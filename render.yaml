@@ -12,3 +12,7 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22.14.0
+      - key: CF_TURN_KEY_ID
+        sync: false
+      - key: CF_TURN_API_TOKEN
+        sync: false

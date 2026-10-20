@@ -19,9 +19,44 @@ export function ArrangeView({
 }) {
   const project = store.project
   const [px, setPx] = useState(90)
+  const pxRef = useRef(px)
+  pxRef.current = px
   const [position, setPosition] = useState(engine.positionSamples)
   const scroller = useRef<HTMLDivElement>(null)
   useEffect(() => engine.subscribe(() => setPosition(engine.positionSamples)), [engine])
+  useEffect(() => {
+    const onZoom = (event: Event) => {
+      const factor = (event as CustomEvent<number>).detail
+      setPx((value) => Math.min(280, Math.max(30, value * factor)))
+    }
+    window.addEventListener('cueharbor-zoom', onZoom)
+    return () => window.removeEventListener('cueharbor-zoom', onZoom)
+  }, [])
+  useEffect(() => {
+    const el = scroller.current
+    if (!el) return
+    let startDist = 0
+    let startPx = pxRef.current
+    const distance = (touches: TouchList) => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY)
+    const start = (event: TouchEvent) => {
+      if (event.touches.length === 2) {
+        startDist = distance(event.touches)
+        startPx = pxRef.current
+      }
+    }
+    const move = (event: TouchEvent) => {
+      if (event.touches.length !== 2 || !startDist) return
+      event.preventDefault()
+      const next = startPx * (distance(event.touches) / startDist)
+      setPx(Math.min(280, Math.max(30, next)))
+    }
+    el.addEventListener('touchstart', start, { passive: true })
+    el.addEventListener('touchmove', move, { passive: false })
+    return () => {
+      el.removeEventListener('touchstart', start)
+      el.removeEventListener('touchmove', move)
+    }
+  }, [])
 
   const seconds = Math.max(16, (project.loopEndSample / project.sampleRate) * 2, ...project.tracks.flatMap((t) => t.clips.map((c) => (c.startSample + c.durationSamples) / project.sampleRate + 2)))
   const width = seconds * px

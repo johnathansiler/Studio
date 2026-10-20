@@ -11,7 +11,9 @@ import {
   shiftPlacementForLateBuffer,
   type TimedPeak,
 } from '../model/latency'
-import { DEFAULT_OPUS, mungeOpusSdp, type OpusOptions } from '../model/sdp'
+import { DEFAULT_OPUS, markOutboundVideo, mungeOpusSdp, type OpusOptions } from '../model/sdp'
+import { cameraAttempts, outboundVideoCodecs, shouldSetVideoCodecPreferences } from '../model/codecs'
+import { isSilentTake, queueIceCandidate, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
 import { arrangementDigest, guestMayRequest, referencedBufferIds } from '../model/sessionSync'
 import { decodeWavPCM, encodeWav } from '../model/wav'
 import { base64ToBytes, bytesToBase64 } from '../storage/idb'
@@ -84,6 +86,13 @@ export interface SessionState {
   /** Guest is playing the host arrangement locally instead of the delayed cue. */
   preferLocalBacking: boolean
   syncLabel: string
+  turn: TurnProvider
+  turnError?: string
+  iceTransportPolicy: IcePolicy
+  media: Record<string, MediaLink>
+  mediaTick: number
+  /** What this browser is actually sending, including the camera direction Safari negotiated. */
+  localSend: string
 }
 
 export interface IncomingTake {
@@ -95,6 +104,7 @@ export interface IncomingTake {
   channels: Float32Array[]
   compensationMs: number
   detail: string
+  silent?: boolean
 }
 
 interface IceServer {
@@ -120,6 +130,10 @@ interface PeerLink {
   clockSamples: { rtt: number; offset: number }[]
   pcmNet: number[]
   pcmTarget: number
+  pendingIce: RTCIceCandidateInit[]
+  openedAt: number
+  caller: boolean
+  camRetry?: string
   take?: {
     takeId: string
     total: number
@@ -130,6 +144,10 @@ interface PeerLink {
 }
 
 const PCM_MIN_TARGET = 18
+
+function senderKey(link: PeerLink) {
+  return [link.musicSender, link.talkSender, link.camSender, link.screenSender].map((item) => item?.sender.track?.id || '').join()
+}
 
 export class SessionClient {
   state: SessionState
@@ -157,6 +175,7 @@ export class SessionClient {
   private pingExpected: number[] = []
   private detachPing: (() => void) | null = null
   private pcmSeq = 1
+  private relayBins = new Map<string, { take?: NonNullable<PeerLink['take']> }>()
   private onTake: ((take: IncomingTake) => void) | null = null
   private onControl: ((cmd: Record<string, unknown>) => void) | null = null
   private onArrangement: ((project: Project, assets: Map<string, AudioAsset>, ready: boolean) => void) | null = null
@@ -197,6 +216,11 @@ export class SessionClient {
       log: [],
       preferLocalBacking: false,
       syncLabel: '',
+      turn: 'none',
+      iceTransportPolicy: 'all',
+      media: {},
+      mediaTick: 0,
+      localSend: 'Camera has not joined the peer connection yet.',
     }
   }
 
@@ -318,6 +342,9 @@ export class SessionClient {
       this.state.participants = msg.participants
       this.state.chat = msg.chat || []
       this.ice = msg.iceServers || []
+      this.state.turn = msg.turn || 'none'
+      this.state.turnError = msg.turnError
+      this.state.iceTransportPolicy = msg.iceTransportPolicy === 'relay' ? 'relay' : 'all'
       this.resumeId = msg.id
       sessionStorage.setItem(`cueharbor-resume:${msg.code}`, msg.id)
       this.state.status = msg.role === 'host' || this.selfAdmitted() ? 'live' : 'waiting'
@@ -399,6 +426,10 @@ export class SessionClient {
     }
     if (msg.t === 'project-asset' && this.state.role === 'guest') {
       this.takeAsset(msg.asset as { id: string; name: string; sampleRate: number; wav: string })
+      return
+    }
+    if (msg.t === 'take-relay' && this.state.role === 'host') {
+      this.acceptRelayTake(String(msg.from || ''), msg.body)
       return
     }
   }
@@ -531,19 +562,16 @@ export class SessionClient {
   }
 
   private async openDevices() {
-    await this.engine.resume()
+    try {
+      await this.engine.resume()
+    } catch {
+      this.note('Audio is locked until the next tap. The camera still opens.')
+    }
     const audio = {
       echoCancellation: false,
       noiseSuppression: false,
       autoGainControl: false,
-      channelCount: 2,
-      sampleRate: 48000,
-      latency: 0,
-      googEchoCancellation: false,
-      googNoiseSuppression: false,
-      googAutoGainControl: false,
-      googHighpassFilter: false,
-      deviceId: this.state.micId ? { exact: this.state.micId } : undefined,
+      deviceId: this.state.micId ? { ideal: this.state.micId } : undefined,
     }
     try {
       this.musicStream?.getTracks().forEach((track) => track.stop())
@@ -560,40 +588,67 @@ export class SessionClient {
       this.engine.setLocalMic(this.musicStream)
       if (this.state.role === 'guest') await this.engine.startRolling(this.musicStream)
     } catch {
-      this.note('Microphone permission is blocked. You can still listen.')
+      try {
+        this.musicStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+        this.engine.setLocalMic(this.musicStream)
+        if (this.state.role === 'guest') await this.engine.startRolling(this.musicStream)
+        this.note('The browser rejected the raw music constraints. Using the default microphone instead.')
+      } catch {
+        this.note('Microphone permission is blocked. You can still listen.')
+      }
     }
+    if (this.talkStream && this.talkStream !== this.musicStream) this.talkStream.getTracks().forEach((track) => track.stop())
+    const videoTracks = this.state.camOn ? await this.openCamera() : []
+    let talk: MediaStreamTrack | null = null
     try {
-      this.talkStream?.getAudioTracks().forEach((track) => track.stop())
-      this.talkStream?.getVideoTracks().forEach((track) => track.stop())
-      const video = this.state.camOn
-        ? {
-            width: 1280,
-            height: 720,
-            frameRate: 24,
-            deviceId: this.state.camId ? { exact: this.state.camId } : undefined,
-          }
-        : false
-      this.talkStream = await navigator.mediaDevices.getUserMedia({
+      const spoken = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-          deviceId: this.state.micId ? { exact: this.state.micId } : undefined,
+          deviceId: this.state.micId ? { ideal: this.state.micId } : undefined,
         },
-        video,
+        video: false,
       })
-      const talk = this.talkStream.getAudioTracks()[0]
+      talk = spoken.getAudioTracks()[0] || null
       if (talk) talk.contentHint = 'speech'
-      this.preview = new MediaStream(this.talkStream.getVideoTracks())
     } catch {
-      this.note('Talkback/camera failed. Performance mic is still available.')
-      if (!this.talkStream && this.musicStream) this.talkStream = this.musicStream
+      this.note('Talkback mic failed. The performance mic is still available.')
+    }
+    if (!videoTracks.length && this.state.camOn) this.note('Camera failed. Check the browser camera permission.')
+    this.talkStream = new MediaStream([...(talk ? [talk] : []), ...videoTracks])
+    this.preview = new MediaStream(videoTracks)
+    for (const track of videoTracks) {
+      track.onended = () => {
+        if (this.state.camOn && document.visibilityState === 'visible') void this.openDevices()
+      }
     }
     const listed = await navigator.mediaDevices.enumerateDevices()
     this.state.devices = listed.map((device) => ({ deviceId: device.deviceId, label: device.label || device.kind, kind: device.kind }))
+    this.state.mediaTick += 1
     this.applySendTracks()
     this.applyMonitor()
     this.emit()
+  }
+
+  /** iOS suspends the camera in the background. A visible page asks for it again if the track ended. */
+  reviveMedia() {
+    void this.engine.resume()
+    const video = this.preview?.getVideoTracks()[0]
+    if (this.state.camOn && (!video || video.readyState === 'ended')) void this.openDevices()
+  }
+
+  private async openCamera() {
+    for (const video of cameraAttempts(this.state.camId)) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video })
+        const tracks = stream.getVideoTracks()
+        if (tracks.length) return tracks
+      } catch {
+        /* Safari rejects some camera constraints. The next attempt is looser. */
+      }
+    }
+    return []
   }
 
   async calibrate() {
@@ -770,7 +825,7 @@ export class SessionClient {
 
   private async createPeer(id: string, caller: boolean) {
     if (this.peers.has(id)) return this.peers.get(id)!
-    const pc = new RTCPeerConnection({ iceServers: this.ice })
+    const pc = new RTCPeerConnection({ iceServers: this.ice, iceTransportPolicy: this.state.iceTransportPolicy })
     const link: PeerLink = {
       pc,
       music: new MediaStream(),
@@ -781,33 +836,59 @@ export class SessionClient {
       clockSamples: [],
       pcmNet: [],
       pcmTarget: PCM_MIN_TARGET,
+      pendingIce: [],
+      openedAt: Date.now(),
+      caller,
     }
     link.musicSender = pc.addTransceiver('audio', { direction: 'sendrecv' })
     link.talkSender = pc.addTransceiver('audio', { direction: 'sendrecv' })
     link.camSender = pc.addTransceiver('video', { direction: 'sendrecv' })
     link.screenSender = pc.addTransceiver('video', { direction: 'sendrecv' })
     this.preferOpus(link.musicSender)
+    this.preferVideo(link.camSender)
+    this.preferVideo(link.screenSender)
     this.preferOpus(link.talkSender)
     this.peers.set(id, link)
     pc.onicecandidate = (event) => {
       if (event.candidate) this.send({ t: 'signal', to: id, data: { kind: 'ice', candidate: event.candidate.toJSON() } })
     }
     pc.ontrack = (event) => {
-      const index = pc.getTransceivers().indexOf(event.transceiver)
-      const bucket =
-        index === 0 ? link.music : index === 1 ? link.talk : index === 2 ? link.camera : index === 3 ? link.screen : null
-      const target =
-        bucket ??
-        (event.track.kind === 'audio' ? (link.music.getAudioTracks().length ? link.talk : link.music) : link.camera.getVideoTracks().length ? link.screen : link.camera)
-      this.tuneReceiver(event.receiver, target === link.music)
-      if (!target.getTracks().includes(event.track)) target.addTrack(event.track)
-      const routed = target === link.music ? 0 : target === link.talk ? 1 : target === link.camera ? 2 : 3
-      this.routeIncoming(id, routed)
+      const transceivers = pc.getTransceivers()
+      let index = transceivers.indexOf(event.transceiver)
+      if (index < 0 && event.transceiver.mid) index = transceivers.findIndex((item) => item.mid === event.transceiver.mid)
+      const track = event.track
+      const fresh = new MediaStream([track])
+      if (index === 0) link.music = fresh
+      else if (index === 1) link.talk = fresh
+      else if (index === 2) link.camera = fresh
+      else if (index === 3) link.screen = fresh
+      else if (track.kind === 'audio') {
+        if (!link.music.getAudioTracks().length) {
+          link.music = fresh
+          index = 0
+        } else {
+          link.talk = fresh
+          index = 1
+        }
+      } else if (!link.camera.getVideoTracks().length) {
+        link.camera = fresh
+        index = 2
+      } else {
+        link.screen = fresh
+        index = 3
+      }
+      this.tuneReceiver(event.receiver, index === 0)
+      this.state.mediaTick += 1
+      this.routeIncoming(id, index)
     }
     pc.ondatachannel = (event) => this.bindChannel(id, link, event.channel)
     pc.onconnectionstatechange = () => {
-      this.note(`${this.nameOf(id)} ${pc.connectionState}`)
+      this.noteMedia(id, link)
       if (pc.connectionState === 'failed') this.recover(id)
+      this.emit()
+    }
+    pc.oniceconnectionstatechange = () => {
+      this.noteMedia(id, link)
       this.emit()
     }
     if (caller) {
@@ -817,11 +898,25 @@ export class SessionClient {
       this.bindChannel(id, link, link.clock)
       this.bindChannel(id, link, link.takes)
       this.bindChannel(id, link, link.pcm)
-      await this.offer(id, link, false)
     }
-    await this.attachSenders(link)
+    await this.attachSenders(id, link)
+    if (caller) await this.offer(id, link, false)
     this.emit()
     return link
+  }
+
+  private preferVideo(transceiver: RTCRtpTransceiver) {
+    if (!shouldSetVideoCodecPreferences(navigator.userAgent)) return
+    const caps = RTCRtpSender.getCapabilities?.('video')
+    if (!caps) return
+    const ordered = outboundVideoCodecs(caps.codecs)
+    if (!ordered.length) return
+    if (!ordered.some((codec) => codec.mimeType.toLowerCase() === 'video/h264') && caps.codecs.some((codec) => codec.mimeType.toLowerCase() === 'video/h264')) return
+    try {
+      transceiver.setCodecPreferences(ordered)
+    } catch {
+      /* keep the browser default, which still includes H.264 when the device has it */
+    }
   }
 
   private preferOpus(transceiver: RTCRtpTransceiver) {
@@ -863,9 +958,19 @@ export class SessionClient {
 
   private async offer(id: string, link: PeerLink, iceRestart: boolean) {
     const offer = await link.pc.createOffer({ iceRestart })
-    offer.sdp = mungeOpusSdp(offer.sdp || '', this.state.opus)
-    await link.pc.setLocalDescription(offer)
-    this.send({ t: 'signal', to: id, data: { kind: 'offer', sdp: offer.sdp } })
+    const raw = mungeOpusSdp(offer.sdp || '', this.state.opus)
+    offer.sdp = markOutboundVideo(raw, this.outboundVideo())
+    try {
+      await link.pc.setLocalDescription(offer)
+    } catch {
+      offer.sdp = raw
+      await link.pc.setLocalDescription(offer)
+    }
+    this.send({ t: 'signal', to: id, data: { kind: 'offer', sdp: link.pc.localDescription?.sdp || offer.sdp } })
+  }
+
+  private outboundVideo() {
+    return [Boolean(this.cameraTrack()), Boolean(this.state.screenOn && this.screenStream?.getVideoTracks().length)]
   }
 
   private async onSignal(from: string, data: any) {
@@ -882,22 +987,65 @@ export class SessionClient {
     if (data.kind === 'offer') {
       const sdp = mungeOpusSdp(data.sdp, this.state.opus)
       await link.pc.setRemoteDescription({ type: 'offer', sdp })
+      await this.flushIce(link)
+      await this.attachSenders(from, link)
       const answer = await link.pc.createAnswer()
-      answer.sdp = mungeOpusSdp(answer.sdp || '', this.state.opus)
-      await link.pc.setLocalDescription(answer)
-      this.send({ t: 'signal', to: from, data: { kind: 'answer', sdp: answer.sdp } })
+      const raw = mungeOpusSdp(answer.sdp || '', this.state.opus)
+      answer.sdp = markOutboundVideo(raw, this.outboundVideo())
+      try {
+        await link.pc.setLocalDescription(answer)
+      } catch {
+        answer.sdp = raw
+        await link.pc.setLocalDescription(answer)
+      }
+      this.send({ t: 'signal', to: from, data: { kind: 'answer', sdp: link.pc.localDescription?.sdp || answer.sdp } })
       await this.tuneSenders(link)
     } else if (data.kind === 'answer') {
       if (link.pc.signalingState === 'have-local-offer') {
         await link.pc.setRemoteDescription({ type: 'answer', sdp: data.sdp })
+        await this.flushIce(link)
         await this.tuneSenders(link)
+        await this.attachSenders(from, link)
       }
     } else if (data.kind === 'ice' && data.candidate) {
-      try {
-        await link.pc.addIceCandidate(data.candidate)
-      } catch {
-        /* candidate raced the description */
+      const queued = queueIceCandidate(Boolean(link.pc.remoteDescription), link.pendingIce, data.candidate as RTCIceCandidateInit)
+      link.pendingIce = queued.pending
+      for (const candidate of queued.apply) {
+        try {
+          await link.pc.addIceCandidate(candidate)
+        } catch {
+          /* a stale candidate after an ICE restart */
+        }
       }
+    }
+  }
+
+  private async flushIce(link: PeerLink) {
+    const queued = link.pendingIce.splice(0)
+    for (const candidate of queued) {
+      try {
+        await link.pc.addIceCandidate(candidate)
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  private noteMedia(id: string, link: PeerLink) {
+    const previous = this.state.media[id]
+    this.state.media = {
+      ...this.state.media,
+      [id]: {
+        connection: link.pc.connectionState,
+        ice: link.pc.iceConnectionState,
+        path: previous?.path || 'unknown',
+        ageMs: Date.now() - link.openedAt,
+      },
+    }
+    this.state.mediaTick += 1
+    const state = link.pc.connectionState
+    if (state === 'failed' || state === 'disconnected') {
+      this.note(`${this.nameOf(id)} media ${state}${this.state.turn === 'none' ? ' — no TURN relay is configured' : ''}`)
     }
   }
 
@@ -942,16 +1090,42 @@ export class SessionClient {
     return this.musicStream?.getAudioTracks()[0] || null
   }
 
-  private async attachSenders(link: PeerLink) {
+  /** The self-view plays this track. The peer connection must send this same object, not a second capture. */
+  private cameraTrack() {
+    if (!this.state.camOn) return null
+    const track = this.preview?.getVideoTracks().find((item) => item.readyState === 'live') || this.talkStream?.getVideoTracks().find((item) => item.readyState === 'live') || null
+    if (track) track.enabled = true
+    return track
+  }
+
+  private async attachSenders(id: string, link: PeerLink) {
+    const before = senderKey(link)
+    const directionBefore = link.camSender?.currentDirection || ''
     await link.musicSender?.sender.replaceTrack(this.performanceTrack())
     const talk = this.state.talkOn ? this.talkStream?.getAudioTracks()[0] || null : null
     await link.talkSender?.sender.replaceTrack(talk)
-    const cam = this.state.camOn ? this.talkStream?.getVideoTracks()[0] || null : null
+    const cam = this.cameraTrack()
+    if (link.camSender) link.camSender.direction = cam ? 'sendrecv' : 'recvonly'
     await link.camSender?.sender.replaceTrack(cam)
-    await link.screenSender?.sender.replaceTrack(this.state.screenOn ? this.screenStream?.getVideoTracks()[0] || null : null)
+    const screen = this.state.screenOn ? this.screenStream?.getVideoTracks()[0] || null : null
+    if (link.screenSender) link.screenSender.direction = screen ? 'sendrecv' : 'recvonly'
+    await link.screenSender?.sender.replaceTrack(screen)
     this.enableTrack(link.musicSender, this.state.musicOn)
     this.enableTrack(link.talkSender, this.state.talkOn)
-    this.enableTrack(link.camSender, this.state.camOn)
+    if (cam) cam.enabled = true
+    const mic = this.performanceTrack()
+    const after = senderKey(link)
+    let directionStale = Boolean(cam) && (directionBefore === 'recvonly' || directionBefore === 'inactive')
+    if (directionStale && cam && link.camRetry === cam.id) directionStale = false
+    if (directionStale && cam) link.camRetry = cam.id
+    this.state.localSend = cam
+      ? `Sending the self-view camera (${cam.readyState}${cam.muted ? ', waiting for frames' : ''}, ${link.camSender?.direction || 'no transceiver'}). Mic ${mic ? mic.readyState : 'missing'}.`
+      : `Camera is not on the peer connection. Mic ${mic ? mic.readyState : 'missing'}.`
+    if ((before !== after || directionStale) && link.pc.localDescription && link.pc.signalingState === 'stable') {
+      if (link.caller) await this.offer(id, link, false)
+      else this.send({ t: 'signal', to: id, data: { kind: 'restart' } })
+    }
+    this.state.mediaTick += 1
   }
 
   private enableTrack(transceiver: RTCRtpTransceiver | undefined, on: boolean) {
@@ -960,7 +1134,7 @@ export class SessionClient {
   }
 
   private applySendTracks() {
-    for (const link of this.peers.values()) void this.attachSenders(link)
+    for (const [id, link] of this.peers) void this.attachSenders(id, link)
   }
 
   private routeIncoming(id: string, index: number) {
@@ -1105,6 +1279,27 @@ export class SessionClient {
           rtt = row.roundTripTime * 1000
         }
       })
+      let path: MediaPath = this.state.media[id]?.path || 'unknown'
+      let localCandidateId = ''
+      stats.forEach((report) => {
+        const row = report as unknown as { nominated?: boolean; selected?: boolean; state?: string; localCandidateId?: string }
+        if (report.type === 'candidate-pair' && row.state === 'succeeded' && (row.nominated || row.selected) && row.localCandidateId) {
+          localCandidateId = row.localCandidateId
+        }
+      })
+      if (localCandidateId) {
+        const local = stats.get(localCandidateId) as { candidateType?: string } | undefined
+        path = local?.candidateType === 'relay' ? 'relay' : 'direct'
+      }
+      this.state.media = {
+        ...this.state.media,
+        [id]: {
+          connection: link.pc.connectionState,
+          ice: link.pc.iceConnectionState,
+          path,
+          ageMs: Date.now() - link.openedAt,
+        },
+      }
       const estimate = this.estimateFor(id)
       const best = bestClockSample(link.clockSamples)
       this.state.latency[id] = {
@@ -1206,6 +1401,8 @@ export class SessionClient {
       this.emit()
       return
     }
+    const silent = isSilentTake([sliced.audio])
+    if (silent) this.note('The local take looks silent. Check that the performance mic is the one you are singing into.')
     const placeAt = shiftPlacementForLateBuffer(
       window.placeAtSample,
       window.guestPerfStart,
@@ -1220,18 +1417,18 @@ export class SessionClient {
       sampleRate: this.engine.sampleRate,
       compensationMs: window.compensationMs,
       detail,
+      silent,
       wav,
     })
   }
 
   private async sendTake(
     link: PeerLink,
-    take: { takeId: string; placeAtSample: number; sampleRate: number; compensationMs: number; detail: string; wav: ArrayBuffer },
+    take: { takeId: string; placeAtSample: number; sampleRate: number; compensationMs: number; detail: string; silent: boolean; wav: ArrayBuffer },
   ) {
     const channel = await this.waitForTakes(link)
     if (!channel) {
-      this.note('Direct channel is not open, so the full-quality take could not upload.')
-      this.emit()
+      await this.sendTakeHttp(take)
       return
     }
     const bytes = new Uint8Array(take.wav)
@@ -1245,6 +1442,7 @@ export class SessionClient {
         sampleRate: take.sampleRate,
         compensationMs: take.compensationMs,
         detail: take.detail,
+        silent: take.silent,
         total,
         bytes: bytes.byteLength,
       }),
@@ -1275,7 +1473,79 @@ export class SessionClient {
     return null
   }
 
-  private onTakeData(id: string, link: PeerLink, data: string | ArrayBuffer) {
+  private async sendTakeHttp(take: { takeId: string; placeAtSample: number; sampleRate: number; compensationMs: number; detail: string; silent: boolean; wav: ArrayBuffer }) {
+    const bytes = new Uint8Array(take.wav)
+    if (bytes.byteLength > 32 * 1024 * 1024) {
+      this.note('The take is over 32 MB, so it was not uploaded.')
+      this.emit()
+      return
+    }
+    const chunkSize = 48 * 1024
+    const total = Math.ceil(bytes.byteLength / chunkSize) || 1
+    const meta = {
+      t: 'begin',
+      takeId: take.takeId,
+      placeAtSample: take.placeAtSample,
+      sampleRate: take.sampleRate,
+      compensationMs: take.compensationMs,
+      detail: `${take.detail}; via server`,
+      silent: take.silent,
+      total,
+      bytes: bytes.byteLength,
+    }
+    try {
+      for (let index = 0; index < total; index++) {
+        const slice = bytes.subarray(index * chunkSize, (index + 1) * chunkSize)
+        const response = await fetch('/api/takes', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            code: this.state.code,
+            from: this.state.selfId,
+            takeId: take.takeId,
+            index,
+            total,
+            chunk: bytesToBase64(slice),
+            meta,
+          }),
+        })
+        if (!response.ok) {
+          const text = await response.text()
+          this.note(`Take upload through the server failed (${response.status}). ${text.slice(0, 140)}`)
+          this.emit()
+          return
+        }
+        this.state.takeProgress = (index + 1) / total
+        this.emit()
+      }
+    } catch {
+      this.note('Take upload through the server failed. The direct channel was also closed.')
+      this.emit()
+      return
+    }
+    this.state.takeProgress = null
+    this.note(take.silent ? 'Silent take delivered through the server. Check the performance mic.' : 'Full-quality take delivered through the server.')
+    this.emit()
+  }
+
+  private acceptRelayTake(from: string, body: any) {
+    if (!body || typeof body !== 'object') return
+    const bin = this.relayBins.get(from) || { take: undefined }
+    this.relayBins.set(from, bin)
+    if (Number(body.index) === 0 && body.meta) this.onTakeData(from, bin, JSON.stringify(body.meta))
+    if (body.chunk) {
+      const raw = base64ToBytes(String(body.chunk))
+      const packet = new Uint8Array(8 + raw.byteLength)
+      const view = new DataView(packet.buffer)
+      view.setUint32(0, Number(body.index) || 0)
+      view.setUint32(4, Number(body.total) || 1)
+      packet.set(raw, 8)
+      this.onTakeData(from, bin, packet.buffer)
+    }
+    if (Number(body.index) + 1 >= Number(body.total)) this.onTakeData(from, bin, JSON.stringify({ t: 'end', takeId: body.takeId }))
+  }
+
+  private onTakeData(id: string, link: { take?: NonNullable<PeerLink['take']> }, data: string | ArrayBuffer) {
     if (typeof data === 'string') {
       const msg = JSON.parse(data)
       if (msg.t === 'begin') {
@@ -1293,7 +1563,7 @@ export class SessionClient {
     this.emit()
   }
 
-  private finishIncoming(id: string, link: PeerLink) {
+  private finishIncoming(id: string, link: { take?: NonNullable<PeerLink['take']> }) {
     const incoming = link.take
     link.take = undefined
     if (!incoming) return
@@ -1311,6 +1581,7 @@ export class SessionClient {
     const decoded = decodeWavPCM(wav.buffer)
     const meta = incoming.meta
     this.state.takeProgress = null
+    const silent = Boolean(meta.silent) || isSilentTake(decoded.channels)
     this.onTake?.({
       peerId: id,
       peerName: this.nameOf(id),
@@ -1320,8 +1591,13 @@ export class SessionClient {
       channels: decoded.channels,
       compensationMs: Number(meta.compensationMs),
       detail: String(meta.detail || ''),
+      silent,
     })
-    this.note(`${this.nameOf(id)} take aligned (${Number(meta.compensationMs).toFixed(0)} ms removed).`)
+    this.note(
+      silent
+        ? `${this.nameOf(id)} take is silent. The file arrived, but it has no signal.`
+        : `${this.nameOf(id)} take aligned (${Number(meta.compensationMs).toFixed(0)} ms removed).`,
+    )
     this.emit()
   }
 

@@ -1,4 +1,5 @@
-import { createServer, type ServerResponse } from 'node:http'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { currentIce, type IceConfig } from './ice.ts'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -47,20 +48,8 @@ interface Session {
 }
 
 const sessions = new Map<string, Session>()
-
-function iceServers() {
-  const servers: { urls: string | string[]; username?: string; credential?: string }[] = [
-    { urls: 'stun:stun.l.google.com:19302' },
-  ]
-  if (process.env.TURN_URL) {
-    servers.push({
-      urls: process.env.TURN_URL,
-      username: process.env.TURN_USERNAME,
-      credential: process.env.TURN_CREDENTIAL,
-    })
-  }
-  return servers
-}
+const TAKE_LIMIT = 32 * 1024 * 1024
+const uploads = new Map<string, { total: number; seen: Set<number>; bytes: number }>()
 
 function send(ws: WebSocket, payload: unknown) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload))
@@ -94,13 +83,16 @@ function emitRoster(session: Session) {
   broadcast(session, { t: 'roster', participants: roster(session) })
 }
 
-function publicSession(session: Session, self: Participant) {
+function publicSession(session: Session, self: Participant, ice: IceConfig) {
   return {
     t: 'welcome',
     id: self.id,
     role: self.role,
     code: session.code,
-    iceServers: iceServers(),
+    iceServers: ice.iceServers,
+    turn: ice.turn,
+    turnError: ice.turnError,
+    iceTransportPolicy: ice.iceTransportPolicy,
     participants: roster(session),
     chat: session.chat.slice(-80),
   }
@@ -126,7 +118,8 @@ function leave(client: Client) {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`)
   if (url.pathname === '/api/health') return json(res, { ok: true, service: 'cueharbor', sessions: sessions.size })
-  if (url.pathname === '/api/ice') return json(res, { iceServers: iceServers() })
+  if (url.pathname === '/api/ice') return json(res, await currentIce())
+  if (url.pathname === '/api/takes' && req.method === 'POST') return acceptTake(req, res)
   if (SERVE_STATIC) {
     await serveStatic(url.pathname, res)
     return
@@ -200,14 +193,69 @@ wss.on('connection', (ws) => {
     } catch {
       return
     }
-    handle(client, msg)
+    void handle(client, msg)
   })
   ws.on('close', () => leave(client))
 })
 
-function handle(client: Client, msg: Record<string, unknown>) {
+async function acceptTake(req: IncomingMessage, res: ServerResponse) {
+  let body: Record<string, unknown>
+  try {
+    body = JSON.parse(await readBody(req, 200_000)) as Record<string, unknown>
+  } catch {
+    return json(res, { error: 'Take chunk was unreadable.' }, 400)
+  }
+  const code = String(body.code || '')
+  const from = String(body.from || '')
+  const takeId = String(body.takeId || '')
+  const index = Number(body.index)
+  const total = Number(body.total)
+  const session = sessions.get(code)
+  const person = session?.participants.get(from)
+  const host = session ? session.clients.get(session.hostId) : undefined
+  if (!session || !person?.admitted || person.role !== 'guest' || !host || !takeId || !Number.isInteger(index) || !Number.isInteger(total) || total < 1 || index < 0 || index >= total) {
+    return json(res, { error: 'Take upload was rejected.' }, 403)
+  }
+  const chunk = typeof body.chunk === 'string' ? body.chunk : ''
+  const raw = Buffer.from(chunk, 'base64')
+  if (!raw.byteLength || raw.byteLength > 64 * 1024) return json(res, { error: 'Take chunk is the wrong size.' }, 413)
+  const key = `${code}:${from}:${takeId}`
+  const upload = uploads.get(key) || { total, seen: new Set<number>(), bytes: 0 }
+  if (upload.seen.has(index)) return json(res, { ok: true, duplicate: true })
+  if (upload.bytes + raw.byteLength > TAKE_LIMIT) {
+    uploads.delete(key)
+    return json(res, { error: 'Take is over 32 MB.' }, 413)
+  }
+  upload.total = total
+  upload.seen.add(index)
+  upload.bytes += raw.byteLength
+  uploads.set(key, upload)
+  send(host.ws, { t: 'take-relay', from, body })
+  if (upload.seen.size >= total) uploads.delete(key)
+  return json(res, { ok: true, received: upload.seen.size, total })
+}
+
+function readBody(req: IncomingMessage, limit: number) {
+  return new Promise<string>((resolve, reject) => {
+    const parts: Buffer[] = []
+    let size = 0
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length
+      if (size > limit) {
+        reject(new Error('body too large'))
+        req.destroy()
+        return
+      }
+      parts.push(chunk)
+    })
+    req.on('end', () => resolve(Buffer.concat(parts).toString('utf8')))
+    req.on('error', reject)
+  })
+}
+
+async function handle(client: Client, msg: Record<string, unknown>) {
   if (msg.t === 'hello') {
-    hello(client, msg)
+    await hello(client, msg)
     return
   }
   const session = client.sessionCode ? sessions.get(client.sessionCode) : undefined
@@ -304,7 +352,7 @@ function handle(client: Client, msg: Record<string, unknown>) {
   }
 }
 
-function hello(client: Client, msg: Record<string, unknown>) {
+async function hello(client: Client, msg: Record<string, unknown>) {
   const name = String(msg.name || 'Guest').slice(0, 40)
   const resumeId = msg.resumeId ? String(msg.resumeId) : ''
   if (msg.create) {
@@ -335,7 +383,7 @@ function hello(client: Client, msg: Record<string, unknown>) {
     client.name = name
     client.sessionCode = code
     sessions.set(code, session)
-    send(client.ws, publicSession(session, person))
+    send(client.ws, publicSession(session, person, await currentIce()))
     return
   }
   const code = String(msg.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
@@ -357,7 +405,7 @@ function hello(client: Client, msg: Record<string, unknown>) {
     client.name = existing.name
     client.sessionCode = code
     if (resumeId === session.hostId) existing.role = 'host'
-    send(client.ws, publicSession(session, existing))
+    send(client.ws, publicSession(session, existing, await currentIce()))
     emitRoster(session)
     return
   }
@@ -379,7 +427,7 @@ function hello(client: Client, msg: Record<string, unknown>) {
   client.id = id
   client.name = name
   client.sessionCode = code
-  send(client.ws, publicSession(session, person))
+  send(client.ws, publicSession(session, person, await currentIce()))
   emitRoster(session)
 }
 

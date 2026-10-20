@@ -268,3 +268,90 @@ code { font-family: var(--mono); font-size: 12px; }
 .sync-pill { font-family: var(--mono); font-size: 11px; color: var(--accent); border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; }
 .dock-placeholder { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
 .dock.popped { height: 100%; width: 100%; border: 0; }
+.t-btn.stop { width: auto; min-width: 72px; padding: 0 12px; }
+.media-banner { margin: 8px; padding: 8px 10px; border-radius: 8px; font-size: 13px; line-height: 1.35; }
+.media-banner.bad { background: #3a1c1c; color: #ffd0d0; }
+.media-banner.warn { background: #3a3218; color: #ffe3a8; }
+.media-banner.good { background: #173224; color: #d7ffe6; }
+.artist-card { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.meter.tall { height: 16px; width: 100%; }
+.meter.tall b { display: block; height: 100%; background: var(--accent); }
+.rec-label { color: var(--rec); }
+.help-grid { display: grid; gap: 8px; }
+.help-grid p { display: flex; gap: 10px; margin: 0; align-items: center; }
+.help-grid kbd { font-family: var(--mono); font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; min-width: 9.5em; }
+.timeline-scroll { touch-action: pan-x pan-y; }
+.clip { touch-action: none; }
+.tile { position: relative; }
+.tile-audio { position: absolute; left: 8px; bottom: 36px; z-index: 2; background: rgba(12, 17, 15, 0.82); }
+
+@media (pointer: coarse) {
+  .text-btn, .t-btn, .icon-btn, .mini, .views button { min-height: 44px; min-width: 44px; }
+  .t-btn.stop { min-width: 72px; }
+}
+
+@media (max-width: 760px) {
+  .shell {
+    height: 100dvh;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  .topbar { flex-wrap: wrap; align-items: flex-start; align-content: flex-start; row-gap: 8px; height: auto; min-height: 56px; padding-top: max(8px, env(safe-area-inset-top)); padding-bottom: 8px; }
+  .brand { min-width: 0; }
+  .brand p { display: none; }
+  .project-name { min-width: 0; width: 140px; }
+  .top-actions, .views { flex: 1 0 100%; min-width: 0; }
+  .top-actions { overflow-x: auto; flex-wrap: nowrap; }
+  .workspace, .workspace.dock-bottom { grid-template-columns: 1fr; grid-template-rows: minmax(200px, 42dvh) minmax(240px, 1fr); }
+  .shell.artist .workspace { grid-template-rows: minmax(0, 1fr); }
+  .main-pane, .editor { min-height: 0; overflow: auto; }
+  .dock { width: 100%; border-left: 0; min-height: 0; overflow: auto; position: relative; z-index: 2; }
+  .transport { flex-wrap: wrap; height: auto; row-gap: 8px; padding-top: 8px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  .lcd { min-width: 0; }
+  .arrange { grid-template-columns: 108px minmax(0, 1fr); }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .shell { grid-template-rows: auto minmax(0, 1fr); height: 100dvh; }
+  .transport { min-height: 48px; padding-top: 4px; padding-bottom: max(4px, env(safe-area-inset-bottom)); }
+  .workspace { grid-template-columns: minmax(0, 1fr) minmax(220px, 46vw); grid-template-rows: minmax(0, 1fr); }
+  .shell.artist .workspace { grid-template-columns: 1fr; }
+  .topbar { display: none; }
+}
+
+html[data-posture="book"] .workspace {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 46vw);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+html[data-posture="tabletop"] .shell {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+html[data-posture="tabletop"] .workspace { order: 1; flex: 1; min-height: 0; }
+html[data-posture="tabletop"] .transport { order: 2; }
+html[data-posture="tabletop"] .topbar { order: 3; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+
+@media (vertical-viewport-segments: 2) {
+  .workspace {
+    position: fixed;
+    top: env(viewport-segment-top 0 0, 0px);
+    left: env(viewport-segment-left 0 0, 0px);
+    width: env(viewport-segment-width 0 0, 100%);
+    height: env(viewport-segment-height 0 0, 50dvh);
+  }
+  .transport {
+    position: fixed;
+    top: env(viewport-segment-top 1 0, 50dvh);
+    left: env(viewport-segment-left 1 0, 0px);
+    width: env(viewport-segment-width 1 0, 100%);
+  }
+  .topbar {
+    position: fixed;
+    top: calc(env(viewport-segment-top 1 0, 50dvh) + 76px);
+    left: env(viewport-segment-left 1 0, 0px);
+    width: env(viewport-segment-width 1 0, 100%);
+  }
+}

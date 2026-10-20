@@ -7,6 +7,8 @@ import { SessionClient } from './remote/session'
 import { listProjects, loadProject, saveProject, base64ToBytes, bytesToBase64 } from './storage/idb'
 import { ProjectStore, seedDemoProject } from './state/store'
 import { decodeWavPCM, encodeWav, linearResample } from './model/wav'
+import { isSilentTake } from './model/media'
+import { beatsToSamples } from './model/time'
 import { guestStartPerf, scheduleLeadMs } from './model/sessionSync'
 import { ArrangeView } from './ui/ArrangeView'
 import { MixerView } from './ui/MixerView'
@@ -41,6 +43,7 @@ export function App() {
   const [joinName, setJoinName] = useState(store.project.name ? localStorage.getItem('cueharbor-name') || 'Artist' : 'Artist')
   const [saved, setSaved] = useState<{ id: string; name: string; savedAt: number }[]>([])
   const [libraryOpen, setLibraryOpen] = useState(false)
+  const [help, setHelp] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
   const takeRef = useRef<{ id: string; endSample: number } | null>(null)
@@ -48,6 +51,7 @@ export function App() {
   const launchKey = useRef('')
   const publishTimer = useRef(0)
   const pendingFollow = useRef<Record<string, unknown> | null>(null)
+  const workletWarned = useRef(false)
 
   useEffect(() => {
     session.bindArrangement(store)
@@ -132,22 +136,103 @@ export function App() {
   }, [session, store])
 
   useEffect(() => {
+    const unlock = () => {
+      void engine.resume()
+      document.querySelectorAll('video').forEach((node) => {
+        void (node as HTMLVideoElement).play().catch(() => undefined)
+      })
+    }
+    window.addEventListener('pointerdown', unlock)
+    return () => window.removeEventListener('pointerdown', unlock)
+  }, [engine])
+
+  useEffect(() => {
+    let lock: WakeLockSentinel | null = null
+    let gone = false
+    const hold = async () => {
+      if (gone || !('wakeLock' in navigator)) return
+      if (session.state.status !== 'live' && engine.status === 'stopped') return
+      try {
+        lock = await navigator.wakeLock.request('screen')
+      } catch {
+        lock = null
+      }
+    }
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      void engine.resume()
+      session.reviveMedia()
+      void hold()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    void hold()
+    return () => {
+      gone = true
+      document.removeEventListener('visibilitychange', onVisible)
+      void lock?.release()
+    }
+  }, [engine, session, session.state.status, engine.status, version])
+
+  useEffect(() => {
+    const applyPosture = () => {
+      const vertical = window.matchMedia('(vertical-viewport-segments: 2)').matches
+      const horizontal = window.matchMedia('(horizontal-viewport-segments: 2)').matches
+      const folded = navigator.devicePosture?.type === 'folded'
+      const landscape = window.innerWidth > window.innerHeight
+      document.documentElement.dataset.posture = vertical || (folded && !landscape) ? 'tabletop' : horizontal || (folded && landscape) ? 'book' : 'flat'
+    }
+    applyPosture()
+    const medias = ['(vertical-viewport-segments: 2)', '(horizontal-viewport-segments: 2)'].map((query) => window.matchMedia(query))
+    medias.forEach((media) => media.addEventListener('change', applyPosture))
+    navigator.devicePosture?.addEventListener('change', applyPosture)
+    window.addEventListener('resize', applyPosture)
+    return () => {
+      medias.forEach((media) => media.removeEventListener('change', applyPosture))
+      navigator.devicePosture?.removeEventListener('change', applyPosture)
+      window.removeEventListener('resize', applyPosture)
+    }
+  }, [])
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
+      const key = event.key.toLowerCase()
+      const meta = event.metaKey || event.ctrlKey
       if (event.code === 'Space') {
         event.preventDefault()
         if (engine.status === 'stopped') void play()
         else void stop()
-      } else if (event.key.toLowerCase() === 'r' && !event.metaKey && !event.ctrlKey) void record()
-      else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+      } else if (key === 'r' && !meta) void record()
+      else if (meta && key === 'z') {
         event.preventDefault()
         if (event.shiftKey) store.redo()
         else store.undo()
+      } else if (!meta && event.shiftKey && key === 'z') store.redo()
+      else if (meta && key === 's') {
+        event.preventDefault()
+        void persist()
+      } else if ((meta && key === 'e') || key === 'b') store.splitSelected(engine.currentTimelineSample())
+      else if (key === 'm' && !meta) {
+        const track = store.project.tracks.find((item) => item.id === store.selectedTrackId)
+        if (track && !store.remoteFollow) store.updateTrack(track.id, { mute: !track.mute })
+      } else if (key === 's' && !meta) {
+        const track = store.project.tracks.find((item) => item.id === store.selectedTrackId)
+        if (track && !store.remoteFollow) store.updateTrack(track.id, { solo: !track.solo })
       } else if (event.key === 'Delete' || event.key === 'Backspace') store.deleteSelectedClip()
-      else if (event.key.toLowerCase() === 'b') store.splitSelected(engine.positionSamples)
-      else if (event.key.toLowerCase() === 'l') store.toggle('loopEnabled')
-      else if (event.key === 'Home') void locate(0)
+      else if (key === 'l' && !meta) store.toggle('loopEnabled')
+      else if (event.key === 'Home' || event.key === 'Enter') void locate(0)
+      else if (event.key === '?' || (event.shiftKey && event.key === '/')) setHelp((open) => !open)
+      else if (event.key === 'Escape') setHelp(false)
+      else if (event.key === '+' || event.key === '=' || event.key === '-') {
+        event.preventDefault()
+        window.dispatchEvent(new CustomEvent('cueharbor-zoom', { detail: event.key === '-' ? 0.87 : 1.15 }))
+      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault()
+        const beats = event.shiftKey ? store.project.timeSignature.numerator : 1
+        const delta = beatsToSamples(beats, store.project.sampleRate, store.project.tempo) * (event.key === 'ArrowLeft' ? -1 : 1)
+        void locate(engine.currentTimelineSample() + delta)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -155,6 +240,10 @@ export function App() {
 
   async function ready() {
     await engine.resume()
+    if (engine.workletError && !workletWarned.current) {
+      workletWarned.current = true
+      store.toast('This browser did not start the audio worklets. Use a current Chrome, Edge, or iOS Safari so recording can run.', 'warn')
+    }
     store.retargetSampleRate(engine.sampleRate)
     engine.sync(store.project, (id) => store.buffers.get(id))
     engine.setLaunches(store.launched)
@@ -243,6 +332,9 @@ export function App() {
         takeId: capture.takeId,
       }
       store.addAudioClip(track.id, clip)
+      if (capture.source === 'guide' && isSilentTake(capture.channels)) {
+        store.toast(`${track.name} guide is silent. Video and the live mic need a connected media path. The aligned take replaces this if the upload arrives.`, 'warn')
+      }
     }
     if (takeRef.current) {
       session.broadcastTransport({ action: 'record-stop', takeId: takeRef.current.id, timelineSample: end })
@@ -450,6 +542,7 @@ export function App() {
           <button className="text-btn" onClick={() => void bounce()}>Bounce</button>
           <button className="text-btn" onClick={() => store.addTrack('audio')}>+ Audio</button>
           <button className="text-btn" onClick={() => store.addTrack('midi')}>+ Inst</button>
+          <button className="text-btn" onClick={() => setHelp(true)} title="Shortcuts">?</button>
           <button className="text-btn" onClick={() => setSurface(surface === 'studio' ? 'artist' : 'studio')}>
             {surface === 'studio' ? 'Artist view' : 'Studio'}
           </button>
@@ -501,6 +594,7 @@ export function App() {
           }}
         >
           <VideoDock
+            simple={surface === 'artist'}
             session={session}
             engine={engine}
             onCreate={() => {
@@ -568,6 +662,39 @@ export function App() {
           </div>
         </div>
       )}
+      {help && (
+        <div className="modal-back" onClick={() => setHelp(false)}>
+          <div className="modal help" onClick={(event) => event.stopPropagation()}>
+            <h2>Shortcuts</h2>
+            <div className="help-grid">
+              {[
+                ['Space', 'Play or stop'],
+                ['Stop button', 'Stop'],
+                ['R', 'Record'],
+                ['Return or Home', 'Go to start'],
+                ['← →', 'Nudge one beat'],
+                ['Shift ← →', 'Nudge one bar'],
+                ['L', 'Loop'],
+                ['M', 'Mute the selected track'],
+                ['S', 'Solo the selected track'],
+                ['⌘/Ctrl Z', 'Undo'],
+                ['⇧⌘/Ctrl Z or Shift Z', 'Redo'],
+                ['⌘/Ctrl S', 'Save in this browser'],
+                ['⌘/Ctrl E or B', 'Split the clip at the playhead'],
+                ['Delete', 'Remove the selected clip'],
+                ['+ or −', 'Zoom the timeline'],
+                ['?', 'Show or hide this list'],
+              ].map(([key, action]) => (
+                <p key={key}>
+                  <kbd>{key}</kbd>
+                  {action}
+                </p>
+              ))}
+            </div>
+            <button className="text-btn" onClick={() => setHelp(false)}>Close</button>
+          </div>
+        </div>
+      )}
       <div className="toasts">
         {store.toasts.map((toast) => (
           <div key={toast.id} className={`toast ${toast.tone || ''}`}>
@@ -607,5 +734,10 @@ function placeTake(store: ProjectStore, engine: AudioEngine, take: IncomingTake)
     takeId: take.takeId,
     alignmentMs: take.compensationMs,
   })
-  store.toast(`${take.peerName} aligned −${take.compensationMs.toFixed(0)} ms. ${take.detail}`, 'good')
+  store.toast(
+    take.silent
+      ? `${take.peerName} take arrived, but it is silent. Check their performance mic.`
+      : `${take.peerName} aligned −${take.compensationMs.toFixed(0)} ms. ${take.detail}`,
+    take.silent ? 'warn' : 'good',
+  )
 }

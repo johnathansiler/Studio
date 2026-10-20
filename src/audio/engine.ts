@@ -139,12 +139,24 @@ export class AudioEngine {
     return this.cueDest?.stream ?? null
   }
 
+  workletError = ''
+
   async resume(preferredRate = 48000) {
     if (!this.ctx) {
-      this.ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: preferredRate })
+      try {
+        this.ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: preferredRate })
+      } catch {
+        this.ctx = new AudioContext({ latencyHint: 'interactive' })
+      }
       this.buildMaster()
     }
-    if (this.ctx.state !== 'running') await this.ctx.resume()
+    if (this.ctx.state !== 'running') {
+      try {
+        await this.ctx.resume()
+      } catch {
+        /* iOS rejects resume outside a tap. The camera must still open. */
+      }
+    }
     await this.ensureWorklets()
     this.refreshClockAnchor()
     return this.ctx
@@ -152,11 +164,16 @@ export class AudioEngine {
 
   private async ensureWorklets() {
     if (!this.ctx || this.workletsReady) return
-    await this.ctx.audioWorklet.addModule('/worklets/recorder.js')
-    await this.ctx.audioWorklet.addModule('/worklets/ping.js')
-    await this.ctx.audioWorklet.addModule('/worklets/pcm-tap.js')
-    await this.ctx.audioWorklet.addModule('/worklets/pcm-player.js')
-    this.workletsReady = true
+    try {
+      await this.ctx.audioWorklet.addModule('/worklets/recorder.js')
+      await this.ctx.audioWorklet.addModule('/worklets/ping.js')
+      await this.ctx.audioWorklet.addModule('/worklets/pcm-tap.js')
+      await this.ctx.audioWorklet.addModule('/worklets/pcm-player.js')
+      this.workletsReady = true
+      this.workletError = ''
+    } catch (error) {
+      this.workletError = error instanceof Error ? error.message : 'AudioWorklet failed'
+    }
   }
 
   refreshClockAnchor() {
