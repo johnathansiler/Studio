@@ -147,6 +147,23 @@ export function VideoDock({
         </button>
       </div>
       {link && <div className={`media-banner ${link.tone}`}>{link.text}</div>}
+      {(state.status === 'live' || state.status === 'waiting' || state.status === 'reconnecting') && (
+        <details className="connection-details">
+          <summary>Connection details</summary>
+          <p>{session.onScreenCount() == null ? 'Waiting for the video layout.' : `Video tiles on screen: ${session.onScreenCount()}.`}</p>
+          {Object.keys(state.media).length === 0 && <p>No peer connection yet.</p>}
+          {Object.entries(state.media).map(([id, item]) => {
+            const person = state.participants.find((entry) => entry.id === id)
+            const kind = item.localType || (item.path === 'relay' ? 'relay' : item.path === 'direct' ? 'host' : 'none yet')
+            return (
+              <p key={id}>
+                {person?.name || 'Peer'}: {item.connection} · ice {item.ice} · {item.signaling || 'signaling'} · {kind}
+                {item.remoteType ? ` / ${item.remoteType}` : ''}
+              </p>
+            )
+          })}
+        </details>
+      )}
       {simple && (
         <div className="artist-card">
           <p>Headphones on. You should hear the session, not your own voice coming back.</p>

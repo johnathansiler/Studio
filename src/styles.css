@@ -426,7 +426,11 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 .shell.phone .stage,
 .shell.phone .invite-card,
 .shell.phone .media-banner,
-.shell.phone .artist-card { position: static; flex: 0 0 auto; }
+.shell.phone .artist-card,
+.shell.phone .connection-details { position: static; flex: 0 0 auto; }
+.connection-details { margin: 0 12px 8px; min-width: 0; max-width: 100%; }
+.connection-details summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
+.connection-details p { margin: 4px 0 8px; overflow-wrap: anywhere; word-break: break-word; color: var(--muted); }
 .shell.phone .stage.gallery { grid-template-columns: 1fr; }
 .shell.phone .tile video,
 .shell.phone .placeholder { height: min(42dvh, 320px); position: relative; }
