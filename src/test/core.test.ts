@@ -20,7 +20,7 @@ import { rememberDiag, sanitizeDiag } from '../model/diag'
 import { arrangementDigest, catchUpSchedule, guestMayRequest, guestStartPerf, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
 import { cameraAttempts, legalDirection, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, videoDirection } from '../model/codecs'
 import { filterBrowserTurnUrls, iceRetryPlan, isSilentTake, mediaStatus, queueIceCandidate, staticTurnServer } from '../model/media'
-import { iceUfrag, politePeer, remoteDescriptionPlan, sessionHello, signalingReconnectPlan, socketMayOpen } from '../model/negotiate'
+import { iceUfrag, offerAgainPlan, politePeer, remoteDescriptionPlan, replaceSocketPlan, sessionHello, signalingReconnectPlan, socketMayOpen } from '../model/negotiate'
 import { isQuotaError } from '../storage/idb'
 import { clearIceCache, currentIce } from '../../server/ice.ts'
 import { formatBarsBeats, formatTimecode, samplesToMusical, snapSample } from '../model/time'
@@ -226,7 +226,8 @@ describe('media path', () => {
     expect(iceRetryPlan({ connection: 'connecting', ice: 'checking', ageMs: 13000, turn: 'cloudflare', previousTurn: 'cloudflare' })).toBe('wait')
     expect(iceRetryPlan({ connection: 'new', ice: 'new', ageMs: 31000, turn: 'cloudflare', previousTurn: 'cloudflare' })).toBe('restart')
     expect(iceRetryPlan({ connection: 'failed', ice: 'failed', ageMs: 1000, turn: 'cloudflare', previousTurn: 'none' })).toBe('restart')
-    expect(iceRetryPlan({ connection: 'new', ice: 'new', ageMs: 5000, turn: 'cloudflare', previousTurn: 'cloudflare', signaling: 'have-local-offer', offerAgeMs: 4500 })).toBe('restart')
+    expect(iceRetryPlan({ connection: 'new', ice: 'new', ageMs: 5000, turn: 'cloudflare', previousTurn: 'cloudflare', signaling: 'have-local-offer', offerAgeMs: 4500 })).toBe('wait')
+    expect(iceRetryPlan({ connection: 'new', ice: 'connected', ageMs: 6000, turn: 'cloudflare', previousTurn: 'cloudflare', signaling: 'have-local-offer', offerAgeMs: 6000 })).toBe('wait')
     expect(iceRetryPlan({ connection: 'new', ice: 'new', ageMs: 2000, turn: 'cloudflare', previousTurn: 'cloudflare', signaling: 'have-local-offer', offerAgeMs: 1000 })).toBe('wait')
     expect(iceRetryPlan({ connection: 'connecting', ice: 'checking', ageMs: 4000, turn: 'cloudflare', previousTurn: 'none', signaling: 'stable' })).toBe('wait')
     expect(iceRetryPlan({ connection: 'disconnected', ice: 'disconnected', ageMs: 5000, turn: 'cloudflare', previousTurn: 'cloudflare' })).toBe('wait')
@@ -614,6 +615,14 @@ describe('offer and answer', () => {
     expect(signalingReconnectPlan({ connection: 'disconnected', ice: 'disconnected', remoteInstance: 'a', previousInstance: 'a' })).toBe('keep')
     expect(signalingReconnectPlan({ connection: 'connected', ice: 'connected', remoteInstance: 'b', previousInstance: 'a' })).toBe('renegotiate')
     expect(signalingReconnectPlan({ connection: 'failed', ice: 'failed', remoteInstance: 'a', previousInstance: 'a' })).toBe('renegotiate')
+    expect(replaceSocketPlan({ readyState: 1, probeAnswered: true })).toBe('keep')
+    expect(replaceSocketPlan({ readyState: 1, probeAnswered: false })).toBe('replace')
+    expect(replaceSocketPlan({ readyState: 3, probeAnswered: true })).toBe('replace')
+    expect(offerAgainPlan({ polite: true, signaling: 'stable', ice: 'disconnected', connection: 'disconnected' })).toBe('ask')
+    expect(offerAgainPlan({ polite: true, signaling: 'have-local-offer', ice: 'new', connection: 'new' })).toBe('ask')
+    expect(offerAgainPlan({ polite: false, signaling: 'have-local-offer', ice: 'connected', connection: 'connecting' })).toBe('resend')
+    expect(offerAgainPlan({ polite: false, signaling: 'have-local-offer', ice: 'failed', connection: 'failed' })).toBe('offer')
+    expect(offerAgainPlan({ polite: false, signaling: 'stable', ice: 'failed', connection: 'failed' })).toBe('offer')
     expect(iceUfrag('a=ice-ufrag:abc123\r\n')).toBe('abc123')
   })
 })

@@ -14,7 +14,7 @@ import {
 import { DEFAULT_OPUS, markOutboundVideo, mungeOpusSdp, sectionDirections, videoDirectionsFromSdp, type OpusOptions } from '../model/sdp'
 import { cameraAttempts, DEFAULT_VIDEO_BITRATE, legalDirection, musicCaptureAttempts, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, videoDirection } from '../model/codecs'
 import { iceRetryPlan, isSilentTake, mediaUp, queueIceCandidate, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
-import { iceUfrag, politePeer, remoteDescriptionPlan, sessionHello, signalingReconnectPlan, socketMayOpen } from '../model/negotiate'
+import { iceUfrag, offerAgainPlan, politePeer, remoteDescriptionPlan, sessionHello, signalingReconnectPlan, socketMayOpen } from '../model/negotiate'
 import { sanitizeDiag } from '../model/diag'
 import { arrangementDigest, guestMayRequest, referencedBufferIds } from '../model/sessionSync'
 import { decodeWavPCM, encodeWav } from '../model/wav'
@@ -186,6 +186,8 @@ export class SessionClient {
   private preview: MediaStream | null = null
   private left = false
   private backoff = 400
+  /** The server proved another socket for this browser is still reading. Do not open another. */
+  private holdReconnect = false
   private clockTimer = 0
   private statsTimer = 0
   private iceTimer = 0
@@ -450,12 +452,29 @@ export class SessionClient {
     }
     ws.onmessage = (event) => {
       const msg = JSON.parse(String(event.data))
+      if (msg?.t === 'beat') {
+        // Reply on this socket. this.ws may already point at a replacement.
+        if (msg.probe && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'beat', probe: msg.probe }))
+        return
+      }
+      if (msg?.t === 'error' && String(msg.message || '').includes('already has a live connection')) this.holdReconnect = true
       if (msg?.t === 'signal' && msg.data?.kind === 'answer') this.stashAnswer(String(msg.from || ''), String(msg.data.sdp || ''))
       void this.onServer(msg)
     }
+    ws.onerror = () => {
+      // An error while the socket is still OPEN is not a reason to replace it. The close event follows a real drop.
+    }
     ws.onclose = () => {
       if (this.left || this.ws !== ws) return
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) return
       this.ws = null
+      if (this.holdReconnect) {
+        this.holdReconnect = false
+        this.state.status = 'error'
+        this.state.error = 'This browser already has a live connection to the session.'
+        this.emit()
+        return
+      }
       this.state.status = 'reconnecting'
       this.note('Signaling dropped. Reconnecting…')
       this.emit()
@@ -520,6 +539,11 @@ export class SessionClient {
       }
       this.adoptRemoteInstances()
       this.syncMesh()
+      for (const [id, link] of this.peers) {
+        if (link.pc.signalingState === 'have-local-offer' && link.pc.localDescription?.sdp) {
+          this.send({ t: 'signal', to: id, data: { kind: 'offer', sdp: link.pc.localDescription.sdp } })
+        }
+      }
       this.startMaintenance()
       return
     }
@@ -1282,6 +1306,14 @@ export class SessionClient {
       return
     }
     if (link.pc.signalingState === 'closed' || link.pc.connectionState === 'closed') return
+    if (link.pc.signalingState === 'have-local-offer') {
+      await this.applyPendingAnswer(id, link)
+      const failed = link.pc.iceConnectionState === 'failed' || link.pc.connectionState === 'failed'
+      if (link.pc.signalingState === 'have-local-offer' && !failed) {
+        if (link.pc.localDescription?.sdp) this.send({ t: 'signal', to: id, data: { kind: 'offer', sdp: link.pc.localDescription.sdp } })
+        return
+      }
+    }
     if (!iceRestart && link.pc.signalingState !== 'stable') {
       link.needsRenegotiate = true
       return
@@ -1408,7 +1440,13 @@ export class SessionClient {
       this.notePeerError(link, `ignored answer while ${link.pc.signalingState}`)
       return
     }
-    await link.pc.setRemoteDescription({ type: 'answer', sdp })
+    try {
+      await link.pc.setRemoteDescription({ type: 'answer', sdp })
+    } catch (error) {
+      link.pendingAnswer = sdp
+      this.pendingAnswers.set(id, sdp)
+      throw error
+    }
     await this.flushIce(link)
     await this.tuneSenders(link)
     await this.attachSenders(id, link)
@@ -1418,6 +1456,10 @@ export class SessionClient {
     if (!data) return
     if (data.kind === 'restart') {
       const existing = this.peers.get(from)
+      if (existing?.pc.signalingState === 'have-local-offer' && existing.pc.localDescription?.sdp) {
+        this.send({ t: 'signal', to: from, data: { kind: 'offer', sdp: existing.pc.localDescription.sdp } })
+        return
+      }
       if (existing && signalingReconnectPlan({
         connection: existing.pc.connectionState,
         ice: existing.pc.iceConnectionState,
@@ -1427,13 +1469,24 @@ export class SessionClient {
       const link = existing || (await this.createPeer(from, !politePeer(this.state.selfId || '', from)))
       await this.applyPendingAnswer(from, link)
       const failed = link.pc.iceConnectionState === 'failed' || link.pc.connectionState === 'failed'
-      const unanswered = link.pc.signalingState === 'have-local-offer' && (link.pc.iceConnectionState === 'new' || link.pc.iceConnectionState === 'checking')
-      if ((failed || unanswered) && !politePeer(this.state.selfId || '', from)) await this.offer(from, link, true)
+      if (failed && !politePeer(this.state.selfId || '', from)) await this.offer(from, link, true)
       return
     }
     let link = this.peers.get(from)
     if (!link || link.pc.connectionState === 'closed') link = await this.createPeer(from, false)
     if (data.kind === 'offer') {
+      const incomingUfrag = iceUfrag(String(data.sdp || ''))
+      const currentUfrag = iceUfrag(link.pc.remoteDescription?.sdp || '')
+      if (
+        link.pc.signalingState === 'stable' &&
+        incomingUfrag &&
+        incomingUfrag === currentUfrag &&
+        link.pc.localDescription?.type === 'answer' &&
+        link.pc.localDescription.sdp
+      ) {
+        this.send({ t: 'signal', to: from, data: { kind: 'answer', sdp: link.pc.localDescription.sdp } })
+        return
+      }
       const plan = remoteDescriptionPlan({
         polite: politePeer(this.state.selfId || '', from),
         signaling: link.pc.signalingState,
@@ -1577,6 +1630,17 @@ export class SessionClient {
     const previousTurn = this.state.turn
     await this.refreshIce()
     for (const [id, link] of this.peers) {
+      if (
+        link.pc.signalingState === 'have-local-offer' &&
+        !politePeer(this.state.selfId || '', id) &&
+        link.pc.localDescription?.sdp &&
+        link.offerSentAt &&
+        Date.now() - link.offerSentAt >= 8000
+      ) {
+        this.send({ t: 'signal', to: id, data: { kind: 'offer', sdp: link.pc.localDescription.sdp } })
+        link.offerSentAt = Date.now()
+        continue
+      }
       const plan = iceRetryPlan({
         connection: link.pc.connectionState,
         ice: link.pc.iceConnectionState,
@@ -1645,6 +1709,23 @@ export class SessionClient {
     }
     await this.applyPendingAnswer(id, link)
     if (link.pc.signalingState === 'have-remote-offer') return
+    const again = offerAgainPlan({
+      polite: politePeer(this.state.selfId || '', id),
+      signaling: link.pc.signalingState,
+      ice: link.pc.iceConnectionState,
+      connection: link.pc.connectionState,
+    })
+    if (again === 'resend') {
+      const sdp = link.pc.localDescription?.sdp
+      if (sdp) this.send({ t: 'signal', to: id, data: { kind: 'offer', sdp } })
+      return
+    }
+    if (again === 'ask') {
+      if (link.restartedAt && Date.now() - link.restartedAt < 15000) return
+      link.restartedAt = Date.now()
+      this.send({ t: 'signal', to: id, data: { kind: 'restart' } })
+      return
+    }
     const plan = iceRetryPlan({
       connection: link.pc.connectionState,
       ice: link.pc.iceConnectionState,
@@ -1675,12 +1756,7 @@ export class SessionClient {
       } catch {
         /* older browsers restart through the next offer */
       }
-      const polite = politePeer(this.state.selfId || '', id)
-      if (!polite || link.askedRestart) await this.offer(id, link, true)
-      else {
-        link.askedRestart = true
-        this.send({ t: 'signal', to: id, data: { kind: 'restart' } })
-      }
+      await this.offer(id, link, true)
     } catch (error) {
       this.notePeerError(link, error)
     }

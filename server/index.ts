@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { currentIce, type IceConfig } from './ice.ts'
 import { rememberDiag, sanitizeDiag, type DiagReport } from '../src/model/diag.ts'
-import { sessionHello } from '../src/model/negotiate.ts'
+import { replaceSocketPlan, sessionHello } from '../src/model/negotiate.ts'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -40,8 +40,8 @@ interface Client {
   id: string
   name: string
   sessionCode?: string
-  /** Last protocol pong or app heartbeat. A second socket must not replace one that answered recently. */
-  lastPong: number
+  /** Last application message from the page. A protocol pong is not proof the page is reading. */
+  lastApp: number
 }
 
 interface Session {
@@ -268,11 +268,9 @@ function contentType(file: string) {
 const wss = new WebSocketServer({ server, path: '/ws' })
 
 wss.on('connection', (ws) => {
-  const client: Client = { ws, id: '', name: 'Guest', lastPong: Date.now() }
-  ws.on('pong', () => {
-    client.lastPong = Date.now()
-  })
+  const client: Client = { ws, id: '', name: 'Guest', lastApp: Date.now() }
   ws.on('message', (raw) => {
+    client.lastApp = Date.now()
     let msg: Record<string, unknown>
     try {
       msg = JSON.parse(String(raw))
@@ -345,8 +343,10 @@ async function handle(client: Client, msg: Record<string, unknown>) {
     return
   }
   if (msg.t === 'beat') {
-    client.lastPong = Date.now()
-    send(client.ws, { t: 'beat' })
+    client.lastApp = Date.now()
+    // A probe reply is for the liveness check. Echoing it would loop.
+    if (msg.probe) return
+    send(client.ws, { t: 'beat', ack: true })
     return
   }
   const session = client.sessionCode ? sessions.get(client.sessionCode) : undefined
@@ -500,14 +500,12 @@ async function hello(client: Client, msg: Record<string, unknown>) {
   }
   const existing = resumeId ? session.participants.get(resumeId) || session.held.get(resumeId) : undefined
   if (resumeId && existing) {
-    session.held.delete(resumeId)
-    session.participants.set(resumeId, existing)
     const instanceId = String(msg.instanceId || '').slice(0, 80)
     if (instanceId) existing.instanceId = instanceId
     const previous = session.clients.get(resumeId)
     if (previous && previous.ws !== client.ws) {
-      const stillOpen = previous.ws.readyState === previous.ws.OPEN && Date.now() - previous.lastPong < 8000
-      if (stillOpen) {
+      const answered = previous.ws.readyState === previous.ws.OPEN ? await probeSocket(previous) : false
+      if (replaceSocketPlan({ readyState: previous.ws.readyState, probeAnswered: answered }) === 'keep') {
         record(session, 'duplicate', `ignored a second socket for ${resumeId} because the first is still open`, resumeId)
         send(client.ws, { t: 'error', message: 'This browser already has a live connection to the session.' })
         client.ws.close()
@@ -517,6 +515,8 @@ async function hello(client: Client, msg: Record<string, unknown>) {
       previous.sessionCode = undefined
       previous.ws.close()
     }
+    session.held.delete(resumeId)
+    session.participants.set(resumeId, existing)
     existing.name = name || existing.name
     session.clients.set(resumeId, client)
     client.id = resumeId
@@ -565,19 +565,38 @@ function drop(session: Session, id: string, event: 'rejected' | 'removed') {
   emitRoster(session)
 }
 
+/** Ask the page, not the proxy. A protocol pong can be answered by a middlebox. */
+function probeSocket(client: Client): Promise<boolean> {
+  if (client.ws.readyState !== client.ws.OPEN) return Promise.resolve(false)
+  const id = crypto.randomUUID()
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout>
+    const finish = (answered: boolean) => {
+      clearTimeout(timer)
+      client.ws.off('message', onMessage)
+      resolve(answered)
+    }
+    timer = setTimeout(() => finish(false), 2000)
+    const onMessage = (raw: Buffer | ArrayBuffer | Buffer[]) => {
+      try {
+        const msg = JSON.parse(String(raw)) as { t?: string; probe?: string }
+        if (msg.t === 'beat' && msg.probe === id) finish(true)
+      } catch {
+        /* the session handler already ignores a bad frame */
+      }
+    }
+    client.ws.on('message', onMessage)
+    send(client.ws, { t: 'beat', probe: id })
+  })
+}
+
 setInterval(() => {
+  const now = Date.now()
   for (const session of sessions.values()) {
     for (const client of session.clients.values()) {
       if (client.ws.readyState !== client.ws.OPEN) continue
-      if (Date.now() - client.lastPong > 8000) {
-        client.ws.terminate()
-        continue
-      }
-      try {
-        client.ws.ping()
-      } catch {
-        /* the close handler records the leave */
-      }
+      // No application traffic for 20s means the page is gone, even if a proxy still pongs.
+      if (now - client.lastApp > 20000) client.ws.terminate()
     }
   }
 }, 3000).unref?.()

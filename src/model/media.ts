@@ -120,11 +120,10 @@ export function mediaStatus(input: { turn: TurnProvider; turnError?: string; lin
 }
 
 /**
- * Keep the room. Restart when the path is down.
- * An offer with no answer is restarted after a few seconds, not after the
- * 30s checking grace. A relay that shows up must not abort a direct check
- * that is already running, and must not roll back an offer whose answer
- * has not been applied yet.
+ * Keep the room. Restart when the path has failed.
+ * An offer that is still waiting for its answer stays in place, including
+ * while ICE is connected and the signaling state has not caught up.
+ * A relay that shows up must not abort a direct check that is already running.
  */
 export function iceRetryPlan(input: {
   connection: string
@@ -138,11 +137,9 @@ export function iceRetryPlan(input: {
   if (mediaUp(input)) return 'wait'
   const failed = input.connection === 'failed' || input.ice === 'failed'
   if (failed) return 'restart'
-  const unanswered =
-    input.signaling === 'have-local-offer' &&
-    (input.offerAgeMs ?? 0) >= 4000 &&
-    (input.ice === 'new' || input.ice === 'checking')
-  if (unanswered) return 'restart'
+  // An outstanding offer is still the offer the other side may be answering.
+  // Replacing it at a few seconds races that answer and leaves both sides offering.
+  if (input.signaling === 'have-local-offer') return 'wait'
   const gainedRelay = input.previousTurn === 'none' && input.turn !== 'none'
   const checking = input.ice === 'checking'
   if (gainedRelay && input.signaling !== 'have-local-offer' && !checking) return 'restart'
