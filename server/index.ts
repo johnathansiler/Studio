@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { currentIce, type IceConfig } from './ice.ts'
+import { rememberDiag, sanitizeDiag, type DiagReport } from '../src/model/diag.ts'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -46,6 +47,7 @@ interface Session {
   held: Map<string, Participant>
   clients: Map<string, Client>
   chat: ChatMessage[]
+  diag: DiagReport[]
   emptyAt?: number
 }
 
@@ -135,6 +137,8 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`)
   if (url.pathname === '/api/health') return json(res, { ok: true, service: 'cueharbor', sessions: sessions.size })
   if (url.pathname === '/api/ice') return json(res, await currentIce())
+  const diag = url.pathname.match(/^\/api\/diag\/([A-Za-z0-9]{4,12})$/)
+  if (diag && (req.method === 'GET' || req.method === 'POST')) return handleDiag(req, res, diag[1].toUpperCase())
   if (url.pathname === '/api/takes' && req.method === 'POST') return acceptTake(req, res)
   if (SERVE_STATIC) {
     await serveStatic(url.pathname, res)
@@ -142,6 +146,22 @@ const server = createServer(async (req, res) => {
   }
   json(res, { error: 'CueHarbor signaling server. The app is served by Vite in development.' }, 404)
 })
+
+async function handleDiag(req: IncomingMessage, res: ServerResponse, code: string) {
+  const session = sessions.get(code)
+  if (!session) return json(res, { error: 'That invite is no longer live.' }, 404)
+  if (req.method === 'GET') return json(res, { code, entries: session.diag.slice(-200) })
+  let body: unknown
+  try {
+    body = JSON.parse(await readBody(req, 8_000))
+  } catch {
+    return json(res, { error: 'Diagnostic was unreadable.' }, 400)
+  }
+  const entry = sanitizeDiag(body)
+  if (!entry) return json(res, { error: 'Diagnostic was empty.' }, 400)
+  session.diag = rememberDiag(session.diag, entry, 200)
+  return json(res, { ok: true, kept: session.diag.length })
+}
 
 function json(res: ServerResponse, body: unknown, status = 200) {
   res.writeHead(status, { 'content-type': 'application/json', 'access-control-allow-origin': '*' })
@@ -381,6 +401,7 @@ async function hello(client: Client, msg: Record<string, unknown>) {
       held: new Map(),
       clients: new Map(),
       chat: [],
+      diag: [],
     }
     const person: Participant = {
       id,

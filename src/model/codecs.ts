@@ -62,6 +62,20 @@ export function videoDirection(send: boolean, recv: boolean): VideoSendDirection
   return 'inactive'
 }
 
+/**
+ * An answer can only send when the offer is willing to receive, and can only
+ * receive when the offer is willing to send. Forcing sendonly against a
+ * sendonly offer makes Safari reject the whole description, audio included.
+ */
+export function legalDirection(want: VideoSendDirection, offer: VideoSendDirection | null): VideoSendDirection {
+  if (!offer) return want
+  const wantSend = want === 'sendrecv' || want === 'sendonly'
+  const wantRecv = want === 'sendrecv' || want === 'recvonly'
+  const maySend = offer === 'sendrecv' || offer === 'recvonly'
+  const mayRecv = offer === 'sendrecv' || offer === 'sendonly'
+  return videoDirection(wantSend && maySend, wantRecv && mayRecv)
+}
+
 /** Rich first, then a set Safari accepts when it rejects channel count or sample rate. The last entry is a bare audio request. */
 export function musicCaptureAttempts(deviceId = ''): Array<true | MediaTrackConstraints> {
   const device = deviceId ? { deviceId: { ideal: deviceId } } : {}

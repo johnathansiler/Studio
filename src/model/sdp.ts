@@ -14,17 +14,18 @@ export const DEFAULT_OPUS: OpusOptions = {
   dtx: false,
 }
 
+/** Payload types named on this m-line. A fmtp for any other type is illegal on Safari. */
+export function mLinePayloadTypes(mline: string): Set<string> {
+  return new Set(mline.trim().split(/\s+/).slice(3))
+}
+
 /**
- * Force low-latency Opus. Browser WebRTC generally floors frames at 10ms
- * even though libopus can go to 2.5ms, so ptime is clamped to 10–60ms.
+ * Force low-latency Opus on a local offer or answer. Browser WebRTC floors
+ * frames at 10ms. Each audio section is edited only for the Opus payload
+ * types that section actually lists, because Safari's types differ per m-line.
  */
 export function mungeOpusSdp(sdp: string, opts: OpusOptions = DEFAULT_OPUS): string {
   const lines = sdp.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n')
-  const opusPts = new Set<string>()
-  for (const line of lines) {
-    const match = line.match(/^a=rtpmap:(\d+)\s+opus\/48000(?:\/2)?/i)
-    if (match) opusPts.add(match[1])
-  }
   const ptime = clamp(Math.round(opts.ptimeMs), 10, 60)
 
   const fmtpFor = (pt: string, existing?: string) => {
@@ -57,9 +58,14 @@ export function mungeOpusSdp(sdp: string, opts: OpusOptions = DEFAULT_OPUS): str
   const rendered = sections.map((section) => {
     const audio = section[0]?.startsWith('m=audio')
     if (!audio) return section
+    const listed = mLinePayloadTypes(section[0] || '')
+    const opusPts = new Set<string>()
+    for (const line of section) {
+      const match = line.match(/^a=rtpmap:(\d+)\s+opus\/48000(?:\/2)?/i)
+      if (match && listed.has(match[1])) opusPts.add(match[1])
+    }
     const next: string[] = []
     const seenFmtp = new Set<string>()
-    let wrotePtime = false
     for (const line of section) {
       if (line.startsWith('a=ptime:') || line.startsWith('a=maxptime:')) continue
       const fmtp = line.match(/^a=fmtp:(\d+)\s*(.*)$/)
@@ -69,21 +75,13 @@ export function mungeOpusSdp(sdp: string, opts: OpusOptions = DEFAULT_OPUS): str
         continue
       }
       next.push(line)
-      if (!wrotePtime && line.startsWith('a=rtpmap:')) {
-        const pt = line.match(/^a=rtpmap:(\d+)/)?.[1]
-        if (pt && opusPts.has(pt)) {
-          next.push(`a=ptime:${ptime}`)
-          next.push(`a=maxptime:${ptime}`)
-          wrotePtime = true
-        }
-      }
-    }
-    if (!wrotePtime) {
-      next.push(`a=ptime:${ptime}`)
-      next.push(`a=maxptime:${ptime}`)
     }
     for (const pt of opusPts) {
       if (!seenFmtp.has(pt)) next.push(fmtpFor(pt))
+    }
+    if (opusPts.size) {
+      next.push(`a=ptime:${ptime}`)
+      next.push(`a=maxptime:${ptime}`)
     }
     return next
   })
@@ -114,6 +112,32 @@ export function markOutboundVideo(sdp: string, send: Array<boolean | 'sendrecv' 
     return section.map((line) => (line === 'a=recvonly' || line === 'a=inactive' || line === 'a=sendonly' || line === 'a=sendrecv' ? `a=${target}` : line))
   })
   return rendered.flat().join('\r\n') + '\r\n'
+}
+
+/** Video directions in m-line order. Safari's answer must be legal against these. */
+export function videoDirectionsFromSdp(sdp: string): Array<'sendrecv' | 'sendonly' | 'recvonly' | 'inactive'> {
+  const lines = sdp.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n')
+  const dirs: Array<'sendrecv' | 'sendonly' | 'recvonly' | 'inactive'> = []
+  let inVideo = false
+  let dir: 'sendrecv' | 'sendonly' | 'recvonly' | 'inactive' | null = null
+  const flush = () => {
+    if (!inVideo) return
+    dirs.push(dir || 'sendrecv')
+    dir = null
+  }
+  for (const line of lines) {
+    if (line.startsWith('m=')) {
+      flush()
+      inVideo = line.startsWith('m=video')
+      continue
+    }
+    if (!inVideo) continue
+    if (line === 'a=sendrecv' || line === 'a=sendonly' || line === 'a=recvonly' || line === 'a=inactive') {
+      dir = line.slice(2) as 'sendrecv' | 'sendonly' | 'recvonly' | 'inactive'
+    }
+  }
+  flush()
+  return dirs
 }
 
 function clamp(n: number, min: number, max: number) {

@@ -15,9 +15,10 @@ import {
   shiftPlacementForLateBuffer,
   sliceChunksByPerf,
 } from '../model/latency'
-import { DEFAULT_OPUS, markOutboundVideo, mungeOpusSdp } from '../model/sdp'
+import { DEFAULT_OPUS, markOutboundVideo, mungeOpusSdp, videoDirectionsFromSdp } from '../model/sdp'
+import { rememberDiag, sanitizeDiag } from '../model/diag'
 import { arrangementDigest, catchUpSchedule, guestMayRequest, guestStartPerf, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
-import { cameraAttempts, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, videoDirection } from '../model/codecs'
+import { cameraAttempts, legalDirection, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, videoDirection } from '../model/codecs'
 import { filterBrowserTurnUrls, iceRetryPlan, isSilentTake, mediaStatus, queueIceCandidate, staticTurnServer } from '../model/media'
 import { isQuotaError } from '../storage/idb'
 import { clearIceCache, currentIce } from '../../server/ice.ts'
@@ -144,6 +145,10 @@ describe('video codecs', () => {
     expect(videoDirection(true, false)).toBe('sendonly')
     expect(videoDirection(false, true)).toBe('recvonly')
     expect(videoDirection(false, false)).toBe('inactive')
+    expect(legalDirection('sendrecv', 'sendonly')).toBe('recvonly')
+    expect(legalDirection('sendonly', 'sendonly')).toBe('inactive')
+    expect(legalDirection('sendrecv', 'recvonly')).toBe('sendonly')
+    expect(legalDirection('sendrecv', null)).toBe('sendrecv')
   })
 })
 
@@ -189,8 +194,15 @@ describe('media path', () => {
   })
 
   it('drops TURN urls on port 53', () => {
-    expect(filterBrowserTurnUrls(['turn:turn.cloudflare.com:3478?transport=udp', 'turn:turn.cloudflare.com:53?transport=udp'])).toEqual([
+    expect(filterBrowserTurnUrls([
       'turn:turn.cloudflare.com:3478?transport=udp',
+      'turn:turn.cloudflare.com:53?transport=udp',
+      'turn:turn.cloudflare.com:80?transport=tcp',
+      'turn:turn.cloudflare.com:443?transport=udp',
+      'turns:turn.cloudflare.com:443?transport=tcp',
+    ])).toEqual([
+      'turn:turn.cloudflare.com:3478?transport=udp',
+      'turns:turn.cloudflare.com:443?transport=tcp',
     ])
     expect(staticTurnServer('turn:127.0.0.1:3478,turns:127.0.0.1:5349', 'cue', 'harbor').urls).toEqual([
       'turn:127.0.0.1:3478',
@@ -209,7 +221,22 @@ describe('media path', () => {
     expect(label?.text).not.toMatch(/TURN|UDP|relay/i)
     expect(iceRetryPlan({ connection: 'failed', ice: 'failed', ageMs: 15000, turn: 'none', previousTurn: 'none' })).toBe('restart')
     expect(iceRetryPlan({ connection: 'connected', ice: 'connected', ageMs: 15000, turn: 'none', previousTurn: 'none' })).toBe('wait')
+    expect(iceRetryPlan({ connection: 'connecting', ice: 'connected', ageMs: 15000, turn: 'cloudflare', previousTurn: 'cloudflare' })).toBe('wait')
+    expect(iceRetryPlan({ connection: 'connecting', ice: 'checking', ageMs: 13000, turn: 'cloudflare', previousTurn: 'cloudflare' })).toBe('wait')
+    expect(iceRetryPlan({ connection: 'new', ice: 'new', ageMs: 31000, turn: 'cloudflare', previousTurn: 'cloudflare' })).toBe('restart')
     expect(iceRetryPlan({ connection: 'failed', ice: 'failed', ageMs: 1000, turn: 'cloudflare', previousTurn: 'none' })).toBe('restart')
+    const checking = mediaStatus({
+      turn: 'cloudflare',
+      live: true,
+      links: [{ connection: 'connecting', ice: 'checking', path: 'unknown', ageMs: 15000 }],
+    })
+    expect(checking?.text).toMatch(/Connecting/)
+    const iceUp = mediaStatus({
+      turn: 'cloudflare',
+      live: true,
+      links: [{ connection: 'connecting', ice: 'connected', path: 'relay', ageMs: 15000 }],
+    })
+    expect(iceUp?.tone).toBe('good')
   })
 
   it('reads Cloudflare TURN credentials on the request that has them', async () => {
@@ -435,6 +462,62 @@ describe('opus sdp and wav', () => {
     expect(munged).toContain('maxplaybackrate=48000')
     expect(munged).toContain('minptime=10')
     expect(munged).not.toMatch(/m=video[\s\S]*maxaveragebitrate/)
+  })
+
+  it('edits each Opus payload type only inside its own audio section', () => {
+    const sdp = [
+      'v=0',
+      'm=audio 9 UDP/TLS/RTP/SAVPF 111',
+      'a=rtpmap:111 opus/48000/2',
+      'a=fmtp:111 minptime=10',
+      'm=audio 9 UDP/TLS/RTP/SAVPF 109',
+      'a=rtpmap:109 opus/48000/2',
+      'a=fmtp:109 minptime=10',
+      'm=video 9 UDP/TLS/RTP/SAVPF 102',
+      'a=rtpmap:102 H264/90000',
+      'a=sendonly',
+      '',
+    ].join('\r\n')
+    const munged = mungeOpusSdp(sdp, DEFAULT_OPUS)
+    const audio = munged.split('m=audio').slice(1)
+    expect(audio[0]).toContain('a=fmtp:111 ')
+    expect(audio[0]).not.toContain('a=fmtp:109 ')
+    expect(audio[1]).toContain('a=fmtp:109 ')
+    expect(audio[1]).not.toContain('a=fmtp:111 ')
+    expect(audio[0]).toContain('maxaveragebitrate=510000')
+    expect(audio[1]).toContain('stereo=1')
+    expect(munged).not.toMatch(/m=video[\s\S]*a=fmtp:111/)
+    expect(videoDirectionsFromSdp(munged)).toEqual(['sendonly'])
+  })
+
+  it('keeps a diagnostic snapshot free of media and secrets', () => {
+    const clean = sanitizeDiag({
+      at: 5,
+      peerId: 'peer-1',
+      role: 'guest',
+      ua: 'Safari',
+      sdp: 'v=0 ice-ufrag:secret',
+      credential: 'do-not-keep',
+      peers: [
+        {
+          id: 'peer-2',
+          signaling: 'stable',
+          ice: 'checking',
+          connection: 'connecting',
+          gathered: { host: 1, srflx: 2, relay: 3, prflx: 0 },
+          selected: { local: 'relay', remote: 'relay' },
+          errors: ['OperationError: Failed to set local answer sdp'],
+          candidate: 'a=candidate secret',
+        },
+      ],
+    })
+    expect(clean?.peers[0].gathered.relay).toBe(3)
+    expect(clean?.peers[0].selected).toEqual({ local: 'relay', remote: 'relay' })
+    expect(JSON.stringify(clean)).not.toMatch(/secret|credential|candidate/)
+    const log = rememberDiag([], clean!, 1)
+    const next = rememberDiag(log, { ...clean!, at: 6 }, 1)
+    expect(next).toHaveLength(1)
+    expect(next[0].at).toBe(6)
   })
 
   it('can turn FEC off', () => {

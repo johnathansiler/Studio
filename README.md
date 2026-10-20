@@ -168,7 +168,7 @@ Signaling messages: `hello` (create, join, resume), roster, `admit` / `reject` /
 
 The host is the clock for the arrangement. Play, stop, and locate on either side are scheduled against the shared clock so both playheads hit the same sample together. The host sends the arrangement and its audio; the guest plays that locally and mutes the delayed cue mix so the backing is not heard twice. Record stays with the host. A guest take that was sung against the local backing is placed with no extra network shift. Popping the session out opens a real window that shares the same session, so mute, camera, chat, admit, and copy invite keep working.
 
-Health: `GET /api/health`. ICE config: `GET /api/ice`. In production the same process serves `dist/` and upgrades `/ws`. The browser opens that socket with `wss` when the page is `https`, and invite links use `location.origin`.
+Health: `GET /api/health`. ICE config: `GET /api/ice`. While a room is open, each browser posts a compact WebRTC snapshot to `POST /api/diag/SESSION` every few seconds, and `GET /api/diag/SESSION` returns the last 200 (peer states, candidate types, selected pair, error text, user agent). Those entries are memory-only and disappear with the room. They do not include media or TURN secrets. In production the same process serves `dist/` and upgrades `/ws`. The browser opens that socket with `wss` when the page is `https`, and invite links use `location.origin`.
 
 ## Limits
 

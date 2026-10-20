@@ -20,6 +20,14 @@ export interface MediaLink {
   ice: string
   path: MediaPath
   ageMs: number
+  signaling?: string
+  localType?: string
+  remoteType?: string
+}
+
+/** ICE can be up while connectionState is still waiting on DTLS or the data channel. */
+export function mediaUp(link: { connection: string; ice: string }) {
+  return link.connection === 'connected' || link.ice === 'connected' || link.ice === 'completed'
 }
 
 const STUN: IceServer = { urls: 'stun:stun.l.google.com:19302' }
@@ -41,9 +49,17 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
   })
 }
 
-/** Browsers block TURN on port 53, and that URL only adds a timeout. */
+/**
+ * Browsers block TURN on port 53. Port 80 and plain TURN on UDP 443 also stall
+ * Safari's gatherer, so ICE never finishes nominating the relay that does work.
+ */
 export function filterBrowserTurnUrls(urls: string[]): string[] {
-  return urls.filter((url) => !/:53(\?|$)/.test(url))
+  return urls.filter((url) => {
+    if (/:53(\?|$)/.test(url)) return false
+    if (/^turns?:/i.test(url) && /:80(\?|$)/.test(url)) return false
+    if (/^turn:/i.test(url) && /:443(\?|$)/.test(url)) return false
+    return true
+  })
 }
 
 export function staticTurnServer(url: string, username: string, credential: string): IceServer {
@@ -91,10 +107,10 @@ export function mediaStatus(input: { turn: TurnProvider; turnError?: string; lin
       ? { tone: 'warn', text: 'Video may take a moment to appear. You’re still in the room.' }
       : { tone: 'warn', text: 'Connecting video and audio…' }
   }
-  const connected = input.links.filter((link) => link.connection === 'connected')
+  const connected = input.links.filter((link) => mediaUp(link))
   if (connected.length) return { tone: 'good', text: 'Video and audio are connected.' }
   const failed = input.links.some((link) => link.connection === 'failed' || link.ice === 'failed' || link.connection === 'disconnected')
-  const stalled = input.links.some((link) => link.ageMs > 12000 && link.connection !== 'connected')
+  const stalled = input.links.some((link) => link.ageMs > 30000 && !mediaUp(link) && link.ice !== 'checking' && link.ice !== 'new')
   if (failed || stalled) return { tone: 'bad', text: STILL_TRYING }
   return { tone: 'warn', text: 'Connecting video and audio…' }
 }
@@ -107,10 +123,13 @@ export function iceRetryPlan(input: {
   turn: TurnProvider
   previousTurn: TurnProvider
 }): 'restart' | 'wait' {
+  if (mediaUp(input)) return 'wait'
   const gainedRelay = input.previousTurn === 'none' && input.turn !== 'none'
-  if (gainedRelay && input.connection !== 'connected') return 'restart'
+  if (gainedRelay) return 'restart'
+  const checking = input.ice === 'checking' || input.ice === 'new'
+  if (checking && input.ageMs < 30000) return 'wait'
   const down = input.connection === 'failed' || input.connection === 'disconnected' || input.ice === 'failed' || input.ice === 'disconnected'
-  const stalled = input.connection !== 'connected' && input.ageMs > 12000
+  const stalled = input.ageMs > 30000
   if (down || stalled) return 'restart'
   return 'wait'
 }

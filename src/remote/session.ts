@@ -11,9 +11,10 @@ import {
   shiftPlacementForLateBuffer,
   type TimedPeak,
 } from '../model/latency'
-import { DEFAULT_OPUS, markOutboundVideo, mungeOpusSdp, type OpusOptions } from '../model/sdp'
-import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, videoDirection, type VideoSendDirection } from '../model/codecs'
+import { DEFAULT_OPUS, markOutboundVideo, mungeOpusSdp, videoDirectionsFromSdp, type OpusOptions } from '../model/sdp'
+import { cameraAttempts, DEFAULT_VIDEO_BITRATE, legalDirection, musicCaptureAttempts, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, videoDirection } from '../model/codecs'
 import { iceRetryPlan, isSilentTake, queueIceCandidate, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
+import { sanitizeDiag } from '../model/diag'
 import { arrangementDigest, guestMayRequest, referencedBufferIds } from '../model/sessionSync'
 import { decodeWavPCM, encodeWav } from '../model/wav'
 import { base64ToBytes, bytesToBase64 } from '../storage/idb'
@@ -138,6 +139,11 @@ interface PeerLink {
   openedAt: number
   caller: boolean
   camRetry?: string
+  gathered: { host: number; srflx: number; relay: number; prflx: number }
+  errors: string[]
+  restartedAt?: number
+  appliedCam?: string
+  appliedScreen?: string
   take?: {
     takeId: string
     total: number
@@ -198,8 +204,11 @@ export class SessionClient {
   private incomingProject: Project | null = null
   private incomingAssets = new Map<string, AudioAsset>()
   private resumeId = ''
-  /** null until the session view reports which tiles are on screen. Then only those peers are received. */
+  /** null until the session view reports which tiles are on screen. Kept for the panel; it does not change SDP. */
   private incomingVideo: Set<string> | null = null
+  private signalLane = new Map<string, Promise<void>>()
+  private inSignal = new Set<string>()
+  private lastDiag = 0
 
   constructor(private engine: AudioEngine) {
     const saved = readIdentity()
@@ -498,7 +507,7 @@ export class SessionClient {
       return
     }
     if (msg.t === 'signal') {
-      await this.onSignal(msg.from, msg.data)
+      await this.enqueueSignal(String(msg.from || ''), () => this.onSignal(msg.from, msg.data))
       return
     }
     if (msg.t === 'clock') {
@@ -631,14 +640,9 @@ export class SessionClient {
     this.emit()
   }
 
-  /** Tiles that are actually on screen. Everyone else stops receiving that video. */
+  /** Remember which tiles are on screen. Receiving video stays on so a phone below the fold still connects. */
   setIncomingVideo(peerIds: string[]) {
-    const next = new Set(peerIds.filter((id) => id && id !== this.state.selfId))
-    const prev = this.incomingVideo ? [...this.incomingVideo].sort().join('|') : '\0'
-    const now = [...next].sort().join('|')
-    if (prev === now) return
-    this.incomingVideo = next
-    this.applySendTracks()
+    this.incomingVideo = new Set(peerIds.filter((id) => id && id !== this.state.selfId))
   }
 
   setOpus(patch: Partial<OpusOptions>) {
@@ -942,12 +946,31 @@ export class SessionClient {
     }
     if (this.state.status !== 'live') return
     for (const peer of this.remoteAdmitted()) {
-      if (!this.peers.has(peer.id) && this.state.selfId && this.state.selfId < peer.id) {
-        void this.createPeer(peer.id, true)
-      } else if (!this.peers.has(peer.id)) {
-        void this.createPeer(peer.id, false)
-      }
+      if (this.peers.has(peer.id)) continue
+      const caller = Boolean(this.state.selfId && this.state.selfId < peer.id)
+      void this.enqueueSignal(peer.id, async () => {
+        if (!this.peers.has(peer.id)) await this.createPeer(peer.id, caller)
+      })
     }
+  }
+
+  private enqueueSignal(id: string, job: () => Promise<void>) {
+    if (!id) return Promise.resolve()
+    if (this.inSignal.has(id)) return job()
+    const prev = this.signalLane.get(id) || Promise.resolve()
+    const run = prev.catch(() => undefined).then(async () => {
+      this.inSignal.add(id)
+      try {
+        await job()
+      } catch (error) {
+        const link = this.peers.get(id)
+        if (link) this.notePeerError(link, error)
+      } finally {
+        this.inSignal.delete(id)
+      }
+    })
+    this.signalLane.set(id, run)
+    return run
   }
 
   private remoteAdmitted() {
@@ -970,6 +993,8 @@ export class SessionClient {
       pendingIce: [],
       openedAt: Date.now(),
       caller,
+      gathered: { host: 0, srflx: 0, relay: 0, prflx: 0 },
+      errors: [],
     }
     link.musicSender = pc.addTransceiver('audio', { direction: 'sendrecv' })
     link.talkSender = pc.addTransceiver('audio', { direction: 'sendrecv' })
@@ -981,7 +1006,10 @@ export class SessionClient {
     this.preferOpus(link.talkSender)
     this.peers.set(id, link)
     pc.onicecandidate = (event) => {
-      if (event.candidate) this.send({ t: 'signal', to: id, data: { kind: 'ice', candidate: event.candidate.toJSON() } })
+      if (!event.candidate) return
+      const kind = String(event.candidate.candidate).match(/typ (host|srflx|relay|prflx)/)?.[1] as 'host' | 'srflx' | 'relay' | 'prflx' | undefined
+      if (kind) link.gathered[kind] += 1
+      this.send({ t: 'signal', to: id, data: { kind: 'ice', candidate: event.candidate.toJSON() } })
     }
     pc.ontrack = (event) => {
       const transceivers = pc.getTransceivers()
@@ -1015,7 +1043,7 @@ export class SessionClient {
     pc.ondatachannel = (event) => this.bindChannel(id, link, event.channel)
     pc.onconnectionstatechange = () => {
       this.noteMedia(id, link)
-      if (pc.connectionState === 'failed') void this.recover(id)
+      if (pc.connectionState === 'failed' && !this.inSignal.has(id)) void this.recover(id)
       this.emit()
     }
     pc.oniceconnectionstatechange = () => {
@@ -1055,7 +1083,10 @@ export class SessionClient {
     const caps = RTCRtpSender.getCapabilities?.('audio')
     if (!caps) return
     const opus = caps.codecs.filter((codec) => codec.mimeType.toLowerCase() === 'audio/opus')
-    const rest = caps.codecs.filter((codec) => codec.mimeType.toLowerCase() !== 'audio/opus')
+    const rest = caps.codecs.filter((codec) => {
+      const name = codec.mimeType.toLowerCase()
+      return name !== 'audio/opus' && name !== 'audio/red' && name !== 'audio/ulpfec'
+    })
     try {
       transceiver.setCodecPreferences([...opus, ...rest])
     } catch {
@@ -1090,26 +1121,39 @@ export class SessionClient {
 
   private async offer(id: string, link: PeerLink, iceRestart: boolean) {
     const offer = await link.pc.createOffer({ iceRestart })
-    const raw = mungeOpusSdp(offer.sdp || '', this.state.opus)
-    offer.sdp = markOutboundVideo(raw, this.videoMarks(id))
-    try {
-      await link.pc.setLocalDescription(offer)
-    } catch {
-      offer.sdp = raw
-      await link.pc.setLocalDescription(offer)
-    }
+    await this.commitLocal(link, offer)
     this.send({ t: 'signal', to: id, data: { kind: 'offer', sdp: link.pc.localDescription?.sdp || offer.sdp } })
   }
 
-  private videoMarks(id: string): VideoSendDirection[] {
-    const recv = this.wantsIncomingVideo(id)
-    return [videoDirection(Boolean(this.cameraTrack()), recv), videoDirection(Boolean(this.screenTrack()), recv)]
+  /** Munge the local description only. If Safari rejects the edit, keep the browser SDP. */
+  private async commitLocal(link: PeerLink, created: RTCSessionDescriptionInit) {
+    const original = created.sdp || ''
+    const munged = markOutboundVideo(mungeOpusSdp(original, this.state.opus), this.videoSendFlags(link))
+    try {
+      await link.pc.setLocalDescription({ type: created.type, sdp: munged })
+    } catch (error) {
+      this.notePeerError(link, error)
+      await link.pc.setLocalDescription({ type: created.type, sdp: original })
+    }
   }
 
-  private wantsIncomingVideo(id: string) {
-    if (this.pageHidesVideo()) return false
-    if (this.incomingVideo === null) return true
-    return this.incomingVideo.has(id)
+  private videoSendFlags(link: PeerLink): boolean[] {
+    const offerDirs = link.pc.signalingState === 'have-remote-offer' ? videoDirectionsFromSdp(link.pc.remoteDescription?.sdp || '') : []
+    const wants = [Boolean(this.cameraTrack()), Boolean(this.screenTrack())]
+    return wants.map((want, index) => {
+      if (!want) return false
+      const offer = offerDirs[index]
+      if (!offer) return true
+      return offer === 'sendrecv' || offer === 'recvonly'
+    })
+  }
+
+  private wantsIncomingVideo() {
+    return !this.pageHidesVideo()
+  }
+
+  onScreenCount() {
+    return this.incomingVideo ? this.incomingVideo.size : null
   }
 
   private pageHidesVideo() {
@@ -1134,24 +1178,26 @@ export class SessionClient {
     let link = this.peers.get(from)
     if (!link || link.pc.connectionState === 'closed') link = await this.createPeer(from, false)
     if (data.kind === 'offer') {
-      const sdp = mungeOpusSdp(data.sdp, this.state.opus)
-      await link.pc.setRemoteDescription({ type: 'offer', sdp })
+      try {
+        await link.pc.setRemoteDescription({ type: 'offer', sdp: data.sdp })
+      } catch (error) {
+        this.notePeerError(link, error)
+        return
+      }
       await this.flushIce(link)
       await this.attachSenders(from, link)
       const answer = await link.pc.createAnswer()
-      const raw = mungeOpusSdp(answer.sdp || '', this.state.opus)
-      answer.sdp = markOutboundVideo(raw, this.videoMarks(from))
-      try {
-        await link.pc.setLocalDescription(answer)
-      } catch {
-        answer.sdp = raw
-        await link.pc.setLocalDescription(answer)
-      }
+      await this.commitLocal(link, answer)
       this.send({ t: 'signal', to: from, data: { kind: 'answer', sdp: link.pc.localDescription?.sdp || answer.sdp } })
       await this.tuneSenders(link)
     } else if (data.kind === 'answer') {
       if (link.pc.signalingState === 'have-local-offer') {
-        await link.pc.setRemoteDescription({ type: 'answer', sdp: data.sdp })
+        try {
+          await link.pc.setRemoteDescription({ type: 'answer', sdp: data.sdp })
+        } catch (error) {
+          this.notePeerError(link, error)
+          return
+        }
         await this.flushIce(link)
         await this.tuneSenders(link)
         await this.attachSenders(from, link)
@@ -1187,7 +1233,10 @@ export class SessionClient {
       [id]: {
         connection: link.pc.connectionState,
         ice: link.pc.iceConnectionState,
+        signaling: link.pc.signalingState,
         path: previous?.path || 'unknown',
+        localType: previous?.localType || '',
+        remoteType: previous?.remoteType || '',
         ageMs: Date.now() - link.openedAt,
       },
     }
@@ -1274,7 +1323,7 @@ export class SessionClient {
   private async tuneAudio(sender: RTCRtpSender | undefined, maxBitrate: number) {
     if (!sender) return
     const params = sender.getParameters()
-    if (!params.encodings?.length) params.encodings = [{}]
+    if (!params.encodings?.length) return
     params.encodings[0].maxBitrate = maxBitrate
     params.encodings[0].priority = 'high'
     ;(params.encodings[0] as RTCRtpEncodingParameters & { networkPriority?: RTCPriorityType }).networkPriority = 'high'
@@ -1288,7 +1337,7 @@ export class SessionClient {
   private async tuneVideo(sender: RTCRtpSender | undefined, track: MediaStreamTrack | null) {
     if (!sender) return
     const params = sender.getParameters()
-    if (!params.encodings?.length) params.encodings = [{}]
+    if (!params.encodings?.length) return
     const settings = track?.getSettings() || {}
     params.encodings[0].maxBitrate = this.state.videoBitrate
     params.encodings[0].maxFramerate = 15
@@ -1305,14 +1354,23 @@ export class SessionClient {
   }
 
   private async recover(id: string) {
+    if (this.inSignal.has(id)) return
+    return this.enqueueSignal(id, () => this.recoverNow(id))
+  }
+
+  private async recoverNow(id: string) {
     const link = this.peers.get(id)
     if (!link || link.restarting || this.left) return
+    if (link.restartedAt && Date.now() - link.restartedAt < 15000) return
     if (link.pc.connectionState === 'closed' || link.pc.signalingState === 'closed') {
       this.peers.delete(id)
       this.syncMesh()
       return
     }
+    if (link.pc.signalingState === 'have-remote-offer') return
     link.restarting = true
+    link.restartedAt = Date.now()
+    link.openedAt = Date.now()
     try {
       await this.refreshIce()
       const pc = link.pc
@@ -1339,13 +1397,18 @@ export class SessionClient {
       } else {
         this.send({ t: 'signal', to: id, data: { kind: 'restart' } })
       }
-    } catch {
-      /* a failed restart must not close signaling or remove the guest */
+    } catch (error) {
+      this.notePeerError(link, error)
     } finally {
       window.setTimeout(() => {
         if (this.peers.get(id) === link) link.restarting = false
       }, 5000)
     }
+  }
+
+  private notePeerError(link: PeerLink, error: unknown) {
+    const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+    link.errors = [...link.errors, message.replace(/\s+/g, ' ').slice(0, 180)].slice(-6)
   }
 
   private adoptReceiverTrack(bucket: MediaStream, transceiver?: RTCRtpTransceiver) {
@@ -1384,16 +1447,19 @@ export class SessionClient {
     await link.musicSender?.sender.replaceTrack(this.performanceTrack())
     const talk = this.state.talkOn ? this.talkStream?.getAudioTracks()[0] || null : null
     await link.talkSender?.sender.replaceTrack(talk)
-    const recv = this.wantsIncomingVideo(id)
+    const recv = this.wantsIncomingVideo()
     const cam = this.cameraTrack()
-    const camDir = videoDirection(Boolean(cam), recv)
-    const prevCam = link.camSender?.direction
+    const offerDirs = link.pc.signalingState === 'have-remote-offer' ? videoDirectionsFromSdp(link.pc.remoteDescription?.sdp || '') : []
+    const camDir = legalDirection(videoDirection(Boolean(cam), recv), offerDirs[0] || null)
+    const prevCam = link.appliedCam
     if (link.camSender) link.camSender.direction = camDir
     await link.camSender?.sender.replaceTrack(cam)
     const screen = this.screenTrack()
-    const screenDir = videoDirection(Boolean(screen), recv)
-    const prevScreen = link.screenSender?.direction
+    const screenDir = legalDirection(videoDirection(Boolean(screen), recv), offerDirs[1] || null)
+    const prevScreen = link.appliedScreen
     if (link.screenSender) link.screenSender.direction = screenDir
+    link.appliedCam = camDir
+    link.appliedScreen = screenDir
     await link.screenSender?.sender.replaceTrack(screen)
     this.enableTrack(link.musicSender, this.state.musicOn)
     this.enableTrack(link.talkSender, this.state.talkOn)
@@ -1406,12 +1472,12 @@ export class SessionClient {
     this.state.localSend = cam
       ? `Sending the self-view camera (${cam.readyState}${cam.muted ? ', waiting for frames' : ''}, ${link.camSender?.direction || 'no transceiver'}). Mic ${mic ? mic.readyState : 'missing'}.`
       : `Camera is not on the peer connection. Mic ${mic ? mic.readyState : 'missing'}.`
-    const directionChanged = prevCam !== camDir || prevScreen !== screenDir
+    const directionChanged = prevCam !== undefined && (prevCam !== camDir || prevScreen !== screenDir)
     if ((before !== after || directionStale || directionChanged) && link.pc.localDescription && link.pc.signalingState === 'stable') {
       if (link.caller) await this.offer(id, link, false)
       else this.send({ t: 'signal', to: id, data: { kind: 'restart' } })
     }
-    await this.tuneSenders(link)
+    if (link.pc.localDescription) await this.tuneSenders(link)
     this.state.mediaTick += 1
   }
 
@@ -1568,22 +1634,32 @@ export class SessionClient {
       })
       let path: MediaPath = this.state.media[id]?.path || 'unknown'
       let localCandidateId = ''
+      let remoteCandidateId = ''
       stats.forEach((report) => {
-        const row = report as unknown as { nominated?: boolean; selected?: boolean; state?: string; localCandidateId?: string }
+        const row = report as unknown as { nominated?: boolean; selected?: boolean; state?: string; localCandidateId?: string; remoteCandidateId?: string }
         if (report.type === 'candidate-pair' && row.state === 'succeeded' && (row.nominated || row.selected) && row.localCandidateId) {
           localCandidateId = row.localCandidateId
+          remoteCandidateId = row.remoteCandidateId || ''
         }
       })
+      let localType = ''
+      let remoteType = ''
       if (localCandidateId) {
         const local = stats.get(localCandidateId) as { candidateType?: string } | undefined
-        path = local?.candidateType === 'relay' ? 'relay' : 'direct'
+        const remote = remoteCandidateId ? (stats.get(remoteCandidateId) as { candidateType?: string } | undefined) : undefined
+        localType = local?.candidateType || ''
+        remoteType = remote?.candidateType || ''
+        path = localType === 'relay' ? 'relay' : localType ? 'direct' : path
       }
       this.state.media = {
         ...this.state.media,
         [id]: {
           connection: link.pc.connectionState,
           ice: link.pc.iceConnectionState,
+          signaling: link.pc.signalingState,
           path,
+          localType,
+          remoteType,
           ageMs: Date.now() - link.openedAt,
         },
       }
@@ -1611,6 +1687,37 @@ export class SessionClient {
     this.state.loopbackMs = this.engine.loopbackMs
     this.applyJam()
     this.emit()
+    this.postDiag()
+  }
+
+  private postDiag() {
+    const code = this.state.code
+    if (!code || this.left) return
+    if (this.state.status !== 'live' && this.state.status !== 'waiting' && this.state.status !== 'reconnecting') return
+    const now = Date.now()
+    if (now - this.lastDiag < 3000) return
+    this.lastDiag = now
+    const report = sanitizeDiag({
+      at: now,
+      peerId: this.state.selfId || '',
+      role: this.state.role || '',
+      ua: navigator.userAgent,
+      peers: [...this.peers.entries()].map(([id, link]) => ({
+        id,
+        signaling: link.pc.signalingState,
+        ice: link.pc.iceConnectionState,
+        connection: link.pc.connectionState,
+        gathered: link.gathered,
+        selected: this.state.media[id]?.localType ? { local: this.state.media[id].localType, remote: this.state.media[id].remoteType || '' } : null,
+        errors: link.errors,
+      })),
+    })
+    if (!report) return
+    void fetch(`/api/diag/${encodeURIComponent(code)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(report),
+    }).catch(() => undefined)
   }
 
   private onTransport(payload: any) {
