@@ -205,10 +205,11 @@ export interface SliceChunk {
   /** performance.now() of the first sample */
   perfStart: number
   data: Float32Array
+  right?: Float32Array
   sampleRate: number
 }
 
-export function sliceChunksByPerf(chunks: SliceChunk[], perfStart: number, perfEnd: number): { audio: Float32Array; actualPerfStart: number } | null {
+export function sliceChunksByPerf(chunks: SliceChunk[], perfStart: number, perfEnd: number): { audio: Float32Array; right?: Float32Array; actualPerfStart: number } | null {
   if (perfEnd <= perfStart || !chunks.length) return null
   const sampleRate = chunks[0].sampleRate
   const spans = chunks
@@ -225,11 +226,17 @@ export function sliceChunksByPerf(chunks: SliceChunk[], perfStart: number, perfE
   if (end <= actual) return null
   const total = Math.max(1, Math.round(((end - actual) / 1000) * sampleRate))
   const out = new Float32Array(total)
+  const stereo = covering.some((chunk) => chunk.right && chunk.right.length)
+  const right = stereo ? new Float32Array(total) : undefined
   for (const chunk of covering) {
     const chunkStartSample = Math.round(((chunk.perfStart - actual) / 1000) * sampleRate)
     const from = Math.max(0, Math.round(((actual - chunk.perfStart) / 1000) * sampleRate))
     let o = Math.max(0, chunkStartSample)
     for (let i = from; i < chunk.data.length && o < out.length; i++, o++) out[o] = chunk.data[i]
+    if (right && chunk.right) {
+      let r = Math.max(0, chunkStartSample)
+      for (let i = from; i < chunk.right.length && r < right.length; i++, r++) right[r] = chunk.right[i]
+    }
   }
-  return { audio: out, actualPerfStart: actual }
+  return { audio: out, right, actualPerfStart: actual }
 }

@@ -12,11 +12,12 @@ import {
   type TimedPeak,
 } from '../model/latency'
 import { DEFAULT_OPUS, markOutboundVideo, mungeOpusSdp, type OpusOptions } from '../model/sdp'
-import { cameraAttempts, outboundVideoCodecs, shouldSetVideoCodecPreferences } from '../model/codecs'
-import { isSilentTake, queueIceCandidate, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
+import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, videoDirection, type VideoSendDirection } from '../model/codecs'
+import { iceRetryPlan, isSilentTake, queueIceCandidate, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
 import { arrangementDigest, guestMayRequest, referencedBufferIds } from '../model/sessionSync'
 import { decodeWavPCM, encodeWav } from '../model/wav'
 import { base64ToBytes, bytesToBase64 } from '../storage/idb'
+import { clearActiveSession, deviceParticipantId, readIdentity } from '../storage/identity'
 import type { AudioAsset, Project } from '../model/types'
 
 export interface Participant {
@@ -72,6 +73,7 @@ export interface SessionState {
   jamEnabled: boolean
   jamDelayMs: number
   opus: OpusOptions
+  videoBitrate: number
   devices: { deviceId: string; label: string; kind: MediaDeviceKind }[]
   micId: string
   camId: string
@@ -93,6 +95,8 @@ export interface SessionState {
   mediaTick: number
   /** What this browser is actually sending, including the camera direction Safari negotiated. */
   localSend: string
+  /** iOS needs another tap before the microphone and camera can start again. */
+  audioLocked: boolean
 }
 
 export interface IncomingTake {
@@ -164,6 +168,13 @@ export class SessionClient {
   private backoff = 400
   private clockTimer = 0
   private statsTimer = 0
+  private iceTimer = 0
+  private joinTimer = 0
+  private iceStamp = ''
+  private iceFreshUntil = 0
+  private primedMusic: Promise<MediaStream | null> | null = null
+  private primedCamera: Promise<MediaStream | null> | null = null
+  private deferMedia = false
   private punch: {
     takeId: string
     recordStartSample: number
@@ -187,26 +198,30 @@ export class SessionClient {
   private incomingProject: Project | null = null
   private incomingAssets = new Map<string, AudioAsset>()
   private resumeId = ''
+  /** null until the session view reports which tiles are on screen. Then only those peers are received. */
+  private incomingVideo: Set<string> | null = null
 
   constructor(private engine: AudioEngine) {
+    const saved = readIdentity()
     this.state = {
       status: 'idle',
-      name: localStorage.getItem('cueharbor-name') || 'Engineer',
+      name: saved?.name || localStorage.getItem('cueharbor-name') || 'Engineer',
       participants: [],
       chat: [],
-      musicOn: true,
+      musicOn: saved?.musicOn ?? true,
       talkOn: true,
-      camOn: true,
+      camOn: saved?.camOn ?? true,
       screenOn: false,
       hand: false,
-      monitorMode: 'opus',
-      jamEnabled: false,
-      jamDelayMs: 40,
+      monitorMode: saved?.monitorMode || 'opus',
+      jamEnabled: saved?.jamEnabled ?? false,
+      jamDelayMs: saved?.jamDelayMs ?? 40,
       opus: { ...DEFAULT_OPUS },
+      videoBitrate: DEFAULT_VIDEO_BITRATE,
       devices: [],
-      micId: '',
+      micId: saved?.micId || '',
       camId: '',
-      outId: '',
+      outId: saved?.outId || '',
       latency: {},
       loopbackMs: null,
       audioPingMs: null,
@@ -221,6 +236,10 @@ export class SessionClient {
       media: {},
       mediaTick: 0,
       localSend: 'Camera has not joined the peer connection yet.',
+      audioLocked: false,
+    }
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => this.onPageVisibility())
     }
   }
 
@@ -266,14 +285,77 @@ export class SessionClient {
     this.state.status = 'connecting'
     this.state.error = undefined
     this.connectOpts = opts
-    const key = `cueharbor-resume:${opts.create ? 'new' : opts.code}`
-    if (!opts.create) this.resumeId = sessionStorage.getItem(key) || ''
+    this.resumeId = deviceParticipantId()
     this.emit()
     this.openSocket()
+    window.clearTimeout(this.joinTimer)
+    this.joinTimer = window.setTimeout(() => {
+      if (this.left || this.state.status !== 'connecting') return
+      this.state.status = 'error'
+      this.state.error = 'The session did not answer. Check the code and try Join again.'
+      this.note(this.state.error)
+      this.emit()
+    }, 8000)
+  }
+
+  /**
+   * iOS only grants the microphone when getUserMedia runs in the tap turn.
+   * Every attempt starts now, before any await. A rejected stereo/48 kHz request
+   * falls through to the relaxed one that was already in flight.
+   */
+  holdMediaForGesture() {
+    this.deferMedia = true
+  }
+
+  async resumeAudio() {
+    this.deferMedia = false
+    this.state.audioLocked = false
+    this.emit()
+    try {
+      await withTimeout(this.openDevices(), 12000, 'Microphone')
+    } catch (error) {
+      this.state.audioLocked = true
+      this.note(error instanceof Error ? error.message : 'Audio did not start.')
+    }
+    this.applySendTracks()
+    this.emit()
+  }
+
+  primeMediaFromGesture() {
+    this.primedMusic = this.gestureCapture(
+      musicCaptureAttempts(this.state.micId).map((audio) => () => navigator.mediaDevices.getUserMedia({ audio, video: false })),
+    )
+    if (this.state.camOn) this.primeCameraFromGesture()
+  }
+
+  primeCameraFromGesture() {
+    this.primedCamera = this.gestureCapture(
+      cameraAttempts(this.state.camId).map((video) => () => navigator.mediaDevices.getUserMedia({ audio: false, video })),
+    )
+  }
+
+  private gestureCapture(starts: Array<() => Promise<MediaStream>>): Promise<MediaStream | null> {
+    const pending = starts.map((start) => {
+      try {
+        return withTimeout(start(), 8000, 'Microphone or camera').catch(() => null)
+      } catch {
+        return Promise.resolve(null)
+      }
+    })
+    return (async () => {
+      const settled: Array<MediaStream | null> = []
+      for (const item of pending) settled.push(await item)
+      const chosen = settled.find((stream) => stream?.getTracks().some((track) => track.readyState === 'live')) || null
+      for (const stream of settled) {
+        if (stream && stream !== chosen) stream.getTracks().forEach((track) => track.stop())
+      }
+      return chosen
+    })()
   }
 
   leave() {
     this.left = true
+    clearActiveSession()
     this.send({ t: 'leave' })
     this.teardown()
     this.state.status = 'idle'
@@ -285,6 +367,8 @@ export class SessionClient {
   private teardown() {
     window.clearInterval(this.clockTimer)
     window.clearInterval(this.statsTimer)
+    window.clearInterval(this.iceTimer)
+    window.clearTimeout(this.joinTimer)
     this.ws?.close()
     this.ws = null
     for (const link of this.peers.values()) link.pc.close()
@@ -341,16 +425,28 @@ export class SessionClient {
       this.state.code = msg.code
       this.state.participants = msg.participants
       this.state.chat = msg.chat || []
-      this.ice = msg.iceServers || []
-      this.state.turn = msg.turn || 'none'
-      this.state.turnError = msg.turnError
-      this.state.iceTransportPolicy = msg.iceTransportPolicy === 'relay' ? 'relay' : 'all'
+      this.rememberIce(msg.iceServers || [], msg.turn || 'none', msg.turnError, msg.iceTransportPolicy)
       this.resumeId = msg.id
       sessionStorage.setItem(`cueharbor-resume:${msg.code}`, msg.id)
       this.state.status = msg.role === 'host' || this.selfAdmitted() ? 'live' : 'waiting'
       this.note(`${msg.role === 'host' ? 'Hosting' : 'Joined'} ${msg.code}`)
+      this.state.error = undefined
+      window.clearTimeout(this.joinTimer)
       this.emit()
-      await this.openDevices()
+      const needsTap = this.deferMedia || (this.iosDevice() && !this.primedMusic && !navigator.userActivation?.isActive)
+      this.deferMedia = false
+      if (needsTap) {
+        this.state.audioLocked = true
+        this.note('Tap to reconnect audio.')
+        this.emit()
+      } else {
+        try {
+          await withTimeout(this.openDevices(), 12000, 'Microphone')
+        } catch (error) {
+          this.state.audioLocked = true
+          this.note(error instanceof Error ? `${error.message}. You are still in the room.` : 'Microphone setup did not finish. You are still in the room.')
+        }
+      }
       this.syncMesh()
       this.startMaintenance()
       return
@@ -480,7 +576,13 @@ export class SessionClient {
   }
   async setCam(on: boolean) {
     this.state.camOn = on
-    if (on && !this.talkStream?.getVideoTracks().length) await this.openDevices()
+    if (!on) {
+      for (const track of this.preview?.getVideoTracks() || []) track.enabled = false
+    }
+    if (on && !this.preview?.getVideoTracks().some((track) => track.readyState === 'live')) {
+      this.primeCameraFromGesture()
+      await this.openDevices()
+    }
     this.applySendTracks()
     this.presence()
     this.emit()
@@ -497,7 +599,7 @@ export class SessionClient {
       return
     }
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 15 }, audio: false })
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 15, max: 15 }, width: { max: 426 }, height: { max: 240 } }, audio: false })
       this.screenStream = stream
       this.state.screenOn = true
       const track = stream.getVideoTracks()[0]
@@ -521,6 +623,22 @@ export class SessionClient {
     }
     if (patch.micId != null || patch.camId != null) await this.openDevices()
     this.emit()
+  }
+
+  setVideoBitrate(bitrate: number) {
+    this.state.videoBitrate = (VIDEO_BITRATES as readonly number[]).includes(bitrate) ? bitrate : DEFAULT_VIDEO_BITRATE
+    for (const link of this.peers.values()) void this.tuneSenders(link)
+    this.emit()
+  }
+
+  /** Tiles that are actually on screen. Everyone else stops receiving that video. */
+  setIncomingVideo(peerIds: string[]) {
+    const next = new Set(peerIds.filter((id) => id && id !== this.state.selfId))
+    const prev = this.incomingVideo ? [...this.incomingVideo].sort().join('|') : '\0'
+    const now = [...next].sort().join('|')
+    if (prev === now) return
+    this.incomingVideo = next
+    this.applySendTracks()
   }
 
   setOpus(patch: Partial<OpusOptions>) {
@@ -561,55 +679,79 @@ export class SessionClient {
     })
   }
 
+  private iosDevice() {
+    const ua = navigator.userAgent
+    return /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  }
+
   private async openDevices() {
     try {
-      await this.engine.resume()
+      await withTimeout(this.engine.resume(), 4000, 'Audio')
     } catch {
       this.note('Audio is locked until the next tap. The camera still opens.')
     }
-    const audio = {
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl: false,
-      deviceId: this.state.micId ? { ideal: this.state.micId } : undefined,
-    }
+    const primedMusic = this.primedMusic
+    const primedCamera = this.primedCamera
+    this.primedMusic = null
+    this.primedCamera = null
     try {
       this.musicStream?.getTracks().forEach((track) => track.stop())
-      this.musicStream = await navigator.mediaDevices.getUserMedia({ audio: audio as MediaTrackConstraints, video: false })
+      const stream = primedMusic
+        ? await primedMusic
+        : await this.gestureCapture(musicCaptureAttempts(this.state.micId).map((audio) => () => navigator.mediaDevices.getUserMedia({ audio, video: false })))
+      if (!stream) throw new Error('no microphone')
+      this.musicStream = stream
       const track = this.musicStream.getAudioTracks()[0]
       if (track) {
         track.contentHint = 'music'
         try {
-          await track.applyConstraints({ echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 })
+          await track.applyConstraints({
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: { ideal: 2 },
+            sampleRate: { ideal: 48000 },
+          })
         } catch {
           this.note('Browser kept some mic processing on. The take is still recorded locally.')
         }
       }
       this.engine.setLocalMic(this.musicStream)
-      if (this.state.role === 'guest') await this.engine.startRolling(this.musicStream)
-    } catch {
-      try {
-        this.musicStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-        this.engine.setLocalMic(this.musicStream)
-        if (this.state.role === 'guest') await this.engine.startRolling(this.musicStream)
-        this.note('The browser rejected the raw music constraints. Using the default microphone instead.')
-      } catch {
-        this.note('Microphone permission is blocked. You can still listen.')
+      if (this.state.role === 'guest') {
+        try {
+          await withTimeout(this.engine.startRolling(this.musicStream), 4000, 'Recording')
+        } catch {
+          this.note('Local recording did not start. You are still in the room.')
+        }
       }
+      this.state.audioLocked = false
+    } catch {
+      this.state.audioLocked = true
+      this.note('Microphone permission is blocked. You can still listen.')
     }
     if (this.talkStream && this.talkStream !== this.musicStream) this.talkStream.getTracks().forEach((track) => track.stop())
-    const videoTracks = this.state.camOn ? await this.openCamera() : []
+    let videoTracks: MediaStreamTrack[] = []
+    if (this.state.camOn) {
+      const camera = primedCamera
+        ? await primedCamera
+        : await this.gestureCapture(cameraAttempts(this.state.camId).map((video) => () => navigator.mediaDevices.getUserMedia({ audio: false, video })))
+      videoTracks = camera?.getVideoTracks() || []
+    }
     let talk: MediaStreamTrack | null = null
     try {
-      const spoken = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          deviceId: this.state.micId ? { ideal: this.state.micId } : undefined,
-        },
-        video: false,
-      })
+      const spoken = await withTimeout(
+        navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            deviceId: this.state.micId ? { ideal: this.state.micId } : undefined,
+          },
+          video: false,
+        }),
+        8000,
+        'Talkback',
+      )
       talk = spoken.getAudioTracks()[0] || null
       if (talk) talk.contentHint = 'speech'
     } catch {
@@ -636,19 +778,6 @@ export class SessionClient {
     void this.engine.resume()
     const video = this.preview?.getVideoTracks()[0]
     if (this.state.camOn && (!video || video.readyState === 'ended')) void this.openDevices()
-  }
-
-  private async openCamera() {
-    for (const video of cameraAttempts(this.state.camId)) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video })
-        const tracks = stream.getVideoTracks()
-        if (tracks.length) return tracks
-      } catch {
-        /* Safari rejects some camera constraints. The next attempt is looser. */
-      }
-    }
-    return []
   }
 
   async calibrate() {
@@ -759,8 +888,10 @@ export class SessionClient {
   private startMaintenance() {
     window.clearInterval(this.clockTimer)
     window.clearInterval(this.statsTimer)
+    window.clearInterval(this.iceTimer)
     this.clockTimer = window.setInterval(() => this.pingClocks(), 800)
     this.statsTimer = window.setInterval(() => void this.pollStats(), 1000)
+    this.iceTimer = window.setInterval(() => void this.retryUnhealthy(), 5000)
   }
 
   private pingClocks() {
@@ -884,11 +1015,12 @@ export class SessionClient {
     pc.ondatachannel = (event) => this.bindChannel(id, link, event.channel)
     pc.onconnectionstatechange = () => {
       this.noteMedia(id, link)
-      if (pc.connectionState === 'failed') this.recover(id)
+      if (pc.connectionState === 'failed') void this.recover(id)
       this.emit()
     }
     pc.oniceconnectionstatechange = () => {
       this.noteMedia(id, link)
+      if (pc.iceConnectionState === 'failed') void this.recover(id)
       this.emit()
     }
     if (caller) {
@@ -959,7 +1091,7 @@ export class SessionClient {
   private async offer(id: string, link: PeerLink, iceRestart: boolean) {
     const offer = await link.pc.createOffer({ iceRestart })
     const raw = mungeOpusSdp(offer.sdp || '', this.state.opus)
-    offer.sdp = markOutboundVideo(raw, this.outboundVideo())
+    offer.sdp = markOutboundVideo(raw, this.videoMarks(id))
     try {
       await link.pc.setLocalDescription(offer)
     } catch {
@@ -969,8 +1101,25 @@ export class SessionClient {
     this.send({ t: 'signal', to: id, data: { kind: 'offer', sdp: link.pc.localDescription?.sdp || offer.sdp } })
   }
 
-  private outboundVideo() {
-    return [Boolean(this.cameraTrack()), Boolean(this.state.screenOn && this.screenStream?.getVideoTracks().length)]
+  private videoMarks(id: string): VideoSendDirection[] {
+    const recv = this.wantsIncomingVideo(id)
+    return [videoDirection(Boolean(this.cameraTrack()), recv), videoDirection(Boolean(this.screenTrack()), recv)]
+  }
+
+  private wantsIncomingVideo(id: string) {
+    if (this.pageHidesVideo()) return false
+    if (this.incomingVideo === null) return true
+    return this.incomingVideo.has(id)
+  }
+
+  private pageHidesVideo() {
+    return typeof document !== 'undefined' && document.visibilityState === 'hidden'
+  }
+
+  private onPageVisibility() {
+    const send = !this.pageHidesVideo() && this.state.camOn
+    for (const track of this.preview?.getVideoTracks() || []) track.enabled = send
+    this.applySendTracks()
   }
 
   private async onSignal(from: string, data: any) {
@@ -991,7 +1140,7 @@ export class SessionClient {
       await this.attachSenders(from, link)
       const answer = await link.pc.createAnswer()
       const raw = mungeOpusSdp(answer.sdp || '', this.state.opus)
-      answer.sdp = markOutboundVideo(raw, this.outboundVideo())
+      answer.sdp = markOutboundVideo(raw, this.videoMarks(from))
       try {
         await link.pc.setLocalDescription(answer)
       } catch {
@@ -1044,19 +1193,91 @@ export class SessionClient {
     }
     this.state.mediaTick += 1
     const state = link.pc.connectionState
-    if (state === 'failed' || state === 'disconnected') {
-      this.note(`${this.nameOf(id)} media ${state}${this.state.turn === 'none' ? ' — no TURN relay is configured' : ''}`)
+    const ice = link.pc.iceConnectionState
+    if ((state === 'failed' || state === 'disconnected' || ice === 'failed') && previous?.connection !== state) {
+      this.note(`${this.nameOf(id)} is still in the room. Video will keep trying to connect.`)
+    }
+  }
+
+  private rememberIce(servers: IceServer[], turn: TurnProvider, turnError: string | undefined, policy: string | undefined) {
+    this.ice = servers
+    this.state.turn = turn
+    this.state.turnError = turnError
+    this.state.iceTransportPolicy = policy === 'relay' ? 'relay' : 'all'
+    this.iceStamp = `${JSON.stringify(servers)}|${turn}|${this.state.iceTransportPolicy}`
+    this.iceFreshUntil = Date.now() + (turn === 'none' ? 4000 : 30000)
+  }
+
+  /** Re-read /api/ice so a relay added on the server is used without leaving the room. */
+  private async refreshIce(): Promise<boolean> {
+    if (Date.now() < this.iceFreshUntil) return false
+    this.iceFreshUntil = Date.now() + (this.state.turn === 'none' ? 4000 : 30000)
+    let body: { iceServers?: IceServer[]; turn?: TurnProvider; turnError?: string; iceTransportPolicy?: IcePolicy }
+    try {
+      const response = await withTimeout(fetch('/api/ice', { cache: 'no-store', signal: AbortSignal.timeout(5000) }), 6000, 'Relay')
+      if (!response.ok) return false
+      body = await response.json()
+    } catch {
+      return false
+    }
+    const servers = Array.isArray(body.iceServers) ? body.iceServers : []
+    const turn = body.turn || 'none'
+    const policy = body.iceTransportPolicy === 'relay' ? 'relay' : 'all'
+    const stamp = `${JSON.stringify(servers)}|${turn}|${policy}`
+    const gained = this.state.turn === 'none' && turn !== 'none'
+    const changed = stamp !== this.iceStamp
+    this.ice = servers
+    this.state.turn = turn
+    this.state.turnError = body.turnError
+    this.state.iceTransportPolicy = policy
+    this.iceStamp = stamp
+    this.iceFreshUntil = Date.now() + (turn === 'none' ? 4000 : 30000)
+    if (changed) {
+      for (const link of this.peers.values()) {
+        if (link.pc.connectionState === 'closed' || link.pc.signalingState === 'closed') continue
+        try {
+          link.pc.setConfiguration({ iceServers: this.ice, iceTransportPolicy: policy })
+        } catch {
+          /* the next offer still carries the new servers when the peer is recreated */
+        }
+      }
+    }
+    this.emit()
+    return gained || changed
+  }
+
+  private async retryUnhealthy() {
+    if (this.left || (this.state.status !== 'live' && this.state.status !== 'waiting' && this.state.status !== 'reconnecting')) return
+    const previousTurn = this.state.turn
+    const changed = await this.refreshIce()
+    for (const [id, link] of this.peers) {
+      const plan = iceRetryPlan({
+        connection: link.pc.connectionState,
+        ice: link.pc.iceConnectionState,
+        ageMs: Date.now() - link.openedAt,
+        turn: this.state.turn,
+        previousTurn,
+      })
+      if (plan === 'wait' && !(changed && link.pc.connectionState !== 'connected')) continue
+      if (changed) link.restarting = false
+      void this.recover(id)
     }
   }
 
   private async tuneSenders(link: PeerLink) {
-    const sender = link.musicSender?.sender
+    await this.tuneAudio(link.musicSender?.sender, this.state.opus.maxAverageBitrate)
+    await this.tuneAudio(link.talkSender?.sender, 64_000)
+    await this.tuneVideo(link.camSender?.sender, this.cameraTrack())
+    await this.tuneVideo(link.screenSender?.sender, this.screenTrack())
+  }
+
+  private async tuneAudio(sender: RTCRtpSender | undefined, maxBitrate: number) {
     if (!sender) return
     const params = sender.getParameters()
     if (!params.encodings?.length) params.encodings = [{}]
-    params.encodings[0].maxBitrate = this.state.opus.maxAverageBitrate
+    params.encodings[0].maxBitrate = maxBitrate
     params.encodings[0].priority = 'high'
-    ;(params.encodings[0] as RTCRtpEncodingParameters & { networkPriority?: string }).networkPriority = 'high'
+    ;(params.encodings[0] as RTCRtpEncodingParameters & { networkPriority?: RTCPriorityType }).networkPriority = 'high'
     try {
       await sender.setParameters(params)
     } catch {
@@ -1064,14 +1285,67 @@ export class SessionClient {
     }
   }
 
-  private recover(id: string) {
+  private async tuneVideo(sender: RTCRtpSender | undefined, track: MediaStreamTrack | null) {
+    if (!sender) return
+    const params = sender.getParameters()
+    if (!params.encodings?.length) params.encodings = [{}]
+    const settings = track?.getSettings() || {}
+    params.encodings[0].maxBitrate = this.state.videoBitrate
+    params.encodings[0].maxFramerate = 15
+    params.encodings[0].scaleResolutionDownBy = scaleResolutionDownBy(settings.width || 0, settings.height || 0)
+    params.encodings[0].priority = 'very-low'
+    ;(params.encodings[0] as RTCRtpEncodingParameters & { networkPriority?: RTCPriorityType }).networkPriority = 'very-low'
+    for (let index = 1; index < params.encodings.length; index++) params.encodings[index].active = false
+    params.degradationPreference = 'maintain-framerate'
+    try {
+      await sender.setParameters(params)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private async recover(id: string) {
     const link = this.peers.get(id)
-    if (!link || link.restarting) return
+    if (!link || link.restarting || this.left) return
+    if (link.pc.connectionState === 'closed' || link.pc.signalingState === 'closed') {
+      this.peers.delete(id)
+      this.syncMesh()
+      return
+    }
     link.restarting = true
-    link.pc.close()
-    this.peers.delete(id)
-    if (this.state.selfId && this.state.selfId < id) void this.createPeer(id, true)
-    else this.send({ t: 'signal', to: id, data: { kind: 'restart' } })
+    try {
+      await this.refreshIce()
+      const pc = link.pc
+      if (pc.connectionState === 'closed' || this.peers.get(id) !== link) return
+      try {
+        pc.setConfiguration({ iceServers: this.ice, iceTransportPolicy: this.state.iceTransportPolicy })
+      } catch {
+        /* keep the current servers and still restart */
+      }
+      try {
+        pc.restartIce()
+      } catch {
+        /* older browsers restart through the next offer */
+      }
+      if (link.caller) {
+        if (pc.signalingState === 'have-local-offer') {
+          try {
+            await pc.setLocalDescription({ type: 'rollback' })
+          } catch {
+            /* negotiate on the next stable state */
+          }
+        }
+        if (pc.signalingState === 'stable') await this.offer(id, link, true)
+      } else {
+        this.send({ t: 'signal', to: id, data: { kind: 'restart' } })
+      }
+    } catch {
+      /* a failed restart must not close signaling or remove the guest */
+    } finally {
+      window.setTimeout(() => {
+        if (this.peers.get(id) === link) link.restarting = false
+      }, 5000)
+    }
   }
 
   private adoptReceiverTrack(bucket: MediaStream, transceiver?: RTCRtpTransceiver) {
@@ -1092,9 +1366,15 @@ export class SessionClient {
 
   /** The self-view plays this track. The peer connection must send this same object, not a second capture. */
   private cameraTrack() {
-    if (!this.state.camOn) return null
+    if (!this.state.camOn || this.pageHidesVideo()) return null
     const track = this.preview?.getVideoTracks().find((item) => item.readyState === 'live') || this.talkStream?.getVideoTracks().find((item) => item.readyState === 'live') || null
     if (track) track.enabled = true
+    return track
+  }
+
+  private screenTrack() {
+    if (!this.state.screenOn || this.pageHidesVideo()) return null
+    const track = this.screenStream?.getVideoTracks().find((item) => item.readyState === 'live') || null
     return track
   }
 
@@ -1104,11 +1384,16 @@ export class SessionClient {
     await link.musicSender?.sender.replaceTrack(this.performanceTrack())
     const talk = this.state.talkOn ? this.talkStream?.getAudioTracks()[0] || null : null
     await link.talkSender?.sender.replaceTrack(talk)
+    const recv = this.wantsIncomingVideo(id)
     const cam = this.cameraTrack()
-    if (link.camSender) link.camSender.direction = cam ? 'sendrecv' : 'recvonly'
+    const camDir = videoDirection(Boolean(cam), recv)
+    const prevCam = link.camSender?.direction
+    if (link.camSender) link.camSender.direction = camDir
     await link.camSender?.sender.replaceTrack(cam)
-    const screen = this.state.screenOn ? this.screenStream?.getVideoTracks()[0] || null : null
-    if (link.screenSender) link.screenSender.direction = screen ? 'sendrecv' : 'recvonly'
+    const screen = this.screenTrack()
+    const screenDir = videoDirection(Boolean(screen), recv)
+    const prevScreen = link.screenSender?.direction
+    if (link.screenSender) link.screenSender.direction = screenDir
     await link.screenSender?.sender.replaceTrack(screen)
     this.enableTrack(link.musicSender, this.state.musicOn)
     this.enableTrack(link.talkSender, this.state.talkOn)
@@ -1121,10 +1406,12 @@ export class SessionClient {
     this.state.localSend = cam
       ? `Sending the self-view camera (${cam.readyState}${cam.muted ? ', waiting for frames' : ''}, ${link.camSender?.direction || 'no transceiver'}). Mic ${mic ? mic.readyState : 'missing'}.`
       : `Camera is not on the peer connection. Mic ${mic ? mic.readyState : 'missing'}.`
-    if ((before !== after || directionStale) && link.pc.localDescription && link.pc.signalingState === 'stable') {
+    const directionChanged = prevCam !== camDir || prevScreen !== screenDir
+    if ((before !== after || directionStale || directionChanged) && link.pc.localDescription && link.pc.signalingState === 'stable') {
       if (link.caller) await this.offer(id, link, false)
       else this.send({ t: 'signal', to: id, data: { kind: 'restart' } })
     }
+    await this.tuneSenders(link)
     this.state.mediaTick += 1
   }
 
@@ -1401,7 +1688,8 @@ export class SessionClient {
       this.emit()
       return
     }
-    const silent = isSilentTake([sliced.audio])
+    const channels = sliced.right ? [sliced.audio, sliced.right] : [sliced.audio]
+    const silent = isSilentTake(channels)
     if (silent) this.note('The local take looks silent. Check that the performance mic is the one you are singing into.')
     const placeAt = shiftPlacementForLateBuffer(
       window.placeAtSample,
@@ -1409,7 +1697,7 @@ export class SessionClient {
       sliced.actualPerfStart,
       punch.hostSampleRate,
     )
-    const wav = encodeWav([sliced.audio], this.engine.sampleRate)
+    const wav = encodeWav(channels, this.engine.sampleRate)
     const detail = `compensated ${window.compensationMs.toFixed(1)} ms via ${this.state.monitorMode}`
     await this.sendTake(link, {
       takeId: punch.takeId,
@@ -1602,7 +1890,7 @@ export class SessionClient {
   }
 
   videoStream(peerId: string, kind: 'camera' | 'screen' | 'self') {
-    if (kind === 'self') return this.preview
+    if (kind === 'self') return this.preview?.getVideoTracks().length ? this.preview : null
     const link = this.peers.get(peerId)
     if (!link) return null
     const stream = kind === 'camera' ? link.camera : link.screen

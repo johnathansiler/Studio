@@ -17,8 +17,10 @@ import {
 } from '../model/latency'
 import { DEFAULT_OPUS, markOutboundVideo, mungeOpusSdp } from '../model/sdp'
 import { arrangementDigest, catchUpSchedule, guestMayRequest, guestStartPerf, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
-import { cameraAttempts, orderVideoCodecs, outboundVideoCodecs, shouldSetVideoCodecPreferences } from '../model/codecs'
-import { filterBrowserTurnUrls, isSilentTake, mediaStatus, queueIceCandidate, staticTurnServer } from '../model/media'
+import { cameraAttempts, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, videoDirection } from '../model/codecs'
+import { filterBrowserTurnUrls, iceRetryPlan, isSilentTake, mediaStatus, queueIceCandidate, staticTurnServer } from '../model/media'
+import { isQuotaError } from '../storage/idb'
+import { clearIceCache, currentIce } from '../../server/ice.ts'
 import { formatBarsBeats, formatTimecode, samplesToMusical, snapSample } from '../model/time'
 import { decodeWavPCM, encodeWav, linearResample, parseWavHeader } from '../model/wav'
 import { ProjectStore, seedDemoProject } from '../state/store'
@@ -129,8 +131,19 @@ describe('video codecs', () => {
   it('does not ask Safari for an exact camera device', () => {
     const attempts = cameraAttempts('cam-1')
     expect(JSON.stringify(attempts)).not.toMatch(/exact/)
-    expect(attempts[0]).toMatchObject({ deviceId: { ideal: 'cam-1' }, facingMode: 'user' })
+    expect(attempts[0]).toMatchObject({
+      deviceId: { ideal: 'cam-1' },
+      facingMode: 'user',
+      width: { ideal: 320, max: 426 },
+      height: { ideal: 240, max: 240 },
+      frameRate: { ideal: 15, max: 15 },
+    })
     expect(attempts.at(-1)).toEqual({})
+    expect(scaleResolutionDownBy(1280, 720)).toBeGreaterThan(1)
+    expect(scaleResolutionDownBy(320, 240)).toBe(1)
+    expect(videoDirection(true, false)).toBe('sendonly')
+    expect(videoDirection(false, true)).toBe('recvonly')
+    expect(videoDirection(false, false)).toBe('inactive')
   })
 })
 
@@ -157,6 +170,11 @@ describe('safari video send', () => {
     expect(videoSections[0]).toMatch(/a=sendrecv/)
     expect(videoSections[1]).toMatch(/a=recvonly/)
     expect(videoSections[1]).not.toMatch(/a=sendrecv/)
+    const paused = markOutboundVideo(shaped, ['sendonly', 'inactive'])
+    expect(paused.split('m=video')[1]).toMatch(/a=sendonly/)
+    expect(paused.split('m=video')[1]).not.toMatch(/a=sendrecv/)
+    expect(paused.split('m=video')[2]).toMatch(/a=inactive/)
+    expect(paused).toMatch(/a=rtpmap:102 H264\/90000/)
   })
 })
 
@@ -180,14 +198,42 @@ describe('media path', () => {
     ])
   })
 
-  it('says when media cannot cross a network without TURN', () => {
+  it('keeps the room and explains a failed media path without jargon', () => {
     const label = mediaStatus({
       turn: 'none',
       live: true,
       links: [{ connection: 'failed', ice: 'failed', path: 'unknown', ageMs: 15000 }],
     })
     expect(label?.tone).toBe('bad')
-    expect(label?.text).toMatch(/no TURN relay/)
+    expect(label?.text).toMatch(/still in the room/i)
+    expect(label?.text).not.toMatch(/TURN|UDP|relay/i)
+    expect(iceRetryPlan({ connection: 'failed', ice: 'failed', ageMs: 15000, turn: 'none', previousTurn: 'none' })).toBe('restart')
+    expect(iceRetryPlan({ connection: 'connected', ice: 'connected', ageMs: 15000, turn: 'none', previousTurn: 'none' })).toBe('wait')
+    expect(iceRetryPlan({ connection: 'failed', ice: 'failed', ageMs: 1000, turn: 'cloudflare', previousTurn: 'none' })).toBe('restart')
+  })
+
+  it('reads Cloudflare TURN credentials on the request that has them', async () => {
+    clearIceCache()
+    const env: NodeJS.ProcessEnv = {}
+    const none = await currentIce(env, async () => {
+      throw new Error('no fetch')
+    })
+    expect(none.turn).toBe('none')
+    env.CF_TURN_KEY_ID = 'key'
+    env.CF_TURN_API_TOKEN = 'token'
+    let calls = 0
+    const fetchImpl = async () => {
+      calls += 1
+      return new Response(JSON.stringify({ iceServers: [{ urls: ['turn:turn.cloudflare.com:3478?transport=udp', 'turn:turn.cloudflare.com:53?transport=udp'], username: 'u', credential: 'c' }] }), { status: 201 })
+    }
+    const first = await currentIce(env, fetchImpl)
+    const second = await currentIce(env, fetchImpl)
+    expect(first.turn).toBe('cloudflare')
+    expect(first.iceServers.some((server) => String(server.urls).includes('3478'))).toBe(true)
+    expect(first.iceServers.some((server) => String(server.urls).includes(':53'))).toBe(false)
+    expect(second).toEqual(first)
+    expect(calls).toBe(1)
+    clearIceCache()
   })
 
   it('treats a flat line as a silent take', () => {
@@ -328,6 +374,10 @@ describe('latency compensation', () => {
     expect(sliced?.audio.length).toBe(500)
     expect(sliced?.audio[0]).toBe(0.5)
     expect(sliced?.actualPerfStart).toBe(1200)
+    const stereo = sliceChunksByPerf([{ perfStart: 0, data: new Float32Array([0.2]), right: new Float32Array([-0.2]), sampleRate: 1000 }], 0, 1)
+    expect(stereo?.right?.[0]).toBeCloseTo(-0.2)
+    const wav = encodeWav(stereo?.right ? [stereo.audio, stereo.right] : [stereo!.audio], 48000)
+    expect(String.fromCharCode(...new Uint8Array(wav).slice(0, 4))).toBe('RIFF')
   })
 
   it('finds a loopback impulse and a ping pattern', () => {
@@ -381,7 +431,10 @@ describe('opus sdp and wav', () => {
     expect(munged).toContain('sprop-stereo=1')
     expect(munged).toContain('maxaveragebitrate=510000')
     expect(munged).toContain('useinbandfec=1')
-    expect(munged).toContain('cbr=1')
+    expect(munged).toContain('cbr=0')
+    expect(munged).toContain('maxplaybackrate=48000')
+    expect(munged).toContain('minptime=10')
+    expect(munged).not.toMatch(/m=video[\s\S]*maxaveragebitrate/)
   })
 
   it('can turn FEC off', () => {
@@ -434,5 +487,13 @@ describe('project store', () => {
     expect(store.project.sampleRate).toBe(24000)
     expect(store.project.tracks[1].clips[0].durationSamples).toBe(Math.round(before / 2))
     expect(store.buffers.get(store.project.tracks[1].clips[0].bufferId)?.channels[0].length).toBe(2)
+  })
+})
+
+describe('storage quota', () => {
+  it('recognizes a quota failure and ignores other errors', () => {
+    expect(isQuotaError(new DOMException('full', 'QuotaExceededError'))).toBe(true)
+    expect(isQuotaError(new DOMException('full', 'NS_ERROR_DOM_QUOTA_REACHED'))).toBe(true)
+    expect(isQuotaError(new Error('full'))).toBe(false)
   })
 })

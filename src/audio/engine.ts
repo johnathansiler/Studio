@@ -141,6 +141,20 @@ export class AudioEngine {
 
   workletError = ''
 
+  /** Call from the tap handler itself. Creates the context and resumes it before any await. */
+  unlock() {
+    if (!this.ctx) {
+      try {
+        this.ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 })
+      } catch {
+        this.ctx = new AudioContext({ latencyHint: 'interactive' })
+      }
+      this.buildMaster()
+    }
+    if (this.ctx.state !== 'running') void this.ctx.resume().catch(() => undefined)
+    return this.ctx
+  }
+
   async resume(preferredRate = 48000) {
     if (!this.ctx) {
       try {
@@ -603,7 +617,12 @@ export class AudioEngine {
       if (event.data?.type !== 'chunk') return
       this.refreshClockAnchor()
       const perfStart = this.perfForContext(event.data.frame / this.sampleRate)
-      this.rollingChunks.push({ perfStart, data: event.data.left, sampleRate: this.sampleRate })
+      this.rollingChunks.push({
+        perfStart,
+        data: event.data.left,
+        right: event.data.right instanceof Float32Array ? event.data.right : undefined,
+        sampleRate: this.sampleRate,
+      })
       const cutoff = performance.now() - 30000
       while (this.rollingChunks.length && this.rollingChunks[0].perfStart < cutoff) this.rollingChunks.shift()
     }

@@ -24,6 +24,23 @@ export interface MediaLink {
 
 const STUN: IceServer = { urls: 'stun:stun.l.google.com:19302' }
 
+/** A hung microphone or relay request must not freeze Join. */
+export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
 /** Browsers block TURN on port 53, and that URL only adds a timeout. */
 export function filterBrowserTurnUrls(urls: string[]): string[] {
   return urls.filter((url) => !/:53(\?|$)/.test(url))
@@ -64,35 +81,38 @@ export function queueIceCandidate<T>(remoteReady: boolean, pending: T[], candida
   return { pending: [], apply: [...pending, candidate] }
 }
 
+const STILL_TRYING = "Video isn’t connected yet. You’re still in the room, and we’ll keep trying."
+
 export function mediaStatus(input: { turn: TurnProvider; turnError?: string; links: MediaLink[]; live: boolean }): { tone: 'good' | 'warn' | 'bad'; text: string } | null {
   if (!input.live) return null
-  if (input.turnError) {
-    return { tone: 'bad', text: `TURN credentials failed (${input.turnError}). Video and guest takes need a working relay.` }
-  }
+  if (input.turnError) return { tone: 'bad', text: STILL_TRYING }
   if (!input.links.length) {
     return input.turn === 'none'
-      ? { tone: 'warn', text: 'No TURN server is configured. A guest on another network may connect signaling and still get no video or take.' }
-      : { tone: 'warn', text: 'Opening the media path…' }
+      ? { tone: 'warn', text: 'Video may take a moment to appear. You’re still in the room.' }
+      : { tone: 'warn', text: 'Connecting video and audio…' }
   }
   const connected = input.links.filter((link) => link.connection === 'connected')
-  if (connected.length) {
-    const relay = connected.some((link) => link.path === 'relay')
-    return relay
-      ? { tone: 'good', text: 'Media connected through TURN.' }
-      : { tone: 'good', text: 'Media connected directly.' }
-  }
+  if (connected.length) return { tone: 'good', text: 'Video and audio are connected.' }
   const failed = input.links.some((link) => link.connection === 'failed' || link.ice === 'failed' || link.connection === 'disconnected')
   const stalled = input.links.some((link) => link.ageMs > 12000 && link.connection !== 'connected')
-  if (failed || stalled) {
-    if (input.turn === 'none') {
-      return {
-        tone: 'bad',
-        text: 'Media is not connected. Signaling works, but there is no TURN relay, so video and the guest take have no path across this network.',
-      }
-    }
-    return { tone: 'bad', text: 'Media failed to connect. TURN is configured; check the credentials and that UDP 3478 or TCP 443 is allowed.' }
-  }
-  return { tone: 'warn', text: 'Waiting for the media path…' }
+  if (failed || stalled) return { tone: 'bad', text: STILL_TRYING }
+  return { tone: 'warn', text: 'Connecting video and audio…' }
+}
+
+/** Keep the room. Restart media when the path is down, or as soon as a relay appears. */
+export function iceRetryPlan(input: {
+  connection: string
+  ice: string
+  ageMs: number
+  turn: TurnProvider
+  previousTurn: TurnProvider
+}): 'restart' | 'wait' {
+  const gainedRelay = input.previousTurn === 'none' && input.turn !== 'none'
+  if (gainedRelay && input.connection !== 'connected') return 'restart'
+  const down = input.connection === 'failed' || input.connection === 'disconnected' || input.ice === 'failed' || input.ice === 'disconnected'
+  const stalled = input.connection !== 'connected' && input.ageMs > 12000
+  if (down || stalled) return 'restart'
+  return 'wait'
 }
 
 /** A take this quiet is a flat line, not a vocal. */

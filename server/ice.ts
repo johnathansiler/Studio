@@ -4,15 +4,35 @@ export type { IceConfig }
 
 interface Cache {
   expires: number
+  stamp: string
   config: IceConfig
 }
 
 let cache: Cache | null = null
 
+/** Credential env is part of the cache key, so a new key is visible on the next request. */
+export function iceEnvStamp(env: NodeJS.ProcessEnv): string {
+  return [
+    env.CF_TURN_KEY_ID,
+    env.CF_TURN_API_TOKEN,
+    env.TURN_URL,
+    env.TURN_USERNAME,
+    env.TURN_CREDENTIAL,
+    env.TWILIO_ACCOUNT_SID,
+    env.TWILIO_AUTH_TOKEN,
+    env.METERED_DOMAIN,
+    env.METERED_API_KEY,
+    env.ICE_TRANSPORT_POLICY,
+  ].join('\n')
+}
+
 export async function currentIce(env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof fetch = fetch): Promise<IceConfig> {
-  if (cache && cache.expires > Date.now()) return cache.config
+  const stamp = iceEnvStamp(env)
+  const now = Date.now()
+  if (cache && cache.stamp === stamp && cache.expires > now && cache.config.turn !== 'none' && !cache.config.turnError) return cache.config
   const config = await resolveIce(env, fetchImpl)
-  cache = { config, expires: Date.now() + 30 * 60 * 1000 }
+  const ttl = config.turn === 'none' || config.turnError ? 0 : 30 * 60 * 1000
+  cache = { config, stamp, expires: now + ttl }
   return config
 }
 
@@ -65,6 +85,7 @@ async function cloudflareIce(keyId: string, token: string, fetchImpl: typeof fet
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify({ ttl: 3600 }),
+    signal: AbortSignal.timeout(5000),
   })
   if (!response.ok) throw new Error(`Cloudflare TURN ${response.status}`)
   const body = (await response.json()) as { iceServers?: IceServer[] | IceServer }
@@ -79,6 +100,7 @@ async function twilioIce(sid: string, token: string, fetchImpl: typeof fetch): P
   const response = await fetchImpl(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Tokens.json`, {
     method: 'POST',
     headers: { authorization: `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}` },
+    signal: AbortSignal.timeout(5000),
   })
   if (!response.ok) throw new Error(`Twilio NTS ${response.status}`)
   const body = (await response.json()) as { ice_servers?: { urls?: string | string[]; url?: string; username?: string; credential?: string }[] }
@@ -91,7 +113,7 @@ async function twilioIce(sid: string, token: string, fetchImpl: typeof fetch): P
 
 async function meteredIce(domain: string, apiKey: string, fetchImpl: typeof fetch): Promise<IceServer[]> {
   const host = domain.replace(/^https?:\/\//, '').replace(/\/$/, '')
-  const response = await fetchImpl(`https://${host}/api/v1/turn/credentials?apiKey=${encodeURIComponent(apiKey)}`)
+  const response = await fetchImpl(`https://${host}/api/v1/turn/credentials?apiKey=${encodeURIComponent(apiKey)}`, { signal: AbortSignal.timeout(5000) })
   if (!response.ok) throw new Error(`Metered TURN ${response.status}`)
   const body = (await response.json()) as IceServer[]
   return Array.isArray(body) ? body : []
