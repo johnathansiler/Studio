@@ -115,19 +115,32 @@ export function mediaStatus(input: { turn: TurnProvider; turnError?: string; lin
   return { tone: 'warn', text: 'Connecting video and audio…' }
 }
 
-/** Keep the room. Restart media when the path is down, or as soon as a relay appears. */
+/**
+ * Keep the room. Restart when the path is down.
+ * An offer with no answer is restarted after a few seconds, not after the
+ * 30s checking grace. A relay that shows up must not abort a direct check
+ * that is already running, and must not roll back an offer whose answer
+ * has not been applied yet.
+ */
 export function iceRetryPlan(input: {
   connection: string
   ice: string
   ageMs: number
   turn: TurnProvider
   previousTurn: TurnProvider
+  signaling?: string
+  offerAgeMs?: number
 }): 'restart' | 'wait' {
   if (mediaUp(input)) return 'wait'
+  const unanswered =
+    input.signaling === 'have-local-offer' &&
+    (input.offerAgeMs ?? 0) >= 4000 &&
+    (input.ice === 'new' || input.ice === 'checking' || input.ice === 'failed')
+  if (unanswered) return 'restart'
   const gainedRelay = input.previousTurn === 'none' && input.turn !== 'none'
-  if (gainedRelay) return 'restart'
-  const checking = input.ice === 'checking' || input.ice === 'new'
-  if (checking && input.ageMs < 30000) return 'wait'
+  const checking = input.ice === 'checking'
+  if (gainedRelay && input.signaling !== 'have-local-offer' && !checking) return 'restart'
+  if ((checking || input.ice === 'new') && input.ageMs < 30000) return 'wait'
   const down = input.connection === 'failed' || input.connection === 'disconnected' || input.ice === 'failed' || input.ice === 'disconnected'
   const stalled = input.ageMs > 30000
   if (down || stalled) return 'restart'

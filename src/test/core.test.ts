@@ -20,6 +20,7 @@ import { rememberDiag, sanitizeDiag } from '../model/diag'
 import { arrangementDigest, catchUpSchedule, guestMayRequest, guestStartPerf, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
 import { cameraAttempts, legalDirection, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, videoDirection } from '../model/codecs'
 import { filterBrowserTurnUrls, iceRetryPlan, isSilentTake, mediaStatus, queueIceCandidate, staticTurnServer } from '../model/media'
+import { iceUfrag, politePeer, remoteDescriptionPlan, sessionHello } from '../model/negotiate'
 import { isQuotaError } from '../storage/idb'
 import { clearIceCache, currentIce } from '../../server/ice.ts'
 import { formatBarsBeats, formatTimecode, samplesToMusical, snapSample } from '../model/time'
@@ -225,6 +226,9 @@ describe('media path', () => {
     expect(iceRetryPlan({ connection: 'connecting', ice: 'checking', ageMs: 13000, turn: 'cloudflare', previousTurn: 'cloudflare' })).toBe('wait')
     expect(iceRetryPlan({ connection: 'new', ice: 'new', ageMs: 31000, turn: 'cloudflare', previousTurn: 'cloudflare' })).toBe('restart')
     expect(iceRetryPlan({ connection: 'failed', ice: 'failed', ageMs: 1000, turn: 'cloudflare', previousTurn: 'none' })).toBe('restart')
+    expect(iceRetryPlan({ connection: 'new', ice: 'new', ageMs: 5000, turn: 'cloudflare', previousTurn: 'cloudflare', signaling: 'have-local-offer', offerAgeMs: 4500 })).toBe('restart')
+    expect(iceRetryPlan({ connection: 'new', ice: 'new', ageMs: 2000, turn: 'cloudflare', previousTurn: 'cloudflare', signaling: 'have-local-offer', offerAgeMs: 1000 })).toBe('wait')
+    expect(iceRetryPlan({ connection: 'connecting', ice: 'checking', ageMs: 4000, turn: 'cloudflare', previousTurn: 'none', signaling: 'stable' })).toBe('wait')
     const checking = mediaStatus({
       turn: 'cloudflare',
       live: true,
@@ -541,6 +545,51 @@ describe('opus sdp and wav', () => {
     expect(decoded.channels[1][10]).toBeCloseTo(-tone[10], 2)
     const half = linearResample(tone, 48000, 24000)
     expect(half.length).toBe(240)
+  })
+})
+
+describe('offer and answer', () => {
+  const base = {
+    polite: false,
+    signaling: 'have-local-offer',
+    kind: 'answer' as const,
+    makingOffer: false,
+    ice: 'new',
+    offerAgeMs: 200,
+    localUfrag: 'abc',
+    remoteUfrag: 'abc',
+  }
+
+  it('keeps an answer that arrives while the local offer is still being set', () => {
+    expect(remoteDescriptionPlan({ ...base, signaling: 'stable', makingOffer: true })).toBe('queue-answer')
+    expect(remoteDescriptionPlan(base)).toBe('apply-answer')
+    expect(remoteDescriptionPlan({ ...base, remoteUfrag: 'answerer' })).toBe('apply-answer')
+    expect(remoteDescriptionPlan({ ...base, signaling: 'stable', makingOffer: false })).toBe('ignore-answer')
+  })
+
+  it('uses perfect negotiation and abandons an offer that never started ICE', () => {
+    expect(politePeer('4761', 'bb58')).toBe(false)
+    expect(politePeer('bb58', '4761')).toBe(true)
+    expect(remoteDescriptionPlan({ ...base, kind: 'offer', signaling: 'stable', ice: 'new' })).toBe('apply-offer')
+    expect(remoteDescriptionPlan({ ...base, kind: 'offer', makingOffer: true, offerAgeMs: 100 })).toBe('ignore-offer')
+    expect(remoteDescriptionPlan({ ...base, kind: 'offer', polite: true, makingOffer: true })).toBe('rollback-offer')
+    expect(remoteDescriptionPlan({ ...base, kind: 'offer', offerAgeMs: 5000, ice: 'new' })).toBe('rollback-offer')
+    expect(remoteDescriptionPlan({ ...base, kind: 'offer', ice: 'failed', offerAgeMs: 100 })).toBe('rollback-offer')
+  })
+
+  it('rejoins a room this browser already hosts instead of minting another', () => {
+    expect(sessionHello({ create: true })).toEqual({ action: 'create', reason: 'host tapped Create' })
+    expect(sessionHello({ create: true, hostedCode: 'EEVEDR' }).action).toBe('join')
+    expect(sessionHello({ create: true, hostedCode: 'EEVEDR' }).code).toBe('EEVEDR')
+    expect(sessionHello({ create: true, hostedCode: 'EEVEDR' }).reason).toMatch(/already hosts EEVEDR/)
+    expect(sessionHello({ create: false, requestedCode: 'eevedr', hostedCode: 'EEVEDR' }).reason).toMatch(/rejoined EEVEDR/)
+    expect(sessionHello({ create: false, requestedCode: 'OTHER1', hostedCode: 'EEVEDR' })).toEqual({
+      action: 'join',
+      code: 'OTHER1',
+      reason: 'joined OTHER1',
+    })
+    expect(sessionHello({ create: false }).reason).toMatch(/no session code/)
+    expect(iceUfrag('a=ice-ufrag:abc123\r\n')).toBe('abc123')
   })
 })
 

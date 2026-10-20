@@ -11,9 +11,10 @@ import {
   shiftPlacementForLateBuffer,
   type TimedPeak,
 } from '../model/latency'
-import { DEFAULT_OPUS, markOutboundVideo, mungeOpusSdp, videoDirectionsFromSdp, type OpusOptions } from '../model/sdp'
+import { DEFAULT_OPUS, markOutboundVideo, mungeOpusSdp, sectionDirections, videoDirectionsFromSdp, type OpusOptions } from '../model/sdp'
 import { cameraAttempts, DEFAULT_VIDEO_BITRATE, legalDirection, musicCaptureAttempts, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, videoDirection } from '../model/codecs'
-import { iceRetryPlan, isSilentTake, queueIceCandidate, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
+import { iceRetryPlan, isSilentTake, mediaUp, queueIceCandidate, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
+import { iceUfrag, politePeer, remoteDescriptionPlan, sessionHello } from '../model/negotiate'
 import { sanitizeDiag } from '../model/diag'
 import { arrangementDigest, guestMayRequest, referencedBufferIds } from '../model/sessionSync'
 import { decodeWavPCM, encodeWav } from '../model/wav'
@@ -142,6 +143,14 @@ interface PeerLink {
   gathered: { host: number; srflx: number; relay: number; prflx: number }
   errors: string[]
   restartedAt?: number
+  makingOffer: boolean
+  pendingAnswer: string | null
+  offerSentAt: number
+  firstOfferAt: number
+  offers: number
+  needsRenegotiate: boolean
+  seenCandidates: Set<string>
+  askedRestart: boolean
   appliedCam?: string
   appliedScreen?: string
   take?: {
@@ -150,7 +159,6 @@ interface PeerLink {
     parts: Uint8Array[]
     meta: Record<string, unknown>
   }
-  restarting?: boolean
 }
 
 const PCM_MIN_TARGET = 18
@@ -209,6 +217,8 @@ export class SessionClient {
   private signalLane = new Map<string, Promise<void>>()
   private inSignal = new Set<string>()
   private lastDiag = 0
+  private pendingAnswers = new Map<string, string>()
+  private deviceJob: Promise<void> | null = null
 
   constructor(private engine: AudioEngine) {
     const saved = readIdentity()
@@ -396,16 +406,20 @@ export class SessionClient {
     this.ws = ws
     ws.onopen = () => {
       this.backoff = 400
+      const code = opts.code || this.state.code
+      const decision = sessionHello({ create: Boolean(opts.create), requestedCode: code })
       this.send({
         t: 'hello',
         name: this.state.name,
-        create: Boolean(opts.create),
-        code: opts.code?.toUpperCase(),
+        create: decision.action === 'create',
+        code: decision.code,
         resumeId: this.resumeId || undefined,
       })
     }
     ws.onmessage = (event) => {
-      void this.onServer(JSON.parse(String(event.data)))
+      const msg = JSON.parse(String(event.data))
+      if (msg?.t === 'signal' && msg.data?.kind === 'answer') this.stashAnswer(String(msg.from || ''), String(msg.data.sdp || ''))
+      void this.onServer(msg)
     }
     ws.onclose = () => {
       if (this.left || this.ws !== ws) return
@@ -437,8 +451,19 @@ export class SessionClient {
       this.rememberIce(msg.iceServers || [], msg.turn || 'none', msg.turnError, msg.iceTransportPolicy)
       this.resumeId = msg.id
       sessionStorage.setItem(`cueharbor-resume:${msg.code}`, msg.id)
+      const askedCreate = Boolean(this.connectOpts?.create)
+      this.connectOpts = { name: this.state.name, create: false, code: msg.code }
       this.state.status = msg.role === 'host' || this.selfAdmitted() ? 'live' : 'waiting'
-      this.note(`${msg.role === 'host' ? 'Hosting' : 'Joined'} ${msg.code}`)
+      const reason = String(msg.reason || '')
+      if (askedCreate && reason.startsWith('new session created')) {
+        this.note(reason)
+        this.postDiagEvent('create', reason)
+      } else if (reason) {
+        this.note(reason)
+        this.postDiagEvent('join', reason)
+      } else {
+        this.note(`${msg.role === 'host' ? 'Hosting' : 'Joined'} ${msg.code}`)
+      }
       this.state.error = undefined
       window.clearTimeout(this.joinTimer)
       this.emit()
@@ -688,7 +713,17 @@ export class SessionClient {
     return /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
   }
 
-  private async openDevices() {
+  private openDevices() {
+    if (this.deviceJob) return this.deviceJob
+    const job = this.captureDevices().finally(() => {
+      if (this.deviceJob === job) this.deviceJob = null
+      this.syncMesh()
+    })
+    this.deviceJob = job
+    return job
+  }
+
+  private async captureDevices() {
     try {
       await withTimeout(this.engine.resume(), 4000, 'Audio')
     } catch {
@@ -945,6 +980,9 @@ export class SessionClient {
       }
     }
     if (this.state.status !== 'live') return
+    // A roster can arrive while the camera is still opening. Offering then
+    // publishes recvonly video and the phone never sends a picture.
+    if (this.deviceJob) return
     for (const peer of this.remoteAdmitted()) {
       if (this.peers.has(peer.id)) continue
       const caller = Boolean(this.state.selfId && this.state.selfId < peer.id)
@@ -956,7 +994,6 @@ export class SessionClient {
 
   private enqueueSignal(id: string, job: () => Promise<void>) {
     if (!id) return Promise.resolve()
-    if (this.inSignal.has(id)) return job()
     const prev = this.signalLane.get(id) || Promise.resolve()
     const run = prev.catch(() => undefined).then(async () => {
       this.inSignal.add(id)
@@ -979,7 +1016,14 @@ export class SessionClient {
 
   private async createPeer(id: string, caller: boolean) {
     if (this.peers.has(id)) return this.peers.get(id)!
-    const pc = new RTCPeerConnection({ iceServers: this.ice, iceTransportPolicy: this.state.iceTransportPolicy })
+    // One transport for every m-line. Cloudflare TURN stays in iceServers and is
+    // allocated once; host candidates are not gathered again for each section.
+    const pc = new RTCPeerConnection({
+      iceServers: this.ice,
+      iceTransportPolicy: this.state.iceTransportPolicy,
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require',
+    })
     const link: PeerLink = {
       pc,
       music: new MediaStream(),
@@ -995,20 +1039,36 @@ export class SessionClient {
       caller,
       gathered: { host: 0, srflx: 0, relay: 0, prflx: 0 },
       errors: [],
+      makingOffer: false,
+      pendingAnswer: this.pendingAnswers.get(id) || null,
+      offerSentAt: 0,
+      firstOfferAt: 0,
+      offers: 0,
+      needsRenegotiate: false,
+      seenCandidates: new Set(),
+      askedRestart: false,
     }
-    link.musicSender = pc.addTransceiver('audio', { direction: 'sendrecv' })
-    link.talkSender = pc.addTransceiver('audio', { direction: 'sendrecv' })
-    link.camSender = pc.addTransceiver('video', { direction: 'sendrecv' })
-    link.screenSender = pc.addTransceiver('video', { direction: 'sendrecv' })
-    this.preferOpus(link.musicSender)
-    this.preferVideo(link.camSender)
-    this.preferVideo(link.screenSender)
-    this.preferOpus(link.talkSender)
+    // The offerer chooses the m-lines. The answerer waits for the offer so Chrome
+    // does not keep a second recvonly set and answer send-only.
+    if (caller) {
+      link.musicSender = pc.addTransceiver('audio', { direction: 'sendrecv' })
+      link.talkSender = pc.addTransceiver('audio', { direction: 'sendrecv' })
+      link.camSender = pc.addTransceiver('video', { direction: 'sendrecv' })
+      link.screenSender = pc.addTransceiver('video', { direction: 'sendrecv' })
+      this.preferOpus(link.musicSender)
+      this.preferVideo(link.camSender)
+      this.preferVideo(link.screenSender)
+      this.preferOpus(link.talkSender)
+    }
     this.peers.set(id, link)
     pc.onicecandidate = (event) => {
       if (!event.candidate) return
-      const kind = String(event.candidate.candidate).match(/typ (host|srflx|relay|prflx)/)?.[1] as 'host' | 'srflx' | 'relay' | 'prflx' | undefined
-      if (kind) link.gathered[kind] += 1
+      const line = event.candidate.candidate
+      if (!link.seenCandidates.has(line)) {
+        link.seenCandidates.add(line)
+        const kind = line.match(/typ (host|srflx|relay|prflx)/)?.[1] as 'host' | 'srflx' | 'relay' | 'prflx' | undefined
+        if (kind) link.gathered[kind] += 1
+      }
       this.send({ t: 'signal', to: id, data: { kind: 'ice', candidate: event.candidate.toJSON() } })
     }
     pc.ontrack = (event) => {
@@ -1043,7 +1103,7 @@ export class SessionClient {
     pc.ondatachannel = (event) => this.bindChannel(id, link, event.channel)
     pc.onconnectionstatechange = () => {
       this.noteMedia(id, link)
-      if (pc.connectionState === 'failed' && !this.inSignal.has(id)) void this.recover(id)
+      if (pc.connectionState === 'failed') void this.recover(id)
       this.emit()
     }
     pc.oniceconnectionstatechange = () => {
@@ -1065,8 +1125,28 @@ export class SessionClient {
     return link
   }
 
-  private preferVideo(transceiver: RTCRtpTransceiver) {
-    if (!shouldSetVideoCodecPreferences(navigator.userAgent)) return
+  /** Point the four slots at the m-lines the remote description actually negotiated. */
+  private adoptTransceivers(link: PeerLink) {
+    const live = link.pc.getTransceivers().filter((tr) => tr.direction !== 'stopped' && tr.mid)
+    const audio = live.filter((tr) => tr.receiver.track.kind === 'audio')
+    const video = live.filter((tr) => tr.receiver.track.kind === 'video')
+    if (audio[0]) link.musicSender = audio[0]
+    if (audio[1]) link.talkSender = audio[1]
+    if (video[0]) link.camSender = video[0]
+    if (video[1]) link.screenSender = video[1]
+    for (const tr of link.pc.getTransceivers()) {
+      if (!tr.mid && tr.direction !== 'stopped') {
+        try {
+          tr.stop()
+        } catch {
+          /* an unused transceiver can stay stopped */
+        }
+      }
+    }
+  }
+
+  private preferVideo(transceiver?: RTCRtpTransceiver) {
+    if (!transceiver || !shouldSetVideoCodecPreferences(navigator.userAgent)) return
     const caps = RTCRtpSender.getCapabilities?.('video')
     if (!caps) return
     const ordered = outboundVideoCodecs(caps.codecs)
@@ -1079,7 +1159,8 @@ export class SessionClient {
     }
   }
 
-  private preferOpus(transceiver: RTCRtpTransceiver) {
+  private preferOpus(transceiver?: RTCRtpTransceiver) {
+    if (!transceiver) return
     const caps = RTCRtpSender.getCapabilities?.('audio')
     if (!caps) return
     const opus = caps.codecs.filter((codec) => codec.mimeType.toLowerCase() === 'audio/opus')
@@ -1120,9 +1201,65 @@ export class SessionClient {
   }
 
   private async offer(id: string, link: PeerLink, iceRestart: boolean) {
-    const offer = await link.pc.createOffer({ iceRestart })
-    await this.commitLocal(link, offer)
-    this.send({ t: 'signal', to: id, data: { kind: 'offer', sdp: link.pc.localDescription?.sdp || offer.sdp } })
+    if (link.makingOffer) {
+      link.needsRenegotiate = true
+      return
+    }
+    if (link.pc.signalingState === 'closed' || link.pc.connectionState === 'closed') return
+    if (!iceRestart && link.pc.signalingState !== 'stable') {
+      link.needsRenegotiate = true
+      return
+    }
+    const now = Date.now()
+    if (!link.firstOfferAt || now - link.firstOfferAt > 20000) {
+      link.firstOfferAt = now
+      link.offers = 0
+    }
+    if (link.offers >= 6) {
+      this.notePeerError(link, 'stopped a repeated offer')
+      link.needsRenegotiate = false
+      return
+    }
+    let settled = false
+    link.makingOffer = true
+    try {
+      const signalingBefore = link.pc.signalingState
+      await this.applyPendingAnswer(id, link)
+      settled = signalingBefore === 'have-local-offer' && link.pc.signalingState === 'stable'
+      if (!settled && link.pc.signalingState === 'have-local-offer') {
+        try {
+          await link.pc.setLocalDescription({ type: 'rollback' })
+        } catch (error) {
+          this.notePeerError(link, error)
+          settled = true
+        }
+      }
+      if (!settled && link.pc.signalingState === 'stable') {
+        link.gathered = { host: 0, srflx: 0, relay: 0, prflx: 0 }
+        link.seenCandidates.clear()
+        const created = await link.pc.createOffer({ iceRestart })
+        const original = created.sdp || ''
+        const munged = markOutboundVideo(mungeOpusSdp(original, this.state.opus), this.videoSendFlags(link))
+        // The local description is published as soon as it is set. Gathering,
+        // including Cloudflare TURN, keeps running and must not delay the answer.
+        try {
+          await link.pc.setLocalDescription({ type: 'offer', sdp: munged })
+        } catch (error) {
+          this.notePeerError(link, error)
+          await link.pc.setLocalDescription({ type: 'offer', sdp: original })
+        }
+        link.offers += 1
+        link.offerSentAt = Date.now()
+        this.send({ t: 'signal', to: id, data: { kind: 'offer', sdp: link.pc.localDescription?.sdp || munged } })
+        await this.applyPendingAnswer(id, link)
+      }
+    } finally {
+      link.makingOffer = false
+    }
+    if (link.needsRenegotiate && link.pc.signalingState === 'stable' && this.peers.get(id) === link) {
+      link.needsRenegotiate = false
+      await this.offer(id, link, false)
+    }
   }
 
   /** Munge the local description only. If Safari rejects the edit, keep the browser SDP. */
@@ -1166,18 +1303,73 @@ export class SessionClient {
     this.applySendTracks()
   }
 
+  private stashAnswer(from: string, sdp: string) {
+    if (!from || !sdp) return
+    const link = this.peers.get(from)
+    if (link?.pc.signalingState === 'stable' && link.pc.remoteDescription && !link.makingOffer) return
+    if (link) link.pendingAnswer = sdp
+    else this.pendingAnswers.set(from, sdp)
+  }
+
+  private async applyPendingAnswer(id: string, link: PeerLink) {
+    if (!link.pendingAnswer && this.pendingAnswers.has(id)) link.pendingAnswer = this.pendingAnswers.get(id) || null
+    const sdp = link.pendingAnswer
+    if (!sdp) return
+    const plan = remoteDescriptionPlan({
+      polite: politePeer(this.state.selfId || '', id),
+      signaling: link.pc.signalingState,
+      kind: 'answer',
+      makingOffer: link.makingOffer,
+      ice: link.pc.iceConnectionState,
+      offerAgeMs: link.offerSentAt ? Date.now() - link.offerSentAt : 0,
+      localUfrag: iceUfrag(link.pc.localDescription?.sdp || ''),
+      remoteUfrag: iceUfrag(sdp),
+    })
+    if (plan === 'queue-answer') return
+    this.pendingAnswers.delete(id)
+    link.pendingAnswer = null
+    if (plan === 'ignore-answer') {
+      this.notePeerError(link, `ignored answer while ${link.pc.signalingState}`)
+      return
+    }
+    await link.pc.setRemoteDescription({ type: 'answer', sdp })
+    await this.flushIce(link)
+    await this.tuneSenders(link)
+    await this.attachSenders(id, link)
+  }
+
   private async onSignal(from: string, data: any) {
     if (!data) return
     if (data.kind === 'restart') {
-      if (this.state.selfId && this.state.selfId < from) {
-        const link = this.peers.get(from) || (await this.createPeer(from, true))
-        await this.offer(from, link, true)
-      }
+      const link = this.peers.get(from) || (await this.createPeer(from, !politePeer(this.state.selfId || '', from)))
+      await this.applyPendingAnswer(from, link)
+      const down = link.pc.iceConnectionState === 'failed' || link.pc.iceConnectionState === 'disconnected' || link.pc.connectionState === 'failed'
+      const unanswered = link.pc.signalingState === 'have-local-offer'
+      if ((down || unanswered) && !politePeer(this.state.selfId || '', from)) await this.offer(from, link, true)
       return
     }
     let link = this.peers.get(from)
     if (!link || link.pc.connectionState === 'closed') link = await this.createPeer(from, false)
     if (data.kind === 'offer') {
+      const plan = remoteDescriptionPlan({
+        polite: politePeer(this.state.selfId || '', from),
+        signaling: link.pc.signalingState,
+        kind: 'offer',
+        makingOffer: link.makingOffer,
+        ice: link.pc.iceConnectionState,
+        offerAgeMs: link.offerSentAt ? Date.now() - link.offerSentAt : 0,
+        localUfrag: iceUfrag(link.pc.localDescription?.sdp || ''),
+        remoteUfrag: iceUfrag(String(data.sdp || '')),
+      })
+      if (plan === 'ignore-offer') return
+      if (plan === 'rollback-offer') {
+        try {
+          await link.pc.setLocalDescription({ type: 'rollback' })
+        } catch (error) {
+          this.notePeerError(link, error)
+          return
+        }
+      }
       try {
         await link.pc.setRemoteDescription({ type: 'offer', sdp: data.sdp })
       } catch (error) {
@@ -1185,26 +1377,27 @@ export class SessionClient {
         return
       }
       await this.flushIce(link)
+      this.adoptTransceivers(link)
       await this.attachSenders(from, link)
       const answer = await link.pc.createAnswer()
       await this.commitLocal(link, answer)
       this.send({ t: 'signal', to: from, data: { kind: 'answer', sdp: link.pc.localDescription?.sdp || answer.sdp } })
       await this.tuneSenders(link)
+      if (link.needsRenegotiate && link.pc.signalingState === 'stable') {
+        link.needsRenegotiate = false
+        if (link.caller) await this.offer(from, link, false)
+        else this.send({ t: 'signal', to: from, data: { kind: 'restart' } })
+      }
     } else if (data.kind === 'answer') {
-      if (link.pc.signalingState === 'have-local-offer') {
-        try {
-          await link.pc.setRemoteDescription({ type: 'answer', sdp: data.sdp })
-        } catch (error) {
-          this.notePeerError(link, error)
-          return
-        }
-        await this.flushIce(link)
-        await this.tuneSenders(link)
-        await this.attachSenders(from, link)
+      if (!(link.pc.signalingState === 'stable' && link.pc.remoteDescription)) this.stashAnswer(from, String(data.sdp || ''))
+      try {
+        await this.applyPendingAnswer(from, link)
+      } catch (error) {
+        this.notePeerError(link, error)
       }
     } else if (data.kind === 'ice' && data.candidate) {
       const queued = queueIceCandidate(Boolean(link.pc.remoteDescription), link.pendingIce, data.candidate as RTCIceCandidateInit)
-      link.pendingIce = queued.pending
+      link.pendingIce = queued.pending.slice(-64)
       for (const candidate of queued.apply) {
         try {
           await link.pc.addIceCandidate(candidate)
@@ -1243,6 +1436,7 @@ export class SessionClient {
     this.state.mediaTick += 1
     const state = link.pc.connectionState
     const ice = link.pc.iceConnectionState
+    if (mediaUp({ connection: state, ice })) link.askedRestart = false
     if ((state === 'failed' || state === 'disconnected' || ice === 'failed') && previous?.connection !== state) {
       this.note(`${this.nameOf(id)} is still in the room. Video will keep trying to connect.`)
     }
@@ -1283,7 +1477,7 @@ export class SessionClient {
     this.iceFreshUntil = Date.now() + (turn === 'none' ? 4000 : 30000)
     if (changed) {
       for (const link of this.peers.values()) {
-        if (link.pc.connectionState === 'closed' || link.pc.signalingState === 'closed') continue
+        if (link.pc.connectionState === 'closed' || link.pc.signalingState !== 'stable' || link.makingOffer) continue
         try {
           link.pc.setConfiguration({ iceServers: this.ice, iceTransportPolicy: policy })
         } catch {
@@ -1298,7 +1492,7 @@ export class SessionClient {
   private async retryUnhealthy() {
     if (this.left || (this.state.status !== 'live' && this.state.status !== 'waiting' && this.state.status !== 'reconnecting')) return
     const previousTurn = this.state.turn
-    const changed = await this.refreshIce()
+    await this.refreshIce()
     for (const [id, link] of this.peers) {
       const plan = iceRetryPlan({
         connection: link.pc.connectionState,
@@ -1306,9 +1500,10 @@ export class SessionClient {
         ageMs: Date.now() - link.openedAt,
         turn: this.state.turn,
         previousTurn,
+        signaling: link.pc.signalingState,
+        offerAgeMs: link.offerSentAt ? Date.now() - link.offerSentAt : 0,
       })
-      if (plan === 'wait' && !(changed && link.pc.connectionState !== 'connected')) continue
-      if (changed) link.restarting = false
+      if (plan === 'wait') continue
       void this.recover(id)
     }
   }
@@ -1354,55 +1549,57 @@ export class SessionClient {
   }
 
   private async recover(id: string) {
-    if (this.inSignal.has(id)) return
     return this.enqueueSignal(id, () => this.recoverNow(id))
   }
 
   private async recoverNow(id: string) {
     const link = this.peers.get(id)
-    if (!link || link.restarting || this.left) return
-    if (link.restartedAt && Date.now() - link.restartedAt < 15000) return
+    if (!link || this.left) return
     if (link.pc.connectionState === 'closed' || link.pc.signalingState === 'closed') {
       this.peers.delete(id)
       this.syncMesh()
       return
     }
+    await this.applyPendingAnswer(id, link)
     if (link.pc.signalingState === 'have-remote-offer') return
-    link.restarting = true
+    const plan = iceRetryPlan({
+      connection: link.pc.connectionState,
+      ice: link.pc.iceConnectionState,
+      ageMs: Date.now() - link.openedAt,
+      turn: this.state.turn,
+      previousTurn: this.state.turn,
+      signaling: link.pc.signalingState,
+      offerAgeMs: link.offerSentAt ? Date.now() - link.offerSentAt : 0,
+    })
+    if (plan === 'wait') return
+    if (link.restartedAt && Date.now() - link.restartedAt < 15000) return
     link.restartedAt = Date.now()
     link.openedAt = Date.now()
     try {
-      await this.refreshIce()
+      // A slow /api/ice refresh must not sit in front of the repair.
+      void this.refreshIce()
       const pc = link.pc
       if (pc.connectionState === 'closed' || this.peers.get(id) !== link) return
-      try {
-        pc.setConfiguration({ iceServers: this.ice, iceTransportPolicy: this.state.iceTransportPolicy })
-      } catch {
-        /* keep the current servers and still restart */
+      if (pc.signalingState === 'stable') {
+        try {
+          pc.setConfiguration({ iceServers: this.ice, iceTransportPolicy: this.state.iceTransportPolicy })
+        } catch {
+          /* keep the current servers and still restart */
+        }
       }
       try {
         pc.restartIce()
       } catch {
         /* older browsers restart through the next offer */
       }
-      if (link.caller) {
-        if (pc.signalingState === 'have-local-offer') {
-          try {
-            await pc.setLocalDescription({ type: 'rollback' })
-          } catch {
-            /* negotiate on the next stable state */
-          }
-        }
-        if (pc.signalingState === 'stable') await this.offer(id, link, true)
-      } else {
+      const polite = politePeer(this.state.selfId || '', id)
+      if (!polite || link.askedRestart) await this.offer(id, link, true)
+      else {
+        link.askedRestart = true
         this.send({ t: 'signal', to: id, data: { kind: 'restart' } })
       }
     } catch (error) {
       this.notePeerError(link, error)
-    } finally {
-      window.setTimeout(() => {
-        if (this.peers.get(id) === link) link.restarting = false
-      }, 5000)
     }
   }
 
@@ -1444,6 +1641,11 @@ export class SessionClient {
   private async attachSenders(id: string, link: PeerLink) {
     const before = senderKey(link)
     const directionBefore = link.camSender?.currentDirection || ''
+    if (link.pc.signalingState === 'have-remote-offer') {
+      const audioOffer = sectionDirections(link.pc.remoteDescription?.sdp || '', 'audio')
+      if (link.musicSender) link.musicSender.direction = legalDirection('sendrecv', audioOffer[0] || null)
+      if (link.talkSender) link.talkSender.direction = legalDirection('sendrecv', audioOffer[1] || null)
+    }
     await link.musicSender?.sender.replaceTrack(this.performanceTrack())
     const talk = this.state.talkOn ? this.talkStream?.getAudioTracks()[0] || null : null
     await link.talkSender?.sender.replaceTrack(talk)
@@ -1473,8 +1675,9 @@ export class SessionClient {
       ? `Sending the self-view camera (${cam.readyState}${cam.muted ? ', waiting for frames' : ''}, ${link.camSender?.direction || 'no transceiver'}). Mic ${mic ? mic.readyState : 'missing'}.`
       : `Camera is not on the peer connection. Mic ${mic ? mic.readyState : 'missing'}.`
     const directionChanged = prevCam !== undefined && (prevCam !== camDir || prevScreen !== screenDir)
-    if ((before !== after || directionStale || directionChanged) && link.pc.localDescription && link.pc.signalingState === 'stable') {
-      if (link.caller) await this.offer(id, link, false)
+    if ((before !== after || directionStale || directionChanged) && link.pc.localDescription) {
+      if (link.pc.signalingState !== 'stable' || link.makingOffer) link.needsRenegotiate = true
+      else if (link.caller) await this.offer(id, link, false)
       else this.send({ t: 'signal', to: id, data: { kind: 'restart' } })
     }
     if (link.pc.localDescription) await this.tuneSenders(link)
@@ -1487,7 +1690,12 @@ export class SessionClient {
   }
 
   private applySendTracks() {
-    for (const [id, link] of this.peers) void this.attachSenders(id, link)
+    for (const id of this.peers.keys()) {
+      void this.enqueueSignal(id, async () => {
+        const link = this.peers.get(id)
+        if (link) await this.attachSenders(id, link)
+      })
+    }
   }
 
   private routeIncoming(id: string, index: number) {
@@ -1708,11 +1916,31 @@ export class SessionClient {
         ice: link.pc.iceConnectionState,
         connection: link.pc.connectionState,
         gathered: link.gathered,
+        offers: link.offers,
         selected: this.state.media[id]?.localType ? { local: this.state.media[id].localType, remote: this.state.media[id].remoteType || '' } : null,
         errors: link.errors,
       })),
     })
     if (!report) return
+    this.sendDiag(code, report)
+  }
+
+  private postDiagEvent(event: string, note: string) {
+    const code = this.state.code
+    if (!code || this.left) return
+    const report = sanitizeDiag({
+      at: Date.now(),
+      peerId: this.state.selfId || this.resumeId || '',
+      role: this.state.role || '',
+      ua: navigator.userAgent,
+      event,
+      note,
+      peers: [],
+    })
+    if (report) this.sendDiag(code, report)
+  }
+
+  private sendDiag(code: string, report: unknown) {
     void fetch(`/api/diag/${encodeURIComponent(code)}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

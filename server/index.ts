@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { currentIce, type IceConfig } from './ice.ts'
 import { rememberDiag, sanitizeDiag, type DiagReport } from '../src/model/diag.ts'
+import { sessionHello } from '../src/model/negotiate.ts'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -87,7 +88,7 @@ function emitRoster(session: Session) {
   broadcast(session, { t: 'roster', participants: roster(session) })
 }
 
-function publicSession(session: Session, self: Participant, ice: IceConfig) {
+function publicSession(session: Session, self: Participant, ice: IceConfig, reason?: string) {
   return {
     t: 'welcome',
     id: self.id,
@@ -99,7 +100,22 @@ function publicSession(session: Session, self: Participant, ice: IceConfig) {
     iceTransportPolicy: ice.iceTransportPolicy,
     participants: roster(session),
     chat: session.chat.slice(-80),
+    reason: reason || '',
   }
+}
+
+function hostedBy(resumeId: string) {
+  if (!resumeId) return undefined
+  for (const session of sessions.values()) {
+    if (session.hostId === resumeId) return session
+  }
+  return undefined
+}
+
+function record(session: Session, event: string, note: string, peerId = '') {
+  console.log(`[session ${session.code}] ${event}: ${note}`)
+  const entry = sanitizeDiag({ at: Date.now(), peerId, role: 'server', ua: 'server', event, note, peers: [] })
+  if (entry) session.diag = rememberDiag(session.diag, entry, 200)
 }
 
 function partySize(session: Session) {
@@ -121,6 +137,7 @@ function leave(client: Client) {
     session.participants.delete(client.id)
     session.held.set(client.id, person)
   }
+  record(session, 'leave', `${client.id} left; the room is kept until it has been empty for 10 minutes`, client.id)
   client.sessionCode = undefined
   if (session.clients.size === 0) {
     session.emptyAt = Date.now()
@@ -391,7 +408,13 @@ async function handle(client: Client, msg: Record<string, unknown>) {
 async function hello(client: Client, msg: Record<string, unknown>) {
   const name = String(msg.name || 'Guest').slice(0, 40)
   const resumeId = msg.resumeId ? String(msg.resumeId) : ''
-  if (msg.create) {
+  const hosted = hostedBy(resumeId)
+  const decision = sessionHello({
+    create: Boolean(msg.create),
+    requestedCode: msg.code ? String(msg.code) : '',
+    hostedCode: hosted?.code,
+  })
+  if (decision.action === 'create') {
     const code = freshCode()
     const id = resumeId || crypto.randomUUID()
     const session: Session = {
@@ -421,13 +444,17 @@ async function hello(client: Client, msg: Record<string, unknown>) {
     client.name = name
     client.sessionCode = code
     sessions.set(code, session)
-    send(client.ws, publicSession(session, person, await currentIce()))
+    const reason = `new session created because ${decision.reason}`
+    record(session, 'create', reason, id)
+    send(client.ws, publicSession(session, person, await currentIce(), reason))
     return
   }
-  const code = String(msg.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
-  const session = sessions.get(code)
+  const code = decision.code || ''
+  const session = code ? sessions.get(code) : undefined
   if (!session) {
-    send(client.ws, { t: 'error', message: 'That invite is no longer live.' })
+    const message = code ? `Could not rejoin ${code}. That invite is no longer live.` : 'Could not rejoin the session. Create an invite again.'
+    console.log(`[session] join failed: ${decision.reason}`)
+    send(client.ws, { t: 'error', message })
     return
   }
   const existing = resumeId ? session.participants.get(resumeId) || session.held.get(resumeId) : undefined
@@ -436,6 +463,7 @@ async function hello(client: Client, msg: Record<string, unknown>) {
     session.participants.set(resumeId, existing)
     const previous = session.clients.get(resumeId)
     if (previous && previous.ws !== client.ws) {
+      record(session, 'evict', `closed the previous socket for ${resumeId}`, resumeId)
       previous.sessionCode = undefined
       previous.ws.close()
     }
@@ -446,7 +474,8 @@ async function hello(client: Client, msg: Record<string, unknown>) {
     client.sessionCode = code
     session.emptyAt = undefined
     if (resumeId === session.hostId) existing.role = 'host'
-    send(client.ws, publicSession(session, existing, await currentIce()))
+    record(session, 'join', decision.reason, resumeId)
+    send(client.ws, publicSession(session, existing, await currentIce(), decision.reason))
     emitRoster(session)
     return
   }
@@ -468,7 +497,8 @@ async function hello(client: Client, msg: Record<string, unknown>) {
   client.id = id
   client.name = name
   client.sessionCode = code
-  send(client.ws, publicSession(session, person, await currentIce()))
+  record(session, 'join', decision.reason, id)
+  send(client.ws, publicSession(session, person, await currentIce(), decision.reason))
   emitRoster(session)
 }
 
