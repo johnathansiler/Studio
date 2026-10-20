@@ -58,6 +58,27 @@ export function socketMayOpen(readyState: number | null | undefined) {
 }
 
 /**
+ * A second hello takes the seat only when the previous socket is gone.
+ * Protocol pongs do not count: a proxy can answer those while the page
+ * has stopped reading. `probeAnswered` is an application message.
+ */
+export function replaceSocketPlan(input: { readyState: number | null | undefined; probeAnswered: boolean }): 'keep' | 'replace' {
+  if (input.readyState !== 1) return 'replace'
+  return input.probeAnswered ? 'keep' : 'replace'
+}
+
+/**
+ * The polite peer never offers. An outstanding local offer is resent, not
+ * replaced, until ICE has actually failed.
+ */
+export function offerAgainPlan(input: { polite: boolean; signaling: string; ice: string; connection: string }): 'offer' | 'resend' | 'ask' {
+  const failed = input.ice === 'failed' || input.connection === 'failed'
+  if (input.polite) return 'ask'
+  if (input.signaling === 'have-local-offer' && !failed) return 'resend'
+  return 'offer'
+}
+
+/**
  * A signaling reconnect keeps a peer connection that is already up.
  * Renegotiate only when that connection has failed, or the other browser
  * reloaded and minted a new page instance.
