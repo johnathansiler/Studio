@@ -3,11 +3,12 @@ services:
     name: cueharbor
     runtime: node
     plan: free
-    buildCommand: npm ci && npm run build
+    branch: main
+    # Render sets NODE_ENV=production for the build, which makes plain `npm ci`
+    # skip devDependencies. typescript and vite are required to compile the app.
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
-      - key: NODE_ENV
-        value: production
       - key: NODE_VERSION
         value: 22.14.0

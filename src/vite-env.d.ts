@@ -2,6 +2,7 @@
 
 interface DocumentPictureInPicture {
   requestWindow(opts?: { width?: number; height?: number }): Promise<Window>
+  readonly window?: Window | null
 }
 
 interface Window {

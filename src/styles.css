@@ -115,7 +115,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .main-pane { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
 .editor { min-height: 0; min-width: 0; }
 
-.arrange { height: 100%; display: grid; grid-template-columns: 210px minmax(0, 1fr); background: #121a16; }
+.arrange-wrap { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.arrange { height: 100%; display: grid; grid-template-columns: 210px minmax(0, 1fr); background: #121a16; min-height: 0; flex: 1; }
+.follow-banner { padding: 6px 10px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); background: #101814; }
 .heads, .lanes { min-height: 0; }
 .heads { border-right: 1px solid var(--line); background: #141c18; overflow: hidden; }
 .ruler-gap { height: 32px; border-bottom: 1px solid var(--line); }
@@ -263,3 +265,6 @@ code { font-family: var(--mono); font-size: 12px; }
 }
 .invite-card span { color: var(--muted); font-size: 12px; }
 .invite-card strong { font-family: var(--mono); font-size: 12px; font-weight: 500; word-break: break-all; }
+.sync-pill { font-family: var(--mono); font-size: 11px; color: var(--accent); border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; }
+.dock-placeholder { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.dock.popped { height: 100%; width: 100%; border: 0; }

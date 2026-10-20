@@ -16,9 +16,11 @@ import {
   sliceChunksByPerf,
 } from '../model/latency'
 import { DEFAULT_OPUS, mungeOpusSdp } from '../model/sdp'
+import { arrangementDigest, catchUpSchedule, guestMayRequest, guestStartPerf, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
 import { formatBarsBeats, formatTimecode, samplesToMusical, snapSample } from '../model/time'
 import { decodeWavPCM, encodeWav, linearResample, parseWavHeader } from '../model/wav'
 import { ProjectStore, seedDemoProject } from '../state/store'
+import { createEmptyProject, makeTrack } from '../model/types'
 import type { AudioClip } from '../model/types'
 
 const clip = (patch: Partial<AudioClip> = {}): AudioClip => ({
@@ -33,6 +35,65 @@ const clip = (patch: Partial<AudioClip> = {}): AudioClip => ({
   gain: 1,
   source: 'local',
   ...patch,
+})
+
+describe('shared session transport', () => {
+  it('waits long enough for the guest to receive the downbeat', () => {
+    expect(scheduleLeadMs(10)).toBe(120)
+    expect(scheduleLeadMs(100)).toBe(180)
+    expect(scheduleLeadMs(900)).toBe(400)
+  })
+
+  it('maps the host performance clock onto the guest', () => {
+    expect(guestStartPerf(5_000, 40)).toBe(4_960)
+  })
+
+  it('skips ahead when the start arrives late', () => {
+    const next = catchUpSchedule({ targetPerf: 1_000, nowPerf: 1_100, sample: 48_000, sampleRate: 48_000 })
+    expect(next.sample).toBe(52_800)
+    expect(next.perf).toBe(1_100)
+    expect(catchUpSchedule({ targetPerf: 2_000, nowPerf: 2_000, sample: 10, sampleRate: 48_000 }).sample).toBe(10)
+  })
+
+  it('lets a guest request play, stop, and locate, and leaves record to the host', () => {
+    expect(guestMayRequest('play')).toBe(true)
+    expect(guestMayRequest('stop')).toBe(true)
+    expect(guestMayRequest('seek')).toBe(true)
+    expect(guestMayRequest('record-start')).toBe(false)
+  })
+
+  it('fingerprints the arrangement without the audio samples', () => {
+    const project = createEmptyProject(48000, 'Sync')
+    const track = makeTrack({ name: 'Music', type: 'audio' })
+    track.clips = [
+      {
+        id: 'c',
+        name: 'Loop',
+        bufferId: 'buf',
+        startSample: 0,
+        offsetSamples: 0,
+        durationSamples: 1000,
+        fadeInSamples: 0,
+        fadeOutSamples: 0,
+        gain: 1,
+        source: 'demo',
+      },
+    ]
+    project.tracks = [track]
+    expect(arrangementDigest(project)).toBe(arrangementDigest(structuredClone(project)))
+    const changed = structuredClone(project)
+    changed.tempo = 100
+    expect(arrangementDigest(project)).not.toBe(arrangementDigest(changed))
+    expect(referencedBufferIds(project)).toEqual(['buf'])
+  })
+
+  it('keeps a following guest from editing the host arrangement', () => {
+    const store = new ProjectStore(createEmptyProject(48000))
+    const tempo = store.project.tempo
+    store.remoteFollow = true
+    store.setTempo(90)
+    expect(store.project.tempo).toBe(tempo)
+  })
 })
 
 describe('musical time', () => {

@@ -7,6 +7,7 @@ import { SessionClient } from './remote/session'
 import { listProjects, loadProject, saveProject, base64ToBytes, bytesToBase64 } from './storage/idb'
 import { ProjectStore, seedDemoProject } from './state/store'
 import { decodeWavPCM, encodeWav, linearResample } from './model/wav'
+import { guestStartPerf, scheduleLeadMs } from './model/sessionSync'
 import { ArrangeView } from './ui/ArrangeView'
 import { MixerView } from './ui/MixerView'
 import { PianoRoll } from './ui/PianoRoll'
@@ -45,9 +46,38 @@ export function App() {
   const takeRef = useRef<{ id: string; endSample: number } | null>(null)
   const armedPeers = useRef(new Set<string>())
   const launchKey = useRef('')
+  const publishTimer = useRef(0)
+  const pendingFollow = useRef<Record<string, unknown> | null>(null)
 
   useEffect(() => {
+    session.bindArrangement(store)
     session.setTakeHandler((take) => placeTake(store, engine, take))
+    session.setArrangementHandler((project, assets, ready) => {
+      store.remoteFollow = true
+      store.loadProject(project, assets)
+      engine.sync(project, (id) => assets.get(id) || store.buffers.get(id))
+      if (ready && pendingFollow.current && engine.status === 'stopped') void followPlay(pendingFollow.current)
+    })
+    session.setControlHandler((cmd) => {
+      const action = String(cmd.action || '')
+      if (session.state.role === 'host') {
+        if (action === 'play') void playFrom(engine.currentTimelineSample())
+        else if (action === 'stop') void stop()
+        else if (action === 'seek') void locate(Number(cmd.timelineSample) || 0)
+        return
+      }
+      if (action === 'play') {
+        pendingFollow.current = cmd
+        if (session.state.preferLocalBacking) void followPlay(cmd)
+        else engine.seek(Number(cmd.timelineSample) || 0)
+      } else if (action === 'stop') {
+        pendingFollow.current = null
+        engine.stop()
+      }
+      else if (action === 'seek') {
+        engine.seek(Number(cmd.timelineSample) || 0)
+      }
+    })
     const params = new URLSearchParams(location.search)
     const code = params.get('session')
     if (code) {
@@ -59,10 +89,14 @@ export function App() {
     return store.subscribe(() => {
       engine.sync(store.project, (id) => store.buffers.get(id))
       engine.setLaunches(store.launched)
+      if (session.state.role === 'host') {
+        window.clearTimeout(publishTimer.current)
+        publishTimer.current = window.setTimeout(() => session.publishArrangement(), 40)
+      }
       const key = `${store.transportMode}:${JSON.stringify(store.launched)}`
       if (store.transportMode === 'session' && key !== launchKey.current) {
         launchKey.current = key
-        void engine.resume().then(() => engine.play(engine.positionSamples, 'session'))
+        void playFrom(engine.positionSamples, 'session')
       } else launchKey.current = key
       setVersion((value) => value + 1)
     })
@@ -78,9 +112,22 @@ export function App() {
             armedPeers.current.add(person.id)
             store.ensureRemoteTrack(person.id, person.name)
             store.toast(`Armed a track for ${person.name}. Record will print a live guide, then replace it with their aligned take.`, 'good')
+            session.publishArrangement()
+            if (engine.status === 'playing' || engine.status === 'recording') {
+              engine.refreshClockAnchor()
+              session.broadcastTransport({
+                action: 'play',
+                timelineSample: Math.round(engine.currentTimelineSample()),
+                hostPerfAtSample: performance.now(),
+                mode: engine.currentMode(),
+                tempo: store.project.tempo,
+              })
+            }
           }
         }
       }
+      if (session.state.role === 'guest' && session.state.status === 'live') store.remoteFollow = true
+      if (session.state.status === 'idle') store.remoteFollow = false
     })
   }, [session, store])
 
@@ -100,7 +147,7 @@ export function App() {
       } else if (event.key === 'Delete' || event.key === 'Backspace') store.deleteSelectedClip()
       else if (event.key.toLowerCase() === 'b') store.splitSelected(engine.positionSamples)
       else if (event.key.toLowerCase() === 'l') store.toggle('loopEnabled')
-      else if (event.key === 'Home') engine.seek(0)
+      else if (event.key === 'Home') void locate(0)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -114,13 +161,60 @@ export function App() {
   }
 
   async function play() {
+    await playFrom(engine.currentTimelineSample())
+  }
+
+  async function playFrom(sample: number, mode: 'arrangement' | 'session' = 'arrangement') {
+    if (session.state.role === 'guest') {
+      session.requestTransport({ action: 'play', timelineSample: Math.round(sample), mode })
+      return
+    }
     void engine.resume()
     await ready()
-    store.armArrangement()
-    await engine.play(engine.positionSamples, 'arrangement')
+    if (mode === 'arrangement') store.armArrangement()
+    const lead = scheduleLeadMs(session.primaryOneWay()?.ms ?? 40)
+    engine.refreshClockAnchor()
+    const hostPerf = performance.now() + lead
+    session.broadcastTransport({
+      action: 'play',
+      timelineSample: Math.round(sample),
+      hostPerfAtSample: hostPerf,
+      mode,
+      tempo: store.project.tempo,
+    })
+    await engine.playAtPerf(sample, hostPerf, mode)
+  }
+
+  async function followPlay(cmd: Record<string, unknown>) {
+    await ready()
+    if (!session.state.preferLocalBacking) return
+    const offset = session.hostOffsetMs()
+    const hostPerf = Number(cmd.hostPerfAtSample) || performance.now()
+    const localPerf = offset == null ? performance.now() : guestStartPerf(hostPerf, offset)
+    const mode = cmd.mode === 'session' ? 'session' : 'arrangement'
+    await engine.playAtPerf(Number(cmd.timelineSample) || 0, localPerf, mode)
+  }
+
+  async function locate(sample: number) {
+    const next = Math.max(0, Math.round(sample))
+    if (session.state.role === 'guest') {
+      session.requestTransport({ action: 'seek', timelineSample: next })
+      return
+    }
+    if (engine.status === 'recording' || engine.status === 'counting-in') return
+    if (engine.status === 'playing') {
+      await playFrom(next)
+      return
+    }
+    engine.seek(next)
+    session.broadcastTransport({ action: 'seek', timelineSample: next })
   }
 
   async function stop() {
+    if (session.state.role === 'guest') {
+      session.requestTransport({ action: 'stop' })
+      return
+    }
     const end = Math.round(engine.currentTimelineSample())
     const captures = await engine.finishRecording()
     engine.stop()
@@ -154,9 +248,14 @@ export function App() {
       session.broadcastTransport({ action: 'record-stop', takeId: takeRef.current.id, timelineSample: end })
       takeRef.current = null
     }
+    session.broadcastTransport({ action: 'stop', timelineSample: end })
   }
 
   async function record() {
+    if (session.state.role === 'guest') {
+      store.toast('The host records. Your take still lands on their timeline.', 'info')
+      return
+    }
     void engine.resume()
     if (engine.status === 'recording' || engine.status === 'counting-in') {
       await stop()
@@ -195,10 +294,25 @@ export function App() {
         return
       }
     }
+    const fromSample = Math.round(engine.currentTimelineSample())
+    const alreadyPlaying = engine.status === 'playing'
+    const lead = scheduleLeadMs(session.primaryOneWay()?.ms ?? 40)
+    engine.refreshClockAnchor()
+    const hostPerf = performance.now() + lead
+    if (!alreadyPlaying) {
+      session.broadcastTransport({
+        action: 'play',
+        timelineSample: fromSample,
+        hostPerfAtSample: hostPerf,
+        mode: 'arrangement',
+        tempo: store.project.tempo,
+      })
+    }
     await engine.beginRecord({
-      fromSample: Math.round(engine.positionSamples),
+      fromSample,
       inputs,
-      countIn: store.project.countIn && engine.status !== 'playing',
+      countIn: store.project.countIn && !alreadyPlaying,
+      hostPerfAtSample: alreadyPlaying ? undefined : hostPerf,
       onPunch: (info) => {
         takeRef.current = { id: takeId, endSample: info.timelineSample }
         session.broadcastTransport({
@@ -344,12 +458,22 @@ export function App() {
           </button>
         </div>
       </header>
-      {surface === 'studio' && <TransportBar store={store} engine={engine} onPlay={() => void play()} onStop={() => void stop()} onRecord={() => void record()} />}
+      {(surface === 'studio' || session.state.status === 'live') && (
+        <TransportBar
+          store={store}
+          engine={engine}
+          syncLabel={session.state.syncLabel}
+          onPlay={() => void play()}
+          onStop={() => void stop()}
+          onRecord={() => void record()}
+          onSeek={(sample) => void locate(sample)}
+        />
+      )}
       <div className={`workspace ${dockEdge === 'bottom' && surface === 'studio' ? 'dock-bottom' : ''}`}>
         {surface === 'studio' && (
           <div className="main-pane">
             <div className="editor">
-              {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} />}
+              {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} onSeek={(sample) => void locate(sample)} />}
               {store.view === 'mix' && <MixerView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} />}
             </div>

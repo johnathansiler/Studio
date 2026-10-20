@@ -8,7 +8,7 @@ True zero latency over the internet is impossible. The live monitor is as short 
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/johnathansiler/Studio)
 
-Click **Deploy to Render** and sign in with GitHub. Render reads `render.yaml`, builds this repo, and gives you a public URL such as `https://cueharbor.onrender.com` (the name can differ). Create an invite in the app and press **Copy invite link**. The artist opens `https://that-host/?session=CODE` — no install. HTTPS is what the browser requires for the mic and camera. Signaling is `wss` on that same origin (`/ws`), derived from the page URL.
+Click **Deploy to Render** and sign in with GitHub. Render reads `render.yaml`, builds `main`, and gives you a public URL such as `https://cueharbor.onrender.com` (the name can differ). The build runs `npm ci --include=dev` because Render sets `NODE_ENV=production`, which would otherwise skip TypeScript and Vite. `npm start` still runs the server in production. Create an invite in the app and press **Copy invite link**. The artist opens `https://that-host/?session=CODE` — no install. HTTPS is what the browser requires for the mic and camera. Signaling is `wss` on that same origin (`/ws`), derived from the page URL.
 
 This environment has no Render, Fly, or Railway credentials, so the app was not published from here. The button above is the whole account step.
 
@@ -138,7 +138,9 @@ Transceiver order is fixed: music audio, talkback audio, camera, screen. The low
 
 Mesh, not an SFU. An SFU (mediasoup, LiveKit, and the like) adds a hop and another jitter buffer, which fights the latency goal. The cap is **6 admitted people** in one room. Past that, an SFU is the right scale path; it is not wired up.
 
-Signaling messages: `hello` (create, join, resume), roster, `admit` / `reject` / `remove`, `signal`, `chat`, `presence`, `reaction`, `force-mute`, `transport`, and `clock`. Session codes are 6 unambiguous characters. An empty room expires after 15 minutes. Resume replaces the previous socket without dropping the participant.
+Signaling messages: `hello` (create, join, resume), roster, `admit` / `reject` / `remove`, `signal`, `chat`, `presence`, `reaction`, `force-mute`, `transport`, `transport-request`, `project`, `project-asset`, and `clock`. Session codes are 6 unambiguous characters. An empty room expires after 15 minutes. Resume replaces the previous socket without dropping the participant.
+
+The host is the clock for the arrangement. Play, stop, and locate on either side are scheduled against the shared clock so both playheads hit the same sample together. The host sends the arrangement and its audio; the guest plays that locally and mutes the delayed cue mix so the backing is not heard twice. Record stays with the host. A guest take that was sung against the local backing is placed with no extra network shift. Popping the session out opens a real window that shares the same session, so mute, camera, chat, admit, and copy invite keep working.
 
 Health: `GET /api/health`. ICE config: `GET /api/ice`. In production the same process serves `dist/` and upgrades `/ws`. The browser opens that socket with `wss` when the page is `https`, and invite links use `location.origin`.
 

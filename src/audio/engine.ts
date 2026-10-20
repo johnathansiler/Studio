@@ -111,6 +111,10 @@ export class AudioEngine {
     for (const fn of this.listeners) fn()
   }
 
+  currentMode(): 'arrangement' | 'session' {
+    return this.mode
+  }
+
   get sampleRate() {
     return this.ctx?.sampleRate ?? this.project?.sampleRate ?? 48000
   }
@@ -391,10 +395,31 @@ export class AudioEngine {
 
   async play(fromSample: number, mode: 'arrangement' | 'session' = 'arrangement') {
     await this.resume()
+    const startAt = this.ctx!.currentTime + 0.05
+    this.startTransport(startAt, fromSample, mode)
+  }
+
+  /**
+   * Start so the playhead is at `sample` when performance.now() reaches `perfMs`.
+   * A late call skips ahead instead of starting the downbeat in the past.
+   */
+  async playAtPerf(sample: number, perfMs: number, mode: 'arrangement' | 'session' = 'arrangement') {
+    await this.resume()
+    this.refreshClockAnchor()
+    const ctx = this.ctx!
+    let startAt = this.contextForPerf(perfMs)
+    let from = Math.max(0, sample)
+    const earliest = ctx.currentTime + 0.02
+    if (startAt < earliest) {
+      from += Math.round((earliest - startAt) * this.sampleRate)
+      startAt = earliest
+    }
+    this.startTransport(startAt, from, mode)
+  }
+
+  private startTransport(startAt: number, fromSample: number, mode: 'arrangement' | 'session') {
     this.stopSources()
     this.mode = mode
-    const ctx = this.ctx!
-    const startAt = ctx.currentTime + 0.05
     this.armTransport(startAt, Math.max(0, fromSample))
     this.status = 'playing'
     this.emit()
@@ -419,13 +444,14 @@ export class AudioEngine {
     fromSample: number
     inputs: RecordInput[]
     countIn: boolean
+    hostPerfAtSample?: number
     onPunch?: (info: PunchInfo) => void
   }) {
     await this.resume()
     const punch = () => {
       const ctx = this.ctx!
       this.refreshClockAnchor()
-      const ctxTime = ctx.currentTime + 0.04
+      const ctxTime = opts.hostPerfAtSample != null ? Math.max(this.contextForPerf(opts.hostPerfAtSample), ctx.currentTime + 0.02) : ctx.currentTime + 0.04
       if (!this.playing) this.armTransport(ctxTime, opts.fromSample)
       const timelineSample = this.playing ? Math.round(this.sampleAt(ctxTime)) : opts.fromSample
       const cueEpochHostPerf = this.perfForContext(ctxTime)

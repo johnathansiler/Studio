@@ -288,6 +288,15 @@ function handle(client: Client, msg: Record<string, unknown>) {
     broadcast(session, { t: 'transport', from: client.id, payload: msg.payload }, client.id)
     return
   }
+  if (msg.t === 'transport-request' && self.admitted && self.role === 'guest') {
+    const host = session.clients.get(session.hostId)
+    if (host) send(host.ws, { t: 'transport-request', from: client.id, name: self.name, payload: msg.payload })
+    return
+  }
+  if ((msg.t === 'project' || msg.t === 'project-asset') && self.role === 'host') {
+    broadcast(session, { t: msg.t, from: client.id, project: msg.project, asset: msg.asset, rev: msg.rev }, client.id)
+    return
+  }
   if (msg.t === 'clock') {
     const target = session.clients.get(String(msg.to))
     if (!target) return
