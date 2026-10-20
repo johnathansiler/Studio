@@ -34,9 +34,10 @@ export function remoteDescriptionPlan(input: {
   const collision = input.makingOffer || (input.signaling !== 'stable' && input.signaling !== '')
   if (!collision) return 'apply-offer'
   if (input.polite) return 'rollback-offer'
+  // The impolite peer keeps its offer through a disconnect flicker.
+  // A failed path, or an offer that never reached ICE, can be replaced.
   const abandoned =
     input.ice === 'failed' ||
-    input.ice === 'disconnected' ||
     (input.offerAgeMs >= 4000 && (input.ice === 'new' || input.ice === 'checking'))
   if (abandoned) return 'rollback-offer'
   return 'ignore-offer'
@@ -47,12 +48,39 @@ export function remoteDescriptionPlan(input: {
  * A dropped socket must rejoin that code. Minting is only the first Create
  * when this browser does not already have a room.
  */
-export function sessionHello(input: { create: boolean; requestedCode?: string; hostedCode?: string }): {
+/**
+ * A second WebSocket may be opened only after the previous one has closed.
+ * CONNECTING and OPEN stay as they are. CLOSING waits for the close event.
+ */
+export function socketMayOpen(readyState: number | null | undefined) {
+  if (readyState == null) return true
+  return readyState === 3
+}
+
+/**
+ * A signaling reconnect keeps a peer connection that is already up.
+ * Renegotiate only when that connection has failed, or the other browser
+ * reloaded and minted a new page instance.
+ */
+export function signalingReconnectPlan(input: {
+  connection: string
+  ice: string
+  remoteInstance: string
+  previousInstance: string
+}): 'keep' | 'renegotiate' {
+  const failed = input.connection === 'failed' || input.ice === 'failed'
+  const replaced = Boolean(input.previousInstance && input.remoteInstance && input.remoteInstance !== input.previousInstance)
+  if (replaced || failed) return 'renegotiate'
+  return 'keep'
+}
+
+export function sessionHello(input: { create: boolean; fresh?: boolean; requestedCode?: string; hostedCode?: string }): {
   action: 'create' | 'join'
   code?: string
   reason: string
 } {
   const requested = (input.requestedCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+  if (input.fresh) return { action: 'create', reason: 'host tapped New session' }
   if (input.hostedCode && (input.create || !requested || requested === input.hostedCode)) {
     const reason = input.create
       ? `new session was not created because this browser already hosts ${input.hostedCode}`

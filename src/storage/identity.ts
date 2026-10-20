@@ -52,8 +52,7 @@ export function writeIdentity(identity: DeviceIdentity) {
 
 export function clearActiveSession() {
   const current = readIdentity()
-  if (!current) return
-  writeIdentity({ ...current, code: '' })
+  if (current) writeIdentity({ ...current, code: '', role: 'host' })
   const url = new URL(location.href)
   if (url.searchParams.has('session')) {
     url.searchParams.delete('session')

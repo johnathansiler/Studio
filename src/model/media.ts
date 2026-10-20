@@ -23,6 +23,8 @@ export interface MediaLink {
   signaling?: string
   localType?: string
   remoteType?: string
+  /** Inbound video RTP bytes. The banner follows this, not a stale connection label. */
+  videoBytes?: number
 }
 
 /** ICE can be up while connectionState is still waiting on DTLS or the data channel. */
@@ -101,15 +103,17 @@ const STILL_TRYING = "Video isn’t connected yet. You’re still in the room, a
 
 export function mediaStatus(input: { turn: TurnProvider; turnError?: string; links: MediaLink[]; live: boolean }): { tone: 'good' | 'warn' | 'bad'; text: string } | null {
   if (!input.live) return null
+  const videoFlowing = input.links.some((link) => (link.videoBytes || 0) > 0)
+  const connected = input.links.some((link) => mediaUp(link))
+  // Bytes win over a stale "disconnected" label, and a live path wins over a relay warning.
+  if (videoFlowing || connected) return { tone: 'good', text: 'Video and audio are connected.' }
   if (input.turnError) return { tone: 'bad', text: STILL_TRYING }
   if (!input.links.length) {
     return input.turn === 'none'
       ? { tone: 'warn', text: 'Video may take a moment to appear. You’re still in the room.' }
       : { tone: 'warn', text: 'Connecting video and audio…' }
   }
-  const connected = input.links.filter((link) => mediaUp(link))
-  if (connected.length) return { tone: 'good', text: 'Video and audio are connected.' }
-  const failed = input.links.some((link) => link.connection === 'failed' || link.ice === 'failed' || link.connection === 'disconnected')
+  const failed = input.links.some((link) => link.connection === 'failed' || link.ice === 'failed')
   const stalled = input.links.some((link) => link.ageMs > 30000 && !mediaUp(link) && link.ice !== 'checking' && link.ice !== 'new')
   if (failed || stalled) return { tone: 'bad', text: STILL_TRYING }
   return { tone: 'warn', text: 'Connecting video and audio…' }
@@ -132,18 +136,19 @@ export function iceRetryPlan(input: {
   offerAgeMs?: number
 }): 'restart' | 'wait' {
   if (mediaUp(input)) return 'wait'
+  const failed = input.connection === 'failed' || input.ice === 'failed'
+  if (failed) return 'restart'
   const unanswered =
     input.signaling === 'have-local-offer' &&
     (input.offerAgeMs ?? 0) >= 4000 &&
-    (input.ice === 'new' || input.ice === 'checking' || input.ice === 'failed')
+    (input.ice === 'new' || input.ice === 'checking')
   if (unanswered) return 'restart'
   const gainedRelay = input.previousTurn === 'none' && input.turn !== 'none'
   const checking = input.ice === 'checking'
   if (gainedRelay && input.signaling !== 'have-local-offer' && !checking) return 'restart'
-  if ((checking || input.ice === 'new') && input.ageMs < 30000) return 'wait'
-  const down = input.connection === 'failed' || input.connection === 'disconnected' || input.ice === 'failed' || input.ice === 'disconnected'
-  const stalled = input.ageMs > 30000
-  if (down || stalled) return 'restart'
+  // A disconnect often recovers on its own. Leave that peer connection alone.
+  if (input.ageMs < 30000) return 'wait'
+  if (input.ageMs > 30000) return 'restart'
   return 'wait'
 }
 
