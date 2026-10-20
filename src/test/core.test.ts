@@ -15,12 +15,12 @@ import {
   shiftPlacementForLateBuffer,
   sliceChunksByPerf,
 } from '../model/latency'
-import { DEFAULT_OPUS, markOutboundVideo, mungeOpusSdp, videoDirectionsFromSdp } from '../model/sdp'
+import { DEFAULT_OPUS, mungeOpusSdp, videoDirectionsFromSdp } from '../model/sdp'
 import { rememberDiag, sanitizeDiag } from '../model/diag'
 import { arrangementDigest, catchUpSchedule, guestMayRequest, guestStartPerf, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
 import { cameraAttempts, legalDirection, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, videoDirection } from '../model/codecs'
-import { filterBrowserTurnUrls, iceRetryPlan, isSilentTake, mediaStatus, queueIceCandidate, staticTurnServer } from '../model/media'
-import { iceUfrag, offerAgainPlan, politePeer, remoteDescriptionPlan, replaceSocketPlan, sessionHello, signalingReconnectPlan, socketMayOpen } from '../model/negotiate'
+import { filterBrowserTurnUrls, isSilentTake, mediaStatus, queueIceCandidate, staticTurnServer } from '../model/media'
+import { ignoreIncomingOffer, inviteWins, keepPeerConnection, sessionHello, socketMayOpen } from '../model/negotiate'
 import { isQuotaError } from '../storage/idb'
 import { clearIceCache, currentIce } from '../../server/ice.ts'
 import { formatBarsBeats, formatTimecode, samplesToMusical, snapSample } from '../model/time'
@@ -153,37 +153,6 @@ describe('video codecs', () => {
   })
 })
 
-describe('safari video send', () => {
-  it('turns a recvonly video answer into sendrecv and keeps H.264', () => {
-    const sdp = [
-      'v=0',
-      'm=audio 9 UDP/TLS/RTP/SAVPF 111',
-      'a=rtpmap:111 opus/48000/2',
-      'a=recvonly',
-      'm=video 9 UDP/TLS/RTP/SAVPF 102',
-      'a=rtpmap:102 H264/90000',
-      'a=fmtp:102 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f',
-      'a=recvonly',
-      'm=video 9 UDP/TLS/RTP/SAVPF 103',
-      'a=rtpmap:103 VP8/90000',
-      'a=recvonly',
-      '',
-    ].join('\r\n')
-    const shaped = markOutboundVideo(mungeOpusSdp(sdp, DEFAULT_OPUS), [true, false])
-    expect(shaped).toMatch(/a=rtpmap:102 H264\/90000/)
-    expect(shaped).toMatch(/m=video[\s\S]*a=sendrecv/)
-    const videoSections = shaped.split('m=video').slice(1)
-    expect(videoSections[0]).toMatch(/a=sendrecv/)
-    expect(videoSections[1]).toMatch(/a=recvonly/)
-    expect(videoSections[1]).not.toMatch(/a=sendrecv/)
-    const paused = markOutboundVideo(shaped, ['sendonly', 'inactive'])
-    expect(paused.split('m=video')[1]).toMatch(/a=sendonly/)
-    expect(paused.split('m=video')[1]).not.toMatch(/a=sendrecv/)
-    expect(paused.split('m=video')[2]).toMatch(/a=inactive/)
-    expect(paused).toMatch(/a=rtpmap:102 H264\/90000/)
-  })
-})
-
 describe('media path', () => {
   it('keeps an ICE candidate that arrives before the remote description', () => {
     const queued = queueIceCandidate(false, [], { candidate: 'a' })
@@ -220,17 +189,6 @@ describe('media path', () => {
     expect(label?.tone).toBe('bad')
     expect(label?.text).toMatch(/still in the room/i)
     expect(label?.text).not.toMatch(/TURN|UDP|relay/i)
-    expect(iceRetryPlan({ connection: 'failed', ice: 'failed', ageMs: 15000, turn: 'none', previousTurn: 'none' })).toBe('restart')
-    expect(iceRetryPlan({ connection: 'connected', ice: 'connected', ageMs: 15000, turn: 'none', previousTurn: 'none' })).toBe('wait')
-    expect(iceRetryPlan({ connection: 'connecting', ice: 'connected', ageMs: 15000, turn: 'cloudflare', previousTurn: 'cloudflare' })).toBe('wait')
-    expect(iceRetryPlan({ connection: 'connecting', ice: 'checking', ageMs: 13000, turn: 'cloudflare', previousTurn: 'cloudflare' })).toBe('wait')
-    expect(iceRetryPlan({ connection: 'new', ice: 'new', ageMs: 31000, turn: 'cloudflare', previousTurn: 'cloudflare' })).toBe('restart')
-    expect(iceRetryPlan({ connection: 'failed', ice: 'failed', ageMs: 1000, turn: 'cloudflare', previousTurn: 'none' })).toBe('restart')
-    expect(iceRetryPlan({ connection: 'new', ice: 'new', ageMs: 5000, turn: 'cloudflare', previousTurn: 'cloudflare', signaling: 'have-local-offer', offerAgeMs: 4500 })).toBe('wait')
-    expect(iceRetryPlan({ connection: 'new', ice: 'connected', ageMs: 6000, turn: 'cloudflare', previousTurn: 'cloudflare', signaling: 'have-local-offer', offerAgeMs: 6000 })).toBe('wait')
-    expect(iceRetryPlan({ connection: 'new', ice: 'new', ageMs: 2000, turn: 'cloudflare', previousTurn: 'cloudflare', signaling: 'have-local-offer', offerAgeMs: 1000 })).toBe('wait')
-    expect(iceRetryPlan({ connection: 'connecting', ice: 'checking', ageMs: 4000, turn: 'cloudflare', previousTurn: 'none', signaling: 'stable' })).toBe('wait')
-    expect(iceRetryPlan({ connection: 'disconnected', ice: 'disconnected', ageMs: 5000, turn: 'cloudflare', previousTurn: 'cloudflare' })).toBe('wait')
     const bytes = mediaStatus({
       turn: 'cloudflare',
       turnError: 'Cloudflare TURN failed',
@@ -559,34 +517,21 @@ describe('opus sdp and wav', () => {
 })
 
 describe('offer and answer', () => {
-  const base = {
-    polite: false,
-    signaling: 'have-local-offer',
-    kind: 'answer' as const,
-    makingOffer: false,
-    ice: 'new',
-    offerAgeMs: 200,
-    localUfrag: 'abc',
-    remoteUfrag: 'abc',
-  }
-
-  it('keeps an answer that arrives while the local offer is still being set', () => {
-    expect(remoteDescriptionPlan({ ...base, signaling: 'stable', makingOffer: true })).toBe('queue-answer')
-    expect(remoteDescriptionPlan(base)).toBe('apply-answer')
-    expect(remoteDescriptionPlan({ ...base, remoteUfrag: 'answerer' })).toBe('apply-answer')
-    expect(remoteDescriptionPlan({ ...base, signaling: 'stable', makingOffer: false })).toBe('ignore-answer')
+  it('ignores a colliding offer only on the impolite peer', () => {
+    expect(ignoreIncomingOffer({ polite: false, makingOffer: true, signalingState: 'have-local-offer', settingRemoteAnswer: false })).toBe(true)
+    expect(ignoreIncomingOffer({ polite: true, makingOffer: true, signalingState: 'have-local-offer', settingRemoteAnswer: false })).toBe(false)
+    expect(ignoreIncomingOffer({ polite: false, makingOffer: false, signalingState: 'stable', settingRemoteAnswer: false })).toBe(false)
+    expect(ignoreIncomingOffer({ polite: false, makingOffer: false, signalingState: 'have-local-offer', settingRemoteAnswer: true })).toBe(false)
   })
 
-  it('uses perfect negotiation and abandons an offer that never started ICE', () => {
-    expect(politePeer('4761', 'bb58')).toBe(false)
-    expect(politePeer('bb58', '4761')).toBe(true)
-    expect(remoteDescriptionPlan({ ...base, kind: 'offer', signaling: 'stable', ice: 'new' })).toBe('apply-offer')
-    expect(remoteDescriptionPlan({ ...base, kind: 'offer', makingOffer: true, offerAgeMs: 100 })).toBe('ignore-offer')
-    expect(remoteDescriptionPlan({ ...base, kind: 'offer', polite: true, makingOffer: true })).toBe('rollback-offer')
-    expect(remoteDescriptionPlan({ ...base, kind: 'offer', offerAgeMs: 5000, ice: 'new' })).toBe('rollback-offer')
-    expect(remoteDescriptionPlan({ ...base, kind: 'offer', ice: 'failed', offerAgeMs: 100 })).toBe('rollback-offer')
-    expect(remoteDescriptionPlan({ ...base, kind: 'offer', ice: 'disconnected', offerAgeMs: 100 })).toBe('ignore-offer')
-    expect(remoteDescriptionPlan({ ...base, kind: 'offer', polite: true, ice: 'disconnected', makingOffer: true })).toBe('rollback-offer')
+  it('lets an invite link win over a stored session code', () => {
+    expect(inviteWins('mjlfh2', 'U279DV')).toEqual({ code: 'MJLFH2', dropStored: true })
+    expect(inviteWins('', 'U279DV')).toEqual({ code: 'U279DV', dropStored: false })
+    expect(inviteWins('U279DV', 'U279DV')).toEqual({ code: 'U279DV', dropStored: false })
+    expect(keepPeerConnection({ left: false, remoteInstance: 'a', previousInstance: 'a' })).toBe(true)
+    expect(keepPeerConnection({ left: false, remoteInstance: 'a', previousInstance: '' })).toBe(true)
+    expect(keepPeerConnection({ left: true, remoteInstance: 'a', previousInstance: 'a' })).toBe(false)
+    expect(keepPeerConnection({ left: false, remoteInstance: 'b', previousInstance: 'a' })).toBe(false)
   })
 
   it('rejoins a room this browser already hosts instead of minting another', () => {
@@ -598,7 +543,7 @@ describe('offer and answer', () => {
     expect(sessionHello({ create: false, requestedCode: 'OTHER1', hostedCode: 'EEVEDR' })).toEqual({
       action: 'join',
       code: 'OTHER1',
-      reason: 'joined OTHER1',
+      reason: 'request OTHER1',
     })
     expect(sessionHello({ create: false }).reason).toMatch(/no session code/)
     expect(sessionHello({ create: true, fresh: true, hostedCode: 'EEVEDR' })).toEqual({
@@ -611,19 +556,6 @@ describe('offer and answer', () => {
     expect(socketMayOpen(0)).toBe(false)
     expect(socketMayOpen(1)).toBe(false)
     expect(socketMayOpen(2)).toBe(false)
-    expect(signalingReconnectPlan({ connection: 'connected', ice: 'connected', remoteInstance: 'a', previousInstance: 'a' })).toBe('keep')
-    expect(signalingReconnectPlan({ connection: 'disconnected', ice: 'disconnected', remoteInstance: 'a', previousInstance: 'a' })).toBe('keep')
-    expect(signalingReconnectPlan({ connection: 'connected', ice: 'connected', remoteInstance: 'b', previousInstance: 'a' })).toBe('renegotiate')
-    expect(signalingReconnectPlan({ connection: 'failed', ice: 'failed', remoteInstance: 'a', previousInstance: 'a' })).toBe('renegotiate')
-    expect(replaceSocketPlan({ readyState: 1, probeAnswered: true })).toBe('keep')
-    expect(replaceSocketPlan({ readyState: 1, probeAnswered: false })).toBe('replace')
-    expect(replaceSocketPlan({ readyState: 3, probeAnswered: true })).toBe('replace')
-    expect(offerAgainPlan({ polite: true, signaling: 'stable', ice: 'disconnected', connection: 'disconnected' })).toBe('ask')
-    expect(offerAgainPlan({ polite: true, signaling: 'have-local-offer', ice: 'new', connection: 'new' })).toBe('ask')
-    expect(offerAgainPlan({ polite: false, signaling: 'have-local-offer', ice: 'connected', connection: 'connecting' })).toBe('resend')
-    expect(offerAgainPlan({ polite: false, signaling: 'have-local-offer', ice: 'failed', connection: 'failed' })).toBe('offer')
-    expect(offerAgainPlan({ polite: false, signaling: 'stable', ice: 'failed', connection: 'failed' })).toBe('offer')
-    expect(iceUfrag('a=ice-ufrag:abc123\r\n')).toBe('abc123')
   })
 })
 
