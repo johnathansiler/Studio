@@ -20,7 +20,29 @@ The same image runs elsewhere:
 - Fly.io: install the `fly` CLI, run `fly auth login`, then `fly launch --copy-config --no-deploy` and `fly deploy`. `fly.toml` is already in the repo; change `app` if that name is taken.
 - Railway: new project from this GitHub repo. `railway.json` points at the Dockerfile and the `/api/health` check. Sign in when Railway asks.
 
-`GET /api/health` returns `{ "ok": true, "service": "cueharbor" }`. The process listens on `PORT` (default 8787) and `HOST` (default `0.0.0.0`). Optional TURN: `TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL`.
+`GET /api/health` returns `{ "ok": true, "service": "cueharbor" }`. The process listens on `PORT` (default 8787) and `HOST` (default `0.0.0.0`).
+
+## TURN for real networks
+
+Signaling (join, admit, the arrangement, play and stop) uses the WebSocket. Video, the live guest microphone, and the direct take upload use a WebRTC peer connection. Without a TURN relay, two browsers on different networks often never connect: the guest still hears the backing, because that audio was sent over the socket, but the host sees no video and the printed guide is a flat line.
+
+CueHarbor asks Cloudflare Realtime TURN for a short-lived credential and hands that to the browsers. Cloudflare charges **$0.05 per GB** sent from their network to the client. There is no monthly fee. (TURN is free only when it is used with Cloudflare’s own SFU. CueHarbor does not use that SFU.)
+
+Set this up once on the existing Render service:
+
+1. Sign in at [dash.cloudflare.com](https://dash.cloudflare.com).
+2. Open the account, then **Realtime** → **TURN**. You can also use the dashboard search and type `TURN`.
+3. Create a TURN key. Copy the **key ID** and the **API token**. The token is shown once. These are not the username and password the browser uses.
+4. In Render, open the `cueharbor` service → **Environment**.
+5. Add `CF_TURN_KEY_ID` and `CF_TURN_API_TOKEN`. Save. Render restarts the service.
+6. Open `https://your-host/api/ice`. The JSON should list `turn.cloudflare.com` and `"turn": "cloudflare"`.
+7. Start a new session. The signal panel should say the media path connected, directly or through TURN.
+
+The server calls `POST https://rtc.live.cloudflare.com/v1/turn/keys/$CF_TURN_KEY_ID/credentials/generate-ice-servers` with `Authorization: Bearer $CF_TURN_API_TOKEN` and caches the result for 30 minutes. Credentials expire after an hour. The browser never sees the API token.
+
+If Cloudflare is not set, these still work as a fallback, in order: `TURN_URL`, `TURN_USERNAME`, and `TURN_CREDENTIAL` (any coturn or static server; comma-separated URLs are allowed); then `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`; then `METERED_DOMAIN` and `METERED_API_KEY`. `ICE_TRANSPORT_POLICY=relay` forces the relay, which is how the local coturn check is run.
+
+When the data channel never opens, the guest posts the take to `/api/takes` in chunks and the server forwards it to the host. That uses Render bandwidth in both directions. A one-minute mono 48 kHz 16-bit vocal is about 5.8 MB each way. Takes over 32 MB are refused. A take whose peak is under 0.001 is still placed, and the host is told it is silent.
 
 ## Run it locally
 
@@ -57,6 +79,8 @@ Keys: select the MIDI clip to open a piano roll. A simple synth plays the notes.
 
 Remote room: gallery and speaker views, active speaker, camera and talkback toggles, device pickers, screen share, chat, reactions, raise hand, waiting room, admit, remove, and host mute. The video dock resizes and can pop out (Chromium picture-in-picture). Headphones on.
 
+Phones and foldables use the same app. Portrait phones stack the video over the timeline. A short landscape phone puts the session beside the arrange view. A half-folded table-top posture, from CSS viewport segments or the Device Posture API, keeps video on the top half and transport on the bottom. The artist view is the simple screen: video, a mic meter, a headphone reminder, and record status. The first tap unlocks the audio device, a screen wake lock stays on during a live session, and the app can be installed from the manifest.
+
 ## Latency
 
 Physics first. A packet cannot cross a network in zero time. CueHarbor splits the problem in two.
@@ -89,7 +113,7 @@ Chrome did not report `jitterBufferEmittedCount` here, so the buffer row in the 
 - Music is Opus, forced in SDP: `ptime` and `maxptime` 10 ms (browsers floor Opus at 10 ms even though libopus can do 2.5), stereo, `usedtx=0`, `cbr=1`, `maxaveragebitrate` 510 kbps, in-band FEC on by default. The sender is high priority.
 - Music receivers ask for `playoutDelayHint = 0` and `jitterBufferTarget = 0` where the browser allows it. Talkback keeps a 20 ms jitter target.
 - Music capture disables echo cancellation, noise suppression, and auto gain, and sets `contentHint = 'music'`. Talkback is a second capture with processing on and `contentHint = 'speech'`.
-- The room is a full mesh. There is no SFU hop. TURN is only a fallback when you set `TURN_URL`, `TURN_USERNAME`, and `TURN_CREDENTIAL`. Otherwise ICE uses `stun:stun.l.google.com:19302` and prefers a direct path.
+- The room is a full mesh. There is no SFU hop. ICE tries a direct path first. Cloudflare TURN, or the static `TURN_URL` fallback, is there when a NAT blocks that path. The signal panel shows whether media is direct, relayed, or failed.
 - An optional **PCM** monitor (the dock toggle, off by default) sends 10 ms float frames on an unreliable data channel. Playout targets `max(18 ms, median network + 8 ms)`. Uncompressed stereo PCM is about 1.5 Mbps and has no FEC and no congestion control, so Opus stays the default on a real network. Alignment uses whichever path the artist actually heard.
 
 The cue tap is the master bus before the monitor delay and before remote returns. The artist does not hear their own voice coming back through the mix. Metronome clicks are in the cue. Talkback is a separate bus.
@@ -117,7 +141,9 @@ Output latency is `(baseLatency + outputLatency) × 1000`, which matches the spe
 
 On punch-in the host broadcasts the timeline sample and the cue’s `performance.now()`. The guest has been rolling a ~30 s local buffer, so the control message cannot clip the top of the take. The capture window is shifted later by the one-way cue delay plus the guest’s input latency: the singer heard the music late, and the microphone heard them later still. Shifting the take earlier by that amount puts the vocal on the music they sang to.
 
-The WAV (16-bit) uploads on an ordered data channel in 16 KB chunks. The host drops the latent guide clip that shares the take id and places the aligned clip at the record-start sample, nudging it if the rolling buffer started late. The dock shows round trip, jitter, loss, jitter buffer, clock RTT, the live monitor estimate, and device input/output.
+An iPhone guest can see its own camera while the host sees nothing. That self-view is a local preview. Safari only sends it if the same track is on the video transceiver before the offer or answer is created, and if the video section says `sendrecv`. Attaching the camera after `setLocalDescription`, which is enough for Chrome and Samsung, leaves Safari on `recvonly`. The host’s offer lists H.264 and VP8, in that order, and does not lead with AV1. Opus SDP edits do not touch the video sections.
+
+The WAV (16-bit) uploads on an ordered data channel in 16 KB chunks. If that channel is not open, the same bytes go through `/api/takes` and the server relays them to the host. The host drops the latent guide clip that shares the take id and places the aligned clip at the record-start sample, nudging it if the rolling buffer started late. A silent file is called out instead of being treated as a good take. The dock shows the media path, round trip, jitter, loss, jitter buffer, clock RTT, the live monitor estimate, and device input/output.
 
 ### Jam mode
 

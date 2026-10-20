@@ -37,8 +37,11 @@ export function TransportBar({
         <button className="t-btn" onClick={() => onSeek(0)} title="Return to start">
           ⏮
         </button>
-        <button className={`t-btn play ${status === 'playing' || status === 'recording' ? 'on' : ''}`} onClick={status === 'stopped' ? onPlay : onStop}>
-          {status === 'stopped' ? '▶' : '■'}
+        <button className={`t-btn play ${status === 'playing' || status === 'recording' ? 'on' : ''}`} onClick={onPlay} title="Play">
+          ▶
+        </button>
+        <button className="t-btn stop" onClick={onStop} title="Stop" disabled={status === 'stopped'}>
+          Stop
         </button>
         <button className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} onClick={onRecord} title="Record">
           ●

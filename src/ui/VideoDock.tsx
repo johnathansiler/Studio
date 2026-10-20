@@ -2,16 +2,19 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { AudioEngine } from '../audio/engine'
 import type { Participant, SessionClient } from '../remote/session'
+import { mediaStatus } from '../model/media'
 import { ms } from './format'
 
 export function VideoDock({
   session,
   engine,
+  simple,
   onCreate,
   onJoin,
 }: {
   session: SessionClient
   engine: AudioEngine
+  simple?: boolean
   onCreate: () => void
   onJoin: () => void
 }) {
@@ -40,6 +43,12 @@ export function VideoDock({
   const waiting = state.participants.filter((person) => !person.admitted && person.role !== 'host')
   const featured = state.activeSpeakerId
   const one = session.primaryOneWay()
+  const link = mediaStatus({
+    turn: state.turn,
+    turnError: state.turnError,
+    links: Object.values(state.media),
+    live: state.status === 'live',
+  })
 
   async function popOut(event: MouseEvent<HTMLButtonElement>) {
     const here = event.currentTarget.ownerDocument.defaultView
@@ -63,7 +72,7 @@ export function VideoDock({
     const dockRoot = createRoot(mount)
     popRoot.current = dockRoot
     popWindow.current = win
-    dockRoot.render(<LiveDock session={session} engine={engine} onCreate={onCreate} onJoin={onJoin} />)
+    dockRoot.render(<LiveDock session={session} engine={engine} simple={simple} onCreate={onCreate} onJoin={onJoin} />)
     setPopped(true)
     win.addEventListener('pagehide', () => {
       dockRoot.unmount()
@@ -90,7 +99,7 @@ export function VideoDock({
   }
 
   return (
-    <aside className="dock" ref={root}>
+    <aside className={`dock ${simple ? 'simple' : ''}`} ref={root}>
       <div className="dock-resize" />
       <div className="dock-bar">
         <strong>{state.code ? `Session ${state.code}` : 'Remote session'}</strong>
@@ -102,6 +111,18 @@ export function VideoDock({
           ⧉
         </button>
       </div>
+      {link && <div className={`media-banner ${link.tone}`}>{link.text}</div>}
+      {simple && (
+        <div className="artist-card">
+          <p>Headphones on. You should hear the session, not your own voice coming back.</p>
+          <div className="meter tall">
+            <b style={{ width: `${Math.min(100, levels.input * 320)}%` }} />
+          </div>
+          <strong className={engine.status === 'recording' ? 'rec-label' : ''}>
+            {engine.status === 'recording' ? 'Recording' : engine.status === 'playing' ? 'Playing' : engine.status === 'counting-in' ? 'Count-in' : 'Stopped'}
+          </strong>
+        </div>
+      )}
       {inviteUrl && (
         <div className="invite-card">
           <span>Send this link to the artist</span>
@@ -204,6 +225,7 @@ export function VideoDock({
               <b style={{ width: `${Math.min(100, levels.input * 320)}%`, height: '100%' }} />
             </div>
             <div className="hint">Performance meter (processing off). Talkback is a separate channel with echo control.</div>
+            <div className="hint">{state.localSend}</div>
             {Object.entries(state.latency).map(([id, latency]) => (
               <div key={id}>
                 {state.participants.find((person) => person.id === id)?.name}: RTT {ms(latency.rttMs)} · jitter {ms(latency.jitterMs, 1)} · loss{' '}
@@ -296,7 +318,7 @@ export function VideoDock({
   )
 }
 
-function LiveDock(props: { session: SessionClient; engine: AudioEngine; onCreate: () => void; onJoin: () => void }) {
+function LiveDock(props: { session: SessionClient; engine: AudioEngine; simple?: boolean; onCreate: () => void; onJoin: () => void }) {
   const [, bump] = useState(0)
   useEffect(() => props.session.subscribe(() => bump((n) => n + 1)), [props.session])
   useEffect(() => props.engine.subscribe(() => bump((n) => n + 1)), [props.engine])
@@ -316,6 +338,21 @@ function copyDockStyles(win: Window) {
       /* a cross-origin sheet cannot be read */
     }
   }
+}
+
+function playVideo(el: HTMLVideoElement | null, stream: MediaStream | null, muted: boolean) {
+  if (!el) return
+  el.muted = muted
+  el.autoplay = true
+  el.playsInline = true
+  el.setAttribute('playsinline', 'true')
+  el.setAttribute('webkit-playsinline', 'true')
+  if (el.srcObject !== stream) el.srcObject = stream
+  const start = () => {
+    void el.play().catch(() => undefined)
+  }
+  start()
+  el.onloadedmetadata = start
 }
 
 function Tile({
@@ -339,24 +376,36 @@ function Tile({
 }) {
   const ref = useRef<HTMLVideoElement>(null)
   const screenRef = useRef<HTMLVideoElement>(null)
+  const [hear, setHear] = useState(false)
   useEffect(() => {
-    const stream = session.videoStream(peerId, self ? 'self' : 'camera')
-    if (ref.current) {
-      ref.current.srcObject = stream
-      void ref.current.play().catch(() => undefined)
-    }
-    const screen = self ? null : session.videoStream(peerId, 'screen')
-    if (screenRef.current) {
-      screenRef.current.srcObject = screen
-      if (screen) void screenRef.current.play().catch(() => undefined)
-    }
-  }, [session, peerId, self, session.state.camOn, session.state.screenOn, session.state.participants])
+    playVideo(ref.current, session.videoStream(peerId, self ? 'self' : 'camera'), self || !hear)
+    playVideo(screenRef.current, self ? null : session.videoStream(peerId, 'screen'), true)
+  }, [session, peerId, self, hear, session.state.camOn, session.state.screenOn, session.state.participants, session.state.mediaTick])
   const screenOn = !self && session.state.participants.find((person) => person.id === peerId)?.screen
   return (
     <div className={`tile ${speaking ? 'speaking' : ''} ${featured ? 'featured' : ''}`}>
-      <video ref={ref} autoPlay playsInline muted={self} />
+      <video ref={ref} autoPlay playsInline muted={self || !hear} />
       {screenOn && <video ref={screenRef} autoPlay playsInline muted style={{ height: 90 }} />}
+      {!self && (
+        <button
+          className="text-btn tile-audio"
+          type="button"
+          onClick={() => {
+            const next = !hear
+            setHear(next)
+            const el = ref.current
+            if (!el) return
+            el.muted = !next
+            void el.play().catch(() => undefined)
+          }}
+        >
+          {hear ? 'Mute tile' : 'Unmute tile'}
+        </button>
+      )}
       {!session.state.camOn && self && <div className="placeholder">Camera off</div>}
+      {!self && !session.videoStream(peerId, 'camera') && (
+        <div className="placeholder">{session.state.media[peerId]?.connection === 'connected' ? 'Camera off' : 'No video yet'}</div>
+      )}
       <div className="cap">
         <span>{self ? `${name} · you` : name}</span>
         {hand && <span>✋</span>}

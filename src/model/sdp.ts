@@ -90,6 +90,29 @@ export function mungeOpusSdp(sdp: string, opts: OpusOptions = DEFAULT_OPUS): str
   return rendered.flat().join('\r\n') + '\r\n'
 }
 
+/**
+ * Safari answers a video m-line with a=recvonly when the track was attached
+ * before setRemoteDescription, then cleared. The self-view still plays.
+ * The host never receives that camera. Flip those sections to sendrecv
+ * when we have a live local track. H.264 lines are left untouched.
+ */
+export function markOutboundVideo(sdp: string, send: boolean[]): string {
+  const lines = sdp.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n')
+  const sections: string[][] = [[]]
+  for (const line of lines) {
+    if (line.startsWith('m=') && sections[sections.length - 1].length) sections.push([])
+    sections[sections.length - 1].push(line)
+  }
+  let video = -1
+  const rendered = sections.map((section) => {
+    if (!section[0]?.startsWith('m=video')) return section
+    video += 1
+    if (!send[video]) return section
+    return section.map((line) => (line === 'a=recvonly' || line === 'a=inactive' || line === 'a=sendonly' ? 'a=sendrecv' : line))
+  })
+  return rendered.flat().join('\r\n') + '\r\n'
+}
+
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n))
 }

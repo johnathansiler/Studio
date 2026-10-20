@@ -5,6 +5,14 @@ interface DocumentPictureInPicture {
   readonly window?: Window | null
 }
 
+interface DevicePosture extends EventTarget {
+  readonly type: 'continuous' | 'folded'
+}
+
+interface Navigator {
+  devicePosture?: DevicePosture
+}
+
 interface Window {
   documentPictureInPicture?: DocumentPictureInPicture
 }

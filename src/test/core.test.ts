@@ -15,8 +15,10 @@ import {
   shiftPlacementForLateBuffer,
   sliceChunksByPerf,
 } from '../model/latency'
-import { DEFAULT_OPUS, mungeOpusSdp } from '../model/sdp'
+import { DEFAULT_OPUS, markOutboundVideo, mungeOpusSdp } from '../model/sdp'
 import { arrangementDigest, catchUpSchedule, guestMayRequest, guestStartPerf, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
+import { cameraAttempts, orderVideoCodecs, outboundVideoCodecs, shouldSetVideoCodecPreferences } from '../model/codecs'
+import { filterBrowserTurnUrls, isSilentTake, mediaStatus, queueIceCandidate, staticTurnServer } from '../model/media'
 import { formatBarsBeats, formatTimecode, samplesToMusical, snapSample } from '../model/time'
 import { decodeWavPCM, encodeWav, linearResample, parseWavHeader } from '../model/wav'
 import { ProjectStore, seedDemoProject } from '../state/store'
@@ -93,6 +95,106 @@ describe('shared session transport', () => {
     store.remoteFollow = true
     store.setTempo(90)
     expect(store.project.tempo).toBe(tempo)
+  })
+})
+
+describe('video codecs', () => {
+  it('keeps H.264 and puts it ahead of VP8', () => {
+    const ordered = orderVideoCodecs([
+      { mimeType: 'video/AV1' },
+      { mimeType: 'video/VP8' },
+      { mimeType: 'video/H264' },
+      { mimeType: 'video/rtx' },
+    ])
+    expect(ordered.map((codec) => codec.mimeType)).toEqual(['video/H264', 'video/VP8', 'video/AV1', 'video/rtx'])
+  })
+
+  it('offers H.264 and VP8 to an iPhone and leaves AV1 out', () => {
+    const offered = outboundVideoCodecs([
+      { mimeType: 'video/VP8' },
+      { mimeType: 'video/rtx' },
+      { mimeType: 'video/AV1' },
+      { mimeType: 'video/H264' },
+      { mimeType: 'video/rtx' },
+      { mimeType: 'video/VP9' },
+    ])
+    expect(offered.map((codec) => codec.mimeType)).toEqual(['video/H264', 'video/rtx', 'video/VP8', 'video/rtx'])
+  })
+
+  it('does not call setCodecPreferences on Safari, where that drops H.264', () => {
+    expect(shouldSetVideoCodecPreferences('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1')).toBe(false)
+    expect(shouldSetVideoCodecPreferences('Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/128.0.0.0 Mobile Safari/537.36')).toBe(true)
+  })
+
+  it('does not ask Safari for an exact camera device', () => {
+    const attempts = cameraAttempts('cam-1')
+    expect(JSON.stringify(attempts)).not.toMatch(/exact/)
+    expect(attempts[0]).toMatchObject({ deviceId: { ideal: 'cam-1' }, facingMode: 'user' })
+    expect(attempts.at(-1)).toEqual({})
+  })
+})
+
+describe('safari video send', () => {
+  it('turns a recvonly video answer into sendrecv and keeps H.264', () => {
+    const sdp = [
+      'v=0',
+      'm=audio 9 UDP/TLS/RTP/SAVPF 111',
+      'a=rtpmap:111 opus/48000/2',
+      'a=recvonly',
+      'm=video 9 UDP/TLS/RTP/SAVPF 102',
+      'a=rtpmap:102 H264/90000',
+      'a=fmtp:102 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f',
+      'a=recvonly',
+      'm=video 9 UDP/TLS/RTP/SAVPF 103',
+      'a=rtpmap:103 VP8/90000',
+      'a=recvonly',
+      '',
+    ].join('\r\n')
+    const shaped = markOutboundVideo(mungeOpusSdp(sdp, DEFAULT_OPUS), [true, false])
+    expect(shaped).toMatch(/a=rtpmap:102 H264\/90000/)
+    expect(shaped).toMatch(/m=video[\s\S]*a=sendrecv/)
+    const videoSections = shaped.split('m=video').slice(1)
+    expect(videoSections[0]).toMatch(/a=sendrecv/)
+    expect(videoSections[1]).toMatch(/a=recvonly/)
+    expect(videoSections[1]).not.toMatch(/a=sendrecv/)
+  })
+})
+
+describe('media path', () => {
+  it('keeps an ICE candidate that arrives before the remote description', () => {
+    const queued = queueIceCandidate(false, [], { candidate: 'a' })
+    expect(queued.apply).toEqual([])
+    expect(queued.pending).toEqual([{ candidate: 'a' }])
+    const flushed = queueIceCandidate(true, queued.pending, { candidate: 'b' })
+    expect(flushed.apply.map((item) => item.candidate)).toEqual(['a', 'b'])
+    expect(flushed.pending).toEqual([])
+  })
+
+  it('drops TURN urls on port 53', () => {
+    expect(filterBrowserTurnUrls(['turn:turn.cloudflare.com:3478?transport=udp', 'turn:turn.cloudflare.com:53?transport=udp'])).toEqual([
+      'turn:turn.cloudflare.com:3478?transport=udp',
+    ])
+    expect(staticTurnServer('turn:127.0.0.1:3478,turns:127.0.0.1:5349', 'cue', 'harbor').urls).toEqual([
+      'turn:127.0.0.1:3478',
+      'turns:127.0.0.1:5349',
+    ])
+  })
+
+  it('says when media cannot cross a network without TURN', () => {
+    const label = mediaStatus({
+      turn: 'none',
+      live: true,
+      links: [{ connection: 'failed', ice: 'failed', path: 'unknown', ageMs: 15000 }],
+    })
+    expect(label?.tone).toBe('bad')
+    expect(label?.text).toMatch(/no TURN relay/)
+  })
+
+  it('treats a flat line as a silent take', () => {
+    expect(isSilentTake([new Float32Array(128)])).toBe(true)
+    const loud = new Float32Array(128)
+    loud[8] = 0.2
+    expect(isSilentTake([loud])).toBe(false)
   })
 })
 
