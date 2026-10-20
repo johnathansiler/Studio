@@ -4,7 +4,8 @@ import { renderDemoLoop } from './model/demo'
 import { uid, type AudioClip } from './model/types'
 import type { IncomingTake } from './remote/session'
 import { SessionClient } from './remote/session'
-import { listProjects, loadProject, saveProject, base64ToBytes, bytesToBase64 } from './storage/idb'
+import { listProjects, loadLastProject, loadProject, requestPersistentStorage, saveProject, base64ToBytes, bytesToBase64, type WorkspaceSnapshot } from './storage/idb'
+import { readIdentity, writeIdentity } from './storage/identity'
 import { ProjectStore, seedDemoProject } from './state/store'
 import { decodeWavPCM, encodeWav, linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
@@ -44,6 +45,9 @@ export function App() {
   const [saved, setSaved] = useState<{ id: string; name: string; savedAt: number }[]>([])
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [help, setHelp] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [phone, setPhone] = useState(() => window.matchMedia('(max-width: 940px)').matches)
+  const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
   const takeRef = useRef<{ id: string; endSample: number } | null>(null)
@@ -52,6 +56,11 @@ export function App() {
   const publishTimer = useRef(0)
   const pendingFollow = useRef<Record<string, unknown> | null>(null)
   const workletWarned = useRef(false)
+  const surfaceRef = useRef(surface)
+  const phonePaneRef = useRef(phonePane)
+  const flushSave = useRef<() => void>(() => {})
+  surfaceRef.current = surface
+  phonePaneRef.current = phonePane
 
   useEffect(() => {
     session.bindArrangement(store)
@@ -83,9 +92,19 @@ export function App() {
       }
     })
     const params = new URLSearchParams(location.search)
-    const code = params.get('session')
-    if (code) {
-      setJoinCode(code.toUpperCase())
+    const urlCode = params.get('session')?.toUpperCase() || ''
+    const identity = readIdentity()
+    const code = urlCode || identity?.code || ''
+    if (identity?.transportMode) store.setTransportMode(identity.transportMode)
+    if (code && identity?.participantId && identity.code === code) {
+      const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+      if (ios && !navigator.userActivation?.isActive) session.holdMediaForGesture()
+      session.connect({ name: identity.name || joinName || 'Artist', code })
+      setSurface(identity.role === 'guest' ? 'artist' : 'studio')
+      setPhonePane('room')
+      setJoinOpen(false)
+    } else if (urlCode) {
+      setJoinCode(urlCode)
       setJoinOpen(true)
       setSurface('artist')
     }
@@ -105,6 +124,103 @@ export function App() {
       setVersion((value) => value + 1)
     })
   }, [store, engine, session])
+
+  useEffect(() => {
+    const saveReady = { current: false }
+    let timer = 0
+    let lastQuota = 0
+    let cancel = false
+    const snapshot = (): WorkspaceSnapshot => ({
+      view: store.view,
+      transportMode: store.transportMode,
+      positionSamples: Math.round(engine.positionSamples),
+      selectedTrackId: store.selectedTrackId,
+      surface: surfaceRef.current,
+      phonePane: phonePaneRef.current,
+    })
+    const write = () => {
+      if (!saveReady.current || cancel) return
+      void saveProject(store.project, store.buffers, snapshot()).then((result) => {
+        if (result === 'quota' && Date.now() - lastQuota > 15000) {
+          lastQuota = Date.now()
+          store.toast('This browser is out of space, so the latest recording could not be kept.', 'warn')
+        }
+      }).catch(() => undefined)
+    }
+    void (async () => {
+      await requestPersistentStorage()
+      const saved = await loadLastProject().catch(() => null)
+      if (cancel) return
+      if (saved) {
+        store.loadProject(saved.project, saved.buffers)
+        store.setView(saved.workspace.view)
+        store.setTransportMode(saved.workspace.transportMode)
+        if (saved.workspace.selectedTrackId) store.selectTrack(saved.workspace.selectedTrackId)
+        setSurface(saved.workspace.surface)
+        setPhonePane(saved.workspace.phonePane)
+        engine.seek(saved.workspace.positionSamples || 0)
+        engine.sync(store.project, (id) => store.buffers.get(id))
+      }
+      saveReady.current = true
+    })()
+    const schedule = () => {
+      if (timer) return
+      timer = window.setTimeout(() => {
+        timer = 0
+        write()
+      }, 500)
+    }
+    const unsub = store.subscribe(schedule)
+    const flush = () => {
+      window.clearTimeout(timer)
+      write()
+    }
+    flushSave.current = flush
+    const onVisible = () => {
+      if (document.visibilityState === 'hidden') flush()
+    }
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      cancel = true
+      saveReady.current = false
+      flushSave.current = () => {}
+      unsub()
+      window.clearTimeout(timer)
+      window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [store, engine])
+
+  useEffect(() => {
+    flushSave.current()
+  }, [surface, phonePane])
+
+  useEffect(() => {
+    const code = session.state.code
+    const id = session.state.selfId
+    const role = session.state.role
+    if (!code || !id || !role) return
+    writeIdentity({
+      participantId: id,
+      name: session.state.name,
+      role,
+      code,
+      camOn: session.state.camOn,
+      micId: session.state.micId,
+      outId: session.state.outId,
+      musicOn: session.state.musicOn,
+      jamEnabled: session.state.jamEnabled,
+      jamDelayMs: session.state.jamDelayMs,
+      monitorMode: session.state.monitorMode,
+      transportMode: store.transportMode,
+    })
+    const url = new URL(location.href)
+    if (url.searchParams.get('session') !== code) {
+      url.searchParams.set('session', code)
+      history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+    }
+  }, [session, store, version])
 
   useEffect(() => {
     return session.subscribe(() => {
@@ -134,6 +250,20 @@ export function App() {
       if (session.state.status === 'idle') store.remoteFollow = false
     })
   }, [session, store])
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 940px)')
+    const apply = () => {
+      setPhone(query.matches)
+      document.documentElement.classList.toggle('phone-root', query.matches)
+    }
+    apply()
+    query.addEventListener('change', apply)
+    return () => {
+      query.removeEventListener('change', apply)
+      document.documentElement.classList.remove('phone-root')
+    }
+  }, [])
 
   useEffect(() => {
     const unlock = () => {
@@ -440,8 +570,24 @@ export function App() {
   }
 
   async function persist() {
-    await saveProject(store.project, store.buffers)
-    store.toast('Saved in this browser.', 'good')
+    const result = await saveProject(store.project, store.buffers, {
+      view: store.view,
+      transportMode: store.transportMode,
+      positionSamples: Math.round(engine.positionSamples),
+      selectedTrackId: store.selectedTrackId,
+      surface,
+      phonePane,
+    })
+    store.toast(result === 'quota' ? 'This browser is out of space, so the project could not be kept.' : 'Saved in this browser.', result === 'quota' ? 'warn' : 'good')
+  }
+
+  function joinSession() {
+    engine.unlock()
+    session.primeMediaFromGesture()
+    session.connect({ name: joinName || 'Artist', code: joinCode.trim() })
+    setJoinOpen(false)
+    setSurface('artist')
+    setPhonePane('room')
   }
 
   async function openLibrary() {
@@ -504,7 +650,7 @@ export function App() {
   const showRoll = store.view === 'arrange' && store.selectedMidiClipId
 
   return (
-    <div className={`shell ${surface}`} style={{ ['--dock' as string]: `${dock}px` }} data-version={version}>
+    <div className={`shell ${surface} ${phone ? 'phone' : ''}`} style={{ ['--dock' as string]: `${dock}px` }} data-version={version}>
       <header className="topbar">
         <div className="brand">
           <div className="mark" aria-hidden>
@@ -519,37 +665,65 @@ export function App() {
           </div>
         </div>
         <input className="project-name" value={store.project.name} onChange={(event) => store.renameProject(event.target.value)} />
-        <div className="views">
-          {(['arrange', 'mix', 'session'] as const).map((view) => (
-            <button key={view} className={store.view === view ? 'active' : ''} onClick={() => { setSurface('studio'); store.setView(view) }}>
-              {view}
-            </button>
-          ))}
-        </div>
+        {!phone && (
+          <div className="views">
+            {(['arrange', 'mix', 'session'] as const).map((view) => (
+              <button key={view} className={store.view === view ? 'active' : ''} onClick={() => { setSurface('studio'); store.setView(view) }}>
+                {view}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="spacer" />
-        {session.state.role === 'host' && session.state.code && (
+        {!phone && session.state.role === 'host' && session.state.code && (
           <button className="text-btn primary" onClick={() => void copyInvite()}>
             Copy invite link
           </button>
         )}
         {session.state.status === 'live' && <div className="latency-pill">monitor {one ? `${one.ms.toFixed(0)} ms` : '…'}</div>}
-        <div className="top-actions">
-          <button className="text-btn" onClick={() => void persist()}>Save</button>
-          <button className="text-btn" onClick={() => void openLibrary()}>Library</button>
-          <button className="text-btn" onClick={exportFile}>File</button>
-          <button className="text-btn" onClick={() => projectFileRef.current?.click()}>Open</button>
-          <button className="text-btn" onClick={() => fileRef.current?.click()}>Import</button>
-          <button className="text-btn" onClick={() => void bounce()}>Bounce</button>
-          <button className="text-btn" onClick={() => store.addTrack('audio')}>+ Audio</button>
-          <button className="text-btn" onClick={() => store.addTrack('midi')}>+ Inst</button>
-          <button className="text-btn" onClick={() => setHelp(true)} title="Shortcuts">?</button>
-          <button className="text-btn" onClick={() => setSurface(surface === 'studio' ? 'artist' : 'studio')}>
-            {surface === 'studio' ? 'Artist view' : 'Studio'}
+        {phone ? (
+          <button className="text-btn menu-btn" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
+            {menuOpen ? 'Close' : 'Menu'}
           </button>
-          <button className="text-btn" onClick={() => setDockEdge(dockEdge === 'right' ? 'bottom' : 'right')}>
-            Dock {dockEdge === 'right' ? 'bottom' : 'right'}
-          </button>
-        </div>
+        ) : (
+          <div className="top-actions">
+            <button className="text-btn" onClick={() => void persist()}>Save</button>
+            <button className="text-btn" onClick={() => void openLibrary()}>Library</button>
+            <button className="text-btn" onClick={exportFile}>File</button>
+            <button className="text-btn" onClick={() => projectFileRef.current?.click()}>Open</button>
+            <button className="text-btn" onClick={() => fileRef.current?.click()}>Import</button>
+            <button className="text-btn" onClick={() => void bounce()}>Bounce</button>
+            <button className="text-btn" onClick={() => store.addTrack('audio')}>+ Audio</button>
+            <button className="text-btn" onClick={() => store.addTrack('midi')}>+ Inst</button>
+            <button className="text-btn" onClick={() => setHelp(true)} title="Shortcuts">?</button>
+            <button className="text-btn" onClick={() => setSurface(surface === 'studio' ? 'artist' : 'studio')}>
+              {surface === 'studio' ? 'Artist view' : 'Studio'}
+            </button>
+            <button className="text-btn" onClick={() => setDockEdge(dockEdge === 'right' ? 'bottom' : 'right')}>
+              Dock {dockEdge === 'right' ? 'bottom' : 'right'}
+            </button>
+          </div>
+        )}
+        {phone && menuOpen && (
+          <div className="phone-menu">
+            <button className="text-btn" onClick={() => { setMenuOpen(false); void persist() }}>Save</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); void openLibrary() }}>Library</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); exportFile() }}>File</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); projectFileRef.current?.click() }}>Open</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); fileRef.current?.click() }}>Import</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); void bounce() }}>Bounce</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); store.addTrack('audio') }}>+ Audio</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); store.addTrack('midi') }}>+ Inst</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }}>Clips</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); setHelp(true) }}>Shortcuts</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); setSurface(surface === 'studio' ? 'artist' : 'studio'); setPhonePane('room') }}>
+              {surface === 'studio' ? 'Artist view' : 'Studio'}
+            </button>
+            {session.state.role === 'host' && session.state.code && (
+              <button className="text-btn primary" onClick={() => { setMenuOpen(false); void copyInvite() }}>Copy invite</button>
+            )}
+          </div>
+        )}
       </header>
       {(surface === 'studio' || session.state.status === 'live') && (
         <TransportBar
@@ -562,8 +736,8 @@ export function App() {
           onSeek={(sample) => void locate(sample)}
         />
       )}
-      <div className={`workspace ${dockEdge === 'bottom' && surface === 'studio' ? 'dock-bottom' : ''}`}>
-        {surface === 'studio' && (
+      <div className={`workspace ${!phone && dockEdge === 'bottom' && surface === 'studio' ? 'dock-bottom' : ''}`}>
+        {surface === 'studio' && (!phone || phonePane === 'edit') && (
           <div className="main-pane">
             <div className="editor">
               {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} onSeek={(sample) => void locate(sample)} />}
@@ -573,6 +747,7 @@ export function App() {
             {showRoll && <PianoRoll store={store} />}
           </div>
         )}
+        {(!phone || phonePane === 'room' || surface === 'artist') && (
         <div
           className="dock-slot"
           onPointerDown={(event) => {
@@ -598,16 +773,35 @@ export function App() {
             session={session}
             engine={engine}
             onCreate={() => {
-              void engine.resume()
+              engine.unlock()
+              session.primeMediaFromGesture()
               setSurface('studio')
+              setPhonePane('room')
               session.connect({ name: joinName || 'Engineer', create: true })
             }}
             onJoin={() => setJoinOpen(true)}
           />
         </div>
+        )}
       </div>
+      {phone && (
+        <nav className="phone-tabs" aria-label="Sections">
+          <button className={phonePane === 'edit' && store.view === 'arrange' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setMenuOpen(false) }}>Arrange</button>
+          <button className={phonePane === 'edit' && store.view === 'mix' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('mix'); setMenuOpen(false) }}>Mix</button>
+          <button className={phonePane === 'room' ? 'active' : ''} onClick={() => { setPhonePane('room'); setSurface('studio'); setMenuOpen(false) }}>Session</button>
+        </nav>
+      )}
       <input ref={fileRef} type="file" accept="audio/*" multiple hidden onChange={(event) => void importAudio(event.target.files)} />
       <input ref={projectFileRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importProject(event.target.files?.[0] || null)} />
+      {session.state.audioLocked && session.state.status !== 'idle' && session.state.status !== 'error' && (
+        <button type="button" className="text-btn primary tap-reconnect" id="tap-reconnect" onClick={() => {
+          engine.unlock()
+          session.primeMediaFromGesture()
+          void session.resumeAudio()
+        }}>
+          Tap to reconnect
+        </button>
+      )}
       {joinOpen && (
         <div className="modal-back">
           <div className="modal">
@@ -617,16 +811,8 @@ export function App() {
               <input value={joinName} onChange={(event) => setJoinName(event.target.value)} placeholder="Your name" />
               <input value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} placeholder="Invite code" />
               <div className="row-btns">
-                <button className="text-btn" onClick={() => setJoinOpen(false)}>Cancel</button>
-                <button
-                  className="text-btn primary"
-                  onClick={() => {
-                    void engine.resume()
-                    session.connect({ name: joinName || 'Artist', code: joinCode.trim() })
-                    setJoinOpen(false)
-                    setSurface('artist')
-                  }}
-                >
+                <button type="button" className="text-btn" onClick={() => setJoinOpen(false)}>Cancel</button>
+                <button type="button" className="text-btn primary" id="join-session" onClick={joinSession}>
                   Join
                 </button>
               </div>

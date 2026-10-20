@@ -42,7 +42,8 @@ export function mungeOpusSdp(sdp: string, opts: OpusOptions = DEFAULT_OPUS): str
     params.set('stereo', opts.stereo ? '1' : '0')
     params.set('sprop-stereo', opts.stereo ? '1' : '0')
     params.set('maxaveragebitrate', String(Math.round(opts.maxAverageBitrate)))
-    params.set('cbr', '1')
+    params.set('maxplaybackrate', '48000')
+    params.set('cbr', '0')
     const body = [...params.entries()].map(([k, v]) => `${k}=${v}`).join(';')
     return `a=fmtp:${pt} ${body}`
   }
@@ -96,7 +97,7 @@ export function mungeOpusSdp(sdp: string, opts: OpusOptions = DEFAULT_OPUS): str
  * The host never receives that camera. Flip those sections to sendrecv
  * when we have a live local track. H.264 lines are left untouched.
  */
-export function markOutboundVideo(sdp: string, send: boolean[]): string {
+export function markOutboundVideo(sdp: string, send: Array<boolean | 'sendrecv' | 'sendonly' | 'recvonly' | 'inactive'>): string {
   const lines = sdp.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n')
   const sections: string[][] = [[]]
   for (const line of lines) {
@@ -107,8 +108,10 @@ export function markOutboundVideo(sdp: string, send: boolean[]): string {
   const rendered = sections.map((section) => {
     if (!section[0]?.startsWith('m=video')) return section
     video += 1
-    if (!send[video]) return section
-    return section.map((line) => (line === 'a=recvonly' || line === 'a=inactive' || line === 'a=sendonly' ? 'a=sendrecv' : line))
+    const desired = send[video]
+    if (!desired) return section
+    const target = desired === true ? 'sendrecv' : desired
+    return section.map((line) => (line === 'a=recvonly' || line === 'a=inactive' || line === 'a=sendonly' || line === 'a=sendrecv' ? `a=${target}` : line))
   })
   return rendered.flat().join('\r\n') + '\r\n'
 }

@@ -38,7 +38,7 @@ Set this up once on the existing Render service:
 6. Open `https://your-host/api/ice`. The JSON should list `turn.cloudflare.com` and `"turn": "cloudflare"`.
 7. Start a new session. The signal panel should say the media path connected, directly or through TURN.
 
-The server calls `POST https://rtc.live.cloudflare.com/v1/turn/keys/$CF_TURN_KEY_ID/credentials/generate-ice-servers` with `Authorization: Bearer $CF_TURN_API_TOKEN` and caches the result for 30 minutes. Credentials expire after an hour. The browser never sees the API token.
+The server calls `POST https://rtc.live.cloudflare.com/v1/turn/keys/$CF_TURN_KEY_ID/credentials/generate-ice-servers` with `Authorization: Bearer $CF_TURN_API_TOKEN`. `GET /api/ice` and each session welcome read `CF_TURN_KEY_ID` and `CF_TURN_API_TOKEN` at request time. A working credential is cached for 30 minutes; a missing relay is not cached, and changing those variables drops the cache immediately. Adding them in Render and redeploying is enough. Credentials expire after an hour. The browser never sees the API token.
 
 If Cloudflare is not set, these still work as a fallback, in order: `TURN_URL`, `TURN_USERNAME`, and `TURN_CREDENTIAL` (any coturn or static server; comma-separated URLs are allowed); then `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`; then `METERED_DOMAIN` and `METERED_API_KEY`. `ICE_TRANSPORT_POLICY=relay` forces the relay, which is how the local coturn check is run.
 
@@ -69,7 +69,7 @@ npm test
 
 ## What you can do
 
-Arrange: record-arm, mic record, play, stop, loop, metronome, tempo, time signature, bars/beats and timecode, per-track volume, pan, mute, solo, and monitor. Clips move, trim, split, and fade. Zoom and scroll the timeline. Undo and redo. Import audio, bounce a WAV, save in IndexedDB, or write a `.cueharbor.json` file.
+Arrange: record-arm, mic record, play, stop, loop, metronome, tempo, time signature, bars/beats and timecode, per-track volume, pan, mute, solo, and monitor. Clips move, trim, split, and fade. Zoom and scroll the timeline. Undo and redo. Import audio, bounce a WAV, or write a `.cueharbor.json` file. The open project autosaves to IndexedDB, including recorded audio, and a refresh restores it.
 
 Mix: channel strips and a master bus. Each strip can insert a shelf/peak EQ, a compressor, a delay, or a convolution reverb.
 
@@ -79,7 +79,7 @@ Keys: select the MIDI clip to open a piano roll. A simple synth plays the notes.
 
 Remote room: gallery and speaker views, active speaker, camera and talkback toggles, device pickers, screen share, chat, reactions, raise hand, waiting room, admit, remove, and host mute. The video dock resizes and can pop out (Chromium picture-in-picture). Headphones on.
 
-Phones and foldables use the same app. Portrait phones stack the video over the timeline. A short landscape phone puts the session beside the arrange view. A half-folded table-top posture, from CSS viewport segments or the Device Posture API, keeps video on the top half and transport on the bottom. The artist view is the simple screen: video, a mic meter, a headphone reminder, and record status. The first tap unlocks the audio device, a screen wake lock stays on during a live session, and the app can be installed from the manifest.
+Phones and foldables use the same app. A portrait phone shows one full-height pane at a time — Arrange, Mix, or Session — and tucks Save, import, and the other tools into Menu. A short landscape phone keeps that single pane. A half-folded table-top posture, from CSS viewport segments or the Device Posture API, keeps video on the top half and transport on the bottom. The artist view is the simple screen: video, a mic meter, a headphone reminder, and record status. The first tap unlocks the audio device, a screen wake lock stays on during a live session, and the app can be installed from the manifest. The session code stays in the address bar. After a refresh the same device rejoins as the same host or guest; iOS shows one Tap to reconnect button when the microphone needs a new gesture. The room stays up for 10 minutes after the last person leaves so that reconnect takes the same seat.
 
 ## Latency
 
@@ -110,7 +110,7 @@ Chrome did not report `jitterBufferEmittedCount` here, so the buffer row in the 
 
 - `AudioContext({ latencyHint: 'interactive', sampleRate: 48000 })`.
 - Capture and playout run in AudioWorklets (`public/worklets/`).
-- Music is Opus, forced in SDP: `ptime` and `maxptime` 10 ms (browsers floor Opus at 10 ms even though libopus can do 2.5), stereo, `usedtx=0`, `cbr=1`, `maxaveragebitrate` 510 kbps, in-band FEC on by default. The sender is high priority.
+- Music is Opus, forced in SDP: `ptime` and `minptime` and `maxptime` 10 ms (browsers floor Opus at 10 ms even though libopus can do 2.5), 48 kHz stereo (`stereo=1;sprop-stereo=1;maxplaybackrate=48000`), `usedtx=0`, `cbr=0`, `maxaveragebitrate` 510 kbps, in-band FEC on. The music sender is `priority` and `networkPriority` high, with `maxBitrate` 510000. Video is a separate, tiny stream (about 320×240, 15 fps, 150 kbps, priority very-low) so it gives bandwidth to the music first. Printed takes are the local uncompressed WAV, not this Opus stream.
 - Music receivers ask for `playoutDelayHint = 0` and `jitterBufferTarget = 0` where the browser allows it. Talkback keeps a 20 ms jitter target.
 - Music capture disables echo cancellation, noise suppression, and auto gain, and sets `contentHint = 'music'`. Talkback is a second capture with processing on and `contentHint = 'speech'`.
 - The room is a full mesh. There is no SFU hop. ICE tries a direct path first. Cloudflare TURN, or the static `TURN_URL` fallback, is there when a NAT blocks that path. The signal panel shows whether media is direct, relayed, or failed.
@@ -178,7 +178,7 @@ Health: `GET /api/health`. ICE config: `GET /api/ice`. In production the same pr
 - Loopback calibration needs a cable or a speaker-to-mic path. On headphones it reads near zero, and the input estimate falls back to one block.
 - Two `getUserMedia` modes on one device (processed talkback and unprocessed music) can fail. The session notes it and keeps the performance mic.
 - Chrome sometimes omits the jitter-buffer stat. The dock shows “—” and the estimate uses 0 ms of buffer.
-- Mesh uplink grows with each person. Six is the cap.
+- Mesh uplink grows with each person. Six is the cap. Someone who drops and comes back within 10 minutes reclaims their seat and is not counted twice.
 - No account system on the signaling server. Anyone with the code can knock; the host still has to admit them.
 - No VST/AU, no hardware MIDI, no tempo map. Inserts are the built-in EQ, compressor, delay, and reverb.
 - IndexedDB quota bounds saved projects. Recording turns the loop off so the take stays linear. Session-mode MIDI repeats on a timer rather than the sample clock.

@@ -34,11 +34,63 @@ export function shouldSetVideoCodecPreferences(userAgent: string) {
   return !safari
 }
 
+export const VIDEO_BITRATES = [100_000, 150_000, 300_000] as const
+export const DEFAULT_VIDEO_BITRATE = 150_000
+
+/** Seeing each other, not a broadcast. Ideal 320×240, never above 426×240 or 15 fps. */
+export function videoCaptureBudget(): Pick<MediaTrackConstraints, 'width' | 'height' | 'frameRate'> {
+  return {
+    width: { ideal: 320, max: 426 },
+    height: { ideal: 240, max: 240 },
+    frameRate: { ideal: 15, max: 15 },
+  }
+}
+
+/** Scale a larger camera down to the 426×240 budget. 1 means the capture is already small enough. */
+export function scaleResolutionDownBy(width: number, height: number): number {
+  if (width <= 0 || height <= 0) return 1
+  const scale = Math.max(width / 426, height / 240, 1)
+  return Math.round(scale * 100) / 100
+}
+
+export type VideoSendDirection = 'sendrecv' | 'sendonly' | 'recvonly' | 'inactive'
+
+export function videoDirection(send: boolean, recv: boolean): VideoSendDirection {
+  if (send && recv) return 'sendrecv'
+  if (send) return 'sendonly'
+  if (recv) return 'recvonly'
+  return 'inactive'
+}
+
+/** Rich first, then a set Safari accepts when it rejects channel count or sample rate. The last entry is a bare audio request. */
+export function musicCaptureAttempts(deviceId = ''): Array<true | MediaTrackConstraints> {
+  const device = deviceId ? { deviceId: { ideal: deviceId } } : {}
+  return [
+    {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: { ideal: 2 },
+      sampleRate: { ideal: 48000 },
+      ...device,
+    },
+    {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      ...device,
+    },
+    true,
+  ]
+}
+
 /** Attempts Safari will accept. No exact deviceId, frameRate, sampleRate, or channelCount. */
 export function cameraAttempts(deviceId: string): MediaTrackConstraints[] {
+  const budget = videoCaptureBudget()
   const attempts: MediaTrackConstraints[] = []
-  if (deviceId) attempts.push({ deviceId: { ideal: deviceId }, facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } })
-  attempts.push({ facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } })
+  if (deviceId) attempts.push({ deviceId: { ideal: deviceId }, facingMode: 'user', ...budget })
+  attempts.push({ facingMode: 'user', ...budget })
+  attempts.push({ facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 15 } })
   attempts.push({ facingMode: 'user' })
   attempts.push({})
   return attempts

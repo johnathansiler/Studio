@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import type { AudioEngine } from '../audio/engine'
 import type { Participant, SessionClient } from '../remote/session'
 import { mediaStatus } from '../model/media'
+import { VIDEO_BITRATES } from '../model/codecs'
 import { ms } from './format'
 
 export function VideoDock({
@@ -28,6 +29,40 @@ export function VideoDock({
   const popRoot = useRef<Root | null>(null)
   const popWindow = useRef<Window | null>(null)
   const [popped, setPopped] = useState(false)
+  useEffect(() => {
+    const dock = root.current
+    if (!dock) return
+    const visible = new Set<string>()
+    const paint = () => session.setIncomingVideo([...visible])
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const id = (entry.target as HTMLElement).dataset.peer || ''
+          if (!id || id === session.state.selfId) continue
+          if (entry.isIntersecting && entry.intersectionRatio >= 0.15) visible.add(id)
+          else visible.delete(id)
+        }
+        paint()
+      },
+      { threshold: [0, 0.15, 0.6] },
+    )
+    const watch = () => {
+      observer.disconnect()
+      visible.clear()
+      for (const tile of dock.querySelectorAll<HTMLElement>('.tile[data-peer]')) {
+        if (tile.dataset.peer === session.state.selfId) continue
+        observer.observe(tile)
+      }
+    }
+    watch()
+    const frame = window.requestAnimationFrame(watch)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      observer.disconnect()
+      session.setIncomingVideo([])
+    }
+  }, [session, state.participants.map((person) => person.id).join(), state.selfId])
+
   useEffect(() => {
     let timer = 0
     const tick = () => {
@@ -107,7 +142,7 @@ export function VideoDock({
         <button className="icon-btn" onClick={() => session.setMonitorMode(state.monitorMode === 'opus' ? 'pcm' : 'opus')} title="Monitor path">
           {state.monitorMode === 'opus' ? 'Opus 10ms' : 'PCM'}
         </button>
-        <button className="icon-btn" onClick={(event) => void popOut(event)} title="Pop out">
+        <button className="icon-btn pop-out" onClick={(event) => void popOut(event)} title="Pop out">
           ⧉
         </button>
       </div>
@@ -149,10 +184,10 @@ export function VideoDock({
         <div className="empty-session">
           <p>Bring an artist, a producer, and a listener into the same room. The cue stays as fast as the path allows. The printed take is aligned after the fact, so the record is on the grid.</p>
           {state.error && <p className="hint">{state.error}</p>}
-          <button className="text-btn primary" onClick={onCreate}>
+          <button type="button" className="text-btn primary" onClick={onCreate}>
             Create invite
           </button>
-          <button className="text-btn" onClick={onJoin}>
+          <button type="button" className="text-btn" id="join-with-code" onClick={onJoin}>
             Join with a code
           </button>
         </div>
@@ -224,6 +259,16 @@ export function VideoDock({
             <div className="meter" style={{ height: 8, width: '100%', margin: '6px 0' }}>
               <b style={{ width: `${Math.min(100, levels.input * 320)}%`, height: '100%' }} />
             </div>
+            <label className="field" style={{ marginTop: 8 }}>
+              Video size
+              <select value={state.videoBitrate} onChange={(event) => session.setVideoBitrate(Number(event.target.value))}>
+                {VIDEO_BITRATES.map((bitrate) => (
+                  <option key={bitrate} value={bitrate}>
+                    {bitrate / 1000} kbps
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="hint">Performance meter (processing off). Talkback is a separate channel with echo control.</div>
             <div className="hint">{state.localSend}</div>
             {Object.entries(state.latency).map(([id, latency]) => (
@@ -342,12 +387,17 @@ function copyDockStyles(win: Window) {
 
 function playVideo(el: HTMLVideoElement | null, stream: MediaStream | null, muted: boolean) {
   if (!el) return
+  const playable = stream && stream.getVideoTracks().length ? stream : null
   el.muted = muted
   el.autoplay = true
   el.playsInline = true
   el.setAttribute('playsinline', 'true')
   el.setAttribute('webkit-playsinline', 'true')
-  if (el.srcObject !== stream) el.srcObject = stream
+  if (!playable) {
+    if (el.srcObject) el.srcObject = null
+    return
+  }
+  if (el.srcObject !== playable) el.srcObject = playable
   const start = () => {
     void el.play().catch(() => undefined)
   }
@@ -383,7 +433,7 @@ function Tile({
   }, [session, peerId, self, hear, session.state.camOn, session.state.screenOn, session.state.participants, session.state.mediaTick])
   const screenOn = !self && session.state.participants.find((person) => person.id === peerId)?.screen
   return (
-    <div className={`tile ${speaking ? 'speaking' : ''} ${featured ? 'featured' : ''}`}>
+    <div className={`tile ${speaking ? 'speaking' : ''} ${featured ? 'featured' : ''}`} data-peer={peerId}>
       <video ref={ref} autoPlay playsInline muted={self || !hear} />
       {screenOn && <video ref={screenRef} autoPlay playsInline muted style={{ height: 90 }} />}
       {!self && (

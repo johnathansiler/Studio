@@ -42,6 +42,8 @@ interface Session {
   code: string
   hostId: string
   participants: Map<string, Participant>
+  /** Disconnected people keep their id and role until the empty room expires. */
+  held: Map<string, Participant>
   clients: Map<string, Client>
   chat: ChatMessage[]
   emptyAt?: number
@@ -98,16 +100,30 @@ function publicSession(session: Session, self: Participant, ice: IceConfig) {
   }
 }
 
+function partySize(session: Session) {
+  const ids = new Set<string>()
+  for (const person of session.participants.values()) if (person.admitted) ids.add(person.id)
+  for (const person of session.held.values()) if (person.admitted) ids.add(person.id)
+  return ids.size
+}
+
 function leave(client: Client) {
   if (!client.sessionCode) return
   const session = sessions.get(client.sessionCode)
   if (!session) return
+  const current = session.clients.get(client.id)
+  if (current && current.ws !== client.ws) return
   session.clients.delete(client.id)
-  session.participants.delete(client.id)
+  const person = session.participants.get(client.id)
+  if (person) {
+    session.participants.delete(client.id)
+    session.held.set(client.id, person)
+  }
   client.sessionCode = undefined
   if (session.clients.size === 0) {
     session.emptyAt = Date.now()
   } else {
+    session.emptyAt = undefined
     emitRoster(session)
     if (client.id === session.hostId) {
       broadcast(session, { t: 'host-away' })
@@ -269,7 +285,7 @@ async function handle(client: Client, msg: Record<string, unknown>) {
   if (msg.t === 'admit' && self.role === 'host') {
     const person = session.participants.get(String(msg.id))
     if (!person) return
-    const admittedCount = [...session.participants.values()].filter((p) => p.admitted).length
+    const admittedCount = partySize(session)
     if (admittedCount >= MAX_PARTY) {
       send(client.ws, { t: 'error', message: `Mesh limit is ${MAX_PARTY} people. Remove someone first.` })
       return
@@ -362,6 +378,7 @@ async function hello(client: Client, msg: Record<string, unknown>) {
       code,
       hostId: id,
       participants: new Map(),
+      held: new Map(),
       clients: new Map(),
       chat: [],
     }
@@ -392,8 +409,10 @@ async function hello(client: Client, msg: Record<string, unknown>) {
     send(client.ws, { t: 'error', message: 'That invite is no longer live.' })
     return
   }
-    if (resumeId && session.participants.has(resumeId)) {
-    const existing = session.participants.get(resumeId)!
+  const existing = resumeId ? session.participants.get(resumeId) || session.held.get(resumeId) : undefined
+  if (resumeId && existing) {
+    session.held.delete(resumeId)
+    session.participants.set(resumeId, existing)
     const previous = session.clients.get(resumeId)
     if (previous && previous.ws !== client.ws) {
       previous.sessionCode = undefined
@@ -404,12 +423,13 @@ async function hello(client: Client, msg: Record<string, unknown>) {
     client.id = resumeId
     client.name = existing.name
     client.sessionCode = code
+    session.emptyAt = undefined
     if (resumeId === session.hostId) existing.role = 'host'
     send(client.ws, publicSession(session, existing, await currentIce()))
     emitRoster(session)
     return
   }
-  const id = crypto.randomUUID()
+  const id = resumeId && !session.participants.has(resumeId) && !session.held.has(resumeId) ? resumeId : crypto.randomUUID()
   const person: Participant = {
     id,
     name,
@@ -434,6 +454,7 @@ async function hello(client: Client, msg: Record<string, unknown>) {
 function drop(session: Session, id: string, event: 'rejected' | 'removed') {
   const target = session.clients.get(id)
   session.participants.delete(id)
+  session.held.delete(id)
   session.clients.delete(id)
   if (target) {
     target.sessionCode = undefined
@@ -445,8 +466,11 @@ function drop(session: Session, id: string, event: 'rejected' | 'removed') {
 setInterval(() => {
   const now = Date.now()
   for (const [code, session] of sessions) {
-    if (session.clients.size === 0 && session.emptyAt && now - session.emptyAt > 15 * 60 * 1000) {
+    if (session.clients.size === 0 && session.emptyAt && now - session.emptyAt > 10 * 60 * 1000) {
       sessions.delete(code)
+      for (const key of uploads.keys()) {
+        if (key.startsWith(`${code}:`)) uploads.delete(key)
+      }
     }
   }
 }, 30_000).unref?.()
