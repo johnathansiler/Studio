@@ -214,6 +214,18 @@ export function App() {
     })
   }
 
+  async function copyInvite() {
+    const code = session.state.code
+    if (!code) return
+    const url = `${location.origin}/?session=${code}`
+    try {
+      await navigator.clipboard.writeText(url)
+      store.toast('Invite link copied. Send it to the artist.', 'good')
+    } catch {
+      store.toast(url, 'warn')
+    }
+  }
+
   async function bounce() {
     await ready()
     const wav = await engine.exportMix(store.project, store.buffers)
@@ -309,6 +321,11 @@ export function App() {
           ))}
         </div>
         <div className="spacer" />
+        {session.state.role === 'host' && session.state.code && (
+          <button className="text-btn primary" onClick={() => void copyInvite()}>
+            Copy invite link
+          </button>
+        )}
         {session.state.status === 'live' && <div className="latency-pill">monitor {one ? `${one.ms.toFixed(0)} ms` : '…'}</div>}
         <div className="top-actions">
           <button className="text-btn" onClick={() => void persist()}>Save</button>

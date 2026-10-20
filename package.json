@@ -4,13 +4,16 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "start": "concurrently -n web,signal -c green,cyan \"vite --host 0.0.0.0 --port 5173\" \"tsx server/index.ts\"",
-    "dev": "npm start",
+    "start": "NODE_ENV=production node --experimental-strip-types server/index.ts",
+    "dev": "concurrently -n web,signal -c green,cyan \"vite --host 0.0.0.0 --port 5173\" \"tsx server/index.ts\"",
     "server": "tsx server/index.ts",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
-    "serve": "SERVE_STATIC=1 tsx server/index.ts",
+    "serve": "NODE_ENV=production node --experimental-strip-types server/index.ts",
     "test": "vitest run",
     "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=22.6.0"
   },
   "dependencies": {
     "react": "^19.0.0",

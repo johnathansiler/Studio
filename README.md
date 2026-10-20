@@ -4,24 +4,42 @@ Remote vocal sessions, captured inside the DAW. CueHarbor is a browser studio: m
 
 True zero latency over the internet is impossible. The live monitor is as short as the path allows. The printed take is recorded on the artist’s machine and aligned to the host timeline, so the recording does not keep the network delay.
 
-## Run it
+## Open it from a link
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/johnathansiler/Studio)
+
+Click **Deploy to Render** and sign in with GitHub. Render reads `render.yaml`, builds this repo, and gives you a public URL such as `https://cueharbor.onrender.com` (the name can differ). Create an invite in the app and press **Copy invite link**. The artist opens `https://that-host/?session=CODE` — no install. HTTPS is what the browser requires for the mic and camera. Signaling is `wss` on that same origin (`/ws`), derived from the page URL.
+
+This environment has no Render, Fly, or Railway credentials, so the app was not published from here. The button above is the whole account step.
+
+A free Render instance sleeps after 15 minutes with no HTTP request and no WebSocket message, then takes about a minute to wake. Rooms live in memory, so a sleep or restart clears them. While people are connected, WebSocket traffic keeps the free instance awake.
+
+The same image runs elsewhere:
+
+- Docker: `docker build -t cueharbor . && docker run -p 8787:8787 -e PORT=8787 cueharbor`, then open http://localhost:8787
+- Fly.io: install the `fly` CLI, run `fly auth login`, then `fly launch --copy-config --no-deploy` and `fly deploy`. `fly.toml` is already in the repo; change `app` if that name is taken.
+- Railway: new project from this GitHub repo. `railway.json` points at the Dockerfile and the `/api/health` check. Sign in when Railway asks.
+
+`GET /api/health` returns `{ "ok": true, "service": "cueharbor" }`. The process listens on `PORT` (default 8787) and `HOST` (default `0.0.0.0`). Optional TURN: `TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL`.
+
+## Run it locally
 
 ```bash
-npm install && npm start
+npm install && npm run dev
 ```
 
-Open http://localhost:5173. That one command starts the Vite app on port 5173 and the signaling server on port 8787. The dev server proxies `/api` and `/ws` to the signaling server.
+Open http://localhost:5173. That starts Vite on port 5173 and the signaling server on port 8787. Vite proxies `/api` and `/ws`.
 
-Two windows, one session: in the first window click **Create invite**. In the second, open `http://localhost:5173/?session=CODE`, enter a name, and join. The host admits them from the **people** tab. Arm is automatic: Record prints a live guide, then replaces it with the guest’s aligned take.
+Two windows, one session: click **Create invite**, then **Copy invite link**. Open that URL in the second window, enter a name, and join. The host admits them from the **people** tab. Arm is automatic: Record prints a live guide, then replaces it with the guest’s aligned take.
 
-Production, one process:
+Production is one process. It serves the built app and the signaling WebSocket on the same port:
 
 ```bash
 npm run build
-npm run serve
+npm start
 ```
 
-`serve` listens on port 8787 (override with `PORT`) and, with `SERVE_STATIC=1` already set by the script, hosts the built app as well as signaling.
+Open http://localhost:8787. `npm start` is what Render and the Docker image run (`NODE_ENV=production`, Node 22). Node 22.6 or newer is required.
 
 ```bash
 npm test
@@ -122,7 +140,7 @@ Mesh, not an SFU. An SFU (mediasoup, LiveKit, and the like) adds a hop and anoth
 
 Signaling messages: `hello` (create, join, resume), roster, `admit` / `reject` / `remove`, `signal`, `chat`, `presence`, `reaction`, `force-mute`, `transport`, and `clock`. Session codes are 6 unambiguous characters. An empty room expires after 15 minutes. Resume replaces the previous socket without dropping the participant.
 
-Health: `GET /api/health`. ICE config: `GET /api/ice`.
+Health: `GET /api/health`. ICE config: `GET /api/ice`. In production the same process serves `dist/` and upgrades `/ws`. The browser opens that socket with `wss` when the page is `https`, and invite links use `location.origin`.
 
 ## Limits
 

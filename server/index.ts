@@ -4,7 +4,10 @@ import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
 
 const PORT = Number(process.env.PORT || 8787)
+const HOST = process.env.HOST || '0.0.0.0'
 const MAX_PARTY = 6
+const STATIC_ROOT = path.resolve(process.env.STATIC_DIR || 'dist')
+const SERVE_STATIC = process.env.NODE_ENV === 'production' || process.env.SERVE_STATIC === '1'
 
 interface Participant {
   id: string
@@ -122,13 +125,13 @@ function leave(client: Client) {
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`)
-  if (url.pathname === '/api/health') return json(res, { ok: true, sessions: sessions.size })
+  if (url.pathname === '/api/health') return json(res, { ok: true, service: 'cueharbor', sessions: sessions.size })
   if (url.pathname === '/api/ice') return json(res, { iceServers: iceServers() })
-  if (process.env.SERVE_STATIC === '1') {
+  if (SERVE_STATIC) {
     await serveStatic(url.pathname, res)
     return
   }
-  json(res, { error: 'CueHarbor signaling server. Use the Vite dev server on :5173.' }, 404)
+  json(res, { error: 'CueHarbor signaling server. The app is served by Vite in development.' }, 404)
 })
 
 function json(res: ServerResponse, body: unknown, status = 200) {
@@ -137,10 +140,10 @@ function json(res: ServerResponse, body: unknown, status = 200) {
 }
 
 async function serveStatic(pathname: string, res: ServerResponse) {
-  const root = path.resolve('dist')
-  const requested = pathname === '/' ? '/index.html' : pathname
-  const filePath = path.normalize(path.join(root, requested))
-  if (!filePath.startsWith(root)) {
+  const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
+  const filePath = path.resolve(STATIC_ROOT, relative)
+  const rootWithSep = STATIC_ROOT.endsWith(path.sep) ? STATIC_ROOT : STATIC_ROOT + path.sep
+  if (filePath !== STATIC_ROOT && !filePath.startsWith(rootWithSep)) {
     res.writeHead(403)
     res.end('Forbidden')
     return
@@ -149,12 +152,21 @@ async function serveStatic(pathname: string, res: ServerResponse) {
     const info = await stat(filePath)
     const finalPath = info.isDirectory() ? path.join(filePath, 'index.html') : filePath
     const data = await readFile(finalPath)
-    res.writeHead(200, { 'content-type': contentType(finalPath) })
+    const headers: Record<string, string> = { 'content-type': contentType(finalPath) }
+    headers['cache-control'] = finalPath.includes(`${path.sep}assets${path.sep}`)
+      ? 'public, max-age=31536000, immutable'
+      : 'no-cache'
+    res.writeHead(200, headers)
     res.end(data)
   } catch {
+    if (path.extname(relative)) {
+      res.writeHead(404)
+      res.end('Not found')
+      return
+    }
     try {
-      const data = await readFile(path.join(root, 'index.html'))
-      res.writeHead(200, { 'content-type': 'text/html' })
+      const data = await readFile(path.join(STATIC_ROOT, 'index.html'))
+      res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-cache' })
       res.end(data)
     } catch {
       res.writeHead(404)
@@ -164,12 +176,16 @@ async function serveStatic(pathname: string, res: ServerResponse) {
 }
 
 function contentType(file: string) {
-  if (file.endsWith('.html')) return 'text/html'
-  if (file.endsWith('.js')) return 'text/javascript'
-  if (file.endsWith('.css')) return 'text/css'
+  if (file.endsWith('.html')) return 'text/html; charset=utf-8'
+  if (file.endsWith('.js') || file.endsWith('.mjs')) return 'text/javascript; charset=utf-8'
+  if (file.endsWith('.css')) return 'text/css; charset=utf-8'
   if (file.endsWith('.svg')) return 'image/svg+xml'
   if (file.endsWith('.json')) return 'application/json'
   if (file.endsWith('.wav')) return 'audio/wav'
+  if (file.endsWith('.png')) return 'image/png'
+  if (file.endsWith('.webp')) return 'image/webp'
+  if (file.endsWith('.ico')) return 'image/x-icon'
+  if (file.endsWith('.woff2')) return 'font/woff2'
   return 'application/octet-stream'
 }
 
@@ -378,6 +394,6 @@ setInterval(() => {
   }
 }, 30_000).unref?.()
 
-server.listen(PORT, () => {
-  console.log(`CueHarbor signaling on :${PORT}`)
+server.listen(PORT, HOST, () => {
+  console.log(`CueHarbor on http://${HOST}:${PORT} (static ${SERVE_STATIC ? STATIC_ROOT : 'off'})`)
 })

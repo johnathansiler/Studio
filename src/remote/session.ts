@@ -256,6 +256,7 @@ export class SessionClient {
   private openSocket() {
     const opts = this.connectOpts
     if (!opts) return
+    // Same origin as the page, so https://host/?session=CODE uses wss://host/ws.
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     const ws = new WebSocket(`${proto}://${location.host}/ws`)
     this.ws = ws

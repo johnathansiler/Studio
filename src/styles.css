@@ -250,3 +250,16 @@ code { font-family: var(--mono); font-size: 12px; }
 .shell.artist .tile video, .shell.artist .placeholder { height: min(52vh, 520px); }
 .empty-session { padding: 18px; display: flex; flex-direction: column; gap: 10px; }
 .linkbox { font-family: var(--mono); font-size: 12px; background: #0c110f; border-radius: 8px; padding: 8px; word-break: break-all; }
+.invite-card {
+  margin: 8px 8px 0;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: #13241b;
+}
+.invite-card span { color: var(--muted); font-size: 12px; }
+.invite-card strong { font-family: var(--mono); font-size: 12px; font-weight: 500; word-break: break-all; }

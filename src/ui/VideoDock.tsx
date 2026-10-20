@@ -17,7 +17,9 @@ export function VideoDock({
   const state = session.state
   const [tab, setTab] = useState<'people' | 'chat' | 'signal'>('signal')
   const [draft, setDraft] = useState('')
+  const [copied, setCopied] = useState(false)
   const [levels, setLevels] = useState({ input: 0, talk: 0 })
+  const inviteUrl = state.code ? `${location.origin}/?session=${state.code}` : ''
   const root = useRef<HTMLDivElement>(null)
   useEffect(() => {
     let timer = 0
@@ -67,6 +69,27 @@ export function VideoDock({
           ⧉
         </button>
       </div>
+      {inviteUrl && (
+        <div className="invite-card">
+          <span>Send this link to the artist</span>
+          <strong>{inviteUrl}</strong>
+          <button
+            className="text-btn primary"
+            onClick={() => {
+              void navigator.clipboard.writeText(inviteUrl).then(
+                () => {
+                  setCopied(true)
+                  window.setTimeout(() => setCopied(false), 1600)
+                  session.note('Invite link copied.')
+                },
+                () => session.note(`Copy this link: ${inviteUrl}`),
+              )
+            }}
+          >
+            {copied ? 'Copied' : 'Copy invite link'}
+          </button>
+        </div>
+      )}
       {state.status === 'idle' || state.status === 'error' ? (
         <div className="empty-session">
           <p>Bring an artist, a producer, and a listener into the same room. The cue stays as fast as the path allows. The printed take is aligned after the fact, so the record is on the grid.</p>
@@ -172,7 +195,7 @@ export function VideoDock({
               </label>
             )}
             <DevicePick session={session} />
-            {state.code && <div className="linkbox">{`${location.origin}/?session=${state.code}`}</div>}
+            {inviteUrl && <div className="linkbox">{inviteUrl}</div>}
             {state.takeProgress != null && <div>Take transfer {Math.round(state.takeProgress * 100)}%</div>}
             {state.log.slice(-3).map((line, index) => (
               <div key={index} className="hint">
