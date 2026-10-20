@@ -119,36 +119,6 @@ export function mediaStatus(input: { turn: TurnProvider; turnError?: string; lin
   return { tone: 'warn', text: 'Connecting video and audio…' }
 }
 
-/**
- * Keep the room. Restart when the path has failed.
- * An offer that is still waiting for its answer stays in place, including
- * while ICE is connected and the signaling state has not caught up.
- * A relay that shows up must not abort a direct check that is already running.
- */
-export function iceRetryPlan(input: {
-  connection: string
-  ice: string
-  ageMs: number
-  turn: TurnProvider
-  previousTurn: TurnProvider
-  signaling?: string
-  offerAgeMs?: number
-}): 'restart' | 'wait' {
-  if (mediaUp(input)) return 'wait'
-  const failed = input.connection === 'failed' || input.ice === 'failed'
-  if (failed) return 'restart'
-  // An outstanding offer is still the offer the other side may be answering.
-  // Replacing it at a few seconds races that answer and leaves both sides offering.
-  if (input.signaling === 'have-local-offer') return 'wait'
-  const gainedRelay = input.previousTurn === 'none' && input.turn !== 'none'
-  const checking = input.ice === 'checking'
-  if (gainedRelay && input.signaling !== 'have-local-offer' && !checking) return 'restart'
-  // A disconnect often recovers on its own. Leave that peer connection alone.
-  if (input.ageMs < 30000) return 'wait'
-  if (input.ageMs > 30000) return 'restart'
-  return 'wait'
-}
-
 /** A take this quiet is a flat line, not a vocal. */
 export const SILENT_PEAK = 0.001
 

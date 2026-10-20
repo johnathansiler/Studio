@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { currentIce, type IceConfig } from './ice.ts'
 import { rememberDiag, sanitizeDiag, type DiagReport } from '../src/model/diag.ts'
-import { replaceSocketPlan, sessionHello } from '../src/model/negotiate.ts'
+import { sessionHello } from '../src/model/negotiate.ts'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -40,8 +40,6 @@ interface Client {
   id: string
   name: string
   sessionCode?: string
-  /** Last application message from the page. A protocol pong is not proof the page is reading. */
-  lastApp: number
 }
 
 interface Session {
@@ -129,6 +127,7 @@ function releaseHost(session: Session, resumeId: string) {
   if (session.clients.size === 0) session.emptyAt = Date.now()
   else {
     session.emptyAt = undefined
+    broadcast(session, { t: 'peer-left', id: resumeId })
     emitRoster(session)
     broadcast(session, { t: 'host-away' })
   }
@@ -155,7 +154,7 @@ function partySize(session: Session) {
   return ids.size
 }
 
-function leave(client: Client) {
+function leave(client: Client, announce = false) {
   if (!client.sessionCode) return
   const session = sessions.get(client.sessionCode)
   if (!session) return
@@ -169,6 +168,7 @@ function leave(client: Client) {
   }
   record(session, 'leave', `${client.id} left; the room is kept until it has been empty for 10 minutes`, client.id)
   client.sessionCode = undefined
+  if (announce && client.id) broadcast(session, { t: 'peer-left', id: client.id })
   if (session.clients.size === 0) {
     session.emptyAt = Date.now()
   } else {
@@ -268,9 +268,8 @@ function contentType(file: string) {
 const wss = new WebSocketServer({ server, path: '/ws' })
 
 wss.on('connection', (ws) => {
-  const client: Client = { ws, id: '', name: 'Guest', lastApp: Date.now() }
+  const client: Client = { ws, id: '', name: 'Guest' }
   ws.on('message', (raw) => {
-    client.lastApp = Date.now()
     let msg: Record<string, unknown>
     try {
       msg = JSON.parse(String(raw))
@@ -342,11 +341,17 @@ async function handle(client: Client, msg: Record<string, unknown>) {
     await hello(client, msg)
     return
   }
-  if (msg.t === 'beat') {
-    client.lastApp = Date.now()
-    // A probe reply is for the liveness check. Echoing it would loop.
-    if (msg.probe) return
-    send(client.ws, { t: 'beat', ack: true })
+  if (msg.t === 'ping') {
+    if (!msg.ack) send(client.ws, { t: 'ping', ack: true })
+    return
+  }
+  if (msg.t === 'leave') {
+    leave(client, true)
+    try {
+      client.ws.close()
+    } catch {
+      /* already closing */
+    }
     return
   }
   const session = client.sessionCode ? sessions.get(client.sessionCode) : undefined
@@ -494,7 +499,7 @@ async function hello(client: Client, msg: Record<string, unknown>) {
   const session = code ? sessions.get(code) : undefined
   if (!session) {
     const message = code ? `Could not rejoin ${code}. That invite is no longer live.` : 'Could not rejoin the session. Create an invite again.'
-    console.log(`[session] join failed: ${decision.reason}`)
+    console.log(`[session] join failed: ${code || 'no code'} is not live`)
     send(client.ws, { t: 'error', message })
     return
   }
@@ -504,16 +509,13 @@ async function hello(client: Client, msg: Record<string, unknown>) {
     if (instanceId) existing.instanceId = instanceId
     const previous = session.clients.get(resumeId)
     if (previous && previous.ws !== client.ws) {
-      const answered = previous.ws.readyState === previous.ws.OPEN ? await probeSocket(previous) : false
-      if (replaceSocketPlan({ readyState: previous.ws.readyState, probeAnswered: answered }) === 'keep') {
-        record(session, 'duplicate', `ignored a second socket for ${resumeId} because the first is still open`, resumeId)
-        send(client.ws, { t: 'error', message: 'This browser already has a live connection to the session.' })
-        client.ws.close()
-        return
-      }
-      record(session, 'evict', `closed the previous socket for ${resumeId}`, resumeId)
+      record(session, 'replace', `closed the previous socket for ${resumeId}`, resumeId)
       previous.sessionCode = undefined
-      previous.ws.close()
+      try {
+        previous.ws.close()
+      } catch {
+        /* already closed */
+      }
     }
     session.held.delete(resumeId)
     session.participants.set(resumeId, existing)
@@ -558,48 +560,13 @@ function drop(session: Session, id: string, event: 'rejected' | 'removed') {
   session.participants.delete(id)
   session.held.delete(id)
   session.clients.delete(id)
+  broadcast(session, { t: 'peer-left', id })
   if (target) {
     target.sessionCode = undefined
     send(target.ws, { t: event })
   }
   emitRoster(session)
 }
-
-/** Ask the page, not the proxy. A protocol pong can be answered by a middlebox. */
-function probeSocket(client: Client): Promise<boolean> {
-  if (client.ws.readyState !== client.ws.OPEN) return Promise.resolve(false)
-  const id = crypto.randomUUID()
-  return new Promise((resolve) => {
-    let timer: ReturnType<typeof setTimeout>
-    const finish = (answered: boolean) => {
-      clearTimeout(timer)
-      client.ws.off('message', onMessage)
-      resolve(answered)
-    }
-    timer = setTimeout(() => finish(false), 2000)
-    const onMessage = (raw: Buffer | ArrayBuffer | Buffer[]) => {
-      try {
-        const msg = JSON.parse(String(raw)) as { t?: string; probe?: string }
-        if (msg.t === 'beat' && msg.probe === id) finish(true)
-      } catch {
-        /* the session handler already ignores a bad frame */
-      }
-    }
-    client.ws.on('message', onMessage)
-    send(client.ws, { t: 'beat', probe: id })
-  })
-}
-
-setInterval(() => {
-  const now = Date.now()
-  for (const session of sessions.values()) {
-    for (const client of session.clients.values()) {
-      if (client.ws.readyState !== client.ws.OPEN) continue
-      // No application traffic for 20s means the page is gone, even if a proxy still pongs.
-      if (now - client.lastApp > 20000) client.ws.terminate()
-    }
-  }
-}, 3000).unref?.()
 
 setInterval(() => {
   const now = Date.now()

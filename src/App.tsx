@@ -5,6 +5,7 @@ import { uid, type AudioClip } from './model/types'
 import type { IncomingTake } from './remote/session'
 import { SessionClient } from './remote/session'
 import { listProjects, loadLastProject, loadProject, requestPersistentStorage, saveProject, base64ToBytes, bytesToBase64, type WorkspaceSnapshot } from './storage/idb'
+import { inviteWins } from './model/negotiate'
 import { readIdentity, writeIdentity } from './storage/identity'
 import { ProjectStore, seedDemoProject } from './state/store'
 import { decodeWavPCM, encodeWav, linearResample } from './model/wav'
@@ -92,14 +93,15 @@ export function App() {
       }
     })
     const params = new URLSearchParams(location.search)
-    const urlCode = params.get('session')?.toUpperCase() || ''
+    const urlCode = (params.get('session') || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
     const identity = readIdentity()
-    const code = urlCode || identity?.code || ''
+    const choice = inviteWins(urlCode, identity?.code || '')
+    if (choice.dropStored && identity) writeIdentity({ ...identity, code: '' })
     if (identity?.transportMode) store.setTransportMode(identity.transportMode)
-    if (code && identity?.participantId && identity.code === code) {
-      const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+    const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+    if (urlCode && identity?.participantId && identity.code === urlCode) {
       if (ios && !navigator.userActivation?.isActive) session.holdMediaForGesture()
-      session.connect({ name: identity.name || joinName || 'Artist', code })
+      session.connect({ name: identity.name || joinName || 'Artist', code: urlCode })
       setSurface(identity.role === 'guest' ? 'artist' : 'studio')
       setPhonePane('room')
       setJoinOpen(false)
@@ -107,6 +109,12 @@ export function App() {
       setJoinCode(urlCode)
       setJoinOpen(true)
       setSurface('artist')
+    } else if (choice.code && identity?.participantId) {
+      if (ios && !navigator.userActivation?.isActive) session.holdMediaForGesture()
+      session.connect({ name: identity.name || joinName || 'Artist', code: choice.code })
+      setSurface(identity.role === 'guest' ? 'artist' : 'studio')
+      setPhonePane('room')
+      setJoinOpen(false)
     }
     engine.sync(store.project, (id) => store.buffers.get(id))
     return store.subscribe(() => {
