@@ -14,7 +14,7 @@ import {
 import { DEFAULT_OPUS, markOutboundVideo, mungeOpusSdp, sectionDirections, videoDirectionsFromSdp, type OpusOptions } from '../model/sdp'
 import { cameraAttempts, DEFAULT_VIDEO_BITRATE, legalDirection, musicCaptureAttempts, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, videoDirection } from '../model/codecs'
 import { iceRetryPlan, isSilentTake, mediaUp, queueIceCandidate, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
-import { iceUfrag, politePeer, remoteDescriptionPlan, sessionHello } from '../model/negotiate'
+import { iceUfrag, politePeer, remoteDescriptionPlan, sessionHello, signalingReconnectPlan, socketMayOpen } from '../model/negotiate'
 import { sanitizeDiag } from '../model/diag'
 import { arrangementDigest, guestMayRequest, referencedBufferIds } from '../model/sessionSync'
 import { decodeWavPCM, encodeWav } from '../model/wav'
@@ -33,6 +33,7 @@ export interface Participant {
   video: boolean
   screen: boolean
   mutedByHost: boolean
+  instanceId?: string
 }
 
 export interface ChatMessage {
@@ -99,6 +100,8 @@ export interface SessionState {
   localSend: string
   /** iOS needs another tap before the microphone and camera can start again. */
   audioLocked: boolean
+  /** The host left this room. The project stays; the call does not. */
+  hostLeft?: boolean
 }
 
 export interface IncomingTake {
@@ -151,6 +154,7 @@ interface PeerLink {
   needsRenegotiate: boolean
   seenCandidates: Set<string>
   askedRestart: boolean
+  remoteInstance?: string
   appliedCam?: string
   appliedScreen?: string
   take?: {
@@ -169,8 +173,10 @@ function senderKey(link: PeerLink) {
 
 export class SessionClient {
   state: SessionState
-  private connectOpts: { name: string; create?: boolean; code?: string } | null = null
+  private connectOpts: { name: string; create?: boolean; code?: string; fresh?: boolean } | null = null
   private ws: WebSocket | null = null
+  /** One id per page load. A reload mints another so the other side can renegotiate. */
+  private instanceId = crypto.randomUUID()
   private peers = new Map<string, PeerLink>()
   private ice: IceServer[] = []
   private listeners = new Set<() => void>()
@@ -184,6 +190,8 @@ export class SessionClient {
   private statsTimer = 0
   private iceTimer = 0
   private joinTimer = 0
+  private reconnectTimer = 0
+  private beatTimer = 0
   private iceStamp = ''
   private iceFreshUntil = 0
   private primedMusic: Promise<MediaStream | null> | null = null
@@ -297,12 +305,15 @@ export class SessionClient {
     this.emit()
   }
 
-  connect(opts: { name: string; create?: boolean; code?: string }) {
+  connect(opts: { name: string; create?: boolean; code?: string; fresh?: boolean }) {
+    if (opts.fresh) this.leave()
+    else if (this.ws && !socketMayOpen(this.ws.readyState)) return
     this.left = false
     this.state.name = opts.name.trim() || 'Guest'
     localStorage.setItem('cueharbor-name', this.state.name)
     this.state.status = 'connecting'
     this.state.error = undefined
+    this.state.hostLeft = false
     this.connectOpts = opts
     this.resumeId = deviceParticipantId()
     this.emit()
@@ -376,18 +387,34 @@ export class SessionClient {
     this.left = true
     clearActiveSession()
     this.send({ t: 'leave' })
+    this.stopLocalTracks()
     this.teardown()
     this.state.status = 'idle'
     this.state.code = undefined
+    this.state.role = undefined
     this.state.participants = []
+    this.state.media = {}
+    this.state.hostLeft = false
     this.emit()
+  }
+
+  private stopLocalTracks() {
+    for (const stream of [this.musicStream, this.talkStream, this.screenStream, this.preview]) {
+      stream?.getTracks().forEach((track) => track.stop())
+    }
+    this.musicStream = null
+    this.talkStream = null
+    this.screenStream = null
+    this.preview = null
   }
 
   private teardown() {
     window.clearInterval(this.clockTimer)
     window.clearInterval(this.statsTimer)
     window.clearInterval(this.iceTimer)
+    window.clearInterval(this.beatTimer)
     window.clearTimeout(this.joinTimer)
+    window.clearTimeout(this.reconnectTimer)
     this.ws?.close()
     this.ws = null
     for (const link of this.peers.values()) link.pc.close()
@@ -400,20 +427,25 @@ export class SessionClient {
   private openSocket() {
     const opts = this.connectOpts
     if (!opts) return
+    // Never replace a socket that is still opening or open. Reconnect runs from onclose only.
+    if (!socketMayOpen(this.ws ? this.ws.readyState : null)) return
+    window.clearTimeout(this.reconnectTimer)
     // Same origin as the page, so https://host/?session=CODE uses wss://host/ws.
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     const ws = new WebSocket(`${proto}://${location.host}/ws`)
     this.ws = ws
     ws.onopen = () => {
       this.backoff = 400
-      const code = opts.code || this.state.code
-      const decision = sessionHello({ create: Boolean(opts.create), requestedCode: code })
+      const code = opts.fresh ? '' : opts.code || this.state.code
+      const decision = sessionHello({ create: Boolean(opts.create), fresh: Boolean(opts.fresh), requestedCode: code })
       this.send({
         t: 'hello',
         name: this.state.name,
         create: decision.action === 'create',
+        fresh: Boolean(opts.fresh),
         code: decision.code,
         resumeId: this.resumeId || undefined,
+        instanceId: this.instanceId,
       })
     }
     ws.onmessage = (event) => {
@@ -423,10 +455,11 @@ export class SessionClient {
     }
     ws.onclose = () => {
       if (this.left || this.ws !== ws) return
+      this.ws = null
       this.state.status = 'reconnecting'
       this.note('Signaling dropped. Reconnecting…')
       this.emit()
-      window.setTimeout(() => this.openSocket(), this.backoff)
+      this.reconnectTimer = window.setTimeout(() => this.openSocket(), this.backoff)
       this.backoff = Math.min(4000, this.backoff * 2)
     }
   }
@@ -465,11 +498,15 @@ export class SessionClient {
         this.note(`${msg.role === 'host' ? 'Hosting' : 'Joined'} ${msg.code}`)
       }
       this.state.error = undefined
+      this.state.hostLeft = false
       window.clearTimeout(this.joinTimer)
       this.emit()
-      const needsTap = this.deferMedia || (this.iosDevice() && !this.primedMusic && !navigator.userActivation?.isActive)
+      const keepMedia = Boolean(this.musicStream || this.talkStream)
+      const needsTap = !keepMedia && (this.deferMedia || (this.iosDevice() && !this.primedMusic && !navigator.userActivation?.isActive))
       this.deferMedia = false
-      if (needsTap) {
+      if (keepMedia) {
+        // The signaling socket came back. A connected peer connection stays up.
+      } else if (needsTap) {
         this.state.audioLocked = true
         this.note('Tap to reconnect audio.')
         this.emit()
@@ -481,17 +518,26 @@ export class SessionClient {
           this.note(error instanceof Error ? `${error.message}. You are still in the room.` : 'Microphone setup did not finish. You are still in the room.')
         }
       }
+      this.adoptRemoteInstances()
       this.syncMesh()
       this.startMaintenance()
       return
     }
     if (msg.t === 'roster') {
       this.state.participants = msg.participants
+      if (msg.participants.some((person: Participant) => person.role === 'host')) this.state.hostLeft = false
       const admitted = this.selfAdmitted()
       this.state.status = this.state.role === 'host' || admitted ? 'live' : 'waiting'
       this.emit()
+      this.adoptRemoteInstances()
       this.syncMesh()
       this.routeTalk()
+      return
+    }
+    if (msg.t === 'host-away') {
+      this.state.hostLeft = true
+      this.note('The host left this session.')
+      this.emit()
       return
     }
     if (msg.t === 'rejected') {
@@ -928,9 +974,35 @@ export class SessionClient {
     window.clearInterval(this.clockTimer)
     window.clearInterval(this.statsTimer)
     window.clearInterval(this.iceTimer)
+    window.clearInterval(this.beatTimer)
     this.clockTimer = window.setInterval(() => this.pingClocks(), 800)
     this.statsTimer = window.setInterval(() => void this.pollStats(), 1000)
     this.iceTimer = window.setInterval(() => void this.retryUnhealthy(), 5000)
+    this.beatTimer = window.setInterval(() => this.send({ t: 'beat' }), 3000)
+  }
+
+  /** Drop a peer connection only when that browser reloaded or the path has failed. */
+  private adoptRemoteInstances() {
+    for (const person of this.state.participants) {
+      const link = this.peers.get(person.id)
+      if (!link || !person.instanceId) continue
+      const plan = signalingReconnectPlan({
+        connection: link.pc.connectionState,
+        ice: link.pc.iceConnectionState,
+        remoteInstance: person.instanceId,
+        previousInstance: link.remoteInstance || person.instanceId,
+      })
+      if (!link.remoteInstance) {
+        link.remoteInstance = person.instanceId
+        continue
+      }
+      if (plan === 'renegotiate') {
+        link.pc.close()
+        this.peers.delete(person.id)
+        this.engine.setRemoteMusic(person.id, null)
+        this.engine.setTalk(person.id, null, false)
+      }
+    }
   }
 
   private pingClocks() {
@@ -1097,6 +1169,10 @@ export class SessionClient {
         index = 3
       }
       this.tuneReceiver(event.receiver, index === 0)
+      track.onunmute = () => {
+        this.state.mediaTick += 1
+        this.emit()
+      }
       this.state.mediaTick += 1
       this.routeIncoming(id, index)
     }
@@ -1341,11 +1417,18 @@ export class SessionClient {
   private async onSignal(from: string, data: any) {
     if (!data) return
     if (data.kind === 'restart') {
-      const link = this.peers.get(from) || (await this.createPeer(from, !politePeer(this.state.selfId || '', from)))
+      const existing = this.peers.get(from)
+      if (existing && signalingReconnectPlan({
+        connection: existing.pc.connectionState,
+        ice: existing.pc.iceConnectionState,
+        remoteInstance: existing.remoteInstance || '',
+        previousInstance: existing.remoteInstance || '',
+      }) === 'keep') return
+      const link = existing || (await this.createPeer(from, !politePeer(this.state.selfId || '', from)))
       await this.applyPendingAnswer(from, link)
-      const down = link.pc.iceConnectionState === 'failed' || link.pc.iceConnectionState === 'disconnected' || link.pc.connectionState === 'failed'
-      const unanswered = link.pc.signalingState === 'have-local-offer'
-      if ((down || unanswered) && !politePeer(this.state.selfId || '', from)) await this.offer(from, link, true)
+      const failed = link.pc.iceConnectionState === 'failed' || link.pc.connectionState === 'failed'
+      const unanswered = link.pc.signalingState === 'have-local-offer' && (link.pc.iceConnectionState === 'new' || link.pc.iceConnectionState === 'checking')
+      if ((failed || unanswered) && !politePeer(this.state.selfId || '', from)) await this.offer(from, link, true)
       return
     }
     let link = this.peers.get(from)
@@ -1362,12 +1445,11 @@ export class SessionClient {
         remoteUfrag: iceUfrag(String(data.sdp || '')),
       })
       if (plan === 'ignore-offer') return
-      if (plan === 'rollback-offer') {
+      if (plan === 'rollback-offer' && link.pc.signalingState === 'have-local-offer') {
         try {
           await link.pc.setLocalDescription({ type: 'rollback' })
         } catch (error) {
           this.notePeerError(link, error)
-          return
         }
       }
       try {
@@ -1431,6 +1513,7 @@ export class SessionClient {
         localType: previous?.localType || '',
         remoteType: previous?.remoteType || '',
         ageMs: Date.now() - link.openedAt,
+        videoBytes: previous?.videoBytes || 0,
       },
     }
     this.state.mediaTick += 1
@@ -1817,6 +1900,7 @@ export class SessionClient {
       let jb: number | null = null
       let level = 0
       let bestAudioBytes = -1
+      let videoBytes = 0
       stats.forEach((report) => {
         const row = report as unknown as Record<string, number | string>
         if (report.type === 'inbound-rtp' && row.kind === 'audio') {
@@ -1833,6 +1917,7 @@ export class SessionClient {
           }
           if (typeof row.audioLevel === 'number') level = row.audioLevel
         }
+        if (report.type === 'inbound-rtp' && row.kind === 'video') videoBytes += Number(row.bytesReceived || 0)
         if (report.type === 'candidate-pair' && row.state === 'succeeded' && typeof row.currentRoundTripTime === 'number') {
           rtt = row.currentRoundTripTime * 1000
         }
@@ -1869,6 +1954,7 @@ export class SessionClient {
           localType,
           remoteType,
           ageMs: Date.now() - link.openedAt,
+          videoBytes,
         },
       }
       const estimate = this.estimateFor(id)

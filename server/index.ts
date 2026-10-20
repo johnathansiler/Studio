@@ -23,6 +23,8 @@ interface Participant {
   video: boolean
   screen: boolean
   mutedByHost: boolean
+  /** Changes when that browser reloads. A live socket keeps the same id. */
+  instanceId?: string
 }
 
 interface ChatMessage {
@@ -38,6 +40,8 @@ interface Client {
   id: string
   name: string
   sessionCode?: string
+  /** Last protocol pong or app heartbeat. A second socket must not replace one that answered recently. */
+  lastPong: number
 }
 
 interface Session {
@@ -101,6 +105,32 @@ function publicSession(session: Session, self: Participant, ice: IceConfig, reas
     participants: roster(session),
     chat: session.chat.slice(-80),
     reason: reason || '',
+  }
+}
+
+function releaseHost(session: Session, resumeId: string) {
+  const previous = session.clients.get(resumeId)
+  if (previous) {
+    previous.sessionCode = undefined
+    session.clients.delete(resumeId)
+    try {
+      previous.ws.close()
+    } catch {
+      /* the socket may already be gone */
+    }
+  }
+  const person = session.participants.get(resumeId)
+  if (person) {
+    session.participants.delete(resumeId)
+    session.held.set(resumeId, person)
+  }
+  if (session.hostId === resumeId) session.hostId = ''
+  record(session, 'leave', `${resumeId} started a new session; this room stays open until it has been empty for 10 minutes`, resumeId)
+  if (session.clients.size === 0) session.emptyAt = Date.now()
+  else {
+    session.emptyAt = undefined
+    emitRoster(session)
+    broadcast(session, { t: 'host-away' })
   }
 }
 
@@ -238,7 +268,10 @@ function contentType(file: string) {
 const wss = new WebSocketServer({ server, path: '/ws' })
 
 wss.on('connection', (ws) => {
-  const client: Client = { ws, id: '', name: 'Guest' }
+  const client: Client = { ws, id: '', name: 'Guest', lastPong: Date.now() }
+  ws.on('pong', () => {
+    client.lastPong = Date.now()
+  })
   ws.on('message', (raw) => {
     let msg: Record<string, unknown>
     try {
@@ -309,6 +342,11 @@ function readBody(req: IncomingMessage, limit: number) {
 async function handle(client: Client, msg: Record<string, unknown>) {
   if (msg.t === 'hello') {
     await hello(client, msg)
+    return
+  }
+  if (msg.t === 'beat') {
+    client.lastPong = Date.now()
+    send(client.ws, { t: 'beat' })
     return
   }
   const session = client.sessionCode ? sessions.get(client.sessionCode) : undefined
@@ -411,10 +449,12 @@ async function hello(client: Client, msg: Record<string, unknown>) {
   const hosted = hostedBy(resumeId)
   const decision = sessionHello({
     create: Boolean(msg.create),
+    fresh: Boolean(msg.fresh),
     requestedCode: msg.code ? String(msg.code) : '',
     hostedCode: hosted?.code,
   })
   if (decision.action === 'create') {
+    if (msg.fresh && hosted && resumeId) releaseHost(hosted, resumeId)
     const code = freshCode()
     const id = resumeId || crypto.randomUUID()
     const session: Session = {
@@ -437,6 +477,7 @@ async function hello(client: Client, msg: Record<string, unknown>) {
       video: true,
       screen: false,
       mutedByHost: false,
+      instanceId: String(msg.instanceId || '').slice(0, 80),
     }
     session.participants.set(id, person)
     session.clients.set(id, client)
@@ -461,8 +502,17 @@ async function hello(client: Client, msg: Record<string, unknown>) {
   if (resumeId && existing) {
     session.held.delete(resumeId)
     session.participants.set(resumeId, existing)
+    const instanceId = String(msg.instanceId || '').slice(0, 80)
+    if (instanceId) existing.instanceId = instanceId
     const previous = session.clients.get(resumeId)
     if (previous && previous.ws !== client.ws) {
+      const stillOpen = previous.ws.readyState === previous.ws.OPEN && Date.now() - previous.lastPong < 8000
+      if (stillOpen) {
+        record(session, 'duplicate', `ignored a second socket for ${resumeId} because the first is still open`, resumeId)
+        send(client.ws, { t: 'error', message: 'This browser already has a live connection to the session.' })
+        client.ws.close()
+        return
+      }
       record(session, 'evict', `closed the previous socket for ${resumeId}`, resumeId)
       previous.sessionCode = undefined
       previous.ws.close()
@@ -491,6 +541,7 @@ async function hello(client: Client, msg: Record<string, unknown>) {
     video: true,
     screen: false,
     mutedByHost: false,
+    instanceId: String(msg.instanceId || '').slice(0, 80),
   }
   session.participants.set(id, person)
   session.clients.set(id, client)
@@ -513,6 +564,23 @@ function drop(session: Session, id: string, event: 'rejected' | 'removed') {
   }
   emitRoster(session)
 }
+
+setInterval(() => {
+  for (const session of sessions.values()) {
+    for (const client of session.clients.values()) {
+      if (client.ws.readyState !== client.ws.OPEN) continue
+      if (Date.now() - client.lastPong > 8000) {
+        client.ws.terminate()
+        continue
+      }
+      try {
+        client.ws.ping()
+      } catch {
+        /* the close handler records the leave */
+      }
+    }
+  }
+}, 3000).unref?.()
 
 setInterval(() => {
   const now = Date.now()

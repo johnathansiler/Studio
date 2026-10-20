@@ -20,7 +20,7 @@ import { rememberDiag, sanitizeDiag } from '../model/diag'
 import { arrangementDigest, catchUpSchedule, guestMayRequest, guestStartPerf, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
 import { cameraAttempts, legalDirection, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, videoDirection } from '../model/codecs'
 import { filterBrowserTurnUrls, iceRetryPlan, isSilentTake, mediaStatus, queueIceCandidate, staticTurnServer } from '../model/media'
-import { iceUfrag, politePeer, remoteDescriptionPlan, sessionHello } from '../model/negotiate'
+import { iceUfrag, politePeer, remoteDescriptionPlan, sessionHello, signalingReconnectPlan, socketMayOpen } from '../model/negotiate'
 import { isQuotaError } from '../storage/idb'
 import { clearIceCache, currentIce } from '../../server/ice.ts'
 import { formatBarsBeats, formatTimecode, samplesToMusical, snapSample } from '../model/time'
@@ -229,6 +229,15 @@ describe('media path', () => {
     expect(iceRetryPlan({ connection: 'new', ice: 'new', ageMs: 5000, turn: 'cloudflare', previousTurn: 'cloudflare', signaling: 'have-local-offer', offerAgeMs: 4500 })).toBe('restart')
     expect(iceRetryPlan({ connection: 'new', ice: 'new', ageMs: 2000, turn: 'cloudflare', previousTurn: 'cloudflare', signaling: 'have-local-offer', offerAgeMs: 1000 })).toBe('wait')
     expect(iceRetryPlan({ connection: 'connecting', ice: 'checking', ageMs: 4000, turn: 'cloudflare', previousTurn: 'none', signaling: 'stable' })).toBe('wait')
+    expect(iceRetryPlan({ connection: 'disconnected', ice: 'disconnected', ageMs: 5000, turn: 'cloudflare', previousTurn: 'cloudflare' })).toBe('wait')
+    const bytes = mediaStatus({
+      turn: 'cloudflare',
+      turnError: 'Cloudflare TURN failed',
+      live: true,
+      links: [{ connection: 'disconnected', ice: 'disconnected', path: 'direct', ageMs: 4000, videoBytes: 12000 }],
+    })
+    expect(bytes?.tone).toBe('good')
+    expect(bytes?.text).toMatch(/connected/)
     const checking = mediaStatus({
       turn: 'cloudflare',
       live: true,
@@ -575,6 +584,8 @@ describe('offer and answer', () => {
     expect(remoteDescriptionPlan({ ...base, kind: 'offer', polite: true, makingOffer: true })).toBe('rollback-offer')
     expect(remoteDescriptionPlan({ ...base, kind: 'offer', offerAgeMs: 5000, ice: 'new' })).toBe('rollback-offer')
     expect(remoteDescriptionPlan({ ...base, kind: 'offer', ice: 'failed', offerAgeMs: 100 })).toBe('rollback-offer')
+    expect(remoteDescriptionPlan({ ...base, kind: 'offer', ice: 'disconnected', offerAgeMs: 100 })).toBe('ignore-offer')
+    expect(remoteDescriptionPlan({ ...base, kind: 'offer', polite: true, ice: 'disconnected', makingOffer: true })).toBe('rollback-offer')
   })
 
   it('rejoins a room this browser already hosts instead of minting another', () => {
@@ -589,6 +600,20 @@ describe('offer and answer', () => {
       reason: 'joined OTHER1',
     })
     expect(sessionHello({ create: false }).reason).toMatch(/no session code/)
+    expect(sessionHello({ create: true, fresh: true, hostedCode: 'EEVEDR' })).toEqual({
+      action: 'create',
+      reason: 'host tapped New session',
+    })
+    expect(socketMayOpen(null)).toBe(true)
+    expect(socketMayOpen(undefined)).toBe(true)
+    expect(socketMayOpen(3)).toBe(true)
+    expect(socketMayOpen(0)).toBe(false)
+    expect(socketMayOpen(1)).toBe(false)
+    expect(socketMayOpen(2)).toBe(false)
+    expect(signalingReconnectPlan({ connection: 'connected', ice: 'connected', remoteInstance: 'a', previousInstance: 'a' })).toBe('keep')
+    expect(signalingReconnectPlan({ connection: 'disconnected', ice: 'disconnected', remoteInstance: 'a', previousInstance: 'a' })).toBe('keep')
+    expect(signalingReconnectPlan({ connection: 'connected', ice: 'connected', remoteInstance: 'b', previousInstance: 'a' })).toBe('renegotiate')
+    expect(signalingReconnectPlan({ connection: 'failed', ice: 'failed', remoteInstance: 'a', previousInstance: 'a' })).toBe('renegotiate')
     expect(iceUfrag('a=ice-ufrag:abc123\r\n')).toBe('abc123')
   })
 })

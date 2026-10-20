@@ -12,12 +12,14 @@ export function VideoDock({
   simple,
   onCreate,
   onJoin,
+  onNewSession,
 }: {
   session: SessionClient
   engine: AudioEngine
   simple?: boolean
   onCreate: () => void
   onJoin: () => void
+  onNewSession: () => void
 }) {
   const state = session.state
   const [tab, setTab] = useState<'people' | 'chat' | 'signal'>('signal')
@@ -85,6 +87,13 @@ export function VideoDock({
     live: state.status === 'live',
   })
 
+  function startNewSession() {
+    const others = state.participants.some((person) => person.id !== state.selfId)
+    const inRoom = state.status === 'live' || state.status === 'waiting' || state.status === 'reconnecting'
+    if (inRoom && others && !window.confirm('Leave this session and start a new one?')) return
+    onNewSession()
+  }
+
   async function popOut(event: MouseEvent<HTMLButtonElement>) {
     const here = event.currentTarget.ownerDocument.defaultView
     const pip = window.documentPictureInPicture
@@ -107,7 +116,7 @@ export function VideoDock({
     const dockRoot = createRoot(mount)
     popRoot.current = dockRoot
     popWindow.current = win
-    dockRoot.render(<LiveDock session={session} engine={engine} simple={simple} onCreate={onCreate} onJoin={onJoin} />)
+    dockRoot.render(<LiveDock session={session} engine={engine} simple={simple} onCreate={onCreate} onJoin={onJoin} onNewSession={onNewSession} />)
     setPopped(true)
     win.addEventListener('pagehide', () => {
       dockRoot.unmount()
@@ -145,8 +154,13 @@ export function VideoDock({
         <button className="icon-btn pop-out" onClick={(event) => void popOut(event)} title="Pop out">
           ⧉
         </button>
+        <button type="button" id="new-session" className="text-btn new-session" onClick={startNewSession}>
+          New session
+        </button>
       </div>
-      {link && <div className={`media-banner ${link.tone}`}>{link.text}</div>}
+      <div className="dock-body">
+      {state.hostLeft && <div className="media-banner bad">The host left this session.</div>}
+      {!state.hostLeft && link && <div className={`media-banner ${link.tone}`}>{link.text}</div>}
       {(state.status === 'live' || state.status === 'waiting' || state.status === 'reconnecting') && (
         <details className="connection-details">
           <summary>Connection details</summary>
@@ -203,6 +217,9 @@ export function VideoDock({
           {state.error && <p className="hint">{state.error}</p>}
           <button type="button" className="text-btn primary" onClick={onCreate}>
             Create invite
+          </button>
+          <button type="button" className="text-btn new-session" onClick={startNewSession}>
+            New session
           </button>
           <button type="button" className="text-btn" id="join-with-code" onClick={onJoin}>
             Join with a code
@@ -376,11 +393,12 @@ export function VideoDock({
           </div>
         )}
       </div>
+      </div>
     </aside>
   )
 }
 
-function LiveDock(props: { session: SessionClient; engine: AudioEngine; simple?: boolean; onCreate: () => void; onJoin: () => void }) {
+function LiveDock(props: { session: SessionClient; engine: AudioEngine; simple?: boolean; onCreate: () => void; onJoin: () => void; onNewSession: () => void }) {
   const [, bump] = useState(0)
   useEffect(() => props.session.subscribe(() => bump((n) => n + 1)), [props.session])
   useEffect(() => props.engine.subscribe(() => bump((n) => n + 1)), [props.engine])
@@ -405,21 +423,26 @@ function copyDockStyles(win: Window) {
 function playVideo(el: HTMLVideoElement | null, stream: MediaStream | null, muted: boolean) {
   if (!el) return
   const playable = stream && stream.getVideoTracks().length ? stream : null
-  el.muted = muted
   el.autoplay = true
   el.playsInline = true
+  el.muted = muted
   el.setAttribute('playsinline', 'true')
   el.setAttribute('webkit-playsinline', 'true')
   if (!playable) {
     if (el.srcObject) el.srcObject = null
     return
   }
-  if (el.srcObject !== playable) el.srcObject = playable
+  const current = el.srcObject instanceof MediaStream ? el.srcObject : null
+  const nextId = playable.getVideoTracks()[0]?.id
+  const same = current?.getVideoTracks()[0]?.id === nextId && nextId
+  if (!same) el.srcObject = playable
   const start = () => {
     void el.play().catch(() => undefined)
   }
   start()
   el.onloadedmetadata = start
+  const track = playable.getVideoTracks()[0]
+  if (track) track.onunmute = start
 }
 
 function Tile({

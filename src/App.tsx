@@ -779,6 +779,14 @@ export function App() {
               setPhonePane('room')
               session.connect({ name: joinName || 'Engineer', create: true })
             }}
+            onNewSession={() => {
+              engine.unlock()
+              session.primeMediaFromGesture()
+              setSurface('studio')
+              setPhonePane('room')
+              setMenuOpen(false)
+              session.connect({ name: joinName || 'Engineer', create: true, fresh: true })
+            }}
             onJoin={() => setJoinOpen(true)}
           />
         </div>
