@@ -25,6 +25,8 @@ export class ProjectStore {
   view: WorkspaceView = 'arrange'
   launched: Record<string, string | null> = {}
   transportMode: 'arrangement' | 'session' = 'arrangement'
+  /** Guests mirror the host arrangement and cannot edit it. */
+  remoteFollow = false
   toasts: Toast[] = []
   version = 0
   private past: string[] = []
@@ -59,12 +61,14 @@ export class ProjectStore {
   }
 
   private mutate(fn: () => void) {
+    if (this.remoteFollow) return
     this.snapshot()
     fn()
     this.emit()
   }
 
   undo() {
+    if (this.remoteFollow) return
     const prev = this.past.pop()
     if (!prev) return
     this.future.push(JSON.stringify(this.project))
@@ -73,6 +77,7 @@ export class ProjectStore {
   }
 
   redo() {
+    if (this.remoteFollow) return
     const next = this.future.pop()
     if (!next) return
     this.past.push(JSON.stringify(this.project))

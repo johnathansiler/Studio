@@ -12,7 +12,10 @@ import {
   type TimedPeak,
 } from '../model/latency'
 import { DEFAULT_OPUS, mungeOpusSdp, type OpusOptions } from '../model/sdp'
+import { arrangementDigest, guestMayRequest, referencedBufferIds } from '../model/sessionSync'
 import { decodeWavPCM, encodeWav } from '../model/wav'
+import { base64ToBytes, bytesToBase64 } from '../storage/idb'
+import type { AudioAsset, Project } from '../model/types'
 
 export interface Participant {
   id: string
@@ -78,6 +81,9 @@ export interface SessionState {
   activeSpeakerId: string | null
   reactions: Record<string, { emoji: string; at: number }>
   log: string[]
+  /** Guest is playing the host arrangement locally instead of the delayed cue. */
+  preferLocalBacking: boolean
+  syncLabel: string
 }
 
 export interface IncomingTake {
@@ -152,6 +158,15 @@ export class SessionClient {
   private detachPing: (() => void) | null = null
   private pcmSeq = 1
   private onTake: ((take: IncomingTake) => void) | null = null
+  private onControl: ((cmd: Record<string, unknown>) => void) | null = null
+  private onArrangement: ((project: Project, assets: Map<string, AudioAsset>, ready: boolean) => void) | null = null
+  private arrangementStore: { project: Project; buffers: Map<string, AudioAsset> } | null = null
+  private sentAssets = new Set<string>()
+  private lastDigest = ''
+  private arrangementRev = 0
+  private incomingRev = 0
+  private incomingProject: Project | null = null
+  private incomingAssets = new Map<string, AudioAsset>()
   private resumeId = ''
 
   constructor(private engine: AudioEngine) {
@@ -180,6 +195,8 @@ export class SessionClient {
       activeSpeakerId: null,
       reactions: {},
       log: [],
+      preferLocalBacking: false,
+      syncLabel: '',
     }
   }
 
@@ -367,6 +384,21 @@ export class SessionClient {
     }
     if (msg.t === 'transport') {
       this.onTransport(msg.payload)
+      return
+    }
+    if (msg.t === 'transport-request') {
+      const payload = msg.payload as Record<string, unknown>
+      if (this.state.role === 'host' && payload && guestMayRequest(String(payload.action || ''))) this.onControl?.(payload)
+      return
+    }
+    if (msg.t === 'project' && this.state.role === 'guest') {
+      this.incomingRev = Number(msg.rev) || this.incomingRev
+      this.incomingProject = msg.project as Project
+      this.applyIncomingArrangement()
+      return
+    }
+    if (msg.t === 'project-asset' && this.state.role === 'guest') {
+      this.takeAsset(msg.asset as { id: string; name: string; sampleRate: number; wav: string })
       return
     }
   }
@@ -593,6 +625,80 @@ export class SessionClient {
   broadcastTransport(payload: Record<string, unknown>) {
     if (this.state.role !== 'host') return
     this.send({ t: 'transport', payload })
+  }
+
+  requestTransport(payload: Record<string, unknown>) {
+    if (!guestMayRequest(String(payload.action || ''))) return
+    this.send({ t: 'transport-request', payload })
+  }
+
+  setControlHandler(fn: (cmd: Record<string, unknown>) => void) {
+    this.onControl = fn
+  }
+
+  setArrangementHandler(fn: (project: Project, assets: Map<string, AudioAsset>, ready: boolean) => void) {
+    this.onArrangement = fn
+  }
+
+  bindArrangement(store: { project: Project; buffers: Map<string, AudioAsset> }) {
+    this.arrangementStore = store
+  }
+
+  hostOffsetMs() {
+    const id = this.hostId()
+    if (!id) return null
+    return this.peers.get(id)?.remoteMinusLocal ?? null
+  }
+
+  /** Host pushes the arrangement and any audio the guest does not have yet. */
+  publishArrangement() {
+    const store = this.arrangementStore
+    if (!store || this.state.role !== 'host' || this.state.status !== 'live') return
+    const project = store.project
+    for (const id of referencedBufferIds(project)) {
+      if (this.sentAssets.has(id)) continue
+      const asset = store.buffers.get(id)
+      if (!asset) continue
+      this.sentAssets.add(id)
+      const wav = bytesToBase64(new Uint8Array(encodeWav(asset.channels, asset.sampleRate)))
+      this.send({ t: 'project-asset', asset: { id: asset.id, name: asset.name, sampleRate: asset.sampleRate, wav } })
+    }
+    const digest = arrangementDigest(project)
+    if (digest === this.lastDigest) return
+    this.lastDigest = digest
+    this.arrangementRev += 1
+    this.send({ t: 'project', rev: this.arrangementRev, project })
+    this.state.syncLabel = 'Host · guests follow'
+    this.emit()
+  }
+
+  private takeAsset(asset: { id: string; name: string; sampleRate: number; wav: string } | undefined) {
+    if (!asset?.id || !asset.wav) return
+    try {
+      const decoded = decodeWavPCM(base64ToBytes(asset.wav).buffer as ArrayBuffer)
+      this.incomingAssets.set(asset.id, {
+        id: asset.id,
+        name: asset.name || 'Audio',
+        sampleRate: decoded.sampleRate || asset.sampleRate,
+        channels: decoded.channels,
+      })
+    } catch {
+      this.note('An arrangement file could not be read.')
+    }
+    this.applyIncomingArrangement()
+  }
+
+  private applyIncomingArrangement() {
+    const project = this.incomingProject
+    if (!project) return
+    const assets = new Map(this.incomingAssets)
+    const ids = referencedBufferIds(project)
+    const ready = ids.every((id) => assets.has(id))
+    this.state.preferLocalBacking = ready
+    this.state.syncLabel = ready ? 'Following host' : 'Receiving arrangement'
+    this.refreshCue()
+    this.onArrangement?.(project, assets, ready)
+    this.emit()
   }
 
   private startMaintenance() {
@@ -869,7 +975,7 @@ export class SessionClient {
           this.pingPeaks.push({ perf: this.engine.perfForContext(frame / this.engine.sampleRate), mag })
           this.finishPing()
         }) || null
-        this.engine.setCueAudible(this.state.monitorMode === 'opus')
+        this.refreshCue()
       } else {
         this.engine.setRemoteMusic(id, link.music)
       }
@@ -887,9 +993,14 @@ export class SessionClient {
     }
   }
 
+  private refreshCue() {
+    const pcm = this.state.monitorMode === 'pcm'
+    this.engine.setCueAudible(!pcm && !this.state.preferLocalBacking)
+  }
+
   private applyMonitor() {
     const pcm = this.state.monitorMode === 'pcm'
-    this.engine.setCueAudible(!pcm)
+    this.refreshCue()
     void this.engine.ensurePcmPlayer()
     if (!pcm) {
       this.engine.stopPcmTap()
@@ -1029,7 +1140,7 @@ export class SessionClient {
         recordStartSample: payload.timelineSample,
         cueEpochHostPerfMs: payload.cueEpochHostPerfMs,
         hostSampleRate: payload.sampleRate,
-        oneWayMs: estimate?.ms ?? payload.oneWayHintMs ?? 30,
+        oneWayMs: this.state.preferLocalBacking ? 0 : (estimate?.ms ?? payload.oneWayHintMs ?? 30),
       }
       this.note(`Recording locally against the host grid (−${this.punch.oneWayMs.toFixed(0)} ms compensation armed).`)
       this.emit()
@@ -1037,6 +1148,10 @@ export class SessionClient {
     }
     if (payload.action === 'record-stop' && this.punch && payload.takeId === this.punch.takeId) {
       void this.finishLocalTake(payload.timelineSample)
+      return
+    }
+    if (payload.action === 'play' || payload.action === 'stop' || payload.action === 'seek') {
+      this.onControl?.(payload)
       return
     }
     if (payload.action === 'ping-arm') {

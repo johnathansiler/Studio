@@ -6,15 +6,19 @@ import type { ProjectStore } from '../state/store'
 export function TransportBar({
   store,
   engine,
+  syncLabel,
   onPlay,
   onStop,
   onRecord,
+  onSeek,
 }: {
   store: ProjectStore
   engine: AudioEngine
+  syncLabel?: string
   onPlay: () => void
   onStop: () => void
   onRecord: () => void
+  onSeek: (sample: number) => void
 }) {
   const project = store.project
   const [position, setPosition] = useState(engine.positionSamples)
@@ -30,7 +34,7 @@ export function TransportBar({
   return (
     <div className="transport">
       <div className="t-buttons">
-        <button className="t-btn" onClick={() => engine.seek(0)} title="Return to start">
+        <button className="t-btn" onClick={() => onSeek(0)} title="Return to start">
           ⏮
         </button>
         <button className={`t-btn play ${status === 'playing' || status === 'recording' ? 'on' : ''}`} onClick={status === 'stopped' ? onPlay : onStop}>
@@ -54,6 +58,7 @@ export function TransportBar({
             min={40}
             max={300}
             value={project.tempo}
+            disabled={store.remoteFollow}
             onChange={(event) => store.setTempo(Number(event.target.value))}
           />
         </label>
@@ -61,6 +66,7 @@ export function TransportBar({
           Sig
           <select
             value={`${project.timeSignature.numerator}/${project.timeSignature.denominator}`}
+            disabled={store.remoteFollow}
             onChange={(event) => {
               const [n, d] = event.target.value.split('/').map(Number)
               store.setTimeSignature(n, d)
@@ -74,18 +80,19 @@ export function TransportBar({
       </div>
       <div className="t-toggles">
         <label className="toggle">
-          <input type="checkbox" checked={project.metronomeEnabled} onChange={() => store.toggle('metronomeEnabled')} /> Click
+          <input type="checkbox" checked={project.metronomeEnabled} disabled={store.remoteFollow} onChange={() => store.toggle('metronomeEnabled')} /> Click
         </label>
         <label className="toggle">
-          <input type="checkbox" checked={project.countIn} onChange={() => store.toggle('countIn')} /> Count-in
+          <input type="checkbox" checked={project.countIn} disabled={store.remoteFollow} onChange={() => store.toggle('countIn')} /> Count-in
         </label>
         <label className="toggle">
-          <input type="checkbox" checked={project.loopEnabled} onChange={() => store.toggle('loopEnabled')} /> Loop
+          <input type="checkbox" checked={project.loopEnabled} disabled={store.remoteFollow} onChange={() => store.toggle('loopEnabled')} /> Loop
         </label>
         <label className="toggle">
-          <input type="checkbox" checked={project.snap} onChange={() => store.toggle('snap')} /> Snap
+          <input type="checkbox" checked={project.snap} disabled={store.remoteFollow} onChange={() => store.toggle('snap')} /> Snap
         </label>
         <span className="hint">{store.transportMode === 'session' ? 'SESSION' : 'ARRANGE'}</span>
+        {syncLabel && <span className="sync-pill">{syncLabel}</span>}
       </div>
     </div>
   )

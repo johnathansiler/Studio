@@ -6,7 +6,17 @@ import type { AudioClip } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import type { SessionClient } from '../remote/session'
 
-export function ArrangeView({ store, engine, session }: { store: ProjectStore; engine: AudioEngine; session: SessionClient }) {
+export function ArrangeView({
+  store,
+  engine,
+  session,
+  onSeek,
+}: {
+  store: ProjectStore
+  engine: AudioEngine
+  session: SessionClient
+  onSeek: (sample: number) => void
+}) {
   const project = store.project
   const [px, setPx] = useState(90)
   const [position, setPosition] = useState(engine.positionSamples)
@@ -20,11 +30,13 @@ export function ArrangeView({ store, engine, session }: { store: ProjectStore; e
   function seekFromEvent(event: MouseEvent<HTMLDivElement>) {
     const bounds = event.currentTarget.getBoundingClientRect()
     const sample = ((event.clientX - bounds.left) / px) * project.sampleRate
-    engine.seek(snapSample(sample, project.sampleRate, project.tempo, project.snap))
+    onSeek(snapSample(sample, project.sampleRate, project.tempo, project.snap))
   }
 
   return (
-    <div className="arrange">
+    <div className="arrange-wrap">
+      {store.remoteFollow && <div className="follow-banner">Following the host. Play, stop, and locate are shared. Clip edits stay on the host.</div>}
+      <div className="arrange">
       <div className="heads">
         <div className="ruler-gap" />
         {project.tracks.map((track) => (
@@ -150,6 +162,7 @@ export function ArrangeView({ store, engine, session }: { store: ProjectStore; e
           ))}
           <div className="playhead" style={{ left: (position / project.sampleRate) * px }} />
         </div>
+      </div>
       </div>
     </div>
   )

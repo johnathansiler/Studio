@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
 import type { AudioEngine } from '../audio/engine'
 import type { Participant, SessionClient } from '../remote/session'
 import { ms } from './format'
@@ -21,6 +22,9 @@ export function VideoDock({
   const [levels, setLevels] = useState({ input: 0, talk: 0 })
   const inviteUrl = state.code ? `${location.origin}/?session=${state.code}` : ''
   const root = useRef<HTMLDivElement>(null)
+  const popRoot = useRef<Root | null>(null)
+  const popWindow = useRef<Window | null>(null)
+  const [popped, setPopped] = useState(false)
   useEffect(() => {
     let timer = 0
     const tick = () => {
@@ -37,23 +41,52 @@ export function VideoDock({
   const featured = state.activeSpeakerId
   const one = session.primaryOneWay()
 
-  async function popOut() {
-    const node = root.current
+  async function popOut(event: MouseEvent<HTMLButtonElement>) {
+    const here = event.currentTarget.ownerDocument.defaultView
     const pip = window.documentPictureInPicture
-    if (!node || !pip) {
+    if (here && pip?.window && here === pip.window) {
+      pip.window.close()
+      return
+    }
+    if (!pip) {
       session.note('Picture-in-picture pop-out needs a Chromium browser.')
       return
     }
     const win = await pip.requestWindow({ width: 960, height: 640 })
-    for (const style of document.querySelectorAll('link[rel="stylesheet"], style')) {
-      win.document.head.appendChild(style.cloneNode(true))
-    }
+    copyDockStyles(win)
     win.document.body.style.margin = '0'
     win.document.body.style.background = '#101614'
-    win.document.body.appendChild(node)
+    win.document.body.style.height = '100%'
+    const mount = win.document.createElement('div')
+    mount.style.height = '100%'
+    win.document.body.appendChild(mount)
+    const dockRoot = createRoot(mount)
+    popRoot.current = dockRoot
+    popWindow.current = win
+    dockRoot.render(<LiveDock session={session} engine={engine} onCreate={onCreate} onJoin={onJoin} />)
+    setPopped(true)
     win.addEventListener('pagehide', () => {
-      document.querySelector('.dock-slot')?.appendChild(node)
+      dockRoot.unmount()
+      if (popRoot.current === dockRoot) popRoot.current = null
+      popWindow.current = null
+      setPopped(false)
     })
+  }
+
+  if (popped) {
+    return (
+      <aside className="dock">
+        <div className="dock-placeholder">
+          <p>The session is in its own window. Mute, camera, chat, and admit stay in sync with this studio.</p>
+          <button className="text-btn primary" onClick={() => popWindow.current?.focus()}>
+            Show session window
+          </button>
+          <button className="text-btn" onClick={() => popWindow.current?.close()}>
+            Dock again
+          </button>
+        </div>
+      </aside>
+    )
   }
 
   return (
@@ -65,7 +98,7 @@ export function VideoDock({
         <button className="icon-btn" onClick={() => session.setMonitorMode(state.monitorMode === 'opus' ? 'pcm' : 'opus')} title="Monitor path">
           {state.monitorMode === 'opus' ? 'Opus 10ms' : 'PCM'}
         </button>
-        <button className="icon-btn" onClick={() => void popOut()} title="Pop out">
+        <button className="icon-btn" onClick={(event) => void popOut(event)} title="Pop out">
           ⧉
         </button>
       </div>
@@ -75,11 +108,12 @@ export function VideoDock({
           <strong>{inviteUrl}</strong>
           <button
             className="text-btn primary"
-            onClick={() => {
-              void navigator.clipboard.writeText(inviteUrl).then(
+            onClick={(event) => {
+              const view = event.currentTarget.ownerDocument.defaultView || window
+              void view.navigator.clipboard.writeText(inviteUrl).then(
                 () => {
                   setCopied(true)
-                  window.setTimeout(() => setCopied(false), 1600)
+                  view.setTimeout(() => setCopied(false), 1600)
                   session.note('Invite link copied.')
                 },
                 () => session.note(`Copy this link: ${inviteUrl}`),
@@ -260,6 +294,28 @@ export function VideoDock({
       </div>
     </aside>
   )
+}
+
+function LiveDock(props: { session: SessionClient; engine: AudioEngine; onCreate: () => void; onJoin: () => void }) {
+  const [, bump] = useState(0)
+  useEffect(() => props.session.subscribe(() => bump((n) => n + 1)), [props.session])
+  useEffect(() => props.engine.subscribe(() => bump((n) => n + 1)), [props.engine])
+  return <VideoDock {...props} />
+}
+
+function copyDockStyles(win: Window) {
+  for (const node of document.querySelectorAll('link[rel="stylesheet"], style')) {
+    win.document.head.appendChild(node.cloneNode(true))
+  }
+  for (const sheet of document.styleSheets) {
+    try {
+      const style = win.document.createElement('style')
+      style.textContent = [...sheet.cssRules].map((rule) => rule.cssText).join('\n')
+      win.document.head.appendChild(style)
+    } catch {
+      /* a cross-origin sheet cannot be read */
+    }
+  }
 }
 
 function Tile({
