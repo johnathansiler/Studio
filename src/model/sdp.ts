@@ -114,30 +114,35 @@ export function markOutboundVideo(sdp: string, send: Array<boolean | 'sendrecv' 
   return rendered.flat().join('\r\n') + '\r\n'
 }
 
-/** Video directions in m-line order. Safari's answer must be legal against these. */
-export function videoDirectionsFromSdp(sdp: string): Array<'sendrecv' | 'sendonly' | 'recvonly' | 'inactive'> {
+/** Directions for one media kind, in m-line order. An answer has to stay legal against these. */
+export function sectionDirections(sdp: string, kind: 'audio' | 'video'): Array<'sendrecv' | 'sendonly' | 'recvonly' | 'inactive'> {
   const lines = sdp.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n')
   const dirs: Array<'sendrecv' | 'sendonly' | 'recvonly' | 'inactive'> = []
-  let inVideo = false
+  let inside = false
   let dir: 'sendrecv' | 'sendonly' | 'recvonly' | 'inactive' | null = null
   const flush = () => {
-    if (!inVideo) return
+    if (!inside) return
     dirs.push(dir || 'sendrecv')
     dir = null
   }
   for (const line of lines) {
     if (line.startsWith('m=')) {
       flush()
-      inVideo = line.startsWith('m=video')
+      inside = line.startsWith(`m=${kind}`)
       continue
     }
-    if (!inVideo) continue
+    if (!inside) continue
     if (line === 'a=sendrecv' || line === 'a=sendonly' || line === 'a=recvonly' || line === 'a=inactive') {
       dir = line.slice(2) as 'sendrecv' | 'sendonly' | 'recvonly' | 'inactive'
     }
   }
   flush()
   return dirs
+}
+
+/** Video directions in m-line order. Safari's answer must be legal against these. */
+export function videoDirectionsFromSdp(sdp: string) {
+  return sectionDirections(sdp, 'video')
 }
 
 function clamp(n: number, min: number, max: number) {

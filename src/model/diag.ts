@@ -6,6 +6,7 @@ export interface DiagPeer {
   gathered: { host: number; srflx: number; relay: number; prflx: number }
   selected: { local: string; remote: string } | null
   errors: string[]
+  offers: number
 }
 
 export interface DiagReport {
@@ -14,6 +15,9 @@ export interface DiagReport {
   role: string
   ua: string
   peers: DiagPeer[]
+  /** create, join, leave, evict, or a client session reason. */
+  event?: string
+  note?: string
 }
 
 const CANDIDATE = new Set(['host', 'srflx', 'relay', 'prflx', ''])
@@ -57,15 +61,20 @@ export function sanitizeDiag(input: unknown): DiagReport | null {
       },
       selected: selectedIn && (CANDIDATE.has(local) || CANDIDATE.has(remote)) ? { local, remote } : null,
       errors,
+      offers: count(peer.offers),
     })
   }
   const at = Number(row.at)
+  const event = clip(row.event, 40)
+  const note = clip(row.note, 180)
   return {
     at: Number.isFinite(at) ? Math.round(at) : Date.now(),
     peerId: clip(row.peerId, 80),
     role: clip(row.role, 16),
     ua: clip(row.ua, 180),
     peers,
+    ...(event ? { event } : {}),
+    ...(note ? { note } : {}),
   }
 }
 
