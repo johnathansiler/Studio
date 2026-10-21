@@ -37,6 +37,21 @@ export function shouldSetVideoCodecPreferences(userAgent: string) {
 export const VIDEO_BITRATES = [100_000, 150_000, 300_000] as const
 /** A face on a phone, not a broadcast. The sender cap stays on this value. */
 export const DEFAULT_VIDEO_BITRATE = 100_000
+export const VIDEO_MAX_FRAMERATE = 15
+
+/**
+ * The camera opens at about 15 fps and 100 kbps. `medium` is enough of the
+ * congestion estimate to reach that cap once the estimate is a few hundred
+ * kilobits, and maxBitrate stops it taking more. Audio stays the higher priority.
+ */
+export function videoEncodingBudget(maxBitrate = DEFAULT_VIDEO_BITRATE) {
+  return {
+    maxBitrate,
+    maxFramerate: VIDEO_MAX_FRAMERATE,
+    priority: 'medium' as const,
+    networkPriority: 'low' as const,
+  }
+}
 
 /** Seeing each other, not a broadcast. Ideal 320×240, never above 426×240 or 15 fps. */
 export function videoCaptureBudget(): Pick<MediaTrackConstraints, 'width' | 'height' | 'frameRate'> {
