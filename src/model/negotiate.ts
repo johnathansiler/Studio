@@ -43,25 +43,22 @@ export function enqueueSignal(queue: OutboundSignal[], message: OutboundSignal, 
 
 /**
  * The host recovers a failed or disconnected peer connection.
- * A repeated ICE-restart offer is resent. A failed restart that was answered
- * and still failed moves to a relay-only peer connection. The guest never does this.
+ * An offer still in flight is sent again. A stable connection restarts ICE.
+ * Nothing rolls that offer back, and nothing builds a second peer connection.
+ * The guest never does this.
  */
 export function iceRecoveryAction(input: {
   polite: boolean
   connection: string
   ice: string
   signaling: string
-  offerWasRestart: boolean
-  restarts: number
-  relayed: boolean
-}): 'none' | 'restart' | 'resend' | 'rollback-restart' | 'wait' | 'relay' {
+}): 'none' | 'restart' | 'resend' | 'wait' {
   if (input.polite) return 'none'
   const failed = input.connection === 'failed' || input.ice === 'failed'
   const disconnected = input.connection === 'disconnected' || input.ice === 'disconnected'
   if (!failed && !disconnected) return 'none'
-  if (failed && input.restarts >= 1 && input.signaling === 'stable' && !input.relayed) return 'relay'
+  if (input.signaling === 'have-local-offer') return 'resend'
   if (input.signaling === 'stable') return 'restart'
-  if (input.signaling === 'have-local-offer') return input.offerWasRestart ? 'resend' : 'rollback-restart'
   return 'wait'
 }
 

@@ -17,7 +17,7 @@ import {
 } from '../model/latency'
 import { DEFAULT_OPUS, mungeOpusSdp, videoDirectionsFromSdp } from '../model/sdp'
 import { rememberDiag, sanitizeDiag } from '../model/diag'
-import { arrangementDigest, catchUpSchedule, guestMayRequest, guestStartPerf, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
+import { arrangementDigest, assetChunkCount, ASSET_CHUNK_BYTES, catchUpSchedule, guestMayRequest, guestStartPerf, mediaCanCarryAssets, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
 import { cameraAttempts, legalDirection, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, videoDirection } from '../model/codecs'
 import { ensureCellularTurn, filterBrowserTurnUrls, isSilentTake, mediaStatus, queueIceCandidate, staticTurnServer } from '../model/media'
 import { answerMatches, enqueueSignal, iceRecoveryAction, ignoreIncomingOffer, inviteWins, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen } from '../model/negotiate'
@@ -590,11 +590,21 @@ describe('offer and answer', () => {
     expect(answerMatches(3, 3)).toBe(true)
     expect(answerMatches(3, 2)).toBe(false)
     expect(answerMatches(3, undefined)).toBe(true)
-    expect(iceRecoveryAction({ polite: true, connection: 'failed', ice: 'failed', signaling: 'stable', offerWasRestart: true, restarts: 1, relayed: false })).toBe('none')
-    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', offerWasRestart: false, restarts: 0, relayed: false })).toBe('restart')
-    expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'have-local-offer', offerWasRestart: true, restarts: 1, relayed: false })).toBe('resend')
-    expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'stable', offerWasRestart: true, restarts: 1, relayed: false })).toBe('relay')
-    expect(iceRecoveryAction({ polite: false, connection: 'connected', ice: 'connected', signaling: 'stable', offerWasRestart: false, restarts: 0, relayed: false })).toBe('none')
+    expect(iceRecoveryAction({ polite: true, connection: 'failed', ice: 'failed', signaling: 'stable' })).toBe('none')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable' })).toBe('restart')
+    expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'have-local-offer' })).toBe('resend')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'have-local-offer' })).toBe('resend')
+    expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'stable' })).toBe('restart')
+    expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'have-remote-offer' })).toBe('wait')
+    expect(iceRecoveryAction({ polite: false, connection: 'connected', ice: 'connected', signaling: 'stable' })).toBe('none')
+    expect(mediaCanCarryAssets([])).toBe(false)
+    expect(mediaCanCarryAssets([{ connection: 'connected', outboundVideo: 0, outboundAudio: 0 }])).toBe(false)
+    expect(mediaCanCarryAssets([{ connection: 'connecting', outboundVideo: 1000, outboundAudio: 0 }])).toBe(false)
+    expect(mediaCanCarryAssets([{ connection: 'connected', outboundVideo: 1000, outboundAudio: 0 }])).toBe(true)
+    expect(mediaCanCarryAssets([{ connection: 'connected', outboundVideo: 0, outboundAudio: 1000 }])).toBe(true)
+    expect(assetChunkCount(0)).toBe(0)
+    expect(assetChunkCount(ASSET_CHUNK_BYTES)).toBe(1)
+    expect(assetChunkCount(ASSET_CHUNK_BYTES + 1)).toBe(2)
   })
 })
 
