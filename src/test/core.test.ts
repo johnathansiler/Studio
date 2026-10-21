@@ -19,8 +19,8 @@ import { DEFAULT_OPUS, mungeOpusSdp, videoDirectionsFromSdp } from '../model/sdp
 import { rememberDiag, sanitizeDiag } from '../model/diag'
 import { arrangementDigest, catchUpSchedule, guestMayRequest, guestStartPerf, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
 import { cameraAttempts, legalDirection, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, videoDirection } from '../model/codecs'
-import { filterBrowserTurnUrls, isSilentTake, mediaStatus, queueIceCandidate, staticTurnServer } from '../model/media'
-import { ignoreIncomingOffer, inviteWins, keepPeerConnection, sessionHello, socketMayOpen } from '../model/negotiate'
+import { ensureCellularTurn, filterBrowserTurnUrls, isSilentTake, mediaStatus, queueIceCandidate, staticTurnServer } from '../model/media'
+import { answerMatches, enqueueSignal, iceRecoveryAction, ignoreIncomingOffer, inviteWins, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen } from '../model/negotiate'
 import { isQuotaError } from '../storage/idb'
 import { clearIceCache, currentIce } from '../../server/ice.ts'
 import { formatBarsBeats, formatTimecode, samplesToMusical, snapSample } from '../model/time'
@@ -163,17 +163,30 @@ describe('media path', () => {
     expect(flushed.pending).toEqual([])
   })
 
-  it('drops TURN urls on port 53', () => {
+  it('keeps cellular TCP and TLS TURN and drops port 53 and UDP 443', () => {
     expect(filterBrowserTurnUrls([
       'turn:turn.cloudflare.com:3478?transport=udp',
       'turn:turn.cloudflare.com:53?transport=udp',
       'turn:turn.cloudflare.com:80?transport=tcp',
       'turn:turn.cloudflare.com:443?transport=udp',
+      'turn:turn.cloudflare.com:443?transport=tcp',
+      'turns:turn.cloudflare.com:443?transport=tcp',
+    ])).toEqual([
+      'turn:turn.cloudflare.com:3478?transport=udp',
+      'turn:turn.cloudflare.com:80?transport=tcp',
+      'turn:turn.cloudflare.com:443?transport=tcp',
+      'turns:turn.cloudflare.com:443?transport=tcp',
+    ])
+    expect(ensureCellularTurn([
+      'turn:turn.cloudflare.com:3478?transport=udp',
       'turns:turn.cloudflare.com:443?transport=tcp',
     ])).toEqual([
       'turn:turn.cloudflare.com:3478?transport=udp',
       'turns:turn.cloudflare.com:443?transport=tcp',
+      'turn:turn.cloudflare.com:80?transport=tcp',
+      'turn:turn.cloudflare.com:443?transport=tcp',
     ])
+    expect(ensureCellularTurn(['stun:stun.l.google.com:19302'])).toEqual(['stun:stun.l.google.com:19302'])
     expect(staticTurnServer('turn:127.0.0.1:3478,turns:127.0.0.1:5349', 'cue', 'harbor').urls).toEqual([
       'turn:127.0.0.1:3478',
       'turns:127.0.0.1:5349',
@@ -228,8 +241,12 @@ describe('media path', () => {
     const first = await currentIce(env, fetchImpl)
     const second = await currentIce(env, fetchImpl)
     expect(first.turn).toBe('cloudflare')
-    expect(first.iceServers.some((server) => String(server.urls).includes('3478'))).toBe(true)
-    expect(first.iceServers.some((server) => String(server.urls).includes(':53'))).toBe(false)
+    const urls = first.iceServers.flatMap((server) => Array.isArray(server.urls) ? server.urls : [server.urls])
+    expect(urls.some((url) => url.includes('3478'))).toBe(true)
+    expect(urls.some((url) => url.includes(':53'))).toBe(false)
+    expect(urls).toContain('turn:turn.cloudflare.com:80?transport=tcp')
+    expect(urls).toContain('turn:turn.cloudflare.com:443?transport=tcp')
+    expect(urls).toContain('turns:turn.cloudflare.com:443?transport=tcp')
     expect(second).toEqual(first)
     expect(calls).toBe(1)
     clearIceCache()
@@ -556,6 +573,28 @@ describe('offer and answer', () => {
     expect(socketMayOpen(0)).toBe(false)
     expect(socketMayOpen(1)).toBe(false)
     expect(socketMayOpen(2)).toBe(false)
+    expect(SIGNAL_KEEPALIVE_MS).toBeGreaterThanOrEqual(5000)
+    expect(SIGNAL_KEEPALIVE_MS).toBeLessThanOrEqual(10000)
+  })
+
+  it('queues an ICE restart until the socket is welcomed and treats a resent offer as the same negotiation', () => {
+    const offer = { t: 'signal', to: 'guest', data: { description: { type: 'offer' }, negotiationId: 2 } }
+    const queued = enqueueSignal([{ t: 'ping' }], offer)
+    expect(queued.map((item) => item.t)).toEqual(['ping', 'signal'])
+    const replaced = enqueueSignal(queued, { t: 'signal', to: 'guest', data: { description: { type: 'offer' }, negotiationId: 3 } })
+    expect(replaced.filter((item) => item.data?.description?.type === 'offer')).toHaveLength(1)
+    expect(replaced.find((item) => item.t === 'signal')?.data?.negotiationId).toBe(3)
+    expect(enqueueSignal(replaced, { t: 'hello' })).toBe(replaced)
+    expect(repeatedOffer(3, 3)).toBe(true)
+    expect(repeatedOffer(3, 4)).toBe(false)
+    expect(answerMatches(3, 3)).toBe(true)
+    expect(answerMatches(3, 2)).toBe(false)
+    expect(answerMatches(3, undefined)).toBe(true)
+    expect(iceRecoveryAction({ polite: true, connection: 'failed', ice: 'failed', signaling: 'stable', offerWasRestart: true, restarts: 1, relayed: false })).toBe('none')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', offerWasRestart: false, restarts: 0, relayed: false })).toBe('restart')
+    expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'have-local-offer', offerWasRestart: true, restarts: 1, relayed: false })).toBe('resend')
+    expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'stable', offerWasRestart: true, restarts: 1, relayed: false })).toBe('relay')
+    expect(iceRecoveryAction({ polite: false, connection: 'connected', ice: 'connected', signaling: 'stable', offerWasRestart: false, restarts: 0, relayed: false })).toBe('none')
   })
 })
 

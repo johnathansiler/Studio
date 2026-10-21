@@ -1,4 +1,4 @@
-import { baseIceConfig, filterBrowserTurnUrls, staticTurnServer, withStun, type IceConfig, type IcePolicy, type IceServer, type TurnProvider } from '../src/model/media.ts'
+import { baseIceConfig, staticTurnServer, withStun, type IceConfig, type IcePolicy, type IceServer, type TurnProvider } from '../src/model/media.ts'
 
 export type { IceConfig }
 
@@ -92,7 +92,7 @@ async function cloudflareIce(keyId: string, token: string, fetchImpl: typeof fet
   const listed = Array.isArray(body.iceServers) ? body.iceServers : body.iceServers ? [body.iceServers] : []
   return listed.map((server) => ({
     ...server,
-    urls: filterBrowserTurnUrls(Array.isArray(server.urls) ? server.urls : [server.urls]),
+    urls: Array.isArray(server.urls) ? server.urls : [server.urls],
   }))
 }
 

@@ -3,10 +3,13 @@
  *
  *   node scripts/prod-call-test.mjs https://cueharbor.onrender.com
  *
- * Three runs, all under a mobile network (150 ms RTT, 1% loss, 4G cap):
+ * Four runs, all under a mobile network (150 ms RTT, 1% loss, 4G cap):
  *   1. Android host, iPhone guest, 6x CPU and paused timers on the Android
  *   2. Android guest, iPhone host, same throttle on the Android
  *   3. Guest localStorage still holds a dead session code and opens a fresh invite
+ *   4. Cellular: the host signaling socket is cut every 8s for 60s, and the
+ *      host network drops for 1.5s once. Media bytes must keep flowing or
+ *      recover within 5s. Set SCENARIO=cellular to run only that one.
  *
  * The Android tab is hidden and shown. Then its outbound signaling is held
  * for 22s, which is what a frozen main thread looks like to the server.
@@ -36,6 +39,8 @@ const hook = () => {
   function PatchedSocket(url, protocols) {
     window.__wsOpens = (window.__wsOpens || 0) + 1
     const sock = protocols === undefined ? new NativeWS(url) : new NativeWS(url, protocols)
+    const sockets = window.__sockets || (window.__sockets = [])
+    sockets.push(sock)
     const mark = (kind, extra) => {
       const row = window.__wsLog || (window.__wsLog = [])
       row.push({ t: Math.round(performance.now()), kind, ready: sock.readyState, ...extra })
@@ -47,6 +52,10 @@ const hook = () => {
       const sent = window.__sent || (window.__sent = [])
       if (sent.length < 40) sent.push(text.slice(0, 160))
       if (window.__holdSends) return
+      if (window.__failOffers && text.includes('"type":"offer"')) {
+        window.__failOffers = false
+        throw new Error('carrier reset')
+      }
       return orig(data)
     }
     sock.addEventListener('open', () => mark('open'))
@@ -167,6 +176,7 @@ async function sample(page) {
       sent: window.__sent || [],
       stored,
       peers,
+      live: (window.__pcs || []).filter((pc) => pc.connectionState !== 'closed').length,
     }
   })
 }
@@ -399,6 +409,185 @@ async function runStale(browser) {
   return fails
 }
 
+async function cutSocket(page) {
+  return page.evaluate(() => {
+    const open = (window.__sockets || []).filter((sock) => sock.readyState === WebSocket.OPEN && sock.url.includes('/ws'))
+    for (const sock of open) sock.close()
+    return open.length
+  })
+}
+
+/**
+ * The next offer send throws, which is a cellular reset eating the packet.
+ * Main drops it. The fix queues it, then the socket reconnect flushes it.
+ */
+async function cutSocketAndRestart(page) {
+  await page.evaluate(() => { window.__failOffers = true })
+  const restarted = await page.evaluate(() => {
+    const pc = (window.__pcs || []).find((item) => item.connectionState !== 'closed' && item.signalingState === 'stable')
+    if (pc) pc.restartIce()
+    return Boolean(pc)
+  })
+  const deadline = Date.now() + 2000
+  let signaling = 'none'
+  while (Date.now() < deadline) {
+    signaling = (await videoBytes(page)).signaling
+    if (signaling === 'have-local-offer') break
+    await page.waitForTimeout(100)
+  }
+  await page.evaluate(() => { window.__failOffers = false })
+  const closed = await cutSocket(page)
+  return { restarted, signaling, closed }
+}
+
+async function videoBytes(page) {
+  const row = await sample(page)
+  return { video: row.peers[0]?.video || 0, live: row.live || 0, conn: row.peers[0]?.conn || 'none', signaling: row.peers[0]?.signaling || 'none' }
+}
+
+/** Bytes must move forward within the budget. A socket cut must not build a second peer connection. */
+async function expectMedia(host, guest, before, ms, { allowRebuild }) {
+  const deadline = Date.now() + ms
+  let hostNow = before.host
+  let guestNow = before.guest
+  let hostLive = before.hostLive
+  let guestLive = before.guestLive
+  while (Date.now() < deadline) {
+    await host.waitForTimeout(500)
+    const h = await videoBytes(host)
+    const g = await videoBytes(guest)
+    hostNow = h.video
+    guestNow = g.video
+    hostLive = h.live
+    guestLive = g.live
+    if (h.video > before.host && g.video > before.guest) {
+      const rebuilt = !allowRebuild && (h.live !== 1 || g.live !== 1)
+      return { ok: !rebuilt, hostNow: h.video, guestNow: g.video, hostLive: h.live, guestLive: g.live, rebuilt }
+    }
+  }
+  const rebuilt = !allowRebuild && (hostLive !== 1 || guestLive !== 1)
+  return { ok: false, hostNow, guestNow, hostLive, guestLive, rebuilt }
+}
+
+/**
+ * Carrier path: the host's signaling socket dies about every 8s for a minute,
+ * and the network drops for 1.5s once. Inbound video has to keep climbing,
+ * or be climbing again within 5s of the network returning.
+ */
+async function runCellular(browser) {
+  const label = 'cellular'
+  const suffix = randomBytes(6).toString('hex')
+  const hostId = `00000000-0000-4000-8000-${suffix}`
+  const guestId = `ffffffff-ffff-4fff-8fff-${suffix}`
+  const pair = await bootPair(browser, {
+    hostProfile: galaxy,
+    guestProfile: iphone,
+    hostId,
+    guestId,
+    staleGuest: false,
+  })
+  const fails = []
+  let blipped = false
+  try {
+    const hostCdp = await mobileNetwork(pair.host, false)
+    await mobileNetwork(pair.guest, false)
+    await connectCall(pair.host, pair.guest)
+    const readyAt = Date.now()
+    let ready = null
+    while (Date.now() - readyAt < 25000) {
+      const host = await videoBytes(pair.host)
+      const guest = await videoBytes(pair.guest)
+      if (host.video > 0 && guest.video > 0 && host.conn === 'connected' && guest.conn === 'connected') {
+        ready = { host, guest }
+        break
+      }
+      await pair.host.waitForTimeout(500)
+    }
+    if (!ready) {
+      const host = await videoBytes(pair.host)
+      const guest = await videoBytes(pair.guest)
+      fails.push(`call did not connect host=${host.conn}/${host.video} guest=${guest.conn}/${guest.video}`)
+    } else {
+      console.log(label, 'connected', JSON.stringify(ready))
+      const beforeRestart = { host: ready.host.video, guest: ready.guest.video, hostLive: ready.host.live, guestLive: ready.guest.live }
+      const restarted = await cutSocketAndRestart(pair.host)
+      console.log(label, 'restart-while-down', JSON.stringify(restarted))
+      const answeredBy = Date.now() + 5000
+      let hostSig = restarted.signaling
+      let guestSig = 'none'
+      while (Date.now() < answeredBy) {
+        hostSig = (await videoBytes(pair.host)).signaling
+        guestSig = (await videoBytes(pair.guest)).signaling
+        if (hostSig === 'stable') break
+        await pair.host.waitForTimeout(300)
+      }
+      const afterRestart = await videoBytes(pair.host)
+      const guestAfter = await videoBytes(pair.guest)
+      console.log(label, 'restart-recovered', JSON.stringify({ hostSig, guestSig, host: afterRestart.video, guest: guestAfter.video, live: afterRestart.live }))
+      if (!restarted.restarted || restarted.signaling !== 'have-local-offer') fails.push(`ICE restart did not produce an offer (${restarted.signaling})`)
+      if (hostSig !== 'stable') fails.push(`ICE restart offer was not answered host=${hostSig} guest=${guestSig}`)
+      if (afterRestart.live !== 1 || guestAfter.live !== 1) fails.push(`ICE restart rebuilt peer connections host=${afterRestart.live} guest=${guestAfter.live}`)
+      if (afterRestart.video <= beforeRestart.host || guestAfter.video <= beforeRestart.guest) {
+        fails.push(`media stalled across the ICE restart host ${beforeRestart.host}->${afterRestart.video} guest ${beforeRestart.guest}->${guestAfter.video}`)
+      }
+      const end = Date.now() + 60000
+      let nextCut = Date.now() + 8000
+      const blipAt = Date.now() + 20000
+      while (Date.now() < end) {
+        if (Date.now() < nextCut) {
+          await pair.host.waitForTimeout(400)
+          continue
+        }
+        const beforeHost = await videoBytes(pair.host)
+        const beforeGuest = await videoBytes(pair.guest)
+        const closed = await cutSocket(pair.host)
+        if (!closed) fails.push('host socket was already closed')
+        let allowRebuild = false
+        if (!blipped && Date.now() >= blipAt) {
+          blipped = true
+          allowRebuild = true
+          await hostCdp.send('Network.emulateNetworkConditions', {
+            offline: true,
+            latency: 0,
+            downloadThroughput: 0,
+            uploadThroughput: 0,
+          })
+          await pair.host.waitForTimeout(1500)
+          await hostCdp.send('Network.emulateNetworkConditions', {
+            offline: false,
+            latency: 150,
+            downloadThroughput: 500_000,
+            uploadThroughput: 250_000,
+            packetLoss: 1,
+          })
+        }
+        const grew = await expectMedia(
+          pair.host,
+          pair.guest,
+          { host: beforeHost.video, guest: beforeGuest.video, hostLive: beforeHost.live, guestLive: beforeGuest.live },
+          5000,
+          { allowRebuild },
+        )
+        console.log(label, 'cut', JSON.stringify({ closed, blipped, allowRebuild, grew }))
+        if (grew.rebuilt) fails.push(`socket cut rebuilt peer connections host=${grew.hostLive} guest=${grew.guestLive}`)
+        else if (!grew.ok) fails.push(`media stalled host ${beforeHost.video}->${grew.hostNow} guest ${beforeGuest.video}->${grew.guestNow} live=${grew.hostLive}/${grew.guestLive}`)
+        nextCut = Date.now() + 8000
+      }
+      if (!blipped) fails.push('the network blip did not run')
+    }
+    console.log(label, fails.length ? 'FAIL' : 'PASS')
+    for (const reason of fails) console.log(label, 'reason:', reason)
+  } catch (error) {
+    fails.push(error instanceof Error ? error.message : String(error))
+    console.log(label, 'FAIL')
+    console.log(label, 'reason:', fails[fails.length - 1])
+  } finally {
+    await pair.hostContext.close()
+    await pair.guestContext.close()
+  }
+  return fails
+}
+
 const browser = await chromium.launch({
   args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'],
 })
@@ -408,8 +597,16 @@ try {
     ['android-host', () => runCall(browser, 'android-host', { androidHost: true, staleGuest: false })],
     ['android-guest', () => runCall(browser, 'android-guest', { androidHost: false, staleGuest: false })],
     ['stale-invite', () => runStale(browser)],
+    ['cellular', () => runCellular(browser)],
   ]
-  for (const [name, run] of scenarios) {
+  const only = process.env.SCENARIO || ''
+  const selected = only ? scenarios.filter(([name]) => name === only) : scenarios
+  if (!selected.length) {
+    console.log('FAIL')
+    console.log('reason: unknown SCENARIO', only)
+    summary.push({ name: only || 'scenario', pass: false, fails: ['unknown scenario'] })
+  }
+  for (const [name, run] of selected) {
     const fails = await run()
     summary.push({ name, pass: fails.length === 0, fails })
   }
