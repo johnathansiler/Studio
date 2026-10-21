@@ -13,8 +13,8 @@ import {
 } from '../model/latency'
 import { DEFAULT_OPUS, mungeOpusSdp, type OpusOptions } from '../model/sdp'
 import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, VIDEO_START_BITRATE, videoEncodingBudget, videoTargetForBwe } from '../model/codecs'
-import { isSilentTake, tcpRelayIceServers, udpIceServers, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
-import { answerMatches, enqueueSignal, ICE_DISCONNECT_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
+import { isSilentTake, nextRelayGather, tcpRelayIceServers, udpIceServers, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
+import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_RESTART_VIDEO_HOLD_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
 import { sanitizeDiag, type DiagDirection } from '../model/diag'
 import { arrangementDigest, ASSET_CHUNK_BYTES, ASSET_CHUNK_GAP_MS, assetChunkCount, guestMayRequest, mediaCanCarryAssets, referencedBufferIds } from '../model/sessionSync'
 import { decodeWavPCM, encodeWav } from '../model/wav'
@@ -163,8 +163,10 @@ interface PeerLink {
   sawUdpPair: boolean
   /** The last nominated pair was a TCP or TLS relay. The next restart gathers UDP again. */
   onTcpRelay: boolean
-  /** TCP/TLS 443 was already added once. A second failure stays on UDP. */
+  /** TCP/TLS 443 is in the gather alongside UDP. A dead TCP pair clears this and tries UDP again. */
   tcpFallback: boolean
+  /** Failures with no UDP pair while the gather is still UDP-only. TCP is added on the second. */
+  udpMisses: number
   /** Ignore a stale bandwidth estimate until this time, and send at the start rate. */
   videoHoldUntil: number
   appliedVideoBitrate: number
@@ -541,7 +543,7 @@ export class SessionClient {
   private resendLiveNegotiation() {
     for (const [id, link] of this.peers) {
       if (link.pc.connectionState === 'closed') continue
-      // The path and the socket died together. If the path is still down, the two-second timer restarts ICE now that signaling can carry it.
+      // The path and the socket died together. If the path is still down, the restart timer runs now that signaling can carry the offer.
       if (!this.isPolite()) this.scheduleRecovery(id, link)
       if (!this.isPolite() && link.pc.signalingState === 'have-local-offer') this.sendOffer(id, link)
       else if (this.isPolite() && link.answerDescription && link.answeredNegotiationId != null) {
@@ -1311,6 +1313,7 @@ export class SessionClient {
       sawUdpPair: false,
       onTcpRelay: false,
       tcpFallback: false,
+      udpMisses: 0,
       videoHoldUntil: 0,
       appliedVideoBitrate: 0,
       appliedVideoHeight: 0,
@@ -1511,52 +1514,51 @@ export class SessionClient {
       ice: link.pc.iceConnectionState,
       signaling: link.pc.signalingState,
       disconnectedForMs: this.downFor(link),
+      tcpRelay: link.onTcpRelay,
     })
   }
 
   /**
-   * One peer, one peer connection. UDP is the gather until it has truly failed.
-   * A TCP relay that dies goes back to UDP, because a carrier reset takes TCP
-   * signaling and TURN-over-TCP down together. Returns true when the next
-   * restart must gather again.
+   * One peer, one peer connection. The first failure stays on UDP: a carrier
+   * hold looks like failure, and swapping in TCP-only makes the next offer a
+   * path that same carrier is resetting. TCP/TLS 443 is added beside UDP only
+   * after a second failure with no UDP pair. A nominated TCP relay goes back
+   * to UDP. Returns true when the next restart must gather again.
    */
   private chooseRelayTransport(id: string, link: PeerLink, failed: boolean) {
-    if (link.onTcpRelay) {
-      const iceServers = udpIceServers(this.ice) as RTCIceServer[]
-      if (!iceServers.length) return false
-      try {
-        link.pc.setConfiguration({ iceServers })
-      } catch {
-        this.postDiagEvent('turn', `peer ${id} tcp relay died; UDP preference was rejected`)
-        return false
-      }
-      link.onTcpRelay = false
-      link.tcpFallback = true
-      this.postDiagEvent('turn', `peer ${id} tcp relay died; next gather is UDP`)
-      return true
+    const choice = nextRelayGather(
+      { onTcpRelay: link.onTcpRelay, sawUdpPair: link.sawUdpPair, tcpFallback: link.tcpFallback, udpMisses: link.udpMisses },
+      failed,
+      tcpRelayIceServers(this.ice).length > 0,
+    )
+    if (choice.servers === 'same') {
+      link.udpMisses = choice.state.udpMisses
+      return false
     }
-    if (failed && !link.sawUdpPair && !link.tcpFallback) {
-      const iceServers = tcpRelayIceServers(this.ice) as RTCIceServer[]
-      if (!iceServers.length) return false
-      try {
-        link.pc.setConfiguration({ iceServers })
-      } catch {
-        this.postDiagEvent('turn', `peer ${id} no UDP pair; TCP fallback was rejected`)
-        return false
-      }
-      link.tcpFallback = true
-      link.onTcpRelay = true
-      this.postDiagEvent('turn', `peer ${id} no UDP pair; next gather is TURN TCP/TLS 443`)
-      return true
+    const udp = udpIceServers(this.ice)
+    const iceServers = (choice.servers === 'both' ? [...udp, ...tcpRelayIceServers(this.ice)] : udp) as RTCIceServer[]
+    if (!iceServers.length) return false
+    try {
+      link.pc.setConfiguration({ iceServers })
+    } catch {
+      this.postDiagEvent('turn', `peer ${id} relay change was rejected`)
+      return false
     }
-    return false
+    link.onTcpRelay = choice.state.onTcpRelay
+    link.tcpFallback = choice.state.tcpFallback
+    link.udpMisses = choice.state.udpMisses
+    this.postDiagEvent('turn', choice.servers === 'udp'
+      ? `peer ${id} tcp relay died; next gather is UDP`
+      : `peer ${id} no UDP pair; next gather keeps UDP and adds TURN TCP/TLS 443`)
+    return true
   }
 
   /**
    * Host only. A socket drop does not come through here and does not rebuild the peer connection.
    * An outstanding offer is resent once the path has actually failed.
-   * A short disconnect does not restart ICE. Failed, or disconnected for
-   * about two seconds, restarts it. The offer is never rolled back.
+   * A short disconnect does not restart ICE. Failed restarts it. A UDP
+   * disconnect waits longer than a TCP relay, which the carrier has already
+   * reset. The offer is never rolled back.
    */
   private scheduleRecovery(id: string, link: PeerLink) {
     if (this.left || this.peers.get(id) !== link) return
@@ -1572,7 +1574,7 @@ export class SessionClient {
       link.recoveryTimer = 0
     }
     const elapsed = link.disconnectedAt ? Date.now() - link.disconnectedAt : 0
-    const delay = action === 'wait' ? Math.max(250, ICE_DISCONNECT_RESTART_MS - elapsed) : 0
+    const delay = action === 'wait' ? Math.max(250, iceDisconnectLimit(link.onTcpRelay) - elapsed) : 0
     link.recoveryTimer = window.setTimeout(() => {
       link.recoveryTimer = 0
       if (this.left || this.peers.get(id) !== link) return
@@ -1590,7 +1592,7 @@ export class SessionClient {
         return
       }
       if (next === 'restart' || changed) {
-        link.videoHoldUntil = Date.now() + ICE_DISCONNECT_RESTART_MS
+        link.videoHoldUntil = Date.now() + ICE_RESTART_VIDEO_HOLD_MS
         link.appliedVideoBitrate = 0
         link.wantsRestart = true
         try {

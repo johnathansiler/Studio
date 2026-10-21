@@ -55,16 +55,22 @@ export function videoEncodingBudget(maxBitrate = VIDEO_START_BITRATE) {
   }
 }
 
+/** Opus stays at its cap. Video does not spend this. */
+const VIDEO_AUDIO_RESERVE = 560_000
+/** One asset POST is about 16 KB every 400 ms. A 1 Mbps uplink has to keep that. */
+const VIDEO_UPLOAD_RESERVE = 360_000
+
 /**
- * 100 kbps until the outgoing estimate can spare about 200 kbps for video,
- * then up to 250 kbps. Frame rate stays preferred; the height only opens at
- * the higher cap so a thin pipe is not asked for 480p.
+ * 100 kbps until the estimate can spare 200 kbps of video after audio and the
+ * asset upload, then up to 250 kbps. 35% of an 800 kbps estimate is not spare
+ * room: that pipe is already carrying Opus. Frame rate stays preferred; the
+ * height only opens at the higher cap so a thin pipe is not asked for 480p.
  */
 export function videoTargetForBwe(availableOutgoingBitrate: number, selected = VIDEO_CEILING_BITRATE): { maxBitrate: number; height: number } {
   const ceiling = selected > VIDEO_START_BITRATE ? Math.min(selected, VIDEO_CEILING_BITRATE) : VIDEO_CEILING_BITRATE
-  const share = availableOutgoingBitrate > 0 ? availableOutgoingBitrate * 0.35 : 0
-  if (share >= 200_000 && ceiling >= 200_000) {
-    const raw = Math.min(ceiling, Math.floor(share))
+  const spare = availableOutgoingBitrate > 0 ? availableOutgoingBitrate - VIDEO_AUDIO_RESERVE - VIDEO_UPLOAD_RESERVE : 0
+  if (spare >= 200_000 && ceiling >= 200_000) {
+    const raw = Math.min(ceiling, Math.floor(spare))
     // 50 kbps steps. A noisy estimate must not call setParameters every second.
     const stepped = Math.min(ceiling, Math.max(200_000, Math.floor(raw / 50_000) * 50_000))
     return { maxBitrate: stepped, height: 480 }
