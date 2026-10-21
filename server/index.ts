@@ -40,6 +40,11 @@ interface Client {
   id: string
   name: string
   sessionCode?: string
+  bytesIn: number
+  bytesOut: number
+  lastInType: string
+  /** peer means the browser or the network closed it. Anything else is this process. */
+  closeBy: string
 }
 
 interface Session {
@@ -55,11 +60,18 @@ interface Session {
 }
 
 const sessions = new Map<string, Session>()
+const sockets = new WeakMap<WebSocket, Client>()
 const TAKE_LIMIT = 32 * 1024 * 1024
 const uploads = new Map<string, { total: number; seen: Set<number>; bytes: number }>()
+/** Same cadence as the client ping. A missed pong does not close the socket. */
+const KEEPALIVE_MS = 5000
 
 function send(ws: WebSocket, payload: unknown) {
-  if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload))
+  const text = JSON.stringify(payload)
+  if (ws.readyState !== ws.OPEN) return
+  ws.send(text)
+  const client = sockets.get(ws)
+  if (client) client.bytesOut += Buffer.byteLength(text)
 }
 
 function codeAlphabet() {
@@ -109,6 +121,7 @@ function publicSession(session: Session, self: Participant, ice: IceConfig, reas
 function releaseHost(session: Session, resumeId: string) {
   const previous = session.clients.get(resumeId)
   if (previous) {
+    previous.closeBy = 'release'
     previous.sessionCode = undefined
     session.clients.delete(resumeId)
     try {
@@ -161,14 +174,21 @@ function leave(client: Client, announce = false) {
   const current = session.clients.get(client.id)
   if (current && current.ws !== client.ws) return
   session.clients.delete(client.id)
+  client.sessionCode = undefined
+  // A carrier reset is not someone leaving. Keep the roster and the peer connection.
+  if (!announce) {
+    record(session, 'socket-drop', `${client.id} signaling dropped; the peer connection stays up`, client.id)
+    if (session.clients.size === 0) session.emptyAt = Date.now()
+    else session.emptyAt = undefined
+    return
+  }
   const person = session.participants.get(client.id)
   if (person) {
     session.participants.delete(client.id)
     session.held.set(client.id, person)
   }
   record(session, 'leave', `${client.id} left; the room is kept until it has been empty for 10 minutes`, client.id)
-  client.sessionCode = undefined
-  if (announce && client.id) broadcast(session, { t: 'peer-left', id: client.id })
+  if (client.id) broadcast(session, { t: 'peer-left', id: client.id })
   if (session.clients.size === 0) {
     session.emptyAt = Date.now()
   } else {
@@ -265,20 +285,61 @@ function contentType(file: string) {
   return 'application/octet-stream'
 }
 
+// No idle timeout and the default 100 MB payload cap. This process does not
+// close a socket for silence or for message size. Render's proxy is not asked
+// to either; a 6–15s 1006 on one cellular client is the carrier resetting TCP.
 const wss = new WebSocketServer({ server, path: '/ws' })
 
 wss.on('connection', (ws) => {
-  const client: Client = { ws, id: '', name: 'Guest' }
+  const client: Client = { ws, id: '', name: 'Guest', bytesIn: 0, bytesOut: 0, lastInType: '', closeBy: 'peer' }
+  sockets.set(ws, client)
+  const heartbeat = setInterval(() => {
+    if (ws.readyState === ws.OPEN) {
+      try {
+        ws.ping()
+      } catch {
+        /* already closing */
+      }
+    }
+  }, KEEPALIVE_MS)
   ws.on('message', (raw) => {
+    const size = typeof raw === 'string'
+      ? Buffer.byteLength(raw)
+      : Array.isArray(raw)
+        ? raw.reduce((sum, chunk) => sum + chunk.byteLength, 0)
+        : raw.byteLength
+    client.bytesIn += size
     let msg: Record<string, unknown>
     try {
       msg = JSON.parse(String(raw))
     } catch {
+      client.lastInType = 'unparsed'
       return
+    }
+    client.lastInType = String(msg.t || '')
+    if (size >= 64 * 1024) {
+      const session = client.sessionCode ? sessions.get(client.sessionCode) : undefined
+      const note = `inbound ${client.lastInType} ${size} bytes`
+      if (session) record(session, 'large', note, client.id)
+      else console.log(`[ws] ${note}`)
     }
     void handle(client, msg)
   })
-  ws.on('close', () => leave(client))
+  ws.on('error', (error) => {
+    if (client.closeBy === 'peer') client.closeBy = 'error'
+    const session = client.sessionCode ? sessions.get(client.sessionCode) : undefined
+    const note = `error ${error.message} last=${client.lastInType} in=${client.bytesIn} out=${client.bytesOut}`
+    if (session) record(session, 'socket-error', note, client.id)
+    else console.log(`[ws] ${note}`)
+  })
+  ws.on('close', (code, reason) => {
+    clearInterval(heartbeat)
+    const session = client.sessionCode ? sessions.get(client.sessionCode) : undefined
+    const note = `code=${code} reason=${reason.toString()} by=${client.closeBy} last=${client.lastInType} in=${client.bytesIn} out=${client.bytesOut}`
+    if (session) record(session, 'socket-close', note, client.id)
+    else console.log(`[ws] close before hello ${note}`)
+    leave(client)
+  })
 })
 
 async function acceptTake(req: IncomingMessage, res: ServerResponse) {
@@ -346,6 +407,7 @@ async function handle(client: Client, msg: Record<string, unknown>) {
     return
   }
   if (msg.t === 'leave') {
+    client.closeBy = 'leave'
     leave(client, true)
     try {
       client.ws.close()
@@ -509,8 +571,9 @@ async function hello(client: Client, msg: Record<string, unknown>) {
     if (instanceId) existing.instanceId = instanceId
     const previous = session.clients.get(resumeId)
     if (previous && previous.ws !== client.ws) {
+      // Leave sessionCode set so a signal already read on the old socket still forwards.
+      previous.closeBy = 'replace'
       record(session, 'replace', `closed the previous socket for ${resumeId}`, resumeId)
-      previous.sessionCode = undefined
       try {
         previous.ws.close()
       } catch {

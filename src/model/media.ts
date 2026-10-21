@@ -52,16 +52,30 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
 }
 
 /**
- * Browsers block TURN on port 53. Port 80 and plain TURN on UDP 443 also stall
- * Safari's gatherer, so ICE never finishes nominating the relay that does work.
+ * Port 53 is blocked by browsers. Plain TURN on UDP 443 stalls Safari's gatherer.
+ * TCP 80, TCP 443, and TLS 443 stay: a cellular network often blocks UDP and
+ * only lets those through.
  */
 export function filterBrowserTurnUrls(urls: string[]): string[] {
   return urls.filter((url) => {
     if (/:53(\?|$)/.test(url)) return false
-    if (/^turns?:/i.test(url) && /:80(\?|$)/.test(url)) return false
-    if (/^turn:/i.test(url) && /:443(\?|$)/.test(url)) return false
+    if (/^turn:/i.test(url) && /:443(?:\?|$)/.test(url) && !/transport=tcp/i.test(url)) return false
     return true
   })
+}
+
+const CELLULAR_TURN = [
+  'turn:turn.cloudflare.com:3478?transport=udp',
+  'turn:turn.cloudflare.com:80?transport=tcp',
+  'turn:turn.cloudflare.com:443?transport=tcp',
+  'turns:turn.cloudflare.com:443?transport=tcp',
+]
+
+/** Cloudflare credentials work on every Cloudflare TURN port. Add the cellular TCP/TLS fallbacks if any Cloudflare URL is present. */
+export function ensureCellularTurn(urls: string[]): string[] {
+  const kept = filterBrowserTurnUrls(urls)
+  if (!urls.some((url) => /turn\.cloudflare\.com/i.test(url))) return kept
+  return [...new Set([...kept, ...CELLULAR_TURN])]
 }
 
 export function staticTurnServer(url: string, username: string, credential: string): IceServer {
@@ -72,7 +86,7 @@ export function staticTurnServer(url: string, username: string, credential: stri
 export function normalizeIceServers(servers: IceServer[]): IceServer[] {
   return servers
     .map((server) => {
-      const urls = filterBrowserTurnUrls(Array.isArray(server.urls) ? server.urls : [server.urls])
+      const urls = ensureCellularTurn(Array.isArray(server.urls) ? server.urls : [server.urls])
       if (!urls.length) return null
       return { ...server, urls: urls.length === 1 ? urls[0] : urls }
     })

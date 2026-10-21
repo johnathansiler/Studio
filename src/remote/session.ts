@@ -14,7 +14,7 @@ import {
 import { DEFAULT_OPUS, mungeOpusSdp, type OpusOptions } from '../model/sdp'
 import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES } from '../model/codecs'
 import { isSilentTake, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
-import { ignoreIncomingOffer, keepPeerConnection, sessionHello, socketMayOpen } from '../model/negotiate'
+import { answerMatches, enqueueSignal, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
 import { sanitizeDiag } from '../model/diag'
 import { arrangementDigest, guestMayRequest, referencedBufferIds } from '../model/sessionSync'
 import { decodeWavPCM, encodeWav } from '../model/wav'
@@ -149,6 +149,14 @@ interface PeerLink {
   offers: number
   seenCandidates: Set<string>
   remoteInstance?: string
+  negotiationId: number
+  offerWasRestart: boolean
+  wantsRestart: boolean
+  restarts: number
+  answeredNegotiationId?: number
+  answerDescription?: RTCSessionDescriptionInit | null
+  remoteNegotiationId?: number
+  recoveryTimer: number
   take?: {
     takeId: string
     total: number
@@ -213,6 +221,12 @@ export class SessionClient {
   private inSignal = new Set<string>()
   private lastDiag = 0
   private deviceJob: Promise<void> | null = null
+  /** True only after this socket's welcome. Signals sent earlier wait in the outbox. */
+  private welcomed = false
+  private outbox: OutboundSignal[] = []
+  private lastSent: { t: string; bytes: number } | null = null
+  /** Peers that already got one relay-only retry after an ICE restart stayed failed. */
+  private relayPeers = new Set<string>()
 
   constructor(private engine: AudioEngine) {
     const saved = readIdentity()
@@ -431,6 +445,7 @@ export class SessionClient {
     this.ws = ws
     ws.onopen = () => {
       this.backoff = 400
+      this.welcomed = false
       this.lastRx = performance.now()
       const code = opts.fresh ? '' : opts.code || this.state.code
       const decision = sessionHello({ create: Boolean(opts.create), fresh: Boolean(opts.fresh), requestedCode: code })
@@ -454,6 +469,7 @@ export class SessionClient {
       this.noteSocket('error')
     }
     ws.onclose = (event) => {
+      this.welcomed = false
       this.noteSocket('close', { code: event.code, reason: event.reason, wasClean: event.wasClean })
       if (this.left || this.ws !== ws) return
       this.ws = null
@@ -468,14 +484,50 @@ export class SessionClient {
   private noteSocket(trigger: string, extra?: { code?: number; reason?: string; wasClean?: boolean }) {
     const since = Math.max(0, Math.round(performance.now() - (this.lastRx || performance.now())))
     const reason = (extra?.reason || '').replace(/\s+/g, ' ').slice(0, 40)
+    const last = this.lastSent
     this.postDiagEvent(
       'socket',
-      `${trigger} code=${extra?.code ?? ''} reason=${reason} clean=${extra?.wasClean ?? ''} vis=${document.visibilityState} onLine=${navigator.onLine} sinceRx=${since}`,
+      `${trigger} code=${extra?.code ?? ''} reason=${reason} clean=${extra?.wasClean ?? ''} last=${last?.t ?? ''} lastBytes=${last?.bytes ?? 0} vis=${document.visibilityState} onLine=${navigator.onLine} sinceRx=${since}`,
     )
   }
 
-  private send(payload: unknown) {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(payload))
+  private send(payload: object) {
+    const message = payload as OutboundSignal
+    const type = String(message.t || '')
+    const text = JSON.stringify(payload)
+    this.lastSent = { t: type, bytes: text.length }
+    if (type !== 'hello' && (!this.welcomed || this.ws?.readyState !== WebSocket.OPEN)) {
+      this.outbox = enqueueSignal(this.outbox, message)
+      return
+    }
+    try {
+      this.ws?.send(text)
+    } catch {
+      if (type !== 'hello') this.outbox = enqueueSignal(this.outbox, message)
+    }
+  }
+
+  private flushOutbox() {
+    const queued = this.outbox
+    this.outbox = []
+    for (const payload of queued) this.send(payload)
+  }
+
+  /** The offer or answer that never left the previous socket, sent again with the same negotiation id. */
+  private resendLiveNegotiation() {
+    for (const [id, link] of this.peers) {
+      if (link.pc.connectionState === 'closed') continue
+      if (!this.isPolite() && link.pc.signalingState === 'have-local-offer') this.sendOffer(id, link)
+      else if (this.isPolite() && link.answerDescription && link.answeredNegotiationId != null) {
+        this.send({ t: 'signal', to: id, data: { description: link.answerDescription, negotiationId: link.answeredNegotiationId } })
+      }
+    }
+  }
+
+  private sendOffer(id: string, link: PeerLink) {
+    const description = link.pc.localDescription
+    if (!description) return
+    this.send({ t: 'signal', to: id, data: { description, negotiationId: link.negotiationId } })
   }
 
   private async onServer(msg: Record<string, any>) {
@@ -500,6 +552,7 @@ export class SessionClient {
       return
     }
     if (msg.t === 'welcome') {
+      this.welcomed = true
       this.state.selfId = msg.id
       this.state.role = msg.role
       this.state.code = msg.code
@@ -544,6 +597,8 @@ export class SessionClient {
       }
       this.syncMesh()
       this.startMaintenance()
+      this.flushOutbox()
+      this.resendLiveNegotiation()
       return
     }
     if (msg.t === 'roster') {
@@ -992,7 +1047,7 @@ export class SessionClient {
     window.clearInterval(this.pingTimer)
     this.clockTimer = window.setInterval(() => this.pingClocks(), 800)
     this.statsTimer = window.setInterval(() => void this.pollStats(), 1000)
-    this.pingTimer = window.setInterval(() => this.send({ t: 'ping' }), 20000)
+    this.pingTimer = window.setInterval(() => this.send({ t: 'ping' }), SIGNAL_KEEPALIVE_MS)
   }
 
   private pingClocks() {
@@ -1034,6 +1089,7 @@ export class SessionClient {
   private closePeer(id: string) {
     const link = this.peers.get(id)
     if (!link) return
+    if (link.recoveryTimer) window.clearTimeout(link.recoveryTimer)
     link.pc.close()
     this.peers.delete(id)
     this.engine.setRemoteMusic(id, null)
@@ -1092,7 +1148,7 @@ export class SessionClient {
     if (this.peers.has(id)) return this.peers.get(id)!
     const pc = new RTCPeerConnection({
       iceServers: this.ice,
-      iceTransportPolicy: this.state.iceTransportPolicy,
+      iceTransportPolicy: this.relayPeers.has(id) ? 'relay' : this.state.iceTransportPolicy,
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require',
     })
@@ -1116,6 +1172,12 @@ export class SessionClient {
       offers: 0,
       seenCandidates: new Set(),
       remoteInstance: remoteInstance || undefined,
+      negotiationId: 0,
+      offerWasRestart: false,
+      wantsRestart: false,
+      restarts: 0,
+      answerDescription: null,
+      recoveryTimer: 0,
     }
     const impolite = !this.isPolite()
     if (impolite) {
@@ -1137,7 +1199,7 @@ export class SessionClient {
         const kind = line.match(/typ (host|srflx|relay|prflx)/)?.[1] as 'host' | 'srflx' | 'relay' | 'prflx' | undefined
         if (kind) link.gathered[kind] += 1
       }
-      this.send({ t: 'signal', to: id, data: { candidate: event.candidate.toJSON() } })
+      this.send({ t: 'signal', to: id, data: { candidate: event.candidate.toJSON(), negotiationId: link.negotiationId } })
     }
     pc.onnegotiationneeded = () => {
       void this.enqueueSignal(id, () => this.onNegotiationNeeded(id, link))
@@ -1178,17 +1240,12 @@ export class SessionClient {
     pc.ondatachannel = (event) => this.bindChannel(id, link, event.channel)
     pc.onconnectionstatechange = () => {
       this.noteMedia(id, link)
-      if (pc.connectionState === 'failed' && !this.isPolite()) {
-        try {
-          pc.restartIce()
-        } catch {
-          /* the browser restarts from the next negotiationneeded */
-        }
-      }
+      this.scheduleRecovery(id, link)
       this.emit()
     }
     pc.oniceconnectionstatechange = () => {
       this.noteMedia(id, link)
+      this.scheduleRecovery(id, link)
       this.emit()
     }
     if (impolite) {
@@ -1278,14 +1335,96 @@ export class SessionClient {
     if (this.isPolite() || this.peers.get(id) !== link || link.pc.signalingState !== 'stable') return
     try {
       link.makingOffer = true
-      await this.commitLocal(link, await link.pc.createOffer())
+      const restart = Boolean(link.wantsRestart)
+      link.wantsRestart = false
+      link.negotiationId += 1
+      link.offerWasRestart = restart
+      if (restart) link.restarts += 1
+      await this.commitLocal(link, await link.pc.createOffer(restart ? { iceRestart: true } : undefined))
       link.offers += 1
-      this.send({ t: 'signal', to: id, data: { description: link.pc.localDescription } })
+      this.sendOffer(id, link)
     } catch (error) {
       this.notePeerError(link, error)
     } finally {
       link.makingOffer = false
     }
+  }
+
+  private recoveryAction(id: string, link: PeerLink) {
+    return iceRecoveryAction({
+      polite: this.isPolite(),
+      connection: link.pc.connectionState,
+      ice: link.pc.iceConnectionState,
+      signaling: link.pc.signalingState,
+      offerWasRestart: link.offerWasRestart,
+      restarts: link.restarts,
+      relayed: this.relayPeers.has(id),
+    })
+  }
+
+  /** Host only. A socket drop does not come through here and does not rebuild the peer connection. */
+  private scheduleRecovery(id: string, link: PeerLink) {
+    if (this.left || this.peers.get(id) !== link) return
+    const action = this.recoveryAction(id, link)
+    const failed = link.pc.connectionState === 'failed' || link.pc.iceConnectionState === 'failed'
+    if (action === 'none') {
+      if (link.recoveryTimer) window.clearTimeout(link.recoveryTimer)
+      link.recoveryTimer = 0
+      return
+    }
+    if (link.recoveryTimer) {
+      if (!failed) return
+      window.clearTimeout(link.recoveryTimer)
+      link.recoveryTimer = 0
+    }
+    // Relay waits so a restart that just got its answer can nominate TCP TURN before the peer connection is rebuilt.
+    const delay = action === 'relay' ? 4000 : failed || action === 'resend' ? 0 : 1500
+    link.recoveryTimer = window.setTimeout(() => {
+      link.recoveryTimer = 0
+      if (this.left || this.peers.get(id) !== link) return
+      const next = this.recoveryAction(id, link)
+      if (next === 'none') return
+      if (next === 'relay') {
+        this.relayPeers.add(id)
+        const instance = link.remoteInstance || ''
+        this.closePeer(id)
+        void this.createPeer(id, instance)
+        return
+      }
+      if (next === 'resend') {
+        this.sendOffer(id, link)
+        link.recoveryTimer = window.setTimeout(() => {
+          link.recoveryTimer = 0
+          this.scheduleRecovery(id, link)
+        }, 3000)
+        return
+      }
+      if (next === 'restart') {
+        link.wantsRestart = true
+        try {
+          link.pc.restartIce()
+        } catch {
+          /* negotiationneeded sends the offer */
+        }
+        return
+      }
+      if (next === 'rollback-restart') {
+        void this.enqueueSignal(id, async () => {
+          if (this.peers.get(id) !== link) return
+          link.wantsRestart = true
+          try {
+            link.pc.restartIce()
+          } catch {
+            /* the rollback still asks for a new offer */
+          }
+          try {
+            await link.pc.setLocalDescription({ type: 'rollback' })
+          } catch {
+            this.sendOffer(id, link)
+          }
+        })
+      }
+    }, delay)
   }
 
   /** Opus fmtp only. A rejected edit keeps the browser description. */
@@ -1308,6 +1447,7 @@ export class SessionClient {
     if (!data) return
     const description = data.description as RTCSessionDescriptionInit | undefined
     const candidate = data.candidate as RTCIceCandidateInit | undefined
+    const negotiationId = typeof data.negotiationId === 'number' ? data.negotiationId : undefined
     if (description?.type === 'offer' && this.deviceJob) await this.deviceJob
     let link = this.peers.get(from)
     if (!link || link.pc.connectionState === 'closed') {
@@ -1317,6 +1457,10 @@ export class SessionClient {
     try {
       if (description?.type) {
         if (description.type === 'offer') {
+          if (repeatedOffer(link.answeredNegotiationId, negotiationId) && link.answerDescription) {
+            this.send({ t: 'signal', to: from, data: { description: link.answerDescription, negotiationId } })
+            return
+          }
           link.ignoreOffer = ignoreIncomingOffer({
             polite: this.isPolite(),
             makingOffer: link.makingOffer,
@@ -1324,7 +1468,9 @@ export class SessionClient {
             settingRemoteAnswer: link.settingRemoteAnswer,
           })
           if (link.ignoreOffer) return
+          link.remoteNegotiationId = negotiationId
         }
+        if (description.type === 'answer' && (!answerMatches(link.negotiationId, negotiationId) || link.pc.signalingState !== 'have-local-offer')) return
         link.settingRemoteAnswer = description.type === 'answer'
         await link.pc.setRemoteDescription(description)
         link.settingRemoteAnswer = false
@@ -1337,10 +1483,13 @@ export class SessionClient {
           this.preferVideo(link.screenSender)
           await this.attachSenders(from, link)
           await this.commitLocal(link, await link.pc.createAnswer())
-          this.send({ t: 'signal', to: from, data: { description: link.pc.localDescription } })
+          link.answeredNegotiationId = negotiationId
+          link.answerDescription = link.pc.localDescription
+          this.send({ t: 'signal', to: from, data: { description: link.pc.localDescription, negotiationId } })
         }
         await this.tuneSenders(link)
       } else if (candidate) {
+        if (negotiationId != null && link.remoteNegotiationId != null && negotiationId !== link.remoteNegotiationId) return
         try {
           await link.pc.addIceCandidate(candidate)
         } catch (error) {
