@@ -15,6 +15,12 @@
  *      socket is cut about every 8s. After the first frames, every 4s of
  *      the next minute must stay at or above ~10 fps. Set SCENARIO=uplink
  *      to run only that one.
+ *   6. Carrier: direct UDP is dropped and TURN UDP is held for 12s, so a
+ *      stack that gathers TCP nominates it. Remote TCP is then reset for
+ *      4s and again every 12s, while UDP still works after the hold. Guest
+ *      video must not stall more than ~3s and must average at least 12 fps
+ *      across 90s (the headless encoder spends its first ~45s near 11 fps).
+ *      Set SCENARIO=carrier to run only that one.
  *      Devtools throttling caps each connection on its own, so it does not
  *      starve video when a WebSocket is busy. The host browser is paced by
  *      scripts/uplink-pace.c instead, one bucket for every socket.
@@ -173,6 +179,7 @@ async function sample(page) {
       let video = 0
       let audio = 0
       let frames = 0
+      let path = ''
       try {
         const report = await pc.getStats()
         report.forEach((row) => {
@@ -181,6 +188,11 @@ async function sample(page) {
             frames += row.framesDecoded || 0
           }
           if (row.type === 'inbound-rtp' && row.kind === 'audio') audio += row.bytesReceived || 0
+          if (row.type === 'candidate-pair' && row.state === 'succeeded' && (row.nominated || row.selected) && row.localCandidateId) {
+            const local = report.get(row.localCandidateId)
+            const remote = row.remoteCandidateId ? report.get(row.remoteCandidateId) : null
+            path = `${local?.candidateType || '?'}/${local?.protocol || '?'}/${local?.relayProtocol || '-'}->${remote?.candidateType || '?'}/${remote?.relayProtocol || '-'}`
+          }
         })
       } catch {
         /* closed */
@@ -192,6 +204,7 @@ async function sample(page) {
         video,
         audio,
         frames,
+        path,
       })
     }
     let stored = ''
@@ -491,6 +504,7 @@ async function videoBytes(page) {
     conn: row.peers[0]?.conn || 'none',
     signaling: row.peers[0]?.signaling || 'none',
     offers: row.offers || 0,
+    path: row.peers[0]?.path || '',
   }
 }
 
@@ -871,6 +885,125 @@ async function runUplink(browser) {
   return fails
 }
 
+/**
+ * The carrier resets every TCP flow and leaves UDP up. A stack that nominated
+ * TURN-over-TCP freezes for the whole reset. UDP media should not.
+ */
+async function runCarrier(browser) {
+  const label = 'carrier'
+  const fails = []
+  const dir = mkdtempSync(path.join(tmpdir(), 'cueharbor-carrier-'))
+  const so = path.join(dir, 'libuplink.so')
+  const shm = path.join(dir, 'bucket')
+  const arm = path.join(dir, 'arm')
+  let hostBrowser = null
+  let guestBrowser = null
+  try {
+    const source = path.join(path.dirname(fileURLToPath(import.meta.url)), 'uplink-pace.c')
+    execFileSync('gcc', ['-shared', '-fPIC', '-O2', '-o', so, source, '-ldl', '-lpthread'], { stdio: 'inherit' })
+    const mediaArgs = ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--no-sandbox']
+    hostBrowser = await chromium.launch({
+      env: {
+        ...process.env,
+        LD_PRELOAD: so,
+        UPLINK_BPS: '50000000',
+        UPLINK_LATENCY_MS: '0',
+        UPLINK_SHM: shm,
+        UPLINK_ARM: arm,
+        UPLINK_RELAY_UDP: '1',
+        UPLINK_UDP_HOLD_MS: '12000',
+        UPLINK_TCP_DOWN_START_MS: '8000',
+        UPLINK_TCP_DOWN_END_MS: '12000',
+        UPLINK_TCP_KILL_EVERY_MS: '12000',
+      },
+      args: mediaArgs,
+    })
+    guestBrowser = browser
+    const suffix = randomBytes(6).toString('hex')
+    const hostId = `00000000-0000-4000-8000-${suffix}`
+    const guestId = `ffffffff-ffff-4fff-8fff-${suffix}`
+    const hostContext = await hostBrowser.newContext(galaxy)
+    const guestContext = await guestBrowser.newContext(iphone)
+    const host = await hostContext.newPage()
+    const guest = await guestContext.newPage()
+    host.on('pageerror', (error) => console.log('HOST PAGE', error.message))
+    guest.on('pageerror', (error) => console.log('GUEST PAGE', error.message))
+    try {
+      await install(host)
+      await install(guest)
+      await host.addInitScript((id) => localStorage.setItem('cueharbor-participant', id), hostId)
+      await guest.addInitScript((id) => localStorage.setItem('cueharbor-participant', id), guestId)
+      await connectCall(host, guest, {
+        timeout: 90000,
+        admitTimeout: 90000,
+        duringAdmit: async () => {
+          writeFileSync(arm, '1')
+          const started = Date.now()
+          let firstAt = 0
+          let lastFrames = 0
+          let lastAdvance = 0
+          let framesAtStart = 0
+          let maxStall = 0
+          let lastLog = started
+          while (!firstAt || Date.now() - firstAt < 90000) {
+            if (Date.now() - started >= 130000) break
+            await guest.waitForTimeout(1000)
+            const row = await videoBytes(guest)
+            const t = Date.now()
+            if (row.frames > lastFrames) {
+              if (!firstAt) {
+                firstAt = t
+                framesAtStart = row.frames
+              }
+              lastFrames = row.frames
+              lastAdvance = t
+            } else if (firstAt && lastAdvance) {
+              maxStall = Math.max(maxStall, t - lastAdvance)
+            }
+            console.log(label, 'video', JSON.stringify({
+              t: Math.round((t - started) / 1000),
+              dt: Math.round((t - lastLog) / 1000),
+              frames: row.frames,
+              conn: row.conn,
+              path: row.path,
+              stall: Math.round(maxStall / 100) / 10,
+            }))
+            lastLog = t
+            if (!firstAt && t - started >= 30000) {
+              fails.push('host video did not reach the guest within 30s of admit')
+              return
+            }
+          }
+          const span = firstAt ? (Date.now() - firstAt) / 1000 : 0
+          const average = span > 0 ? (lastFrames - framesAtStart) / span : 0
+          console.log(label, 'summary', JSON.stringify({
+            span: Math.round(span),
+            stall: Math.round(maxStall / 100) / 10,
+            average: Math.round(average * 10) / 10,
+            frames: lastFrames,
+          }))
+          if (maxStall > 3500) fails.push(`guest video stalled ${Math.round(maxStall / 100) / 10}s (need under ~3s)`)
+          if (average < 12) fails.push(`guest video averaged ${average.toFixed(1)} fps (need at least 12)`)
+          if (firstAt && Date.now() - firstAt < 85000) fails.push(`guest video was not observed for 90s (ran ${Math.round((Date.now() - firstAt) / 1000)}s)`)
+        },
+      })
+      console.log(label, fails.length ? 'FAIL' : 'PASS')
+      for (const reason of fails) console.log(label, 'reason:', reason)
+    } finally {
+      await hostContext.close()
+      await guestContext.close()
+    }
+  } catch (error) {
+    fails.push(error instanceof Error ? error.message : String(error))
+    console.log(label, 'FAIL')
+    console.log(label, 'reason:', fails[fails.length - 1])
+  } finally {
+    if (hostBrowser) await hostBrowser.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+  return fails
+}
+
 const browser = await chromium.launch({
   args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'],
 })
@@ -882,6 +1015,7 @@ try {
     ['stale-invite', () => runStale(browser)],
     ['cellular', () => runCellular(browser)],
     ['uplink', () => runUplink(browser)],
+    ['carrier', () => runCarrier(browser)],
   ]
   const only = process.env.SCENARIO || ''
   const selected = only ? scenarios.filter(([name]) => name === only) : scenarios

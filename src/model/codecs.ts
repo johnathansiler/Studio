@@ -35,16 +35,18 @@ export function shouldSetVideoCodecPreferences(userAgent: string) {
 }
 
 export const VIDEO_BITRATES = [100_000, 150_000, 300_000] as const
-/** A face on a phone, not a broadcast. The sender cap stays on this value. */
+/** Where the encoder starts. The cap opens toward VIDEO_CEILING_BITRATE once the estimate allows. */
 export const DEFAULT_VIDEO_BITRATE = 100_000
+export const VIDEO_START_BITRATE = DEFAULT_VIDEO_BITRATE
+export const VIDEO_CEILING_BITRATE = 250_000
 export const VIDEO_MAX_FRAMERATE = 15
 
 /**
  * The camera opens at about 15 fps and 100 kbps. `medium` is enough of the
  * congestion estimate to reach that cap once the estimate is a few hundred
- * kilobits, and maxBitrate stops it taking more. Audio stays the higher priority.
+ * kilobits. Audio stays the higher priority.
  */
-export function videoEncodingBudget(maxBitrate = DEFAULT_VIDEO_BITRATE) {
+export function videoEncodingBudget(maxBitrate = VIDEO_START_BITRATE) {
   return {
     maxBitrate,
     maxFramerate: VIDEO_MAX_FRAMERATE,
@@ -53,19 +55,39 @@ export function videoEncodingBudget(maxBitrate = DEFAULT_VIDEO_BITRATE) {
   }
 }
 
-/** Seeing each other, not a broadcast. Ideal 320×240, never above 426×240 or 15 fps. */
+/**
+ * 100 kbps until the outgoing estimate can spare about 200 kbps for video,
+ * then up to 250 kbps. Frame rate stays preferred; the height only opens at
+ * the higher cap so a thin pipe is not asked for 480p.
+ */
+export function videoTargetForBwe(availableOutgoingBitrate: number, selected = VIDEO_CEILING_BITRATE): { maxBitrate: number; height: number } {
+  const ceiling = selected > VIDEO_START_BITRATE ? Math.min(selected, VIDEO_CEILING_BITRATE) : VIDEO_CEILING_BITRATE
+  const share = availableOutgoingBitrate > 0 ? availableOutgoingBitrate * 0.35 : 0
+  if (share >= 200_000 && ceiling >= 200_000) {
+    const raw = Math.min(ceiling, Math.floor(share))
+    // 50 kbps steps. A noisy estimate must not call setParameters every second.
+    const stepped = Math.min(ceiling, Math.max(200_000, Math.floor(raw / 50_000) * 50_000))
+    return { maxBitrate: stepped, height: 480 }
+  }
+  return { maxBitrate: Math.min(VIDEO_START_BITRATE, ceiling), height: 240 }
+}
+
+/** Capture up to 480p so the sender can open that size. The encoder scales down while the cap is 100 kbps. */
 export function videoCaptureBudget(): Pick<MediaTrackConstraints, 'width' | 'height' | 'frameRate'> {
   return {
-    width: { ideal: 320, max: 426 },
-    height: { ideal: 240, max: 240 },
+    width: { ideal: 640, max: 854 },
+    height: { ideal: 360, max: 480 },
     frameRate: { ideal: 15, max: 15 },
   }
 }
 
-/** Scale a larger camera down to the 426×240 budget. 1 means the capture is already small enough. */
-export function scaleResolutionDownBy(width: number, height: number): number {
+/** Scale a larger camera down to 426×240, or to 854×480 when the target height says so. */
+export function scaleResolutionDownBy(width: number, height: number, targetHeight = 240): number {
+  const tall = targetHeight >= 400
+  const targetWidth = tall ? 854 : 426
+  const limitHeight = tall ? 480 : 240
   if (width <= 0 || height <= 0) return 1
-  const scale = Math.max(width / 426, height / 240, 1)
+  const scale = Math.max(width / targetWidth, height / limitHeight, 1)
   return Math.round(scale * 100) / 100
 }
 

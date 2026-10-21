@@ -43,10 +43,11 @@ export function enqueueSignal(queue: OutboundSignal[], message: OutboundSignal, 
 
 /**
  * A disconnected ICE path often checks itself back to connected.
- * Restarting before that throws away the congestion estimate, so video
- * never climbs off the floor. Wait this long, then restart once.
+ * Restarting immediately throws away the congestion estimate. Waiting
+ * several seconds is what froze the picture for 10s on a dead TCP relay.
+ * Two seconds is long enough for a blip and short enough to ramp again.
  */
-export const ICE_DISCONNECT_RESTART_MS = 8000
+export const ICE_DISCONNECT_RESTART_MS = 2000
 
 /**
  * The host recovers a failed peer connection, or one that has stayed

@@ -15,6 +15,8 @@ export interface DiagPeer {
   ice: string
   connection: string
   gathered: { host: number; srflx: number; relay: number; prflx: number }
+  /** Local relay candidates by the protocol used to reach TURN. */
+  relayProtocols: { udp: number; tcp: number; tls: number }
   selected: { local: string; remote: string; protocol: string; relayProtocol: string } | null
   outbound: DiagDirection
   inbound: DiagDirection
@@ -98,6 +100,7 @@ export function sanitizeDiag(input: unknown): DiagReport | null {
     if (!item || typeof item !== 'object') continue
     const peer = item as Record<string, unknown>
     const gathered = peer.gathered && typeof peer.gathered === 'object' ? (peer.gathered as Record<string, unknown>) : {}
+    const relays = peer.relayProtocols && typeof peer.relayProtocols === 'object' ? (peer.relayProtocols as Record<string, unknown>) : {}
     const selectedIn = peer.selected && typeof peer.selected === 'object' ? (peer.selected as Record<string, unknown>) : null
     const local = clip(selectedIn?.local, 16)
     const remote = clip(selectedIn?.remote, 16)
@@ -118,6 +121,7 @@ export function sanitizeDiag(input: unknown): DiagReport | null {
         relay: count(gathered.relay),
         prflx: count(gathered.prflx),
       },
+      relayProtocols: { udp: count(relays.udp), tcp: count(relays.tcp), tls: count(relays.tls) },
       selected,
       outbound: direction(peer.outbound, true),
       inbound: direction(peer.inbound, false),
