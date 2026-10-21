@@ -12,8 +12,8 @@ import {
   type TimedPeak,
 } from '../model/latency'
 import { DEFAULT_OPUS, mungeOpusSdp, type OpusOptions } from '../model/sdp'
-import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, videoEncodingBudget } from '../model/codecs'
-import { isSilentTake, tcpRelayIceServers, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
+import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, VIDEO_START_BITRATE, videoEncodingBudget, videoTargetForBwe } from '../model/codecs'
+import { isSilentTake, tcpRelayIceServers, udpIceServers, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
 import { answerMatches, enqueueSignal, ICE_DISCONNECT_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
 import { sanitizeDiag, type DiagDirection } from '../model/diag'
 import { arrangementDigest, ASSET_CHUNK_BYTES, ASSET_CHUNK_GAP_MS, assetChunkCount, guestMayRequest, mediaCanCarryAssets, referencedBufferIds } from '../model/sessionSync'
@@ -159,9 +159,17 @@ interface PeerLink {
   recoveryTimer: number
   /** When the peer connection or ICE last entered disconnected or failed. 0 while it is up. */
   disconnectedAt: number
-  /** This peer has used a UDP relay. The next real restart prefers TCP/TLS 443. */
-  sawUdpRelay: boolean
-  tcpRelay: boolean
+  /** A nominated pair that was not a TCP/TLS relay. TCP stays out of the gather until this is still false at failure. */
+  sawUdpPair: boolean
+  /** The last nominated pair was a TCP or TLS relay. The next restart gathers UDP again. */
+  onTcpRelay: boolean
+  /** TCP/TLS 443 was already added once. A second failure stays on UDP. */
+  tcpFallback: boolean
+  /** Ignore a stale bandwidth estimate until this time, and send at the start rate. */
+  videoHoldUntil: number
+  appliedVideoBitrate: number
+  appliedVideoHeight: number
+  relayProtocols: { udp: number; tcp: number; tls: number }
   rtp: {
     outbound: DiagDirection
     inbound: DiagDirection
@@ -533,6 +541,8 @@ export class SessionClient {
   private resendLiveNegotiation() {
     for (const [id, link] of this.peers) {
       if (link.pc.connectionState === 'closed') continue
+      // The path and the socket died together. If the path is still down, the two-second timer restarts ICE now that signaling can carry it.
+      if (!this.isPolite()) this.scheduleRecovery(id, link)
       if (!this.isPolite() && link.pc.signalingState === 'have-local-offer') this.sendOffer(id, link)
       else if (this.isPolite() && link.answerDescription && link.answeredNegotiationId != null) {
         this.send({ t: 'signal', to: id, data: { description: link.answerDescription, negotiationId: link.answeredNegotiationId } })
@@ -1264,8 +1274,9 @@ export class SessionClient {
 
   private async createPeer(id: string, remoteInstance = '') {
     if (this.peers.has(id)) return this.peers.get(id)!
+    const udp = udpIceServers(this.ice)
     const pc = new RTCPeerConnection({
-      iceServers: this.ice,
+      iceServers: (udp.length ? udp : this.ice) as RTCIceServer[],
       iceTransportPolicy: this.state.iceTransportPolicy,
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require',
@@ -1297,8 +1308,13 @@ export class SessionClient {
       outboundAudio: 0,
       recoveryTimer: 0,
       disconnectedAt: 0,
-      sawUdpRelay: false,
-      tcpRelay: false,
+      sawUdpPair: false,
+      onTcpRelay: false,
+      tcpFallback: false,
+      videoHoldUntil: 0,
+      appliedVideoBitrate: 0,
+      appliedVideoHeight: 0,
+      relayProtocols: { udp: 0, tcp: 0, tls: 0 },
       rtp: null,
     }
     const impolite = !this.isPolite()
@@ -1315,7 +1331,11 @@ export class SessionClient {
     }
     this.peers.set(id, link)
     pc.onicecandidate = (event) => {
-      if (!event.candidate) return
+      if (!event.candidate) {
+        // Trickle end. Without this, a peer that waits for gathering complete sits through every TCP TURN timeout.
+        this.send({ t: 'signal', to: id, data: { candidate: null, negotiationId: link.negotiationId } })
+        return
+      }
       const line = event.candidate.candidate
       if (!link.seenCandidates.has(line)) {
         link.seenCandidates.add(line)
@@ -1495,33 +1515,48 @@ export class SessionClient {
   }
 
   /**
-   * One peer, one peer connection. After that peer has already been on a UDP
-   * relay and we are about to restart ICE for real, gather only TCP/TLS 443.
+   * One peer, one peer connection. UDP is the gather until it has truly failed.
+   * A TCP relay that dies goes back to UDP, because a carrier reset takes TCP
+   * signaling and TURN-over-TCP down together. Returns true when the next
+   * restart must gather again.
    */
-  private preferTcpRelay(id: string, link: PeerLink) {
-    if (link.tcpRelay || !link.sawUdpRelay) return
-    const iceServers = tcpRelayIceServers(this.ice)
-    if (!iceServers.length) return
-    const servers = iceServers as RTCIceServer[]
-    try {
-      link.pc.setConfiguration({ iceServers: servers, iceTransportPolicy: 'relay' })
-    } catch {
+  private chooseRelayTransport(id: string, link: PeerLink, failed: boolean) {
+    if (link.onTcpRelay) {
+      const iceServers = udpIceServers(this.ice) as RTCIceServer[]
+      if (!iceServers.length) return false
       try {
-        link.pc.setConfiguration({ iceServers: servers })
+        link.pc.setConfiguration({ iceServers })
       } catch {
-        this.postDiagEvent('turn', `peer ${id} udp relay flapped; TCP preference was rejected`)
-        return
+        this.postDiagEvent('turn', `peer ${id} tcp relay died; UDP preference was rejected`)
+        return false
       }
+      link.onTcpRelay = false
+      link.tcpFallback = true
+      this.postDiagEvent('turn', `peer ${id} tcp relay died; next gather is UDP`)
+      return true
     }
-    link.tcpRelay = true
-    this.postDiagEvent('turn', `peer ${id} udp relay flapped; next gather is TURN TCP/TLS 443`)
+    if (failed && !link.sawUdpPair && !link.tcpFallback) {
+      const iceServers = tcpRelayIceServers(this.ice) as RTCIceServer[]
+      if (!iceServers.length) return false
+      try {
+        link.pc.setConfiguration({ iceServers })
+      } catch {
+        this.postDiagEvent('turn', `peer ${id} no UDP pair; TCP fallback was rejected`)
+        return false
+      }
+      link.tcpFallback = true
+      link.onTcpRelay = true
+      this.postDiagEvent('turn', `peer ${id} no UDP pair; next gather is TURN TCP/TLS 443`)
+      return true
+    }
+    return false
   }
 
   /**
    * Host only. A socket drop does not come through here and does not rebuild the peer connection.
    * An outstanding offer is resent once the path has actually failed.
    * A short disconnect does not restart ICE. Failed, or disconnected for
-   * several seconds, restarts it. The offer is never rolled back.
+   * about two seconds, restarts it. The offer is never rolled back.
    */
   private scheduleRecovery(id: string, link: PeerLink) {
     if (this.left || this.peers.get(id) !== link) return
@@ -1546,20 +1581,24 @@ export class SessionClient {
         this.scheduleRecovery(id, link)
         return
       }
-      if (next === 'resend') {
+      const failed = link.pc.connectionState === 'failed' || link.pc.iceConnectionState === 'failed'
+      const changed = next === 'restart' || next === 'resend' ? this.chooseRelayTransport(id, link, failed) : false
+      if (next === 'resend' && !changed) {
         if (link.resentNegotiationId === link.negotiationId) return
         link.resentNegotiationId = link.negotiationId
         this.sendOffer(id, link)
         return
       }
-      if (next === 'restart') {
-        this.preferTcpRelay(id, link)
+      if (next === 'restart' || changed) {
+        link.videoHoldUntil = Date.now() + ICE_DISCONNECT_RESTART_MS
+        link.appliedVideoBitrate = 0
         link.wantsRestart = true
         try {
           link.pc.restartIce()
         } catch {
           /* negotiationneeded sends the offer */
         }
+        void this.tuneSenders(link)
       }
     }, delay)
   }
@@ -1625,12 +1664,13 @@ export class SessionClient {
           this.send({ t: 'signal', to: from, data: { description: link.pc.localDescription, negotiationId } })
         }
         await this.tuneSenders(link)
-      } else if (candidate) {
-        if (negotiationId != null && link.remoteNegotiationId != null && negotiationId !== link.remoteNegotiationId) return
+      } else if (Object.prototype.hasOwnProperty.call(data, 'candidate')) {
+        const end = !candidate || !candidate.candidate
+        if (!end && negotiationId != null && link.remoteNegotiationId != null && negotiationId !== link.remoteNegotiationId) return
         try {
-          await link.pc.addIceCandidate(candidate)
+          await link.pc.addIceCandidate(end ? null : candidate)
         } catch (error) {
-          if (link.ignoreOffer) return
+          if (end || link.ignoreOffer) return
           if (!link.pc.remoteDescription) {
             link.pendingIce.push(candidate)
             if (link.pendingIce.length > 64) link.pendingIce.shift()
@@ -1688,11 +1728,48 @@ export class SessionClient {
     this.state.iceTransportPolicy = policy === 'relay' ? 'relay' : 'all'
   }
 
+  private videoTarget(link: PeerLink) {
+    const fresh = link.pc.connectionState === 'connected' && Date.now() >= link.videoHoldUntil
+    if (!fresh) return { maxBitrate: VIDEO_START_BITRATE, height: 240 }
+    const bwe = link.rtp?.availableOutgoingBitrate || 0
+    // A missing estimate is a stats gap, not a thin pipe. Reconfiguring the
+    // encoder back to the start rate on that gap throws away the frame-rate ramp.
+    if (bwe <= 0 && link.appliedVideoBitrate > 0) {
+      return { maxBitrate: link.appliedVideoBitrate, height: link.appliedVideoHeight || 240 }
+    }
+    const next = videoTargetForBwe(bwe, this.state.videoBitrate)
+    if (link.appliedVideoBitrate >= 200_000 && next.maxBitrate < link.appliedVideoBitrate && bwe >= 400_000) {
+      return { maxBitrate: link.appliedVideoBitrate, height: link.appliedVideoHeight || next.height }
+    }
+    return next
+  }
+
+  private applyVideoTarget(link: PeerLink) {
+    const target = this.videoTarget(link)
+    if (target.maxBitrate === link.appliedVideoBitrate && target.height === link.appliedVideoHeight) return
+    void this.commitVideoTarget(link, target)
+  }
+
   private async tuneSenders(link: PeerLink) {
     await this.tuneAudio(link.musicSender?.sender, this.state.opus.maxAverageBitrate)
     await this.tuneAudio(link.talkSender?.sender, 64_000)
-    await this.tuneVideo(link.camSender?.sender, this.cameraTrack())
-    await this.tuneVideo(link.screenSender?.sender, this.screenTrack())
+    await this.commitVideoTarget(link, this.videoTarget(link), true)
+  }
+
+  /**
+   * Latch the target only after setParameters accepts it. A call made before
+   * the sender has a description throws; remembering that failure would skip
+   * the frame-rate preference on every later poll.
+   */
+  private async commitVideoTarget(link: PeerLink, target: { maxBitrate: number; height: number }, force = false) {
+    if (!force && target.maxBitrate === link.appliedVideoBitrate && target.height === link.appliedVideoHeight) return
+    const camOk = await this.tuneVideo(link.camSender?.sender, this.cameraTrack(), target)
+    await this.tuneVideo(link.screenSender?.sender, this.screenTrack(), target)
+    if (!camOk) return
+    const current = this.videoTarget(link)
+    if (current.maxBitrate !== target.maxBitrate || current.height !== target.height) return
+    link.appliedVideoBitrate = target.maxBitrate
+    link.appliedVideoHeight = target.height
   }
 
   private async tuneAudio(sender: RTCRtpSender | undefined, maxBitrate: number) {
@@ -1709,23 +1786,24 @@ export class SessionClient {
     }
   }
 
-  private async tuneVideo(sender: RTCRtpSender | undefined, track: MediaStreamTrack | null) {
-    if (!sender) return
+  private async tuneVideo(sender: RTCRtpSender | undefined, track: MediaStreamTrack | null, target: { maxBitrate: number; height: number }) {
+    if (!sender) return false
     const params = sender.getParameters()
-    if (!params.encodings?.length) return
+    if (!params.encodings?.length) return false
     const settings = track?.getSettings() || {}
-    const budget = videoEncodingBudget(this.state.videoBitrate)
+    const budget = videoEncodingBudget(target.maxBitrate)
     params.encodings[0].maxBitrate = budget.maxBitrate
     params.encodings[0].maxFramerate = budget.maxFramerate
-    params.encodings[0].scaleResolutionDownBy = scaleResolutionDownBy(settings.width || 0, settings.height || 0)
+    params.encodings[0].scaleResolutionDownBy = scaleResolutionDownBy(settings.width || 0, settings.height || 0, target.height)
     params.encodings[0].priority = budget.priority
     ;(params.encodings[0] as RTCRtpEncodingParameters & { networkPriority?: RTCPriorityType }).networkPriority = budget.networkPriority
     for (let index = 1; index < params.encodings.length; index++) params.encodings[index].active = false
     params.degradationPreference = 'maintain-framerate'
     try {
       await sender.setParameters(params)
+      return true
     } catch {
-      /* ignore */
+      return false
     }
   }
 
@@ -1768,7 +1846,10 @@ export class SessionClient {
   private cameraTrack() {
     if (!this.state.camOn || this.pageHidesVideo()) return null
     const track = this.preview?.getVideoTracks().find((item) => item.readyState === 'live') || this.talkStream?.getVideoTracks().find((item) => item.readyState === 'live') || null
-    if (track) track.enabled = true
+    if (track) {
+      track.enabled = true
+      if (track.contentHint !== 'motion') track.contentHint = 'motion'
+    }
     return track
   }
 
@@ -2039,8 +2120,22 @@ export class SessionClient {
         protocol = (local?.protocol || remote?.protocol || '').toLowerCase()
         relayProtocol = (local?.relayProtocol || remote?.relayProtocol || '').toLowerCase()
         path = localType === 'relay' ? 'relay' : localType ? 'direct' : path
-        if (protocol === 'udp' && (localType === 'relay' || remoteType === 'relay')) link.sawUdpRelay = true
+        const tcpRelay = (localType === 'relay' || remoteType === 'relay') && (relayProtocol === 'tcp' || relayProtocol === 'tls' || protocol === 'tcp' || protocol === 'tls')
+        if (tcpRelay) link.onTcpRelay = true
+        else if (protocol === 'udp' || localType === 'host' || localType === 'srflx') {
+          link.onTcpRelay = false
+          link.sawUdpPair = true
+        }
       }
+      const relayProtocols = { udp: 0, tcp: 0, tls: 0 }
+      stats.forEach((report) => {
+        if (report.type !== 'local-candidate') return
+        const row = report as { candidateType?: string; protocol?: string; relayProtocol?: string }
+        if (row.candidateType !== 'relay') return
+        const kind = (row.relayProtocol || '').toLowerCase()
+        if (kind === 'udp' || kind === 'tcp' || kind === 'tls') relayProtocols[kind] += 1
+      })
+      link.relayProtocols = relayProtocols
       this.state.media = {
         ...this.state.media,
         [id]: {
@@ -2079,6 +2174,7 @@ export class SessionClient {
         availableOutgoingBitrate,
         currentRoundTripTime: pairRtt,
       }
+      this.applyVideoTarget(link)
       const estimate = this.estimateFor(id)
       const best = bestClockSample(link.clockSamples)
       this.state.latency[id] = {
@@ -2127,6 +2223,7 @@ export class SessionClient {
           ice: link.pc.iceConnectionState,
           connection: link.pc.connectionState,
           gathered: link.gathered,
+          relayProtocols: link.relayProtocols,
           offers: link.offers,
           selected: media?.localType
             ? { local: media.localType, remote: media.remoteType || '', protocol: media.protocol || '', relayProtocol: media.relayProtocol || '' }

@@ -78,7 +78,22 @@ function urlList(urls: string | string[]) {
   return Array.isArray(urls) ? urls : [urls]
 }
 
-/** TCP and TLS on 443 only. Used after a UDP relay path has already flapped, so the next gather is not another UDP allocation. */
+/** STUN and TURN over UDP. The initial gather. TCP and TLS are left out so ICE cannot nominate them while a UDP pair exists. */
+export function udpIceServers(servers: IceServer[]): IceServer[] {
+  const next: IceServer[] = []
+  for (const server of servers) {
+    const urls = urlList(server.urls).filter((url) => {
+      if (/^stun:/i.test(url)) return true
+      if (!/^turn:/i.test(url)) return false
+      return !/transport=tcp/i.test(url)
+    })
+    if (!urls.length) continue
+    next.push({ ...server, urls: urls.length === 1 ? urls[0] : urls })
+  }
+  return next
+}
+
+/** TCP and TLS on 443 only. Gathered after no UDP pair has succeeded, not on the first offer. */
 export function tcpRelayIceServers(servers: IceServer[]): IceServer[] {
   const next: IceServer[] = []
   for (const server of servers) {
