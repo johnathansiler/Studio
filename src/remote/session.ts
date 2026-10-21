@@ -16,7 +16,7 @@ import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, outboundVi
 import { isSilentTake, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
 import { answerMatches, enqueueSignal, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
 import { sanitizeDiag } from '../model/diag'
-import { arrangementDigest, guestMayRequest, referencedBufferIds } from '../model/sessionSync'
+import { arrangementDigest, ASSET_CHUNK_BYTES, ASSET_CHUNK_GAP_MS, assetChunkCount, guestMayRequest, mediaCanCarryAssets, referencedBufferIds } from '../model/sessionSync'
 import { decodeWavPCM, encodeWav } from '../model/wav'
 import { base64ToBytes, bytesToBase64 } from '../storage/idb'
 import { clearActiveSession, deviceParticipantId, readIdentity } from '../storage/identity'
@@ -150,13 +150,15 @@ interface PeerLink {
   seenCandidates: Set<string>
   remoteInstance?: string
   negotiationId: number
-  offerWasRestart: boolean
   wantsRestart: boolean
-  restarts: number
   answeredNegotiationId?: number
   answerDescription?: RTCSessionDescriptionInit | null
   remoteNegotiationId?: number
+  /** Set once an in-flight offer has been sent again for this id. Welcome may send it again. */
+  resentNegotiationId?: number
   recoveryTimer: number
+  outboundVideo: number
+  outboundAudio: number
   take?: {
     takeId: string
     total: number
@@ -225,8 +227,9 @@ export class SessionClient {
   private welcomed = false
   private outbox: OutboundSignal[] = []
   private lastSent: { t: string; bytes: number } | null = null
-  /** Peers that already got one relay-only retry after an ICE restart stayed failed. */
-  private relayPeers = new Set<string>()
+  /** One paced HTTP upload of project audio. It does not start until media is flowing. */
+  private assetJob: { id: string; name: string; sampleRate: number; wav: Uint8Array; index: number; total: number } | null = null
+  private assetTimer = 0
 
   constructor(private engine: AudioEngine) {
     const saved = readIdentity()
@@ -425,6 +428,8 @@ export class SessionClient {
     window.clearInterval(this.pingTimer)
     window.clearTimeout(this.joinTimer)
     window.clearTimeout(this.reconnectTimer)
+    window.clearTimeout(this.assetTimer)
+    this.assetJob = null
     this.ws?.close()
     this.ws = null
     for (const link of this.peers.values()) link.pc.close()
@@ -679,6 +684,10 @@ export class SessionClient {
     }
     if (msg.t === 'project-asset' && this.state.role === 'guest') {
       this.takeAsset(msg.asset as { id: string; name: string; sampleRate: number; wav: string })
+      return
+    }
+    if (msg.t === 'asset-ready' && this.state.role === 'guest') {
+      void this.fetchRemoteAsset(msg.asset as { id?: string; name?: string; sampleRate?: number })
       return
     }
     if (msg.t === 'take-relay' && this.state.role === 'host') {
@@ -990,26 +999,124 @@ export class SessionClient {
     return this.peers.get(id)?.remoteMinusLocal ?? null
   }
 
-  /** Host pushes the arrangement and any audio the guest does not have yet. */
+  /**
+   * Host publishes the arrangement. The project JSON is small and goes on the
+   * signaling socket. The wav files do not: they wait until media is flowing,
+   * then move in small HTTP chunks the guest downloads from the server.
+   */
   publishArrangement() {
     const store = this.arrangementStore
     if (!store || this.state.role !== 'host' || this.state.status !== 'live') return
-    const project = store.project
-    for (const id of referencedBufferIds(project)) {
+    const digest = arrangementDigest(store.project)
+    if (digest !== this.lastDigest) {
+      this.lastDigest = digest
+      this.arrangementRev += 1
+      this.send({ t: 'project', rev: this.arrangementRev, project: store.project })
+      this.state.syncLabel = 'Host · guests follow'
+      this.emit()
+    }
+    this.pumpAssetUpload()
+  }
+
+  private uplinkReady() {
+    return mediaCanCarryAssets([...this.peers.values()].map((link) => ({
+      connection: link.pc.connectionState,
+      outboundVideo: link.outboundVideo,
+      outboundAudio: link.outboundAudio,
+    })))
+  }
+
+  /** Start the next wav only while the call is already carrying media. One chunk at a time. */
+  private pumpAssetUpload() {
+    if (this.assetJob || this.assetTimer || this.left) return
+    const store = this.arrangementStore
+    if (!store || this.state.role !== 'host' || this.state.status !== 'live' || !this.state.code || !this.state.selfId) return
+    if (!this.uplinkReady()) return
+    for (const id of referencedBufferIds(store.project)) {
       if (this.sentAssets.has(id)) continue
       const asset = store.buffers.get(id)
       if (!asset) continue
-      this.sentAssets.add(id)
-      const wav = bytesToBase64(new Uint8Array(encodeWav(asset.channels, asset.sampleRate)))
-      this.send({ t: 'project-asset', asset: { id: asset.id, name: asset.name, sampleRate: asset.sampleRate, wav } })
+      let wav: Uint8Array
+      try {
+        wav = new Uint8Array(encodeWav(asset.channels, asset.sampleRate))
+      } catch {
+        this.sentAssets.add(id)
+        continue
+      }
+      const total = assetChunkCount(wav.byteLength)
+      if (!total) {
+        this.sentAssets.add(id)
+        continue
+      }
+      this.assetJob = { id: asset.id, name: asset.name, sampleRate: asset.sampleRate, wav, index: 0, total }
+      void this.sendAssetChunk()
+      return
     }
-    const digest = arrangementDigest(project)
-    if (digest === this.lastDigest) return
-    this.lastDigest = digest
-    this.arrangementRev += 1
-    this.send({ t: 'project', rev: this.arrangementRev, project })
-    this.state.syncLabel = 'Host · guests follow'
-    this.emit()
+  }
+
+  private async sendAssetChunk() {
+    const job = this.assetJob
+    if (!job || this.left) return
+    if (job.index >= job.total) {
+      this.assetJob = null
+      return
+    }
+    const start = job.index * ASSET_CHUNK_BYTES
+    const slice = job.wav.subarray(start, Math.min(job.wav.byteLength, start + ASSET_CHUNK_BYTES))
+    let complete = false
+    try {
+      const res = await fetch('/api/assets', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          code: this.state.code,
+          from: this.state.selfId,
+          id: job.id,
+          name: job.name,
+          sampleRate: job.sampleRate,
+          index: job.index,
+          total: job.total,
+          chunk: bytesToBase64(slice),
+        }),
+      })
+      const data = await res.json().catch(() => null) as { ok?: boolean; complete?: boolean } | null
+      if (!res.ok || !data?.ok) throw new Error('asset upload rejected')
+      complete = Boolean(data.complete)
+      if (this.assetJob === job && !complete) job.index += 1
+    } catch {
+      /* the same chunk tries again after the gap */
+    }
+    if (this.assetJob !== job || this.left) return
+    if (complete) {
+      this.sentAssets.add(job.id)
+      this.assetJob = null
+      this.pumpAssetUpload()
+      return
+    }
+    this.assetTimer = window.setTimeout(() => {
+      this.assetTimer = 0
+      void this.sendAssetChunk()
+    }, ASSET_CHUNK_GAP_MS)
+  }
+
+  private async fetchRemoteAsset(asset: { id?: string; name?: string; sampleRate?: number } | undefined) {
+    const id = String(asset?.id || '')
+    if (!id || this.incomingAssets.has(id) || !this.state.code || !this.state.selfId) return
+    try {
+      const params = new URLSearchParams({ code: this.state.code, id, from: this.state.selfId })
+      const res = await fetch(`/api/assets?${params}`)
+      if (!res.ok) return
+      const decoded = decodeWavPCM(await res.arrayBuffer())
+      this.incomingAssets.set(id, {
+        id,
+        name: asset?.name || 'Audio',
+        sampleRate: decoded.sampleRate || asset?.sampleRate || decoded.sampleRate,
+        channels: decoded.channels,
+      })
+      this.applyIncomingArrangement()
+    } catch {
+      this.note('An arrangement file could not be read.')
+    }
   }
 
   private takeAsset(asset: { id: string; name: string; sampleRate: number; wav: string } | undefined) {
@@ -1148,7 +1255,7 @@ export class SessionClient {
     if (this.peers.has(id)) return this.peers.get(id)!
     const pc = new RTCPeerConnection({
       iceServers: this.ice,
-      iceTransportPolicy: this.relayPeers.has(id) ? 'relay' : this.state.iceTransportPolicy,
+      iceTransportPolicy: this.state.iceTransportPolicy,
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require',
     })
@@ -1173,10 +1280,10 @@ export class SessionClient {
       seenCandidates: new Set(),
       remoteInstance: remoteInstance || undefined,
       negotiationId: 0,
-      offerWasRestart: false,
       wantsRestart: false,
-      restarts: 0,
       answerDescription: null,
+      outboundVideo: 0,
+      outboundAudio: 0,
       recoveryTimer: 0,
     }
     const impolite = !this.isPolite()
@@ -1338,8 +1445,7 @@ export class SessionClient {
       const restart = Boolean(link.wantsRestart)
       link.wantsRestart = false
       link.negotiationId += 1
-      link.offerWasRestart = restart
-      if (restart) link.restarts += 1
+      link.resentNegotiationId = undefined
       await this.commitLocal(link, await link.pc.createOffer(restart ? { iceRestart: true } : undefined))
       link.offers += 1
       this.sendOffer(id, link)
@@ -1350,53 +1456,38 @@ export class SessionClient {
     }
   }
 
-  private recoveryAction(id: string, link: PeerLink) {
+  private recoveryAction(link: PeerLink) {
     return iceRecoveryAction({
       polite: this.isPolite(),
       connection: link.pc.connectionState,
       ice: link.pc.iceConnectionState,
       signaling: link.pc.signalingState,
-      offerWasRestart: link.offerWasRestart,
-      restarts: link.restarts,
-      relayed: this.relayPeers.has(id),
     })
   }
 
-  /** Host only. A socket drop does not come through here and does not rebuild the peer connection. */
+  /**
+   * Host only. A socket drop does not come through here and does not rebuild the peer connection.
+   * An outstanding offer is resent once. A stable failed connection restarts ICE.
+   * The offer is never rolled back, and the peer connection is never replaced from here.
+   */
   private scheduleRecovery(id: string, link: PeerLink) {
     if (this.left || this.peers.get(id) !== link) return
-    const action = this.recoveryAction(id, link)
-    const failed = link.pc.connectionState === 'failed' || link.pc.iceConnectionState === 'failed'
+    const action = this.recoveryAction(link)
     if (action === 'none') {
       if (link.recoveryTimer) window.clearTimeout(link.recoveryTimer)
       link.recoveryTimer = 0
       return
     }
-    if (link.recoveryTimer) {
-      if (!failed) return
-      window.clearTimeout(link.recoveryTimer)
-      link.recoveryTimer = 0
-    }
-    // Relay waits so a restart that just got its answer can nominate TCP TURN before the peer connection is rebuilt.
-    const delay = action === 'relay' ? 4000 : failed || action === 'resend' ? 0 : 1500
+    if (link.recoveryTimer) return
+    const delay = action === 'resend' ? 0 : 1500
     link.recoveryTimer = window.setTimeout(() => {
       link.recoveryTimer = 0
       if (this.left || this.peers.get(id) !== link) return
-      const next = this.recoveryAction(id, link)
-      if (next === 'none') return
-      if (next === 'relay') {
-        this.relayPeers.add(id)
-        const instance = link.remoteInstance || ''
-        this.closePeer(id)
-        void this.createPeer(id, instance)
-        return
-      }
+      const next = this.recoveryAction(link)
       if (next === 'resend') {
+        if (link.resentNegotiationId === link.negotiationId) return
+        link.resentNegotiationId = link.negotiationId
         this.sendOffer(id, link)
-        link.recoveryTimer = window.setTimeout(() => {
-          link.recoveryTimer = 0
-          this.scheduleRecovery(id, link)
-        }, 3000)
         return
       }
       if (next === 'restart') {
@@ -1406,23 +1497,6 @@ export class SessionClient {
         } catch {
           /* negotiationneeded sends the offer */
         }
-        return
-      }
-      if (next === 'rollback-restart') {
-        void this.enqueueSignal(id, async () => {
-          if (this.peers.get(id) !== link) return
-          link.wantsRestart = true
-          try {
-            link.pc.restartIce()
-          } catch {
-            /* the rollback still asks for a new offer */
-          }
-          try {
-            await link.pc.setLocalDescription({ type: 'rollback' })
-          } catch {
-            this.sendOffer(id, link)
-          }
-        })
       }
     }, delay)
   }
@@ -1797,6 +1871,8 @@ export class SessionClient {
       let level = 0
       let bestAudioBytes = -1
       let videoBytes = 0
+      let outboundVideo = 0
+      let outboundAudio = 0
       stats.forEach((report) => {
         const row = report as unknown as Record<string, number | string>
         if (report.type === 'inbound-rtp' && row.kind === 'audio') {
@@ -1814,6 +1890,8 @@ export class SessionClient {
           if (typeof row.audioLevel === 'number') level = row.audioLevel
         }
         if (report.type === 'inbound-rtp' && row.kind === 'video') videoBytes += Number(row.bytesReceived || 0)
+        if (report.type === 'outbound-rtp' && row.kind === 'video') outboundVideo += Number(row.bytesSent || 0)
+        if (report.type === 'outbound-rtp' && row.kind === 'audio') outboundAudio += Number(row.bytesSent || 0)
         if (report.type === 'candidate-pair' && row.state === 'succeeded' && typeof row.currentRoundTripTime === 'number') {
           rtt = row.currentRoundTripTime * 1000
         }
@@ -1853,6 +1931,8 @@ export class SessionClient {
           videoBytes,
         },
       }
+      link.outboundVideo = outboundVideo
+      link.outboundAudio = outboundAudio
       const estimate = this.estimateFor(id)
       const best = bestClockSample(link.clockSamples)
       this.state.latency[id] = {
@@ -1878,6 +1958,7 @@ export class SessionClient {
     this.applyJam()
     this.emit()
     this.postDiag()
+    if (this.state.role === 'host') this.pumpAssetUpload()
   }
 
   private postDiag() {

@@ -35,7 +35,8 @@ export function shouldSetVideoCodecPreferences(userAgent: string) {
 }
 
 export const VIDEO_BITRATES = [100_000, 150_000, 300_000] as const
-export const DEFAULT_VIDEO_BITRATE = 150_000
+/** A face on a phone, not a broadcast. The sender cap stays on this value. */
+export const DEFAULT_VIDEO_BITRATE = 100_000
 
 /** Seeing each other, not a broadcast. Ideal 320×240, never above 426×240 or 15 fps. */
 export function videoCaptureBudget(): Pick<MediaTrackConstraints, 'width' | 'height' | 'frameRate'> {

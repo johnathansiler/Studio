@@ -3,21 +3,32 @@
  *
  *   node scripts/prod-call-test.mjs https://cueharbor.onrender.com
  *
- * Four runs, all under a mobile network (150 ms RTT, 1% loss, 4G cap):
+ * Five runs, all under a mobile network (150 ms RTT, 1% loss, 4G cap):
  *   1. Android host, iPhone guest, 6x CPU and paused timers on the Android
  *   2. Android guest, iPhone host, same throttle on the Android
  *   3. Guest localStorage still holds a dead session code and opens a fresh invite
  *   4. Cellular: the host signaling socket is cut every 8s for 60s, and the
  *      host network drops for 1.5s once. Media bytes must keep flowing or
  *      recover within 5s. Set SCENARIO=cellular to run only that one.
+ *   5. Uplink: the host is on one shared ~1 Mbps pipe with 150 ms delay, and
+ *      its saved project carries a ~1 MB audio asset. Guest inbound video must
+ *      keep climbing for 60s. Set SCENARIO=uplink to run only that one.
+ *      Devtools throttling caps each connection on its own, so it does not
+ *      starve video when a WebSocket is busy. The host browser is paced by
+ *      scripts/uplink-pace.c instead, one bucket for every socket.
  *
  * The Android tab is hidden and shown. Then its outbound signaling is held
  * for 22s, which is what a frozen main thread looks like to the server.
  * Prints PASS or FAIL per scenario. A live socket must stay up through that
  * hold, and the invite code must win over the stored one.
  */
+import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)
 const { chromium, devices } = require('playwright')
@@ -51,6 +62,10 @@ const hook = () => {
       const text = String(data)
       const sent = window.__sent || (window.__sent = [])
       if (sent.length < 40) sent.push(text.slice(0, 160))
+      if (text.length >= 64 * 1024) {
+        const big = window.__bigSends || (window.__bigSends = [])
+        big.push(text.length)
+      }
       if (window.__holdSends) return
       if (window.__failOffers && text.includes('"type":"offer"')) {
         window.__failOffers = false
@@ -84,6 +99,18 @@ const hook = () => {
   }
   Patched.prototype = Native.prototype
   window.RTCPeerConnection = Patched
+
+  const origFetch = window.fetch.bind(window)
+  window.fetch = (input, init) => {
+    try {
+      const url = typeof input === 'string' ? input : (input && input.url) || ''
+      const body = init && typeof init.body === 'string' ? init.body : ''
+      if (String(url).includes('/api/assets') && body) window.__assetPosts = (window.__assetPosts || 0) + body.length
+    } catch {
+      /* counting must not block the request */
+    }
+    return origFetch(input, init)
+  }
 }
 
 async function install(page) {
@@ -177,6 +204,8 @@ async function sample(page) {
       stored,
       peers,
       live: (window.__pcs || []).filter((pc) => pc.connectionState !== 'closed').length,
+      big: (window.__bigSends || []).reduce((sum, n) => sum + n, 0),
+      assets: window.__assetPosts || 0,
     }
   })
 }
@@ -259,8 +288,12 @@ async function bootPair(browser, { hostProfile, guestProfile, hostId, guestId, s
   return { host, guest, hostContext, guestContext }
 }
 
-async function connectCall(host, guest) {
-  await host.goto(base + '/', { waitUntil: 'domcontentloaded', timeout: 45000 })
+async function connectCall(host, guest, options = {}) {
+  await host.goto(base + '/', { waitUntil: 'domcontentloaded', timeout: options.timeout || 45000 })
+  if (options.project) {
+    await host.waitForFunction((name) => document.querySelector('.project-name')?.value === name, options.project, { timeout: 30000 })
+  }
+  if (options.beforeInvite) await options.beforeInvite()
   await host.getByRole('button', { name: 'Session', exact: true }).click()
   await host.getByRole('button', { name: 'Create invite' }).click()
   const codeLabel = host.locator('.dock-bar strong').filter({ hasText: /Session [A-Z0-9]{6}/ })
@@ -274,8 +307,10 @@ async function connectCall(host, guest) {
   if (await reconnect.isVisible().catch(() => false)) await reconnect.click()
   await guest.getByRole('button', { name: 'Session', exact: true }).click()
   await host.getByRole('button', { name: 'people' }).click()
-  await host.locator('.waiting', { hasText: 'Ava' }).getByRole('button', { name: 'Admit' }).click({ timeout: 20000 })
-  await host.getByRole('button', { name: 'Session', exact: true }).click()
+  const admit = host.locator('.waiting', { hasText: 'Ava' }).getByRole('button', { name: 'Admit' }).click({ timeout: options.admitTimeout || 20000 })
+  if (options.duringAdmit) await options.duringAdmit()
+  await admit
+  if (!options.duringAdmit) await host.getByRole('button', { name: 'Session', exact: true }).click()
   return code
 }
 
@@ -588,6 +623,202 @@ async function runCellular(browser) {
   return fails
 }
 
+const UPLINK_PCM_BYTES = 750_000
+
+/** A saved project whose clip references a ~1 MB wav, so the live app syncs it on admit. */
+function seedBulkProject(pcmBytes) {
+  const dataSize = pcmBytes
+  const buffer = new ArrayBuffer(44 + dataSize)
+  const view = new DataView(buffer)
+  const write = (offset, text) => {
+    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i))
+  }
+  write(0, 'RIFF')
+  view.setUint32(4, 36 + dataSize, true)
+  write(8, 'WAVE')
+  write(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, 48000, true)
+  view.setUint32(28, 96000, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  write(36, 'data')
+  view.setUint32(40, dataSize, true)
+  const wav = new Blob([buffer], { type: 'audio/wav' })
+  const project = {
+    version: 1,
+    id: 'prj_uplink',
+    name: 'Uplink',
+    sampleRate: 48000,
+    tempo: 120,
+    timeSignature: { numerator: 4, denominator: 4 },
+    tracks: [
+      {
+        id: 'trk_vocal', name: 'Vocal', type: 'audio', color: '#ef6b6b', volume: 0.8, pan: 0,
+        mute: false, solo: false, armed: true, monitor: false, input: 'mic', inserts: [], clips: [], midiClips: [],
+      },
+      {
+        id: 'trk_music', name: 'Music', type: 'audio', color: '#73c48f', volume: 0.8, pan: 0,
+        mute: false, solo: false, armed: false, monitor: false, input: 'none', inserts: [],
+        clips: [{
+          id: 'clip_uplink', name: 'Bulk', bufferId: 'buf_uplink', startSample: 0, offsetSamples: 0,
+          durationSamples: dataSize / 2, fadeInSamples: 0, fadeOutSamples: 0, gain: 0.9, source: 'import',
+        }],
+        midiClips: [],
+      },
+      {
+        id: 'trk_keys', name: 'Keys', type: 'midi', color: '#79b8d4', volume: 0.8, pan: 0,
+        mute: false, solo: false, armed: false, monitor: false, input: 'none', inserts: [], clips: [], midiClips: [],
+      },
+    ],
+    masterVolume: 0.9,
+    masterInserts: [],
+    loopEnabled: false,
+    loopStartSample: 0,
+    loopEndSample: 48000 * 8,
+    metronomeEnabled: false,
+    countIn: false,
+    snap: true,
+  }
+  const record = {
+    id: project.id,
+    name: project.name,
+    savedAt: Date.now(),
+    project,
+    workspace: { view: 'arrange', transportMode: 'arrangement', positionSamples: 0, selectedTrackId: 'trk_vocal', surface: 'studio', phonePane: 'edit' },
+    assets: [{ id: 'buf_uplink', name: 'Bulk', sampleRate: 48000, wav }],
+  }
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('cueharbor', 2)
+    req.onupgradeneeded = () => {
+      const db = req.result
+      if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' })
+      if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta')
+    }
+    req.onerror = () => reject(req.error)
+    req.onsuccess = () => {
+      const db = req.result
+      const tx = db.transaction(['projects', 'meta'], 'readwrite')
+      tx.objectStore('projects').put(record)
+      tx.objectStore('meta').put(project.id, 'last')
+      tx.oncomplete = () => {
+        db.close()
+        resolve(true)
+      }
+      tx.onerror = () => reject(tx.error)
+    }
+  })
+}
+
+/**
+ * Host on a shared 1 Mbps uplink with 150 ms delay, syncing a ~1 MB project
+ * asset. The guest must receive host video the whole minute.
+ */
+async function runUplink(browser) {
+  const label = 'uplink'
+  const fails = []
+  const dir = mkdtempSync(path.join(tmpdir(), 'cueharbor-uplink-'))
+  const so = path.join(dir, 'libuplink.so')
+  const shm = path.join(dir, 'bucket')
+  const arm = path.join(dir, 'arm')
+  let hostBrowser = null
+  let guestBrowser = null
+  try {
+    const source = path.join(path.dirname(fileURLToPath(import.meta.url)), 'uplink-pace.c')
+    execFileSync('gcc', ['-shared', '-fPIC', '-O2', '-o', so, source, '-ldl', '-lpthread'], { stdio: 'inherit' })
+    const mediaArgs = ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--no-sandbox']
+    hostBrowser = await chromium.launch({
+      env: { ...process.env, LD_PRELOAD: so, UPLINK_BPS: '125000', UPLINK_LATENCY_MS: '150', UPLINK_SHM: shm, UPLINK_ARM: arm },
+      args: mediaArgs,
+    })
+    guestBrowser = browser
+    const suffix = randomBytes(6).toString('hex')
+    const hostId = `00000000-0000-4000-8000-${suffix}`
+    const guestId = `ffffffff-ffff-4fff-8fff-${suffix}`
+    const hostContext = await hostBrowser.newContext(galaxy)
+    const guestContext = await guestBrowser.newContext(iphone)
+    const host = await hostContext.newPage()
+    const guest = await guestContext.newPage()
+    host.on('pageerror', (error) => console.log('HOST PAGE', error.message))
+    guest.on('pageerror', (error) => console.log('GUEST PAGE', error.message))
+    try {
+      await install(host)
+      await install(guest)
+      await host.addInitScript(seedBulkProject, UPLINK_PCM_BYTES)
+      await host.addInitScript((id) => localStorage.setItem('cueharbor-participant', id), hostId)
+      await guest.addInitScript((id) => localStorage.setItem('cueharbor-participant', id), guestId)
+      const cdp = await host.context().newCDPSession(host)
+      await cdp.send('Network.enable')
+      // Devtools throughput is per connection, so it cannot make a WebSocket
+      // upload and RTP share one radio. The pacer above is that shared 1 Mbps
+      // pipe. This adds the cellular delay on the host.
+      await cdp.send('Network.emulateNetworkConditions', {
+        offline: false,
+        latency: 150,
+        downloadThroughput: -1,
+        uploadThroughput: -1,
+        packetLoss: 0,
+      })
+      const samples = []
+      await connectCall(host, guest, {
+        project: 'Uplink',
+        timeout: 90000,
+        admitTimeout: 90000,
+        beforeInvite: async () => writeFileSync(arm, '1'),
+        duringAdmit: async () => {
+          const started = Date.now()
+          let firstAt = 0
+          while (Date.now() - started < 60000) {
+            await guest.waitForTimeout(2000)
+            const row = await videoBytes(guest)
+            const hostRow = await sample(host)
+            const t = Date.now()
+            samples.push({ t, video: row.video })
+            if (row.video > 0 && !firstAt) firstAt = t
+            const prior = firstAt ? samples.filter((item) => item.t >= firstAt && t - item.t >= 4000).pop() : null
+            const grew = prior ? row.video - prior.video : 0
+            console.log(label, 'video', JSON.stringify({
+              t: Math.round((t - started) / 1000),
+              video: row.video,
+              grew,
+              conn: row.conn,
+              big: hostRow.big,
+              assets: hostRow.assets,
+            }))
+            if (!firstAt && t - started >= 15000) {
+              fails.push(`host video did not reach the guest within 15s of admit (ws asset ${hostRow.big}, http asset ${hostRow.assets})`)
+              return
+            }
+            if (firstAt && prior && grew < 8000) {
+              fails.push(`guest video stalled over 4s (${prior.video}->${row.video})`)
+              return
+            }
+          }
+        },
+      })
+      const done = await sample(host)
+      const moved = Math.max(done.big, done.assets)
+      console.log(label, 'asset', JSON.stringify({ big: done.big, assets: done.assets }))
+      if (moved < 500_000) fails.push(`project asset did not sync (ws ${done.big}, http ${done.assets})`)
+      console.log(label, fails.length ? 'FAIL' : 'PASS')
+      for (const reason of fails) console.log(label, 'reason:', reason)
+    } finally {
+      await hostContext.close()
+      await guestContext.close()
+    }
+  } catch (error) {
+    fails.push(error instanceof Error ? error.message : String(error))
+    console.log(label, 'FAIL')
+    console.log(label, 'reason:', fails[fails.length - 1])
+  } finally {
+    if (hostBrowser) await hostBrowser.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+  return fails
+}
+
 const browser = await chromium.launch({
   args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'],
 })
@@ -598,6 +829,7 @@ try {
     ['android-guest', () => runCall(browser, 'android-guest', { androidHost: false, staleGuest: false })],
     ['stale-invite', () => runStale(browser)],
     ['cellular', () => runCellular(browser)],
+    ['uplink', () => runUplink(browser)],
   ]
   const only = process.env.SCENARIO || ''
   const selected = only ? scenarios.filter(([name]) => name === only) : scenarios

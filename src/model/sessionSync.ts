@@ -31,6 +31,24 @@ export function guestMayRequest(action: string): boolean {
   return action === 'play' || action === 'stop' || action === 'seek'
 }
 
+/** Wav bytes per HTTP chunk. A 1 Mbps uplink still has room for video beside this. */
+export const ASSET_CHUNK_BYTES = 12_000
+/** Gap between chunks so the upload stays behind the call. */
+export const ASSET_CHUNK_GAP_MS = 400
+
+export function assetChunkCount(byteLength: number, chunkBytes = ASSET_CHUNK_BYTES): number {
+  if (byteLength <= 0) return 0
+  return Math.ceil(byteLength / chunkBytes)
+}
+
+/**
+ * Bulk project audio waits until this call is already carrying media.
+ * A connected peer with outbound bytes means ICE finished and the uplink is in use.
+ */
+export function mediaCanCarryAssets(peers: Array<{ connection: string; outboundVideo: number; outboundAudio: number }>): boolean {
+  return peers.some((peer) => peer.connection === 'connected' && (peer.outboundVideo > 0 || peer.outboundAudio > 0))
+}
+
 export function referencedBufferIds(project: Project): string[] {
   const ids = new Set<string>()
   for (const track of project.tracks) {
