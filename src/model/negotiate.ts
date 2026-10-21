@@ -42,12 +42,26 @@ export function enqueueSignal(queue: OutboundSignal[], message: OutboundSignal, 
 }
 
 /**
- * A disconnected ICE path often checks itself back to connected.
- * Restarting immediately throws away the congestion estimate. Waiting
- * several seconds is what froze the picture for 10s on a dead TCP relay.
- * Two seconds is long enough for a blip and short enough to ramp again.
+ * A UDP path on a thin pipe goes disconnected and then checks itself back.
+ * Restarting that path at two seconds is what froze the 1 Mbps uplink: the
+ * new offer tore down a pair that was still carrying frames.
+ * A TCP relay does not come back. The carrier reset takes it with the socket,
+ * and waiting eight seconds is the 10s freeze. Leave TCP after two seconds.
  */
-export const ICE_DISCONNECT_RESTART_MS = 2000
+export const ICE_UDP_DISCONNECT_RESTART_MS = 8000
+export const ICE_TCP_DISCONNECT_RESTART_MS = 2000
+/** After a restart, hold the encoder at the start rate so the new estimate can climb. */
+export const ICE_RESTART_VIDEO_HOLD_MS = 2000
+/**
+ * The first gather has to be allowed to finish. A carrier that swallows TURN
+ * for 12s looks like a disconnect, and restarting there throws away the
+ * allocate that is about to succeed.
+ */
+export const ICE_INITIAL_GATHER_MS = 20000
+
+export function iceDisconnectLimit(tcpRelay: boolean) {
+  return tcpRelay ? ICE_TCP_DISCONNECT_RESTART_MS : ICE_UDP_DISCONNECT_RESTART_MS
+}
 
 /**
  * The host recovers a failed peer connection, or one that has stayed
@@ -61,12 +75,20 @@ export function iceRecoveryAction(input: {
   ice: string
   signaling: string
   disconnectedForMs?: number
+  /** The nominated pair is a TCP/TLS relay, so a short disconnect is a dead path. */
+  tcpRelay?: boolean
+  /** This peer connection has already carried a pair. The opening gather has not. */
+  established?: boolean
+  /** Age of this peer connection. The opening gather is left alone until ICE_INITIAL_GATHER_MS. */
+  ageMs?: number
 }): 'none' | 'restart' | 'resend' | 'wait' {
   if (input.polite) return 'none'
   const failed = input.connection === 'failed' || input.ice === 'failed'
   const disconnected = input.connection === 'disconnected' || input.ice === 'disconnected'
   if (!failed && !disconnected) return 'none'
-  const stalled = failed || (input.disconnectedForMs ?? 0) >= ICE_DISCONNECT_RESTART_MS
+  const opening = !input.established && !input.tcpRelay && input.ageMs != null && input.ageMs < ICE_INITIAL_GATHER_MS
+  if (opening) return 'wait'
+  const stalled = failed || (input.disconnectedForMs ?? 0) >= iceDisconnectLimit(Boolean(input.tcpRelay))
   if (!stalled) return 'wait'
   if (input.signaling === 'have-local-offer') return 'resend'
   if (input.signaling === 'stable') return 'restart'

@@ -93,6 +93,15 @@ static int udp_socket(int fd) {
   return socket_type(fd) == SOCK_DGRAM;
 }
 
+/* Chrome's renderer talks to the network service over Unix sockets.
+   Pacing those stalls the page itself. Only the IP path is the shared radio. */
+static int internet_socket(int fd) {
+  int domain = 0;
+  socklen_t len = sizeof(domain);
+  if (getsockopt(fd, SOL_SOCKET, SO_DOMAIN, &domain, &len) != 0) return 0;
+  return domain == AF_INET || domain == AF_INET6;
+}
+
 static char *dup_env(const char *key) {
   const char *value = getenv(key);
   if (!value || !value[0]) return NULL;
@@ -191,7 +200,7 @@ static int swallow_udp(int fd, const struct sockaddr *addr) {
 }
 
 static void pace(int fd, size_t n) {
-  if (!bucket || n == 0 || rate_bps < 1) return;
+  if (!bucket || n == 0 || rate_bps < 1 || !internet_socket(fd)) return;
   if (!armed) {
     if (arm_path && access(arm_path, F_OK) != 0) return;
     armed = 1;

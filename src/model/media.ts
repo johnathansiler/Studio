@@ -93,7 +93,36 @@ export function udpIceServers(servers: IceServer[]): IceServer[] {
   return next
 }
 
-/** TCP and TLS on 443 only. Gathered after no UDP pair has succeeded, not on the first offer. */
+export interface RelayGatherState {
+  onTcpRelay: boolean
+  sawUdpPair: boolean
+  tcpFallback: boolean
+  udpMisses: number
+}
+
+/**
+ * UDP stays the gather until it has failed twice with no pair. The first
+ * failure is often just TURN UDP being unreachable for a few seconds; replacing
+ * it with TCP-only then makes the restart offer a path the carrier is resetting.
+ * When TCP is added, UDP stays in the list so a late allocate can still win.
+ * A nominated TCP relay goes back to UDP-only on the next restart.
+ */
+export function nextRelayGather(state: RelayGatherState, failed: boolean, canAddTcp: boolean): { servers: 'udp' | 'both' | 'same'; state: RelayGatherState } {
+  if (state.onTcpRelay) {
+    return {
+      servers: 'udp',
+      state: { onTcpRelay: false, sawUdpPair: state.sawUdpPair, tcpFallback: false, udpMisses: 0 },
+    }
+  }
+  if (failed && !state.sawUdpPair && !state.tcpFallback) {
+    const udpMisses = state.udpMisses + 1
+    if (udpMisses < 2 || !canAddTcp) return { servers: 'same', state: { ...state, udpMisses } }
+    return { servers: 'both', state: { ...state, udpMisses, tcpFallback: true } }
+  }
+  return { servers: 'same', state }
+}
+
+/** TCP and TLS on 443 only. Gathered after UDP has failed twice with no pair, not on the first offer. */
 export function tcpRelayIceServers(servers: IceServer[]): IceServer[] {
   const next: IceServer[] = []
   for (const server of servers) {

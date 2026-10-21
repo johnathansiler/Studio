@@ -19,8 +19,8 @@ import { DEFAULT_OPUS, mungeOpusSdp, videoDirectionsFromSdp } from '../model/sdp
 import { rememberDiag, sanitizeDiag } from '../model/diag'
 import { arrangementDigest, assetChunkCount, ASSET_CHUNK_BYTES, catchUpSchedule, guestMayRequest, guestStartPerf, mediaCanCarryAssets, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
 import { cameraAttempts, DEFAULT_VIDEO_BITRATE, legalDirection, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, videoDirection, videoEncodingBudget, videoTargetForBwe } from '../model/codecs'
-import { ensureCellularTurn, filterBrowserTurnUrls, isSilentTake, mediaStatus, queueIceCandidate, staticTurnServer, tcpRelayIceServers, udpIceServers } from '../model/media'
-import { answerMatches, enqueueSignal, ICE_DISCONNECT_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, inviteWins, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen } from '../model/negotiate'
+import { ensureCellularTurn, filterBrowserTurnUrls, isSilentTake, mediaStatus, nextRelayGather, queueIceCandidate, staticTurnServer, tcpRelayIceServers, udpIceServers } from '../model/media'
+import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_INITIAL_GATHER_MS, ICE_RESTART_VIDEO_HOLD_MS, ICE_TCP_DISCONNECT_RESTART_MS, ICE_UDP_DISCONNECT_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, inviteWins, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen } from '../model/negotiate'
 import { isQuotaError } from '../storage/idb'
 import { clearIceCache, currentIce } from '../../server/ice.ts'
 import { formatBarsBeats, formatTimecode, samplesToMusical, snapSample } from '../model/time'
@@ -236,8 +236,21 @@ describe('media path', () => {
     expect(budget.priority).toBe('medium')
     expect(videoTargetForBwe(0)).toEqual({ maxBitrate: 100_000, height: 240 })
     expect(videoTargetForBwe(243_000)).toEqual({ maxBitrate: 100_000, height: 240 })
-    expect(videoTargetForBwe(800_000).maxBitrate).toBe(250_000)
-    expect(videoTargetForBwe(800_000).height).toBe(480)
+    expect(videoTargetForBwe(800_000)).toEqual({ maxBitrate: 100_000, height: 240 })
+    expect(videoTargetForBwe(1_500_000).maxBitrate).toBe(250_000)
+    expect(videoTargetForBwe(1_500_000).height).toBe(480)
+    const gather = { onTcpRelay: false, sawUdpPair: false, tcpFallback: false, udpMisses: 0 }
+    expect(nextRelayGather(gather, true, true)).toEqual({ servers: 'same', state: { ...gather, udpMisses: 1 } })
+    expect(nextRelayGather({ ...gather, udpMisses: 1 }, true, true)).toEqual({
+      servers: 'both',
+      state: { ...gather, udpMisses: 2, tcpFallback: true },
+    })
+    expect(nextRelayGather({ ...gather, udpMisses: 1 }, true, false).servers).toBe('same')
+    expect(nextRelayGather({ ...gather, sawUdpPair: true }, true, true).servers).toBe('same')
+    expect(nextRelayGather({ onTcpRelay: true, sawUdpPair: false, tcpFallback: true, udpMisses: 2 }, true, true)).toEqual({
+      servers: 'udp',
+      state: { onTcpRelay: false, sawUdpPair: false, tcpFallback: false, udpMisses: 0 },
+    })
     expect(DEFAULT_OPUS.maxAverageBitrate).toBe(510000)
     expect(staticTurnServer('turn:127.0.0.1:3478,turns:127.0.0.1:5349', 'cue', 'harbor').urls).toEqual([
       'turn:127.0.0.1:3478',
@@ -664,14 +677,26 @@ describe('offer and answer', () => {
     expect(answerMatches(3, 3)).toBe(true)
     expect(answerMatches(3, 2)).toBe(false)
     expect(answerMatches(3, undefined)).toBe(true)
-    expect(ICE_DISCONNECT_RESTART_MS).toBe(2000)
+    expect(ICE_UDP_DISCONNECT_RESTART_MS).toBe(8000)
+    expect(ICE_TCP_DISCONNECT_RESTART_MS).toBe(2000)
+    expect(ICE_RESTART_VIDEO_HOLD_MS).toBe(2000)
+    expect(iceDisconnectLimit(false)).toBe(8000)
+    expect(iceDisconnectLimit(true)).toBe(2000)
     expect(iceRecoveryAction({ polite: true, connection: 'failed', ice: 'failed', signaling: 'stable' })).toBe('none')
     expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', disconnectedForMs: 1000 })).toBe('wait')
     expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable' })).toBe('wait')
-    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', disconnectedForMs: 2000 })).toBe('restart')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', disconnectedForMs: 2000 })).toBe('wait')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', disconnectedForMs: 2000, tcpRelay: true })).toBe('restart')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', disconnectedForMs: 8000 })).toBe('restart')
+    expect(ICE_INITIAL_GATHER_MS).toBe(20000)
+    expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'stable', ageMs: 5000 })).toBe('wait')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', disconnectedForMs: 8000, ageMs: 5000 })).toBe('wait')
+    expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'stable', ageMs: 5000, established: true })).toBe('restart')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', disconnectedForMs: 8000, ageMs: 20000 })).toBe('restart')
     expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'have-local-offer' })).toBe('resend')
     expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'have-local-offer', disconnectedForMs: 1000 })).toBe('wait')
-    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'have-local-offer', disconnectedForMs: 2000 })).toBe('resend')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'have-local-offer', disconnectedForMs: 2000 })).toBe('wait')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'have-local-offer', disconnectedForMs: 8000 })).toBe('resend')
     expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'stable' })).toBe('restart')
     expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'have-remote-offer' })).toBe('wait')
     expect(iceRecoveryAction({ polite: false, connection: 'connected', ice: 'connected', signaling: 'stable' })).toBe('none')
