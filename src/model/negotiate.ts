@@ -42,21 +42,31 @@ export function enqueueSignal(queue: OutboundSignal[], message: OutboundSignal, 
 }
 
 /**
- * The host recovers a failed or disconnected peer connection.
- * An offer still in flight is sent again. A stable connection restarts ICE.
- * Nothing rolls that offer back, and nothing builds a second peer connection.
- * The guest never does this.
+ * A disconnected ICE path often checks itself back to connected.
+ * Restarting before that throws away the congestion estimate, so video
+ * never climbs off the floor. Wait this long, then restart once.
+ */
+export const ICE_DISCONNECT_RESTART_MS = 8000
+
+/**
+ * The host recovers a failed peer connection, or one that has stayed
+ * disconnected. An offer still in flight is sent again. A stable connection
+ * restarts ICE. A short disconnect waits. Nothing rolls an offer back, and
+ * nothing builds a second peer connection. The guest never does this.
  */
 export function iceRecoveryAction(input: {
   polite: boolean
   connection: string
   ice: string
   signaling: string
+  disconnectedForMs?: number
 }): 'none' | 'restart' | 'resend' | 'wait' {
   if (input.polite) return 'none'
   const failed = input.connection === 'failed' || input.ice === 'failed'
   const disconnected = input.connection === 'disconnected' || input.ice === 'disconnected'
   if (!failed && !disconnected) return 'none'
+  const stalled = failed || (input.disconnectedForMs ?? 0) >= ICE_DISCONNECT_RESTART_MS
+  if (!stalled) return 'wait'
   if (input.signaling === 'have-local-offer') return 'resend'
   if (input.signaling === 'stable') return 'restart'
   return 'wait'

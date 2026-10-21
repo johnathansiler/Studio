@@ -11,8 +11,10 @@
  *      host network drops for 1.5s once. Media bytes must keep flowing or
  *      recover within 5s. Set SCENARIO=cellular to run only that one.
  *   5. Uplink: the host is on one shared ~1 Mbps pipe with 150 ms delay, and
- *      its saved project carries a ~1 MB audio asset. Guest inbound video must
- *      keep climbing for 60s. Set SCENARIO=uplink to run only that one.
+ *      its saved project carries a ~1 MB audio asset. The host signaling
+ *      socket is cut about every 8s. After the first frames, every 4s of
+ *      the next minute must stay at or above ~10 fps. Set SCENARIO=uplink
+ *      to run only that one.
  *      Devtools throttling caps each connection on its own, so it does not
  *      starve video when a WebSocket is busy. The host browser is paced by
  *      scripts/uplink-pace.c instead, one bucket for every socket.
@@ -131,8 +133,8 @@ async function install(page) {
           ctx.fillRect(0, 0, 160, 120)
         }
         draw()
-        setInterval(draw, 100)
-        const stream = canvas.captureStream?.(10)
+        setInterval(draw, 66)
+        const stream = canvas.captureStream?.(15)
         if (stream?.getVideoTracks().length) tracks.push(stream.getVideoTracks()[0])
       }
       if (constraints.audio) {
@@ -170,10 +172,14 @@ async function sample(page) {
     for (const pc of window.__pcs || []) {
       let video = 0
       let audio = 0
+      let frames = 0
       try {
         const report = await pc.getStats()
         report.forEach((row) => {
-          if (row.type === 'inbound-rtp' && row.kind === 'video') video += row.bytesReceived || 0
+          if (row.type === 'inbound-rtp' && row.kind === 'video') {
+            video += row.bytesReceived || 0
+            frames += row.framesDecoded || 0
+          }
           if (row.type === 'inbound-rtp' && row.kind === 'audio') audio += row.bytesReceived || 0
         })
       } catch {
@@ -185,6 +191,7 @@ async function sample(page) {
         conn: pc.connectionState,
         video,
         audio,
+        frames,
       })
     }
     let stored = ''
@@ -477,7 +484,14 @@ async function cutSocketAndRestart(page) {
 
 async function videoBytes(page) {
   const row = await sample(page)
-  return { video: row.peers[0]?.video || 0, live: row.live || 0, conn: row.peers[0]?.conn || 'none', signaling: row.peers[0]?.signaling || 'none' }
+  return {
+    video: row.peers[0]?.video || 0,
+    frames: row.peers[0]?.frames || 0,
+    live: row.live || 0,
+    conn: row.peers[0]?.conn || 'none',
+    signaling: row.peers[0]?.signaling || 'none',
+    offers: row.offers || 0,
+  }
 }
 
 /** Bytes must move forward within the budget. A socket cut must not build a second peer connection. */
@@ -761,7 +775,6 @@ async function runUplink(browser) {
         uploadThroughput: -1,
         packetLoss: 0,
       })
-      const samples = []
       await connectCall(host, guest, {
         project: 'Uplink',
         timeout: 90000,
@@ -770,31 +783,70 @@ async function runUplink(browser) {
         duringAdmit: async () => {
           const started = Date.now()
           let firstAt = 0
-          while (Date.now() - started < 60000) {
+          let nextCut = started + 8000
+          let windowStart = null
+          let lastLog = started
+          let scored = 0
+          let worst = null
+          let framesAtStart = 0
+          let lastFrames = 0
+          while (!firstAt || Date.now() - firstAt < 60000) {
+            if (Date.now() - started >= 90000) break
             await guest.waitForTimeout(2000)
+            if (firstAt && Date.now() >= nextCut) {
+              nextCut = Date.now() + 8000
+              void cutSocket(host).then((closed) => {
+                console.log(label, 'cut', JSON.stringify({ closed, t: Math.round((Date.now() - started) / 1000) }))
+              })
+            }
             const row = await videoBytes(guest)
-            const hostRow = await sample(host)
             const t = Date.now()
-            samples.push({ t, video: row.video })
-            if (row.video > 0 && !firstAt) firstAt = t
-            const prior = firstAt ? samples.filter((item) => item.t >= firstAt && t - item.t >= 4000).pop() : null
-            const grew = prior ? row.video - prior.video : 0
+            if (row.frames > 0 && !firstAt) {
+              firstAt = t
+              framesAtStart = row.frames
+            }
+            lastFrames = row.frames
+            if (firstAt && !windowStart && t - firstAt >= 8000) windowStart = { t, frames: row.frames }
+            const elapsed = windowStart ? t - windowStart.t : 0
+            const fps = windowStart && elapsed >= 4000 ? ((row.frames - windowStart.frames) * 1000) / elapsed : null
             console.log(label, 'video', JSON.stringify({
               t: Math.round((t - started) / 1000),
+              dt: Math.round((t - lastLog) / 1000),
               video: row.video,
-              grew,
+              frames: row.frames,
+              fps: fps == null ? null : Math.round(fps * 10) / 10,
               conn: row.conn,
-              big: hostRow.big,
-              assets: hostRow.assets,
             }))
+            lastLog = t
             if (!firstAt && t - started >= 15000) {
-              fails.push(`host video did not reach the guest within 15s of admit (ws asset ${hostRow.big}, http asset ${hostRow.assets})`)
+              fails.push('host video did not reach the guest within 15s of admit')
               return
             }
-            if (firstAt && prior && grew < 8000) {
-              fails.push(`guest video stalled over 4s (${prior.video}->${row.video})`)
-              return
+            if (fps != null) {
+              if (elapsed > 8000) {
+                fails.push(`fps sample gap was ${Math.round(elapsed / 1000)}s, so the rate is not a 4s window`)
+                return
+              }
+              scored += 1
+              if (!worst || fps < worst.fps) worst = { fps, elapsed }
+              windowStart = { t, frames: row.frames }
             }
+          }
+          const span = firstAt ? (Date.now() - firstAt) / 1000 : 0
+          const average = span > 0 ? (lastFrames - framesAtStart) / span : 0
+          console.log(label, 'fps-summary', JSON.stringify({
+            scored,
+            worst: worst ? Math.round(worst.fps * 10) / 10 : null,
+            average: Math.round(average * 10) / 10,
+          }))
+          if (scored < 8) fails.push(`only ${scored} fps windows in the minute`)
+          // Live main (3236df8) fell to 6.7 fps over a 4s window on this pipe.
+          // The minute has to average about 10 fps, and no window may fall under 8.
+          if (!worst || worst.fps < 8 || average < 10) {
+            fails.push(`guest video worst ${worst ? worst.fps.toFixed(1) : '0'} fps over ${worst ? Math.round(worst.elapsed / 1000) : 0}s, average ${average.toFixed(1)} fps (need ~10 fps sustained)`)
+          }
+          if (firstAt && Date.now() - firstAt < 55000) {
+            fails.push(`guest video was not observed for 60s (ran ${Math.round((Date.now() - firstAt) / 1000)}s)`)
           }
         },
       })

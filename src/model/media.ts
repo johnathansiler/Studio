@@ -25,6 +25,9 @@ export interface MediaLink {
   remoteType?: string
   /** Inbound video RTP bytes. The banner follows this, not a stale connection label. */
   videoBytes?: number
+  /** Selected candidate transport, when a pair is nominated. */
+  protocol?: string
+  relayProtocol?: string
 }
 
 /** ICE can be up while connectionState is still waiting on DTLS or the data channel. */
@@ -70,6 +73,21 @@ const CELLULAR_TURN = [
   'turn:turn.cloudflare.com:443?transport=tcp',
   'turns:turn.cloudflare.com:443?transport=tcp',
 ]
+
+function urlList(urls: string | string[]) {
+  return Array.isArray(urls) ? urls : [urls]
+}
+
+/** TCP and TLS on 443 only. Used after a UDP relay path has already flapped, so the next gather is not another UDP allocation. */
+export function tcpRelayIceServers(servers: IceServer[]): IceServer[] {
+  const next: IceServer[] = []
+  for (const server of servers) {
+    const urls = urlList(server.urls).filter((url) => /^turns?:/i.test(url) && /transport=tcp/i.test(url) && /:443(?:\?|$)/.test(url))
+    if (!urls.length) continue
+    next.push({ ...server, urls: urls.length === 1 ? urls[0] : urls })
+  }
+  return next
+}
 
 /** Cloudflare credentials work on every Cloudflare TURN port. Add the cellular TCP/TLS fallbacks if any Cloudflare URL is present. */
 export function ensureCellularTurn(urls: string[]): string[] {

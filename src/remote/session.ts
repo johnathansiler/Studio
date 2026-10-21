@@ -12,10 +12,10 @@ import {
   type TimedPeak,
 } from '../model/latency'
 import { DEFAULT_OPUS, mungeOpusSdp, type OpusOptions } from '../model/sdp'
-import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES } from '../model/codecs'
-import { isSilentTake, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
-import { answerMatches, enqueueSignal, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
-import { sanitizeDiag } from '../model/diag'
+import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, videoEncodingBudget } from '../model/codecs'
+import { isSilentTake, tcpRelayIceServers, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
+import { answerMatches, enqueueSignal, ICE_DISCONNECT_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
+import { sanitizeDiag, type DiagDirection } from '../model/diag'
 import { arrangementDigest, ASSET_CHUNK_BYTES, ASSET_CHUNK_GAP_MS, assetChunkCount, guestMayRequest, mediaCanCarryAssets, referencedBufferIds } from '../model/sessionSync'
 import { decodeWavPCM, encodeWav } from '../model/wav'
 import { base64ToBytes, bytesToBase64 } from '../storage/idb'
@@ -157,6 +157,17 @@ interface PeerLink {
   /** Set once an in-flight offer has been sent again for this id. Welcome may send it again. */
   resentNegotiationId?: number
   recoveryTimer: number
+  /** When the peer connection or ICE last entered disconnected or failed. 0 while it is up. */
+  disconnectedAt: number
+  /** This peer has used a UDP relay. The next real restart prefers TCP/TLS 443. */
+  sawUdpRelay: boolean
+  tcpRelay: boolean
+  rtp: {
+    outbound: DiagDirection
+    inbound: DiagDirection
+    availableOutgoingBitrate: number
+    currentRoundTripTime: number
+  } | null
   outboundVideo: number
   outboundAudio: number
   take?: {
@@ -1285,13 +1296,18 @@ export class SessionClient {
       outboundVideo: 0,
       outboundAudio: 0,
       recoveryTimer: 0,
+      disconnectedAt: 0,
+      sawUdpRelay: false,
+      tcpRelay: false,
+      rtp: null,
     }
     const impolite = !this.isPolite()
     if (impolite) {
+      const video = videoEncodingBudget(this.state.videoBitrate)
       link.musicSender = pc.addTransceiver('audio', { direction: 'sendrecv' })
       link.talkSender = pc.addTransceiver('audio', { direction: 'sendrecv' })
-      link.camSender = pc.addTransceiver('video', { direction: 'sendrecv' })
-      link.screenSender = pc.addTransceiver('video', { direction: 'sendrecv' })
+      link.camSender = pc.addTransceiver('video', { direction: 'sendrecv', sendEncodings: [{ maxBitrate: video.maxBitrate, maxFramerate: video.maxFramerate, priority: video.priority }] })
+      link.screenSender = pc.addTransceiver('video', { direction: 'sendrecv', sendEncodings: [{ maxBitrate: video.maxBitrate, maxFramerate: video.maxFramerate, priority: video.priority }] })
       this.preferOpus(link.musicSender)
       this.preferVideo(link.camSender)
       this.preferVideo(link.screenSender)
@@ -1456,19 +1472,56 @@ export class SessionClient {
     }
   }
 
+  private downFor(link: PeerLink) {
+    const state = link.pc.connectionState
+    const ice = link.pc.iceConnectionState
+    const down = state === 'disconnected' || state === 'failed' || ice === 'disconnected' || ice === 'failed'
+    if (!down) {
+      link.disconnectedAt = 0
+      return 0
+    }
+    if (!link.disconnectedAt) link.disconnectedAt = Date.now()
+    return Date.now() - link.disconnectedAt
+  }
+
   private recoveryAction(link: PeerLink) {
     return iceRecoveryAction({
       polite: this.isPolite(),
       connection: link.pc.connectionState,
       ice: link.pc.iceConnectionState,
       signaling: link.pc.signalingState,
+      disconnectedForMs: this.downFor(link),
     })
   }
 
   /**
+   * One peer, one peer connection. After that peer has already been on a UDP
+   * relay and we are about to restart ICE for real, gather only TCP/TLS 443.
+   */
+  private preferTcpRelay(id: string, link: PeerLink) {
+    if (link.tcpRelay || !link.sawUdpRelay) return
+    const iceServers = tcpRelayIceServers(this.ice)
+    if (!iceServers.length) return
+    const servers = iceServers as RTCIceServer[]
+    try {
+      link.pc.setConfiguration({ iceServers: servers, iceTransportPolicy: 'relay' })
+    } catch {
+      try {
+        link.pc.setConfiguration({ iceServers: servers })
+      } catch {
+        this.postDiagEvent('turn', `peer ${id} udp relay flapped; TCP preference was rejected`)
+        return
+      }
+    }
+    link.tcpRelay = true
+    this.postDiagEvent('turn', `peer ${id} udp relay flapped; next gather is TURN TCP/TLS 443`)
+  }
+
+  /**
    * Host only. A socket drop does not come through here and does not rebuild the peer connection.
-   * An outstanding offer is resent once. A stable failed connection restarts ICE.
-   * The offer is never rolled back, and the peer connection is never replaced from here.
+   * An outstanding offer is resent once the path has actually failed.
+   * A short disconnect does not restart ICE. Failed, or disconnected for
+   * several seconds, restarts it. The offer is never rolled back.
    */
   private scheduleRecovery(id: string, link: PeerLink) {
     if (this.left || this.peers.get(id) !== link) return
@@ -1478,12 +1531,21 @@ export class SessionClient {
       link.recoveryTimer = 0
       return
     }
-    if (link.recoveryTimer) return
-    const delay = action === 'resend' ? 0 : 1500
+    if (link.recoveryTimer) {
+      if (action === 'wait') return
+      window.clearTimeout(link.recoveryTimer)
+      link.recoveryTimer = 0
+    }
+    const elapsed = link.disconnectedAt ? Date.now() - link.disconnectedAt : 0
+    const delay = action === 'wait' ? Math.max(250, ICE_DISCONNECT_RESTART_MS - elapsed) : 0
     link.recoveryTimer = window.setTimeout(() => {
       link.recoveryTimer = 0
       if (this.left || this.peers.get(id) !== link) return
       const next = this.recoveryAction(link)
+      if (next === 'wait') {
+        this.scheduleRecovery(id, link)
+        return
+      }
       if (next === 'resend') {
         if (link.resentNegotiationId === link.negotiationId) return
         link.resentNegotiationId = link.negotiationId
@@ -1491,6 +1553,7 @@ export class SessionClient {
         return
       }
       if (next === 'restart') {
+        this.preferTcpRelay(id, link)
         link.wantsRestart = true
         try {
           link.pc.restartIce()
@@ -1604,6 +1667,8 @@ export class SessionClient {
         path: previous?.path || 'unknown',
         localType: previous?.localType || '',
         remoteType: previous?.remoteType || '',
+        protocol: previous?.protocol || '',
+        relayProtocol: previous?.relayProtocol || '',
         ageMs: Date.now() - link.openedAt,
         videoBytes: previous?.videoBytes || 0,
       },
@@ -1649,11 +1714,12 @@ export class SessionClient {
     const params = sender.getParameters()
     if (!params.encodings?.length) return
     const settings = track?.getSettings() || {}
-    params.encodings[0].maxBitrate = this.state.videoBitrate
-    params.encodings[0].maxFramerate = 15
+    const budget = videoEncodingBudget(this.state.videoBitrate)
+    params.encodings[0].maxBitrate = budget.maxBitrate
+    params.encodings[0].maxFramerate = budget.maxFramerate
     params.encodings[0].scaleResolutionDownBy = scaleResolutionDownBy(settings.width || 0, settings.height || 0)
-    params.encodings[0].priority = 'very-low'
-    ;(params.encodings[0] as RTCRtpEncodingParameters & { networkPriority?: RTCPriorityType }).networkPriority = 'very-low'
+    params.encodings[0].priority = budget.priority
+    ;(params.encodings[0] as RTCRtpEncodingParameters & { networkPriority?: RTCPriorityType }).networkPriority = budget.networkPriority
     for (let index = 1; index < params.encodings.length; index++) params.encodings[index].active = false
     params.degradationPreference = 'maintain-framerate'
     try {
@@ -1873,6 +1939,21 @@ export class SessionClient {
       let videoBytes = 0
       let outboundVideo = 0
       let outboundAudio = 0
+      let outFrames = 0
+      let outLost = 0
+      let outNack = 0
+      let outPli = 0
+      let outFps = 0
+      let outLimit = ''
+      let outBest = -1
+      let inFrames = 0
+      let inLost = 0
+      let inNack = 0
+      let inPli = 0
+      let inFps = 0
+      let inBest = -1
+      let availableOutgoingBitrate = 0
+      let pairRtt = 0
       stats.forEach((report) => {
         const row = report as unknown as Record<string, number | string>
         if (report.type === 'inbound-rtp' && row.kind === 'audio') {
@@ -1889,11 +1970,38 @@ export class SessionClient {
           }
           if (typeof row.audioLevel === 'number') level = row.audioLevel
         }
-        if (report.type === 'inbound-rtp' && row.kind === 'video') videoBytes += Number(row.bytesReceived || 0)
-        if (report.type === 'outbound-rtp' && row.kind === 'video') outboundVideo += Number(row.bytesSent || 0)
+        if (report.type === 'inbound-rtp' && row.kind === 'video') {
+          const bytes = Number(row.bytesReceived || 0)
+          videoBytes += bytes
+          inFrames += Number(row.framesDecoded || 0)
+          inLost += Number(row.packetsLost || 0)
+          inNack += Number(row.nackCount || 0)
+          inPli += Number(row.pliCount || 0)
+          if (bytes >= inBest) {
+            inBest = bytes
+            inFps = Number(row.framesPerSecond || 0)
+          }
+        }
+        if (report.type === 'outbound-rtp' && row.kind === 'video') {
+          const bytes = Number(row.bytesSent || 0)
+          outboundVideo += bytes
+          outFrames += Number(row.framesEncoded || 0)
+          outNack += Number(row.nackCount || 0)
+          outPli += Number(row.pliCount || 0)
+          if (bytes >= outBest) {
+            outBest = bytes
+            outFps = Number(row.framesPerSecond || 0)
+            outLimit = String(row.qualityLimitationReason || '')
+          }
+        }
         if (report.type === 'outbound-rtp' && row.kind === 'audio') outboundAudio += Number(row.bytesSent || 0)
+        if (report.type === 'remote-inbound-rtp' && row.kind === 'video') outLost += Number(row.packetsLost || 0)
         if (report.type === 'candidate-pair' && row.state === 'succeeded' && typeof row.currentRoundTripTime === 'number') {
           rtt = row.currentRoundTripTime * 1000
+          pairRtt = row.currentRoundTripTime
+        }
+        if (report.type === 'candidate-pair' && row.state === 'succeeded' && typeof row.availableOutgoingBitrate === 'number' && !availableOutgoingBitrate) {
+          availableOutgoingBitrate = row.availableOutgoingBitrate
         }
         if (report.type === 'remote-inbound-rtp' && row.kind === 'audio' && typeof row.roundTripTime === 'number') {
           rtt = row.roundTripTime * 1000
@@ -1903,20 +2011,35 @@ export class SessionClient {
       let localCandidateId = ''
       let remoteCandidateId = ''
       stats.forEach((report) => {
-        const row = report as unknown as { nominated?: boolean; selected?: boolean; state?: string; localCandidateId?: string; remoteCandidateId?: string }
+        const row = report as unknown as {
+          nominated?: boolean
+          selected?: boolean
+          state?: string
+          localCandidateId?: string
+          remoteCandidateId?: string
+          availableOutgoingBitrate?: number
+          currentRoundTripTime?: number
+        }
         if (report.type === 'candidate-pair' && row.state === 'succeeded' && (row.nominated || row.selected) && row.localCandidateId) {
           localCandidateId = row.localCandidateId
           remoteCandidateId = row.remoteCandidateId || ''
+          if (typeof row.availableOutgoingBitrate === 'number') availableOutgoingBitrate = row.availableOutgoingBitrate
+          if (typeof row.currentRoundTripTime === 'number') pairRtt = row.currentRoundTripTime
         }
       })
       let localType = ''
       let remoteType = ''
+      let protocol = ''
+      let relayProtocol = ''
       if (localCandidateId) {
-        const local = stats.get(localCandidateId) as { candidateType?: string } | undefined
-        const remote = remoteCandidateId ? (stats.get(remoteCandidateId) as { candidateType?: string } | undefined) : undefined
+        const local = stats.get(localCandidateId) as { candidateType?: string; protocol?: string; relayProtocol?: string } | undefined
+        const remote = remoteCandidateId ? (stats.get(remoteCandidateId) as { candidateType?: string; protocol?: string; relayProtocol?: string } | undefined) : undefined
         localType = local?.candidateType || ''
         remoteType = remote?.candidateType || ''
+        protocol = (local?.protocol || remote?.protocol || '').toLowerCase()
+        relayProtocol = (local?.relayProtocol || remote?.relayProtocol || '').toLowerCase()
         path = localType === 'relay' ? 'relay' : localType ? 'direct' : path
+        if (protocol === 'udp' && (localType === 'relay' || remoteType === 'relay')) link.sawUdpRelay = true
       }
       this.state.media = {
         ...this.state.media,
@@ -1927,12 +2050,35 @@ export class SessionClient {
           path,
           localType,
           remoteType,
+          protocol,
+          relayProtocol,
           ageMs: Date.now() - link.openedAt,
           videoBytes,
         },
       }
       link.outboundVideo = outboundVideo
       link.outboundAudio = outboundAudio
+      link.rtp = {
+        outbound: {
+          framesPerSecond: outFps,
+          framesEncoded: outFrames,
+          bytes: outboundVideo,
+          packetsLost: outLost,
+          nackCount: outNack,
+          pliCount: outPli,
+          qualityLimitationReason: outLimit,
+        },
+        inbound: {
+          framesPerSecond: inFps,
+          framesDecoded: inFrames,
+          bytes: videoBytes,
+          packetsLost: inLost,
+          nackCount: inNack,
+          pliCount: inPli,
+        },
+        availableOutgoingBitrate,
+        currentRoundTripTime: pairRtt,
+      }
       const estimate = this.estimateFor(id)
       const best = bestClockSample(link.clockSamples)
       this.state.latency[id] = {
@@ -1973,16 +2119,25 @@ export class SessionClient {
       peerId: this.state.selfId || '',
       role: this.state.role || '',
       ua: navigator.userAgent,
-      peers: [...this.peers.entries()].map(([id, link]) => ({
-        id,
-        signaling: link.pc.signalingState,
-        ice: link.pc.iceConnectionState,
-        connection: link.pc.connectionState,
-        gathered: link.gathered,
-        offers: link.offers,
-        selected: this.state.media[id]?.localType ? { local: this.state.media[id].localType, remote: this.state.media[id].remoteType || '' } : null,
-        errors: link.errors,
-      })),
+      peers: [...this.peers.entries()].map(([id, link]) => {
+        const media = this.state.media[id]
+        return {
+          id,
+          signaling: link.pc.signalingState,
+          ice: link.pc.iceConnectionState,
+          connection: link.pc.connectionState,
+          gathered: link.gathered,
+          offers: link.offers,
+          selected: media?.localType
+            ? { local: media.localType, remote: media.remoteType || '', protocol: media.protocol || '', relayProtocol: media.relayProtocol || '' }
+            : null,
+          outbound: link.rtp?.outbound,
+          inbound: link.rtp?.inbound,
+          availableOutgoingBitrate: link.rtp?.availableOutgoingBitrate || 0,
+          currentRoundTripTime: link.rtp?.currentRoundTripTime || 0,
+          errors: link.errors,
+        }
+      }),
     })
     if (!report) return
     this.sendDiag(code, report)

@@ -18,9 +18,9 @@ import {
 import { DEFAULT_OPUS, mungeOpusSdp, videoDirectionsFromSdp } from '../model/sdp'
 import { rememberDiag, sanitizeDiag } from '../model/diag'
 import { arrangementDigest, assetChunkCount, ASSET_CHUNK_BYTES, catchUpSchedule, guestMayRequest, guestStartPerf, mediaCanCarryAssets, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
-import { cameraAttempts, legalDirection, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, videoDirection } from '../model/codecs'
-import { ensureCellularTurn, filterBrowserTurnUrls, isSilentTake, mediaStatus, queueIceCandidate, staticTurnServer } from '../model/media'
-import { answerMatches, enqueueSignal, iceRecoveryAction, ignoreIncomingOffer, inviteWins, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen } from '../model/negotiate'
+import { cameraAttempts, DEFAULT_VIDEO_BITRATE, legalDirection, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, videoDirection, videoEncodingBudget } from '../model/codecs'
+import { ensureCellularTurn, filterBrowserTurnUrls, isSilentTake, mediaStatus, queueIceCandidate, staticTurnServer, tcpRelayIceServers } from '../model/media'
+import { answerMatches, enqueueSignal, ICE_DISCONNECT_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, inviteWins, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen } from '../model/negotiate'
 import { isQuotaError } from '../storage/idb'
 import { clearIceCache, currentIce } from '../../server/ice.ts'
 import { formatBarsBeats, formatTimecode, samplesToMusical, snapSample } from '../model/time'
@@ -187,6 +187,33 @@ describe('media path', () => {
       'turn:turn.cloudflare.com:443?transport=tcp',
     ])
     expect(ensureCellularTurn(['stun:stun.l.google.com:19302'])).toEqual(['stun:stun.l.google.com:19302'])
+    expect(tcpRelayIceServers([
+      {
+        urls: [
+          'stun:stun.l.google.com:19302',
+          'turn:turn.cloudflare.com:3478?transport=udp',
+          'turn:turn.cloudflare.com:80?transport=tcp',
+          'turn:turn.cloudflare.com:443?transport=udp',
+          'turn:turn.cloudflare.com:443?transport=tcp',
+          'turns:turn.cloudflare.com:443?transport=tcp',
+        ],
+        username: 'u',
+        credential: 'c',
+      },
+    ])).toEqual([
+      {
+        urls: ['turn:turn.cloudflare.com:443?transport=tcp', 'turns:turn.cloudflare.com:443?transport=tcp'],
+        username: 'u',
+        credential: 'c',
+      },
+    ])
+    expect(tcpRelayIceServers([{ urls: 'turn:turn.cloudflare.com:3478?transport=udp', username: 'u', credential: 'c' }])).toEqual([])
+    const budget = videoEncodingBudget()
+    expect(budget.maxBitrate).toBe(DEFAULT_VIDEO_BITRATE)
+    expect(budget.maxBitrate).toBe(100_000)
+    expect(budget.maxFramerate).toBe(15)
+    expect(budget.priority).toBe('medium')
+    expect(DEFAULT_OPUS.maxAverageBitrate).toBe(510000)
     expect(staticTurnServer('turn:127.0.0.1:3478,turns:127.0.0.1:5349', 'cue', 'harbor').urls).toEqual([
       'turn:127.0.0.1:3478',
       'turns:127.0.0.1:5349',
@@ -494,14 +521,36 @@ describe('opus sdp and wav', () => {
           ice: 'checking',
           connection: 'connecting',
           gathered: { host: 1, srflx: 2, relay: 3, prflx: 0 },
-          selected: { local: 'relay', remote: 'relay' },
+          selected: { local: 'relay', remote: 'relay', protocol: 'udp', relayProtocol: 'udp', url: 'turn:secret' },
+          outbound: {
+            framesPerSecond: 14.5,
+            framesEncoded: 1200,
+            bytes: 480000,
+            packetsLost: 3,
+            nackCount: 4,
+            pliCount: 1,
+            qualityLimitationReason: 'bandwidth',
+            sdp: 'v=0 secret',
+          },
+          inbound: { framesPerSecond: 12, framesDecoded: 900, bytes: 300000, packetsLost: 2, nackCount: 1, pliCount: 0 },
+          availableOutgoingBitrate: 250000,
+          currentRoundTripTime: 0.182,
           errors: ['OperationError: Failed to set local answer sdp'],
           candidate: 'a=candidate secret',
         },
       ],
     })
     expect(clean?.peers[0].gathered.relay).toBe(3)
-    expect(clean?.peers[0].selected).toEqual({ local: 'relay', remote: 'relay' })
+    expect(clean?.peers[0].selected).toEqual({ local: 'relay', remote: 'relay', protocol: 'udp', relayProtocol: 'udp' })
+    expect(clean?.peers[0].outbound.framesPerSecond).toBe(14.5)
+    expect(clean?.peers[0].outbound.framesEncoded).toBe(1200)
+    expect(clean?.peers[0].outbound.bytes).toBe(480000)
+    expect(clean?.peers[0].outbound.qualityLimitationReason).toBe('bandwidth')
+    expect(clean?.peers[0].inbound.framesDecoded).toBe(900)
+    expect(clean?.peers[0].inbound.packetsLost).toBe(2)
+    expect(clean?.peers[0].availableOutgoingBitrate).toBe(250000)
+    expect(clean?.peers[0].currentRoundTripTime).toBe(0.182)
+    expect(clean?.peers[0].outbound).not.toHaveProperty('sdp')
     expect(JSON.stringify(clean)).not.toMatch(/secret|credential|candidate/)
     const log = rememberDiag([], clean!, 1)
     const next = rememberDiag(log, { ...clean!, at: 6 }, 1)
@@ -590,10 +639,14 @@ describe('offer and answer', () => {
     expect(answerMatches(3, 3)).toBe(true)
     expect(answerMatches(3, 2)).toBe(false)
     expect(answerMatches(3, undefined)).toBe(true)
+    expect(ICE_DISCONNECT_RESTART_MS).toBe(8000)
     expect(iceRecoveryAction({ polite: true, connection: 'failed', ice: 'failed', signaling: 'stable' })).toBe('none')
-    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable' })).toBe('restart')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', disconnectedForMs: 1000 })).toBe('wait')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable' })).toBe('wait')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', disconnectedForMs: 8000 })).toBe('restart')
     expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'have-local-offer' })).toBe('resend')
-    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'have-local-offer' })).toBe('resend')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'have-local-offer', disconnectedForMs: 1000 })).toBe('wait')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'have-local-offer', disconnectedForMs: 8000 })).toBe('resend')
     expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'stable' })).toBe('restart')
     expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'have-remote-offer' })).toBe('wait')
     expect(iceRecoveryAction({ polite: false, connection: 'connected', ice: 'connected', signaling: 'stable' })).toBe('none')

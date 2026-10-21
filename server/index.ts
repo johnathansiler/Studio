@@ -227,7 +227,7 @@ async function handleDiag(req: IncomingMessage, res: ServerResponse, code: strin
   if (req.method === 'GET') return json(res, { code, entries: session.diag.slice(-200) })
   let body: unknown
   try {
-    body = JSON.parse(await readBody(req, 8_000))
+    body = JSON.parse(await readBody(req, 24_000))
   } catch {
     return json(res, { error: 'Diagnostic was unreadable.' }, 400)
   }
