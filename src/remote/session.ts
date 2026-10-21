@@ -14,7 +14,7 @@ import {
 import { DEFAULT_OPUS, mungeOpusSdp, type OpusOptions } from '../model/sdp'
 import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, VIDEO_START_BITRATE, videoEncodingBudget, videoTargetForBwe } from '../model/codecs'
 import { isSilentTake, nextRelayGather, tcpRelayIceServers, udpIceServers, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
-import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_RESTART_VIDEO_HOLD_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
+import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_INITIAL_GATHER_MS, ICE_RESTART_VIDEO_HOLD_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
 import { sanitizeDiag, type DiagDirection } from '../model/diag'
 import { arrangementDigest, ASSET_CHUNK_BYTES, ASSET_CHUNK_GAP_MS, assetChunkCount, guestMayRequest, mediaCanCarryAssets, referencedBufferIds } from '../model/sessionSync'
 import { decodeWavPCM, encodeWav } from '../model/wav'
@@ -167,6 +167,8 @@ interface PeerLink {
   tcpFallback: boolean
   /** Failures with no UDP pair while the gather is still UDP-only. TCP is added on the second. */
   udpMisses: number
+  /** Set once connectionState has been connected. The opening gather is not restarted before that. */
+  everConnected: boolean
   /** Ignore a stale bandwidth estimate until this time, and send at the start rate. */
   videoHoldUntil: number
   appliedVideoBitrate: number
@@ -1314,6 +1316,7 @@ export class SessionClient {
       onTcpRelay: false,
       tcpFallback: false,
       udpMisses: 0,
+      everConnected: false,
       videoHoldUntil: 0,
       appliedVideoBitrate: 0,
       appliedVideoHeight: 0,
@@ -1385,6 +1388,7 @@ export class SessionClient {
     }
     pc.ondatachannel = (event) => this.bindChannel(id, link, event.channel)
     pc.onconnectionstatechange = () => {
+      if (link.pc.connectionState === 'connected') link.everConnected = true
       this.noteMedia(id, link)
       this.scheduleRecovery(id, link)
       this.emit()
@@ -1515,6 +1519,8 @@ export class SessionClient {
       signaling: link.pc.signalingState,
       disconnectedForMs: this.downFor(link),
       tcpRelay: link.onTcpRelay,
+      established: link.everConnected || link.sawUdpPair,
+      ageMs: Date.now() - link.openedAt,
     })
   }
 
@@ -1574,7 +1580,10 @@ export class SessionClient {
       link.recoveryTimer = 0
     }
     const elapsed = link.disconnectedAt ? Date.now() - link.disconnectedAt : 0
-    const delay = action === 'wait' ? Math.max(250, iceDisconnectLimit(link.onTcpRelay) - elapsed) : 0
+    const openingLeft = !link.everConnected && !link.sawUdpPair && !link.onTcpRelay
+      ? Math.max(0, ICE_INITIAL_GATHER_MS - (Date.now() - link.openedAt))
+      : 0
+    const delay = action === 'wait' ? Math.max(250, iceDisconnectLimit(link.onTcpRelay) - elapsed, openingLeft) : 0
     link.recoveryTimer = window.setTimeout(() => {
       link.recoveryTimer = 0
       if (this.left || this.peers.get(id) !== link) return

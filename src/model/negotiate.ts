@@ -52,6 +52,12 @@ export const ICE_UDP_DISCONNECT_RESTART_MS = 8000
 export const ICE_TCP_DISCONNECT_RESTART_MS = 2000
 /** After a restart, hold the encoder at the start rate so the new estimate can climb. */
 export const ICE_RESTART_VIDEO_HOLD_MS = 2000
+/**
+ * The first gather has to be allowed to finish. A carrier that swallows TURN
+ * for 12s looks like a disconnect, and restarting there throws away the
+ * allocate that is about to succeed.
+ */
+export const ICE_INITIAL_GATHER_MS = 20000
 
 export function iceDisconnectLimit(tcpRelay: boolean) {
   return tcpRelay ? ICE_TCP_DISCONNECT_RESTART_MS : ICE_UDP_DISCONNECT_RESTART_MS
@@ -71,11 +77,17 @@ export function iceRecoveryAction(input: {
   disconnectedForMs?: number
   /** The nominated pair is a TCP/TLS relay, so a short disconnect is a dead path. */
   tcpRelay?: boolean
+  /** This peer connection has already carried a pair. The opening gather has not. */
+  established?: boolean
+  /** Age of this peer connection. The opening gather is left alone until ICE_INITIAL_GATHER_MS. */
+  ageMs?: number
 }): 'none' | 'restart' | 'resend' | 'wait' {
   if (input.polite) return 'none'
   const failed = input.connection === 'failed' || input.ice === 'failed'
   const disconnected = input.connection === 'disconnected' || input.ice === 'disconnected'
   if (!failed && !disconnected) return 'none'
+  const opening = !input.established && !input.tcpRelay && input.ageMs != null && input.ageMs < ICE_INITIAL_GATHER_MS
+  if (opening) return 'wait'
   const stalled = failed || (input.disconnectedForMs ?? 0) >= iceDisconnectLimit(Boolean(input.tcpRelay))
   if (!stalled) return 'wait'
   if (input.signaling === 'have-local-offer') return 'resend'

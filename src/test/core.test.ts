@@ -20,7 +20,7 @@ import { rememberDiag, sanitizeDiag } from '../model/diag'
 import { arrangementDigest, assetChunkCount, ASSET_CHUNK_BYTES, catchUpSchedule, guestMayRequest, guestStartPerf, mediaCanCarryAssets, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
 import { cameraAttempts, DEFAULT_VIDEO_BITRATE, legalDirection, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, videoDirection, videoEncodingBudget, videoTargetForBwe } from '../model/codecs'
 import { ensureCellularTurn, filterBrowserTurnUrls, isSilentTake, mediaStatus, nextRelayGather, queueIceCandidate, staticTurnServer, tcpRelayIceServers, udpIceServers } from '../model/media'
-import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_RESTART_VIDEO_HOLD_MS, ICE_TCP_DISCONNECT_RESTART_MS, ICE_UDP_DISCONNECT_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, inviteWins, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen } from '../model/negotiate'
+import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_INITIAL_GATHER_MS, ICE_RESTART_VIDEO_HOLD_MS, ICE_TCP_DISCONNECT_RESTART_MS, ICE_UDP_DISCONNECT_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, inviteWins, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen } from '../model/negotiate'
 import { isQuotaError } from '../storage/idb'
 import { clearIceCache, currentIce } from '../../server/ice.ts'
 import { formatBarsBeats, formatTimecode, samplesToMusical, snapSample } from '../model/time'
@@ -688,6 +688,11 @@ describe('offer and answer', () => {
     expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', disconnectedForMs: 2000 })).toBe('wait')
     expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', disconnectedForMs: 2000, tcpRelay: true })).toBe('restart')
     expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', disconnectedForMs: 8000 })).toBe('restart')
+    expect(ICE_INITIAL_GATHER_MS).toBe(20000)
+    expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'stable', ageMs: 5000 })).toBe('wait')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', disconnectedForMs: 8000, ageMs: 5000 })).toBe('wait')
+    expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'stable', ageMs: 5000, established: true })).toBe('restart')
+    expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'stable', disconnectedForMs: 8000, ageMs: 20000 })).toBe('restart')
     expect(iceRecoveryAction({ polite: false, connection: 'failed', ice: 'failed', signaling: 'have-local-offer' })).toBe('resend')
     expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'have-local-offer', disconnectedForMs: 1000 })).toBe('wait')
     expect(iceRecoveryAction({ polite: false, connection: 'disconnected', ice: 'disconnected', signaling: 'have-local-offer', disconnectedForMs: 2000 })).toBe('wait')
