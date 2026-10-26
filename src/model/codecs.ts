@@ -27,6 +27,38 @@ export function outboundVideoCodecs<T extends NamedCodec>(codecs: T[]): T[] {
   return [...groups['video/h264'], ...groups['video/vp8']]
 }
 
+/**
+ * What the publisher may offer. iPhone Safari paints a black picture for VP8
+ * forwarded by the SFU, so a browser that has H.264 offers only that.
+ * Constrained Baseline (42e0) is the profile iOS actually decodes.
+ * VP8 remains only when the device has no H.264.
+ */
+export function sendVideoCodecs<T extends NamedCodec & { sdpFmtpLine?: string }>(codecs: T[]): T[] {
+  const offered = outboundVideoCodecs(codecs)
+  const groups: T[][] = []
+  for (let index = 0; index < offered.length; index++) {
+    const name = offered[index].mimeType.toLowerCase()
+    if (name !== 'video/h264' && name !== 'video/vp8') continue
+    const group = [offered[index]]
+    const next = offered[index + 1]
+    if (next && next.mimeType.toLowerCase() === 'video/rtx') {
+      group.push(next)
+      index += 1
+    }
+    groups.push(group)
+  }
+  const h264 = groups.filter((group) => group[0].mimeType.toLowerCase() === 'video/h264')
+  const chosen = h264.length ? h264 : groups
+  const rank = (fmtp = '') => {
+    const line = fmtp.toLowerCase()
+    if (line.includes('profile-level-id=42e0')) return 0
+    if (line.includes('profile-level-id=4200')) return 1
+    return 2
+  }
+  chosen.sort((left, right) => rank(left[0].sdpFmtpLine) - rank(right[0].sdpFmtpLine))
+  return chosen.flat()
+}
+
 /** WebKit's setCodecPreferences can drop H.264. Leave Safari on its native order, which leads with H.264. */
 export function shouldSetVideoCodecPreferences(userAgent: string) {
   const ua = userAgent.toLowerCase()
