@@ -58,16 +58,26 @@ export const ICE_RESTART_VIDEO_HOLD_MS = 2000
  * allocate that is about to succeed.
  */
 export const ICE_INITIAL_GATHER_MS = 20000
+/**
+ * ICE stays `new` until a remote candidate is added. Ten seconds after the
+ * remote description with no candidate means the trickle was lost. `checking`
+ * is different: a carrier that swallows TURN UDP for 12s sits here on purpose,
+ * so that wait is the opening gather, not this timer.
+ */
+export const ICE_STUCK_RESTART_MS = 10000
 
 export function iceDisconnectLimit(tcpRelay: boolean) {
   return tcpRelay ? ICE_TCP_DISCONNECT_RESTART_MS : ICE_UDP_DISCONNECT_RESTART_MS
 }
 
 /**
- * The host recovers a failed peer connection, or one that has stayed
- * disconnected. An offer still in flight is sent again. A stable connection
- * restarts ICE. A short disconnect waits. Nothing rolls an offer back, and
- * nothing builds a second peer connection. The guest never does this.
+ * The host recovers a failed peer connection, one that has stayed
+ * disconnected, or one that is still `new` / `checking` long after the remote
+ * description arrived. An offer still in flight is sent again. A stable
+ * connection restarts ICE. A short disconnect waits. Nothing rolls an offer
+ * back, and nothing builds a second peer connection.
+ * The guest never restarts. It asks the host to, once ICE has failed or the
+ * same stuck timer has run out.
  */
 export function iceRecoveryAction(input: {
   polite: boolean
@@ -81,12 +91,32 @@ export function iceRecoveryAction(input: {
   established?: boolean
   /** Age of this peer connection. The opening gather is left alone until ICE_INITIAL_GATHER_MS. */
   ageMs?: number
-}): 'none' | 'restart' | 'resend' | 'wait' {
-  if (input.polite) return 'none'
+  /** How long the remote description has been applied. Unset until then. */
+  remoteForMs?: number
+}): 'none' | 'restart' | 'resend' | 'wait' | 'request' {
   const failed = input.connection === 'failed' || input.ice === 'failed'
   const disconnected = input.connection === 'disconnected' || input.ice === 'disconnected'
-  if (!failed && !disconnected) return 'none'
+  const remoteFor = input.remoteForMs
   const opening = !input.established && !input.tcpRelay && input.ageMs != null && input.ageMs < ICE_INITIAL_GATHER_MS
+  const described = input.signaling === 'stable' && remoteFor != null
+  const stuckNew = Boolean(described && input.ice === 'new' && remoteFor >= ICE_STUCK_RESTART_MS)
+  const stuckChecking = Boolean(described && input.ice === 'checking' && remoteFor >= ICE_STUCK_RESTART_MS && !opening)
+  const pendingStuck = Boolean(described && (
+    (input.ice === 'new' && remoteFor < ICE_STUCK_RESTART_MS)
+    || (input.ice === 'checking' && (opening || remoteFor < ICE_STUCK_RESTART_MS))
+  ))
+  if (input.polite) {
+    if (input.signaling !== 'stable') return 'none'
+    if (failed || stuckNew || stuckChecking) return 'request'
+    if (pendingStuck) return 'wait'
+    return 'none'
+  }
+  if (stuckNew || stuckChecking) {
+    if (input.signaling === 'have-local-offer') return 'resend'
+    if (input.signaling === 'stable') return 'restart'
+    return 'wait'
+  }
+  if (!failed && !disconnected) return pendingStuck ? 'wait' : 'none'
   if (opening) return 'wait'
   const stalled = failed || (input.disconnectedForMs ?? 0) >= iceDisconnectLimit(Boolean(input.tcpRelay))
   if (!stalled) return 'wait'

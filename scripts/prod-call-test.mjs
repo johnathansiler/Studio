@@ -24,6 +24,11 @@
  *      Devtools throttling caps each connection on its own, so it does not
  *      starve video when a WebSocket is busy. The host browser is paced by
  *      scripts/uplink-pace.c instead, one bucket for every socket.
+ *   7. Trickle: the host socket is killed as the guest's answer arrives.
+ *      Candidates are removed from the offer and the answer, and trickle on
+ *      that host socket is dropped, which is the same-machine shape of a
+ *      pair whose answer carried no usable candidates. Both directions of
+ *      video must flow within 15s. Set SCENARIO=trickle to run only that one.
  *
  * The Android tab is hidden and shown. Then its outbound signaling is held
  * for 22s, which is what a frozen main thread looks like to the server.
@@ -67,7 +72,31 @@ const hook = () => {
     mark('open-ctor', { url: String(url) })
     const orig = sock.send.bind(sock)
     sock.send = (data) => {
-      const text = String(data)
+      let outgoing = data
+      let text = String(data)
+      const stripOffer = window.__dropHostCandidates && text.includes('"type":"offer"')
+      const stripAnswer = window.__stripAnswerCandidates && text.includes('"type":"answer"')
+      if (stripOffer || stripAnswer) {
+        try {
+          const msg = JSON.parse(text)
+          const sdp = msg?.data?.description?.sdp
+          if (typeof sdp === 'string') {
+            const lines = sdp.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+              .filter((line) => line && !line.startsWith('a=candidate:') && line !== 'a=end-of-candidates')
+            msg.data.description.sdp = `${lines.join('\r\n')}\r\n`
+            outgoing = JSON.stringify(msg)
+            text = outgoing
+            if (stripAnswer) window.__strippedAnswers = (window.__strippedAnswers || 0) + 1
+            else window.__strippedOffers = (window.__strippedOffers || 0) + 1
+          }
+        } catch {
+          /* keep the original description */
+        }
+      }
+      if (window.__dropHostCandidates && text.includes('"candidate"')) {
+        window.__droppedCandidates = (window.__droppedCandidates || 0) + 1
+        return
+      }
       const sent = window.__sent || (window.__sent = [])
       if (sent.length < 40) sent.push(text.slice(0, 160))
       if (text.length >= 64 * 1024) {
@@ -79,8 +108,33 @@ const hook = () => {
         window.__failOffers = false
         throw new Error('carrier reset')
       }
-      return orig(data)
+      return orig(outgoing)
     }
+    let dropCandidates = false
+    const shouldDrop = (event) => {
+      const text = typeof event.data === 'string' ? event.data : ''
+      if (text.includes('"type":"answer"') && window.__dropHostCandidates) {
+        window.__dropHostCandidates = false
+        dropCandidates = true
+        window.__answerSeen = (window.__answerSeen || 0) + 1
+        setTimeout(() => {
+          try { sock.close() } catch { /* already closing */ }
+        }, 0)
+        return false
+      }
+      return (dropCandidates || window.__dropHostCandidates) && text.includes('"candidate"')
+    }
+    let userOnMessage = null
+    Object.defineProperty(sock, 'onmessage', {
+      configurable: true,
+      enumerable: true,
+      get() { return userOnMessage },
+      set(fn) { userOnMessage = typeof fn === 'function' ? fn : null },
+    })
+    sock.addEventListener('message', (event) => {
+      if (shouldDrop(event)) return
+      if (userOnMessage) userOnMessage.call(sock, event)
+    })
     sock.addEventListener('open', () => mark('open'))
     sock.addEventListener('error', () => mark('error'))
     sock.addEventListener('close', (event) => mark('close', { code: event.code, reason: event.reason, clean: event.wasClean }))
@@ -537,6 +591,74 @@ async function expectMedia(host, guest, before, ms, { allowRebuild }) {
  * and the network drops for 1.5s once. Inbound video has to keep climbing,
  * or be climbing again within 5s of the network returning.
  */
+/**
+ * The host socket dies as the guest answer lands, while candidates are still
+ * trickling. Old builds drop those candidates and never restart ICE `new`.
+ * Video has to flow both ways within 15s of the answer.
+ */
+async function runTrickle(browser) {
+  const label = 'trickle'
+  const suffix = randomBytes(6).toString('hex')
+  const hostId = `00000000-0000-4000-8000-${suffix}`
+  const guestId = `ffffffff-ffff-4fff-8fff-${suffix}`
+  const pair = await bootPair(browser, {
+    hostProfile: galaxy,
+    guestProfile: iphone,
+    hostId,
+    guestId,
+    staleGuest: false,
+  })
+  const fails = []
+  try {
+    await pair.host.addInitScript(() => { window.__dropHostCandidates = true })
+    await pair.guest.addInitScript(() => { window.__stripAnswerCandidates = true })
+    const code = await connectCall(pair.host, pair.guest)
+    const armed = Date.now()
+    let seen = 0
+    while (Date.now() - armed < 20000) {
+      seen = await pair.host.evaluate(() => window.__answerSeen || 0)
+      if (seen) break
+      await pair.host.waitForTimeout(100)
+    }
+    if (!seen) fails.push('guest answer did not arrive')
+    const deadline = Date.now() + 15000
+    let hostVideo = 0
+    let guestVideo = 0
+    let hostIce = 'none'
+    let guestIce = 'none'
+    while (Date.now() < deadline) {
+      const host = await videoBytes(pair.host)
+      const guest = await videoBytes(pair.guest)
+      hostVideo = host.video
+      guestVideo = guest.video
+      hostIce = host.conn
+      guestIce = guest.conn
+      console.log(label, 'video', JSON.stringify({ code, host: host.video, guest: guest.video, hostIce: host.conn, guestIce: guest.conn }))
+      if (host.video > 0 && guest.video > 0) break
+      await pair.host.waitForTimeout(500)
+    }
+    const marks = {
+      stripped: await pair.guest.evaluate(() => window.__strippedAnswers || 0),
+      offers: await pair.host.evaluate(() => window.__strippedOffers || 0),
+      dropped: await pair.host.evaluate(() => window.__droppedCandidates || 0),
+    }
+    console.log(label, 'result', JSON.stringify({ code, seen, ...marks, hostVideo, guestVideo, hostIce, guestIce }))
+    if (seen && (hostVideo <= 0 || guestVideo <= 0)) {
+      fails.push(`media did not flow both ways within 15s host=${hostVideo} guest=${guestVideo} ice=${hostIce}/${guestIce}`)
+    }
+    console.log(label, fails.length ? 'FAIL' : 'PASS')
+    for (const reason of fails) console.log(label, 'reason:', reason)
+  } catch (error) {
+    fails.push(error instanceof Error ? error.message : String(error))
+    console.log(label, 'FAIL')
+    console.log(label, 'reason:', fails[fails.length - 1])
+  } finally {
+    await pair.hostContext.close()
+    await pair.guestContext.close()
+  }
+  return fails
+}
+
 async function runCellular(browser) {
   const label = 'cellular'
   const suffix = randomBytes(6).toString('hex')
@@ -1016,6 +1138,7 @@ try {
     ['cellular', () => runCellular(browser)],
     ['uplink', () => runUplink(browser)],
     ['carrier', () => runCarrier(browser)],
+    ['trickle', () => runTrickle(browser)],
   ]
   const only = process.env.SCENARIO || ''
   const selected = only ? scenarios.filter(([name]) => name === only) : scenarios

@@ -14,7 +14,7 @@ import {
 import { DEFAULT_OPUS, mungeOpusSdp, type OpusOptions } from '../model/sdp'
 import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, VIDEO_START_BITRATE, videoEncodingBudget, videoTargetForBwe } from '../model/codecs'
 import { isSilentTake, nextRelayGather, tcpRelayIceServers, udpIceServers, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
-import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_INITIAL_GATHER_MS, ICE_RESTART_VIDEO_HOLD_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
+import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_INITIAL_GATHER_MS, ICE_RESTART_VIDEO_HOLD_MS, ICE_STUCK_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
 import { sanitizeDiag, type DiagDirection } from '../model/diag'
 import { arrangementDigest, ASSET_CHUNK_BYTES, ASSET_CHUNK_GAP_MS, assetChunkCount, guestMayRequest, mediaCanCarryAssets, referencedBufferIds } from '../model/sessionSync'
 import { decodeWavPCM, encodeWav } from '../model/wav'
@@ -140,6 +140,18 @@ interface PeerLink {
   pcmNet: number[]
   pcmTarget: number
   pendingIce: RTCIceCandidateInit[]
+  /** Local candidates for the current negotiation, resent when a socket is replaced. */
+  localCandidates: RTCIceCandidateInit[]
+  /** Trickle finished for localCandidates. The null candidate is resent with them. */
+  gatheringDone: boolean
+  /** Negotiation id stamped on localCandidates. */
+  candidateNegotiationId: number
+  /** Remote candidate lines already handed to this peer connection. */
+  appliedRemote: Set<string>
+  /** When the current remote description was applied. 0 until then. */
+  remoteDescriptionAt: number
+  /** Last time the guest asked the host to restart ICE. */
+  restartAskedAt: number
   openedAt: number
   gathered: { host: number; srflx: number; relay: number; prflx: number }
   errors: string[]
@@ -546,12 +558,27 @@ export class SessionClient {
     for (const [id, link] of this.peers) {
       if (link.pc.connectionState === 'closed') continue
       // The path and the socket died together. If the path is still down, the restart timer runs now that signaling can carry the offer.
-      if (!this.isPolite()) this.scheduleRecovery(id, link)
+      this.scheduleRecovery(id, link)
       if (!this.isPolite() && link.pc.signalingState === 'have-local-offer') this.sendOffer(id, link)
       else if (this.isPolite() && link.answerDescription && link.answeredNegotiationId != null) {
         this.send({ t: 'signal', to: id, data: { description: link.answerDescription, negotiationId: link.answeredNegotiationId } })
       }
+      this.resendCandidates(id, link)
     }
+  }
+
+  /**
+   * Trickled candidates are not part of the answer SDP. A socket that died
+   * while they were in flight never applies them, and ICE stays `new`.
+   * Send the gathered set again. addIceCandidate ignores a line it already has.
+   */
+  private resendCandidates(id: string, link: PeerLink) {
+    const negotiationId = link.candidateNegotiationId
+    if (!negotiationId || link.pc.connectionState === 'closed') return
+    for (const candidate of link.localCandidates) {
+      this.send({ t: 'signal', to: id, data: { candidate, negotiationId } })
+    }
+    if (link.gatheringDone) this.send({ t: 'signal', to: id, data: { candidate: null, negotiationId } })
   }
 
   private sendOffer(id: string, link: PeerLink) {
@@ -579,6 +606,12 @@ export class SessionClient {
     if (msg.t === 'peer-left') {
       this.closePeer(String(msg.id || ''))
       this.emit()
+      return
+    }
+    if (msg.t === 'peer-resumed') {
+      const id = String(msg.id || '')
+      const link = this.peers.get(id)
+      if (link) this.resendCandidates(id, link)
       return
     }
     if (msg.t === 'welcome') {
@@ -1296,6 +1329,12 @@ export class SessionClient {
       pcmNet: [],
       pcmTarget: PCM_MIN_TARGET,
       pendingIce: [],
+      localCandidates: [],
+      gatheringDone: false,
+      candidateNegotiationId: 0,
+      appliedRemote: new Set(),
+      remoteDescriptionAt: 0,
+      restartAskedAt: 0,
       openedAt: Date.now(),
       gathered: { host: 0, srflx: 0, relay: 0, prflx: 0 },
       errors: [],
@@ -1337,18 +1376,22 @@ export class SessionClient {
     }
     this.peers.set(id, link)
     pc.onicecandidate = (event) => {
+      const negotiationId = link.candidateNegotiationId
       if (!event.candidate) {
         // Trickle end. Without this, a peer that waits for gathering complete sits through every TCP TURN timeout.
-        this.send({ t: 'signal', to: id, data: { candidate: null, negotiationId: link.negotiationId } })
+        link.gatheringDone = true
+        this.send({ t: 'signal', to: id, data: { candidate: null, negotiationId } })
         return
       }
+      const init = event.candidate.toJSON()
+      if (link.localCandidates.length < 64) link.localCandidates.push(init)
       const line = event.candidate.candidate
       if (!link.seenCandidates.has(line)) {
         link.seenCandidates.add(line)
         const kind = line.match(/typ (host|srflx|relay|prflx)/)?.[1] as 'host' | 'srflx' | 'relay' | 'prflx' | undefined
         if (kind) link.gathered[kind] += 1
       }
-      this.send({ t: 'signal', to: id, data: { candidate: event.candidate.toJSON(), negotiationId: link.negotiationId } })
+      this.send({ t: 'signal', to: id, data: { candidate: init, negotiationId } })
     }
     pc.onnegotiationneeded = () => {
       void this.enqueueSignal(id, () => this.onNegotiationNeeded(id, link))
@@ -1489,6 +1532,9 @@ export class SessionClient {
       link.wantsRestart = false
       link.negotiationId += 1
       link.resentNegotiationId = undefined
+      link.candidateNegotiationId = link.negotiationId
+      link.localCandidates = []
+      link.gatheringDone = false
       await this.commitLocal(link, await link.pc.createOffer(restart ? { iceRestart: true } : undefined))
       link.offers += 1
       this.sendOffer(id, link)
@@ -1521,6 +1567,7 @@ export class SessionClient {
       tcpRelay: link.onTcpRelay,
       established: link.everConnected || link.sawUdpPair,
       ageMs: Date.now() - link.openedAt,
+      remoteForMs: link.remoteDescriptionAt ? Date.now() - link.remoteDescriptionAt : undefined,
     })
   }
 
@@ -1560,11 +1607,13 @@ export class SessionClient {
   }
 
   /**
-   * Host only. A socket drop does not come through here and does not rebuild the peer connection.
-   * An outstanding offer is resent once the path has actually failed.
-   * A short disconnect does not restart ICE. Failed restarts it. A UDP
-   * disconnect waits longer than a TCP relay, which the carrier has already
-   * reset. The offer is never rolled back.
+   * A socket drop does not come through here and does not rebuild the peer connection.
+   * The host restarts ICE once the path has actually failed, or once ICE has
+   * sat in `new` with no remote candidate. `checking` during the first gather
+   * is a TURN allocate still in flight and is left alone.
+   * The guest does not restart. It asks the host to.
+   * An outstanding offer is resent. A short disconnect does not restart ICE.
+   * A UDP disconnect waits longer than a TCP relay. The offer is never rolled back.
    */
   private scheduleRecovery(id: string, link: PeerLink) {
     if (this.left || this.peers.get(id) !== link) return
@@ -1583,13 +1632,28 @@ export class SessionClient {
     const openingLeft = !link.everConnected && !link.sawUdpPair && !link.onTcpRelay
       ? Math.max(0, ICE_INITIAL_GATHER_MS - (Date.now() - link.openedAt))
       : 0
-    const delay = action === 'wait' ? Math.max(250, iceDisconnectLimit(link.onTcpRelay) - elapsed, openingLeft) : 0
+    const ice = link.pc.iceConnectionState
+    const stuck = !elapsed && link.remoteDescriptionAt > 0 && (ice === 'new' || ice === 'checking')
+    const delay = action === 'wait'
+      ? (stuck
+        ? Math.max(250, ICE_STUCK_RESTART_MS - (Date.now() - link.remoteDescriptionAt), ice === 'checking' ? openingLeft : 0)
+        : Math.max(250, iceDisconnectLimit(link.onTcpRelay) - elapsed, openingLeft))
+      : 0
     link.recoveryTimer = window.setTimeout(() => {
       link.recoveryTimer = 0
       if (this.left || this.peers.get(id) !== link) return
       const next = this.recoveryAction(link)
+      if (next === 'none') return
       if (next === 'wait') {
         this.scheduleRecovery(id, link)
+        return
+      }
+      if (next === 'request') {
+        this.requestRestart(id, link)
+        link.recoveryTimer = window.setTimeout(() => {
+          link.recoveryTimer = 0
+          this.scheduleRecovery(id, link)
+        }, ICE_STUCK_RESTART_MS)
         return
       }
       const failed = link.pc.connectionState === 'failed' || link.pc.iceConnectionState === 'failed'
@@ -1600,18 +1664,44 @@ export class SessionClient {
         this.sendOffer(id, link)
         return
       }
-      if (next === 'restart' || changed) {
-        link.videoHoldUntil = Date.now() + ICE_RESTART_VIDEO_HOLD_MS
-        link.appliedVideoBitrate = 0
-        link.wantsRestart = true
-        try {
-          link.pc.restartIce()
-        } catch {
-          /* negotiationneeded sends the offer */
-        }
-        void this.tuneSenders(link)
-      }
+      if (next === 'restart' || changed) this.restartIce(link)
     }, delay)
+  }
+
+  /** The guest asks once. The host is the only side that restarts ICE. */
+  private requestRestart(id: string, link: PeerLink) {
+    if (!this.isPolite()) return
+    if (link.restartAskedAt && Date.now() - link.restartAskedAt < ICE_STUCK_RESTART_MS) return
+    link.restartAskedAt = Date.now()
+    this.send({ t: 'signal', to: id, data: { restart: true } })
+  }
+
+  /**
+   * A guest whose ICE failed, or whose trickle never arrived, asks for this.
+   * Ignore it when media is up, or while the first gather is still checking
+   * through a TURN-UDP hold. `new` means no remote candidate landed, so it restarts.
+   */
+  private acceptRestartRequest(id: string, link: PeerLink) {
+    if (this.isPolite() || this.peers.get(id) !== link) return
+    const ice = link.pc.iceConnectionState
+    const conn = link.pc.connectionState
+    if (conn === 'connected' || conn === 'closed' || ice === 'connected' || ice === 'completed') return
+    const opening = !link.everConnected && !link.sawUdpPair && !link.onTcpRelay && Date.now() - link.openedAt < ICE_INITIAL_GATHER_MS
+    if (opening && ice === 'checking') return
+    if (link.wantsRestart || link.makingOffer || link.pc.signalingState !== 'stable') return
+    this.restartIce(link)
+  }
+
+  private restartIce(link: PeerLink) {
+    link.videoHoldUntil = Date.now() + ICE_RESTART_VIDEO_HOLD_MS
+    link.appliedVideoBitrate = 0
+    link.wantsRestart = true
+    try {
+      link.pc.restartIce()
+    } catch {
+      /* negotiationneeded sends the offer */
+    }
+    void this.tuneSenders(link)
   }
 
   /** Opus fmtp only. A rejected edit keeps the browser description. */
@@ -1638,14 +1728,20 @@ export class SessionClient {
     if (description?.type === 'offer' && this.deviceJob) await this.deviceJob
     let link = this.peers.get(from)
     if (!link || link.pc.connectionState === 'closed') {
+      if (data.restart) return
       if (link) this.closePeer(from)
       link = await this.createPeer(from)
     }
     try {
+      if (data.restart) {
+        this.acceptRestartRequest(from, link)
+        return
+      }
       if (description?.type) {
         if (description.type === 'offer') {
           if (repeatedOffer(link.answeredNegotiationId, negotiationId) && link.answerDescription) {
             this.send({ t: 'signal', to: from, data: { description: link.answerDescription, negotiationId } })
+            this.resendCandidates(from, link)
             return
           }
           link.ignoreOffer = ignoreIncomingOffer({
@@ -1656,12 +1752,18 @@ export class SessionClient {
           })
           if (link.ignoreOffer) return
           link.remoteNegotiationId = negotiationId
+          link.candidateNegotiationId = negotiationId ?? link.candidateNegotiationId
+          link.localCandidates = []
+          link.gatheringDone = false
         }
         if (description.type === 'answer' && (!answerMatches(link.negotiationId, negotiationId) || link.pc.signalingState !== 'have-local-offer')) return
         link.settingRemoteAnswer = description.type === 'answer'
+        link.appliedRemote.clear()
         await link.pc.setRemoteDescription(description)
         link.settingRemoteAnswer = false
+        link.remoteDescriptionAt = Date.now()
         await this.flushIce(link)
+        this.scheduleRecovery(from, link)
         if (description.type === 'offer') {
           this.adoptTransceivers(link)
           this.preferOpus(link.musicSender)
@@ -1678,8 +1780,10 @@ export class SessionClient {
       } else if (Object.prototype.hasOwnProperty.call(data, 'candidate')) {
         const end = !candidate || !candidate.candidate
         if (!end && negotiationId != null && link.remoteNegotiationId != null && negotiationId !== link.remoteNegotiationId) return
+        if (!end && candidate.candidate && link.appliedRemote.has(candidate.candidate)) return
         try {
           await link.pc.addIceCandidate(end ? null : candidate)
+          if (!end && candidate.candidate) link.appliedRemote.add(candidate.candidate)
         } catch (error) {
           if (end || link.ignoreOffer) return
           if (!link.pc.remoteDescription) {
@@ -1699,8 +1803,10 @@ export class SessionClient {
   private async flushIce(link: PeerLink) {
     const queued = link.pendingIce.splice(0)
     for (const candidate of queued) {
+      if (candidate.candidate && link.appliedRemote.has(candidate.candidate)) continue
       try {
         await link.pc.addIceCandidate(candidate)
+        if (candidate.candidate) link.appliedRemote.add(candidate.candidate)
       } catch (error) {
         if (!link.ignoreOffer) this.notePeerError(link, error)
       }
