@@ -3,7 +3,6 @@ import { createRoot, type Root } from 'react-dom/client'
 import type { AudioEngine } from '../audio/engine'
 import type { Participant, SessionClient } from '../remote/session'
 import { mediaStatus } from '../model/media'
-import { VIDEO_BITRATES } from '../model/codecs'
 import { ms } from './format'
 
 export function VideoDock({
@@ -22,7 +21,8 @@ export function VideoDock({
   onNewSession: () => void
 }) {
   const state = session.state
-  const [tab, setTab] = useState<'people' | 'chat' | 'signal'>('signal')
+  const [tab, setTab] = useState<'people' | 'chat'>('people')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const [copied, setCopied] = useState(false)
   const [levels, setLevels] = useState({ input: 0, talk: 0 })
@@ -257,96 +257,64 @@ export function VideoDock({
         <button className={`t-btn ${state.talkOn ? 'on' : ''}`} onClick={() => void session.setTalk(!state.talkOn)} title="Talkback" aria-label={state.talkOn ? 'Mic' : 'Mic off'}>
           Mic
         </button>
-        <button className={`t-btn ${state.musicOn ? 'on' : ''}`} onClick={() => void session.setMusic(!state.musicOn)} title="Performance or cue send">
-          {state.role === 'host' ? 'Cue' : 'Perf'}
-        </button>
         <button className={`t-btn ${state.camOn ? 'on' : ''}`} onClick={() => void session.setCam(!state.camOn)}>
           Cam
         </button>
         <button className={`t-btn ${state.screenOn ? 'on' : ''}`} onClick={() => void session.setScreen(!state.screenOn)}>
           Share
         </button>
-        <button className={`t-btn ${state.hand ? 'on' : ''}`} onClick={() => session.setHand(!state.hand)}>
-          Hand
+        <button
+          type="button"
+          className={`t-btn ${settingsOpen ? 'on' : ''}`}
+          aria-label="Settings"
+          aria-expanded={settingsOpen}
+          onClick={() => setSettingsOpen((open) => !open)}
+        >
+          <GearIcon />
         </button>
-        {['👍', '🎧', '🔥'].map((emoji) => (
-          <button key={emoji} className="t-btn" onClick={() => session.react(emoji)}>
-            {emoji}
-          </button>
-        ))}
-        {state.code && (
-          <button className="text-btn warn" onClick={() => session.leave()}>
-            Leave
-          </button>
-        )}
       </div>
+      {settingsOpen && (
+        <div className="settings-sheet">
+          <div className="settings-stats" title={one?.source || 'not measured'}>
+            Mon {one ? ms(one.ms, 0) : '—'} · Out {plainMs(engine.outputLatencyMs)} · In {plainMs(engine.inputLatencyMs)} · Loop {plainMs(state.loopbackMs)} · Ping {plainMs(state.audioPingMs)}
+          </div>
+          <div className="settings-actions">
+            <button className={`text-btn ${state.musicOn ? 'primary' : ''}`} onClick={() => void session.setMusic(!state.musicOn)} aria-label="Performance or cue send">
+              {state.role === 'host' ? 'Cue' : 'Perf'}
+            </button>
+            <button className="text-btn" aria-label="Calibrate I/O" onClick={() => void session.calibrate()}>
+              Calibrate
+            </button>
+            <button className="text-btn" aria-label="Ping cue path" onClick={() => void session.measureOpusPath()}>
+              Ping
+            </button>
+            <button className={`text-btn ${state.jamEnabled ? 'primary' : ''}`} aria-label="Jam mode" onClick={() => session.setJam(!state.jamEnabled)}>
+              Jam
+            </button>
+            {state.code && (
+              <button className="text-btn warn" onClick={() => session.leave()}>
+                Leave
+              </button>
+            )}
+          </div>
+          {state.jamEnabled && (
+            <label className="settings-delay">
+              Delay
+              <input type="number" value={state.jamDelayMs} onChange={(event) => session.setJam(true, Number(event.target.value))} />
+            </label>
+          )}
+          <DevicePick session={session} />
+          {state.takeProgress != null && <div>Take {Math.round(state.takeProgress * 100)}%</div>}
+        </div>
+      )}
       <div>
         <div className="side-tabs">
-          {(['signal', 'people', 'chat'] as const).map((item) => (
+          {(['people', 'chat'] as const).map((item) => (
             <button key={item} className={`text-btn ${tab === item ? 'active' : ''}`} onClick={() => setTab(item)}>
               {item}
             </button>
           ))}
         </div>
-        {tab === 'signal' && (
-          <div className="panel stats">
-            <div title={one?.source || 'not measured'}>
-              Monitor <b>{one ? ms(one.ms) : '—'}</b> ± {one ? ms(one.uncertaintyMs) : '—'}
-            </div>
-            <div>
-              Out <b>{ms(engine.outputLatencyMs, 1)}</b> · In <b>{ms(engine.inputLatencyMs, 1)}</b>
-            </div>
-            <div>
-              Loop <b>{ms(state.loopbackMs, 1)}</b> · Ping <b>{ms(state.audioPingMs, 1)}</b>
-            </div>
-            {!simple && (
-              <div className="meter" style={{ height: 8, width: '100%', margin: '6px 0' }}>
-                <b style={{ width: `${Math.min(100, levels.input * 320)}%`, height: '100%' }} />
-              </div>
-            )}
-            <label className="field" style={{ marginTop: 8 }}>
-              Video
-              <select value={state.videoBitrate} onChange={(event) => session.setVideoBitrate(Number(event.target.value))}>
-                {VIDEO_BITRATES.map((bitrate) => (
-                  <option key={bitrate} value={bitrate}>
-                    {bitrate / 1000} kbps
-                  </option>
-                ))}
-              </select>
-            </label>
-            {Object.entries(state.latency).map(([id, latency]) => (
-              <div key={id}>
-                {state.participants.find((person) => person.id === id)?.name}: RTT {ms(latency.rttMs)} · jitter {ms(latency.jitterMs, 1)} · loss{' '}
-                {latency.packetLossPct == null ? '—' : `${latency.packetLossPct.toFixed(1)}%`} · buffer {ms(latency.jitterBufferMs, 1)} · clock{' '}
-                {ms(latency.clockRttMs, 1)}
-              </div>
-            ))}
-            <div className="row" style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-              <button className="text-btn" aria-label="Calibrate I/O" onClick={() => void session.calibrate()}>
-                Calibrate
-              </button>
-              <button className="text-btn" aria-label="Ping cue path" onClick={() => void session.measureOpusPath()}>
-                Ping
-              </button>
-              <button className={`text-btn ${state.jamEnabled ? 'primary' : ''}`} aria-label="Jam mode" onClick={() => session.setJam(!state.jamEnabled)}>
-                Jam
-              </button>
-            </div>
-            {state.jamEnabled && (
-              <label className="field" style={{ marginTop: 8 }}>
-                Delay
-                <input type="number" value={state.jamDelayMs} onChange={(event) => session.setJam(true, Number(event.target.value))} />
-              </label>
-            )}
-            <DevicePick session={session} />
-            {state.takeProgress != null && <div>Take {Math.round(state.takeProgress * 100)}%</div>}
-            {state.log.slice(-3).map((line, index) => (
-              <div key={index} className="hint">
-                {line}
-              </div>
-            ))}
-          </div>
-        )}
         {tab === 'people' && (
           <div className="panel">
             {waiting.length > 0 && (
@@ -542,6 +510,22 @@ function PersonRow({ person, session }: { person: Participant; session: SessionC
         </span>
       )}
     </div>
+  )
+}
+
+function plainMs(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) return '—'
+  return String(Math.round(value))
+}
+
+function GearIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M19.4 13.5a7.6 7.6 0 0 0 .1-1.5 7.6 7.6 0 0 0-.1-1.5l2-1.6-2-3.4-2.5 1a7.4 7.4 0 0 0-2.6-1.5l-.4-2.6h-4l-.4 2.6a7.4 7.4 0 0 0-2.6 1.5l-2.5-1-2 3.4 2 1.6a7.6 7.6 0 0 0-.1 1.5 7.6 7.6 0 0 0 .1 1.5l-2 1.6 2 3.4 2.5-1a7.4 7.4 0 0 0 2.6 1.5l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 2.6-1.5l2.5 1 2-3.4-2-1.6zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"
+      />
+    </svg>
   )
 }
 
