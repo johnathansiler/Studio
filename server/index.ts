@@ -320,7 +320,12 @@ async function openSfuSession(req: IncomingMessage, res: ServerResponse) {
   const result = await sfuCall(process.env, '/sessions/new', 'POST', null)
   const opened = result.body as { sessionId?: string; error?: string; code?: string }
   if (!result.ok || !opened?.sessionId) return json(res, opened || { error: 'The media server did not open a session.', code: 'sfu' }, result.status || 502)
+  const previous = session.sfuSessions.get(peerId)
   session.sfuSessions.set(peerId, opened.sessionId)
+  if (previous && previous !== opened.sessionId) {
+    await usage.closeSession(previous)
+    void sfuCall(process.env, `/sessions/${encodeURIComponent(previous)}/tracks/close`, 'PUT', { tracks: [], force: true }).catch(() => undefined)
+  }
   await usage.openSession(opened.sessionId, 1, admittedOthers(session, peerId))
   return json(res, { sessionId: opened.sessionId })
 }
@@ -331,7 +336,8 @@ async function proxySfu(req: IncomingMessage, res: ServerResponse, op: 'tracks' 
   const code = String(body.code || '').toUpperCase()
   const peerId = String(body.peerId || '')
   const sessionId = String(body.sessionId || '')
-  if (!liveMember(code, peerId)) return json(res, { error: 'Join the session before opening media.', code: 'forbidden' }, 403)
+  const session = liveMember(code, peerId)
+  if (!session) return json(res, { error: 'Join the session before opening media.', code: 'forbidden' }, 403)
   if (!sfuConfigured(process.env)) return json(res, { error: 'Cloudflare Realtime is not configured.', code: 'disabled' }, 403)
   if (op !== 'close' && await usage.blocked()) return json(res, { error: CAP_NOTICE, code: 'cap' }, 403)
   if (!sessionId || sessionId.length > 80) return json(res, { error: 'The media session id was missing.', code: 'bad-request' }, 400)
@@ -346,6 +352,11 @@ async function proxySfu(req: IncomingMessage, res: ServerResponse, op: 'tracks' 
           tracks: body.tracks,
         }
   const result = await sfuCall(process.env, path, method, forwarded)
+  if (op === 'close') {
+    await usage.closeSession(sessionId)
+    if (session.sfuSessions.get(peerId) === sessionId) session.sfuSessions.delete(peerId)
+    if (session.pubs.get(peerId)?.sessionId === sessionId) session.pubs.delete(peerId)
+  }
   return json(res, result.body, result.ok ? 200 : result.status || 502)
 }
 

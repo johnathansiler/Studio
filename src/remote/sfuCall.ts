@@ -48,6 +48,8 @@ interface SfuBody {
 export class SfuCall {
   pc: RTCPeerConnection | null = null
   sessionId = ''
+  /** True only after local tracks exist on this session. Announcements wait for this. */
+  published = false
   connection = 'new'
   ice = 'new'
   signaling = 'stable'
@@ -70,6 +72,10 @@ export class SfuCall {
 
   pull(publication: SfuPublication) {
     if (!publication.sessionId || publication.peerId === this.host.peerId) return Promise.resolve()
+    const previous = this.pending.find((item) => item.peerId === publication.peerId)
+    if (!previous || previous.sessionId !== publication.sessionId) {
+      for (const track of publication.tracks) this.pulled.delete(track.trackName)
+    }
     this.pending = this.pending.filter((item) => item.peerId !== publication.peerId).concat(publication)
     return this.enqueue(async () => {
       if (!this.sessionId || !this.pc) return
@@ -107,16 +113,21 @@ export class SfuCall {
 
   close() {
     this.closed = true
+    const sessionId = this.sessionId
     this.pc?.close()
     this.pc = null
-    if (this.sessionId) {
-      const sessionId = this.sessionId
-      void fetch('/api/sfu/close', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ code: this.host.code, peerId: this.host.peerId, sessionId, force: true }),
-      }).catch(() => undefined)
-    }
+    this.sessionId = ''
+    this.published = false
+    this.abandon(sessionId)
+  }
+
+  private abandon(sessionId: string) {
+    if (!sessionId) return
+    void fetch('/api/sfu/close', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: this.host.code, peerId: this.host.peerId, sessionId, force: true }),
+    }).catch(() => undefined)
   }
 
   private enqueue(job: () => Promise<void>) {
@@ -146,12 +157,15 @@ export class SfuCall {
   }
 
   private reset() {
+    const abandoned = this.sessionId
     this.pc?.close()
     this.pc = null
     this.sessionId = ''
+    this.published = false
     this.pulled.clear()
     this.midOf.clear()
     this.senders.clear()
+    this.abandon(abandoned)
   }
 
   private async publish() {
@@ -191,10 +205,13 @@ export class SfuCall {
       sessionDescription: { type: local.type, sdp: local.sdp },
       tracks,
     })
+    const refused = (answer.tracks || []).find((track) => track.errorCode)
+    if (refused) throw new Error(refused.errorDescription || 'A media track was refused.')
     if (!answer.sessionDescription?.sdp) throw new Error(answer.error || 'The media server did not answer the publish.')
     if (answer.sessionDescription.type === 'offer' || answer.requiresImmediateRenegotiation) await this.answerOffer(pc, answer.sessionDescription)
     else await pc.setRemoteDescription(answer.sessionDescription)
     await this.tune()
+    this.published = true
     this.host.sendPub({
       peerId: this.host.peerId,
       sessionId,
@@ -220,13 +237,17 @@ export class SfuCall {
       tracks: tracks.map((track) => ({ location: 'remote', sessionId: track.sessionId, trackName: track.trackName })),
     })
     const remote = response.tracks || []
+    let accepted = 0
     remote.forEach((row, index) => {
       const asked = tracks.find((item) => item.trackName === row.trackName) || tracks[index]
-      if (!asked || !row.mid) return
+      if (!asked || row.errorCode || !row.mid) return
       this.midOf.set(row.mid, { peerId: asked.peerId, kind: asked.kind })
       this.pulled.add(asked.trackName)
+      accepted += 1
     })
-    if (!response.sessionDescription?.sdp) throw new Error(response.error || 'The media server did not offer the remote tracks.')
+    // A publication that is still being created is not a failed connection.
+    // The next announcement tries those track names again.
+    if (!accepted || !response.sessionDescription?.sdp || !this.pc) return
     await this.answerOffer(this.pc, response.sessionDescription)
     this.emitState()
   }
@@ -351,8 +372,6 @@ export class SfuCall {
       error.code = parsed.code || parsed.errorCode
       throw error
     }
-    const failed = (parsed.tracks || []).find((track) => track.errorCode)
-    if (failed) throw new Error(failed.errorDescription || 'A media track was refused.')
     return parsed
   }
 }

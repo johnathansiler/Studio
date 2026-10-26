@@ -1410,8 +1410,8 @@ export class SessionClient {
       } catch {
         bytes = 0
       }
-      if (this.sfuCall.sessionId) {
-        key = this.sfuCall.sessionId
+      if (this.sfuCall.sessionId) key = this.sfuCall.sessionId
+      if (this.sfuCall.published && this.sfuCall.sessionId) {
         const kinds: SfuKind[] = ['music', 'talk', 'camera', 'screen']
         this.send({
           t: 'sfu-pub',
