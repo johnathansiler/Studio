@@ -209,7 +209,7 @@ export class SfuCall {
     } catch {
       await pc.setLocalDescription(offer)
     }
-    await waitGather(pc, 8000)
+    await waitGather(pc, 12000)
     const local = pc.localDescription
     if (!local?.sdp) throw new Error('The media offer was empty.')
     const tracks = kinds.map((kind) => {
@@ -291,7 +291,7 @@ export class SfuCall {
     } catch {
       await pc.setLocalDescription(answer)
     }
-    await waitGather(pc, 8000)
+    await waitGather(pc, 2000)
     const local = pc.localDescription
     if (!local?.sdp) throw new Error('The media answer was empty.')
     const accepted = await this.post('/api/sfu/renegotiate', {
@@ -410,20 +410,38 @@ export function trackName(peerId: string, kind: SfuKind) {
   return `${peerId}:${kind}`
 }
 
+function hasUdpRelay(sdp: string) {
+  return sdp.split('\n').some((line) => line.startsWith('a=candidate:') && line.includes(' udp ') && line.includes(' typ relay'))
+}
+
 function waitGather(pc: RTCPeerConnection, ms: number) {
   if (pc.iceGatheringState === 'complete') return Promise.resolve()
+  if (hasUdpRelay(pc.localDescription?.sdp || '')) return Promise.resolve()
   return new Promise<void>((resolve) => {
-    const timer = window.setTimeout(() => {
-      pc.removeEventListener('icegatheringstatechange', done)
-      resolve()
-    }, ms)
-    const done = () => {
-      if (pc.iceGatheringState !== 'complete') return
-      window.clearTimeout(timer)
-      pc.removeEventListener('icegatheringstatechange', done)
+    let finished = false
+    let quiet = 0
+    const finish = () => {
+      if (finished) return
+      finished = true
+      window.clearTimeout(cap)
+      window.clearTimeout(quiet)
+      pc.removeEventListener('icegatheringstatechange', onState)
+      pc.removeEventListener('icecandidate', onCandidate)
       resolve()
     }
-    pc.addEventListener('icegatheringstatechange', done)
+    const cap = window.setTimeout(finish, ms)
+    const onState = () => {
+      if (pc.iceGatheringState === 'complete') finish()
+    }
+    const onCandidate = (event: RTCPeerConnectionIceEvent) => {
+      if (!event.candidate) return finish()
+      const text = event.candidate.candidate || ''
+      if (!/ typ relay /.test(text) || !/ udp /.test(text)) return
+      window.clearTimeout(quiet)
+      quiet = window.setTimeout(finish, 400)
+    }
+    pc.addEventListener('icegatheringstatechange', onState)
+    pc.addEventListener('icecandidate', onCandidate)
   })
 }
 

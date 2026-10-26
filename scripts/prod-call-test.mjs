@@ -414,11 +414,12 @@ function judgeCall(held, events, invite) {
 /** Host play must move the guest playhead to the same musical position, within 100 ms. */
 async function assertPlaySync(host, guest) {
   const fails = []
-  const play = host.getByRole('button', { name: 'Play' })
+  const play = host.locator('button.t-btn.play')
   if (!(await play.isVisible().catch(() => false))) {
     fails.push('host play button was not visible')
     return fails
   }
+  await play.scrollIntoViewIfNeeded()
   await play.click()
   await host.waitForTimeout(1200)
   const hostRow = await videoBytes(host)
