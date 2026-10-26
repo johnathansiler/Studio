@@ -14,6 +14,25 @@ export function guestStartPerf(hostPerfAtSample: number, clockOffsetMs: number):
   return hostPerfAtSample - clockOffsetMs
 }
 
+/**
+ * Where the guest playhead should start.
+ * A measured clock offset maps the host's named instant. Without one, start
+ * about one scheduling lead after the host pressed play, minus the one-way
+ * delay already spent getting the message here.
+ */
+export function guestFollowStart(args: {
+  hostPerfAtSample: number
+  clockOffsetMs: number | null
+  oneWayMs: number
+  nowPerf: number
+}): number {
+  if (args.clockOffsetMs == null || !Number.isFinite(args.clockOffsetMs)) {
+    const oneWay = Number.isFinite(args.oneWayMs) ? Math.max(0, args.oneWayMs) : 40
+    return args.nowPerf + Math.max(0, scheduleLeadMs(oneWay) - oneWay)
+  }
+  return guestStartPerf(args.hostPerfAtSample, args.clockOffsetMs)
+}
+
 /** If the start message arrives late, move the playhead forward so both sides meet. */
 export function catchUpSchedule(args: {
   targetPerf: number

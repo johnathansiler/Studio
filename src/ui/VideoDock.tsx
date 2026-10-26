@@ -159,6 +159,7 @@ export function VideoDock({
         </button>
       </div>
       <div className="dock-body">
+      {state.usageNotice && <div className="media-banner bad">{state.usageNotice}</div>}
       {state.hostLeft && <div className="media-banner bad">The host left this session.</div>}
       {!state.hostLeft && link && <div className={`media-banner ${link.tone}`}>{link.text}</div>}
       {(state.status === 'live' || state.status === 'waiting' || state.status === 'reconnecting') && (

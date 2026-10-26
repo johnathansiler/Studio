@@ -17,6 +17,8 @@ import { isSilentTake, nextRelayGather, tcpRelayIceServers, udpIceServers, withT
 import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_INITIAL_GATHER_MS, ICE_RESTART_VIDEO_HOLD_MS, ICE_STUCK_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
 import { sanitizeDiag, type DiagDirection } from '../model/diag'
 import { arrangementDigest, ASSET_CHUNK_BYTES, ASSET_CHUNK_GAP_MS, assetChunkCount, guestMayRequest, mediaCanCarryAssets, referencedBufferIds } from '../model/sessionSync'
+import { CAP_NOTICE } from '../model/usage'
+import { SfuCall, type SfuKind, type SfuPublication } from './sfuCall'
 import { decodeWavPCM, encodeWav } from '../model/wav'
 import { base64ToBytes, bytesToBase64 } from '../storage/idb'
 import { clearActiveSession, deviceParticipantId, readIdentity } from '../storage/identity'
@@ -102,6 +104,10 @@ export interface SessionState {
   audioLocked: boolean
   /** The host left this room. The project stays; the call does not. */
   hostLeft?: boolean
+  /** Set when the monthly Cloudflare cap is already spent. */
+  usageNotice: string
+  /** Remote media goes through the Cloudflare SFU instead of the peer mesh. */
+  sfu: boolean
 }
 
 export interface IncomingTake {
@@ -211,6 +217,11 @@ export class SessionClient {
   /** One id per page load. A reload mints another so the other side can renegotiate. */
   private instanceId = crypto.randomUUID()
   private peers = new Map<string, PeerLink>()
+  private sfuCall: SfuCall | null = null
+  private pendingPubs = new Map<string, SfuPublication>()
+  private remoteStreams = new Map<string, Record<SfuKind, MediaStream>>()
+  private clockOffset = new Map<string, { samples: Array<{ offset: number; rtt: number }>; remoteMinusLocal: number | null }>()
+  private usageTimer = 0
   private ice: IceServer[] = []
   private listeners = new Set<() => void>()
   private musicStream: MediaStream | null = null
@@ -302,6 +313,8 @@ export class SessionClient {
       mediaTick: 0,
       localSend: 'Camera has not joined the peer connection yet.',
       audioLocked: false,
+      usageNotice: '',
+      sfu: false,
     }
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', () => this.onPageVisibility())
@@ -465,6 +478,10 @@ export class SessionClient {
     window.clearTimeout(this.reconnectTimer)
     window.clearTimeout(this.assetTimer)
     this.assetJob = null
+    window.clearInterval(this.usageTimer)
+    this.sfuCall?.close()
+    this.sfuCall = null
+    this.remoteStreams.clear()
     this.ws?.close()
     this.ws = null
     for (const link of this.peers.values()) link.pc.close()
@@ -622,6 +639,10 @@ export class SessionClient {
       this.state.participants = msg.participants
       this.state.chat = msg.chat || []
       this.rememberIce(msg.iceServers || [], msg.turn || 'none', msg.turnError, msg.iceTransportPolicy)
+      this.state.sfu = Boolean(msg.sfu)
+      this.state.usageNotice = String(msg.usage?.notice || '')
+      if (this.state.usageNotice) this.note(this.state.usageNotice)
+      ;(window as unknown as { __cueharborSfu?: boolean }).__cueharborSfu = this.state.sfu
       this.resumeId = msg.id
       sessionStorage.setItem(`cueharbor-resume:${msg.code}`, msg.id)
       const askedCreate = Boolean(this.connectOpts?.create)
@@ -715,6 +736,14 @@ export class SessionClient {
       this.presence()
       this.note(msg.muted ? 'The host muted you.' : 'The host unmuted you.')
       this.emit()
+      return
+    }
+    if (msg.t === 'sfu-pub') {
+      const publication = (msg.publication || msg) as SfuPublication
+      if (!publication?.sessionId || !publication.peerId || publication.peerId === this.state.selfId) return
+      const tracks = Array.isArray(publication.tracks) ? publication.tracks : []
+      this.pendingPubs.set(publication.peerId, { peerId: publication.peerId, sessionId: publication.sessionId, tracks })
+      if (this.sfuCall) void this.sfuCall.pull(this.pendingPubs.get(publication.peerId)!)
       return
     }
     if (msg.t === 'signal') {
@@ -1054,7 +1083,7 @@ export class SessionClient {
   hostOffsetMs() {
     const id = this.hostId()
     if (!id) return null
-    return this.peers.get(id)?.remoteMinusLocal ?? null
+    return this.peers.get(id)?.remoteMinusLocal ?? this.clockOffset.get(id)?.remoteMinusLocal ?? null
   }
 
   /**
@@ -1077,6 +1106,9 @@ export class SessionClient {
   }
 
   private uplinkReady() {
+    if (this.sfuCall) {
+      return this.sfuCall.connection === 'connected' && (this.sfuCall.outboundVideo > 0 || this.sfuCall.outboundAudio > 0)
+    }
     return mediaCanCarryAssets([...this.peers.values()].map((link) => ({
       connection: link.pc.connectionState,
       outboundVideo: link.outboundVideo,
@@ -1213,6 +1245,8 @@ export class SessionClient {
     this.clockTimer = window.setInterval(() => this.pingClocks(), 800)
     this.statsTimer = window.setInterval(() => void this.pollStats(), 1000)
     this.pingTimer = window.setInterval(() => this.send({ t: 'ping' }), SIGNAL_KEEPALIVE_MS)
+    window.clearInterval(this.usageTimer)
+    this.usageTimer = window.setInterval(() => void this.reportCloudflare(), 3000)
   }
 
   private pingClocks() {
@@ -1238,7 +1272,14 @@ export class SessionClient {
       const sample = ntpOffset(payload.t0, payload.t1, payload.t2, performance.now())
       if (sample.rtt < 0 || sample.rtt > 2000) return
       const link = this.peers.get(from)
-      if (!link) return
+      if (!link) {
+        const slot = this.clockOffset.get(from) || { samples: [], remoteMinusLocal: null }
+        slot.samples = [...slot.samples, sample].slice(-12)
+        const best = bestClockSample(slot.samples)
+        if (best) slot.remoteMinusLocal = best.offset
+        this.clockOffset.set(from, slot)
+        return
+      }
       link.clockSamples = [...link.clockSamples, sample].slice(-12)
       const best = bestClockSample(link.clockSamples.filter((s) => (via === 'dc' ? s.rtt < 150 : true))) || bestClockSample(link.clockSamples)
       if (best) link.remoteMinusLocal = best.offset
@@ -1252,8 +1293,20 @@ export class SessionClient {
   }
 
   private closePeer(id: string) {
+    this.remoteStreams.delete(id)
+    this.pendingPubs.delete(id)
+    this.clockOffset.delete(id)
     const link = this.peers.get(id)
-    if (!link) return
+    if (!link) {
+      this.engine.setRemoteMusic(id, null)
+      this.engine.setTalk(id, null, false)
+      if (this.state.media[id]) {
+        const media = { ...this.state.media }
+        delete media[id]
+        this.state.media = media
+      }
+      return
+    }
     if (link.recoveryTimer) window.clearTimeout(link.recoveryTimer)
     link.pc.close()
     this.peers.delete(id)
@@ -1266,10 +1319,164 @@ export class SessionClient {
     }
   }
 
+  private ensureSfu() {
+    if (!this.state.sfu || !this.state.code || !this.state.selfId) return
+    if (!this.sfuCall) {
+      const call = new SfuCall({
+        iceServers: this.ice,
+        code: this.state.code,
+        peerId: this.state.selfId,
+        opus: this.state.opus,
+        tracks: () => ({
+          music: this.state.musicOn ? this.performanceTrack() : null,
+          talk: this.state.talkOn ? this.talkStream?.getAudioTracks()[0] || null : null,
+          camera: this.cameraTrack(),
+          screen: this.screenTrack(),
+        }),
+        onTrack: (peerId, kind, track) => this.takeSfuTrack(peerId, kind, track),
+        onState: (state) => this.noteSfuState(state),
+        note: (text) => this.note(text),
+        sendPub: (publication) => this.send({ t: 'sfu-pub', sessionId: publication.sessionId, tracks: publication.tracks }),
+      })
+      this.sfuCall = call
+      void call.start()
+    }
+    for (const publication of this.pendingPubs.values()) void this.sfuCall.pull(publication)
+    for (const peer of this.remoteAdmitted()) this.ensureRemoteSlot(peer.id)
+  }
+
+  private ensureRemoteSlot(id: string) {
+    const existing = this.remoteStreams.get(id)
+    if (existing) return existing
+    const slot = { music: new MediaStream(), talk: new MediaStream(), camera: new MediaStream(), screen: new MediaStream() }
+    this.remoteStreams.set(id, slot)
+    return slot
+  }
+
+  private takeSfuTrack(peerId: string, kind: SfuKind, track: MediaStreamTrack) {
+    const slot = this.ensureRemoteSlot(peerId)
+    slot[kind] = new MediaStream([track])
+    track.onunmute = () => {
+      this.state.mediaTick += 1
+      this.emit()
+    }
+    if (kind === 'music' || kind === 'talk') this.routeSfuAudio(peerId)
+    this.state.mediaTick += 1
+    this.emit()
+  }
+
+  private routeSfuAudio(id: string) {
+    const slot = this.remoteStreams.get(id)
+    if (!slot) return
+    const person = this.state.participants.find((p) => p.id === id)
+    if (person?.role === 'host' && this.state.role === 'guest') {
+      this.engine.setCueReturn(slot.music)
+      this.refreshCue()
+    } else if (slot.music.getAudioTracks().length) {
+      this.engine.setRemoteMusic(id, slot.music)
+    }
+    const audible = person?.role === 'host' || !person?.music
+    this.engine.setTalk(id, slot.talk.getAudioTracks().length ? slot.talk : null, Boolean(audible && person && !person.mutedByHost))
+    this.emit()
+  }
+
+  private noteSfuState(state: { connection: string; ice: string; signaling: string }) {
+    const media = { ...this.state.media }
+    for (const peer of this.remoteAdmitted()) {
+      const previous = media[peer.id]
+      media[peer.id] = {
+        connection: state.connection,
+        ice: state.ice,
+        signaling: state.signaling,
+        path: previous?.path || 'relay',
+        localType: previous?.localType || '',
+        remoteType: previous?.remoteType || '',
+        ageMs: previous?.ageMs || 0,
+        videoBytes: previous?.videoBytes || 0,
+      }
+    }
+    this.state.media = media
+    this.state.mediaTick += 1
+    this.emit()
+  }
+
+  private async reportCloudflare() {
+    if (this.left || !this.state.code || !this.state.selfId) return
+    let bytes = 0
+    let key = `peer:${this.state.selfId}`
+    if (this.sfuCall) {
+      try {
+        bytes = await this.sfuCall.cloudflareBytes()
+      } catch {
+        bytes = 0
+      }
+      if (this.sfuCall.sessionId) key = this.sfuCall.sessionId
+      if (this.sfuCall.published && this.sfuCall.sessionId) {
+        const kinds: SfuKind[] = ['music', 'talk', 'camera', 'screen']
+        this.send({
+          t: 'sfu-pub',
+          sessionId: this.sfuCall.sessionId,
+          tracks: kinds
+            .filter((kind) => kind !== 'screen' || Boolean(this.screenTrack()))
+            .map((kind) => ({ trackName: `${this.state.selfId}:${kind}`, kind })),
+        })
+      }
+      this.noteSfuState({ connection: this.sfuCall.connection, ice: this.sfuCall.ice, signaling: this.sfuCall.signaling })
+    } else {
+      for (const link of this.peers.values()) {
+        try {
+          const stats = await link.pc.getStats()
+          stats.forEach((report) => {
+            const row = report as unknown as Record<string, number | string | boolean>
+            if (report.type !== 'candidate-pair') return
+            const selected = Boolean(row.nominated) || Boolean(row.selected) || row.state === 'succeeded'
+            if (!selected) return
+            const local = stats.get(String(row.localCandidateId || '')) as { candidateType?: string } | undefined
+            if (local?.candidateType !== 'relay') return
+            bytes += Number(row.bytesSent || 0) + Number(row.bytesReceived || 0)
+          })
+        } catch {
+          /* the peer connection is closing */
+        }
+      }
+    }
+    const floor = rememberedUsageFloor()
+    try {
+      const response = await fetch('/api/usage', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code: this.state.code, peerId: this.state.selfId, key, bytes, floor }),
+      })
+      if (!response.ok) return
+      const body = (await response.json()) as { bytes?: number; blocked?: boolean }
+      if (typeof body.bytes === 'number' && typeof (body as { month?: string }).month === 'string') {
+        const month = (body as { month: string }).month
+        const remembered = rememberedUsageFloor()
+        localStorage.setItem('cueharbor-cf-usage', JSON.stringify({ month, bytes: Math.max(remembered, body.bytes) }))
+      }
+      if (body.blocked && !this.state.usageNotice) {
+        this.state.usageNotice = CAP_NOTICE
+        this.note(CAP_NOTICE)
+        this.emit()
+      }
+    } catch {
+      /* a missed report is filled in by the server's duration estimate */
+    }
+    if (this.state.role === 'host') this.publishArrangement()
+  }
+
   /** Create a peer connection when someone joins. A socket rejoin leaves the existing one alone. */
   private syncMesh() {
     if (this.state.status !== 'live') return
     if (this.deviceJob) return
+    if (!this.state.sfu && this.sfuCall) {
+      this.sfuCall.close()
+      this.sfuCall = null
+    }
+    if (this.state.sfu) {
+      this.ensureSfu()
+      return
+    }
     for (const peer of this.remoteAdmitted()) {
       const link = this.peers.get(peer.id)
       const instance = peer.instanceId || ''
@@ -2007,6 +2214,10 @@ export class SessionClient {
   }
 
   private applySendTracks() {
+    if (this.sfuCall) {
+      void this.sfuCall.refreshTracks()
+      return
+    }
     for (const id of this.peers.keys()) {
       void this.enqueueSignal(id, async () => {
         const link = this.peers.get(id)
@@ -2658,6 +2869,11 @@ export class SessionClient {
 
   videoStream(peerId: string, kind: 'camera' | 'screen' | 'self') {
     if (kind === 'self') return this.preview?.getVideoTracks().length ? this.preview : null
+    const remote = this.remoteStreams.get(peerId)
+    if (remote) {
+      const stream = kind === 'camera' ? remote.camera : remote.screen
+      return stream.getVideoTracks().length ? stream : null
+    }
     const link = this.peers.get(peerId)
     if (!link) return null
     const stream = kind === 'camera' ? link.camera : link.screen
@@ -2666,5 +2882,17 @@ export class SessionClient {
 
   private nameOf(id: string) {
     return this.state.participants.find((p) => p.id === id)?.name || 'Guest'
+  }
+}
+
+/** Highest Cloudflare total this browser has seen for the current UTC month. */
+function rememberedUsageFloor() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('cueharbor-cf-usage') || '') as { month?: string; bytes?: number }
+    const month = new Date().toISOString().slice(0, 7)
+    if (saved.month !== month) return 0
+    return Number(saved.bytes) || 0
+  } catch {
+    return 0
   }
 }

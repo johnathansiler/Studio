@@ -26,7 +26,8 @@ export function iceEnvStamp(env: NodeJS.ProcessEnv): string {
   ].join('\n')
 }
 
-export async function currentIce(env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof fetch = fetch): Promise<IceConfig> {
+export async function currentIce(env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof fetch = fetch, opts?: { stunOnly?: boolean }): Promise<IceConfig> {
+  if (opts?.stunOnly) return { ...baseIceConfig(), iceTransportPolicy: 'all' }
   const stamp = iceEnvStamp(env)
   const now = Date.now()
   if (cache && cache.stamp === stamp && cache.expires > now && cache.config.turn !== 'none' && !cache.config.turnError) return cache.config

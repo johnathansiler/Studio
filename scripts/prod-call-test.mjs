@@ -255,6 +255,8 @@ async function sample(page) {
         signaling: pc.signalingState,
         ice: pc.iceConnectionState,
         conn: pc.connectionState,
+        gather: pc.iceGatheringState,
+        relay: / typ relay/.test(pc.localDescription?.sdp || ''),
         video,
         audio,
         frames,
@@ -280,6 +282,10 @@ async function sample(page) {
       live: (window.__pcs || []).filter((pc) => pc.connectionState !== 'closed').length,
       big: (window.__bigSends || []).reduce((sum, n) => sum + n, 0),
       assets: window.__assetPosts || 0,
+      sfu: Boolean(window.__cueharborSfu),
+      playhead: window.__cueharborPlayhead || 0,
+      transport: window.__cueharborStatus || '',
+      rate: window.__cueharborRate || 48000,
     }
   })
 }
@@ -400,10 +406,38 @@ function judgeCall(held, events, invite) {
   if (hostPeer?.conn !== 'connected' || guestPeer?.conn !== 'connected') fails.push(`connection host=${hostPeer?.conn}/${hostPeer?.ice} guest=${guestPeer?.conn}/${guestPeer?.ice}`)
   if ((hostPeer?.video || 0) <= 0 || (hostPeer?.audio || 0) <= 0) fails.push('host inbound bytes are 0')
   if ((guestPeer?.video || 0) <= 0 || (guestPeer?.audio || 0) <= 0) fails.push('guest inbound bytes are 0')
-  if (held.guest.offers > 0) fails.push(`guest created ${held.guest.offers} offers`)
+  if (!held.guest.sfu && held.guest.offers > 0) fails.push(`guest created ${held.guest.offers} offers`)
   if (invite && held.guest.code && held.guest.code !== invite) fails.push(`guest stayed on ${held.guest.code} instead of ${invite}`)
   const staleSent = (held.guest.sent || []).some((row) => row.includes(DEAD))
   if (staleSent) fails.push('guest hello still named the stored dead session')
+  return fails
+}
+
+/** Host play must move the guest playhead to the same musical position, within 100 ms. */
+async function assertPlaySync(host, guest) {
+  const fails = []
+  const play = host.locator('button.t-btn.play')
+  if (!(await play.isVisible().catch(() => false))) {
+    fails.push('host play button was not visible')
+    return fails
+  }
+  await play.scrollIntoViewIfNeeded()
+  await play.click()
+  await host.waitForTimeout(1200)
+  const hostRow = await videoBytes(host)
+  const guestRow = await videoBytes(guest)
+  const rate = hostRow.rate || 48000
+  const gapMs = Math.abs(hostRow.playhead - guestRow.playhead) / rate * 1000
+  console.log('play-sync', JSON.stringify({
+    host: hostRow.playhead,
+    guest: guestRow.playhead,
+    hostStatus: hostRow.transport,
+    guestStatus: guestRow.transport,
+    gapMs: Math.round(gapMs),
+  }))
+  if (hostRow.transport !== 'playing') fails.push(`host transport is ${hostRow.transport || 'stopped'}`)
+  if (guestRow.transport !== 'playing') fails.push(`guest transport is ${guestRow.transport || 'stopped'}`)
+  if (gapMs > 100) fails.push(`guest playhead is ${Math.round(gapMs)} ms from the host`)
   return fails
 }
 
@@ -427,6 +461,7 @@ async function runCall(browser, label, { androidHost, staleGuest }) {
     code = await connectCall(pair.host, pair.guest)
     await pair.host.waitForTimeout(8000)
     console.log(label, 'before-throttle', JSON.stringify({ host: line(await sample(pair.host)), guest: line(await sample(pair.guest)) }))
+    fails.push(...(await assertPlaySync(pair.host, pair.guest)))
     await hideThenShow(android)
     await holdSignaling(android, 22000)
     await android.waitForTimeout(2000)
@@ -551,14 +586,20 @@ async function cutSocketAndRestart(page) {
 
 async function videoBytes(page) {
   const row = await sample(page)
+  const peer = [...(row.peers || [])].sort((a, b) => (b.video || 0) - (a.video || 0))[0] || row.peers[0]
   return {
-    video: row.peers[0]?.video || 0,
-    frames: row.peers[0]?.frames || 0,
+    video: peer?.video || 0,
+    frames: peer?.frames || 0,
+    audio: peer?.audio || 0,
     live: row.live || 0,
-    conn: row.peers[0]?.conn || 'none',
-    signaling: row.peers[0]?.signaling || 'none',
+    conn: peer?.conn || 'none',
+    signaling: peer?.signaling || 'none',
     offers: row.offers || 0,
-    path: row.peers[0]?.path || '',
+    path: peer?.path || '',
+    sfu: row.sfu,
+    playhead: row.playhead || 0,
+    transport: row.transport || '',
+    rate: row.rate || 48000,
   }
 }
 
@@ -620,7 +661,8 @@ async function runTrickle(browser) {
       if (seen) break
       await pair.host.waitForTimeout(100)
     }
-    if (!seen) fails.push('guest answer did not arrive')
+    const sfu = await pair.host.evaluate(() => Boolean(window.__cueharborSfu))
+    if (!seen && !sfu) fails.push('guest answer did not arrive')
     const deadline = Date.now() + 15000
     let hostVideo = 0
     let guestVideo = 0
@@ -694,7 +736,11 @@ async function runCellular(browser) {
       fails.push(`call did not connect host=${host.conn}/${host.video} guest=${guest.conn}/${guest.video}`)
     } else {
       console.log(label, 'connected', JSON.stringify(ready))
+      const sfu = ready.host.sfu || ready.guest.sfu
       const beforeRestart = { host: ready.host.video, guest: ready.guest.video, hostLive: ready.host.live, guestLive: ready.guest.live }
+      if (sfu) {
+        console.log(label, 'sfu', 'media is on the SFU, so a mesh ICE restart is not part of this call')
+      } else {
       const restarted = await cutSocketAndRestart(pair.host)
       console.log(label, 'restart-while-down', JSON.stringify(restarted))
       const answeredBy = Date.now() + 5000
@@ -715,6 +761,9 @@ async function runCellular(browser) {
       if (afterRestart.video <= beforeRestart.host || guestAfter.video <= beforeRestart.guest) {
         fails.push(`media stalled across the ICE restart host ${beforeRestart.host}->${afterRestart.video} guest ${beforeRestart.guest}->${guestAfter.video}`)
       }
+      }
+      const frameStartHost = (await videoBytes(pair.host)).frames
+      const frameStartGuest = (await videoBytes(pair.guest)).frames
       const end = Date.now() + 60000
       let nextCut = Date.now() + 8000
       const blipAt = Date.now() + 20000
@@ -758,6 +807,11 @@ async function runCellular(browser) {
         else if (!grew.ok) fails.push(`media stalled host ${beforeHost.video}->${grew.hostNow} guest ${beforeGuest.video}->${grew.guestNow} live=${grew.hostLive}/${grew.guestLive}`)
         nextCut = Date.now() + 8000
       }
+      const hostEnd = await videoBytes(pair.host)
+      const guestEnd = await videoBytes(pair.guest)
+      console.log(label, 'frames', JSON.stringify({ host: [frameStartHost, hostEnd.frames], guest: [frameStartGuest, guestEnd.frames] }))
+      if (hostEnd.frames <= frameStartHost) fails.push(`host video frames did not increase for 60s (${frameStartHost}->${hostEnd.frames})`)
+      if (guestEnd.frames <= frameStartGuest) fails.push(`guest video frames did not increase for 60s (${frameStartGuest}->${guestEnd.frames})`)
       if (!blipped) fails.push('the network blip did not run')
     }
     console.log(label, fails.length ? 'FAIL' : 'PASS')
@@ -1050,6 +1104,19 @@ async function runCarrier(browser) {
     const guest = await guestContext.newPage()
     host.on('pageerror', (error) => console.log('HOST PAGE', error.message))
     guest.on('pageerror', (error) => console.log('GUEST PAGE', error.message))
+    const admitMark = { at: 0 }
+    host.on('console', (msg) => {
+      const text = msg.text()
+      if (/sfu|media server|ice|turn|Reconnecting/i.test(text)) console.log('HOST LOG', text.slice(0, 300))
+    })
+    host.on('response', async (response) => {
+      const url = response.url()
+      if (!url.includes('/api/sfu/')) return
+      const elapsed = admitMark.at ? Math.round((Date.now() - admitMark.at) / 1000) : 0
+      let detail = ''
+      if (response.status() >= 400) detail = (await response.text().catch(() => '')).slice(0, 180)
+      console.log('HOST SFU', response.status(), url.replace(base, ''), 't', elapsed, detail)
+    })
     try {
       await install(host)
       await install(guest)
@@ -1059,6 +1126,7 @@ async function runCarrier(browser) {
         timeout: 90000,
         admitTimeout: 90000,
         duringAdmit: async () => {
+          admitMark.at = Date.now()
           writeFileSync(arm, '1')
           const started = Date.now()
           let firstAt = 0
@@ -1067,11 +1135,24 @@ async function runCarrier(browser) {
           let framesAtStart = 0
           let maxStall = 0
           let lastLog = started
+          let hostFirst = 0
+          let hostLast = 0
+          let hostAdvance = 0
+          let hostStall = 0
           while (!firstAt || Date.now() - firstAt < 90000) {
             if (Date.now() - started >= 130000) break
             await guest.waitForTimeout(1000)
             const row = await videoBytes(guest)
+            const hostRow = await videoBytes(host)
+            const hostAll = await sample(host)
             const t = Date.now()
+            if (hostRow.frames > hostLast) {
+              if (!hostFirst) hostFirst = t
+              hostLast = hostRow.frames
+              hostAdvance = t
+            } else if (hostFirst && hostAdvance) {
+              hostStall = Math.max(hostStall, t - hostAdvance)
+            }
             if (row.frames > lastFrames) {
               if (!firstAt) {
                 firstAt = t
@@ -1088,6 +1169,10 @@ async function runCarrier(browser) {
               frames: row.frames,
               conn: row.conn,
               path: row.path,
+              hostFrames: hostRow.frames,
+              hostConn: hostRow.conn,
+              hostPath: hostRow.path,
+              hostPeers: hostAll.peers.map((peer) => `${peer.conn}/${peer.ice}/${peer.signaling}/${peer.gather}/${peer.relay ? 'relay' : 'norel'}`),
               stall: Math.round(maxStall / 100) / 10,
             }))
             lastLog = t
@@ -1107,6 +1192,10 @@ async function runCarrier(browser) {
           if (maxStall > 3500) fails.push(`guest video stalled ${Math.round(maxStall / 100) / 10}s (need under ~3s)`)
           if (average < 12) fails.push(`guest video averaged ${average.toFixed(1)} fps (need at least 12)`)
           if (firstAt && Date.now() - firstAt < 85000) fails.push(`guest video was not observed for 90s (ran ${Math.round((Date.now() - firstAt) / 1000)}s)`)
+          const hostSpan = hostFirst ? (Date.now() - hostFirst) / 1000 : 0
+          console.log(label, 'host-frames', JSON.stringify({ frames: hostLast, stall: Math.round(hostStall / 100) / 10, span: Math.round(hostSpan) }))
+          if (hostLast <= 0 || hostSpan < 60) fails.push(`host video frames did not keep increasing for 60s (frames ${hostLast}, span ${Math.round(hostSpan)}s)`)
+          if (hostStall > 3500) fails.push(`host video stalled ${Math.round(hostStall / 100) / 10}s (need under ~3s)`)
         },
       })
       console.log(label, fails.length ? 'FAIL' : 'PASS')
@@ -1126,12 +1215,36 @@ async function runCarrier(browser) {
   return fails
 }
 
+async function runUsage() {
+  const fails = []
+  const response = await fetch(`${base}/api/usage`)
+  const text = await response.text()
+  console.log('usage', response.status, text.slice(0, 500))
+  if (!response.ok) fails.push(`GET /api/usage returned ${response.status}`)
+  let body = {}
+  try {
+    body = JSON.parse(text)
+  } catch {
+    fails.push('GET /api/usage was not JSON')
+  }
+  if (!/^\d{4}-\d{2}$/.test(body.month || '')) fails.push('usage month missing')
+  if (typeof body.bytes !== 'number') fails.push('usage bytes missing')
+  if (typeof body.gigabytes !== 'number') fails.push('usage gigabytes missing')
+  if (typeof body.capGigabytes !== 'number') fails.push('usage cap missing')
+  if (typeof body.blocked !== 'boolean') fails.push('usage blocked missing')
+  if (/secret|token|credential|authorization/i.test(text)) fails.push('usage response included a secret')
+  console.log('usage', fails.length ? 'FAIL' : 'PASS')
+  for (const reason of fails) console.log('usage', 'reason:', reason)
+  return fails
+}
+
 const browser = await chromium.launch({
   args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'],
 })
 const summary = []
 try {
   const scenarios = [
+    ['usage', () => runUsage()],
     ['android-host', () => runCall(browser, 'android-host', { androidHost: true, staleGuest: false })],
     ['android-guest', () => runCall(browser, 'android-guest', { androidHost: false, staleGuest: false })],
     ['stale-invite', () => runStale(browser)],

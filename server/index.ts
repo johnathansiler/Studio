@@ -1,10 +1,15 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { currentIce, type IceConfig } from './ice.ts'
+import { sfuCall, sfuConfigured } from './sfu.ts'
+import { createUsageLedger } from './usage.ts'
 import { rememberDiag, sanitizeDiag, type DiagReport } from '../src/model/diag.ts'
 import { sessionHello } from '../src/model/negotiate.ts'
+import { CAP_NOTICE, type UsageSnapshot } from '../src/model/usage.ts'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
+
+const usage = createUsageLedger()
 
 const PORT = Number(process.env.PORT || 8787)
 const HOST = process.env.HOST || '0.0.0.0'
@@ -58,7 +63,17 @@ interface Session {
   diag: DiagReport[]
   /** Finished project audio, fetched by guests over HTTP. */
   assets: Map<string, { name: string; sampleRate: number; wav: Buffer }>
+  /** SFU publications announced by admitted peers. Replayed to a rejoining socket. */
+  pubs: Map<string, SfuPublication>
+  /** Session ids this room asked Cloudflare to open, so the egress ledger can close them. */
+  sfuSessions: Map<string, string>
   emptyAt?: number
+}
+
+interface SfuPublication {
+  peerId: string
+  sessionId: string
+  tracks: Array<{ trackName: string; kind: string }>
 }
 
 const sessions = new Map<string, Session>()
@@ -107,7 +122,8 @@ function emitRoster(session: Session) {
   broadcast(session, { t: 'roster', participants: roster(session) })
 }
 
-function publicSession(session: Session, self: Participant, ice: IceConfig, reason?: string) {
+function publicSession(session: Session, self: Participant, ice: IceConfig, snap: UsageSnapshot, reason?: string) {
+  const sfu = sfuConfigured(process.env) && !snap.blocked
   return {
     t: 'welcome',
     id: self.id,
@@ -120,7 +136,22 @@ function publicSession(session: Session, self: Participant, ice: IceConfig, reas
     participants: roster(session),
     chat: session.chat.slice(-80),
     reason: reason || '',
+    sfu,
+    usage: {
+      month: snap.month,
+      bytes: snap.bytes,
+      gigabytes: snap.gigabytes,
+      capGigabytes: snap.capGigabytes,
+      blocked: snap.blocked,
+      notice: snap.blocked ? CAP_NOTICE : '',
+    },
   }
+}
+
+async function welcomeIce() {
+  const snap = await usage.view()
+  const ice = await currentIce(process.env, fetch, { stunOnly: snap.blocked })
+  return { snap, ice }
 }
 
 function releaseHost(session: Session, resumeId: string) {
@@ -193,6 +224,7 @@ function leave(client: Client, announce = false) {
     session.held.set(client.id, person)
   }
   record(session, 'leave', `${client.id} left; the room is kept until it has been empty for 10 minutes`, client.id)
+  releaseMedia(session, client.id)
   if (client.id) broadcast(session, { t: 'peer-left', id: client.id })
   if (session.clients.size === 0) {
     session.emptyAt = Date.now()
@@ -208,7 +240,16 @@ function leave(client: Client, announce = false) {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`)
   if (url.pathname === '/api/health') return json(res, { ok: true, service: 'cueharbor', sessions: sessions.size })
-  if (url.pathname === '/api/ice') return json(res, await currentIce())
+  if (url.pathname === '/api/usage' && req.method === 'GET') return json(res, await usage.view())
+  if (url.pathname === '/api/usage' && req.method === 'POST') return reportUsage(req, res)
+  if (url.pathname === '/api/sfu/session' && req.method === 'POST') return openSfuSession(req, res)
+  if (url.pathname === '/api/sfu/tracks' && req.method === 'POST') return proxySfu(req, res, 'tracks')
+  if (url.pathname === '/api/sfu/renegotiate' && req.method === 'POST') return proxySfu(req, res, 'renegotiate')
+  if (url.pathname === '/api/sfu/close' && req.method === 'POST') return proxySfu(req, res, 'close')
+  if (url.pathname === '/api/ice') {
+    const { ice } = await welcomeIce()
+    return json(res, ice)
+  }
   const diag = url.pathname.match(/^\/api\/diag\/([A-Za-z0-9]{4,12})$/)
   if (diag && (req.method === 'GET' || req.method === 'POST')) return handleDiag(req, res, diag[1].toUpperCase())
   if (url.pathname === '/api/takes' && req.method === 'POST') return acceptTake(req, res)
@@ -220,6 +261,114 @@ const server = createServer(async (req, res) => {
   }
   json(res, { error: 'CueHarbor signaling server. The app is served by Vite in development.' }, 404)
 })
+
+const TRACK_KINDS = new Set(['music', 'talk', 'camera', 'screen'])
+
+function sanitizePublication(peerId: string, msg: Record<string, unknown>): SfuPublication | null {
+  const sessionId = String(msg.sessionId || '')
+  if (!sessionId || sessionId.length > 80) return null
+  const listed = Array.isArray(msg.tracks) ? msg.tracks : []
+  const tracks = listed.slice(0, 8).map((item) => {
+    const row = item as { trackName?: string; kind?: string }
+    const kind = TRACK_KINDS.has(String(row.kind)) ? String(row.kind) : ''
+    const trackName = String(row.trackName || '').slice(0, 120)
+    return kind && trackName ? { trackName, kind } : null
+  }).filter((item): item is { trackName: string; kind: string } => Boolean(item))
+  if (!tracks.length) return null
+  return { peerId, sessionId, tracks }
+}
+
+function liveMember(code: string, peerId: string) {
+  const session = sessions.get(code)
+  if (!session) return null
+  const person = session.participants.get(peerId)
+  // A carrier reset drops the signaling socket without removing the member.
+  // Media calls have to keep working until they explicitly leave.
+  if (!person?.admitted) return null
+  return session
+}
+
+async function readJson(req: IncomingMessage, limit = 200_000) {
+  try {
+    return JSON.parse(await readBody(req, limit)) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+async function reportUsage(req: IncomingMessage, res: ServerResponse) {
+  const body = await readJson(req, 4000)
+  if (!body) return json(res, { error: 'Usage report was unreadable.' }, 400)
+  const code = String(body.code || '').toUpperCase()
+  const peerId = String(body.peerId || '')
+  if (!liveMember(code, peerId)) return json(res, { error: 'Join the session before reporting usage.' }, 403)
+  const bytes = Number(body.bytes)
+  const floor = Number(body.floor)
+  if (Number.isFinite(floor) && floor > 0) await usage.applyFloor(floor)
+  const key = String(body.key || `peer:${peerId}`).slice(0, 120)
+  if (!Number.isFinite(bytes) || bytes < 0) return json(res, await usage.view())
+  return json(res, await usage.report(key, bytes))
+}
+
+async function openSfuSession(req: IncomingMessage, res: ServerResponse) {
+  const body = await readJson(req, 4000)
+  if (!body) return json(res, { error: 'The media request was unreadable.', code: 'bad-request' }, 400)
+  const code = String(body.code || '').toUpperCase()
+  const peerId = String(body.peerId || '')
+  const session = liveMember(code, peerId)
+  if (!session) return json(res, { error: 'Join the session before opening media.', code: 'forbidden' }, 403)
+  if (!sfuConfigured(process.env)) return json(res, { error: 'Cloudflare Realtime is not configured.', code: 'disabled' }, 403)
+  if (await usage.blocked()) return json(res, { error: CAP_NOTICE, code: 'cap' }, 403)
+  const result = await sfuCall(process.env, '/sessions/new', 'POST', null)
+  const opened = result.body as { sessionId?: string; error?: string; code?: string }
+  if (!result.ok || !opened?.sessionId) return json(res, opened || { error: 'The media server did not open a session.', code: 'sfu' }, result.status || 502)
+  const previous = session.sfuSessions.get(peerId)
+  session.sfuSessions.set(peerId, opened.sessionId)
+  if (previous && previous !== opened.sessionId) {
+    await usage.closeSession(previous)
+    void sfuCall(process.env, `/sessions/${encodeURIComponent(previous)}/tracks/close`, 'PUT', { tracks: [], force: true }).catch(() => undefined)
+  }
+  await usage.openSession(opened.sessionId, 1, admittedOthers(session, peerId))
+  return json(res, { sessionId: opened.sessionId })
+}
+
+async function proxySfu(req: IncomingMessage, res: ServerResponse, op: 'tracks' | 'renegotiate' | 'close') {
+  const body = await readJson(req)
+  if (!body) return json(res, { error: 'The media request was unreadable.', code: 'bad-request' }, 400)
+  const code = String(body.code || '').toUpperCase()
+  const peerId = String(body.peerId || '')
+  const sessionId = String(body.sessionId || '')
+  const session = liveMember(code, peerId)
+  if (!session) return json(res, { error: 'Join the session before opening media.', code: 'forbidden' }, 403)
+  if (!sfuConfigured(process.env)) return json(res, { error: 'Cloudflare Realtime is not configured.', code: 'disabled' }, 403)
+  if (op !== 'close' && await usage.blocked()) return json(res, { error: CAP_NOTICE, code: 'cap' }, 403)
+  if (!sessionId || sessionId.length > 80) return json(res, { error: 'The media session id was missing.', code: 'bad-request' }, 400)
+  const path = op === 'tracks' ? `/sessions/${encodeURIComponent(sessionId)}/tracks/new` : op === 'renegotiate' ? `/sessions/${encodeURIComponent(sessionId)}/renegotiate` : `/sessions/${encodeURIComponent(sessionId)}/tracks/close`
+  const method = op === 'tracks' ? 'POST' : 'PUT'
+  const forwarded = op === 'close'
+    ? { tracks: Array.isArray(body.tracks) ? body.tracks : [], force: true }
+    : op === 'renegotiate'
+      ? { sessionDescription: body.sessionDescription }
+      : {
+          ...(body.sessionDescription ? { sessionDescription: body.sessionDescription } : {}),
+          tracks: body.tracks,
+        }
+  const closing = op === 'close'
+  const knownTracks = closing && Array.isArray(body.tracks) ? body.tracks : []
+  if (closing && !knownTracks.length) {
+    await usage.closeSession(sessionId)
+    if (session.sfuSessions.get(peerId) === sessionId) session.sfuSessions.delete(peerId)
+    if (session.pubs.get(peerId)?.sessionId === sessionId) session.pubs.delete(peerId)
+    return json(res, { closed: true })
+  }
+  const result = await sfuCall(process.env, path, method, forwarded)
+  if (closing) {
+    await usage.closeSession(sessionId)
+    if (session.sfuSessions.get(peerId) === sessionId) session.sfuSessions.delete(peerId)
+    if (session.pubs.get(peerId)?.sessionId === sessionId) session.pubs.delete(peerId)
+  }
+  return json(res, result.body, result.ok ? 200 : result.status || 502)
+}
 
 async function handleDiag(req: IncomingMessage, res: ServerResponse, code: string) {
   const session = sessions.get(code)
@@ -526,6 +675,14 @@ async function handle(client: Client, msg: Record<string, unknown>) {
     }
     person.admitted = true
     emitRoster(session)
+    const target = session.clients.get(person.id)
+    if (target) {
+      for (const publication of session.pubs.values()) {
+        if (publication.peerId === person.id) continue
+        send(target.ws, { t: 'sfu-pub', publication })
+      }
+    }
+    void shapeRoom(session)
     return
   }
   if (msg.t === 'reject' && self.role === 'host') {
@@ -534,6 +691,15 @@ async function handle(client: Client, msg: Record<string, unknown>) {
   }
   if (msg.t === 'remove' && self.role === 'host') {
     drop(session, String(msg.id), 'removed')
+    return
+  }
+  if (msg.t === 'sfu-pub' && self.admitted) {
+    const publication = sanitizePublication(client.id, msg)
+    if (!publication) return
+    session.pubs.set(client.id, publication)
+    if (!session.sfuSessions.has(client.id)) session.sfuSessions.set(client.id, publication.sessionId)
+    broadcast(session, { t: 'sfu-pub', publication }, client.id)
+    void shapeRoom(session)
     return
   }
   if (msg.t === 'signal') {
@@ -627,6 +793,8 @@ async function hello(client: Client, msg: Record<string, unknown>) {
       chat: [],
       diag: [],
       assets: new Map(),
+      pubs: new Map(),
+      sfuSessions: new Map(),
     }
     const person: Participant = {
       id,
@@ -649,7 +817,7 @@ async function hello(client: Client, msg: Record<string, unknown>) {
     sessions.set(code, session)
     const reason = `new session created because ${decision.reason}`
     record(session, 'create', reason, id)
-    send(client.ws, publicSession(session, person, await currentIce(), reason))
+    await sendWelcome(session, client, person, reason)
     return
   }
   const code = decision.code || ''
@@ -685,7 +853,7 @@ async function hello(client: Client, msg: Record<string, unknown>) {
     session.emptyAt = undefined
     if (resumeId === session.hostId) existing.role = 'host'
     record(session, 'join', decision.reason, resumeId)
-    send(client.ws, publicSession(session, existing, await currentIce(), decision.reason))
+    await sendWelcome(session, client, existing, decision.reason)
     emitRoster(session)
     // Candidates trickled at the old socket are gone. Peers send that generation again.
     broadcast(session, { t: 'peer-resumed', id: resumeId }, resumeId)
@@ -711,8 +879,46 @@ async function hello(client: Client, msg: Record<string, unknown>) {
   client.name = name
   client.sessionCode = code
   record(session, 'join', decision.reason, id)
-  send(client.ws, publicSession(session, person, await currentIce(), decision.reason))
+  await sendWelcome(session, client, person, decision.reason)
   emitRoster(session)
+}
+
+async function sendWelcome(session: Session, client: Client, person: Participant, reason?: string) {
+  const { snap, ice } = await welcomeIce()
+  send(client.ws, publicSession(session, person, ice, snap, reason))
+  for (const publication of session.pubs.values()) {
+    if (publication.peerId === person.id) continue
+    send(client.ws, { t: 'sfu-pub', publication })
+  }
+  const sfu = sfuConfigured(process.env) && !snap.blocked
+  if (!sfu && !snap.blocked && ice.turn !== 'none' && person.admitted) {
+    await usage.openSession(`peer:${person.id}`, 1, admittedOthers(session, person.id))
+  }
+}
+
+function admittedOthers(session: Session, id: string) {
+  let count = 0
+  for (const person of session.participants.values()) if (person.admitted && person.id !== id) count += 1
+  return count
+}
+
+async function shapeRoom(session: Session) {
+  for (const [peerId, sessionId] of session.sfuSessions) {
+    await usage.setShape(sessionId, 1, admittedOthers(session, peerId))
+  }
+  for (const person of session.participants.values()) {
+    if (!person.admitted) continue
+    await usage.setShape(`peer:${person.id}`, 1, admittedOthers(session, person.id))
+  }
+}
+
+function releaseMedia(session: Session, id: string) {
+  const sfuId = session.sfuSessions.get(id)
+  session.sfuSessions.delete(id)
+  session.pubs.delete(id)
+  if (sfuId) void usage.closeSession(sfuId)
+  void usage.closeSession(`peer:${id}`)
+  void shapeRoom(session)
 }
 
 function drop(session: Session, id: string, event: 'rejected' | 'removed') {
@@ -720,6 +926,7 @@ function drop(session: Session, id: string, event: 'rejected' | 'removed') {
   session.participants.delete(id)
   session.held.delete(id)
   session.clients.delete(id)
+  releaseMedia(session, id)
   broadcast(session, { t: 'peer-left', id })
   if (target) {
     target.sessionCode = undefined
@@ -732,6 +939,7 @@ setInterval(() => {
   const now = Date.now()
   for (const [code, session] of sessions) {
     if (session.clients.size === 0 && session.emptyAt && now - session.emptyAt > 10 * 60 * 1000) {
+      for (const id of [...session.sfuSessions.keys()]) releaseMedia(session, id)
       sessions.delete(code)
       for (const key of uploads.keys()) {
         if (key.startsWith(`${code}:`)) uploads.delete(key)
