@@ -228,8 +228,20 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); background: #070b09; }
 
 .side-tabs { display: flex; gap: 4px; padding: 0 8px; }
-.side-tabs button { flex: 1; }
-.side-tabs button.active { background: var(--panel-3); color: var(--text); }
+.side-tabs button { flex: 1; border-color: transparent; background: transparent; }
+.side-tabs button.active { background: transparent; color: var(--text); font-weight: 640; }
+.settings-sheet { display: flex; flex-direction: column; gap: 8px; padding: 4px 10px 8px; }
+.settings-stats { color: var(--muted); font-family: var(--mono); font-size: 11px; line-height: 1.4; white-space: nowrap; }
+.settings-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.settings-sheet .text-btn { border-color: transparent; background: var(--panel-2); }
+.settings-sheet .text-btn.primary { background: var(--accent); color: var(--accent-ink); }
+.settings-sheet .text-btn.warn { background: transparent; }
+.settings-sheet select { width: 100%; appearance: none; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 6px 0; }
+.settings-delay { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.settings-delay input { width: 72px; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 4px 0; }
+.dock .call-controls { border-top: 0; }
+.dock .call-controls .t-btn { border-color: transparent; background: var(--panel-2); }
+.dock .call-controls .t-btn.on { color: var(--accent); background: var(--accent-dim); }
 .panel { padding: 8px 10px 12px; overflow: auto; max-height: 240px; }
 .shell.artist .panel { max-height: 260px; }
 .person, .chat-line { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 13px; }
