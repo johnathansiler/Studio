@@ -317,6 +317,7 @@ export class SfuCall {
       await pc.setLocalDescription(answer)
     }
     await waitGather(pc, 2000)
+    if (this.pc !== pc || this.closed) throw Object.assign(new Error('The media path was replaced.'), { code: 'replaced' })
     const local = pc.localDescription
     if (!local?.sdp) throw new Error('The media answer was empty.')
     const accepted = await this.post('/api/sfu/renegotiate', {
@@ -370,6 +371,9 @@ export class SfuCall {
     this.recovering = true
     this.attempt += 1
     this.inflight?.abort()
+    // Closing the failed connection releases a gather that is still waiting,
+    // so the replacement queued below is not stuck behind it.
+    this.reset()
     const error = Object.assign(new Error('The media path failed.'), { code: 'ice' })
     void this.enqueue(async () => {
       try {
@@ -510,7 +514,7 @@ function waitGather(pc: RTCPeerConnection, ms: number) {
     }
     const cap = window.setTimeout(finish, ms)
     const onState = () => {
-      if (pc.iceGatheringState === 'complete') finish()
+      if (pc.connectionState === 'closed' || pc.iceGatheringState === 'complete') finish()
     }
     const onCandidate = (event: RTCPeerConnectionIceEvent) => {
       if (!event.candidate) return finish()

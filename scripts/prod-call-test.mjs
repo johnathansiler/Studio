@@ -1109,11 +1109,13 @@ async function runCarrier(browser) {
       const text = msg.text()
       if (/sfu|media server|ice|turn|Reconnecting/i.test(text)) console.log('HOST LOG', text.slice(0, 300))
     })
-    host.on('response', (response) => {
+    host.on('response', async (response) => {
       const url = response.url()
       if (!url.includes('/api/sfu/')) return
       const elapsed = admitMark.at ? Math.round((Date.now() - admitMark.at) / 1000) : 0
-      console.log('HOST SFU', response.status(), url.replace(base, ''), 't', elapsed)
+      let detail = ''
+      if (response.status() >= 400) detail = (await response.text().catch(() => '')).slice(0, 180)
+      console.log('HOST SFU', response.status(), url.replace(base, ''), 't', elapsed, detail)
     })
     try {
       await install(host)
