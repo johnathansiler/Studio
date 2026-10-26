@@ -687,6 +687,8 @@ async function hello(client: Client, msg: Record<string, unknown>) {
     record(session, 'join', decision.reason, resumeId)
     send(client.ws, publicSession(session, existing, await currentIce(), decision.reason))
     emitRoster(session)
+    // Candidates trickled at the old socket are gone. Peers send that generation again.
+    broadcast(session, { t: 'peer-resumed', id: resumeId }, resumeId)
     return
   }
   const id = resumeId && !session.participants.has(resumeId) && !session.held.has(resumeId) ? resumeId : crypto.randomUUID()
