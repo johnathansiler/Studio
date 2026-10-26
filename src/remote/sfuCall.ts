@@ -64,7 +64,10 @@ export class SfuCall {
   private midOf = new Map<string, { peerId: string; kind: SfuKind }>()
   private senders = new Map<SfuKind, RTCRtpSender>()
   private localMids: string[] = []
-  private reviveQueued = false
+  /** Bumped when a failed path is replaced, so an in-flight request cannot keep going. */
+  private attempt = 0
+  private inflight: AbortController | null = null
+  private recovering = false
 
   constructor(private host: SfuHost) {}
 
@@ -153,6 +156,8 @@ export class SfuCall {
     try {
       await this.publish()
     } catch (error) {
+      const code = String((error as { code?: string }).code || '')
+      if (code === 'replaced') return
       await this.recover(error)
       return
     }
@@ -160,17 +165,22 @@ export class SfuCall {
   }
 
   private async recover(error: unknown) {
-    if (this.closed) return
-    const code = String((error as { code?: string }).code || '')
-    const message = error instanceof Error ? error.message : 'The media server did not connect.'
-    if (code === 'cap' || code === 'disabled' || this.replaced || this.tries >= 2) {
-      this.host.note(message)
-      return
+    if (this.closed || this.recovering) return
+    this.recovering = true
+    try {
+      const code = String((error as { code?: string }).code || '')
+      const message = error instanceof Error ? error.message : 'The media server did not connect.'
+      if (code === 'cap' || code === 'disabled' || code === 'replaced' || this.replaced || this.tries >= 2) {
+        if (code !== 'replaced') this.host.note(message)
+        return
+      }
+      this.replaced = true
+      this.host.note('Reconnecting media once.')
+      this.reset()
+      await this.establish()
+    } finally {
+      this.recovering = false
     }
-    this.replaced = true
-    this.host.note('Reconnecting media once.')
-    this.reset()
-    await this.establish()
   }
 
   private reset() {
@@ -188,6 +198,7 @@ export class SfuCall {
   }
 
   private async publish() {
+    const generation = this.attempt
     const pc = this.openPc(this.replaced)
     const kinds: SfuKind[] = ['music', 'talk', 'camera', 'screen']
     const localTracks = this.host.tracks()
@@ -207,6 +218,7 @@ export class SfuCall {
       await pc.setLocalDescription(offer)
     }
     await waitGather(pc, 12000)
+    if (generation !== this.attempt || this.pc !== pc) throw Object.assign(new Error('The media path was replaced.'), { code: 'replaced' })
     const local = pc.localDescription
     if (!local?.sdp) throw new Error('The media offer was empty.')
     const tracks = kinds.map((kind) => {
@@ -262,10 +274,11 @@ export class SfuCall {
     } catch (error) {
       const code = String((error as { code?: string }).code || '')
       // The socket may be down for a few seconds. The next announcement retries.
-      if (code === 'unreachable' || code === 'forbidden' || error instanceof TypeError) return
+      if (code === 'unreachable' || code === 'forbidden' || code === 'replaced' || error instanceof TypeError) return
       await this.recover(error)
       return
     }
+    if (this.pc == null) return
     const remote = response.tracks || []
     let accepted = 0
     remote.forEach((row, index) => {
@@ -282,7 +295,7 @@ export class SfuCall {
       await this.answerOffer(this.pc, response.sessionDescription)
     } catch (error) {
       const code = String((error as { code?: string }).code || '')
-      if (code === 'unreachable' || code === 'forbidden' || error instanceof TypeError) return
+      if (code === 'unreachable' || code === 'forbidden' || code === 'replaced' || error instanceof TypeError) return
       await this.recover(error)
       return
     }
@@ -345,16 +358,12 @@ export class SfuCall {
   }
 
   private queueRevive(pc: RTCPeerConnection) {
-    if (this.reviveQueued || this.closed || this.pc !== pc) return
-    const dead = pc.connectionState === 'failed' || pc.iceConnectionState === 'failed'
-    if (!dead) return
-    this.reviveQueued = true
-    void this.enqueue(async () => {
-      this.reviveQueued = false
-      if (this.closed || this.pc !== pc) return
-      if (pc.connectionState !== 'failed' && pc.iceConnectionState !== 'failed') return
-      await this.recover(Object.assign(new Error('The media path failed.'), { code: 'ice' }))
-    })
+    if (this.recovering || this.replaced || this.closed || this.pc !== pc) return
+    if (pc.connectionState !== 'failed' && pc.iceConnectionState !== 'failed') return
+    // A subscribe may be waiting out a reset. Drop it and open the replacement now.
+    this.attempt += 1
+    this.inflight?.abort()
+    void this.recover(Object.assign(new Error('The media path failed.'), { code: 'ice' }))
   }
 
   private emitState() {
@@ -417,12 +426,17 @@ export class SfuCall {
   }
 
   private async post(path: string, body: unknown, attempt = 0): Promise<SfuBody> {
+    const generation = this.attempt
+    const controller = new AbortController()
+    this.inflight = controller
     try {
       const response = await fetch(path, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
+        signal: controller.signal,
       })
+      if (generation !== this.attempt) throw Object.assign(new Error('The media path was replaced.'), { code: 'replaced' })
       let parsed: SfuBody = {}
       try {
         parsed = (await response.json()) as SfuBody
@@ -438,9 +452,14 @@ export class SfuCall {
       return parsed
     } catch (error) {
       const code = String((error as { code?: string }).code || '')
+      const aborted = error instanceof DOMException && error.name === 'AbortError'
+      if (generation !== this.attempt || code === 'replaced' || aborted) {
+        throw Object.assign(new Error('The media path was replaced.'), { code: 'replaced' })
+      }
       const reset = error instanceof TypeError || code === 'unreachable'
       if (reset && attempt < 8) {
         await pause(1500)
+        if (generation !== this.attempt) throw Object.assign(new Error('The media path was replaced.'), { code: 'replaced' })
         return this.post(path, body, attempt + 1)
       }
       throw error
