@@ -64,6 +64,7 @@ export class SfuCall {
   private midOf = new Map<string, { peerId: string; kind: SfuKind }>()
   private senders = new Map<SfuKind, RTCRtpSender>()
   private localMids: string[] = []
+  private reviveQueued = false
 
   constructor(private host: SfuHost) {}
 
@@ -331,17 +332,29 @@ export class SfuCall {
       if (!mapped) return
       this.host.onTrack(mapped.peerId, mapped.kind, event.track)
     }
-    pc.onconnectionstatechange = () => this.emitState()
+    pc.onconnectionstatechange = () => {
+      this.emitState()
+      this.queueRevive(pc)
+    }
     pc.oniceconnectionstatechange = () => {
       this.emitState()
-      if (this.closed || this.pc !== pc || pc.iceConnectionState !== 'failed') return
-      void this.enqueue(async () => {
-        if (this.closed || this.pc !== pc) return
-        await this.recover(Object.assign(new Error('The media path failed.'), { code: 'ice' }))
-      })
+      this.queueRevive(pc)
     }
     pc.onsignalingstatechange = () => this.emitState()
     return pc
+  }
+
+  private queueRevive(pc: RTCPeerConnection) {
+    if (this.reviveQueued || this.closed || this.pc !== pc) return
+    const dead = pc.connectionState === 'failed' || pc.iceConnectionState === 'failed'
+    if (!dead) return
+    this.reviveQueued = true
+    void this.enqueue(async () => {
+      this.reviveQueued = false
+      if (this.closed || this.pc !== pc) return
+      if (pc.connectionState !== 'failed' && pc.iceConnectionState !== 'failed') return
+      await this.recover(Object.assign(new Error('The media path failed.'), { code: 'ice' }))
+    })
   }
 
   private emitState() {
