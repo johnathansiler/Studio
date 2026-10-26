@@ -210,12 +210,17 @@ export class SfuCall {
     const pc = this.openPc(this.replaced)
     const kinds: SfuKind[] = ['music', 'talk', 'camera', 'screen']
     const localTracks = this.host.tracks()
+    const sending: SfuKind[] = []
     for (const kind of kinds) {
-      const media = localTracks[kind] || (kind === 'camera' || kind === 'screen' ? 'video' : 'audio')
-      const transceiver = pc.addTransceiver(media, { direction: 'sendonly' })
+      const track = localTracks[kind]
+      // An empty video section never sends frames. Safari still starts an encoder for it
+      // and then fails the whole connection while the subscribe answer is gathered.
+      if ((kind === 'camera' || kind === 'screen') && !track) continue
+      const transceiver = pc.addTransceiver(track || 'audio', { direction: 'sendonly' })
       this.senders.set(kind, transceiver.sender)
       if (kind === 'music' || kind === 'talk') this.preferOpus(transceiver)
       else this.preferVideo(transceiver)
+      sending.push(kind)
     }
     await this.attachLocal()
     const offer = await pc.createOffer()
@@ -229,7 +234,7 @@ export class SfuCall {
     if (generation !== this.attempt || this.pc !== pc) throw Object.assign(new Error('The media path was replaced.'), { code: 'replaced' })
     const local = pc.localDescription
     if (!local?.sdp) throw new Error('The media offer was empty.')
-    const tracks = kinds.map((kind) => {
+    const tracks = sending.map((kind) => {
       const mid = [...pc.getTransceivers()].find((item) => item.sender === this.senders.get(kind))?.mid || ''
       return { location: 'local', mid, trackName: trackName(this.host.peerId, kind) }
     })
@@ -252,7 +257,7 @@ export class SfuCall {
     else await pc.setRemoteDescription(answer.sessionDescription)
     await this.tune()
     this.published = true
-    const announced = kinds.filter((kind) => kind !== 'screen' || localTracks.screen)
+    const announced = sending.filter((kind) => kind === 'music' || kind === 'talk' || localTracks[kind])
     this.host.sendPub({
       peerId: this.host.peerId,
       sessionId,
@@ -435,16 +440,67 @@ export class SfuCall {
 
   private async attachLocal() {
     const tracks = this.host.tracks()
+    const pc = this.pc
+    const added: SfuKind[] = []
     for (const kind of ['music', 'talk', 'camera', 'screen'] as const) {
-      const sender = this.senders.get(kind)
-      if (!sender || sender.track === tracks[kind]) continue
+      const track = tracks[kind]
+      let sender = this.senders.get(kind)
+      if (!sender && track && pc && (kind === 'camera' || kind === 'screen')) {
+        const transceiver = pc.addTransceiver(track, { direction: 'sendonly' })
+        this.senders.set(kind, transceiver.sender)
+        this.preferVideo(transceiver)
+        sender = transceiver.sender
+        added.push(kind)
+      }
+      if (!sender || sender.track === track) continue
       try {
-        await sender.replaceTrack(tracks[kind])
+        await sender.replaceTrack(track)
       } catch {
         /* the next publish retry attaches it */
       }
     }
     await this.tune()
+    if (added.length && this.published && this.sessionId && pc) await this.publishAdded(pc, added)
+  }
+
+  /** The camera can open after the first offer. One new offer publishes it. */
+  private async publishAdded(pc: RTCPeerConnection, kinds: SfuKind[]) {
+    const offer = await pc.createOffer()
+    const munged = mungeOpusSdp(offer.sdp || '', this.host.opus || DEFAULT_OPUS)
+    try {
+      await pc.setLocalDescription({ type: 'offer', sdp: munged })
+    } catch {
+      await pc.setLocalDescription(offer)
+    }
+    await waitGather(pc, 2000)
+    if (this.pc !== pc || this.closed) return
+    const local = pc.localDescription
+    if (!local?.sdp || !this.sessionId) return
+    const tracks = kinds.map((kind) => {
+      const mid = [...pc.getTransceivers()].find((item) => item.sender === this.senders.get(kind))?.mid || ''
+      return { location: 'local' as const, mid, trackName: trackName(this.host.peerId, kind) }
+    }).filter((track) => track.mid)
+    if (!tracks.length) return
+    this.localMids = [...new Set([...this.localMids, ...tracks.map((track) => track.mid)])]
+    const answer = await this.post('/api/sfu/tracks', {
+      code: this.host.code,
+      peerId: this.host.peerId,
+      sessionId: this.sessionId,
+      sessionDescription: { type: local.type, sdp: local.sdp },
+      tracks,
+    })
+    const refused = (answer.tracks || []).find((track) => track.errorCode)
+    if (refused || !answer.sessionDescription?.sdp || this.pc !== pc) return
+    if (answer.sessionDescription.type === 'offer' || answer.requiresImmediateRenegotiation) await this.answerOffer(pc, answer.sessionDescription)
+    else await pc.setRemoteDescription(answer.sessionDescription)
+    const current = this.host.tracks()
+    this.host.sendPub({
+      peerId: this.host.peerId,
+      sessionId: this.sessionId,
+      tracks: (['music', 'talk', 'camera', 'screen'] as const)
+        .filter((kind) => this.senders.has(kind) && (kind === 'music' || kind === 'talk' || current[kind]))
+        .map((kind) => ({ trackName: trackName(this.host.peerId, kind), kind })),
+    })
   }
 
   private async tune() {
@@ -582,7 +638,7 @@ async function tuneAudio(sender: RTCRtpSender | undefined, maxBitrate: number) {
 }
 
 async function tuneVideo(sender: RTCRtpSender | undefined, track: MediaStreamTrack | null) {
-  if (!sender) return
+  if (!sender || !track) return
   const params = sender.getParameters()
   if (!params.encodings?.length) return
   const settings = track?.getSettings() || {}

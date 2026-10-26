@@ -1417,7 +1417,7 @@ export class SessionClient {
           t: 'sfu-pub',
           sessionId: this.sfuCall.sessionId,
           tracks: kinds
-            .filter((kind) => kind !== 'screen' || Boolean(this.screenTrack()))
+            .filter((kind) => (kind !== 'screen' || Boolean(this.screenTrack())) && (kind !== 'camera' || Boolean(this.cameraTrack())))
             .map((kind) => ({ trackName: `${this.state.selfId}:${kind}`, kind })),
         })
       }
