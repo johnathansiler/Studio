@@ -10,7 +10,7 @@ import { readIdentity, writeIdentity } from './storage/identity'
 import { ProjectStore, seedDemoProject } from './state/store'
 import { decodeWavPCM, encodeWav, linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
-import { beatsToSamples } from './model/time'
+import { beatsToSamples, countInSeconds } from './model/time'
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { ArrangeView } from './ui/ArrangeView'
 import { MixerView } from './ui/MixerView'
@@ -409,27 +409,41 @@ export function App() {
     await ready()
     if (mode === 'arrangement') store.armArrangement()
     const lead = scheduleLeadMs(session.primaryOneWay()?.ms ?? 40)
+    const counting = store.project.countIn && engine.status === 'stopped'
+    const countMs = counting ? countInSeconds(store.project.tempo, store.project.timeSignature) * 1000 : 0
     engine.refreshClockAnchor()
-    const hostPerf = performance.now() + lead
+    const hostPerf = performance.now() + lead + countMs
     session.broadcastTransport({
       action: 'play',
       timelineSample: Math.round(sample),
       hostPerfAtSample: hostPerf,
       mode,
       tempo: store.project.tempo,
+      countIn: counting,
+      countInMs: Math.round(countMs),
+      timeSignature: store.project.timeSignature,
     })
+    if (counting) engine.armCountIn(store.project.tempo, store.project.timeSignature)
     await engine.playAtPerf(sample, hostPerf, mode)
   }
 
   async function followPlay(cmd: Record<string, unknown>) {
     await ready()
+    const counting = Boolean(cmd.countIn)
+    const tempo = Number(cmd.tempo) || store.project.tempo
+    const raw = cmd.timeSignature as { numerator?: number; denominator?: number } | undefined
+    const signature = raw?.numerator && raw?.denominator
+      ? { numerator: raw.numerator, denominator: raw.denominator }
+      : store.project.timeSignature
     const localPerf = guestFollowStart({
       hostPerfAtSample: Number(cmd.hostPerfAtSample) || performance.now(),
       clockOffsetMs: session.hostOffsetMs(),
       oneWayMs: session.primaryOneWay()?.ms ?? 40,
       nowPerf: performance.now(),
+      countInMs: counting ? Number(cmd.countInMs) || 0 : 0,
     })
     const mode = cmd.mode === 'session' ? 'session' : 'arrangement'
+    if (counting) engine.armCountIn(tempo, signature)
     await engine.playAtPerf(Number(cmd.timelineSample) || 0, localPerf, mode)
   }
 
@@ -537,9 +551,11 @@ export function App() {
     }
     const fromSample = Math.round(engine.currentTimelineSample())
     const alreadyPlaying = engine.status === 'playing'
+    const counting = store.project.countIn && !alreadyPlaying
     const lead = scheduleLeadMs(session.primaryOneWay()?.ms ?? 40)
+    const countMs = counting ? countInSeconds(store.project.tempo, store.project.timeSignature) * 1000 : 0
     engine.refreshClockAnchor()
-    const hostPerf = performance.now() + lead
+    const hostPerf = performance.now() + lead + countMs
     if (!alreadyPlaying) {
       session.broadcastTransport({
         action: 'play',
@@ -547,12 +563,15 @@ export function App() {
         hostPerfAtSample: hostPerf,
         mode: 'arrangement',
         tempo: store.project.tempo,
+        countIn: counting,
+        countInMs: Math.round(countMs),
+        timeSignature: store.project.timeSignature,
       })
     }
     await engine.beginRecord({
       fromSample,
       inputs,
-      countIn: store.project.countIn && !alreadyPlaying,
+      countIn: counting,
       hostPerfAtSample: alreadyPlaying ? undefined : hostPerf,
       onPunch: (info) => {
         takeRef.current = { id: takeId, endSample: info.timelineSample }
@@ -826,7 +845,7 @@ export function App() {
           session.primeMediaFromGesture()
           void session.resumeAudio()
         }}>
-          Tap to reconnect
+          Tap for sound
         </button>
       )}
       {joinOpen && (

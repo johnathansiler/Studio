@@ -17,7 +17,7 @@ import {
 } from '../model/latency'
 import { DEFAULT_OPUS, mungeOpusSdp, videoDirectionsFromSdp } from '../model/sdp'
 import { rememberDiag, sanitizeDiag } from '../model/diag'
-import { arrangementDigest, assetChunkCount, ASSET_CHUNK_BYTES, catchUpSchedule, guestFollowStart, guestMayRequest, guestStartPerf, mediaCanCarryAssets, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
+import { arrangementDigest, assetChunkCount, ASSET_CHUNK_BYTES, catchUpSchedule, guestFollowStart, guestMayRequest, guestStartPerf, mediaCanCarryAssets, outlineWaveforms, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
 import { capGigabytes, creditSession, estimateBytesPerSecond, monthKey, usageSnapshot } from '../model/usage'
 import { createUsageLedger } from '../../server/usage.ts'
 import { sfuCall, sfuConfigured } from '../../server/sfu.ts'
@@ -618,6 +618,37 @@ describe('opus sdp and wav', () => {
     expect(clean?.peers[0].currentRoundTripTime).toBe(0.182)
     expect(clean?.peers[0].outbound).not.toHaveProperty('sdp')
     expect(JSON.stringify(clean)).not.toMatch(/secret|credential|candidate/)
+    const sfu = sanitizeDiag({
+      at: 7,
+      peerId: 'peer-1',
+      role: 'guest',
+      ua: 'Safari',
+      peers: [],
+      sfu: {
+        sessionId: 'sess-1',
+        published: true,
+        dtls: 'connected',
+        ice: 'connected',
+        signaling: 'stable',
+        sending: ['music', 'camera'],
+        pulled: [{ mid: '4', kind: 'camera', peer: '4761a304', sdp: 'v=0 secret' }],
+        pull: 'camera:4:',
+        selected: { local: 'relay', remote: 'relay', protocol: 'udp', relayProtocol: 'udp', url: 'turn:secret' },
+        outCodec: 'video/H264',
+        outFrames: 10,
+        inCodec: 'video/H264',
+        inFrames: 8,
+        inReceived: 9,
+        videos: [{ peer: '4761a304', w: 160, h: 120, frames: 8, play: '' }],
+        credential: 'do-not-keep',
+      },
+    })
+    expect(sfu?.sfu?.dtls).toBe('connected')
+    expect(sfu?.sfu?.pulled).toEqual([{ mid: '4', kind: 'camera', peer: '4761a304' }])
+    expect(sfu?.sfu?.inCodec).toBe('video/H264')
+    expect(sfu?.sfu?.videos[0].w).toBe(160)
+    expect(sfu?.sfu?.selected).toEqual({ local: 'relay', remote: 'relay', protocol: 'udp', relayProtocol: 'udp' })
+    expect(JSON.stringify(sfu)).not.toMatch(/secret|credential/)
     const log = rememberDiag([], clean!, 1)
     const next = rememberDiag(log, { ...clean!, at: 6 }, 1)
     expect(next).toHaveLength(1)
@@ -870,6 +901,20 @@ describe('cloudflare egress cap', () => {
     expect(guestFollowStart({ hostPerfAtSample: 5_000, clockOffsetMs: 40, oneWayMs: 30, nowPerf: 4_900 })).toBe(4_960)
     const fallback = guestFollowStart({ hostPerfAtSample: 5_000, clockOffsetMs: null, oneWayMs: 40, nowPerf: 1_000 })
     expect(fallback).toBe(1_080)
+    const counted = guestFollowStart({ hostPerfAtSample: 5_000, clockOffsetMs: null, oneWayMs: 40, nowPerf: 1_000, countInMs: 2_000 })
+    expect(counted).toBe(2_960)
+  })
+
+  it('sends a clip outline the guest can draw before the wav arrives', () => {
+    const tone = new Float32Array(480)
+    for (let i = 0; i < tone.length; i++) tone[i] = Math.sin((i / 48) * Math.PI) * 0.8
+    const project = {
+      tracks: [{ clips: [{ bufferId: 'buf' }], midiClips: [] }],
+    }
+    const buffers = new Map([['buf', { id: 'buf', name: 'Bulk', sampleRate: 48000, channels: [tone] }]])
+    const waves = outlineWaveforms(project as never, buffers)
+    expect(waves.buf?.length).toBeGreaterThan(8)
+    expect(waves.buf?.some((peak) => peak.max > 0.2)).toBe(true)
   })
 })
 

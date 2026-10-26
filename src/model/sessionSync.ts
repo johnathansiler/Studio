@@ -1,4 +1,5 @@
-import type { Project } from './types'
+import { computePeaks } from './demo'
+import type { AudioAsset, Project } from './types'
 
 /** How long the host waits so a guest can receive the start time before the downbeat. */
 export function scheduleLeadMs(oneWayMs: number): number {
@@ -25,12 +26,30 @@ export function guestFollowStart(args: {
   clockOffsetMs: number | null
   oneWayMs: number
   nowPerf: number
+  /** When the clocks are not mapped yet, wait out the count-in instead of starting now. */
+  countInMs?: number
 }): number {
   if (args.clockOffsetMs == null || !Number.isFinite(args.clockOffsetMs)) {
     const oneWay = Number.isFinite(args.oneWayMs) ? Math.max(0, args.oneWayMs) : 40
+    const countIn = Number.isFinite(args.countInMs) ? Math.max(0, Number(args.countInMs)) : 0
+    if (countIn > 0) return args.nowPerf + Math.max(0, countIn - oneWay)
     return args.nowPerf + Math.max(0, scheduleLeadMs(oneWay) - oneWay)
   }
   return guestStartPerf(args.hostPerfAtSample, args.clockOffsetMs)
+}
+
+/** Small peak outline for each referenced clip. The wav itself stays on HTTP. */
+export function outlineWaveforms(project: Project, buffers: Map<string, AudioAsset>): Record<string, { min: number; max: number }[]> {
+  const out: Record<string, { min: number; max: number }[]> = {}
+  for (const id of referencedBufferIds(project)) {
+    const channel = buffers.get(id)?.channels[0]
+    if (!channel?.length) continue
+    out[id] = computePeaks(channel, 160).map((peak) => ({
+      min: Math.round(peak.min * 100) / 100,
+      max: Math.round(peak.max * 100) / 100,
+    }))
+  }
+  return out
 }
 
 /** If the start message arrives late, move the playhead forward so both sides meet. */

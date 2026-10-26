@@ -16,7 +16,7 @@ import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, sendVideoC
 import { isSilentTake, nextRelayGather, tcpRelayIceServers, udpIceServers, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
 import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_INITIAL_GATHER_MS, ICE_RESTART_VIDEO_HOLD_MS, ICE_STUCK_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
 import { sanitizeDiag, type DiagDirection } from '../model/diag'
-import { arrangementDigest, ASSET_CHUNK_BYTES, ASSET_CHUNK_GAP_MS, assetChunkCount, guestMayRequest, mediaCanCarryAssets, referencedBufferIds } from '../model/sessionSync'
+import { arrangementDigest, ASSET_CHUNK_BYTES, ASSET_CHUNK_GAP_MS, assetChunkCount, guestMayRequest, mediaCanCarryAssets, outlineWaveforms, referencedBufferIds } from '../model/sessionSync'
 import { CAP_NOTICE } from '../model/usage'
 import { SfuCall, type SfuKind, type SfuPublication } from './sfuCall'
 import { decodeWavPCM, encodeWav } from '../model/wav'
@@ -239,7 +239,6 @@ export class SessionClient {
   private lastRx = 0
   private primedMusic: Promise<MediaStream | null> | null = null
   private primedCamera: Promise<MediaStream | null> | null = null
-  private deferMedia = false
   private punch: {
     takeId: string
     recordStartSample: number
@@ -390,26 +389,25 @@ export class SessionClient {
     }, 8000)
   }
 
-  /**
-   * iOS only grants the microphone when getUserMedia runs in the tap turn.
-   * Every attempt starts now, before any await. A rejected stereo/48 kHz request
-   * falls through to the relaxed one that was already in flight.
-   */
-  holdMediaForGesture() {
-    this.deferMedia = true
-  }
+  /** Page-load joins have no gesture yet. Subscribe anyway; the sound tap retries the mic. */
+  holdMediaForGesture() {}
 
   async resumeAudio() {
-    this.deferMedia = false
-    this.state.audioLocked = false
-    this.emit()
+    try {
+      await this.engine.resume()
+    } catch {
+      /* playback stays locked until this tap's resume lands */
+    }
     try {
       await withTimeout(this.openDevices(), 12000, 'Microphone')
     } catch (error) {
-      this.state.audioLocked = true
       this.note(error instanceof Error ? error.message : 'Audio did not start.')
     }
     this.applySendTracks()
+    for (const video of document.querySelectorAll('video')) {
+      if (video.muted) void video.play().catch(() => undefined)
+    }
+    this.state.audioLocked = this.engine.ctx?.state === 'suspended'
     this.emit()
   }
 
@@ -663,23 +661,18 @@ export class SessionClient {
       window.clearTimeout(this.joinTimer)
       this.emit()
       const keepMedia = Boolean(this.musicStream || this.talkStream)
-      const needsTap = !keepMedia && (this.deferMedia || (this.iosDevice() && !this.primedMusic && !navigator.userActivation?.isActive))
-      this.deferMedia = false
-      if (keepMedia) {
-        // The signaling socket came back. A connected peer connection stays up.
-      } else if (needsTap) {
-        this.state.audioLocked = true
-        this.note('Tap to reconnect audio.')
-        this.emit()
-      } else {
-        try {
-          await withTimeout(this.openDevices(), 12000, 'Microphone')
-        } catch (error) {
-          this.state.audioLocked = true
-          this.note(error instanceof Error ? `${error.message}. You are still in the room.` : 'Microphone setup did not finish. You are still in the room.')
-        }
-      }
+      // Subscribe as soon as the room is live. Waiting on the mic prompt, or on
+      // a tap, was leaving the iPhone with no remote camera.
       this.syncMesh()
+      if (!keepMedia) {
+        void this.openDevices()
+          .catch((error) => {
+            this.note(error instanceof Error ? `${error.message}. You are still in the room.` : 'Microphone setup did not finish. You are still in the room.')
+          })
+          .finally(() => { void this.markSoundLock() })
+      } else {
+        void this.markSoundLock()
+      }
       this.startMaintenance()
       this.flushOutbox()
       this.resendLiveNegotiation()
@@ -921,11 +914,6 @@ export class SessionClient {
     })
   }
 
-  private iosDevice() {
-    const ua = navigator.userAgent
-    return /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  }
-
   private openDevices() {
     if (this.deviceJob) return this.deviceJob
     const job = this.captureDevices().finally(() => {
@@ -976,9 +964,7 @@ export class SessionClient {
           this.note('Local recording did not start. You are still in the room.')
         }
       }
-      this.state.audioLocked = false
     } catch {
-      this.state.audioLocked = true
       this.note('Microphone permission is blocked. You can still listen.')
     }
     if (this.talkStream && this.talkStream !== this.musicStream) this.talkStream.getTracks().forEach((track) => track.stop())
@@ -1098,7 +1084,7 @@ export class SessionClient {
     if (digest !== this.lastDigest) {
       this.lastDigest = digest
       this.arrangementRev += 1
-      this.send({ t: 'project', rev: this.arrangementRev, project: store.project })
+      this.send({ t: 'project', rev: this.arrangementRev, project: { ...store.project, waveforms: outlineWaveforms(store.project, store.buffers) } })
       this.state.syncLabel = 'Host · guests follow'
       this.emit()
     }
@@ -1466,9 +1452,23 @@ export class SessionClient {
   }
 
   /** Create a peer connection when someone joins. A socket rejoin leaves the existing one alone. */
+  private async markSoundLock() {
+    let locked = false
+    try {
+      await this.engine.resume()
+      locked = this.engine.ctx?.state === 'suspended'
+    } catch {
+      locked = true
+    }
+    this.state.audioLocked = locked
+    this.emit()
+  }
+
   private syncMesh() {
     if (this.state.status !== 'live') return
-    if (this.deviceJob) return
+    // A direct call still waits until the mic exists. The SFU must not: the
+    // subscribe is what paints the other phone, and capture can take the whole timeout.
+    if (this.deviceJob && !this.state.sfu) return
     if (!this.state.sfu && this.sfuCall) {
       this.sfuCall.close()
       this.sfuCall = null
@@ -2538,11 +2538,32 @@ export class SessionClient {
     const now = Date.now()
     if (now - this.lastDiag < 3000) return
     this.lastDiag = now
+    void this.sendDiagSnapshot(code, now)
+  }
+
+  private videoPaint() {
+    if (typeof document === 'undefined') return []
+    return [...document.querySelectorAll('.tile')].slice(0, 6).map((tile) => {
+      const video = tile.querySelector('video')
+      const quality = video?.getVideoPlaybackQuality?.()
+      return {
+        peer: (tile as HTMLElement).dataset.peer || '',
+        w: video?.videoWidth || 0,
+        h: video?.videoHeight || 0,
+        frames: quality?.totalVideoFrames || (video as HTMLVideoElement & { webkitDecodedFrameCount?: number })?.webkitDecodedFrameCount || 0,
+        play: video?.dataset.playError || (video?.paused ? 'paused' : ''),
+      }
+    })
+  }
+
+  private async sendDiagSnapshot(code: string, now: number) {
+    const sfu = this.sfuCall ? await this.sfuCall.mediaFacts().catch(() => null) : null
     const report = sanitizeDiag({
       at: now,
       peerId: this.state.selfId || '',
       role: this.state.role || '',
       ua: navigator.userAgent,
+      ...(sfu ? { sfu: { ...sfu, videos: this.videoPaint() } } : {}),
       peers: [...this.peers.entries()].map(([id, link]) => {
         const media = this.state.media[id]
         return {

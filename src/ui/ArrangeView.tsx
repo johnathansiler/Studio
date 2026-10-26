@@ -211,26 +211,32 @@ function ClipView({ store, clip, trackId, px }: { store: ProjectStore; clip: Aud
   const left = (shown.startSample / project.sampleRate) * px
   const width = Math.max(8, (shown.durationSamples / project.sampleRate) * px)
   const canvas = useRef<HTMLCanvasElement>(null)
+  const outline = project.waveforms?.[clip.bufferId]
   const peaks = useMemo(() => {
-    if (!asset) return []
-    const slice = asset.channels[0].subarray(shown.offsetSamples, shown.offsetSamples + shown.durationSamples)
-    return computePeaks(slice, Math.max(8, Math.round(width)))
-  }, [asset, shown.offsetSamples, shown.durationSamples, width])
+    if (asset?.channels[0]?.length) {
+      const slice = asset.channels[0].subarray(shown.offsetSamples, shown.offsetSamples + shown.durationSamples)
+      return computePeaks(slice, Math.max(8, Math.round(width)))
+    }
+    return outline || []
+  }, [asset, outline, shown.offsetSamples, shown.durationSamples, width])
 
   useEffect(() => {
     const node = canvas.current
-    if (!node) return
-    node.width = Math.max(8, Math.round(width))
+    if (!node || !peaks.length) return
+    const columns = Math.max(8, Math.round(width))
+    node.width = columns
     node.height = 64
     const ctx = node.getContext('2d')
     if (!ctx) return
     ctx.clearRect(0, 0, node.width, node.height)
     ctx.fillStyle = 'rgba(255,255,255,0.85)'
-    peaks.forEach((peak, index) => {
+    for (let x = 0; x < columns; x++) {
+      const peak = peaks[Math.min(peaks.length - 1, Math.floor((x * peaks.length) / columns))]
+      if (!peak) continue
       const y1 = (1 - peak.max) * 32
       const y2 = (1 - peak.min) * 32
-      ctx.fillRect(index, y1, 1, Math.max(1, y2 - y1))
-    })
+      ctx.fillRect(x, y1, 1, Math.max(1, y2 - y1))
+    }
   }, [peaks, width])
 
   function pointerDown(event: ReactPointerEvent, mode: 'move' | 'start' | 'end') {

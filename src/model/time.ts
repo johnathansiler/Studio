@@ -20,6 +20,12 @@ export function samplesPerBeatUnit(sampleRate: number, tempo: number, sig: TimeS
   return samplesPerQuarter(sampleRate, tempo) * (4 / sig.denominator)
 }
 
+/** One bar of clicks before the downbeat. The sample rate cancels out. */
+export function countInSeconds(tempo: number, sig: TimeSignature): number {
+  const beat = samplesPerBeatUnit(48000, Math.max(1, tempo), sig) / 48000
+  return Math.max(0, sig.numerator) * beat
+}
+
 export function beatsToSamples(beats: number, sampleRate: number, tempo: number): number {
   return beats * samplesPerQuarter(sampleRate, tempo)
 }
