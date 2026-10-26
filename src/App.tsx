@@ -11,7 +11,7 @@ import { ProjectStore, seedDemoProject } from './state/store'
 import { decodeWavPCM, encodeWav, linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
 import { beatsToSamples } from './model/time'
-import { guestStartPerf, scheduleLeadMs } from './model/sessionSync'
+import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { ArrangeView } from './ui/ArrangeView'
 import { MixerView } from './ui/MixerView'
 import { PianoRoll } from './ui/PianoRoll'
@@ -36,6 +36,16 @@ function createBundle(): Bundle {
 
 export function App() {
   const [{ store, engine, session }] = useState(createBundle)
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const hook = window as unknown as { __cueharborPlayhead?: number; __cueharborStatus?: string; __cueharborRate?: number }
+      hook.__cueharborPlayhead = engine.currentTimelineSample()
+      hook.__cueharborStatus = engine.status
+      hook.__cueharborRate = engine.sampleRate
+    }, 40)
+    return () => window.clearInterval(id)
+  }, [engine])
   const [version, setVersion] = useState(0)
   const [surface, setSurface] = useState<'studio' | 'artist'>('studio')
   const [dock, setDock] = useState(380)
@@ -82,8 +92,7 @@ export function App() {
       }
       if (action === 'play') {
         pendingFollow.current = cmd
-        if (session.state.preferLocalBacking) void followPlay(cmd)
-        else engine.seek(Number(cmd.timelineSample) || 0)
+        void followPlay(cmd)
       } else if (action === 'stop') {
         pendingFollow.current = null
         engine.stop()
@@ -414,10 +423,12 @@ export function App() {
 
   async function followPlay(cmd: Record<string, unknown>) {
     await ready()
-    if (!session.state.preferLocalBacking) return
-    const offset = session.hostOffsetMs()
-    const hostPerf = Number(cmd.hostPerfAtSample) || performance.now()
-    const localPerf = offset == null ? performance.now() : guestStartPerf(hostPerf, offset)
+    const localPerf = guestFollowStart({
+      hostPerfAtSample: Number(cmd.hostPerfAtSample) || performance.now(),
+      clockOffsetMs: session.hostOffsetMs(),
+      oneWayMs: session.primaryOneWay()?.ms ?? 40,
+      nowPerf: performance.now(),
+    })
     const mode = cmd.mode === 'session' ? 'session' : 'arrangement'
     await engine.playAtPerf(Number(cmd.timelineSample) || 0, localPerf, mode)
   }

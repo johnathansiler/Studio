@@ -17,7 +17,13 @@ import {
 } from '../model/latency'
 import { DEFAULT_OPUS, mungeOpusSdp, videoDirectionsFromSdp } from '../model/sdp'
 import { rememberDiag, sanitizeDiag } from '../model/diag'
-import { arrangementDigest, assetChunkCount, ASSET_CHUNK_BYTES, catchUpSchedule, guestMayRequest, guestStartPerf, mediaCanCarryAssets, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
+import { arrangementDigest, assetChunkCount, ASSET_CHUNK_BYTES, catchUpSchedule, guestFollowStart, guestMayRequest, guestStartPerf, mediaCanCarryAssets, referencedBufferIds, scheduleLeadMs } from '../model/sessionSync'
+import { capGigabytes, creditSession, estimateBytesPerSecond, monthKey, usageSnapshot } from '../model/usage'
+import { createUsageLedger } from '../../server/usage.ts'
+import { sfuCall, sfuConfigured } from '../../server/sfu.ts'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { cameraAttempts, DEFAULT_VIDEO_BITRATE, legalDirection, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, videoDirection, videoEncodingBudget, videoTargetForBwe } from '../model/codecs'
 import { ensureCellularTurn, filterBrowserTurnUrls, isSilentTake, mediaStatus, nextRelayGather, queueIceCandidate, staticTurnServer, tcpRelayIceServers, udpIceServers } from '../model/media'
 import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_INITIAL_GATHER_MS, ICE_RESTART_VIDEO_HOLD_MS, ICE_STUCK_RESTART_MS, ICE_TCP_DISCONNECT_RESTART_MS, ICE_UDP_DISCONNECT_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, inviteWins, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen } from '../model/negotiate'
@@ -747,6 +753,82 @@ describe('project store', () => {
     expect(store.project.sampleRate).toBe(24000)
     expect(store.project.tracks[1].clips[0].durationSamples).toBe(Math.round(before / 2))
     expect(store.buffers.get(store.project.tracks[1].clips[0].bufferId)?.channels[0].length).toBe(2)
+  })
+})
+
+describe('cloudflare egress cap', () => {
+  it('names the UTC month and blocks at the cap', () => {
+    expect(monthKey(new Date('2026-10-26T23:30:00Z'))).toBe('2026-10')
+    expect(monthKey(new Date('2026-11-01T00:00:00Z'))).toBe('2026-11')
+    expect(capGigabytes(undefined)).toBe(500)
+    expect(capGigabytes('0')).toBe(500)
+    const open = usageSnapshot(10_000, 500, '2026-10')
+    expect(open.blocked).toBe(false)
+    expect(open.capGigabytes).toBe(500)
+    expect(Object.keys(open).sort()).toEqual(['blocked', 'bytes', 'capGigabytes', 'gigabytes', 'month'])
+    expect(usageSnapshot(500_000_000_000, 500, '2026-10').blocked).toBe(true)
+  })
+
+  it('counts SFU pulls and TURN relay, and keeps the larger of the report and the estimate', () => {
+    const perSecond = estimateBytesPerSecond(1, 1)
+    expect(perSecond).toBeGreaterThan((610_000 / 8) * 2)
+    const first = creditSession(0, 1_000, 400)
+    expect(first).toEqual({ credited: 1_000, added: 1_000 })
+    const raised = creditSession(first.credited, 1_000, 2_500)
+    expect(raised).toEqual({ credited: 2_500, added: 1_500 })
+    expect(creditSession(raised.credited, 2_000, 2_100).added).toBe(0)
+  })
+
+  it('persists the month across a new ledger and stops issuing TURN once the cap is reached', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'cueharbor-usage-'))
+    const filePath = path.join(dir, 'usage.json')
+    const env = { CF_REALTIME_MONTHLY_CAP_GB: '500' }
+    const first = createUsageLedger({ env, filePath, now: () => Date.parse('2026-10-26T12:00:00Z') })
+    await first.report('sfu-1', 499_000_000_000)
+    expect((await first.view()).blocked).toBe(false)
+    first.stop()
+    const second = createUsageLedger({ env, filePath, now: () => Date.parse('2026-10-26T13:00:00Z') })
+    const restored = await second.view()
+    expect(restored.bytes).toBeGreaterThanOrEqual(499_000_000_000)
+    expect(restored.blocked).toBe(false)
+    await second.applyFloor(500_000_000_000)
+    expect((await second.view()).blocked).toBe(true)
+    const nextMonth = createUsageLedger({ env, filePath, now: () => Date.parse('2026-11-01T00:00:00Z') })
+    expect((await nextMonth.view()).blocked).toBe(false)
+    expect((await nextMonth.view()).bytes).toBe(0)
+    second.stop()
+    nextMonth.stop()
+    clearIceCache()
+    let called = false
+    const ice = await currentIce({ CF_TURN_KEY_ID: 'key', CF_TURN_API_TOKEN: 'token' }, async () => {
+      called = true
+      return new Response('no', { status: 500 })
+    }, { stunOnly: true })
+    expect(called).toBe(false)
+    expect(ice.turn).toBe('none')
+    expect(ice.iceServers.some((server) => String(server.urls).includes('stun:'))).toBe(true)
+    expect(ice.iceServers.some((server) => /turn:/i.test(String(server.urls)))).toBe(false)
+  })
+
+  it('proxies the SFU without putting the app secret in the response', async () => {
+    expect(sfuConfigured({})).toBe(false)
+    expect(sfuConfigured({ CF_REALTIME_APP_ID: 'app', CF_REALTIME_APP_SECRET: 'super-secret' })).toBe(true)
+    let auth = ''
+    const result = await sfuCall({ CF_REALTIME_APP_ID: 'app', CF_REALTIME_APP_SECRET: 'super-secret' }, '/sessions/new', 'POST', null, async (url, init) => {
+      auth = String((init?.headers as { authorization?: string })?.authorization || '')
+      expect(String(url)).toContain('/apps/app/sessions/new')
+      expect(init?.body).toBeUndefined()
+      return new Response(JSON.stringify({ sessionId: 'sess', note: 'super-secret leaked' }), { status: 200 })
+    })
+    expect(auth).toBe('Bearer super-secret')
+    expect(JSON.stringify(result.body)).not.toContain('super-secret')
+    expect((result.body as { sessionId: string }).sessionId).toBe('sess')
+  })
+
+  it('starts the guest transport from the host clock, and from the lead when the offset is unknown', () => {
+    expect(guestFollowStart({ hostPerfAtSample: 5_000, clockOffsetMs: 40, oneWayMs: 30, nowPerf: 4_900 })).toBe(4_960)
+    const fallback = guestFollowStart({ hostPerfAtSample: 5_000, clockOffsetMs: null, oneWayMs: 40, nowPerf: 1_000 })
+    expect(fallback).toBe(1_080)
   })
 })
 
