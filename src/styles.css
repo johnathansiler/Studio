@@ -229,6 +229,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .side-tabs { display: flex; gap: 4px; padding: 0 8px; }
 .side-tabs button { flex: 1; }
+.side-tabs button.active { background: var(--panel-3); color: var(--text); }
 .panel { padding: 8px 10px 12px; overflow: auto; max-height: 240px; }
 .shell.artist .panel { max-height: 260px; }
 .person, .chat-line { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 13px; }
@@ -489,20 +490,6 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 .shell.phone .modal .row-btns { flex-direction: column; }
 .shell.phone .modal .row-btns .text-btn { width: 100%; min-height: 48px; }
 .shell.phone .empty-session .text-btn { width: 100%; min-height: 48px; }
-.new-session {
-  min-height: 44px;
-  min-width: 44px;
-  flex: 1 0 100%;
-  width: 100%;
-  position: relative;
-  z-index: 2;
-  font-weight: 640;
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-color: transparent;
-}
-.shell.phone .new-session { min-height: 48px; }
-.empty-session .new-session { flex: none; width: 100%; }
 .shell.phone .tap-reconnect { bottom: calc(64px + env(safe-area-inset-bottom)); }
 
 @media (orientation: landscape) and (max-height: 520px) {
