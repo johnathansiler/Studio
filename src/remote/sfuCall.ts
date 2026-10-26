@@ -71,6 +71,8 @@ export class SfuCall {
   /** Safari reports ICE failed while a subscribe answer is still being gathered. Closing then drops the answer. */
   private suppressRevive = false
   private reviveAfterAnswer = false
+  /** Last subscribe rows, kind:mid:error, so a phone diag can show an empty camera. */
+  private lastPull = ''
 
   constructor(private host: SfuHost) {}
 
@@ -117,6 +119,67 @@ export class SfuCall {
       relay += Number(row.bytesSent || 0) + Number(row.bytesReceived || 0)
     })
     return pulls + relay
+  }
+
+  /** Counters only. No SDP and no credentials. */
+  async mediaFacts() {
+    const pc = this.pc
+    const facts = {
+      sessionId: this.sessionId,
+      published: this.published,
+      dtls: this.connection,
+      ice: this.ice,
+      signaling: this.signaling,
+      sending: [...this.senders.keys()],
+      pulled: [...this.midOf.entries()].map(([mid, row]) => ({ mid, kind: row.kind, peer: row.peerId.slice(0, 8) })),
+      pull: this.lastPull,
+      selected: null as { local: string; remote: string; protocol: string; relayProtocol: string } | null,
+      outAudio: 0,
+      outVideo: 0,
+      outCodec: '',
+      outFrames: 0,
+      inAudio: 0,
+      inVideo: 0,
+      inCodec: '',
+      inFrames: 0,
+      inReceived: 0,
+    }
+    if (!pc) return facts
+    try {
+      const stats = await pc.getStats()
+      stats.forEach((report) => {
+        const row = report as unknown as Record<string, number | string | boolean>
+        if (report.type === 'outbound-rtp' && row.kind === 'audio') facts.outAudio += Number(row.bytesSent || 0)
+        if (report.type === 'outbound-rtp' && row.kind === 'video') {
+          facts.outVideo += Number(row.bytesSent || 0)
+          facts.outFrames += Number(row.framesEncoded || 0)
+          const codec = stats.get(String(row.codecId || '')) as { mimeType?: string } | undefined
+          if (codec?.mimeType) facts.outCodec = codec.mimeType
+        }
+        if (report.type === 'inbound-rtp' && row.kind === 'audio') facts.inAudio += Number(row.bytesReceived || 0)
+        if (report.type === 'inbound-rtp' && row.kind === 'video') {
+          facts.inVideo += Number(row.bytesReceived || 0)
+          facts.inFrames += Number(row.framesDecoded || 0)
+          facts.inReceived += Number(row.framesReceived || 0)
+          const codec = stats.get(String(row.codecId || '')) as { mimeType?: string } | undefined
+          if (codec?.mimeType) facts.inCodec = codec.mimeType
+        }
+        if (report.type !== 'candidate-pair') return
+        const chosen = Boolean(row.nominated) || Boolean(row.selected) || row.state === 'succeeded'
+        if (!chosen) return
+        const local = stats.get(String(row.localCandidateId || '')) as { candidateType?: string; protocol?: string; relayProtocol?: string } | undefined
+        const remote = stats.get(String(row.remoteCandidateId || '')) as { candidateType?: string; relayProtocol?: string } | undefined
+        facts.selected = {
+          local: local?.candidateType || '',
+          remote: remote?.candidateType || '',
+          protocol: local?.protocol || '',
+          relayProtocol: local?.relayProtocol || remote?.relayProtocol || '',
+        }
+      })
+    } catch {
+      /* the connection is closing */
+    }
+    return facts
   }
 
   close() {
@@ -293,6 +356,7 @@ export class SfuCall {
     }
     if (this.pc == null) return
     const remote = response.tracks || []
+    this.lastPull = remote.map((row) => `${String(row.trackName || '').split(':').pop() || ''}:${row.mid || ''}:${row.errorCode || ''}`).join(',').slice(0, 240)
     let accepted = 0
     remote.forEach((row, index) => {
       const asked = tracks.find((item) => item.trackName === row.trackName) || tracks[index]

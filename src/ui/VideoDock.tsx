@@ -438,7 +438,10 @@ function playVideo(el: HTMLVideoElement | null, stream: MediaStream | null, mute
   const same = current?.getVideoTracks()[0]?.id === nextId && nextId
   if (!same) el.srcObject = playable
   const start = () => {
-    void el.play().catch(() => undefined)
+    void el.play().then(
+      () => { el.dataset.playError = '' },
+      (error: unknown) => { el.dataset.playError = error instanceof Error ? error.name : 'play' },
+    )
   }
   start()
   el.onloadedmetadata = start

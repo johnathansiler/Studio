@@ -26,12 +26,52 @@ export interface DiagPeer {
   offers: number
 }
 
+export interface DiagSfuTrack {
+  mid: string
+  kind: string
+  peer: string
+}
+
+export interface DiagVideo {
+  peer: string
+  w: number
+  h: number
+  frames: number
+  play: string
+}
+
+/** One SFU peer connection. Peers stay empty on this path, so the picture has to live here. */
+export interface DiagSfu {
+  sessionId: string
+  published: boolean
+  /** connectionState, which is ICE plus DTLS. */
+  dtls: string
+  ice: string
+  signaling: string
+  sending: string[]
+  pulled: DiagSfuTrack[]
+  /** Last subscribe answer, as kind:mid:error. */
+  pull: string
+  selected: { local: string; remote: string; protocol: string; relayProtocol: string } | null
+  outAudio: number
+  outVideo: number
+  outCodec: string
+  outFrames: number
+  inAudio: number
+  inVideo: number
+  inCodec: string
+  inFrames: number
+  inReceived: number
+  videos: DiagVideo[]
+}
+
 export interface DiagReport {
   at: number
   peerId: string
   role: string
   ua: string
   peers: DiagPeer[]
+  sfu?: DiagSfu
   /** create, join, leave, evict, or a client session reason. */
   event?: string
   note?: string
@@ -134,14 +174,79 @@ export function sanitizeDiag(input: unknown): DiagReport | null {
   const at = Number(row.at)
   const event = clip(row.event, 40)
   const note = clip(row.note, 180)
+  const sfu = sfuFacts(row.sfu)
   return {
     at: Number.isFinite(at) ? Math.round(at) : Date.now(),
     peerId: clip(row.peerId, 80),
     role: clip(row.role, 16),
     ua: clip(row.ua, 180),
     peers,
+    ...(sfu ? { sfu } : {}),
     ...(event ? { event } : {}),
     ...(note ? { note } : {}),
+  }
+}
+
+const KIND = new Set(['music', 'talk', 'camera', 'screen'])
+
+function sfuFacts(value: unknown): DiagSfu | null {
+  if (!value || typeof value !== 'object') return null
+  const row = value as Record<string, unknown>
+  const selectedIn = row.selected && typeof row.selected === 'object' ? (row.selected as Record<string, unknown>) : null
+  const local = clip(selectedIn?.local, 16)
+  const remote = clip(selectedIn?.remote, 16)
+  const protocol = proto(selectedIn?.protocol)
+  const relayProtocol = proto(selectedIn?.relayProtocol)
+  const selected = selectedIn && (CANDIDATE.has(local) || CANDIDATE.has(remote) || protocol || relayProtocol)
+    ? { local, remote, protocol, relayProtocol }
+    : null
+  const sending = Array.isArray(row.sending)
+    ? row.sending.map((kind) => clip(kind, 16)).filter((kind) => KIND.has(kind)).slice(0, 4)
+    : []
+  const pulled: DiagSfuTrack[] = []
+  if (Array.isArray(row.pulled)) {
+    for (const item of row.pulled.slice(0, 8)) {
+      if (!item || typeof item !== 'object') continue
+      const track = item as Record<string, unknown>
+      const kind = clip(track.kind, 16)
+      if (!KIND.has(kind)) continue
+      pulled.push({ mid: clip(track.mid, 8), kind, peer: clip(track.peer, 12) })
+    }
+  }
+  const videos: DiagVideo[] = []
+  if (Array.isArray(row.videos)) {
+    for (const item of row.videos.slice(0, 6)) {
+      if (!item || typeof item !== 'object') continue
+      const video = item as Record<string, unknown>
+      videos.push({
+        peer: clip(video.peer, 12),
+        w: count(video.w) > 0 ? qty(video.w) : 0,
+        h: qty(video.h),
+        frames: qty(video.frames),
+        play: clip(video.play, 40),
+      })
+    }
+  }
+  return {
+    sessionId: clip(row.sessionId, 80),
+    published: Boolean(row.published),
+    dtls: clip(row.dtls, 32),
+    ice: clip(row.ice, 32),
+    signaling: clip(row.signaling, 32),
+    sending,
+    pulled,
+    pull: clip(row.pull, 240),
+    selected,
+    outAudio: qty(row.outAudio),
+    outVideo: qty(row.outVideo),
+    outCodec: clip(row.outCodec, 40),
+    outFrames: qty(row.outFrames),
+    inAudio: qty(row.inAudio),
+    inVideo: qty(row.inVideo),
+    inCodec: clip(row.inCodec, 40),
+    inFrames: qty(row.inFrames),
+    inReceived: qty(row.inReceived),
+    videos,
   }
 }
 

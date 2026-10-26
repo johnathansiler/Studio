@@ -242,7 +242,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .modal-back { position: fixed; inset: 0; width: 100%; max-width: 100%; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 80; }
 .modal { width: min(460px, calc(100% - 32px)); max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; box-shadow: var(--shadow); }
-.tap-reconnect { position: fixed; left: 12px; right: 12px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 70; min-height: 48px; width: auto; }
+.tap-reconnect { position: fixed; left: 50%; right: auto; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 70; width: auto; min-height: 36px; padding: 8px 16px; border-radius: 999px; }
 .modal h2 { margin: 0 0 6px; font-size: 22px; letter-spacing: -0.03em; }
 .modal p { color: var(--muted); margin: 0 0 12px; }
 .modal .stack { display: flex; flex-direction: column; gap: 8px; }

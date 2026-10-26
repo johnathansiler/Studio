@@ -30,8 +30,14 @@
  *      pair whose answer carried no usable candidates. Both directions of
  *      video must flow within 15s. Set SCENARIO=trickle to run only that one.
  *   8. WebKit: a real WebKit guest (not Chromium wearing an iPhone profile)
- *      must paint the host camera. The remote <video> needs videoWidth > 0
- *      and a rising frame count. Set SCENARIO=webkit-video to run only that.
+ *      must paint the host camera without tapping to join. The remote <video>
+ *      needs videoWidth > 0 and a rising frame count. A sound overlay, if it
+ *      shows, says "Tap for sound". Set SCENARIO=webkit-video to run only that.
+ *   Count-in: with the host's count-in on, the guest stays in counting-in
+ *   until the downbeat, then both playheads match. The existing play-sync
+ *   check turns count-in off first.
+ *   Waveforms: the uplink guest draws the host clip "Bulk" before relying
+ *   on the full wav download.
  *
  * The Android tab is hidden and shown. Then its outbound signaling is held
  * for 22s, which is what a frozen main thread looks like to the server.
@@ -387,7 +393,10 @@ async function connectCall(host, guest, options = {}) {
   await guest.getByPlaceholder('Your name').fill('Ava')
   await guest.locator('#join-session').click()
   const reconnect = guest.locator('#tap-reconnect')
-  if (await reconnect.isVisible().catch(() => false)) await reconnect.click()
+  if (await reconnect.isVisible().catch(() => false)) {
+    const label = (await reconnect.innerText()).replace(/\s+/g, ' ').trim()
+    console.log('sound-lock', label)
+  }
   await guest.getByRole('button', { name: 'Session', exact: true }).click()
   await host.getByRole('button', { name: 'people' }).click()
   const admit = host.locator('.waiting', { hasText: 'Ava' }).getByRole('button', { name: 'Admit' }).click({ timeout: options.admitTimeout || 20000 })
@@ -416,9 +425,59 @@ function judgeCall(held, events, invite) {
   return fails
 }
 
+/** Count-in on: the guest must not start the arrangement until the downbeat. */
+async function assertCountIn(host, guest) {
+  const fails = []
+  const box = host.locator('label.toggle', { hasText: 'Count-in' }).locator('input')
+  await box.scrollIntoViewIfNeeded().catch(() => undefined)
+  if (!(await box.isChecked().catch(() => false))) await box.click()
+  const play = host.locator('button.t-btn.play')
+  await play.scrollIntoViewIfNeeded()
+  await play.click()
+  await host.waitForTimeout(500)
+  const earlyHost = await videoBytes(host)
+  const earlyGuest = await videoBytes(guest)
+  console.log('count-in early', JSON.stringify({
+    host: earlyHost.transport,
+    guest: earlyGuest.transport,
+    hostHead: earlyHost.playhead,
+    guestHead: earlyGuest.playhead,
+  }))
+  if (earlyHost.transport !== 'counting-in') fails.push(`host left count-in immediately (${earlyHost.transport || 'stopped'})`)
+  if (earlyGuest.transport !== 'counting-in') fails.push(`guest started during count-in (${earlyGuest.transport || 'stopped'})`)
+  if ((earlyGuest.playhead || 0) > (earlyGuest.rate || 48000) * 0.2) fails.push('guest playhead moved during count-in')
+  const deadline = Date.now() + 4000
+  let hostRow = earlyHost
+  let guestRow = earlyGuest
+  while (Date.now() < deadline && (hostRow.transport !== 'playing' || guestRow.transport !== 'playing')) {
+    await host.waitForTimeout(200)
+    hostRow = await videoBytes(host)
+    guestRow = await videoBytes(guest)
+  }
+  const rate = hostRow.rate || 48000
+  const gapMs = Math.abs(hostRow.playhead - guestRow.playhead) / rate * 1000
+  console.log('count-in downbeat', JSON.stringify({
+    host: hostRow.transport,
+    guest: guestRow.transport,
+    hostHead: hostRow.playhead,
+    guestHead: guestRow.playhead,
+    gapMs: Math.round(gapMs),
+  }))
+  if (hostRow.transport !== 'playing') fails.push(`host did not reach the downbeat (${hostRow.transport || 'stopped'})`)
+  if (guestRow.transport !== 'playing') fails.push(`guest did not reach the downbeat (${guestRow.transport || 'stopped'})`)
+  if (gapMs > 100) fails.push(`count-in downbeat is ${Math.round(gapMs)} ms apart`)
+  const stop = host.locator('button.t-btn.stop')
+  if (await stop.isEnabled().catch(() => false)) await stop.click()
+  await host.waitForTimeout(300)
+  return fails
+}
+
 /** Host play must move the guest playhead to the same musical position, within 100 ms. */
 async function assertPlaySync(host, guest) {
   const fails = []
+  const box = host.locator('label.toggle', { hasText: 'Count-in' }).locator('input')
+  await box.scrollIntoViewIfNeeded().catch(() => undefined)
+  if (await box.isChecked().catch(() => false)) await box.click()
   const play = host.locator('button.t-btn.play')
   if (!(await play.isVisible().catch(() => false))) {
     fails.push('host play button was not visible')
@@ -462,6 +521,7 @@ async function runCall(browser, label, { androidHost, staleGuest }) {
     await mobileNetwork(pair.host, androidHost)
     await mobileNetwork(pair.guest, !androidHost)
     code = await connectCall(pair.host, pair.guest)
+    fails.push(...(await assertCountIn(pair.host, pair.guest)))
     await pair.host.waitForTimeout(8000)
     console.log(label, 'before-throttle', JSON.stringify({ host: line(await sample(pair.host)), guest: line(await sample(pair.guest)) }))
     fails.push(...(await assertPlaySync(pair.host, pair.guest)))
@@ -919,6 +979,32 @@ function seedBulkProject(pcmBytes) {
   })
 }
 
+/** The host clip outline should paint on the guest before the wav has to finish. */
+async function assertGuestWaveform(guest) {
+  const fails = []
+  const arrange = guest.getByRole('button', { name: 'Arrange', exact: true })
+  if (await arrange.isVisible().catch(() => false)) await arrange.click()
+  const deadline = Date.now() + 12000
+  let ink = 0
+  while (Date.now() < deadline && ink < 8) {
+    await guest.waitForTimeout(500)
+    ink = await guest.evaluate(() => {
+      const clip = [...document.querySelectorAll('.clip')].find((el) => /Bulk/.test(el.textContent || ''))
+      const canvas = clip?.querySelector('canvas')
+      if (!canvas) return 0
+      const ctx = canvas.getContext('2d')
+      if (!ctx || !canvas.width) return 0
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+      let painted = 0
+      for (let i = 3; i < data.length; i += 16) if (data[i] > 20) painted += 1
+      return painted
+    }).catch(() => 0)
+  }
+  console.log('waveform', JSON.stringify({ ink }))
+  if (ink < 8) fails.push(`guest waveform for Bulk painted ${ink} samples`)
+  return fails
+}
+
 /**
  * Host on a shared 1 Mbps uplink with 150 ms delay, syncing a ~1 MB project
  * asset. The guest must receive host video the whole minute.
@@ -1043,6 +1129,7 @@ async function runUplink(browser) {
           }
         },
       })
+      fails.push(...(await assertGuestWaveform(guest)))
       const done = await sample(host)
       const moved = Math.max(done.big, done.assets)
       console.log(label, 'asset', JSON.stringify({ big: done.big, assets: done.assets }))
@@ -1273,6 +1360,11 @@ async function runWebKitVideo(hostBrowser) {
     await host.addInitScript((id) => localStorage.setItem('cueharbor-participant', id), hostId)
     await guest.addInitScript((id) => localStorage.setItem('cueharbor-participant', id), guestId)
     const code = await connectCall(host, guest)
+    const tap = guest.locator('#tap-reconnect')
+    if (await tap.isVisible().catch(() => false)) {
+      const label = (await tap.innerText()).replace(/\s+/g, ' ').trim()
+      if (!/tap for sound/i.test(label)) fails.push(`join gate said "${label}"`)
+    }
     const deadline = Date.now() + 25000
     let picture = await remotePicture(guest)
     while (Date.now() < deadline && !(picture.width > 0 && picture.frames > 0)) {

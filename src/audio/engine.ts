@@ -94,6 +94,8 @@ export class AudioEngine {
   private rollingSrc: MediaStreamAudioSourceNode | null = null
   private rollingSilent: GainNode | null = null
   private countTimer = 0
+  private countWait: (() => void) | null = null
+  private countPlan: { tempo: number; numerator: number; denominator: number } | null = null
   private lastUiEmit = 0
   private pcmTap: AudioWorkletNode | null = null
   private pcmTapSilent: GainNode | null = null
@@ -434,6 +436,11 @@ export class AudioEngine {
    * Start so the playhead is at `sample` when performance.now() reaches `perfMs`.
    * A late call skips ahead instead of starting the downbeat in the past.
    */
+  /** Clicks land on the beats before the next playAtPerf downbeat. */
+  armCountIn(tempo: number, signature: { numerator: number; denominator: number }) {
+    this.countPlan = { tempo, numerator: signature.numerator, denominator: signature.denominator }
+  }
+
   async playAtPerf(sample: number, perfMs: number, mode: 'arrangement' | 'session' = 'arrangement') {
     await this.resume()
     this.refreshClockAnchor()
@@ -445,7 +452,22 @@ export class AudioEngine {
       from += Math.round((earliest - startAt) * this.sampleRate)
       startAt = earliest
     }
+    const plan = this.countPlan
+    this.countPlan = null
+    if (plan) this.scheduleCountClicks(startAt, plan.tempo, plan)
     this.startTransport(startAt, from, mode)
+    if (plan && startAt > ctx.currentTime + 0.05) {
+      this.status = 'counting-in'
+      const wait = Math.max(0, (startAt - ctx.currentTime) * 1000)
+      window.clearTimeout(this.countTimer)
+      this.countTimer = window.setTimeout(() => {
+        if (this.playing && this.status === 'counting-in') {
+          this.status = 'playing'
+          this.emit()
+        }
+      }, wait)
+      this.emit()
+    }
   }
 
   private startTransport(startAt: number, fromSample: number, mode: 'arrangement' | 'session') {
@@ -458,6 +480,9 @@ export class AudioEngine {
 
   stop() {
     window.clearTimeout(this.countTimer)
+    this.countPlan = null
+    this.countWait?.()
+    this.countWait = null
     this.playing = false
     this.stopSources()
     this.arrangementScheduled = false
@@ -490,6 +515,12 @@ export class AudioEngine {
       this.armRecorders(opts.inputs, timelineSample, ctxTime)
       opts.onPunch?.({ timelineSample, cueEpochHostPerf, ctxTime })
       this.emit()
+    }
+    if (opts.countIn && opts.hostPerfAtSample != null && this.project && !this.playing) {
+      const go = await this.holdForDownbeat(opts.hostPerfAtSample, this.project.tempo, this.project.timeSignature)
+      if (!go) return
+      punch()
+      return
     }
     if (opts.countIn && this.project?.countIn && !this.playing) await this.runCountIn(punch)
     else punch()
@@ -840,6 +871,36 @@ export class AudioEngine {
     asset.channels.forEach((channel, index) => buffer.copyToChannel(new Float32Array(channel), index))
     if (ctx === this.ctx) this.audioBuffers.set(asset.id, buffer)
     return buffer
+  }
+
+  private scheduleCountClicks(startAt: number, tempo: number, signature: { numerator: number; denominator: number }) {
+    if (!this.ctx) return
+    const beatSec = samplesPerBeatUnit(this.sampleRate, tempo, signature) / this.sampleRate
+    const beats = Math.max(1, signature.numerator)
+    for (let i = 0; i < beats; i++) {
+      const when = startAt - (beats - i) * beatSec
+      if (when >= this.ctx.currentTime - 0.02) this.click(when, i === 0)
+    }
+  }
+
+  /** Play the count-in and resolve at the downbeat. Stop during the wait resolves false. */
+  private async holdForDownbeat(downbeatPerf: number, tempo: number, signature: { numerator: number; denominator: number }) {
+    await this.resume()
+    this.refreshClockAnchor()
+    const ctx = this.ctx!
+    const startAt = Math.max(this.contextForPerf(downbeatPerf), ctx.currentTime + 0.02)
+    this.scheduleCountClicks(startAt, tempo, signature)
+    this.status = 'counting-in'
+    this.emit()
+    const wait = Math.max(0, (startAt - ctx.currentTime) * 1000)
+    await new Promise<void>((resolve) => {
+      this.countWait = resolve
+      this.countTimer = window.setTimeout(() => {
+        this.countWait = null
+        resolve()
+      }, wait)
+    })
+    return this.status === 'counting-in'
   }
 
   private async runCountIn(done: () => void) {

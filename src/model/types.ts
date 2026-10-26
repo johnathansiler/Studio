@@ -74,6 +74,8 @@ export interface Project {
   metronomeEnabled: boolean
   countIn: boolean
   snap: boolean
+  /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */
+  waveforms?: Record<string, { min: number; max: number }[]>
 }
 
 export interface AudioAsset {
