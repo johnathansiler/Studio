@@ -588,18 +588,6 @@ export function App() {
     })
   }
 
-  async function copyInvite() {
-    const code = session.state.code
-    if (!code) return
-    const url = `${location.origin}/?session=${code}`
-    try {
-      await navigator.clipboard.writeText(url)
-      store.toast('Invite link copied. Send it to the artist.', 'good')
-    } catch {
-      store.toast(url, 'warn')
-    }
-  }
-
   async function bounce() {
     await ready()
     const wav = await engine.exportMix(store.project, store.buffers)
@@ -684,7 +672,6 @@ export function App() {
     await ready()
   }
 
-  const one = session.primaryOneWay()
   const showRoll = store.view === 'arrange' && store.selectedMidiClipId
 
   return (
@@ -699,7 +686,6 @@ export function App() {
           </div>
           <div>
             <h1>CueHarbor</h1>
-            <p>Studio</p>
           </div>
         </div>
         <input className="project-name" value={store.project.name} onChange={(event) => store.renameProject(event.target.value)} />
@@ -713,12 +699,6 @@ export function App() {
           </div>
         )}
         <div className="spacer" />
-        {!phone && session.state.role === 'host' && session.state.code && (
-          <button className="text-btn primary" onClick={() => void copyInvite()}>
-            Copy invite link
-          </button>
-        )}
-        {session.state.status === 'live' && <div className="latency-pill">monitor {one ? `${one.ms.toFixed(0)} ms` : '…'}</div>}
         {phone ? (
           <button className="text-btn menu-btn" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
             {menuOpen ? 'Close' : 'Menu'}
@@ -733,12 +713,12 @@ export function App() {
             <button className="text-btn" onClick={() => void bounce()}>Bounce</button>
             <button className="text-btn" onClick={() => store.addTrack('audio')}>+ Audio</button>
             <button className="text-btn" onClick={() => store.addTrack('midi')}>+ Inst</button>
-            <button className="text-btn" onClick={() => setHelp(true)} title="Shortcuts">?</button>
-            <button className="text-btn" onClick={() => setSurface(surface === 'studio' ? 'artist' : 'studio')}>
-              {surface === 'studio' ? 'Artist view' : 'Studio'}
+            <button className="text-btn" onClick={() => setHelp(true)} title="Shortcuts" aria-label="Shortcuts">?</button>
+            <button className="text-btn" aria-label={surface === 'studio' ? 'Artist view' : 'Studio'} onClick={() => setSurface(surface === 'studio' ? 'artist' : 'studio')}>
+              {surface === 'studio' ? 'Artist' : 'Studio'}
             </button>
-            <button className="text-btn" onClick={() => setDockEdge(dockEdge === 'right' ? 'bottom' : 'right')}>
-              Dock {dockEdge === 'right' ? 'bottom' : 'right'}
+            <button className="text-btn" aria-label={dockEdge === 'right' ? 'Dock bottom' : 'Dock right'} onClick={() => setDockEdge(dockEdge === 'right' ? 'bottom' : 'right')}>
+              {dockEdge === 'right' ? 'Bottom' : 'Side'}
             </button>
           </div>
         )}
@@ -755,11 +735,8 @@ export function App() {
             <button className="text-btn" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }}>Clips</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setHelp(true) }}>Shortcuts</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setSurface(surface === 'studio' ? 'artist' : 'studio'); setPhonePane('room') }}>
-              {surface === 'studio' ? 'Artist view' : 'Studio'}
+              {surface === 'studio' ? 'Artist' : 'Studio'}
             </button>
-            {session.state.role === 'host' && session.state.code && (
-              <button className="text-btn primary" onClick={() => { setMenuOpen(false); void copyInvite() }}>Copy invite</button>
-            )}
           </div>
         )}
       </header>
@@ -851,8 +828,7 @@ export function App() {
       {joinOpen && (
         <div className="modal-back">
           <div className="modal">
-            <h2>Join the session</h2>
-            <p>No install. Headphones on. You’ll hear the cue as fast as the link allows, and your take is recorded locally so it lands on the grid.</p>
+            <h2>Join</h2>
             <div className="stack">
               <input value={joinName} onChange={(event) => setJoinName(event.target.value)} placeholder="Your name" />
               <input value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} placeholder="Invite code" />

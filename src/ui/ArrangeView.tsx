@@ -70,7 +70,6 @@ export function ArrangeView({
 
   return (
     <div className="arrange-wrap">
-      {store.remoteFollow && <div className="follow-banner">Following the host. Play, stop, and locate are shared. Clip edits stay on the host.</div>}
       <div className="arrange">
       <div className="heads">
         <div className="ruler-gap" />

@@ -4,7 +4,6 @@ export function SessionView({ store }: { store: ProjectStore }) {
   const scenes = 8
   return (
     <div className="session-grid">
-      <p className="hint">Launch a clip and it loops from the next beat. Arrangement playback stays put until you press play there again.</p>
       <table>
         <thead>
           <tr>
