@@ -231,10 +231,11 @@ export class SfuCall {
     else await pc.setRemoteDescription(answer.sessionDescription)
     await this.tune()
     this.published = true
+    const announced = kinds.filter((kind) => kind !== 'screen' || localTracks.screen)
     this.host.sendPub({
       peerId: this.host.peerId,
       sessionId,
-      tracks: kinds.map((kind) => ({ trackName: trackName(this.host.peerId, kind), kind })),
+      tracks: announced.map((kind) => ({ trackName: trackName(this.host.peerId, kind), kind })),
     })
     this.emitState()
   }
@@ -307,8 +308,14 @@ export class SfuCall {
 
   private openPc(wide: boolean) {
     const servers = wide ? this.host.iceServers : udpIceServers(this.host.iceServers)
+    const list = (servers.length ? servers : this.host.iceServers) as RTCIceServer[]
+    const relay = list.some((server) => {
+      const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
+      return urls.some((url) => /^turns?:/i.test(String(url)))
+    })
     const pc = new RTCPeerConnection({
-      iceServers: (servers.length ? servers : this.host.iceServers) as RTCIceServer[],
+      iceServers: list,
+      iceTransportPolicy: relay ? 'relay' : 'all',
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require',
     })

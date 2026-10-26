@@ -1416,7 +1416,9 @@ export class SessionClient {
         this.send({
           t: 'sfu-pub',
           sessionId: this.sfuCall.sessionId,
-          tracks: kinds.map((kind) => ({ trackName: `${this.state.selfId}:${kind}`, kind })),
+          tracks: kinds
+            .filter((kind) => kind !== 'screen' || Boolean(this.screenTrack()))
+            .map((kind) => ({ trackName: `${this.state.selfId}:${kind}`, kind })),
         })
       }
       this.noteSfuState({ connection: this.sfuCall.connection, ice: this.sfuCall.ice, signaling: this.sfuCall.signaling })
