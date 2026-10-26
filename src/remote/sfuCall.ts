@@ -187,10 +187,6 @@ export class SfuCall {
   }
 
   private async publish() {
-    const created = await this.post('/api/sfu/session', { code: this.host.code, peerId: this.host.peerId })
-    const sessionId = String(created.sessionId || '')
-    if (!sessionId) throw new Error(created.error || 'The media server did not open a session.')
-    this.sessionId = sessionId
     const pc = this.openPc(this.replaced)
     const kinds: SfuKind[] = ['music', 'talk', 'camera', 'screen']
     const localTracks = this.host.tracks()
@@ -217,6 +213,10 @@ export class SfuCall {
       return { location: 'local', mid, trackName: trackName(this.host.peerId, kind) }
     })
     this.localMids = tracks.map((track) => track.mid).filter(Boolean)
+    const created = await this.post('/api/sfu/session', { code: this.host.code, peerId: this.host.peerId })
+    const sessionId = String(created.sessionId || '')
+    if (!sessionId) throw new Error(created.error || 'The media server did not open a session.')
+    this.sessionId = sessionId
     const answer = await this.post('/api/sfu/tracks', {
       code: this.host.code,
       peerId: this.host.peerId,
