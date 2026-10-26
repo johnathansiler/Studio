@@ -391,26 +391,40 @@ export class SfuCall {
     }
   }
 
-  private async post(path: string, body: unknown): Promise<SfuBody> {
-    const response = await fetch(path, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    let parsed: SfuBody = {}
+  private async post(path: string, body: unknown, attempt = 0): Promise<SfuBody> {
     try {
-      parsed = (await response.json()) as SfuBody
-    } catch {
-      parsed = {}
-    }
-    if (!response.ok) {
-      const message = parsed.error || parsed.errorDescription || 'The media server refused the request.'
-      const error = new Error(message) as Error & { code?: string }
-      error.code = parsed.code || parsed.errorCode
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      let parsed: SfuBody = {}
+      try {
+        parsed = (await response.json()) as SfuBody
+      } catch {
+        parsed = {}
+      }
+      if (!response.ok) {
+        const message = parsed.error || parsed.errorDescription || 'The media server refused the request.'
+        const error = new Error(message) as Error & { code?: string }
+        error.code = parsed.code || parsed.errorCode
+        throw error
+      }
+      return parsed
+    } catch (error) {
+      const code = String((error as { code?: string }).code || '')
+      const reset = error instanceof TypeError || code === 'unreachable'
+      if (reset && attempt < 4) {
+        await pause(1500)
+        return this.post(path, body, attempt + 1)
+      }
       throw error
     }
-    return parsed
   }
+}
+
+function pause(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms))
 }
 
 export function trackName(peerId: string, kind: SfuKind) {

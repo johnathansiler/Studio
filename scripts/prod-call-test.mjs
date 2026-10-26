@@ -1152,6 +1152,9 @@ async function runCarrier(browser) {
               frames: row.frames,
               conn: row.conn,
               path: row.path,
+              hostFrames: hostRow.frames,
+              hostConn: hostRow.conn,
+              hostPath: hostRow.path,
               stall: Math.round(maxStall / 100) / 10,
             }))
             lastLog = t
