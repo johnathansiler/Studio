@@ -329,7 +329,14 @@ export class SfuCall {
       this.host.onTrack(mapped.peerId, mapped.kind, event.track)
     }
     pc.onconnectionstatechange = () => this.emitState()
-    pc.oniceconnectionstatechange = () => this.emitState()
+    pc.oniceconnectionstatechange = () => {
+      this.emitState()
+      if (this.closed || this.pc !== pc || pc.iceConnectionState !== 'failed') return
+      void this.enqueue(async () => {
+        if (this.closed || this.pc !== pc) return
+        await this.recover(Object.assign(new Error('The media path failed.'), { code: 'ice' }))
+      })
+    }
     pc.onsignalingstatechange = () => this.emitState()
     return pc
   }
