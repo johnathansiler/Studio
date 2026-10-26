@@ -1255,35 +1255,11 @@ async function runWebKitVideo(hostBrowser) {
   const guest = await guestContext.newPage()
   host.on('pageerror', (error) => console.log('HOST PAGE', error.message))
   guest.on('pageerror', (error) => console.log('GUEST PAGE', error.message))
-  guest.on('crash', () => console.log('GUEST CRASH'))
-  guest.on('console', (msg) => {
-    const text = msg.text()
-    if (text.startsWith('UA ') || text.startsWith('CODECS ')) console.log(label, text)
-  })
-  const logSfu = (who) => (response) => {
-    if (!response.url().includes('/api/sfu/')) return
-    void response.text().then((text) => {
-      let body = {}
-      try { body = JSON.parse(text) } catch { body = {} }
-      const tracks = (body.tracks || []).map((row) => `${String(row.trackName || '').split(':').pop()}:${row.mid || ''}:${row.errorCode || ''}`).join(',')
-      console.log(label, who, response.status(), response.url().replace(base, ''), 'reneg', Boolean(body.requiresImmediateRenegotiation), tracks)
-    }).catch(() => undefined)
-  }
-  host.on('response', logSfu('host'))
-  guest.on('response', logSfu('guest'))
   try {
     await install(host)
     await install(guest)
-    await guest.addInitScript(() => {
-      console.log('UA ' + navigator.userAgent)
-      const orig = RTCRtpTransceiver.prototype.setCodecPreferences
-      if (orig) {
-        RTCRtpTransceiver.prototype.setCodecPreferences = function (codecs) {
-          console.log('CODECS ' + (codecs || []).map((codec) => codec.mimeType).join(','))
-          return orig.apply(this, arguments)
-        }
-      }
-    })
+    // Playwright WebKit aborts if it has to encode a canvas track. The picture
+    // under test is the host camera on this guest, so the guest only sends audio.
     await guest.addInitScript(() => {
       if (window.chrome) return
       const md = navigator.mediaDevices
@@ -1292,23 +1268,6 @@ async function runWebKitVideo(hostBrowser) {
       md.getUserMedia = (constraints = {}) => {
         if (!constraints.video) return prev(constraints)
         return prev({ ...constraints, video: false }).catch(() => prev({ audio: true, video: false }))
-      }
-      const orig = window.fetch.bind(window)
-      window.fetch = async (input, init) => {
-        const url = typeof input === 'string' ? input : (input && input.url) || ''
-        const response = await orig(input, init)
-        if (String(url).includes('/api/sfu/')) {
-          let body = {}
-          try { body = await response.clone().json() } catch { body = {} }
-          window.__sfu = window.__sfu || []
-          window.__sfu.push({
-            url: String(url).replace(/\?.*$/, ''),
-            status: response.status,
-            reneg: Boolean(body.requiresImmediateRenegotiation),
-            tracks: (body.tracks || []).map((row) => ({ mid: row.mid || '', err: row.errorCode || '', name: String(row.trackName || '').split(':').pop() })),
-          })
-        }
-        return response
       }
     })
     await host.addInitScript((id) => localStorage.setItem('cueharbor-participant', id), hostId)
@@ -1319,14 +1278,6 @@ async function runWebKitVideo(hostBrowser) {
     while (Date.now() < deadline && !(picture.width > 0 && picture.frames > 0)) {
       await host.waitForTimeout(1000)
       picture = await remotePicture(guest).catch((error) => ({ width: 0, height: 0, frames: 0, time: 0, src: false, placeholder: error.message }))
-      const extra = await guest.evaluate(() => ({
-        sfu: window.__sfu || [],
-        pcs: (window.__pcs || []).filter((pc) => pc.connectionState !== 'closed').map((pc) => ({
-          state: `${pc.connectionState}/${pc.iceConnectionState}/${pc.signalingState}`,
-          trans: [...pc.getTransceivers()].map((t) => `${t.mid}:${t.currentDirection}:${t.receiver?.track?.kind}:${t.receiver?.track?.muted}`),
-        })),
-      })).catch((error) => error.message)
-      console.log(label, 'picture', JSON.stringify({ code, ...picture, extra }))
     }
     const first = picture
     await host.waitForTimeout(1000)
