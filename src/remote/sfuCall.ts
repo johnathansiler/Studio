@@ -168,19 +168,24 @@ export class SfuCall {
     if (this.closed || this.recovering) return
     this.recovering = true
     try {
-      const code = String((error as { code?: string }).code || '')
-      const message = error instanceof Error ? error.message : 'The media server did not connect.'
-      if (code === 'cap' || code === 'disabled' || code === 'replaced' || this.replaced || this.tries >= 2) {
-        if (code !== 'replaced') this.host.note(message)
-        return
-      }
-      this.replaced = true
-      this.host.note('Reconnecting media once.')
-      this.reset()
-      await this.establish()
+      await this.revive(error)
     } finally {
       this.recovering = false
     }
+  }
+
+  private async revive(error: unknown) {
+    if (this.closed) return
+    const code = String((error as { code?: string }).code || '')
+    const message = error instanceof Error ? error.message : 'The media server did not connect.'
+    if (code === 'cap' || code === 'disabled' || code === 'replaced' || this.replaced || this.tries >= 2) {
+      if (code !== 'replaced') this.host.note(message)
+      return
+    }
+    this.replaced = true
+    this.host.note('Reconnecting media once.')
+    this.reset()
+    await this.establish()
   }
 
   private reset() {
@@ -360,10 +365,19 @@ export class SfuCall {
   private queueRevive(pc: RTCPeerConnection) {
     if (this.recovering || this.replaced || this.closed || this.pc !== pc) return
     if (pc.connectionState !== 'failed' && pc.iceConnectionState !== 'failed') return
-    // A subscribe may be waiting out a reset. Drop it and open the replacement now.
+    // Drop the subscribe that is still in flight, then replace on the same queue
+    // so the new session is not negotiated at the same time as the old one.
+    this.recovering = true
     this.attempt += 1
     this.inflight?.abort()
-    void this.recover(Object.assign(new Error('The media path failed.'), { code: 'ice' }))
+    const error = Object.assign(new Error('The media path failed.'), { code: 'ice' })
+    void this.enqueue(async () => {
+      try {
+        await this.revive(error)
+      } finally {
+        this.recovering = false
+      }
+    })
   }
 
   private emitState() {
