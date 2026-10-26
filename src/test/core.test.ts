@@ -24,7 +24,7 @@ import { sfuCall, sfuConfigured } from '../../server/sfu.ts'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { cameraAttempts, DEFAULT_VIDEO_BITRATE, legalDirection, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, videoDirection, videoEncodingBudget, videoTargetForBwe } from '../model/codecs'
+import { cameraAttempts, DEFAULT_VIDEO_BITRATE, legalDirection, orderVideoCodecs, outboundVideoCodecs, scaleResolutionDownBy, sendVideoCodecs, shouldSetVideoCodecPreferences, videoDirection, videoEncodingBudget, videoTargetForBwe } from '../model/codecs'
 import { ensureCellularTurn, filterBrowserTurnUrls, isSilentTake, mediaStatus, nextRelayGather, queueIceCandidate, staticTurnServer, tcpRelayIceServers, udpIceServers } from '../model/media'
 import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_INITIAL_GATHER_MS, ICE_RESTART_VIDEO_HOLD_MS, ICE_STUCK_RESTART_MS, ICE_TCP_DISCONNECT_RESTART_MS, ICE_UDP_DISCONNECT_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, inviteWins, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen } from '../model/negotiate'
 import { isQuotaError } from '../storage/idb'
@@ -129,6 +129,28 @@ describe('video codecs', () => {
       { mimeType: 'video/VP9' },
     ])
     expect(offered.map((codec) => codec.mimeType)).toEqual(['video/H264', 'video/rtx', 'video/VP8', 'video/rtx'])
+  })
+
+  it('sends only H.264 when the browser has it, with Constrained Baseline first', () => {
+    const offered = sendVideoCodecs([
+      { mimeType: 'video/VP8' },
+      { mimeType: 'video/rtx' },
+      { mimeType: 'video/H264', sdpFmtpLine: 'level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640c1f' },
+      { mimeType: 'video/rtx' },
+      { mimeType: 'video/H264', sdpFmtpLine: 'level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f' },
+      { mimeType: 'video/rtx' },
+    ])
+    expect(offered.map((codec) => codec.sdpFmtpLine || codec.mimeType)).toEqual([
+      'level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f',
+      'video/rtx',
+      'level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640c1f',
+      'video/rtx',
+    ])
+  })
+
+  it('keeps VP8 when the browser has no H.264', () => {
+    const offered = sendVideoCodecs([{ mimeType: 'video/VP8' }, { mimeType: 'video/rtx' }, { mimeType: 'video/VP9' }])
+    expect(offered.map((codec) => codec.mimeType)).toEqual(['video/VP8', 'video/rtx'])
   })
 
   it('does not call setCodecPreferences on Safari, where that drops H.264', () => {

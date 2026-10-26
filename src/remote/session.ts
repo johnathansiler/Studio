@@ -12,7 +12,7 @@ import {
   type TimedPeak,
 } from '../model/latency'
 import { DEFAULT_OPUS, mungeOpusSdp, type OpusOptions } from '../model/sdp'
-import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, outboundVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, VIDEO_START_BITRATE, videoEncodingBudget, videoTargetForBwe } from '../model/codecs'
+import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, sendVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, VIDEO_START_BITRATE, videoEncodingBudget, videoTargetForBwe } from '../model/codecs'
 import { isSilentTake, nextRelayGather, tcpRelayIceServers, udpIceServers, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
 import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_INITIAL_GATHER_MS, ICE_RESTART_VIDEO_HOLD_MS, ICE_STUCK_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
 import { sanitizeDiag, type DiagDirection } from '../model/diag'
@@ -1680,7 +1680,7 @@ export class SessionClient {
     if (!transceiver || !shouldSetVideoCodecPreferences(navigator.userAgent)) return
     const caps = RTCRtpSender.getCapabilities?.('video')
     if (!caps) return
-    const ordered = outboundVideoCodecs(caps.codecs)
+    const ordered = sendVideoCodecs(caps.codecs)
     if (!ordered.length) return
     if (!ordered.some((codec) => codec.mimeType.toLowerCase() === 'video/h264') && caps.codecs.some((codec) => codec.mimeType.toLowerCase() === 'video/h264')) return
     try {

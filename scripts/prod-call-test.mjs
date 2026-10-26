@@ -29,6 +29,9 @@
  *      that host socket is dropped, which is the same-machine shape of a
  *      pair whose answer carried no usable candidates. Both directions of
  *      video must flow within 15s. Set SCENARIO=trickle to run only that one.
+ *   8. WebKit: a real WebKit guest (not Chromium wearing an iPhone profile)
+ *      must paint the host camera. The remote <video> needs videoWidth > 0
+ *      and a rising frame count. Set SCENARIO=webkit-video to run only that.
  *
  * The Android tab is hidden and shown. Then its outbound signaling is held
  * for 22s, which is what a frozen main thread looks like to the server.
@@ -44,7 +47,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)
-const { chromium, devices } = require('playwright')
+const { chromium, devices, webkit } = require('playwright')
 
 const base = (process.argv[2] || process.env.BASE || '').replace(/\/$/, '')
 const waitMs = Number(process.env.WAIT || 20000)
@@ -1215,6 +1218,87 @@ async function runCarrier(browser) {
   return fails
 }
 
+async function remotePicture(page) {
+  return page.evaluate(() => {
+    const remote = [...document.querySelectorAll('.tile')].find((tile) => !/you/.test(tile.querySelector('.cap')?.textContent || ''))
+    const video = remote?.querySelector('video')
+    const quality = video?.getVideoPlaybackQuality?.()
+    const decoded = quality?.totalVideoFrames || video?.webkitDecodedFrameCount || 0
+    return {
+      width: video?.videoWidth || 0,
+      height: video?.videoHeight || 0,
+      frames: decoded,
+      time: video ? Math.round(video.currentTime * 1000) : 0,
+      src: Boolean(video?.srcObject),
+      placeholder: remote?.querySelector('.placeholder')?.textContent || '',
+    }
+  })
+}
+
+/**
+ * Chromium with an iPhone profile still decodes VP8 and fills transceiver.mid
+ * before ontrack. This guest is Playwright's WebKit, which is the engine
+ * Safari uses. Its software encoder aborts the tab if we hand it a canvas
+ * track, so the WebKit side only receives. The picture under test is the
+ * host camera on the guest's remote <video>.
+ */
+async function runWebKitVideo(hostBrowser) {
+  const label = 'webkit-video'
+  const suffix = randomBytes(6).toString('hex')
+  const hostId = `00000000-0000-4000-8000-${suffix}`
+  const guestId = `ffffffff-ffff-4fff-8fff-${suffix}`
+  const fails = []
+  const guestBrowser = await webkit.launch()
+  const hostContext = await hostBrowser.newContext(galaxy)
+  const guestContext = await guestBrowser.newContext(iphone)
+  const host = await hostContext.newPage()
+  const guest = await guestContext.newPage()
+  host.on('pageerror', (error) => console.log('HOST PAGE', error.message))
+  guest.on('pageerror', (error) => console.log('GUEST PAGE', error.message))
+  guest.on('crash', () => console.log('GUEST CRASH'))
+  try {
+    await install(host)
+    await install(guest)
+    await guest.addInitScript(() => {
+      if (window.chrome) return
+      const md = navigator.mediaDevices
+      if (!md) return
+      const prev = md.getUserMedia.bind(md)
+      md.getUserMedia = (constraints = {}) => {
+        if (!constraints.video) return prev(constraints)
+        return prev({ ...constraints, video: false }).catch(() => prev({ audio: true, video: false }))
+      }
+    })
+    await host.addInitScript((id) => localStorage.setItem('cueharbor-participant', id), hostId)
+    await guest.addInitScript((id) => localStorage.setItem('cueharbor-participant', id), guestId)
+    const code = await connectCall(host, guest)
+    const deadline = Date.now() + 25000
+    let picture = await remotePicture(guest)
+    while (Date.now() < deadline && !(picture.width > 0 && picture.frames > 0)) {
+      await host.waitForTimeout(1000)
+      picture = await remotePicture(guest).catch((error) => ({ width: 0, height: 0, frames: 0, time: 0, src: false, placeholder: error.message }))
+      console.log(label, 'picture', JSON.stringify({ code, ...picture }))
+    }
+    const first = picture
+    await host.waitForTimeout(1000)
+    const second = await remotePicture(guest)
+    console.log(label, 'result', JSON.stringify({ code, first, second }))
+    if (!(first.width > 0)) fails.push(`remote videoWidth is ${first.width} (${first.placeholder || 'no placeholder'})`)
+    if (!(second.frames > first.frames)) fails.push(`remote frames did not increase (${first.frames} -> ${second.frames})`)
+    console.log(label, fails.length ? 'FAIL' : 'PASS')
+    for (const reason of fails) console.log(label, 'reason:', reason)
+  } catch (error) {
+    fails.push(error instanceof Error ? error.message : String(error))
+    console.log(label, 'FAIL')
+    console.log(label, 'reason:', fails[fails.length - 1])
+  } finally {
+    await hostContext.close().catch(() => undefined)
+    await guestContext.close().catch(() => undefined)
+    await guestBrowser.close().catch(() => undefined)
+  }
+  return fails
+}
+
 async function runUsage() {
   const fails = []
   const response = await fetch(`${base}/api/usage`)
@@ -1252,6 +1336,7 @@ try {
     ['uplink', () => runUplink(browser)],
     ['carrier', () => runCarrier(browser)],
     ['trickle', () => runTrickle(browser)],
+    ['webkit-video', () => runWebKitVideo(browser)],
   ]
   const only = process.env.SCENARIO || ''
   const selected = only ? scenarios.filter(([name]) => name === only) : scenarios
