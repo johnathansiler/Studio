@@ -259,6 +259,8 @@ export class SfuCall {
         tracks: tracks.map((track) => ({ location: 'remote', sessionId: track.sessionId, trackName: track.trackName })),
       })
     } catch (error) {
+      const code = String((error as { code?: string }).code || '')
+      if (code === 'unreachable' || error instanceof TypeError) return
       await this.recover(error)
       return
     }
@@ -414,7 +416,7 @@ export class SfuCall {
     } catch (error) {
       const code = String((error as { code?: string }).code || '')
       const reset = error instanceof TypeError || code === 'unreachable'
-      if (reset && attempt < 4) {
+      if (reset && attempt < 8) {
         await pause(1500)
         return this.post(path, body, attempt + 1)
       }
