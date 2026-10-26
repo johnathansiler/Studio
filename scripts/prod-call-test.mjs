@@ -255,6 +255,8 @@ async function sample(page) {
         signaling: pc.signalingState,
         ice: pc.iceConnectionState,
         conn: pc.connectionState,
+        gather: pc.iceGatheringState,
+        relay: / typ relay/.test(pc.localDescription?.sdp || ''),
         video,
         audio,
         frames,
@@ -1102,6 +1104,17 @@ async function runCarrier(browser) {
     const guest = await guestContext.newPage()
     host.on('pageerror', (error) => console.log('HOST PAGE', error.message))
     guest.on('pageerror', (error) => console.log('GUEST PAGE', error.message))
+    const admitMark = { at: 0 }
+    host.on('console', (msg) => {
+      const text = msg.text()
+      if (/sfu|media server|ice|turn|Reconnecting/i.test(text)) console.log('HOST LOG', text.slice(0, 300))
+    })
+    host.on('response', (response) => {
+      const url = response.url()
+      if (!url.includes('/api/sfu/')) return
+      const elapsed = admitMark.at ? Math.round((Date.now() - admitMark.at) / 1000) : 0
+      console.log('HOST SFU', response.status(), url.replace(base, ''), 't', elapsed)
+    })
     try {
       await install(host)
       await install(guest)
@@ -1111,6 +1124,7 @@ async function runCarrier(browser) {
         timeout: 90000,
         admitTimeout: 90000,
         duringAdmit: async () => {
+          admitMark.at = Date.now()
           writeFileSync(arm, '1')
           const started = Date.now()
           let firstAt = 0
@@ -1128,6 +1142,7 @@ async function runCarrier(browser) {
             await guest.waitForTimeout(1000)
             const row = await videoBytes(guest)
             const hostRow = await videoBytes(host)
+            const hostAll = await sample(host)
             const t = Date.now()
             if (hostRow.frames > hostLast) {
               if (!hostFirst) hostFirst = t
@@ -1155,6 +1170,7 @@ async function runCarrier(browser) {
               hostFrames: hostRow.frames,
               hostConn: hostRow.conn,
               hostPath: hostRow.path,
+              hostPeers: hostAll.peers.map((peer) => `${peer.conn}/${peer.ice}/${peer.signaling}/${peer.gather}/${peer.relay ? 'relay' : 'norel'}`),
               stall: Math.round(maxStall / 100) / 10,
             }))
             lastLog = t

@@ -260,7 +260,8 @@ export class SfuCall {
       })
     } catch (error) {
       const code = String((error as { code?: string }).code || '')
-      if (code === 'unreachable' || error instanceof TypeError) return
+      // The socket may be down for a few seconds. The next announcement retries.
+      if (code === 'unreachable' || code === 'forbidden' || error instanceof TypeError) return
       await this.recover(error)
       return
     }
@@ -279,6 +280,8 @@ export class SfuCall {
     try {
       await this.answerOffer(this.pc, response.sessionDescription)
     } catch (error) {
+      const code = String((error as { code?: string }).code || '')
+      if (code === 'unreachable' || code === 'forbidden' || error instanceof TypeError) return
       await this.recover(error)
       return
     }

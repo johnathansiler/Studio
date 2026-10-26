@@ -282,7 +282,9 @@ function liveMember(code: string, peerId: string) {
   const session = sessions.get(code)
   if (!session) return null
   const person = session.participants.get(peerId)
-  if (!person?.admitted || !session.clients.has(peerId)) return null
+  // A carrier reset drops the signaling socket without removing the member.
+  // Media calls have to keep working until they explicitly leave.
+  if (!person?.admitted) return null
   return session
 }
 
