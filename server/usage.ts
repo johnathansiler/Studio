@@ -46,6 +46,8 @@ export function createUsageLedger(options: {
   const clock = options.now || Date.now
   let record: LedgerFile = { month: monthKey(new Date(clock())), bytes: 0, sessions: {} }
   let loaded = false
+  /** Sessions this process has opened or heard from. A restart must not keep estimating rooms that are already gone. */
+  const live = new Set<string>()
   let writing: Promise<void> = Promise.resolve()
   const timer = setInterval(() => {
     void accrue(clock()).catch(() => undefined)
@@ -89,7 +91,10 @@ export function createUsageLedger(options: {
   function touch(now: number) {
     roll(now)
     let added = 0
-    for (const bucket of Object.values(record.sessions)) added += accrueBucket(bucket, now)
+    for (const [id, bucket] of Object.entries(record.sessions)) {
+      if (!live.has(id)) continue
+      added += accrueBucket(bucket, now)
+    }
     if (added) record.bytes += added
     return added
   }
@@ -120,6 +125,7 @@ export function createUsageLedger(options: {
     async openSession(id: string, publishers: number, subscribers: number, now = clock()) {
       await load()
       roll(now)
+      live.add(id)
       if (!record.sessions[id]) {
         record.sessions[id] = {
           publishers: Math.max(0, publishers),
@@ -138,6 +144,7 @@ export function createUsageLedger(options: {
     },
     async setShape(id: string, publishers: number, subscribers: number, now = clock()) {
       await load()
+      live.add(id)
       const bucket = record.sessions[id]
       if (!bucket) return
       touch(now)
@@ -147,6 +154,7 @@ export function createUsageLedger(options: {
     },
     async closeSession(id: string, now = clock()) {
       await load()
+      live.delete(id)
       if (!record.sessions[id]) return
       touch(now)
       delete record.sessions[id]
@@ -156,6 +164,7 @@ export function createUsageLedger(options: {
       await load()
       roll(now)
       const seen = Number.isFinite(cumulative) ? Math.max(0, cumulative) : 0
+      live.add(id)
       let bucket = record.sessions[id]
       if (!bucket) {
         bucket = {

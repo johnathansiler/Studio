@@ -30,7 +30,7 @@ export async function sfuCall(
       method,
       headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
       body: body == null ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(20000),
     })
   } catch {
     return { ok: false, status: 502, body: { error: 'The media server did not answer.', code: 'unreachable' } }

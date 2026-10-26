@@ -351,8 +351,16 @@ async function proxySfu(req: IncomingMessage, res: ServerResponse, op: 'tracks' 
           ...(body.sessionDescription ? { sessionDescription: body.sessionDescription } : {}),
           tracks: body.tracks,
         }
+  const closing = op === 'close'
+  const knownTracks = closing && Array.isArray(body.tracks) ? body.tracks : []
+  if (closing && !knownTracks.length) {
+    await usage.closeSession(sessionId)
+    if (session.sfuSessions.get(peerId) === sessionId) session.sfuSessions.delete(peerId)
+    if (session.pubs.get(peerId)?.sessionId === sessionId) session.pubs.delete(peerId)
+    return json(res, { closed: true })
+  }
   const result = await sfuCall(process.env, path, method, forwarded)
-  if (op === 'close') {
+  if (closing) {
     await usage.closeSession(sessionId)
     if (session.sfuSessions.get(peerId) === sessionId) session.sfuSessions.delete(peerId)
     if (session.pubs.get(peerId)?.sessionId === sessionId) session.pubs.delete(peerId)

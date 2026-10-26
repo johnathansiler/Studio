@@ -810,6 +810,25 @@ describe('cloudflare egress cap', () => {
     expect(ice.iceServers.some((server) => /turn:/i.test(String(server.urls)))).toBe(false)
   })
 
+  it('does not keep estimating a session after the process restarts', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'cueharbor-usage-'))
+    const filePath = path.join(dir, 'usage.json')
+    const env = { CF_REALTIME_MONTHLY_CAP_GB: '500' }
+    let now = Date.parse('2026-10-26T12:00:00Z')
+    const first = createUsageLedger({ env, filePath, now: () => now })
+    await first.openSession('sfu-1', 1, 1)
+    now += 30_000
+    await first.setShape('sfu-1', 1, 1)
+    const mid = await first.view()
+    expect(mid.bytes).toBeGreaterThan(0)
+    first.stop()
+    const restarted = createUsageLedger({ env, filePath, now: () => now })
+    now += 60_000
+    const quiet = await restarted.view()
+    expect(quiet.bytes).toBe(mid.bytes)
+    restarted.stop()
+  })
+
   it('proxies the SFU without putting the app secret in the response', async () => {
     expect(sfuConfigured({})).toBe(false)
     expect(sfuConfigured({ CF_REALTIME_APP_ID: 'app', CF_REALTIME_APP_SECRET: 'super-secret' })).toBe(true)

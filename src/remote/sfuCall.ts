@@ -63,6 +63,7 @@ export class SfuCall {
   private pulled = new Set<string>()
   private midOf = new Map<string, { peerId: string; kind: SfuKind }>()
   private senders = new Map<SfuKind, RTCRtpSender>()
+  private localMids: string[] = []
 
   constructor(private host: SfuHost) {}
 
@@ -114,19 +115,28 @@ export class SfuCall {
   close() {
     this.closed = true
     const sessionId = this.sessionId
+    const tracks = this.trackClosures()
     this.pc?.close()
     this.pc = null
     this.sessionId = ''
     this.published = false
-    this.abandon(sessionId)
+    this.localMids = []
+    this.abandon(sessionId, tracks)
   }
 
-  private abandon(sessionId: string) {
+  private trackClosures() {
+    const mids = new Set<string>()
+    for (const mid of this.localMids) if (mid) mids.add(mid)
+    for (const mid of this.midOf.keys()) if (mid) mids.add(mid)
+    return [...mids].map((mid) => ({ mid }))
+  }
+
+  private abandon(sessionId: string, tracks: Array<{ mid: string }>) {
     if (!sessionId) return
     void fetch('/api/sfu/close', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ code: this.host.code, peerId: this.host.peerId, sessionId, force: true }),
+      body: JSON.stringify({ code: this.host.code, peerId: this.host.peerId, sessionId, tracks, force: true }),
     }).catch(() => undefined)
   }
 
@@ -141,31 +151,39 @@ export class SfuCall {
     this.tries += 1
     try {
       await this.publish()
-      await this.pullPending()
     } catch (error) {
-      if (this.closed) return
-      const code = (error as { code?: string }).code
-      if (this.replaced || this.tries >= 2 || code === 'cap' || code === 'disabled') {
-        this.host.note(error instanceof Error ? error.message : 'The media server did not connect.')
-        return
-      }
-      this.replaced = true
-      this.host.note('Reconnecting media once.')
-      this.reset()
-      await this.establish()
+      await this.recover(error)
+      return
     }
+    await this.pullPending()
+  }
+
+  private async recover(error: unknown) {
+    if (this.closed) return
+    const code = String((error as { code?: string }).code || '')
+    const message = error instanceof Error ? error.message : 'The media server did not connect.'
+    if (code === 'cap' || code === 'disabled' || this.replaced || this.tries >= 2) {
+      this.host.note(message)
+      return
+    }
+    this.replaced = true
+    this.host.note('Reconnecting media once.')
+    this.reset()
+    await this.establish()
   }
 
   private reset() {
     const abandoned = this.sessionId
+    const tracks = this.trackClosures()
     this.pc?.close()
     this.pc = null
     this.sessionId = ''
     this.published = false
+    this.localMids = []
     this.pulled.clear()
     this.midOf.clear()
     this.senders.clear()
-    this.abandon(abandoned)
+    this.abandon(abandoned, tracks)
   }
 
   private async publish() {
@@ -198,6 +216,7 @@ export class SfuCall {
       const mid = [...pc.getTransceivers()].find((item) => item.sender === this.senders.get(kind))?.mid || ''
       return { location: 'local', mid, trackName: trackName(this.host.peerId, kind) }
     })
+    this.localMids = tracks.map((track) => track.mid).filter(Boolean)
     const answer = await this.post('/api/sfu/tracks', {
       code: this.host.code,
       peerId: this.host.peerId,
@@ -230,12 +249,18 @@ export class SfuCall {
       }
     }
     if (!tracks.length || !this.pc || !this.sessionId) return
-    const response = await this.post('/api/sfu/tracks', {
-      code: this.host.code,
-      peerId: this.host.peerId,
-      sessionId: this.sessionId,
-      tracks: tracks.map((track) => ({ location: 'remote', sessionId: track.sessionId, trackName: track.trackName })),
-    })
+    let response: SfuBody
+    try {
+      response = await this.post('/api/sfu/tracks', {
+        code: this.host.code,
+        peerId: this.host.peerId,
+        sessionId: this.sessionId,
+        tracks: tracks.map((track) => ({ location: 'remote', sessionId: track.sessionId, trackName: track.trackName })),
+      })
+    } catch (error) {
+      await this.recover(error)
+      return
+    }
     const remote = response.tracks || []
     let accepted = 0
     remote.forEach((row, index) => {
@@ -248,7 +273,12 @@ export class SfuCall {
     // A publication that is still being created is not a failed connection.
     // The next announcement tries those track names again.
     if (!accepted || !response.sessionDescription?.sdp || !this.pc) return
-    await this.answerOffer(this.pc, response.sessionDescription)
+    try {
+      await this.answerOffer(this.pc, response.sessionDescription)
+    } catch (error) {
+      await this.recover(error)
+      return
+    }
     this.emitState()
   }
 
