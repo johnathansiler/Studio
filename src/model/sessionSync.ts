@@ -148,6 +148,7 @@ export function arrangementDigest(project: Project): string {
         clip.startBeat,
         clip.durationBeats,
         clip.notes.length,
+        clip.notes.map((note) => (note.slide ? 1 : 0)).join(''),
         clip.quant ?? null,
         clip.mode ?? null,
         clip.follow ?? null,

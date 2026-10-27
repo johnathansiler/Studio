@@ -4,7 +4,7 @@ import { DEVICE_KINDS, DEVICE_NAMES, DEVICE_PARAMS, FACTORY_PRESETS, type Device
 import { samplesToBeats } from '../model/time'
 import type { ProjectStore } from '../state/store'
 
-export function RackView({ store, engine, trackId }: { store: ProjectStore; engine: AudioEngine; trackId: string }) {
+export function RackView({ store, engine, trackId, onOpenKnock }: { store: ProjectStore; engine: AudioEngine; trackId: string; onOpenKnock?: () => void }) {
   const track = store.track(trackId)
   const rack = track?.rack
   const [selected, setSelected] = useState(0)
@@ -98,13 +98,17 @@ export function RackView({ store, engine, trackId }: { store: ProjectStore; engi
                     max={param.max}
                     step={(param.max - param.min) <= 2 ? 0.01 : (param.max - param.min) <= 40 ? 0.1 : 1}
                     value={device.params[param.id] ?? param.default}
+                    aria-label={param.name}
                     onChange={(event) => setParam(param.id, Number(event.target.value))}
                   />
                 </label>
               ))}
             </div>
-            {device.kind === 'sampler' && (
-              <select value="" onChange={(event) => event.target.value && store.addZone(track.id, device.id, event.target.value)}>
+            {device.kind === 'knock' && (
+              <button className="text-btn" onClick={() => onOpenKnock?.()}>Open Knock</button>
+            )}
+            {(device.kind === 'sampler' || device.kind === 'knock') && (
+              <select aria-label="Sample" value="" onChange={(event) => event.target.value && store.addZone(track.id, device.id, event.target.value)}>
                 <option value="">Sample</option>
                 {[...store.buffers.values()].map((buffer) => (
                   <option key={buffer.id} value={buffer.id}>{buffer.name}</option>

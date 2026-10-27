@@ -159,6 +159,8 @@ export interface MidiNote {
   locks?: Record<string, number>
   velocityLo?: number
   velocityHi?: number
+  /** Slide into this note from the one still held. */
+  slide?: boolean
 }
 
 export interface MidiTake {
