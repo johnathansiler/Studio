@@ -22,8 +22,19 @@ import {
 import type { RollTool } from '../model/paint'
 import { defaultRoll } from '../model/paint'
 import { progressionById, romanLine, starterParts } from '../model/progressions'
+import {
+  defaultQuantize,
+  detectTransients,
+  extractGroove,
+  normalizeQuantize,
+  quantizeAudioStart,
+  quantizeAudioWarp,
+  quantizeChannel,
+  quantizeMidi,
+  type QuantizeSettings,
+} from '../model/quantize'
 import { cloneRack, defaults, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
-import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleState } from '../model/scale'
+import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
 import {
   clonePattern,
   fillEvery,
@@ -47,6 +58,12 @@ export interface Toast {
 }
 
 type Listener = () => void
+
+interface QuantizeResult {
+  notes: { trackId: string; clipId: string; notes: MidiNote[] }[]
+  channels: { id: string; cells: StepCell[] }[]
+  audio: { trackId: string; clipId: string; clip: AudioClip }[]
+}
 
 export class ProjectStore {
   project: Project
@@ -84,6 +101,11 @@ export class ProjectStore {
 
   /** Open plugin sheet. Not saved with the project. */
   pluginFocus: { trackId: string; pluginId: string } | null = null
+  quantizeOpen = false
+  quantizeDraft: QuantizeSettings = defaultQuantize()
+  quantizePreview: QuantizeResult | null = null
+  private takeOpen = false
+  private takeNotes: { trackId: string; clipId: string; noteId: string }[] = []
   /** Arrange edit tool. Not saved, and switching it does not create an undo step. */
   tool: 'pointer' | 'stretch' = 'pointer'
   /** Clip settings. Not saved. */
@@ -120,6 +142,7 @@ export class ProjectStore {
 
   private mutate(fn: () => void) {
     if (this.remoteFollow) return
+    this.quantizePreview = null
     this.drafted = false
     this.snapshot()
     fn()
@@ -148,6 +171,7 @@ export class ProjectStore {
     if (!prev) return
     this.future.push(JSON.stringify(this.project))
     this.project = JSON.parse(prev) as Project
+    this.quantizePreview = null
     this.emit()
   }
 
@@ -158,6 +182,7 @@ export class ProjectStore {
     if (!next) return
     this.past.push(JSON.stringify(this.project))
     this.project = JSON.parse(next) as Project
+    this.quantizePreview = null
     this.emit()
   }
 
@@ -830,7 +855,7 @@ export class ProjectStore {
       if (!clip) return
       const scale = this.scaleState()
       const pitch = scale.snap ? snapPitch(note.pitch, scale.root, scale.scale) : note.pitch
-      const next = { ...note, pitch, id: uid('note') }
+      const next = this.inputNote(clip, { ...note, pitch, id: uid('note') })
       clip.notes.push(next)
       this.selectedNoteId = next.id
       this.selectedNoteIds = [next.id]
@@ -897,7 +922,7 @@ export class ProjectStore {
     let end = clip.durationBeats
     const ids: string[] = []
     for (const note of performed) {
-      const next: MidiNote = { ...note, id: uid('note'), startBeat: rel + note.startBeat }
+      const next = this.inputNote(clip, { ...note, id: uid('note'), startBeat: rel + note.startBeat })
       clip.notes.push(next)
       ids.push(next.id)
       end = Math.max(end, next.startBeat + next.durationBeats)
@@ -1728,6 +1753,235 @@ export class ProjectStore {
   rememberPen(length: number, velocity: number) {
     const memory = this.project.roll ?? defaultRoll()
     this.project.roll = { ...memory, length, velocity }
+  }
+
+  quantizeSettings() {
+    return this.quantizeOpen ? this.quantizeDraft : normalizeQuantize(this.project.quantize)
+  }
+
+  beginTake() {
+    this.takeOpen = true
+    this.takeNotes = []
+  }
+
+  endTake() {
+    const pending = this.takeNotes
+    this.takeOpen = false
+    this.takeNotes = []
+    const settings = normalizeQuantize(this.project.quantize)
+    if (settings.record !== 'after' || !pending.length) return
+    this.mutate(() => {
+      for (const item of pending) {
+        const clip = this.track(item.trackId)?.midiClips.find((entry) => entry.id === item.clipId)
+        if (!clip) continue
+        clip.notes = quantizeMidi(clip.notes, settings, this.quantizeContext([item.noteId]))
+      }
+    })
+  }
+
+  addRecordedAudio(trackId: string, clip: AudioClip) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'audio') return
+      const settings = normalizeQuantize(this.project.quantize)
+      const asset = this.buffers.get(clip.bufferId)
+      const channel = asset?.channels[0]
+      let next = clip
+      if (channel && settings.record === 'live') next = quantizeAudioStart(clip, channel, asset.sampleRate, this.project.tempo, settings)
+      if (channel && settings.record === 'after') next = quantizeAudioWarp(clip, channel, asset.sampleRate, this.project.tempo, settings)
+      track.clips.push(next)
+      this.selectedTrackId = trackId
+      this.selectedClipId = next.id
+    })
+  }
+
+  openQuantize() {
+    this.quantizeDraft = normalizeQuantize(this.project.quantize)
+    this.quantizeOpen = true
+    this.quantizePreview = this.computeQuantize(this.quantizeDraft)
+    this.emit()
+  }
+
+  closeQuantize() {
+    this.project.quantize = this.quantizeDraft
+    this.quantizePreview = null
+    this.quantizeOpen = false
+    this.emit()
+  }
+
+  setQuantizeDraft(patch: Partial<QuantizeSettings>) {
+    this.quantizeDraft = normalizeQuantize({ ...this.quantizeDraft, ...patch })
+    if (this.quantizeOpen) this.quantizePreview = this.computeQuantize(this.quantizeDraft)
+    this.emit()
+  }
+
+  quickQuantize() {
+    const settings = normalizeQuantize(this.project.quantize)
+    const result = this.computeQuantize(settings)
+    this.mutate(() => {
+      this.project.quantize = settings
+      this.writeQuantize(result)
+    })
+  }
+
+  commitQuantize() {
+    const settings = this.quantizeDraft
+    const result = this.computeQuantize(settings)
+    this.mutate(() => {
+      this.project.quantize = settings
+      this.writeQuantize(result)
+    })
+    this.quantizeOpen = false
+  }
+
+  saveQuantizePreset(name: string) {
+    const label = name.trim()
+    if (!label) return
+    this.mutate(() => {
+      const settings = normalizeQuantize(this.quantizeOpen ? this.quantizeDraft : this.project.quantize)
+      const presets = (this.project.quantizePresets ?? []).filter((preset) => preset.name !== label)
+      presets.push({ id: uid('q'), name: label, settings })
+      this.project.quantizePresets = presets
+      this.project.quantize = settings
+    })
+  }
+
+  loadQuantizePreset(id: string) {
+    const preset = this.project.quantizePresets?.find((item) => item.id === id)
+    if (!preset) return
+    this.quantizeDraft = normalizeQuantize(preset.settings)
+    this.quantizeOpen = true
+    this.quantizePreview = this.computeQuantize(this.quantizeDraft)
+    this.emit()
+  }
+
+  extractQuantizeGroove() {
+    const settings = this.quantizeSettings()
+    const beats = this.grooveSources(settings)
+    if (!beats.length) return
+    this.setQuantizeDraft({ groove: extractGroove(beats), swing: 0 })
+  }
+
+  private inputNote(clip: MidiClip, note: MidiNote) {
+    const settings = normalizeQuantize(this.project.quantize)
+    if (!this.takeOpen || settings.record === 'off') return note
+    if (settings.record === 'after') {
+      this.takeNotes.push({ trackId: this.trackOfClip(clip.id) ?? '', clipId: clip.id, noteId: note.id })
+      return note
+    }
+    return quantizeMidi([note], settings, this.quantizeContext())[0] ?? note
+  }
+
+  private trackOfClip(clipId: string) {
+    return this.project.tracks.find((track) => track.midiClips.some((clip) => clip.id === clipId))?.id ?? null
+  }
+
+  private quantizeContext(only?: string[]) {
+    const scale = this.scaleState()
+    return { tempo: this.project.tempo, root: scale.root, scale: scale.scale as ScaleId, only }
+  }
+
+  private grooveSources(settings: QuantizeSettings) {
+    const beats: number[] = []
+    for (const item of this.collectNotes(settings.scope)) {
+      for (const note of item.clip.notes) beats.push(item.clip.startBeat + note.startBeat)
+    }
+    if (beats.length) return beats
+    for (const item of this.collectAudio(settings.scope)) {
+      const channel = this.buffers.get(item.clip.bufferId)?.channels[0]
+      if (!channel) continue
+      const rate = this.buffers.get(item.clip.bufferId)?.sampleRate || this.project.sampleRate
+      const slice = channel.subarray(item.clip.offsetSamples, item.clip.offsetSamples + item.clip.durationSamples)
+      for (const hit of detectTransients(slice, rate, settings.threshold)) {
+        beats.push((item.clip.startSample + hit) / this.project.sampleRate * (this.project.tempo / 60))
+      }
+    }
+    const pattern = this.activePattern()
+    if (!beats.length && pattern && (settings.scope === 'pattern' || this.view === 'beats')) {
+      for (const channel of pattern.channels) {
+        const count = channel.steps || pattern.steps
+        for (let index = 0; index < count; index++) {
+          const cell = channel.cells[index]
+          if (cell?.on) beats.push(index * 0.25 + (cell.nudge || 0))
+        }
+      }
+    }
+    return beats
+  }
+
+  private computeQuantize(settings: QuantizeSettings): QuantizeResult {
+    const scale = this.quantizeContext()
+    const result: QuantizeResult = { notes: [], channels: [], audio: [] }
+    if (settings.scope === 'pattern' || (settings.scope === 'selection' && this.view === 'beats' && !this.selectedNoteIds.length)) {
+      const pattern = this.activePattern()
+      if (pattern) {
+        for (const channel of pattern.channels) result.channels.push({ id: channel.id, cells: quantizeChannel(channel, settings, scale) })
+      }
+      if (settings.scope === 'pattern' || this.view === 'beats') return result
+    }
+    const skipAudio = settings.scope === 'selection' && this.selectedNoteIds.length > 0
+    for (const item of this.collectNotes(settings.scope)) {
+      const only = settings.scope === 'selection' && this.selectedNoteIds.length ? this.selectedNoteIds : undefined
+      result.notes.push({ trackId: item.trackId, clipId: item.clip.id, notes: quantizeMidi(item.clip.notes, settings, { ...scale, only }) })
+    }
+    for (const item of skipAudio ? [] : this.collectAudio(settings.scope)) {
+      const asset = this.buffers.get(item.clip.bufferId)
+      const channel = asset?.channels[0]
+      if (!channel) continue
+      result.audio.push({
+        trackId: item.trackId,
+        clipId: item.clip.id,
+        clip: quantizeAudioWarp(item.clip, channel, asset.sampleRate, this.project.tempo, settings),
+      })
+    }
+    return result
+  }
+
+  private collectNotes(scope: QuantizeSettings['scope']) {
+    const found: { trackId: string; clip: MidiClip }[] = []
+    const tracks = scope === 'track' ? this.project.tracks.filter((track) => track.id === this.selectedTrackId) : this.project.tracks
+    for (const track of tracks) {
+      for (const clip of track.midiClips) {
+        if (clip.scene != null) continue
+        if (scope === 'clip' || scope === 'selection') {
+          if (clip.id !== this.selectedMidiClipId) continue
+        }
+        if (!clip.notes.length) continue
+        found.push({ trackId: track.id, clip })
+      }
+    }
+    return found
+  }
+
+  private collectAudio(scope: QuantizeSettings['scope']) {
+    if (scope === 'pattern') return []
+    const found: { trackId: string; clip: AudioClip }[] = []
+    const tracks = scope === 'track' ? this.project.tracks.filter((track) => track.id === this.selectedTrackId) : this.project.tracks
+    for (const track of tracks) {
+      for (const clip of track.clips) {
+        if ((scope === 'clip' || scope === 'selection') && clip.id !== this.selectedClipId) continue
+        found.push({ trackId: track.id, clip })
+      }
+    }
+    return found
+  }
+
+  private writeQuantize(result: QuantizeResult) {
+    for (const item of result.notes) {
+      const clip = this.track(item.trackId)?.midiClips.find((entry) => entry.id === item.clipId)
+      if (clip) clip.notes = item.notes
+    }
+    for (const item of result.audio) {
+      const clips = this.track(item.trackId)?.clips
+      const index = clips?.findIndex((clip) => clip.id === item.clipId) ?? -1
+      if (clips && index >= 0) clips[index] = item.clip
+    }
+    const pattern = this.activePattern()
+    if (!pattern) return
+    for (const item of result.channels) {
+      const channel = pattern.channels.find((row) => row.id === item.id)
+      if (channel) channel.cells = item.cells
+    }
   }
 
   recordSettings(): RecordSettings {

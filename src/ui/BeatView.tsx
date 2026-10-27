@@ -54,6 +54,7 @@ export function BeatView({ store, engine }: { store: ProjectStore; engine: Audio
       </div>
       {pattern.channels.map((channel) => {
         const count = channel.steps || pattern.steps
+        const cells = store.quantizePreview?.channels.find((row) => row.id === channel.id)?.cells ?? channel.cells
         const playStep = channel.mute ? -1 : stepIndexAt(beat, count, 0.25, channel.swing ?? pattern.swing)
         return (
           <div className="beat-row" key={channel.id}>
@@ -111,7 +112,7 @@ export function BeatView({ store, engine }: { store: ProjectStore; engine: Audio
               }}
             >
               {Array.from({ length: count }, (_, index) => {
-                const cell = channel.cells[index]
+                const cell = cells[index]
                 return (
                   <button
                     key={index}

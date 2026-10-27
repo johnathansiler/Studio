@@ -128,7 +128,8 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   const high = 84
   const pxBeat = 70
   const width = Math.max(clip.durationBeats, 8) * pxBeat
-  const selected = clip.notes.filter((note) => store.selectedNoteIds.includes(note.id))
+  const shown = store.quantizePreview?.notes.find((item) => item.clipId === clip.id)?.notes ?? clip.notes
+  const selected = shown.filter((note) => store.selectedNoteIds.includes(note.id))
   const chord = selected.length ? nameChord(selected.map((note) => note.pitch)) : ''
   const pads = diatonicPads(scale.root, scale.scale, scale.source)
   const tones = [...scaleTones(scale.root, scale.scale, 4), ...scaleTones(scale.root, scale.scale, 5)]
@@ -142,6 +143,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     const ids = store.selectedNoteIds.length ? store.selectedNoteIds : undefined
     withNotes(quantizeNotes(clip.notes, roll.grid, ids).map((note) => ({ ...note, id: note.id || uid('note') })))
   }
+
 
   function arpeggiate() {
     if (!clip) return
@@ -324,7 +326,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
               commitGesture(current.from, current.to, current.pitch, current.y)
             }}
           >
-            {clip.notes.map((note) => (
+            {shown.map((note) => (
               <div
                 key={note.id}
                 className={`note ${store.selectedNoteIds.includes(note.id) ? 'selected' : ''} ${inScale(note.pitch, scale.root, scale.scale) ? '' : 'off'} ${note.slide ? 'slide' : ''}`}

@@ -1,6 +1,7 @@
 import type { AutomationLane, Insert, PluginInstance, Project, UserPreset } from '../../model/types'
 import { AMP_PRESETS } from '../../model/ampPresets'
 import { defaultRoll } from '../../model/paint'
+import { normalizeQuantize } from '../../model/quantize'
 import { defaultRecord, uid } from '../../model/types'
 import { normalizeScale } from '../../model/scale'
 import { normalizeBeats } from '../../model/steps'
@@ -856,6 +857,8 @@ export function normalizeProject(project: Project): Project {
   project.beats = beats.beats
   project.patternClips = beats.patternClips
   project.roll = { ...defaultRoll(), ...project.roll }
+  project.quantize = normalizeQuantize(project.quantize)
+  project.quantizePresets = project.quantizePresets ?? []
   project.record = { ...defaultRecord(project.loopEndSample || 0), ...(project.record || {}) }
   project.masterPlugins = project.masterPlugins ?? []
   project.automation = project.automation ?? []
