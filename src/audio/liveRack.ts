@@ -41,7 +41,7 @@ export class LiveRack {
   private remoteBus: AudioNode | null = null
 
   constructor() {
-    if (typeof matchMedia !== 'undefined') this.phone = matchMedia('(max-width: 940px)').matches
+    if (typeof matchMedia !== 'undefined') this.phone = matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
   }
 
   spectrum(pluginId: string) {

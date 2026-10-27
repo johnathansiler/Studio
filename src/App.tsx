@@ -20,6 +20,7 @@ import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
 import { VideoDock } from './ui/VideoDock'
 import { downloadBlob } from './ui/format'
+import { formFactor, type FormFactor } from './ui/form'
 
 interface Bundle {
   store: ProjectStore
@@ -58,7 +59,10 @@ export function App() {
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [help, setHelp] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [phone, setPhone] = useState(() => window.matchMedia('(max-width: 940px)').matches)
+  const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight))
+  const [land, setLand] = useState(() => window.innerWidth > window.innerHeight)
+  const phone = form === 'phone'
+  const compact = form !== 'desk'
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
@@ -270,15 +274,17 @@ export function App() {
   }, [session, store])
 
   useEffect(() => {
-    const query = window.matchMedia('(max-width: 940px)')
     const apply = () => {
-      setPhone(query.matches)
-      document.documentElement.classList.toggle('phone-root', query.matches)
+      const next = formFactor(window.innerWidth, window.innerHeight)
+      setForm(next)
+      setLand(window.innerWidth > window.innerHeight)
+      document.documentElement.classList.toggle('phone-root', next === 'phone')
+      document.documentElement.dataset.form = next
     }
     apply()
-    query.addEventListener('change', apply)
+    window.addEventListener('resize', apply)
     return () => {
-      query.removeEventListener('change', apply)
+      window.removeEventListener('resize', apply)
       document.documentElement.classList.remove('phone-root')
     }
   }, [])
@@ -676,7 +682,7 @@ export function App() {
   const showRoll = store.view === 'arrange' && store.selectedMidiClipId
 
   return (
-    <div className={`shell ${surface} ${phone ? 'phone' : ''}`} style={{ ['--dock' as string]: `${dock}px` }} data-version={version}>
+    <div className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''}`} style={{ ['--dock' as string]: `${dock}px` }} data-version={version} data-form={form}>
       <header className="topbar">
         <div className="brand">
           <div className="mark" aria-hidden>
@@ -700,7 +706,7 @@ export function App() {
           </div>
         )}
         <div className="spacer" />
-        {phone ? (
+        {compact ? (
           <button className="text-btn menu-btn" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
             {menuOpen ? 'Close' : 'Menu'}
           </button>
@@ -725,7 +731,7 @@ export function App() {
             </button>
           </div>
         )}
-        {phone && menuOpen && (
+        {compact && menuOpen && (
           <div className="phone-menu">
             <button className="text-btn" onClick={() => { setMenuOpen(false); void persist() }}>Save</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); void openLibrary() }}>Library</button>
@@ -764,10 +770,15 @@ export function App() {
               {store.view === 'mix' && <MixerView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} />}
             </div>
-            {showRoll && <PianoRoll store={store} engine={engine} />}
+            {showRoll && form !== 'fold' && <PianoRoll store={store} engine={engine} />}
           </div>
         )}
-        {(!phone || phonePane === 'room' || surface === 'artist') && (
+                {form === 'fold' && showRoll && surface === 'studio' && (
+          <div className="side-editor">
+            <PianoRoll store={store} engine={engine} />
+          </div>
+        )}
+{(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && showRoll) && (
         <div
           className="dock-slot"
           onPointerDown={(event) => {
