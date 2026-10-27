@@ -15,6 +15,7 @@ import {
   type RackState,
   type VoiceRef,
 } from '../../model/rack'
+import { drumStepIndex } from '../../model/steps'
 
 export interface SampleBuffer {
   sampleRate: number
@@ -355,10 +356,7 @@ export class RackRuntime {
   }
 
   private drum(device: RackDevice, params: Record<string, number>, buffers: Map<string, SampleBuffer>, time: number, beatSamples: number) {
-    const swing = params.swing || 0
-    const stepLen = beatSamples / 4
-    const shifted = time + (Math.floor(time / stepLen) % 2 === 1 ? swing * stepLen : 0)
-    const step = Math.floor(shifted / stepLen) % 16
+    const step = drumStepIndex(time, beatSamples, device.pattern.length || 16, params.swing || 0)
     const state = this.fxState(device.id, 'drum')
     if (step !== this.drumStep) {
       this.drumStep = step
