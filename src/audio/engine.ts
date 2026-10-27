@@ -80,6 +80,7 @@ export class AudioEngine {
   private cueDest: MediaStreamAudioDestinationNode | null = null
   private recordSink: MediaStreamAudioDestinationNode | null = null
   private inputAnalyser: AnalyserNode | null = null
+  private tuneAnalyser: AnalyserNode | null = null
   private talkAnalyser: AnalyserNode | null = null
   private cueReturnGain: GainNode | null = null
   private cueReturnSrc: MediaStreamAudioSourceNode | null = null
@@ -93,6 +94,8 @@ export class AudioEngine {
   private localMicSrc: MediaStreamAudioSourceNode | null = null
   private monitorSplit: ChannelSplitterNode | null = null
   private localMicGain: GainNode | null = null
+  private directMonitor = false
+  private tuneMuted = false
   private remoteGains = new Map<string, { src: MediaStreamAudioSourceNode; gain: GainNode }>()
   private talkGains = new Map<string, GainNode>()
 
@@ -164,6 +167,48 @@ export class AudioEngine {
 
   get baseLatencyMs() {
     return (this.ctx?.baseLatency || 0) * 1000
+  }
+
+  get processQuality() {
+    return this.rack.quality
+  }
+
+  directAvailable() {
+    return typeof AudioContext !== 'undefined' && 'setSinkId' in AudioContext.prototype
+  }
+
+  /** Software monitor time, or the device output time when Direct is handing the input to the interface. */
+  monitorInfo(trackId?: string) {
+    const device = this.outputLatencyMs
+    const chain = trackId ? (this.rack.ownerLatency(trackId) / this.sampleRate) * 1000 : 0
+    const direct = this.directMonitor
+    return {
+      ms: direct ? (this.ctx?.outputLatency || 0) * 1000 : device + chain,
+      direct,
+      directAvailable: this.directAvailable(),
+      eco: this.rack.quality === 'eco',
+    }
+  }
+
+  setDirectMonitor(on: boolean) {
+    this.directMonitor = on && this.directAvailable()
+    this.routeLocalMic()
+  }
+
+  setTuneMute(on: boolean) {
+    this.tuneMuted = on
+    this.routeLocalMic()
+  }
+
+  tuner(pluginId: string) {
+    return this.rack.tuner(pluginId)
+  }
+
+  inputFrame() {
+    if (!this.tuneAnalyser) return null
+    const frame = new Float32Array(this.tuneAnalyser.fftSize)
+    this.tuneAnalyser.getFloatTimeDomainData(frame)
+    return frame
   }
 
   /** Without a loopback measurement, estimate input as one audio block. */
@@ -277,6 +322,8 @@ export class AudioEngine {
     this.recordSink = ctx.createMediaStreamDestination()
     this.inputAnalyser = ctx.createAnalyser()
     this.inputAnalyser.fftSize = 256
+    this.tuneAnalyser = ctx.createAnalyser()
+    this.tuneAnalyser.fftSize = 8192
     this.talkAnalyser = ctx.createAnalyser()
     this.talkAnalyser.fftSize = 256
     this.masterStrip = createStrip(ctx)
@@ -454,6 +501,7 @@ export class AudioEngine {
     this.localMicSrc = this.ctx.createMediaStreamSource(stream)
     this.localMicSrc.connect(this.localMicGain)
     this.localMicSrc.connect(this.inputAnalyser)
+    if (this.tuneAnalyser) this.localMicSrc.connect(this.tuneAnalyser)
     this.routeLocalMic()
   }
 
@@ -471,6 +519,8 @@ export class AudioEngine {
         /* already */
       }
     }
+    const hear = !this.directMonitor && !this.tuneMuted
+    this.localMicGain.gain.value = hear ? 1 : 0
     if (this.monitorSplit) {
       try {
         this.localMicSrc?.disconnect(this.monitorSplit)
@@ -480,6 +530,7 @@ export class AudioEngine {
       this.monitorSplit.disconnect()
       this.monitorSplit = null
     }
+    if (!hear) return
     const splitCount = Math.max(
       1,
       ...this.project.tracks.map((track) => {

@@ -13,6 +13,7 @@ const loaders: Record<string, () => Promise<{ default: PluginModule }>> = {
   reverb: () => import('./reverb'),
   tune: () => import('./tune'),
   pitch: () => import('./pitch'),
+  amp: () => import('./amp').then((mod) => ({ default: mod.ampModule() })),
   fet: () => import('./models').then((mod) => ({ default: mod.moduleFor('fet') })),
   opto: () => import('./models').then((mod) => ({ default: mod.moduleFor('opto') })),
   bus: () => import('./models').then((mod) => ({ default: mod.moduleFor('bus') })),
