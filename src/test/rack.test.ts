@@ -168,7 +168,7 @@ describe('rack', () => {
   })
 
   it('keeps every device finite on a note and on silence', () => {
-    for (const kind of ['sub', 'fm', 'sampler', 'drum', 'eq', 'comp', 'delay', 'reverb', 'chorus', 'dist', 'filter'] as const) {
+    for (const kind of ['sub', 'fm', 'wave', 'sampler', 'drum', 'eq', 'comp', 'delay', 'reverb', 'chorus', 'dist', 'filter'] as const) {
       const device = makeDevice(kind)
       const runtime = new RackRuntime(44100)
       if (kind === 'sub' || kind === 'fm' || kind === 'sampler') runtime.note(57, 0.6, 4)

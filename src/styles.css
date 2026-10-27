@@ -205,8 +205,12 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .device { min-width: 92px; display: flex; flex-direction: column; gap: 4px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .device-edit { min-width: 0; flex: 1; }
 .steps { display: grid; grid-template-columns: repeat(8, minmax(28px, 1fr)); gap: 4px; }
-.shell.phone .rack { height: 280px; }
-.shell.phone .rack header button, .shell.phone .rack header select, .shell.phone .rack .text-btn, .shell.phone .device-list button, .shell.phone .steps button { min-height: 44px; }
+.shell.phone .rack { height: 320px; }
+.shell.phone .rack header button, .shell.phone .rack header select, .shell.phone .rack .text-btn, .shell.phone .device-list button, .shell.phone .steps button, .shell.phone .rack-keys button, .shell.phone .rack input, .shell.phone .rack select { min-height: 44px; }
+.shell.phone .rack select, .shell.phone .rack input { max-width: 28vw; }
+.rack-keys { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
+.rack-keys button { min-width: 0; padding: 0; }
+.knobs.macros { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .keys { overflow: hidden; }
 .key { height: 16px; border-bottom: 1px solid #243028; font-size: 9px; color: var(--faint); display: flex; align-items: center; padding-left: 6px; }
 .key.black { background: #0c110f; }

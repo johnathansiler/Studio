@@ -15,6 +15,7 @@ import {
   type RackState,
   type VoiceRef,
 } from '../../model/rack'
+import { renderTone, tableFromAudio, type PlayVoice, type SynthState } from './synth'
 import { drumStepIndex } from '../../model/steps'
 
 export interface SampleBuffer {
@@ -38,9 +39,10 @@ interface Mem {
   fenv: number
 }
 
-interface Voice extends VoiceRef {
+interface Voice extends VoiceRef, PlayVoice {
   vel: number
   mem: Record<string, Mem>
+  synth: Record<string, SynthState>
 }
 
 interface Fx {
@@ -66,13 +68,6 @@ function san(value: number) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
-}
-
-function wave(shape: number, phase: number) {
-  const p = phase - Math.floor(phase)
-  if (shape >= 1.5) return p < 0.5 ? 4 * p - 1 : 3 - 4 * p
-  if (shape >= 0.5) return p < 0.5 ? 1 : -1
-  return 2 * p - 1
 }
 
 function midiHz(note: number) {
@@ -110,6 +105,9 @@ export class RackRuntime {
   private arpNote: number | null = null
   private arpOn = false
   private drumStep = -1
+  private lastNote = 0
+  private frame = 0
+  private tables = new Map<string, Float32Array[]>()
 
   constructor(sampleRate: number) {
     this.sampleRate = sampleRate
@@ -126,6 +124,24 @@ export class RackRuntime {
     const slot = allocateVoice(this.voices, midi, polyphony) as Voice
     slot.vel = vel
     slot.mem = {}
+    slot.synth = {}
+    slot.bend = 0
+    slot.pressure = 0
+    slot.glideFrom = this.lastNote || midi
+    this.lastNote = midi
+  }
+
+  express(pitch: number, bend: number, pressure: number) {
+    const midi = Math.round(pitch)
+    for (const voice of this.voices) {
+      if (!voice.active || voice.note !== midi) continue
+      voice.bend = bend
+      voice.pressure = pressure
+    }
+  }
+
+  activeVoices() {
+    return this.voices.filter((voice) => voice.active).length
   }
 
   allOff() {
@@ -148,6 +164,7 @@ export class RackRuntime {
     const beatSamples = Math.max(1, (60 / Math.max(1, tempo)) * this.sampleRate)
     for (let i = 0; i < frames; i++) {
       const time = this.sampleTime + i
+      this.frame = time
       this.fillControl(rack, time, beatSamples, tempo)
       const params = new Map(rack.devices.map((device) => [device.id, this.params(device, modCables, lanes, beat + i / beatSamples)]))
       const produced = new Map<string, number>()
@@ -227,8 +244,7 @@ export class RackRuntime {
   }
 
   private device(device: RackDevice, params: Record<string, number>, input: number, limit: number, buffers: Map<string, SampleBuffer>, quality: 'full' | 'eco', time: number, beatSamples: number) {
-    if (device.kind === 'sub') return this.sub(device, params, limit)
-    if (device.kind === 'fm') return this.fm(device, params, limit)
+    if (device.kind === 'sub' || device.kind === 'fm' || device.kind === 'wave') return this.tone(device, params, quality, buffers)
     if (device.kind === 'sampler') return this.sampler(device, params, limit, buffers)
     if (device.kind === 'drum') return this.drum(device, params, buffers, time, beatSamples)
     if (device.kind === 'eq') return this.eq(device, params, input)
@@ -247,73 +263,33 @@ export class RackRuntime {
     return input
   }
 
-  private sub(device: RackDevice, params: Record<string, number>, _limit: number) {
-    const sr = this.sampleRate
-    let mix = 0
-    const lfo1 = Math.sin(2 * Math.PI * (params.lfo1 || 0.4) * (this.sampleTime / sr))
-    const lfo2 = Math.sin(2 * Math.PI * (params.lfo2 || 2) * (this.sampleTime / sr))
-    this.cv[`${device.id}:lfo1`] = lfo1
-    this.cv[`${device.id}:lfo2`] = lfo2
-    const sources = [lfo1, lfo2, 0, 0]
-    for (const voice of this.voices) {
-      if (!voice.active) continue
-      const state = this.voiceMem(voice, device.id)
-      state.amp = env(state.amp, voice.released, params.attack, params.decay, params.sustain, params.release, sr)
-      state.fenv = env(state.fenv, voice.released, params.fattack, params.fdecay, params.fsustain, params.frelease, sr)
-      if (voice.released && state.amp < 0.0008) {
-        voice.active = false
-        continue
+  private tone(device: RackDevice, params: Record<string, number>, quality: 'full' | 'eco', buffers: Map<string, SampleBuffer>) {
+    let table: Float32Array[] | null = null
+    const zone = device.zones[0]
+    const channel = zone ? buffers.get(zone.bufferId)?.channels[0] : undefined
+    if (device.kind === 'wave' && zone && channel?.length) {
+      const key = `${zone.bufferId}:${channel.length}`
+      let built = this.tables.get(key)
+      if (!built) {
+        built = tableFromAudio(channel)
+        this.tables.set(key, built)
       }
-      sources[2] = state.fenv
-      sources[3] = voice.vel
-      const played = this.playedNote(voice)
-      if (played == null) continue
-      let cutoff = params.cutoff + (params.famt || 0) * 4000 * state.fenv
-      let pitch = played
-      let amp = state.amp
-      for (const slot of [1, 2] as const) {
-        const amount = params[`mod${slot}amt`] || 0
-        if (!amount) continue
-        const src = sources[Math.round(params[`mod${slot}src`] || 0)] || 0
-        const dst = Math.round(params[`mod${slot}dst`] || 0)
-        if (dst === 0) cutoff += amount * 3000 * src
-        else if (dst === 1) pitch += amount * 2 * src
-        else amp *= clamp(1 + amount * src, 0, 1.5)
-      }
-      const hz = midiHz(pitch)
-      state.phase += hz / sr
-      state.phase2 += (hz * 2 ** ((params.detune || 0) / 1200)) / sr
-      const osc = wave(params.wave1 || 0, state.phase) * (params.mix1 || 0)
-        + wave(1, state.phase2) * (params.mix2 || 0)
-        + wave(2, state.phase * 0.5) * (params.mix3 || 0)
-      mix += svf(state, osc * 0.22, cutoff, params.res || 0, sr, false) * amp * voice.vel
+      table = built
     }
-    this.cv[`${device.id}:env`] = this.voices[0]?.mem[device.id]?.amp || 0
-    return san(mix)
-  }
-
-  private fm(device: RackDevice, params: Record<string, number>, _limit: number) {
-    const sr = this.sampleRate
-    let mix = 0
-    for (const voice of this.voices) {
-      if (!voice.active) continue
-      const state = this.voiceMem(voice, device.id)
-      state.amp = env(state.amp, voice.released, params.attack, params.decay, params.sustain, params.release, sr)
-      if (voice.released && state.amp < 0.0008) {
-        voice.active = false
-        continue
-      }
-      const played = this.playedNote(voice)
-      if (played == null) continue
-      const hz = midiHz(played)
-      state.phase2 += (hz * (params.ratio || 1)) / sr
-      const mod = Math.sin(2 * Math.PI * state.phase2) * (params.index || 0)
-      state.phase += hz / sr
-      const table = params.mode >= 0.5
-      const sample = table ? wave(params.index || 0, state.phase) : Math.sin(2 * Math.PI * (state.phase + mod))
-      mix += sample * 0.2 * state.amp * voice.vel
-    }
-    return san(mix)
+    return renderTone(device.kind, {
+      sr: this.sampleRate,
+      time: this.frame,
+      quality,
+      params,
+      voices: this.voices,
+      played: (voice) => this.playedNote(voice as Voice),
+      table,
+      fx: this.fxState(device.id, device.kind),
+      publish: (port, value) => {
+        this.cv[`${device.id}:${port}`] = value
+      },
+      deviceId: device.id,
+    })
   }
 
   private sampler(device: RackDevice, params: Record<string, number>, _limit: number, buffers: Map<string, SampleBuffer>) {

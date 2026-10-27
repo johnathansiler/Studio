@@ -124,5 +124,6 @@ export function arrangementDigest(project: Project): string {
       rack: track.rack?.devices.map((device) => [device.id, device.kind, device.params, device.pattern, device.zones.length]),
       cables: track.rack?.cables.map((cable) => [cable.from, cable.fromPort, cable.to, cable.toPort, cable.amount]),
     })),
+    presetFavorites: project.presetFavorites ?? [],
   })
 }

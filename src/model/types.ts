@@ -81,6 +81,8 @@ export interface Project {
   automation: RackAutomation[]
   devicePresets: DevicePreset[]
   rackPatches: RackPatch[]
+  /** `${kind}:${name}` factory and user presets marked in the browser. */
+  presetFavorites?: string[]
   /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */
   waveforms?: Record<string, { min: number; max: number }[]>
 }
