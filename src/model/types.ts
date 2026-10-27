@@ -1,4 +1,44 @@
-export type TrackType = 'audio' | 'midi'
+import { defaultScale, type ScaleState } from './scale'
+
+export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
+
+export interface PluginInstance {
+  id: string
+  pluginId: string
+  version: string
+  enabled: boolean
+  wet: number
+  params: Record<string, number>
+  /** Sidechain source track or bus id. Empty uses the plugin input. */
+  sidechain: string
+}
+
+export interface Send {
+  id: string
+  busId: string
+  gain: number
+  preFader: boolean
+  enabled: boolean
+}
+
+export interface AutomationPoint {
+  beat: number
+  value: number
+}
+
+export interface AutomationLane {
+  id: string
+  pluginId: string
+  param: string
+  points: AutomationPoint[]
+}
+
+export interface UserPreset {
+  id: string
+  pluginId: string
+  name: string
+  params: Record<string, number>
+}
 export type InsertType = 'eq' | 'compressor' | 'delay' | 'reverb'
 export type ClipSource = 'local' | 'import' | 'demo' | 'guide' | 'aligned-take' | 'midi'
 export type LaunchQuant = 'none' | '1/16' | '1/4' | '1bar' | '2bar' | '4bar'
@@ -100,6 +140,12 @@ export interface Track {
   monitor: boolean
   input: string
   inserts: Insert[]
+  plugins: PluginInstance[]
+  sends: Send[]
+  /** Bus or group id. Null reaches the master, or the monitor bus for a remote input. */
+  output: string | null
+  /** Folder group that sums this track. Wins over output. */
+  groupId: string | null
   clips: AudioClip[]
   midiClips: MidiClip[]
   /** Scene index → clip id. Missing means scene N is clips[N]. */
@@ -117,6 +163,9 @@ export interface Project {
   tracks: Track[]
   masterVolume: number
   masterInserts: Insert[]
+  masterPlugins: PluginInstance[]
+  automation: AutomationLane[]
+  presets: UserPreset[]
   loopEnabled: boolean
   loopStartSample: number
   loopEndSample: number
@@ -128,7 +177,8 @@ export interface Project {
   /** 0 records until stop. A positive count trims a session take to that many bars. */
   recordBars?: number
   tempoMap?: TempoPoint[]
-  automation?: { pluginId: string; param: string; points: { beat: number; value: number }[] }[]
+  /** Key, scale, and chord-pad performance settings. */
+  scale?: ScaleState
   /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */
   waveforms?: Record<string, { min: number; max: number }[]>
 }
@@ -168,6 +218,10 @@ export function makeTrack(partial: Partial<Track> & Pick<Track, 'name' | 'type'>
     monitor: false,
     input: partial.type === 'audio' ? 'mic' : 'none',
     inserts: [],
+    plugins: [],
+    sends: [],
+    output: null,
+    groupId: null,
     clips: [],
     midiClips: [],
     ...partial,
@@ -189,6 +243,9 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     tracks: [vocal, music, keys],
     masterVolume: 0.9,
     masterInserts: [],
+    masterPlugins: [],
+    automation: [],
+    presets: [],
     loopEnabled: false,
     loopStartSample: 0,
     loopEndSample: bar * 4,
@@ -197,5 +254,6 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     snap: true,
     launchQuant: '1bar',
     recordBars: 4,
+    scale: defaultScale(),
   }
 }
