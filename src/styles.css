@@ -707,6 +707,30 @@ html[data-posture="tabletop"] .shell .plugin-sheet {
 }
 .touch-menu button { min-height: 44px; min-width: 64px; }
 
+.sound-browser { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #101714; color: var(--text); }
+.sound-browser.sheet {
+  position: fixed; z-index: 64; top: 56px; right: 12px; bottom: 12px; width: min(440px, calc(100vw - 24px));
+  border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden;
+}
+.sound-browser.pane { height: 100%; border-left: 1px solid var(--line); }
+.sound-search { display: flex; gap: 6px; align-items: center; padding: 8px; border-bottom: 1px solid var(--line); }
+.sound-search input, .sound-search select { min-height: 44px; background: #18231d; border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; }
+.sound-search input { flex: 1; min-width: 0; font-size: 16px; }
+.sound-used { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; flex: 0 0 auto; }
+.sound-chips { display: flex; gap: 6px; overflow-x: auto; padding: 8px; flex: 0 0 auto; }
+.sound-chips .chip, .sound-row .chip {
+  flex: 0 0 auto; min-height: 36px; border-radius: 999px; border: 1px solid var(--line); background: #18231d; padding: 0 12px;
+}
+.chip.on, .sound-row button.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.sound-list { overflow: auto; min-height: 0; display: flex; flex-direction: column; }
+.sound-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.sound-name { flex: 1; min-width: 140px; min-height: 44px; display: flex; justify-content: space-between; gap: 8px; align-items: center; background: transparent; border: 0; text-align: left; }
+.sound-name i { color: var(--muted); font-style: normal; font-size: 12px; }
+.sound-row button, .sound-row input { min-height: 44px; }
+.sound-row input { flex: 1 0 120px; background: #18231d; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; }
+.shell.phone .sound-browser.sheet, .shell.phone.land .sound-browser.sheet { inset: 0; width: auto; border: 0; border-radius: 0; }
+.shell.phone .sound-chips .chip { min-height: 44px; font-size: 15px; }
+
 .loom-pop {
   position: fixed; z-index: 60; right: 12px; top: 56px; bottom: 12px; width: min(440px, calc(100vw - 24px));
   display: flex; flex-direction: column; background: #101714; border: 1px solid var(--line); border-radius: 16px;

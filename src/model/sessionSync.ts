@@ -111,6 +111,7 @@ export function arrangementDigest(project: Project): string {
     countIn: project.countIn,
     snap: project.snap,
     loom: project.loom ? [project.loom.active, project.loom.articulation, project.loom.lite, project.loom.patchId] : null,
+    sounds: project.sounds ? [project.sounds.favorite, project.sounds.userTags, (project.sounds.imports ?? []).map((item) => item.id)] : null,
     tracks: project.tracks.map((track) => ({
       id: track.id,
       name: track.name,

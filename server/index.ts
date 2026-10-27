@@ -3,6 +3,7 @@ import { currentIce, type IceConfig } from './ice.ts'
 import { sfuCall, sfuConfigured } from './sfu.ts'
 import { createUsageLedger } from './usage.ts'
 import { rememberDiag, sanitizeDiag, type DiagReport } from '../src/model/diag.ts'
+import { isBlockedStatic } from '../src/model/libraryHost.ts'
 import { sessionHello } from '../src/model/negotiate.ts'
 import { CAP_NOTICE, type UsageSnapshot } from '../src/model/usage.ts'
 import { readFile, stat } from 'node:fs/promises'
@@ -392,6 +393,11 @@ function json(res: ServerResponse, body: unknown, status = 200) {
 }
 
 async function serveStatic(pathname: string, res: ServerResponse) {
+  if (isBlockedStatic(pathname)) {
+    res.writeHead(404)
+    res.end('Not found')
+    return
+  }
   const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
   const filePath = path.resolve(STATIC_ROOT, relative)
   const rootWithSep = STATIC_ROOT.endsWith(path.sep) ? STATIC_ROOT : STATIC_ROOT + path.sep

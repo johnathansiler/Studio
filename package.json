@@ -10,6 +10,7 @@
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "serve": "NODE_ENV=production node --experimental-strip-types server/index.ts",
     "test": "vitest run",
+    "guard": "node --experimental-strip-types scripts/library-guard.ts",
     "test:watch": "vitest"
   },
   "engines": {
