@@ -409,7 +409,7 @@ function voiceState(voice: PlayVoice, id: string) {
   return (voice.synth[id] ??= freshState())
 }
 
-function envelope(value: number, released: boolean, attackMs = 8, decayMs = 200, sustain = 0.7, releaseMs = 200, sr = 48000) {
+export function envelope(value: number, released: boolean, attackMs = 8, decayMs = 200, sustain = 0.7, releaseMs = 200, sr = 48000) {
   if (!released) {
     const attack = Math.max(1, (attackMs / 1000) * sr)
     if (value < 0.999) return Math.min(1, value + 1 / attack)
