@@ -150,6 +150,33 @@ describe('sampler and looper', () => {
     expect(lane.gain).toBeCloseTo(0.25)
   })
 
+  it('uses the offline stretch for a bounce and the preview stretch while playing', () => {
+    const play = (offline: boolean) => {
+      const plugin = createPlugin('sampler')
+      plugin.sampler!.bufferId = 'tone'
+      const proc = createSampler(48000)
+      proc.bind(plugin, () => sine(4000, 220, 48000))
+      proc.note(48, 0.8)
+      const output = [new Float32Array(256), new Float32Array(256)]
+      proc.process([new Float32Array(256), new Float32Array(256)], output, { ...plugin.params, stretch: 1, keys: 0 }, {
+        sampleRate: 48000,
+        tempo: 120,
+        sampleTime: 0,
+        sidechain: null,
+        scaleRoot: 0,
+        scaleIntervals: [0, 2, 4, 5, 7, 9, 11],
+        quality: 'full',
+        offline,
+      })
+      return output[0]
+    }
+    const bounced = play(true)
+    const live = play(false)
+    clean(bounced)
+    clean(live)
+    expect(bounced.some((sample, index) => sample !== live[index])).toBe(true)
+  })
+
   it('places beat slices on exact beat boundaries', () => {
     const slices = sliceBeats(48000, 48000, 120, 1)
     expect(slices[0]).toEqual({ start: 0, end: 24000 })

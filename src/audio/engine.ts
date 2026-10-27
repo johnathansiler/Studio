@@ -496,6 +496,7 @@ export class AudioEngine {
 
   previewSample(pluginId: string, note: number) {
     this.unlock()
+    if (this.project) this.sync(this.project, this.assetOf)
     this.rack.trigger(pluginId, note, 0.85)
     window.setTimeout(() => this.rack.trigger(pluginId, note, 0), 280)
   }
