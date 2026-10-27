@@ -1,4 +1,5 @@
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
+import { compPieces, recordOffsetSamples } from '../model/comp'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
 import { RackHost } from './rack/host'
 import { renderNotes } from './rack/dsp'
@@ -24,6 +25,8 @@ export interface CaptureResult {
   source: 'local' | 'guide'
   peerId?: string
   takeId?: string
+  /** Armed track id this capture was recorded for. */
+  key?: string
 }
 
 interface RecordInput {
@@ -32,6 +35,8 @@ interface RecordInput {
   source: 'local' | 'guide'
   peerId?: string
   takeId?: string
+  /** Interface channel. Omitted records the whole stream. */
+  channel?: number
 }
 
 interface ActiveRec {
@@ -85,6 +90,7 @@ export class AudioEngine {
   private truePeak = -70
 
   private localMicSrc: MediaStreamAudioSourceNode | null = null
+  private monitorSplit: ChannelSplitterNode | null = null
   private localMicGain: GainNode | null = null
   private remoteGains = new Map<string, { src: MediaStreamAudioSourceNode; gain: GainNode }>()
   private talkGains = new Map<string, GainNode>()
@@ -228,6 +234,12 @@ export class AudioEngine {
     return (perf - this.perfAtCtx0) / 1000
   }
 
+  /** Timeline sample for a performance.now() reading, using the output timestamp clock. */
+  timelineSampleForPerf(perf: number) {
+    if (!this.ctx || !this.playing) return Math.max(0, Math.round(this.positionSamples))
+    return Math.max(0, Math.round(this.sampleAt(this.contextForPerf(perf))))
+  }
+
   frameForPerf(perf: number) {
     return Math.round(this.contextForPerf(perf) * this.sampleRate)
   }
@@ -313,12 +325,17 @@ export class AudioEngine {
     this.rackHost.sync(this.ctx, project, this.strips, buffers)
   }
 
-  previewRack(trackId: string, pitch: number) {
+  previewRack(trackId: string, pitch: number, slide = false, hold = false) {
     this.unlock()
     if (this.project) this.sync(this.project, this.assetOf)
-    const when = (this.ctx?.currentTime ?? 0) + 0.03
-    this.rackHost.note(trackId, pitch, 0.8, when)
-    this.rackHost.note(trackId, pitch, 0, when + 0.35)
+    const when = (this.ctx?.currentTime ?? 0) + (hold ? 0 : 0.03)
+    this.rackHost.note(trackId, pitch, 0.9, when, slide)
+    if (!hold) this.rackHost.note(trackId, pitch, 0, when + 0.35)
+  }
+
+  releaseRack(trackId: string, pitch: number) {
+    const when = this.ctx?.currentTime ?? 0
+    this.rackHost.note(trackId, pitch, 0, when)
   }
 
   /** CPU load and master loudness. Loudness is read from the master analyser and includes the master fader. */
@@ -438,12 +455,41 @@ export class AudioEngine {
         /* already */
       }
     }
-    for (const track of this.project.tracks) {
-      if (isLocalInput(track.input) && track.monitor) {
-        const strip = this.strips.get(track.id)
-        if (strip) this.localMicGain.connect(strip.input)
+    if (this.monitorSplit) {
+      try {
+        this.localMicSrc?.disconnect(this.monitorSplit)
+      } catch {
+        /* noop */
       }
+      this.monitorSplit.disconnect()
+      this.monitorSplit = null
     }
+    const splitCount = Math.max(
+      1,
+      ...this.project.tracks.map((track) => {
+        const match = /^mic:(\d+)$/.exec(track.input)
+        return match ? Number(match[1]) + 1 : 1
+      }),
+    )
+    if (splitCount > 1 && this.ctx && this.localMicSrc) {
+      this.monitorSplit = this.ctx.createChannelSplitter(splitCount)
+      this.localMicSrc.connect(this.monitorSplit)
+    }
+    for (const track of this.project.tracks) {
+      if (!track.monitor) continue
+      const strip = this.strips.get(track.id)
+      if (!strip) continue
+      const match = /^mic:(\d+)$/.exec(track.input)
+      if (match && this.monitorSplit) this.monitorSplit.connect(strip.input, Number(match[1]), 0)
+      else if (isLocalInput(track.input)) this.localMicGain.connect(strip.input)
+    }
+  }
+
+  /** Input plus output latency, in samples, used to place a recording on the grid. */
+  latencyCompensationSamples() {
+    const ctx = this.ctx
+    if (!ctx) return 0
+    return recordOffsetSamples(ctx.baseLatency || 0, ctx.outputLatency || 0, ctx.sampleRate)
   }
 
   setRemoteMusic(peerId: string, stream: MediaStream | null) {
@@ -697,6 +743,7 @@ export class AudioEngine {
       source: rec.meta.source,
       peerId: rec.meta.peerId,
       takeId: rec.meta.takeId,
+      key: rec.meta.key,
     }
   }
 
@@ -726,7 +773,11 @@ export class AudioEngine {
       const node = new AudioWorkletNode(this.ctx, 'recorder-processor')
       const silent = this.ctx.createGain()
       silent.gain.value = 0
-      src.connect(node)
+      if (input.channel != null) {
+        const splitter = this.ctx.createChannelSplitter(input.channel + 1)
+        src.connect(splitter)
+        splitter.connect(node, input.channel, 0)
+      } else src.connect(node)
       node.connect(silent)
       silent.connect(this.recordSink ?? this.ctx.destination)
       const rec: ActiveRec = {
@@ -962,7 +1013,7 @@ export class AudioEngine {
             const start = beatsToSamples(clip.startBeat + note.startBeat, rate, project.tempo)
             const dur = beatsToSamples(note.durationBeats, rate, project.tempo)
             if (start >= end) continue
-            events.push({ sample: Math.max(0, start), pitch: note.pitch, vel: note.velocity })
+            events.push({ sample: Math.max(0, start), pitch: note.pitch, vel: note.velocity, slide: !!note.slide })
             events.push({ sample: Math.min(end - 1, start + dur), pitch: note.pitch, vel: 0 })
           }
         }
@@ -1126,8 +1177,7 @@ export class AudioEngine {
         project &&
         this.mode === 'arrangement' &&
         project.loopEnabled &&
-        this.status !== 'recording' &&
-        this.status !== 'counting-in'
+        (this.status === 'playing' || (this.status === 'recording' && project.record?.loop))
       ) {
         const len = project.loopEndSample - project.loopStartSample
         if (len > 1 && sample >= project.loopEndSample) {
@@ -1199,7 +1249,8 @@ export class AudioEngine {
   private scheduleArrangement(horizon: number) {
     const project = this.project!
     const end = projectEndSample(project.tracks, this.sampleRate, project.tempo)
-    if (!project.loopEnabled || this.status === 'recording') {
+    const cycleWhileRecording = this.status === 'recording' && project.record?.loop
+    if (!project.loopEnabled || (this.status === 'recording' && !cycleWhileRecording)) {
       if (this.arrangementScheduled) return
       this.arrangementScheduled = true
       this.scheduleWindow(this.playOriginCtx, this.playOriginSample, end)
@@ -1382,10 +1433,15 @@ export class AudioEngine {
       if (!strip) continue
       for (const clip of track.clips) {
         if (clip.slotOnly) continue
-        const asset = this.assetOf(clip.bufferId)
-        if (!asset) continue
-        const buffer = this.bufferFromAsset(ctx, asset)
-        this.scheduleAudioClip(ctx, strip, buffer, clip, ctxTime, timelineStart, timelineEnd)
+        const pieces = clip.folder
+          ? compPieces(clip.folder, clip.fadeInSamples, clip.fadeOutSamples).map((piece) => ({ ...clip, folder: undefined, ...piece, gain: clip.gain }))
+          : [clip]
+        for (const piece of pieces) {
+          const asset = this.assetOf(piece.bufferId)
+          if (!asset) continue
+          const buffer = this.bufferFromAsset(ctx, asset)
+          this.scheduleAudioClip(ctx, strip, buffer, piece, ctxTime, timelineStart, timelineEnd)
+        }
       }
       for (const clip of track.midiClips) {
         if (clip.slotOnly || clip.scene != null) continue
@@ -1627,8 +1683,11 @@ export class AudioEngine {
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[]) {
     if (note.muted) return
     if (track?.rack && ctx === this.ctx) {
-      this.rackHost.note(track.id, note.pitch, note.velocity, Math.max(when, ctx.currentTime))
-      this.rackHost.note(track.id, note.pitch, 0, Math.max(when, ctx.currentTime) + dur)
+      const knock = track.rack.devices.find((device) => device.kind === 'knock')
+      const legato = (knock?.params.legato ?? 0) >= 0.5
+      const at = Math.max(when, ctx.currentTime)
+      this.rackHost.note(track.id, note.pitch, note.velocity, at, !!note.slide || legato)
+      this.rackHost.note(track.id, note.pitch, 0, at + dur)
       return
     }
     if (ctx === this.ctx && when < ctx.currentTime) return

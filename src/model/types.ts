@@ -110,6 +110,40 @@ export interface AudioClip {
   stretch?: ClipStretch
   /** Session slot only, until Capture copies it onto the arrangement. */
   slotOnly?: boolean
+  /** Swipe-comp take folder. Playback uses the active comp, not the parent buffer. */
+  folder?: TakeFolder
+}
+
+/** One recorded pass inside a take folder. */
+export interface TakeLane {
+  id: string
+  name: string
+  bufferId: string
+  offsetSamples: number
+  startSample: number
+  durationSamples: number
+  peerId?: string
+  takeId?: string
+  source: ClipSource
+}
+
+export interface CompSegment {
+  laneId: string
+  startSample: number
+  endSample: number
+}
+
+export interface SavedComp {
+  id: string
+  name: string
+  segments: CompSegment[]
+}
+
+export interface TakeFolder {
+  lanes: TakeLane[]
+  comps: SavedComp[]
+  activeCompId: string
+  crossfadeSamples: number
 }
 
 export interface MidiNote {
@@ -121,6 +155,14 @@ export interface MidiNote {
   muted?: boolean
   pan?: number
   fine?: number
+  /** Slide into this note from the one still held. */
+  slide?: boolean
+}
+
+export interface MidiTake {
+  id: string
+  name: string
+  notes: MidiNote[]
 }
 
 export interface MidiClip {
@@ -142,6 +184,23 @@ export interface MidiClip {
   channelId?: string
   /** Session scene. Unset clips stay on the arrangement. */
   scene?: number
+  /** Earlier loop passes. The clip notes are the active pass. */
+  takes?: MidiTake[]
+  activeTakeId?: string
+}
+
+export interface RecordSettings {
+  /** Cycle recording stacks a take lane per loop pass. */
+  loop: boolean
+  midiLoop: 'merge' | 'takes'
+  punchEnabled: boolean
+  punchIn: number
+  punchOut: number
+  preRoll: number
+  postRoll: number
+  rollUnit: 'bars' | 'seconds'
+  /** One-shot punch that ignores pre-roll and stops at the out point. */
+  quick: boolean
 }
 
 export interface Track {
@@ -207,6 +266,7 @@ export interface Project {
   /** 0 records until stop. A positive count trims a session take to that many bars. */
   recordBars?: number
   tempoMap?: TempoPoint[]
+  record?: RecordSettings
   /** Key, scale, and chord-pad performance settings. */
   scale?: ScaleState
   beats?: BeatRack
@@ -290,6 +350,21 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     rackAutomation: [],
     launchQuant: '1bar',
     recordBars: 4,
+    record: defaultRecord(bar * 4),
     scale: defaultScale(),
+  }
+}
+
+export function defaultRecord(span = 0): RecordSettings {
+  return {
+    loop: false,
+    midiLoop: 'takes',
+    punchEnabled: false,
+    punchIn: 0,
+    punchOut: span,
+    preRoll: 1,
+    postRoll: 1,
+    rollUnit: 'bars',
+    quick: false,
   }
 }
