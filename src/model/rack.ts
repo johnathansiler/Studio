@@ -1,9 +1,11 @@
 import { uid, type Project, type Track } from './types'
 import { KNOCK_PRESETS } from './knockPresets'
+import { FM_PRESETS, SUB_PRESETS, WAVE_PRESETS } from './tonePresets'
 
 export type DeviceKind =
   | 'sub'
   | 'fm'
+  | 'wave'
   | 'knock'
   | 'sampler'
   | 'drum'
@@ -67,6 +69,7 @@ export interface DevicePreset {
   kind: DeviceKind
   name: string
   params: Record<string, number>
+  category?: string
 }
 
 export interface RackPatch {
@@ -91,6 +94,10 @@ export interface ParamSpec {
   unit: string
 }
 
+export const PRESET_CATEGORIES = ['Bass', 'Lead', 'Pad', 'Keys', 'Pluck', 'Bells', 'FX', 'Drums', 'Texture'] as const
+
+export const MACRO_TARGETS = ['cutoff', 'res', 'detune', 'mix2', 'famt', 'pw', 'drive', 'lfo1'] as const
+
 const spec = (id: string, name: string, min: number, max: number, fallback: number, unit = ''): ParamSpec => ({
   id, name, min, max, default: fallback, unit,
 })
@@ -102,7 +109,7 @@ export const DEVICE_PARAMS: Record<DeviceKind, ParamSpec[]> = {
     spec('mix3', 'Osc 3', 0, 1, 0),
     spec('wave1', 'Wave', 0, 2, 0),
     spec('detune', 'Detune', -40, 40, 6, 'ct'),
-    spec('cutoff', 'Cutoff', 40, 8000, 1400, 'Hz'),
+    spec('cutoff', 'Cutoff', 40, 16000, 1400, 'Hz'),
     spec('res', 'Res', 0, 0.9, 0.15),
     spec('attack', 'Attack', 1, 2000, 8, 'ms'),
     spec('decay', 'Decay', 5, 3000, 240, 'ms'),
@@ -121,6 +128,30 @@ export const DEVICE_PARAMS: Record<DeviceKind, ParamSpec[]> = {
     spec('mod2src', 'Mod 2 src', 0, 3, 1),
     spec('mod2dst', 'Mod 2 dst', 0, 2, 1),
     spec('mod2amt', 'Mod 2', -1, 1, 0),
+    spec('mod3src', 'Mod 3 src', 0, 5, 5),
+    spec('mod3dst', 'Mod 3 dst', 0, 3, 0),
+    spec('mod3amt', 'Mod 3', -1, 1, 0),
+    spec('mod4src', 'Mod 4 src', 0, 5, 0),
+    spec('mod4dst', 'Mod 4 dst', 0, 3, 1),
+    spec('mod4amt', 'Mod 4', -1, 1, 0),
+    spec('wave2', 'Wave 2', 0, 5, 1),
+    spec('wave3', 'Wave 3', 0, 5, 3),
+    spec('pw', 'Width', 0.05, 0.95, 0.5),
+    spec('sync', 'Sync', 0, 1, 0),
+    spec('ring', 'Ring', 0, 1, 0),
+    spec('uni', 'Unison', 1, 4, 1),
+    spec('uniDet', 'Spread', 0, 40, 8, 'ct'),
+    spec('fmode', 'Filter', 0, 3, 0),
+    spec('slope', 'Slope', 0, 1, 0),
+    spec('ftype', 'Ladder', 0, 1, 0),
+    spec('drive', 'Drive', 0, 1, 0),
+    spec('glide', 'Glide', 0, 400, 0, 'ms'),
+    spec('mattack', 'M Atk', 1, 2000, 10, 'ms'),
+    spec('mdecay', 'M Dec', 5, 3000, 200, 'ms'),
+    spec('msustain', 'M Sus', 0, 1, 0.5),
+    spec('mrelease', 'M Rel', 5, 4000, 240, 'ms'),
+    ...fxSpecs(),
+    ...macroSpecs(),
   ],
   fm: [
     spec('mode', 'Mode', 0, 1, 0),
@@ -130,6 +161,39 @@ export const DEVICE_PARAMS: Record<DeviceKind, ParamSpec[]> = {
     spec('decay', 'Decay', 5, 3000, 200, 'ms'),
     spec('sustain', 'Sustain', 0, 1, 0.6),
     spec('release', 'Release', 5, 4000, 240, 'ms'),
+    spec('algo', 'Algo', 0, 5, 0),
+    spec('feedback', 'Feedback', 0, 1, 0),
+    spec('fixed', 'Fixed', 0, 1, 0),
+    spec('op3', 'Op3', 0.5, 16, 1),
+    spec('lv3', 'Lv3', 0, 4, 0),
+    spec('op4', 'Op4', 0.5, 16, 1),
+    spec('lv4', 'Lv4', 0, 4, 0),
+    spec('op5', 'Op5', 0.5, 16, 1),
+    spec('lv5', 'Lv5', 0, 4, 0),
+    spec('op6', 'Op6', 0.5, 16, 2),
+    spec('lv6', 'Lv6', 0, 4, 0),
+    spec('glide', 'Glide', 0, 400, 0, 'ms'),
+    ...fxSpecs(),
+    ...macroSpecs(),
+  ],
+  wave: [
+    spec('table', 'Table', 0, 4, 0),
+    spec('position', 'Position', 0, 1, 0),
+    spec('warp', 'Warp', 0, 3, 0),
+    spec('warpAmt', 'Warp amt', 0, 1, 0),
+    spec('pw', 'Width', 0.05, 0.95, 0.5),
+    spec('uni', 'Unison', 1, 4, 1),
+    spec('uniDet', 'Spread', 0, 40, 8, 'ct'),
+    spec('cutoff', 'Cutoff', 40, 16000, 8000, 'Hz'),
+    spec('res', 'Res', 0, 0.9, 0),
+    spec('fmode', 'Filter', 0, 3, 0),
+    spec('attack', 'Attack', 1, 2000, 8, 'ms'),
+    spec('decay', 'Decay', 5, 3000, 240, 'ms'),
+    spec('sustain', 'Sustain', 0, 1, 0.75),
+    spec('release', 'Release', 5, 4000, 280, 'ms'),
+    spec('glide', 'Glide', 0, 400, 0, 'ms'),
+    ...fxSpecs(),
+    ...macroSpecs(),
   ],
   knock: [
     spec('morph', 'Shape', 0, 1, 0.12),
@@ -248,9 +312,43 @@ export const DEVICE_PARAMS: Record<DeviceKind, ParamSpec[]> = {
   ],
 }
 
+function fxSpecs(): ParamSpec[] {
+  return [
+    spec('fxChor', 'Chorus', 0, 1, 0),
+    spec('fxDel', 'Delay', 0, 1, 0),
+    spec('fxRev', 'Reverb', 0, 1, 0),
+    spec('fxDrv', 'Distort', 0, 1, 0),
+  ]
+}
+
+function macroSpecs(): ParamSpec[] {
+  return [1, 2, 3, 4].flatMap((slot) => [
+    spec(`m${slot}`, `M${slot}`, 0, 1, 0.5),
+    spec(`m${slot}d`, `M${slot} depth`, -1, 1, 0.35),
+    spec(`m${slot}t`, `M${slot} target`, 0, MACRO_TARGETS.length - 1, slot - 1),
+  ])
+}
+
+export function applyMacros(params: Record<string, number>, specs: ParamSpec[]) {
+  const next = { ...params }
+  for (let slot = 1; slot <= 4; slot++) {
+    const depth = next[`m${slot}d`] || 0
+    if (!depth) continue
+    const index = Math.max(0, Math.min(MACRO_TARGETS.length - 1, Math.round(next[`m${slot}t`] || 0)))
+    const target = MACRO_TARGETS[index]
+    const item = specs.find((specItem) => specItem.id === target)
+    if (!item) continue
+    const knob = next[`m${slot}`] ?? 0.5
+    const shifted = (next[target] ?? item.default) + (knob - 0.5) * 2 * depth * (item.max - item.min)
+    next[target] = Math.min(item.max, Math.max(item.min, shifted))
+  }
+  return next
+}
+
 export const DEVICE_NAMES: Record<DeviceKind, string> = {
-  sub: 'Sub',
+  sub: 'Analog',
   fm: 'FM',
+  wave: 'Wavetable',
   knock: 'Knock',
   sampler: 'Sampler',
   drum: 'Drums',
@@ -269,18 +367,21 @@ export const DEVICE_NAMES: Record<DeviceKind, string> = {
 
 export const DEVICE_KINDS = Object.keys(DEVICE_NAMES) as DeviceKind[]
 
-export const FACTORY_PRESETS: Record<DeviceKind, { name: string; params: Record<string, number> }[]> = {
+export const FACTORY_PRESETS: Record<DeviceKind, { name: string; params: Record<string, number>; category?: string }[]> = {
   sub: [
-    { name: 'Init', params: {} },
-    { name: 'Bass', params: { cutoff: 420, res: 0.35, mix2: 0.4, detune: 8, famt: 0.55, decay: 180, sustain: 0.4 } },
-    { name: 'Pad', params: { attack: 420, release: 900, cutoff: 2200, mix2: 0.45, mix3: 0.2, famt: 0.2 } },
-    { name: 'Pluck', params: { attack: 2, decay: 160, sustain: 0.1, release: 180, cutoff: 3200, famt: 0.7 } },
+    { name: 'Init', category: 'Keys', params: {} },
+    { name: 'Bass', category: 'Bass', params: { cutoff: 420, res: 0.35, mix2: 0.4, detune: 8, famt: 0.55, decay: 180, sustain: 0.4, m1d: 0.4, m1t: 0 } },
+    { name: 'Pad', category: 'Pad', params: { attack: 420, release: 900, cutoff: 2200, mix2: 0.45, mix3: 0.2, famt: 0.2, m1d: 0.25, m1t: 0 } },
+    { name: 'Pluck', category: 'Pluck', params: { attack: 2, decay: 160, sustain: 0.1, release: 180, cutoff: 3200, famt: 0.7 } },
+    ...SUB_PRESETS,
   ],
   fm: [
-    { name: 'Bell', params: { ratio: 3.5, index: 2.2, decay: 400, sustain: 0.2 } },
-    { name: 'Bass', params: { ratio: 1, index: 2.8, decay: 140, sustain: 0.35 } },
-    { name: 'Keys', params: { mode: 1, index: 1.2, attack: 4, decay: 260, sustain: 0.55 } },
+    { name: 'Bell', category: 'Bells', params: { ratio: 3.5, index: 2.2, decay: 400, sustain: 0.2 } },
+    { name: 'Bass', category: 'Bass', params: { ratio: 1, index: 2.8, decay: 140, sustain: 0.35, m1d: 0.3, m1t: 0 } },
+    { name: 'Keys', category: 'Keys', params: { mode: 1, index: 1.2, attack: 4, decay: 260, sustain: 0.55 } },
+    ...FM_PRESETS,
   ],
+  wave: WAVE_PRESETS,
   knock: KNOCK_PRESETS,
   sampler: [
     { name: 'One shot', params: { loop: 0, attack: 2, sustain: 1, release: 80 } },
@@ -356,7 +457,7 @@ export function defaultRack(): RackState {
 }
 
 export function isInstrument(kind: DeviceKind) {
-  return kind === 'sub' || kind === 'fm' || kind === 'knock' || kind === 'sampler' || kind === 'drum'
+  return kind === 'sub' || kind === 'fm' || kind === 'wave' || kind === 'knock' || kind === 'sampler' || kind === 'drum'
 }
 
 export function isEffect(kind: DeviceKind) {
@@ -473,6 +574,7 @@ export function normalizeProjectRack(project: Project): Project {
   project.rackAutomation = rackLanes
   project.devicePresets = project.devicePresets ?? []
   project.rackPatches = project.rackPatches ?? []
+  project.presetFavorites = project.presetFavorites ?? []
   for (const track of project.tracks) normalizeTrackRack(track)
   return project
 }

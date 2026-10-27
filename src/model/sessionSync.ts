@@ -191,5 +191,6 @@ export function arrangementDigest(project: Project): string {
       cables: track.rack?.cables.map((cable) => [cable.from, cable.fromPort, cable.to, cable.toPort, cable.amount]),
     })),
     pads: project.padKit ? padFingerprint(project.padKit) : '',
+    presetFavorites: project.presetFavorites ?? [],
   })
 }

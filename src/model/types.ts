@@ -286,6 +286,8 @@ export interface Project {
   scale?: ScaleState
   /** Musical grid for performed MIDI. 0 leaves the note where it was played. */
   quantizeBeats?: number
+  /** `${kind}:${name}` factory and user presets marked in the browser. */
+  presetFavorites?: string[]
   beats?: BeatRack
   patternClips?: PatternClip[]
   roll?: RollMemory
@@ -374,6 +376,7 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     record: defaultRecord(bar * 4),
     scale: defaultScale(),
     quantizeBeats: 0,
+    presetFavorites: [],
   }
 }
 
