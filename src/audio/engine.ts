@@ -1552,7 +1552,7 @@ export class AudioEngine {
     if (!clip.warpPoints || clip.warpPoints.length < 2) return { buffer, clip }
     const sr = ctx.sampleRate
     const tempo = this.project?.tempo || 120
-    const phone = typeof matchMedia === 'function' && matchMedia('(max-width: 940px)').matches
+    const phone = typeof matchMedia === 'function' && matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
     const key = `${clip.bufferId}:${clip.offsetSamples}:${clip.durationSamples}:${sr}:${tempo}:${JSON.stringify(clip.warpPoints)}`
     let pcm = this.warpPcm.get(key)
     if (!pcm) {
