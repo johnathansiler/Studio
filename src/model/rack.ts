@@ -1,10 +1,12 @@
 import { uid, type Project, type Track } from './types'
+import { KNOCK_PRESETS } from './knockPresets'
 import { FM_PRESETS, SUB_PRESETS, WAVE_PRESETS } from './tonePresets'
 
 export type DeviceKind =
   | 'sub'
   | 'fm'
   | 'wave'
+  | 'knock'
   | 'sampler'
   | 'drum'
   | 'eq'
@@ -193,6 +195,54 @@ export const DEVICE_PARAMS: Record<DeviceKind, ParamSpec[]> = {
     ...fxSpecs(),
     ...macroSpecs(),
   ],
+  knock: [
+    spec('morph', 'Shape', 0, 1, 0.12),
+    spec('sub', 'Sub', 0, 1, 0.4),
+    spec('fine', 'Fine', -100, 100, 0, 'ct'),
+    spec('punch', 'Punch', 0, 24, 8, 'st'),
+    spec('pdec', 'Drop', 1, 2000, 40, 'ms'),
+    spec('pcurve', 'Drop curve', 0, 2, 1),
+    spec('click', 'Click', 0, 3, 1),
+    spec('clevel', 'Click lvl', 0, 1, 0.4),
+    spec('ctone', 'Click tone', 0, 1, 0.55),
+    spec('cdec', 'Click dec', 1, 80, 14, 'ms'),
+    spec('attack', 'Attack', 0, 2000, 0, 'ms'),
+    spec('hold', 'Hold', 0, 500, 6, 'ms'),
+    spec('decay', 'Decay', 5, 8000, 480, 'ms'),
+    spec('sustain', 'Sustain', 0, 1, 0.45),
+    spec('release', 'Release', 5, 8000, 160, 'ms'),
+    spec('tail', 'Long tail', 0, 1, 0),
+    spec('tailBeats', 'Tail', 0.25, 8, 2, 'bt'),
+    spec('glide', 'Glide', 0, 2000, 0, 'ms'),
+    spec('gsync', 'Glide sync', 0, 1, 0),
+    spec('gbeats', 'Glide beats', 0.05, 4, 0.25, 'bt'),
+    spec('gcurve', 'Glide curve', 0, 2, 0),
+    spec('bend', 'Bend', 1, 24, 2, 'st'),
+    spec('legato', 'Legato', 0, 1, 1),
+    spec('snap', 'Key snap', 0, 1, 0),
+    spec('root', 'Root', 0, 11, 0),
+    spec('scale', 'Scale', 0, 4, 0),
+    spec('smode', 'Sample', 0, 1, 0),
+    spec('sroot', 'Sample root', 0, 127, 0),
+    spec('dtype', 'Drive type', 0, 7, 0),
+    spec('drive', 'Drive', 0, 1, 0.12),
+    spec('dmix', 'Drive mix', 0, 1, 1),
+    spec('dout', 'Drive out', 0, 2, 1),
+    spec('pre', 'Pre', 80, 18000, 8000, 'Hz'),
+    spec('post', 'Post', 80, 18000, 12000, 'Hz'),
+    spec('xover', 'Crossover', 30, 400, 90, 'Hz'),
+    spec('band', 'Band split', 0, 1, 1),
+    spec('phone', 'Phone', 0, 1, 0.2),
+    spec('cutoff', 'Tone', 40, 18000, 2400, 'Hz'),
+    spec('res', 'Res', 0, 0.9, 0.04),
+    spec('fenv', 'F Env', 0, 1, 0.15),
+    spec('fmode', 'Filter', 0, 1, 0),
+    spec('mono', 'Mono below', 20, 250, 120, 'Hz'),
+    spec('ceiling', 'Ceiling', 0.1, 1, 0.95),
+    spec('duck', 'Duck', 0, 1, 0),
+    spec('duckRel', 'Duck rel', 10, 500, 90, 'ms'),
+    spec('level', 'Level', 0, 1, 0.8),
+  ],
   sampler: [
     spec('attack', 'Attack', 1, 2000, 4, 'ms'),
     spec('decay', 'Decay', 5, 3000, 180, 'ms'),
@@ -299,6 +349,7 @@ export const DEVICE_NAMES: Record<DeviceKind, string> = {
   sub: 'Analog',
   fm: 'FM',
   wave: 'Wavetable',
+  knock: 'Knock',
   sampler: 'Sampler',
   drum: 'Drums',
   eq: 'EQ',
@@ -331,6 +382,7 @@ export const FACTORY_PRESETS: Record<DeviceKind, { name: string; params: Record<
     ...FM_PRESETS,
   ],
   wave: WAVE_PRESETS,
+  knock: KNOCK_PRESETS,
   sampler: [
     { name: 'One shot', params: { loop: 0, attack: 2, sustain: 1, release: 80 } },
     { name: 'Loop', params: { loop: 1, attack: 8, sustain: 0.85 } },
@@ -405,7 +457,7 @@ export function defaultRack(): RackState {
 }
 
 export function isInstrument(kind: DeviceKind) {
-  return kind === 'sub' || kind === 'fm' || kind === 'wave' || kind === 'sampler' || kind === 'drum'
+  return kind === 'sub' || kind === 'fm' || kind === 'wave' || kind === 'knock' || kind === 'sampler' || kind === 'drum'
 }
 
 export function isEffect(kind: DeviceKind) {

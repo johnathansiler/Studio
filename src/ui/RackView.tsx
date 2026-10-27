@@ -15,7 +15,7 @@ const KEYS = [
   [72, 'C'],
 ] as const
 
-export function RackView({ store, engine, trackId }: { store: ProjectStore; engine: AudioEngine; trackId: string }) {
+export function RackView({ store, engine, trackId, onOpenKnock }: { store: ProjectStore; engine: AudioEngine; trackId: string; onOpenKnock?: () => void }) {
   const track = store.track(trackId)
   const rack = track?.rack
   const [selected, setSelected] = useState(0)
@@ -162,7 +162,10 @@ export function RackView({ store, engine, trackId }: { store: ProjectStore; engi
                 })}
               </div>
             )}
-            {(device.kind === 'sampler' || device.kind === 'wave') && (
+            {device.kind === 'knock' && (
+              <button className="text-btn" onClick={() => onOpenKnock?.()}>Open Knock</button>
+            )}
+            {(device.kind === 'sampler' || device.kind === 'wave' || device.kind === 'knock') && (
               <select aria-label="Sample" value="" onChange={(event) => event.target.value && store.addZone(track.id, device.id, event.target.value)}>
                 <option value="">Sample</option>
                 {[...store.buffers.values()].map((buffer) => (

@@ -1,6 +1,9 @@
+import { scheduleStretchCommit, stretchCacheKey } from '../audio/stretch/commit'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
+import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
 import { findCycle, MASTER } from '../audio/routing'
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
+import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
 import { demoMidiNotes } from '../model/demo'
 import {
@@ -15,15 +18,26 @@ import {
   type SessionClock,
   type TransportSlot,
 } from '../model/launch'
+import type { RollTool } from '../model/paint'
+import { defaultRoll } from '../model/paint'
 import { progressionById, romanLine, starterParts } from '../model/progressions'
 import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleState } from '../model/scale'
-import { createEmptyProject, defaultInsert, makeTrack, uid, TRACK_COLORS } from '../model/types'
-import type { AudioAsset, AudioClip, FollowAction, InsertType, LaunchMode, LaunchQuant, MidiClip, MidiNote, PluginInstance, Project, Track } from '../model/types'
+import {
+  clonePattern,
+  fillEvery,
+  humanizeCells,
+  randomizeCells,
+  renderPattern,
+  shiftCells,
+  type StepCell,
+} from '../model/steps'
+import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK_COLORS } from '../model/types'
+import type { AudioAsset, AudioClip, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, MidiClip, MidiNote, PluginInstance, Project, RecordSettings, TakeLane, Track } from '../model/types'
 import { beatsToSamples, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
 
-export type WorkspaceView = 'arrange' | 'mix' | 'session'
+export type WorkspaceView = 'arrange' | 'mix' | 'session' | 'beats'
 
 export interface Toast {
   id: string
@@ -62,12 +76,18 @@ export class ProjectStore {
   private tempoGroup = false
   toasts: Toast[] = []
   version = 0
+  rowClipboard: StepCell[] | null = null
   private past: string[] = []
   private future: string[] = []
   private listeners = new Set<Listener>()
+  private drafted = false
 
   /** Open plugin sheet. Not saved with the project. */
   pluginFocus: { trackId: string; pluginId: string } | null = null
+  /** Arrange edit tool. Not saved, and switching it does not create an undo step. */
+  tool: 'pointer' | 'stretch' = 'pointer'
+  /** Clip settings. Not saved. */
+  clipSheet = false
 
   constructor(project = createEmptyProject(), buffers?: Map<string, AudioAsset>) {
     this.project = normalizeProjectRack(normalizeProject(project))
@@ -99,9 +119,25 @@ export class ProjectStore {
 
   private mutate(fn: () => void) {
     if (this.remoteFollow) return
+    this.drafted = false
     this.snapshot()
     fn()
     this.emit()
+  }
+
+  /** One undo step for a drag. The first call snapshots; later calls only edit. */
+  draft(fn: () => void) {
+    if (this.remoteFollow) return
+    if (!this.drafted) {
+      this.snapshot()
+      this.drafted = true
+    }
+    fn()
+    this.emit()
+  }
+
+  endDraft() {
+    this.drafted = false
   }
 
   undo() {
@@ -158,7 +194,13 @@ export class ProjectStore {
       this.selectedClipId = clipId
       this.selectedNoteId = null
       this.selectedNoteIds = []
+      this.clipSheet = clipId != null
     }
+    this.emit()
+  }
+
+  closeClipSheet() {
+    this.clipSheet = false
     this.emit()
   }
 
@@ -208,22 +250,38 @@ export class ProjectStore {
     })
   }
 
+  setTool(tool: 'pointer' | 'stretch') {
+    this.tool = tool
+    this.emit()
+  }
+
   setTempo(tempo: number, group = false) {
     const value = clamp(Math.round(tempo * 10) / 10, 30, 300)
     if (group && this.tempoGroup) {
       if (this.remoteFollow || this.project.tempo === value) return
       this.project.tempo = value
+      this.retimeFollow()
       this.emit()
       return
     }
     this.mutate(() => {
       this.project.tempo = value
+      this.retimeFollow()
     })
     this.tempoGroup = group
   }
 
   endTempoGroup() {
     this.tempoGroup = false
+  }
+
+  private retimeFollow() {
+    for (const track of this.project.tracks) {
+      for (const clip of track.clips) {
+        if (!clip.stretch?.followTempo) continue
+        clip.durationSamples = timelineSamples(clip, this.project)
+      }
+    }
   }
 
   setTimeSignature(numerator: number, denominator: number) {
@@ -586,6 +644,121 @@ export class ProjectStore {
     })
   }
 
+  stretchClip(trackId: string, clipId: string, edge: 'start' | 'end', sample: number) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip) return
+      Object.assign(clip, stretchEdge(clip, edge, sample))
+      this.commitClip(clip)
+    })
+  }
+
+  setClipStretch(trackId: string, clipId: string, patch: Partial<ClipStretch>) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip) return
+      const base = clip.stretch ?? defaultStretch(clip.durationSamples)
+      clip.stretch = { ...base, ...patch, markers: patch.markers ?? base.markers }
+      if (clip.stretch.followTempo) {
+        if (!clip.stretch.sourceBpm) clip.stretch.sourceBpm = this.detectClipBpm(clip)
+        clip.durationSamples = timelineSamples(clip, this.project)
+      }
+      this.commitClip(clip)
+    })
+  }
+
+  setStretchRatio(trackId: string, clipId: string, percent: number) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip) return
+      const base = clip.stretch ?? defaultStretch(clip.durationSamples)
+      const source = Math.max(1, base.sourceSamples || clip.durationSamples)
+      const duration = Math.max(64, Math.round(source * (clamp(percent, 12.5, 800) / 100)))
+      const scale = clip.durationSamples > 0 ? duration / clip.durationSamples : 1
+      clip.durationSamples = duration
+      clip.stretch = {
+        ...base,
+        sourceSamples: source,
+        followTempo: false,
+        markers: base.markers.map((marker) => ({ ...marker, target: marker.target * scale })),
+      }
+      this.commitClip(clip)
+    })
+  }
+
+  addWarpMarker(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip) return
+      const base = clip.stretch ?? defaultStretch(clip.durationSamples)
+      const source = Math.round(sourceSamplesOf(clip) / 2)
+      const beats = (source / Math.max(1, base.sourceSamples)) * (clip.durationSamples / this.project.sampleRate) * (this.project.tempo / 60)
+      clip.stretch = { ...base, markers: [...base.markers, { id: uid('warp'), source, target: beats }] }
+      this.commitClip(clip)
+    })
+  }
+
+  moveWarpMarker(trackId: string, clipId: string, markerId: string, patch: { source?: number; target?: number }) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      const stretch = clip?.stretch
+      if (!clip || !stretch) return
+      stretch.markers = stretch.markers.map((marker) => (marker.id === markerId ? { ...marker, ...patch } : marker))
+      this.commitClip(clip)
+    })
+  }
+
+  removeWarpMarker(trackId: string, clipId: string, markerId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip?.stretch) return
+      clip.stretch.markers = clip.stretch.markers.filter((marker) => marker.id !== markerId)
+      this.commitClip(clip)
+    })
+  }
+
+  autoWarpMarkers(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip) return
+      const asset = this.buffers.get(clip.bufferId)
+      const channel = asset?.channels[0]
+      if (!channel) return
+      const source = sourceSamplesOf(clip)
+      const found = inspectClip(channel.subarray(clip.offsetSamples, clip.offsetSamples + source), asset?.sampleRate ?? this.project.sampleRate, this.project.tempo)
+      const base = clip.stretch ?? defaultStretch(source)
+      clip.stretch = { ...base, sourceSamples: source, sourceBpm: found.sourceBpm, markers: found.markers }
+      this.commitClip(clip)
+    })
+  }
+
+  /** Start the offline render as soon as the edit lands. Playback can use the preview until it finishes. */
+  private commitClip(clip: AudioClip) {
+    const asset = this.buffers.get(clip.bufferId)
+    if (!asset?.channels.length || !clip.stretch) return
+    const source = sourceSamplesOf(clip)
+    const sliced = asset.channels.map((channel) => Float32Array.from(channel.subarray(clip.offsetSamples, Math.min(channel.length, clip.offsetSamples + source))))
+    const frozen: AudioClip = {
+      ...clip,
+      stretch: { ...clip.stretch, markers: clip.stretch.markers.map((marker) => ({ ...marker })) },
+    }
+    const project = this.project
+    const key = stretchCacheKey(frozen, project)
+    scheduleStretchCommit(
+      key,
+      () => renderClipChannels(sliced, frozen, project, 'hq'),
+      () => renderClipChannels(sliced, frozen, project, 'preview'),
+    )
+  }
+
+  private detectClipBpm(clip: AudioClip) {
+    const asset = this.buffers.get(clip.bufferId)
+    const channel = asset?.channels[0]
+    if (!channel) return clip.stretch?.sourceBpm ?? null
+    const source = sourceSamplesOf(clip)
+    return inspectClip(channel.subarray(clip.offsetSamples, clip.offsetSamples + source), asset?.sampleRate ?? this.project.sampleRate, this.project.tempo).sourceBpm
+  }
+
   trimClip(trackId: string, clipId: string, edge: 'start' | 'end', sample: number) {
     this.mutate(() => {
       const track = this.track(trackId)
@@ -646,6 +819,7 @@ export class ProjectStore {
       }
       if (patch.durationBeats != null) Object.assign(note, resizeMidiNote(note, patch.durationBeats))
       if (patch.velocity != null) note.velocity = patch.velocity
+      if ('slide' in patch) note.slide = !!patch.slide
     })
   }
 
@@ -1107,6 +1281,13 @@ export class ProjectStore {
         clip.durationSamples = Math.max(1, scale(clip.durationSamples))
         clip.fadeInSamples = scale(clip.fadeInSamples)
         clip.fadeOutSamples = scale(clip.fadeOutSamples)
+        if (clip.stretch) {
+          clip.stretch = {
+            ...clip.stretch,
+            sourceSamples: Math.max(1, scale(clip.stretch.sourceSamples)),
+            markers: clip.stretch.markers.map((marker) => ({ ...marker, source: scale(marker.source) })),
+          }
+        }
       }
     }
     this.emit()
@@ -1293,6 +1474,448 @@ export class ProjectStore {
     }
     return null
   }
+
+  activePattern() {
+    const beats = this.project.beats
+    return beats?.patterns.find((pattern) => pattern.id === beats.activeId) ?? beats?.patterns[0] ?? null
+  }
+
+  selectPattern(id: string) {
+    this.mutate(() => {
+      if (this.project.beats?.patterns.some((pattern) => pattern.id === id)) this.project.beats.activeId = id
+    })
+  }
+
+  renamePattern(name: string) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (pattern && name.trim()) pattern.name = name.trim()
+    })
+  }
+
+  recolorPattern(color: string) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (pattern) pattern.color = color
+    })
+  }
+
+  cloneActivePattern() {
+    this.mutate(() => {
+      const beats = this.project.beats
+      const pattern = this.activePattern()
+      if (!beats || !pattern) return
+      const copy = clonePattern(pattern, `${pattern.name} copy`)
+      beats.patterns.push(copy)
+      beats.activeId = copy.id
+    })
+  }
+
+  setPatternSteps(steps: number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (pattern) pattern.steps = Math.max(1, Math.min(64, Math.round(steps)))
+    })
+  }
+
+  setPatternSwing(swing: number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (pattern) pattern.swing = Math.max(0, Math.min(0.9, swing))
+    })
+  }
+
+  editChannel(channelId: string, fn: (cells: StepCell[], count: number) => StepCell[] | void, draft = false) {
+    const run = (body: () => void) => (draft ? this.draft(body) : this.mutate(body))
+    run(() => {
+      const pattern = this.activePattern()
+      const channel = pattern?.channels.find((row) => row.id === channelId)
+      if (!pattern || !channel) return
+      const count = channel.steps || pattern.steps
+      const next = fn(channel.cells, count)
+      if (next) channel.cells = next
+    })
+  }
+
+  setStep(channelId: string, index: number, on: boolean) {
+    this.draft(() => {
+      const pattern = this.activePattern()
+      const channel = pattern?.channels.find((row) => row.id === channelId)
+      const cell = channel?.cells[index]
+      if (!cell) return
+      cell.on = on
+    })
+  }
+
+  editStep(channelId: string, index: number, patch: Partial<Pick<StepCell, 'velocity' | 'pan' | 'pitch' | 'fine' | 'gate'>>) {
+    this.mutate(() => {
+      const cell = this.activePattern()?.channels.find((row) => row.id === channelId)?.cells[index]
+      if (!cell) return
+      if (patch.velocity != null) cell.velocity = Math.max(0.05, Math.min(1, patch.velocity))
+      if (patch.pan != null) cell.pan = Math.max(-1, Math.min(1, patch.pan))
+      if (patch.pitch != null) cell.pitch = Math.max(-48, Math.min(48, Math.round(patch.pitch)))
+      if (patch.fine != null) cell.fine = Math.max(-100, Math.min(100, patch.fine))
+      if (patch.gate != null) cell.gate = Math.max(0.05, Math.min(1, patch.gate))
+    })
+  }
+
+  setChannel(channelId: string, patch: Partial<{ volume: number; pan: number; mute: boolean; solo: boolean; output: string | null; steps: number; swing: number | null; name: string }>) {
+    this.mutate(() => {
+      const channel = this.activePattern()?.channels.find((row) => row.id === channelId)
+      if (!channel) return
+      Object.assign(channel, patch)
+      if (patch.steps != null) channel.steps = Math.max(1, Math.min(64, Math.round(patch.steps)))
+    })
+  }
+
+  fillChannel(every: number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (!pattern) return
+      for (const channel of pattern.channels) {
+        const count = channel.steps || pattern.steps
+        channel.cells = fillEvery(channel.cells, every, count)
+      }
+    })
+  }
+
+  randomizePattern(rng?: () => number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (!pattern) return
+      for (const channel of pattern.channels) channel.cells = randomizeCells(channel.cells, channel.steps || pattern.steps, rng)
+    })
+  }
+
+  humanizePattern(rng?: () => number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (!pattern) return
+      for (const channel of pattern.channels) channel.cells = humanizeCells(channel.cells, channel.steps || pattern.steps, 0.45, rng)
+    })
+  }
+
+  shiftPattern(direction: number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (!pattern) return
+      for (const channel of pattern.channels) channel.cells = shiftCells(channel.cells, channel.steps || pattern.steps, direction)
+    })
+  }
+
+  copyRow(channelId: string) {
+    const channel = this.activePattern()?.channels.find((row) => row.id === channelId)
+    if (!channel) return
+    const count = channel.steps || this.activePattern()?.steps || 16
+    this.rowClipboard = channel.cells.slice(0, count).map((cell) => ({ ...cell }))
+    this.emit()
+  }
+
+  pasteRow(channelId: string) {
+    if (!this.rowClipboard) return
+    const clip = this.rowClipboard
+    this.editChannel(channelId, (cells, count) => cells.map((cell, index) => (index < count && clip[index] ? { ...clip[index] } : cell)))
+  }
+
+  placePattern(startBeat: number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (!pattern || !this.project.patternClips) return
+      this.project.patternClips.push({
+        id: uid('pcl'),
+        patternId: pattern.id,
+        startBeat: Math.max(0, startBeat),
+        lengthBeats: (pattern.steps * 0.25),
+        scene: null,
+      })
+    })
+  }
+
+  placePatternScene(scene: number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      const track = this.project.tracks.find((item) => item.type === 'midi')
+      if (!pattern || !track) return
+      const length = pattern.steps * 0.25
+      const existing = track.midiClips.find((clip) => clip.patternId === pattern.id && clip.scene === scene)
+      if (existing) {
+        this.selectedMidiClipId = existing.id
+        return
+      }
+      const clip: MidiClip = {
+        id: uid('midi'),
+        name: pattern.name,
+        startBeat: 0,
+        durationBeats: length,
+        notes: [],
+        patternId: pattern.id,
+        scene,
+      }
+      track.midiClips.push(clip)
+      this.selectedMidiClipId = clip.id
+      this.selectedTrackId = track.id
+    })
+  }
+
+  openChannelRoll(channelId: string) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      const channel = pattern?.channels.find((row) => row.id === channelId)
+      const track = this.project.tracks.find((item) => item.type === 'midi')
+      if (!pattern || !channel || !track) return
+      let clip = track.midiClips.find((item) => item.channelId === channelId && item.scene == null)
+      if (!clip) {
+        const hits = renderPattern({ ...pattern, channels: [{ ...channel, mute: false, solo: false }] }, 0, pattern.steps * 0.25)
+        clip = {
+          id: uid('midi'),
+          name: channel.name,
+          startBeat: 0,
+          durationBeats: Math.max(1, pattern.steps * 0.25),
+          channelId,
+          notes: hits.map((hit) => ({
+            id: uid('note'),
+            pitch: hit.pitch,
+            startBeat: hit.startBeat,
+            durationBeats: hit.durationBeats,
+            velocity: hit.velocity,
+            pan: hit.pan,
+            fine: hit.fine,
+          })),
+        }
+        track.midiClips.push(clip)
+      }
+      this.selectedMidiClipId = clip.id
+      this.selectedTrackId = track.id
+      this.view = 'beats'
+    })
+  }
+
+  setRoll(patch: Partial<{ tool: RollTool; grid: number; length: number; velocity: number }>) {
+    this.mutate(() => {
+      this.project.roll = { ...defaultRoll(), ...this.project.roll, ...patch }
+    })
+  }
+
+  setRollTool(tool: RollTool) {
+    const memory = this.project.roll ?? defaultRoll()
+    if (memory.tool === tool) return
+    this.project.roll = { ...memory, tool }
+    this.emit()
+  }
+
+  replaceNotes(trackId: string, clipId: string, notes: MidiNote[]) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      clip.notes = notes
+      const memory = this.project.roll ?? defaultRoll()
+      const last = notes[notes.length - 1]
+      if (last) this.project.roll = { ...memory, length: last.durationBeats, velocity: last.velocity }
+    })
+  }
+
+  mutateAutomation(id: string, pluginId: string, points: { beat: number; value: number }[]) {
+    this.mutate(() => {
+      let lane = this.project.automation.find((item) => item.id === id)
+      if (!lane) {
+        lane = { id, pluginId, param: 'expression', points: [] }
+        this.project.automation.push(lane)
+      }
+      lane.points = points
+    })
+  }
+
+  rememberPen(length: number, velocity: number) {
+    const memory = this.project.roll ?? defaultRoll()
+    this.project.roll = { ...memory, length, velocity }
+  }
+
+  recordSettings(): RecordSettings {
+    return this.project.record || defaultRecord(this.project.loopEndSample)
+  }
+
+  setRecord(patch: Partial<RecordSettings>) {
+    this.mutate(() => {
+      this.project.record = { ...this.recordSettings(), ...patch }
+    })
+  }
+
+  quickPunch(playhead: number, recording: boolean) {
+    this.mutate(() => {
+      this.project.record = quickPunchSettings(this.recordSettings(), playhead, this.project.sampleRate, this.project.tempo, this.project.timeSignature, recording)
+    })
+  }
+
+  swipeTake(trackId: string, clipId: string, laneId: string, from: number, to: number) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip?.folder) return
+      clip.folder = swipeComp(clip.folder, laneId, from, to)
+    })
+  }
+
+  saveTakeComp(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip?.folder) return
+      const name = `Comp ${clip.folder.comps.length + 1}`
+      clip.folder = saveComp(clip.folder, name, uid('comp'))
+    })
+  }
+
+  recallTakeComp(trackId: string, clipId: string, compId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip?.folder) return
+      clip.folder = recallComp(clip.folder, compId)
+    })
+  }
+
+  flattenTakes(trackId: string, clipId: string, merge: boolean) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const index = track.clips.findIndex((item) => item.id === clipId)
+      const clip = track.clips[index]
+      if (!clip?.folder) return
+      if (!merge) {
+        track.clips.splice(index, 1, ...flattenPieces(clip))
+        this.selectedClipId = track.clips[index]?.id ?? null
+        return
+      }
+      const audio = new Map<string, Float32Array[]>()
+      for (const lane of clip.folder.lanes) {
+        const asset = this.buffers.get(lane.bufferId)
+        if (asset) audio.set(lane.bufferId, asset.channels)
+      }
+      const channels = renderComp(clip.folder, audio)
+      const bufferId = uid('buf')
+      this.buffers.set(bufferId, { id: bufferId, name: `${clip.name} comp`, sampleRate: this.project.sampleRate, channels })
+      const spanStart = clip.folder.lanes.reduce((min, lane) => Math.min(min, lane.startSample), clip.startSample)
+      track.clips[index] = {
+        ...clip,
+        name: `${clip.name} flat`,
+        folder: undefined,
+        bufferId,
+        startSample: spanStart,
+        offsetSamples: 0,
+        durationSamples: channels[0]?.length || clip.durationSamples,
+        source: 'local',
+      }
+    })
+  }
+
+  dropGuideLanes(takeId: string) {
+    this.mutate(() => {
+      for (const track of this.project.tracks) {
+        for (const clip of track.clips) {
+          if (!clip.folder) continue
+          const removed = new Set(clip.folder.lanes.filter((lane) => lane.source === 'guide' && lane.takeId === takeId).map((lane) => lane.id))
+          if (!removed.size) continue
+          clip.folder = {
+            ...clip.folder,
+            lanes: clip.folder.lanes.filter((lane) => !removed.has(lane.id)),
+            comps: clip.folder.comps.map((comp) => ({
+              ...comp,
+              segments: comp.segments.filter((segment) => !removed.has(segment.laneId)),
+            })),
+          }
+        }
+        track.clips = track.clips.filter((clip) => !clip.folder || clip.folder.lanes.length > 0)
+      }
+    })
+  }
+
+  addTakeLane(trackId: string, lane: TakeLane, clipId?: string) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const existing = clipId
+        ? track.clips.find((item) => item.id === clipId && item.folder)
+        : track.clips.find((item) => item.folder && rangesOverlap(item, lane))
+      if (existing?.folder) {
+        existing.folder = addLane(existing.folder, lane)
+        const span = folderSpan(existing.folder)
+        existing.startSample = span.start
+        existing.durationSamples = Math.max(1, span.end - span.start)
+        existing.bufferId = lane.bufferId
+        this.selectedClipId = existing.id
+        return
+      }
+      const clip = folderClip(uid('clip'), lane.name, createFolder(lane), 1)
+      track.clips.push(clip)
+      this.selectedTrackId = trackId
+      this.selectedClipId = clip.id
+    })
+  }
+
+  commitMidiPass(trackId: string, clipId: string, incoming: MidiNote[]) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      const mode = this.recordSettings().midiLoop
+      const pass = applyMidiPass(clip.notes, incoming, clip.takes || [], mode, `Take ${(clip.takes?.length || 0) + 1}`, uid('mtake'))
+      clip.notes = pass.notes
+      clip.takes = pass.takes
+      clip.activeTakeId = pass.activeTakeId
+    })
+  }
+
+  recallMidi(trackId: string, clipId: string, takeId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip?.takes) return
+      const notes = recallMidiTake(clip.takes, takeId)
+      if (!notes) return
+      clip.notes = notes
+      clip.activeTakeId = takeId
+    })
+  }
+
+  /** Two stacked lanes so the comp UI can be shown without a microphone. */
+  seedCompPreview() {
+    const rate = this.project.sampleRate
+    const length = Math.round(rate * 2)
+    const tone = (freq: number, gain: number) => {
+      const data = new Float32Array(length)
+      for (let i = 0; i < length; i++) data[i] = Math.sin((2 * Math.PI * freq * i) / rate) * gain
+      return data
+    }
+    const first = tone(220, 0.2)
+    const second = tone(330, 0.2)
+    const a = uid('buf')
+    const b = uid('buf')
+    this.addAsset({ id: a, name: 'Take 1', sampleRate: rate, channels: [first] })
+    this.addAsset({ id: b, name: 'Take 2', sampleRate: rate, channels: [second] })
+    const track = this.project.tracks.find((item) => item.type === 'audio')
+    if (!track) return
+    this.mutate(() => {
+      track.clips = track.clips.filter((clip) => !clip.folder)
+    })
+    const lane = (id: string, name: string, bufferId: string): TakeLane => ({
+      id,
+      name,
+      bufferId,
+      offsetSamples: 0,
+      startSample: 0,
+      durationSamples: length,
+      source: 'local',
+    })
+    this.addTakeLane(track.id, lane(uid('lane'), 'Take 1', a))
+    this.addTakeLane(track.id, lane(uid('lane'), 'Take 2', b))
+    const clip = track.clips.find((item) => item.folder)
+    if (clip?.folder) {
+      const cut = Math.round(length / 2)
+      this.swipeTake(track.id, clip.id, clip.folder.lanes[1].id, cut, length)
+      this.setRecord({ loop: true, punchEnabled: true, punchIn: 0, punchOut: length })
+    }
+  }
+}
+
+function rangesOverlap(clip: AudioClip, lane: TakeLane) {
+  const laneEnd = lane.startSample + lane.durationSamples
+  const clipEnd = clip.startSample + clip.durationSamples
+  return lane.startSample < clipEnd && laneEnd > clip.startSample
 }
 
 export function seedDemoProject(sampleRate: number, music: Float32Array): { project: Project; buffers: Map<string, AudioAsset> } {

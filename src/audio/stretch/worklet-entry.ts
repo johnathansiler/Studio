@@ -31,7 +31,8 @@ class CueStretchProcessor extends AudioWorkletProcessor {
       }
       if (!data || data.type !== 'stretch' || !data.channels?.length) return
       const channels = data.channels.map((channel) => Float32Array.from(channel))
-      this.rendered = renderStretch(channels, data.sampleRate || sampleRate, data.options ?? { ratio: 1 })
+      const options = { ratio: 1, ...data.options, quality: data.options?.quality ?? ('preview' as const) }
+      this.rendered = renderStretch(channels, data.sampleRate || sampleRate, options)
       this.startFrame = data.startFrame ?? 0
       this.skip = data.skip ?? 0
       this.end = this.skip + (data.frames ?? this.rendered[0].length)

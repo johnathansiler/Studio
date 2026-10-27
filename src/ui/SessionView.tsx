@@ -88,7 +88,7 @@ export function SessionView({ store, engine }: { store: ProjectStore; engine: Au
                 <button type="button" className="scene-launch" onClick={() => store.launchScene(scene, engine.currentTimelineSample())}>{scene + 1}</button>
               </th>
               {store.project.tracks.map((track) => {
-                const clip = sceneClip(track, scene)
+                const clip = sceneClip(track, scene) || track.midiClips.find((item) => item.scene === scene)
                 const launched = clip && store.launched[track.id] === clip.id
                 const armed = store.sessionSlot?.trackId === track.id && store.sessionSlot.scene === scene
                 return (

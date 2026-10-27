@@ -15,6 +15,7 @@ import {
   type RackState,
   type VoiceRef,
 } from '../../model/rack'
+import { knockNoteOn, knockStep, knockVoice } from './knock'
 import { renderTone, tableFromAudio, type PlayVoice, type SynthState } from './synth'
 import { drumStepIndex } from '../../model/steps'
 
@@ -27,6 +28,7 @@ export interface NoteEvent {
   sample: number
   pitch: number
   vel: number
+  slide?: boolean
 }
 
 interface Mem {
@@ -43,6 +45,8 @@ interface Voice extends VoiceRef, PlayVoice {
   vel: number
   mem: Record<string, Mem>
   synth: Record<string, SynthState>
+  knockGen: number
+  knockSlide: boolean
 }
 
 interface Fx {
@@ -108,12 +112,13 @@ export class RackRuntime {
   private lastNote = 0
   private frame = 0
   private tables = new Map<string, Float32Array[]>()
+  private knockDelta = 0
 
   constructor(sampleRate: number) {
     this.sampleRate = sampleRate
   }
 
-  note(pitch: number, vel: number, polyphony = 8) {
+  note(pitch: number, vel: number, polyphony = 8, slide = false) {
     const midi = Math.round(pitch)
     if (vel <= 0.0001) {
       this.held = this.held.filter((note) => note !== midi)
@@ -121,6 +126,18 @@ export class RackRuntime {
       return
     }
     if (!this.held.includes(midi)) this.held.push(midi)
+    if (slide) {
+      const heldVoice = this.voices.find((voice) => voice.active && !voice.released)
+      if (heldVoice && heldVoice.note !== midi) {
+        heldVoice.note = midi
+        heldVoice.vel = vel
+        heldVoice.age = 0
+        heldVoice.bend = 0
+        heldVoice.knockSlide = true
+        heldVoice.knockGen = (heldVoice.knockGen || 0) + 1
+        return
+      }
+    }
     const slot = allocateVoice(this.voices, midi, polyphony) as Voice
     slot.vel = vel
     slot.mem = {}
@@ -129,6 +146,8 @@ export class RackRuntime {
     slot.pressure = 0
     slot.glideFrom = this.lastNote || midi
     this.lastNote = midi
+    slot.knockSlide = false
+    slot.knockGen = (slot.knockGen || 0) + 1
   }
 
   express(pitch: number, bend: number, pressure: number) {
@@ -169,6 +188,7 @@ export class RackRuntime {
       const params = new Map(rack.devices.map((device) => [device.id, this.params(device, modCables, lanes, beat + i / beatSamples)]))
       const produced = new Map<string, number>()
       let bus = 0
+      this.knockDelta = 0
       for (const device of rack.devices) {
         const wired = audioCables.filter((cable) => cable.to === device.id)
         const input = wired.length
@@ -182,8 +202,9 @@ export class RackRuntime {
         else if (isEffect(device.kind)) bus = sample
       }
       const out = san(bus)
+      const widened = rack.devices.some((device) => device.kind === 'knock')
       left[i] = out
-      right[i] = out * 0.98
+      right[i] = widened ? san(bus + this.knockDelta) : out * 0.98
     }
     this.sampleTime += frames
     return [left, right]
@@ -244,6 +265,7 @@ export class RackRuntime {
   }
 
   private device(device: RackDevice, params: Record<string, number>, input: number, limit: number, buffers: Map<string, SampleBuffer>, quality: 'full' | 'eco', time: number, beatSamples: number) {
+    if (device.kind === 'knock') return this.knock(device, params, buffers, quality, input, beatSamples)
     if (device.kind === 'sub' || device.kind === 'fm' || device.kind === 'wave') return this.tone(device, params, quality, buffers)
     if (device.kind === 'sampler') return this.sampler(device, params, limit, buffers)
     if (device.kind === 'drum') return this.drum(device, params, buffers, time, beatSamples)
@@ -261,6 +283,42 @@ export class RackRuntime {
       return sample
     }
     return input
+  }
+
+  private knock(device: RackDevice, params: Record<string, number>, buffers: Map<string, SampleBuffer>, quality: 'full' | 'eco', side: number, beatSamples: number) {
+    const zone = device.zones[0]
+    const asset = zone ? buffers.get(zone.bufferId) : undefined
+    const buffer = asset?.channels[0] ?? null
+    const bufferR = asset?.channels[1] ?? null
+    let mix = 0
+    for (const voice of this.voices) {
+      if (!voice.active) continue
+      const state = knockVoice(voice)
+      if (state.gen !== (voice.knockGen || 0)) {
+        knockNoteOn(state, voice.note, voice.vel, !!voice.knockSlide, params, this.sampleRate, beatSamples)
+        state.gen = voice.knockGen || 0
+      }
+      const step = knockStep(
+        state,
+        params,
+        this.sampleRate,
+        beatSamples,
+        voice.released,
+        voice.bend || 0,
+        side,
+        buffer,
+        bufferR,
+        asset?.sampleRate || this.sampleRate,
+        quality,
+      )
+      if (step.done) {
+        voice.active = false
+        continue
+      }
+      mix += step.mono
+      this.knockDelta += step.delta
+    }
+    return san(mix)
   }
 
   private tone(device: RackDevice, params: Record<string, number>, quality: 'full' | 'eco', buffers: Map<string, SampleBuffer>) {
@@ -457,7 +515,7 @@ export function renderNotes(rack: RackState, events: NoteEvent[], sampleRate: nu
   const block = 128
   while (offset < length) {
     while (cursor < ordered.length && ordered[cursor].sample <= offset) {
-      runtime.note(ordered[cursor].pitch, ordered[cursor].vel, rack.polyphony)
+      runtime.note(ordered[cursor].pitch, ordered[cursor].vel, rack.polyphony, !!ordered[cursor].slide)
       cursor += 1
     }
     const next = ordered[cursor]?.sample ?? length
