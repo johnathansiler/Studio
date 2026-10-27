@@ -12,11 +12,13 @@ export function ArrangeView({
   engine,
   session,
   onSeek,
+  onOpenPiano,
 }: {
   store: ProjectStore
   engine: AudioEngine
   session: SessionClient
   onSeek: (sample: number) => void
+  onOpenPiano: (trackId: string, clipId?: string) => void
 }) {
   const project = store.project
   const [px, setPx] = useState(90)
@@ -73,7 +75,9 @@ export function ArrangeView({
     <div className="arrange-wrap">
       <div className="arrange">
       <div className="heads">
-        <div className="ruler-gap" />
+        <div className="ruler-gap">
+          <button type="button" className="add-inst" onClick={() => store.addTrack('midi')}>+ Inst</button>
+        </div>
         {project.tracks.map((track) => (
           <div className="head" key={track.id} onClick={() => store.selectTrack(track.id)}>
             <header>
@@ -180,6 +184,9 @@ export function ArrangeView({
               {track.clips.map((clip) => (
                 <ClipView key={clip.id} store={store} clip={clip} trackId={track.id} px={px} onSplit={() => store.splitSelected(engine.currentTimelineSample())} />
               ))}
+              {track.type === 'midi' && track.midiClips.length === 0 && (
+                <button type="button" className="lane-add" aria-label="Add clip" onClick={() => onOpenPiano(track.id)}>+</button>
+              )}
               {track.midiClips.map((clip) => {
                 const left = ((clip.startBeat * 60) / project.tempo) * px
                 const widthPx = ((clip.durationBeats * 60) / project.tempo) * px
@@ -188,7 +195,7 @@ export function ArrangeView({
                     key={clip.id}
                     className={`clip ${store.selectedMidiClipId === clip.id ? 'selected' : ''}`}
                     style={{ left, width: widthPx, background: track.color }}
-                    onClick={() => store.selectClip(track.id, clip.id, true)}
+                    onClick={() => onOpenPiano(track.id, clip.id)}
                   >
                     <em>
                       {clip.name} · {clip.notes.length} notes

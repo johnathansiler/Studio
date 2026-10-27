@@ -11,6 +11,7 @@ export function TransportBar({
   onStop,
   onRecord,
   onSeek,
+  onPiano,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -19,8 +20,10 @@ export function TransportBar({
   onStop: () => void
   onRecord: () => void
   onSeek: (sample: number) => void
+  onPiano?: (trackId: string) => void
 }) {
   const project = store.project
+  const midiTrack = project.tracks.find((track) => track.id === store.selectedTrackId && track.type === 'midi')
   const [position, setPosition] = useState(engine.positionSamples)
   const [status, setStatus] = useState(engine.status)
   useEffect(
@@ -46,6 +49,9 @@ export function TransportBar({
         <button className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} onClick={onRecord} title="Record">
           ●
         </button>
+        {midiTrack && onPiano && (
+          <button type="button" className={`t-btn piano-btn ${store.selectedMidiClipId ? 'on' : ''}`} onClick={() => onPiano(midiTrack.id)}>Piano</button>
+        )}
       </div>
       <div className="lcd-wrap">
         <div className="lcd">

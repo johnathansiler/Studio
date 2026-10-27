@@ -5,7 +5,7 @@ import { findCycle, MASTER } from '../audio/routing'
 import { createEmptyProject, defaultInsert, makeTrack, uid, TRACK_COLORS } from '../model/types'
 import type { AudioAsset, AudioClip, InsertType, MidiClip, MidiNote, PluginInstance, Project, Track } from '../model/types'
 import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleState } from '../model/scale'
-import { beatsToSamples } from '../model/time'
+import { beatsToSamples, quartersPerBar } from '../model/time'
 import { linearResample } from '../model/wav'
 
 export type WorkspaceView = 'arrange' | 'mix' | 'session'
@@ -217,8 +217,32 @@ export class ProjectStore {
         type,
         color: TRACK_COLORS[index % TRACK_COLORS.length],
       })
-      this.project.tracks.push(track)
+      if (type === 'midi') this.project.tracks.unshift(track)
+      else this.project.tracks.push(track)
       this.selectedTrackId = track.id
+    })
+  }
+
+  /** Open a MIDI track in the piano. An empty track gets a 4-bar clip at the playhead. */
+  preparePianoClip(trackId: string, beat: number, clipId?: string) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      const bar = Math.max(1, quartersPerBar(this.project.timeSignature))
+      const start = Math.max(0, Math.floor(Math.max(0, beat) / bar) * bar)
+      let clip = clipId ? track.midiClips.find((item) => item.id === clipId) : undefined
+      if (!clip && track.midiClips.length) {
+        clip = track.midiClips.find((item) => beat >= item.startBeat && beat < item.startBeat + item.durationBeats) ?? track.midiClips[0]
+      }
+      if (!clip) {
+        clip = { id: uid('midi'), name: 'Keys', startBeat: start, durationBeats: bar * 4, notes: [] }
+        track.midiClips.push(clip)
+      }
+      this.selectedTrackId = trackId
+      this.selectedMidiClipId = clip.id
+      this.selectedClipId = null
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
     })
   }
 

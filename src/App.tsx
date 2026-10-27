@@ -10,7 +10,7 @@ import { readIdentity, writeIdentity } from './storage/identity'
 import { ProjectStore, seedDemoProject } from './state/store'
 import { decodeWavPCM, encodeWav, linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
-import { beatsToSamples, countInSeconds } from './model/time'
+import { beatsToSamples, countInSeconds, samplesToBeats } from './model/time'
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { ArrangeView } from './ui/ArrangeView'
 import { MixerView } from './ui/MixerView'
@@ -64,6 +64,7 @@ export function App() {
   const phone = form === 'phone'
   const compact = form !== 'desk'
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
+  const [pianoOpen, setPianoOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
   const takeRef = useRef<{ id: string; endSample: number } | null>(null)
@@ -679,7 +680,16 @@ export function App() {
     await ready()
   }
 
-  const showRoll = store.view === 'arrange' && store.selectedMidiClipId
+  const showRoll = store.view === 'arrange' && store.selectedMidiClipId && !pianoOpen
+
+  function openPiano(trackId: string, clipId?: string) {
+    const beat = samplesToBeats(engine.positionSamples, store.project.sampleRate, store.project.tempo)
+    store.preparePianoClip(trackId, beat, clipId)
+    setSurface('studio')
+    setPhonePane('edit')
+    store.setView('arrange')
+    setPianoOpen(true)
+  }
 
   return (
     <div className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''}`} style={{ ['--dock' as string]: `${dock}px` }} data-version={version} data-form={form}>
@@ -760,13 +770,14 @@ export function App() {
           onStop={() => void stop()}
           onRecord={() => void record()}
           onSeek={(sample) => void locate(sample)}
+          onPiano={(trackId) => openPiano(trackId)}
         />
       )}
       <div className={`workspace ${!phone && dockEdge === 'bottom' && surface === 'studio' ? 'dock-bottom' : ''}`}>
         {surface === 'studio' && (!phone || phonePane === 'edit') && (
           <div className="main-pane">
             <div className="editor">
-              {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} onSeek={(sample) => void locate(sample)} />}
+              {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} onSeek={(sample) => void locate(sample)} onOpenPiano={openPiano} />}
               {store.view === 'mix' && <MixerView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} />}
             </div>
@@ -824,6 +835,15 @@ export function App() {
         )}
       </div>
       <PluginSheet store={store} engine={engine} />
+      {pianoOpen && (
+        <div className="piano-pop" data-piano="open" role="dialog" aria-label="Piano">
+          <header>
+            <strong>Piano</strong>
+            <button type="button" aria-label="Close piano" onClick={() => setPianoOpen(false)}>×</button>
+          </header>
+          <PianoRoll store={store} engine={engine} />
+        </div>
+      )}
       {phone && (
         <nav className="phone-tabs" aria-label="Sections">
           <button className={phonePane === 'edit' && store.view === 'arrange' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setMenuOpen(false) }}>Arrange</button>

@@ -142,6 +142,7 @@ export function PianoRoll({ store, engine }: { store: ProjectStore; engine: Audi
   return (
     <div className="piano">
       <div className="scale-bar">
+        <button type="button" className={`chords-btn ${open ? 'on' : ''}`} aria-expanded={open} onClick={() => void toggleChords()}>Chords</button>
         <select aria-label="Key" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
           {NOTE_NAMES.map((name, index) => (
             <option key={name} value={index}>{name}</option>
@@ -158,7 +159,6 @@ export function PianoRoll({ store, engine }: { store: ProjectStore; engine: Audi
           store.setScale({ root: found.root, scale: found.scale })
         }}>Detect</button>
         <span className="chord-name">{chord}</span>
-        <button type="button" className={open ? 'on' : ''} aria-expanded={open} onClick={() => void toggleChords()}>Chords</button>
       </div>
       <div className="piano-body">
         <div className="keys">
