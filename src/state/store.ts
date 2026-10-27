@@ -1,6 +1,7 @@
 import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
 import { demoMidiNotes } from '../model/demo'
 import { createEmptyProject, defaultInsert, makeTrack, uid, TRACK_COLORS } from '../model/types'
+import { cloneRack, defaults, FACTORY_PRESETS, makeDevice, normalizeProjectRack, type DeviceKind } from '../model/rack'
 import type { AudioAsset, AudioClip, InsertType, MidiClip, MidiNote, Project, Track } from '../model/types'
 import { beatsToSamples } from '../model/time'
 import { linearResample } from '../model/wav'
@@ -27,6 +28,8 @@ export class ProjectStore {
   transportMode: 'arrangement' | 'session' = 'arrangement'
   /** Guests mirror the host arrangement and cannot edit it. */
   remoteFollow = false
+  rackTrackId: string | null = null
+  rackFlip = false
   toasts: Toast[] = []
   version = 0
   private past: string[] = []
@@ -34,7 +37,7 @@ export class ProjectStore {
   private listeners = new Set<Listener>()
 
   constructor(project = createEmptyProject(), buffers?: Map<string, AudioAsset>) {
-    this.project = project
+    this.project = normalizeProjectRack(project)
     if (buffers) this.buffers = buffers
     this.selectedTrackId = project.tracks[0]?.id ?? null
     this.selectedClipId = null
@@ -368,7 +371,7 @@ export class ProjectStore {
   loadProject(project: Project, buffers: Map<string, AudioAsset>) {
     this.past = []
     this.future = []
-    this.project = project
+    this.project = normalizeProjectRack(project)
     this.buffers = buffers
     this.selectedTrackId = project.tracks[0]?.id ?? null
     this.selectedClipId = null
@@ -416,6 +419,136 @@ export class ProjectStore {
     const id = this.selectedTrackId
     if (!id) return
     this.updateTrack(id, { name, input, armed: true, monitor: true })
+  }
+
+  openRack(trackId: string) {
+    this.rackTrackId = this.rackTrackId === trackId ? null : trackId
+    this.rackFlip = false
+    this.emit()
+  }
+
+  flipRack() {
+    this.rackFlip = !this.rackFlip
+    this.emit()
+  }
+
+  addDevice(trackId: string, kind: DeviceKind) {
+    this.mutate(() => {
+      const rack = this.track(trackId)?.rack
+      if (rack) rack.devices.push(makeDevice(kind))
+    })
+  }
+
+  removeDevice(trackId: string, deviceId: string) {
+    this.mutate(() => {
+      const rack = this.track(trackId)?.rack
+      if (!rack || rack.devices.length < 2) return
+      rack.devices = rack.devices.filter((device) => device.id !== deviceId)
+      rack.cables = rack.cables.filter((cable) => cable.from !== deviceId && cable.to !== deviceId)
+    })
+  }
+
+  moveDevice(trackId: string, deviceId: string, direction: -1 | 1) {
+    this.mutate(() => {
+      const rack = this.track(trackId)?.rack
+      if (!rack) return
+      const index = rack.devices.findIndex((device) => device.id === deviceId)
+      const next = index + direction
+      if (index < 0 || next < 0 || next >= rack.devices.length) return
+      const [item] = rack.devices.splice(index, 1)
+      rack.devices.splice(next, 0, item)
+    })
+  }
+
+  setDeviceParam(trackId: string, deviceId: string, param: string, value: number) {
+    this.mutate(() => {
+      const device = this.track(trackId)?.rack?.devices.find((item) => item.id === deviceId)
+      if (device) device.params[param] = value
+    })
+  }
+
+  applyDevicePreset(trackId: string, deviceId: string, name: string) {
+    this.mutate(() => {
+      const device = this.track(trackId)?.rack?.devices.find((item) => item.id === deviceId)
+      if (!device) return
+      const factory = FACTORY_PRESETS[device.kind].find((item) => item.name === name)
+      const user = this.project.devicePresets.find((item) => item.kind === device.kind && item.name === name)
+      const params = factory?.params ?? user?.params
+      if (params) device.params = { ...defaults(device.kind), ...params }
+    })
+  }
+
+  saveDevicePreset(kind: DeviceKind, name: string, params: Record<string, number>) {
+    this.mutate(() => {
+      const existing = this.project.devicePresets.find((item) => item.kind === kind && item.name === name)
+      if (existing) existing.params = { ...params }
+      else this.project.devicePresets.push({ id: uid('preset'), kind, name, params: { ...params } })
+    })
+  }
+
+  addCable(trackId: string, from: string, fromPort: string, to: string, toPort: string) {
+    this.mutate(() => {
+      const rack = this.track(trackId)?.rack
+      if (!rack || from === to) return
+      rack.cables.push({ id: uid('cable'), from, fromPort, to, toPort, amount: 0.5 })
+    })
+  }
+
+  removeCable(trackId: string, cableId: string) {
+    this.mutate(() => {
+      const rack = this.track(trackId)?.rack
+      if (rack) rack.cables = rack.cables.filter((cable) => cable.id !== cableId)
+    })
+  }
+
+  saveRackPatch(trackId: string, name: string) {
+    this.mutate(() => {
+      const rack = this.track(trackId)?.rack
+      if (!rack) return
+      const patch = { id: uid('patch'), name, rack: cloneRack(rack) }
+      const existing = this.project.rackPatches.find((item) => item.name === name)
+      if (existing) existing.rack = patch.rack
+      else this.project.rackPatches.push(patch)
+    })
+  }
+
+  loadRackPatch(trackId: string, name: string) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      const patch = this.project.rackPatches.find((item) => item.name === name)
+      if (track && patch) track.rack = cloneRack(patch.rack)
+    })
+  }
+
+  addZone(trackId: string, deviceId: string, bufferId: string) {
+    this.mutate(() => {
+      const device = this.track(trackId)?.rack?.devices.find((item) => item.id === deviceId)
+      if (!device) return
+      const root = 60 + device.zones.length * 12
+      device.zones.push({ id: uid('zone'), bufferId, root, lo: root - 6, hi: root + 5, loopStart: 0, loopEnd: 1, tune: 0 })
+    })
+  }
+
+  toggleStep(trackId: string, deviceId: string, step: number, pad: number) {
+    this.mutate(() => {
+      const device = this.track(trackId)?.rack?.devices.find((item) => item.id === deviceId)
+      if (!device) return
+      const bit = 1 << pad
+      device.pattern[step] = (device.pattern[step] || 0) ^ bit
+    })
+  }
+
+  addRackPoint(deviceId: string, param: string, beat: number, value: number) {
+    this.mutate(() => {
+      let lane = this.project.automation.find((item) => item.deviceId === deviceId && item.param === param)
+      if (!lane) {
+        lane = { id: uid('auto'), deviceId, param, points: [] }
+        this.project.automation.push(lane)
+      }
+      const point = lane.points.find((item) => Math.abs(item.beat - beat) < 0.02)
+      if (point) point.value = value
+      else lane.points.push({ beat, value })
+    })
   }
 
   findClip(clipId: string) {

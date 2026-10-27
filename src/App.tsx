@@ -15,6 +15,7 @@ import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { ArrangeView } from './ui/ArrangeView'
 import { MixerView } from './ui/MixerView'
 import { PianoRoll } from './ui/PianoRoll'
+import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
 import { VideoDock } from './ui/VideoDock'
@@ -759,7 +760,8 @@ export function App() {
               {store.view === 'mix' && <MixerView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} />}
             </div>
-            {showRoll && <PianoRoll store={store} />}
+            {store.view === 'arrange' && store.rackTrackId && <RackView store={store} engine={engine} trackId={store.rackTrackId} />}
+            {showRoll && !store.rackTrackId && <PianoRoll store={store} />}
           </div>
         )}
         {(!phone || phonePane === 'room' || surface === 'artist') && (
