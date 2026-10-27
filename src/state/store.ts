@@ -15,6 +15,7 @@ import {
   type SessionClock,
   type TransportSlot,
 } from '../model/launch'
+import { progressionById, romanLine, starterParts } from '../model/progressions'
 import { cloneRack, defaults, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleState } from '../model/scale'
 import { createEmptyProject, defaultInsert, makeTrack, uid, TRACK_COLORS } from '../model/types'
@@ -703,6 +704,56 @@ export class ProjectStore {
     this.project.scale = { ...scale, lastVoicing: voiced }
   }
 
+  /** Drop an idea onto the chord track plus editable bass and drums in that genre. */
+  insertIdea(id: string, beat = 0) {
+    const progression = progressionById(id)
+    if (!progression) return
+    const scale = this.scaleState()
+    const parts = starterParts(progression, scale.root)
+    this.mutate(() => {
+      const chords = this.ensureMidi('Chords', '#e0b15a')
+      const bass = this.ensureMidi('Bass', '#79b8d4')
+      const drums = this.ensureMidi('Drums', '#c58be0')
+      const line = romanLine(progression.chords)
+      this.replaceClip(chords, beat, parts.chords, line)
+      this.replaceClip(bass, beat, parts.bass, `${progression.name} bass`)
+      this.replaceClip(drums, beat, parts.drums, `${progression.name} drums`)
+      const next = this.scaleState()
+      this.project.scale = { ...next, idea: id }
+      this.project.tempo = progression.tempo
+      this.selectedTrackId = chords.id
+    })
+  }
+
+  toggleFavorite(id: string) {
+    this.mutate(() => {
+      const scale = this.scaleState()
+      const favorites = scale.favorites.includes(id) ? scale.favorites.filter((item) => item !== id) : [...scale.favorites, id]
+      this.project.scale = { ...scale, favorites }
+    })
+  }
+
+  private ensureMidi(name: string, color: string) {
+    const existing = this.project.tracks.find((track) => track.type === 'midi' && track.name === name)
+    if (existing) return existing
+    const track = makeTrack({ name, type: 'midi', color, input: 'none' })
+    this.project.tracks.push(track)
+    return track
+  }
+
+  private replaceClip(track: Track, beat: number, notes: { pitch: number; startBeat: number; durationBeats: number; velocity: number }[], name: string) {
+    const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 4)
+    const clip: MidiClip = {
+      id: uid('midi'),
+      name,
+      startBeat: beat,
+      durationBeats: Math.max(4, Math.ceil(end)),
+      notes: notes.map((note) => ({ ...note, id: uid('note'), startBeat: note.startBeat })),
+    }
+    track.midiClips = [clip]
+    this.selectedMidiClipId = clip.id
+  }
+
   launch(trackId: string, clipId: string | null, nowSample = 0) {
     if (this.remoteFollow) return
     const track = this.track(trackId)
@@ -851,6 +902,13 @@ export class ProjectStore {
     this.transportMode = 'arrangement'
     this.pendingTransport = { action: 'back' }
     this.emit()
+  }
+
+  replace(project: Project, buffers?: Map<string, AudioAsset>) {
+    this.mutate(() => {
+      this.project = project
+      if (buffers) this.buffers = buffers
+    })
   }
 
   enterSession() {
