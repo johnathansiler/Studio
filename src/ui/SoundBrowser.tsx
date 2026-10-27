@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
+import { downloadParts, oldestId, planStore, storageBudget, touchLru } from '../model/libraryHost'
 import { NOTE_NAMES } from '../model/scale'
+import { deleteLibraryFile, writeLibraryFile } from '../storage/libraryFiles'
+import type { FormFactor } from './form'
 import {
   addToCollection,
   buildIndex,
@@ -32,12 +35,14 @@ export function SoundBrowser({
   store,
   engine,
   layout,
+  form,
   onClose,
   onPlace,
 }: {
   store: ProjectStore
   engine: AudioEngine
   layout: 'sheet' | 'pane'
+  form: FormFactor
   onClose: () => void
   onPlace: (id: string, trackId: string | null, startSample: number) => void
 }) {
@@ -68,7 +73,8 @@ export function SoundBrowser({
   const results = searchSounds(index, query, personal)
   const counts = tagCounts(index, query, personal)
   const chips = chipList(entries, personal, counts, groups)
-  const stored = entries.reduce((sum, item) => sum + (available(item, personal) ? item.bytes : 0), 0)
+  const stored = libraryBytes(entries, personal)
+  const budget = storageBudget(form)
 
   function toggle(group: TagGroup, value: string) {
     const current = groups[group] ?? []
@@ -97,7 +103,8 @@ export function SoundBrowser({
           <option value="newest">Newest</option>
           <option value="used">Used</option>
         </select>
-        <span className="sound-used">{stored ? mb(stored) : '0 MB'}</span>
+        <span className="sound-used">{mb(stored) || '0'} / {mb(budget)}</span>
+        {personal.cached.length > 0 && <button type="button" aria-label="Free" onClick={() => freeOldest(store)}>Free</button>}
         <button type="button" className="text-btn" aria-label="Close" onClick={onClose}>×</button>
       </div>
       <div className="sound-chips">
@@ -177,10 +184,26 @@ export function SoundBrowser({
   )
 }
 
-export function placeSound(store: ProjectStore, id: string, trackId: string | null, startSample: number) {
+export async function placeSound(store: ProjectStore, id: string, trackId: string | null, startSample: number, form: FormFactor) {
   const personal = store.soundState()
-  const item = catalog().concat(personal.imports).find((entry) => entry.id === id)
+  const rows = catalog().concat(personal.imports)
+  const item = rows.find((entry) => entry.id === id)
   if (!item) return
+  const incoming = available(item, personal) ? 0 : item.bytes
+  const decision = planStore(libraryBytes(rows, personal), incoming, storageBudget(form))
+  if (decision === 'block') {
+    store.toast('Storage full', 'warn')
+    return
+  }
+  if (decision === 'warn') store.toast('Storage low', 'warn')
+  if (incoming > 0 && item.urls?.length) {
+    try {
+      await writeLibraryFile(item.id, await downloadParts(item.urls, fetch))
+    } catch {
+      store.toast('Download failed', 'warn')
+      return
+    }
+  }
   const loom = store.project.loom
   if (loom && (item.type === 'instrument' || item.type === 'preset')) {
     const instrument = loom.instruments.find((entry) => entry.id === item.id)
@@ -211,7 +234,52 @@ export function placeSound(store: ProjectStore, id: string, trackId: string | nu
     })
   }
   const cached = item.bytes > 0 && !personal.cached.includes(item.id) ? [...personal.cached, item.id] : personal.cached
+  if (incoming > 0 && !item.urls?.length) {
+    const key = NOTE_NAMES[store.scaleState().root]
+    const rendered = fitPreview(item, store.project.sampleRate, store.project.tempo, key)
+    const bytes = new Uint8Array(rendered.byteLength)
+    bytes.set(new Uint8Array(rendered.buffer.slice(rendered.byteOffset, rendered.byteOffset + rendered.byteLength)))
+    await writeLibraryFile(item.id, bytes)
+  }
+  rememberLru(item.id)
   store.setSounds(noteUse({ ...personal, cached }, item.id))
+}
+
+export function freeOldest(store: ProjectStore) {
+  const personal = store.soundState()
+  const id = oldestId(readLru(), personal.cached)
+  if (!id) return
+  void deleteLibraryFile(id)
+  const next = readLru()
+  delete next[id]
+  writeLru(next)
+  store.setSounds({ ...personal, cached: personal.cached.filter((item) => item !== id) })
+}
+
+const LRU_KEY = 'cueharbor-library-lru'
+
+function readLru() {
+  try {
+    return JSON.parse(localStorage.getItem(LRU_KEY) || '{}') as Record<string, number>
+  } catch {
+    return {}
+  }
+}
+
+function writeLru(map: Record<string, number>) {
+  try {
+    localStorage.setItem(LRU_KEY, JSON.stringify(map))
+  } catch {
+    /* the file is still removed from the project list */
+  }
+}
+
+function rememberLru(id: string) {
+  writeLru(touchLru(readLru(), id, Date.now()))
+}
+
+function libraryBytes(entries: SoundEntry[], personal: ReturnType<ProjectStore['soundState']>) {
+  return entries.reduce((sum, item) => sum + (item.origin !== 'import' && item.origin !== 'synth' && personal.cached.includes(item.id) ? item.bytes : 0), 0)
 }
 
 function available(item: SoundEntry, personal: ReturnType<ProjectStore['soundState']>) {
@@ -237,6 +305,9 @@ function chipList(entries: SoundEntry[], personal: ReturnType<ProjectStore['soun
 
 function mb(bytes: number) {
   if (!bytes) return ''
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes >= 1024 * 1024) {
+    const value = bytes / (1024 * 1024)
+    return `${value >= 10 ? Math.round(value) : value.toFixed(1)} MB`
+  }
   return `${Math.max(1, Math.round(bytes / 1024))} KB`
 }

@@ -812,7 +812,7 @@ export function App() {
         {surface === 'studio' && (!phone || phonePane === 'edit') && (
           <div className="main-pane">
             <div className="editor">
-              {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} onSeek={(sample) => void locate(sample)} onPlaceSound={(trackId, id, sample) => placeSound(store, id, trackId, sample)} />}
+              {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} onSeek={(sample) => void locate(sample)} onPlaceSound={(trackId, id, sample) => { void placeSound(store, id, trackId, sample, form) }} />}
               {store.view === 'mix' && <MixerView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} />}
             </div>
@@ -821,7 +821,7 @@ export function App() {
         )}
         {form === 'fold' && soundsOpen && !showRoll && surface === 'studio' && (
           <div className="side-editor">
-            <SoundBrowser store={store} engine={engine} layout="pane" onClose={() => setSoundsOpen(false)} onPlace={(id, trackId, sample) => placeSound(store, id, trackId, sample)} />
+            <SoundBrowser store={store} engine={engine} form={form} layout="pane" onClose={() => setSoundsOpen(false)} onPlace={(id, trackId, sample) => { void placeSound(store, id, trackId, sample, form) }} />
           </div>
         )}
         {form === 'fold' && showRoll && surface === 'studio' && (
@@ -877,7 +877,7 @@ export function App() {
       <PluginSheet store={store} engine={engine} />
       <LoomPop store={store} engine={engine} form={form} open={loomOpen} onClose={() => setLoomOpen(false)} />
       {soundsOpen && form !== 'fold' && (
-        <SoundBrowser store={store} engine={engine} layout="sheet" onClose={() => setSoundsOpen(false)} onPlace={(id, trackId, sample) => placeSound(store, id, trackId, sample)} />
+        <SoundBrowser store={store} engine={engine} form={form} layout="sheet" onClose={() => setSoundsOpen(false)} onPlace={(id, trackId, sample) => { void placeSound(store, id, trackId, sample, form) }} />
       )}
       {phone && (
         <nav className="phone-tabs" aria-label="Sections">

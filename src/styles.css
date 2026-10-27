@@ -716,7 +716,7 @@ html[data-posture="tabletop"] .shell .plugin-sheet {
 .sound-search { display: flex; gap: 6px; align-items: center; padding: 8px; border-bottom: 1px solid var(--line); }
 .sound-search input, .sound-search select { min-height: 44px; background: #18231d; border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; }
 .sound-search input { flex: 1; min-width: 0; font-size: 16px; }
-.sound-used { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sound-used { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; flex: 0 0 auto; }
 .sound-chips { display: flex; gap: 6px; overflow-x: auto; padding: 8px; flex: 0 0 auto; }
 .sound-chips .chip, .sound-row .chip {
   flex: 0 0 auto; min-height: 36px; border-radius: 999px; border: 1px solid var(--line); background: #18231d; padding: 0 12px;

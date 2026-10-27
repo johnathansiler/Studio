@@ -1,5 +1,6 @@
 /** Local sound catalog, search, and cache plan. No network calls live here. */
 
+import { allowedLibraryHost, downloadParts, HOST_PART_LIMIT, partCount } from './libraryHost'
 import { starterLoom } from './loom'
 
 export type SoundType = 'instrument' | 'loop' | 'one-shot' | 'kit' | 'preset' | 'ir'
@@ -22,6 +23,8 @@ export interface SoundEntry {
   origin: 'synth' | 'generated' | 'import' | 'remote'
   addedAt: number
   bufferId?: string
+  /** Direct free-host parts. Empty until a licensed manifest names them. */
+  urls?: string[]
 }
 
 export interface SoundPersonal {
@@ -54,6 +57,8 @@ export interface ManifestRow {
   license: string
   url: string
   bytes: number
+  /** Direct part URLs when the file is larger than the host limit. */
+  parts?: string[]
 }
 
 const GROUPS: TagGroup[] = ['type', 'category', 'genre', 'character', 'key', 'pack']
@@ -344,21 +349,18 @@ export function analyzeSound(samples: Float32Array, sampleRate: number) {
   return { bpm, key, type, category }
 }
 
-const ALLOWED_HOST = /^https:\/\/(github\.com\/|objects\.githubusercontent\.com\/|release-assets\.githubusercontent\.com\/|huggingface\.co\/|cdn-lfs[a-z0-9.-]*\.huggingface\.co\/)/i
 const CLEAR_LICENSE = /^(cc0|cc-by|cc-by-sa|public domain|public-domain|mit|bsd|bsd-2-clause|bsd-3-clause)$/i
 const NON_COMMERCIAL = /non-?commercial|\bnc\b/i
 
-/** Keep a manifest row only when the license is clear and the file lives on a free host. */
+/** Keep a manifest row only when the license is clear and every part is a direct free-host file. */
 export function takeManifest(rows: ManifestRow[]) {
   const ok: ManifestRow[] = []
   const rejected: string[] = []
   for (const row of rows) {
     const license = row.license.trim()
-    if (!license || NON_COMMERCIAL.test(license) || !CLEAR_LICENSE.test(license)) {
-      rejected.push(row.id)
-      continue
-    }
-    if (!ALLOWED_HOST.test(row.url)) {
+    const urls = row.parts?.length ? row.parts : [row.url]
+    const tooBig = row.bytes > HOST_PART_LIMIT && urls.length < partCount(row.bytes)
+    if (!license || NON_COMMERCIAL.test(license) || !CLEAR_LICENSE.test(license) || tooBig || urls.some((url) => !allowedLibraryHost(url))) {
       rejected.push(row.id)
       continue
     }
@@ -393,9 +395,7 @@ export function memoryCache(): MemoryCache {
 export async function cacheRemote(row: ManifestRow, fetchImpl: typeof fetch, cache: MemoryCache) {
   const accepted = takeManifest([row])
   if (!accepted.ok.length) throw new Error('refused')
-  const response = await fetchImpl(row.url)
-  if (!response.ok) throw new Error('download')
-  const data = new Uint8Array(await response.arrayBuffer())
+  const data = await downloadParts(row.parts?.length ? row.parts : [row.url], fetchImpl)
   cache.put(row.id, data)
   return data.byteLength
 }
