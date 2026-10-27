@@ -29,6 +29,7 @@ export class LiveRack {
   private readonly processors = new Map<string, Processor>()
   private readonly failed = new Set<string>()
   private readonly spectra = new Map<string, Float32Array>()
+  private readonly tuners = new Map<string, { hz: number; cents: number; note: number }>()
   private readonly meters = new Map<string, { vu: number; gr: number }>()
   private readonly traces = new Map<string, Float32Array>()
   private readonly tapsOut = new Map<string, Float32Array>()
@@ -43,11 +44,18 @@ export class LiveRack {
   private remoteBus: AudioNode | null = null
 
   constructor() {
-    if (typeof matchMedia !== 'undefined') this.phone = matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
+    if (typeof matchMedia !== 'undefined') {
+      this.phone = matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
+      if (this.phone) this.quality = 'eco'
+    }
   }
 
   spectrum(pluginId: string) {
     return this.spectra.get(pluginId) ?? null
+  }
+
+  tuner(pluginId: string) {
+    return this.tuners.get(pluginId) ?? null
   }
 
   meter(pluginId: string) {
@@ -56,6 +64,14 @@ export class LiveRack {
 
   trace(pluginId: string) {
     return this.traces.get(pluginId) ?? null
+  }
+
+  ownerLatency(owner: string) {
+    const project = this.project
+    const ctx = this.ctx
+    if (!project || !ctx) return 0
+    const plugins = owner === 'master' ? project.masterPlugins : project.tracks.find((track) => track.id === owner)?.plugins ?? []
+    return this.latency(owner, plugins, ctx.sampleRate)
   }
 
   isFailed(pluginId: string) {
@@ -204,6 +220,7 @@ export class LiveRack {
     for (const slot of slots) {
       if (slot.failed) this.failed.add(slot.id)
       if (slot.processor?.spectrum) this.spectra.set(slot.id, slot.processor.spectrum)
+      if (slot.processor?.tuner) this.tuners.set(slot.id, slot.processor.tuner)
       if (slot.processor?.meter) this.meters.set(slot.id, slot.processor.meter)
       if (slot.processor?.trace) this.traces.set(slot.id, slot.processor.trace)
     }

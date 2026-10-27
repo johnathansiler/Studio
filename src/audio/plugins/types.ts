@@ -35,6 +35,8 @@ export interface BlockContext {
 export interface Processor {
   latencySamples: number
   spectrum?: Float32Array
+  /** Chromatic tuner readout. `cents` is signed distance to the nearest semitone. */
+  tuner?: { hz: number; cents: number; note: number }
   /** Needle ballistics. vu is dB relative to 0 VU. gr is positive reduction. */
   meter?: { vu: number; gr: number }
   /** Recent detected pitch, in hertz, for the tune graph. */
