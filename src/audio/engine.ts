@@ -340,6 +340,14 @@ export class AudioEngine {
     return this.rack.spectrum(pluginId)
   }
 
+  meter(pluginId: string) {
+    return this.rack.meter(pluginId)
+  }
+
+  trace(pluginId: string) {
+    return this.rack.trace(pluginId)
+  }
+
   pluginFailed(pluginId: string) {
     return this.rack.isFailed(pluginId)
   }

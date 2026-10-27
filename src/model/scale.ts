@@ -63,6 +63,9 @@ export interface ScaleState {
   timing: number
   velocity: number
   lastVoicing: number[]
+  /** Id of the idea last dropped onto the chord, bass, and drum tracks. */
+  idea: string
+  favorites: string[]
 }
 
 export interface ChordPad {
@@ -143,6 +146,8 @@ export function defaultScale(): ScaleState {
     timing: 0.02,
     velocity: 0,
     lastVoicing: [],
+    idea: '',
+    favorites: [],
   }
 }
 
@@ -166,6 +171,8 @@ export function normalizeScale(value: Partial<ScaleState> | undefined): ScaleSta
     timing: clamp(value.timing ?? base.timing, 0, 0.2),
     velocity: clamp(value.velocity ?? 0, 0, 1),
     lastVoicing: Array.isArray(value.lastVoicing) ? value.lastVoicing.filter((n) => Number.isFinite(n)) : [],
+    idea: typeof value.idea === 'string' ? value.idea : '',
+    favorites: Array.isArray(value.favorites) ? value.favorites.filter((item): item is string => typeof item === 'string') : [],
   }
 }
 

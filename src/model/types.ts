@@ -167,8 +167,11 @@ export interface Track {
   midiSlots?: (string | null)[]
 }
 
+/** Bump when saved documents change shape. migrateProject opens older numbers. */
+export const SCHEMA_VERSION = 2
+
 export interface Project {
-  version: 1
+  version: number
   id: string
   name: string
   sampleRate: number
@@ -252,7 +255,7 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
   const keys = makeTrack({ name: 'Keys', type: 'midi', color: TRACK_COLORS[2], input: 'none' })
   const bar = Math.round(sampleRate * 2) // 1 bar at 120bpm is 2s; tempo applied by caller via loop length
   return {
-    version: 1,
+    version: SCHEMA_VERSION,
     id: uid('prj'),
     name,
     sampleRate,
