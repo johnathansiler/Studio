@@ -794,3 +794,31 @@ html[data-posture="tabletop"] .shell .plugin-sheet {
 .shell:not(.phone):not(.fold) .piano-pop {
   top: 72px; right: 16px; bottom: 16px; width: min(720px, 48vw); border-radius: 16px;
 }
+.ideas-pop {
+  position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column;
+  background: #121a16; color: var(--text);
+}
+.ideas-pop header, .idea-actions, .chip-row { display: flex; gap: 8px; align-items: center; }
+.ideas-pop header { padding: 10px 12px; }
+.ideas-pop header strong { margin-right: auto; }
+.ideas-pop header input { flex: 1; min-width: 0; min-height: 44px; }
+.ideas-pop button, .idea-actions button, .chip-row button {
+  min-height: 44px; border-radius: 8px; border: 1px solid var(--line); background: #18241d; color: var(--text); padding: 0 12px;
+}
+.ideas-pop button.on, .chip-row button.on, .idea-actions button.on { background: var(--accent); color: var(--accent-ink); }
+.chip-row { overflow: auto; padding: 0 12px 8px; flex: none; }
+.idea-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.idea-list { flex: 1; overflow: auto; padding: 0 12px 16px; }
+.idea-row { width: 100%; min-height: 44px; display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; background: transparent; }
+.idea-row b { font-weight: 640; }
+.idea-row span, .idea-why, .idea-meta, .idea-names { color: var(--muted); font-size: 13px; margin: 0; }
+.idea-roman { margin: 0; font-size: 15px; }
+.idea-body { display: flex; flex-direction: column; gap: 6px; padding: 4px 8px 12px; }
+.idea-detail { display: none; }
+.idea-list article.on .idea-row { border-color: var(--accent); }
+.shell.phone:not(.land) .ideas-pop { bottom: calc(48px + env(safe-area-inset-bottom)); }
+.shell.fold .idea-stage, .shell.phone.land .idea-stage, .shell.land .idea-stage { flex-direction: row; }
+.shell.fold .idea-list, .shell.phone.land .idea-list, .shell.land .idea-list,
+.shell.fold .idea-detail, .shell.phone.land .idea-detail, .shell.land .idea-detail { flex: 1; min-width: 0; overflow: auto; }
+.shell.fold .idea-detail, .shell.phone.land .idea-detail, .shell.land .idea-detail { display: block; padding: 8px 12px 16px; }
+.shell.fold .idea-list .idea-body, .shell.phone.land .idea-list .idea-body, .shell.land .idea-list .idea-body { display: none; }

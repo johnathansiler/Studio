@@ -16,6 +16,7 @@ import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { ArrangeView } from './ui/ArrangeView'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
+import { IdeasPop } from './ui/IdeasPop'
 import { PianoRoll } from './ui/PianoRoll'
 import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
@@ -67,6 +68,7 @@ export function App() {
   const compact = form !== 'desk'
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
   const [pianoOpen, setPianoOpen] = useState(false)
+  const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
   const takeRef = useRef<{ id: string; endSample: number } | null>(null)
@@ -216,6 +218,17 @@ export function App() {
       window.clearInterval(followTimer)
     }
   }, [store, engine, session])
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('ideas') !== '1') return
+    const track = store.project.tracks.find((item) => item.type === 'midi')
+    if (track && !track.midiClips.length) store.addMidiClip(track.id, 0)
+    if (track) store.selectTrack(track.id)
+    store.setView('arrange')
+    setSurface('studio')
+    setPhonePane('edit')
+    setIdeasOpen(true)
+  }, [store])
 
   useEffect(() => {
     const saveReady = { current: false }
@@ -881,12 +894,12 @@ export function App() {
               {store.view === 'session' && <SessionView store={store} engine={engine} />}
             </div>
             {store.view === 'arrange' && store.rackTrackId && form !== 'fold' && <RackView store={store} engine={engine} trackId={store.rackTrackId} />}
-            {showRoll && form !== 'fold' && !store.rackTrackId && <PianoRoll store={store} engine={engine} />}
+            {showRoll && form !== 'fold' && !store.rackTrackId && <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />}
           </div>
         )}
         {form === 'fold' && surface === 'studio' && (showRoll || store.rackTrackId) && (
           <div className="side-editor">
-            {store.rackTrackId ? <RackView store={store} engine={engine} trackId={store.rackTrackId} /> : <PianoRoll store={store} engine={engine} />}
+            {store.rackTrackId ? <RackView store={store} engine={engine} trackId={store.rackTrackId} /> : <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />}
           </div>
         )}
         {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && (showRoll || store.rackTrackId)) && (
@@ -941,9 +954,10 @@ export function App() {
             <strong>Piano</strong>
             <button type="button" aria-label="Close piano" onClick={() => setPianoOpen(false)}>×</button>
           </header>
-          <PianoRoll store={store} engine={engine} />
+          <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />
         </div>
       )}
+      {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}
       {phone && (
         <nav className="phone-tabs" aria-label="Sections">
           <button className={phonePane === 'edit' && store.view === 'arrange' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setMenuOpen(false) }}>Arrange</button>
