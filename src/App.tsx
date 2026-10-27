@@ -24,6 +24,7 @@ import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
 import { IdeasPop } from './ui/IdeasPop'
 import { PianoRoll } from './ui/PianoRoll'
+import { KnockPop } from './ui/KnockPop'
 import { ProjectSheet } from './ui/ProjectSheet'
 import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
@@ -80,6 +81,7 @@ export function App() {
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
   const [pianoOpen, setPianoOpen] = useState(false)
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
+  const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
@@ -152,6 +154,19 @@ export function App() {
       }
     })
     const params = new URLSearchParams(location.search)
+    if (params.get('knock') === '1') {
+      const track = store.project.tracks.find((item) => item.type === 'midi')
+      if (track) {
+        if (!track.rack?.devices.some((device) => device.kind === 'knock')) store.addDevice(track.id, 'knock')
+        const other = track.rack?.devices.find((device) => device.kind !== 'knock')
+        if (other && (track.rack?.devices.length || 0) > 1) store.removeDevice(track.id, other.id)
+        if (store.rackTrackId !== track.id) store.openRack(track.id)
+        store.setView('arrange')
+        setKnockOpen(true)
+        setSurface('studio')
+        setPhonePane('edit')
+      }
+    }
     const urlCode = (params.get('session') || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
     const identity = readIdentity()
     const choice = inviteWins(urlCode, identity?.code || '')
@@ -1064,13 +1079,13 @@ async function importDropped(files: FileList) {
               {store.view === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} />}
               {store.view === 'session' && <SessionView store={store} engine={engine} />}
             </div>
-            {store.view === 'arrange' && store.rackTrackId && form !== 'fold' && <RackView store={store} engine={engine} trackId={store.rackTrackId} />}
+            {store.view === 'arrange' && store.rackTrackId && form !== 'fold' && <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />}
             {showRoll && form !== 'fold' && !store.rackTrackId && <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />}
           </div>
         )}
         {form === 'fold' && surface === 'studio' && (showRoll || store.rackTrackId) && (
           <div className="side-editor">
-            {store.rackTrackId ? <RackView store={store} engine={engine} trackId={store.rackTrackId} /> : <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />}
+            {store.rackTrackId ? <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} /> : <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />}
           </div>
         )}
         {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && (showRoll || store.rackTrackId)) && (
@@ -1265,6 +1280,7 @@ async function importDropped(files: FileList) {
           </div>
         </div>
       )}
+      {knockOpen && <KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} />}
       <div className="toasts">
         {store.toasts.map((toast) => (
           <div key={toast.id} className={`toast ${toast.tone || ''}`}>

@@ -11,7 +11,7 @@ interface Live {
   rack: RackState | null
   tempo: number
   buffers: Map<string, SampleBuffer>
-  notes: { pitch: number; vel: number; time: number }[]
+  notes: { pitch: number; vel: number; time: number; slide?: boolean }[]
 }
 
 /**
@@ -25,7 +25,7 @@ export class RackHost {
   private lives = new Map<string, Live>()
   private ready: Promise<boolean> | null = null
   private workletOk = false
-  private pending = new Map<string, { pitch: number; vel: number; time: number }[]>()
+  private pending = new Map<string, { pitch: number; vel: number; time: number; slide?: boolean }[]>()
 
   constructor() {
     if (typeof matchMedia !== 'undefined') this.phone = matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
@@ -53,17 +53,17 @@ export class RackHost {
     })
   }
 
-  note(trackId: string, pitch: number, vel: number, time: number) {
+  note(trackId: string, pitch: number, vel: number, time: number, slide = false) {
     const live = this.lives.get(trackId)
     if (!live) {
       const queue = this.pending.get(trackId) ?? []
-      queue.push({ pitch, vel, time })
+      queue.push({ pitch, vel, time, slide })
       this.pending.set(trackId, queue)
       return
     }
-    if (live.worklet) live.worklet.port.postMessage({ type: 'note', pitch, vel, time })
+    if (live.worklet) live.worklet.port.postMessage({ type: 'note', pitch, vel, time, slide })
     else {
-      live.notes.push({ pitch, vel, time })
+      live.notes.push({ pitch, vel, time, slide })
       live.notes.sort((a, b) => a.time - b.time)
     }
   }
@@ -107,7 +107,7 @@ export class RackHost {
           const when = event.playbackTime || ctx.currentTime
           while (live.notes.length && live.notes[0].time <= when) {
             const item = live.notes.shift()!
-            runtime.note(item.pitch, item.vel, rack.polyphony)
+            runtime.note(item.pitch, item.vel, rack.polyphony, !!item.slide)
           }
           const started = performance.now()
           const rendered = runtime.render(rack, event.outputBuffer.length, live.tempo, this.quality, live.buffers)

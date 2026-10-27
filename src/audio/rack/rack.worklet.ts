@@ -15,6 +15,7 @@ interface NoteMsg {
   pitch: number
   vel: number
   time: number
+  slide?: boolean
 }
 
 interface StateMsg {
@@ -31,7 +32,7 @@ class RackProcessor extends AudioWorkletProcessor {
   private tempo = 120
   private quality: 'full' | 'eco' = 'full'
   private buffers = new Map<string, SampleBuffer>()
-  private pending: { pitch: number; vel: number; time: number }[] = []
+  private pending: { pitch: number; vel: number; time: number; slide?: boolean }[] = []
 
   constructor() {
     super()
@@ -45,7 +46,7 @@ class RackProcessor extends AudioWorkletProcessor {
           this.buffers = new Map(data.buffers.map((item) => [item.id, { sampleRate: item.sampleRate, channels: [item.data] }]))
         }
       } else if (data.type === 'note') {
-        this.pending.push({ pitch: data.pitch, vel: data.vel, time: data.time })
+        this.pending.push({ pitch: data.pitch, vel: data.vel, time: data.time, slide: data.slide })
         this.pending.sort((a, b) => a.time - b.time)
       } else if (data.type === 'off') {
         this.runtime.allOff()
@@ -62,7 +63,7 @@ class RackProcessor extends AudioWorkletProcessor {
     const rack = this.rack
     while (this.pending.length && this.pending[0].time <= now) {
       const note = this.pending.shift()!
-      this.runtime.note(note.pitch, note.vel, rack?.polyphony ?? 8)
+      this.runtime.note(note.pitch, note.vel, rack?.polyphony ?? 8, !!note.slide)
     }
     if (!rack) {
       out[0]?.fill(0)

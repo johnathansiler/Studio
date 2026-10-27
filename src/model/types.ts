@@ -150,6 +150,8 @@ export interface MidiNote {
   startBeat: number
   durationBeats: number
   velocity: number
+  /** Slide into this note from the one still held. */
+  slide?: boolean
 }
 
 export interface MidiTake {
