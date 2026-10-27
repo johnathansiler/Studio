@@ -1,3 +1,4 @@
+import { MASTERING_IDS } from '../audio/master/assistant'
 import { scheduleStretchCommit, stretchCacheKey } from '../audio/stretch/commit'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
 import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
@@ -87,6 +88,7 @@ export class ProjectStore {
   tool: 'pointer' | 'stretch' = 'pointer'
   /** Clip settings. Not saved. */
   clipSheet = false
+  private bypassed: { id: string; enabled: boolean }[] | null = null
 
   constructor(project = createEmptyProject(), buffers?: Map<string, AudioAsset>) {
     this.project = normalizeProjectRack(normalizeProject(project))
@@ -388,6 +390,34 @@ export class ProjectStore {
   focusPlugin(trackId: string | null, pluginId: string | null = null) {
     this.pluginFocus = trackId && pluginId ? { trackId, pluginId } : null
     this.emit()
+  }
+
+  replaceMasterChain(plugins: PluginInstance[]) {
+    this.mutate(() => {
+      const mastering = new Set<string>(MASTERING_IDS)
+      const meter = this.project.masterPlugins.find((plugin) => plugin.pluginId === 'meter') ?? createPlugin('meter')
+      const kept = this.project.masterPlugins.filter((plugin) => plugin.pluginId !== 'meter' && !mastering.has(plugin.pluginId))
+      this.project.masterPlugins = [...plugins, ...kept, meter]
+    })
+  }
+
+  /** Bypass the mastering chain so a loudness-matched dry signal can be compared. */
+  setMasterBypass(on: boolean) {
+    this.mutate(() => {
+      const mastering = new Set<string>(MASTERING_IDS)
+      if (on) {
+        this.bypassed = this.project.masterPlugins.map((plugin) => ({ id: plugin.id, enabled: plugin.enabled }))
+        for (const plugin of this.project.masterPlugins) {
+          if (mastering.has(plugin.pluginId) || plugin.pluginId === 'limiter') plugin.enabled = false
+        }
+      } else if (this.bypassed) {
+        for (const snap of this.bypassed) {
+          const plugin = this.project.masterPlugins.find((item) => item.id === snap.id)
+          if (plugin) plugin.enabled = snap.enabled
+        }
+        this.bypassed = null
+      }
+    })
   }
 
   addPlugin(trackId: string | 'master', pluginId: string, preset?: string) {

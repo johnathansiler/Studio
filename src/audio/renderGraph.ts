@@ -32,6 +32,8 @@ export function renderGraph(opts: {
   scaleIntervals: readonly number[]
   automation: AutomationLane[]
   quality?: 'full' | 'eco'
+  /** Mastering uses linear-phase EQ and 4x oversampling on this path. */
+  offline?: boolean
   liveRemote?: boolean
   create: (pluginId: string, sampleRate: number) => Processor
 }) {
@@ -164,7 +166,7 @@ function slotsFor(
 function runBlocks(
   slots: ChainSlot[],
   input: Float32Array[],
-  opts: { sampleRate: number; tempo: number; scaleRoot: number; scaleIntervals: readonly number[]; automation: AutomationLane[]; quality?: 'full' | 'eco' },
+  opts: { sampleRate: number; tempo: number; scaleRoot: number; scaleIntervals: readonly number[]; automation: AutomationLane[]; quality?: 'full' | 'eco'; offline?: boolean },
   rendered: Map<string, { pre: Float32Array[]; post: Float32Array[] }>,
   tracks: Map<string, GraphTrack>,
 ) {
@@ -186,6 +188,7 @@ function runBlocks(
       scaleRoot: opts.scaleRoot,
       scaleIntervals: opts.scaleIntervals,
       quality: opts.quality ?? 'full',
+      offline: opts.offline !== false,
     }, (id) => {
       const ready = rendered.get(id)?.pre[0]
       if (ready) return ready.subarray(offset, offset + count)
