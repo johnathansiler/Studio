@@ -1,4 +1,5 @@
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
+import { compPieces, recordOffsetSamples } from '../model/comp'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
 import { residentDrums, type ResidentDrum } from '../model/drums'
 import { calibrationTrim, contextTimeForEvent, monitoringOffset, type ClockStamp } from '../model/midiClock'
@@ -26,6 +27,8 @@ export interface CaptureResult {
   source: 'local' | 'guide'
   peerId?: string
   takeId?: string
+  /** Armed track id this capture was recorded for. */
+  key?: string
 }
 
 interface RecordInput {
@@ -34,6 +37,8 @@ interface RecordInput {
   source: 'local' | 'guide'
   peerId?: string
   takeId?: string
+  /** Interface channel. Omitted records the whole stream. */
+  channel?: number
 }
 
 interface ActiveRec {
@@ -96,6 +101,7 @@ export class AudioEngine {
   private truePeak = -70
 
   private localMicSrc: MediaStreamAudioSourceNode | null = null
+  private monitorSplit: ChannelSplitterNode | null = null
   private localMicGain: GainNode | null = null
   private remoteGains = new Map<string, { src: MediaStreamAudioSourceNode; gain: GainNode }>()
   private talkGains = new Map<string, GainNode>()
@@ -453,12 +459,41 @@ export class AudioEngine {
         /* already */
       }
     }
-    for (const track of this.project.tracks) {
-      if (isLocalInput(track.input) && track.monitor) {
-        const strip = this.strips.get(track.id)
-        if (strip) this.localMicGain.connect(strip.input)
+    if (this.monitorSplit) {
+      try {
+        this.localMicSrc?.disconnect(this.monitorSplit)
+      } catch {
+        /* noop */
       }
+      this.monitorSplit.disconnect()
+      this.monitorSplit = null
     }
+    const splitCount = Math.max(
+      1,
+      ...this.project.tracks.map((track) => {
+        const match = /^mic:(\d+)$/.exec(track.input)
+        return match ? Number(match[1]) + 1 : 1
+      }),
+    )
+    if (splitCount > 1 && this.ctx && this.localMicSrc) {
+      this.monitorSplit = this.ctx.createChannelSplitter(splitCount)
+      this.localMicSrc.connect(this.monitorSplit)
+    }
+    for (const track of this.project.tracks) {
+      if (!track.monitor) continue
+      const strip = this.strips.get(track.id)
+      if (!strip) continue
+      const match = /^mic:(\d+)$/.exec(track.input)
+      if (match && this.monitorSplit) this.monitorSplit.connect(strip.input, Number(match[1]), 0)
+      else if (isLocalInput(track.input)) this.localMicGain.connect(strip.input)
+    }
+  }
+
+  /** Input plus output latency, in samples, used to place a recording on the grid. */
+  latencyCompensationSamples() {
+    const ctx = this.ctx
+    if (!ctx) return 0
+    return recordOffsetSamples(ctx.baseLatency || 0, ctx.outputLatency || 0, ctx.sampleRate)
   }
 
   setRemoteMusic(peerId: string, stream: MediaStream | null) {
@@ -712,6 +747,7 @@ export class AudioEngine {
       source: rec.meta.source,
       peerId: rec.meta.peerId,
       takeId: rec.meta.takeId,
+      key: rec.meta.key,
     }
   }
 
@@ -741,7 +777,11 @@ export class AudioEngine {
       const node = new AudioWorkletNode(this.ctx, 'recorder-processor')
       const silent = this.ctx.createGain()
       silent.gain.value = 0
-      src.connect(node)
+      if (input.channel != null) {
+        const splitter = this.ctx.createChannelSplitter(input.channel + 1)
+        src.connect(splitter)
+        splitter.connect(node, input.channel, 0)
+      } else src.connect(node)
       node.connect(silent)
       silent.connect(this.recordSink ?? this.ctx.destination)
       const rec: ActiveRec = {
@@ -1144,8 +1184,7 @@ export class AudioEngine {
         project &&
         this.mode === 'arrangement' &&
         project.loopEnabled &&
-        this.status !== 'recording' &&
-        this.status !== 'counting-in'
+        (this.status === 'playing' || (this.status === 'recording' && project.record?.loop))
       ) {
         const len = project.loopEndSample - project.loopStartSample
         if (len > 1 && sample >= project.loopEndSample) {
@@ -1217,7 +1256,8 @@ export class AudioEngine {
   private scheduleArrangement(horizon: number) {
     const project = this.project!
     const end = projectEndSample(project.tracks, this.sampleRate, project.tempo)
-    if (!project.loopEnabled || this.status === 'recording') {
+    const cycleWhileRecording = this.status === 'recording' && project.record?.loop
+    if (!project.loopEnabled || (this.status === 'recording' && !cycleWhileRecording)) {
       if (this.arrangementScheduled) return
       this.arrangementScheduled = true
       this.scheduleWindow(this.playOriginCtx, this.playOriginSample, end)
@@ -1393,10 +1433,15 @@ export class AudioEngine {
       if (!strip) continue
       for (const clip of track.clips) {
         if (clip.slotOnly) continue
-        const asset = this.assetOf(clip.bufferId)
-        if (!asset) continue
-        const buffer = this.bufferFromAsset(ctx, asset)
-        this.scheduleAudioClip(ctx, strip, buffer, clip, ctxTime, timelineStart, timelineEnd)
+        const pieces = clip.folder
+          ? compPieces(clip.folder, clip.fadeInSamples, clip.fadeOutSamples).map((piece) => ({ ...clip, folder: undefined, ...piece, gain: clip.gain }))
+          : [clip]
+        for (const piece of pieces) {
+          const asset = this.assetOf(piece.bufferId)
+          if (!asset) continue
+          const buffer = this.bufferFromAsset(ctx, asset)
+          this.scheduleAudioClip(ctx, strip, buffer, piece, ctxTime, timelineStart, timelineEnd)
+        }
       }
       for (const clip of track.midiClips) {
         if (clip.slotOnly) continue

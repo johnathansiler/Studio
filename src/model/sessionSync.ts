@@ -91,7 +91,10 @@ export function mediaCanCarryAssets(peers: Array<{ connection: string; outboundV
 export function referencedBufferIds(project: Project): string[] {
   const ids = new Set<string>()
   for (const track of project.tracks) {
-    for (const clip of track.clips) ids.add(clip.bufferId)
+    for (const clip of track.clips) {
+      ids.add(clip.bufferId)
+      for (const lane of clip.folder?.lanes || []) ids.add(lane.bufferId)
+    }
   }
   return [...ids]
 }
@@ -122,7 +125,24 @@ export function arrangementDigest(project: Project): string {
       mute: track.mute,
       solo: track.solo,
       color: track.color,
-      clips: track.clips.map((clip) => [clip.id, clip.bufferId, clip.startSample, clip.offsetSamples, clip.durationSamples, clip.gain, clip.quant ?? null, clip.mode ?? null, clip.loop ?? null, clip.warp ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null]),
+      clips: track.clips.map((clip) => [
+        clip.id,
+        clip.bufferId,
+        clip.startSample,
+        clip.offsetSamples,
+        clip.durationSamples,
+        clip.gain,
+        clip.quant ?? null,
+        clip.mode ?? null,
+        clip.loop ?? null,
+        clip.warp ?? null,
+        clip.follow ?? null,
+        clip.legato ?? null,
+        clip.slotOnly ?? null,
+        clip.folder?.activeCompId || '',
+        (clip.folder?.lanes || []).map((lane) => lane.bufferId).join(','),
+        (clip.folder?.comps.find((comp) => comp.id === clip.folder?.activeCompId)?.segments || []).map((segment) => `${segment.laneId}:${segment.startSample}:${segment.endSample}`).join('|'),
+      ]),
       midi: track.midiClips.map((clip) => [
         clip.id,
         clip.startBeat,
@@ -133,6 +153,8 @@ export function arrangementDigest(project: Project): string {
         clip.follow ?? null,
         clip.legato ?? null,
         clip.slotOnly ?? null,
+        clip.activeTakeId || '',
+        clip.takes?.length || 0,
         clip.notes.map((note) => `${note.startBeat}:${note.probability ?? ''}:${note.nudge ?? ''}:${note.condition ?? ''}:${note.locks ? JSON.stringify(note.locks) : ''}`).join(','),
       ]),
       audioSlots: track.audioSlots ?? null,

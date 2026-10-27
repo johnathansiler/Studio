@@ -1,5 +1,5 @@
 import type { AutomationLane, Insert, PluginInstance, Project, UserPreset } from '../../model/types'
-import { uid } from '../../model/types'
+import { defaultRecord, uid } from '../../model/types'
 import { normalizeScale } from '../../model/scale'
 import { normalizePadKit } from '../../model/padMachine'
 import type { FactoryPreset, ParamSpec, PluginDescriptor } from './types'
@@ -631,6 +631,7 @@ export function tuneLatency(sampleRate: number) {
 export function normalizeProject(project: Project): Project {
   project.scale = normalizeScale(project.scale)
   project.padKit = normalizePadKit(project.padKit)
+  project.record = { ...defaultRecord(project.loopEndSample || 0), ...(project.record || {}) }
   project.masterPlugins = project.masterPlugins ?? []
   project.automation = project.automation ?? []
   project.presets = project.presets ?? []
