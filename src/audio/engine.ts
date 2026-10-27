@@ -1105,7 +1105,7 @@ export class AudioEngine {
 
   /** Cached tempo-follow. A phone plays the pre-render instead of stretching on each launch. */
   private sessionWarp(buffer: AudioBuffer, audio: AudioClip, sampleRate: number, tempo: number): Float32Array[] {
-    const phone = typeof matchMedia === 'function' && matchMedia('(max-width: 940px)').matches
+    const phone = typeof matchMedia === 'function' && matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
     const key = `${audio.bufferId}:${audio.offsetSamples}:${audio.durationSamples}:${audio.durationBeats}:${sampleRate}:${tempo}`
     let pcm = this.warpPcm.get(key)
     if (!pcm) {
