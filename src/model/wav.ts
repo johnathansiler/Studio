@@ -7,6 +7,8 @@ export interface WavEncodeOptions {
   bits?: WavBits
   dither?: DitherMode
   random?: () => number
+  /** LIST/INFO comment. Used for the loudness report and ISRC. */
+  comment?: string
 }
 
 export function encodeWav(channels: Float32Array[], sampleRate: number, options?: WavEncodeOptions): ArrayBuffer {
@@ -55,7 +57,56 @@ export function encodeWav(channels: Float32Array[], sampleRate: number, options?
       }
     }
   }
-  return buffer
+  if (!options?.comment) return buffer
+  return appendComment(buffer, options.comment)
+}
+
+function appendComment(buffer: ArrayBuffer, comment: string) {
+  const text = new TextEncoder().encode(comment)
+  const dataSize = text.length + 1
+  const pad = dataSize % 2
+  const listSize = 4 + 8 + dataSize
+  const extra = 8 + listSize + pad
+  const out = new Uint8Array(buffer.byteLength + extra)
+  out.set(new Uint8Array(buffer))
+  const view = new DataView(out.buffer)
+  view.setUint32(4, out.length - 8, true)
+  let offset = buffer.byteLength
+  writeString(view, offset, 'LIST')
+  view.setUint32(offset + 4, listSize, true)
+  writeString(view, offset + 8, 'INFO')
+  writeString(view, offset + 12, 'ICMT')
+  view.setUint32(offset + 16, dataSize, true)
+  offset += 20
+  out.set(text, offset)
+  out[offset + text.length] = 0
+  return out.buffer
+}
+
+function quantize(sample: number, bits: 16 | 24, dither: DitherMode, random: () => number, error: { e: number }) {
+  const full = bits === 16 ? 0x8000 : 0x800000
+  const positive = full - 1
+  let s = Math.max(-1, Math.min(1, Number.isFinite(sample) ? sample : 0))
+  if (dither !== 'none') {
+    const quantum = 1 / positive
+    const noise = (random() - random()) * quantum
+    s += dither === 'shaped' ? noise - error.e : noise
+    s = Math.max(-1, Math.min(1, s))
+  }
+  const scaled = s < 0 ? s * full : s * positive
+  const code = Math.trunc(scaled)
+  const clamped = Math.max(-full, Math.min(positive, code))
+  if (dither === 'shaped') {
+    const decoded = clamped < 0 ? clamped / full : clamped / positive
+    error.e = decoded - (Number.isFinite(sample) ? sample : 0)
+  }
+  return clamped
+}
+
+function writeInt24(view: DataView, offset: number, value: number) {
+  view.setUint8(offset, value & 0xff)
+  view.setUint8(offset + 1, (value >> 8) & 0xff)
+  view.setUint8(offset + 2, (value >> 16) & 0xff)
 }
 
 function quantize(sample: number, bits: 16 | 24, dither: DitherMode, random: () => number, error: { e: number }) {
