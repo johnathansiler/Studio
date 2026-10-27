@@ -90,7 +90,10 @@ export function mediaCanCarryAssets(peers: Array<{ connection: string; outboundV
 export function referencedBufferIds(project: Project): string[] {
   const ids = new Set<string>()
   for (const track of project.tracks) {
-    for (const clip of track.clips) ids.add(clip.bufferId)
+    for (const clip of track.clips) {
+      ids.add(clip.bufferId)
+      for (const lane of clip.folder?.lanes || []) ids.add(lane.bufferId)
+    }
   }
   return [...ids]
 }
@@ -148,8 +151,11 @@ export function arrangementDigest(project: Project): string {
               clip.stretch.formant ? 1 : 0,
             ]
           : 0,
+        clip.folder?.activeCompId || '',
+        (clip.folder?.lanes || []).map((lane) => lane.bufferId).join(','),
+        (clip.folder?.comps.find((comp) => comp.id === clip.folder?.activeCompId)?.segments || []).map((segment) => `${segment.laneId}:${segment.startSample}:${segment.endSample}`).join('|'),
       ]),
-      midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length, clip.quant ?? null, clip.mode ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null]),
+      midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length, clip.quant ?? null, clip.mode ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null, clip.activeTakeId || '', clip.takes?.length || 0]),
       audioSlots: track.audioSlots ?? null,
       midiSlots: track.midiSlots ?? null,
       rack: track.rack?.devices.map((device) => [device.id, device.kind, device.params, device.pattern, device.zones.length]),
