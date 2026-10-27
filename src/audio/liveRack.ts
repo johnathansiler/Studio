@@ -24,6 +24,7 @@ export class LiveRack {
   cpu = 0
   quality: 'full' | 'eco' = 'full'
   clock: () => number = () => 0
+  assetOf: (id: string) => { channels: Float32Array[] } | undefined = () => undefined
   private project: Project | null = null
   private readonly taps = new Map<string, Tap>()
   private readonly processors = new Map<string, Processor>()
@@ -46,6 +47,11 @@ export class LiveRack {
 
   spectrum(pluginId: string) {
     return this.spectra.get(pluginId) ?? null
+  }
+
+  trigger(pluginId: string, note: number, vel: number) {
+    const proc = this.processors.get(pluginId) as Processor & { note?: (pitch: number, vel: number) => void }
+    proc?.note?.(note, vel)
   }
 
   isFailed(pluginId: string) {
@@ -167,6 +173,10 @@ export class LiveRack {
     const output = [event.outputBuffer.getChannelData(0), event.outputBuffer.getChannelData(1)]
     const beat = samplesToBeats(this.clock(), rate, project.tempo)
     const scale = scaleById(project.scale?.scale)
+    for (const plugin of plugins) {
+      const proc = this.processors.get(plugin.id) as Processor & { bind?: (plugin: PluginInstance, channel: (id: string) => Float32Array | null) => void }
+      proc?.bind?.(plugin, (id) => this.assetOf(id)?.channels[0] ?? null)
+    }
     const slots: ChainSlot[] = plugins.map((plugin) => ({
       id: plugin.id,
       pluginId: plugin.pluginId,

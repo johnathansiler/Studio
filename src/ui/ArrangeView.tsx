@@ -4,6 +4,7 @@ import { computePeaks } from '../model/demo'
 import { snapSample } from '../model/time'
 import type { AudioClip } from '../model/types'
 import type { ProjectStore } from '../state/store'
+import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 
@@ -202,6 +203,7 @@ export function ArrangeView({
         </div>
       </div>
       </div>
+      <StemSheet store={store} />
     </div>
   )
 }
@@ -244,8 +246,9 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
   }, [peaks, width])
 
   function pointerDown(event: ReactPointerEvent, mode: 'move' | 'start' | 'end') {
+    if (event.button === 2) return
     event.stopPropagation()
-    store.selectClip(trackId, clip.id)
+    store.selectClip(trackId, clip.id, false, false)
     const originX = event.clientX
     const originY = event.clientY
     let latest: AudioClip | null = null
@@ -278,6 +281,7 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
       }
       const next = latest
       setPreview(null)
+      if (held) return
       if (!next) return
       if (mode === 'move') store.moveClip(trackId, clip.id, next.startSample)
       if (mode === 'start') store.trimClip(trackId, clip.id, 'start', next.startSample)
@@ -294,6 +298,11 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
       className={`clip ${store.selectedClipId === clip.id ? 'selected' : ''}`}
       style={{ left, width, background: store.project.tracks.find((t) => t.id === trackId)?.color }}
       onPointerDown={(event) => pointerDown(event, 'move')}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        store.openStems(trackId, clip.id)
+      }}
     >
       <canvas ref={canvas} />
       <em>
@@ -304,6 +313,7 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
       {menu && (
         <div className="touch-menu" style={{ left: menu.x, top: menu.y }}>
           <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { onSplit(); setMenu(null) }}>Split</button>
+          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openStems(trackId, clip.id); setMenu(null) }}>Stems</button>
           <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setMenu(null) }}>Delete</button>
         </div>
       )}

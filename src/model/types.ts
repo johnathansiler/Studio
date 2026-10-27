@@ -2,6 +2,11 @@ import { defaultScale, type ScaleState } from './scale'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
 
+export interface SamplerState {
+  bufferId: string
+  root: number
+}
+
 export interface PluginInstance {
   id: string
   pluginId: string
@@ -11,6 +16,7 @@ export interface PluginInstance {
   params: Record<string, number>
   /** Sidechain source track or bus id. Empty uses the plugin input. */
   sidechain: string
+  sampler?: SamplerState
 }
 
 export interface Send {

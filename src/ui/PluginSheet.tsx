@@ -79,6 +79,18 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
         </select>
       )}
       {plugin.pluginId === 'eq' && <canvas ref={canvas} width={320} height={64} className="spectrum" />}
+      {plugin.pluginId === 'sampler' && (
+        <div className="stem-keys">
+          {['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C'].map((label, index) => {
+            const note = [60, 62, 64, 65, 67, 69, 71, 72][index]
+            return (
+              <button key={label + index} type="button" className="text-btn" onClick={() => engine.previewSample(plugin.id, note)}>
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      )}
       <div className="knobs">
         {spec.params.map((param) => (
           <label key={param.id}>

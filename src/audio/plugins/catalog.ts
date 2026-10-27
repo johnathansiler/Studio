@@ -149,6 +149,12 @@ export const CATALOG: PluginDescriptor[] = [
     ],
   },
   {
+    id: 'sampler',
+    name: 'Sampler',
+    version: VERSION,
+    params: [param('gain', 'Gain', 0, 1, 0.8, '')],
+  },
+  {
     id: 'pitch',
     name: 'Pitch',
     version: VERSION,
@@ -244,6 +250,7 @@ export function createPlugin(pluginId: string, preset?: string): PluginInstance 
     wet: 1,
     params,
     sidechain: '',
+    sampler: pluginId === 'sampler' ? { bufferId: '', root: 60 } : undefined,
   }
 }
 
