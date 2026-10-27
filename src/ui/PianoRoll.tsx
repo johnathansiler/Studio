@@ -10,6 +10,7 @@ import {
   paintCc,
   paintChords,
   paintNotes,
+  quantizeNotes,
   sliceNote,
   strumSelection,
   type RollTool,
@@ -113,6 +114,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
       const tools: Record<string, RollTool> = { '1': 'paint', '2': 'brush', '3': 'pen', '4': 'slice', '5': 'glue', '6': 'mute', '7': 'erase', '8': 'velocity', '9': 'cc' }
       if (tools[event.key]) store.setRollTool(tools[event.key])
+      else if (event.key === 'q' && !event.metaKey && !event.ctrlKey) quantize()
       else if (event.key === 'a' && !event.metaKey && !event.ctrlKey) arpeggiate()
       else if (event.key === 'u' && !event.metaKey && !event.ctrlKey) strum()
       else if (event.key === 'h' && !event.metaKey && !event.ctrlKey) humanize()
@@ -135,6 +137,13 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   function withNotes(next: MidiNote[]) {
     store.replaceNotes(track!.id, clip!.id, next)
   }
+
+  function quantize() {
+    if (!clip) return
+    const ids = store.selectedNoteIds.length ? store.selectedNoteIds : undefined
+    withNotes(quantizeNotes(clip.notes, roll.grid, ids).map((note) => ({ ...note, id: note.id || uid('note') })))
+  }
+
 
   function arpeggiate() {
     if (!clip) return
@@ -277,6 +286,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
           <option value="0.5">1/8</option>
           <option value="1">1/4</option>
         </select>
+        <button type="button" onClick={quantize}>Quantize</button>
         <button type="button" onClick={arpeggiate}>Arp</button>
         <button type="button" onClick={strum}>Strum</button>
       </div>
