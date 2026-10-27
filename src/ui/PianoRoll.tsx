@@ -204,7 +204,7 @@ export function PianoRoll({ store, engine }: { store: ProjectStore; engine: Audi
                     nextPitch = Math.max(0, Math.min(127, originPitch + Math.round((originY - ev.clientY) / row)))
                     const node = event.currentTarget as HTMLDivElement
                     node.style.left = `${next * pxBeat}px`
-                    node.style.top = `${(high - nextPitch) * 16}px`
+                    node.style.top = `${(high - nextPitch) * row}px`
                   }
                   const up = () => {
                     window.removeEventListener('pointermove', move)
