@@ -1,7 +1,7 @@
 import type { AudioAsset, Project } from '../model/types'
 
 export interface WorkspaceSnapshot {
-  view: 'arrange' | 'mix' | 'session'
+  view: 'arrange' | 'mix' | 'session' | 'beats'
   transportMode: 'arrangement' | 'session'
   positionSamples: number
   selectedTrackId: string | null

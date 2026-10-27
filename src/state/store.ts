@@ -18,9 +18,20 @@ import {
   type SessionClock,
   type TransportSlot,
 } from '../model/launch'
+import type { RollTool } from '../model/paint'
+import { defaultRoll } from '../model/paint'
 import { progressionById, romanLine, starterParts } from '../model/progressions'
 import { cloneRack, defaults, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleState } from '../model/scale'
+import {
+  clonePattern,
+  fillEvery,
+  humanizeCells,
+  randomizeCells,
+  renderPattern,
+  shiftCells,
+  type StepCell,
+} from '../model/steps'
 import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK_COLORS } from '../model/types'
 import type { AudioAsset, AudioClip, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, MidiClip, MidiNote, PluginInstance, Project, RecordSettings, TakeLane, Track } from '../model/types'
 import { beatsToSamples, quartersPerBar, samplesToBeats } from '../model/time'
@@ -40,7 +51,7 @@ import {
   type SequenceNote,
 } from '../model/padMachine'
 
-export type WorkspaceView = 'arrange' | 'mix' | 'session'
+export type WorkspaceView = 'arrange' | 'mix' | 'session' | 'beats'
 
 export interface Toast {
   id: string
@@ -78,10 +89,12 @@ export class ProjectStore {
   private tempoGroup = false
   toasts: Toast[] = []
   version = 0
+  rowClipboard: StepCell[] | null = null
   private past: string[] = []
   private future: string[] = []
   private listeners = new Set<Listener>()
   private takeUndo: { trackId: string; clipId: string; notes: MidiNote[]; durationBeats: number } | null = null
+  private drafted = false
 
   /** Open plugin sheet. Not saved with the project. */
   pluginFocus: { trackId: string; pluginId: string } | null = null
@@ -120,9 +133,25 @@ export class ProjectStore {
 
   private mutate(fn: () => void) {
     if (this.remoteFollow) return
+    this.drafted = false
     this.snapshot()
     fn()
     this.emit()
+  }
+
+  /** One undo step for a drag. The first call snapshots; later calls only edit. */
+  draft(fn: () => void) {
+    if (this.remoteFollow) return
+    if (!this.drafted) {
+      this.snapshot()
+      this.drafted = true
+    }
+    fn()
+    this.emit()
+  }
+
+  endDraft() {
+    this.drafted = false
   }
 
   undo() {
@@ -833,10 +862,34 @@ export class ProjectStore {
     })
   }
 
-  setStep(trackId: string, clipId: string, pitch: number, step: number, patch: Partial<MidiNote> & { lock?: { param: string; value: number } }) {
+  setStep(trackId: string, clipId: string, pitch: number, step: number, patch: Partial<MidiNote> & { lock?: { param: string; value: number } }): void
+  setStep(channelId: string, index: number, on: boolean): void
+  setStep(
+    a: string,
+    b: string | number,
+    c: number | boolean,
+    step?: number,
+    patch?: Partial<MidiNote> & { lock?: { param: string; value: number } },
+  ) {
+    if (typeof b === 'number' && typeof c === 'boolean') {
+      const channelId = a
+      const index = b
+      const on = c
+      this.draft(() => {
+        const pattern = this.activePattern()
+        const channel = pattern?.channels.find((row) => row.id === channelId)
+        const cell = channel?.cells[index]
+        if (!cell) return
+        cell.on = on
+      })
+      return
+    }
+    const trackId = a
+    const clipId = b as string
+    const pitch = c as number
     this.mutate(() => {
       const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
-      if (!clip) return
+      if (!clip || step == null || !patch) return
       const beat = step / 4
       const note = clip.notes.find((item) => item.pitch === pitch && Math.abs(item.startBeat - (item.nudge || 0) - beat) < 0.02)
       if (!note) return
@@ -1746,6 +1799,251 @@ export class ProjectStore {
       if (clip) return { track, clip }
     }
     return null
+  }
+
+  activePattern() {
+    const beats = this.project.beats
+    return beats?.patterns.find((pattern) => pattern.id === beats.activeId) ?? beats?.patterns[0] ?? null
+  }
+
+  selectPattern(id: string) {
+    this.mutate(() => {
+      if (this.project.beats?.patterns.some((pattern) => pattern.id === id)) this.project.beats.activeId = id
+    })
+  }
+
+  renamePattern(name: string) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (pattern && name.trim()) pattern.name = name.trim()
+    })
+  }
+
+  recolorPattern(color: string) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (pattern) pattern.color = color
+    })
+  }
+
+  cloneActivePattern() {
+    this.mutate(() => {
+      const beats = this.project.beats
+      const pattern = this.activePattern()
+      if (!beats || !pattern) return
+      const copy = clonePattern(pattern, `${pattern.name} copy`)
+      beats.patterns.push(copy)
+      beats.activeId = copy.id
+    })
+  }
+
+  setPatternSteps(steps: number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (pattern) pattern.steps = Math.max(1, Math.min(64, Math.round(steps)))
+    })
+  }
+
+  setPatternSwing(swing: number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (pattern) pattern.swing = Math.max(0, Math.min(0.9, swing))
+    })
+  }
+
+  editChannel(channelId: string, fn: (cells: StepCell[], count: number) => StepCell[] | void, draft = false) {
+    const run = (body: () => void) => (draft ? this.draft(body) : this.mutate(body))
+    run(() => {
+      const pattern = this.activePattern()
+      const channel = pattern?.channels.find((row) => row.id === channelId)
+      if (!pattern || !channel) return
+      const count = channel.steps || pattern.steps
+      const next = fn(channel.cells, count)
+      if (next) channel.cells = next
+    })
+  }
+
+  editStep(channelId: string, index: number, patch: Partial<Pick<StepCell, 'velocity' | 'pan' | 'pitch' | 'fine' | 'gate'>>) {
+    this.mutate(() => {
+      const cell = this.activePattern()?.channels.find((row) => row.id === channelId)?.cells[index]
+      if (!cell) return
+      if (patch.velocity != null) cell.velocity = Math.max(0.05, Math.min(1, patch.velocity))
+      if (patch.pan != null) cell.pan = Math.max(-1, Math.min(1, patch.pan))
+      if (patch.pitch != null) cell.pitch = Math.max(-48, Math.min(48, Math.round(patch.pitch)))
+      if (patch.fine != null) cell.fine = Math.max(-100, Math.min(100, patch.fine))
+      if (patch.gate != null) cell.gate = Math.max(0.05, Math.min(1, patch.gate))
+    })
+  }
+
+  setChannel(channelId: string, patch: Partial<{ volume: number; pan: number; mute: boolean; solo: boolean; output: string | null; steps: number; swing: number | null; name: string }>) {
+    this.mutate(() => {
+      const channel = this.activePattern()?.channels.find((row) => row.id === channelId)
+      if (!channel) return
+      Object.assign(channel, patch)
+      if (patch.steps != null) channel.steps = Math.max(1, Math.min(64, Math.round(patch.steps)))
+    })
+  }
+
+  fillChannel(every: number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (!pattern) return
+      for (const channel of pattern.channels) {
+        const count = channel.steps || pattern.steps
+        channel.cells = fillEvery(channel.cells, every, count)
+      }
+    })
+  }
+
+  randomizePattern(rng?: () => number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (!pattern) return
+      for (const channel of pattern.channels) channel.cells = randomizeCells(channel.cells, channel.steps || pattern.steps, rng)
+    })
+  }
+
+  humanizePattern(rng?: () => number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (!pattern) return
+      for (const channel of pattern.channels) channel.cells = humanizeCells(channel.cells, channel.steps || pattern.steps, 0.45, rng)
+    })
+  }
+
+  shiftPattern(direction: number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (!pattern) return
+      for (const channel of pattern.channels) channel.cells = shiftCells(channel.cells, channel.steps || pattern.steps, direction)
+    })
+  }
+
+  copyRow(channelId: string) {
+    const channel = this.activePattern()?.channels.find((row) => row.id === channelId)
+    if (!channel) return
+    const count = channel.steps || this.activePattern()?.steps || 16
+    this.rowClipboard = channel.cells.slice(0, count).map((cell) => ({ ...cell }))
+    this.emit()
+  }
+
+  pasteRow(channelId: string) {
+    if (!this.rowClipboard) return
+    const clip = this.rowClipboard
+    this.editChannel(channelId, (cells, count) => cells.map((cell, index) => (index < count && clip[index] ? { ...clip[index] } : cell)))
+  }
+
+  placePattern(startBeat: number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (!pattern || !this.project.patternClips) return
+      this.project.patternClips.push({
+        id: uid('pcl'),
+        patternId: pattern.id,
+        startBeat: Math.max(0, startBeat),
+        lengthBeats: (pattern.steps * 0.25),
+        scene: null,
+      })
+    })
+  }
+
+  placePatternScene(scene: number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      const track = this.project.tracks.find((item) => item.type === 'midi')
+      if (!pattern || !track) return
+      const length = pattern.steps * 0.25
+      const existing = track.midiClips.find((clip) => clip.patternId === pattern.id && clip.scene === scene)
+      if (existing) {
+        this.selectedMidiClipId = existing.id
+        return
+      }
+      const clip: MidiClip = {
+        id: uid('midi'),
+        name: pattern.name,
+        startBeat: 0,
+        durationBeats: length,
+        notes: [],
+        patternId: pattern.id,
+        scene,
+      }
+      track.midiClips.push(clip)
+      this.selectedMidiClipId = clip.id
+      this.selectedTrackId = track.id
+    })
+  }
+
+  openChannelRoll(channelId: string) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      const channel = pattern?.channels.find((row) => row.id === channelId)
+      const track = this.project.tracks.find((item) => item.type === 'midi')
+      if (!pattern || !channel || !track) return
+      let clip = track.midiClips.find((item) => item.channelId === channelId && item.scene == null)
+      if (!clip) {
+        const hits = renderPattern({ ...pattern, channels: [{ ...channel, mute: false, solo: false }] }, 0, pattern.steps * 0.25)
+        clip = {
+          id: uid('midi'),
+          name: channel.name,
+          startBeat: 0,
+          durationBeats: Math.max(1, pattern.steps * 0.25),
+          channelId,
+          notes: hits.map((hit) => ({
+            id: uid('note'),
+            pitch: hit.pitch,
+            startBeat: hit.startBeat,
+            durationBeats: hit.durationBeats,
+            velocity: hit.velocity,
+            pan: hit.pan,
+            fine: hit.fine,
+          })),
+        }
+        track.midiClips.push(clip)
+      }
+      this.selectedMidiClipId = clip.id
+      this.selectedTrackId = track.id
+      this.view = 'beats'
+    })
+  }
+
+  setRoll(patch: Partial<{ tool: RollTool; grid: number; length: number; velocity: number }>) {
+    this.mutate(() => {
+      this.project.roll = { ...defaultRoll(), ...this.project.roll, ...patch }
+    })
+  }
+
+  setRollTool(tool: RollTool) {
+    const memory = this.project.roll ?? defaultRoll()
+    if (memory.tool === tool) return
+    this.project.roll = { ...memory, tool }
+    this.emit()
+  }
+
+  replaceNotes(trackId: string, clipId: string, notes: MidiNote[]) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      clip.notes = notes
+      const memory = this.project.roll ?? defaultRoll()
+      const last = notes[notes.length - 1]
+      if (last) this.project.roll = { ...memory, length: last.durationBeats, velocity: last.velocity }
+    })
+  }
+
+  mutateAutomation(id: string, pluginId: string, points: { beat: number; value: number }[]) {
+    this.mutate(() => {
+      let lane = this.project.automation.find((item) => item.id === id)
+      if (!lane) {
+        lane = { id, pluginId, param: 'expression', points: [] }
+        this.project.automation.push(lane)
+      }
+      lane.points = points
+    })
+  }
+
+  rememberPen(length: number, velocity: number) {
+    const memory = this.project.roll ?? defaultRoll()
+    this.project.roll = { ...memory, length, velocity }
   }
 
   recordSettings(): RecordSettings & { quantizeBeats: number } {

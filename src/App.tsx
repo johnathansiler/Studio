@@ -19,6 +19,7 @@ import { beatsToSamples, countInSeconds, samplesToBeats } from './model/time'
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { TunerPop } from './ui/AmpPop'
 import { ArrangeView } from './ui/ArrangeView'
+import { BeatView } from './ui/BeatView'
 import { ExportSheet } from './ui/ExportSheet'
 import { formFactor, type FormFactor } from './ui/form'
 import { PerformPop } from './ui/PerformPop'
@@ -1008,7 +1009,7 @@ async function importDropped(files: FileList) {
   }
 
   const armedTrack = store.sessionSlot ? store.project.tracks.find((track) => track.id === store.sessionSlot?.trackId) : undefined
-  const showRoll = !!store.selectedMidiClipId && !pianoOpen && (store.view === 'arrange' || (store.view === 'session' && armedTrack?.type === 'midi'))
+  const showRoll = !!store.selectedMidiClipId && !pianoOpen && (store.view === 'arrange' || store.view === 'beats' || (store.view === 'session' && armedTrack?.type === 'midi'))
 
   function openPiano(trackId: string, clipId?: string) {
     const beat = samplesToBeats(engine.positionSamples, store.project.sampleRate, store.project.tempo)
@@ -1048,7 +1049,7 @@ async function importDropped(files: FileList) {
         <input className="project-name" value={store.project.name} onChange={(event) => store.renameProject(event.target.value)} />
         {!phone && (
           <div className="views">
-            {(['arrange', 'mix', 'session'] as const).map((view) => (
+            {(['arrange', 'mix', 'beats', 'session'] as const).map((view) => (
               <button key={view} className={store.view === view ? 'active' : ''} onClick={() => { setSurface('studio'); store.setView(view) }}>
                 {view}
               </button>
@@ -1077,6 +1078,7 @@ async function importDropped(files: FileList) {
           <div className="phone-menu">
             <button className="text-btn" id="menu-save" onClick={() => { setMenuOpen(false); void openProjects() }}>Save</button>
             <button className="text-btn" id="menu-export" onClick={() => { setMenuOpen(false); setExportOpen(true) }}>Export</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('beats') }}>Beats</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }}>Clips</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setHelp(true) }}>Shortcuts</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setSurface(surface === 'studio' ? 'artist' : 'studio'); setPhonePane('room') }}>
@@ -1117,6 +1119,7 @@ async function importDropped(files: FileList) {
                 />
               )}
               {store.view === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} />}
+              {store.view === 'beats' && <BeatView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} engine={engine} />}
             </div>
             {store.view === 'arrange' && store.rackTrackId && form !== 'fold' && <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />}
@@ -1199,6 +1202,7 @@ async function importDropped(files: FileList) {
         <nav className="phone-tabs" aria-label="Sections">
           <button className={phonePane === 'edit' && store.view === 'arrange' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setMenuOpen(false) }}>Arrange</button>
           <button className={phonePane === 'edit' && store.view === 'mix' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('mix'); setMenuOpen(false) }}>Mix</button>
+          <button className={phonePane === 'edit' && store.view === 'beats' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('beats'); setMenuOpen(false) }}>Beats</button>
           <button className={phonePane === 'room' ? 'active' : ''} onClick={() => { setPhonePane('room'); setSurface('studio'); setMenuOpen(false) }}>Session</button>
         </nav>
       )}
