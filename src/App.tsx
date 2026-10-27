@@ -1,28 +1,32 @@
 import { useEffect, useRef, useState } from 'react'
+import { applyFreeze } from './audio/bounce'
 import { AudioEngine } from './audio/engine'
+import { unpackProject } from './model/archive'
 import { renderDemoLoop } from './model/demo'
-import { isLocalInput, uid, type AudioClip } from './model/types'
+import { createEmptyProject, isLocalInput, uid, type AudioClip } from './model/types'
 import type { IncomingTake } from './remote/session'
 import { SessionClient } from './remote/session'
-import { listProjects, loadLastProject, loadProject, requestPersistentStorage, saveProject, base64ToBytes, bytesToBase64, type WorkspaceSnapshot } from './storage/idb'
+import { deleteProject, listProjects, listSnapshots, loadLastProject, loadProject, loadSnapshot, requestPersistentStorage, saveProject, storageReport, type ProjectListItem, type WorkspaceSnapshot } from './storage/idb'
 import { inviteWins } from './model/negotiate'
 import { readIdentity, writeIdentity } from './storage/identity'
 import { ProjectStore, seedDemoProject } from './state/store'
-import { decodeWavPCM, encodeWav, linearResample } from './model/wav'
+import { linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
 import { beatsToSamples, countInSeconds, samplesToBeats } from './model/time'
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { ArrangeView } from './ui/ArrangeView'
+import { ExportSheet } from './ui/ExportSheet'
+import { formFactor, type FormFactor } from './ui/form'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
 import { PianoRoll } from './ui/PianoRoll'
+import { ProjectSheet } from './ui/ProjectSheet'
 import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
 import { VideoDock } from './ui/VideoDock'
-import { downloadBlob } from './ui/format'
-import { formFactor, type FormFactor } from './ui/form'
+import { formatBytes } from './ui/share'
 
 interface Bundle {
   store: ProjectStore
@@ -57,8 +61,13 @@ export function App() {
   const [joinOpen, setJoinOpen] = useState(false)
   const [joinCode, setJoinCode] = useState('')
   const [joinName, setJoinName] = useState(store.project.name ? localStorage.getItem('cueharbor-name') || 'Artist' : 'Artist')
-  const [saved, setSaved] = useState<{ id: string; name: string; savedAt: number }[]>([])
-  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [projects, setProjects] = useState<ProjectListItem[]>([])
+  const [snapshots, setSnapshots] = useState<{ key: string; savedAt: number }[]>([])
+  const [projectsOpen, setProjectsOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [draftName, setDraftName] = useState(store.project.name)
+  const [usage, setUsage] = useState('')
+  const [persisted, setPersisted] = useState(true)
   const [help, setHelp] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight))
@@ -230,9 +239,12 @@ export function App() {
       surface: surfaceRef.current,
       phonePane: phonePaneRef.current,
     })
-    const write = () => {
+    let lastSnapshot = 0
+    const write = (forceSnapshot = false) => {
       if (!saveReady.current || cancel) return
-      void saveProject(store.project, store.buffers, snapshot()).then((result) => {
+      const snap = forceSnapshot || Date.now() - lastSnapshot > 20000
+      if (snap) lastSnapshot = Date.now()
+      void saveProject(store.project, store.buffers, snapshot(), { snapshot: snap }).then((result) => {
         if (result === 'quota' && Date.now() - lastQuota > 15000) {
           lastQuota = Date.now()
           store.toast('This browser is out of space, so the latest recording could not be kept.', 'warn')
@@ -265,7 +277,7 @@ export function App() {
     const unsub = store.subscribe(schedule)
     const flush = () => {
       window.clearTimeout(timer)
-      write()
+      write(true)
     }
     flushSave.current = flush
     const onVisible = () => {
@@ -700,23 +712,31 @@ export function App() {
     })
   }
 
-  async function bounce() {
-    await ready()
-    const wav = await engine.exportMix(store.project, store.buffers)
-    downloadBlob(`${store.project.name.replace(/\s+/g, '-').toLowerCase()}.wav`, new Blob([wav], { type: 'audio/wav' }))
-    store.toast('Mix bounced to WAV.', 'good')
-  }
-
-  async function persist() {
-    const result = await saveProject(store.project, store.buffers, {
+  function workspaceNow(): WorkspaceSnapshot {
+    return {
       view: store.view,
       transportMode: store.transportMode,
       positionSamples: Math.round(engine.positionSamples),
       selectedTrackId: store.selectedTrackId,
       surface,
       phonePane,
-    })
+    }
+  }
+
+  async function persist() {
+    const result = await saveProject(store.project, store.buffers, workspaceNow(), { snapshot: true })
     store.toast(result === 'quota' ? 'This browser is out of space, so the project could not be kept.' : 'Saved in this browser.', result === 'quota' ? 'warn' : 'good')
+  }
+
+  async function openProjects() {
+    setDraftName(store.project.name)
+    setProjects(await listProjects())
+    setSnapshots(await listSnapshots(store.project.id))
+    const report = await storageReport()
+    setUsage(formatBytes(report.used))
+    setPersisted(report.persisted)
+    setProjectsOpen(true)
+    void requestPersistentStorage()
   }
 
   function joinSession() {
@@ -728,20 +748,15 @@ export function App() {
     setPhonePane('room')
   }
 
-  async function openLibrary() {
-    setSaved(await listProjects())
-    setLibraryOpen(true)
-  }
-
-  function exportFile() {
-    const assets = [...store.buffers.values()].map((asset) => ({
-      id: asset.id,
-      name: asset.name,
-      sampleRate: asset.sampleRate,
-      wav: bytesToBase64(new Uint8Array(encodeWav(asset.channels, asset.sampleRate))),
-    }))
-    const blob = new Blob([JSON.stringify({ project: store.project, assets })], { type: 'application/json' })
-    downloadBlob(`${store.project.name.replace(/\s+/g, '-').toLowerCase()}.cueharbor.json`, blob)
+  function saveAs(name: string) {
+    const copy = JSON.parse(JSON.stringify(store.project)) as typeof store.project
+    copy.id = uid('prj')
+    copy.name = name || store.project.name
+    const buffers = new Map(store.buffers)
+    void saveProject(copy, buffers, workspaceNow(), { snapshot: true }).then(() => {
+      store.loadProject(copy, buffers)
+      void openProjects()
+    })
   }
 
   async function importAudio(files: FileList | null) {
@@ -771,17 +786,22 @@ export function App() {
 
   async function importProject(file: File | null) {
     if (!file) return
-    const parsed = JSON.parse(await file.text()) as {
-      project: Bundle['store']['project']
-      assets: { id: string; name: string; sampleRate: number; wav: string }[]
-    }
-    const buffers = new Map()
-    for (const asset of parsed.assets) {
-      const decoded = decodeWavPCM(base64ToBytes(asset.wav).buffer as ArrayBuffer)
-      buffers.set(asset.id, { id: asset.id, name: asset.name, sampleRate: decoded.sampleRate, channels: decoded.channels })
-    }
-    store.loadProject(parsed.project, buffers)
+    const loaded = await unpackProject(new Uint8Array(await file.arrayBuffer()))
+    const buffers = new Map(loaded.assets.map((asset) => [asset.id, asset]))
+    store.loadProject(loaded.project, buffers)
     await ready()
+  }
+
+async function importDropped(files: FileList) {
+    const list = [...files]
+    const projectFile = list.find((file) => /\.cueharbor$|\.json$/i.test(file.name))
+    if (projectFile) {
+      await importProject(projectFile)
+      return
+    }
+    const transfer = new DataTransfer()
+    for (const file of list) transfer.items.add(file)
+    await importAudio(transfer.files)
   }
 
   const armedTrack = store.sessionSlot ? store.project.tracks.find((track) => track.id === store.sessionSlot?.trackId) : undefined
@@ -797,7 +817,19 @@ export function App() {
   }
 
   return (
-    <div className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''}`} style={{ ['--dock' as string]: `${dock}px` }} data-version={version} data-form={form}>
+    <div
+      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''}`}
+      style={{ ['--dock' as string]: `${dock}px` }}
+      data-version={version}
+      data-form={form}
+      onDragOver={(event) => {
+        if ([...event.dataTransfer.types].includes('Files')) event.preventDefault()
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        if (event.dataTransfer.files.length) void importDropped(event.dataTransfer.files)
+      }}
+    >
       <header className="topbar">
         <div className="brand">
           <div className="mark" aria-hidden>
@@ -827,12 +859,8 @@ export function App() {
           </button>
         ) : (
           <div className="top-actions">
-            <button className="text-btn" onClick={() => void persist()}>Save</button>
-            <button className="text-btn" onClick={() => void openLibrary()}>Library</button>
-            <button className="text-btn" onClick={exportFile}>File</button>
-            <button className="text-btn" onClick={() => projectFileRef.current?.click()}>Open</button>
-            <button className="text-btn" onClick={() => fileRef.current?.click()}>Import</button>
-            <button className="text-btn" onClick={() => void bounce()}>Bounce</button>
+            <button className="text-btn" onClick={() => void openProjects()}>Save</button>
+            <button className="text-btn" id="menu-export" onClick={() => setExportOpen(true)}>Export</button>
             <button className="text-btn" onClick={() => setHelp(true)} title="Shortcuts" aria-label="Shortcuts">?</button>
             <button className="text-btn" aria-label={surface === 'studio' ? 'Artist view' : 'Studio'} onClick={() => setSurface(surface === 'studio' ? 'artist' : 'studio')}>
               {surface === 'studio' ? 'Artist' : 'Studio'}
@@ -844,12 +872,8 @@ export function App() {
         )}
         {compact && menuOpen && (
           <div className="phone-menu">
-            <button className="text-btn" onClick={() => { setMenuOpen(false); void persist() }}>Save</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); void openLibrary() }}>Library</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); exportFile() }}>File</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); projectFileRef.current?.click() }}>Open</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); fileRef.current?.click() }}>Import</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); void bounce() }}>Bounce</button>
+            <button className="text-btn" id="menu-save" onClick={() => { setMenuOpen(false); void openProjects() }}>Save</button>
+            <button className="text-btn" id="menu-export" onClick={() => { setMenuOpen(false); setExportOpen(true) }}>Export</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }}>Clips</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setHelp(true) }}>Shortcuts</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setSurface(surface === 'studio' ? 'artist' : 'studio'); setPhonePane('room') }}>
@@ -952,7 +976,7 @@ export function App() {
         </nav>
       )}
       <input ref={fileRef} type="file" accept="audio/*" multiple hidden onChange={(event) => void importAudio(event.target.files)} />
-      <input ref={projectFileRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importProject(event.target.files?.[0] || null)} />
+      <input ref={projectFileRef} type="file" accept=".cueharbor,.json,application/json,application/zip" hidden onChange={(event) => void importProject(event.target.files?.[0] || null)} />
       {session.state.audioLocked && session.state.status !== 'idle' && session.state.status !== 'error' && (
         <button type="button" className="text-btn primary tap-reconnect" id="tap-reconnect" onClick={() => {
           engine.unlock()
@@ -979,33 +1003,72 @@ export function App() {
           </div>
         </div>
       )}
-      {libraryOpen && (
-        <div className="modal-back">
-          <div className="modal">
-            <h2>Browser library</h2>
-            <div className="stack">
-              {saved.length === 0 && <p>Nothing saved yet.</p>}
-              {saved.map((item) => (
-                <button
-                  key={item.id}
-                  className="text-btn"
-                  onClick={() => {
-                    void loadProject(item.id).then((loaded) => {
-                      if (!loaded) return
-                      store.loadProject(loaded.project, loaded.buffers)
-                      setLibraryOpen(false)
-                    })
-                  }}
-                >
-                  {item.name}
-                </button>
-              ))}
-              <div className="row-btns">
-                <button className="text-btn" onClick={() => setLibraryOpen(false)}>Close</button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {projectsOpen && (
+        <ProjectSheet
+          projects={projects}
+          snapshots={snapshots}
+          usage={usage}
+          persisted={persisted}
+          name={draftName}
+          onName={setDraftName}
+          onClose={() => setProjectsOpen(false)}
+          onNew={() => {
+            store.loadProject(createEmptyProject(engine.sampleRate), new Map())
+            setProjectsOpen(false)
+          }}
+          onSave={() => void persist()}
+          onSaveAs={() => saveAs(draftName)}
+          onRename={() => {
+            store.renameProject(draftName)
+            void persist()
+          }}
+          onDuplicate={() => saveAs(`${store.project.name} copy`)}
+          onDelete={(id) => {
+            void deleteProject(id).then(async () => {
+              const next = await listProjects()
+              setProjects(next)
+              if (id === store.project.id) {
+                if (next[0]) {
+                  const loaded = await loadProject(next[0].id)
+                  if (loaded) store.loadProject(loaded.project, loaded.buffers)
+                } else store.loadProject(createEmptyProject(engine.sampleRate), new Map())
+              }
+            })
+          }}
+          onOpen={(id) => {
+            void loadProject(id).then((loaded) => {
+              if (!loaded) return
+              store.loadProject(loaded.project, loaded.buffers)
+              setProjectsOpen(false)
+            })
+          }}
+          onRevert={(key) => {
+            void loadSnapshot(key).then(async (loaded) => {
+              if (!loaded) return
+              await saveProject(loaded.project, loaded.buffers, loaded.workspace, { snapshot: true })
+              store.loadProject(loaded.project, loaded.buffers)
+              setProjectsOpen(false)
+            })
+          }}
+          onAudio={() => fileRef.current?.click()}
+          onKeep={() => void requestPersistentStorage().then(() => storageReport().then((report) => setPersisted(report.persisted)))}
+        />
+      )}
+      {exportOpen && (
+        <ExportSheet
+          store={store}
+          phone={phone || form === 'fold'}
+          onClose={() => setExportOpen(false)}
+          onFreeze={(audio, start) => {
+            const source = store.selectedTrackId
+            if (!source) return
+            const next = applyFreeze(store.project, store.buffers, source, audio, start)
+            store.replace(next.project, next.buffers)
+            const created = next.project.tracks.find((track) => track.name.endsWith(' bounce'))
+            if (created) store.selectTrack(created.id)
+            setExportOpen(false)
+          }}
+        />
       )}
       {help && (
         <div className="modal-back" onClick={() => setHelp(false)}>

@@ -853,6 +853,13 @@ export class ProjectStore {
     this.emit()
   }
 
+  replace(project: Project, buffers?: Map<string, AudioAsset>) {
+    this.mutate(() => {
+      this.project = project
+      if (buffers) this.buffers = buffers
+    })
+  }
+
   enterSession() {
     if (this.remoteFollow) return
     this.transportMode = 'session'
