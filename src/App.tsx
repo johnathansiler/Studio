@@ -17,6 +17,7 @@ import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
 import { beatsToSamples, countInSeconds, samplesToBeats } from './model/time'
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
+import { TunerPop } from './ui/AmpPop'
 import { ArrangeView } from './ui/ArrangeView'
 import { ExportSheet } from './ui/ExportSheet'
 import { formFactor, type FormFactor } from './ui/form'
@@ -81,6 +82,7 @@ export function App() {
   const compact = form !== 'desk'
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
   const [pianoOpen, setPianoOpen] = useState(false)
+  const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
   const [perform, setPerform] = useState<'keys' | 'drums' | null>(null)
@@ -249,14 +251,30 @@ export function App() {
   }, [store, engine, session])
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('ideas') !== '1') return
-    const track = store.project.tracks.find((item) => item.type === 'midi')
-    if (track && !track.midiClips.length) store.addMidiClip(track.id, 0)
-    if (track) store.selectTrack(track.id)
-    store.setView('arrange')
-    setSurface('studio')
-    setPhonePane('edit')
-    setIdeasOpen(true)
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('board') === '1') {
+      const track = store.project.tracks.find((item) => item.type === 'audio')
+      if (track) {
+        let plugin = track.plugins.find((item) => item.pluginId === 'amp')
+        if (!plugin) {
+          store.addPlugin(track.id, 'amp', 'Glass Room')
+          plugin = store.track(track.id)?.plugins.find((item) => item.pluginId === 'amp')
+        }
+        if (plugin) store.focusPlugin(track.id, plugin.id)
+        store.setView('mix')
+        setSurface('studio')
+        setPhonePane('edit')
+      }
+    }
+    if (params.get('ideas') === '1') {
+      const track = store.project.tracks.find((item) => item.type === 'midi')
+      if (track && !track.midiClips.length) store.addMidiClip(track.id, 0)
+      if (track) store.selectTrack(track.id)
+      store.setView('arrange')
+      setSurface('studio')
+      setPhonePane('edit')
+      setIdeasOpen(true)
+    }
   }, [store])
 
   useEffect(() => {
@@ -1098,7 +1116,7 @@ async function importDropped(files: FileList) {
                   onQuickPunch={() => void quickPunch()}
                 />
               )}
-              {store.view === 'mix' && <MixerView store={store} engine={engine} />}
+              {store.view === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} />}
               {store.view === 'session' && <SessionView store={store} engine={engine} />}
             </div>
             {store.view === 'arrange' && store.rackTrackId && form !== 'fold' && <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />}
@@ -1165,6 +1183,7 @@ async function importDropped(files: FileList) {
           <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />
         </div>
       )}
+      {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
       {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}
       {perform && (
         <PerformPop
