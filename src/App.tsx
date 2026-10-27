@@ -3,6 +3,7 @@ import { applyFreeze } from './audio/bounce'
 import { AudioEngine } from './audio/engine'
 import { unpackProject } from './model/archive'
 import { renderDemoLoop } from './model/demo'
+import { isSessionLink, isUntouchedEmpty, NEW_PROJECT, planLaunch, readTab, shouldKeepProject, TAB_PROJECT } from './model/launchProject'
 import { channelConstraints, inputChannel, mediaChannelCount, punchWindow, sliceCapture } from './model/comp'
 import { inspectClip } from './audio/stretch/engine'
 import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } from './model/types'
@@ -42,10 +43,22 @@ interface Bundle {
   session: SessionClient
 }
 
+function opensBlank(): boolean {
+  try {
+    const reload = sessionStorage.getItem('cueharbor-tab') === '1'
+    const current = sessionStorage.getItem(TAB_PROJECT)
+    return planLaunch({ reload, search: window.location.search, current }) === 'empty'
+  } catch {
+    return false
+  }
+}
+
 function createBundle(): Bundle {
   const engine = new AudioEngine()
-  const seeded = seedDemoProject(48000, renderDemoLoop(48000, 4, 120))
-  const store = new ProjectStore(seeded.project, seeded.buffers)
+  const opened = opensBlank()
+    ? { project: createEmptyProject(), buffers: new Map() }
+    : seedDemoProject(48000, renderDemoLoop(48000, 4, 120))
+  const store = new ProjectStore(opened.project, opened.buffers)
   const session = new SessionClient(engine)
   return { store, engine, session }
 }
@@ -100,6 +113,15 @@ export function App() {
   const surfaceRef = useRef(surface)
   const phonePaneRef = useRef(phonePane)
   const flushSave = useRef<() => void>(() => {})
+  const launchChoice = useRef<{ plan: 'restore' | 'empty'; reload: boolean } | null>(null)
+  if (launchChoice.current === null) {
+    let tab = { reload: true, current: null as string | null }
+    try { tab = readTab(sessionStorage) } catch { /* no sessionStorage: keep the last project */ }
+    launchChoice.current = {
+      reload: tab.reload,
+      plan: planLaunch({ reload: tab.reload, search: window.location.search, current: tab.current }),
+    }
+  }
   surfaceRef.current = surface
   phonePaneRef.current = phonePane
 
@@ -293,8 +315,16 @@ export function App() {
       phonePane: phonePaneRef.current,
     })
     let lastSnapshot = 0
+    const remember = (id: string) => {
+      try { sessionStorage.setItem(TAB_PROJECT, id) } catch { /* private mode keeps the in-memory project */ }
+    }
     const write = (forceSnapshot = false) => {
       if (!saveReady.current || cancel) return
+      if (isUntouchedEmpty(store.project)) {
+        remember(NEW_PROJECT)
+        return
+      }
+      remember(store.project.id)
       const snap = forceSnapshot || Date.now() - lastSnapshot > 20000
       if (snap) lastSnapshot = Date.now()
       void saveProject(store.project, store.buffers, snapshot(), { snapshot: snap }).then((result) => {
@@ -304,19 +334,44 @@ export function App() {
         }
       }).catch(() => undefined)
     }
+    const restoreSaved = (saved: NonNullable<Awaited<ReturnType<typeof loadLastProject>>>) => {
+      store.loadProject(saved.project, saved.buffers)
+      store.setView(saved.workspace.view)
+      store.setTransportMode(saved.workspace.transportMode)
+      if (saved.workspace.selectedTrackId) store.selectTrack(saved.workspace.selectedTrackId)
+      setSurface(saved.workspace.surface)
+      setPhonePane(saved.workspace.phonePane)
+      engine.seek(saved.workspace.positionSamples || 0)
+      engine.sync(store.project, (id) => store.buffers.get(id))
+      remember(saved.project.id)
+    }
+    const launch = launchChoice.current ?? { plan: 'restore' as const, reload: true }
     void (async () => {
       await requestPersistentStorage()
       const saved = await loadLastProject().catch(() => null)
       if (cancel) return
-      if (saved) {
-        store.loadProject(saved.project, saved.buffers)
-        store.setView(saved.workspace.view)
-        store.setTransportMode(saved.workspace.transportMode)
-        if (saved.workspace.selectedTrackId) store.selectTrack(saved.workspace.selectedTrackId)
-        setSurface(saved.workspace.surface)
-        setPhonePane(saved.workspace.phonePane)
-        engine.seek(saved.workspace.positionSamples || 0)
+      if (launch.plan === 'empty') {
+        remember(NEW_PROJECT)
+        if (!launch.reload && saved && shouldKeepProject(saved.project, saved.buffers.size) && !isSessionLink(window.location.search)) {
+          const kept = await saveProject(saved.project, saved.buffers, saved.workspace).catch(() => 'fail' as const)
+          if (cancel) return
+          if (kept !== 'ok') {
+            restoreSaved(saved)
+            store.toast('Could not store the last project, so it stays open.', 'warn')
+            saveReady.current = true
+            return
+          }
+        }
+        store.loadProject(createEmptyProject(engine.sampleRate), new Map())
+        store.setView('arrange')
+        store.setTransportMode('arrangement')
+        setSurface('studio')
+        setPhonePane('edit')
+        engine.seek(0)
         engine.sync(store.project, (id) => store.buffers.get(id))
+        remember(NEW_PROJECT)
+      } else if (saved) {
+        restoreSaved(saved)
       }
       const params = new URLSearchParams(window.location.search)
       const performMode = params.get('perform')
