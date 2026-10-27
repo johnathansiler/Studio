@@ -33,7 +33,7 @@ import {
   quantizeMidi,
   type QuantizeSettings,
 } from '../model/quantize'
-import { cloneRack, defaults, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
+import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
 import {
   clonePattern,
@@ -88,6 +88,7 @@ export class ProjectStore {
   remoteFollow = false
   rackTrackId: string | null = null
   rackFlip = false
+  rackDetail = false
   /** Letter keys play notes while this is on, so tap-tempo stays off T. */
   keyboardMidi = false
   private tempoGroup = false
@@ -1365,12 +1366,41 @@ export class ProjectStore {
   openRack(trackId: string) {
     this.rackTrackId = this.rackTrackId === trackId ? null : trackId
     this.rackFlip = false
+    this.rackDetail = false
     this.emit()
   }
 
   flipRack() {
     this.rackFlip = !this.rackFlip
     this.emit()
+  }
+
+  toggleRackDetail() {
+    this.rackDetail = !this.rackDetail
+    this.emit()
+  }
+
+  togglePresetFavorite(kind: string, name: string) {
+    if (!name) return
+    this.mutate(() => {
+      const key = `${kind}:${name}`
+      const list = this.project.presetFavorites ?? []
+      this.project.presetFavorites = list.includes(key) ? list.filter((item) => item !== key) : [...list, key]
+    })
+  }
+
+  mutateDevice(trackId: string, deviceId: string, rng: () => number = Math.random) {
+    this.mutate(() => {
+      const device = this.track(trackId)?.rack?.devices.find((item) => item.id === deviceId)
+      if (!device) return
+      for (const item of DEVICE_PARAMS[device.kind]) {
+        if (/^m\d/.test(item.id)) continue
+        const span = item.max - item.min
+        const current = device.params[item.id] ?? item.default
+        const next = current + (rng() * 2 - 1) * span * 0.15
+        device.params[item.id] = Math.min(item.max, Math.max(item.min, next))
+      }
+    })
   }
 
   addDevice(trackId: string, kind: DeviceKind) {

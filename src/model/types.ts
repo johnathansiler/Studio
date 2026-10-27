@@ -275,6 +275,8 @@ export interface Project {
   record?: RecordSettings
   /** Key, scale, and chord-pad performance settings. */
   scale?: ScaleState
+  /** `${kind}:${name}` factory and user presets marked in the browser. */
+  presetFavorites?: string[]
   beats?: BeatRack
   patternClips?: PatternClip[]
   roll?: RollMemory
@@ -360,6 +362,7 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     recordBars: 4,
     record: defaultRecord(bar * 4),
     scale: defaultScale(),
+    presetFavorites: [],
   }
 }
 
