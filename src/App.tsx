@@ -354,7 +354,10 @@ export function App() {
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
       const key = event.key.toLowerCase()
       const meta = event.metaKey || event.ctrlKey
-      if (event.code === 'Space') {
+      if (key === 't' && !meta && !event.repeat && !store.keyboardMidi) {
+        event.preventDefault()
+        window.dispatchEvent(new CustomEvent('cueharbor-tap', { detail: event.timeStamp }))
+      } else if (event.code === 'Space') {
         event.preventDefault()
         if (engine.status === 'stopped') void play()
         else void stop()

@@ -32,6 +32,9 @@ export class ProjectStore {
   transportMode: 'arrangement' | 'session' = 'arrangement'
   /** Guests mirror the host arrangement and cannot edit it. */
   remoteFollow = false
+  /** Letter keys play notes while this is on, so tap-tempo stays off T. */
+  keyboardMidi = false
+  private tempoGroup = false
   toasts: Toast[] = []
   version = 0
   private past: string[] = []
@@ -78,6 +81,7 @@ export class ProjectStore {
 
   undo() {
     if (this.remoteFollow) return
+    this.tempoGroup = false
     const prev = this.past.pop()
     if (!prev) return
     this.future.push(JSON.stringify(this.project))
@@ -87,6 +91,7 @@ export class ProjectStore {
 
   redo() {
     if (this.remoteFollow) return
+    this.tempoGroup = false
     const next = this.future.pop()
     if (!next) return
     this.past.push(JSON.stringify(this.project))
@@ -178,10 +183,22 @@ export class ProjectStore {
     })
   }
 
-  setTempo(tempo: number) {
+  setTempo(tempo: number, group = false) {
+    const value = clamp(Math.round(tempo * 10) / 10, 30, 300)
+    if (group && this.tempoGroup) {
+      if (this.remoteFollow || this.project.tempo === value) return
+      this.project.tempo = value
+      this.emit()
+      return
+    }
     this.mutate(() => {
-      this.project.tempo = clamp(tempo, 40, 300)
+      this.project.tempo = value
     })
+    this.tempoGroup = group
+  }
+
+  endTempoGroup() {
+    this.tempoGroup = false
   }
 
   setTimeSignature(numerator: number, denominator: number) {

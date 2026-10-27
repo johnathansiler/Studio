@@ -109,6 +109,13 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .lcd .bars { font-family: var(--mono); color: var(--amber); font-size: 20px; letter-spacing: 0.04em; }
 .lcd .tc { font-family: var(--mono); color: #8d7a52; font-size: 12px; }
 .field { display: flex; flex-direction: column; gap: 2px; color: var(--faint); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+.bpm-readout, .tap-pad button {
+  min-height: 44px; min-width: 44px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--panel); font-variant-numeric: tabular-nums;
+}
+.bpm-readout { min-width: 72px; font-size: 16px; }
+.tap-pad { display: flex; gap: 6px; align-items: center; }
+.tap-pad button.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 .field input, .field select, .grow input, .grow select {
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; width: 78px;
 }
