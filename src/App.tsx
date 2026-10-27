@@ -3,6 +3,7 @@ import { applyFreeze } from './audio/bounce'
 import { AudioEngine } from './audio/engine'
 import { unpackProject } from './model/archive'
 import { renderDemoLoop } from './model/demo'
+import { inspectClip } from './audio/stretch/engine'
 import { createEmptyProject, isLocalInput, uid, type AudioClip } from './model/types'
 import type { IncomingTake } from './remote/session'
 import { SessionClient } from './remote/session'
@@ -621,6 +622,7 @@ export function App() {
         warp: intoSlot ? true : undefined,
         loop: intoSlot ? true : undefined,
         slotOnly: intoSlot ? true : undefined,
+        stretch: inspectClip(capture.channels[0] ?? new Float32Array(), capture.sampleRate, store.project.tempo),
       }
       if (intoSlot && slot) store.placeInSlot(track.id, slot.scene, clip)
       else store.addAudioClip(track.id, clip)
@@ -793,6 +795,7 @@ export function App() {
         fadeOutSamples: 0,
         gain: 1,
         source: 'import',
+        stretch: inspectClip(channels[0] ?? new Float32Array(), decoded.sampleRate, store.project.tempo),
       })
     }
   }
@@ -1155,6 +1158,7 @@ function placeTake(store: ProjectStore, engine: AudioEngine, take: IncomingTake)
     peerId: take.peerId,
     takeId: take.takeId,
     alignmentMs: take.compensationMs,
+    stretch: inspectClip(channels[0] ?? new Float32Array(), engine.sampleRate, store.project.tempo),
   })
   store.toast(
     take.silent

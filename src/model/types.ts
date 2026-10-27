@@ -195,6 +195,7 @@ export interface Project {
   launchQuant?: LaunchQuant
   /** 0 records until stop. A positive count trims a session take to that many bars. */
   recordBars?: number
+  /** Tempo changes. Empty keeps `tempo` for the whole arrangement. */
   tempoMap?: TempoPoint[]
   /** Key, scale, and chord-pad performance settings. */
   scale?: ScaleState

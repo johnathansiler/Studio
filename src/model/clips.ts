@@ -33,6 +33,50 @@ export function trimAudioClip(
   newSample: number,
   bufferLength: number,
 ): AudioClip {
+  const stretch = clip.stretch
+  if (stretch && stretch.sourceSamples > 0 && clip.durationSamples > 0) {
+    const ratio = clip.durationSamples / stretch.sourceSamples
+    const end = clip.startSample + clip.durationSamples
+    if (edge === 'start') {
+      const minStart = clip.startSample - Math.round(clip.offsetSamples * ratio)
+      const start = clamp(Math.round(newSample), Math.max(0, minStart), end - 1)
+      const delta = start - clip.startSample
+      const sourceDelta = Math.round(delta / ratio)
+      const duration = Math.max(1, clip.durationSamples - delta)
+      const source = Math.max(1, stretch.sourceSamples - sourceDelta)
+      return {
+        ...clip,
+        startSample: start,
+        offsetSamples: Math.max(0, clip.offsetSamples + sourceDelta),
+        durationSamples: duration,
+        fadeInSamples: Math.min(clip.fadeInSamples, duration),
+        fadeOutSamples: Math.min(clip.fadeOutSamples, duration),
+        stretch: {
+          ...stretch,
+          sourceSamples: source,
+          followTempo: false,
+          markers: stretch.markers
+            .map((marker) => ({ ...marker, source: marker.source - sourceDelta }))
+            .filter((marker) => marker.source > 0 && marker.source < source),
+        },
+      }
+    }
+    const maxDuration = Math.max(1, Math.round(Math.max(0, bufferLength - clip.offsetSamples) * ratio))
+    const duration = clamp(Math.round(newSample) - clip.startSample, 1, maxDuration)
+    const source = Math.max(1, Math.round(duration / ratio))
+    return {
+      ...clip,
+      durationSamples: duration,
+      fadeInSamples: Math.min(clip.fadeInSamples, duration),
+      fadeOutSamples: Math.min(clip.fadeOutSamples, duration),
+      stretch: {
+        ...stretch,
+        sourceSamples: source,
+        followTempo: false,
+        markers: stretch.markers.filter((marker) => marker.source > 0 && marker.source < source),
+      },
+    }
+  }
   const end = clip.startSample + clip.durationSamples
   if (edge === 'start') {
     const minStart = clip.startSample - clip.offsetSamples
