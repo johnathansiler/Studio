@@ -36,7 +36,7 @@ const SOURCES: { id: ChordSource; name: string }[] = [
   { id: 'gospel', name: 'Gospel' },
 ]
 
-export function PianoRoll({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
+export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; engine: AudioEngine; onIdeas?: () => void }) {
   const track = store.project.tracks.find((item) => item.midiClips.some((clip) => clip.id === store.selectedMidiClipId))
   const clip = track?.midiClips.find((item) => item.id === store.selectedMidiClipId)
   const [open, setOpen] = useState(false)
@@ -142,6 +142,7 @@ export function PianoRoll({ store, engine }: { store: ProjectStore; engine: Audi
   return (
     <div className="piano">
       <div className="scale-bar">
+        <button type="button" className={`chords-btn ${open ? 'on' : ''}`} aria-expanded={open} onClick={() => void toggleChords()}>Chords</button>
         <select aria-label="Key" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
           {NOTE_NAMES.map((name, index) => (
             <option key={name} value={index}>{name}</option>
@@ -158,7 +159,7 @@ export function PianoRoll({ store, engine }: { store: ProjectStore; engine: Audi
           store.setScale({ root: found.root, scale: found.scale })
         }}>Detect</button>
         <span className="chord-name">{chord}</span>
-        <button type="button" className={open ? 'on' : ''} aria-expanded={open} onClick={() => void toggleChords()}>Chords</button>
+        {onIdeas && <button type="button" onClick={onIdeas}>Ideas</button>}
       </div>
       <div className="piano-body">
         <div className="keys">
@@ -204,7 +205,7 @@ export function PianoRoll({ store, engine }: { store: ProjectStore; engine: Audi
                     nextPitch = Math.max(0, Math.min(127, originPitch + Math.round((originY - ev.clientY) / row)))
                     const node = event.currentTarget as HTMLDivElement
                     node.style.left = `${next * pxBeat}px`
-                    node.style.top = `${(high - nextPitch) * 16}px`
+                    node.style.top = `${(high - nextPitch) * row}px`
                   }
                   const up = () => {
                     window.removeEventListener('pointermove', move)

@@ -1,11 +1,7 @@
-import { resampleSinc } from '../quality/resample'
-import { phaseStretch } from './phase'
 import { Psola } from './voice'
 import type { AudioClip, ClipStretch, Project, StretchMode, TempoPoint, WarpMarker } from '../../model/types'
 
 export type { ClipStretch, StretchMode, TempoPoint, WarpMarker }
-
-export type StretchQuality = 'preview' | 'hq'
 
 export interface StretchOptions {
   /** Output length ÷ input length. 2 holds a clip twice as long. */
@@ -13,13 +9,9 @@ export interface StretchOptions {
   semitones?: number
   cents?: number
   mode?: StretchMode
-  /** Committed audio uses the phase vocoder. Live playback may use the lighter preview. */
-  quality?: StretchQuality
-  /** Keep vocal formants when the pitch moves. Voice and speech default to on. */
-  formant?: boolean
 }
 
-const MODES: StretchMode[] = ['pro', 'beats', 'tonal', 'voice', 'speech', 'tape']
+const MODES: StretchMode[] = ['beats', 'tonal', 'voice', 'tape']
 
 export function pitchFactor(semitones = 0, cents = 0) {
   return 2 ** ((semitones + cents / 100) / 12)
@@ -97,7 +89,7 @@ export function inspectClip(channel: Float32Array, sampleRate: number, tempo = 1
     sourceSamples: channel.length,
     semitones: 0,
     cents: 0,
-    mode: hits.length > (channel.length / sampleRate) * 2 ? 'beats' : 'pro',
+    mode: hits.length > (channel.length / sampleRate) * 2 ? 'beats' : 'tonal',
     followTempo: false,
     sourceBpm: bpm,
     markers: hits.map((sample) => ({
@@ -214,17 +206,7 @@ function markersDeviate(clip: AudioClip, project: Project) {
   return false
 }
 
-export function formantEnabled(mode: StretchMode, formant?: boolean) {
-  if (formant != null) return formant
-  return mode === 'voice' || mode === 'speech'
-}
-
-export function renderClipChannels(
-  channels: Float32Array[],
-  clip: AudioClip,
-  project: Project,
-  quality: StretchQuality = 'hq',
-): Float32Array[] {
+export function renderClipChannels(channels: Float32Array[], clip: AudioClip, project: Project): Float32Array[] {
   const stretch = clip.stretch
   const source = sourceSamplesOf(clip)
   const sliced = channels.map((channel) => Float32Array.from(channel.subarray(clip.offsetSamples, Math.min(channel.length, clip.offsetSamples + source))))
@@ -233,19 +215,18 @@ export function renderClipChannels(
   const lead = sliced[0] ?? new Float32Array(0)
   const segments = clipSegments(lead, outLen, clip, project)
   const timed = segments
-    ? fitChannels(sliced.map((channel) => stretchSegments(channel, project.sampleRate, stretch.mode, segments, quality)), outLen)
+    ? fitChannels(sliced.map((channel) => stretchSegments(channel, project.sampleRate, stretch.mode, segments)), outLen)
     : null
   if (timed && !(stretch.semitones || stretch.cents)) return timed
   if (timed) {
-    return shiftAll(timed, project.sampleRate, stretch.semitones, stretch.cents, formantEnabled(stretch.mode, stretch.formant), quality, stretch.mode)
+    const formant = stretch.mode === 'voice' || stretch.mode === 'tape'
+    return shiftAll(timed, project.sampleRate, stretch.semitones, stretch.cents, formant)
   }
   return renderStretch(sliced, project.sampleRate, {
     ratio: outLen / Math.max(1, lead.length),
     semitones: stretch.semitones,
     cents: stretch.cents,
     mode: stretch.mode,
-    quality,
-    formant: stretch.formant,
   })
 }
 
@@ -344,31 +325,16 @@ function pointsToSegments(
   return segments
 }
 
-function stretchSegments(
-  input: Float32Array,
-  sampleRate: number,
-  mode: StretchMode,
-  segments: Segment[],
-  quality: StretchQuality = 'hq',
-): Float32Array {
+function stretchSegments(input: Float32Array, sampleRate: number, mode: StretchMode, segments: Segment[]): Float32Array {
   const end = segments.length ? segments[segments.length - 1].out1 : input.length
   const output = new Float32Array(Math.max(1, end))
-  const fade = Math.max(0, Math.round(sampleRate * 0.002))
   for (const segment of segments) {
     const src = input.subarray(Math.max(0, segment.src0), Math.min(input.length, segment.src1))
     const dstLen = segment.out1 - segment.out0
     if (src.length < 1 || dstLen < 1) continue
-    const piece = mode === 'tape' ? resampleTo(src, dstLen, quality) : timeStretch(src, dstLen, mode, sampleRate, quality)
+    const piece = mode === 'tape' ? resampleLinear(src, dstLen) : timeStretch(src, dstLen, mode, sampleRate)
     const dest = Math.max(0, segment.out0)
-    const count = Math.min(piece.length, output.length - dest)
-    const blend = dest > 0 ? Math.min(fade, Math.floor(count / 2)) : 0
-    for (let i = 0; i < count; i++) {
-      const sample = piece[i] || 0
-      if (i < blend) {
-        const gain = i / blend
-        output[dest + i] = (output[dest + i] || 0) * (1 - gain) + sample * gain
-      } else output[dest + i] = sample
-    }
+    output.set(piece.subarray(0, Math.min(piece.length, output.length - dest)), dest)
     if (mode === 'beats' && dest < output.length && Math.abs(src[0] || 0) >= 0.2) output[dest] = src[0] || 0
   }
   return output
@@ -434,12 +400,20 @@ export class StretchStream {
     const mode = normalizeMode(this.options.mode)
     const semis = this.options.semitones || 0
     const cents = this.options.cents || 0
-    const quality: StretchQuality = this.options.quality === 'preview' ? 'preview' : 'hq'
-    const formant = formantEnabled(mode, this.options.formant)
     if (length < 1) return [new Float32Array(outLen)]
+    if (mode === 'tape') {
+      const varied = input.map((channel) => resampleLinear(channel, outLen))
+      return shiftAll(varied, this.sampleRate, semis, cents, true)
+    }
     const factor = pitchFactor(semis, cents)
-    if (Math.abs(ratio - 1) < 1e-6 && Math.abs(factor - 1) < 1e-4 && mode !== 'tape') return fitChannels(input, outLen)
-    return input.map((channel) => renderChannel(channel, outLen, this.sampleRate, mode, semis, cents, quality, formant))
+    if (mode === 'voice') {
+      const stretched = input.map((channel) => timeStretch(channel, outLen, 'voice', this.sampleRate))
+      return Math.abs(factor - 1) < 1e-4 ? stretched : shiftAll(stretched, this.sampleRate, semis, cents, true)
+    }
+    const timed = Math.abs(factor - 1) < 1e-4
+      ? input
+      : input.map((channel) => resampleLinear(channel, Math.max(1, Math.round(length / factor))))
+    return timed.map((channel) => timeStretch(channel, outLen, mode, this.sampleRate))
   }
 
   private pull(count: number): Float32Array[] {
@@ -455,45 +429,13 @@ export class StretchStream {
   }
 }
 
-function renderChannel(
-  input: Float32Array,
-  outLen: number,
-  sampleRate: number,
-  mode: StretchMode,
-  semitones: number,
-  cents: number,
-  quality: StretchQuality,
-  formant: boolean,
-) {
-  const factor = pitchFactor(semitones, cents)
-  if (mode === 'tape') {
-    const varied = resampleTo(input, outLen, quality)
-    if (Math.abs(factor - 1) < 1e-4) return varied
-    if (formant) return formantShift(varied, sampleRate, factor)
-    const pitched = resampleTo(varied, Math.max(1, Math.round(varied.length / factor)), quality)
-    return timeStretch(pitched, outLen, 'pro', sampleRate, quality)
-  }
-  if (Math.abs(factor - 1) < 1e-4) return timeStretch(input, outLen, mode, sampleRate, quality)
-  if (formant) return formantShift(timeStretch(input, outLen, mode, sampleRate, quality), sampleRate, factor)
-  const pitched = resampleTo(input, Math.max(1, Math.round(input.length / factor)), quality)
-  return timeStretch(pitched, outLen, mode, sampleRate, quality)
-}
-
-function shiftAll(
-  channels: Float32Array[],
-  sampleRate: number,
-  semitones: number,
-  cents: number,
-  formant: boolean,
-  quality: StretchQuality,
-  mode: StretchMode,
-) {
+function shiftAll(channels: Float32Array[], sampleRate: number, semitones: number, cents: number, formant: boolean) {
   const factor = pitchFactor(semitones, cents)
   if (Math.abs(factor - 1) < 1e-4) return channels
   if (formant) return channels.map((channel) => formantShift(channel, sampleRate, factor))
   return channels.map((channel) => {
-    const mid = resampleTo(channel, Math.max(1, Math.round(channel.length / factor)), quality)
-    return timeStretch(mid, channel.length, mode === 'tape' ? 'pro' : mode, sampleRate, quality)
+    const mid = resampleLinear(channel, Math.max(1, Math.round(channel.length / factor)))
+    return timeStretch(mid, channel.length, 'tonal', sampleRate)
   })
 }
 
@@ -505,33 +447,20 @@ function formantShift(input: Float32Array, sampleRate: number, factor: number) {
   return output
 }
 
-export function timeStretch(
-  input: Float32Array,
-  outLen: number,
-  mode: StretchMode,
-  sampleRate: number,
-  quality: StretchQuality = 'hq',
-) {
+export function timeStretch(input: Float32Array, outLen: number, mode: StretchMode, sampleRate: number) {
   const length = Math.max(1, outLen)
-  if (input.length < 2) return resampleTo(input, length, quality)
-  if (Math.abs(input.length - length) <= 1 && mode !== 'tape') {
-    const copy = new Float32Array(length)
-    copy.set(input.subarray(0, Math.min(input.length, length)))
-    if (length > input.length) copy[length - 1] = input[input.length - 1] || 0
-    return copy
-  }
-  if (mode === 'tape') return resampleTo(input, length, quality)
-  if (mode === 'beats') return stretchBeats(input, length, sampleRate, quality)
-  if (quality === 'preview') return wsola(input, length, mode)
-  return phaseStretch(input, length, sampleRate, mode)
+  if (input.length < 2) return resampleLinear(input, length)
+  if (mode === 'tape') return resampleLinear(input, length)
+  if (mode === 'beats') return stretchBeats(input, length, sampleRate)
+  return wsola(input, length, mode)
 }
 
-function stretchBeats(input: Float32Array, outLen: number, sampleRate: number, quality: StretchQuality) {
+function stretchBeats(input: Float32Array, outLen: number, sampleRate: number) {
   const hits = detectTransients(input, sampleRate, 0.2)
-  if (!hits.length) return quality === 'preview' ? wsola(input, outLen, 'beats') : phaseStretch(input, outLen, sampleRate, 'beats')
+  if (!hits.length) return wsola(input, outLen, 'beats')
   const bounds = [0, ...hits, input.length]
   const output = new Float32Array(outLen)
-  const attack = Math.max(1, Math.round(sampleRate * 0.012))
+  const attack = Math.max(1, Math.round(sampleRate * 0.004))
   for (let i = 0; i < bounds.length - 1; i++) {
     let src0 = bounds[i]
     const src1 = bounds[i + 1]
@@ -546,27 +475,17 @@ function stretchBeats(input: Float32Array, outLen: number, sampleRate: number, q
     const srcLen = src1 - src0
     const dstLen = out1 - out0
     if (srcLen < 1 || dstLen < 1) continue
-    const body = input.subarray(src0, src1)
-    const piece =
-      srcLen < 32 || dstLen < 32
-        ? resampleTo(body, dstLen, quality)
-        : quality === 'preview'
-          ? wsola(body, dstLen, 'beats')
-          : phaseStretch(body, dstLen, sampleRate, 'beats')
-    output.set(piece.subarray(0, Math.min(piece.length, output.length - out0)), out0)
+    const piece = srcLen < 32 || dstLen < 32 ? resampleLinear(input.subarray(src0, src1), dstLen) : wsola(input.subarray(src0, src1), dstLen, 'beats')
+    output.set(piece, out0)
   }
   return output
-}
-
-function resampleTo(input: Float32Array, outLen: number, quality: StretchQuality) {
-  return resampleSinc(input, outLen, quality === 'hq' ? 96 : 24)
 }
 
 function wsola(input: Float32Array, outLen: number, mode: StretchMode) {
   if (input.length < 8 || outLen < 8) return resampleLinear(input, outLen)
   const output = new Float32Array(outLen)
   const weight = new Float32Array(outLen)
-  let win = mode === 'beats' || mode === 'speech' ? 512 : mode === 'voice' ? 1024 : 2048
+  let win = mode === 'beats' ? 512 : 2048
   win = Math.min(win, input.length)
   win = Math.max(32, win - (win % 2))
   const hs = Math.max(8, Math.min(outLen, Math.floor(win / 2)))
@@ -657,9 +576,23 @@ function addGrain(output: Float32Array, weight: Float32Array, input: Float32Arra
   }
 }
 
-/** Band-limited resize. The name stays so older call sites keep working. */
 export function resampleLinear(input: Float32Array, outLen: number) {
-  return resampleSinc(input, outLen, 64)
+  const output = new Float32Array(Math.max(1, outLen))
+  if (input.length < 1) return output
+  if (input.length === 1 || output.length === 1) {
+    output.fill(input[0] || 0)
+    return output
+  }
+  const step = (input.length - 1) / (output.length - 1)
+  for (let i = 0; i < output.length; i++) {
+    const pos = i * step
+    const index = Math.floor(pos)
+    const frac = pos - index
+    const a = input[index] || 0
+    const b = input[Math.min(input.length - 1, index + 1)] || 0
+    output[i] = a + (b - a) * frac
+  }
+  return output
 }
 
 function fitChannels(channels: Float32Array[], length: number) {
@@ -689,7 +622,7 @@ function clampRatio(ratio: number) {
 }
 
 function normalizeMode(mode: StretchMode | undefined): StretchMode {
-  return mode && MODES.includes(mode) ? mode : 'pro'
+  return mode && MODES.includes(mode) ? mode : 'tonal'
 }
 
 /** Peak position of a channel, for alignment tests and marker checks. */
@@ -706,7 +639,7 @@ export function peakIndex(channel: Float32Array) {
   return at
 }
 
-export function defaultStretch(sourceSamples: number, mode: StretchMode = 'pro'): ClipStretch {
+export function defaultStretch(sourceSamples: number, mode: StretchMode = 'tonal'): ClipStretch {
   return {
     sourceSamples: Math.max(1, sourceSamples),
     semitones: 0,
@@ -778,5 +711,5 @@ export function renderTempoFollow(
       out1: Math.round(samplesAtBeat(startBeat + ordered[i + 1], sampleRate, tempo, points) - samplesAtBeat(startBeat, sampleRate, tempo, points)),
     })
   }
-  return stretchSegments(channel, sampleRate, mode, segments, 'hq')
+  return stretchSegments(channel, sampleRate, mode, segments)
 }

@@ -1,5 +1,3 @@
-import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
-import { demoMidiNotes } from '../model/demo'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
 import {
   detectRoot,
@@ -22,10 +20,27 @@ import {
   type LoopTake,
 } from '../audio/sample/engine'
 import { findCycle, MASTER } from '../audio/routing'
-import { createEmptyProject, defaultInsert, makeTrack, uid, TRACK_COLORS } from '../model/types'
-import type { AudioAsset, AudioClip, InsertType, MidiClip, MidiNote, PluginInstance, Project, Track } from '../model/types'
+import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
+import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
+import { demoMidiNotes } from '../model/demo'
+import {
+  clipById,
+  dueFollow,
+  followTarget,
+  quantizeSample,
+  retrigger,
+  sceneClip,
+  sceneIndex,
+  SESSION_SCENES,
+  type SessionClock,
+  type TransportSlot,
+} from '../model/launch'
+import { progressionById, romanLine, starterParts } from '../model/progressions'
+import { cloneRack, defaults, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleState } from '../model/scale'
-import { beatsToSamples } from '../model/time'
+import { createEmptyProject, defaultInsert, makeTrack, uid, TRACK_COLORS } from '../model/types'
+import type { AudioAsset, AudioClip, FollowAction, InsertType, LaunchMode, LaunchQuant, MidiClip, MidiNote, PluginInstance, Project, Track } from '../model/types'
+import { beatsToSamples, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
 
 export type WorkspaceView = 'arrange' | 'mix' | 'session'
@@ -48,9 +63,22 @@ export class ProjectStore {
   selectedNoteIds: string[] = []
   view: WorkspaceView = 'arrange'
   launched: Record<string, string | null> = {}
+  launchAt: Record<string, number> = {}
+  launchGen: Record<string, number> = {}
+  /** Armed empty slot for the next recording. */
+  sessionSlot: { trackId: string; scene: number } | null = null
+  sessionEdit: { trackId: string; scene: number } | null = null
+  captureLog: { trackId: string; clipId: string; sample: number }[] = []
+  pendingTransport: Record<string, unknown> | null = null
   transportMode: 'arrangement' | 'session' = 'arrangement'
+  private followed: Record<string, true> = {}
   /** Guests mirror the host arrangement and cannot edit it. */
   remoteFollow = false
+  rackTrackId: string | null = null
+  rackFlip = false
+  /** Letter keys play notes while this is on, so tap-tempo stays off T. */
+  keyboardMidi = false
+  private tempoGroup = false
   toasts: Toast[] = []
   version = 0
   private past: string[] = []
@@ -61,7 +89,7 @@ export class ProjectStore {
   pluginFocus: { trackId: string; pluginId: string } | null = null
 
   constructor(project = createEmptyProject(), buffers?: Map<string, AudioAsset>) {
-    this.project = normalizeProject({ ...project, scale: normalizeScale(project.scale) })
+    this.project = normalizeProjectRack(normalizeProject(project))
     if (buffers) this.buffers = buffers
     this.selectedTrackId = project.tracks[0]?.id ?? null
     this.selectedClipId = null
@@ -97,6 +125,7 @@ export class ProjectStore {
 
   undo() {
     if (this.remoteFollow) return
+    this.tempoGroup = false
     const prev = this.past.pop()
     if (!prev) return
     this.future.push(JSON.stringify(this.project))
@@ -106,6 +135,7 @@ export class ProjectStore {
 
   redo() {
     if (this.remoteFollow) return
+    this.tempoGroup = false
     const next = this.future.pop()
     if (!next) return
     this.past.push(JSON.stringify(this.project))
@@ -197,10 +227,22 @@ export class ProjectStore {
     })
   }
 
-  setTempo(tempo: number) {
+  setTempo(tempo: number, group = false) {
+    const value = clamp(Math.round(tempo * 10) / 10, 30, 300)
+    if (group && this.tempoGroup) {
+      if (this.remoteFollow || this.project.tempo === value) return
+      this.project.tempo = value
+      this.emit()
+      return
+    }
     this.mutate(() => {
-      this.project.tempo = clamp(tempo, 40, 300)
+      this.project.tempo = value
     })
+    this.tempoGroup = group
+  }
+
+  endTempoGroup() {
+    this.tempoGroup = false
   }
 
   setTimeSignature(numerator: number, denominator: number) {
@@ -229,16 +271,63 @@ export class ProjectStore {
     })
   }
 
-  addTrack(type: Track['type']) {
+  addTracks(spec: AddTrackSpec) {
+    const ids: string[] = []
     this.mutate(() => {
-      const index = this.project.tracks.length
-      const track = makeTrack({
-        name: type === 'midi' ? `Inst ${index + 1}` : type === 'bus' ? `Bus ${index + 1}` : type === 'group' ? `Group ${index + 1}` : `Audio ${index + 1}`,
-        type,
-        color: TRACK_COLORS[index % TRACK_COLORS.length],
+      const made = tracksFor(spec, this.project.tracks)
+      for (const track of made) if (track.type === 'midi') normalizeTrackRack(track)
+      const at = insertIndex(this.project.tracks, this.selectedTrackId)
+      this.project.tracks.splice(at, 0, ...made)
+      this.selectedTrackId = made[0]?.id ?? this.selectedTrackId
+      ids.push(...made.map((track) => track.id))
+    })
+    return ids
+  }
+
+  addTrack(type: Track['type']) {
+    if (type === 'group') {
+      this.mutate(() => {
+        const index = this.project.tracks.length
+        const track = makeTrack({
+          name: `Group ${index + 1}`,
+          type,
+          color: TRACK_COLORS[index % TRACK_COLORS.length],
+        })
+        this.project.tracks.splice(insertIndex(this.project.tracks, this.selectedTrackId), 0, track)
+        this.selectedTrackId = track.id
       })
-      this.project.tracks.push(track)
-      this.selectedTrackId = track.id
+      return
+    }
+    this.addTracks({
+      kind: type === 'audio' ? 'audio' : type === 'bus' ? 'bus' : 'midi',
+      count: 1,
+      instrument: 'none',
+      input: 'mic',
+      channels: 1,
+      armed: false,
+    })
+  }
+
+  /** Open a MIDI track in the piano. An empty track gets a 4-bar clip at the playhead. */
+  preparePianoClip(trackId: string, beat: number, clipId?: string) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      const bar = Math.max(1, quartersPerBar(this.project.timeSignature))
+      const start = Math.max(0, Math.floor(Math.max(0, beat) / bar) * bar)
+      let clip = clipId ? track.midiClips.find((item) => item.id === clipId) : undefined
+      if (!clip && track.midiClips.length) {
+        clip = track.midiClips.find((item) => beat >= item.startBeat && beat < item.startBeat + item.durationBeats) ?? track.midiClips[0]
+      }
+      if (!clip) {
+        clip = { id: uid('midi'), name: 'Keys', startBeat: start, durationBeats: bar * 4, notes: [] }
+        track.midiClips.push(clip)
+      }
+      this.selectedTrackId = trackId
+      this.selectedMidiClipId = clip.id
+      this.selectedClipId = null
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
     })
   }
 
@@ -815,27 +904,377 @@ export class ProjectStore {
     this.project.scale = { ...scale, lastVoicing: voiced }
   }
 
-  launch(trackId: string, clipId: string | null) {
-    this.launched = { ...this.launched, [trackId]: clipId }
+  /** Drop an idea onto the chord track plus editable bass and drums in that genre. */
+  insertIdea(id: string, beat = 0) {
+    const progression = progressionById(id)
+    if (!progression) return
+    const scale = this.scaleState()
+    const parts = starterParts(progression, scale.root)
+    this.mutate(() => {
+      const chords = this.ensureMidi('Chords', '#e0b15a')
+      const bass = this.ensureMidi('Bass', '#79b8d4')
+      const drums = this.ensureMidi('Drums', '#c58be0')
+      const line = romanLine(progression.chords)
+      this.replaceClip(chords, beat, parts.chords, line)
+      this.replaceClip(bass, beat, parts.bass, `${progression.name} bass`)
+      this.replaceClip(drums, beat, parts.drums, `${progression.name} drums`)
+      const next = this.scaleState()
+      this.project.scale = { ...next, idea: id }
+      this.project.tempo = progression.tempo
+      this.selectedTrackId = chords.id
+    })
+  }
+
+  toggleFavorite(id: string) {
+    this.mutate(() => {
+      const scale = this.scaleState()
+      const favorites = scale.favorites.includes(id) ? scale.favorites.filter((item) => item !== id) : [...scale.favorites, id]
+      this.project.scale = { ...scale, favorites }
+    })
+  }
+
+  private ensureMidi(name: string, color: string) {
+    const existing = this.project.tracks.find((track) => track.type === 'midi' && track.name === name)
+    if (existing) return existing
+    const track = makeTrack({ name, type: 'midi', color, input: 'none' })
+    this.project.tracks.push(track)
+    return track
+  }
+
+  private replaceClip(track: Track, beat: number, notes: { pitch: number; startBeat: number; durationBeats: number; velocity: number }[], name: string) {
+    const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 4)
+    const clip: MidiClip = {
+      id: uid('midi'),
+      name,
+      startBeat: beat,
+      durationBeats: Math.max(4, Math.ceil(end)),
+      notes: notes.map((note) => ({ ...note, id: uid('note'), startBeat: note.startBeat })),
+    }
+    track.midiClips = [clip]
+    this.selectedMidiClipId = clip.id
+  }
+
+  launch(trackId: string, clipId: string | null, nowSample = 0) {
+    if (this.remoteFollow) return
+    const track = this.track(trackId)
+    const clip = track && clipId ? clipById(track, clipId) : null
+    if (clipId && !clip) return
+    const mode = clip?.mode ?? 'toggle'
+    const same = !!clipId && this.launched[trackId] === clipId
+    const busy = !!this.launched[trackId]
+    const decision = !clipId ? 'stop' : retrigger(mode, mode === 'toggle' ? same : busy, !!clip?.legato)
+    if (decision === 'hold') return
+    const quant = clip?.quant ?? this.project.launchQuant ?? '1bar'
+    const at = quantizeSample(nowSample, quant, this.project.sampleRate, this.project.tempo, this.project.timeSignature)
+    const launched = { ...this.launched }
+    const launchAt = { ...this.launchAt }
+    const launchGen = { ...this.launchGen }
+    if (decision === 'stop') {
+      launched[trackId] = null
+      delete launchAt[trackId]
+    } else if (clipId) {
+      launchGen[trackId] = (launchGen[trackId] || 0) + 1
+      launched[trackId] = clipId
+      launchAt[trackId] = at
+      this.captureLog = [...this.captureLog, { trackId, clipId, sample: at }]
+    }
+    this.launched = launched
+    this.launchAt = launchAt
+    this.launchGen = launchGen
     this.transportMode = 'session'
+    if (track && clip) this.sessionEdit = { trackId, scene: sceneIndex(track, clip.id) }
+    this.pendingTransport = {
+      action: 'launch',
+      trackId,
+      clipId: decision === 'stop' ? null : clipId,
+      timelineSample: decision === 'stop' ? nowSample : at,
+      gen: launchGen,
+    }
+    this.emit()
+  }
+
+  launchScene(scene: number, nowSample = 0) {
+    if (this.remoteFollow) return
+    const quant = this.project.launchQuant ?? '1bar'
+    const at = quantizeSample(nowSample, quant, this.project.sampleRate, this.project.tempo, this.project.timeSignature)
+    const launched = { ...this.launched }
+    const launchAt = { ...this.launchAt }
+    const launchGen = { ...this.launchGen }
+    const slots: TransportSlot[] = []
+    for (const track of this.project.tracks) {
+      const clip = sceneClip(track, scene)
+      if (!clip) {
+        launched[track.id] = null
+        delete launchAt[track.id]
+        slots.push({ trackId: track.id, clipId: null })
+        continue
+      }
+      const same = launched[track.id] === clip.id
+      const decision = retrigger(clip.mode ?? 'toggle', same, !!clip.legato)
+      if (decision === 'hold') {
+        slots.push({ trackId: track.id, clipId: launched[track.id] ?? null, timelineSample: launchAt[track.id] })
+        continue
+      }
+      if (decision === 'stop') {
+        launched[track.id] = null
+        delete launchAt[track.id]
+        slots.push({ trackId: track.id, clipId: null })
+        continue
+      }
+      launchGen[track.id] = (launchGen[track.id] || 0) + 1
+      launched[track.id] = clip.id
+      launchAt[track.id] = at
+      this.captureLog = [...this.captureLog, { trackId: track.id, clipId: clip.id, sample: at }]
+      slots.push({ trackId: track.id, clipId: clip.id, timelineSample: at })
+    }
+    this.launched = launched
+    this.launchAt = launchAt
+    this.launchGen = launchGen
+    this.transportMode = 'session'
+    this.view = 'session'
+    this.pendingTransport = { action: 'scene', scene, timelineSample: at, slots, gen: launchGen }
+    this.emit()
+  }
+
+  /** Advance follow actions that have reached their boundary. One step per call. */
+  tickFollow(nowSample: number) {
+    if (this.remoteFollow || this.transportMode !== 'session') return
+    const launched = { ...this.launched }
+    const launchAt = { ...this.launchAt }
+    const launchGen = { ...this.launchGen }
+    let changed = false
+    for (const [trackId, clipId] of Object.entries(this.launched)) {
+      if (!clipId) continue
+      const track = this.track(trackId)
+      const clip = track ? clipById(track, clipId) : null
+      if (!track || !clip || !clip.follow || clip.follow === 'none') continue
+      const start = this.launchAt[trackId] ?? 0
+      const key = `${trackId}:${clipId}:${start}`
+      if (this.followed[key]) continue
+      const beats = clip.followBeats ?? quartersPerBar(this.project.timeSignature)
+      if (!dueFollow(start, beats, nowSample, this.project.sampleRate, this.project.tempo)) continue
+      this.followed = { ...this.followed, [key]: true }
+      const scene = sceneIndex(track, clipId)
+      const target = followTarget(clip.follow, scene, SESSION_SCENES)
+      changed = true
+      if (target === 'stop' || target == null) {
+        launched[trackId] = null
+        delete launchAt[trackId]
+        continue
+      }
+      const next = sceneClip(track, target)
+      if (!next) {
+        launched[trackId] = null
+        delete launchAt[trackId]
+        continue
+      }
+      const boundary = Math.round(start + beatsToSamples(beats, this.project.sampleRate, this.project.tempo))
+      launchGen[trackId] = (launchGen[trackId] || 0) + 1
+      launched[trackId] = next.id
+      launchAt[trackId] = boundary
+      this.captureLog = [...this.captureLog, { trackId, clipId: next.id, sample: boundary }]
+    }
+    if (!changed) return
+    this.launched = launched
+    this.launchAt = launchAt
+    this.launchGen = launchGen
+    const slots: TransportSlot[] = this.project.tracks.map((track) => ({
+      trackId: track.id,
+      clipId: launched[track.id] ?? null,
+      timelineSample: launchAt[track.id],
+    }))
+    this.pendingTransport = { action: 'scene', timelineSample: nowSample, slots, gen: launchGen }
     this.emit()
   }
 
   stopSession() {
+    if (this.remoteFollow) return
     this.launched = {}
+    this.launchAt = {}
+    this.transportMode = 'session'
+    this.pendingTransport = { action: 'stop-clips' }
     this.emit()
   }
 
   armArrangement() {
     this.launched = {}
+    this.launchAt = {}
     this.transportMode = 'arrangement'
+    this.pendingTransport = { action: 'back' }
     this.emit()
+  }
+
+  replace(project: Project, buffers?: Map<string, AudioAsset>) {
+    this.mutate(() => {
+      this.project = project
+      if (buffers) this.buffers = buffers
+    })
+  }
+
+  enterSession() {
+    if (this.remoteFollow) return
+    this.transportMode = 'session'
+    this.view = 'session'
+    this.emit()
+  }
+
+  backToArrangement() {
+    if (this.remoteFollow) return
+    this.launched = {}
+    this.launchAt = {}
+    this.transportMode = 'arrangement'
+    this.view = 'arrange'
+    this.pendingTransport = { action: 'back' }
+    this.emit()
+  }
+
+  replaceSession(next: SessionClock) {
+    this.launched = { ...next.launched }
+    this.launchAt = { ...next.at }
+    this.launchGen = { ...next.gen }
+    this.transportMode = next.mode
+    if (next.mode === 'session') this.view = 'session'
+    if (next.mode === 'arrangement') this.view = 'arrange'
+    this.pendingTransport = null
+    this.emit()
+  }
+
+  takePendingTransport() {
+    const pending = this.pendingTransport
+    this.pendingTransport = null
+    return pending
+  }
+
+  armSlot(trackId: string, scene: number) {
+    this.sessionSlot = { trackId, scene }
+    this.sessionEdit = { trackId, scene }
+    const track = this.track(trackId)
+    const clip = track ? sceneClip(track, scene) : null
+    this.selectedTrackId = trackId
+    if (clip && track?.type === 'midi') {
+      this.selectedMidiClipId = clip.id
+      this.selectedClipId = null
+    } else if (clip) {
+      this.selectedClipId = clip.id
+      this.selectedMidiClipId = null
+    }
+    this.emit()
+  }
+
+  setLaunchQuant(quant: LaunchQuant) {
+    this.mutate(() => {
+      this.project.launchQuant = quant
+    })
+  }
+
+  setRecordBars(bars: number) {
+    this.mutate(() => {
+      this.project.recordBars = Math.max(0, Math.round(bars))
+    })
+  }
+
+  setClipLaunch(
+    trackId: string,
+    clipId: string,
+    patch: Partial<{ quant: LaunchQuant; mode: LaunchMode; loop: boolean; legato: boolean; follow: FollowAction; followBeats: number; warp: boolean }>,
+  ) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      const clip = track ? clipById(track, clipId) : null
+      if (!clip) return
+      Object.assign(clip, patch)
+    })
+  }
+
+  prepareMidiSlot(trackId: string, scene: number) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      this.ensureSlots(track, scene)
+      const existingId = track.midiSlots?.[scene]
+      let clip = existingId ? track.midiClips.find((item) => item.id === existingId) : undefined
+      if (!clip) {
+        const bars = this.project.recordBars ?? 0
+        const beats = bars > 0 ? bars * quartersPerBar(this.project.timeSignature) : 4
+        clip = {
+          id: uid('midi'),
+          name: 'Clip',
+          startBeat: 0,
+          durationBeats: beats,
+          notes: [],
+          slotOnly: true,
+          loop: true,
+        }
+        track.midiClips.push(clip)
+        track.midiSlots![scene] = clip.id
+      }
+      this.selectedMidiClipId = clip.id
+      this.selectedTrackId = trackId
+      this.sessionEdit = { trackId, scene }
+    })
+  }
+
+  placeInSlot(trackId: string, scene: number, clip: AudioClip) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'audio') return
+      this.ensureSlots(track, scene)
+      track.clips.push(clip)
+      track.audioSlots![scene] = clip.id
+      this.selectedClipId = clip.id
+      this.selectedTrackId = trackId
+      this.sessionSlot = null
+    })
+  }
+
+  captureToArrangement() {
+    if (this.remoteFollow || !this.captureLog.length) return
+    const events = this.captureLog
+    this.captureLog = []
+    this.mutate(() => {
+      for (const event of events) {
+        const track = this.track(event.trackId)
+        if (!track) continue
+        const audio = track.clips.find((clip) => clip.id === event.clipId)
+        if (audio) {
+          track.clips.push({
+            ...audio,
+            id: uid('clip'),
+            name: audio.name,
+            startSample: Math.max(0, Math.round(event.sample)),
+            slotOnly: false,
+          })
+        }
+        const midi = track.midiClips.find((clip) => clip.id === event.clipId)
+        if (midi) {
+          track.midiClips.push({
+            ...midi,
+            id: uid('midi'),
+            name: midi.name,
+            startBeat: samplesToBeats(event.sample, this.project.sampleRate, this.project.tempo),
+            slotOnly: false,
+            notes: midi.notes.map((note) => ({ ...note, id: uid('note') })),
+          })
+        }
+      }
+    })
+  }
+
+  private ensureSlots(track: Track, scene: number) {
+    const scenes = Math.max(SESSION_SCENES, scene + 1)
+    if (track.type === 'audio') {
+      if (!track.audioSlots) track.audioSlots = Array.from({ length: scenes }, (_, index) => track.clips[index]?.id ?? null)
+      while (track.audioSlots.length < scenes) track.audioSlots.push(null)
+      return
+    }
+    if (!track.midiSlots) track.midiSlots = Array.from({ length: scenes }, (_, index) => track.midiClips[index]?.id ?? null)
+    while (track.midiSlots.length < scenes) track.midiSlots.push(null)
   }
 
   loadProject(project: Project, buffers: Map<string, AudioAsset>) {
     this.past = []
     this.future = []
-    this.project = normalizeProject({ ...project, scale: normalizeScale(project.scale) })
+    this.project = normalizeProjectRack(normalizeProject(project))
     this.buffers = buffers
     this.selectedTrackId = project.tracks[0]?.id ?? null
     this.selectedClipId = null
@@ -885,6 +1324,136 @@ export class ProjectStore {
     const id = this.selectedTrackId
     if (!id) return
     this.updateTrack(id, { name, input, armed: true, monitor: true })
+  }
+
+  openRack(trackId: string) {
+    this.rackTrackId = this.rackTrackId === trackId ? null : trackId
+    this.rackFlip = false
+    this.emit()
+  }
+
+  flipRack() {
+    this.rackFlip = !this.rackFlip
+    this.emit()
+  }
+
+  addDevice(trackId: string, kind: DeviceKind) {
+    this.mutate(() => {
+      const rack = this.track(trackId)?.rack
+      if (rack) rack.devices.push(makeDevice(kind))
+    })
+  }
+
+  removeDevice(trackId: string, deviceId: string) {
+    this.mutate(() => {
+      const rack = this.track(trackId)?.rack
+      if (!rack || rack.devices.length < 2) return
+      rack.devices = rack.devices.filter((device) => device.id !== deviceId)
+      rack.cables = rack.cables.filter((cable) => cable.from !== deviceId && cable.to !== deviceId)
+    })
+  }
+
+  moveDevice(trackId: string, deviceId: string, direction: -1 | 1) {
+    this.mutate(() => {
+      const rack = this.track(trackId)?.rack
+      if (!rack) return
+      const index = rack.devices.findIndex((device) => device.id === deviceId)
+      const next = index + direction
+      if (index < 0 || next < 0 || next >= rack.devices.length) return
+      const [item] = rack.devices.splice(index, 1)
+      rack.devices.splice(next, 0, item)
+    })
+  }
+
+  setDeviceParam(trackId: string, deviceId: string, param: string, value: number) {
+    this.mutate(() => {
+      const device = this.track(trackId)?.rack?.devices.find((item) => item.id === deviceId)
+      if (device) device.params[param] = value
+    })
+  }
+
+  applyDevicePreset(trackId: string, deviceId: string, name: string) {
+    this.mutate(() => {
+      const device = this.track(trackId)?.rack?.devices.find((item) => item.id === deviceId)
+      if (!device) return
+      const factory = FACTORY_PRESETS[device.kind].find((item) => item.name === name)
+      const user = this.project.devicePresets.find((item) => item.kind === device.kind && item.name === name)
+      const params = factory?.params ?? user?.params
+      if (params) device.params = { ...defaults(device.kind), ...params }
+    })
+  }
+
+  saveDevicePreset(kind: DeviceKind, name: string, params: Record<string, number>) {
+    this.mutate(() => {
+      const existing = this.project.devicePresets.find((item) => item.kind === kind && item.name === name)
+      if (existing) existing.params = { ...params }
+      else this.project.devicePresets.push({ id: uid('preset'), kind, name, params: { ...params } })
+    })
+  }
+
+  addCable(trackId: string, from: string, fromPort: string, to: string, toPort: string) {
+    this.mutate(() => {
+      const rack = this.track(trackId)?.rack
+      if (!rack || from === to) return
+      rack.cables.push({ id: uid('cable'), from, fromPort, to, toPort, amount: 0.5 })
+    })
+  }
+
+  removeCable(trackId: string, cableId: string) {
+    this.mutate(() => {
+      const rack = this.track(trackId)?.rack
+      if (rack) rack.cables = rack.cables.filter((cable) => cable.id !== cableId)
+    })
+  }
+
+  saveRackPatch(trackId: string, name: string) {
+    this.mutate(() => {
+      const rack = this.track(trackId)?.rack
+      if (!rack) return
+      const patch = { id: uid('patch'), name, rack: cloneRack(rack) }
+      const existing = this.project.rackPatches.find((item) => item.name === name)
+      if (existing) existing.rack = patch.rack
+      else this.project.rackPatches.push(patch)
+    })
+  }
+
+  loadRackPatch(trackId: string, name: string) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      const patch = this.project.rackPatches.find((item) => item.name === name)
+      if (track && patch) track.rack = cloneRack(patch.rack)
+    })
+  }
+
+  addZone(trackId: string, deviceId: string, bufferId: string) {
+    this.mutate(() => {
+      const device = this.track(trackId)?.rack?.devices.find((item) => item.id === deviceId)
+      if (!device) return
+      const root = 60 + device.zones.length * 12
+      device.zones.push({ id: uid('zone'), bufferId, root, lo: root - 6, hi: root + 5, loopStart: 0, loopEnd: 1, tune: 0 })
+    })
+  }
+
+  toggleStep(trackId: string, deviceId: string, step: number, pad: number) {
+    this.mutate(() => {
+      const device = this.track(trackId)?.rack?.devices.find((item) => item.id === deviceId)
+      if (!device) return
+      const bit = 1 << pad
+      device.pattern[step] = (device.pattern[step] || 0) ^ bit
+    })
+  }
+
+  addRackPoint(deviceId: string, param: string, beat: number, value: number) {
+    this.mutate(() => {
+      let lane = this.project.rackAutomation.find((item) => item.deviceId === deviceId && item.param === param)
+      if (!lane) {
+        lane = { id: uid('auto'), deviceId, param, points: [] }
+        this.project.rackAutomation.push(lane)
+      }
+      const point = lane.points.find((item) => Math.abs(item.beat - beat) < 0.02)
+      if (point) point.value = value
+      else lane.points.push({ beat, value })
+    })
   }
 
   findClip(clipId: string) {

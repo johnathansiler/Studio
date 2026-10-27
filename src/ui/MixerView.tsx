@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import type { ProjectStore } from '../state/store'
+import { AddTrackButton } from './AddTrack'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 
 export function MixerView({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
@@ -8,7 +9,7 @@ export function MixerView({ store, engine }: { store: ProjectStore; engine: Audi
   return (
     <div className="mixer">
       {project.tracks.map((track) => (
-        <div className="strip" key={track.id}>
+        <div className="strip" data-track={track.id} key={track.id}>
           <h3 style={{ color: track.color }}>{track.name}</h3>
           <RouteFields store={store} trackId={track.id} />
           <InsertList store={store} trackId={track.id} />
@@ -24,6 +25,7 @@ export function MixerView({ store, engine }: { store: ProjectStore; engine: Audi
           </div>
         </div>
       ))}
+      <AddTrackButton store={store} />
       <div className="strip master">
         <h3>Master</h3>
         <InsertList store={store} trackId="master" />

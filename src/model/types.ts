@@ -1,6 +1,12 @@
+import type { DevicePreset, RackAutomation, RackPatch, RackState } from './rack'
 import { defaultScale, type ScaleState } from './scale'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
+export type TrackInstrument = 'synth' | 'sampler' | '808' | 'drum-machine' | 'none'
+
+export function isLocalInput(input: string) {
+  return input === 'mic' || input === 'line'
+}
 
 export interface SampleZone {
   id: string
@@ -92,7 +98,10 @@ export interface UserPreset {
 }
 export type InsertType = 'eq' | 'compressor' | 'delay' | 'reverb'
 export type ClipSource = 'local' | 'import' | 'demo' | 'guide' | 'aligned-take' | 'midi'
-export type StretchMode = 'pro' | 'beats' | 'tonal' | 'voice' | 'speech' | 'tape'
+export type LaunchQuant = 'none' | '1/16' | '1/4' | '1bar' | '2bar' | '4bar'
+export type LaunchMode = 'trigger' | 'gate' | 'toggle' | 'repeat'
+export type FollowAction = 'none' | 'next' | 'prev' | 'any' | 'other' | 'stop'
+export type StretchMode = 'beats' | 'tonal' | 'voice' | 'tape'
 
 /** Source sample locked to a musical beat. Targets are beats from the clip start. */
 export interface WarpMarker {
@@ -101,14 +110,12 @@ export interface WarpMarker {
   target: number
 }
 
-/** Non-destructive time-stretch used by the sampler's tempo-synced playback. */
+/** Non-destructive time-stretch. Playback and export render from these fields. */
 export interface ClipStretch {
   sourceSamples: number
   semitones: number
   cents: number
   mode: StretchMode
-  /** Pitch shift keeps the spectral envelope. Voice and speech default to on. */
-  formant?: boolean
   followTempo: boolean
   sourceBpm: number | null
   markers: WarpMarker[]
@@ -140,7 +147,18 @@ export interface AudioClip {
   peerId?: string
   takeId?: string
   alignmentMs?: number
+  quant?: LaunchQuant
+  mode?: LaunchMode
+  loop?: boolean
+  legato?: boolean
+  follow?: FollowAction
+  followBeats?: number
+  /** Tempo-follow. Missing means on when durationBeats is set. */
+  warp?: boolean
+  durationBeats?: number
   stretch?: ClipStretch
+  /** Session slot only, until Capture copies it onto the arrangement. */
+  slotOnly?: boolean
 }
 
 export interface MidiNote {
@@ -157,6 +175,13 @@ export interface MidiClip {
   startBeat: number
   durationBeats: number
   notes: MidiNote[]
+  quant?: LaunchQuant
+  mode?: LaunchMode
+  loop?: boolean
+  legato?: boolean
+  follow?: FollowAction
+  followBeats?: number
+  slotOnly?: boolean
 }
 
 export interface Track {
@@ -171,6 +196,10 @@ export interface Track {
   armed: boolean
   monitor: boolean
   input: string
+  /** 1 is mono, 2 is stereo. Audio tracks only. */
+  channels?: 1 | 2
+  /** Chosen instrument for a MIDI track. */
+  instrument?: TrackInstrument
   inserts: Insert[]
   plugins: PluginInstance[]
   sends: Send[]
@@ -180,10 +209,18 @@ export interface Track {
   groupId: string | null
   clips: AudioClip[]
   midiClips: MidiClip[]
+  /** Modular instrument rack. Present on instrument tracks. */
+  rack?: RackState
+  /** Scene index → clip id. Missing means scene N is clips[N]. */
+  audioSlots?: (string | null)[]
+  midiSlots?: (string | null)[]
 }
 
+/** Bump when saved documents change shape. migrateProject opens older numbers. */
+export const SCHEMA_VERSION = 2
+
 export interface Project {
-  version: 1
+  version: number
   id: string
   name: string
   sampleRate: number
@@ -201,6 +238,14 @@ export interface Project {
   metronomeEnabled: boolean
   countIn: boolean
   snap: boolean
+  devicePresets: DevicePreset[]
+  rackPatches: RackPatch[]
+  /** Parameter lanes for devices in the modular rack. */
+  rackAutomation: RackAutomation[]
+  /** Global clip launch grid. A clip quant overrides it. */
+  launchQuant?: LaunchQuant
+  /** 0 records until stop. A positive count trims a session take to that many bars. */
+  recordBars?: number
   /** Tempo changes. Empty keeps `tempo` for the whole arrangement. */
   tempoMap?: TempoPoint[]
   /** Key, scale, and chord-pad performance settings. */
@@ -260,7 +305,7 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
   const keys = makeTrack({ name: 'Keys', type: 'midi', color: TRACK_COLORS[2], input: 'none' })
   const bar = Math.round(sampleRate * 2) // 1 bar at 120bpm is 2s; tempo applied by caller via loop length
   return {
-    version: 1,
+    version: SCHEMA_VERSION,
     id: uid('prj'),
     name,
     sampleRate,
@@ -278,6 +323,11 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     metronomeEnabled: true,
     countIn: true,
     snap: true,
+    devicePresets: [],
+    rackPatches: [],
+    rackAutomation: [],
+    launchQuant: '1bar',
+    recordBars: 4,
     scale: defaultScale(),
   }
 }

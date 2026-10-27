@@ -13,11 +13,9 @@ interface Profile {
 }
 
 const PROFILES: Record<StretchMode, Profile> = {
-  pro: { fft: 4096, transient: 0.2 },
   tonal: { fft: 8192, transient: 0.07 },
   beats: { fft: 1024, transient: 0.42 },
   voice: { fft: 2048, transient: 0.18 },
-  speech: { fft: 1024, transient: 0.28 },
   tape: { fft: 2048, transient: 0.18 },
 }
 
@@ -89,7 +87,7 @@ export function phaseStretch(input: Float32Array, outLen: number, sampleRate: nu
     if (length > input.length) output[length - 1] = input[input.length - 1] || 0
     return output
   }
-  const profile = PROFILES[mode] ?? PROFILES.pro
+  const profile = PROFILES[mode] ?? PROFILES.tonal
   let size = nextPow2(Math.min(8192, Math.max(128, Math.round(profile.fft * (sampleRate / 48000)))))
   while (size > input.length && size > 128) size >>= 1
   const synthHop = Math.max(16, size >> 2)
