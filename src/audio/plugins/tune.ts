@@ -8,12 +8,17 @@ export function createTune(sampleRate: number): Processor {
   const psola = new Psola(sampleRate, 2)
   let smoothed = 0
   let center = 0
+  const trace = new Float32Array(64)
+  let cursor = 0
   return {
     latencySamples: 0,
+    trace,
     reset() {
       psola.reset()
       smoothed = 0
       center = 0
+      trace.fill(0)
+      cursor = 0
     },
     process(input, output, params, ctx) {
       if ((params.amount ?? 0) <= 0.001) {
@@ -26,11 +31,15 @@ export function createTune(sampleRate: number): Processor {
       psola.process(
         input,
         output,
-        (frame) => targetHz(frame, params, ctx, () => smoothed, (value) => {
+        (frame) => {
+          trace[cursor % trace.length] = frame.hz
+          cursor += 1
+          return targetHz(frame, params, ctx, () => smoothed, (value) => {
           smoothed = value
         }, () => center, (value) => {
           center = value
-        }),
+        })
+        },
         ctx.sampleRate,
         params.minHz || 80,
         params.maxHz || 900,
@@ -57,7 +66,12 @@ function targetHz(
   setCenter(tracked + (frame.hz - tracked) * 0.08)
   const human = clamp(params.humanize ?? 0, 0, 1)
   const amount = clamp(params.amount ?? 0, 0, 1)
-  const kept = goal + human * (frame.hz - goal)
+  const flex = clamp(params.flex ?? 0, 0, 1)
+  const centsOff = 1200 * Math.log2(frame.hz / goal)
+  const window = flex * 40
+  const pull = Math.sign(centsOff) * Math.max(0, Math.abs(centsOff) - window)
+  const flexed = frame.hz * 2 ** (-pull / 1200)
+  const kept = flexed + human * (frame.hz - flexed)
   const aimed = frame.hz + amount * (kept - frame.hz)
   const speed = clamp(params.retune ?? 0.5, 0.02, 1)
   const prev = smoothed() || frame.hz
