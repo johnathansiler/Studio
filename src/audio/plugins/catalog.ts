@@ -1,3 +1,4 @@
+import { emptyLooper, emptySampler } from '../sample/engine'
 import type { AutomationLane, Insert, PluginInstance, Project, UserPreset } from '../../model/types'
 import { uid } from '../../model/types'
 import { normalizeScale } from '../../model/scale'
@@ -159,6 +160,43 @@ export const CATALOG: PluginDescriptor[] = [
       param('mix', 'Mix', 0, 1, 0, ''),
     ],
   },
+  {
+    id: 'sampler',
+    name: 'Sampler',
+    version: VERSION,
+    params: [
+      param('gain', 'Gain', 0, 1, 0.8, ''),
+      param('pitch', 'Pitch', -24, 24, 0, 'st'),
+      param('pan', 'Pan', -1, 1, 0, ''),
+      param('attack', 'Attack', 1, 2000, 4, 'ms'),
+      param('decay', 'Decay', 5, 3000, 200, 'ms'),
+      param('sustain', 'Sustain', 0, 1, 0.8, ''),
+      param('release', 'Release', 5, 4000, 180, 'ms'),
+      param('cutoff', 'Cutoff', 80, 16000, 16000, 'Hz'),
+      param('res', 'Res', 0, 0.9, 0, ''),
+      param('stretch', 'Stretch', 0, 1, 1, ''),
+      param('keys', 'Keys', 0, 1, 0, ''),
+      param('mono', 'Mono', 0, 1, 0, ''),
+      param('record', 'Rec', 0, 1, 0, ''),
+      param('loopMode', 'Loop', 0, 2, 0, ''),
+      param('crossfade', 'Fade', 0, 0.5, 0.02, ''),
+      param('sensitivity', 'Sense', 0, 1, 0.45, ''),
+    ],
+  },
+  {
+    id: 'looper',
+    name: 'Looper',
+    version: VERSION,
+    params: [
+      param('transport', 'Play', 0, 3, 0, ''),
+      param('bars', 'Bars', 1, 8, 1, ''),
+      param('sync', 'Sync', 0, 1, 1, ''),
+      param('feedback', 'Decay', 0, 1, 0.85, ''),
+      param('level', 'Level', 0, 1, 0.9, ''),
+      param('speed', 'Speed', 0.5, 2, 1, ''),
+      param('reverse', 'Reverse', 0, 1, 0, ''),
+    ],
+  },
 ]
 
 export const FACTORY: Record<string, FactoryPreset[]> = {
@@ -218,6 +256,16 @@ export const FACTORY: Record<string, FactoryPreset[]> = {
     { name: 'Fifth', params: { semis: 0, harmony: 7, harmonyMix: 0.6, mix: 0.8 } },
     { name: 'Double', params: { semis: 0.1, harmony: 12, harmonyMix: 0.35, mix: 0.5 } },
   ],
+  sampler: [
+    { name: 'Loop', params: { stretch: 1, keys: 0, loopMode: 0, crossfade: 0.04 } },
+    { name: 'One shot', params: { stretch: 0, loopMode: 2, attack: 1, sustain: 1, release: 40 } },
+    { name: 'Keys', params: { keys: 1, stretch: 0, loopMode: 0, attack: 6, sustain: 0.85 } },
+  ],
+  looper: [
+    { name: '1 bar', params: { sync: 1, bars: 1, feedback: 0.9, transport: 0 } },
+    { name: '4 bars', params: { sync: 1, bars: 4, feedback: 0.85 } },
+    { name: 'Free', params: { sync: 0, bars: 1, feedback: 1 } },
+  ],
 }
 
 export function descriptor(id: string) {
@@ -244,6 +292,8 @@ export function createPlugin(pluginId: string, preset?: string): PluginInstance 
     wet: 1,
     params,
     sidechain: '',
+    sampler: pluginId === 'sampler' ? emptySampler() : undefined,
+    looper: pluginId === 'looper' ? emptyLooper() : undefined,
   }
 }
 
@@ -260,6 +310,12 @@ export function tuneLatency(sampleRate: number) {
   return span + Math.floor(span / 2)
 }
 
+function fillInstrument(plugin: PluginInstance): PluginInstance {
+  if (plugin.pluginId === 'sampler' && !plugin.sampler) plugin.sampler = emptySampler()
+  if (plugin.pluginId === 'looper' && !plugin.looper) plugin.looper = emptyLooper()
+  return plugin
+}
+
 export function normalizeProject(project: Project): Project {
   project.scale = normalizeScale(project.scale)
   project.masterPlugins = project.masterPlugins ?? []
@@ -267,7 +323,7 @@ export function normalizeProject(project: Project): Project {
   project.presets = project.presets ?? []
   project.masterInserts = project.masterInserts ?? []
   for (const track of project.tracks) {
-    track.plugins = track.plugins ?? []
+    track.plugins = (track.plugins ?? []).map(fillInstrument)
     track.sends = track.sends ?? []
     track.inserts = track.inserts ?? []
     track.output = track.output ?? null
@@ -277,6 +333,7 @@ export function normalizeProject(project: Project): Project {
       track.inserts = []
     }
   }
+  project.masterPlugins = (project.masterPlugins ?? []).map(fillInstrument)
   if (project.masterInserts.length && project.masterPlugins.length === 0) {
     for (const insert of project.masterInserts) project.masterPlugins.push(fromLegacy(insert))
     project.masterInserts = []

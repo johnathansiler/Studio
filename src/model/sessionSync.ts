@@ -91,8 +91,17 @@ export function referencedBufferIds(project: Project): string[] {
   const ids = new Set<string>()
   for (const track of project.tracks) {
     for (const clip of track.clips) ids.add(clip.bufferId)
+    for (const plugin of track.plugins ?? []) collectInstrumentBuffers(plugin, ids)
   }
+  for (const plugin of project.masterPlugins ?? []) collectInstrumentBuffers(plugin, ids)
   return [...ids]
+}
+
+function collectInstrumentBuffers(plugin: { sampler?: { bufferId: string; slices: { bufferId: string }[] }; looper?: { layers: { bufferId: string }[]; undone: { bufferId: string }[] } }, ids: Set<string>) {
+  if (plugin.sampler?.bufferId) ids.add(plugin.sampler.bufferId)
+  for (const slice of plugin.sampler?.slices ?? []) if (slice.bufferId) ids.add(slice.bufferId)
+  for (const layer of plugin.looper?.layers ?? []) if (layer.bufferId) ids.add(layer.bufferId)
+  for (const layer of plugin.looper?.undone ?? []) if (layer.bufferId) ids.add(layer.bufferId)
 }
 
 /** Musical state the guest must mirror. Ignores selection and undo history. */
@@ -121,6 +130,16 @@ export function arrangementDigest(project: Project): string {
       color: track.color,
       clips: track.clips.map((clip) => [clip.id, clip.bufferId, clip.startSample, clip.offsetSamples, clip.durationSamples, clip.gain]),
       midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length]),
+      instruments: (track.plugins ?? []).map((plugin) => [
+        plugin.id,
+        plugin.pluginId,
+        plugin.sampler?.bufferId ?? '',
+        plugin.sampler?.slices.length ?? 0,
+        plugin.looper?.transport ?? 0,
+        plugin.looper?.startBeat ?? 0,
+        plugin.looper?.lengthSamples ?? 0,
+        plugin.looper?.layers.length ?? 0,
+      ]),
     })),
   })
 }

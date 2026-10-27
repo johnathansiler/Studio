@@ -13,6 +13,8 @@ const loaders: Record<string, () => Promise<{ default: PluginModule }>> = {
   reverb: () => import('./reverb'),
   tune: () => import('./tune'),
   pitch: () => import('./pitch'),
+  sampler: () => import('./sampler'),
+  looper: () => import('./looper'),
 }
 
 const cache = new Map<string, PluginModule>()

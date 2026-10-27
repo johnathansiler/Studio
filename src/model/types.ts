@@ -2,6 +2,55 @@ import { defaultScale, type ScaleState } from './scale'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
 
+export interface SampleZone {
+  id: string
+  bufferId: string
+  root: number
+  lo: number
+  hi: number
+  loopStart: number
+  loopEnd: number
+  tune: number
+  gain: number
+  pan: number
+  reverse: boolean
+  choke: number
+}
+
+export interface SamplerState {
+  bufferId: string
+  start: number
+  end: number
+  loopStart: number
+  loopEnd: number
+  fadeIn: number
+  fadeOut: number
+  crossfade: number
+  loopMode: number
+  root: number
+  slices: SampleZone[]
+}
+
+export interface LooperLayer {
+  id: string
+  bufferId: string
+  gain: number
+  mute: boolean
+  reverse: boolean
+  speed: number
+}
+
+export interface LooperState {
+  layers: LooperLayer[]
+  undone: LooperLayer[]
+  sync: boolean
+  bars: number
+  feedback: number
+  transport: number
+  startBeat: number
+  lengthSamples: number
+}
+
 export interface PluginInstance {
   id: string
   pluginId: string
@@ -11,6 +60,8 @@ export interface PluginInstance {
   params: Record<string, number>
   /** Sidechain source track or bus id. Empty uses the plugin input. */
   sidechain: string
+  sampler?: SamplerState
+  looper?: LooperState
 }
 
 export interface Send {
@@ -41,6 +92,32 @@ export interface UserPreset {
 }
 export type InsertType = 'eq' | 'compressor' | 'delay' | 'reverb'
 export type ClipSource = 'local' | 'import' | 'demo' | 'guide' | 'aligned-take' | 'midi'
+export type StretchMode = 'pro' | 'beats' | 'tonal' | 'voice' | 'speech' | 'tape'
+
+/** Source sample locked to a musical beat. Targets are beats from the clip start. */
+export interface WarpMarker {
+  id: string
+  source: number
+  target: number
+}
+
+/** Non-destructive time-stretch used by the sampler's tempo-synced playback. */
+export interface ClipStretch {
+  sourceSamples: number
+  semitones: number
+  cents: number
+  mode: StretchMode
+  /** Pitch shift keeps the spectral envelope. Voice and speech default to on. */
+  formant?: boolean
+  followTempo: boolean
+  sourceBpm: number | null
+  markers: WarpMarker[]
+}
+
+export interface TempoPoint {
+  beat: number
+  bpm: number
+}
 
 export interface Insert {
   id: string
@@ -63,6 +140,7 @@ export interface AudioClip {
   peerId?: string
   takeId?: string
   alignmentMs?: number
+  stretch?: ClipStretch
 }
 
 export interface MidiNote {
@@ -123,6 +201,8 @@ export interface Project {
   metronomeEnabled: boolean
   countIn: boolean
   snap: boolean
+  /** Tempo changes. Empty keeps `tempo` for the whole arrangement. */
+  tempoMap?: TempoPoint[]
   /** Key, scale, and chord-pad performance settings. */
   scale?: ScaleState
   /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */

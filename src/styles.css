@@ -198,7 +198,17 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .plugin-sheet .text-btn.on { border-color: rgba(115, 196, 143, 0.6); color: var(--text); }
 .plugin-sheet .wet { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .plugin-sheet .spectrum { width: 100%; height: 64px; background: #101814; border-radius: 8px; }
+.sample-panel { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.sample-panel .pads { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.sample-panel .pads.keys { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+.sample-panel .file { display: none; }
+.sample-panel select { min-width: 0; max-width: 100%; }
+.shell.phone .sample-panel .pads button,
+.shell.phone .sample-panel .text-btn,
+.shell.fold .sample-panel .pads button,
+.shell.fold .sample-panel .text-btn { min-height: 44px; }
 .shell.phone .plugin-sheet { bottom: calc(48px + env(safe-area-inset-bottom)); max-height: 42vh; }
+.shell.phone .plugin-sheet:has(.sample-panel) { max-height: 74vh; }
 .fader-row { display: flex; gap: 8px; align-items: stretch; height: 180px; }
 .fader-row input[type='range'] { writing-mode: vertical-lr; direction: rtl; width: 28px; }
 .meter { width: 10px; border-radius: 99px; background: #0c110f; border: 1px solid var(--line); position: relative; overflow: hidden; }
