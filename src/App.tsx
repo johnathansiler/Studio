@@ -4,6 +4,7 @@ import { AudioEngine } from './audio/engine'
 import { unpackProject } from './model/archive'
 import { renderDemoLoop } from './model/demo'
 import { channelConstraints, inputChannel, mediaChannelCount, punchWindow, sliceCapture } from './model/comp'
+import { inspectClip } from './audio/stretch/engine'
 import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } from './model/types'
 import type { IncomingTake } from './remote/session'
 import { SessionClient } from './remote/session'
@@ -653,6 +654,7 @@ export function App() {
           warp: true,
           loop: true,
           slotOnly: true,
+          stretch: inspectClip(capture.channels[0] ?? new Float32Array(), capture.sampleRate, store.project.tempo),
         }
         store.placeInSlot(track.id, slot.scene, clip)
         if (capture.source === 'guide' && isSilentTake(capture.channels)) {
@@ -711,6 +713,7 @@ export function App() {
           source: lane.source,
           peerId: capture.peerId,
           takeId: capture.takeId,
+          stretch: inspectClip(channels[0] ?? new Float32Array(), capture.sampleRate, store.project.tempo),
         }
         store.addAudioClip(track.id, clip)
         if (capture.source === 'local' && compensation > 0) {
@@ -929,6 +932,7 @@ export function App() {
         fadeOutSamples: 0,
         gain: 1,
         source: 'import',
+        stretch: inspectClip(channels[0] ?? new Float32Array(), decoded.sampleRate, store.project.tempo),
       })
     }
   }
