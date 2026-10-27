@@ -10,7 +10,7 @@ import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Proj
 import { renderPattern, type RenderedHit } from '../model/steps'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToMusical } from '../model/time'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
-import { encodeWav } from '../model/wav'
+import { encodeWav, linearResample } from '../model/wav'
 import { scaleById } from '../model/scale'
 import { LiveRack } from './liveRack'
 import { renderGraph } from './renderGraph'
@@ -75,6 +75,11 @@ export class AudioEngine {
   private monitorDelay: DelayNode | null = null
   private remoteDelay: DelayNode | null = null
   private masterGain: GainNode | null = null
+  /** Loudness-matched dry comparison. 1 leaves the master fader alone. */
+  compareGain = 1
+  private referenceOn = false
+  private referenceSource: AudioBufferSourceNode | null = null
+  private referenceGain: GainNode | null = null
   private speakerGain: GainNode | null = null
   private talkBus: GainNode | null = null
   private metroGain: GainNode | null = null
@@ -369,7 +374,7 @@ export class AudioEngine {
       strip.mute.gain.setTargetAtTime(audible ? 1 : 0, now, 0.01)
     }
     applyInserts(this.ctx, this.masterStrip, project.masterInserts)
-    this.masterGain.gain.setTargetAtTime(project.masterVolume, this.ctx.currentTime, 0.015)
+    this.applyMasterGain()
     this.rack.clock = () => this.currentTimelineSample()
     this.rack.route(this.ctx, project, this.strips, this.masterStrip, this.localBus, this.remoteBus)
     this.routeLocalMic()
@@ -401,6 +406,63 @@ export class AudioEngine {
   releaseRack(trackId: string, pitch: number) {
     const when = this.ctx?.currentTime ?? 0
     this.rackHost.note(trackId, pitch, 0, when)
+  }
+
+  setCompareGain(gain: number) {
+    this.compareGain = Number.isFinite(gain) && gain > 0 ? Math.min(16, gain) : 1
+    this.applyMasterGain()
+  }
+
+  /** Play a loudness-matched reference through the speakers and duck the mix. */
+  audition(channels: Float32Array[], gain: number) {
+    this.stopAudition()
+    const ctx = this.ctx
+    const leftIn = channels[0]
+    if (!ctx || !this.speakerGain || !leftIn?.length) return
+    const rate = ctx.sampleRate
+    const left = rate === this.sampleRate ? leftIn : linearResample(leftIn, this.sampleRate, rate)
+    const rightIn = channels[1] ?? leftIn
+    const right = rate === this.sampleRate ? rightIn : linearResample(rightIn, this.sampleRate, rate)
+    const buffer = ctx.createBuffer(2, left.length, rate)
+    buffer.getChannelData(0).set(left)
+    buffer.getChannelData(1).set(right.subarray(0, left.length))
+    const source = ctx.createBufferSource()
+    source.buffer = buffer
+    source.loop = true
+    const node = ctx.createGain()
+    node.gain.value = Number.isFinite(gain) && gain > 0 ? gain : 1
+    source.connect(node)
+    node.connect(this.speakerGain)
+    source.start()
+    this.referenceSource = source
+    this.referenceGain = node
+    this.referenceOn = true
+    this.applyMasterGain()
+  }
+
+  stopAudition() {
+    try { this.referenceSource?.stop() } catch { /* already stopped */ }
+    try { this.referenceSource?.disconnect() } catch { /* already gone */ }
+    try { this.referenceGain?.disconnect() } catch { /* already gone */ }
+    this.referenceSource = null
+    this.referenceGain = null
+    if (!this.referenceOn) return
+    this.referenceOn = false
+    this.applyMasterGain()
+  }
+
+  masterReading() {
+    return this.rack.reading()
+  }
+
+  masterScope() {
+    return this.rack.scope()
+  }
+
+  private applyMasterGain() {
+    if (!this.ctx || !this.masterGain || !this.project) return
+    const gain = this.referenceOn ? 0 : this.project.masterVolume * this.compareGain
+    this.masterGain.gain.setTargetAtTime(gain, this.ctx.currentTime, 0.015)
   }
 
   /** CPU load and master loudness. Loudness is read from the master analyser and includes the master fader. */

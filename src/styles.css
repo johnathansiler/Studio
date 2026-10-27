@@ -317,6 +317,29 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .clip-sheet .text-btn.on { border-color: rgba(115, 196, 143, 0.6); color: var(--text); }
 .shell.phone .clip-sheet { bottom: calc(48px + env(safe-area-inset-bottom)); max-height: 42vh; }
 .shell.phone .clip-sheet input, .shell.phone .clip-sheet select, .shell.phone .clip-sheet .text-btn { min-height: 44px; }
+.master-open { width: 100%; text-align: center; }
+.master-meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.master-meters span { min-width: 0; font-size: 10px; color: var(--muted); }
+.master-meters b { display: block; color: var(--text); font-size: 14px; font-variant-numeric: tabular-nums; }
+.master-scope { display: grid; grid-template-columns: minmax(0, 1fr) 72px; gap: 8px; }
+.master-sheet { min-width: 0; overflow-x: hidden; }
+.master-sheet header button { min-width: 44px; min-height: 44px; }
+.master-sheet select, .master-sheet .file-btn, .master-sheet button { min-height: 44px; }
+.master-sheet .row { min-width: 0; }
+.master-sheet input, .master-sheet select { min-width: 0; max-width: 100%; }
+.master-sheet .row input { flex: 1 1 8rem; }
+.verdict.pass { color: #73c48f; }
+.verdict.fail { color: #ef6b6b; }
+.verdict.wait { color: var(--muted); }
+.file-btn { position: relative; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; }
+.file-btn input { position: absolute; inset: 0; opacity: 0; }
+.goniometer, .spectrogram { width: 100%; background: #101814; border-radius: 8px; }
+.shell.phone .master-sheet { max-height: min(68dvh, 560px); }
+.shell.phone .master-sheet input, .shell.phone .master-sheet select, .shell.phone .file-btn { min-height: 44px; font-size: 16px; }
+.shell.phone.land .master-sheet { max-height: calc(100dvh - 96px); }
+.shell.phone.land .master-scope { grid-template-columns: minmax(0, 1fr) 56px; }
+.shell.phone.land .spectrum, .shell.phone.land .goniometer { height: 48px; }
+.shell.fold .master-sheet { width: min(420px, 46vw); }
 .fader-row { display: flex; gap: 8px; align-items: stretch; height: 180px; }
 .fader-row input[type='range'] { writing-mode: vertical-lr; direction: rtl; width: 28px; }
 .meter { width: 10px; border-radius: 99px; background: #0c110f; border: 1px solid var(--line); position: relative; overflow: hidden; }
@@ -863,6 +886,13 @@ html[data-posture="tabletop"] .shell .plugin-sheet {
   width: auto;
   max-height: 46dvh;
   border-left: 0;
+}
+html[data-posture="tabletop"] .shell .master-sheet {
+  top: 56px;
+  bottom: auto;
+  max-height: 42dvh;
+  border-top: 0;
+  border-bottom: 1px solid var(--line);
 }
 
 @media (vertical-viewport-segments: 2) {

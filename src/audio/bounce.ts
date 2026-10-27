@@ -11,6 +11,8 @@ import { zipFiles } from '../model/zip'
 import { packProject } from '../model/archive'
 import { encodeMp3, keyLabel } from './mp3'
 import { normalizeAudio } from './normalize'
+import { limitBuffer } from './master/process'
+import { measureProgram } from './master/meter'
 import type { Processor } from './plugins/types'
 
 export class BounceCancelled extends Error {
@@ -45,6 +47,11 @@ export interface BounceJob {
   artist: string
   artwork: Uint8Array | null
   projectAudio: 'wav' | 'flac'
+  /** Keep the file at or under this true-peak ceiling after loudness normalize. */
+  truePeakCeiling?: number
+  /** Write the loudness report, and the ISRC when one is set. */
+  isrc?: string
+  report?: boolean
 }
 
 export interface BounceFile {
@@ -58,6 +65,8 @@ export function tailSamples(project: Project, sampleRate: number) {
   const plugins = [...project.masterPlugins, ...project.tracks.flatMap((track) => track.plugins)]
   for (const plugin of plugins) {
     if (!plugin.enabled || plugin.wet <= 0) continue
+    if (plugin.pluginId === 'brick' || plugin.pluginId === 'maxim') seconds = Math.max(seconds, ((plugin.params.lookahead || 5) / 1000) + 0.02)
+    if (plugin.pluginId === 'meq' && (plugin.params.phase ?? 1) >= 0.5) seconds = Math.max(seconds, 0.04)
     if (plugin.pluginId === 'delay') {
       const time = Math.max(0.001, (plugin.params.time ?? 250) / 1000)
       const feedback = Math.min(0.95, Math.max(0, plugin.params.feedback ?? 0.35))
@@ -124,7 +133,9 @@ export async function runBounce(job: BounceJob, onProgress?: (progress: number) 
   onProgress?.(0.7)
   stop()
   const rate = job.kind === 'mp3' && job.sampleRate !== 44100 ? 48000 : job.sampleRate
-  const channels = resample(finish(rendered.master, job), job.project.sampleRate, rate)
+  let channels = resample(finish(rendered.master, job), job.project.sampleRate, rate)
+  if (job.truePeakCeiling != null && Number.isFinite(job.truePeakCeiling)) channels = limitBuffer(channels, rate, job.truePeakCeiling, true)
+  const note = job.report ? loudnessNote(channels, rate, job.isrc) : ''
   onProgress?.(0.85)
   if (job.kind === 'flac') {
     onProgress?.(1)
@@ -135,13 +146,19 @@ export async function runBounce(job: BounceJob, onProgress?: (progress: number) 
       mode: job.mp3Mode,
       bitrate: job.mp3Bitrate,
       quality: job.mp3Quality,
-      tags: { title: job.title || job.project.name, artist: job.artist, bpm: job.project.tempo, key: keyLabel(job.project), artwork: job.artwork },
+      tags: { title: job.title || job.project.name, artist: job.artist, bpm: job.project.tempo, key: keyLabel(job.project), artwork: job.artwork, comment: note, isrc: job.isrc },
     })
     onProgress?.(1)
     return [{ name: `${fileSlug(job.project.name)}.mp3`, mime: 'audio/mpeg', bytes }]
   }
   onProgress?.(1)
-  return [{ name: `${fileSlug(job.project.name)}.wav`, mime: 'audio/wav', bytes: new Uint8Array(encodeWav(channels, rate, { bits: job.bits, dither: job.dither })) }]
+  return [{ name: `${fileSlug(job.project.name)}.wav`, mime: 'audio/wav', bytes: new Uint8Array(encodeWav(channels, rate, { bits: job.bits, dither: job.dither, comment: note })) }]
+}
+
+function loudnessNote(channels: Float32Array[], sampleRate: number, isrc?: string) {
+  const reading = measureProgram(channels[0] ?? new Float32Array(0), channels[1] ?? null, sampleRate)
+  const code = isrc?.trim() ? ` ISRC ${isrc.trim()}.` : ''
+  return `Integrated ${reading.integrated.toFixed(1)} LUFS, short-term ${reading.shortTerm.toFixed(1)} LUFS, LRA ${reading.lra.toFixed(1)} LU, true peak ${reading.truePeak.toFixed(2)} dBTP.${code}`
 }
 
 function finish(channels: Float32Array[], job: BounceJob) {
