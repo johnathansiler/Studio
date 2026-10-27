@@ -773,12 +773,12 @@ export function App() {
             {showRoll && form !== 'fold' && <PianoRoll store={store} engine={engine} />}
           </div>
         )}
-                {form === 'fold' && showRoll && surface === 'studio' && (
+        {form === 'fold' && showRoll && surface === 'studio' && (
           <div className="side-editor">
             <PianoRoll store={store} engine={engine} />
           </div>
         )}
-{(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && showRoll) && (
+        {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && showRoll) && (
         <div
           className="dock-slot"
           onPointerDown={(event) => {
