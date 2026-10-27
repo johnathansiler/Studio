@@ -2,11 +2,12 @@ import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, 
 import { demoMidiNotes } from '../model/demo'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
 import { findCycle, MASTER } from '../audio/routing'
+import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { cloneRack, defaults, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleState } from '../model/scale'
 import { createEmptyProject, defaultInsert, makeTrack, uid, TRACK_COLORS } from '../model/types'
 import type { AudioAsset, AudioClip, InsertType, MidiClip, MidiNote, PluginInstance, Project, Track } from '../model/types'
-import { beatsToSamples } from '../model/time'
+import { beatsToSamples, quartersPerBar } from '../model/time'
 import { linearResample } from '../model/wav'
 
 export type WorkspaceView = 'arrange' | 'mix' | 'session'
@@ -34,6 +35,9 @@ export class ProjectStore {
   remoteFollow = false
   rackTrackId: string | null = null
   rackFlip = false
+  /** Letter keys play notes while this is on, so tap-tempo stays off T. */
+  keyboardMidi = false
+  private tempoGroup = false
   toasts: Toast[] = []
   version = 0
   private past: string[] = []
@@ -80,6 +84,7 @@ export class ProjectStore {
 
   undo() {
     if (this.remoteFollow) return
+    this.tempoGroup = false
     const prev = this.past.pop()
     if (!prev) return
     this.future.push(JSON.stringify(this.project))
@@ -89,6 +94,7 @@ export class ProjectStore {
 
   redo() {
     if (this.remoteFollow) return
+    this.tempoGroup = false
     const next = this.future.pop()
     if (!next) return
     this.past.push(JSON.stringify(this.project))
@@ -180,10 +186,22 @@ export class ProjectStore {
     })
   }
 
-  setTempo(tempo: number) {
+  setTempo(tempo: number, group = false) {
+    const value = clamp(Math.round(tempo * 10) / 10, 30, 300)
+    if (group && this.tempoGroup) {
+      if (this.remoteFollow || this.project.tempo === value) return
+      this.project.tempo = value
+      this.emit()
+      return
+    }
     this.mutate(() => {
-      this.project.tempo = clamp(tempo, 40, 300)
+      this.project.tempo = value
     })
+    this.tempoGroup = group
+  }
+
+  endTempoGroup() {
+    this.tempoGroup = false
   }
 
   setTimeSignature(numerator: number, denominator: number) {
@@ -212,17 +230,63 @@ export class ProjectStore {
     })
   }
 
-  addTrack(type: Track['type']) {
+  addTracks(spec: AddTrackSpec) {
+    const ids: string[] = []
     this.mutate(() => {
-      const index = this.project.tracks.length
-      const track = makeTrack({
-        name: type === 'midi' ? `Inst ${index + 1}` : type === 'bus' ? `Bus ${index + 1}` : type === 'group' ? `Group ${index + 1}` : `Audio ${index + 1}`,
-        type,
-        color: TRACK_COLORS[index % TRACK_COLORS.length],
+      const made = tracksFor(spec, this.project.tracks)
+      for (const track of made) if (track.type === 'midi') normalizeTrackRack(track)
+      const at = insertIndex(this.project.tracks, this.selectedTrackId)
+      this.project.tracks.splice(at, 0, ...made)
+      this.selectedTrackId = made[0]?.id ?? this.selectedTrackId
+      ids.push(...made.map((track) => track.id))
+    })
+    return ids
+  }
+
+  addTrack(type: Track['type']) {
+    if (type === 'group') {
+      this.mutate(() => {
+        const index = this.project.tracks.length
+        const track = makeTrack({
+          name: `Group ${index + 1}`,
+          type,
+          color: TRACK_COLORS[index % TRACK_COLORS.length],
+        })
+        this.project.tracks.splice(insertIndex(this.project.tracks, this.selectedTrackId), 0, track)
+        this.selectedTrackId = track.id
       })
-      if (type === 'midi') normalizeTrackRack(track)
-      this.project.tracks.push(track)
-      this.selectedTrackId = track.id
+      return
+    }
+    this.addTracks({
+      kind: type === 'audio' ? 'audio' : type === 'bus' ? 'bus' : 'midi',
+      count: 1,
+      instrument: 'none',
+      input: 'mic',
+      channels: 1,
+      armed: false,
+    })
+  }
+
+  /** Open a MIDI track in the piano. An empty track gets a 4-bar clip at the playhead. */
+  preparePianoClip(trackId: string, beat: number, clipId?: string) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      const bar = Math.max(1, quartersPerBar(this.project.timeSignature))
+      const start = Math.max(0, Math.floor(Math.max(0, beat) / bar) * bar)
+      let clip = clipId ? track.midiClips.find((item) => item.id === clipId) : undefined
+      if (!clip && track.midiClips.length) {
+        clip = track.midiClips.find((item) => beat >= item.startBeat && beat < item.startBeat + item.durationBeats) ?? track.midiClips[0]
+      }
+      if (!clip) {
+        clip = { id: uid('midi'), name: 'Keys', startBeat: start, durationBeats: bar * 4, notes: [] }
+        track.midiClips.push(clip)
+      }
+      this.selectedTrackId = trackId
+      this.selectedMidiClipId = clip.id
+      this.selectedClipId = null
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
     })
   }
 

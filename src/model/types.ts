@@ -2,6 +2,11 @@ import type { DevicePreset, RackAutomation, RackPatch, RackState } from './rack'
 import { defaultScale, type ScaleState } from './scale'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
+export type TrackInstrument = 'synth' | 'sampler' | '808' | 'drum-machine' | 'none'
+
+export function isLocalInput(input: string) {
+  return input === 'mic' || input === 'line'
+}
 
 export interface PluginInstance {
   id: string
@@ -94,6 +99,10 @@ export interface Track {
   armed: boolean
   monitor: boolean
   input: string
+  /** 1 is mono, 2 is stereo. Audio tracks only. */
+  channels?: 1 | 2
+  /** Chosen instrument for a MIDI track. */
+  instrument?: TrackInstrument
   inserts: Insert[]
   plugins: PluginInstance[]
   sends: Send[]

@@ -1,7 +1,7 @@
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
 import { RackHost } from './rack/host'
 import { renderNotes } from './rack/dsp'
-import type { AudioAsset, AudioClip, MidiNote, Project, Track } from '../model/types'
+import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToMusical } from '../model/time'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav } from '../model/wav'
@@ -380,7 +380,7 @@ export class AudioEngine {
       }
     }
     for (const track of this.project.tracks) {
-      if (track.input === 'mic' && track.monitor) {
+      if (isLocalInput(track.input) && track.monitor) {
         const strip = this.strips.get(track.id)
         if (strip) this.localMicGain.connect(strip.input)
       }
