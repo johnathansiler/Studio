@@ -1,4 +1,5 @@
 import type { ProjectStore } from '../state/store'
+import { AddTrackButton } from './AddTrack'
 
 export function SessionView({ store }: { store: ProjectStore }) {
   const scenes = 8
@@ -9,10 +10,11 @@ export function SessionView({ store }: { store: ProjectStore }) {
           <tr>
             <th />
             {store.project.tracks.map((track) => (
-              <th key={track.id} style={{ color: track.color }}>
+              <th key={track.id} data-track={track.id} style={{ color: track.color }}>
                 {track.name}
               </th>
             ))}
+            <th><AddTrackButton store={store} /></th>
           </tr>
         </thead>
         <tbody>
