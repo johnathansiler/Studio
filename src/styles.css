@@ -127,7 +127,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .heads { border-right: 1px solid var(--line); background: #141c18; overflow: hidden; }
 .lanes { overflow: hidden; }
 .ruler-gap { height: 32px; border-bottom: 1px solid var(--line); }
-.head, .lane { height: 92px; border-bottom: 1px solid var(--line); }
+.head, .lane { height: 150px; border-bottom: 1px solid var(--line); }
 .head { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
 .head header { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
 .head input.name { width: 100%; background: transparent; border: 0; font-weight: 640; padding: 0; }
@@ -141,6 +141,11 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .head select, .slim {
   background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 3px 4px; font-size: 11px; color: var(--muted);
 }
+.head-extra { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.head-extra .inserts { flex-direction: row; overflow-x: auto; }
+.head-extra .inserts button, .head-extra .insert-add { white-space: nowrap; }
+.route-fields { display: flex; gap: 4px; }
+.route-fields select { flex: 1; min-width: 0; }
 .timeline-scroll { overflow: auto; position: relative; height: 100%; min-width: 0; max-width: 100%; }
 .timeline-inner { position: relative; min-height: 100%; }
 .ruler {
@@ -178,6 +183,22 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   text-align: left; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 7px; font-size: 12px; color: var(--muted);
 }
 .inserts button.on { color: var(--text); border-color: rgba(115, 196, 143, 0.4); }
+.sends { display: flex; flex-direction: column; gap: 4px; }
+.sends label { display: grid; grid-template-columns: minmax(0, 1fr) 52px auto auto; gap: 4px; align-items: center; font-size: 11px; color: var(--muted); }
+.sends input[type='range'] { width: 100%; }
+.readout { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.plugin-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  background: #18241d; border-top: 1px solid var(--line);
+  padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+  max-height: 72vh; overflow: auto; display: flex; flex-direction: column; gap: 8px;
+}
+.plugin-sheet header, .plugin-sheet .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.plugin-sheet header strong { margin-right: auto; }
+.plugin-sheet .text-btn.on { border-color: rgba(115, 196, 143, 0.6); color: var(--text); }
+.plugin-sheet .wet { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.plugin-sheet .spectrum { width: 100%; height: 64px; background: #101814; border-radius: 8px; }
+.shell.phone .plugin-sheet { bottom: calc(48px + env(safe-area-inset-bottom)); max-height: 42vh; }
 .fader-row { display: flex; gap: 8px; align-items: stretch; height: 180px; }
 .fader-row input[type='range'] { writing-mode: vertical-lr; direction: rtl; width: 28px; }
 .meter { width: 10px; border-radius: 99px; background: #0c110f; border: 1px solid var(--line); position: relative; overflow: hidden; }
@@ -506,7 +527,10 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 .shell.phone .head .row { display: flex; flex-wrap: nowrap; gap: 4px; }
 .shell.phone .head .mini { width: 44px; height: 44px; min-width: 44px; min-height: 44px; flex: 0 0 44px; }
 .shell.phone .head select,
-.shell.phone .head .slim { display: none; }
+.shell.phone .head .slim,
+.shell.phone .head-extra { display: none; }
+.shell.phone .inserts button,
+.shell.phone .insert-add { min-height: 44px; }
 .shell.phone .clip { height: 78px; }
 .phone-tabs {
   display: grid;

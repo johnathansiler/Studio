@@ -14,6 +14,7 @@ import { beatsToSamples, countInSeconds } from './model/time'
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { ArrangeView } from './ui/ArrangeView'
 import { MixerView } from './ui/MixerView'
+import { PluginSheet } from './ui/PluginSheet'
 import { PianoRoll } from './ui/PianoRoll'
 import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
@@ -719,6 +720,8 @@ export function App() {
             <button className="text-btn" onClick={() => void bounce()}>Bounce</button>
             <button className="text-btn" onClick={() => store.addTrack('audio')}>+ Audio</button>
             <button className="text-btn" onClick={() => store.addTrack('midi')}>+ Inst</button>
+            <button className="text-btn" onClick={() => store.addTrack('bus')}>+ Bus</button>
+            <button className="text-btn" onClick={() => store.addTrack('group')}>+ Group</button>
             <button className="text-btn" onClick={() => setHelp(true)} title="Shortcuts" aria-label="Shortcuts">?</button>
             <button className="text-btn" aria-label={surface === 'studio' ? 'Artist view' : 'Studio'} onClick={() => setSurface(surface === 'studio' ? 'artist' : 'studio')}>
               {surface === 'studio' ? 'Artist' : 'Studio'}
@@ -738,6 +741,8 @@ export function App() {
             <button className="text-btn" onClick={() => { setMenuOpen(false); void bounce() }}>Bounce</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); store.addTrack('audio') }}>+ Audio</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); store.addTrack('midi') }}>+ Inst</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); store.addTrack('bus') }}>+ Bus</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); store.addTrack('group') }}>+ Group</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }}>Clips</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setHelp(true) }}>Shortcuts</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setSurface(surface === 'studio' ? 'artist' : 'studio'); setPhonePane('room') }}>
@@ -818,6 +823,7 @@ export function App() {
         </div>
         )}
       </div>
+      <PluginSheet store={store} engine={engine} />
       {phone && (
         <nav className="phone-tabs" aria-label="Sections">
           <button className={phonePane === 'edit' && store.view === 'arrange' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setMenuOpen(false) }}>Arrange</button>
