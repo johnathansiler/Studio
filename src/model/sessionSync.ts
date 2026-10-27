@@ -110,6 +110,8 @@ export function arrangementDigest(project: Project): string {
     metronomeEnabled: project.metronomeEnabled,
     countIn: project.countIn,
     snap: project.snap,
+    launchQuant: project.launchQuant ?? null,
+    recordBars: project.recordBars ?? 0,
     tracks: project.tracks.map((track) => ({
       id: track.id,
       name: track.name,
@@ -119,8 +121,12 @@ export function arrangementDigest(project: Project): string {
       mute: track.mute,
       solo: track.solo,
       color: track.color,
-      clips: track.clips.map((clip) => [clip.id, clip.bufferId, clip.startSample, clip.offsetSamples, clip.durationSamples, clip.gain]),
-      midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length]),
+      clips: track.clips.map((clip) => [clip.id, clip.bufferId, clip.startSample, clip.offsetSamples, clip.durationSamples, clip.gain, clip.quant ?? null, clip.mode ?? null, clip.loop ?? null, clip.warp ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null]),
+      midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length, clip.quant ?? null, clip.mode ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null]),
+      audioSlots: track.audioSlots ?? null,
+      midiSlots: track.midiSlots ?? null,
+      rack: track.rack?.devices.map((device) => [device.id, device.kind, device.params, device.pattern, device.zones.length]),
+      cables: track.rack?.cables.map((cable) => [cable.from, cable.fromPort, cable.to, cable.toPort, cable.amount]),
     })),
   })
 }

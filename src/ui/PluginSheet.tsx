@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { CATALOG, FACTORY, descriptor } from '../audio/plugins/catalog'
+import { MODEL_IDS } from '../audio/plugins/models'
+import { Faceplate } from './Faceplate'
 import { NOTE_NAMES, SCALES } from '../model/scale'
 import { samplesToBeats } from '../model/time'
 import type { PluginInstance } from '../model/types'
@@ -12,6 +14,13 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   const spec = plugin ? descriptor(plugin.pluginId) : null
   const [last, setLast] = useState('')
   const canvas = useRef<HTMLCanvasElement>(null)
+  const [, setTick] = useState(0)
+  const faced = plugin ? MODEL_IDS.includes(plugin.pluginId) || plugin.pluginId === 'tune' : false
+  useEffect(() => {
+    if (!faced) return
+    const timer = window.setInterval(() => setTick((value) => value + 1), 80)
+    return () => window.clearInterval(timer)
+  }, [faced, plugin?.id])
   useEffect(() => {
     if (!plugin || plugin.pluginId !== 'eq') return
     let timer = 0
@@ -91,7 +100,22 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
           })}
         </div>
       )}
-      <div className="knobs">
+      {faced && (
+        <Faceplate
+          pluginId={plugin.pluginId}
+          title={spec.name}
+          params={spec.params}
+          values={plugin.params}
+          vu={engine.meter(plugin.id)?.vu ?? -20}
+          gr={engine.meter(plugin.id)?.gr ?? 0}
+          trace={engine.trace(plugin.id)}
+          onChange={(id, value) => {
+            setLast(id)
+            store.updatePlugin(focus.trackId, plugin.id, { params: { [id]: value } })
+          }}
+        />
+      )}
+      {!faced ? <div className="knobs">
         {spec.params.map((param) => (
           <label key={param.id}>
             {param.name} {formatParam(param.id, plugin.params[param.id] ?? param.default, param.unit)}
@@ -107,7 +131,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
             />
           </label>
         ))}
-      </div>
+      </div> : null}
       <div className="row">
         <button className="text-btn" onClick={() => store.movePlugin(focus.trackId, plugin.id, -1)}>←</button>
         <button className="text-btn" onClick={() => store.movePlugin(focus.trackId, plugin.id, 1)}>→</button>

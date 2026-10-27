@@ -29,11 +29,13 @@ export function createCompressor(_sampleRate: number): Processor {
 export function createGate(_sampleRate: number): Processor {
   let env = 1
   let hold = 0
+  let gateOpen = false
   return {
     latencySamples: 0,
     reset() {
       env = 1
       hold = 0
+      gateOpen = false
     },
     process(input, output, params, ctx) {
       const n = input[0]?.length ?? 0
@@ -45,9 +47,12 @@ export function createGate(_sampleRate: number): Processor {
       const holdSamples = Math.round(((params.hold || 0) / 1000) * ctx.sampleRate)
       for (let i = 0; i < n; i++) {
         const detector = Math.max(Math.abs(input[0][i] || 0), Math.abs(input[1]?.[i] || 0))
-        if (detector >= threshold) hold = holdSamples
+        const closeAt = threshold * 0.7
+        if (detector >= threshold) gateOpen = true
+        else if (detector < closeAt) gateOpen = false
+        if (gateOpen) hold = holdSamples
         else if (hold > 0) hold -= 1
-        const below = hold > 0 ? 1 : detector < threshold ? clamp(threshold > 0 ? detector / threshold : 1, 0, 1) : 1
+        const below = hold > 0 || open ? 1 : detector < threshold ? clamp(threshold > 0 ? detector / threshold : 1, 0, 1) : 1
         const expanded = below >= 1 ? 1 : Math.max(range, below ** (ratio - 1))
         const rate = expanded > env ? open : close
         env += (expanded - env) * rate
@@ -119,12 +124,14 @@ export function createDeesser(sampleRate: number): Processor {
       for (let i = 0; i < n; i++) {
         const left = input[0][i] || 0
         const right = input[1]?.[i] ?? left
-        const ess = Math.max(Math.abs(tickBiquad(band[0], left)), Math.abs(tickBiquad(band[1], right)))
+        const bandL = tickBiquad(band[0], left)
+        const bandR = tickBiquad(band[1], right)
+        const ess = Math.max(Math.abs(bandL), Math.abs(bandR))
         env += (ess - env) * follow
         const over = env > threshold && threshold > 0 ? clamp((env - threshold) / threshold, 0, 1) : 0
-        const gain = 1 - amount * over
-        if (output[0]) output[0][i] = sanitize(left * (amount === 0 ? 1 : gain))
-        if (output[1]) output[1][i] = sanitize(right * (amount === 0 ? 1 : gain))
+        const cut = amount * over
+        if (output[0]) output[0][i] = sanitize(left - bandL * cut)
+        if (output[1]) output[1][i] = sanitize(right - bandR * cut)
       }
     },
   }

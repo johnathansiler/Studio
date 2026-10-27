@@ -16,6 +16,7 @@
     "node": ">=22.6.0"
   },
   "dependencies": {
+    "@breezystack/lamejs": "1.2.7",
     "onnxruntime-web": "^1.21.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -28,6 +29,7 @@
     "@types/ws": "^8.5.13",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
+    "mpg123-decoder": "1.0.3",
     "playwright": "^1.56.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
