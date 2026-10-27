@@ -1,7 +1,9 @@
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
+import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
 import { RackHost } from './rack/host'
 import { renderNotes } from './rack/dsp'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
+import { preferStretchCache } from './stretch/engine'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToMusical } from '../model/time'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav } from '../model/wav'
@@ -87,6 +89,7 @@ export class AudioEngine {
   private talkGains = new Map<string, GainNode>()
 
   private sources: Stoppable[] = []
+  private warpPcm = new Map<string, Float32Array[]>()
   private scheduler = 0
   private raf = 0
   private playing = false
@@ -97,7 +100,12 @@ export class AudioEngine {
   private nextLoopSample = 0
   private nextMetroSample = 0
   private sessionStarted = new Set<string>()
+  private sessionClip = new Map<string, string>()
+  private sessionGen = new Map<string, number>()
+  private sessionNodes = new Map<string, Stoppable[]>()
   private launches = new Map<string, string>()
+  private launchAt = new Map<string, number>()
+  private launchGen = new Map<string, number>()
   private perfAtCtx0 = 0
   private workletsReady = false
   private recorders = new Map<string, ActiveRec>()
@@ -339,6 +347,47 @@ export class AudioEngine {
 
   setLaunches(map: Record<string, string | null>) {
     this.launches = new Map(Object.entries(map).filter((e): e is [string, string] => !!e[1]))
+  }
+
+  setLaunchAt(map: Record<string, number>) {
+    this.launchAt = new Map(Object.entries(map).filter((entry): entry is [string, number] => Number.isFinite(entry[1])))
+  }
+
+  setLaunchGen(map: Record<string, number>) {
+    this.launchGen = new Map(Object.entries(map).map(([id, value]) => [id, Number(value) || 0]))
+  }
+
+  /** performance.now() when the shared timeline reaches `sample`, or null while stopped. */
+  perfAtTimeline(sample: number): number | null {
+    if (!this.playing || !this.ctx) return null
+    const ctxTime = this.playOriginCtx + (sample - this.playOriginSample) / this.sampleRate
+    return this.perfForContext(ctxTime)
+  }
+
+  kickSession() {
+    const ids = new Set([...this.sessionNodes.keys(), ...this.sessionStarted])
+    for (const id of ids) {
+      const want = this.launches.get(id)
+      const gen = this.launchGen.get(id) ?? 0
+      if (!want || this.sessionClip.get(id) !== want || (this.sessionGen.get(id) ?? 0) !== gen) this.stopSessionTrack(id)
+    }
+    if (this.playing) this.scheduleAhead()
+  }
+
+  adoptSession() {
+    if (!this.playing) return
+    this.mode = 'session'
+    this.stopSources()
+    this.arrangementScheduled = false
+    this.scheduleAhead()
+  }
+
+  adoptArrangement() {
+    if (!this.playing) return
+    this.mode = 'arrangement'
+    this.stopSources()
+    this.arrangementScheduled = false
+    this.scheduleAhead()
   }
 
   setJam(enabled: boolean, delayMs: number, oneWayMs: number) {
@@ -889,6 +938,7 @@ export class AudioEngine {
       input.connect(offline.destination)
       const strip = { input } as StripNodes
       for (const clip of track.clips) {
+        if (clip.slotOnly) continue
         const asset = assets.get(clip.bufferId)
         if (!asset) continue
         const buffer = this.bufferFromAsset(offline, asset)
@@ -897,6 +947,7 @@ export class AudioEngine {
       if (track.rack) {
         const events = []
         for (const clip of track.midiClips) {
+          if (clip.slotOnly) continue
           for (const note of clip.notes) {
             const start = beatsToSamples(clip.startBeat + note.startBeat, rate, project.tempo)
             const dur = beatsToSamples(note.durationBeats, rate, project.tempo)
@@ -915,6 +966,7 @@ export class AudioEngine {
         src.start(0)
       } else {
         for (const clip of track.midiClips) {
+          if (clip.slotOnly) continue
           for (const note of clip.notes) {
             const start = beatsToSamples(clip.startBeat + note.startBeat, rate, project.tempo)
             const dur = beatsToSamples(note.durationBeats, rate, project.tempo) / rate
@@ -1156,42 +1208,96 @@ export class AudioEngine {
     }
   }
 
+  /** Cached tempo-follow. A phone plays the pre-render instead of stretching on each launch. */
+  private sessionWarp(buffer: AudioBuffer, audio: AudioClip, sampleRate: number, tempo: number): Float32Array[] {
+    const phone = typeof matchMedia === 'function' && matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
+    const key = `${audio.bufferId}:${audio.offsetSamples}:${audio.durationSamples}:${audio.durationBeats}:${sampleRate}:${tempo}`
+    let pcm = this.warpPcm.get(key)
+    if (!pcm) {
+      const channels: Float32Array[] = []
+      for (let index = 0; index < buffer.numberOfChannels; index++) channels.push(buffer.getChannelData(index))
+      pcm = renderTempoWarp(channels, audio.offsetSamples, audio.durationSamples, sampleRate, tempo, audio.durationBeats || 0)
+      if (this.warpPcm.size >= 8) {
+        const oldest = this.warpPcm.keys().next().value
+        if (oldest) this.warpPcm.delete(oldest)
+      }
+      this.warpPcm.set(key, pcm)
+    }
+    if (preferStretchCache(phone, phone ? 1 : 0)) pcm = this.warpPcm.get(key) ?? pcm
+    return pcm
+  }
+
   private scheduleSession(horizon: number) {
     const project = this.project!
     const sr = this.sampleRate
-    const beat = samplesPerBeatUnit(sr, project.tempo, project.timeSignature)
     for (const [trackId, clipId] of this.launches) {
-      if (this.sessionStarted.has(trackId)) continue
+      const gen = this.launchGen.get(trackId) ?? 0
+      if (this.sessionStarted.has(trackId) && this.sessionClip.get(trackId) === clipId && (this.sessionGen.get(trackId) ?? 0) === gen) continue
       const track = project.tracks.find((t) => t.id === trackId)
       const strip = this.strips.get(trackId)
       if (!track || !strip || !this.ctx) continue
-      const nowSample = Math.max(this.playOriginSample, this.sampleAt(this.ctx.currentTime))
-      const quant = Math.max(nowSample, Math.ceil((nowSample - 1) / beat) * beat)
-      const when = this.playOriginCtx + (quant - this.playOriginSample) / sr
-      if (when > horizon) continue
       const audio = track.clips.find((c) => c.id === clipId)
       const midi = track.midiClips.find((c) => c.id === clipId)
+      const clip = audio || midi
+      if (!clip) continue
+      if (clip.legato && this.sessionStarted.has(trackId)) {
+        this.sessionClip.set(trackId, clipId)
+        this.sessionGen.set(trackId, gen)
+        continue
+      }
+      const nowSample = Math.max(this.playOriginSample, this.sampleAt(this.ctx.currentTime))
+      const quant = clip.quant ?? project.launchQuant ?? '1bar'
+      const scheduled = this.launchAt.get(trackId)
+      const target = scheduled != null ? scheduled : quantizeSample(nowSample, quant, sr, project.tempo, project.timeSignature)
+      const when = this.playOriginCtx + (target - this.playOriginSample) / sr
+      if (when > horizon) continue
+      const startWhen = Math.max(when, this.ctx.currentTime + 0.01)
+      this.stopSessionTrack(trackId)
       if (audio) {
         const asset = this.assetOf(audio.bufferId)
         if (!asset) continue
         const buffer = this.bufferFromAsset(this.ctx, asset)
         const src = this.ctx.createBufferSource()
-        src.buffer = buffer
-        const offset = audio.offsetSamples / buffer.sampleRate
-        const dur = audio.durationSamples / sr
-        src.loop = true
-        src.loopStart = offset
-        src.loopEnd = offset + dur
+        const rate = warpRate(audio.durationSamples, audio.durationBeats, sr, project.tempo, audio.warp !== false)
+        let playBuffer = buffer
+        let offset = audio.offsetSamples / buffer.sampleRate
+        let dur = Math.max(0.01, audio.durationSamples / sr)
+        let playRate = rate
+        if (audio.durationBeats && Math.abs(rate - 1) > 1e-3) {
+          const pcm = this.sessionWarp(buffer, audio, sr, project.tempo)
+          playBuffer = this.ctx.createBuffer(Math.max(1, pcm.length), Math.max(1, pcm[0]?.length ?? 1), sr)
+          pcm.forEach((channel, index) => playBuffer.copyToChannel(Float32Array.from(channel), index))
+          offset = 0
+          dur = Math.max(0.01, playBuffer.duration)
+          playRate = 1
+        }
+        src.buffer = playBuffer
+        src.playbackRate.value = playRate
+        const looping = audio.mode === 'repeat' || audio.loop !== false
+        if (looping && dur > 0.01) {
+          src.loop = true
+          src.loopStart = offset
+          src.loopEnd = offset + (playRate === 1 ? dur : audio.durationSamples / buffer.sampleRate)
+        }
         const gain = this.ctx.createGain()
         gain.gain.value = audio.gain
         src.connect(gain)
         gain.connect(strip.input)
-        src.start(Math.max(when, this.ctx.currentTime + 0.01), offset)
-        this.sources.push(src)
+        if (looping) src.start(startWhen, offset)
+        else src.start(startWhen, offset, playRate === 1 ? dur : dur / rate)
+        this.trackNodes(trackId, {
+          stop: () => src.stop(),
+          disconnect: () => {
+            src.disconnect()
+            gain.disconnect()
+          },
+        })
       } else if (midi) {
-        this.scheduleMidiLoop(track, strip, midi.id, when)
-      } else continue
+        this.scheduleMidiLoop(track, strip, midi.id, startWhen)
+      }
       this.sessionStarted.add(trackId)
+      this.sessionClip.set(trackId, clipId)
+      this.sessionGen.set(trackId, gen)
     }
   }
 
@@ -1200,23 +1306,51 @@ export class AudioEngine {
     const clip = track.midiClips.find((c) => c.id === clipId)
     if (!clip || !this.ctx) return
     const sr = this.sampleRate
-    const durSec = beatsToSamples(clip.durationBeats, sr, project.tempo) / sr
-    // Schedule two loops ahead; the look-ahead interval calls scheduleSession only once per track.
-    // A dedicated repeater keeps MIDI session clips alive.
+    const durSec = Math.max(0.05, beatsToSamples(Math.max(0.25, clip.durationBeats), sr, project.tempo) / sr)
+    const looping = clip.mode === 'repeat' || clip.loop !== false
+    if (!this.sessionNodes.has(track.id)) this.sessionNodes.set(track.id, [])
     const schedulePass = (when: number) => {
-      if (!this.playing || this.mode !== 'session' || !this.launches.has(track.id)) return
+      if (!this.playing || this.mode !== 'session' || this.launches.get(track.id) !== clip.id) return
       for (const note of clip.notes) {
         const noteDelay = beatsToSamples(note.startBeat, sr, project.tempo) / sr
         const noteDur = beatsToSamples(note.durationBeats, sr, project.tempo) / sr
-        this.scheduleVoice(this.ctx!, strip, note, when + noteDelay, noteDur, track)
+        this.scheduleVoice(this.ctx!, strip, note, when + noteDelay, noteDur, track, this.sessionNodes.get(track.id))
       }
+      if (!looping) return
       const timer = window.setTimeout(() => schedulePass(when + durSec), Math.max(20, durSec * 1000 - 200))
-      this.sources.push({
+      this.trackNodes(track.id, {
         stop: () => window.clearTimeout(timer),
         disconnect: () => undefined,
       })
     }
     schedulePass(firstWhen)
+  }
+
+  private trackNodes(trackId: string, node: Stoppable) {
+    const list = this.sessionNodes.get(trackId) || []
+    list.push(node)
+    this.sessionNodes.set(trackId, list)
+    this.sources.push(node)
+  }
+
+  private stopSessionTrack(trackId: string) {
+    for (const node of this.sessionNodes.get(trackId) || []) {
+      try {
+        node.stop()
+      } catch {
+        /* already stopped */
+      }
+      try {
+        node.disconnect()
+      } catch {
+        /* already disconnected */
+      }
+      this.sources = this.sources.filter((item) => item !== node)
+    }
+    this.sessionNodes.delete(trackId)
+    this.sessionStarted.delete(trackId)
+    this.sessionClip.delete(trackId)
+    this.sessionGen.delete(trackId)
   }
 
   private scheduleWindow(ctxTime: number, timelineStart: number, timelineEnd: number) {
@@ -1227,12 +1361,14 @@ export class AudioEngine {
       const strip = this.strips.get(track.id)
       if (!strip) continue
       for (const clip of track.clips) {
+        if (clip.slotOnly) continue
         const asset = this.assetOf(clip.bufferId)
         if (!asset) continue
         const buffer = this.bufferFromAsset(ctx, asset)
         this.scheduleAudioClip(ctx, strip, buffer, clip, ctxTime, timelineStart, timelineEnd)
       }
       for (const clip of track.midiClips) {
+        if (clip.slotOnly) continue
         const clipStart = beatsToSamples(clip.startBeat, this.sampleRate, project.tempo)
         for (const note of clip.notes) {
           const noteStart = clipStart + beatsToSamples(note.startBeat, this.sampleRate, project.tempo)
@@ -1327,7 +1463,7 @@ export class AudioEngine {
     }
   }
 
-  private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track) {
+  private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[]) {
     if (track?.rack && ctx === this.ctx) {
       this.rackHost.note(track.id, note.pitch, note.velocity, Math.max(when, ctx.currentTime))
       this.rackHost.note(track.id, note.pitch, 0, Math.max(when, ctx.currentTime) + dur)
@@ -1351,7 +1487,10 @@ export class AudioEngine {
     gain.connect(strip.input)
     osc.start(when)
     osc.stop(when + dur + 0.03)
-    if (ctx === this.ctx) this.sources.push(osc)
+    if (ctx === this.ctx) {
+      this.sources.push(osc)
+      bucket?.push(osc)
+    }
   }
 
   private stopSources() {
@@ -1369,6 +1508,10 @@ export class AudioEngine {
     }
     this.sources = []
     this.rackHost.allOff()
+    this.sessionNodes.clear()
+    this.sessionStarted.clear()
+    this.sessionClip.clear()
+    this.sessionGen.clear()
   }
 }
 

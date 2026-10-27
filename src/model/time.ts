@@ -120,11 +120,15 @@ export function gainToDb(gain: number): string {
   return `${db.toFixed(1)} dB`
 }
 
-export function projectEndSample(tracks: { clips: { startSample: number; durationSamples: number }[]; midiClips: { startBeat: number; durationBeats: number }[] }[], sampleRate: number, tempo: number): number {
+export function projectEndSample(tracks: { clips: { startSample: number; durationSamples: number; slotOnly?: boolean }[]; midiClips: { startBeat: number; durationBeats: number; slotOnly?: boolean }[] }[], sampleRate: number, tempo: number): number {
   let end = sampleRate * 8
   for (const track of tracks) {
-    for (const clip of track.clips) end = Math.max(end, clip.startSample + clip.durationSamples)
+    for (const clip of track.clips) {
+      if (clip.slotOnly) continue
+      end = Math.max(end, clip.startSample + clip.durationSamples)
+    }
     for (const clip of track.midiClips) {
+      if (clip.slotOnly) continue
       end = Math.max(end, Math.round(beatsToSamples(clip.startBeat + clip.durationBeats, sampleRate, tempo)))
     }
   }
