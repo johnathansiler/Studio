@@ -13,6 +13,7 @@ import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
 import { beatsToSamples, countInSeconds, samplesToBeats } from './model/time'
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
+import { TunerPop } from './ui/AmpPop'
 import { ArrangeView } from './ui/ArrangeView'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
@@ -67,6 +68,7 @@ export function App() {
   const compact = form !== 'desk'
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
   const [pianoOpen, setPianoOpen] = useState(false)
+  const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
   const takeRef = useRef<{ id: string; endSample: number } | null>(null)
@@ -216,6 +218,21 @@ export function App() {
       window.clearInterval(followTimer)
     }
   }, [store, engine, session])
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('board') !== '1') return
+    const track = store.project.tracks.find((item) => item.type === 'audio')
+    if (!track) return
+    let plugin = track.plugins.find((item) => item.pluginId === 'amp')
+    if (!plugin) {
+      store.addPlugin(track.id, 'amp', 'Glass Room')
+      plugin = store.track(track.id)?.plugins.find((item) => item.pluginId === 'amp')
+    }
+    if (plugin) store.focusPlugin(track.id, plugin.id)
+    store.setView('mix')
+    setSurface('studio')
+    setPhonePane('edit')
+  }, [store])
 
   useEffect(() => {
     const saveReady = { current: false }
@@ -877,7 +894,7 @@ export function App() {
           <div className="main-pane">
             <div className="editor">
               {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} onSeek={(sample) => void locate(sample)} onOpenPiano={openPiano} />}
-              {store.view === 'mix' && <MixerView store={store} engine={engine} />}
+              {store.view === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} />}
               {store.view === 'session' && <SessionView store={store} engine={engine} />}
             </div>
             {store.view === 'arrange' && store.rackTrackId && form !== 'fold' && <RackView store={store} engine={engine} trackId={store.rackTrackId} />}
@@ -944,6 +961,7 @@ export function App() {
           <PianoRoll store={store} engine={engine} />
         </div>
       )}
+      {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
       {phone && (
         <nav className="phone-tabs" aria-label="Sections">
           <button className={phonePane === 'edit' && store.view === 'arrange' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setMenuOpen(false) }}>Arrange</button>

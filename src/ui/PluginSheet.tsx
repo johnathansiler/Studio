@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { CATALOG, FACTORY, descriptor } from '../audio/plugins/catalog'
+import { AmpPop } from './AmpPop'
 import { NOTE_NAMES, SCALES } from '../model/scale'
 import { samplesToBeats } from '../model/time'
 import type { PluginInstance } from '../model/types'
@@ -36,6 +37,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     return () => window.clearTimeout(timer)
   }, [engine, plugin])
   if (!focus || !plugin || !spec) return null
+  if (plugin.pluginId === 'amp') return <AmpPop store={store} engine={engine} trackId={focus.trackId} plugin={plugin} />
   const names = [
     ...(FACTORY[plugin.pluginId] ?? []).map((item) => item.name),
     ...store.project.presets.filter((item) => item.pluginId === plugin.pluginId).map((item) => item.name),

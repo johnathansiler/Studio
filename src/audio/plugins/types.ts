@@ -35,6 +35,8 @@ export interface BlockContext {
 export interface Processor {
   latencySamples: number
   spectrum?: Float32Array
+  /** Chromatic tuner readout. `cents` is signed distance to the nearest semitone. */
+  tuner?: { hz: number; cents: number; note: number }
   reset(): void
   process(input: Float32Array[], output: Float32Array[], params: Record<string, number>, ctx: BlockContext): void
 }
