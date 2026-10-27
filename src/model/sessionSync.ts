@@ -115,6 +115,18 @@ export function arrangementDigest(project: Project): string {
     snap: project.snap,
     launchQuant: project.launchQuant ?? null,
     recordBars: project.recordBars ?? 0,
+    beats: project.beats
+      ? {
+          active: project.beats.activeId,
+          patterns: project.beats.patterns.map((pattern) => [
+            pattern.id,
+            pattern.steps,
+            pattern.swing,
+            pattern.channels.map((channel) => [channel.id, channel.steps, channel.swing, channel.mute, channel.solo, channel.volume, channel.cells.map((cell) => (cell.on ? cell.velocity : 0))]),
+          ]),
+        }
+      : null,
+    patternClips: (project.patternClips ?? []).map((clip) => [clip.id, clip.patternId, clip.startBeat, clip.lengthBeats, clip.scene]),
     tempoMap: project.tempoMap ?? [],
     tracks: project.tracks.map((track) => ({
       id: track.id,

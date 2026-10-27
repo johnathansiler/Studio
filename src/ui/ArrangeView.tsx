@@ -294,7 +294,7 @@ export function ArrangeView({
               {track.type === 'midi' && track.midiClips.every((clip) => clip.slotOnly) && (
                 <button type="button" className="lane-add" aria-label="Add clip" onClick={() => onOpenPiano(track.id)}>+</button>
               )}
-              {track.midiClips.filter((clip) => !clip.slotOnly).map((clip) => {
+              {track.midiClips.filter((clip) => !clip.slotOnly && clip.scene == null).map((clip) => {
                 const left = ((clip.startBeat * 60) / project.tempo) * px
                 const widthPx = ((clip.durationBeats * 60) / project.tempo) * px
                 return (
@@ -310,6 +310,19 @@ export function ArrangeView({
                   </div>
                 )
               })}
+              {track.id === project.tracks.find((item) => item.type === 'midi')?.id &&
+                (project.patternClips ?? [])
+                  .filter((clip) => clip.scene == null)
+                  .map((clip) => {
+                    const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
+                    const left = ((clip.startBeat * 60) / project.tempo) * px
+                    const widthPx = Math.max(24, ((clip.lengthBeats * 60) / project.tempo) * px)
+                    return (
+                      <div key={clip.id} className="clip pattern" style={{ left, width: widthPx, background: pattern?.color || track.color }}>
+                        <em>{pattern?.name || 'Pattern'}</em>
+                      </div>
+                    )
+                  })}
             </div>
           ))}
           <div className="playhead" style={{ left: (position / project.sampleRate) * px }} />
