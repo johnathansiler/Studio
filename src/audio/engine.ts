@@ -232,6 +232,12 @@ export class AudioEngine {
     return (perf - this.perfAtCtx0) / 1000
   }
 
+  /** Timeline sample for a performance.now() reading, using the output timestamp clock. */
+  timelineSampleForPerf(perf: number) {
+    if (!this.ctx || !this.playing) return Math.max(0, Math.round(this.positionSamples))
+    return Math.max(0, Math.round(this.sampleAt(this.contextForPerf(perf))))
+  }
+
   frameForPerf(perf: number) {
     return Math.round(this.contextForPerf(perf) * this.sampleRate)
   }
@@ -317,12 +323,17 @@ export class AudioEngine {
     this.rackHost.sync(this.ctx, project, this.strips, buffers)
   }
 
-  previewRack(trackId: string, pitch: number) {
+  previewRack(trackId: string, pitch: number, slide = false, hold = false) {
     this.unlock()
     if (this.project) this.sync(this.project, this.assetOf)
-    const when = (this.ctx?.currentTime ?? 0) + 0.03
-    this.rackHost.note(trackId, pitch, 0.8, when)
-    this.rackHost.note(trackId, pitch, 0, when + 0.35)
+    const when = (this.ctx?.currentTime ?? 0) + (hold ? 0 : 0.03)
+    this.rackHost.note(trackId, pitch, 0.9, when, slide)
+    if (!hold) this.rackHost.note(trackId, pitch, 0, when + 0.35)
+  }
+
+  releaseRack(trackId: string, pitch: number) {
+    const when = this.ctx?.currentTime ?? 0
+    this.rackHost.note(trackId, pitch, 0, when)
   }
 
   /** CPU load and master loudness. Loudness is read from the master analyser and includes the master fader. */
@@ -1000,7 +1011,7 @@ export class AudioEngine {
             const start = beatsToSamples(clip.startBeat + note.startBeat, rate, project.tempo)
             const dur = beatsToSamples(note.durationBeats, rate, project.tempo)
             if (start >= end) continue
-            events.push({ sample: Math.max(0, start), pitch: note.pitch, vel: note.velocity })
+            events.push({ sample: Math.max(0, start), pitch: note.pitch, vel: note.velocity, slide: !!note.slide })
             events.push({ sample: Math.min(end - 1, start + dur), pitch: note.pitch, vel: 0 })
           }
         }
@@ -1518,8 +1529,11 @@ export class AudioEngine {
 
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[]) {
     if (track?.rack && ctx === this.ctx) {
-      this.rackHost.note(track.id, note.pitch, note.velocity, Math.max(when, ctx.currentTime))
-      this.rackHost.note(track.id, note.pitch, 0, Math.max(when, ctx.currentTime) + dur)
+      const knock = track.rack.devices.find((device) => device.kind === 'knock')
+      const legato = (knock?.params.legato ?? 0) >= 0.5
+      const at = Math.max(when, ctx.currentTime)
+      this.rackHost.note(track.id, note.pitch, note.velocity, at, !!note.slide || legato)
+      this.rackHost.note(track.id, note.pitch, 0, at + dur)
       return
     }
     if (ctx === this.ctx && when < ctx.currentTime) return
