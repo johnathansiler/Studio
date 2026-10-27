@@ -68,6 +68,20 @@ import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK
 import type { AudioAsset, AudioClip, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, MidiClip, MidiNote, PluginInstance, Project, RecordSettings, TakeLane, Track } from '../model/types'
 import { beatsToSamples, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
+import { renderDrum, DRUM_PADS } from '../model/drums'
+import {
+  chainSong,
+  chopSample,
+  chopsToPads,
+  doubleLength,
+  eraseWhilePlaying,
+  kitPreset,
+  normalizePadKit,
+  ratchetBeats,
+  recordTake,
+  type PadProgram,
+  type SequenceNote,
+} from '../model/padMachine'
 
 export type WorkspaceView = 'arrange' | 'mix' | 'session' | 'beats'
 
@@ -118,6 +132,7 @@ export class ProjectStore {
   private past: string[] = []
   private future: string[] = []
   private listeners = new Set<Listener>()
+  private takeUndo: { trackId: string; clipId: string; notes: MidiNote[]; durationBeats: number } | null = null
   private drafted = false
 
   /** Open plugin sheet. Not saved with the project. */
@@ -1050,6 +1065,347 @@ export class ProjectStore {
     })
   }
 
+  addPerformedNotes(trackId: string, clipId: string, notes: Omit<MidiNote, 'id'>[], mode: 'overdub' | 'replace' = 'overdub', fixedBeats = 0) {
+    if (!notes.length) return
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      const fixed = fixedBeats > 0 ? fixedBeats : 0
+      const incoming = notes.map((note) => {
+        const start = fixed ? ((note.startBeat % fixed) + fixed) % fixed : note.startBeat
+        return { ...note, id: uid('note'), startBeat: start, velocity: Math.max(0.05, Math.min(1, note.velocity)) }
+      })
+      if (mode === 'replace') {
+        const start = Math.min(...incoming.map((note) => note.startBeat))
+        const end = Math.max(...incoming.map((note) => note.startBeat + note.durationBeats))
+        clip.notes = recordTake(clip.notes, incoming, 'replace', start, end)
+      } else {
+        clip.notes.push(...incoming)
+      }
+      if (fixed) clip.durationBeats = fixed
+      else {
+        let end = clip.durationBeats
+        for (const note of incoming) end = Math.max(end, note.startBeat + note.durationBeats)
+        clip.durationBeats = Math.max(clip.durationBeats, end)
+      }
+    })
+  }
+
+  setClipLength(trackId: string, clipId: string, beats: number) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      clip.durationBeats = Math.max(0.25, beats)
+      clip.notes = clip.notes.filter((note) => note.startBeat < clip.durationBeats)
+    })
+  }
+
+  toggleDrumStep(trackId: string, clipId: string, pitch: number, step: number, ratchet = 1) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      const beat = step / 4
+      const existing = clip.notes.filter((note) => note.pitch === pitch && note.startBeat >= beat - 0.02 && note.startBeat < beat + 0.23)
+      if (existing.length) {
+        const ids = new Set(existing.map((note) => note.id))
+        clip.notes = clip.notes.filter((note) => !ids.has(note.id))
+        return
+      }
+      for (const mark of ratchetBeats(beat, 0.25, ratchet)) {
+        clip.notes.push({ id: uid('note'), pitch, startBeat: mark, durationBeats: Math.min(0.2, 0.25 / Math.max(1, ratchet)), velocity: 0.9 })
+      }
+      clip.durationBeats = Math.max(clip.durationBeats, (step + 1) / 4)
+    })
+  }
+
+  setStep(trackId: string, clipId: string, pitch: number, step: number, patch: Partial<MidiNote> & { lock?: { param: string; value: number } }): void
+  setStep(channelId: string, index: number, on: boolean): void
+  setStep(
+    a: string,
+    b: string | number,
+    c: number | boolean,
+    step?: number,
+    patch?: Partial<MidiNote> & { lock?: { param: string; value: number } },
+  ) {
+    if (typeof b === 'number' && typeof c === 'boolean') {
+      const channelId = a
+      const index = b
+      const on = c
+      this.draft(() => {
+        const pattern = this.activePattern()
+        const channel = pattern?.channels.find((row) => row.id === channelId)
+        const cell = channel?.cells[index]
+        if (!cell) return
+        cell.on = on
+      })
+      return
+    }
+    const trackId = a
+    const clipId = b as string
+    const pitch = c as number
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip || step == null || !patch) return
+      const beat = step / 4
+      const note = clip.notes.find((item) => item.pitch === pitch && Math.abs(item.startBeat - (item.nudge || 0) - beat) < 0.02)
+      if (!note) return
+      if (patch.velocity != null) note.velocity = patch.velocity
+      if (patch.durationBeats != null) note.durationBeats = patch.durationBeats
+      if (patch.probability != null) note.probability = patch.probability
+      if (patch.condition != null) note.condition = patch.condition
+      if (patch.velocityLo != null) note.velocityLo = patch.velocityLo
+      if (patch.velocityHi != null) note.velocityHi = patch.velocityHi
+      if (patch.nudge != null) {
+        note.nudge = patch.nudge
+        note.startBeat = beat + patch.nudge
+      }
+      if (patch.lock) note.locks = { ...note.locks, [patch.lock.param]: patch.lock.value }
+    })
+  }
+
+  padProgram(): PadProgram {
+    return normalizePadKit(this.project.padKit)
+  }
+
+  patchKit(patch: Partial<PadProgram>) {
+    this.mutate(() => {
+      const kit = normalizePadKit(this.project.padKit)
+      this.project.padKit = normalizePadKit({ ...kit, ...patch, banks: kit.banks })
+    })
+  }
+
+  updatePad(bank: number, index: number, patch: Partial<PadProgram['banks'][number][number]>) {
+    this.mutate(() => {
+      const kit = normalizePadKit(this.project.padKit)
+      Object.assign(kit.banks[bank][index], patch)
+      this.project.padKit = kit
+    })
+  }
+
+  applyKit(id: 'room' | 'tight') {
+    const preset = kitPreset(id)
+    this.mutate(() => {
+      const kit = normalizePadKit(this.project.padKit)
+      for (const pad of kit.banks[0]) {
+        pad.tune = preset.tune
+        pad.decay = preset.decay
+        pad.attack = preset.attack
+      }
+      kit.name = preset.name
+      this.project.padKit = kit
+    })
+  }
+
+  assignResident(bank: number, index: number, pitch: number) {
+    const known = DRUM_PADS.find((pad) => pad.pitch === pitch)
+    this.mutate(() => {
+      const kit = normalizePadKit(this.project.padKit)
+      const pad = kit.banks[bank][index]
+      pad.pitch = pitch
+      pad.name = known?.name ?? `Pad ${index + 1}`
+      pad.layers = [{ velocityLo: 0, velocityHi: 1, tune: 0 }]
+      this.project.padKit = kit
+    })
+  }
+
+  assignPadSample(bank: number, index: number, samples: Float32Array, sampleRate: number, name: string) {
+    const id = uid('smp')
+    this.buffers.set(id, { id, name, sampleRate, channels: [samples] })
+    this.mutate(() => {
+      const kit = normalizePadKit(this.project.padKit)
+      const pad = kit.banks[bank][index]
+      pad.name = name
+      pad.layers = [{ velocityLo: 0, velocityHi: 1, tune: 0, bufferId: id }]
+      this.project.padKit = kit
+    })
+  }
+
+  chopPad(bank: number, index: number, mode: 'transient' | 'regions' | 'bpm', asProgram: boolean, opts?: { regions?: number; bpm?: number }) {
+    const kit = normalizePadKit(this.project.padKit)
+    const pad = kit.banks[bank][index]
+    const asset = pad.layers[0]?.bufferId ? this.buffers.get(pad.layers[0].bufferId) : undefined
+    const known = DRUM_PADS.find((item) => item.pitch === pad.pitch)
+    const samples = asset?.channels[0] ?? renderDrum(known?.kind ?? 'perc', this.project.sampleRate, pad.pitch)
+    const sampleRate = asset?.sampleRate ?? this.project.sampleRate
+    const pieces = chopsToPads(chopSample(samples, sampleRate, mode, opts), pad.name)
+    const targetBank = asProgram ? (bank + 1) % 8 : bank
+    this.mutate(() => {
+      const next = normalizePadKit(this.project.padKit)
+      for (const piece of pieces) {
+        const slice = samples.slice(piece.start, piece.end)
+        const id = uid('smp')
+        this.buffers.set(id, { id, name: piece.name, sampleRate, channels: [slice] })
+        const dest = next.banks[targetBank][piece.pad]
+        dest.name = piece.name
+        dest.layers = [{ velocityLo: 0, velocityHi: 1, tune: 0, bufferId: id }]
+      }
+      if (asProgram) next.activeBank = targetBank
+      this.project.padKit = next
+    })
+  }
+
+  flattenPad(bank: number, index: number) {
+    const kit = normalizePadKit(this.project.padKit)
+    const pad = kit.banks[bank][index]
+    const asset = pad.layers[0]?.bufferId ? this.buffers.get(pad.layers[0].bufferId) : undefined
+    const known = DRUM_PADS.find((item) => item.pitch === pad.pitch)
+    const samples = asset?.channels[0] ?? renderDrum(known?.kind ?? 'perc', this.project.sampleRate, pad.pitch)
+    const sampleRate = asset?.sampleRate ?? this.project.sampleRate
+    const id = uid('smp')
+    this.buffers.set(id, { id, name: pad.name, sampleRate, channels: [new Float32Array(samples)] })
+    this.mutate(() => {
+      const track = makeTrack({
+        name: pad.name,
+        type: 'audio',
+        color: TRACK_COLORS[this.project.tracks.length % TRACK_COLORS.length],
+        output: pad.busId || null,
+      })
+      track.clips.push({
+        id: uid('clip'),
+        name: pad.name,
+        bufferId: id,
+        startSample: 0,
+        offsetSamples: 0,
+        durationSamples: samples.length,
+        fadeInSamples: 0,
+        fadeOutSamples: 0,
+        gain: pad.level,
+        source: 'local',
+      })
+      this.project.tracks.push(track)
+      this.selectedTrackId = track.id
+      this.selectedClipId = track.clips[0].id
+    })
+  }
+
+  routePad(bank: number, index: number) {
+    this.mutate(() => {
+      let bus = this.project.tracks.find((track) => track.type === 'bus')
+      if (!bus) {
+        bus = makeTrack({ name: 'Pad bus', type: 'bus', color: TRACK_COLORS[4] })
+        this.project.tracks.push(bus)
+      }
+      const kit = normalizePadKit(this.project.padKit)
+      kit.banks[bank][index].busId = bus.id
+      const midi = this.project.tracks.find((track) => track.type === 'midi')
+      if (midi && !midi.sends.some((send) => send.busId === bus!.id)) {
+        midi.sends.push({ id: uid('send'), busId: bus.id, gain: kit.banks[bank][index].send || 0.4, preFader: false, enabled: true })
+      }
+      this.project.padKit = kit
+    })
+  }
+
+  erasePadNotes(trackId: string, clipId: string, pitch: number, fromBeat: number, toBeat: number) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      clip.notes = eraseWhilePlaying(clip.notes, pitch, fromBeat, toBeat)
+    })
+  }
+
+  doubleClip(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      const next = doubleLength(clip.notes, clip.durationBeats)
+      const half = clip.notes.length
+      clip.notes = next.notes.map((note, index) => (index < half ? note : { ...note, id: uid('note') }))
+      clip.durationBeats = next.lengthBeats
+    })
+  }
+
+  armTakeUndo(trackId: string, clipId: string) {
+    const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+    if (!clip) return
+    this.takeUndo = {
+      trackId,
+      clipId,
+      durationBeats: clip.durationBeats,
+      notes: clip.notes.map((note) => ({ ...note, locks: note.locks ? { ...note.locks } : undefined })),
+    }
+  }
+
+  undoTake() {
+    const shot = this.takeUndo
+    if (!shot) return
+    this.mutate(() => {
+      const clip = this.track(shot.trackId)?.midiClips.find((item) => item.id === shot.clipId)
+      if (!clip) return
+      clip.notes = shot.notes.map((note) => ({ ...note }))
+      clip.durationBeats = shot.durationBeats
+    })
+  }
+
+  rememberSequence(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      const kit = normalizePadKit(this.project.padKit)
+      const notes: SequenceNote[] = clip.notes.map((note) => ({
+        pitch: note.pitch,
+        startBeat: note.startBeat,
+        durationBeats: note.durationBeats,
+        velocity: note.velocity,
+        probability: note.probability,
+        condition: note.condition,
+        nudge: note.nudge,
+        locks: note.locks ? { ...note.locks } : undefined,
+      }))
+      const existing = kit.sequences.find((sequence) => sequence.id === clip.id)
+      if (existing) {
+        existing.notes = notes
+        existing.lengthBeats = clip.durationBeats
+        existing.name = clip.name
+      } else {
+        kit.sequences.push({ id: clip.id, name: clip.name, lengthBeats: clip.durationBeats, notes })
+      }
+      this.project.padKit = kit
+    })
+  }
+
+  addSongSlot(sequenceId: string, repeats = 1) {
+    this.mutate(() => {
+      const kit = normalizePadKit(this.project.padKit)
+      kit.song.push({ sequenceId, repeats })
+      this.project.padKit = kit
+    })
+  }
+
+  commitSong(trackId: string) {
+    this.mutate(() => {
+      const kit = normalizePadKit(this.project.padKit)
+      const spans = chainSong(kit.song, kit.sequences.map((sequence) => ({ id: sequence.id, lengthBeats: sequence.lengthBeats })))
+      const notes: MidiNote[] = []
+      for (const span of spans) {
+        const sequence = kit.sequences.find((item) => item.id === span.id)
+        if (!sequence) continue
+        for (const note of sequence.notes) {
+          if (note.startBeat >= sequence.lengthBeats) continue
+          notes.push({ ...note, id: uid('note'), startBeat: span.start + note.startBeat })
+        }
+      }
+      const track = this.track(trackId)
+      if (!track) return
+      let clip = track.midiClips.find((item) => item.name === 'Song')
+      if (!clip) {
+        clip = { id: uid('midi'), name: 'Song', startBeat: 0, durationBeats: spans.at(-1)?.end ?? 4, notes }
+        track.midiClips.push(clip)
+      } else {
+        clip.notes = notes
+        clip.durationBeats = spans.at(-1)?.end ?? clip.durationBeats
+      }
+      this.selectedMidiClipId = clip.id
+      this.project.padKit = kit
+    })
+  }
+
+  toggleTrack(id: string, flag: 'mute' | 'solo') {
+    this.mutate(() => {
+      const track = this.track(id)
+      if (track) track[flag] = !track[flag]
+    })
+  }
+
   addNote(trackId: string, clipId: string, note: Omit<MidiNote, 'id'>) {
     this.mutate(() => {
       const clip = this.track(trackId)?.midiClips.find((c) => c.id === clipId)
@@ -1792,16 +2148,6 @@ export class ProjectStore {
     })
   }
 
-  setStep(channelId: string, index: number, on: boolean) {
-    this.draft(() => {
-      const pattern = this.activePattern()
-      const channel = pattern?.channels.find((row) => row.id === channelId)
-      const cell = channel?.cells[index]
-      if (!cell) return
-      cell.on = on
-    })
-  }
-
   editStep(channelId: string, index: number, patch: Partial<Pick<StepCell, 'velocity' | 'pan' | 'pitch' | 'fine' | 'gate'>>) {
     this.mutate(() => {
       const cell = this.activePattern()?.channels.find((row) => row.id === channelId)?.cells[index]
@@ -2214,19 +2560,26 @@ export class ProjectStore {
     }
   }
 
-  recordSettings(): RecordSettings {
-    return this.project.record || defaultRecord(this.project.loopEndSample)
+  recordSettings(): RecordSettings & { quantizeBeats: number } {
+    return { ...(this.project.record || defaultRecord(this.project.loopEndSample)), quantizeBeats: this.project.quantizeBeats ?? 0 }
   }
 
-  setRecord(patch: Partial<RecordSettings>) {
+  setRecord(patch: Partial<RecordSettings> & { quantizeBeats?: number }) {
     this.mutate(() => {
-      this.project.record = { ...this.recordSettings(), ...patch }
+      if (patch.quantizeBeats != null) this.project.quantizeBeats = Math.max(0, patch.quantizeBeats)
+      const rest = { ...patch }
+      delete rest.quantizeBeats
+      if (Object.keys(rest).length) {
+        const current = { ...(this.project.record || defaultRecord(this.project.loopEndSample)) }
+        this.project.record = { ...current, ...rest }
+      }
     })
   }
 
   quickPunch(playhead: number, recording: boolean) {
     this.mutate(() => {
-      this.project.record = quickPunchSettings(this.recordSettings(), playhead, this.project.sampleRate, this.project.tempo, this.project.timeSignature, recording)
+      const current = { ...(this.project.record || defaultRecord(this.project.loopEndSample)) }
+      this.project.record = quickPunchSettings(current, playhead, this.project.sampleRate, this.project.tempo, this.project.timeSignature, recording)
     })
   }
 

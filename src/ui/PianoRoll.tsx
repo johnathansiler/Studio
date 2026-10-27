@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
+import { heardBeat } from '../model/midiClock'
 import { samplesToBeats } from '../model/time'
+import { attachGlissando } from './glissando'
 import {
   ROLL_TOOLS,
   arpeggiateSelection,
@@ -60,6 +62,10 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   const rowRef = useRef(row)
   rowRef.current = row
   const rollRef = useRef<HTMLDivElement>(null)
+  const pianoRef = useRef<HTMLDivElement>(null)
+  const keysRef = useRef<HTMLDivElement>(null)
+  const fingers = useRef(new Map<number, { pitch: number; eventMs: number }>())
+  const playKey = useRef<(pitch: number, event: PointerEvent, pointerId: number, on: boolean) => void>(() => {})
   useEffect(() => {
     const el = rollRef.current
     if (!el) return
@@ -107,6 +113,59 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
       for (const input of access.inputs.values()) input.onmidimessage = null
     }
   }, [])
+
+  playKey.current = (pitch, event, pointerId, on) => {
+    if (!track || !clip) return
+    if (on) {
+      const current = store.scaleState()
+      const next = current.snap ? snapPitch(pitch, current.root, current.scale) : pitch
+      engine.unlock()
+      void engine.resume()
+      engine.liveNoteOn(next, 0.8)
+      fingers.current.set(pointerId, { pitch: next, eventMs: event.timeStamp })
+      return
+    }
+    const held = fingers.current.get(pointerId)
+    fingers.current.delete(pointerId)
+    if (!held) return
+    engine.liveNoteOff(held.pitch)
+    const playing = engine.status === 'playing' || engine.status === 'recording'
+    const start = playing ? performanceBeat(store, engine, held.eventMs) : timelineBeat(store, engine)
+    const end = playing ? performanceBeat(store, engine, event.timeStamp) : start
+    const elapsed = Math.max(0, event.timeStamp - held.eventMs) / 1000 * (store.project.tempo / 60)
+    const duration = playing ? Math.max(0.05, end - start) : Math.max(0.05, elapsed)
+    store.addNote(track.id, clip.id, {
+      pitch: held.pitch,
+      startBeat: Math.max(0, start - clip.startBeat),
+      durationBeats: duration,
+      velocity: 0.8,
+    })
+  }
+
+  useEffect(() => {
+    const root = pianoRef.current
+    const keys = keysRef.current
+    const roll = rollRef.current
+    if (!root) return
+    const detach = attachGlissando(root, {
+      accept: (key) => !!key.closest('.keys, .scale-keys'),
+      onOn: (pitch, event, pointerId) => playKey.current(pitch, event, pointerId, true),
+      onOff: (pitch, event, pointerId) => playKey.current(pitch, event, pointerId, false),
+      onTwoFinger: (dy) => {
+        if (!keys) return
+        keys.scrollTop -= dy
+        if (roll) roll.scrollTop = keys.scrollTop
+      },
+    })
+    const sync = () => {
+      if (keys && roll && keys.scrollTop !== roll.scrollTop) keys.scrollTop = roll.scrollTop
+    }
+    roll?.addEventListener('scroll', sync)
+    return () => {
+      roll?.removeEventListener('scroll', sync)
+      detach()
+    }
+  }, [clip?.id])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -243,7 +302,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   }
 
   return (
-    <div className="piano">
+    <div className="piano" ref={pianoRef}>
       <div className="scale-bar">
         <button type="button" className={`chords-btn ${open ? 'on' : ''}`} aria-expanded={open} onClick={() => void toggleChords()}>Chords</button>
         <select aria-label="Key" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
@@ -291,17 +350,45 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
         <button type="button" onClick={strum}>Strum</button>
       </div>
       <div className="piano-body">
-        <div className="keys">
+        <div className="keys" ref={keysRef}>
           {Array.from({ length: high - low + 1 }, (_, index) => {
             const pitch = high - index
             const black = [1, 3, 6, 8, 10].includes(pitch % 12)
             return (
-              <div key={pitch} className={`key ${black ? 'black' : ''} ${inScale(pitch, scale.root, scale.scale) ? 'in' : ''}`} style={{ height: row }}>
+              <div key={pitch} data-pitch={pitch} className={`key ${black ? 'black' : ''} ${inScale(pitch, scale.root, scale.scale) ? 'in' : ''}`} style={{ height: row }}>
                 {pitch % 12 === 0 ? `C${Math.floor(pitch / 12) - 1}` : ''}
               </div>
             )
           })}
         </div>
+        <div
+          className="key-scroll"
+          data-scroll="keys"
+          aria-label="Scroll keyboard"
+          onPointerDown={(event) => {
+            event.stopPropagation()
+            event.preventDefault()
+            const track = event.currentTarget
+            const move = (ev: PointerEvent) => {
+              const bounds = track.getBoundingClientRect()
+              const ratio = Math.min(1, Math.max(0, (ev.clientY - bounds.top) / Math.max(1, bounds.height)))
+              const keys = keysRef.current
+              const roll = rollRef.current
+              if (!keys) return
+              keys.scrollTop = ratio * Math.max(0, keys.scrollHeight - keys.clientHeight)
+              if (roll) roll.scrollTop = keys.scrollTop
+            }
+            const up = () => {
+              window.removeEventListener('pointermove', move)
+              window.removeEventListener('pointerup', up)
+              window.removeEventListener('pointercancel', up)
+            }
+            window.addEventListener('pointermove', move)
+            window.addEventListener('pointerup', up)
+            window.addEventListener('pointercancel', up)
+            move(event.nativeEvent)
+          }}
+        />
         <div className="roll" ref={rollRef}>
           <div
             style={{ width, height: (high - low + 1) * row, position: 'relative' }}
@@ -400,7 +487,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
           </div>
           <div className="scale-keys">
             {tones.map((pitch) => (
-              <button key={pitch} type="button" onClick={() => playRef.current(pitch, 0.8)}>
+              <button key={pitch} type="button" data-pitch={pitch}>
                 {noteName(pitch)}{Math.floor(pitch / 12) - 1}
               </button>
             ))}
@@ -442,6 +529,22 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
       )}
     </div>
   )
+}
+
+function performanceBeat(store: ProjectStore, engine: AudioEngine, eventMs: number) {
+  const origin = engine.playOrigin()
+  const clock = engine.clockCompensation()
+  return Math.max(0, heardBeat({
+    eventMs,
+    stamp: engine.outputStamp(),
+    originContext: origin.context,
+    originBeat: origin.beat,
+    tempo: store.project.tempo,
+    outputLatency: clock.outputLatency,
+    baseLatency: clock.baseLatency,
+    calibrationSec: clock.calibrationSec,
+    quantizeBeats: 0,
+  }))
 }
 
 function timelineBeat(store: ProjectStore, engine: AudioEngine) {

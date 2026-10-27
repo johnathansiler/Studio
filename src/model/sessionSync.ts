@@ -1,4 +1,5 @@
 import { computePeaks } from './demo'
+import { padFingerprint } from './padMachine'
 import type { AudioAsset, Project } from './types'
 
 /** How long the host waits so a guest can receive the start time before the downbeat. */
@@ -177,7 +178,22 @@ export function arrangementDigest(project: Project): string {
         (clip.folder?.lanes || []).map((lane) => lane.bufferId).join(','),
         (clip.folder?.comps.find((comp) => comp.id === clip.folder?.activeCompId)?.segments || []).map((segment) => `${segment.laneId}:${segment.startSample}:${segment.endSample}`).join('|'),
       ]),
-      midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length, clip.notes.map((note) => [note.startBeat, note.durationBeats, note.pitch]), clip.notes.map((note) => (note.slide ? 1 : 0)).join(''), clip.quant ?? null, clip.mode ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null, clip.activeTakeId || '', clip.takes?.length || 0]),
+      midi: track.midiClips.map((clip) => [
+        clip.id,
+        clip.startBeat,
+        clip.durationBeats,
+        clip.notes.length,
+        clip.notes.map((note) => [note.startBeat, note.durationBeats, note.pitch]),
+        clip.notes.map((note) => (note.slide ? 1 : 0)).join(''),
+        clip.quant ?? null,
+        clip.mode ?? null,
+        clip.follow ?? null,
+        clip.legato ?? null,
+        clip.slotOnly ?? null,
+        clip.activeTakeId || '',
+        clip.takes?.length || 0,
+        clip.notes.map((note) => `${note.startBeat}:${note.probability ?? ''}:${note.nudge ?? ''}:${note.condition ?? ''}:${note.locks ? JSON.stringify(note.locks) : ''}`).join(','),
+      ]),
       audioSlots: track.audioSlots ?? null,
       midiSlots: track.midiSlots ?? null,
       rack: track.rack?.devices.map((device) => [device.id, device.kind, device.params, device.pattern, device.zones.length]),
@@ -193,6 +209,7 @@ export function arrangementDigest(project: Project): string {
         plugin.looper?.layers.length ?? 0,
       ]),
     })),
+    pads: project.padKit ? padFingerprint(project.padKit) : '',
     presetFavorites: project.presetFavorites ?? [],
   })
 }

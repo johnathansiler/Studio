@@ -17,6 +17,7 @@ export function ArrangeView({
   session,
   onSeek,
   onOpenPiano,
+  onPerform,
   onQuickPunch,
 }: {
   store: ProjectStore
@@ -24,6 +25,7 @@ export function ArrangeView({
   session: SessionClient
   onSeek: (sample: number) => void
   onOpenPiano: (trackId: string, clipId?: string) => void
+  onPerform: (mode: 'keys' | 'drums') => void
   onQuickPunch: () => void
 }) {
   const project = store.project
@@ -202,6 +204,12 @@ export function ArrangeView({
                 <button className={`mini ${track.monitor ? 'on-s' : ''}`} title="Input monitor" onClick={() => store.updateTrack(track.id, { monitor: !track.monitor })}>
                   I
                 </button>
+              )}
+              {track.type === 'midi' && (
+                <>
+                  <button className="mini" title="Piano roll" onClick={() => onPerform('keys')}>K</button>
+                  <button className="mini" title="Drum machine" onClick={() => onPerform('drums')}>D</button>
+                </>
               )}
               <input
                 className="slim"
