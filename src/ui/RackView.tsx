@@ -45,8 +45,9 @@ export function RackView({ store, engine, trackId }: { store: ProjectStore; engi
     }
   }
   const macros = [1, 2, 3, 4].map((slot) => {
-    const target = MACRO_TARGETS[Math.round(device.params[`m${slot}t`] || 0)] || 'M'
-    return { id: `m${slot}`, name: target }
+    const target = MACRO_TARGETS[Math.round(device.params[`m${slot}t`] ?? slot - 1)] || `M${slot}`
+    const mapped = DEVICE_PARAMS[device.kind].some((item) => item.id === target)
+    return { id: `m${slot}`, name: mapped ? target : `M${slot}` }
   })
   return (
     <div className="rack">

@@ -274,8 +274,8 @@ function fxSpecs(): ParamSpec[] {
 function macroSpecs(): ParamSpec[] {
   return [1, 2, 3, 4].flatMap((slot) => [
     spec(`m${slot}`, `M${slot}`, 0, 1, 0.5),
-    spec(`m${slot}d`, `M${slot} depth`, -1, 1, 0),
-    spec(`m${slot}t`, `M${slot} target`, 0, MACRO_TARGETS.length - 1, 0),
+    spec(`m${slot}d`, `M${slot} depth`, -1, 1, 0.35),
+    spec(`m${slot}t`, `M${slot} target`, 0, MACRO_TARGETS.length - 1, slot - 1),
   ])
 }
 
