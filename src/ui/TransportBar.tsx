@@ -15,6 +15,8 @@ export function TransportBar({
   onSession,
   onArrange,
   onPiano,
+  onKeys,
+  onDrums,
   onQuantize,
 }: {
   store: ProjectStore
@@ -27,6 +29,8 @@ export function TransportBar({
   onSession?: () => void
   onArrange?: () => void
   onPiano?: (trackId: string) => void
+  onKeys: () => void
+  onDrums: () => void
   onQuantize: () => void
 }) {
   const project = store.project
@@ -121,6 +125,12 @@ export function TransportBar({
         {midiTrack && onPiano && (
           <button type="button" className={`t-btn piano-btn ${store.selectedMidiClipId ? 'on' : ''}`} onClick={() => onPiano(midiTrack.id)}>Piano</button>
         )}
+        <button className="t-btn wide" onPointerDown={() => engine.unlock()} onClick={onKeys} title="Piano roll">
+          Keys
+        </button>
+        <button className="t-btn wide" onPointerDown={() => engine.unlock()} onClick={onDrums} title="Drum machine">
+          Pads
+        </button>
         <button
           className="t-btn"
           type="button"

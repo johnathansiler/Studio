@@ -5,6 +5,7 @@ import { defaultRoll } from '../../model/paint'
 import { normalizeQuantize } from '../../model/quantize'
 import { defaultRecord, uid } from '../../model/types'
 import { normalizeScale } from '../../model/scale'
+import { normalizePadKit } from '../../model/padMachine'
 import { normalizeBeats } from '../../model/steps'
 import type { FactoryPreset, ParamSpec, PluginDescriptor } from './types'
 
@@ -909,6 +910,7 @@ export function tuneLatency(sampleRate: number) {
 
 export function normalizeProject(project: Project): Project {
   project.scale = normalizeScale(project.scale)
+  project.padKit = normalizePadKit(project.padKit)
   const beats = normalizeBeats(project.beats, project.patternClips)
   project.beats = beats.beats
   project.patternClips = beats.patternClips

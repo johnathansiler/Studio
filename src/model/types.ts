@@ -208,6 +208,15 @@ export interface MidiNote {
   startBeat: number
   durationBeats: number
   velocity: number
+  /** 0–1 chance this step plays. Omitted steps always play. */
+  probability?: number
+  condition?: 'always' | '1:2' | '1:4' | 'fill'
+  /** Beats after the step grid. The sounding beat is the step plus this nudge. */
+  nudge?: number
+  /** Values applied only when playback lands on this step. */
+  locks?: Record<string, number>
+  velocityLo?: number
+  velocityHi?: number
   muted?: boolean
   pan?: number
   fine?: number
@@ -326,6 +335,8 @@ export interface Project {
   record?: RecordSettings
   /** Key, scale, and chord-pad performance settings. */
   scale?: ScaleState
+  /** Musical grid for performed MIDI. 0 leaves the note where it was played. */
+  quantizeBeats?: number
   /** `${kind}:${name}` factory and user presets marked in the browser. */
   presetFavorites?: string[]
   beats?: BeatRack
@@ -335,6 +346,8 @@ export interface Project {
   quantizePresets?: QuantizePreset[]
   /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */
   waveforms?: Record<string, { min: number; max: number }[]>
+  /** Pad banks, swing, and song chain for the drum deck. */
+  padKit?: import('./padMachine').PadProgram
 }
 
 export interface AudioAsset {
@@ -413,6 +426,7 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     recordBars: 4,
     record: defaultRecord(bar * 4),
     scale: defaultScale(),
+    quantizeBeats: 0,
     presetFavorites: [],
   }
 }

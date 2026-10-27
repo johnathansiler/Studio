@@ -22,6 +22,7 @@ import { ArrangeView } from './ui/ArrangeView'
 import { BeatView } from './ui/BeatView'
 import { ExportSheet } from './ui/ExportSheet'
 import { formFactor, type FormFactor } from './ui/form'
+import { PerformPop } from './ui/PerformPop'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
 import { IdeasPop } from './ui/IdeasPop'
@@ -86,6 +87,7 @@ export function App() {
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
+  const [perform, setPerform] = useState<'keys' | 'drums' | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
   const takeRef = useRef<{ id: string; endSample: number } | null>(null)
@@ -316,7 +318,16 @@ export function App() {
         engine.seek(saved.workspace.positionSamples || 0)
         engine.sync(store.project, (id) => store.buffers.get(id))
       }
-      if (new URLSearchParams(window.location.search).has('comp')) {
+      const params = new URLSearchParams(window.location.search)
+      const performMode = params.get('perform')
+      if (performMode === 'keys' || performMode === 'drums') {
+        store.setView('arrange')
+        const midi = store.project.tracks.find((track) => track.type === 'midi')
+        if (midi) store.selectTrack(midi.id)
+        setPerform(performMode)
+        setVersion((value) => value + 1)
+      }
+      if (params.has('comp')) {
         store.seedCompPreview()
         store.setView('arrange')
         engine.sync(store.project, (id) => store.buffers.get(id))
@@ -382,6 +393,13 @@ export function App() {
       history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
     }
   }, [session, store, version])
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    ;(window as unknown as { __cue?: { measure: () => ReturnType<AudioEngine['measureLiveHit']> } }).__cue = {
+      measure: () => engine.measureLiveHit(),
+    }
+  }, [engine])
 
   useEffect(() => {
     return session.subscribe(() => {
@@ -753,6 +771,21 @@ export function App() {
     store.endTake()
   }
 
+  function openPerform(mode: 'keys' | 'drums') {
+    engine.unlock()
+    void engine.resume()
+    const midi = store.project.tracks.find((track) => track.id === store.selectedTrackId && track.type === 'midi')
+      || store.project.tracks.find((track) => track.type === 'midi')
+    if (midi) {
+      store.selectTrack(midi.id)
+      if (!midi.midiClips.length) store.addMidiClip(midi.id, 0)
+      else if (!store.selectedMidiClipId) store.selectClip(midi.id, midi.midiClips[0].id, true)
+    }
+    setPerform(mode)
+    setSurface('studio')
+    setPhonePane('edit')
+  }
+
   async function quickPunch() {
     if (session.state.role === 'guest') {
       store.toast('The host records. Your take still lands on their timeline.', 'info')
@@ -1071,6 +1104,8 @@ async function importDropped(files: FileList) {
           onSession={() => { setPhonePane('edit'); setSurface('studio'); store.enterSession() }}
           onArrange={() => { setPhonePane('edit'); setSurface('studio'); store.backToArrangement() }}
           onPiano={(trackId) => openPiano(trackId)}
+          onKeys={() => openPerform('keys')}
+          onDrums={() => openPerform('drums')}
           onQuantize={() => store.openQuantize()}
         />
       )}
@@ -1085,6 +1120,7 @@ async function importDropped(files: FileList) {
                   session={session}
                   onSeek={(sample) => void locate(sample)}
                   onOpenPiano={openPiano}
+                  onPerform={(mode) => openPerform(mode)}
                   onQuickPunch={() => void quickPunch()}
                 />
               )}
@@ -1159,6 +1195,16 @@ async function importDropped(files: FileList) {
       )}
       {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
       {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}
+      {perform && (
+        <PerformPop
+          mode={perform}
+          store={store}
+          engine={engine}
+          session={session}
+          onRecord={() => void record()}
+          onClose={() => setPerform(null)}
+        />
+      )}
       {phone && (
         <nav className="phone-tabs" aria-label="Sections">
           <button className={phonePane === 'edit' && store.view === 'arrange' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setMenuOpen(false) }}>Arrange</button>
