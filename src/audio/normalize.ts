@@ -1,4 +1,5 @@
-import { createLoudness, dbToGain, measureLoudness } from './plugins/dsp'
+import { measureProgram } from './master/meter'
+import { dbToGain } from './plugins/dsp'
 
 export function normalizeAudio(channels: Float32Array[], sampleRate: number, mode: 'off' | 'peak' | 'lufs', target: number): Float32Array[] {
   if (mode === 'off') return channels
@@ -12,8 +13,7 @@ export function normalizeAudio(channels: Float32Array[], sampleRate: number, mod
 }
 
 export function measureLufs(channels: Float32Array[], sampleRate: number) {
-  const state = createLoudness(sampleRate)
-  return measureLoudness(state, channels[0] ?? new Float32Array(0), channels[1] ?? null, sampleRate).lufs
+  return measureProgram(channels[0] ?? new Float32Array(0), channels[1] ?? null, sampleRate).integrated
 }
 
 function lufsGain(channels: Float32Array[], sampleRate: number, target: number) {

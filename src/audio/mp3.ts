@@ -9,6 +9,8 @@ export interface Mp3Tags {
   bpm: number
   key: string
   artwork?: Uint8Array | null
+  comment?: string
+  isrc?: string
 }
 
 export interface Mp3Options {
@@ -175,6 +177,8 @@ function id3(tags: Mp3Tags) {
     textFrame('TKEY', tags.key),
   ]
   if (tags.artwork?.length) frames.push(pictureFrame(tags.artwork))
+  if (tags.comment) frames.push(commentFrame(tags.comment))
+  if (tags.isrc?.trim()) frames.push(textFrame('TSRC', tags.isrc.trim()))
   const body = concat(frames)
   const header = new Uint8Array(10)
   header.set(new TextEncoder().encode('ID3'), 0)
@@ -190,6 +194,18 @@ function textFrame(id: string, value: string) {
   data[0] = 3
   data.set(text, 1)
   return frame(id, data)
+}
+
+function commentFrame(value: string) {
+  const text = new TextEncoder().encode(value)
+  const data = new Uint8Array(1 + 3 + 1 + text.length)
+  data[0] = 3
+  data[1] = 101
+  data[2] = 110
+  data[3] = 103
+  data[4] = 0
+  data.set(text, 5)
+  return frame('COMM', data)
 }
 
 function pictureFrame(artwork: Uint8Array) {

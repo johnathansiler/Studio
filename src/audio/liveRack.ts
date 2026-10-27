@@ -38,6 +38,8 @@ export class LiveRack {
   private generation = 0
   private signature = ''
   private phone = false
+  private meterReading: Record<string, number> | null = null
+  private meterScope: Float32Array | null = null
   private ctx: AudioContext | null = null
   private strips: Map<string, StripNodes> = new Map()
   private localBus: AudioNode | null = null
@@ -72,6 +74,14 @@ export class LiveRack {
     if (!project || !ctx) return 0
     const plugins = owner === 'master' ? project.masterPlugins : project.tracks.find((track) => track.id === owner)?.plugins ?? []
     return this.latency(owner, plugins, ctx.sampleRate)
+  }
+
+  reading() {
+    return this.meterReading
+  }
+
+  scope() {
+    return this.meterScope
   }
 
   isFailed(pluginId: string) {
@@ -212,6 +222,7 @@ export class LiveRack {
       scaleRoot: project.scale?.root ?? 0,
       scaleIntervals: scale.intervals,
       quality: this.quality,
+      offline: false,
     }, (id, length) => {
       const buf = this.tapsOut.get(id)
       if (!buf || !buf.length) return null
@@ -223,6 +234,10 @@ export class LiveRack {
       if (slot.processor?.tuner) this.tuners.set(slot.id, slot.processor.tuner)
       if (slot.processor?.meter) this.meters.set(slot.id, slot.processor.meter)
       if (slot.processor?.trace) this.traces.set(slot.id, slot.processor.trace)
+      if (slot.processor?.meters) {
+        this.meterReading = slot.processor.meters
+        this.meterScope = slot.processor.scope ?? this.meterScope
+      }
     }
     this.tapsOut.set(owner, Float32Array.from(output[0]))
     const budget = (input[0].length / rate) * 1000
