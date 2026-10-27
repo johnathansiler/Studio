@@ -1,5 +1,6 @@
 import { defaultScale, type ScaleState } from './scale'
 import type { LoomState } from './loom'
+import type { SoundPersonal } from './sounds'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
 
@@ -128,6 +129,8 @@ export interface Project {
   scale?: ScaleState
   /** Loom instrument performance state. Samples stay in local storage, not in this object. */
   loom?: LoomState
+  /** Favorites, user tags, and imports for the sound browser. Audio stays in the project buffers. */
+  sounds?: SoundPersonal
   /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */
   waveforms?: Record<string, { min: number; max: number }[]>
 }

@@ -12,11 +12,13 @@ export function ArrangeView({
   engine,
   session,
   onSeek,
+  onPlaceSound,
 }: {
   store: ProjectStore
   engine: AudioEngine
   session: SessionClient
   onSeek: (sample: number) => void
+  onPlaceSound?: (trackId: string, id: string, startSample: number) => void
 }) {
   const project = store.project
   const [px, setPx] = useState(90)
@@ -175,6 +177,17 @@ export function ArrangeView({
                 const bounds = event.currentTarget.getBoundingClientRect()
                 const beat = ((event.clientX - bounds.left) / px) * (project.tempo / 60)
                 store.addMidiClip(track.id, Math.floor(beat))
+              }}
+              onDragOver={(event) => {
+                if ([...event.dataTransfer.types].includes('application/x-cueharbor-sound')) event.preventDefault()
+              }}
+              onDrop={(event) => {
+                const id = event.dataTransfer.getData('application/x-cueharbor-sound')
+                if (!id || !onPlaceSound) return
+                event.preventDefault()
+                const bounds = event.currentTarget.getBoundingClientRect()
+                const sample = ((event.clientX - bounds.left) / px) * project.sampleRate
+                onPlaceSound(track.id, id, sample)
               }}
             >
               {track.clips.map((clip) => (

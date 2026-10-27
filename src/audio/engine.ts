@@ -1283,17 +1283,26 @@ export class AudioEngine {
     }
   }
 
-  private playBuffer(ctx: BaseAudioContext, dest: AudioNode, audio: Float32Array, when: number, level: number) {
+  private playBuffer(ctx: BaseAudioContext, dest: AudioNode, audio: Float32Array, when: number, level: number, rate = 1) {
     const buffer = ctx.createBuffer(1, audio.length, ctx.sampleRate)
     buffer.getChannelData(0).set(audio)
     const src = ctx.createBufferSource()
     const gain = ctx.createGain()
     src.buffer = buffer
+    src.playbackRate.value = Math.max(0.25, Math.min(4, rate))
     gain.gain.value = level
     src.connect(gain)
     gain.connect(dest)
     src.start(Math.max(when, 0))
     if (ctx === this.ctx) this.sources.push(src)
+  }
+
+  /** Local audition of a browser preview. It does not enter the cue or the mic path. */
+  previewSound(audio: Float32Array, rate = 1) {
+    const ctx = this.ctx
+    const out = this.speakerGain
+    if (!ctx || !out || !audio.length) return
+    this.playBuffer(ctx, out, audio, ctx.currentTime, 0.22, rate)
   }
 
   /** Play one Loom note on the speaker. It does not enter the cue or the mic path. */

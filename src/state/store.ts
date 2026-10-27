@@ -5,6 +5,7 @@ import { findCycle, MASTER } from '../audio/routing'
 import { createEmptyProject, defaultInsert, makeTrack, uid, TRACK_COLORS } from '../model/types'
 import type { AudioAsset, AudioClip, InsertType, MidiClip, MidiNote, PluginInstance, Project, Track } from '../model/types'
 import { starterLoom, type LoomState } from '../model/loom'
+import { emptySounds, type SoundPersonal } from '../model/sounds'
 import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleState } from '../model/scale'
 import { beatsToSamples } from '../model/time'
 import { linearResample } from '../model/wav'
@@ -155,6 +156,16 @@ export class ProjectStore {
     if (this.project.loom) return
     this.mutate(() => {
       this.project.loom = starterLoom()
+    })
+  }
+
+  soundState() {
+    return this.project.sounds ?? emptySounds()
+  }
+
+  setSounds(next: SoundPersonal) {
+    this.mutate(() => {
+      this.project.sounds = next
     })
   }
 

@@ -15,7 +15,9 @@ import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { ArrangeView } from './ui/ArrangeView'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
+import { analyzeSound, rememberImport } from './model/sounds'
 import { LoomPop } from './ui/LoomPop'
+import { placeSound, SoundBrowser } from './ui/SoundBrowser'
 import { PianoRoll } from './ui/PianoRoll'
 import { starterLoom } from './model/loom'
 import { SessionView } from './ui/SessionView'
@@ -67,6 +69,7 @@ export function App() {
   const compact = form !== 'desk'
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
   const [loomOpen, setLoomOpen] = useState(false)
+  const [soundsOpen, setSoundsOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
   const takeRef = useRef<{ id: string; endSample: number } | null>(null)
@@ -163,6 +166,14 @@ export function App() {
     setLoomOpen(true)
     setSurface('studio')
     setPhonePane('edit')
+  }, [store])
+
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get('sounds') !== '1') return
+    setSoundsOpen(true)
+    setSurface('studio')
+    setPhonePane('edit')
+    store.setView('arrange')
   }, [store])
 
   useEffect(() => {
@@ -679,6 +690,12 @@ export function App() {
         gain: 1,
         source: 'import',
       })
+      const heard = analyzeSound(channels[0] ?? new Float32Array(), decoded.sampleRate)
+      const personal = store.soundState()
+      store.setSounds({
+        ...personal,
+        imports: [...personal.imports.filter((item) => item.id !== bufferId), rememberImport(file.name, bufferId, channels[0]?.byteLength ?? 0, heard)],
+      })
     }
   }
 
@@ -741,6 +758,7 @@ export function App() {
           <div className="top-actions">
             <button className="text-btn" onClick={() => void persist()}>Save</button>
             <button className="text-btn" onClick={() => void openLibrary()}>Library</button>
+            <button className="text-btn" onClick={() => setSoundsOpen(true)}>Sounds</button>
             <button className="text-btn" onClick={exportFile}>File</button>
             <button className="text-btn" onClick={() => projectFileRef.current?.click()}>Open</button>
             <button className="text-btn" onClick={() => fileRef.current?.click()}>Import</button>
@@ -762,6 +780,7 @@ export function App() {
           <div className="phone-menu">
             <button className="text-btn" onClick={() => { setMenuOpen(false); void persist() }}>Save</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); void openLibrary() }}>Library</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); setSoundsOpen(true); setPhonePane('edit'); setSurface('studio'); store.setView('arrange') }}>Sounds</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); exportFile() }}>File</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); projectFileRef.current?.click() }}>Open</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); fileRef.current?.click() }}>Import</button>
@@ -793,11 +812,16 @@ export function App() {
         {surface === 'studio' && (!phone || phonePane === 'edit') && (
           <div className="main-pane">
             <div className="editor">
-              {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} onSeek={(sample) => void locate(sample)} />}
+              {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} onSeek={(sample) => void locate(sample)} onPlaceSound={(trackId, id, sample) => placeSound(store, id, trackId, sample)} />}
               {store.view === 'mix' && <MixerView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} />}
             </div>
             {showRoll && form !== 'fold' && <PianoRoll store={store} engine={engine} onLoom={openLoom} />}
+          </div>
+        )}
+        {form === 'fold' && soundsOpen && !showRoll && surface === 'studio' && (
+          <div className="side-editor">
+            <SoundBrowser store={store} engine={engine} layout="pane" onClose={() => setSoundsOpen(false)} onPlace={(id, trackId, sample) => placeSound(store, id, trackId, sample)} />
           </div>
         )}
         {form === 'fold' && showRoll && surface === 'studio' && (
@@ -805,7 +829,7 @@ export function App() {
             <PianoRoll store={store} engine={engine} onLoom={openLoom} />
           </div>
         )}
-        {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && showRoll) && (
+        {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && (showRoll || soundsOpen)) && (
         <div
           className="dock-slot"
           onPointerDown={(event) => {
@@ -852,6 +876,9 @@ export function App() {
       </div>
       <PluginSheet store={store} engine={engine} />
       <LoomPop store={store} engine={engine} form={form} open={loomOpen} onClose={() => setLoomOpen(false)} />
+      {soundsOpen && form !== 'fold' && (
+        <SoundBrowser store={store} engine={engine} layout="sheet" onClose={() => setSoundsOpen(false)} onPlace={(id, trackId, sample) => placeSound(store, id, trackId, sample)} />
+      )}
       {phone && (
         <nav className="phone-tabs" aria-label="Sections">
           <button className={phonePane === 'edit' && store.view === 'arrange' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setMenuOpen(false) }}>Arrange</button>
