@@ -1,3 +1,5 @@
+import { resampleSinc } from '../audio/quality/resample'
+
 export type WavBits = 16 | 24 | 32
 export type DitherMode = 'none' | 'tpdf' | 'shaped'
 
@@ -165,18 +167,7 @@ function readInt24(view: DataView, offset: number) {
 export function linearResample(input: Float32Array, fromRate: number, toRate: number): Float32Array {
   if (fromRate === toRate) return input.slice()
   const outLen = Math.max(1, Math.round((input.length * toRate) / fromRate))
-  const out = new Float32Array(outLen)
-  const scale = fromRate / toRate
-  for (let i = 0; i < outLen; i++) {
-    const pos = i * scale
-    const i0 = Math.floor(pos)
-    const i1 = Math.min(input.length - 1, i0 + 1)
-    const f = pos - i0
-    const a = input[Math.min(input.length - 1, i0)] || 0
-    const b = input[i1] || 0
-    out[i] = a + (b - a) * f
-  }
-  return out
+  return resampleSinc(input, outLen, 64)
 }
 
 function writeString(view: DataView, offset: number, text: string) {

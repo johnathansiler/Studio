@@ -1,4 +1,5 @@
 import { clipNeedsStretch, preferStretchCache, renderClipChannels, sourceSamplesOf, timelineSamples } from './stretch/engine'
+import { onStretchCommit, readStretch, storeStretch, stretchCacheKey, stretchSlot } from './stretch/commit'
 import type { StretchMode } from './stretch/engine'
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
@@ -110,7 +111,11 @@ export class AudioEngine {
   private perfAtCtx0 = 0
   private workletsReady = false
   private stretchReady = false
-  private readonly stretchPcm = new Map<string, Float32Array[]>()
+  private readonly stretchKeys = new Set<string>()
+  private joining = false
+  private readonly dropCommit = onStretchCommit((key) => {
+    if (this.stretchKeys.has(key)) this.adoptCommit()
+  })
   private recorders = new Map<string, ActiveRec>()
   private pendingRecorders: { key: string; stream: MediaStream; handler: () => void }[] = []
   private rollingChunks: SliceChunk[] = []
@@ -1032,7 +1037,7 @@ export class AudioEngine {
       liveRemote: false,
       create: (pluginId, sampleRate) => peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
     })
-    return encodeWav(graph.master, rate)
+    return encodeWav(graph.master, rate, { dither: 'tpdf' })
   }
 
   bufferFor(asset: AudioAsset) {
@@ -1448,7 +1453,11 @@ export class AudioEngine {
       if (fadeOut > 0 && t > clipDur - fadeOut) g *= Math.max(0, (clipDur - t) / fadeOut)
       return Math.max(0.0001, g)
     }
-    gain.gain.setValueAtTime(env(relFrom), when)
+    const join = this.joining && from <= timelineStart + 8
+    gain.gain.setValueAtTime(join ? 0.0001 : env(relFrom), when)
+    if (join && !(fadeIn > 0 && relFrom < fadeIn)) {
+      gain.gain.linearRampToValueAtTime(Math.max(0.0001, clip.gain), when + Math.min(0.008, dur))
+    }
     if (fadeIn > 0 && relFrom < fadeIn) {
       gain.gain.linearRampToValueAtTime(clip.gain, Math.min(when + (fadeIn - relFrom), when + dur))
     }
@@ -1466,6 +1475,7 @@ export class AudioEngine {
   /** Phone under load replays the cached render instead of stretching on the audio thread. */
   private shouldStretchLive(clip: AudioClip) {
     if (!this.stretchReady || !this.project || !clip.stretch) return false
+    if (stretchSlot(stretchCacheKey(clip, this.project))?.quality === 'hq') return false
     const phone = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
     if (preferStretchCache(phone, this.rack.cpu)) return false
     if (clip.stretch.followTempo || clip.stretch.markers.length >= 2) return false
@@ -1475,35 +1485,43 @@ export class AudioEngine {
   private stretchBuffer(ctx: BaseAudioContext, buffer: AudioBuffer, clip: AudioClip) {
     const project = this.project
     if (!project || !clipNeedsStretch(clip, project)) return { buffer, clip }
-    const pcm = this.cachedStretch(buffer, clip, project)
+    const pcm = this.cachedStretch(buffer, clip, project, ctx instanceof OfflineAudioContext)
     const length = Math.max(1, pcm[0]?.length ?? 1)
     const audio = ctx.createBuffer(Math.max(1, pcm.length), length, ctx.sampleRate || project.sampleRate)
     pcm.forEach((channel, index) => audio.copyToChannel(new Float32Array(channel), index))
     return { buffer: audio, clip: { ...clip, offsetSamples: 0, durationSamples: length } }
   }
 
-  private cachedStretch(buffer: AudioBuffer, clip: AudioClip, project: Project) {
-    const key = JSON.stringify([
-      clip.bufferId,
-      clip.offsetSamples,
-      clip.startSample,
-      timelineSamples(clip, project),
-      clip.stretch,
-      project.tempo,
-      project.tempoMap ?? [],
-      project.sampleRate,
-    ])
-    const hit = this.stretchPcm.get(key)
-    if (hit) return hit
+  private cachedStretch(buffer: AudioBuffer, clip: AudioClip, project: Project, committed: boolean) {
+    const key = stretchCacheKey(clip, project)
+    this.stretchKeys.add(key)
     const channels: Float32Array[] = []
     for (let index = 0; index < buffer.numberOfChannels; index++) channels.push(buffer.getChannelData(index))
-    const pcm = renderClipChannels(channels, clip, project)
-    this.stretchPcm.set(key, pcm)
-    if (this.stretchPcm.size > 8) {
-      const oldest = this.stretchPcm.keys().next().value
-      if (oldest) this.stretchPcm.delete(oldest)
+    if (committed) {
+      const pcm = renderClipChannels(channels, clip, project, 'hq')
+      storeStretch(key, pcm)
+      return pcm
     }
-    return pcm
+    return readStretch(key, channels, clip, project)
+  }
+
+  /** Swap a live preview for the committed render without moving the playhead. */
+  private adoptCommit() {
+    void this.dropCommit
+    const ctx = this.ctx
+    const project = this.project
+    if (!this.playing || !ctx || !project) return
+    const now = Math.max(ctx.currentTime + 0.01, this.playOriginCtx)
+    const sample = Math.max(0, Math.round(this.sampleAt(now)))
+    this.stopSources()
+    this.arrangementScheduled = true
+    this.sessionStarted.clear()
+    this.nextLoopCtx = now
+    this.nextLoopSample = sample
+    this.joining = true
+    const end = projectEndSample(project.tracks, this.sampleRate, project.tempo)
+    this.scheduleWindow(now, sample, end)
+    this.joining = false
   }
 
   private scheduleStretchWorklet(
@@ -1564,6 +1582,8 @@ export class AudioEngine {
         semitones: stretch.semitones,
         cents: stretch.cents,
         mode: stretch.mode as StretchMode,
+        quality: 'preview' as const,
+        formant: stretch.formant,
       },
       startFrame: Math.max(0, Math.round(Math.max(when, 0) * sr)),
       skip: Math.max(0, from - clip.startSample),

@@ -2,7 +2,14 @@ import type { AudioClip, StretchMode } from '../model/types'
 import { sourceSamplesOf } from '../audio/stretch/engine'
 import type { ProjectStore } from '../state/store'
 
-const MODES: StretchMode[] = ['beats', 'tonal', 'voice', 'tape']
+const MODES: { id: StretchMode; label: string }[] = [
+  { id: 'pro', label: 'Pro' },
+  { id: 'beats', label: 'Beats' },
+  { id: 'tonal', label: 'Tonal' },
+  { id: 'voice', label: 'Voice' },
+  { id: 'speech', label: 'Speech' },
+  { id: 'tape', label: 'Tape' },
+]
 
 export function ClipSheet({ store, trackId, clip, onClose }: { store: ProjectStore; trackId: string; clip: AudioClip; onClose: () => void }) {
   const project = store.project
@@ -54,15 +61,23 @@ export function ClipSheet({ store, trackId, clip, onClose }: { store: ProjectSto
         </label>
         <select
           aria-label="Mode"
-          value={stretch?.mode ?? 'tonal'}
+          value={stretch?.mode ?? 'pro'}
           onChange={(event) => store.setClipStretch(trackId, clip.id, { mode: event.target.value as StretchMode })}
         >
           {MODES.map((mode) => (
-            <option key={mode} value={mode}>
-              {mode[0].toUpperCase() + mode.slice(1)}
+            <option key={mode.id} value={mode.id}>
+              {mode.label}
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          className={`text-btn ${stretch?.formant ? 'on' : ''}`}
+          aria-pressed={stretch?.formant ?? false}
+          onClick={() => store.setClipStretch(trackId, clip.id, { formant: !stretch?.formant })}
+        >
+          Formant
+        </button>
         <button
           type="button"
           className={`text-btn ${stretch?.followTempo ? 'on' : ''}`}

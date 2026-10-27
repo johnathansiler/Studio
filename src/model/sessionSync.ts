@@ -145,6 +145,7 @@ export function arrangementDigest(project: Project): string {
               clip.stretch.followTempo ? 1 : 0,
               clip.stretch.sourceBpm ?? 0,
               clip.stretch.markers.map((marker) => [marker.source, Math.round(marker.target * 1000) / 1000]),
+              clip.stretch.formant ? 1 : 0,
             ]
           : 0,
       ]),
