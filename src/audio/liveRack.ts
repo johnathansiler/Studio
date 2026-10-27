@@ -29,6 +29,8 @@ export class LiveRack {
   private readonly processors = new Map<string, Processor>()
   private readonly failed = new Set<string>()
   private readonly spectra = new Map<string, Float32Array>()
+  private readonly meters = new Map<string, { vu: number; gr: number }>()
+  private readonly traces = new Map<string, Float32Array>()
   private readonly tapsOut = new Map<string, Float32Array>()
   private readonly sendGains = new Map<string, GainNode>()
   private links: { from: AudioNode; to: AudioNode }[] = []
@@ -46,6 +48,14 @@ export class LiveRack {
 
   spectrum(pluginId: string) {
     return this.spectra.get(pluginId) ?? null
+  }
+
+  meter(pluginId: string) {
+    return this.meters.get(pluginId) ?? null
+  }
+
+  trace(pluginId: string) {
+    return this.traces.get(pluginId) ?? null
   }
 
   isFailed(pluginId: string) {
@@ -194,6 +204,8 @@ export class LiveRack {
     for (const slot of slots) {
       if (slot.failed) this.failed.add(slot.id)
       if (slot.processor?.spectrum) this.spectra.set(slot.id, slot.processor.spectrum)
+      if (slot.processor?.meter) this.meters.set(slot.id, slot.processor.meter)
+      if (slot.processor?.trace) this.traces.set(slot.id, slot.processor.trace)
     }
     this.tapsOut.set(owner, Float32Array.from(output[0]))
     const budget = (input[0].length / rate) * 1000

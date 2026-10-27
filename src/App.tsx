@@ -1,27 +1,33 @@
 import { useEffect, useRef, useState } from 'react'
+import { applyFreeze } from './audio/bounce'
 import { AudioEngine } from './audio/engine'
+import { unpackProject } from './model/archive'
 import { renderDemoLoop } from './model/demo'
-import { uid, type AudioClip } from './model/types'
+import { createEmptyProject, isLocalInput, uid, type AudioClip } from './model/types'
 import type { IncomingTake } from './remote/session'
 import { SessionClient } from './remote/session'
-import { listProjects, loadLastProject, loadProject, requestPersistentStorage, saveProject, base64ToBytes, bytesToBase64, type WorkspaceSnapshot } from './storage/idb'
+import { deleteProject, listProjects, listSnapshots, loadLastProject, loadProject, loadSnapshot, requestPersistentStorage, saveProject, storageReport, type ProjectListItem, type WorkspaceSnapshot } from './storage/idb'
 import { inviteWins } from './model/negotiate'
 import { readIdentity, writeIdentity } from './storage/identity'
 import { ProjectStore, seedDemoProject } from './state/store'
-import { decodeWavPCM, encodeWav, linearResample } from './model/wav'
+import { linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
-import { beatsToSamples, countInSeconds } from './model/time'
+import { applyTransportLaunch, recordedLength } from './model/launch'
+import { beatsToSamples, countInSeconds, samplesToBeats } from './model/time'
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { ArrangeView } from './ui/ArrangeView'
+import { ExportSheet } from './ui/ExportSheet'
+import { formFactor, type FormFactor } from './ui/form'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
+import { IdeasPop } from './ui/IdeasPop'
 import { PianoRoll } from './ui/PianoRoll'
+import { ProjectSheet } from './ui/ProjectSheet'
 import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
 import { VideoDock } from './ui/VideoDock'
-import { downloadBlob } from './ui/format'
-import { formFactor, type FormFactor } from './ui/form'
+import { formatBytes } from './ui/share'
 
 interface Bundle {
   store: ProjectStore
@@ -56,8 +62,13 @@ export function App() {
   const [joinOpen, setJoinOpen] = useState(false)
   const [joinCode, setJoinCode] = useState('')
   const [joinName, setJoinName] = useState(store.project.name ? localStorage.getItem('cueharbor-name') || 'Artist' : 'Artist')
-  const [saved, setSaved] = useState<{ id: string; name: string; savedAt: number }[]>([])
-  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [projects, setProjects] = useState<ProjectListItem[]>([])
+  const [snapshots, setSnapshots] = useState<{ key: string; savedAt: number }[]>([])
+  const [projectsOpen, setProjectsOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [draftName, setDraftName] = useState(store.project.name)
+  const [usage, setUsage] = useState('')
+  const [persisted, setPersisted] = useState(true)
   const [help, setHelp] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight))
@@ -65,6 +76,8 @@ export function App() {
   const phone = form === 'phone'
   const compact = form !== 'desk'
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
+  const [pianoOpen, setPianoOpen] = useState(false)
+  const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
   const takeRef = useRef<{ id: string; endSample: number } | null>(null)
@@ -90,6 +103,33 @@ export function App() {
     })
     session.setControlHandler((cmd) => {
       const action = String(cmd.action || '')
+      if (action === 'launch' || action === 'scene' || action === 'stop-clips' || action === 'back') {
+        if (session.state.role === 'host') return
+        const next = applyTransportLaunch(
+          { launched: store.launched, at: store.launchAt, gen: store.launchGen, mode: store.transportMode },
+          {
+            action,
+            trackId: cmd.trackId ? String(cmd.trackId) : undefined,
+            clipId: cmd.clipId == null || cmd.clipId === '' ? null : String(cmd.clipId),
+            timelineSample: Number(cmd.timelineSample),
+            slots: Array.isArray(cmd.slots) ? (cmd.slots as { trackId: string; clipId: string | null; timelineSample?: number }[]) : undefined,
+            gen: cmd.gen && typeof cmd.gen === 'object' ? (cmd.gen as Record<string, number>) : undefined,
+          },
+        )
+        const stopped = engine.status === 'stopped'
+        store.replaceSession(next)
+        if (action === 'back' || action === 'stop-clips') return
+        if (stopped && next.mode === 'session' && Object.values(next.launched).some(Boolean)) {
+          const localPerf = guestFollowStart({
+            hostPerfAtSample: Number(cmd.hostPerfAtSample) || performance.now(),
+            clockOffsetMs: session.hostOffsetMs(),
+            oneWayMs: session.primaryOneWay()?.ms ?? 40,
+            nowPerf: performance.now(),
+          })
+          void engine.playAtPerf(Number(cmd.timelineSample) || 0, localPerf, 'session')
+        }
+        return
+      }
       if (session.state.role === 'host') {
         if (action === 'play') void playFrom(engine.currentTimelineSample())
         else if (action === 'stop') void stop()
@@ -132,21 +172,72 @@ export function App() {
       setJoinOpen(false)
     }
     engine.sync(store.project, (id) => store.buffers.get(id))
-    return store.subscribe(() => {
+    const unsub = store.subscribe(() => {
       engine.sync(store.project, (id) => store.buffers.get(id))
       engine.setLaunches(store.launched)
+      engine.setLaunchAt(store.launchAt)
+      engine.setLaunchGen(store.launchGen)
       if (session.state.role === 'host') {
         window.clearTimeout(publishTimer.current)
         publishTimer.current = window.setTimeout(() => session.publishArrangement(), 40)
       }
-      const key = `${store.transportMode}:${JSON.stringify(store.launched)}`
-      if (store.transportMode === 'session' && key !== launchKey.current) {
+      const key = `${store.transportMode}:${JSON.stringify(store.launched)}:${JSON.stringify(store.launchAt)}:${JSON.stringify(store.launchGen)}`
+      const pending = store.takePendingTransport()
+      const playing = engine.status === 'playing' || engine.status === 'recording'
+      if (session.state.role !== 'guest' && pending) {
+        if (!playing && store.transportMode === 'session' && Object.values(store.launched).some(Boolean)) {
+          void playFrom(engine.positionSamples, 'session')
+        } else {
+          const at = Number(pending.timelineSample)
+          const sample = Number.isFinite(at) ? at : Math.round(engine.currentTimelineSample())
+          const lead = scheduleLeadMs(session.primaryOneWay()?.ms ?? 40)
+          session.broadcastTransport({
+            ...pending,
+            timelineSample: sample,
+            hostPerfAtSample: engine.perfAtTimeline(sample) ?? performance.now() + lead,
+            tempo: store.project.tempo,
+            timeSignature: store.project.timeSignature,
+            mode: store.transportMode,
+          })
+          if (playing && store.transportMode === 'session') {
+            if (engine.currentMode() !== 'session') engine.adoptSession()
+            else engine.kickSession()
+          } else if (playing && pending.action === 'back') engine.adoptArrangement()
+        }
+      }
+      if (key !== launchKey.current) {
         launchKey.current = key
-        void playFrom(engine.positionSamples, 'session')
-      } else launchKey.current = key
+        if (session.state.role === 'guest') {
+          if (store.transportMode === 'arrangement') {
+            if (playing && engine.currentMode() === 'session') engine.adoptArrangement()
+          } else if (playing && engine.currentMode() !== 'session') engine.adoptSession()
+          else if (playing) engine.kickSession()
+        }
+      }
       setVersion((value) => value + 1)
     })
+    const followTimer = window.setInterval(() => {
+      if (session.state.role === 'guest') return
+      if (store.transportMode !== 'session') return
+      if (engine.status !== 'playing' && engine.status !== 'recording') return
+      store.tickFollow(engine.currentTimelineSample())
+    }, 40)
+    return () => {
+      unsub()
+      window.clearInterval(followTimer)
+    }
   }, [store, engine, session])
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('ideas') !== '1') return
+    const track = store.project.tracks.find((item) => item.type === 'midi')
+    if (track && !track.midiClips.length) store.addMidiClip(track.id, 0)
+    if (track) store.selectTrack(track.id)
+    store.setView('arrange')
+    setSurface('studio')
+    setPhonePane('edit')
+    setIdeasOpen(true)
+  }, [store])
 
   useEffect(() => {
     const saveReady = { current: false }
@@ -161,9 +252,12 @@ export function App() {
       surface: surfaceRef.current,
       phonePane: phonePaneRef.current,
     })
-    const write = () => {
+    let lastSnapshot = 0
+    const write = (forceSnapshot = false) => {
       if (!saveReady.current || cancel) return
-      void saveProject(store.project, store.buffers, snapshot()).then((result) => {
+      const snap = forceSnapshot || Date.now() - lastSnapshot > 20000
+      if (snap) lastSnapshot = Date.now()
+      void saveProject(store.project, store.buffers, snapshot(), { snapshot: snap }).then((result) => {
         if (result === 'quota' && Date.now() - lastQuota > 15000) {
           lastQuota = Date.now()
           store.toast('This browser is out of space, so the latest recording could not be kept.', 'warn')
@@ -196,7 +290,7 @@ export function App() {
     const unsub = store.subscribe(schedule)
     const flush = () => {
       window.clearTimeout(timer)
-      write()
+      write(true)
     }
     flushSave.current = flush
     const onVisible = () => {
@@ -264,6 +358,9 @@ export function App() {
                 hostPerfAtSample: performance.now(),
                 mode: engine.currentMode(),
                 tempo: store.project.tempo,
+                launches: store.launched,
+                launchAt: store.launchAt,
+                launchGen: store.launchGen,
               })
             }
           }
@@ -354,7 +451,10 @@ export function App() {
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
       const key = event.key.toLowerCase()
       const meta = event.metaKey || event.ctrlKey
-      if (event.code === 'Space') {
+      if (key === 't' && !meta && !event.repeat && !store.keyboardMidi) {
+        event.preventDefault()
+        window.dispatchEvent(new CustomEvent('cueharbor-tap', { detail: event.timeStamp }))
+      } else if (event.code === 'Space') {
         event.preventDefault()
         if (engine.status === 'stopped') void play()
         else void stop()
@@ -430,6 +530,9 @@ export function App() {
       countIn: counting,
       countInMs: Math.round(countMs),
       timeSignature: store.project.timeSignature,
+      launches: store.launched,
+      launchAt: store.launchAt,
+      launchGen: store.launchGen,
     })
     if (counting) engine.armCountIn(store.project.tempo, store.project.timeSignature)
     await engine.playAtPerf(sample, hostPerf, mode)
@@ -437,6 +540,14 @@ export function App() {
 
   async function followPlay(cmd: Record<string, unknown>) {
     await ready()
+    if (cmd.launches && typeof cmd.launches === 'object') {
+      store.replaceSession({
+        launched: cmd.launches as Record<string, string | null>,
+        at: cmd.launchAt && typeof cmd.launchAt === 'object' ? (cmd.launchAt as Record<string, number>) : {},
+        gen: cmd.launchGen && typeof cmd.launchGen === 'object' ? (cmd.launchGen as Record<string, number>) : {},
+        mode: cmd.mode === 'session' ? 'session' : 'arrangement',
+      })
+    }
     const counting = Boolean(cmd.countIn)
     const tempo = Number(cmd.tempo) || store.project.tempo
     const raw = cmd.timeSignature as { numerator?: number; denominator?: number } | undefined
@@ -480,7 +591,7 @@ export function App() {
     engine.stop()
     for (const capture of captures) {
       const bufferId = uid('buf')
-      const track = store.project.tracks.find((item) => item.armed && (capture.peerId ? item.input === `remote:${capture.peerId}` : item.input === 'mic'))
+      const track = store.project.tracks.find((item) => item.armed && (capture.peerId ? item.input === `remote:${capture.peerId}` : isLocalInput(item.input)))
       store.addAsset({
         id: bufferId,
         name: capture.source === 'guide' ? 'Live guide' : 'Recording',
@@ -488,21 +599,31 @@ export function App() {
         channels: capture.channels,
       })
       if (!track) continue
+      const slot = store.sessionSlot
+      const intoSlot = slot && slot.trackId === track.id && capture.source === 'local'
+      const durationSamples = intoSlot
+        ? recordedLength(capture.channels[0].length, store.project.recordBars ?? 0, capture.sampleRate, store.project.tempo, store.project.timeSignature)
+        : capture.channels[0].length
       const clip: AudioClip = {
         id: uid('clip'),
         name: capture.source === 'guide' ? `${track.name} guide` : track.name,
         bufferId,
-        startSample: capture.startSample,
+        startSample: intoSlot ? 0 : capture.startSample,
         offsetSamples: 0,
-        durationSamples: capture.channels[0].length,
+        durationSamples,
         fadeInSamples: 64,
         fadeOutSamples: 128,
         gain: 1,
         source: capture.source === 'guide' ? 'guide' : 'local',
         peerId: capture.peerId,
         takeId: capture.takeId,
+        durationBeats: intoSlot ? samplesToBeats(durationSamples, capture.sampleRate, store.project.tempo) : undefined,
+        warp: intoSlot ? true : undefined,
+        loop: intoSlot ? true : undefined,
+        slotOnly: intoSlot ? true : undefined,
       }
-      store.addAudioClip(track.id, clip)
+      if (intoSlot && slot) store.placeInSlot(track.id, slot.scene, clip)
+      else store.addAudioClip(track.id, clip)
       if (capture.source === 'guide' && isSilentTake(capture.channels)) {
         store.toast(`${track.name} guide is silent. Video and the live mic need a connected media path. The aligned take replaces this if the upload arrives.`, 'warn')
       }
@@ -524,12 +645,19 @@ export function App() {
       await stop()
       return
     }
+    const slot = store.sessionSlot
+    const slotTrack = slot ? store.project.tracks.find((track) => track.id === slot.trackId) : undefined
+    if (slot && slotTrack?.type === 'midi') {
+      store.prepareMidiSlot(slot.trackId, slot.scene)
+      if (engine.status !== 'playing') await playFrom(engine.currentTimelineSample(), 'session')
+      return
+    }
     await ready()
     const takeId = uid('take')
     const inputs = []
     for (const track of store.project.tracks) {
       if (!track.armed || track.type !== 'audio') continue
-      if (track.input === 'mic' && session.localPerformanceStream()) {
+      if (isLocalInput(track.input) && session.localPerformanceStream()) {
         inputs.push({ key: track.id, stream: session.localPerformanceStream()!, source: 'local' as const, takeId })
       }
       if (track.input.startsWith('remote:')) {
@@ -540,13 +668,14 @@ export function App() {
     }
     if (!inputs.some((input) => input.source === 'local')) {
       const mic = session.localPerformanceStream()
-      const armed = store.project.tracks.find((track) => track.armed && track.input === 'mic')
+      const armed = store.project.tracks.find((track) => track.armed && isLocalInput(track.input))
       if (mic && armed) inputs.push({ key: armed.id, stream: mic, source: 'local' as const, takeId })
     }
     if (!inputs.length) {
       try {
+        const stereo = store.project.tracks.some((track) => track.armed && track.type === 'audio' && track.channels === 2 && isLocalInput(track.input))
         const mic = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+          audio: { channelCount: stereo ? 2 : 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
           video: false,
         })
         engine.setLocalMic(mic)
@@ -596,23 +725,31 @@ export function App() {
     })
   }
 
-  async function bounce() {
-    await ready()
-    const wav = await engine.exportMix(store.project, store.buffers)
-    downloadBlob(`${store.project.name.replace(/\s+/g, '-').toLowerCase()}.wav`, new Blob([wav], { type: 'audio/wav' }))
-    store.toast('Mix bounced to WAV.', 'good')
-  }
-
-  async function persist() {
-    const result = await saveProject(store.project, store.buffers, {
+  function workspaceNow(): WorkspaceSnapshot {
+    return {
       view: store.view,
       transportMode: store.transportMode,
       positionSamples: Math.round(engine.positionSamples),
       selectedTrackId: store.selectedTrackId,
       surface,
       phonePane,
-    })
+    }
+  }
+
+  async function persist() {
+    const result = await saveProject(store.project, store.buffers, workspaceNow(), { snapshot: true })
     store.toast(result === 'quota' ? 'This browser is out of space, so the project could not be kept.' : 'Saved in this browser.', result === 'quota' ? 'warn' : 'good')
+  }
+
+  async function openProjects() {
+    setDraftName(store.project.name)
+    setProjects(await listProjects())
+    setSnapshots(await listSnapshots(store.project.id))
+    const report = await storageReport()
+    setUsage(formatBytes(report.used))
+    setPersisted(report.persisted)
+    setProjectsOpen(true)
+    void requestPersistentStorage()
   }
 
   function joinSession() {
@@ -624,20 +761,15 @@ export function App() {
     setPhonePane('room')
   }
 
-  async function openLibrary() {
-    setSaved(await listProjects())
-    setLibraryOpen(true)
-  }
-
-  function exportFile() {
-    const assets = [...store.buffers.values()].map((asset) => ({
-      id: asset.id,
-      name: asset.name,
-      sampleRate: asset.sampleRate,
-      wav: bytesToBase64(new Uint8Array(encodeWav(asset.channels, asset.sampleRate))),
-    }))
-    const blob = new Blob([JSON.stringify({ project: store.project, assets })], { type: 'application/json' })
-    downloadBlob(`${store.project.name.replace(/\s+/g, '-').toLowerCase()}.cueharbor.json`, blob)
+  function saveAs(name: string) {
+    const copy = JSON.parse(JSON.stringify(store.project)) as typeof store.project
+    copy.id = uid('prj')
+    copy.name = name || store.project.name
+    const buffers = new Map(store.buffers)
+    void saveProject(copy, buffers, workspaceNow(), { snapshot: true }).then(() => {
+      store.loadProject(copy, buffers)
+      void openProjects()
+    })
   }
 
   async function importAudio(files: FileList | null) {
@@ -667,25 +799,50 @@ export function App() {
 
   async function importProject(file: File | null) {
     if (!file) return
-    const parsed = JSON.parse(await file.text()) as {
-      project: Bundle['store']['project']
-      assets: { id: string; name: string; sampleRate: number; wav: string }[]
-    }
-    const buffers = new Map()
-    for (const asset of parsed.assets) {
-      const decoded = decodeWavPCM(base64ToBytes(asset.wav).buffer as ArrayBuffer)
-      buffers.set(asset.id, { id: asset.id, name: asset.name, sampleRate: decoded.sampleRate, channels: decoded.channels })
-    }
-    store.loadProject(parsed.project, buffers)
+    const loaded = await unpackProject(new Uint8Array(await file.arrayBuffer()))
+    const buffers = new Map(loaded.assets.map((asset) => [asset.id, asset]))
+    store.loadProject(loaded.project, buffers)
     await ready()
   }
 
-  const showRack = store.view === 'arrange' && !!store.rackTrackId
-  const showRoll = store.view === 'arrange' && !!store.selectedMidiClipId && !showRack
-  const sideEditor = showRoll || showRack
+async function importDropped(files: FileList) {
+    const list = [...files]
+    const projectFile = list.find((file) => /\.cueharbor$|\.json$/i.test(file.name))
+    if (projectFile) {
+      await importProject(projectFile)
+      return
+    }
+    const transfer = new DataTransfer()
+    for (const file of list) transfer.items.add(file)
+    await importAudio(transfer.files)
+  }
+
+  const armedTrack = store.sessionSlot ? store.project.tracks.find((track) => track.id === store.sessionSlot?.trackId) : undefined
+  const showRoll = !!store.selectedMidiClipId && !pianoOpen && (store.view === 'arrange' || (store.view === 'session' && armedTrack?.type === 'midi'))
+
+  function openPiano(trackId: string, clipId?: string) {
+    const beat = samplesToBeats(engine.positionSamples, store.project.sampleRate, store.project.tempo)
+    store.preparePianoClip(trackId, beat, clipId)
+    setSurface('studio')
+    setPhonePane('edit')
+    store.setView('arrange')
+    setPianoOpen(true)
+  }
 
   return (
-    <div className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''}`} style={{ ['--dock' as string]: `${dock}px` }} data-version={version} data-form={form}>
+    <div
+      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''}`}
+      style={{ ['--dock' as string]: `${dock}px` }}
+      data-version={version}
+      data-form={form}
+      onDragOver={(event) => {
+        if ([...event.dataTransfer.types].includes('Files')) event.preventDefault()
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        if (event.dataTransfer.files.length) void importDropped(event.dataTransfer.files)
+      }}
+    >
       <header className="topbar">
         <div className="brand">
           <div className="mark" aria-hidden>
@@ -715,16 +872,8 @@ export function App() {
           </button>
         ) : (
           <div className="top-actions">
-            <button className="text-btn" onClick={() => void persist()}>Save</button>
-            <button className="text-btn" onClick={() => void openLibrary()}>Library</button>
-            <button className="text-btn" onClick={exportFile}>File</button>
-            <button className="text-btn" onClick={() => projectFileRef.current?.click()}>Open</button>
-            <button className="text-btn" onClick={() => fileRef.current?.click()}>Import</button>
-            <button className="text-btn" onClick={() => void bounce()}>Bounce</button>
-            <button className="text-btn" onClick={() => store.addTrack('audio')}>+ Audio</button>
-            <button className="text-btn" onClick={() => store.addTrack('midi')}>+ Inst</button>
-            <button className="text-btn" onClick={() => store.addTrack('bus')}>+ Bus</button>
-            <button className="text-btn" onClick={() => store.addTrack('group')}>+ Group</button>
+            <button className="text-btn" onClick={() => void openProjects()}>Save</button>
+            <button className="text-btn" id="menu-export" onClick={() => setExportOpen(true)}>Export</button>
             <button className="text-btn" onClick={() => setHelp(true)} title="Shortcuts" aria-label="Shortcuts">?</button>
             <button className="text-btn" aria-label={surface === 'studio' ? 'Artist view' : 'Studio'} onClick={() => setSurface(surface === 'studio' ? 'artist' : 'studio')}>
               {surface === 'studio' ? 'Artist' : 'Studio'}
@@ -736,16 +885,8 @@ export function App() {
         )}
         {compact && menuOpen && (
           <div className="phone-menu">
-            <button className="text-btn" onClick={() => { setMenuOpen(false); void persist() }}>Save</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); void openLibrary() }}>Library</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); exportFile() }}>File</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); projectFileRef.current?.click() }}>Open</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); fileRef.current?.click() }}>Import</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); void bounce() }}>Bounce</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); store.addTrack('audio') }}>+ Audio</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); store.addTrack('midi') }}>+ Inst</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); store.addTrack('bus') }}>+ Bus</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); store.addTrack('group') }}>+ Group</button>
+            <button className="text-btn" id="menu-save" onClick={() => { setMenuOpen(false); void openProjects() }}>Save</button>
+            <button className="text-btn" id="menu-export" onClick={() => { setMenuOpen(false); setExportOpen(true) }}>Export</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }}>Clips</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setHelp(true) }}>Shortcuts</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setSurface(surface === 'studio' ? 'artist' : 'studio'); setPhonePane('room') }}>
@@ -763,26 +904,29 @@ export function App() {
           onStop={() => void stop()}
           onRecord={() => void record()}
           onSeek={(sample) => void locate(sample)}
+          onSession={() => { setPhonePane('edit'); setSurface('studio'); store.enterSession() }}
+          onArrange={() => { setPhonePane('edit'); setSurface('studio'); store.backToArrangement() }}
+          onPiano={(trackId) => openPiano(trackId)}
         />
       )}
       <div className={`workspace ${!phone && dockEdge === 'bottom' && surface === 'studio' ? 'dock-bottom' : ''}`}>
         {surface === 'studio' && (!phone || phonePane === 'edit') && (
           <div className="main-pane">
             <div className="editor">
-              {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} onSeek={(sample) => void locate(sample)} />}
+              {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} onSeek={(sample) => void locate(sample)} onOpenPiano={openPiano} />}
               {store.view === 'mix' && <MixerView store={store} engine={engine} />}
-              {store.view === 'session' && <SessionView store={store} />}
+              {store.view === 'session' && <SessionView store={store} engine={engine} />}
             </div>
-            {showRack && form !== 'fold' && store.rackTrackId && <RackView store={store} engine={engine} trackId={store.rackTrackId} />}
-            {showRoll && form !== 'fold' && <PianoRoll store={store} engine={engine} />}
+            {store.view === 'arrange' && store.rackTrackId && form !== 'fold' && <RackView store={store} engine={engine} trackId={store.rackTrackId} />}
+            {showRoll && form !== 'fold' && !store.rackTrackId && <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />}
           </div>
         )}
-        {form === 'fold' && sideEditor && surface === 'studio' && (
+        {form === 'fold' && surface === 'studio' && (showRoll || store.rackTrackId) && (
           <div className="side-editor">
-            {showRack && store.rackTrackId ? <RackView store={store} engine={engine} trackId={store.rackTrackId} /> : <PianoRoll store={store} engine={engine} />}
+            {store.rackTrackId ? <RackView store={store} engine={engine} trackId={store.rackTrackId} /> : <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />}
           </div>
         )}
-        {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && sideEditor) && (
+        {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && (showRoll || store.rackTrackId)) && (
         <div
           className="dock-slot"
           onPointerDown={(event) => {
@@ -828,6 +972,16 @@ export function App() {
         )}
       </div>
       <PluginSheet store={store} engine={engine} />
+      {pianoOpen && (
+        <div className="piano-pop" data-piano="open" role="dialog" aria-label="Piano">
+          <header>
+            <strong>Piano</strong>
+            <button type="button" aria-label="Close piano" onClick={() => setPianoOpen(false)}>×</button>
+          </header>
+          <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />
+        </div>
+      )}
+      {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}
       {phone && (
         <nav className="phone-tabs" aria-label="Sections">
           <button className={phonePane === 'edit' && store.view === 'arrange' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setMenuOpen(false) }}>Arrange</button>
@@ -836,7 +990,7 @@ export function App() {
         </nav>
       )}
       <input ref={fileRef} type="file" accept="audio/*" multiple hidden onChange={(event) => void importAudio(event.target.files)} />
-      <input ref={projectFileRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importProject(event.target.files?.[0] || null)} />
+      <input ref={projectFileRef} type="file" accept=".cueharbor,.json,application/json,application/zip" hidden onChange={(event) => void importProject(event.target.files?.[0] || null)} />
       {session.state.audioLocked && session.state.status !== 'idle' && session.state.status !== 'error' && (
         <button type="button" className="text-btn primary tap-reconnect" id="tap-reconnect" onClick={() => {
           engine.unlock()
@@ -863,33 +1017,72 @@ export function App() {
           </div>
         </div>
       )}
-      {libraryOpen && (
-        <div className="modal-back">
-          <div className="modal">
-            <h2>Browser library</h2>
-            <div className="stack">
-              {saved.length === 0 && <p>Nothing saved yet.</p>}
-              {saved.map((item) => (
-                <button
-                  key={item.id}
-                  className="text-btn"
-                  onClick={() => {
-                    void loadProject(item.id).then((loaded) => {
-                      if (!loaded) return
-                      store.loadProject(loaded.project, loaded.buffers)
-                      setLibraryOpen(false)
-                    })
-                  }}
-                >
-                  {item.name}
-                </button>
-              ))}
-              <div className="row-btns">
-                <button className="text-btn" onClick={() => setLibraryOpen(false)}>Close</button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {projectsOpen && (
+        <ProjectSheet
+          projects={projects}
+          snapshots={snapshots}
+          usage={usage}
+          persisted={persisted}
+          name={draftName}
+          onName={setDraftName}
+          onClose={() => setProjectsOpen(false)}
+          onNew={() => {
+            store.loadProject(createEmptyProject(engine.sampleRate), new Map())
+            setProjectsOpen(false)
+          }}
+          onSave={() => void persist()}
+          onSaveAs={() => saveAs(draftName)}
+          onRename={() => {
+            store.renameProject(draftName)
+            void persist()
+          }}
+          onDuplicate={() => saveAs(`${store.project.name} copy`)}
+          onDelete={(id) => {
+            void deleteProject(id).then(async () => {
+              const next = await listProjects()
+              setProjects(next)
+              if (id === store.project.id) {
+                if (next[0]) {
+                  const loaded = await loadProject(next[0].id)
+                  if (loaded) store.loadProject(loaded.project, loaded.buffers)
+                } else store.loadProject(createEmptyProject(engine.sampleRate), new Map())
+              }
+            })
+          }}
+          onOpen={(id) => {
+            void loadProject(id).then((loaded) => {
+              if (!loaded) return
+              store.loadProject(loaded.project, loaded.buffers)
+              setProjectsOpen(false)
+            })
+          }}
+          onRevert={(key) => {
+            void loadSnapshot(key).then(async (loaded) => {
+              if (!loaded) return
+              await saveProject(loaded.project, loaded.buffers, loaded.workspace, { snapshot: true })
+              store.loadProject(loaded.project, loaded.buffers)
+              setProjectsOpen(false)
+            })
+          }}
+          onAudio={() => fileRef.current?.click()}
+          onKeep={() => void requestPersistentStorage().then(() => storageReport().then((report) => setPersisted(report.persisted)))}
+        />
+      )}
+      {exportOpen && (
+        <ExportSheet
+          store={store}
+          phone={phone || form === 'fold'}
+          onClose={() => setExportOpen(false)}
+          onFreeze={(audio, start) => {
+            const source = store.selectedTrackId
+            if (!source) return
+            const next = applyFreeze(store.project, store.buffers, source, audio, start)
+            store.replace(next.project, next.buffers)
+            const created = next.project.tracks.find((track) => track.name.endsWith(' bounce'))
+            if (created) store.selectTrack(created.id)
+            setExportOpen(false)
+          }}
+        />
       )}
       {help && (
         <div className="modal-back" onClick={() => setHelp(false)}>

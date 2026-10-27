@@ -5,6 +5,7 @@ import { snapSample } from '../model/time'
 import type { AudioClip } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import type { SessionClient } from '../remote/session'
+import { AddTrackButton } from './AddTrack'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 
 export function ArrangeView({
@@ -12,11 +13,13 @@ export function ArrangeView({
   engine,
   session,
   onSeek,
+  onOpenPiano,
 }: {
   store: ProjectStore
   engine: AudioEngine
   session: SessionClient
   onSeek: (sample: number) => void
+  onOpenPiano: (trackId: string, clipId?: string) => void
 }) {
   const project = store.project
   const [px, setPx] = useState(90)
@@ -75,7 +78,7 @@ export function ArrangeView({
       <div className="heads">
         <div className="ruler-gap" />
         {project.tracks.map((track) => (
-          <div className="head" key={track.id} onClick={() => store.selectTrack(track.id)}>
+          <div className="head" data-track={track.id} key={track.id} onClick={() => store.selectTrack(track.id)}>
             <header>
               <input
                 className="name"
@@ -114,7 +117,8 @@ export function ArrangeView({
             </div>
             {track.type === 'audio' && (
               <select value={track.input} onChange={(event) => store.updateTrack(track.id, { input: event.target.value })}>
-                <option value="mic">Mic · raw</option>
+                <option value="mic">Mic</option>
+                <option value="line">Line</option>
                 <option value="none">No input</option>
                 {session.state.participants
                   .filter((person) => person.id !== session.state.selfId)
@@ -132,6 +136,7 @@ export function ArrangeView({
             </div>
           </div>
         ))}
+        <AddTrackButton store={store} />
       </div>
       <div
         className="timeline-scroll"
@@ -171,6 +176,7 @@ export function ArrangeView({
           {project.tracks.map((track) => (
             <div
               className="lane"
+              data-track={track.id}
               key={track.id}
               style={{ backgroundSize: `${beatPx}px 100%` }}
               onDoubleClick={(event) => {
@@ -180,10 +186,13 @@ export function ArrangeView({
                 store.addMidiClip(track.id, Math.floor(beat))
               }}
             >
-              {track.clips.map((clip) => (
+              {track.clips.filter((clip) => !clip.slotOnly).map((clip) => (
                 <ClipView key={clip.id} store={store} clip={clip} trackId={track.id} px={px} onSplit={() => store.splitSelected(engine.currentTimelineSample())} />
               ))}
-              {track.midiClips.map((clip) => {
+              {track.type === 'midi' && track.midiClips.every((clip) => clip.slotOnly) && (
+                <button type="button" className="lane-add" aria-label="Add clip" onClick={() => onOpenPiano(track.id)}>+</button>
+              )}
+              {track.midiClips.filter((clip) => !clip.slotOnly).map((clip) => {
                 const left = ((clip.startBeat * 60) / project.tempo) * px
                 const widthPx = ((clip.durationBeats * 60) / project.tempo) * px
                 return (
@@ -191,7 +200,7 @@ export function ArrangeView({
                     key={clip.id}
                     className={`clip ${store.selectedMidiClipId === clip.id ? 'selected' : ''}`}
                     style={{ left, width: widthPx, background: track.color }}
-                    onClick={() => store.selectClip(track.id, clip.id, true)}
+                    onClick={() => onOpenPiano(track.id, clip.id)}
                   >
                     <em>
                       {clip.name} · {clip.notes.length} notes
