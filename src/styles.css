@@ -124,10 +124,26 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .arrange { height: 100%; display: grid; grid-template-columns: 210px minmax(0, 1fr); background: #121a16; min-height: 0; flex: 1; }
 .follow-banner { padding: 6px 10px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); background: #101814; }
 .heads, .lanes { min-height: 0; min-width: 0; }
-.heads { border-right: 1px solid var(--line); background: #141c18; overflow: hidden; }
+.heads { border-right: 1px solid var(--line); background: #141c18; overflow-x: hidden; overflow-y: auto; }
+.shell.phone .heads { overflow: visible; }
 .lanes { overflow: hidden; }
 .ruler-gap { height: 44px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 6px; padding: 0 6px; }
-.add-inst, .t-btn.piano-btn { min-height: 44px; min-width: 44px; }
+.add-track-btn, .t-btn.piano-btn { min-height: 44px; min-width: 44px; }
+.add-track-slot { position: sticky; bottom: 0; z-index: 2; display: flex; padding: 6px; background: #141c18; }
+.add-track-btn { width: 44px; border-radius: 10px; border: 1px solid var(--line); background: #18231d; font-size: 22px; }
+.add-sheet {
+  position: fixed; z-index: 70; left: 8px; right: 8px; bottom: calc(12px + env(safe-area-inset-bottom));
+  background: #18241d; border: 1px solid var(--line); border-radius: 16px; padding: 8px;
+  display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow);
+}
+.add-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.add-row button, .add-go {
+  min-height: 44px; flex: 1 1 64px; border-radius: 10px; border: 1px solid var(--line); background: #101814;
+}
+.add-row button.on, .add-go { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.shell:not(.phone):not(.fold) .add-sheet { left: auto; right: 16px; width: min(440px, calc(100vw - 32px)); }
+.mixer .add-track-slot { position: static; align-items: flex-start; background: transparent; padding: 0; }
+.session-grid .add-track-slot { position: static; background: transparent; padding: 0; }
 .t-btn.piano-btn { width: auto; padding: 0 12px; }
 .head, .lane { height: 150px; border-bottom: 1px solid var(--line); }
 .head { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }

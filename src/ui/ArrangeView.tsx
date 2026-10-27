@@ -5,6 +5,7 @@ import { snapSample } from '../model/time'
 import type { AudioClip } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import type { SessionClient } from '../remote/session'
+import { AddTrackButton } from './AddTrack'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 
 export function ArrangeView({
@@ -75,11 +76,9 @@ export function ArrangeView({
     <div className="arrange-wrap">
       <div className="arrange">
       <div className="heads">
-        <div className="ruler-gap">
-          <button type="button" className="add-inst" onClick={() => store.addTrack('midi')}>+ Inst</button>
-        </div>
+        <div className="ruler-gap" />
         {project.tracks.map((track) => (
-          <div className="head" key={track.id} onClick={() => store.selectTrack(track.id)}>
+          <div className="head" data-track={track.id} key={track.id} onClick={() => store.selectTrack(track.id)}>
             <header>
               <input
                 className="name"
@@ -115,7 +114,8 @@ export function ArrangeView({
             </div>
             {track.type === 'audio' && (
               <select value={track.input} onChange={(event) => store.updateTrack(track.id, { input: event.target.value })}>
-                <option value="mic">Mic · raw</option>
+                <option value="mic">Mic</option>
+                <option value="line">Line</option>
                 <option value="none">No input</option>
                 {session.state.participants
                   .filter((person) => person.id !== session.state.selfId)
@@ -133,6 +133,7 @@ export function ArrangeView({
             </div>
           </div>
         ))}
+        <AddTrackButton store={store} />
       </div>
       <div
         className="timeline-scroll"
@@ -172,6 +173,7 @@ export function ArrangeView({
           {project.tracks.map((track) => (
             <div
               className="lane"
+              data-track={track.id}
               key={track.id}
               style={{ backgroundSize: `${beatPx}px 100%` }}
               onDoubleClick={(event) => {

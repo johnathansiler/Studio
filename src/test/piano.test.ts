@@ -34,13 +34,15 @@ describe('piano open', () => {
     expect(track.midiClips[0].startBeat).toBe(0)
   })
 
-  it('selects a new instrument track at the top', () => {
+  it('selects a new instrument track after the selected track', () => {
     const store = new ProjectStore(createEmptyProject())
     const before = store.project.tracks.length
+    const selected = store.selectedTrackId
     store.addTrack('midi')
     expect(store.project.tracks).toHaveLength(before + 1)
-    expect(store.project.tracks[0].type).toBe('midi')
-    expect(store.project.tracks[0].id).toBe(store.selectedTrackId)
-    expect(store.project.tracks[0].midiClips).toHaveLength(0)
+    const added = store.project.tracks.find((track) => track.id === store.selectedTrackId)!
+    expect(added.type).toBe('midi')
+    expect(store.project.tracks[store.project.tracks.findIndex((track) => track.id === selected) + 1].id).toBe(added.id)
+    expect(added.midiClips).toHaveLength(0)
   })
 })

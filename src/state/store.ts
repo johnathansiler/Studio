@@ -2,6 +2,7 @@ import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, 
 import { demoMidiNotes } from '../model/demo'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
 import { findCycle, MASTER } from '../audio/routing'
+import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { createEmptyProject, defaultInsert, makeTrack, uid, TRACK_COLORS } from '../model/types'
 import type { AudioAsset, AudioClip, InsertType, MidiClip, MidiNote, PluginInstance, Project, Track } from '../model/types'
 import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleState } from '../model/scale'
@@ -209,17 +210,39 @@ export class ProjectStore {
     })
   }
 
-  addTrack(type: Track['type']) {
+  addTracks(spec: AddTrackSpec) {
+    const ids: string[] = []
     this.mutate(() => {
-      const index = this.project.tracks.length
-      const track = makeTrack({
-        name: type === 'midi' ? `Inst ${index + 1}` : type === 'bus' ? `Bus ${index + 1}` : type === 'group' ? `Group ${index + 1}` : `Audio ${index + 1}`,
-        type,
-        color: TRACK_COLORS[index % TRACK_COLORS.length],
+      const made = tracksFor(spec, this.project.tracks)
+      const at = insertIndex(this.project.tracks, this.selectedTrackId)
+      this.project.tracks.splice(at, 0, ...made)
+      this.selectedTrackId = made[0]?.id ?? this.selectedTrackId
+      ids.push(...made.map((track) => track.id))
+    })
+    return ids
+  }
+
+  addTrack(type: Track['type']) {
+    if (type === 'group') {
+      this.mutate(() => {
+        const index = this.project.tracks.length
+        const track = makeTrack({
+          name: `Group ${index + 1}`,
+          type,
+          color: TRACK_COLORS[index % TRACK_COLORS.length],
+        })
+        this.project.tracks.splice(insertIndex(this.project.tracks, this.selectedTrackId), 0, track)
+        this.selectedTrackId = track.id
       })
-      if (type === 'midi') this.project.tracks.unshift(track)
-      else this.project.tracks.push(track)
-      this.selectedTrackId = track.id
+      return
+    }
+    this.addTracks({
+      kind: type === 'audio' ? 'audio' : type === 'bus' ? 'bus' : 'midi',
+      count: 1,
+      instrument: 'none',
+      input: 'mic',
+      channels: 1,
+      armed: false,
     })
   }
 
