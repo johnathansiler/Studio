@@ -4,7 +4,7 @@ import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 
-export function MixerView({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
+export function MixerView({ store, engine, onTune }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void }) {
   const project = store.project
   return (
     <div className="mixer">
@@ -22,6 +22,9 @@ export function MixerView({ store, engine }: { store: ProjectStore; engine: Audi
           <div className="row">
             <button className={`mini ${track.mute ? 'on-m' : ''}`} onClick={() => store.updateTrack(track.id, { mute: !track.mute })}>M</button>
             <button className={`mini ${track.solo ? 'on-s' : ''}`} onClick={() => store.updateTrack(track.id, { solo: !track.solo })}>S</button>
+            {track.type === 'audio' && onTune && (
+              <button type="button" className="mini tune-btn" onClick={() => onTune(track.id)}>Tune</button>
+            )}
           </div>
         </div>
       ))}

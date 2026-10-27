@@ -90,7 +90,10 @@ export function mediaCanCarryAssets(peers: Array<{ connection: string; outboundV
 export function referencedBufferIds(project: Project): string[] {
   const ids = new Set<string>()
   for (const track of project.tracks) {
-    for (const clip of track.clips) ids.add(clip.bufferId)
+    for (const clip of track.clips) {
+      ids.add(clip.bufferId)
+      for (const lane of clip.folder?.lanes || []) ids.add(lane.bufferId)
+    }
   }
   return [...ids]
 }
@@ -124,6 +127,7 @@ export function arrangementDigest(project: Project): string {
         }
       : null,
     patternClips: (project.patternClips ?? []).map((clip) => [clip.id, clip.patternId, clip.startBeat, clip.lengthBeats, clip.scene]),
+    tempoMap: project.tempoMap ?? [],
     tracks: project.tracks.map((track) => ({
       id: track.id,
       name: track.name,
@@ -133,8 +137,38 @@ export function arrangementDigest(project: Project): string {
       mute: track.mute,
       solo: track.solo,
       color: track.color,
-      clips: track.clips.map((clip) => [clip.id, clip.bufferId, clip.startSample, clip.offsetSamples, clip.durationSamples, clip.gain, clip.quant ?? null, clip.mode ?? null, clip.loop ?? null, clip.warp ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null, clip.warpPoints?.length ?? 0]),
-      midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length, clip.quant ?? null, clip.mode ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null, clip.notes.map((note) => [note.startBeat, note.durationBeats, note.pitch])]),
+      clips: track.clips.map((clip) => [
+        clip.id,
+        clip.bufferId,
+        clip.startSample,
+        clip.offsetSamples,
+        clip.durationSamples,
+        clip.gain,
+        clip.quant ?? null,
+        clip.mode ?? null,
+        clip.loop ?? null,
+        clip.warp ?? null,
+        clip.follow ?? null,
+        clip.legato ?? null,
+        clip.slotOnly ?? null,
+        clip.warpPoints?.length ?? 0,
+        clip.stretch
+          ? [
+              clip.stretch.sourceSamples,
+              clip.stretch.semitones,
+              clip.stretch.cents,
+              clip.stretch.mode,
+              clip.stretch.followTempo ? 1 : 0,
+              clip.stretch.sourceBpm ?? 0,
+              clip.stretch.markers.map((marker) => [marker.source, Math.round(marker.target * 1000) / 1000]),
+              clip.stretch.formant ? 1 : 0,
+            ]
+          : 0,
+        clip.folder?.activeCompId || '',
+        (clip.folder?.lanes || []).map((lane) => lane.bufferId).join(','),
+        (clip.folder?.comps.find((comp) => comp.id === clip.folder?.activeCompId)?.segments || []).map((segment) => `${segment.laneId}:${segment.startSample}:${segment.endSample}`).join('|'),
+      ]),
+      midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length, clip.notes.map((note) => [note.startBeat, note.durationBeats, note.pitch]), clip.notes.map((note) => (note.slide ? 1 : 0)).join(''), clip.quant ?? null, clip.mode ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null, clip.activeTakeId || '', clip.takes?.length || 0]),
       audioSlots: track.audioSlots ?? null,
       midiSlots: track.midiSlots ?? null,
       rack: track.rack?.devices.map((device) => [device.id, device.kind, device.params, device.pattern, device.zones.length]),
