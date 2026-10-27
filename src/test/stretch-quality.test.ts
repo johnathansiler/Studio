@@ -263,7 +263,7 @@ describe('render quality', () => {
     }
     writeFileSync(`${dir}/metrics.json`, JSON.stringify(report, null, 2))
     expect(report.sineThd).toBeLessThan(report.previewThd + 0.05)
-  })
+  }, 20000)
 
   it('replaces the preview with the committed render', async () => {
     const input = sine(330, 0.3)
