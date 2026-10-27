@@ -28,7 +28,7 @@ export class RackHost {
   private pending = new Map<string, { pitch: number; vel: number; time: number }[]>()
 
   constructor() {
-    if (typeof matchMedia !== 'undefined') this.phone = matchMedia('(max-width: 940px)').matches
+    if (typeof matchMedia !== 'undefined') this.phone = matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
   }
 
   sync(ctx: AudioContext, project: Project, strips: Map<string, StripNodes>, buffers: Map<string, SampleBuffer>) {

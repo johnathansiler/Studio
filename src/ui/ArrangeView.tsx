@@ -177,7 +177,7 @@ export function ArrangeView({
               }}
             >
               {track.clips.map((clip) => (
-                <ClipView key={clip.id} store={store} clip={clip} trackId={track.id} px={px} />
+                <ClipView key={clip.id} store={store} clip={clip} trackId={track.id} px={px} onSplit={() => store.splitSelected(engine.currentTimelineSample())} />
               ))}
               {track.midiClips.map((clip) => {
                 const left = ((clip.startBeat * 60) / project.tempo) * px
@@ -205,7 +205,7 @@ export function ArrangeView({
   )
 }
 
-function ClipView({ store, clip, trackId, px }: { store: ProjectStore; clip: AudioClip; trackId: string; px: number }) {
+function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; clip: AudioClip; trackId: string; px: number; onSplit: () => void }) {
   const project = store.project
   const asset = store.buffers.get(clip.bufferId)
   const [preview, setPreview] = useState<AudioClip | null>(null)
@@ -213,6 +213,7 @@ function ClipView({ store, clip, trackId, px }: { store: ProjectStore; clip: Aud
   const left = (shown.startSample / project.sampleRate) * px
   const width = Math.max(8, (shown.durationSamples / project.sampleRate) * px)
   const canvas = useRef<HTMLCanvasElement>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const outline = project.waveforms?.[clip.bufferId]
   const peaks = useMemo(() => {
     if (asset?.channels[0]?.length) {
@@ -245,9 +246,17 @@ function ClipView({ store, clip, trackId, px }: { store: ProjectStore; clip: Aud
     event.stopPropagation()
     store.selectClip(trackId, clip.id)
     const originX = event.clientX
+    const originY = event.clientY
     let latest: AudioClip | null = null
+    let held = false
+    const timer = window.setTimeout(() => {
+      held = true
+      setMenu({ x: originX, y: originY })
+    }, 480)
     const snapped = (value: number) => snapSample(value, project.sampleRate, project.tempo, project.snap)
     const move = (ev: PointerEvent) => {
+      if (Math.abs(ev.clientX - originX) > 8 || Math.abs(ev.clientY - originY) > 8) window.clearTimeout(timer)
+      if (held) return
       const delta = ((ev.clientX - originX) / px) * project.sampleRate
       if (mode === 'move') latest = { ...clip, startSample: snapped(clip.startSample + delta) }
       if (mode === 'start') {
@@ -259,8 +268,13 @@ function ClipView({ store, clip, trackId, px }: { store: ProjectStore; clip: Aud
       setPreview(latest)
     }
     const up = () => {
+      window.clearTimeout(timer)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      if (held) {
+        setPreview(null)
+        return
+      }
       const next = latest
       setPreview(null)
       if (!next) return
@@ -286,6 +300,12 @@ function ClipView({ store, clip, trackId, px }: { store: ProjectStore; clip: Aud
         {clip.source === 'guide' ? ' · guide' : ''}
         {clip.source === 'aligned-take' ? ' · aligned' : ''}
       </em>
+      {menu && (
+        <div className="touch-menu" style={{ left: menu.x, top: menu.y }}>
+          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { onSplit(); setMenu(null) }}>Split</button>
+          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setMenu(null) }}>Delete</button>
+        </div>
+      )}
       {fadeIn > 1 && <div className="fade" style={{ left: 0, width: fadeIn }} />}
       {fadeOut > 1 && <div className="fade" style={{ right: 0, width: fadeOut, transform: 'scaleX(-1)' }} />}
       <div className="edge" onPointerDown={(event) => pointerDown(event, 'start')} />
