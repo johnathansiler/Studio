@@ -444,6 +444,145 @@ export const CATALOG: PluginDescriptor[] = [
       param('release', 'Release', 10, 500, 80, 'ms'),
     ],
   },
+  {
+    id: 'meq',
+    name: 'Lin EQ',
+    version: VERSION,
+    params: [
+      param('phase', 'Phase', 0, 1, 1, ''),
+      param('ms', 'M/S', 0, 1, 0, ''),
+      param('hp', 'HP', 20, 200, 30, 'Hz'),
+      param('lp', 'LP', 8000, 20000, 19000, 'Hz'),
+      param('lowG', 'Low', -12, 12, 0, 'dB'),
+      param('midF', 'Mid', 200, 8000, 1400, 'Hz'),
+      param('midG', 'Mid', -12, 12, 0, 'dB'),
+      param('midQ', 'Q', 0.3, 6, 1, ''),
+      param('highG', 'High', -12, 12, 0, 'dB'),
+      param('sLow', 'S Low', -12, 12, 0, 'dB'),
+      param('sMid', 'S Mid', -12, 12, 0, 'dB'),
+      param('sHigh', 'S High', -12, 12, 0, 'dB'),
+    ],
+  },
+  {
+    id: 'deq',
+    name: 'Dyn EQ',
+    version: VERSION,
+    params: [
+      param('freq', 'Freq', 80, 12000, 3000, 'Hz'),
+      param('q', 'Q', 0.4, 6, 1.2, ''),
+      param('threshold', 'Thresh', -48, 0, -24, 'dB'),
+      param('gain', 'Gain', -12, 12, 0, 'dB'),
+      param('attack', 'Attack', 1, 40, 10, 'ms'),
+      param('release', 'Release', 10, 300, 80, 'ms'),
+    ],
+  },
+  {
+    id: 'mbcomp',
+    name: 'Multi',
+    version: VERSION,
+    params: [
+      param('bands', 'Bands', 3, 5, 4, ''),
+      param('x1', 'X1', 40, 400, 120, 'Hz'),
+      param('x2', 'X2', 150, 1500, 500, 'Hz'),
+      param('x3', 'X3', 800, 6000, 2000, 'Hz'),
+      param('x4', 'X4', 2000, 12000, 6000, 'Hz'),
+      param('threshold', 'Thresh', -40, 0, -18, 'dB'),
+      param('ratio', 'Ratio', 1, 12, 2, ':1'),
+      param('attack', 'Attack', 1, 40, 10, 'ms'),
+      param('release', 'Release', 10, 300, 80, 'ms'),
+      param('makeup', 'Makeup', 0, 12, 0, 'dB'),
+      param('ms', 'M/S', 0, 1, 0, ''),
+    ],
+  },
+  {
+    id: 'glue',
+    name: 'Glue',
+    version: VERSION,
+    params: [
+      param('threshold', 'Thresh', -30, 0, -12, 'dB'),
+      param('ratio', 'Ratio', 1, 10, 2, ':1'),
+      param('attack', 'Attack', 0.1, 30, 10, 'ms'),
+      param('release', 'Release', 20, 400, 120, 'ms'),
+      param('releaseMode', 'Rel', 0, 2, 1, ''),
+      param('makeup', 'Makeup', 0, 12, 0, 'dB'),
+      param('mix', 'Mix', 0, 1, 1, ''),
+    ],
+  },
+  {
+    id: 'brick',
+    name: 'Brick',
+    version: VERSION,
+    params: [
+      param('ceiling', 'Ceiling', -6, 0, -1, 'dB'),
+      param('release', 'Release', 20, 300, 80, 'ms'),
+      param('lookahead', 'Look', 1, 10, 5, 'ms'),
+      param('releaseMode', 'Rel', 0, 2, 1, ''),
+    ],
+  },
+  {
+    id: 'maxim',
+    name: 'Max',
+    version: VERSION,
+    params: [
+      param('target', 'Target', -24, -6, -14, 'LU'),
+      param('ceiling', 'Ceiling', -3, 0, -1, 'dB'),
+    ],
+  },
+  {
+    id: 'mtape',
+    name: 'M-Tape',
+    version: VERSION,
+    params: [
+      param('drive', 'Drive', 0, 1, 0.25, ''),
+      param('color', 'Color', 0, 1, 0, ''),
+      param('mix', 'Mix', 0, 1, 0.6, ''),
+    ],
+  },
+  {
+    id: 'image',
+    name: 'Image',
+    version: VERSION,
+    params: [
+      param('width', 'Width', 0, 2, 1, ''),
+      param('bass', 'Mono', 40, 300, 120, 'Hz'),
+      param('low', 'Low', 0, 2, 1, ''),
+      param('high', 'High', 0, 2, 1, ''),
+    ],
+  },
+  {
+    id: 'msbox',
+    name: 'M/S',
+    version: VERSION,
+    params: [
+      param('mid', 'Mid', -12, 12, 0, 'dB'),
+      param('side', 'Side', -24, 12, 0, 'dB'),
+    ],
+  },
+  {
+    id: 'clip',
+    name: 'Clip',
+    version: VERSION,
+    params: [
+      param('drive', 'Drive', 0, 1, 0.2, ''),
+      param('mode', 'Mode', 0, 1, 0, ''),
+      param('ceiling', 'Ceiling', -6, 0, -0.3, 'dB'),
+    ],
+  },
+  {
+    id: 'dither',
+    name: 'Dither',
+    version: VERSION,
+    params: [
+      param('bits', 'Bits', 16, 24, 24, ''),
+      param('shape', 'Shape', 0, 2, 1, ''),
+    ],
+  },
+  {
+    id: 'meter',
+    name: 'Meter',
+    version: VERSION,
+    params: [],
+  },
 ]
 
 export const FACTORY: Record<string, FactoryPreset[]> = {
@@ -621,6 +760,52 @@ export const FACTORY: Record<string, FactoryPreset[]> = {
     { name: 'Drums', params: { ceiling: -0.8, release: 30 } },
     { name: 'Safe', params: { ceiling: -1.5, release: 120 } },
   ],
+  meq: [
+    { name: 'Flat', params: { phase: 1, lowG: 0, midG: 0, highG: 0 } },
+    { name: 'Air', params: { phase: 1, highG: 2, hp: 30 } },
+    { name: 'Warm', params: { phase: 0, lowG: 1.5, highG: -0.5 } },
+  ],
+  deq: [
+    { name: 'Harsh', params: { freq: 3500, threshold: -20, gain: -3, q: 1.4 } },
+    { name: 'Mud', params: { freq: 250, threshold: -18, gain: -2.5, q: 0.8 } },
+  ],
+  mbcomp: [
+    { name: 'Gentle', params: { bands: 4, threshold: -16, ratio: 1.8, ms: 0 } },
+    { name: 'Wide', params: { bands: 4, threshold: -18, ratio: 2, ms: 1 } },
+  ],
+  glue: [
+    { name: 'SSL', params: { threshold: -8, ratio: 4, attack: 10, release: 100, releaseMode: 1, makeup: 2, mix: 1 } },
+    { name: 'Soft', params: { threshold: -14, ratio: 2, attack: 30, release: 200, releaseMode: 2, mix: 0.7 } },
+  ],
+  brick: [
+    { name: 'Stream', params: { ceiling: -1, release: 80, lookahead: 5, releaseMode: 1 } },
+    { name: 'CD', params: { ceiling: -0.1, release: 50, lookahead: 5, releaseMode: 0 } },
+  ],
+  maxim: [
+    { name: 'Spotify', params: { target: -14, ceiling: -1 } },
+    { name: 'Club', params: { target: -6, ceiling: -0.3 } },
+  ],
+  mtape: [
+    { name: 'Tape', params: { drive: 0.3, color: 0, mix: 0.6 } },
+    { name: 'Tube', params: { drive: 0.35, color: 1, mix: 0.5 } },
+  ],
+  image: [
+    { name: 'Widen', params: { width: 1.3, bass: 120, low: 0.8, high: 1.3 } },
+    { name: 'Mono bass', params: { width: 1, bass: 150, low: 0.7, high: 1.1 } },
+  ],
+  msbox: [
+    { name: 'Sides', params: { mid: 0, side: 2 } },
+    { name: 'Center', params: { mid: 1, side: -3 } },
+  ],
+  clip: [
+    { name: 'Soft', params: { drive: 0.3, mode: 0, ceiling: -0.3 } },
+    { name: 'Hard', params: { drive: 0.4, mode: 1, ceiling: -0.3 } },
+  ],
+  dither: [
+    { name: '24-bit', params: { bits: 24, shape: 1 } },
+    { name: '16-bit', params: { bits: 16, shape: 2 } },
+  ],
+  meter: [{ name: 'Meter', params: {} }],
 }
 
 export function descriptor(id: string) {
@@ -657,6 +842,7 @@ export function latencyOf(pluginId: string, params: Record<string, number>, samp
   if (pluginId === 'limiter') return 64
   if (pluginId === 'peak') return 96
   if (pluginId === 'focus' && (params.linear ?? 0) >= 0.5) return 256
+  if (pluginId === 'brick' || pluginId === 'maxim') return Math.round(((params.lookahead || 5) / 1000) * sampleRate)
   return 0
 }
 
@@ -696,6 +882,9 @@ export function normalizeProject(project: Project): Project {
     const limiter = createPlugin('limiter', 'Transparent')
     limiter.enabled = false
     project.masterPlugins.unshift(limiter)
+  }
+  if (!project.masterPlugins.some((plugin) => plugin.pluginId === 'meter')) {
+    project.masterPlugins.push(createPlugin('meter'))
   }
   return project
 }

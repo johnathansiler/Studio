@@ -7,6 +7,8 @@ export interface WavEncodeOptions {
   bits?: WavBits
   dither?: DitherMode
   random?: () => number
+  /** LIST/INFO comment. Used for the loudness report and ISRC. */
+  comment?: string
 }
 
 export function encodeWav(channels: Float32Array[], sampleRate: number, options?: WavEncodeOptions): ArrayBuffer {
@@ -55,7 +57,30 @@ export function encodeWav(channels: Float32Array[], sampleRate: number, options?
       }
     }
   }
-  return buffer
+  if (!options?.comment) return buffer
+  return appendComment(buffer, options.comment)
+}
+
+function appendComment(buffer: ArrayBuffer, comment: string) {
+  const text = new TextEncoder().encode(comment)
+  const dataSize = text.length + 1
+  const pad = dataSize % 2
+  const listSize = 4 + 8 + dataSize
+  const extra = 8 + listSize + pad
+  const out = new Uint8Array(buffer.byteLength + extra)
+  out.set(new Uint8Array(buffer))
+  const view = new DataView(out.buffer)
+  view.setUint32(4, out.length - 8, true)
+  let offset = buffer.byteLength
+  writeString(view, offset, 'LIST')
+  view.setUint32(offset + 4, listSize, true)
+  writeString(view, offset + 8, 'INFO')
+  writeString(view, offset + 12, 'ICMT')
+  view.setUint32(offset + 16, dataSize, true)
+  offset += 20
+  out.set(text, offset)
+  out[offset + text.length] = 0
+  return out.buffer
 }
 
 function quantize(sample: number, bits: 16 | 24, dither: DitherMode, random: () => number, error: { e: number }) {
