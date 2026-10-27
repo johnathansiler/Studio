@@ -2,6 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { samplesToBeats } from '../model/time'
 import {
+  ROLL_TOOLS,
+  arpeggiateSelection,
+  eraseNotes,
+  glueNotes,
+  humanizeNotes,
+  paintCc,
+  paintChords,
+  paintNotes,
+  quantizeNotes,
+  sliceNote,
+  strumSelection,
+  type RollTool,
+} from '../model/paint'
+import {
   NOTE_NAMES,
   SCALES,
   diatonicPads,
@@ -9,6 +23,7 @@ import {
   inScale,
   nameChord,
   noteName,
+  scaleById,
   scaleTones,
   snapPitch,
   voiceChord,
@@ -17,6 +32,7 @@ import {
   type RhythmPattern,
   type ScaleId,
 } from '../model/scale'
+import { uid, type MidiNote } from '../model/types'
 import type { ProjectStore } from '../state/store'
 
 const SOURCES: { id: ChordSource; name: string }[] = [
@@ -71,6 +87,8 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   const midiRef = useRef<MIDIAccess | null>(null)
   const playRef = useRef<(pitch: number, velocity: number) => void>(() => {})
   const scale = store.scaleState()
+  const roll = store.project.roll ?? { tool: 'pen' as RollTool, grid: 0.25, length: 0.25, velocity: 0.8 }
+  const gesture = useRef<{ from: number; to: number; pitch: number; y: number } | null>(null)
 
   playRef.current = (pitch, velocity) => {
     if (!track || !clip) return
@@ -90,6 +108,21 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     }
   }, [])
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
+      const tools: Record<string, RollTool> = { '1': 'paint', '2': 'brush', '3': 'pen', '4': 'slice', '5': 'glue', '6': 'mute', '7': 'erase', '8': 'velocity', '9': 'cc' }
+      if (tools[event.key]) store.setRollTool(tools[event.key])
+      else if (event.key === 'q' && !event.metaKey && !event.ctrlKey) quantize()
+      else if (event.key === 'a' && !event.metaKey && !event.ctrlKey) arpeggiate()
+      else if (event.key === 'u' && !event.metaKey && !event.ctrlKey) strum()
+      else if (event.key === 'h' && !event.metaKey && !event.ctrlKey) humanize()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
   if (!track || !clip) return null
   const low = 48
   const high = 84
@@ -99,6 +132,74 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   const chord = selected.length ? nameChord(selected.map((note) => note.pitch)) : ''
   const pads = diatonicPads(scale.root, scale.scale, scale.source)
   const tones = [...scaleTones(scale.root, scale.scale, 4), ...scaleTones(scale.root, scale.scale, 5)]
+
+  function withNotes(next: MidiNote[]) {
+    store.replaceNotes(track!.id, clip!.id, next)
+  }
+
+  function quantize() {
+    if (!clip) return
+    const ids = store.selectedNoteIds.length ? store.selectedNoteIds : undefined
+    withNotes(quantizeNotes(clip.notes, roll.grid, ids).map((note) => ({ ...note, id: note.id || uid('note') })))
+  }
+
+  function arpeggiate() {
+    if (!clip) return
+    const chosen = clip.notes.filter((note) => !store.selectedNoteIds.length || store.selectedNoteIds.includes(note.id))
+    const rest = store.selectedNoteIds.length ? clip.notes.filter((note) => !store.selectedNoteIds.includes(note.id)) : []
+    const played = arpeggiateSelection(chosen, { arp: scale.arp, rate: scale.rate, gate: scale.gate, octaves: scale.octaves, timing: scale.timing, velocity: scale.velocity })
+    withNotes([...rest, ...played.map((note) => ({ ...note, id: uid('note') }))])
+  }
+
+  function strum() {
+    if (!clip) return
+    const chosen = clip.notes.filter((note) => !store.selectedNoteIds.length || store.selectedNoteIds.includes(note.id))
+    const rest = store.selectedNoteIds.length ? clip.notes.filter((note) => !store.selectedNoteIds.includes(note.id)) : []
+    withNotes([...rest, ...strumSelection(chosen).map((note) => ({ ...note, id: uid('note') }))])
+  }
+
+  function humanize() {
+    if (!clip) return
+    const chosen = clip.notes.filter((note) => !store.selectedNoteIds.length || store.selectedNoteIds.includes(note.id))
+    const rest = store.selectedNoteIds.length ? clip.notes.filter((note) => !store.selectedNoteIds.includes(note.id)) : []
+    withNotes([...rest, ...humanizeNotes(chosen, scale.timing || 0.02, scale.velocity || 0.3)])
+  }
+
+  function commitGesture(from: number, to: number, pitch: number, y: number) {
+    if (!clip) return
+    const length = roll.length || 0.25
+    const velocity = roll.velocity || 0.8
+    if (roll.tool === 'paint') {
+      const notes = paintNotes({ fromBeat: from, toBeat: to, pitch, grid: roll.grid, length, velocity, scaleLock: scale.snap, root: scale.root, scale: scale.scale })
+      withNotes([...clip.notes, ...notes.map((note) => ({ ...note, id: uid('note') }))])
+    } else if (roll.tool === 'brush') {
+      const intervals = scaleById(scale.scale).intervals
+      const notes = paintChords({ fromBeat: from, toBeat: to, pitch, grid: roll.grid, length, velocity, root: scale.root, scale: scale.scale, intervals })
+      withNotes([...clip.notes, ...notes.map((note) => ({ ...note, id: uid('note') }))])
+    } else if (roll.tool === 'pen') {
+      const beat = roll.grid > 0 ? Math.max(0, Math.round(from / roll.grid) * roll.grid) : Math.max(0, from)
+      const nextPitch = scale.snap ? snapPitch(pitch, scale.root, scale.scale) : pitch
+      withNotes([...clip.notes, { id: uid('note'), pitch: nextPitch, startBeat: beat, durationBeats: length, velocity }])
+    } else if (roll.tool === 'erase') {
+      withNotes(eraseNotes(clip.notes, from, Math.max(from + 0.05, to), null))
+    } else if (roll.tool === 'velocity') {
+      const value = Math.max(0.05, Math.min(1, 1 - y))
+      const start = Math.min(from, to)
+      const end = Math.max(from, to)
+      withNotes(clip.notes.map((note) => (note.startBeat >= start && note.startBeat <= end ? { ...note, velocity: value } : note)))
+    } else if (roll.tool === 'cc') {
+      const lane = store.project.automation.find((item) => item.param === 'expression') ?? {
+        id: uid('auto'),
+        pluginId: 'midi',
+        param: 'expression',
+        points: [],
+      }
+      const points = paintCc(lane.points, from, to, Math.max(0, Math.min(1, 1 - y)), roll.grid)
+      store.mutateAutomation(lane.id, lane.pluginId, points)
+    } else if (roll.tool === 'glue') {
+      withNotes(glueNotes(clip.notes).map((note) => ({ ...note, id: note.id || uid('note') })))
+    }
+  }
 
   function playPad(pitches: number[]) {
     engine.unlock()
@@ -161,6 +262,20 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
         <span className="chord-name">{chord}</span>
         {onIdeas && <button type="button" onClick={onIdeas}>Ideas</button>}
       </div>
+      <div className="tool-row">
+        {ROLL_TOOLS.map((tool) => (
+          <button key={tool} type="button" className={roll.tool === tool ? 'on' : ''} onClick={() => store.setRollTool(tool)}>{tool}</button>
+        ))}
+        <select aria-label="Grid" value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
+          <option value="0">Free</option>
+          <option value="0.25">1/16</option>
+          <option value="0.5">1/8</option>
+          <option value="1">1/4</option>
+        </select>
+        <button type="button" onClick={quantize}>Quantize</button>
+        <button type="button" onClick={arpeggiate}>Arp</button>
+        <button type="button" onClick={strum}>Strum</button>
+      </div>
       <div className="piano-body">
         <div className="keys">
           {Array.from({ length: high - low + 1 }, (_, index) => {
@@ -176,11 +291,25 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
         <div className="roll" ref={rollRef}>
           <div
             style={{ width, height: (high - low + 1) * row, position: 'relative' }}
-            onClick={(event) => {
+            onPointerDown={(event) => {
+              if ((event.target as HTMLElement).closest('.note')) return
               const bounds = event.currentTarget.getBoundingClientRect()
-              const beat = Math.floor((event.clientX - bounds.left) / (pxBeat / 4)) / 4
+              const beat = (event.clientX - bounds.left) / pxBeat
               const pitch = high - Math.floor((event.clientY - bounds.top) / row)
-              store.addNote(track.id, clip.id, { pitch, startBeat: Math.max(0, beat), durationBeats: 1, velocity: 0.8 })
+              gesture.current = { from: Math.max(0, beat), to: Math.max(0, beat), pitch, y: (event.clientY - bounds.top) / bounds.height }
+              event.currentTarget.setPointerCapture(event.pointerId)
+            }}
+            onPointerMove={(event) => {
+              if (!gesture.current) return
+              const bounds = event.currentTarget.getBoundingClientRect()
+              gesture.current.to = Math.max(0, (event.clientX - bounds.left) / pxBeat)
+              gesture.current.y = (event.clientY - bounds.top) / Math.max(1, bounds.height)
+            }}
+            onPointerUp={() => {
+              const current = gesture.current
+              gesture.current = null
+              if (!current) return
+              commitGesture(current.from, current.to, current.pitch, current.y)
             }}
           >
             {clip.notes.map((note) => (
@@ -194,6 +323,25 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
                 }}
                 onPointerDown={(event) => {
                   event.stopPropagation()
+                  if (roll.tool === 'slice') {
+                    const bounds = (event.currentTarget.parentElement as HTMLElement).getBoundingClientRect()
+                    const at = (event.clientX - bounds.left) / pxBeat
+                    const parts = sliceNote(note, at)
+                    if (parts) withNotes(clip.notes.flatMap((item) => (item.id === note.id ? [{ ...parts[0] }, { ...parts[1], id: uid('note') }] : [item])))
+                    return
+                  }
+                  if (roll.tool === 'mute') {
+                    withNotes(clip.notes.map((item) => (item.id === note.id ? { ...item, muted: !item.muted } : item)))
+                    return
+                  }
+                  if (roll.tool === 'erase') {
+                    withNotes(clip.notes.filter((item) => item.id !== note.id))
+                    return
+                  }
+                  if (roll.tool === 'glue') {
+                    withNotes(glueNotes(clip.notes))
+                    return
+                  }
                   const originX = event.clientX
                   const originY = event.clientY
                   const originBeat = note.startBeat
