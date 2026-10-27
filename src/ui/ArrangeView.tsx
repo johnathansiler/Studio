@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEven
 import type { AudioEngine } from '../audio/engine'
 import { activeComp } from '../model/comp'
 import { computePeaks } from '../model/demo'
+import { sourceSamplesOf, stretchEdge } from '../audio/stretch/engine'
 import { snapSample } from '../model/time'
 import type { AudioClip } from '../model/types'
+import { ClipSheet } from './ClipSheet'
 import type { ProjectStore } from '../state/store'
 import type { SessionClient } from '../remote/session'
 import { AddTrackButton } from './AddTrack'
@@ -77,12 +79,23 @@ export function ArrangeView({
     onSeek(snapSample(sample, project.sampleRate, project.tempo, project.snap))
   }
 
+  const selected = project.tracks.flatMap((track) => track.clips.filter((clip) => clip.id === store.selectedClipId).map((clip) => ({ track, clip })))[0]
   const record = store.recordSettings()
   const selectedFolder = project.tracks.flatMap((track) => track.clips.map((clip) => ({ track, clip }))).find((item) => item.clip.id === store.selectedClipId && item.clip.folder)
   const selectedMidi = project.tracks.flatMap((track) => track.midiClips.map((clip) => ({ track, clip }))).find((item) => item.clip.id === store.selectedMidiClipId)
 
   return (
     <div className="arrange-wrap">
+      <div className="tool-row" role="toolbar" aria-label="Tools">
+        <button
+          type="button"
+          className={store.tool === 'stretch' ? 'on' : ''}
+          aria-pressed={store.tool === 'stretch'}
+          onClick={() => store.setTool(store.tool === 'stretch' ? 'pointer' : 'stretch')}
+        >
+          Stretch
+        </button>
+      </div>
       <div className="rec-bar" role="group" aria-label="Recording">
         <button type="button" className={record.loop ? 'on' : ''} onClick={() => {
           const next = !record.loop
@@ -311,6 +324,9 @@ export function ArrangeView({
         </div>
       </div>
       </div>
+      {store.clipSheet && selected ? (
+        <ClipSheet store={store} trackId={selected.track.id} clip={selected.clip} onClose={() => store.closeClipSheet()} />
+      ) : null}
     </div>
   )
 }
@@ -332,13 +348,14 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [swipe, setSwipe] = useState<{ laneId: string; from: number; to: number } | null>(null)
   const outline = project.waveforms?.[clip.bufferId]
+  const sourceLen = sourceSamplesOf(shown)
   const peaks = useMemo(() => {
     if (asset?.channels[0]?.length) {
-      const slice = asset.channels[0].subarray(shown.offsetSamples, shown.offsetSamples + shown.durationSamples)
+      const slice = asset.channels[0].subarray(shown.offsetSamples, Math.min(asset.channels[0].length, shown.offsetSamples + sourceLen))
       return computePeaks(slice, Math.max(8, Math.round(width)))
     }
     return outline || []
-  }, [asset, outline, shown.offsetSamples, shown.durationSamples, width])
+  }, [asset, outline, shown.offsetSamples, sourceLen, width])
 
   useEffect(() => {
     const node = canvas.current
@@ -364,6 +381,7 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
     store.selectClip(trackId, clip.id)
     const originX = event.clientX
     const originY = event.clientY
+    const stretching = mode !== 'move' && (store.tool === 'stretch' || event.altKey)
     let latest: AudioClip | null = null
     let held = false
     const timer = window.setTimeout(() => {
@@ -376,12 +394,14 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
       if (held) return
       const delta = ((ev.clientX - originX) / px) * project.sampleRate
       if (mode === 'move') latest = { ...clip, startSample: snapped(clip.startSample + delta) }
-      if (mode === 'start') {
+      if (mode === 'start' && stretching) latest = stretchEdge(clip, 'start', snapped(clip.startSample + delta))
+      if (mode === 'start' && !stretching) {
         const start = snapped(clip.startSample + delta)
         const shift = start - clip.startSample
         latest = { ...clip, startSample: start, offsetSamples: clip.offsetSamples + shift, durationSamples: clip.durationSamples - shift }
       }
-      if (mode === 'end') latest = { ...clip, durationSamples: Math.max(64, snapped(clip.durationSamples + delta)) }
+      if (mode === 'end' && stretching) latest = stretchEdge(clip, 'end', snapped(clip.startSample + clip.durationSamples + delta))
+      if (mode === 'end' && !stretching) latest = { ...clip, durationSamples: Math.max(64, snapped(clip.durationSamples + delta)) }
       setPreview(latest)
     }
     const up = () => {
@@ -396,8 +416,10 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
       setPreview(null)
       if (!next) return
       if (mode === 'move') store.moveClip(trackId, clip.id, next.startSample)
-      if (mode === 'start') store.trimClip(trackId, clip.id, 'start', next.startSample)
-      if (mode === 'end') store.trimClip(trackId, clip.id, 'end', next.startSample + next.durationSamples)
+      if (stretching && mode === 'start') store.stretchClip(trackId, clip.id, 'start', next.startSample)
+      if (stretching && mode === 'end') store.stretchClip(trackId, clip.id, 'end', next.startSample + next.durationSamples)
+      if (!stretching && mode === 'start') store.trimClip(trackId, clip.id, 'start', next.startSample)
+      if (!stretching && mode === 'end') store.trimClip(trackId, clip.id, 'end', next.startSample + next.durationSamples)
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -417,6 +439,7 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
       <canvas ref={canvas} />
       <em>
         {clip.name}
+        {clip.stretch && Math.abs(clip.durationSamples - sourceSamplesOf(clip)) > 1 ? ` ${Math.round((clip.durationSamples / sourceSamplesOf(clip)) * 100)}%` : ''}
         {clip.folder ? ` · ${clip.folder.lanes.length} takes` : ''}
         {clip.source === 'guide' ? ' · guide' : ''}
         {clip.source === 'aligned-take' ? ' · aligned' : ''}
@@ -475,6 +498,9 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
           <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setMenu(null) }}>Delete</button>
         </div>
       )}
+      {(shown.stretch?.markers ?? []).map((marker) => (
+        <i key={marker.id} className="warp" style={{ left: `${(marker.source / Math.max(1, sourceLen)) * 100}%` }} />
+      ))}
       {fadeIn > 1 && <div className="fade" style={{ left: 0, width: fadeIn }} />}
       {fadeOut > 1 && <div className="fade" style={{ right: 0, width: fadeOut, transform: 'scaleX(-1)' }} />}
       <div className="edge" onPointerDown={(event) => pointerDown(event, 'start')} />

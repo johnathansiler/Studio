@@ -116,6 +116,7 @@ export function arrangementDigest(project: Project): string {
     snap: project.snap,
     launchQuant: project.launchQuant ?? null,
     recordBars: project.recordBars ?? 0,
+    tempoMap: project.tempoMap ?? [],
     tracks: project.tracks.map((track) => ({
       id: track.id,
       name: track.name,
@@ -139,6 +140,18 @@ export function arrangementDigest(project: Project): string {
         clip.follow ?? null,
         clip.legato ?? null,
         clip.slotOnly ?? null,
+        clip.stretch
+          ? [
+              clip.stretch.sourceSamples,
+              clip.stretch.semitones,
+              clip.stretch.cents,
+              clip.stretch.mode,
+              clip.stretch.followTempo ? 1 : 0,
+              clip.stretch.sourceBpm ?? 0,
+              clip.stretch.markers.map((marker) => [marker.source, Math.round(marker.target * 1000) / 1000]),
+              clip.stretch.formant ? 1 : 0,
+            ]
+          : 0,
         clip.folder?.activeCompId || '',
         (clip.folder?.lanes || []).map((lane) => lane.bufferId).join(','),
         (clip.folder?.comps.find((comp) => comp.id === clip.folder?.activeCompId)?.segments || []).map((segment) => `${segment.laneId}:${segment.startSample}:${segment.endSample}`).join('|'),

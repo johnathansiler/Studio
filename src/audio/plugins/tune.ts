@@ -1,7 +1,7 @@
 import { SCALES, pitchClass } from '../../model/scale'
 import { descriptor, FACTORY, tuneLatency } from './catalog'
 import { clamp, sanitize } from './dsp'
-import { Psola, type PitchFrame } from './psola'
+import { Psola, type PitchFrame } from '../stretch/voice'
 import type { BlockContext, PluginModule, Processor } from './types'
 
 export function createTune(sampleRate: number): Processor {

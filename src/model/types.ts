@@ -50,7 +50,7 @@ export type ClipSource = 'local' | 'import' | 'demo' | 'guide' | 'aligned-take' 
 export type LaunchQuant = 'none' | '1/16' | '1/4' | '1bar' | '2bar' | '4bar'
 export type LaunchMode = 'trigger' | 'gate' | 'toggle' | 'repeat'
 export type FollowAction = 'none' | 'next' | 'prev' | 'any' | 'other' | 'stop'
-export type StretchMode = 'beats' | 'tonal' | 'voice' | 'tape'
+export type StretchMode = 'pro' | 'beats' | 'tonal' | 'voice' | 'speech' | 'tape'
 
 /** Source sample locked to a musical beat. Targets are beats from the clip start. */
 export interface WarpMarker {
@@ -59,12 +59,14 @@ export interface WarpMarker {
   target: number
 }
 
-/** Non-destructive time-stretch. Playback and export render from these fields. */
+/** Non-destructive time-stretch. Playback and export render from the source, never from a previous render. */
 export interface ClipStretch {
   sourceSamples: number
   semitones: number
   cents: number
   mode: StretchMode
+  /** Pitch shift keeps the spectral envelope. Voice and speech default to on. */
+  formant?: boolean
   followTempo: boolean
   sourceBpm: number | null
   markers: WarpMarker[]
@@ -263,6 +265,7 @@ export interface Project {
   launchQuant?: LaunchQuant
   /** 0 records until stop. A positive count trims a session take to that many bars. */
   recordBars?: number
+  /** Tempo changes. Empty keeps `tempo` for the whole arrangement. */
   tempoMap?: TempoPoint[]
   record?: RecordSettings
   /** Key, scale, and chord-pad performance settings. */
