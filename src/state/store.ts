@@ -4,6 +4,7 @@ import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/c
 import { findCycle, MASTER } from '../audio/routing'
 import { createEmptyProject, defaultInsert, makeTrack, uid, TRACK_COLORS } from '../model/types'
 import type { AudioAsset, AudioClip, InsertType, MidiClip, MidiNote, PluginInstance, Project, Track } from '../model/types'
+import { starterLoom, type LoomState } from '../model/loom'
 import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleState } from '../model/scale'
 import { beatsToSamples } from '../model/time'
 import { linearResample } from '../model/wav'
@@ -148,6 +149,26 @@ export class ProjectStore {
 
   scaleState() {
     return normalizeScale(this.project.scale)
+  }
+
+  ensureLoom() {
+    if (this.project.loom) return
+    this.mutate(() => {
+      this.project.loom = starterLoom()
+    })
+  }
+
+  setLoom(next: LoomState, record = true) {
+    const apply = () => {
+      this.project.loom = next
+    }
+    if (!record) {
+      if (this.remoteFollow) return
+      apply()
+      this.emit()
+      return
+    }
+    this.mutate(apply)
   }
 
   setScale(patch: Partial<ScaleState>) {

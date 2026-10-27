@@ -110,6 +110,7 @@ export function arrangementDigest(project: Project): string {
     metronomeEnabled: project.metronomeEnabled,
     countIn: project.countIn,
     snap: project.snap,
+    loom: project.loom ? [project.loom.active, project.loom.articulation, project.loom.lite, project.loom.patchId] : null,
     tracks: project.tracks.map((track) => ({
       id: track.id,
       name: track.name,

@@ -229,6 +229,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border-bottom: 1px solid var(--line); border-radius: 0; padding: 0 6px; font-size: 12px;
 }
 .scale-bar button.on { color: var(--accent); border-bottom-color: var(--accent); }
+.scale-bar .loom-btn { position: sticky; left: 0; z-index: 2; background: #101714; }
 .chord-name { color: var(--amber); font-size: 12px; min-width: 3ch; }
 .piano-body { display: grid; grid-template-columns: 56px minmax(0, 1fr); min-height: 0; }
 .keys { overflow: hidden; }
@@ -705,3 +706,59 @@ html[data-posture="tabletop"] .shell .plugin-sheet {
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 6px;
 }
 .touch-menu button { min-height: 44px; min-width: 64px; }
+
+.loom-pop {
+  position: fixed; z-index: 60; right: 12px; top: 56px; bottom: 12px; width: min(440px, calc(100vw - 24px));
+  display: flex; flex-direction: column; background: #101714; border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: var(--shadow); overflow: hidden;
+}
+.loom-pop header { display: flex; align-items: center; gap: 8px; padding: 8px 10px; min-height: 48px; border-bottom: 1px solid var(--line); }
+.loom-pop header strong { font-size: 15px; }
+.loom-mem { margin-right: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.loom-body { min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.loom-play, .loom-edit { padding: 10px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.loom-edit { border-top: 1px solid var(--line); }
+.art-row, .mic-row, .loom-keys { display: flex; flex-wrap: wrap; gap: 6px; }
+.art-row button, .loom-keys button, .loom-pop .text-btn {
+  min-height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #18231d; padding: 0 12px;
+}
+.art-row button.on, .loom-pop .text-btn.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.loom-orb {
+  width: min(220px, 72%); aspect-ratio: 1; border-radius: 18px; border: 1px solid var(--line); touch-action: none;
+  background:
+    radial-gradient(circle at var(--x) var(--y), rgba(224, 177, 90, 0.95) 0 10px, transparent 12px),
+    radial-gradient(circle at 30% 28%, #2c4d3b, #121a16 72%);
+}
+.loom-field { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; text-transform: capitalize; flex: 1; }
+.loom-field input[type='range'] { width: 100%; min-height: 44px; }
+.loom-row, .loom-line { display: flex; gap: 8px; align-items: center; }
+.loom-line select, .loom-line span { min-height: 44px; display: flex; align-items: center; }
+.loom-keys button { flex: 1 1 28px; min-width: 28px; padding: 0; }
+.loom-keys button.black { background: #0c110f; }
+.loom-note { margin: 0; color: var(--muted); font-size: 12px; }
+.shell.phone .loom-pop, .shell.phone.land .loom-pop { inset: 0; width: auto; border: 0; border-radius: 0; }
+.shell.phone .loom-keys button { flex-basis: 18%; min-height: 52px; }
+.shell.fold .scale-bar button, .shell.fold .scale-bar select { min-height: 44px; height: 44px; }
+.shell.fold .loom-pop { inset: 8px; width: auto; }
+.shell.fold .loom-pop[data-deep='1'] .loom-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.shell.fold .loom-pop[data-deep='1'] .loom-edit { border-top: 0; border-left: 1px solid var(--line); overflow: auto; }
+.shell.fold .loom-pop[data-deep='1'] .loom-play { overflow: auto; }
+.shell.phone.land .loom-pop header { min-height: 44px; padding-top: 4px; padding-bottom: 4px; }
+.shell.phone.land .loom-body { overflow: hidden; }
+.shell.phone.land .loom-play {
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1.15fr) minmax(0, 1fr);
+  grid-template-areas:
+    "orb arts human"
+    "orb dyn mics"
+    "keys keys keys";
+  gap: 6px;
+  padding: 8px;
+  overflow: hidden;
+}
+.shell.phone.land .loom-orb { grid-area: orb; width: 140px; height: 140px; aspect-ratio: auto; }
+.shell.phone.land .art-row { grid-area: arts; align-content: start; }
+.shell.phone.land .loom-row { grid-area: human; }
+.shell.phone.land .loom-play > .loom-field { grid-area: dyn; }
+.shell.phone.land .mic-row { grid-area: mics; }
+.shell.phone.land .loom-keys { grid-area: keys; }

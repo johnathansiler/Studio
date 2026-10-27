@@ -3,6 +3,7 @@ import type { AudioAsset, AudioClip, MidiNote, Project, Track } from '../model/t
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToMusical } from '../model/time'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav } from '../model/wav'
+import { activeInstrument, advanceNote, pickZones, renderLayer, renderNote, voiceState } from '../model/loom'
 import { scaleById } from '../model/scale'
 import { LiveRack } from './liveRack'
 import { renderGraph } from './renderGraph'
@@ -84,6 +85,7 @@ export class AudioEngine {
   private talkGains = new Map<string, GainNode>()
 
   private sources: Stoppable[] = []
+  private loomLast: number | null = null
   private scheduler = 0
   private raf = 0
   private playing = false
@@ -1281,8 +1283,73 @@ export class AudioEngine {
     }
   }
 
+  private playBuffer(ctx: BaseAudioContext, dest: AudioNode, audio: Float32Array, when: number, level: number) {
+    const buffer = ctx.createBuffer(1, audio.length, ctx.sampleRate)
+    buffer.getChannelData(0).set(audio)
+    const src = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    src.buffer = buffer
+    gain.gain.value = level
+    src.connect(gain)
+    gain.connect(dest)
+    src.start(Math.max(when, 0))
+    if (ctx === this.ctx) this.sources.push(src)
+  }
+
+  /** Play one Loom note on the speaker. It does not enter the cue or the mic path. */
+  previewLoom(pitch: number, vel = 0.8, channel = 0) {
+    const ctx = this.ctx
+    const out = this.speakerGain
+    const loom = this.project?.loom
+    if (!ctx || !out || !loom) return
+    const state = voiceState(loom, channel, pitch)
+    const step = advanceNote(state, pitch)
+    loom.articulation = step.articulation
+    loom.rr = step.rr
+    if (!step.sound) return
+    const interval = this.loomLast == null ? null : Math.abs(pitch - this.loomLast)
+    const frames = Math.max(32, Math.floor(ctx.sampleRate * 0.35))
+    const audio = renderNote(state, pitch, vel, ctx.sampleRate, frames, interval)
+    this.loomLast = pitch
+    this.playBuffer(ctx, out, audio, ctx.currentTime, 0.22)
+  }
+
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number) {
     if (ctx === this.ctx && when < ctx.currentTime) return
+    const loom = this.project?.loom
+    if (loom) {
+      const state = voiceState(loom, 0, note.pitch)
+      const step = advanceNote(state, note.pitch)
+      loom.articulation = step.articulation
+      loom.rr = step.rr
+      if (!step.sound) return
+      const interval = this.loomLast == null ? null : Math.abs(note.pitch - this.loomLast)
+      const frames = Math.max(32, Math.min(ctx.sampleRate, Math.floor(Math.max(0.05, dur) * ctx.sampleRate)))
+      const audio = renderNote(state, note.pitch, note.velocity, ctx.sampleRate, frames, interval)
+      this.loomLast = note.pitch
+      this.playBuffer(ctx, strip.input, audio, Math.max(when, 0), 0.3)
+      const instrument = activeInstrument(state)
+      const release = instrument
+        ? pickZones(instrument, {
+            note: note.pitch,
+            vel: note.velocity,
+            articulation: step.articulation,
+            cc1: state.cc1,
+            rr: 0,
+            trigger: 'release',
+            lite: state.lite,
+            seed: state.seed,
+            interval: null,
+          })
+        : { hits: [], keyswitch: null }
+      if (release.hits.length) {
+        const relFrames = Math.max(32, Math.floor(ctx.sampleRate * 0.12))
+        const rel = renderLayer('grain', relFrames, ctx.sampleRate, 440 * 2 ** ((note.pitch - 69) / 12), state.seed + 9)
+        const gain = 0.15 * release.hits[0].gain
+        this.playBuffer(ctx, strip.input, rel, Math.max(when, 0) + Math.max(0.02, dur), gain)
+      }
+      return
+    }
     const osc = ctx.createOscillator()
     const filter = ctx.createBiquadFilter()
     const gain = ctx.createGain()
