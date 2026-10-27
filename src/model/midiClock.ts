@@ -7,9 +7,10 @@ export interface ClockStamp {
   performanceTime: number
 }
 
-export type RepeatRate = '1/8' | '1/16' | '1/32'
+export type RepeatRate = '1/4' | '1/8' | '1/16' | '1/32'
 
 const REPEAT_BEATS: Record<RepeatRate, number> = {
+  '1/4': 1,
   '1/8': 1 / 2,
   '1/16': 1 / 4,
   '1/32': 1 / 8,

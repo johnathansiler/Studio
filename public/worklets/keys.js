@@ -39,9 +39,22 @@ class KeysProcessor extends AudioWorkletProcessor {
       voice.phase = 0
       voice.drum = data.drum
       voice.pos = 0
+      voice.rate = data.rate || 1
+      voice.decay = data.decay == null ? 1 : data.decay
+      voice.attack = data.attack || 0
+      voice.cut = data.filter == null ? 1 : data.filter
+      voice.low = 0
+      voice.swing = data.swing || 0
+      voice.odd = true
       voice.every = data.type === 'repeat' ? data.every : 0
-      voice.left = voice.every
+      voice.left = voice.every > 0 ? voice.every * (1 + voice.swing) : 0
       this.port.postMessage({ type: 'onset', frame: currentFrame, pitch: data.pitch })
+      return
+    }
+    if (data.type === 'gain') {
+      for (const voice of this.voices) {
+        if (voice.on && voice.pitch === data.pitch) voice.vel = data.velocity
+      }
       return
     }
     if (data.type === 'off') {
@@ -86,17 +99,30 @@ class KeysProcessor extends AudioWorkletProcessor {
         if (voice.every > 0) {
           voice.left -= 1
           if (voice.left <= 0) {
-            voice.left = voice.every
+            voice.odd = !voice.odd
+            voice.left = voice.every * (voice.odd ? (1 + (voice.swing || 0)) : Math.max(0.25, 1 - (voice.swing || 0)))
             voice.env = 1
             voice.pos = 0
             voice.phase = 0
+            voice.low = 0
           }
         }
         if (voice.drum >= 0 && this.drums[voice.drum]) {
           const buffer = this.drums[voice.drum]
-          if (voice.pos < buffer.length) {
-            sample += buffer[voice.pos] * voice.vel
-            voice.pos += 1
+          const limit = buffer.length * (voice.decay == null ? 1 : voice.decay)
+          if (voice.pos < limit) {
+            const idx = Math.min(buffer.length - 1, voice.pos | 0)
+            let hit = buffer[idx] * voice.vel
+            if (voice.attack > 0) {
+              const fade = voice.attack * buffer.length
+              if (voice.pos < fade) hit *= voice.pos / Math.max(1, fade)
+            }
+            if (voice.cut < 0.999) {
+              voice.low += (hit - (voice.low || 0)) * Math.max(0.02, voice.cut)
+              hit = voice.low
+            }
+            sample += hit
+            voice.pos += voice.rate || 1
           } else if (voice.every <= 0) voice.on = false
         } else {
           const freq = 440 * 2 ** ((voice.pitch - 69) / 12)

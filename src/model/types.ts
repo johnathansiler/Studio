@@ -116,6 +116,15 @@ export interface MidiNote {
   startBeat: number
   durationBeats: number
   velocity: number
+  /** 0–1 chance this step plays. Omitted steps always play. */
+  probability?: number
+  condition?: 'always' | '1:2' | '1:4' | 'fill'
+  /** Beats after the step grid. The sounding beat is the step plus this nudge. */
+  nudge?: number
+  /** Values applied only when playback lands on this step. */
+  locks?: Record<string, number>
+  velocityLo?: number
+  velocityHi?: number
 }
 
 export interface MidiClip {
@@ -202,6 +211,8 @@ export interface Project {
   quantizeBeats?: number
   /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */
   waveforms?: Record<string, { min: number; max: number }[]>
+  /** Pad banks, swing, and song chain for the drum deck. */
+  padKit?: import('./padMachine').PadProgram
 }
 
 export interface AudioAsset {

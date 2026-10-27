@@ -1,4 +1,5 @@
 import { computePeaks } from './demo'
+import { padFingerprint } from './padMachine'
 import type { AudioAsset, Project } from './types'
 
 /** How long the host waits so a guest can receive the start time before the downbeat. */
@@ -122,11 +123,23 @@ export function arrangementDigest(project: Project): string {
       solo: track.solo,
       color: track.color,
       clips: track.clips.map((clip) => [clip.id, clip.bufferId, clip.startSample, clip.offsetSamples, clip.durationSamples, clip.gain, clip.quant ?? null, clip.mode ?? null, clip.loop ?? null, clip.warp ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null]),
-      midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length, clip.quant ?? null, clip.mode ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null]),
+      midi: track.midiClips.map((clip) => [
+        clip.id,
+        clip.startBeat,
+        clip.durationBeats,
+        clip.notes.length,
+        clip.quant ?? null,
+        clip.mode ?? null,
+        clip.follow ?? null,
+        clip.legato ?? null,
+        clip.slotOnly ?? null,
+        clip.notes.map((note) => `${note.startBeat}:${note.probability ?? ''}:${note.nudge ?? ''}:${note.condition ?? ''}:${note.locks ? JSON.stringify(note.locks) : ''}`).join(','),
+      ]),
       audioSlots: track.audioSlots ?? null,
       midiSlots: track.midiSlots ?? null,
       rack: track.rack?.devices.map((device) => [device.id, device.kind, device.params, device.pattern, device.zones.length]),
       cables: track.rack?.cables.map((cable) => [cable.from, cable.fromPort, cable.to, cable.toPort, cable.amount]),
     })),
+    pads: project.padKit ? padFingerprint(project.padKit) : '',
   })
 }
