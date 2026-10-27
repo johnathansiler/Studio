@@ -94,8 +94,17 @@ export function referencedBufferIds(project: Project): string[] {
       ids.add(clip.bufferId)
       for (const lane of clip.folder?.lanes || []) ids.add(lane.bufferId)
     }
+    for (const plugin of track.plugins ?? []) collectInstrumentBuffers(plugin, ids)
   }
+  for (const plugin of project.masterPlugins ?? []) collectInstrumentBuffers(plugin, ids)
   return [...ids]
+}
+
+function collectInstrumentBuffers(plugin: { sampler?: { bufferId: string; slices: { bufferId: string }[] }; looper?: { layers: { bufferId: string }[]; undone: { bufferId: string }[] } }, ids: Set<string>) {
+  if (plugin.sampler?.bufferId) ids.add(plugin.sampler.bufferId)
+  for (const slice of plugin.sampler?.slices ?? []) if (slice.bufferId) ids.add(slice.bufferId)
+  for (const layer of plugin.looper?.layers ?? []) if (layer.bufferId) ids.add(layer.bufferId)
+  for (const layer of plugin.looper?.undone ?? []) if (layer.bufferId) ids.add(layer.bufferId)
 }
 
 /** Musical state the guest must mirror. Ignores selection and undo history. */
@@ -173,6 +182,16 @@ export function arrangementDigest(project: Project): string {
       midiSlots: track.midiSlots ?? null,
       rack: track.rack?.devices.map((device) => [device.id, device.kind, device.params, device.pattern, device.zones.length]),
       cables: track.rack?.cables.map((cable) => [cable.from, cable.fromPort, cable.to, cable.toPort, cable.amount]),
+      instruments: (track.plugins ?? []).map((plugin) => [
+        plugin.id,
+        plugin.pluginId,
+        plugin.sampler?.bufferId ?? '',
+        plugin.sampler?.slices.length ?? 0,
+        plugin.looper?.transport ?? 0,
+        plugin.looper?.startBeat ?? 0,
+        plugin.looper?.lengthSamples ?? 0,
+        plugin.looper?.layers.length ?? 0,
+      ]),
     })),
     presetFavorites: project.presetFavorites ?? [],
   })

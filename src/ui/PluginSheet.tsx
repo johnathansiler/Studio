@@ -9,6 +9,7 @@ import { NOTE_NAMES, SCALES } from '../model/scale'
 import { samplesToBeats } from '../model/time'
 import type { PluginInstance } from '../model/types'
 import type { ProjectStore } from '../state/store'
+import { SamplePanel } from './SamplePanel'
 
 export function PluginSheet({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
   const focus = store.pluginFocus
@@ -91,6 +92,9 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
         </select>
       )}
       {plugin.pluginId === 'eq' && <canvas ref={canvas} width={320} height={64} className="spectrum" />}
+      {(plugin.pluginId === 'sampler' || plugin.pluginId === 'looper') && (
+        <SamplePanel store={store} engine={engine} trackId={focus.trackId} plugin={plugin} />
+      )}
       {faced && (
         <Faceplate
           pluginId={plugin.pluginId}
@@ -106,7 +110,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
           }}
         />
       )}
-      {!faced ? <div className="knobs">
+      {!faced && plugin.pluginId !== 'sampler' && plugin.pluginId !== 'looper' ? <div className="knobs">
         {spec.params.map((param) => (
           <label key={param.id}>
             {param.name} {formatParam(param.id, plugin.params[param.id] ?? param.default, param.unit)}
