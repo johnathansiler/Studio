@@ -759,7 +759,7 @@ export function App() {
               {store.view === 'mix' && <MixerView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} />}
             </div>
-            {showRoll && <PianoRoll store={store} />}
+            {showRoll && <PianoRoll store={store} engine={engine} />}
           </div>
         )}
         {(!phone || phonePane === 'room' || surface === 'artist') && (

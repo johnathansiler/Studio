@@ -1189,6 +1189,40 @@ export class AudioEngine {
     if (ctx === this.ctx) this.sources.push(src)
   }
 
+  /** Local audition only. Stays on the speaker and never enters the cue or mic path. */
+  previewPitches(pitches: number[]) {
+    const ctx = this.ctx
+    const out = this.speakerGain
+    if (!ctx || !out) return
+    const unique = [...new Set(pitches.map((pitch) => Math.round(pitch)).filter((pitch) => pitch >= 0 && pitch <= 127))]
+    if (!unique.length) return
+    const now = ctx.currentTime
+    const bus = ctx.createGain()
+    const level = 0.08 / Math.sqrt(unique.length)
+    bus.gain.setValueAtTime(0.0001, now)
+    bus.gain.exponentialRampToValueAtTime(level, now + 0.015)
+    bus.gain.exponentialRampToValueAtTime(0.0001, now + 0.5)
+    bus.connect(out)
+    let pending = unique.length
+    for (const pitch of unique) {
+      const osc = ctx.createOscillator()
+      osc.type = 'triangle'
+      osc.frequency.value = 440 * 2 ** ((pitch - 69) / 12)
+      osc.connect(bus)
+      osc.onended = () => {
+        pending -= 1
+        if (pending > 0) return
+        try {
+          bus.disconnect()
+        } catch {
+          /* already disconnected */
+        }
+      }
+      osc.start(now)
+      osc.stop(now + 0.55)
+    }
+  }
+
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number) {
     if (ctx === this.ctx && when < ctx.currentTime) return
     const osc = ctx.createOscillator()
