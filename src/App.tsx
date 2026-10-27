@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AudioEngine } from './audio/engine'
 import { renderDemoLoop } from './model/demo'
-import { uid, type AudioClip } from './model/types'
+import { isLocalInput, uid, type AudioClip } from './model/types'
 import type { IncomingTake } from './remote/session'
 import { SessionClient } from './remote/session'
 import { listProjects, loadLastProject, loadProject, requestPersistentStorage, saveProject, base64ToBytes, bytesToBase64, type WorkspaceSnapshot } from './storage/idb'
@@ -65,6 +65,7 @@ export function App() {
   const phone = form === 'phone'
   const compact = form !== 'desk'
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
+  const [pianoOpen, setPianoOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
   const takeRef = useRef<{ id: string; endSample: number } | null>(null)
@@ -424,7 +425,10 @@ export function App() {
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
       const key = event.key.toLowerCase()
       const meta = event.metaKey || event.ctrlKey
-      if (event.code === 'Space') {
+      if (key === 't' && !meta && !event.repeat && !store.keyboardMidi) {
+        event.preventDefault()
+        window.dispatchEvent(new CustomEvent('cueharbor-tap', { detail: event.timeStamp }))
+      } else if (event.code === 'Space') {
         event.preventDefault()
         if (engine.status === 'stopped') void play()
         else void stop()
@@ -561,7 +565,7 @@ export function App() {
     engine.stop()
     for (const capture of captures) {
       const bufferId = uid('buf')
-      const track = store.project.tracks.find((item) => item.armed && (capture.peerId ? item.input === `remote:${capture.peerId}` : item.input === 'mic'))
+      const track = store.project.tracks.find((item) => item.armed && (capture.peerId ? item.input === `remote:${capture.peerId}` : isLocalInput(item.input)))
       store.addAsset({
         id: bufferId,
         name: capture.source === 'guide' ? 'Live guide' : 'Recording',
@@ -627,7 +631,7 @@ export function App() {
     const inputs = []
     for (const track of store.project.tracks) {
       if (!track.armed || track.type !== 'audio') continue
-      if (track.input === 'mic' && session.localPerformanceStream()) {
+      if (isLocalInput(track.input) && session.localPerformanceStream()) {
         inputs.push({ key: track.id, stream: session.localPerformanceStream()!, source: 'local' as const, takeId })
       }
       if (track.input.startsWith('remote:')) {
@@ -638,13 +642,14 @@ export function App() {
     }
     if (!inputs.some((input) => input.source === 'local')) {
       const mic = session.localPerformanceStream()
-      const armed = store.project.tracks.find((track) => track.armed && track.input === 'mic')
+      const armed = store.project.tracks.find((track) => track.armed && isLocalInput(track.input))
       if (mic && armed) inputs.push({ key: armed.id, stream: mic, source: 'local' as const, takeId })
     }
     if (!inputs.length) {
       try {
+        const stereo = store.project.tracks.some((track) => track.armed && track.type === 'audio' && track.channels === 2 && isLocalInput(track.input))
         const mic = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+          audio: { channelCount: stereo ? 2 : 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
           video: false,
         })
         engine.setLocalMic(mic)
@@ -779,7 +784,16 @@ export function App() {
   }
 
   const armedTrack = store.sessionSlot ? store.project.tracks.find((track) => track.id === store.sessionSlot?.trackId) : undefined
-  const showRoll = !!store.selectedMidiClipId && (store.view === 'arrange' || (store.view === 'session' && armedTrack?.type === 'midi'))
+  const showRoll = !!store.selectedMidiClipId && !pianoOpen && (store.view === 'arrange' || (store.view === 'session' && armedTrack?.type === 'midi'))
+
+  function openPiano(trackId: string, clipId?: string) {
+    const beat = samplesToBeats(engine.positionSamples, store.project.sampleRate, store.project.tempo)
+    store.preparePianoClip(trackId, beat, clipId)
+    setSurface('studio')
+    setPhonePane('edit')
+    store.setView('arrange')
+    setPianoOpen(true)
+  }
 
   return (
     <div className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''}`} style={{ ['--dock' as string]: `${dock}px` }} data-version={version} data-form={form}>
@@ -818,10 +832,6 @@ export function App() {
             <button className="text-btn" onClick={() => projectFileRef.current?.click()}>Open</button>
             <button className="text-btn" onClick={() => fileRef.current?.click()}>Import</button>
             <button className="text-btn" onClick={() => void bounce()}>Bounce</button>
-            <button className="text-btn" onClick={() => store.addTrack('audio')}>+ Audio</button>
-            <button className="text-btn" onClick={() => store.addTrack('midi')}>+ Inst</button>
-            <button className="text-btn" onClick={() => store.addTrack('bus')}>+ Bus</button>
-            <button className="text-btn" onClick={() => store.addTrack('group')}>+ Group</button>
             <button className="text-btn" onClick={() => setHelp(true)} title="Shortcuts" aria-label="Shortcuts">?</button>
             <button className="text-btn" aria-label={surface === 'studio' ? 'Artist view' : 'Studio'} onClick={() => setSurface(surface === 'studio' ? 'artist' : 'studio')}>
               {surface === 'studio' ? 'Artist' : 'Studio'}
@@ -839,10 +849,6 @@ export function App() {
             <button className="text-btn" onClick={() => { setMenuOpen(false); projectFileRef.current?.click() }}>Open</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); fileRef.current?.click() }}>Import</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); void bounce() }}>Bounce</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); store.addTrack('audio') }}>+ Audio</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); store.addTrack('midi') }}>+ Inst</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); store.addTrack('bus') }}>+ Bus</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); store.addTrack('group') }}>+ Group</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }}>Clips</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setHelp(true) }}>Shortcuts</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setSurface(surface === 'studio' ? 'artist' : 'studio'); setPhonePane('room') }}>
@@ -862,13 +868,14 @@ export function App() {
           onSeek={(sample) => void locate(sample)}
           onSession={() => { setPhonePane('edit'); setSurface('studio'); store.enterSession() }}
           onArrange={() => { setPhonePane('edit'); setSurface('studio'); store.backToArrangement() }}
+          onPiano={(trackId) => openPiano(trackId)}
         />
       )}
       <div className={`workspace ${!phone && dockEdge === 'bottom' && surface === 'studio' ? 'dock-bottom' : ''}`}>
         {surface === 'studio' && (!phone || phonePane === 'edit') && (
           <div className="main-pane">
             <div className="editor">
-              {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} onSeek={(sample) => void locate(sample)} />}
+              {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} onSeek={(sample) => void locate(sample)} onOpenPiano={openPiano} />}
               {store.view === 'mix' && <MixerView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} engine={engine} />}
             </div>
@@ -926,6 +933,15 @@ export function App() {
         )}
       </div>
       <PluginSheet store={store} engine={engine} />
+      {pianoOpen && (
+        <div className="piano-pop" data-piano="open" role="dialog" aria-label="Piano">
+          <header>
+            <strong>Piano</strong>
+            <button type="button" aria-label="Close piano" onClick={() => setPianoOpen(false)}>×</button>
+          </header>
+          <PianoRoll store={store} engine={engine} />
+        </div>
+      )}
       {phone && (
         <nav className="phone-tabs" aria-label="Sections">
           <button className={phonePane === 'edit' && store.view === 'arrange' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setMenuOpen(false) }}>Arrange</button>

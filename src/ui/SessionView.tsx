@@ -3,6 +3,7 @@ import { FOLLOW_ACTIONS, LAUNCH_MODES, LAUNCH_QUANTS, QUANT_LABEL, sceneClip, SE
 import type { FollowAction, LaunchMode, LaunchQuant } from '../model/types'
 import { quartersPerBar } from '../model/time'
 import type { ProjectStore } from '../state/store'
+import { AddTrackButton } from './AddTrack'
 
 export function SessionView({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
   const project = store.project
@@ -73,8 +74,11 @@ export function SessionView({ store, engine }: { store: ProjectStore; engine: Au
           <tr>
             <th />
             {store.project.tracks.map((track) => (
-              <th key={track.id} style={{ color: track.color }}>{track.name}</th>
+              <th key={track.id} data-track={track.id} style={{ color: track.color }}>
+                {track.name}
+              </th>
             ))}
+            <th><AddTrackButton store={store} /></th>
           </tr>
         </thead>
         <tbody>
