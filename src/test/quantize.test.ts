@@ -11,9 +11,12 @@ import {
   quantizeAudioWarp,
   quantizeChannel,
   quantizeMidi,
+  renderQuantizedClip,
   warpSpans,
   type QuantizeSettings,
 } from '../model/quantize'
+import { peakIndex, preferStretchCache, renderStretch, renderStretchBlocks } from '../audio/stretch/engine'
+import { yinPitch } from '../audio/stretch/voice'
 
 function note(partial: Partial<MidiNote> & Pick<MidiNote, 'id' | 'startBeat'>): MidiNote {
   return { pitch: 60, durationBeats: 0.25, velocity: 0.8, ...partial }
@@ -135,6 +138,44 @@ describe('quantize engine', () => {
     expect(spans?.length).toBeGreaterThan(0)
     const shifted = quantizeAudioStart({ ...clip, startSample: 1000 }, audio, 48000, 120, settings({ division: 4 }))
     expect((shifted.startSample + 14400) / 24000).toBeCloseTo(1)
+    const placed = renderQuantizedClip([audio], warped, 48000, 120)
+    expect(Math.abs(peakIndex(placed[0]) - 24000)).toBeLessThan(48)
+  })
+
+  it('stretches a quantized clip without changing pitch', () => {
+    const rate = 48000
+    const sine = new Float32Array(rate)
+    for (let i = 0; i < sine.length; i++) sine[i] = Math.sin((2 * Math.PI * 440 * i) / rate)
+    const out = renderQuantizedClip([sine], {
+      id: 'c',
+      name: 'Tone',
+      bufferId: 'b',
+      startSample: 0,
+      offsetSamples: 0,
+      durationSamples: Math.round(rate * 1.5),
+      fadeInSamples: 0,
+      fadeOutSamples: 0,
+      gain: 1,
+      source: 'local',
+      warpPoints: [
+        { source: 0, target: 0 },
+        { source: rate, target: 3 },
+      ],
+    }, rate, 120)
+    expect(Math.abs(out[0].length - rate * 1.5)).toBeLessThan(rate * 0.001)
+    const start = Math.floor(out[0].length * 0.35)
+    const frame = out[0].subarray(start, start + 4096)
+    const cents = Math.abs(1200 * Math.log2(yinPitch(frame, rate, 220, 880).hz / 440))
+    expect(cents).toBeLessThan(8)
+    const once = renderStretch([sine.subarray(0, 8000)], rate, { ratio: 1.5, mode: 'tonal' })
+    const blocks = renderStretchBlocks([sine.subarray(0, 8000)], rate, { ratio: 1.5, mode: 'tonal' }, 192)
+    expect(blocks[0].length).toBe(once[0].length)
+    let err = 0
+    for (let i = 0; i < once[0].length; i++) err = Math.max(err, Math.abs((once[0][i] || 0) - (blocks[0][i] || 0)))
+    expect(err).toBeLessThan(1e-5)
+    expect(preferStretchCache(true, 0.71)).toBe(true)
+    expect(preferStretchCache(true, 0.7)).toBe(false)
+    expect(preferStretchCache(false, 1)).toBe(false)
   })
 
   it('quantizes recorded notes live or after the take, and undoes an apply', () => {

@@ -3,9 +3,9 @@ import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
 import { RackHost } from './rack/host'
 import { renderNotes } from './rack/dsp'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
-import { warpSpans } from '../model/quantize'
-import { renderPattern, type RenderedHit } from '../model/steps'
+import { renderQuantizedClip } from '../model/quantize'
 import { preferStretchCache } from './stretch/engine'
+import { renderPattern, type RenderedHit } from '../model/steps'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToMusical } from '../model/time'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav } from '../model/wav'
@@ -1544,6 +1544,33 @@ export class AudioEngine {
     }
   }
 
+  /**
+   * Quantize markers play through the stretch engine. A tight phone reuses the
+   * cached render instead of stretching again on the scheduling tick.
+   */
+  private prepareWarp(ctx: BaseAudioContext, buffer: AudioBuffer, clip: AudioClip): { buffer: AudioBuffer; clip: AudioClip } {
+    if (!clip.warpPoints || clip.warpPoints.length < 2) return { buffer, clip }
+    const sr = ctx.sampleRate
+    const tempo = this.project?.tempo || 120
+    const phone = typeof matchMedia === 'function' && matchMedia('(max-width: 940px)').matches
+    const key = `${clip.bufferId}:${clip.offsetSamples}:${clip.durationSamples}:${sr}:${tempo}:${JSON.stringify(clip.warpPoints)}`
+    let pcm = this.warpPcm.get(key)
+    if (!pcm) {
+      const channels: Float32Array[] = []
+      for (let index = 0; index < buffer.numberOfChannels; index++) channels.push(buffer.getChannelData(index))
+      pcm = renderQuantizedClip(channels, clip, sr, tempo)
+      if (this.warpPcm.size >= 8) {
+        const oldest = this.warpPcm.keys().next().value
+        if (oldest) this.warpPcm.delete(oldest)
+      }
+      this.warpPcm.set(key, pcm)
+    }
+    if (preferStretchCache(phone, this.rack.cpu)) pcm = this.warpPcm.get(key) ?? pcm
+    const audio = ctx.createBuffer(Math.max(1, pcm.length), Math.max(1, pcm[0]?.length ?? 1), sr)
+    pcm.forEach((channel, index) => audio.copyToChannel(Float32Array.from(channel), index))
+    return { buffer: audio, clip: { ...clip, offsetSamples: 0, warp: undefined } }
+  }
+
   private scheduleAudioClip(
     ctx: BaseAudioContext,
     strip: StripNodes,
@@ -1554,30 +1581,9 @@ export class AudioEngine {
     timelineEnd: number,
   ) {
     const sr = ctx.sampleRate
-    const spans = warpSpans(clip, sr, this.project?.tempo || 120)
-    if (spans) {
-      for (const span of spans) {
-        const abs = clip.startSample + span.at
-        const absEnd = abs + Math.max(1, Math.round(span.seconds * sr))
-        const from = Math.max(abs, timelineStart)
-        const to = Math.min(absEnd, timelineEnd)
-        if (to - from < 8) continue
-        const when = ctxTime + (from - timelineStart) / sr
-        if (ctx === this.ctx && when < ctx.currentTime - 0.02) continue
-        const into = (from - abs) / sr
-        const dur = (to - from) / sr
-        const src = ctx.createBufferSource()
-        src.buffer = buffer
-        src.playbackRate.value = span.rate
-        const gain = ctx.createGain()
-        gain.gain.value = Math.max(0.0001, clip.gain)
-        src.connect(gain)
-        gain.connect(strip.input)
-        src.start(Math.max(when, 0), Math.max(0, span.offset + into * span.rate), Math.max(0.01, dur * span.rate))
-        if (ctx === this.ctx) this.sources.push(src)
-      }
-      return
-    }
+    const prepared = this.prepareWarp(ctx, buffer, clip)
+    buffer = prepared.buffer
+    clip = prepared.clip
     const clipEnd = clip.startSample + clip.durationSamples
     const from = Math.max(clip.startSample, timelineStart)
     const to = Math.min(clipEnd, timelineEnd)

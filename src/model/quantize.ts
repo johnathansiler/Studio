@@ -1,7 +1,8 @@
+import { renderClipChannels } from '../audio/stretch/engine'
 import { snapPitch, type ScaleId } from './scale'
 import { STEP_BEAT, emptyCell, type StepCell, type StepChannel } from './steps'
 import { beatsToSamples, samplesToBeats } from './time'
-import type { AudioClip, MidiNote } from './types'
+import type { AudioClip, ClipStretch, MidiNote, Project, WarpMarker } from './types'
 
 export const DIVISIONS = [1, 2, 4, 8, 16, 32, 64, 128] as const
 export type Division = (typeof DIVISIONS)[number]
@@ -379,6 +380,35 @@ export function warpSpans(clip: AudioClip, sampleRate: number, tempo: number): W
     })
   }
   return spans.length ? spans : null
+}
+
+/** Render warp markers with the shared stretch engine. Output length is the clip; pitch stays. */
+export function renderQuantizedClip(channels: Float32Array[], clip: AudioClip, sampleRate: number, tempo: number): Float32Array[] {
+  const points = clip.warpPoints
+  if (!points || points.length < 2) {
+    const from = Math.max(0, clip.offsetSamples)
+    const to = from + Math.max(1, clip.durationSamples)
+    return channels.map((channel) => Float32Array.from(channel.subarray(from, Math.min(channel.length, to))))
+  }
+  const ordered = [...points].sort((a, b) => a.source - b.source)
+  const offset = ordered[0].source
+  const sourceSamples = Math.max(1, ordered[ordered.length - 1].source - offset)
+  const markers: WarpMarker[] = ordered.map((point, index) => ({
+    id: `w${index}`,
+    source: point.source - offset,
+    target: point.target,
+  }))
+  const stretch: ClipStretch = {
+    sourceSamples,
+    semitones: 0,
+    cents: 0,
+    mode: markers.length > 2 ? 'beats' : 'tonal',
+    followTempo: false,
+    sourceBpm: null,
+    markers,
+  }
+  const project = { sampleRate, tempo, automation: [] } as unknown as Project
+  return renderClipChannels(channels, { ...clip, offsetSamples: offset, stretch }, project)
 }
 
 function fixOverlaps(notes: MidiNote[], active: Set<string> | null) {
