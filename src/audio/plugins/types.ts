@@ -30,15 +30,23 @@ export interface BlockContext {
   scaleRoot: number
   scaleIntervals: readonly number[]
   quality: 'full' | 'eco'
+  /** Offline bounces use linear-phase EQ and 4x oversampling. Live preview stays lighter. */
+  offline?: boolean
 }
 
 export interface Processor {
   latencySamples: number
   spectrum?: Float32Array
+  /** Chromatic tuner readout. `cents` is signed distance to the nearest semitone. */
+  tuner?: { hz: number; cents: number; note: number }
   /** Needle ballistics. vu is dB relative to 0 VU. gr is positive reduction. */
   meter?: { vu: number; gr: number }
   /** Recent detected pitch, in hertz, for the tune graph. */
   trace?: Float32Array
+  /** Latest loudness and stereo readings, when this processor measures them. */
+  meters?: Record<string, number>
+  /** Interleaved left/right pairs for the goniometer. */
+  scope?: Float32Array
   reset(): void
   process(input: Float32Array[], output: Float32Array[], params: Record<string, number>, ctx: BlockContext): void
 }

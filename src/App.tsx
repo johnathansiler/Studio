@@ -3,7 +3,9 @@ import { applyFreeze } from './audio/bounce'
 import { AudioEngine } from './audio/engine'
 import { unpackProject } from './model/archive'
 import { renderDemoLoop } from './model/demo'
-import { createEmptyProject, isLocalInput, uid, type AudioClip } from './model/types'
+import { channelConstraints, inputChannel, mediaChannelCount, punchWindow, sliceCapture } from './model/comp'
+import { inspectClip } from './audio/stretch/engine'
+import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } from './model/types'
 import type { IncomingTake } from './remote/session'
 import { SessionClient } from './remote/session'
 import { deleteProject, listProjects, listSnapshots, loadLastProject, loadProject, loadSnapshot, requestPersistentStorage, saveProject, storageReport, type ProjectListItem, type WorkspaceSnapshot } from './storage/idb'
@@ -15,13 +17,17 @@ import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
 import { beatsToSamples, countInSeconds, samplesToBeats } from './model/time'
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
+import { TunerPop } from './ui/AmpPop'
 import { ArrangeView } from './ui/ArrangeView'
+import { BeatView } from './ui/BeatView'
 import { ExportSheet } from './ui/ExportSheet'
 import { formFactor, type FormFactor } from './ui/form'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
 import { IdeasPop } from './ui/IdeasPop'
+import { QuantizeSheet } from './ui/QuantizeSheet'
 import { PianoRoll } from './ui/PianoRoll'
+import { KnockPop } from './ui/KnockPop'
 import { ProjectSheet } from './ui/ProjectSheet'
 import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
@@ -77,10 +83,13 @@ export function App() {
   const compact = form !== 'desk'
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
   const [pianoOpen, setPianoOpen] = useState(false)
+  const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
+  const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
   const takeRef = useRef<{ id: string; endSample: number } | null>(null)
+  const punchTimer = useRef(0)
   const armedPeers = useRef(new Set<string>())
   const launchKey = useRef('')
   const publishTimer = useRef(0)
@@ -148,6 +157,19 @@ export function App() {
       }
     })
     const params = new URLSearchParams(location.search)
+    if (params.get('knock') === '1') {
+      const track = store.project.tracks.find((item) => item.type === 'midi')
+      if (track) {
+        if (!track.rack?.devices.some((device) => device.kind === 'knock')) store.addDevice(track.id, 'knock')
+        const other = track.rack?.devices.find((device) => device.kind !== 'knock')
+        if (other && (track.rack?.devices.length || 0) > 1) store.removeDevice(track.id, other.id)
+        if (store.rackTrackId !== track.id) store.openRack(track.id)
+        store.setView('arrange')
+        setKnockOpen(true)
+        setSurface('studio')
+        setPhonePane('edit')
+      }
+    }
     const urlCode = (params.get('session') || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
     const identity = readIdentity()
     const choice = inviteWins(urlCode, identity?.code || '')
@@ -229,14 +251,30 @@ export function App() {
   }, [store, engine, session])
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('ideas') !== '1') return
-    const track = store.project.tracks.find((item) => item.type === 'midi')
-    if (track && !track.midiClips.length) store.addMidiClip(track.id, 0)
-    if (track) store.selectTrack(track.id)
-    store.setView('arrange')
-    setSurface('studio')
-    setPhonePane('edit')
-    setIdeasOpen(true)
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('board') === '1') {
+      const track = store.project.tracks.find((item) => item.type === 'audio')
+      if (track) {
+        let plugin = track.plugins.find((item) => item.pluginId === 'amp')
+        if (!plugin) {
+          store.addPlugin(track.id, 'amp', 'Glass Room')
+          plugin = store.track(track.id)?.plugins.find((item) => item.pluginId === 'amp')
+        }
+        if (plugin) store.focusPlugin(track.id, plugin.id)
+        store.setView('mix')
+        setSurface('studio')
+        setPhonePane('edit')
+      }
+    }
+    if (params.get('ideas') === '1') {
+      const track = store.project.tracks.find((item) => item.type === 'midi')
+      if (track && !track.midiClips.length) store.addMidiClip(track.id, 0)
+      if (track) store.selectTrack(track.id)
+      store.setView('arrange')
+      setSurface('studio')
+      setPhonePane('edit')
+      setIdeasOpen(true)
+    }
   }, [store])
 
   useEffect(() => {
@@ -277,6 +315,12 @@ export function App() {
         setPhonePane(saved.workspace.phonePane)
         engine.seek(saved.workspace.positionSamples || 0)
         engine.sync(store.project, (id) => store.buffers.get(id))
+      }
+      if (new URLSearchParams(window.location.search).has('comp')) {
+        store.seedCompPreview()
+        store.setView('arrange')
+        engine.sync(store.project, (id) => store.buffers.get(id))
+        setVersion((value) => value + 1)
       }
       saveReady.current = true
     })()
@@ -459,6 +503,7 @@ export function App() {
         if (engine.status === 'stopped') void play()
         else void stop()
       } else if (key === 'r' && !meta) void record()
+      else if (key === 'q' && !meta) store.quickQuantize()
       else if (meta && key === 'z') {
         event.preventDefault()
         if (event.shiftKey) store.redo()
@@ -589,50 +634,134 @@ export function App() {
     const end = Math.round(engine.currentTimelineSample())
     const captures = await engine.finishRecording()
     engine.stop()
+    if (punchTimer.current) {
+      window.clearTimeout(punchTimer.current)
+      punchTimer.current = 0
+    }
+    const settings = store.recordSettings()
+    const compensation = engine.latencyCompensationSamples()
+    const punched = settings.punchEnabled ? punchWindow(settings, store.project.sampleRate, store.project.tempo, store.project.timeSignature) : null
+    const cycling = Boolean(settings.loop && store.project.loopEnabled)
     for (const capture of captures) {
-      const bufferId = uid('buf')
-      const track = store.project.tracks.find((item) => item.armed && (capture.peerId ? item.input === `remote:${capture.peerId}` : isLocalInput(item.input)))
-      store.addAsset({
-        id: bufferId,
-        name: capture.source === 'guide' ? 'Live guide' : 'Recording',
-        sampleRate: capture.sampleRate,
-        channels: capture.channels,
-      })
+      const track = store.project.tracks.find((item) => item.id === capture.key)
+        || store.project.tracks.find((item) => item.armed && (capture.peerId ? item.input === `remote:${capture.peerId}` : isLocalInput(item.input) || item.input.startsWith('mic:')))
       if (!track) continue
       const slot = store.sessionSlot
       const intoSlot = slot && slot.trackId === track.id && capture.source === 'local'
-      const durationSamples = intoSlot
-        ? recordedLength(capture.channels[0].length, store.project.recordBars ?? 0, capture.sampleRate, store.project.tempo, store.project.timeSignature)
-        : capture.channels[0].length
-      const clip: AudioClip = {
-        id: uid('clip'),
-        name: capture.source === 'guide' ? `${track.name} guide` : track.name,
-        bufferId,
-        startSample: intoSlot ? 0 : capture.startSample,
-        offsetSamples: 0,
-        durationSamples,
-        fadeInSamples: 64,
-        fadeOutSamples: 128,
-        gain: 1,
-        source: capture.source === 'guide' ? 'guide' : 'local',
-        peerId: capture.peerId,
-        takeId: capture.takeId,
-        durationBeats: intoSlot ? samplesToBeats(durationSamples, capture.sampleRate, store.project.tempo) : undefined,
-        warp: intoSlot ? true : undefined,
-        loop: intoSlot ? true : undefined,
-        slotOnly: intoSlot ? true : undefined,
+      if (intoSlot && slot) {
+        const bufferId = uid('buf')
+        store.addAsset({
+          id: bufferId,
+          name: capture.source === 'guide' ? 'Live guide' : 'Recording',
+          sampleRate: capture.sampleRate,
+          channels: capture.channels,
+        })
+        const durationSamples = recordedLength(capture.channels[0].length, store.project.recordBars ?? 0, capture.sampleRate, store.project.tempo, store.project.timeSignature)
+        const clip: AudioClip = {
+          id: uid('clip'),
+          name: capture.source === 'guide' ? `${track.name} guide` : track.name,
+          bufferId,
+          startSample: 0,
+          offsetSamples: 0,
+          durationSamples,
+          fadeInSamples: 64,
+          fadeOutSamples: 128,
+          gain: 1,
+          source: capture.source === 'guide' ? 'guide' : 'local',
+          peerId: capture.peerId,
+          takeId: capture.takeId,
+          durationBeats: samplesToBeats(durationSamples, capture.sampleRate, store.project.tempo),
+          warp: true,
+          loop: true,
+          slotOnly: true,
+          stretch: inspectClip(capture.channels[0] ?? new Float32Array(), capture.sampleRate, store.project.tempo),
+        }
+        store.placeInSlot(track.id, slot.scene, clip)
+        if (capture.source === 'guide' && isSilentTake(capture.channels)) {
+          store.toast(`${track.name} guide is silent. Video and the live mic need a connected media path. The aligned take replaces this if the upload arrives.`, 'warn')
+        }
+        continue
       }
-      if (intoSlot && slot) store.placeInSlot(track.id, slot.scene, clip)
-      else store.addAudioClip(track.id, clip)
-      if (capture.source === 'guide' && isSilentTake(capture.channels)) {
-        store.toast(`${track.name} guide is silent. Video and the live mic need a connected media path. The aligned take replaces this if the upload arrives.`, 'warn')
+      const length = capture.channels[0]?.length || 0
+      const slices = sliceCapture({
+        captureStart: capture.startSample,
+        captureLength: length,
+        compensation: capture.source === 'guide' ? 0 : compensation,
+        punchFrom: punched ? punched.recordFrom : undefined,
+        punchTo: punched ? punched.recordTo : undefined,
+        loopStart: cycling ? store.project.loopStartSample : undefined,
+        loopEnd: cycling ? store.project.loopEndSample : undefined,
+      })
+      if (!track || !slices.length) continue
+      const makeLane = (slice: (typeof slices)[number], index: number): TakeLane => {
+        const channels = capture.channels.map((channel) => channel.slice(slice.captureOffset, slice.captureOffset + slice.durationSamples))
+        const bufferId = uid('buf')
+        store.addAsset({
+          id: bufferId,
+          name: capture.source === 'guide' ? 'Live guide' : `Take ${index + 1}`,
+          sampleRate: capture.sampleRate,
+          channels,
+        })
+        return {
+          id: uid('lane'),
+          name: capture.source === 'guide' ? `${track.name} guide` : `${track.name} ${index + 1}`,
+          bufferId,
+          offsetSamples: 0,
+          startSample: slice.startSample,
+          durationSamples: channels[0]?.length || slice.durationSamples,
+          peerId: capture.peerId,
+          takeId: capture.takeId,
+          source: capture.source === 'guide' ? 'guide' : 'local',
+        }
+      }
+      if (slices.length > 1 || cycling) {
+        slices.forEach((slice, index) => store.addTakeLane(track.id, makeLane(slice, index)))
+        store.toast(`${track.name}: ${slices.length} take${slices.length === 1 ? '' : 's'} on the loop.`, 'good')
+      } else {
+        const lane = makeLane(slices[0], 0)
+        const channels = store.buffers.get(lane.bufferId)?.channels || capture.channels
+        const clip: AudioClip = {
+          id: uid('clip'),
+          name: capture.source === 'guide' ? `${track.name} guide` : track.name,
+          bufferId: lane.bufferId,
+          startSample: lane.startSample,
+          offsetSamples: 0,
+          durationSamples: lane.durationSamples,
+          fadeInSamples: 64,
+          fadeOutSamples: 128,
+          gain: 1,
+          source: lane.source,
+          peerId: capture.peerId,
+          takeId: capture.takeId,
+          stretch: inspectClip(channels[0] ?? new Float32Array(), capture.sampleRate, store.project.tempo),
+        }
+        store.addAudioClip(track.id, clip)
+        if (capture.source === 'local' && compensation > 0) {
+          store.toast(`${track.name} aligned −${Math.round((compensation / engine.sampleRate) * 1000)} ms for monitoring delay.`, 'good')
+        }
+        if (capture.source === 'guide' && isSilentTake(channels)) {
+          store.toast(`${track.name} guide is silent. Video and the live mic need a connected media path. The aligned take replaces this if the upload arrives.`, 'warn')
+        }
       }
     }
+    if (settings.quick) store.setRecord({ quick: false, punchEnabled: false })
     if (takeRef.current) {
       session.broadcastTransport({ action: 'record-stop', takeId: takeRef.current.id, timelineSample: end })
       takeRef.current = null
     }
     session.broadcastTransport({ action: 'stop', timelineSample: end })
+    store.endTake()
+  }
+
+  async function quickPunch() {
+    if (session.state.role === 'guest') {
+      store.toast('The host records. Your take still lands on their timeline.', 'info')
+      return
+    }
+    const recording = engine.status === 'recording'
+    store.quickPunch(Math.round(engine.currentTimelineSample()), recording)
+    if (recording) await stop()
+    else await record()
   }
 
   async function record() {
@@ -654,11 +783,33 @@ export function App() {
     }
     await ready()
     const takeId = uid('take')
+    const armedAudio = store.project.tracks.filter((track) => track.armed && track.type === 'audio')
+    const localArmed = armedAudio.filter((track) => isLocalInput(track.input) || track.input.startsWith('mic:'))
+    let mic = session.localPerformanceStream()
+    if (localArmed.length && !mic) {
+      const count = mediaChannelCount(localArmed.map((track) => track.input))
+      try {
+        mic = await navigator.mediaDevices.getUserMedia({ audio: channelConstraints(count), video: false })
+        engine.setLocalMic(mic)
+      } catch {
+        try {
+          mic = await navigator.mediaDevices.getUserMedia({ audio: channelConstraints(1), video: false })
+          engine.setLocalMic(mic)
+        } catch {
+          if (!armedAudio.some((track) => track.input.startsWith('remote:'))) {
+            store.toast('Microphone permission is needed to record.', 'warn')
+            return
+          }
+        }
+      }
+    }
     const inputs = []
-    for (const track of store.project.tracks) {
-      if (!track.armed || track.type !== 'audio') continue
-      if (isLocalInput(track.input) && session.localPerformanceStream()) {
-        inputs.push({ key: track.id, stream: session.localPerformanceStream()!, source: 'local' as const, takeId })
+    for (const track of armedAudio) {
+      const local = isLocalInput(track.input) || track.input.startsWith('mic:')
+      const stream = mic || session.localPerformanceStream()
+      if (local && stream) {
+        const channel = inputChannel(track.input)
+        inputs.push({ key: track.id, stream, source: 'local' as const, takeId, channel: channel ?? undefined })
       }
       if (track.input.startsWith('remote:')) {
         const peerId = track.input.slice('remote:'.length)
@@ -667,27 +818,31 @@ export function App() {
       }
     }
     if (!inputs.some((input) => input.source === 'local')) {
-      const mic = session.localPerformanceStream()
-      const armed = store.project.tracks.find((track) => track.armed && isLocalInput(track.input))
-      if (mic && armed) inputs.push({ key: armed.id, stream: mic, source: 'local' as const, takeId })
+      const live = session.localPerformanceStream()
+      const armed = store.project.tracks.find((track) => track.armed && (isLocalInput(track.input) || track.input.startsWith('mic:')))
+      if (live && armed) inputs.push({ key: armed.id, stream: live, source: 'local' as const, takeId })
     }
     if (!inputs.length) {
       try {
         const stereo = store.project.tracks.some((track) => track.armed && track.type === 'audio' && track.channels === 2 && isLocalInput(track.input))
-        const mic = await navigator.mediaDevices.getUserMedia({
+        const fresh = await navigator.mediaDevices.getUserMedia({
           audio: { channelCount: stereo ? 2 : 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
           video: false,
         })
-        engine.setLocalMic(mic)
+        engine.setLocalMic(fresh)
         const armed = store.project.tracks.find((track) => track.type === 'audio' && track.armed) || store.project.tracks[0]
-        inputs.push({ key: armed.id, stream: mic, source: 'local' as const, takeId })
+        inputs.push({ key: armed.id, stream: fresh, source: 'local' as const, takeId })
       } catch {
-        store.toast('Microphone permission is needed to record.', 'warn')
+        store.toast('Arm a track with an input to record.', 'warn')
         return
       }
     }
-    const fromSample = Math.round(engine.currentTimelineSample())
+    const settings = store.recordSettings()
+    const punched = settings.punchEnabled ? punchWindow(settings, store.project.sampleRate, store.project.tempo, store.project.timeSignature) : null
     const alreadyPlaying = engine.status === 'playing'
+    let fromSample = Math.round(engine.currentTimelineSample())
+    if (!alreadyPlaying && punched) fromSample = punched.playFrom
+    else if (!alreadyPlaying && settings.loop && store.project.loopEnabled) fromSample = store.project.loopStartSample
     const counting = store.project.countIn && !alreadyPlaying
     const lead = scheduleLeadMs(session.primaryOneWay()?.ms ?? 40)
     const countMs = counting ? countInSeconds(store.project.tempo, store.project.timeSignature) * 1000 : 0
@@ -712,6 +867,12 @@ export function App() {
       hostPerfAtSample: alreadyPlaying ? undefined : hostPerf,
       onPunch: (info) => {
         takeRef.current = { id: takeId, endSample: info.timelineSample }
+        store.beginTake()
+        if (punched) {
+          const remain = (punched.stopAt - info.timelineSample) / engine.sampleRate
+          if (punchTimer.current) window.clearTimeout(punchTimer.current)
+          punchTimer.current = window.setTimeout(() => { void stop() }, Math.max(80, remain * 1000))
+        }
         session.broadcastTransport({
           action: 'record-start',
           takeId,
@@ -793,6 +954,7 @@ export function App() {
         fadeOutSamples: 0,
         gain: 1,
         source: 'import',
+        stretch: inspectClip(channels[0] ?? new Float32Array(), decoded.sampleRate, store.project.tempo),
       })
     }
   }
@@ -818,7 +980,7 @@ async function importDropped(files: FileList) {
   }
 
   const armedTrack = store.sessionSlot ? store.project.tracks.find((track) => track.id === store.sessionSlot?.trackId) : undefined
-  const showRoll = !!store.selectedMidiClipId && !pianoOpen && (store.view === 'arrange' || (store.view === 'session' && armedTrack?.type === 'midi'))
+  const showRoll = !!store.selectedMidiClipId && !pianoOpen && (store.view === 'arrange' || store.view === 'beats' || (store.view === 'session' && armedTrack?.type === 'midi'))
 
   function openPiano(trackId: string, clipId?: string) {
     const beat = samplesToBeats(engine.positionSamples, store.project.sampleRate, store.project.tempo)
@@ -858,7 +1020,7 @@ async function importDropped(files: FileList) {
         <input className="project-name" value={store.project.name} onChange={(event) => store.renameProject(event.target.value)} />
         {!phone && (
           <div className="views">
-            {(['arrange', 'mix', 'session'] as const).map((view) => (
+            {(['arrange', 'mix', 'beats', 'session'] as const).map((view) => (
               <button key={view} className={store.view === view ? 'active' : ''} onClick={() => { setSurface('studio'); store.setView(view) }}>
                 {view}
               </button>
@@ -887,6 +1049,8 @@ async function importDropped(files: FileList) {
           <div className="phone-menu">
             <button className="text-btn" id="menu-save" onClick={() => { setMenuOpen(false); void openProjects() }}>Save</button>
             <button className="text-btn" id="menu-export" onClick={() => { setMenuOpen(false); setExportOpen(true) }}>Export</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('beats') }}>Beats</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); store.openQuantize() }}>Quantize</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }}>Clips</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setHelp(true) }}>Shortcuts</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setSurface(surface === 'studio' ? 'artist' : 'studio'); setPhonePane('room') }}>
@@ -907,23 +1071,34 @@ async function importDropped(files: FileList) {
           onSession={() => { setPhonePane('edit'); setSurface('studio'); store.enterSession() }}
           onArrange={() => { setPhonePane('edit'); setSurface('studio'); store.backToArrangement() }}
           onPiano={(trackId) => openPiano(trackId)}
+          onQuantize={() => store.openQuantize()}
         />
       )}
       <div className={`workspace ${!phone && dockEdge === 'bottom' && surface === 'studio' ? 'dock-bottom' : ''}`}>
         {surface === 'studio' && (!phone || phonePane === 'edit') && (
           <div className="main-pane">
             <div className="editor">
-              {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} onSeek={(sample) => void locate(sample)} onOpenPiano={openPiano} />}
-              {store.view === 'mix' && <MixerView store={store} engine={engine} />}
+              {store.view === 'arrange' && (
+                <ArrangeView
+                  store={store}
+                  engine={engine}
+                  session={session}
+                  onSeek={(sample) => void locate(sample)}
+                  onOpenPiano={openPiano}
+                  onQuickPunch={() => void quickPunch()}
+                />
+              )}
+              {store.view === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} />}
+              {store.view === 'beats' && <BeatView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} engine={engine} />}
             </div>
-            {store.view === 'arrange' && store.rackTrackId && form !== 'fold' && <RackView store={store} engine={engine} trackId={store.rackTrackId} />}
+            {store.view === 'arrange' && store.rackTrackId && form !== 'fold' && <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />}
             {showRoll && form !== 'fold' && !store.rackTrackId && <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />}
           </div>
         )}
         {form === 'fold' && surface === 'studio' && (showRoll || store.rackTrackId) && (
           <div className="side-editor">
-            {store.rackTrackId ? <RackView store={store} engine={engine} trackId={store.rackTrackId} /> : <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />}
+            {store.rackTrackId ? <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} /> : <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />}
           </div>
         )}
         {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && (showRoll || store.rackTrackId)) && (
@@ -972,6 +1147,7 @@ async function importDropped(files: FileList) {
         )}
       </div>
       <PluginSheet store={store} engine={engine} />
+      <QuantizeSheet store={store} />
       {pianoOpen && (
         <div className="piano-pop" data-piano="open" role="dialog" aria-label="Piano">
           <header>
@@ -981,11 +1157,13 @@ async function importDropped(files: FileList) {
           <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />
         </div>
       )}
+      {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
       {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}
       {phone && (
         <nav className="phone-tabs" aria-label="Sections">
           <button className={phonePane === 'edit' && store.view === 'arrange' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setMenuOpen(false) }}>Arrange</button>
           <button className={phonePane === 'edit' && store.view === 'mix' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('mix'); setMenuOpen(false) }}>Mix</button>
+          <button className={phonePane === 'edit' && store.view === 'beats' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('beats'); setMenuOpen(false) }}>Beats</button>
           <button className={phonePane === 'room' ? 'active' : ''} onClick={() => { setPhonePane('room'); setSurface('studio'); setMenuOpen(false) }}>Session</button>
         </nav>
       )}
@@ -1117,6 +1295,7 @@ async function importDropped(files: FileList) {
           </div>
         </div>
       )}
+      {knockOpen && <KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} />}
       <div className="toasts">
         {store.toasts.map((toast) => (
           <div key={toast.id} className={`toast ${toast.tone || ''}`}>
@@ -1133,6 +1312,7 @@ function placeTake(store: ProjectStore, engine: AudioEngine, take: IncomingTake)
     take.sampleRate === engine.sampleRate ? channel : linearResample(channel, take.sampleRate, engine.sampleRate),
   )
   store.removeClips((clip) => clip.source === 'guide' && clip.takeId === take.takeId)
+  store.dropGuideLanes(take.takeId)
   let track = store.project.tracks.find((item) => item.input === `remote:${take.peerId}`)
   if (!track) {
     store.ensureRemoteTrack(take.peerId, take.peerName)
@@ -1141,20 +1321,16 @@ function placeTake(store: ProjectStore, engine: AudioEngine, take: IncomingTake)
   if (!track) return
   const bufferId = uid('buf')
   store.addAsset({ id: bufferId, name: `${take.peerName} take`, sampleRate: engine.sampleRate, channels })
-  store.addAudioClip(track.id, {
-    id: uid('clip'),
+  store.addTakeLane(track.id, {
+    id: uid('lane'),
     name: `${take.peerName} aligned`,
     bufferId,
-    startSample: Math.max(0, take.placeAtSample),
     offsetSamples: 0,
+    startSample: Math.max(0, take.placeAtSample),
     durationSamples: channels[0].length,
-    fadeInSamples: 32,
-    fadeOutSamples: 64,
-    gain: 1,
-    source: 'aligned-take',
     peerId: take.peerId,
     takeId: take.takeId,
-    alignmentMs: take.compensationMs,
+    source: 'aligned-take',
   })
   store.toast(
     take.silent

@@ -30,6 +30,7 @@ export class LiveRack {
   private readonly processors = new Map<string, Processor>()
   private readonly failed = new Set<string>()
   private readonly spectra = new Map<string, Float32Array>()
+  private readonly tuners = new Map<string, { hz: number; cents: number; note: number }>()
   private readonly meters = new Map<string, { vu: number; gr: number }>()
   private readonly traces = new Map<string, Float32Array>()
   private readonly tapsOut = new Map<string, Float32Array>()
@@ -38,13 +39,18 @@ export class LiveRack {
   private generation = 0
   private signature = ''
   private phone = false
+  private meterReading: Record<string, number> | null = null
+  private meterScope: Float32Array | null = null
   private ctx: AudioContext | null = null
   private strips: Map<string, StripNodes> = new Map()
   private localBus: AudioNode | null = null
   private remoteBus: AudioNode | null = null
 
   constructor() {
-    if (typeof matchMedia !== 'undefined') this.phone = matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
+    if (typeof matchMedia !== 'undefined') {
+      this.phone = matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
+      if (this.phone) this.quality = 'eco'
+    }
   }
 
   spectrum(pluginId: string) {
@@ -56,12 +62,37 @@ export class LiveRack {
     proc?.note?.(note, vel)
   }
 
+  keptLoop(pluginId: string) {
+    const proc = this.processors.get(pluginId) as Processor & { kept?: () => Float32Array | null }
+    return proc?.kept?.() ?? null
+  }
+
+  tuner(pluginId: string) {
+    return this.tuners.get(pluginId) ?? null
+  }
+
   meter(pluginId: string) {
     return this.meters.get(pluginId) ?? null
   }
 
   trace(pluginId: string) {
     return this.traces.get(pluginId) ?? null
+  }
+
+  ownerLatency(owner: string) {
+    const project = this.project
+    const ctx = this.ctx
+    if (!project || !ctx) return 0
+    const plugins = owner === 'master' ? project.masterPlugins : project.tracks.find((track) => track.id === owner)?.plugins ?? []
+    return this.latency(owner, plugins, ctx.sampleRate)
+  }
+
+  reading() {
+    return this.meterReading
+  }
+
+  scope() {
+    return this.meterScope
   }
 
   isFailed(pluginId: string) {
@@ -206,6 +237,7 @@ export class LiveRack {
       scaleRoot: project.scale?.root ?? 0,
       scaleIntervals: scale.intervals,
       quality: this.quality,
+      offline: false,
     }, (id, length) => {
       const buf = this.tapsOut.get(id)
       if (!buf || !buf.length) return null
@@ -214,8 +246,13 @@ export class LiveRack {
     for (const slot of slots) {
       if (slot.failed) this.failed.add(slot.id)
       if (slot.processor?.spectrum) this.spectra.set(slot.id, slot.processor.spectrum)
+      if (slot.processor?.tuner) this.tuners.set(slot.id, slot.processor.tuner)
       if (slot.processor?.meter) this.meters.set(slot.id, slot.processor.meter)
       if (slot.processor?.trace) this.traces.set(slot.id, slot.processor.trace)
+      if (slot.processor?.meters) {
+        this.meterReading = slot.processor.meters
+        this.meterScope = slot.processor.scope ?? this.meterScope
+      }
     }
     this.tapsOut.set(owner, Float32Array.from(output[0]))
     const budget = (input[0].length / rate) * 1000

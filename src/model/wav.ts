@@ -1,3 +1,5 @@
+import { resampleSinc } from '../audio/quality/resample'
+
 export type WavBits = 16 | 24 | 32
 export type DitherMode = 'none' | 'tpdf' | 'shaped'
 
@@ -5,6 +7,8 @@ export interface WavEncodeOptions {
   bits?: WavBits
   dither?: DitherMode
   random?: () => number
+  /** LIST/INFO comment. Used for the loudness report and ISRC. */
+  comment?: string
 }
 
 export function encodeWav(channels: Float32Array[], sampleRate: number, options?: WavEncodeOptions): ArrayBuffer {
@@ -53,7 +57,30 @@ export function encodeWav(channels: Float32Array[], sampleRate: number, options?
       }
     }
   }
-  return buffer
+  if (!options?.comment) return buffer
+  return appendComment(buffer, options.comment)
+}
+
+function appendComment(buffer: ArrayBuffer, comment: string) {
+  const text = new TextEncoder().encode(comment)
+  const dataSize = text.length + 1
+  const pad = dataSize % 2
+  const listSize = 4 + 8 + dataSize
+  const extra = 8 + listSize + pad
+  const out = new Uint8Array(buffer.byteLength + extra)
+  out.set(new Uint8Array(buffer))
+  const view = new DataView(out.buffer)
+  view.setUint32(4, out.length - 8, true)
+  let offset = buffer.byteLength
+  writeString(view, offset, 'LIST')
+  view.setUint32(offset + 4, listSize, true)
+  writeString(view, offset + 8, 'INFO')
+  writeString(view, offset + 12, 'ICMT')
+  view.setUint32(offset + 16, dataSize, true)
+  offset += 20
+  out.set(text, offset)
+  out[offset + text.length] = 0
+  return out.buffer
 }
 
 function quantize(sample: number, bits: 16 | 24, dither: DitherMode, random: () => number, error: { e: number }) {
@@ -165,18 +192,7 @@ function readInt24(view: DataView, offset: number) {
 export function linearResample(input: Float32Array, fromRate: number, toRate: number): Float32Array {
   if (fromRate === toRate) return input.slice()
   const outLen = Math.max(1, Math.round((input.length * toRate) / fromRate))
-  const out = new Float32Array(outLen)
-  const scale = fromRate / toRate
-  for (let i = 0; i < outLen; i++) {
-    const pos = i * scale
-    const i0 = Math.floor(pos)
-    const i1 = Math.min(input.length - 1, i0 + 1)
-    const f = pos - i0
-    const a = input[Math.min(input.length - 1, i0)] || 0
-    const b = input[i1] || 0
-    out[i] = a + (b - a) * f
-  }
-  return out
+  return resampleSinc(input, outLen, 64)
 }
 
 function writeString(view: DataView, offset: number, text: string) {

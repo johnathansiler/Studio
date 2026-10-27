@@ -1,12 +1,17 @@
+import { clipNeedsStretch, preferStretchCache, renderClipChannels, sourceSamplesOf, timelineSamples } from './stretch/engine'
+import { onStretchCommit, readStretch, storeStretch, stretchCacheKey, stretchSlot } from './stretch/commit'
+import type { StretchMode } from './stretch/engine'
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
+import { compPieces, recordOffsetSamples } from '../model/comp'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
 import { RackHost } from './rack/host'
 import { renderNotes } from './rack/dsp'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
-import { preferStretchCache } from './stretch/engine'
+import { renderQuantizedClip } from '../model/quantize'
+import { renderPattern, type RenderedHit } from '../model/steps'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToMusical } from '../model/time'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
-import { encodeWav } from '../model/wav'
+import { encodeWav, linearResample } from '../model/wav'
 import { scaleById } from '../model/scale'
 import { LiveRack } from './liveRack'
 import { renderGraph } from './renderGraph'
@@ -23,6 +28,8 @@ export interface CaptureResult {
   source: 'local' | 'guide'
   peerId?: string
   takeId?: string
+  /** Armed track id this capture was recorded for. */
+  key?: string
 }
 
 interface RecordInput {
@@ -31,6 +38,8 @@ interface RecordInput {
   source: 'local' | 'guide'
   peerId?: string
   takeId?: string
+  /** Interface channel. Omitted records the whole stream. */
+  channel?: number
 }
 
 interface ActiveRec {
@@ -67,12 +76,18 @@ export class AudioEngine {
   private monitorDelay: DelayNode | null = null
   private remoteDelay: DelayNode | null = null
   private masterGain: GainNode | null = null
+  /** Loudness-matched dry comparison. 1 leaves the master fader alone. */
+  compareGain = 1
+  private referenceOn = false
+  private referenceSource: AudioBufferSourceNode | null = null
+  private referenceGain: GainNode | null = null
   private speakerGain: GainNode | null = null
   private talkBus: GainNode | null = null
   private metroGain: GainNode | null = null
   private cueDest: MediaStreamAudioDestinationNode | null = null
   private recordSink: MediaStreamAudioDestinationNode | null = null
   private inputAnalyser: AnalyserNode | null = null
+  private tuneAnalyser: AnalyserNode | null = null
   private talkAnalyser: AnalyserNode | null = null
   private cueReturnGain: GainNode | null = null
   private cueReturnSrc: MediaStreamAudioSourceNode | null = null
@@ -84,7 +99,10 @@ export class AudioEngine {
   private truePeak = -70
 
   private localMicSrc: MediaStreamAudioSourceNode | null = null
+  private monitorSplit: ChannelSplitterNode | null = null
   private localMicGain: GainNode | null = null
+  private directMonitor = false
+  private tuneMuted = false
   private remoteGains = new Map<string, { src: MediaStreamAudioSourceNode; gain: GainNode }>()
   private talkGains = new Map<string, GainNode>()
 
@@ -108,6 +126,12 @@ export class AudioEngine {
   private launchGen = new Map<string, number>()
   private perfAtCtx0 = 0
   private workletsReady = false
+  private stretchReady = false
+  private readonly stretchKeys = new Set<string>()
+  private joining = false
+  private readonly dropCommit = onStretchCommit((key) => {
+    if (this.stretchKeys.has(key)) this.adoptCommit()
+  })
   private recorders = new Map<string, ActiveRec>()
   private pendingRecorders: { key: string; stream: MediaStream; handler: () => void }[] = []
   private rollingChunks: SliceChunk[] = []
@@ -117,6 +141,7 @@ export class AudioEngine {
   private countTimer = 0
   private countWait: (() => void) | null = null
   private countPlan: { tempo: number; numerator: number; denominator: number } | null = null
+  private noise: AudioBuffer | null = null
   private lastUiEmit = 0
   private pcmTap: AudioWorkletNode | null = null
   private pcmTapSilent: GainNode | null = null
@@ -150,6 +175,48 @@ export class AudioEngine {
 
   get baseLatencyMs() {
     return (this.ctx?.baseLatency || 0) * 1000
+  }
+
+  get processQuality() {
+    return this.rack.quality
+  }
+
+  directAvailable() {
+    return typeof AudioContext !== 'undefined' && 'setSinkId' in AudioContext.prototype
+  }
+
+  /** Software monitor time, or the device output time when Direct is handing the input to the interface. */
+  monitorInfo(trackId?: string) {
+    const device = this.outputLatencyMs
+    const chain = trackId ? (this.rack.ownerLatency(trackId) / this.sampleRate) * 1000 : 0
+    const direct = this.directMonitor
+    return {
+      ms: direct ? (this.ctx?.outputLatency || 0) * 1000 : device + chain,
+      direct,
+      directAvailable: this.directAvailable(),
+      eco: this.rack.quality === 'eco',
+    }
+  }
+
+  setDirectMonitor(on: boolean) {
+    this.directMonitor = on && this.directAvailable()
+    this.routeLocalMic()
+  }
+
+  setTuneMute(on: boolean) {
+    this.tuneMuted = on
+    this.routeLocalMic()
+  }
+
+  tuner(pluginId: string) {
+    return this.rack.tuner(pluginId)
+  }
+
+  inputFrame() {
+    if (!this.tuneAnalyser) return null
+    const frame = new Float32Array(this.tuneAnalyser.fftSize)
+    this.tuneAnalyser.getFloatTimeDomainData(frame)
+    return frame
   }
 
   /** Without a loopback measurement, estimate input as one audio block. */
@@ -200,16 +267,26 @@ export class AudioEngine {
   }
 
   private async ensureWorklets() {
-    if (!this.ctx || this.workletsReady) return
-    try {
-      await this.ctx.audioWorklet.addModule('/worklets/recorder.js')
-      await this.ctx.audioWorklet.addModule('/worklets/ping.js')
-      await this.ctx.audioWorklet.addModule('/worklets/pcm-tap.js')
-      await this.ctx.audioWorklet.addModule('/worklets/pcm-player.js')
-      this.workletsReady = true
-      this.workletError = ''
-    } catch (error) {
-      this.workletError = error instanceof Error ? error.message : 'AudioWorklet failed'
+    if (!this.ctx) return
+    if (!this.workletsReady) {
+      try {
+        await this.ctx.audioWorklet.addModule('/worklets/recorder.js')
+        await this.ctx.audioWorklet.addModule('/worklets/ping.js')
+        await this.ctx.audioWorklet.addModule('/worklets/pcm-tap.js')
+        await this.ctx.audioWorklet.addModule('/worklets/pcm-player.js')
+        this.workletsReady = true
+        this.workletError = ''
+      } catch (error) {
+        this.workletError = error instanceof Error ? error.message : 'AudioWorklet failed'
+      }
+    }
+    if (!this.stretchReady) {
+      try {
+        await this.ctx.audioWorklet.addModule('/worklets/stretch.js')
+        this.stretchReady = true
+      } catch {
+        this.stretchReady = false
+      }
     }
   }
 
@@ -224,6 +301,12 @@ export class AudioEngine {
 
   contextForPerf(perf: number) {
     return (perf - this.perfAtCtx0) / 1000
+  }
+
+  /** Timeline sample for a performance.now() reading, using the output timestamp clock. */
+  timelineSampleForPerf(perf: number) {
+    if (!this.ctx || !this.playing) return Math.max(0, Math.round(this.positionSamples))
+    return Math.max(0, Math.round(this.sampleAt(this.contextForPerf(perf))))
   }
 
   frameForPerf(perf: number) {
@@ -247,6 +330,8 @@ export class AudioEngine {
     this.recordSink = ctx.createMediaStreamDestination()
     this.inputAnalyser = ctx.createAnalyser()
     this.inputAnalyser.fftSize = 256
+    this.tuneAnalyser = ctx.createAnalyser()
+    this.tuneAnalyser.fftSize = 8192
     this.talkAnalyser = ctx.createAnalyser()
     this.talkAnalyser.fftSize = 256
     this.masterStrip = createStrip(ctx)
@@ -290,7 +375,7 @@ export class AudioEngine {
       strip.mute.gain.setTargetAtTime(audible ? 1 : 0, now, 0.01)
     }
     applyInserts(this.ctx, this.masterStrip, project.masterInserts)
-    this.masterGain.gain.setTargetAtTime(project.masterVolume, this.ctx.currentTime, 0.015)
+    this.applyMasterGain()
     this.rack.assetOf = assetOf
     this.rack.clock = () => this.currentTimelineSample()
     this.rack.route(this.ctx, project, this.strips, this.masterStrip, this.localBus, this.remoteBus)
@@ -312,12 +397,74 @@ export class AudioEngine {
     this.rackHost.sync(this.ctx, project, this.strips, buffers)
   }
 
-  previewRack(trackId: string, pitch: number) {
+  previewRack(trackId: string, pitch: number, slide = false, hold = false) {
     this.unlock()
     if (this.project) this.sync(this.project, this.assetOf)
-    const when = (this.ctx?.currentTime ?? 0) + 0.03
-    this.rackHost.note(trackId, pitch, 0.8, when)
-    this.rackHost.note(trackId, pitch, 0, when + 0.35)
+    const when = (this.ctx?.currentTime ?? 0) + (hold ? 0 : 0.03)
+    this.rackHost.note(trackId, pitch, 0.9, when, slide)
+    if (!hold) this.rackHost.note(trackId, pitch, 0, when + 0.35)
+  }
+
+  releaseRack(trackId: string, pitch: number) {
+    const when = this.ctx?.currentTime ?? 0
+    this.rackHost.note(trackId, pitch, 0, when)
+  }
+
+  setCompareGain(gain: number) {
+    this.compareGain = Number.isFinite(gain) && gain > 0 ? Math.min(16, gain) : 1
+    this.applyMasterGain()
+  }
+
+  /** Play a loudness-matched reference through the speakers and duck the mix. */
+  audition(channels: Float32Array[], gain: number) {
+    this.stopAudition()
+    const ctx = this.ctx
+    const leftIn = channels[0]
+    if (!ctx || !this.speakerGain || !leftIn?.length) return
+    const rate = ctx.sampleRate
+    const left = rate === this.sampleRate ? leftIn : linearResample(leftIn, this.sampleRate, rate)
+    const rightIn = channels[1] ?? leftIn
+    const right = rate === this.sampleRate ? rightIn : linearResample(rightIn, this.sampleRate, rate)
+    const buffer = ctx.createBuffer(2, left.length, rate)
+    buffer.getChannelData(0).set(left)
+    buffer.getChannelData(1).set(right.subarray(0, left.length))
+    const source = ctx.createBufferSource()
+    source.buffer = buffer
+    source.loop = true
+    const node = ctx.createGain()
+    node.gain.value = Number.isFinite(gain) && gain > 0 ? gain : 1
+    source.connect(node)
+    node.connect(this.speakerGain)
+    source.start()
+    this.referenceSource = source
+    this.referenceGain = node
+    this.referenceOn = true
+    this.applyMasterGain()
+  }
+
+  stopAudition() {
+    try { this.referenceSource?.stop() } catch { /* already stopped */ }
+    try { this.referenceSource?.disconnect() } catch { /* already gone */ }
+    try { this.referenceGain?.disconnect() } catch { /* already gone */ }
+    this.referenceSource = null
+    this.referenceGain = null
+    if (!this.referenceOn) return
+    this.referenceOn = false
+    this.applyMasterGain()
+  }
+
+  masterReading() {
+    return this.rack.reading()
+  }
+
+  masterScope() {
+    return this.rack.scope()
+  }
+
+  private applyMasterGain() {
+    if (!this.ctx || !this.masterGain || !this.project) return
+    const gain = this.referenceOn ? 0 : this.project.masterVolume * this.compareGain
+    this.masterGain.gain.setTargetAtTime(gain, this.ctx.currentTime, 0.015)
   }
 
   /** CPU load and master loudness. Loudness is read from the master analyser and includes the master fader. */
@@ -335,6 +482,10 @@ export class AudioEngine {
     if (this.project) this.sync(this.project, this.assetOf)
     this.rack.trigger(pluginId, note, 0.85)
     window.setTimeout(() => this.rack.trigger(pluginId, note, 0), 280)
+  }
+
+  takeLoop(pluginId: string) {
+    return this.rack.keptLoop(pluginId)
   }
 
   meter(pluginId: string) {
@@ -427,6 +578,7 @@ export class AudioEngine {
     this.localMicSrc = this.ctx.createMediaStreamSource(stream)
     this.localMicSrc.connect(this.localMicGain)
     this.localMicSrc.connect(this.inputAnalyser)
+    if (this.tuneAnalyser) this.localMicSrc.connect(this.tuneAnalyser)
     this.routeLocalMic()
   }
 
@@ -444,12 +596,44 @@ export class AudioEngine {
         /* already */
       }
     }
-    for (const track of this.project.tracks) {
-      if (isLocalInput(track.input) && track.monitor) {
-        const strip = this.strips.get(track.id)
-        if (strip) this.localMicGain.connect(strip.input)
+    const hear = !this.directMonitor && !this.tuneMuted
+    this.localMicGain.gain.value = hear ? 1 : 0
+    if (this.monitorSplit) {
+      try {
+        this.localMicSrc?.disconnect(this.monitorSplit)
+      } catch {
+        /* noop */
       }
+      this.monitorSplit.disconnect()
+      this.monitorSplit = null
     }
+    if (!hear) return
+    const splitCount = Math.max(
+      1,
+      ...this.project.tracks.map((track) => {
+        const match = /^mic:(\d+)$/.exec(track.input)
+        return match ? Number(match[1]) + 1 : 1
+      }),
+    )
+    if (splitCount > 1 && this.ctx && this.localMicSrc) {
+      this.monitorSplit = this.ctx.createChannelSplitter(splitCount)
+      this.localMicSrc.connect(this.monitorSplit)
+    }
+    for (const track of this.project.tracks) {
+      if (!track.monitor) continue
+      const strip = this.strips.get(track.id)
+      if (!strip) continue
+      const match = /^mic:(\d+)$/.exec(track.input)
+      if (match && this.monitorSplit) this.monitorSplit.connect(strip.input, Number(match[1]), 0)
+      else if (isLocalInput(track.input)) this.localMicGain.connect(strip.input)
+    }
+  }
+
+  /** Input plus output latency, in samples, used to place a recording on the grid. */
+  latencyCompensationSamples() {
+    const ctx = this.ctx
+    if (!ctx) return 0
+    return recordOffsetSamples(ctx.baseLatency || 0, ctx.outputLatency || 0, ctx.sampleRate)
   }
 
   setRemoteMusic(peerId: string, stream: MediaStream | null) {
@@ -703,6 +887,7 @@ export class AudioEngine {
       source: rec.meta.source,
       peerId: rec.meta.peerId,
       takeId: rec.meta.takeId,
+      key: rec.meta.key,
     }
   }
 
@@ -732,7 +917,11 @@ export class AudioEngine {
       const node = new AudioWorkletNode(this.ctx, 'recorder-processor')
       const silent = this.ctx.createGain()
       silent.gain.value = 0
-      src.connect(node)
+      if (input.channel != null) {
+        const splitter = this.ctx.createChannelSplitter(input.channel + 1)
+        src.connect(splitter)
+        splitter.connect(node, input.channel, 0)
+      } else src.connect(node)
       node.connect(silent)
       silent.connect(this.recordSink ?? this.ctx.destination)
       const rec: ActiveRec = {
@@ -963,12 +1152,12 @@ export class AudioEngine {
       if (track.rack) {
         const events = []
         for (const clip of track.midiClips) {
-          if (clip.slotOnly) continue
+          if (clip.slotOnly || clip.scene != null) continue
           for (const note of clip.notes) {
             const start = beatsToSamples(clip.startBeat + note.startBeat, rate, project.tempo)
             const dur = beatsToSamples(note.durationBeats, rate, project.tempo)
             if (start >= end) continue
-            events.push({ sample: Math.max(0, start), pitch: note.pitch, vel: note.velocity })
+            events.push({ sample: Math.max(0, start), pitch: note.pitch, vel: note.velocity, slide: !!note.slide })
             events.push({ sample: Math.min(end - 1, start + dur), pitch: note.pitch, vel: 0 })
           }
         }
@@ -982,7 +1171,7 @@ export class AudioEngine {
         src.start(0)
       } else {
         for (const clip of track.midiClips) {
-          if (clip.slotOnly) continue
+          if (clip.slotOnly || clip.scene != null) continue
           for (const note of clip.notes) {
             const start = beatsToSamples(clip.startBeat + note.startBeat, rate, project.tempo)
             const dur = beatsToSamples(note.durationBeats, rate, project.tempo) / rate
@@ -991,6 +1180,7 @@ export class AudioEngine {
           }
         }
       }
+      this.schedulePatternClips(offline, strip, project, track.id, 0, 0, end)
       const rendered = await offline.startRendering()
       const left = new Float32Array(rendered.getChannelData(0))
       const right = rendered.numberOfChannels > 1 ? new Float32Array(rendered.getChannelData(1)) : new Float32Array(left)
@@ -1027,7 +1217,7 @@ export class AudioEngine {
       liveRemote: false,
       create: (pluginId, sampleRate) => peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
     })
-    return encodeWav(graph.master, rate)
+    return encodeWav(graph.master, rate, { dither: 'tpdf' })
   }
 
   bufferFor(asset: AudioAsset) {
@@ -1131,8 +1321,7 @@ export class AudioEngine {
         project &&
         this.mode === 'arrangement' &&
         project.loopEnabled &&
-        this.status !== 'recording' &&
-        this.status !== 'counting-in'
+        (this.status === 'playing' || (this.status === 'recording' && project.record?.loop))
       ) {
         const len = project.loopEndSample - project.loopStartSample
         if (len > 1 && sample >= project.loopEndSample) {
@@ -1204,7 +1393,8 @@ export class AudioEngine {
   private scheduleArrangement(horizon: number) {
     const project = this.project!
     const end = projectEndSample(project.tracks, this.sampleRate, project.tempo)
-    if (!project.loopEnabled || this.status === 'recording') {
+    const cycleWhileRecording = this.status === 'recording' && project.record?.loop
+    if (!project.loopEnabled || (this.status === 'recording' && !cycleWhileRecording)) {
       if (this.arrangementScheduled) return
       this.arrangementScheduled = true
       this.scheduleWindow(this.playOriginCtx, this.playOriginSample, end)
@@ -1273,13 +1463,14 @@ export class AudioEngine {
         const asset = this.assetOf(audio.bufferId)
         if (!asset) continue
         const buffer = this.bufferFromAsset(this.ctx, asset)
+        const prepared = this.stretchBuffer(this.ctx, buffer, audio)
         const src = this.ctx.createBufferSource()
-        const rate = warpRate(audio.durationSamples, audio.durationBeats, sr, project.tempo, audio.warp !== false)
-        let playBuffer = buffer
-        let offset = audio.offsetSamples / buffer.sampleRate
-        let dur = Math.max(0.01, audio.durationSamples / sr)
+        const rate = audio.stretch ? 1 : warpRate(audio.durationSamples, audio.durationBeats, sr, project.tempo, audio.warp !== false)
+        let playBuffer = prepared.buffer
+        let offset = prepared.clip.offsetSamples / prepared.buffer.sampleRate
+        let dur = Math.max(0.01, prepared.clip.durationSamples / sr)
         let playRate = rate
-        if (audio.durationBeats && Math.abs(rate - 1) > 1e-3) {
+        if (!audio.stretch && audio.durationBeats && Math.abs(rate - 1) > 1e-3) {
           const pcm = this.sessionWarp(buffer, audio, sr, project.tempo)
           playBuffer = this.ctx.createBuffer(Math.max(1, pcm.length), Math.max(1, pcm[0]?.length ?? 1), sr)
           pcm.forEach((channel, index) => playBuffer.copyToChannel(Float32Array.from(channel), index))
@@ -1327,7 +1518,16 @@ export class AudioEngine {
     if (!this.sessionNodes.has(track.id)) this.sessionNodes.set(track.id, [])
     const schedulePass = (when: number) => {
       if (!this.playing || this.mode !== 'session' || this.launches.get(track.id) !== clip.id) return
-      for (const note of clip.notes) {
+      if (clip.patternId) {
+        const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
+        const hits = pattern ? renderPattern(pattern, 0, clip.durationBeats) : []
+        for (const hit of hits) {
+          const noteDelay = beatsToSamples(hit.startBeat, sr, project.tempo) / sr
+          const out = (hit.output && this.strips.get(hit.output)) || strip
+          this.scheduleHit(this.ctx!, out, hit, when + noteDelay)
+        }
+      }
+      for (const note of clip.patternId ? [] : clip.notes) {
         const noteDelay = beatsToSamples(note.startBeat, sr, project.tempo) / sr
         const noteDur = beatsToSamples(note.durationBeats, sr, project.tempo) / sr
         this.scheduleVoice(this.ctx!, strip, note, when + noteDelay, noteDur, track, this.sessionNodes.get(track.id))
@@ -1378,13 +1578,18 @@ export class AudioEngine {
       if (!strip) continue
       for (const clip of track.clips) {
         if (clip.slotOnly) continue
-        const asset = this.assetOf(clip.bufferId)
-        if (!asset) continue
-        const buffer = this.bufferFromAsset(ctx, asset)
-        this.scheduleAudioClip(ctx, strip, buffer, clip, ctxTime, timelineStart, timelineEnd)
+        const pieces = clip.folder
+          ? compPieces(clip.folder, clip.fadeInSamples, clip.fadeOutSamples).map((piece) => ({ ...clip, folder: undefined, ...piece, gain: clip.gain }))
+          : [clip]
+        for (const piece of pieces) {
+          const asset = this.assetOf(piece.bufferId)
+          if (!asset) continue
+          const buffer = this.bufferFromAsset(ctx, asset)
+          this.scheduleAudioClip(ctx, strip, buffer, piece, ctxTime, timelineStart, timelineEnd)
+        }
       }
       for (const clip of track.midiClips) {
-        if (clip.slotOnly) continue
+        if (clip.slotOnly || clip.scene != null) continue
         const clipStart = beatsToSamples(clip.startBeat, this.sampleRate, project.tempo)
         for (const note of clip.notes) {
           const noteStart = clipStart + beatsToSamples(note.startBeat, this.sampleRate, project.tempo)
@@ -1395,7 +1600,175 @@ export class AudioEngine {
           this.scheduleVoice(ctx, strip, note, when, noteDurSamples / this.sampleRate, track)
         }
       }
+      this.schedulePatternClips(ctx, strip, project, track.id, ctxTime, timelineStart, timelineEnd)
     }
+  }
+
+  private schedulePatternClips(
+    ctx: BaseAudioContext,
+    strip: StripNodes,
+    project: Project,
+    trackId: string,
+    ctxTime: number,
+    timelineStart: number,
+    timelineEnd: number,
+  ) {
+    const midiId = project.tracks.find((track) => track.type === 'midi')?.id
+    for (const clip of project.patternClips ?? []) {
+      if (clip.scene != null) continue
+      const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
+      if (!pattern) continue
+      for (const hit of renderPattern(pattern, 0, clip.lengthBeats)) {
+        if ((hit.output || midiId) !== trackId) continue
+        const sample = beatsToSamples(clip.startBeat + hit.startBeat, this.sampleRate, project.tempo)
+        if (sample < timelineStart || sample >= timelineEnd) continue
+        const when = ctxTime + (sample - timelineStart) / this.sampleRate
+        const liveStrip = ctx === this.ctx && hit.output ? this.strips.get(hit.output) : undefined
+        this.scheduleHit(ctx, liveStrip || strip, hit, when)
+      }
+    }
+  }
+
+  private scheduleHit(ctx: BaseAudioContext, strip: StripNodes, hit: RenderedHit, when: number) {
+    if (ctx === this.ctx && when < ctx.currentTime) return
+    if (hit.kind === 'note' && hit.sampleId) {
+      const asset = this.assetOf(hit.sampleId)
+      if (asset) {
+        const buffer = this.bufferFromAsset(ctx, asset)
+        const src = ctx.createBufferSource()
+        src.buffer = buffer
+        const rate = 2 ** ((hit.pitch - 60 + hit.fine / 100) / 12)
+        src.playbackRate.value = rate
+        this.envelope(ctx, strip, src, when, Math.max(0.05, beatsToSamples(hit.durationBeats, this.sampleRate, this.project?.tempo || 120) / this.sampleRate), hit)
+        return
+      }
+    }
+    if (hit.kind === 'note') {
+      this.scheduleVoice(ctx, strip, {
+        id: hit.channelId,
+        pitch: hit.pitch,
+        fine: hit.fine,
+        pan: hit.pan,
+        startBeat: hit.startBeat,
+        durationBeats: hit.durationBeats,
+        velocity: hit.velocity,
+      }, when, Math.max(0.05, beatsToSamples(hit.durationBeats, this.sampleRate, this.project?.tempo || 120) / this.sampleRate))
+      return
+    }
+    const dur = Math.max(0.04, beatsToSamples(hit.durationBeats, this.sampleRate, this.project?.tempo || 120) / this.sampleRate)
+    if (hit.kind === 'kick') {
+      const osc = ctx.createOscillator()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(160, when)
+      osc.frequency.exponentialRampToValueAtTime(48, when + Math.min(0.18, dur))
+      this.envelope(ctx, strip, osc, when, Math.min(0.28, dur + 0.05), hit)
+      return
+    }
+    if (hit.kind === 'perc') {
+      const osc = ctx.createOscillator()
+      osc.type = 'square'
+      osc.frequency.value = 440 * 2 ** ((hit.pitch - 69) / 12)
+      this.envelope(ctx, strip, osc, when, Math.min(0.16, dur), hit)
+      return
+    }
+    const noise = ctx.createBufferSource()
+    noise.buffer = this.noiseBuffer(ctx)
+    if (hit.kind === 'hat') {
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'highpass'
+      filter.frequency.value = 7000
+      noise.connect(filter)
+      this.envelope(ctx, strip, filter, when, Math.min(0.06, dur), hit, noise)
+      return
+    }
+    if (hit.kind === 'clap') {
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'bandpass'
+      filter.frequency.value = 1400
+      noise.connect(filter)
+      this.envelope(ctx, strip, filter, when, Math.min(0.18, dur), hit, noise)
+      return
+    }
+    const tone = ctx.createOscillator()
+    tone.type = 'triangle'
+    tone.frequency.value = 190
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'highpass'
+    filter.frequency.value = 800
+    noise.connect(filter)
+    this.envelope(ctx, strip, filter, when, Math.min(0.16, dur), hit, noise)
+    this.envelope(ctx, strip, tone, when, 0.08, { ...hit, velocity: hit.velocity * 0.4 })
+  }
+
+  private noiseBuffer(ctx: BaseAudioContext) {
+    if (this.noise && this.noise.sampleRate === ctx.sampleRate) return this.noise
+    const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let index = 0; index < data.length; index++) data[index] = Math.random() * 2 - 1
+    if (ctx === this.ctx) this.noise = buffer
+    return buffer
+  }
+
+  private envelope(
+    ctx: BaseAudioContext,
+    strip: StripNodes,
+    source: AudioNode,
+    when: number,
+    dur: number,
+    hit: Pick<RenderedHit, 'velocity' | 'pan'>,
+    extra?: AudioNode,
+  ) {
+    const gain = ctx.createGain()
+    const peak = Math.max(0.001, 0.22 * hit.velocity)
+    gain.gain.setValueAtTime(0.0001, when)
+    gain.gain.exponentialRampToValueAtTime(peak, when + 0.005)
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.03, dur))
+    source.connect(gain)
+    const pan = hit.pan || 0
+    if (Math.abs(pan) > 0.02 && ctx.createStereoPanner) {
+      const panner = ctx.createStereoPanner()
+      panner.pan.value = Math.max(-1, Math.min(1, pan))
+      gain.connect(panner)
+      panner.connect(strip.input)
+    } else gain.connect(strip.input)
+    const startable = source as AudioScheduledSourceNode
+    if (typeof startable.start === 'function') {
+      startable.start(when)
+      startable.stop(when + dur + 0.02)
+    }
+    extra && typeof (extra as AudioScheduledSourceNode).start === 'function' && (extra as AudioScheduledSourceNode).start(when)
+    extra && typeof (extra as AudioScheduledSourceNode).stop === 'function' && (extra as AudioScheduledSourceNode).stop(when + dur + 0.02)
+    if (ctx === this.ctx) {
+      if (typeof startable.stop === 'function') this.sources.push(startable)
+      if (extra && typeof (extra as AudioScheduledSourceNode).stop === 'function') this.sources.push(extra as AudioScheduledSourceNode)
+    }
+  }
+
+  /**
+   * Quantize markers play through the stretch engine. A tight phone reuses the
+   * cached render instead of stretching again on the scheduling tick.
+   */
+  private prepareWarp(ctx: BaseAudioContext, buffer: AudioBuffer, clip: AudioClip): { buffer: AudioBuffer; clip: AudioClip } {
+    if (!clip.warpPoints || clip.warpPoints.length < 2) return { buffer, clip }
+    const sr = ctx.sampleRate
+    const tempo = this.project?.tempo || 120
+    const phone = typeof matchMedia === 'function' && matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
+    const key = `${clip.bufferId}:${clip.offsetSamples}:${clip.durationSamples}:${sr}:${tempo}:${JSON.stringify(clip.warpPoints)}`
+    let pcm = this.warpPcm.get(key)
+    if (!pcm) {
+      const channels: Float32Array[] = []
+      for (let index = 0; index < buffer.numberOfChannels; index++) channels.push(buffer.getChannelData(index))
+      pcm = renderQuantizedClip(channels, clip, sr, tempo)
+      if (this.warpPcm.size >= 8) {
+        const oldest = this.warpPcm.keys().next().value
+        if (oldest) this.warpPcm.delete(oldest)
+      }
+      this.warpPcm.set(key, pcm)
+    }
+    if (preferStretchCache(phone, this.rack.cpu)) pcm = this.warpPcm.get(key) ?? pcm
+    const audio = ctx.createBuffer(Math.max(1, pcm.length), Math.max(1, pcm[0]?.length ?? 1), sr)
+    pcm.forEach((channel, index) => audio.copyToChannel(Float32Array.from(channel), index))
+    return { buffer: audio, clip: { ...clip, offsetSamples: 0, warp: undefined } }
   }
 
   private scheduleAudioClip(
@@ -1407,6 +1780,19 @@ export class AudioEngine {
     timelineStart: number,
     timelineEnd: number,
   ) {
+    const project = this.project
+    if (project && clipNeedsStretch(clip, project) && this.shouldStretchLive(clip) && ctx === this.ctx) {
+      try {
+        this.scheduleStretchWorklet(ctx, strip, buffer, clip, ctxTime, timelineStart, timelineEnd)
+        return
+      } catch {
+        this.stretchReady = false
+      }
+    }
+    const stretched = this.stretchBuffer(ctx, buffer, clip)
+    const prepared = this.prepareWarp(ctx, stretched.buffer, stretched.clip)
+    buffer = prepared.buffer
+    clip = prepared.clip
     const sr = ctx.sampleRate
     const clipEnd = clip.startSample + clip.durationSamples
     const from = Math.max(clip.startSample, timelineStart)
@@ -1430,7 +1816,11 @@ export class AudioEngine {
       if (fadeOut > 0 && t > clipDur - fadeOut) g *= Math.max(0, (clipDur - t) / fadeOut)
       return Math.max(0.0001, g)
     }
-    gain.gain.setValueAtTime(env(relFrom), when)
+    const join = this.joining && from <= timelineStart + 8
+    gain.gain.setValueAtTime(join ? 0.0001 : env(relFrom), when)
+    if (join && !(fadeIn > 0 && relFrom < fadeIn)) {
+      gain.gain.linearRampToValueAtTime(Math.max(0.0001, clip.gain), when + Math.min(0.008, dur))
+    }
     if (fadeIn > 0 && relFrom < fadeIn) {
       gain.gain.linearRampToValueAtTime(clip.gain, Math.min(when + (fadeIn - relFrom), when + dur))
     }
@@ -1443,6 +1833,134 @@ export class AudioEngine {
     gain.connect(strip.input)
     src.start(Math.max(when, 0), Math.max(0, offset), dur)
     if (ctx === this.ctx) this.sources.push(src)
+  }
+
+  /** Phone under load replays the cached render instead of stretching on the audio thread. */
+  private shouldStretchLive(clip: AudioClip) {
+    if (!this.stretchReady || !this.project || !clip.stretch) return false
+    if (stretchSlot(stretchCacheKey(clip, this.project))?.quality === 'hq') return false
+    const phone = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
+    if (preferStretchCache(phone, this.rack.cpu)) return false
+    if (clip.stretch.followTempo || clip.stretch.markers.length >= 2) return false
+    return sourceSamplesOf(clip) <= this.sampleRate * 3
+  }
+
+  private stretchBuffer(ctx: BaseAudioContext, buffer: AudioBuffer, clip: AudioClip) {
+    const project = this.project
+    if (!project || !clipNeedsStretch(clip, project)) return { buffer, clip }
+    const pcm = this.cachedStretch(buffer, clip, project, ctx instanceof OfflineAudioContext)
+    const length = Math.max(1, pcm[0]?.length ?? 1)
+    const audio = ctx.createBuffer(Math.max(1, pcm.length), length, ctx.sampleRate || project.sampleRate)
+    pcm.forEach((channel, index) => audio.copyToChannel(new Float32Array(channel), index))
+    return { buffer: audio, clip: { ...clip, offsetSamples: 0, durationSamples: length } }
+  }
+
+  private cachedStretch(buffer: AudioBuffer, clip: AudioClip, project: Project, committed: boolean) {
+    const key = stretchCacheKey(clip, project)
+    this.stretchKeys.add(key)
+    const channels: Float32Array[] = []
+    for (let index = 0; index < buffer.numberOfChannels; index++) channels.push(buffer.getChannelData(index))
+    if (committed) {
+      const pcm = renderClipChannels(channels, clip, project, 'hq')
+      storeStretch(key, pcm)
+      return pcm
+    }
+    return readStretch(key, channels, clip, project)
+  }
+
+  /** Swap a live preview for the committed render without moving the playhead. */
+  private adoptCommit() {
+    void this.dropCommit
+    const ctx = this.ctx
+    const project = this.project
+    if (!this.playing || !ctx || !project) return
+    const now = Math.max(ctx.currentTime + 0.01, this.playOriginCtx)
+    const sample = Math.max(0, Math.round(this.sampleAt(now)))
+    this.stopSources()
+    this.arrangementScheduled = true
+    this.sessionStarted.clear()
+    this.nextLoopCtx = now
+    this.nextLoopSample = sample
+    this.joining = true
+    const end = projectEndSample(project.tracks, this.sampleRate, project.tempo)
+    this.scheduleWindow(now, sample, end)
+    this.joining = false
+  }
+
+  private scheduleStretchWorklet(
+    ctx: BaseAudioContext,
+    strip: StripNodes,
+    buffer: AudioBuffer,
+    clip: AudioClip,
+    ctxTime: number,
+    timelineStart: number,
+    timelineEnd: number,
+  ) {
+    const project = this.project
+    const stretch = clip.stretch
+    if (!project || !stretch || ctx !== this.ctx) return
+    const sr = ctx.sampleRate
+    const duration = timelineSamples(clip, project)
+    const clipEnd = clip.startSample + duration
+    const from = Math.max(clip.startSample, timelineStart)
+    const to = Math.min(clipEnd, timelineEnd)
+    if (to - from < 8) return
+    const when = ctxTime + (from - timelineStart) / sr
+    if (when < ctx.currentTime - 0.02) return
+    const source = sourceSamplesOf(clip)
+    const channels: Float32Array[] = []
+    for (let index = 0; index < buffer.numberOfChannels; index++) {
+      const data = buffer.getChannelData(index)
+      channels.push(data.slice(clip.offsetSamples, clip.offsetSamples + source))
+    }
+    const node = new AudioWorkletNode(ctx, 'cueharbor-stretch')
+    const gain = ctx.createGain()
+    const relFrom = (from - clip.startSample) / sr
+    const relTo = (to - clip.startSample) / sr
+    const clipDur = duration / sr
+    const dur = (to - from) / sr
+    const fadeIn = clip.fadeInSamples / sr
+    const fadeOut = clip.fadeOutSamples / sr
+    const env = (t: number) => {
+      let level = clip.gain
+      if (fadeIn > 0 && t < fadeIn) level *= t / fadeIn
+      if (fadeOut > 0 && t > clipDur - fadeOut) level *= Math.max(0, (clipDur - t) / fadeOut)
+      return Math.max(0.0001, level)
+    }
+    gain.gain.setValueAtTime(env(relFrom), Math.max(when, 0))
+    if (fadeIn > 0 && relFrom < fadeIn) gain.gain.linearRampToValueAtTime(Math.max(0.0001, clip.gain), Math.min(Math.max(when, 0) + (fadeIn - relFrom), Math.max(when, 0) + dur))
+    if (fadeOut > 0 && relTo > clipDur - fadeOut) {
+      const start = Math.max(when, 0) + Math.max(0, clipDur - fadeOut - relFrom)
+      gain.gain.setValueAtTime(Math.max(0.0001, clip.gain), start)
+      gain.gain.linearRampToValueAtTime(0.0001, Math.max(when, 0) + dur)
+    }
+    node.connect(gain)
+    gain.connect(strip.input)
+    node.port.postMessage({
+      type: 'stretch',
+      channels,
+      sampleRate: sr,
+      options: {
+        ratio: duration / Math.max(1, source),
+        semitones: stretch.semitones,
+        cents: stretch.cents,
+        mode: stretch.mode as StretchMode,
+        quality: 'preview' as const,
+        formant: stretch.formant,
+      },
+      startFrame: Math.max(0, Math.round(Math.max(when, 0) * sr)),
+      skip: Math.max(0, from - clip.startSample),
+      frames: Math.max(1, to - from),
+    })
+    this.sources.push({
+      stop: () => {
+        try { node.disconnect() } catch { /* already stopped */ }
+      },
+      disconnect: () => {
+        try { node.disconnect() } catch { /* already disconnected */ }
+        try { gain.disconnect() } catch { /* already disconnected */ }
+      },
+    })
   }
 
   /** Local audition only. Stays on the speaker and never enters the cue or mic path. */
@@ -1480,9 +1998,13 @@ export class AudioEngine {
   }
 
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[]) {
+    if (note.muted) return
     if (track?.rack && ctx === this.ctx) {
-      this.rackHost.note(track.id, note.pitch, note.velocity, Math.max(when, ctx.currentTime))
-      this.rackHost.note(track.id, note.pitch, 0, Math.max(when, ctx.currentTime) + dur)
+      const knock = track.rack.devices.find((device) => device.kind === 'knock')
+      const legato = (knock?.params.legato ?? 0) >= 0.5
+      const at = Math.max(when, ctx.currentTime)
+      this.rackHost.note(track.id, note.pitch, note.velocity, at, !!note.slide || legato)
+      this.rackHost.note(track.id, note.pitch, 0, at + dur)
       return
     }
     if (ctx === this.ctx && when < ctx.currentTime) return
@@ -1490,7 +2012,7 @@ export class AudioEngine {
     const filter = ctx.createBiquadFilter()
     const gain = ctx.createGain()
     osc.type = 'sawtooth'
-    osc.frequency.value = 440 * 2 ** ((note.pitch - 69) / 12)
+    osc.frequency.value = 440 * 2 ** ((note.pitch + (note.fine || 0) / 100 - 69) / 12)
     filter.type = 'lowpass'
     filter.frequency.setValueAtTime(2200, when)
     filter.frequency.exponentialRampToValueAtTime(900, when + Math.min(0.3, dur))
@@ -1500,7 +2022,13 @@ export class AudioEngine {
     gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.05, dur))
     osc.connect(filter)
     filter.connect(gain)
-    gain.connect(strip.input)
+    const pan = note.pan || 0
+    if (Math.abs(pan) > 0.02 && ctx.createStereoPanner) {
+      const panner = ctx.createStereoPanner()
+      panner.pan.value = Math.max(-1, Math.min(1, pan))
+      gain.connect(panner)
+      panner.connect(strip.input)
+    } else gain.connect(strip.input)
     osc.start(when)
     osc.stop(when + dur + 0.03)
     if (ctx === this.ctx) {

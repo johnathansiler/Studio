@@ -175,14 +175,15 @@ describe('stem separation', () => {
 
   it('plays a dropped stem on pitch and an octave up', () => {
     const plugin = createPlugin('sampler')
-    plugin.sampler = { bufferId: 'tone', root: 69 }
+    plugin.sampler!.bufferId = 'tone'
+    plugin.sampler!.root = 69
     const proc = createSampler(RATE)
     proc.bind(plugin, () => sine(RATE, 440))
     const ctx = { sampleRate: RATE, tempo: 120, sampleTime: 0, sidechain: null, scaleRoot: 0, scaleIntervals: [0, 2, 4, 5, 7, 9, 11], quality: 'full' as const }
     const play = (note: number) => {
       proc.note(note, 0.9)
       const output = [new Float32Array(RATE), new Float32Array(RATE)]
-      proc.process([new Float32Array(RATE), new Float32Array(RATE)], output, { gain: 1 }, ctx)
+      proc.process([new Float32Array(RATE), new Float32Array(RATE)], output, { gain: 1, keys: 1, stretch: 0, attack: 1, sustain: 1 }, ctx)
       return output[0]
     }
     expect(cents(measureHz(play(69)), 440)).toBeLessThan(15)

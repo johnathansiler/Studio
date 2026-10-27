@@ -1,5 +1,8 @@
+import type { RollMemory } from './paint'
+import type { QuantizePreset, QuantizeSettings, WarpPoint } from './quantize'
 import type { DevicePreset, RackAutomation, RackPatch, RackState } from './rack'
 import { defaultScale, type ScaleState } from './scale'
+import type { BeatRack, PatternClip } from './steps'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
 export type TrackInstrument = 'synth' | 'sampler' | '808' | 'drum-machine' | 'none'
@@ -8,9 +11,53 @@ export function isLocalInput(input: string) {
   return input === 'mic' || input === 'line'
 }
 
-export interface SamplerState {
+export interface SampleZone {
+  id: string
   bufferId: string
   root: number
+  lo: number
+  hi: number
+  loopStart: number
+  loopEnd: number
+  tune: number
+  gain: number
+  pan: number
+  reverse: boolean
+  choke: number
+}
+
+export interface SamplerState {
+  bufferId: string
+  start: number
+  end: number
+  loopStart: number
+  loopEnd: number
+  fadeIn: number
+  fadeOut: number
+  crossfade: number
+  loopMode: number
+  root: number
+  slices: SampleZone[]
+}
+
+export interface LooperLayer {
+  id: string
+  bufferId: string
+  gain: number
+  mute: boolean
+  reverse: boolean
+  speed: number
+}
+
+export interface LooperState {
+  layers: LooperLayer[]
+  undone: LooperLayer[]
+  sync: boolean
+  bars: number
+  feedback: number
+  transport: number
+  startBeat: number
+  lengthSamples: number
 }
 
 export interface PluginInstance {
@@ -23,6 +70,7 @@ export interface PluginInstance {
   /** Sidechain source track or bus id. Empty uses the plugin input. */
   sidechain: string
   sampler?: SamplerState
+  looper?: LooperState
 }
 
 export interface Send {
@@ -56,7 +104,7 @@ export type ClipSource = 'local' | 'import' | 'demo' | 'guide' | 'aligned-take' 
 export type LaunchQuant = 'none' | '1/16' | '1/4' | '1bar' | '2bar' | '4bar'
 export type LaunchMode = 'trigger' | 'gate' | 'toggle' | 'repeat'
 export type FollowAction = 'none' | 'next' | 'prev' | 'any' | 'other' | 'stop'
-export type StretchMode = 'beats' | 'tonal' | 'voice' | 'tape'
+export type StretchMode = 'pro' | 'beats' | 'tonal' | 'voice' | 'speech' | 'tape'
 
 /** Source sample locked to a musical beat. Targets are beats from the clip start. */
 export interface WarpMarker {
@@ -65,12 +113,14 @@ export interface WarpMarker {
   target: number
 }
 
-/** Non-destructive time-stretch. Playback and export render from these fields. */
+/** Non-destructive time-stretch. Playback and export render from the source, never from a previous render. */
 export interface ClipStretch {
   sourceSamples: number
   semitones: number
   cents: number
   mode: StretchMode
+  /** Pitch shift keeps the spectral envelope. Voice and speech default to on. */
+  formant?: boolean
   followTempo: boolean
   sourceBpm: number | null
   markers: WarpMarker[]
@@ -114,6 +164,42 @@ export interface AudioClip {
   stretch?: ClipStretch
   /** Session slot only, until Capture copies it onto the arrangement. */
   slotOnly?: boolean
+  /** Transient warp. Source samples map onto beats inside the clip. */
+  warpPoints?: WarpPoint[]
+  /** Swipe-comp take folder. Playback uses the active comp, not the parent buffer. */
+  folder?: TakeFolder
+}
+
+/** One recorded pass inside a take folder. */
+export interface TakeLane {
+  id: string
+  name: string
+  bufferId: string
+  offsetSamples: number
+  startSample: number
+  durationSamples: number
+  peerId?: string
+  takeId?: string
+  source: ClipSource
+}
+
+export interface CompSegment {
+  laneId: string
+  startSample: number
+  endSample: number
+}
+
+export interface SavedComp {
+  id: string
+  name: string
+  segments: CompSegment[]
+}
+
+export interface TakeFolder {
+  lanes: TakeLane[]
+  comps: SavedComp[]
+  activeCompId: string
+  crossfadeSamples: number
 }
 
 export interface MidiNote {
@@ -122,6 +208,17 @@ export interface MidiNote {
   startBeat: number
   durationBeats: number
   velocity: number
+  muted?: boolean
+  pan?: number
+  fine?: number
+  /** Slide into this note from the one still held. */
+  slide?: boolean
+}
+
+export interface MidiTake {
+  id: string
+  name: string
+  notes: MidiNote[]
 }
 
 export interface MidiClip {
@@ -137,6 +234,29 @@ export interface MidiClip {
   follow?: FollowAction
   followBeats?: number
   slotOnly?: boolean
+  /** Live link to a beat pattern. Playback renders the pattern instead of notes. */
+  patternId?: string
+  /** Channel row that was sent to this clip. */
+  channelId?: string
+  /** Session scene. Unset clips stay on the arrangement. */
+  scene?: number
+  /** Earlier loop passes. The clip notes are the active pass. */
+  takes?: MidiTake[]
+  activeTakeId?: string
+}
+
+export interface RecordSettings {
+  /** Cycle recording stacks a take lane per loop pass. */
+  loop: boolean
+  midiLoop: 'merge' | 'takes'
+  punchEnabled: boolean
+  punchIn: number
+  punchOut: number
+  preRoll: number
+  postRoll: number
+  rollUnit: 'bars' | 'seconds'
+  /** One-shot punch that ignores pre-roll and stops at the out point. */
+  quick: boolean
 }
 
 export interface Track {
@@ -201,9 +321,18 @@ export interface Project {
   launchQuant?: LaunchQuant
   /** 0 records until stop. A positive count trims a session take to that many bars. */
   recordBars?: number
+  /** Tempo changes. Empty keeps `tempo` for the whole arrangement. */
   tempoMap?: TempoPoint[]
+  record?: RecordSettings
   /** Key, scale, and chord-pad performance settings. */
   scale?: ScaleState
+  /** `${kind}:${name}` factory and user presets marked in the browser. */
+  presetFavorites?: string[]
+  beats?: BeatRack
+  patternClips?: PatternClip[]
+  roll?: RollMemory
+  quantize?: QuantizeSettings
+  quantizePresets?: QuantizePreset[]
   /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */
   waveforms?: Record<string, { min: number; max: number }[]>
 }
@@ -282,6 +411,22 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     rackAutomation: [],
     launchQuant: '1bar',
     recordBars: 4,
+    record: defaultRecord(bar * 4),
     scale: defaultScale(),
+    presetFavorites: [],
+  }
+}
+
+export function defaultRecord(span = 0): RecordSettings {
+  return {
+    loop: false,
+    midiLoop: 'takes',
+    punchEnabled: false,
+    punchIn: 0,
+    punchOut: span,
+    preRoll: 1,
+    postRoll: 1,
+    rollUnit: 'bars',
+    quick: false,
   }
 }

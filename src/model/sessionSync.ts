@@ -90,9 +90,21 @@ export function mediaCanCarryAssets(peers: Array<{ connection: string; outboundV
 export function referencedBufferIds(project: Project): string[] {
   const ids = new Set<string>()
   for (const track of project.tracks) {
-    for (const clip of track.clips) ids.add(clip.bufferId)
+    for (const clip of track.clips) {
+      ids.add(clip.bufferId)
+      for (const lane of clip.folder?.lanes || []) ids.add(lane.bufferId)
+    }
+    for (const plugin of track.plugins ?? []) collectInstrumentBuffers(plugin, ids)
   }
+  for (const plugin of project.masterPlugins ?? []) collectInstrumentBuffers(plugin, ids)
   return [...ids]
+}
+
+function collectInstrumentBuffers(plugin: { sampler?: { bufferId: string; slices: { bufferId: string }[] }; looper?: { layers: { bufferId: string }[]; undone: { bufferId: string }[] } }, ids: Set<string>) {
+  if (plugin.sampler?.bufferId) ids.add(plugin.sampler.bufferId)
+  for (const slice of plugin.sampler?.slices ?? []) if (slice.bufferId) ids.add(slice.bufferId)
+  for (const layer of plugin.looper?.layers ?? []) if (layer.bufferId) ids.add(layer.bufferId)
+  for (const layer of plugin.looper?.undone ?? []) if (layer.bufferId) ids.add(layer.bufferId)
 }
 
 /** Musical state the guest must mirror. Ignores selection and undo history. */
@@ -112,6 +124,19 @@ export function arrangementDigest(project: Project): string {
     snap: project.snap,
     launchQuant: project.launchQuant ?? null,
     recordBars: project.recordBars ?? 0,
+    beats: project.beats
+      ? {
+          active: project.beats.activeId,
+          patterns: project.beats.patterns.map((pattern) => [
+            pattern.id,
+            pattern.steps,
+            pattern.swing,
+            pattern.channels.map((channel) => [channel.id, channel.steps, channel.swing, channel.mute, channel.solo, channel.volume, channel.cells.map((cell) => (cell.on ? [cell.velocity, cell.nudge || 0] : 0))]),
+          ]),
+        }
+      : null,
+    patternClips: (project.patternClips ?? []).map((clip) => [clip.id, clip.patternId, clip.startBeat, clip.lengthBeats, clip.scene]),
+    tempoMap: project.tempoMap ?? [],
     tracks: project.tracks.map((track) => ({
       id: track.id,
       name: track.name,
@@ -121,12 +146,53 @@ export function arrangementDigest(project: Project): string {
       mute: track.mute,
       solo: track.solo,
       color: track.color,
-      clips: track.clips.map((clip) => [clip.id, clip.bufferId, clip.startSample, clip.offsetSamples, clip.durationSamples, clip.gain, clip.quant ?? null, clip.mode ?? null, clip.loop ?? null, clip.warp ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null]),
-      midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length, clip.quant ?? null, clip.mode ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null]),
+      clips: track.clips.map((clip) => [
+        clip.id,
+        clip.bufferId,
+        clip.startSample,
+        clip.offsetSamples,
+        clip.durationSamples,
+        clip.gain,
+        clip.quant ?? null,
+        clip.mode ?? null,
+        clip.loop ?? null,
+        clip.warp ?? null,
+        clip.follow ?? null,
+        clip.legato ?? null,
+        clip.slotOnly ?? null,
+        clip.warpPoints?.length ?? 0,
+        clip.stretch
+          ? [
+              clip.stretch.sourceSamples,
+              clip.stretch.semitones,
+              clip.stretch.cents,
+              clip.stretch.mode,
+              clip.stretch.followTempo ? 1 : 0,
+              clip.stretch.sourceBpm ?? 0,
+              clip.stretch.markers.map((marker) => [marker.source, Math.round(marker.target * 1000) / 1000]),
+              clip.stretch.formant ? 1 : 0,
+            ]
+          : 0,
+        clip.folder?.activeCompId || '',
+        (clip.folder?.lanes || []).map((lane) => lane.bufferId).join(','),
+        (clip.folder?.comps.find((comp) => comp.id === clip.folder?.activeCompId)?.segments || []).map((segment) => `${segment.laneId}:${segment.startSample}:${segment.endSample}`).join('|'),
+      ]),
+      midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length, clip.notes.map((note) => [note.startBeat, note.durationBeats, note.pitch]), clip.notes.map((note) => (note.slide ? 1 : 0)).join(''), clip.quant ?? null, clip.mode ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null, clip.activeTakeId || '', clip.takes?.length || 0]),
       audioSlots: track.audioSlots ?? null,
       midiSlots: track.midiSlots ?? null,
       rack: track.rack?.devices.map((device) => [device.id, device.kind, device.params, device.pattern, device.zones.length]),
       cables: track.rack?.cables.map((cable) => [cable.from, cable.fromPort, cable.to, cable.toPort, cable.amount]),
+      instruments: (track.plugins ?? []).map((plugin) => [
+        plugin.id,
+        plugin.pluginId,
+        plugin.sampler?.bufferId ?? '',
+        plugin.sampler?.slices.length ?? 0,
+        plugin.looper?.transport ?? 0,
+        plugin.looper?.startBeat ?? 0,
+        plugin.looper?.lengthSamples ?? 0,
+        plugin.looper?.layers.length ?? 0,
+      ]),
     })),
+    presetFavorites: project.presetFavorites ?? [],
   })
 }

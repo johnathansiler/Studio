@@ -14,6 +14,8 @@ const loaders: Record<string, () => Promise<{ default: PluginModule }>> = {
   tune: () => import('./tune'),
   pitch: () => import('./pitch'),
   sampler: () => import('./sampler'),
+  looper: () => import('./looper'),
+  amp: () => import('./amp').then((mod) => ({ default: mod.ampModule() })),
   fet: () => import('./models').then((mod) => ({ default: mod.moduleFor('fet') })),
   opto: () => import('./models').then((mod) => ({ default: mod.moduleFor('opto') })),
   bus: () => import('./models').then((mod) => ({ default: mod.moduleFor('bus') })),
@@ -35,6 +37,18 @@ const loaders: Record<string, () => Promise<{ default: PluginModule }>> = {
   phase: () => import('./models').then((mod) => ({ default: mod.moduleFor('phase') })),
   rotor: () => import('./models').then((mod) => ({ default: mod.moduleFor('rotor') })),
   peak: () => import('./models').then((mod) => ({ default: mod.moduleFor('peak') })),
+  meq: () => import('./mastering').then((mod) => ({ default: mod.module('meq') })),
+  deq: () => import('./mastering').then((mod) => ({ default: mod.module('deq') })),
+  mbcomp: () => import('./mastering').then((mod) => ({ default: mod.module('mbcomp') })),
+  glue: () => import('./mastering').then((mod) => ({ default: mod.module('glue') })),
+  brick: () => import('./mastering').then((mod) => ({ default: mod.module('brick') })),
+  maxim: () => import('./mastering').then((mod) => ({ default: mod.module('maxim') })),
+  mtape: () => import('./mastering').then((mod) => ({ default: mod.module('mtape') })),
+  image: () => import('./mastering').then((mod) => ({ default: mod.module('image') })),
+  msbox: () => import('./mastering').then((mod) => ({ default: mod.module('msbox') })),
+  clip: () => import('./mastering').then((mod) => ({ default: mod.module('clip') })),
+  dither: () => import('./mastering').then((mod) => ({ default: mod.module('dither') })),
+  meter: () => import('./mastering').then((mod) => ({ default: mod.module('meter') })),
 }
 
 const cache = new Map<string, PluginModule>()

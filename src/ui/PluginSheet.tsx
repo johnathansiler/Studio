@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
+import { MASTERING_IDS } from '../audio/master/assistant'
 import { CATALOG, FACTORY, descriptor } from '../audio/plugins/catalog'
 import { MODEL_IDS } from '../audio/plugins/models'
+import { AmpPop } from './AmpPop'
 import { Faceplate } from './Faceplate'
 import { NOTE_NAMES, SCALES } from '../model/scale'
 import { samplesToBeats } from '../model/time'
 import type { PluginInstance } from '../model/types'
 import type { ProjectStore } from '../state/store'
+import { SamplePanel } from './SamplePanel'
 
 export function PluginSheet({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
   const focus = store.pluginFocus
@@ -22,7 +25,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     return () => window.clearInterval(timer)
   }, [faced, plugin?.id])
   useEffect(() => {
-    if (!plugin || plugin.pluginId !== 'eq') return
+    if (!plugin || (plugin.pluginId !== 'eq' && plugin.pluginId !== 'meq' && plugin.pluginId !== 'meter')) return
     let timer = 0
     const draw = () => {
       const spectrum = engine.spectrum(plugin.id)
@@ -45,6 +48,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     return () => window.clearTimeout(timer)
   }, [engine, plugin])
   if (!focus || !plugin || !spec) return null
+  if (plugin.pluginId === 'amp') return <AmpPop store={store} engine={engine} trackId={focus.trackId} plugin={plugin} />
   const names = [
     ...(FACTORY[plugin.pluginId] ?? []).map((item) => item.name),
     ...store.project.presets.filter((item) => item.pluginId === plugin.pluginId).map((item) => item.name),
@@ -88,17 +92,8 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
         </select>
       )}
       {plugin.pluginId === 'eq' && <canvas ref={canvas} width={320} height={64} className="spectrum" />}
-      {plugin.pluginId === 'sampler' && (
-        <div className="stem-keys">
-          {['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C'].map((label, index) => {
-            const note = [60, 62, 64, 65, 67, 69, 71, 72][index]
-            return (
-              <button key={label + index} type="button" className="text-btn" onClick={() => engine.previewSample(plugin.id, note)}>
-                {label}
-              </button>
-            )
-          })}
-        </div>
+      {(plugin.pluginId === 'sampler' || plugin.pluginId === 'looper') && (
+        <SamplePanel store={store} engine={engine} trackId={focus.trackId} plugin={plugin} />
       )}
       {faced && (
         <Faceplate
@@ -115,7 +110,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
           }}
         />
       )}
-      {!faced ? <div className="knobs">
+      {!faced && plugin.pluginId !== 'sampler' && plugin.pluginId !== 'looper' ? <div className="knobs">
         {spec.params.map((param) => (
           <label key={param.id}>
             {param.name} {formatParam(param.id, plugin.params[param.id] ?? param.default, param.unit)}
@@ -198,7 +193,7 @@ export function InsertList({ store, trackId }: { store: ProjectStore; trackId: s
       ))}
       <select className="insert-add" value="" onChange={(event) => addChoice(store, trackId, event.target.value)}>
         <option value="">+</option>
-        {CATALOG.map((plugin) => (
+        {CATALOG.filter((plugin) => plugin.id !== 'meter' && (trackId === 'master' || !(MASTERING_IDS as readonly string[]).includes(plugin.id))).map((plugin) => (
           <option key={plugin.id} value={plugin.id}>{plugin.name}</option>
         ))}
         {trackId !== 'master' && <option value="vocal">Vocal chain</option>}

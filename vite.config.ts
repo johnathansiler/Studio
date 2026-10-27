@@ -23,6 +23,10 @@ function ortAssets() {
 
 export default defineConfig({
   plugins: [react(), ortAssets()],
+  worker: {
+    // The bounce worker loads plugins with dynamic import, which Rollup cannot emit as iife.
+    format: 'es',
+  },
   server: {
     port: 5173,
     proxy: {
