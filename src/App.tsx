@@ -15,7 +15,9 @@ import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { ArrangeView } from './ui/ArrangeView'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
+import { LoomPop } from './ui/LoomPop'
 import { PianoRoll } from './ui/PianoRoll'
+import { starterLoom } from './model/loom'
 import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
 import { VideoDock } from './ui/VideoDock'
@@ -64,6 +66,7 @@ export function App() {
   const phone = form === 'phone'
   const compact = form !== 'desk'
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
+  const [loomOpen, setLoomOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
   const takeRef = useRef<{ id: string; endSample: number } | null>(null)
@@ -146,6 +149,21 @@ export function App() {
       setVersion((value) => value + 1)
     })
   }, [store, engine, session])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    if (params.get('loom') !== '1') return
+    const track = store.project.tracks.find((item) => item.type === 'midi' && item.midiClips.length)
+    const clip = track?.midiClips[0]
+    if (track && clip) store.selectClip(track.id, clip.id, true)
+    const next = starterLoom()
+    next.lite = formFactor(window.innerWidth, window.innerHeight) === 'phone'
+    next.deep = params.get('deep') === '1'
+    store.setLoom(next)
+    setLoomOpen(true)
+    setSurface('studio')
+    setPhonePane('edit')
+  }, [store])
 
   useEffect(() => {
     const saveReady = { current: false }
@@ -679,6 +697,15 @@ export function App() {
     await ready()
   }
 
+  function openLoom() {
+    if (!store.project.loom) {
+      const next = starterLoom()
+      next.lite = form === 'phone'
+      store.setLoom(next)
+    }
+    setLoomOpen(true)
+  }
+
   const showRoll = store.view === 'arrange' && store.selectedMidiClipId
 
   return (
@@ -770,12 +797,12 @@ export function App() {
               {store.view === 'mix' && <MixerView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} />}
             </div>
-            {showRoll && form !== 'fold' && <PianoRoll store={store} engine={engine} />}
+            {showRoll && form !== 'fold' && <PianoRoll store={store} engine={engine} onLoom={openLoom} />}
           </div>
         )}
         {form === 'fold' && showRoll && surface === 'studio' && (
           <div className="side-editor">
-            <PianoRoll store={store} engine={engine} />
+            <PianoRoll store={store} engine={engine} onLoom={openLoom} />
           </div>
         )}
         {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && showRoll) && (
@@ -824,6 +851,7 @@ export function App() {
         )}
       </div>
       <PluginSheet store={store} engine={engine} />
+      <LoomPop store={store} engine={engine} form={form} open={loomOpen} onClose={() => setLoomOpen(false)} />
       {phone && (
         <nav className="phone-tabs" aria-label="Sections">
           <button className={phonePane === 'edit' && store.view === 'arrange' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setMenuOpen(false) }}>Arrange</button>

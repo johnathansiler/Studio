@@ -1,4 +1,5 @@
 import { defaultScale, type ScaleState } from './scale'
+import type { LoomState } from './loom'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
 
@@ -125,6 +126,8 @@ export interface Project {
   snap: boolean
   /** Key, scale, and chord-pad performance settings. */
   scale?: ScaleState
+  /** Loom instrument performance state. Samples stay in local storage, not in this object. */
+  loom?: LoomState
   /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */
   waveforms?: Record<string, { min: number; max: number }[]>
 }

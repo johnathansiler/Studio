@@ -36,7 +36,7 @@ const SOURCES: { id: ChordSource; name: string }[] = [
   { id: 'gospel', name: 'Gospel' },
 ]
 
-export function PianoRoll({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
+export function PianoRoll({ store, engine, onLoom }: { store: ProjectStore; engine: AudioEngine; onLoom?: () => void }) {
   const track = store.project.tracks.find((item) => item.midiClips.some((clip) => clip.id === store.selectedMidiClipId))
   const clip = track?.midiClips.find((item) => item.id === store.selectedMidiClipId)
   const [open, setOpen] = useState(false)
@@ -77,7 +77,8 @@ export function PianoRoll({ store, engine }: { store: ProjectStore; engine: Audi
     const current = store.scaleState()
     const next = current.snap ? snapPitch(pitch, current.root, current.scale) : pitch
     engine.unlock()
-    engine.previewPitches([next])
+    if (store.project.loom) engine.previewLoom(next)
+    else engine.previewPitches([next])
     store.addNote(track.id, clip.id, { pitch: next, startBeat: clipBeat(store, engine, clip.startBeat), durationBeats: 1, velocity })
   }
 
@@ -142,6 +143,7 @@ export function PianoRoll({ store, engine }: { store: ProjectStore; engine: Audi
   return (
     <div className="piano">
       <div className="scale-bar">
+        {onLoom && <button type="button" className="loom-btn" onClick={onLoom}>Loom</button>}
         <select aria-label="Key" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
           {NOTE_NAMES.map((name, index) => (
             <option key={name} value={index}>{name}</option>
