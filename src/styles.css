@@ -311,8 +311,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .shell.phone .rack { height: 280px; }
 .shell.phone .rack header button, .shell.phone .rack header select, .shell.phone .rack .text-btn, .shell.phone .device-list button, .shell.phone .steps button { min-height: 44px; }
 .piano {
-  height: 248px; border-top: 1px solid var(--line); display: grid; grid-template-rows: auto minmax(0, 1fr);
-  background: #101714; position: relative; min-height: 0;
+  height: 248px; border-top: 1px solid var(--line); display: grid; grid-template-rows: auto auto minmax(0, 1fr);
+  background: #101714; position: relative; min-height: 0; overflow: hidden;
 }
 .scale-bar {
   display: flex; align-items: center; gap: 4px; padding: 4px 6px; min-width: 0; overflow: auto;
@@ -347,7 +347,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .chord-depth { padding-top: 0; }
 .chord-depth summary { cursor: pointer; color: var(--muted); padding: 4px 6px; }
 .chord-depth button.on { color: var(--accent); border-color: var(--accent); }
-.shell.phone .piano { height: 268px; }
+.shell.phone .piano { height: 320px; }
 .shell.phone .scale-bar button, .shell.phone .scale-bar select { min-height: 44px; height: 44px; }
 .shell.phone .chord-sheet { top: 52px; }
 .shell.phone .chord-sheet summary { min-height: 44px; display: flex; align-items: center; }
@@ -648,6 +648,8 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 .step.now { outline: 2px solid var(--amber); }
 .tool-row button.on { border-color: var(--amber); color: var(--amber); }
 .shell.phone .beats { min-height: 0; }
+.shell.phone .beat-row { flex-wrap: wrap; }
+.shell.phone .step-grid { flex: 1 0 100%; min-height: 44px; }
 .shell.phone .step { width: 44px; height: 44px; }
 .shell.phone .beat-row input[type='range'] { width: 44px; }
 .shell.phone .beat-row select { max-width: 72px; }
