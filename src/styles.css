@@ -220,6 +220,19 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   height: 248px; border-top: 1px solid var(--line); display: grid; grid-template-rows: auto minmax(0, 1fr);
   background: #101714; position: relative; min-height: 0;
 }
+.rack { height: 250px; border-top: 1px solid var(--line); background: #101714; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.rack header, .rack .row { display: flex; gap: 6px; align-items: center; padding: 6px 8px; flex-wrap: wrap; }
+.rack header strong { margin-right: auto; }
+.rack-body { display: flex; gap: 8px; overflow: auto; padding: 0 8px 8px; min-height: 0; flex: 1; }
+.device-list, .cables { display: flex; flex-direction: column; gap: 4px; min-width: 88px; }
+.device-list button.on, .rack .text-btn.on, .device button.on, .steps button.on { border-color: rgba(115, 196, 143, 0.7); color: var(--text); }
+.device { min-width: 92px; display: flex; flex-direction: column; gap: 4px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.device-edit { min-width: 0; flex: 1; }
+.steps { display: grid; grid-template-columns: repeat(8, minmax(28px, 1fr)); gap: 4px; }
+.rack-keys { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
+.rack-keys button { min-width: 0; padding: 0; }
+.knobs.macros { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.mini.rack-open.on { border-color: rgba(115, 196, 143, 0.7); color: var(--text); }
 .scale-bar {
   display: flex; align-items: center; gap: 4px; padding: 4px 6px; min-width: 0; overflow: auto;
   border-bottom: 1px solid var(--line);
@@ -253,6 +266,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .chord-depth summary { cursor: pointer; color: var(--muted); padding: 4px 6px; }
 .chord-depth button.on { color: var(--accent); border-color: var(--accent); }
 .shell.phone .piano { height: 268px; }
+.shell.phone .rack { height: 320px; }
+.shell.phone .rack header button, .shell.phone .rack header select, .shell.phone .rack .text-btn, .shell.phone .device-list button, .shell.phone .steps button, .shell.phone .rack-keys button, .shell.phone .rack input, .shell.phone .rack select { min-height: 44px; }
+.shell.phone .rack select, .shell.phone .rack input { max-width: 28vw; }
 .shell.phone .scale-bar button, .shell.phone .scale-bar select { min-height: 44px; height: 44px; }
 .shell.phone .chord-sheet { top: 52px; }
 .shell.phone .chord-sheet summary { min-height: 44px; display: flex; align-items: center; }
@@ -526,6 +542,7 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 .shell.phone .head .name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shell.phone .head .row { display: flex; flex-wrap: nowrap; gap: 4px; }
 .shell.phone .head .mini { width: 44px; height: 44px; min-width: 44px; min-height: 44px; flex: 0 0 44px; }
+.shell.phone .head .mini.rack-open { width: auto; flex: 0 0 auto; padding: 0 10px; }
 .shell.phone .head select,
 .shell.phone .head .slim,
 .shell.phone .head-extra { display: none; }
@@ -596,7 +613,8 @@ html[data-posture="book"] .shell:not(.phone) .workspace {
   overflow: hidden;
   display: flex;
 }
-.shell.fold .side-editor .piano { flex: 1; height: auto; min-height: 0; }
+.shell.fold .side-editor .piano,
+.shell.fold .side-editor .rack { flex: 1; height: auto; min-height: 0; }
 .shell.fold .views button,
 .shell.fold .text-btn,
 .shell.fold .menu-btn,
@@ -627,13 +645,16 @@ html[data-posture="book"] .shell:not(.phone) .workspace {
 }
 .shell.phone.land .t-toggles { flex: 0 0 auto; flex-wrap: nowrap; }
 .shell.phone.land .lcd { flex: 0 1 150px; }
-.shell.phone.land .main-pane:has(.piano) {
+.shell.phone.land .main-pane:has(.piano),
+.shell.phone.land .main-pane:has(.rack) {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(200px, 0.85fr);
   grid-template-rows: minmax(0, 1fr);
 }
 .shell.phone.land .main-pane:has(.piano) .editor,
-.shell.phone.land .main-pane:has(.piano) .piano { min-height: 0; height: 100%; }
+.shell.phone.land .main-pane:has(.piano) .piano,
+.shell.phone.land .main-pane:has(.rack) .editor,
+.shell.phone.land .main-pane:has(.rack) .rack { min-height: 0; height: 100%; }
 .shell.phone.land .head,
 .shell.phone.land .lane { height: 84px; }
 .shell.phone.land .strip { width: 128px; }

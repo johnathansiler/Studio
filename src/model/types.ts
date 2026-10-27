@@ -1,3 +1,4 @@
+import type { DevicePreset, RackAutomation, RackPatch, RackState } from './rack'
 import { defaultScale, type ScaleState } from './scale'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
@@ -102,6 +103,8 @@ export interface Track {
   groupId: string | null
   clips: AudioClip[]
   midiClips: MidiClip[]
+  /** Modular instrument rack. Present on instrument tracks. */
+  rack?: RackState
 }
 
 export interface Project {
@@ -125,6 +128,12 @@ export interface Project {
   snap: boolean
   /** Key, scale, and chord-pad performance settings. */
   scale?: ScaleState
+  devicePresets: DevicePreset[]
+  rackPatches: RackPatch[]
+  /** Rack parameter lanes. Mixer plugin lanes stay on `automation`. */
+  rackAutomation: RackAutomation[]
+  /** `${kind}:${name}` factory and user presets marked in the browser. */
+  presetFavorites?: string[]
   /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */
   waveforms?: Record<string, { min: number; max: number }[]>
 }
@@ -199,5 +208,8 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     countIn: true,
     snap: true,
     scale: defaultScale(),
+    devicePresets: [],
+    rackPatches: [],
+    rackAutomation: [],
   }
 }

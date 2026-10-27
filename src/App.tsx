@@ -16,6 +16,7 @@ import { ArrangeView } from './ui/ArrangeView'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
 import { PianoRoll } from './ui/PianoRoll'
+import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
 import { VideoDock } from './ui/VideoDock'
@@ -679,7 +680,9 @@ export function App() {
     await ready()
   }
 
-  const showRoll = store.view === 'arrange' && store.selectedMidiClipId
+  const showRack = store.view === 'arrange' && !!store.rackTrackId
+  const showRoll = store.view === 'arrange' && !!store.selectedMidiClipId && !showRack
+  const sideEditor = showRoll || showRack
 
   return (
     <div className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''}`} style={{ ['--dock' as string]: `${dock}px` }} data-version={version} data-form={form}>
@@ -770,15 +773,16 @@ export function App() {
               {store.view === 'mix' && <MixerView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} />}
             </div>
+            {showRack && form !== 'fold' && store.rackTrackId && <RackView store={store} engine={engine} trackId={store.rackTrackId} />}
             {showRoll && form !== 'fold' && <PianoRoll store={store} engine={engine} />}
           </div>
         )}
-        {form === 'fold' && showRoll && surface === 'studio' && (
+        {form === 'fold' && sideEditor && surface === 'studio' && (
           <div className="side-editor">
-            <PianoRoll store={store} engine={engine} />
+            {showRack && store.rackTrackId ? <RackView store={store} engine={engine} trackId={store.rackTrackId} /> : <PianoRoll store={store} engine={engine} />}
           </div>
         )}
-        {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && showRoll) && (
+        {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && sideEditor) && (
         <div
           className="dock-slot"
           onPointerDown={(event) => {
