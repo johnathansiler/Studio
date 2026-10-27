@@ -8,6 +8,7 @@ import { BANKS, gridPitch, PAD_MACROS, sixteenLevels, type GridLayout, type Leve
 import { decodeWavPCM } from '../model/wav'
 import type { ProjectStore } from '../state/store'
 import type { SessionClient } from '../remote/session'
+import { attachGlissando } from './glissando'
 
 const WHITE = [0, 2, 4, 5, 7, 9, 11]
 const BLACK = [1, 3, 6, 8, 10]
@@ -122,6 +123,26 @@ export function PerformPop({
     const root = board.current
     const play = performer.current
     if (!root || !play) return
+    const detachKeys = attachGlissando(root, {
+      accept: (key) => !!key.closest('.play-keys, .grid8'),
+      onOn: (pitch, event, pointerId) => {
+        const key = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('[data-pitch]') as HTMLElement | null
+        const level = key?.dataset.level == null ? undefined : Number(key.dataset.level)
+        const rect = key?.getBoundingClientRect() ?? { top: event.clientY, height: 1 }
+        play.down(pitch, pointerVelocity(event, rect), event.timeStamp, pointerId, level)
+        light(outputs.current, pitch, 127)
+      },
+      onOff: (pitch, event, pointerId) => {
+        light(outputs.current, pitch, 0)
+        play.up(pointerId, event.timeStamp)
+      },
+      onMove: (_pitch, event, pointerId) => {
+        const key = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('[data-pitch]') as HTMLElement | null
+        if (!key) return
+        play.pressure(pointerId, pointerVelocity(event, key.getBoundingClientRect()))
+      },
+      onTwoFinger: (dy) => { root.scrollTop -= dy },
+    })
     const pointers = new Map<number, HTMLElement>()
     const down = (event: PointerEvent) => {
       const sample = (event.target as HTMLElement).closest?.('[data-sample]') as HTMLElement | null
@@ -132,6 +153,7 @@ export function PerformPop({
         return
       }
       const key = (event.target as HTMLElement).closest?.('[data-pitch]') as HTMLElement | null
+      if (key?.closest('.play-keys, .grid8')) return
       if (!key || !root.contains(key)) return
       event.preventDefault()
       const pitch = Number(key.dataset.pitch)
@@ -168,6 +190,7 @@ export function PerformPop({
     root.addEventListener('pointerup', up)
     root.addEventListener('pointercancel', up)
     return () => {
+      detachKeys()
       root.removeEventListener('pointerdown', down)
       root.removeEventListener('pointermove', move)
       root.removeEventListener('pointerup', up)
