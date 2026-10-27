@@ -1,7 +1,9 @@
 import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
 import { demoMidiNotes } from '../model/demo'
+import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
+import { findCycle, MASTER } from '../audio/routing'
 import { createEmptyProject, defaultInsert, makeTrack, uid, TRACK_COLORS } from '../model/types'
-import type { AudioAsset, AudioClip, InsertType, MidiClip, MidiNote, Project, Track } from '../model/types'
+import type { AudioAsset, AudioClip, InsertType, MidiClip, MidiNote, PluginInstance, Project, Track } from '../model/types'
 import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleState } from '../model/scale'
 import { beatsToSamples } from '../model/time'
 import { linearResample } from '../model/wav'
@@ -35,8 +37,11 @@ export class ProjectStore {
   private future: string[] = []
   private listeners = new Set<Listener>()
 
+  /** Open plugin sheet. Not saved with the project. */
+  pluginFocus: { trackId: string; pluginId: string } | null = null
+
   constructor(project = createEmptyProject(), buffers?: Map<string, AudioAsset>) {
-    this.project = { ...project, scale: normalizeScale(project.scale) }
+    this.project = normalizeProject({ ...project, scale: normalizeScale(project.scale) })
     if (buffers) this.buffers = buffers
     this.selectedTrackId = project.tracks[0]?.id ?? null
     this.selectedClipId = null
@@ -208,7 +213,7 @@ export class ProjectStore {
     this.mutate(() => {
       const index = this.project.tracks.length
       const track = makeTrack({
-        name: type === 'midi' ? `Inst ${index + 1}` : `Audio ${index + 1}`,
+        name: type === 'midi' ? `Inst ${index + 1}` : type === 'bus' ? `Bus ${index + 1}` : type === 'group' ? `Group ${index + 1}` : `Audio ${index + 1}`,
         type,
         color: TRACK_COLORS[index % TRACK_COLORS.length],
       })
@@ -225,11 +230,173 @@ export class ProjectStore {
   }
 
   updateTrack(id: string, patch: Partial<Track>) {
+    if ((patch.output !== undefined || patch.groupId !== undefined) && this.routeLoops(id, patch)) return
     this.mutate(() => {
       const track = this.track(id)
       if (!track) return
       Object.assign(track, patch)
     })
+  }
+
+  focusPlugin(trackId: string | null, pluginId: string | null = null) {
+    this.pluginFocus = trackId && pluginId ? { trackId, pluginId } : null
+    this.emit()
+  }
+
+  addPlugin(trackId: string | 'master', pluginId: string, preset?: string) {
+    this.mutate(() => {
+      const list = this.pluginList(trackId)
+      if (!list) return
+      list.push(createPlugin(pluginId, preset))
+    })
+  }
+
+  updatePlugin(trackId: string | 'master', pluginId: string, patch: Partial<PluginInstance>) {
+    this.mutate(() => {
+      const plugin = this.pluginList(trackId)?.find((item) => item.id === pluginId)
+      if (!plugin) return
+      if (patch.enabled != null) plugin.enabled = patch.enabled
+      if (patch.wet != null) plugin.wet = Math.min(1, Math.max(0, patch.wet))
+      if (patch.sidechain != null) plugin.sidechain = patch.sidechain
+      if (patch.params) plugin.params = { ...plugin.params, ...patch.params }
+    })
+  }
+
+  removePlugin(trackId: string | 'master', pluginId: string) {
+    this.mutate(() => {
+      const list = this.pluginList(trackId)
+      if (!list) return
+      const index = list.findIndex((item) => item.id === pluginId)
+      if (index >= 0) list.splice(index, 1)
+      if (this.pluginFocus?.pluginId === pluginId) this.pluginFocus = null
+    })
+  }
+
+  movePlugin(trackId: string | 'master', pluginId: string, direction: -1 | 1) {
+    this.mutate(() => {
+      const list = this.pluginList(trackId)
+      if (!list) return
+      const index = list.findIndex((item) => item.id === pluginId)
+      const next = index + direction
+      if (index < 0 || next < 0 || next >= list.length) return
+      const [item] = list.splice(index, 1)
+      list.splice(next, 0, item)
+    })
+  }
+
+  addSend(trackId: string, busId: string, preFader = false) {
+    const existing = this.track(trackId)
+    const sends = [...(existing?.sends ?? []), { id: 'new', busId, gain: 0.25, preFader, enabled: true }]
+    if (this.routeLoops(trackId, { sends })) return
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.sends.some((send) => send.busId === busId)) return
+      track.sends.push({ id: uid('send'), busId, gain: 0.25, preFader, enabled: true })
+    })
+  }
+
+  updateSend(trackId: string, sendId: string, patch: Partial<{ gain: number; preFader: boolean; enabled: boolean }>) {
+    this.mutate(() => {
+      const send = this.track(trackId)?.sends.find((item) => item.id === sendId)
+      if (!send) return
+      Object.assign(send, patch)
+    })
+  }
+
+  removeSend(trackId: string, sendId: string) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (track) track.sends = track.sends.filter((send) => send.id !== sendId)
+    })
+  }
+
+  applyPluginPreset(trackId: string | 'master', pluginId: string, name: string) {
+    this.mutate(() => {
+      const plugin = this.pluginList(trackId)?.find((item) => item.id === pluginId)
+      if (!plugin) return
+      const params = presetParams(plugin.pluginId, name, this.project.presets)
+      if (params) plugin.params = params
+    })
+  }
+
+  savePluginPreset(pluginId: string, name: string, params: Record<string, number>) {
+    this.mutate(() => {
+      const existing = this.project.presets.find((item) => item.pluginId === pluginId && item.name === name)
+      if (existing) existing.params = { ...params }
+      else this.project.presets.push({ id: uid('preset'), pluginId, name, params: { ...params } })
+    })
+  }
+
+  addAutomationPoint(pluginId: string, param: string, beat: number, value: number) {
+    this.mutate(() => {
+      let lane = this.project.automation.find((item) => item.pluginId === pluginId && item.param === param)
+      if (!lane) {
+        lane = { id: uid('auto'), pluginId, param, points: [] }
+        this.project.automation.push(lane)
+      }
+      const point = lane.points.find((item) => Math.abs(item.beat - beat) < 0.01)
+      if (point) point.value = value
+      else lane.points.push({ beat, value })
+    })
+  }
+
+  addVocalChain(trackId: string) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      for (const [pluginId, preset] of [
+        ['gate', 'Vocal'],
+        ['eq', 'Vocal'],
+        ['deesser', 'Vocal'],
+        ['compressor', 'Vocal'],
+        ['tune', 'Alto/Tenor'],
+        ['saturator', 'Tape'],
+      ] as const) {
+        track.plugins.push(createPlugin(pluginId, preset))
+      }
+      const delay = this.ensureBus('Delay', 'delay', 'Ping-pong')
+      const reverb = this.ensureBus('Reverb', 'reverb', 'Hall')
+      if (!track.sends.some((send) => send.busId === delay.id)) {
+        track.sends.push({ id: uid('send'), busId: delay.id, gain: 0.22, preFader: false, enabled: true })
+      }
+      if (!track.sends.some((send) => send.busId === reverb.id)) {
+        track.sends.push({ id: uid('send'), busId: reverb.id, gain: 0.18, preFader: false, enabled: true })
+      }
+    })
+  }
+
+  private ensureBus(name: string, pluginId: string, preset: string) {
+    const existing = this.project.tracks.find((track) => (track.type === 'bus' || track.type === 'group') && track.name === name)
+    if (existing) return existing
+    const track = makeTrack({
+      name,
+      type: 'bus',
+      color: TRACK_COLORS[this.project.tracks.length % TRACK_COLORS.length],
+      input: 'none',
+    })
+    const plugin = createPlugin(pluginId, preset)
+    plugin.params.mix = 1
+    track.plugins.push(plugin)
+    this.project.tracks.push(track)
+    return track
+  }
+
+  private pluginList(trackId: string | 'master') {
+    if (trackId === 'master') return this.project.masterPlugins
+    return this.track(trackId)?.plugins
+  }
+
+  private routeLoops(trackId: string, patch: Partial<Track>) {
+    const points = this.project.tracks.map((track) => {
+      const next = track.id === trackId ? { ...track, ...patch, sends: patch.sends ?? track.sends } : track
+      return {
+        id: next.id,
+        dest: next.groupId || next.output || MASTER,
+        sends: (next.sends ?? []).filter((send) => send.enabled).map((send) => send.busId),
+        latency: 0,
+      }
+    })
+    return findCycle(points) != null
   }
 
   addInsert(trackId: string | 'master', type: InsertType) {
@@ -468,7 +635,7 @@ export class ProjectStore {
   loadProject(project: Project, buffers: Map<string, AudioAsset>) {
     this.past = []
     this.future = []
-    this.project = { ...project, scale: normalizeScale(project.scale) }
+    this.project = normalizeProject({ ...project, scale: normalizeScale(project.scale) })
     this.buffers = buffers
     this.selectedTrackId = project.tracks[0]?.id ?? null
     this.selectedClipId = null
