@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
+import { MASTERING_IDS } from '../audio/master/assistant'
 import { CATALOG, FACTORY, descriptor } from '../audio/plugins/catalog'
 import { MODEL_IDS } from '../audio/plugins/models'
+import { AmpPop } from './AmpPop'
 import { Faceplate } from './Faceplate'
 import { NOTE_NAMES, SCALES } from '../model/scale'
 import { samplesToBeats } from '../model/time'
@@ -23,7 +25,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     return () => window.clearInterval(timer)
   }, [faced, plugin?.id])
   useEffect(() => {
-    if (!plugin || plugin.pluginId !== 'eq') return
+    if (!plugin || (plugin.pluginId !== 'eq' && plugin.pluginId !== 'meq' && plugin.pluginId !== 'meter')) return
     let timer = 0
     const draw = () => {
       const spectrum = engine.spectrum(plugin.id)
@@ -46,6 +48,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     return () => window.clearTimeout(timer)
   }, [engine, plugin])
   if (!focus || !plugin || !spec) return null
+  if (plugin.pluginId === 'amp') return <AmpPop store={store} engine={engine} trackId={focus.trackId} plugin={plugin} />
   const names = [
     ...(FACTORY[plugin.pluginId] ?? []).map((item) => item.name),
     ...store.project.presets.filter((item) => item.pluginId === plugin.pluginId).map((item) => item.name),
@@ -190,7 +193,7 @@ export function InsertList({ store, trackId }: { store: ProjectStore; trackId: s
       ))}
       <select className="insert-add" value="" onChange={(event) => addChoice(store, trackId, event.target.value)}>
         <option value="">+</option>
-        {CATALOG.map((plugin) => (
+        {CATALOG.filter((plugin) => plugin.id !== 'meter' && (trackId === 'master' || !(MASTERING_IDS as readonly string[]).includes(plugin.id))).map((plugin) => (
           <option key={plugin.id} value={plugin.id}>{plugin.name}</option>
         ))}
         {trackId !== 'master' && <option value="vocal">Vocal chain</option>}

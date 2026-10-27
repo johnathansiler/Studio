@@ -117,7 +117,7 @@ export function createSampler(sampleRate: number): SamplerProcessor {
         const semis = (params.pitch ?? 0) + (voice.note - state.root)
         const chromatic = (params.keys ?? 0) >= 0.5
         if (!chromatic && sampleUsesStretch(params.stretch ?? 1, quality) && voice.buffer.length <= sampleRate * 2) {
-          const rendered = renderStretch([voice.buffer], sampleRate, { ratio: beat / voice.buffer.length, semitones: 0, mode: 'tonal' })
+          const rendered = renderStretch([voice.buffer], sampleRate, { ratio: beat / voice.buffer.length, semitones: 0, mode: 'tonal', quality: 'preview' })
           if (rendered[0]?.length) voice.buffer = rendered[0]
           voice.rate = 1
         } else voice.rate = 2 ** (semis / 12)

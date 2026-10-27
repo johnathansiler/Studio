@@ -12,6 +12,8 @@ export interface StepCell {
   pitch: number
   fine: number
   gate: number
+  /** Beats added to the step, after swing. */
+  nudge?: number
 }
 
 export interface StepChannel {
@@ -138,7 +140,7 @@ export function hitsInRange(
     for (let step = 0; step < count; step++) {
       const cell = channel.cells[step]
       if (!cell?.on) continue
-      const start = cycle * loop + stepStart(step, STEP_BEAT, swing)
+      const start = cycle * loop + stepStart(step, STEP_BEAT, swing) + (cell.nudge || 0)
       if (start < fromBeat - 1e-9 || start >= toBeat - 1e-9) continue
       const next = cycle * loop + (step + 1 < count ? stepStart(step + 1, STEP_BEAT, swing) : loop)
       const span = Math.max(0.02, next - start)

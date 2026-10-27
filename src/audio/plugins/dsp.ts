@@ -22,7 +22,9 @@ export function designBiquad(kind: BiquadKind, sampleRate: number, freq: number,
   const w0 = (2 * Math.PI * f) / fs
   const cos = Math.cos(w0)
   const sin = Math.sin(w0)
-  const alpha = sin / (2 * qq)
+  const octave = (2 / Math.LN2) * Math.asinh(1 / (2 * qq))
+  const warp = Math.min(2.2, w0 / Math.max(1e-4, sin))
+  const alpha = kind === 'peaking' ? sin * Math.sinh((Math.LN2 / 2) * octave * warp) : sin / (2 * qq)
   let b0 = 1
   let b1 = 0
   let b2 = 0
