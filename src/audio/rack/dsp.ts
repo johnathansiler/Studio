@@ -115,7 +115,6 @@ export class RackRuntime {
   private arpNote: number | null = null
   private arpOn = false
   private drumStep = -1
-  private lastNote = 0
   private knockDelta = 0
 
   constructor(sampleRate: number) {
@@ -139,7 +138,6 @@ export class RackRuntime {
         heldVoice.bend = 0
         heldVoice.knockSlide = true
         heldVoice.knockGen = (heldVoice.knockGen || 0) + 1
-        this.lastNote = midi
         return
       }
     }
@@ -149,7 +147,6 @@ export class RackRuntime {
     slot.bend = 0
     slot.knockSlide = false
     slot.knockGen = (slot.knockGen || 0) + 1
-    this.lastNote = midi
   }
 
   allOff() {
