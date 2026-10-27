@@ -122,7 +122,7 @@ export function arrangementDigest(project: Project): string {
             pattern.id,
             pattern.steps,
             pattern.swing,
-            pattern.channels.map((channel) => [channel.id, channel.steps, channel.swing, channel.mute, channel.solo, channel.volume, channel.cells.map((cell) => (cell.on ? cell.velocity : 0))]),
+            pattern.channels.map((channel) => [channel.id, channel.steps, channel.swing, channel.mute, channel.solo, channel.volume, channel.cells.map((cell) => (cell.on ? [cell.velocity, cell.nudge || 0] : 0))]),
           ]),
         }
       : null,
@@ -151,6 +151,7 @@ export function arrangementDigest(project: Project): string {
         clip.follow ?? null,
         clip.legato ?? null,
         clip.slotOnly ?? null,
+        clip.warpPoints?.length ?? 0,
         clip.stretch
           ? [
               clip.stretch.sourceSamples,
@@ -167,7 +168,7 @@ export function arrangementDigest(project: Project): string {
         (clip.folder?.lanes || []).map((lane) => lane.bufferId).join(','),
         (clip.folder?.comps.find((comp) => comp.id === clip.folder?.activeCompId)?.segments || []).map((segment) => `${segment.laneId}:${segment.startSample}:${segment.endSample}`).join('|'),
       ]),
-      midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length, clip.notes.map((note) => (note.slide ? 1 : 0)).join(''), clip.quant ?? null, clip.mode ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null, clip.activeTakeId || '', clip.takes?.length || 0]),
+      midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length, clip.notes.map((note) => [note.startBeat, note.durationBeats, note.pitch]), clip.notes.map((note) => (note.slide ? 1 : 0)).join(''), clip.quant ?? null, clip.mode ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null, clip.activeTakeId || '', clip.takes?.length || 0]),
       audioSlots: track.audioSlots ?? null,
       midiSlots: track.midiSlots ?? null,
       rack: track.rack?.devices.map((device) => [device.id, device.kind, device.params, device.pattern, device.zones.length]),

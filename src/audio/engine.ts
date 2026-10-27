@@ -7,6 +7,7 @@ import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
 import { RackHost } from './rack/host'
 import { renderNotes } from './rack/dsp'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
+import { renderQuantizedClip } from '../model/quantize'
 import { renderPattern, type RenderedHit } from '../model/steps'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToMusical } from '../model/time'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
@@ -1731,6 +1732,33 @@ export class AudioEngine {
     }
   }
 
+  /**
+   * Quantize markers play through the stretch engine. A tight phone reuses the
+   * cached render instead of stretching again on the scheduling tick.
+   */
+  private prepareWarp(ctx: BaseAudioContext, buffer: AudioBuffer, clip: AudioClip): { buffer: AudioBuffer; clip: AudioClip } {
+    if (!clip.warpPoints || clip.warpPoints.length < 2) return { buffer, clip }
+    const sr = ctx.sampleRate
+    const tempo = this.project?.tempo || 120
+    const phone = typeof matchMedia === 'function' && matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
+    const key = `${clip.bufferId}:${clip.offsetSamples}:${clip.durationSamples}:${sr}:${tempo}:${JSON.stringify(clip.warpPoints)}`
+    let pcm = this.warpPcm.get(key)
+    if (!pcm) {
+      const channels: Float32Array[] = []
+      for (let index = 0; index < buffer.numberOfChannels; index++) channels.push(buffer.getChannelData(index))
+      pcm = renderQuantizedClip(channels, clip, sr, tempo)
+      if (this.warpPcm.size >= 8) {
+        const oldest = this.warpPcm.keys().next().value
+        if (oldest) this.warpPcm.delete(oldest)
+      }
+      this.warpPcm.set(key, pcm)
+    }
+    if (preferStretchCache(phone, this.rack.cpu)) pcm = this.warpPcm.get(key) ?? pcm
+    const audio = ctx.createBuffer(Math.max(1, pcm.length), Math.max(1, pcm[0]?.length ?? 1), sr)
+    pcm.forEach((channel, index) => audio.copyToChannel(Float32Array.from(channel), index))
+    return { buffer: audio, clip: { ...clip, offsetSamples: 0, warp: undefined } }
+  }
+
   private scheduleAudioClip(
     ctx: BaseAudioContext,
     strip: StripNodes,
@@ -1749,7 +1777,8 @@ export class AudioEngine {
         this.stretchReady = false
       }
     }
-    const prepared = this.stretchBuffer(ctx, buffer, clip)
+    const stretched = this.stretchBuffer(ctx, buffer, clip)
+    const prepared = this.prepareWarp(ctx, stretched.buffer, stretched.clip)
     buffer = prepared.buffer
     clip = prepared.clip
     const sr = ctx.sampleRate

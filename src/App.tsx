@@ -25,6 +25,7 @@ import { formFactor, type FormFactor } from './ui/form'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
 import { IdeasPop } from './ui/IdeasPop'
+import { QuantizeSheet } from './ui/QuantizeSheet'
 import { PianoRoll } from './ui/PianoRoll'
 import { KnockPop } from './ui/KnockPop'
 import { ProjectSheet } from './ui/ProjectSheet'
@@ -502,6 +503,7 @@ export function App() {
         if (engine.status === 'stopped') void play()
         else void stop()
       } else if (key === 'r' && !meta) void record()
+      else if (key === 'q' && !meta) store.quickQuantize()
       else if (meta && key === 'z') {
         event.preventDefault()
         if (event.shiftKey) store.redo()
@@ -748,6 +750,7 @@ export function App() {
       takeRef.current = null
     }
     session.broadcastTransport({ action: 'stop', timelineSample: end })
+    store.endTake()
   }
 
   async function quickPunch() {
@@ -864,6 +867,7 @@ export function App() {
       hostPerfAtSample: alreadyPlaying ? undefined : hostPerf,
       onPunch: (info) => {
         takeRef.current = { id: takeId, endSample: info.timelineSample }
+        store.beginTake()
         if (punched) {
           const remain = (punched.stopAt - info.timelineSample) / engine.sampleRate
           if (punchTimer.current) window.clearTimeout(punchTimer.current)
@@ -1046,6 +1050,7 @@ async function importDropped(files: FileList) {
             <button className="text-btn" id="menu-save" onClick={() => { setMenuOpen(false); void openProjects() }}>Save</button>
             <button className="text-btn" id="menu-export" onClick={() => { setMenuOpen(false); setExportOpen(true) }}>Export</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('beats') }}>Beats</button>
+            <button className="text-btn" onClick={() => { setMenuOpen(false); store.openQuantize() }}>Quantize</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }}>Clips</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setHelp(true) }}>Shortcuts</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setSurface(surface === 'studio' ? 'artist' : 'studio'); setPhonePane('room') }}>
@@ -1066,6 +1071,7 @@ async function importDropped(files: FileList) {
           onSession={() => { setPhonePane('edit'); setSurface('studio'); store.enterSession() }}
           onArrange={() => { setPhonePane('edit'); setSurface('studio'); store.backToArrangement() }}
           onPiano={(trackId) => openPiano(trackId)}
+          onQuantize={() => store.openQuantize()}
         />
       )}
       <div className={`workspace ${!phone && dockEdge === 'bottom' && surface === 'studio' ? 'dock-bottom' : ''}`}>
@@ -1141,6 +1147,7 @@ async function importDropped(files: FileList) {
         )}
       </div>
       <PluginSheet store={store} engine={engine} />
+      <QuantizeSheet store={store} />
       {pianoOpen && (
         <div className="piano-pop" data-piano="open" role="dialog" aria-label="Piano">
           <header>

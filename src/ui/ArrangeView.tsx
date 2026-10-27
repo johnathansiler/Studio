@@ -346,7 +346,8 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
   const project = store.project
   const asset = store.buffers.get(clip.bufferId)
   const [preview, setPreview] = useState<AudioClip | null>(null)
-  const shown = preview ?? clip
+  const ghost = store.quantizePreview?.audio.find((item) => item.clipId === clip.id)?.clip
+  const shown = preview ?? ghost ?? clip
   const left = (shown.startSample / project.sampleRate) * px
   const width = Math.max(8, (shown.durationSamples / project.sampleRate) * px)
   const canvas = useRef<HTMLCanvasElement>(null)
