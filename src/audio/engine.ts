@@ -1,5 +1,7 @@
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
+import { RackHost } from './rack/host'
+import { renderNotes } from './rack/dsp'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
 import { preferStretchCache } from './stretch/engine'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToMusical } from '../model/time'
@@ -75,6 +77,7 @@ export class AudioEngine {
   private cueReturnGain: GainNode | null = null
   private cueReturnSrc: MediaStreamAudioSourceNode | null = null
   private meterScratch = new Float32Array(256)
+  private readonly rackHost = new RackHost()
   private readonly rack = new LiveRack()
   private loudness: LoudnessState | null = null
   private lufs = -70
@@ -292,6 +295,28 @@ export class AudioEngine {
     this.rack.route(this.ctx, project, this.strips, this.masterStrip, this.localBus, this.remoteBus)
     this.routeLocalMic()
     this.routeRemotes()
+    const buffers = new Map<string, AudioAsset>()
+    for (const track of project.tracks) {
+      for (const device of track.rack?.devices ?? []) {
+        for (const zone of device.zones) {
+          const asset = assetOf(zone.bufferId)
+          if (asset) buffers.set(asset.id, asset)
+        }
+        for (const pad of device.pads ?? []) {
+          const asset = pad.bufferId ? assetOf(pad.bufferId) : undefined
+          if (asset) buffers.set(asset.id, asset)
+        }
+      }
+    }
+    this.rackHost.sync(this.ctx, project, this.strips, buffers)
+  }
+
+  previewRack(trackId: string, pitch: number) {
+    this.unlock()
+    if (this.project) this.sync(this.project, this.assetOf)
+    const when = (this.ctx?.currentTime ?? 0) + 0.03
+    this.rackHost.note(trackId, pitch, 0.8, when)
+    this.rackHost.note(trackId, pitch, 0, when + 0.35)
   }
 
   /** CPU load and master loudness. Loudness is read from the master analyser and includes the master fader. */
@@ -919,13 +944,35 @@ export class AudioEngine {
         const buffer = this.bufferFromAsset(offline, asset)
         this.scheduleAudioClip(offline, strip, buffer, clip, 0, 0, end)
       }
-      for (const clip of track.midiClips) {
-        if (clip.slotOnly) continue
-        for (const note of clip.notes) {
-          const start = beatsToSamples(clip.startBeat + note.startBeat, rate, project.tempo)
-          const dur = beatsToSamples(note.durationBeats, rate, project.tempo) / rate
-          if (start >= end) continue
-          this.scheduleVoice(offline, strip, note, start / rate, dur)
+      if (track.rack) {
+        const events = []
+        for (const clip of track.midiClips) {
+          if (clip.slotOnly) continue
+          for (const note of clip.notes) {
+            const start = beatsToSamples(clip.startBeat + note.startBeat, rate, project.tempo)
+            const dur = beatsToSamples(note.durationBeats, rate, project.tempo)
+            if (start >= end) continue
+            events.push({ sample: Math.max(0, start), pitch: note.pitch, vel: note.velocity })
+            events.push({ sample: Math.min(end - 1, start + dur), pitch: note.pitch, vel: 0 })
+          }
+        }
+        const rendered = renderNotes(track.rack, events, rate, project.tempo, end, assets, project.rackAutomation)
+        const buffer = offline.createBuffer(2, end, rate)
+        buffer.copyToChannel(rendered[0], 0)
+        buffer.copyToChannel(rendered[1], 1)
+        const src = offline.createBufferSource()
+        src.buffer = buffer
+        src.connect(strip.input)
+        src.start(0)
+      } else {
+        for (const clip of track.midiClips) {
+          if (clip.slotOnly) continue
+          for (const note of clip.notes) {
+            const start = beatsToSamples(clip.startBeat + note.startBeat, rate, project.tempo)
+            const dur = beatsToSamples(note.durationBeats, rate, project.tempo) / rate
+            if (start >= end) continue
+            this.scheduleVoice(offline, strip, note, start / rate, dur)
+          }
         }
       }
       const rendered = await offline.startRendering()
@@ -1267,7 +1314,7 @@ export class AudioEngine {
       for (const note of clip.notes) {
         const noteDelay = beatsToSamples(note.startBeat, sr, project.tempo) / sr
         const noteDur = beatsToSamples(note.durationBeats, sr, project.tempo) / sr
-        this.scheduleVoice(this.ctx!, strip, note, when + noteDelay, noteDur, this.sessionNodes.get(track.id))
+        this.scheduleVoice(this.ctx!, strip, note, when + noteDelay, noteDur, track, this.sessionNodes.get(track.id))
       }
       if (!looping) return
       const timer = window.setTimeout(() => schedulePass(when + durSec), Math.max(20, durSec * 1000 - 200))
@@ -1329,7 +1376,7 @@ export class AudioEngine {
           if (noteStart + noteDurSamples <= timelineStart || noteStart >= timelineEnd) continue
           const when = ctxTime + (noteStart - timelineStart) / this.sampleRate
           if (when < ctx.currentTime) continue
-          this.scheduleVoice(ctx, strip, note, when, noteDurSamples / this.sampleRate)
+          this.scheduleVoice(ctx, strip, note, when, noteDurSamples / this.sampleRate, track)
         }
       }
     }
@@ -1416,7 +1463,12 @@ export class AudioEngine {
     }
   }
 
-  private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, bucket?: Stoppable[]) {
+  private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[]) {
+    if (track?.rack && ctx === this.ctx) {
+      this.rackHost.note(track.id, note.pitch, note.velocity, Math.max(when, ctx.currentTime))
+      this.rackHost.note(track.id, note.pitch, 0, Math.max(when, ctx.currentTime) + dur)
+      return
+    }
     if (ctx === this.ctx && when < ctx.currentTime) return
     const osc = ctx.createOscillator()
     const filter = ctx.createBiquadFilter()
@@ -1455,6 +1507,7 @@ export class AudioEngine {
       }
     }
     this.sources = []
+    this.rackHost.allOff()
     this.sessionNodes.clear()
     this.sessionStarted.clear()
     this.sessionClip.clear()

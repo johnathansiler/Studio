@@ -17,6 +17,7 @@ import { ArrangeView } from './ui/ArrangeView'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
 import { PianoRoll } from './ui/PianoRoll'
+import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
 import { VideoDock } from './ui/VideoDock'
@@ -879,15 +880,16 @@ export function App() {
               {store.view === 'mix' && <MixerView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} engine={engine} />}
             </div>
-            {showRoll && form !== 'fold' && <PianoRoll store={store} engine={engine} />}
+            {store.view === 'arrange' && store.rackTrackId && form !== 'fold' && <RackView store={store} engine={engine} trackId={store.rackTrackId} />}
+            {showRoll && form !== 'fold' && !store.rackTrackId && <PianoRoll store={store} engine={engine} />}
           </div>
         )}
-        {form === 'fold' && showRoll && surface === 'studio' && (
+        {form === 'fold' && surface === 'studio' && (showRoll || store.rackTrackId) && (
           <div className="side-editor">
-            <PianoRoll store={store} engine={engine} />
+            {store.rackTrackId ? <RackView store={store} engine={engine} trackId={store.rackTrackId} /> : <PianoRoll store={store} engine={engine} />}
           </div>
         )}
-        {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && showRoll) && (
+        {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && (showRoll || store.rackTrackId)) && (
         <div
           className="dock-slot"
           onPointerDown={(event) => {

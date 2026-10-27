@@ -125,6 +125,8 @@ export function arrangementDigest(project: Project): string {
       midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length, clip.quant ?? null, clip.mode ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null]),
       audioSlots: track.audioSlots ?? null,
       midiSlots: track.midiSlots ?? null,
+      rack: track.rack?.devices.map((device) => [device.id, device.kind, device.params, device.pattern, device.zones.length]),
+      cables: track.rack?.cables.map((cable) => [cable.from, cable.fromPort, cable.to, cable.toPort, cable.amount]),
     })),
   })
 }

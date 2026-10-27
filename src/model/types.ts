@@ -1,3 +1,4 @@
+import type { DevicePreset, RackAutomation, RackPatch, RackState } from './rack'
 import { defaultScale, type ScaleState } from './scale'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
@@ -157,6 +158,8 @@ export interface Track {
   groupId: string | null
   clips: AudioClip[]
   midiClips: MidiClip[]
+  /** Modular instrument rack. Present on instrument tracks. */
+  rack?: RackState
   /** Scene index → clip id. Missing means scene N is clips[N]. */
   audioSlots?: (string | null)[]
   midiSlots?: (string | null)[]
@@ -181,6 +184,10 @@ export interface Project {
   metronomeEnabled: boolean
   countIn: boolean
   snap: boolean
+  devicePresets: DevicePreset[]
+  rackPatches: RackPatch[]
+  /** Parameter lanes for devices in the modular rack. */
+  rackAutomation: RackAutomation[]
   /** Global clip launch grid. A clip quant overrides it. */
   launchQuant?: LaunchQuant
   /** 0 records until stop. A positive count trims a session take to that many bars. */
@@ -261,6 +268,9 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     metronomeEnabled: true,
     countIn: true,
     snap: true,
+    devicePresets: [],
+    rackPatches: [],
+    rackAutomation: [],
     launchQuant: '1bar',
     recordBars: 4,
     scale: defaultScale(),
