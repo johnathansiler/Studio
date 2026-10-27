@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { oversized, MAX_DIST_BYTES } from '../../scripts/check-size.ts'
+import { ORT_VERSION, ORT_WASM_BASE } from '../audio/stems/runtime'
 import {
   HTDEMUCS,
   HTDEMUCS_6,
@@ -203,6 +206,17 @@ describe('stem separation', () => {
     const mode: StemMode = '4'
     expect(modeAllowed(mode, stemBudget(8, false, false))).toBe(true)
     expect(etaSeconds(RATE * 180, RATE, 0, 28)).toBeGreaterThan(60)
+  })
+
+  it('loads the ONNX runtime from the pinned jsDelivr release', () => {
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { dependencies: Record<string, string> }
+    expect(pkg.dependencies['onnxruntime-web']).toBe(ORT_VERSION)
+    expect(ORT_WASM_BASE).toBe(`https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`)
+    const worker = readFileSync('src/audio/stems/worker.ts', 'utf8')
+    expect(worker).toContain('ORT_WASM_BASE')
+    expect(worker).not.toContain('location.origin')
+    expect(oversized([{ path: 'dist/app.js', size: MAX_DIST_BYTES }])).toEqual([])
+    expect(oversized([{ path: 'dist/ort-wasm-simd-threaded.wasm', size: 15 * 1024 * 1024 }])).toHaveLength(1)
   })
 })
 

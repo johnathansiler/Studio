@@ -1,5 +1,6 @@
 import { MODEL_RATE, modelFor, separateMix, type StemCheckpoint, type StemMode } from './engine'
 import { loadWeights } from './load'
+import { ORT_WASM_BASE } from './runtime'
 
 interface StartMessage {
   type: 'start'
@@ -34,7 +35,7 @@ async function runtime(webgpu: boolean): Promise<OrtModule> {
   const ort = (webgpu ? await import('onnxruntime-web/webgpu') : await import('onnxruntime-web/wasm')) as unknown as OrtModule
   ort.env.wasm.numThreads = 1
   ort.env.wasm.proxy = false
-  ort.env.wasm.wasmPaths = `${self.location.origin}/ort/`
+  ort.env.wasm.wasmPaths = ORT_WASM_BASE
   return ort
 }
 
