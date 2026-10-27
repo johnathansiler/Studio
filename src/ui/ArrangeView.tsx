@@ -183,13 +183,13 @@ export function ArrangeView({
                 store.addMidiClip(track.id, Math.floor(beat))
               }}
             >
-              {track.clips.map((clip) => (
+              {track.clips.filter((clip) => !clip.slotOnly).map((clip) => (
                 <ClipView key={clip.id} store={store} clip={clip} trackId={track.id} px={px} onSplit={() => store.splitSelected(engine.currentTimelineSample())} />
               ))}
-              {track.type === 'midi' && track.midiClips.length === 0 && (
+              {track.type === 'midi' && track.midiClips.every((clip) => clip.slotOnly) && (
                 <button type="button" className="lane-add" aria-label="Add clip" onClick={() => onOpenPiano(track.id)}>+</button>
               )}
-              {track.midiClips.map((clip) => {
+              {track.midiClips.filter((clip) => !clip.slotOnly).map((clip) => {
                 const left = ((clip.startBeat * 60) / project.tempo) * px
                 const widthPx = ((clip.durationBeats * 60) / project.tempo) * px
                 return (

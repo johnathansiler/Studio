@@ -2631,6 +2631,10 @@ export class SessionClient {
       void this.finishLocalTake(payload.timelineSample)
       return
     }
+    if (payload.action === 'launch' || payload.action === 'scene' || payload.action === 'stop-clips' || payload.action === 'back') {
+      this.onControl?.(payload)
+      return
+    }
     if (payload.action === 'play' || payload.action === 'stop' || payload.action === 'seek') {
       this.onControl?.(payload)
       return

@@ -1,12 +1,24 @@
-import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
-import { demoMidiNotes } from '../model/demo'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
 import { findCycle, MASTER } from '../audio/routing'
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
-import { createEmptyProject, defaultInsert, makeTrack, uid, TRACK_COLORS } from '../model/types'
-import type { AudioAsset, AudioClip, InsertType, MidiClip, MidiNote, PluginInstance, Project, Track } from '../model/types'
+import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
+import { demoMidiNotes } from '../model/demo'
+import {
+  clipById,
+  dueFollow,
+  followTarget,
+  quantizeSample,
+  retrigger,
+  sceneClip,
+  sceneIndex,
+  SESSION_SCENES,
+  type SessionClock,
+  type TransportSlot,
+} from '../model/launch'
 import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleState } from '../model/scale'
-import { beatsToSamples, quartersPerBar } from '../model/time'
+import { createEmptyProject, defaultInsert, makeTrack, uid, TRACK_COLORS } from '../model/types'
+import type { AudioAsset, AudioClip, FollowAction, InsertType, LaunchMode, LaunchQuant, MidiClip, MidiNote, PluginInstance, Project, Track } from '../model/types'
+import { beatsToSamples, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
 
 export type WorkspaceView = 'arrange' | 'mix' | 'session'
@@ -29,7 +41,15 @@ export class ProjectStore {
   selectedNoteIds: string[] = []
   view: WorkspaceView = 'arrange'
   launched: Record<string, string | null> = {}
+  launchAt: Record<string, number> = {}
+  launchGen: Record<string, number> = {}
+  /** Armed empty slot for the next recording. */
+  sessionSlot: { trackId: string; scene: number } | null = null
+  sessionEdit: { trackId: string; scene: number } | null = null
+  captureLog: { trackId: string; clipId: string; sample: number }[] = []
+  pendingTransport: Record<string, unknown> | null = null
   transportMode: 'arrangement' | 'session' = 'arrangement'
+  private followed: Record<string, true> = {}
   /** Guests mirror the host arrangement and cannot edit it. */
   remoteFollow = false
   /** Letter keys play notes while this is on, so tap-tempo stays off T. */
@@ -679,21 +699,314 @@ export class ProjectStore {
     this.project.scale = { ...scale, lastVoicing: voiced }
   }
 
-  launch(trackId: string, clipId: string | null) {
-    this.launched = { ...this.launched, [trackId]: clipId }
+  launch(trackId: string, clipId: string | null, nowSample = 0) {
+    if (this.remoteFollow) return
+    const track = this.track(trackId)
+    const clip = track && clipId ? clipById(track, clipId) : null
+    if (clipId && !clip) return
+    const mode = clip?.mode ?? 'toggle'
+    const same = !!clipId && this.launched[trackId] === clipId
+    const busy = !!this.launched[trackId]
+    const decision = !clipId ? 'stop' : retrigger(mode, mode === 'toggle' ? same : busy, !!clip?.legato)
+    if (decision === 'hold') return
+    const quant = clip?.quant ?? this.project.launchQuant ?? '1bar'
+    const at = quantizeSample(nowSample, quant, this.project.sampleRate, this.project.tempo, this.project.timeSignature)
+    const launched = { ...this.launched }
+    const launchAt = { ...this.launchAt }
+    const launchGen = { ...this.launchGen }
+    if (decision === 'stop') {
+      launched[trackId] = null
+      delete launchAt[trackId]
+    } else if (clipId) {
+      launchGen[trackId] = (launchGen[trackId] || 0) + 1
+      launched[trackId] = clipId
+      launchAt[trackId] = at
+      this.captureLog = [...this.captureLog, { trackId, clipId, sample: at }]
+    }
+    this.launched = launched
+    this.launchAt = launchAt
+    this.launchGen = launchGen
     this.transportMode = 'session'
+    if (track && clip) this.sessionEdit = { trackId, scene: sceneIndex(track, clip.id) }
+    this.pendingTransport = {
+      action: 'launch',
+      trackId,
+      clipId: decision === 'stop' ? null : clipId,
+      timelineSample: decision === 'stop' ? nowSample : at,
+      gen: launchGen,
+    }
+    this.emit()
+  }
+
+  launchScene(scene: number, nowSample = 0) {
+    if (this.remoteFollow) return
+    const quant = this.project.launchQuant ?? '1bar'
+    const at = quantizeSample(nowSample, quant, this.project.sampleRate, this.project.tempo, this.project.timeSignature)
+    const launched = { ...this.launched }
+    const launchAt = { ...this.launchAt }
+    const launchGen = { ...this.launchGen }
+    const slots: TransportSlot[] = []
+    for (const track of this.project.tracks) {
+      const clip = sceneClip(track, scene)
+      if (!clip) {
+        launched[track.id] = null
+        delete launchAt[track.id]
+        slots.push({ trackId: track.id, clipId: null })
+        continue
+      }
+      const same = launched[track.id] === clip.id
+      const decision = retrigger(clip.mode ?? 'toggle', same, !!clip.legato)
+      if (decision === 'hold') {
+        slots.push({ trackId: track.id, clipId: launched[track.id] ?? null, timelineSample: launchAt[track.id] })
+        continue
+      }
+      if (decision === 'stop') {
+        launched[track.id] = null
+        delete launchAt[track.id]
+        slots.push({ trackId: track.id, clipId: null })
+        continue
+      }
+      launchGen[track.id] = (launchGen[track.id] || 0) + 1
+      launched[track.id] = clip.id
+      launchAt[track.id] = at
+      this.captureLog = [...this.captureLog, { trackId: track.id, clipId: clip.id, sample: at }]
+      slots.push({ trackId: track.id, clipId: clip.id, timelineSample: at })
+    }
+    this.launched = launched
+    this.launchAt = launchAt
+    this.launchGen = launchGen
+    this.transportMode = 'session'
+    this.view = 'session'
+    this.pendingTransport = { action: 'scene', scene, timelineSample: at, slots, gen: launchGen }
+    this.emit()
+  }
+
+  /** Advance follow actions that have reached their boundary. One step per call. */
+  tickFollow(nowSample: number) {
+    if (this.remoteFollow || this.transportMode !== 'session') return
+    const launched = { ...this.launched }
+    const launchAt = { ...this.launchAt }
+    const launchGen = { ...this.launchGen }
+    let changed = false
+    for (const [trackId, clipId] of Object.entries(this.launched)) {
+      if (!clipId) continue
+      const track = this.track(trackId)
+      const clip = track ? clipById(track, clipId) : null
+      if (!track || !clip || !clip.follow || clip.follow === 'none') continue
+      const start = this.launchAt[trackId] ?? 0
+      const key = `${trackId}:${clipId}:${start}`
+      if (this.followed[key]) continue
+      const beats = clip.followBeats ?? quartersPerBar(this.project.timeSignature)
+      if (!dueFollow(start, beats, nowSample, this.project.sampleRate, this.project.tempo)) continue
+      this.followed = { ...this.followed, [key]: true }
+      const scene = sceneIndex(track, clipId)
+      const target = followTarget(clip.follow, scene, SESSION_SCENES)
+      changed = true
+      if (target === 'stop' || target == null) {
+        launched[trackId] = null
+        delete launchAt[trackId]
+        continue
+      }
+      const next = sceneClip(track, target)
+      if (!next) {
+        launched[trackId] = null
+        delete launchAt[trackId]
+        continue
+      }
+      const boundary = Math.round(start + beatsToSamples(beats, this.project.sampleRate, this.project.tempo))
+      launchGen[trackId] = (launchGen[trackId] || 0) + 1
+      launched[trackId] = next.id
+      launchAt[trackId] = boundary
+      this.captureLog = [...this.captureLog, { trackId, clipId: next.id, sample: boundary }]
+    }
+    if (!changed) return
+    this.launched = launched
+    this.launchAt = launchAt
+    this.launchGen = launchGen
+    const slots: TransportSlot[] = this.project.tracks.map((track) => ({
+      trackId: track.id,
+      clipId: launched[track.id] ?? null,
+      timelineSample: launchAt[track.id],
+    }))
+    this.pendingTransport = { action: 'scene', timelineSample: nowSample, slots, gen: launchGen }
     this.emit()
   }
 
   stopSession() {
+    if (this.remoteFollow) return
     this.launched = {}
+    this.launchAt = {}
+    this.transportMode = 'session'
+    this.pendingTransport = { action: 'stop-clips' }
     this.emit()
   }
 
   armArrangement() {
     this.launched = {}
+    this.launchAt = {}
     this.transportMode = 'arrangement'
+    this.pendingTransport = { action: 'back' }
     this.emit()
+  }
+
+  enterSession() {
+    if (this.remoteFollow) return
+    this.transportMode = 'session'
+    this.view = 'session'
+    this.emit()
+  }
+
+  backToArrangement() {
+    if (this.remoteFollow) return
+    this.launched = {}
+    this.launchAt = {}
+    this.transportMode = 'arrangement'
+    this.view = 'arrange'
+    this.pendingTransport = { action: 'back' }
+    this.emit()
+  }
+
+  replaceSession(next: SessionClock) {
+    this.launched = { ...next.launched }
+    this.launchAt = { ...next.at }
+    this.launchGen = { ...next.gen }
+    this.transportMode = next.mode
+    if (next.mode === 'session') this.view = 'session'
+    if (next.mode === 'arrangement') this.view = 'arrange'
+    this.pendingTransport = null
+    this.emit()
+  }
+
+  takePendingTransport() {
+    const pending = this.pendingTransport
+    this.pendingTransport = null
+    return pending
+  }
+
+  armSlot(trackId: string, scene: number) {
+    this.sessionSlot = { trackId, scene }
+    this.sessionEdit = { trackId, scene }
+    const track = this.track(trackId)
+    const clip = track ? sceneClip(track, scene) : null
+    this.selectedTrackId = trackId
+    if (clip && track?.type === 'midi') {
+      this.selectedMidiClipId = clip.id
+      this.selectedClipId = null
+    } else if (clip) {
+      this.selectedClipId = clip.id
+      this.selectedMidiClipId = null
+    }
+    this.emit()
+  }
+
+  setLaunchQuant(quant: LaunchQuant) {
+    this.mutate(() => {
+      this.project.launchQuant = quant
+    })
+  }
+
+  setRecordBars(bars: number) {
+    this.mutate(() => {
+      this.project.recordBars = Math.max(0, Math.round(bars))
+    })
+  }
+
+  setClipLaunch(
+    trackId: string,
+    clipId: string,
+    patch: Partial<{ quant: LaunchQuant; mode: LaunchMode; loop: boolean; legato: boolean; follow: FollowAction; followBeats: number; warp: boolean }>,
+  ) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      const clip = track ? clipById(track, clipId) : null
+      if (!clip) return
+      Object.assign(clip, patch)
+    })
+  }
+
+  prepareMidiSlot(trackId: string, scene: number) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      this.ensureSlots(track, scene)
+      const existingId = track.midiSlots?.[scene]
+      let clip = existingId ? track.midiClips.find((item) => item.id === existingId) : undefined
+      if (!clip) {
+        const bars = this.project.recordBars ?? 0
+        const beats = bars > 0 ? bars * quartersPerBar(this.project.timeSignature) : 4
+        clip = {
+          id: uid('midi'),
+          name: 'Clip',
+          startBeat: 0,
+          durationBeats: beats,
+          notes: [],
+          slotOnly: true,
+          loop: true,
+        }
+        track.midiClips.push(clip)
+        track.midiSlots![scene] = clip.id
+      }
+      this.selectedMidiClipId = clip.id
+      this.selectedTrackId = trackId
+      this.sessionEdit = { trackId, scene }
+    })
+  }
+
+  placeInSlot(trackId: string, scene: number, clip: AudioClip) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'audio') return
+      this.ensureSlots(track, scene)
+      track.clips.push(clip)
+      track.audioSlots![scene] = clip.id
+      this.selectedClipId = clip.id
+      this.selectedTrackId = trackId
+      this.sessionSlot = null
+    })
+  }
+
+  captureToArrangement() {
+    if (this.remoteFollow || !this.captureLog.length) return
+    const events = this.captureLog
+    this.captureLog = []
+    this.mutate(() => {
+      for (const event of events) {
+        const track = this.track(event.trackId)
+        if (!track) continue
+        const audio = track.clips.find((clip) => clip.id === event.clipId)
+        if (audio) {
+          track.clips.push({
+            ...audio,
+            id: uid('clip'),
+            name: audio.name,
+            startSample: Math.max(0, Math.round(event.sample)),
+            slotOnly: false,
+          })
+        }
+        const midi = track.midiClips.find((clip) => clip.id === event.clipId)
+        if (midi) {
+          track.midiClips.push({
+            ...midi,
+            id: uid('midi'),
+            name: midi.name,
+            startBeat: samplesToBeats(event.sample, this.project.sampleRate, this.project.tempo),
+            slotOnly: false,
+            notes: midi.notes.map((note) => ({ ...note, id: uid('note') })),
+          })
+        }
+      }
+    })
+  }
+
+  private ensureSlots(track: Track, scene: number) {
+    const scenes = Math.max(SESSION_SCENES, scene + 1)
+    if (track.type === 'audio') {
+      if (!track.audioSlots) track.audioSlots = Array.from({ length: scenes }, (_, index) => track.clips[index]?.id ?? null)
+      while (track.audioSlots.length < scenes) track.audioSlots.push(null)
+      return
+    }
+    if (!track.midiSlots) track.midiSlots = Array.from({ length: scenes }, (_, index) => track.midiClips[index]?.id ?? null)
+    while (track.midiSlots.length < scenes) track.midiSlots.push(null)
   }
 
   loadProject(project: Project, buffers: Map<string, AudioAsset>) {

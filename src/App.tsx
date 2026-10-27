@@ -10,6 +10,7 @@ import { readIdentity, writeIdentity } from './storage/identity'
 import { ProjectStore, seedDemoProject } from './state/store'
 import { decodeWavPCM, encodeWav, linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
+import { applyTransportLaunch, recordedLength } from './model/launch'
 import { beatsToSamples, countInSeconds, samplesToBeats } from './model/time'
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { ArrangeView } from './ui/ArrangeView'
@@ -90,6 +91,33 @@ export function App() {
     })
     session.setControlHandler((cmd) => {
       const action = String(cmd.action || '')
+      if (action === 'launch' || action === 'scene' || action === 'stop-clips' || action === 'back') {
+        if (session.state.role === 'host') return
+        const next = applyTransportLaunch(
+          { launched: store.launched, at: store.launchAt, gen: store.launchGen, mode: store.transportMode },
+          {
+            action,
+            trackId: cmd.trackId ? String(cmd.trackId) : undefined,
+            clipId: cmd.clipId == null || cmd.clipId === '' ? null : String(cmd.clipId),
+            timelineSample: Number(cmd.timelineSample),
+            slots: Array.isArray(cmd.slots) ? (cmd.slots as { trackId: string; clipId: string | null; timelineSample?: number }[]) : undefined,
+            gen: cmd.gen && typeof cmd.gen === 'object' ? (cmd.gen as Record<string, number>) : undefined,
+          },
+        )
+        const stopped = engine.status === 'stopped'
+        store.replaceSession(next)
+        if (action === 'back' || action === 'stop-clips') return
+        if (stopped && next.mode === 'session' && Object.values(next.launched).some(Boolean)) {
+          const localPerf = guestFollowStart({
+            hostPerfAtSample: Number(cmd.hostPerfAtSample) || performance.now(),
+            clockOffsetMs: session.hostOffsetMs(),
+            oneWayMs: session.primaryOneWay()?.ms ?? 40,
+            nowPerf: performance.now(),
+          })
+          void engine.playAtPerf(Number(cmd.timelineSample) || 0, localPerf, 'session')
+        }
+        return
+      }
       if (session.state.role === 'host') {
         if (action === 'play') void playFrom(engine.currentTimelineSample())
         else if (action === 'stop') void stop()
@@ -132,20 +160,60 @@ export function App() {
       setJoinOpen(false)
     }
     engine.sync(store.project, (id) => store.buffers.get(id))
-    return store.subscribe(() => {
+    const unsub = store.subscribe(() => {
       engine.sync(store.project, (id) => store.buffers.get(id))
       engine.setLaunches(store.launched)
+      engine.setLaunchAt(store.launchAt)
+      engine.setLaunchGen(store.launchGen)
       if (session.state.role === 'host') {
         window.clearTimeout(publishTimer.current)
         publishTimer.current = window.setTimeout(() => session.publishArrangement(), 40)
       }
-      const key = `${store.transportMode}:${JSON.stringify(store.launched)}`
-      if (store.transportMode === 'session' && key !== launchKey.current) {
+      const key = `${store.transportMode}:${JSON.stringify(store.launched)}:${JSON.stringify(store.launchAt)}:${JSON.stringify(store.launchGen)}`
+      const pending = store.takePendingTransport()
+      const playing = engine.status === 'playing' || engine.status === 'recording'
+      if (session.state.role !== 'guest' && pending) {
+        if (!playing && store.transportMode === 'session' && Object.values(store.launched).some(Boolean)) {
+          void playFrom(engine.positionSamples, 'session')
+        } else {
+          const at = Number(pending.timelineSample)
+          const sample = Number.isFinite(at) ? at : Math.round(engine.currentTimelineSample())
+          const lead = scheduleLeadMs(session.primaryOneWay()?.ms ?? 40)
+          session.broadcastTransport({
+            ...pending,
+            timelineSample: sample,
+            hostPerfAtSample: engine.perfAtTimeline(sample) ?? performance.now() + lead,
+            tempo: store.project.tempo,
+            timeSignature: store.project.timeSignature,
+            mode: store.transportMode,
+          })
+          if (playing && store.transportMode === 'session') {
+            if (engine.currentMode() !== 'session') engine.adoptSession()
+            else engine.kickSession()
+          } else if (playing && pending.action === 'back') engine.adoptArrangement()
+        }
+      }
+      if (key !== launchKey.current) {
         launchKey.current = key
-        void playFrom(engine.positionSamples, 'session')
-      } else launchKey.current = key
+        if (session.state.role === 'guest') {
+          if (store.transportMode === 'arrangement') {
+            if (playing && engine.currentMode() === 'session') engine.adoptArrangement()
+          } else if (playing && engine.currentMode() !== 'session') engine.adoptSession()
+          else if (playing) engine.kickSession()
+        }
+      }
       setVersion((value) => value + 1)
     })
+    const followTimer = window.setInterval(() => {
+      if (session.state.role === 'guest') return
+      if (store.transportMode !== 'session') return
+      if (engine.status !== 'playing' && engine.status !== 'recording') return
+      store.tickFollow(engine.currentTimelineSample())
+    }, 40)
+    return () => {
+      unsub()
+      window.clearInterval(followTimer)
+    }
   }, [store, engine, session])
 
   useEffect(() => {
@@ -264,6 +332,9 @@ export function App() {
                 hostPerfAtSample: performance.now(),
                 mode: engine.currentMode(),
                 tempo: store.project.tempo,
+                launches: store.launched,
+                launchAt: store.launchAt,
+                launchGen: store.launchGen,
               })
             }
           }
@@ -433,6 +504,9 @@ export function App() {
       countIn: counting,
       countInMs: Math.round(countMs),
       timeSignature: store.project.timeSignature,
+      launches: store.launched,
+      launchAt: store.launchAt,
+      launchGen: store.launchGen,
     })
     if (counting) engine.armCountIn(store.project.tempo, store.project.timeSignature)
     await engine.playAtPerf(sample, hostPerf, mode)
@@ -440,6 +514,14 @@ export function App() {
 
   async function followPlay(cmd: Record<string, unknown>) {
     await ready()
+    if (cmd.launches && typeof cmd.launches === 'object') {
+      store.replaceSession({
+        launched: cmd.launches as Record<string, string | null>,
+        at: cmd.launchAt && typeof cmd.launchAt === 'object' ? (cmd.launchAt as Record<string, number>) : {},
+        gen: cmd.launchGen && typeof cmd.launchGen === 'object' ? (cmd.launchGen as Record<string, number>) : {},
+        mode: cmd.mode === 'session' ? 'session' : 'arrangement',
+      })
+    }
     const counting = Boolean(cmd.countIn)
     const tempo = Number(cmd.tempo) || store.project.tempo
     const raw = cmd.timeSignature as { numerator?: number; denominator?: number } | undefined
@@ -491,21 +573,31 @@ export function App() {
         channels: capture.channels,
       })
       if (!track) continue
+      const slot = store.sessionSlot
+      const intoSlot = slot && slot.trackId === track.id && capture.source === 'local'
+      const durationSamples = intoSlot
+        ? recordedLength(capture.channels[0].length, store.project.recordBars ?? 0, capture.sampleRate, store.project.tempo, store.project.timeSignature)
+        : capture.channels[0].length
       const clip: AudioClip = {
         id: uid('clip'),
         name: capture.source === 'guide' ? `${track.name} guide` : track.name,
         bufferId,
-        startSample: capture.startSample,
+        startSample: intoSlot ? 0 : capture.startSample,
         offsetSamples: 0,
-        durationSamples: capture.channels[0].length,
+        durationSamples,
         fadeInSamples: 64,
         fadeOutSamples: 128,
         gain: 1,
         source: capture.source === 'guide' ? 'guide' : 'local',
         peerId: capture.peerId,
         takeId: capture.takeId,
+        durationBeats: intoSlot ? samplesToBeats(durationSamples, capture.sampleRate, store.project.tempo) : undefined,
+        warp: intoSlot ? true : undefined,
+        loop: intoSlot ? true : undefined,
+        slotOnly: intoSlot ? true : undefined,
       }
-      store.addAudioClip(track.id, clip)
+      if (intoSlot && slot) store.placeInSlot(track.id, slot.scene, clip)
+      else store.addAudioClip(track.id, clip)
       if (capture.source === 'guide' && isSilentTake(capture.channels)) {
         store.toast(`${track.name} guide is silent. Video and the live mic need a connected media path. The aligned take replaces this if the upload arrives.`, 'warn')
       }
@@ -525,6 +617,13 @@ export function App() {
     void engine.resume()
     if (engine.status === 'recording' || engine.status === 'counting-in') {
       await stop()
+      return
+    }
+    const slot = store.sessionSlot
+    const slotTrack = slot ? store.project.tracks.find((track) => track.id === slot.trackId) : undefined
+    if (slot && slotTrack?.type === 'midi') {
+      store.prepareMidiSlot(slot.trackId, slot.scene)
+      if (engine.status !== 'playing') await playFrom(engine.currentTimelineSample(), 'session')
       return
     }
     await ready()
@@ -684,7 +783,8 @@ export function App() {
     await ready()
   }
 
-  const showRoll = store.view === 'arrange' && store.selectedMidiClipId && !pianoOpen
+  const armedTrack = store.sessionSlot ? store.project.tracks.find((track) => track.id === store.sessionSlot?.trackId) : undefined
+  const showRoll = !!store.selectedMidiClipId && !pianoOpen && (store.view === 'arrange' || (store.view === 'session' && armedTrack?.type === 'midi'))
 
   function openPiano(trackId: string, clipId?: string) {
     const beat = samplesToBeats(engine.positionSamples, store.project.sampleRate, store.project.tempo)
@@ -766,6 +866,8 @@ export function App() {
           onStop={() => void stop()}
           onRecord={() => void record()}
           onSeek={(sample) => void locate(sample)}
+          onSession={() => { setPhonePane('edit'); setSurface('studio'); store.enterSession() }}
+          onArrange={() => { setPhonePane('edit'); setSurface('studio'); store.backToArrangement() }}
           onPiano={(trackId) => openPiano(trackId)}
         />
       )}
@@ -775,7 +877,7 @@ export function App() {
             <div className="editor">
               {store.view === 'arrange' && <ArrangeView store={store} engine={engine} session={session} onSeek={(sample) => void locate(sample)} onOpenPiano={openPiano} />}
               {store.view === 'mix' && <MixerView store={store} engine={engine} />}
-              {store.view === 'session' && <SessionView store={store} />}
+              {store.view === 'session' && <SessionView store={store} engine={engine} />}
             </div>
             {showRoll && form !== 'fold' && <PianoRoll store={store} engine={engine} />}
           </div>

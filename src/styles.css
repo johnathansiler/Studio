@@ -237,14 +237,24 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .knobs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; color: var(--muted); }
 .knobs label { display: flex; flex-direction: column; gap: 3px; }
 
-.session-grid { height: 100%; overflow: auto; padding: 16px; background: #121a16; }
-.session-grid table { border-collapse: separate; border-spacing: 6px; }
+.session-grid { height: 100%; overflow: auto; padding: 12px; background: #121a16; }
+.session-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.session-bar select, .mode-btn {
+  min-height: 36px; border-radius: 8px; border: 1px solid var(--line); background: #18231d; color: var(--text); padding: 0 10px;
+}
+.mode-btn.on { border-color: var(--amber); color: var(--amber); }
+.session-grid table { border-collapse: separate; border-spacing: 6px; width: 100%; }
 .session-grid th { font-weight: 560; font-size: 12px; color: var(--muted); text-align: left; }
+.scene-launch {
+  width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted);
+}
 .slot {
-  width: 140px; height: 64px; border-radius: 10px; border: 1px solid var(--line); background: #18231d; color: var(--muted);
+  width: 100%; min-width: 88px; height: 64px; border-radius: 10px; border: 1px solid var(--line); background: #18231d; color: var(--muted);
+  touch-action: manipulation;
 }
 .slot.filled { color: var(--accent-ink); font-weight: 640; }
 .slot.live { outline: 2px solid var(--amber); }
+.slot.armed { border-color: var(--rec); }
 
 .piano {
   height: 248px; border-top: 1px solid var(--line); display: grid; grid-template-rows: auto minmax(0, 1fr);
@@ -483,6 +493,11 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 .shell.phone .mixer,
 .shell.phone .session-grid,
 .shell.phone .arrange { overflow: auto; }
+.shell.phone .session-grid table { table-layout: fixed; }
+.shell.phone .slot { min-width: 0; min-height: 48px; height: 48px; }
+.shell.phone .scene-launch,
+.shell.phone .session-bar select,
+.shell.phone .mode-btn { min-width: 44px; min-height: 44px; }
 .shell.phone .dock {
   display: flex;
   flex-direction: column;
