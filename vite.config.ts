@@ -1,28 +1,37 @@
-import { copyFileSync, mkdirSync } from 'node:fs'
+import { rmSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { defineConfig } from 'vitest/config'
+import { defineConfig, type Plugin } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
-const ortFiles = [
-  'ort-wasm-simd-threaded.wasm',
-  'ort-wasm-simd-threaded.mjs',
-  'ort-wasm-simd-threaded.jsep.wasm',
-  'ort-wasm-simd-threaded.jsep.mjs',
-]
+const root = dirname(fileURLToPath(import.meta.url))
 
-function ortAssets() {
-  const root = dirname(fileURLToPath(import.meta.url))
-  const copy = () => {
-    const to = resolve(root, 'public/ort')
-    mkdirSync(to, { recursive: true })
-    for (const name of ortFiles) copyFileSync(resolve(root, 'node_modules/onnxruntime-web/dist', name), resolve(to, name))
+/** The external ONNX Runtime build fetches WASM from wasmPaths. Refuse a bundled copy. */
+function dropBundledOrt(): Plugin {
+  return {
+    name: 'drop-bundled-ort',
+    buildStart() {
+      rmSync(resolve(root, 'public/ort'), { recursive: true, force: true })
+    },
+    generateBundle(_options, bundle) {
+      for (const [fileName, item] of Object.entries(bundle)) {
+        const name = item.fileName || fileName
+        if (name.endsWith('.wasm') || name.includes('ort-wasm')) {
+          this.error(`ONNX Runtime files must not ship in the build (${name}). They load from jsDelivr.`)
+        }
+      }
+    },
   }
-  return { name: 'ort-assets', buildStart: copy, configureServer: copy }
 }
 
 export default defineConfig({
-  plugins: [react(), ortAssets()],
+  plugins: [react(), dropBundledOrt()],
+  resolve: {
+    alias: [
+      { find: 'onnxruntime-web/wasm', replacement: resolve(root, 'node_modules/onnxruntime-web/dist/ort.wasm.min.mjs') },
+      { find: 'onnxruntime-web/webgpu', replacement: resolve(root, 'node_modules/onnxruntime-web/dist/ort.webgpu.min.mjs') },
+    ],
+  },
   worker: {
     // The bounce worker loads plugins with dynamic import, which Rollup cannot emit as iife.
     format: 'es',
