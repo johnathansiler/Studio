@@ -393,6 +393,7 @@ export class AudioEngine {
     }
     applyInserts(this.ctx, this.masterStrip, project.masterInserts)
     this.applyMasterGain()
+    this.rack.assetOf = assetOf
     this.rack.clock = () => this.currentTimelineSample()
     this.rack.route(this.ctx, project, this.strips, this.masterStrip, this.localBus, this.remoteBus)
     this.routeLocalMic()
@@ -491,6 +492,16 @@ export class AudioEngine {
 
   spectrum(pluginId: string) {
     return this.rack.spectrum(pluginId)
+  }
+
+  previewSample(pluginId: string, note: number) {
+    this.unlock()
+    this.rack.trigger(pluginId, note, 0.85)
+    window.setTimeout(() => this.rack.trigger(pluginId, note, 0), 280)
+  }
+
+  takeLoop(pluginId: string) {
+    return this.rack.keptLoop(pluginId)
   }
 
   meter(pluginId: string) {

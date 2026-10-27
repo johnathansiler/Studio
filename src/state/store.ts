@@ -1,6 +1,26 @@
 import { MASTERING_IDS } from '../audio/master/assistant'
 import { scheduleStretchCommit, stretchCacheKey } from '../audio/stretch/commit'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
+import {
+  detectRoot,
+  emptyLooper,
+  emptySampler,
+  fadeChannel,
+  makeZone,
+  mixTakes,
+  nextBar,
+  normalizeChannel,
+  reverseChannel,
+  sliceBeats,
+  sliceEven,
+  sliceTransients,
+  slicesToNotes,
+  snapZero,
+  syncedLoopSamples,
+  tempoFromLoop,
+  trimSilence,
+  type LoopTake,
+} from '../audio/sample/engine'
 import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
 import { findCycle, MASTER } from '../audio/routing'
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
@@ -477,6 +497,178 @@ export class ProjectStore {
       if (patch.wet != null) plugin.wet = Math.min(1, Math.max(0, patch.wet))
       if (patch.sidechain != null) plugin.sidechain = patch.sidechain
       if (patch.params) plugin.params = { ...plugin.params, ...patch.params }
+      if (patch.sampler) plugin.sampler = patch.sampler
+      if (patch.looper) plugin.looper = patch.looper
+    })
+  }
+
+  setSampleBuffer(trackId: string | 'master', pluginId: string, bufferId: string) {
+    this.mutate(() => {
+      const plugin = this.instrument(trackId, pluginId)
+      if (!plugin?.sampler) return
+      plugin.sampler.bufferId = bufferId
+      const channel = this.buffers.get(bufferId)?.channels[0]
+      if (channel) plugin.sampler.root = detectRoot(channel, this.buffers.get(bufferId)?.sampleRate || this.project.sampleRate)
+    })
+  }
+
+  editSample(trackId: string | 'master', pluginId: string, op: 'norm' | 'reverse' | 'trim' | 'fade' | 'snap') {
+    this.mutate(() => {
+      const plugin = this.instrument(trackId, pluginId)
+      const sampler = plugin?.sampler
+      if (!plugin || !sampler?.bufferId) return
+      const asset = this.buffers.get(sampler.bufferId)
+      const channel = asset?.channels[0]
+      if (!asset || !channel) return
+      const rate = asset.sampleRate
+      let next = channel
+      if (op === 'norm') next = normalizeChannel(channel)
+      else if (op === 'reverse') next = reverseChannel(channel)
+      else if (op === 'trim') next = trimSilence(channel)
+      else if (op === 'fade') next = fadeChannel(channel, Math.round(sampler.fadeIn * channel.length), Math.round((sampler.fadeOut || 0.01) * channel.length))
+      else {
+        const start = snapZero(channel, Math.round(sampler.start * channel.length))
+        const end = snapZero(channel, Math.round(sampler.end * channel.length))
+        sampler.start = start / channel.length
+        sampler.end = Math.max(sampler.start + 2 / channel.length, end / channel.length)
+        sampler.loopStart = snapZero(channel, Math.round(sampler.loopStart * channel.length)) / channel.length
+        sampler.loopEnd = snapZero(channel, Math.round(sampler.loopEnd * channel.length)) / channel.length
+        return
+      }
+      const id = uid('smp')
+      this.buffers.set(id, { id, name: asset.name, sampleRate: rate, channels: [next] })
+      sampler.bufferId = id
+      sampler.slices = []
+    })
+  }
+
+  chopSample(trackId: string | 'master', pluginId: string, mode: 'transient' | 'grid' | 'beat') {
+    this.mutate(() => {
+      const plugin = this.instrument(trackId, pluginId)
+      const sampler = plugin?.sampler
+      if (!plugin || !sampler?.bufferId) return
+      const asset = this.buffers.get(sampler.bufferId)
+      const channel = asset?.channels[0]
+      if (!channel) return
+      const rate = asset?.sampleRate || this.project.sampleRate
+      const spanStart = Math.floor(sampler.start * channel.length)
+      const spanEnd = Math.max(spanStart + 2, Math.floor(sampler.end * channel.length))
+      const region = channel.subarray(spanStart, Math.min(channel.length, spanEnd))
+      const cuts = mode === 'transient'
+        ? sliceTransients(region, rate, plugin.params.sensitivity ?? 0.45)
+        : mode === 'beat'
+          ? sliceBeats(region.length, rate, this.project.tempo, 1)
+          : sliceEven(region.length, 16)
+      sampler.slices = cuts.slice(0, 16).map((cut, index) => makeZone(uid('zn'), sampler.bufferId, spanStart + cut.start, spanStart + cut.end, channel.length, index))
+    })
+  }
+
+  exportSlices(trackId: string | 'master', pluginId: string) {
+    this.mutate(() => {
+      const plugin = this.instrument(trackId, pluginId)
+      const count = plugin?.sampler?.slices.length ?? 0
+      if (!count) return
+      const notes = slicesToNotes(count).map((note) => ({ ...note, id: uid('note') }))
+      const host = this.project.tracks.find((track) => track.type === 'midi') ?? (trackId === 'master' ? null : this.track(trackId))
+      if (!host) return
+      host.midiClips.push({
+        id: uid('midi'),
+        name: 'Slices',
+        startBeat: 0,
+        durationBeats: Math.max(1, notes.length * 0.25),
+        notes,
+      })
+    })
+  }
+
+  armLooper(trackId: string | 'master', pluginId: string, transport: number, beat: number) {
+    this.mutate(() => {
+      const plugin = this.instrument(trackId, pluginId)
+      if (!plugin) return
+      const looper = plugin.looper ?? emptyLooper()
+      const beats = this.project.timeSignature.numerator
+      looper.transport = transport
+      looper.startBeat = transport >= 2 ? nextBar(beat, beats) : looper.startBeat
+      if (looper.sync) looper.lengthSamples = syncedLoopSamples(looper.bars, this.project.tempo, this.project.sampleRate, beats)
+      plugin.looper = looper
+      plugin.params = { ...plugin.params, transport }
+    })
+  }
+
+  addLooperLayer(trackId: string | 'master', pluginId: string, channel: Float32Array) {
+    this.mutate(() => {
+      const plugin = this.instrument(trackId, pluginId)
+      if (!plugin) return
+      const looper = plugin.looper ?? emptyLooper()
+      const id = uid('loop')
+      this.buffers.set(id, { id, name: 'Loop', sampleRate: this.project.sampleRate, channels: [Float32Array.from(channel)] })
+      looper.layers = [...looper.layers, { id: uid('lyr'), bufferId: id, gain: 1, mute: false, reverse: false, speed: plugin.params.speed || 1 }]
+      looper.undone = []
+      looper.lengthSamples = channel.length
+      if (!looper.sync) this.project.tempo = Math.round(tempoFromLoop(channel.length, this.project.sampleRate, this.project.timeSignature.numerator) * 10) / 10
+      plugin.looper = looper
+    })
+  }
+
+  undoLooper(trackId: string | 'master', pluginId: string) {
+    this.mutate(() => {
+      const looper = this.instrument(trackId, pluginId)?.looper
+      if (!looper?.layers.length) return
+      const last = looper.layers[looper.layers.length - 1]
+      looper.layers = looper.layers.slice(0, -1)
+      looper.undone = [...looper.undone, last]
+    })
+  }
+
+  redoLooper(trackId: string | 'master', pluginId: string) {
+    this.mutate(() => {
+      const looper = this.instrument(trackId, pluginId)?.looper
+      if (!looper?.undone.length) return
+      const last = looper.undone[looper.undone.length - 1]
+      looper.undone = looper.undone.slice(0, -1)
+      looper.layers = [...looper.layers, last]
+    })
+  }
+
+  clearLooper(trackId: string | 'master', pluginId: string) {
+    this.mutate(() => {
+      const looper = this.instrument(trackId, pluginId)?.looper
+      if (!looper) return
+      looper.undone = [...looper.undone, ...looper.layers]
+      looper.layers = []
+      looper.lengthSamples = 0
+      looper.transport = 0
+    })
+  }
+
+  bounceLooper(trackId: string, pluginId: string, startSample: number) {
+    this.mutate(() => {
+      const plugin = this.instrument(trackId, pluginId)
+      const looper = plugin?.looper
+      const track = this.track(trackId)
+      if (!looper || !track) return
+      const takes: LoopTake[] = []
+      for (const layer of looper.layers) {
+        const samples = this.buffers.get(layer.bufferId)?.channels[0]
+        if (samples) takes.push({ samples, gain: layer.gain, mute: layer.mute, reverse: layer.reverse, speed: layer.speed || 1 })
+      }
+      const length = looper.lengthSamples || takes[0]?.samples.length || 0
+      if (!length) return
+      const mixed = mixTakes({ length, takes, undone: [], feedback: looper.feedback })
+      const id = uid('bounce')
+      this.buffers.set(id, { id, name: 'Loop bounce', sampleRate: this.project.sampleRate, channels: [mixed] })
+      track.clips.push({
+        id: uid('clip'),
+        name: 'Loop',
+        bufferId: id,
+        startSample,
+        offsetSamples: 0,
+        durationSamples: mixed.length,
+        fadeInSamples: 0,
+        fadeOutSamples: 0,
+        gain: 1,
+        source: 'local',
+      })
     })
   }
 
@@ -602,6 +794,14 @@ export class ProjectStore {
   private pluginList(trackId: string | 'master') {
     if (trackId === 'master') return this.project.masterPlugins
     return this.track(trackId)?.plugins
+  }
+
+  private instrument(trackId: string | 'master', pluginId: string) {
+    const plugin = this.pluginList(trackId)?.find((item) => item.id === pluginId)
+    if (!plugin) return null
+    if (plugin.pluginId === 'sampler') plugin.sampler = plugin.sampler ?? emptySampler()
+    if (plugin.pluginId === 'looper') plugin.looper = plugin.looper ?? emptyLooper()
+    return plugin
   }
 
   private routeLoops(trackId: string, patch: Partial<Track>) {

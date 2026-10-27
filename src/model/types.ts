@@ -11,6 +11,55 @@ export function isLocalInput(input: string) {
   return input === 'mic' || input === 'line'
 }
 
+export interface SampleZone {
+  id: string
+  bufferId: string
+  root: number
+  lo: number
+  hi: number
+  loopStart: number
+  loopEnd: number
+  tune: number
+  gain: number
+  pan: number
+  reverse: boolean
+  choke: number
+}
+
+export interface SamplerState {
+  bufferId: string
+  start: number
+  end: number
+  loopStart: number
+  loopEnd: number
+  fadeIn: number
+  fadeOut: number
+  crossfade: number
+  loopMode: number
+  root: number
+  slices: SampleZone[]
+}
+
+export interface LooperLayer {
+  id: string
+  bufferId: string
+  gain: number
+  mute: boolean
+  reverse: boolean
+  speed: number
+}
+
+export interface LooperState {
+  layers: LooperLayer[]
+  undone: LooperLayer[]
+  sync: boolean
+  bars: number
+  feedback: number
+  transport: number
+  startBeat: number
+  lengthSamples: number
+}
+
 export interface PluginInstance {
   id: string
   pluginId: string
@@ -20,6 +69,8 @@ export interface PluginInstance {
   params: Record<string, number>
   /** Sidechain source track or bus id. Empty uses the plugin input. */
   sidechain: string
+  sampler?: SamplerState
+  looper?: LooperState
 }
 
 export interface Send {
