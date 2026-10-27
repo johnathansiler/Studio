@@ -128,7 +128,14 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .editor { min-height: 0; min-width: 0; }
 
 .arrange-wrap { height: 100%; display: flex; flex-direction: column; min-height: 0; }
-.arrange { height: 100%; display: grid; grid-template-columns: 210px minmax(0, 1fr); background: #121a16; min-height: 0; flex: 1; }
+.tool-row { display: flex; gap: 4px; align-items: center; padding: 0 8px; border-bottom: 1px solid var(--line); background: #141c18; min-width: 0; }
+.tool-row button {
+  height: 28px; min-height: 28px; border: 0; background: transparent; color: var(--muted);
+  border-bottom: 1px solid transparent; border-radius: 0; padding: 0 8px; font-size: 12px;
+}
+.tool-row button.on { color: var(--accent); border-bottom-color: var(--accent); }
+.shell.phone .tool-row button { min-height: 44px; height: 44px; }
+.arrange { height: auto; flex: 1; min-height: 0; display: grid; grid-template-columns: 210px minmax(0, 1fr); background: #121a16; }
 .follow-banner { padding: 6px 10px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); background: #101814; }
 .heads, .lanes { min-height: 0; min-width: 0; }
 .heads { border-right: 1px solid var(--line); background: #141c18; overflow-x: hidden; overflow-y: auto; }
@@ -217,6 +224,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .rec-bar input { width: 64px; }
 .clip canvas { width: 100%; height: 100%; display: block; opacity: 0.9; }
 .clip em { position: absolute; left: 8px; top: 6px; font-style: normal; font-size: 11px; font-weight: 640; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+.clip .warp { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--amber); pointer-events: none; }
 .clip .edge { position: absolute; top: 0; width: 8px; height: 100%; cursor: ew-resize; }
 .clip .edge.r { right: 0; }
 .fade {
@@ -296,6 +304,19 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .shell.phone .knob button, .shell.fold .knob button, .shell.phone .tune-keys button { min-width: 44px; min-height: 44px; }
 .shell.phone .plugin-sheet { bottom: calc(48px + env(safe-area-inset-bottom)); max-height: 42vh; }
 .shell.phone .plugin-sheet:has(.faceplate) { max-height: 68vh; }
+.clip-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  background: #18241d; border-top: 1px solid var(--line);
+  padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+  max-height: 46vh; overflow: auto; display: flex; flex-direction: column; gap: 8px;
+}
+.clip-sheet header, .clip-sheet .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.clip-sheet header strong { margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clip-sheet label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.clip-sheet input, .clip-sheet select { width: 72px; max-width: 28vw; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--text); padding: 4px 6px; }
+.clip-sheet .text-btn.on { border-color: rgba(115, 196, 143, 0.6); color: var(--text); }
+.shell.phone .clip-sheet { bottom: calc(48px + env(safe-area-inset-bottom)); max-height: 42vh; }
+.shell.phone .clip-sheet input, .shell.phone .clip-sheet select, .shell.phone .clip-sheet .text-btn { min-height: 44px; }
 .fader-row { display: flex; gap: 8px; align-items: stretch; height: 180px; }
 .fader-row input[type='range'] { writing-mode: vertical-lr; direction: rtl; width: 28px; }
 .meter { width: 10px; border-radius: 99px; background: #0c110f; border: 1px solid var(--line); position: relative; overflow: hidden; }

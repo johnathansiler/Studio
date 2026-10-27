@@ -1,4 +1,6 @@
+import { scheduleStretchCommit, stretchCacheKey } from '../audio/stretch/commit'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
+import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
 import { findCycle, MASTER } from '../audio/routing'
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
@@ -20,7 +22,7 @@ import { progressionById, romanLine, starterParts } from '../model/progressions'
 import { cloneRack, defaults, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleState } from '../model/scale'
 import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK_COLORS } from '../model/types'
-import type { AudioAsset, AudioClip, FollowAction, InsertType, LaunchMode, LaunchQuant, MidiClip, MidiNote, PluginInstance, Project, RecordSettings, TakeLane, Track } from '../model/types'
+import type { AudioAsset, AudioClip, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, MidiClip, MidiNote, PluginInstance, Project, RecordSettings, TakeLane, Track } from '../model/types'
 import { beatsToSamples, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
 
@@ -68,6 +70,10 @@ export class ProjectStore {
 
   /** Open plugin sheet. Not saved with the project. */
   pluginFocus: { trackId: string; pluginId: string } | null = null
+  /** Arrange edit tool. Not saved, and switching it does not create an undo step. */
+  tool: 'pointer' | 'stretch' = 'pointer'
+  /** Clip settings. Not saved. */
+  clipSheet = false
 
   constructor(project = createEmptyProject(), buffers?: Map<string, AudioAsset>) {
     this.project = normalizeProjectRack(normalizeProject(project))
@@ -158,7 +164,13 @@ export class ProjectStore {
       this.selectedClipId = clipId
       this.selectedNoteId = null
       this.selectedNoteIds = []
+      this.clipSheet = clipId != null
     }
+    this.emit()
+  }
+
+  closeClipSheet() {
+    this.clipSheet = false
     this.emit()
   }
 
@@ -208,22 +220,38 @@ export class ProjectStore {
     })
   }
 
+  setTool(tool: 'pointer' | 'stretch') {
+    this.tool = tool
+    this.emit()
+  }
+
   setTempo(tempo: number, group = false) {
     const value = clamp(Math.round(tempo * 10) / 10, 30, 300)
     if (group && this.tempoGroup) {
       if (this.remoteFollow || this.project.tempo === value) return
       this.project.tempo = value
+      this.retimeFollow()
       this.emit()
       return
     }
     this.mutate(() => {
       this.project.tempo = value
+      this.retimeFollow()
     })
     this.tempoGroup = group
   }
 
   endTempoGroup() {
     this.tempoGroup = false
+  }
+
+  private retimeFollow() {
+    for (const track of this.project.tracks) {
+      for (const clip of track.clips) {
+        if (!clip.stretch?.followTempo) continue
+        clip.durationSamples = timelineSamples(clip, this.project)
+      }
+    }
   }
 
   setTimeSignature(numerator: number, denominator: number) {
@@ -584,6 +612,121 @@ export class ProjectStore {
       const clip = track?.clips.find((c) => c.id === clipId)
       if (clip) Object.assign(clip, moveAudioClip(clip, startSample))
     })
+  }
+
+  stretchClip(trackId: string, clipId: string, edge: 'start' | 'end', sample: number) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip) return
+      Object.assign(clip, stretchEdge(clip, edge, sample))
+      this.commitClip(clip)
+    })
+  }
+
+  setClipStretch(trackId: string, clipId: string, patch: Partial<ClipStretch>) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip) return
+      const base = clip.stretch ?? defaultStretch(clip.durationSamples)
+      clip.stretch = { ...base, ...patch, markers: patch.markers ?? base.markers }
+      if (clip.stretch.followTempo) {
+        if (!clip.stretch.sourceBpm) clip.stretch.sourceBpm = this.detectClipBpm(clip)
+        clip.durationSamples = timelineSamples(clip, this.project)
+      }
+      this.commitClip(clip)
+    })
+  }
+
+  setStretchRatio(trackId: string, clipId: string, percent: number) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip) return
+      const base = clip.stretch ?? defaultStretch(clip.durationSamples)
+      const source = Math.max(1, base.sourceSamples || clip.durationSamples)
+      const duration = Math.max(64, Math.round(source * (clamp(percent, 12.5, 800) / 100)))
+      const scale = clip.durationSamples > 0 ? duration / clip.durationSamples : 1
+      clip.durationSamples = duration
+      clip.stretch = {
+        ...base,
+        sourceSamples: source,
+        followTempo: false,
+        markers: base.markers.map((marker) => ({ ...marker, target: marker.target * scale })),
+      }
+      this.commitClip(clip)
+    })
+  }
+
+  addWarpMarker(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip) return
+      const base = clip.stretch ?? defaultStretch(clip.durationSamples)
+      const source = Math.round(sourceSamplesOf(clip) / 2)
+      const beats = (source / Math.max(1, base.sourceSamples)) * (clip.durationSamples / this.project.sampleRate) * (this.project.tempo / 60)
+      clip.stretch = { ...base, markers: [...base.markers, { id: uid('warp'), source, target: beats }] }
+      this.commitClip(clip)
+    })
+  }
+
+  moveWarpMarker(trackId: string, clipId: string, markerId: string, patch: { source?: number; target?: number }) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      const stretch = clip?.stretch
+      if (!clip || !stretch) return
+      stretch.markers = stretch.markers.map((marker) => (marker.id === markerId ? { ...marker, ...patch } : marker))
+      this.commitClip(clip)
+    })
+  }
+
+  removeWarpMarker(trackId: string, clipId: string, markerId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip?.stretch) return
+      clip.stretch.markers = clip.stretch.markers.filter((marker) => marker.id !== markerId)
+      this.commitClip(clip)
+    })
+  }
+
+  autoWarpMarkers(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip) return
+      const asset = this.buffers.get(clip.bufferId)
+      const channel = asset?.channels[0]
+      if (!channel) return
+      const source = sourceSamplesOf(clip)
+      const found = inspectClip(channel.subarray(clip.offsetSamples, clip.offsetSamples + source), asset?.sampleRate ?? this.project.sampleRate, this.project.tempo)
+      const base = clip.stretch ?? defaultStretch(source)
+      clip.stretch = { ...base, sourceSamples: source, sourceBpm: found.sourceBpm, markers: found.markers }
+      this.commitClip(clip)
+    })
+  }
+
+  /** Start the offline render as soon as the edit lands. Playback can use the preview until it finishes. */
+  private commitClip(clip: AudioClip) {
+    const asset = this.buffers.get(clip.bufferId)
+    if (!asset?.channels.length || !clip.stretch) return
+    const source = sourceSamplesOf(clip)
+    const sliced = asset.channels.map((channel) => Float32Array.from(channel.subarray(clip.offsetSamples, Math.min(channel.length, clip.offsetSamples + source))))
+    const frozen: AudioClip = {
+      ...clip,
+      stretch: { ...clip.stretch, markers: clip.stretch.markers.map((marker) => ({ ...marker })) },
+    }
+    const project = this.project
+    const key = stretchCacheKey(frozen, project)
+    scheduleStretchCommit(
+      key,
+      () => renderClipChannels(sliced, frozen, project, 'hq'),
+      () => renderClipChannels(sliced, frozen, project, 'preview'),
+    )
+  }
+
+  private detectClipBpm(clip: AudioClip) {
+    const asset = this.buffers.get(clip.bufferId)
+    const channel = asset?.channels[0]
+    if (!channel) return clip.stretch?.sourceBpm ?? null
+    const source = sourceSamplesOf(clip)
+    return inspectClip(channel.subarray(clip.offsetSamples, clip.offsetSamples + source), asset?.sampleRate ?? this.project.sampleRate, this.project.tempo).sourceBpm
   }
 
   trimClip(trackId: string, clipId: string, edge: 'start' | 'end', sample: number) {
@@ -1108,6 +1251,13 @@ export class ProjectStore {
         clip.durationSamples = Math.max(1, scale(clip.durationSamples))
         clip.fadeInSamples = scale(clip.fadeInSamples)
         clip.fadeOutSamples = scale(clip.fadeOutSamples)
+        if (clip.stretch) {
+          clip.stretch = {
+            ...clip.stretch,
+            sourceSamples: Math.max(1, scale(clip.stretch.sourceSamples)),
+            markers: clip.stretch.markers.map((marker) => ({ ...marker, source: scale(marker.source) })),
+          }
+        }
       }
     }
     this.emit()
