@@ -1,5 +1,7 @@
+import type { RollMemory } from './paint'
 import type { DevicePreset, RackAutomation, RackPatch, RackState } from './rack'
 import { defaultScale, type ScaleState } from './scale'
+import type { BeatRack, PatternClip } from './steps'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
 export type TrackInstrument = 'synth' | 'sampler' | '808' | 'drum-machine' | 'none'
@@ -116,6 +118,9 @@ export interface MidiNote {
   startBeat: number
   durationBeats: number
   velocity: number
+  muted?: boolean
+  pan?: number
+  fine?: number
 }
 
 export interface MidiClip {
@@ -131,6 +136,12 @@ export interface MidiClip {
   follow?: FollowAction
   followBeats?: number
   slotOnly?: boolean
+  /** Live link to a beat pattern. Playback renders the pattern instead of notes. */
+  patternId?: string
+  /** Channel row that was sent to this clip. */
+  channelId?: string
+  /** Session scene. Unset clips stay on the arrangement. */
+  scene?: number
 }
 
 export interface Track {
@@ -198,6 +209,9 @@ export interface Project {
   tempoMap?: TempoPoint[]
   /** Key, scale, and chord-pad performance settings. */
   scale?: ScaleState
+  beats?: BeatRack
+  patternClips?: PatternClip[]
+  roll?: RollMemory
   /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */
   waveforms?: Record<string, { min: number; max: number }[]>
 }

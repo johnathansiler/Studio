@@ -3,6 +3,7 @@ import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
 import { RackHost } from './rack/host'
 import { renderNotes } from './rack/dsp'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
+import { renderPattern, type RenderedHit } from '../model/steps'
 import { preferStretchCache } from './stretch/engine'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToMusical } from '../model/time'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
@@ -117,6 +118,7 @@ export class AudioEngine {
   private countTimer = 0
   private countWait: (() => void) | null = null
   private countPlan: { tempo: number; numerator: number; denominator: number } | null = null
+  private noise: AudioBuffer | null = null
   private lastUiEmit = 0
   private pcmTap: AudioWorkletNode | null = null
   private pcmTapSilent: GainNode | null = null
@@ -955,7 +957,7 @@ export class AudioEngine {
       if (track.rack) {
         const events = []
         for (const clip of track.midiClips) {
-          if (clip.slotOnly) continue
+          if (clip.slotOnly || clip.scene != null) continue
           for (const note of clip.notes) {
             const start = beatsToSamples(clip.startBeat + note.startBeat, rate, project.tempo)
             const dur = beatsToSamples(note.durationBeats, rate, project.tempo)
@@ -974,7 +976,7 @@ export class AudioEngine {
         src.start(0)
       } else {
         for (const clip of track.midiClips) {
-          if (clip.slotOnly) continue
+          if (clip.slotOnly || clip.scene != null) continue
           for (const note of clip.notes) {
             const start = beatsToSamples(clip.startBeat + note.startBeat, rate, project.tempo)
             const dur = beatsToSamples(note.durationBeats, rate, project.tempo) / rate
@@ -983,6 +985,7 @@ export class AudioEngine {
           }
         }
       }
+      this.schedulePatternClips(offline, strip, project, track.id, 0, 0, end)
       const rendered = await offline.startRendering()
       const left = new Float32Array(rendered.getChannelData(0))
       const right = rendered.numberOfChannels > 1 ? new Float32Array(rendered.getChannelData(1)) : new Float32Array(left)
@@ -1319,7 +1322,16 @@ export class AudioEngine {
     if (!this.sessionNodes.has(track.id)) this.sessionNodes.set(track.id, [])
     const schedulePass = (when: number) => {
       if (!this.playing || this.mode !== 'session' || this.launches.get(track.id) !== clip.id) return
-      for (const note of clip.notes) {
+      if (clip.patternId) {
+        const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
+        const hits = pattern ? renderPattern(pattern, 0, clip.durationBeats) : []
+        for (const hit of hits) {
+          const noteDelay = beatsToSamples(hit.startBeat, sr, project.tempo) / sr
+          const out = (hit.output && this.strips.get(hit.output)) || strip
+          this.scheduleHit(this.ctx!, out, hit, when + noteDelay)
+        }
+      }
+      for (const note of clip.patternId ? [] : clip.notes) {
         const noteDelay = beatsToSamples(note.startBeat, sr, project.tempo) / sr
         const noteDur = beatsToSamples(note.durationBeats, sr, project.tempo) / sr
         this.scheduleVoice(this.ctx!, strip, note, when + noteDelay, noteDur, track, this.sessionNodes.get(track.id))
@@ -1376,7 +1388,7 @@ export class AudioEngine {
         this.scheduleAudioClip(ctx, strip, buffer, clip, ctxTime, timelineStart, timelineEnd)
       }
       for (const clip of track.midiClips) {
-        if (clip.slotOnly) continue
+        if (clip.slotOnly || clip.scene != null) continue
         const clipStart = beatsToSamples(clip.startBeat, this.sampleRate, project.tempo)
         for (const note of clip.notes) {
           const noteStart = clipStart + beatsToSamples(note.startBeat, this.sampleRate, project.tempo)
@@ -1387,6 +1399,147 @@ export class AudioEngine {
           this.scheduleVoice(ctx, strip, note, when, noteDurSamples / this.sampleRate, track)
         }
       }
+      this.schedulePatternClips(ctx, strip, project, track.id, ctxTime, timelineStart, timelineEnd)
+    }
+  }
+
+  private schedulePatternClips(
+    ctx: BaseAudioContext,
+    strip: StripNodes,
+    project: Project,
+    trackId: string,
+    ctxTime: number,
+    timelineStart: number,
+    timelineEnd: number,
+  ) {
+    const midiId = project.tracks.find((track) => track.type === 'midi')?.id
+    for (const clip of project.patternClips ?? []) {
+      if (clip.scene != null) continue
+      const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
+      if (!pattern) continue
+      for (const hit of renderPattern(pattern, 0, clip.lengthBeats)) {
+        if ((hit.output || midiId) !== trackId) continue
+        const sample = beatsToSamples(clip.startBeat + hit.startBeat, this.sampleRate, project.tempo)
+        if (sample < timelineStart || sample >= timelineEnd) continue
+        const when = ctxTime + (sample - timelineStart) / this.sampleRate
+        const liveStrip = ctx === this.ctx && hit.output ? this.strips.get(hit.output) : undefined
+        this.scheduleHit(ctx, liveStrip || strip, hit, when)
+      }
+    }
+  }
+
+  private scheduleHit(ctx: BaseAudioContext, strip: StripNodes, hit: RenderedHit, when: number) {
+    if (ctx === this.ctx && when < ctx.currentTime) return
+    if (hit.kind === 'note' && hit.sampleId) {
+      const asset = this.assetOf(hit.sampleId)
+      if (asset) {
+        const buffer = this.bufferFromAsset(ctx, asset)
+        const src = ctx.createBufferSource()
+        src.buffer = buffer
+        const rate = 2 ** ((hit.pitch - 60 + hit.fine / 100) / 12)
+        src.playbackRate.value = rate
+        this.envelope(ctx, strip, src, when, Math.max(0.05, beatsToSamples(hit.durationBeats, this.sampleRate, this.project?.tempo || 120) / this.sampleRate), hit)
+        return
+      }
+    }
+    if (hit.kind === 'note') {
+      this.scheduleVoice(ctx, strip, {
+        id: hit.channelId,
+        pitch: hit.pitch,
+        fine: hit.fine,
+        pan: hit.pan,
+        startBeat: hit.startBeat,
+        durationBeats: hit.durationBeats,
+        velocity: hit.velocity,
+      }, when, Math.max(0.05, beatsToSamples(hit.durationBeats, this.sampleRate, this.project?.tempo || 120) / this.sampleRate))
+      return
+    }
+    const dur = Math.max(0.04, beatsToSamples(hit.durationBeats, this.sampleRate, this.project?.tempo || 120) / this.sampleRate)
+    if (hit.kind === 'kick') {
+      const osc = ctx.createOscillator()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(160, when)
+      osc.frequency.exponentialRampToValueAtTime(48, when + Math.min(0.18, dur))
+      this.envelope(ctx, strip, osc, when, Math.min(0.28, dur + 0.05), hit)
+      return
+    }
+    if (hit.kind === 'perc') {
+      const osc = ctx.createOscillator()
+      osc.type = 'square'
+      osc.frequency.value = 440 * 2 ** ((hit.pitch - 69) / 12)
+      this.envelope(ctx, strip, osc, when, Math.min(0.16, dur), hit)
+      return
+    }
+    const noise = ctx.createBufferSource()
+    noise.buffer = this.noiseBuffer(ctx)
+    if (hit.kind === 'hat') {
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'highpass'
+      filter.frequency.value = 7000
+      noise.connect(filter)
+      this.envelope(ctx, strip, filter, when, Math.min(0.06, dur), hit, noise)
+      return
+    }
+    if (hit.kind === 'clap') {
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'bandpass'
+      filter.frequency.value = 1400
+      noise.connect(filter)
+      this.envelope(ctx, strip, filter, when, Math.min(0.18, dur), hit, noise)
+      return
+    }
+    const tone = ctx.createOscillator()
+    tone.type = 'triangle'
+    tone.frequency.value = 190
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'highpass'
+    filter.frequency.value = 800
+    noise.connect(filter)
+    this.envelope(ctx, strip, filter, when, Math.min(0.16, dur), hit, noise)
+    this.envelope(ctx, strip, tone, when, 0.08, { ...hit, velocity: hit.velocity * 0.4 })
+  }
+
+  private noiseBuffer(ctx: BaseAudioContext) {
+    if (this.noise && this.noise.sampleRate === ctx.sampleRate) return this.noise
+    const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let index = 0; index < data.length; index++) data[index] = Math.random() * 2 - 1
+    if (ctx === this.ctx) this.noise = buffer
+    return buffer
+  }
+
+  private envelope(
+    ctx: BaseAudioContext,
+    strip: StripNodes,
+    source: AudioNode,
+    when: number,
+    dur: number,
+    hit: Pick<RenderedHit, 'velocity' | 'pan'>,
+    extra?: AudioNode,
+  ) {
+    const gain = ctx.createGain()
+    const peak = Math.max(0.001, 0.22 * hit.velocity)
+    gain.gain.setValueAtTime(0.0001, when)
+    gain.gain.exponentialRampToValueAtTime(peak, when + 0.005)
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.03, dur))
+    source.connect(gain)
+    const pan = hit.pan || 0
+    if (Math.abs(pan) > 0.02 && ctx.createStereoPanner) {
+      const panner = ctx.createStereoPanner()
+      panner.pan.value = Math.max(-1, Math.min(1, pan))
+      gain.connect(panner)
+      panner.connect(strip.input)
+    } else gain.connect(strip.input)
+    const startable = source as AudioScheduledSourceNode
+    if (typeof startable.start === 'function') {
+      startable.start(when)
+      startable.stop(when + dur + 0.02)
+    }
+    extra && typeof (extra as AudioScheduledSourceNode).start === 'function' && (extra as AudioScheduledSourceNode).start(when)
+    extra && typeof (extra as AudioScheduledSourceNode).stop === 'function' && (extra as AudioScheduledSourceNode).stop(when + dur + 0.02)
+    if (ctx === this.ctx) {
+      if (typeof startable.stop === 'function') this.sources.push(startable)
+      if (extra && typeof (extra as AudioScheduledSourceNode).stop === 'function') this.sources.push(extra as AudioScheduledSourceNode)
     }
   }
 
@@ -1472,6 +1625,7 @@ export class AudioEngine {
   }
 
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[]) {
+    if (note.muted) return
     if (track?.rack && ctx === this.ctx) {
       this.rackHost.note(track.id, note.pitch, note.velocity, Math.max(when, ctx.currentTime))
       this.rackHost.note(track.id, note.pitch, 0, Math.max(when, ctx.currentTime) + dur)
@@ -1482,7 +1636,7 @@ export class AudioEngine {
     const filter = ctx.createBiquadFilter()
     const gain = ctx.createGain()
     osc.type = 'sawtooth'
-    osc.frequency.value = 440 * 2 ** ((note.pitch - 69) / 12)
+    osc.frequency.value = 440 * 2 ** ((note.pitch + (note.fine || 0) / 100 - 69) / 12)
     filter.type = 'lowpass'
     filter.frequency.setValueAtTime(2200, when)
     filter.frequency.exponentialRampToValueAtTime(900, when + Math.min(0.3, dur))
@@ -1492,7 +1646,13 @@ export class AudioEngine {
     gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.05, dur))
     osc.connect(filter)
     filter.connect(gain)
-    gain.connect(strip.input)
+    const pan = note.pan || 0
+    if (Math.abs(pan) > 0.02 && ctx.createStereoPanner) {
+      const panner = ctx.createStereoPanner()
+      panner.pan.value = Math.max(-1, Math.min(1, pan))
+      gain.connect(panner)
+      panner.connect(strip.input)
+    } else gain.connect(strip.input)
     osc.start(when)
     osc.stop(when + dur + 0.03)
     if (ctx === this.ctx) {
