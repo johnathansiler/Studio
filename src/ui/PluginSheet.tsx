@@ -22,7 +22,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     return () => window.clearInterval(timer)
   }, [faced, plugin?.id])
   useEffect(() => {
-    if (!plugin || plugin.pluginId !== 'eq') return
+    if (!plugin || plugin.pluginId !== 'eq' || engine.performanceMode) return
     let timer = 0
     const draw = () => {
       const spectrum = engine.spectrum(plugin.id)

@@ -621,6 +621,46 @@ export class ProjectStore {
     })
   }
 
+  recordSettings() {
+    return { quantizeBeats: this.project.quantizeBeats ?? 0 }
+  }
+
+  setRecord(patch: { quantizeBeats?: number }) {
+    this.mutate(() => {
+      if (patch.quantizeBeats != null) this.project.quantizeBeats = Math.max(0, patch.quantizeBeats)
+    })
+  }
+
+  addPerformedNotes(trackId: string, clipId: string, notes: Omit<MidiNote, 'id'>[]) {
+    if (!notes.length) return
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      let end = clip.durationBeats
+      for (const note of notes) {
+        const next = { ...note, id: uid('note'), velocity: Math.max(0.05, Math.min(1, note.velocity)) }
+        clip.notes.push(next)
+        end = Math.max(end, next.startBeat + next.durationBeats)
+      }
+      clip.durationBeats = Math.max(clip.durationBeats, end)
+    })
+  }
+
+  toggleDrumStep(trackId: string, clipId: string, pitch: number, step: number) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      const beat = step / 4
+      const existing = clip.notes.find((note) => note.pitch === pitch && Math.abs(note.startBeat - beat) < 0.02)
+      if (existing) {
+        clip.notes = clip.notes.filter((note) => note.id !== existing.id)
+        return
+      }
+      clip.notes.push({ id: uid('note'), pitch, startBeat: beat, durationBeats: 0.2, velocity: 0.9 })
+      clip.durationBeats = Math.max(clip.durationBeats, 4)
+    })
+  }
+
   addNote(trackId: string, clipId: string, note: Omit<MidiNote, 'id'>) {
     this.mutate(() => {
       const clip = this.track(trackId)?.midiClips.find((c) => c.id === clipId)

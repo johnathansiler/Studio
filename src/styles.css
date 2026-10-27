@@ -436,7 +436,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .sync-pill { font-family: var(--mono); font-size: 11px; color: var(--accent); border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; }
 .dock-placeholder { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
 .dock.popped { height: 100%; width: 100%; border: 0; }
-.t-btn.stop { width: auto; min-width: 72px; padding: 0 12px; }
+.t-btn.stop, .t-btn.wide { width: auto; min-width: 64px; padding: 0 12px; }
 .media-banner {
   display: block;
   margin: 8px;
@@ -865,3 +865,44 @@ html[data-posture="tabletop"] .shell .plugin-sheet {
 .shell.fold .idea-detail, .shell.phone.land .idea-detail, .shell.land .idea-detail { flex: 1; min-width: 0; overflow: auto; }
 .shell.fold .idea-detail, .shell.phone.land .idea-detail, .shell.land .idea-detail { display: block; padding: 8px 12px 16px; }
 .shell.fold .idea-list .idea-body, .shell.phone.land .idea-list .idea-body, .shell.land .idea-list .idea-body { display: none; }
+.perform-pop {
+  position: fixed; z-index: 50; display: flex; flex-direction: column; gap: 8px;
+  background: #18241d; color: var(--text); border: 1px solid var(--line);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  top: 72px; left: 50%; transform: translateX(-50%);
+  width: min(960px, calc(100vw - 32px)); height: min(680px, calc(100dvh - 96px));
+  border-radius: 16px; padding: 12px; min-width: 0;
+}
+.perform-pop header, .perform-pop .scale-row { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; overflow-x: auto; }
+.perform-pop header strong { margin-right: auto; }
+.perform-pop button, .perform-pop select {
+  min-height: 44px; min-width: 44px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--text); padding: 0 10px;
+}
+.perform-pop button.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.perform-pop .latency { font-variant-numeric: tabular-nums; min-width: 52px; color: var(--amber); }
+.perform-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr); gap: 8px; }
+.perform-play, .perform-edit { min-width: 0; min-height: 0; overflow: auto; }
+.play-keys { position: relative; display: flex; height: 180px; touch-action: none; }
+.play-keys .white { flex: 1; min-width: 44px; height: 100%; background: #f4f1ea; color: #1c241e; border-radius: 0 0 8px 8px; }
+.play-keys .white.lit { background: #d7ecdf; }
+.play-keys .blacks { position: absolute; inset: 0; pointer-events: none; }
+.play-keys .black {
+  position: absolute; top: 0; width: 36px; height: 58%; transform: translateX(-50%);
+  background: #1c241e; pointer-events: auto; touch-action: none; min-width: 44px; width: 44px; padding: 0;
+}
+.play-keys .black.lit { background: #73c48f; }
+.drum-pads { display: grid; grid-template-columns: repeat(4, minmax(44px, 1fr)); gap: 8px; touch-action: none; }
+.drum-pads button { min-height: 64px; background: #24342b; font-weight: 640; }
+.drum-pads button.lit { background: var(--accent); color: var(--accent-ink); }
+.step-grid { display: flex; flex-direction: column; gap: 4px; }
+.step-row { display: grid; grid-template-columns: 72px repeat(16, minmax(44px, 1fr)); gap: 4px; align-items: center; }
+.step-row span { font-size: 11px; color: var(--muted); }
+.step-row button { min-width: 44px; padding: 0; background: #121a16; }
+.step-row button.on { background: var(--accent); }
+.roll-grid { position: relative; height: 100%; min-height: 240px; background: repeating-linear-gradient(#1c2822, #1c2822 7px, #24342b 8px); }
+.roll-grid i { position: absolute; height: 7px; background: #e0b15a; border-radius: 2px; }
+.shell.phone .perform-pop { inset: 0; transform: none; width: auto; height: auto; border-radius: 0; top: 0; left: 0; }
+.shell.phone .perform-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(160px, 0.8fr); }
+.shell.fold .perform-pop { top: 12px; left: 12px; right: 12px; bottom: 12px; transform: none; width: auto; height: auto; }
+.shell.fold .perform-body { grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.15fr); }

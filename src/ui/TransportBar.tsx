@@ -15,6 +15,8 @@ export function TransportBar({
   onSession,
   onArrange,
   onPiano,
+  onKeys,
+  onDrums,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -26,6 +28,8 @@ export function TransportBar({
   onSession?: () => void
   onArrange?: () => void
   onPiano?: (trackId: string) => void
+  onKeys: () => void
+  onDrums: () => void
 }) {
   const project = store.project
   const midiTrack = project.tracks.find((track) => track.id === store.selectedTrackId && track.type === 'midi')
@@ -117,6 +121,12 @@ export function TransportBar({
         {midiTrack && onPiano && (
           <button type="button" className={`t-btn piano-btn ${store.selectedMidiClipId ? 'on' : ''}`} onClick={() => onPiano(midiTrack.id)}>Piano</button>
         )}
+        <button className="t-btn wide" onPointerDown={() => engine.unlock()} onClick={onKeys} title="Piano roll">
+          Keys
+        </button>
+        <button className="t-btn wide" onPointerDown={() => engine.unlock()} onClick={onDrums} title="Drum machine">
+          Pads
+        </button>
       </div>
       <div className="lcd-wrap">
         <div className="lcd">

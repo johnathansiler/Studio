@@ -198,6 +198,8 @@ export interface Project {
   tempoMap?: TempoPoint[]
   /** Key, scale, and chord-pad performance settings. */
   scale?: ScaleState
+  /** Musical grid for performed MIDI. 0 leaves the note where it was played. */
+  quantizeBeats?: number
   /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */
   waveforms?: Record<string, { min: number; max: number }[]>
 }
@@ -277,5 +279,6 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     launchQuant: '1bar',
     recordBars: 4,
     scale: defaultScale(),
+    quantizeBeats: 0,
   }
 }

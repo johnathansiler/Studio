@@ -14,12 +14,14 @@ export function ArrangeView({
   session,
   onSeek,
   onOpenPiano,
+  onPerform,
 }: {
   store: ProjectStore
   engine: AudioEngine
   session: SessionClient
   onSeek: (sample: number) => void
   onOpenPiano: (trackId: string, clipId?: string) => void
+  onPerform: (mode: 'keys' | 'drums') => void
 }) {
   const project = store.project
   const [px, setPx] = useState(90)
@@ -104,6 +106,12 @@ export function ArrangeView({
                 <button className={`mini ${track.armed ? 'on-r' : ''}`} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
                   R
                 </button>
+              )}
+              {track.type === 'midi' && (
+                <>
+                  <button className="mini" title="Piano roll" onClick={() => onPerform('keys')}>K</button>
+                  <button className="mini" title="Drum machine" onClick={() => onPerform('drums')}>D</button>
+                </>
               )}
               <input
                 className="slim"
