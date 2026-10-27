@@ -5,6 +5,7 @@ import { snapSample } from '../model/time'
 import type { AudioClip } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import type { SessionClient } from '../remote/session'
+import { InsertList, RouteFields, SendList } from './PluginSheet'
 
 export function ArrangeView({
   store,
@@ -111,7 +112,7 @@ export function ArrangeView({
                 onChange={(event) => store.updateTrack(track.id, { volume: Number(event.target.value) })}
               />
             </div>
-            {track.type === 'audio' ? (
+            {track.type === 'audio' && (
               <select value={track.input} onChange={(event) => store.updateTrack(track.id, { input: event.target.value })}>
                 <option value="mic">Mic · raw</option>
                 <option value="none">No input</option>
@@ -123,9 +124,12 @@ export function ArrangeView({
                     </option>
                   ))}
               </select>
-            ) : (
-              <span className="hint">Instrument</span>
             )}
+            <div className="head-extra">
+              <RouteFields store={store} trackId={track.id} />
+              <InsertList store={store} trackId={track.id} />
+              <SendList store={store} trackId={track.id} />
+            </div>
           </div>
         ))}
       </div>

@@ -5,6 +5,12 @@ import type { AudioAsset, AudioClip, MidiNote, Project, Track } from '../model/t
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToMusical } from '../model/time'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav } from '../model/wav'
+import { scaleById } from '../model/scale'
+import { LiveRack } from './liveRack'
+import { renderGraph } from './renderGraph'
+import { loadModule, peekModule } from './plugins/registry'
+import { createLoudness, measureLoudness, type LoudnessState } from './plugins/dsp'
+import type { Processor } from './plugins/types'
 
 export type EngineStatus = 'stopped' | 'playing' | 'recording' | 'counting-in'
 
@@ -70,6 +76,10 @@ export class AudioEngine {
   private cueReturnSrc: MediaStreamAudioSourceNode | null = null
   private meterScratch = new Float32Array(256)
   private readonly rackHost = new RackHost()
+  private readonly rack = new LiveRack()
+  private loudness: LoudnessState | null = null
+  private lufs = -70
+  private truePeak = -70
 
   private localMicSrc: MediaStreamAudioSourceNode | null = null
   private localMicGain: GainNode | null = null
@@ -270,15 +280,11 @@ export class AudioEngine {
       strip.pan.pan.setTargetAtTime(track.pan, now, 0.015)
       const audible = !track.mute && (!anySolo || track.solo)
       strip.mute.gain.setTargetAtTime(audible ? 1 : 0, now, 0.01)
-      try {
-        strip.output.disconnect()
-      } catch {
-        /* not connected yet */
-      }
-      strip.output.connect(track.input.startsWith('remote:') ? this.remoteBus : this.localBus)
     }
     applyInserts(this.ctx, this.masterStrip, project.masterInserts)
     this.masterGain.gain.setTargetAtTime(project.masterVolume, this.ctx.currentTime, 0.015)
+    this.rack.clock = () => this.currentTimelineSample()
+    this.rack.route(this.ctx, project, this.strips, this.masterStrip, this.localBus, this.remoteBus)
     this.routeLocalMic()
     this.routeRemotes()
     const buffers = new Map<string, AudioAsset>()
@@ -303,6 +309,32 @@ export class AudioEngine {
     const when = (this.ctx?.currentTime ?? 0) + 0.03
     this.rackHost.note(trackId, pitch, 0.8, when)
     this.rackHost.note(trackId, pitch, 0, when + 0.35)
+  }
+
+  /** CPU load and master loudness. Loudness is read from the master analyser and includes the master fader. */
+  mixMeters() {
+    this.sampleLoudness()
+    return { cpu: this.rack.cpu, lufs: this.lufs, truePeak: this.truePeak }
+  }
+
+  spectrum(pluginId: string) {
+    return this.rack.spectrum(pluginId)
+  }
+
+  pluginFailed(pluginId: string) {
+    return this.rack.isFailed(pluginId)
+  }
+
+  private sampleLoudness() {
+    if (!this.ctx || !this.masterStrip) return
+    if (!this.loudness) this.loudness = createLoudness(this.ctx.sampleRate)
+    const frame = new Float32Array(this.masterStrip.analyser.fftSize)
+    this.masterStrip.analyser.getFloatTimeDomainData(frame)
+    const reading = measureLoudness(this.loudness, frame, null, this.ctx.sampleRate)
+    const vol = this.project?.masterVolume ?? 1
+    const gainDb = vol > 1e-6 ? 20 * Math.log10(vol) : -80
+    this.lufs = Math.max(-70, reading.lufs + gainDb)
+    this.truePeak = Math.max(-70, reading.truePeak + gainDb)
   }
 
   setLaunches(map: Record<string, string | null>) {
@@ -850,18 +882,12 @@ export class AudioEngine {
   async exportMix(project: Project, assets: Map<string, AudioAsset>): Promise<ArrayBuffer> {
     const rate = this.sampleRate
     const end = Math.max(rate, projectEndSample(project.tracks, rate, project.tempo))
-    const offline = new OfflineAudioContext(2, end, rate)
-    const master = offline.createGain()
-    master.gain.value = project.masterVolume
-    master.connect(offline.destination)
-    const anySolo = project.tracks.some((t) => t.solo)
+    const renderedTracks = []
     for (const track of project.tracks) {
-      if (track.mute || (anySolo && !track.solo)) continue
-      const strip = createStrip(offline)
-      applyInserts(offline, strip, track.inserts)
-      strip.fader.gain.value = track.volume
-      strip.pan.pan.value = track.pan
-      strip.output.connect(master)
+      const offline = new OfflineAudioContext(2, end, rate)
+      const input = offline.createGain()
+      input.connect(offline.destination)
+      const strip = { input } as StripNodes
       for (const clip of track.clips) {
         const asset = assets.get(clip.bufferId)
         if (!asset) continue
@@ -879,7 +905,7 @@ export class AudioEngine {
             events.push({ sample: Math.min(end - 1, start + dur), pitch: note.pitch, vel: 0 })
           }
         }
-        const rendered = renderNotes(track.rack, events, rate, project.tempo, end, assets, project.automation)
+        const rendered = renderNotes(track.rack, events, rate, project.tempo, end, assets, project.rackAutomation)
         const buffer = offline.createBuffer(2, end, rate)
         buffer.copyToChannel(rendered[0], 0)
         buffer.copyToChannel(rendered[1], 1)
@@ -897,11 +923,43 @@ export class AudioEngine {
           }
         }
       }
+      const rendered = await offline.startRendering()
+      const left = new Float32Array(rendered.getChannelData(0))
+      const right = rendered.numberOfChannels > 1 ? new Float32Array(rendered.getChannelData(1)) : new Float32Array(left)
+      renderedTracks.push({
+        id: track.id,
+        type: track.type,
+        input: track.input,
+        buffer: [left, right],
+        volume: track.volume,
+        pan: track.pan,
+        mute: track.mute,
+        solo: track.solo,
+        plugins: track.plugins,
+        sends: track.sends,
+        output: track.output,
+        groupId: track.groupId,
+      })
     }
-    const rendered = await offline.startRendering()
-    const channels: Float32Array[] = []
-    for (let i = 0; i < rendered.numberOfChannels; i++) channels.push(rendered.getChannelData(i).slice())
-    return encodeWav(channels, rendered.sampleRate)
+    const ids = new Set<string>()
+    for (const track of project.tracks) for (const plugin of track.plugins) ids.add(plugin.pluginId)
+    for (const plugin of project.masterPlugins) ids.add(plugin.pluginId)
+    await Promise.all([...ids].map((id) => loadModule(id)))
+    const scale = scaleById(project.scale?.scale)
+    const graph = renderGraph({
+      tracks: renderedTracks,
+      masterPlugins: project.masterPlugins,
+      masterVolume: project.masterVolume,
+      sampleRate: rate,
+      tempo: project.tempo,
+      length: end,
+      scaleRoot: project.scale?.root ?? 0,
+      scaleIntervals: scale.intervals,
+      automation: project.automation,
+      liveRemote: false,
+      create: (pluginId, sampleRate) => peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
+    })
+    return encodeWav(graph.master, rate)
   }
 
   bufferFor(asset: AudioAsset) {
@@ -1235,6 +1293,40 @@ export class AudioEngine {
     if (ctx === this.ctx) this.sources.push(src)
   }
 
+  /** Local audition only. Stays on the speaker and never enters the cue or mic path. */
+  previewPitches(pitches: number[]) {
+    const ctx = this.ctx
+    const out = this.speakerGain
+    if (!ctx || !out) return
+    const unique = [...new Set(pitches.map((pitch) => Math.round(pitch)).filter((pitch) => pitch >= 0 && pitch <= 127))]
+    if (!unique.length) return
+    const now = ctx.currentTime
+    const bus = ctx.createGain()
+    const level = 0.08 / Math.sqrt(unique.length)
+    bus.gain.setValueAtTime(0.0001, now)
+    bus.gain.exponentialRampToValueAtTime(level, now + 0.015)
+    bus.gain.exponentialRampToValueAtTime(0.0001, now + 0.5)
+    bus.connect(out)
+    let pending = unique.length
+    for (const pitch of unique) {
+      const osc = ctx.createOscillator()
+      osc.type = 'triangle'
+      osc.frequency.value = 440 * 2 ** ((pitch - 69) / 12)
+      osc.connect(bus)
+      osc.onended = () => {
+        pending -= 1
+        if (pending > 0) return
+        try {
+          bus.disconnect()
+        } catch {
+          /* already disconnected */
+        }
+      }
+      osc.start(now)
+      osc.stop(now + 0.55)
+    }
+  }
+
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track) {
     if (track?.rack && ctx === this.ctx) {
       this.rackHost.note(track.id, note.pitch, note.velocity, Math.max(when, ctx.currentTime))
@@ -1277,5 +1369,18 @@ export class AudioEngine {
     }
     this.sources = []
     this.rackHost.allOff()
+  }
+}
+
+function passthrough(): Processor {
+  return {
+    latencySamples: 0,
+    reset() {},
+    process(input, output) {
+      for (let c = 0; c < output.length; c++) {
+        const src = input[Math.min(c, input.length - 1)]
+        if (src && output[c]) output[c].set(src)
+      }
+    },
   }
 }

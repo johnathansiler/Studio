@@ -411,7 +411,14 @@ export function cloneRack(rack: RackState): RackState {
 }
 
 export function normalizeProjectRack(project: Project): Project {
-  project.automation = project.automation ?? []
+  const pluginLanes: Project['automation'] = []
+  const rackLanes: RackAutomation[] = [...(project.rackAutomation ?? [])]
+  for (const lane of (project.automation ?? []) as Array<RackAutomation & { pluginId?: string }>) {
+    if (lane.deviceId && !lane.pluginId) rackLanes.push(lane)
+    else pluginLanes.push(lane as Project['automation'][number])
+  }
+  project.automation = pluginLanes
+  project.rackAutomation = rackLanes
   project.devicePresets = project.devicePresets ?? []
   project.rackPatches = project.rackPatches ?? []
   for (const track of project.tracks) normalizeTrackRack(track)
