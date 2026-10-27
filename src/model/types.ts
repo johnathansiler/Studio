@@ -4,6 +4,30 @@ export type ClipSource = 'local' | 'import' | 'demo' | 'guide' | 'aligned-take' 
 export type LaunchQuant = 'none' | '1/16' | '1/4' | '1bar' | '2bar' | '4bar'
 export type LaunchMode = 'trigger' | 'gate' | 'toggle' | 'repeat'
 export type FollowAction = 'none' | 'next' | 'prev' | 'any' | 'other' | 'stop'
+export type StretchMode = 'beats' | 'tonal' | 'voice' | 'tape'
+
+/** Source sample locked to a musical beat. Targets are beats from the clip start. */
+export interface WarpMarker {
+  id: string
+  source: number
+  target: number
+}
+
+/** Non-destructive time-stretch. Playback and export render from these fields. */
+export interface ClipStretch {
+  sourceSamples: number
+  semitones: number
+  cents: number
+  mode: StretchMode
+  followTempo: boolean
+  sourceBpm: number | null
+  markers: WarpMarker[]
+}
+
+export interface TempoPoint {
+  beat: number
+  bpm: number
+}
 
 export interface Insert {
   id: string
@@ -35,6 +59,7 @@ export interface AudioClip {
   /** Tempo-follow. Missing means on when durationBeats is set. */
   warp?: boolean
   durationBeats?: number
+  stretch?: ClipStretch
   /** Session slot only, until Capture copies it onto the arrangement. */
   slotOnly?: boolean
 }
@@ -102,6 +127,8 @@ export interface Project {
   launchQuant?: LaunchQuant
   /** 0 records until stop. A positive count trims a session take to that many bars. */
   recordBars?: number
+  tempoMap?: TempoPoint[]
+  automation?: { pluginId: string; param: string; points: { beat: number; value: number }[] }[]
   /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */
   waveforms?: Record<string, { min: number; max: number }[]>
 }

@@ -1,6 +1,7 @@
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
 import type { AudioAsset, AudioClip, MidiNote, Project, Track } from '../model/types'
-import { quantizeSample, warpRate } from '../model/launch'
+import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
+import { preferStretchCache } from './stretch/engine'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToMusical } from '../model/time'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav } from '../model/wav'
@@ -75,6 +76,7 @@ export class AudioEngine {
   private talkGains = new Map<string, GainNode>()
 
   private sources: Stoppable[] = []
+  private warpPcm = new Map<string, Float32Array[]>()
   private scheduler = 0
   private raf = 0
   private playing = false
@@ -1101,6 +1103,25 @@ export class AudioEngine {
     }
   }
 
+  /** Cached tempo-follow. A phone plays the pre-render instead of stretching on each launch. */
+  private sessionWarp(buffer: AudioBuffer, audio: AudioClip, sampleRate: number, tempo: number): Float32Array[] {
+    const phone = typeof matchMedia === 'function' && matchMedia('(max-width: 940px)').matches
+    const key = `${audio.bufferId}:${audio.offsetSamples}:${audio.durationSamples}:${audio.durationBeats}:${sampleRate}:${tempo}`
+    let pcm = this.warpPcm.get(key)
+    if (!pcm) {
+      const channels: Float32Array[] = []
+      for (let index = 0; index < buffer.numberOfChannels; index++) channels.push(buffer.getChannelData(index))
+      pcm = renderTempoWarp(channels, audio.offsetSamples, audio.durationSamples, sampleRate, tempo, audio.durationBeats || 0)
+      if (this.warpPcm.size >= 8) {
+        const oldest = this.warpPcm.keys().next().value
+        if (oldest) this.warpPcm.delete(oldest)
+      }
+      this.warpPcm.set(key, pcm)
+    }
+    if (preferStretchCache(phone, phone ? 1 : 0)) pcm = this.warpPcm.get(key) ?? pcm
+    return pcm
+  }
+
   private scheduleSession(horizon: number) {
     const project = this.project!
     const sr = this.sampleRate
@@ -1132,23 +1153,33 @@ export class AudioEngine {
         if (!asset) continue
         const buffer = this.bufferFromAsset(this.ctx, asset)
         const src = this.ctx.createBufferSource()
-        src.buffer = buffer
-        const offset = audio.offsetSamples / buffer.sampleRate
-        const dur = Math.max(0.01, audio.durationSamples / sr)
         const rate = warpRate(audio.durationSamples, audio.durationBeats, sr, project.tempo, audio.warp !== false)
-        src.playbackRate.value = rate
+        let playBuffer = buffer
+        let offset = audio.offsetSamples / buffer.sampleRate
+        let dur = Math.max(0.01, audio.durationSamples / sr)
+        let playRate = rate
+        if (audio.durationBeats && Math.abs(rate - 1) > 1e-3) {
+          const pcm = this.sessionWarp(buffer, audio, sr, project.tempo)
+          playBuffer = this.ctx.createBuffer(Math.max(1, pcm.length), Math.max(1, pcm[0]?.length ?? 1), sr)
+          pcm.forEach((channel, index) => playBuffer.copyToChannel(Float32Array.from(channel), index))
+          offset = 0
+          dur = Math.max(0.01, playBuffer.duration)
+          playRate = 1
+        }
+        src.buffer = playBuffer
+        src.playbackRate.value = playRate
         const looping = audio.mode === 'repeat' || audio.loop !== false
         if (looping && dur > 0.01) {
           src.loop = true
           src.loopStart = offset
-          src.loopEnd = offset + dur
+          src.loopEnd = offset + (playRate === 1 ? dur : audio.durationSamples / buffer.sampleRate)
         }
         const gain = this.ctx.createGain()
         gain.gain.value = audio.gain
         src.connect(gain)
         gain.connect(strip.input)
         if (looping) src.start(startWhen, offset)
-        else src.start(startWhen, offset, dur / rate)
+        else src.start(startWhen, offset, playRate === 1 ? dur : dur / rate)
         this.trackNodes(trackId, {
           stop: () => src.stop(),
           disconnect: () => {

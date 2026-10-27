@@ -8,8 +8,11 @@ import {
   recordedLength,
   retrigger,
   sceneClip,
+  renderTempoWarp,
   warpRate,
 } from '../model/launch'
+import { preferStretchCache, renderStretch, renderStretchBlocks } from '../audio/stretch/engine'
+import { yinPitch } from '../audio/stretch/voice'
 import { beatsToSamples } from '../model/time'
 import { createEmptyProject, makeTrack, type MidiClip } from '../model/types'
 import { ProjectStore } from '../state/store'
@@ -51,6 +54,25 @@ describe('clip launch', () => {
     expect(warpRate(48000, 2, 48000, 60, true)).toBe(0.5)
     expect(warpRate(48000, 2, 48000, 60, false)).toBe(1)
     expect(warpRate(48000, undefined, 48000, 60, true)).toBe(1)
+    const rate = 48000
+    const sine = new Float32Array(rate)
+    for (let i = 0; i < sine.length; i++) sine[i] = Math.sin((2 * Math.PI * 440 * i) / rate)
+    const stretched = renderTempoWarp([sine], 0, sine.length, rate, 60, 2)
+    expect(Math.abs(stretched[0].length - rate * 2)).toBeLessThan(rate * 0.001)
+    const start = Math.floor(stretched[0].length * 0.35)
+    const hz = yinPitch(stretched[0].subarray(start, start + 4096), rate, 220, 880).hz
+    expect(Math.abs(1200 * Math.log2(hz / 440))).toBeLessThan(8)
+    const same = renderTempoWarp([sine], 0, sine.length, rate, 120, 2)
+    expect(same[0].length).toBe(sine.length)
+    expect(same[0][100]).toBeCloseTo(sine[100])
+    const once = renderStretch([sine.subarray(0, 8000)], rate, { ratio: 2, mode: 'tonal' })
+    const blocks = renderStretchBlocks([sine.subarray(0, 8000)], rate, { ratio: 2, mode: 'tonal' }, 192)
+    expect(blocks[0].length).toBe(once[0].length)
+    let err = 0
+    for (let i = 0; i < once[0].length; i++) err = Math.max(err, Math.abs((once[0][i] || 0) - (blocks[0][i] || 0)))
+    expect(err).toBeLessThan(1e-5)
+    expect(preferStretchCache(true, 1)).toBe(true)
+    expect(preferStretchCache(false, 1)).toBe(false)
   })
 
   it('retriggers, holds legato, and toggles', () => {

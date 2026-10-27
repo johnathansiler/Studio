@@ -1,3 +1,4 @@
+import { renderStretch } from '../audio/stretch/engine'
 import type { AudioClip, FollowAction, LaunchMode, LaunchQuant, MidiClip, MidiNote, Track } from './types'
 import { uid } from './types'
 import { beatsToSamples, samplesPerBar, samplesPerQuarter, type TimeSignature } from './time'
@@ -80,6 +81,27 @@ export function warpRate(
   if (!(musical > 0)) return 1
   const rate = durationSamples / musical
   return Number.isFinite(rate) && rate > 0 ? rate : 1
+}
+
+/** Tempo-follow at constant pitch. Output length is the musical length of `durationBeats`. */
+export function renderTempoWarp(
+  channels: Float32Array[],
+  offsetSamples: number,
+  durationSamples: number,
+  sampleRate: number,
+  tempo: number,
+  durationBeats: number,
+): Float32Array[] {
+  const length = Math.max(1, Math.round(durationSamples))
+  const musical = Math.max(1, Math.round(beatsToSamples(durationBeats, sampleRate, tempo)))
+  const slices = channels.map((channel) => {
+    const slice = new Float32Array(length)
+    const start = Math.max(0, offsetSamples)
+    slice.set(channel.subarray(start, start + length))
+    return slice
+  })
+  if (Math.abs(musical - length) <= 1) return slices
+  return renderStretch(slices, sampleRate, { ratio: musical / length, mode: 'tonal' })
 }
 
 export function retrigger(mode: LaunchMode, alreadyPlaying: boolean, legato: boolean): 'start' | 'stop' | 'hold' {
