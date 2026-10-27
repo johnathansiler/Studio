@@ -1,6 +1,6 @@
 import { descriptor, FACTORY, tuneLatency } from './catalog'
 import { clamp, sanitize } from './dsp'
-import { Psola } from './psola'
+import { Psola } from '../stretch/voice'
 import type { PluginModule, Processor } from './types'
 
 export function createPitch(sampleRate: number): Processor {
