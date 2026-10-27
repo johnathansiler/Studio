@@ -1,4 +1,5 @@
 import type { RollMemory } from './paint'
+import type { QuantizePreset, QuantizeSettings, WarpPoint } from './quantize'
 import type { DevicePreset, RackAutomation, RackPatch, RackState } from './rack'
 import { defaultScale, type ScaleState } from './scale'
 import type { BeatRack, PatternClip } from './steps'
@@ -110,6 +111,8 @@ export interface AudioClip {
   stretch?: ClipStretch
   /** Session slot only, until Capture copies it onto the arrangement. */
   slotOnly?: boolean
+  /** Transient warp. Source samples map onto beats inside the clip. */
+  warpPoints?: WarpPoint[]
 }
 
 export interface MidiNote {
@@ -212,6 +215,8 @@ export interface Project {
   beats?: BeatRack
   patternClips?: PatternClip[]
   roll?: RollMemory
+  quantize?: QuantizeSettings
+  quantizePresets?: QuantizePreset[]
   /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */
   waveforms?: Record<string, { min: number; max: number }[]>
 }

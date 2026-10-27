@@ -3,6 +3,7 @@ import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
 import { RackHost } from './rack/host'
 import { renderNotes } from './rack/dsp'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
+import { warpSpans } from '../model/quantize'
 import { renderPattern, type RenderedHit } from '../model/steps'
 import { preferStretchCache } from './stretch/engine'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToMusical } from '../model/time'
@@ -1553,6 +1554,30 @@ export class AudioEngine {
     timelineEnd: number,
   ) {
     const sr = ctx.sampleRate
+    const spans = warpSpans(clip, sr, this.project?.tempo || 120)
+    if (spans) {
+      for (const span of spans) {
+        const abs = clip.startSample + span.at
+        const absEnd = abs + Math.max(1, Math.round(span.seconds * sr))
+        const from = Math.max(abs, timelineStart)
+        const to = Math.min(absEnd, timelineEnd)
+        if (to - from < 8) continue
+        const when = ctxTime + (from - timelineStart) / sr
+        if (ctx === this.ctx && when < ctx.currentTime - 0.02) continue
+        const into = (from - abs) / sr
+        const dur = (to - from) / sr
+        const src = ctx.createBufferSource()
+        src.buffer = buffer
+        src.playbackRate.value = span.rate
+        const gain = ctx.createGain()
+        gain.gain.value = Math.max(0.0001, clip.gain)
+        src.connect(gain)
+        gain.connect(strip.input)
+        src.start(Math.max(when, 0), Math.max(0, span.offset + into * span.rate), Math.max(0.01, dur * span.rate))
+        if (ctx === this.ctx) this.sources.push(src)
+      }
+      return
+    }
     const clipEnd = clip.startSample + clip.durationSamples
     const from = Math.max(clip.startSample, timelineStart)
     const to = Math.min(clipEnd, timelineEnd)

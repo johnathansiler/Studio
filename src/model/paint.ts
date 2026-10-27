@@ -1,3 +1,4 @@
+import { defaultQuantize, divisionForGrid, quantizeMidi } from './quantize'
 import { patternNotes, snapPitch, type ScaleId } from './scale'
 import type { MidiNote } from './types'
 
@@ -136,7 +137,8 @@ export function eraseNotes(notes: MidiNote[], fromBeat: number, toBeat: number, 
 }
 
 export function quantizeNotes(notes: MidiNote[], grid: number, only?: string[]): MidiNote[] {
-  return notes.map((note) => (!only || only.includes(note.id) ? { ...note, startBeat: snapBeat(note.startBeat, grid) } : note))
+  if (!(grid > 0)) return notes.map((note) => ({ ...note }))
+  return quantizeMidi(notes, { ...defaultQuantize(), division: divisionForGrid(grid), strength: 1, starts: true, ends: false, keepLength: true, window: 100 }, { only })
 }
 
 /** Scaler arp, written from the earliest selected note. */

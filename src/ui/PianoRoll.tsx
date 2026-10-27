@@ -10,7 +10,6 @@ import {
   paintCc,
   paintChords,
   paintNotes,
-  quantizeNotes,
   sliceNote,
   strumSelection,
   type RollTool,
@@ -114,7 +113,6 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
       const tools: Record<string, RollTool> = { '1': 'paint', '2': 'brush', '3': 'pen', '4': 'slice', '5': 'glue', '6': 'mute', '7': 'erase', '8': 'velocity', '9': 'cc' }
       if (tools[event.key]) store.setRollTool(tools[event.key])
-      else if (event.key === 'q' && !event.metaKey && !event.ctrlKey) quantize()
       else if (event.key === 'a' && !event.metaKey && !event.ctrlKey) arpeggiate()
       else if (event.key === 'u' && !event.metaKey && !event.ctrlKey) strum()
       else if (event.key === 'h' && !event.metaKey && !event.ctrlKey) humanize()
@@ -128,19 +126,14 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   const high = 84
   const pxBeat = 70
   const width = Math.max(clip.durationBeats, 8) * pxBeat
-  const selected = clip.notes.filter((note) => store.selectedNoteIds.includes(note.id))
+  const shown = store.quantizePreview?.notes.find((item) => item.clipId === clip.id)?.notes ?? clip.notes
+  const selected = shown.filter((note) => store.selectedNoteIds.includes(note.id))
   const chord = selected.length ? nameChord(selected.map((note) => note.pitch)) : ''
   const pads = diatonicPads(scale.root, scale.scale, scale.source)
   const tones = [...scaleTones(scale.root, scale.scale, 4), ...scaleTones(scale.root, scale.scale, 5)]
 
   function withNotes(next: MidiNote[]) {
     store.replaceNotes(track!.id, clip!.id, next)
-  }
-
-  function quantize() {
-    if (!clip) return
-    const ids = store.selectedNoteIds.length ? store.selectedNoteIds : undefined
-    withNotes(quantizeNotes(clip.notes, roll.grid, ids).map((note) => ({ ...note, id: note.id || uid('note') })))
   }
 
   function arpeggiate() {
@@ -272,7 +265,6 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
           <option value="0.5">1/8</option>
           <option value="1">1/4</option>
         </select>
-        <button type="button" onClick={quantize}>Quantize</button>
         <button type="button" onClick={arpeggiate}>Arp</button>
         <button type="button" onClick={strum}>Strum</button>
       </div>
@@ -312,7 +304,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
               commitGesture(current.from, current.to, current.pitch, current.y)
             }}
           >
-            {clip.notes.map((note) => (
+            {shown.map((note) => (
               <div
                 key={note.id}
                 className={`note ${store.selectedNoteIds.includes(note.id) ? 'selected' : ''} ${inScale(note.pitch, scale.root, scale.scale) ? '' : 'off'}`}
