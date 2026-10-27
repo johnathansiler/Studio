@@ -1466,7 +1466,7 @@ export class AudioEngine {
   /** Phone under load replays the cached render instead of stretching on the audio thread. */
   private shouldStretchLive(clip: AudioClip) {
     if (!this.stretchReady || !this.project || !clip.stretch) return false
-    const phone = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 940px)').matches
+    const phone = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
     if (preferStretchCache(phone, this.rack.cpu)) return false
     if (clip.stretch.followTempo || clip.stretch.markers.length >= 2) return false
     return sourceSamplesOf(clip) <= this.sampleRate * 3
