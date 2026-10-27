@@ -109,32 +109,6 @@ function writeInt24(view: DataView, offset: number, value: number) {
   view.setUint8(offset + 2, (value >> 16) & 0xff)
 }
 
-function quantize(sample: number, bits: 16 | 24, dither: DitherMode, random: () => number, error: { e: number }) {
-  const full = bits === 16 ? 0x8000 : 0x800000
-  const positive = full - 1
-  let s = Math.max(-1, Math.min(1, Number.isFinite(sample) ? sample : 0))
-  if (dither !== 'none') {
-    const quantum = 1 / positive
-    const noise = (random() - random()) * quantum
-    s += dither === 'shaped' ? noise - error.e : noise
-    s = Math.max(-1, Math.min(1, s))
-  }
-  const scaled = s < 0 ? s * full : s * positive
-  const code = Math.trunc(scaled)
-  const clamped = Math.max(-full, Math.min(positive, code))
-  if (dither === 'shaped') {
-    const decoded = clamped < 0 ? clamped / full : clamped / positive
-    error.e = decoded - (Number.isFinite(sample) ? sample : 0)
-  }
-  return clamped
-}
-
-function writeInt24(view: DataView, offset: number, value: number) {
-  view.setUint8(offset, value & 0xff)
-  view.setUint8(offset + 1, (value >> 8) & 0xff)
-  view.setUint8(offset + 2, (value >> 16) & 0xff)
-}
-
 export interface WavInfo {
   sampleRate: number
   channels: number
