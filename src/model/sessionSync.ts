@@ -123,7 +123,7 @@ export function arrangementDigest(project: Project): string {
             pattern.id,
             pattern.steps,
             pattern.swing,
-            pattern.channels.map((channel) => [channel.id, channel.steps, channel.swing, channel.mute, channel.solo, channel.volume, channel.cells.map((cell) => (cell.on ? cell.velocity : 0))]),
+            pattern.channels.map((channel) => [channel.id, channel.steps, channel.swing, channel.mute, channel.solo, channel.volume, channel.cells.map((cell) => (cell.on ? [cell.velocity, cell.nudge || 0] : 0))]),
           ]),
         }
       : null,
@@ -152,6 +152,7 @@ export function arrangementDigest(project: Project): string {
         clip.follow ?? null,
         clip.legato ?? null,
         clip.slotOnly ?? null,
+        clip.warpPoints?.length ?? 0,
         clip.stretch
           ? [
               clip.stretch.sourceSamples,
@@ -173,6 +174,7 @@ export function arrangementDigest(project: Project): string {
         clip.startBeat,
         clip.durationBeats,
         clip.notes.length,
+        clip.notes.map((note) => [note.startBeat, note.durationBeats, note.pitch]),
         clip.notes.map((note) => (note.slide ? 1 : 0)).join(''),
         clip.quant ?? null,
         clip.mode ?? null,

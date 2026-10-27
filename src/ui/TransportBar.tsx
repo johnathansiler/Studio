@@ -17,6 +17,7 @@ export function TransportBar({
   onPiano,
   onKeys,
   onDrums,
+  onQuantize,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -30,9 +31,12 @@ export function TransportBar({
   onPiano?: (trackId: string) => void
   onKeys: () => void
   onDrums: () => void
+  onQuantize: () => void
 }) {
   const project = store.project
   const midiTrack = project.tracks.find((track) => track.id === store.selectedTrackId && track.type === 'midi')
+  const qHold = useRef(0)
+  const opened = useRef(false)
   const [position, setPosition] = useState(engine.positionSamples)
   const [status, setStatus] = useState(engine.status)
   const [tapOpen, setTapOpen] = useState(false)
@@ -126,6 +130,31 @@ export function TransportBar({
         </button>
         <button className="t-btn wide" onPointerDown={() => engine.unlock()} onClick={onDrums} title="Drum machine">
           Pads
+        </button>
+        <button
+          className="t-btn"
+          type="button"
+          aria-label="Quantize"
+          onPointerDown={() => {
+            opened.current = false
+            qHold.current = window.setTimeout(() => {
+              opened.current = true
+              onQuantize()
+            }, 420)
+          }}
+          onPointerUp={() => window.clearTimeout(qHold.current)}
+          onPointerCancel={() => window.clearTimeout(qHold.current)}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            opened.current = true
+            onQuantize()
+          }}
+          onClick={() => {
+            if (opened.current) return
+            store.quickQuantize()
+          }}
+        >
+          Q
         </button>
       </div>
       <div className="lcd-wrap">
