@@ -35,6 +35,10 @@ export interface BlockContext {
 export interface Processor {
   latencySamples: number
   spectrum?: Float32Array
+  /** Needle ballistics. vu is dB relative to 0 VU. gr is positive reduction. */
+  meter?: { vu: number; gr: number }
+  /** Recent detected pitch, in hertz, for the tune graph. */
+  trace?: Float32Array
   reset(): void
   process(input: Float32Array[], output: Float32Array[], params: Record<string, number>, ctx: BlockContext): void
 }

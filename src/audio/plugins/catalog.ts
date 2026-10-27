@@ -138,6 +138,7 @@ export const CATALOG: PluginDescriptor[] = [
     params: [
       param('retune', 'Speed', 0.02, 1, 0.65, ''),
       param('humanize', 'Human', 0, 1, 0.25, ''),
+      param('flex', 'Flex', 0, 1, 0, ''),
       param('amount', 'Amount', 0, 1, 0, ''),
       param('transpose', 'Transpose', -12, 12, 0, 'st'),
       param('mode', 'Mode', 0, 1, 1, ''),
@@ -157,6 +158,253 @@ export const CATALOG: PluginDescriptor[] = [
       param('harmony', 'Harm', -12, 12, 7, 'st'),
       param('harmonyMix', 'Harm', 0, 1, 0, ''),
       param('mix', 'Mix', 0, 1, 0, ''),
+    ],
+  },
+  {
+    id: 'fet',
+    name: 'FET',
+    version: VERSION,
+    params: [
+      param('input', 'Input', -24, 24, 0, 'dB'),
+      param('output', 'Output', -24, 24, 0, 'dB'),
+      param('ratio', 'Ratio', 0, 4, 0, ''),
+      param('attack', 'Attack', 0.02, 0.8, 0.2, 'ms'),
+      param('release', 'Release', 50, 1100, 300, 'ms'),
+    ],
+  },
+  {
+    id: 'opto',
+    name: 'Opto',
+    version: VERSION,
+    params: [
+      param('peak', 'Peak', 0, 1, 0.35, ''),
+      param('gain', 'Gain', 0, 24, 6, 'dB'),
+    ],
+  },
+  {
+    id: 'bus',
+    name: 'Bus',
+    version: VERSION,
+    params: [
+      param('threshold', 'Thresh', -40, 0, -8, 'dB'),
+      param('ratio', 'Ratio', 0, 2, 1, ''),
+      param('attack', 'Attack', 0, 5, 2, ''),
+      param('release', 'Release', 0, 4, 4, ''),
+      param('hpf', 'SC HPF', 20, 300, 80, 'Hz'),
+      param('makeup', 'Makeup', 0, 18, 0, 'dB'),
+    ],
+  },
+  {
+    id: 'vari',
+    name: 'Vari',
+    version: VERSION,
+    params: [
+      param('time', 'Time', 0, 5, 1, ''),
+      param('input', 'Input', -12, 24, 0, 'dB'),
+      param('output', 'Output', -12, 12, 0, 'dB'),
+      param('color', 'Color', 0, 1, 0.35, ''),
+    ],
+  },
+  {
+    id: 'passive',
+    name: 'Passive',
+    version: VERSION,
+    params: [
+      param('lowF', 'Low', 0, 3, 2, ''),
+      param('lowBoost', 'Boost', 0, 1, 0, ''),
+      param('lowAtten', 'Atten', 0, 1, 0, ''),
+      param('highF', 'High', 0, 6, 4, ''),
+      param('highBoost', 'HF', 0, 1, 0, ''),
+      param('highBw', 'Width', 0, 1, 0.5, ''),
+      param('highAtten', 'HF cut', 0, 1, 0, ''),
+      param('highAttenF', 'Cut', 0, 2, 1, ''),
+    ],
+  },
+  {
+    id: 'pre',
+    name: 'Pre',
+    version: VERSION,
+    params: [
+      param('hp', 'HP', 0, 4, 0, ''),
+      param('lowF', 'Low', 0, 3, 2, ''),
+      param('lowG', 'Low', -16, 16, 0, 'dB'),
+      param('midF', 'Mid', 0, 5, 2, ''),
+      param('midG', 'Mid', -18, 18, 0, 'dB'),
+      param('highF', 'High', 0, 1, 0, ''),
+      param('highG', 'High', -16, 16, 0, 'dB'),
+      param('drive', 'Drive', 0, 1, 0, ''),
+    ],
+  },
+  {
+    id: 'channel',
+    name: 'Channel',
+    version: VERSION,
+    params: [
+      param('curve', 'Curve', 0, 1, 0, ''),
+      param('lfF', 'LF', 0, 3, 1, ''),
+      param('lfG', 'LF', -15, 15, 0, 'dB'),
+      param('lmfF', 'LMF', 0, 3, 1, ''),
+      param('lmfG', 'LMF', -15, 15, 0, 'dB'),
+      param('hmfF', 'HMF', 0, 3, 2, ''),
+      param('hmfG', 'HMF', -15, 15, 0, 'dB'),
+      param('hfF', 'HF', 0, 3, 2, ''),
+      param('hfG', 'HF', -15, 15, 0, 'dB'),
+    ],
+  },
+  {
+    id: 'prop',
+    name: 'Prop',
+    version: VERSION,
+    params: [
+      param('freq', 'Freq', 0, 10, 5, ''),
+      param('gain', 'Gain', -12, 12, 0, 'dB'),
+    ],
+  },
+  {
+    id: 'focus',
+    name: 'Focus',
+    version: VERSION,
+    params: [
+      param('f0', 'Low', 40, 500, 120, 'Hz'),
+      param('g0', 'Low', -18, 18, 0, 'dB'),
+      param('q0', 'Q', 0.2, 12, 0.7, ''),
+      param('f1', 'Mid', 200, 8000, 1500, 'Hz'),
+      param('g1', 'Mid', -18, 18, 0, 'dB'),
+      param('q1', 'Q', 0.2, 12, 1, ''),
+      param('f2', 'High', 1000, 16000, 8000, 'Hz'),
+      param('g2', 'High', -18, 18, 0, 'dB'),
+      param('q2', 'Q', 0.2, 12, 0.7, ''),
+      param('dynamic', 'Dynamic', 0, 1, 0, ''),
+      param('threshold', 'Thresh', -48, 0, -18, 'dB'),
+      param('linear', 'Linear', 0, 1, 0, ''),
+      param('ms', 'M/S', 0, 2, 0, ''),
+    ],
+  },
+  {
+    id: 'tape',
+    name: 'Tape',
+    version: VERSION,
+    params: [
+      param('speed', 'Speed', 0, 2, 1, ''),
+      param('bias', 'Bias', 0, 1, 0.4, ''),
+      param('wow', 'Wow', 0, 1, 0.15, ''),
+      param('bump', 'Bump', 0, 1, 0.4, ''),
+      param('hiss', 'Hiss', 0, 1, 0.1, ''),
+      param('drive', 'Drive', 0, 1, 0.3, ''),
+    ],
+  },
+  {
+    id: 'sum',
+    name: 'Sum',
+    version: VERSION,
+    params: [
+      param('drive', 'Drive', 0, 1, 0.25, ''),
+      param('tube', 'Tube', 0, 1, 0, ''),
+    ],
+  },
+  {
+    id: 'plate',
+    name: 'Plate',
+    version: VERSION,
+    params: [
+      param('size', 'Size', 0.15, 1, 0.5, ''),
+      param('decay', 'Decay', 0.2, 0.95, 0.7, ''),
+      param('damp', 'Damp', 0, 0.9, 0.35, ''),
+      param('mix', 'Mix', 0, 1, 0.22, ''),
+    ],
+  },
+  {
+    id: 'hall',
+    name: 'Hall',
+    version: VERSION,
+    params: [
+      param('mode', 'Mode', 0, 2, 1, ''),
+      param('size', 'Size', 0.15, 1, 0.7, ''),
+      param('decay', 'Decay', 0.2, 0.96, 0.8, ''),
+      param('damp', 'Damp', 0, 0.9, 0.4, ''),
+      param('mix', 'Mix', 0, 1, 0.24, ''),
+    ],
+  },
+  {
+    id: 'conv',
+    name: 'Conv',
+    version: VERSION,
+    params: [
+      param('ir', 'IR', 0, 1, 0, ''),
+      param('mix', 'Mix', 0, 1, 0.3, ''),
+    ],
+  },
+  {
+    id: 'echo',
+    name: 'Echo',
+    version: VERSION,
+    params: [
+      param('time', 'Time', 20, 1000, 280, 'ms'),
+      param('feedback', 'Feedback', 0, 0.9, 0.35, ''),
+      param('wow', 'Wow', 0, 1, 0.25, ''),
+      param('drive', 'Drive', 0, 1, 0.3, ''),
+      param('mix', 'Mix', 0, 1, 0.3, ''),
+    ],
+  },
+  {
+    id: 'bbd',
+    name: 'BBD',
+    version: VERSION,
+    params: [
+      param('time', 'Time', 10, 380, 180, 'ms'),
+      param('feedback', 'Feedback', 0, 0.85, 0.3, ''),
+      param('clock', 'Clock', 0, 1, 0.45, ''),
+      param('mix', 'Mix', 0, 1, 0.3, ''),
+    ],
+  },
+  {
+    id: 'digital',
+    name: 'Digital',
+    version: VERSION,
+    params: [
+      param('time', 'Time', 1, 1800, 250, 'ms'),
+      param('feedback', 'Feedback', 0, 0.95, 0.25, ''),
+      param('mix', 'Mix', 0, 1, 0.3, ''),
+    ],
+  },
+  {
+    id: 'ensemble',
+    name: 'Ensemble',
+    version: VERSION,
+    params: [
+      param('rate', 'Rate', 0.05, 4, 0.4, 'Hz'),
+      param('depth', 'Depth', 0, 1, 0.4, ''),
+      param('mode', 'Mode', 0, 1, 0, ''),
+      param('mix', 'Mix', 0, 1, 0.4, ''),
+    ],
+  },
+  {
+    id: 'phase',
+    name: 'Phase',
+    version: VERSION,
+    params: [
+      param('rate', 'Rate', 0.02, 4, 0.3, 'Hz'),
+      param('depth', 'Depth', 0, 1, 0.6, ''),
+      param('feedback', 'Feedback', 0, 0.9, 0.4, ''),
+      param('mix', 'Mix', 0, 1, 0.5, ''),
+    ],
+  },
+  {
+    id: 'rotor',
+    name: 'Rotor',
+    version: VERSION,
+    params: [
+      param('speed', 'Speed', 0, 1, 0, ''),
+      param('mix', 'Mix', 0, 1, 0.7, ''),
+    ],
+  },
+  {
+    id: 'peak',
+    name: 'Peak',
+    version: VERSION,
+    params: [
+      param('ceiling', 'Ceiling', -6, 0, -1, 'dB'),
+      param('release', 'Release', 10, 500, 80, 'ms'),
     ],
   },
 ]
@@ -218,6 +466,123 @@ export const FACTORY: Record<string, FactoryPreset[]> = {
     { name: 'Fifth', params: { semis: 0, harmony: 7, harmonyMix: 0.6, mix: 0.8 } },
     { name: 'Double', params: { semis: 0.1, harmony: 12, harmonyMix: 0.35, mix: 0.5 } },
   ],
+  fet: [
+    { name: 'Vocal', params: { input: 8, output: -2, ratio: 0, attack: 0.4, release: 250 } },
+    { name: 'Drums', params: { input: 14, output: -4, ratio: 3, attack: 0.08, release: 120 } },
+    { name: 'Bus', params: { input: 4, output: 0, ratio: 1, attack: 0.5, release: 400 } },
+    { name: 'Crush', params: { input: 16, output: -6, ratio: 4, attack: 0.05, release: 80 } },
+  ],
+  opto: [
+    { name: 'Vocal', params: { peak: 0.45, gain: 8 } },
+    { name: 'Bass', params: { peak: 0.6, gain: 6 } },
+    { name: 'Bus', params: { peak: 0.25, gain: 3 } },
+    { name: 'Master', params: { peak: 0.15, gain: 2 } },
+  ],
+  bus: [
+    { name: 'Vocal', params: { threshold: -16, ratio: 1, attack: 2, release: 2, hpf: 90, makeup: 2 } },
+    { name: 'Drums', params: { threshold: -12, ratio: 1, attack: 1, release: 4, hpf: 80, makeup: 3 } },
+    { name: 'Bus', params: { threshold: -8, ratio: 0, attack: 2, release: 4, hpf: 70, makeup: 1 } },
+    { name: 'Master', params: { threshold: -6, ratio: 0, attack: 3, release: 4, hpf: 40, makeup: 1 } },
+  ],
+  vari: [
+    { name: 'Vocal', params: { time: 1, input: 4, output: 0, color: 0.4 } },
+    { name: 'Drums', params: { time: 0, input: 6, output: -1, color: 0.25 } },
+    { name: 'Bus', params: { time: 2, input: 2, output: 0, color: 0.3 } },
+    { name: 'Master', params: { time: 4, input: 1, output: 0, color: 0.2 } },
+  ],
+  passive: [
+    { name: 'Vocal', params: { lowF: 2, lowBoost: 0.25, lowAtten: 0.2, highF: 4, highBoost: 0.35, highBw: 0.4, highAtten: 0 } },
+    { name: 'Drums', params: { lowF: 1, lowBoost: 0.4, lowAtten: 0.15, highF: 5, highBoost: 0.2, highBw: 0.6 } },
+    { name: 'Bus', params: { lowF: 2, lowBoost: 0.15, lowAtten: 0.1, highBoost: 0.2, highBw: 0.5 } },
+    { name: 'Air', params: { highF: 6, highBoost: 0.45, highBw: 0.3, lowBoost: 0 } },
+  ],
+  pre: [
+    { name: 'Vocal', params: { hp: 2, lowF: 2, lowG: -2, midF: 3, midG: 2, highF: 1, highG: 2, drive: 0.2 } },
+    { name: 'Drums', params: { hp: 1, lowF: 1, lowG: 3, midF: 2, midG: -1, drive: 0.35 } },
+    { name: 'Bus', params: { lowG: 1, highG: 1, drive: 0.15 } },
+    { name: 'Master', params: { highF: 0, highG: 1, drive: 0.1 } },
+  ],
+  channel: [
+    { name: 'Vocal', params: { curve: 0, lfG: -2, lmfG: 2, hmfF: 2, hmfG: 1.5, hfG: 2 } },
+    { name: 'Drums', params: { curve: 1, lfG: 2, lmfG: -1, hmfG: 2, hfG: 1 } },
+    { name: 'Bus', params: { curve: 0, lfG: 1, hfG: 1 } },
+    { name: 'Master', params: { curve: 0, hfG: 0.8, lfG: 0.5 } },
+  ],
+  prop: [
+    { name: 'Vocal', params: { freq: 7, gain: 3 } },
+    { name: 'Drums', params: { freq: 2, gain: 4 } },
+    { name: 'Bus', params: { freq: 4, gain: -2 } },
+    { name: 'Master', params: { freq: 9, gain: 1.5 } },
+  ],
+  focus: [
+    { name: 'Vocal', params: { f0: 90, g0: -2, f1: 3200, g1: 2, q1: 1, f2: 11000, g2: 1.5, dynamic: 0.2, ms: 0 } },
+    { name: 'Drums', params: { f0: 60, g0: 2, f1: 400, g1: -2, f2: 8000, g2: 1 } },
+    { name: 'Bus', params: { f0: 40, g0: 0.5, f2: 12000, g2: 1, linear: 0 } },
+    { name: 'Master', params: { f2: 14000, g2: 0.8, q2: 0.5, linear: 1, dynamic: 0 } },
+  ],
+  tape: [
+    { name: 'Vocal', params: { speed: 1, bias: 0.35, wow: 0.08, bump: 0.3, hiss: 0.05, drive: 0.25 } },
+    { name: 'Drums', params: { speed: 2, bias: 0.5, wow: 0.05, bump: 0.5, drive: 0.45 } },
+    { name: 'Bus', params: { speed: 1, bias: 0.4, wow: 0.1, bump: 0.35, drive: 0.3 } },
+    { name: 'Master', params: { speed: 2, bias: 0.25, wow: 0.04, bump: 0.2, hiss: 0.02, drive: 0.15 } },
+  ],
+  sum: [
+    { name: 'Vocal', params: { drive: 0.2, tube: 1 } },
+    { name: 'Drums', params: { drive: 0.4, tube: 0 } },
+    { name: 'Bus', params: { drive: 0.3, tube: 0 } },
+    { name: 'Master', params: { drive: 0.12, tube: 1 } },
+  ],
+  plate: [
+    { name: 'Vocal', params: { size: 0.45, decay: 0.68, damp: 0.3, mix: 0.2 } },
+    { name: 'Drums', params: { size: 0.35, decay: 0.5, damp: 0.45, mix: 0.16 } },
+    { name: 'Bus', params: { size: 0.55, decay: 0.75, damp: 0.4, mix: 0.18 } },
+  ],
+  hall: [
+    { name: 'Vocal', params: { mode: 2, size: 0.5, decay: 0.7, damp: 0.4, mix: 0.2 } },
+    { name: 'Drums', params: { mode: 0, size: 0.4, decay: 0.45, damp: 0.5, mix: 0.14 } },
+    { name: 'Hall', params: { mode: 1, size: 0.8, decay: 0.88, damp: 0.35, mix: 0.24 } },
+    { name: 'Master', params: { mode: 1, size: 0.6, decay: 0.6, damp: 0.5, mix: 0.08 } },
+  ],
+  conv: [
+    { name: 'Room', params: { ir: 0, mix: 0.25 } },
+    { name: 'Plate', params: { ir: 1, mix: 0.22 } },
+  ],
+  echo: [
+    { name: 'Vocal', params: { time: 320, feedback: 0.28, wow: 0.3, drive: 0.35, mix: 0.22 } },
+    { name: 'Drums', params: { time: 180, feedback: 0.2, wow: 0.1, drive: 0.4, mix: 0.18 } },
+    { name: 'Slap', params: { time: 90, feedback: 0.1, wow: 0.15, drive: 0.2, mix: 0.25 } },
+  ],
+  bbd: [
+    { name: 'Vocal', params: { time: 220, feedback: 0.3, clock: 0.4, mix: 0.22 } },
+    { name: 'Drums', params: { time: 120, feedback: 0.2, clock: 0.6, mix: 0.16 } },
+    { name: 'Dark', params: { time: 300, feedback: 0.4, clock: 0.8, mix: 0.28 } },
+  ],
+  digital: [
+    { name: 'Vocal', params: { time: 375, feedback: 0.25, mix: 0.2 } },
+    { name: 'Drums', params: { time: 125, feedback: 0.15, mix: 0.16 } },
+    { name: 'Bus', params: { time: 250, feedback: 0.3, mix: 0.18 } },
+  ],
+  ensemble: [
+    { name: 'Vocal', params: { rate: 0.35, depth: 0.3, mode: 0, mix: 0.28 } },
+    { name: 'Wide', params: { rate: 0.2, depth: 0.45, mode: 1, mix: 0.4 } },
+    { name: 'Drums', params: { rate: 0.5, depth: 0.2, mode: 0, mix: 0.15 } },
+  ],
+  phase: [
+    { name: 'Vocal', params: { rate: 0.2, depth: 0.5, feedback: 0.3, mix: 0.35 } },
+    { name: 'Drums', params: { rate: 0.8, depth: 0.7, feedback: 0.5, mix: 0.3 } },
+    { name: 'Slow', params: { rate: 0.08, depth: 0.6, feedback: 0.45, mix: 0.4 } },
+  ],
+  rotor: [
+    { name: 'Slow', params: { speed: 0, mix: 0.7 } },
+    { name: 'Fast', params: { speed: 1, mix: 0.75 } },
+    { name: 'Vocal', params: { speed: 0, mix: 0.4 } },
+  ],
+  peak: [
+    { name: 'Master', params: { ceiling: -1, release: 80 } },
+    { name: 'Vocal', params: { ceiling: -1.5, release: 40 } },
+    { name: 'Drums', params: { ceiling: -0.8, release: 30 } },
+    { name: 'Safe', params: { ceiling: -1.5, release: 120 } },
+  ],
 }
 
 export function descriptor(id: string) {
@@ -252,6 +617,8 @@ export function latencyOf(pluginId: string, params: Record<string, number>, samp
   if (pluginId === 'tune' && (params.amount ?? 0) > 0.001) return tuneLatency(sampleRate)
   if (pluginId === 'pitch' && (params.mix ?? 0) > 0.001) return tuneLatency(sampleRate)
   if (pluginId === 'limiter') return 64
+  if (pluginId === 'peak') return 96
+  if (pluginId === 'focus' && (params.linear ?? 0) >= 0.5) return 256
   return 0
 }
 
