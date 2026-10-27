@@ -644,6 +644,7 @@ export class ProjectStore {
       }
       if (patch.durationBeats != null) Object.assign(note, resizeMidiNote(note, patch.durationBeats))
       if (patch.velocity != null) note.velocity = patch.velocity
+      if ('slide' in patch) note.slide = !!patch.slide
     })
   }
 

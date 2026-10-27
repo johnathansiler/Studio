@@ -122,7 +122,7 @@ export function arrangementDigest(project: Project): string {
       solo: track.solo,
       color: track.color,
       clips: track.clips.map((clip) => [clip.id, clip.bufferId, clip.startSample, clip.offsetSamples, clip.durationSamples, clip.gain, clip.quant ?? null, clip.mode ?? null, clip.loop ?? null, clip.warp ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null]),
-      midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length, clip.quant ?? null, clip.mode ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null]),
+      midi: track.midiClips.map((clip) => [clip.id, clip.startBeat, clip.durationBeats, clip.notes.length, clip.notes.map((note) => (note.slide ? 1 : 0)).join(''), clip.quant ?? null, clip.mode ?? null, clip.follow ?? null, clip.legato ?? null, clip.slotOnly ?? null]),
       audioSlots: track.audioSlots ?? null,
       midiSlots: track.midiSlots ?? null,
       rack: track.rack?.devices.map((device) => [device.id, device.kind, device.params, device.pattern, device.zones.length]),

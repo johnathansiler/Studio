@@ -159,6 +159,18 @@ export function PianoRoll({ store, engine }: { store: ProjectStore; engine: Audi
           store.setScale({ root: found.root, scale: found.scale })
         }}>Detect</button>
         <span className="chord-name">{chord}</span>
+        {store.selectedNoteId && (
+          <button
+            type="button"
+            className={clip.notes.find((note) => note.id === store.selectedNoteId)?.slide ? 'on' : ''}
+            onClick={() => {
+              const note = clip.notes.find((item) => item.id === store.selectedNoteId)
+              if (note) store.updateNote(track.id, clip.id, note.id, { slide: !note.slide })
+            }}
+          >
+            {clip.notes.find((note) => note.id === store.selectedNoteId)?.slide ? 'Slide on' : 'Slide'}
+          </button>
+        )}
       </div>
       <div className="piano-body">
         <div className="keys">
@@ -185,7 +197,7 @@ export function PianoRoll({ store, engine }: { store: ProjectStore; engine: Audi
             {clip.notes.map((note) => (
               <div
                 key={note.id}
-                className={`note ${store.selectedNoteIds.includes(note.id) ? 'selected' : ''} ${inScale(note.pitch, scale.root, scale.scale) ? '' : 'off'}`}
+                className={`note ${store.selectedNoteIds.includes(note.id) ? 'selected' : ''} ${inScale(note.pitch, scale.root, scale.scale) ? '' : 'off'} ${note.slide ? 'slide' : ''}`}
                 style={{ left: note.startBeat * pxBeat, width: Math.max(8, note.durationBeats * pxBeat), top: (high - note.pitch) * row, height: Math.max(12, row - 2) }}
                 onClick={(event) => {
                   event.stopPropagation()

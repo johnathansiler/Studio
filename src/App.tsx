@@ -17,6 +17,7 @@ import { ArrangeView } from './ui/ArrangeView'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
 import { PianoRoll } from './ui/PianoRoll'
+import { KnockPop } from './ui/KnockPop'
 import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
@@ -67,6 +68,7 @@ export function App() {
   const compact = form !== 'desk'
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
   const [pianoOpen, setPianoOpen] = useState(false)
+  const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
   const takeRef = useRef<{ id: string; endSample: number } | null>(null)
@@ -137,6 +139,19 @@ export function App() {
       }
     })
     const params = new URLSearchParams(location.search)
+    if (params.get('knock') === '1') {
+      const track = store.project.tracks.find((item) => item.type === 'midi')
+      if (track) {
+        if (!track.rack?.devices.some((device) => device.kind === 'knock')) store.addDevice(track.id, 'knock')
+        const other = track.rack?.devices.find((device) => device.kind !== 'knock')
+        if (other && (track.rack?.devices.length || 0) > 1) store.removeDevice(track.id, other.id)
+        if (store.rackTrackId !== track.id) store.openRack(track.id)
+        store.setView('arrange')
+        setKnockOpen(true)
+        setSurface('studio')
+        setPhonePane('edit')
+      }
+    }
     const urlCode = (params.get('session') || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
     const identity = readIdentity()
     const choice = inviteWins(urlCode, identity?.code || '')
@@ -880,13 +895,13 @@ export function App() {
               {store.view === 'mix' && <MixerView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} engine={engine} />}
             </div>
-            {store.view === 'arrange' && store.rackTrackId && form !== 'fold' && <RackView store={store} engine={engine} trackId={store.rackTrackId} />}
+            {store.view === 'arrange' && store.rackTrackId && form !== 'fold' && <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />}
             {showRoll && form !== 'fold' && !store.rackTrackId && <PianoRoll store={store} engine={engine} />}
           </div>
         )}
         {form === 'fold' && surface === 'studio' && (showRoll || store.rackTrackId) && (
           <div className="side-editor">
-            {store.rackTrackId ? <RackView store={store} engine={engine} trackId={store.rackTrackId} /> : <PianoRoll store={store} engine={engine} />}
+            {store.rackTrackId ? <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} /> : <PianoRoll store={store} engine={engine} />}
           </div>
         )}
         {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && (showRoll || store.rackTrackId)) && (
@@ -1040,6 +1055,7 @@ export function App() {
           </div>
         </div>
       )}
+      {knockOpen && <KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} />}
       <div className="toasts">
         {store.toasts.map((toast) => (
           <div key={toast.id} className={`toast ${toast.tone || ''}`}>
