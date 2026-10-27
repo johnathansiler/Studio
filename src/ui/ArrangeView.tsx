@@ -7,6 +7,7 @@ import { snapSample } from '../model/time'
 import type { AudioClip } from '../model/types'
 import { ClipSheet } from './ClipSheet'
 import type { ProjectStore } from '../state/store'
+import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
 import { AddTrackButton } from './AddTrack'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
@@ -337,6 +338,7 @@ export function ArrangeView({
         </div>
       </div>
       </div>
+      <StemSheet store={store} />
       {store.clipSheet && selected ? (
         <ClipSheet store={store} trackId={selected.track.id} clip={selected.clip} onClose={() => store.closeClipSheet()} />
       ) : null}
@@ -391,8 +393,9 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
   }, [peaks, width])
 
   function pointerDown(event: ReactPointerEvent, mode: 'move' | 'start' | 'end') {
+    if (event.button === 2) return
     event.stopPropagation()
-    store.selectClip(trackId, clip.id)
+    store.selectClip(trackId, clip.id, false, false)
     const originX = event.clientX
     const originY = event.clientY
     const stretching = mode !== 'move' && (store.tool === 'stretch' || event.altKey)
@@ -428,6 +431,7 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
       }
       const next = latest
       setPreview(null)
+      if (held) return
       if (!next) return
       if (mode === 'move') store.moveClip(trackId, clip.id, next.startSample)
       if (stretching && mode === 'start') store.stretchClip(trackId, clip.id, 'start', next.startSample)
@@ -448,6 +452,11 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
       onPointerDown={(event) => {
         if ((event.target as HTMLElement).closest('.take-lane')) return
         pointerDown(event, 'move')
+      }}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        store.openStems(trackId, clip.id)
       }}
     >
       <canvas ref={canvas} />
@@ -509,6 +518,7 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
       {menu && (
         <div className="touch-menu" style={{ left: menu.x, top: menu.y }}>
           <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { onSplit(); setMenu(null) }}>Split</button>
+          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openStems(trackId, clip.id); setMenu(null) }}>Stems</button>
           <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setMenu(null) }}>Delete</button>
         </div>
       )}

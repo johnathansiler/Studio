@@ -137,6 +137,11 @@ export class ProjectStore {
 
   /** Open plugin sheet. Not saved with the project. */
   pluginFocus: { trackId: string; pluginId: string } | null = null
+  /** Stem sheet target. Not saved. */
+  stemTrackId: string | null = null
+  stemClipId: string | null = null
+  stemPaused = false
+  stemStatus: { phase: 'download' | 'separate'; ratio: number; line: string } | null = null
   quantizeOpen = false
   quantizeDraft: QuantizeSettings = defaultQuantize()
   quantizePreview: QuantizeResult | null = null
@@ -247,7 +252,7 @@ export class ProjectStore {
     this.emit()
   }
 
-  selectClip(trackId: string, clipId: string | null, midi = false) {
+  selectClip(trackId: string, clipId: string | null, midi = false, openSheet = true) {
     this.selectedTrackId = trackId
     if (midi) {
       this.selectedMidiClipId = clipId
@@ -256,8 +261,38 @@ export class ProjectStore {
       this.selectedClipId = clipId
       this.selectedNoteId = null
       this.selectedNoteIds = []
+      if (openSheet) {
+        this.stemTrackId = null
+        this.stemClipId = null
+      }
       this.clipSheet = clipId != null
     }
+    this.emit()
+  }
+
+  openStems(trackId: string, clipId: string) {
+    this.selectedTrackId = trackId
+    this.selectedClipId = clipId
+    this.stemTrackId = trackId
+    this.stemClipId = clipId
+    this.emit()
+  }
+
+  closeStems() {
+    this.stemClipId = null
+    this.stemTrackId = null
+    this.stemStatus = null
+    this.stemPaused = false
+    this.emit()
+  }
+
+  setStemStatus(status: ProjectStore['stemStatus']) {
+    this.stemStatus = status
+    this.emit()
+  }
+
+  setStemPaused(paused: boolean) {
+    this.stemPaused = paused
     this.emit()
   }
 
@@ -1917,6 +1952,48 @@ export class ProjectStore {
     const id = this.selectedTrackId
     if (!id) return
     this.updateTrack(id, { name, input, armed: true, monitor: true })
+  }
+
+  placeStems(trackId: string, clipId: string, stems: { name: string; color: string; channels: Float32Array[] }[], intoSampler: boolean) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      const clip = track?.clips.find((item) => item.id === clipId)
+      if (!track || !clip) return
+      track.mute = true
+      const index = this.project.tracks.findIndex((item) => item.id === trackId)
+      const created: Track[] = []
+      for (const stem of stems) {
+        const id = uid('buf')
+        this.buffers.set(id, { id, name: stem.name, sampleRate: this.project.sampleRate, channels: stem.channels })
+        if (intoSampler) {
+          const midi = makeTrack({ name: stem.name, type: 'midi', color: stem.color, input: 'none' })
+          const plugin = createPlugin('sampler')
+          if (plugin.sampler) {
+            plugin.sampler.bufferId = id
+            const channel = stem.channels[0]
+            if (channel) plugin.sampler.root = detectRoot(channel, this.project.sampleRate)
+          }
+          midi.plugins = [plugin]
+          created.push(midi)
+        } else {
+          const audio = makeTrack({ name: stem.name, type: 'audio', color: stem.color, input: 'none' })
+          audio.clips.push({
+            id: uid('clip'),
+            name: stem.name,
+            bufferId: id,
+            startSample: clip.startSample,
+            offsetSamples: 0,
+            durationSamples: clip.durationSamples,
+            fadeInSamples: 0,
+            fadeOutSamples: 0,
+            gain: clip.gain,
+            source: 'local',
+          })
+          created.push(audio)
+        }
+      }
+      this.project.tracks.splice(Math.max(0, index + 1), 0, ...created)
+    })
   }
 
   openRack(trackId: string) {
