@@ -173,10 +173,10 @@ export function ArrangeView({
                 store.addMidiClip(track.id, Math.floor(beat))
               }}
             >
-              {track.clips.map((clip) => (
+              {track.clips.filter((clip) => !clip.slotOnly).map((clip) => (
                 <ClipView key={clip.id} store={store} clip={clip} trackId={track.id} px={px} />
               ))}
-              {track.midiClips.map((clip) => {
+              {track.midiClips.filter((clip) => !clip.slotOnly).map((clip) => {
                 const left = ((clip.startBeat * 60) / project.tempo) * px
                 const widthPx = ((clip.durationBeats * 60) / project.tempo) * px
                 return (

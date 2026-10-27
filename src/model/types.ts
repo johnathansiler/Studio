@@ -1,6 +1,9 @@
 export type TrackType = 'audio' | 'midi'
 export type InsertType = 'eq' | 'compressor' | 'delay' | 'reverb'
 export type ClipSource = 'local' | 'import' | 'demo' | 'guide' | 'aligned-take' | 'midi'
+export type LaunchQuant = 'none' | '1/16' | '1/4' | '1bar' | '2bar' | '4bar'
+export type LaunchMode = 'trigger' | 'gate' | 'toggle' | 'repeat'
+export type FollowAction = 'none' | 'next' | 'prev' | 'any' | 'other' | 'stop'
 
 export interface Insert {
   id: string
@@ -23,6 +26,17 @@ export interface AudioClip {
   peerId?: string
   takeId?: string
   alignmentMs?: number
+  quant?: LaunchQuant
+  mode?: LaunchMode
+  loop?: boolean
+  legato?: boolean
+  follow?: FollowAction
+  followBeats?: number
+  /** Tempo-follow. Missing means on when durationBeats is set. */
+  warp?: boolean
+  durationBeats?: number
+  /** Session slot only, until Capture copies it onto the arrangement. */
+  slotOnly?: boolean
 }
 
 export interface MidiNote {
@@ -39,6 +53,13 @@ export interface MidiClip {
   startBeat: number
   durationBeats: number
   notes: MidiNote[]
+  quant?: LaunchQuant
+  mode?: LaunchMode
+  loop?: boolean
+  legato?: boolean
+  follow?: FollowAction
+  followBeats?: number
+  slotOnly?: boolean
 }
 
 export interface Track {
@@ -56,6 +77,9 @@ export interface Track {
   inserts: Insert[]
   clips: AudioClip[]
   midiClips: MidiClip[]
+  /** Scene index → clip id. Missing means scene N is clips[N]. */
+  audioSlots?: (string | null)[]
+  midiSlots?: (string | null)[]
 }
 
 export interface Project {
@@ -74,6 +98,10 @@ export interface Project {
   metronomeEnabled: boolean
   countIn: boolean
   snap: boolean
+  /** Global clip launch grid. A clip quant overrides it. */
+  launchQuant?: LaunchQuant
+  /** 0 records until stop. A positive count trims a session take to that many bars. */
+  recordBars?: number
   /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */
   waveforms?: Record<string, { min: number; max: number }[]>
 }
@@ -140,5 +168,7 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     metronomeEnabled: true,
     countIn: true,
     snap: true,
+    launchQuant: '1bar',
+    recordBars: 4,
   }
 }

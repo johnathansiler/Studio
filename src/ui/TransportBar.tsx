@@ -11,6 +11,8 @@ export function TransportBar({
   onStop,
   onRecord,
   onSeek,
+  onSession,
+  onArrange,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -19,6 +21,8 @@ export function TransportBar({
   onStop: () => void
   onRecord: () => void
   onSeek: (sample: number) => void
+  onSession?: () => void
+  onArrange?: () => void
 }) {
   const project = store.project
   const [position, setPosition] = useState(engine.positionSamples)
@@ -94,6 +98,22 @@ export function TransportBar({
         <label className="toggle">
           <input type="checkbox" checked={project.snap} disabled={store.remoteFollow} onChange={() => store.toggle('snap')} /> Snap
         </label>
+        <button
+          type="button"
+          className={`mode-btn ${store.transportMode === 'session' ? 'on' : ''}`}
+          disabled={store.remoteFollow}
+          onClick={() => (store.transportMode === 'session' ? (onArrange ?? (() => store.backToArrangement()))() : (onSession ?? (() => store.enterSession()))())}
+        >
+          {store.transportMode === 'session' ? 'Session' : 'Arrange'}
+        </button>
+        {store.transportMode === 'session' && (
+          <button type="button" className="mode-btn" disabled={store.remoteFollow} onClick={() => (onArrange ?? (() => store.backToArrangement()))()}>
+            Back
+          </button>
+        )}
+        <button type="button" className="mode-btn" disabled={store.remoteFollow} onClick={() => store.captureToArrangement()}>
+          Capture
+        </button>
         {syncLabel && <span className="sync-pill">{syncLabel}</span>}
       </div>
     </div>
