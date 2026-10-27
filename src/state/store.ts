@@ -2,6 +2,7 @@ import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, 
 import { demoMidiNotes } from '../model/demo'
 import { createEmptyProject, defaultInsert, makeTrack, uid, TRACK_COLORS } from '../model/types'
 import type { AudioAsset, AudioClip, InsertType, MidiClip, MidiNote, Project, Track } from '../model/types'
+import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleState } from '../model/scale'
 import { beatsToSamples } from '../model/time'
 import { linearResample } from '../model/wav'
 
@@ -22,6 +23,7 @@ export class ProjectStore {
   selectedClipId: string | null
   selectedMidiClipId: string | null
   selectedNoteId: string | null
+  selectedNoteIds: string[] = []
   view: WorkspaceView = 'arrange'
   launched: Record<string, string | null> = {}
   transportMode: 'arrangement' | 'session' = 'arrangement'
@@ -34,12 +36,13 @@ export class ProjectStore {
   private listeners = new Set<Listener>()
 
   constructor(project = createEmptyProject(), buffers?: Map<string, AudioAsset>) {
-    this.project = project
+    this.project = { ...project, scale: normalizeScale(project.scale) }
     if (buffers) this.buffers = buffers
     this.selectedTrackId = project.tracks[0]?.id ?? null
     this.selectedClipId = null
     this.selectedMidiClipId = null
     this.selectedNoteId = null
+    this.selectedNoteIds = []
   }
 
   subscribe = (fn: Listener) => {
@@ -118,13 +121,49 @@ export class ProjectStore {
     } else {
       this.selectedClipId = clipId
       this.selectedNoteId = null
+      this.selectedNoteIds = []
     }
     this.emit()
   }
 
-  selectNote(id: string | null) {
-    this.selectedNoteId = id
+  selectNote(id: string | null, additive = false) {
+    if (!id) {
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
+    } else if (additive) {
+      const has = this.selectedNoteIds.includes(id)
+      this.selectedNoteIds = has ? this.selectedNoteIds.filter((note) => note !== id) : [...this.selectedNoteIds, id]
+      this.selectedNoteId = this.selectedNoteIds.at(-1) ?? null
+    } else {
+      this.selectedNoteId = id
+      this.selectedNoteIds = [id]
+    }
     this.emit()
+  }
+
+  scaleState() {
+    return normalizeScale(this.project.scale)
+  }
+
+  setScale(patch: Partial<ScaleState>) {
+    this.mutate(() => {
+      const next = normalizeScale({ ...this.scaleState(), ...patch })
+      const turningOn = !this.scaleState().snap && next.snap
+      this.project.scale = next
+      if (turningOn) this.quantizeSelected()
+    })
+  }
+
+  private quantizeSelected() {
+    const scale = this.scaleState()
+    if (!this.selectedNoteIds.length || !this.selectedMidiClipId) return
+    for (const track of this.project.tracks) {
+      const clip = track.midiClips.find((item) => item.id === this.selectedMidiClipId)
+      if (!clip) continue
+      for (const note of clip.notes) {
+        if (this.selectedNoteIds.includes(note.id)) note.pitch = snapPitch(note.pitch, scale.root, scale.scale)
+      }
+    }
   }
 
   renameProject(name: string) {
@@ -330,9 +369,12 @@ export class ProjectStore {
     this.mutate(() => {
       const clip = this.track(trackId)?.midiClips.find((c) => c.id === clipId)
       if (!clip) return
-      const next = { ...note, id: uid('note') }
+      const scale = this.scaleState()
+      const pitch = scale.snap ? snapPitch(note.pitch, scale.root, scale.scale) : note.pitch
+      const next = { ...note, pitch, id: uid('note') }
       clip.notes.push(next)
       this.selectedNoteId = next.id
+      this.selectedNoteIds = [next.id]
     })
   }
 
@@ -340,12 +382,70 @@ export class ProjectStore {
     this.mutate(() => {
       const note = this.track(trackId)?.midiClips.find((c) => c.id === clipId)?.notes.find((n) => n.id === noteId)
       if (!note) return
+      const scale = this.scaleState()
+      const pitch = patch.pitch == null ? note.pitch : scale.snap ? snapPitch(patch.pitch, scale.root, scale.scale) : patch.pitch
       if (patch.startBeat != null || patch.pitch != null) {
-        Object.assign(note, moveMidiNote(note, patch.startBeat ?? note.startBeat, patch.pitch ?? note.pitch))
+        Object.assign(note, moveMidiNote(note, patch.startBeat ?? note.startBeat, pitch))
       }
       if (patch.durationBeats != null) Object.assign(note, resizeMidiNote(note, patch.durationBeats))
       if (patch.velocity != null) note.velocity = patch.velocity
     })
+  }
+
+  insertPerformance(trackId: string, clipId: string | null, timelineBeat: number, pitches: number[]) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      const scale = normalizeScale(this.project.scale)
+      const voiced = voiceChord(pitches, {
+        inversion: scale.inversion,
+        spread: scale.spread,
+        drop2: scale.drop2,
+        octave: scale.octave,
+        voiceLead: scale.voiceLead,
+        previous: scale.lastVoicing,
+      })
+      const performed = patternNotes(voiced, {
+        arp: scale.arp,
+        rate: scale.rate,
+        gate: scale.gate,
+        octaves: scale.octaves,
+        rhythm: scale.rhythm,
+        timing: scale.timing,
+        velocity: scale.velocity,
+        spanBeats: Math.max(1, this.project.timeSignature.numerator),
+      })
+      this.writePerformed(track, clipId, Math.max(0, timelineBeat), performed, voiced, scale)
+    })
+  }
+
+  private writePerformed(track: Track, clipId: string | null, timelineBeat: number, performed: PlayNote[], voiced: number[], scale: ScaleState) {
+    let clip = clipId ? track.midiClips.find((item) => item.id === clipId) : undefined
+    if (!clip) {
+      clip = {
+        id: uid('midi'),
+        name: 'Chords',
+        startBeat: timelineBeat,
+        durationBeats: Math.max(1, this.project.timeSignature.numerator),
+        notes: [],
+      }
+      track.midiClips.push(clip)
+      this.selectedMidiClipId = clip.id
+      this.selectedTrackId = track.id
+    }
+    const rel = Math.max(0, timelineBeat - clip.startBeat)
+    let end = clip.durationBeats
+    const ids: string[] = []
+    for (const note of performed) {
+      const next: MidiNote = { ...note, id: uid('note'), startBeat: rel + note.startBeat }
+      clip.notes.push(next)
+      ids.push(next.id)
+      end = Math.max(end, next.startBeat + next.durationBeats)
+    }
+    clip.durationBeats = Math.max(clip.durationBeats, Math.ceil(end * 4) / 4)
+    this.selectedNoteIds = ids
+    this.selectedNoteId = ids.at(-1) ?? null
+    this.project.scale = { ...scale, lastVoicing: voiced }
   }
 
   launch(trackId: string, clipId: string | null) {
@@ -368,11 +468,13 @@ export class ProjectStore {
   loadProject(project: Project, buffers: Map<string, AudioAsset>) {
     this.past = []
     this.future = []
-    this.project = project
+    this.project = { ...project, scale: normalizeScale(project.scale) }
     this.buffers = buffers
     this.selectedTrackId = project.tracks[0]?.id ?? null
     this.selectedClipId = null
     this.selectedMidiClipId = null
+    this.selectedNoteId = null
+    this.selectedNoteIds = []
     this.emit()
   }
 

@@ -3,7 +3,6 @@ import { createRoot, type Root } from 'react-dom/client'
 import type { AudioEngine } from '../audio/engine'
 import type { Participant, SessionClient } from '../remote/session'
 import { mediaStatus } from '../model/media'
-import { VIDEO_BITRATES } from '../model/codecs'
 import { ms } from './format'
 
 export function VideoDock({
@@ -22,7 +21,8 @@ export function VideoDock({
   onNewSession: () => void
 }) {
   const state = session.state
-  const [tab, setTab] = useState<'people' | 'chat' | 'signal'>('signal')
+  const [tab, setTab] = useState<'people' | 'chat'>('people')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const [copied, setCopied] = useState(false)
   const [levels, setLevels] = useState({ input: 0, talk: 0 })
@@ -87,9 +87,10 @@ export function VideoDock({
     live: state.status === 'live',
   })
 
+  const inRoom = state.status === 'live' || state.status === 'waiting' || state.status === 'reconnecting'
+
   function startNewSession() {
     const others = state.participants.some((person) => person.id !== state.selfId)
-    const inRoom = state.status === 'live' || state.status === 'waiting' || state.status === 'reconnecting'
     if (inRoom && others && !window.confirm('Leave this session and start a new one?')) return
     onNewSession()
   }
@@ -130,7 +131,7 @@ export function VideoDock({
     return (
       <aside className="dock">
         <div className="dock-placeholder">
-          <p>The session is in its own window. Mute, camera, chat, and admit stay in sync with this studio.</p>
+          <p>Session window is open.</p>
           <button className="text-btn primary" onClick={() => popWindow.current?.focus()}>
             Show session window
           </button>
@@ -146,17 +147,24 @@ export function VideoDock({
     <aside className={`dock ${simple ? 'simple' : ''}`} ref={root}>
       <div className="dock-resize" />
       <div className="dock-bar">
-        <strong>{state.code ? `Session ${state.code}` : 'Remote session'}</strong>
+        <strong>{state.code ? `Session ${state.code}` : 'Session'}</strong>
         <span className="spacer" />
-        <button className="icon-btn" onClick={() => session.setMonitorMode(state.monitorMode === 'opus' ? 'pcm' : 'opus')} title="Monitor path">
-          {state.monitorMode === 'opus' ? 'Opus 10ms' : 'PCM'}
+        <button
+          className="icon-btn"
+          onClick={() => session.setMonitorMode(state.monitorMode === 'opus' ? 'pcm' : 'opus')}
+          title="Monitor path"
+          aria-label={state.monitorMode === 'opus' ? 'Opus monitor' : 'PCM monitor'}
+        >
+          {state.monitorMode === 'opus' ? 'Opus' : 'PCM'}
         </button>
-        <button className="icon-btn pop-out" onClick={(event) => void popOut(event)} title="Pop out">
+        <button className="icon-btn pop-out" onClick={(event) => void popOut(event)} title="Pop out" aria-label="Pop out">
           ⧉
         </button>
-        <button type="button" id="new-session" className="text-btn new-session" onClick={startNewSession}>
-          New session
-        </button>
+        {inRoom && (
+          <button type="button" id="new-session" className="text-btn" aria-label="New session" onClick={startNewSession}>
+            New
+          </button>
+        )}
       </div>
       <div className="dock-body">
       {state.usageNotice && <div className="media-banner bad">{state.usageNotice}</div>}
@@ -164,9 +172,9 @@ export function VideoDock({
       {!state.hostLeft && link && <div className={`media-banner ${link.tone}`}>{link.text}</div>}
       {(state.status === 'live' || state.status === 'waiting' || state.status === 'reconnecting') && (
         <details className="connection-details">
-          <summary>Connection details</summary>
-          <p>{session.onScreenCount() == null ? 'Waiting for the video layout.' : `Video tiles on screen: ${session.onScreenCount()}.`}</p>
-          {Object.keys(state.media).length === 0 && <p>No peer connection yet.</p>}
+          <summary>Connection</summary>
+          {session.onScreenCount() != null && <p>{session.onScreenCount()} tiles</p>}
+          {Object.keys(state.media).length === 0 && <p>No peer yet</p>}
           {Object.entries(state.media).map(([id, item]) => {
             const person = state.participants.find((entry) => entry.id === id)
             const kind = item.localType || (item.path === 'relay' ? 'relay' : item.path === 'direct' ? 'host' : 'none yet')
@@ -181,21 +189,22 @@ export function VideoDock({
       )}
       {simple && (
         <div className="artist-card">
-          <p>Headphones on. You should hear the session, not your own voice coming back.</p>
           <div className="meter tall">
             <b style={{ width: `${Math.min(100, levels.input * 320)}%` }} />
           </div>
-          <strong className={engine.status === 'recording' ? 'rec-label' : ''}>
-            {engine.status === 'recording' ? 'Recording' : engine.status === 'playing' ? 'Playing' : engine.status === 'counting-in' ? 'Count-in' : 'Stopped'}
-          </strong>
+          {state.status !== 'live' && (
+            <strong className={engine.status === 'recording' ? 'rec-label' : ''}>
+              {engine.status === 'recording' ? 'Recording' : engine.status === 'playing' ? 'Playing' : engine.status === 'counting-in' ? 'Count-in' : 'Stopped'}
+            </strong>
+          )}
         </div>
       )}
       {inviteUrl && (
         <div className="invite-card">
-          <span>Send this link to the artist</span>
           <strong>{inviteUrl}</strong>
           <button
-            className="text-btn primary"
+            className="text-btn"
+            aria-label="Copy invite link"
             onClick={(event) => {
               const view = event.currentTarget.ownerDocument.defaultView || window
               void view.navigator.clipboard.writeText(inviteUrl).then(
@@ -208,22 +217,21 @@ export function VideoDock({
               )
             }}
           >
-            {copied ? 'Copied' : 'Copy invite link'}
+            {copied ? 'Copied' : 'Copy'}
           </button>
         </div>
       )}
       {state.status === 'idle' || state.status === 'error' ? (
         <div className="empty-session">
-          <p>Bring an artist, a producer, and a listener into the same room. The cue stays as fast as the path allows. The printed take is aligned after the fact, so the record is on the grid.</p>
           {state.error && <p className="hint">{state.error}</p>}
           <button type="button" className="text-btn primary" onClick={onCreate}>
             Create invite
           </button>
-          <button type="button" className="text-btn new-session" onClick={startNewSession}>
-            New session
+          <button type="button" className="text-btn" id="join-with-code" aria-label="Join with a code" onClick={onJoin}>
+            Join
           </button>
-          <button type="button" className="text-btn" id="join-with-code" onClick={onJoin}>
-            Join with a code
+          <button type="button" id="new-session" className="text-btn" aria-label="New session" onClick={startNewSession}>
+            New
           </button>
         </div>
       ) : (
@@ -246,11 +254,8 @@ export function VideoDock({
         </div>
       )}
       <div className="call-controls">
-        <button className={`t-btn ${state.talkOn ? 'on' : ''}`} onClick={() => void session.setTalk(!state.talkOn)} title="Talkback">
-          {state.talkOn ? 'Mic' : 'Mic off'}
-        </button>
-        <button className={`t-btn ${state.musicOn ? 'on' : ''}`} onClick={() => void session.setMusic(!state.musicOn)} title="Performance or cue send">
-          {state.role === 'host' ? 'Cue' : 'Perf'}
+        <button className={`t-btn ${state.talkOn ? 'on' : ''}`} onClick={() => void session.setTalk(!state.talkOn)} title="Talkback" aria-label={state.talkOn ? 'Mic' : 'Mic off'}>
+          Mic
         </button>
         <button className={`t-btn ${state.camOn ? 'on' : ''}`} onClick={() => void session.setCam(!state.camOn)}>
           Cam
@@ -258,88 +263,58 @@ export function VideoDock({
         <button className={`t-btn ${state.screenOn ? 'on' : ''}`} onClick={() => void session.setScreen(!state.screenOn)}>
           Share
         </button>
-        <button className={`t-btn ${state.hand ? 'on' : ''}`} onClick={() => session.setHand(!state.hand)}>
-          Hand
+        <button
+          type="button"
+          className={`t-btn ${settingsOpen ? 'on' : ''}`}
+          aria-label="Settings"
+          aria-expanded={settingsOpen}
+          onClick={() => setSettingsOpen((open) => !open)}
+        >
+          <GearIcon />
         </button>
-        {['👍', '🎧', '🔥'].map((emoji) => (
-          <button key={emoji} className="t-btn" onClick={() => session.react(emoji)}>
-            {emoji}
-          </button>
-        ))}
-        {state.code && (
-          <button className="text-btn warn" onClick={() => session.leave()}>
-            Leave
-          </button>
-        )}
       </div>
+      {settingsOpen && (
+        <div className="settings-sheet">
+          <div className="settings-stats" title={one?.source || 'not measured'}>
+            Mon {one ? ms(one.ms, 0) : '—'} · Out {plainMs(engine.outputLatencyMs)} · In {plainMs(engine.inputLatencyMs)} · Loop {plainMs(state.loopbackMs)} · Ping {plainMs(state.audioPingMs)}
+          </div>
+          <div className="settings-actions">
+            <button className={`text-btn ${state.musicOn ? 'primary' : ''}`} onClick={() => void session.setMusic(!state.musicOn)} aria-label="Performance or cue send">
+              {state.role === 'host' ? 'Cue' : 'Perf'}
+            </button>
+            <button className="text-btn" aria-label="Calibrate I/O" onClick={() => void session.calibrate()}>
+              Calibrate
+            </button>
+            <button className="text-btn" aria-label="Ping cue path" onClick={() => void session.measureOpusPath()}>
+              Ping
+            </button>
+            <button className={`text-btn ${state.jamEnabled ? 'primary' : ''}`} aria-label="Jam mode" onClick={() => session.setJam(!state.jamEnabled)}>
+              Jam
+            </button>
+            {state.code && (
+              <button className="text-btn warn" onClick={() => session.leave()}>
+                Leave
+              </button>
+            )}
+          </div>
+          {state.jamEnabled && (
+            <label className="settings-delay">
+              Delay
+              <input type="number" value={state.jamDelayMs} onChange={(event) => session.setJam(true, Number(event.target.value))} />
+            </label>
+          )}
+          <DevicePick session={session} />
+          {state.takeProgress != null && <div>Take {Math.round(state.takeProgress * 100)}%</div>}
+        </div>
+      )}
       <div>
         <div className="side-tabs">
-          {(['signal', 'people', 'chat'] as const).map((item) => (
-            <button key={item} className={`text-btn ${tab === item ? 'primary' : ''}`} onClick={() => setTab(item)}>
+          {(['people', 'chat'] as const).map((item) => (
+            <button key={item} className={`text-btn ${tab === item ? 'active' : ''}`} onClick={() => setTab(item)}>
               {item}
             </button>
           ))}
         </div>
-        {tab === 'signal' && (
-          <div className="panel stats">
-            <div>
-              Live monitor <b>{one ? ms(one.ms) : '—'}</b> ± {one ? ms(one.uncertaintyMs) : '—'} via {one?.source || 'not measured'}
-            </div>
-            <div>
-              Printed take removes that path. Device out <b>{ms(engine.outputLatencyMs, 1)}</b> · in <b>{ms(engine.inputLatencyMs, 1)}</b>
-            </div>
-            <div>
-              Loopback <b>{ms(state.loopbackMs, 1)}</b> · Opus ping <b>{ms(state.audioPingMs, 1)}</b>
-            </div>
-            <div className="meter" style={{ height: 8, width: '100%', margin: '6px 0' }}>
-              <b style={{ width: `${Math.min(100, levels.input * 320)}%`, height: '100%' }} />
-            </div>
-            <label className="field" style={{ marginTop: 8 }}>
-              Video size
-              <select value={state.videoBitrate} onChange={(event) => session.setVideoBitrate(Number(event.target.value))}>
-                {VIDEO_BITRATES.map((bitrate) => (
-                  <option key={bitrate} value={bitrate}>
-                    {bitrate / 1000} kbps
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="hint">Performance meter (processing off). Talkback is a separate channel with echo control.</div>
-            <div className="hint">{state.localSend}</div>
-            {Object.entries(state.latency).map(([id, latency]) => (
-              <div key={id}>
-                {state.participants.find((person) => person.id === id)?.name}: RTT {ms(latency.rttMs)} · jitter {ms(latency.jitterMs, 1)} · loss{' '}
-                {latency.packetLossPct == null ? '—' : `${latency.packetLossPct.toFixed(1)}%`} · buffer {ms(latency.jitterBufferMs, 1)} · clock{' '}
-                {ms(latency.clockRttMs, 1)}
-              </div>
-            ))}
-            <div className="row" style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-              <button className="text-btn" onClick={() => void session.calibrate()}>
-                Calibrate I/O
-              </button>
-              <button className="text-btn" onClick={() => void session.measureOpusPath()}>
-                Ping cue path
-              </button>
-              <button className={`text-btn ${state.jamEnabled ? 'primary' : ''}`} onClick={() => session.setJam(!state.jamEnabled)}>
-                Jam mode
-              </button>
-            </div>
-            {state.jamEnabled && (
-              <label className="field" style={{ marginTop: 8 }}>
-                Host monitor delay
-                <input type="number" value={state.jamDelayMs} onChange={(event) => session.setJam(true, Number(event.target.value))} />
-              </label>
-            )}
-            <DevicePick session={session} />
-            {inviteUrl && <div className="linkbox">{inviteUrl}</div>}
-            {state.takeProgress != null && <div>Take transfer {Math.round(state.takeProgress * 100)}%</div>}
-            {state.log.slice(-3).map((line, index) => (
-              <div key={index} className="hint">
-                {line}
-              </div>
-            ))}
-          </div>
-        )}
         {tab === 'people' && (
           <div className="panel">
             {waiting.length > 0 && (
@@ -484,6 +459,7 @@ function Tile({
         <button
           className="text-btn tile-audio"
           type="button"
+          aria-label={hear ? 'Mute tile' : 'Unmute tile'}
           onClick={() => {
             const next = !hear
             setHear(next)
@@ -493,7 +469,7 @@ function Tile({
             void el.play().catch(() => undefined)
           }}
         >
-          {hear ? 'Mute tile' : 'Unmute tile'}
+          {hear ? 'Mute' : 'Hear'}
         </button>
       )}
       {!session.state.camOn && self && <div className="placeholder">Camera off</div>}
@@ -518,8 +494,8 @@ function PersonRow({ person, session }: { person: Participant; session: SessionC
           {person.name} {person.role === 'host' ? '· host' : ''}
         </span>
         <small>
-          {person.hand ? 'hand raised · ' : ''}
-          {person.music ? 'performance on' : 'performance muted'}
+          {person.hand ? 'hand · ' : ''}
+          {person.music ? 'perf' : 'muted'}
           {person.screen ? ' · sharing' : ''}
         </small>
       </div>
@@ -534,6 +510,22 @@ function PersonRow({ person, session }: { person: Participant; session: SessionC
         </span>
       )}
     </div>
+  )
+}
+
+function plainMs(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) return '—'
+  return String(Math.round(value))
+}
+
+function GearIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M19.4 13.5a7.6 7.6 0 0 0 .1-1.5 7.6 7.6 0 0 0-.1-1.5l2-1.6-2-3.4-2.5 1a7.4 7.4 0 0 0-2.6-1.5l-.4-2.6h-4l-.4 2.6a7.4 7.4 0 0 0-2.6 1.5l-2.5-1-2 3.4 2 1.6a7.6 7.6 0 0 0-.1 1.5 7.6 7.6 0 0 0 .1 1.5l-2 1.6 2 3.4 2.5-1a7.4 7.4 0 0 0 2.6 1.5l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 2.6-1.5l2.5 1 2-3.4-2-1.6zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"
+      />
+    </svg>
   )
 }
 

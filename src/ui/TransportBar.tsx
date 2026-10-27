@@ -94,7 +94,6 @@ export function TransportBar({
         <label className="toggle">
           <input type="checkbox" checked={project.snap} disabled={store.remoteFollow} onChange={() => store.toggle('snap')} /> Snap
         </label>
-        <span className="hint">{store.transportMode === 'session' ? 'SESSION' : 'ARRANGE'}</span>
         {syncLabel && <span className="sync-pill">{syncLabel}</span>}
       </div>
     </div>

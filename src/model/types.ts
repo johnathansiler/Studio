@@ -1,3 +1,5 @@
+import { defaultScale, type ScaleState } from './scale'
+
 export type TrackType = 'audio' | 'midi'
 export type InsertType = 'eq' | 'compressor' | 'delay' | 'reverb'
 export type ClipSource = 'local' | 'import' | 'demo' | 'guide' | 'aligned-take' | 'midi'
@@ -74,6 +76,8 @@ export interface Project {
   metronomeEnabled: boolean
   countIn: boolean
   snap: boolean
+  /** Key, scale, and chord-pad performance settings. */
+  scale?: ScaleState
   /** Compact clip outlines so a guest can draw waveforms before the wav arrives. */
   waveforms?: Record<string, { min: number; max: number }[]>
 }
@@ -140,5 +144,6 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     metronomeEnabled: true,
     countIn: true,
     snap: true,
+    scale: defaultScale(),
   }
 }

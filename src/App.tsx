@@ -19,6 +19,7 @@ import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
 import { VideoDock } from './ui/VideoDock'
 import { downloadBlob } from './ui/format'
+import { formFactor, type FormFactor } from './ui/form'
 
 interface Bundle {
   store: ProjectStore
@@ -57,7 +58,10 @@ export function App() {
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [help, setHelp] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [phone, setPhone] = useState(() => window.matchMedia('(max-width: 940px)').matches)
+  const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight))
+  const [land, setLand] = useState(() => window.innerWidth > window.innerHeight)
+  const phone = form === 'phone'
+  const compact = form !== 'desk'
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
@@ -269,15 +273,17 @@ export function App() {
   }, [session, store])
 
   useEffect(() => {
-    const query = window.matchMedia('(max-width: 940px)')
     const apply = () => {
-      setPhone(query.matches)
-      document.documentElement.classList.toggle('phone-root', query.matches)
+      const next = formFactor(window.innerWidth, window.innerHeight)
+      setForm(next)
+      setLand(window.innerWidth > window.innerHeight)
+      document.documentElement.classList.toggle('phone-root', next === 'phone')
+      document.documentElement.dataset.form = next
     }
     apply()
-    query.addEventListener('change', apply)
+    window.addEventListener('resize', apply)
     return () => {
-      query.removeEventListener('change', apply)
+      window.removeEventListener('resize', apply)
       document.documentElement.classList.remove('phone-root')
     }
   }, [])
@@ -588,18 +594,6 @@ export function App() {
     })
   }
 
-  async function copyInvite() {
-    const code = session.state.code
-    if (!code) return
-    const url = `${location.origin}/?session=${code}`
-    try {
-      await navigator.clipboard.writeText(url)
-      store.toast('Invite link copied. Send it to the artist.', 'good')
-    } catch {
-      store.toast(url, 'warn')
-    }
-  }
-
   async function bounce() {
     await ready()
     const wav = await engine.exportMix(store.project, store.buffers)
@@ -684,11 +678,10 @@ export function App() {
     await ready()
   }
 
-  const one = session.primaryOneWay()
   const showRoll = store.view === 'arrange' && store.selectedMidiClipId
 
   return (
-    <div className={`shell ${surface} ${phone ? 'phone' : ''}`} style={{ ['--dock' as string]: `${dock}px` }} data-version={version}>
+    <div className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''}`} style={{ ['--dock' as string]: `${dock}px` }} data-version={version} data-form={form}>
       <header className="topbar">
         <div className="brand">
           <div className="mark" aria-hidden>
@@ -699,7 +692,6 @@ export function App() {
           </div>
           <div>
             <h1>CueHarbor</h1>
-            <p>Studio</p>
           </div>
         </div>
         <input className="project-name" value={store.project.name} onChange={(event) => store.renameProject(event.target.value)} />
@@ -713,13 +705,7 @@ export function App() {
           </div>
         )}
         <div className="spacer" />
-        {!phone && session.state.role === 'host' && session.state.code && (
-          <button className="text-btn primary" onClick={() => void copyInvite()}>
-            Copy invite link
-          </button>
-        )}
-        {session.state.status === 'live' && <div className="latency-pill">monitor {one ? `${one.ms.toFixed(0)} ms` : '…'}</div>}
-        {phone ? (
+        {compact ? (
           <button className="text-btn menu-btn" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
             {menuOpen ? 'Close' : 'Menu'}
           </button>
@@ -733,16 +719,16 @@ export function App() {
             <button className="text-btn" onClick={() => void bounce()}>Bounce</button>
             <button className="text-btn" onClick={() => store.addTrack('audio')}>+ Audio</button>
             <button className="text-btn" onClick={() => store.addTrack('midi')}>+ Inst</button>
-            <button className="text-btn" onClick={() => setHelp(true)} title="Shortcuts">?</button>
-            <button className="text-btn" onClick={() => setSurface(surface === 'studio' ? 'artist' : 'studio')}>
-              {surface === 'studio' ? 'Artist view' : 'Studio'}
+            <button className="text-btn" onClick={() => setHelp(true)} title="Shortcuts" aria-label="Shortcuts">?</button>
+            <button className="text-btn" aria-label={surface === 'studio' ? 'Artist view' : 'Studio'} onClick={() => setSurface(surface === 'studio' ? 'artist' : 'studio')}>
+              {surface === 'studio' ? 'Artist' : 'Studio'}
             </button>
-            <button className="text-btn" onClick={() => setDockEdge(dockEdge === 'right' ? 'bottom' : 'right')}>
-              Dock {dockEdge === 'right' ? 'bottom' : 'right'}
+            <button className="text-btn" aria-label={dockEdge === 'right' ? 'Dock bottom' : 'Dock right'} onClick={() => setDockEdge(dockEdge === 'right' ? 'bottom' : 'right')}>
+              {dockEdge === 'right' ? 'Bottom' : 'Side'}
             </button>
           </div>
         )}
-        {phone && menuOpen && (
+        {compact && menuOpen && (
           <div className="phone-menu">
             <button className="text-btn" onClick={() => { setMenuOpen(false); void persist() }}>Save</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); void openLibrary() }}>Library</button>
@@ -755,11 +741,8 @@ export function App() {
             <button className="text-btn" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }}>Clips</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setHelp(true) }}>Shortcuts</button>
             <button className="text-btn" onClick={() => { setMenuOpen(false); setSurface(surface === 'studio' ? 'artist' : 'studio'); setPhonePane('room') }}>
-              {surface === 'studio' ? 'Artist view' : 'Studio'}
+              {surface === 'studio' ? 'Artist' : 'Studio'}
             </button>
-            {session.state.role === 'host' && session.state.code && (
-              <button className="text-btn primary" onClick={() => { setMenuOpen(false); void copyInvite() }}>Copy invite</button>
-            )}
           </div>
         )}
       </header>
@@ -782,10 +765,15 @@ export function App() {
               {store.view === 'mix' && <MixerView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} />}
             </div>
-            {showRoll && <PianoRoll store={store} />}
+            {showRoll && form !== 'fold' && <PianoRoll store={store} engine={engine} />}
           </div>
         )}
-        {(!phone || phonePane === 'room' || surface === 'artist') && (
+        {form === 'fold' && showRoll && surface === 'studio' && (
+          <div className="side-editor">
+            <PianoRoll store={store} engine={engine} />
+          </div>
+        )}
+        {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && showRoll) && (
         <div
           className="dock-slot"
           onPointerDown={(event) => {
@@ -851,8 +839,7 @@ export function App() {
       {joinOpen && (
         <div className="modal-back">
           <div className="modal">
-            <h2>Join the session</h2>
-            <p>No install. Headphones on. You’ll hear the cue as fast as the link allows, and your take is recorded locally so it lands on the grid.</p>
+            <h2>Join</h2>
             <div className="stack">
               <input value={joinName} onChange={(event) => setJoinName(event.target.value)} placeholder="Your name" />
               <input value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} placeholder="Invite code" />
