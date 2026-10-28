@@ -5,6 +5,7 @@ import { formatMapBars } from '../model/tempoMap'
 import { formatTimecode } from '../model/time'
 import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
+import { AutomationFollow } from './AutomationLane'
 import { TRANSPORT_COPY, copyOf } from './chrome'
 import { TipButton } from './Hint'
 
@@ -106,6 +107,7 @@ export function TransportBar({
   const transport = (id: string) => copyOf(TRANSPORT_COPY, id)
   return (
     <div className="transport">
+      <AutomationFollow store={store} engine={engine} />
       <div className="t-buttons">
         {!simple && (
           <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>

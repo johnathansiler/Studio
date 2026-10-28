@@ -8,6 +8,7 @@ import { normalizeMidiProject } from '../../model/midiTools'
 import { normalizeScale } from '../../model/scale'
 import { normalizePadKit } from '../../model/padMachine'
 import { normalizeBeats } from '../../model/steps'
+import { normalizeMix } from '../../model/mixGroups'
 import { normalizeOmniProject } from '../../instruments/patch/model'
 import type { FactoryPreset, ParamSpec, PluginDescriptor } from './types'
 
@@ -637,6 +638,7 @@ export const FACTORY: Record<string, FactoryPreset[]> = {
     { name: 'Gentle', params: { threshold: -12, ratio: 2, attack: 15, release: 140, knee: 8, makeup: 1, mix: 1 } },
     { name: 'Vocal', params: { threshold: -18, ratio: 3, attack: 8, release: 120, knee: 6, makeup: 3, mix: 1 } },
     { name: 'Squeeze', params: { threshold: -24, ratio: 6, attack: 5, release: 80, knee: 4, makeup: 6, mix: 1 } },
+    { name: 'Duck', params: { threshold: -30, ratio: 10, attack: 1, release: 160, knee: 6, makeup: 0, mix: 1 } },
   ],
   deesser: [
     { name: 'Vocal', params: { freq: 6800, threshold: -22, amount: 0.55 } },
@@ -949,7 +951,7 @@ export function normalizeProject(project: Project): Project {
   if (!project.masterPlugins.some((plugin) => plugin.pluginId === 'meter')) {
     project.masterPlugins.push(createPlugin('meter'))
   }
-  return project
+  return normalizeMix(project)
 }
 
 export function fromLegacy(insert: Insert): PluginInstance {
@@ -992,6 +994,7 @@ export function presetParams(pluginId: string, name: string, user: UserPreset[])
 export function automationAt(lanes: AutomationLane[], pluginId: string, params: Record<string, number>, beat: number) {
   const next = { ...params }
   for (const lane of lanes) {
+    if (lane.target && lane.target !== 'plugin') continue
     if (lane.pluginId !== pluginId || !lane.points.length) continue
     next[lane.param] = interpolate(lane.points, beat, params[lane.param] ?? 0)
   }

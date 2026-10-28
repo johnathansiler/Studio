@@ -20,6 +20,9 @@ import { renderPattern, type RenderedHit } from '../model/steps'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav, linearResample } from '../model/wav'
 import { scaleById } from '../model/scale'
+import { audibleIds } from '../model/audible'
+import { laneFor, rackLanesFor, rampEvents, valueAtSample } from '../model/automation'
+import { applyRamps } from './paramCurve'
 import { chainContext, enabledFx, LiveMidiChain, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
 import { LiveRack } from './liveRack'
 import { renderGraph } from './renderGraph'
@@ -405,15 +408,9 @@ export class AudioEngine {
         this.strips.delete(id)
       }
     }
-    const anySolo = project.tracks.some((t) => t.solo)
     for (const track of project.tracks) {
       const strip = this.strips.get(track.id)!
       applyInserts(this.ctx, strip, track.inserts)
-      const now = this.ctx.currentTime
-      strip.fader.gain.setTargetAtTime(track.volume, now, 0.015)
-      strip.pan.pan.setTargetAtTime(track.pan, now, 0.015)
-      const audible = !track.mute && (!anySolo || track.solo)
-      strip.mute.gain.setTargetAtTime(audible ? 1 : 0, now, 0.01)
     }
     applyInserts(this.ctx, this.masterStrip, project.masterInserts)
     this.applyMasterGain()
@@ -443,6 +440,40 @@ export class AudioEngine {
       if (!asset || !channel?.length) return null
       return { sampleRate: asset.sampleRate, channel }
     })
+    this.applyMixerAutomation()
+  }
+
+  /** Faders, pans, sends, and solo follow the project. Playing lanes are scheduled on the audio clock. */
+  private applyMixerAutomation() {
+    const project = this.project
+    const ctx = this.ctx
+    if (!project || !ctx) return
+    const heard = audibleIds(project.tracks)
+    const now = ctx.currentTime
+    const sample = this.playing ? this.currentTimelineSample() : this.positionSamples
+    const end = Math.max(sample + this.sampleRate, arrangementEndSample(project))
+    for (const track of project.tracks) {
+      const strip = this.strips.get(track.id)
+      if (!strip) continue
+      strip.mute.gain.setTargetAtTime(heard.has(track.id) ? 1 : 0, now, 0.01)
+      this.scheduleControl(strip.fader.gain, laneFor(project.automation, track.id, 'volume')?.points, track.volume, sample, now, end)
+      this.scheduleControl(strip.pan.pan, laneFor(project.automation, track.id, 'pan')?.points, track.pan, sample, now, end)
+    }
+    this.rack.applyAutomation(project, this.playing, sample, now, end, this.sampleRate)
+    const originBeat = samplesToBeats(this.playing ? this.playOriginSample : sample, this.sampleRate, project.tempo)
+    this.rackHost.setTransport(project, this.playing ? this.playOriginCtx : now, originBeat)
+  }
+
+  private scheduleControl(param: AudioParam, points: { beat: number; value: number }[] | undefined, fallback: number, sample: number, now: number, end: number) {
+    const project = this.project
+    if (!project) return
+    if (!this.playing || !points?.length) {
+      const value = points?.length ? valueAtSample(points, sample, this.sampleRate, project.tempo, fallback) : fallback
+      param.cancelScheduledValues(now)
+      param.setTargetAtTime(value, now, 0.015)
+      return
+    }
+    applyRamps(param, rampEvents(points, fallback, this.sampleRate, project.tempo, sample, now, end), now)
   }
 
   previewRack(trackId: string, pitch: number, slide = false, hold = false) {
@@ -1259,7 +1290,7 @@ export class AudioEngine {
             events.push({ sample: Math.min(end - 1, Math.round(span.start + span.duration)), pitch: note.pitch, vel: 0 })
           }
         }
-        const rendered = renderNotes(track.rack, events, rate, project.tempo, end, assets, project.rackAutomation)
+        const rendered = renderNotes(track.rack, events, rate, project.tempo, end, assets, rackLanesFor(project, track.id))
         const buffer = offline.createBuffer(2, end, rate)
         buffer.copyToChannel(rendered[0], 0)
         buffer.copyToChannel(rendered[1], 1)
@@ -1290,6 +1321,7 @@ export class AudioEngine {
         pan: track.pan,
         mute: track.mute,
         solo: track.solo,
+        soloSafe: track.soloSafe,
         plugins: track.plugins,
         sends: track.sends,
         output: track.output,
@@ -1393,6 +1425,7 @@ export class AudioEngine {
     this.ensureScheduler()
     if (!this.raf) this.raf = requestAnimationFrame(() => this.tick())
     this.scheduleAhead()
+    this.applyMixerAutomation()
   }
 
   /** The interval only wakes the scheduler. Notes are placed on the audio clock inside the horizon. */

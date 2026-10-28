@@ -7,6 +7,7 @@ import { quartersPerBar } from '../model/time'
 import { selectSession } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
+import { LinkGroup, MixFlags } from './AutomationLane'
 import { SESSION_BAR, SESSION_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
 import { ActionSheet, TipButton } from './Hint'
@@ -120,6 +121,10 @@ function SessionBody({ store, engine }: { store: ProjectStore; engine: AudioEngi
             {grid.tracks.map((track, index) => (
               <th key={track.id} className="track-col" data-track={track.id} style={{ color: track.color }}>
                 <span className="col-name">{track.name}</span>
+                <div className="mix-flags session-flags">
+                  <MixFlags store={store} trackId={track.id} />
+                </div>
+                <LinkGroup store={store} trackId={track.id} />
                 <ColumnGrip value={layout.column} onChange={setColumn} labelled={index === 0} />
               </th>
             ))}

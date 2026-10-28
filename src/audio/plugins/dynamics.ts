@@ -46,13 +46,16 @@ export function createGate(_sampleRate: number): Processor {
       const ratio = Math.max(1, params.ratio)
       const holdSamples = Math.round(((params.hold || 0) / 1000) * ctx.sampleRate)
       for (let i = 0; i < n; i++) {
-        const detector = Math.max(Math.abs(input[0][i] || 0), Math.abs(input[1]?.[i] || 0))
+        const side = ctx.sidechain
+        const detector = side
+          ? Math.abs(side[Math.min(i, side.length - 1)] || 0)
+          : Math.max(Math.abs(input[0][i] || 0), Math.abs(input[1]?.[i] || 0))
         const closeAt = threshold * 0.7
         if (detector >= threshold) gateOpen = true
         else if (detector < closeAt) gateOpen = false
         if (gateOpen) hold = holdSamples
         else if (hold > 0) hold -= 1
-        const below = hold > 0 || open ? 1 : detector < threshold ? clamp(threshold > 0 ? detector / threshold : 1, 0, 1) : 1
+        const below = hold > 0 || gateOpen ? 1 : detector < threshold ? clamp(threshold > 0 ? detector / threshold : 1, 0, 1) : 1
         const expanded = below >= 1 ? 1 : Math.max(range, below ** (ratio - 1))
         const rate = expanded > env ? open : close
         env += (expanded - env) * rate

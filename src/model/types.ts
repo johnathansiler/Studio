@@ -91,11 +91,30 @@ export interface AutomationPoint {
   value: number
 }
 
+/** Read plays lanes. Latch keeps writing the last value until stop. Touch writes only while a control is held. */
+export type AutomationWriteMode = 'read' | 'latch' | 'touch'
+
 export interface AutomationLane {
   id: string
   pluginId: string
   param: string
   points: AutomationPoint[]
+  /** Track that owns a volume, pan, or send lane. */
+  trackId?: string
+  /** Plugin lanes leave this as `plugin`. Mixer lanes set volume, pan, or send. */
+  target?: 'plugin' | 'volume' | 'pan' | 'send'
+  sendId?: string
+}
+
+/** Tracks whose faders, mutes, solos, and edits move together. */
+export interface MixGroup {
+  id: string
+  name: string
+  trackIds: string[]
+  faders: boolean
+  mutes: boolean
+  solos: boolean
+  edits: boolean
 }
 
 export interface UserPreset {
@@ -382,6 +401,8 @@ export interface Track {
   pan: number
   mute: boolean
   solo: boolean
+  /** Stays audible while other tracks are soloed. Used for returns and talkback. */
+  soloSafe?: boolean
   armed: boolean
   monitor: boolean
   input: string
@@ -426,6 +447,10 @@ export interface Project {
   masterInserts: Insert[]
   masterPlugins: PluginInstance[]
   automation: AutomationLane[]
+  /** How fader and plugin moves are written while the transport is rolling. */
+  automationMode?: AutomationWriteMode
+  /** Control groups. Folder summing still uses track.groupId. */
+  mixGroups?: MixGroup[]
   presets: UserPreset[]
   loopEnabled: boolean
   loopStartSample: number
@@ -543,6 +568,8 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     masterInserts: [],
     masterPlugins: [],
     automation: [],
+    automationMode: 'read',
+    mixGroups: [],
     presets: [],
     loopEnabled: false,
     loopStartSample: 0,

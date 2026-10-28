@@ -154,6 +154,11 @@ export function arrangementDigest(project: Project): string {
       pan: track.pan,
       mute: track.mute,
       solo: track.solo,
+      soloSafe: track.soloSafe ? 1 : 0,
+      groupId: track.groupId,
+      output: track.output,
+      sends: track.sends.map((send) => [send.id, send.busId, Math.round(send.gain * 1000) / 1000, send.preFader ? 1 : 0, send.enabled ? 1 : 0]),
+      sidechains: (track.plugins ?? []).map((plugin) => [plugin.id, plugin.sidechain || '']),
       color: track.color,
       clips: track.clips.map((clip) => [
         clip.id,
@@ -223,6 +228,10 @@ export function arrangementDigest(project: Project): string {
     })),
     pads: project.padKit ? padFingerprint(project.padKit) : '',
     presetFavorites: project.presetFavorites ?? [],
+    automationMode: project.automationMode ?? 'read',
+    mixGroups: (project.mixGroups ?? []).map((group) => [group.id, group.trackIds.join(','), group.faders ? 1 : 0, group.mutes ? 1 : 0, group.solos ? 1 : 0, group.edits ? 1 : 0]),
+    automation: (project.automation ?? []).map((lane) => [lane.id, lane.trackId || '', lane.target || 'plugin', lane.pluginId, lane.param, lane.sendId || '', lane.points.map((point) => [Math.round(point.beat * 1000) / 1000, Math.round(point.value * 1000) / 1000])]),
+    rackAutomation: (project.rackAutomation ?? []).map((lane) => [lane.deviceId, lane.param, lane.points.map((point) => [Math.round(point.beat * 1000) / 1000, Math.round(point.value * 1000) / 1000])]),
     omni: omniFingerprint(project),
   })
 }
