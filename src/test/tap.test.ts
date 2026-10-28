@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createEmptyProject } from '../model/types'
-import { emptyTap, formatTempo, pushTap, roundTempo, scaleTempo, shownTempo } from '../model/tap'
+import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, scaleTempo, shownTempo, tempoFromTaps } from '../model/tap'
 import { ProjectStore } from '../state/store'
 
 describe('tap tempo', () => {
@@ -68,21 +68,32 @@ describe('tap tempo', () => {
     expect(floor.bpm).toBe(30)
   })
 
-  it('drops an interval more than 30 percent off the average', () => {
+  it('keeps a tempo change in the rolling average', () => {
     let memory = emptyTap()
     for (const at of [0, 500, 1000]) memory = pushTap(memory, at).memory
-    const low = pushTap(memory, 1340)
-    expect(low.ignored).toBe(true)
-    expect(low.bpm).toBe(120)
-    expect(low.memory.taps).toEqual([0, 500, 1000])
-    const high = pushTap(memory, 1660)
-    expect(high.ignored).toBe(true)
-    expect(high.memory.taps).toEqual([0, 500, 1000])
-    const kept = pushTap(memory, 1350)
-    expect(kept.ignored).toBe(false)
-    expect(kept.bpm).toBe(133.3)
-    expect(shownTempo(120, low)).toBe(120)
-    expect(shownTempo(120, kept)).toBe(133.3)
+    const next = pushTap(memory, 1700)
+    expect(next.ignored).toBe(false)
+    expect(next.memory.taps).toEqual([0, 500, 1000, 1700])
+    expect(next.bpm).toBe(105.9)
+    expect(shownTempo(120, next)).toBe(105.9)
+  })
+
+  it('is 60 over the mean of the last eight intervals', () => {
+    const gaps = [400, 420, 440, 460, 480, 500, 520, 540, 560]
+    let memory = emptyTap()
+    let at = 0
+    let result = pushTap(memory, at)
+    memory = result.memory
+    for (const gap of gaps) {
+      at += gap
+      result = pushTap(memory, at)
+      memory = result.memory
+    }
+    const kept = gaps.slice(-8)
+    const mean = kept.reduce((sum, gap) => sum + gap, 0) / kept.length
+    expect(memory.taps).toHaveLength(9)
+    expect(tempoFromTaps(memory.taps)).toBeCloseTo(60000 / mean, 6)
+    expect(result.bpm).toBe(Math.round((60000 / mean) * 10) / 10)
   })
 
   it('does not count the click that follows a pointer tap', () => {
@@ -103,6 +114,17 @@ describe('tap tempo', () => {
     expect(keys.bpm).toBe(120)
     const typed = pushTap(pushTap(emptyTap(), 0, 'pointer').memory, 500, 'key')
     expect(typed.bpm).toBe(120)
+    let held = pushTap(emptyTap(), 0, 'pointer').memory
+    held = noteTapRelease(held, 4000)
+    const late = pushTap(held, 4010, 'click')
+    expect(late.ignored).toBe(true)
+    expect(late.memory.taps).toEqual([0])
+    const ghost = pushTap(late.memory, 4500, 'click')
+    expect(ghost.ignored).toBe(true)
+    expect(ghost.memory.taps).toEqual([0])
+    const after = pushTap(ghost.memory, 5600, 'click')
+    expect(after.reset).toBe(true)
+    expect(after.memory.taps).toEqual([5600])
   })
 
   it('keeps a rolling average of the last eight intervals', () => {
@@ -129,6 +151,7 @@ describe('tap tempo', () => {
   it('writes each new display tempo onto the project from the second tap', () => {
     const store = new ProjectStore(createEmptyProject())
     store.setTempo(90)
+    store.project.tempoMap = [{ beat: 0, bpm: 90 }]
     let memory = emptyTap()
     let display = store.project.tempo
     const seen: number[] = []
@@ -141,8 +164,13 @@ describe('tap tempo', () => {
     }
     expect(seen).toEqual([90, 120, 109.1, 112.5])
     expect(store.project.tempo).toBe(112.5)
+    expect(store.project.tempoMap?.[0]?.bpm).toBe(112.5)
     expect(seen[2]).not.toBe(seen[1])
     expect(seen[3]).not.toBe(seen[2])
+    store.undo()
+    expect(store.project.tempo).toBe(90)
+    store.undo()
+    expect(store.project.tempo).toBe(120)
   })
 
   it('rounds to a tenth or a whole number inside 30–300 and undoes the group once', () => {

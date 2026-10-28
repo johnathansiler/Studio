@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
-import { emptyTap, formatTempo, pushTap, roundTempo, type TapMemory, type TapSource } from '../model/tap'
+import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, type TapMemory, type TapSource } from '../model/tap'
 import { formatMapBars } from '../model/tempoMap'
 import { formatTimecode } from '../model/time'
 import { selectTransport } from '../state/select'
@@ -41,6 +41,8 @@ export function TransportBar({
   const memory = useRef<TapMemory>(emptyTap())
   const fieldRef = useRef<HTMLInputElement>(null)
   const written = useRef<number | null>(null)
+  const shown = useRef(project.tempo)
+  const draftRef = useRef<string | null>(null)
   const drag = useRef<{ y: number; origin: number; moved: boolean } | null>(null)
   const suppressFocus = useRef(false)
   const tapping = useRef(false)
@@ -59,23 +61,44 @@ export function TransportBar({
   )
 
   useEffect(() => {
-    if (written.current == null || project.tempo === written.current) return
-    written.current = null
-    setLive(null)
-    memory.current = emptyTap()
-    store.endTempoGroup()
+    const writtenTempo = written.current
+    if (writtenTempo != null && project.tempo === writtenTempo) return
+    if (writtenTempo != null) {
+      written.current = null
+      setLive(null)
+      memory.current = emptyTap()
+      store.endTempoGroup()
+    }
+    if (draftRef.current == null) shown.current = project.tempo
   }, [project.tempo, store])
+
+  function typedBase() {
+    const text = draftRef.current
+    if (text == null) return null
+    const trimmed = text.trim()
+    if (!trimmed || trimmed === '-' || trimmed === '.' || trimmed === '-.') return null
+    const value = Number(trimmed)
+    return Number.isFinite(value) ? value : null
+  }
 
   function publish(bpm: number, group: boolean) {
     const next = roundTempo(bpm, false)
+    shown.current = next
     written.current = next
+    draftRef.current = null
     setLive(next)
     setDraft(null)
     if (next !== store.project.tempo) store.setTempo(next, group)
   }
 
-  const publishRef = useRef(publish)
-  publishRef.current = publish
+  function bump(delta: number) {
+    memory.current = emptyTap()
+    const typed = typedBase()
+    publish((typed ?? shown.current) + delta, true)
+  }
+
+  const bumpRef = useRef(bump)
+  bumpRef.current = bump
 
   function pulse() {
     setFlash(true)
@@ -91,10 +114,12 @@ export function TransportBar({
     tapping.current = true
     fieldRef.current?.blur()
     tapping.current = false
+    draftRef.current = null
     setDraft(null)
     if (result.reset) {
       setLive(null)
       written.current = null
+      shown.current = store.project.tempo
       store.endTempoGroup()
     }
     if (result.bpm != null) publish(result.bpm, true)
@@ -128,11 +153,10 @@ export function TransportBar({
     if (!node) return
     const onWheel = (event: WheelEvent) => {
       if (store.remoteFollow) return
+      if (event.deltaY === 0) return
       event.preventDefault()
-      memory.current = emptyTap()
       const step = (event.deltaY < 0 ? 0.1 : -0.1) * (event.shiftKey ? 10 : 1)
-      const base = Number(node.value)
-      publishRef.current((Number.isFinite(base) ? base : store.project.tempo) + step, true)
+      bumpRef.current(step)
     }
     node.addEventListener('wheel', onWheel, { passive: false })
     return () => node.removeEventListener('wheel', onWheel)
@@ -140,9 +164,14 @@ export function TransportBar({
 
   function commitDraft(text: string) {
     if (tapping.current || drag.current?.moved || suppressFocus.current) return
+    draftRef.current = null
     setDraft(null)
-    const value = Number(text)
+    const trimmed = text.trim()
+    if (!trimmed) return
+    const value = Number(trimmed)
     if (!Number.isFinite(value)) return
+    const next = roundTempo(value, false)
+    if (next === store.project.tempo && next === shown.current) return
     memory.current = emptyTap()
     store.endTempoGroup()
     publish(value, false)
@@ -150,7 +179,7 @@ export function TransportBar({
 
   function onTempoPointerDown(event: ReactPointerEvent<HTMLInputElement>) {
     if (store.remoteFollow || event.button !== 0) return
-    drag.current = { y: event.clientY, origin: tempo, moved: false }
+    drag.current = { y: event.clientY, origin: typedBase() ?? shown.current, moved: false }
   }
 
   function onTempoPointerMove(event: ReactPointerEvent<HTMLInputElement>) {
@@ -239,10 +268,14 @@ export function TransportBar({
               event.currentTarget.blur()
               return
             }
+            draftRef.current = event.currentTarget.value
             setDraft(event.currentTarget.value)
             event.currentTarget.select()
           }}
-          onChange={(event) => setDraft(event.currentTarget.value)}
+          onChange={(event) => {
+            draftRef.current = event.currentTarget.value
+            setDraft(event.currentTarget.value)
+          }}
           onBlur={(event) => commitDraft(event.currentTarget.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
@@ -252,9 +285,7 @@ export function TransportBar({
             if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
             event.preventDefault()
             const delta = (event.shiftKey ? 1 : 0.1) * (event.key === 'ArrowUp' ? 1 : -1)
-            const base = draft != null && Number.isFinite(Number(draft)) ? Number(draft) : tempo
-            memory.current = emptyTap()
-            publish(base + delta, true)
+            bump(delta)
           }}
           onPointerDown={onTempoPointerDown}
           onPointerMove={onTempoPointerMove}
@@ -280,6 +311,12 @@ export function TransportBar({
             }
             pulse()
             applyTap(performance.now(), 'pointer')
+          }}
+          onPointerUp={() => {
+            memory.current = noteTapRelease(memory.current, performance.now())
+          }}
+          onPointerCancel={() => {
+            memory.current = noteTapRelease(memory.current, performance.now())
           }}
           onClick={() => {
             const result = applyTap(performance.now(), 'click')

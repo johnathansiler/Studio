@@ -175,15 +175,21 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .bpm-readout, .tap-pad button, .tap-tempo {
   height: 36px; min-height: 36px; min-width: 36px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line);
   background: var(--panel); font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 13px;
+  line-height: 1; white-space: nowrap;
 }
-.bpm-readout { width: 4.8em; min-width: 64px; text-align: center; }
+.bpm-readout {
+  width: calc(6.4ch + 16px); min-width: 64px; padding: 0 6px; text-align: center; touch-action: none;
+  appearance: textfield; -moz-appearance: textfield;
+}
+.bpm-readout::-webkit-outer-spin-button,
+.bpm-readout::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .bpm-readout:disabled { opacity: 0.45; }
 .tempo-cluster { display: flex; align-items: center; gap: 4px; flex: none; }
 .tap-pad { display: flex; gap: 6px; align-items: center; }
 .tap-pad button.on, .tap-tempo:active, .tap-tempo.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 .tap-tempo {
   min-width: 44px; padding: 0 12px; font-family: var(--font); font-weight: 650; letter-spacing: 0.01em;
-  touch-action: manipulation; user-select: none;
+  line-height: 1; white-space: nowrap; touch-action: manipulation; user-select: none;
 }
 .field input, .field select, .grow input, .grow select {
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; width: 78px;
@@ -773,7 +779,7 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 .shell.phone .latency-pill { max-width: 100%; }
 .shell.phone .transport {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   height: auto;
@@ -781,9 +787,11 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 }
 .shell.phone .t-btn, .shell.phone .t-btn.stop { width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; }
 .shell.phone .bpm-readout, .shell.phone .tap-pad button, .shell.phone .tap-tempo { height: 44px; min-height: 44px; font-size: 16px; }
-.shell.phone .tap-tempo { min-width: 64px; padding: 0 14px; }
+.shell.phone .bpm-readout { width: calc(6.4ch + 16px); min-width: 72px; }
+.shell.phone .tap-tempo { min-width: 44px; padding: 0 12px; }
+.shell.phone .tempo-cluster { flex: 1 1 auto; }
 .shell.phone .tool-slot:not(:empty) { min-height: 44px; }
-.shell.phone .lcd { min-width: 0; flex: 1 1 96px; padding: 4px 8px; }
+.shell.phone .lcd { min-width: 12.75rem; flex: 1 1 12.75rem; padding: 4px 8px; }
 .shell.phone .lcd .bars { font-size: 15px; }
 .shell.phone .field input, .shell.phone .field select { width: 68px; min-height: 44px; }
 .shell.phone .t-toggles { flex: 1 1 100%; flex-wrap: wrap; gap: 4px 10px; }

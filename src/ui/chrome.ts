@@ -26,7 +26,7 @@ export const TRANSPORT_COPY: Copy[] = [
   { id: 'stop', label: 'Stop', hint: 'Stop playback and recording.' },
   { id: 'record', label: 'Record', hint: 'Record onto armed tracks from the playhead.' },
   { id: 'loop', label: 'Loop', hint: 'Repeat the highlighted region.' },
-  { id: 'tempo', label: 'Tempo', hint: 'Type a tempo, or drag the number up or down.' },
+  { id: 'tempo', label: 'Tempo', hint: 'Type a tempo, or drag, scroll, or press the arrow keys.' },
   { id: 'tap', label: 'Tap', hint: 'Tap in time. The tempo follows your taps.' },
 ]
 
