@@ -3,10 +3,12 @@ import { descriptor } from '../audio/plugins/catalog'
 import type { AudioEngine } from '../audio/engine'
 import { computePeaks } from '../model/demo'
 import { FOLLOW_ACTIONS, LAUNCH_MODES, LAUNCH_QUANTS, QUANT_LABEL, sceneClip } from '../model/launch'
+import { quartersPerBar } from '../model/time'
 import { CLIP_SWATCHES, curvePath } from '../model/sessionBoard'
 import type { AudioClip, FollowAction, LaunchMode, LaunchQuant, MidiClip, MidiFx, PluginInstance, Track } from '../model/types'
 import { activeTool, subscribeTools } from '../state/tools'
 import type { ProjectStore } from '../state/store'
+import { useFormFactor } from './form'
 import { PianoRoll } from './PianoRoll'
 import { ToolBar } from './ToolBar'
 
@@ -27,6 +29,7 @@ export function SessionDetail({
   onResize: (height: number) => void
   onClose?: () => void
 }) {
+  const phone = useFormFactor() === 'phone'
   const clip = track && scene != null ? sceneClip(track, scene) : null
   const clipId = clip?.id ?? ''
   const [tab, setTab] = useState<'clip' | 'devices'>(clip ? 'clip' : 'devices')
@@ -75,7 +78,7 @@ export function SessionDetail({
             <Waveform store={store} trackId={track.id} clip={clip} />
           ) : (
             <>
-              <ToolBar context="piano" compact={false} onChange={(next) => store.setTool(next)} onDuplicate={() => store.duplicateSlot(track.id, scene ?? 0)} onDelete={() => store.deleteSelectedClip()} />
+              <ToolBar context="piano" compact={phone} onChange={(next) => store.setTool(next)} onDuplicate={() => store.duplicateSlot(track.id, scene ?? 0)} onDelete={() => store.deleteSelectedClip()} />
               <PianoRoll store={store} engine={engine} />
             </>
           )}
@@ -119,13 +122,16 @@ function ClipBar({
       </select>
       {'durationBeats' in clip && !('bufferId' in clip) && (
         <select aria-label="Clip length" title="Length of this clip." value={String(clip.durationBeats)} onChange={(event) => store.resizeMidiClip(track.id, clip.id, 'end', clip.startBeat + Number(event.target.value))}>
-          {[1, 2, 4, 8, 16].map((bars) => <option key={bars} value={bars * 4}>{bars} bar{bars === 1 ? '' : 's'}</option>)}
+          {[1, 2, 4, 8, 16].map((bars) => {
+            const beats = bars * quartersPerBar(store.project.timeSignature)
+            return <option key={bars} value={beats}>{bars === 1 ? '1 bar' : `${bars} bars`}</option>
+          })}
         </select>
       )}
-      <select aria-label="Follow action" title="What happens when the clip finishes." value={clip.follow ?? 'none'} onChange={(event) => store.setClipLaunch(track.id, clip.id, { follow: event.target.value as FollowAction })}>
+      <select className="sl-follow" aria-label="Follow action" title="What happens when the clip finishes." value={clip.follow ?? 'none'} onChange={(event) => store.setClipLaunch(track.id, clip.id, { follow: event.target.value as FollowAction })}>
         {FOLLOW_ACTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
       </select>
-      <button type="button" title="Duplicate into the next empty scene." onClick={() => store.duplicateSlot(track.id, scene)}>Duplicate</button>
+      <button type="button" className="sl-dup" title="Duplicate into the next empty scene." onClick={() => store.duplicateSlot(track.id, scene)}>Duplicate</button>
     </div>
   )
 }
@@ -179,7 +185,7 @@ function Waveform({ store, trackId, clip }: { store: ProjectStore; trackId: stri
       <canvas ref={canvas} />
       {clip.loop !== false && <i className="loopbar" />}
       <div className="mark" data-marker="start" title="Clip start. Drag to trim the beginning." onPointerDown={(event) => drag('start', event)} />
-      <div className="mark" data-marker="end" title="Clip end. Drag to trim the length." style={{ right: 0 }} onPointerDown={(event) => drag('end', event)} />
+      <div className="mark" data-marker="end" title="Clip end. Drag to trim the length." onPointerDown={(event) => drag('end', event)} />
     </div>
   )
 }

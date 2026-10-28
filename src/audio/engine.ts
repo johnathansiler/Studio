@@ -5,7 +5,7 @@ import type { StretchMode } from './stretch/engine'
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
 import { compPieces, recordOffsetSamples } from '../model/comp'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
-import { sessionStartContext } from '../model/sessionSlots'
+import { clipLoops, holdUntilGrid, sessionStartContext } from '../model/sessionSlots'
 import { DRUM_PADS, residentDrums, type ResidentDrum } from '../model/drums'
 import { calibrationTrim, contextTimeForEvent, monitoringOffset, type ClockStamp } from '../model/midiClock'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
@@ -150,6 +150,10 @@ export class AudioEngine {
   private sessionClip = new Map<string, string>()
   private sessionGen = new Map<string, number>()
   private sessionNodes = new Map<string, Stoppable[]>()
+  /** Identifies the loop currently allowed to schedule on a track. */
+  private activeLoop = new Map<string, object>()
+  /** A clip that keeps sounding until a queued launch reaches the grid. */
+  private retiring = new Map<string, { clipId: string; until: number; token: object; nodes: Stoppable[] }>()
   private launches = new Map<string, string>()
   private launchAt = new Map<string, number>()
   private launchGen = new Map<string, number>()
@@ -642,10 +646,23 @@ export class AudioEngine {
 
   kickSession() {
     const ids = new Set([...this.sessionNodes.keys(), ...this.sessionStarted])
+    const now = this.ctx?.currentTime ?? 0
     for (const id of ids) {
       const want = this.launches.get(id)
       const gen = this.launchGen.get(id) ?? 0
-      if (!want || this.sessionClip.get(id) !== want || (this.sessionGen.get(id) ?? 0) !== gen) this.stopSessionTrack(id)
+      const same = !!want && this.sessionClip.get(id) === want && (this.sessionGen.get(id) ?? 0) === gen
+      if (same) continue
+      const target = want != null ? this.launchAt.get(id) : undefined
+      if (this.ctx && target != null && holdUntilGrid({
+        sounding: this.sessionStarted.has(id),
+        sameGeneration: false,
+        nowCtx: now,
+        targetSample: target,
+        playOriginSample: this.playOriginSample,
+        playOriginCtx: this.playOriginCtx,
+        sampleRate: this.sampleRate,
+      })) continue
+      this.stopSessionTrack(id)
     }
     if (this.playing) this.scheduleAhead()
   }
@@ -917,6 +934,7 @@ export class AudioEngine {
     inputs: RecordInput[]
     countIn: boolean
     hostPerfAtSample?: number
+    mode?: 'arrangement' | 'session'
     onPunch?: (info: PunchInfo) => void
   }) {
     await this.resume()
@@ -924,6 +942,15 @@ export class AudioEngine {
       const ctx = this.ctx!
       this.refreshClockAnchor()
       const ctxTime = opts.hostPerfAtSample != null ? Math.max(this.contextForPerf(opts.hostPerfAtSample), ctx.currentTime + 0.02) : ctx.currentTime + 0.04
+      if (opts.mode) {
+        const previous = this.mode
+        this.mode = opts.mode
+        if (this.playing && previous !== opts.mode) {
+          this.stopSources()
+          this.arrangementScheduled = false
+          this.scheduleAhead()
+        }
+      }
       if (!this.playing) this.armTransport(ctxTime, opts.fromSample)
       const timelineSample = this.playing ? Math.round(this.sampleAt(ctxTime)) : opts.fromSample
       const cueEpochHostPerf = this.perfForContext(ctxTime)
@@ -1619,7 +1646,7 @@ export class AudioEngine {
         horizonSec: horizon - this.ctx.currentTime,
       })
       if (startWhen == null) continue
-      this.stopSessionTrack(trackId)
+      this.stopSessionTrack(trackId, startWhen)
       if (audio) {
         const asset = this.assetOf(audio.bufferId)
         if (!asset) continue
@@ -1641,7 +1668,7 @@ export class AudioEngine {
         }
         src.buffer = playBuffer
         src.playbackRate.value = playRate
-        const looping = audio.mode === 'repeat' || audio.loop !== false
+        const looping = clipLoops(audio)
         if (looping && dur > 0.01) {
           src.loop = true
           src.loopStart = offset
@@ -1654,7 +1681,9 @@ export class AudioEngine {
         if (looping) src.start(startWhen, offset)
         else src.start(startWhen, offset, playRate === 1 ? dur : dur / rate)
         this.trackNodes(trackId, {
-          stop: () => src.stop(),
+          stop: (at?: number) => {
+            try { src.stop(at) } catch { /* already stopped */ }
+          },
           disconnect: () => {
             src.disconnect()
             gain.disconnect()
@@ -1676,30 +1705,53 @@ export class AudioEngine {
     const sr = this.sampleRate
     const bpm = tempoAtSample(project, this.positionSamples)
     const durSec = Math.max(0.05, beatsToSamples(Math.max(0.25, clip.durationBeats), sr, bpm) / sr)
-    const looping = clip.mode === 'repeat' || clip.loop !== false
+    const looping = clipLoops(clip)
     if (!this.sessionNodes.has(track.id)) this.sessionNodes.set(track.id, [])
+    const token = {}
+    this.activeLoop.set(track.id, token)
     const schedulePass = (when: number) => {
-      if (!this.playing || this.mode !== 'session' || this.launches.get(track.id) !== clip.id) return
+      const ctx = this.ctx
+      if (!this.playing || !ctx || this.mode !== 'session') return
+      const retired = this.retiring.get(track.id)
+      const retiredHere = retired?.token === token
+      const active = this.activeLoop.get(track.id) === token
+      if (!active && !retiredHere) return
+      const limit = retiredHere && retired ? retired.until : null
+      if (limit != null && when >= limit - 0.001) return
+      const bucket = retiredHere && retired ? retired.nodes : this.sessionNodes.get(track.id)
       if (clip.patternId) {
         const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
         const hits = pattern ? renderPattern(pattern, 0, clip.durationBeats) : []
         for (const hit of hits) {
           const noteDelay = beatsToSamples(hit.startBeat, sr, bpm) / sr
+          if (limit != null && when + noteDelay >= limit - 0.001) continue
           const out = (hit.output && this.strips.get(hit.output)) || strip
-          this.scheduleHit(this.ctx!, out, hit, when + noteDelay)
+          this.scheduleHit(ctx, out, hit, when + noteDelay)
         }
       }
       for (const note of clip.patternId ? [] : prepareClipNotes(project, track, clip)) {
         const noteDelay = beatsToSamples(note.startBeat, sr, bpm) / sr
         const noteDur = beatsToSamples(note.durationBeats, sr, bpm) / sr
-        this.scheduleVoice(this.ctx!, strip, note, when + noteDelay, noteDur, track, this.sessionNodes.get(track.id))
+        const start = when + noteDelay
+        if (limit != null && start >= limit - 0.001) continue
+        const dur = limit != null ? Math.min(noteDur, Math.max(0.02, limit - start)) : noteDur
+        this.scheduleVoice(ctx, strip, note, start, dur, track, bucket)
       }
       if (!looping) return
-      const timer = window.setTimeout(() => schedulePass(when + durSec), Math.max(20, durSec * 1000 - 200))
-      this.trackNodes(track.id, {
-        stop: () => window.clearTimeout(timer),
+      const nextWhen = when + durSec
+      if (limit != null && nextWhen >= limit - 0.001) return
+      const timer = window.setTimeout(() => schedulePass(nextWhen), Math.max(20, durSec * 1000 - 200))
+      const node: Stoppable = {
+        stop: (at?: number) => {
+          const kill = () => window.clearTimeout(timer)
+          const now = this.ctx?.currentTime ?? 0
+          if (at != null && at > now + 0.005) window.setTimeout(kill, (at - now) * 1000)
+          else kill()
+        },
         disconnect: () => undefined,
-      })
+      }
+      if (retiredHere && retired) retired.nodes.push(node)
+      else this.trackNodes(track.id, node)
     }
     schedulePass(firstWhen)
   }
@@ -1711,24 +1763,41 @@ export class AudioEngine {
     this.sources.push(node)
   }
 
-  private stopSessionTrack(trackId: string) {
-    for (const node of this.sessionNodes.get(trackId) || []) {
-      try {
-        node.stop()
-      } catch {
-        /* already stopped */
-      }
-      try {
-        node.disconnect()
-      } catch {
-        /* already disconnected */
-      }
-      this.sources = this.sources.filter((item) => item !== node)
-    }
+  private stopSessionTrack(trackId: string, when?: number) {
+    const now = this.ctx?.currentTime ?? 0
+    const later = when != null && when > now + 0.005
+    const nodes = this.sessionNodes.get(trackId) || []
+    const clipId = this.sessionClip.get(trackId)
+    const token = this.activeLoop.get(trackId)
+    if (later && clipId && token) {
+      const bucket = [...nodes]
+      this.retiring.set(trackId, { clipId, until: when, token, nodes: bucket })
+      window.setTimeout(() => {
+        for (const node of bucket) {
+          try { node.stop() } catch { /* already stopped */ }
+          try { node.disconnect() } catch { /* already disconnected */ }
+          this.sources = this.sources.filter((item) => item !== node)
+        }
+        const retired = this.retiring.get(trackId)
+        if (retired?.token === token) this.retiring.delete(trackId)
+      }, Math.max(0, (when - now) * 1000 + 40))
+    } else this.retiring.delete(trackId)
+    this.activeLoop.delete(trackId)
     this.sessionNodes.delete(trackId)
     this.sessionStarted.delete(trackId)
     this.sessionClip.delete(trackId)
     this.sessionGen.delete(trackId)
+    for (const node of nodes) {
+      try {
+        node.stop(later ? when : undefined)
+      } catch {
+        /* already stopped */
+      }
+      if (!later) {
+        try { node.disconnect() } catch { /* already disconnected */ }
+        this.sources = this.sources.filter((item) => item !== node)
+      }
+    }
   }
 
   private scheduleWindow(ctxTime: number, timelineStart: number, timelineEnd: number) {
@@ -2865,6 +2934,8 @@ export class AudioEngine {
     this.sessionStarted.clear()
     this.sessionClip.clear()
     this.sessionGen.clear()
+    this.activeLoop.clear()
+    this.retiring.clear()
   }
 }
 

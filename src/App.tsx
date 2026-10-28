@@ -195,7 +195,7 @@ export function App() {
           },
         )
         const stopped = engine.status === 'stopped'
-        store.replaceSession(next)
+        store.replaceSession(next, engine.currentTimelineSample())
         if (action === 'back' || action === 'stop-clips') return
         if (stopped && next.mode === 'session' && Object.values(next.launched).some(Boolean)) {
           const localPerf = guestFollowStart({
@@ -721,7 +721,7 @@ export function App() {
         at: cmd.launchAt && typeof cmd.launchAt === 'object' ? (cmd.launchAt as Record<string, number>) : {},
         gen: cmd.launchGen && typeof cmd.launchGen === 'object' ? (cmd.launchGen as Record<string, number>) : {},
         mode: cmd.mode === 'session' ? 'session' : 'arrangement',
-      })
+      }, engine.currentTimelineSample())
     }
     const counting = Boolean(cmd.countIn)
     const tempo = Number(cmd.tempo) || store.project.tempo
@@ -921,11 +921,15 @@ export function App() {
     }
     const slot = store.sessionSlot
     const slotTrack = slot ? store.project.tracks.find((track) => track.id === slot.trackId) : undefined
+    const intoSlot = Boolean(slot && slotTrack && (slotTrack.type === 'audio' || slotTrack.type === 'midi'))
     if (slot && slotTrack?.type === 'midi') {
       store.prepareMidiSlot(slot.trackId, slot.scene)
-      if (engine.status !== 'playing') await playFrom(engine.currentTimelineSample(), 'session')
-      return
+      const fresh = store.track(slot.trackId)
+      if (fresh && (!fresh.armed || fresh.input === 'none')) {
+        store.updateTrack(slot.trackId, { armed: true, input: fresh.input === 'none' ? 'midi' : fresh.input })
+      }
     }
+    if (intoSlot && store.transportMode !== 'session') store.enterSession()
     await ready()
     const takeId = uid('take')
     const inputs = await collectRecordInputs({
@@ -944,6 +948,7 @@ export function App() {
     const settings = store.recordSettings()
     const punched = settings.punchEnabled ? punchWindow(settings, store.project.sampleRate, store.project.tempo, store.project.timeSignature) : null
     const alreadyPlaying = engine.status === 'playing'
+    const transportMode = intoSlot || store.transportMode === 'session' || engine.currentMode() === 'session' ? 'session' : 'arrangement'
     let fromSample = Math.round(engine.currentTimelineSample())
     if (!alreadyPlaying && punched) fromSample = punched.playFrom
     else if (!alreadyPlaying && settings.loop && store.project.loopEnabled) fromSample = store.project.loopStartSample
@@ -957,7 +962,7 @@ export function App() {
         action: 'play',
         timelineSample: fromSample,
         hostPerfAtSample: hostPerf,
-        mode: 'arrangement',
+        mode: transportMode,
         tempo: tempoAtSample(store.project, fromSample),
         countIn: counting,
         countInMs: Math.round(countMs),
@@ -969,7 +974,11 @@ export function App() {
       inputs,
       countIn: counting,
       hostPerfAtSample: alreadyPlaying ? undefined : hostPerf,
+      mode: transportMode,
       onPunch: (info) => {
+        if (slot && slotTrack?.type === 'midi') {
+          store.sessionRecordBeat = samplesToBeats(info.timelineSample, store.project.sampleRate, store.project.tempo)
+        }
         takeRef.current = { id: takeId, endSample: info.timelineSample }
         store.beginTake()
         if (punched) {

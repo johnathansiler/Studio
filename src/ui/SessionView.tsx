@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { LAUNCH_QUANTS, QUANT_LABEL, sceneClip } from '../model/launch'
-import { clipLoopSamples, slotPhase } from '../model/sessionSlots'
+import { clipLoopSamples, slotDisplay } from '../model/sessionSlots'
 import {
   clipPaint,
   instrumentFor,
@@ -55,7 +55,7 @@ function SessionBody({
   const [detailOn, setDetailOn] = useState(panes.detail)
   const [mixerOn, setMixerOn] = useState(panes.mixer)
   const [browserW, setBrowserW] = useState(220)
-  const [detailH, setDetailH] = useState(200)
+  const [detailH, setDetailH] = useState(320)
   const [levels, setLevels] = useState<{ master: number; tracks: Record<string, number> }>({ master: 0, tracks: {} })
   const [now, setNow] = useState(() => engine.currentTimelineSample())
   const clickTimer = useRef(0)
@@ -98,6 +98,8 @@ function SessionBody({
         if (item.type === 'audio' && item.id !== trackId && item.armed) store.updateTrack(item.id, { armed: false })
       }
       store.updateTrack(trackId, { armed: true })
+    } else if (track?.type === 'midi') {
+      store.updateTrack(trackId, { armed: true, input: track.input === 'none' ? 'midi' : track.input })
     }
     onRecord()
   }
@@ -289,10 +291,12 @@ function TrackColumn({
       </button>
       {Array.from({ length: 8 }, (_, scene) => {
         const clip = sceneClip(track, scene)
-        const launched = !!(clip && playingId === clip.id)
-        const phase = slotPhase({
-          hasClip: !!clip,
-          launched,
+        const hand = store.handoff[track.id]
+        const phase = slotDisplay({
+          clipId: clip?.id ?? null,
+          launchedId: playingId ?? null,
+          handoffId: hand?.clipId,
+          handoffAt: hand?.at,
           now,
           launchAt: store.launchAt[track.id],
           stopAt: store.stopAt[track.id],
@@ -346,15 +350,12 @@ function TrackColumn({
       })}
       <button
         type="button"
-        className={`track-stop ${trackLive ? 'live' : ''} ${track.armed ? 'armed' : ''}`}
-        aria-label={`${track.name}. Stop clips on this track, or arm it when nothing is playing.`}
-        title="Stop clips on this track. If nothing is playing, arm the track."
-        onClick={() => {
-          if (trackLive || store.stopAt[track.id] != null) onStop()
-          else store.updateTrack(track.id, { armed: !track.armed })
-        }}
+        className={`track-stop ${trackLive ? 'live' : ''}`}
+        aria-label={`${track.name}. Stop this track.`}
+        title="Stop this track on the next grid line."
+        onClick={onStop}
       >
-        {trackLive ? 'Stop' : track.armed ? 'Armed' : 'Arm'}
+        <i className="sl-sq" />
       </button>
       {mixer && (
         <div className="sl-mix" data-mixer={track.id}>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clipLoopSamples, sessionStartContext, slotPhase, stopPlan } from '../model/sessionSlots'
+import { clipLoopSamples, clipLoops, handoffAfter, holdUntilGrid, sessionStartContext, slotDisplay, slotPhase, stopPlan } from '../model/sessionSlots'
 import { collabBadgeOn, collabPanelVisible } from '../ui/collabTab'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
@@ -139,6 +139,94 @@ describe('slot launch and stop quantization', () => {
     expect(store.stopAt[keys.id]).toBe(96000)
     store.tickSession(96000, true)
     expect(store.launched[keys.id]).toBeFalsy()
+  })
+})
+
+describe('one clip per track waits on the grid', () => {
+  it('keeps the sounding clip until the next one starts', () => {
+    const store = new ProjectStore(createEmptyProject(48000))
+    const keys = store.project.tracks[2]
+    keys.midiClips = [
+      { id: 'a', name: 'A', startBeat: 0, durationBeats: 4, notes: [], loop: true },
+      { id: 'b', name: 'B', startBeat: 0, durationBeats: 4, notes: [], loop: true },
+    ]
+    keys.midiSlots = ['a', 'b']
+    store.launch(keys.id, 'a', 0)
+    store.launch(keys.id, 'b', 1000)
+    expect(store.launched[keys.id]).toBe('b')
+    expect(Object.values(store.launched).filter(Boolean)).toEqual(['b'])
+    expect(store.handoff[keys.id]).toEqual({ clipId: 'a', at: 0 })
+    expect(slotDisplay({
+      clipId: 'a',
+      launchedId: 'b',
+      handoffId: 'a',
+      handoffAt: 0,
+      now: 1000,
+      launchAt: 96000,
+      lengthSamples: 96000,
+    }).phase).toBe('playing')
+    expect(slotDisplay({
+      clipId: 'b',
+      launchedId: 'b',
+      handoffId: 'a',
+      now: 1000,
+      launchAt: 96000,
+      lengthSamples: 96000,
+    }).phase).toBe('queued')
+    expect(holdUntilGrid({
+      sounding: true,
+      sameGeneration: false,
+      nowCtx: 10,
+      targetSample: 96000,
+      playOriginSample: 0,
+      playOriginCtx: 10,
+      sampleRate: 48000,
+    })).toBe(true)
+    expect(holdUntilGrid({
+      sounding: true,
+      sameGeneration: true,
+      nowCtx: 10,
+      targetSample: 96000,
+      playOriginSample: 0,
+      playOriginCtx: 10,
+      sampleRate: 48000,
+    })).toBe(false)
+    expect(clipLoops({})).toBe(true)
+    expect(clipLoops({ loop: false })).toBe(false)
+    expect(clipLoops({ loop: false, mode: 'repeat' })).toBe(true)
+  })
+
+  it('stops an empty scene slot on the bar instead of dropping the clip now', () => {
+    const store = new ProjectStore(createEmptyProject(48000))
+    const keys = store.project.tracks[2]
+    keys.midiClips = [{ id: 'a', name: 'A', startBeat: 0, durationBeats: 4, notes: [], loop: true }]
+    keys.midiSlots = ['a', null]
+    store.launch(keys.id, 'a', 0)
+    store.launchScene(1, 1000)
+    expect(store.launched[keys.id]).toBe('a')
+    expect(store.stopAt[keys.id]).toBe(96000)
+    store.tickSession(96000, true)
+    expect(store.launched[keys.id]).toBeFalsy()
+  })
+
+  it('records notes into the armed slot instead of a new arrangement clip', () => {
+    const store = new ProjectStore(createEmptyProject(48000))
+    const keys = store.project.tracks[2]
+    store.prepareMidiSlot(keys.id, 2)
+    store.armSlot(keys.id, 2)
+    store.sessionRecordBeat = 8
+    store.overdubSlot(keys.id, 2, [{ pitch: 67, startBeat: 8.5, durationBeats: 1, velocity: 0.8 }])
+    const clip = keys.midiClips.find((item) => item.id === keys.midiSlots?.[2])
+    expect(clip?.slotOnly).toBe(true)
+    expect(clip?.notes.map((note) => note.pitch)).toEqual([67])
+    expect(clip?.notes[0].startBeat).toBeCloseTo(0.5)
+    expect(keys.midiClips.filter((item) => !item.slotOnly)).toHaveLength(0)
+    const switched = handoffAfter(
+      { launched: { keys: 'a' }, at: { keys: 0 } },
+      { launched: { keys: 'b' }, at: { keys: 96000 } },
+      1000,
+    )
+    expect(switched.keys).toEqual({ clipId: 'a', at: 0 })
   })
 })
 

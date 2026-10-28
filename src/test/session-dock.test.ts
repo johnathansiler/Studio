@@ -160,7 +160,7 @@ describe('arrange on first load', () => {
       await spansArrange(page)
       await page.getByRole('button', { name: /^Session/ }).click()
       await page.locator('[data-session-view="open"]').waitFor()
-      expect(await page.locator('.track-stop').first().innerText()).toBe('Arm')
+      expect(await page.locator('.track-stop').first().getAttribute('aria-label')).toMatch(/Stop/)
       await page.locator('[data-session-browser="open"]').waitFor()
       await page.locator('[data-session-detail="open"]').waitFor()
       await page.locator('[data-mixer]').first().waitFor()
