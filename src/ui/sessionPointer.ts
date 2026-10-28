@@ -1,5 +1,13 @@
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { targetFromAttrs, type SessionDrag, type SessionTarget } from '../model/sessionInteract'
+import { quickDragArmed } from './clipKeys'
+
+/** A short flick still drops. A vertical touch keeps scrolling the browser list. */
+export function sessionDragDecision(dx: number, dy: number, pointerType: string): 'wait' | 'drag' | 'scroll' {
+  if (!quickDragArmed(dx, dy)) return 'wait'
+  if (pointerType === 'touch' && Math.abs(dy) > Math.abs(dx) + 4) return 'scroll'
+  return 'drag'
+}
 
 export function sessionTargetAt(x: number, y: number): SessionTarget | null {
   const el = document.elementFromPoint(x, y)
@@ -42,31 +50,43 @@ export function beginSessionDrag(
     window.removeEventListener('pointercancel', up)
     ghost?.remove()
   }
-  const move = (ev: PointerEvent) => {
-    if (ev.pointerId !== pointerId) return
-    const dx = ev.clientX - startX
-    const dy = ev.clientY - startY
+  const arm = (x: number, y: number) => {
+    const choice = sessionDragDecision(x - startX, y - startY, pointerType)
+    if (choice === 'wait') return false
+    if (choice === 'scroll') {
+      finish()
+      return false
+    }
     if (!dragging) {
-      if (Math.hypot(dx, dy) < 8) return
-      if (pointerType === 'touch' && Math.abs(dy) > Math.abs(dx) + 4) {
-        finish()
-        return
-      }
       dragging = true
+      const node = event.currentTarget
+      if (node instanceof Element && node.setPointerCapture) {
+        try { node.setPointerCapture(pointerId) } catch { /* the window listeners still see the release */ }
+      }
       ghost = document.createElement('div')
       ghost.className = 'sl-drag-ghost'
       ghost.textContent = label
       document.body.appendChild(ghost)
     }
-    if (!ghost) return
+    return true
+  }
+  const move = (ev: PointerEvent) => {
+    if (ev.pointerId !== pointerId) return
+    if (!arm(ev.clientX, ev.clientY) || !ghost) return
     ghost.style.left = `${ev.clientX + 14}px`
     ghost.style.top = `${ev.clientY + 14}px`
   }
   const up = (ev: PointerEvent) => {
+    if (ev.pointerId !== pointerId) {
+      finish()
+      return
+    }
+    arm(ev.clientX, ev.clientY)
     const did = dragging
+    const point = { x: ev.clientX, y: ev.clientY }
     finish()
-    if (!did || ev.pointerId !== pointerId) return
-    onDrop(drag, { x: ev.clientX, y: ev.clientY })
+    if (!did) return
+    onDrop(drag, point)
   }
   window.addEventListener('pointermove', move)
   window.addEventListener('pointerup', up)

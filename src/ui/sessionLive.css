@@ -361,7 +361,7 @@
   background: #1e2320;
   min-height: 0;
   height: 100%;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .sl-mix.closed { display: none; }
@@ -370,15 +370,18 @@
   display: flex;
   gap: 6px;
   align-items: stretch;
-  height: 48px;
+  flex: none;
+  height: 88px;
+  overflow: hidden;
 }
 
 .sl-fader input[type="range"] {
   writing-mode: vertical-lr;
   direction: rtl;
-  width: 22px;
-  min-width: 0;
-  height: 84px;
+  flex: none;
+  width: 28px;
+  min-width: 28px;
+  height: 100%;
   margin: 0;
   accent-color: #d7b15a;
 }
@@ -417,11 +420,16 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: none;
+  min-height: 24px;
   font-size: 11px;
+  line-height: 1.2;
   letter-spacing: 0;
   color: #8d9a90;
   white-space: nowrap;
   min-width: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .sl-pan input { flex: 1; width: 100%; min-width: 0; max-width: 100%; accent-color: #9bb4a4; }
