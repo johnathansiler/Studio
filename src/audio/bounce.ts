@@ -1,6 +1,7 @@
 import { createPlugin } from './plugins/catalog'
 import { loadModule, peekModule } from './plugins/registry'
 import { renderGraph, type GraphTrack } from './renderGraph'
+import { prepareClipNotes } from '../model/midiTools'
 import { scaleById } from '../model/scale'
 import { beatsToSamples, projectEndSample } from '../model/time'
 import { makeTrack, uid, type AudioAsset, type AudioClip, type PluginInstance, type Project, type Track } from '../model/types'
@@ -225,7 +226,7 @@ async function renderChannels(project: Project, assets: Map<string, AudioAsset>,
     id: track.id,
     type: track.type,
     input: track.input,
-    buffer: mixTrack(track, assets, start, length, project.sampleRate, project.tempo),
+    buffer: mixTrack(project, track, assets, start, length),
     volume: track.volume,
     pan: track.pan,
     mute: track.mute,
@@ -277,7 +278,9 @@ function feeds(track: Track, target: string, tracks: Track[], seen = new Set<str
   return next ? feeds(next, target, tracks, seen) : false
 }
 
-function mixTrack(track: Track, assets: Map<string, AudioAsset>, start: number, length: number, rate: number, tempo: number) {
+function mixTrack(project: Project, track: Track, assets: Map<string, AudioAsset>, start: number, length: number) {
+  const rate = project.sampleRate
+  const tempo = project.tempo
   const out = [new Float32Array(length), new Float32Array(length)]
   for (const clip of track.clips) {
     const asset = assets.get(clip.bufferId)
@@ -305,7 +308,7 @@ function mixTrack(track: Track, assets: Map<string, AudioAsset>, start: number, 
     }
   }
   for (const clip of track.midiClips) {
-    for (const note of clip.notes) {
+    for (const note of prepareClipNotes(project, track, clip)) {
       const noteStart = Math.round(beatsToSamples(clip.startBeat + note.startBeat, rate, tempo))
       const duration = Math.round(beatsToSamples(note.durationBeats, rate, tempo))
       addVoice(out, note.pitch, note.velocity, noteStart, duration, start, rate)

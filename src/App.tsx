@@ -4,7 +4,7 @@ import { AudioEngine } from './audio/engine'
 import { unpackProject } from './model/archive'
 import { renderDemoLoop } from './model/demo'
 import { isSessionLink, isUntouchedEmpty, NEW_PROJECT, planLaunch, readTab, shouldKeepProject, TAB_PROJECT } from './model/launchProject'
-import { channelConstraints, inputChannel, mediaChannelCount, punchWindow, sliceCapture } from './model/comp'
+import { punchWindow, sliceCapture } from './model/comp'
 import { inspectClip } from './audio/stretch/engine'
 import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } from './model/types'
 import type { IncomingTake } from './remote/session'
@@ -22,7 +22,10 @@ import { TunerPop } from './ui/AmpPop'
 import { ArrangeView } from './ui/ArrangeView'
 import { BeatView } from './ui/BeatView'
 import { ExportSheet } from './ui/ExportSheet'
+import { collectRecordInputs } from './midi/inputs'
+import { hidesHardwareMidi } from './model/midiTools'
 import { formFactor, type FormFactor } from './ui/form'
+import { MidiTools } from './ui/MidiTools'
 import { PerformPop } from './ui/PerformPop'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
@@ -885,59 +888,18 @@ export function App() {
     }
     await ready()
     const takeId = uid('take')
-    const armedAudio = store.project.tracks.filter((track) => track.armed && track.type === 'audio')
-    const localArmed = armedAudio.filter((track) => isLocalInput(track.input) || track.input.startsWith('mic:'))
-    let mic = session.localPerformanceStream()
-    if (localArmed.length && !mic) {
-      const count = mediaChannelCount(localArmed.map((track) => track.input))
-      try {
-        mic = await navigator.mediaDevices.getUserMedia({ audio: channelConstraints(count), video: false })
-        engine.setLocalMic(mic)
-      } catch {
-        try {
-          mic = await navigator.mediaDevices.getUserMedia({ audio: channelConstraints(1), video: false })
-          engine.setLocalMic(mic)
-        } catch {
-          if (!armedAudio.some((track) => track.input.startsWith('remote:'))) {
-            store.toast('Microphone permission is needed to record.', 'warn')
-            return
-          }
-        }
-      }
-    }
-    const inputs = []
-    for (const track of armedAudio) {
-      const local = isLocalInput(track.input) || track.input.startsWith('mic:')
-      const stream = mic || session.localPerformanceStream()
-      if (local && stream) {
-        const channel = inputChannel(track.input)
-        inputs.push({ key: track.id, stream, source: 'local' as const, takeId, channel: channel ?? undefined })
-      }
-      if (track.input.startsWith('remote:')) {
-        const peerId = track.input.slice('remote:'.length)
-        const stream = session.remoteMusic(peerId)
-        if (stream) inputs.push({ key: track.id, stream, source: 'guide' as const, peerId, takeId })
-      }
-    }
-    if (!inputs.some((input) => input.source === 'local')) {
-      const live = session.localPerformanceStream()
-      const armed = store.project.tracks.find((track) => track.armed && (isLocalInput(track.input) || track.input.startsWith('mic:')))
-      if (live && armed) inputs.push({ key: armed.id, stream: live, source: 'local' as const, takeId })
-    }
-    if (!inputs.length) {
-      try {
-        const stereo = store.project.tracks.some((track) => track.armed && track.type === 'audio' && track.channels === 2 && isLocalInput(track.input))
-        const fresh = await navigator.mediaDevices.getUserMedia({
-          audio: { channelCount: stereo ? 2 : 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-          video: false,
-        })
-        engine.setLocalMic(fresh)
-        const armed = store.project.tracks.find((track) => track.type === 'audio' && track.armed) || store.project.tracks[0]
-        inputs.push({ key: armed.id, stream: fresh, source: 'local' as const, takeId })
-      } catch {
-        store.toast('Arm a track with an input to record.', 'warn')
-        return
-      }
+    const inputs = await collectRecordInputs({
+      tracks: store.project.tracks,
+      takeId,
+      localStream: () => session.localPerformanceStream(),
+      remoteStream: (peerId) => session.remoteMusic(peerId),
+      setLocalMic: (stream) => engine.setLocalMic(stream),
+      openMic: (audio) => navigator.mediaDevices.getUserMedia({ audio, video: false }),
+    })
+    const midiArmed = store.project.tracks.some((track) => track.type === 'midi' && track.armed && track.input.startsWith('midi'))
+    if (!inputs.length && !midiArmed) {
+      store.toast('Arm a track with an input to record.', 'warn')
+      return
     }
     const settings = store.recordSettings()
     const punched = settings.punchEnabled ? punchWindow(settings, store.project.sampleRate, store.project.tempo, store.project.timeSignature) : null
@@ -1156,6 +1118,9 @@ async function importDropped(files: FileList) {
             <button type="button" onClick={() => { setMenuOpen(false); openPerform('keys') }}>Keys</button>
             <button type="button" onClick={() => { setMenuOpen(false); openPerform('drums') }}>Pads</button>
             <button type="button" disabled={!pianoTrack} onClick={() => { if (!pianoTrack) return; setMenuOpen(false); openPiano(pianoTrack.id) }}>Piano</button>
+            {!hidesHardwareMidi(navigator.userAgent) && (
+              <button type="button" className="split" title="MIDI learn, effects, output, and capture" onClick={() => { setMenuOpen(false); store.setMidiToolsOpen(!store.midiToolsOpen) }}>MIDI</button>
+            )}
             <button type="button" className="split" onClick={() => { setMenuOpen(false); store.quickQuantize() }}>Quantize</button>
             <button type="button" onClick={() => { setMenuOpen(false); store.openQuantize() }}>Quantize…</button>
             <button type="button" className="split" aria-pressed={store.project.metronomeEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('metronomeEnabled')}>Click</button>
@@ -1232,6 +1197,7 @@ async function importDropped(files: FileList) {
               onDelete={() => store.deleteSelectedClip()}
             />
           )}
+          <MidiTools store={store} engine={engine} />
         </div>
       )}
       <div className={`workspace ${!phone && dockEdge === 'bottom' && surface === 'studio' ? 'dock-bottom' : ''}`}>

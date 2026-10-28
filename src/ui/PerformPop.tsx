@@ -8,6 +8,8 @@ import { BANKS, gridPitch, PAD_MACROS, sixteenLevels, type GridLayout, type Leve
 import { decodeWavPCM } from '../model/wav'
 import type { ProjectStore } from '../state/store'
 import type { SessionClient } from '../remote/session'
+import { midiOutputs, onMidiMessage, onMidiPorts } from '../midi/access'
+import { setPerformanceOwnsMidi } from '../midi/remember'
 import { attachGlissando } from './glissando'
 
 const WHITE = [0, 2, 4, 5, 7, 9, 11]
@@ -53,7 +55,7 @@ export function PerformPop({
   const target = useRef<PerformTarget | null>(null)
   const dragging = useRef<number | null>(null)
   const bankRef = useRef(0)
-  const outputs = useRef<MIDIOutput[]>([])
+  const outputs = useRef<{ send: (data: number[]) => void }[]>([])
   const [octave, setOctave] = useState(0)
   const [repeat, setRepeat] = useState<RepeatRate | null>(null)
   const [triplet, setTriplet] = useState(false)
@@ -259,28 +261,26 @@ export function PerformPop({
   }, [drums, levels, selectedPad, store])
 
   useEffect(() => {
-    if (!navigator.requestMIDIAccess) return
-    let dead = false
+    setPerformanceOwnsMidi(true)
+    return () => setPerformanceOwnsMidi(false)
+  }, [])
+
+  useEffect(() => {
     const play = performer.current
     const root = board.current
-    void navigator.requestMIDIAccess().then((access) => {
-      if (dead || !play) return
-      const bind = () => {
-        outputs.current = [...access.outputs.values()]
-        for (const input of access.inputs.values()) {
-          input.onmidimessage = (event) => {
-            if (!event.data) return
-            play.midi(event.data, event.timeStamp, window.performance.now())
-            const on = (event.data[0] & 0xf0) === 0x90 && event.data[2] > 0
-            root?.querySelectorAll(`[data-pitch="${event.data[1]}"]`).forEach((pad) => pad.classList.toggle('lit', on))
-          }
-        }
-      }
-      bind()
-      access.onstatechange = bind
-    }).catch(() => undefined)
+    const refresh = () => {
+      outputs.current = midiOutputs()
+    }
+    const stopPorts = onMidiPorts(refresh)
+    const stop = onMidiMessage((_input, data, timeStamp) => {
+      if (!play || !data) return
+      play.midi(data, timeStamp, window.performance.now())
+      const on = (data[0] & 0xf0) === 0x90 && data[2] > 0
+      root?.querySelectorAll(`[data-pitch="${data[1]}"]`).forEach((pad) => pad.classList.toggle('lit', on))
+    })
     return () => {
-      dead = true
+      stop()
+      stopPorts()
     }
   }, [drums])
 
@@ -776,7 +776,7 @@ function StepEditor({
   )
 }
 
-function light(outputs: MIDIOutput[], pitch: number, velocity: number) {
+function light(outputs: { send: (data: number[]) => void }[], pitch: number, velocity: number) {
   const status = velocity > 0 ? 0x90 : 0x80
   for (const output of outputs) {
     try { output.send([status, pitch & 127, velocity]) } catch { /* port closed */ }

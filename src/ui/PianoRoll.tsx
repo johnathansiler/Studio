@@ -203,55 +203,8 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     }
   }, [clip?.id])
 
-  const midiRef = useRef<MIDIAccess | null>(null)
   const scale = store.scaleState()
   const roll = store.project.roll ?? defaultRoll()
-
-  useEffect(() => {
-    if (!navigator.requestMIDIAccess) return
-    let dead = false
-    const held = new Map<number, number>()
-    void navigator.requestMIDIAccess().then((access) => {
-      if (dead) return
-      midiRef.current = access
-      const bind = () => {
-        for (const input of access.inputs.values()) {
-          input.onmidimessage = (event) => {
-            const data = event.data
-            if (!data || data.length < 3) return
-            const status = data[0] & 0xf0
-            const pitch = data[1]
-            const velocity = data[2]
-            const on = status === 0x90 && velocity > 0
-            const off = status === 0x80 || (status === 0x90 && velocity === 0)
-            if (!on && !off) return
-            const id = 3000 + pitch
-            const stamp = { timeStamp: event.timeStamp }
-            if (on) {
-              if (held.has(pitch)) return
-              held.set(pitch, id)
-              playKey.current(pitch, stamp, id, true, velocity / 127)
-            } else if (held.has(pitch)) {
-              held.delete(pitch)
-              playKey.current(pitch, stamp, id, false)
-            }
-          }
-        }
-      }
-      bind()
-      access.onstatechange = bind
-    }).catch(() => undefined)
-    return () => {
-      dead = true
-      const now = performance.now()
-      for (const [pitch, id] of held) playKey.current(pitch, { timeStamp: now }, id, false)
-      held.clear()
-      const access = midiRef.current
-      if (!access) return
-      access.onstatechange = null
-      for (const input of access.inputs.values()) input.onmidimessage = null
-    }
-  }, [])
 
   playKey.current = (pitch, event, pointerId, on, velocity = 0.8) => {
     if (!track || !clip) return

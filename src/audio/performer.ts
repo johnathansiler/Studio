@@ -1,3 +1,4 @@
+import { rememberPlayed } from '../midi/remember'
 import type { AudioEngine } from './engine'
 import { heardBeat, midiPerformanceMs, quantizeBeat, repeatIntervalBeats, repeatIntervalSeconds, type RepeatRate } from '../model/midiClock'
 import { snapPitch, type ScaleId } from '../model/scale'
@@ -262,6 +263,7 @@ export class Performer {
     if (this.recording()) this.commit(target, notes, this.recordMode, this.fixedBeats)
     else {
       this.recent.push(...notes)
+      rememberPlayed(target.trackId, notes)
       if (this.recent.length > 256) this.recent.splice(0, this.recent.length - 256)
     }
   }

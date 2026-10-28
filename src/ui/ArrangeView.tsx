@@ -407,8 +407,8 @@ export function ArrangeView({
               <button className={`mini ${track.solo ? 'on-s' : ''}`} onClick={() => store.updateTrack(track.id, { solo: !track.solo })}>
                 S
               </button>
-              {track.type === 'audio' && (
-                <button className={`mini ${track.armed ? 'on-r' : ''}`} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
+              {(track.type === 'audio' || track.type === 'midi') && (
+                <button className={`mini ${track.armed ? 'on-r' : ''}`} title="Arm this track so record prints its input" onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
                   R
                 </button>
               )}
