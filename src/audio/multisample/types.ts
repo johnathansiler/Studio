@@ -108,6 +108,18 @@ export interface SamplerProgram {
   gainDb: number
   /** Polyphony cap. */
   voices: number
+  /** Live overrides for the instrument panel. Absent keeps each zone's own envelope. */
+  play?: InstrumentPlay
+}
+
+/** Knobs on a sampled instrument. Times are seconds. `tune` is semitones. `tone` is a lowpass in Hz. */
+export interface InstrumentPlay {
+  tune: number
+  attack: number
+  decay: number
+  sustain: number
+  release: number
+  tone: number
 }
 
 export interface DecodedSample {

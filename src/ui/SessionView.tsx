@@ -34,24 +34,28 @@ export function SessionView({
   store,
   engine,
   onDropAudio,
+  onOpenPiano,
 }: {
   store: ProjectStore
   engine: AudioEngine
   /** Kept so recording stays on the transport. Slot clicks do not start a take. */
   onRecord: () => void
   onDropAudio: (trackId: string, scene: number, file: File) => void
+  onOpenPiano?: (trackId: string) => void
 }) {
-  return <SessionBody key={store.project.id} store={store} engine={engine} onDropAudio={onDropAudio} />
+  return <SessionBody key={store.project.id} store={store} engine={engine} onDropAudio={onDropAudio} onOpenPiano={onOpenPiano} />
 }
 
 function SessionBody({
   store,
   engine,
   onDropAudio,
+  onOpenPiano,
 }: {
   store: ProjectStore
   engine: AudioEngine
   onDropAudio: (trackId: string, scene: number, file: File) => void
+  onOpenPiano?: (trackId: string) => void
 }) {
   const grid = selectSession(store)
   const phone = useFormFactor() === 'phone'
@@ -60,7 +64,10 @@ function SessionBody({
   const [detailOn, setDetailOn] = useState(panes.detail)
   const [mixerOn, setMixerOn] = useState(panes.mixer)
   const [browserW, setBrowserW] = useState(220)
-  const [detailH, setDetailH] = useState(360)
+  const [detailH, setDetailH] = useState(240)
+  const clipScroll = useRef<HTMLDivElement>(null)
+  const mixScroll = useRef<HTMLDivElement>(null)
+  const scrollLock = useRef(false)
   const [levels, setLevels] = useState<{ master: number; tracks: Record<string, number> }>({ master: 0, tracks: {} })
   const [now, setNow] = useState(() => engine.currentTimelineSample())
   const clickTimer = useRef(0)
@@ -72,9 +79,13 @@ function SessionBody({
   const pane = !phone ? 'grid' : browserOn ? 'browser' : detailOn ? 'detail' : 'grid'
   const rolling = engine.status === 'playing' || engine.status === 'recording' || engine.status === 'counting-in'
   const stopping = Object.keys(store.stopAt).length > 0
-  const rows = mixerOn
-    ? `var(--sl-head) repeat(${SESSION_SCENES}, var(--sl-slot)) var(--sl-stop) minmax(248px, auto)`
-    : `var(--sl-head) repeat(${SESSION_SCENES}, var(--sl-slot)) var(--sl-stop)`
+  const rows = `var(--sl-head) repeat(${SESSION_SCENES}, var(--sl-slot)) var(--sl-stop)`
+  function syncScroll(source: HTMLDivElement, other: HTMLDivElement | null) {
+    if (!other || scrollLock.current || other.scrollLeft === source.scrollLeft) return
+    scrollLock.current = true
+    other.scrollLeft = source.scrollLeft
+    scrollLock.current = false
+  }
 
   useEffect(() => {
     const next = sessionPanes(phone)
@@ -230,28 +241,28 @@ function SessionBody({
         <div className="sl-stage">
           <div
             className="sl-scroller"
+            ref={clipScroll}
             style={{ ['--sl-rows' as string]: rows }}
+            onScroll={(event) => syncScroll(event.currentTarget, mixScroll.current)}
             onPointerDown={(event) => {
               const target = event.target as HTMLElement
               if (target.closest('.slot, button, input, select, .sl-head')) return
               store.clearSessionSelection()
             }}
           >
-            {tracks.map((track, index) => (
+            {tracks.map((track) => (
               <TrackColumn
                 key={track.id}
                 store={store}
                 engine={engine}
                 track={track}
-                index={index}
                 now={now}
-                level={levels.tracks[track.id] ?? 0}
-                mixer={mixerOn}
                 onBody={bodyClick}
                 onOpen={openSlot}
                 onLaunch={launchSlot}
                 onStop={() => stopTrack(track.id)}
                 onDrop={readDrop}
+                onOpenPiano={onOpenPiano}
               />
             ))}
             <div className="sl-scenes" aria-label="Scenes">
@@ -279,16 +290,21 @@ function SessionBody({
               <button type="button" className="sl-stopall" title="Stop every clip on the next grid line. The transport keeps playing." onClick={() => store.stopSession(engine.currentTimelineSample(), rolling)}>
                 {stopping ? 'Stopping' : 'Stop all'}
               </button>
-              {mixerOn && (
-                <div className="sl-mix sl-master">
-                  <div className="sl-fader">
-                    <input aria-label="Master volume" title="Master volume." type="range" min={0} max={1.25} step={0.01} value={grid.project.masterVolume} onChange={(event) => store.setMasterVolume(Number(event.target.value))} />
-                    <div className="sl-meter" aria-hidden><i style={{ height: `${Math.min(100, levels.master * 140)}%` }} /></div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
+          {mixerOn && (
+            <div className="sl-mixline" ref={mixScroll} onScroll={(event) => syncScroll(event.currentTarget, clipScroll.current)}>
+              {tracks.map((track, index) => (
+                <TrackMix key={track.id} store={store} track={track} index={index} level={levels.tracks[track.id] ?? 0} />
+              ))}
+              <div className="sl-mix sl-master" data-mixer="master">
+                <div className="sl-fader">
+                  <input aria-label="Master volume" title="Master volume." type="range" min={0} max={1.25} step={0.01} value={grid.project.masterVolume} onChange={(event) => store.setMasterVolume(Number(event.target.value))} />
+                  <div className="sl-meter" aria-hidden><i style={{ height: `${Math.min(100, levels.master * 140)}%` }} /></div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
         {detailOn && (
           <SessionDetail
@@ -310,52 +326,57 @@ function TrackColumn({
   store,
   engine,
   track,
-  index,
   now,
-  level,
-  mixer,
   onBody,
   onOpen,
   onLaunch,
   onStop,
   onDrop,
+  onOpenPiano,
 }: {
   store: ProjectStore
   engine: AudioEngine
   track: Track
-  index: number
   now: number
-  level: number
-  mixer: boolean
   onBody: (track: Track, scene: number, additive?: boolean) => void
   onOpen: (track: Track, scene: number) => void
   onLaunch: (track: Track, scene: number) => void
   onStop: () => void
   onDrop: (event: DragEvent, target: SessionTarget) => void
+  onOpenPiano?: (trackId: string) => void
 }) {
   const project = store.project
   const playingId = store.launched[track.id]
   const trackLive = !!playingId
-  const buses = project.tracks.filter((item) => item.type === 'bus')
   const names = Array.from({ length: SESSION_SCENES }, (_, scene) => sceneClip(track, scene)?.name ?? null)
   const labels = slotLabels(names)
   const slotTarget = (scene: number): SessionTarget => ({ kind: 'slot', trackId: track.id, scene, trackType: track.type })
   const headTarget: SessionTarget = { kind: 'header', trackId: track.id, trackType: track.type }
   return (
     <div className="session-col sl-col" data-track={track.id}>
-      <button
-        type="button"
+      <div
         className="sl-head"
         data-session-head={track.id}
         data-track-type={track.type}
         style={{ background: track.color }}
         title={track.name}
-        onClick={() => store.selectTrack(track.id)}
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => onDrop(event, headTarget)}
       >
-        <span>{track.name}</span>
-      </button>
+        <button type="button" className="sl-name" onClick={() => store.selectTrack(track.id)}>{track.name}</button>
+        {track.type === 'midi' && onOpenPiano && (
+          <button
+            type="button"
+            className="piano-open"
+            data-piano={track.id}
+            aria-label="Piano roll"
+            title="Piano roll"
+            onClick={(event) => { event.stopPropagation(); onOpenPiano(track.id) }}
+          >
+            <span>Roll</span>
+          </button>
+        )}
+      </div>
       {Array.from({ length: SESSION_SCENES }, (_, scene) => {
         const clip = sceneClip(track, scene)
         const hand = store.handoff[track.id]
@@ -462,56 +483,60 @@ function TrackColumn({
       >
         <i className="sl-sq" />
       </button>
-      {mixer && (
-        <div className="sl-mix" data-mixer={track.id}>
-          <div className="sl-fader">
-            <input aria-label={`${track.name} volume`} title="Volume." type="range" min={0} max={1.25} step={0.01} value={track.volume} onChange={(event) => store.updateTrack(track.id, { volume: Number(event.target.value) })} />
-            <div className="sl-meter" aria-hidden><i style={{ height: `${Math.min(100, level * 160)}%` }} /></div>
-          </div>
-          <label className="sl-pan">
-            Pan
-            <input aria-label={`${track.name} pan`} title="Pan." type="range" min={-1} max={1} step={0.01} value={track.pan} onChange={(event) => store.updateTrack(track.id, { pan: Number(event.target.value) })} />
-          </label>
-          <div className="sl-flags">
-            <button type="button" className={track.mute ? 'mute on' : ''} title="Activator. Turn the track on or off." onClick={() => store.updateTrack(track.id, { mute: !track.mute })}>{index + 1}</button>
-            <button type="button" className={track.solo ? 'on' : ''} title="Solo this track." onClick={() => store.updateTrack(track.id, { solo: !track.solo })}>S</button>
-            <button type="button" className={track.armed ? 'arm on' : ''} title="Arm this track for recording." onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>R</button>
-          </div>
-          <div className="sl-sends">
-            {[0, 1].map((sendIndex) => {
-              const bus = buses[sendIndex]
-              const send = bus ? track.sends.find((item) => item.busId === bus.id) : undefined
-              const letter = String.fromCharCode(65 + sendIndex)
-              return (
-                <label key={letter}>
-                  {letter}
-                  <input
-                    aria-label={`${track.name} send ${letter}`}
-                    title={bus ? `Send to ${bus.name}.` : 'Adds a return and sends this track to it.'}
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={send?.gain ?? 0}
-                    onChange={(event) => {
-                      const gain = Number(event.target.value)
-                      let target: Track | undefined = bus
-                      if (!target) {
-                        store.addTrack('bus')
-                        target = store.project.tracks.filter((item) => item.type === 'bus').at(-1)
-                      }
-                      if (!target) return
-                      if (!track.sends.some((item) => item.busId === target!.id)) store.addSend(track.id, target.id)
-                      const next = store.track(track.id)?.sends.find((item) => item.busId === target!.id)
-                      if (next) store.updateSend(track.id, next.id, { gain })
-                    }}
-                  />
-                </label>
-              )
-            })}
-          </div>
-        </div>
-      )}
+    </div>
+  )
+}
+
+function TrackMix({ store, track, index, level }: { store: ProjectStore; track: Track; index: number; level: number }) {
+  const buses = store.project.tracks.filter((item) => item.type === 'bus')
+  return (
+    <div className="sl-mix" data-mixer={track.id}>
+      <div className="sl-fader">
+        <input aria-label={`${track.name} volume`} title="Volume." type="range" min={0} max={1.25} step={0.01} value={track.volume} onChange={(event) => store.updateTrack(track.id, { volume: Number(event.target.value) })} />
+        <div className="sl-meter" aria-hidden><i style={{ height: `${Math.min(100, level * 160)}%` }} /></div>
+      </div>
+      <label className="sl-pan">
+        Pan
+        <input aria-label={`${track.name} pan`} title="Pan." type="range" min={-1} max={1} step={0.01} value={track.pan} onChange={(event) => store.updateTrack(track.id, { pan: Number(event.target.value) })} />
+      </label>
+      <div className="sl-flags">
+        <button type="button" className={track.mute ? 'mute on' : ''} title="Activator. Turn the track on or off." onClick={() => store.updateTrack(track.id, { mute: !track.mute })}>{index + 1}</button>
+        <button type="button" className={track.solo ? 'on' : ''} title="Solo this track." onClick={() => store.updateTrack(track.id, { solo: !track.solo })}>S</button>
+        <button type="button" className={track.armed ? 'arm on' : ''} title="Arm this track for recording." onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>R</button>
+      </div>
+      <div className="sl-sends">
+        {[0, 1].map((sendIndex) => {
+          const bus = buses[sendIndex]
+          const send = bus ? track.sends.find((item) => item.busId === bus.id) : undefined
+          const letter = String.fromCharCode(65 + sendIndex)
+          return (
+            <label key={letter}>
+              {letter}
+              <input
+                aria-label={`${track.name} send ${letter}`}
+                title={bus ? `Send to ${bus.name}.` : 'Adds a return and sends this track to it.'}
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={send?.gain ?? 0}
+                onChange={(event) => {
+                  const gain = Number(event.target.value)
+                  let target: Track | undefined = bus
+                  if (!target) {
+                    store.addTrack('bus')
+                    target = store.project.tracks.filter((item) => item.type === 'bus').at(-1)
+                  }
+                  if (!target) return
+                  if (!track.sends.some((item) => item.busId === target!.id)) store.addSend(track.id, target.id)
+                  const next = store.track(track.id)?.sends.find((item) => item.busId === target!.id)
+                  if (next) store.updateSend(track.id, next.id, { gain })
+                }}
+              />
+            </label>
+          )
+        })}
+      </div>
     </div>
   )
 }

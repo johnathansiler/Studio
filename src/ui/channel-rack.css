@@ -362,6 +362,9 @@
 .rack-ruler {
   margin-bottom: 0;
 }
+.rack-ruler .rack-steps { position: relative; min-height: 40px; }
+.rack-ruler .loop-host { position: absolute; inset: 0; overflow: hidden; }
+.shell.phone .rack-ruler .rack-steps { min-height: 44px; }
 
 .rack-ruler .rack-lead {
   height: 16px;

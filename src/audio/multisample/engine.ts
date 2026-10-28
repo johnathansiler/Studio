@@ -72,6 +72,8 @@ export class SamplerInstrument {
   private voiceLimit = 32
   private left = new Float32Array(0)
   private right = new Float32Array(0)
+  private toneL = 0
+  private toneR = 0
   private readonly bank: SampleBank
 
   constructor(
@@ -314,8 +316,18 @@ export class SamplerInstrument {
         }
         if (stepped.done && voice.stage === 'release' && voice.env < 0.001) voice.active = false
       }
-      this.left[i] = soft(left)
-      this.right[i] = soft(right)
+      const tone = this.currentProgram?.play?.tone
+      let outL = left
+      let outR = right
+      if (tone != null && tone < 17000) {
+        const coeff = 1 - Math.exp((-2 * Math.PI * Math.min(tone, sr * 0.45)) / sr)
+        this.toneL += (left - this.toneL) * coeff
+        this.toneR += (right - this.toneR) * coeff
+        outL = this.toneL
+        outR = this.toneR
+      }
+      this.left[i] = soft(outL)
+      this.right[i] = soft(outR)
     }
     this.voices.splice(0, this.voices.length, ...this.voices.filter((voice) => voice.active))
     return [this.left, this.right]
@@ -332,12 +344,19 @@ export class SamplerInstrument {
     }
     const room = Math.max(1, this.voiceLimit)
     for (const layer of layers) {
-      while (this.voices.filter((voice) => voice.active).length >= room) {
-        const victim = [...this.voices].filter((voice) => voice.active).sort((a, b) => b.age - a.age)[0]
+      while (this.voices.filter((voice) => voice.active && !voice.released).length >= room) {
+        const victim = [...this.voices].filter((voice) => voice.active && !voice.released).sort((a, b) => b.age - a.age)[0]
         if (!victim) break
-        victim.active = false
+        victim.released = true
+        victim.stage = 'release'
+        victim.release = Math.min(victim.release > 0 ? victim.release : 0.03, 0.012)
       }
       const zone = layer.zone
+      const play = this.currentProgram?.play
+      const attack = play ? play.attack : zone.ampeg.attack
+      const decay = play ? play.decay : zone.ampeg.decay
+      const sustain = play ? play.sustain : zone.ampeg.sustain
+      const release = Math.max(0.005, play ? play.release : zone.ampeg.release)
       const ref = layer.sample
       const stream = openStream(this.bank, ref)
       const audio = stream ? null : this.bank.get(ref)
@@ -354,11 +373,11 @@ export class SamplerInstrument {
         age: 0,
         exclusive: zone.exclusive,
         offBy: zone.offBy,
-        env: zone.ampeg.attack <= 0 ? 1 : 0,
-        stage: zone.ampeg.attack <= 0 ? (zone.ampeg.hold > 0 ? 'hold' : zone.ampeg.decay > 0 ? 'decay' : 'sustain') : 'attack',
-        holdLeft: Math.round(zone.ampeg.hold * this.sampleRate),
+        env: attack <= 0 ? 1 : 0,
+        stage: attack <= 0 ? (zone.ampeg.hold > 0 && !play ? 'hold' : decay > 0 ? 'decay' : 'sustain') : 'attack',
+        holdLeft: Math.round((play ? 0 : zone.ampeg.hold) * this.sampleRate),
         pos: Math.max(0, zone.offset),
-        tune: layer.tuneRatio,
+        tune: layer.tuneRatio * (play?.tune ? 2 ** (play.tune / 12) : 1),
         gain: dbToAmp(zone.gainDb),
         pan: zone.pan,
         micId: zone.mic,
@@ -368,10 +387,10 @@ export class SamplerInstrument {
         loopEnd,
         fade,
         end: zone.end,
-        attack: Math.max(0, zone.ampeg.attack),
-        decay: Math.max(0, zone.ampeg.decay),
-        sustain: clamp(zone.ampeg.sustain, 0, 1),
-        release: Math.max(0.005, zone.ampeg.release),
+        attack: Math.max(0, attack),
+        decay: Math.max(0, decay),
+        sustain: clamp(sustain, 0, 1),
+        release,
         audio,
         stream,
         ref,

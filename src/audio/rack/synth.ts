@@ -24,6 +24,8 @@ export interface PlayVoice {
   glideFrom: number
   released: boolean
   active: boolean
+  /** Short release in milliseconds when a voice is stolen. Absent uses the patch release. */
+  releaseMs?: number
   synth: Record<string, SynthState>
 }
 
@@ -114,7 +116,7 @@ function analog(ctx: ToneCtx) {
   for (const voice of ctx.voices) {
     if (!voice.active) continue
     const state = voiceState(voice, ctx.deviceId)
-    state.env[0] = envelope(state.env[0], voice.released, p.attack, p.decay, p.sustain, p.release, sr)
+    state.env[0] = envelope(state.env[0], voice.released, p.attack, p.decay, p.sustain, voice.releaseMs ?? p.release, sr)
     state.env[1] = envelope(state.env[1], voice.released, p.fattack, p.fdecay, p.fsustain, p.frelease, sr)
     state.env[2] = envelope(state.env[2], voice.released, p.mattack, p.mdecay, p.msustain, p.mrelease, sr)
     if (voice.released && state.env[0] < 0.0008) {
@@ -176,7 +178,7 @@ function wavetable(ctx: ToneCtx) {
   for (const voice of ctx.voices) {
     if (!voice.active) continue
     const state = voiceState(voice, ctx.deviceId)
-    state.env[0] = envelope(state.env[0], voice.released, p.attack, p.decay, p.sustain, p.release, sr)
+    state.env[0] = envelope(state.env[0], voice.released, p.attack, p.decay, p.sustain, voice.releaseMs ?? p.release, sr)
     if (voice.released && state.env[0] < 0.0008) {
       voice.active = false
       continue
@@ -219,7 +221,7 @@ function fm(ctx: ToneCtx) {
   for (const voice of ctx.voices) {
     if (!voice.active) continue
     const state = voiceState(voice, ctx.deviceId)
-    state.env[0] = envelope(state.env[0], voice.released, p.attack, p.decay, p.sustain, p.release, sr)
+    state.env[0] = envelope(state.env[0], voice.released, p.attack, p.decay, p.sustain, voice.releaseMs ?? p.release, sr)
     if (voice.released && state.env[0] < 0.0008) {
       voice.active = false
       continue

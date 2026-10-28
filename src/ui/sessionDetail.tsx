@@ -11,6 +11,7 @@ import { suggestKey } from '../theory'
 import { EDITOR_TOOLS, TOOL_INFO, activeTool, subscribeTools } from '../state/tools'
 import type { ProjectStore } from '../state/store'
 import { useFormFactor } from './form'
+import { SongLoopStrip } from './LoopRegion'
 import { PianoRoll, type PianoActions } from './PianoRoll'
 
 export function SessionDetail({
@@ -152,7 +153,10 @@ export function SessionDetail({
       ) : (
         <div className="sl-clipbody">
           {'bufferId' in clip ? (
-            <Waveform store={store} trackId={track.id} clip={clip} />
+            <>
+              <SongLoopStrip store={store} onSeek={(sample) => engine.seek(sample)} />
+              <Waveform store={store} trackId={track.id} clip={clip} />
+            </>
           ) : (
             <PianoRoll store={store} engine={engine} chrome={false} chordsOpen={chords} actionsRef={actions} />
           )}

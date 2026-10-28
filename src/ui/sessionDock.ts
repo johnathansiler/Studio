@@ -55,8 +55,10 @@ export function fittedDockWidth(viewport: number, requested: number, edge: 'righ
     const max = Math.min(520, Math.max(200, Math.floor(view * 0.45)))
     return Math.round(Math.min(max, Math.max(200, want)))
   }
-  const cap = Math.max(EDITOR_DOCK_MIN, Math.min(EDITOR_DOCK_MAX, Math.floor(view * 0.5), view - EDITOR_WORK_MIN))
-  return Math.round(Math.min(cap, Math.max(EDITOR_DOCK_MIN, want)))
+  const room = Math.max(160, view - EDITOR_WORK_MIN)
+  const cap = Math.min(EDITOR_DOCK_MAX, Math.floor(view * 0.5), room)
+  const floor = Math.min(EDITOR_DOCK_MIN, cap)
+  return Math.round(Math.min(cap, Math.max(floor, want)))
 }
 
 /** Piano, rack, and Scaler use the side dock. The call panel is the Collab tab and never this dock. */
