@@ -29,6 +29,7 @@ import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { loadScaleCatalog } from '../theory'
 import { AutoTuneFace, AutoTuneTrackButton } from '../ui/AutoTuneFace'
+import { InsertList, insertLabel } from '../ui/PluginSheet'
 
 const rate = 48000
 const major = [0, 2, 4, 5, 7, 9, 11]
@@ -124,6 +125,7 @@ describe('Auto-Tune insert', () => {
     store.addPlugin(vocal.id, 'tune')
     const plugin = store.track(vocal.id)!.plugins.at(-1)!
     expect(plugin.pluginId).toBe('tune')
+    expect(plugin.enabled).toBe(true)
     expect(plugin.params.amount).toBeGreaterThan(0.5)
     expect(plugin.params.root).toBe(-1)
     expect(plugin.params.scaleIndex).toBe(-1)
@@ -301,5 +303,95 @@ describe('Auto-Tune insert', () => {
     expect(css).toContain('.tune-resize')
     expect(css).toContain('.shell.phone .tune-board .side')
     expect(css).toContain('.keybed')
+    expect(css).toContain('.tune-board.graph .tune-graph')
+    expect(css).toContain('.bypass-toggle.lit')
+    expect(css).toContain('.tune-tools,\n.tune-actions { flex-wrap: wrap; }')
+    expect(css).toContain('.shell.phone .tune-notes')
+  })
+
+  it('starts active and opens from one strip click', () => {
+    const store = new ProjectStore(createEmptyProject())
+    const vocal = store.project.tracks.find((track) => track.name === 'Vocal')!
+    store.addPlugin(vocal.id, 'tune')
+    const plugin = store.track(vocal.id)!.plugins.at(-1)!
+    expect(plugin.enabled).toBe(true)
+    expect(insertLabel('tune')).toBe('Tune')
+    expect(insertLabel('eq')).toBe('EQ')
+    const song = tuneScaleOf(store.scaleState())
+    const html = renderToStaticMarkup(createElement(AutoTuneFace, {
+      values: plugin.params,
+      trace: null,
+      revision: 0,
+      enabled: plugin.enabled,
+      projectKey: song.note,
+      projectScale: song.scaleName,
+      projectRoot: song.root,
+      projectIntervals: song.intervals,
+      onChange: () => undefined,
+      onPreset: () => undefined,
+      onBypass: () => undefined,
+    }))
+    expect(html).toContain('data-bypass="off"')
+    expect(html).toContain('>Bypass<')
+    expect(html).not.toContain('>Bypassed<')
+    expect(html).not.toContain('bypass-toggle lit')
+    const bypassed = renderToStaticMarkup(createElement(AutoTuneFace, {
+      values: plugin.params,
+      trace: null,
+      revision: 0,
+      enabled: false,
+      projectKey: song.note,
+      projectScale: song.scaleName,
+      onChange: () => undefined,
+      onPreset: () => undefined,
+      onBypass: () => undefined,
+    }))
+    expect(bypassed).toContain('data-bypass="on"')
+    expect(bypassed).toContain('bypass-toggle lit')
+    expect(bypassed).toContain('>Bypassed<')
+    const button = findButton(InsertList({ store, trackId: vocal.id }), 'Tune')
+    expect(button.props.children).toBe('Tune')
+    expect(button.props['aria-label']).toContain('Auto-Tune')
+    expect(button.props.onPointerDown).toBeUndefined()
+    button.props.onClick()
+    expect(store.pluginFocus).toEqual({ trackId: vocal.id, pluginId: plugin.id })
+    expect(store.track(vocal.id)!.plugins.find((item) => item.id === plugin.id)!.enabled).toBe(true)
+    button.props.onDoubleClick()
+    expect(store.track(vocal.id)!.plugins.find((item) => item.id === plugin.id)!.enabled).toBe(false)
+    store.undo()
+    expect(store.track(vocal.id)!.plugins.find((item) => item.id === plugin.id)!.enabled).toBe(true)
+    store.redo()
+    expect(store.track(vocal.id)!.plugins.find((item) => item.id === plugin.id)!.enabled).toBe(false)
+    store.undo()
+    store.updatePlugin(vocal.id, plugin.id, { enabled: false })
+    expect(store.track(vocal.id)!.plugins.find((item) => item.id === plugin.id)!.enabled).toBe(false)
+    store.undo()
+    expect(store.track(vocal.id)!.plugins.find((item) => item.id === plugin.id)!.enabled).toBe(true)
   })
 })
+
+function findButton(node: unknown, label: string): { props: { children: string; onClick: () => void; onDoubleClick: () => void; onPointerDown?: (event: { button: number; stopPropagation: () => void }) => void; 'aria-label': string } } {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      try {
+        return findButton(child, label)
+      } catch {
+        /* keep looking */
+      }
+    }
+    throw new Error(`missing ${label} button`)
+  }
+  if (!node || typeof node !== 'object') throw new Error(`missing ${label} button`)
+  const element = node as { props?: { children?: unknown; onClick?: () => void } }
+  const children = element.props?.children
+  if (children === label && element.props?.onClick) return element as never
+  const list = Array.isArray(children) ? children : children ? [children] : []
+  for (const child of list) {
+    try {
+      return findButton(child, label)
+    } catch {
+      /* keep looking */
+    }
+  }
+  throw new Error(`missing ${label} button`)
+}

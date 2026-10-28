@@ -1,9 +1,19 @@
+import { wantsLibrary } from '../../instruments/scaler/model'
 import type { Project, Track } from '../../model/types'
 import type { StripNodes } from '../strips'
 import { SampleCache } from './cache'
 import { SamplerInstrument, renderSampler, type SamplerNote } from './engine'
 import { isPackAsset, packFromAsset } from './persist'
-import type { SamplePack } from './types'
+import type { SamplePack, SampleRef } from './types'
+
+type FetchLike = (input: string, init?: { headers?: Record<string, string> }) => Promise<Response>
+
+export interface PrepareResult {
+  /** Notes whose attack samples all failed. */
+  missing: number
+  /** Notes that selected at least one attack sample. */
+  sounding: number
+}
 
 interface Queued {
   pitch: number
@@ -22,17 +32,19 @@ interface Live {
 
 /**
  * Plays library tracks on the instrument strip.
- * The worklet rack is left alone; this host only takes notes for `instrument === 'library'`.
+ * The worklet rack is left alone. Notes play here for a library instrument, or for Scaler when its sound is Library.
  */
 export class LibraryHost {
   private readonly lives = new Map<string, Live>()
   private readonly pending = new Map<string, Queued[]>()
 
+  constructor(private readonly fetchImpl?: FetchLike) {}
+
   sync(ctx: AudioContext, project: Project, strips: Map<string, StripNodes>, assetOf: (id: string) => { id: string; name?: string; sampleRate: number; channels: Float32Array[] } | undefined) {
     const phone = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
     for (const track of project.tracks) {
-      if (track.type !== 'midi' || track.instrument !== 'library' || !track.library) {
-        if (track.instrument !== 'library') this.drop(track.id)
+      if (track.type !== 'midi' || !wantsLibrary(track) || !track.library) {
+        if (!wantsLibrary(track)) this.drop(track.id)
         continue
       }
       const strip = strips.get(track.id)
@@ -67,6 +79,21 @@ export class LibraryHost {
     live.notes.sort((a, b) => a.time - b.time)
   }
 
+  /** Drop a pitch's queued notes and release it, so a new chord does not leave the old one held. */
+  release(trackId: string, pitch: number, time: number) {
+    const midi = Math.round(pitch)
+    const live = this.lives.get(trackId)
+    if (!live) {
+      const queue = (this.pending.get(trackId) ?? []).filter((note) => note.pitch !== midi)
+      queue.push({ pitch: midi, vel: 0, time })
+      this.pending.set(trackId, queue)
+      return
+    }
+    live.notes = live.notes.filter((note) => note.pitch !== midi)
+    live.notes.push({ pitch: midi, vel: 0, time })
+    live.notes.sort((a, b) => a.time - b.time)
+  }
+
   holdPack(trackId: string, pack: SamplePack) {
     this.ensure(trackId, 48000).cache.holdPack(pack)
   }
@@ -76,25 +103,42 @@ export class LibraryHost {
     for (const sample of samples) cache.holdAudio(sample.id, { sampleRate: sample.sampleRate, channels: sample.channels })
   }
 
-  async prepare(trackId: string, track: Track, events: SamplerNote[], sampleRate: number) {
+  /**
+   * Load every sample the notes will actually play, including later round-robins.
+   * A note counts as missing only when none of its attack samples decode.
+   */
+  async prepare(trackId: string, track: Track, events: SamplerNote[], sampleRate: number): Promise<PrepareResult> {
     const program = track.library
-    if (!program) return
+    if (!program) return { missing: 0, sounding: 0 }
     const live = this.ensure(trackId, sampleRate)
-    live.instrument.setProgram(program)
-    const ids = new Set<string>()
-    for (const event of events) {
-      if (event.vel <= 0) continue
-      for (const layer of live.instrument.preview(event.pitch, event.vel)) ids.add(layer.sample.id)
+    if (live.instrument.program !== program) live.instrument.setProgram(program)
+    const planned = live.instrument.plan(events)
+    const sounding = planned.length
+    const samples = new Map<string, SampleRef>()
+    for (const note of planned) {
+      for (const sample of note.samples) samples.set(sample.id, sample)
     }
-    await Promise.all([...ids].map(async (id) => {
-      const sample = program.samples.find((item) => item.id === id)
-      if (!sample?.url) return
+    const failed = new Set<string>()
+    await Promise.all([...samples.values()].map(async (sample) => {
+      if (!sample.url) {
+        const held = live.cache.get(sample)
+        if (held?.channels.some((channel) => channel.length > 0)) return
+        if (sample.bufferId || sample.packId) return
+        failed.add(sample.id)
+        return
+      }
       try {
-        await live.cache.load(sample)
+        const decoded = await live.cache.load(sample)
+        if (!decoded?.channels.some((channel) => channel.length > 0)) failed.add(sample.id)
       } catch {
-        /* a missing starter file stays silent */
+        failed.add(sample.id)
       }
     }))
+    let missing = 0
+    for (const note of planned) {
+      if (note.attackIds.length > 0 && note.attackIds.every((id) => failed.has(id))) missing += 1
+    }
+    return { missing, sounding }
   }
 
   renderOffline(trackId: string, track: Track, events: SamplerNote[], sampleRate: number, length: number) {
@@ -120,7 +164,7 @@ export class LibraryHost {
       }
       return found
     }
-    const cache = new SampleCache()
+    const cache = new SampleCache(this.fetchImpl)
     const live: Live = {
       instrument: new SamplerInstrument(sampleRate, cache),
       cache,

@@ -216,6 +216,15 @@ export function peaks(channel: Float32Array, buckets: number) {
   return out
 }
 
+/** Min/max per column, scaled so the loudest sample fills the waveform. */
+export function scaledPeaks(channel: Float32Array, buckets: number) {
+  const bars = peaks(channel, buckets)
+  let peak = 0
+  for (const bar of bars) peak = Math.max(peak, Math.abs(bar.min), bar.max)
+  if (peak < 1e-8) return bars
+  return bars.map((bar) => ({ min: bar.min / peak, max: bar.max / peak }))
+}
+
 /**
  * Play a region. Near the wrap, the tail fades into the sample that plays
  * next so a hard edit does not click. One-shot stops at the end.

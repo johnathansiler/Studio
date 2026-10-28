@@ -35,6 +35,9 @@ export class SampleCache implements SampleBank {
   private readonly packs = new Map<string, SamplePack>()
   private readonly inflight = new Map<string, Promise<DecodedSample | null>>()
   private readonly order: string[] = []
+  private readonly waiters: Array<() => void> = []
+  private active = 0
+  private readonly maxActive = 4
   private bytes = 0
 
   constructor(
@@ -80,31 +83,46 @@ export class SampleCache implements SampleBank {
   request(sample: SampleRef) {
     if (this.get(sample) || this.views.has(sample.id)) return
     if (sample.packId && this.packs.has(sample.packId)) return
-    if (!sample.url || this.inflight.has(sample.id)) return
-    const task = this.load(sample).catch(() => null)
-    this.inflight.set(sample.id, task)
-    void task.finally(() => {
-      if (this.inflight.get(sample.id) === task) this.inflight.delete(sample.id)
-    })
+    if (!sample.url) return
+    void this.load(sample).catch(() => undefined)
   }
 
   async load(sample: SampleRef): Promise<DecodedSample | null> {
     const ready = this.get(sample) ?? this.views.get(sample.id)
     if (ready) return ready
     if (!sample.url) return null
-    assertHuggingFaceUrl(sample.url)
-    const headers: Record<string, string> = {}
-    const ranged = sample.format !== 'wav' && sample.byteOffset != null && sample.byteLength != null && sample.byteLength > 0
-    if (ranged) headers.Range = `bytes=${sample.byteOffset}-${sample.byteOffset! + sample.byteLength! - 1}`
-    const response = await this.fetchImpl(sample.url, { headers })
-    if (!response.ok) throw new Error(`Sample download failed (${response.status})`)
-    let bytes = await response.arrayBuffer()
-    if (ranged && response.status === 200 && sample.byteOffset != null && sample.byteLength != null) {
-      bytes = bytes.slice(sample.byteOffset, sample.byteOffset + sample.byteLength)
+    const existing = this.inflight.get(sample.id)
+    if (existing) return existing
+    const task = this.fetchAndStore(sample)
+    this.inflight.set(sample.id, task)
+    try {
+      return await task
+    } finally {
+      if (this.inflight.get(sample.id) === task) this.inflight.delete(sample.id)
     }
-    const decoded = decodeSampleBytes(bytes, sample)
-    this.remember(sample.id, decoded)
-    return decoded
+  }
+
+  private async fetchAndStore(sample: SampleRef): Promise<DecodedSample | null> {
+    assertHuggingFaceUrl(sample.url)
+    if (this.active >= this.maxActive) await new Promise<void>((resolve) => this.waiters.push(resolve))
+    this.active += 1
+    try {
+      const headers: Record<string, string> = {}
+      const ranged = sample.format !== 'wav' && sample.byteOffset != null && sample.byteLength != null && sample.byteLength > 0
+      if (ranged) headers.Range = `bytes=${sample.byteOffset}-${sample.byteOffset! + sample.byteLength! - 1}`
+      const response = await this.fetchImpl(sample.url, { headers })
+      if (!response.ok) throw new Error(`Sample download failed (${response.status})`)
+      let bytes = await response.arrayBuffer()
+      if (ranged && response.status === 200 && sample.byteOffset != null && sample.byteLength != null) {
+        bytes = bytes.slice(sample.byteOffset, sample.byteOffset + sample.byteLength)
+      }
+      const decoded = decodeSampleBytes(bytes, sample)
+      this.remember(sample.id, decoded)
+      return decoded
+    } finally {
+      this.active -= 1
+      this.waiters.shift()?.()
+    }
   }
 
   holdAudio(id: string, sample: DecodedSample) {

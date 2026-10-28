@@ -44,8 +44,9 @@ export function SmartTempoBar({ store }: { store: ProjectStore }) {
   )
 }
 
-export function SongMapHead({ store, position }: { store: ProjectStore; position: number }) {
+export function SongMapHead({ store, position, compact = false }: { store: ProjectStore; position: number; compact?: boolean }) {
   const project = store.project
+  if (compact) return null
   const section = project.sections?.find((item) => item.id === store.sectionId) ?? null
   const point = (project.tempoMap ?? []).find((item) => store.tempoPointBeat != null && Math.abs(item.beat - store.tempoPointBeat) < 0.04)
   const meter = meterAtSample(project, position)

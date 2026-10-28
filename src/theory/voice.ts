@@ -29,8 +29,26 @@ export function voiceTones(tones: Tone[], options: VoiceOptions = {}): Tone[] {
   abs = recipe(abs, options.voicing ?? 'close')
   if (options.octave) abs = unique([...abs, Math.min(...abs) + 1200]).sort((a, b) => a - b)
   let voiced = abs.map(toneFromCents).filter((tone) => tone.midi >= 0 && tone.midi <= 127)
-  if (options.voiceLead && options.previous?.length) voiced = voiceLead(voiced, options.previous)
+  if (options.voiceLead && options.previous?.length) voiced = nearestRegister(voiced, options.previous)
   return voiced
+}
+
+/** Move a finished voicing by octaves. The bass and the spacing stay put. */
+function nearestRegister(target: Tone[], previous: Tone[]): Tone[] {
+  const prev = previous.map(absoluteCents)
+  const base = unique(target.map(absoluteCents).sort((a, b) => a - b))
+  let best = base
+  let bestCost = movementCents(base, prev)
+  for (const shift of [-2400, -1200, 1200, 2400]) {
+    const candidate = base.map((cents) => cents + shift)
+    if (candidate.some((cents) => cents < 0 || cents > 12700)) continue
+    const cost = movementCents(candidate, prev)
+    if (cost < bestCost) {
+      bestCost = cost
+      best = candidate
+    }
+  }
+  return best.map(toneFromCents)
 }
 
 /** Minimal motion from the previous chord. Common tones stay put. */

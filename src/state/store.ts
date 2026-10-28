@@ -25,6 +25,7 @@ import {
   trimSilence,
   type LoopTake,
 } from '../audio/sample/engine'
+import { assetFromClip, placeLooper, placeSampler, playbackChannel, readSlotPoints, type SlotPoints } from '../audio/sample/slot'
 import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
 import { findCycle, MASTER } from '../audio/routing'
 import { isPackAsset, packToAsset } from '../audio/multisample/persist'
@@ -60,11 +61,13 @@ import {
   trimLinkedAudio,
   trimLinkedMidi,
 } from '../model/mixGroups'
+import { channelRoute, mirrorTrackMix } from '../model/sharedMix'
 import { demoMidiNotes } from '../model/demo'
 import {
   clipById,
   dueFollow,
   followTarget,
+  overdubNotes,
   quantizeSample,
   retrigger,
   sceneClip,
@@ -73,7 +76,7 @@ import {
   type SessionClock,
   type TransportSlot,
 } from '../model/launch'
-import { stopPlan } from '../model/sessionSlots'
+import { handoffAfter, stopPlan, type SlotHandoff } from '../model/sessionSlots'
 import type { RollTool } from '../model/paint'
 import { defaultRoll } from '../model/paint'
 import type { GeneratedPart } from '../generators/types'
@@ -93,9 +96,13 @@ import {
   type QuantizeSettings,
 } from '../model/quantize'
 import { cloneOmni, emptyOmni, type OmniPatch } from '../instruments/patch'
+import { placeholderInstrumentName } from '../sounds/instruments'
 import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
-import { lockedTone, scaleIsMicrotonal } from '../theory/lock'
+import { clipFromNotes, recordOnto, rememberVoice } from '../instruments/scaler/clips'
+import { freshScaler, normalizeScaler, padPerformance, type ScalerState } from '../instruments/scaler/model'
+import type { ScalerPage } from '../instruments/scaler/types'
+import { lockedTone, scaleIsMicrotonal, suggestKey } from '../theory/lock'
 import { applyPatternLength, makeRackChannel, type RackChoice } from '../model/channelRack'
 import {
   clampSwing,
@@ -119,7 +126,7 @@ import {
   type ParsedMidi,
 } from '../model/midiTools'
 import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK_COLORS } from '../model/types'
-import type { AudioAsset, AudioClip, AutomationWriteMode, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, LiveCaptureSettings, MidiClip, MidiEditorPrefs, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, MixGroup, PluginInstance, Project, RecordSettings, SectionKind, TakeLane, Track } from '../model/types'
+import type { AudioAsset, AudioClip, AutomationWriteMode, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, LiveCaptureSettings, MidiClip, MidiEditorPrefs, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, MixGroup, PluginInstance, Project, RecordSettings, SectionKind, TakeLane, Track, TrackInstrument } from '../model/types'
 import { createSection, deleteSectionContents, duplicateSectionContents, moveSectionContents, resizeSection as setSectionLength, sectionKind } from '../model/sections'
 import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
 import { downbeatAt, projectBeatSample, projectSampleBeat, snapSampleToMap, tempoAtSample } from '../model/tempoMap'
@@ -127,7 +134,7 @@ import { beatsToSamples, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
 import { renderDrum, DRUM_PADS } from '../model/drums'
 import { isDrumTrack, clampRoll, DRUM_STEP, hitAt } from '../model/drumLanes'
-import { clearStep, normalizeMidiEditor, placeStep, tieHeld, type StepTone } from '../model/stepEntry'
+import { clearStep, editorState, normalizeMidiEditor, placeStep, tieHeld, writeRollPrefs, type StepTone } from '../model/stepEntry'
 import {
   chainSong,
   chopSample,
@@ -191,6 +198,8 @@ export class ProjectStore {
   selectedClipIds: string[] = []
   selectedMidiClipId: string | null
   selectedMidiClipIds: string[] = []
+  selectedPatternClipId: string | null = null
+  selectedPatternClipIds: string[] = []
   selectedNoteId: string | null
   selectedNoteIds: string[] = []
   view: WorkspaceView = 'arrange'
@@ -199,8 +208,12 @@ export class ProjectStore {
   launchGen: Record<string, number> = {}
   /** Quantized stop that has not reached its bar yet. The clip keeps playing until then. */
   stopAt: Record<string, number> = {}
+  /** Clip still audible on a track while the next launch waits for the grid. */
+  handoff: Record<string, SlotHandoff> = {}
   /** Armed empty slot for the next recording. */
   sessionSlot: { trackId: string; scene: number } | null = null
+  /** Timeline beat where the current slot recording started. Notes are stored relative to it. */
+  sessionRecordBeat: number | null = null
   sessionEdit: { trackId: string; scene: number } | null = null
   captureLog: { trackId: string; clipId: string; sample: number }[] = []
   pendingTransport: Record<string, unknown> | null = null
@@ -209,6 +222,10 @@ export class ProjectStore {
   /** Guests mirror the host arrangement and cannot edit it. */
   remoteFollow = false
   rackTrackId: string | null = null
+  /** Open Scaler panel. The plugin state itself is on the track. */
+  scalerTrackId: string | null = null
+  /** Which page of the open Scaler panel is showing. Not saved. */
+  scalerPage: ScalerPage = 'play'
   /** Open layered patch. Not saved; the patch itself is on the track. */
   patchTrackId: string | null = null
   rackFlip = false
@@ -222,6 +239,9 @@ export class ProjectStore {
   private tempoGroup = false
   toasts: Toast[] = []
   version = 0
+  /** Project edits since the last successful save. Selecting a track does not count. */
+  private editGeneration = 0
+  private savedGeneration = 0
   rowClipboard: StepCell[] | null = null
   private past: string[] = []
   private future: string[] = []
@@ -339,8 +359,22 @@ export class ProjectStore {
     this.quantizePreview = null
     this.drafted = false
     this.snapshot()
+    this.editGeneration += 1
     fn()
     this.emit()
+  }
+
+  hasUnsavedEdits() {
+    return this.editGeneration !== this.savedGeneration
+  }
+
+  /** Mark the project saved only when nothing newer landed while the write was in flight. */
+  markSaved(stamp = this.editGeneration) {
+    if (stamp === this.editGeneration) this.savedGeneration = stamp
+  }
+
+  editStamp() {
+    return this.editGeneration
   }
 
   /** One undo step for a drag. The first call snapshots; later calls only edit. */
@@ -349,6 +383,7 @@ export class ProjectStore {
     if (!this.drafted) {
       this.snapshot()
       this.drafted = true
+      this.editGeneration += 1
     }
     fn()
     this.emit()
@@ -391,8 +426,18 @@ export class ProjectStore {
   }
 
   setView(view: WorkspaceView) {
+    if (view !== 'beats' && this.view === 'beats') this.clearRackRoll()
     this.view = view
     this.emit()
+  }
+
+  /** Hide a piano roll that was opened from a channel row. */
+  private clearRackRoll() {
+    if (!this.selectedMidiClipId) return
+    const clip = this.project.tracks.flatMap((track) => track.midiClips).find((item) => item.id === this.selectedMidiClipId)
+    if (!clip?.channelId) return
+    this.selectedMidiClipId = null
+    this.selectedMidiClipIds = []
   }
 
   setTransportMode(mode: 'arrangement' | 'session') {
@@ -407,6 +452,28 @@ export class ProjectStore {
 
   selectClip(trackId: string, clipId: string | null, midi = false, openSheet = true, additive = false) {
     this.selectedTrackId = trackId
+    const patternHit = !!clipId && (this.project.patternClips ?? []).some((clip) => clip.id === clipId)
+    if (patternHit && clipId) {
+      this.selectedClipId = null
+      this.selectedClipIds = []
+      this.selectedMidiClipId = null
+      this.selectedMidiClipIds = []
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
+      this.clipSheet = false
+      if (additive) {
+        const has = this.selectedPatternClipIds.includes(clipId)
+        this.selectedPatternClipIds = has ? this.selectedPatternClipIds.filter((id) => id !== clipId) : [...this.selectedPatternClipIds, clipId]
+        this.selectedPatternClipId = this.selectedPatternClipIds.at(-1) ?? null
+      } else {
+        this.selectedPatternClipId = clipId
+        this.selectedPatternClipIds = [clipId]
+      }
+      this.emit()
+      return
+    }
+    this.selectedPatternClipId = null
+    this.selectedPatternClipIds = []
     if (midi) {
       this.selectedClipId = null
       this.selectedClipIds = []
@@ -449,10 +516,16 @@ export class ProjectStore {
   }
 
   selectRegion(audioIds: string[], midiIds: string[], trackId: string | null, additive = false) {
-    this.selectedClipIds = additive ? uniqueIds([...this.selectedClipIds, ...audioIds]) : audioIds
-    this.selectedMidiClipIds = additive ? uniqueIds([...this.selectedMidiClipIds, ...midiIds]) : midiIds
+    const known = new Set((this.project.patternClips ?? []).map((clip) => clip.id))
+    const patternIds = [...audioIds, ...midiIds].filter((id) => known.has(id))
+    const audio = audioIds.filter((id) => !known.has(id))
+    const midi = midiIds.filter((id) => !known.has(id))
+    this.selectedClipIds = additive ? uniqueIds([...this.selectedClipIds, ...audio]) : audio
+    this.selectedMidiClipIds = additive ? uniqueIds([...this.selectedMidiClipIds, ...midi]) : midi
+    this.selectedPatternClipIds = additive ? uniqueIds([...this.selectedPatternClipIds, ...patternIds]) : patternIds
     this.selectedClipId = this.selectedClipIds.at(-1) ?? null
     this.selectedMidiClipId = this.selectedMidiClipIds.at(-1) ?? null
+    this.selectedPatternClipId = this.selectedPatternClipIds.at(-1) ?? null
     if (trackId) this.selectedTrackId = trackId
     this.clipSheet = false
     this.emit()
@@ -616,6 +689,150 @@ export class ProjectStore {
 
   scaleState() {
     return normalizeScale(this.project.scale)
+  }
+
+  /** Put Scaler on a MIDI track, or make a new one, and open its panel. */
+  insertScaler(trackId?: string | null, page: ScalerPage = 'play'): string | null {
+    this.scalerPage = page
+    this.patchTrackId = null
+    const asked = trackId ? this.track(trackId) : undefined
+    const selected = this.selectedTrackId ? this.track(this.selectedTrackId) : undefined
+    const host = asked?.type === 'midi' ? asked : selected?.type === 'midi' ? selected : undefined
+    if (host) {
+      if (host.instrument === 'scaler') {
+        this.rackTrackId = null
+        this.scalerTrackId = host.id
+        this.emit()
+      } else this.setTrackInstrument(host.id, 'scaler')
+      return host.id
+    }
+    const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'scaler', input: 'mic', channels: 1, armed: false })
+    return ids[0] ?? null
+  }
+
+  setTrackInstrument(trackId: string, instrument: TrackInstrument) {
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return
+    this.mutate(() => {
+      const current = this.track(trackId)
+      if (!current || current.type !== 'midi') return
+      current.instrument = instrument
+      if (instrument === 'scaler') current.scaler = current.scaler ? normalizeScaler(current.scaler) : freshScaler(this.project)
+    })
+    if (instrument === 'scaler') {
+      this.rackTrackId = null
+      this.patchTrackId = null
+      this.scalerTrackId = trackId
+      this.emit()
+    } else if (this.scalerTrackId === trackId) {
+      this.scalerTrackId = null
+      this.emit()
+    }
+  }
+
+  openScaler(trackId: string, page?: ScalerPage) {
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return
+    if (page) this.scalerPage = page
+    if (track.instrument !== 'scaler') {
+      this.setTrackInstrument(trackId, 'scaler')
+      return
+    }
+    this.rackTrackId = null
+    this.patchTrackId = null
+    if (page || this.scalerTrackId !== trackId) {
+      this.scalerTrackId = trackId
+      this.emit()
+      return
+    }
+    this.scalerTrackId = null
+    this.emit()
+  }
+
+  closeScaler() {
+    if (!this.scalerTrackId) return
+    this.scalerTrackId = null
+    this.emit()
+  }
+
+  setScalerPage(page: ScalerPage) {
+    this.scalerPage = page
+    this.emit()
+  }
+
+  setScaler(trackId: string, patch: Partial<ScalerState>, draft = false) {
+    const run = () => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      track.instrument = 'scaler'
+      track.scaler = normalizeScaler({ ...normalizeScaler(track.scaler), ...patch })
+    }
+    if (draft) this.draft(run)
+    else this.mutate(run)
+  }
+
+  scalerPadNotes(trackId: string, index: number) {
+    const track = this.track(trackId)
+    if (!track?.scaler) return []
+    const span = Math.max(1, this.project.timeSignature?.numerator || 4)
+    return padPerformance(normalizeScaler(track.scaler), index, span)?.notes ?? []
+  }
+
+  detectScaler(trackId: string) {
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return false
+    const notes = track.midiClips.flatMap((clip) => clip.notes.filter((note) => !note.muted).map((note) => ({
+      midi: note.pitch,
+      cents: note.fine ?? 0,
+      weight: Math.max(0.05, note.durationBeats),
+    })))
+    if (notes.length < 3) return false
+    const found = suggestKey(notes)
+    this.setScaler(trackId, { root: found.root, scale: found.scale, library: found.library, snap: true, lastVoicing: [], lastCents: [] })
+    return true
+  }
+
+  /** Voice-leading memory. Not an undo step, so playing pads does not flood the journal. */
+  rememberScalerVoice(trackId: string, midi: number[], cents: number[]) {
+    const track = this.track(trackId)
+    if (!track) return
+    rememberVoice(track, midi, cents)
+    this.emit()
+  }
+
+  /** Drop a chord onto Arrange as its own MIDI clip. */
+  writeScalerClip(trackId: string, notes: { pitch: number; fine?: number; startBeat: number; durationBeats: number; velocity: number }[], startBeat: number, name: string) {
+    if (!notes.length) return null
+    let clipId: string | null = null
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      const clip = clipFromNotes(notes, startBeat, name)
+      track.midiClips.push(clip)
+      clipId = clip.id
+      this.selectedTrackId = track.id
+      this.selectedMidiClipId = clip.id
+      this.selectedMidiClipIds = [clip.id]
+      this.selectedNoteIds = clip.notes.map((note) => note.id)
+      this.selectedNoteId = clip.notes.at(-1)?.id ?? null
+    })
+    return clipId
+  }
+
+  /** Record a played pad onto this track's Scaler take. */
+  recordScalerChord(trackId: string, notes: { pitch: number; fine?: number; startBeat: number; durationBeats: number; velocity: number }[], startBeat: number) {
+    if (!notes.length) return null
+    let clipId: string | null = null
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      const clip = recordOnto(track, notes, startBeat)
+      clipId = clip.id
+      this.selectedTrackId = track.id
+      this.selectedMidiClipId = clip.id
+      this.selectedMidiClipIds = [clip.id]
+    })
+    return clipId
   }
 
   setScale(patch: Partial<ScaleState>) {
@@ -876,8 +1093,9 @@ export class ProjectStore {
     this.emit()
   }
 
-  setLoop(enabled: boolean, start?: number, end?: number) {
-    this.mutate(() => {
+  setLoop(enabled: boolean, start?: number, end?: number, drag = false) {
+    const run = (body: () => void) => (drag ? this.draft(body) : this.mutate(body))
+    run(() => {
       this.project.loopEnabled = enabled
       if (start != null) this.project.loopStartSample = Math.max(0, Math.round(start))
       if (end != null) this.project.loopEndSample = Math.max(this.project.loopStartSample + 1, Math.round(end))
@@ -900,8 +1118,15 @@ export class ProjectStore {
     const ids: string[] = []
     this.mutate(() => {
       const made = tracksFor(spec, this.project.tracks)
-      for (const track of made) if (track.type === 'midi') normalizeTrackRack(track)
+      for (const track of made) {
+        if (track.type === 'midi') normalizeTrackRack(track)
+        if (track.instrument === 'scaler') track.scaler = freshScaler(this.project)
+      }
       if (spec.kind === 'midi' && spec.instrument === 'library' && made[0]) this.rackTrackId = made[0].id
+      if (spec.kind === 'midi' && spec.instrument === 'scaler' && made[0]) {
+        this.scalerTrackId = made[0].id
+        this.rackTrackId = null
+      }
       const at = insertIndex(this.project.tracks, this.selectedTrackId)
       this.project.tracks.splice(at, 0, ...made)
       this.selectedTrackId = made[0]?.id ?? this.selectedTrackId
@@ -915,10 +1140,24 @@ export class ProjectStore {
     this.mutate(() => {
       const track = this.track(trackId)
       if (!track || track.type !== 'midi') return
+      if (track.instrument === 'scaler') {
+        track.library = program ?? undefined
+        track.scaler = normalizeScaler({ ...normalizeScaler(track.scaler), sound: 'library' })
+        return
+      }
+      this.titleLibrary(track, program)
       track.instrument = 'library'
       track.library = program ?? undefined
       if (!track.rack?.devices?.length) normalizeTrackRack(track)
     })
+  }
+
+  /** The header shows the track name. A placeholder becomes the instrument that just landed. */
+  private titleLibrary(track: Track, program: SamplerProgram | null | undefined) {
+    if (!program?.name) return
+    const previous = track.library?.name
+    if (!placeholderInstrumentName(track.name, previous)) return
+    track.name = program.name.slice(0, 64)
   }
 
   /** Same as setLibrary, and keep imported wavs and SoundFont packs in the project so they save. */
@@ -926,6 +1165,14 @@ export class ProjectStore {
     this.mutate(() => {
       const track = this.track(trackId)
       if (!track || track.type !== 'midi') return
+      if (track.instrument === 'scaler') {
+        track.library = program
+        track.scaler = normalizeScaler({ ...normalizeScaler(track.scaler), sound: 'library' })
+        for (const asset of assets) this.buffers.set(asset.id, asset)
+        if (pack) this.buffers.set(pack.id, packToAsset(pack))
+        return
+      }
+      this.titleLibrary(track, program)
       track.instrument = 'library'
       track.library = program
       for (const asset of assets) this.buffers.set(asset.id, asset)
@@ -1017,7 +1264,10 @@ export class ProjectStore {
       if (patch.mute != null) mixer.mute = patch.mute
       if (patch.solo != null) mixer.solo = patch.solo
       if (patch.soloSafe != null) mixer.soloSafe = patch.soloSafe
-      if (Object.keys(mixer).length) patchMixer(this.project, id, mixer)
+      if (Object.keys(mixer).length) {
+        patchMixer(this.project, id, mixer)
+        mirrorTrackMix(this.project, id)
+      }
       const rest: Partial<Track> = { ...patch }
       delete rest.volume
       delete rest.pan
@@ -1090,9 +1340,55 @@ export class ProjectStore {
       const plugin = this.instrument(trackId, pluginId)
       if (!plugin?.sampler) return
       plugin.sampler.bufferId = bufferId
-      const channel = this.buffers.get(bufferId)?.channels[0]
-      if (channel) plugin.sampler.root = detectRoot(channel, this.buffers.get(bufferId)?.sampleRate || this.project.sampleRate)
+      const asset = this.buffers.get(bufferId)
+      const channel = asset?.channels[0]
+      if (asset) plugin.sampler.sourceRate = asset.sampleRate
+      if (channel) plugin.sampler.root = detectRoot(channel, asset?.sampleRate || this.project.sampleRate)
     })
+  }
+
+  /** Put audio in a sampler or looper slot. Samples are stored as given, at their own rate. */
+  loadSlotAudio(trackId: string | 'master', pluginId: string, asset: AudioAsset, mode: 'replace' | 'overdub' = 'replace') {
+    this.mutate(() => {
+      const plugin = this.instrument(trackId, pluginId)
+      if (!plugin || !asset.channels[0]?.length) return
+      const copy: AudioAsset = {
+        id: asset.id || uid('smp'),
+        name: asset.name || 'Sample',
+        sampleRate: asset.sampleRate || this.project.sampleRate,
+        channels: asset.channels.map((channel) => Float32Array.from(channel)),
+      }
+      if (plugin.sampler) {
+        placeSampler(plugin.sampler, copy)
+        this.buffers.set(copy.id, copy)
+        return
+      }
+      if (!plugin.looper) return
+      const stored = placeLooper(plugin.looper, copy, mode, this.project)
+      this.buffers.set(stored.id, stored)
+      plugin.params = { ...plugin.params, transport: plugin.looper.transport }
+    })
+  }
+
+  /** Drag the waveform handles. One undo step covers a whole drag. */
+  setSlotPoints(trackId: string | 'master', pluginId: string, points: SlotPoints) {
+    this.draft(() => {
+      const plugin = this.instrument(trackId, pluginId)
+      const next = readSlotPoints(points)
+      if (plugin?.sampler) Object.assign(plugin.sampler, next)
+      if (plugin?.looper) Object.assign(plugin.looper, next)
+    })
+  }
+
+  /** Copy an arrange clip into the open slot without resampling it. */
+  sendClipToSlot(trackId: string | 'master', pluginId: string, clipTrackId: string, clipId: string) {
+    const clip = this.track(clipTrackId)?.clips.find((item) => item.id === clipId)
+    const asset = clip ? this.buffers.get(clip.bufferId) : undefined
+    if (!clip || !asset) return false
+    const region = assetFromClip(asset, clip, uid('smp'))
+    if (!region) return false
+    this.loadSlotAudio(trackId, pluginId, region, 'replace')
+    return true
   }
 
   editSample(trackId: string | 'master', pluginId: string, op: 'norm' | 'reverse' | 'trim' | 'fade' | 'snap') {
@@ -1146,7 +1442,8 @@ export class ProjectStore {
     })
   }
 
-  exportSlices(trackId: string | 'master', pluginId: string) {
+  exportSlices(trackId: string | 'master', pluginId: string, beat = 0) {
+    let placed = ''
     this.mutate(() => {
       const plugin = this.instrument(trackId, pluginId)
       const count = plugin?.sampler?.slices.length ?? 0
@@ -1154,14 +1451,19 @@ export class ProjectStore {
       const notes = slicesToNotes(count).map((note) => ({ ...note, id: uid('note') }))
       const host = this.project.tracks.find((track) => track.type === 'midi') ?? (trackId === 'master' ? null : this.track(trackId))
       if (!host) return
+      const startBeat = Math.max(0, beat)
+      const bar = Math.floor(startBeat / Math.max(1, this.project.timeSignature.numerator)) + 1
       host.midiClips.push({
         id: uid('midi'),
         name: 'Slices',
-        startBeat: 0,
+        startBeat,
         durationBeats: Math.max(1, notes.length * 0.25),
         notes,
       })
+      placed = `MIDI clip placed on ${host.name} at bar ${bar}`
     })
+    if (placed) this.toast(placed, 'good')
+    else this.toast('Slice the sample before placing MIDI.', 'warn')
   }
 
   armLooper(trackId: string | 'master', pluginId: string, transport: number, beat: number) {
@@ -1172,7 +1474,10 @@ export class ProjectStore {
       const beats = this.project.timeSignature.numerator
       looper.transport = transport
       looper.startBeat = transport >= 2 ? nextBar(beat, beats) : looper.startBeat
-      if (looper.sync) looper.lengthSamples = syncedLoopSamples(looper.bars, this.project.tempo, this.project.sampleRate, beats)
+      if (looper.sync) {
+        const rate = looper.sourceRate && looper.sourceRate > 0 ? looper.sourceRate : this.project.sampleRate
+        looper.lengthSamples = syncedLoopSamples(looper.bars, this.project.tempo, rate, beats)
+      }
       plugin.looper = looper
       plugin.params = { ...plugin.params, transport }
     })
@@ -1183,12 +1488,16 @@ export class ProjectStore {
       const plugin = this.instrument(trackId, pluginId)
       if (!plugin) return
       const looper = plugin.looper ?? emptyLooper()
+      const targetRate = looper.sourceRate && looper.sourceRate > 0 ? looper.sourceRate : this.project.sampleRate
+      const incoming = Float32Array.from(channel)
+      const matched = targetRate === this.project.sampleRate ? incoming : playbackChannel(incoming, this.project.sampleRate, targetRate)
       const id = uid('loop')
-      this.buffers.set(id, { id, name: 'Loop', sampleRate: this.project.sampleRate, channels: [Float32Array.from(channel)] })
+      this.buffers.set(id, { id, name: 'Loop', sampleRate: targetRate, channels: [matched] })
+      looper.sourceRate = targetRate
       looper.layers = [...looper.layers, { id: uid('lyr'), bufferId: id, gain: 1, mute: false, reverse: false, speed: plugin.params.speed || 1 }]
       looper.undone = []
-      looper.lengthSamples = channel.length
-      if (!looper.sync) this.project.tempo = Math.round(tempoFromLoop(channel.length, this.project.sampleRate, this.project.timeSignature.numerator) * 10) / 10
+      looper.lengthSamples = matched.length
+      if (!looper.sync) this.project.tempo = Math.round(tempoFromLoop(matched.length, targetRate, this.project.timeSignature.numerator) * 10) / 10
       plugin.looper = looper
     })
   }
@@ -1224,6 +1533,57 @@ export class ProjectStore {
     })
   }
 
+  /** Cut every loop layer to the start and end handles, and keep the overdubs. */
+  trimLooperWindow(trackId: string | 'master', pluginId: string) {
+    this.mutate(() => {
+      const looper = this.instrument(trackId, pluginId)?.looper
+      if (!looper?.layers.length) return
+      const points = readSlotPoints(looper)
+      if (points.start <= 0.001 && points.end >= 0.999) return
+      const span = Math.max(0.0001, points.end - points.start)
+      let length = 0
+      for (const layer of looper.layers) {
+        const asset = this.buffers.get(layer.bufferId)
+        const lead = asset?.channels[0]
+        if (!asset || !lead?.length) continue
+        const from = Math.min(lead.length - 2, Math.floor(points.start * lead.length))
+        const to = Math.max(from + 2, Math.min(lead.length, Math.floor(points.end * lead.length)))
+        const id = uid('smp')
+        const channels = asset.channels.map((channel) => channel.slice(from, Math.min(channel.length, to)))
+        this.buffers.set(id, { id, name: asset.name, sampleRate: asset.sampleRate, channels })
+        layer.bufferId = id
+        length = channels[0]?.length || length
+      }
+      Object.assign(looper, readSlotPoints({
+        start: 0,
+        end: 1,
+        loopStart: (points.loopStart - points.start) / span,
+        loopEnd: (points.loopEnd - points.start) / span,
+      }))
+      if (length > 0) looper.lengthSamples = length
+    })
+  }
+
+  /** Raise each loop layer without dropping the earlier passes. */
+  normalizeLooper(trackId: string | 'master', pluginId: string) {
+    this.mutate(() => {
+      const looper = this.instrument(trackId, pluginId)?.looper
+      if (!looper?.layers.length) return
+      for (const layer of looper.layers) {
+        const asset = this.buffers.get(layer.bufferId)
+        if (!asset?.channels[0]?.length) continue
+        const id = uid('smp')
+        this.buffers.set(id, {
+          id,
+          name: asset.name,
+          sampleRate: asset.sampleRate,
+          channels: asset.channels.map((channel) => normalizeChannel(channel)),
+        })
+        layer.bufferId = id
+      }
+    })
+  }
+
   bounceLooper(trackId: string, pluginId: string, startSample: number) {
     this.mutate(() => {
       const plugin = this.instrument(trackId, pluginId)
@@ -1238,15 +1598,17 @@ export class ProjectStore {
       const length = looper.lengthSamples || takes[0]?.samples.length || 0
       if (!length) return
       const mixed = mixTakes({ length, takes, undone: [], feedback: looper.feedback })
+      const rate = looper.sourceRate && looper.sourceRate > 0 ? looper.sourceRate : this.project.sampleRate
+      const atProject = rate === this.project.sampleRate ? mixed : playbackChannel(mixed, rate, this.project.sampleRate)
       const id = uid('bounce')
-      this.buffers.set(id, { id, name: 'Loop bounce', sampleRate: this.project.sampleRate, channels: [mixed] })
+      this.buffers.set(id, { id, name: 'Loop bounce', sampleRate: this.project.sampleRate, channels: [atProject] })
       track.clips.push({
         id: uid('clip'),
         name: 'Loop',
         bufferId: id,
         startSample,
         offsetSamples: 0,
-        durationSamples: mixed.length,
+        durationSamples: atProject.length,
         fadeInSamples: 0,
         fadeOutSamples: 0,
         gain: 1,
@@ -1594,6 +1956,15 @@ export class ProjectStore {
     })
   }
 
+  private dropSelectedPatterns() {
+    const patterns = new Set(this.selectedPatternClipIds.length ? this.selectedPatternClipIds : this.selectedPatternClipId ? [this.selectedPatternClipId] : [])
+    if (!patterns.size || !this.project.patternClips) return false
+    this.project.patternClips = this.project.patternClips.filter((clip) => !patterns.has(clip.id))
+    this.selectedPatternClipId = null
+    this.selectedPatternClipIds = []
+    return true
+  }
+
   deleteSelectedClip() {
     this.mutate(() => {
       const audio = new Set(this.selectedClipIds.length ? this.selectedClipIds : this.selectedClipId ? [this.selectedClipId] : [])
@@ -1607,6 +1978,7 @@ export class ProjectStore {
         for (const track of this.project.tracks) track.clips = track.clips.filter((clip) => !audio.has(clip.id))
         this.selectedClipId = null
         this.selectedClipIds = []
+        this.dropSelectedPatterns()
         return
       }
       if (this.selectedNoteIds.length && this.selectedMidiClipId) {
@@ -1620,10 +1992,12 @@ export class ProjectStore {
         return
       }
       const midi = new Set(this.selectedMidiClipIds.length ? this.selectedMidiClipIds : this.selectedMidiClipId ? [this.selectedMidiClipId] : [])
-      if (!midi.size) return
-      for (const track of this.project.tracks) track.midiClips = track.midiClips.filter((clip) => !midi.has(clip.id))
-      this.selectedMidiClipId = null
-      this.selectedMidiClipIds = []
+      if (midi.size) {
+        for (const track of this.project.tracks) track.midiClips = track.midiClips.filter((clip) => !midi.has(clip.id))
+        this.selectedMidiClipId = null
+        this.selectedMidiClipIds = []
+      }
+      this.dropSelectedPatterns()
     })
   }
 
@@ -1807,6 +2181,41 @@ export class ProjectStore {
     })
   }
 
+  placePatternClips(moves: { clipId: string; startBeat: number; trackId?: string }[]) {
+    this.mutate(() => {
+      for (const move of moves) {
+        const clip = this.project.patternClips?.find((item) => item.id === move.clipId)
+        if (!clip || clip.scene != null) continue
+        clip.placed = true
+        clip.startBeat = this.project.snap ? Math.max(0, Math.round(move.startBeat)) : Math.max(0, move.startBeat)
+        if (move.trackId && this.project.tracks.some((track) => track.id === move.trackId && track.type === 'midi')) {
+          clip.trackId = move.trackId
+        }
+      }
+    })
+  }
+
+  resizePatternClip(clipId: string, edge: 'start' | 'end', beat: number) {
+    this.mutate(() => {
+      const clip = this.project.patternClips?.find((item) => item.id === clipId)
+      if (!clip || clip.scene != null) return
+      const next = snappedClipBeat(this.project, beat)
+      const min = 0.25
+      clip.placed = true
+      if (edge === 'end') {
+        clip.lengthBeats = Math.max(min, next - clip.startBeat)
+        return
+      }
+      const end = clip.startBeat + clip.lengthBeats
+      const offset = clip.offsetBeats || 0
+      const start = Math.max(clip.startBeat - offset, Math.min(next, end - min))
+      const delta = start - clip.startBeat
+      clip.offsetBeats = Math.max(0, offset + delta)
+      clip.startBeat = start
+      clip.lengthBeats = end - start
+    })
+  }
+
   placeNotes(trackId: string, clipId: string, moves: { id: string; startBeat: number; pitch: number; durationBeats: number }[]) {
     this.mutate(() => {
       const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
@@ -1869,6 +2278,8 @@ export class ProjectStore {
         this.selectedMidiClipIds = [clip.id]
         this.selectedClipId = null
         this.selectedClipIds = []
+        this.selectedPatternClipId = null
+        this.selectedPatternClipIds = []
         return
       }
       if (track.type !== 'audio') return
@@ -1892,6 +2303,8 @@ export class ProjectStore {
       this.selectedClipIds = [clip.id]
       this.selectedMidiClipId = null
       this.selectedMidiClipIds = []
+      this.selectedPatternClipId = null
+      this.selectedPatternClipIds = []
     })
   }
 
@@ -1946,6 +2359,25 @@ export class ProjectStore {
       if (nextMidi.length) {
         this.selectedMidiClipIds = nextMidi
         this.selectedMidiClipId = nextMidi.at(-1) ?? null
+      }
+      const patternIds = new Set(this.selectedPatternClipIds)
+      const nextPattern: string[] = []
+      if (this.project.patternClips) {
+        for (const clip of [...this.project.patternClips]) {
+          if (!patternIds.has(clip.id)) continue
+          const copy = {
+            ...clip,
+            id: uid('pcl'),
+            placed: true,
+            startBeat: clip.startBeat + clip.lengthBeats,
+          }
+          this.project.patternClips.push(copy)
+          nextPattern.push(copy.id)
+        }
+      }
+      if (nextPattern.length) {
+        this.selectedPatternClipIds = nextPattern
+        this.selectedPatternClipId = nextPattern.at(-1) ?? null
       }
     })
   }
@@ -2315,6 +2747,7 @@ export class ProjectStore {
       const track = this.track(id)
       if (!track) return
       patchMixer(this.project, id, { [flag]: !track[flag] })
+      mirrorTrackMix(this.project, id)
     })
   }
 
@@ -2670,7 +3103,7 @@ export class ProjectStore {
     this.selectedMidiClipId = clip.id
   }
 
-  launch(trackId: string, clipId: string | null, nowSample = 0) {
+  launch(trackId: string, clipId: string | null, nowSample = 0, intent: 'default' | 'start' = 'default') {
     if (this.remoteFollow) return
     const track = this.track(trackId)
     const clip = track && clipId ? clipById(track, clipId) : null
@@ -2678,7 +3111,7 @@ export class ProjectStore {
     const mode = clip?.mode ?? 'toggle'
     const same = !!clipId && this.launched[trackId] === clipId
     const busy = !!this.launched[trackId]
-    const decision = !clipId ? 'stop' : retrigger(mode, mode === 'toggle' ? same : busy, !!clip?.legato)
+    const decision = !clipId ? 'stop' : intent === 'start' ? 'start' : retrigger(mode, mode === 'toggle' ? same : busy, !!clip?.legato)
     if (decision === 'hold') return
     const quant = clip?.quant ?? this.project.launchQuant ?? '1bar'
     const at = quantizeSample(nowSample, quant, this.project.sampleRate, this.project.tempo, this.project.timeSignature)
@@ -2687,18 +3120,31 @@ export class ProjectStore {
     const launchGen = { ...this.launchGen }
     if (decision === 'stop') {
       const playingId = this.launched[trackId]
-      const playing = track && playingId ? clipById(track, playingId) : null
+      const hand = this.handoff[trackId]
+      const audibleId = hand?.clipId || playingId
+      const playing = track && audibleId ? clipById(track, audibleId) : null
       const stopQuant = playing?.quant ?? this.project.launchQuant ?? '1bar'
       const plan = stopPlan({
         now: nowSample,
-        launchAt: this.launchAt[trackId],
-        hasClip: !!playingId,
+        launchAt: hand?.at ?? this.launchAt[trackId],
+        hasClip: !!audibleId,
         quant: stopQuant,
         sampleRate: this.project.sampleRate,
         tempo: this.project.tempo,
         sig: this.project.timeSignature,
       })
       if (!plan.immediate) {
+        if (hand && playingId && playingId !== hand.clipId) {
+          launched[trackId] = hand.clipId
+          launchAt[trackId] = hand.at
+          launchGen[trackId] = Math.max(0, (launchGen[trackId] || 1) - 1)
+          const nextHandoff = { ...this.handoff }
+          delete nextHandoff[trackId]
+          this.handoff = nextHandoff
+        }
+        this.launched = launched
+        this.launchAt = launchAt
+        this.launchGen = launchGen
         this.stopAt = { ...this.stopAt, [trackId]: plan.when }
         this.transportMode = 'session'
         this.pendingTransport = null
@@ -2710,6 +3156,9 @@ export class ProjectStore {
       const stopAt = { ...this.stopAt }
       delete stopAt[trackId]
       this.stopAt = stopAt
+      const nextHandoff = { ...this.handoff }
+      delete nextHandoff[trackId]
+      this.handoff = nextHandoff
     } else if (clipId) {
       const stopAt = { ...this.stopAt }
       delete stopAt[trackId]
@@ -2719,6 +3168,11 @@ export class ProjectStore {
       launchAt[trackId] = at
       this.captureLog = [...this.captureLog, { trackId, clipId, sample: at }]
     }
+    this.keepHandoff(
+      { launched: { [trackId]: this.launched[trackId] }, at: { [trackId]: this.launchAt[trackId] } },
+      { launched: { [trackId]: launched[trackId] }, at: { [trackId]: launchAt[trackId] } },
+      nowSample,
+    )
     this.launched = launched
     this.launchAt = launchAt
     this.launchGen = launchGen
@@ -2741,25 +3195,24 @@ export class ProjectStore {
     const launched = { ...this.launched }
     const launchAt = { ...this.launchAt }
     const launchGen = { ...this.launchGen }
+    const stopAt: Record<string, number> = {}
     const slots: TransportSlot[] = []
+    const later = at > nowSample + 0.5
     for (const track of this.project.tracks) {
       const clip = sceneClip(track, scene)
+      const playingId = launched[track.id]
       if (!clip) {
-        launched[track.id] = null
-        delete launchAt[track.id]
-        slots.push({ trackId: track.id, clipId: null })
+        this.queueSceneStop(track.id, playingId, later, at, launched, launchAt, stopAt, slots)
         continue
       }
-      const same = launched[track.id] === clip.id
+      const same = playingId === clip.id
       const decision = retrigger(clip.mode ?? 'toggle', same, !!clip.legato)
       if (decision === 'hold') {
-        slots.push({ trackId: track.id, clipId: launched[track.id] ?? null, timelineSample: launchAt[track.id] })
+        slots.push({ trackId: track.id, clipId: playingId ?? null, timelineSample: launchAt[track.id] })
         continue
       }
       if (decision === 'stop') {
-        launched[track.id] = null
-        delete launchAt[track.id]
-        slots.push({ trackId: track.id, clipId: null })
+        this.queueSceneStop(track.id, playingId, later, at, launched, launchAt, stopAt, slots)
         continue
       }
       launchGen[track.id] = (launchGen[track.id] || 0) + 1
@@ -2768,14 +3221,59 @@ export class ProjectStore {
       this.captureLog = [...this.captureLog, { trackId: track.id, clipId: clip.id, sample: at }]
       slots.push({ trackId: track.id, clipId: clip.id, timelineSample: at })
     }
+    this.keepHandoff(
+      { launched: this.launched, at: this.launchAt },
+      { launched, at: launchAt },
+      nowSample,
+    )
     this.launched = launched
     this.launchAt = launchAt
     this.launchGen = launchGen
-    this.stopAt = {}
+    this.stopAt = stopAt
     this.transportMode = 'session'
     this.view = 'session'
     this.pendingTransport = { action: 'scene', scene, timelineSample: at, slots, gen: launchGen }
     this.emit()
+  }
+
+  /** An empty scene slot stops the track on the same grid line as the clips that start. */
+  private queueSceneStop(
+    trackId: string,
+    playingId: string | null | undefined,
+    later: boolean,
+    at: number,
+    launched: Record<string, string | null>,
+    launchAt: Record<string, number>,
+    stopAt: Record<string, number>,
+    slots: TransportSlot[],
+  ) {
+    if (playingId && later) {
+      stopAt[trackId] = at
+      slots.push({ trackId, clipId: playingId, timelineSample: launchAt[trackId] })
+      return
+    }
+    launched[trackId] = null
+    delete launchAt[trackId]
+    slots.push({ trackId, clipId: null, timelineSample: at })
+  }
+
+  /** Remember a clip that is still audible while its replacement waits for the grid. */
+  private keepHandoff(
+    prev: { launched: Record<string, string | null | undefined>; at: Record<string, number | undefined> },
+    next: { launched: Record<string, string | null | undefined>; at: Record<string, number | undefined> },
+    nowSample: number,
+  ) {
+    const computed = handoffAfter(prev, next, nowSample)
+    const handoff = { ...this.handoff }
+    const ids = new Set([...Object.keys(prev.launched), ...Object.keys(next.launched)])
+    for (const id of ids) {
+      const sameClip = prev.launched[id] === next.launched[id]
+      const sameAt = (prev.at[id] ?? 0) === (next.at[id] ?? 0)
+      if (sameClip && sameAt) continue
+      if (computed[id]) handoff[id] = computed[id]
+      else delete handoff[id]
+    }
+    this.handoff = handoff
   }
 
   /** Apply quantized stops. While stopped, a queued stop commits immediately. */
@@ -2792,17 +3290,20 @@ export class ProjectStore {
     const launched = { ...this.launched }
     const launchAt = { ...this.launchAt }
     const stopAt = { ...this.stopAt }
+    const handoff = { ...this.handoff }
     const slots: TransportSlot[] = []
     for (const trackId of due) {
       const when = stopAt[trackId]
       launched[trackId] = null
       delete launchAt[trackId]
       delete stopAt[trackId]
+      delete handoff[trackId]
       slots.push({ trackId, clipId: null, timelineSample: when })
     }
     this.launched = launched
     this.launchAt = launchAt
     this.stopAt = stopAt
+    this.handoff = handoff
     this.transportMode = 'session'
     this.pendingTransport = slots.length === 1
       ? { action: 'launch', trackId: slots[0].trackId, clipId: null, timelineSample: slots[0].timelineSample, gen: this.launchGen }
@@ -2869,6 +3370,7 @@ export class ProjectStore {
     if (rolling && playing.length && when > nowSample + 0.5) {
       const stopAt = { ...this.stopAt }
       for (const [trackId] of playing) stopAt[trackId] = when
+      for (const trackId of Object.keys(this.handoff)) stopAt[trackId] = when
       this.stopAt = stopAt
       this.transportMode = 'session'
       this.emit()
@@ -2877,6 +3379,7 @@ export class ProjectStore {
     this.launched = {}
     this.launchAt = {}
     this.stopAt = {}
+    this.handoff = {}
     this.transportMode = 'session'
     this.pendingTransport = { action: 'stop-clips' }
     this.emit()
@@ -2886,6 +3389,7 @@ export class ProjectStore {
     this.launched = {}
     this.launchAt = {}
     this.stopAt = {}
+    this.handoff = {}
     this.transportMode = 'arrangement'
     this.pendingTransport = { action: 'back' }
     this.emit()
@@ -2910,13 +3414,22 @@ export class ProjectStore {
     this.launched = {}
     this.launchAt = {}
     this.stopAt = {}
+    this.handoff = {}
     this.transportMode = 'arrangement'
     this.view = 'arrange'
     this.pendingTransport = { action: 'back' }
     this.emit()
   }
 
-  replaceSession(next: SessionClock) {
+  replaceSession(next: SessionClock, nowSample = 0) {
+    if (next.mode === 'arrangement') this.handoff = {}
+    else {
+      this.keepHandoff(
+        { launched: this.launched, at: this.launchAt },
+        { launched: next.launched, at: next.at },
+        nowSample,
+      )
+    }
     this.launched = { ...next.launched }
     this.launchAt = { ...next.at }
     this.launchGen = { ...next.gen }
@@ -3003,6 +3516,67 @@ export class ProjectStore {
     })
   }
 
+  /** Empty session clip. Always one bar, independent of the record length. */
+  createEmptyMidiSlot(trackId: string, scene: number) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      this.ensureSlots(track, scene)
+      const existingId = track.midiSlots?.[scene]
+      let clip = existingId ? track.midiClips.find((item) => item.id === existingId) : undefined
+      if (!clip) {
+        clip = {
+          id: uid('midi'),
+          name: 'Clip',
+          startBeat: 0,
+          durationBeats: quartersPerBar(this.project.timeSignature),
+          notes: [],
+          slotOnly: true,
+          loop: true,
+        }
+        track.midiClips.push(clip)
+        track.midiSlots![scene] = clip.id
+      }
+      this.selectedMidiClipId = clip.id
+      this.selectedTrackId = trackId
+      this.sessionEdit = { trackId, scene }
+      this.sessionSlot = { trackId, scene }
+    })
+  }
+
+  /** Write recorded notes into the armed session slot, wrapped into the clip length. */
+  overdubSlot(
+    trackId: string,
+    scene: number,
+    notes: { pitch: number; startBeat: number; durationBeats: number; velocity: number }[],
+    originBeat = this.sessionRecordBeat ?? 0,
+  ) {
+    if (!notes.length) return
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      this.ensureSlots(track, scene)
+      const existing = sceneClip(track, scene)
+      if (!existing || 'bufferId' in existing) return
+      const length = Math.max(0.25, existing.durationBeats)
+      const origin = Number.isFinite(originBeat) ? originBeat : 0
+      const relative = notes.map((note) => {
+        let start = note.startBeat - origin
+        start = ((start % length) + length) % length
+        return {
+          pitch: note.pitch,
+          startBeat: start,
+          durationBeats: Math.max(0.05, Math.min(note.durationBeats, length)),
+          velocity: note.velocity,
+        }
+      })
+      existing.notes = overdubNotes(existing, relative).notes
+      this.selectedTrackId = trackId
+      this.selectedMidiClipId = existing.id
+      this.sessionEdit = { trackId, scene }
+    })
+  }
+
   placeInSlot(trackId: string, scene: number, clip: AudioClip) {
     this.mutate(() => {
       const track = this.track(trackId)
@@ -3062,6 +3636,84 @@ export class ProjectStore {
     })
   }
 
+  renameClip(trackId: string, clipId: string, name: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId) ? clipById(this.track(trackId)!, clipId) : null
+      if (!clip) return
+      const next = name.trim()
+      if (next) clip.name = next
+    })
+  }
+
+  recolorClip(trackId: string, clipId: string, color: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId) ? clipById(this.track(trackId)!, clipId) : null
+      if (clip) clip.color = color
+    })
+  }
+
+  setSceneName(scene: number, name: string) {
+    this.mutate(() => {
+      const names = [...(this.project.sceneNames ?? [])]
+      while (names.length <= scene) names.push('')
+      names[scene] = name
+      this.project.sceneNames = names
+    })
+  }
+
+  /** Move a session clip. A filled destination swaps. The clip stays one per slot. */
+  moveClipToSlot(fromTrackId: string, fromScene: number, toTrackId: string, toScene: number) {
+    if (this.remoteFollow) return
+    if (fromTrackId === toTrackId && fromScene === toScene) return
+    const from = this.track(fromTrackId)
+    const to = this.track(toTrackId)
+    if (!from || !to || from.type !== to.type || from.type === 'bus' || from.type === 'group') {
+      this.toast('That clip needs the same kind of track.', 'warn')
+      return
+    }
+    this.mutate(() => {
+      const source = this.track(fromTrackId)
+      const dest = this.track(toTrackId)
+      if (!source || !dest) return
+      this.ensureSlots(source, fromScene)
+      this.ensureSlots(dest, toScene)
+      const sourceSlots = source.type === 'audio' ? source.audioSlots! : source.midiSlots!
+      const destSlots = dest.type === 'audio' ? dest.audioSlots! : dest.midiSlots!
+      const movingId = sourceSlots[fromScene]
+      if (!movingId) return
+      const displacedId = destSlots[toScene] ?? null
+      if (source.id !== dest.id) {
+        transferClip(source, dest, movingId)
+        if (displacedId) transferClip(dest, source, displacedId)
+      }
+      destSlots[toScene] = movingId
+      sourceSlots[fromScene] = displacedId
+      this.selectedTrackId = dest.id
+      this.sessionEdit = { trackId: dest.id, scene: toScene }
+      if (dest.type === 'midi') {
+        this.selectedMidiClipId = movingId
+        this.selectedClipId = null
+      } else {
+        this.selectedClipId = movingId
+        this.selectedMidiClipId = null
+      }
+    })
+  }
+
+  duplicateSlot(trackId: string, scene: number) {
+    const track = this.track(trackId)
+    const clip = track ? sceneClip(track, scene) : null
+    if (!track || !clip) return
+    this.ensureSlots(track, SESSION_SCENES - 1)
+    const slots = track.type === 'audio' ? track.audioSlots! : track.midiSlots!
+    const empty = slots.findIndex((id, index) => index !== scene && !id)
+    if (empty < 0) {
+      this.toast('Every scene on this track already has a clip.', 'warn')
+      return
+    }
+    this.copyIntoSlot(trackId, empty, trackId, clip.id)
+  }
+
   captureToArrangement() {
     if (this.remoteFollow || !this.captureLog.length) return
     const events = this.captureLog
@@ -3113,9 +3765,16 @@ export class ProjectStore {
     this.buffers = buffers
     this.selectedTrackId = project.tracks[0]?.id ?? null
     this.selectedClipId = null
+    this.selectedClipIds = []
     this.selectedMidiClipId = null
+    this.selectedMidiClipIds = []
+    this.selectedPatternClipId = null
+    this.selectedPatternClipIds = []
     this.selectedNoteId = null
     this.selectedNoteIds = []
+    this.editGeneration = 0
+    this.savedGeneration = 0
+    if (this.scalerTrackId && !project.tracks.some((track) => track.id === this.scalerTrackId && track.type === 'midi')) this.scalerTrackId = null
     this.sync.rebase(this.project)
     this.emit()
   }
@@ -3213,6 +3872,7 @@ export class ProjectStore {
   }
 
   openRack(trackId: string) {
+    this.scalerTrackId = null
     this.rackTrackId = this.rackTrackId === trackId ? null : trackId
     this.rackFlip = false
     this.rackDetail = false
@@ -3220,6 +3880,7 @@ export class ProjectStore {
   }
 
   openPatch(trackId: string) {
+    this.scalerTrackId = null
     if (this.patchTrackId === trackId) {
       this.patchTrackId = null
       this.emit()
@@ -3537,8 +4198,29 @@ export class ProjectStore {
     run(() => {
       const channel = this.activePattern()?.channels.find((row) => row.id === channelId)
       if (!channel) return
-      Object.assign(channel, patch)
+      const mix: { volume?: number; pan?: number; mute?: boolean; solo?: boolean } = {}
+      if (patch.volume != null) mix.volume = patch.volume
+      if (patch.pan != null) mix.pan = patch.pan
+      if (patch.mute != null) mix.mute = patch.mute
+      if (patch.solo != null) mix.solo = patch.solo
+      if (Object.keys(mix).length) {
+        const trackId = channelRoute(this.project, channel)
+        if (trackId) {
+          patchMixer(this.project, trackId, mix)
+          mirrorTrackMix(this.project, trackId)
+        }
+      }
+      const rest: Partial<typeof patch> = { ...patch }
+      delete rest.volume
+      delete rest.pan
+      delete rest.mute
+      delete rest.solo
+      Object.assign(channel, rest)
       if (patch.steps != null) channel.steps = Math.max(1, Math.min(64, Math.round(patch.steps)))
+      if (patch.output !== undefined) {
+        const next = channelRoute(this.project, channel)
+        if (next) mirrorTrackMix(this.project, next)
+      }
     })
   }
 
@@ -3592,18 +4274,56 @@ export class ProjectStore {
     this.editChannel(channelId, (cells, count) => cells.map((cell, index) => (index < count && clip[index] ? { ...clip[index] } : cell)))
   }
 
-  placePattern(startBeat: number) {
+  placePattern(startBeat: number, trackId?: string) {
+    const pattern = this.activePattern()
+    if (!pattern) {
+      this.toast('Choose a pattern first.', 'warn')
+      return
+    }
+    let landed = 'Drums'
     this.mutate(() => {
-      const pattern = this.activePattern()
-      if (!pattern || !this.project.patternClips) return
-      this.project.patternClips.push({
+      const requested = trackId ? this.project.tracks.find((track) => track.id === trackId && track.type === 'midi') : null
+      const track = requested ?? this.ensureDrumsTrack()
+      landed = track.name
+      if (!this.project.patternClips) this.project.patternClips = []
+      for (const channel of pattern.channels) {
+        if (!channel.output) channel.output = track.id
+      }
+      mirrorTrackMix(this.project, track.id)
+      const clip = {
         id: uid('pcl'),
         patternId: pattern.id,
         startBeat: Math.max(0, startBeat),
-        lengthBeats: (pattern.steps * 0.25),
+        lengthBeats: pattern.steps * 0.25,
         scene: null,
-      })
+        trackId: track.id,
+        placed: true,
+        offsetBeats: 0,
+      }
+      this.project.patternClips.push(clip)
+      this.selectedPatternClipId = clip.id
+      this.selectedPatternClipIds = [clip.id]
+      this.selectedClipId = null
+      this.selectedClipIds = []
+      this.selectedMidiClipId = null
+      this.selectedMidiClipIds = []
+      this.selectedTrackId = track.id
     })
+    this.toast(`${pattern.name} is on ${landed}.`, 'good')
+  }
+
+  /** Midi track named Drums. Place creates it when the song does not have one yet. */
+  private ensureDrumsTrack() {
+    const found = this.project.tracks.find((track) => track.type === 'midi' && track.name === 'Drums')
+    if (found) return found
+    const track = makeTrack({
+      name: 'Drums',
+      type: 'midi',
+      color: '#e07a3d',
+      input: 'none',
+    })
+    this.project.tracks.push(track)
+    return track
   }
 
   placePatternScene(scene: number) {
@@ -3690,14 +4410,15 @@ export class ProjectStore {
   }
 
   midiEditor(): MidiEditorPrefs {
-    return normalizeMidiEditor(this.project.midiEditor)
+    return editorState(this.project)
   }
 
   setMidiEditor(patch: Partial<MidiEditorPrefs>, drag = false) {
     const run = (body: () => void) => (drag ? this.draft(body) : this.mutate(body))
     run(() => {
-      this.project.midiEditor = normalizeMidiEditor({ ...normalizeMidiEditor(this.project.midiEditor), ...patch })
+      this.project.midiEditor = normalizeMidiEditor({ ...editorState(this.project), ...patch })
     })
+    if (patch.stepInput != null || patch.follow != null) writeRollPrefs(patch)
   }
 
   /** Notes played together land on the step cursor, then the cursor advances. */
@@ -4570,6 +5291,20 @@ export class ProjectStore {
       }
     })
   }
+}
+
+function transferClip(from: Track, to: Track, clipId: string) {
+  if (from.type === 'audio' && to.type === 'audio') {
+    const index = from.clips.findIndex((clip) => clip.id === clipId)
+    if (index < 0) return
+    const [clip] = from.clips.splice(index, 1)
+    to.clips.push(clip)
+    return
+  }
+  const index = from.midiClips.findIndex((clip) => clip.id === clipId)
+  if (index < 0) return
+  const [clip] = from.midiClips.splice(index, 1)
+  to.midiClips.push(clip)
 }
 
 function rangesOverlap(clip: AudioClip, lane: TakeLane) {

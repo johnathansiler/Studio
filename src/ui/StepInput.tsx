@@ -35,7 +35,8 @@ export function StepInput({ store, engine }: { store: ProjectStore; engine: Audi
     chord.current.push({ pitch, velocity: level })
     engine.unlock()
     void engine.resume()
-    engine.liveNoteOn(pitch, level)
+    if (track) engine.playThrough(track.id, pitch, level)
+    else engine.liveNoteOn(pitch, level)
     setLit([...new Set(held.current.values())])
   }
 
@@ -43,7 +44,8 @@ export function StepInput({ store, engine }: { store: ProjectStore; engine: Audi
     const pitch = held.current.get(token)
     if (pitch == null) return
     held.current.delete(token)
-    engine.liveNoteOff(pitch)
+    if (track) engine.releaseThrough(track.id, pitch)
+    else engine.liveNoteOff(pitch)
     setLit([...new Set(held.current.values())])
     if (held.current.size > 0) return
     const tones = chord.current.splice(0)

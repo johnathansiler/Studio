@@ -49,6 +49,11 @@ export function shouldKeepProject(project: Project, bufferCount = 0): boolean {
   return !isUntouchedEmpty(project)
 }
 
+/** Ask before New project when the open session has edits that are not saved yet. */
+export function needsNewProjectConfirm(unsavedEdits: boolean) {
+  return unsavedEdits
+}
+
 function signature(project: Project): string {
   const loopEnd = project.loopEndSample || 0
   const record = { ...defaultRecord(loopEnd), ...(project.record || {}) }

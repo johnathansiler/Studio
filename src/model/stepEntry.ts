@@ -45,6 +45,8 @@ export function defaultMidiEditor(): MidiEditorPrefs {
     scoreDuration: 1,
     page: 0,
     scorePage: 0,
+    stepInput: true,
+    follow: true,
   }
 }
 
@@ -62,7 +64,45 @@ export function normalizeMidiEditor(value: Partial<MidiEditorPrefs> | undefined)
     scoreDuration: nearestScore(value.scoreDuration ?? base.scoreDuration),
     page: Math.max(0, Math.round(value.page ?? 0) || 0),
     scorePage: Math.max(0, Math.round(value.scorePage ?? 0) || 0),
+    stepInput: value.stepInput !== false,
+    follow: value.follow !== false,
   }
+}
+
+const STEP_INPUT_KEY = 'cueharbor-step-input'
+const FOLLOW_KEY = 'cueharbor-roll-follow'
+
+export interface PrefMemory {
+  getItem(key: string): string | null
+  setItem(key: string, value: string): void
+}
+
+export function readRollPrefs(storage: PrefMemory | null = typeof localStorage === 'undefined' ? null : localStorage) {
+  const step = storage?.getItem(STEP_INPUT_KEY)
+  const follow = storage?.getItem(FOLLOW_KEY)
+  return {
+    stepInput: step == null ? undefined : step === '1',
+    follow: follow == null ? undefined : follow === '1',
+  }
+}
+
+export function writeRollPrefs(patch: { stepInput?: boolean; follow?: boolean }, storage: PrefMemory | null = typeof localStorage === 'undefined' ? null : localStorage) {
+  if (!storage) return
+  if (patch.stepInput != null) storage.setItem(STEP_INPUT_KEY, patch.stepInput ? '1' : '0')
+  if (patch.follow != null) storage.setItem(FOLLOW_KEY, patch.follow ? '1' : '0')
+}
+
+/** Off means a key only auditions. On writes a note at the playhead. */
+export function keyCommitsNote(stepInput: boolean) {
+  return stepInput !== false
+}
+
+export function editorState(project: { midiEditor?: Partial<MidiEditorPrefs> }, storage?: PrefMemory | null): MidiEditorPrefs {
+  const editor = normalizeMidiEditor(project.midiEditor)
+  const memory = readRollPrefs(storage)
+  if (project.midiEditor?.stepInput == null && memory.stepInput != null) editor.stepInput = memory.stepInput
+  if (project.midiEditor?.follow == null && memory.follow != null) editor.follow = memory.follow
+  return editor
 }
 
 export function nearestStep(beats: number): number {

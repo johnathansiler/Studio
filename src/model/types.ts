@@ -6,11 +6,12 @@ import type { OmniPatch } from '../instruments/patch/types'
 import type { DevicePreset, RackAutomation, RackPatch, RackState } from './rack'
 import type { GeneratorSettings } from '../generators/types'
 import type { PlayerSettings } from '../players/types'
+import type { ScalerState } from '../instruments/scaler/types'
 import { defaultScale, type ScaleState } from './scale'
 import type { BeatRack, PatternClip } from './steps'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
-export type TrackInstrument = 'synth' | 'sampler' | '808' | 'drum-machine' | 'library' | 'none'
+export type TrackInstrument = 'synth' | 'sampler' | '808' | 'drum-machine' | 'library' | 'scaler' | 'none'
 
 export function isLocalInput(input: string) {
   return input === 'mic' || input === 'line'
@@ -43,6 +44,10 @@ export interface SamplerState {
   loopMode: number
   root: number
   slices: SampleZone[]
+  /** Captured or file rate. 0 plays the buffer at the engine rate. */
+  sourceRate?: number
+  /** Playback speed. 0.5 is half speed, 2 is double speed. */
+  speed?: number
 }
 
 export interface LooperLayer {
@@ -63,6 +68,13 @@ export interface LooperState {
   transport: number
   startBeat: number
   lengthSamples: number
+  /** Sample rate of the loop layers. 0 plays them at the engine rate. */
+  sourceRate?: number
+  /** Window inside the loop, as fractions of the buffer. Missing means the whole loop. */
+  start?: number
+  end?: number
+  loopStart?: number
+  loopEnd?: number
 }
 
 export interface PluginInstance {
@@ -227,6 +239,8 @@ export interface AudioClip {
   folder?: TakeFolder
   /** Spectral repairs. Playback uses a rendered copy; the source asset stays put. */
   spectral?: SpectralRepair
+  /** Session color. Missing uses the track color. */
+  color?: string
 }
 
 /** One recorded pass inside a take folder. */
@@ -315,6 +329,8 @@ export interface MidiClip {
   /** Earlier loop passes. The clip notes are the active pass. */
   takes?: MidiTake[]
   activeTakeId?: string
+  /** Session color. Missing uses the track color. */
+  color?: string
   /** 0–0.9. Odd sixteenths sound later by this fraction of a sixteenth. */
   swing?: number
 }
@@ -339,6 +355,10 @@ export interface MidiEditorPrefs {
   page: number
   /** Score page. Each page is four bars. */
   scorePage: number
+  /** Computer and on-screen keys write a note at the playhead. Off, they only play the sound. */
+  stepInput: boolean
+  /** The piano roll scrolls to keep the playhead in view. */
+  follow: boolean
 }
 
 export interface RecordSettings {
@@ -410,6 +430,8 @@ export interface Track {
   channels?: 1 | 2
   /** Chosen instrument for a MIDI track. */
   instrument?: TrackInstrument
+  /** Scaler chord instrument. Present when this track's instrument is Scaler. */
+  scaler?: ScalerState
   /** Multi-sample program for a library instrument. PCM is not stored here. */
   library?: SamplerProgram
   inserts: Insert[]
@@ -504,6 +526,8 @@ export interface Project {
   liveCapture?: LiveCaptureSettings
   /** Piano roll, step entry, drum lanes, or score. */
   midiEditor?: MidiEditorPrefs
+  /** Names for session scenes. Empty entries use Scene 1, Scene 2, and so on. */
+  sceneNames?: string[]
 }
 
 export interface AudioAsset {
@@ -552,7 +576,7 @@ export function makeTrack(partial: Partial<Track> & Pick<Track, 'name' | 'type'>
 }
 
 export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'): Project {
-  const vocal = makeTrack({ name: 'Vocal', type: 'audio', color: TRACK_COLORS[0], armed: true, monitor: false })
+  const vocal = makeTrack({ name: 'Vocal', type: 'audio', color: TRACK_COLORS[0], armed: false, monitor: false })
   const music = makeTrack({ name: 'Music', type: 'audio', color: TRACK_COLORS[1], input: 'none' })
   const keys = makeTrack({ name: 'Keys', type: 'midi', color: TRACK_COLORS[2], input: 'none' })
   const bar = Math.round(sampleRate * 2) // 1 bar at 120bpm is 2s; tempo applied by caller via loop length
