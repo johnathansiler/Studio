@@ -3,7 +3,7 @@ import { uid } from './types'
 /** One sixteenth note, in quarter-note beats. */
 export const STEP_BEAT = 0.25
 
-export type DrumKind = 'kick' | 'snare' | 'clap' | 'hat' | 'perc' | 'note'
+export type DrumKind = 'kick' | 'snare' | 'clap' | 'hat' | 'openhat' | 'tom' | 'cymbal' | 'perc' | 'note'
 
 export interface StepCell {
   on: boolean

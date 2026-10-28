@@ -1,44 +1,53 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { bindLocalSamples, importInstrument } from '../audio/multisample/import'
-import { fetchCatalog, fetchInstrument, STARTER_CATALOG, type LibraryEntry } from '../audio/multisample/library'
-import { libraryBaseUrl } from '../audio/multisample/source'
+import { STARTER_CATALOG, type LibraryEntry } from '../audio/multisample/library'
+import { loadStarterOnto, starterCatalog } from '../sounds/instruments'
 import { selectInstrument } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import './instrument.css'
 
-export function LibraryPanel({ store, engine, trackId }: { store: ProjectStore; engine: AudioEngine; trackId: string }) {
+export function LibraryPanel({
+  store,
+  engine,
+  trackId,
+  initialCatalog,
+}: {
+  store: ProjectStore
+  engine: AudioEngine
+  trackId: string
+  /** Tests pass the catalog so the picker renders without the network. */
+  initialCatalog?: LibraryEntry[]
+}) {
   const instrument = selectInstrument(store, trackId)
   const program = instrument.program
   const [status, setStatus] = useState(program ? `${program.name} · ${program.zones.length} zones` : 'Load a starter instrument or import SFZ, SF2, or DecentSampler.')
   const [hint, setHint] = useState('Samples stay on this device or stream from Hugging Face. Nothing is hosted here.')
   const [busy, setBusy] = useState(false)
-  const [catalog, setCatalog] = useState<LibraryEntry[]>(STARTER_CATALOG)
+  const [catalog, setCatalog] = useState<LibraryEntry[]>(initialCatalog ?? STARTER_CATALOG)
   const show = (text: string) => setHint(text)
+
+  useEffect(() => {
+    if (initialCatalog) return
+    let alive = true
+    void starterCatalog().then((next) => {
+      if (alive) setCatalog(next)
+    }).catch(() => undefined)
+    return () => { alive = false }
+  }, [initialCatalog])
 
   async function loadStarter(entry: LibraryEntry) {
     setBusy(true)
     setStatus(`Downloading ${entry.name} from Hugging Face…`)
     try {
-      const imported = await fetchInstrument(libraryBaseUrl(), entry)
-      if (imported.pack) engine.holdLibraryPack(trackId, imported.pack)
-      store.setLibrary(trackId, imported.program)
+      const imported = await loadStarterOnto(entry, trackId, {
+        setLibrary: (id, program) => store.setLibrary(id, program),
+        holdLibraryPack: (id, pack) => engine.holdLibraryPack(id, pack),
+        auditionLibrary: (id, pitch) => engine.auditionLibrary(id, pitch),
+      })
       setStatus(`${imported.program.name} · ${imported.program.zones.length} zones · samples stream per note`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Download failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function refreshCatalog() {
-    setBusy(true)
-    try {
-      const next = await fetchCatalog(libraryBaseUrl())
-      setCatalog(next)
-      setStatus(`${next.length} instruments in the starter catalog`)
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Catalog failed')
     } finally {
       setBusy(false)
     }
@@ -79,17 +88,23 @@ export function LibraryPanel({ store, engine, trackId }: { store: ProjectStore; 
   return (
     <div className="library-panel">
       <div className="library-row">
-        {catalog.map((entry) => (
-          <button
-            key={entry.id}
-            type="button"
-            disabled={busy}
-            title={entry.description}
-            onPointerDown={() => show(entry.description)}
-            onClick={() => void loadStarter(entry)}
-          >{entry.name}</button>
-        ))}
-        <button type="button" disabled={busy} title="Refresh the starter list from Hugging Face. Sample files are not downloaded." onPointerDown={() => show('Refresh the starter list. Only the catalog is downloaded.')} onClick={() => void refreshCatalog()}>Catalog</button>
+        <select
+          aria-label="Load starter instrument"
+          title="Load a free starter instrument onto this track. Samples stream from Hugging Face."
+          value={catalog.some((entry) => entry.id === program?.id) ? program?.id ?? '' : ''}
+          disabled={busy}
+          onChange={(event) => {
+            const entry = catalog.find((item) => item.id === event.target.value)
+            if (!entry) return
+            show(entry.description || `Load ${entry.name}. Samples stream from Hugging Face.`)
+            void loadStarter(entry)
+          }}
+        >
+          <option value="">Load</option>
+          {catalog.map((entry) => (
+            <option key={entry.id} value={entry.id} title={entry.description}>{entry.name}</option>
+          ))}
+        </select>
         <label className="library-file" title="Read an SFZ, SoundFont, or DecentSampler file from this device. The audio stays in this browser.">
           Import
           <input

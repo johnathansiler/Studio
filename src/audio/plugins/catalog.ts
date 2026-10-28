@@ -11,6 +11,7 @@ import { normalizePadKit } from '../../model/padMachine'
 import { normalizeBeats } from '../../model/steps'
 import { normalizeMix } from '../../model/mixGroups'
 import { normalizeOmniProject } from '../../instruments/patch/model'
+import { tuneLiveLatency } from './autoTune'
 import type { FactoryPreset, ParamSpec, PluginDescriptor } from './types'
 
 const VERSION = '1'
@@ -52,6 +53,44 @@ function ampDescriptor(): PluginDescriptor {
 }
 
 export const CATALOG: PluginDescriptor[] = [
+  {
+    id: 'tune',
+    name: 'Auto-Tune',
+    version: VERSION,
+    params: [
+      param('retune', 'Retune', 0.02, 1, 0.95, ''),
+      param('humanize', 'Humanize', 0, 1, 0.05, ''),
+      param('flex', 'Flex', 0, 1, 0, ''),
+      param('amount', 'Amount', 0, 1, 0.85, ''),
+      param('transpose', 'Transpose', -12, 12, 0, 'st'),
+      param('formant', 'Formant', 0, 1, 0, ''),
+      param('mode', 'Mode', 0, 1, 1, ''),
+      param('root', 'Root', -1, 11, -1, ''),
+      param('scaleIndex', 'Scale', -1, 18, -1, ''),
+      param('minHz', 'Low', 50, 400, 80, 'Hz'),
+      param('maxHz', 'High', 300, 1600, 1000, 'Hz'),
+      param('mask', 'Mask', 0, 4095, 0, '', false),
+      param('custom', 'Custom', 0, 1, 0, '', false),
+      param('bypassMask', 'Pass', 0, 4095, 0, '', false),
+      param('a4', 'A4', 430, 450, 440, 'Hz', false),
+      param('hq', 'HQ', 0, 1, 0, '', false),
+      param('color', 'Color', 0, 1, 0, '', false),
+      param('vibrato', 'Vibrato', 0, 1, 0, ''),
+      param('holdMidi', 'Hold', -1, 127, -1, '', false),
+      param('n0', 'C', -200, 200, 0, 'ct'),
+      param('n1', 'C#', -200, 200, 0, 'ct'),
+      param('n2', 'D', -200, 200, 0, 'ct'),
+      param('n3', 'D#', -200, 200, 0, 'ct'),
+      param('n4', 'E', -200, 200, 0, 'ct'),
+      param('n5', 'F', -200, 200, 0, 'ct'),
+      param('n6', 'F#', -200, 200, 0, 'ct'),
+      param('n7', 'G', -200, 200, 0, 'ct'),
+      param('n8', 'G#', -200, 200, 0, 'ct'),
+      param('n9', 'A', -200, 200, 0, 'ct'),
+      param('n10', 'A#', -200, 200, 0, 'ct'),
+      param('n11', 'B', -200, 200, 0, 'ct'),
+    ],
+  },
   {
     id: 'eq',
     name: 'EQ',
@@ -171,24 +210,6 @@ export const CATALOG: PluginDescriptor[] = [
       param('size', 'Size', 0.1, 1, 0.6, ''),
       param('damp', 'Damp', 0, 1, 0.4, ''),
       param('mix', 'Mix', 0, 1, 0, ''),
-    ],
-  },
-  {
-    id: 'tune',
-    name: 'Tune',
-    version: VERSION,
-    params: [
-      param('retune', 'Speed', 0.02, 1, 0.65, ''),
-      param('humanize', 'Human', 0, 1, 0.25, ''),
-      param('flex', 'Flex', 0, 1, 0, ''),
-      param('amount', 'Amount', 0, 1, 0, ''),
-      param('transpose', 'Transpose', -12, 12, 0, 'st'),
-      param('mode', 'Mode', 0, 1, 1, ''),
-      param('root', 'Root', -1, 11, -1, ''),
-      param('scaleIndex', 'Scale', -1, 18, -1, ''),
-      param('minHz', 'Low', 50, 400, 120, 'Hz'),
-      param('maxHz', 'High', 300, 1600, 800, 'Hz'),
-      param('mask', 'Mask', 0, 4095, 0, ''),
     ],
   },
   {
@@ -676,10 +697,12 @@ export const FACTORY: Record<string, FactoryPreset[]> = {
     { name: 'Hall', params: { mode: 2, size: 0.75, damp: 0.4, mix: 0.24 } },
   ],
   tune: [
-    { name: 'Soprano', params: { retune: 0.75, humanize: 0.2, amount: 0.85, mode: 1, minHz: 200, maxHz: 1200, transpose: 0, root: -1, scaleIndex: -1, mask: 0 } },
-    { name: 'Alto/Tenor', params: { retune: 0.6, humanize: 0.35, amount: 0.8, mode: 1, minHz: 120, maxHz: 700, transpose: 0, root: -1, scaleIndex: -1, mask: 0 } },
-    { name: 'Low male', params: { retune: 0.5, humanize: 0.4, amount: 0.75, mode: 1, minHz: 70, maxHz: 420, transpose: 0, root: -1, scaleIndex: -1, mask: 0 } },
-    { name: 'Instrument', params: { retune: 0.9, humanize: 0.1, amount: 0.9, mode: 0, minHz: 50, maxHz: 1500, transpose: 0, root: -1, scaleIndex: -1, mask: 0 } },
+    { name: 'Hard tune/T-Pain', params: { retune: 0.95, humanize: 0.05, flex: 0, amount: 0.85, mode: 1, minHz: 80, maxHz: 1000, transpose: 0, formant: 0.15, root: -1, scaleIndex: -1, mask: 0 } },
+    { name: 'Natural', params: { retune: 0.42, humanize: 0.55, flex: 0.35, amount: 0.72, mode: 1, minHz: 80, maxHz: 900, transpose: 0, formant: 0, root: -1, scaleIndex: -1, mask: 0 } },
+    { name: 'Soprano', params: { retune: 0.75, humanize: 0.2, amount: 0.85, mode: 1, minHz: 200, maxHz: 1200, transpose: 0, root: -1, scaleIndex: -1, mask: 0, formant: 0 } },
+    { name: 'Alto/Tenor', params: { retune: 0.6, humanize: 0.35, amount: 0.8, mode: 1, minHz: 120, maxHz: 700, transpose: 0, root: -1, scaleIndex: -1, mask: 0, formant: 0 } },
+    { name: 'Low male', params: { retune: 0.5, humanize: 0.4, amount: 0.75, mode: 1, minHz: 70, maxHz: 420, transpose: 0, root: -1, scaleIndex: -1, mask: 0, formant: 0 } },
+    { name: 'Instrument', params: { retune: 0.9, humanize: 0.1, amount: 0.9, mode: 0, minHz: 50, maxHz: 1500, transpose: 0, root: -1, scaleIndex: -1, mask: 0, formant: 0 } },
   ],
   pitch: [
     { name: 'Octave up', params: { semis: 12, harmony: 7, harmonyMix: 0, mix: 1 } },
@@ -891,9 +914,12 @@ export function createPlugin(pluginId: string, preset?: string): PluginInstance 
   }
 }
 
-export function latencyOf(pluginId: string, params: Record<string, number>, sampleRate: number, enabled = true) {
+export function latencyOf(pluginId: string, params: Record<string, number>, sampleRate: number, enabled = true, live = false) {
   if (!enabled) return 0
-  if (pluginId === 'tune' && (params.amount ?? 0) > 0.001) return tuneLatency(sampleRate)
+  if (pluginId === 'tune' && (params.amount ?? 0) > 0.001) {
+    if (live && (params.hq ?? 0) < 0.5) return tuneLiveLatency(sampleRate)
+    return tuneLatency(sampleRate)
+  }
   if (pluginId === 'pitch' && (params.mix ?? 0) > 0.001) return tuneLatency(sampleRate)
   if (pluginId === 'limiter') return 64
   if (pluginId === 'peak') return 96
