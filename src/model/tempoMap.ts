@@ -326,6 +326,10 @@ export function arrangementEndSample(project: Project): number {
       end = Math.max(end, Math.round(projectBeatSample(project, clip.startBeat + clip.durationBeats)))
     }
   }
+  for (const clip of project.patternClips ?? []) {
+    if (clip.scene != null) continue
+    end = Math.max(end, Math.round(projectBeatSample(project, clip.startBeat + clip.lengthBeats)))
+  }
   return end
 }
 
