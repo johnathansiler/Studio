@@ -197,6 +197,7 @@ export function arrangementDigest(project: Project): string {
       audioSlots: track.audioSlots ?? null,
       midiSlots: track.midiSlots ?? null,
       rack: track.rack?.devices.map((device) => [device.id, device.kind, device.params, device.pattern, device.zones.length]),
+      sample: track.sampleProgram ? [track.sampleProgram.revision, track.sampleProgram.articulation, track.sampleProgram.def.zones.length] : 0,
       cables: track.rack?.cables.map((cable) => [cable.from, cable.fromPort, cable.to, cable.toPort, cable.amount]),
       instruments: (track.plugins ?? []).map((plugin) => [
         plugin.id,

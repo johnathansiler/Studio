@@ -23,6 +23,7 @@ import {
 } from '../audio/sample/engine'
 import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
 import { findCycle, MASTER } from '../audio/routing'
+import type { SampleProgramState } from '../instruments/engine/types'
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
@@ -520,6 +521,32 @@ export class ProjectStore {
     this.mutate(() => {
       this.project.tracks = this.project.tracks.filter((t) => t.id !== id)
       if (this.selectedTrackId === id) this.selectedTrackId = this.project.tracks[0]?.id ?? null
+    })
+  }
+
+  setSampleProgram(trackId: string, program: SampleProgramState) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      track.instrument = 'sample'
+      track.sampleProgram = program
+      if (/^Sample( \d+)?$/.test(track.name) && program.def.name) track.name = program.def.name
+    })
+  }
+
+  setSampleControl(trackId: string, id: string, value: number) {
+    this.mutate(() => {
+      const program = this.track(trackId)?.sampleProgram
+      if (!program) return
+      program.values[id] = value
+    })
+  }
+
+  setSampleArticulation(trackId: string, id: string) {
+    this.mutate(() => {
+      const program = this.track(trackId)?.sampleProgram
+      if (!program) return
+      program.articulation = id
     })
   }
 

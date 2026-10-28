@@ -98,6 +98,7 @@ function trackSignature(track: Track) {
     input: track.input,
     channels: track.channels ?? null,
     instrument: track.instrument ?? null,
+    sample: track.sampleProgram?.revision ?? null,
     output: track.output ?? null,
     groupId: track.groupId ?? null,
     inserts: track.inserts?.length ?? 0,

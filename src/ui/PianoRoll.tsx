@@ -914,7 +914,8 @@ function playPadNotes(store: ProjectStore, engine: AudioEngine, trackId: string,
     voiceLead: current.voiceLead,
     previous: current.lastVoicing,
   })
-  engine.previewPitches(voiced)
+  if (store.track(trackId)?.instrument === 'sample') engine.playSampleInstrument(trackId, voiced, current.velocity || 0.85, 0.5)
+  else engine.previewPitches(voiced)
   store.insertPerformance(trackId, clipId, timelineBeat(store, engine), pitches)
 }
 

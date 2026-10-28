@@ -13,6 +13,7 @@ const KINDS: { id: AddKind; label: string }[] = [
 const INSTRUMENTS: { id: TrackInstrument; label: string }[] = [
   { id: 'synth', label: 'Synth' },
   { id: 'sampler', label: 'Sampler' },
+  { id: 'sample', label: 'Sample' },
   { id: '808', label: '808' },
   { id: 'drum-machine', label: 'Drum machine' },
   { id: 'none', label: 'None' },
@@ -122,7 +123,7 @@ export function AddTrackButton({ store }: { store: ProjectStore }) {
           {spec.kind === 'midi' && (
             <div className="add-row">
               {INSTRUMENTS.map((item) => (
-                <button key={item.id} type="button" className={spec.instrument === item.id ? 'on' : ''} onClick={() => setSpec({ ...spec, instrument: item.id })}>
+                <button key={item.id} type="button" className={spec.instrument === item.id ? 'on' : ''} title={item.id === 'sample' ? 'Multi-sampled instrument with velocity layers, round-robins, keyswitches, and microphones.' : undefined} onClick={() => setSpec({ ...spec, instrument: item.id })}>
                   {item.label}
                 </button>
               ))}

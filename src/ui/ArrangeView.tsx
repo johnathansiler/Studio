@@ -12,6 +12,7 @@ import { activeTool, EDITOR_TOOL_KEYS, subscribeTools } from '../state/tools'
 import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
 import { AddTrackButton } from './AddTrack'
+import { SampleSheet } from './SampleSheet'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 
 export function ArrangeView({
@@ -33,6 +34,7 @@ export function ArrangeView({
 }) {
   const project = store.project
   const [px, setPx] = useState(90)
+  const [sampleTrackId, setSampleTrackId] = useState<string | null>(null)
   const pxRef = useRef(px)
   pxRef.current = px
   const [position, setPosition] = useState(engine.positionSamples)
@@ -421,6 +423,9 @@ export function ArrangeView({
                 <>
                   <button className="mini" title="Piano roll" onClick={() => onPerform('keys')}>K</button>
                   <button className="mini" title="Drum machine" onClick={() => onPerform('drums')}>D</button>
+                  {track.instrument === 'sample' && (
+                    <button className="mini" title="Sample instrument. Zones, velocity layers, round-robins, keyswitches, and microphones." onClick={() => setSampleTrackId(track.id)}>S</button>
+                  )}
                 </>
               )}
               <input
@@ -604,6 +609,7 @@ export function ArrangeView({
       </div>
       </div>
       <StemSheet store={store} />
+      {sampleTrackId && <SampleSheet store={store} engine={engine} trackId={sampleTrackId} onClose={() => setSampleTrackId(null)} />}
       {store.clipSheet && selected ? (
         <ClipSheet store={store} trackId={selected.track.id} clip={selected.clip} onClose={() => store.closeClipSheet()} />
       ) : null}

@@ -1,3 +1,4 @@
+import { emptySampleProgram } from '../instruments/engine/program'
 import { makeTrack, TRACK_COLORS, type Track, type TrackInstrument } from './types'
 
 export type AddKind = 'audio' | 'midi' | 'drum' | 'bus'
@@ -35,6 +36,7 @@ function label(spec: AddTrackSpec) {
   if (spec.kind === 'bus') return 'Bus'
   if (spec.kind === 'drum') return 'Drum'
   if (spec.instrument === 'sampler') return 'Sampler'
+  if (spec.instrument === 'sample') return 'Sample'
   if (spec.instrument === '808') return '808'
   if (spec.instrument === 'drum-machine') return 'Drums'
   if (spec.instrument === 'synth') return 'Synth'
@@ -58,6 +60,7 @@ export function tracksFor(spec: AddTrackSpec, existing: Track[]): Track[] {
       input: type === 'audio' ? spec.input : 'none',
       channels: type === 'audio' ? spec.channels : 1,
       armed: type === 'audio' && spec.armed,
+      sampleProgram: instrument === 'sample' ? emptySampleProgram() : undefined,
     }))
   }
   return made
