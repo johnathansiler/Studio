@@ -22,8 +22,9 @@ const GRIDS: { value: number; label: string }[] = [
 
 export function TrackReadout({ trackId }: { trackId: string }) {
   const result = useSyncExternalStore(subscribeAnalysis, () => trackAnalysis(trackId), () => null)
-  if (!result) return null
-  return <span className="track-key" title={summaryLine(result)}>{result.key.label}</span>
+  const line = result ? summaryLine(result) : ''
+  if (!line) return null
+  return <span className="track-key" title={line}>{result?.key.label}</span>
 }
 
 export function AnalysisSheet({
@@ -160,7 +161,7 @@ export function AnalysisSheet({
       {error && <p className="hint">{error}</p>}
       {analysis && (
         <div className="analysis-result">
-          <p className="readout">{analysis.key.label} · {analysis.scale} · {Math.round(analysis.tempo)} bpm</p>
+          <p className="readout">{analysis.key.confidence <= 0 && !analysis.chordsByBar.length ? 'Nothing to analyze on this track yet.' : `${analysis.key.label} · ${analysis.scale} · ${Math.round(analysis.tempo)} bpm`}</p>
           <div className="chords" aria-label="Chords">
             {analysis.chordsByBar.map((chord) => (
               <span className="chord" key={`${chord.bar}-${chord.symbol}`}>{chord.bar + 1} {chord.symbol}</span>

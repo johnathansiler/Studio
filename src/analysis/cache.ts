@@ -25,6 +25,7 @@ export function trackAnalysis(trackId: string) {
 }
 
 export function summaryLine(result: AnalysisResult) {
+  if (result.key.confidence <= 0 && !result.chordsByBar.length) return ''
   const chords = result.chordsByBar.slice(0, 6).map((chord) => chord.symbol).join(' ')
   return chords ? `${result.key.label} · ${chords}` : result.key.label
 }

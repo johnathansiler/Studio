@@ -197,6 +197,7 @@ export function sectionsFromBars(bars: BarActivity[], beatsPerBar: number): Anal
     maxDensity = Math.max(maxDensity, bar.density)
     maxActive = Math.max(maxActive, bar.active)
   }
+  if (maxEnergy <= 1e-8 && maxDensity <= 0) return []
   const rows = bars.map((bar) => vector(bar, maxEnergy, maxDensity, maxActive))
   const cuts = new Set<number>([0])
   for (const cut of arrangementCuts(bars.map((bar) => bar.mask))) cuts.add(cut)
