@@ -23,10 +23,13 @@ import {
 } from '../audio/sample/engine'
 import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
 import { findCycle, MASTER } from '../audio/routing'
+import type { SamplerProgram } from '../audio/multisample/types'
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
 import { splitMidiClip, stretchMidiClip, trimMidiClip } from '../model/edit'
+import { setPath, type ProjectOp, type StampWire } from './ops'
+import { ProjectSync } from './sync'
 import { activeTool, setActiveTool, type ArrangeTool } from './tools'
 import { demoMidiNotes } from '../model/demo'
 import {
@@ -55,6 +58,7 @@ import {
   quantizeMidi,
   type QuantizeSettings,
 } from '../model/quantize'
+import { cloneOmni, emptyOmni, type OmniPatch } from '../instruments/patch'
 import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
 import { lockedTone, scaleIsMicrotonal } from '../theory/lock'
@@ -126,6 +130,8 @@ export class ProjectStore {
   /** Guests mirror the host arrangement and cannot edit it. */
   remoteFollow = false
   rackTrackId: string | null = null
+  /** Open layered patch. Not saved; the patch itself is on the track. */
+  patchTrackId: string | null = null
   rackFlip = false
   rackDetail = false
   /** Letter keys play notes while this is on, so tap-tempo stays off T. */
@@ -137,6 +143,8 @@ export class ProjectStore {
   private past: string[] = []
   private future: string[] = []
   private listeners = new Set<Listener>()
+  /** Musical journal shared with every view and with the remote session. */
+  readonly sync = new ProjectSync()
   private takeUndo: { trackId: string; clipId: string; notes: MidiNote[]; durationBeats: number } | null = null
   private drafted = false
 
@@ -164,6 +172,7 @@ export class ProjectStore {
     this.selectedMidiClipId = null
     this.selectedNoteId = null
     this.selectedNoteIds = []
+    this.sync.rebase(this.project)
   }
 
   subscribe = (fn: Listener) => {
@@ -175,7 +184,50 @@ export class ProjectStore {
 
   private emit() {
     this.version += 1
+    if (!this.sync.silence) this.sync.observe(this.project)
     for (const fn of this.listeners) fn()
+  }
+
+  /** Remote field ops. History is patched so a later undo keeps them. */
+  applyRemoteOps(ops: ProjectOp[]) {
+    const { applied, gap } = this.sync.ingest(this.project, ops)
+    if (applied.length) {
+      this.rewriteHistory(applied)
+      this.emit()
+    }
+    return gap
+  }
+
+  /**
+   * Reconnect resync. Local stamps that are newer than the checkpoint are returned
+   * so the other device can catch up without a second full project.
+   */
+  mergeRemoteCheckpoint(remote: Project, stamps: StampWire[] | undefined, prefer: 'local' | 'remote', lamport = 0, actor = '', seq = 0) {
+    this.sync.silence = true
+    const waveforms = remote.waveforms
+    const merged = this.sync.merge(this.project, remote, stamps, prefer, lamport, actor, seq)
+    this.project = normalizeProjectRack(normalizeProject(merged.project))
+    if (waveforms) this.project.waveforms = waveforms
+    this.past = []
+    this.future = []
+    this.sync.adopt(this.project)
+    this.sync.silence = false
+    this.emit()
+    return merged.reply
+  }
+
+  private rewriteHistory(ops: ProjectOp[]) {
+    const apply = (raw: string) => {
+      try {
+        const project = JSON.parse(raw) as Project
+        for (const op of ops) setPath(project, op.p, op.v)
+        return JSON.stringify(project)
+      } catch {
+        return raw
+      }
+    }
+    this.past = this.past.map(apply)
+    this.future = this.future.map(apply)
   }
 
   private snapshot() {
@@ -465,12 +517,45 @@ export class ProjectStore {
     this.mutate(() => {
       const made = tracksFor(spec, this.project.tracks)
       for (const track of made) if (track.type === 'midi') normalizeTrackRack(track)
+      if (spec.kind === 'midi' && spec.instrument === 'library' && made[0]) this.rackTrackId = made[0].id
       const at = insertIndex(this.project.tracks, this.selectedTrackId)
       this.project.tracks.splice(at, 0, ...made)
       this.selectedTrackId = made[0]?.id ?? this.selectedTrackId
       ids.push(...made.map((track) => track.id))
     })
     return ids
+  }
+
+  /** Install a multi-sample program on a library instrument track. */
+  setLibrary(trackId: string, program: SamplerProgram | null) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      track.instrument = 'library'
+      track.library = program ?? undefined
+      if (!track.rack?.devices?.length) normalizeTrackRack(track)
+    })
+  }
+
+  /** Same as setLibrary, and keep imported wavs in the project so they save. */
+  adoptLibrary(trackId: string, program: SamplerProgram, assets: { id: string; name: string; sampleRate: number; channels: Float32Array[] }[]) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      track.instrument = 'library'
+      track.library = program
+      for (const asset of assets) this.buffers.set(asset.id, asset)
+      if (!track.rack?.devices?.length) normalizeTrackRack(track)
+    })
+  }
+
+  setLibraryMic(trackId: string, micId: string, gain: number, mute?: boolean) {
+    this.mutate(() => {
+      const mic = this.track(trackId)?.library?.mics.find((item) => item.id === micId)
+      if (!mic) return
+      mic.gain = Math.max(0, Math.min(1, gain))
+      if (mute != null) mic.mute = mute
+    })
   }
 
   addTrack(type: Track['type']) {
@@ -1334,9 +1419,9 @@ export class ProjectStore {
     })
   }
 
-  addPerformedNotes(trackId: string, clipId: string, notes: Omit<MidiNote, 'id'>[], mode: 'overdub' | 'replace' = 'overdub', fixedBeats = 0) {
+  addPerformedNotes(trackId: string, clipId: string, notes: Omit<MidiNote, 'id'>[], mode: 'overdub' | 'replace' = 'overdub', fixedBeats = 0, coalesce = false) {
     if (!notes.length) return
-    this.mutate(() => {
+    const write = () => {
       const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
       if (!clip) return
       const fixed = fixedBeats > 0 ? fixedBeats : 0
@@ -1357,7 +1442,9 @@ export class ProjectStore {
         for (const note of incoming) end = Math.max(end, note.startBeat + note.durationBeats)
         clip.durationBeats = Math.max(clip.durationBeats, end)
       }
-    })
+    }
+    if (coalesce) this.draft(write)
+    else this.mutate(write)
   }
 
   setClipLength(trackId: string, clipId: string, beats: number) {
@@ -2199,6 +2286,7 @@ export class ProjectStore {
     this.selectedMidiClipId = null
     this.selectedNoteId = null
     this.selectedNoteIds = []
+    this.sync.rebase(this.project)
     this.emit()
   }
 
@@ -2298,6 +2386,55 @@ export class ProjectStore {
     this.rackFlip = false
     this.rackDetail = false
     this.emit()
+  }
+
+  openPatch(trackId: string) {
+    if (this.patchTrackId === trackId) {
+      this.patchTrackId = null
+      this.emit()
+      return
+    }
+    this.patchTrackId = trackId
+    const track = this.track(trackId)
+    if (track?.type === 'midi' && !track.omniPatch) {
+      this.mutate(() => {
+        track.omniPatch = emptyOmni(track.name)
+      })
+      return
+    }
+    this.emit()
+  }
+
+  updateOmni(trackId: string, fn: (patch: OmniPatch) => void, draft = false) {
+    const run = () => {
+      const track = this.track(trackId)
+      if (!track?.omniPatch || track.type !== 'midi') return
+      fn(track.omniPatch)
+    }
+    if (draft) this.draft(run)
+    else this.mutate(run)
+  }
+
+  saveOmniPatch(trackId: string) {
+    this.mutate(() => {
+      const patch = this.track(trackId)?.omniPatch
+      if (!patch) return
+      const copy = cloneOmni(patch, true)
+      copy.name = patch.name.trim() || 'Patch'
+      const library = (this.project.omniLibrary ?? []).filter((item) => item.name !== copy.name)
+      this.project.omniLibrary = [...library, copy]
+    })
+  }
+
+  loadOmniPatch(trackId: string, id: string) {
+    this.mutate(() => {
+      const found = this.project.omniLibrary?.find((item) => item.id === id)
+      const track = this.track(trackId)
+      if (!found || track?.type !== 'midi') return
+      const copy = cloneOmni(found, true)
+      copy.name = found.name
+      track.omniPatch = copy
+    })
   }
 
   flipRack() {

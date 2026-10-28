@@ -7,6 +7,7 @@ import { defaultRecord, uid } from '../../model/types'
 import { normalizeScale } from '../../model/scale'
 import { normalizePadKit } from '../../model/padMachine'
 import { normalizeBeats } from '../../model/steps'
+import { normalizeOmniProject } from '../../instruments/patch/model'
 import type { FactoryPreset, ParamSpec, PluginDescriptor } from './types'
 
 const VERSION = '1'
@@ -909,6 +910,7 @@ export function tuneLatency(sampleRate: number) {
 }
 
 export function normalizeProject(project: Project): Project {
+  normalizeOmniProject(project)
   project.scale = normalizeScale(project.scale)
   project.padKit = normalizePadKit(project.padKit)
   const beats = normalizeBeats(project.beats, project.patternClips)
