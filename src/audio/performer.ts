@@ -1,5 +1,6 @@
 import type { AudioEngine } from './engine'
-import { heardBeat, midiPerformanceMs, quantizeBeat, repeatIntervalBeats, repeatIntervalSeconds, type RepeatRate } from '../model/midiClock'
+import { BEAT_LOOKAHEAD_SEC, BeatRepeat, beatAt, contextAt, type RepeatHit } from '../model/beatRepeat'
+import { heardBeat, midiPerformanceMs, quantizeBeat, repeatIntervalBeats, type RepeatRate } from '../model/midiClock'
 import { snapPitch, type ScaleId } from '../model/scale'
 import {
   chokeTargets,
@@ -7,11 +8,11 @@ import {
   padVelocity,
   pickLayer,
   sixteenLevels,
-  swungRepeats,
   timingCorrect,
   type LevelSpread,
   type PadProgram,
 } from '../model/padMachine'
+import { samplesToBeats } from '../model/time'
 
 export interface PlayedNote {
   pitch: number
@@ -28,23 +29,48 @@ export interface PerformTarget {
   drums: boolean
 }
 
+interface PadColor {
+  tune?: number
+  filter?: number
+  decay?: number
+  attack?: number
+  swing?: number
+}
+
 interface HeldNote {
   pitch: number
   eventMs: number
   velocity: number
   erase: boolean
   locks?: Record<string, number>
+  sample: Float32Array | null
+  color?: PadColor
+  choke: number[]
+  repeated: boolean
+}
+
+interface RepeatVoice {
+  sample: Float32Array | null
+  color?: PadColor
+  locks?: Record<string, number>
+  choke: number[]
 }
 
 /**
  * Turns a pointer, key, or MIDI message into sound before any project edit.
  * The musical position is taken from the event timestamp, so a late handler still prints the right beat.
+ * Beat repeat is scheduled on the audio clock, ahead of the speaker, and locked to the transport grid.
  */
 export class Performer {
   private held = new Map<number, HeldNote>()
   private latched = new Map<number, HeldNote>()
+  private holders = new Map<number, number>()
+  private voices = new Map<number, RepeatVoice>()
   private recent: PlayedNote[] = []
-  private repeat: { rate: RepeatRate; triplet: boolean } | null = null
+  private pending: PlayedNote[] = []
+  private beat = new BeatRepeat()
+  private grid: { rate: RepeatRate; triplet: boolean } | null = null
+  private engaged = false
   private quantizeBeats = 0
   private octave = 0
   private snap = false
@@ -61,13 +87,15 @@ export class Performer {
   private fixedBeats = 0
   private recordMode: 'overdub' | 'replace' = 'overdub'
   private sampleOf: (bufferId: string) => Float32Array | null = () => null
+  private freeOrigin: { context: number; beat: number } | null = null
 
   constructor(
     private engine: AudioEngine,
     private target: () => PerformTarget | null,
-    private commit: (target: PerformTarget, notes: PlayedNote[], mode: 'overdub' | 'replace', fixedBeats: number) => void,
+    private commit: (target: PerformTarget, notes: PlayedNote[], mode: 'overdub' | 'replace', fixedBeats: number, coalesce?: boolean) => void,
     private recording: () => boolean,
     private eraseNotes: (target: PerformTarget, pitch: number, fromBeat: number, toBeat: number) => void,
+    private finishTake: () => void = () => undefined,
   ) {}
 
   setScale(snap: boolean, root: number, scale: ScaleId, octave: number) {
@@ -77,8 +105,41 @@ export class Performer {
     this.octave = octave
   }
 
+  /** Keys: choosing a rate also turns repeat on. The pad deck engages with the Beat button instead. */
   setRepeat(rate: RepeatRate | null, triplet: boolean) {
-    this.repeat = rate ? { rate, triplet } : null
+    this.setGrid(rate, triplet)
+    this.setEngaged(!!rate)
+  }
+
+  setGrid(rate: RepeatRate | null, triplet: boolean) {
+    const next = rate ? { rate, triplet } : null
+    const changed = (next?.rate ?? null) !== (this.grid?.rate ?? null) || (next?.triplet ?? false) !== (this.grid?.triplet ?? false)
+    this.grid = next
+    if (!changed) return
+    if (!next) {
+      if (this.engaged) this.setEngaged(false)
+      return
+    }
+    if (this.engaged) this.retarget(repeatIntervalBeats(next.rate, next.triplet))
+  }
+
+  setEngaged(on: boolean) {
+    if (this.engaged === on) return
+    this.engaged = on
+    if (on) {
+      this.armHeld()
+      this.engine.setRepeatWatch(true)
+      this.pumpSoon()
+      return
+    }
+    const beat = this.safeBeat()
+    this.beat.releaseAll(beat)
+    this.holders.clear()
+    this.latched.clear()
+    this.cancelFuture(beat)
+    this.pumpSoon()
+    this.flushRepeats(true)
+    this.engine.setRepeatWatch(false)
   }
 
   setQuantize(beats: number) {
@@ -97,8 +158,10 @@ export class Performer {
     recordMode: 'overdub' | 'replace'
     sampleOf: (bufferId: string) => Float32Array | null
   }) {
+    const swing = effectiveSwing(opts.kit?.swing ?? opts.swing, opts.kit?.trackSwing ?? opts.swing)
+    const swingChanged = swing !== this.swing
     this.kit = opts.kit
-    this.swing = effectiveSwing(opts.kit?.swing ?? opts.swing, opts.kit?.trackSwing ?? opts.swing)
+    this.swing = swing
     this.fullLevel = opts.fullLevel
     this.accent = opts.accent
     this.erase = opts.erase
@@ -107,19 +170,18 @@ export class Performer {
     this.fixedBeats = opts.fixedBeats
     this.recordMode = opts.recordMode
     this.sampleOf = opts.sampleOf
+    if (swingChanged && this.engaged && this.grid) this.retarget(repeatIntervalBeats(this.grid.rate, this.grid.triplet))
   }
 
   down(rawPitch: number, velocity: number, eventMs: number, pointerId: number, levelIndex?: number) {
     const pitch = this.soundingPitch(rawPitch)
     if (this.erase && (this.target()?.drums ?? false)) {
-      this.held.set(pointerId, { pitch, eventMs, velocity, erase: true })
+      this.held.set(pointerId, { pitch, eventMs, velocity, erase: true, sample: null, choke: [], repeated: false })
       return
     }
-    if (this.latch && this.repeat && this.latched.has(pitch)) {
-      const held = this.latched.get(pitch)!
+    if (this.latch && this.engaged && this.latched.has(pitch)) {
       this.latched.delete(pitch)
-      this.engine.liveNoteOff(pitch)
-      this.print(held.pitch, held.velocity, held.eventMs, eventMs, held.locks)
+      this.releaseRepeat(pitch, eventMs)
       return
     }
     const drums = this.target()?.drums ?? false
@@ -130,10 +192,10 @@ export class Performer {
     const locks = spread
       ? { tune: spread.tune, filter: spread.filter, decay: spread.decay, attack: spread.attack }
       : undefined
-    const color = spread
-      ? { tune: spread.tune, filter: spread.filter, decay: spread.decay, attack: spread.attack, swing: this.repeat ? this.swingFraction() : 0 }
+    const color: PadColor | undefined = spread
+      ? { tune: spread.tune, filter: spread.filter, decay: spread.decay, attack: spread.attack }
       : pad
-        ? { tune: pad.tune, filter: pad.filter, decay: pad.decay, attack: pad.attack, swing: this.repeat ? this.swingFraction() : 0 }
+        ? { tune: pad.tune, filter: pad.filter, decay: pad.decay, attack: pad.attack }
         : undefined
     let sample: Float32Array | null = null
     if (pad && !spread) {
@@ -144,18 +206,26 @@ export class Performer {
       if (layer?.tune && color) color.tune = (color.tune || 0) + layer.tune
     }
     const gain = level * (pad?.level ?? 1)
+    const choke = drums ? chokeTargets(this.chokePads(), pitch) : []
+    const repeated = this.engaged && !!this.grid
+    const note: HeldNote = { pitch, eventMs, velocity: gain, erase: false, locks, sample, color, choke, repeated }
+    this.held.set(pointerId, note)
+    if (repeated) {
+      const count = (this.holders.get(pitch) ?? 0) + 1
+      this.holders.set(pitch, count)
+      if (count === 1) this.startRepeat(pitch, gain, this.transportBeat(eventMs), sample, color, locks, choke)
+      else this.beat.pressure(pitch, gain, this.transportBeat(eventMs))
+      if (this.latch) this.latched.set(pitch, note)
+      this.pumpNow()
+      return
+    }
     if (drums) {
-      for (const other of chokeTargets(this.chokePads(), pitch)) this.engine.liveNoteOff(other)
+      for (const other of choke) this.engine.liveNoteOff(other)
       if (pad?.poly === 'mono') this.engine.liveNoteOff(pitch)
     }
-    const interval = this.repeatSeconds()
-    const every = interval > 0 ? Math.round(interval * (this.engine.sampleRate || 48000)) : 0
     if (sample) this.engine.playBuffer(sample, pitch, gain, color)
-    else if (drums) this.engine.liveDrum(pitch, gain, every, color)
-    else this.engine.liveNoteOn(pitch, gain, -1, every, color)
-    const held = { pitch, eventMs, velocity: gain, erase: false, locks }
-    this.held.set(pointerId, held)
-    if (this.latch && this.repeat) this.latched.set(pitch, held)
+    else if (drums) this.engine.liveDrum(pitch, gain, 0, color)
+    else this.engine.liveNoteOn(pitch, gain, -1, 0, color)
   }
 
   up(pointerId: number, eventMs: number) {
@@ -170,8 +240,17 @@ export class Performer {
       this.eraseNotes(target, held.pitch, start, end)
       return
     }
+    if (held.repeated) {
+      if (this.latched.has(held.pitch)) return
+      const left = (this.holders.get(held.pitch) ?? 1) - 1
+      if (left > 0) {
+        this.holders.set(held.pitch, left)
+        return
+      }
+      this.releaseRepeat(held.pitch, eventMs)
+      return
+    }
     const still = [...this.held.values(), ...this.latched.values()].some((item) => item.pitch === held.pitch)
-    if (this.latched.has(held.pitch)) return
     if (!still) this.engine.liveNoteOff(held.pitch)
     this.print(held.pitch, held.velocity, held.eventMs, eventMs, held.locks)
   }
@@ -181,7 +260,8 @@ export class Performer {
     if (!held || held.erase) return
     const level = padVelocity(velocity, this.fullLevel, this.accent)
     held.velocity = level
-    if (this.repeat) this.engine.liveGain(held.pitch, level)
+    if (held.repeated) this.beat.pressure(held.pitch, level, this.transportBeat(performance.now()))
+    this.engine.liveGain(held.pitch, level)
   }
 
   midi(data: Uint8Array, timeStamp: number, nowMs: number) {
@@ -195,9 +275,176 @@ export class Performer {
   }
 
   capture(): PlayedNote[] {
-    const notes = this.recent
-    this.recent = []
+    const notes = this.recent.splice(0, this.recent.length)
     return notes
+  }
+
+  /** Called from the audio look-ahead. Hit times were chosen on the musical grid. */
+  pumpRepeats(now: number, horizon: number) {
+    if (!this.grid && this.beat.count === 0) return
+    const clock = this.clockFor(now)
+    const { play, record, realigned } = this.beat.take(clock, now, horizon)
+    if (realigned) {
+      for (const pitch of this.voices.keys()) this.engine.cancelPadHits(pitch, now)
+    }
+    for (const hit of play) this.sound(hit)
+    if (record.length) this.remember(record)
+  }
+
+  private armHeld() {
+    if (!this.grid) return
+    const seen = new Set<number>()
+    for (const note of this.held.values()) {
+      if (note.erase || seen.has(note.pitch)) continue
+      seen.add(note.pitch)
+      note.repeated = true
+      let count = 0
+      for (const other of this.held.values()) if (!other.erase && other.pitch === note.pitch) count += 1
+      this.holders.set(note.pitch, count)
+      this.startRepeat(note.pitch, note.velocity, this.transportBeat(performance.now()), note.sample, note.color, note.locks, note.choke)
+      if (this.latch) this.latched.set(note.pitch, note)
+    }
+  }
+
+  private startRepeat(
+    pitch: number,
+    velocity: number,
+    fromBeat: number,
+    sample: Float32Array | null,
+    color: PadColor | undefined,
+    locks: Record<string, number> | undefined,
+    choke: number[],
+  ) {
+    if (!this.grid) return
+    this.voices.set(pitch, { sample, color, locks, choke })
+    this.beat.arm({
+      pitch,
+      velocity,
+      fromBeat,
+      interval: repeatIntervalBeats(this.grid.rate, this.grid.triplet),
+      swing: this.swing,
+    })
+    this.engine.setRepeatWatch(true)
+  }
+
+  private retarget(interval: number) {
+    const { now } = this.clockNow()
+    this.beat.retarget(interval, this.swing, beatAt(this.clockFor(now), now), now)
+    this.cancelFuture()
+    this.pumpSoon()
+  }
+
+  private releaseRepeat(pitch: number, eventMs: number) {
+    this.holders.delete(pitch)
+    if (this.beat.hasOpen(pitch)) {
+      const beat = this.transportBeat(eventMs)
+      this.beat.release(pitch, beat)
+      this.engine.cancelPadHits(pitch, this.contextForBeat(beat))
+      this.pumpNow()
+    }
+    this.voices.delete(pitch)
+    const still = [...this.held.values(), ...this.latched.values()].some((item) => item.pitch === pitch)
+    if (!still) this.engine.liveNoteOff(pitch)
+    if (this.beat.count === 0) {
+      this.flushRepeats(true)
+      if (!this.engaged) this.engine.setRepeatWatch(false)
+    }
+  }
+
+  private sound(hit: RepeatHit) {
+    const voice = this.voices.get(hit.pitch)
+    if (!voice) return
+    if (voice.sample) this.engine.playBuffer(voice.sample, hit.pitch, hit.velocity, voice.color, hit.when)
+    else this.engine.schedulePadHit(hit.when, hit.pitch, hit.velocity, voice.color)
+    for (const other of voice.choke) this.engine.duckPad(other)
+  }
+
+  private remember(hits: RepeatHit[]) {
+    for (const hit of hits) {
+      const voice = this.voices.get(hit.pitch)
+      this.pending.push({
+        pitch: hit.pitch,
+        startBeat: Math.max(0, hit.beat),
+        durationBeats: hit.durationBeats,
+        velocity: hit.velocity,
+        locks: voice?.locks,
+      })
+    }
+    this.flushRepeats(false)
+  }
+
+  private flushRepeats(close: boolean) {
+    const notes = this.pending.splice(0, this.pending.length)
+    const target = this.target()
+    if (notes.length && this.recording() && target) this.commit(target, notes, this.recordMode, this.fixedBeats, true)
+    else if (notes.length) {
+      this.recent.push(...notes)
+      if (this.recent.length > 256) this.recent.splice(0, this.recent.length - 256)
+    }
+    if (close) this.finishTake()
+  }
+
+  private cancelFuture(fromBeat?: number) {
+    const when = fromBeat == null ? this.clockNow().now : this.contextForBeat(fromBeat)
+    for (const pitch of this.voices.keys()) this.engine.cancelPadHits(pitch, when)
+  }
+
+  private pumpNow() {
+    const { now } = this.clockNow()
+    this.pumpRepeats(now, now + BEAT_LOOKAHEAD_SEC)
+  }
+
+  private pumpSoon() {
+    queueMicrotask(() => this.pumpNow())
+  }
+
+  private clockNow() {
+    const ctx = this.engine.unlock()
+    const now = ctx.currentTime
+    return { clock: this.clockFor(now), now }
+  }
+
+  private safeBeat() {
+    const { clock, now } = this.clockNow()
+    return beatAt(clock, now)
+  }
+
+  private contextForBeat(beat: number) {
+    return contextAt(this.clockNow().clock, beat)
+  }
+
+  private clockFor(now: number) {
+    if (this.engine.transportPlaying) {
+      this.freeOrigin = null
+      const origin = this.engine.playOrigin()
+      return { originContext: origin.context, originBeat: origin.beat, tempo: this.engine.tempo, sampleRate: this.engine.sampleRate }
+    }
+    if (!this.freeOrigin) {
+      const beat = samplesToBeats(this.engine.positionSamples, this.engine.sampleRate, this.engine.tempo)
+      this.freeOrigin = { context: now, beat }
+    }
+    return {
+      originContext: this.freeOrigin.context,
+      originBeat: this.freeOrigin.beat,
+      tempo: this.engine.tempo,
+      sampleRate: this.engine.sampleRate,
+    }
+  }
+
+  private transportBeat(eventMs: number) {
+    const { clock } = this.clockNow()
+    const timing = this.engine.clockCompensation()
+    return heardBeat({
+      eventMs,
+      stamp: this.engine.outputStamp(),
+      originContext: clock.originContext,
+      originBeat: clock.originBeat,
+      tempo: clock.tempo,
+      outputLatency: timing.outputLatency,
+      baseLatency: timing.baseLatency,
+      calibrationSec: timing.calibrationSec,
+      quantizeBeats: 0,
+    })
   }
 
   private padFor(pitch: number) {
@@ -216,19 +463,10 @@ export class Performer {
     return pads
   }
 
-  private swingFraction() {
-    return 2 * (this.swing / 100) - 1
-  }
-
   private soundingPitch(rawPitch: number) {
     if (this.target()?.drums) return Math.max(0, Math.min(127, rawPitch))
     const shifted = Math.max(0, Math.min(127, rawPitch + this.octave * 12))
     return this.snap ? snapPitch(shifted, this.root, this.scale) : shifted
-  }
-
-  private repeatSeconds() {
-    if (!this.repeat) return 0
-    return repeatIntervalSeconds(this.repeat.rate, this.repeat.triplet, this.engine.tempo)
   }
 
   private place(eventMs: number) {
@@ -246,7 +484,7 @@ export class Performer {
       calibrationSec: clock.calibrationSec,
       quantizeBeats: 0,
     })
-    if (this.kit?.timing) return timingCorrect(beat, this.kit.timingGrid || this.quantizeBeats || 0.25, this.kit.timingStrength, this.repeat ? 50 : this.swing, true)
+    if (this.kit?.timing) return timingCorrect(beat, this.kit.timingGrid || this.quantizeBeats || 0.25, this.kit.timingStrength, this.swing, true)
     return quantizeBeat(beat, this.quantizeBeats)
   }
 
@@ -255,10 +493,7 @@ export class Performer {
     if (!target) return
     const startBeat = Math.max(0, this.place(startMs))
     const endBeat = Math.max(startBeat + 0.05, this.place(endMs))
-    const interval = this.repeat ? repeatIntervalBeats(this.repeat.rate, this.repeat.triplet) : 0
-    const marks = interval > 0 ? swungRepeats(startBeat, endBeat, interval, this.swing) : [startBeat]
-    const span = interval > 0 ? Math.min(interval * 0.9, 0.5) : endBeat - startBeat
-    const notes = marks.map((beat) => ({ pitch, velocity, startBeat: beat, durationBeats: span, locks }))
+    const notes = [{ pitch, velocity, startBeat, durationBeats: endBeat - startBeat, locks }]
     if (this.recording()) this.commit(target, notes, this.recordMode, this.fixedBeats)
     else {
       this.recent.push(...notes)
