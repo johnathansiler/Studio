@@ -74,7 +74,8 @@ export function resolveLoopDrag(
   const at = Math.max(0, sample)
   const free = bypass || !(gridBeats > 0)
   if (drag.mode === 'end') {
-    let end = snapLoopSample(at, project, gridBeats, bypass)
+    // Delta from the pointer, so a handle pinned to the screen edge does not jump.
+    let end = snapLoopSample(Math.max(0, drag.originEnd + (at - drag.anchor)), project, gridBeats, bypass)
     if (end < drag.originStart + min) {
       end = free ? drag.originStart + min : snapLoopSample(drag.originStart + min, project, gridBeats, false, 'ceil')
       if (end < drag.originStart + min) end = drag.originStart + min
@@ -82,7 +83,7 @@ export function resolveLoopDrag(
     return finish(drag.originStart, end, min)
   }
   if (drag.mode === 'start') {
-    let start = snapLoopSample(at, project, gridBeats, bypass)
+    let start = snapLoopSample(Math.max(0, drag.originStart + (at - drag.anchor)), project, gridBeats, bypass)
     const limit = Math.max(0, drag.originEnd - min)
     if (start > limit) {
       start = free ? limit : snapLoopSample(limit, project, gridBeats, false, 'floor')
