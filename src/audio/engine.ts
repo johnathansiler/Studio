@@ -586,10 +586,11 @@ export class AudioEngine {
   }
 
   /** Audition a layered patch. `down` starts the note; a lift releases it. A loaded starter instrument plays instead. */
-  previewPatch(trackId: string, pitch: number, down: boolean) {
+  previewPatch(trackId: string, pitch: number, down: boolean, velocity = 0.85) {
     this.unlock()
     if (this.project) this.sync(this.project, this.assetOf)
     const when = this.ctx?.currentTime ?? 0
+    const level = velocity > 0 && velocity <= 1 ? velocity : 0.85
     const track = this.project?.tracks.find((item) => item.id === trackId)
     if (track?.instrument === 'library' && track.library) {
       const key = `${trackId}:${Math.round(pitch)}`
@@ -601,15 +602,15 @@ export class AudioEngine {
       this.libraryHeld.add(key)
       const rate = this.ctx?.sampleRate ?? this.sampleRate
       const program = track.library
-      void this.libraryHost.prepare(trackId, track, [{ sample: 0, pitch, vel: 0.85 }], rate).then((ready) => {
+      void this.libraryHost.prepare(trackId, track, [{ sample: 0, pitch, vel: level }], rate).then((ready) => {
         if (!this.libraryHeld.has(key) || ready.missing > 0 || ready.sounding <= 0) return
         if (this.project?.tracks.find((item) => item.id === trackId)?.library !== program) return
         const at = (this.ctx?.currentTime ?? 0) + 0.02
-        this.libraryHost.note(trackId, pitch, 0.85, at)
+        this.libraryHost.note(trackId, pitch, level, at)
       }).catch(() => undefined)
       return
     }
-    this.patchHost.note(trackId, pitch, down ? 0.85 : 0, when)
+    this.patchHost.note(trackId, pitch, down ? level : 0, when)
   }
 
   setCompareGain(gain: number) {
@@ -2442,6 +2443,11 @@ export class AudioEngine {
 
   /** Monitor one track through its MIDI effect chain, then the instrument. */
   playThrough(trackId: string, pitch: number, velocity: number) {
+    const track = this.project?.tracks.find((item) => item.id === trackId)
+    if (track?.instrument === 'library' && track.library) {
+      this.previewPatch(trackId, pitch, true, velocity)
+      return
+    }
     const previous = this.liveTrackId
     this.liveTrackId = trackId
     this.liveNoteOn(pitch, velocity)
@@ -2449,6 +2455,11 @@ export class AudioEngine {
   }
 
   releaseThrough(trackId: string, pitch: number) {
+    const track = this.project?.tracks.find((item) => item.id === trackId)
+    if (track?.instrument === 'library' && track.library) {
+      this.previewPatch(trackId, pitch, false)
+      return
+    }
     const previous = this.liveTrackId
     this.liveTrackId = trackId
     this.liveNoteOff(pitch)

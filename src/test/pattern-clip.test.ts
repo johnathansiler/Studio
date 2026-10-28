@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { deletesSelection } from '../ui/clipKeys'
 import { ProjectStore } from '../state/store'
 import { createEmptyProject } from '../model/types'
 import { normalizeBeats, renderPattern, starterPattern } from '../model/steps'
@@ -167,6 +168,48 @@ describe('pattern clip edits', () => {
     const restored = store.project.tracks.find((item) => item.id === track.id)!
     expect(store.project.patternClips?.map((clip) => clip.id)).toEqual([patternId])
     expect(restored.midiClips.map((clip) => clip.id)).toEqual([midiId])
+  })
+})
+
+describe('timeline delete key', () => {
+  const timeline = { tagName: 'DIV', isContentEditable: false }
+  const field = { tagName: 'INPUT', isContentEditable: false }
+
+  it('removes a selected pattern, audio, or MIDI clip, and leaves text fields alone', () => {
+    expect(deletesSelection('Delete', timeline)).toBe(true)
+    expect(deletesSelection('Backspace', timeline)).toBe(true)
+    expect(deletesSelection('Delete', null)).toBe(true)
+    expect(deletesSelection('Delete', field)).toBe(false)
+    expect(deletesSelection('Backspace', { tagName: 'TEXTAREA', isContentEditable: false })).toBe(false)
+    expect(deletesSelection('Backspace', { tagName: 'SELECT', isContentEditable: false })).toBe(false)
+    expect(deletesSelection('Backspace', { tagName: 'DIV', isContentEditable: true })).toBe(false)
+    expect(deletesSelection('Enter', timeline)).toBe(false)
+
+    const store = new ProjectStore(createEmptyProject(48000))
+    const audioId = store.project.tracks.find((track) => track.type === 'audio')!.id
+    const midi = store.project.tracks.find((track) => track.type === 'midi')!
+    const press = (key: string, target: { tagName: string; isContentEditable: boolean }) => {
+      if (deletesSelection(key, target)) store.deleteSelectedClip()
+    }
+
+    store.placePattern(0)
+    press('Delete', timeline)
+    expect(store.project.patternClips).toEqual([])
+
+    store.drawRegion(audioId, 0, 48000)
+    press('Backspace', timeline)
+    expect(store.project.tracks.find((track) => track.id === audioId)!.clips).toEqual([])
+
+    store.addMidiClip(midi.id, 0)
+    press('Delete', timeline)
+    expect(store.project.tracks.find((track) => track.id === midi.id)!.midiClips).toEqual([])
+
+    store.placePattern(4)
+    press('Delete', field)
+    press('Backspace', field)
+    expect(store.project.patternClips).toHaveLength(1)
+    press('Delete', timeline)
+    expect(store.project.patternClips).toEqual([])
   })
 })
 

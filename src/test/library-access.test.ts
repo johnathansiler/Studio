@@ -11,7 +11,7 @@ import type { LibraryEntry } from '../audio/multisample/library'
 import { createEmptyProject } from '../model/types'
 import { encodeWav } from '../model/wav'
 import { filterSounds, parseCatalog } from '../sounds/catalog'
-import { filterStarters, loadStarterOnto, playableAudition, playablePitch } from '../sounds/instruments'
+import { boundLibraryHost, filterStarters, loadStarterOnto, placeholderInstrumentName, playableAudition, playablePitch } from '../sounds/instruments'
 import {
   SOUND_PANEL_DEFAULT,
   SOUND_PANEL_MAX,
@@ -185,6 +185,7 @@ describe('library access', () => {
     expect(phone).not.toContain('sound-resize')
     expect(phone).toContain('Close')
     expect(phone).toContain('Load. Load it on this track and play a note.')
+    expect(phone).toContain('>Drums</option>')
     expect(phone).not.toContain('role="dialog"')
   })
 
@@ -226,6 +227,18 @@ describe('library access', () => {
     expect(program.id).toBe('xylophone')
     expect(program.samples[0].url).toBe('https://huggingface.co/datasets/cueharbor/starter-instruments/resolve/main/xylophone/samples/c4.wav')
     expect(pitches).toEqual([60])
+    expect(store.track(keys.id)!.name).toBe('Xylophone')
+    expect(placeholderInstrumentName('Keys')).toBe(true)
+    expect(placeholderInstrumentName('Sampler')).toBe(true)
+    expect(placeholderInstrumentName('Sampler 2')).toBe(true)
+    expect(placeholderInstrumentName('Verse')).toBe(false)
+    store.updateTrack(keys.id, { name: 'Verse' })
+    store.setLibrary(keys.id, { ...program, name: 'Clarinet' })
+    expect(store.track(keys.id)!.name).toBe('Verse')
+    expect(store.track(keys.id)!.instrument).toBe('library')
+    store.updateTrack(keys.id, { name: 'Clarinet' })
+    store.setLibrary(keys.id, { ...store.track(keys.id)!.library!, name: 'Bassoon' })
+    expect(store.track(keys.id)!.name).toBe('Bassoon')
     expect(urls.every((url) => url.includes('huggingface.co/datasets/cueharbor/'))).toBe(true)
 
     const cache = new SampleCache(fetchImpl)
@@ -236,6 +249,39 @@ describe('library access', () => {
     let sum = 0
     for (const sample of played[0]) sum += sample * sample
     expect(Math.sqrt(sum / played[0].length)).toBeGreaterThan(0.02)
+  })
+
+  it('keeps unlock on the engine when a starter instrument is loaded or played', async () => {
+    class Engine {
+      hits = 0
+      unlock() {
+        this.hits += 1
+      }
+      holdLibraryPack() {
+        this.unlock()
+      }
+      async auditionLibrary() {
+        this.unlock()
+      }
+    }
+    const engine = new Engine()
+    const bare = {
+      setLibrary() {},
+      holdLibraryPack: engine.holdLibraryPack,
+      auditionLibrary: engine.auditionLibrary,
+    }
+    await expect(bare.auditionLibrary()).rejects.toThrow('this.unlock is not a function')
+
+    const store = new ProjectStore(createEmptyProject())
+    const keys = store.project.tracks.find((track) => track.name === 'Keys')!
+    const tone = new Float32Array(480)
+    const wav = encodeWav([tone], 48000)
+    const fetchImpl = async (url: string) => (url.endsWith('.sfz') ? new Response('<region> sample=samples/c4.wav key=c4\n') : new Response(wav))
+    await loadStarterOnto(xylophone, keys.id, boundLibraryHost(engine, (id, program) => store.setLibrary(id, program)), { fetchImpl })
+    expect(engine.hits).toBeGreaterThan(0)
+    expect(store.track(keys.id)!.instrument).toBe('library')
+    expect(store.track(keys.id)!.name).toBe('Xylophone')
+    expect(store.track(keys.id)!.library?.id).toBe('xylophone')
   })
 
   it('picks a note the velocity layers can sound and loads every round-robin before playback', async () => {

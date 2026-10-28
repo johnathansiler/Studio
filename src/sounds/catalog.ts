@@ -52,12 +52,23 @@ export function bpmMatchesProject(bpm: number, projectBpm: number) {
   return Math.abs(candidate - projectBpm) / projectBpm <= 0.06
 }
 
+const DRUM_WORD = /\b(drum|drums|kit|kick|snare|hi-?hat|hat|clap|tom|cymbal|rimshot|rim)\b/
+
+/** One-shots and loops that are drum samples or kits. Percussion that is not a drum stays out. */
+export function isDrumSound(entry: Pick<SoundEntry, 'name' | 'path' | 'tags'>) {
+  const path = entry.path.toLowerCase()
+  if (path.startsWith('drums/') || path.includes('/drums/')) return true
+  return DRUM_WORD.test(`${entry.name} ${entry.path} ${entry.tags.join(' ')}`.toLowerCase())
+}
+
 export function filterSounds(entries: SoundEntry[], query: SoundQuery): SoundEntry[] {
   const tokens = query.text.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const key = query.key.trim().toLowerCase()
   return entries
     .filter((entry) => {
-      if (query.type !== 'all' && entry.type !== query.type) return false
+      if (query.type === 'drum') {
+        if (!isDrumSound(entry)) return false
+      } else if (query.type !== 'all' && entry.type !== query.type) return false
       if (query.favoritesOnly && !query.favorites.includes(entry.id)) return false
       if (key && !soundKeyMatches(key, entry.key)) return false
       if (query.bpm === 'project' && (entry.bpm == null || !bpmMatchesProject(entry.bpm, query.projectBpm))) return false

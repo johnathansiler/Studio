@@ -237,7 +237,11 @@ export class Performer {
     }
     if (sample) this.engine.playBuffer(sample, pitch, gain, color)
     else if (drums) this.engine.liveDrum(pitch, gain, 0, color)
-    else this.engine.liveNoteOn(pitch, gain, -1, 0, color)
+    else {
+      const aimed = this.target()
+      if (aimed) this.engine.playThrough(aimed.trackId, pitch, gain)
+      else this.engine.liveNoteOn(pitch, gain, -1, 0, color)
+    }
   }
 
   up(pointerId: number, eventMs: number) {
@@ -263,7 +267,11 @@ export class Performer {
       return
     }
     const still = [...this.held.values(), ...this.latched.values()].some((item) => item.pitch === held.pitch)
-    if (!still) this.engine.liveNoteOff(held.pitch)
+    if (!still) {
+      const aimed = this.target()
+      if (aimed && !aimed.drums && !held.sample) this.engine.releaseThrough(aimed.trackId, held.pitch)
+      else this.engine.liveNoteOff(held.pitch)
+    }
     this.print(held.pitch, held.fine, held.velocity, held.eventMs, eventMs, held.locks)
   }
 

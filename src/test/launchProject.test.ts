@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { emptyOmni } from '../instruments/patch'
-import { isSessionLink, isUntouchedEmpty, NEW_PROJECT, planLaunch, readTab, shouldKeepProject, TAB_LIVE, TAB_PROJECT } from '../model/launchProject'
+import { isSessionLink, isUntouchedEmpty, needsNewProjectConfirm, NEW_PROJECT, planLaunch, readTab, shouldKeepProject, TAB_LIVE, TAB_PROJECT } from '../model/launchProject'
 import { createEmptyProject } from '../model/types'
+import { ProjectStore } from '../state/store'
 
 function memory() {
   const data = new Map<string, string>()
@@ -65,5 +66,31 @@ describe('fresh project launch', () => {
     const limited = createEmptyProject()
     limited.masterPlugins = [{ id: 'lim', pluginId: 'limiter', version: '1', enabled: false, wet: 1, sidechain: '', params: {} }]
     expect(isUntouchedEmpty(limited)).toBe(true)
+  })
+
+  it('asks before a new project only when edits are still unsaved', () => {
+    expect(needsNewProjectConfirm(false)).toBe(false)
+    expect(needsNewProjectConfirm(true)).toBe(true)
+  })
+
+  it('starts from three tracks, an empty arrangement, and the default beats rack', () => {
+    const store = new ProjectStore(createEmptyProject(48000))
+    expect(store.project.tracks.map((track) => [track.name, track.type])).toEqual([
+      ['Vocal', 'audio'],
+      ['Music', 'audio'],
+      ['Keys', 'midi'],
+    ])
+    expect(store.project.patternClips ?? []).toEqual([])
+    expect(store.project.tracks.every((track) => track.clips.length === 0 && track.midiClips.length === 0)).toBe(true)
+    expect(store.project.beats?.patterns[0].channels.map((channel) => channel.name)).toEqual(['Kick', 'Snare', 'Clap', 'Hat', 'Perc'])
+    expect(store.hasUnsavedEdits()).toBe(false)
+    store.placePattern(0)
+    expect(store.hasUnsavedEdits()).toBe(true)
+    store.markSaved(store.editStamp())
+    expect(store.hasUnsavedEdits()).toBe(false)
+    store.loadProject(createEmptyProject(store.project.sampleRate), new Map())
+    expect(store.project.patternClips ?? []).toEqual([])
+    expect(store.project.tracks.map((track) => track.name)).toEqual(['Vocal', 'Music', 'Keys'])
+    expect(store.hasUnsavedEdits()).toBe(false)
   })
 })
