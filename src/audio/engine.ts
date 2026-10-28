@@ -16,6 +16,7 @@ import { renderNotes } from './rack/dsp'
 import { LibraryHost } from './multisample/host'
 import type { SamplePack } from './multisample/types'
 import { renderQuantizedClip } from '../model/quantize'
+import { emptyPatternLoopSamples } from '../model/channelRack'
 import { renderPattern, type RenderedHit } from '../model/steps'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav, linearResample } from '../model/wav'
@@ -1479,8 +1480,10 @@ export class AudioEngine {
           sample = project.loopStartSample + ((sample - project.loopStartSample) % len)
         }
       }
+      const patternLoop = project && this.status !== 'recording' ? emptyPatternLoopSamples(project) : 0
+      if (patternLoop > 1 && sample >= patternLoop) sample = sample % patternLoop
       this.positionSamples = Math.max(0, sample)
-      if (project && this.mode === 'arrangement' && !project.loopEnabled && this.status === 'playing') {
+      if (patternLoop <= 1 && project && this.mode === 'arrangement' && !project.loopEnabled && this.status === 'playing') {
         const end = arrangementEndSample(project)
         if (sample > end + this.sampleRate) {
           this.stop()
@@ -1546,6 +1549,20 @@ export class AudioEngine {
 
   private scheduleArrangement(horizon: number) {
     const project = this.project!
+    const patternLoop = this.status === 'recording' ? 0 : emptyPatternLoopSamples(project)
+    if (patternLoop > 16) {
+      if (this.nextLoopCtx == null) {
+        this.nextLoopCtx = this.playOriginCtx
+        this.nextLoopSample = ((this.playOriginSample % patternLoop) + patternLoop) % patternLoop
+      }
+      while (this.nextLoopCtx < horizon) {
+        const samples = Math.max(1, patternLoop - this.nextLoopSample)
+        this.scheduleWindow(this.nextLoopCtx, this.nextLoopSample, this.nextLoopSample + samples)
+        this.nextLoopCtx += samples / this.sampleRate
+        this.nextLoopSample = 0
+      }
+      return
+    }
     const end = arrangementEndSample(project)
     const cycleWhileRecording = this.status === 'recording' && project.record?.loop
     if (!project.loopEnabled || (this.status === 'recording' && !cycleWhileRecording)) {
@@ -1771,7 +1788,9 @@ export class AudioEngine {
       if (clip.scene != null) continue
       const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
       if (!pattern) continue
-      for (const hit of renderPattern(pattern, 0, clip.lengthBeats)) {
+      const full = pattern.steps * 0.25
+      const renderTo = emptyPatternLoopSamples(project) > 0 && clip.startBeat < 1e-4 ? Math.max(clip.lengthBeats, full) : clip.lengthBeats
+      for (const hit of renderPattern(pattern, 0, renderTo)) {
         if ((hit.output || midiId) !== trackId) continue
         const span = beatSpanSamples(project, clip.startBeat + hit.startBeat, hit.durationBeats)
         if (span.start < timelineStart || span.start >= timelineEnd) continue

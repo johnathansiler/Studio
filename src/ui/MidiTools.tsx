@@ -38,9 +38,13 @@ export function MidiTools({ store, engine }: { store: ProjectStore; engine: Audi
 
   useEffect(() => store.subscribe(() => setTick((value) => value + 1)), [store])
   useEffect(() => {
+    if (!store.midiToolsOpen) {
+      host.current?.stop()
+      return
+    }
     host.current?.start(hide)
     return () => host.current?.stop()
-  }, [hide])
+  }, [hide, store.midiToolsOpen])
   useEffect(() => {
     engine.liveTrackId = track?.id ?? null
     engine.midiOutChannel = selectMidiOut(project).channel

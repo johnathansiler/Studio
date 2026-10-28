@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { MASTERING_IDS } from '../audio/master/assistant'
 import { CATALOG, FACTORY, descriptor } from '../audio/plugins/catalog'
 import { MODEL_IDS } from '../audio/plugins/models'
 import { AmpPop } from './AmpPop'
 import { Faceplate } from './Faceplate'
+import { useFormFactor } from './form'
+
+const PluginFace = lazy(() => import('./faces/PluginFace').then((mod) => ({ default: mod.PluginFace })))
 import { NOTE_NAMES, SCALES } from '../model/scale'
 import { projectSampleBeat } from '../model/tempoMap'
 import { selectPlugin } from '../state/select'
@@ -18,7 +21,11 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   const [last, setLast] = useState('')
   const canvas = useRef<HTMLCanvasElement>(null)
   const [, setTick] = useState(0)
-  const faced = plugin ? MODEL_IDS.includes(plugin.pluginId) || plugin.pluginId === 'tune' : false
+  const compact = useFormFactor() !== 'desk'
+  const tuneFace = plugin?.pluginId === 'tune'
+  const sampleFace = plugin?.pluginId === 'sampler' || plugin?.pluginId === 'looper'
+  const customFace = !!plugin && plugin.pluginId !== 'tune' && plugin.pluginId !== 'amp' && !sampleFace
+  const faced = tuneFace || customFace || (plugin ? MODEL_IDS.includes(plugin.pluginId) : false)
   useEffect(() => {
     if (!faced) return
     const timer = window.setInterval(() => setTick((value) => value + 1), 80)
@@ -98,11 +105,39 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
       {plugin.pluginId === 'compressor' && (
         <button type="button" className="text-btn" title="Ducking preset: heavy compression for a sidechain key." onClick={() => store.applyPluginPreset(focus.trackId, plugin.id, 'Duck')}>Duck</button>
       )}
-      {plugin.pluginId === 'eq' && <canvas ref={canvas} width={320} height={64} className="spectrum" />}
-      {(plugin.pluginId === 'sampler' || plugin.pluginId === 'looper') && (
-        <SamplePanel store={store} engine={engine} trackId={focus.trackId} plugin={plugin} />
+      {(customFace || sampleFace) && (
+        <Suspense fallback={<p className="face-hint">Loading the faceplate.</p>}>
+          <div onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
+            <PluginFace
+              pluginId={plugin.pluginId}
+              params={spec.params}
+              values={plugin.params}
+              vu={engine.meter(plugin.id)?.vu ?? -20}
+              gr={engine.meter(plugin.id)?.gr ?? 0}
+              spectrum={engine.spectrum(plugin.id)}
+              compact={compact}
+              showParams={customFace}
+              keyboard={plugin.pluginId === 'sampler'}
+              onChange={(id, value) => {
+                setLast(id)
+                const param = spec.params.find((item) => item.id === id)
+                store.setAutomated(
+                  { trackId: focus.trackId, target: 'plugin', pluginId: plugin.id, param: id, min: param?.min ?? 0, max: param?.max ?? 1 },
+                  value,
+                  rolling(),
+                  engine.currentTimelineSample(),
+                )
+              }}
+              onNote={(note, down) => {
+                if (down) engine.previewSample(plugin.id, note)
+              }}
+            >
+              {sampleFace ? <SamplePanel store={store} engine={engine} trackId={focus.trackId} plugin={plugin} /> : null}
+            </PluginFace>
+          </div>
+        </Suspense>
       )}
-      {faced && (
+      {tuneFace && (
         <div onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
         <Faceplate
           pluginId={plugin.pluginId}
@@ -125,7 +160,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
         />
         </div>
       )}
-      {!faced && plugin.pluginId !== 'sampler' && plugin.pluginId !== 'looper' ? <div className="knobs" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
+      {!customFace && !tuneFace && !sampleFace ? <div className="knobs" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
         {spec.params.map((param) => (
           <label key={param.id}>
             {param.name} {formatParam(param.id, plugin.params[param.id] ?? param.default, param.unit)}

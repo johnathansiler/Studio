@@ -390,8 +390,18 @@ export class ProjectStore {
   }
 
   setView(view: WorkspaceView) {
+    if (view !== 'beats' && this.view === 'beats') this.clearRackRoll()
     this.view = view
     this.emit()
+  }
+
+  /** Hide a piano roll that was opened from a channel row. */
+  private clearRackRoll() {
+    if (!this.selectedMidiClipId) return
+    const clip = this.project.tracks.flatMap((track) => track.midiClips).find((item) => item.id === this.selectedMidiClipId)
+    if (!clip?.channelId) return
+    this.selectedMidiClipId = null
+    this.selectedMidiClipIds = []
   }
 
   setTransportMode(mode: 'arrangement' | 'session') {
@@ -3589,6 +3599,7 @@ export class ProjectStore {
   }
 
   placePattern(startBeat: number) {
+    let note = ''
     this.mutate(() => {
       const pattern = this.activePattern()
       if (!pattern || !this.project.patternClips) return
@@ -3599,7 +3610,11 @@ export class ProjectStore {
         lengthBeats: (pattern.steps * 0.25),
         scene: null,
       })
+      const routed = pattern.channels.map((channel) => channel.output).find((id) => id)
+      const track = this.project.tracks.find((item) => item.id === routed) ?? this.project.tracks.find((item) => item.type === 'midi')
+      note = `Placed ${pattern.name} on ${track?.name ?? 'the timeline'}`
     })
+    if (note) this.toast(note, 'good')
   }
 
   placePatternScene(scene: number) {

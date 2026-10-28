@@ -1,20 +1,10 @@
 import { useState } from 'react'
+import { Keyboard } from './kit/controls'
 import type { AudioEngine } from '../audio/engine'
 import { LibraryPanel } from './LibraryPanel'
 import { DEVICE_KINDS, DEVICE_NAMES, DEVICE_PARAMS, FACTORY_PRESETS, isInstrument, MACRO_TARGETS, PRESET_CATEGORIES, type DeviceKind } from '../model/rack'
 import { selectRack } from '../state/select'
 import type { ProjectStore } from '../state/store'
-
-const KEYS = [
-  [60, 'C'],
-  [62, 'D'],
-  [64, 'E'],
-  [65, 'F'],
-  [67, 'G'],
-  [69, 'A'],
-  [71, 'B'],
-  [72, 'C'],
-] as const
 
 export function RackView({ store, engine, trackId, onOpenKnock }: { store: ProjectStore; engine: AudioEngine; trackId: string; onOpenKnock?: () => void }) {
   const rackState = selectRack(store, trackId)
@@ -187,11 +177,11 @@ export function RackView({ store, engine, trackId, onOpenKnock }: { store: Proje
               </div>
             )}
             {isInstrument(device.kind) && (
-              <div className="rack-keys">
-                {KEYS.map(([note, label]) => (
-                  <button key={note} className="text-btn" onClick={() => engine.previewRack(track.id, note)}>{label}</button>
-                ))}
-              </div>
+              <Keyboard
+                compact
+                onDown={(note) => engine.previewRack(track.id, note, false, true)}
+                onUp={(note) => engine.releaseRack(track.id, note)}
+              />
             )}
           </div>
         </div>

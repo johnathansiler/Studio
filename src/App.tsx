@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { applyFreeze } from './audio/bounce'
 import { AudioEngine } from './audio/engine'
 import { unpackProject } from './model/archive'
@@ -18,6 +18,8 @@ import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
 import { countInAt, meterAtSample, tempoAtSample } from './model/tempoMap'
 import { beatsToSamples, samplesToBeats } from './model/time'
+
+const FaceGallery = lazy(() => import('./ui/faces/PluginFace').then((mod) => ({ default: mod.FaceGallery })))
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { TunerPop } from './ui/AmpPop'
 import { ArrangeView } from './ui/ArrangeView'
@@ -114,6 +116,11 @@ export function App() {
   const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight))
   const [land, setLand] = useState(() => window.innerWidth > window.innerHeight)
   const phone = form === 'phone'
+  const rackRoll = store.view === 'beats' && store.project.tracks.some((track) => track.midiClips.some((clip) => clip.id === store.selectedMidiClipId && clip.channelId))
+  useEffect(() => {
+    if (!rackRoll || phone) return
+    setDock((value) => (value < 640 ? 640 : value))
+  }, [rackRoll, phone])
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
   const [collabOpen, setCollabOpen] = useState(() => readSessionDock())
   const [invitePending, setInvitePending] = useState(false)
@@ -1160,6 +1167,14 @@ async function importDropped(files: FileList) {
     setPhonePane('edit')
     store.setView('arrange')
     setPianoOpen(true)
+  }
+
+  if (new URLSearchParams(window.location.search).get('faces') === '1') {
+    return (
+      <Suspense fallback={null}>
+        <FaceGallery />
+      </Suspense>
+    )
   }
 
   return (
