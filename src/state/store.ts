@@ -91,8 +91,11 @@ import {
   type ParsedMidi,
 } from '../model/midiTools'
 import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK_COLORS } from '../model/types'
-import type { AudioAsset, AudioClip, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, LiveCaptureSettings, MidiClip, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, PluginInstance, Project, RecordSettings, TakeLane, Track } from '../model/types'
-import { beatsToSamples, quartersPerBar, samplesToBeats, snapSample } from '../model/time'
+import type { AudioAsset, AudioClip, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, LiveCaptureSettings, MidiClip, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, PluginInstance, Project, RecordSettings, SectionKind, TakeLane, Track } from '../model/types'
+import { createSection, deleteSectionContents, duplicateSectionContents, moveSectionContents, resizeSection as setSectionLength, sectionKind } from '../model/sections'
+import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
+import { downbeatAt, projectSampleBeat, snapSampleToMap, tempoAtSample } from '../model/tempoMap'
+import { beatsToSamples, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
 import { renderDrum, DRUM_PADS } from '../model/drums'
 import {
@@ -200,6 +203,12 @@ export class ProjectStore {
   private takeNotes: { trackId: string; clipId: string; noteId: string }[] = []
   /** Clip settings. Not saved. */
   clipSheet = false
+  /** Selected song section. Not saved. */
+  sectionId: string | null = null
+  /** Selected tempo-map point, by its quarter-note beat. Not saved. */
+  tempoPointBeat: number | null = null
+  /** Offer after a recording or import whose pulse is not the song tempo. Not saved. */
+  smartTempo: { trackId: string; clipId: string; bpm: number } | null = null
   /** Spectral repair sheet. Not saved. */
   spectralTrackId: string | null = null
   spectralClipId: string | null = null
@@ -605,17 +614,19 @@ export class ProjectStore {
 
   setTempo(tempo: number, group = false) {
     const value = clamp(Math.round(tempo * 10) / 10, 30, 300)
+    const apply = () => {
+      this.project.tempo = value
+      const first = this.project.tempoMap?.find((point) => point.beat <= 1e-3)
+      if (first) first.bpm = value
+      this.retimeFollow()
+    }
     if (group && this.tempoGroup) {
       if (this.remoteFollow || this.project.tempo === value) return
-      this.project.tempo = value
-      this.retimeFollow()
+      apply()
       this.emit()
       return
     }
-    this.mutate(() => {
-      this.project.tempo = value
-      this.retimeFollow()
-    })
+    this.mutate(apply)
     this.tempoGroup = group
   }
 
@@ -635,7 +646,187 @@ export class ProjectStore {
   setTimeSignature(numerator: number, denominator: number) {
     this.mutate(() => {
       this.project.timeSignature = { numerator, denominator }
+      if (this.project.meterMap) this.project.meterMap = this.project.meterMap.filter((change) => change.beat > 1e-3)
     })
+  }
+
+  addTempoPoint(beat: number, bpm = this.project.tempo, ramp = false) {
+    const at = Math.max(0, beat)
+    const value = clamp(Math.round(bpm * 10) / 10, 30, 300)
+    if (at <= 1e-3) {
+      this.setTempo(value)
+      return
+    }
+    this.mutate(() => {
+      const map = [...(this.project.tempoMap ?? [])]
+      const index = map.findIndex((point) => Math.abs(point.beat - at) < 0.04)
+      const point = { beat: at, bpm: value, ramp }
+      if (index >= 0) map[index] = { ...map[index], ...point }
+      else map.push(point)
+      map.sort((a, b) => a.beat - b.beat)
+      this.project.tempoMap = map
+      this.retimeFollow()
+    })
+    this.tempoPointBeat = at
+    this.sectionId = null
+    this.emit()
+  }
+
+  moveTempoPoint(fromBeat: number, next: { beat?: number; bpm?: number; ramp?: boolean }) {
+    this.mutate(() => {
+      const map = this.project.tempoMap ?? []
+      const point = map.find((item) => Math.abs(item.beat - fromBeat) < 0.04) ?? (fromBeat <= 1e-3 ? map.find((item) => item.beat <= 1e-3) : undefined)
+      if (fromBeat <= 1e-3 && next.bpm != null && !point) {
+        this.project.tempo = clamp(Math.round(next.bpm * 10) / 10, 30, 300)
+        this.retimeFollow()
+        return
+      }
+      if (!point) return
+      if (next.bpm != null) point.bpm = clamp(Math.round(next.bpm * 10) / 10, 30, 300)
+      if (next.ramp != null) point.ramp = next.ramp
+      if (next.beat != null && point.beat > 1e-3) point.beat = Math.max(1e-3, next.beat)
+      if (point.beat <= 1e-3) this.project.tempo = point.bpm
+      map.sort((a, b) => a.beat - b.beat)
+      this.retimeFollow()
+    })
+    if (next.beat != null) this.tempoPointBeat = next.beat
+    this.emit()
+  }
+
+  removeTempoPoint(beat: number) {
+    if (beat <= 1e-3) return
+    this.mutate(() => {
+      this.project.tempoMap = (this.project.tempoMap ?? []).filter((point) => Math.abs(point.beat - beat) >= 0.04)
+      if (!this.project.tempoMap.length) this.project.tempoMap = undefined
+      this.retimeFollow()
+    })
+    this.tempoPointBeat = null
+    this.emit()
+  }
+
+  setMeterAt(beat: number, numerator: number, denominator: number) {
+    const at = beat <= 0.5 ? 0 : downbeatAt(this.project, beat)
+    if (at <= 1e-3) {
+      this.setTimeSignature(numerator, denominator)
+      return
+    }
+    this.mutate(() => {
+      const map = [...(this.project.meterMap ?? [])].filter((change) => Math.abs(change.beat - at) >= 0.04)
+      map.push({ beat: at, numerator, denominator })
+      map.sort((a, b) => a.beat - b.beat)
+      this.project.meterMap = map
+    })
+  }
+
+  selectSection(id: string | null) {
+    this.sectionId = id
+    if (id) this.tempoPointBeat = null
+    this.emit()
+  }
+
+  selectTempoPoint(beat: number | null) {
+    this.tempoPointBeat = beat
+    if (beat != null) this.sectionId = null
+    this.emit()
+  }
+
+  addSection(kind: SectionKind, beat: number) {
+    let created: string | null = null
+    this.mutate(() => {
+      const section = createSection(this.project, beat, kind)
+      this.project.sections = [...(this.project.sections ?? []), section]
+      created = section.id
+    })
+    this.sectionId = created
+    this.tempoPointBeat = null
+    this.emit()
+  }
+
+  renameSection(id: string, name: string) {
+    this.mutate(() => {
+      const section = this.project.sections?.find((item) => item.id === id)
+      if (section) section.name = name.slice(0, 48)
+    })
+  }
+
+  recolorSection(id: string, kind: SectionKind) {
+    this.mutate(() => {
+      const section = this.project.sections?.find((item) => item.id === id)
+      if (!section) return
+      const spec = sectionKind(kind)
+      const keepName = section.name === sectionKind(section.kind).name || section.name.startsWith(`${sectionKind(section.kind).name} `)
+      section.kind = kind
+      section.color = spec.color
+      if (kind === 'marker') section.durationBeats = 0
+      if (keepName) section.name = spec.name
+    })
+  }
+
+  moveSection(id: string, beat: number) {
+    this.mutate(() => {
+      moveSectionContents(this.project, id, this.project.snap ? Math.max(0, Math.round(beat)) : Math.max(0, beat))
+      this.retimeFollow()
+    })
+  }
+
+  duplicateSection(id: string) {
+    let created: string | null = null
+    this.mutate(() => {
+      created = duplicateSectionContents(this.project, id)?.id ?? null
+      this.retimeFollow()
+    })
+    if (created) this.sectionId = created
+    this.emit()
+  }
+
+  deleteSection(id: string) {
+    this.mutate(() => {
+      deleteSectionContents(this.project, id)
+      this.retimeFollow()
+    })
+    if (this.sectionId === id) this.sectionId = null
+    this.emit()
+  }
+
+  resizeSection(id: string, durationBeats: number) {
+    this.mutate(() => {
+      setSectionLength(this.project, id, durationBeats)
+    })
+  }
+
+  dismissSmartTempo() {
+    this.smartTempo = null
+    this.emit()
+  }
+
+  adaptClipTempo(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip) return
+      const bpm = clipTempo(clip) ?? this.detectClipBpm(clip)
+      if (bpm == null) return
+      if (!clip.stretch) clip.stretch = { sourceSamples: clip.durationSamples, semitones: 0, cents: 0, mode: 'pro', followTempo: false, sourceBpm: bpm, markers: [] }
+      else if (!clip.stretch.sourceBpm) clip.stretch.sourceBpm = bpm
+      adaptProjectTempo(this.project, bpm)
+      this.retimeFollow()
+    })
+    this.smartTempo = null
+    this.emit()
+  }
+
+  conformClipTempo(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip) return
+      const bpm = clipTempo(clip) ?? this.detectClipBpm(clip)
+      if (bpm == null) return
+      const base = clip.stretch ?? { sourceSamples: clip.durationSamples, semitones: 0, cents: 0, mode: 'pro' as const, followTempo: false, sourceBpm: bpm, markers: [] }
+      clip.stretch = { ...base, ...conformStretchPatch(bpm, base.mode), markers: base.markers }
+      clip.durationSamples = timelineSamples(clip, this.project)
+      this.commitClip(clip)
+    })
+    this.smartTempo = null
+    this.emit()
   }
 
   setLoop(enabled: boolean, start?: number, end?: number) {
@@ -1187,7 +1378,15 @@ export class ProjectStore {
       track.clips.push(clip)
       this.selectedTrackId = trackId
       this.selectedClipId = clip.id
+      this.offerSmartTempo(trackId, clip)
     })
+  }
+
+  private offerSmartTempo(trackId: string, clip: AudioClip) {
+    if (clip.slotOnly || (clip.source !== 'import' && clip.source !== 'local')) return
+    const bpm = clip.stretch?.sourceBpm
+    if (bpm == null || Math.abs(bpm - this.project.tempo) < 0.5) return
+    this.smartTempo = { trackId, clipId: clip.id, bpm }
   }
 
   updateAudioClip(trackId: string, clipId: string, clip: AudioClip) {
@@ -1380,7 +1579,7 @@ export class ProjectStore {
       for (const move of moves) {
         const clip = this.track(move.trackId)?.clips.find((item) => item.id === move.clipId)
         if (!clip) continue
-        const start = snapSample(move.startSample, this.project.sampleRate, this.project.tempo, this.project.snap)
+        const start = snapSampleToMap(move.startSample, this.project)
         Object.assign(clip, moveAudioClip(clip, start))
       }
     })
@@ -1437,7 +1636,7 @@ export class ProjectStore {
       }
       const midiIndex = track.midiClips.findIndex((clip) => clip.id === clipId)
       if (midiIndex < 0) return
-      const beat = samplesToBeats(atSample, this.project.sampleRate, this.project.tempo)
+      const beat = projectSampleBeat(this.project, atSample)
       const parts = splitMidiClip(track.midiClips[midiIndex], beat)
       if (!parts) return
       track.midiClips.splice(midiIndex, 1, parts[0], parts[1])
@@ -1450,19 +1649,19 @@ export class ProjectStore {
     this.mutate(() => {
       const track = this.track(trackId)
       if (!track) return
-      const rate = this.project.sampleRate
-      const tempo = this.project.tempo
-      const a = snapSample(Math.min(startSample, endSample), rate, tempo, this.project.snap)
-      let b = snapSample(Math.max(startSample, endSample), rate, tempo, this.project.snap)
-      const quarter = beatsToSamples(1, rate, tempo)
+      const a = snapSampleToMap(Math.min(startSample, endSample), this.project)
+      let b = snapSampleToMap(Math.max(startSample, endSample), this.project)
+      const quarter = beatsToSamples(1, this.project.sampleRate, tempoAtSample(this.project, a))
       if (b - a < quarter / 4) b = a + quarter
       this.selectedTrackId = trackId
       if (track.type === 'midi') {
+        const startBeat = projectSampleBeat(this.project, a)
+        const endBeat = projectSampleBeat(this.project, b)
         const clip: MidiClip = {
           id: uid('midi'),
           name: 'MIDI',
-          startBeat: samplesToBeats(a, rate, tempo),
-          durationBeats: Math.max(0.25, samplesToBeats(b - a, rate, tempo)),
+          startBeat,
+          durationBeats: Math.max(0.25, endBeat - startBeat),
           notes: [],
         }
         track.midiClips.push(clip)
@@ -1475,7 +1674,7 @@ export class ProjectStore {
       if (track.type !== 'audio') return
       const duration = Math.max(1, Math.round(b - a))
       const bufferId = uid('buf')
-      this.buffers.set(bufferId, { id: bufferId, name: 'Clip', sampleRate: rate, channels: [new Float32Array(duration)] })
+      this.buffers.set(bufferId, { id: bufferId, name: 'Clip', sampleRate: this.project.sampleRate, channels: [new Float32Array(duration)] })
       const clip: AudioClip = {
         id: uid('clip'),
         name: 'Clip',

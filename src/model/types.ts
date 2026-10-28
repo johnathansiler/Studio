@@ -134,6 +134,39 @@ export interface ClipStretch {
 export interface TempoPoint {
   beat: number
   bpm: number
+  /** Glide from the previous tempo and arrive at this bpm on this beat. */
+  ramp?: boolean
+}
+
+/** Time signature from this quarter-note beat until the next change. */
+export interface MeterChange {
+  beat: number
+  numerator: number
+  denominator: number
+}
+
+export type SectionKind =
+  | 'intro'
+  | 'verse'
+  | 'pre'
+  | 'chorus'
+  | 'bridge'
+  | 'breakdown'
+  | 'solo'
+  | 'outro'
+  | 'marker'
+  | 'custom'
+
+/** A marker (duration 0) or a named span of the song. */
+export interface SongSection {
+  id: string
+  name: string
+  kind: SectionKind
+  /** Quarter notes from the start of the song. */
+  startBeat: number
+  /** Quarter notes. Zero is a point marker. */
+  durationBeats: number
+  color: string
 }
 
 export interface Insert {
@@ -384,6 +417,10 @@ export interface Project {
   recordBars?: number
   /** Tempo changes. Empty keeps `tempo` for the whole arrangement. */
   tempoMap?: TempoPoint[]
+  /** Time-signature changes after the start. Beat 0 uses `timeSignature`. */
+  meterMap?: MeterChange[]
+  /** Markers and named sections (intro, verse, chorus, …). */
+  sections?: SongSection[]
   record?: RecordSettings
   /** Key, scale, and chord-pad performance settings. */
   scale?: ScaleState

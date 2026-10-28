@@ -16,7 +16,8 @@ import { ProjectStore, seedDemoProject } from './state/store'
 import { linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
-import { beatsToSamples, countInSeconds, samplesToBeats } from './model/time'
+import { countInAt, meterAtSample, tempoAtSample } from './model/tempoMap'
+import { beatsToSamples, samplesToBeats } from './model/time'
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { TunerPop } from './ui/AmpPop'
 import { ArrangeView } from './ui/ArrangeView'
@@ -684,7 +685,7 @@ export function App() {
     if (mode === 'arrangement') store.armArrangement()
     const lead = scheduleLeadMs(session.primaryOneWay()?.ms ?? 40)
     const counting = store.project.countIn && engine.status === 'stopped'
-    const countMs = counting ? countInSeconds(store.project.tempo, store.project.timeSignature) * 1000 : 0
+    const countMs = counting ? countInAt(store.project, sample) * 1000 : 0
     engine.refreshClockAnchor()
     const hostPerf = performance.now() + lead + countMs
     session.broadcastTransport({
@@ -692,15 +693,15 @@ export function App() {
       timelineSample: Math.round(sample),
       hostPerfAtSample: hostPerf,
       mode,
-      tempo: store.project.tempo,
+      tempo: tempoAtSample(store.project, sample),
       countIn: counting,
       countInMs: Math.round(countMs),
-      timeSignature: store.project.timeSignature,
+      timeSignature: meterAtSample(store.project, sample),
       launches: store.launched,
       launchAt: store.launchAt,
       launchGen: store.launchGen,
     })
-    if (counting) engine.armCountIn(store.project.tempo, store.project.timeSignature)
+    if (counting) engine.armCountIn(tempoAtSample(store.project, sample), meterAtSample(store.project, sample))
     await engine.playAtPerf(sample, hostPerf, mode)
   }
 
@@ -940,7 +941,7 @@ export function App() {
     else if (!alreadyPlaying && settings.loop && store.project.loopEnabled) fromSample = store.project.loopStartSample
     const counting = store.project.countIn && !alreadyPlaying
     const lead = scheduleLeadMs(session.primaryOneWay()?.ms ?? 40)
-    const countMs = counting ? countInSeconds(store.project.tempo, store.project.timeSignature) * 1000 : 0
+    const countMs = counting ? countInAt(store.project, fromSample) * 1000 : 0
     engine.refreshClockAnchor()
     const hostPerf = performance.now() + lead + countMs
     if (!alreadyPlaying) {
@@ -949,10 +950,10 @@ export function App() {
         timelineSample: fromSample,
         hostPerfAtSample: hostPerf,
         mode: 'arrangement',
-        tempo: store.project.tempo,
+        tempo: tempoAtSample(store.project, fromSample),
         countIn: counting,
         countInMs: Math.round(countMs),
-        timeSignature: store.project.timeSignature,
+        timeSignature: meterAtSample(store.project, fromSample),
       })
     }
     await engine.beginRecord({
