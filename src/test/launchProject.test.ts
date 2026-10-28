@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { emptyOmni } from '../instruments/patch'
 import { isSessionLink, isUntouchedEmpty, NEW_PROJECT, planLaunch, readTab, shouldKeepProject, TAB_LIVE, TAB_PROJECT } from '../model/launchProject'
 import { createEmptyProject } from '../model/types'
 
@@ -58,6 +59,9 @@ describe('fresh project launch', () => {
     expect(shouldKeepProject(noted)).toBe(true)
     const recorded = createEmptyProject()
     expect(shouldKeepProject(recorded, 1)).toBe(true)
+    const patched = createEmptyProject()
+    patched.tracks[2].omniPatch = emptyOmni('Pad')
+    expect(shouldKeepProject(patched)).toBe(true)
     const limited = createEmptyProject()
     limited.masterPlugins = [{ id: 'lim', pluginId: 'limiter', version: '1', enabled: false, wet: 1, sidechain: '', params: {} }]
     expect(isUntouchedEmpty(limited)).toBe(true)

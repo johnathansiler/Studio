@@ -13,15 +13,21 @@ import {
   voiceLead,
   type Progression,
 } from '../model/progressions'
+import { selectScale } from '../state/select'
 import type { ProjectStore } from '../state/store'
 
 export function IdeasPop({ store, engine, onClose }: { store: ProjectStore; engine: AudioEngine; onClose: () => void }) {
-  const scale = store.scaleState()
+  const scale = selectScale(store)
+  const idea = scale.idea || 'axis'
   const [query, setQuery] = useState('')
   const [genre, setGenre] = useState('all')
   const [mood, setMood] = useState('all')
-  const [selected, setSelected] = useState(scale.idea || 'axis')
-  const [open, setOpen] = useState(scale.idea || 'axis')
+  const [selected, setSelected] = useState(idea)
+  const [open, setOpen] = useState(idea)
+  useEffect(() => {
+    setSelected(idea)
+    setOpen(idea)
+  }, [idea])
   const timers = useRef<number[]>([])
   const list = filterIdeas(query, genre, mood)
   const current = progressionById(selected) ?? list[0] ?? null

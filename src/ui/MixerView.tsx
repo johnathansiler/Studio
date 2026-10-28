@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { STRIP_BOUNDS } from '../model/layoutWidth'
+import { selectMixer } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
 import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
@@ -12,7 +13,7 @@ export function MixerView({ store, engine, onTune }: { store: ProjectStore; engi
 }
 
 function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void }) {
-  const project = store.project
+  const project = selectMixer(store).project
   const { layout, setStrip, resetStrip } = useLayoutWidths(project.id)
   const areaRef = useRef<HTMLDivElement>(null)
   const stripRef = useRef(layout.strip)

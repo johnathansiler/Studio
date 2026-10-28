@@ -4,6 +4,7 @@ import { FOLLOW_ACTIONS, LAUNCH_MODES, LAUNCH_QUANTS, QUANT_LABEL, sceneClip, SE
 import { COLUMN_BOUNDS, sessionTableWidth } from '../model/layoutWidth'
 import type { FollowAction, LaunchMode, LaunchQuant } from '../model/types'
 import { quartersPerBar } from '../model/time'
+import { selectSession } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
 import { SESSION_BAR, SESSION_SHEET, copyOf, described } from './chrome'
@@ -16,7 +17,8 @@ export function SessionView({ store, engine }: { store: ProjectStore; engine: Au
 }
 
 function SessionBody({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
-  const project = store.project
+  const grid = selectSession(store)
+  const project = grid.project
   const { layout, setColumn, resetColumn } = useLayoutWidths(project.id)
   const areaRef = useRef<HTMLDivElement>(null)
   const columnRef = useRef(layout.column)
@@ -25,7 +27,7 @@ function SessionBody({ store, engine }: { store: ProjectStore; engine: AudioEngi
   const quant = project.launchQuant ?? '1bar'
   const bars = project.recordBars ?? 4
   const edit = store.sessionEdit
-  const editTrack = edit ? store.project.tracks.find((track) => track.id === edit.trackId) : undefined
+  const editTrack = edit ? grid.tracks.find((track) => track.id === edit.trackId) : undefined
   const editClip = editTrack && edit ? sceneClip(editTrack, edit.scene) : null
   const compact = useFormFactor() !== 'desk'
   const [clipOpen, setClipOpen] = useState(false)
@@ -108,11 +110,11 @@ function SessionBody({ store, engine }: { store: ProjectStore; engine: AudioEngi
           </div>
         </ActionSheet>
       )}
-      <table style={{ width: sessionTableWidth(store.project.tracks.length, layout.column) }}>
+      <table style={{ width: sessionTableWidth(grid.tracks.length, layout.column) }}>
         <thead>
           <tr>
             <th className="scene-col" />
-            {store.project.tracks.map((track, index) => (
+            {grid.tracks.map((track, index) => (
               <th key={track.id} className="track-col" data-track={track.id} style={{ color: track.color }}>
                 <span className="col-name">{track.name}</span>
                 <ColumnGrip value={layout.column} onChange={setColumn} labelled={index === 0} />
@@ -127,7 +129,7 @@ function SessionBody({ store, engine }: { store: ProjectStore; engine: AudioEngi
               <th className="scene-col">
                 <button type="button" className="scene-launch" title="Launch every clip in this row." aria-label={`Scene ${scene + 1}. Launch every clip in this row.`} onClick={() => store.launchScene(scene, engine.currentTimelineSample())}>{scene + 1}</button>
               </th>
-              {store.project.tracks.map((track) => {
+              {grid.tracks.map((track) => {
                 const clip = sceneClip(track, scene) || track.midiClips.find((item) => item.scene === scene)
                 const launched = clip && store.launched[track.id] === clip.id
                 const armed = store.sessionSlot?.trackId === track.id && store.sessionSlot.scene === scene

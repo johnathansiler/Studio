@@ -1,7 +1,8 @@
 import type { AudioEngine } from './engine'
 import { BEAT_LOOKAHEAD_SEC, BeatRepeat, beatAt, contextAt, type RepeatHit } from '../model/beatRepeat'
 import { heardBeat, midiPerformanceMs, quantizeBeat, repeatIntervalBeats, type RepeatRate } from '../model/midiClock'
-import { snapPitch, type ScaleId } from '../model/scale'
+import { type ScaleId } from '../model/scale'
+import { lockedTone } from '../theory/lock'
 import {
   chokeTargets,
   effectiveSwing,
@@ -19,6 +20,8 @@ export interface PlayedNote {
   startBeat: number
   durationBeats: number
   velocity: number
+  /** Cents offset. Quarter-tone scale lock uses ±50. */
+  fine?: number
   nudge?: number
   locks?: Record<string, number>
 }
@@ -39,6 +42,7 @@ interface PadColor {
 
 interface HeldNote {
   pitch: number
+  fine: number
   eventMs: number
   velocity: number
   erase: boolean
@@ -76,6 +80,7 @@ export class Performer {
   private snap = false
   private root = 0
   private scale: ScaleId = 'ionian'
+  private library = ''
   private swing = 50
   private fullLevel = false
   private accent = false
@@ -98,11 +103,12 @@ export class Performer {
     private finishTake: () => void = () => undefined,
   ) {}
 
-  setScale(snap: boolean, root: number, scale: ScaleId, octave: number) {
+  setScale(snap: boolean, root: number, scale: ScaleId, octave: number, library = '') {
     this.snap = snap
     this.root = root
     this.scale = scale
     this.octave = octave
+    this.library = library
   }
 
   /** Keys: choosing a rate also turns repeat on. The pad deck engages with the Beat button instead. */
@@ -173,10 +179,12 @@ export class Performer {
     if (swingChanged && this.engaged && this.grid) this.retarget(repeatIntervalBeats(this.grid.rate, this.grid.triplet))
   }
 
-  down(rawPitch: number, velocity: number, eventMs: number, pointerId: number, levelIndex?: number) {
-    const pitch = this.soundingPitch(rawPitch)
+  down(rawPitch: number, velocity: number, eventMs: number, pointerId: number, levelIndex?: number, givenFine?: number) {
+    const sounded = this.soundingPitch(rawPitch, givenFine)
+    const pitch = sounded.midi
+    const fine = sounded.cents
     if (this.erase && (this.target()?.drums ?? false)) {
-      this.held.set(pointerId, { pitch, eventMs, velocity, erase: true, sample: null, choke: [], repeated: false })
+      this.held.set(pointerId, { pitch, fine: 0, eventMs, velocity, erase: true, sample: null, choke: [], repeated: false })
       return
     }
     if (this.latch && this.engaged && this.latched.has(pitch)) {
@@ -192,11 +200,14 @@ export class Performer {
     const locks = spread
       ? { tune: spread.tune, filter: spread.filter, decay: spread.decay, attack: spread.attack }
       : undefined
+    const tune = (spread?.tune ?? pad?.tune ?? 0) + fine / 100
     const color: PadColor | undefined = spread
-      ? { tune: spread.tune, filter: spread.filter, decay: spread.decay, attack: spread.attack }
+      ? { tune, filter: spread.filter, decay: spread.decay, attack: spread.attack }
       : pad
-        ? { tune: pad.tune, filter: pad.filter, decay: pad.decay, attack: pad.attack }
-        : undefined
+        ? { tune, filter: pad.filter, decay: pad.decay, attack: pad.attack }
+        : fine
+          ? { tune: fine / 100 }
+          : undefined
     let sample: Float32Array | null = null
     if (pad && !spread) {
       const layerIndex = pickLayer(pad.layers, level, pad.layerMode, this.robin, this.kit?.seed ?? 1)
@@ -208,7 +219,7 @@ export class Performer {
     const gain = level * (pad?.level ?? 1)
     const choke = drums ? chokeTargets(this.chokePads(), pitch) : []
     const repeated = this.engaged && !!this.grid
-    const note: HeldNote = { pitch, eventMs, velocity: gain, erase: false, locks, sample, color, choke, repeated }
+    const note: HeldNote = { pitch, fine, eventMs, velocity: gain, erase: false, locks, sample, color, choke, repeated }
     this.held.set(pointerId, note)
     if (repeated) {
       const count = (this.holders.get(pitch) ?? 0) + 1
@@ -252,7 +263,7 @@ export class Performer {
     }
     const still = [...this.held.values(), ...this.latched.values()].some((item) => item.pitch === held.pitch)
     if (!still) this.engine.liveNoteOff(held.pitch)
-    this.print(held.pitch, held.velocity, held.eventMs, eventMs, held.locks)
+    this.print(held.pitch, held.fine, held.velocity, held.eventMs, eventMs, held.locks)
   }
 
   pressure(pointerId: number, velocity: number) {
@@ -463,10 +474,13 @@ export class Performer {
     return pads
   }
 
-  private soundingPitch(rawPitch: number) {
-    if (this.target()?.drums) return Math.max(0, Math.min(127, rawPitch))
+  private soundingPitch(rawPitch: number, givenFine?: number) {
+    if (this.target()?.drums) return { midi: Math.max(0, Math.min(127, rawPitch)), cents: 0 }
     const shifted = Math.max(0, Math.min(127, rawPitch + this.octave * 12))
-    return this.snap ? snapPitch(shifted, this.root, this.scale) : shifted
+    const fine = givenFine ?? 0
+    if (!this.snap) return { midi: shifted, cents: fine }
+    const tone = lockedTone(shifted, fine, { root: this.root, scale: this.scale, library: this.library })
+    return { midi: Math.max(0, Math.min(127, tone.midi)), cents: tone.cents }
   }
 
   private place(eventMs: number) {
@@ -488,12 +502,12 @@ export class Performer {
     return quantizeBeat(beat, this.quantizeBeats)
   }
 
-  private print(pitch: number, velocity: number, startMs: number, endMs: number, locks?: Record<string, number>) {
+  private print(pitch: number, fine: number, velocity: number, startMs: number, endMs: number, locks?: Record<string, number>) {
     const target = this.target()
     if (!target) return
     const startBeat = Math.max(0, this.place(startMs))
     const endBeat = Math.max(startBeat + 0.05, this.place(endMs))
-    const notes = [{ pitch, velocity, startBeat, durationBeats: endBeat - startBeat, locks }]
+    const notes = [{ pitch, velocity, startBeat, durationBeats: endBeat - startBeat, locks, ...(fine ? { fine: Math.round(fine) } : {}) }]
     if (this.recording()) this.commit(target, notes, this.recordMode, this.fixedBeats)
     else {
       this.recent.push(...notes)
