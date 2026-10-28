@@ -6,12 +6,9 @@ import {
   NOTE_NAMES,
   SCALES,
   diatonicPads,
-  detectKey,
-  inScale,
   nameChord,
   noteName,
   scaleTones,
-  snapPitch,
   voiceChord,
   type ArpDirection,
   type ChordSource,
@@ -19,6 +16,7 @@ import {
   type ScaleId,
 } from '../model/scale'
 import { uid, type MidiNote } from '../model/types'
+import { findScale, lockedTone, pitchRole, suggestKey } from '../theory'
 import { EDITOR_TOOLS, EDITOR_TOOL_KEYS, activeTool, keyForTool, setActiveTool, subscribeTools } from '../state/tools'
 import type { ProjectStore } from '../state/store'
 import { samplesToBeats } from '../model/time'
@@ -59,7 +57,7 @@ const LOW = 48
 const HIGH = 84
 const VEL_H = 36
 
-export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; engine: AudioEngine; onIdeas?: () => void }) {
+export function PianoRoll({ store, engine, onIdeas, onLibrary }: { store: ProjectStore; engine: AudioEngine; onIdeas?: () => void; onLibrary?: () => void }) {
   const track = store.project.tracks.find((item) => item.midiClips.some((clip) => clip.id === store.selectedMidiClipId))
   const clip = track?.midiClips.find((item) => item.id === store.selectedMidiClipId)
   const [open, setOpen] = useState(false)
@@ -80,8 +78,8 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   const dragGen = useRef(0)
   const multi = useRef(false)
   const frameRef = useRef<{ originPx: number; originRow: number; contentX: number; contentY: number; clientX: number; clientY: number } | null>(null)
-  const fingers = useRef(new Map<number, { pitch: number; eventMs: number; velocity: number }>())
-  const playKey = useRef<(pitch: number, event: { timeStamp: number }, pointerId: number, on: boolean, velocity?: number) => void>(() => {})
+  const fingers = useRef(new Map<number, { pitch: number; fine: number; eventMs: number; velocity: number }>())
+  const playKey = useRef<(pitch: number, event: { timeStamp: number }, pointerId: number, on: boolean, velocity?: number, fine?: number) => void>(() => {})
   const tool = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const api = useRef<{ quantize: () => boolean; arpeggiate: () => void; strum: () => void; humanize: () => void; duplicate: () => boolean; remove: () => boolean }>({
     quantize: () => false,
@@ -253,16 +251,17 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     }
   }, [])
 
-  playKey.current = (pitch, event, pointerId, on, velocity = 0.8) => {
+  playKey.current = (pitch, event, pointerId, on, velocity = 0.8, fine?: number) => {
     if (!track || !clip) return
     if (on) {
       const current = store.scaleState()
-      const next = current.snap ? snapPitch(pitch, current.root, current.scale) : pitch
+      const tone = current.snap ? lockedTone(pitch, fine ?? 0, current) : { midi: pitch, cents: fine ?? 0 }
       const level = Math.max(0.05, Math.min(1, velocity))
       engine.unlock()
       void engine.resume()
-      engine.liveNoteOn(next, level)
-      fingers.current.set(pointerId, { pitch: next, eventMs: event.timeStamp, velocity: level })
+      if (tone.cents) engine.liveNoteOn(tone.midi, level, -1, 0, { tune: tone.cents / 100 })
+      else engine.liveNoteOn(tone.midi, level)
+      fingers.current.set(pointerId, { pitch: tone.midi, fine: tone.cents, eventMs: event.timeStamp, velocity: level })
       return
     }
     const held = fingers.current.get(pointerId)
@@ -277,6 +276,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     const duration = playing ? Math.max(0.05, end - start) : Math.max(0.05, elapsed)
     store.addNote(track.id, clip.id, {
       pitch: held.pitch,
+      fine: held.fine || undefined,
       startBeat: Math.max(0, start - clip.startBeat),
       durationBeats: duration,
       velocity: held.velocity,
@@ -290,7 +290,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     if (!root) return
     const detach = attachGlissando(root, {
       accept: (key) => !!key.closest('.keys, .scale-keys'),
-      onOn: (pitch, event, pointerId) => playKey.current(pitch, event, pointerId, true),
+      onOn: (pitch, event, pointerId, fine) => playKey.current(pitch, event, pointerId, true, 0.8, fine),
       onOff: (pitch, event, pointerId) => playKey.current(pitch, event, pointerId, false),
       onTwoFinger: (dy) => {
         if (!keys) return
@@ -499,18 +499,20 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
 
     if (tool === 'pencil') {
       const gen = ++dragGen.current
-      const pitch = scaleNow.snap ? snapPitch(at.pitch, scaleNow.root, scaleNow.scale) : at.pitch
-      let drawn = pencilNote(at.beat, at.beat, pitch, grid, velocity, '__pencil__')
+      const tone = scaleNow.snap ? lockedTone(at.pitch, 0, scaleNow) : { midi: at.pitch, cents: 0 }
+      const pitch = tone.midi
+      let drawn = { ...pencilNote(at.beat, at.beat, pitch, grid, velocity, '__pencil__'), fine: tone.cents || undefined }
       setGhost([...base, drawn])
       watch(gen, (ev) => {
         const point = cell(ev)
         if (!point) return
-        drawn = pencilNote(at.beat, point.beat, pitch, grid, velocity, '__pencil__')
+        drawn = { ...pencilNote(at.beat, point.beat, pitch, grid, velocity, '__pencil__'), fine: tone.cents || undefined }
         setGhost([...base, drawn])
       }, () => {
         setGhost(null)
         store.addNote(track.id, clip.id, {
           pitch: drawn.pitch,
+          fine: drawn.fine,
           startBeat: drawn.startBeat,
           durationBeats: drawn.durationBeats,
           velocity: drawn.velocity,
@@ -611,7 +613,12 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     const originY = event.clientY
     const grid = roll.grid
     const scaleNow = store.scaleState()
-    const pitchSnap = scaleNow.snap ? (pitch: number) => snapPitch(pitch, scaleNow.root, scaleNow.scale) : undefined
+    const pitchSnap = scaleNow.snap
+      ? (pitch: number) => {
+          const tone = lockedTone(pitch, 0, scaleNow)
+          return tone.cents ? { pitch: tone.midi, fine: tone.cents } : tone.midi
+        }
+      : undefined
     let latest = base
     let dirty = false
     watch(gen, (ev) => {
@@ -696,10 +703,15 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
           ))}
         </select>
         <button type="button" className={scale.snap ? 'on' : ''} aria-pressed={scale.snap} onClick={() => store.setScale({ snap: !scale.snap })}>Snap</button>
-        <button type="button" onClick={() => {
-          const found = detectKey(clip.notes.map((note) => ({ pitch: note.pitch, weight: note.durationBeats })))
-          store.setScale({ root: found.root, scale: found.scale })
+        <button type="button" title="Guess a key from the notes already on this track." onClick={() => {
+          const found = suggestKey(clip.notes.map((note) => ({ midi: note.pitch, cents: note.fine, weight: note.durationBeats })))
+          store.setScale({ root: found.root, scale: found.scale, library: found.library })
         }}>Detect</button>
+        {onLibrary && (
+          <button type="button" title="Browse scales, modes, and the chords they contain." onClick={onLibrary}>
+            {scale.library ? (findScale(scale.library)?.name ?? 'Scale') : 'Library'}
+          </button>
+        )}
         <span className="chord-name">{chord}</span>
         {onIdeas && <button type="button" onClick={onIdeas}>Ideas</button>}
         {store.selectedNoteId && (
@@ -737,7 +749,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
             const pitch = HIGH - index
             const black = [1, 3, 6, 8, 10].includes(pitch % 12)
             return (
-              <div key={pitch} data-pitch={pitch} className={`key ${black ? 'black' : ''} ${inScale(pitch, scale.root, scale.scale) ? 'in' : ''}`} style={{ height: row }}>
+              <div key={pitch} data-pitch={pitch} className={`key ${black ? 'black' : ''} ${keyClass(pitch, scale.root, scale.library || scale.scale)}`} style={{ height: row }}>
                 {pitch % 12 === 0 ? `C${Math.floor(pitch / 12) - 1}` : ''}
               </div>
             )
@@ -794,12 +806,16 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
               })}
               {notes.map((note) => {
                 const noteWidth = Math.max(8, note.durationBeats * pxBeat)
+                const fine = note.fine || 0
+                const role = pitchRole(note.pitch, fine, scale.root, scale.library || scale.scale)
                 return (
                   <div
                     key={note.id}
                     data-note={note.id}
-                    className={`note ${store.selectedNoteIds.includes(note.id) ? 'selected' : ''} ${inScale(note.pitch, scale.root, scale.scale) ? '' : 'off'} ${note.slide ? 'slide' : ''}`}
-                    style={{ left: note.startBeat * pxBeat, width: noteWidth, top: (HIGH - note.pitch) * row, height: Math.max(12, row - 2), cursor: tool === 'select' ? 'grab' : 'inherit' }}
+                    data-fine={fine ? `${fine > 0 ? '+' : ''}${fine}` : undefined}
+                    title={fine ? `${fine} cents` : undefined}
+                    className={`note ${store.selectedNoteIds.includes(note.id) ? 'selected' : ''} ${role === 'out' ? 'off' : ''} ${note.slide ? 'slide' : ''}`}
+                    style={{ left: note.startBeat * pxBeat, width: noteWidth, top: (HIGH - note.pitch) * row - (fine / 100) * row, height: Math.max(12, row - 2), cursor: tool === 'select' ? 'grab' : 'inherit' }}
                     onPointerMove={(event) => {
                       if (tool !== 'select') return
                       const bounds = event.currentTarget.getBoundingClientRect()
@@ -939,4 +955,11 @@ function timelineBeat(store: ProjectStore, engine: AudioEngine) {
   let beat = samplesToBeats(engine.currentTimelineSample(), project.sampleRate, project.tempo)
   if (project.snap) beat = Math.round(beat * 4) / 4
   return Math.max(0, beat)
+}
+
+function keyClass(pitch: number, root: number, scaleId: string) {
+  const role = pitchRole(pitch, 0, root, scaleId)
+  if (role === 'in') return 'in'
+  if (role === 'near') return 'near'
+  return ''
 }

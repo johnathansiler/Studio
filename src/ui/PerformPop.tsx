@@ -4,6 +4,7 @@ import type { AudioEngine } from '../audio/engine'
 import { DRUM_PADS, renderDrum } from '../model/drums'
 import type { RepeatRate } from '../model/midiClock'
 import { NOTE_NAMES, SCALES, type ScaleId } from '../model/scale'
+import { degreeTone, findScale, isBuiltinScale, isTwelveTone, toneName } from '../theory'
 import { BANKS, gridPitch, PAD_MACROS, sixteenLevels, type GridLayout, type LevelSpread, type PadVoice, type StepCondition } from '../model/padMachine'
 import { decodeWavPCM } from '../model/wav'
 import type { ProjectStore } from '../state/store'
@@ -39,6 +40,7 @@ export function PerformPop({
   session,
   onRecord,
   onClose,
+  onLibrary,
 }: {
   mode: 'keys' | 'drums'
   store: ProjectStore
@@ -46,6 +48,7 @@ export function PerformPop({
   session: SessionClient
   onRecord: () => void
   onClose: () => void
+  onLibrary?: () => void
 }) {
   const drums = mode === 'drums'
   const board = useRef<HTMLDivElement>(null)
@@ -93,7 +96,7 @@ export function PerformPop({
       (aimed, pitch, from, to) => store.erasePadNotes(aimed.trackId, aimed.clipId, pitch, from, to),
     )
   }
-  performer.current.setScale(scale.snap, scale.root, scale.scale, octave)
+  performer.current.setScale(scale.snap, scale.root, scale.scale, octave, scale.library)
   performer.current.setRepeat(repeat, triplet)
   performer.current.setQuantize(record.quantizeBeats || 0)
   performer.current.setDeck({
@@ -134,7 +137,9 @@ export function PerformPop({
         const key = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('[data-pitch]') as HTMLElement | null
         const level = key?.dataset.level == null ? undefined : Number(key.dataset.level)
         const rect = key?.getBoundingClientRect() ?? { top: event.clientY, height: 1 }
-        play.down(pitch, pointerVelocity(event, rect), event.timeStamp, pointerId, level)
+        const rawFine = key?.dataset.fine
+        const fine = rawFine == null || rawFine === '' ? undefined : Number(rawFine)
+        play.down(pitch, pointerVelocity(event, rect), event.timeStamp, pointerId, level, Number.isFinite(fine) ? fine : undefined)
         light(outputs.current, pitch, 127)
         try { key?.setPointerCapture(pointerId) } catch { /* already released */ }
       },
@@ -304,7 +309,8 @@ export function PerformPop({
             <button type="button" onClick={() => setOctave((value) => Math.max(-3, value - 1))} aria-label="Octave down">−</button>
             <span className="octave">{NOTE_NAMES[(base + octave * 12) % 12]}{Math.floor((base + octave * 12) / 12) - 1}</span>
             <button type="button" onClick={() => setOctave((value) => Math.min(3, value + 1))} aria-label="Octave up">+</button>
-            <button type="button" className={scale.snap ? 'on' : ''} onClick={() => store.setScale({ snap: !scale.snap })}>Scale</button>
+            <button type="button" className={scale.snap ? 'on' : ''} title="Lock played notes to the scale, including quarter tones." onClick={() => store.setScale({ snap: !scale.snap })}>Scale</button>
+            {onLibrary && <button type="button" title="Browse scales and the chords inside them." onClick={onLibrary}>Library</button>}
             {RATES.slice(1).map((rate) => (
               <button key={rate} type="button" className={repeat === rate ? 'on' : ''} onClick={() => setRepeat((value) => (value === rate ? null : rate))}>{rate}</button>
             ))}
@@ -328,12 +334,10 @@ export function PerformPop({
       </header>
       {!drums && (
         <div className="scale-row">
-          <select aria-label="Key" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
+          <select aria-label="Key" title="Concert pitch of the tonic." value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
             {NOTE_NAMES.map((name, index) => <option key={name} value={index}>{name}</option>)}
           </select>
-          <select aria-label="Scale" value={scale.scale} onChange={(event) => store.setScale({ scale: event.target.value as ScaleId })}>
-            {SCALES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-          </select>
+          <ScaleSelect scale={scale} onChange={(id) => store.setScale(isBuiltinScale(id) ? { scale: id, library: '' } : { library: id })} />
         </div>
       )}
       {drums && (
@@ -394,7 +398,7 @@ export function PerformPop({
           {drums && deck === 'session' ? (
             <SessionPads store={store} mutes={padMutes} solo={soloPads} />
           ) : drums && deck === 'keys' ? (
-            <KeyGrid root={scale.root} scaleId={scale.scale} layout={layout} inKey={inKey} />
+            <KeyGrid root={scale.root} scaleId={scale.library || scale.scale} layout={layout} inKey={inKey} />
           ) : drums ? (
             <>
               {browser && (
@@ -417,7 +421,7 @@ export function PerformPop({
                   >{levels ? levelLabel(index, levels) : pad.name}</button>
                 ))}
               </div>
-              <KeyGrid root={scale.root} scaleId={scale.scale} layout={layout} inKey={inKey} land />
+              <KeyGrid root={scale.root} scaleId={scale.library || scale.scale} layout={layout} inKey={inKey} land />
             </>
           ) : (
             <div className="play-keys">
@@ -478,14 +482,13 @@ export function PerformPop({
             </>
           ) : drums && deck === 'keys' ? (
             <div className="scale-row">
-              <select aria-label="Key" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
+              <select aria-label="Key" title="Concert pitch of the tonic." value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
                 {NOTE_NAMES.map((name, index) => <option key={name} value={index}>{name}</option>)}
               </select>
-              <select aria-label="Scale" value={scale.scale} onChange={(event) => store.setScale({ scale: event.target.value as ScaleId })}>
-                {SCALES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-              <button type="button" className={layout === 'fourths' ? 'on' : ''} onClick={() => setLayout((value) => (value === 'fourths' ? 'sequential' : 'fourths'))}>{layout === 'fourths' ? 'Fourths' : 'Sequential'}</button>
-              <button type="button" className={inKey ? 'on' : ''} onClick={() => setInKey((value) => !value)}>{inKey ? 'In key' : 'Chromatic'}</button>
+              <ScaleSelect scale={scale} onChange={(id) => store.setScale(isBuiltinScale(id) ? { scale: id, library: '' } : { library: id })} />
+              <button type="button" className={layout === 'fourths' ? 'on' : ''} title="Fourths stacks a fourth each row. Sequential walks the scale." onClick={() => setLayout((value) => (value === 'fourths' ? 'sequential' : 'fourths'))}>{layout === 'fourths' ? 'Fourths' : 'Sequential'}</button>
+              <button type="button" className={inKey ? 'on' : ''} title="Lock the pads to the scale, including quarter-tone pitches." onClick={() => setInKey((value) => !value)}>{inKey ? 'In key' : 'Chromatic'}</button>
+              {onLibrary && <button type="button" title="Browse scales and the chords inside them." onClick={onLibrary}>Library</button>}
             </div>
           ) : drums && deck === 'session' ? (
             <div className="tool-row">
@@ -512,15 +515,43 @@ function levelLabel(index: number, spread: LevelSpread) {
   return String(Math.round((spread === 'filter' ? params.filter : spread === 'decay' ? params.decay : params.attack) * 100))
 }
 
-function KeyGrid({ root, scaleId, layout, inKey, land = false }: { root: number; scaleId: ScaleId; layout: GridLayout; inKey: boolean; land?: boolean }) {
-  const cells = []
+function ScaleSelect({ scale, onChange }: { scale: { scale: ScaleId; library: string }; onChange: (id: string) => void }) {
+  const extra = scale.library && !isBuiltinScale(scale.library) ? scale.library : ''
+  return (
+    <select aria-label="Scale" title="The scale the keys and pads follow." value={extra || scale.scale} onChange={(event) => onChange(event.target.value)}>
+      {extra && <option value={extra}>{findScale(extra)?.name ?? 'Scale'}</option>}
+      {SCALES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+    </select>
+  )
+}
+
+function KeyGrid({ root, scaleId, layout, inKey, land = false }: { root: number; scaleId: string; layout: GridLayout; inKey: boolean; land?: boolean }) {
+  const spec = findScale(scaleId)
+  const micro = !!spec && inKey && (!isTwelveTone(spec) || !isBuiltinScale(scaleId))
+  const cells: { pitch: number; fine: number; isRoot: boolean; row: number; column: number; label: string }[] = []
   for (let row = 7; row >= 0; row--) {
-    for (let column = 0; column < 8; column++) cells.push({ ...gridPitch(row, column, root, scaleId, layout, inKey), row, column })
+    for (let column = 0; column < 8; column++) {
+      if (micro && spec) {
+        const index = layout === 'fourths' ? column + row * 3 : row * 8 + column
+        const tone = degreeTone(root, index, scaleId)
+        cells.push({ pitch: tone.midi, fine: tone.cents, isRoot: index % spec.cents.length === 0, row, column, label: toneName(tone) })
+      } else {
+        const cell = gridPitch(row, column, root, isBuiltinScale(scaleId) ? scaleId : 'ionian', layout, inKey)
+        cells.push({ pitch: cell.pitch, fine: 0, isRoot: cell.isRoot, row, column, label: NOTE_NAMES[((cell.pitch % 12) + 12) % 12] })
+      }
+    }
   }
   return (
     <div className={land ? 'grid8 land-grid' : 'grid8'} aria-label={land ? 'Landscape grid' : 'Key grid'}>
       {cells.map((cell) => (
-        <button key={`${cell.row}-${cell.column}`} type="button" data-pitch={cell.pitch} className={cell.isRoot ? 'root' : ''}>{NOTE_NAMES[cell.pitch % 12]}</button>
+        <button
+          key={`${cell.row}-${cell.column}`}
+          type="button"
+          data-pitch={cell.pitch}
+          data-fine={cell.fine ? String(cell.fine) : undefined}
+          className={cell.isRoot ? 'root' : ''}
+          title={cell.fine ? `${cell.label}, ${cell.fine > 0 ? '+' : ''}${cell.fine} cents` : 'Pad pitch'}
+        >{cell.label}</button>
       ))}
     </div>
   )

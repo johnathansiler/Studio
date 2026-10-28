@@ -521,6 +521,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .key { height: 16px; border-bottom: 1px solid #243028; font-size: 9px; color: var(--faint); display: flex; align-items: center; padding-left: 6px; touch-action: none; }
 .key.black { background: #0c110f; }
 .key.in { color: var(--accent); }
+.key.near { color: var(--amber); }
 .key.lit { background: #234233; color: var(--text); }
 .key-scroll { touch-action: none; background: #0c110f; cursor: ns-resize; }
 .roll { position: relative; overflow: auto; }
@@ -1199,6 +1200,30 @@ html[data-posture="tabletop"] .shell .master-sheet {
 .idea-detail { display: none; }
 .idea-list article.on .idea-row { border-color: var(--accent); }
 .shell.phone:not(.land) .ideas-pop { bottom: env(safe-area-inset-bottom); }
+.lib-hint { margin: 0; padding: 0 12px 8px; color: var(--muted); font-size: 13px; }
+.lib-suggest { margin: 0 12px 8px; min-height: 44px; text-align: left; }
+.lib-search { padding: 0 12px 8px; }
+.lib-search input { width: 100%; min-height: 44px; }
+.lib-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.lib-scales, .lib-detail { overflow: auto; min-height: 0; }
+.lib-scales { max-height: 34%; padding: 0 12px; }
+.lib-scales button, .lib-progress button {
+  width: 100%; min-height: 44px; display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px;
+  background: transparent; color: var(--text); border: 0; border-bottom: 1px solid var(--line); padding: 8px 4px;
+}
+.lib-scales button.on { background: #1c2b23; }
+.lib-scales span, .lib-progress span, .lib-scale-name { color: var(--muted); font-size: 13px; }
+.lib-scale-name { margin: 0; padding: 4px 12px 0; color: var(--text); font-size: 16px; }
+.lib-detail { flex: 1; }
+.lib-chords, .lib-progress { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 12px; }
+.lib-chord { display: flex; }
+.lib-chord button { min-height: 44px; }
+.shell.fold .library-pop .lib-body,
+.shell.land .library-pop .lib-body,
+.shell.phone.land .library-pop .lib-body { flex-direction: row; }
+.shell.fold .library-pop .lib-scales,
+.shell.land .library-pop .lib-scales,
+.shell.phone.land .library-pop .lib-scales { max-height: none; flex: 0.9; }
 .shell.fold .idea-stage, .shell.phone.land .idea-stage, .shell.land .idea-stage { flex-direction: row; }
 .shell.fold .idea-list, .shell.phone.land .idea-list, .shell.land .idea-list,
 .shell.fold .idea-detail, .shell.phone.land .idea-detail, .shell.land .idea-detail { flex: 1; min-width: 0; overflow: auto; }

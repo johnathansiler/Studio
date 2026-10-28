@@ -27,6 +27,8 @@ import { PerformPop } from './ui/PerformPop'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
 import { IdeasPop } from './ui/IdeasPop'
+import { LibraryPop } from './ui/LibraryPop'
+import { loadScaleCatalog } from './theory'
 import { QuantizeSheet } from './ui/QuantizeSheet'
 import { PianoRoll } from './ui/PianoRoll'
 import { KnockPop } from './ui/KnockPop'
@@ -100,6 +102,10 @@ export function App() {
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
+  const [libraryOpen, setLibraryOpen] = useState(() => new URLSearchParams(window.location.search).get('library') === '1')
+  useEffect(() => {
+    void loadScaleCatalog().then(() => setVersion((value) => value + 1))
+  }, [])
   const [perform, setPerform] = useState<'keys' | 'drums' | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
@@ -1156,6 +1162,7 @@ async function importDropped(files: FileList) {
             <button type="button" onClick={() => { setMenuOpen(false); openPerform('keys') }}>Keys</button>
             <button type="button" onClick={() => { setMenuOpen(false); openPerform('drums') }}>Pads</button>
             <button type="button" disabled={!pianoTrack} onClick={() => { if (!pianoTrack) return; setMenuOpen(false); openPiano(pianoTrack.id) }}>Piano</button>
+            <button type="button" title="Browse scales and the chords inside them." onClick={() => { setMenuOpen(false); setLibraryOpen(true) }}>Scales</button>
             <button type="button" className="split" onClick={() => { setMenuOpen(false); store.quickQuantize() }}>Quantize</button>
             <button type="button" onClick={() => { setMenuOpen(false); store.openQuantize() }}>Quantize…</button>
             <button type="button" className="split" aria-pressed={store.project.metronomeEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('metronomeEnabled')}>Click</button>
@@ -1279,7 +1286,7 @@ async function importDropped(files: FileList) {
             <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
           )}
           {surface === 'studio' && panel === 'piano' && (
-            <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />
+            <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onLibrary={() => setLibraryOpen(true)} />
           )}
           {(surface !== 'studio' || panel === 'room') && (
             <VideoDock
@@ -1310,6 +1317,7 @@ async function importDropped(files: FileList) {
       <QuantizeSheet store={store} />
       {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
       {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}
+      {libraryOpen && <LibraryPop store={store} engine={engine} onClose={() => setLibraryOpen(false)} />}
       {perform && (
         <PerformPop
           mode={perform}
@@ -1318,6 +1326,7 @@ async function importDropped(files: FileList) {
           session={session}
           onRecord={() => void record()}
           onClose={() => setPerform(null)}
+          onLibrary={() => setLibraryOpen(true)}
         />
       )}
       <input ref={fileRef} type="file" accept="audio/*" multiple hidden onChange={(event) => void importAudio(event.target.files)} />
