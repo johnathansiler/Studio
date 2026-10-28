@@ -3,7 +3,9 @@ import { activeScaleId, followSource } from '../generators/adapt'
 import { normalizePlayer } from '../players/settings'
 import type { ScaleState } from '../model/scale'
 import type { QuantizeSettings } from '../model/quantize'
-import type { AudioClip, PluginInstance, Project, Track } from '../model/types'
+import { orderedSections } from '../model/sections'
+import { meterChanges, projectTempoMap } from '../model/tempoMap'
+import type { AudioClip, MeterChange, PluginInstance, Project, SongSection, TempoPoint, Track } from '../model/types'
 
 /**
  * Read models for the studio surfaces.
@@ -210,4 +212,35 @@ export function selectSounds(store: { project: Project; selectedTrackId: string 
     trackId: selected?.id ?? null,
     trackName: selected?.name ?? '',
   }
+}
+
+/**
+ * Song form for Unstuck, generators, and any other screen.
+ * These read the shared project. They do not keep a second copy.
+ */
+export function selectSections(project: Project): SongSection[] {
+  return orderedSections(project)
+}
+
+export function selectMarkers(project: Project): SongSection[] {
+  return orderedSections(project).filter((section) => section.kind === 'marker' || section.durationBeats <= 0)
+}
+
+export function selectSongParts(project: Project): SongSection[] {
+  return orderedSections(project).filter((section) => section.kind !== 'marker' && section.durationBeats > 0)
+}
+
+/** Smallest section that contains this quarter-note beat, if any. */
+export function selectSectionAt(project: Project, beat: number): SongSection | null {
+  const hits = selectSongParts(project).filter((section) => beat >= section.startBeat - 1e-6 && beat < section.startBeat + section.durationBeats)
+  hits.sort((a, b) => a.durationBeats - b.durationBeats)
+  return hits[0] ?? null
+}
+
+export function selectTempoMap(project: Project): TempoPoint[] {
+  return projectTempoMap(project).map((point) => ({ ...point }))
+}
+
+export function selectMeterMap(project: Project): MeterChange[] {
+  return meterChanges(project).map((change) => ({ ...change }))
 }
