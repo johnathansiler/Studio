@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
+import { selectMixer } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
 import { MasterSheet } from './MasterSheet'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 
 export function MixerView({ store, engine, onTune }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void }) {
-  const project = store.project
+  const project = selectMixer(store).project
   const [masterOpen, setMasterOpen] = useState(false)
   return (
     <div className="mixer">

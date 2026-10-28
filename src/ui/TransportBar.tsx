@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { emptyTap, pushTap, scaleTempo, tempoFromTaps, roundTempo, type TapMemory } from '../model/tap'
 import { formatBarsBeats, formatTimecode } from '../model/time'
+import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
 
 export function TransportBar({
@@ -21,7 +22,7 @@ export function TransportBar({
   onRecord: () => void
   onSeek: (sample: number) => void
 }) {
-  const project = store.project
+  const project = selectTransport(store).project
   const [position, setPosition] = useState(engine.positionSamples)
   const [status, setStatus] = useState(engine.status)
   const [tapOpen, setTapOpen] = useState(false)

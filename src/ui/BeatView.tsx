@@ -2,13 +2,15 @@ import { useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { stepIndexAt } from '../model/steps'
 import { samplesToBeats } from '../model/time'
+import { selectBeats } from '../state/select'
 import type { ProjectStore } from '../state/store'
 
 const COLORS = ['#73c48f', '#ef6b6b', '#79b8d4', '#e0b15a', '#c58be0', '#f09a6a']
 
 export function BeatView({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
-  const project = store.project
-  const pattern = store.activePattern()
+  const beatState = selectBeats(store)
+  const project = beatState.project
+  const pattern = beatState.pattern
   const painting = useRef<{ channelId: string; on: boolean } | null>(null)
   const [picked, setPicked] = useState<{ channelId: string; index: number } | null>(null)
   if (!pattern) return null

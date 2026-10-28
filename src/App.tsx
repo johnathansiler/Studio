@@ -129,9 +129,14 @@ export function App() {
     session.bindArrangement(store)
     session.setTakeHandler((take) => placeTake(store, engine, take))
     session.setArrangementHandler((project, assets, ready) => {
-      store.remoteFollow = true
-      store.loadProject(project, assets)
-      engine.sync(project, (id) => assets.get(id) || store.buffers.get(id))
+      if (session.state.role === 'guest') store.remoteFollow = true
+      if (session.usingOps) {
+        for (const [id, asset] of assets) store.buffers.set(id, asset)
+        engine.sync(store.project, (id) => assets.get(id) || store.buffers.get(id))
+      } else {
+        store.loadProject(project, assets)
+        engine.sync(project, (id) => assets.get(id) || store.buffers.get(id))
+      }
       if (ready && pendingFollow.current && engine.status === 'stopped') void followPlay(pendingFollow.current)
     })
     session.setControlHandler((cmd) => {
@@ -223,9 +228,9 @@ export function App() {
       engine.setLaunches(store.launched)
       engine.setLaunchAt(store.launchAt)
       engine.setLaunchGen(store.launchGen)
-      if (session.state.role === 'host') {
+      if (session.state.status === 'live') {
         window.clearTimeout(publishTimer.current)
-        publishTimer.current = window.setTimeout(() => session.publishArrangement(), 40)
+        publishTimer.current = window.setTimeout(() => session.publishEdits(), 40)
       }
       const key = `${store.transportMode}:${JSON.stringify(store.launched)}:${JSON.stringify(store.launchAt)}:${JSON.stringify(store.launchGen)}`
       const pending = store.takePendingTransport()

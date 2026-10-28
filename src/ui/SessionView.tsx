@@ -2,15 +2,17 @@ import type { AudioEngine } from '../audio/engine'
 import { FOLLOW_ACTIONS, LAUNCH_MODES, LAUNCH_QUANTS, QUANT_LABEL, sceneClip, SESSION_SCENES } from '../model/launch'
 import type { FollowAction, LaunchMode, LaunchQuant } from '../model/types'
 import { quartersPerBar } from '../model/time'
+import { selectSession } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
 
 export function SessionView({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
-  const project = store.project
+  const grid = selectSession(store)
+  const project = grid.project
   const quant = project.launchQuant ?? '1bar'
   const bars = project.recordBars ?? 4
   const edit = store.sessionEdit
-  const editTrack = edit ? store.project.tracks.find((track) => track.id === edit.trackId) : undefined
+  const editTrack = edit ? grid.tracks.find((track) => track.id === edit.trackId) : undefined
   const editClip = editTrack && edit ? sceneClip(editTrack, edit.scene) : null
   return (
     <div className="session-grid">
@@ -73,7 +75,7 @@ export function SessionView({ store, engine }: { store: ProjectStore; engine: Au
         <thead>
           <tr>
             <th />
-            {store.project.tracks.map((track) => (
+            {grid.tracks.map((track) => (
               <th key={track.id} data-track={track.id} style={{ color: track.color }}>
                 {track.name}
               </th>
@@ -87,7 +89,7 @@ export function SessionView({ store, engine }: { store: ProjectStore; engine: Au
               <th>
                 <button type="button" className="scene-launch" onClick={() => store.launchScene(scene, engine.currentTimelineSample())}>{scene + 1}</button>
               </th>
-              {store.project.tracks.map((track) => {
+              {grid.tracks.map((track) => {
                 const clip = sceneClip(track, scene) || track.midiClips.find((item) => item.scene === scene)
                 const launched = clip && store.launched[track.id] === clip.id
                 const armed = store.sessionSlot?.trackId === track.id && store.sessionSlot.scene === scene
