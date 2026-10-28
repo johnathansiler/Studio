@@ -25,7 +25,7 @@ import { TRACK_ROW, TRACK_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
 import { ActionSheet, SheetRow, TipButton } from './Hint'
 import { RecordBar } from './RecordBar'
-import { coarsePointer, trimZone } from './touchEdit'
+import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, trimZone } from './touchEdit'
 
 export function ArrangeView({
   store,
@@ -51,7 +51,9 @@ export function ArrangeView({
   const pxRef = useRef(px)
   pxRef.current = px
   const [position, setPosition] = useState(engine.positionSamples)
-  const [nudge, setNudge] = useState<{ audio: Record<string, number>; midi: Record<string, number> } | null>(null)
+  const [nudge, setNudge] = useState<{ audio: Record<string, number>; midi: Record<string, number>; pattern: Record<string, number> } | null>(null)
+  const [patternMenu, setPatternMenu] = useState<{ x: number; y: number } | null>(null)
+  const touch = useFormFactor() !== 'desk'
   const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
   const [ghost, setGhost] = useState<{ trackId: string; left: number; width: number } | null>(null)
   const [tool, setToolState] = useState(activeTool)
@@ -195,6 +197,7 @@ export function ArrangeView({
   }
 
   function onTimelineDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (patternMenu) setPatternMenu(null)
     if (event.button !== 0 && event.pointerType !== 'touch') return
     const current = activeTool()
     const target = event.target as HTMLElement
@@ -288,6 +291,22 @@ export function ArrangeView({
     }
   }
 
+  function trimPattern(event: ReactPointerEvent, clipId: string, edge: 'start' | 'end') {
+    event.stopPropagation()
+    event.preventDefault()
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    const clip = project.patternClips?.find((item) => item.id === clipId)
+    if (!clip) return
+    watch(
+      () => undefined,
+      (ev) => {
+        const sample = Math.max(0, sampleAt(ev.clientX))
+        const beat = projectSampleBeat(project, project.snap ? snapSampleToMap(sample, project) : sample)
+        store.resizePatternClip(clipId, edge, beat)
+      },
+    )
+  }
+
   function trimMidi(event: ReactPointerEvent, trackId: string, clipId: string, edge: 'start' | 'end', stretch: boolean) {
     event.stopPropagation()
     event.preventDefault()
@@ -304,10 +323,14 @@ export function ArrangeView({
     )
   }
 
-  function moveSelection(event: ReactPointerEvent, kind: 'audio' | 'midi', trackId: string, clipId: string) {
+  function moveSelection(event: ReactPointerEvent, kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
     event.stopPropagation()
+    if (kind === 'pattern') {
+      setPatternMenu(null)
+      if (touch) event.preventDefault()
+    }
     const additive = event.shiftKey || event.metaKey || event.ctrlKey
-    const selected = kind === 'audio' ? store.selectedClipIds : store.selectedMidiClipIds
+    const selected = kind === 'audio' ? store.selectedClipIds : kind === 'midi' ? store.selectedMidiClipIds : store.selectedPatternClipIds
     const wasIn = selected.includes(clipId)
     const ids = !additive ? (wasIn ? [...selected] : [clipId]) : wasIn ? [...selected] : [...selected, clipId]
     if (additive) {
@@ -317,14 +340,24 @@ export function ArrangeView({
     for (const track of project.tracks) {
       if (kind === 'audio') {
         for (const clip of track.clips) if (ids.includes(clip.id)) origins.set(clip.id, { trackId: track.id, at: clip.startSample })
-      } else {
+      } else if (kind === 'midi') {
         for (const clip of track.midiClips) if (ids.includes(clip.id)) origins.set(clip.id, { trackId: track.id, at: clip.startBeat })
       }
     }
+    if (kind === 'pattern') {
+      for (const clip of project.patternClips ?? []) {
+        if (ids.includes(clip.id) && clip.scene == null) origins.set(clip.id, { trackId, at: clip.startBeat })
+      }
+    }
     const originX = event.clientX
+    const originY = event.clientY
+    const started = performance.now()
     const deltas = new Map<string, number>()
+    let travel = 0
     watch(
       (ev) => {
+        travel = Math.max(travel, Math.hypot(ev.clientX - originX, ev.clientY - originY))
+        if (kind === 'pattern' && touch && travel <= PATTERN_HOLD_SLOP) return
         const sampleDelta = ((ev.clientX - originX) / pxRef.current) * project.sampleRate
         const patch: Record<string, number> = {}
         for (const [id, item] of origins) {
@@ -332,10 +365,15 @@ export function ArrangeView({
           else patch[id] = projectSampleBeat(project, projectBeatSample(project, item.at) + sampleDelta) - item.at
           deltas.set(id, patch[id])
         }
-        setNudge(kind === 'audio' ? { audio: patch, midi: {} } : { audio: {}, midi: patch })
+        setNudge(kind === 'audio' ? { audio: patch, midi: {}, pattern: {} } : kind === 'midi' ? { audio: {}, midi: patch, pattern: {} } : { audio: {}, midi: {}, pattern: patch })
       },
       () => {
         setNudge(null)
+        if (kind === 'pattern' && patternHoldOpensMenu(touch, performance.now() - started, travel)) {
+          store.selectClip(trackId, clipId, false, false)
+          setPatternMenu(patternMenuPoint(originX, originY, 168, 56, window.innerWidth, window.innerHeight))
+          return
+        }
         const moved = [...deltas.values()].some((value) => Math.abs(value) >= (kind === 'audio' ? 1 : 0.01))
         if (!moved) {
           if (additive && wasIn) store.selectClip(trackId, clipId, kind === 'midi', false, true)
@@ -343,14 +381,15 @@ export function ArrangeView({
         }
         if (kind === 'audio') {
           store.placeAudioClips([...origins].map(([id, item]) => ({ trackId: item.trackId, clipId: id, startSample: item.at + (deltas.get(id) ?? 0) })))
-        } else {
+        } else if (kind === 'midi') {
           store.placeMidiClips([...origins].map(([id, item]) => ({ trackId: item.trackId, clipId: id, startBeat: item.at + (deltas.get(id) ?? 0) })))
+        } else {
+          store.placePatternClips([...origins].map(([id, item]) => ({ clipId: id, startBeat: item.at + (deltas.get(id) ?? 0) })))
         }
       },
     )
   }
 
-  const touch = useFormFactor() !== 'desk'
   const [trackSheet, setTrackSheet] = useState<string | null>(null)
   const selected = project.tracks.flatMap((track) => track.clips.filter((clip) => clip.id === store.selectedClipId).map((clip) => ({ track, clip })))[0]
   const sheetTrack = project.tracks.find((track) => track.id === trackSheet) || null
@@ -624,11 +663,48 @@ export function ArrangeView({
                   .filter((clip) => clip.scene == null)
                   .map((clip) => {
                     const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
-                    const left = pxAtBeat(project, clip.startBeat, px)
-                    const widthPx = Math.max(24, pxAtBeat(project, clip.startBeat + clip.lengthBeats, px) - left)
+                    const beat = clip.startBeat + (nudge?.pattern[clip.id] ?? 0)
+                    const left = pxAtBeat(project, beat, px)
+                    const widthPx = Math.max(24, pxAtBeat(project, beat + clip.lengthBeats, px) - left)
+                    const picked = store.selectedPatternClipIds.includes(clip.id)
                     return (
-                      <div key={clip.id} className="clip pattern" style={{ left, width: widthPx, background: pattern?.color || track.color, pointerEvents: passive ? 'none' : undefined }}>
+                      <div
+                        key={clip.id}
+                        data-clip={clip.id}
+                        data-pattern="1"
+                        data-track={track.id}
+                        className={`clip pattern ${picked ? 'selected' : ''}`}
+                        style={{ left, width: widthPx, background: pattern?.color || track.color, pointerEvents: passive ? 'none' : undefined, touchAction: passive ? undefined : 'none' }}
+                        onContextMenu={(event) => event.preventDefault()}
+                        onPointerDown={(event) => {
+                          if ((event.target as HTMLElement).closest('.edge')) return
+                          if (tool === 'erase') {
+                            beginErase(event)
+                            return
+                          }
+                          if (tool === 'trim') {
+                            event.stopPropagation()
+                            event.preventDefault()
+                            const bounds = event.currentTarget.getBoundingClientRect()
+                            const ratio = (event.clientX - bounds.left) / Math.max(1, bounds.width)
+                            const zone = trimZone(ratio, coarsePointer(event.pointerType))
+                            if (zone === 'start' || zone === 'end') trimPattern(event, clip.id, zone)
+                            else store.selectClip(track.id, clip.id, false, false)
+                            return
+                          }
+                          if (tool !== 'select') return
+                          moveSelection(event, 'pattern', track.id, clip.id)
+                        }}
+                      >
                         <em>{pattern?.name || 'Pattern'}</em>
+                        {(tool === 'select' || tool === 'trim') && (
+                          <ClipEdges
+                            startLabel="Trim start. Drag to move the beginning. The pattern stays on the grid."
+                            endLabel="Trim end. Drag to change how long the pattern plays."
+                            onStart={(event) => trimPattern(event, clip.id, 'start')}
+                            onEnd={(event) => trimPattern(event, clip.id, 'end')}
+                          />
+                        )}
                       </div>
                     )
                   })}
@@ -639,6 +715,12 @@ export function ArrangeView({
         </div>
       </div>
       </div>
+      {patternMenu && (
+        <div className="touch-menu" style={{ left: patternMenu.x, top: patternMenu.y }}>
+          <button type="button" title="Copy this pattern clip and place it just after." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.duplicateSelection(); setPatternMenu(null) }}>Duplicate</button>
+          <button type="button" title="Remove this pattern clip from the arrangement." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setPatternMenu(null) }}>Delete</button>
+        </div>
+      )}
       <StemSheet store={store} />
       {store.clipSheet && selected ? (
         <ClipSheet store={store} trackId={selected.track.id} clip={selected.clip} onClose={() => store.closeClipSheet()} />
@@ -994,9 +1076,13 @@ function ClipView({
 function ClipEdges({
   onStart,
   onEnd,
+  startLabel = 'Trim start. Drag to move the beginning. The audio stays put.',
+  endLabel = 'Trim end. Drag to change the length. Stops at the recorded audio.',
 }: {
   onStart: (event: ReactPointerEvent) => void
   onEnd: (event: ReactPointerEvent) => void
+  startLabel?: string
+  endLabel?: string
 }) {
   return (
     <>
@@ -1004,16 +1090,16 @@ function ClipEdges({
         className="edge"
         data-edge="start"
         role="button"
-        aria-label="Trim start. Drag to move the beginning. The audio stays put."
-        title="Trim start. Drag to move the beginning. The audio stays put."
+        aria-label={startLabel}
+        title={startLabel}
         onPointerDown={onStart}
       />
       <div
         className="edge r"
         data-edge="end"
         role="button"
-        aria-label="Trim end. Drag to change the length. Stops at the recorded audio."
-        title="Trim end. Drag to change the length. Stops at the recorded audio."
+        aria-label={endLabel}
+        title={endLabel}
         onPointerDown={onEnd}
       />
     </>
