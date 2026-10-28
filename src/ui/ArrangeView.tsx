@@ -326,7 +326,7 @@ export function ArrangeView({
     )
   }
 
-  const phone = useFormFactor() === 'phone'
+  const touch = useFormFactor() !== 'desk'
   const [trackSheet, setTrackSheet] = useState<string | null>(null)
   const selected = project.tracks.flatMap((track) => track.clips.filter((clip) => clip.id === store.selectedClipId).map((clip) => ({ track, clip })))[0]
   const sheetTrack = project.tracks.find((track) => track.id === trackSheet) || null
@@ -347,9 +347,9 @@ export function ArrangeView({
                 value={track.name}
                 onChange={(event) => store.updateTrack(track.id, { name: event.target.value })}
               />
-              {phone ? (
+              {touch ? (
                 <TipButton className="mini" label="Track" hint="Monitor, input, instrument, and removing the track." onClick={(event) => { event.stopPropagation(); setTrackSheet(track.id) }}>
-                  ···
+                  ⋮
                 </TipButton>
               ) : (
                 <>
@@ -376,12 +376,12 @@ export function ArrangeView({
                   R
                 </TipButton>
               )}
-              {!phone && track.type === 'audio' && (
+              {!touch && track.type === 'audio' && (
                 <TipButton className={`mini ${track.monitor ? 'on-s' : ''}`} label={copyOf(TRACK_SHEET, 'monitor').label} hint={copyOf(TRACK_SHEET, 'monitor').hint} pressed={track.monitor} onClick={() => store.updateTrack(track.id, { monitor: !track.monitor })}>
                   I
                 </TipButton>
               )}
-              {!phone && track.type === 'midi' && (
+              {!touch && track.type === 'midi' && (
                 <>
                   <TipButton className="mini" label={copyOf(TRACK_SHEET, 'keys').label} hint={copyOf(TRACK_SHEET, 'keys').hint} onClick={() => onPerform('keys')}>
                     K
@@ -391,7 +391,7 @@ export function ArrangeView({
                   </TipButton>
                 </>
               )}
-              {!phone && (
+              {!touch && (
                 <input
                   className="slim"
                   type="range"
@@ -404,7 +404,7 @@ export function ArrangeView({
                 />
               )}
             </div>
-            {!phone && track.type === 'audio' && (
+            {!touch && track.type === 'audio' && (
               <select className="input" {...described(copyOf(TRACK_SHEET, 'input'))} value={track.input} onChange={(event) => store.updateTrack(track.id, { input: event.target.value })}>
                 <option value="mic">Mic</option>
                 <option value="line">Line</option>
@@ -422,7 +422,7 @@ export function ArrangeView({
                   ))}
               </select>
             )}
-            {!phone && (
+            {!touch && (
               <div className="head-extra">
                 <RouteFields store={store} trackId={track.id} />
                 <InsertList store={store} trackId={track.id} />
@@ -581,7 +581,7 @@ export function ArrangeView({
       {store.clipSheet && selected ? (
         <ClipSheet store={store} trackId={selected.track.id} clip={selected.clip} onClose={() => store.closeClipSheet()} />
       ) : null}
-      {phone && sheetTrack && (
+      {touch && sheetTrack && (
         <ActionSheet title={sheetTrack.name} hint="Everything else for this track." onClose={() => setTrackSheet(null)}>
           {sheetTrack.type === 'audio' && (
             <SheetRow

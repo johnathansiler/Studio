@@ -1238,7 +1238,7 @@ async function importDropped(files: FileList) {
           onSeek={(sample) => void locate(sample)}
         />
       )}
-      {surface === 'studio' && phonePane !== 'room' && (store.view === 'arrange' || panel === 'piano') && (
+      {surface === 'studio' && phonePane !== 'room' && store.view !== 'mix' && (store.view === 'arrange' || panel === 'piano') && (
         <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
           <ToolBar
             context={panel === 'piano' ? 'piano' : 'arrange'}

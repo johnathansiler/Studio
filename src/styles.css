@@ -1385,19 +1385,20 @@ html[data-posture="tabletop"] .shell .master-sheet {
 .arrange[data-tool="pan"] .timeline-scroll { cursor: grab; }
 .arrange[data-tool="zoom"] .timeline-scroll { cursor: zoom-in; }
 .arrange[data-tool="trim"] .clip .edge { width: 18px; }
-.arrange[data-tool="pencil"] .lanes,
-.piano[data-tool="pencil"] .roll { box-shadow: inset 0 0 0 2px rgba(115, 196, 143, 0.85); }
-.arrange[data-tool="erase"] .lanes,
-.piano[data-tool="erase"] .roll { box-shadow: inset 0 0 0 2px rgba(239, 77, 77, 0.8); }
-.arrange[data-tool="split"] .lanes,
+.arrange[data-tool="pencil"] .timeline-scroll,
+.piano[data-tool="pencil"] .roll { box-shadow: inset 0 0 0 3px rgba(115, 196, 143, 0.95); }
+.arrange[data-tool="erase"] .timeline-scroll,
+.piano[data-tool="erase"] .roll { box-shadow: inset 0 0 0 2px rgba(239, 77, 77, 0.85); }
+.arrange[data-tool="split"] .timeline-scroll,
 .piano[data-tool="split"] .roll,
-.arrange[data-tool="trim"] .lanes { box-shadow: inset 0 0 0 2px rgba(224, 177, 90, 0.85); }
-.arrange[data-tool="box"] .lanes,
+.arrange[data-tool="trim"] .timeline-scroll { box-shadow: inset 0 0 0 2px rgba(224, 177, 90, 0.9); }
+.arrange[data-tool="box"] .timeline-scroll,
 .piano[data-tool="box"] .roll,
-.arrange[data-tool="zoom"] .lanes,
-.piano[data-tool="zoom"] .roll { box-shadow: inset 0 0 0 2px rgba(121, 184, 212, 0.8); }
-.arrange[data-tool="pan"] .lanes,
-.piano[data-tool="pan"] .roll { box-shadow: inset 0 0 0 2px rgba(147, 163, 153, 0.9); }
+.arrange[data-tool="zoom"] .timeline-scroll,
+.piano[data-tool="zoom"] .roll { box-shadow: inset 0 0 0 2px rgba(121, 184, 212, 0.85); }
+.arrange[data-tool="pan"] .timeline-scroll,
+.piano[data-tool="pan"] .roll { box-shadow: inset 0 0 0 2px rgba(147, 163, 153, 0.95); }
+.shell.fold .head .mini { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
 @media (pointer: coarse) {
   .arrange[data-tool="trim"] .clip .edge { width: 28px; }
 }
