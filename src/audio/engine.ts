@@ -5,6 +5,7 @@ import { analyserRms, applyInserts, createStrip, type StripNodes } from './strip
 import { compPieces, recordOffsetSamples } from '../model/comp'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
 import { residentDrums, type ResidentDrum } from '../model/drums'
+import { anchorClock, gridRepeatBeats, type ClockAnchor, type GridRepeat } from '../model/beatRepeat'
 import { calibrationTrim, contextTimeForEvent, monitoringOffset, type ClockStamp } from '../model/midiClock'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToBeats, samplesToMusical } from '../model/time'
@@ -125,6 +126,9 @@ export class AudioEngine {
   private playing = false
   private playOriginCtx = 0
   private playOriginSample = 0
+  private idleClock: ClockAnchor | null = null
+  private postedPadIds = new Set<string>()
+  private gridTails = new Map<number, { when: number; stop: () => void }[]>()
   private arrangementScheduled = false
   private nextLoopCtx: number | null = null
   private nextLoopSample = 0
@@ -807,6 +811,7 @@ export class AudioEngine {
     this.countWait?.()
     this.countWait = null
     this.playing = false
+    this.idleClock = null
     this.stopSources()
     this.arrangementScheduled = false
     this.sessionStarted.clear()
@@ -1305,6 +1310,7 @@ export class AudioEngine {
 
   private armTransport(startAt: number, fromSample: number) {
     this.playing = true
+    this.idleClock = null
     this.playOriginCtx = startAt
     this.playOriginSample = fromSample
     this.positionSamples = fromSample
@@ -1860,6 +1866,25 @@ export class AudioEngine {
     if (ctx === this.ctx) this.sources.push(src)
   }
 
+  /**
+   * Musical grid shared by every pad. While the transport runs, this is the play origin.
+   * While it is stopped, the grid free-runs from the playhead and does not restart on each press.
+   */
+  musicalClock(): { originContext: number; originBeat: number; tempo: number } {
+    const tempo = this.tempo
+    if (this.playing && this.ctx) {
+      return {
+        originContext: this.playOriginCtx,
+        originBeat: samplesToBeats(this.playOriginSample, this.sampleRate, tempo),
+        tempo,
+      }
+    }
+    const beat = samplesToBeats(this.positionSamples, this.sampleRate, tempo)
+    const context = this.ctx?.currentTime ?? 0
+    this.idleClock = anchorClock(this.idleClock, this.positionSamples, beat, tempo, context)
+    return { originContext: this.idleClock.originContext, originBeat: this.idleClock.originBeat, tempo }
+  }
+
   playOrigin(): { context: number; beat: number } {
     const tempo = this.project?.tempo || 120
     const beatNow = samplesToBeats(this.positionSamples, this.sampleRate, tempo)
@@ -2023,10 +2048,47 @@ export class AudioEngine {
     this.warmNote(pitch, level)
   }
 
-  liveNoteOff(pitch: number) {
+  /**
+   * Retrigger on the tempo grid inside the worklet. The main thread only arms and releases;
+   * each hit is a sample offset in the audio block, not a UI timer.
+   */
+  liveGridRepeat(opts: GridRepeat) {
+    if (!this.ctx) this.unlock()
+    const level = Math.max(0.05, Math.min(1, opts.velocity))
+    const index = opts.drums ? this.drumTable.findIndex((drum) => drum.pitch === opts.pitch) : -1
+    const useSample = Boolean(opts.sampleId && opts.sample && opts.sample.length)
     if (this.keysNode) {
-      if (!this.pushSab(0, pitch, 0, -1)) this.keysNode.port.postMessage({ type: 'off', pitch })
+      if (useSample && opts.sample && opts.sampleId) this.ensurePadSample(opts.sampleId, opts.sample)
+      this.keysNode.port.postMessage({
+        type: 'repeat',
+        grid: opts.intervalBeats,
+        swing: opts.swing,
+        originContext: opts.originContext,
+        originBeat: opts.originBeat,
+        tempo: opts.tempo,
+        armedBeat: opts.armedBeat,
+        pitch: opts.pitch,
+        velocity: level,
+        drum: useSample ? -1 : index,
+        sampleId: useSample ? opts.sampleId : '',
+        rate: opts.tune ? 2 ** (opts.tune / 12) : 1,
+        decay: opts.decay,
+        attack: opts.attack,
+        filter: opts.filter,
+      })
+      return
     }
+    this.scheduleGridFallback(opts, useSample ? -1 : index, level)
+  }
+
+  liveNoteOff(pitch: number, releaseBeat?: number) {
+    const beat = releaseBeat != null && Number.isFinite(releaseBeat) ? releaseBeat : undefined
+    if (this.keysNode) {
+      if (beat == null) {
+        if (!this.pushSab(0, pitch, 0, -1)) this.keysNode.port.postMessage({ type: 'off', pitch })
+      } else this.keysNode.port.postMessage({ type: 'off', pitch, releaseBeat: beat })
+    }
+    this.stopGridTails(pitch, beat)
     for (const shot of this.oneShots) if (shot.pitch === pitch) shot.stop()
     this.oneShots = this.oneShots.filter((shot) => shot.pitch !== pitch)
     for (const voice of this.warmVoices) {
@@ -2035,6 +2097,82 @@ export class AudioEngine {
         voice.busy = false
       }
     }
+  }
+
+  private ensurePadSample(id: string, samples: Float32Array) {
+    if (!this.keysNode || this.postedPadIds.has(id)) return
+    this.postedPadIds.add(id)
+    this.keysNode.port.postMessage({ type: 'pad-sample', id, samples: new Float32Array(samples) })
+  }
+
+  private stopGridTails(pitch: number, releaseBeat?: number) {
+    const tails = this.gridTails.get(pitch)
+    if (!tails) return
+    const clock = this.musicalClock()
+    const releaseTime = releaseBeat == null
+      ? (this.ctx?.currentTime ?? 0)
+      : clock.originContext + (releaseBeat - clock.originBeat) * (60 / Math.max(1, clock.tempo))
+    for (const tail of tails) {
+      if (tail.when >= releaseTime - 0.0005) tail.stop()
+    }
+    this.gridTails.delete(pitch)
+  }
+
+  /** Used only before the worklet is ready. Hits are still started on the audio clock. */
+  private scheduleGridFallback(opts: GridRepeat, drumIndex: number, velocity: number) {
+    const ctx = this.ctx
+    const out = this.speakerGain
+    if (!ctx || !out) return
+    this.stopGridTails(opts.pitch)
+    const buffer = this.fallbackBuffer(opts, drumIndex)
+    if (!buffer) return
+    const swingPercent = 50 + Math.max(0, Math.min(0.5, opts.swing)) * 50
+    const horizon = opts.armedBeat + opts.intervalBeats * 96
+    const beats = gridRepeatBeats(opts.armedBeat, horizon, opts.intervalBeats, swingPercent)
+    const tails: { when: number; stop: () => void }[] = []
+    const now = ctx.currentTime
+    const tempo = Math.max(1, opts.tempo)
+    for (let i = 0; i < beats.length; i++) {
+      const beat = beats[i]
+      let when = opts.originContext + (beat - opts.originBeat) * (60 / tempo)
+      const next = i + 1 < beats.length
+        ? opts.originContext + (beats[i + 1] - opts.originBeat) * (60 / tempo)
+        : when + opts.intervalBeats * (60 / tempo)
+      if (when < now) {
+        if (next <= now) continue
+        when = now
+      }
+      const src = ctx.createBufferSource()
+      const gain = ctx.createGain()
+      src.buffer = buffer
+      src.playbackRate.value = opts.tune ? 2 ** (opts.tune / 12) : 1
+      gain.gain.value = velocity
+      src.connect(gain)
+      gain.connect(out)
+      src.start(when)
+      const stop = () => {
+        try { src.stop() } catch { /* already started or stopped */ }
+      }
+      tails.push({ when, stop })
+    }
+    if (tails.length) this.gridTails.set(opts.pitch, tails)
+  }
+
+  private fallbackBuffer(opts: GridRepeat, drumIndex: number): AudioBuffer | null {
+    const ctx = this.ctx
+    if (!ctx) return null
+    if (opts.sample?.length) {
+      const buffer = ctx.createBuffer(1, opts.sample.length, ctx.sampleRate)
+      buffer.copyToChannel(new Float32Array(opts.sample), 0)
+      return buffer
+    }
+    if (drumIndex >= 0 && this.drumBuffers[drumIndex]) return this.drumBuffers[drumIndex]
+    const length = Math.max(1, Math.round(ctx.sampleRate * 0.05))
+    const buffer = ctx.createBuffer(1, length, ctx.sampleRate)
+    const data = buffer.getChannelData(0)
+    const freq = 440 * 2 ** ((opts.pitch - 69) / 12)
+    for (let i = 0; i < length; i++) data[i] = Math.sin((2 * Math.PI * freq * i) / ctx.sampleRate) * Math.exp(-i / (ctx.sampleRate * 0.02))
+    return buffer
   }
 
   private pushSab(type: number, pitch: number, velocity: number, drum: number) {

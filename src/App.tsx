@@ -582,7 +582,7 @@ export function App() {
       if (key === 't' && !meta && !event.repeat && !store.keyboardMidi) {
         event.preventDefault()
         window.dispatchEvent(new CustomEvent('cueharbor-tap', { detail: event.timeStamp }))
-      } else if (event.code === 'Space') {
+      } else if (event.code === 'Space' && !document.querySelector('.perform-pop.drums')) {
         event.preventDefault()
         if (engine.status === 'stopped') void play()
         else void stop()

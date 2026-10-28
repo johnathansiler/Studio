@@ -1,5 +1,6 @@
 import type { AudioEngine } from './engine'
-import { heardBeat, midiPerformanceMs, quantizeBeat, repeatIntervalBeats, repeatIntervalSeconds, type RepeatRate } from '../model/midiClock'
+import { gridRepeatBeats } from '../model/beatRepeat'
+import { heardBeat, midiPerformanceMs, quantizeBeat, repeatIntervalBeats, type RepeatRate } from '../model/midiClock'
 import { snapPitch, type ScaleId } from '../model/scale'
 import {
   chokeTargets,
@@ -7,7 +8,7 @@ import {
   padVelocity,
   pickLayer,
   sixteenLevels,
-  swungRepeats,
+  swingDelay,
   timingCorrect,
   type LevelSpread,
   type PadProgram,
@@ -34,6 +35,10 @@ interface HeldNote {
   velocity: number
   erase: boolean
   locks?: Record<string, number>
+  repeating?: boolean
+  printed?: boolean
+  repeatRate?: RepeatRate
+  repeatTriplet?: boolean
 }
 
 /**
@@ -77,8 +82,16 @@ export class Performer {
     this.octave = octave
   }
 
-  setRepeat(rate: RepeatRate | null, triplet: boolean) {
-    this.repeat = rate ? { rate, triplet } : null
+  setRepeat(rate: RepeatRate | null, triplet: boolean, eventMs = performance.now()) {
+    const next = rate ? { rate, triplet } : null
+    const same = (!this.repeat && !next) || (this.repeat && next && this.repeat.rate === next.rate && this.repeat.triplet === next.triplet)
+    if (same) return
+    if (this.repeat && !next) {
+      this.releaseRepeats(eventMs)
+      this.repeat = null
+      return
+    }
+    this.repeat = next
   }
 
   setQuantize(beats: number) {
@@ -118,8 +131,7 @@ export class Performer {
     if (this.latch && this.repeat && this.latched.has(pitch)) {
       const held = this.latched.get(pitch)!
       this.latched.delete(pitch)
-      this.engine.liveNoteOff(pitch)
-      this.print(held.pitch, held.velocity, held.eventMs, eventMs, held.locks)
+      this.finishPitch(pitch, eventMs, held)
       return
     }
     const drums = this.target()?.drums ?? false
@@ -136,24 +148,56 @@ export class Performer {
         ? { tune: pad.tune, filter: pad.filter, decay: pad.decay, attack: pad.attack, swing: this.repeat ? this.swingFraction() : 0 }
         : undefined
     let sample: Float32Array | null = null
+    let sampleId: string | undefined
     if (pad && !spread) {
       const layerIndex = pickLayer(pad.layers, level, pad.layerMode, this.robin, this.kit?.seed ?? 1)
       this.robin = (this.robin + 1) % 4
       const layer = pad.layers[layerIndex]
-      if (layer?.bufferId) sample = this.sampleOf(layer.bufferId)
+      if (layer?.bufferId) {
+        sample = this.sampleOf(layer.bufferId)
+        sampleId = layer.bufferId
+      }
       if (layer?.tune && color) color.tune = (color.tune || 0) + layer.tune
     }
     const gain = level * (pad?.level ?? 1)
+    const previous = this.held.get(pointerId)
+    if (previous?.repeating && !previous.printed) this.finishPitch(previous.pitch, eventMs, previous)
     if (drums) {
-      for (const other of chokeTargets(this.chokePads(), pitch)) this.engine.liveNoteOff(other)
-      if (pad?.poly === 'mono') this.engine.liveNoteOff(pitch)
+      for (const other of chokeTargets(this.chokePads(), pitch)) this.finishPitch(other, eventMs)
+      if (pad?.poly === 'mono') this.finishPitch(pitch, eventMs)
     }
-    const interval = this.repeatSeconds()
-    const every = interval > 0 ? Math.round(interval * (this.engine.sampleRate || 48000)) : 0
-    if (sample) this.engine.playBuffer(sample, pitch, gain, color)
-    else if (drums) this.engine.liveDrum(pitch, gain, every, color)
-    else this.engine.liveNoteOn(pitch, gain, -1, every, color)
-    const held = { pitch, eventMs, velocity: gain, erase: false, locks }
+    if (this.repeat) {
+      const clock = this.engine.musicalClock()
+      this.engine.liveGridRepeat({
+        pitch,
+        velocity: gain,
+        drums,
+        intervalBeats: repeatIntervalBeats(this.repeat.rate, this.repeat.triplet),
+        swing: swingDelay(this.swing),
+        originContext: clock.originContext,
+        originBeat: clock.originBeat,
+        tempo: clock.tempo,
+        armedBeat: this.musicalBeat(eventMs),
+        sample,
+        sampleId,
+        tune: color?.tune,
+        decay: color?.decay,
+        attack: color?.attack,
+        filter: color?.filter,
+      })
+    } else if (sample) this.engine.playBuffer(sample, pitch, gain, color)
+    else if (drums) this.engine.liveDrum(pitch, gain, 0, color)
+    else this.engine.liveNoteOn(pitch, gain, -1, 0, color)
+    const held = {
+      pitch,
+      eventMs,
+      velocity: gain,
+      erase: false,
+      locks,
+      repeating: Boolean(this.repeat),
+      repeatRate: this.repeat?.rate,
+      repeatTriplet: this.repeat?.triplet,
+    }
     this.held.set(pointerId, held)
     if (this.latch && this.repeat) this.latched.set(pitch, held)
   }
@@ -170,10 +214,22 @@ export class Performer {
       this.eraseNotes(target, held.pitch, start, end)
       return
     }
+    if (held.printed) return
     const still = [...this.held.values(), ...this.latched.values()].some((item) => item.pitch === held.pitch)
     if (this.latched.has(held.pitch)) return
-    if (!still) this.engine.liveNoteOff(held.pitch)
-    this.print(held.pitch, held.velocity, held.eventMs, eventMs, held.locks)
+    if (still) {
+      if (held.repeating) {
+        for (const other of [...this.held.values(), ...this.latched.values()]) {
+          if (other.pitch === held.pitch && other.eventMs > held.eventMs) other.eventMs = held.eventMs
+        }
+      }
+      return
+    }
+    if (held.repeating) this.finishPitch(held.pitch, eventMs, held)
+    else {
+      this.engine.liveNoteOff(held.pitch)
+      this.print(held.pitch, held.velocity, held.eventMs, eventMs, held.locks)
+    }
   }
 
   pressure(pointerId: number, velocity: number) {
@@ -226,9 +282,68 @@ export class Performer {
     return this.snap ? snapPitch(shifted, this.root, this.scale) : shifted
   }
 
-  private repeatSeconds() {
-    if (!this.repeat) return 0
-    return repeatIntervalSeconds(this.repeat.rate, this.repeat.triplet, this.engine.tempo)
+  private releaseRepeats(eventMs: number) {
+    const pitches = new Set<number>()
+    for (const held of [...this.held.values(), ...this.latched.values()]) {
+      if (held.repeating && !held.printed && !held.erase) pitches.add(held.pitch)
+    }
+    for (const pitch of pitches) this.finishPitch(pitch, eventMs)
+    for (const [pitch, held] of this.latched) {
+      if (held.printed || !held.repeating) this.latched.delete(pitch)
+    }
+  }
+
+  /** Stop one pitch, and if it was repeating, print the grid hits up to this moment. */
+  private finishPitch(pitch: number, eventMs: number, extra?: HeldNote) {
+    const notes: HeldNote[] = []
+    const take = (held: HeldNote) => {
+      if (held.pitch !== pitch || held.printed || held.erase || !held.repeating) return
+      notes.push(held)
+    }
+    if (extra) take(extra)
+    for (const held of this.held.values()) take(held)
+    for (const held of this.latched.values()) take(held)
+    if (!notes.length) {
+      this.engine.liveNoteOff(pitch)
+      return
+    }
+    let start = notes[0].eventMs
+    let velocity = notes[0].velocity
+    let locks = notes[0].locks
+    for (const held of notes) {
+      if (held.eventMs < start) start = held.eventMs
+      velocity = held.velocity
+      locks = held.locks
+      held.printed = true
+      held.repeating = false
+    }
+    this.engine.liveNoteOff(pitch, this.musicalBeat(eventMs))
+    const gesture = notes.find((note) => note.repeatRate)
+    this.print(
+      pitch,
+      velocity,
+      start,
+      eventMs,
+      locks,
+      true,
+      gesture?.repeatRate ? { rate: gesture.repeatRate, triplet: Boolean(gesture.repeatTriplet) } : undefined,
+    )
+  }
+
+  private musicalBeat(eventMs: number) {
+    const clock = this.engine.musicalClock()
+    const comp = this.engine.clockCompensation()
+    return heardBeat({
+      eventMs,
+      stamp: this.engine.outputStamp(),
+      originContext: clock.originContext,
+      originBeat: clock.originBeat,
+      tempo: clock.tempo,
+      outputLatency: comp.outputLatency,
+      baseLatency: comp.baseLatency,
+      calibrationSec: comp.calibrationSec,
+      quantizeBeats: 0,
+    })
   }
 
   private place(eventMs: number) {
@@ -250,15 +365,32 @@ export class Performer {
     return quantizeBeat(beat, this.quantizeBeats)
   }
 
-  private print(pitch: number, velocity: number, startMs: number, endMs: number, locks?: Record<string, number>) {
+  private print(
+    pitch: number,
+    velocity: number,
+    startMs: number,
+    endMs: number,
+    locks?: Record<string, number>,
+    repeating = false,
+    gesture?: { rate: RepeatRate; triplet: boolean },
+  ) {
     const target = this.target()
     if (!target) return
-    const startBeat = Math.max(0, this.place(startMs))
-    const endBeat = Math.max(startBeat + 0.05, this.place(endMs))
-    const interval = this.repeat ? repeatIntervalBeats(this.repeat.rate, this.repeat.triplet) : 0
-    const marks = interval > 0 ? swungRepeats(startBeat, endBeat, interval, this.swing) : [startBeat]
-    const span = interval > 0 ? Math.min(interval * 0.9, 0.5) : endBeat - startBeat
-    const notes = marks.map((beat) => ({ pitch, velocity, startBeat: beat, durationBeats: span, locks }))
+    const spec = gesture ?? this.repeat
+    let notes: PlayedNote[]
+    if (repeating && spec) {
+      const startBeat = this.musicalBeat(startMs)
+      const endBeat = this.musicalBeat(endMs)
+      const interval = repeatIntervalBeats(spec.rate, spec.triplet)
+      const marks = gridRepeatBeats(startBeat, endBeat, interval, this.swing)
+      if (!marks.length) return
+      const span = Math.min(interval * 0.9, 0.5)
+      notes = marks.map((beat) => ({ pitch, velocity, startBeat: beat, durationBeats: span, locks }))
+    } else {
+      const startBeat = Math.max(0, this.place(startMs))
+      const endBeat = Math.max(startBeat + 0.05, this.place(endMs))
+      notes = [{ pitch, velocity, startBeat, durationBeats: endBeat - startBeat, locks }]
+    }
     if (this.recording()) this.commit(target, notes, this.recordMode, this.fixedBeats)
     else {
       this.recent.push(...notes)

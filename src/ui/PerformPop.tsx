@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Performer, pointerVelocity, type PerformTarget } from '../audio/performer'
 import type { AudioEngine } from '../audio/engine'
+import { BEAT_REPEAT_KEY, beatRepeatSwitch } from '../model/beatRepeat'
 import { DRUM_PADS, renderDrum } from '../model/drums'
-import type { RepeatRate } from '../model/midiClock'
+import { midiPerformanceMs, type RepeatRate } from '../model/midiClock'
 import { NOTE_NAMES, SCALES, type ScaleId } from '../model/scale'
 import { BANKS, gridPitch, PAD_MACROS, sixteenLevels, type GridLayout, type LevelSpread, type PadVoice, type StepCondition } from '../model/padMachine'
 import { decodeWavPCM } from '../model/wav'
@@ -56,6 +57,8 @@ export function PerformPop({
   const outputs = useRef<MIDIOutput[]>([])
   const [octave, setOctave] = useState(0)
   const [repeat, setRepeat] = useState<RepeatRate | null>(null)
+  const [rate, setRate] = useState<RepeatRate>('1/16')
+  const [repeatHeld, setRepeatHeld] = useState(false)
   const [triplet, setTriplet] = useState(false)
   const [latency, setLatency] = useState(() => Math.round(engine.roundTripMs))
   const [focus, setFocus] = useState(engine.performanceMode)
@@ -78,6 +81,24 @@ export function PerformPop({
   const [padMutes, setPadMutes] = useState(false)
   const [soloPads, setSoloPads] = useState(false)
   const [lockParam, setLockParam] = useState('filter')
+  const holds = useRef(new Set<string>())
+  const rateRef = useRef(rate)
+  const tripletRef = useRef(triplet)
+  const levelsRef = useRef(levels)
+  const selectedRef = useRef(selectedPad)
+  rateRef.current = rate
+  tripletRef.current = triplet
+  levelsRef.current = levels
+  selectedRef.current = selectedPad
+  const syncHold = (source: string, down: boolean, eventMs: number) => {
+    if (down) holds.current.add(source)
+    else holds.current.delete(source)
+    const on = holds.current.size > 0
+    performer.current?.setRepeat(on ? rateRef.current : null, tripletRef.current, eventMs)
+    setRepeatHeld(on)
+  }
+  const syncHoldRef = useRef(syncHold)
+  syncHoldRef.current = syncHold
   const scale = store.scaleState()
   const record = store.recordSettings()
   const clip = currentClip(store)
@@ -94,7 +115,7 @@ export function PerformPop({
     )
   }
   performer.current.setScale(scale.snap, scale.root, scale.scale, octave)
-  performer.current.setRepeat(repeat, triplet)
+  performer.current.setRepeat(drums ? (holds.current.size ? rate : null) : repeat, triplet)
   performer.current.setQuantize(record.quantizeBeats || 0)
   performer.current.setDeck({
     kit: drums ? kit : null,
@@ -218,7 +239,9 @@ export function PerformPop({
         const row = store.padProgram().banks[bankRef.current] || []
         const pad = row[index]
         if (!pad) return null
-        return { pitch: levels ? (row[selectedPad]?.pitch ?? pad.pitch) : pad.pitch, level: levels ? index : undefined }
+        const spread = levelsRef.current
+        const chosen = selectedRef.current
+        return { pitch: spread ? (row[chosen]?.pitch ?? pad.pitch) : pad.pitch, level: spread ? index : undefined }
       }
       const pitch = KEY_CODES[event.code] ?? KEYBOARD[event.key.toLowerCase()]
       return pitch == null ? null : { pitch, level: undefined }
@@ -227,6 +250,13 @@ export function PerformPop({
       if (event.metaKey || event.ctrlKey || event.altKey) return
       const tag = (event.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+      if (drums && event.code === BEAT_REPEAT_KEY) {
+        event.preventDefault()
+        if (event.repeat || heldKeys.has(BEAT_REPEAT_KEY)) return
+        heldKeys.set(BEAT_REPEAT_KEY, -1)
+        syncHoldRef.current('key', true, event.timeStamp)
+        return
+      }
       const token = tokenOf(event)
       if (heldKeys.has(token)) return
       const next = pitchOf(event)
@@ -237,6 +267,11 @@ export function PerformPop({
       play.down(next.pitch, 0.8, event.timeStamp, id, next.level)
     }
     const up = (event: KeyboardEvent) => {
+      if (drums && event.code === BEAT_REPEAT_KEY) {
+        heldKeys.delete(BEAT_REPEAT_KEY)
+        syncHoldRef.current('key', false, event.timeStamp)
+        return
+      }
       const id = heldKeys.get(tokenOf(event))
       if (id == null) return
       heldKeys.delete(tokenOf(event))
@@ -244,8 +279,12 @@ export function PerformPop({
     }
     const blur = () => {
       const now = performance.now()
-      for (const id of heldKeys.values()) play.up(id, now)
+      for (const id of heldKeys.values()) if (id >= 0) play.up(id, now)
       heldKeys.clear()
+      syncHoldRef.current('key', false, now)
+      syncHoldRef.current('touch-header', false, now)
+      syncHoldRef.current('touch-tools', false, now)
+      syncHoldRef.current('midi', false, now)
     }
     window.addEventListener('keydown', down)
     window.addEventListener('keyup', up)
@@ -256,7 +295,7 @@ export function PerformPop({
       window.removeEventListener('keyup', up)
       window.removeEventListener('blur', blur)
     }
-  }, [drums, levels, selectedPad, store])
+  }, [drums, store])
 
   useEffect(() => {
     if (!navigator.requestMIDIAccess) return
@@ -270,6 +309,11 @@ export function PerformPop({
         for (const input of access.inputs.values()) {
           input.onmidimessage = (event) => {
             if (!event.data) return
+            const held = beatRepeatSwitch(event.data)
+            if (held != null) {
+              syncHoldRef.current('midi', held, midiPerformanceMs(event.timeStamp, window.performance.now()))
+              return
+            }
             play.midi(event.data, event.timeStamp, window.performance.now())
             const on = (event.data[0] & 0xf0) === 0x90 && event.data[2] > 0
             root?.querySelectorAll(`[data-pitch="${event.data[1]}"]`).forEach((pad) => pad.classList.toggle('lit', on))
@@ -289,9 +333,20 @@ export function PerformPop({
   const source = pads[selectedPad] || pads[0]
   const showEdit = deck === 'steps' || deck === 'mix'
   const lengthSteps = clip ? Math.max(16, Math.round(clip.durationBeats * 4)) : 16
+  const label = triplet ? `${rate}T` : rate
+  const holdRepeat = (event: React.PointerEvent<HTMLButtonElement>, source: string, down: boolean) => {
+    if (down) {
+      event.preventDefault()
+      try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* already gone */ }
+    }
+    syncHold(source, down, event.timeStamp)
+  }
   return (
-    <div className={`perform-pop ${drums ? 'drums' : 'keys'}`} role="dialog" aria-label={drums ? 'Drum machine' : 'Piano roll'}>
+    <div className={`perform-pop ${drums ? 'drums' : 'keys'}${repeatHeld ? ' repeating' : ''}`} role="dialog" aria-label={drums ? 'Drum machine' : 'Piano roll'}>
       <header>
+        {drums && (
+          <BeatRepeatControl label={label} rate={rate} triplet={triplet} held={repeatHeld} live onRate={setRate} onTriplet={() => setTriplet((value) => !value)} onHold={holdRepeat} source="touch-header" />
+        )}
         {drums ? DECKS.map((item) => (
           <button key={item} type="button" className={deck === item ? 'on' : ''} onClick={() => setDeck(item)}>{item[0].toUpperCase() + item.slice(1)}</button>
         )) : <strong>Keys</strong>}
@@ -326,6 +381,7 @@ export function PerformPop({
         <button type="button" onClick={() => void session.calibrate()}>Calibrate</button>
         <button type="button" onClick={onClose} aria-label="Close">×</button>
       </header>
+      {drums && repeatHeld && <div className="repeat-banner" aria-hidden="true">Beat Repeat {label}</div>}
       {!drums && (
         <div className="scale-row">
           <select aria-label="Key" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
@@ -361,10 +417,7 @@ export function PerformPop({
               <input aria-label="Timing strength" type="range" min={0} max={100} value={Math.round(kit.timingStrength * 100)} onChange={(event) => store.patchKit({ timingStrength: Number(event.target.value) / 100 })} />
             </label>
           )}
-          {RATES.map((rate) => (
-            <button key={rate} type="button" className={repeat === rate ? 'on' : ''} onClick={() => setRepeat((value) => (value === rate ? null : rate))}>{rate}</button>
-          ))}
-          <button type="button" className={triplet ? 'on' : ''} onClick={() => setTriplet((value) => !value)}>Triplet</button>
+          <BeatRepeatControl label={label} rate={rate} triplet={triplet} held={repeatHeld} onRate={setRate} onTriplet={() => setTriplet((value) => !value)} onHold={holdRepeat} source="touch-tools" />
           <button type="button" className={latch ? 'on' : ''} onClick={() => setLatch((value) => !value)}>Latch</button>
           <button type="button" className={fullLevel ? 'on' : ''} onClick={() => setFullLevel((value) => !value)}>Full</button>
           <button type="button" className={accent ? 'on' : ''} onClick={() => setAccent((value) => !value)}>Accent</button>
@@ -502,6 +555,41 @@ export function PerformPop({
         </div>
       </div>
     </div>
+  )
+}
+
+function BeatRepeatControl({
+  label, rate, triplet, held, source, live, onRate, onTriplet, onHold,
+}: {
+  label: string
+  rate: RepeatRate
+  triplet: boolean
+  held: boolean
+  source: string
+  live?: boolean
+  onRate: (rate: RepeatRate) => void
+  onTriplet: () => void
+  onHold: (event: React.PointerEvent<HTMLButtonElement>, source: string, down: boolean) => void
+}) {
+  return (
+    <>
+      <select aria-label={live ? 'Quantize' : 'Beat quantize'} value={rate} onChange={(event) => onRate(event.target.value as RepeatRate)}>
+        {RATES.map((item) => <option key={item} value={item}>{item}</option>)}
+      </select>
+      <button type="button" className={triplet ? 'on' : ''} aria-pressed={triplet} onClick={onTriplet}>Triplet</button>
+      <button
+        type="button"
+        className={`beat-repeat${held ? ' on' : ''}`}
+        aria-pressed={held}
+        aria-label={live ? `Beat Repeat ${label}` : `Beat Repeat ${label} (pads)`}
+        title="Hold to retrigger a pad on the quantize grid. Space does the same. MIDI CC 119 holds it from a controller."
+        onPointerDown={(event) => onHold(event, source, true)}
+        onPointerUp={(event) => onHold(event, source, false)}
+        onPointerCancel={(event) => onHold(event, source, false)}
+        onContextMenu={(event) => event.preventDefault()}
+      >Beat Repeat</button>
+      <span className={`repeat-rate${held ? ' on' : ''}`} role={live ? 'status' : undefined} aria-live={live ? 'polite' : undefined} aria-hidden={live ? undefined : true}>{held ? `ON ${label}` : label}</span>
+    </>
   )
 }
 
