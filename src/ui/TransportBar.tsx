@@ -12,12 +12,6 @@ export function TransportBar({
   onStop,
   onRecord,
   onSeek,
-  onSession,
-  onArrange,
-  onPiano,
-  onKeys,
-  onDrums,
-  onQuantize,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -26,17 +20,8 @@ export function TransportBar({
   onStop: () => void
   onRecord: () => void
   onSeek: (sample: number) => void
-  onSession?: () => void
-  onArrange?: () => void
-  onPiano?: (trackId: string) => void
-  onKeys: () => void
-  onDrums: () => void
-  onQuantize: () => void
 }) {
   const project = store.project
-  const midiTrack = project.tracks.find((track) => track.id === store.selectedTrackId && track.type === 'midi')
-  const qHold = useRef(0)
-  const opened = useRef(false)
   const [position, setPosition] = useState(engine.positionSamples)
   const [status, setStatus] = useState(engine.status)
   const [tapOpen, setTapOpen] = useState(false)
@@ -107,164 +92,131 @@ export function TransportBar({
   }, [tapOpen])
 
   const readout = (shown ?? project.tempo).toFixed(whole || shown == null && Number.isInteger(project.tempo) ? 0 : 1)
+  const playing = status === 'playing' || status === 'recording'
   return (
     <div className="transport">
       <div className="t-buttons">
-        <button className="t-btn" onClick={() => onSeek(0)} title="Return to start">
-          ⏮
+        <button type="button" className="t-btn" onClick={() => onSeek(0)} aria-label="Return to start">
+          <SkipBackIcon />
         </button>
-        <button className={`t-btn play ${status === 'playing' || status === 'recording' ? 'on' : ''}`} onClick={onPlay} title="Play">
-          ▶
+        <button type="button" className={`t-btn play ${playing ? 'on' : ''}`} onClick={onPlay} aria-label="Play">
+          <PlayIcon />
         </button>
-        <button className="t-btn stop" onClick={onStop} title="Stop" disabled={status === 'stopped'}>
-          Stop
+        <button type="button" className="t-btn stop" onClick={onStop} aria-label="Stop" disabled={status === 'stopped'}>
+          <StopIcon />
         </button>
-        <button className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} onClick={onRecord} title="Record">
-          ●
-        </button>
-        {midiTrack && onPiano && (
-          <button type="button" className={`t-btn piano-btn ${store.selectedMidiClipId ? 'on' : ''}`} onClick={() => onPiano(midiTrack.id)}>Piano</button>
-        )}
-        <button className="t-btn wide" onPointerDown={() => engine.unlock()} onClick={onKeys} title="Piano roll">
-          Keys
-        </button>
-        <button className="t-btn wide" onPointerDown={() => engine.unlock()} onClick={onDrums} title="Drum machine">
-          Pads
-        </button>
-        <button
-          className="t-btn"
-          type="button"
-          aria-label="Quantize"
-          onPointerDown={() => {
-            opened.current = false
-            qHold.current = window.setTimeout(() => {
-              opened.current = true
-              onQuantize()
-            }, 420)
-          }}
-          onPointerUp={() => window.clearTimeout(qHold.current)}
-          onPointerCancel={() => window.clearTimeout(qHold.current)}
-          onContextMenu={(event) => {
-            event.preventDefault()
-            opened.current = true
-            onQuantize()
-          }}
-          onClick={() => {
-            if (opened.current) return
-            store.quickQuantize()
-          }}
-        >
-          Q
+        <button type="button" className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} onClick={onRecord} aria-label="Record">
+          <RecIcon />
         </button>
       </div>
-      <div className="lcd-wrap">
-        <div className="lcd">
-          <div className="bars">{formatBarsBeats(position, project.sampleRate, project.tempo, project.timeSignature)}</div>
-          <div className="tc">
-            {formatTimecode(position, project.sampleRate)} · {status}
-          </div>
-        </div>
-        {tapOpen ? (
-          <div className="tap-pad">
-            <button
-              type="button"
-              className="bpm-readout"
-              aria-label="Tap tempo"
-              onPointerDown={(event) => register(event.timeStamp)}
-            >
-              {readout}
-            </button>
-            <button type="button" aria-label="Half tempo" onClick={() => nudge(0.5)}>½</button>
-            <button type="button" aria-label="Double tempo" onClick={() => nudge(2)}>2×</button>
-            <button
-              type="button"
-              aria-label="Whole BPM"
-              className={whole ? 'on' : ''}
-              onClick={() => {
-                const next = !whole
-                setWhole(next)
-                memory.current = { ...memory.current, whole: next }
-                const raw = tempoFromTaps(memory.current.taps)
-                if (raw == null) return
-                const rounded = roundTempo(raw, next)
-                setShown(rounded)
-                if (memory.current.taps.length >= 3) store.setTempo(rounded, true)
-              }}
-            >
-              {whole ? '1' : '.1'}
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="field bpm-readout"
-            aria-label="BPM"
-            disabled={store.remoteFollow}
-            onPointerDown={() => {
-              held.current = false
-              window.clearTimeout(hold.current)
-              hold.current = window.setTimeout(() => {
-                held.current = true
-                setTapOpen(true)
-              }, 450)
-            }}
-            onPointerUp={(event) => {
-              window.clearTimeout(hold.current)
-              if (!held.current) register(event.timeStamp)
-              held.current = false
-            }}
-            onPointerLeave={() => window.clearTimeout(hold.current)}
-          >
+      <div className="lcd" aria-live="polite">
+        <div className="bars">{formatBarsBeats(position, project.sampleRate, project.tempo, project.timeSignature)}</div>
+        <div className="tc">{formatTimecode(position, project.sampleRate)} · {status}</div>
+      </div>
+      {tapOpen ? (
+        <div className="tap-pad">
+          <button type="button" className="bpm-readout" aria-label="Tap tempo" onPointerDown={(event) => register(event.timeStamp)}>
             {readout}
           </button>
-        )}
-        <label className="field">
-          Sig
-          <select
-            value={`${project.timeSignature.numerator}/${project.timeSignature.denominator}`}
-            disabled={store.remoteFollow}
-            onChange={(event) => {
-              const [n, d] = event.target.value.split('/').map(Number)
-              store.setTimeSignature(n, d)
+          <button type="button" aria-label="Half tempo" onClick={() => nudge(0.5)}>½</button>
+          <button type="button" aria-label="Double tempo" onClick={() => nudge(2)}>2×</button>
+          <button
+            type="button"
+            aria-label="Whole BPM"
+            className={whole ? 'on' : ''}
+            onClick={() => {
+              const next = !whole
+              setWhole(next)
+              memory.current = { ...memory.current, whole: next }
+              const raw = tempoFromTaps(memory.current.taps)
+              if (raw == null) return
+              const rounded = roundTempo(raw, next)
+              setShown(rounded)
+              if (memory.current.taps.length >= 3) store.setTempo(rounded, true)
             }}
           >
-            {['4/4', '3/4', '6/8', '5/4', '7/8'].map((sig) => (
-              <option key={sig}>{sig}</option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <div className="t-toggles">
-        <label className="toggle">
-          <input type="checkbox" checked={project.metronomeEnabled} disabled={store.remoteFollow} onChange={() => store.toggle('metronomeEnabled')} /> Click
-        </label>
-        <label className="toggle">
-          <input type="checkbox" checked={project.countIn} disabled={store.remoteFollow} onChange={() => store.toggle('countIn')} /> Count-in
-        </label>
-        <label className="toggle">
-          <input type="checkbox" checked={project.loopEnabled} disabled={store.remoteFollow} onChange={() => store.toggle('loopEnabled')} /> Loop
-        </label>
-        <label className="toggle">
-          <input type="checkbox" checked={project.snap} disabled={store.remoteFollow} onChange={() => store.toggle('snap')} /> Snap
-        </label>
+            {whole ? '1' : '.1'}
+          </button>
+        </div>
+      ) : (
         <button
           type="button"
-          className={`mode-btn ${store.transportMode === 'session' ? 'on' : ''}`}
+          className="bpm-readout"
+          aria-label="BPM"
           disabled={store.remoteFollow}
-          onClick={() => (store.transportMode === 'session' ? (onArrange ?? (() => store.backToArrangement()))() : (onSession ?? (() => store.enterSession()))())}
+          onPointerDown={() => {
+            held.current = false
+            window.clearTimeout(hold.current)
+            hold.current = window.setTimeout(() => {
+              held.current = true
+              setTapOpen(true)
+            }, 450)
+          }}
+          onPointerUp={(event) => {
+            window.clearTimeout(hold.current)
+            if (!held.current) register(event.timeStamp)
+            held.current = false
+          }}
+          onPointerLeave={() => window.clearTimeout(hold.current)}
         >
-          {store.transportMode === 'session' ? 'Session' : 'Arrange'}
+          {readout}
         </button>
-        {store.transportMode === 'session' && (
-          <button type="button" className="mode-btn" disabled={store.remoteFollow} onClick={() => (onArrange ?? (() => store.backToArrangement()))()}>
-            Back
-          </button>
-        )}
-        <button type="button" className="mode-btn" disabled={store.remoteFollow} onClick={() => store.captureToArrangement()}>
-          Capture
-        </button>
-        {syncLabel && <span className="sync-pill">{syncLabel}</span>}
-      </div>
+      )}
+      <button
+        type="button"
+        className={`t-btn loop ${project.loopEnabled ? 'on' : ''}`}
+        aria-label="Loop"
+        aria-pressed={project.loopEnabled}
+        disabled={store.remoteFollow}
+        onClick={() => store.toggle('loopEnabled')}
+      >
+        <LoopIcon />
+      </button>
+      {syncLabel && <span className="sync-pill">{syncLabel}</span>}
     </div>
+  )
+}
+
+function SkipBackIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M4 3.2v9.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M13 3.4 5.6 8 13 12.6V3.4Z" fill="currentColor" />
+    </svg>
+  )
+}
+
+function PlayIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M5.2 3.1v9.8L13 8 5.2 3.1Z" fill="currentColor" />
+    </svg>
+  )
+}
+
+function StopIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="4" y="4" width="8" height="8" rx="1.2" fill="currentColor" />
+    </svg>
+  )
+}
+
+function RecIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="4" fill="currentColor" />
+    </svg>
+  )
+}
+
+function LoopIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M4.2 6.2h6.6a1.8 1.8 0 0 1 1.8 1.8V11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M6.2 4.1 3.8 6.2l2.4 2.1" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M11.8 9.8H5.2A1.8 1.8 0 0 1 3.4 8V5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M9.8 12 12.2 9.9 9.8 7.8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   )
 }
