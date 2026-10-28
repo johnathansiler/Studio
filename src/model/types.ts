@@ -4,6 +4,7 @@ import type { QuantizePreset, QuantizeSettings, WarpPoint } from './quantize'
 import type { OmniPatch } from '../instruments/patch/types'
 import type { DevicePreset, RackAutomation, RackPatch, RackState } from './rack'
 import type { GeneratorSettings } from '../generators/types'
+import type { PlayerSettings } from '../players/types'
 import { defaultScale, type ScaleState } from './scale'
 import type { BeatRack, PatternClip } from './steps'
 
@@ -346,6 +347,8 @@ export interface Project {
   scale?: ScaleState
   /** Last one-tap generator choices. The MIDI itself lives on the tracks. */
   generator?: GeneratorSettings
+  /** Drummer and session-player choices. The MIDI itself lives on the tracks. */
+  players?: PlayerSettings
   /** Musical grid for performed MIDI. 0 leaves the note where it was played. */
   quantizeBeats?: number
   /** `${kind}:${name}` factory and user presets marked in the browser. */

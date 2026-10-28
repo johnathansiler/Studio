@@ -1,0 +1,72 @@
+.players-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  max-height: min(46dvh, 420px);
+  overflow: auto;
+  background: #18241d;
+  border-top: 1px solid var(--line);
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.players-dock header { display: flex; gap: 8px; align-items: center; }
+.players-dock header strong { margin-right: auto; }
+.players-dock header button, .players-actions button, .players-parts button {
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #121a16;
+  color: var(--text);
+  padding: 0 12px;
+}
+.players-readout { margin: 0; color: var(--muted); font-size: 13px; }
+.players-style, .players-region { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.players-style select, .players-region input {
+  min-height: 44px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 4px 8px;
+}
+.players-region input { width: 4.5rem; }
+.players-pad {
+  position: relative;
+  height: 140px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background:
+    linear-gradient(to top, transparent, rgba(224, 177, 90, 0.16)),
+    linear-gradient(to right, transparent, rgba(115, 196, 143, 0.18));
+  touch-action: none;
+}
+.players-pad i {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 6px rgba(115, 196, 143, 0.25);
+}
+.players-pad small { position: absolute; color: var(--muted); font-size: 11px; pointer-events: none; }
+.players-pad .axis-x { right: 8px; bottom: 6px; }
+.players-pad .axis-y { left: 8px; top: 6px; }
+.players-fill { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 13px; }
+.players-fill input { width: 100%; min-height: 44px; }
+.players-parts, .players-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.players-parts button.on, .players-actions button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.players-dock .hint { margin: 0; }
+.shell.fold .players-dock {
+  left: auto;
+  top: 0;
+  bottom: 0;
+  width: min(380px, 42vw);
+  max-height: none;
+  border-top: 0;
+  border-left: 1px solid var(--line);
+}

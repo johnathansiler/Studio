@@ -1271,7 +1271,7 @@ export class AudioEngine {
             const start = beatsToSamples(clip.startBeat + audible.startBeat, rate, project.tempo)
             const dur = beatsToSamples(audible.durationBeats, rate, project.tempo) / rate
             if (start >= end) continue
-            this.scheduleVoice(offline, strip, audible, start / rate, dur)
+            this.scheduleVoice(offline, strip, audible, start / rate, dur, track)
           }
         }
       }
