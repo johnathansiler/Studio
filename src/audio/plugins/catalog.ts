@@ -53,6 +53,25 @@ function ampDescriptor(): PluginDescriptor {
 
 export const CATALOG: PluginDescriptor[] = [
   {
+    id: 'tune',
+    name: 'Auto-Tune',
+    version: VERSION,
+    params: [
+      param('retune', 'Retune', 0.02, 1, 0.95, ''),
+      param('humanize', 'Humanize', 0, 1, 0.05, ''),
+      param('flex', 'Flex', 0, 1, 0, ''),
+      param('amount', 'Amount', 0, 1, 0.85, ''),
+      param('transpose', 'Transpose', -12, 12, 0, 'st'),
+      param('formant', 'Formant', 0, 1, 0, ''),
+      param('mode', 'Mode', 0, 1, 1, ''),
+      param('root', 'Root', -1, 11, -1, ''),
+      param('scaleIndex', 'Scale', -1, 18, -1, ''),
+      param('minHz', 'Low', 50, 400, 80, 'Hz'),
+      param('maxHz', 'High', 300, 1600, 1000, 'Hz'),
+      param('mask', 'Mask', 0, 4095, 0, ''),
+    ],
+  },
+  {
     id: 'eq',
     name: 'EQ',
     version: VERSION,
@@ -171,25 +190,6 @@ export const CATALOG: PluginDescriptor[] = [
       param('size', 'Size', 0.1, 1, 0.6, ''),
       param('damp', 'Damp', 0, 1, 0.4, ''),
       param('mix', 'Mix', 0, 1, 0, ''),
-    ],
-  },
-  {
-    id: 'tune',
-    name: 'Auto-Tune',
-    version: VERSION,
-    params: [
-      param('retune', 'Retune', 0.02, 1, 0.65, ''),
-      param('humanize', 'Humanize', 0, 1, 0.25, ''),
-      param('flex', 'Flex', 0, 1, 0, ''),
-      param('amount', 'Amount', 0, 1, 0, ''),
-      param('transpose', 'Transpose', -12, 12, 0, 'st'),
-      param('formant', 'Formant', 0, 1, 0, ''),
-      param('mode', 'Mode', 0, 1, 1, ''),
-      param('root', 'Root', -1, 11, -1, ''),
-      param('scaleIndex', 'Scale', -1, 18, -1, ''),
-      param('minHz', 'Low', 50, 400, 120, 'Hz'),
-      param('maxHz', 'High', 300, 1600, 800, 'Hz'),
-      param('mask', 'Mask', 0, 4095, 0, ''),
     ],
   },
   {

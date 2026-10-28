@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { TUNE_NAME, TUNE_PRESET_NAMES, tuneOnTrack } from '../audio/plugins/autoTune'
+import { TUNE_NAME, TUNE_PRESET_META, TUNE_PRESET_NAMES, tuneOnTrack } from '../audio/plugins/autoTune'
 import { NOTE_NAMES, SCALES } from '../model/scale'
 import type { ProjectStore } from '../state/store'
 import { TipButton } from './Hint'
@@ -54,6 +54,8 @@ export function AutoTuneFace({
   enabled,
   projectKey,
   projectScale,
+  active,
+  presets,
   onChange,
   onScale,
   onPreset,
@@ -65,6 +67,8 @@ export function AutoTuneFace({
   enabled: boolean
   projectKey: string
   projectScale: string
+  active?: string | null
+  presets?: readonly string[]
   onChange: (id: string, value: number) => void
   onScale: (mode: number, scaleIndex: number) => void
   onPreset: (name: string) => void
@@ -76,6 +80,7 @@ export function AutoTuneFace({
     drawPitch(canvas.current, trace)
   }, [trace, revision])
   const scaleValue = (values.mode ?? 1) < 0.5 ? 'chromatic' : Math.round(values.scaleIndex ?? -1) < 0 ? 'project' : String(Math.round(values.scaleIndex ?? -1))
+  const names = presets?.length ? presets : [...TUNE_PRESET_NAMES]
   return (
     <section className="autotune" aria-label={`${TUNE_NAME} faceplate`}>
       <div className="autotune-key">
@@ -135,24 +140,33 @@ export function AutoTuneFace({
         </p>
       </div>
       <div className="autotune-sliders">
-        <Slider label="Retune Speed" hint="How fast the note snaps. Right is the hard-tune effect." value={values.retune ?? 0.65} min={0.02} max={1} step={0.01} text={retuneText(values.retune ?? 0.65)} onChange={(value) => onChange('retune', value)} />
-        <Slider label="Humanize" hint="Leave a little of the original pitch in the note." value={values.humanize ?? 0.25} min={0} max={1} step={0.01} text={percent(values.humanize ?? 0.25)} onChange={(value) => onChange('humanize', value)} />
-        <Slider label="Amount" hint="How much correction you hear. Zero is dry." value={values.amount ?? 0} min={0} max={1} step={0.01} text={percent(values.amount ?? 0)} onChange={(value) => onChange('amount', value)} />
+        <Slider label="Retune Speed" hint="How fast the note snaps. Right is the hard-tune effect." value={values.retune ?? 0.95} min={0.02} max={1} step={0.01} text={retuneText(values.retune ?? 0.95)} onChange={(value) => onChange('retune', value)} />
+        <Slider label="Humanize" hint="Leave a little of the original pitch in the note." value={values.humanize ?? 0.05} min={0} max={1} step={0.01} text={percent(values.humanize ?? 0.05)} onChange={(value) => onChange('humanize', value)} />
+        <Slider label="Amount" hint="How much correction you hear. Zero is dry." value={values.amount ?? 0.85} min={0} max={1} step={0.01} text={percent(values.amount ?? 0.85)} onChange={(value) => onChange('amount', value)} />
         <Slider label="Formant" hint="Zero keeps the throat. Right lets the tone follow the new pitch." value={values.formant ?? 0} min={0} max={1} step={0.01} text={(values.formant ?? 0) < 0.08 ? 'Keep' : percent(values.formant ?? 0)} onChange={(value) => onChange('formant', value)} />
         <Slider label="Transpose" hint="Shift the corrected note, in semitones." value={values.transpose ?? 0} min={-12} max={12} step={1} text={semitones(values.transpose ?? 0)} onChange={(value) => onChange('transpose', value)} />
       </div>
       <div className="autotune-presets" role="group" aria-label="Auto-Tune presets">
-        {TUNE_PRESET_NAMES.map((name) => (
-          <button
-            key={name}
-            type="button"
-            title={`${name}. Load this Auto-Tune preset.`}
-            aria-label={`${name}. Load this Auto-Tune preset.`}
-            onClick={() => onPreset(name)}
-          >
-            {name}
-          </button>
-        ))}
+        {names.map((name) => {
+          const meta = TUNE_PRESET_META.find((item) => item.name === name)
+          const hint = meta?.hint ?? 'Load this saved Auto-Tune preset.'
+          const on = active === name
+          return (
+            <button
+              key={name}
+              type="button"
+              className={on ? 'on' : ''}
+              aria-pressed={on}
+              data-preset={name}
+              title={`${name}. ${hint}`}
+              aria-label={`${name}. ${hint}`}
+              onClick={() => onPreset(name)}
+            >
+              <span className="wide">{name}</span>
+              <span className="narrow">{meta?.short ?? name}</span>
+            </button>
+          )
+        })}
       </div>
     </section>
   )

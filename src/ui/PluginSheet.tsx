@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { MASTERING_IDS } from '../audio/master/assistant'
-import { orderedInserts } from '../audio/plugins/autoTune'
+import { activeTunePreset, orderedInserts, tuneScaleOf } from '../audio/plugins/autoTune'
 import { CATALOG, FACTORY, descriptor } from '../audio/plugins/catalog'
 import { MODEL_IDS } from '../audio/plugins/models'
 import { AmpPop } from './AmpPop'
@@ -56,6 +56,11 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     ...(FACTORY[plugin.pluginId] ?? []).map((item) => item.name),
     ...store.project.presets.filter((item) => item.pluginId === plugin.pluginId).map((item) => item.name),
   ]
+  const song = tuneScaleOf(store.scaleState())
+  const tunePresets = [
+    ...(FACTORY.tune ?? []),
+    ...store.project.presets.filter((item) => item.pluginId === 'tune'),
+  ]
   const buses = store.project.tracks.filter((track) => track.id !== focus.trackId)
   const rolling = () => engine.status === 'playing' || engine.status === 'recording'
   const point = () => {
@@ -68,19 +73,23 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     <div className="plugin-sheet" role="dialog" aria-label={spec.name}>
       <header>
         <strong>{spec.name}</strong>
-        <select value="" onChange={(event) => event.target.value && store.applyPluginPreset(focus.trackId, plugin.id, event.target.value)}>
-          <option value="">Preset</option>
-          {names.map((name) => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-        </select>
-        <button className="text-btn" onClick={() => {
+        {!autoTune && (
+          <select value="" onChange={(event) => event.target.value && store.applyPluginPreset(focus.trackId, plugin.id, event.target.value)}>
+            <option value="">Preset</option>
+            {names.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        )}
+        <button className="text-btn" title="Save these settings as a preset." aria-label="Save preset. Keep these settings under a name." onClick={() => {
           const name = window.prompt('Preset')
           if (name) store.savePluginPreset(plugin.pluginId, name.trim(), plugin.params)
         }}>Save</button>
-        <button className={`text-btn ${plugin.enabled ? 'on' : ''}`} onClick={() => store.updatePlugin(focus.trackId, plugin.id, { enabled: !plugin.enabled })}>
-          {plugin.enabled ? 'On' : 'Bypass'}
-        </button>
+        {!autoTune && (
+          <button className={`text-btn ${plugin.enabled ? 'on' : ''}`} onClick={() => store.updatePlugin(focus.trackId, plugin.id, { enabled: !plugin.enabled })}>
+            {plugin.enabled ? 'On' : 'Bypass'}
+          </button>
+        )}
         <button className="text-btn" onClick={() => store.focusPlugin(null)}>×</button>
       </header>
       {plugin.pluginId !== 'tune' && (
@@ -114,9 +123,15 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
           trace={engine.trace(plugin.id)}
           revision={tick}
           enabled={plugin.enabled}
-          projectKey={NOTE_NAMES[store.scaleState().root] ?? 'C'}
-          projectScale={SCALES.find((scale) => scale.id === store.scaleState().scale)?.name ?? 'Major'}
+          projectKey={song.note}
+          projectScale={song.scaleName}
+          active={activeTunePreset(plugin.params, tunePresets)}
+          presets={tunePresets.map((item) => item.name)}
           onChange={(id, value) => {
+            if (id === 'root') {
+              store.updatePlugin(focus.trackId, plugin.id, { params: { root: value } })
+              return
+            }
             setLast(id)
             const param = spec.params.find((item) => item.id === id)
             store.setAutomated(
@@ -241,9 +256,9 @@ export function InsertList({ store, trackId }: { store: ProjectStore; trackId: s
           {descriptor(plugin.pluginId)?.name ?? plugin.pluginId}
         </button>
       ))}
-      <select className="insert-add" aria-label="Add insert" title="Add an effect. Auto-Tune is first on audio tracks." value="" onChange={(event) => addChoice(store, trackId, event.target.value)}>
+      <select className="insert-add" aria-label="Add insert" title="Add an effect. Auto-Tune is first." value="" onChange={(event) => addChoice(store, trackId, event.target.value)}>
         <option value="">+</option>
-        {orderedInserts(CATALOG.filter((plugin) => plugin.id !== 'meter' && (trackId === 'master' || !(MASTERING_IDS as readonly string[]).includes(plugin.id))), trackId !== 'master' && store.track(trackId)?.type === 'audio').map((plugin) => (
+        {orderedInserts(CATALOG.filter((plugin) => plugin.id !== 'meter' && (trackId === 'master' || !(MASTERING_IDS as readonly string[]).includes(plugin.id)))).map((plugin) => (
           <option key={plugin.id} value={plugin.id}>{plugin.name}</option>
         ))}
         {trackId !== 'master' && <option value="vocal">Vocal chain</option>}

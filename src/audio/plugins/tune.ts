@@ -1,6 +1,5 @@
-import { SCALES, pitchClass } from '../../model/scale'
 import { descriptor, FACTORY, tuneLatency } from './catalog'
-import { TUNE_TRACE_FRAMES, tuneLiveHop, tuneLiveLatency } from './autoTune'
+import { TUNE_TRACE_FRAMES, tuneLiveHop, tuneLiveLatency, tuneSnapMidi } from './autoTune'
 import { clamp, sanitize } from './dsp'
 import { Psola, type PitchFrame } from '../stretch/voice'
 import type { BlockContext, PluginModule, Processor } from './types'
@@ -84,7 +83,7 @@ function targetHz(
 ) {
   if (frame.hz <= 0 || frame.confidence < 0.7) return 0
   const midi = 69 + 12 * Math.log2(frame.hz / 440) + (params.transpose || 0)
-  const snapped = nearestAllowed(midi, params, ctx)
+  const snapped = tuneSnapMidi(midi, params, ctx)
   const goal = 440 * 2 ** ((snapped - 69) / 12)
   const tracked = center() || frame.hz
   setCenter(tracked + (frame.hz - tracked) * 0.08)
@@ -102,28 +101,6 @@ function targetHz(
   const next = prev + (aimed - prev) * speed
   setSmoothed(next)
   return clamp(next, 40, 2000)
-}
-
-function nearestAllowed(midi: number, params: Record<string, number>, ctx: BlockContext) {
-  const mask = Math.round(params.mask || 0)
-  const chromatic = (params.mode ?? 1) < 0.5 && mask <= 0
-  const root = (params.root ?? -1) >= 0 ? Math.round(params.root) : ctx.scaleRoot
-  const scaleIndex = Math.round(params.scaleIndex ?? -1)
-  const intervals: readonly number[] = scaleIndex >= 0 && SCALES[scaleIndex] ? SCALES[scaleIndex].intervals : ctx.scaleIntervals
-  let best = Math.round(midi)
-  let bestDist = 99
-  for (let note = Math.floor(midi) - 3; note <= Math.ceil(midi) + 3; note++) {
-    const pc = pitchClass(note)
-    const rel = ((pc - root) % 12 + 12) % 12
-    const allowed = mask > 0 ? (mask & (1 << pc)) !== 0 : chromatic ? true : intervals.some((interval) => interval === rel)
-    if (!allowed) continue
-    const dist = Math.abs(note - midi)
-    if (dist < bestDist || (dist === bestDist && note < best)) {
-      best = note
-      bestDist = dist
-    }
-  }
-  return best
 }
 
 const plugin: PluginModule = { descriptor: descriptor('tune')!, presets: FACTORY.tune, create: createTune }

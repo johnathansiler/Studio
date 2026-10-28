@@ -41,7 +41,8 @@
 
 .autotune-bypass.on,
 .autotune-add.on,
-.autotune-add.inserted.on {
+.autotune-add.inserted.on,
+.autotune-presets button.on {
   background: var(--accent-dim);
   border-color: var(--accent);
   color: var(--text);
@@ -112,6 +113,10 @@
   flex: 1 1 calc(50% - 6px);
 }
 
+.autotune-presets button .narrow {
+  display: none;
+}
+
 .lane-insert {
   position: absolute;
   top: 4px;
@@ -145,6 +150,28 @@
   min-width: 44px;
   flex: 0 0 auto;
   font-size: 12px;
+  padding: 0 8px;
+}
+
+.shell.phone .autotune-presets button .wide,
+.shell.fold .autotune-presets button .wide {
+  display: none;
+}
+
+.shell.phone .autotune-presets button .narrow,
+.shell.fold .autotune-presets button .narrow {
+  display: inline;
+}
+
+.shell.phone .autotune-presets,
+.shell.fold .autotune-presets {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.shell.phone .autotune-presets button,
+.shell.fold .autotune-presets button {
+  flex: 0 0 auto;
 }
 
 @media (max-width: 520px) {

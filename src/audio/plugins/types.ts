@@ -29,6 +29,8 @@ export interface BlockContext {
   sidechain: Float32Array | null
   scaleRoot: number
   scaleIntervals: readonly number[]
+  /** Cents above the tonic. Present when the block follows the project scale, including quarter tones. */
+  scaleCents?: readonly number[]
   quality: 'full' | 'eco'
   /** Offline bounces use linear-phase EQ and 4x oversampling. Live preview stays lighter. */
   offline?: boolean

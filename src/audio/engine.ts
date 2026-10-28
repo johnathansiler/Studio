@@ -19,7 +19,7 @@ import { renderQuantizedClip } from '../model/quantize'
 import { renderPattern, type RenderedHit } from '../model/steps'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav, linearResample } from '../model/wav'
-import { scaleById } from '../model/scale'
+import { tuneBlockScale } from './plugins/autoTune'
 import { audibleIds } from '../model/audible'
 import { automationSchedule, laneFor, rackLanesFor, valueAtMappedSample } from '../model/automation'
 import { applyRamps } from './paramCurve'
@@ -1332,7 +1332,7 @@ export class AudioEngine {
     for (const track of project.tracks) for (const plugin of track.plugins) ids.add(plugin.pluginId)
     for (const plugin of project.masterPlugins) ids.add(plugin.pluginId)
     await Promise.all([...ids].map((id) => loadModule(id)))
-    const scale = scaleById(project.scale?.scale)
+    const scale = tuneBlockScale(project.scale)
     const graph = renderGraph({
       tracks: renderedTracks,
       masterPlugins: project.masterPlugins,
@@ -1341,8 +1341,9 @@ export class AudioEngine {
       tempo: project.tempo,
       tempoMap: project.tempoMap,
       length: end,
-      scaleRoot: project.scale?.root ?? 0,
-      scaleIntervals: scale.intervals,
+      scaleRoot: scale.scaleRoot,
+      scaleIntervals: scale.scaleIntervals,
+      scaleCents: scale.scaleCents,
       automation: project.automation,
       liveRemote: false,
       create: (pluginId, sampleRate) => peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
