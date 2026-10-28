@@ -16,6 +16,7 @@ export function TransportBar({
   onRecord,
   onSeek,
   simple = false,
+  takeProgress = null,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -26,6 +27,8 @@ export function TransportBar({
   onSeek: (sample: number) => void
   /** Phone: keep play, stop, record, and tempo. To-start and loop live in the menu. */
   simple?: boolean
+  /** 0–1 while a full-quality guest take is moving to the host. */
+  takeProgress?: number | null
 }) {
   const project = selectTransport(store).project
   const [position, setPosition] = useState(engine.positionSamples)
@@ -120,8 +123,24 @@ export function TransportBar({
       </div>
       <div className="lcd" aria-live="polite">
         <div className="bars">{formatBarsBeats(position, project.sampleRate, project.tempo, project.timeSignature)}</div>
-        <div className="tc">{formatTimecode(position, project.sampleRate)} · {status}</div>
+        <div className="tc">
+          {formatTimecode(position, project.sampleRate)} · {status}
+          {takeProgress != null ? ` · HQ ${Math.round(takeProgress * 100)}%` : ''}
+        </div>
       </div>
+      {takeProgress != null && (
+        <div
+          className="hq-take"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(takeProgress * 100)}
+          aria-valuetext={`Full-quality take ${Math.round(takeProgress * 100)} percent`}
+          title="Full-quality take replacing the live guide"
+        >
+          <i style={{ width: `${Math.round(takeProgress * 100)}%` }} />
+        </div>
+      )}
       {tapOpen ? (
         <div className="tap-pad">
           <button type="button" className="bpm-readout" aria-label="Tap tempo" onPointerDown={(event) => register(event.timeStamp)}>

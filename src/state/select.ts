@@ -1,3 +1,6 @@
+import type { GeneratorSettings } from '../generators/types'
+import { activeScaleId, followSource } from '../generators/adapt'
+import { normalizePlayer } from '../players/settings'
 import type { ScaleState } from '../model/scale'
 import type { QuantizeSettings } from '../model/quantize'
 import type { AudioClip, PluginInstance, Project, Track } from '../model/types'
@@ -153,6 +156,26 @@ export function selectSpectral(store: { project: Project; spectralTrackId: strin
 
 export function selectClipRepair(clip: AudioClip | null | undefined) {
   return clip?.spectral ?? null
+}
+
+export function selectGenerator(store: { project: Project; generatorState(): GeneratorSettings; scaleState(): ScaleState }) {
+  const scale = store.scaleState()
+  return {
+    project: store.project,
+    settings: store.generatorState(),
+    scale,
+    scaleId: activeScaleId(store.project),
+    tempo: store.project.tempo,
+    timeSignature: store.project.timeSignature,
+    tracks: store.project.tracks,
+  }
+}
+
+export function selectPlayers(store: { project: Project }) {
+  return {
+    settings: normalizePlayer(store.project.players),
+    follow: followSource(store.project),
+  }
 }
 
 export function selectKnock(store: { project: Project }) {

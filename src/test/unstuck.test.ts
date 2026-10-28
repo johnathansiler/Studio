@@ -5,7 +5,10 @@ import { createEmptyProject, makeTrack, uid, type MidiNote, type Project } from 
 import { spellSymbol } from '../model/progressions'
 import { starterPattern } from '../model/steps'
 import { applySuggestion } from '../unstuck/apply'
-import { deriveSongContext, normalizeSongContext } from '../unstuck/context'
+import { forgetAnalyses, rememberTrackAnalysis } from '../analysis/cache'
+import type { AnalysisResult } from '../analysis/types'
+import { deriveSongContext, normalizeSongContext, songContext } from '../unstuck/context'
+import { normalizeSectionKind, spellToRoman } from '../unstuck/adapt'
 import { audition } from '../unstuck/preview'
 import { suggest, suggestionsFor } from '../unstuck/suggest'
 import { degreeKey, nextWeights, sectionWeights } from '../unstuck/theory'
@@ -275,5 +278,90 @@ describe('unstuck apply', () => {
     const bed = audition(context, arrange)
     expect(bed.every((event) => event.at < 30)).toBe(true)
     expect(bed.length).toBeGreaterThan(0)
+  })
+})
+
+function analyzed(partial: Partial<AnalysisResult> & Pick<AnalysisResult, 'chordsByBar' | 'sections'>): AnalysisResult {
+  return {
+    key: { root: 0, name: 'C', mode: 'major', label: 'C major', confidence: 0.8 },
+    scale: 'ionian',
+    tempo: 100,
+    ...partial,
+  }
+}
+
+describe('analysis adapter', () => {
+  it('turns spelled chords and section kinds into a roman SongContext', () => {
+    expect(spellToRoman('Am', 0, 'major')).toBe('vi')
+    expect(spellToRoman('G', 0, 'major')).toBe('V')
+    expect(spellToRoman('G7', 0, 'major')).toBe('V7')
+    expect(spellToRoman('Am/G', 0, 'major')).toBe('vi')
+    expect(spellToRoman('Bb', 0, 'major')).toBe('bVII')
+    expect(spellToRoman('F#m', 9, 'major')).toBe('vi')
+    expect(normalizeSectionKind('prechorus')).toBe('pre-chorus')
+    expect(normalizeSectionKind('post chorus')).toBe('post-chorus')
+    expect(normalizeSectionKind('section')).toBe('verse')
+
+    const project = song([{ bar: 0, pitches: [60, 64, 67] }])
+    const context = songContext(project, 0, [analyzed({
+      chordsByBar: [
+        { bar: 0, startBeat: 0, beats: 4, symbol: 'Am', root: 9, confidence: 0.9 },
+        { bar: 1, startBeat: 4, beats: 4, symbol: 'G', root: 7, confidence: 0.8 },
+      ],
+      sections: [{ kind: 'prechorus', label: 'Prechorus', startBar: 0, endBar: 2, startBeat: 0, endBeat: 8 }],
+      tempo: 96,
+    })])
+    expect(context.key).toBe(0)
+    expect(context.mode).toBe('major')
+    expect(context.tempo).toBe(96)
+    expect(context.chordsByBar.map((chord) => chord.symbol)).toEqual(['vi', 'V'])
+    expect(context.sections[0]).toMatchObject({ kind: 'pre-chorus', startBar: 0, bars: 2 })
+    expect(deriveSongContext(project).chordsByBar[0].symbol.startsWith('I')).toBe(true)
+  })
+
+  it('uses sections stored on another analysis and ignores MIDI chords while analysis exists', () => {
+    const project = song([
+      { bar: 0, pitches: [60, 64, 67] },
+      { bar: 1, pitches: [65, 69, 72] },
+    ])
+    const context = songContext(project, 0, [
+      analyzed({
+        key: { root: 9, name: 'A', mode: 'minor', label: 'A minor', confidence: 0.7 },
+        scale: 'aeolian',
+        chordsByBar: [
+          { bar: 0, startBeat: 0, beats: 4, symbol: 'Am', root: 9, confidence: 0.9 },
+          { bar: 1, startBeat: 4, beats: 4, symbol: 'F', root: 5, confidence: 0.8 },
+          { bar: 2, startBeat: 8, beats: 4, symbol: 'E', root: 4, confidence: 0.8 },
+        ],
+        sections: [],
+      }),
+      analyzed({
+        chordsByBar: [],
+        sections: [
+          { kind: 'verse', label: 'Verse', startBar: 0, endBar: 4, startBeat: 0, endBeat: 16 },
+          { kind: 'prechorus', label: 'Prechorus', startBar: 4, endBar: 6, startBeat: 16, endBeat: 24 },
+          { kind: 'chorus', label: 'Chorus', startBar: 6, endBar: 10, startBeat: 24, endBeat: 40 },
+        ],
+      }),
+    ])
+    expect(context.key).toBe(9)
+    expect(context.mode).toBe('minor')
+    expect(context.chordsByBar.map((chord) => chord.symbol)).toEqual(['i', 'VI', 'V'])
+    expect(context.sections.map((section) => section.kind)).toEqual(['verse', 'pre-chorus', 'chorus'])
+    const next = suggestionsFor(context, 'section')
+    expect(next.map((item) => item.title)).toContain('Bridge')
+  })
+
+  it('reads the shared analysis cache and falls back to MIDI when it is empty', () => {
+    forgetAnalyses()
+    const project = song([{ bar: 0, pitches: [60, 64, 67] }, { bar: 1, pitches: [67, 71, 74] }])
+    expect(songContext(project).chordsByBar.map((chord) => chord.symbol)).toEqual(deriveSongContext(project).chordsByBar.map((chord) => chord.symbol))
+    rememberTrackAnalysis('keys', analyzed({
+      chordsByBar: [{ bar: 0, startBeat: 0, beats: 4, symbol: 'Dm', root: 2, confidence: 0.9 }],
+      sections: [],
+    }))
+    expect(songContext(project).chordsByBar.map((chord) => chord.symbol)).toEqual(['ii'])
+    forgetAnalyses()
+    expect(songContext(project).chordsByBar[0].symbol.startsWith('I')).toBe(true)
   })
 })

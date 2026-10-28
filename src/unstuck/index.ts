@@ -20,7 +20,8 @@ export type {
   SuggestionPart,
   TrackRole,
 } from './types'
-export { deriveSongContext, editSpan, landingBeat, normalizeSongContext, roleOf } from './context'
+export { deriveSongContext, editSpan, landingBeat, normalizeSongContext, roleOf, songContext } from './context'
+export { normalizeSectionKind, spellToRoman } from './adapt'
 export { suggest, suggestionsFor } from './suggest'
 export { applySuggestion } from './apply'
 export { audition, type AuditionNote } from './preview'

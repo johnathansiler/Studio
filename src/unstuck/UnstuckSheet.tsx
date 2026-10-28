@@ -1,19 +1,24 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { cachedAnalyses, subscribeAnalysis } from '../analysis/cache'
+import type { AnalysisResult } from '../analysis/types'
 import type { AudioEngine } from '../audio/engine'
 import { spellSymbol, type Mode } from '../model/progressions'
 import { samplesToBeats } from '../model/time'
 import type { ProjectStore } from '../state/store'
-import { audition, deriveSongContext, suggest, UNSTUCK_BUTTON, UNSTUCK_TABS, type Suggestion, type SuggestionKind } from './index'
+import { audition, songContext, suggest, UNSTUCK_BUTTON, UNSTUCK_TABS, type Suggestion, type SuggestionKind } from './index'
+
+const NO_ANALYSIS: AnalysisResult[] = []
 
 export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; engine: AudioEngine; onClose: () => void }) {
   const [tab, setTab] = useState<SuggestionKind>('progression')
   const [heard, setHeard] = useState<string | null>(null)
   const [added, setAdded] = useState('')
   const version = store.version
+  const analyses = useSyncExternalStore(subscribeAnalysis, cachedAnalyses, () => NO_ANALYSIS)
   const context = useMemo(() => {
     const beat = samplesToBeats(engine.positionSamples, store.project.sampleRate, store.project.tempo)
-    return deriveSongContext(store.project, beat)
-  }, [store, engine, version])
+    return songContext(store.project, beat, analyses)
+  }, [store, engine, version, analyses])
   const items = useMemo(() => suggest(context).filter((item) => item.kind === tab), [context, tab])
   const blurb = UNSTUCK_TABS.find((item) => item.id === tab)?.description ?? UNSTUCK_BUTTON
 

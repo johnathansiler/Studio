@@ -8,7 +8,6 @@ import { channelConstraints, inputChannel, mediaChannelCount, punchWindow, slice
 import { watchSpectral } from './audio/spectral/job'
 import { inspectClip } from './audio/stretch/engine'
 import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } from './model/types'
-import type { IncomingTake } from './remote/session'
 import { SessionClient } from './remote/session'
 import { deleteProject, listProjects, listSnapshots, loadLastProject, loadProject, loadSnapshot, requestPersistentStorage, saveProject, storageReport, type ProjectListItem, type WorkspaceSnapshot } from './storage/idb'
 import { inviteWins } from './model/negotiate'
@@ -28,6 +27,8 @@ import { PerformPop } from './ui/PerformPop'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
 import { IdeasPop } from './ui/IdeasPop'
+import { GeneratePop } from './ui/GeneratePop'
+import { PlayersSheet } from './ui/PlayersSheet'
 import { UnstuckSheet } from './unstuck/UnstuckSheet'
 import { LibraryPop } from './ui/LibraryPop'
 import { loadScaleCatalog } from './theory'
@@ -110,6 +111,8 @@ export function App() {
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
+  const [generateOpen, setGenerateOpen] = useState(() => new URLSearchParams(window.location.search).get('generate') === '1')
+  const [playersOpen, setPlayersOpen] = useState(() => new URLSearchParams(window.location.search).get('players') === '1')
   const [unstuckOpen, setUnstuckOpen] = useState(() => new URLSearchParams(window.location.search).get('unstuck') === '1')
   const [libraryOpen, setLibraryOpen] = useState(() => new URLSearchParams(window.location.search).get('library') === '1')
   useEffect(() => {
@@ -143,7 +146,12 @@ export function App() {
 
   useEffect(() => {
     session.bindArrangement(store)
-    session.setTakeHandler((take) => placeTake(store, engine, take))
+    session.setTakeHandler((take) => {
+      const channels = take.sampleRate === engine.sampleRate
+        ? take.channels
+        : take.channels.map((channel) => linearResample(channel, take.sampleRate, engine.sampleRate))
+      store.acceptAlignedTake({ ...take, channels, sampleRate: engine.sampleRate })
+    })
     session.setArrangementHandler((project, assets, ready) => {
       if (session.state.role === 'guest') store.remoteFollow = true
       if (session.usingOps) {
@@ -1190,6 +1198,8 @@ async function importDropped(files: FileList) {
             <MenuRow label={copyOf(MENU_COPY, 'keys').label} hint={copyOf(MENU_COPY, 'keys').hint} onClick={() => { setMenuOpen(false); openPerform('keys') }} />
             <MenuRow label={copyOf(MENU_COPY, 'pads').label} hint={copyOf(MENU_COPY, 'pads').hint} onClick={() => { setMenuOpen(false); openPerform('drums') }} />
             <MenuRow label={copyOf(MENU_COPY, 'piano').label} hint={copyOf(MENU_COPY, 'piano').hint} disabled={!pianoTrack} onClick={() => { if (!pianoTrack) return; setMenuOpen(false); openPiano(pianoTrack.id) }} />
+            <MenuRow label={copyOf(MENU_COPY, 'generate').label} hint={copyOf(MENU_COPY, 'generate').hint} onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); setGenerateOpen(true) }} />
+            <MenuRow label={copyOf(MENU_COPY, 'players').label} hint={copyOf(MENU_COPY, 'players').hint} onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); setPlayersOpen(true) }} />
             <MenuRow label="Scales" hint="Browse scales and the chords inside them." onClick={() => { setMenuOpen(false); setLibraryOpen(true) }} />
             <MenuRow className="split" label={copyOf(MENU_COPY, 'quantize').label} hint={copyOf(MENU_COPY, 'quantize').hint} onClick={() => { setMenuOpen(false); store.quickQuantize() }} />
             <MenuRow label={copyOf(MENU_COPY, 'quantize-more').label} hint={copyOf(MENU_COPY, 'quantize-more').hint} onClick={() => { setMenuOpen(false); store.openQuantize() }} />
@@ -1264,6 +1274,7 @@ async function importDropped(files: FileList) {
           onStop={() => void stop()}
           onRecord={() => void record()}
           onSeek={(sample) => void locate(sample)}
+          takeProgress={session.state.takeProgress}
         />
       )}
       {surface === 'studio' && phonePane !== 'room' && store.view !== 'mix' && (store.view === 'arrange' || panel === 'piano') && (
@@ -1323,7 +1334,7 @@ async function importDropped(files: FileList) {
             <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
           )}
           {surface === 'studio' && panel === 'piano' && (
-            <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onLibrary={() => setLibraryOpen(true)} />
+            <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => setGenerateOpen(true)} onLibrary={() => setLibraryOpen(true)} />
           )}
           {(surface !== 'studio' || panel === 'room') && (
             <VideoDock
@@ -1355,6 +1366,8 @@ async function importDropped(files: FileList) {
       <QuantizeSheet store={store} />
       {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
       {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}
+      {generateOpen && <GeneratePop store={store} engine={engine} onClose={() => setGenerateOpen(false)} />}
+      {playersOpen && <PlayersSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setPlayersOpen(false) }} />}
       {unstuckOpen && <UnstuckSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }} />}
       {libraryOpen && <LibraryPop store={store} engine={engine} onClose={() => setLibraryOpen(false)} />}
       {analysisTrackId && <AnalysisSheet store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} />}
@@ -1517,38 +1530,5 @@ function MenuIcon() {
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
       <path d="M3 4.5h10M3 8h10M3 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
-  )
-}
-
-function placeTake(store: ProjectStore, engine: AudioEngine, take: IncomingTake) {
-  const channels = take.channels.map((channel) =>
-    take.sampleRate === engine.sampleRate ? channel : linearResample(channel, take.sampleRate, engine.sampleRate),
-  )
-  store.removeClips((clip) => clip.source === 'guide' && clip.takeId === take.takeId)
-  store.dropGuideLanes(take.takeId)
-  let track = store.project.tracks.find((item) => item.input === `remote:${take.peerId}`)
-  if (!track) {
-    store.ensureRemoteTrack(take.peerId, take.peerName)
-    track = store.project.tracks.find((item) => item.input === `remote:${take.peerId}`)
-  }
-  if (!track) return
-  const bufferId = uid('buf')
-  store.addAsset({ id: bufferId, name: `${take.peerName} take`, sampleRate: engine.sampleRate, channels })
-  store.addTakeLane(track.id, {
-    id: uid('lane'),
-    name: `${take.peerName} aligned`,
-    bufferId,
-    offsetSamples: 0,
-    startSample: Math.max(0, take.placeAtSample),
-    durationSamples: channels[0].length,
-    peerId: take.peerId,
-    takeId: take.takeId,
-    source: 'aligned-take',
-  })
-  store.toast(
-    take.silent
-      ? `${take.peerName} take arrived, but it is silent. Check their performance mic.`
-      : `${take.peerName} aligned −${take.compensationMs.toFixed(0)} ms. ${take.detail}`,
-    take.silent ? 'warn' : 'good',
   )
 }
