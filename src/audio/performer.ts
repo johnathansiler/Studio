@@ -170,8 +170,9 @@ export class Performer {
       this.eraseNotes(target, held.pitch, start, end)
       return
     }
+    const still = [...this.held.values(), ...this.latched.values()].some((item) => item.pitch === held.pitch)
     if (this.latched.has(held.pitch)) return
-    this.engine.liveNoteOff(held.pitch)
+    if (!still) this.engine.liveNoteOff(held.pitch)
     this.print(held.pitch, held.velocity, held.eventMs, eventMs, held.locks)
   }
 

@@ -201,7 +201,7 @@ function readVoice(voice: Voice, coeff: number) {
 }
 
 function steal(voices: Voice[], note: number, limit: number) {
-  const cap = Math.max(1, limit)
+  const cap = Math.max(1, Math.round(Number.isFinite(limit) ? limit : 16))
   for (const voice of voices) if (voice.active) voice.age += 1
   const same = voices.find((voice) => voice.active && voice.note === note)
   if (same) {
@@ -216,11 +216,13 @@ function steal(voices: Voice[], note: number, limit: number) {
     voices.push(slot)
     return slot
   }
-  if (!slot) slot = voices.slice().sort((a, b) => b.age - a.age)[0]
-  const kept = slot
-  const created = fresh(note)
-  Object.assign(kept, created)
-  return kept
+  if (!slot) {
+    const releasing = voices.filter((voice) => voice.released)
+    const pool = releasing.length ? releasing : voices
+    slot = pool.slice().sort((a, b) => b.age - a.age)[0]
+  }
+  Object.assign(slot, fresh(note))
+  return slot
 }
 
 function fresh(note: number): Voice {
