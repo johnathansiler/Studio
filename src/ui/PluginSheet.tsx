@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { MASTERING_IDS } from '../audio/master/assistant'
+import { orderedInserts } from '../audio/plugins/autoTune'
 import { CATALOG, FACTORY, descriptor } from '../audio/plugins/catalog'
 import { MODEL_IDS } from '../audio/plugins/models'
 import { AmpPop } from './AmpPop'
+import { AutoTuneFace } from './AutoTuneFace'
 import { Faceplate } from './Faceplate'
 import { NOTE_NAMES, SCALES } from '../model/scale'
 import { projectSampleBeat } from '../model/tempoMap'
@@ -17,8 +19,9 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   const spec = plugin ? descriptor(plugin.pluginId) : null
   const [last, setLast] = useState('')
   const canvas = useRef<HTMLCanvasElement>(null)
-  const [, setTick] = useState(0)
-  const faced = plugin ? MODEL_IDS.includes(plugin.pluginId) || plugin.pluginId === 'tune' : false
+  const [tick, setTick] = useState(0)
+  const autoTune = plugin?.pluginId === 'tune'
+  const faced = plugin ? MODEL_IDS.includes(plugin.pluginId) || !!autoTune : false
   useEffect(() => {
     if (!faced) return
     const timer = window.setInterval(() => setTick((value) => value + 1), 80)
@@ -80,10 +83,12 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
         </button>
         <button className="text-btn" onClick={() => store.focusPlugin(null)}>×</button>
       </header>
+      {plugin.pluginId !== 'tune' && (
       <label className="wet">
         Wet
         <input type="range" min={0} max={1} step={0.01} value={plugin.wet} onChange={(event) => store.updatePlugin(focus.trackId, plugin.id, { wet: Number(event.target.value) })} />
       </label>
+      )}
       {(plugin.pluginId === 'compressor' || plugin.pluginId === 'gate') && (
         <label>
           Sidechain key
@@ -102,7 +107,32 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
       {(plugin.pluginId === 'sampler' || plugin.pluginId === 'looper') && (
         <SamplePanel store={store} engine={engine} trackId={focus.trackId} plugin={plugin} />
       )}
-      {faced && (
+      {autoTune && (
+        <div onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
+        <AutoTuneFace
+          values={plugin.params}
+          trace={engine.trace(plugin.id)}
+          revision={tick}
+          enabled={plugin.enabled}
+          projectKey={NOTE_NAMES[store.scaleState().root] ?? 'C'}
+          projectScale={SCALES.find((scale) => scale.id === store.scaleState().scale)?.name ?? 'Major'}
+          onChange={(id, value) => {
+            setLast(id)
+            const param = spec.params.find((item) => item.id === id)
+            store.setAutomated(
+              { trackId: focus.trackId, target: 'plugin', pluginId: plugin.id, param: id, min: param?.min ?? 0, max: param?.max ?? 1 },
+              value,
+              rolling(),
+              engine.currentTimelineSample(),
+            )
+          }}
+          onScale={(mode, scaleIndex) => store.updatePlugin(focus.trackId, plugin.id, { params: { mode, scaleIndex } })}
+          onPreset={(name) => store.applyPluginPreset(focus.trackId, plugin.id, name)}
+          onBypass={() => store.updatePlugin(focus.trackId, plugin.id, { enabled: !plugin.enabled })}
+        />
+        </div>
+      )}
+      {faced && !autoTune && (
         <div onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
         <Faceplate
           pluginId={plugin.pluginId}
@@ -211,9 +241,9 @@ export function InsertList({ store, trackId }: { store: ProjectStore; trackId: s
           {descriptor(plugin.pluginId)?.name ?? plugin.pluginId}
         </button>
       ))}
-      <select className="insert-add" value="" onChange={(event) => addChoice(store, trackId, event.target.value)}>
+      <select className="insert-add" aria-label="Add insert" title="Add an effect. Auto-Tune is first on audio tracks." value="" onChange={(event) => addChoice(store, trackId, event.target.value)}>
         <option value="">+</option>
-        {CATALOG.filter((plugin) => plugin.id !== 'meter' && (trackId === 'master' || !(MASTERING_IDS as readonly string[]).includes(plugin.id))).map((plugin) => (
+        {orderedInserts(CATALOG.filter((plugin) => plugin.id !== 'meter' && (trackId === 'master' || !(MASTERING_IDS as readonly string[]).includes(plugin.id))), trackId !== 'master' && store.track(trackId)?.type === 'audio').map((plugin) => (
           <option key={plugin.id} value={plugin.id}>{plugin.name}</option>
         ))}
         {trackId !== 'master' && <option value="vocal">Vocal chain</option>}

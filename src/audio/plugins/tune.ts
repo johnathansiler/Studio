@@ -12,12 +12,10 @@ export function createTune(sampleRate: number): Processor {
   let center = 0
   let path: 'dry' | 'live' | 'hq' = 'dry'
   const trace = new Float32Array(TUNE_TRACE_FRAMES * 2)
-  let cursor = 0
   const remember = (detected: number, corrected: number) => {
-    const slot = cursor % TUNE_TRACE_FRAMES
-    trace[slot * 2] = detected > 0 ? detected : 0
-    trace[slot * 2 + 1] = corrected > 0 ? corrected : 0
-    cursor += 1
+    trace.copyWithin(0, 2)
+    trace[trace.length - 2] = detected > 0 ? detected : 0
+    trace[trace.length - 1] = corrected > 0 ? corrected : 0
   }
   return {
     latencySamples: 0,
@@ -29,7 +27,6 @@ export function createTune(sampleRate: number): Processor {
       center = 0
       path = 'dry'
       trace.fill(0)
-      cursor = 0
     },
     process(input, output, params, ctx) {
       if ((params.amount ?? 0) <= 0.001) {
