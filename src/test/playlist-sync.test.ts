@@ -78,6 +78,37 @@ describe('shared transport and mixer', () => {
   })
 })
 
+describe('arrange browser', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('docks sounds, instruments, loops, patterns, plugins, and clips on the left', () => {
+    vi.stubGlobal('window', { innerWidth: 1280, innerHeight: 800, addEventListener() {}, removeEventListener() {} })
+    const store = new ProjectStore(createEmptyProject(48000))
+    const html = renderToStaticMarkup(createElement(ArrangeView, {
+      store,
+      engine: {
+        positionSamples: 0,
+        subscribe: () => () => undefined,
+        currentTimelineSample: () => 0,
+        stopPreview() {},
+        previewPcm() {},
+        unlock() {},
+      },
+      session: { state: { participants: [], selfId: 'me' } },
+      onSeek: () => undefined,
+      onOpenPiano: () => undefined,
+      onPerform: () => undefined,
+      onQuickPunch: () => undefined,
+      onAnalyze: () => undefined,
+    } as never))
+    expect(html).toContain('data-playlist-browser="open"')
+    for (const label of ['Sounds', 'Instruments', 'Loops', 'Patterns', 'Plugins', 'Clips']) expect(html).toContain(label)
+    expect(html).not.toContain('>Read<')
+    expect(html).not.toContain('Auto-Tune')
+    expect(html).toContain('>Setup<')
+  })
+})
+
 describe('phone arrange', () => {
   afterEach(() => vi.unstubAllGlobals())
 
