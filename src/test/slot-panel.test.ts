@@ -127,14 +127,15 @@ describe('loop and sample panel', () => {
       expect(await percent(deskPage, '.slot-handle.edge')).toBeGreaterThan(10)
       expect(await percent(deskPage, '.slot-handle.loop')).toBeGreaterThan(25)
       await deskPage.locator('.slot-file').setInputFiles(file)
-      await deskPage.locator('.slot-wave canvas').evaluate((canvas) => {
+      const painted = async () => deskPage.locator('.slot-wave canvas').evaluate((canvas) => {
         const view = canvas as HTMLCanvasElement
         const data = view.getContext('2d')?.getImageData(0, 0, view.width, view.height).data
         if (!data) return 0
-        let painted = 0
-        for (let i = 1; i < data.length; i += 4) if (data[i] > 40) painted += 1
-        return painted
-      }).then((painted) => expect(painted).toBeGreaterThan(20))
+        let count = 0
+        for (let i = 1; i < data.length; i += 4) if (data[i] > 40) count += 1
+        return count
+      })
+      await expect.poll(painted, { timeout: 8000 }).toBeGreaterThan(20)
 
       await deskPage.evaluate(() => {
         navigator.mediaDevices.getUserMedia = async () => {
@@ -158,7 +159,7 @@ describe('loop and sample panel', () => {
       await deskPage.locator('.slot-status', { hasText: 'Recording' }).waitFor({ state: 'detached', timeout: 4000 })
       expect(errors.join('\n')).not.toMatch(/Could not open the microphone|Recording failed|InvalidStateError/)
 
-      await deskPage.locator('.plugin-sheet').getByRole('button', { name: '×' }).click()
+      await deskPage.locator('.plugin-sheet').getByRole('button', { name: 'Close the plugin.' }).click()
       const deskHead = deskPage.locator('.head').first()
       await deskHead.locator('.insert-add').selectOption('looper')
       await deskHead.locator('.inserts button', { hasText: 'Looper' }).evaluate((el) => (el as HTMLButtonElement).click())
@@ -173,7 +174,7 @@ describe('loop and sample panel', () => {
       expect(await percent(phonePage, '.slot-handle.loop')).toBeGreaterThan(25)
       await dragHandle(phonePage, '.slot-handle.edge', 0.18, 0.2, 'touch')
       expect(await percent(phonePage, '.slot-handle.edge')).toBeGreaterThan(8)
-      await phonePage.locator('.plugin-sheet').getByRole('button', { name: '×' }).click()
+      await phonePage.locator('.plugin-sheet').getByRole('button', { name: 'Close the plugin.' }).click()
       const phoneStrip = phonePage.locator('.mixer .strip').first()
       await phoneStrip.locator('.insert-add').selectOption('looper')
       await phoneStrip.locator('.inserts button', { hasText: 'Looper' }).evaluate((el) => (el as HTMLButtonElement).click())
