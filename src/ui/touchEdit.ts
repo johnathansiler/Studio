@@ -19,3 +19,13 @@ export function noteGrip(width: number, coarse: boolean) {
 export function coarsePointer(pointerType: string) {
   return pointerType === 'touch' || pointerType === 'pen'
 }
+
+/** How long a phone press waits before the pattern-clip menu opens. */
+export const PATTERN_HOLD_MS = 480
+/** Movement past this many pixels is a drag, so the menu stays closed. */
+export const PATTERN_HOLD_SLOP = 8
+
+/** A still phone press opens Duplicate / Delete. A drag moves the clip instead. */
+export function patternHoldOpensMenu(phone: boolean, heldMs: number, movedPx: number): boolean {
+  return phone && heldMs >= PATTERN_HOLD_MS && movedPx <= PATTERN_HOLD_SLOP
+}

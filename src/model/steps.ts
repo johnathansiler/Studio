@@ -57,6 +57,10 @@ export interface PatternClip {
   lengthBeats: number
   /** Session scene, when placed in a clip slot. */
   scene: number | null
+  /** Set when someone places the clip. The old automatic clip has no flag. */
+  placed?: boolean
+  /** Beats into the pattern hidden by trimming the left edge. */
+  offsetBeats?: number
 }
 
 export interface RenderedHit {
@@ -265,12 +269,52 @@ export function clonePattern(pattern: BeatPattern, name: string): BeatPattern {
   }
 }
 
+/** The untouched starter, still sitting on the automatic arrangement clip. */
+export function isFactoryPattern(pattern: BeatPattern): boolean {
+  if (pattern.name !== 'Pattern 1' || pattern.steps !== 16 || pattern.swing !== 0) return false
+  if (pattern.channels.length !== KIT.length) return false
+  return pattern.channels.every((channel, index) => {
+    const spec = KIT[index]
+    if (channel.name !== spec.name || channel.kind !== spec.kind) return false
+    if (channel.steps !== 16 || channel.swing != null || channel.mute || channel.solo) return false
+    const on = new Set(spec.on)
+    for (let step = 0; step < 16; step++) {
+      if (Boolean(channel.cells[step]?.on) !== on.has(step)) return false
+    }
+    return true
+  })
+}
+
+function isAutoSeedClip(beats: BeatRack, clip: PatternClip): boolean {
+  if (clip.placed || clip.scene != null) return false
+  if (Math.abs(clip.startBeat) > 1e-6 || Math.abs(clip.lengthBeats - 4) > 1e-6) return false
+  const pattern = beats.patterns.find((item) => item.id === clip.patternId)
+  return !!pattern && isFactoryPattern(pattern)
+}
+
+/** Drop the arrangement clip that used to be inserted with a new rack. Keep the rack. */
+export function settlePatternClips(beats: BeatRack, clips: PatternClip[]): PatternClip[] {
+  const kept: PatternClip[] = []
+  for (const clip of clips) {
+    if (isAutoSeedClip(beats, clip)) continue
+    if (!clip.placed) clip.placed = true
+    kept.push(clip)
+  }
+  return kept
+}
+
+/** Pattern beats heard by one arrangement clip, after a left-edge trim. */
+export function patternPlayRange(clip: PatternClip): { from: number; to: number } {
+  const from = Math.max(0, clip.offsetBeats || 0)
+  return { from, to: from + Math.max(0, clip.lengthBeats) }
+}
+
 export function normalizeBeats(beats: BeatRack | undefined, clips: PatternClip[] | undefined): { beats: BeatRack; patternClips: PatternClip[] } {
   if (!beats?.patterns?.length) {
     const pattern = starterPattern()
     return {
       beats: { activeId: pattern.id, patterns: [pattern] },
-      patternClips: [{ id: uid('pcl'), patternId: pattern.id, startBeat: 0, lengthBeats: 4, scene: null }],
+      patternClips: [],
     }
   }
   for (const pattern of beats.patterns) {
@@ -283,5 +327,5 @@ export function normalizeBeats(beats: BeatRack | undefined, clips: PatternClip[]
     }
   }
   if (!beats.patterns.some((pattern) => pattern.id === beats.activeId)) beats.activeId = beats.patterns[0].id
-  return { beats, patternClips: clips ?? [] }
+  return { beats, patternClips: settlePatternClips(beats, clips ?? []) }
 }
