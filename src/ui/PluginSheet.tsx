@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { MASTERING_IDS } from '../audio/master/assistant'
 import { activeTunePreset, orderedInserts, tuneScaleOf } from '../audio/plugins/autoTune'
@@ -18,6 +18,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   const plugin = focus ? selectPlugin(store, focus.trackId, focus.pluginId) : null
   const spec = plugin ? descriptor(plugin.pluginId) : null
   const [last, setLast] = useState('')
+  const [sheetHeight, setSheetHeight] = useState(680)
   const canvas = useRef<HTMLCanvasElement>(null)
   const [tick, setTick] = useState(0)
   const autoTune = plugin?.pluginId === 'tune'
@@ -69,8 +70,23 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     const beat = projectSampleBeat(store.project, engine.currentTimelineSample())
     store.addAutomationPoint(plugin.id, param, beat, plugin.params[param] ?? 0)
   }
+  const resize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const startY = event.clientY
+    const startH = sheetHeight
+    const move = (ev: PointerEvent) => {
+      const next = Math.min(window.innerHeight * 0.92, Math.max(340, startH + (startY - ev.clientY)))
+      setSheetHeight(next)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
   return (
-    <div className="plugin-sheet" role="dialog" aria-label={spec.name}>
+    <div className={`plugin-sheet ${autoTune ? 'tune-open' : ''}`} role="dialog" aria-label={spec.name} style={autoTune ? { height: sheetHeight } : undefined}>
+      {autoTune && <div className="tune-resize" title="Drag to resize the plugin." aria-label="Resize plugin. Drag up or down." onPointerDown={resize} />}
       <header>
         <strong>{spec.name}</strong>
         {!autoTune && (
@@ -81,10 +97,12 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
             ))}
           </select>
         )}
+        {!autoTune && (
         <button className="text-btn" title="Save these settings as a preset." aria-label="Save preset. Keep these settings under a name." onClick={() => {
           const name = window.prompt('Preset')
           if (name) store.savePluginPreset(plugin.pluginId, name.trim(), plugin.params)
         }}>Save</button>
+        )}
         {!autoTune && (
           <button className={`text-btn ${plugin.enabled ? 'on' : ''}`} onClick={() => store.updatePlugin(focus.trackId, plugin.id, { enabled: !plugin.enabled })}>
             {plugin.enabled ? 'On' : 'Bypass'}
@@ -125,25 +143,18 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
           enabled={plugin.enabled}
           projectKey={song.note}
           projectScale={song.scaleName}
+          projectRoot={song.root}
+          projectIntervals={song.intervals}
           active={activeTunePreset(plugin.params, tunePresets)}
           presets={tunePresets.map((item) => item.name)}
           onChange={(id, value) => {
-            if (id === 'root') {
-              store.updatePlugin(focus.trackId, plugin.id, { params: { root: value } })
-              return
-            }
             setLast(id)
-            const param = spec.params.find((item) => item.id === id)
-            store.setAutomated(
-              { trackId: focus.trackId, target: 'plugin', pluginId: plugin.id, param: id, min: param?.min ?? 0, max: param?.max ?? 1 },
-              value,
-              rolling(),
-              engine.currentTimelineSample(),
-            )
+            store.updatePlugin(focus.trackId, plugin.id, { params: { [id]: value } })
           }}
-          onScale={(mode, scaleIndex) => store.updatePlugin(focus.trackId, plugin.id, { params: { mode, scaleIndex } })}
+          onPatch={(patch) => store.updatePlugin(focus.trackId, plugin.id, { params: patch })}
           onPreset={(name) => store.applyPluginPreset(focus.trackId, plugin.id, name)}
           onBypass={() => store.updatePlugin(focus.trackId, plugin.id, { enabled: !plugin.enabled })}
+          onSave={(name) => store.savePluginPreset(plugin.pluginId, name, plugin.params)}
         />
         </div>
       )}

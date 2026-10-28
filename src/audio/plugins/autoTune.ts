@@ -122,10 +122,11 @@ export function tuneSnapMidi(
   ctx: { scaleRoot: number; scaleIntervals: readonly number[]; scaleCents?: readonly number[] },
 ) {
   const mask = Math.round(params.mask || 0)
-  const chromatic = (params.mode ?? 1) < 0.5 && mask <= 0
+  const maskOn = (params.custom ?? 0) >= 0.5 || mask > 0
+  const chromatic = (params.mode ?? 1) < 0.5 && !maskOn
   const root = (params.root ?? -1) >= 0 ? Math.round(params.root) : ctx.scaleRoot
   const scaleIndex = Math.round(params.scaleIndex ?? -1)
-  if (!chromatic && mask <= 0 && scaleIndex < 0) {
+  if (!chromatic && !maskOn && scaleIndex < 0) {
     const degrees = ctx.scaleCents?.length
       ? ctx.scaleCents
       : (ctx.scaleIntervals?.length ? ctx.scaleIntervals : [0, 2, 4, 5, 7, 9, 11]).map((interval) => interval * 100)
@@ -137,7 +138,7 @@ export function tuneSnapMidi(
   for (let note = Math.floor(midi) - 3; note <= Math.ceil(midi) + 3; note++) {
     const pc = pitchClass(note)
     const rel = ((pc - root) % 12 + 12) % 12
-    const allowed = mask > 0 ? (mask & (1 << pc)) !== 0 : chromatic ? true : intervals.some((interval) => interval === rel)
+    const allowed = maskOn ? (mask & (1 << pc)) !== 0 : chromatic ? true : intervals.some((interval) => interval === rel)
     if (!allowed) continue
     const dist = Math.abs(note - midi)
     if (dist < bestDist || (dist === bestDist && note < best)) {
@@ -171,3 +172,155 @@ function nearestCents(midi: number, root: number, degrees: readonly number[]) {
 export function tuneOnTrack(plugins: readonly { id: string; pluginId: string; enabled: boolean }[]) {
   return plugins.find((plugin) => plugin.pluginId === TUNE_ID) ?? null
 }
+
+export const TUNE_RANGES = [
+  { id: 'wide', name: 'Wide', minHz: 80, maxHz: 1000 },
+  { id: 'soprano', name: 'Soprano', minHz: 200, maxHz: 1200 },
+  { id: 'alto', name: 'Alto', minHz: 120, maxHz: 700 },
+  { id: 'low', name: 'Low', minHz: 70, maxHz: 420 },
+] as const
+
+const BLACK = new Set([1, 3, 6, 8, 10])
+
+export function tuneNudgeId(pc: number) {
+  return `n${((pc % 12) + 12) % 12}`
+}
+
+export function scaleAllowMask(root: number, intervals: readonly number[]) {
+  let mask = 0
+  for (const interval of intervals) {
+    const pc = ((Math.round(root) + Math.round(interval)) % 12 + 12) % 12
+    mask |= 1 << pc
+  }
+  return mask
+}
+
+export function bitOn(mask: number, pc: number) {
+  return (Math.round(mask) & (1 << (((pc % 12) + 12) % 12))) !== 0
+}
+
+export function toggleBit(mask: number, pc: number) {
+  return (Math.round(mask) ^ (1 << (((pc % 12) + 12) % 12))) & 4095
+}
+
+/** Scale notes the keyboard should light. A custom mask replaces the scale. */
+export function activeNoteMask(params: Record<string, number>, projectRoot: number, projectIntervals: readonly number[]) {
+  const custom = (params.custom ?? 0) >= 0.5 || Math.round(params.mask || 0) > 0
+  if (custom) return Math.round(params.mask || 0) & 4095
+  if ((params.mode ?? 1) < 0.5) return 4095
+  const root = (params.root ?? -1) >= 0 ? Math.round(params.root) : projectRoot
+  const scaleIndex = Math.round(params.scaleIndex ?? -1)
+  const intervals = scaleIndex >= 0 && SCALES[scaleIndex] ? SCALES[scaleIndex].intervals : projectIntervals
+  return scaleAllowMask(root, intervals)
+}
+
+/** Remove toggles a scale note. The first edit copies the current scale into the mask. */
+export function nextScaleMask(stored: number, custom: boolean, derived: number, pc: number) {
+  const base = custom || stored > 0 ? stored & 4095 : derived & 4095
+  return toggleBit(base, pc)
+}
+
+export function dragNudge(startMidi: number, nextMidi: number, startCents: number) {
+  const pc = ((Math.round(startMidi) % 12) + 12) % 12
+  const cents = Math.max(-200, Math.min(200, Math.round(startCents + (nextMidi - startMidi) * 100)))
+  return { id: tuneNudgeId(pc), cents }
+}
+
+export interface MeterRead {
+  name: string
+  octave: number
+  cents: number
+  hz: number
+}
+
+export function readMeter(trace: Float32Array | null, a4 = 440): MeterRead | null {
+  if (!trace) return null
+  for (let i = trace.length - 2; i >= 0; i -= 2) {
+    const detected = trace[i] || 0
+    const corrected = trace[i + 1] || 0
+    const hz = detected > 0 ? detected : corrected
+    if (hz <= 0) continue
+    const ref = a4 > 0 ? a4 : 440
+    const midi = 69 + 12 * Math.log2(hz / ref)
+    const target = corrected > 0 ? 69 + 12 * Math.log2(corrected / ref) : Math.round(midi)
+    const cents = Math.max(-100, Math.min(100, Math.round((midi - target) * 100)))
+    const shown = corrected > 0 ? target : midi
+    const rounded = Math.round(shown)
+    const name = NOTE_NAMES[((rounded % 12) + 12) % 12] ?? 'C'
+    return { name, octave: Math.floor(rounded / 12) - 1, cents, hz }
+  }
+  return null
+}
+
+export interface GraphNote {
+  start: number
+  end: number
+  midi: number
+  detected: number
+  corrected: number
+}
+
+/** Stable runs of corrected pitch, for the graph blobs. */
+export function graphNotes(trace: Float32Array | null): GraphNote[] {
+  if (!trace) return []
+  const notes: GraphNote[] = []
+  let start = -1
+  let midi = 0
+  let detected = 0
+  let corrected = 0
+  const flush = (end: number) => {
+    if (start < 0) return
+    notes.push({ start, end, midi, detected, corrected })
+    start = -1
+  }
+  const frames = Math.floor(trace.length / 2)
+  for (let i = 0; i < frames; i++) {
+    const heard = trace[i * 2] || 0
+    const tuned = trace[i * 2 + 1] || 0
+    const hz = tuned > 0 ? tuned : heard
+    if (hz <= 0) {
+      flush(i)
+      continue
+    }
+    const next = Math.round(69 + 12 * Math.log2(hz / 440))
+    if (start < 0 || next !== midi) {
+      flush(i)
+      start = i
+      midi = next
+      detected = heard
+      corrected = tuned || heard
+      continue
+    }
+    if (heard > 0) detected = heard
+    if (tuned > 0) corrected = tuned
+  }
+  flush(frames)
+  return notes.filter((note) => note.end - note.start >= 2)
+}
+
+export function heardPitchClass(trace: Float32Array | null) {
+  if (!trace) return null
+  const counts = new Array(12).fill(0)
+  for (let i = 0; i + 1 < trace.length; i += 2) {
+    const hz = trace[i] || trace[i + 1] || 0
+    if (hz <= 0) continue
+    const midi = Math.round(69 + 12 * Math.log2(hz / 440))
+    counts[((midi % 12) + 12) % 12] += 1
+  }
+  let best = -1
+  let n = 0
+  counts.forEach((count, pc) => {
+    if (count > n) {
+      n = count
+      best = pc
+    }
+  })
+  return best < 0 ? null : best
+}
+
+export function isBlackKey(pc: number) {
+  return BLACK.has(((pc % 12) + 12) % 12)
+}
+
+export const KEYBOARD_START = 48
+export const KEYBOARD_END = 84

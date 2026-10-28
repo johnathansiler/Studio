@@ -40,7 +40,7 @@ export function createTune(sampleRate: number): Processor {
         copyThrough(input, output)
         return
       }
-      const monitoring = ctx.offline === false
+      const monitoring = ctx.offline === false && (params.hq ?? 0) < 0.5
       const engine = monitoring ? live : hq
       if (path !== (monitoring ? 'live' : 'hq')) {
         engine.reset()
@@ -82,23 +82,33 @@ function targetHz(
   setCenter: (value: number) => void,
 ) {
   if (frame.hz <= 0 || frame.confidence < 0.7) return 0
-  const midi = 69 + 12 * Math.log2(frame.hz / 440) + (params.transpose || 0)
-  const snapped = tuneSnapMidi(midi, params, ctx)
-  const goal = 440 * 2 ** ((snapped - 69) / 12)
-  const tracked = center() || frame.hz
-  setCenter(tracked + (frame.hz - tracked) * 0.08)
+  const ref = clamp(params.a4 ?? 440, 430, 450)
+  const midi = 69 + 12 * Math.log2(frame.hz / ref) + (params.transpose || 0)
+  const heardPc = ((Math.round(midi) % 12) + 12) % 12
+  if ((Math.round(params.bypassMask || 0) & (1 << heardPc)) !== 0) return 0
+  const held = Math.round(params.holdMidi ?? -1)
+  const snapped = held >= 0 && held <= 127 ? held : tuneSnapMidi(midi, params, ctx)
+  const nudgePc = ((Math.round(snapped) % 12) + 12) % 12
+  const nudge = clamp(params[`n${nudgePc}`] ?? 0, -200, 200) / 100
+  const goal = ref * 2 ** ((snapped + nudge - 69) / 12)
+  const slow = center() || frame.hz
+  setCenter(slow + (frame.hz - slow) * 0.08)
   const human = clamp(params.humanize ?? 0, 0, 1)
   const amount = clamp(params.amount ?? 0, 0, 1)
-  const flex = clamp(params.flex ?? 0, 0, 1)
+  const classic = (params.color ?? 0) >= 0.5
+  const flex = classic ? 0 : clamp(params.flex ?? 0, 0, 1)
   const centsOff = 1200 * Math.log2(frame.hz / goal)
   const window = flex * 40
   const pull = Math.sign(centsOff) * Math.max(0, Math.abs(centsOff) - window)
   const flexed = frame.hz * 2 ** (-pull / 1200)
   const kept = flexed + human * (frame.hz - flexed)
-  const aimed = frame.hz + amount * (kept - frame.hz)
+  let aimed = frame.hz + amount * (kept - frame.hz)
+  const vibe = clamp(params.vibrato ?? 0, 0, 1)
+  if (vibe > 0) aimed += vibe * (frame.hz - slow)
   const speed = clamp(params.retune ?? 0.5, 0.02, 1)
+  const rate = classic ? Math.min(1, 0.35 + speed * 0.65) : speed
   const prev = smoothed() || frame.hz
-  const next = prev + (aimed - prev) * speed
+  const next = prev + (aimed - prev) * rate
   setSmoothed(next)
   return clamp(next, 40, 2000)
 }

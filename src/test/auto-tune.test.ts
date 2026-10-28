@@ -4,7 +4,19 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { activeTunePreset, orderedInserts, tuneBlockScale, tuneLiveLatency, tuneScaleOf, tuneSnapMidi } from '../audio/plugins/autoTune'
+import {
+  activeNoteMask,
+  activeTunePreset,
+  dragNudge,
+  graphNotes,
+  nextScaleMask,
+  orderedInserts,
+  readMeter,
+  tuneBlockScale,
+  tuneLiveLatency,
+  tuneScaleOf,
+  tuneSnapMidi,
+} from '../audio/plugins/autoTune'
 import { CATALOG, FACTORY, createPlugin, defaultParams, tuneLatency } from '../audio/plugins/catalog'
 import { createTune } from '../audio/plugins/tune'
 import { yinPitch } from '../audio/plugins/psola'
@@ -193,7 +205,44 @@ describe('Auto-Tune insert', () => {
     expect(voiced).toBeGreaterThan(4)
   })
 
-  it('shows the project key, the loaded preset, and a phone preset row', () => {
+  it('drives scale notes, nudges, reference pitch, bypass, and hold', () => {
+    const follow = { mode: 1, root: 0, scaleIndex: 0, mask: 0, custom: 0 }
+    const cMajor = { scaleRoot: 0, scaleIntervals: major, scaleCents: majorCents }
+    const derived = activeNoteMask(follow, 0, major)
+    const withoutF = nextScaleMask(0, false, derived, 5)
+    expect(tuneSnapMidi(midiOf(360), { ...follow, custom: 1, mask: withoutF }, cMajor)).toBe(67)
+    expect(tuneSnapMidi(midiOf(360), follow, cMajor)).toBe(65)
+    const input = sine(360, 0.5)
+    const params = hard()
+    const nudged = run(createTune(rate), input, { ...params, n5: 100 }, { offline: true })
+    expect(cents(pitchAt(nudged, tuneLatency(rate) + 5000), hzOf(66))).toBeLessThan(30)
+    const bypassed = run(createTune(rate), sine(445, 0.5), { ...params, mode: 0, bypassMask: 1 << 9 }, { offline: true })
+    expect(cents(pitchAt(bypassed, tuneLatency(rate) + 5000), 445)).toBeLessThan(25)
+    const reference = run(createTune(rate), sine(450, 0.45), { ...params, mode: 0, a4: 450 }, { offline: true })
+    expect(cents(pitchAt(reference, tuneLatency(rate) + 4000), 450)).toBeLessThan(25)
+    const held = run(createTune(rate), sine(392, 0.45), { ...params, mode: 0, holdMidi: 69 }, { offline: true })
+    expect(cents(pitchAt(held, tuneLatency(rate) + 4000), 440)).toBeLessThan(30)
+    const live = createTune(rate)
+    run(live, sine(440, 0.2), { ...params, hq: 1 }, { offline: false })
+    expect(live.latencySamples).toBe(tuneLatency(rate))
+    const monitor = createTune(rate)
+    run(monitor, sine(440, 0.2), params, { offline: false })
+    expect(monitor.latencySamples).toBe(tuneLiveLatency(rate))
+    const dragged = dragNudge(65, 66, 0)
+    expect(dragged).toEqual({ id: 'n5', cents: 100 })
+    const trace = new Float32Array(16)
+    for (let i = 4; i < 8; i++) {
+      trace[i * 2] = 440
+      trace[i * 2 + 1] = 440
+    }
+    const blobs = graphNotes(trace)
+    expect(blobs.length).toBe(1)
+    expect(blobs[0].midi).toBe(69)
+    expect(readMeter(trace)?.name).toBe('A')
+    expect(readMeter(trace)?.cents).toBe(0)
+  })
+
+  it('shows the meter, knobs, keyboard, and graph without a popup menu', () => {
     const store = new ProjectStore(createEmptyProject())
     store.setScale({ root: 9, scale: 'aeolian' })
     const vocal = store.project.tracks.find((track) => track.name === 'Vocal')!
@@ -213,21 +262,28 @@ describe('Auto-Tune insert', () => {
       enabled: true,
       projectKey: song.note,
       projectScale: song.scaleName,
+      projectRoot: song.root,
+      projectIntervals: song.intervals,
       active: 'Hard tune/T-Pain',
       onChange: () => undefined,
-      onScale: () => undefined,
       onPreset: () => undefined,
       onBypass: () => undefined,
     }))
     expect(html).toContain('Project · A')
     expect(html).toContain('Project · Minor')
     expect(html).toContain('data-preset="Hard tune/T-Pain"')
-    expect(html).toContain('aria-pressed="true"')
     expect(html).toContain('Waiting for a note')
-    expect(html.match(/aria-pressed="true"/g)).toHaveLength(1)
+    expect(html).toContain('Retune')
+    expect(html).toContain('data-note="F#"')
+    expect(html).toContain('data-key="60"')
+    expect(html).toContain('Graph')
+    expect(html).not.toContain('<select')
+    expect(html).toContain('aria-pressed="true"')
     const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../ui/autoTune.css'), 'utf8')
-    expect(css).toContain('.shell.phone .head .autotune-add')
-    expect(css).toContain('.shell.phone .autotune-presets')
-    expect(css).toContain('.autotune-presets button.on')
+    expect(css).toContain('.tune-meter')
+    expect(css).toContain('.tune-knob')
+    expect(css).toContain('.tune-resize')
+    expect(css).toContain('.shell.phone .tune-board .side')
+    expect(css).toContain('.keybed')
   })
 })
