@@ -1070,7 +1070,7 @@ export class ProjectStore {
   }
 
   updatePlugin(trackId: string | 'master', pluginId: string, patch: Partial<PluginInstance>) {
-    this.mutate(() => {
+    const edit = () => {
       const plugin = this.pluginList(trackId)?.find((item) => item.id === pluginId)
       if (!plugin) return
       if (patch.enabled != null) plugin.enabled = patch.enabled
@@ -1079,7 +1079,9 @@ export class ProjectStore {
       if (patch.params) plugin.params = { ...plugin.params, ...patch.params }
       if (patch.sampler) plugin.sampler = patch.sampler
       if (patch.looper) plugin.looper = patch.looper
-    })
+    }
+    if (this.touching) this.draft(edit)
+    else this.mutate(edit)
   }
 
   setSampleBuffer(trackId: string | 'master', pluginId: string, bufferId: string) {

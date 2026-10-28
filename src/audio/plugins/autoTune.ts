@@ -34,9 +34,16 @@ export function tuneLiveHop(sampleRate: number) {
   return Math.max(128, Math.round(256 * (sampleRate / 48000)))
 }
 
-/** Output delay of the monitoring path: two hops, not the HQ analysis window. */
+/**
+ * Output delay of the monitoring path.
+ * The hop stays short. The lookahead is long enough for a two-period grain at the
+ * bottom of the detector range, so low notes are not stitched from silence.
+ */
 export function tuneLiveLatency(sampleRate: number) {
-  return tuneLiveHop(sampleRate) * 2
+  const hop = tuneLiveHop(sampleRate)
+  const span = Math.max(1024, Math.round(1536 * (sampleRate / 48000)))
+  const ahead = Math.max(hop, Math.floor((span - 1) / 2))
+  return ahead + hop
 }
 
 /** Auto-Tune leads every insert list. */
@@ -220,10 +227,10 @@ export function nextScaleMask(stored: number, custom: boolean, derived: number, 
   return toggleBit(base, pc)
 }
 
-export function dragNudge(startMidi: number, nextMidi: number, startCents: number) {
-  const pc = ((Math.round(startMidi) % 12) + 12) % 12
+export function dragNudge(startMidi: number, nextMidi: number, startCents: number, pc = Math.round(startMidi)) {
+  const pitch = ((Math.round(pc) % 12) + 12) % 12
   const cents = Math.max(-200, Math.min(200, Math.round(startCents + (nextMidi - startMidi) * 100)))
-  return { id: tuneNudgeId(pc), cents }
+  return { id: tuneNudgeId(pitch), cents }
 }
 
 export interface MeterRead {
@@ -261,8 +268,9 @@ export interface GraphNote {
 }
 
 /** Stable runs of corrected pitch, for the graph blobs. */
-export function graphNotes(trace: Float32Array | null): GraphNote[] {
+export function graphNotes(trace: Float32Array | null, a4 = 440): GraphNote[] {
   if (!trace) return []
+  const ref = a4 > 0 ? a4 : 440
   const notes: GraphNote[] = []
   let start = -1
   let midi = 0
@@ -282,7 +290,7 @@ export function graphNotes(trace: Float32Array | null): GraphNote[] {
       flush(i)
       continue
     }
-    const next = Math.round(69 + 12 * Math.log2(hz / 440))
+    const next = Math.round(69 + 12 * Math.log2(hz / ref))
     if (start < 0 || next !== midi) {
       flush(i)
       start = i
@@ -298,13 +306,39 @@ export function graphNotes(trace: Float32Array | null): GraphNote[] {
   return notes.filter((note) => note.end - note.start >= 2)
 }
 
-export function heardPitchClass(trace: Float32Array | null) {
+/** Fractional MIDI of a blob. The nudge is already in the corrected frequency. */
+export function blobMidi(note: GraphNote, a4 = 440) {
+  const hz = note.corrected > 0 ? note.corrected : note.detected
+  const ref = a4 > 0 ? a4 : 440
+  if (hz <= 0) return note.midi
+  return 69 + 12 * Math.log2(hz / ref)
+}
+
+/** Pitch class the correction offset belongs to, after that offset has moved the blob. */
+export function nudgeKey(correctedMidi: number, values: Record<string, number>) {
+  let bestPc = ((Math.round(correctedMidi) % 12) + 12) % 12
+  let bestErr = Infinity
+  for (let pc = 0; pc < 12; pc++) {
+    const nudge = (values[tuneNudgeId(pc)] ?? 0) / 100
+    const source = correctedMidi - nudge
+    const rounded = Math.round(source)
+    const err = Math.abs(source - rounded)
+    if ((((rounded % 12) + 12) % 12) === pc && err < bestErr) {
+      bestErr = err
+      bestPc = pc
+    }
+  }
+  return tuneNudgeId(bestPc)
+}
+
+export function heardPitchClass(trace: Float32Array | null, a4 = 440) {
   if (!trace) return null
+  const ref = a4 > 0 ? a4 : 440
   const counts = new Array(12).fill(0)
   for (let i = 0; i + 1 < trace.length; i += 2) {
     const hz = trace[i] || trace[i + 1] || 0
     if (hz <= 0) continue
-    const midi = Math.round(69 + 12 * Math.log2(hz / 440))
+    const midi = Math.round(69 + 12 * Math.log2(hz / ref))
     counts[((midi % 12) + 12) % 12] += 1
   }
   let best = -1

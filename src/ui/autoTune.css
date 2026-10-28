@@ -342,6 +342,16 @@
   max-height: 86vh;
 }
 
+.shell.phone.land .plugin-sheet.tune-open,
+.shell.fold.land .plugin-sheet.tune-open {
+  max-height: min(52dvh, 280px);
+}
+
+.shell.phone.land .tune-board button,
+.shell.fold.land .tune-board button {
+  min-height: 36px;
+}
+
 .shell.phone .tune-board .side,
 .shell.fold .tune-board .side {
   display: none;
@@ -383,6 +393,6 @@
 }
 
 @media (min-width: 900px) {
-  .tune-board .more { display: none; }
-  .tune-board .side { display: flex; }
+  .shell:not(.phone):not(.fold) .tune-board .more { display: none; }
+  .shell:not(.phone):not(.fold) .tune-board .side { display: flex; }
 }

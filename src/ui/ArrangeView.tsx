@@ -635,7 +635,7 @@ export function ArrangeView({
           {sheetTrack.type === 'audio' && (
             <SheetRow
               label="Auto-Tune"
-              hint="Add Auto-Tune, or open it. New inserts start in key and already audible."
+              hint="Add or open Auto-Tune."
               pressed={sheetTrack.plugins.some((plugin) => plugin.pluginId === 'tune' && plugin.enabled)}
               onClick={() => {
                 addOrOpenAutoTune(store, sheetTrack.id)

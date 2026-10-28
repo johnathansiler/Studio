@@ -9,6 +9,7 @@ export function createTune(sampleRate: number): Processor {
   const live = new Psola(sampleRate, 2, tuneLiveHop(sampleRate))
   let smoothed = 0
   let center = 0
+  let quiet = 0
   let path: 'dry' | 'live' | 'hq' = 'dry'
   const trace = new Float32Array(TUNE_TRACE_FRAMES * 2)
   const remember = (detected: number, corrected: number) => {
@@ -24,6 +25,7 @@ export function createTune(sampleRate: number): Processor {
       live.reset()
       smoothed = 0
       center = 0
+      quiet = 0
       path = 'dry'
       trace.fill(0)
     },
@@ -34,9 +36,11 @@ export function createTune(sampleRate: number): Processor {
           live.reset()
           smoothed = 0
           center = 0
+          quiet = 0
           path = 'dry'
         }
         this.latencySamples = 0
+        trace.fill(0)
         copyThrough(input, output)
         return
       }
@@ -46,6 +50,7 @@ export function createTune(sampleRate: number): Processor {
         engine.reset()
         smoothed = 0
         center = 0
+        quiet = 0
         path = monitoring ? 'live' : 'hq'
       }
       this.latencySamples = monitoring ? tuneLiveLatency(ctx.sampleRate) : tuneLatency(ctx.sampleRate)
@@ -59,6 +64,13 @@ export function createTune(sampleRate: number): Processor {
           }, () => center, (value) => {
             center = value
           })
+          if (corrected <= 0) {
+            quiet += 1
+            if (quiet > 4) {
+              smoothed = 0
+              center = 0
+            }
+          } else quiet = 0
           remember(frame.hz, corrected)
           return corrected
         },

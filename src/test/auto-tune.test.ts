@@ -7,9 +7,11 @@ import { describe, expect, it } from 'vitest'
 import {
   activeNoteMask,
   activeTunePreset,
+  blobMidi,
   dragNudge,
   graphNotes,
   nextScaleMask,
+  nudgeKey,
   orderedInserts,
   readMeter,
   tuneBlockScale,
@@ -17,7 +19,7 @@ import {
   tuneScaleOf,
   tuneSnapMidi,
 } from '../audio/plugins/autoTune'
-import { CATALOG, FACTORY, createPlugin, defaultParams, tuneLatency } from '../audio/plugins/catalog'
+import { CATALOG, FACTORY, createPlugin, defaultParams, latencyOf, tuneLatency } from '../audio/plugins/catalog'
 import { createTune } from '../audio/plugins/tune'
 import { yinPitch } from '../audio/plugins/psola'
 import { renderGraph } from '../audio/renderGraph'
@@ -230,6 +232,20 @@ describe('Auto-Tune insert', () => {
     expect(monitor.latencySamples).toBe(tuneLiveLatency(rate))
     const dragged = dragNudge(65, 66, 0)
     expect(dragged).toEqual({ id: 'n5', cents: 100 })
+    const sharp = 440 * 2 ** (0.5 / 12)
+    const nudgedNote = { start: 0, end: 4, midi: 70, detected: 440, corrected: sharp }
+    expect(blobMidi(nudgedNote, 440)).toBeCloseTo(69.5, 2)
+    expect(nudgeKey(69.5, { n9: 50 })).toBe('n9')
+    expect(dragNudge(69.5, 70.5, 50, 9)).toEqual({ id: 'n9', cents: 150 })
+    expect(latencyOf('tune', { ...params, hq: 1 }, rate, true, true)).toBe(tuneLatency(rate))
+    expect(latencyOf('tune', params, rate, true, true)).toBe(tuneLiveLatency(rate))
+    const low = sine(82, 0.55)
+    const lowOut = run(createTune(rate), low, { ...params, minHz: 70 }, { offline: false })
+    const lowSkip = tuneLiveLatency(rate) + 1500
+    let energy = 0
+    for (let i = lowSkip; i < lowSkip + 4000; i++) energy += lowOut[i] * lowOut[i]
+    expect(Math.sqrt(energy / 4000)).toBeGreaterThan(0.2)
+    expect(cents(pitchAt(lowOut, lowSkip), 82)).toBeLessThan(30)
     const trace = new Float32Array(16)
     for (let i = 4; i < 8; i++) {
       trace[i * 2] = 440

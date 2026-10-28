@@ -7,13 +7,14 @@ import {
   TUNE_RANGES,
   activeNoteMask,
   bitOn,
+  blobMidi,
   dragNudge,
   graphNotes,
   heardPitchClass,
+  nudgeKey,
   isBlackKey,
   nextScaleMask,
   readMeter,
-  tuneNudgeId,
   tuneOnTrack,
 } from '../audio/plugins/autoTune'
 import { NOTE_NAMES, SCALES } from '../model/scale'
@@ -34,9 +35,7 @@ export function addOrOpenAutoTune(store: ProjectStore, trackId: string) {
 
 export function AutoTuneTrackButton({ store, trackId }: { store: ProjectStore; trackId: string }) {
   const plugin = tuneOnTrack(store.track(trackId)?.plugins ?? [])
-  const hint = plugin
-    ? 'Open Auto-Tune. It is on this track and follows the project key unless you set one.'
-    : 'Add Auto-Tune to this track. Starts in key, with an audible hard-tune preset.'
+  const hint = plugin ? 'Open Auto-Tune on this track.' : 'Add Auto-Tune. Starts in key and audible.'
   return (
     <TipButton
       className={`autotune-add ${plugin ? 'inserted' : ''} ${plugin?.enabled ? 'on' : ''}`}
@@ -105,23 +104,25 @@ export function AutoTuneFace({
   const [naming, setNaming] = useState(false)
   const [draft, setDraft] = useState('')
   const canvas = useRef<HTMLCanvasElement>(null)
-  const blobs = graphNotes(trace)
+  const a4 = values.a4 || 440
+  const shownTrace = enabled && (values.amount ?? 0) > 0.001 ? trace : null
+  const blobs = graphNotes(shownTrace, a4)
   const notes = useRef(blobs)
   notes.current = blobs
-  const drag = useRef<{ startMidi: number; startCents: number } | null>(null)
+  const drag = useRef<{ startMidi: number; startCents: number; pc: number } | null>(null)
   const moment = useRef<Record<string, number> | null>(null)
-  const meter = readMeter(trace, values.a4 || 440)
+  const meter = readMeter(shownTrace, a4)
   const mask = activeNoteMask(values, projectRoot, projectIntervals)
   const derived = activeNoteMask({ ...values, custom: 0, mask: 0 }, projectRoot, projectIntervals)
   const names = presets?.length ? [...presets] : TUNE_PRESET_META.map((item) => item.name)
-  const presetAt = Math.max(0, active ? names.indexOf(active) : 0)
+  const presetAt = active && names.includes(active) ? names.indexOf(active) : -1
   const scaleLabel = scaleText(values, projectScale)
   const keyLabel = (values.root ?? -1) < 0 ? `Project · ${projectKey}` : NOTE_NAMES[Math.round(values.root)] ?? projectKey
   const rangeAt = nearestRange(values.minHz ?? 80, values.maxHz ?? 1000)
 
   useEffect(() => {
-    drawGraph(canvas.current, trace, values)
-  }, [trace, revision, values, view])
+    drawGraph(canvas.current, shownTrace, values)
+  }, [shownTrace, revision, values, view])
 
   const set = (id: string, value: number) => onChange(id, value)
   const patch = (next: Record<string, number>) => {
@@ -173,10 +174,10 @@ export function AutoTuneFace({
         <Stepper
           label="Preset"
           hint="Previous or next preset."
-          value={names[presetAt] ?? 'Preset'}
-          preset={names[presetAt]}
-          onPrev={() => onPreset(names[(presetAt - 1 + names.length) % names.length])}
-          onNext={() => onPreset(names[(presetAt + 1) % names.length])}
+          value={presetAt < 0 ? 'Custom' : names[presetAt]}
+          preset={presetAt < 0 ? undefined : names[presetAt]}
+          onPrev={() => onPreset(names[presetAt < 0 ? names.length - 1 : (presetAt - 1 + names.length) % names.length])}
+          onNext={() => onPreset(names[presetAt < 0 ? 0 : (presetAt + 1) % names.length])}
         />
         <div className="tune-actions">
           {naming ? (
@@ -211,7 +212,7 @@ export function AutoTuneFace({
         <div className="tune-stage">
           <PitchMeter meter={meter} held={Math.round(values.holdMidi ?? -1) >= 0} onHold={() => {
             if (Math.round(values.holdMidi ?? -1) >= 0) set('holdMidi', -1)
-            else if (meter) set('holdMidi', Math.max(0, Math.min(127, Math.round(69 + 12 * Math.log2(meter.hz / (values.a4 || 440))))))
+            else if (meter) set('holdMidi', Math.max(0, Math.min(127, Math.round(69 + 12 * Math.log2(meter.hz / a4)))))
           }} />
           <div className="tune-knobs">
             <Knob label="Retune" hint="How fast the note snaps." value={values.retune ?? 0.95} min={0.02} max={1} text={String(Math.round((values.retune ?? 0.95) * 100))} color="#73c48f" onChange={(value) => set('retune', value)} />
@@ -223,7 +224,7 @@ export function AutoTuneFace({
           </div>
         </div>
       ) : (
-        <div className="tune-graph" onPointerDown={(event) => beginDrag(event, canvas.current, notes.current, values, drag)} onPointerMove={(event) => moveDrag(event, canvas.current, drag, set)} onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }}>
+        <div className="tune-graph" onPointerDown={(event) => beginDrag(event, canvas.current, notes.current, values, a4, drag)} onPointerMove={(event) => moveDrag(event, canvas.current, drag, set)} onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }}>
           <canvas ref={canvas} width={960} height={320} aria-label="Pitch notes. Drag a blob up or down to retune it." />
           <p>{blobs.length ? 'Drag a note up or down. That pitch class follows.' : 'Sing or play to see the pitch'}</p>
         </div>
@@ -250,10 +251,10 @@ export function AutoTuneFace({
         <button type="button" className={latch ? 'on' : ''} aria-pressed={latch} title="A tap sticks until you tap again." aria-label="Latch. A tap sticks." onClick={() => setLatch(true)}>Latch</button>
         <button type="button" className={latch ? '' : 'on'} aria-pressed={!latch} title="The edit lasts while your finger is down." aria-label="Momentary. The edit lasts while held." onClick={() => setLatch(false)}>Moment</button>
         <button type="button" className="side" title="Set the key from the note you are singing." aria-label="Listen. Set the key from the sung note." onClick={() => {
-          const pc = heardPitchClass(trace)
+          const pc = heardPitchClass(shownTrace, a4)
           if (pc != null) set('root', pc)
         }}>Listen</button>
-        <button type="button" className={`side ${(values.hq ?? 0) >= 0.5 ? 'on' : ''}`} aria-pressed={(values.hq ?? 0) >= 0.5} title={(values.hq ?? 0) >= 0.5 ? 'HQ correction, with more delay.' : 'Low latency while you monitor.'} aria-label={(values.hq ?? 0) >= 0.5 ? 'HQ. Cleaner correction, more delay.' : 'Low latency. Short delay while you monitor.'} onClick={() => set('hq', (values.hq ?? 0) >= 0.5 ? 0 : 1)}>{(values.hq ?? 0) >= 0.5 ? 'HQ' : 'Low latency'}</button>
+        <button type="button" className={`side ${(values.hq ?? 0) >= 0.5 ? 'on' : ''}`} aria-pressed={(values.hq ?? 0) >= 0.5} title={(values.hq ?? 0) >= 0.5 ? 'HQ correction, with more delay.' : 'Low latency while you play.'} aria-label={(values.hq ?? 0) >= 0.5 ? 'HQ. Cleaner correction, more delay.' : 'Low latency. Short delay while you play.'} onClick={() => set('hq', (values.hq ?? 0) >= 0.5 ? 0 : 1)}>{(values.hq ?? 0) >= 0.5 ? 'HQ' : 'Low latency'}</button>
         <button type="button" className={`side ${(values.color ?? 0) >= 0.5 ? 'on' : ''}`} aria-pressed={(values.color ?? 0) >= 0.5} title={(values.color ?? 0) >= 0.5 ? 'Classic is a harder snap.' : 'Modern keeps the flex window.'} aria-label={(values.color ?? 0) >= 0.5 ? 'Classic. Harder snap.' : 'Modern. Softer snap.'} onClick={() => set('color', (values.color ?? 0) >= 0.5 ? 0 : 1)}>{(values.color ?? 0) >= 0.5 ? 'Classic' : 'Modern'}</button>
       </div>
 
@@ -270,7 +271,7 @@ export function AutoTuneFace({
               aria-pressed={on && !pass}
               title={`${name}. ${toolHint}`}
               aria-label={`${name}. ${on ? 'In the scale.' : 'Out of the scale.'} ${pass ? 'Bypassed.' : ''}`}
-              onPointerDown={(event) => { event.preventDefault(); editNote(pc, true) }}
+              onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); editNote(pc, true) }}
               onPointerUp={() => { if (!latch) editNote(pc, false) }}
               onPointerCancel={() => { if (!latch) editNote(pc, false) }}
             >
@@ -394,7 +395,7 @@ function Key({ midi, mask, passMask, white, onDown, onUp }: { midi: number; mask
       title={`${name}${octaveOf(midi)}. ${on ? 'In the scale.' : 'Removed.'}`}
       aria-label={`${name}${octaveOf(midi)}. ${on ? 'In the scale.' : 'Removed from the scale.'}`}
       style={white ? undefined : { left: `calc(${whitesBefore} * var(--white) - var(--black) / 2)` }}
-      onPointerDown={(event) => { event.preventDefault(); onDown(pc, true) }}
+      onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); onDown(pc, true) }}
       onPointerUp={() => onUp(pc)}
       onPointerCancel={() => onUp(pc)}
     >
@@ -520,7 +521,7 @@ function drawGraph(view: HTMLCanvasElement | null, trace: Float32Array | null, v
       ctx.fillText(`C${Math.floor(midi / 12) - 1}`, 4, y + 4)
     }
   }
-  const blobs = graphNotes(trace)
+  const blobs = graphNotes(trace, values.a4 || 440)
   if (trace) {
     ctx.strokeStyle = '#e0b15a'
     ctx.lineWidth = 2
@@ -533,7 +534,7 @@ function drawGraph(view: HTMLCanvasElement | null, trace: Float32Array | null, v
         drawing = false
         continue
       }
-      const midi = 69 + 12 * Math.log2(hz / 440)
+      const midi = 69 + 12 * Math.log2(hz / (values.a4 || 440))
       const x = (i / Math.max(1, frames - 1)) * width
       const y = midiY(midi, height)
       if (!drawing) ctx.moveTo(x, y)
@@ -547,8 +548,7 @@ function drawGraph(view: HTMLCanvasElement | null, trace: Float32Array | null, v
   blobs.forEach((note) => {
     const x = (note.start / frames) * width
     const w = Math.max(10, ((note.end - note.start) / frames) * width)
-    const nudged = note.midi + (values[tuneNudgeId(note.midi)] ?? 0) / 100
-    const y = midiY(nudged, height)
+    const y = midiY(blobMidi(note, values.a4 || 440), height)
     ctx.fillStyle = 'rgba(115, 196, 143, 0.85)'
     roundRect(ctx, x, y - 8, w, 16, 8)
     ctx.fill()
@@ -580,7 +580,8 @@ function beginDrag(
   view: HTMLCanvasElement | null,
   blobs: ReturnType<typeof graphNotes>,
   values: Record<string, number>,
-  drag: { current: { startMidi: number; startCents: number } | null },
+  a4: number,
+  drag: { current: { startMidi: number; startCents: number; pc: number } | null },
 ) {
   if (!view) return
   const rect = view.getBoundingClientRect()
@@ -589,23 +590,24 @@ function beginDrag(
   const hit = blobs.find((note) => {
     const left = (note.start / 64) * view.width
     const right = (note.end / 64) * view.width
-    const nudged = note.midi + (values[tuneNudgeId(note.midi)] ?? 0) / 100
-    return x >= left && x <= right && Math.abs(y - midiY(nudged, view.height)) < 18
+    return x >= left && x <= right && Math.abs(y - midiY(blobMidi(note, a4), view.height)) < 18
   })
   if (!hit) return
-  drag.current = { startMidi: hit.midi, startCents: values[tuneNudgeId(hit.midi)] ?? 0 }
+  const visual = blobMidi(hit, a4)
+  const id = nudgeKey(visual, values)
+  drag.current = { startMidi: visual, startCents: values[id] ?? 0, pc: Number(id.slice(1)) }
   event.currentTarget.setPointerCapture(event.pointerId)
 }
 
 function moveDrag(
   event: ReactPointerEvent<HTMLDivElement>,
   view: HTMLCanvasElement | null,
-  drag: { current: { startMidi: number; startCents: number } | null },
+  drag: { current: { startMidi: number; startCents: number; pc: number } | null },
   set: (id: string, value: number) => void,
 ) {
   if (!view || !drag.current) return
   const rect = view.getBoundingClientRect()
   const y = ((event.clientY - rect.top) / rect.height) * view.height
-  const next = dragNudge(drag.current.startMidi, yToMidi(y, view.height), drag.current.startCents)
+  const next = dragNudge(drag.current.startMidi, yToMidi(y, view.height), drag.current.startCents, drag.current.pc)
   set(next.id, next.cents)
 }

@@ -915,7 +915,10 @@ export function createPlugin(pluginId: string, preset?: string): PluginInstance 
 
 export function latencyOf(pluginId: string, params: Record<string, number>, sampleRate: number, enabled = true, live = false) {
   if (!enabled) return 0
-  if (pluginId === 'tune' && (params.amount ?? 0) > 0.001) return live ? tuneLiveLatency(sampleRate) : tuneLatency(sampleRate)
+  if (pluginId === 'tune' && (params.amount ?? 0) > 0.001) {
+    if (live && (params.hq ?? 0) < 0.5) return tuneLiveLatency(sampleRate)
+    return tuneLatency(sampleRate)
+  }
   if (pluginId === 'pitch' && (params.mix ?? 0) > 0.001) return tuneLatency(sampleRate)
   if (pluginId === 'limiter') return 64
   if (pluginId === 'peak') return 96

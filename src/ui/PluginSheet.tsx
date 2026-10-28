@@ -108,7 +108,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
             {plugin.enabled ? 'On' : 'Bypass'}
           </button>
         )}
-        <button className="text-btn" onClick={() => store.focusPlugin(null)}>×</button>
+        <button className="text-btn" title="Close the plugin." aria-label="Close the plugin." onClick={() => store.focusPlugin(null)}>×</button>
       </header>
       {plugin.pluginId !== 'tune' && (
       <label className="wet">
@@ -135,7 +135,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
         <SamplePanel store={store} engine={engine} trackId={focus.trackId} plugin={plugin} />
       )}
       {autoTune && (
-        <div onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
+        <div onPointerDownCapture={() => store.beginAutomationTouch()} onPointerUp={() => { store.endAutomationTouch(); store.endDraft() }} onPointerCancel={() => { store.endAutomationTouch(); store.endDraft() }}>
         <AutoTuneFace
           values={plugin.params}
           trace={engine.trace(plugin.id)}
@@ -204,10 +204,10 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
         ))}
       </div> : null}
       <div className="row">
-        <button className="text-btn" onClick={() => store.movePlugin(focus.trackId, plugin.id, -1)}>←</button>
-        <button className="text-btn" onClick={() => store.movePlugin(focus.trackId, plugin.id, 1)}>→</button>
-        <button className="text-btn" onClick={() => store.removePlugin(focus.trackId, plugin.id)}>Remove</button>
-        <button className="text-btn" onClick={point}>Point</button>
+        <button className="text-btn" title="Move this plugin earlier." aria-label="Move this plugin earlier." onClick={() => store.movePlugin(focus.trackId, plugin.id, -1)}>←</button>
+        <button className="text-btn" title="Move this plugin later." aria-label="Move this plugin later." onClick={() => store.movePlugin(focus.trackId, plugin.id, 1)}>→</button>
+        <button className="text-btn" title="Remove this plugin." aria-label="Remove this plugin." onClick={() => store.removePlugin(focus.trackId, plugin.id)}>Remove</button>
+        <button className="text-btn" title="Write an automation point." aria-label="Point. Write an automation point." onClick={point}>Point</button>
       </div>
     </div>
   )

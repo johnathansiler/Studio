@@ -13,8 +13,14 @@ export interface PitchFrame {
   confidence: number
 }
 
+/** Reused YIN tables. Callers on the audio thread pass these in so a frame does not allocate. */
+export interface YinScratch {
+  diff: Float32Array
+  cmnd: Float32Array
+}
+
 /** YIN pitch estimate. hz is 0 when the frame is unvoiced. */
-export function yinPitch(frame: Float32Array, sampleRate: number, minHz: number, maxHz: number): PitchFrame {
+export function yinPitch(frame: Float32Array, sampleRate: number, minHz: number, maxHz: number, scratch?: YinScratch): PitchFrame {
   const n = frame.length
   const tauMin = Math.max(2, Math.floor(sampleRate / Math.max(40, maxHz)))
   const tauMax = Math.min(Math.floor(n / 2) - 2, Math.floor(sampleRate / Math.max(40, minHz)))
@@ -22,7 +28,17 @@ export function yinPitch(frame: Float32Array, sampleRate: number, minHz: number,
   let energy = 0
   for (let i = 0; i < n; i++) energy += frame[i] * frame[i]
   if (energy / n < 1e-8) return { hz: 0, confidence: 0 }
-  const diff = new Float32Array(tauMax + 1)
+  let diff: Float32Array
+  let cmnd: Float32Array
+  if (scratch && scratch.diff.length > tauMax && scratch.cmnd.length > tauMax) {
+    diff = scratch.diff
+    cmnd = scratch.cmnd
+    diff.fill(0, 0, tauMax + 1)
+    cmnd.fill(0, 0, tauMax + 1)
+  } else {
+    diff = new Float32Array(tauMax + 1)
+    cmnd = new Float32Array(tauMax + 1)
+  }
   for (let tau = tauMin; tau <= tauMax; tau++) {
     let sum = 0
     for (let i = 0; i < n - tau; i += 2) {
@@ -31,7 +47,6 @@ export function yinPitch(frame: Float32Array, sampleRate: number, minHz: number,
     }
     diff[tau] = sum
   }
-  const cmnd = new Float32Array(tauMax + 1)
   let running = 0
   cmnd[tauMin] = 1
   for (let tau = tauMin; tau <= tauMax; tau++) {
@@ -75,9 +90,14 @@ export class Psola {
   private readonly span: number
   /** Non-zero on the monitoring path. Zero keeps the original HQ delay. */
   private readonly liveHop: number
+  /** Samples of input kept ahead of the grain so a low note is not read as silence. */
+  private readonly liveAhead: number
   private readonly ring: Float32Array[]
   private readonly mix: Float32Array[]
   private readonly weight: Float32Array
+  private readonly frame: Float32Array
+  private readonly yin: YinScratch
+  private readonly held: number[]
   private written = 0
   private nextOut = 0
   private emitted = 0
@@ -89,11 +109,19 @@ export class Psola {
     this.channels = Math.max(1, Math.min(2, channels))
     this.span = Math.max(1024, Math.round(1536 * (sampleRate / 48000)))
     this.liveHop = liveHop > 0 ? Math.round(liveHop) : 0
-    this.latencySamples = this.liveHop > 0 ? this.liveHop * 2 : this.span + Math.floor(this.span / 2)
+    const maxHalf = Math.floor((this.span - 1) / 2)
+    this.liveAhead = this.liveHop > 0 ? Math.max(this.liveHop, maxHalf) : 0
+    this.latencySamples = this.liveHop > 0 ? this.liveAhead + this.liveHop : this.span + Math.floor(this.span / 2)
     const size = this.span * 8
     this.ring = Array.from({ length: this.channels }, () => new Float32Array(size))
     this.mix = Array.from({ length: this.channels }, () => new Float32Array(size))
     this.weight = new Float32Array(size)
+    this.frame = new Float32Array(this.span)
+    this.yin = {
+      diff: new Float32Array(Math.floor(this.span / 2) + 1),
+      cmnd: new Float32Array(Math.floor(this.span / 2) + 1),
+    }
+    this.held = [0, 0]
   }
 
   reset() {
@@ -133,13 +161,13 @@ export class Psola {
 
   private synthesize(targetFor: (frame: PitchFrame) => number, sampleRate: number, minHz: number, maxHz: number, hop: number) {
     let guard = 0
-    const ahead = this.liveHop > 0 ? this.liveHop : this.span
+    const ahead = this.liveHop > 0 ? this.liveAhead : this.span
     const guardMax = this.liveHop > 0 ? 8 : 4
     while (this.written - this.nextOut > ahead && guard < guardMax) {
       guard += 1
-      const frame = new Float32Array(this.span)
+      const frame = this.frame
       for (let i = 0; i < this.span; i++) frame[i] = this.read(0, this.nextOut - this.span + i)
-      const pitch = yinPitch(frame, sampleRate, minHz, maxHz)
+      const pitch = yinPitch(frame, sampleRate, minHz, maxHz, this.yin)
       const target = targetFor(pitch)
       const voiced = pitch.hz > 0 && pitch.confidence >= 0.7 && target > 30
       if (!voiced) {
@@ -166,13 +194,14 @@ export class Psola {
   /** Repeat the pitch-locked input grain at the target spacing. `step` 1 keeps formants. */
   private stamp(inputCenter: number, outputCenter: number, grain: number, windowed: boolean, step = 1) {
     const half = Math.floor(grain / 2)
+    const center = this.fitCenter(inputCenter, half, step)
     for (let i = 0; i < grain; i++) {
       const at = outputCenter - half + i
       if (at < this.emitted) continue
       const win = windowed ? hann(i, grain) : 1
       const slot = at % this.weight.length
       this.weight[slot] += win
-      const atInput = step === 1 ? inputCenter - half + i : inputCenter - half + i * step
+      const atInput = center + (i - half) * step
       for (let c = 0; c < this.channels; c++) {
         const sample = step === 1 ? this.read(c, atInput) : this.readFrac(c, atInput)
         this.mix[c][slot] += sample * win
@@ -180,20 +209,32 @@ export class Psola {
     }
   }
 
+  /** Keep a formant-shifted grain inside audio that has already arrived. */
+  private fitCenter(inputCenter: number, half: number, step: number) {
+    const reach = Math.ceil(half * Math.max(1, step))
+    const latest = this.written - 1 - reach
+    if (latest < 0 || inputCenter <= latest) return inputCenter
+    return latest
+  }
+
   private take(hop: number) {
     const delay = this.liveHop > 0 ? this.liveHop : Math.max(hop, Math.floor(this.span / 2))
     const ready = this.nextOut - delay
-    if (this.emitted >= ready) return this.channels === 2 ? [0, 0] : [0]
+    if (this.emitted >= ready) {
+      this.held[0] = 0
+      this.held[1] = 0
+      return this.held
+    }
     const slot = this.emitted % this.weight.length
     const weight = this.weight[slot]
-    const sample: number[] = []
     for (let c = 0; c < this.channels; c++) {
-      sample.push(sanitize(weight > 1e-5 ? this.mix[c][slot] / weight : 0))
+      this.held[c] = sanitize(weight > 1e-5 ? this.mix[c][slot] / weight : 0)
       this.mix[c][slot] = 0
     }
+    if (this.channels === 1) this.held[1] = this.held[0]
     this.weight[slot] = 0
     this.emitted += 1
-    return sample
+    return this.held
   }
 
   private read(channel: number, index: number) {
