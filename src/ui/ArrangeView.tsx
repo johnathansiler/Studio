@@ -16,6 +16,7 @@ import { activeTool, EDITOR_TOOL_KEYS, subscribeTools, toolClaimsGesture } from 
 import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
 import { AddTrackButton } from './AddTrack'
+import { AutoFader, AutomationModeBar, AutomationOverlay, LanePicker, LinkGroup, MixFlags } from './AutomationLane'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { TRACK_ROW, TRACK_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
@@ -352,6 +353,7 @@ export function ArrangeView({
   return (
     <div className="arrange-wrap">
       <SmartTempoBar store={store} />
+      <AutomationModeBar store={store} />
       <RecordBar store={store} engine={engine} session={session} onQuickPunch={onQuickPunch} />
       <div className="arrange" data-tool={tool}>
       <div className="heads">
@@ -359,7 +361,7 @@ export function ArrangeView({
           <SongMapHead store={store} position={position} />
         </div>
         {project.tracks.map((track) => (
-          <div className="head" data-track={track.id} key={track.id} style={laneStyle(track, store.selectedClipId)} onClick={() => store.selectTrack(track.id)}>
+          <div className="head" data-track={track.id} key={track.id} style={rowHeight(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => store.selectTrack(track.id)}>
             <header>
               <input
                 className="name"
@@ -391,12 +393,10 @@ export function ArrangeView({
               )}
             </header>
             <div className="row">
-              <TipButton className={`mini ${track.mute ? 'on-m' : ''}`} label={copyOf(TRACK_ROW, 'mute').label} hint={copyOf(TRACK_ROW, 'mute').hint} pressed={track.mute} onClick={() => store.updateTrack(track.id, { mute: !track.mute })}>
-                M
-              </TipButton>
-              <TipButton className={`mini ${track.solo ? 'on-s' : ''}`} label={copyOf(TRACK_ROW, 'solo').label} hint={copyOf(TRACK_ROW, 'solo').hint} pressed={track.solo} onClick={() => store.updateTrack(track.id, { solo: !track.solo })}>
-                S
-              </TipButton>
+              <MixFlags store={store} trackId={track.id} />
+              <button type="button" className={`mini auto-open ${store.openLanes[track.id] ? 'on' : ''}`} aria-pressed={!!store.openLanes[track.id]} aria-label="Automation lane" title="Show the automation lane for this track." onClick={(event) => { event.stopPropagation(); store.toggleAutomation(track.id) }}>
+                Auto
+              </button>
               {(track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
                 <TipButton className={`mini ${track.armed ? 'on-r' : ''}`} label={copyOf(TRACK_ROW, 'arm').label} hint={track.type === 'midi' ? 'Record this instrument from its MIDI input.' : copyOf(TRACK_ROW, 'arm').hint} pressed={track.armed} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
                   R
@@ -424,15 +424,13 @@ export function ArrangeView({
               )}
               {!touch && <TrackReadout trackId={track.id} />}
               {!touch && (
-                <input
+                <AutoFader
                   className="slim"
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  {...described(copyOf(TRACK_SHEET, 'volume'))}
+                  store={store}
+                  engine={engine}
+                  label={`${track.name} volume. How loud this track is.`}
                   value={track.volume}
-                  onChange={(event) => store.updateTrack(track.id, { volume: Number(event.target.value) })}
+                  spec={{ trackId: track.id, target: 'volume', param: 'volume', min: 0, max: 1.25 }}
                 />
               )}
             </div>
@@ -454,11 +452,13 @@ export function ArrangeView({
                   ))}
               </select>
             )}
+            <LanePicker store={store} trackId={track.id} />
             {!touch && (
               <div className="head-extra">
+                <LinkGroup store={store} trackId={track.id} />
                 <RouteFields store={store} trackId={track.id} />
                 <InsertList store={store} trackId={track.id} />
-                <SendList store={store} trackId={track.id} />
+                <SendList store={store} trackId={track.id} engine={engine} />
               </div>
             )}
           </div>
@@ -509,7 +509,7 @@ export function ArrangeView({
               className="lane"
               data-track={track.id}
               key={track.id}
-              style={{ backgroundSize: linear ? `${beatPx}px 100%` : undefined, backgroundImage: linear ? undefined : 'none', ...laneStyle(track, store.selectedClipId) }}
+              style={{ backgroundSize: linear ? `${beatPx}px 100%` : undefined, backgroundImage: linear ? undefined : 'none', ...rowHeight(track, store.selectedClipId, !!store.openLanes[track.id]) }}
               onDoubleClick={(event) => {
                 if (track.type !== 'midi') return
                 const bounds = event.currentTarget.getBoundingClientRect()
@@ -539,6 +539,7 @@ export function ArrangeView({
               {track.type === 'midi' && track.midiClips.every((clip) => clip.slotOnly) && (
                 <button type="button" className="lane-add" aria-label="Add clip" onClick={() => onOpenPiano(track.id)}>+</button>
               )}
+              <AutomationOverlay store={store} trackId={track.id} px={px} tool={tool} />
               {track.midiClips.filter((clip) => !clip.slotOnly && clip.scene == null).map((clip) => {
                 const beat = clip.startBeat + (nudge?.midi[clip.id] ?? 0)
                 const left = pxAtBeat(project, beat, px)
@@ -694,6 +695,12 @@ function laneStyle(track: { clips: AudioClip[] }, selectedId: string | null): { 
   const open = track.clips.find((clip) => clip.id === selectedId && clip.folder)
   if (!open?.folder) return {}
   return { height: Math.max(168, 40 + open.folder.lanes.length * 48) }
+}
+
+function rowHeight(track: { clips: AudioClip[] }, selectedId: string | null, automation: boolean) {
+  const base = laneStyle(track, selectedId)
+  if (!automation) return base
+  return { height: Math.max(base.height ?? 150, 236) }
 }
 
 function ClipView({

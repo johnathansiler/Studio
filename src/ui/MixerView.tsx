@@ -4,6 +4,7 @@ import { STRIP_BOUNDS } from '../model/layoutWidth'
 import { selectMixer } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
+import { AutoFader, AutomationModeBar, LinkGroup, MixFlags } from './AutomationLane'
 import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
@@ -25,20 +26,21 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
     <div className="mixer-view" ref={areaRef} data-strip-width={layout.strip} style={{ ['--strip' as string]: `${layout.strip}px` }}>
       <WidthBar axis="strip" value={layout.strip} onChange={setStrip} onReset={resetStrip} />
       <div className="mixer">
+      <AutomationModeBar store={store} />
       {project.tracks.map((track) => (
         <div className="strip" data-track={track.id} key={track.id}>
           <h3 style={{ color: track.color }}>{track.name}</h3>
           <RouteFields store={store} trackId={track.id} />
+          <LinkGroup store={store} trackId={track.id} />
           <InsertList store={store} trackId={track.id} />
-          <SendList store={store} trackId={track.id} />
-          <input className="pan" type="range" min={-1} max={1} step={0.01} aria-label={`${track.name} pan. Left or right.`} title="Left or right." value={track.pan} onChange={(event) => store.updateTrack(track.id, { pan: Number(event.target.value) })} />
+          <SendList store={store} trackId={track.id} engine={engine} />
+          <AutoFader className="pan" store={store} engine={engine} label={`${track.name} pan. Left or right.`} value={track.pan} spec={{ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }} />
           <div className="fader-row">
             <Meter engine={engine} id={track.id} />
-            <input type="range" min={0} max={1.25} step={0.01} aria-label={`${track.name} volume. How loud this track is.`} title="How loud this track is." value={track.volume} onChange={(event) => store.updateTrack(track.id, { volume: Number(event.target.value) })} />
+            <AutoFader store={store} engine={engine} label={`${track.name} volume. How loud this track is.`} value={track.volume} spec={{ trackId: track.id, target: 'volume', param: 'volume', min: 0, max: 1.25 }} />
           </div>
           <div className="row">
-            <button className={`mini ${track.mute ? 'on-m' : ''}`} aria-label={`Mute ${track.name}. Silence this track.`} title="Silence this track." onClick={() => store.updateTrack(track.id, { mute: !track.mute })}>M</button>
-            <button className={`mini ${track.solo ? 'on-s' : ''}`} aria-label={`Solo ${track.name}. Hear only this track.`} title="Hear only this track." onClick={() => store.updateTrack(track.id, { solo: !track.solo })}>S</button>
+            <MixFlags store={store} trackId={track.id} />
             {track.type === 'audio' && onTune && (
               <button type="button" className="mini tune-btn" aria-label={`Tune ${track.name}. Check the pitch of this input.`} title="Check the pitch of this input." onClick={() => onTune(track.id)}>Tune</button>
             )}

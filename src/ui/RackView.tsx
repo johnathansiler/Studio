@@ -2,7 +2,6 @@ import { useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { LibraryPanel } from './LibraryPanel'
 import { DEVICE_KINDS, DEVICE_NAMES, DEVICE_PARAMS, FACTORY_PRESETS, isInstrument, MACRO_TARGETS, PRESET_CATEGORIES, type DeviceKind } from '../model/rack'
-import { samplesToBeats } from '../model/time'
 import { selectRack } from '../state/select'
 import type { ProjectStore } from '../state/store'
 
@@ -41,11 +40,14 @@ export function RackView({ store, engine, trackId, onOpenKnock }: { store: Proje
     return true
   })
   const setParam = (param: string, value: number) => {
-    store.setDeviceParam(track.id, device.id, param, value)
-    if (engine.status === 'recording' || engine.status === 'playing') {
-      const beat = samplesToBeats(engine.currentTimelineSample(), engine.sampleRate, store.project.tempo)
-      store.addRackPoint(device.id, param, beat, value)
-    }
+    const spec = DEVICE_PARAMS[device.kind].find((item) => item.id === param)
+    const rolling = engine.status === 'playing' || engine.status === 'recording'
+    store.setAutomated(
+      { trackId: track.id, target: 'instrument', param, deviceId: device.id, min: spec?.min ?? 0, max: spec?.max ?? 1 },
+      value,
+      rolling,
+      engine.currentTimelineSample(),
+    )
   }
   const macros = [1, 2, 3, 4].map((slot) => {
     const target = MACRO_TARGETS[Math.round(device.params[`m${slot}t`] ?? slot - 1)] || `M${slot}`
@@ -128,7 +130,7 @@ export function RackView({ store, engine, trackId, onOpenKnock }: { store: Proje
               }}>Save</button>
             </div>
             {store.rackDetail ? (
-              <div className="knobs">
+              <div className="knobs" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
                 {DEVICE_PARAMS[device.kind].map((param) => (
                   <label key={param.id}>
                     {param.name}
@@ -145,7 +147,7 @@ export function RackView({ store, engine, trackId, onOpenKnock }: { store: Proje
                 ))}
               </div>
             ) : (
-              <div className="knobs macros">
+              <div className="knobs macros" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
                 {macros.map((macro) => {
                   const spec = DEVICE_PARAMS[device.kind].find((item) => item.id === macro.id)
                   if (!spec) return null
