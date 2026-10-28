@@ -19,10 +19,14 @@ import {
   type ScaleId,
 } from '../model/scale'
 import { uid, type MidiNote } from '../model/types'
-import { EDITOR_TOOLS, EDITOR_TOOL_KEYS, activeTool, keyForTool, setActiveTool, subscribeTools } from '../state/tools'
+import { EDITOR_TOOL_KEYS, activeTool, setActiveTool, subscribeTools, toolCursor } from '../state/tools'
 import type { ProjectStore } from '../state/store'
 import { samplesToBeats } from '../model/time'
+import { PIANO_BAR, PIANO_SHEET, copyOf, described } from './chrome'
+import { useFormFactor } from './form'
 import { attachGlissando } from './glissando'
+import { ActionSheet, SheetRow, TipButton } from './Hint'
+import { coarsePointer, noteGrip } from './touchEdit'
 import {
   commitMidiNotes,
   duplicateNotes,
@@ -68,6 +72,8 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   const [ghost, setGhost] = useState<MidiNote[] | null>(null)
   const [box, setBox] = useState<{ a: number; b: number; p0: number; p1: number } | null>(null)
   const [viewRev, setViewRev] = useState(0)
+  const [notesOpen, setNotesOpen] = useState(false)
+  const compact = useFormFactor() !== 'desk'
   const rowRef = useRef(row)
   const pxRef = useRef(pxBeat)
   rowRef.current = row
@@ -450,10 +456,13 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   const chord = selected.length ? nameChord(selected.map((note) => note.pitch)) : ''
   const pads = diatonicPads(scale.root, scale.scale, scale.source)
   const tones = [...scaleTones(scale.root, scale.scale, 4), ...scaleTones(scale.root, scale.scale, 5)]
-  const cursor = tool === 'pan' ? 'grab' : tool === 'zoom' ? 'zoom-in' : tool === 'select' ? 'default' : 'crosshair'
+  const cursor = toolCursor(tool)
+  const bar = (id: string) => copyOf(PIANO_BAR, id)
+  const sheet = (id: string) => copyOf(PIANO_SHEET, id)
 
   const onGridDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || !event.isPrimary || multi.current) return
+    if (!event.isPrimary || multi.current) return
+    if (event.button !== 0 && event.pointerType !== 'touch') return
     const at = cell(event)
     if (!at) return
     const grid = roll.grid
@@ -585,7 +594,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     event.preventDefault()
     const bounds = event.currentTarget.getBoundingClientRect()
     const x = event.clientX - bounds.left
-    const grip = Math.min(8, bounds.width * 0.25)
+    const grip = noteGrip(bounds.width, coarsePointer(event.pointerType))
     if (x <= grip || x >= bounds.width - grip) {
       onResize(event, note, x <= grip ? 'start' : 'end')
       return
@@ -682,55 +691,91 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
 
   const gridPx = (roll.grid > 0 ? roll.grid : 1) * pxBeat
   return (
-    <div className="piano" ref={pianoRef} data-tool={tool}>
+    <div className={`piano ${compact ? 'compact' : ''}`} ref={pianoRef} data-tool={tool}>
       <div className="scale-bar">
-        <button type="button" className={`chords-btn ${open ? 'on' : ''}`} aria-expanded={open} onClick={() => void toggleChords()}>Chords</button>
-        <select aria-label="Key" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
+        <TipButton className={`chords-btn ${open ? 'on' : ''}`} label={bar('chords').label} hint={bar('chords').hint} pressed={open} onClick={() => void toggleChords()} />
+        <select {...described(bar('key'))} value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
           {NOTE_NAMES.map((name, index) => (
             <option key={name} value={index}>{name}</option>
           ))}
         </select>
-        <select aria-label="Scale" value={scale.scale} onChange={(event) => store.setScale({ scale: event.target.value as ScaleId })}>
+        <select {...described(bar('scale'))} value={scale.scale} onChange={(event) => store.setScale({ scale: event.target.value as ScaleId })}>
           {SCALES.map((item) => (
             <option key={item.id} value={item.id}>{item.name}</option>
           ))}
         </select>
-        <button type="button" className={scale.snap ? 'on' : ''} aria-pressed={scale.snap} onClick={() => store.setScale({ snap: !scale.snap })}>Snap</button>
-        <button type="button" onClick={() => {
-          const found = detectKey(clip.notes.map((note) => ({ pitch: note.pitch, weight: note.durationBeats })))
-          store.setScale({ root: found.root, scale: found.scale })
-        }}>Detect</button>
+        <TipButton className={scale.snap ? 'on' : ''} label={bar('snap').label} hint={bar('snap').hint} pressed={scale.snap} onClick={() => store.setScale({ snap: !scale.snap })} />
+        {compact && (
+          <select {...described(bar('grid'))} value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
+            <option value="0">Free</option>
+            <option value="0.25">1/16</option>
+            <option value="0.5">1/8</option>
+            <option value="1">1/4</option>
+          </select>
+        )}
+        {compact && <TipButton label={bar('notes').label} hint={bar('notes').hint} onClick={() => setNotesOpen(true)} />}
         <span className="chord-name">{chord}</span>
-        {onIdeas && <button type="button" onClick={onIdeas}>Ideas</button>}
-        {store.selectedNoteId && (
-          <button
-            type="button"
+        {!compact && (
+          <TipButton label={sheet('detect').label} hint={sheet('detect').hint} onClick={() => {
+            const found = detectKey(clip.notes.map((note) => ({ pitch: note.pitch, weight: note.durationBeats })))
+            store.setScale({ root: found.root, scale: found.scale })
+          }} />
+        )}
+        {!compact && onIdeas && <TipButton label={sheet('ideas').label} hint={sheet('ideas').hint} onClick={onIdeas} />}
+        {!compact && store.selectedNoteId && (
+          <TipButton
             className={clip.notes.find((note) => note.id === store.selectedNoteId)?.slide ? 'on' : ''}
+            label={sheet('slide').label}
+            hint={sheet('slide').hint}
+            pressed={!!clip.notes.find((note) => note.id === store.selectedNoteId)?.slide}
             onClick={() => {
               const note = clip.notes.find((item) => item.id === store.selectedNoteId)
               if (note) store.updateNote(track.id, clip.id, note.id, { slide: !note.slide })
             }}
-          >
-            {clip.notes.find((note) => note.id === store.selectedNoteId)?.slide ? 'Slide on' : 'Slide'}
-          </button>
+          />
         )}
       </div>
-      <div className="tool-row">
-        {EDITOR_TOOLS.map((item) => (
-          <button key={item} type="button" className={tool === item ? 'on' : ''} aria-pressed={tool === item} title={`${item} (${keyForTool(item)})`} onClick={() => setActiveTool(item)}>{item}</button>
-        ))}
-        <select aria-label="Grid" value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
-          <option value="0">Free</option>
-          <option value="0.25">1/16</option>
-          <option value="0.5">1/8</option>
-          <option value="1">1/4</option>
-        </select>
-        <button type="button" onClick={quantize}>Quantize</button>
-        <button type="button" onClick={arpeggiate}>Arp</button>
-        <button type="button" onClick={strum}>Strum</button>
-        <button type="button" onClick={duplicate}>Duplicate</button>
-        <button type="button" onClick={remove}>Delete</button>
-      </div>
+      {!compact && (
+        <div className="tool-row">
+          <select {...described(bar('grid'))} value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
+            <option value="0">Free</option>
+            <option value="0.25">1/16</option>
+            <option value="0.5">1/8</option>
+            <option value="1">1/4</option>
+          </select>
+          <TipButton label={sheet('quantize').label} hint={sheet('quantize').hint} onClick={quantize} />
+          <TipButton label={sheet('arp').label} hint={sheet('arp').hint} onClick={arpeggiate} />
+          <TipButton label={sheet('strum').label} hint={sheet('strum').hint} onClick={strum} />
+          <TipButton label={sheet('duplicate').label} hint={sheet('duplicate').hint} onClick={duplicate} />
+          <TipButton label={sheet('delete').label} hint={sheet('delete').hint} onClick={remove} />
+        </div>
+      )}
+      {notesOpen && (
+        <ActionSheet title="Notes" hint="Edits for the notes you have selected." onClose={() => setNotesOpen(false)}>
+          <SheetRow label={sheet('detect').label} hint={sheet('detect').hint} onClick={() => {
+            const found = detectKey(clip.notes.map((note) => ({ pitch: note.pitch, weight: note.durationBeats })))
+            store.setScale({ root: found.root, scale: found.scale })
+            setNotesOpen(false)
+          }} />
+          {onIdeas && <SheetRow label={sheet('ideas').label} hint={sheet('ideas').hint} onClick={() => { setNotesOpen(false); onIdeas() }} />}
+          {store.selectedNoteId && (
+            <SheetRow
+              label={sheet('slide').label}
+              hint={sheet('slide').hint}
+              pressed={!!clip.notes.find((note) => note.id === store.selectedNoteId)?.slide}
+              onClick={() => {
+                const note = clip.notes.find((item) => item.id === store.selectedNoteId)
+                if (note) store.updateNote(track.id, clip.id, note.id, { slide: !note.slide })
+              }}
+            />
+          )}
+          <SheetRow label={sheet('quantize').label} hint={sheet('quantize').hint} onClick={() => { quantize(); setNotesOpen(false) }} />
+          <SheetRow label={sheet('arp').label} hint={sheet('arp').hint} onClick={() => { arpeggiate(); setNotesOpen(false) }} />
+          <SheetRow label={sheet('strum').label} hint={sheet('strum').hint} onClick={() => { strum(); setNotesOpen(false) }} />
+          <SheetRow label={sheet('duplicate').label} hint={sheet('duplicate').hint} onClick={() => { duplicate(); setNotesOpen(false) }} />
+          <SheetRow label={sheet('delete').label} hint={sheet('delete').hint} onClick={() => { remove(); setNotesOpen(false) }} />
+        </ActionSheet>
+      )}
       <div className="piano-body">
         <div className="keys" ref={keysRef}>
           {Array.from({ length: HIGH - LOW + 1 }, (_, index) => {
@@ -804,10 +849,16 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
                       if (tool !== 'select') return
                       const bounds = event.currentTarget.getBoundingClientRect()
                       const x = event.clientX - bounds.left
-                      const zone = Math.min(8, bounds.width * 0.25)
+                      const zone = noteGrip(bounds.width, coarsePointer(event.pointerType))
                       event.currentTarget.style.cursor = x <= zone || x >= bounds.width - zone ? 'ew-resize' : 'grab'
                     }}
-                    onPointerDown={(event) => onNoteDown(event, note)}
+                    onPointerDown={(event) => {
+                      if (tool !== 'select') {
+                        event.preventDefault()
+                        return
+                      }
+                      onNoteDown(event, note)
+                    }}
                   />
                 )
               })}
