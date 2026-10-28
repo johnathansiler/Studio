@@ -97,6 +97,7 @@ export function referencedBufferIds(project: Project): string[] {
       for (const lane of clip.folder?.lanes || []) ids.add(lane.bufferId)
     }
     for (const plugin of track.plugins ?? []) collectInstrumentBuffers(plugin, ids)
+    for (const sample of track.library?.samples ?? []) if (sample.bufferId) ids.add(sample.bufferId)
   }
   for (const plugin of project.masterPlugins ?? []) collectInstrumentBuffers(plugin, ids)
   for (const id of patchBufferIds(project)) ids.add(id)
@@ -200,6 +201,7 @@ export function arrangementDigest(project: Project): string {
       midiSlots: track.midiSlots ?? null,
       rack: track.rack?.devices.map((device) => [device.id, device.kind, device.params, device.pattern, device.zones.length]),
       cables: track.rack?.cables.map((cable) => [cable.from, cable.fromPort, cable.to, cable.toPort, cable.amount]),
+      library: track.instrument === 'library' ? [track.library?.id ?? '', track.library?.zones.length ?? 0, track.library?.samples.length ?? 0] : null,
       instruments: (track.plugins ?? []).map((plugin) => [
         plugin.id,
         plugin.pluginId,

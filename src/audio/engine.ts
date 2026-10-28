@@ -11,6 +11,8 @@ import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToBeats, s
 import { matchBufferRate, PatchHost, renderPatchSpan } from '../instruments/patch'
 import { RackHost } from './rack/host'
 import { renderNotes } from './rack/dsp'
+import { LibraryHost } from './multisample/host'
+import type { SamplePack } from './multisample/types'
 import { renderQuantizedClip } from '../model/quantize'
 import { renderPattern, type RenderedHit } from '../model/steps'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
@@ -77,7 +79,7 @@ export class AudioEngine {
   private drumBuffers: AudioBuffer[] = []
   private warmVoices: { osc: OscillatorNode; gain: GainNode; busy: boolean; pitch: number; age: number }[] = []
   lastOnsetFrame = -1
-  private oneShots: { pitch: number; stop: () => void }[] = []
+  private oneShots: { pitch: number; when: number; stop: () => void }[] = []
 
   private project: Project | null = null
   private assetOf: (id: string) => AudioAsset | undefined = () => undefined
@@ -106,6 +108,7 @@ export class AudioEngine {
   private cueReturnSrc: MediaStreamAudioSourceNode | null = null
   private meterScratch = new Float32Array(256)
   private readonly rackHost = new RackHost()
+  private readonly libraryHost = new LibraryHost()
   private readonly patchHost = new PatchHost()
   private patchRateCache = new Map<string, Float32Array>()
   private readonly rack = new LiveRack()
@@ -124,6 +127,9 @@ export class AudioEngine {
   private sources: Stoppable[] = []
   private warpPcm = new Map<string, Float32Array[]>()
   private scheduler = 0
+  /** Beat repeat is armed, so the look-ahead pump stays up while transport is stopped. */
+  private repeatWatch = false
+  private beatPump: ((now: number, horizon: number) => void) | null = null
   private raf = 0
   private playing = false
   private playOriginCtx = 0
@@ -180,6 +186,10 @@ export class AudioEngine {
 
   get tempo() {
     return this.project?.tempo || 120
+  }
+
+  get transportPlaying() {
+    return this.playing
   }
 
   get sampleRate() {
@@ -415,6 +425,7 @@ export class AudioEngine {
       }
     }
     this.rackHost.sync(this.ctx, project, this.strips, buffers)
+    this.libraryHost.sync(this.ctx, project, this.strips, assetOf)
     this.patchHost.sync(this.ctx, project.tracks, this.strips, (id) => {
       const asset = this.assetOf(id)
       const channel = asset?.channels[0]
@@ -427,13 +438,34 @@ export class AudioEngine {
     this.unlock()
     if (this.project) this.sync(this.project, this.assetOf)
     const when = (this.ctx?.currentTime ?? 0) + (hold ? 0 : 0.03)
+    const track = this.project?.tracks.find((item) => item.id === trackId)
+    if (track?.instrument === 'library') {
+      if (track.library) {
+        this.libraryHost.note(trackId, pitch, 0.9, when)
+        if (!hold) this.libraryHost.note(trackId, pitch, 0, when + 0.35)
+      }
+      return
+    }
     this.rackHost.note(trackId, pitch, 0.9, when, slide)
     if (!hold) this.rackHost.note(trackId, pitch, 0, when + 0.35)
   }
 
   releaseRack(trackId: string, pitch: number) {
     const when = this.ctx?.currentTime ?? 0
+    const track = this.project?.tracks.find((item) => item.id === trackId)
+    if (track?.instrument === 'library') {
+      this.libraryHost.note(trackId, pitch, 0, when)
+      return
+    }
     this.rackHost.note(trackId, pitch, 0, when)
+  }
+
+  holdLibraryPack(trackId: string, pack: SamplePack) {
+    this.libraryHost.holdPack(trackId, pack)
+  }
+
+  holdLibraryAudio(trackId: string, samples: { id: string; sampleRate: number; channels: Float32Array[] }[]) {
+    this.libraryHost.holdAudio(trackId, samples)
   }
 
   /** Audition a layered patch. `down` starts the note; a lift releases it. */
@@ -828,7 +860,7 @@ export class AudioEngine {
     this.arrangementScheduled = false
     this.sessionStarted.clear()
     this.nextLoopCtx = null
-    if (this.scheduler) {
+    if (this.scheduler && !this.repeatWatch) {
       window.clearInterval(this.scheduler)
       this.scheduler = 0
     }
@@ -1183,7 +1215,30 @@ export class AudioEngine {
         const buffer = this.bufferFromAsset(offline, asset)
         this.scheduleAudioClip(offline, strip, buffer, clip, 0, 0, end)
       }
-      if (track.rack) {
+      if (track.instrument === 'library' && track.library) {
+        const events = []
+        for (const clip of track.midiClips) {
+          if (clip.slotOnly || clip.scene != null) continue
+          for (const note of clip.notes) {
+            const audible = playedNote(project, note, clip.startBeat + note.startBeat)
+            if (!audible) continue
+            const start = beatsToSamples(clip.startBeat + audible.startBeat, rate, project.tempo)
+            const dur = beatsToSamples(audible.durationBeats, rate, project.tempo)
+            if (start >= end) continue
+            events.push({ sample: Math.max(0, start), pitch: audible.pitch, vel: audible.velocity, slide: !!audible.slide })
+            events.push({ sample: Math.min(end - 1, start + dur), pitch: audible.pitch, vel: 0 })
+          }
+        }
+        await this.libraryHost.prepare(track.id, track, events, rate)
+        const rendered = this.libraryHost.renderOffline(track.id, track, events, rate, end)
+        const buffer = offline.createBuffer(2, end, rate)
+        buffer.getChannelData(0).set(rendered[0])
+        buffer.getChannelData(1).set(rendered[1])
+        const src = offline.createBufferSource()
+        src.buffer = buffer
+        src.connect(strip.input)
+        src.start(0)
+      } else if (track.rack) {
         const events = []
         for (const clip of track.midiClips) {
           if (clip.slotOnly || clip.scene != null) continue
@@ -1332,19 +1387,40 @@ export class AudioEngine {
       ? samplesPerBeatUnit(this.sampleRate, this.project.tempo, this.project.timeSignature)
       : this.sampleRate / 2
     this.nextMetroSample = Math.ceil(fromSample / beat - 1e-6) * beat
-    if (!this.scheduler) {
-      this.scheduler = window.setInterval(() => {
-        this.scheduleAhead()
-        if (this.playing && this.ctx) this.positionSamples = this.currentTimelineSample()
-        const now = performance.now()
-        if (now - this.lastUiEmit > 50) {
-          this.lastUiEmit = now
-          this.emit()
-        }
-      }, 25)
-    }
+    this.ensureScheduler()
     if (!this.raf) this.raf = requestAnimationFrame(() => this.tick())
     this.scheduleAhead()
+  }
+
+  /** The interval only wakes the scheduler. Notes are placed on the audio clock inside the horizon. */
+  private ensureScheduler() {
+    if (this.scheduler) return
+    this.scheduler = window.setInterval(() => {
+      this.scheduleAhead()
+      if (this.playing && this.ctx) this.positionSamples = this.currentTimelineSample()
+      const now = performance.now()
+      if (now - this.lastUiEmit > 50) {
+        this.lastUiEmit = now
+        this.emit()
+      }
+      if (!this.playing && !this.repeatWatch && this.scheduler) {
+        window.clearInterval(this.scheduler)
+        this.scheduler = 0
+      }
+    }, 25)
+  }
+
+  setBeatPump(pump: ((now: number, horizon: number) => void) | null) {
+    this.beatPump = pump
+  }
+
+  setRepeatWatch(active: boolean) {
+    this.repeatWatch = active
+    if (active) this.ensureScheduler()
+    else if (!this.playing && this.scheduler) {
+      window.clearInterval(this.scheduler)
+      this.scheduler = 0
+    }
   }
 
   private sampleAt(ctxTime: number) {
@@ -1389,8 +1465,11 @@ export class AudioEngine {
   }
 
   private scheduleAhead() {
-    if (!this.playing || !this.ctx || !this.project) return
-    const horizon = this.ctx.currentTime + 0.35
+    if (!this.ctx) return
+    const now = this.ctx.currentTime
+    const horizon = now + 0.35
+    if (this.beatPump) this.beatPump(now, horizon)
+    if (!this.playing || !this.project) return
     this.refreshClockAnchor()
     this.scheduleMetronome(horizon)
     if (this.mode === 'session') this.scheduleSession(horizon)
@@ -1965,7 +2044,7 @@ export class AudioEngine {
   }
 
   /** A chopped or recorded pad. The buffer is already decoded. */
-  playBuffer(samples: Float32Array, pitch: number, velocity: number, color?: PadColor) {
+  playBuffer(samples: Float32Array, pitch: number, velocity: number, color?: PadColor, when?: number) {
     if (!this.ctx) this.unlock()
     const ctx = this.ctx
     if (!ctx || !this.speakerGain || !samples.length) return
@@ -1983,15 +2062,16 @@ export class AudioEngine {
     filter.connect(gain)
     gain.connect(this.speakerGain)
     const decay = color?.decay == null ? 1 : Math.max(0.05, color.decay)
+    const startAt = when ?? ctx.currentTime
     const stop = () => {
       try { src.stop() } catch { /* already stopped */ }
     }
-    this.oneShots.push({ pitch, stop })
+    this.oneShots.push({ pitch, when: startAt, stop })
     src.onended = () => {
       this.oneShots = this.oneShots.filter((shot) => shot.stop !== stop)
     }
-    src.start()
-    src.stop(ctx.currentTime + buffer.duration * decay + 0.02)
+    src.start(startAt)
+    src.stop(startAt + buffer.duration * decay + 0.02)
   }
 
   liveGain(pitch: number, velocity: number) {
@@ -1999,7 +2079,7 @@ export class AudioEngine {
     this.keysNode.port.postMessage({ type: 'gain', pitch, velocity: Math.max(0.05, Math.min(1, velocity)) })
   }
 
-  private playResident(index: number, velocity: number, color?: PadColor) {
+  private playResident(index: number, velocity: number, color?: PadColor, when?: number) {
     const ctx = this.ctx
     const buffer = this.drumBuffers[index]
     if (!ctx || !buffer || !this.speakerGain) return
@@ -2011,8 +2091,16 @@ export class AudioEngine {
     src.connect(gain)
     gain.connect(this.speakerGain)
     const decay = color?.decay == null ? 1 : Math.max(0.05, color.decay)
-    src.start()
-    src.stop(ctx.currentTime + buffer.duration * decay + 0.02)
+    const startAt = when ?? ctx.currentTime
+    const stop = () => {
+      try { src.stop() } catch { /* already stopped */ }
+    }
+    this.oneShots.push({ pitch: this.drumTable[index]?.pitch ?? -1, when: startAt, stop })
+    src.onended = () => {
+      this.oneShots = this.oneShots.filter((shot) => shot.stop !== stop)
+    }
+    src.start(startAt)
+    src.stop(startAt + buffer.duration * decay + 0.02)
   }
 
   liveNoteOn(pitch: number, velocity: number, drumIndex = -1, repeatEverySamples = 0, color?: PadColor) {
@@ -2038,6 +2126,52 @@ export class AudioEngine {
       return
     }
     this.warmNote(pitch, level)
+  }
+
+  /** Grid-locked retrigger. `when` is an AudioContext time, not the moment this method runs. */
+  schedulePadHit(when: number, pitch: number, velocity: number, color?: PadColor) {
+    if (!this.ctx) this.unlock()
+    const ctx = this.ctx
+    if (!ctx) return
+    const level = Math.max(0.05, Math.min(1, velocity))
+    if (!this.drumTable.length) this.drumTable = residentDrums(ctx.sampleRate)
+    const index = this.drumTable.findIndex((drum) => drum.pitch === pitch)
+    if (this.keysNode) {
+      this.keysNode.port.postMessage({
+        type: 'hit',
+        atFrame: Math.round(when * ctx.sampleRate),
+        pitch,
+        velocity: level,
+        drum: index,
+        rate: color?.tune ? 2 ** (color.tune / 12) : 1,
+        decay: color?.decay,
+        attack: color?.attack,
+        filter: color?.filter,
+      })
+      return
+    }
+    if (index >= 0 && this.drumBuffers[index]) this.playResident(index, level, color, when)
+    else this.warmNote(pitch, level, when)
+  }
+
+  cancelPadHits(pitch: number, afterTime: number) {
+    const ctx = this.ctx
+    if (!ctx) return
+    this.keysNode?.port.postMessage({ type: 'cancel', pitch, afterFrame: Math.round(afterTime * ctx.sampleRate) })
+    for (const shot of this.oneShots) {
+      if (shot.pitch === pitch && shot.when >= afterTime - 1e-4) shot.stop()
+    }
+    this.oneShots = this.oneShots.filter((shot) => !(shot.pitch === pitch && shot.when >= afterTime - 1e-4))
+  }
+
+  /** Silence the current hit. Later grid hits for that pad stay queued. */
+  duckPad(pitch: number) {
+    const now = this.ctx?.currentTime ?? 0
+    this.keysNode?.port.postMessage({ type: 'duck', pitch })
+    for (const shot of this.oneShots) {
+      if (shot.pitch === pitch && shot.when <= now + 0.005) shot.stop()
+    }
+    this.oneShots = this.oneShots.filter((shot) => !(shot.pitch === pitch && shot.when <= now + 0.005))
   }
 
   liveNoteOff(pitch: number) {
@@ -2085,7 +2219,7 @@ export class AudioEngine {
     }
   }
 
-  private warmNote(pitch: number, velocity: number) {
+  private warmNote(pitch: number, velocity: number, when?: number) {
     for (const voice of this.warmVoices) if (voice.busy) voice.age += 1
     const same = this.warmVoices.find((item) => item.busy && item.pitch === pitch)
     const free = this.warmVoices.find((item) => !item.busy)
@@ -2095,9 +2229,10 @@ export class AudioEngine {
     voice.busy = true
     voice.pitch = pitch
     voice.age = 0
-    voice.osc.frequency.setValueAtTime(440 * 2 ** ((pitch - 69) / 12), this.ctx.currentTime)
-    voice.gain.gain.cancelScheduledValues(this.ctx.currentTime)
-    voice.gain.gain.setValueAtTime(Math.max(0.001, velocity * 0.2), this.ctx.currentTime)
+    const at = when ?? this.ctx.currentTime
+    voice.osc.frequency.setValueAtTime(440 * 2 ** ((pitch - 69) / 12), at)
+    voice.gain.gain.cancelScheduledValues(at)
+    voice.gain.gain.setValueAtTime(Math.max(0.001, velocity * 0.2), at)
   }
 
   private attachKeys() {
@@ -2285,6 +2420,14 @@ export class AudioEngine {
 
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[]) {
     if (note.muted) return
+    if (track?.instrument === 'library' && ctx === this.ctx) {
+      if (track.library) {
+        const at = Math.max(when, ctx.currentTime)
+        this.libraryHost.note(track.id, note.pitch, note.velocity, at)
+        this.libraryHost.note(track.id, note.pitch, 0, at + dur)
+      }
+      return
+    }
     if (track?.omniPatch?.enabled) {
       if (ctx === this.ctx) {
         const at = Math.max(when, ctx.currentTime)
@@ -2377,6 +2520,7 @@ export class AudioEngine {
     }
     this.sources = []
     this.rackHost.allOff()
+    this.libraryHost.allOff()
     this.patchHost.allOff()
     this.sessionNodes.clear()
     this.sessionStarted.clear()

@@ -37,6 +37,8 @@ import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
 import { VideoDock } from './ui/VideoDock'
+import { MENU_COPY, VIEW_COPY, copyOf, described } from './ui/chrome'
+import { HintBubble, MenuRow } from './ui/Hint'
 import { formatBytes } from './ui/share'
 
 interface Bundle {
@@ -130,9 +132,14 @@ export function App() {
     session.bindArrangement(store)
     session.setTakeHandler((take) => placeTake(store, engine, take))
     session.setArrangementHandler((project, assets, ready) => {
-      store.remoteFollow = true
-      store.loadProject(project, assets)
-      engine.sync(project, (id) => assets.get(id) || store.buffers.get(id))
+      if (session.state.role === 'guest') store.remoteFollow = true
+      if (session.usingOps) {
+        for (const [id, asset] of assets) store.buffers.set(id, asset)
+        engine.sync(store.project, (id) => assets.get(id) || store.buffers.get(id))
+      } else {
+        store.loadProject(project, assets)
+        engine.sync(project, (id) => assets.get(id) || store.buffers.get(id))
+      }
       if (ready && pendingFollow.current && engine.status === 'stopped') void followPlay(pendingFollow.current)
     })
     session.setControlHandler((cmd) => {
@@ -224,9 +231,9 @@ export function App() {
       engine.setLaunches(store.launched)
       engine.setLaunchAt(store.launchAt)
       engine.setLaunchGen(store.launchGen)
-      if (session.state.role === 'host') {
+      if (session.state.status === 'live') {
         window.clearTimeout(publishTimer.current)
-        publishTimer.current = window.setTimeout(() => session.publishArrangement(), 40)
+        publishTimer.current = window.setTimeout(() => session.publishEdits(), 40)
       }
       const key = `${store.transportMode}:${JSON.stringify(store.launched)}:${JSON.stringify(store.launchAt)}:${JSON.stringify(store.launchGen)}`
       const pending = store.takePendingTransport()
@@ -1128,44 +1135,56 @@ async function importDropped(files: FileList) {
         </div>
         <input className="project-name" aria-label="Project name" value={store.project.name} onChange={(event) => store.renameProject(event.target.value)} />
         <div className="views">
-          {(['arrange', 'mix', 'beats'] as const).map((view) => (
-            <button
-              key={view}
-              type="button"
-              className={surface === 'studio' && phonePane !== 'room' && store.view === view ? 'active' : ''}
-              onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView(view); setMenuOpen(false) }}
-            >
-              {view === 'arrange' ? 'Arrange' : view === 'mix' ? 'Mix' : 'Beats'}
-            </button>
-          ))}
+          {(['arrange', 'mix', 'beats'] as const).map((view) => {
+            const copy = copyOf(VIEW_COPY, view)
+            return (
+              <button
+                key={view}
+                type="button"
+                className={surface === 'studio' && phonePane !== 'room' && store.view === view ? 'active' : ''}
+                {...described(copy)}
+                onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView(view); setMenuOpen(false) }}
+              >
+                {copy.label}
+              </button>
+            )
+          })}
           <button
             type="button"
             className={surface === 'studio' && phonePane === 'room' ? 'active' : ''}
+            {...described(copyOf(VIEW_COPY, 'session'))}
             onClick={() => { setPianoOpen(false); setPhonePane('room'); setSurface('studio'); setMenuOpen(false) }}
           >
             Session
           </button>
         </div>
-        <button type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu" aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
+        <button type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Save, export, clips, and setup." title="Save, export, clips, and setup." aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
           <MenuIcon />
         </button>
         {menuOpen && (
           <div className="shell-menu" id="shell-menu">
-            <button type="button" id="menu-save" onClick={() => { setMenuOpen(false); void openProjects() }}>Save</button>
-            <button type="button" id="menu-export" onClick={() => { setMenuOpen(false); setExportOpen(true) }}>Export</button>
-            <button type="button" className="split" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }}>Clips</button>
-            <button type="button" onClick={() => { setMenuOpen(false); openPerform('keys') }}>Keys</button>
-            <button type="button" onClick={() => { setMenuOpen(false); openPerform('drums') }}>Pads</button>
-            <button type="button" disabled={!pianoTrack} onClick={() => { if (!pianoTrack) return; setMenuOpen(false); openPiano(pianoTrack.id) }}>Piano</button>
-            <button type="button" className="split" onClick={() => { setMenuOpen(false); store.quickQuantize() }}>Quantize</button>
-            <button type="button" onClick={() => { setMenuOpen(false); store.openQuantize() }}>Quantize…</button>
-            <button type="button" className="split" aria-pressed={store.project.metronomeEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('metronomeEnabled')}>Click</button>
-            <button type="button" aria-pressed={store.project.countIn} disabled={store.remoteFollow} onClick={() => store.toggle('countIn')}>Count-in</button>
-            <button type="button" aria-pressed={store.project.snap} disabled={store.remoteFollow} onClick={() => store.toggle('snap')}>Snap</button>
+            <MenuRow id="menu-save" label={copyOf(MENU_COPY, 'save').label} hint={copyOf(MENU_COPY, 'save').hint} onClick={() => { setMenuOpen(false); void openProjects() }} />
+            <MenuRow label={copyOf(MENU_COPY, 'export').label} hint={copyOf(MENU_COPY, 'export').hint} onClick={() => { setMenuOpen(false); setExportOpen(true) }} />
+            <MenuRow className="split" label={copyOf(MENU_COPY, 'clips').label} hint={copyOf(MENU_COPY, 'clips').hint} onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }} />
+            <MenuRow label={copyOf(MENU_COPY, 'keys').label} hint={copyOf(MENU_COPY, 'keys').hint} onClick={() => { setMenuOpen(false); openPerform('keys') }} />
+            <MenuRow label={copyOf(MENU_COPY, 'pads').label} hint={copyOf(MENU_COPY, 'pads').hint} onClick={() => { setMenuOpen(false); openPerform('drums') }} />
+            <MenuRow label={copyOf(MENU_COPY, 'piano').label} hint={copyOf(MENU_COPY, 'piano').hint} disabled={!pianoTrack} onClick={() => { if (!pianoTrack) return; setMenuOpen(false); openPiano(pianoTrack.id) }} />
+            <MenuRow className="split" label={copyOf(MENU_COPY, 'quantize').label} hint={copyOf(MENU_COPY, 'quantize').hint} onClick={() => { setMenuOpen(false); store.quickQuantize() }} />
+            <MenuRow label={copyOf(MENU_COPY, 'quantize-more').label} hint={copyOf(MENU_COPY, 'quantize-more').hint} onClick={() => { setMenuOpen(false); store.openQuantize() }} />
+            <MenuRow className="split" label={copyOf(MENU_COPY, 'click').label} hint={copyOf(MENU_COPY, 'click').hint} pressed={store.project.metronomeEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('metronomeEnabled')} />
+            <MenuRow label={copyOf(MENU_COPY, 'count-in').label} hint={copyOf(MENU_COPY, 'count-in').hint} pressed={store.project.countIn} disabled={store.remoteFollow} onClick={() => store.toggle('countIn')} />
+            <MenuRow label={copyOf(MENU_COPY, 'snap').label} hint={copyOf(MENU_COPY, 'snap').hint} pressed={store.project.snap} disabled={store.remoteFollow} onClick={() => store.toggle('snap')} />
+            {phone && (
+              <>
+                <MenuRow label={copyOf(MENU_COPY, 'to-start').label} hint={copyOf(MENU_COPY, 'to-start').hint} onClick={() => { setMenuOpen(false); void locate(0) }} />
+                <MenuRow label={copyOf(MENU_COPY, 'loop').label} hint={copyOf(MENU_COPY, 'loop').hint} pressed={store.project.loopEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('loopEnabled')} />
+              </>
+            )}
             <label className="menu-sig">
               Sig
               <select
-                aria-label="Time signature"
+                aria-label="Time signature. Beats in each bar."
+                title="Beats in each bar."
                 value={`${store.project.timeSignature.numerator}/${store.project.timeSignature.denominator}`}
                 disabled={store.remoteFollow}
                 onChange={(event) => {
@@ -1176,9 +1195,10 @@ async function importDropped(files: FileList) {
                 {['4/4', '3/4', '6/8', '5/4', '7/8'].map((sig) => <option key={sig}>{sig}</option>)}
               </select>
             </label>
-            <button
-              type="button"
+            <MenuRow
               className="split"
+              label={store.transportMode === 'session' ? copyOf(MENU_COPY, 'arrangement').label : copyOf(MENU_COPY, 'session-view').label}
+              hint={store.transportMode === 'session' ? copyOf(MENU_COPY, 'arrangement').hint : copyOf(MENU_COPY, 'session-view').hint}
               disabled={store.remoteFollow}
               onClick={() => {
                 setMenuOpen(false)
@@ -1187,13 +1207,12 @@ async function importDropped(files: FileList) {
                 if (store.transportMode === 'session') store.backToArrangement()
                 else store.enterSession()
               }}
-            >
-              {store.transportMode === 'session' ? 'Arrangement' : 'Session view'}
-            </button>
-            <button type="button" disabled={store.remoteFollow} onClick={() => { setMenuOpen(false); store.captureToArrangement() }}>Capture</button>
-            <button
-              type="button"
+            />
+            <MenuRow label={copyOf(MENU_COPY, 'capture').label} hint={copyOf(MENU_COPY, 'capture').hint} disabled={store.remoteFollow} onClick={() => { setMenuOpen(false); store.captureToArrangement() }} />
+            <MenuRow
               className="split"
+              label={surface === 'studio' ? copyOf(MENU_COPY, 'artist').label : copyOf(MENU_COPY, 'studio').label}
+              hint={surface === 'studio' ? copyOf(MENU_COPY, 'artist').hint : copyOf(MENU_COPY, 'studio').hint}
               onClick={() => {
                 setMenuOpen(false)
                 if (surface === 'studio') {
@@ -1201,15 +1220,15 @@ async function importDropped(files: FileList) {
                   setPhonePane('room')
                 } else setSurface('studio')
               }}
-            >
-              {surface === 'studio' ? 'Artist' : 'Studio'}
-            </button>
+            />
             {!phone && (
-              <button type="button" aria-label={dockEdge === 'right' ? 'Dock bottom' : 'Dock right'} onClick={() => setDockEdge(dockEdge === 'right' ? 'bottom' : 'right')}>
-                {dockEdge === 'right' ? 'Bottom' : 'Side'}
-              </button>
+              <MenuRow
+                label={dockEdge === 'right' ? copyOf(MENU_COPY, 'dock-bottom').label : copyOf(MENU_COPY, 'dock-side').label}
+                hint={dockEdge === 'right' ? copyOf(MENU_COPY, 'dock-bottom').hint : copyOf(MENU_COPY, 'dock-side').hint}
+                onClick={() => setDockEdge(dockEdge === 'right' ? 'bottom' : 'right')}
+              />
             )}
-            <button type="button" onClick={() => { setMenuOpen(false); setHelp(true) }}>Shortcuts</button>
+            <MenuRow label={copyOf(MENU_COPY, 'shortcuts').label} hint={copyOf(MENU_COPY, 'shortcuts').hint} onClick={() => { setMenuOpen(false); setHelp(true) }} />
           </div>
         )}
       </header>
@@ -1218,21 +1237,22 @@ async function importDropped(files: FileList) {
           store={store}
           engine={engine}
           syncLabel={session.state.syncLabel}
+          simple={phone}
           onPlay={() => void play()}
           onStop={() => void stop()}
           onRecord={() => void record()}
           onSeek={(sample) => void locate(sample)}
         />
       )}
-      {surface === 'studio' && (
+      {surface === 'studio' && phonePane !== 'room' && store.view !== 'mix' && (store.view === 'arrange' || panel === 'piano') && (
         <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
-          {store.view === 'arrange' && (
-            <ToolBar
-              onChange={(tool) => store.setTool(tool)}
-              onDuplicate={() => store.duplicateSelection()}
-              onDelete={() => store.deleteSelectedClip()}
-            />
-          )}
+          <ToolBar
+            context={panel === 'piano' ? 'piano' : 'arrange'}
+            compact={form !== 'desk'}
+            onChange={(tool) => store.setTool(tool)}
+            onDuplicate={() => store.duplicateSelection()}
+            onDelete={() => store.deleteSelectedClip()}
+          />
         </div>
       )}
       <div className={`workspace ${!phone && dockEdge === 'bottom' && surface === 'studio' ? 'dock-bottom' : ''}`}>
@@ -1438,6 +1458,7 @@ async function importDropped(files: FileList) {
                 ['⌘/Ctrl E or B', 'Split the clip at the playhead'],
                 ['Delete', 'Remove the selected clip'],
                 ['+ or −', 'Zoom the timeline'],
+                ['1–7', 'Choose an edit tool'],
                 ['?', 'Show or hide this list'],
               ].map(([key, action]) => (
                 <p key={key}>
@@ -1451,6 +1472,7 @@ async function importDropped(files: FileList) {
         </div>
       )}
       {knockOpen && <KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} />}
+      <HintBubble />
       <div className="toasts">
         {store.toasts.map((toast) => (
           <div key={toast.id} className={`toast ${toast.tone || ''}`}>
