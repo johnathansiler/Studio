@@ -46,6 +46,9 @@ import {
 } from '../model/launch'
 import type { RollTool } from '../model/paint'
 import { defaultRoll } from '../model/paint'
+import type { GeneratedPart } from '../generators/types'
+import { normalizeGenerator } from '../generators/settings'
+import { buildSession, normalizePlayer, type PlayerSettings, type SessionDetection, type SessionPart } from '../players'
 import { progressionById, romanLine, starterParts } from '../model/progressions'
 import { applySuggestion, type Suggestion } from '../unstuck'
 import {
@@ -105,6 +108,21 @@ interface QuantizeResult {
   notes: { trackId: string; clipId: string; notes: MidiNote[] }[]
   channels: { id: string; cells: StepCell[] }[]
   audio: { trackId: string; clipId: string; clip: AudioClip }[]
+}
+
+function samePlayer(name: string, role: SessionPart['role']) {
+  if (role === 'drums') return name === 'Drummer' || name.endsWith(' drummer')
+  if (role === 'bass') return name.endsWith('bass player')
+  return name.endsWith('keys player')
+}
+
+const GENERATED_COLOR: Record<GeneratedPart['kind'], string> = {
+  chords: '#e0b15a',
+  bass: '#79b8d4',
+  melody: '#73c48f',
+  arp: '#f09a6a',
+  rhythm: '#ef6b6b',
+  drums: '#c58be0',
 }
 
 export class ProjectStore {
@@ -1953,6 +1971,147 @@ export class ProjectStore {
     })
   }
 
+  generatorState() {
+    return normalizeGenerator(this.project.generator)
+  }
+
+  playerState() {
+    return normalizePlayer(this.project.players)
+  }
+
+  setPlayers(patch: Partial<PlayerSettings>, draft = false) {
+    const apply = () => {
+      this.project.players = normalizePlayer({ ...this.playerState(), ...patch })
+    }
+    if (draft) this.draft(apply)
+    else this.mutate(apply)
+  }
+
+  /** Write the drummer and session players as editable MIDI. One undo step. */
+  writeSession(found?: SessionDetection, seed?: number) {
+    if (this.remoteFollow) return
+    const settings = normalizePlayer({ ...this.playerState(), ...(seed == null ? {} : { seed }) })
+    const built = buildSession(this.project, settings, found)
+    if (!built.parts.length) {
+      this.toast('Pick drums, bass, or keys.', 'warn')
+      return
+    }
+    this.mutate(() => {
+      this.project.players = settings
+      let selected: { trackId: string; clipId: string; noteIds: string[] } | null = null
+      for (const part of built.parts) {
+        const placed = this.placePlayer(part)
+        if (part.role === 'drums' || !selected) selected = placed
+      }
+      if (selected) {
+        this.selectedTrackId = selected.trackId
+        this.selectedMidiClipId = selected.clipId
+        this.selectedMidiClipIds = [selected.clipId]
+        this.selectedNoteIds = selected.noteIds
+        this.selectedNoteId = selected.noteIds.at(-1) ?? null
+      }
+      this.toast(built.summary)
+    })
+  }
+
+  setGenerator(patch: Partial<import('../generators/types').GeneratorSettings>, draft = false) {
+    const apply = () => {
+      this.project.generator = normalizeGenerator({ ...this.generatorState(), ...patch })
+    }
+    if (draft) this.draft(apply)
+    else this.mutate(apply)
+  }
+
+  /** Remember a heard progression without an undo step, so the next part can follow it. */
+  rememberChords(chords: import('../generators/types').GeneratorChord[]) {
+    const current = this.generatorState()
+    if (JSON.stringify(current.chords) === JSON.stringify(chords)) return
+    this.project.generator = { ...current, chords }
+    this.emit()
+  }
+
+  /** Drop generated MIDI on the part's track, or on a fresh one. Notes stay editable. */
+  insertGenerated(part: GeneratedPart, where: 'part' | 'new' = 'part') {
+    this.mutate(() => {
+      const color = GENERATED_COLOR[part.kind]
+      let track
+      if (where === 'new') {
+        track = makeTrack({
+          name: this.freshName(part.trackName),
+          type: 'midi',
+          color,
+          input: 'none',
+          instrument: part.instrument,
+        })
+        this.project.tracks.push(track)
+      } else {
+        track = this.ensureMidi(part.trackName, color)
+        if (part.instrument === 'drum-machine' && (!track.instrument || track.instrument === 'none')) track.instrument = 'drum-machine'
+        if (part.instrument === '808' && (!track.instrument || track.instrument === 'none')) track.instrument = '808'
+      }
+      const span = Math.max(1, part.bars * quartersPerBar(this.project.timeSignature))
+      const end = part.notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), span)
+      const last = track.midiClips.reduce((max, clip) => Math.max(max, clip.startBeat + clip.durationBeats), 0)
+      const clip: MidiClip = {
+        id: uid('midi'),
+        name: part.name,
+        startBeat: track.midiClips.length ? last : 0,
+        durationBeats: Math.max(span, Math.ceil(end * 4) / 4),
+        notes: part.notes.map((note) => ({
+          id: uid('note'),
+          pitch: note.pitch,
+          startBeat: note.startBeat,
+          durationBeats: note.durationBeats,
+          velocity: note.velocity,
+          ...(note.fine ? { fine: note.fine } : {}),
+          ...(note.slide ? { slide: true } : {}),
+        })),
+      }
+      track.midiClips.push(clip)
+      this.selectedTrackId = track.id
+      this.selectedMidiClipId = clip.id
+      this.selectedMidiClipIds = [clip.id]
+      this.selectedNoteIds = clip.notes.map((note) => note.id)
+      this.selectedNoteId = clip.notes.at(-1)?.id ?? null
+      if (part.kind === 'chords') this.project.generator = { ...this.generatorState(), chords: part.chords }
+      this.toast(`Added ${part.name}`)
+    })
+  }
+
+  private placePlayer(part: SessionPart) {
+    const track = this.ensureMidi(part.trackName, part.color)
+    if (part.instrument === 'drum-machine') track.instrument = 'drum-machine'
+    else if (part.instrument === '808' && (!track.instrument || track.instrument === 'none' || track.instrument === 'synth')) track.instrument = '808'
+    else if (!track.instrument || track.instrument === 'none') track.instrument = part.instrument
+    track.midiClips = track.midiClips.filter((clip) => !samePlayer(clip.name, part.role))
+    const end = part.notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), part.durationBeats)
+    const notes: MidiNote[] = part.notes.map((note) => ({
+      id: uid('note'),
+      pitch: note.pitch,
+      startBeat: note.startBeat,
+      durationBeats: note.durationBeats,
+      velocity: note.velocity,
+      ...(note.fine ? { fine: note.fine } : {}),
+      ...(note.slide ? { slide: true } : {}),
+    }))
+    const clip: MidiClip = {
+      id: uid('midi'),
+      name: part.clipName,
+      startBeat: part.startBeat,
+      durationBeats: Math.max(part.durationBeats, end),
+      notes,
+    }
+    track.midiClips.push(clip)
+    return { trackId: track.id, clipId: clip.id, noteIds: notes.map((note) => note.id) }
+  }
+
+  private freshName(base: string) {
+    if (!this.project.tracks.some((track) => track.name === base)) return base
+    let index = 2
+    while (this.project.tracks.some((track) => track.name === `${base} ${index}`)) index += 1
+    return `${base} ${index}`
+  }
+
   private ensureMidi(name: string, color: string) {
     const existing = this.project.tracks.find((track) => track.type === 'midi' && track.name === name)
     if (existing) return existing
@@ -3175,6 +3334,69 @@ export class ProjectStore {
         source: 'local',
       }
     })
+  }
+
+  /** Replace the host's live guide for this take with the guest's aligned recording. */
+  acceptAlignedTake(take: {
+    peerId: string
+    peerName: string
+    takeId: string
+    placeAtSample: number
+    sampleRate: number
+    channels: Float32Array[]
+    compensationMs: number
+    detail: string
+    silent?: boolean
+  }) {
+    const parked: { trackId: string; scene: number }[] = []
+    for (const track of this.project.tracks) {
+      track.audioSlots?.forEach((id, scene) => {
+        if (!id) return
+        const clip = track.clips.find((item) => item.id === id)
+        if (clip && clip.source === 'guide' && clip.takeId === take.takeId) parked.push({ trackId: track.id, scene })
+      })
+    }
+    this.removeClips((clip) => clip.source === 'guide' && clip.takeId === take.takeId)
+    this.dropGuideLanes(take.takeId)
+    let track = this.project.tracks.find((item) => item.input === `remote:${take.peerId}`)
+    if (!track) {
+      this.ensureRemoteTrack(take.peerId, take.peerName)
+      track = this.project.tracks.find((item) => item.input === `remote:${take.peerId}`)
+    }
+    if (!track || !take.channels[0]?.length) return
+    const bufferId = uid('buf')
+    this.addAsset({
+      id: bufferId,
+      name: `${take.peerName} take`,
+      sampleRate: take.sampleRate,
+      channels: take.channels,
+    })
+    this.addTakeLane(track.id, {
+      id: uid('lane'),
+      name: `${take.peerName} aligned`,
+      bufferId,
+      offsetSamples: 0,
+      startSample: Math.max(0, Math.round(take.placeAtSample)),
+      durationSamples: take.channels[0].length,
+      peerId: take.peerId,
+      takeId: take.takeId,
+      source: 'aligned-take',
+    })
+    const placed = this.selectedClipId
+    if (parked.length && placed) {
+      this.mutate(() => {
+        for (const slot of parked) {
+          const row = this.track(slot.trackId)
+          if (row?.audioSlots) row.audioSlots[slot.scene] = placed
+        }
+      })
+    }
+    this.toast(
+      take.silent
+        ? `${take.peerName} take arrived, but it is silent. Check their performance mic.`
+        : `${take.peerName} aligned −${take.compensationMs.toFixed(0)} ms. ${take.detail}`,
+      take.silent ? 'warn' : 'good',
+    )
   }
 
   dropGuideLanes(takeId: string) {

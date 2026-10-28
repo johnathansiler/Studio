@@ -1,3 +1,4 @@
+import { normalizePlayer } from '../players/settings'
 import { normalizeScale } from './scale'
 import { createEmptyProject, defaultRecord, type PluginInstance, type Project, type Track } from './types'
 
@@ -76,6 +77,7 @@ function signature(project: Project): string {
     record,
     scale: normalizeScale(project.scale),
     soundFavorites: project.soundFavorites ?? [],
+    players: normalizePlayer(project.players),
     tracks: project.tracks.map(trackSignature),
   })
 }

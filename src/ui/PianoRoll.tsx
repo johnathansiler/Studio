@@ -62,7 +62,7 @@ const LOW = 48
 const HIGH = 84
 const VEL_H = 36
 
-export function PianoRoll({ store, engine, onIdeas, onLibrary }: { store: ProjectStore; engine: AudioEngine; onIdeas?: () => void; onLibrary?: () => void }) {
+export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { store: ProjectStore; engine: AudioEngine; onIdeas?: () => void; onGenerate?: () => void; onLibrary?: () => void }) {
   const piano = selectPiano(store)
   const track = piano.track
   const clip = piano.clip
@@ -703,6 +703,7 @@ export function PianoRoll({ store, engine, onIdeas, onLibrary }: { store: Projec
     <div className={`piano ${compact ? 'compact' : ''}`} ref={pianoRef} data-tool={tool}>
       <div className="scale-bar">
         <TipButton className={`chords-btn ${open ? 'on' : ''}`} label={bar('chords').label} hint={bar('chords').hint} pressed={open} onClick={() => void toggleChords()} />
+        {!compact && onGenerate && <TipButton label={bar('generate').label} hint={bar('generate').hint} onClick={onGenerate} />}
         <select {...described(bar('key'))} value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
           {NOTE_NAMES.map((name, index) => (
             <option key={name} value={index}>{name}</option>
@@ -771,6 +772,7 @@ export function PianoRoll({ store, engine, onIdeas, onLibrary }: { store: Projec
           }} />
           {onLibrary && <SheetRow label={scale.library ? (findScale(scale.library)?.name ?? 'Scale') : 'Library'} hint="Browse scales, modes, and the chords they contain." onClick={() => { setNotesOpen(false); onLibrary() }} />}
           {onIdeas && <SheetRow label={sheet('ideas').label} hint={sheet('ideas').hint} onClick={() => { setNotesOpen(false); onIdeas() }} />}
+          {onGenerate && <SheetRow label={bar('generate').label} hint={bar('generate').hint} onClick={() => { setNotesOpen(false); onGenerate() }} />}
           {store.selectedNoteId && (
             <SheetRow
               label={sheet('slide').label}

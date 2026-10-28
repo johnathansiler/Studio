@@ -4,7 +4,7 @@ import type { StretchMode } from './stretch/engine'
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
 import { compPieces, recordOffsetSamples } from '../model/comp'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
-import { residentDrums, type ResidentDrum } from '../model/drums'
+import { DRUM_PADS, residentDrums, type ResidentDrum } from '../model/drums'
 import { calibrationTrim, contextTimeForEvent, monitoringOffset, type ClockStamp } from '../model/midiClock'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToBeats, samplesToMusical } from '../model/time'
@@ -80,6 +80,7 @@ export class AudioEngine {
   private warmVoices: { osc: OscillatorNode; gain: GainNode; busy: boolean; pitch: number; age: number }[] = []
   lastOnsetFrame = -1
   private oneShots: { pitch: number; when: number; stop: () => void }[] = []
+  private drumCache = new WeakMap<BaseAudioContext, AudioBuffer[]>()
 
   private project: Project | null = null
   private assetOf: (id: string) => AudioAsset | undefined = () => undefined
@@ -1270,7 +1271,7 @@ export class AudioEngine {
             const start = beatsToSamples(clip.startBeat + audible.startBeat, rate, project.tempo)
             const dur = beatsToSamples(audible.durationBeats, rate, project.tempo) / rate
             if (start >= end) continue
-            this.scheduleVoice(offline, strip, audible, start / rate, dur)
+            this.scheduleVoice(offline, strip, audible, start / rate, dur, track)
           }
         }
       }
@@ -1820,6 +1821,40 @@ export class AudioEngine {
     noise.connect(filter)
     this.envelope(ctx, strip, filter, when, Math.min(0.16, dur), hit, noise)
     this.envelope(ctx, strip, tone, when, 0.08, { ...hit, velocity: hit.velocity * 0.4 })
+  }
+
+  private cachedDrum(ctx: BaseAudioContext, pitch: number) {
+    let list = this.drumCache.get(ctx)
+    if (!list) {
+      const drums = residentDrums(ctx.sampleRate)
+      list = drums.map((drum) => {
+        const buffer = ctx.createBuffer(1, Math.max(1, drum.samples.length), ctx.sampleRate)
+        buffer.getChannelData(0).set(drum.samples)
+        return buffer
+      })
+      this.drumCache.set(ctx, list)
+    }
+    const index = DRUM_PADS.findIndex((pad) => pad.pitch === Math.round(pitch))
+    return index >= 0 ? list[index] : null
+  }
+
+  private playDrum(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, bucket?: Stoppable[]) {
+    const buffer = this.cachedDrum(ctx, note.pitch)
+    if (!buffer) return false
+    if (ctx === this.ctx && when < ctx.currentTime) return true
+    const src = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    src.buffer = buffer
+    gain.gain.setValueAtTime(Math.max(0.001, note.velocity * 0.9), when)
+    src.connect(gain)
+    gain.connect(strip.input)
+    src.start(when)
+    src.stop(when + buffer.duration)
+    if (ctx === this.ctx) {
+      this.sources.push(src)
+      bucket?.push(src)
+    }
+    return true
   }
 
   private noiseBuffer(ctx: BaseAudioContext) {
@@ -2386,7 +2421,7 @@ export class AudioEngine {
   }
 
   /** Speaker-only sequence. `at` and `dur` are seconds from now. Never enters the cue. */
-  previewSequence(events: { pitch: number; at: number; dur: number; velocity?: number; drum?: boolean }[]) {
+  previewSequence(events: { pitch: number; at: number; dur: number; velocity?: number; drum?: boolean; cents?: number }[]) {
     this.stopPreview()
     const ctx = this.ctx
     const out = this.speakerGain
@@ -2403,7 +2438,7 @@ export class AudioEngine {
       const dur = Math.max(0.05, Math.min(8, event.dur))
       const velocity = Math.max(0.05, Math.min(1, event.velocity ?? 0.7))
       if (event.drum) this.previewHit(ctx, bus, event.pitch, when, dur, velocity, stops)
-      else this.previewTone(ctx, bus, event.pitch, when, dur, velocity, stops)
+      else this.previewTone(ctx, bus, event.pitch, event.cents ?? 0, when, dur, velocity, stops)
     }
     this.previewStops = stops
   }
@@ -2451,11 +2486,11 @@ export class AudioEngine {
     src.start()
   }
 
-  private previewTone(ctx: AudioContext, bus: GainNode, pitch: number, when: number, dur: number, velocity: number, stops: Stoppable[]) {
+  private previewTone(ctx: AudioContext, bus: GainNode, pitch: number, cents: number, when: number, dur: number, velocity: number, stops: Stoppable[]) {
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
     osc.type = 'triangle'
-    osc.frequency.value = 440 * 2 ** ((Math.round(pitch) - 69) / 12)
+    osc.frequency.value = 440 * 2 ** ((Math.round(pitch) + cents / 100 - 69) / 12)
     gain.gain.setValueAtTime(0.0001, when)
     gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, 0.07 * velocity), when + 0.012)
     gain.gain.exponentialRampToValueAtTime(0.0001, when + dur)
@@ -2550,6 +2585,7 @@ export class AudioEngine {
 
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[]) {
     if (note.muted) return
+    if (track?.instrument === 'drum-machine' && this.playDrum(ctx, strip, note, when, bucket)) return
     if (track?.instrument === 'library' && ctx === this.ctx) {
       if (track.library) {
         const at = Math.max(when, ctx.currentTime)
