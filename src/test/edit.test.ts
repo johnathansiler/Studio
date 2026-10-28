@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
-import { activeTool, setActiveTool, subscribeTools } from '../state/tools'
+import { activeTool, overflowTools, phoneTools, setActiveTool, subscribeTools, toolCaption, toolInfo, toolsFor, TOOLS } from '../state/tools'
 
 afterEach(() => setActiveTool('select'))
 
@@ -62,5 +62,25 @@ describe('arrangement tool', () => {
     store.setTool('box')
     expect(activeTool()).toBe('box')
     expect(store.tool).toBe('box')
+  })
+
+  it('names every tool and keeps the phone set free of duplicates', () => {
+    for (const id of toolsFor('arrange')) {
+      const info = toolInfo(id, 'arrange')
+      expect(info.label.length).toBeGreaterThan(0)
+      expect(info.hint.length).toBeGreaterThan(0)
+      expect(info.cursor.length).toBeGreaterThan(0)
+      expect(toolCaption(id, 'arrange')).toBe(`${info.label} — ${info.hint}`)
+    }
+    expect(toolInfo('pencil', 'piano').hint).toBe('Draw a note')
+    expect(toolInfo('pencil', 'arrange').hint).toBe('Draw a new clip')
+    expect(toolInfo('trim', 'piano').cursor).toBe('default')
+    const phone = phoneTools('arrange')
+    const overflow = overflowTools('arrange')
+    expect(phone).toEqual(['select', 'pencil', 'split', 'erase'])
+    expect(new Set([...phone, ...overflow])).toEqual(new Set(toolsFor('arrange')))
+    expect(phone.filter((tool) => overflow.includes(tool))).toEqual([])
+    expect(overflowTools('piano')).not.toContain('trim')
+    expect(Object.keys(TOOLS)).toEqual(toolsFor('arrange'))
   })
 })

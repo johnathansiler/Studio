@@ -3,10 +3,11 @@ import type { AudioEngine } from '../audio/engine'
 import { stepIndexAt } from '../model/steps'
 import { samplesToBeats } from '../model/time'
 import type { ProjectStore } from '../state/store'
+import { HintButton, MoreItem, MoreMenu } from './hint'
 
 const COLORS = ['#73c48f', '#ef6b6b', '#79b8d4', '#e0b15a', '#c58be0', '#f09a6a']
 
-export function BeatView({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
+export function BeatView({ store, engine, compact = false }: { store: ProjectStore; engine: AudioEngine; compact?: boolean }) {
   const project = store.project
   const pattern = store.activePattern()
   const painting = useRef<{ channelId: string; on: boolean } | null>(null)
@@ -31,17 +32,34 @@ export function BeatView({ store, engine }: { store: ProjectStore; engine: Audio
           ))}
         </select>
         <input aria-label="Steps" type="number" min={1} max={64} value={pattern.steps} onChange={(event) => store.setPatternSteps(Number(event.target.value))} />
-        <input aria-label="Swing" type="range" min={0} max={0.6} step={0.01} value={pattern.swing} onChange={(event) => store.setPatternSwing(Number(event.target.value))} />
-        <button type="button" onClick={() => store.cloneActivePattern()}>Clone</button>
-        <button type="button" aria-label="Fill every 2" onClick={() => store.fillChannel(2)}>2</button>
-        <button type="button" aria-label="Fill every 4" onClick={() => store.fillChannel(4)}>4</button>
-        <button type="button" aria-label="Fill every 8" onClick={() => store.fillChannel(8)}>8</button>
-        <button type="button" onClick={() => store.randomizePattern()}>Rand</button>
-        <button type="button" onClick={() => store.humanizePattern()}>Human</button>
-        <button type="button" aria-label="Shift left" onClick={() => store.shiftPattern(-1)}>‹</button>
-        <button type="button" aria-label="Shift right" onClick={() => store.shiftPattern(1)}>›</button>
-        <button type="button" onClick={() => store.placePattern(Math.max(0, Math.floor(beat)))}>Place</button>
-        <button type="button" onClick={() => store.placePatternScene(0)}>Slot</button>
+        <input aria-label="Swing" title="Swing — delay the off-beats" type="range" min={0} max={0.6} step={0.01} value={pattern.swing} onChange={(event) => store.setPatternSwing(Number(event.target.value))} />
+        {compact ? (
+          <MoreMenu label="Pattern actions" hint="Fill, shift, and place this pattern" trigger="More">
+            <MoreItem label="Clone" hint="Copy this pattern" onClick={() => store.cloneActivePattern()} />
+            <MoreItem label="Fill every 2" hint="Turn on every second step" onClick={() => store.fillChannel(2)} />
+            <MoreItem label="Fill every 4" hint="Turn on every fourth step" onClick={() => store.fillChannel(4)} />
+            <MoreItem label="Fill every 8" hint="Turn on every eighth step" onClick={() => store.fillChannel(8)} />
+            <MoreItem label="Randomize" hint="Scatter hits on this pattern" onClick={() => store.randomizePattern()} />
+            <MoreItem label="Humanize" hint="Nudge timing and velocity" onClick={() => store.humanizePattern()} />
+            <MoreItem label="Shift left" hint="Move every hit one step earlier" onClick={() => store.shiftPattern(-1)} />
+            <MoreItem label="Shift right" hint="Move every hit one step later" onClick={() => store.shiftPattern(1)} />
+            <MoreItem label="Place" hint="Drop the pattern on the timeline" onClick={() => store.placePattern(Math.max(0, Math.floor(beat)))} />
+            <MoreItem label="Slot" hint="Put the pattern in the first scene" onClick={() => store.placePatternScene(0)} />
+          </MoreMenu>
+        ) : (
+          <>
+            <HintButton type="button" label="Clone" hint="Copy this pattern" onClick={() => store.cloneActivePattern()}>Clone</HintButton>
+            <HintButton type="button" label="Every 2" hint="Turn on every second step" onClick={() => store.fillChannel(2)}>2</HintButton>
+            <HintButton type="button" label="Every 4" hint="Turn on every fourth step" onClick={() => store.fillChannel(4)}>4</HintButton>
+            <HintButton type="button" label="Every 8" hint="Turn on every eighth step" onClick={() => store.fillChannel(8)}>8</HintButton>
+            <HintButton type="button" label="Random" hint="Scatter hits on this pattern" onClick={() => store.randomizePattern()}>Rand</HintButton>
+            <HintButton type="button" label="Human" hint="Nudge timing and velocity" onClick={() => store.humanizePattern()}>Human</HintButton>
+            <HintButton type="button" label="Shift left" hint="Move every hit one step earlier" onClick={() => store.shiftPattern(-1)}>‹</HintButton>
+            <HintButton type="button" label="Shift right" hint="Move every hit one step later" onClick={() => store.shiftPattern(1)}>›</HintButton>
+            <HintButton type="button" label="Place" hint="Drop the pattern on the timeline" onClick={() => store.placePattern(Math.max(0, Math.floor(beat)))}>Place</HintButton>
+            <HintButton type="button" label="Slot" hint="Put the pattern in the first scene" onClick={() => store.placePatternScene(0)}>Slot</HintButton>
+          </>
+        )}
         {picked && pickedCell && (
           <>
             <input aria-label="Velocity" type="number" min={0.05} max={1} step={0.05} value={pickedCell.velocity} onChange={(event) => store.editStep(picked.channelId, picked.index, { velocity: Number(event.target.value) })} />
@@ -58,9 +76,9 @@ export function BeatView({ store, engine }: { store: ProjectStore; engine: Audio
         const playStep = channel.mute ? -1 : stepIndexAt(beat, count, 0.25, channel.swing ?? pattern.swing)
         return (
           <div className="beat-row" key={channel.id}>
-            <button type="button" className="beat-name" style={{ color: channel.color }} onClick={() => store.openChannelRoll(channel.id)}>{channel.name}</button>
-            <button type="button" className={`mini ${channel.mute ? 'on' : ''}`} onClick={() => store.setChannel(channel.id, { mute: !channel.mute })}>M</button>
-            <button type="button" className={`mini ${channel.solo ? 'on' : ''}`} onClick={() => store.setChannel(channel.id, { solo: !channel.solo })}>S</button>
+            <HintButton type="button" className="beat-name" label={channel.name} hint="Open this row in the piano roll" style={{ color: channel.color }} onClick={() => store.openChannelRoll(channel.id)}>{channel.name}</HintButton>
+            <HintButton type="button" className={`mini ${channel.mute ? 'on' : ''}`} label="Mute" hint={`Silence ${channel.name}`} aria-pressed={channel.mute} onClick={() => store.setChannel(channel.id, { mute: !channel.mute })}>M</HintButton>
+            <HintButton type="button" className={`mini ${channel.solo ? 'on' : ''}`} label="Solo" hint={`Hear only ${channel.name}`} aria-pressed={channel.solo} onClick={() => store.setChannel(channel.id, { solo: !channel.solo })}>S</HintButton>
             <input aria-label={`${channel.name} volume`} type="range" min={0} max={1} step={0.01} value={channel.volume} onChange={(event) => store.setChannel(channel.id, { volume: Number(event.target.value) })} />
             <input aria-label={`${channel.name} pan`} type="range" min={-1} max={1} step={0.01} value={channel.pan} onChange={(event) => store.setChannel(channel.id, { pan: Number(event.target.value) })} />
             <select aria-label={`${channel.name} output`} value={channel.output ?? ''} onChange={(event) => store.setChannel(channel.id, { output: event.target.value || null })}>
@@ -124,8 +142,8 @@ export function BeatView({ store, engine }: { store: ProjectStore; engine: Audio
                 )
               })}
             </div>
-            <button type="button" className="mini" onClick={() => store.copyRow(channel.id)}>Copy</button>
-            <button type="button" className="mini" onClick={() => store.pasteRow(channel.id)}>Paste</button>
+            <HintButton type="button" className="mini" label="Copy" hint={`Copy the ${channel.name} row`} onClick={() => store.copyRow(channel.id)}>Copy</HintButton>
+            <HintButton type="button" className="mini" label="Paste" hint={`Paste into the ${channel.name} row`} onClick={() => store.pasteRow(channel.id)}>Paste</HintButton>
           </div>
         )
       })}

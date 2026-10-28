@@ -3,6 +3,7 @@ import type { AudioEngine } from '../audio/engine'
 import { emptyTap, pushTap, scaleTempo, tempoFromTaps, roundTempo, type TapMemory } from '../model/tap'
 import { formatBarsBeats, formatTimecode } from '../model/time'
 import type { ProjectStore } from '../state/store'
+import { HintButton } from './hint'
 
 export function TransportBar({
   store,
@@ -96,18 +97,18 @@ export function TransportBar({
   return (
     <div className="transport">
       <div className="t-buttons">
-        <button type="button" className="t-btn" onClick={() => onSeek(0)} aria-label="Return to start">
+        <HintButton type="button" className="t-btn" label="Start" hint="Return to the beginning" onClick={() => onSeek(0)}>
           <SkipBackIcon />
-        </button>
-        <button type="button" className={`t-btn play ${playing ? 'on' : ''}`} onClick={onPlay} aria-label="Play">
+        </HintButton>
+        <HintButton type="button" className={`t-btn play ${playing ? 'on' : ''}`} label="Play" hint={playing ? 'Playing' : 'Play from the playhead'} onClick={onPlay}>
           <PlayIcon />
-        </button>
-        <button type="button" className="t-btn stop" onClick={onStop} aria-label="Stop" disabled={status === 'stopped'}>
+        </HintButton>
+        <HintButton type="button" className="t-btn stop" label="Stop" hint="Stop playback" onClick={onStop} disabled={status === 'stopped'}>
           <StopIcon />
-        </button>
-        <button type="button" className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} onClick={onRecord} aria-label="Record">
+        </HintButton>
+        <HintButton type="button" className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} label="Record" hint="Record on armed tracks" onClick={onRecord}>
           <RecIcon />
-        </button>
+        </HintButton>
       </div>
       <div className="lcd" aria-live="polite">
         <div className="bars">{formatBarsBeats(position, project.sampleRate, project.tempo, project.timeSignature)}</div>
@@ -142,7 +143,8 @@ export function TransportBar({
         <button
           type="button"
           className="bpm-readout"
-          aria-label="BPM"
+          aria-label="BPM. Tap to set the tempo. Hold for half-time and double-time."
+          title="BPM — tap to set the tempo. Hold for half-time and double-time."
           disabled={store.remoteFollow}
           onPointerDown={() => {
             held.current = false
@@ -162,16 +164,17 @@ export function TransportBar({
           {readout}
         </button>
       )}
-      <button
+      <HintButton
         type="button"
         className={`t-btn loop ${project.loopEnabled ? 'on' : ''}`}
-        aria-label="Loop"
+        label="Loop"
+        hint="Repeat between the loop points"
         aria-pressed={project.loopEnabled}
         disabled={store.remoteFollow}
         onClick={() => store.toggle('loopEnabled')}
       >
         <LoopIcon />
-      </button>
+      </HintButton>
       {syncLabel && <span className="sync-pill">{syncLabel}</span>}
     </div>
   )

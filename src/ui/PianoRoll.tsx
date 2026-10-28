@@ -19,7 +19,9 @@ import {
   type ScaleId,
 } from '../model/scale'
 import { uid, type MidiNote } from '../model/types'
-import { EDITOR_TOOLS, EDITOR_TOOL_KEYS, activeTool, keyForTool, setActiveTool, subscribeTools } from '../state/tools'
+import { EDITOR_TOOL_KEYS, activeTool, setActiveTool, subscribeTools, toolInfo } from '../state/tools'
+import { EditorTools } from './ToolBar'
+import { HintButton, MoreItem, MoreMenu } from './hint'
 import type { ProjectStore } from '../state/store'
 import { samplesToBeats } from '../model/time'
 import { attachGlissando } from './glissando'
@@ -59,7 +61,19 @@ const LOW = 48
 const HIGH = 84
 const VEL_H = 36
 
-export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; engine: AudioEngine; onIdeas?: () => void }) {
+export function PianoRoll({
+  store,
+  engine,
+  onIdeas,
+  compact = false,
+  toolsInBar = false,
+}: {
+  store: ProjectStore
+  engine: AudioEngine
+  onIdeas?: () => void
+  compact?: boolean
+  toolsInBar?: boolean
+}) {
   const track = store.project.tracks.find((item) => item.midiClips.some((clip) => clip.id === store.selectedMidiClipId))
   const clip = track?.midiClips.find((item) => item.id === store.selectedMidiClipId)
   const [open, setOpen] = useState(false)
@@ -450,7 +464,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   const chord = selected.length ? nameChord(selected.map((note) => note.pitch)) : ''
   const pads = diatonicPads(scale.root, scale.scale, scale.source)
   const tones = [...scaleTones(scale.root, scale.scale, 4), ...scaleTones(scale.root, scale.scale, 5)]
-  const cursor = tool === 'pan' ? 'grab' : tool === 'zoom' ? 'zoom-in' : tool === 'select' ? 'default' : 'crosshair'
+  const cursor = toolInfo(tool, 'piano').cursor
 
   const onGridDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || !event.isPrimary || multi.current) return
@@ -684,27 +698,31 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   return (
     <div className="piano" ref={pianoRef} data-tool={tool}>
       <div className="scale-bar">
-        <button type="button" className={`chords-btn ${open ? 'on' : ''}`} aria-expanded={open} onClick={() => void toggleChords()}>Chords</button>
-        <select aria-label="Key" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
+        <HintButton type="button" className={`chords-btn ${open ? 'on' : ''}`} label="Chords" hint="Build a chord in this key" aria-expanded={open} onClick={() => void toggleChords()}>Chords</HintButton>
+        <select aria-label="Key" title="Key — the scale root" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
           {NOTE_NAMES.map((name, index) => (
             <option key={name} value={index}>{name}</option>
           ))}
         </select>
-        <select aria-label="Scale" value={scale.scale} onChange={(event) => store.setScale({ scale: event.target.value as ScaleId })}>
+        <select aria-label="Scale" title="Scale — which notes belong" value={scale.scale} onChange={(event) => store.setScale({ scale: event.target.value as ScaleId })}>
           {SCALES.map((item) => (
             <option key={item.id} value={item.id}>{item.name}</option>
           ))}
         </select>
-        <button type="button" className={scale.snap ? 'on' : ''} aria-pressed={scale.snap} onClick={() => store.setScale({ snap: !scale.snap })}>Snap</button>
-        <button type="button" onClick={() => {
-          const found = detectKey(clip.notes.map((note) => ({ pitch: note.pitch, weight: note.durationBeats })))
-          store.setScale({ root: found.root, scale: found.scale })
-        }}>Detect</button>
+        <HintButton type="button" className={scale.snap ? 'on' : ''} label="Snap" hint="Keep new notes inside the scale" aria-pressed={scale.snap} onClick={() => store.setScale({ snap: !scale.snap })}>Snap</HintButton>
+        {!compact && (
+          <HintButton type="button" label="Detect" hint="Guess the key from these notes" onClick={() => {
+            const found = detectKey(clip.notes.map((note) => ({ pitch: note.pitch, weight: note.durationBeats })))
+            store.setScale({ root: found.root, scale: found.scale })
+          }}>Detect</HintButton>
+        )}
         <span className="chord-name">{chord}</span>
-        {onIdeas && <button type="button" onClick={onIdeas}>Ideas</button>}
-        {store.selectedNoteId && (
-          <button
+        {!compact && onIdeas && <HintButton type="button" label="Ideas" hint="Start from a progression" onClick={onIdeas}>Ideas</HintButton>}
+        {!compact && store.selectedNoteId && (
+          <HintButton
             type="button"
+            label="Slide"
+            hint="Glide from the previous note"
             className={clip.notes.find((note) => note.id === store.selectedNoteId)?.slide ? 'on' : ''}
             onClick={() => {
               const note = clip.notes.find((item) => item.id === store.selectedNoteId)
@@ -712,24 +730,54 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
             }}
           >
             {clip.notes.find((note) => note.id === store.selectedNoteId)?.slide ? 'Slide on' : 'Slide'}
-          </button>
+          </HintButton>
+        )}
+        {compact && (
+          <MoreMenu label="Scale options" hint="Detect the key, browse ideas, or slide a note" trigger="More">
+            <MoreItem label="Detect key" hint="Guess the key from these notes" onClick={() => {
+              const found = detectKey(clip.notes.map((note) => ({ pitch: note.pitch, weight: note.durationBeats })))
+              store.setScale({ root: found.root, scale: found.scale })
+            }} />
+            {onIdeas && <MoreItem label="Ideas" hint="Start from a progression" onClick={onIdeas} />}
+            {store.selectedNoteId && (
+              <MoreItem
+                label={clip.notes.find((note) => note.id === store.selectedNoteId)?.slide ? 'Slide on' : 'Slide'}
+                hint="Glide from the previous note"
+                pressed={!!clip.notes.find((note) => note.id === store.selectedNoteId)?.slide}
+                onClick={() => {
+                  const note = clip.notes.find((item) => item.id === store.selectedNoteId)
+                  if (note) store.updateNote(track.id, clip.id, note.id, { slide: !note.slide })
+                }}
+              />
+            )}
+          </MoreMenu>
         )}
       </div>
-      <div className="tool-row">
-        {EDITOR_TOOLS.map((item) => (
-          <button key={item} type="button" className={tool === item ? 'on' : ''} aria-pressed={tool === item} title={`${item} (${keyForTool(item)})`} onClick={() => setActiveTool(item)}>{item}</button>
-        ))}
-        <select aria-label="Grid" value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
+      <div className="tool-row piano-tools">
+        <EditorTools place="piano" compact={compact} hidden={toolsInBar} onChange={setActiveTool} />
+        <select aria-label="Grid" title="Grid — how notes snap in time" value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
           <option value="0">Free</option>
           <option value="0.25">1/16</option>
           <option value="0.5">1/8</option>
           <option value="1">1/4</option>
         </select>
-        <button type="button" onClick={quantize}>Quantize</button>
-        <button type="button" onClick={arpeggiate}>Arp</button>
-        <button type="button" onClick={strum}>Strum</button>
-        <button type="button" onClick={duplicate}>Duplicate</button>
-        <button type="button" onClick={remove}>Delete</button>
+        {compact ? (
+          <MoreMenu label="Note actions" hint="Quantize, arpeggio, strum, copy, or delete" trigger="Notes">
+            <MoreItem label="Quantize" hint="Snap the selected notes to the grid" onClick={quantize} />
+            <MoreItem label="Arpeggio" hint="Play the chord one note at a time" onClick={arpeggiate} />
+            <MoreItem label="Strum" hint="Spread the chord like a strum" onClick={strum} />
+            <MoreItem label="Duplicate" hint="Copy the selected notes" onClick={duplicate} />
+            <MoreItem label="Delete" hint="Remove the selected notes" onClick={remove} />
+          </MoreMenu>
+        ) : (
+          <>
+            <HintButton type="button" label="Quantize" hint="Snap the selected notes to the grid" onClick={quantize}>Quantize</HintButton>
+            <HintButton type="button" label="Arp" hint="Play the chord one note at a time" onClick={arpeggiate}>Arp</HintButton>
+            <HintButton type="button" label="Strum" hint="Spread the chord like a strum" onClick={strum}>Strum</HintButton>
+            <HintButton type="button" label="Duplicate" hint="Copy the selected notes" onClick={duplicate}>Duplicate</HintButton>
+            <HintButton type="button" label="Delete" hint="Remove the selected notes" onClick={remove}>Delete</HintButton>
+          </>
+        )}
       </div>
       <div className="piano-body">
         <div className="keys" ref={keysRef}>

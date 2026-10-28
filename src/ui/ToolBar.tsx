@@ -1,47 +1,126 @@
-import { useSyncExternalStore } from 'react'
-import { ARRANGE_TOOLS, activeTool, keyForTool, subscribeTools, type ArrangeTool } from '../state/tools'
+import { useSyncExternalStore, type ReactNode } from 'react'
+import {
+  activeTool,
+  keyForTool,
+  overflowTools,
+  phoneTools,
+  subscribeTools,
+  toolCaption,
+  toolInfo,
+  toolsFor,
+  type ArrangeTool,
+  type ToolPlace,
+} from '../state/tools'
+import { HintButton, MoreItem, MoreMenu } from './hint'
 
 export function ToolBar({
   onChange,
   onDuplicate,
   onDelete,
+  compact = false,
 }: {
   onChange: (tool: ArrangeTool) => void
   onDuplicate: () => void
   onDelete: () => void
+  compact?: boolean
+}) {
+  return (
+    <EditorTools place="arrange" compact={compact} onChange={onChange}>
+      {compact ? (
+        <>
+          <MoreItem label="Duplicate" hint="Copy the selected clips" onClick={onDuplicate} />
+          <MoreItem label="Delete" hint="Remove the selected clips" onClick={onDelete} />
+        </>
+      ) : (
+        <>
+          <HintButton type="button" className="tool" label="Duplicate" hint="Copy the selected clips" onClick={onDuplicate}>
+            <ToolIcon id="duplicate" />
+          </HintButton>
+          <HintButton type="button" className="tool" label="Delete" hint="Remove the selected clips" onClick={onDelete}>
+            <ToolIcon id="delete" />
+          </HintButton>
+        </>
+      )}
+    </EditorTools>
+  )
+}
+
+/** Shared tool strip. `hidden` keeps the mode line and drops the buttons when another strip already shows them. */
+export function EditorTools({
+  place,
+  compact = false,
+  hidden = false,
+  onChange,
+  children,
+}: {
+  place: ToolPlace
+  compact?: boolean
+  hidden?: boolean
+  onChange: (tool: ArrangeTool) => void
+  children?: ReactNode
 }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
+  const info = toolInfo(value, place)
+  const visible = compact ? phoneTools(place) : toolsFor(place)
+  const overflow = compact ? overflowTools(place) : []
+  const overflowOn = overflow.includes(value)
   return (
-    <div className="timeline-tools" role="toolbar" aria-label="Tools">
-      {ARRANGE_TOOLS.map((tool) => {
-        const key = keyForTool(tool.id)
-        return (
-          <button
-            key={tool.id}
-            type="button"
-            className={`tool ${value === tool.id ? 'on' : ''}`}
-            aria-label={tool.label}
-            aria-pressed={value === tool.id}
-            title={key ? `${tool.label} (${key})` : tool.label}
-            onClick={() => onChange(tool.id)}
-          >
-            <ToolIcon id={tool.id} />
-          </button>
-        )
-      })}
-      <span className="tool-gap" />
-      <button type="button" className="tool" aria-label="Duplicate" title="Duplicate" onClick={onDuplicate}>
-        <ToolIcon id="duplicate" />
-      </button>
-      <button type="button" className="tool" aria-label="Delete" title="Delete" onClick={onDelete}>
-        <ToolIcon id="delete" />
-      </button>
+    <div className="timeline-tools" role="toolbar" aria-label={place === 'piano' ? 'Piano tools' : 'Tools'} data-place={place}>
+      {!hidden &&
+        visible.map((id) => {
+          const tool = toolInfo(id, place)
+          const key = keyForTool(id)
+          return (
+            <HintButton
+              key={id}
+              type="button"
+              className={`tool ${value === id ? 'on' : ''}`}
+              label={tool.label}
+              hint={tool.hint}
+              shortcut={key || undefined}
+              aria-pressed={value === id}
+              onClick={() => onChange(id)}
+            >
+              <ToolIcon id={id} />
+            </HintButton>
+          )
+        })}
+      {!hidden && compact && (
+        <MoreMenu
+          label={overflowOn ? info.label : 'More tools'}
+          hint={overflowOn ? info.hint : 'Box, pan, zoom, and the other edit tools'}
+          trigger={overflowOn ? info.label : 'More'}
+          active={overflowOn}
+        >
+          {overflow.map((id) => {
+            const tool = toolInfo(id, place)
+            return <MoreItem key={id} label={tool.label} hint={tool.hint} pressed={value === id} onClick={() => onChange(id)} />
+          })}
+          {children}
+        </MoreMenu>
+      )}
+      {!hidden && !compact && children}
+      <p className="tool-mode" aria-live="polite" data-tool={value}>
+        <strong>{info.label}</strong>
+        <span>{info.hint}</span>
+      </p>
+      <span className="sr-only">{toolCaption(value, place)}</span>
     </div>
   )
 }
 
-function ToolIcon({ id }: { id: ArrangeTool | 'duplicate' | 'delete' }) {
-  const common = { width: 18, height: 18, viewBox: '0 0 18 18', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+export function ToolIcon({ id }: { id: ArrangeTool | 'duplicate' | 'delete' }) {
+  const common = {
+    width: 18,
+    height: 18,
+    viewBox: '0 0 18 18',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.6,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true as const,
+  }
   if (id === 'select') return <svg {...common}><path d="M4 2.5l8 6.2-3.2.6 2.1 4.2-1.8.9-2.1-4.2-3 .9z" /></svg>
   if (id === 'box') return <svg {...common}><rect x="3" y="3.5" width="12" height="11" strokeDasharray="2.2 1.6" /></svg>
   if (id === 'pencil') return <svg {...common}><path d="M11.2 3.2l3.6 3.6L7 14.6 3.2 15l.4-3.8z" /></svg>

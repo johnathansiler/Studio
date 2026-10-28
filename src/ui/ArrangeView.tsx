@@ -12,6 +12,7 @@ import { activeTool, EDITOR_TOOL_KEYS, subscribeTools } from '../state/tools'
 import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
 import { AddTrackButton } from './AddTrack'
+import { HintButton, MoreItem, MoreMenu } from './hint'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 
 export function ArrangeView({
@@ -22,6 +23,7 @@ export function ArrangeView({
   onOpenPiano,
   onPerform,
   onQuickPunch,
+  compact = false,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -30,6 +32,7 @@ export function ArrangeView({
   onOpenPiano: (trackId: string, clipId?: string) => void
   onPerform: (mode: 'keys' | 'drums') => void
   onQuickPunch: () => void
+  compact?: boolean
 }) {
   const project = store.project
   const [px, setPx] = useState(90)
@@ -309,28 +312,24 @@ export function ArrangeView({
   return (
     <div className="arrange-wrap">
       <div className="rec-bar" role="group" aria-label="Recording">
-        <button type="button" className={record.loop ? 'on' : ''} onClick={() => {
-          const next = !record.loop
-          store.setRecord({ loop: next })
-          if (next) store.setLoop(true, project.loopStartSample, project.loopEndSample)
-        }}>Cycle</button>
-        <button type="button" className={record.punchEnabled ? 'on' : ''} onClick={() => store.setRecord({ punchEnabled: !record.punchEnabled, quick: false })}>Punch</button>
-        <button type="button" onClick={() => store.setRecord({ punchIn: Math.round(engine.currentTimelineSample()) })}>In</button>
-        <button type="button" onClick={() => store.setRecord({ punchOut: Math.round(engine.currentTimelineSample()) })}>Out</button>
-        <button type="button" onClick={onQuickPunch}>Quick</button>
-        <label>Pre
-          <input inputMode="decimal" value={record.preRoll} onChange={(event) => store.setRecord({ preRoll: Number(event.target.value) || 0 })} />
-        </label>
-        <label>Post
-          <input inputMode="decimal" value={record.postRoll} onChange={(event) => store.setRecord({ postRoll: Number(event.target.value) || 0 })} />
-        </label>
-        <select value={record.rollUnit} onChange={(event) => store.setRecord({ rollUnit: event.target.value === 'seconds' ? 'seconds' : 'bars' })} aria-label="Roll unit">
-          <option value="bars">Bars</option>
-          <option value="seconds">Seconds</option>
-        </select>
+        <HintButton
+          type="button"
+          className={record.loop ? 'on' : ''}
+          label="Cycle"
+          hint="Loop while recording"
+          aria-pressed={record.loop}
+          onClick={() => {
+            const next = !record.loop
+            store.setRecord({ loop: next })
+            if (next) store.setLoop(true, project.loopStartSample, project.loopEndSample)
+          }}
+        >
+          Cycle
+        </HintButton>
         {project.tracks.find((track) => track.id === store.selectedTrackId)?.type === 'audio' && (
           <select
             aria-label="Track input"
+            title="Input — where this track records from"
             value={project.tracks.find((track) => track.id === store.selectedTrackId)?.input || 'mic'}
             onChange={(event) => {
               const track = project.tracks.find((item) => item.id === store.selectedTrackId)
@@ -350,34 +349,96 @@ export function ArrangeView({
               ))}
           </select>
         )}
-        <select value={record.midiLoop} onChange={(event) => store.setRecord({ midiLoop: event.target.value === 'merge' ? 'merge' : 'takes' })} aria-label="MIDI loop mode">
-          <option value="takes">MIDI takes</option>
-          <option value="merge">MIDI merge</option>
-        </select>
-        {selectedMidi && (
-          <button type="button" onClick={() => store.commitMidiPass(selectedMidi.track.id, selectedMidi.clip.id, selectedMidi.clip.notes)}>Save MIDI take</button>
-        )}
         {selectedMidi?.clip.takes && selectedMidi.clip.takes.length > 0 && (
-          <select aria-label="MIDI take" value={selectedMidi.clip.activeTakeId || ''} onChange={(event) => store.recallMidi(selectedMidi.track.id, selectedMidi.clip.id, event.target.value)}>
+          <select aria-label="MIDI take" title="MIDI take — which pass you hear" value={selectedMidi.clip.activeTakeId || ''} onChange={(event) => store.recallMidi(selectedMidi.track.id, selectedMidi.clip.id, event.target.value)}>
             {selectedMidi.clip.takes.map((take) => (
               <option key={take.id} value={take.id}>{take.name}</option>
             ))}
           </select>
         )}
         {selectedFolder?.clip.folder && (
-          <>
-            <select
-              aria-label="Comp"
-              value={selectedFolder.clip.folder.activeCompId}
-              onChange={(event) => store.recallTakeComp(selectedFolder.track.id, selectedFolder.clip.id, event.target.value)}
-            >
-              {selectedFolder.clip.folder.comps.map((comp) => (
-                <option key={comp.id} value={comp.id}>{comp.name}</option>
-              ))}
+          <select
+            aria-label="Comp"
+            title="Comp — which take edit is active"
+            value={selectedFolder.clip.folder.activeCompId}
+            onChange={(event) => store.recallTakeComp(selectedFolder.track.id, selectedFolder.clip.id, event.target.value)}
+          >
+            {selectedFolder.clip.folder.comps.map((comp) => (
+              <option key={comp.id} value={comp.id}>{comp.name}</option>
+            ))}
             </select>
-            <button type="button" onClick={() => store.saveTakeComp(selectedFolder.track.id, selectedFolder.clip.id)}>Save comp</button>
-            <button type="button" onClick={() => store.flattenTakes(selectedFolder.track.id, selectedFolder.clip.id, false)}>Flatten</button>
-            <button type="button" onClick={() => store.flattenTakes(selectedFolder.track.id, selectedFolder.clip.id, true)}>Merge</button>
+        )}
+        {compact ? (
+          <MoreMenu label="Recording options" hint="Punch, pre-roll, and take editing" trigger="Options">
+            <MoreItem label="Punch" hint="Record only between the in and out points" pressed={record.punchEnabled} onClick={() => store.setRecord({ punchEnabled: !record.punchEnabled, quick: false })} />
+            <MoreItem label="Set punch in" hint="Use the playhead as the record start" onClick={() => store.setRecord({ punchIn: Math.round(engine.currentTimelineSample()) })} />
+            <MoreItem label="Set punch out" hint="Use the playhead as the record end" onClick={() => store.setRecord({ punchOut: Math.round(engine.currentTimelineSample()) })} />
+            <MoreItem label="Quick punch" hint="Punch in or out at the playhead" onClick={onQuickPunch} />
+            <label>
+              Pre-roll
+              <input aria-label="Pre-roll" inputMode="decimal" value={record.preRoll} onChange={(event) => store.setRecord({ preRoll: Number(event.target.value) || 0 })} />
+              <i>Count this much before recording</i>
+            </label>
+            <label>
+              Post-roll
+              <input aria-label="Post-roll" inputMode="decimal" value={record.postRoll} onChange={(event) => store.setRecord({ postRoll: Number(event.target.value) || 0 })} />
+              <i>Keep recording this much after the end</i>
+            </label>
+            <label>
+              Roll unit
+              <select aria-label="Roll unit" value={record.rollUnit} onChange={(event) => store.setRecord({ rollUnit: event.target.value === 'seconds' ? 'seconds' : 'bars' })}>
+                <option value="bars">Bars</option>
+                <option value="seconds">Seconds</option>
+              </select>
+            </label>
+            <label>
+              MIDI loop
+              <select aria-label="MIDI loop mode" value={record.midiLoop} onChange={(event) => store.setRecord({ midiLoop: event.target.value === 'merge' ? 'merge' : 'takes' })}>
+                <option value="takes">New take each pass</option>
+                <option value="merge">Merge into the clip</option>
+              </select>
+            </label>
+            {selectedMidi && (
+              <MoreItem label="Save MIDI take" hint="Keep this pass so you can recall it" onClick={() => store.commitMidiPass(selectedMidi.track.id, selectedMidi.clip.id, selectedMidi.clip.notes)} />
+            )}
+            {selectedFolder?.clip.folder && (
+              <>
+                <MoreItem label="Save comp" hint="Store this take edit" onClick={() => store.saveTakeComp(selectedFolder.track.id, selectedFolder.clip.id)} />
+                <MoreItem label="Flatten" hint="Write the comp into one clip" onClick={() => store.flattenTakes(selectedFolder.track.id, selectedFolder.clip.id, false)} />
+                <MoreItem label="Merge" hint="Join the comp regions" onClick={() => store.flattenTakes(selectedFolder.track.id, selectedFolder.clip.id, true)} />
+              </>
+            )}
+          </MoreMenu>
+        ) : (
+          <>
+            <HintButton type="button" className={record.punchEnabled ? 'on' : ''} label="Punch" hint="Record only between the in and out points" aria-pressed={record.punchEnabled} onClick={() => store.setRecord({ punchEnabled: !record.punchEnabled, quick: false })}>Punch</HintButton>
+            <HintButton type="button" label="In" hint="Set the punch-in point at the playhead" onClick={() => store.setRecord({ punchIn: Math.round(engine.currentTimelineSample()) })}>In</HintButton>
+            <HintButton type="button" label="Out" hint="Set the punch-out point at the playhead" onClick={() => store.setRecord({ punchOut: Math.round(engine.currentTimelineSample()) })}>Out</HintButton>
+            <HintButton type="button" label="Quick" hint="Punch in or out at the playhead" onClick={onQuickPunch}>Quick</HintButton>
+            <label title="Pre-roll — count this much before recording">Pre
+              <input aria-label="Pre-roll" inputMode="decimal" value={record.preRoll} onChange={(event) => store.setRecord({ preRoll: Number(event.target.value) || 0 })} />
+            </label>
+            <label title="Post-roll — keep recording this much after the end">Post
+              <input aria-label="Post-roll" inputMode="decimal" value={record.postRoll} onChange={(event) => store.setRecord({ postRoll: Number(event.target.value) || 0 })} />
+            </label>
+            <select title="Pre and post roll unit" value={record.rollUnit} onChange={(event) => store.setRecord({ rollUnit: event.target.value === 'seconds' ? 'seconds' : 'bars' })} aria-label="Roll unit">
+              <option value="bars">Bars</option>
+              <option value="seconds">Seconds</option>
+            </select>
+            <select title="MIDI loop — a new take, or merge into the clip" value={record.midiLoop} onChange={(event) => store.setRecord({ midiLoop: event.target.value === 'merge' ? 'merge' : 'takes' })} aria-label="MIDI loop mode">
+              <option value="takes">MIDI takes</option>
+              <option value="merge">MIDI merge</option>
+            </select>
+            {selectedMidi && (
+              <HintButton type="button" label="Save MIDI take" hint="Keep this pass so you can recall it" onClick={() => store.commitMidiPass(selectedMidi.track.id, selectedMidi.clip.id, selectedMidi.clip.notes)}>Save MIDI take</HintButton>
+            )}
+            {selectedFolder?.clip.folder && (
+              <>
+                <HintButton type="button" label="Save comp" hint="Store this take edit" onClick={() => store.saveTakeComp(selectedFolder.track.id, selectedFolder.clip.id)}>Save comp</HintButton>
+                <HintButton type="button" label="Flatten" hint="Write the comp into one clip" onClick={() => store.flattenTakes(selectedFolder.track.id, selectedFolder.clip.id, false)}>Flatten</HintButton>
+                <HintButton type="button" label="Merge" hint="Join the comp regions" onClick={() => store.flattenTakes(selectedFolder.track.id, selectedFolder.clip.id, true)}>Merge</HintButton>
+              </>
+            )}
           </>
         )}
       </div>
@@ -394,33 +455,38 @@ export function ArrangeView({
                 onChange={(event) => store.updateTrack(track.id, { name: event.target.value })}
               />
               {track.type === 'midi' && (
-                <button className={`mini rack-open ${store.rackTrackId === track.id ? 'on' : ''}`} onClick={(event) => { event.stopPropagation(); store.openRack(track.id) }}>Rack</button>
+                <HintButton type="button" className={`mini rack-open ${store.rackTrackId === track.id ? 'on' : ''}`} label="Rack" hint="Open the instrument and effects" onClick={(event) => { event.stopPropagation(); store.openRack(track.id) }}>Rack</HintButton>
               )}
-              <button className="mini" onClick={() => store.removeTrack(track.id)} title="Remove track">
-                ×
-              </button>
+              {compact ? (
+                <MoreMenu label="Track options" hint="Monitor, play, or remove this track" trigger="…">
+                  {track.type === 'audio' && (
+                    <MoreItem label="Input monitor" hint="Hear the input while recording" pressed={track.monitor} onClick={() => store.updateTrack(track.id, { monitor: !track.monitor })} />
+                  )}
+                  {track.type === 'midi' && (
+                    <MoreItem label="Keys" hint="Play this track on a keyboard" onClick={() => { store.selectTrack(track.id); onPerform('keys') }} />
+                  )}
+                  {track.type === 'midi' && (
+                    <MoreItem label="Pads" hint="Play this track on drum pads" onClick={() => { store.selectTrack(track.id); onPerform('drums') }} />
+                  )}
+                  <MoreItem label="Remove track" hint="Delete this track" onClick={() => store.removeTrack(track.id)} />
+                </MoreMenu>
+              ) : (
+                <HintButton type="button" className="mini" label="Remove" hint="Delete this track" onClick={() => store.removeTrack(track.id)}>×</HintButton>
+              )}
             </header>
             <div className="row">
-              <button className={`mini ${track.mute ? 'on-m' : ''}`} onClick={() => store.updateTrack(track.id, { mute: !track.mute })}>
-                M
-              </button>
-              <button className={`mini ${track.solo ? 'on-s' : ''}`} onClick={() => store.updateTrack(track.id, { solo: !track.solo })}>
-                S
-              </button>
+              <HintButton type="button" className={`mini ${track.mute ? 'on-m' : ''}`} label="Mute" hint="Silence this track" aria-pressed={track.mute} onClick={() => store.updateTrack(track.id, { mute: !track.mute })}>M</HintButton>
+              <HintButton type="button" className={`mini ${track.solo ? 'on-s' : ''}`} label="Solo" hint="Hear only this track" aria-pressed={track.solo} onClick={() => store.updateTrack(track.id, { solo: !track.solo })}>S</HintButton>
               {track.type === 'audio' && (
-                <button className={`mini ${track.armed ? 'on-r' : ''}`} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
-                  R
-                </button>
+                <HintButton type="button" className={`mini ${track.armed ? 'on-r' : ''}`} label="Arm" hint="Record onto this track" aria-pressed={track.armed} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>R</HintButton>
               )}
-              {track.type === 'audio' && (
-                <button className={`mini ${track.monitor ? 'on-s' : ''}`} title="Input monitor" onClick={() => store.updateTrack(track.id, { monitor: !track.monitor })}>
-                  I
-                </button>
+              {!compact && track.type === 'audio' && (
+                <HintButton type="button" className={`mini ${track.monitor ? 'on-s' : ''}`} label="Monitor" hint="Hear the input while recording" aria-pressed={track.monitor} onClick={() => store.updateTrack(track.id, { monitor: !track.monitor })}>I</HintButton>
               )}
-              {track.type === 'midi' && (
+              {!compact && track.type === 'midi' && (
                 <>
-                  <button className="mini" title="Piano roll" onClick={() => onPerform('keys')}>K</button>
-                  <button className="mini" title="Drum machine" onClick={() => onPerform('drums')}>D</button>
+                  <HintButton type="button" className="mini" label="Keys" hint="Play this track on a keyboard" onClick={() => { store.selectTrack(track.id); onPerform('keys') }}>K</HintButton>
+                  <HintButton type="button" className="mini" label="Pads" hint="Play this track on drum pads" onClick={() => { store.selectTrack(track.id); onPerform('drums') }}>D</HintButton>
                 </>
               )}
               <input

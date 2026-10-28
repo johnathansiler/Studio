@@ -34,6 +34,7 @@ import { ProjectSheet } from './ui/ProjectSheet'
 import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
+import { HintButton } from './ui/hint'
 import { ToolBar } from './ui/ToolBar'
 import { VideoDock } from './ui/VideoDock'
 import { formatBytes } from './ui/share'
@@ -1127,23 +1128,31 @@ async function importDropped(files: FileList) {
         </div>
         <input className="project-name" aria-label="Project name" value={store.project.name} onChange={(event) => store.renameProject(event.target.value)} />
         <div className="views">
-          {(['arrange', 'mix', 'beats'] as const).map((view) => (
-            <button
+          {([
+            ['arrange', 'Arrange', 'Edit clips on the timeline'],
+            ['mix', 'Mix', 'Levels, pan, and effects'],
+            ['beats', 'Beats', 'Step sequencer'],
+          ] as const).map(([view, label, hint]) => (
+            <HintButton
               key={view}
               type="button"
+              label={label}
+              hint={hint}
               className={surface === 'studio' && phonePane !== 'room' && store.view === view ? 'active' : ''}
               onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView(view); setMenuOpen(false) }}
             >
-              {view === 'arrange' ? 'Arrange' : view === 'mix' ? 'Mix' : 'Beats'}
-            </button>
+              {label}
+            </HintButton>
           ))}
-          <button
+          <HintButton
             type="button"
+            label="Session"
+            hint="Open the call and video"
             className={surface === 'studio' && phonePane === 'room' ? 'active' : ''}
             onClick={() => { setPianoOpen(false); setPhonePane('room'); setSurface('studio'); setMenuOpen(false) }}
           >
             Session
-          </button>
+          </HintButton>
         </div>
         <button type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu" aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
           <MenuIcon />
@@ -1152,15 +1161,15 @@ async function importDropped(files: FileList) {
           <div className="shell-menu" id="shell-menu">
             <button type="button" id="menu-save" onClick={() => { setMenuOpen(false); void openProjects() }}>Save</button>
             <button type="button" id="menu-export" onClick={() => { setMenuOpen(false); setExportOpen(true) }}>Export</button>
-            <button type="button" className="split" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }}>Clips</button>
-            <button type="button" onClick={() => { setMenuOpen(false); openPerform('keys') }}>Keys</button>
-            <button type="button" onClick={() => { setMenuOpen(false); openPerform('drums') }}>Pads</button>
-            <button type="button" disabled={!pianoTrack} onClick={() => { if (!pianoTrack) return; setMenuOpen(false); openPiano(pianoTrack.id) }}>Piano</button>
-            <button type="button" className="split" onClick={() => { setMenuOpen(false); store.quickQuantize() }}>Quantize</button>
-            <button type="button" onClick={() => { setMenuOpen(false); store.openQuantize() }}>Quantize…</button>
-            <button type="button" className="split" aria-pressed={store.project.metronomeEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('metronomeEnabled')}>Click</button>
-            <button type="button" aria-pressed={store.project.countIn} disabled={store.remoteFollow} onClick={() => store.toggle('countIn')}>Count-in</button>
-            <button type="button" aria-pressed={store.project.snap} disabled={store.remoteFollow} onClick={() => store.toggle('snap')}>Snap</button>
+            <button type="button" className="split" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }}>Clips<small>Launcher</small></button>
+            <button type="button" onClick={() => { setMenuOpen(false); openPerform('keys') }}>Keys<small>Play notes</small></button>
+            <button type="button" onClick={() => { setMenuOpen(false); openPerform('drums') }}>Pads<small>Play drums</small></button>
+            <button type="button" disabled={!pianoTrack} onClick={() => { if (!pianoTrack) return; setMenuOpen(false); openPiano(pianoTrack.id) }}>Piano<small>Edit notes</small></button>
+            <button type="button" className="split" onClick={() => { setMenuOpen(false); store.quickQuantize() }}>Quantize<small>Snap to the grid</small></button>
+            <button type="button" onClick={() => { setMenuOpen(false); store.openQuantize() }}>Quantize…<small>Timing and strength</small></button>
+            <button type="button" className="split" aria-pressed={store.project.metronomeEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('metronomeEnabled')}>Click<small>Metronome</small></button>
+            <button type="button" aria-pressed={store.project.countIn} disabled={store.remoteFollow} onClick={() => store.toggle('countIn')}>Count-in<small>One bar first</small></button>
+            <button type="button" aria-pressed={store.project.snap} disabled={store.remoteFollow} onClick={() => store.toggle('snap')}>Snap<small>Align edits</small></button>
             <label className="menu-sig">
               Sig
               <select
@@ -1188,8 +1197,9 @@ async function importDropped(files: FileList) {
               }}
             >
               {store.transportMode === 'session' ? 'Arrangement' : 'Session view'}
+              <small>{store.transportMode === 'session' ? 'Back to the timeline' : 'Play clips live'}</small>
             </button>
-            <button type="button" disabled={store.remoteFollow} onClick={() => { setMenuOpen(false); store.captureToArrangement() }}>Capture</button>
+            <button type="button" disabled={store.remoteFollow} onClick={() => { setMenuOpen(false); store.captureToArrangement() }}>Capture<small>Print onto the timeline</small></button>
             <button
               type="button"
               className="split"
@@ -1227,6 +1237,7 @@ async function importDropped(files: FileList) {
         <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
           {store.view === 'arrange' && (
             <ToolBar
+              compact={phone && !land}
               onChange={(tool) => store.setTool(tool)}
               onDuplicate={() => store.duplicateSelection()}
               onDelete={() => store.deleteSelectedClip()}
@@ -1247,10 +1258,11 @@ async function importDropped(files: FileList) {
                   onOpenPiano={openPiano}
                   onPerform={(mode) => openPerform(mode)}
                   onQuickPunch={() => void quickPunch()}
+                  compact={phone && !land}
                 />
               )}
               {store.view === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} />}
-              {store.view === 'beats' && <BeatView store={store} engine={engine} />}
+              {store.view === 'beats' && <BeatView store={store} engine={engine} compact={phone && !land} />}
               {store.view === 'session' && <SessionView store={store} engine={engine} />}
             </div>
           </div>
@@ -1279,7 +1291,13 @@ async function importDropped(files: FileList) {
             <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
           )}
           {surface === 'studio' && panel === 'piano' && (
-            <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />
+            <PianoRoll
+              store={store}
+              engine={engine}
+              compact={phone && !land}
+              toolsInBar={surface === 'studio' && store.view === 'arrange'}
+              onIdeas={() => setIdeasOpen(true)}
+            />
           )}
           {(surface !== 'studio' || panel === 'room') && (
             <VideoDock
@@ -1436,6 +1454,7 @@ async function importDropped(files: FileList) {
                 ['⌘/Ctrl E or B', 'Split the clip at the playhead'],
                 ['Delete', 'Remove the selected clip'],
                 ['+ or −', 'Zoom the timeline'],
+                ['1–7', 'Select, Box, Pencil, Split, Erase, Pan, Zoom'],
                 ['?', 'Show or hide this list'],
               ].map(([key, action]) => (
                 <p key={key}>
