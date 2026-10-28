@@ -312,9 +312,12 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   padding: 12px; align-items: stretch;
 }
 .strip {
-  width: var(--strip); flex: 0 0 var(--strip); min-width: 0;
+  width: var(--strip); flex: 0 0 var(--strip); min-width: 0; container-type: inline-size;
   background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
   padding: 8px; display: flex; flex-direction: column; gap: 8px;
+}
+@container (max-width: 150px) {
+  .route-fields { flex-direction: column; }
 }
 .strip.master { background: #1b2820; border-color: rgba(115, 196, 143, 0.4); }
 .strip h3 { margin: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
