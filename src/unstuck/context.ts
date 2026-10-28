@@ -1,5 +1,8 @@
-/** Build a SongContext from the project, or fill in a partial one from analysis. */
+/** Build a SongContext from analysis when it exists, otherwise from MIDI. */
 
+import { cachedAnalyses } from '../analysis/cache'
+import type { AnalysisResult } from '../analysis/types'
+import { analysisMode, pickAnalysis, sharedSections, spellToRoman } from './adapt'
 import { renderPattern } from '../model/steps'
 import { detectKey, normalizeScale, pitchClass, scaleById, type ScaleId } from '../model/scale'
 import { quartersPerBar, samplesToBeats } from '../model/time'
@@ -58,7 +61,45 @@ export function normalizeSongContext(input: SongContextInput): SongContext {
   }
 }
 
-/** Fallback until analysis supplies a SongContext. Harmonic MIDI becomes chords; monophonic lines become the melody. */
+/**
+ * Analysis wins when any track has been analyzed. MIDI supplies chords only
+ * when that shared cache is empty. Sections in the cache replace clip names.
+ */
+export function songContext(project: Project, playheadBeat = 0, analyses?: readonly AnalysisResult[]): SongContext {
+  const found = analyses ?? cachedAnalyses()
+  const harmony = pickAnalysis(found)
+  if (!harmony) return deriveSongContext(project, playheadBeat)
+  const midi = deriveSongContext(project, playheadBeat)
+  const mode = analysisMode(harmony)
+  const key = ((harmony.key.root % 12) + 12) % 12
+  const sections = sharedSections(found)
+  const chords = harmony.chordsByBar.flatMap((chord) => {
+    const symbol = spellToRoman(chord.symbol, key, mode)
+    if (!symbol) return []
+    return [{ bar: chord.bar, symbol, root: chord.root, beats: chord.beats }]
+  })
+  const analyzedEnd = Math.max(
+    ...harmony.chordsByBar.map((chord) => chord.startBeat + chord.beats),
+    ...sections.map((section) => (section.startBar + section.bars) * midi.beatsPerBar),
+    0,
+  )
+  return normalizeSongContext({
+    key,
+    scale: harmony.scale || midi.scale,
+    mode,
+    tempo: harmony.tempo > 0 ? harmony.tempo : midi.tempo,
+    beatsPerBar: midi.beatsPerBar,
+    chordsByBar: chords,
+    sections: sections.length ? sections : midi.sections,
+    melodyNotes: midi.melodyNotes,
+    playheadBeat,
+    tracks: midi.tracks,
+    contentEndBeat: Math.max(midi.contentEndBeat, analyzedEnd),
+    activeRoles: midi.activeRoles,
+  })
+}
+
+/** Harmonic MIDI becomes chords, and monophonic lines become the melody. */
 export function deriveSongContext(project: Project, playheadBeat = 0): SongContext {
   const beatsPerBar = clampBar(quartersPerBar(project.timeSignature))
   const roles = new Map<string, TrackRole>()
