@@ -120,20 +120,20 @@
   flex: none;
 }
 
+.loop-gap { align-items: flex-end; justify-content: flex-start; padding-bottom: 4px; }
 .loop-toggle {
-  position: sticky;
-  left: 4px;
-  z-index: 8;
-  top: 6px;
-  height: 22px;
-  min-height: 22px;
-  margin: 4px;
-  padding: 0 8px;
-  border-radius: 6px;
+  position: static;
+  z-index: 2;
+  height: 28px;
+  min-height: 28px;
+  margin: 0 6px 2px;
+  padding: 0 10px;
+  border-radius: 8px;
   border: 1px solid var(--line);
-  background: #101814;
+  background-image: var(--face);
+  box-shadow: var(--raised);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .loop-toggle.on { background: #2f6b45; color: white; border-color: transparent; }
 .loop-toggle.off {
@@ -141,7 +141,7 @@
   color: #e0b15a;
   border-color: #e0b15a;
 }
-.shell.phone .loop-toggle { height: 36px; min-height: 36px; font-size: 13px; }
+.shell.phone .loop-toggle { height: 36px; min-height: 36px; margin-bottom: 4px; font-size: 13px; padding: 0 12px; }
 
 .shell.phone:not(.land) .tool-slot .timeline-tools button {
   width: auto;

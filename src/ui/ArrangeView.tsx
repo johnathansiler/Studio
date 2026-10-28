@@ -510,8 +510,18 @@ export function ArrangeView({
           body.scrollTop += event.deltaY
         }}
       >
-        <div className="ruler-gap">
+        <div className="ruler-gap loop-gap">
           <SongMapHead store={store} position={position} compact />
+          <button
+            type="button"
+            className={`loop-toggle ${project.loopEnabled ? 'on' : 'off'}`}
+            aria-pressed={project.loopEnabled}
+            data-loop={project.loopEnabled ? 'on' : 'off'}
+            title={project.loopEnabled ? 'Loop is on. Playback wraps at the end of the highlighted region.' : 'Loop is off. The region is marked, but playback does not wrap.'}
+            onClick={() => store.toggle('loopEnabled')}
+          >
+            {project.loopEnabled ? 'Loop on' : 'Loop off'}
+          </button>
         </div>
         {project.tracks.map((track) => (
           <div className="head" data-track={track.id} key={track.id} style={rowHeight(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => store.selectTrack(track.id)}>
@@ -561,17 +571,6 @@ export function ArrangeView({
         <div className="timeline-inner" ref={innerRef} data-px={px} style={{ width }}>
           <SongMap store={store} px={px} width={width} onSeek={onSeek} />
           <div className="ruler">
-            <button
-              type="button"
-              className={`loop-toggle ${project.loopEnabled ? 'on' : 'off'}`}
-              aria-pressed={project.loopEnabled}
-              data-loop={project.loopEnabled ? 'on' : 'off'}
-              title={project.loopEnabled ? 'Loop is on. Playback wraps at the end of the highlighted region.' : 'Loop is off. The region is marked, but playback does not wrap.'}
-              onClick={(event) => { event.stopPropagation(); store.toggle('loopEnabled') }}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              {project.loopEnabled ? 'Loop on' : 'Loop off'}
-            </button>
             <LoopRegion
               store={store}
               project={project}
