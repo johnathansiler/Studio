@@ -5,6 +5,7 @@ import { defaultRoll } from '../../model/paint'
 import { normalizeQuantize } from '../../model/quantize'
 import { defaultRecord, uid } from '../../model/types'
 import { normalizeMidiProject } from '../../model/midiTools'
+import { normalizeTrackScaler } from '../../instruments/scaler/model'
 import { normalizeScale } from '../../model/scale'
 import { normalizePadKit } from '../../model/padMachine'
 import { normalizeBeats } from '../../model/steps'
@@ -929,6 +930,7 @@ export function normalizeProject(project: Project): Project {
   project.presets = project.presets ?? []
   project.masterInserts = project.masterInserts ?? []
   for (const track of project.tracks) {
+    normalizeTrackScaler(track)
     track.plugins = (track.plugins ?? []).map(fillInstrument)
     track.sends = track.sends ?? []
     track.inserts = track.inserts ?? []
