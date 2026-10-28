@@ -13,6 +13,11 @@ import { attachGlissando } from './glissando'
 const WHITE = [0, 2, 4, 5, 7, 9, 11]
 const BLACK = [1, 3, 6, 8, 10]
 const KEYBOARD: Record<string, number> = { a: 60, w: 61, s: 62, e: 63, d: 64, f: 65, t: 66, g: 67, y: 68, h: 69, u: 70, j: 71 }
+const KEY_CODES: Record<string, number> = {
+  KeyA: 60, KeyW: 61, KeyS: 62, KeyE: 63, KeyD: 64, KeyF: 65,
+  KeyT: 66, KeyG: 67, KeyY: 68, KeyH: 69, KeyU: 70, KeyJ: 71,
+}
+const PAD_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyZ', 'KeyX', 'KeyC', 'KeyV']
 const DECKS = ['pads', 'steps', 'keys', 'session', 'mix'] as const
 type Deck = (typeof DECKS)[number]
 const RATES: RepeatRate[] = ['1/4', '1/8', '1/16', '1/32']
@@ -131,6 +136,7 @@ export function PerformPop({
         const rect = key?.getBoundingClientRect() ?? { top: event.clientY, height: 1 }
         play.down(pitch, pointerVelocity(event, rect), event.timeStamp, pointerId, level)
         light(outputs.current, pitch, 127)
+        try { key?.setPointerCapture(pointerId) } catch { /* already released */ }
       },
       onOff: (pitch, event, pointerId) => {
         light(outputs.current, pitch, 0)
@@ -162,6 +168,7 @@ export function PerformPop({
       key.classList.add('lit')
       light(outputs.current, pitch, 127)
       pointers.set(event.pointerId, key)
+      try { key.setPointerCapture(event.pointerId) } catch { /* already released */ }
     }
     const move = (event: PointerEvent) => {
       const key = pointers.get(event.pointerId)
@@ -200,31 +207,56 @@ export function PerformPop({
 
   useEffect(() => {
     const play = performer.current
-    if (!play || drums) return
-    const downKeys = new Set<string>()
+    if (!play) return
+    const heldKeys = new Map<string, number>()
+    let nextId = 2000
+    const tokenOf = (event: KeyboardEvent) => event.code || event.key
+    const pitchOf = (event: KeyboardEvent) => {
+      if (drums) {
+        const index = PAD_CODES.indexOf(event.code)
+        if (index < 0) return null
+        const row = store.padProgram().banks[bankRef.current] || []
+        const pad = row[index]
+        if (!pad) return null
+        return { pitch: levels ? (row[selectedPad]?.pitch ?? pad.pitch) : pad.pitch, level: levels ? index : undefined }
+      }
+      const pitch = KEY_CODES[event.code] ?? KEYBOARD[event.key.toLowerCase()]
+      return pitch == null ? null : { pitch, level: undefined }
+    }
     const down = (event: KeyboardEvent) => {
-      if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return
-      const tag = (event.target as HTMLElement).tagName
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const tag = (event.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
-      const pitch = KEYBOARD[event.key.toLowerCase()]
-      if (pitch == null || downKeys.has(event.key)) return
+      const token = tokenOf(event)
+      if (heldKeys.has(token)) return
+      const next = pitchOf(event)
+      if (!next) return
       event.preventDefault()
-      downKeys.add(event.key)
-      play.down(pitch, 0.8, event.timeStamp, 2000 + pitch)
+      const id = nextId++
+      heldKeys.set(token, id)
+      play.down(next.pitch, 0.8, event.timeStamp, id, next.level)
     }
     const up = (event: KeyboardEvent) => {
-      const pitch = KEYBOARD[event.key.toLowerCase()]
-      if (pitch == null || !downKeys.has(event.key)) return
-      downKeys.delete(event.key)
-      play.up(2000 + pitch, event.timeStamp)
+      const id = heldKeys.get(tokenOf(event))
+      if (id == null) return
+      heldKeys.delete(tokenOf(event))
+      play.up(id, event.timeStamp)
+    }
+    const blur = () => {
+      const now = performance.now()
+      for (const id of heldKeys.values()) play.up(id, now)
+      heldKeys.clear()
     }
     window.addEventListener('keydown', down)
     window.addEventListener('keyup', up)
+    window.addEventListener('blur', blur)
     return () => {
+      blur()
       window.removeEventListener('keydown', down)
       window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', blur)
     }
-  }, [drums])
+  }, [drums, levels, selectedPad, store])
 
   useEffect(() => {
     if (!navigator.requestMIDIAccess) return

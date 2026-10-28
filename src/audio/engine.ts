@@ -74,7 +74,7 @@ export class AudioEngine {
   private keysSab: Int32Array | null = null
   private drumTable: ResidentDrum[] = []
   private drumBuffers: AudioBuffer[] = []
-  private warmVoices: { osc: OscillatorNode; gain: GainNode; busy: boolean }[] = []
+  private warmVoices: { osc: OscillatorNode; gain: GainNode; busy: boolean; pitch: number; age: number }[] = []
   lastOnsetFrame = -1
   private oneShots: { pitch: number; stop: () => void }[] = []
 
@@ -2030,7 +2030,7 @@ export class AudioEngine {
     for (const shot of this.oneShots) if (shot.pitch === pitch) shot.stop()
     this.oneShots = this.oneShots.filter((shot) => shot.pitch !== pitch)
     for (const voice of this.warmVoices) {
-      if (voice.busy) {
+      if (voice.busy && voice.pitch === pitch) {
         voice.gain.gain.setTargetAtTime(0.0001, this.ctx?.currentTime || 0, 0.03)
         voice.busy = false
       }
@@ -2040,14 +2040,15 @@ export class AudioEngine {
   private pushSab(type: number, pitch: number, velocity: number, drum: number) {
     const sab = this.keysSab
     if (!sab) return false
-    const count = Atomics.load(sab, 0)
-    if (count >= 8) return false
-    const base = 1 + count * 4
+    const write = Atomics.load(sab, 0)
+    const read = Atomics.load(sab, 1)
+    if (write - read >= 8) return false
+    const base = 2 + (write % 8) * 4
     Atomics.store(sab, base, type)
     Atomics.store(sab, base + 1, pitch | 0)
     Atomics.store(sab, base + 2, Math.round(velocity * 1000))
     Atomics.store(sab, base + 3, drum | 0)
-    Atomics.store(sab, 0, count + 1)
+    Atomics.store(sab, 0, write + 1)
     return true
   }
 
@@ -2063,14 +2064,20 @@ export class AudioEngine {
       osc.connect(gain)
       gain.connect(out)
       osc.start()
-      this.warmVoices.push({ osc, gain, busy: false })
+      this.warmVoices.push({ osc, gain, busy: false, pitch: 60, age: 0 })
     }
   }
 
   private warmNote(pitch: number, velocity: number) {
-    const voice = this.warmVoices.find((item) => !item.busy) || this.warmVoices[0]
+    for (const voice of this.warmVoices) if (voice.busy) voice.age += 1
+    const same = this.warmVoices.find((item) => item.busy && item.pitch === pitch)
+    const free = this.warmVoices.find((item) => !item.busy)
+    const oldest = this.warmVoices.slice().sort((a, b) => b.age - a.age)[0]
+    const voice = same || free || oldest
     if (!voice || !this.ctx) return
     voice.busy = true
+    voice.pitch = pitch
+    voice.age = 0
     voice.osc.frequency.setValueAtTime(440 * 2 ** ((pitch - 69) / 12), this.ctx.currentTime)
     voice.gain.gain.cancelScheduledValues(this.ctx.currentTime)
     voice.gain.gain.setValueAtTime(Math.max(0.001, velocity * 0.2), this.ctx.currentTime)
@@ -2090,7 +2097,7 @@ export class AudioEngine {
     }
     node.port.postMessage({ type: 'samples', samples: this.drumTable.map((drum) => drum.samples) })
     if (typeof SharedArrayBuffer !== 'undefined' && globalThis.crossOriginIsolated) {
-      const buffer = new SharedArrayBuffer(33 * 4)
+      const buffer = new SharedArrayBuffer((2 + 8 * 4) * 4)
       this.keysSab = new Int32Array(buffer)
       node.port.postMessage({ type: 'sab', buffer })
     }
@@ -2262,10 +2269,8 @@ export class AudioEngine {
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[]) {
     if (note.muted) return
     if (track?.rack && ctx === this.ctx) {
-      const knock = track.rack.devices.find((device) => device.kind === 'knock')
-      const legato = (knock?.params.legato ?? 0) >= 0.5
       const at = Math.max(when, ctx.currentTime)
-      this.rackHost.note(track.id, note.pitch, note.velocity, at, !!note.slide || legato)
+      this.rackHost.note(track.id, note.pitch, note.velocity, at, !!note.slide)
       this.rackHost.note(track.id, note.pitch, 0, at + dur)
       return
     }
