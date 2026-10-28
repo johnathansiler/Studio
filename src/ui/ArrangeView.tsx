@@ -4,7 +4,8 @@ import { activeComp } from '../model/comp'
 import { computePeaks } from '../model/demo'
 import { sourceSamplesOf, stretchEdge } from '../audio/stretch/engine'
 import { rectsHit } from '../model/edit'
-import { snapSample } from '../model/time'
+import { arrangementEndSample, gridMarks, mapIsLinear, projectBeatSample, projectSampleBeat, pxAtBeat, snapSampleToMap } from '../model/tempoMap'
+import { SongMap, SongMapHead, SmartTempoBar } from './SongMap'
 import type { AudioClip } from '../model/types'
 import { ClipSheet } from './ClipSheet'
 import type { ProjectStore } from '../state/store'
@@ -118,14 +119,21 @@ export function ArrangeView({
     }
   }, [])
 
-  const seconds = Math.max(16, (project.loopEndSample / project.sampleRate) * 2, ...project.tracks.flatMap((t) => t.clips.map((c) => (c.startSample + c.durationSamples) / project.sampleRate + 2)))
+  const seconds = Math.max(
+    16,
+    arrangementEndSample(project) / project.sampleRate + 2,
+    (project.loopEndSample / project.sampleRate) * 2,
+    ...project.tracks.flatMap((t) => t.clips.map((c) => (c.startSample + c.durationSamples) / project.sampleRate + 2)),
+  )
   const width = seconds * px
+  const linear = mapIsLinear(project)
   const beatPx = (60 / project.tempo) * px
+  const marks = gridMarks(project, projectSampleBeat(project, seconds * project.sampleRate) + 1)
 
   function seekFromEvent(event: MouseEvent<HTMLDivElement>) {
     const bounds = event.currentTarget.getBoundingClientRect()
     const sample = ((event.clientX - bounds.left) / px) * project.sampleRate
-    onSeek(snapSample(sample, project.sampleRate, project.tempo, project.snap))
+    onSeek(snapSampleToMap(sample, project))
   }
 
   function sampleAt(clientX: number) {
@@ -157,6 +165,7 @@ export function ArrangeView({
     if (event.button !== 0) return
     const current = activeTool()
     const target = event.target as HTMLElement
+    if (target.closest('.song-map, .smart-tempo, .map-head')) return
     if (target.closest('.clip') && !passive) return
     if (target.closest('.ruler') && current !== 'pan' && current !== 'zoom') return
     if (current === 'pan') {
@@ -246,16 +255,16 @@ export function ArrangeView({
   }
 
   function trimMidi(event: ReactPointerEvent, trackId: string, clipId: string, edge: 'start' | 'end', stretch: boolean) {
+    event.stopPropagation()
     const clip = project.tracks.find((track) => track.id === trackId)?.midiClips.find((item) => item.id === clipId)
     if (!clip) return
-    const originX = event.clientX
-    let beat = edge === 'start' ? clip.startBeat : clip.startBeat + clip.durationBeats
     watch(
+      () => undefined,
       (ev) => {
-        const delta = ((ev.clientX - originX) / pxRef.current) * (project.tempo / 60)
-        beat = (edge === 'start' ? clip.startBeat : clip.startBeat + clip.durationBeats) + delta
+        const sample = Math.max(0, sampleAt(ev.clientX))
+        const beat = projectSampleBeat(project, project.snap ? snapSampleToMap(sample, project) : sample)
+        store.resizeMidiClip(trackId, clipId, edge, beat, stretch)
       },
-      () => store.resizeMidiClip(trackId, clipId, edge, beat, stretch),
     )
   }
 
@@ -277,25 +286,29 @@ export function ArrangeView({
       }
     }
     const originX = event.clientX
-    let delta = 0
+    const deltas = new Map<string, number>()
     watch(
       (ev) => {
-        const samples = ((ev.clientX - originX) / pxRef.current) * project.sampleRate
-        delta = kind === 'audio' ? samples : (samples / project.sampleRate) * (project.tempo / 60)
+        const sampleDelta = ((ev.clientX - originX) / pxRef.current) * project.sampleRate
         const patch: Record<string, number> = {}
-        for (const id of ids) patch[id] = delta
+        for (const [id, item] of origins) {
+          if (kind === 'audio') patch[id] = sampleDelta
+          else patch[id] = projectSampleBeat(project, projectBeatSample(project, item.at) + sampleDelta) - item.at
+          deltas.set(id, patch[id])
+        }
         setNudge(kind === 'audio' ? { audio: patch, midi: {} } : { audio: {}, midi: patch })
       },
       () => {
         setNudge(null)
-        if (Math.abs(delta) < (kind === 'audio' ? 1 : 0.01)) {
+        const moved = [...deltas.values()].some((value) => Math.abs(value) >= (kind === 'audio' ? 1 : 0.01))
+        if (!moved) {
           if (additive && wasIn) store.selectClip(trackId, clipId, kind === 'midi', false, true)
           return
         }
         if (kind === 'audio') {
-          store.placeAudioClips([...origins].map(([id, item]) => ({ trackId: item.trackId, clipId: id, startSample: item.at + delta })))
+          store.placeAudioClips([...origins].map(([id, item]) => ({ trackId: item.trackId, clipId: id, startSample: item.at + (deltas.get(id) ?? 0) })))
         } else {
-          store.placeMidiClips([...origins].map(([id, item]) => ({ trackId: item.trackId, clipId: id, startBeat: item.at + delta })))
+          store.placeMidiClips([...origins].map(([id, item]) => ({ trackId: item.trackId, clipId: id, startBeat: item.at + (deltas.get(id) ?? 0) })))
         }
       },
     )
@@ -308,6 +321,7 @@ export function ArrangeView({
 
   return (
     <div className="arrange-wrap">
+      <SmartTempoBar store={store} />
       <div className="rec-bar" role="group" aria-label="Recording">
         <button type="button" className={record.loop ? 'on' : ''} onClick={() => {
           const next = !record.loop
@@ -383,7 +397,9 @@ export function ArrangeView({
       </div>
       <div className="arrange" data-tool={tool}>
       <div className="heads">
-        <div className="ruler-gap" />
+        <div className="ruler-gap">
+          <SongMapHead store={store} position={position} />
+        </div>
         {project.tracks.map((track) => (
           <div className="head" data-track={track.id} key={track.id} style={laneStyle(track, store.selectedClipId)} onClick={() => store.selectTrack(track.id)}>
             <header>
@@ -473,20 +489,22 @@ export function ArrangeView({
         }}
       >
         <div className="timeline-inner" ref={innerRef} data-px={px} style={{ width }}>
-          <div
-            className="ruler"
-            onClick={seekFromEvent}
-            style={{ backgroundImage: `linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px)`, backgroundSize: `${beatPx}px 100%` }}
-          >
-            {Array.from({ length: Math.ceil(seconds / (60 / project.tempo)) + 1 }, (_, beat) =>
-              beat % project.timeSignature.numerator === 0 ? (
-                <span key={beat} style={{ left: beat * beatPx }}>
-                  {beat / project.timeSignature.numerator + 1}
+          <SongMap store={store} px={px} width={width} onSeek={onSeek} />
+          <div className="ruler" onClick={seekFromEvent}>
+            {marks.map((mark) =>
+              mark.downbeat ? (
+                <span key={mark.beat} style={{ left: pxAtBeat(project, mark.beat, px) }}>
+                  {mark.bar}
                 </span>
               ) : (
-                <i key={beat} style={{ left: beat * beatPx }} />
+                <i key={mark.beat} style={{ left: pxAtBeat(project, mark.beat, px) }} />
               ),
             )}
+          </div>
+          <div className="bar-grid" aria-hidden>
+            {marks.filter((mark) => mark.downbeat).map((mark) => (
+              <i key={mark.beat} style={{ left: pxAtBeat(project, mark.beat, px) }} />
+            ))}
           </div>
           {project.loopEnabled && (
             <div
@@ -502,12 +520,12 @@ export function ArrangeView({
               className="lane"
               data-track={track.id}
               key={track.id}
-              style={{ backgroundSize: `${beatPx}px 100%`, ...laneStyle(track, store.selectedClipId) }}
+              style={{ backgroundSize: linear ? `${beatPx}px 100%` : undefined, backgroundImage: linear ? undefined : 'none', ...laneStyle(track, store.selectedClipId) }}
               onDoubleClick={(event) => {
                 if (track.type !== 'midi') return
                 const bounds = event.currentTarget.getBoundingClientRect()
-                const beat = ((event.clientX - bounds.left) / px) * (project.tempo / 60)
-                store.addMidiClip(track.id, Math.floor(beat))
+                const sample = ((event.clientX - bounds.left) / px) * project.sampleRate
+                store.addMidiClip(track.id, Math.floor(projectSampleBeat(project, sample)))
               }}
             >
               {ghost?.trackId === track.id && (
@@ -533,8 +551,8 @@ export function ArrangeView({
               )}
               {track.midiClips.filter((clip) => !clip.slotOnly && clip.scene == null).map((clip) => {
                 const beat = clip.startBeat + (nudge?.midi[clip.id] ?? 0)
-                const left = ((beat * 60) / project.tempo) * px
-                const widthPx = ((clip.durationBeats * 60) / project.tempo) * px
+                const left = pxAtBeat(project, beat, px)
+                const widthPx = Math.max(8, pxAtBeat(project, beat + clip.durationBeats, px) - left)
                 const picked = store.selectedMidiClipIds.includes(clip.id)
                 return (
                   <div
@@ -588,8 +606,8 @@ export function ArrangeView({
                   .filter((clip) => clip.scene == null)
                   .map((clip) => {
                     const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
-                    const left = ((clip.startBeat * 60) / project.tempo) * px
-                    const widthPx = Math.max(24, ((clip.lengthBeats * 60) / project.tempo) * px)
+                    const left = pxAtBeat(project, clip.startBeat, px)
+                    const widthPx = Math.max(24, pxAtBeat(project, clip.startBeat + clip.lengthBeats, px) - left)
                     return (
                       <div key={clip.id} className="clip pattern" style={{ left, width: widthPx, background: pattern?.color || track.color, pointerEvents: passive ? 'none' : undefined }}>
                         <em>{pattern?.name || 'Pattern'}</em>
@@ -692,7 +710,7 @@ function ClipView({
       held = true
       setMenu({ x: originX, y: originY })
     }, 480)
-    const snapped = (value: number) => snapSample(value, project.sampleRate, project.tempo, project.snap)
+    const snapped = (value: number) => snapSampleToMap(value, project)
     const move = (ev: PointerEvent) => {
       if (Math.abs(ev.clientX - originX) > 8 || Math.abs(ev.clientY - originY) > 8) window.clearTimeout(timer)
       if (held) return

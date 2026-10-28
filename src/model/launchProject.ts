@@ -64,6 +64,8 @@ function signature(project: Project): string {
     launchQuant: project.launchQuant ?? '1bar',
     recordBars: project.recordBars ?? 4,
     tempoMap: project.tempoMap ?? [],
+    meterMap: project.meterMap ?? [],
+    sections: project.sections ?? [],
     waveforms: project.waveforms ?? {},
     automation: project.automation ?? [],
     presets: project.presets ?? [],
