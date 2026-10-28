@@ -103,8 +103,19 @@ import {
   shiftCells,
   type StepCell,
 } from '../model/steps'
+import {
+  applyMidiChain,
+  bindingFromMessage,
+  chainContext,
+  currentControl,
+  defaultFx,
+  describeWrite,
+  upsertMap,
+  type LearnSlot,
+  type ParsedMidi,
+} from '../model/midiTools'
 import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK_COLORS } from '../model/types'
-import type { AudioAsset, AudioClip, AutomationWriteMode, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, MidiClip, MidiNote, MixGroup, PluginInstance, Project, RecordSettings, SectionKind, TakeLane, Track } from '../model/types'
+import type { AudioAsset, AudioClip, AutomationWriteMode, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, LiveCaptureSettings, MidiClip, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, MixGroup, PluginInstance, Project, RecordSettings, SectionKind, TakeLane, Track } from '../model/types'
 import { createSection, deleteSectionContents, duplicateSectionContents, moveSectionContents, resizeSection as setSectionLength, sectionKind } from '../model/sections'
 import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
 import { downbeatAt, projectSampleBeat, snapSampleToMap, tempoAtSample } from '../model/tempoMap'
@@ -186,6 +197,10 @@ export class ProjectStore {
   rackDetail = false
   /** Letter keys play notes while this is on, so tap-tempo stays off T. */
   keyboardMidi = false
+  /** MIDI tools strip. Not saved. */
+  midiToolsOpen = false
+  midiLearnActive = false
+  midiLearnSlot: LearnSlot | null = null
   private tempoGroup = false
   toasts: Toast[] = []
   version = 0
@@ -4005,6 +4020,201 @@ export class ProjectStore {
       this.swipeTake(track.id, clip.id, clip.folder.lanes[1].id, cut, length)
       this.setRecord({ loop: true, punchEnabled: true, punchIn: 0, punchOut: length })
     }
+  }
+
+  setMidiToolsOpen(open: boolean) {
+    this.midiToolsOpen = open
+    if (!open) {
+      this.midiLearnActive = false
+      this.midiLearnSlot = null
+    }
+    this.emit()
+  }
+
+  setMidiLearn(active: boolean) {
+    this.midiLearnActive = active
+    if (!active) this.midiLearnSlot = null
+    this.emit()
+  }
+
+  armLearn(slot: LearnSlot) {
+    this.midiLearnActive = true
+    this.midiLearnSlot = slot
+    this.toast(`Learning ${slot.label}. Move a knob or play a key.`, 'info')
+    this.emit()
+  }
+
+  completeLearn(message: ParsedMidi) {
+    const slot = this.midiLearnSlot
+    if (!slot || !this.midiLearnActive) return false
+    this.mutate(() => {
+      const entry = bindingFromMessage(slot, message, uid('map'))
+      this.project.midiMaps = upsertMap(this.project.midiMaps ?? [], entry)
+    })
+    this.midiLearnActive = false
+    this.midiLearnSlot = null
+    this.toast(`Mapped ${slot.label}.`, 'good')
+    return true
+  }
+
+  updateMidiMap(id: string, patch: Partial<MidiMapEntry>) {
+    this.mutate(() => {
+      const map = this.project.midiMaps?.find((item) => item.id === id)
+      if (!map) return
+      Object.assign(map, patch)
+    })
+  }
+
+  clearMidiMap(id: string) {
+    this.mutate(() => {
+      this.project.midiMaps = (this.project.midiMaps ?? []).filter((item) => item.id !== id)
+    })
+  }
+
+  clearMidiMaps() {
+    this.mutate(() => {
+      this.project.midiMaps = []
+    })
+  }
+
+  setMidiOut(patch: Partial<MidiOutSettings>) {
+    this.mutate(() => {
+      this.project.midiOut = { enabled: false, port: '', channel: 0, clock: false, ...(this.project.midiOut || {}), ...patch }
+    })
+  }
+
+  setLiveCapture(patch: Partial<LiveCaptureSettings>) {
+    this.mutate(() => {
+      const current = { enabled: true, bars: 4, ...(this.project.liveCapture || {}) }
+      this.project.liveCapture = { ...current, ...patch, bars: Math.max(1, Math.min(32, Math.round((patch.bars ?? current.bars) || 4))) }
+    })
+  }
+
+  currentControlValue(target: string) {
+    return currentControl(this.project, target)
+  }
+
+  applyMidiControl(target: string, value: number, continuous = false) {
+    if (Math.abs(currentControl(this.project, target) - value) < 1e-4) return
+    if (target === 'transport:tempo') {
+      this.setTempo(value, continuous)
+      return
+    }
+    const write = () => {
+      const action = describeWrite(target, value)
+      if (!action) return
+      if (action.kind === 'master') this.project.masterVolume = clamp(action.volume, 0, 1.25)
+      else if (action.kind === 'flag') this.project[action.flag] = action.value
+      else if (action.kind === 'track') {
+        const track = this.track(action.id)
+        if (!track) return
+        if (action.key === 'volume') track.volume = clamp(action.value, 0, 1.25)
+        else if (action.key === 'pan') track.pan = clamp(action.value, -1, 1)
+        else if (action.key === 'mute') track.mute = action.value >= 0.5
+        else if (action.key === 'solo') track.solo = action.value >= 0.5
+        else track.armed = action.value >= 0.5
+      } else if (action.kind === 'fx') {
+        const effect = this.track(action.trackId)?.midiFx?.find((item) => item.id === action.fxId)
+        if (effect) effect.params[action.param] = action.value
+      }
+    }
+    if (continuous) this.draft(write)
+    else this.mutate(write)
+  }
+
+  addMidiFx(trackId: string, kind: MidiFxKind) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      track.midiFx = [...(track.midiFx ?? []), defaultFx(kind, uid('fx'))]
+    })
+  }
+
+  setMidiFx(trackId: string, fxId: string, patch: Partial<Pick<MidiFx, 'enabled'>> & { params?: Record<string, number> }) {
+    this.mutate(() => {
+      const effect = this.track(trackId)?.midiFx?.find((item) => item.id === fxId)
+      if (!effect) return
+      if (patch.enabled != null) effect.enabled = patch.enabled
+      if (patch.params) effect.params = { ...effect.params, ...patch.params }
+    })
+  }
+
+  moveMidiFx(trackId: string, fxId: string, direction: -1 | 1) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      const list = track?.midiFx
+      if (!list) return
+      const index = list.findIndex((item) => item.id === fxId)
+      const next = index + direction
+      if (index < 0 || next < 0 || next >= list.length) return
+      const [item] = list.splice(index, 1)
+      list.splice(next, 0, item)
+    })
+  }
+
+  removeMidiFx(trackId: string, fxId: string) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track?.midiFx) return
+      track.midiFx = track.midiFx.filter((item) => item.id !== fxId)
+    })
+  }
+
+  /** Bake the chain into the clip so the instrument sees the effected notes. */
+  printMidiFx(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      const clip = track?.midiClips.find((item) => item.id === clipId)
+      if (!track || !clip) return
+      const muted = clip.notes.filter((note) => note.muted).map((note) => ({ ...note }))
+      const printed = applyMidiChain(clip.notes, track.midiFx, chainContext(this.project, clip.id))
+      clip.notes = [...printed.map((note) => ({ ...note, id: uid('note') })), ...muted]
+      let end = clip.durationBeats
+      for (const note of clip.notes) end = Math.max(end, note.startBeat + note.durationBeats)
+      clip.durationBeats = Math.max(0.25, end)
+    })
+  }
+
+  placeMidiTake(
+    trackId: string,
+    startBeat: number,
+    notes: { pitch: number; startBeat: number; durationBeats: number; velocity: number }[],
+    name = 'MIDI take',
+  ) {
+    if (!notes.length) return
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0.25)
+      const clip: MidiClip = {
+        id: uid('midi'),
+        name,
+        startBeat: Math.max(0, startBeat),
+        durationBeats: Math.max(0.25, end),
+        notes: notes.map((note) => ({
+          id: uid('note'),
+          pitch: Math.max(0, Math.min(127, Math.round(note.pitch))),
+          startBeat: Math.max(0, note.startBeat),
+          durationBeats: Math.max(0.05, note.durationBeats),
+          velocity: Math.max(0.05, Math.min(1, note.velocity)),
+        })),
+      }
+      track.midiClips.push(clip)
+      this.selectedTrackId = trackId
+      this.selectedMidiClipId = clip.id
+    })
+  }
+
+  applyInputRoutes(routes: { trackId: string; input: string; armed: boolean }[]) {
+    if (!routes.length) return
+    this.mutate(() => {
+      for (const route of routes) {
+        const track = this.track(route.trackId)
+        if (!track) continue
+        track.input = route.input
+        track.armed = route.armed
+      }
+    })
   }
 }
 

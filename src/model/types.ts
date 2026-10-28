@@ -327,6 +327,43 @@ export interface RecordSettings {
   quick: boolean
 }
 
+export type MidiFxKind = 'arp' | 'chord' | 'scale' | 'repeat' | 'humanize' | 'velocity'
+
+/** One MIDI effect in the chain that sits in front of an instrument. */
+export interface MidiFx {
+  id: string
+  kind: MidiFxKind
+  enabled: boolean
+  params: Record<string, number>
+}
+
+/** Hardware control bound to an on-screen target. Saved with the project. */
+export interface MidiMapEntry {
+  id: string
+  target: string
+  label: string
+  source: 'cc' | 'note'
+  /** -1 listens on every channel. */
+  channel: number
+  number: number
+  min: number
+  max: number
+  mode: 'absolute' | 'toggle'
+}
+
+export interface MidiOutSettings {
+  enabled: boolean
+  /** Empty sends to every connected output. Otherwise a port id or name. */
+  port: string
+  channel: number
+  clock: boolean
+}
+
+export interface LiveCaptureSettings {
+  enabled: boolean
+  bars: number
+}
+
 export interface Track {
   id: string
   name: string
@@ -363,6 +400,8 @@ export interface Track {
   /** Scene index → clip id. Missing means scene N is clips[N]. */
   audioSlots?: (string | null)[]
   midiSlots?: (string | null)[]
+  /** Effects that reshape notes before they reach the instrument. */
+  midiFx?: MidiFx[]
 }
 
 /** Bump when saved documents change shape. migrateProject opens older numbers. */
@@ -429,6 +468,12 @@ export interface Project {
   waveforms?: Record<string, { min: number; max: number }[]>
   /** Pad banks, swing, and song chain for the drum deck. */
   padKit?: import('./padMachine').PadProgram
+  /** Hardware CC and note bindings. One entry per on-screen control. */
+  midiMaps?: MidiMapEntry[]
+  /** Notes and clock sent to external gear. */
+  midiOut?: MidiOutSettings
+  /** Always-on performance buffer that can become a clip. */
+  liveCapture?: LiveCaptureSettings
 }
 
 export interface AudioAsset {

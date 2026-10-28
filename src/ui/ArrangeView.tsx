@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
+import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { activeComp } from '../model/comp'
 import { computePeaks } from '../model/demo'
 import { sourceSamplesOf, stretchEdge } from '../audio/stretch/engine'
@@ -396,8 +397,8 @@ export function ArrangeView({
               <button type="button" className={`mini auto-open ${store.openLanes[track.id] ? 'on' : ''}`} aria-pressed={!!store.openLanes[track.id]} aria-label="Automation lane" title="Show the automation lane for this track." onClick={(event) => { event.stopPropagation(); store.toggleAutomation(track.id) }}>
                 Auto
               </button>
-              {track.type === 'audio' && (
-                <TipButton className={`mini ${track.armed ? 'on-r' : ''}`} label={copyOf(TRACK_ROW, 'arm').label} hint={copyOf(TRACK_ROW, 'arm').hint} pressed={track.armed} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
+              {(track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
+                <TipButton className={`mini ${track.armed ? 'on-r' : ''}`} label={copyOf(TRACK_ROW, 'arm').label} hint={track.type === 'midi' ? 'Record this instrument from its MIDI input.' : copyOf(TRACK_ROW, 'arm').hint} pressed={track.armed} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
                   R
                 </TipButton>
               )}

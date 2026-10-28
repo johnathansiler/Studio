@@ -10,7 +10,17 @@ import { groupForTrack } from '../model/mixGroups'
 import { DEVICE_PARAMS } from '../model/rack'
 import { orderedSections } from '../model/sections'
 import { meterChanges, projectTempoMap } from '../model/tempoMap'
-import type { AudioClip, MeterChange, PluginInstance, Project, SongSection, TempoPoint, Track } from '../model/types'
+import type { AudioClip, LiveCaptureSettings, MeterChange, MidiFx, MidiMapEntry, MidiOutSettings, PluginInstance, Project, SongSection, TempoPoint, Track } from '../model/types'
+import {
+  defaultLiveCapture,
+  defaultMidiOut,
+  planAudioRoutes,
+  planMidiRoutes,
+  sanitizeFx,
+  sanitizeMaps,
+  type AudioRoute,
+  type MidiRoute,
+} from '../model/midiTools'
 
 /**
  * Read models for the studio surfaces.
@@ -203,6 +213,36 @@ export function selectKnock(store: { project: Project }) {
   const track = store.project.tracks.find((item) => item.type === 'midi' && item.rack?.devices.some((device) => device.kind === 'knock')) ?? null
   const device = track?.rack?.devices.find((item) => item.kind === 'knock') ?? null
   return { project: store.project, track, device, tempo: store.project.tempo }
+}
+
+/** MIDI reads. Writes go through ProjectStore so the undo journal and every screen stay in step. */
+
+export function selectMidiMaps(project: Project): MidiMapEntry[] {
+  return project.midiMaps ?? []
+}
+
+export function selectMidiOut(project: Project): MidiOutSettings {
+  return { ...defaultMidiOut(), ...(project.midiOut || {}) }
+}
+
+export function selectLiveCapture(project: Project): LiveCaptureSettings {
+  return { ...defaultLiveCapture(), ...(project.liveCapture || {}) }
+}
+
+export function selectTrackFx(track: Track | null | undefined): MidiFx[] {
+  return sanitizeFx(track?.midiFx)
+}
+
+export function selectAudioRoutes(project: Project): AudioRoute[] {
+  return planAudioRoutes(project.tracks)
+}
+
+export function selectMidiRoutes(project: Project): MidiRoute[] {
+  return planMidiRoutes(project.tracks)
+}
+
+export function selectSavedMaps(project: Project): MidiMapEntry[] {
+  return sanitizeMaps(project.midiMaps)
 }
 
 /** Sound browser. Favorites live on the project so every screen and device sees them. */

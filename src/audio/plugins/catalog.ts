@@ -4,6 +4,7 @@ import { AMP_PRESETS } from '../../model/ampPresets'
 import { defaultRoll } from '../../model/paint'
 import { normalizeQuantize } from '../../model/quantize'
 import { defaultRecord, uid } from '../../model/types'
+import { normalizeMidiProject } from '../../model/midiTools'
 import { normalizeScale } from '../../model/scale'
 import { normalizePadKit } from '../../model/padMachine'
 import { normalizeBeats } from '../../model/steps'
@@ -912,6 +913,7 @@ export function tuneLatency(sampleRate: number) {
 }
 
 export function normalizeProject(project: Project): Project {
+  normalizeMidiProject(project)
   normalizeOmniProject(project)
   project.scale = normalizeScale(project.scale)
   project.padKit = normalizePadKit(project.padKit)

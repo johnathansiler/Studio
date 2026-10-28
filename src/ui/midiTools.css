@@ -1,0 +1,79 @@
+.midi-tools {
+  flex: 1 0 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0 2px;
+  max-height: 34vh;
+  overflow: auto;
+}
+
+.tool-slot:has(.midi-tools) {
+  flex-wrap: wrap;
+  align-items: stretch;
+  height: auto;
+}
+
+.midi-tabs,
+.midi-row,
+.midi-maps,
+.midi-fx {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.midi-tools button,
+.midi-tools select,
+.midi-tools input {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: 32px;
+  padding: 0 8px;
+  color: var(--text);
+}
+
+.midi-tools button.on {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: transparent;
+}
+
+.midi-tools .midi-note {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.midi-map,
+.midi-fx-item {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px;
+  flex: 0 0 auto;
+}
+
+.midi-tools input[type='number'] {
+  width: 64px;
+}
+
+.midi-tools input[type='range'] {
+  width: 88px;
+  padding: 0;
+}
+
+.shell.phone .midi-tools button,
+.shell.phone .midi-tools select,
+.shell.phone .midi-tools input,
+.shell.fold .midi-tools button,
+.shell.fold .midi-tools select {
+  min-height: 44px;
+}
