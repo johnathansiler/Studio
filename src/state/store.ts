@@ -55,6 +55,8 @@ import {
   quantizeMidi,
   type QuantizeSettings,
 } from '../model/quantize'
+import { assignFlat, clampRange, flattenPatch, rangeMap, soundingFlat, writeSounding } from '../layers/matrix'
+import { makeLayer, normalizeLayerPatch, starterPatch } from '../layers/presets'
 import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
 import {
@@ -125,6 +127,8 @@ export class ProjectStore {
   /** Guests mirror the host arrangement and cannot edit it. */
   remoteFollow = false
   rackTrackId: string | null = null
+  /** Layered patch editor. Not saved. */
+  layerTrackId: string | null = null
   rackFlip = false
   rackDetail = false
   /** Letter keys play notes while this is on, so tap-tempo stays off T. */
@@ -460,7 +464,10 @@ export class ProjectStore {
     const ids: string[] = []
     this.mutate(() => {
       const made = tracksFor(spec, this.project.tracks)
-      for (const track of made) if (track.type === 'midi') normalizeTrackRack(track)
+      for (const track of made) {
+        if (track.type === 'midi') normalizeTrackRack(track)
+        if (track.instrument === 'layers') track.layerPatch = starterPatch('glass-pad')
+      }
       const at = insertIndex(this.project.tracks, this.selectedTrackId)
       this.project.tracks.splice(at, 0, ...made)
       this.selectedTrackId = made[0]?.id ?? this.selectedTrackId
@@ -2223,6 +2230,186 @@ export class ProjectStore {
         }
       }
       this.project.tracks.splice(Math.max(0, index + 1), 0, ...created)
+    })
+  }
+
+  openLayers(trackId: string) {
+    if (this.layerTrackId === trackId) {
+      this.layerTrackId = null
+      this.emit()
+      return
+    }
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return
+    if (track.instrument !== 'layers' || !track.layerPatch) {
+      this.mutate(() => {
+        track.instrument = 'layers'
+        track.layerPatch = normalizeLayerPatch(track.layerPatch)
+      })
+    }
+    this.layerTrackId = trackId
+    this.rackTrackId = null
+    this.emit()
+  }
+
+  closeLayers() {
+    this.layerTrackId = null
+    this.emit()
+  }
+
+  loadLayerStarter(trackId: string, id: string) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      track.instrument = 'layers'
+      track.layerPatch = starterPatch(id)
+    })
+  }
+
+  setLayerName(trackId: string, name: string) {
+    this.mutate(() => {
+      const patch = this.track(trackId)?.layerPatch
+      if (patch) patch.name = name.slice(0, 48)
+    })
+  }
+
+  setPatchLayerName(trackId: string, layerId: string, name: string) {
+    this.mutate(() => {
+      const layer = this.track(trackId)?.layerPatch?.layers.find((item) => item.id === layerId)
+      if (layer) layer.name = name.slice(0, 32)
+    })
+  }
+
+  addPatchLayer(trackId: string) {
+    this.mutate(() => {
+      const patch = this.track(trackId)?.layerPatch
+      if (!patch || patch.layers.length >= 4) return
+      patch.layers.push(makeLayer(`Layer ${patch.layers.length + 1}`, 'synth', 'analog', { level: 0.4 }, { wave: 2, mix2: 0, uni: 1 }))
+      normalizeLayerPatch(patch)
+    })
+  }
+
+  removePatchLayer(trackId: string, layerId: string) {
+    this.mutate(() => {
+      const patch = this.track(trackId)?.layerPatch
+      if (!patch || patch.layers.length < 2) return
+      patch.layers = patch.layers.filter((layer) => layer.id !== layerId)
+      patch.routes = patch.routes.filter((route) => !route.destination.startsWith(`${layerId}:`))
+      normalizeLayerPatch(patch)
+    })
+  }
+
+  setPatchLayerEnabled(trackId: string, layerId: string, enabled: boolean) {
+    this.mutate(() => {
+      const layer = this.track(trackId)?.layerPatch?.layers.find((item) => item.id === layerId)
+      if (layer) layer.enabled = enabled
+    })
+  }
+
+  setPatchLayerSource(trackId: string, layerId: string, choice: string) {
+    this.mutate(() => {
+      const patch = this.track(trackId)?.layerPatch
+      const layer = patch?.layers.find((item) => item.id === layerId)
+      if (!patch || !layer) return
+      const sampled = choice === 'sample' || choice === 'granular'
+      layer.source = {
+        kind: sampled ? choice : 'synth',
+        engine: sampled ? undefined : choice === 'wavetable' || choice === 'fm' ? choice : 'analog',
+        bufferId: sampled ? layer.source.bufferId || '' : '',
+        params: {},
+      }
+      normalizeLayerPatch(patch)
+    })
+  }
+
+  setPatchLayerBuffer(trackId: string, layerId: string, bufferId: string) {
+    this.mutate(() => {
+      const layer = this.track(trackId)?.layerPatch?.layers.find((item) => item.id === layerId)
+      if (layer) layer.source.bufferId = bufferId
+    })
+  }
+
+  setLayerSounding(trackId: string, key: string, value: number, gesture = false) {
+    const run = () => {
+      const patch = this.track(trackId)?.layerPatch
+      if (!patch) return
+      const range = rangeMap(patch)[key]
+      const target = range ? clampRange(value, range.min, range.max) : value
+      const corners = patch.corners.map((corner) => corner.values)
+      writeSounding(corners, patch.xy.x, patch.xy.y, flattenPatch(patch), key, target)
+      assignFlat(patch, key, target)
+    }
+    if (gesture) this.draft(run)
+    else this.mutate(run)
+  }
+
+  setLayerXY(trackId: string, x: number, y: number, gesture = false) {
+    const run = () => {
+      const patch = this.track(trackId)?.layerPatch
+      if (!patch) return
+      patch.xy = { x: clampRange(x, 0, 1), y: clampRange(y, 0, 1) }
+    }
+    if (gesture) this.draft(run)
+    else this.mutate(run)
+  }
+
+  setLayerModWheel(trackId: string, value: number, gesture = false) {
+    const run = () => {
+      const patch = this.track(trackId)?.layerPatch
+      if (patch) patch.modWheel = clampRange(value, 0, 1)
+    }
+    if (gesture) this.draft(run)
+    else this.mutate(run)
+  }
+
+  setLayerAftertouch(trackId: string, value: number, gesture = false) {
+    const run = () => {
+      const patch = this.track(trackId)?.layerPatch
+      if (patch) patch.aftertouch = clampRange(value, 0, 1)
+    }
+    if (gesture) this.draft(run)
+    else this.mutate(run)
+  }
+
+  captureLayerCorner(trackId: string, index: number) {
+    this.mutate(() => {
+      const patch = this.track(trackId)?.layerPatch
+      if (!patch || index < 0 || index > 3) return
+      patch.corners[index] = { values: soundingFlat(patch) }
+    })
+  }
+
+  addLayerRoute(trackId: string) {
+    this.mutate(() => {
+      const patch = this.track(trackId)?.layerPatch
+      if (!patch || patch.routes.length >= 12) return
+      const layer = patch.layers[0]
+      patch.routes.push({
+        id: uid('mod'),
+        source: 'lfo1',
+        destination: layer ? `${layer.id}:cutoff` : 'g:master',
+        amount: 0.25,
+      })
+    })
+  }
+
+  setLayerRoute(trackId: string, routeId: string, edit: { source?: string; destination?: string; amount?: number }, gesture = false) {
+    const run = () => {
+      const route = this.track(trackId)?.layerPatch?.routes.find((item) => item.id === routeId)
+      if (!route) return
+      if (edit.source != null) route.source = edit.source
+      if (edit.destination != null) route.destination = edit.destination
+      if (edit.amount != null && Number.isFinite(edit.amount)) route.amount = clampRange(edit.amount, -1, 1)
+    }
+    if (gesture) this.draft(run)
+    else this.mutate(run)
+  }
+
+  removeLayerRoute(trackId: string, routeId: string) {
+    this.mutate(() => {
+      const patch = this.track(trackId)?.layerPatch
+      if (!patch) return
+      patch.routes = patch.routes.filter((route) => route.id !== routeId)
     })
   }
 

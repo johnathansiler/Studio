@@ -198,6 +198,18 @@ export function arrangementDigest(project: Project): string {
       midiSlots: track.midiSlots ?? null,
       rack: track.rack?.devices.map((device) => [device.id, device.kind, device.params, device.pattern, device.zones.length]),
       cables: track.rack?.cables.map((cable) => [cable.from, cable.fromPort, cable.to, cable.toPort, cable.amount]),
+      layers: track.layerPatch
+        ? {
+            name: track.layerPatch.name,
+            xy: track.layerPatch.xy,
+            modWheel: track.layerPatch.modWheel,
+            aftertouch: track.layerPatch.aftertouch,
+            routes: track.layerPatch.routes.map((route) => [route.source, route.destination, route.amount]),
+            globals: track.layerPatch.globals,
+            corners: track.layerPatch.corners.map((corner) => corner.values),
+            layers: track.layerPatch.layers.map((layer) => [layer.id, layer.enabled, layer.source.kind, layer.source.engine ?? '', layer.source.bufferId ?? '', layer.params, layer.source.params]),
+          }
+        : null,
       instruments: (track.plugins ?? []).map((plugin) => [
         plugin.id,
         plugin.pluginId,

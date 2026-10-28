@@ -1,3 +1,4 @@
+import { normalizeLayerTracks } from '../../layers/presets'
 import { emptyLooper, emptySampler } from '../sample/engine'
 import type { AutomationLane, Insert, PluginInstance, Project, UserPreset } from '../../model/types'
 import { AMP_PRESETS } from '../../model/ampPresets'
@@ -945,6 +946,7 @@ export function normalizeProject(project: Project): Project {
   if (!project.masterPlugins.some((plugin) => plugin.pluginId === 'meter')) {
     project.masterPlugins.push(createPlugin('meter'))
   }
+  normalizeLayerTracks(project.tracks)
   return project
 }
 

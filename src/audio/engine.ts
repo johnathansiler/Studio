@@ -8,6 +8,8 @@ import { residentDrums, type ResidentDrum } from '../model/drums'
 import { calibrationTrim, contextTimeForEvent, monitoringOffset, type ClockStamp } from '../model/midiClock'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToBeats, samplesToMusical } from '../model/time'
+import { layerBuffers, renderLayerNotes } from '../layers/engine'
+import { LayerHost } from '../layers/host'
 import { RackHost } from './rack/host'
 import { renderNotes } from './rack/dsp'
 import { renderQuantizedClip } from '../model/quantize'
@@ -105,6 +107,7 @@ export class AudioEngine {
   private cueReturnSrc: MediaStreamAudioSourceNode | null = null
   private meterScratch = new Float32Array(256)
   private readonly rackHost = new RackHost()
+  private readonly layerHost = new LayerHost()
   private readonly rack = new LiveRack()
   private loudness: LoudnessState | null = null
   private lufs = -70
@@ -412,6 +415,7 @@ export class AudioEngine {
       }
     }
     this.rackHost.sync(this.ctx, project, this.strips, buffers)
+    this.layerHost.sync(this.ctx, project, this.strips, assetOf)
   }
 
   previewRack(trackId: string, pitch: number, slide = false, hold = false) {
@@ -425,6 +429,18 @@ export class AudioEngine {
   releaseRack(trackId: string, pitch: number) {
     const when = this.ctx?.currentTime ?? 0
     this.rackHost.note(trackId, pitch, 0, when)
+  }
+
+  previewLayer(trackId: string, pitch: number, hold = false) {
+    this.unlock()
+    if (this.project) this.sync(this.project, this.assetOf)
+    const when = (this.ctx?.currentTime ?? 0) + 0.02
+    this.layerHost.note(trackId, pitch, 0.9, when)
+    if (!hold) this.layerHost.note(trackId, pitch, 0, when + 0.45)
+  }
+
+  releaseLayer(trackId: string, pitch: number) {
+    this.layerHost.note(trackId, pitch, 0, this.ctx?.currentTime ?? 0)
   }
 
   setCompareGain(gain: number) {
@@ -1166,7 +1182,30 @@ export class AudioEngine {
         const buffer = this.bufferFromAsset(offline, asset)
         this.scheduleAudioClip(offline, strip, buffer, clip, 0, 0, end)
       }
-      if (track.rack) {
+      if (track.instrument === 'layers' && track.layerPatch) {
+        const events = []
+        for (const clip of track.midiClips) {
+          if (clip.slotOnly || clip.scene != null) continue
+          for (const note of clip.notes) {
+            const audible = playedNote(project, note, clip.startBeat + note.startBeat)
+            if (!audible) continue
+            const start = beatsToSamples(clip.startBeat + audible.startBeat, rate, project.tempo)
+            const dur = beatsToSamples(audible.durationBeats, rate, project.tempo)
+            if (start >= end) continue
+            const vel = audible.velocity > 1 ? audible.velocity / 127 : audible.velocity
+            events.push({ sample: Math.max(0, start), pitch: audible.pitch, vel })
+            events.push({ sample: Math.min(end - 1, start + dur), pitch: audible.pitch, vel: 0 })
+          }
+        }
+        const rendered = renderLayerNotes(track.layerPatch, events, rate, end, layerBuffers(track.layerPatch, assets))
+        const buffer = offline.createBuffer(2, end, rate)
+        buffer.getChannelData(0).set(rendered[0])
+        buffer.getChannelData(1).set(rendered[1])
+        const src = offline.createBufferSource()
+        src.buffer = buffer
+        src.connect(strip.input)
+        src.start(0)
+      } else if (track.rack) {
         const events = []
         for (const clip of track.midiClips) {
           if (clip.slotOnly || clip.scene != null) continue
@@ -2268,6 +2307,13 @@ export class AudioEngine {
 
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[]) {
     if (note.muted) return
+    if (track?.instrument === 'layers' && track.layerPatch && ctx === this.ctx) {
+      const at = Math.max(when, ctx.currentTime)
+      const vel = note.velocity > 1 ? note.velocity / 127 : note.velocity
+      this.layerHost.note(track.id, note.pitch, vel, at)
+      this.layerHost.note(track.id, note.pitch, 0, at + dur)
+      return
+    }
     if (track?.rack && ctx === this.ctx) {
       const at = Math.max(when, ctx.currentTime)
       this.rackHost.note(track.id, note.pitch, note.velocity, at, !!note.slide)
@@ -2321,6 +2367,7 @@ export class AudioEngine {
     }
     this.sources = []
     this.rackHost.allOff()
+    this.layerHost.allOff()
     this.sessionNodes.clear()
     this.sessionStarted.clear()
     this.sessionClip.clear()

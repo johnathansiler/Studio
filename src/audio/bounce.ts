@@ -2,6 +2,7 @@ import { createPlugin } from './plugins/catalog'
 import { loadModule, peekModule } from './plugins/registry'
 import { renderGraph, type GraphTrack } from './renderGraph'
 import { scaleById } from '../model/scale'
+import { layerBuffers, renderLayerNotes } from '../layers/engine'
 import { beatsToSamples, projectEndSample } from '../model/time'
 import { makeTrack, uid, type AudioAsset, type AudioClip, type PluginInstance, type Project, type Track } from '../model/types'
 import { encodeWav, linearResample, type DitherMode, type WavBits } from '../model/wav'
@@ -304,11 +305,34 @@ function mixTrack(track: Track, assets: Map<string, AudioAsset>, start: number, 
       }
     }
   }
-  for (const clip of track.midiClips) {
-    for (const note of clip.notes) {
-      const noteStart = Math.round(beatsToSamples(clip.startBeat + note.startBeat, rate, tempo))
-      const duration = Math.round(beatsToSamples(note.durationBeats, rate, tempo))
-      addVoice(out, note.pitch, note.velocity, noteStart, duration, start, rate)
+  if (track.instrument === 'layers' && track.layerPatch) {
+    const events = []
+    for (const clip of track.midiClips) {
+      for (const note of clip.notes) {
+        if (note.muted) continue
+        const noteStart = Math.round(beatsToSamples(clip.startBeat + note.startBeat, rate, tempo))
+        const duration = Math.max(1, Math.round(beatsToSamples(note.durationBeats, rate, tempo)))
+        const noteEnd = noteStart + duration
+        if (noteEnd <= start || noteStart >= start + length) continue
+        const on = Math.max(noteStart, start) - start
+        const off = Math.min(noteEnd, start + length) - start
+        const vel = note.velocity > 1 ? note.velocity / 127 : note.velocity
+        events.push({ sample: on, pitch: note.pitch, vel })
+        events.push({ sample: off, pitch: note.pitch, vel: 0 })
+      }
+    }
+    const rendered = renderLayerNotes(track.layerPatch, events, rate, length, layerBuffers(track.layerPatch, assets))
+    for (let i = 0; i < length; i++) {
+      out[0][i] += rendered[0][i] || 0
+      out[1][i] += rendered[1][i] || 0
+    }
+  } else {
+    for (const clip of track.midiClips) {
+      for (const note of clip.notes) {
+        const noteStart = Math.round(beatsToSamples(clip.startBeat + note.startBeat, rate, tempo))
+        const duration = Math.round(beatsToSamples(note.durationBeats, rate, tempo))
+        addVoice(out, note.pitch, note.velocity, noteStart, duration, start, rate)
+      }
     }
   }
   return out

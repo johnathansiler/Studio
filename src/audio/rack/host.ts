@@ -35,7 +35,7 @@ export class RackHost {
     void this.ensure(ctx).then((ok) => {
       this.workletOk = ok
       for (const track of project.tracks) {
-        if (track.type !== 'midi' || !track.rack) continue
+        if (track.type !== 'midi' || !track.rack || track.instrument === 'layers') continue
         const strip = strips.get(track.id)
         if (!strip) continue
         const live = this.ensureLive(ctx, track.id, strip)
@@ -48,7 +48,7 @@ export class RackHost {
         this.pending.delete(track.id)
       }
       for (const id of [...this.lives.keys()]) {
-        if (!project.tracks.some((track) => track.id === id && track.rack)) this.drop(id)
+        if (!project.tracks.some((track) => track.id === id && track.rack && track.instrument !== 'layers')) this.drop(id)
       }
     })
   }
