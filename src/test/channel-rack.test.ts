@@ -26,7 +26,7 @@ describe('channel rack', () => {
     const html = render()
     for (const name of ['Kick', 'Snare', 'Clap', 'Hat', 'Perc']) {
       const line = row(html, name)
-      expect(line.match(/class="rack-step/g), name).toHaveLength(16)
+      expect(line.match(/data-index="/g), name).toHaveLength(16)
       expect(line.match(/class="rack-group/g), name).toHaveLength(4)
       expect(line.match(/class="rack-group alt"/g), name).toHaveLength(2)
       expect(line).toContain('rack-mute')
@@ -66,7 +66,7 @@ describe('channel rack', () => {
     expect(at32.channels[1].steps).toBe(8)
     const wide = render(store)
     expect(wide).toContain('data-length="32"')
-    expect(row(wide, 'Kick').match(/class="rack-step/g)).toHaveLength(32)
+    expect(row(wide, 'Kick').match(/data-index="/g)).toHaveLength(32)
     expect(row(wide, 'Kick').match(/class="rack-group/g)).toHaveLength(8)
     store.setPatternLength(64)
     const at64 = store.activePattern()!
@@ -74,7 +74,7 @@ describe('channel rack', () => {
     expect(at64.channels[0].steps).toBe(64)
     expect(at64.channels[2].steps).toBe(64)
     expect(at64.channels[1].steps).toBe(8)
-    expect(row(render(store), 'Hat').match(/class="rack-step/g)).toHaveLength(64)
+    expect(row(render(store), 'Hat').match(/data-index="/g)).toHaveLength(64)
   })
 
   it('highlights the step under the playhead', () => {
@@ -94,6 +94,6 @@ describe('channel rack', () => {
     store.addPatternChannel({ name: 'Rim', kind: 'perc', note: 37, color: '#73c48f' })
     expect(store.activePattern()!.channels).toHaveLength(before + 1)
     expect(store.activePattern()!.channels.at(-1)!.steps).toBe(16)
-    expect(row(render(store), 'Rim').match(/class="rack-step/g)).toHaveLength(16)
+    expect(row(render(store), 'Rim').match(/data-index="/g)).toHaveLength(16)
   })
 })
