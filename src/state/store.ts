@@ -4402,6 +4402,10 @@ export class ProjectStore {
       const track = requested ?? this.ensureDrumsTrack()
       landed = track.name
       if (!this.project.patternClips) this.project.patternClips = []
+      for (const channel of pattern.channels) {
+        if (!channel.output) channel.output = track.id
+      }
+      mirrorTrackMix(this.project, track.id)
       const clip = {
         id: uid('pcl'),
         patternId: pattern.id,

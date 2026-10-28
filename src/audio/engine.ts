@@ -1619,10 +1619,9 @@ export class AudioEngine {
     if (this.playing && this.ctx) {
       const linear = this.sampleAt(this.ctx.currentTime)
       const sample = this.heardSample(linear)
-      this.positionSamples = sample
       const project = this.project
       const patternLoop = project && this.status !== 'recording' ? emptyPatternLoopSamples(project) : 0
-      if (patternLoop > 1) this.positionSamples = ((linear % patternLoop) + patternLoop) % patternLoop
+      this.positionSamples = patternLoop > 1 && linear >= 0 ? linear % patternLoop : sample
       if (patternLoop <= 1 && project && this.mode === 'arrangement' && this.status === 'playing') {
         if (playbackStops(linear, project, arrangementEndSample(project), this.sampleRate)) {
           this.stop()
@@ -1738,7 +1737,7 @@ export class AudioEngine {
     const now = ctx.currentTime + 0.02
     const linear = Math.max(0, this.sampleAt(ctx.currentTime))
     const patternLoop = emptyPatternLoopSamples(project)
-    const sample = patternLoop > 1 ? ((linear % patternLoop) + patternLoop) % patternLoop : this.heardSample(linear)
+    const sample = patternLoop > 1 ? linear % patternLoop : this.heardSample(linear)
     this.stopSources()
     this.playOriginCtx = now
     this.playOriginSample = sample

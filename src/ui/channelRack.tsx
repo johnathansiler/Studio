@@ -405,7 +405,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
     engine.unlock?.()
     const asset = channel.sampleId ? store.buffers.get(channel.sampleId) : undefined
     const pcm = asset?.channels?.[0]
-    if (pcm?.length) {
+    if (asset && pcm?.length) {
       engine.previewPcm?.(asset.channels, asset.sampleRate)
       return
     }

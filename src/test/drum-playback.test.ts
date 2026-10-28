@@ -10,7 +10,6 @@ import {
   transportPatternClips,
 } from '../model/channelRack'
 import { clonePattern, isolatedCells, normalizeBeats, renderPattern, starterPattern } from '../model/steps'
-import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { BeatView } from '../ui/BeatView'
 

@@ -1,13 +1,10 @@
 import type { Project, Track } from './types'
 import type { StepChannel } from './steps'
 
-/**
- * Mixer strip a Beats row is explicitly linked to.
- * An empty output stays on the row itself, so one fader does not move every drum.
- */
+/** Where a Beats row follows the mixer. An empty output uses the first instrument track. */
 export function channelRoute(project: Project, channel: Pick<StepChannel, 'output'>): string | null {
-  if (!channel.output) return null
-  return project.tracks.some((track) => track.id === channel.output) ? channel.output : null
+  if (channel.output) return channel.output
+  return project.tracks.find((track) => track.type === 'midi')?.id ?? null
 }
 
 /** Copy a mixer strip onto every Beats row that plays through it. */
