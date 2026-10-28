@@ -128,6 +128,7 @@ export function App() {
   const [libraryOpen, setLibraryOpen] = useState(() => new URLSearchParams(window.location.search).get('library') === '1')
   const [soundsOpen, setSoundsOpen] = useState(() => new URLSearchParams(window.location.search).get('sounds') === '1')
   const [soundWidth, setSoundWidth] = useState(() => readSoundWidth(undefined, window.innerWidth))
+  const soundReserveRef = useRef(0)
   useEffect(() => {
     void loadScaleCatalog().then(() => setVersion((value) => value + 1))
   }, [])
@@ -544,7 +545,7 @@ export function App() {
       const next = formFactor(window.innerWidth, window.innerHeight)
       setForm(next)
       setLand(window.innerWidth > window.innerHeight)
-      setSoundWidth((value) => clampSoundWidth(value, window.innerWidth))
+      setSoundWidth((value) => clampSoundWidth(value, window.innerWidth, soundReserveRef.current))
       document.documentElement.classList.toggle('phone-root', next === 'phone')
       document.documentElement.dataset.form = next
     }
@@ -1124,6 +1125,11 @@ async function importDropped(files: FileList) {
   const studioTab: StudioTab = collabOpen ? 'collab' : store.view
   const collabShown = collabPanelVisible(studioTab)
   const dockShown = surface === 'studio' && !collabShown && (panel === 'piano' || panel === 'rack')
+  const soundReserve = !phone && dockShown && dockEdge === 'right' ? dock : 0
+  soundReserveRef.current = soundReserve
+  useEffect(() => {
+    setSoundWidth((value) => clampSoundWidth(value, window.innerWidth, soundReserve))
+  }, [soundReserve])
   const waitingGuests = session.state.participants.filter((person) => !person.admitted && person.role !== 'host').length
   const collabBadge = collabBadgeOn({
     tab: studioTab,
@@ -1389,8 +1395,8 @@ async function importDropped(files: FileList) {
             </div>
           </div>
         )}
-        {soundsOpen && !phone && (
-          <SoundBrowser store={store} engine={engine} phone={false} onWidth={setSoundWidth} onClose={() => { engine.stopPreview(); setSoundsOpen(false) }} />
+        {soundsOpen && (
+          <SoundBrowser store={store} engine={engine} phone={phone} reserve={soundReserve} onWidth={setSoundWidth} onClose={() => { engine.stopPreview(); setSoundsOpen(false) }} />
         )}
         {dockShown && <div
           className="dock-slot panel-slot"
@@ -1429,7 +1435,6 @@ async function importDropped(files: FileList) {
       {playersOpen && <PlayersSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setPlayersOpen(false) }} />}
       {unstuckOpen && <UnstuckSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }} />}
       {libraryOpen && <LibraryPop store={store} engine={engine} onClose={() => setLibraryOpen(false)} />}
-      {soundsOpen && phone && <SoundBrowser store={store} engine={engine} phone onClose={() => { engine.stopPreview(); setSoundsOpen(false) }} />}
       {analysisTrackId && <AnalysisSheet store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} />}
       {perform && (
         <PerformPop

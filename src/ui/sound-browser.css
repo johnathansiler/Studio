@@ -23,12 +23,29 @@ html[data-posture="book"] .shell:not(.phone) .workspace.sounds-open.session-clos
   grid-column: 1 / -1;
 }
 
+/* Book posture sets two columns later in the cascade. Keep the sounds column when the dock is open. */
+html[data-posture="book"] .shell:not(.phone) .workspace.sounds-open {
+  grid-template-columns: minmax(0, 1fr) var(--sounds, 360px) minmax(240px, var(--dock));
+  grid-template-rows: minmax(0, 1fr);
+}
+
+html[data-posture="book"] .shell:not(.phone) .workspace.sounds-open.session-closed {
+  grid-template-columns: minmax(0, 1fr) var(--sounds, 360px);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open {
+  grid-template-columns: minmax(0, 1fr) var(--sounds, 360px);
+  grid-template-rows: minmax(0, 1fr) var(--dock);
+}
+
 .sound-slot {
   position: relative;
   min-width: 0;
   min-height: 0;
   height: 100%;
   display: flex;
+  overflow: hidden;
   background: var(--panel);
   border-left: 1px solid var(--line);
 }
@@ -43,16 +60,47 @@ html[data-posture="book"] .shell:not(.phone) .workspace.sounds-open.session-clos
   border: 0;
   background: transparent;
   cursor: col-resize;
+  touch-action: none;
   z-index: 5;
 }
 
+/* Phone sheet sits on the bottom and leaves the timeline usable. It does not dim or block the work. */
 .sound-back.sheet {
   position: fixed;
-  inset: 0;
-  z-index: 70;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 28;
   display: flex;
-  align-items: flex-end;
-  background: rgba(0, 0, 0, 0.45);
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-end;
+  background: transparent;
+  pointer-events: none;
+}
+
+.sound-dismiss {
+  pointer-events: auto;
+  align-self: center;
+  width: 72px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  position: relative;
+}
+
+.sound-dismiss::before {
+  content: "";
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: 8px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
 }
 
 .sound-panel {
@@ -77,11 +125,48 @@ html[data-posture="book"] .shell:not(.phone) .workspace.sounds-open.session-clos
 }
 
 .sound-back.sheet .sound-panel {
+  pointer-events: auto;
   width: 100%;
-  height: calc(100dvh - 56px);
-  max-height: calc(100dvh - 56px);
+  height: min(68dvh, 620px);
+  max-height: min(68dvh, 620px);
   border-radius: 16px 16px 0 0;
   padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+
+/* On a phone the list is a bottom pane in the workspace, so the timeline shrinks instead of sitting under it. */
+.shell.phone .workspace > .sound-back.sheet {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+  flex: 0 1 auto;
+  width: 100%;
+  height: min(52dvh, 460px);
+  min-height: 280px;
+  max-height: min(52dvh, 460px);
+  overflow: hidden;
+  pointer-events: auto;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+
+.shell.phone .workspace > .sound-back.sheet .sound-panel {
+  height: 100%;
+  max-height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.shell.phone.land .workspace > .sound-back.sheet {
+  flex: 0 0 min(300px, 42vw);
+  width: min(300px, 42vw);
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  border-top: 0;
+  border-left: 1px solid var(--line);
 }
 
 .sound-head {
@@ -156,6 +241,7 @@ html[data-posture="book"] .shell:not(.phone) .workspace.sounds-open.session-clos
 .sound-list {
   overflow: auto;
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 6px;
   min-height: 0;
@@ -203,4 +289,22 @@ html[data-posture="book"] .shell:not(.phone) .workspace.sounds-open.session-clos
 .shell.phone .sound-actions button,
 .shell.phone .sound-head button {
   min-height: 44px;
+}
+
+.shell.phone .sound-head,
+.shell.phone .sound-where,
+.shell.phone .sound-count,
+.shell.phone .sound-status,
+.shell.phone .sound-filters {
+  flex: none;
+}
+
+.shell.phone .sound-filters {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  min-height: 44px;
+}
+
+.shell.phone .sound-list {
+  min-height: 120px;
 }

@@ -4,12 +4,14 @@ import { describe, expect, it } from 'vitest'
 import type { AudioEngine } from '../audio/engine'
 import { MemoryBank, SampleCache } from '../audio/multisample/cache'
 import { renderSampler } from '../audio/multisample/engine'
+import { LibraryHost } from '../audio/multisample/host'
 import { fetchCatalog } from '../audio/multisample/library'
+import { makeProgram, makeSample, makeZone, midiVelocity } from '../audio/multisample/types'
 import type { LibraryEntry } from '../audio/multisample/library'
 import { createEmptyProject } from '../model/types'
 import { encodeWav } from '../model/wav'
 import { filterSounds, parseCatalog } from '../sounds/catalog'
-import { filterStarters, loadStarterOnto, playablePitch } from '../sounds/instruments'
+import { filterStarters, loadStarterOnto, playableAudition, playablePitch } from '../sounds/instruments'
 import {
   SOUND_PANEL_DEFAULT,
   SOUND_PANEL_MAX,
@@ -144,6 +146,8 @@ describe('library access', () => {
     expect(writeSoundWidth(480, store, 1440)).toBe(480)
     expect(readSoundWidth(store, 1440)).toBe(480)
     expect(readSoundWidth(store, 700)).toBe(380)
+    expect(clampSoundWidth(520, 1200, 400)).toBe(480)
+    expect(clampSoundWidth(900, 1200, 700)).toBe(SOUND_PANEL_MIN)
     expect(matchCountLabel(1647, 200)).toBe('1647 matches. Showing the first 200.')
     expect(matchCountLabel(34, 34)).toBe('34 matches.')
     expect(matchCountLabel(0, 0)).toBe('')
@@ -177,8 +181,11 @@ describe('library access', () => {
       instruments: [xylophone],
     }))
     expect(phone).toContain('sound-back sheet')
+    expect(phone).toContain('sound-dismiss')
     expect(phone).not.toContain('sound-resize')
     expect(phone).toContain('Close')
+    expect(phone).toContain('Load. Load it on this track and play a note.')
+    expect(phone).not.toContain('role="dialog"')
   })
 
   it('fills the patch Load menu and plays a starter instrument from Hugging Face audio', async () => {
@@ -229,5 +236,76 @@ describe('library access', () => {
     let sum = 0
     for (const sample of played[0]) sum += sample * sample
     expect(Math.sqrt(sum / played[0].length)).toBeGreaterThan(0.02)
+  })
+
+  it('picks a note the velocity layers can sound and loads every round-robin before playback', async () => {
+    const base = 'https://huggingface.co/datasets/cueharbor/starter-instruments/resolve/main'
+    const quiet = makeProgram({
+      name: 'Quiet',
+      samples: [makeSample({ id: 'low', url: `${base}/quiet/low.wav` })],
+      zones: [makeZone({ id: 'z', sampleId: 'low', lokey: 40, hikey: 40, root: 40, lovel: 1, hivel: 20 })],
+    })
+    const quietNote = playableAudition(quiet)
+    expect(quietNote.pitch).toBe(40)
+    expect(midiVelocity(quietNote.velocity)).toBeLessThanOrEqual(20)
+    expect(midiVelocity(quietNote.velocity)).toBeGreaterThan(0)
+
+    const split = makeProgram({
+      name: 'Split',
+      samples: [
+        makeSample({ id: 'low', url: `${base}/split/low.wav` }),
+        makeSample({ id: 'high', url: `${base}/split/high.wav` }),
+      ],
+      zones: [
+        makeZone({ id: 'low', sampleId: 'low', lokey: 40, hikey: 40, root: 40, lovel: 1, hivel: 20 }),
+        makeZone({ id: 'high', sampleId: 'high', lokey: 67, hikey: 67, root: 67, lovel: 21, hivel: 127 }),
+      ],
+    })
+    expect(playablePitch(split)).toBe(67)
+    expect(playableAudition(split).velocity).toBe(0.9)
+
+    const urls: string[] = []
+    const tone = new Float32Array(480)
+    for (let i = 0; i < tone.length; i++) tone[i] = Math.sin((2 * Math.PI * 440 * i) / 48000) * 0.4
+    const wav = encodeWav([tone], 48000)
+    const host = new LibraryHost(async (url) => {
+      urls.push(url)
+      if (url.endsWith('rr2.wav')) return new Response('missing', { status: 404 })
+      return new Response(wav)
+    })
+    const store = new ProjectStore(createEmptyProject())
+    const keys = store.project.tracks.find((track) => track.name === 'Keys')!
+    store.setLibrary(keys.id, makeProgram({
+      name: 'Rounds',
+      samples: [
+        makeSample({ id: 'rr1', url: `${base}/rounds/rr1.wav` }),
+        makeSample({ id: 'rr2', url: `${base}/rounds/rr2.wav` }),
+      ],
+      zones: [
+        makeZone({ id: 'a', sampleId: 'rr1', lokey: 60, hikey: 60, root: 60, seq: 1, seqLength: 2, rrGroup: 1 }),
+        makeZone({ id: 'b', sampleId: 'rr2', lokey: 60, hikey: 60, root: 60, seq: 2, seqLength: 2, rrGroup: 1 }),
+      ],
+    }))
+    const ready = await host.prepare(keys.id, store.track(keys.id)!, [
+      { sample: 0, pitch: 60, vel: 0.9 },
+      { sample: 4800, pitch: 60, vel: 0.9 },
+    ], 48000)
+    expect(urls.filter((url) => url.endsWith('rr1.wav'))).toHaveLength(1)
+    expect(urls.some((url) => url.endsWith('rr2.wav'))).toBe(true)
+    expect(ready.sounding).toBe(2)
+    expect(ready.missing).toBe(1)
+    const outside = await host.prepare(keys.id, store.track(keys.id)!, [{ sample: 0, pitch: 10, vel: 0.9 }], 48000)
+    expect(outside).toEqual({ missing: 0, sounding: 0 })
+
+    let fetches = 0
+    const cache = new SampleCache(async () => {
+      fetches += 1
+      return new Response(wav)
+    })
+    const shared = makeSample({ id: 'shared', url: `${base}/rounds/shared.wav` })
+    const [first, second] = await Promise.all([cache.load(shared), cache.load(shared)])
+    expect(fetches).toBe(1)
+    expect(first?.channels[0].length).toBeGreaterThan(0)
+    expect(second).toBe(first)
   })
 })

@@ -115,6 +115,8 @@ export class AudioEngine {
   private meterScratch = new Float32Array(256)
   private readonly rackHost = new RackHost()
   private readonly libraryHost = new LibraryHost()
+  private readonly libraryHeld = new Set<string>()
+  private libraryWarmAt = 0
   private readonly patchHost = new PatchHost()
   private patchRateCache = new Map<string, Float32Array>()
   private readonly rack = new LiveRack()
@@ -506,16 +508,18 @@ export class AudioEngine {
    * Load the samples for one note, then play it.
    * The file is requested only after the preset is on the track, from Hugging Face.
    */
-  async auditionLibrary(trackId: string, pitch = 60) {
+  async auditionLibrary(trackId: string, pitch = 60, velocity = 0.9) {
     this.unlock()
     if (this.project) this.sync(this.project, this.assetOf)
     const track = this.project?.tracks.find((item) => item.id === trackId)
     if (!track?.library || track.instrument !== 'library') return
     const rate = this.ctx?.sampleRate ?? this.sampleRate
-    const missing = await this.libraryHost.prepare(trackId, track, [{ sample: 0, pitch, vel: 0.9 }], rate)
-    if (missing > 0) throw new Error('That instrument sample is not on Hugging Face yet.')
+    const level = velocity > 0 && velocity <= 1 ? velocity : 0.9
+    const ready = await this.libraryHost.prepare(trackId, track, [{ sample: 0, pitch, vel: level }], rate)
+    if (ready.missing > 0) throw new Error('That instrument sample is not on Hugging Face yet.')
+    if (ready.sounding <= 0) throw new Error('That note is outside this instrument.')
     const when = (this.ctx?.currentTime ?? 0) + 0.05
-    this.libraryHost.note(trackId, pitch, 0.9, when)
+    this.libraryHost.note(trackId, pitch, level, when)
     this.libraryHost.note(trackId, pitch, 0, when + 1.1)
   }
 
@@ -534,7 +538,21 @@ export class AudioEngine {
     const when = this.ctx?.currentTime ?? 0
     const track = this.project?.tracks.find((item) => item.id === trackId)
     if (track?.instrument === 'library' && track.library) {
-      this.libraryHost.note(trackId, pitch, down ? 0.85 : 0, when)
+      const key = `${trackId}:${Math.round(pitch)}`
+      if (!down) {
+        this.libraryHeld.delete(key)
+        this.libraryHost.note(trackId, pitch, 0, when)
+        return
+      }
+      this.libraryHeld.add(key)
+      const rate = this.ctx?.sampleRate ?? this.sampleRate
+      const program = track.library
+      void this.libraryHost.prepare(trackId, track, [{ sample: 0, pitch, vel: 0.85 }], rate).then((ready) => {
+        if (!this.libraryHeld.has(key) || ready.missing > 0 || ready.sounding <= 0) return
+        if (this.project?.tracks.find((item) => item.id === trackId)?.library !== program) return
+        const at = (this.ctx?.currentTime ?? 0) + 0.02
+        this.libraryHost.note(trackId, pitch, 0.85, at)
+      }).catch(() => undefined)
       return
     }
     this.patchHost.note(trackId, pitch, down ? 0.85 : 0, when)
@@ -864,6 +882,7 @@ export class AudioEngine {
 
   async play(fromSample: number, mode: 'arrangement' | 'session' = 'arrangement') {
     await this.resume()
+    await this.warmUpcomingLibrary(Math.max(0, fromSample), 2.5)
     const startAt = this.ctx!.currentTime + 0.05
     this.startTransport(startAt, fromSample, mode)
   }
@@ -879,6 +898,7 @@ export class AudioEngine {
 
   async playAtPerf(sample: number, perfMs: number, mode: 'arrangement' | 'session' = 'arrangement') {
     await this.resume()
+    await this.warmUpcomingLibrary(Math.max(0, sample), 2.5)
     this.refreshClockAnchor()
     const ctx = this.ctx!
     let startAt = this.contextForPerf(perfMs)
@@ -1523,6 +1543,49 @@ export class AudioEngine {
     }
   }
 
+  /** Fetch library samples that are about to play so the attack is not silent. */
+  private primeLibraryAhead() {
+    const now = performance.now()
+    if (now - this.libraryWarmAt < 500) return
+    this.libraryWarmAt = now
+    const sample = this.playing && this.ctx ? Math.max(0, Math.round(this.sampleAt(this.ctx.currentTime))) : this.positionSamples
+    void this.warmUpcomingLibrary(sample, 8, false)
+  }
+
+  private async warmUpcomingLibrary(fromSample: number, seconds: number, block = true) {
+    const project = this.project
+    const ctx = this.ctx
+    if (!project || !ctx) return
+    const end = fromSample + Math.round(this.sampleRate * seconds)
+    const jobs: Promise<unknown>[] = []
+    for (const track of project.tracks) {
+      if (track.type !== 'midi' || track.instrument !== 'library' || !track.library) continue
+      const events: { sample: number; pitch: number; vel: number }[] = []
+      for (const clip of track.midiClips) {
+        if (clip.slotOnly || clip.scene != null) continue
+        for (const note of prepareClipNotes(project, track, clip)) {
+          if (note.muted || !(note.velocity > 0)) continue
+          const span = beatSpanSamples(project, clip.startBeat + note.startBeat, note.durationBeats)
+          if (span.start >= end || span.start + span.duration <= fromSample) continue
+          events.push({ sample: Math.max(0, Math.round(span.start)), pitch: note.pitch, vel: note.velocity })
+        }
+      }
+      events.sort((a, b) => a.sample - b.sample)
+      const upcoming = events.slice(0, block ? 24 : 48)
+      if (upcoming.length) jobs.push(this.libraryHost.prepare(track.id, track, upcoming, ctx.sampleRate))
+    }
+    if (!jobs.length) return
+    const work = Promise.all(jobs).then(() => undefined)
+    if (!block) {
+      void work.catch(() => undefined)
+      return
+    }
+    await Promise.race([
+      work.catch(() => undefined),
+      new Promise<void>((resolve) => window.setTimeout(resolve, 8000)),
+    ])
+  }
+
   private scheduleAhead() {
     if (!this.ctx) return
     const now = this.ctx.currentTime
@@ -1533,6 +1596,7 @@ export class AudioEngine {
     this.scheduleMetronome(horizon)
     if (this.mode === 'session') this.scheduleSession(horizon)
     else this.scheduleArrangement(horizon)
+    if (this.mode === 'arrangement') this.primeLibraryAhead()
   }
 
   private scheduleMetronome(horizon: number) {

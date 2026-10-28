@@ -1,8 +1,7 @@
 import { useEffect, useState, type PointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
-import { fetchCatalog, STARTER_CATALOG, type LibraryEntry } from '../audio/multisample/library'
-import { libraryBaseUrl } from '../audio/multisample/source'
-import { loadStarterOnto } from '../sounds/instruments'
+import { STARTER_CATALOG, type LibraryEntry } from '../audio/multisample/library'
+import { loadStarterOnto, starterCatalog } from '../sounds/instruments'
 import { detectRoot } from '../audio/sample/engine'
 import {
   LAYER_KINDS,
@@ -60,7 +59,7 @@ export function PatchSheet({
   useEffect(() => {
     if (initialCatalog) return
     let alive = true
-    void fetchCatalog(libraryBaseUrl()).then((next) => {
+    void starterCatalog().then((next) => {
       if (alive) setStarters(next)
     }).catch(() => undefined)
     return () => { alive = false }

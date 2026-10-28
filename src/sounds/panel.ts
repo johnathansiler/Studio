@@ -40,34 +40,35 @@ export function soundWidthMemory(): SoundWidthMemory {
   return resolved
 }
 
-export function soundPanelMax(viewport: number) {
+export function soundPanelMax(viewport: number, reserved = 0) {
   const room = Number.isFinite(viewport) ? viewport : 1280
-  return Math.min(SOUND_PANEL_MAX, Math.max(SOUND_PANEL_MIN, Math.round(room - TIMELINE_ROOM)))
+  const aside = Number.isFinite(reserved) && reserved > 0 ? reserved : 0
+  return Math.min(SOUND_PANEL_MAX, Math.max(SOUND_PANEL_MIN, Math.round(room - TIMELINE_ROOM - aside)))
 }
 
-export function clampSoundWidth(value: number, viewport = 1280) {
-  const max = soundPanelMax(viewport)
+export function clampSoundWidth(value: number, viewport = 1280, reserved = 0) {
+  const max = soundPanelMax(viewport, reserved)
   if (!Number.isFinite(value)) return Math.min(SOUND_PANEL_DEFAULT, max)
   return Math.min(max, Math.max(SOUND_PANEL_MIN, Math.round(value)))
 }
 
-export function soundWidthFromDrag(start: number, delta: number, viewport = 1280) {
-  if (!Number.isFinite(start) || !Number.isFinite(delta)) return clampSoundWidth(start, viewport)
-  return clampSoundWidth(start + delta, viewport)
+export function soundWidthFromDrag(start: number, delta: number, viewport = 1280, reserved = 0) {
+  if (!Number.isFinite(start) || !Number.isFinite(delta)) return clampSoundWidth(start, viewport, reserved)
+  return clampSoundWidth(start + delta, viewport, reserved)
 }
 
-export function readSoundWidth(storage: SoundWidthMemory = soundWidthMemory(), viewport = 1280) {
+export function readSoundWidth(storage: SoundWidthMemory = soundWidthMemory(), viewport = 1280, reserved = 0) {
   try {
     const raw = storage.getItem(SOUND_WIDTH_KEY)
-    if (!raw) return clampSoundWidth(SOUND_PANEL_DEFAULT, viewport)
-    return clampSoundWidth(Number(raw), viewport)
+    if (!raw) return clampSoundWidth(SOUND_PANEL_DEFAULT, viewport, reserved)
+    return clampSoundWidth(Number(raw), viewport, reserved)
   } catch {
-    return clampSoundWidth(SOUND_PANEL_DEFAULT, viewport)
+    return clampSoundWidth(SOUND_PANEL_DEFAULT, viewport, reserved)
   }
 }
 
-export function writeSoundWidth(value: number, storage: SoundWidthMemory = soundWidthMemory(), viewport = 1280) {
-  const clean = clampSoundWidth(value, viewport)
+export function writeSoundWidth(value: number, storage: SoundWidthMemory = soundWidthMemory(), viewport = 1280, reserved = 0) {
+  const clean = clampSoundWidth(value, viewport, reserved)
   try {
     storage.setItem(SOUND_WIDTH_KEY, String(clean))
   } catch {

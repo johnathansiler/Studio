@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
 import type { LibraryEntry } from '../audio/multisample/library'
 import type { SamplePack } from '../audio/multisample/types'
-import { fetchCatalog } from '../audio/multisample/library'
-import { libraryBaseUrl } from '../audio/multisample/source'
 import { fetchSoundBytes, soundCache } from '../sounds/cache'
 import { catalogMessage, filterSounds, loadSoundCatalog, soundKeys } from '../sounds/catalog'
-import { filterStarters, loadStarterOnto, playablePitch } from '../sounds/instruments'
+import { filterStarters, loadStarterOnto, playableAudition, refreshStarterCatalog, starterCatalog } from '../sounds/instruments'
 import { matchCountLabel, readSoundWidth, soundWidthFromDrag, writeSoundWidth } from '../sounds/panel'
 import { audioTrackFor, decodeSoundBytes, placeSound, previewChannelsFor, trackIdFromDrop } from '../sounds/place'
 import { soundFileUrl } from '../sounds/source'
@@ -33,7 +31,7 @@ type PreviewEngine = {
   previewPcm: (channels: Float32Array[], sampleRate?: number) => void
   currentTimelineSample: () => number
   holdLibraryPack?: (trackId: string, pack: SamplePack) => void
-  auditionLibrary?: (trackId: string, pitch?: number) => Promise<void>
+  auditionLibrary?: (trackId: string, pitch?: number, velocity?: number) => Promise<void>
 }
 
 export function SoundBrowser({
@@ -42,6 +40,7 @@ export function SoundBrowser({
   phone,
   onClose,
   onWidth,
+  reserve = 0,
   initial,
   instruments: instrumentSeed,
 }: {
@@ -51,6 +50,8 @@ export function SoundBrowser({
   onClose: () => void
   /** Desktop column width. Phones use a sheet and ignore this. */
   onWidth?: (px: number) => void
+  /** Pixels already used by the side dock, so the column leaves the timeline room. */
+  reserve?: number
   /** Tests pass a catalog so the panel can render without the network. */
   initial?: CatalogResult
   instruments?: LibraryEntry[]
@@ -89,7 +90,7 @@ export function SoundBrowser({
   useEffect(() => {
     if (instrumentSeed) return
     let alive = true
-    void fetchCatalog(libraryBaseUrl()).then((next) => {
+    void starterCatalog().then((next) => {
       if (!alive) return
       setStarters(next)
       setStartersReady(true)
@@ -175,7 +176,7 @@ export function SoundBrowser({
     setLoading(true)
     const [next, list] = await Promise.all([
       loadSoundCatalog(fetch, soundCache()),
-      fetchCatalog(libraryBaseUrl()).catch(() => starters),
+      refreshStarterCatalog().catch(() => starters),
     ])
     setResult(next)
     setStarters(list)
@@ -266,7 +267,8 @@ export function SoundBrowser({
     try {
       if (already && audition && engine.auditionLibrary) {
         const program = store.track(target)?.library
-        await engine.auditionLibrary(target, program ? playablePitch(program) : 60)
+        const choice = program ? playableAudition(program) : { pitch: 60, velocity: 0.9 }
+        await engine.auditionLibrary(target, choice.pitch, choice.velocity)
       } else {
         await loadStarterOnto(entry, target, {
           setLibrary: (id, program) => store.setLibrary(id, program),
@@ -291,10 +293,11 @@ export function SoundBrowser({
     if (event.button !== 0) return
     event.preventDefault()
     const origin = event.clientX
-    const start = readSoundWidth(undefined, window.innerWidth)
+    const aside = reserve
+    const start = readSoundWidth(undefined, window.innerWidth, aside)
     const move = (ev: PointerEvent) => {
-      const next = soundWidthFromDrag(start, origin - ev.clientX, window.innerWidth)
-      onWidth?.(writeSoundWidth(next, undefined, window.innerWidth))
+      const next = soundWidthFromDrag(start, origin - ev.clientX, window.innerWidth, aside)
+      onWidth?.(writeSoundWidth(next, undefined, window.innerWidth, aside))
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
@@ -305,7 +308,7 @@ export function SoundBrowser({
   }
 
   const panel = (
-    <div className="sound-panel" id="sound-browser" role={phone ? 'dialog' : 'complementary'} aria-label="Sounds. Loops, one-shots, and instruments from the free library.">
+    <div className="sound-panel" id="sound-browser" role="complementary" aria-label="Sounds. Loops, one-shots, and instruments from the free library.">
       <div className="sound-head">
         <div>
           <h2>Sounds</h2>
@@ -380,8 +383,12 @@ export function SoundBrowser({
                 <span className="sound-info" title={`${entry.description} Audio streams from Hugging Face.`}>{entry.license} · Hugging Face</span>
               </div>
               <div className="sound-actions">
-                <TipButton label="Play" hint="Play this instrument on the speakers." disabled={busy === entry.id} onClick={() => { engine.unlock(); void loadInstrument(entry, null, true) }} />
-                <TipButton label="Add" hint="Load this instrument on the selected instrument track." disabled={busy === entry.id || !sounds.instrumentId} onClick={() => { engine.unlock(); void loadInstrument(entry, null, true) }} />
+                <TipButton
+                  label={store.track(sounds.instrumentId ?? '')?.library?.id === entry.id ? 'Play' : 'Load'}
+                  hint={store.track(sounds.instrumentId ?? '')?.library?.id === entry.id ? 'Play this instrument on the speakers.' : 'Load it on this track and play a note.'}
+                  disabled={busy === entry.id || !sounds.instrumentId}
+                  onClick={() => { engine.unlock(); void loadInstrument(entry, null, true) }}
+                />
                 <TipButton
                   label={saved ? 'Saved' : 'Save'}
                   hint="Keep this sound in the project favorites."
@@ -442,7 +449,8 @@ export function SoundBrowser({
 
   if (phone) {
     return (
-      <div className="sound-back sheet" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <div className="sound-back sheet">
+        <button type="button" className="sound-dismiss" aria-label="Close sounds" title="Close the sound browser." onClick={onClose} />
         {panel}
       </div>
     )

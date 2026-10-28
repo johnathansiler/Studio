@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { bindLocalSamples, importInstrument } from '../audio/multisample/import'
-import { fetchCatalog, STARTER_CATALOG, type LibraryEntry } from '../audio/multisample/library'
-import { libraryBaseUrl } from '../audio/multisample/source'
-import { loadStarterOnto } from '../sounds/instruments'
+import { STARTER_CATALOG, type LibraryEntry } from '../audio/multisample/library'
+import { loadStarterOnto, starterCatalog } from '../sounds/instruments'
 import { selectInstrument } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import './instrument.css'
@@ -31,7 +30,7 @@ export function LibraryPanel({
   useEffect(() => {
     if (initialCatalog) return
     let alive = true
-    void fetchCatalog(libraryBaseUrl()).then((next) => {
+    void starterCatalog().then((next) => {
       if (alive) setCatalog(next)
     }).catch(() => undefined)
     return () => { alive = false }
