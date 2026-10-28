@@ -91,7 +91,8 @@
 }
 .tool-label { display: none; font-size: 12px; font-weight: 640; }
 .shell.phone:not(.land) .tool-label { display: inline; }
-.shell.phone:not(.land) .tool-slot .timeline-tools { flex-wrap: nowrap; overflow-x: auto; }
+.shell.phone:not(.land) .tool-slot .timeline-tools { flex-wrap: wrap; overflow: visible; }
+.shell.phone:not(.land) .tool-strip { flex: 1 1 100%; min-width: 0; overflow-x: auto; }
 .shell.phone:not(.land) .tool-chip {
   flex: 1 1 100%;
   white-space: nowrap;

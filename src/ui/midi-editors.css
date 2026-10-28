@@ -181,4 +181,4 @@
   border-right: 6px solid transparent;
   border-top: 8px solid #e0b15a;
 }
-.scale-bar button.on { background: var(--accent); color: var(--accent-ink); }
+.piano .scale-bar button.on { background: var(--accent); color: var(--accent-ink); }

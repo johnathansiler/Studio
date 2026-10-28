@@ -682,18 +682,6 @@ export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { s
     <div className={`piano ${compact ? 'compact' : ''}`} ref={pianoRef} data-tool={tool}>
       <div className="scale-bar">
         <TipButton className={`chords-btn ${open ? 'on' : ''}`} label={bar('chords').label} hint={bar('chords').hint} pressed={open} onClick={() => void toggleChords()} />
-        {!compact && onGenerate && <TipButton label={bar('generate').label} hint={bar('generate').hint} onClick={onGenerate} />}
-        <select {...described(bar('key'))} value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
-          {NOTE_NAMES.map((name, index) => (
-            <option key={name} value={index}>{name}</option>
-          ))}
-        </select>
-        <select {...described(bar('scale'))} value={scale.scale} onChange={(event) => store.setScale({ scale: event.target.value as ScaleId })}>
-          {SCALES.map((item) => (
-            <option key={item.id} value={item.id}>{item.name}</option>
-          ))}
-        </select>
-        <TipButton className={scale.snap ? 'on' : ''} label={bar('snap').label} hint={bar('snap').hint} pressed={scale.snap} onClick={() => store.setScale({ snap: !scale.snap })} />
         <TipButton
           className={store.midiEditor().stepInput ? 'on' : ''}
           label="Step input"
@@ -708,6 +696,18 @@ export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { s
           pressed={store.midiEditor().follow}
           onClick={() => store.setMidiEditor({ follow: !store.midiEditor().follow })}
         />
+        {!compact && onGenerate && <TipButton label={bar('generate').label} hint={bar('generate').hint} onClick={onGenerate} />}
+        <select {...described(bar('key'))} value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
+          {NOTE_NAMES.map((name, index) => (
+            <option key={name} value={index}>{name}</option>
+          ))}
+        </select>
+        <select {...described(bar('scale'))} value={scale.scale} onChange={(event) => store.setScale({ scale: event.target.value as ScaleId })}>
+          {SCALES.map((item) => (
+            <option key={item.id} value={item.id}>{item.name}</option>
+          ))}
+        </select>
+        <TipButton className={scale.snap ? 'on' : ''} label={bar('snap').label} hint={bar('snap').hint} pressed={scale.snap} onClick={() => store.setScale({ snap: !scale.snap })} />
         {!compact && onLibrary && (
           <TipButton label={scale.library ? (findScale(scale.library)?.name ?? 'Scale') : 'Library'} hint="Browse scales, modes, and the chords they contain." onClick={onLibrary} />
         )}
