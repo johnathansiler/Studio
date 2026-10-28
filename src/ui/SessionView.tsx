@@ -197,13 +197,21 @@ function SessionBody({
                   lengthSamples: clip ? clipLoopSamples(clip, project.sampleRate, project.tempo) : 1,
                 })
                 const armed = store.sessionSlot?.trackId === track.id && store.sessionSlot.scene === scene
+                const phaseLabel = phase.phase === 'queued'
+                  ? 'Queued until the next grid line.'
+                  : phase.phase === 'playing'
+                    ? 'Playing.'
+                    : phase.phase === 'stopping'
+                      ? 'Stopping at the next grid line.'
+                      : ''
                 return (
                   <button
                     key={scene}
                     type="button"
+                    data-phase={phase.phase}
                     className={`slot ${clip ? 'filled' : ''} ${phase.phase === 'playing' ? 'live' : ''} ${phase.phase === 'queued' ? 'queued' : ''} ${phase.phase === 'stopping' ? 'stopping' : ''} ${armed && !clip ? 'armed' : ''}`}
                     title={clip ? 'Tap to launch this clip on the grid. Tap again to stop it.' : 'Empty slot. Tap to record into it. Drop a clip to assign it.'}
-                    aria-label={clip ? `${clip.name}. Tap to launch this clip. Tap again to stop it.` : `${track.name} scene ${scene + 1}. Empty slot. Tap to record into it.`}
+                    aria-label={clip ? `${clip.name}. ${phaseLabel} Tap to launch this clip. Tap again to stop it.` : `${track.name} scene ${scene + 1}. Empty slot. Tap to record into it.`}
                     style={clip ? { background: track.color } : undefined}
                     draggable={!!clip}
                     onDragStart={(event) => {
@@ -244,6 +252,9 @@ function SessionBody({
                   >
                     {(phase.phase === 'playing' || phase.phase === 'stopping') && (
                       <span className="slot-progress" style={{ width: `${Math.round(phase.progress * 100)}%` }} />
+                    )}
+                    {(phase.phase === 'queued' || phase.phase === 'playing' || phase.phase === 'stopping') && (
+                      <span className="slot-mark" aria-hidden />
                     )}
                     <span className="slot-name">{clip ? clip.name : ''}</span>
                   </button>

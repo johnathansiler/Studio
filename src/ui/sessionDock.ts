@@ -41,6 +41,24 @@ export function nextSessionDock(input: {
   return { dockOpen: true, phonePane: 'room' }
 }
 
+export const EDITOR_DOCK_DEFAULT = 380
+export const EDITOR_DOCK_MIN = 280
+export const EDITOR_DOCK_MAX = 760
+/** Arrange or Session keeps at least this much beside a side editor. */
+export const EDITOR_WORK_MIN = 320
+
+/** Side editor width that stays inside the viewport and leaves the work visible. */
+export function fittedDockWidth(viewport: number, requested: number, edge: 'right' | 'bottom' = 'right'): number {
+  const view = Number.isFinite(viewport) && viewport > 0 ? viewport : 1280
+  const want = Number.isFinite(requested) ? requested : EDITOR_DOCK_DEFAULT
+  if (edge === 'bottom') {
+    const max = Math.min(520, Math.max(200, Math.floor(view * 0.45)))
+    return Math.round(Math.min(max, Math.max(200, want)))
+  }
+  const cap = Math.max(EDITOR_DOCK_MIN, Math.min(EDITOR_DOCK_MAX, Math.floor(view * 0.5), view - EDITOR_WORK_MIN))
+  return Math.round(Math.min(cap, Math.max(EDITOR_DOCK_MIN, want)))
+}
+
 /** Piano and rack use the side dock. The call panel is the Collab tab and never this dock. */
 export function dockVisible(input: { surface: 'studio' | 'artist'; panel: 'room' | 'piano' | 'rack'; dockOpen: boolean }): boolean {
   if (input.surface !== 'studio') return false

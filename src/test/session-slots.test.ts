@@ -1,11 +1,55 @@
 import { describe, expect, it } from 'vitest'
-import { clipLoopSamples, slotPhase, stopPlan } from '../model/sessionSlots'
+import { clipLoopSamples, sessionStartContext, slotPhase, stopPlan } from '../model/sessionSlots'
 import { collabBadgeOn, collabPanelVisible } from '../ui/collabTab'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { beatsToSamples } from '../model/time'
 
 const sig = { numerator: 4, denominator: 4 }
+
+describe('new sessions', () => {
+  it('starts every track unarmed, including Vocal', () => {
+    const project = createEmptyProject()
+    expect(project.tracks.map((track) => track.name)).toEqual(['Vocal', 'Music', 'Keys'])
+    expect(project.tracks.every((track) => track.armed === false)).toBe(true)
+    expect(project.launchQuant).toBe('1bar')
+  })
+})
+
+describe('session playback waits for the quantize line', () => {
+  it('does not start a clip until the look-ahead reaches the bar', () => {
+    const rate = 48000
+    const bar = 96000
+    const origin = 10
+    const early = sessionStartContext({
+      targetSample: bar,
+      playOriginSample: 1000,
+      playOriginCtx: origin,
+      sampleRate: rate,
+      nowCtx: origin,
+      horizonSec: 0.35,
+    })
+    expect(early).toBeNull()
+    const near = sessionStartContext({
+      targetSample: bar,
+      playOriginSample: 1000,
+      playOriginCtx: origin,
+      sampleRate: rate,
+      nowCtx: origin + (bar - 1000) / rate - 0.1,
+      horizonSec: 0.35,
+    })
+    expect(near).toBeCloseTo(origin + (bar - 1000) / rate, 5)
+    const late = sessionStartContext({
+      targetSample: 1000,
+      playOriginSample: 4000,
+      playOriginCtx: origin,
+      sampleRate: rate,
+      nowCtx: origin + 1,
+      horizonSec: 0.35,
+    })
+    expect(late).toBeCloseTo(origin + 1.01, 5)
+  })
+})
 
 describe('slot launch and stop quantization', () => {
   it('quantizes a launch to the next bar and cancels a clip that has not started', () => {

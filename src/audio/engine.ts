@@ -5,6 +5,7 @@ import type { StretchMode } from './stretch/engine'
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
 import { compPieces, recordOffsetSamples } from '../model/comp'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
+import { sessionStartContext } from '../model/sessionSlots'
 import { DRUM_PADS, residentDrums, type ResidentDrum } from '../model/drums'
 import { calibrationTrim, contextTimeForEvent, monitoringOffset, type ClockStamp } from '../model/midiClock'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
@@ -1609,9 +1610,15 @@ export class AudioEngine {
       const quant = clip.quant ?? project.launchQuant ?? '1bar'
       const scheduled = this.launchAt.get(trackId)
       const target = scheduled != null ? scheduled : quantizeSample(nowSample, quant, sr, project.tempo, project.timeSignature)
-      const when = this.playOriginCtx + (target - this.playOriginSample) / sr
-      if (when > horizon) continue
-      const startWhen = Math.max(when, this.ctx.currentTime + 0.01)
+      const startWhen = sessionStartContext({
+        targetSample: target,
+        playOriginSample: this.playOriginSample,
+        playOriginCtx: this.playOriginCtx,
+        sampleRate: sr,
+        nowCtx: this.ctx.currentTime,
+        horizonSec: horizon - this.ctx.currentTime,
+      })
+      if (startWhen == null) continue
       this.stopSessionTrack(trackId)
       if (audio) {
         const asset = this.assetOf(audio.bufferId)

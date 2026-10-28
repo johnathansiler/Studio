@@ -552,7 +552,7 @@ export function makeTrack(partial: Partial<Track> & Pick<Track, 'name' | 'type'>
 }
 
 export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'): Project {
-  const vocal = makeTrack({ name: 'Vocal', type: 'audio', color: TRACK_COLORS[0], armed: true, monitor: false })
+  const vocal = makeTrack({ name: 'Vocal', type: 'audio', color: TRACK_COLORS[0], armed: false, monitor: false })
   const music = makeTrack({ name: 'Music', type: 'audio', color: TRACK_COLORS[1], input: 'none' })
   const keys = makeTrack({ name: 'Keys', type: 'midi', color: TRACK_COLORS[2], input: 'none' })
   const bar = Math.round(sampleRate * 2) // 1 bar at 120bpm is 2s; tempo applied by caller via loop length

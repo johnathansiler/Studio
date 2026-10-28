@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { chromium, type Browser, type Page } from 'playwright'
 import { describe, expect, it } from 'vitest'
-import { dockVisible, nextSessionDock, paneAfterRestore, sessionDockOpen } from '../ui/sessionDock'
+import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, nextSessionDock, paneAfterRestore, sessionDockOpen } from '../ui/sessionDock'
 
 describe('session dock choice', () => {
   it('stays closed until someone opens it, including older saved rooms', () => {
@@ -21,6 +21,17 @@ describe('session dock choice', () => {
     expect(dockVisible({ surface: 'studio', panel: 'piano', dockOpen: false })).toBe(true)
     expect(dockVisible({ surface: 'studio', panel: 'rack', dockOpen: false })).toBe(true)
     expect(dockVisible({ surface: 'artist', panel: 'room', dockOpen: true })).toBe(false)
+  })
+
+  it('keeps a side editor inside the viewport and leaves the work visible', () => {
+    expect(fittedDockWidth(1280, EDITOR_DOCK_DEFAULT)).toBe(EDITOR_DOCK_DEFAULT)
+    const wide = fittedDockWidth(1280, 900)
+    expect(wide).toBeLessThanOrEqual(640)
+    expect(wide).toBeGreaterThanOrEqual(280)
+    expect(1280 - wide).toBeGreaterThanOrEqual(320)
+    expect(fittedDockWidth(1100, 760)).toBeLessThanOrEqual(550)
+    expect(fittedDockWidth(1280, 200)).toBe(280)
+    expect(fittedDockWidth(800, 700, 'bottom')).toBeLessThanOrEqual(520)
   })
 })
 
@@ -75,14 +86,22 @@ async function drawAndTrim(page: Page) {
   const clip = page.locator('[data-clip]').first()
   await clip.waitFor()
   await page.getByRole('button', { name: /^Select/ }).click()
+  await page.mouse.click(view.x + 30, Math.min(lane.y + 110, view.y + view.height - 12))
+  await page.mouse.move(2, 2)
   const edge = clip.locator('[data-edge="end"]')
   await edge.scrollIntoViewIfNeeded()
+  const grip = await edge.evaluate((el) => {
+    const after = getComputedStyle(el, '::after')
+    return { opacity: Number(after.opacity), width: after.width, selected: el.parentElement?.classList.contains('selected') ?? false }
+  })
+  expect(grip.selected).toBe(false)
+  expect(grip.opacity).toBeGreaterThan(0.9)
   const before = await clip.boundingBox()
   const edgeBox = await edge.boundingBox()
   if (!before || !edgeBox) throw new Error('clip edge missing')
-  expect(edgeBox.width).toBeGreaterThanOrEqual(24)
+  expect(edgeBox.width).toBeGreaterThanOrEqual(28)
   const startEdge = await clip.locator('[data-edge="start"]').boundingBox()
-  expect(startEdge?.width).toBeGreaterThanOrEqual(24)
+  expect(startEdge?.width).toBeGreaterThanOrEqual(28)
   const gripX = Math.min(edgeBox.x + 8, view.x + view.width - 8)
   const gripY = edgeBox.y + Math.min(20, edgeBox.height / 2)
   const drag = Math.min(70, Math.max(36, before.width * 0.4))
@@ -95,6 +114,21 @@ async function drawAndTrim(page: Page) {
   if (!after) throw new Error('clip vanished')
   expect(after.width).toBeLessThan(before.width - 12)
   expect(Math.abs(after.x - before.x)).toBeLessThan(8)
+  const start = clip.locator('[data-edge="start"]')
+  const startBox = await start.boundingBox()
+  const mid = await clip.boundingBox()
+  if (!startBox || !mid) throw new Error('start edge missing')
+  const startX = startBox.x + 8
+  const startY = startBox.y + Math.min(20, startBox.height / 2)
+  await page.mouse.move(startX, startY)
+  await page.mouse.down()
+  await page.mouse.move(startX + 60, startY, { steps: 10 })
+  await page.mouse.up()
+  await page.waitForTimeout(80)
+  const trimmedStart = await clip.boundingBox()
+  if (!trimmedStart) throw new Error('clip vanished')
+  expect(trimmedStart.x).toBeGreaterThan(mid.x + 12)
+  expect(trimmedStart.width).toBeLessThan(mid.width - 12)
 }
 
 describe('arrange on first load', () => {
@@ -126,6 +160,42 @@ describe('arrange on first load', () => {
       await spansArrange(page)
       await page.getByRole('button', { name: /^Session/ }).click()
       await page.locator('[data-session-view="open"]').waitFor()
+      expect(await page.locator('.track-stop').first().innerText()).toBe('Arm')
+      const slot = page.locator('.session-col').nth(2).locator('.slot').first()
+      await slot.click()
+      await page.locator('.midi-dock').waitFor()
+      await page.waitForFunction(() => /1\.2\./.test(document.querySelector('.lcd .bars')?.textContent || ''), null, { timeout: 8000 })
+      await slot.click()
+      await page.locator('.slot[data-phase="queued"]').waitFor()
+      const fit = await page.evaluate(() => {
+        const dock = document.querySelector('.dock-slot')!.getBoundingClientRect()
+        const work = document.querySelector('.workspace')!.getBoundingClientRect()
+        const rights = [...document.querySelectorAll('.midi-dock .scale-bar > *, .midi-dock .tool-row > *, .midi-dock .me-modes > *')].map((el) => el.getBoundingClientRect().right)
+        return {
+          dockRight: dock.right,
+          dockLeft: dock.left,
+          workRight: work.right,
+          vw: window.innerWidth,
+          resize: !!document.querySelector('.dock-slot > .dock-resize'),
+          maxControl: Math.max(...rights),
+        }
+      })
+      expect(fit.resize).toBe(true)
+      expect(fit.dockRight).toBeLessThanOrEqual(fit.vw + 1)
+      expect(fit.workRight).toBeLessThanOrEqual(fit.vw + 1)
+      expect(fit.dockLeft).toBeGreaterThan(200)
+      expect(fit.maxControl).toBeLessThanOrEqual(fit.vw + 1)
+      const handle = await page.locator('.dock-slot > .dock-resize').boundingBox()
+      const dockBefore = await page.locator('.dock-slot').boundingBox()
+      if (!handle || !dockBefore) throw new Error('editor resize handle missing')
+      await page.mouse.move(handle.x + 4, handle.y + 80)
+      await page.mouse.down()
+      await page.mouse.move(handle.x - 70, handle.y + 80, { steps: 6 })
+      await page.mouse.up()
+      const dockAfter = await page.locator('.dock-slot').boundingBox()
+      if (!dockAfter) throw new Error('editor dock vanished')
+      expect(dockAfter.width).toBeGreaterThan(dockBefore.width + 30)
+      expect(dockAfter.x + dockAfter.width).toBeLessThanOrEqual(1281)
       expect(await page.getByRole('button', { name: /Create invite/ }).count()).toBe(0)
       expect(await page.locator('[data-collab-panel="open"]').count()).toBe(0)
       for (const tab of [/^Arrange/, /^Mix/, /^Beats/]) {
@@ -151,5 +221,5 @@ describe('arrange on first load', () => {
       await browser?.close()
       child.kill('SIGTERM')
     }
-  }, 60000)
+  }, 90000)
 })

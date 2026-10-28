@@ -52,7 +52,7 @@ import { ToolBar } from './ui/ToolBar'
 import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
 import { MENU_COPY, UNSTUCK_COPY, VIEW_COPY, copyOf, described } from './ui/chrome'
-import { paneAfterRestore, readSessionDock, writeSessionDock } from './ui/sessionDock'
+import { EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, readSessionDock, writeSessionDock } from './ui/sessionDock'
 import { HintBubble, MenuRow, TipButton } from './ui/Hint'
 import { formatBytes } from './ui/share'
 
@@ -97,8 +97,13 @@ export function App() {
   useEffect(() => watchSpectral(store), [store])
   const [version, setVersion] = useState(0)
   const [surface, setSurface] = useState<'studio' | 'artist'>('studio')
-  const [dock, setDock] = useState(380)
+  const [dock, setDock] = useState(() => fittedDockWidth(typeof window === 'undefined' ? 1280 : window.innerWidth, EDITOR_DOCK_DEFAULT))
   const [dockEdge, setDockEdge] = useState<'right' | 'bottom'>('right')
+  useEffect(() => {
+    const fit = () => setDock((value) => fittedDockWidth(window.innerWidth, value, dockEdge))
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
+  }, [dockEdge])
   const [joinOpen, setJoinOpen] = useState(false)
   const [joinCode, setJoinCode] = useState('')
   const [joinName, setJoinName] = useState(store.project.name ? localStorage.getItem('cueharbor-name') || 'Artist' : 'Artist')
@@ -1396,7 +1401,7 @@ async function importDropped(files: FileList) {
             const initial = dock
             const move = (ev: PointerEvent) => {
               const delta = dockEdge === 'right' ? start - ev.clientX : start - ev.clientY
-              setDock(Math.min(dockEdge === 'right' ? 760 : 520, Math.max(280, initial + delta)))
+              setDock(fittedDockWidth(window.innerWidth, initial + delta, dockEdge))
             }
             const up = () => {
               window.removeEventListener('pointermove', move)
@@ -1406,6 +1411,13 @@ async function importDropped(files: FileList) {
             window.addEventListener('pointerup', up)
           }}
         >
+          <div
+            className="dock-resize"
+            role="separator"
+            aria-orientation={dockEdge === 'bottom' ? 'horizontal' : 'vertical'}
+            aria-label="Resize editor. Drag to change its size."
+            title="Drag to resize the editor."
+          />
           {surface === 'studio' && panel === 'rack' && store.rackTrackId && (
             <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
           )}

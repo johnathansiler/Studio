@@ -28,6 +28,25 @@ export function clipLoopSamples(clip: AudioClip | MidiClip, sampleRate: number, 
   return Math.max(1, Math.round(beatsToSamples(Math.max(0.25, clip.durationBeats), sampleRate, tempo)))
 }
 
+/**
+ * Audio-clock time for a quantized launch.
+ * Null while the start is still beyond the look-ahead, so the clip does not begin early.
+ */
+export function sessionStartContext(input: {
+  targetSample: number
+  playOriginSample: number
+  playOriginCtx: number
+  sampleRate: number
+  nowCtx: number
+  horizonSec: number
+  leadSec?: number
+}): number | null {
+  const rate = input.sampleRate > 0 ? input.sampleRate : 1
+  const when = input.playOriginCtx + (input.targetSample - input.playOriginSample) / rate
+  if (when > input.nowCtx + input.horizonSec) return null
+  return Math.max(when, input.nowCtx + (input.leadSec ?? 0.01))
+}
+
 /** Queued launches and queued stops blink. Playing slots report loop progress from 0 to 1. */
 export function slotPhase(input: {
   hasClip: boolean
