@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
-import { emptyTap, pushTap, scaleTempo, tempoFromTaps, roundTempo, type TapMemory } from '../model/tap'
+import { emptyTap, formatTempo, pushTap, roundTempo, type TapMemory, type TapSource } from '../model/tap'
 import { formatMapBars } from '../model/tempoMap'
 import { formatTimecode } from '../model/time'
 import { selectTransport } from '../state/select'
@@ -35,12 +35,20 @@ export function TransportBar({
   const project = selectTransport(store).project
   const [position, setPosition] = useState(engine.positionSamples)
   const [status, setStatus] = useState(engine.status)
-  const [tapOpen, setTapOpen] = useState(false)
-  const [shown, setShown] = useState<number | null>(null)
-  const [whole, setWhole] = useState(false)
+  const [live, setLive] = useState<number | null>(null)
+  const [draft, setDraft] = useState<string | null>(null)
+  const [flash, setFlash] = useState(false)
   const memory = useRef<TapMemory>(emptyTap())
-  const hold = useRef(0)
-  const held = useRef(false)
+  const fieldRef = useRef<HTMLInputElement>(null)
+  const written = useRef<number | null>(null)
+  const drag = useRef<{ y: number; origin: number; moved: boolean } | null>(null)
+  const suppressFocus = useRef(false)
+  const tapping = useRef(false)
+  const flashTimer = useRef(0)
+  const tempo = live ?? project.tempo
+  const tempoCopy = copyOf(TRANSPORT_COPY, 'tempo')
+  const tapCopy = copyOf(TRANSPORT_COPY, 'tap')
+
   useEffect(
     () =>
       engine.subscribe(() => {
@@ -50,59 +58,128 @@ export function TransportBar({
     [engine],
   )
 
-  function register(at: number) {
-    if (store.remoteFollow) return
-    const result = pushTap(memory.current, at)
-    memory.current = result.memory
-    if (result.live != null) setShown(result.live)
-    if (result.commit != null) store.setTempo(result.commit, true)
-    setTapOpen(true)
-  }
-
-  function closeTap() {
-    setTapOpen(false)
-    setShown(null)
-    memory.current = emptyTap(memory.current.whole)
+  useEffect(() => {
+    if (written.current == null || project.tempo === written.current) return
+    written.current = null
+    setLive(null)
+    memory.current = emptyTap()
     store.endTempoGroup()
+  }, [project.tempo, store])
+
+  function publish(bpm: number, group: boolean) {
+    const next = roundTempo(bpm, false)
+    written.current = next
+    setLive(next)
+    setDraft(null)
+    if (next !== store.project.tempo) store.setTempo(next, group)
   }
 
-  function nudge(factor: number) {
-    if (store.remoteFollow) return
-    const next = scaleTempo(store.project.tempo, factor, whole)
-    memory.current = { ...memory.current, taps: [] }
-    setShown(next)
-    store.setTempo(next, true)
-    setTapOpen(true)
+  const publishRef = useRef(publish)
+  publishRef.current = publish
+
+  function pulse() {
+    setFlash(true)
+    window.clearTimeout(flashTimer.current)
+    flashTimer.current = window.setTimeout(() => setFlash(false), 160)
   }
+
+  function applyTap(at: number, source: TapSource) {
+    if (store.remoteFollow) return null
+    const result = pushTap(memory.current, at, source)
+    memory.current = result.memory
+    if (result.ignored) return result
+    tapping.current = true
+    fieldRef.current?.blur()
+    tapping.current = false
+    setDraft(null)
+    if (result.reset) {
+      setLive(null)
+      written.current = null
+      store.endTempoGroup()
+    }
+    if (result.bpm != null) publish(result.bpm, true)
+    return result
+  }
+
+  const applyRef = useRef(applyTap)
+  applyRef.current = applyTap
 
   useEffect(() => {
     const onTap = (event: Event) => {
       if (store.remoteFollow || store.keyboardMidi) return
-      register((event as CustomEvent<number>).detail)
+      const detail = (event as CustomEvent<number>).detail
+      const at = typeof detail === 'number' && Number.isFinite(detail) ? detail : performance.now()
+      applyRef.current(at, 'key')
+      setFlash(true)
+      window.clearTimeout(flashTimer.current)
+      flashTimer.current = window.setTimeout(() => setFlash(false), 160)
     }
     window.addEventListener('cueharbor-tap', onTap)
     return () => window.removeEventListener('cueharbor-tap', onTap)
-  })
+  }, [store])
+
+  useEffect(() => () => {
+    window.clearTimeout(flashTimer.current)
+    store.endTempoGroup()
+  }, [store])
 
   useEffect(() => {
-    if (!tapOpen) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeTap()
+    const node = fieldRef.current
+    if (!node) return
+    const onWheel = (event: WheelEvent) => {
+      if (store.remoteFollow) return
+      event.preventDefault()
+      memory.current = emptyTap()
+      const step = (event.deltaY < 0 ? 0.1 : -0.1) * (event.shiftKey ? 10 : 1)
+      const base = Number(node.value)
+      publishRef.current((Number.isFinite(base) ? base : store.project.tempo) + step, true)
     }
-    const onPointer = (event: PointerEvent) => {
-      const target = event.target as HTMLElement | null
-      if (target?.closest('.tap-pad, .bpm-readout')) return
-      closeTap()
-    }
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('pointerdown', onPointer)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('pointerdown', onPointer)
-    }
-  }, [tapOpen])
+    node.addEventListener('wheel', onWheel, { passive: false })
+    return () => node.removeEventListener('wheel', onWheel)
+  }, [store])
 
-  const readout = (shown ?? project.tempo).toFixed(whole || shown == null && Number.isInteger(project.tempo) ? 0 : 1)
+  function commitDraft(text: string) {
+    if (tapping.current || drag.current?.moved || suppressFocus.current) return
+    setDraft(null)
+    const value = Number(text)
+    if (!Number.isFinite(value)) return
+    memory.current = emptyTap()
+    store.endTempoGroup()
+    publish(value, false)
+  }
+
+  function onTempoPointerDown(event: ReactPointerEvent<HTMLInputElement>) {
+    if (store.remoteFollow || event.button !== 0) return
+    drag.current = { y: event.clientY, origin: tempo, moved: false }
+  }
+
+  function onTempoPointerMove(event: ReactPointerEvent<HTMLInputElement>) {
+    const state = drag.current
+    if (!state || store.remoteFollow) return
+    const dy = state.y - event.clientY
+    if (!state.moved) {
+      if (Math.abs(dy) < 4) return
+      state.moved = true
+      suppressFocus.current = true
+      memory.current = emptyTap()
+      store.endTempoGroup()
+      setDraft(null)
+      event.currentTarget.setPointerCapture(event.pointerId)
+      event.currentTarget.blur()
+    }
+    publish(state.origin + dy * 0.2, true)
+  }
+
+  function onTempoPointerUp() {
+    const moved = drag.current?.moved ?? false
+    drag.current = null
+    if (!moved) return
+    store.endTempoGroup()
+    window.setTimeout(() => {
+      suppressFocus.current = false
+    }, 0)
+  }
+
   const playing = status === 'playing' || status === 'recording'
   const transport = (id: string) => copyOf(TRANSPORT_COPY, id)
   return (
@@ -144,56 +221,74 @@ export function TransportBar({
           <i style={{ width: `${Math.round(takeProgress * 100)}%` }} />
         </div>
       )}
-      {tapOpen ? (
-        <div className="tap-pad">
-          <button type="button" className="bpm-readout" aria-label="Tap tempo" onPointerDown={(event) => register(event.timeStamp)}>
-            {readout}
-          </button>
-          <button type="button" aria-label="Half tempo" onClick={() => nudge(0.5)}>½</button>
-          <button type="button" aria-label="Double tempo" onClick={() => nudge(2)}>2×</button>
-          <button
-            type="button"
-            aria-label="Whole BPM"
-            className={whole ? 'on' : ''}
-            onClick={() => {
-              const next = !whole
-              setWhole(next)
-              memory.current = { ...memory.current, whole: next }
-              const raw = tempoFromTaps(memory.current.taps)
-              if (raw == null) return
-              const rounded = roundTempo(raw, next)
-              setShown(rounded)
-              if (memory.current.taps.length >= 3) store.setTempo(rounded, true)
-            }}
-          >
-            {whole ? '1' : '.1'}
-          </button>
-        </div>
-      ) : (
+      <div className="tempo-cluster" role="group" aria-label="Tempo">
+        <input
+          ref={fieldRef}
+          className="bpm-readout"
+          type="number"
+          inputMode="decimal"
+          min={30}
+          max={300}
+          step={0.1}
+          title={tempoCopy.hint}
+          aria-label={`${tempoCopy.label}. ${tempoCopy.hint}`}
+          disabled={store.remoteFollow}
+          value={draft ?? formatTempo(tempo)}
+          onFocus={(event) => {
+            if (suppressFocus.current) {
+              event.currentTarget.blur()
+              return
+            }
+            setDraft(event.currentTarget.value)
+            event.currentTarget.select()
+          }}
+          onChange={(event) => setDraft(event.currentTarget.value)}
+          onBlur={(event) => commitDraft(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.currentTarget.blur()
+              return
+            }
+            if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+            event.preventDefault()
+            const delta = (event.shiftKey ? 1 : 0.1) * (event.key === 'ArrowUp' ? 1 : -1)
+            const base = draft != null && Number.isFinite(Number(draft)) ? Number(draft) : tempo
+            memory.current = emptyTap()
+            publish(base + delta, true)
+          }}
+          onPointerDown={onTempoPointerDown}
+          onPointerMove={onTempoPointerMove}
+          onPointerUp={onTempoPointerUp}
+          onPointerCancel={onTempoPointerUp}
+        />
         <button
           type="button"
-          className="bpm-readout"
-          title={transport('tempo').hint}
-          aria-label={`${transport('tempo').label}. ${transport('tempo').hint}`}
+          className={`tap-tempo${flash ? ' on' : ''}`}
+          title={tapCopy.hint}
+          aria-label={`${tapCopy.label}. ${tapCopy.hint}`}
           disabled={store.remoteFollow}
-          onPointerDown={() => {
-            held.current = false
-            window.clearTimeout(hold.current)
-            hold.current = window.setTimeout(() => {
-              held.current = true
-              setTapOpen(true)
-            }, 450)
+          onKeyDown={(event) => {
+            if (event.key === ' ' || event.key === 'Enter') event.stopPropagation()
           }}
-          onPointerUp={(event) => {
-            window.clearTimeout(hold.current)
-            if (!held.current) register(event.timeStamp)
-            held.current = false
+          onPointerDown={(event) => {
+            if (event.button !== 0 || store.remoteFollow) return
+            event.preventDefault()
+            try {
+              event.currentTarget.setPointerCapture(event.pointerId)
+            } catch {
+              /* The pointer can already be gone. */
+            }
+            pulse()
+            applyTap(performance.now(), 'pointer')
           }}
-          onPointerLeave={() => window.clearTimeout(hold.current)}
+          onClick={() => {
+            const result = applyTap(performance.now(), 'click')
+            if (result && !result.ignored) pulse()
+          }}
         >
-          {readout}
+          Tap
         </button>
-      )}
+      </div>
       {!simple && (
         <TipButton
           className={`t-btn loop ${project.loopEnabled ? 'on' : ''}`}

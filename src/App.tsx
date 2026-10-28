@@ -619,7 +619,7 @@ export function App() {
       const meta = event.metaKey || event.ctrlKey
       if (key === 't' && !meta && !event.repeat && !store.keyboardMidi) {
         event.preventDefault()
-        window.dispatchEvent(new CustomEvent('cueharbor-tap', { detail: event.timeStamp }))
+        window.dispatchEvent(new CustomEvent('cueharbor-tap', { detail: performance.now() }))
       } else if (event.code === 'Space') {
         event.preventDefault()
         if (engine.status === 'stopped') void play()
@@ -1540,6 +1540,7 @@ async function importDropped(files: FileList) {
                 ['Space', 'Play or stop'],
                 ['Stop button', 'Stop'],
                 ['R', 'Record'],
+                ['T', 'Tap tempo'],
                 ['Return or Home', 'Go to start'],
                 ['← →', 'Nudge one beat'],
                 ['Shift ← →', 'Nudge one bar'],

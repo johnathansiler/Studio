@@ -26,7 +26,8 @@ export const TRANSPORT_COPY: Copy[] = [
   { id: 'stop', label: 'Stop', hint: 'Stop playback and recording.' },
   { id: 'record', label: 'Record', hint: 'Record onto armed tracks from the playhead.' },
   { id: 'loop', label: 'Loop', hint: 'Repeat the highlighted region.' },
-  { id: 'tempo', label: 'Tempo', hint: 'Tap the number to set the tempo. Hold it for half-time, double-time, and rounding.' },
+  { id: 'tempo', label: 'Tempo', hint: 'Type a tempo, or drag the number up or down.' },
+  { id: 'tap', label: 'Tap', hint: 'Tap in time. The tempo follows your taps.' },
 ]
 
 /** On a phone these leave the transport and live in the menu, so Play stays reachable. */
