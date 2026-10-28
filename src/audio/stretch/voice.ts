@@ -73,6 +73,8 @@ export class Psola {
   readonly latencySamples: number
   private readonly channels: number
   private readonly span: number
+  /** Non-zero on the monitoring path. Zero keeps the original HQ delay. */
+  private readonly liveHop: number
   private readonly ring: Float32Array[]
   private readonly mix: Float32Array[]
   private readonly weight: Float32Array
@@ -81,11 +83,13 @@ export class Psola {
   private emitted = 0
   private epoch = 0
   private epochSet = false
+  private formant = 0
 
-  constructor(sampleRate: number, channels = 2) {
+  constructor(sampleRate: number, channels = 2, liveHop = 0) {
     this.channels = Math.max(1, Math.min(2, channels))
     this.span = Math.max(1024, Math.round(1536 * (sampleRate / 48000)))
-    this.latencySamples = this.span + Math.floor(this.span / 2)
+    this.liveHop = liveHop > 0 ? Math.round(liveHop) : 0
+    this.latencySamples = this.liveHop > 0 ? this.liveHop * 2 : this.span + Math.floor(this.span / 2)
     const size = this.span * 8
     this.ring = Array.from({ length: this.channels }, () => new Float32Array(size))
     this.mix = Array.from({ length: this.channels }, () => new Float32Array(size))
@@ -111,9 +115,11 @@ export class Psola {
     minHz: number,
     maxHz: number,
     analyzeEvery: number,
+    formant = 0,
   ) {
     const n = input[0]?.length ?? 0
     const hop = Math.max(32, Math.round(analyzeEvery))
+    this.formant = clamp(formant, 0, 1)
     for (let i = 0; i < n; i++) {
       for (let c = 0; c < this.channels; c++) {
         this.ring[c][this.written % this.ring[c].length] = input[Math.min(c, input.length - 1)]?.[i] ?? 0
@@ -127,7 +133,9 @@ export class Psola {
 
   private synthesize(targetFor: (frame: PitchFrame) => number, sampleRate: number, minHz: number, maxHz: number, hop: number) {
     let guard = 0
-    while (this.written - this.nextOut > this.span && guard < 4) {
+    const ahead = this.liveHop > 0 ? this.liveHop : this.span
+    const guardMax = this.liveHop > 0 ? 8 : 4
+    while (this.written - this.nextOut > ahead && guard < guardMax) {
       guard += 1
       const frame = new Float32Array(this.span)
       for (let i = 0; i < this.span; i++) frame[i] = this.read(0, this.nextOut - this.span + i)
@@ -136,7 +144,7 @@ export class Psola {
       const voiced = pitch.hz > 0 && pitch.confidence >= 0.7 && target > 30
       if (!voiced) {
         this.epochSet = false
-        this.stamp(this.nextOut, this.nextOut, hop, false)
+        this.stamp(this.nextOut, this.nextOut, hop, false, 1)
         this.nextOut += hop
         continue
       }
@@ -148,13 +156,15 @@ export class Psola {
       }
       const mark = this.epoch + Math.round((this.nextOut - this.epoch) / period) * period
       const grain = clamp(period * 2, 16, this.span - 1)
-      this.stamp(mark, this.nextOut, grain, true)
+      const ratio = pitch.hz > 0 ? target / pitch.hz : 1
+      const step = this.formant > 0.001 ? 1 + this.formant * (ratio - 1) : 1
+      this.stamp(mark, this.nextOut, grain, true, step)
       this.nextOut += outPeriod
     }
   }
 
-  /** Repeat the pitch-locked input grain at the target spacing. */
-  private stamp(inputCenter: number, outputCenter: number, grain: number, windowed: boolean) {
+  /** Repeat the pitch-locked input grain at the target spacing. `step` 1 keeps formants. */
+  private stamp(inputCenter: number, outputCenter: number, grain: number, windowed: boolean, step = 1) {
     const half = Math.floor(grain / 2)
     for (let i = 0; i < grain; i++) {
       const at = outputCenter - half + i
@@ -162,12 +172,17 @@ export class Psola {
       const win = windowed ? hann(i, grain) : 1
       const slot = at % this.weight.length
       this.weight[slot] += win
-      for (let c = 0; c < this.channels; c++) this.mix[c][slot] += this.read(c, inputCenter - half + i) * win
+      const atInput = step === 1 ? inputCenter - half + i : inputCenter - half + i * step
+      for (let c = 0; c < this.channels; c++) {
+        const sample = step === 1 ? this.read(c, atInput) : this.readFrac(c, atInput)
+        this.mix[c][slot] += sample * win
+      }
     }
   }
 
   private take(hop: number) {
-    const ready = this.nextOut - Math.max(hop, Math.floor(this.span / 2))
+    const delay = this.liveHop > 0 ? this.liveHop : Math.max(hop, Math.floor(this.span / 2))
+    const ready = this.nextOut - delay
     if (this.emitted >= ready) return this.channels === 2 ? [0, 0] : [0]
     const slot = this.emitted % this.weight.length
     const weight = this.weight[slot]
@@ -184,6 +199,15 @@ export class Psola {
   private read(channel: number, index: number) {
     if (index < 0 || index >= this.written) return 0
     return this.ring[channel][index % this.ring[channel].length]
+  }
+
+  private readFrac(channel: number, index: number) {
+    const base = Math.floor(index)
+    const frac = index - base
+    const a = this.read(channel, base)
+    if (frac <= 0) return a
+    const b = this.read(channel, base + 1)
+    return a + (b - a) * frac
   }
 }
 

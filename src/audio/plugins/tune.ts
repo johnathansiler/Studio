@@ -1,49 +1,76 @@
 import { SCALES, pitchClass } from '../../model/scale'
 import { descriptor, FACTORY, tuneLatency } from './catalog'
+import { TUNE_TRACE_FRAMES, tuneLiveHop, tuneLiveLatency } from './autoTune'
 import { clamp, sanitize } from './dsp'
 import { Psola, type PitchFrame } from '../stretch/voice'
 import type { BlockContext, PluginModule, Processor } from './types'
 
 export function createTune(sampleRate: number): Processor {
-  const psola = new Psola(sampleRate, 2)
+  const hq = new Psola(sampleRate, 2)
+  const live = new Psola(sampleRate, 2, tuneLiveHop(sampleRate))
   let smoothed = 0
   let center = 0
-  const trace = new Float32Array(64)
+  let path: 'dry' | 'live' | 'hq' = 'dry'
+  const trace = new Float32Array(TUNE_TRACE_FRAMES * 2)
   let cursor = 0
+  const remember = (detected: number, corrected: number) => {
+    const slot = cursor % TUNE_TRACE_FRAMES
+    trace[slot * 2] = detected > 0 ? detected : 0
+    trace[slot * 2 + 1] = corrected > 0 ? corrected : 0
+    cursor += 1
+  }
   return {
     latencySamples: 0,
     trace,
     reset() {
-      psola.reset()
+      hq.reset()
+      live.reset()
       smoothed = 0
       center = 0
+      path = 'dry'
       trace.fill(0)
       cursor = 0
     },
     process(input, output, params, ctx) {
       if ((params.amount ?? 0) <= 0.001) {
+        if (path !== 'dry') {
+          hq.reset()
+          live.reset()
+          smoothed = 0
+          center = 0
+          path = 'dry'
+        }
         this.latencySamples = 0
         copyThrough(input, output)
         return
       }
-      this.latencySamples = tuneLatency(ctx.sampleRate)
-      const hop = ctx.quality === 'eco' ? 256 : 128
-      psola.process(
+      const monitoring = ctx.offline === false
+      const engine = monitoring ? live : hq
+      if (path !== (monitoring ? 'live' : 'hq')) {
+        engine.reset()
+        smoothed = 0
+        center = 0
+        path = monitoring ? 'live' : 'hq'
+      }
+      this.latencySamples = monitoring ? tuneLiveLatency(ctx.sampleRate) : tuneLatency(ctx.sampleRate)
+      const hop = monitoring ? tuneLiveHop(ctx.sampleRate) : ctx.quality === 'eco' ? 256 : 128
+      engine.process(
         input,
         output,
         (frame) => {
-          trace[cursor % trace.length] = frame.hz
-          cursor += 1
-          return targetHz(frame, params, ctx, () => smoothed, (value) => {
-          smoothed = value
-        }, () => center, (value) => {
-          center = value
-        })
+          const corrected = targetHz(frame, params, ctx, () => smoothed, (value) => {
+            smoothed = value
+          }, () => center, (value) => {
+            center = value
+          })
+          remember(frame.hz, corrected)
+          return corrected
         },
         ctx.sampleRate,
         params.minHz || 80,
         params.maxHz || 900,
         hop,
+        params.formant ?? 0,
       )
     },
   }

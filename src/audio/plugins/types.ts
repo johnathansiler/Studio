@@ -41,7 +41,7 @@ export interface Processor {
   tuner?: { hz: number; cents: number; note: number }
   /** Needle ballistics. vu is dB relative to 0 VU. gr is positive reduction. */
   meter?: { vu: number; gr: number }
-  /** Recent detected pitch, in hertz, for the tune graph. */
+  /** Tune graph pairs: detected Hz, then the corrected target Hz. */
   trace?: Float32Array
   /** Latest loudness and stereo readings, when this processor measures them. */
   meters?: Record<string, number>

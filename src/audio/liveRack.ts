@@ -445,7 +445,7 @@ export class LiveRack {
   private latency(owner: string, plugins: PluginInstance[], sampleRate: number) {
     const tap = this.taps.get(owner)
     const script = tap && !tap.direct ? 256 : 0
-    return script + plugins.reduce((sum, plugin) => sum + latencyOf(plugin.pluginId, plugin.params, sampleRate, plugin.enabled && plugin.wet > 0), 0)
+    return script + plugins.reduce((sum, plugin) => sum + latencyOf(plugin.pluginId, plugin.params, sampleRate, plugin.enabled && plugin.wet > 0, true), 0)
   }
 
   private link(ctx: AudioContext, from: AudioNode, to: AudioNode, samples: number) {
