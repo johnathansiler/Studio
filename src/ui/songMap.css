@@ -1,10 +1,11 @@
-.arrange { --map-h: 68px; --ruler-h: 28px; }
+.arrange { --map-h: 68px; --ruler-h: 40px; }
 .ruler-gap {
   height: calc(var(--map-h) + var(--ruler-h));
   align-items: stretch;
   overflow: hidden;
 }
 .ruler { height: var(--ruler-h); top: var(--map-h); }
+.ruler > span, .ruler > i { pointer-events: none; }
 .song-map {
   position: sticky;
   top: 0;

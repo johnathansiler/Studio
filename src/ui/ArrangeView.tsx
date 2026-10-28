@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { activeComp } from '../model/comp'
@@ -8,6 +8,7 @@ import { trimAudioClip } from '../model/clips'
 import { rectsHit } from '../model/edit'
 import { SCALER_MIME, parseScalerDrag } from '../instruments/scaler/model'
 import { patternHostId } from '../model/steps'
+import { loopGridBeats } from '../model/loopEdit'
 import { arrangementEndSample, gridMarks, mapIsLinear, projectBeatSample, projectSampleBeat, pxAtBeat, snapSampleToMap } from '../model/tempoMap'
 import { displayedPlayhead } from '../model/transportSync'
 import { SongMap, SongMapHead, SmartTempoBar } from './SongMap'
@@ -29,6 +30,7 @@ import { ActionSheet, SheetRow, TipButton } from './Hint'
 import { RecordBar } from './RecordBar'
 import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, trimZone } from './touchEdit'
 import { laneDoubleClickAddsClip } from './clipKeys'
+import { LoopRegion } from './LoopRegion'
 
 export function ArrangeView({
   store,
@@ -168,30 +170,10 @@ export function ArrangeView({
   const beatPx = (60 / project.tempo) * px
   const marks = gridMarks(project, projectSampleBeat(project, seconds * project.sampleRate) + 1)
 
-  function seekFromEvent(event: MouseEvent<HTMLDivElement>) {
-    const bounds = event.currentTarget.getBoundingClientRect()
-    const sample = ((event.clientX - bounds.left) / px) * project.sampleRate
-    onSeek(snapSampleToMap(sample, project))
-  }
-
   function sampleAt(clientX: number) {
     const inner = innerRef.current
     if (!inner) return 0
     return ((clientX - inner.getBoundingClientRect().left) / pxRef.current) * project.sampleRate
-  }
-
-  function dragLoop(event: ReactPointerEvent, edge: 'start' | 'end') {
-    event.stopPropagation()
-    event.preventDefault()
-    const move = (ev: PointerEvent) => {
-      const sample = Math.max(0, snapSampleToMap(sampleAt(ev.clientX), project))
-      const start = edge === 'start' ? sample : project.loopStartSample
-      const end = edge === 'end' ? sample : project.loopEndSample
-      const orderedStart = Math.min(start, end)
-      const orderedEnd = Math.max(start, end, orderedStart + 1)
-      store.setLoop(true, orderedStart, orderedEnd, true)
-    }
-    watch(move, () => store.endDraft())
   }
 
   function laneAt(clientX: number, clientY: number) {
@@ -578,7 +560,7 @@ export function ArrangeView({
       >
         <div className="timeline-inner" ref={innerRef} data-px={px} style={{ width }}>
           <SongMap store={store} px={px} width={width} onSeek={onSeek} />
-          <div className="ruler" onClick={seekFromEvent}>
+          <div className="ruler">
             <button
               type="button"
               className={`loop-toggle ${project.loopEnabled ? 'on' : 'off'}`}
@@ -590,33 +572,16 @@ export function ArrangeView({
             >
               {project.loopEnabled ? 'Loop on' : 'Loop off'}
             </button>
-            <div
-              className={`loop-bar ${project.loopEnabled ? 'on' : ''}`}
-              data-loop={project.loopEnabled ? 'on' : 'off'}
-              style={{
-                left: (project.loopStartSample / project.sampleRate) * px,
-                width: Math.max(8, ((project.loopEndSample - project.loopStartSample) / project.sampleRate) * px),
-              }}
-            >
-              <button
-                type="button"
-                className="loop-handle"
-                data-edge="start"
-                aria-label="Loop start. Drag to move the start of the loop."
-                title="Loop start. Drag to move the start of the loop."
-                onClick={(event) => event.stopPropagation()}
-                onPointerDown={(event) => dragLoop(event, 'start')}
-              />
-              <button
-                type="button"
-                className="loop-handle end"
-                data-edge="end"
-                aria-label="Loop end. Drag to move the end of the loop."
-                title="Loop end. Drag to move the end of the loop."
-                onClick={(event) => event.stopPropagation()}
-                onPointerDown={(event) => dragLoop(event, 'end')}
-              />
-            </div>
+            <LoopRegion
+              store={store}
+              project={project}
+              view="arrange"
+              gridBeats={loopGridBeats(project)}
+              sampleAt={(clientX, rect) => ((clientX - rect.left) / px) * project.sampleRate}
+              xAt={(sample) => (sample / project.sampleRate) * px}
+              onSeek={(sample) => onSeek(snapSampleToMap(sample, project))}
+              yieldEmpty={tool === 'pan' || tool === 'zoom'}
+            />
             {marks.map((mark) =>
               mark.downbeat ? (
                 <span key={mark.beat} style={{ left: pxAtBeat(project, mark.beat, px) }}>

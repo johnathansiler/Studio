@@ -123,7 +123,7 @@
 .loop-toggle {
   position: sticky;
   left: 4px;
-  z-index: 6;
+  z-index: 8;
   top: 6px;
   height: 22px;
   min-height: 22px;
@@ -141,33 +141,7 @@
   color: #e0b15a;
   border-color: #e0b15a;
 }
-.loop-bar {
-  position: absolute;
-  top: 0;
-  height: 8px;
-  background: repeating-linear-gradient(90deg, rgba(224, 177, 90, 0.55) 0 8px, transparent 8px 14px);
-  border-bottom: 2px dashed #e0b15a;
-  pointer-events: none;
-  z-index: 4;
-}
-.loop-bar.on { background: rgba(115, 196, 143, 0.85); border-bottom: 2px solid #73c48f; }
-.loop-bar:not(.on) .loop-handle { background: #e0b15a; }
-.loop-handle {
-  position: absolute;
-  top: 0;
-  width: 14px;
-  height: 44px;
-  min-height: 44px;
-  padding: 0;
-  border: 0;
-  background: #73c48f;
-  color: transparent;
-  pointer-events: auto;
-  cursor: ew-resize;
-}
-.loop-handle.end { right: 0; }
 .shell.phone .loop-toggle { height: 36px; min-height: 36px; font-size: 13px; }
-.shell.phone .loop-handle { width: 22px; }
 
 .shell.phone:not(.land) .tool-slot .timeline-tools button {
   width: auto;

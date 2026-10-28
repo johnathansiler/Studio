@@ -10,6 +10,7 @@ import { DRUM_PADS, residentDrums, type ResidentDrum } from '../model/drums'
 import { calibrationTrim, contextTimeForEvent, monitoringOffset, type ClockStamp } from '../model/midiClock'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
 import { arrangementEndSample, beatSpanSamples, clickAccent, clickAtOrAfter, meterAtSample, nextClickAfter, projectSampleBeat, tempoAtSample } from '../model/tempoMap'
+import { planLoopAudio } from '../model/loopEdit'
 import { playbackStops, transportSample } from '../model/transportSync'
 import { beatsToSamples, samplesPerBeatUnit, samplesToBeats } from '../model/time'
 import { matchBufferRate, PatchHost, renderPatchSpan } from '../instruments/patch'
@@ -171,6 +172,14 @@ export class AudioEngine {
   private playOriginSample = 0
   private arrangementScheduled = false
   private loopArmed: boolean | null = null
+  private loopSpanStart = -1
+  private loopSpanEnd = -1
+  private loopQueuedUntil = 0
+  private loopQueuedCtx = 0
+  private loopRestartAt = 0
+  private loopAudioDirty = false
+  private pendingSchedule = false
+  private scheduling = false
   private nextLoopCtx: number | null = null
   private nextLoopSample = 0
   private nextMetroSample = 0
@@ -476,7 +485,36 @@ export class AudioEngine {
       return { sampleRate: asset.sampleRate, channel }
     })
     this.applyMixerAutomation()
-    if (loopFlip && this.playing && this.mode === 'arrangement') this.rearmLoop()
+    const loopStart = project.loopStartSample
+    const loopEnd = project.loopEndSample
+    const firstSpan = this.loopSpanStart < 0
+    const spanChanged = !firstSpan && (this.loopSpanStart !== loopStart || this.loopSpanEnd !== loopEnd)
+    this.loopSpanStart = loopStart
+    this.loopSpanEnd = loopEnd
+    if (spanChanged && this.ctx) {
+      if (this.playing) {
+        const linear = Math.max(0, this.sampleAt(this.ctx.currentTime))
+        this.positionSamples = this.heardSample(linear)
+        this.loopAudioDirty = this.mode === 'arrangement'
+        this.emit()
+      } else if (project.loopEnabled) {
+        const heard = transportSample(this.positionSamples, project)
+        if (Math.abs(heard - this.positionSamples) > 0.5) {
+          this.positionSamples = heard
+          this.emit()
+        }
+      }
+    }
+    if (loopFlip && this.playing && this.mode === 'arrangement') {
+      this.loopAudioDirty = false
+      this.rearmLoop()
+    } else if (this.loopAudioDirty) {
+      this.applyLoopAudio()
+      if (this.pendingSchedule) {
+        this.pendingSchedule = false
+        this.scheduleAhead()
+      }
+    }
   }
 
   /** Faders, pans, sends, and solo follow the project. Playing lanes are scheduled on the audio clock. */
@@ -1699,16 +1737,24 @@ export class AudioEngine {
   }
 
   private scheduleAhead() {
-    if (!this.ctx) return
-    const now = this.ctx.currentTime
-    const horizon = now + 0.35
-    if (this.beatPump) this.beatPump(now, horizon)
-    if (!this.playing || !this.project) return
-    this.refreshClockAnchor()
-    this.scheduleMetronome(horizon)
-    if (this.mode === 'session') this.scheduleSession(horizon)
-    else this.scheduleArrangement(horizon)
-    if (this.mode === 'arrangement') this.primeLibraryAhead()
+    if (!this.ctx || this.scheduling) return
+    this.scheduling = true
+    try {
+      this.applyLoopAudio()
+      if (this.pendingSchedule) this.pendingSchedule = false
+      if (!this.ctx) return
+      const now = this.ctx.currentTime
+      const horizon = now + 0.35
+      if (this.beatPump) this.beatPump(now, horizon)
+      if (!this.playing || !this.project) return
+      this.refreshClockAnchor()
+      this.scheduleMetronome(horizon)
+      if (this.mode === 'session') this.scheduleSession(horizon)
+      else this.scheduleArrangement(horizon)
+      if (this.mode === 'arrangement') this.primeLibraryAhead()
+    } finally {
+      this.scheduling = false
+    }
   }
 
   private scheduleMetronome(horizon: number) {
@@ -1744,6 +1790,12 @@ export class AudioEngine {
 
   /** Restart arrangement playback at the wrapped playhead so a loop toggle takes effect immediately. */
   private rearmLoop() {
+    this.retargetPlayingLoop()
+    this.scheduleAhead()
+  }
+
+  /** Drop queued arrangement audio and park the clock on the wrapped playhead. Does not schedule. */
+  private retargetPlayingLoop() {
     const ctx = this.ctx
     const project = this.project
     if (!ctx || !project || !this.playing) return
@@ -1755,8 +1807,54 @@ export class AudioEngine {
     this.positionSamples = sample
     this.arrangementScheduled = false
     this.nextLoopCtx = null
+    this.loopQueuedUntil = 0
+    this.loopQueuedCtx = 0
     this.nextMetroSample = clickAtOrAfter(project, sample)
-    this.scheduleAhead()
+  }
+
+  /**
+   * Follow a loop-bound change on the audio scheduler. Extending schedules only the
+   * extra span. Crossing the playhead restarts from the wrapped sample.
+   */
+  private applyLoopAudio() {
+    if (!this.loopAudioDirty || !this.ctx || !this.project || !this.playing) return
+    const project = this.project
+    if (this.mode !== 'arrangement' || !project.loopEnabled || emptyPatternLoopSamples(project) > 16) {
+      this.loopAudioDirty = false
+      return
+    }
+    const nowLinear = Math.max(0, this.sampleAt(this.ctx.currentTime))
+    const wrapQueued = this.nextLoopSample === project.loopStartSample
+      && this.nextLoopCtx != null
+      && this.nextLoopCtx <= this.ctx.currentTime + 0.45
+    const plan = planLoopAudio(project, {
+      nowLinear,
+      scheduledUntil: this.loopQueuedUntil > 0 ? this.loopQueuedUntil : null,
+      wrapQueued,
+    })
+    if (plan.action === 'keep') {
+      this.loopAudioDirty = false
+      if (this.nextLoopCtx != null) this.nextLoopSample = project.loopStartSample
+      return
+    }
+    if (plan.action === 'extend' && this.loopQueuedCtx > this.ctx.currentTime - 0.02) {
+      this.loopAudioDirty = false
+      this.scheduleWindow(this.loopQueuedCtx, plan.from, plan.to)
+      const added = (plan.to - plan.from) / this.sampleRate
+      if (this.nextLoopCtx != null) this.nextLoopCtx += added
+      this.loopQueuedCtx += added
+      this.loopQueuedUntil = plan.to
+      this.nextLoopSample = project.loopStartSample
+      return
+    }
+    const heard = plan.action === 'restart' ? plan.from : transportSample(nowLinear, project)
+    const soon = (project.loopEndSample - heard) / this.sampleRate < 0.25
+    const outside = plan.action === 'restart' && plan.reason === 'outside'
+    if (!outside && !soon && this.ctx.currentTime - this.loopRestartAt < 0.1) return
+    this.loopAudioDirty = false
+    this.loopRestartAt = this.ctx.currentTime
+    this.retargetPlayingLoop()
+    this.pendingSchedule = true
   }
 
   private scheduleArrangement(horizon: number) {
@@ -1791,7 +1889,10 @@ export class AudioEngine {
     }
     while (this.nextLoopCtx < horizon) {
       const samples = Math.max(1, project.loopEndSample - this.nextLoopSample)
-      this.scheduleWindow(this.nextLoopCtx, this.nextLoopSample, this.nextLoopSample + samples)
+      const when = this.nextLoopCtx
+      this.scheduleWindow(when, this.nextLoopSample, this.nextLoopSample + samples)
+      this.loopQueuedUntil = this.nextLoopSample + samples
+      this.loopQueuedCtx = when + samples / this.sampleRate
       this.nextLoopCtx += samples / this.sampleRate
       this.nextLoopSample = project.loopStartSample
     }
