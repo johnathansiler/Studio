@@ -20,6 +20,7 @@ import {
 } from '../model/scale'
 import { uid, type MidiNote } from '../model/types'
 import { EDITOR_TOOL_KEYS, activeTool, setActiveTool, subscribeTools, toolCursor } from '../state/tools'
+import { selectPiano, selectScale } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { samplesToBeats } from '../model/time'
 import { PIANO_BAR, PIANO_SHEET, copyOf, described } from './chrome'
@@ -64,8 +65,9 @@ const HIGH = 84
 const VEL_H = 36
 
 export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; engine: AudioEngine; onIdeas?: () => void }) {
-  const track = store.project.tracks.find((item) => item.midiClips.some((clip) => clip.id === store.selectedMidiClipId))
-  const clip = track?.midiClips.find((item) => item.id === store.selectedMidiClipId)
+  const piano = selectPiano(store)
+  const track = piano.track
+  const clip = piano.clip
   const [open, setOpen] = useState(false)
   const [row, setRow] = useState(16)
   const [pxBeat, setPxBeat] = useState(70)
@@ -210,7 +212,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   }, [clip?.id])
 
   const midiRef = useRef<MIDIAccess | null>(null)
-  const scale = store.scaleState()
+  const scale = piano.scale
   const roll = store.project.roll ?? defaultRoll()
 
   useEffect(() => {
@@ -262,7 +264,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   playKey.current = (pitch, event, pointerId, on, velocity = 0.8) => {
     if (!track || !clip) return
     if (on) {
-      const current = store.scaleState()
+      const current = selectScale(store)
       const next = current.snap ? snapPitch(pitch, current.root, current.scale) : pitch
       const level = Math.max(0.05, Math.min(1, velocity))
       engine.unlock()
@@ -369,7 +371,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
 
   function arpeggiate() {
     if (!track || !clip) return
-    const current = store.scaleState()
+    const current = selectScale(store)
     const chosen = clip.notes.filter((note) => !store.selectedNoteIds.length || store.selectedNoteIds.includes(note.id))
     const rest = store.selectedNoteIds.length ? clip.notes.filter((note) => !store.selectedNoteIds.includes(note.id)) : []
     const played = arpeggiateSelection(chosen, { arp: current.arp, rate: current.rate, gate: current.gate, octaves: current.octaves, timing: current.timing, velocity: current.velocity })
@@ -385,7 +387,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
 
   function humanize() {
     if (!track || !clip) return
-    const current = store.scaleState()
+    const current = selectScale(store)
     const chosen = clip.notes.filter((note) => !store.selectedNoteIds.length || store.selectedNoteIds.includes(note.id))
     const rest = store.selectedNoteIds.length ? clip.notes.filter((note) => !store.selectedNoteIds.includes(note.id)) : []
     commitMidiNotes(store, track.id, clip.id, [...rest, ...humanizeNotes(chosen, current.timing || 0.02, current.velocity || 0.3)])
@@ -467,7 +469,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     if (!at) return
     const grid = roll.grid
     const velocity = roll.velocity || 0.8
-    const scaleNow = store.scaleState()
+    const scaleNow = selectScale(store)
     const base = clip.notes.map((note) => ({ ...note }))
     event.preventDefault()
 
@@ -619,7 +621,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     const originX = event.clientX
     const originY = event.clientY
     const grid = roll.grid
-    const scaleNow = store.scaleState()
+    const scaleNow = selectScale(store)
     const pitchSnap = scaleNow.snap ? (pitch: number) => snapPitch(pitch, scaleNow.root, scaleNow.scale) : undefined
     let latest = base
     let dirty = false
@@ -956,7 +958,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
 
 function playPadNotes(store: ProjectStore, engine: AudioEngine, trackId: string, clipId: string, pitches: number[]) {
   engine.unlock()
-  const current = store.scaleState()
+  const current = selectScale(store)
   const voiced = voiceChord(pitches, {
     inversion: current.inversion,
     spread: current.spread,

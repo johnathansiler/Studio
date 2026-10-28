@@ -5,6 +5,7 @@ import { createUsageLedger } from './usage.ts'
 import { rememberDiag, sanitizeDiag, type DiagReport } from '../src/model/diag.ts'
 import { sessionHello } from '../src/model/negotiate.ts'
 import { CAP_NOTICE, type UsageSnapshot } from '../src/model/usage.ts'
+import { syncMessageOk } from '../src/state/ops.ts'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -757,6 +758,17 @@ async function handle(client: Client, msg: Record<string, unknown>) {
   if (msg.t === 'transport-request' && self.admitted && self.role === 'guest') {
     const host = session.clients.get(session.hostId)
     if (host) send(host.ws, { t: 'transport-request', from: client.id, name: self.name, payload: msg.payload })
+    return
+  }
+  if ((msg.t === 'sync-hello' || msg.t === 'sync-ops' || msg.t === 'sync-checkpoint') && self.admitted) {
+    if (!syncMessageOk(msg)) return
+    const payload = { ...msg, from: client.id }
+    if (msg.to) {
+      const target = session.clients.get(String(msg.to))
+      if (target) send(target.ws, payload)
+      return
+    }
+    broadcast(session, payload, client.id)
     return
   }
   if ((msg.t === 'project' || msg.t === 'project-asset') && self.role === 'host') {

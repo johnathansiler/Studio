@@ -7,6 +7,7 @@ import { rectsHit } from '../model/edit'
 import { snapSample } from '../model/time'
 import type { AudioClip } from '../model/types'
 import { ClipSheet } from './ClipSheet'
+import { selectArrange } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { activeTool, EDITOR_TOOL_KEYS, subscribeTools, toolClaimsGesture } from '../state/tools'
 import { StemSheet } from './StemSheet'
@@ -36,7 +37,7 @@ export function ArrangeView({
   onPerform: (mode: 'keys' | 'drums') => void
   onQuickPunch: () => void
 }) {
-  const project = store.project
+  const project = selectArrange(store).project
   const [px, setPx] = useState(90)
   const pxRef = useRef(px)
   pxRef.current = px
@@ -674,7 +675,7 @@ function ClipView({
   onErase: (event: ReactPointerEvent) => void
   onMove: (event: ReactPointerEvent) => void
 }) {
-  const project = store.project
+  const project = selectArrange(store).project
   const asset = store.buffers.get(clip.bufferId)
   const [preview, setPreview] = useState<AudioClip | null>(null)
   const ghost = store.quantizePreview?.audio.find((item) => item.clipId === clip.id)?.clip

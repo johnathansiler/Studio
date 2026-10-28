@@ -7,6 +7,7 @@ import type { RepeatRate } from '../model/midiClock'
 import { NOTE_NAMES, SCALES, type ScaleId } from '../model/scale'
 import { BANKS, gridPitch, PAD_MACROS, sixteenLevels, type GridLayout, type LevelSpread, type PadVoice, type StepCondition } from '../model/padMachine'
 import { decodeWavPCM } from '../model/wav'
+import { selectScale } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import type { SessionClient } from '../remote/session'
 import { attachGlissando } from './glissando'
@@ -81,7 +82,7 @@ export function PerformPop({
   const [padMutes, setPadMutes] = useState(false)
   const [soloPads, setSoloPads] = useState(false)
   const [lockParam, setLockParam] = useState('filter')
-  const scale = store.scaleState()
+  const scale = selectScale(store)
   const record = store.recordSettings()
   const clip = currentClip(store)
   const kit = store.padProgram()
