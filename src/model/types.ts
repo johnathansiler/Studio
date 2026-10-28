@@ -6,11 +6,12 @@ import type { OmniPatch } from '../instruments/patch/types'
 import type { DevicePreset, RackAutomation, RackPatch, RackState } from './rack'
 import type { GeneratorSettings } from '../generators/types'
 import type { PlayerSettings } from '../players/types'
+import type { ScalerState } from '../instruments/scaler/types'
 import { defaultScale, type ScaleState } from './scale'
 import type { BeatRack, PatternClip } from './steps'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
-export type TrackInstrument = 'synth' | 'sampler' | '808' | 'drum-machine' | 'library' | 'none'
+export type TrackInstrument = 'synth' | 'sampler' | '808' | 'drum-machine' | 'library' | 'scaler' | 'none'
 
 export function isLocalInput(input: string) {
   return input === 'mic' || input === 'line'
@@ -45,6 +46,8 @@ export interface SamplerState {
   slices: SampleZone[]
   /** Captured or file rate. 0 plays the buffer at the engine rate. */
   sourceRate?: number
+  /** Playback speed. 0.5 is half speed, 2 is double speed. */
+  speed?: number
 }
 
 export interface LooperLayer {
@@ -352,6 +355,10 @@ export interface MidiEditorPrefs {
   page: number
   /** Score page. Each page is four bars. */
   scorePage: number
+  /** Computer and on-screen keys write a note at the playhead. Off, they only play the sound. */
+  stepInput: boolean
+  /** The piano roll scrolls to keep the playhead in view. */
+  follow: boolean
 }
 
 export interface RecordSettings {
@@ -423,6 +430,8 @@ export interface Track {
   channels?: 1 | 2
   /** Chosen instrument for a MIDI track. */
   instrument?: TrackInstrument
+  /** Scaler chord instrument. Present when this track's instrument is Scaler. */
+  scaler?: ScalerState
   /** Multi-sample program for a library instrument. PCM is not stored here. */
   library?: SamplerProgram
   inserts: Insert[]

@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { graphRatio, kitChoices, rackPlayIndex, stepLooks, valueFromRatio } from '../model/channelRack'
+import { emptyPatternLoopSamples, graphRatio, kitChoices, rackPlayIndex, shortSoundName, stepLooks, valueFromRatio } from '../model/channelRack'
 import { renderPattern } from '../model/steps'
 import { ProjectStore } from '../state/store'
 import { BeatView } from '../ui/BeatView'
@@ -41,6 +41,8 @@ describe('channel rack', () => {
     expect(html).toContain('>64<')
     expect(html).toContain('>Graph<')
     expect(html).toContain('>Paint<')
+    expect(html).toContain('Kick loop length')
+    expect(html).toContain('disabled=""')
     expect(html).toContain('Steps')
     expect(html).toContain('Swing')
     expect(html).toContain('rack-ruler')
@@ -151,6 +153,22 @@ describe('channel rack', () => {
     const hit = renderPattern(store.activePattern()!, 0, 1).find((item) => item.channelId === channel.id)
     expect(hit?.kind).toBe('openhat')
     expect(hit?.pitch).toBe(46)
+  })
+
+  it('loops an empty arrangement on the shared transport and confirms a place', () => {
+    const store = new ProjectStore()
+    const loop = emptyPatternLoopSamples(store.project)
+    expect(loop).toBeGreaterThan(48000)
+    store.placePattern(4)
+    expect(emptyPatternLoopSamples(store.project)).toBe(0)
+    expect(store.toasts.some((toast) => toast.text.startsWith('Pattern 1 is on '))).toBe(true)
+    expect(shortSoundName('long_library_name_here.wav').endsWith('…')).toBe(true)
+    const kick = store.activePattern()!.channels[0].id
+    store.openChannelRoll(kick)
+    expect(store.selectedMidiClipId).toBeTruthy()
+    store.setView('arrange')
+    expect(store.view).toBe('arrange')
+    expect(store.selectedMidiClipId).toBeNull()
   })
 
   it('moves the playhead with the tempo map', () => {

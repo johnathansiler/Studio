@@ -1,6 +1,41 @@
-.slot-panel { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.slot-panel .row { flex-wrap: wrap; }
-.slot-wave { position: relative; height: 72px; border-radius: 8px; background: #14241b; touch-action: none; }
+.slot-face {
+  --panel: #12161c;
+  --ink: #f4f7f2;
+  --accent: #79b8d4;
+  --accent2: #d6eaf8;
+  --metal: #243040;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: 16px;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 14% 0%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 46%),
+    linear-gradient(180deg, color-mix(in srgb, var(--metal) 72%, white), var(--panel) 42%, #0c1014);
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, #000);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 14px 32px rgba(0, 0, 0, 0.32);
+}
+.slot-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  gap: 8px;
+  align-items: stretch;
+  min-width: 0;
+}
+.slot-wave {
+  position: relative;
+  height: 168px;
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 30%),
+    #070b09;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45);
+  touch-action: none;
+  overflow: hidden;
+}
 .slot-wave canvas { width: 100%; height: 100%; display: block; }
 .slot-wave .slot-shade { position: absolute; top: 0; bottom: 0; background: rgba(8, 16, 12, 0.55); pointer-events: none; }
 .slot-loop { position: absolute; top: 0; bottom: 0; background: rgba(224, 177, 90, 0.16); pointer-events: none; }
@@ -11,11 +46,49 @@
   border: 0;
   padding: 0;
   background: transparent;
+  box-shadow: none;
   touch-action: none;
   z-index: 2;
 }
-.slot-handle.edge { top: 0; height: 54%; }
-.slot-handle.loop { top: 46%; height: 54%; z-index: 3; }
+.slot-handle.edge { top: 0; height: 48%; z-index: 2; }
+.slot-handle.loop { top: 34%; height: 66%; z-index: 4; }
+.slot-slice {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  pointer-events: none;
+}
+.slot-slice i {
+  position: absolute;
+  top: 16px;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+.slot-slice span {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: #0c110f;
+  color: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  box-shadow: inset 0 -2px 0 currentColor;
+}
 .slot-handle i {
   position: absolute;
   left: 13px;
@@ -35,10 +108,67 @@
 .shell.phone .slot-handle.on i,
 .shell.fold .slot-handle.on i { left: 16px; }
 .slot-active { position: absolute; left: 8px; top: 6px; z-index: 5; text-shadow: 0 1px 2px #07110c; }
-.slot-meter { height: 8px; border-radius: 99px; background: #1c2c23; overflow: hidden; }
-.slot-meter span { display: block; height: 100%; background: #73c48f; width: 0; }
-.slot-status { margin: 0; color: #d7ecdf; font-size: 13px; }
-.slot-upload { position: relative; overflow: hidden; display: inline-flex; }
+.slot-out {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-height: 0;
+}
+.slot-out div {
+  flex: 1;
+  width: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 4px 3px;
+  border-radius: 8px;
+  background: #070b09;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.65), var(--raised);
+}
+.slot-out i {
+  display: block;
+  height: 7px;
+  border-radius: 2px;
+  background: #1a2420;
+}
+.slot-out i.lit { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.slot-out i.lit[data-hot='1'] { background: #ef6b6b; box-shadow: 0 0 6px #ef6b6b; }
+.slot-out span {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent2);
+}
+.slot-status { margin: 0; color: var(--accent2); font-size: 13px; }
+.slot-knobs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-evenly;
+  gap: 8px 12px;
+  width: 100%;
+}
+.slot-actions,
+.plugin-sheet .row.slot-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 8px;
+  align-items: stretch;
+  width: 100%;
+}
+.slot-actions > .text-btn,
+.slot-actions > .slot-upload {
+  width: 100%;
+  min-height: 36px;
+  margin: 0;
+  padding: 6px 10px;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
+.slot-upload { position: relative; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; }
 .slot-panel .slot-file {
   position: absolute;
   inset: 0;
@@ -48,9 +178,45 @@
   font-size: 16px;
   cursor: pointer;
 }
-.slot-panel .pads { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
-.slot-panel .pads.keys { grid-template-columns: repeat(8, minmax(0, 1fr)); }
-.shell.phone .slot-panel .pads button,
+.slot-panel .pads {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.slot-pad {
+  --pad: #79b8d4;
+  --vel: 0;
+  min-height: 58px;
+  width: 100%;
+  padding: 6px 4px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--pad) 55%, #000);
+  color: #f7fbf8;
+  font-weight: 680;
+  letter-spacing: 0.02em;
+  background:
+    radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.22), transparent 46%),
+    linear-gradient(180deg, color-mix(in srgb, var(--pad) 42%, #2a3330), color-mix(in srgb, var(--pad) 18%, #101614) 58%, #0c100e);
+  box-shadow:
+    var(--raised),
+    inset 0 -5px 0 color-mix(in srgb, var(--pad) 80%, #000),
+    0 0 calc(var(--vel) * 18px) color-mix(in srgb, var(--pad) calc(var(--vel) * 80%), transparent);
+}
+.slot-pad.lit,
+.slot-pad:active {
+  background:
+    radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--pad) 70%, white), transparent 55%),
+    linear-gradient(180deg, color-mix(in srgb, var(--pad) 78%, white), var(--pad) 46%, #141816);
+  box-shadow:
+    var(--pressed),
+    inset 0 0 16px color-mix(in srgb, var(--pad) 65%, transparent),
+    0 0 18px color-mix(in srgb, var(--pad) 75%, transparent);
+}
+.shell.phone .slot-wave,
+.shell.fold .slot-wave { height: 128px; }
+.shell.phone .slot-pad,
+.shell.fold .slot-pad,
 .shell.phone .slot-panel .text-btn,
-.shell.fold .slot-panel .pads button,
 .shell.fold .slot-panel .text-btn { min-height: 44px; }
+.shell.phone .slot-actions,
+.shell.fold .slot-actions { grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); }

@@ -134,6 +134,8 @@ export function SessionDetail({
                 store.setScale({ root: found.root, scale: found.scale, library: found.library })
               }}>Detect key</button>
               <button type="button" className={chords ? 'on' : ''} title="Pads of chords in the current key." onClick={() => setChords((value) => !value)}>Chords</button>
+              <button type="button" className={store.midiEditor().stepInput ? 'on' : ''} title="Keys write a note at the playhead. Off, they only play the sound." onClick={() => store.setMidiEditor({ stepInput: !store.midiEditor().stepInput })}>Step input</button>
+              <button type="button" className={store.midiEditor().follow ? 'on' : ''} title="Scroll the piano roll to keep the playhead in view while playing." onClick={() => store.setMidiEditor({ follow: !store.midiEditor().follow })}>Follow</button>
               {EDITOR_TOOLS.map((id) => (
                 <button key={id} type="button" className={tool === id ? 'on' : ''} title={TOOL_INFO[id].hint} onClick={() => store.setTool(id)}>{TOOL_INFO[id].label}</button>
               ))}

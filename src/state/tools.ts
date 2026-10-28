@@ -60,10 +60,10 @@ export const TOOL_INFO: Record<ArrangeTool, ToolInfo> = {
     cursor: 'ew-resize',
   },
   split: {
-    label: 'Split',
+    label: 'Slice',
     hint: 'Tap a clip or note where you want the cut.',
-    arrange: 'Split: tap a clip to cut it',
-    piano: 'Split: tap a note to cut it',
+    arrange: 'Slice: tap a clip to cut it',
+    piano: 'Slice: tap a note to cut it',
     cursor: 'col-resize',
   },
   erase: {

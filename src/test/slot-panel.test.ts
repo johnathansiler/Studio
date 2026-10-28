@@ -50,11 +50,13 @@ async function waitForProject(page: Page) {
 async function openSampler(page: Page, phone: boolean) {
   await waitForProject(page)
   if (phone) await page.getByRole('button', { name: /^Mix/ }).first().click()
-  const root = page.locator(phone ? '.mixer .strip' : '.head').first()
+  else await page.locator('.head').first().getByRole('button', { name: /^Track/ }).click()
+  const root = page.locator(phone ? '.mixer .strip' : '.action-sheet').first()
   await root.locator('.insert-add').selectOption('sampler')
   const button = root.locator('.inserts button', { hasText: 'Sampler' })
   await button.waitFor()
   await button.evaluate((el) => (el as HTMLButtonElement).click())
+  if (!phone) await page.locator('.action-sheet header').getByRole('button', { name: 'Close' }).click()
   await page.locator('.slot-wave').scrollIntoViewIfNeeded()
   await page.locator('.slot-wave').waitFor()
 }
@@ -160,9 +162,11 @@ describe('loop and sample panel', () => {
       expect(errors.join('\n')).not.toMatch(/Could not open the microphone|Recording failed|InvalidStateError/)
 
       await deskPage.locator('.plugin-sheet').getByRole('button', { name: 'Close the plugin.' }).click()
-      const deskHead = deskPage.locator('.head').first()
-      await deskHead.locator('.insert-add').selectOption('looper')
-      await deskHead.locator('.inserts button', { hasText: 'Looper' }).evaluate((el) => (el as HTMLButtonElement).click())
+      await deskPage.locator('.head').first().getByRole('button', { name: /^Track/ }).click()
+      const deskSheet = deskPage.locator('.action-sheet')
+      await deskSheet.locator('.insert-add').selectOption('looper')
+      await deskSheet.locator('.inserts button', { hasText: 'Looper' }).evaluate((el) => (el as HTMLButtonElement).click())
+      await deskPage.locator('.action-sheet header').getByRole('button', { name: 'Close' }).click()
       expect(await deskPage.locator('.slot-panel').getByRole('button', { name: /^Dub/ }).count()).toBe(1)
       await desk.close()
 

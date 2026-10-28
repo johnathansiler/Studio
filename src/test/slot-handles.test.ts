@@ -5,7 +5,7 @@ import type { AudioEngine } from '../audio/engine'
 import { createLooper } from '../audio/plugins/looper'
 import { createSampler } from '../audio/plugins/sampler'
 import { createPlugin } from '../audio/plugins/catalog'
-import { emptyLooper } from '../audio/sample/engine'
+import { emptyLooper, scaledPeaks } from '../audio/sample/engine'
 import {
   assetFromClip,
   audibleLoopSamples,
@@ -173,9 +173,13 @@ describe('slot handles, slices, and overdub', () => {
     expect(slices[0].loopEnd).toBeGreaterThan(slices[0].loopStart)
     store.chopSample(track.id, sampler.id, 'grid')
     expect(store.track(track.id)!.plugins.find((plugin) => plugin.id === sampler.id)!.sampler!.slices).toHaveLength(16)
-    store.exportSlices(track.id, sampler.id)
+    store.exportSlices(track.id, sampler.id, 4)
     const midi = store.project.tracks.find((item) => item.type === 'midi')!
     expect(midi.midiClips.some((clip) => clip.name === 'Slices' && clip.notes.length === 16)).toBe(true)
+    expect(store.toasts.some((toast) => toast.text === 'MIDI clip placed on Keys at bar 2')).toBe(true)
+    const click = new Float32Array(40)
+    click[3] = 0.02
+    expect(Math.max(...scaledPeaks(click, 40).map((bar) => bar.max))).toBeCloseTo(1)
 
     store.loadSlotAudio(track.id, looper.id, { id: 'base', name: 'Base', sampleRate: 48000, channels: [Float32Array.from([0.4, 0.4, 0.4, 0.4])] })
     store.setSlotPoints(track.id, looper.id, { start: 0.1, end: 0.9, loopStart: 0.2, loopEnd: 0.8 })
@@ -302,8 +306,39 @@ describe('slot handles, slices, and overdub', () => {
     expect(html).toContain('aria-label="Loop end. Drag to set where the loop returns."')
     expect(html).toContain('Dub')
     expect(html).toContain('Record')
+    expect(html).toContain('text-btn')
+    expect(html).toContain('aria-label="Level"')
+    expect(html).toContain('aria-label="Decay"')
+    expect(html).toContain('aria-label="Speed"')
+    expect(html).toContain('slot-out')
     expect(html).toContain('slot-handle edge')
     expect(html).toContain('slot-handle loop')
+  })
+
+  it('draws the sampler as pads, knobs, and a meter', () => {
+    const store = new ProjectStore(createEmptyProject())
+    const track = store.project.tracks[0]
+    store.addPlugin(track.id, 'sampler')
+    const plugin = track.plugins.find((item) => item.pluginId === 'sampler')!
+    store.loadSlotAudio(track.id, plugin.id, { id: 'hit', name: 'Hit', sampleRate: 48000, channels: [tone(64, 0.4)] })
+    store.chopSample(track.id, plugin.id, 'grid')
+    const fresh = store.track(track.id)!.plugins.find((item) => item.id === plugin.id)!
+    const engine = {
+      takeLoop: () => null,
+      currentTimelineSample: () => 0,
+      previewSample: () => undefined,
+    } as unknown as AudioEngine
+    const html = renderToStaticMarkup(createElement(SamplePanel, { store, engine, trackId: track.id, plugin: fresh }))
+    expect(html).toContain('slot-pad')
+    expect(html).toContain('aria-label="Pads"')
+    expect(html).toContain('aria-label="Gain"')
+    expect(html).toContain('aria-label="Pitch"')
+    expect(html).toContain('aria-label="Attack"')
+    expect(html).toContain('aria-label="Release"')
+    expect(html).toContain('class="text-btn"')
+    expect(html).toContain('slot-slice')
+    expect(html.match(/class="slot-slice"/g)?.length).toBe(16)
+    expect(html).not.toContain('>GR<')
   })
 
   it('places an overdub in the loop window and keeps the bar length at the file rate', () => {

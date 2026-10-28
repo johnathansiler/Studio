@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { applyFreeze } from './audio/bounce'
 import { AudioEngine } from './audio/engine'
 import { unpackProject } from './model/archive'
 import { renderDemoLoop } from './model/demo'
-import { isSessionLink, isUntouchedEmpty, NEW_PROJECT, planLaunch, readTab, shouldKeepProject, TAB_PROJECT } from './model/launchProject'
+import { isSessionLink, isUntouchedEmpty, needsNewProjectConfirm, NEW_PROJECT, planLaunch, readTab, shouldKeepProject, TAB_PROJECT } from './model/launchProject'
 import { punchWindow, sliceCapture } from './model/comp'
 import { watchSpectral } from './audio/spectral/job'
 import { inspectClip } from './audio/stretch/engine'
@@ -19,6 +19,8 @@ import { applyTransportLaunch, recordedLength } from './model/launch'
 import { shouldCountIn } from './model/sessionInteract'
 import { countInAt, meterAtSample, tempoAtSample } from './model/tempoMap'
 import { beatsToSamples, samplesToBeats } from './model/time'
+
+const FaceGallery = lazy(() => import('./ui/faces/PluginFace').then((mod) => ({ default: mod.FaceGallery })))
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { TunerPop } from './ui/AmpPop'
 import { ArrangeView } from './ui/ArrangeView'
@@ -32,11 +34,10 @@ import { PerformPop } from './ui/PerformPop'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
 import { IdeasPop } from './ui/IdeasPop'
-import { GeneratePop } from './ui/GeneratePop'
 import { PlayersSheet } from './ui/PlayersSheet'
 import { UnstuckSheet } from './unstuck/UnstuckSheet'
-import { LibraryPop } from './ui/LibraryPop'
 import { SoundBrowser } from './ui/SoundBrowser'
+import { ScalerPanel } from './ui/ScalerPanel'
 import { clampSoundWidth, readSoundWidth } from './sounds/panel'
 import { loadScaleCatalog } from './theory'
 import { AnalysisSheet } from './ui/AnalysisSheet'
@@ -54,7 +55,8 @@ import { ToolBar } from './ui/ToolBar'
 import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
 import { MENU_COPY, UNSTUCK_COPY, VIEW_COPY, copyOf, described } from './ui/chrome'
-import { EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, readSessionDock, writeSessionDock } from './ui/sessionDock'
+import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, readSessionDock, writeSessionDock } from './ui/sessionDock'
+import { deletesSelection } from './ui/clipKeys'
 import { HintBubble, MenuRow, TipButton } from './ui/Hint'
 import { formatBytes } from './ui/share'
 
@@ -121,6 +123,11 @@ export function App() {
   const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight))
   const [land, setLand] = useState(() => window.innerWidth > window.innerHeight)
   const phone = form === 'phone'
+  const rackRoll = store.view === 'beats' && store.project.tracks.some((track) => track.midiClips.some((clip) => clip.id === store.selectedMidiClipId && clip.channelId))
+  useEffect(() => {
+    if (!rackRoll || phone) return
+    setDock((value) => (value < 640 ? 640 : value))
+  }, [rackRoll, phone])
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
   const [collabOpen, setCollabOpen] = useState(() => readSessionDock())
   const [invitePending, setInvitePending] = useState(false)
@@ -128,10 +135,8 @@ export function App() {
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
-  const [generateOpen, setGenerateOpen] = useState(() => new URLSearchParams(window.location.search).get('generate') === '1')
   const [playersOpen, setPlayersOpen] = useState(() => new URLSearchParams(window.location.search).get('players') === '1')
   const [unstuckOpen, setUnstuckOpen] = useState(() => new URLSearchParams(window.location.search).get('unstuck') === '1')
-  const [libraryOpen, setLibraryOpen] = useState(() => new URLSearchParams(window.location.search).get('library') === '1')
   const [soundsOpen, setSoundsOpen] = useState(() => new URLSearchParams(window.location.search).get('sounds') === '1')
   const [soundWidth, setSoundWidth] = useState(() => readSoundWidth(undefined, window.innerWidth))
   const soundReserveRef = useRef(0)
@@ -368,14 +373,16 @@ export function App() {
     }
     const write = (forceSnapshot = false) => {
       if (!saveReady.current || cancel) return
-      if (isUntouchedEmpty(store.project)) {
+      if (isUntouchedEmpty(store.project) && store.buffers.size === 0) {
         remember(NEW_PROJECT)
         return
       }
       remember(store.project.id)
       const snap = forceSnapshot || Date.now() - lastSnapshot > 20000
       if (snap) lastSnapshot = Date.now()
+      const stamp = store.editStamp()
       void saveProject(store.project, store.buffers, snapshot(), { snapshot: snap }).then((result) => {
+        if (result === 'ok') store.markSaved(stamp)
         if (result === 'quota' && Date.now() - lastQuota > 15000) {
           lastQuota = Date.now()
           store.toast('This browser is out of space, so the latest recording could not be kept.', 'warn')
@@ -438,6 +445,10 @@ export function App() {
         store.seedCompPreview()
         store.setView('arrange')
         engine.sync(store.project, (id) => store.buffers.get(id))
+        setVersion((value) => value + 1)
+      }
+      if (params.get('scaler') === '1' || params.get('library') === '1' || params.get('generate') === '1') {
+        store.insertScaler(null, params.get('generate') === '1' ? 'write' : 'play')
         setVersion((value) => value + 1)
       }
       saveReady.current = true
@@ -656,7 +667,10 @@ export function App() {
       } else if (key === 's' && !meta) {
         const track = store.project.tracks.find((item) => item.id === store.selectedTrackId)
         if (track && !store.remoteFollow) store.updateTrack(track.id, { solo: !track.solo })
-      } else if (event.key === 'Delete' || event.key === 'Backspace') store.deleteSelectedClip()
+      } else if (deletesSelection(event.key, event.target)) {
+        event.preventDefault()
+        store.deleteSelectedClip()
+      }
       else if (key === 'l' && !meta) store.toggle('loopEnabled')
       else if (event.key === 'Home' || event.key === 'Enter') void locate(0)
       else if (event.key === '?' || (event.shiftKey && event.key === '/')) setHelp((open) => !open)
@@ -1021,8 +1035,27 @@ export function App() {
   }
 
   async function persist() {
+    const stamp = store.editStamp()
     const result = await saveProject(store.project, store.buffers, workspaceNow(), { snapshot: true })
+    if (result === 'ok') store.markSaved(stamp)
     store.toast(result === 'quota' ? 'This browser is out of space, so the project could not be kept.' : 'Saved in this browser.', result === 'quota' ? 'warn' : 'good')
+  }
+
+  function beginNewProject() {
+    setMenuOpen(false)
+    if (store.remoteFollow) return
+    if (needsNewProjectConfirm(store.hasUnsavedEdits())) {
+      const discard = window.confirm('This project has unsaved changes. Start a new project without saving them?')
+      if (!discard) return
+    }
+    if (engine.status !== 'stopped') engine.stop()
+    store.loadProject(createEmptyProject(engine.sampleRate), new Map())
+    store.setView('arrange')
+    store.setTransportMode('arrangement')
+    setSurface('studio')
+    engine.seek(0)
+    engine.sync(store.project, (id) => store.buffers.get(id))
+    try { sessionStorage.setItem(TAB_PROJECT, NEW_PROJECT) } catch { /* private mode keeps the in-memory project */ }
   }
 
   async function openProjects() {
@@ -1133,8 +1166,9 @@ async function importDropped(files: FileList) {
   }
 
   const rollWanted = !!store.selectedMidiClipId && (store.view === 'arrange' || store.view === 'beats')
-  const panel: 'room' | 'piano' | 'rack' =
+  const panel: 'room' | 'piano' | 'rack' | 'scaler' =
     surface !== 'studio' || phonePane === 'room' ? 'room'
+    : store.scalerTrackId ? 'scaler'
     : pianoOpen ? 'piano'
     : store.rackTrackId ? 'rack'
     : rollWanted ? 'piano'
@@ -1143,7 +1177,7 @@ async function importDropped(files: FileList) {
     || store.project.tracks.find((track) => track.type === 'midi')
   const studioTab: StudioTab = collabOpen ? 'collab' : store.view
   const collabShown = collabPanelVisible(studioTab)
-  const dockShown = surface === 'studio' && !collabShown && (panel === 'piano' || panel === 'rack')
+  const dockShown = !collabShown && dockVisible({ surface, panel, dockOpen: false })
   const soundReserve = !phone && dockShown && dockEdge === 'right' ? dock : 0
   soundReserveRef.current = soundReserve
   useEffect(() => {
@@ -1182,12 +1216,29 @@ async function importDropped(files: FileList) {
   }
 
   function openPiano(trackId: string, clipId?: string) {
+    store.closeScaler()
     const beat = samplesToBeats(engine.positionSamples, store.project.sampleRate, store.project.tempo)
     store.preparePianoClip(trackId, beat, clipId)
     setSurface('studio')
     setPhonePane('edit')
     store.setView('arrange')
     setPianoOpen(true)
+  }
+
+  function openPlugin(page: 'play' | 'write') {
+    hideCollab()
+    setSurface('studio')
+    setPhonePane('edit')
+    setMenuOpen(false)
+    store.insertScaler(pianoTrack?.id ?? null, page)
+  }
+
+  if (new URLSearchParams(window.location.search).get('faces') === '1') {
+    return (
+      <Suspense fallback={null}>
+        <FaceGallery />
+      </Suspense>
+    )
   }
 
   return (
@@ -1199,6 +1250,7 @@ async function importDropped(files: FileList) {
       data-session-dock="closed"
       data-collab={collabShown ? 'open' : 'closed'}
       data-dock={dockShown ? 'open' : 'closed'}
+      data-plugin={dockShown && panel === 'scaler' ? 'scaler' : 'none'}
       onDragOver={(event) => {
         if ([...event.dataTransfer.types].includes('Files')) event.preventDefault()
       }}
@@ -1264,6 +1316,7 @@ async function importDropped(files: FileList) {
         </button>
         {menuOpen && (
           <div className="shell-menu" id="shell-menu">
+            <MenuRow label={copyOf(MENU_COPY, 'new').label} hint={copyOf(MENU_COPY, 'new').hint} disabled={store.remoteFollow} onClick={beginNewProject} />
             <MenuRow id="menu-save" label={copyOf(MENU_COPY, 'save').label} hint={copyOf(MENU_COPY, 'save').hint} onClick={() => { setMenuOpen(false); void openProjects() }} />
             <MenuRow label={copyOf(MENU_COPY, 'export').label} hint={copyOf(MENU_COPY, 'export').hint} onClick={() => { setMenuOpen(false); setExportOpen(true) }} />
             <MenuRow className="split" label={copyOf(MENU_COPY, 'clips').label} hint={copyOf(MENU_COPY, 'clips').hint} onClick={() => showView('session')} />
@@ -1273,10 +1326,10 @@ async function importDropped(files: FileList) {
             {!hidesHardwareMidi(navigator.userAgent) && (
               <MenuRow className="split" label="MIDI" hint="Learn knobs, effects, hardware out, live capture, and recording several inputs." onClick={() => { setMenuOpen(false); store.setMidiToolsOpen(!store.midiToolsOpen) }} />
             )}
-            <MenuRow label={copyOf(MENU_COPY, 'generate').label} hint={copyOf(MENU_COPY, 'generate').hint} onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); setGenerateOpen(true) }} />
+            <MenuRow label={copyOf(MENU_COPY, 'generate').label} hint={copyOf(MENU_COPY, 'generate').hint} onClick={() => openPlugin('write')} />
+            <MenuRow label={copyOf(MENU_COPY, 'scaler').label} hint={copyOf(MENU_COPY, 'scaler').hint} pressed={panel === 'scaler'} onClick={() => openPlugin('play')} />
             <MenuRow label={copyOf(MENU_COPY, 'players').label} hint={copyOf(MENU_COPY, 'players').hint} onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); setPlayersOpen(true) }} />
-            <MenuRow label="Scales" hint="Browse scales and the chords inside them." onClick={() => { setMenuOpen(false); setLibraryOpen(true) }} />
-            <MenuRow label="Sounds" hint="Browse loops, one-shots, and starter instruments." onClick={() => { setMenuOpen(false); setSoundsOpen(true) }} />
+            <MenuRow label="Sounds" hint="Browse loops, one-shots, and starter instruments." onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setSoundsOpen(true) }} />
             <MenuRow className="split" label={copyOf(MENU_COPY, 'quantize').label} hint={copyOf(MENU_COPY, 'quantize').hint} onClick={() => { setMenuOpen(false); store.quickQuantize() }} />
             <MenuRow label={copyOf(MENU_COPY, 'quantize-more').label} hint={copyOf(MENU_COPY, 'quantize-more').hint} onClick={() => { setMenuOpen(false); store.openQuantize() }} />
             <MenuRow className="split" label={copyOf(MENU_COPY, 'click').label} hint={copyOf(MENU_COPY, 'click').hint} pressed={store.project.metronomeEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('metronomeEnabled')} />
@@ -1356,6 +1409,7 @@ async function importDropped(files: FileList) {
           <ToolBar
             context={panel === 'piano' ? 'piano' : 'arrange'}
             compact={form !== 'desk'}
+            phone={phone}
             onChange={(tool) => store.setTool(tool)}
             onDuplicate={() => store.duplicateSelection()}
             onDelete={() => store.deleteSelectedClip()}
@@ -1399,6 +1453,8 @@ async function importDropped(files: FileList) {
                   onPerform={(mode) => openPerform(mode)}
                   onQuickPunch={() => void quickPunch()}
                   onAnalyze={(trackId) => { setAnalysisTrackId(trackId); setPhonePane('edit'); setSurface('studio') }}
+                  libraryTab={soundsOpen ? 'sounds' : null}
+                  onLibraryClose={() => { engine.stopPreview(); setSoundsOpen(false) }}
                 />
               )}
               {store.view === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} />}
@@ -1414,7 +1470,7 @@ async function importDropped(files: FileList) {
             </div>
           </div>
         )}
-        {soundsOpen && (
+        {soundsOpen && store.view !== 'arrange' && (
           <SoundBrowser store={store} engine={engine} phone={phone} reserve={soundReserve} onWidth={setSoundWidth} onClose={() => { engine.stopPreview(); setSoundsOpen(false) }} />
         )}
         {dockShown && <div
@@ -1444,11 +1500,14 @@ async function importDropped(files: FileList) {
             aria-label="Resize editor. Drag to change its size."
             title="Drag to resize the editor."
           />
+          {surface === 'studio' && panel === 'scaler' && store.scalerTrackId && (
+            <ScalerPanel store={store} engine={engine} trackId={store.scalerTrackId} />
+          )}
           {surface === 'studio' && panel === 'rack' && store.rackTrackId && (
             <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
           )}
           {surface === 'studio' && panel === 'piano' && (
-            <MidiDock store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => setGenerateOpen(true)} onLibrary={() => setLibraryOpen(true)} />
+            <MidiDock store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => openPlugin('write')} />
           )}
         </div>}
       </div>
@@ -1457,10 +1516,8 @@ async function importDropped(files: FileList) {
       <QuantizeSheet store={store} />
       {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
       {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}
-      {generateOpen && <GeneratePop store={store} engine={engine} onClose={() => setGenerateOpen(false)} />}
       {playersOpen && <PlayersSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setPlayersOpen(false) }} />}
       {unstuckOpen && <UnstuckSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }} />}
-      {libraryOpen && <LibraryPop store={store} engine={engine} onClose={() => setLibraryOpen(false)} />}
       {analysisTrackId && <AnalysisSheet store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} />}
       {perform && (
         <PerformPop
@@ -1470,7 +1527,6 @@ async function importDropped(files: FileList) {
           session={session}
           onRecord={() => void record()}
           onClose={() => setPerform(null)}
-          onLibrary={() => setLibraryOpen(true)}
         />
       )}
       <input ref={fileRef} type="file" accept="audio/*" multiple hidden onChange={(event) => void importAudio(event.target.files)} />

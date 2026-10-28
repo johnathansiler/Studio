@@ -5,9 +5,10 @@ import { defaultRoll } from '../../model/paint'
 import { normalizeQuantize } from '../../model/quantize'
 import { defaultRecord, uid } from '../../model/types'
 import { normalizeMidiProject } from '../../model/midiTools'
+import { normalizeTrackScaler } from '../../instruments/scaler/model'
 import { normalizeScale } from '../../model/scale'
 import { normalizePadKit } from '../../model/padMachine'
-import { normalizeBeats } from '../../model/steps'
+import { bindPatternClips, normalizeBeats } from '../../model/steps'
 import { normalizeMix } from '../../model/mixGroups'
 import { normalizeOmniProject } from '../../instruments/patch/model'
 import { tuneLiveLatency } from './autoTune'
@@ -945,7 +946,7 @@ export function normalizeProject(project: Project): Project {
   project.padKit = normalizePadKit(project.padKit)
   const beats = normalizeBeats(project.beats, project.patternClips)
   project.beats = beats.beats
-  project.patternClips = beats.patternClips
+  project.patternClips = bindPatternClips(beats.patternClips, project.tracks)
   project.roll = { ...defaultRoll(), ...project.roll }
   project.quantize = normalizeQuantize(project.quantize)
   project.quantizePresets = project.quantizePresets ?? []
@@ -955,6 +956,7 @@ export function normalizeProject(project: Project): Project {
   project.presets = project.presets ?? []
   project.masterInserts = project.masterInserts ?? []
   for (const track of project.tracks) {
+    normalizeTrackScaler(track)
     track.plugins = (track.plugins ?? []).map(fillInstrument)
     track.sends = track.sends ?? []
     track.inserts = track.inserts ?? []

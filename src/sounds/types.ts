@@ -1,5 +1,8 @@
 export type SoundKind = 'one-shot' | 'loop' | 'instrument'
 
+/** Drums is a browser filter over existing samples and kits, not a stored kind. */
+export type SoundFilter = 'all' | SoundKind | 'drum'
+
 /** One row of the public sound-library index. */
 export interface SoundEntry {
   id: string
@@ -23,7 +26,7 @@ export interface CatalogResult {
 
 export interface SoundQuery {
   text: string
-  type: 'all' | SoundKind
+  type: SoundFilter
   /** `project` keeps tempos near the song, including half-time and double-time. */
   bpm: 'any' | 'project'
   /** Empty shows every key. */

@@ -142,7 +142,7 @@ export function arrangementDigest(project: Project): string {
           ]),
         }
       : null,
-    patternClips: (project.patternClips ?? []).map((clip) => [clip.id, clip.patternId, clip.startBeat, clip.lengthBeats, clip.scene, clip.offsetBeats || 0]),
+    patternClips: (project.patternClips ?? []).map((clip) => [clip.id, clip.patternId, clip.startBeat, clip.lengthBeats, clip.scene, clip.offsetBeats || 0, clip.trackId ?? '']),
     tempoMap: project.tempoMap ?? [],
     meterMap: project.meterMap ?? [],
     sections: (project.sections ?? []).map((section) => [section.id, section.name, section.kind, section.startBeat, section.durationBeats, section.color]),

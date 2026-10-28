@@ -113,6 +113,36 @@ export interface StarterHost {
   auditionLibrary?(trackId: string, pitch?: number, velocity?: number): Promise<void>
 }
 
+/**
+ * Keep engine methods on the engine.
+ * Passing `engine.auditionLibrary` bare makes `this` the host object, so `this.unlock` throws.
+ */
+export function boundLibraryHost(
+  engine: Pick<StarterHost, 'holdLibraryPack' | 'auditionLibrary'>,
+  setLibrary: StarterHost['setLibrary'],
+  audition = true,
+): StarterHost {
+  return {
+    setLibrary,
+    holdLibraryPack: engine.holdLibraryPack
+      ? (trackId, pack) => engine.holdLibraryPack!(trackId, pack)
+      : undefined,
+    auditionLibrary: audition && engine.auditionLibrary
+      ? (trackId, pitch, velocity) => engine.auditionLibrary!(trackId, pitch, velocity)
+      : undefined,
+  }
+}
+
+/** Names the track header still uses before a real instrument is chosen. */
+const PLACEHOLDER_TRACK = /^(keys|sampler|library|synth|drums?|808|inst|audio)( \d+)?$/i
+
+export function placeholderInstrumentName(name: string, previous?: string) {
+  const trimmed = name.trim()
+  if (!trimmed) return true
+  if (previous && trimmed === previous.trim()) return true
+  return PLACEHOLDER_TRACK.test(trimmed)
+}
+
 /** Download one starter preset and install it on an instrument track. Samples stay on Hugging Face. */
 export async function loadStarterOnto(
   entry: LibraryEntry,

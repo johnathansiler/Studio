@@ -57,6 +57,8 @@ export interface PatternClip {
   lengthBeats: number
   /** Session scene, when placed in a clip slot. */
   scene: number | null
+  /** Arrangement track this clip lives on. Place uses the lane under the pointer, or Drums. */
+  trackId?: string
   /** Set when someone places the clip. The old automatic clip has no flag. */
   placed?: boolean
   /** Beats into the pattern hidden by trimming the left edge. */
@@ -157,10 +159,10 @@ export function hitsInRange(
         volume: channel.volume,
         pitch: channel.note + (cell.pitch || 0),
         fine: cell.fine || 0,
-        pan: Math.max(-1, Math.min(1, channel.pan + (cell.pan || 0))),
+        pan: Math.max(-1, Math.min(1, cell.pan || 0)),
         startBeat: start,
         durationBeats: span * gate,
-        velocity: Math.max(0.05, Math.min(1, (cell.velocity || 0.8) * channel.volume)),
+        velocity: Math.max(0.05, Math.min(1, cell.velocity || 0.8)),
       })
     }
   }
@@ -327,6 +329,29 @@ export function settlePatternClips(beats: BeatRack, clips: PatternClip[]): Patte
 export function patternPlayRange(clip: PatternClip): { from: number; to: number } {
   const from = Math.max(0, clip.offsetBeats || 0)
   return { from, to: from + Math.max(0, clip.lengthBeats) }
+}
+
+/** Lane a pattern clip should draw on. A midi lane under the pointer wins. Otherwise null, and Place creates Drums. */
+export function patternHostId(tracks: { id: string; type: string }[], laneId: string | null | undefined): string | null {
+  if (!laneId) return null
+  const track = tracks.find((item) => item.id === laneId)
+  return track?.type === 'midi' ? track.id : null
+}
+
+/**
+ * Arrangement clips always belong to a track that exists.
+ * A missing or stale id uses Drums when that track is already there, otherwise the first instrument track.
+ */
+export function bindPatternClips(clips: PatternClip[], tracks: { id: string; type: string; name: string }[]): PatternClip[] {
+  const live = new Set(tracks.map((track) => track.id))
+  const home = tracks.find((track) => track.type === 'midi' && track.name === 'Drums')?.id
+    ?? tracks.find((track) => track.type === 'midi')?.id
+  if (!home) return clips
+  for (const clip of clips) {
+    if (clip.scene != null) continue
+    if (!clip.trackId || !live.has(clip.trackId)) clip.trackId = home
+  }
+  return clips
 }
 
 export function normalizeBeats(beats: BeatRack | undefined, clips: PatternClip[] | undefined): { beats: BeatRack; patternClips: PatternClip[] } {

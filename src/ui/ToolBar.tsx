@@ -18,6 +18,7 @@ export function ToolBar({
   onDelete,
   context = 'arrange',
   compact = false,
+  phone = false,
 }: {
   onChange: (tool: ArrangeTool) => void
   onDuplicate: () => void
@@ -26,10 +27,12 @@ export function ToolBar({
   context?: 'arrange' | 'piano'
   /** Phone and foldable: one sideways strip under the status line. */
   compact?: boolean
+  /** Portrait phone: short labels and only the tools that fit. */
+  phone?: boolean
 }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const stripRef = useRef<HTMLDivElement>(null)
-  const shown = compact ? compactToolOrder() : ARRANGE_TOOLS.map((tool) => tool.id)
+  const shown = phone ? (['select', 'pencil', 'split', 'erase'] as ArrangeTool[]) : compact ? compactToolOrder() : ARRANGE_TOOLS.map((tool) => tool.id)
   const chip = toolChip(value, context)
   useEffect(() => {
     const strip = stripRef.current
@@ -60,10 +63,11 @@ export function ToolBar({
               onClick={() => onChange(id)}
             >
               <ToolIcon id={id} />
+              {phone && <span className="tool-label">{info.label}</span>}
             </TipButton>
           )
         })}
-        {TOOL_ACTIONS.map((action) => (
+        {(phone ? TOOL_ACTIONS.filter((action) => action.id === 'delete') : TOOL_ACTIONS).map((action) => (
           <TipButton
             key={action.id}
             className="tool"
@@ -72,6 +76,7 @@ export function ToolBar({
             onClick={action.id === 'duplicate' ? onDuplicate : onDelete}
           >
             <ToolIcon id={action.id} />
+            {phone && <span className="tool-label">{action.label}</span>}
           </TipButton>
         ))}
       </div>
@@ -84,8 +89,8 @@ function ToolIcon({ id }: { id: ArrangeTool | 'duplicate' | 'delete' }) {
   if (id === 'select') return <svg {...common}><path d="M4 2.5l8 6.2-3.2.6 2.1 4.2-1.8.9-2.1-4.2-3 .9z" /></svg>
   if (id === 'box') return <svg {...common}><rect x="3" y="3.5" width="12" height="11" strokeDasharray="2.2 1.6" /></svg>
   if (id === 'pencil') return <svg {...common}><path d="M11.2 3.2l3.6 3.6L7 14.6 3.2 15l.4-3.8z" /></svg>
-  if (id === 'trim') return <svg {...common}><path d="M6 4.5v9M12 4.5v9M6 9h6" /></svg>
-  if (id === 'split') return <svg {...common}><path d="M5 14.5l3.2-9.2M13 14.5L9.8 5.3M9 3.2v2.2" /></svg>
+  if (id === 'trim') return <svg {...common}><path d="M7 4H4.5v10H7M11 4h2.5v10H11" /></svg>
+  if (id === 'split') return <svg {...common}><path d="M3.5 4.5h6.2l2.8 2.2V14H3.5z" /><path d="M9.7 4.5V7h3" /><path d="M12.2 9.2l2.6 2.6M14.8 9.2l-2.6 2.6" /></svg>
   if (id === 'erase') return <svg {...common}><path d="M4 12.5l6.2-6.2 3.3 3.3-6.2 6.2H4zM7.2 14.5h7" /></svg>
   if (id === 'pan') return <svg {...common}><path d="M9 3.2v11.6M3.2 9h11.6M9 3.2L7.2 5M9 3.2l1.8 1.8M9 14.8l-1.8-1.8M9 14.8l1.8-1.8M3.2 9l1.8-1.8M3.2 9l1.8 1.8M14.8 9l-1.8-1.8M14.8 9L13 10.8" /></svg>
   if (id === 'zoom') return <svg {...common}><circle cx="8" cy="8" r="4.2" /><path d="M11.2 11.2L15 15" /></svg>
