@@ -137,6 +137,17 @@ function soundHay(entry: PadSound): string {
   return `${entry.name} ${entry.path} ${entry.tags?.join(' ') ?? ''}`.toLowerCase()
 }
 
+/** A pad face shows the sound, wrapped, never cut off with an ellipsis. */
+export function shortPadName(name: string): string {
+  const head = name.split(/\s[–—-]\s/)[0]?.trim() || name
+  const cleaned = head
+    .replace(/\b(vel(?:ocity)?|rr|round)\s*\d+\b/gi, '')
+    .replace(/\bsum\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return cleaned || name.trim() || 'Pad'
+}
+
 /** Bank A slots filled from CC0 drum one-shots. The same catalog always picks the same files. */
 export function pickDefaultKit(entries: PadSound[]): { index: number; id: string; name: string; path: string }[] {
   const pool = entries.filter((entry) => entry.type === 'one-shot' && isDrumSound({ name: entry.name, path: entry.path, tags: entry.tags ?? [] }))

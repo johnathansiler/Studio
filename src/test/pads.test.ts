@@ -13,6 +13,7 @@ import {
   pickDefaultKit,
   quantizePadBeat,
   recordPadHits,
+  shortPadName,
   swingPercent,
 } from '../instruments/pads/record'
 import { createKit } from '../model/padMachine'
@@ -136,6 +137,8 @@ describe('pads drum machine', () => {
     ])
     expect(picks.map((pick) => pick.id)).toEqual(['k', 's', 'h', 'o'])
     expect(picks[3].index).toBe(5)
+    expect(shortPadName('Bass Drum 1 – BDrumNe w hit v2 rr1 Sum')).toBe('Bass Drum 1')
+    expect(shortPadName('Gogodze kit hihat closed vel 1 rr1')).toBe('Gogodze kit hihat closed')
     expect(CATALOG.find((plugin) => plugin.id === 'pads')?.name).toBe('Pads')
     expect(browserGroup('plugins').map((item) => item.name)).toContain('Pads')
     const store = new ProjectStore(createEmptyProject())

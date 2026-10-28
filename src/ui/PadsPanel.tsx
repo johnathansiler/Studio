@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent } fro
 import type { AudioEngine } from '../audio/engine'
 import { Performer, pointerVelocity, type PerformTarget } from '../audio/performer'
 import { ensureDefaultKit } from '../instruments/pads/load'
-import { clipBeat } from '../instruments/pads/record'
+import { clipBeat, shortPadName } from '../instruments/pads/record'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { projectSampleBeat } from '../model/tempoMap'
 import { BANKS, sixteenLevels, type LevelSpread } from '../model/padMachine'
@@ -261,12 +261,6 @@ export function PadsPanel({
           >{name}</button>
         ))}
         <button type="button" className={recording ? 'on' : ''} aria-pressed={recording} title="Record pad hits into a clip on this track, with the count-in and the loop." onClick={record}>Record</button>
-        {!phone && (
-          <button type="button" className={store.project.countIn ? 'on' : ''} aria-pressed={store.project.countIn} title="Count one bar before recording starts." onClick={() => store.toggle('countIn')}>Count</button>
-        )}
-        {!phone && (
-          <button type="button" className={store.project.metronomeEnabled ? 'on' : ''} aria-pressed={store.project.metronomeEnabled} title="Metronome while the pads record." onClick={() => store.toggle('metronomeEnabled')}>Click</button>
-        )}
         <button type="button" className={kit.timing ? 'on' : ''} aria-pressed={kit.timing} title="Snap hits to the grid with MPC swing." onClick={() => store.patchTrackKit(trackId, { timing: !kit.timing, timingGrid: 0.25, timingStrength: 1 })}>Quantize</button>
         <button
           type="button"
@@ -289,19 +283,17 @@ export function PadsPanel({
           onPointerLeave={() => setEraseOn(false)}
         >Erase</button>
         <button type="button" title="Undo the last record pass." onClick={() => store.undoTake()}>Undo</button>
-        {!phone && (
-          <select aria-label="16 Levels" title="One pad spread across 16 velocities, tunes, or decays." value={levels} onChange={(event) => setLevels(event.target.value as LevelSpread | '')}>
-            <option value="">16 Levels</option>
-            <option value="velocity">Velocity</option>
-            <option value="tune">Tune</option>
-            <option value="filter">Filter</option>
-            <option value="decay">Decay</option>
-            <option value="attack">Attack</option>
-          </select>
-        )}
-        {!phone && (
-          <button type="button" title="Open this clip in the piano roll." onClick={edit}>Roll</button>
-        )}
+        <button type="button" className={store.project.countIn ? 'on' : ''} aria-pressed={store.project.countIn} title="Count one bar before recording starts." onClick={() => store.toggle('countIn')}>Count</button>
+        <button type="button" className={store.project.metronomeEnabled ? 'on' : ''} aria-pressed={store.project.metronomeEnabled} title="Metronome while the pads record." onClick={() => store.toggle('metronomeEnabled')}>Click</button>
+        <select aria-label="16 Levels" title="One pad spread across 16 velocities, tunes, or decays." value={levels} onChange={(event) => setLevels(event.target.value as LevelSpread | '')}>
+          <option value="">16 Levels</option>
+          <option value="velocity">Velocity</option>
+          <option value="tune">Tune</option>
+          <option value="filter">Filter</option>
+          <option value="decay">Decay</option>
+          <option value="attack">Attack</option>
+        </select>
+        <button type="button" title="Open this clip in the piano roll." onClick={edit}>Roll</button>
         <button type="button" className="mpc-close" title="Close Pads. The track keeps the instrument." aria-label="Close Pads. The track keeps the instrument." onClick={() => store.closePads()}>×</button>
       </div>
       <p className="mpc-tool" data-tool={tool}>Tool: <b>{tool}</b></p>
@@ -309,7 +301,7 @@ export function PadsPanel({
         <div className="mpc-grid" ref={board} aria-label="Drum pads">
           {pads.map((pad, index) => {
             const pitch = levels && source ? source.pitch : pad.pitch
-            const label = levels ? levelLabel(index, levels) : pad.name
+            const label = levels ? levelLabel(index, levels) : shortPadName(pad.name)
             return (
               <button
                 key={`${bank}-${pad.pitch}-${index}`}
@@ -330,15 +322,7 @@ export function PadsPanel({
         </div>
         {source && (
           <aside className="mpc-params" aria-label="Pad settings">
-            <h3>{source.name}</h3>
-            {phone && (
-              <select aria-label="16 Levels" title="Spread this pad across 16 levels." value={levels} onChange={(event) => setLevels(event.target.value as LevelSpread | '')}>
-                <option value="">16 Levels</option>
-                <option value="velocity">Velocity</option>
-                <option value="tune">Tune</option>
-                <option value="decay">Decay</option>
-              </select>
-            )}
+            <h3>{shortPadName(source.name)}</h3>
             <label>Vol
               <input aria-label="Pad volume" title="How loud this pad is." type="range" min={0} max={1} step={0.01} value={source.level} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { level: Number(event.target.value) })} />
             </label>
@@ -361,12 +345,6 @@ export function PadsPanel({
                 store.patchTrackKit(trackId, { swing, trackSwing: swing })
               }} />
             </label>
-            {phone && (
-              <button type="button" className={store.project.countIn ? 'on' : ''} aria-pressed={store.project.countIn} title="Count one bar before recording starts." onClick={() => store.toggle('countIn')}>Count</button>
-            )}
-            {phone && (
-              <button type="button" className={store.project.metronomeEnabled ? 'on' : ''} aria-pressed={store.project.metronomeEnabled} title="Metronome while the pads record." onClick={() => store.toggle('metronomeEnabled')}>Click</button>
-            )}
             {!phone && (
               <label>Out
                 <select aria-label="Pad output" title="Play this pad on the track, or on a bus." value={source.busId || ''} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { busId: event.target.value || undefined })}>
@@ -376,9 +354,6 @@ export function PadsPanel({
                   ))}
                 </select>
               </label>
-            )}
-            {phone && (
-              <button type="button" title="Open this clip in the piano roll." onClick={edit}>Roll</button>
             )}
           </aside>
         )}

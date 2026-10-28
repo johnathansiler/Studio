@@ -124,13 +124,14 @@
 .mpc-pad span {
   display: block;
   width: 100%;
+  max-height: none;
   text-align: center;
   white-space: normal;
   overflow: visible;
   text-overflow: clip;
   word-break: break-word;
   line-height: 1.15;
-  font-size: clamp(11px, 2.1vw, 15px);
+  font-size: clamp(11px, 2.4vw, 15px);
   font-weight: 680;
 }
 
@@ -188,30 +189,58 @@
 
 .mpc-params input[type='range'] { width: 100%; }
 
+.shell.phone .mpc-top button,
+.shell.phone .mpc-top select,
+.shell.phone .mpc-params button,
+.shell.phone .mpc-params select,
+.shell.phone .mpc-params input {
+  min-height: 32px;
+  height: 32px;
+}
+
+.mpc.phone .mpc-top {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
 .mpc.phone .mpc-body {
+  flex: 1;
+  min-height: 0;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
   padding: 6px;
   gap: 6px;
 }
 
-.mpc.phone .mpc-grid { gap: 6px; }
-.mpc.phone .mpc-pad { min-height: 58px; border-radius: 14px; }
+.mpc.phone .mpc-grid {
+  gap: 6px;
+  min-height: 0;
+  height: 100%;
+}
+
+.shell.phone .mpc .mpc-pad {
+  min-height: 0;
+  height: 100%;
+  border-radius: 14px;
+}
+
 .mpc.phone .desk-only { display: none; }
 
 .mpc.phone .mpc-params {
   flex-direction: row;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
+  overflow-x: auto;
   padding: 6px;
   gap: 6px;
+  max-height: 44px;
 }
 
 .mpc.phone .mpc-params h3 { display: none; }
 
 .mpc.phone .mpc-params label {
-  grid-template-columns: auto 72px;
-  flex: 1 1 120px;
+  grid-template-columns: auto 64px;
+  flex: 0 0 auto;
 }
 
 @container (max-width: 560px) {
