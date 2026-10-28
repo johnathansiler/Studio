@@ -1,4 +1,5 @@
 import type { AudioEngine } from '../audio/engine'
+import { rememberSlotInput } from '../audio/sample/slot'
 import {
   alignedRecordWindow,
   bestClockSample,
@@ -475,6 +476,7 @@ export class SessionClient {
       stream?.getTracks().forEach((track) => track.stop())
     }
     this.musicStream = null
+    rememberSlotInput(this.state.micId, null)
     this.talkStream = null
     this.screenStream = null
     this.preview = null
@@ -967,6 +969,7 @@ export class SessionClient {
         : await this.gestureCapture(musicCaptureAttempts(this.state.micId).map((audio) => () => navigator.mediaDevices.getUserMedia({ audio, video: false })))
       if (!stream) throw new Error('no microphone')
       this.musicStream = stream
+      rememberSlotInput(this.state.micId, stream)
       const track = this.musicStream.getAudioTracks()[0]
       if (track) {
         track.contentHint = 'music'
