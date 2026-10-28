@@ -1,6 +1,7 @@
 import { descriptor, FACTORY } from './catalog'
 import { sanitize } from './dsp'
 import { emptyLooper, mixTakes, nextBar, syncedLoopSamples, type LoopBox, type LoopTake, type LooperState } from '../sample/engine'
+import { playbackChannel, readSlotPoints } from '../sample/slot'
 import type { PluginInstance } from '../../model/types'
 import type { PluginModule, Processor } from './types'
 
@@ -25,16 +26,18 @@ export function createLooper(sampleRate: number): LooperProcessor {
     },
     bind(plugin, channel) {
       state = plugin.looper ?? emptyLooper()
-      const next = state.layers.map((layer) => layer.bufferId).join(',')
+      const fileRate = state.sourceRate && state.sourceRate > 0 ? state.sourceRate : sampleRate
+      const next = `${state.layers.map((layer) => layer.bufferId).join(',')}:${fileRate}:${sampleRate}:${state.lengthSamples}`
       if (next !== signature) {
         signature = next
         const takes: LoopTake[] = []
         for (const layer of state.layers) {
           const samples = channel(layer.bufferId)
           if (!samples?.length) continue
-          takes.push({ samples, gain: layer.gain, mute: layer.mute, reverse: layer.reverse, speed: layer.speed || 1 })
+          takes.push({ samples: playbackChannel(samples, fileRate, sampleRate), gain: layer.gain, mute: layer.mute, reverse: layer.reverse, speed: layer.speed || 1 })
         }
-        const length = state.lengthSamples || takes[0]?.samples.length || 0
+        const rawLength = state.lengthSamples || takes[0]?.samples.length || 0
+        const length = fileRate === sampleRate ? rawLength : Math.max(1, Math.round((rawLength * sampleRate) / fileRate))
         box = { length, takes, undone: [], feedback: state.feedback }
       }
       box.feedback = state.feedback
@@ -74,8 +77,11 @@ export function createLooper(sampleRate: number): LooperProcessor {
       for (let i = 0; i < n; i++) {
         let sample = 0
         if (mix && mix.length) {
-          const at = cursor % mix.length
-          sample = mix[at] || 0
+          const points = readSlotPoints(state)
+          const from = Math.min(mix.length - 1, Math.floor(points.loopStart * mix.length))
+          const to = Math.max(from + 1, Math.min(mix.length, Math.ceil(points.loopEnd * mix.length)))
+          const span = Math.max(1, to - from)
+          sample = mix[from + (cursor % span)] || 0
           cursor += 1
         }
         if (output[0]) output[0][i] = sanitize(sample * level)

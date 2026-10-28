@@ -24,6 +24,7 @@ import {
   trimSilence,
   type LoopTake,
 } from '../audio/sample/engine'
+import { assetFromClip, placeLooper, placeSampler, readSlotPoints, type SlotPoints } from '../audio/sample/slot'
 import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
 import { findCycle, MASTER } from '../audio/routing'
 import { isPackAsset, packToAsset } from '../audio/multisample/persist'
@@ -1082,9 +1083,55 @@ export class ProjectStore {
       const plugin = this.instrument(trackId, pluginId)
       if (!plugin?.sampler) return
       plugin.sampler.bufferId = bufferId
-      const channel = this.buffers.get(bufferId)?.channels[0]
-      if (channel) plugin.sampler.root = detectRoot(channel, this.buffers.get(bufferId)?.sampleRate || this.project.sampleRate)
+      const asset = this.buffers.get(bufferId)
+      const channel = asset?.channels[0]
+      if (asset) plugin.sampler.sourceRate = asset.sampleRate
+      if (channel) plugin.sampler.root = detectRoot(channel, asset?.sampleRate || this.project.sampleRate)
     })
+  }
+
+  /** Put audio in a sampler or looper slot. Samples are stored as given, at their own rate. */
+  loadSlotAudio(trackId: string | 'master', pluginId: string, asset: AudioAsset, mode: 'replace' | 'overdub' = 'replace') {
+    this.mutate(() => {
+      const plugin = this.instrument(trackId, pluginId)
+      if (!plugin || !asset.channels[0]?.length) return
+      const copy: AudioAsset = {
+        id: asset.id || uid('smp'),
+        name: asset.name || 'Sample',
+        sampleRate: asset.sampleRate || this.project.sampleRate,
+        channels: asset.channels.map((channel) => Float32Array.from(channel)),
+      }
+      if (plugin.sampler) {
+        placeSampler(plugin.sampler, copy)
+        this.buffers.set(copy.id, copy)
+        return
+      }
+      if (!plugin.looper) return
+      const stored = placeLooper(plugin.looper, copy, mode, this.project)
+      this.buffers.set(stored.id, stored)
+      plugin.params = { ...plugin.params, transport: plugin.looper.transport }
+    })
+  }
+
+  /** Drag the waveform handles. One undo step covers a whole drag. */
+  setSlotPoints(trackId: string | 'master', pluginId: string, points: SlotPoints) {
+    this.draft(() => {
+      const plugin = this.instrument(trackId, pluginId)
+      const next = readSlotPoints(points)
+      if (plugin?.sampler) Object.assign(plugin.sampler, next)
+      if (plugin?.looper) Object.assign(plugin.looper, next)
+    })
+  }
+
+  /** Copy an arrange clip into the open slot without resampling it. */
+  sendClipToSlot(trackId: string | 'master', pluginId: string, clipTrackId: string, clipId: string) {
+    const clip = this.track(clipTrackId)?.clips.find((item) => item.id === clipId)
+    const asset = clip ? this.buffers.get(clip.bufferId) : undefined
+    if (!clip || !asset) return false
+    const region = assetFromClip(asset, clip, uid('smp'))
+    if (!region) return false
+    this.loadSlotAudio(trackId, pluginId, region, 'replace')
+    return true
   }
 
   editSample(trackId: string | 'master', pluginId: string, op: 'norm' | 'reverse' | 'trim' | 'fade' | 'snap') {

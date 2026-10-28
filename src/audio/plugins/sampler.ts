@@ -8,6 +8,7 @@ import {
   zoneFor,
   type SamplerState,
 } from '../sample/engine'
+import { playbackChannel, readSlotPoints } from '../sample/slot'
 import type { PluginInstance } from '../../model/types'
 import type { PluginModule, Processor } from './types'
 
@@ -43,6 +44,19 @@ export function createSampler(sampleRate: number): SamplerProcessor {
   let lookup: (id: string) => Float32Array | null = () => null
   let quality: 'full' | 'eco' = 'full'
   const captured: number[] = []
+  const played = new Map<string, Float32Array>()
+  const hear = (id: string, channel: Float32Array | null) => {
+    if (!channel?.length) return null
+    const fileRate = state.sourceRate && state.sourceRate > 0 ? state.sourceRate : sampleRate
+    if (fileRate === sampleRate) return channel
+    const key = `${id}:${channel.length}:${fileRate}:${sampleRate}`
+    let hit = played.get(key)
+    if (!hit) {
+      hit = playbackChannel(channel, fileRate, sampleRate)
+      played.set(key, hit)
+    }
+    return hit
+  }
   return {
     latencySamples: 0,
     reset() {
@@ -52,7 +66,7 @@ export function createSampler(sampleRate: number): SamplerProcessor {
     bind(plugin, channel) {
       state = plugin.sampler ?? emptySampler()
       lookup = channel
-      source = state.bufferId ? channel(state.bufferId) : null
+      source = hear(state.bufferId, state.bufferId ? channel(state.bufferId) : null)
     },
     note(pitch, vel) {
       const midi = Math.round(pitch)
@@ -60,7 +74,7 @@ export function createSampler(sampleRate: number): SamplerProcessor {
         for (const voice of voices) if (voice.note === midi) voice.released = true
         return
       }
-      const region = regionFor(state, source, lookup, midi)
+      const region = regionFor(state, source, (id) => hear(id, lookup(id)), midi)
       if (!region) return
       const slice = state.slices.length ? zoneFor(state.slices, midi) : null
       const limit = sampleVoiceLimit(quality)
@@ -154,8 +168,12 @@ function regionFor(state: SamplerState, source: Float32Array | null, lookup: (id
   const slice = state.slices.length ? zoneFor(state.slices, midi) : null
   const channel = (slice && lookup(slice.bufferId)) || source
   if (!channel || channel.length < 2) return null
-  const start = clamp(Math.floor((slice ? slice.loopStart : state.start) * channel.length), 0, channel.length - 2)
-  const end = clamp(Math.floor((slice ? slice.loopEnd : state.end) * channel.length), start + 2, channel.length)
+  const points = readSlotPoints(state)
+  const looped = state.loopMode !== 2
+  const from = slice ? slice.loopStart : looped ? points.loopStart : points.start
+  const to = slice ? slice.loopEnd : looped ? points.loopEnd : points.end
+  const start = clamp(Math.floor(from * channel.length), 0, channel.length - 2)
+  const end = clamp(Math.floor(to * channel.length), start + 2, channel.length)
   const region = channel.slice(start, end)
   if (slice?.reverse || false) {
     for (let i = 0; i < region.length / 2; i++) {
