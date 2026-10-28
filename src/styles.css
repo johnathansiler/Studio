@@ -1271,3 +1271,17 @@ html[data-posture="tabletop"] .shell .master-sheet {
 .shell.phone.land .perform-pop.drums .grid8.land-grid { display: grid; height: 100%; grid-template-rows: repeat(8, minmax(44px, 1fr)); }
 .shell.fold .perform-pop { top: 12px; left: 12px; right: 12px; bottom: 12px; transform: none; width: auto; height: auto; }
 .shell.fold .perform-body { grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.15fr); }
+
+.library-panel { display: flex; flex-direction: column; gap: 6px; padding: 8px 8px 0; min-height: 0; overflow: auto; max-height: 46%; }
+.library-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.library-row button, .library-file {
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+.library-file { cursor: pointer; }
+.library-status { margin: 0; color: var(--muted); font-size: 12px; }
+.library-mics { display: flex; flex-wrap: wrap; gap: 8px; }
+.library-mics label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--muted); min-width: 72px; }
+.library-mics input[type='range'] { width: 88px; }

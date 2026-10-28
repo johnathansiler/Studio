@@ -23,6 +23,7 @@ import {
 } from '../audio/sample/engine'
 import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
 import { findCycle, MASTER } from '../audio/routing'
+import type { SamplerProgram } from '../audio/multisample/types'
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
@@ -461,12 +462,45 @@ export class ProjectStore {
     this.mutate(() => {
       const made = tracksFor(spec, this.project.tracks)
       for (const track of made) if (track.type === 'midi') normalizeTrackRack(track)
+      if (spec.kind === 'midi' && spec.instrument === 'library' && made[0]) this.rackTrackId = made[0].id
       const at = insertIndex(this.project.tracks, this.selectedTrackId)
       this.project.tracks.splice(at, 0, ...made)
       this.selectedTrackId = made[0]?.id ?? this.selectedTrackId
       ids.push(...made.map((track) => track.id))
     })
     return ids
+  }
+
+  /** Install a multi-sample program on a library instrument track. */
+  setLibrary(trackId: string, program: SamplerProgram | null) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      track.instrument = 'library'
+      track.library = program ?? undefined
+      if (!track.rack?.devices?.length) normalizeTrackRack(track)
+    })
+  }
+
+  /** Same as setLibrary, and keep imported wavs in the project so they save. */
+  adoptLibrary(trackId: string, program: SamplerProgram, assets: { id: string; name: string; sampleRate: number; channels: Float32Array[] }[]) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      track.instrument = 'library'
+      track.library = program
+      for (const asset of assets) this.buffers.set(asset.id, asset)
+      if (!track.rack?.devices?.length) normalizeTrackRack(track)
+    })
+  }
+
+  setLibraryMic(trackId: string, micId: string, gain: number, mute?: boolean) {
+    this.mutate(() => {
+      const mic = this.track(trackId)?.library?.mics.find((item) => item.id === micId)
+      if (!mic) return
+      mic.gain = Math.max(0, Math.min(1, gain))
+      if (mute != null) mic.mute = mute
+    })
   }
 
   addTrack(type: Track['type']) {

@@ -1,3 +1,4 @@
+import type { SamplerProgram } from '../audio/multisample/types'
 import type { RollMemory } from './paint'
 import type { QuantizePreset, QuantizeSettings, WarpPoint } from './quantize'
 import type { DevicePreset, RackAutomation, RackPatch, RackState } from './rack'
@@ -5,7 +6,7 @@ import { defaultScale, type ScaleState } from './scale'
 import type { BeatRack, PatternClip } from './steps'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
-export type TrackInstrument = 'synth' | 'sampler' | '808' | 'drum-machine' | 'none'
+export type TrackInstrument = 'synth' | 'sampler' | '808' | 'drum-machine' | 'library' | 'none'
 
 export function isLocalInput(input: string) {
   return input === 'mic' || input === 'line'
@@ -284,6 +285,8 @@ export interface Track {
   channels?: 1 | 2
   /** Chosen instrument for a MIDI track. */
   instrument?: TrackInstrument
+  /** Multi-sample program for a library instrument. PCM is not stored here. */
+  library?: SamplerProgram
   inserts: Insert[]
   plugins: PluginInstance[]
   sends: Send[]
