@@ -2125,7 +2125,7 @@ export class AudioEngine {
       }
       return
     }
-    this.warmNote(pitch, level)
+    this.warmNote(pitch, level, color?.tune || 0)
   }
 
   /** Grid-locked retrigger. `when` is an AudioContext time, not the moment this method runs. */
@@ -2151,7 +2151,7 @@ export class AudioEngine {
       return
     }
     if (index >= 0 && this.drumBuffers[index]) this.playResident(index, level, color, when)
-    else this.warmNote(pitch, level, when)
+    else this.warmNote(pitch, level, 0, when)
   }
 
   cancelPadHits(pitch: number, afterTime: number) {
@@ -2219,7 +2219,7 @@ export class AudioEngine {
     }
   }
 
-  private warmNote(pitch: number, velocity: number, when?: number) {
+  private warmNote(pitch: number, velocity: number, tune = 0, when?: number) {
     for (const voice of this.warmVoices) if (voice.busy) voice.age += 1
     const same = this.warmVoices.find((item) => item.busy && item.pitch === pitch)
     const free = this.warmVoices.find((item) => !item.busy)
@@ -2230,7 +2230,7 @@ export class AudioEngine {
     voice.pitch = pitch
     voice.age = 0
     const at = when ?? this.ctx.currentTime
-    voice.osc.frequency.setValueAtTime(440 * 2 ** ((pitch - 69) / 12), at)
+    voice.osc.frequency.setValueAtTime(440 * 2 ** ((pitch + tune - 69) / 12), at)
     voice.gain.gain.cancelScheduledValues(at)
     voice.gain.gain.setValueAtTime(Math.max(0.001, velocity * 0.2), at)
   }
@@ -2389,7 +2389,18 @@ export class AudioEngine {
     const ctx = this.ctx
     const out = this.speakerGain
     if (!ctx || !out) return
-    const unique = [...new Set(pitches.map((pitch) => Math.round(pitch)).filter((pitch) => pitch >= 0 && pitch <= 127))]
+    const unique: { midi: number; cents: number }[] = []
+    const seen = new Set<number>()
+    for (const pitch of pitches) {
+      if (!Number.isFinite(pitch)) continue
+      const midi = Math.round(pitch)
+      if (midi < 0 || midi > 127) continue
+      const cents = Math.round((pitch - midi) * 100)
+      const key = midi * 100 + cents
+      if (seen.has(key)) continue
+      seen.add(key)
+      unique.push({ midi, cents })
+    }
     if (!unique.length) return
     const now = ctx.currentTime
     const bus = ctx.createGain()
@@ -2399,10 +2410,10 @@ export class AudioEngine {
     bus.gain.exponentialRampToValueAtTime(0.0001, now + 0.5)
     bus.connect(out)
     let pending = unique.length
-    for (const pitch of unique) {
+    for (const tone of unique) {
       const osc = ctx.createOscillator()
       osc.type = 'triangle'
-      osc.frequency.value = 440 * 2 ** ((pitch - 69) / 12)
+      osc.frequency.value = 440 * 2 ** ((tone.midi + tone.cents / 100 - 69) / 12)
       osc.connect(bus)
       osc.onended = () => {
         pending -= 1
