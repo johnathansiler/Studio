@@ -34,6 +34,7 @@ import { ProjectSheet } from './ui/ProjectSheet'
 import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
+import { ToolBar } from './ui/ToolBar'
 import { VideoDock } from './ui/VideoDock'
 import { formatBytes } from './ui/share'
 
@@ -1222,7 +1223,17 @@ async function importDropped(files: FileList) {
           onSeek={(sample) => void locate(sample)}
         />
       )}
-      {surface === 'studio' && <div className="tool-slot" id="tool-slot" data-slot="timeline-tools" />}
+      {surface === 'studio' && (
+        <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
+          {store.view === 'arrange' && (
+            <ToolBar
+              onChange={(tool) => store.setTool(tool)}
+              onDuplicate={() => store.duplicateSelection()}
+              onDelete={() => store.deleteSelectedClip()}
+            />
+          )}
+        </div>
+      )}
       <div className={`workspace ${!phone && dockEdge === 'bottom' && surface === 'studio' ? 'dock-bottom' : ''}`}>
         {surface === 'studio' && (
           <div className="main-pane">

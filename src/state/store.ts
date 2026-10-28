@@ -26,6 +26,8 @@ import { findCycle, MASTER } from '../audio/routing'
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
+import { splitMidiClip, stretchMidiClip, trimMidiClip } from '../model/edit'
+import { activeTool, setActiveTool, type ArrangeTool } from './tools'
 import { demoMidiNotes } from '../model/demo'
 import {
   clipById,
@@ -66,7 +68,7 @@ import {
 } from '../model/steps'
 import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK_COLORS } from '../model/types'
 import type { AudioAsset, AudioClip, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, MidiClip, MidiNote, PluginInstance, Project, RecordSettings, TakeLane, Track } from '../model/types'
-import { beatsToSamples, quartersPerBar, samplesToBeats } from '../model/time'
+import { beatsToSamples, quartersPerBar, samplesToBeats, snapSample } from '../model/time'
 import { linearResample } from '../model/wav'
 import { renderDrum, DRUM_PADS } from '../model/drums'
 import {
@@ -104,7 +106,9 @@ export class ProjectStore {
   buffers = new Map<string, AudioAsset>()
   selectedTrackId: string | null
   selectedClipId: string | null
+  selectedClipIds: string[] = []
   selectedMidiClipId: string | null
+  selectedMidiClipIds: string[] = []
   selectedNoteId: string | null
   selectedNoteIds: string[] = []
   view: WorkspaceView = 'arrange'
@@ -147,8 +151,6 @@ export class ProjectStore {
   quantizePreview: QuantizeResult | null = null
   private takeOpen = false
   private takeNotes: { trackId: string; clipId: string; noteId: string }[] = []
-  /** Arrange edit tool. Not saved, and switching it does not create an undo step. */
-  tool: 'pointer' | 'stretch' = 'pointer'
   /** Clip settings. Not saved. */
   clipSheet = false
   private bypassed: { id: string; enabled: boolean }[] | null = null
@@ -252,21 +254,62 @@ export class ProjectStore {
     this.emit()
   }
 
-  selectClip(trackId: string, clipId: string | null, midi = false, openSheet = true) {
+  selectClip(trackId: string, clipId: string | null, midi = false, openSheet = true, additive = false) {
     this.selectedTrackId = trackId
     if (midi) {
-      this.selectedMidiClipId = clipId
       this.selectedClipId = null
+      this.selectedClipIds = []
+      if (!clipId) {
+        this.selectedMidiClipId = null
+        this.selectedMidiClipIds = []
+      } else if (additive) {
+        const has = this.selectedMidiClipIds.includes(clipId)
+        this.selectedMidiClipIds = has ? this.selectedMidiClipIds.filter((id) => id !== clipId) : [...this.selectedMidiClipIds, clipId]
+        this.selectedMidiClipId = this.selectedMidiClipIds.at(-1) ?? null
+      } else {
+        this.selectedMidiClipId = clipId
+        this.selectedMidiClipIds = [clipId]
+      }
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
     } else {
-      this.selectedClipId = clipId
+      this.selectedMidiClipId = null
+      this.selectedMidiClipIds = []
+      if (!clipId) {
+        this.selectedClipId = null
+        this.selectedClipIds = []
+      } else if (additive) {
+        const has = this.selectedClipIds.includes(clipId)
+        this.selectedClipIds = has ? this.selectedClipIds.filter((id) => id !== clipId) : [...this.selectedClipIds, clipId]
+        this.selectedClipId = this.selectedClipIds.at(-1) ?? null
+      } else {
+        this.selectedClipId = clipId
+        this.selectedClipIds = [clipId]
+      }
       this.selectedNoteId = null
       this.selectedNoteIds = []
       if (openSheet) {
         this.stemTrackId = null
         this.stemClipId = null
       }
-      this.clipSheet = clipId != null
+      this.clipSheet = Boolean(openSheet && clipId)
     }
+    this.emit()
+  }
+
+  selectRegion(audioIds: string[], midiIds: string[], trackId: string | null, additive = false) {
+    this.selectedClipIds = additive ? uniqueIds([...this.selectedClipIds, ...audioIds]) : audioIds
+    this.selectedMidiClipIds = additive ? uniqueIds([...this.selectedMidiClipIds, ...midiIds]) : midiIds
+    this.selectedClipId = this.selectedClipIds.at(-1) ?? null
+    this.selectedMidiClipId = this.selectedMidiClipIds.at(-1) ?? null
+    if (trackId) this.selectedTrackId = trackId
+    this.clipSheet = false
+    this.emit()
+  }
+
+  selectNotes(ids: string[], additive = false) {
+    this.selectedNoteIds = additive ? uniqueIds([...this.selectedNoteIds, ...ids]) : ids
+    this.selectedNoteId = this.selectedNoteIds.at(-1) ?? null
     this.emit()
   }
 
@@ -347,8 +390,14 @@ export class ProjectStore {
     })
   }
 
-  setTool(tool: 'pointer' | 'stretch') {
-    this.tool = tool
+  /** Active arrangement tool. Shared with the piano roll through `src/state/tools.ts`. */
+  get tool(): ArrangeTool {
+    return activeTool()
+  }
+
+  setTool(tool: ArrangeTool | 'pointer' | 'stretch') {
+    const next: ArrangeTool = tool === 'pointer' ? 'select' : tool === 'stretch' ? 'trim' : tool
+    setActiveTool(next)
     this.emit()
   }
 
@@ -907,23 +956,28 @@ export class ProjectStore {
 
   deleteSelectedClip() {
     this.mutate(() => {
-      if (this.selectedClipId) {
-        for (const track of this.project.tracks) {
-          track.clips = track.clips.filter((c) => c.id !== this.selectedClipId)
-        }
+      const audio = new Set(this.selectedClipIds.length ? this.selectedClipIds : this.selectedClipId ? [this.selectedClipId] : [])
+      if (audio.size) {
+        for (const track of this.project.tracks) track.clips = track.clips.filter((clip) => !audio.has(clip.id))
         this.selectedClipId = null
-      } else if (this.selectedNoteId && this.selectedMidiClipId) {
+        this.selectedClipIds = []
+        return
+      }
+      if (this.selectedNoteIds.length && this.selectedMidiClipId) {
+        const notes = new Set(this.selectedNoteIds)
         for (const track of this.project.tracks) {
-          const clip = track.midiClips.find((c) => c.id === this.selectedMidiClipId)
-          if (clip) clip.notes = clip.notes.filter((n) => n.id !== this.selectedNoteId)
+          const clip = track.midiClips.find((item) => item.id === this.selectedMidiClipId)
+          if (clip) clip.notes = clip.notes.filter((note) => !notes.has(note.id))
         }
         this.selectedNoteId = null
-      } else if (this.selectedMidiClipId) {
-        for (const track of this.project.tracks) {
-          track.midiClips = track.midiClips.filter((c) => c.id !== this.selectedMidiClipId)
-        }
-        this.selectedMidiClipId = null
+        this.selectedNoteIds = []
+        return
       }
+      const midi = new Set(this.selectedMidiClipIds.length ? this.selectedMidiClipIds : this.selectedMidiClipId ? [this.selectedMidiClipId] : [])
+      if (!midi.size) return
+      for (const track of this.project.tracks) track.midiClips = track.midiClips.filter((clip) => !midi.has(clip.id))
+      this.selectedMidiClipId = null
+      this.selectedMidiClipIds = []
     })
   }
 
@@ -1073,6 +1127,182 @@ export class ProjectStore {
       const length = asset?.channels[0].length ?? clip.offsetSamples + clip.durationSamples
       const next = trimAudioClip(clip, edge, sample, length)
       Object.assign(clip, next)
+    })
+  }
+
+  placeAudioClips(moves: { trackId: string; clipId: string; startSample: number }[]) {
+    this.mutate(() => {
+      for (const move of moves) {
+        const clip = this.track(move.trackId)?.clips.find((item) => item.id === move.clipId)
+        if (!clip) continue
+        const start = snapSample(move.startSample, this.project.sampleRate, this.project.tempo, this.project.snap)
+        Object.assign(clip, moveAudioClip(clip, start))
+      }
+    })
+  }
+
+  placeMidiClips(moves: { trackId: string; clipId: string; startBeat: number }[]) {
+    this.mutate(() => {
+      for (const move of moves) {
+        const clip = this.track(move.trackId)?.midiClips.find((item) => item.id === move.clipId)
+        if (!clip) continue
+        clip.startBeat = this.project.snap ? Math.max(0, Math.round(move.startBeat)) : Math.max(0, move.startBeat)
+      }
+    })
+  }
+
+  placeNotes(trackId: string, clipId: string, moves: { id: string; startBeat: number; pitch: number; durationBeats: number }[]) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      const grid = this.project.roll?.grid || 0.25
+      for (const move of moves) {
+        const note = clip.notes.find((item) => item.id === move.id)
+        if (!note) continue
+        const beat = this.project.snap && grid > 0 ? Math.max(0, Math.round(move.startBeat / grid) * grid) : Math.max(0, move.startBeat)
+        Object.assign(note, moveMidiNote(note, beat, move.pitch))
+        Object.assign(note, resizeMidiNote(note, move.durationBeats))
+      }
+    })
+  }
+
+  resizeMidiClip(trackId: string, clipId: string, edge: 'start' | 'end', beat: number, stretch = false) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      const next = stretch ? stretchMidiClip(clip, edge, beat) : trimMidiClip(clip, edge, beat)
+      clip.startBeat = next.startBeat
+      clip.durationBeats = next.durationBeats
+      clip.notes = next.notes
+    })
+  }
+
+  splitAt(trackId: string, clipId: string, atSample: number) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const index = track.clips.findIndex((clip) => clip.id === clipId)
+      if (index >= 0) {
+        const parts = splitAudioClip(track.clips[index], atSample)
+        if (!parts) return
+        track.clips.splice(index, 1, parts[0], parts[1])
+        this.selectedClipId = parts[1].id
+        this.selectedClipIds = [parts[1].id]
+        return
+      }
+      const midiIndex = track.midiClips.findIndex((clip) => clip.id === clipId)
+      if (midiIndex < 0) return
+      const beat = samplesToBeats(atSample, this.project.sampleRate, this.project.tempo)
+      const parts = splitMidiClip(track.midiClips[midiIndex], beat)
+      if (!parts) return
+      track.midiClips.splice(midiIndex, 1, parts[0], parts[1])
+      this.selectedMidiClipId = parts[1].id
+      this.selectedMidiClipIds = [parts[1].id]
+    })
+  }
+
+  drawRegion(trackId: string, startSample: number, endSample: number) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const rate = this.project.sampleRate
+      const tempo = this.project.tempo
+      const a = snapSample(Math.min(startSample, endSample), rate, tempo, this.project.snap)
+      let b = snapSample(Math.max(startSample, endSample), rate, tempo, this.project.snap)
+      const quarter = beatsToSamples(1, rate, tempo)
+      if (b - a < quarter / 4) b = a + quarter
+      this.selectedTrackId = trackId
+      if (track.type === 'midi') {
+        const clip: MidiClip = {
+          id: uid('midi'),
+          name: 'MIDI',
+          startBeat: samplesToBeats(a, rate, tempo),
+          durationBeats: Math.max(0.25, samplesToBeats(b - a, rate, tempo)),
+          notes: [],
+        }
+        track.midiClips.push(clip)
+        this.selectedMidiClipId = clip.id
+        this.selectedMidiClipIds = [clip.id]
+        this.selectedClipId = null
+        this.selectedClipIds = []
+        return
+      }
+      if (track.type !== 'audio') return
+      const duration = Math.max(1, Math.round(b - a))
+      const bufferId = uid('buf')
+      this.buffers.set(bufferId, { id: bufferId, name: 'Clip', sampleRate: rate, channels: [new Float32Array(duration)] })
+      const clip: AudioClip = {
+        id: uid('clip'),
+        name: 'Clip',
+        bufferId,
+        startSample: a,
+        offsetSamples: 0,
+        durationSamples: duration,
+        fadeInSamples: 0,
+        fadeOutSamples: 0,
+        gain: 0.8,
+        source: 'local',
+      }
+      track.clips.push(clip)
+      this.selectedClipId = clip.id
+      this.selectedClipIds = [clip.id]
+      this.selectedMidiClipId = null
+      this.selectedMidiClipIds = []
+    })
+  }
+
+  duplicateSelection() {
+    this.mutate(() => {
+      if (this.selectedNoteIds.length && this.selectedMidiClipId) {
+        const ids = new Set(this.selectedNoteIds)
+        for (const track of this.project.tracks) {
+          const clip = track.midiClips.find((item) => item.id === this.selectedMidiClipId)
+          if (!clip) continue
+          const copies = clip.notes.filter((note) => ids.has(note.id)).map((note) => ({ ...note, id: uid('note'), startBeat: note.startBeat + 1 }))
+          clip.notes.push(...copies)
+          this.selectedNoteIds = copies.map((note) => note.id)
+          this.selectedNoteId = this.selectedNoteIds.at(-1) ?? null
+        }
+        return
+      }
+      const audioIds = new Set(this.selectedClipIds)
+      const midiIds = new Set(this.selectedMidiClipIds)
+      const nextAudio: string[] = []
+      const nextMidi: string[] = []
+      for (const track of this.project.tracks) {
+        for (const clip of [...track.clips]) {
+          if (!audioIds.has(clip.id)) continue
+          const copy: AudioClip = {
+            ...clip,
+            id: uid('clip'),
+            name: `${clip.name} copy`,
+            startSample: clip.startSample + clip.durationSamples,
+            stretch: clip.stretch ? { ...clip.stretch, markers: clip.stretch.markers.map((marker) => ({ ...marker })) } : undefined,
+          }
+          track.clips.push(copy)
+          nextAudio.push(copy.id)
+        }
+        for (const clip of [...track.midiClips]) {
+          if (!midiIds.has(clip.id)) continue
+          const copy: MidiClip = {
+            ...clip,
+            id: uid('midi'),
+            name: `${clip.name} copy`,
+            startBeat: clip.startBeat + clip.durationBeats,
+            notes: clip.notes.map((note) => ({ ...note, id: uid('note') })),
+          }
+          track.midiClips.push(copy)
+          nextMidi.push(copy.id)
+        }
+      }
+      if (nextAudio.length) {
+        this.selectedClipIds = nextAudio
+        this.selectedClipId = nextAudio.at(-1) ?? null
+      }
+      if (nextMidi.length) {
+        this.selectedMidiClipIds = nextMidi
+        this.selectedMidiClipId = nextMidi.at(-1) ?? null
+      }
     })
   }
 
@@ -2864,4 +3094,8 @@ export function seedDemoProject(sampleRate: number, music: Float32Array): { proj
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n))
+}
+
+function uniqueIds(ids: string[]) {
+  return [...new Set(ids)]
 }

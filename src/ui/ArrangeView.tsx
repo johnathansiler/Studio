@@ -3,10 +3,12 @@ import type { AudioEngine } from '../audio/engine'
 import { activeComp } from '../model/comp'
 import { computePeaks } from '../model/demo'
 import { sourceSamplesOf, stretchEdge } from '../audio/stretch/engine'
+import { rectsHit } from '../model/edit'
 import { snapSample } from '../model/time'
 import type { AudioClip } from '../model/types'
 import { ClipSheet } from './ClipSheet'
 import type { ProjectStore } from '../state/store'
+import { activeTool, EDITOR_TOOL_KEYS, subscribeTools } from '../state/tools'
 import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
 import { AddTrackButton } from './AddTrack'
@@ -34,8 +36,32 @@ export function ArrangeView({
   const pxRef = useRef(px)
   pxRef.current = px
   const [position, setPosition] = useState(engine.positionSamples)
+  const [nudge, setNudge] = useState<{ audio: Record<string, number>; midi: Record<string, number> } | null>(null)
+  const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
+  const [ghost, setGhost] = useState<{ trackId: string; left: number; width: number } | null>(null)
+  const [tool, setToolState] = useState(activeTool)
   const scroller = useRef<HTMLDivElement>(null)
+  const innerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => subscribeTools(() => setToolState(activeTool())), [])
   useEffect(() => engine.subscribe(() => setPosition(engine.positionSamples)), [engine])
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
+      const next = EDITOR_TOOL_KEYS[event.key]
+      if (next && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault()
+        store.setTool(next)
+        return
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd' && !event.shiftKey) {
+        event.preventDefault()
+        store.duplicateSelection()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
   useEffect(() => {
     const onZoom = (event: Event) => {
       const factor = (event as CustomEvent<number>).detail
@@ -47,26 +73,48 @@ export function ArrangeView({
   useEffect(() => {
     const el = scroller.current
     if (!el) return
-    let startDist = 0
-    let startPx = pxRef.current
-    const distance = (touches: TouchList) => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY)
-    const start = (event: TouchEvent) => {
-      if (event.touches.length === 2) {
-        startDist = distance(event.touches)
-        startPx = pxRef.current
+    const points = new Map<number, { x: number; y: number }>()
+    let pinch: { dist: number; px: number; left: number; top: number; x: number; y: number } | null = null
+    const pair = () => [...points.values()]
+    const down = (event: PointerEvent) => {
+      points.set(event.pointerId, { x: event.clientX, y: event.clientY })
+      if (points.size !== 2) return
+      const [a, b] = pair()
+      pinch = {
+        dist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+        px: pxRef.current,
+        left: el.scrollLeft,
+        top: el.scrollTop,
+        x: (a.x + b.x) / 2,
+        y: (a.y + b.y) / 2,
       }
     }
-    const move = (event: TouchEvent) => {
-      if (event.touches.length !== 2 || !startDist) return
+    const move = (event: PointerEvent) => {
+      if (!points.has(event.pointerId)) return
+      points.set(event.pointerId, { x: event.clientX, y: event.clientY })
+      if (!pinch || points.size < 2) return
       event.preventDefault()
-      const next = startPx * (distance(event.touches) / startDist)
-      setPx(Math.min(280, Math.max(30, next)))
+      const [a, b] = pair()
+      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1
+      const midX = (a.x + b.x) / 2
+      const midY = (a.y + b.y) / 2
+      setPx(Math.min(280, Math.max(30, pinch.px * (dist / pinch.dist))))
+      el.scrollLeft = pinch.left - (midX - pinch.x)
+      el.scrollTop = pinch.top - (midY - pinch.y)
     }
-    el.addEventListener('touchstart', start, { passive: true })
-    el.addEventListener('touchmove', move, { passive: false })
+    const up = (event: PointerEvent) => {
+      points.delete(event.pointerId)
+      if (points.size < 2) pinch = null
+    }
+    el.addEventListener('pointerdown', down, true)
+    window.addEventListener('pointermove', move, { passive: false })
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
     return () => {
-      el.removeEventListener('touchstart', start)
-      el.removeEventListener('touchmove', move)
+      el.removeEventListener('pointerdown', down, true)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
     }
   }, [])
 
@@ -80,6 +128,179 @@ export function ArrangeView({
     onSeek(snapSample(sample, project.sampleRate, project.tempo, project.snap))
   }
 
+  function sampleAt(clientX: number) {
+    const inner = innerRef.current
+    if (!inner) return 0
+    return ((clientX - inner.getBoundingClientRect().left) / pxRef.current) * project.sampleRate
+  }
+
+  function pointAt(clientX: number, clientY: number) {
+    const inner = innerRef.current
+    if (!inner) return { x: 0, y: 0 }
+    const rect = inner.getBoundingClientRect()
+    return { x: clientX - rect.left, y: clientY - rect.top }
+  }
+
+  const passive = tool === 'box' || tool === 'pencil' || tool === 'pan' || tool === 'zoom'
+
+  function watch(move: (event: PointerEvent) => void, up: (event: PointerEvent) => void) {
+    const end = (event: PointerEvent) => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      up(event)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end)
+  }
+
+  function onTimelineDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return
+    const current = activeTool()
+    const target = event.target as HTMLElement
+    if (target.closest('.clip') && !passive) return
+    if (target.closest('.ruler') && current !== 'pan' && current !== 'zoom') return
+    if (current === 'pan') {
+      const el = scroller.current
+      if (!el) return
+      const originX = event.clientX
+      const originY = event.clientY
+      const left = el.scrollLeft
+      const top = el.scrollTop
+      watch(
+        (ev) => {
+          el.scrollLeft = left - (ev.clientX - originX)
+          el.scrollTop = top - (ev.clientY - originY)
+        },
+        () => undefined,
+      )
+      return
+    }
+    if (current === 'zoom') {
+      const originX = event.clientX
+      const start = pxRef.current
+      watch(
+        (ev) => setPx(Math.min(280, Math.max(30, start * Math.pow(1.004, ev.clientX - originX)))),
+        () => undefined,
+      )
+      return
+    }
+    if (current === 'box') {
+      const origin = pointAt(event.clientX, event.clientY)
+      let box = { left: origin.x, top: origin.y, width: 0, height: 0 }
+      watch(
+        (ev) => {
+          const next = pointAt(ev.clientX, ev.clientY)
+          box = { left: Math.min(origin.x, next.x), top: Math.min(origin.y, next.y), width: Math.abs(next.x - origin.x), height: Math.abs(next.y - origin.y) }
+          setMarquee(box)
+        },
+        (ev) => {
+          setMarquee(null)
+          const inner = innerRef.current
+          if (!inner) return
+          const rect = inner.getBoundingClientRect()
+          const end = pointAt(ev.clientX, ev.clientY)
+          const hit = {
+            left: rect.left + Math.min(origin.x, end.x),
+            right: rect.left + Math.max(origin.x, end.x),
+            top: rect.top + Math.min(origin.y, end.y),
+            bottom: rect.top + Math.max(origin.y, end.y),
+          }
+          const audio: string[] = []
+          const midi: string[] = []
+          let trackId: string | null = null
+          for (const node of inner.querySelectorAll<HTMLElement>('[data-clip]')) {
+            if (!rectsHit(hit, node.getBoundingClientRect())) continue
+            const id = node.dataset.clip
+            if (!id) continue
+            trackId = node.dataset.track || trackId
+            if (node.dataset.midi === '1') midi.push(id)
+            else audio.push(id)
+          }
+          store.selectRegion(audio, midi, trackId, ev.shiftKey)
+        },
+      )
+      return
+    }
+    if (current === 'pencil') {
+      const lane = target.closest('.lane') as HTMLElement | null
+      const trackId = lane?.dataset.track
+      if (!trackId) return
+      const origin = sampleAt(event.clientX)
+      watch(
+        (ev) => {
+          const a = Math.min(origin, sampleAt(ev.clientX))
+          const b = Math.max(origin, sampleAt(ev.clientX))
+          setGhost({ trackId, left: (a / project.sampleRate) * pxRef.current, width: ((b - a) / project.sampleRate) * pxRef.current })
+        },
+        (ev) => {
+          setGhost(null)
+          store.drawRegion(trackId, origin, sampleAt(ev.clientX))
+        },
+      )
+      return
+    }
+    if (current === 'select' && !target.closest('.clip')) {
+      const trackId = (target.closest('.lane') as HTMLElement | null)?.dataset.track || store.selectedTrackId || project.tracks[0]?.id
+      if (trackId) store.selectClip(trackId, null, false, false)
+    }
+  }
+
+  function trimMidi(event: ReactPointerEvent, trackId: string, clipId: string, edge: 'start' | 'end', stretch: boolean) {
+    const clip = project.tracks.find((track) => track.id === trackId)?.midiClips.find((item) => item.id === clipId)
+    if (!clip) return
+    const originX = event.clientX
+    let beat = edge === 'start' ? clip.startBeat : clip.startBeat + clip.durationBeats
+    watch(
+      (ev) => {
+        const delta = ((ev.clientX - originX) / pxRef.current) * (project.tempo / 60)
+        beat = (edge === 'start' ? clip.startBeat : clip.startBeat + clip.durationBeats) + delta
+      },
+      () => store.resizeMidiClip(trackId, clipId, edge, beat, stretch),
+    )
+  }
+
+  function moveSelection(event: ReactPointerEvent, kind: 'audio' | 'midi', trackId: string, clipId: string) {
+    event.stopPropagation()
+    const additive = event.shiftKey || event.metaKey || event.ctrlKey
+    const selected = kind === 'audio' ? store.selectedClipIds : store.selectedMidiClipIds
+    const wasIn = selected.includes(clipId)
+    const ids = !additive ? (wasIn ? [...selected] : [clipId]) : wasIn ? [...selected] : [...selected, clipId]
+    if (additive) {
+      if (!wasIn) store.selectClip(trackId, clipId, kind === 'midi', false, true)
+    } else if (!wasIn) store.selectClip(trackId, clipId, kind === 'midi', false, false)
+    const origins = new Map<string, { trackId: string; at: number }>()
+    for (const track of project.tracks) {
+      if (kind === 'audio') {
+        for (const clip of track.clips) if (ids.includes(clip.id)) origins.set(clip.id, { trackId: track.id, at: clip.startSample })
+      } else {
+        for (const clip of track.midiClips) if (ids.includes(clip.id)) origins.set(clip.id, { trackId: track.id, at: clip.startBeat })
+      }
+    }
+    const originX = event.clientX
+    let delta = 0
+    watch(
+      (ev) => {
+        const samples = ((ev.clientX - originX) / pxRef.current) * project.sampleRate
+        delta = kind === 'audio' ? samples : (samples / project.sampleRate) * (project.tempo / 60)
+        const patch: Record<string, number> = {}
+        for (const id of ids) patch[id] = delta
+        setNudge(kind === 'audio' ? { audio: patch, midi: {} } : { audio: {}, midi: patch })
+      },
+      () => {
+        setNudge(null)
+        if (Math.abs(delta) < (kind === 'audio' ? 1 : 0.01)) {
+          if (additive && wasIn) store.selectClip(trackId, clipId, kind === 'midi', false, true)
+          return
+        }
+        if (kind === 'audio') {
+          store.placeAudioClips([...origins].map(([id, item]) => ({ trackId: item.trackId, clipId: id, startSample: item.at + delta })))
+        } else {
+          store.placeMidiClips([...origins].map(([id, item]) => ({ trackId: item.trackId, clipId: id, startBeat: item.at + delta })))
+        }
+      },
+    )
+  }
+
   const selected = project.tracks.flatMap((track) => track.clips.filter((clip) => clip.id === store.selectedClipId).map((clip) => ({ track, clip })))[0]
   const record = store.recordSettings()
   const selectedFolder = project.tracks.flatMap((track) => track.clips.map((clip) => ({ track, clip }))).find((item) => item.clip.id === store.selectedClipId && item.clip.folder)
@@ -87,16 +308,6 @@ export function ArrangeView({
 
   return (
     <div className="arrange-wrap">
-      <div className="tool-row" role="toolbar" aria-label="Tools">
-        <button
-          type="button"
-          className={store.tool === 'stretch' ? 'on' : ''}
-          aria-pressed={store.tool === 'stretch'}
-          onClick={() => store.setTool(store.tool === 'stretch' ? 'pointer' : 'stretch')}
-        >
-          Stretch
-        </button>
-      </div>
       <div className="rec-bar" role="group" aria-label="Recording">
         <button type="button" className={record.loop ? 'on' : ''} onClick={() => {
           const next = !record.loop
@@ -170,7 +381,7 @@ export function ArrangeView({
           </>
         )}
       </div>
-      <div className="arrange">
+      <div className="arrange" data-tool={tool}>
       <div className="heads">
         <div className="ruler-gap" />
         {project.tracks.map((track) => (
@@ -252,6 +463,8 @@ export function ArrangeView({
       <div
         className="timeline-scroll"
         ref={scroller}
+        style={{ touchAction: 'none' }}
+        onPointerDown={onTimelineDown}
         onWheel={(event) => {
           if (event.ctrlKey || event.metaKey) {
             event.preventDefault()
@@ -259,7 +472,7 @@ export function ArrangeView({
           }
         }}
       >
-        <div className="timeline-inner" style={{ width }}>
+        <div className="timeline-inner" ref={innerRef} data-px={px} style={{ width }}>
           <div
             className="ruler"
             onClick={seekFromEvent}
@@ -297,25 +510,76 @@ export function ArrangeView({
                 store.addMidiClip(track.id, Math.floor(beat))
               }}
             >
+              {ghost?.trackId === track.id && (
+                <div className="clip" data-draw="1" style={{ left: ghost.left, width: Math.max(8, ghost.width), opacity: 0.45, pointerEvents: 'none' }} />
+              )}
               {track.clips.filter((clip) => !clip.slotOnly).map((clip) => (
-                <ClipView key={clip.id} store={store} clip={clip} trackId={track.id} px={px} onSplit={() => store.splitSelected(engine.currentTimelineSample())} />
+                <ClipView
+                  key={clip.id}
+                  store={store}
+                  clip={clip}
+                  trackId={track.id}
+                  px={px}
+                  tool={tool}
+                  shift={nudge?.audio[clip.id] ?? 0}
+                  passive={passive}
+                  onSplitAt={(clientX) => store.splitAt(track.id, clip.id, sampleAt(clientX))}
+                  onSplit={() => store.splitSelected(engine.currentTimelineSample())}
+                  onMove={(event) => moveSelection(event, 'audio', track.id, clip.id)}
+                />
               ))}
               {track.type === 'midi' && track.midiClips.every((clip) => clip.slotOnly) && (
                 <button type="button" className="lane-add" aria-label="Add clip" onClick={() => onOpenPiano(track.id)}>+</button>
               )}
               {track.midiClips.filter((clip) => !clip.slotOnly && clip.scene == null).map((clip) => {
-                const left = ((clip.startBeat * 60) / project.tempo) * px
+                const beat = clip.startBeat + (nudge?.midi[clip.id] ?? 0)
+                const left = ((beat * 60) / project.tempo) * px
                 const widthPx = ((clip.durationBeats * 60) / project.tempo) * px
+                const picked = store.selectedMidiClipIds.includes(clip.id)
                 return (
                   <div
                     key={clip.id}
-                    className={`clip ${store.selectedMidiClipId === clip.id ? 'selected' : ''}`}
-                    style={{ left, width: widthPx, background: track.color }}
-                    onClick={() => onOpenPiano(track.id, clip.id)}
+                    data-clip={clip.id}
+                    data-midi="1"
+                    data-track={track.id}
+                    className={`clip ${picked ? 'selected' : ''}`}
+                    style={{ left, width: widthPx, background: track.color, pointerEvents: passive ? 'none' : undefined }}
+                    onPointerDown={(event) => {
+                      if (tool === 'erase') {
+                        event.stopPropagation()
+                        if (!store.selectedMidiClipIds.includes(clip.id)) store.selectClip(track.id, clip.id, true, false)
+                        store.deleteSelectedClip()
+                        return
+                      }
+                      if (tool === 'split') {
+                        event.stopPropagation()
+                        store.splitAt(track.id, clip.id, sampleAt(event.clientX))
+                        return
+                      }
+                      if (tool === 'trim') {
+                        const edge = (event.target as HTMLElement).dataset.edge
+                        if (edge === 'start' || edge === 'end') {
+                          event.stopPropagation()
+                          trimMidi(event, track.id, clip.id, edge, event.altKey)
+                          return
+                        }
+                        store.selectClip(track.id, clip.id, true, false)
+                        return
+                      }
+                      if (tool !== 'select') return
+                      moveSelection(event, 'midi', track.id, clip.id)
+                    }}
+                    onDoubleClick={() => onOpenPiano(track.id, clip.id)}
                   >
                     <em>
                       {clip.name} · {clip.notes.length} notes
                     </em>
+                    {tool === 'trim' && (
+                      <>
+                        <div className="edge" data-edge="start" />
+                        <div className="edge r" data-edge="end" />
+                      </>
+                    )}
                   </div>
                 )
               })}
@@ -327,13 +591,14 @@ export function ArrangeView({
                     const left = ((clip.startBeat * 60) / project.tempo) * px
                     const widthPx = Math.max(24, ((clip.lengthBeats * 60) / project.tempo) * px)
                     return (
-                      <div key={clip.id} className="clip pattern" style={{ left, width: widthPx, background: pattern?.color || track.color }}>
+                      <div key={clip.id} className="clip pattern" style={{ left, width: widthPx, background: pattern?.color || track.color, pointerEvents: passive ? 'none' : undefined }}>
                         <em>{pattern?.name || 'Pattern'}</em>
                       </div>
                     )
                   })}
             </div>
           ))}
+          {marquee && <div className="marquee" style={marquee} />}
           <div className="playhead" style={{ left: (position / project.sampleRate) * px }} />
         </div>
       </div>
@@ -352,13 +617,35 @@ function laneStyle(track: { clips: AudioClip[] }, selectedId: string | null): { 
   return { height: Math.max(168, 40 + open.folder.lanes.length * 48) }
 }
 
-function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; clip: AudioClip; trackId: string; px: number; onSplit: () => void }) {
+function ClipView({
+  store,
+  clip,
+  trackId,
+  px,
+  tool,
+  shift,
+  passive,
+  onSplitAt,
+  onSplit,
+  onMove,
+}: {
+  store: ProjectStore
+  clip: AudioClip
+  trackId: string
+  px: number
+  tool: string
+  shift: number
+  passive: boolean
+  onSplitAt: (clientX: number) => void
+  onSplit: () => void
+  onMove: (event: ReactPointerEvent) => void
+}) {
   const project = store.project
   const asset = store.buffers.get(clip.bufferId)
   const [preview, setPreview] = useState<AudioClip | null>(null)
   const ghost = store.quantizePreview?.audio.find((item) => item.clipId === clip.id)?.clip
   const shown = preview ?? ghost ?? clip
-  const left = (shown.startSample / project.sampleRate) * px
+  const left = ((shown.startSample + (preview ? 0 : shift)) / project.sampleRate) * px
   const width = Math.max(8, (shown.durationSamples / project.sampleRate) * px)
   const canvas = useRef<HTMLCanvasElement>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
@@ -398,7 +685,7 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
     store.selectClip(trackId, clip.id, false, false)
     const originX = event.clientX
     const originY = event.clientY
-    const stretching = mode !== 'move' && (store.tool === 'stretch' || event.altKey)
+    const stretching = event.altKey
     let latest: AudioClip | null = null
     let held = false
     const timer = window.setTimeout(() => {
@@ -447,11 +734,30 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
   const fadeOut = (shown.fadeOutSamples / project.sampleRate) * px
   return (
     <div
-      className={`clip ${store.selectedClipId === clip.id ? 'selected' : ''} ${clip.folder && store.selectedClipId === clip.id ? 'open' : ''}`}
-      style={{ left, width, background: store.project.tracks.find((t) => t.id === trackId)?.color }}
+      data-clip={clip.id}
+      data-track={trackId}
+      className={`clip ${store.selectedClipIds.includes(clip.id) ? 'selected' : ''} ${clip.folder && store.selectedClipId === clip.id ? 'open' : ''}`}
+      style={{ left, width, background: store.project.tracks.find((t) => t.id === trackId)?.color, pointerEvents: passive ? 'none' : undefined }}
       onPointerDown={(event) => {
-        if ((event.target as HTMLElement).closest('.take-lane')) return
-        pointerDown(event, 'move')
+        if ((event.target as HTMLElement).closest('.take-lane, .edge')) return
+        if (tool === 'erase') {
+          event.stopPropagation()
+          if (!store.selectedClipIds.includes(clip.id)) store.selectClip(trackId, clip.id, false, false)
+          store.deleteSelectedClip()
+          return
+        }
+        if (tool === 'split') {
+          event.stopPropagation()
+          onSplitAt(event.clientX)
+          return
+        }
+        if (tool === 'trim') {
+          event.stopPropagation()
+          store.selectClip(trackId, clip.id, false, false)
+          return
+        }
+        if (tool !== 'select') return
+        onMove(event)
       }}
       onContextMenu={(event) => {
         event.preventDefault()
@@ -527,8 +833,12 @@ function ClipView({ store, clip, trackId, px, onSplit }: { store: ProjectStore; 
       ))}
       {fadeIn > 1 && <div className="fade" style={{ left: 0, width: fadeIn }} />}
       {fadeOut > 1 && <div className="fade" style={{ right: 0, width: fadeOut, transform: 'scaleX(-1)' }} />}
-      <div className="edge" onPointerDown={(event) => pointerDown(event, 'start')} />
-      <div className="edge r" onPointerDown={(event) => pointerDown(event, 'end')} />
+      {tool === 'trim' && (
+        <>
+          <div className="edge" onPointerDown={(event) => pointerDown(event, 'start')} />
+          <div className="edge r" onPointerDown={(event) => pointerDown(event, 'end')} />
+        </>
+      )}
     </div>
   )
 }
