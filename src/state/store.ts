@@ -3,6 +3,7 @@ import { spectralKey, ensureRepair, pushOp, sliceRegion } from '../audio/spectra
 import { learnOffline } from '../audio/spectral/job'
 import type { SpectralAction, SpectralRegion } from '../audio/spectral/types'
 import { scheduleStretchCommit, stretchCacheKey } from '../audio/stretch/commit'
+import { TUNE_INSERT_PRESET } from '../audio/plugins/autoTune'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
 import {
   detectRoot,
@@ -24,6 +25,7 @@ import {
   trimSilence,
   type LoopTake,
 } from '../audio/sample/engine'
+import { assetFromClip, placeLooper, placeSampler, playbackChannel, readSlotPoints, type SlotPoints } from '../audio/sample/slot'
 import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
 import { findCycle, MASTER } from '../audio/routing'
 import { isPackAsset, packToAsset } from '../audio/multisample/persist'
@@ -191,6 +193,8 @@ export class ProjectStore {
   selectedClipIds: string[] = []
   selectedMidiClipId: string | null
   selectedMidiClipIds: string[] = []
+  selectedPatternClipId: string | null = null
+  selectedPatternClipIds: string[] = []
   selectedNoteId: string | null
   selectedNoteIds: string[] = []
   view: WorkspaceView = 'arrange'
@@ -411,6 +415,28 @@ export class ProjectStore {
 
   selectClip(trackId: string, clipId: string | null, midi = false, openSheet = true, additive = false) {
     this.selectedTrackId = trackId
+    const patternHit = !!clipId && (this.project.patternClips ?? []).some((clip) => clip.id === clipId)
+    if (patternHit && clipId) {
+      this.selectedClipId = null
+      this.selectedClipIds = []
+      this.selectedMidiClipId = null
+      this.selectedMidiClipIds = []
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
+      this.clipSheet = false
+      if (additive) {
+        const has = this.selectedPatternClipIds.includes(clipId)
+        this.selectedPatternClipIds = has ? this.selectedPatternClipIds.filter((id) => id !== clipId) : [...this.selectedPatternClipIds, clipId]
+        this.selectedPatternClipId = this.selectedPatternClipIds.at(-1) ?? null
+      } else {
+        this.selectedPatternClipId = clipId
+        this.selectedPatternClipIds = [clipId]
+      }
+      this.emit()
+      return
+    }
+    this.selectedPatternClipId = null
+    this.selectedPatternClipIds = []
     if (midi) {
       this.selectedClipId = null
       this.selectedClipIds = []
@@ -453,10 +479,16 @@ export class ProjectStore {
   }
 
   selectRegion(audioIds: string[], midiIds: string[], trackId: string | null, additive = false) {
-    this.selectedClipIds = additive ? uniqueIds([...this.selectedClipIds, ...audioIds]) : audioIds
-    this.selectedMidiClipIds = additive ? uniqueIds([...this.selectedMidiClipIds, ...midiIds]) : midiIds
+    const known = new Set((this.project.patternClips ?? []).map((clip) => clip.id))
+    const patternIds = [...audioIds, ...midiIds].filter((id) => known.has(id))
+    const audio = audioIds.filter((id) => !known.has(id))
+    const midi = midiIds.filter((id) => !known.has(id))
+    this.selectedClipIds = additive ? uniqueIds([...this.selectedClipIds, ...audio]) : audio
+    this.selectedMidiClipIds = additive ? uniqueIds([...this.selectedMidiClipIds, ...midi]) : midi
+    this.selectedPatternClipIds = additive ? uniqueIds([...this.selectedPatternClipIds, ...patternIds]) : patternIds
     this.selectedClipId = this.selectedClipIds.at(-1) ?? null
     this.selectedMidiClipId = this.selectedMidiClipIds.at(-1) ?? null
+    this.selectedPatternClipId = this.selectedPatternClipIds.at(-1) ?? null
     if (trackId) this.selectedTrackId = trackId
     this.clipSheet = false
     this.emit()
@@ -1069,12 +1101,13 @@ export class ProjectStore {
     this.mutate(() => {
       const list = this.pluginList(trackId)
       if (!list) return
-      list.push(createPlugin(pluginId, preset))
+      const chosen = preset ?? (pluginId === 'tune' ? TUNE_INSERT_PRESET : undefined)
+      list.push(createPlugin(pluginId, chosen))
     })
   }
 
   updatePlugin(trackId: string | 'master', pluginId: string, patch: Partial<PluginInstance>) {
-    this.mutate(() => {
+    const edit = () => {
       const plugin = this.pluginList(trackId)?.find((item) => item.id === pluginId)
       if (!plugin) return
       if (patch.enabled != null) plugin.enabled = patch.enabled
@@ -1083,7 +1116,9 @@ export class ProjectStore {
       if (patch.params) plugin.params = { ...plugin.params, ...patch.params }
       if (patch.sampler) plugin.sampler = patch.sampler
       if (patch.looper) plugin.looper = patch.looper
-    })
+    }
+    if (this.touching) this.draft(edit)
+    else this.mutate(edit)
   }
 
   setSampleBuffer(trackId: string | 'master', pluginId: string, bufferId: string) {
@@ -1091,9 +1126,55 @@ export class ProjectStore {
       const plugin = this.instrument(trackId, pluginId)
       if (!plugin?.sampler) return
       plugin.sampler.bufferId = bufferId
-      const channel = this.buffers.get(bufferId)?.channels[0]
-      if (channel) plugin.sampler.root = detectRoot(channel, this.buffers.get(bufferId)?.sampleRate || this.project.sampleRate)
+      const asset = this.buffers.get(bufferId)
+      const channel = asset?.channels[0]
+      if (asset) plugin.sampler.sourceRate = asset.sampleRate
+      if (channel) plugin.sampler.root = detectRoot(channel, asset?.sampleRate || this.project.sampleRate)
     })
+  }
+
+  /** Put audio in a sampler or looper slot. Samples are stored as given, at their own rate. */
+  loadSlotAudio(trackId: string | 'master', pluginId: string, asset: AudioAsset, mode: 'replace' | 'overdub' = 'replace') {
+    this.mutate(() => {
+      const plugin = this.instrument(trackId, pluginId)
+      if (!plugin || !asset.channels[0]?.length) return
+      const copy: AudioAsset = {
+        id: asset.id || uid('smp'),
+        name: asset.name || 'Sample',
+        sampleRate: asset.sampleRate || this.project.sampleRate,
+        channels: asset.channels.map((channel) => Float32Array.from(channel)),
+      }
+      if (plugin.sampler) {
+        placeSampler(plugin.sampler, copy)
+        this.buffers.set(copy.id, copy)
+        return
+      }
+      if (!plugin.looper) return
+      const stored = placeLooper(plugin.looper, copy, mode, this.project)
+      this.buffers.set(stored.id, stored)
+      plugin.params = { ...plugin.params, transport: plugin.looper.transport }
+    })
+  }
+
+  /** Drag the waveform handles. One undo step covers a whole drag. */
+  setSlotPoints(trackId: string | 'master', pluginId: string, points: SlotPoints) {
+    this.draft(() => {
+      const plugin = this.instrument(trackId, pluginId)
+      const next = readSlotPoints(points)
+      if (plugin?.sampler) Object.assign(plugin.sampler, next)
+      if (plugin?.looper) Object.assign(plugin.looper, next)
+    })
+  }
+
+  /** Copy an arrange clip into the open slot without resampling it. */
+  sendClipToSlot(trackId: string | 'master', pluginId: string, clipTrackId: string, clipId: string) {
+    const clip = this.track(clipTrackId)?.clips.find((item) => item.id === clipId)
+    const asset = clip ? this.buffers.get(clip.bufferId) : undefined
+    if (!clip || !asset) return false
+    const region = assetFromClip(asset, clip, uid('smp'))
+    if (!region) return false
+    this.loadSlotAudio(trackId, pluginId, region, 'replace')
+    return true
   }
 
   editSample(trackId: string | 'master', pluginId: string, op: 'norm' | 'reverse' | 'trim' | 'fade' | 'snap') {
@@ -1173,7 +1254,10 @@ export class ProjectStore {
       const beats = this.project.timeSignature.numerator
       looper.transport = transport
       looper.startBeat = transport >= 2 ? nextBar(beat, beats) : looper.startBeat
-      if (looper.sync) looper.lengthSamples = syncedLoopSamples(looper.bars, this.project.tempo, this.project.sampleRate, beats)
+      if (looper.sync) {
+        const rate = looper.sourceRate && looper.sourceRate > 0 ? looper.sourceRate : this.project.sampleRate
+        looper.lengthSamples = syncedLoopSamples(looper.bars, this.project.tempo, rate, beats)
+      }
       plugin.looper = looper
       plugin.params = { ...plugin.params, transport }
     })
@@ -1184,12 +1268,16 @@ export class ProjectStore {
       const plugin = this.instrument(trackId, pluginId)
       if (!plugin) return
       const looper = plugin.looper ?? emptyLooper()
+      const targetRate = looper.sourceRate && looper.sourceRate > 0 ? looper.sourceRate : this.project.sampleRate
+      const incoming = Float32Array.from(channel)
+      const matched = targetRate === this.project.sampleRate ? incoming : playbackChannel(incoming, this.project.sampleRate, targetRate)
       const id = uid('loop')
-      this.buffers.set(id, { id, name: 'Loop', sampleRate: this.project.sampleRate, channels: [Float32Array.from(channel)] })
+      this.buffers.set(id, { id, name: 'Loop', sampleRate: targetRate, channels: [matched] })
+      looper.sourceRate = targetRate
       looper.layers = [...looper.layers, { id: uid('lyr'), bufferId: id, gain: 1, mute: false, reverse: false, speed: plugin.params.speed || 1 }]
       looper.undone = []
-      looper.lengthSamples = channel.length
-      if (!looper.sync) this.project.tempo = Math.round(tempoFromLoop(channel.length, this.project.sampleRate, this.project.timeSignature.numerator) * 10) / 10
+      looper.lengthSamples = matched.length
+      if (!looper.sync) this.project.tempo = Math.round(tempoFromLoop(matched.length, targetRate, this.project.timeSignature.numerator) * 10) / 10
       plugin.looper = looper
     })
   }
@@ -1225,6 +1313,57 @@ export class ProjectStore {
     })
   }
 
+  /** Cut every loop layer to the start and end handles, and keep the overdubs. */
+  trimLooperWindow(trackId: string | 'master', pluginId: string) {
+    this.mutate(() => {
+      const looper = this.instrument(trackId, pluginId)?.looper
+      if (!looper?.layers.length) return
+      const points = readSlotPoints(looper)
+      if (points.start <= 0.001 && points.end >= 0.999) return
+      const span = Math.max(0.0001, points.end - points.start)
+      let length = 0
+      for (const layer of looper.layers) {
+        const asset = this.buffers.get(layer.bufferId)
+        const lead = asset?.channels[0]
+        if (!asset || !lead?.length) continue
+        const from = Math.min(lead.length - 2, Math.floor(points.start * lead.length))
+        const to = Math.max(from + 2, Math.min(lead.length, Math.floor(points.end * lead.length)))
+        const id = uid('smp')
+        const channels = asset.channels.map((channel) => channel.slice(from, Math.min(channel.length, to)))
+        this.buffers.set(id, { id, name: asset.name, sampleRate: asset.sampleRate, channels })
+        layer.bufferId = id
+        length = channels[0]?.length || length
+      }
+      Object.assign(looper, readSlotPoints({
+        start: 0,
+        end: 1,
+        loopStart: (points.loopStart - points.start) / span,
+        loopEnd: (points.loopEnd - points.start) / span,
+      }))
+      if (length > 0) looper.lengthSamples = length
+    })
+  }
+
+  /** Raise each loop layer without dropping the earlier passes. */
+  normalizeLooper(trackId: string | 'master', pluginId: string) {
+    this.mutate(() => {
+      const looper = this.instrument(trackId, pluginId)?.looper
+      if (!looper?.layers.length) return
+      for (const layer of looper.layers) {
+        const asset = this.buffers.get(layer.bufferId)
+        if (!asset?.channels[0]?.length) continue
+        const id = uid('smp')
+        this.buffers.set(id, {
+          id,
+          name: asset.name,
+          sampleRate: asset.sampleRate,
+          channels: asset.channels.map((channel) => normalizeChannel(channel)),
+        })
+        layer.bufferId = id
+      }
+    })
+  }
+
   bounceLooper(trackId: string, pluginId: string, startSample: number) {
     this.mutate(() => {
       const plugin = this.instrument(trackId, pluginId)
@@ -1239,15 +1378,17 @@ export class ProjectStore {
       const length = looper.lengthSamples || takes[0]?.samples.length || 0
       if (!length) return
       const mixed = mixTakes({ length, takes, undone: [], feedback: looper.feedback })
+      const rate = looper.sourceRate && looper.sourceRate > 0 ? looper.sourceRate : this.project.sampleRate
+      const atProject = rate === this.project.sampleRate ? mixed : playbackChannel(mixed, rate, this.project.sampleRate)
       const id = uid('bounce')
-      this.buffers.set(id, { id, name: 'Loop bounce', sampleRate: this.project.sampleRate, channels: [mixed] })
+      this.buffers.set(id, { id, name: 'Loop bounce', sampleRate: this.project.sampleRate, channels: [atProject] })
       track.clips.push({
         id: uid('clip'),
         name: 'Loop',
         bufferId: id,
         startSample,
         offsetSamples: 0,
-        durationSamples: mixed.length,
+        durationSamples: atProject.length,
         fadeInSamples: 0,
         fadeOutSamples: 0,
         gain: 1,
@@ -1595,6 +1736,15 @@ export class ProjectStore {
     })
   }
 
+  private dropSelectedPatterns() {
+    const patterns = new Set(this.selectedPatternClipIds.length ? this.selectedPatternClipIds : this.selectedPatternClipId ? [this.selectedPatternClipId] : [])
+    if (!patterns.size || !this.project.patternClips) return false
+    this.project.patternClips = this.project.patternClips.filter((clip) => !patterns.has(clip.id))
+    this.selectedPatternClipId = null
+    this.selectedPatternClipIds = []
+    return true
+  }
+
   deleteSelectedClip() {
     this.mutate(() => {
       const audio = new Set(this.selectedClipIds.length ? this.selectedClipIds : this.selectedClipId ? [this.selectedClipId] : [])
@@ -1608,6 +1758,7 @@ export class ProjectStore {
         for (const track of this.project.tracks) track.clips = track.clips.filter((clip) => !audio.has(clip.id))
         this.selectedClipId = null
         this.selectedClipIds = []
+        this.dropSelectedPatterns()
         return
       }
       if (this.selectedNoteIds.length && this.selectedMidiClipId) {
@@ -1621,10 +1772,12 @@ export class ProjectStore {
         return
       }
       const midi = new Set(this.selectedMidiClipIds.length ? this.selectedMidiClipIds : this.selectedMidiClipId ? [this.selectedMidiClipId] : [])
-      if (!midi.size) return
-      for (const track of this.project.tracks) track.midiClips = track.midiClips.filter((clip) => !midi.has(clip.id))
-      this.selectedMidiClipId = null
-      this.selectedMidiClipIds = []
+      if (midi.size) {
+        for (const track of this.project.tracks) track.midiClips = track.midiClips.filter((clip) => !midi.has(clip.id))
+        this.selectedMidiClipId = null
+        this.selectedMidiClipIds = []
+      }
+      this.dropSelectedPatterns()
     })
   }
 
@@ -1808,6 +1961,38 @@ export class ProjectStore {
     })
   }
 
+  placePatternClips(moves: { clipId: string; startBeat: number }[]) {
+    this.mutate(() => {
+      for (const move of moves) {
+        const clip = this.project.patternClips?.find((item) => item.id === move.clipId)
+        if (!clip || clip.scene != null) continue
+        clip.placed = true
+        clip.startBeat = this.project.snap ? Math.max(0, Math.round(move.startBeat)) : Math.max(0, move.startBeat)
+      }
+    })
+  }
+
+  resizePatternClip(clipId: string, edge: 'start' | 'end', beat: number) {
+    this.mutate(() => {
+      const clip = this.project.patternClips?.find((item) => item.id === clipId)
+      if (!clip || clip.scene != null) return
+      const next = snappedClipBeat(this.project, beat)
+      const min = 0.25
+      clip.placed = true
+      if (edge === 'end') {
+        clip.lengthBeats = Math.max(min, next - clip.startBeat)
+        return
+      }
+      const end = clip.startBeat + clip.lengthBeats
+      const offset = clip.offsetBeats || 0
+      const start = Math.max(clip.startBeat - offset, Math.min(next, end - min))
+      const delta = start - clip.startBeat
+      clip.offsetBeats = Math.max(0, offset + delta)
+      clip.startBeat = start
+      clip.lengthBeats = end - start
+    })
+  }
+
   placeNotes(trackId: string, clipId: string, moves: { id: string; startBeat: number; pitch: number; durationBeats: number }[]) {
     this.mutate(() => {
       const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
@@ -1870,6 +2055,8 @@ export class ProjectStore {
         this.selectedMidiClipIds = [clip.id]
         this.selectedClipId = null
         this.selectedClipIds = []
+        this.selectedPatternClipId = null
+        this.selectedPatternClipIds = []
         return
       }
       if (track.type !== 'audio') return
@@ -1893,6 +2080,8 @@ export class ProjectStore {
       this.selectedClipIds = [clip.id]
       this.selectedMidiClipId = null
       this.selectedMidiClipIds = []
+      this.selectedPatternClipId = null
+      this.selectedPatternClipIds = []
     })
   }
 
@@ -1947,6 +2136,25 @@ export class ProjectStore {
       if (nextMidi.length) {
         this.selectedMidiClipIds = nextMidi
         this.selectedMidiClipId = nextMidi.at(-1) ?? null
+      }
+      const patternIds = new Set(this.selectedPatternClipIds)
+      const nextPattern: string[] = []
+      if (this.project.patternClips) {
+        for (const clip of [...this.project.patternClips]) {
+          if (!patternIds.has(clip.id)) continue
+          const copy = {
+            ...clip,
+            id: uid('pcl'),
+            placed: true,
+            startBeat: clip.startBeat + clip.lengthBeats,
+          }
+          this.project.patternClips.push(copy)
+          nextPattern.push(copy.id)
+        }
+      }
+      if (nextPattern.length) {
+        this.selectedPatternClipIds = nextPattern
+        this.selectedPatternClipId = nextPattern.at(-1) ?? null
       }
     })
   }
@@ -3788,13 +3996,22 @@ export class ProjectStore {
     this.mutate(() => {
       const pattern = this.activePattern()
       if (!pattern || !this.project.patternClips) return
-      this.project.patternClips.push({
+      const clip = {
         id: uid('pcl'),
         patternId: pattern.id,
         startBeat: Math.max(0, startBeat),
-        lengthBeats: (pattern.steps * 0.25),
+        lengthBeats: pattern.steps * 0.25,
         scene: null,
-      })
+        placed: true,
+        offsetBeats: 0,
+      }
+      this.project.patternClips.push(clip)
+      this.selectedPatternClipId = clip.id
+      this.selectedPatternClipIds = [clip.id]
+      this.selectedClipId = null
+      this.selectedClipIds = []
+      this.selectedMidiClipId = null
+      this.selectedMidiClipIds = []
     })
   }
 

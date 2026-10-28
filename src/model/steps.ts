@@ -57,6 +57,10 @@ export interface PatternClip {
   lengthBeats: number
   /** Session scene, when placed in a clip slot. */
   scene: number | null
+  /** Set when someone places the clip. The old automatic clip has no flag. */
+  placed?: boolean
+  /** Beats into the pattern hidden by trimming the left edge. */
+  offsetBeats?: number
 }
 
 export interface RenderedHit {
@@ -265,12 +269,72 @@ export function clonePattern(pattern: BeatPattern, name: string): BeatPattern {
   }
 }
 
+function cellMatches(cell: StepCell | undefined, factory: StepCell): boolean {
+  const value = { ...emptyCell(), ...cell }
+  return value.on === factory.on
+    && value.velocity === factory.velocity
+    && value.pan === factory.pan
+    && value.pitch === factory.pitch
+    && value.fine === factory.fine
+    && value.gate === factory.gate
+    && (value.nudge || 0) === (factory.nudge || 0)
+}
+
+/** The untouched starter, still sitting on the automatic arrangement clip. */
+export function isFactoryPattern(pattern: BeatPattern): boolean {
+  if (pattern.name !== 'Pattern 1' || pattern.color !== '#73c48f' || pattern.steps !== 16 || pattern.swing !== 0) return false
+  if (pattern.channels.length !== KIT.length) return false
+  return pattern.channels.every((channel, index) => {
+    const factory = makeChannel(KIT[index], 16)
+    if (channel.name !== factory.name || channel.kind !== factory.kind || channel.note !== factory.note) return false
+    if (channel.color !== factory.color || channel.volume !== factory.volume || channel.pan !== factory.pan) return false
+    if (channel.mute || channel.solo || channel.output != null || channel.sampleId != null) return false
+    if (channel.steps !== 16 || channel.swing != null) return false
+    const count = Math.max(channel.cells?.length ?? 0, factory.cells.length)
+    for (let step = 0; step < count; step++) {
+      if (!cellMatches(channel.cells?.[step], factory.cells[step] ?? emptyCell())) return false
+    }
+    return true
+  })
+}
+
+function isAutoSeedClip(beats: BeatRack, clip: PatternClip): boolean {
+  if (clip.placed || clip.scene != null) return false
+  if (Math.abs(clip.offsetBeats || 0) > 1e-6) return false
+  if (Math.abs(clip.startBeat) > 1e-6 || Math.abs(clip.lengthBeats - 16 * STEP_BEAT) > 1e-6) return false
+  const pattern = beats.patterns.find((item) => item.id === clip.patternId)
+  return !!pattern && isFactoryPattern(pattern)
+}
+
+/**
+ * Drop the one arrangement clip normalizeBeats used to insert with a new rack.
+ * A placed flag, any pattern edit, a move, a trim, a session slot, or a second
+ * copy at the same spot all stay. The rack itself is never removed.
+ */
+export function settlePatternClips(beats: BeatRack, clips: PatternClip[]): PatternClip[] {
+  const seeds = clips.filter((clip) => isAutoSeedClip(beats, clip))
+  const dropId = seeds.length === 1 ? seeds[0].id : null
+  const kept: PatternClip[] = []
+  for (const clip of clips) {
+    if (clip.id === dropId) continue
+    if (!clip.placed) clip.placed = true
+    kept.push(clip)
+  }
+  return kept
+}
+
+/** Pattern beats heard by one arrangement clip, after a left-edge trim. */
+export function patternPlayRange(clip: PatternClip): { from: number; to: number } {
+  const from = Math.max(0, clip.offsetBeats || 0)
+  return { from, to: from + Math.max(0, clip.lengthBeats) }
+}
+
 export function normalizeBeats(beats: BeatRack | undefined, clips: PatternClip[] | undefined): { beats: BeatRack; patternClips: PatternClip[] } {
   if (!beats?.patterns?.length) {
     const pattern = starterPattern()
     return {
       beats: { activeId: pattern.id, patterns: [pattern] },
-      patternClips: [{ id: uid('pcl'), patternId: pattern.id, startBeat: 0, lengthBeats: 4, scene: null }],
+      patternClips: [],
     }
   }
   for (const pattern of beats.patterns) {
@@ -283,5 +347,5 @@ export function normalizeBeats(beats: BeatRack | undefined, clips: PatternClip[]
     }
   }
   if (!beats.patterns.some((pattern) => pattern.id === beats.activeId)) beats.activeId = beats.patterns[0].id
-  return { beats, patternClips: clips ?? [] }
+  return { beats, patternClips: settlePatternClips(beats, clips ?? []) }
 }

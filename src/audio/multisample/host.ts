@@ -3,7 +3,16 @@ import type { StripNodes } from '../strips'
 import { SampleCache } from './cache'
 import { SamplerInstrument, renderSampler, type SamplerNote } from './engine'
 import { isPackAsset, packFromAsset } from './persist'
-import type { SamplePack } from './types'
+import type { SamplePack, SampleRef } from './types'
+
+type FetchLike = (input: string, init?: { headers?: Record<string, string> }) => Promise<Response>
+
+export interface PrepareResult {
+  /** Notes whose attack samples all failed. */
+  missing: number
+  /** Notes that selected at least one attack sample. */
+  sounding: number
+}
 
 interface Queued {
   pitch: number
@@ -27,6 +36,8 @@ interface Live {
 export class LibraryHost {
   private readonly lives = new Map<string, Live>()
   private readonly pending = new Map<string, Queued[]>()
+
+  constructor(private readonly fetchImpl?: FetchLike) {}
 
   sync(ctx: AudioContext, project: Project, strips: Map<string, StripNodes>, assetOf: (id: string) => { id: string; name?: string; sampleRate: number; channels: Float32Array[] } | undefined) {
     const phone = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
@@ -76,25 +87,42 @@ export class LibraryHost {
     for (const sample of samples) cache.holdAudio(sample.id, { sampleRate: sample.sampleRate, channels: sample.channels })
   }
 
-  async prepare(trackId: string, track: Track, events: SamplerNote[], sampleRate: number) {
+  /**
+   * Load every sample the notes will actually play, including later round-robins.
+   * A note counts as missing only when none of its attack samples decode.
+   */
+  async prepare(trackId: string, track: Track, events: SamplerNote[], sampleRate: number): Promise<PrepareResult> {
     const program = track.library
-    if (!program) return
+    if (!program) return { missing: 0, sounding: 0 }
     const live = this.ensure(trackId, sampleRate)
-    live.instrument.setProgram(program)
-    const ids = new Set<string>()
-    for (const event of events) {
-      if (event.vel <= 0) continue
-      for (const layer of live.instrument.preview(event.pitch, event.vel)) ids.add(layer.sample.id)
+    if (live.instrument.program !== program) live.instrument.setProgram(program)
+    const planned = live.instrument.plan(events)
+    const sounding = planned.length
+    const samples = new Map<string, SampleRef>()
+    for (const note of planned) {
+      for (const sample of note.samples) samples.set(sample.id, sample)
     }
-    await Promise.all([...ids].map(async (id) => {
-      const sample = program.samples.find((item) => item.id === id)
-      if (!sample?.url) return
+    const failed = new Set<string>()
+    await Promise.all([...samples.values()].map(async (sample) => {
+      if (!sample.url) {
+        const held = live.cache.get(sample)
+        if (held?.channels.some((channel) => channel.length > 0)) return
+        if (sample.bufferId || sample.packId) return
+        failed.add(sample.id)
+        return
+      }
       try {
-        await live.cache.load(sample)
+        const decoded = await live.cache.load(sample)
+        if (!decoded?.channels.some((channel) => channel.length > 0)) failed.add(sample.id)
       } catch {
-        /* a missing starter file stays silent */
+        failed.add(sample.id)
       }
     }))
+    let missing = 0
+    for (const note of planned) {
+      if (note.attackIds.length > 0 && note.attackIds.every((id) => failed.has(id))) missing += 1
+    }
+    return { missing, sounding }
   }
 
   renderOffline(trackId: string, track: Track, events: SamplerNote[], sampleRate: number, length: number) {
@@ -120,7 +148,7 @@ export class LibraryHost {
       }
       return found
     }
-    const cache = new SampleCache()
+    const cache = new SampleCache(this.fetchImpl)
     const live: Live = {
       instrument: new SamplerInstrument(sampleRate, cache),
       cache,

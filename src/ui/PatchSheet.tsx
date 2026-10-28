@@ -1,5 +1,7 @@
 import { useEffect, useState, type PointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
+import { STARTER_CATALOG, type LibraryEntry } from '../audio/multisample/library'
+import { loadStarterOnto, starterCatalog } from '../sounds/instruments'
 import { detectRoot } from '../audio/sample/engine'
 import {
   LAYER_KINDS,
@@ -34,7 +36,18 @@ const TABS = [
 const KEYS = [60, 62, 64, 65, 67, 69, 71, 72]
 const NAMES = ['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C']
 
-export function PatchSheet({ store, engine, trackId }: { store: ProjectStore; engine: AudioEngine; trackId: string }) {
+export function PatchSheet({
+  store,
+  engine,
+  trackId,
+  initialCatalog,
+}: {
+  store: ProjectStore
+  engine: AudioEngine
+  trackId: string
+  /** Tests pass the catalog so the Load menu renders without the network. */
+  initialCatalog?: LibraryEntry[]
+}) {
   const track = store.track(trackId)
   const patch = track?.omniPatch
   const [tab, setTab] = useState<(typeof TABS)[number][0]>('layers')
@@ -42,9 +55,37 @@ export function PatchSheet({ store, engine, trackId }: { store: ProjectStore; en
   const [routeId, setRouteId] = useState('')
   const [more, setMore] = useState(false)
   const [hint, setHint] = useState(controlHelp('tabLayers'))
+  const [starters, setStarters] = useState<LibraryEntry[]>(initialCatalog ?? STARTER_CATALOG)
+  useEffect(() => {
+    if (initialCatalog) return
+    let alive = true
+    void starterCatalog().then((next) => {
+      if (alive) setStarters(next)
+    }).catch(() => undefined)
+    return () => { alive = false }
+  }, [initialCatalog])
   useEffect(() => () => {
     for (const note of KEYS) engine.previewPatch(trackId, note, false)
   }, [engine, trackId])
+  async function loadChoice(value: string) {
+    if (value.startsWith('starter:')) {
+      const entry = starters.find((item) => item.id === value.slice('starter:'.length))
+      if (!entry) return
+      setHint(`Downloading ${entry.name} from Hugging Face…`)
+      try {
+        const imported = await loadStarterOnto(entry, trackId, {
+          setLibrary: (id, program) => store.setLibrary(id, program),
+          holdLibraryPack: (id, pack) => engine.holdLibraryPack(id, pack),
+          auditionLibrary: (id, pitch) => engine.auditionLibrary(id, pitch),
+        })
+        setHint(`${imported.program.name} is on this track. Samples stream from Hugging Face.`)
+      } catch (error) {
+        setHint(error instanceof Error ? error.message : 'Download failed')
+      }
+      return
+    }
+    if (value) store.loadOmniPatch(trackId, value)
+  }
   if (!track || !patch) return null
   const layer = patch.layers.find((item) => item.id === layerId) ?? patch.layers[0]
   const route = patch.routes.find((item) => item.id === routeId) ?? patch.routes[0]
@@ -70,12 +111,19 @@ export function PatchSheet({ store, engine, trackId }: { store: ProjectStore; en
         <button type="button" className="text-btn" title={controlHelp('name')} onClick={() => store.saveOmniPatch(trackId)}>Save</button>
         <select
           aria-label="Load patch"
-          title={controlHelp('name')}
+          title="Load a starter instrument or a saved patch. Starter instruments play from Hugging Face."
           value=""
-          onChange={(event) => event.target.value && store.loadOmniPatch(trackId, event.target.value)}
+          onChange={(event) => { if (event.target.value) void loadChoice(event.target.value) }}
         >
           <option value="">Load</option>
-          {(store.project.omniLibrary ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          <optgroup label="Starter instruments">
+            {starters.map((item) => <option key={item.id} value={`starter:${item.id}`} title={item.description}>{item.name}</option>)}
+          </optgroup>
+          {(store.project.omniLibrary ?? []).length > 0 && (
+            <optgroup label="Saved patches">
+              {(store.project.omniLibrary ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </optgroup>
+          )}
         </select>
         <button type="button" className="text-btn" onClick={() => store.openPatch(trackId)} aria-label="Close patch">Close</button>
       </header>

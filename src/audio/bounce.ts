@@ -2,7 +2,7 @@ import { createPlugin } from './plugins/catalog'
 import { loadModule, peekModule } from './plugins/registry'
 import { renderGraph, type GraphTrack } from './renderGraph'
 import { prepareClipNotes } from '../model/midiTools'
-import { scaleById } from '../model/scale'
+import { tuneBlockScale } from './plugins/autoTune'
 import { beatsToSamples, projectEndSample } from '../model/time'
 import { makeTrack, uid, type AudioAsset, type AudioClip, type PluginInstance, type Project, type Track } from '../model/types'
 import { encodeWav, linearResample, type DitherMode, type WavBits } from '../model/wav'
@@ -213,7 +213,7 @@ export function applyFreeze(project: Project, buffers: Map<string, AudioAsset>, 
 
 async function renderChannels(project: Project, assets: Map<string, AudioAsset>, start: number, length: number, limiter: boolean, stemId: string | null) {
   await ensurePlugins(project)
-  const scale = scaleById(project.scale?.scale)
+  const scale = tuneBlockScale(project.scale)
   const routed = routeForStem(project.tracks, stemId)
   let masterPlugins = project.masterPlugins.map(copyPlugin)
   let masterVolume = project.masterVolume
@@ -250,8 +250,9 @@ async function renderChannels(project: Project, assets: Map<string, AudioAsset>,
     tempo: project.tempo,
     tempoMap: project.tempoMap,
     length,
-    scaleRoot: project.scale?.root ?? 0,
-    scaleIntervals: scale.intervals,
+    scaleRoot: scale.scaleRoot,
+    scaleIntervals: scale.scaleIntervals,
+    scaleCents: scale.scaleCents,
     automation: project.automation,
     liveRemote: false,
     create: (pluginId, sampleRate) => peekModule(pluginId)?.create(sampleRate) ?? passthrough(),

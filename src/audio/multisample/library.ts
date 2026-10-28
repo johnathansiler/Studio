@@ -10,6 +10,8 @@ export interface LibraryEntry {
   path: string
   bytes: number
   description: string
+  category?: string
+  tags?: string[]
 }
 
 /**
@@ -96,7 +98,7 @@ export function sampleUrl(preset: string, samplePath: string) {
 }
 
 function named(program: SamplerProgram, entry: LibraryEntry): SamplerProgram {
-  return { ...program, name: program.name || entry.name, license: entry.license }
+  return { ...program, id: entry.id, name: entry.name || program.name, license: entry.license }
 }
 
 function parseCatalog(value: unknown): LibraryEntry[] {
@@ -108,6 +110,10 @@ function parseCatalog(value: unknown): LibraryEntry[] {
     if (typeof row.id !== 'string' || typeof row.name !== 'string' || typeof row.path !== 'string') continue
     if (!LICENSES.has(row.license as SampleLicense)) continue
     if (row.path.includes('..') || row.path.startsWith('/')) continue
+    const tags = Array.isArray((row as { tags?: unknown }).tags)
+      ? (row as { tags: unknown[] }).tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0).map((tag) => tag.trim())
+      : []
+    const category = typeof (row as { category?: unknown }).category === 'string' ? (row as { category: string }).category.trim() : ''
     entries.push({
       id: row.id,
       name: row.name,
@@ -115,6 +121,8 @@ function parseCatalog(value: unknown): LibraryEntry[] {
       path: row.path,
       bytes: typeof row.bytes === 'number' ? row.bytes : 0,
       description: typeof row.description === 'string' ? row.description : '',
+      category: category || undefined,
+      tags: tags.length ? tags : undefined,
     })
   }
   return entries

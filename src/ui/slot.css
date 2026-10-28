@@ -1,0 +1,56 @@
+.slot-panel { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.slot-panel .row { flex-wrap: wrap; }
+.slot-wave { position: relative; height: 72px; border-radius: 8px; background: #14241b; touch-action: none; }
+.slot-wave canvas { width: 100%; height: 100%; display: block; }
+.slot-wave .slot-shade { position: absolute; top: 0; bottom: 0; background: rgba(8, 16, 12, 0.55); pointer-events: none; }
+.slot-loop { position: absolute; top: 0; bottom: 0; background: rgba(224, 177, 90, 0.16); pointer-events: none; }
+.slot-handle {
+  position: absolute;
+  width: 28px;
+  margin-left: -14px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  touch-action: none;
+  z-index: 2;
+}
+.slot-handle.edge { top: 0; height: 54%; }
+.slot-handle.loop { top: 46%; height: 54%; z-index: 3; }
+.slot-handle i {
+  position: absolute;
+  left: 13px;
+  width: 2px;
+  border-radius: 2px;
+  background: #d7ecdf;
+  pointer-events: none;
+}
+.slot-handle.edge i { top: 3px; bottom: 0; }
+.slot-handle.loop i { top: 0; bottom: 3px; background: #e0b15a; }
+.slot-handle.on { z-index: 4; }
+.slot-handle.on i { width: 4px; left: 12px; background: #f4fff7; }
+.shell.phone .slot-handle,
+.shell.fold .slot-handle { width: 36px; margin-left: -18px; }
+.shell.phone .slot-handle i,
+.shell.fold .slot-handle i { left: 17px; }
+.shell.phone .slot-handle.on i,
+.shell.fold .slot-handle.on i { left: 16px; }
+.slot-active { position: absolute; left: 8px; top: 6px; z-index: 5; text-shadow: 0 1px 2px #07110c; }
+.slot-meter { height: 8px; border-radius: 99px; background: #1c2c23; overflow: hidden; }
+.slot-meter span { display: block; height: 100%; background: #73c48f; width: 0; }
+.slot-status { margin: 0; color: #d7ecdf; font-size: 13px; }
+.slot-upload { position: relative; overflow: hidden; display: inline-flex; }
+.slot-panel .slot-file {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  font-size: 16px;
+  cursor: pointer;
+}
+.slot-panel .pads { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.slot-panel .pads.keys { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+.shell.phone .slot-panel .pads button,
+.shell.phone .slot-panel .text-btn,
+.shell.fold .slot-panel .pads button,
+.shell.fold .slot-panel .text-btn { min-height: 44px; }
