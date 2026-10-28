@@ -1,5 +1,5 @@
 import { DRUM_PADS, type DrumKind as PadKind } from './drums'
-import { clampStepCount, emptyCell, type BeatPattern, type DrumKind, type StepCell, type StepChannel } from './steps'
+import { clampStepCount, emptyCell, STEP_BEAT, stepIndexAt, type BeatPattern, type DrumKind, type StepCell, type StepChannel } from './steps'
 import { uid } from './types'
 
 /** Pattern lengths the channel rack offers, in sixteenth notes. */
@@ -7,7 +7,14 @@ export const RACK_LENGTHS = [16, 32, 64] as const
 
 export const RACK_COLORS = ['#ef6b6b', '#e0b15a', '#f09a6a', '#79b8d4', '#c58be0', '#73c48f', '#8fd0c6', '#d98baf']
 
-export type GraphMode = 'velocity' | 'pitch'
+export type GraphMode = 'velocity' | 'pan' | 'pitch' | 'gate'
+
+export const GRAPH_LABELS: Record<GraphMode, string> = {
+  velocity: 'Velocity',
+  pan: 'Pan',
+  pitch: 'Pitch',
+  gate: 'Gate',
+}
 
 export interface RackChoice {
   name: string
@@ -93,14 +100,35 @@ export function stepGroups(count: number) {
   return groups
 }
 
-/** 0 is the bottom of a graph bar, 1 is the top. Pitch 0 sits in the middle. */
-export function graphRatio(mode: GraphMode, cell: Pick<StepCell, 'velocity' | 'pitch'>) {
+/** Steps past a channel's own loop are dim. The last in-loop step wears the loop mark. */
+export function stepLooks(index: number, channelSteps: number, patternSteps: number) {
+  const loop = clampStepCount(channelSteps || patternSteps)
+  return {
+    past: index >= loop,
+    loop: loop < patternSteps && index === loop - 1,
+  }
+}
+
+/** Playhead inside one channel. A muted or soloed-out row stays dark. Shorter rows wrap. */
+export function rackPlayIndex(beat: number, steps: number, swing: number, audible: boolean) {
+  if (!audible) return -1
+  return stepIndexAt(beat, steps, STEP_BEAT, swing)
+}
+
+type GraphCell = Pick<StepCell, 'velocity' | 'pan' | 'pitch' | 'gate'>
+
+/** 0 is the bottom of a graph bar, 1 is the top. Pan and pitch sit in the middle at 0. */
+export function graphRatio(mode: GraphMode, cell: GraphCell) {
   if (mode === 'velocity') return Math.max(0, Math.min(1, (cell.velocity - 0.05) / 0.95))
+  if (mode === 'gate') return Math.max(0, Math.min(1, (cell.gate - 0.05) / 0.95))
+  if (mode === 'pan') return Math.max(0, Math.min(1, (cell.pan + 1) / 2))
   return Math.max(0, Math.min(1, (cell.pitch + 12) / 24))
 }
 
-export function valueFromRatio(mode: GraphMode, ratio: number): Partial<Pick<StepCell, 'velocity' | 'pitch'>> {
+export function valueFromRatio(mode: GraphMode, ratio: number): Partial<GraphCell> {
   const t = Math.max(0, Math.min(1, ratio))
   if (mode === 'velocity') return { velocity: Math.round((0.05 + t * 0.95) * 100) / 100 }
+  if (mode === 'gate') return { gate: Math.round((0.05 + t * 0.95) * 100) / 100 }
+  if (mode === 'pan') return { pan: Math.round((-1 + t * 2) * 100) / 100 }
   return { pitch: Math.round(-12 + t * 24) }
 }

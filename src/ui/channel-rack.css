@@ -20,15 +20,20 @@
 }
 
 .shell.phone .beats.channel-rack {
-  --lead: 196px;
+  --lead: 172px;
   --step: 40px;
   --step-h: 44px;
 }
 
 .shell.phone.land .beats.channel-rack {
-  --lead: 176px;
+  --lead: 168px;
   --step: 36px;
   --step-h: 40px;
+}
+
+.shell.phone .beats.channel-rack .rack-name {
+  padding: 0 6px;
+  font-size: 14px;
 }
 
 .rack-bar,
@@ -105,6 +110,19 @@
   border-color: transparent;
 }
 
+.rack-tool {
+  flex: none;
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .rack-swing,
 .rack-field {
   display: flex;
@@ -112,7 +130,7 @@
   gap: 6px;
   flex: 1 1 150px;
   min-width: 0;
-  max-width: 100%;
+  max-width: 240px;
 }
 
 .rack-swing input[type='range'] {
@@ -178,6 +196,24 @@
   position: relative;
 }
 
+.rack-mute {
+  display: grid;
+  place-items: center;
+}
+
+.rack-mute::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #243028;
+}
+
+.rack-mute.live::after {
+  background: #f4fff7;
+  box-shadow: 0 0 6px #f4fff7;
+}
+
 .shell.phone .beats.channel-rack .rack-mute,
 .shell.phone .beats.channel-rack .rack-knob,
 .shell.phone .beats.channel-rack .rack-step,
@@ -229,6 +265,46 @@
   white-space: nowrap;
 }
 
+.rack-name.on {
+  background: #24382c;
+  box-shadow: inset 3px 0 0 currentColor;
+}
+
+.rack-ruler {
+  margin-bottom: 0;
+}
+
+.rack-ruler .rack-lead {
+  height: 16px;
+  min-height: 0;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rack-tick {
+  width: var(--step);
+  height: 12px;
+  flex: 0 0 var(--step);
+  position: relative;
+}
+
+.rack-tick[data-beat]::before {
+  content: attr(data-beat);
+  position: absolute;
+  left: 0;
+  top: -1px;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rack-steps .rack-group:nth-child(4n + 1) .rack-tick[data-beat]::before {
+  color: var(--text);
+  font-weight: 700;
+}
+
 .rack-steps {
   display: flex;
   flex-wrap: nowrap;
@@ -268,6 +344,14 @@
   border-color: transparent;
 }
 
+.rack-step.past {
+  opacity: 0.32;
+}
+
+.rack-step.loop {
+  box-shadow: inset -3px 0 0 var(--accent);
+}
+
 .rack-step.now {
   outline: 2px solid #f4f7f1;
   outline-offset: -2px;
@@ -287,15 +371,18 @@
   gap: 4px;
 }
 
-.rack-modes {
-  display: flex;
-  gap: 4px;
+.rack-graph-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.rack-modes button {
-  flex: 1 1 0;
+.rack-graph select {
+  width: 100%;
   min-width: 0;
-  padding: 0 4px;
   min-height: 28px;
 }
 
@@ -316,7 +403,16 @@
   pointer-events: none;
 }
 
-.rack-graph[data-mode='pitch'] .rack-bar-step::before {
+.rack-bar-step.off span {
+  opacity: 0.18;
+}
+
+.rack-bar-step.past span {
+  opacity: 0.2;
+}
+
+.rack-graph[data-mode='pitch'] .rack-bar-step::before,
+.rack-graph[data-mode='pan'] .rack-bar-step::before {
   content: '';
   position: absolute;
   left: 0;
@@ -369,6 +465,8 @@
 .shell.phone .beats.channel-rack .rack-extras button,
 .shell.phone .beats.channel-rack .rack-add,
 .shell.phone .beats.channel-rack .rack-picker button,
-.shell.phone .beats.channel-rack .rack-name {
+.shell.phone .beats.channel-rack .rack-name,
+.shell.phone .beats.channel-rack select,
+.shell.phone .beats.channel-rack input {
   min-height: 44px;
 }

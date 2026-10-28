@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import {
+  GRAPH_LABELS,
   graphRatio,
   kitChoices,
   libraryChoice,
+  rackPlayIndex,
   RACK_COLORS,
   stepGroups,
+  stepLooks,
   valueFromRatio,
   type GraphMode,
   type RackChoice,
 } from '../model/channelRack'
-import { stepIndexAt, type StepCell, type StepChannel } from '../model/steps'
+import { type StepCell, type StepChannel } from '../model/steps'
 import { samplesToBeats } from '../model/time'
 import { fetchSoundBytes } from '../sounds/cache'
 import { catalogMessage, loadSoundCatalog } from '../sounds/catalog'
@@ -20,6 +23,7 @@ import type { SoundEntry } from '../sounds/types'
 import { selectBeats } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { BEAT_BAR, BEAT_ROW, BEAT_SHEET, copyOf, described } from './chrome'
+import { useFormFactor } from './form'
 import { TipButton } from './Hint'
 import './channel-rack.css'
 
@@ -42,6 +46,19 @@ function usePlaySample(engine: RackEngine) {
     return engine.subscribe(read)
   }, [engine])
   return live ?? engine.positionSamples
+}
+
+function graphBounds(mode: GraphMode) {
+  if (mode === 'pan') return { min: -1, max: 1 }
+  if (mode === 'pitch') return { min: -12, max: 12 }
+  return { min: 0.05, max: 1 }
+}
+
+function graphNow(mode: GraphMode, cell: Pick<StepCell, 'velocity' | 'pan' | 'pitch' | 'gate'>) {
+  if (mode === 'pan') return cell.pan
+  if (mode === 'pitch') return cell.pitch
+  if (mode === 'gate') return cell.gate
+  return cell.velocity
 }
 
 function knobAngle(value: number, min: number, max: number) {
@@ -173,16 +190,26 @@ function StepButtons({
           {group.map((index) => {
             const cell = cells[index]
             const on = !!cell?.on
+            const look = stepLooks(index, channel.steps, count)
+            const now = playStep === index
+            const className = [
+              'rack-step',
+              on ? 'on' : '',
+              now ? 'now' : '',
+              look.past ? 'past' : '',
+              look.loop ? 'loop' : '',
+            ].filter(Boolean).join(' ')
+            const action = look.past ? 'Outside this row\'s loop. Tap to extend it and add a hit.' : 'Tap to add a hit.'
             return (
               <button
                 key={index}
                 type="button"
                 data-index={index}
-                className={`rack-step${on ? ' on' : ''}${playStep === index ? ' now' : ''}`}
+                className={className}
                 style={on ? { background: channel.color } : undefined}
-                aria-label={`${channel.name} step ${index + 1}. Tap to add a hit.`}
+                aria-label={`${channel.name} step ${index + 1}. ${action}`}
                 aria-pressed={on}
-                aria-current={playStep === index ? 'step' : undefined}
+                aria-current={now ? 'step' : undefined}
               />
             )
           })}
@@ -207,6 +234,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
   const [library, setLibrary] = useState<SoundEntry[]>([])
   const [libraryNote, setLibraryNote] = useState('')
   const asked = useRef(false)
+  const phone = useFormFactor() === 'phone'
   const bar = (id: string) => copyOf(BEAT_BAR, id)
   const rowCopy = (id: string) => copyOf(BEAT_ROW, id)
   const sheet = (id: string) => copyOf(BEAT_SHEET, id)
@@ -216,8 +244,12 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
   const pickedCell = picked ? pattern.channels.find((row) => row.id === picked.channelId)?.cells[picked.index] : undefined
   const outputs = project.tracks.filter((track) => track.type === 'bus' || track.type === 'group' || track.type === 'midi')
   const beat = samplesToBeats(sample, project.sampleRate, project.tempo)
-  const playStep = stepIndexAt(beat, pattern.steps, 0.25, pattern.swing)
   const count = pattern.steps
+  const soloed = pattern.channels.some((row) => row.solo)
+  const toolName = graph ? `Graph · ${GRAPH_LABELS[graphMode]}` : 'Paint'
+  const toolHint = graph
+    ? `${focus?.name ?? 'Channel'}. Drag a bar to set ${GRAPH_LABELS[graphMode].toLowerCase()}.`
+    : `${focus?.name ?? 'Channel'}. Tap a step to add or remove a hit.`
 
   function paint(channel: StepChannel, index: number, on: boolean) {
     setGraphId(channel.id)
@@ -261,13 +293,33 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
 
   function graphAt(index: number, event: ReactPointerEvent<HTMLDivElement>) {
     if (!focus) return
+    setPicked({ channelId: focus.id, index })
     const box = event.currentTarget.getBoundingClientRect()
     const ratio = box.height > 0 ? 1 - (event.clientY - box.top) / box.height : 0
     store.editStep(focus.id, index, valueFromRatio(graphMode, ratio), true)
   }
 
+  function placePattern() {
+    store.placePattern(Math.max(0, Math.floor(beat)))
+  }
+
+  const swing = (
+    <label className="rack-swing" title={bar('swing').hint}>
+      <span>Swing</span>
+      <input
+        {...described(bar('swing'))}
+        type="range"
+        min={0}
+        max={0.6}
+        step={0.01}
+        value={pattern.swing}
+        onChange={(event) => store.setPatternSwing(Number(event.target.value))}
+      />
+    </label>
+  )
+
   return (
-    <div className="beats channel-rack" data-length={count}>
+    <div className="beats channel-rack" data-length={count} data-tool={graph ? 'graph' : 'paint'}>
       <div className="rack-bar">
         <select {...described(bar('pattern'))} value={pattern.id} onChange={(event) => store.selectPattern(event.target.value)}>
           {project.beats?.patterns.map((item) => (
@@ -287,23 +339,17 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
             />
           ))}
         </div>
-        <label className="rack-swing" title={bar('swing').hint}>
-          <span>Swing</span>
-          <input
-            {...described(bar('swing'))}
-            type="range"
-            min={0}
-            max={0.6}
-            step={0.01}
-            value={pattern.swing}
-            onChange={(event) => store.setPatternSwing(Number(event.target.value))}
-          />
-        </label>
-        <TipButton label="Graph" hint="Show or hide the velocity and pitch bars under the steps." pressed={graph} onClick={() => setGraph((open) => !open)} />
-        <TipButton label={sheet('place').label} hint={sheet('place').hint} onClick={() => store.placePattern(Math.max(0, Math.floor(beat)))} />
+        {!phone && swing}
+        <TipButton label="Graph" hint="Show the step graph for the selected channel. Drag a bar to change velocity, pan, pitch, or gate." pressed={graph} onClick={() => setGraph((open) => !open)} />
+        {!phone && <TipButton label="Roll" hint="Open the selected channel in the piano roll." disabled={!focus} onClick={() => focus && store.openChannelRoll(focus.id)} />}
+        {!phone && <TipButton label={sheet('place').label} hint={sheet('place').hint} onClick={placePattern} />}
         <TipButton label={bar('edit').label} hint={bar('edit').hint} pressed={editOpen} onClick={() => setEditOpen((open) => !open)} />
+        <span className="rack-tool" role="status" aria-live="polite" title={toolHint}>{toolName}</span>
       </div>
       <div className={`rack-extras${editOpen ? ' open' : ''}`}>
+        {phone && swing}
+        {phone && <TipButton label="Roll" hint="Open the selected channel in the piano roll." disabled={!focus} onClick={() => focus && store.openChannelRoll(focus.id)} />}
+        {phone && <TipButton label={sheet('place').label} hint={sheet('place').hint} onClick={placePattern} />}
         <input className="rack-name-field" {...described(bar('name'))} value={pattern.name} onChange={(event) => store.renamePattern(event.target.value)} />
         <select {...described(sheet('color'))} value={pattern.color} onChange={(event) => store.recolorPattern(event.target.value)}>
           {RACK_COLORS.map((color) => (
@@ -311,9 +357,9 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
           ))}
         </select>
         <TipButton label={sheet('clone').label} hint={sheet('clone').hint} onClick={() => store.cloneActivePattern()} />
-        <TipButton label={sheet('fill-2').label} hint={sheet('fill-2').hint} onClick={() => focus && store.fillChannel(2)}>2</TipButton>
-        <TipButton label={sheet('fill-4').label} hint={sheet('fill-4').hint} onClick={() => focus && store.fillChannel(4)}>4</TipButton>
-        <TipButton label={sheet('fill-8').label} hint={sheet('fill-8').hint} onClick={() => focus && store.fillChannel(8)}>8</TipButton>
+        <TipButton label={sheet('fill-2').label} hint={sheet('fill-2').hint} onClick={() => focus && store.fillChannel(2, focus.id)}>2</TipButton>
+        <TipButton label={sheet('fill-4').label} hint={sheet('fill-4').hint} onClick={() => focus && store.fillChannel(4, focus.id)}>4</TipButton>
+        <TipButton label={sheet('fill-8').label} hint={sheet('fill-8').hint} onClick={() => focus && store.fillChannel(8, focus.id)}>8</TipButton>
         <TipButton label={sheet('rand').label} hint={sheet('rand').hint} onClick={() => store.randomizePattern()} />
         <TipButton label={sheet('human').label} hint={sheet('human').hint} onClick={() => store.humanizePattern()} />
         <TipButton label={sheet('left').label} hint={sheet('left').hint} onClick={() => store.shiftPattern(-1)}>‹</TipButton>
@@ -343,6 +389,23 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
                 ))}
               </select>
             </label>
+            {phone && (
+              <label className="rack-field" title={rowCopy('pan').hint}>
+                <span>Pan</span>
+                <input
+                  aria-label={`${focus.name} ${rowCopy('pan').label}. ${rowCopy('pan').hint}`}
+                  title={rowCopy('pan').hint}
+                  type="range"
+                  min={-1}
+                  max={1}
+                  step={0.01}
+                  value={focus.pan}
+                  onChange={(event) => store.setChannel(focus.id, { pan: Number(event.target.value) }, true)}
+                  onPointerUp={() => store.endDraft()}
+                  onPointerCancel={() => store.endDraft()}
+                />
+              </label>
+            )}
             <label className="rack-field" title={rowCopy('steps').hint}>
               <span>Loop</span>
               <input
@@ -358,30 +421,35 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
           </>
         )}
         {picked && pickedCell && (
-          <>
-            <label className="rack-field" title="Left or right for this hit.">
-              <span>Step pan</span>
-              <input aria-label="Step pan. Left or right for this hit." title="Left or right for this hit." type="number" min={-1} max={1} step={0.05} value={pickedCell.pan} onChange={(event) => store.editStep(picked.channelId, picked.index, { pan: Number(event.target.value) })} />
-            </label>
-            <label className="rack-field" title="Tune this hit in cents.">
-              <span>Fine</span>
-              <input aria-label="Fine. Tune this hit in cents." title="Tune this hit in cents." type="number" min={-100} max={100} step={1} value={pickedCell.fine} onChange={(event) => store.editStep(picked.channelId, picked.index, { fine: Number(event.target.value) })} />
-            </label>
-            <label className="rack-field" title="How long this hit holds.">
-              <span>Gate</span>
-              <input aria-label="Gate. How long this hit holds." title="How long this hit holds." type="number" min={0.05} max={1} step={0.05} value={pickedCell.gate} onChange={(event) => store.editStep(picked.channelId, picked.index, { gate: Number(event.target.value) })} />
-            </label>
-          </>
+          <label className="rack-field" title="Tune this hit in cents. Pan, pitch, and gate live on the graph.">
+            <span>Fine</span>
+            <input aria-label="Fine. Tune this hit in cents." title="Tune this hit in cents." type="number" min={-100} max={100} step={1} value={pickedCell.fine} onChange={(event) => store.editStep(picked.channelId, picked.index, { fine: Number(event.target.value) })} />
+          </label>
         )}
       </div>
       <div className="rack-scroll">
+        <div className="rack-row rack-ruler" aria-hidden="true">
+          <div className="rack-lead"><span>Beat</span></div>
+          <div className="rack-steps">
+            {stepGroups(count).map((group, groupIndex) => (
+              <div className={`rack-group${groupIndex % 2 ? ' alt' : ''}`} key={group[0]}>
+                {group.map((index) => (
+                  <span key={index} className="rack-tick" data-beat={index === group[0] ? String((groupIndex % 4) + 1) : undefined} />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
         {pattern.channels.map((channel) => {
           const cells = store.quantizePreview?.channels.find((row) => row.id === channel.id)?.cells ?? channel.cells
           const volume = rowCopy('volume')
           const pan = rowCopy('pan')
           const mute = rowCopy('mute')
+          const audible = !channel.mute && (!soloed || channel.solo)
+          const playStep = rackPlayIndex(beat, channel.steps || count, channel.swing ?? pattern.swing, audible)
+          const selected = focus?.id === channel.id
           return (
-            <div className={`rack-row${focus?.id === channel.id ? ' sel' : ''}`} data-channel={channel.name} key={channel.id}>
+            <div className={`rack-row${selected ? ' sel' : ''}`} data-channel={channel.name} key={channel.id}>
               <div className="rack-lead">
                 <button
                   type="button"
@@ -391,16 +459,18 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
                   aria-pressed={channel.mute}
                   onClick={() => store.setChannel(channel.id, { mute: !channel.mute })}
                 />
-                <Knob
-                  label={`${channel.name} ${pan.label}`}
-                  hint={pan.hint}
-                  min={-1}
-                  max={1}
-                  step={0.01}
-                  value={channel.pan}
-                  onChange={(next, drag) => store.setChannel(channel.id, { pan: next }, drag)}
-                  onDone={() => store.endDraft()}
-                />
+                {!phone && (
+                  <Knob
+                    label={`${channel.name} ${pan.label}`}
+                    hint={pan.hint}
+                    min={-1}
+                    max={1}
+                    step={0.01}
+                    value={channel.pan}
+                    onChange={(next, drag) => store.setChannel(channel.id, { pan: next }, drag)}
+                    onDone={() => store.endDraft()}
+                  />
+                )}
                 <Knob
                   label={`${channel.name} ${volume.label}`}
                   hint={volume.hint}
@@ -413,14 +483,12 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
                 />
                 <button
                   type="button"
-                  className="rack-name"
+                  className={`rack-name${selected ? ' on' : ''}`}
                   style={{ color: channel.color }}
-                  title="Open this sound in the piano roll."
-                  aria-label={`${channel.name}. Open this sound in the piano roll.`}
-                  onClick={() => {
-                    setGraphId(channel.id)
-                    store.openChannelRoll(channel.id)
-                  }}
+                  title={`Select ${channel.name}. Fills and the graph follow this channel.`}
+                  aria-label={`${channel.name}. Select this channel. Fills and the graph follow it.`}
+                  aria-pressed={selected}
+                  onClick={() => setGraphId(channel.id)}
                 >
                   {channel.name}
                 </button>
@@ -429,7 +497,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
                 channel={channel}
                 cells={cells}
                 count={count}
-                playStep={channel.mute ? -1 : playStep}
+                playStep={playStep}
                 onPaint={(index, on) => paint(channel, index, on)}
                 onDone={() => store.endDraft()}
               />
@@ -439,10 +507,17 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         {graph && focus && (
           <div className="rack-row rack-graph" data-mode={graphMode}>
             <div className="rack-lead">
-              <div className="rack-modes" role="group" aria-label="Graph. Velocity or pitch for each step.">
-                <TipButton label="Velocity" hint="How hard each step hits. Drag a bar up or down." pressed={graphMode === 'velocity'} onClick={() => setGraphMode('velocity')} />
-                <TipButton label="Pitch" hint="Shift each step up or down. Drag a bar up or down." pressed={graphMode === 'pitch'} onClick={() => setGraphMode('pitch')} />
-              </div>
+              <span className="rack-graph-name" style={{ color: focus.color }}>{focus.name}</span>
+              <select
+                aria-label={`Graph property for ${focus.name}. Velocity, pan, pitch, or gate.`}
+                title="Velocity, pan, pitch, or gate for the selected channel."
+                value={graphMode}
+                onChange={(event) => setGraphMode(event.target.value as GraphMode)}
+              >
+                {(Object.keys(GRAPH_LABELS) as GraphMode[]).map((mode) => (
+                  <option key={mode} value={mode}>{GRAPH_LABELS[mode]}</option>
+                ))}
+              </select>
             </div>
             <div className="rack-steps">
               {stepGroups(count).map((group, groupIndex) => (
@@ -450,16 +525,18 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
                   {group.map((index) => {
                     const cell = focus.cells[index] ?? { on: false, velocity: 0.8, pan: 0, pitch: 0, fine: 0, gate: 0.8 }
                     const ratio = graphRatio(graphMode, cell)
-                    const shown = graphMode === 'velocity' ? cell.velocity : cell.pitch
+                    const bounds = graphBounds(graphMode)
+                    const shown = graphNow(graphMode, cell)
+                    const look = stepLooks(index, focus.steps, count)
                     return (
                       <div
                         key={index}
-                        className="rack-bar-step"
+                        className={`rack-bar-step${cell.on ? '' : ' off'}${look.past ? ' past' : ''}`}
                         role="slider"
-                        title={`Drag to set ${graphMode}.`}
-                        aria-label={`${focus.name} step ${index + 1} ${graphMode}. Drag up or down.`}
-                        aria-valuemin={graphMode === 'velocity' ? 0.05 : -12}
-                        aria-valuemax={graphMode === 'velocity' ? 1 : 12}
+                        title={`Drag to set ${GRAPH_LABELS[graphMode].toLowerCase()}.`}
+                        aria-label={`${focus.name} step ${index + 1} ${GRAPH_LABELS[graphMode].toLowerCase()}. Drag up or down.`}
+                        aria-valuemin={bounds.min}
+                        aria-valuemax={bounds.max}
                         aria-valuenow={shown}
                         onPointerDown={(event) => {
                           event.currentTarget.setPointerCapture(event.pointerId)

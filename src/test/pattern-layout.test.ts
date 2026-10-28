@@ -108,7 +108,16 @@ async function measure(page: Page) {
       groups: row.querySelectorAll('.rack-group').length,
       alt: row.querySelectorAll('.rack-group.alt').length,
       bar: document.querySelector('.rack-bar')?.textContent ?? '',
+      extras: document.querySelector('.rack-extras')?.textContent ?? '',
+      tool: document.querySelector('.rack-tool')?.textContent ?? '',
       mute: row.querySelectorAll('.rack-mute').length,
+      ticks: document.querySelectorAll('.rack-ruler .rack-tick').length,
+      align: (() => {
+        const tick = document.querySelector('.rack-ruler .rack-tick')
+        const step = row.querySelector('.rack-step')
+        if (!tick || !step) return 99
+        return Math.abs(tick.getBoundingClientRect().left - step.getBoundingClientRect().left)
+      })(),
     }
   })
 }
@@ -151,8 +160,13 @@ describe('pattern step layout', () => {
         expect(box.scroll, where).toBeLessThanOrEqual(1)
         expect(box.outside, box.outside.join(', ')).toEqual([])
         expect(box.mute, where).toBe(1)
-        expect(box.bar).toContain('Swing')
         expect(box.bar).toContain('Steps')
+        expect(box.bar).toContain('Paint')
+        expect(box.ticks, where).toBe(16)
+        expect(box.align, where).toBeLessThan(2)
+        const phone = viewport.width <= 520 || (viewport.width > viewport.height && viewport.height <= 520)
+        if (phone) expect(box.bar, where).not.toContain('Swing')
+        else expect(box.bar, where).toContain('Swing')
         for (const step of box.steps) {
           expect(step.width, where).toBeGreaterThanOrEqual(24)
           expect(step.height, where).toBeGreaterThanOrEqual(28)
@@ -163,6 +177,7 @@ describe('pattern step layout', () => {
         expect(open.outside, open.outside.join(', ')).toEqual([])
         expect(open.scroll, where).toBeLessThanOrEqual(1)
         expect(open.tops, where).toHaveLength(1)
+        if (phone) expect(open.extras, where).toContain('Swing')
         const visible = await page.evaluate(() => document.querySelector('.rack-extras')!.getBoundingClientRect().height)
         expect(visible).toBeGreaterThan(32)
       }
@@ -178,6 +193,9 @@ describe('pattern step layout', () => {
       expect(desk.sticky).toBe('sticky')
       expect(desk.bar).toContain('Swing')
       expect(desk.bar).toContain('Steps')
+      expect(desk.bar).toContain('Paint')
+      expect(desk.ticks).toBe(16)
+      expect(desk.align).toBeLessThan(2)
       expect(desk.mute).toBe(1)
       const place = await page.evaluate(() => {
         const button = [...document.querySelectorAll('.rack-bar button')].find((el) => el.textContent === 'Place')

@@ -3412,11 +3412,12 @@ export class ProjectStore {
     })
   }
 
-  fillChannel(every: number) {
+  fillChannel(every: number, channelId?: string) {
     this.mutate(() => {
       const pattern = this.activePattern()
       if (!pattern) return
       for (const channel of pattern.channels) {
+        if (channelId && channel.id !== channelId) continue
         const count = channel.steps || pattern.steps
         channel.cells = fillEvery(channel.cells, every, count)
       }
