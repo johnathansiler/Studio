@@ -48,7 +48,7 @@ export function LoopRegion({
     onBody: boolean
   } | null>(null)
   const lastTap = useRef(0)
-  const [box, setBox] = useState({ width: 0, label: 0 })
+  const [box, setBox] = useState({ width: 0, label: 0, viewLeft: 0, viewWidth: 0 })
   const readout = formatLoopReadout(project, project.loopStartSample, project.loopEndSample)
   const xAtRef = useRef(xAt)
   xAtRef.current = xAt
@@ -70,7 +70,8 @@ export function LoopRegion({
       const regionLeft = xAtRef.current(project.loopStartSample, width)
       const regionRight = xAtRef.current(project.loopEndSample, width)
       const center = loopLabelCenter(Math.min(regionLeft, regionRight), Math.abs(regionRight - regionLeft), label.offsetWidth, viewLeft, viewWidth)
-      setBox((prev) => (near(prev.width, width) && near(prev.label, center) ? prev : { width, label: center }))
+      const next = { width, label: center, viewLeft, viewWidth }
+      setBox((prev) => (near(prev.width, next.width) && near(prev.label, next.label) && near(prev.viewLeft, next.viewLeft) && near(prev.viewWidth, next.viewWidth) ? prev : next))
     }
     measure()
     const scroller = scrollParent(host)
@@ -89,8 +90,10 @@ export function LoopRegion({
   const barWidth = Math.max(0, Math.abs(rawRight - rawLeft))
   const baseGrip = phone ? 44 : GRIP
   const grip = width > 0 && width < baseGrip * 2 ? Math.max(32, width / 2) : baseGrip
-  const startX = pinGrip(rawLeft, width, grip)
-  const endX = pinGrip(rawRight, width, grip)
+  const viewLeft = box.viewWidth > 0 ? box.viewLeft : 0
+  const viewWidth = box.viewWidth > 0 ? box.viewWidth : width
+  const startX = pinGrip(rawLeft, viewLeft, viewWidth, grip)
+  const endX = pinGrip(rawRight, viewLeft, viewWidth, grip)
   const labelX = box.label || left + barWidth / 2
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -231,9 +234,13 @@ export function SongLoopStrip({ store, onSeek }: { store: ProjectStore; onSeek?:
   )
 }
 
-function pinGrip(edge: number, hostWidth: number, grip: number) {
-  if (!(hostWidth > 0)) return Math.max(0, edge - grip / 2)
-  return Math.min(Math.max(0, hostWidth - grip), Math.max(0, edge - grip / 2))
+/** Keep a grip inside the visible ruler, centered on its edge when that edge is on screen. */
+function pinGrip(edge: number, viewLeft: number, viewWidth: number, grip: number) {
+  if (!(viewWidth > 0)) return Math.max(0, edge - grip / 2)
+  const min = viewLeft
+  const max = viewLeft + viewWidth - grip
+  if (max <= min) return min
+  return Math.min(max, Math.max(min, edge - grip / 2))
 }
 
 function near(a: number, b: number) {
