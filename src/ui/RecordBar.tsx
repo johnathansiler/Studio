@@ -11,11 +11,14 @@ export function RecordBar({
   engine,
   session,
   onQuickPunch,
+  inline = false,
 }: {
   store: ProjectStore
   engine: AudioEngine
   session: SessionClient
   onQuickPunch: () => void
+  /** Draw the fields in place. The phone setup button owns the open and close. */
+  inline?: boolean
 }) {
   const project = store.project
   const record = store.recordSettings()
@@ -104,6 +107,14 @@ export function RecordBar({
       )}
     </>
   )
+
+  if (inline) {
+    return (
+      <div className="rec-bar inline" role="group" aria-label="Recording">
+        {fields}
+      </div>
+    )
+  }
 
   if (!compact) {
     return (

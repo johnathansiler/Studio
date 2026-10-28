@@ -44,6 +44,8 @@ export function SoundBrowser({
   reserve = 0,
   initial,
   instruments: instrumentSeed,
+  embedded = false,
+  lockType,
 }: {
   store: ProjectStore
   engine: PreviewEngine
@@ -56,6 +58,10 @@ export function SoundBrowser({
   /** Tests pass a catalog so the panel can render without the network. */
   initial?: CatalogResult
   instruments?: LibraryEntry[]
+  /** Inside the Arrange browser. The parent draws the frame and the resize handle. */
+  embedded?: boolean
+  /** Sounds, Instruments, or Loops tab. Hides the kind menu. */
+  lockType?: SoundQuery['type']
 }) {
   useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
   const sounds = selectSounds(store)
@@ -64,7 +70,10 @@ export function SoundBrowser({
   const [startersReady, setStartersReady] = useState(Boolean(instrumentSeed) || Boolean(initial))
   const [loading, setLoading] = useState(!initial)
   const [text, setText] = useState('')
-  const [type, setType] = useState<SoundQuery['type']>('all')
+  const [type, setType] = useState<SoundQuery['type']>(lockType && lockType !== 'all' ? lockType : 'all')
+  useEffect(() => {
+    setType(lockType && lockType !== 'all' ? lockType : 'all')
+  }, [lockType])
   const [bpm, setBpm] = useState<SoundQuery['bpm']>('any')
   const [key, setKey] = useState('')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
@@ -72,7 +81,7 @@ export function SoundBrowser({
   const [playing, setPlaying] = useState('')
   const entriesRef = useRef(result.entries)
   const startersRef = useRef(starters)
-  const addRef = useRef<(entry: SoundEntry, trackId?: string | null) => void>(() => undefined)
+  const addRef = useRef<(entry: SoundEntry, trackId?: string | null, startSample?: number) => void>(() => undefined)
   const loadRef = useRef<(entry: LibraryEntry, trackId?: string | null) => void>(() => undefined)
   const slotRef = useRef<(entry: SoundEntry) => void>(() => undefined)
   entriesRef.current = result.entries
@@ -105,12 +114,13 @@ export function SoundBrowser({
   useEffect(() => () => engine.stopPreview(), [engine])
 
   useEffect(() => {
+    if (embedded) return
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [embedded, onClose])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -124,7 +134,7 @@ export function SoundBrowser({
       const id = event.dataTransfer?.getData(SOUND_MIME) || dragId
       if (!id) return
       const target = event.target instanceof Element ? event.target : null
-      if (target?.closest('.sound-panel, .sound-slot')) return
+      if (target?.closest('.sound-panel, .sound-slot, .playlist-browser')) return
       event.preventDefault()
       dragId = ''
       if (id.startsWith(INSTRUMENT_PREFIX)) {
@@ -138,7 +148,14 @@ export function SoundBrowser({
         slotRef.current(entry)
         return
       }
-      addRef.current(entry, trackIdFromDrop(target))
+      const inner = target?.closest('.timeline-inner') as HTMLElement | null
+      let at: number | undefined
+      if (inner) {
+        const px = Number(inner.dataset.px) || 90
+        const rect = inner.getBoundingClientRect()
+        at = Math.max(0, ((event.clientX - rect.left) / px) * (store.project.sampleRate || 48000))
+      }
+      addRef.current(entry, trackIdFromDrop(target), at)
     }
     window.addEventListener('dragover', allow)
     window.addEventListener('drop', drop)
@@ -215,7 +232,7 @@ export function SoundBrowser({
     }
   }
 
-  async function add(entry: SoundEntry, trackId?: string | null) {
+  async function add(entry: SoundEntry, trackId?: string | null, startSample?: number) {
     if (store.remoteFollow) {
       store.toast('The host owns the arrangement.', 'warn')
       return
@@ -233,7 +250,7 @@ export function SoundBrowser({
         channels: decoded.channels,
         fileRate: decoded.sampleRate,
         project: store.project,
-        startSample: engine.currentTimelineSample(),
+        startSample: startSample ?? engine.currentTimelineSample(),
         bufferId: `lib_${entry.id}`,
       })
       if (!placed) {
@@ -250,9 +267,9 @@ export function SoundBrowser({
       setBusy('')
     }
   }
-  addRef.current = (entry, trackId) => {
+  addRef.current = (entry, trackId, startSample) => {
     engine.unlock()
-    void add(entry, trackId)
+    void add(entry, trackId, startSample)
   }
 
   async function intoSlot(entry: SoundEntry) {
@@ -360,13 +377,15 @@ export function SoundBrowser({
           value={text}
           onChange={(event) => setText(event.target.value)}
         />
-        <select aria-label="Kind. One-shots, loops, drums, or instruments." title="One-shots, loops, drums, or instruments." value={type} onChange={(event) => setType(event.target.value as SoundQuery['type'])}>
-          <option value="all">All kinds</option>
-          <option value="one-shot">One-shots</option>
-          <option value="loop">Loops</option>
-          <option value="drum">Drums</option>
-          <option value="instrument">Instruments</option>
-        </select>
+        {!lockType && (
+          <select aria-label="Kind. One-shots, loops, drums, or instruments." title="One-shots, loops, drums, or instruments." value={type} onChange={(event) => setType(event.target.value as SoundQuery['type'])}>
+            <option value="all">All kinds</option>
+            <option value="one-shot">One-shots</option>
+            <option value="loop">Loops</option>
+            <option value="drum">Drums</option>
+            <option value="instrument">Instruments</option>
+          </select>
+        )}
         {type !== 'instrument' && (
           <>
             <select aria-label="Tempo. Loops near the song tempo, including half-time and double-time." title="Loops near the song tempo, including half-time and double-time." value={bpm} onChange={(event) => setBpm(event.target.value as SoundQuery['bpm'])}>
@@ -485,6 +504,8 @@ export function SoundBrowser({
       {count && <p className="sound-count">{count}</p>}
     </div>
   )
+
+  if (embedded) return panel
 
   if (phone) {
     return (
