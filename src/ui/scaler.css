@@ -1,0 +1,74 @@
+.scaler-panel {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: #121a16;
+  color: var(--text);
+}
+.scaler-panel header,
+.scaler-row,
+.scaler-actions,
+.scaler-panel .chip-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.scaler-panel header { padding: 8px; flex: none; }
+.scaler-panel header strong { margin-right: auto; }
+.scaler-key { color: var(--muted); font-size: 13px; }
+.scaler-panel button,
+.scaler-panel select,
+.scaler-panel input {
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #18241d;
+  color: var(--text);
+  padding: 0 10px;
+}
+.scaler-panel button.on,
+.scaler-panel .chip-row button.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.scaler-hint { margin: 0; padding: 0 8px 8px; color: var(--muted); font-size: 13px; line-height: 1.35; }
+.scaler-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 0 8px 12px; }
+.scaler-pads { display: grid; grid-template-columns: repeat(4, minmax(44px, 1fr)); gap: 6px; }
+.scaler-pads button {
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  text-align: left;
+  gap: 2px;
+}
+.scaler-pads button.on { background: var(--accent); color: var(--accent-ink); }
+.scaler-pads span,
+.scaler-lines span,
+.scaler-scales span { color: var(--muted); font-size: 12px; }
+.scaler-pads button.on span,
+.scaler-lines button.on span { color: var(--accent-ink); }
+.scaler-lines,
+.scaler-scales { display: flex; flex-direction: column; min-height: 0; }
+.scaler-lines button,
+.scaler-scales button {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 2px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+.scaler-lines button.on,
+.scaler-scales button.on { background: #1c2b23; }
+.scaler-gate { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.scaler-gate input { flex: 1; }
+.scaler-panel .gen-body { padding-left: 0; padding-right: 0; }
+.shell.phone .scaler-panel select,
+.shell.phone .scaler-panel input { max-width: 46vw; }

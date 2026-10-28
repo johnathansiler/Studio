@@ -1,4 +1,4 @@
-import type { Project, Track } from '../../model/types'
+import type { MidiClip, Project, Track } from '../../model/types'
 import { normalizeScale, patternNotes, scaleById, type ScaleId } from '../../model/scale'
 import {
   chordsInScale,
@@ -15,7 +15,7 @@ import {
   type ChordGroup,
   type Tone,
 } from '../../theory'
-import { defaultScaler, type ScalerGroup, type ScalerNote, type ScalerState } from './types'
+import { defaultScaler, type ScalerGroup, type ScalerNote, type ScalerSound, type ScalerState } from './types'
 
 export type { ScalerGroup, ScalerNote, ScalerSound, ScalerState } from './types'
 export { defaultScaler } from './types'
@@ -179,16 +179,54 @@ export function chooseScale(id: string): { scale: ScaleId; library: string } {
   return { scale: nearestBuiltin(getScale(id).cents), library: id }
 }
 
-/** Where a Scaler track's notes should sound. */
+/** Where a Scaler track's notes should sound. One hop only, so two forwards cannot loop. */
 export function routeScaler(project: Project, track: Track): { voice: Track; liveStripId: string } {
   if (track.instrument !== 'scaler') return { voice: track, liveStripId: track.id }
   const state = normalizeScaler(track.scaler)
   if (state.sound === 'forward') {
     const dest = project.tracks.find((item) => item.id === state.forwardTrackId && item.id !== track.id && item.type === 'midi')
-    if (dest) return { voice: dest, liveStripId: dest.id }
-    return { voice: { ...track, instrument: 'synth' }, liveStripId: track.id }
+    if (dest) return { voice: localVoice(dest), liveStripId: dest.id }
+    return { voice: soundVoice(track, 'synth'), liveStripId: track.id }
   }
-  return { voice: { ...track, instrument: state.sound }, liveStripId: track.id }
+  return { voice: soundVoice(track, state.sound), liveStripId: track.id }
+}
+
+export interface HeardMidi {
+  voice: Track
+  owner: Track
+  clips: MidiClip[]
+}
+
+/** Clips that should sound on this track, after Scaler forward is applied once. */
+export function performancesOn(project: Project, track: Track): HeardMidi[] {
+  const out: HeardMidi[] = []
+  if (!forwardsAway(project, track)) out.push({ voice: localVoice(track), owner: track, clips: track.midiClips })
+  for (const other of project.tracks) {
+    if (other.id === track.id || other.instrument !== 'scaler') continue
+    const state = normalizeScaler(other.scaler)
+    if (state.sound === 'forward' && state.forwardTrackId === track.id) out.push({ voice: localVoice(track), owner: other, clips: other.midiClips })
+  }
+  return out
+}
+
+function forwardsAway(project: Project, track: Track) {
+  if (track.instrument !== 'scaler') return false
+  const state = normalizeScaler(track.scaler)
+  if (state.sound !== 'forward') return false
+  return project.tracks.some((item) => item.id === state.forwardTrackId && item.id !== track.id && item.type === 'midi')
+}
+
+function localVoice(track: Track): Track {
+  if (track.instrument !== 'scaler') return track
+  const state = normalizeScaler(track.scaler)
+  if (state.sound === 'forward') return soundVoice(track, 'synth')
+  return soundVoice(track, state.sound)
+}
+
+function soundVoice(track: Track, sound: ScalerSound): Track {
+  if (sound === 'library') return track.library ? { ...track, instrument: 'library' } : { ...track, instrument: 'synth' }
+  if (sound === 'synth' || sound === 'sampler' || sound === '808' || sound === 'drum-machine') return { ...track, instrument: sound }
+  return { ...track, instrument: 'synth' }
 }
 
 export function wantsLibrary(track: { instrument?: string; scaler?: ScalerState }): boolean {

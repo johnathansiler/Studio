@@ -96,6 +96,7 @@ import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normal
 import { normalizeScale, patternNotes, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
 import { clipFromNotes, recordOnto, rememberVoice } from '../instruments/scaler/clips'
 import { freshScaler, normalizeScaler, padPerformance, type ScalerState } from '../instruments/scaler/model'
+import type { ScalerPage } from '../instruments/scaler/types'
 import { lockedTone, scaleIsMicrotonal, suggestKey } from '../theory/lock'
 import {
   clampSwing,
@@ -211,6 +212,8 @@ export class ProjectStore {
   rackTrackId: string | null = null
   /** Open Scaler panel. The plugin state itself is on the track. */
   scalerTrackId: string | null = null
+  /** Which page of the open Scaler panel is showing. Not saved. */
+  scalerPage: ScalerPage = 'play'
   /** Open layered patch. Not saved; the patch itself is on the track. */
   patchTrackId: string | null = null
   rackFlip = false
@@ -621,12 +624,18 @@ export class ProjectStore {
   }
 
   /** Put Scaler on a MIDI track, or make a new one, and open its panel. */
-  insertScaler(trackId?: string | null): string | null {
+  insertScaler(trackId?: string | null, page: ScalerPage = 'play'): string | null {
+    this.scalerPage = page
+    this.patchTrackId = null
     const asked = trackId ? this.track(trackId) : undefined
     const selected = this.selectedTrackId ? this.track(this.selectedTrackId) : undefined
     const host = asked?.type === 'midi' ? asked : selected?.type === 'midi' ? selected : undefined
     if (host) {
-      this.setTrackInstrument(host.id, 'scaler')
+      if (host.instrument === 'scaler') {
+        this.rackTrackId = null
+        this.scalerTrackId = host.id
+        this.emit()
+      } else this.setTrackInstrument(host.id, 'scaler')
       return host.id
     }
     const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'scaler', input: 'mic', channels: 1, armed: false })
@@ -644,6 +653,7 @@ export class ProjectStore {
     })
     if (instrument === 'scaler') {
       this.rackTrackId = null
+      this.patchTrackId = null
       this.scalerTrackId = trackId
       this.emit()
     } else if (this.scalerTrackId === trackId) {
@@ -652,25 +662,45 @@ export class ProjectStore {
     }
   }
 
-  openScaler(trackId: string) {
+  openScaler(trackId: string, page?: ScalerPage) {
     const track = this.track(trackId)
     if (!track || track.type !== 'midi') return
+    if (page) this.scalerPage = page
     if (track.instrument !== 'scaler') {
       this.setTrackInstrument(trackId, 'scaler')
       return
     }
     this.rackTrackId = null
-    this.scalerTrackId = this.scalerTrackId === trackId ? null : trackId
+    this.patchTrackId = null
+    if (page || this.scalerTrackId !== trackId) {
+      this.scalerTrackId = trackId
+      this.emit()
+      return
+    }
+    this.scalerTrackId = null
     this.emit()
   }
 
-  setScaler(trackId: string, patch: Partial<ScalerState>) {
-    this.mutate(() => {
+  closeScaler() {
+    if (!this.scalerTrackId) return
+    this.scalerTrackId = null
+    this.emit()
+  }
+
+  setScalerPage(page: ScalerPage) {
+    this.scalerPage = page
+    this.emit()
+  }
+
+  setScaler(trackId: string, patch: Partial<ScalerState>, draft = false) {
+    const run = () => {
       const track = this.track(trackId)
       if (!track || track.type !== 'midi') return
       track.instrument = 'scaler'
       track.scaler = normalizeScaler({ ...normalizeScaler(track.scaler), ...patch })
-    })
+    }
+    if (draft) this.draft(run)
+    else this.mutate(run)
   }
 
   scalerPadNotes(trackId: string, index: number) {
@@ -1041,6 +1071,11 @@ export class ProjectStore {
     this.mutate(() => {
       const track = this.track(trackId)
       if (!track || track.type !== 'midi') return
+      if (track.instrument === 'scaler') {
+        track.library = program ?? undefined
+        track.scaler = normalizeScaler({ ...normalizeScaler(track.scaler), sound: 'library' })
+        return
+      }
       track.instrument = 'library'
       track.library = program ?? undefined
       if (!track.rack?.devices?.length) normalizeTrackRack(track)
@@ -1052,6 +1087,13 @@ export class ProjectStore {
     this.mutate(() => {
       const track = this.track(trackId)
       if (!track || track.type !== 'midi') return
+      if (track.instrument === 'scaler') {
+        track.library = program
+        track.scaler = normalizeScaler({ ...normalizeScaler(track.scaler), sound: 'library' })
+        for (const asset of assets) this.buffers.set(asset.id, asset)
+        if (pack) this.buffers.set(pack.id, packToAsset(pack))
+        return
+      }
       track.instrument = 'library'
       track.library = program
       for (const asset of assets) this.buffers.set(asset.id, asset)
@@ -3344,6 +3386,7 @@ export class ProjectStore {
   }
 
   openPatch(trackId: string) {
+    this.scalerTrackId = null
     if (this.patchTrackId === trackId) {
       this.patchTrackId = null
       this.emit()

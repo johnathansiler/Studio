@@ -29,6 +29,16 @@ export type ScalerSound = 'synth' | 'sampler' | '808' | 'drum-machine' | 'librar
 
 export type ScalerGroup = 'triad' | 'seventh' | 'ninth' | 'sus' | 'add' | 'altered'
 
+export type ScalerPage = 'play' | 'key' | 'voice' | 'sound' | 'write'
+
+export const SCALER_PAGES: { id: ScalerPage; label: string; hint: string }[] = [
+  { id: 'play', label: 'Play', hint: 'Chord pads. Rec writes them as MIDI.' },
+  { id: 'key', label: 'Key', hint: 'Key and scale for this track.' },
+  { id: 'voice', label: 'Voice', hint: 'Voicing, bass, and how the chord is played.' },
+  { id: 'sound', label: 'Sound', hint: 'Which instrument plays the chords.' },
+  { id: 'write', label: 'Write', hint: 'Generate chords, bass, melody, arp, strum, or drums as MIDI.' },
+]
+
 /** Chord instrument state stored on the track, not in a separate view. */
 export interface ScalerState {
   root: number

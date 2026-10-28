@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { padPerformance } from '../instruments/scaler/model'
+import { padPerformance, performancesOn, routeScaler } from '../instruments/scaler/model'
 import { migrateProject } from '../model/schema'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
+import type { SamplerProgram } from '../audio/multisample/types'
+import { VIEW_COPY } from '../ui/chrome'
 
 describe('scaler instrument', () => {
   it('inserts Scaler on a track from the instrument slot', () => {
@@ -58,5 +60,37 @@ describe('scaler instrument', () => {
     store.recordScalerChord(id, store.scalerPadNotes(id, 1), 4)
     const take = store.track(id)?.midiClips.find((item) => item.name === 'Scaler')
     expect(take?.notes.length).toBeGreaterThan(notes.length)
+  })
+
+  it('keeps a loaded library on the Scaler track', () => {
+    const store = new ProjectStore(createEmptyProject())
+    const id = store.project.tracks.find((track) => track.type === 'midi')!.id
+    store.setTrackInstrument(id, 'scaler')
+    store.setLibrary(id, { id: 'piano', name: 'Piano', zones: [], samples: [] } as unknown as SamplerProgram)
+    expect(store.track(id)?.instrument).toBe('scaler')
+    expect(store.track(id)?.scaler?.sound).toBe('library')
+    expect(store.track(id)?.library?.name).toBe('Piano')
+  })
+
+  it('forwards MIDI to another track once', () => {
+    const store = new ProjectStore(createEmptyProject())
+    const id = store.project.tracks.find((track) => track.type === 'midi')!.id
+    store.setTrackInstrument(id, 'scaler')
+    const other = store.addTracks({ kind: 'midi', count: 1, instrument: 'synth', input: 'mic', channels: 1, armed: false })[0]!
+    store.setScaler(id, { sound: 'forward', forwardTrackId: other })
+    store.writeScalerClip(id, store.scalerPadNotes(id, 0), 0, 'C')
+    const routed = routeScaler(store.project, store.track(id)!)
+    expect(routed.liveStripId).toBe(other)
+    expect(routed.voice.instrument).not.toBe('scaler')
+    expect(performancesOn(store.project, store.track(id)!).some((group) => group.owner.id === id)).toBe(false)
+    expect(performancesOn(store.project, store.track(other)!).some((group) => group.owner.id === id && group.clips.length > 0)).toBe(true)
+    store.setScaler(other, { sound: 'forward', forwardTrackId: id })
+    const again = routeScaler(store.project, store.track(id)!)
+    expect(again.voice.instrument).not.toBe('scaler')
+    expect(again.liveStripId).toBe(other)
+  })
+
+  it('is not its own view tab', () => {
+    expect(VIEW_COPY.map((item) => item.id)).toEqual(['arrange', 'mix', 'beats', 'session', 'collab'])
   })
 })
