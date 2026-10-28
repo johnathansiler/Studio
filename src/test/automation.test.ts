@@ -5,13 +5,13 @@ import { create as createGate } from '../audio/plugins/gate'
 import { renderGraph, type GraphTrack } from '../audio/renderGraph'
 import type { Processor } from '../audio/plugins/types'
 import { audibleIds } from '../model/audible'
-import { curveAt, prepareCurve, rampEvents, valueAtSample, writeSegment } from '../model/automation'
+import { automationSchedule, curveAt, prepareCurve, rampEvents, valueAtSample, writeSegment } from '../model/automation'
 import { arrangementDigest } from '../model/sessionSync'
-import { projectSampleBeat, snapSampleToMap } from '../model/tempoMap'
+import { projectBeatSample, projectSampleBeat, snapSampleToMap } from '../model/tempoMap'
 import { samplesToBeats, snapSample } from '../model/time'
 import { createEmptyProject, makeTrack, type AudioClip, type MidiClip } from '../model/types'
 import { ProjectStore } from '../state/store'
-import { lanePoints } from '../state/select'
+import { automatedValue, lanePoints } from '../state/select'
 
 const rate = 48000
 
@@ -90,6 +90,87 @@ function clip(id: string, start: number): AudioClip {
     source: 'local',
   }
 }
+
+function scheduledAt(events: { time: number; value: number }[], time: number) {
+  if (!events.length || time <= events[0].time) return events[0]?.value ?? 0
+  for (let i = 1; i < events.length; i++) {
+    const prev = events[i - 1]
+    const next = events[i]
+    if (time <= next.time) {
+      const span = next.time - prev.time || 1
+      return prev.value + ((time - prev.time) / span) * (next.value - prev.value)
+    }
+  }
+  return events[events.length - 1].value
+}
+
+describe('automation follows the tempo map', () => {
+  const spec = { trackId: 'a', target: 'volume' as const, param: 'volume', min: 0, max: 1.25 }
+
+  function withMap(map: { beat: number; bpm: number; ramp?: boolean }[]) {
+    const project = createEmptyProject(rate)
+    project.tempo = 120
+    project.snap = false
+    project.tempoMap = map
+    project.tracks = [makeTrack({ id: 'a', name: 'A', type: 'audio' })]
+    const store = new ProjectStore(project)
+    store.project.tempoMap = map
+    store.project.snap = false
+    return store
+  }
+
+  function writeAt(store: ProjectStore, beat: number, value: number) {
+    const sample = Math.round(projectBeatSample(store.project, beat))
+    store.setAutomationMode('latch')
+    store.beginAutomationTouch()
+    store.setAutomated(spec, value, true, sample)
+    return sample
+  }
+
+  it('lands a write and a read on a tempo step', () => {
+    const store = withMap([{ beat: 0, bpm: 120 }, { beat: 1, bpm: 60 }])
+    const sample = writeAt(store, 3, 0.42)
+    expect(samplesToBeats(sample, rate, 120)).not.toBeCloseTo(3, 1)
+    expect(lanePoints(store.project, spec)[0].beat).toBeCloseTo(3, 3)
+    expect(automatedValue(store.project, spec, sample, 0)).toBeCloseTo(0.42)
+    store.endAutomationTouch()
+    const later = Math.round(projectBeatSample(store.project, 5))
+    store.sustainAutomation(later)
+    expect(lanePoints(store.project, spec).some((point) => Math.abs(point.beat - 5) < 0.02)).toBe(true)
+    expect(automatedValue(store.project, spec, later, 0)).toBeCloseTo(0.42)
+  })
+
+  it('lands a write and a read on a tempo ramp', () => {
+    const store = withMap([{ beat: 0, bpm: 120 }, { beat: 4, bpm: 60, ramp: true }])
+    const sample = writeAt(store, 3, 0.7)
+    expect(samplesToBeats(sample, rate, 120)).not.toBeCloseTo(3, 1)
+    expect(lanePoints(store.project, spec)[0].beat).toBeCloseTo(3, 3)
+    expect(automatedValue(store.project, spec, sample, 0)).toBeCloseTo(0.7)
+  })
+
+  it('places audio-clock breakpoints on the mapped sample of each beat', () => {
+    const points = [{ beat: 0, value: 0 }, { beat: 4, value: 1 }]
+    const maps = [
+      [{ beat: 0, bpm: 120 }, { beat: 2, bpm: 60 }],
+      [{ beat: 0, bpm: 120 }, { beat: 4, bpm: 60, ramp: true }],
+    ]
+    for (const map of maps) {
+      const project = createEmptyProject(rate)
+      project.tempo = 120
+      project.tempoMap = map
+      const beatSample = projectBeatSample(project, 4)
+      const fixed = (4 * rate * 60) / 120
+      expect(Math.abs(beatSample - fixed)).toBeGreaterThan(1000)
+      const events = automationSchedule(points, 0, project, 0, 8, Math.ceil(beatSample))
+      const last = events[events.length - 1]
+      expect(last.time).toBeCloseTo(8 + beatSample / rate, 4)
+      expect(last.value).toBeCloseTo(1, 4)
+      expect(last.time).not.toBeCloseTo(8 + fixed / rate, 2)
+      const mid = 8 + projectBeatSample(project, 2) / rate
+      expect(scheduledAt(events, mid)).toBeCloseTo(0.5, 2)
+    }
+  })
+})
 
 describe('automation curves', () => {
   it('interpolates a lane at the sample', () => {

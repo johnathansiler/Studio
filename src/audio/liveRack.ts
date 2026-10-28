@@ -1,10 +1,10 @@
 import type { PluginInstance, Project } from '../model/types'
 import { scaleById } from '../model/scale'
-import { samplesToBeats } from '../model/time'
 import type { StripNodes } from './strips'
 import { processChain, type ChainSlot } from './plugins/chain'
 import { automationAt, latencyOf } from './plugins/catalog'
-import { pluginLanesMove, rampEvents, sendLane } from '../model/automation'
+import { automationSchedule, sendLane, valueChanges } from '../model/automation'
+import { projectSampleBeat } from '../model/tempoMap'
 import { applyRamps } from './paramCurve'
 import { processSampleAccurate } from './automationRender'
 import { loadModule } from './plugins/registry'
@@ -218,7 +218,8 @@ export class LiveRack {
     const rate = event.inputBuffer.sampleRate
     const input = [event.inputBuffer.getChannelData(0), event.inputBuffer.getChannelData(1)]
     const output = [event.outputBuffer.getChannelData(0), event.outputBuffer.getChannelData(1)]
-    const beat = samplesToBeats(this.clock(), rate, project.tempo)
+    const beatAt = (sample: number) => projectSampleBeat(project, sample)
+    const beat = beatAt(this.clock())
     const scale = scaleById(project.scale?.scale)
     for (const plugin of plugins) {
       const proc = this.processors.get(plugin.id) as Processor & { bind?: (plugin: PluginInstance, channel: (id: string) => Float32Array | null) => void }
@@ -251,8 +252,10 @@ export class LiveRack {
       if (!buf?.length) return null
       return buf.subarray(0, Math.min(buf.length, length))
     }
-    if (pluginLanesMove(project.automation, plugins.map((plugin) => plugin.id), rate, project.tempo, input[0].length)) {
-      processSampleAccurate(slots, input, output, blockCtx, project.automation, keyAt)
+    const endBeat = beatAt(origin + Math.max(0, input[0].length - 1))
+    const moving = project.automation.some((lane) => (lane.target == null || lane.target === 'plugin') && plugins.some((plugin) => plugin.id === lane.pluginId) && valueChanges(lane.points, beat, endBeat, 0))
+    if (moving) {
+      processSampleAccurate(slots, input, output, blockCtx, project.automation, keyAt, beatAt)
     } else {
       for (const slot of slots) slot.params = automationAt(project.automation, slot.id, slot.params, beat)
       processChain(slots, input, output, blockCtx, keyAt)
@@ -325,7 +328,7 @@ export class LiveRack {
   }
 
   /** Schedule send levels. A moving lane becomes a sample-accurate ramp on the audio clock. */
-  applyAutomation(project: Project, playing: boolean, sample: number, now: number, endSample: number, sampleRate: number) {
+  applyAutomation(project: Project, playing: boolean, sample: number, now: number, endSample: number) {
     for (const track of project.tracks) {
       for (const send of track.sends) {
         const node = this.sendGains.get(send.id)
@@ -336,7 +339,7 @@ export class LiveRack {
           node.gain.setTargetAtTime(send.gain, now, 0.015)
           continue
         }
-        applyRamps(node.gain, rampEvents(points, send.gain, sampleRate, project.tempo, sample, now, endSample), now)
+        applyRamps(node.gain, automationSchedule(points, send.gain, project, sample, now, endSample), now)
       }
     }
     this.captureKeys(project)
