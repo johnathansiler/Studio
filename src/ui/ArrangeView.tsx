@@ -394,7 +394,10 @@ export function ArrangeView({
                 onChange={(event) => store.updateTrack(track.id, { name: event.target.value })}
               />
               {track.type === 'midi' && (
-                <button className={`mini rack-open ${store.rackTrackId === track.id ? 'on' : ''}`} onClick={(event) => { event.stopPropagation(); store.openRack(track.id) }}>Rack</button>
+                <>
+                  <button className={`mini rack-open ${store.rackTrackId === track.id ? 'on' : ''}`} onClick={(event) => { event.stopPropagation(); store.openRack(track.id) }}>Rack</button>
+                  <button className={`mini patch-open ${store.patchTrackId === track.id ? 'on' : ''}`} title="Layered patch: synths, samples, grains, and a morph pad" onClick={(event) => { event.stopPropagation(); store.openPatch(track.id) }}>Patch</button>
+                </>
               )}
               <button className="mini" onClick={() => store.removeTrack(track.id)} title="Remove track">
                 ×

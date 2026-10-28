@@ -1,5 +1,6 @@
 import type { RollMemory } from './paint'
 import type { QuantizePreset, QuantizeSettings, WarpPoint } from './quantize'
+import type { OmniPatch } from '../instruments/patch/types'
 import type { DevicePreset, RackAutomation, RackPatch, RackState } from './rack'
 import { defaultScale, type ScaleState } from './scale'
 import type { BeatRack, PatternClip } from './steps'
@@ -295,6 +296,8 @@ export interface Track {
   midiClips: MidiClip[]
   /** Modular instrument rack. Present on instrument tracks. */
   rack?: RackState
+  /** Layered synth/sample patch. Saved with the project. */
+  omniPatch?: OmniPatch | null
   /** Scene index → clip id. Missing means scene N is clips[N]. */
   audioSlots?: (string | null)[]
   midiSlots?: (string | null)[]
@@ -324,6 +327,8 @@ export interface Project {
   snap: boolean
   devicePresets: DevicePreset[]
   rackPatches: RackPatch[]
+  /** Named layered patches saved with this project. */
+  omniLibrary?: OmniPatch[]
   /** Parameter lanes for devices in the modular rack. */
   rackAutomation: RackAutomation[]
   /** Global clip launch grid. A clip quant overrides it. */
@@ -421,6 +426,7 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     snap: true,
     devicePresets: [],
     rackPatches: [],
+    omniLibrary: [],
     rackAutomation: [],
     launchQuant: '1bar',
     recordBars: 4,

@@ -1,3 +1,4 @@
+import { patchBufferIds } from '../instruments/patch/model'
 import { computePeaks } from './demo'
 import { padFingerprint } from './padMachine'
 import type { AudioAsset, Project } from './types'
@@ -98,6 +99,7 @@ export function referencedBufferIds(project: Project): string[] {
     for (const plugin of track.plugins ?? []) collectInstrumentBuffers(plugin, ids)
   }
   for (const plugin of project.masterPlugins ?? []) collectInstrumentBuffers(plugin, ids)
+  for (const id of patchBufferIds(project)) ids.add(id)
   return [...ids]
 }
 
@@ -211,5 +213,18 @@ export function arrangementDigest(project: Project): string {
     })),
     pads: project.padKit ? padFingerprint(project.padKit) : '',
     presetFavorites: project.presetFavorites ?? [],
+    omni: omniFingerprint(project),
   })
+}
+
+function omniFingerprint(project: Project) {
+  const library = (project.omniLibrary ?? []).map((patch) => patch.id).join(',')
+  const tracks = project.tracks.map((track) => {
+    const patch = track.omniPatch
+    if (!patch) return ''
+    const layers = patch.layers.map((layer) => [layer.kind, layer.enabled ? 1 : 0, layer.level.toFixed(3), Math.round(layer.cutoff), layer.bufferId, layer.granular.position.toFixed(3), layer.granular.freeze ? 1 : 0].join('.')).join(';')
+    const routes = patch.routes.map((route) => `${route.source}:${route.target}:${route.depth.toFixed(2)}`).join(';')
+    return [patch.id, patch.enabled ? 1 : 0, patch.morph.x.toFixed(3), patch.morph.y.toFixed(3), patch.modWheel.toFixed(2), layers, routes].join(':')
+  }).join('/')
+  return `${library}|${tracks}`
 }
