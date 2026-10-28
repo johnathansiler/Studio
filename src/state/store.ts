@@ -1756,7 +1756,6 @@ export class ProjectStore {
         this.dropSelectedPatterns()
         return
       }
-      if (this.dropSelectedPatterns()) return
       if (this.selectedNoteIds.length && this.selectedMidiClipId) {
         const notes = new Set(this.selectedNoteIds)
         for (const track of this.project.tracks) {
@@ -1768,10 +1767,12 @@ export class ProjectStore {
         return
       }
       const midi = new Set(this.selectedMidiClipIds.length ? this.selectedMidiClipIds : this.selectedMidiClipId ? [this.selectedMidiClipId] : [])
-      if (!midi.size) return
-      for (const track of this.project.tracks) track.midiClips = track.midiClips.filter((clip) => !midi.has(clip.id))
-      this.selectedMidiClipId = null
-      this.selectedMidiClipIds = []
+      if (midi.size) {
+        for (const track of this.project.tracks) track.midiClips = track.midiClips.filter((clip) => !midi.has(clip.id))
+        this.selectedMidiClipId = null
+        this.selectedMidiClipIds = []
+      }
+      this.dropSelectedPatterns()
     })
   }
 

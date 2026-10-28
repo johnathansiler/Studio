@@ -24,7 +24,7 @@ import { TRACK_ROW, TRACK_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
 import { ActionSheet, SheetRow, TipButton } from './Hint'
 import { RecordBar } from './RecordBar'
-import { coarsePointer, PATTERN_HOLD_MS, PATTERN_HOLD_SLOP, patternHoldOpensMenu, trimZone } from './touchEdit'
+import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, trimZone } from './touchEdit'
 
 export function ArrangeView({
   store,
@@ -324,7 +324,10 @@ export function ArrangeView({
 
   function moveSelection(event: ReactPointerEvent, kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
     event.stopPropagation()
-    if (kind === 'pattern') setPatternMenu(null)
+    if (kind === 'pattern') {
+      setPatternMenu(null)
+      if (touch) event.preventDefault()
+    }
     const additive = event.shiftKey || event.metaKey || event.ctrlKey
     const selected = kind === 'audio' ? store.selectedClipIds : kind === 'midi' ? store.selectedMidiClipIds : store.selectedPatternClipIds
     const wasIn = selected.includes(clipId)
@@ -347,21 +350,13 @@ export function ArrangeView({
     }
     const originX = event.clientX
     const originY = event.clientY
+    const started = performance.now()
     const deltas = new Map<string, number>()
-    let held = false
     let travel = 0
-    const timer = kind === 'pattern' && touch
-      ? window.setTimeout(() => {
-          if (!patternHoldOpensMenu(true, PATTERN_HOLD_MS, travel)) return
-          held = true
-          setPatternMenu({ x: originX, y: originY })
-        }, PATTERN_HOLD_MS)
-      : 0
     watch(
       (ev) => {
         travel = Math.max(travel, Math.hypot(ev.clientX - originX, ev.clientY - originY))
-        if (travel > PATTERN_HOLD_SLOP) window.clearTimeout(timer)
-        if (held || (kind === 'pattern' && touch && travel <= PATTERN_HOLD_SLOP)) return
+        if (kind === 'pattern' && touch && travel <= PATTERN_HOLD_SLOP) return
         const sampleDelta = ((ev.clientX - originX) / pxRef.current) * project.sampleRate
         const patch: Record<string, number> = {}
         for (const [id, item] of origins) {
@@ -372,9 +367,12 @@ export function ArrangeView({
         setNudge(kind === 'audio' ? { audio: patch, midi: {}, pattern: {} } : kind === 'midi' ? { audio: {}, midi: patch, pattern: {} } : { audio: {}, midi: {}, pattern: patch })
       },
       () => {
-        window.clearTimeout(timer)
         setNudge(null)
-        if (held) return
+        if (kind === 'pattern' && patternHoldOpensMenu(touch, performance.now() - started, travel)) {
+          store.selectClip(trackId, clipId, false, false)
+          setPatternMenu(patternMenuPoint(originX, originY, 168, 56, window.innerWidth, window.innerHeight))
+          return
+        }
         const moved = [...deltas.values()].some((value) => Math.abs(value) >= (kind === 'audio' ? 1 : 0.01))
         if (!moved) {
           if (additive && wasIn) store.selectClip(trackId, clipId, kind === 'midi', false, true)
@@ -655,7 +653,8 @@ export function ArrangeView({
                         data-pattern="1"
                         data-track={track.id}
                         className={`clip pattern ${picked ? 'selected' : ''}`}
-                        style={{ left, width: widthPx, background: pattern?.color || track.color, pointerEvents: passive ? 'none' : undefined }}
+                        style={{ left, width: widthPx, background: pattern?.color || track.color, pointerEvents: passive ? 'none' : undefined, touchAction: passive ? undefined : 'none' }}
+                        onContextMenu={(event) => event.preventDefault()}
                         onPointerDown={(event) => {
                           if ((event.target as HTMLElement).closest('.edge')) return
                           if (tool === 'erase') {

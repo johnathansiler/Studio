@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { ProjectStore } from '../state/store'
 import { createEmptyProject } from '../model/types'
 import { normalizeBeats, renderPattern, starterPattern } from '../model/steps'
-import { PATTERN_HOLD_MS, PATTERN_HOLD_SLOP, patternHoldOpensMenu } from '../ui/touchEdit'
+import { PATTERN_HOLD_MS, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint } from '../ui/touchEdit'
 
 describe('new arrangement', () => {
   it('starts empty and still keeps the default pattern in the rack', () => {
@@ -47,6 +47,43 @@ describe('saved automatic clip', () => {
     expect(store.project.patternClips).toEqual([])
     store.undo()
     expect(store.project.patternClips?.map((clip) => clip.id)).toEqual(['kept'])
+  })
+
+  it('keeps a clip the user edited, moved, trimmed, or placed, and drops only one untouched seed', () => {
+    const seed = (id: string, patternId: string, startBeat = 0) => ({ id, patternId, startBeat, lengthBeats: 4, scene: null })
+    const quiet = starterPattern()
+    quiet.channels[0].cells[0].velocity = 0.2
+    const velocity = normalizeBeats({ activeId: quiet.id, patterns: [quiet] }, [seed('vel', quiet.id)])
+    expect(velocity.patternClips.map((clip) => clip.id)).toEqual(['vel'])
+
+    const louder = starterPattern()
+    louder.channels[3].volume = 0.4
+    const level = normalizeBeats({ activeId: louder.id, patterns: [louder] }, [seed('level', louder.id)])
+    expect(level.patternClips.map((clip) => clip.id)).toEqual(['level'])
+
+    const sampled = starterPattern()
+    sampled.channels[0].sampleId = 'kick'
+    const sample = normalizeBeats({ activeId: sampled.id, patterns: [sampled] }, [seed('sample', sampled.id)])
+    expect(sample.patternClips.map((clip) => clip.id)).toEqual(['sample'])
+
+    const pattern = starterPattern()
+    const rack = { activeId: pattern.id, patterns: [pattern] }
+    const moved = normalizeBeats(rack, [seed('ghost', pattern.id), seed('mine', pattern.id, 8)])
+    expect(moved.patternClips.map((clip) => clip.id)).toEqual(['mine'])
+    expect(moved.patternClips[0].placed).toBe(true)
+
+    const trimmed = normalizeBeats(rack, [{ ...seed('trim', pattern.id), offsetBeats: 1 }])
+    expect(trimmed.patternClips.map((clip) => clip.id)).toEqual(['trim'])
+
+    const slot = normalizeBeats(rack, [{ ...seed('slot', pattern.id), scene: 0 }])
+    expect(slot.patternClips.map((clip) => clip.id)).toEqual(['slot'])
+
+    const flagged = normalizeBeats(rack, [{ ...seed('user', pattern.id), placed: true }])
+    expect(flagged.patternClips.map((clip) => clip.id)).toEqual(['user'])
+
+    const stacked = normalizeBeats(rack, [seed('a', pattern.id), seed('b', pattern.id)])
+    expect(stacked.patternClips.map((clip) => clip.id)).toEqual(['a', 'b'])
+    expect(stacked.patternClips.every((clip) => clip.placed)).toBe(true)
   })
 
   it('keeps a clip the user placed, including one at the start, across reload', () => {
@@ -114,6 +151,23 @@ describe('pattern clip edits', () => {
     store.undo()
     expect(store.project.patternClips).toHaveLength(1)
   })
+
+  it('deletes a pattern clip and a midi clip together, and undo restores both', () => {
+    const store = new ProjectStore(createEmptyProject(48000))
+    const track = store.project.tracks.find((item) => item.type === 'midi')!
+    store.placePattern(4)
+    const patternId = store.project.patternClips![0].id
+    store.addMidiClip(track.id, 2)
+    const midiId = track.midiClips[0].id
+    store.selectRegion([patternId], [midiId], track.id)
+    store.deleteSelectedClip()
+    expect(store.project.patternClips).toEqual([])
+    expect(track.midiClips).toEqual([])
+    store.undo()
+    const restored = store.project.tracks.find((item) => item.id === track.id)!
+    expect(store.project.patternClips?.map((clip) => clip.id)).toEqual([patternId])
+    expect(restored.midiClips.map((clip) => clip.id)).toEqual([midiId])
+  })
 })
 
 describe('phone pattern menu', () => {
@@ -123,5 +177,11 @@ describe('phone pattern menu', () => {
     expect(patternHoldOpensMenu(true, PATTERN_HOLD_MS - 1, 0)).toBe(false)
     expect(patternHoldOpensMenu(true, PATTERN_HOLD_MS + 200, PATTERN_HOLD_SLOP + 1)).toBe(false)
     expect(patternHoldOpensMenu(false, PATTERN_HOLD_MS + 200, 0)).toBe(false)
+  })
+
+  it('places the menu above the finger and inside the screen', () => {
+    expect(patternMenuPoint(100, 400, 168, 56, 390, 800)).toEqual({ x: 100, y: 332 })
+    expect(patternMenuPoint(300, 40, 168, 56, 390, 800)).toEqual({ x: 214, y: 52 })
+    expect(patternMenuPoint(380, 780, 168, 56, 390, 844)).toEqual({ x: 214, y: 712 })
   })
 })
