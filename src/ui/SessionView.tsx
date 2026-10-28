@@ -131,11 +131,11 @@ function SessionBody({
     else if (fresh.type !== 'midi') store.toast('Drop a sound here, or arm the track and record.', 'info')
   }
 
-  function bodyClick(track: Track, scene: number) {
+  function bodyClick(track: Track, scene: number, additive = false) {
     const key = `${track.id}:${scene}`
     const at = performance.now()
     const prev = lastClick.current
-    if (prev && prev.key === key && at - prev.at < 400) {
+    if (!additive && prev && prev.key === key && at - prev.at < 400) {
       lastClick.current = null
       openSlot(track, scene)
       return
@@ -145,8 +145,8 @@ function SessionBody({
     clickTimer.current = window.setTimeout(() => {
       const fresh = store.project.tracks.find((item) => item.id === track.id) ?? track
       const clip = sceneClip(fresh, scene)
-      store.armSlot(fresh.id, scene)
-      if (clip) showDetail()
+      store.armSlot(fresh.id, scene, additive)
+      if (clip && !additive) showDetail()
     }, 280)
   }
 
@@ -239,7 +239,17 @@ function SessionBody({
           />
         )}
         <div className="sl-stage">
-          <div className="sl-scroller" ref={clipScroll} style={{ ['--sl-rows' as string]: rows }} onScroll={(event) => syncScroll(event.currentTarget, mixScroll.current)}>
+          <div
+            className="sl-scroller"
+            ref={clipScroll}
+            style={{ ['--sl-rows' as string]: rows }}
+            onScroll={(event) => syncScroll(event.currentTarget, mixScroll.current)}
+            onPointerDown={(event) => {
+              const target = event.target as HTMLElement
+              if (target.closest('.slot, button, input, select, .sl-head')) return
+              store.clearSessionSelection()
+            }}
+          >
             {tracks.map((track) => (
               <TrackColumn
                 key={track.id}
@@ -328,7 +338,7 @@ function TrackColumn({
   engine: AudioEngine
   track: Track
   now: number
-  onBody: (track: Track, scene: number) => void
+  onBody: (track: Track, scene: number, additive?: boolean) => void
   onOpen: (track: Track, scene: number) => void
   onLaunch: (track: Track, scene: number) => void
   onStop: () => void
@@ -392,7 +402,7 @@ function TrackColumn({
             role="button"
             tabIndex={0}
             draggable={!!clip}
-            className={`slot ${clip ? 'filled' : ''} ${phase.phase === 'playing' ? 'live' : ''} ${phase.phase === 'queued' ? 'queued' : ''} ${phase.phase === 'stopping' ? 'stopping' : ''}`}
+            className={`slot ${clip ? 'filled' : ''} ${phase.phase === 'playing' ? 'live' : ''} ${phase.phase === 'queued' ? 'queued' : ''} ${phase.phase === 'stopping' ? 'stopping' : ''} ${store.selectedSessionSlots.some((slot) => slot.trackId === track.id && slot.scene === scene) ? 'chosen' : ''}`}
             style={clip ? { backgroundColor: clipPaint(clip, track.color) } : undefined}
             title={clip ? label.title : 'Empty slot. Double-click a MIDI track to make a 1-bar clip.'}
             aria-label={clip ? `${label.title}. ${phaseLabel} Click to edit. The triangle launches.` : `${track.name} scene ${scene + 1}. Empty slot.`}
@@ -407,7 +417,7 @@ function TrackColumn({
             onClick={(event) => {
               const hit = (event.target as HTMLElement).closest('[data-slot-launch], [data-slot-stop]')
               if (hit) return
-              if (slotGesture('body', 1) === 'select') onBody(track, scene)
+              if (slotGesture('body', 1) === 'select') onBody(track, scene, event.shiftKey || event.metaKey || event.ctrlKey)
             }}
             onKeyDown={(event) => {
               if (event.key === 'Enter') onBody(track, scene)

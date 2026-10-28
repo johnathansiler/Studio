@@ -61,7 +61,7 @@ import {
   trimLinkedAudio,
   trimLinkedMidi,
 } from '../model/mixGroups'
-import { channelRoute, mirrorTrackMix } from '../model/sharedMix'
+import { mirrorTrackMix } from '../model/sharedMix'
 import { demoMidiNotes } from '../model/demo'
 import {
   clipById,
@@ -202,6 +202,11 @@ export class ProjectStore {
   selectedMidiClipIds: string[] = []
   selectedPatternClipId: string | null = null
   selectedPatternClipIds: string[] = []
+  /** Channel-rack steps. Not saved. One entry is one pad, never a shared row. */
+  selectedRackSteps: { channelId: string; index: number }[] = []
+  selectedRackChannels: string[] = []
+  /** Session slots, keyed by track and scene so one clip id cannot light every row. */
+  selectedSessionSlots: { trackId: string; scene: number }[] = []
   selectedNoteId: string | null
   selectedNoteIds: string[] = []
   view: WorkspaceView = 'arrange'
@@ -2811,8 +2816,13 @@ export class ProjectStore {
         const pattern = this.activePattern()
         const channel = pattern?.channels.find((row) => row.id === channelId)
         const cell = channel?.cells[index]
-        if (!cell) return
-        cell.on = on
+        if (!channel || !cell) return
+        const shared = channel.cells.some((other, at) => at !== index && other === cell)
+        if (!shared) {
+          cell.on = on
+          return
+        }
+        channel.cells = channel.cells.map((item, at) => (item === cell ? { ...item, ...(at === index ? { on } : {}) } : item))
       })
       return
     }
@@ -3780,12 +3790,18 @@ export class ProjectStore {
     return pending
   }
 
-  armSlot(trackId: string, scene: number) {
+  armSlot(trackId: string, scene: number, additive = false) {
     this.sessionSlot = { trackId, scene }
-    this.sessionEdit = { trackId, scene }
-    const track = this.track(trackId)
-    const clip = track ? sceneClip(track, scene) : null
-    this.selectedTrackId = trackId
+    const picked = this.selectedSessionSlots.some((slot) => slot.trackId === trackId && slot.scene === scene)
+    if (!additive) this.selectedSessionSlots = [{ trackId, scene }]
+    else this.selectedSessionSlots = picked
+      ? this.selectedSessionSlots.filter((slot) => !(slot.trackId === trackId && slot.scene === scene))
+      : [...this.selectedSessionSlots, { trackId, scene }]
+    const focus = this.selectedSessionSlots.at(-1) ?? null
+    this.sessionEdit = focus
+    const track = focus ? this.track(focus.trackId) : this.track(trackId)
+    const clip = focus && track ? sceneClip(track, focus.scene) : null
+    this.selectedTrackId = focus?.trackId ?? trackId
     if (clip && track?.type === 'midi') {
       this.selectedMidiClipId = clip.id
       this.selectedClipId = null
@@ -3793,6 +3809,13 @@ export class ProjectStore {
       this.selectedClipId = clip.id
       this.selectedMidiClipId = null
     }
+    this.emit()
+  }
+
+  clearSessionSelection() {
+    if (!this.selectedSessionSlots.length && !this.sessionEdit) return
+    this.selectedSessionSlots = []
+    this.sessionEdit = null
     this.emit()
   }
 
@@ -4454,6 +4477,85 @@ export class ProjectStore {
     })
   }
 
+  setRackMode(mode: 'pattern' | 'song') {
+    if (this.project.rackMode === mode) return
+    this.mutate(() => {
+      this.project.rackMode = mode
+    })
+  }
+
+  selectRackStep(channelId: string, index: number, additive = false) {
+    const hit = (step: { channelId: string; index: number }) => step.channelId === channelId && step.index === index
+    if (!additive) {
+      this.selectedRackSteps = [{ channelId, index }]
+      this.selectedRackChannels = [channelId]
+    } else {
+      const has = this.selectedRackSteps.some(hit)
+      this.selectedRackSteps = has
+        ? this.selectedRackSteps.filter((step) => !hit(step))
+        : [...this.selectedRackSteps, { channelId, index }]
+      if (!this.selectedRackChannels.includes(channelId)) this.selectedRackChannels = [...this.selectedRackChannels, channelId]
+    }
+    this.emit()
+  }
+
+  selectRackSteps(steps: { channelId: string; index: number }[], additive = false) {
+    const unique = steps.filter((step, index) => steps.findIndex((other) => other.channelId === step.channelId && other.index === step.index) === index)
+    if (!additive) {
+      this.selectedRackSteps = unique
+      this.selectedRackChannels = [...new Set(unique.map((step) => step.channelId))]
+    } else {
+      const next = [...this.selectedRackSteps]
+      for (const step of unique) {
+        if (!next.some((item) => item.channelId === step.channelId && item.index === step.index)) next.push(step)
+      }
+      this.selectedRackSteps = next
+      this.selectedRackChannels = [...new Set([...this.selectedRackChannels, ...unique.map((step) => step.channelId)])]
+    }
+    this.emit()
+  }
+
+  selectRackChannel(channelId: string, additive = false) {
+    if (!additive) {
+      this.selectedRackChannels = [channelId]
+      this.selectedRackSteps = this.selectedRackSteps.filter((step) => step.channelId === channelId)
+    } else {
+      const has = this.selectedRackChannels.includes(channelId)
+      this.selectedRackChannels = has
+        ? this.selectedRackChannels.filter((id) => id !== channelId)
+        : [...this.selectedRackChannels, channelId]
+      if (has) this.selectedRackSteps = this.selectedRackSteps.filter((step) => step.channelId !== channelId)
+    }
+    this.emit()
+  }
+
+  clearRackSelection() {
+    if (!this.selectedRackSteps.length && !this.selectedRackChannels.length) return
+    this.selectedRackSteps = []
+    this.selectedRackChannels = []
+    this.emit()
+  }
+
+  /** Point one arrangement clip at its own pattern. The other copies stay linked. */
+  makePatternClipUnique(clipId: string) {
+    this.mutate(() => {
+      const beats = this.project.beats
+      const clip = this.project.patternClips?.find((item) => item.id === clipId)
+      if (!beats || !clip) return
+      const pattern = beats.patterns.find((item) => item.id === clip.patternId)
+      if (!pattern) return
+      const users = (this.project.patternClips ?? []).filter((item) => item.patternId === pattern.id).length
+        + this.project.tracks.reduce((count, track) => count + track.midiClips.filter((item) => item.patternId === pattern.id).length, 0)
+      if (users < 2) return
+      const copy = clonePattern(pattern, `${pattern.name} unique`)
+      beats.patterns.push(copy)
+      clip.patternId = copy.id
+      beats.activeId = copy.id
+      this.selectedPatternClipId = clip.id
+      this.selectedPatternClipIds = [clip.id]
+    })
+  }
+
   renamePattern(name: string) {
     this.mutate(() => {
       const pattern = this.activePattern()
@@ -4543,29 +4645,14 @@ export class ProjectStore {
     run(() => {
       const channel = this.activePattern()?.channels.find((row) => row.id === channelId)
       if (!channel) return
-      const mix: { volume?: number; pan?: number; mute?: boolean; solo?: boolean } = {}
-      if (patch.volume != null) mix.volume = patch.volume
-      if (patch.pan != null) mix.pan = patch.pan
-      if (patch.mute != null) mix.mute = patch.mute
-      if (patch.solo != null) mix.solo = patch.solo
-      if (Object.keys(mix).length) {
-        const trackId = channelRoute(this.project, channel)
-        if (trackId) {
-          patchMixer(this.project, trackId, mix)
-          mirrorTrackMix(this.project, trackId)
-        }
-      }
-      const rest: Partial<typeof patch> = { ...patch }
-      delete rest.volume
-      delete rest.pan
-      delete rest.mute
-      delete rest.solo
-      Object.assign(channel, rest)
+      if (patch.volume != null) channel.volume = Math.max(0, Math.min(1.5, patch.volume))
+      if (patch.pan != null) channel.pan = Math.max(-1, Math.min(1, patch.pan))
+      if (patch.mute != null) channel.mute = patch.mute
+      if (patch.solo != null) channel.solo = patch.solo
+      if (patch.name != null && patch.name.trim()) channel.name = patch.name.trim()
+      if (patch.output !== undefined) channel.output = patch.output
+      if (patch.swing !== undefined) channel.swing = patch.swing == null ? null : Math.max(0, Math.min(0.9, patch.swing))
       if (patch.steps != null) channel.steps = Math.max(1, Math.min(64, Math.round(patch.steps)))
-      if (patch.output !== undefined) {
-        const next = channelRoute(this.project, channel)
-        if (next) mirrorTrackMix(this.project, next)
-      }
     })
   }
 

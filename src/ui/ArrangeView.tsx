@@ -757,6 +757,7 @@ export function ArrangeView({
                     const left = pxAtBeat(project, beat, px)
                     const widthPx = Math.max(24, pxAtBeat(project, beat + clip.lengthBeats, px) - left)
                     const picked = store.selectedPatternClipIds.includes(clip.id)
+                    const linked = (project.patternClips ?? []).filter((item) => item.scene == null && item.patternId === clip.patternId).length > 1
                     return (
                       <div
                         key={clip.id}
@@ -790,7 +791,21 @@ export function ArrangeView({
                           moveSelection(event, 'pattern', track.id, clip.id)
                         }}
                       >
-                        <em>{pattern?.name || 'Pattern'}</em>
+                        <em>{pattern?.name || 'Pattern'}{linked ? ' · Linked' : ''}</em>
+                        {picked && linked && (
+                          <button
+                            type="button"
+                            className="clip-unique"
+                            title="Make this clip its own pattern. The other copies stay linked."
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              store.makePatternClipUnique(clip.id)
+                            }}
+                          >
+                            Unique
+                          </button>
+                        )}
                         <span className="clip-steps" aria-hidden>
                           {(pattern?.channels ?? []).slice(0, 4).map((channel) => (
                             <span key={channel.id}>
@@ -822,6 +837,7 @@ export function ArrangeView({
       {patternMenu && (
         <div className="touch-menu" style={{ left: patternMenu.x, top: patternMenu.y }}>
           <button type="button" title="Copy this pattern clip and place it just after." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.duplicateSelection(); setPatternMenu(null) }}>Duplicate</button>
+          <button type="button" title="Give this clip its own pattern so edits stay here." onPointerDown={(event) => event.stopPropagation()} onClick={() => { const id = store.selectedPatternClipId; if (id) store.makePatternClipUnique(id); setPatternMenu(null) }}>Make unique</button>
           <button type="button" title="Remove this pattern clip from the arrangement." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setPatternMenu(null) }}>Delete</button>
         </div>
       )}

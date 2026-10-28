@@ -1,7 +1,7 @@
 import type { Project, Track } from './types'
 import type { StepChannel } from './steps'
 
-/** Where a Beats row is heard. An empty output uses the first instrument track. */
+/** Where a Beats row follows the mixer. An empty output uses the first instrument track. */
 export function channelRoute(project: Project, channel: Pick<StepChannel, 'output'>): string | null {
   if (channel.output) return channel.output
   return project.tracks.find((track) => track.type === 'midi')?.id ?? null

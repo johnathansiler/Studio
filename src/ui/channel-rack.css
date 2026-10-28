@@ -456,6 +456,62 @@
   box-shadow: inset -3px 0 0 var(--accent), var(--raised);
 }
 
+.rack-step.picked {
+  outline: 2px solid #fff;
+  outline-offset: -3px;
+  z-index: 1;
+}
+
+.rack-mode {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.rack-wait {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #e0b15a;
+  box-shadow: 0 0 8px #e0b15a;
+  vertical-align: middle;
+}
+
+.rack-retry,
+.rack-sample-note button {
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--raised);
+}
+
+.rack-sample-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #2a2118;
+  color: #f3d7b0;
+  font-size: 13px;
+}
+
+.rack-marquee {
+  position: fixed;
+  z-index: 5;
+  pointer-events: none;
+  border: 1px solid #f4fff4;
+  background: rgba(244, 255, 244, 0.16);
+  box-shadow: 0 0 12px rgba(244, 255, 244, 0.35);
+}
+
 .rack-step.now {
   z-index: 1;
   box-shadow: var(--pressed), 0 0 14px #f4fff4, 0 0 2px #fff;

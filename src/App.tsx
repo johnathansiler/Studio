@@ -1439,9 +1439,9 @@ async function importDropped(files: FileList) {
           engine={engine}
           syncLabel={session.state.syncLabel}
           simple={phone}
-          onPlay={() => void play()}
+          onPlay={() => { engine.unlock(); void play() }}
           onStop={() => void stop()}
-          onRecord={() => void record()}
+          onRecord={() => { engine.unlock(); void record() }}
           onSeek={(sample) => void locate(sample)}
           takeProgress={session.state.takeProgress}
         />
