@@ -171,24 +171,29 @@ describe('pattern clip edits', () => {
   })
 })
 
+/** Stand-in for a focused element. `editingText` only reads these two fields. */
+function fakeTarget(tagName: string, isContentEditable: boolean): EventTarget {
+  return { tagName, isContentEditable } as unknown as EventTarget
+}
+
 describe('timeline delete key', () => {
-  const timeline = { tagName: 'DIV', isContentEditable: false }
-  const field = { tagName: 'INPUT', isContentEditable: false }
+  const timeline = fakeTarget('DIV', false)
+  const field = fakeTarget('INPUT', false)
 
   it('removes a selected pattern, audio, or MIDI clip, and leaves text fields alone', () => {
     expect(deletesSelection('Delete', timeline)).toBe(true)
     expect(deletesSelection('Backspace', timeline)).toBe(true)
     expect(deletesSelection('Delete', null)).toBe(true)
     expect(deletesSelection('Delete', field)).toBe(false)
-    expect(deletesSelection('Backspace', { tagName: 'TEXTAREA', isContentEditable: false })).toBe(false)
-    expect(deletesSelection('Backspace', { tagName: 'SELECT', isContentEditable: false })).toBe(false)
-    expect(deletesSelection('Backspace', { tagName: 'DIV', isContentEditable: true })).toBe(false)
+    expect(deletesSelection('Backspace', fakeTarget('TEXTAREA', false))).toBe(false)
+    expect(deletesSelection('Backspace', fakeTarget('SELECT', false))).toBe(false)
+    expect(deletesSelection('Backspace', fakeTarget('DIV', true))).toBe(false)
     expect(deletesSelection('Enter', timeline)).toBe(false)
 
     const store = new ProjectStore(createEmptyProject(48000))
     const audioId = store.project.tracks.find((track) => track.type === 'audio')!.id
     const midi = store.project.tracks.find((track) => track.type === 'midi')!
-    const press = (key: string, target: { tagName: string; isContentEditable: boolean }) => {
+    const press = (key: string, target: EventTarget) => {
       if (deletesSelection(key, target)) store.deleteSelectedClip()
     }
 
