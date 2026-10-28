@@ -36,6 +36,7 @@ import { PlayersSheet } from './ui/PlayersSheet'
 import { UnstuckSheet } from './unstuck/UnstuckSheet'
 import { LibraryPop } from './ui/LibraryPop'
 import { SoundBrowser } from './ui/SoundBrowser'
+import { clampSoundWidth, readSoundWidth } from './sounds/panel'
 import { loadScaleCatalog } from './theory'
 import { AnalysisSheet } from './ui/AnalysisSheet'
 import { QuantizeSheet } from './ui/QuantizeSheet'
@@ -52,7 +53,7 @@ import { ToolBar } from './ui/ToolBar'
 import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
 import { MENU_COPY, UNSTUCK_COPY, VIEW_COPY, copyOf, described } from './ui/chrome'
-import { paneAfterRestore, readSessionDock, writeSessionDock } from './ui/sessionDock'
+import { EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, readSessionDock, writeSessionDock } from './ui/sessionDock'
 import { HintBubble, MenuRow, TipButton } from './ui/Hint'
 import { formatBytes } from './ui/share'
 
@@ -97,8 +98,13 @@ export function App() {
   useEffect(() => watchSpectral(store), [store])
   const [version, setVersion] = useState(0)
   const [surface, setSurface] = useState<'studio' | 'artist'>('studio')
-  const [dock, setDock] = useState(380)
+  const [dock, setDock] = useState(() => fittedDockWidth(typeof window === 'undefined' ? 1280 : window.innerWidth, EDITOR_DOCK_DEFAULT))
   const [dockEdge, setDockEdge] = useState<'right' | 'bottom'>('right')
+  useEffect(() => {
+    const fit = () => setDock((value) => fittedDockWidth(window.innerWidth, value, dockEdge))
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
+  }, [dockEdge])
   const [joinOpen, setJoinOpen] = useState(false)
   const [joinCode, setJoinCode] = useState('')
   const [joinName, setJoinName] = useState(store.project.name ? localStorage.getItem('cueharbor-name') || 'Artist' : 'Artist')
@@ -126,6 +132,8 @@ export function App() {
   const [unstuckOpen, setUnstuckOpen] = useState(() => new URLSearchParams(window.location.search).get('unstuck') === '1')
   const [libraryOpen, setLibraryOpen] = useState(() => new URLSearchParams(window.location.search).get('library') === '1')
   const [soundsOpen, setSoundsOpen] = useState(() => new URLSearchParams(window.location.search).get('sounds') === '1')
+  const [soundWidth, setSoundWidth] = useState(() => readSoundWidth(undefined, window.innerWidth))
+  const soundReserveRef = useRef(0)
   useEffect(() => {
     const open = () => setSoundsOpen(true)
     window.addEventListener('cueharbor-open-sounds', open)
@@ -195,7 +203,7 @@ export function App() {
           },
         )
         const stopped = engine.status === 'stopped'
-        store.replaceSession(next)
+        store.replaceSession(next, engine.currentTimelineSample())
         if (action === 'back' || action === 'stop-clips') return
         if (stopped && next.mode === 'session' && Object.values(next.launched).some(Boolean)) {
           const localPerf = guestFollowStart({
@@ -547,6 +555,7 @@ export function App() {
       const next = formFactor(window.innerWidth, window.innerHeight)
       setForm(next)
       setLand(window.innerWidth > window.innerHeight)
+      setSoundWidth((value) => clampSoundWidth(value, window.innerWidth, soundReserveRef.current))
       document.documentElement.classList.toggle('phone-root', next === 'phone')
       document.documentElement.dataset.form = next
     }
@@ -721,7 +730,7 @@ export function App() {
         at: cmd.launchAt && typeof cmd.launchAt === 'object' ? (cmd.launchAt as Record<string, number>) : {},
         gen: cmd.launchGen && typeof cmd.launchGen === 'object' ? (cmd.launchGen as Record<string, number>) : {},
         mode: cmd.mode === 'session' ? 'session' : 'arrangement',
-      })
+      }, engine.currentTimelineSample())
     }
     const counting = Boolean(cmd.countIn)
     const tempo = Number(cmd.tempo) || store.project.tempo
@@ -921,11 +930,15 @@ export function App() {
     }
     const slot = store.sessionSlot
     const slotTrack = slot ? store.project.tracks.find((track) => track.id === slot.trackId) : undefined
+    const intoSlot = Boolean(slot && slotTrack && (slotTrack.type === 'audio' || slotTrack.type === 'midi'))
     if (slot && slotTrack?.type === 'midi') {
       store.prepareMidiSlot(slot.trackId, slot.scene)
-      if (engine.status !== 'playing') await playFrom(engine.currentTimelineSample(), 'session')
-      return
+      const fresh = store.track(slot.trackId)
+      if (fresh && (!fresh.armed || fresh.input === 'none')) {
+        store.updateTrack(slot.trackId, { armed: true, input: fresh.input === 'none' ? 'midi' : fresh.input })
+      }
     }
+    if (intoSlot && store.transportMode !== 'session') store.enterSession()
     await ready()
     const takeId = uid('take')
     const inputs = await collectRecordInputs({
@@ -944,6 +957,7 @@ export function App() {
     const settings = store.recordSettings()
     const punched = settings.punchEnabled ? punchWindow(settings, store.project.sampleRate, store.project.tempo, store.project.timeSignature) : null
     const alreadyPlaying = engine.status === 'playing'
+    const transportMode = intoSlot || store.transportMode === 'session' || engine.currentMode() === 'session' ? 'session' : 'arrangement'
     let fromSample = Math.round(engine.currentTimelineSample())
     if (!alreadyPlaying && punched) fromSample = punched.playFrom
     else if (!alreadyPlaying && settings.loop && store.project.loopEnabled) fromSample = store.project.loopStartSample
@@ -957,7 +971,7 @@ export function App() {
         action: 'play',
         timelineSample: fromSample,
         hostPerfAtSample: hostPerf,
-        mode: 'arrangement',
+        mode: transportMode,
         tempo: tempoAtSample(store.project, fromSample),
         countIn: counting,
         countInMs: Math.round(countMs),
@@ -969,7 +983,11 @@ export function App() {
       inputs,
       countIn: counting,
       hostPerfAtSample: alreadyPlaying ? undefined : hostPerf,
+      mode: transportMode,
       onPunch: (info) => {
+        if (slot && slotTrack?.type === 'midi') {
+          store.sessionRecordBeat = samplesToBeats(info.timelineSample, store.project.sampleRate, store.project.tempo)
+        }
         takeRef.current = { id: takeId, endSample: info.timelineSample }
         store.beginTake()
         if (punched) {
@@ -1113,8 +1131,7 @@ async function importDropped(files: FileList) {
     await importAudio(transfer.files)
   }
 
-  const armedTrack = store.sessionSlot ? store.project.tracks.find((track) => track.id === store.sessionSlot?.trackId) : undefined
-  const rollWanted = !!store.selectedMidiClipId && (store.view === 'arrange' || store.view === 'beats' || (store.view === 'session' && armedTrack?.type === 'midi'))
+  const rollWanted = !!store.selectedMidiClipId && (store.view === 'arrange' || store.view === 'beats')
   const panel: 'room' | 'piano' | 'rack' =
     surface !== 'studio' || phonePane === 'room' ? 'room'
     : pianoOpen ? 'piano'
@@ -1126,6 +1143,11 @@ async function importDropped(files: FileList) {
   const studioTab: StudioTab = collabOpen ? 'collab' : store.view
   const collabShown = collabPanelVisible(studioTab)
   const dockShown = surface === 'studio' && !collabShown && (panel === 'piano' || panel === 'rack')
+  const soundReserve = !phone && dockShown && dockEdge === 'right' ? dock : 0
+  soundReserveRef.current = soundReserve
+  useEffect(() => {
+    setSoundWidth((value) => clampSoundWidth(value, window.innerWidth, soundReserve))
+  }, [soundReserve])
   const waitingGuests = session.state.participants.filter((person) => !person.admitted && person.role !== 'host').length
   const collabBadge = collabBadgeOn({
     tab: studioTab,
@@ -1170,7 +1192,7 @@ async function importDropped(files: FileList) {
   return (
     <div
       className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''}`}
-      style={{ ['--dock' as string]: `${dock}px` }}
+      style={{ ['--dock' as string]: `${dock}px`, ['--sounds' as string]: `${soundWidth}px` }}
       data-version={version}
       data-form={form}
       data-session-dock="closed"
@@ -1253,7 +1275,7 @@ async function importDropped(files: FileList) {
             <MenuRow label={copyOf(MENU_COPY, 'generate').label} hint={copyOf(MENU_COPY, 'generate').hint} onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); setGenerateOpen(true) }} />
             <MenuRow label={copyOf(MENU_COPY, 'players').label} hint={copyOf(MENU_COPY, 'players').hint} onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); setPlayersOpen(true) }} />
             <MenuRow label="Scales" hint="Browse scales and the chords inside them." onClick={() => { setMenuOpen(false); setLibraryOpen(true) }} />
-            <MenuRow label="Sounds" hint="Browse loops and one-shots. Add one at the playhead." onClick={() => { setMenuOpen(false); setSoundsOpen(true) }} />
+            <MenuRow label="Sounds" hint="Browse loops, one-shots, and starter instruments." onClick={() => { setMenuOpen(false); setSoundsOpen(true) }} />
             <MenuRow className="split" label={copyOf(MENU_COPY, 'quantize').label} hint={copyOf(MENU_COPY, 'quantize').hint} onClick={() => { setMenuOpen(false); store.quickQuantize() }} />
             <MenuRow label={copyOf(MENU_COPY, 'quantize-more').label} hint={copyOf(MENU_COPY, 'quantize-more').hint} onClick={() => { setMenuOpen(false); store.openQuantize() }} />
             <MenuRow className="split" label={copyOf(MENU_COPY, 'click').label} hint={copyOf(MENU_COPY, 'click').hint} pressed={store.project.metronomeEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('metronomeEnabled')} />
@@ -1340,7 +1362,7 @@ async function importDropped(files: FileList) {
           <MidiTools store={store} engine={engine} />
         </div>
       )}
-      <div className={`workspace ${dockShown ? '' : 'session-closed'} ${!phone && dockEdge === 'bottom' && surface === 'studio' && dockShown ? 'dock-bottom' : ''}`}>
+      <div className={`workspace ${dockShown ? '' : 'session-closed'} ${soundsOpen && !phone ? 'sounds-open' : ''} ${!phone && dockEdge === 'bottom' && surface === 'studio' && dockShown ? 'dock-bottom' : ''}`}>
         {collabShown && (
           <div className="collab-pane" data-collab-panel="open">
             <VideoDock
@@ -1391,6 +1413,9 @@ async function importDropped(files: FileList) {
             </div>
           </div>
         )}
+        {soundsOpen && (
+          <SoundBrowser store={store} engine={engine} phone={phone} reserve={soundReserve} onWidth={setSoundWidth} onClose={() => { engine.stopPreview(); setSoundsOpen(false) }} />
+        )}
         {dockShown && <div
           className="dock-slot panel-slot"
           onPointerDown={(event) => {
@@ -1401,7 +1426,7 @@ async function importDropped(files: FileList) {
             const initial = dock
             const move = (ev: PointerEvent) => {
               const delta = dockEdge === 'right' ? start - ev.clientX : start - ev.clientY
-              setDock(Math.min(dockEdge === 'right' ? 760 : 520, Math.max(280, initial + delta)))
+              setDock(fittedDockWidth(window.innerWidth, initial + delta, dockEdge))
             }
             const up = () => {
               window.removeEventListener('pointermove', move)
@@ -1411,6 +1436,13 @@ async function importDropped(files: FileList) {
             window.addEventListener('pointerup', up)
           }}
         >
+          <div
+            className="dock-resize"
+            role="separator"
+            aria-orientation={dockEdge === 'bottom' ? 'horizontal' : 'vertical'}
+            aria-label="Resize editor. Drag to change its size."
+            title="Drag to resize the editor."
+          />
           {surface === 'studio' && panel === 'rack' && store.rackTrackId && (
             <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
           )}
@@ -1428,7 +1460,6 @@ async function importDropped(files: FileList) {
       {playersOpen && <PlayersSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setPlayersOpen(false) }} />}
       {unstuckOpen && <UnstuckSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }} />}
       {libraryOpen && <LibraryPop store={store} engine={engine} onClose={() => setLibraryOpen(false)} />}
-      {soundsOpen && <SoundBrowser store={store} engine={engine} phone={phone} onClose={() => { engine.stopPreview(); setSoundsOpen(false) }} />}
       {analysisTrackId && <AnalysisSheet store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} />}
       {perform && (
         <PerformPop

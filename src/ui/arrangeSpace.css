@@ -22,49 +22,41 @@ html[data-posture="book"] .shell:not(.phone) .workspace.session-closed {
 .clip .edge,
 .arrange[data-tool="trim"] .clip .edge {
   left: 0;
-  width: 24px;
-  min-width: 24px;
+  width: 28px;
+  min-width: 28px;
   height: 100%;
   z-index: 4;
   touch-action: none;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0));
 }
 
 .clip .edge.r,
 .arrange[data-tool="trim"] .clip .edge.r {
   left: auto;
   right: 0;
+  background: linear-gradient(270deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0));
 }
 
 .clip .edge::after {
   content: "";
   position: absolute;
-  top: 16%;
-  bottom: 16%;
-  width: 3px;
+  top: 12%;
+  bottom: 12%;
+  width: 4px;
   border-radius: 2px;
   background: #fff;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
-  opacity: 0;
-}
-
-.clip .edge:not(.r)::after { left: 7px; }
-.clip .edge.r::after { right: 7px; }
-
-.clip.selected .edge::after {
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
   opacity: 1;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .clip:hover .edge::after {
-    opacity: 1;
-  }
-}
+.clip .edge:not(.r)::after { left: 6px; }
+.clip .edge.r::after { right: 6px; }
 
 @media (pointer: coarse) {
   .clip .edge,
   .arrange[data-tool="trim"] .clip .edge {
-    width: 28px;
-    min-width: 28px;
+    width: 36px;
+    min-width: 36px;
   }
 }
 
