@@ -8,7 +8,7 @@ import { normalizeMidiProject } from '../../model/midiTools'
 import { normalizeTrackScaler } from '../../instruments/scaler/model'
 import { normalizeScale } from '../../model/scale'
 import { normalizePadKit } from '../../model/padMachine'
-import { bindPatternClips, normalizeBeats } from '../../model/steps'
+import { bindPatternClips, normalizeBeats, repairArrangementIdentities } from '../../model/steps'
 import { normalizeMix } from '../../model/mixGroups'
 import { normalizeOmniProject } from '../../instruments/patch/model'
 import { tuneLiveLatency } from './autoTune'
@@ -953,6 +953,7 @@ export function normalizeProject(project: Project): Project {
   const beats = normalizeBeats(project.beats, project.patternClips)
   project.beats = beats.beats
   project.patternClips = bindPatternClips(beats.patternClips, project.tracks)
+  repairArrangementIdentities(project)
   project.roll = { ...defaultRoll(), ...project.roll }
   project.quantize = normalizeQuantize(project.quantize)
   project.quantizePresets = project.quantizePresets ?? []

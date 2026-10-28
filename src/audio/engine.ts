@@ -19,8 +19,8 @@ import { renderNotes } from './rack/dsp'
 import { LibraryHost } from './multisample/host'
 import type { SamplePack } from './multisample/types'
 import { renderQuantizedClip } from '../model/quantize'
-import { emptyPatternLoopSamples } from '../model/channelRack'
-import { patternPlayRange, renderPattern, type PatternClip, type RenderedHit } from '../model/steps'
+import { emptyPatternLoopSamples, patternHitTrack, rackPlayMode, transportPatternClips } from '../model/channelRack'
+import { patternPlayRange, renderPattern, type RenderedHit } from '../model/steps'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav, linearResample } from '../model/wav'
 import { tuneBlockScale } from './plugins/autoTune'
@@ -73,25 +73,6 @@ interface Stoppable {
 }
 
 type PunchInfo = { timelineSample: number; cueEpochHostPerf: number; ctxTime: number }
-
-/**
- * Arrangement clips win. On an empty song the live transport still loops the
- * rack, so the active pattern is heard without planting a clip on the timeline.
- * Offline bounces stay on the clips that were actually placed.
- */
-function patternClipsToPlay(project: Project, live: boolean): PatternClip[] {
-  const clips = project.patternClips ?? []
-  if (!live || clips.some((clip) => clip.scene == null) || emptyPatternLoopSamples(project) <= 16) return clips
-  const pattern = project.beats?.patterns.find((item) => item.id === project.beats?.activeId)
-  if (!pattern) return clips
-  return [{
-    id: 'live-pattern',
-    patternId: pattern.id,
-    startBeat: 0,
-    lengthBeats: pattern.steps * 0.25,
-    scene: null,
-  }]
-}
 
 export class AudioEngine {
   ctx: AudioContext | null = null
@@ -170,6 +151,8 @@ export class AudioEngine {
   private playOriginCtx = 0
   private playOriginSample = 0
   private arrangementScheduled = false
+  /** Pattern mode and the open pattern. A change rearms the shared transport. */
+  private rackToken = ''
   private loopArmed: boolean | null = null
   private nextLoopCtx: number | null = null
   private nextLoopSample = 0
@@ -476,7 +459,12 @@ export class AudioEngine {
       return { sampleRate: asset.sampleRate, channel }
     })
     this.applyMixerAutomation()
+    const pattern = project.beats?.patterns.find((item) => item.id === project.beats?.activeId)
+    const token = `${rackPlayMode(project)}:${pattern?.id ?? ''}:${pattern?.steps ?? 0}:${pattern?.swing ?? 0}`
+    const rackChanged = this.rackToken !== '' && this.rackToken !== token
+    this.rackToken = token
     if (loopFlip && this.playing && this.mode === 'arrangement') this.rearmLoop()
+    else if (rackChanged && this.playing && this.mode === 'arrangement' && this.status !== 'recording') this.rearmLoop()
   }
 
   /** Faders, pans, sends, and solo follow the project. Playing lanes are scheduled on the audio clock. */
@@ -1634,7 +1622,7 @@ export class AudioEngine {
       this.positionSamples = sample
       const project = this.project
       const patternLoop = project && this.status !== 'recording' ? emptyPatternLoopSamples(project) : 0
-      if (patternLoop > 1) this.positionSamples = sample % patternLoop
+      if (patternLoop > 1) this.positionSamples = ((linear % patternLoop) + patternLoop) % patternLoop
       if (patternLoop <= 1 && project && this.mode === 'arrangement' && this.status === 'playing') {
         if (playbackStops(linear, project, arrangementEndSample(project), this.sampleRate)) {
           this.stop()
@@ -1748,7 +1736,9 @@ export class AudioEngine {
     const project = this.project
     if (!ctx || !project || !this.playing) return
     const now = ctx.currentTime + 0.02
-    const sample = this.heardSample(Math.max(0, this.sampleAt(ctx.currentTime)))
+    const linear = Math.max(0, this.sampleAt(ctx.currentTime))
+    const patternLoop = emptyPatternLoopSamples(project)
+    const sample = patternLoop > 1 ? ((linear % patternLoop) + patternLoop) % patternLoop : this.heardSample(linear)
     this.stopSources()
     this.playOriginCtx = now
     this.playOriginSample = sample
@@ -2052,28 +2042,36 @@ export class AudioEngine {
     timelineStart: number,
     timelineEnd: number,
   ) {
-    const midiId = project.tracks.find((track) => track.type === 'midi')?.id
-    const clips = patternClipsToPlay(project, ctx === this.ctx)
+    const clips = transportPatternClips(project, ctx === this.ctx)
+    const masterPass = trackId === project.tracks[0]?.id
     for (const clip of clips) {
       if (clip.scene != null) continue
       const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
       if (!pattern) continue
       const range = patternPlayRange(clip)
       for (const hit of renderPattern(pattern, range.from, range.to)) {
-        if ((hit.output || clip.trackId || midiId) !== trackId) continue
+        const dest = patternHitTrack(project, hit, clip)
+        if (dest && dest !== trackId) continue
+        if (!dest && !masterPass) continue
         const span = beatSpanSamples(project, clip.startBeat + (hit.startBeat - range.from), hit.durationBeats)
         if (span.start < timelineStart || span.start >= timelineEnd) continue
         const when = ctxTime + (span.start - timelineStart) / this.sampleRate
+        const routed = dest ? this.strips.get(dest) : this.masterStrip
         const liveStrip = ctx === this.ctx && hit.output ? this.strips.get(hit.output) : undefined
-        this.scheduleHit(ctx, liveStrip || strip, hit, when, span.duration / this.sampleRate)
+        const bus = liveStrip || routed || strip
+        if (!bus) continue
+        this.scheduleHit(ctx, bus, hit, when, span.duration / this.sampleRate)
       }
     }
   }
 
   private scheduleHit(ctx: BaseAudioContext, strip: StripNodes, hit: RenderedHit, when: number, durationSec?: number) {
-    if (ctx === this.ctx && when < ctx.currentTime) return
+    const level = Math.max(0, hit.volume ?? 1)
+    if (level <= 0.0001) return
+    if (ctx === this.ctx && when < ctx.currentTime - 0.05) return
+    if (ctx === this.ctx && when < ctx.currentTime) when = ctx.currentTime + 0.001
     const dur = durationSec ?? Math.max(0.04, beatsToSamples(hit.durationBeats, this.sampleRate, this.project?.tempo || 120) / this.sampleRate)
-    if (hit.kind === 'note' && hit.sampleId) {
+    if (hit.sampleId) {
       const asset = this.assetOf(hit.sampleId)
       if (asset) {
         const buffer = this.bufferFromAsset(ctx, asset)
@@ -2183,7 +2181,7 @@ export class AudioEngine {
     const src = ctx.createBufferSource()
     const gain = ctx.createGain()
     src.buffer = buffer
-    const peak = Math.max(0.001, 0.22 * hit.velocity)
+    const peak = Math.max(0.001, 0.22 * hit.velocity * Math.max(0, hit.volume ?? 1))
     gain.gain.setValueAtTime(0.0001, when)
     gain.gain.exponentialRampToValueAtTime(peak, when + 0.003)
     src.connect(gain)
@@ -2235,11 +2233,11 @@ export class AudioEngine {
     source: AudioNode,
     when: number,
     dur: number,
-    hit: Pick<RenderedHit, 'velocity' | 'pan'>,
+    hit: Pick<RenderedHit, 'velocity' | 'pan' | 'volume'>,
     extra?: AudioNode,
   ) {
     const gain = ctx.createGain()
-    const peak = Math.max(0.001, 0.22 * hit.velocity)
+    const peak = Math.max(0.001, 0.22 * hit.velocity * Math.max(0, hit.volume ?? 1))
     gain.gain.setValueAtTime(0.0001, when)
     gain.gain.exponentialRampToValueAtTime(peak, when + 0.005)
     gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.03, dur))

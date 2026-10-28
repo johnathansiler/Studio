@@ -130,6 +130,7 @@ export function arrangementDigest(project: Project): string {
     countIn: project.countIn,
     snap: project.snap,
     launchQuant: project.launchQuant ?? null,
+    rackMode: project.rackMode ?? null,
     recordBars: project.recordBars ?? 0,
     beats: project.beats
       ? {

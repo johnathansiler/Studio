@@ -511,6 +511,11 @@ export interface Project {
   soundFavorites?: string[]
   beats?: BeatRack
   patternClips?: PatternClip[]
+  /**
+   * Channel-rack transport. Pattern loops the open beat.
+   * Song plays arrangement clips. Missing follows an empty timeline as Pattern.
+   */
+  rackMode?: 'pattern' | 'song'
   roll?: RollMemory
   quantize?: QuantizeSettings
   quantizePresets?: QuantizePreset[]

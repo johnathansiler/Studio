@@ -1,4 +1,4 @@
-import { uid } from './types'
+import { uid, type AudioClip, type MidiClip, type MidiNote, type Project } from './types'
 
 /** One sixteenth note, in quarter-note beats. */
 export const STEP_BEAT = 0.25
@@ -159,7 +159,7 @@ export function hitsInRange(
         volume: channel.volume,
         pitch: channel.note + (cell.pitch || 0),
         fine: cell.fine || 0,
-        pan: Math.max(-1, Math.min(1, cell.pan || 0)),
+        pan: Math.max(-1, Math.min(1, (channel.pan || 0) + (cell.pan || 0))),
         startBeat: start,
         durationBeats: span * gate,
         velocity: Math.max(0.05, Math.min(1, cell.velocity || 0.8)),
@@ -354,6 +354,44 @@ export function bindPatternClips(clips: PatternClip[], tracks: { id: string; typ
   return clips
 }
 
+function takeId(id: string | undefined, seen: Set<string>, prefix: string) {
+  if (id && !seen.has(id)) {
+    seen.add(id)
+    return id
+  }
+  let next = uid(prefix)
+  while (seen.has(next)) next = uid(prefix)
+  seen.add(next)
+  return next
+}
+
+/** Copy every step so a shared cell object cannot light the whole row. */
+export function isolatedCells(cells: StepCell[] | undefined): StepCell[] {
+  return Array.from({ length: 64 }, (_, index) => ({ ...emptyCell(), ...cells?.[index] }))
+}
+
+function repairPattern(pattern: BeatPattern, patternIds: Set<string>): BeatPattern {
+  pattern.steps = clampStepCount(pattern.steps || 16)
+  pattern.swing = clampSwing(pattern.swing || 0)
+  pattern.id = takeId(pattern.id, patternIds, 'pat')
+  const seenRow = new Set<StepChannel>()
+  const rowIds = new Set<string>()
+  pattern.channels = pattern.channels.map((channel) => {
+    const shared = seenRow.has(channel)
+    seenRow.add(channel)
+    const next: StepChannel = shared
+      ? { ...channel, cells: (channel.cells ?? []).map((cell) => ({ ...cell })) }
+      : channel
+    next.steps = clampStepCount(next.steps || pattern.steps)
+    next.cells = isolatedCells(next.cells)
+    next.swing = next.swing == null ? null : clampSwing(next.swing)
+    next.id = takeId(shared ? undefined : next.id, rowIds, 'row')
+    return next
+  })
+  return pattern
+}
+
+/** Give duplicated patterns, rows, and clips their own ids and step objects. */
 export function normalizeBeats(beats: BeatRack | undefined, clips: PatternClip[] | undefined): { beats: BeatRack; patternClips: PatternClip[] } {
   if (!beats?.patterns?.length) {
     const pattern = starterPattern()
@@ -362,15 +400,73 @@ export function normalizeBeats(beats: BeatRack | undefined, clips: PatternClip[]
       patternClips: [],
     }
   }
-  for (const pattern of beats.patterns) {
-    pattern.steps = clampStepCount(pattern.steps || 16)
-    pattern.swing = clampSwing(pattern.swing || 0)
-    for (const channel of pattern.channels) {
-      channel.steps = clampStepCount(channel.steps || pattern.steps)
-      channel.cells = Array.from({ length: 64 }, (_, index) => ({ ...emptyCell(), ...channel.cells?.[index] }))
-      channel.swing = channel.swing == null ? null : clampSwing(channel.swing)
-    }
-  }
+  const seenPattern = new Set<BeatPattern>()
+  const patternIds = new Set<string>()
+  beats.patterns = beats.patterns.map((pattern) => {
+    if (seenPattern.has(pattern)) return repairPattern(clonePattern(pattern, pattern.name), patternIds)
+    seenPattern.add(pattern)
+    return repairPattern(pattern, patternIds)
+  })
   if (!beats.patterns.some((pattern) => pattern.id === beats.activeId)) beats.activeId = beats.patterns[0].id
-  return { beats, patternClips: settlePatternClips(beats, clips ?? []) }
+  return { beats, patternClips: settlePatternClips(beats, separatePatternClips(clips ?? [])) }
+}
+
+function separatePatternClips(clips: PatternClip[]): PatternClip[] {
+  const seenRef = new Set<PatternClip>()
+  const seenId = new Set<string>()
+  return clips.map((clip) => {
+    const shared = seenRef.has(clip)
+    seenRef.add(clip)
+    const id = takeId(shared ? undefined : clip.id, seenId, 'pcl')
+    if (!shared && id === clip.id) return clip
+    return { ...clip, id }
+  })
+}
+
+function separateNotes(notes: MidiNote[] | undefined): MidiNote[] | undefined {
+  if (!notes) return notes
+  const seen = new Set<string>()
+  let changed = false
+  const next = notes.map((note) => {
+    if (note?.id && !seen.has(note.id)) {
+      seen.add(note.id)
+      return note
+    }
+    changed = true
+    const id = uid('note')
+    seen.add(id)
+    return { ...note, id }
+  })
+  return changed ? next : notes
+}
+
+/** Arrangement and session clips each get their own id. A pasted alias does not stay glued to the original. */
+export function repairArrangementIdentities(project: Project) {
+  const audioIds = new Set<string>()
+  const midiIds = new Set<string>()
+  const audioRefs = new Set<AudioClip>()
+  const midiRefs = new Set<MidiClip>()
+  for (const track of project.tracks) {
+    track.clips = track.clips.map((clip) => {
+      const shared = audioRefs.has(clip)
+      audioRefs.add(clip)
+      const id = takeId(shared ? undefined : clip.id, audioIds, 'clip')
+      if (!shared && id === clip.id) return clip
+      return {
+        ...clip,
+        id,
+        stretch: clip.stretch
+          ? { ...clip.stretch, markers: clip.stretch.markers.map((marker) => ({ ...marker })) }
+          : undefined,
+      }
+    })
+    track.midiClips = track.midiClips.map((clip) => {
+      const shared = midiRefs.has(clip)
+      midiRefs.add(clip)
+      const notes = separateNotes(clip.notes)
+      const id = takeId(shared ? undefined : clip.id, midiIds, 'midi')
+      if (!shared && id === clip.id && notes === clip.notes) return clip
+      return { ...clip, id, notes: notes ?? [] }
+    })
+  }
 }

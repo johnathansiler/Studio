@@ -220,13 +220,13 @@ export function TransportBar({
             <SkipBackIcon />
           </TipButton>
         )}
-        <TipButton className={`t-btn play ${playing ? 'on' : ''}`} label={transport('play').label} hint={transport('play').hint} pressed={playing} onClick={onPlay}>
+        <TipButton className={`t-btn play ${playing ? 'on' : ''}`} label={transport('play').label} hint={transport('play').hint} pressed={playing} onPress={() => engine.unlock()} onClick={onPlay}>
           <PlayIcon />
         </TipButton>
         <TipButton className="t-btn stop" label={transport('stop').label} hint={transport('stop').hint} disabled={status === 'stopped'} onClick={onStop}>
           <StopIcon />
         </TipButton>
-        <TipButton className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={status === 'recording' || status === 'counting-in'} onClick={onRecord}>
+        <TipButton className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={status === 'recording' || status === 'counting-in'} onPress={() => engine.unlock()} onClick={onRecord}>
           <RecIcon />
         </TipButton>
       </div>

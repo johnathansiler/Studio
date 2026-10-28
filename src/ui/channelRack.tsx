@@ -7,6 +7,7 @@ import {
   kitChoices,
   libraryChoice,
   rackPlayIndex,
+  rackPlayMode,
   shortSoundName,
   RACK_COLORS,
   stepGroups,
@@ -35,6 +36,24 @@ type RackEngine = {
   status?: AudioEngine['status']
   subscribe?: (fn: () => void) => () => void
   currentTimelineSample?: () => number
+  unlock?: () => void
+  previewSequence?: (events: { pitch: number; at: number; dur: number; velocity?: number; drum?: boolean; cents?: number }[]) => void
+  previewPcm?: (channels: Float32Array[], sampleRate?: number) => void
+}
+
+async function loadRowSample(store: ProjectStore, sampleId: string) {
+  if (store.buffers.has(sampleId)) return
+  const catalog = await loadSoundCatalog()
+  const id = sampleId.startsWith('lib_') ? sampleId.slice(4) : sampleId
+  const entry = catalog.entries.find((item) => item.id === id)
+  if (!entry) throw new Error('That drum sample is not in the free library.')
+  const bytes = await fetchSoundBytes(soundFileUrl(entry.path))
+  const decoded = await decodeSoundBytes(bytes)
+  const channels = matchProjectRate(decoded.channels, decoded.sampleRate, store.project.sampleRate)
+  if (!channels[0]?.length) throw new Error('That drum sample had no audio.')
+  if (!store.buffers.has(sampleId)) {
+    store.addAsset({ id: sampleId, name: entry.name, sampleRate: store.project.sampleRate, channels })
+  }
 }
 
 function usePlaySample(engine: RackEngine) {
@@ -144,15 +163,19 @@ function StepButtons({
   cells,
   count,
   playStep,
+  selected,
   onPaint,
   onDone,
+  onUnlock,
 }: {
   channel: StepChannel
   cells: StepCell[]
   count: number
   playStep: number
-  onPaint: (index: number, on: boolean) => void
+  selected: number[]
+  onPaint: (index: number, on: boolean, preview: boolean) => void
   onDone: () => void
+  onUnlock: () => void
 }) {
   const painting = useRef<{ on: boolean; touch: boolean; x: number; y: number; index: number } | null>(null)
   const paintAt = (event: ReactPointerEvent<HTMLDivElement>, force: boolean) => {
@@ -162,7 +185,7 @@ function StepButtons({
     const index = Number(step.dataset.index)
     if (!painting.current) return
     if (painting.current.touch && !force) return
-    onPaint(index, painting.current.on)
+    onPaint(index, painting.current.on, false)
   }
   return (
     <div
@@ -170,6 +193,8 @@ function StepButtons({
       role="group"
       aria-label={`${channel.name} steps. Tap a pad to add a hit. Drag to paint.`}
       onPointerDown={(event) => {
+        onUnlock()
+        if (event.shiftKey || event.metaKey || event.ctrlKey) return
         const step = (event.target as HTMLElement).closest('.rack-step') as HTMLElement | null
         if (!step) return
         const index = Number(step.dataset.index)
@@ -178,7 +203,7 @@ function StepButtons({
         painting.current = { on, touch, x: event.clientX, y: event.clientY, index }
         if (!touch) {
           event.preventDefault()
-          onPaint(index, on)
+          onPaint(index, on, true)
           event.currentTarget.setPointerCapture(event.pointerId)
         }
       }}
@@ -189,7 +214,7 @@ function StepButtons({
       onPointerUp={(event) => {
         const gesture = painting.current
         painting.current = null
-        if (gesture?.touch && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) < 12) onPaint(gesture.index, gesture.on)
+        if (gesture?.touch && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) < 12) onPaint(gesture.index, gesture.on, true)
         onDone()
       }}
       onPointerCancel={() => {
@@ -204,9 +229,11 @@ function StepButtons({
             const on = !!cell?.on
             const look = stepLooks(index, channel.steps, count)
             const now = playStep === index
+            const pickedStep = selected.includes(index)
             const className = [
               'rack-step',
               on ? 'on' : '',
+              pickedStep ? 'picked' : '',
               now ? 'now' : '',
               look.past ? 'past' : '',
               look.loop ? 'loop' : '',
@@ -221,6 +248,7 @@ function StepButtons({
                 style={on ? { background: channel.color } : undefined}
                 aria-label={`${channel.name} step ${index + 1}. ${action}`}
                 aria-pressed={on}
+                aria-selected={pickedStep}
                 aria-current={now ? 'step' : undefined}
               />
             )
@@ -318,23 +346,51 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
   const [graphMode, setGraphMode] = useState<GraphMode>('velocity')
   const [editOpen, setEditOpen] = useState(false)
   const [adding, setAdding] = useState(false)
-  const [graphId, setGraphId] = useState<string | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('All')
-  const [picked, setPicked] = useState<{ channelId: string; index: number } | null>(null)
   const [library, setLibrary] = useState<SoundEntry[]>([])
   const [libraryNote, setLibraryNote] = useState('')
+  const [sampleState, setSampleState] = useState<Record<string, 'loading' | 'error' | 'ready'>>({})
+  const [sampleError, setSampleError] = useState('')
+  const [sampleRetry, setSampleRetry] = useState(0)
+  const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
   const asked = useRef(false)
   const graphing = useRef(false)
+  const inflight = useRef(new Set<string>())
+  const scrollRef = useRef<HTMLDivElement>(null)
   const phone = useFormFactor() === 'phone'
+  const sampleKey = pattern?.channels.map((row) => `${row.id}:${row.sampleId ?? ''}`).join('|') ?? ''
+  useEffect(() => {
+    if (!pattern) return
+    let cancel = false
+    for (const channel of pattern.channels) {
+      const id = channel.sampleId
+      if (!id || store.buffers.has(id) || inflight.current.has(id)) continue
+      inflight.current.add(id)
+      setSampleState((prev) => ({ ...prev, [id]: 'loading' }))
+      void loadRowSample(store, id).then(() => {
+        inflight.current.delete(id)
+        if (cancel) return
+        setSampleState((prev) => ({ ...prev, [id]: 'ready' }))
+      }).catch((error: unknown) => {
+        inflight.current.delete(id)
+        if (cancel) return
+        setSampleState((prev) => ({ ...prev, [id]: 'error' }))
+        setSampleError(error instanceof Error ? error.message : 'Could not load that drum sample.')
+      })
+    }
+    return () => { cancel = true }
+  }, [pattern, sampleKey, sampleRetry, store])
   const bar = (id: string) => copyOf(BEAT_BAR, id)
   const rowCopy = (id: string) => copyOf(BEAT_ROW, id)
   const sheet = (id: string) => copyOf(BEAT_SHEET, id)
 
   if (!pattern) return null
-  const selected = pattern.channels.find((row) => row.id === selectedId) ?? null
-  const focus = selected ?? pattern.channels.find((row) => row.id === graphId) ?? pattern.channels[0]
+  const mode = rackPlayMode(project)
+  const focusId = store.selectedRackChannels.at(-1) ?? null
+  const selected = pattern.channels.find((row) => row.id === focusId) ?? null
+  const focus = selected ?? pattern.channels[0]
+  const picked = store.selectedRackSteps.at(-1) ?? null
   const pickedCell = picked ? pattern.channels.find((row) => row.id === picked.channelId)?.cells[picked.index] : undefined
   const outputs = project.tracks.filter((track) => track.type === 'bus' || track.type === 'group' || track.type === 'midi')
   const beat = projectSampleBeat(project, displayedPlayhead(sample, project))
@@ -345,12 +401,40 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
     ? `${focus?.name ?? 'Channel'}. Drag across the bars to set ${GRAPH_LABELS[graphMode].toLowerCase()}. Empty steps turn on.`
     : `${focus?.name ?? 'Channel'}. Tap a step to add or remove a hit.`
 
-  function paint(channel: StepChannel, index: number, on: boolean) {
-    setGraphId(channel.id)
-    setSelectedId(channel.id)
-    setPicked({ channelId: channel.id, index })
+  function hear(channel: StepChannel) {
+    engine.unlock?.()
+    const asset = channel.sampleId ? store.buffers.get(channel.sampleId) : undefined
+    const pcm = asset?.channels?.[0]
+    if (pcm?.length) {
+      engine.previewPcm?.(asset.channels, asset.sampleRate)
+      return
+    }
+    engine.previewSequence?.([{
+      pitch: channel.note,
+      at: 0,
+      dur: channel.kind === 'hat' ? 0.06 : 0.18,
+      velocity: Math.max(0.2, channel.volume || 0.8),
+      drum: channel.kind !== 'note',
+    }])
+  }
+
+  function paint(channel: StepChannel, index: number, on: boolean, preview: boolean) {
+    engine.unlock?.()
+    if (on && preview) hear(channel)
+    store.selectRackStep(channel.id, index, false)
     store.setStep(channel.id, index, on)
     if (on && index >= channel.steps) store.setChannel(channel.id, { steps: Math.min(64, index + 1) }, true)
+  }
+
+  function retrySamples() {
+    inflight.current.clear()
+    setSampleState((prev) => {
+      const next = { ...prev }
+      for (const id of Object.keys(next)) if (next[id] === 'error') delete next[id]
+      return next
+    })
+    setSampleError('')
+    setSampleRetry((count) => count + 1)
   }
 
   function openAdd() {
@@ -366,7 +450,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
 
   function addChoice(choice: RackChoice, entry?: SoundEntry) {
     const id = store.addPatternChannel(choice)
-    if (id) setGraphId(id)
+    if (id) store.selectRackChannel(id)
     setAdding(false)
     if (!entry) return
     const sampleId = choice.sampleId || ''
@@ -389,7 +473,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
 
   function writeGraph(index: number, ratio: number) {
     if (!focus || !Number.isFinite(index)) return
-    setPicked({ channelId: focus.id, index })
+    store.selectRackStep(focus.id, index, false)
     const cell = focus.cells[index]
     if (cell && !cell.on) store.setStep(focus.id, index, true)
     store.editStep(focus.id, index, valueFromRatio(graphMode, ratio), true)
@@ -423,8 +507,24 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
   )
 
   return (
-    <div className="beats channel-rack" data-length={count} data-tool={graph ? 'graph' : 'paint'}>
+    <div className="beats channel-rack" data-length={count} data-tool={graph ? 'graph' : 'paint'} data-play-mode={mode}>
       <div className="rack-bar">
+        <div className="rack-mode" role="group" aria-label="Play mode. Pattern loops this beat. Song plays the arrangement.">
+          <TipButton
+            label="Pattern"
+            hint="Play this pattern in a loop, even when Arrange is empty or the song loop is somewhere else."
+            className={mode === 'pattern' ? 'on' : ''}
+            pressed={mode === 'pattern'}
+            onClick={() => { engine.unlock?.(); store.setRackMode('pattern') }}
+          />
+          <TipButton
+            label="Song"
+            hint="Play the arrangement. An empty song stays quiet until a clip is placed."
+            className={mode === 'song' ? 'on' : ''}
+            pressed={mode === 'song'}
+            onClick={() => { engine.unlock?.(); store.setRackMode('song') }}
+          />
+        </div>
         <select {...described(bar('pattern'))} value={pattern.id} onChange={(event) => store.selectPattern(event.target.value)}>
           {project.beats?.patterns.map((item) => (
             <option key={item.id} value={item.id}>{item.name}</option>
@@ -449,10 +549,19 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         {!phone && <TipButton label={sheet('place').label} hint={sheet('place').hint} onClick={placePattern} />}
         <TipButton label={bar('edit').label} hint={bar('edit').hint} pressed={editOpen} onClick={() => setEditOpen((open) => !open)} />
         <span className="rack-tool" role="status" aria-live="polite" title={toolHint}>{toolName}</span>
-        <span className={`rack-loop ${project.loopEnabled ? 'on' : ''}`} data-loop={project.loopEnabled ? 'on' : 'off'} title="The song loop. It is the same region as Arrange, and the playhead wraps inside it.">
-          {project.loopEnabled ? 'Loop on' : 'Loop off'}
+        <span className={`rack-loop ${mode === 'pattern' || project.loopEnabled ? 'on' : ''}`} data-loop={project.loopEnabled ? 'on' : 'off'} data-mode={mode} title={mode === 'pattern' ? 'Pattern mode loops this beat. Song mode uses the arrangement loop.' : 'The song loop. It is the same region as Arrange, and the playhead wraps inside it.'}>
+          {mode === 'pattern' ? 'Pattern' : project.loopEnabled ? 'Loop on' : 'Loop off'}
         </span>
       </div>
+      {sampleError && (
+        <p className="rack-sample-note" role="status">
+          {sampleError}
+          <button type="button" onClick={retrySamples}>Retry</button>
+        </p>
+      )}
+      {!sampleError && Object.values(sampleState).some((state) => state === 'loading') && (
+        <p className="rack-sample-note" role="status">Loading drum samples…</p>
+      )}
       <div className={`rack-extras${editOpen ? ' open' : ''}`}>
         {phone && swing}
         {phone && <TipButton label="Roll" hint="Open the selected channel in the piano roll." disabled={!selected} onClick={() => selected && store.openChannelRoll(selected.id)} />}
@@ -548,7 +657,69 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
           </label>
         )}
       </div>
-      <div className="rack-scroll">
+      <div
+        className="rack-scroll"
+        ref={scrollRef}
+        onPointerDown={(event) => {
+          engine.unlock?.()
+          const target = event.target as HTMLElement
+          const step = target.closest('.rack-step') as HTMLElement | null
+          const interactive = target.closest('.rack-step, .rack-bar-step, button, input, select, .rack-knob, .rack-lead')
+          if (!interactive) {
+            store.clearRackSelection()
+            return
+          }
+          const additive = event.shiftKey || event.metaKey || event.ctrlKey
+          const touch = event.pointerType === 'touch'
+          if (!step || (!additive && !touch)) return
+          const originX = event.clientX
+          const originY = event.clientY
+          let moved = false
+          const pick = (clientX: number, clientY: number) => {
+            const hit = {
+              left: Math.min(originX, clientX),
+              right: Math.max(originX, clientX),
+              top: Math.min(originY, clientY),
+              bottom: Math.max(originY, clientY),
+            }
+            const found: { channelId: string; index: number }[] = []
+            const root = scrollRef.current
+            if (!root) return found
+            for (const node of root.querySelectorAll<HTMLElement>('.rack-step')) {
+              const box = node.getBoundingClientRect()
+              if (box.right < hit.left || box.left > hit.right || box.bottom < hit.top || box.top > hit.bottom) continue
+              const channelId = node.closest('[data-channel-id]')?.getAttribute('data-channel-id')
+              const index = Number(node.dataset.index)
+              if (channelId && Number.isInteger(index)) found.push({ channelId, index })
+            }
+            return found
+          }
+          const move = (ev: PointerEvent) => {
+            if (Math.hypot(ev.clientX - originX, ev.clientY - originY) < 8) return
+            moved = true
+            const left = Math.min(originX, ev.clientX)
+            const top = Math.min(originY, ev.clientY)
+            setMarquee({ left, top, width: Math.abs(ev.clientX - originX), height: Math.abs(ev.clientY - originY) })
+          }
+          const up = (ev: PointerEvent) => {
+            window.removeEventListener('pointermove', move)
+            window.removeEventListener('pointerup', up)
+            window.removeEventListener('pointercancel', up)
+            setMarquee(null)
+            if (!moved) {
+              if (!additive) return
+              const channelId = step.closest('[data-channel-id]')?.getAttribute('data-channel-id')
+              const index = Number(step.dataset.index)
+              if (channelId && Number.isInteger(index)) store.selectRackStep(channelId, index, true)
+              return
+            }
+            store.selectRackSteps(pick(ev.clientX, ev.clientY), true)
+          }
+          window.addEventListener('pointermove', move)
+          window.addEventListener('pointerup', up)
+          window.addEventListener('pointercancel', up)
+        }}
+      >
         <div className="rack-row rack-ruler" aria-hidden="true">
           <div className="rack-lead"><span>Beat</span></div>
           <div className="rack-steps">
@@ -568,10 +739,12 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
           const mute = rowCopy('mute')
           const audible = !channel.mute && (!soloed || channel.solo)
           const playStep = rackPlayIndex(beat, channel.steps || count, channel.swing ?? pattern.swing, audible)
-          const rowOn = selected?.id === channel.id
+          const rowOn = store.selectedRackChannels.includes(channel.id)
           const stepsLabel = rowCopy('steps')
+          const sampleId = channel.sampleId
+          const samplePhase = sampleId ? sampleState[sampleId] : undefined
           return (
-            <div className={`rack-row${rowOn ? ' sel' : ''}`} data-channel={channel.name} key={channel.id}>
+            <div className={`rack-row${rowOn ? ' sel' : ''}`} data-channel={channel.name} data-channel-id={channel.id} key={channel.id}>
               <div className="rack-lead">
                 <button
                   type="button"
@@ -607,13 +780,22 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
                   type="button"
                   className={`rack-name${rowOn ? ' on' : ''}`}
                   style={{ color: channel.color }}
-                  title={`Select ${channel.name}. Fills and the graph follow this channel.`}
-                  aria-label={`${channel.name}. Select this channel. Fills and the graph follow it.`}
+                  title={`Play ${channel.name}. Select this channel. Fills and the graph follow it.`}
+                  aria-label={`${channel.name}. Play this pad and select this channel.`}
                   aria-pressed={rowOn}
-                  onClick={() => { setGraphId(channel.id); setSelectedId(channel.id) }}
+                  onPointerDown={() => engine.unlock?.()}
+                  onClick={(event) => {
+                    const additive = event.shiftKey || event.metaKey || event.ctrlKey
+                    store.selectRackChannel(channel.id, additive)
+                    hear(channel)
+                  }}
                 >
                   {channel.name}
+                  {samplePhase === 'loading' && <i className="rack-wait" aria-label={`${channel.name} sample loading`} />}
                 </button>
+                {samplePhase === 'error' && (
+                  <button type="button" className="rack-retry" title="Try loading this drum sample again." onClick={retrySamples}>Retry</button>
+                )}
                 <label className="rack-loop" title={stepsLabel.hint}>
                   <span>Loop</span>
                   <input
@@ -632,8 +814,10 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
                 cells={cells}
                 count={count}
                 playStep={playStep}
-                onPaint={(index, on) => paint(channel, index, on)}
+                selected={store.selectedRackSteps.filter((step) => step.channelId === channel.id).map((step) => step.index)}
+                onPaint={(index, on, preview) => paint(channel, index, on, preview)}
                 onDone={() => store.endDraft()}
+                onUnlock={() => engine.unlock?.()}
               />
             </div>
           )
@@ -716,6 +900,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
             </div>
           </div>
         )}
+        {marquee && <div className="rack-marquee" style={marquee} />}
       </div>
       <button
         type="button"

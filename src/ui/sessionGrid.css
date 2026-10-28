@@ -63,6 +63,11 @@
   outline-offset: -3px;
 }
 .session-grid .slot.armed { border-color: var(--rec); }
+.session-grid .slot.chosen {
+  outline: 2px solid white;
+  outline-offset: -2px;
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.28);
+}
 .session-grid .slot .slot-name {
   position: relative;
   z-index: 1;

@@ -302,6 +302,20 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border: 1px solid rgba(255,255,255,0.16); cursor: grab; user-select: none;
 }
 .clip.selected { outline: 2px solid white; }
+.clip-unique {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  z-index: 2;
+  min-height: 22px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(12, 16, 14, 0.72);
+  color: white;
+  font-size: 11px;
+  box-shadow: var(--raised);
+}
 .clip.open { height: auto; min-height: 96px; top: 8px; z-index: 3; overflow: visible; }
 .take-lanes { position: absolute; left: 4px; right: 4px; top: 22px; display: flex; flex-direction: column; gap: 4px; }
 .take-lane {
