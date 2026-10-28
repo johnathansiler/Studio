@@ -23,6 +23,7 @@ export function ClipSheet({ store, trackId, clip, onClose }: { store: ProjectSto
     <div className="clip-sheet" role="dialog" aria-label="Clip">
       <header>
         <strong>{shown.name}</strong>
+        <button type="button" className="text-btn" title="Spectrogram. Select a spot and remove clicks, hum, or noise." onClick={() => store.openSpectral(trackId, shown.id)}>Repair</button>
         <button type="button" className="text-btn" onClick={onClose}>Close</button>
       </header>
       <div className="row">

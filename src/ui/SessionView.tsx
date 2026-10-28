@@ -64,7 +64,10 @@ function SessionBody({ store, engine }: { store: ProjectStore; engine: AudioEngi
       <TipButton className={`mode-btn ${editClip.loop !== false ? 'on' : ''}`} label={sheet('loop').label} hint={sheet('loop').hint} pressed={editClip.loop !== false} disabled={store.remoteFollow} onClick={() => store.setClipLaunch(edit.trackId, editClip.id, { loop: editClip.loop === false })} />
       <TipButton className={`mode-btn ${editClip.legato ? 'on' : ''}`} label={sheet('legato').label} hint={sheet('legato').hint} pressed={!!editClip.legato} disabled={store.remoteFollow} onClick={() => store.setClipLaunch(edit.trackId, editClip.id, { legato: !editClip.legato })} />
       {'bufferId' in editClip && (
-        <TipButton className={`mode-btn ${editClip.warp !== false ? 'on' : ''}`} label={sheet('warp').label} hint={sheet('warp').hint} pressed={editClip.warp !== false} disabled={store.remoteFollow} onClick={() => store.setClipLaunch(edit.trackId, editClip.id, { warp: editClip.warp === false })} />
+        <>
+          <TipButton className={`mode-btn ${editClip.warp !== false ? 'on' : ''}`} label={sheet('warp').label} hint={sheet('warp').hint} pressed={editClip.warp !== false} disabled={store.remoteFollow} onClick={() => store.setClipLaunch(edit.trackId, editClip.id, { warp: editClip.warp === false })} />
+          <TipButton className="mode-btn" label="Repair" hint="Spectrogram. Select a spot and remove clicks, hum, or noise." disabled={store.remoteFollow} onClick={() => store.openSpectral(edit.trackId, editClip.id)} />
+        </>
       )}
     </>
   ) : null

@@ -1,4 +1,7 @@
 import { MASTERING_IDS } from '../audio/master/assistant'
+import { spectralKey, ensureRepair, pushOp, sliceRegion } from '../audio/spectral/edit'
+import { learnOffline } from '../audio/spectral/job'
+import type { SpectralAction, SpectralRegion } from '../audio/spectral/types'
 import { scheduleStretchCommit, stretchCacheKey } from '../audio/stretch/commit'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
 import {
@@ -182,6 +185,10 @@ export class ProjectStore {
   private takeNotes: { trackId: string; clipId: string; noteId: string }[] = []
   /** Clip settings. Not saved. */
   clipSheet = false
+  /** Spectral repair sheet. Not saved. */
+  spectralTrackId: string | null = null
+  spectralClipId: string | null = null
+  spectralStatus: string | null = null
   private bypassed: { id: string; enabled: boolean }[] | null = null
 
   constructor(project = createEmptyProject(), buffers?: Map<string, AudioAsset>) {
@@ -415,6 +422,110 @@ export class ProjectStore {
   closeClipSheet() {
     this.clipSheet = false
     this.emit()
+  }
+
+  openSpectral(trackId: string, clipId: string) {
+    this.spectralTrackId = trackId
+    this.spectralClipId = clipId
+    this.selectedTrackId = trackId
+    this.selectedClipId = clipId
+    this.stemTrackId = null
+    this.stemClipId = null
+    this.emit()
+  }
+
+  closeSpectral() {
+    this.spectralTrackId = null
+    this.spectralClipId = null
+    this.spectralStatus = null
+    this.emit()
+  }
+
+  setSpectralStatus(status: string | null) {
+    if (this.spectralStatus === status) return
+    this.spectralStatus = status
+    this.emit()
+  }
+
+  applySpectralOp(trackId: string, clipId: string, action: SpectralAction, region: SpectralRegion, amount: number, humHz?: number) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      if (!clip) return
+      pushOp(clip, action, region, amount, humHz, uid('sop'))
+    })
+  }
+
+  learnSpectralNoise(trackId: string, clipId: string, region: SpectralRegion) {
+    const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+    if (!clip || this.remoteFollow) return Promise.resolve()
+    const origin = clip.spectral?.origin ?? clip.offsetSamples
+    const span = clip.spectral?.span || clip.durationSamples
+    const source = this.buffers.get(clip.spectral?.sourceBufferId ?? clip.bufferId)
+    if (!source) return Promise.resolve()
+    const mapped = sliceRegion(clip, region)
+    const slice = source.channels.map((channel) => channel.slice(origin, origin + span))
+    this.setSpectralStatus('Learning noise…')
+    return learnOffline(slice, source.sampleRate, mapped)
+      .then((bands) => {
+        this.mutate(() => {
+          const current = this.track(trackId)?.clips.find((item) => item.id === clipId)
+          if (!current) return
+          const repair = ensureRepair(current)
+          repair.noiseBands = bands
+          repair.noiseRate = source.sampleRate
+          repair.renderedKey = undefined
+        })
+      })
+      .catch(() => {
+        this.toast('Could not learn the noise profile', 'warn')
+      })
+      .finally(() => this.setSpectralStatus(null))
+  }
+
+  removeSpectralOp(trackId: string, clipId: string, opId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      const repair = clip?.spectral
+      if (!clip || !repair) return
+      repair.ops = repair.ops.filter((op) => op.id !== opId)
+      repair.renderedKey = undefined
+      if (!repair.ops.length) {
+        clip.bufferId = repair.sourceBufferId
+        repair.renderId = undefined
+      }
+    })
+  }
+
+  toggleSpectral(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+      const repair = clip?.spectral
+      if (!clip || !repair) return
+      repair.enabled = !repair.enabled
+      if (!repair.enabled) clip.bufferId = repair.sourceBufferId
+      else if (repair.renderId && repair.renderedKey === spectralKey(repair)) clip.bufferId = repair.renderId
+    })
+  }
+
+  /** Swap in a finished render without an extra undo step. The source asset stays. */
+  installSpectral(trackId: string, clipId: string, channels: Float32Array[], sampleRate: number, key: string) {
+    const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
+    const repair = clip?.spectral
+    if (!clip || !repair || spectralKey(repair) !== key) return
+    const id = uid('spec')
+    this.buffers.set(id, { id, name: `${clip.name} spectral`, sampleRate, channels })
+    const previous = repair.renderId
+    repair.renderId = id
+    repair.renderedKey = key
+    if (repair.enabled) clip.bufferId = id
+    this.dropSpectralAsset(previous)
+    this.emit()
+  }
+
+  private dropSpectralAsset(id?: string) {
+    if (!id?.startsWith('spec_')) return
+    const hay = `${this.past.join('\n')}\n${this.future.join('\n')}\n${JSON.stringify(this.project)}`
+    if (!hay.includes(`"${id}"`)) this.buffers.delete(id)
   }
 
   selectNote(id: string | null, additive = false) {

@@ -1,0 +1,117 @@
+.spectral-sheet {
+  position: fixed;
+  z-index: 36;
+  left: 0;
+  right: 0;
+  top: 88px;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+  background: var(--bg-0, #0c110f);
+  border-top: 1px solid var(--line, #31443a);
+  color: var(--text, #eef3ea);
+}
+
+.spectral-sheet header,
+.spectral-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.spectral-sheet header { flex-wrap: wrap; }
+.spectral-sheet header strong { margin-right: auto; }
+.spectral-sheet header p,
+.spectral-note {
+  margin: 0;
+  width: 100%;
+  color: var(--muted, #b7c4b8);
+  font-size: 12px;
+}
+
+.spectral-stage {
+  position: relative;
+  flex: 1;
+  min-height: 160px;
+  border: 1px solid var(--line, #31443a);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #101614;
+  touch-action: none;
+}
+
+.spectral-stage canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+.spectral-readout {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(12, 17, 15, 0.72);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.spectral-row button,
+.spectral-sheet header button {
+  flex: 0 0 auto;
+}
+
+.spectral-row button.on {
+  background: var(--accent, #73c48f);
+  color: var(--accent-ink, #102117);
+  border-color: transparent;
+}
+
+.spectral-strength {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted, #b7c4b8);
+}
+
+.spectral-strength input { flex: 1; min-width: 80px; }
+
+.spectral-ops {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.spectral-ops button {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.shell.phone .spectral-sheet,
+.shell.fold .spectral-sheet {
+  top: 72px;
+}
+
+.shell.phone .spectral-sheet button,
+.shell.fold .spectral-sheet button {
+  min-height: 44px;
+}
+
+.shell.fold .spectral-sheet {
+  left: auto;
+  top: 0;
+  width: min(560px, 52vw);
+  border-top: 0;
+  border-left: 1px solid var(--line, #31443a);
+}
