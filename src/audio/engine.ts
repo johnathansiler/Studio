@@ -119,6 +119,7 @@ export class AudioEngine {
   private talkGains = new Map<string, GainNode>()
 
   private sources: Stoppable[] = []
+  private previewStops: Stoppable[] = []
   private warpPcm = new Map<string, Float32Array[]>()
   private scheduler = 0
   private raf = 0
@@ -2232,6 +2233,89 @@ export class AudioEngine {
     })
   }
 
+  /** Speaker-only sequence. `at` and `dur` are seconds from now. Never enters the cue. */
+  previewSequence(events: { pitch: number; at: number; dur: number; velocity?: number; drum?: boolean }[]) {
+    this.stopPreview()
+    const ctx = this.ctx
+    const out = this.speakerGain
+    if (!ctx || !out || !events.length) return
+    const now = ctx.currentTime + 0.02
+    const bus = ctx.createGain()
+    bus.connect(out)
+    const cut = () => {
+      try { bus.disconnect() } catch { /* already disconnected */ }
+    }
+    const stops: Stoppable[] = [{ stop: cut, disconnect: cut }]
+    for (const event of events) {
+      const when = now + Math.max(0, event.at)
+      const dur = Math.max(0.05, Math.min(8, event.dur))
+      const velocity = Math.max(0.05, Math.min(1, event.velocity ?? 0.7))
+      if (event.drum) this.previewHit(ctx, bus, event.pitch, when, dur, velocity, stops)
+      else this.previewTone(ctx, bus, event.pitch, when, dur, velocity, stops)
+    }
+    this.previewStops = stops
+  }
+
+  stopPreview() {
+    for (const src of this.previewStops) {
+      try { src.stop() } catch { /* already stopped */ }
+      try { src.disconnect() } catch { /* already disconnected */ }
+    }
+    this.previewStops = []
+  }
+
+  private previewTone(ctx: AudioContext, bus: GainNode, pitch: number, when: number, dur: number, velocity: number, stops: Stoppable[]) {
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = 'triangle'
+    osc.frequency.value = 440 * 2 ** ((Math.round(pitch) - 69) / 12)
+    gain.gain.setValueAtTime(0.0001, when)
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, 0.07 * velocity), when + 0.012)
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + dur)
+    osc.connect(gain)
+    gain.connect(bus)
+    osc.start(when)
+    osc.stop(when + dur + 0.02)
+    stops.push(osc)
+  }
+
+  private previewHit(ctx: AudioContext, bus: GainNode, pitch: number, when: number, dur: number, velocity: number, stops: Stoppable[]) {
+    if (pitch <= 36) {
+      const osc = ctx.createOscillator()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(150, when)
+      osc.frequency.exponentialRampToValueAtTime(48, when + Math.min(0.16, dur))
+      const gain = ctx.createGain()
+      gain.gain.setValueAtTime(0.0001, when)
+      gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, 0.22 * velocity), when + 0.008)
+      gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.min(0.28, dur))
+      osc.connect(gain)
+      gain.connect(bus)
+      osc.start(when)
+      osc.stop(when + 0.3)
+      stops.push(osc)
+      return
+    }
+    const noise = ctx.createBufferSource()
+    noise.buffer = this.noiseBuffer(ctx)
+    const filter = ctx.createBiquadFilter()
+    const hat = pitch === 42 || pitch === 44 || pitch === 46
+    const cymbal = pitch >= 49
+    filter.type = hat || cymbal ? 'highpass' : 'bandpass'
+    filter.frequency.value = hat ? 7000 : cymbal ? 5000 : 1800
+    const length = hat ? 0.05 : cymbal ? Math.min(0.7, dur) : 0.12
+    const gain = ctx.createGain()
+    gain.gain.setValueAtTime(0.0001, when)
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, 0.16 * velocity), when + 0.005)
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + length)
+    noise.connect(filter)
+    filter.connect(gain)
+    gain.connect(bus)
+    noise.start(when)
+    noise.stop(when + length + 0.02)
+    stops.push(noise)
+  }
+
   /** Local audition only. Stays on the speaker and never enters the cue or mic path. */
   previewPitches(pitches: number[]) {
     const ctx = this.ctx
@@ -2307,6 +2391,7 @@ export class AudioEngine {
   }
 
   private stopSources() {
+    this.stopPreview()
     for (const src of this.sources) {
       try {
         src.stop()

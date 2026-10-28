@@ -27,6 +27,8 @@ import { PerformPop } from './ui/PerformPop'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
 import { IdeasPop } from './ui/IdeasPop'
+import { UnstuckSheet } from './unstuck/UnstuckSheet'
+import { UNSTUCK_BUTTON } from './unstuck'
 import { QuantizeSheet } from './ui/QuantizeSheet'
 import { PianoRoll } from './ui/PianoRoll'
 import { KnockPop } from './ui/KnockPop'
@@ -100,6 +102,7 @@ export function App() {
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
+  const [unstuckOpen, setUnstuckOpen] = useState(() => new URLSearchParams(window.location.search).get('unstuck') === '1')
   const [perform, setPerform] = useState<'keys' | 'drums' | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
@@ -1145,6 +1148,17 @@ async function importDropped(files: FileList) {
             Session
           </button>
         </div>
+        <button
+          type="button"
+          className={`unstuck-btn ${unstuckOpen ? 'on' : ''}`}
+          aria-label={`Unstuck. ${UNSTUCK_BUTTON}`}
+          aria-pressed={unstuckOpen}
+          title={UNSTUCK_BUTTON}
+          disabled={store.remoteFollow}
+          onClick={() => { setMenuOpen(false); setUnstuckOpen((open) => !open) }}
+        >
+          Unstuck
+        </button>
         <button type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu" aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
           <MenuIcon />
         </button>
@@ -1310,6 +1324,7 @@ async function importDropped(files: FileList) {
       <QuantizeSheet store={store} />
       {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
       {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}
+      {unstuckOpen && <UnstuckSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }} />}
       {perform && (
         <PerformPop
           mode={perform}

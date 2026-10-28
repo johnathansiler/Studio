@@ -687,13 +687,55 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
   padding-right: env(safe-area-inset-right);
 }
 .shell.phone .workspace { flex: 1 1 auto; min-height: 0; height: auto; }
+.unstuck-btn {
+  flex: none; height: 36px; min-height: 36px; padding: 0 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  font-size: 13px; font-weight: 640; white-space: nowrap;
+}
+.unstuck-btn:disabled { opacity: 0.45; }
+.unstuck-btn.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.unstuck-sheet {
+  position: fixed; z-index: 70; right: 12px; bottom: 12px;
+  width: min(420px, calc(100vw - 24px)); max-height: min(72dvh, 640px);
+  display: flex; flex-direction: column; min-height: 0;
+  background: #121a16; color: var(--text); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+.unstuck-sheet header { display: flex; align-items: center; gap: 8px; padding: 10px 12px 4px; }
+.unstuck-sheet header strong { margin-right: auto; font-size: 16px; }
+.unstuck-sheet header button {
+  width: 44px; height: 44px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font-size: 22px;
+}
+.unstuck-tabs { display: flex; gap: 6px; overflow-x: auto; padding: 4px 12px 0; flex: none; }
+.unstuck-tabs button, .unstuck-actions button {
+  min-height: 44px; border-radius: 8px; border: 1px solid var(--line); background: #18241d; color: var(--text); padding: 0 12px;
+}
+.unstuck-tabs button.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.unstuck-blurb { margin: 6px 12px 0; color: var(--muted); font-size: 13px; line-height: 1.35; }
+.unstuck-list { overflow: auto; padding: 8px 12px 16px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.unstuck-list article {
+  display: flex; flex-direction: column; gap: 4px; padding: 10px; border-radius: 12px; background: #18241d; border: 1px solid transparent;
+}
+.unstuck-list article.on { border-color: var(--accent); }
+.unstuck-card-top { display: flex; align-items: baseline; gap: 8px; }
+.unstuck-card-top b { margin-right: auto; }
+.unstuck-card-top span, .unstuck-names, .unstuck-why, .unstuck-empty { color: var(--muted); font-size: 13px; margin: 0; }
+.unstuck-line { margin: 0; font-size: 15px; }
+.unstuck-actions { display: flex; gap: 8px; }
+.unstuck-actions button { flex: 1; }
+.unstuck-actions button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 640; }
+.shell.phone .unstuck-btn, .shell.fold .unstuck-btn { height: 44px; min-height: 44px; min-width: 44px; }
+.shell.phone .unstuck-sheet, .shell.fold .unstuck-sheet {
+  left: 0; right: 0; bottom: 0; width: auto; max-height: 68dvh;
+  border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom);
+}
 .shell.phone .topbar {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   grid-template-areas:
-    "brand name menu"
-    "views views views";
+    "brand name unstuck menu"
+    "views views views views";
   align-items: center;
   gap: 6px 8px;
   height: auto;
@@ -707,6 +749,7 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 .shell.phone .project-name { grid-area: name; min-width: 0; width: auto; }
 .shell.phone .views { grid-area: views; width: 100%; }
 .shell.phone .views button { flex: 1; padding: 0 4px; }
+.shell.phone .unstuck-btn { grid-area: unstuck; }
 .shell.phone .menu-btn { grid-area: menu; width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
 .shell.phone .shell-menu {
   position: fixed; top: auto; left: 0; right: 0; bottom: 0; width: auto;

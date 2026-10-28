@@ -44,6 +44,7 @@ import {
 import type { RollTool } from '../model/paint'
 import { defaultRoll } from '../model/paint'
 import { progressionById, romanLine, starterParts } from '../model/progressions'
+import { applySuggestion, type Suggestion } from '../unstuck'
 import {
   defaultQuantize,
   detectTransients,
@@ -1753,6 +1754,20 @@ export class ProjectStore {
     this.selectedNoteIds = ids
     this.selectedNoteId = ids.at(-1) ?? null
     this.project.scale = { ...scale, lastVoicing: voiced }
+  }
+
+  /** Insert one Unstuck suggestion. Undo restores the project. */
+  applyUnstuck(suggestion: Suggestion) {
+    this.mutate(() => {
+      const placed = applySuggestion(this.project, suggestion)
+      if (placed.trackId) this.selectedTrackId = placed.trackId
+      if (placed.clipId) {
+        this.selectedMidiClipId = placed.clipId
+        this.selectedMidiClipIds = [placed.clipId]
+        this.selectedNoteId = null
+        this.selectedNoteIds = []
+      }
+    })
   }
 
   /** Drop an idea onto the chord track plus editable bass and drums in that genre. */
