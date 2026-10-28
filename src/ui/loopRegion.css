@@ -74,6 +74,15 @@
   width: 44px;
   min-width: 44px;
 }
+/* The arrange ruler absolutely positions every span. Keep the readout in normal flow. */
+.ruler .loop-read span {
+  position: static;
+  top: auto;
+  transform: none;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+}
 .loop-read {
   position: absolute;
   top: 50%;
