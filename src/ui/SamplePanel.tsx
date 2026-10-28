@@ -336,10 +336,11 @@ export function SamplePanel({ store, engine, trackId, plugin, vu }: { store: Pro
       {sampler && (plugin.params.keys >= 0.5 ? (
         <Keyboard
           compact={phone}
-          onDown={(note) => {
-            setBurst(0.85)
-            engine.previewSample(plugin.id, note)
+          onDown={(note, velocity) => {
+            setBurst(velocity ?? 0.85)
+            engine.previewSample(plugin.id, note, velocity)
           }}
+          onUp={(note) => engine.previewSample(plugin.id, note, 0)}
         />
       ) : (
         <div className="pads" role="group" aria-label="Pads">

@@ -36,6 +36,7 @@ export function ArrangeView({
   session,
   onSeek,
   onOpenPiano,
+  onImportInstrument,
   onPerform,
   onQuickPunch,
   onAnalyze,
@@ -47,6 +48,7 @@ export function ArrangeView({
   session: SessionClient
   onSeek: (sample: number) => void
   onOpenPiano: (trackId: string, clipId?: string) => void
+  onImportInstrument?: (trackId: string, files: FileList) => void
   onPerform: (mode: 'keys' | 'drums') => void
   onQuickPunch: () => void
   onAnalyze: (trackId: string) => void
@@ -543,6 +545,19 @@ export function ArrangeView({
                 onChange={(event) => store.updateTrack(track.id, { name: event.target.value })}
               />
               <MixFlags store={store} trackId={track.id} compact />
+              {track.type === 'midi' && (
+                <button
+                  type="button"
+                  className="piano-open"
+                  data-piano={track.id}
+                  aria-label="Piano roll"
+                  title="Piano roll"
+                  onClick={(event) => { event.stopPropagation(); onOpenPiano(track.id) }}
+                >
+                  <PianoIcon />
+                  <span>Roll</span>
+                </button>
+              )}
               {!phone && (track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
                 <TipButton className={`mini ${track.armed ? 'on-r' : ''}`} label={copyOf(TRACK_ROW, 'arm').label} hint={track.type === 'midi' ? 'Record this instrument from its MIDI input.' : copyOf(TRACK_ROW, 'arm').hint} pressed={track.armed} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
                   R
@@ -660,6 +675,12 @@ export function ArrangeView({
                 event.preventDefault()
               }}
               onDrop={(event) => {
+                if (track.type === 'midi' && event.dataTransfer.files.length) {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onImportInstrument?.(track.id, event.dataTransfer.files)
+                  return
+                }
                 if (track.type !== 'midi') return
                 const payload = parseScalerDrag(event.dataTransfer.getData(SCALER_MIME) || event.dataTransfer.getData('text/plain'))
                 if (!payload) return
@@ -1206,6 +1227,15 @@ function ClipView({
         />
       )}
     </div>
+  )
+}
+
+function PianoIcon() {
+  return (
+    <svg width="14" height="12" viewBox="0 0 14 12" aria-hidden="true">
+      <rect x="0.5" y="0.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" />
+      <path d="M3 1v6M6 1v6M9 1v6M11 1v6" stroke="currentColor" />
+    </svg>
   )
 }
 

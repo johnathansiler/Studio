@@ -1,4 +1,5 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { attachGlissando } from '../glissando'
 import type { FaceTheme } from '../faces/themes'
 import './kit.css'
 
@@ -188,47 +189,66 @@ export function Keyboard({
   onUp,
 }: {
   compact?: boolean
-  onDown?: (note: number) => void
+  /** Velocity follows pointer pressure. A mouse press uses 0.85. */
+  onDown?: (note: number, velocity?: number) => void
   onUp?: (note: number) => void
 }) {
-  const whites = keyboardNotes(compact ? 2 : 3, compact ? 48 : 36)
+  const octaves = compact ? 2 : 3
+  const base = compact ? 48 : 36
+  const [shift, setShift] = useState(0)
+  const start = Math.max(0, Math.min(96, base + shift * 12))
+  const whites = keyboardNotes(octaves, start)
   const top = whites[whites.length - 1]
+  const root = useRef<HTMLDivElement>(null)
+  const downRef = useRef(onDown)
+  const upRef = useRef(onUp)
+  downRef.current = onDown
+  upRef.current = onUp
+  useEffect(() => {
+    const el = root.current
+    if (!el) return
+    return attachGlissando(el, {
+      accept: (key) => key.classList.contains('white') || key.classList.contains('black'),
+      onOn: (pitch, event) => {
+        const pressure = event.pressure > 0 && event.pressure < 1 ? event.pressure : 0.85
+        downRef.current?.(pitch, Math.max(0.08, Math.min(1, pressure)))
+      },
+      onOff: (pitch) => upRef.current?.(pitch),
+    })
+  }, [start])
   return (
-    <div className={`kit-keys${compact ? ' compact' : ''}`} role="group" aria-label="Keyboard">
-      {whites.map((note) => {
-        const black = blackAfter(note)
-        const showBlack = black != null && black < top
-        return (
-          <div className="slot" key={note}>
-            <button
-              type="button"
-              className="white"
-              aria-label={((note % 12) + 12) % 12 === 0 ? octaveName(note) : `Note ${note}`}
-              onPointerDown={(event) => {
-                event.currentTarget.setPointerCapture(event.pointerId)
-                onDown?.(note)
-              }}
-              onPointerUp={() => onUp?.(note)}
-              onPointerCancel={() => onUp?.(note)}
-            >
-              {((note % 12) + 12) % 12 === 0 ? <span>{octaveName(note)}</span> : null}
-            </button>
-            {showBlack && (
+    <div className={`kit-keyboard${compact ? ' compact' : ''}`}>
+      <div className="kit-octave">
+        <button type="button" aria-label="Octave down" title="Lower the keyboard by one octave." disabled={start <= 0} onClick={() => setShift((value) => Math.max(-3, value - 1))}>−</button>
+        <span>{octaveName(start)}</span>
+        <button type="button" aria-label="Octave up" title="Raise the keyboard by one octave." disabled={start >= 96} onClick={() => setShift((value) => Math.min(4, value + 1))}>+</button>
+      </div>
+      <div ref={root} className={`kit-keys${compact ? ' compact' : ''}`} role="group" aria-label="Keyboard">
+        {whites.map((note) => {
+          const black = blackAfter(note)
+          const showBlack = black != null && black < top
+          return (
+            <div className="slot" key={note}>
               <button
                 type="button"
-                className="black"
-                aria-label={`Note ${black}`}
-                onPointerDown={(event) => {
-                  event.currentTarget.setPointerCapture(event.pointerId)
-                  onDown?.(black)
-                }}
-                onPointerUp={() => onUp?.(black)}
-                onPointerCancel={() => onUp?.(black)}
-              />
-            )}
-          </div>
-        )
-      })}
+                className="white"
+                data-pitch={note}
+                aria-label={((note % 12) + 12) % 12 === 0 ? octaveName(note) : `Note ${note}`}
+              >
+                {((note % 12) + 12) % 12 === 0 ? <span>{octaveName(note)}</span> : null}
+              </button>
+              {showBlack && (
+                <button
+                  type="button"
+                  className="black"
+                  data-pitch={black}
+                  aria-label={`Note ${black}`}
+                />
+              )}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

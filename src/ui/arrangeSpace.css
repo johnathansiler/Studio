@@ -57,6 +57,36 @@
 .pl-head .swatch { width: 6px; align-self: stretch; flex: none; }
 .pl-head .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: transparent; border: 0; font-weight: 640; padding: 0 2px; }
 .pl-head .mini { flex: none; }
+.pl-head .piano-open {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 28px;
+  min-height: 28px;
+  width: auto;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background-color: #24352c;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 640;
+  white-space: nowrap;
+  overflow: visible;
+}
+.pl-head .piano-open span { line-height: 1; }
+.shell.phone .pl-head .piano-open {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+}
+.shell.phone .pl-head .piano-open span { display: none; }
 .mini-meter { width: 28px; height: 10px; border-radius: 3px; background: #0c110f; overflow: hidden; flex: none; }
 .mini-meter i { display: block; height: 100%; width: 100%; background: #73c48f; transform-origin: left center; }
 

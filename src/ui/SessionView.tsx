@@ -34,24 +34,28 @@ export function SessionView({
   store,
   engine,
   onDropAudio,
+  onOpenPiano,
 }: {
   store: ProjectStore
   engine: AudioEngine
   /** Kept so recording stays on the transport. Slot clicks do not start a take. */
   onRecord: () => void
   onDropAudio: (trackId: string, scene: number, file: File) => void
+  onOpenPiano?: (trackId: string) => void
 }) {
-  return <SessionBody key={store.project.id} store={store} engine={engine} onDropAudio={onDropAudio} />
+  return <SessionBody key={store.project.id} store={store} engine={engine} onDropAudio={onDropAudio} onOpenPiano={onOpenPiano} />
 }
 
 function SessionBody({
   store,
   engine,
   onDropAudio,
+  onOpenPiano,
 }: {
   store: ProjectStore
   engine: AudioEngine
   onDropAudio: (trackId: string, scene: number, file: File) => void
+  onOpenPiano?: (trackId: string) => void
 }) {
   const grid = selectSession(store)
   const phone = useFormFactor() === 'phone'
@@ -244,6 +248,7 @@ function SessionBody({
                 onLaunch={launchSlot}
                 onStop={() => stopTrack(track.id)}
                 onDrop={readDrop}
+                onOpenPiano={onOpenPiano}
               />
             ))}
             <div className="sl-scenes" aria-label="Scenes">
@@ -311,6 +316,7 @@ function TrackColumn({
   onLaunch,
   onStop,
   onDrop,
+  onOpenPiano,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -324,6 +330,7 @@ function TrackColumn({
   onLaunch: (track: Track, scene: number) => void
   onStop: () => void
   onDrop: (event: DragEvent, target: SessionTarget) => void
+  onOpenPiano?: (trackId: string) => void
 }) {
   const project = store.project
   const playingId = store.launched[track.id]
@@ -335,19 +342,29 @@ function TrackColumn({
   const headTarget: SessionTarget = { kind: 'header', trackId: track.id, trackType: track.type }
   return (
     <div className="session-col sl-col" data-track={track.id}>
-      <button
-        type="button"
+      <div
         className="sl-head"
         data-session-head={track.id}
         data-track-type={track.type}
         style={{ background: track.color }}
         title={track.name}
-        onClick={() => store.selectTrack(track.id)}
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => onDrop(event, headTarget)}
       >
-        <span>{track.name}</span>
-      </button>
+        <button type="button" className="sl-name" onClick={() => store.selectTrack(track.id)}>{track.name}</button>
+        {track.type === 'midi' && onOpenPiano && (
+          <button
+            type="button"
+            className="piano-open"
+            data-piano={track.id}
+            aria-label="Piano roll"
+            title="Piano roll"
+            onClick={(event) => { event.stopPropagation(); onOpenPiano(track.id) }}
+          >
+            <span>Roll</span>
+          </button>
+        )}
+      </div>
       {Array.from({ length: SESSION_SCENES }, (_, scene) => {
         const clip = sceneClip(track, scene)
         const hand = store.handoff[track.id]

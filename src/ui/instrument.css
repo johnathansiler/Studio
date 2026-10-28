@@ -1,3 +1,36 @@
+.inst-panel { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; overflow: auto; }
+.inst-head, .inst-row, .inst-devices { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.inst-head strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+.inst-devices { flex: 1; min-width: 0; overflow: auto; }
+.inst-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.inst-sample { margin: 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inst-knobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 8px 6px; align-items: end; justify-items: center; }
+.inst-panel .bevel, .rack .library-panel select, .rack .library-file {
+  height: 36px; min-height: 36px; padding: 0 12px;
+  display: inline-flex; align-items: center; justify-content: center; text-align: center;
+  border-radius: 8px; border: 1px solid #1c2822; color: var(--text); white-space: nowrap;
+  background-color: #24352c; background-image: var(--face); box-shadow: var(--raised);
+}
+.inst-panel .bevel.on, .rack .device-list button.on { color: var(--accent-ink); background-color: var(--accent); }
+.rack .library-panel { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rack .library-row { display: flex; gap: 8px; align-items: center; }
+.rack .library-row select { flex: 1; min-width: 0; }
+.rack .library-status, .rack .instrument-hint { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.root-step { display: flex; align-items: center; gap: 4px; }
+.root-step span { display: flex; flex-direction: column; align-items: center; min-width: 42px; }
+.root-step em { font-style: normal; font-size: 10px; color: var(--muted); }
+.root-step b { font-size: 13px; }
+.root-step .bevel { width: 32px; padding: 0; }
+.shell.phone .inst-panel { gap: 6px; padding: 8px; }
+.shell.phone .inst-knobs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.shell.phone .inst-panel .bevel,
+.shell.phone .rack .library-panel select,
+.shell.phone .rack .library-file,
+.shell.phone .rack select.bevel { min-height: 40px; height: 40px; max-width: none; }
+.shell.phone .rack { height: auto; }
+.shell.phone .inst-head { flex-wrap: nowrap; }
+.shell.phone .inst-devices .bevel { flex: 0 0 auto; padding: 0 10px; }
+
 .instrument-switches {
   display: flex;
   flex-wrap: wrap;

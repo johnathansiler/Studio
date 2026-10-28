@@ -47,6 +47,7 @@ export class LiveRack {
   private phone = false
   private meterReading: Record<string, number> | null = null
   private meterScope: Float32Array | null = null
+  private blockTime = 0
   private ctx: AudioContext | null = null
   private strips: Map<string, StripNodes> = new Map()
   private localBus: AudioNode | null = null
@@ -66,6 +67,16 @@ export class LiveRack {
   trigger(pluginId: string, note: number, vel: number) {
     const proc = this.processors.get(pluginId) as Processor & { note?: (pitch: number, vel: number) => void }
     proc?.note?.(note, vel)
+  }
+
+  /** Queue a sampler note on the audio clock. `time` is an AudioContext time. */
+  schedule(pluginId: string, note: number, vel: number, time: number) {
+    const proc = this.processors.get(pluginId) as Processor & {
+      schedule?: (pitch: number, vel: number, time: number) => void
+      note?: (pitch: number, vel: number) => void
+    }
+    if (proc?.schedule) proc.schedule(note, vel, time)
+    else proc?.note?.(note, vel)
   }
 
   keptLoop(pluginId: string) {
@@ -181,12 +192,15 @@ export class LiveRack {
       activeCount += 1
       if (!tap.proc) {
         try {
-          tap.proc = ctx.createScriptProcessor(256, 2, 2)
+          tap.proc = ctx.createScriptProcessor(1024, 2, 2)
         } catch {
           this.setDirect(tap, true)
           continue
         }
-        tap.proc.onaudioprocess = (event) => this.processOwner(owner.id, event)
+        tap.proc.onaudioprocess = (event) => {
+          this.blockTime = event.playbackTime
+          this.processOwner(owner.id, event)
+        }
       }
       this.setDirect(tap, false)
     }
@@ -252,6 +266,7 @@ export class LiveRack {
       scaleCents: scale.scaleCents,
       quality: this.quality,
       offline: false,
+      playTime: this.blockTime,
     }
     const keyAt = (id: string, length: number) => {
       const buf = this.keys.get(id) ?? this.tapsOut.get(id)
@@ -372,7 +387,7 @@ export class LiveRack {
       if (!strip) continue
       let proc: ScriptProcessorNode
       try {
-        proc = ctx.createScriptProcessor(256, 2, 2)
+        proc = ctx.createScriptProcessor(1024, 2, 2)
       } catch {
         continue
       }
@@ -450,7 +465,7 @@ export class LiveRack {
 
   private latency(owner: string, plugins: PluginInstance[], sampleRate: number) {
     const tap = this.taps.get(owner)
-    const script = tap && !tap.direct ? 256 : 0
+    const script = tap && !tap.direct ? 1024 : 0
     return script + plugins.reduce((sum, plugin) => sum + latencyOf(plugin.pluginId, plugin.params, sampleRate, plugin.enabled && plugin.wet > 0, true), 0)
   }
 

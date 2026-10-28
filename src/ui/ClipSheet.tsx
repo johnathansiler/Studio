@@ -24,6 +24,17 @@ export function ClipSheet({ store, trackId, clip, onClose }: { store: ProjectSto
     <div className="clip-sheet" role="dialog" aria-label="Clip">
       <header>
         <strong>{shown.name}</strong>
+        <button type="button" className="text-btn" title="Play as instrument. Pitch this recording across the keyboard." onClick={() => {
+          const asset = store.buffers.get(shown.bufferId)
+          const midi = store.project.tracks.find((item) => item.id === store.selectedTrackId && item.type === 'midi')
+            || store.project.tracks.find((item) => item.type === 'midi')
+          if (!asset || !midi) {
+            store.toast('Add an instrument track to play this as keys.', 'warn')
+            return
+          }
+          store.loadSamplerSound(midi.id, { ...asset, name: shown.name })
+          onClose()
+        }}>As keys</button>
         <button type="button" className="text-btn" title="Spectrogram. Select a spot and remove clicks, hum, or noise." onClick={() => store.openSpectral(trackId, shown.id)}>Repair</button>
         <button type="button" className="text-btn" onClick={onClose}>Close</button>
       </header>
