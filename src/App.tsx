@@ -45,12 +45,14 @@ import { ProjectSheet } from './ui/ProjectSheet'
 import { PatchSheet } from './ui/PatchSheet'
 import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
+import { collabBadgeOn, collabPanelVisible, type StudioTab } from './ui/collabTab'
+import './ui/collab.css'
 import { TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
 import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
 import { MENU_COPY, UNSTUCK_COPY, VIEW_COPY, copyOf, described } from './ui/chrome'
-import { dockVisible, nextSessionDock, paneAfterRestore, readSessionDock, writeSessionDock } from './ui/sessionDock'
+import { paneAfterRestore, readSessionDock, writeSessionDock } from './ui/sessionDock'
 import { HintBubble, MenuRow, TipButton } from './ui/Hint'
 import { formatBytes } from './ui/share'
 
@@ -113,7 +115,8 @@ export function App() {
   const [land, setLand] = useState(() => window.innerWidth > window.innerHeight)
   const phone = form === 'phone'
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
-  const [sessionDock, setSessionDock] = useState(() => readSessionDock())
+  const [collabOpen, setCollabOpen] = useState(() => readSessionDock())
+  const [invitePending, setInvitePending] = useState(false)
   const [pianoOpen, setPianoOpen] = useState(false)
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
@@ -245,16 +248,13 @@ export function App() {
     if (urlCode && identity?.participantId && identity.code === urlCode) {
       if (ios && !navigator.userActivation?.isActive) session.holdMediaForGesture()
       session.connect({ name: identity.name || joinName || 'Artist', code: urlCode })
-      setSurface(identity.role === 'guest' ? 'artist' : 'studio')
       setJoinOpen(false)
     } else if (urlCode) {
       setJoinCode(urlCode)
-      setJoinOpen(true)
-      setSurface('artist')
+      setInvitePending(true)
     } else if (choice.code && identity?.participantId) {
       if (ios && !navigator.userActivation?.isActive) session.holdMediaForGesture()
       session.connect({ name: identity.name || joinName || 'Artist', code: choice.code })
-      setSurface(identity.role === 'guest' ? 'artist' : 'studio')
       setJoinOpen(false)
     }
     engine.sync(store.project, (id) => store.buffers.get(id))
@@ -304,9 +304,8 @@ export function App() {
     })
     const followTimer = window.setInterval(() => {
       if (session.state.role === 'guest') return
-      if (store.transportMode !== 'session') return
-      if (engine.status !== 'playing' && engine.status !== 'recording') return
-      store.tickFollow(engine.currentTimelineSample())
+      const rolling = (engine.status === 'playing' || engine.status === 'recording') && store.transportMode === 'session'
+      store.tickSession(engine.currentTimelineSample(), rolling)
     }, 40)
     return () => {
       unsub()
@@ -379,8 +378,12 @@ export function App() {
       store.setView(saved.workspace.view)
       store.setTransportMode(saved.workspace.transportMode)
       if (saved.workspace.selectedTrackId) store.selectTrack(saved.workspace.selectedTrackId)
-      setSurface(saved.workspace.surface)
-      setPhonePane(paneAfterRestore(saved.workspace.phonePane, readSessionDock()))
+      if (saved.workspace.surface === 'artist') {
+        setSurface('studio')
+        writeSessionDock(true)
+        setCollabOpen(true)
+      } else setSurface(saved.workspace.surface)
+      setPhonePane(paneAfterRestore(saved.workspace.phonePane, false))
       engine.seek(saved.workspace.positionSamples || 0)
       engine.sync(store.project, (id) => store.buffers.get(id))
       remember(saved.project.id)
@@ -1019,8 +1022,7 @@ export function App() {
     session.primeMediaFromGesture()
     session.connect({ name: joinName || 'Artist', code: joinCode.trim() })
     setJoinOpen(false)
-    setSurface('artist')
-    setPhonePane('room')
+    setInvitePending(false)
   }
 
   function saveAs(name: string) {
@@ -1031,6 +1033,37 @@ export function App() {
     void saveProject(copy, buffers, workspaceNow(), { snapshot: true }).then(() => {
       store.loadProject(copy, buffers)
       void openProjects()
+    })
+  }
+
+  async function dropOnSlot(trackId: string, scene: number, file: File) {
+    const track = store.project.tracks.find((item) => item.id === trackId)
+    if (!track || track.type !== 'audio') {
+      store.toast('Drop audio onto an audio track.', 'warn')
+      return
+    }
+    await ready()
+    if (!engine.ctx) return
+    const decoded = await engine.ctx.decodeAudioData((await file.arrayBuffer()).slice(0))
+    const channels = Array.from({ length: decoded.numberOfChannels }, (_, index) => decoded.getChannelData(index).slice())
+    const bufferId = uid('buf')
+    store.addAsset({ id: bufferId, name: file.name, sampleRate: decoded.sampleRate, channels })
+    store.placeInSlot(trackId, scene, {
+      id: uid('clip'),
+      name: file.name.replace(/\.[^.]+$/, '') || file.name,
+      bufferId,
+      startSample: 0,
+      offsetSamples: 0,
+      durationSamples: decoded.length,
+      fadeInSamples: 0,
+      fadeOutSamples: 0,
+      gain: 1,
+      source: 'import',
+      loop: true,
+      slotOnly: true,
+      warp: true,
+      durationBeats: samplesToBeats(decoded.length, decoded.sampleRate, store.project.tempo),
+      stretch: inspectClip(channels[0] ?? new Float32Array(), decoded.sampleRate, store.project.tempo),
     })
   }
 
@@ -1090,13 +1123,39 @@ async function importDropped(files: FileList) {
     : 'room'
   const pianoTrack = store.project.tracks.find((track) => track.id === store.selectedTrackId && track.type === 'midi')
     || store.project.tracks.find((track) => track.type === 'midi')
-  const dockShown = dockVisible({ surface, panel, dockOpen: sessionDock })
+  const studioTab: StudioTab = collabOpen ? 'collab' : store.view
+  const collabShown = collabPanelVisible(studioTab)
+  const dockShown = surface === 'studio' && !collabShown && (panel === 'piano' || panel === 'rack')
+  const waitingGuests = session.state.participants.filter((person) => !person.admitted && person.role !== 'host').length
+  const collabBadge = collabBadgeOn({
+    tab: studioTab,
+    status: session.state.status,
+    pendingInvite: invitePending,
+    waiting: waitingGuests,
+  })
 
-  function chooseSessionDock(action: 'session' | 'hide') {
-    const next = nextSessionDock({ dockOpen: sessionDock, phonePane, action })
-    writeSessionDock(next.dockOpen)
-    setSessionDock(next.dockOpen)
-    setPhonePane(next.phonePane)
+  function hideCollab() {
+    writeSessionDock(false)
+    setCollabOpen(false)
+    setJoinOpen(false)
+    setPhonePane('edit')
+  }
+
+  function showCollab() {
+    writeSessionDock(true)
+    setCollabOpen(true)
+    setSurface('studio')
+    setPhonePane('edit')
+    setPianoOpen(false)
+    setMenuOpen(false)
+  }
+
+  function showView(view: 'arrange' | 'mix' | 'beats' | 'session') {
+    hideCollab()
+    setSurface('studio')
+    setMenuOpen(false)
+    if (view !== 'arrange') setPianoOpen(false)
+    store.setView(view)
   }
 
   function openPiano(trackId: string, clipId?: string) {
@@ -1114,7 +1173,8 @@ async function importDropped(files: FileList) {
       style={{ ['--dock' as string]: `${dock}px` }}
       data-version={version}
       data-form={form}
-      data-session-dock={sessionDock ? 'open' : 'closed'}
+      data-session-dock="closed"
+      data-collab={collabShown ? 'open' : 'closed'}
       data-dock={dockShown ? 'open' : 'closed'}
       onDragOver={(event) => {
         if ([...event.dataTransfer.types].includes('Files')) event.preventDefault()
@@ -1142,9 +1202,9 @@ async function importDropped(files: FileList) {
               <button
                 key={view}
                 type="button"
-                className={surface === 'studio' && phonePane !== 'room' && store.view === view ? 'active' : ''}
+                className={surface === 'studio' && !collabShown && phonePane !== 'room' && store.view === view ? 'active' : ''}
                 {...described(copy)}
-                onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView(view); setMenuOpen(false) }}
+                onClick={() => showView(view)}
               >
                 {copy.label}
               </button>
@@ -1152,11 +1212,20 @@ async function importDropped(files: FileList) {
           })}
           <button
             type="button"
-            className={surface === 'studio' && phonePane === 'room' ? 'active' : ''}
+            className={surface === 'studio' && !collabShown && store.view === 'session' ? 'active' : ''}
             {...described(copyOf(VIEW_COPY, 'session'))}
-            onClick={() => { setPianoOpen(false); setSurface('studio'); setMenuOpen(false); chooseSessionDock('session') }}
+            onClick={() => showView('session')}
           >
             Session
+          </button>
+          <button
+            type="button"
+            className={`collab-tab ${collabShown ? 'active' : ''}`}
+            {...described(copyOf(VIEW_COPY, 'collab'))}
+            onClick={showCollab}
+          >
+            Collab
+            {collabBadge && <span className="collab-badge" aria-hidden />}
           </button>
         </div>
         <TipButton
@@ -1174,7 +1243,7 @@ async function importDropped(files: FileList) {
           <div className="shell-menu" id="shell-menu">
             <MenuRow id="menu-save" label={copyOf(MENU_COPY, 'save').label} hint={copyOf(MENU_COPY, 'save').hint} onClick={() => { setMenuOpen(false); void openProjects() }} />
             <MenuRow label={copyOf(MENU_COPY, 'export').label} hint={copyOf(MENU_COPY, 'export').hint} onClick={() => { setMenuOpen(false); setExportOpen(true) }} />
-            <MenuRow className="split" label={copyOf(MENU_COPY, 'clips').label} hint={copyOf(MENU_COPY, 'clips').hint} onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }} />
+            <MenuRow className="split" label={copyOf(MENU_COPY, 'clips').label} hint={copyOf(MENU_COPY, 'clips').hint} onClick={() => showView('session')} />
             <MenuRow label={copyOf(MENU_COPY, 'keys').label} hint={copyOf(MENU_COPY, 'keys').hint} onClick={() => { setMenuOpen(false); openPerform('keys') }} />
             <MenuRow label={copyOf(MENU_COPY, 'pads').label} hint={copyOf(MENU_COPY, 'pads').hint} onClick={() => { setMenuOpen(false); openPerform('drums') }} />
             <MenuRow label={copyOf(MENU_COPY, 'piano').label} hint={copyOf(MENU_COPY, 'piano').hint} disabled={!pianoTrack} onClick={() => { if (!pianoTrack) return; setMenuOpen(false); openPiano(pianoTrack.id) }} />
@@ -1218,7 +1287,7 @@ async function importDropped(files: FileList) {
               disabled={store.remoteFollow}
               onClick={() => {
                 setMenuOpen(false)
-                setPhonePane('edit')
+                hideCollab()
                 setSurface('studio')
                 if (store.transportMode === 'session') store.backToArrangement()
                 else store.enterSession()
@@ -1231,10 +1300,8 @@ async function importDropped(files: FileList) {
               hint={surface === 'studio' ? copyOf(MENU_COPY, 'artist').hint : copyOf(MENU_COPY, 'studio').hint}
               onClick={() => {
                 setMenuOpen(false)
-                if (surface === 'studio') {
-                  setSurface('artist')
-                  setPhonePane('room')
-                } else setSurface('studio')
+                if (!collabShown) showCollab()
+                else hideCollab()
               }}
             />
             {!phone && (
@@ -1261,7 +1328,7 @@ async function importDropped(files: FileList) {
           takeProgress={session.state.takeProgress}
         />
       )}
-      {surface === 'studio' && phonePane !== 'room' && store.view !== 'mix' && (store.view === 'arrange' || panel === 'piano') && (
+      {surface === 'studio' && !collabShown && phonePane !== 'room' && store.view !== 'mix' && (store.view === 'arrange' || panel === 'piano') && (
         <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
           <ToolBar
             context={panel === 'piano' ? 'piano' : 'arrange'}
@@ -1274,7 +1341,29 @@ async function importDropped(files: FileList) {
         </div>
       )}
       <div className={`workspace ${dockShown ? '' : 'session-closed'} ${!phone && dockEdge === 'bottom' && surface === 'studio' && dockShown ? 'dock-bottom' : ''}`}>
-        {surface === 'studio' && (
+        {collabShown && (
+          <div className="collab-pane" data-collab-panel="open">
+            <VideoDock
+              simple={false}
+              session={session}
+              engine={engine}
+              onCreate={() => {
+                engine.unlock()
+                session.primeMediaFromGesture()
+                session.connect({ name: joinName || 'Engineer', create: true })
+              }}
+              onNewSession={() => {
+                engine.unlock()
+                session.primeMediaFromGesture()
+                setMenuOpen(false)
+                session.connect({ name: joinName || 'Engineer', create: true, fresh: true })
+              }}
+              onJoin={() => setJoinOpen(true)}
+              onHide={hideCollab}
+            />
+          </div>
+        )}
+        {surface === 'studio' && !collabShown && (
           <div className="main-pane">
             <div className="editor">
               {store.view === 'arrange' && (
@@ -1291,7 +1380,14 @@ async function importDropped(files: FileList) {
               )}
               {store.view === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} />}
               {store.view === 'beats' && <BeatView store={store} engine={engine} />}
-              {store.view === 'session' && <SessionView store={store} engine={engine} />}
+              {store.view === 'session' && (
+                <SessionView
+                  store={store}
+                  engine={engine}
+                  onRecord={() => { void record() }}
+                  onDropAudio={(trackId, scene, file) => { void dropOnSlot(trackId, scene, file) }}
+                />
+              )}
             </div>
           </div>
         )}
@@ -1320,34 +1416,6 @@ async function importDropped(files: FileList) {
           )}
           {surface === 'studio' && panel === 'piano' && (
             <MidiDock store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => setGenerateOpen(true)} onLibrary={() => setLibraryOpen(true)} />
-          )}
-          {(surface !== 'studio' || panel === 'room') && (
-            <VideoDock
-              simple={surface === 'artist'}
-              session={session}
-              engine={engine}
-              onCreate={() => {
-                engine.unlock()
-                session.primeMediaFromGesture()
-                writeSessionDock(true)
-                setSessionDock(true)
-                setSurface('studio')
-                setPhonePane('room')
-                session.connect({ name: joinName || 'Engineer', create: true })
-              }}
-              onNewSession={() => {
-                engine.unlock()
-                session.primeMediaFromGesture()
-                writeSessionDock(true)
-                setSessionDock(true)
-                setSurface('studio')
-                setPhonePane('room')
-                setMenuOpen(false)
-                session.connect({ name: joinName || 'Engineer', create: true, fresh: true })
-              }}
-              onJoin={() => setJoinOpen(true)}
-              onHide={surface === 'studio' ? () => chooseSessionDock('hide') : undefined}
-            />
           )}
         </div>}
       </div>
@@ -1384,7 +1452,7 @@ async function importDropped(files: FileList) {
           Tap for sound
         </button>
       )}
-      {joinOpen && (
+      {collabShown && joinOpen && (
         <div className="modal-back">
           <div className="modal">
             <h2>Join</h2>

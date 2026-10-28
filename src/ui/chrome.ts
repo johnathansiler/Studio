@@ -16,7 +16,8 @@ export const VIEW_COPY: Copy[] = [
   { id: 'arrange', label: 'Arrange', hint: 'Clips on a timeline. The tools above change what a tap does.' },
   { id: 'mix', label: 'Mix', hint: 'Level, pan, and effects for each track.' },
   { id: 'beats', label: 'Beats', hint: 'Step sequencer. Tap a pad to add a hit.' },
-  { id: 'session', label: 'Session', hint: 'Open the session panel. Invite people and talk while you play.' },
+  { id: 'session', label: 'Session', hint: 'Launch clips in a grid. Tap a slot to play or record.' },
+  { id: 'collab', label: 'Collab', hint: 'Call, video, and remote recording. Stays closed until you open this tab.' },
 ]
 
 export const TRANSPORT_COPY: Copy[] = [
@@ -116,8 +117,9 @@ export const BEAT_SHEET: Copy[] = [
 
 export const SESSION_BAR: Copy[] = [
   { id: 'quant', label: 'Launch', hint: 'When a tapped clip starts: the next beat, bar, or immediately.' },
-  { id: 'stop', label: 'Stop all', hint: 'Stop every launched clip.' },
+  { id: 'stop', label: 'Stop all', hint: 'Stop every launched clip on the next grid line.' },
   { id: 'clip', label: 'Clip', hint: 'How the selected slot launches, loops, and follows.' },
+  { id: 'print', label: 'To arrangement', hint: 'Print the clips that are playing onto the timeline.' },
 ]
 
 export const SESSION_SHEET: Copy[] = [
