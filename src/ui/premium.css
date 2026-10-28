@@ -1,0 +1,672 @@
+/* Shared premium chrome. Views inherit these tokens and classes.
+   Glows are state changes only: hover, focus, and active. No looping shadows. */
+
+:root {
+  --recessed: inset 0 1px 2px rgba(0, 0, 0, 0.55), inset 0 -1px 0 rgba(255, 255, 255, 0.1);
+  --field: linear-gradient(180deg, rgba(0, 0, 0, 0.42), rgba(255, 255, 255, 0.05));
+  --sheet: radial-gradient(circle at 14% 0%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(0, 0, 0, 0.22));
+  --chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1.5 1.5 L6 6 L10.5 1.5' fill='none' stroke='%2393a399' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  --tick: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'><path d='M2.5 7.2 L5.4 10.2 L11.5 3.6' fill='none' stroke='%23102117' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
+
+.ch-raised {
+  background-color: var(--panel-2);
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  border-radius: var(--radius-control);
+}
+
+.ch-recessed,
+.ch-field {
+  background-color: #101814;
+  background-image: var(--field);
+  box-shadow: var(--recessed);
+  border: 1px solid color-mix(in srgb, var(--line) 88%, white);
+  border-radius: var(--radius-control);
+}
+
+.ch-sheet {
+  background-color: #18241d;
+  background-image: var(--sheet);
+  box-shadow: inset 0 1px 0 var(--bevel-hi), var(--shadow);
+}
+
+.ch-tab {
+  border: 1px solid color-mix(in srgb, var(--line) 80%, white);
+  border-radius: var(--radius-control);
+  background-color: #18231d;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+}
+
+.ch-tab.on,
+.ch-tab.active,
+.ch-tab[aria-pressed='true'] {
+  background-color: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+  box-shadow: var(--pressed), var(--glow);
+}
+
+.ch-empty {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background-color: rgba(0, 0, 0, 0.22);
+  background-image: var(--field);
+  box-shadow: var(--recessed);
+}
+
+/* Recessed text fields. Range, file, and the tempo readout keep their own metrics. */
+.shell select,
+.shell textarea,
+.shell input[type='text'],
+.shell input[type='search'],
+.shell input[type='email'],
+.shell input[type='url'],
+.shell input[type='password'],
+.shell input[type='number']:not(.bpm-readout),
+.shell input:not([type]) {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: var(--control-h);
+  border: 1px solid color-mix(in srgb, var(--line) 82%, white);
+  border-radius: var(--radius-control);
+  background-color: #101814;
+  background-image: var(--field);
+  box-shadow: var(--recessed);
+  color: var(--text);
+  padding: 0 8px;
+}
+
+.shell select {
+  padding: 0 26px 0 8px;
+  background-image: var(--field), var(--chevron);
+  background-repeat: no-repeat, no-repeat;
+  background-position: 0 0, right 8px center;
+  background-size: auto, 12px 8px;
+  cursor: pointer;
+}
+
+.shell .sl-bar select,
+.shell .sl-detail select,
+.shell .settings-sheet select,
+.shell .settings-delay input {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: var(--control-h);
+  border: 1px solid color-mix(in srgb, var(--line) 82%, white);
+  border-radius: var(--radius-control);
+  background-color: #101814;
+  background-image: var(--field), var(--chevron);
+  background-repeat: no-repeat, no-repeat;
+  background-position: 0 0, right 8px center;
+  background-size: auto, 12px 8px;
+  box-shadow: var(--recessed);
+  color: var(--text);
+  padding: 0 26px 0 8px;
+}
+
+.shell .settings-delay input {
+  width: 72px;
+  background-image: var(--field);
+  padding: 0 8px;
+}
+
+.shell select:hover,
+.shell textarea:hover,
+.shell input[type='text']:hover,
+.shell input[type='search']:hover,
+.shell input[type='number']:hover,
+.shell input:not([type]):hover,
+.shell .sl-bar select:hover,
+.shell .sl-detail select:hover,
+.shell .settings-sheet select:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.shell select:focus-visible,
+.shell textarea:focus-visible,
+.shell input:focus-visible,
+.shell .settings-sheet select:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 75%, white);
+  outline-offset: 1px;
+  box-shadow: var(--recessed), var(--glow);
+}
+
+.shell .bpm-readout {
+  background-color: #101814;
+  background-image: var(--field);
+  box-shadow: var(--recessed);
+  border-color: color-mix(in srgb, var(--line) 82%, white);
+}
+
+.shell .project-name,
+.shell .head input.name,
+.shell .pl-head .name {
+  min-height: 28px;
+  padding: 0 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background-color: rgba(0, 0, 0, 0.22);
+  background-image: var(--field);
+  box-shadow: var(--recessed);
+}
+
+.shell .head input.name,
+.shell .pl-head .name {
+  padding: 0 2px;
+}
+
+.shell #shell-menu .menu-sig {
+  flex-shrink: 0;
+  height: auto;
+}
+
+.shell #shell-menu select {
+  width: 100%;
+  min-height: 36px;
+  height: auto;
+}
+
+.shell.phone #shell-menu select {
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.shell .project-name:focus,
+.shell .head input.name:focus,
+.shell .pl-head .name:focus {
+  border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+  box-shadow: var(--recessed), var(--glow);
+}
+
+.shell .map-head input,
+.shell .map-head select,
+.shell .rack-loop input,
+.shell .sl-scene input {
+  min-height: 26px;
+  height: 26px;
+  padding: 0 6px;
+}
+
+.shell .map-head select {
+  padding-right: 20px;
+  background-position: 0 0, right 4px center;
+}
+
+.shell .sl-scene input {
+  min-height: 0;
+  height: 22px;
+  padding: 0 4px;
+  text-align: center;
+  border-radius: 6px;
+}
+
+.shell.phone:not(.land) select,
+.shell.phone:not(.land) textarea,
+.shell.phone:not(.land) input[type='text'],
+.shell.phone:not(.land) input[type='search'],
+.shell.phone:not(.land) input[type='number']:not(.bpm-readout),
+.shell.phone:not(.land) input:not([type]),
+.shell.phone:not(.land) .settings-sheet select,
+.shell.phone:not(.land) .sl-bar select,
+.shell.phone:not(.land) .sl-detail select {
+  min-height: var(--control-h-phone);
+  font-size: 16px;
+}
+
+.shell.phone:not(.land) .map-head input,
+.shell.phone:not(.land) .map-head select,
+.shell.phone:not(.land) .rack-loop input,
+.shell.phone:not(.land) .sl-scene input,
+.shell.phone:not(.land) .project-name,
+.shell.phone:not(.land) .pl-head .name {
+  min-height: 36px;
+  font-size: 14px;
+}
+
+.shell.phone:not(.land) .sl-scene input {
+  min-height: 0;
+  height: 28px;
+  font-size: 13px;
+}
+
+/* Narrow mixer strips keep the option label visible beside the chevron. */
+.shell .strip select,
+.shell .route-fields select {
+  padding: 0 16px 0 4px;
+  background-position: 0 0, right 3px center;
+  background-size: auto, 10px 7px;
+}
+
+.shell.phone .strip select,
+.shell.fold .strip select {
+  min-height: 36px;
+  font-size: 16px;
+}
+
+/* Custom range. The track is recessed; the cap is a metal bevel. */
+.shell input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 28px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.shell input[type='range']:focus {
+  outline: none;
+}
+
+.shell input[type='range']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 75%, white);
+  outline-offset: 2px;
+}
+
+.shell input[type='range']::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #050807, #2a3b32);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.72), inset 0 -1px 0 rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.shell input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 22px;
+  margin-top: -8px;
+  border-radius: 7px;
+  border: 1px solid #141a17;
+  background:
+    radial-gradient(circle at 50% 28%, rgba(255, 255, 255, 0.75), transparent 42%),
+    linear-gradient(180deg, #f4f7f2, #8d9994);
+  box-shadow: var(--raised);
+}
+
+.shell input[type='range']::-moz-range-track {
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #050807, #2a3b32);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.72), inset 0 -1px 0 rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.shell input[type='range']::-moz-range-thumb {
+  width: 18px;
+  height: 22px;
+  border-radius: 7px;
+  border: 1px solid #141a17;
+  background: linear-gradient(180deg, #f4f7f2, #8d9994);
+  box-shadow: var(--raised);
+}
+
+.shell input[type='range']:hover::-webkit-slider-thumb,
+.shell input[type='range']:hover::-moz-range-thumb {
+  box-shadow: var(--raised), var(--glow);
+}
+
+.shell.phone:not(.land) input[type='range'] {
+  min-height: 44px;
+}
+
+.shell .fader-row input[type='range'],
+.shell .sl-fader input[type='range'],
+.shell.phone .fader-row input[type='range'],
+.shell.phone .sl-fader input[type='range'] {
+  height: 100%;
+  min-height: 0;
+}
+
+.shell .fader-row input[type='range']::-webkit-slider-thumb,
+.shell .sl-fader input[type='range']::-webkit-slider-thumb {
+  width: 22px;
+  height: 16px;
+  margin-top: -5px;
+  border-radius: 5px;
+}
+
+/* Checkbox. The label stays the touch target. */
+.shell input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  margin: 0;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, white);
+  background-color: #101814;
+  background-image: var(--field);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 14px 14px;
+  box-shadow: var(--recessed);
+  cursor: pointer;
+}
+
+.shell input[type='checkbox']:checked {
+  background-color: var(--accent);
+  background-image: var(--tick);
+  border-color: transparent;
+  box-shadow: var(--pressed), var(--glow);
+}
+
+.shell input[type='checkbox']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 75%, white);
+  outline-offset: 2px;
+}
+
+.shell.phone:not(.land) input[type='checkbox'] {
+  width: 28px;
+  height: 28px;
+}
+
+.shell progress {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 12px;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #0c110f;
+  box-shadow: var(--recessed);
+}
+
+.shell progress::-webkit-progress-bar {
+  background: transparent;
+}
+
+.shell progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: linear-gradient(180deg, #d7ffe6, var(--accent));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 65%, transparent);
+}
+
+.shell progress::-moz-progress-bar {
+  border-radius: 999px;
+  background: linear-gradient(180deg, #d7ffe6, var(--accent));
+}
+
+/* Bars, sheets, and empty plates. */
+.shell .topbar,
+.shell .transport,
+.shell .tool-slot:not(:empty) {
+  background-color: #121916;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.16));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+}
+
+.shell .views {
+  background-color: #101814;
+  background-image: var(--field);
+  box-shadow: var(--recessed);
+  border-color: color-mix(in srgb, var(--line) 80%, black);
+}
+
+.shell .lcd {
+  background-color: #070b08;
+  background-image: linear-gradient(180deg, rgba(0, 0, 0, 0.35), rgba(224, 177, 90, 0.05));
+  box-shadow: var(--recessed), inset 0 0 16px rgba(224, 177, 90, 0.06);
+}
+
+.shell .modal,
+.shell .plugin-sheet,
+.shell .add-sheet,
+.shell .q-sheet,
+.shell .patch-sheet,
+.shell .analysis-sheet,
+.shell .players-dock,
+.shell .unstuck-sheet,
+.shell .shell-menu,
+.shell .gen-pop,
+.shell .ideas-pop,
+.shell .perform-pop,
+.shell .spectral-sheet,
+.shell .clip-sheet,
+.shell .stem-sheet,
+.shell .master-sheet,
+.shell .knock-pop,
+.shell .toast {
+  background-color: #18241d;
+  background-image: var(--sheet);
+  box-shadow: inset 0 1px 0 var(--bevel-hi), var(--shadow);
+}
+
+.shell .toasts {
+  z-index: 70;
+}
+
+.shell .toast.good {
+  box-shadow: inset 0 1px 0 var(--bevel-hi), var(--glow), var(--shadow);
+}
+
+.shell .toast.warn {
+  box-shadow: inset 0 1px 0 var(--bevel-hi), 0 0 12px color-mix(in srgb, var(--amber) 50%, transparent), var(--shadow);
+}
+
+.shell .me-empty,
+.shell .unstuck-empty,
+.shell .sl-note,
+.shell .empty-session,
+.shell .dock-placeholder {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background-color: rgba(0, 0, 0, 0.2);
+  background-image: var(--field);
+  box-shadow: var(--recessed);
+}
+
+.shell .me-empty,
+.shell .unstuck-empty,
+.shell .sl-note {
+  padding: 10px 12px;
+}
+
+.shell .midi-note {
+  border-radius: 8px;
+  padding: 2px 8px;
+  background-color: rgba(0, 0, 0, 0.22);
+  background-image: var(--field);
+  box-shadow: var(--recessed);
+}
+
+/* Plain tabs become beveled segments. Heights stay with the existing rules. */
+.shell .tool-row button,
+.shell .scale-bar button,
+.shell .scale-bar select,
+.shell .me-modes button,
+.shell .me-bar button,
+.shell .me-bar select,
+.shell .side-tabs button,
+.shell .browser-tabs button,
+.shell .patch-tabs button,
+.shell .sound-filters button,
+.shell .sound-actions button,
+.shell .sound-head button,
+.shell .sound-status button {
+  border: 1px solid color-mix(in srgb, var(--line) 78%, white);
+  border-radius: var(--radius-control);
+  background-color: #18231d;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+}
+
+.shell .scale-bar select,
+.shell .me-bar select {
+  padding: 0 22px 0 8px;
+  background-image: var(--field), var(--chevron);
+  background-repeat: no-repeat, no-repeat;
+  background-position: 0 0, right 6px center;
+  background-size: auto, 10px 7px;
+  box-shadow: var(--recessed);
+}
+
+.shell .tool-row button.on,
+.shell .scale-bar button.on,
+.shell .me-modes button.on,
+.shell .me-bar button.on,
+.shell .side-tabs button.active,
+.shell .browser-tabs button.on,
+.shell .patch-tabs button.on,
+.shell .sound-filters button.on,
+.shell .sound-actions button.on,
+.shell .views button.active {
+  background-color: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+  box-shadow: var(--pressed), var(--glow);
+}
+
+.shell .side-tabs {
+  gap: 6px;
+  padding: 6px 8px 8px;
+}
+
+.shell .sl-groups button,
+.shell .sl-list button,
+.shell .lib-scales button,
+.shell .idea-row,
+.shell .browser-row,
+.shell .sound-row {
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  background-color: #18231d;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+}
+
+.shell .sl-groups button.on,
+.shell .lib-scales button.on,
+.shell .idea-list article.on .idea-row {
+  box-shadow: var(--pressed), var(--glow);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.shell .session-grid.sl .slot {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 48%);
+}
+
+.shell .heads,
+.shell .playlist-browser,
+.shell .sound-slot,
+.shell .dock,
+.shell .dock-slot {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 72px);
+}
+
+.shell .strip {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 42%), var(--face);
+}
+
+.shell .ruler,
+.shell .song-map {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+}
+
+.shell .meter,
+.shell .mini-meter,
+.shell .sl-meter {
+  box-shadow: var(--recessed);
+}
+
+.shell .clip,
+.shell .section-block:not(.marker) {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38), inset 0 -2px 0 rgba(0, 0, 0, 0.28);
+}
+
+.shell .play-keys .white,
+.shell .step-piano .white {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), inset 0 -3px 0 rgba(0, 0, 0, 0.16), var(--raised);
+}
+
+.shell .play-keys .black,
+.shell .step-piano .black {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -3px 0 rgba(0, 0, 0, 0.55), var(--raised);
+}
+
+.shell .lane-add {
+  background-color: rgba(255, 255, 255, 0.03);
+  background-image: var(--field);
+  box-shadow: var(--recessed);
+}
+
+@media (hover: hover) {
+  .shell .text-btn:hover,
+  .shell .t-btn:hover,
+  .shell .menu-btn:hover,
+  .shell .views button:hover,
+  .shell .mini:hover,
+  .shell .tool-row button:hover,
+  .shell .me-modes button:hover,
+  .shell .browser-row:hover,
+  .shell .sound-row:hover,
+  .shell .sl-list button:hover {
+    box-shadow: var(--raised), 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+
+  .shell .views button.active:hover,
+  .shell .text-btn.primary:hover,
+  .shell .t-btn.play:hover,
+  .shell .tool-row button.on:hover,
+  .shell .me-modes button.on:hover,
+  .shell button[aria-pressed='true']:hover {
+    box-shadow: var(--pressed), var(--glow);
+  }
+}
+
+/* Scrollbars. Hidden strips stay hidden. */
+.shell,
+.shell * {
+  scrollbar-width: thin;
+  scrollbar-color: #5c7568 #101614;
+}
+
+.shell .keys,
+.shell .tool-strip,
+.shell .spectral-row,
+.shell .spectral-ops,
+.shell .spectral-sheet header {
+  scrollbar-width: none;
+}
+
+.shell *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.shell *::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.shell *::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  background: linear-gradient(180deg, #6d8778, #243028);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.shell .keys::-webkit-scrollbar,
+.shell .tool-strip::-webkit-scrollbar,
+.shell .spectral-row::-webkit-scrollbar,
+.shell .spectral-ops::-webkit-scrollbar,
+.shell .spectral-sheet header::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell .toast,
+  .shell button,
+  .shell select,
+  .shell input {
+    transition: none;
+  }
+}
