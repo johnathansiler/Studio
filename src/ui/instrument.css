@@ -26,7 +26,9 @@
 .shell.phone .inst-panel .bevel,
 .shell.phone .rack .library-panel select,
 .shell.phone .rack .library-file,
-.shell.phone .rack select.bevel { min-height: 40px; height: 40px; max-width: none; }
+.shell.phone .rack select.bevel,
+.shell.phone:not(.land) .inst-panel select.bevel,
+.shell.phone:not(.land) .rack .library-panel select { min-height: 40px; height: 40px; max-width: none; font-size: 14px; }
 .shell.phone .rack { height: auto; }
 .shell.phone .inst-head { flex-wrap: nowrap; }
 .shell.phone .inst-devices .bevel { flex: 0 0 auto; padding: 0 10px; }
