@@ -7,7 +7,7 @@ describe('session board', () => {
   it('names Auto-Tune and Scaler and parses a device drop', () => {
     expect(AUDIO_DEVICES[0]).toMatchObject({ id: 'tune', name: 'Auto-Tune' })
     expect(MIDI_DEVICES[0]).toMatchObject({ id: 'scale', name: 'Scaler' })
-    expect(browserGroup('plugins').map((item) => item.name)).toEqual(['Auto-Tune', 'Scaler'])
+    expect(browserGroup('plugins').map((item) => item.name)).toEqual(['Auto-Tune', 'Scaler', 'Pads'])
     expect(parseDeviceDrag('cueharbor-device:audio:tune')).toEqual({ kind: 'audio', id: 'tune' })
     expect(parseDeviceDrag('cueharbor-clip:a:b')).toBeNull()
   })

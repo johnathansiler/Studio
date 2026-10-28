@@ -478,6 +478,12 @@ export const CATALOG: PluginDescriptor[] = [
     params: [],
   },
   {
+    id: 'pads',
+    name: 'Pads',
+    version: VERSION,
+    params: [],
+  },
+  {
     id: 'sampler',
     name: 'Sampler',
     version: VERSION,
@@ -963,6 +969,7 @@ export function normalizeProject(project: Project): Project {
   project.masterInserts = project.masterInserts ?? []
   for (const track of project.tracks) {
     normalizeTrackScaler(track)
+    if (track.instrument === 'pads' || track.padKit) track.padKit = normalizePadKit(track.padKit)
     track.plugins = (track.plugins ?? []).map(fillInstrument)
     track.sends = track.sends ?? []
     track.inserts = track.inserts ?? []

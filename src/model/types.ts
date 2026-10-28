@@ -11,7 +11,7 @@ import { defaultScale, type ScaleState } from './scale'
 import type { BeatRack, PatternClip } from './steps'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
-export type TrackInstrument = 'synth' | 'sampler' | '808' | 'drum-machine' | 'library' | 'scaler' | 'none'
+export type TrackInstrument = 'synth' | 'sampler' | '808' | 'drum-machine' | 'library' | 'scaler' | 'pads' | 'none'
 
 export function isLocalInput(input: string) {
   return input === 'mic' || input === 'line'
@@ -432,6 +432,8 @@ export interface Track {
   instrument?: TrackInstrument
   /** Scaler chord instrument. Present when this track's instrument is Scaler. */
   scaler?: ScalerState
+  /** MPC pad kit. Present when this track's instrument is Pads. */
+  padKit?: import('./padMachine').PadProgram
   /** Multi-sample program for a library instrument. PCM is not stored here. */
   library?: SamplerProgram
   inserts: Insert[]
