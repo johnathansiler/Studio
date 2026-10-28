@@ -4,6 +4,7 @@ import type { FollowAction, LaunchMode, LaunchQuant } from '../model/types'
 import { quartersPerBar } from '../model/time'
 import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
+import { LinkGroup, MixFlags } from './AutomationLane'
 
 export function SessionView({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
   const project = store.project
@@ -76,6 +77,10 @@ export function SessionView({ store, engine }: { store: ProjectStore; engine: Au
             {store.project.tracks.map((track) => (
               <th key={track.id} data-track={track.id} style={{ color: track.color }}>
                 {track.name}
+                <div className="mix-flags session-flags">
+                  <MixFlags store={store} trackId={track.id} />
+                </div>
+                <LinkGroup store={store} trackId={track.id} />
               </th>
             ))}
             <th><AddTrackButton store={store} /></th>

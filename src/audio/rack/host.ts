@@ -1,7 +1,8 @@
 import type { Project } from '../../model/types'
 import type { StripNodes } from '../strips'
 import { RackRuntime, type SampleBuffer } from './dsp'
-import type { RackState } from '../../model/rack'
+import { rackLanesFor } from '../../model/automation'
+import type { RackAutomation, RackState } from '../../model/rack'
 
 interface Live {
   worklet: AudioWorkletNode | null
@@ -12,6 +13,9 @@ interface Live {
   tempo: number
   buffers: Map<string, SampleBuffer>
   notes: { pitch: number; vel: number; time: number; slide?: boolean }[]
+  lanes: RackAutomation[]
+  originTime: number
+  originBeat: number
 }
 
 /**
@@ -26,6 +30,9 @@ export class RackHost {
   private ready: Promise<boolean> | null = null
   private workletOk = false
   private pending = new Map<string, { pitch: number; vel: number; time: number; slide?: boolean }[]>()
+  private originTime = 0
+  private originBeat = 0
+  private clockProject: Project | null = null
 
   constructor() {
     if (typeof matchMedia !== 'undefined') this.phone = matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
@@ -50,7 +57,35 @@ export class RackHost {
       for (const id of [...this.lives.keys()]) {
         if (!project.tracks.some((track) => track.id === id && track.rack)) this.drop(id)
       }
+      this.clockProject = project
+      this.broadcast()
     })
+  }
+
+  /** Anchor instrument lanes to the audio clock so playback is sample-accurate. */
+  setTransport(project: Project, originTime: number, originBeat: number) {
+    this.clockProject = project
+    this.originTime = originTime
+    this.originBeat = originBeat
+    this.broadcast()
+  }
+
+  private broadcast() {
+    const project = this.clockProject
+    if (!project) return
+    for (const [id, live] of this.lives) {
+      live.lanes = rackLanesFor(project, id)
+      live.originTime = this.originTime
+      live.originBeat = this.originBeat
+      live.tempo = project.tempo
+      live.worklet?.port.postMessage({
+        type: 'clock',
+        originTime: this.originTime,
+        originBeat: this.originBeat,
+        tempo: project.tempo,
+        lanes: live.lanes,
+      })
+    }
   }
 
   note(trackId: string, pitch: number, vel: number, time: number, slide = false) {
@@ -87,7 +122,7 @@ export class RackHost {
     const gain = ctx.createGain()
     gain.connect(strip.input)
     const runtime = new RackRuntime(ctx.sampleRate)
-    const live: Live = { worklet: null, script: null, runtime, gain, rack: null, tempo: 120, buffers: new Map(), notes: [] }
+    const live: Live = { worklet: null, script: null, runtime, gain, rack: null, tempo: 120, buffers: new Map(), notes: [], lanes: [], originTime: 0, originBeat: 0 }
     if (this.workletOk) {
       const node = new AudioWorkletNode(ctx, 'cueharbor-rack', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] })
       node.port.onmessage = (event: MessageEvent<{ type?: string; value?: number }>) => {
@@ -110,7 +145,8 @@ export class RackHost {
             runtime.note(item.pitch, item.vel, rack.polyphony, !!item.slide)
           }
           const started = performance.now()
-          const rendered = runtime.render(rack, event.outputBuffer.length, live.tempo, this.quality, live.buffers)
+          const beat = live.originBeat + (when - live.originTime) * (live.tempo / 60)
+          const rendered = runtime.render(rack, event.outputBuffer.length, live.tempo, this.quality, live.buffers, live.lanes, beat)
           event.outputBuffer.getChannelData(0).set(rendered[0])
           event.outputBuffer.getChannelData(1).set(rendered[1])
           const budget = (event.outputBuffer.length / ctx.sampleRate) * 1000

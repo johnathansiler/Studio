@@ -3,6 +3,7 @@ import type { AudioEngine } from '../audio/engine'
 import { emptyTap, pushTap, scaleTempo, tempoFromTaps, roundTempo, type TapMemory } from '../model/tap'
 import { formatBarsBeats, formatTimecode } from '../model/time'
 import type { ProjectStore } from '../state/store'
+import { AutomationFollow } from './AutomationLane'
 
 export function TransportBar({
   store,
@@ -95,6 +96,7 @@ export function TransportBar({
   const playing = status === 'playing' || status === 'recording'
   return (
     <div className="transport">
+      <AutomationFollow store={store} engine={engine} />
       <div className="t-buttons">
         <button type="button" className="t-btn" onClick={() => onSeek(0)} aria-label="Return to start">
           <SkipBackIcon />

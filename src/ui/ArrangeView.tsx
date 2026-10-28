@@ -12,6 +12,7 @@ import { activeTool, EDITOR_TOOL_KEYS, subscribeTools } from '../state/tools'
 import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
 import { AddTrackButton } from './AddTrack'
+import { AutoFader, AutomationModeBar, AutomationOverlay, LanePicker, LinkGroup, MixFlags } from './AutomationLane'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 
 export function ArrangeView({
@@ -308,6 +309,7 @@ export function ArrangeView({
 
   return (
     <div className="arrange-wrap">
+      <AutomationModeBar store={store} />
       <div className="rec-bar" role="group" aria-label="Recording">
         <button type="button" className={record.loop ? 'on' : ''} onClick={() => {
           const next = !record.loop
@@ -385,7 +387,7 @@ export function ArrangeView({
       <div className="heads">
         <div className="ruler-gap" />
         {project.tracks.map((track) => (
-          <div className="head" data-track={track.id} key={track.id} style={laneStyle(track, store.selectedClipId)} onClick={() => store.selectTrack(track.id)}>
+          <div className="head" data-track={track.id} key={track.id} style={rowHeight(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => store.selectTrack(track.id)}>
             <header>
               <input
                 className="name"
@@ -401,11 +403,9 @@ export function ArrangeView({
               </button>
             </header>
             <div className="row">
-              <button className={`mini ${track.mute ? 'on-m' : ''}`} onClick={() => store.updateTrack(track.id, { mute: !track.mute })}>
-                M
-              </button>
-              <button className={`mini ${track.solo ? 'on-s' : ''}`} onClick={() => store.updateTrack(track.id, { solo: !track.solo })}>
-                S
+              <MixFlags store={store} trackId={track.id} />
+              <button type="button" className={`mini auto-open ${store.openLanes[track.id] ? 'on' : ''}`} aria-pressed={!!store.openLanes[track.id]} title="Show the automation lane for this track." onClick={(event) => { event.stopPropagation(); store.toggleAutomation(track.id) }}>
+                Auto
               </button>
               {track.type === 'audio' && (
                 <button className={`mini ${track.armed ? 'on-r' : ''}`} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
@@ -423,14 +423,13 @@ export function ArrangeView({
                   <button className="mini" title="Drum machine" onClick={() => onPerform('drums')}>D</button>
                 </>
               )}
-              <input
+              <AutoFader
                 className="slim"
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
+                store={store}
+                engine={engine}
+                label={`${track.name} volume`}
                 value={track.volume}
-                onChange={(event) => store.updateTrack(track.id, { volume: Number(event.target.value) })}
+                spec={{ trackId: track.id, target: 'volume', param: 'volume', min: 0, max: 1.25 }}
               />
             </div>
             {track.type === 'audio' && (
@@ -451,10 +450,12 @@ export function ArrangeView({
                   ))}
               </select>
             )}
+            <LanePicker store={store} trackId={track.id} />
             <div className="head-extra">
+              <LinkGroup store={store} trackId={track.id} />
               <RouteFields store={store} trackId={track.id} />
               <InsertList store={store} trackId={track.id} />
-              <SendList store={store} trackId={track.id} />
+              <SendList store={store} trackId={track.id} engine={engine} />
             </div>
           </div>
         ))}
@@ -502,7 +503,7 @@ export function ArrangeView({
               className="lane"
               data-track={track.id}
               key={track.id}
-              style={{ backgroundSize: `${beatPx}px 100%`, ...laneStyle(track, store.selectedClipId) }}
+              style={{ backgroundSize: `${beatPx}px 100%`, ...rowHeight(track, store.selectedClipId, !!store.openLanes[track.id]) }}
               onDoubleClick={(event) => {
                 if (track.type !== 'midi') return
                 const bounds = event.currentTarget.getBoundingClientRect()
@@ -531,6 +532,7 @@ export function ArrangeView({
               {track.type === 'midi' && track.midiClips.every((clip) => clip.slotOnly) && (
                 <button type="button" className="lane-add" aria-label="Add clip" onClick={() => onOpenPiano(track.id)}>+</button>
               )}
+              <AutomationOverlay store={store} trackId={track.id} px={px} tool={tool} />
               {track.midiClips.filter((clip) => !clip.slotOnly && clip.scene == null).map((clip) => {
                 const beat = clip.startBeat + (nudge?.midi[clip.id] ?? 0)
                 const left = ((beat * 60) / project.tempo) * px
@@ -615,6 +617,12 @@ function laneStyle(track: { clips: AudioClip[] }, selectedId: string | null): { 
   const open = track.clips.find((clip) => clip.id === selectedId && clip.folder)
   if (!open?.folder) return {}
   return { height: Math.max(168, 40 + open.folder.lanes.length * 48) }
+}
+
+function rowHeight(track: { clips: AudioClip[] }, selectedId: string | null, automation: boolean) {
+  const base = laneStyle(track, selectedId)
+  if (!automation) return base
+  return { height: Math.max(base.height ?? 150, 236) }
 }
 
 function ClipView({

@@ -4,6 +4,9 @@ import { samplesToBeats } from '../model/time'
 import type { StripNodes } from './strips'
 import { processChain, type ChainSlot } from './plugins/chain'
 import { automationAt, latencyOf } from './plugins/catalog'
+import { pluginLanesMove, rampEvents, sendLane } from '../model/automation'
+import { applyRamps } from './paramCurve'
+import { processSampleAccurate } from './automationRender'
 import { loadModule } from './plugins/registry'
 import type { Processor } from './plugins/types'
 import { MASTER, REMOTE, edgeDelays, findCycle, type RoutePoint } from './routing'
@@ -35,6 +38,9 @@ export class LiveRack {
   private readonly traces = new Map<string, Float32Array>()
   private readonly tapsOut = new Map<string, Float32Array>()
   private readonly sendGains = new Map<string, GainNode>()
+  private readonly keys = new Map<string, Float32Array>()
+  private readonly keyTaps = new Map<string, ScriptProcessorNode>()
+  private readonly keySinks = new Map<string, GainNode>()
   private links: { from: AudioNode; to: AudioNode }[] = []
   private generation = 0
   private signature = ''
@@ -218,31 +224,39 @@ export class LiveRack {
       const proc = this.processors.get(plugin.id) as Processor & { bind?: (plugin: PluginInstance, channel: (id: string) => Float32Array | null) => void }
       proc?.bind?.(plugin, (id) => this.assetOf(id)?.channels[0] ?? null)
     }
+    const origin = this.clock()
     const slots: ChainSlot[] = plugins.map((plugin) => ({
       id: plugin.id,
       pluginId: plugin.pluginId,
       enabled: plugin.enabled,
       wet: plugin.wet,
-      params: automationAt(project.automation, plugin.id, plugin.params, beat),
+      params: { ...plugin.params },
       failed: this.failed.has(plugin.id),
       sidechain: plugin.sidechain,
       processor: this.processors.get(plugin.id) ?? null,
     }))
     const started = performance.now()
-    processChain(slots, input, output, {
+    const blockCtx = {
       sampleRate: rate,
       tempo: project.tempo,
-      sampleTime: this.clock(),
+      sampleTime: origin,
       sidechain: null,
       scaleRoot: project.scale?.root ?? 0,
       scaleIntervals: scale.intervals,
       quality: this.quality,
       offline: false,
-    }, (id, length) => {
-      const buf = this.tapsOut.get(id)
-      if (!buf || !buf.length) return null
+    }
+    const keyAt = (id: string, length: number) => {
+      const buf = this.keys.get(id) ?? this.tapsOut.get(id)
+      if (!buf?.length) return null
       return buf.subarray(0, Math.min(buf.length, length))
-    })
+    }
+    if (pluginLanesMove(project.automation, plugins.map((plugin) => plugin.id), rate, project.tempo, input[0].length)) {
+      processSampleAccurate(slots, input, output, blockCtx, project.automation, keyAt)
+    } else {
+      for (const slot of slots) slot.params = automationAt(project.automation, slot.id, slot.params, beat)
+      processChain(slots, input, output, blockCtx, keyAt)
+    }
     for (const slot of slots) {
       if (slot.failed) this.failed.add(slot.id)
       if (slot.processor?.spectrum) this.spectra.set(slot.id, slot.processor.spectrum)
@@ -294,6 +308,7 @@ export class LiveRack {
     const next = this.signatureOf()
     if (next && next === this.signature) {
       this.applySendGains(project)
+      this.captureKeys(project)
       return
     }
     this.signature = next
@@ -306,6 +321,72 @@ export class LiveRack {
         const gain = this.sendGains.get(send.id)
         if (gain) gain.gain.value = send.gain
       }
+    }
+  }
+
+  /** Schedule send levels. A moving lane becomes a sample-accurate ramp on the audio clock. */
+  applyAutomation(project: Project, playing: boolean, sample: number, now: number, endSample: number, sampleRate: number) {
+    for (const track of project.tracks) {
+      for (const send of track.sends) {
+        const node = this.sendGains.get(send.id)
+        if (!node) continue
+        const points = sendLane(project.automation, track.id, send.id)?.points
+        if (!playing || !points?.length) {
+          node.gain.cancelScheduledValues(now)
+          node.gain.setTargetAtTime(send.gain, now, 0.015)
+          continue
+        }
+        applyRamps(node.gain, rampEvents(points, send.gain, sampleRate, project.tempo, sample, now, endSample), now)
+      }
+    }
+    this.captureKeys(project)
+  }
+
+  /** Pre-fader tap so a muted or unprocessed track can still key a compressor or gate. */
+  private captureKeys(project: Project) {
+    const ctx = this.ctx
+    if (!ctx) return
+    const needed = new Set<string>()
+    for (const plugin of [...project.masterPlugins, ...project.tracks.flatMap((track) => track.plugins)]) {
+      if (plugin.sidechain) needed.add(plugin.sidechain)
+    }
+    for (const id of [...this.keyTaps.keys()]) {
+      if (needed.has(id)) continue
+      try { this.keyTaps.get(id)?.disconnect() } catch { /* gone */ }
+      try { this.keySinks.get(id)?.disconnect() } catch { /* gone */ }
+      this.keyTaps.delete(id)
+      this.keySinks.delete(id)
+    }
+    for (const id of needed) {
+      if (this.keyTaps.has(id)) continue
+      const strip = this.strips.get(id)
+      if (!strip) continue
+      let proc: ScriptProcessorNode
+      try {
+        proc = ctx.createScriptProcessor(256, 2, 2)
+      } catch {
+        continue
+      }
+      proc.onaudioprocess = (event) => {
+        const left = event.inputBuffer.getChannelData(0)
+        const right = event.inputBuffer.getChannelData(1)
+        const mono = new Float32Array(left.length)
+        for (let i = 0; i < left.length; i++) mono[i] = ((left[i] || 0) + (right[i] || 0)) * 0.5
+        this.keys.set(id, mono)
+        event.outputBuffer.getChannelData(0).set(left)
+        event.outputBuffer.getChannelData(1).set(right)
+      }
+      const sink = ctx.createGain()
+      sink.gain.value = 0
+      try {
+        strip.pan.connect(proc)
+        proc.connect(sink)
+        sink.connect(ctx.destination)
+      } catch {
+        continue
+      }
+      this.keyTaps.set(id, proc)
+      this.keySinks.set(id, sink)
     }
   }
 

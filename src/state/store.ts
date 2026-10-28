@@ -25,9 +25,33 @@ import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stret
 import { findCycle, MASTER } from '../audio/routing'
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
-import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
-import { splitMidiClip, stretchMidiClip, trimMidiClip } from '../model/edit'
+import { clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
+import { stretchMidiClip, trimMidiClip } from '../model/edit'
 import { activeTool, setActiveTool, type ArrangeTool } from './tools'
+import {
+  drawPoint,
+  ensureLane,
+  eraseNear,
+  findLane,
+  modeOf,
+  movePoint,
+  specKey,
+  writeSegment,
+  type AutoSpec,
+  type WriteCursor,
+} from '../model/automation'
+import {
+  groupForTrack,
+  linkedAudioTargets,
+  patchMixer,
+  setGroupFlags,
+  setTrackGroup,
+  shiftLinkedAudio,
+  shiftLinkedMidi,
+  splitLinkedAudio,
+  splitLinkedMidi,
+  trimLinkedAudio,
+} from '../model/mixGroups'
 import { demoMidiNotes } from '../model/demo'
 import {
   clipById,
@@ -67,7 +91,7 @@ import {
   type StepCell,
 } from '../model/steps'
 import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK_COLORS } from '../model/types'
-import type { AudioAsset, AudioClip, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, MidiClip, MidiNote, PluginInstance, Project, RecordSettings, TakeLane, Track } from '../model/types'
+import type { AudioAsset, AudioClip, AutomationWriteMode, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, MidiClip, MidiNote, MixGroup, PluginInstance, Project, RecordSettings, TakeLane, Track } from '../model/types'
 import { beatsToSamples, quartersPerBar, samplesToBeats, snapSample } from '../model/time'
 import { linearResample } from '../model/wav'
 import { renderDrum, DRUM_PADS } from '../model/drums'
@@ -154,6 +178,11 @@ export class ProjectStore {
   /** Clip settings. Not saved. */
   clipSheet = false
   private bypassed: { id: string; enabled: boolean }[] | null = null
+  /** Which arrange rows show an automation lane. Not saved. */
+  openLanes: Record<string, boolean> = {}
+  laneChoice: Record<string, string> = {}
+  private touching = false
+  private write: WriteCursor | null = null
 
   constructor(project = createEmptyProject(), buffers?: Map<string, AudioAsset>) {
     this.project = normalizeProjectRack(normalizeProject(project))
@@ -528,7 +557,20 @@ export class ProjectStore {
     this.mutate(() => {
       const track = this.track(id)
       if (!track) return
-      Object.assign(track, patch)
+      const mixer: { volume?: number; pan?: number; mute?: boolean; solo?: boolean; soloSafe?: boolean } = {}
+      if (patch.volume != null) mixer.volume = patch.volume
+      if (patch.pan != null) mixer.pan = patch.pan
+      if (patch.mute != null) mixer.mute = patch.mute
+      if (patch.solo != null) mixer.solo = patch.solo
+      if (patch.soloSafe != null) mixer.soloSafe = patch.soloSafe
+      if (Object.keys(mixer).length) patchMixer(this.project, id, mixer)
+      const rest: Partial<Track> = { ...patch }
+      delete rest.volume
+      delete rest.pan
+      delete rest.mute
+      delete rest.solo
+      delete rest.soloSafe
+      Object.assign(track, rest)
     })
   }
 
@@ -834,6 +876,139 @@ export class ProjectStore {
     })
   }
 
+  setAutomationMode(mode: AutomationWriteMode) {
+    this.mutate(() => {
+      this.project.automationMode = mode
+    })
+  }
+
+  toggleAutomation(trackId: string) {
+    this.openLanes = { ...this.openLanes, [trackId]: !this.openLanes[trackId] }
+    this.emit()
+  }
+
+  chooseLane(trackId: string, key: string) {
+    this.laneChoice = { ...this.laneChoice, [trackId]: key }
+    this.emit()
+  }
+
+  assignMixGroup(trackId: string, choice: string) {
+    this.mutate(() => {
+      setTrackGroup(this.project, trackId, choice)
+    })
+  }
+
+  setMixLink(groupId: string, patch: Partial<Pick<MixGroup, 'faders' | 'mutes' | 'solos' | 'edits' | 'name'>>) {
+    this.mutate(() => {
+      setGroupFlags(this.project, groupId, patch)
+    })
+  }
+
+  beginAutomationTouch() {
+    this.touching = true
+  }
+
+  endAutomationTouch() {
+    this.touching = false
+  }
+
+  /** Move a mixer or plugin control. Latch and touch write a lane while the transport is rolling. */
+  setAutomated(spec: AutoSpec, value: number, playing: boolean, sample: number) {
+    const mode = modeOf(this.project)
+    if (playing && mode === 'read') return
+    const writing = playing && (mode === 'latch' || this.touching)
+    const run = writing ? (fn: () => void) => this.draft(fn) : (fn: () => void) => this.mutate(fn)
+    run(() => {
+      this.applySpec(spec, value)
+      if (!writing) {
+        this.write = null
+        return
+      }
+      const beat = samplesToBeats(sample, this.project.sampleRate, this.project.tempo)
+      const key = specKey(spec)
+      const previous = this.write?.key === key ? this.write : null
+      const fromBeat = previous?.beat ?? beat
+      const fromValue = previous?.value ?? value
+      this.punchSpec(spec, fromBeat, beat, fromValue, value)
+      this.write = { key, beat, value, spec }
+    })
+  }
+
+  sustainAutomation(sample: number) {
+    if (modeOf(this.project) !== 'latch' || !this.write || this.touching) return
+    const beat = samplesToBeats(sample, this.project.sampleRate, this.project.tempo)
+    if (beat <= this.write.beat + 0.02) return
+    const cursor = this.write
+    this.draft(() => {
+      this.punchSpec(cursor.spec, cursor.beat, beat, cursor.value, cursor.value)
+      cursor.beat = beat
+    })
+  }
+
+  finishAutomationLatch() {
+    if (!this.write && !this.touching) return
+    this.write = null
+    this.touching = false
+  }
+
+  paintAutomation(spec: AutoSpec, beat: number, value: number, radius = 0.03) {
+    this.draft(() => {
+      this.setPoints(spec, drawPoint(this.pointsOf(spec), Math.max(0, beat), clamp(value, spec.min, spec.max), radius))
+    })
+  }
+
+  eraseAutomation(spec: AutoSpec, beat: number, radius: number) {
+    this.draft(() => {
+      this.setPoints(spec, eraseNear(this.pointsOf(spec), beat, radius))
+    })
+  }
+
+  moveAutomationPoint(spec: AutoSpec, fromBeat: number, toBeat: number, value: number) {
+    this.draft(() => {
+      this.setPoints(spec, movePoint(this.pointsOf(spec), fromBeat, Math.max(0, toBeat), clamp(value, spec.min, spec.max)))
+    })
+  }
+
+  private applySpec(spec: AutoSpec, value: number) {
+    const next = clamp(value, spec.min, spec.max)
+    if (spec.target === 'volume') patchMixer(this.project, spec.trackId, { volume: next })
+    else if (spec.target === 'pan') patchMixer(this.project, spec.trackId, { pan: next })
+    else if (spec.target === 'send' && spec.sendId) {
+      const send = this.track(spec.trackId)?.sends.find((item) => item.id === spec.sendId)
+      if (send) send.gain = next
+    } else if (spec.target === 'plugin' && spec.pluginId) {
+      const plugin = this.pluginList(spec.trackId)?.find((item) => item.id === spec.pluginId)
+      if (plugin) plugin.params = { ...plugin.params, [spec.param]: next }
+    } else if (spec.target === 'instrument' && spec.deviceId) {
+      const device = this.track(spec.trackId)?.rack?.devices.find((item) => item.id === spec.deviceId)
+      if (device) device.params = { ...device.params, [spec.param]: next }
+    }
+  }
+
+  private pointsOf(spec: AutoSpec) {
+    if (spec.target === 'instrument' && spec.deviceId) {
+      return this.project.rackAutomation.find((lane) => lane.deviceId === spec.deviceId && lane.param === spec.param)?.points ?? []
+    }
+    return findLane(this.project, spec)?.points ?? []
+  }
+
+  private setPoints(spec: AutoSpec, points: { beat: number; value: number }[]) {
+    if (spec.target === 'instrument' && spec.deviceId) {
+      let lane = this.project.rackAutomation.find((item) => item.deviceId === spec.deviceId && item.param === spec.param)
+      if (!lane) {
+        lane = { id: uid('auto'), deviceId: spec.deviceId, param: spec.param, points: [] }
+        this.project.rackAutomation.push(lane)
+      }
+      lane.points = points
+      return
+    }
+    ensureLane(this.project, spec, uid('auto')).points = points
+  }
+
+  private punchSpec(spec: AutoSpec, fromBeat: number, toBeat: number, fromValue: number, toValue: number) {
+    this.setPoints(spec, writeSegment(this.pointsOf(spec), fromBeat, toBeat, fromValue, toValue))
+  }
+
   addVocalChain(trackId: string) {
     this.mutate(() => {
       const track = this.track(trackId)
@@ -958,6 +1133,12 @@ export class ProjectStore {
     this.mutate(() => {
       const audio = new Set(this.selectedClipIds.length ? this.selectedClipIds : this.selectedClipId ? [this.selectedClipId] : [])
       if (audio.size) {
+        for (const track of this.project.tracks) {
+          for (const clip of track.clips) {
+            if (!audio.has(clip.id)) continue
+            for (const other of linkedAudioTargets(this.project, track.id, clip)) audio.add(other.id)
+          }
+        }
         for (const track of this.project.tracks) track.clips = track.clips.filter((clip) => !audio.has(clip.id))
         this.selectedClipId = null
         this.selectedClipIds = []
@@ -983,23 +1164,20 @@ export class ProjectStore {
 
   splitSelected(atSample: number) {
     if (!this.selectedClipId) return
+    const selected = this.selectedClipId
     this.mutate(() => {
       for (const track of this.project.tracks) {
-        const index = track.clips.findIndex((c) => c.id === this.selectedClipId)
-        if (index < 0) continue
-        const parts = splitAudioClip(track.clips[index], atSample)
-        if (!parts) return
-        track.clips.splice(index, 1, parts[0], parts[1])
-        this.selectedClipId = parts[1].id
+        const id = splitLinkedAudio(this.project, track.id, selected, atSample)
+        if (!id) continue
+        this.selectedClipId = id
+        return
       }
     })
   }
 
   moveClip(trackId: string, clipId: string, startSample: number) {
     this.mutate(() => {
-      const track = this.track(trackId)
-      const clip = track?.clips.find((c) => c.id === clipId)
-      if (clip) Object.assign(clip, moveAudioClip(clip, startSample))
+      shiftLinkedAudio(this.project, trackId, clipId, startSample)
     })
   }
 
@@ -1007,8 +1185,17 @@ export class ProjectStore {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((item) => item.id === clipId)
       if (!clip) return
+      const original = { ...clip }
+      const edgeAt = edge === 'start' ? clip.startSample : clip.startSample + clip.durationSamples
+      const delta = sample - edgeAt
       Object.assign(clip, stretchEdge(clip, edge, sample))
       this.commitClip(clip)
+      if (!delta || !groupForTrack(this.project, trackId)?.edits) return
+      for (const other of linkedAudioTargets(this.project, trackId, original)) {
+        const next = edge === 'start' ? other.startSample + delta : other.startSample + other.durationSamples + delta
+        Object.assign(other, stretchEdge(other, edge, next))
+        this.commitClip(other)
+      }
     })
   }
 
@@ -1120,33 +1307,31 @@ export class ProjectStore {
 
   trimClip(trackId: string, clipId: string, edge: 'start' | 'end', sample: number) {
     this.mutate(() => {
-      const track = this.track(trackId)
-      const clip = track?.clips.find((c) => c.id === clipId)
-      if (!clip) return
-      const asset = this.buffers.get(clip.bufferId)
-      const length = asset?.channels[0].length ?? clip.offsetSamples + clip.durationSamples
-      const next = trimAudioClip(clip, edge, sample, length)
-      Object.assign(clip, next)
+      trimLinkedAudio(this.project, trackId, clipId, edge, sample, (clip) => {
+        const asset = this.buffers.get(clip.bufferId)
+        return asset?.channels[0].length ?? clip.offsetSamples + clip.durationSamples
+      })
     })
   }
 
   placeAudioClips(moves: { trackId: string; clipId: string; startSample: number }[]) {
     this.mutate(() => {
+      const done = new Set<string>()
       for (const move of moves) {
-        const clip = this.track(move.trackId)?.clips.find((item) => item.id === move.clipId)
-        if (!clip) continue
+        if (done.has(move.clipId)) continue
         const start = snapSample(move.startSample, this.project.sampleRate, this.project.tempo, this.project.snap)
-        Object.assign(clip, moveAudioClip(clip, start))
+        for (const id of shiftLinkedAudio(this.project, move.trackId, move.clipId, start)) done.add(id)
       }
     })
   }
 
   placeMidiClips(moves: { trackId: string; clipId: string; startBeat: number }[]) {
     this.mutate(() => {
+      const done = new Set<string>()
       for (const move of moves) {
-        const clip = this.track(move.trackId)?.midiClips.find((item) => item.id === move.clipId)
-        if (!clip) continue
-        clip.startBeat = this.project.snap ? Math.max(0, Math.round(move.startBeat)) : Math.max(0, move.startBeat)
+        if (done.has(move.clipId)) continue
+        const start = this.project.snap ? Math.max(0, Math.round(move.startBeat)) : Math.max(0, move.startBeat)
+        for (const id of shiftLinkedMidi(this.project, move.trackId, move.clipId, start)) done.add(id)
       }
     })
   }
@@ -1179,25 +1364,17 @@ export class ProjectStore {
 
   splitAt(trackId: string, clipId: string, atSample: number) {
     this.mutate(() => {
-      const track = this.track(trackId)
-      if (!track) return
-      const index = track.clips.findIndex((clip) => clip.id === clipId)
-      if (index >= 0) {
-        const parts = splitAudioClip(track.clips[index], atSample)
-        if (!parts) return
-        track.clips.splice(index, 1, parts[0], parts[1])
-        this.selectedClipId = parts[1].id
-        this.selectedClipIds = [parts[1].id]
+      const audioId = splitLinkedAudio(this.project, trackId, clipId, atSample)
+      if (audioId) {
+        this.selectedClipId = audioId
+        this.selectedClipIds = [audioId]
         return
       }
-      const midiIndex = track.midiClips.findIndex((clip) => clip.id === clipId)
-      if (midiIndex < 0) return
       const beat = samplesToBeats(atSample, this.project.sampleRate, this.project.tempo)
-      const parts = splitMidiClip(track.midiClips[midiIndex], beat)
-      if (!parts) return
-      track.midiClips.splice(midiIndex, 1, parts[0], parts[1])
-      this.selectedMidiClipId = parts[1].id
-      this.selectedMidiClipIds = [parts[1].id]
+      const midiId = splitLinkedMidi(this.project, trackId, clipId, beat)
+      if (!midiId) return
+      this.selectedMidiClipId = midiId
+      this.selectedMidiClipIds = [midiId]
     })
   }
 
@@ -1667,7 +1844,8 @@ export class ProjectStore {
   toggleTrack(id: string, flag: 'mute' | 'solo') {
     this.mutate(() => {
       const track = this.track(id)
-      if (track) track[flag] = !track[flag]
+      if (!track) return
+      patchMixer(this.project, id, { [flag]: !track[flag] })
     })
   }
 

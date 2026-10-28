@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
+import { AutoFader, AutomationModeBar, LinkGroup, MixFlags } from './AutomationLane'
 import { MasterSheet } from './MasterSheet'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 
@@ -10,20 +11,21 @@ export function MixerView({ store, engine, onTune }: { store: ProjectStore; engi
   const [masterOpen, setMasterOpen] = useState(false)
   return (
     <div className="mixer">
+      <AutomationModeBar store={store} />
       {project.tracks.map((track) => (
         <div className="strip" data-track={track.id} key={track.id}>
           <h3 style={{ color: track.color }}>{track.name}</h3>
           <RouteFields store={store} trackId={track.id} />
+          <LinkGroup store={store} trackId={track.id} />
           <InsertList store={store} trackId={track.id} />
-          <SendList store={store} trackId={track.id} />
-          <input className="pan" type="range" min={-1} max={1} step={0.01} value={track.pan} onChange={(event) => store.updateTrack(track.id, { pan: Number(event.target.value) })} />
+          <SendList store={store} trackId={track.id} engine={engine} />
+          <AutoFader className="pan" store={store} engine={engine} label={`${track.name} pan`} value={track.pan} spec={{ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }} />
           <div className="fader-row">
             <Meter engine={engine} id={track.id} />
-            <input type="range" min={0} max={1.25} step={0.01} value={track.volume} onChange={(event) => store.updateTrack(track.id, { volume: Number(event.target.value) })} />
+            <AutoFader store={store} engine={engine} label={`${track.name} volume`} value={track.volume} spec={{ trackId: track.id, target: 'volume', param: 'volume', min: 0, max: 1.25 }} />
           </div>
           <div className="row">
-            <button className={`mini ${track.mute ? 'on-m' : ''}`} onClick={() => store.updateTrack(track.id, { mute: !track.mute })}>M</button>
-            <button className={`mini ${track.solo ? 'on-s' : ''}`} onClick={() => store.updateTrack(track.id, { solo: !track.solo })}>S</button>
+            <MixFlags store={store} trackId={track.id} />
             {track.type === 'audio' && onTune && (
               <button type="button" className="mini tune-btn" onClick={() => onTune(track.id)}>Tune</button>
             )}

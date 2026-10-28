@@ -1,5 +1,5 @@
 import { RackRuntime } from './dsp'
-import type { RackState } from '../../model/rack'
+import type { RackAutomation, RackState } from '../../model/rack'
 import type { SampleBuffer } from './dsp'
 
 declare const sampleRate: number
@@ -26,6 +26,14 @@ interface StateMsg {
   buffers: { id: string; sampleRate: number; data: Float32Array }[]
 }
 
+interface ClockMsg {
+  type: 'clock'
+  originTime: number
+  originBeat: number
+  tempo: number
+  lanes: RackAutomation[]
+}
+
 class RackProcessor extends AudioWorkletProcessor {
   private runtime = new RackRuntime(sampleRate)
   private rack: RackState | null = null
@@ -33,12 +41,20 @@ class RackProcessor extends AudioWorkletProcessor {
   private quality: 'full' | 'eco' = 'full'
   private buffers = new Map<string, SampleBuffer>()
   private pending: { pitch: number; vel: number; time: number; slide?: boolean }[] = []
+  private lanes: RackAutomation[] = []
+  private originTime = 0
+  private originBeat = 0
 
   constructor() {
     super()
-    this.port.onmessage = (event: MessageEvent<NoteMsg | StateMsg | { type: 'off' }>) => {
+    this.port.onmessage = (event: MessageEvent<NoteMsg | StateMsg | ClockMsg | { type: 'off' }>) => {
       const data = event.data
-      if (data.type === 'state') {
+      if (data.type === 'clock') {
+        this.originTime = data.originTime
+        this.originBeat = data.originBeat
+        this.tempo = data.tempo
+        this.lanes = data.lanes ?? []
+      } else if (data.type === 'state') {
         this.rack = data.rack
         this.tempo = data.tempo
         this.quality = data.quality
@@ -71,7 +87,8 @@ class RackProcessor extends AudioWorkletProcessor {
       return true
     }
     const started = typeof performance !== 'undefined' ? performance.now() : 0
-    const rendered = this.runtime.render(rack, frames, this.tempo, this.quality, this.buffers)
+    const beat = this.originBeat + (now - this.originTime) * (this.tempo / 60)
+    const rendered = this.runtime.render(rack, frames, this.tempo, this.quality, this.buffers, this.lanes, beat)
     out[0]?.set(rendered[0])
     if (out[1]) out[1].set(rendered[1])
     else out[0]?.set(rendered[0])

@@ -1,8 +1,12 @@
 import type { AutomationLane, PluginInstance } from '../model/types'
+import { audibleIds } from '../model/audible'
+import { constantOrCurve, laneFor, pluginLanesMove, sendLane } from '../model/automation'
 import { samplesToBeats } from '../model/time'
 import { processChain, type ChainSlot } from './plugins/chain'
 import { automationAt, latencyOf } from './plugins/catalog'
 import { createLoudness, measureLoudness, sanitize } from './plugins/dsp'
+import { processSampleAccurate } from './automationRender'
+import { sidechainMono } from './sidechain'
 import { MASTER, REMOTE, edgeDelays, findCycle, type RoutePoint } from './routing'
 import type { Processor } from './plugins/types'
 
@@ -15,6 +19,7 @@ export interface GraphTrack {
   pan: number
   mute: boolean
   solo: boolean
+  soloSafe?: boolean
   plugins: PluginInstance[]
   sends: { id: string; busId: string; gain: number; preFader: boolean; enabled: boolean }[]
   output: string | null
@@ -40,6 +45,7 @@ export function renderGraph(opts: {
   const length = Math.max(1, opts.length)
   const blank = () => [new Float32Array(length), new Float32Array(length)]
   const anySolo = opts.tracks.some((track) => track.solo)
+  const heard = audibleIds(opts.tracks)
   const processors = new Map<string, ChainSlot[]>()
   const latencyFor = (plugins: PluginInstance[], owner: string) => {
     const slots = slotsFor(plugins, opts.create, opts.sampleRate, processors, owner)
@@ -64,14 +70,14 @@ export function renderGraph(opts: {
     : points
   const delays = edgeDelays(safe)
   const byId = new Map(opts.tracks.map((track) => [track.id, track]))
-  const incoming = new Map<string, { from: string; to: string; gain: number; pre: boolean }[]>()
+  const incoming = new Map<string, Edge[]>()
   for (const point of safe) {
     if (point.dest) pushEdge(incoming, point.dest, { from: point.id, to: point.dest, gain: 1, pre: false })
     const track = byId.get(point.id)
     if (!track || cyclic) continue
     for (const send of track.sends) {
       if (!send.enabled) continue
-      pushEdge(incoming, send.busId, { from: track.id, to: send.busId, gain: send.gain, pre: send.preFader })
+      pushEdge(incoming, send.busId, { from: track.id, to: send.busId, gain: send.gain, pre: send.preFader, sendId: send.id })
     }
   }
 
@@ -81,18 +87,18 @@ export function renderGraph(opts: {
     if (id === MASTER || id === REMOTE) continue
     const track = byId.get(id)
     if (!track) continue
-    const audible = !track.mute && (!anySolo || track.solo)
-    const soloedOut = anySolo && !track.solo
-    const base = mixIncoming(blank(), incoming.get(id) ?? [], rendered, delays, length)
+    const audible = heard.has(id)
+    const soloedOut = anySolo && !heard.has(id)
+    const base = mixIncoming(blank(), incoming.get(id) ?? [], rendered, delays, length, opts)
     add(base, fit(track.buffer, length))
     const slots = slotsFor(track.plugins, opts.create, opts.sampleRate, processors, id)
     const processed = runBlocks(slots, base, opts, rendered, byId)
     const pre = soloedOut ? blank() : processed
-    const post = audible ? applyFader(processed, track.volume, track.pan) : blank()
+    const post = audible ? applyAutomatedFader(processed, track, opts) : blank()
     rendered.set(id, { pre, post })
   }
 
-  const masterIn = mixIncoming(blank(), incoming.get(MASTER) ?? [], rendered, delays, length)
+  const masterIn = mixIncoming(blank(), incoming.get(MASTER) ?? [], rendered, delays, length, opts)
   const masterSlots = slotsFor(opts.masterPlugins, opts.create, opts.sampleRate, processors, MASTER)
   const mastered = runBlocks(masterSlots, masterIn, opts, rendered, byId)
   const master = applyGain(mastered, opts.masterVolume)
@@ -110,7 +116,15 @@ function destination(track: GraphTrack, liveRemote: boolean) {
   return MASTER
 }
 
-function pushEdge(map: Map<string, { from: string; to: string; gain: number; pre: boolean }[]>, to: string, edge: { from: string; to: string; gain: number; pre: boolean }) {
+interface Edge {
+  from: string
+  to: string
+  gain: number
+  pre: boolean
+  sendId?: string
+}
+
+function pushEdge(map: Map<string, Edge[]>, to: string, edge: Edge) {
   const list = map.get(to) ?? []
   list.push(edge)
   map.set(to, list)
@@ -180,48 +194,53 @@ function runBlocks(
     const sliceOut = output.map((channel) => channel.subarray(offset, offset + count))
     const beat = samplesToBeats(offset, opts.sampleRate, opts.tempo)
     for (const slot of slots) slot.params = automationAt(opts.automation, slot.id, base.get(slot.id) ?? slot.params, beat)
-    processChain(slots, sliceIn, sliceOut, {
+    const blockCtx = {
       sampleRate: opts.sampleRate,
       tempo: opts.tempo,
       sampleTime: offset,
       sidechain: null,
       scaleRoot: opts.scaleRoot,
       scaleIntervals: opts.scaleIntervals,
-      quality: opts.quality ?? 'full',
+      quality: opts.quality ?? 'full' as const,
       offline: opts.offline !== false,
-    }, (id) => {
-      const ready = rendered.get(id)?.pre[0]
-      if (ready) return ready.subarray(offset, offset + count)
-      const dry = tracks.get(id)?.buffer[0]
-      return dry ? dry.subarray(offset, Math.min(dry.length, offset + count)) : null
-    })
+    }
+    const keyAt = (id: string, keyLength: number) => sidechainMono(id, offset, keyLength, [...tracks.values()], rendered)
+    if (opts.offline !== false && pluginLanesMove(opts.automation, slots.map((slot) => slot.id), opts.sampleRate, opts.tempo, count)) {
+      processSampleAccurate(slots, sliceIn, sliceOut, blockCtx, opts.automation, keyAt)
+      continue
+    }
+    processChain(slots, sliceIn, sliceOut, blockCtx, keyAt)
   }
   return output
 }
 
 function mixIncoming(
   into: Float32Array[],
-  edges: { from: string; to: string; gain: number; pre: boolean }[],
+  edges: Edge[],
   rendered: Map<string, { pre: Float32Array[]; post: Float32Array[] }>,
   delays: Map<string, number>,
   length: number,
+  opts: { automation: AutomationLane[]; sampleRate: number; tempo: number },
 ) {
   for (const edge of edges) {
     const source = rendered.get(edge.from)
     if (!source) continue
     const buffer = edge.pre ? source.pre : source.post
     const delay = delays.get(`${edge.from}>${edge.to}`) ?? 0
-    addDelayed(into, buffer, delay, edge.gain, length)
+    const lane = edge.sendId ? sendLane(opts.automation, edge.from, edge.sendId) : undefined
+    const gain = constantOrCurve(lane?.points, edge.gain, opts.sampleRate, opts.tempo, length)
+    addDelayed(into, buffer, delay, gain, length)
   }
   return into
 }
 
-function addDelayed(into: Float32Array[], buffer: Float32Array[], delay: number, gain: number, length: number) {
+function addDelayed(into: Float32Array[], buffer: Float32Array[], delay: number, gain: number | Float32Array, length: number) {
   for (let c = 0; c < into.length; c++) {
     const src = buffer[Math.min(c, buffer.length - 1)]
     for (let i = 0; i < length; i++) {
       const j = i - delay
-      if (j >= 0 && j < src.length) into[c][i] += src[j] * gain
+      const amount = typeof gain === 'number' ? gain : gain[i] || 0
+      if (j >= 0 && j < src.length) into[c][i] += src[j] * amount
     }
   }
 }
@@ -248,6 +267,26 @@ function applyGain(input: Float32Array[], volume: number) {
     for (let i = 0; i < channel.length; i++) out[i] = channel[i] * volume
     return out
   })
+}
+
+function applyAutomatedFader(
+  input: Float32Array[],
+  track: GraphTrack,
+  opts: { automation: AutomationLane[]; sampleRate: number; tempo: number },
+) {
+  const length = input[0]?.length ?? 0
+  const vol = constantOrCurve(laneFor(opts.automation, track.id, 'volume')?.points, track.volume, opts.sampleRate, opts.tempo, length)
+  const pan = constantOrCurve(laneFor(opts.automation, track.id, 'pan')?.points, track.pan, opts.sampleRate, opts.tempo, length)
+  if (typeof vol === 'number' && typeof pan === 'number') return applyFader(input, vol, pan)
+  const out = [new Float32Array(length), new Float32Array(length)]
+  for (let i = 0; i < length; i++) {
+    const v = typeof vol === 'number' ? vol : vol[i]
+    const p = typeof pan === 'number' ? pan : pan[i]
+    const angle = ((p + 1) * Math.PI) / 4
+    out[0][i] = (input[0]?.[i] || 0) * Math.cos(angle) * v
+    out[1][i] = (input[1]?.[i] ?? input[0]?.[i] ?? 0) * Math.sin(angle) * v
+  }
+  return out
 }
 
 function applyFader(input: Float32Array[], volume: number, pan: number) {

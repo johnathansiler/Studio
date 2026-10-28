@@ -53,7 +53,8 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     ...(FACTORY[plugin.pluginId] ?? []).map((item) => item.name),
     ...store.project.presets.filter((item) => item.pluginId === plugin.pluginId).map((item) => item.name),
   ]
-  const buses = store.project.tracks.filter((track) => track.type === 'bus' || track.type === 'group' || track.type === 'audio')
+  const buses = store.project.tracks.filter((track) => track.id !== focus.trackId)
+  const rolling = () => engine.status === 'playing' || engine.status === 'recording'
   const point = () => {
     const param = last || spec.params[0]?.id
     if (!param) return
@@ -83,19 +84,26 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
         Wet
         <input type="range" min={0} max={1} step={0.01} value={plugin.wet} onChange={(event) => store.updatePlugin(focus.trackId, plugin.id, { wet: Number(event.target.value) })} />
       </label>
+      {(plugin.pluginId === 'compressor' || plugin.pluginId === 'gate') && (
+        <label>
+          Sidechain key
+          <select aria-label="Sidechain key" title="Route any track or bus into this compressor or gate." value={plugin.sidechain} onChange={(event) => store.updatePlugin(focus.trackId, plugin.id, { sidechain: event.target.value })}>
+            <option value="">Input</option>
+            {buses.map((track) => (
+              <option key={track.id} value={track.id}>{track.name}</option>
+            ))}
+          </select>
+        </label>
+      )}
       {plugin.pluginId === 'compressor' && (
-        <select value={plugin.sidechain} onChange={(event) => store.updatePlugin(focus.trackId, plugin.id, { sidechain: event.target.value })}>
-          <option value="">Sidechain</option>
-          {buses.filter((track) => track.id !== focus.trackId).map((track) => (
-            <option key={track.id} value={track.id}>{track.name}</option>
-          ))}
-        </select>
+        <button type="button" className="text-btn" title="Ducking preset: heavy compression for a sidechain key." onClick={() => store.applyPluginPreset(focus.trackId, plugin.id, 'Duck')}>Duck</button>
       )}
       {plugin.pluginId === 'eq' && <canvas ref={canvas} width={320} height={64} className="spectrum" />}
       {(plugin.pluginId === 'sampler' || plugin.pluginId === 'looper') && (
         <SamplePanel store={store} engine={engine} trackId={focus.trackId} plugin={plugin} />
       )}
       {faced && (
+        <div onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
         <Faceplate
           pluginId={plugin.pluginId}
           title={spec.name}
@@ -106,11 +114,18 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
           trace={engine.trace(plugin.id)}
           onChange={(id, value) => {
             setLast(id)
-            store.updatePlugin(focus.trackId, plugin.id, { params: { [id]: value } })
+            const param = spec.params.find((item) => item.id === id)
+            store.setAutomated(
+              { trackId: focus.trackId, target: 'plugin', pluginId: plugin.id, param: id, min: param?.min ?? 0, max: param?.max ?? 1 },
+              value,
+              rolling(),
+              engine.currentTimelineSample(),
+            )
           }}
         />
+        </div>
       )}
-      {!faced && plugin.pluginId !== 'sampler' && plugin.pluginId !== 'looper' ? <div className="knobs">
+      {!faced && plugin.pluginId !== 'sampler' && plugin.pluginId !== 'looper' ? <div className="knobs" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
         {spec.params.map((param) => (
           <label key={param.id}>
             {param.name} {formatParam(param.id, plugin.params[param.id] ?? param.default, param.unit)}
@@ -121,7 +136,12 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
               value={plugin.params[param.id] ?? param.default}
               onChange={(value) => {
                 setLast(param.id)
-                store.updatePlugin(focus.trackId, plugin.id, { params: { [param.id]: value } })
+                store.setAutomated(
+                  { trackId: focus.trackId, target: 'plugin', pluginId: plugin.id, param: param.id, min: param.min, max: param.max },
+                  value,
+                  rolling(),
+                  engine.currentTimelineSample(),
+                )
               }}
             />
           </label>
@@ -202,7 +222,7 @@ export function InsertList({ store, trackId }: { store: ProjectStore; trackId: s
   )
 }
 
-export function SendList({ store, trackId }: { store: ProjectStore; trackId: string }) {
+export function SendList({ store, trackId, engine }: { store: ProjectStore; trackId: string; engine?: AudioEngine }) {
   const track = store.track(trackId)
   if (!track) return null
   const buses = store.project.tracks.filter((item) => (item.type === 'bus' || item.type === 'group') && item.id !== trackId)
@@ -211,7 +231,27 @@ export function SendList({ store, trackId }: { store: ProjectStore; trackId: str
       {track.sends.map((send) => (
         <label key={send.id}>
           <span>{buses.find((bus) => bus.id === send.busId)?.name ?? 'Send'}</span>
-          <input type="range" min={0} max={1} step={0.01} value={send.gain} onChange={(event) => store.updateSend(trackId, send.id, { gain: Number(event.target.value) })} />
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            aria-label={`${buses.find((bus) => bus.id === send.busId)?.name ?? 'Send'} level`}
+            title="Send level. Latch and touch write this while playing."
+            value={send.gain}
+            onPointerDown={() => store.beginAutomationTouch()}
+            onPointerUp={() => store.endAutomationTouch()}
+            onPointerCancel={() => store.endAutomationTouch()}
+            onChange={(event) => {
+              const rolling = !!engine && (engine.status === 'playing' || engine.status === 'recording')
+              store.setAutomated(
+                { trackId, target: 'send', param: 'gain', sendId: send.id, min: 0, max: 1 },
+                Number(event.target.value),
+                rolling,
+                engine?.currentTimelineSample() ?? 0,
+              )
+            }}
+          />
           <button type="button" className={`mini ${send.preFader ? 'on' : ''}`} onClick={() => store.updateSend(trackId, send.id, { preFader: !send.preFader })}>
             {send.preFader ? 'Pre' : 'Post'}
           </button>
