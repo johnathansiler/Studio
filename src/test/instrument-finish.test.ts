@@ -317,7 +317,10 @@ describe('instrument engine gaps', () => {
       name: 'Keys',
       defaultSwitch: 36,
       keyswitches: [{ key: 36, label: 'Sustain', articulation: 'sustain' }],
-      mics: [{ id: 'close', name: 'Close', gain: 0.8, pan: 0, mute: false }],
+      mics: [
+        { id: 'close', name: 'Close', gain: 0.8, pan: 0, mute: false },
+        { id: 'room', name: 'Room', gain: 1, pan: 0, mute: false },
+      ],
     }))
     const html = renderToStaticMarkup(createElement(LibraryPanel, { store, engine: {} as AudioEngine, trackId }))
     expect(html).toContain('Sustain')
