@@ -118,6 +118,13 @@ export class PatchEngine {
     }
   }
 
+  /** Cancel a queued note and release it if it is already sounding. */
+  releasePitch(note: number) {
+    const midi = Math.round(note)
+    this.queue = this.queue.filter((item) => Math.round(item.note) !== midi)
+    this.noteOff(midi)
+  }
+
   /** Context-time note. The audio callback fires it on the sample it belongs to. */
   schedule(note: number, velocity: number, time: number) {
     this.queue.push({ note, vel: velocity, time: Number.isFinite(time) ? time : 0 })
