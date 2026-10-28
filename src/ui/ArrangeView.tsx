@@ -7,6 +7,7 @@ import { rectsHit } from '../model/edit'
 import { snapSample } from '../model/time'
 import type { AudioClip } from '../model/types'
 import { ClipSheet } from './ClipSheet'
+import { TrackReadout } from './AnalysisSheet'
 import type { ProjectStore } from '../state/store'
 import { activeTool, EDITOR_TOOL_KEYS, subscribeTools } from '../state/tools'
 import { StemSheet } from './StemSheet'
@@ -22,6 +23,7 @@ export function ArrangeView({
   onOpenPiano,
   onPerform,
   onQuickPunch,
+  onAnalyze,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -30,6 +32,7 @@ export function ArrangeView({
   onOpenPiano: (trackId: string, clipId?: string) => void
   onPerform: (mode: 'keys' | 'drums') => void
   onQuickPunch: () => void
+  onAnalyze: (trackId: string) => void
 }) {
   const project = store.project
   const [px, setPx] = useState(90)
@@ -423,6 +426,16 @@ export function ArrangeView({
                   <button className="mini" title="Drum machine" onClick={() => onPerform('drums')}>D</button>
                 </>
               )}
+              <button
+                type="button"
+                className="mini"
+                aria-label={`Analyze ${track.name}`}
+                title="Analyze the key, chords, and sections of this track"
+                onClick={(event) => { event.stopPropagation(); onAnalyze(track.id) }}
+              >
+                An
+              </button>
+              <TrackReadout trackId={track.id} />
               <input
                 className="slim"
                 type="range"

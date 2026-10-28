@@ -1271,3 +1271,24 @@ html[data-posture="tabletop"] .shell .master-sheet {
 .shell.phone.land .perform-pop.drums .grid8.land-grid { display: grid; height: 100%; grid-template-rows: repeat(8, minmax(44px, 1fr)); }
 .shell.fold .perform-pop { top: 12px; left: 12px; right: 12px; bottom: 12px; transform: none; width: auto; height: auto; }
 .shell.fold .perform-body { grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.15fr); }
+.track-key { font-size: 10px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 72px; }
+.analysis-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 44;
+  background: #18241d; border-top: 1px solid var(--line);
+  padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+  max-height: 62vh; overflow: auto; display: flex; flex-direction: column; gap: 6px;
+}
+.analysis-sheet header, .analysis-sheet .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.analysis-sheet header strong { margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.analysis-field { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.analysis-sheet select { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--text); padding: 4px 6px; }
+.analysis-sheet .chords { display: flex; flex-wrap: wrap; gap: 6px; }
+.analysis-sheet .chord { font-size: 12px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.analysis-sheet .sections { margin: 0; padding-left: 18px; font-size: 12px; color: var(--muted); }
+.shell.phone .analysis-sheet, .shell.fold .analysis-sheet { bottom: env(safe-area-inset-bottom); }
+.shell.phone .analysis-sheet .text-btn, .shell.fold .analysis-sheet .text-btn,
+.shell.phone .analysis-sheet select, .shell.fold .analysis-sheet select { min-height: 44px; }
+.shell.fold .analysis-sheet {
+  left: auto; top: 0; width: min(420px, 46vw); max-height: 100dvh; bottom: 0;
+  border-top: 0; border-left: 1px solid var(--line);
+}
