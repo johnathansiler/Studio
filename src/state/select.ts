@@ -267,6 +267,8 @@ export function selectSavedMaps(project: Project): MidiMapEntry[] {
 export function selectSounds(store: { project: Project; selectedTrackId: string | null }) {
   const tracks = store.project.tracks.filter((track) => track.type === 'audio')
   const selected = tracks.find((track) => track.id === store.selectedTrackId) ?? tracks[0] ?? null
+  const instruments = store.project.tracks.filter((track) => track.type === 'midi')
+  const instrument = instruments.find((track) => track.id === store.selectedTrackId) ?? instruments[0] ?? null
   return {
     favorites: store.project.soundFavorites ?? [],
     tempo: store.project.tempo,
@@ -274,6 +276,8 @@ export function selectSounds(store: { project: Project; selectedTrackId: string 
     tracks,
     trackId: selected?.id ?? null,
     trackName: selected?.name ?? '',
+    instrumentId: instrument?.id ?? null,
+    instrumentName: instrument?.name ?? '',
   }
 }
 

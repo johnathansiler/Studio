@@ -73,6 +73,11 @@ export class LiveRack {
     return proc?.kept?.() ?? null
   }
 
+  /** Start the looper's playhead over so an overdub lines up with the loop. */
+  rewindLoop(pluginId: string) {
+    this.processors.get(pluginId)?.reset()
+  }
+
   tuner(pluginId: string) {
     return this.tuners.get(pluginId) ?? null
   }
