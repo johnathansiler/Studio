@@ -7,6 +7,7 @@ import { measureProgram } from '../audio/master/meter'
 import { projectEndSample } from '../model/time'
 import { decodeWavPCM, linearResample } from '../model/wav'
 import { listProjects, loadProject } from '../storage/idb'
+import { selectMaster } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { formFactor } from './form'
 import { InsertList } from './PluginSheet'
@@ -38,7 +39,7 @@ export function MasterSheet({ store, engine, onClose }: { store: ProjectStore; e
     const tick = () => {
       const reading = engine.masterReading()
       if (reading) setLive((prev) => (sameReading(prev, reading) ? prev : { ...reading }))
-      const meter = store.project.masterPlugins.find((plugin) => plugin.pluginId === 'meter')
+      const meter = selectMaster(store).plugins.find((plugin) => plugin.pluginId === 'meter')
       drawMeters(spectrum.current, scope.current, meter ? engine.spectrum(meter.id) : null, engine.masterScope(), refBands, history.current)
       if (chain) drawSpectrogram(document.querySelector('#master-sheet .spectrogram'), history.current)
       timer = window.setTimeout(tick, 180)

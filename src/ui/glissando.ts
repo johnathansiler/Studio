@@ -2,7 +2,7 @@ import { glideUpdate, pointerAction } from '../model/glissando'
 
 export function attachGlissando(root: HTMLElement, opts: {
   accept: (key: HTMLElement) => boolean
-  onOn: (pitch: number, event: PointerEvent, pointerId: number) => void
+  onOn: (pitch: number, event: PointerEvent, pointerId: number, fine?: number) => void
   onOff: (pitch: number, event: PointerEvent, pointerId: number) => void
   onMove?: (pitch: number, event: PointerEvent, pointerId: number, element: HTMLElement) => void
   onTwoFinger?: (deltaY: number) => void
@@ -38,7 +38,9 @@ export function attachGlissando(root: HTMLElement, opts: {
     if (step.change.on != null && found) {
       found.key.classList.add('lit')
       lit.set(pointerId, found.key)
-      opts.onOn(step.change.on, event, pointerId)
+      const raw = found.key.dataset.fine
+      const fine = raw == null || raw === '' ? undefined : Number(raw)
+      opts.onOn(step.change.on, event, pointerId, Number.isFinite(fine) ? fine : undefined)
     }
   }
 

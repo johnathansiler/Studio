@@ -7,6 +7,8 @@ import { rectsHit } from '../model/edit'
 import { snapSample } from '../model/time'
 import type { AudioClip } from '../model/types'
 import { ClipSheet } from './ClipSheet'
+import { selectArrange } from '../state/select'
+import { TrackReadout } from './AnalysisSheet'
 import type { ProjectStore } from '../state/store'
 import { activeTool, EDITOR_TOOL_KEYS, subscribeTools, toolClaimsGesture } from '../state/tools'
 import { StemSheet } from './StemSheet'
@@ -27,6 +29,7 @@ export function ArrangeView({
   onOpenPiano,
   onPerform,
   onQuickPunch,
+  onAnalyze,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -35,8 +38,9 @@ export function ArrangeView({
   onOpenPiano: (trackId: string, clipId?: string) => void
   onPerform: (mode: 'keys' | 'drums') => void
   onQuickPunch: () => void
+  onAnalyze: (trackId: string) => void
 }) {
-  const project = store.project
+  const project = selectArrange(store).project
   const [px, setPx] = useState(90)
   const pxRef = useRef(px)
   pxRef.current = px
@@ -358,6 +362,11 @@ export function ArrangeView({
                       Rack
                     </TipButton>
                   )}
+                  {track.type === 'midi' && (
+                    <TipButton className={`mini patch-open ${store.patchTrackId === track.id ? 'on' : ''}`} label="Patch" hint="Layered patch: synths, samples, grains, and a morph pad." pressed={store.patchTrackId === track.id} onClick={(event) => { event.stopPropagation(); store.openPatch(track.id) }}>
+                      Patch
+                    </TipButton>
+                  )}
                   <TipButton className="mini" label={copyOf(TRACK_SHEET, 'remove').label} hint={copyOf(TRACK_SHEET, 'remove').hint} onClick={(event) => { event.stopPropagation(); store.removeTrack(track.id) }}>
                     ×
                   </TipButton>
@@ -391,6 +400,12 @@ export function ArrangeView({
                   </TipButton>
                 </>
               )}
+              {!touch && (
+                <TipButton className="mini" label="Analyze" hint="Analyze the key, chords, and sections of this track." onClick={(event) => { event.stopPropagation(); onAnalyze(track.id) }}>
+                  An
+                </TipButton>
+              )}
+              {!touch && <TrackReadout trackId={track.id} />}
               {!touch && (
                 <input
                   className="slim"
@@ -627,6 +642,7 @@ export function ArrangeView({
           {sheetTrack.type === 'midi' && (
             <>
               <SheetRow label={copyOf(TRACK_SHEET, 'rack').label} hint={copyOf(TRACK_SHEET, 'rack').hint} pressed={store.rackTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openRack(sheetTrack.id) }} />
+              <SheetRow label="Patch" hint="Layered patch: synths, samples, grains, and a morph pad." pressed={store.patchTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openPatch(sheetTrack.id) }} />
               <SheetRow label={copyOf(TRACK_SHEET, 'keys').label} hint={copyOf(TRACK_SHEET, 'keys').hint} onClick={() => { setTrackSheet(null); onPerform('keys') }} />
               <SheetRow label={copyOf(TRACK_SHEET, 'drums').label} hint={copyOf(TRACK_SHEET, 'drums').hint} onClick={() => { setTrackSheet(null); onPerform('drums') }} />
             </>
@@ -636,6 +652,7 @@ export function ArrangeView({
             <InsertList store={store} trackId={sheetTrack.id} />
             <SendList store={store} trackId={sheetTrack.id} />
           </div>
+          <SheetRow label="Analyze" hint="Analyze the key, chords, and sections of this track." onClick={() => { setTrackSheet(null); onAnalyze(sheetTrack.id) }} />
           <SheetRow label={copyOf(TRACK_SHEET, 'remove').label} hint={copyOf(TRACK_SHEET, 'remove').hint} onClick={() => { store.removeTrack(sheetTrack.id); setTrackSheet(null) }} />
         </ActionSheet>
       )}
@@ -674,7 +691,7 @@ function ClipView({
   onErase: (event: ReactPointerEvent) => void
   onMove: (event: ReactPointerEvent) => void
 }) {
-  const project = store.project
+  const project = selectArrange(store).project
   const asset = store.buffers.get(clip.bufferId)
   const [preview, setPreview] = useState<AudioClip | null>(null)
   const ghost = store.quantizePreview?.audio.find((item) => item.clipId === clip.id)?.clip

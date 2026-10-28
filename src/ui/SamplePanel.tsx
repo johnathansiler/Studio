@@ -3,6 +3,7 @@ import type { AudioEngine } from '../audio/engine'
 import { peaks } from '../audio/sample/engine'
 import { uid, type PluginInstance } from '../model/types'
 import { samplesToBeats } from '../model/time'
+import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
 
 const PADS = Array.from({ length: 16 }, (_, index) => index)
@@ -36,7 +37,8 @@ export function SamplePanel({ store, engine, trackId, plugin }: { store: Project
     }, 240)
     return () => window.clearInterval(timer)
   }, [engine, plugin.id, plugin.pluginId, store, trackId])
-  const beat = () => samplesToBeats(engine.currentTimelineSample(), engine.sampleRate, store.project.tempo)
+  const transport = selectTransport(store)
+  const beat = () => samplesToBeats(engine.currentTimelineSample(), engine.sampleRate, transport.tempo)
   const loadFile = async (file: File) => {
     const ctx = new AudioContext()
     const decoded = await ctx.decodeAudioData(await file.arrayBuffer())

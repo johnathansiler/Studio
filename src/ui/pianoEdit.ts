@@ -70,7 +70,7 @@ export function moveNotes(
   deltaBeat: number,
   deltaPitch: number,
   grid: number,
-  pitchSnap?: (pitch: number) => number,
+  pitchSnap?: (pitch: number) => number | { pitch: number; fine?: number },
 ): MidiNote[] {
   const moving = new Set(ids)
   const group = notes.filter((note) => moving.has(note.id))
@@ -82,8 +82,14 @@ export function moveNotes(
   return notes.map((note) => {
     if (!moving.has(note.id)) return note
     const shifted = clampPitch(note.pitch + steps)
-    const pitch = steps === 0 ? note.pitch : pitchSnap ? pitchSnap(shifted) : shifted
-    return { ...note, startBeat: note.startBeat + delta, pitch }
+    const snapped = steps === 0 ? null : pitchSnap ? pitchSnap(shifted) : shifted
+    const pitch = snapped == null ? note.pitch : typeof snapped === 'number' ? snapped : snapped.pitch
+    const next = { ...note, startBeat: note.startBeat + delta, pitch }
+    if (snapped != null && typeof snapped !== 'number') {
+      if (snapped.fine) next.fine = snapped.fine
+      else delete next.fine
+    }
+    return next
   })
 }
 
