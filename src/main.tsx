@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import './styles.css'
 import './ui/remoteFixes.css'
+import './ui/arrangeSpace.css'
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

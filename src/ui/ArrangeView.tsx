@@ -4,6 +4,7 @@ import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { activeComp } from '../model/comp'
 import { computePeaks } from '../model/demo'
 import { sourceSamplesOf, stretchEdge } from '../audio/stretch/engine'
+import { trimAudioClip } from '../model/clips'
 import { rectsHit } from '../model/edit'
 import { arrangementEndSample, gridMarks, mapIsLinear, projectBeatSample, projectSampleBeat, pxAtBeat, snapSampleToMap } from '../model/tempoMap'
 import { SongMap, SongMapHead, SmartTempoBar } from './SongMap'
@@ -287,6 +288,8 @@ export function ArrangeView({
 
   function trimMidi(event: ReactPointerEvent, trackId: string, clipId: string, edge: 'start' | 'end', stretch: boolean) {
     event.stopPropagation()
+    event.preventDefault()
+    event.currentTarget.setPointerCapture?.(event.pointerId)
     const clip = project.tracks.find((track) => track.id === trackId)?.midiClips.find((item) => item.id === clipId)
     if (!clip) return
     watch(
@@ -564,13 +567,13 @@ export function ArrangeView({
                         store.splitAt(track.id, clip.id, sampleAt(event.clientX))
                         return
                       }
+                      if ((event.target as HTMLElement).closest('.edge')) return
                       if (tool === 'trim') {
                         event.stopPropagation()
                         event.preventDefault()
-                        const edge = (event.target as HTMLElement).dataset.edge
                         const bounds = event.currentTarget.getBoundingClientRect()
                         const ratio = (event.clientX - bounds.left) / Math.max(1, bounds.width)
-                        const zone = edge === 'start' || edge === 'end' ? edge : trimZone(ratio, coarsePointer(event.pointerType))
+                        const zone = trimZone(ratio, coarsePointer(event.pointerType))
                         if (zone === 'start' || zone === 'end') trimMidi(event, track.id, clip.id, zone, event.altKey)
                         else store.selectClip(track.id, clip.id, true, false)
                         return
@@ -583,11 +586,11 @@ export function ArrangeView({
                     <em>
                       {clip.name} · {clip.notes.length} notes
                     </em>
-                    {tool === 'trim' && (
-                      <>
-                        <div className="edge" data-edge="start" />
-                        <div className="edge r" data-edge="end" />
-                      </>
+                    {(tool === 'select' || tool === 'trim') && (
+                      <ClipEdges
+                        onStart={(event) => trimMidi(event, track.id, clip.id, 'start', event.altKey)}
+                        onEnd={(event) => trimMidi(event, track.id, clip.id, 'end', event.altKey)}
+                      />
                     )}
                   </div>
                 )
@@ -770,6 +773,8 @@ function ClipView({
   function pointerDown(event: ReactPointerEvent, mode: 'move' | 'start' | 'end') {
     if (event.button === 2) return
     event.stopPropagation()
+    event.preventDefault()
+    event.currentTarget.setPointerCapture?.(event.pointerId)
     store.selectClip(trackId, clip.id, false, false)
     const originX = event.clientX
     const originY = event.clientY
@@ -783,19 +788,16 @@ function ClipView({
         }, 480)
       : 0
     const snapped = (value: number) => snapSampleToMap(value, project)
+    const bufferLength = asset?.channels[0]?.length ?? clip.offsetSamples + clip.durationSamples
     const move = (ev: PointerEvent) => {
       if (Math.abs(ev.clientX - originX) > 8 || Math.abs(ev.clientY - originY) > 8) window.clearTimeout(timer)
       if (held) return
       const delta = ((ev.clientX - originX) / px) * project.sampleRate
       if (mode === 'move') latest = { ...clip, startSample: snapped(clip.startSample + delta) }
       if (mode === 'start' && stretching) latest = stretchEdge(clip, 'start', snapped(clip.startSample + delta))
-      if (mode === 'start' && !stretching) {
-        const start = snapped(clip.startSample + delta)
-        const shift = start - clip.startSample
-        latest = { ...clip, startSample: start, offsetSamples: clip.offsetSamples + shift, durationSamples: clip.durationSamples - shift }
-      }
+      if (mode === 'start' && !stretching) latest = trimAudioClip(clip, 'start', snapped(clip.startSample + delta), bufferLength)
       if (mode === 'end' && stretching) latest = stretchEdge(clip, 'end', snapped(clip.startSample + clip.durationSamples + delta))
-      if (mode === 'end' && !stretching) latest = { ...clip, durationSamples: Math.max(64, snapped(clip.durationSamples + delta)) }
+      if (mode === 'end' && !stretching) latest = trimAudioClip(clip, 'end', snapped(clip.startSample + clip.durationSamples + delta), bufferLength)
       setPreview(latest)
     }
     const up = () => {
@@ -811,6 +813,12 @@ function ClipView({
       setPreview(null)
       if (held) return
       if (!next) return
+      if (
+        mode !== 'move'
+        && next.startSample === clip.startSample
+        && next.durationSamples === clip.durationSamples
+        && next.offsetSamples === clip.offsetSamples
+      ) return
       if (mode === 'move') store.moveClip(trackId, clip.id, next.startSample)
       if (stretching && mode === 'start') store.stretchClip(trackId, clip.id, 'start', next.startSample)
       if (stretching && mode === 'end') store.stretchClip(trackId, clip.id, 'end', next.startSample + next.durationSamples)
@@ -931,12 +939,41 @@ function ClipView({
       ))}
       {fadeIn > 1 && <div className="fade" style={{ left: 0, width: fadeIn }} />}
       {fadeOut > 1 && <div className="fade" style={{ right: 0, width: fadeOut, transform: 'scaleX(-1)' }} />}
-      {tool === 'trim' && (
-        <>
-          <div className="edge" onPointerDown={(event) => pointerDown(event, 'start')} />
-          <div className="edge r" onPointerDown={(event) => pointerDown(event, 'end')} />
-        </>
+      {(tool === 'select' || tool === 'trim') && (
+        <ClipEdges
+          onStart={(event) => pointerDown(event, 'start')}
+          onEnd={(event) => pointerDown(event, 'end')}
+        />
       )}
     </div>
+  )
+}
+
+function ClipEdges({
+  onStart,
+  onEnd,
+}: {
+  onStart: (event: ReactPointerEvent) => void
+  onEnd: (event: ReactPointerEvent) => void
+}) {
+  return (
+    <>
+      <div
+        className="edge"
+        data-edge="start"
+        role="button"
+        aria-label="Trim start. Drag to move the beginning. The audio stays put."
+        title="Trim start. Drag to move the beginning. The audio stays put."
+        onPointerDown={onStart}
+      />
+      <div
+        className="edge r"
+        data-edge="end"
+        role="button"
+        aria-label="Trim end. Drag to change the length. Stops at the recorded audio."
+        title="Trim end. Drag to change the length. Stops at the recorded audio."
+        onPointerDown={onEnd}
+      />
+    </>
   )
 }

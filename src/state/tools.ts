@@ -33,8 +33,8 @@ export interface ToolInfo {
 export const TOOL_INFO: Record<ArrangeTool, ToolInfo> = {
   select: {
     label: 'Select',
-    hint: 'Tap a clip or note, then drag to move it.',
-    arrange: 'Select: tap a clip, drag to move',
+    hint: 'Drag the middle of a clip to move it. Drag either end to trim.',
+    arrange: 'Select: drag the middle to move, either end to trim',
     piano: 'Select: tap a note, drag to move',
     cursor: 'default',
   },

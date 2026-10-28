@@ -16,7 +16,7 @@ export const VIEW_COPY: Copy[] = [
   { id: 'arrange', label: 'Arrange', hint: 'Clips on a timeline. The tools above change what a tap does.' },
   { id: 'mix', label: 'Mix', hint: 'Level, pan, and effects for each track.' },
   { id: 'beats', label: 'Beats', hint: 'Step sequencer. Tap a pad to add a hit.' },
-  { id: 'session', label: 'Session', hint: 'The video call. See people and talk while you play.' },
+  { id: 'session', label: 'Session', hint: 'Open the session panel. Invite people and talk while you play.' },
 ]
 
 export const TRANSPORT_COPY: Copy[] = [

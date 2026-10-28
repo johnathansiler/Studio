@@ -79,7 +79,7 @@ export function trimAudioClip(
   }
   const end = clip.startSample + clip.durationSamples
   if (edge === 'start') {
-    const minStart = clip.startSample - clip.offsetSamples
+    const minStart = Math.max(0, clip.startSample - clip.offsetSamples)
     const maxStart = end - 1
     const start = clamp(Math.round(newSample), minStart, maxStart)
     const delta = start - clip.startSample

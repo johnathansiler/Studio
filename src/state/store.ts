@@ -31,7 +31,6 @@ import type { SamplePack, SamplerProgram } from '../audio/multisample/types'
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
-import { stretchMidiClip, trimMidiClip } from '../model/edit'
 import { setPath, type ProjectOp, type StampWire } from './ops'
 import { ProjectSync } from './sync'
 import { activeTool, setActiveTool, type ArrangeTool } from './tools'
@@ -58,6 +57,7 @@ import {
   splitLinkedAudio,
   splitLinkedMidi,
   trimLinkedAudio,
+  trimLinkedMidi,
 } from '../model/mixGroups'
 import { demoMidiNotes } from '../model/demo'
 import {
@@ -119,7 +119,7 @@ import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK
 import type { AudioAsset, AudioClip, AutomationWriteMode, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, LiveCaptureSettings, MidiClip, MidiEditorPrefs, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, MixGroup, PluginInstance, Project, RecordSettings, SectionKind, TakeLane, Track } from '../model/types'
 import { createSection, deleteSectionContents, duplicateSectionContents, moveSectionContents, resizeSection as setSectionLength, sectionKind } from '../model/sections'
 import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
-import { downbeatAt, projectSampleBeat, snapSampleToMap, tempoAtSample } from '../model/tempoMap'
+import { downbeatAt, projectBeatSample, projectSampleBeat, snapSampleToMap, tempoAtSample } from '../model/tempoMap'
 import { beatsToSamples, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
 import { renderDrum, DRUM_PADS } from '../model/drums'
@@ -168,6 +168,16 @@ const GENERATED_COLOR: Record<GeneratedPart['kind'], string> = {
   arp: '#f09a6a',
   rhythm: '#ef6b6b',
   drums: '#c58be0',
+}
+
+/** Snap a clip edge to the tempo map. Whole-beat hits drop sample roundoff. */
+function snappedClipBeat(project: Project, beat: number) {
+  if (!project.snap) return Math.max(0, beat)
+  const sample = snapSampleToMap(projectBeatSample(project, beat), project)
+  const next = projectSampleBeat(project, sample)
+  const grid = Math.round(next)
+  if (Math.abs(next - grid) < 1e-3) return Math.max(0, grid)
+  return Math.max(0, next)
 }
 
 export class ProjectStore {
@@ -1754,10 +1764,14 @@ export class ProjectStore {
 
   trimClip(trackId: string, clipId: string, edge: 'start' | 'end', sample: number) {
     this.mutate(() => {
-      trimLinkedAudio(this.project, trackId, clipId, edge, sample, (clip) => {
+      const at = snapSampleToMap(sample, this.project)
+      const ids = new Set(trimLinkedAudio(this.project, trackId, clipId, edge, at, (clip) => {
         const asset = this.buffers.get(clip.bufferId)
         return asset?.channels[0].length ?? clip.offsetSamples + clip.durationSamples
-      })
+      }))
+      for (const track of this.project.tracks) {
+        for (const clip of track.clips) if (ids.has(clip.id)) this.commitClip(clip)
+      }
     })
   }
 
@@ -1802,12 +1816,8 @@ export class ProjectStore {
 
   resizeMidiClip(trackId: string, clipId: string, edge: 'start' | 'end', beat: number, stretch = false) {
     this.mutate(() => {
-      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
-      if (!clip) return
-      const next = stretch ? stretchMidiClip(clip, edge, beat) : trimMidiClip(clip, edge, beat)
-      clip.startBeat = next.startBeat
-      clip.durationBeats = next.durationBeats
-      clip.notes = next.notes
+      const nextBeat = snappedClipBeat(this.project, beat)
+      trimLinkedMidi(this.project, trackId, clipId, edge, nextBeat, stretch)
     })
   }
 

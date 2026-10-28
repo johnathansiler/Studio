@@ -1,5 +1,5 @@
 import { moveAudioClip, splitAudioClip, trimAudioClip } from './clips'
-import { splitMidiClip } from './edit'
+import { splitMidiClip, stretchMidiClip, trimMidiClip } from './edit'
 import type { AudioClip, MidiClip, MixGroup, Project, Track } from './types'
 import { uid } from './types'
 
@@ -206,6 +206,34 @@ export function splitLinkedMidi(project: Project, trackId: string, clipId: strin
     if (peerParts) peer.midiClips.splice(peerIndex, 1, peerParts[0], peerParts[1])
   }
   return parts[1].id
+}
+
+function applyMidiEdge(clip: MidiClip, edge: 'start' | 'end', beat: number, stretch: boolean) {
+  const next = stretch ? stretchMidiClip(clip, edge, beat) : trimMidiClip(clip, edge, beat)
+  clip.startBeat = next.startBeat
+  clip.durationBeats = next.durationBeats
+  clip.notes = next.notes
+}
+
+/** Trim or stretch a MIDI clip and any overlapping clips in a linked edit group. */
+export function trimLinkedMidi(project: Project, trackId: string, clipId: string, edge: 'start' | 'end', beat: number, stretch = false) {
+  const clip = project.tracks.find((track) => track.id === trackId)?.midiClips.find((item) => item.id === clipId)
+  if (!clip) return []
+  const original = { ...clip }
+  const edgeAt = edge === 'start' ? clip.startBeat : clip.startBeat + clip.durationBeats
+  const delta = beat - edgeAt
+  applyMidiEdge(clip, edge, beat, stretch)
+  const moved = [clip.id]
+  if (!delta) return moved
+  for (const track of editPeers(project, trackId)) {
+    for (const other of track.midiClips) {
+      if (!midiOverlap(original, other)) continue
+      const next = edge === 'start' ? other.startBeat + delta : other.startBeat + other.durationBeats + delta
+      applyMidiEdge(other, edge, next, stretch)
+      moved.push(other.id)
+    }
+  }
+  return moved
 }
 
 export function linkedAudioTargets(project: Project, trackId: string, clip: AudioClip) {
