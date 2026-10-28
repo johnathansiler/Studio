@@ -1,6 +1,7 @@
 import { DRUM_PADS } from './drums'
 import { clampStepCount, emptyCell, STEP_BEAT, stepIndexAt, type BeatPattern, type DrumKind, type StepCell, type StepChannel } from './steps'
-import { uid } from './types'
+import { beatsToSamples } from './time'
+import { uid, type Project } from './types'
 
 /** Pattern lengths the channel rack offers, in sixteenth notes. */
 export const RACK_LENGTHS = [16, 32, 64] as const
@@ -117,6 +118,47 @@ export function graphRatio(mode: GraphMode, cell: GraphCell) {
   if (mode === 'gate') return Math.max(0, Math.min(1, (cell.gate - 0.05) / 0.95))
   if (mode === 'pan') return Math.max(0, Math.min(1, (cell.pan + 1) / 2))
   return Math.max(0, Math.min(1, (cell.pitch + 12) / 24))
+}
+
+/** True when the timeline has no audio, MIDI, or offset pattern clips. */
+export function arrangementIsEmpty(project: Project): boolean {
+  for (const track of project.tracks) {
+    if (track.clips.some((clip) => !clip.slotOnly)) return false
+    if (track.midiClips.some((clip) => !clip.slotOnly && clip.scene == null)) return false
+  }
+  const placed = (project.patternClips ?? []).filter((clip) => clip.scene == null)
+  if (placed.length > 1) return false
+  if (placed.some((clip) => clip.startBeat > 1e-4)) return false
+  return true
+}
+
+/**
+ * Loop length for an empty song, in samples. 0 means the global transport
+ * should play out and stop as usual. The user's loop region wins.
+ */
+export function emptyPatternLoopSamples(project: Project): number {
+  if (project.loopEnabled || !arrangementIsEmpty(project)) return 0
+  const rack = project.beats
+  const pattern = rack?.patterns.find((item) => item.id === rack.activeId)
+  if (!pattern) return 0
+  const beats = Math.max(STEP_BEAT, pattern.steps * STEP_BEAT)
+  return Math.max(1, Math.round(beatsToSamples(beats, project.sampleRate, project.tempo)))
+}
+
+export function shortSoundName(name: string): string {
+  const cleaned = name.replace(/\.[a-z0-9]{2,4}$/i, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim()
+  if (cleaned.length <= 18) return cleaned
+  return `${cleaned.slice(0, 17).trimEnd()}…`
+}
+
+export type RackCategory = 'Kicks' | 'Snares' | 'Hats' | 'Perc' | 'Notes'
+
+export function kitCategory(kind: DrumKind): RackCategory {
+  if (kind === 'kick') return 'Kicks'
+  if (kind === 'snare' || kind === 'clap') return 'Snares'
+  if (kind === 'hat' || kind === 'openhat' || kind === 'cymbal') return 'Hats'
+  if (kind === 'note') return 'Notes'
+  return 'Perc'
 }
 
 export function valueFromRatio(mode: GraphMode, ratio: number): Partial<GraphCell> {

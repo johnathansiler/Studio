@@ -3,9 +3,11 @@ import type { AudioEngine } from '../audio/engine'
 import {
   GRAPH_LABELS,
   graphRatio,
+  kitCategory,
   kitChoices,
   libraryChoice,
   rackPlayIndex,
+  shortSoundName,
   RACK_COLORS,
   stepGroups,
   stepLooks,
@@ -86,22 +88,28 @@ function Knob({
   onDone: () => void
 }) {
   const drag = useRef<{ y: number; value: number } | null>(null)
+  const [live, setLive] = useState(false)
   const set = (next: number, fromDrag: boolean) => {
     const snapped = Math.round(Math.max(min, Math.min(max, next)) / step) * step
     onChange(Number(snapped.toFixed(2)), fromDrag)
   }
+  const span = max - min || 1
+  const unit = Math.max(0, Math.min(1, (value - min) / span))
   return (
     <button
       type="button"
-      className="rack-knob"
+      className={`rack-knob${live ? ' dragging' : ''}`}
       role="slider"
+      style={{ ['--arc' as string]: String(unit) }}
       title={`${label}. ${hint}`}
       aria-label={`${label}. ${hint}`}
       aria-valuemin={min}
       aria-valuemax={max}
       aria-valuenow={Number(value.toFixed(2))}
+      onDoubleClick={() => set((min + max) / 2, false)}
       onPointerDown={(event) => {
         drag.current = { y: event.clientY, value }
+        setLive(true)
         event.currentTarget.setPointerCapture(event.pointerId)
       }}
       onPointerMove={(event) => {
@@ -111,10 +119,12 @@ function Knob({
       }}
       onPointerUp={() => {
         drag.current = null
+        setLive(false)
         onDone()
       }}
       onPointerCancel={() => {
         drag.current = null
+        setLive(false)
         onDone()
       }}
       onKeyDown={(event) => {
@@ -123,6 +133,7 @@ function Knob({
       }}
     >
       <i style={{ transform: `rotate(${knobAngle(value, min, max)}deg)` }} />
+      {live && <em className="rack-readout">{value.toFixed(2)}</em>}
     </button>
   )
 }
@@ -219,6 +230,83 @@ function StepButtons({
   )
 }
 
+const PICK_CATS = ['All', 'Kicks', 'Snares', 'Hats', 'Perc', 'Library'] as const
+
+function Picker({
+  kit,
+  library,
+  note,
+  query,
+  category,
+  onQuery,
+  onCategory,
+  onKit,
+  onLibrary,
+}: {
+  kit: ReturnType<typeof kitChoices>
+  library: SoundEntry[]
+  note: string
+  query: string
+  category: string
+  onQuery: (value: string) => void
+  onCategory: (value: string) => void
+  onKit: (choice: ReturnType<typeof kitChoices>[number]) => void
+  onLibrary: (entry: SoundEntry, index: number) => void
+}) {
+  const needle = query.trim().toLowerCase()
+  const kitRows = kit.filter((choice) => {
+    const cat = kitCategory(choice.kind)
+    if (category !== 'All' && category !== cat) return false
+    return !needle || choice.name.toLowerCase().includes(needle)
+  })
+  const libRows = category === 'Kicks' || category === 'Snares' || category === 'Hats' || category === 'Perc'
+    ? []
+    : library.filter((entry) => !needle || entry.name.toLowerCase().includes(needle) || entry.tags.some((tag) => tag.toLowerCase().includes(needle))).slice(0, 40)
+  return (
+    <div className="rack-picker" role="listbox" aria-label="Sounds to add. Search the kit or the library.">
+      <input
+        className="rack-search"
+        aria-label="Search sounds"
+        placeholder="Search"
+        value={query}
+        onChange={(event) => onQuery(event.target.value)}
+      />
+      <div className="rack-cats" role="group" aria-label="Sound categories">
+        {PICK_CATS.map((cat) => (
+          <button key={cat} type="button" className={category === cat ? 'on' : ''} aria-pressed={category === cat} onClick={() => onCategory(cat)}>{cat}</button>
+        ))}
+      </div>
+      <div className="rack-results">
+        {kitRows.map((choice) => (
+          <button
+            key={`${choice.note}-${choice.name}`}
+            type="button"
+            title={`Add ${choice.name}.`}
+            aria-label={`Add ${choice.name}. Puts a ${choice.name} row on this pattern.`}
+            onClick={() => onKit(choice)}
+          >
+            <b>{shortSoundName(choice.name)}</b>
+            <small>{kitCategory(choice.kind)}</small>
+          </button>
+        ))}
+        {libRows.map((entry, index) => (
+          <button
+            key={entry.id}
+            type="button"
+            title={`Add ${entry.name} from the sound library.`}
+            aria-label={`Add ${entry.name}. Puts a library sound on this pattern.`}
+            onClick={() => onLibrary(entry, index)}
+          >
+            <b>{shortSoundName(entry.name)}</b>
+            <small>Library</small>
+          </button>
+        ))}
+      </div>
+      {note && <p>{note}</p>}
+    </div>
+  )
+}
+
 export function ChannelRack({ store, engine }: { store: ProjectStore; engine: RackEngine }) {
   useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
   const beatState = selectBeats(store)
@@ -230,6 +318,9 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
   const [editOpen, setEditOpen] = useState(false)
   const [adding, setAdding] = useState(false)
   const [graphId, setGraphId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState('All')
   const [picked, setPicked] = useState<{ channelId: string; index: number } | null>(null)
   const [library, setLibrary] = useState<SoundEntry[]>([])
   const [libraryNote, setLibraryNote] = useState('')
@@ -241,7 +332,8 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
   const sheet = (id: string) => copyOf(BEAT_SHEET, id)
 
   if (!pattern) return null
-  const focus = pattern.channels.find((row) => row.id === graphId) ?? pattern.channels[0]
+  const selected = pattern.channels.find((row) => row.id === selectedId) ?? null
+  const focus = selected ?? pattern.channels.find((row) => row.id === graphId) ?? pattern.channels[0]
   const pickedCell = picked ? pattern.channels.find((row) => row.id === picked.channelId)?.cells[picked.index] : undefined
   const outputs = project.tracks.filter((track) => track.type === 'bus' || track.type === 'group' || track.type === 'midi')
   const beat = projectSampleBeat(project, sample)
@@ -254,6 +346,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
 
   function paint(channel: StepChannel, index: number, on: boolean) {
     setGraphId(channel.id)
+    setSelectedId(channel.id)
     setPicked({ channelId: channel.id, index })
     store.setStep(channel.id, index, on)
     if (on && index >= channel.steps) store.setChannel(channel.id, { steps: Math.min(64, index + 1) }, true)
@@ -264,7 +357,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
     if (asked.current) return
     asked.current = true
     void loadSoundCatalog().then((result) => {
-      const sounds = result.entries.filter((entry) => entry.type === 'instrument' || entry.type === 'one-shot').slice(0, 24)
+      const sounds = result.entries.filter((entry) => entry.type === 'instrument' || entry.type === 'one-shot')
       setLibrary(sounds)
       setLibraryNote(sounds.length ? '' : catalogMessage(result, 0, false))
     })
@@ -351,7 +444,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         </div>
         {!phone && swing}
         <TipButton label="Graph" hint="Show the step graph for the selected channel. Drag a bar to change velocity, pan, pitch, or gate." pressed={graph} onClick={() => setGraph((open) => !open)} />
-        {!phone && <TipButton label="Roll" hint="Open the selected channel in the piano roll." disabled={!focus} onClick={() => focus && store.openChannelRoll(focus.id)} />}
+        {!phone && <TipButton label="Roll" hint="Open the selected channel in the piano roll." disabled={!selected} onClick={() => selected && store.openChannelRoll(selected.id)} />}
         {!phone && <TipButton label={sheet('place').label} hint={sheet('place').hint} onClick={placePattern} />}
         <TipButton label={bar('edit').label} hint={bar('edit').hint} pressed={editOpen} onClick={() => setEditOpen((open) => !open)} />
         <span className="rack-tool" role="status" aria-live="polite" title={toolHint}>{toolName}</span>
@@ -361,7 +454,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
       </div>
       <div className={`rack-extras${editOpen ? ' open' : ''}`}>
         {phone && swing}
-        {phone && <TipButton label="Roll" hint="Open the selected channel in the piano roll." disabled={!focus} onClick={() => focus && store.openChannelRoll(focus.id)} />}
+        {phone && <TipButton label="Roll" hint="Open the selected channel in the piano roll." disabled={!selected} onClick={() => selected && store.openChannelRoll(selected.id)} />}
         {phone && <TipButton label={sheet('place').label} hint={sheet('place').hint} onClick={placePattern} />}
         <input className="rack-name-field" {...described(bar('name'))} value={pattern.name} onChange={(event) => store.renamePattern(event.target.value)} />
         <select {...described(sheet('color'))} value={pattern.color} onChange={(event) => store.recolorPattern(event.target.value)}>
@@ -474,9 +567,10 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
           const mute = rowCopy('mute')
           const audible = !channel.mute && (!soloed || channel.solo)
           const playStep = rackPlayIndex(beat, channel.steps || count, channel.swing ?? pattern.swing, audible)
-          const selected = focus?.id === channel.id
+          const rowOn = selected?.id === channel.id
+          const stepsLabel = rowCopy('steps')
           return (
-            <div className={`rack-row${selected ? ' sel' : ''}`} data-channel={channel.name} key={channel.id}>
+            <div className={`rack-row${rowOn ? ' sel' : ''}`} data-channel={channel.name} key={channel.id}>
               <div className="rack-lead">
                 <button
                   type="button"
@@ -510,15 +604,27 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
                 />
                 <button
                   type="button"
-                  className={`rack-name${selected ? ' on' : ''}`}
+                  className={`rack-name${rowOn ? ' on' : ''}`}
                   style={{ color: channel.color }}
                   title={`Select ${channel.name}. Fills and the graph follow this channel.`}
                   aria-label={`${channel.name}. Select this channel. Fills and the graph follow it.`}
-                  aria-pressed={selected}
-                  onClick={() => setGraphId(channel.id)}
+                  aria-pressed={rowOn}
+                  onClick={() => { setGraphId(channel.id); setSelectedId(channel.id) }}
                 >
                   {channel.name}
                 </button>
+                <label className="rack-loop" title={stepsLabel.hint}>
+                  <span>Loop</span>
+                  <input
+                    aria-label={`${channel.name} loop length. ${stepsLabel.hint}`}
+                    title={stepsLabel.hint}
+                    type="number"
+                    min={1}
+                    max={64}
+                    value={channel.steps || count}
+                    onChange={(event) => store.setChannel(channel.id, { steps: Number(event.target.value) })}
+                  />
+                </label>
               </div>
               <StepButtons
                 channel={channel}
@@ -621,37 +727,17 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         +
       </button>
       {adding && (
-        <div className="rack-picker" role="listbox" aria-label="Sounds to add. Kit drums and library instruments.">
-          <div className="rack-picker-row">
-            {kitChoices().map((choice) => (
-              <button
-                key={`${choice.note}-${choice.name}`}
-                type="button"
-                title={`Add ${choice.name}.`}
-                aria-label={`Add ${choice.name}. Puts a ${choice.name} row on this pattern.`}
-                onClick={() => addChoice(choice)}
-              >
-                {choice.name}
-              </button>
-            ))}
-          </div>
-          {library.length > 0 && (
-            <div className="rack-picker-row">
-              {library.map((entry, index) => (
-                <button
-                  key={entry.id}
-                  type="button"
-                  title={`Add ${entry.name} from the sound library.`}
-                  aria-label={`Add ${entry.name}. Puts a library sound on this pattern.`}
-                  onClick={() => addChoice(libraryChoice(entry, index), entry)}
-                >
-                  {entry.name}
-                </button>
-              ))}
-            </div>
-          )}
-          {libraryNote && <p>{libraryNote}</p>}
-        </div>
+        <Picker
+          kit={kitChoices()}
+          library={library}
+          note={libraryNote}
+          query={query}
+          category={category}
+          onQuery={setQuery}
+          onCategory={setCategory}
+          onKit={(choice) => addChoice(choice)}
+          onLibrary={(entry, index) => addChoice(libraryChoice(entry, index), entry)}
+        />
       )}
     </div>
   )

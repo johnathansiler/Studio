@@ -46,6 +46,8 @@ export interface SamplerState {
   slices: SampleZone[]
   /** Captured or file rate. 0 plays the buffer at the engine rate. */
   sourceRate?: number
+  /** Playback speed. 0.5 is half speed, 2 is double speed. */
+  speed?: number
 }
 
 export interface LooperLayer {

@@ -1,9 +1,9 @@
 /* FL-style channel rack. Names stay sticky while the steps scroll sideways. */
 
 .beats.channel-rack {
-  --lead: 176px;
+  --lead: 268px;
   --step: 28px;
-  --step-h: 32px;
+  --step-h: 34px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -20,8 +20,8 @@
 }
 
 .shell.phone .beats.channel-rack {
-  --lead: 172px;
-  --step: 40px;
+  --lead: 236px;
+  --step: 36px;
   --step-h: 44px;
 }
 
@@ -41,7 +41,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 8px;
   max-width: 100%;
   min-width: 0;
 }
@@ -64,11 +65,32 @@
 .rack-bar button,
 .rack-extras button,
 .rack-add,
-.rack-picker button {
+.rack-cats button,
+.rack-picker button,
+.rack-results button {
   border-radius: 8px;
   border: 1px solid var(--line);
-  background: var(--panel);
+  background-color: var(--panel);
   color: var(--text);
+}
+.rack-bar button,
+.rack-extras button,
+.rack-add,
+.rack-cats button,
+.rack-picker button,
+.rack-results button {
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  min-height: var(--control-h);
+  padding: 6px 12px;
+  line-height: 1.15;
 }
 
 .rack-bar select,
@@ -126,14 +148,19 @@
 .rack-tool {
   flex: none;
   max-width: 100%;
-  padding: 4px 10px;
+  min-height: var(--control-h);
+  padding: 6px 14px;
   border-radius: 999px;
   background: var(--accent);
   color: var(--accent-ink);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 800;
   line-height: 1.2;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--raised), var(--glow);
 }
 
 .rack-swing,
@@ -170,8 +197,8 @@
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
+  min-width: max-content;
   margin-bottom: 4px;
 }
 
@@ -204,8 +231,11 @@
   flex: none;
   padding: 0;
   border-radius: 50%;
-  border: 1px solid #3c5346;
-  background: #1a2420;
+  border: 1px solid #4d6558;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.18), transparent 46%),
+    linear-gradient(180deg, #2a3830, #121a16);
+  box-shadow: var(--raised);
   position: relative;
 }
 
@@ -249,6 +279,16 @@
   box-shadow: 0 0 8px rgba(115, 196, 143, 0.75);
 }
 
+.rack-knob::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: conic-gradient(from 220deg, var(--accent) calc(var(--arc, 0) * 280deg), rgba(255, 255, 255, 0.08) 0);
+  -webkit-mask: radial-gradient(circle, transparent 58%, #000 60%);
+  mask: radial-gradient(circle, transparent 58%, #000 60%);
+  pointer-events: none;
+}
 .rack-knob i {
   position: absolute;
   left: 50%;
@@ -258,8 +298,44 @@
   margin-left: -1px;
   border-radius: 1px;
   background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
   transform-origin: 50% 9px;
   pointer-events: none;
+}
+.rack-readout {
+  position: absolute;
+  left: 50%;
+  top: -18px;
+  transform: translateX(-50%);
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: #0c110f;
+  color: var(--accent);
+  font-size: 11px;
+  font-style: normal;
+  z-index: 4;
+  pointer-events: none;
+}
+.rack-loop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  flex: none;
+  width: 46px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.rack-loop input {
+  width: 44px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  text-align: center;
+  border-radius: 6px;
 }
 
 .rack-name {
@@ -297,9 +373,10 @@
 }
 
 .rack-tick {
-  width: var(--step);
+  width: auto;
+  min-width: var(--step);
   height: 12px;
-  flex: 0 0 var(--step);
+  flex: 1 1 var(--step);
   position: relative;
 }
 
@@ -320,15 +397,19 @@
 
 .rack-steps {
   display: flex;
+  flex: 1 1 auto;
   flex-wrap: nowrap;
-  align-items: center;
+  align-items: stretch;
   gap: 6px;
+  min-width: 0;
 }
 
 .rack-group {
   display: flex;
+  flex: 1 1 0;
   flex-wrap: nowrap;
   gap: 3px;
+  min-width: max-content;
   padding: 3px;
   border-radius: 6px;
   background: #141c18;
@@ -340,35 +421,43 @@
 
 .rack-step,
 .rack-bar-step {
-  width: var(--step);
+  width: auto;
+  min-width: var(--step);
   height: var(--step-h);
-  flex: 0 0 var(--step);
+  flex: 1 1 var(--step);
   padding: 0;
-  border-radius: 3px;
-  border: 1px solid #2a3a32;
-  background: #151c18;
+  border-radius: 5px;
+  border: 1px solid #3a4e44;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02) 42%, rgba(0, 0, 0, 0.28)),
+    #151c18;
+  box-shadow: var(--raised);
 }
 
 .rack-group.alt .rack-step:not(.on) {
-  background: #1c2922;
+  background-color: #1c2922;
+  background-image: var(--face);
 }
 
 .rack-step.on {
   border-color: transparent;
+  box-shadow: var(--pressed), 0 0 10px color-mix(in srgb, currentColor 35%, transparent);
 }
 
 .rack-step.past {
-  opacity: 0.32;
+  opacity: 0.28;
+  filter: saturate(0.4);
 }
 
 .rack-step.loop {
-  box-shadow: inset -3px 0 0 var(--accent);
+  box-shadow: inset -3px 0 0 var(--accent), var(--raised);
 }
 
 .rack-step.now {
-  outline: 2px solid #f4f7f1;
-  outline-offset: -2px;
   z-index: 1;
+  box-shadow: var(--pressed), 0 0 14px #f4fff4, 0 0 2px #fff;
+  outline: 2px solid #f4fff4;
+  outline-offset: -2px;
 }
 
 .rack-graph {
@@ -452,25 +541,33 @@
 .rack-picker {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   max-width: 100%;
   min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #121a16;
 }
-
-.rack-picker-row {
+.rack-search { width: 100%; min-height: var(--control-h); }
+.rack-cats, .rack-results {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  overflow-x: auto;
-  max-width: 100%;
-  min-width: 0;
-  padding-bottom: 2px;
+  align-items: center;
 }
-
-.rack-picker-row button {
-  flex: none;
-  padding: 0 10px;
-  min-height: 32px;
+.rack-results { max-height: 220px; overflow: auto; align-items: stretch; }
+.rack-results button {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 72px;
+  min-height: 44px;
+  padding: 4px 10px;
 }
+.rack-results small { color: var(--muted); font-size: 10px; }
 
 .rack-picker p {
   margin: 0;

@@ -426,8 +426,18 @@ export class ProjectStore {
   }
 
   setView(view: WorkspaceView) {
+    if (view !== 'beats' && this.view === 'beats') this.clearRackRoll()
     this.view = view
     this.emit()
+  }
+
+  /** Hide a piano roll that was opened from a channel row. */
+  private clearRackRoll() {
+    if (!this.selectedMidiClipId) return
+    const clip = this.project.tracks.flatMap((track) => track.midiClips).find((item) => item.id === this.selectedMidiClipId)
+    if (!clip?.channelId) return
+    this.selectedMidiClipId = null
+    this.selectedMidiClipIds = []
   }
 
   setTransportMode(mode: 'arrangement' | 'session') {
@@ -1432,7 +1442,8 @@ export class ProjectStore {
     })
   }
 
-  exportSlices(trackId: string | 'master', pluginId: string) {
+  exportSlices(trackId: string | 'master', pluginId: string, beat = 0) {
+    let placed = ''
     this.mutate(() => {
       const plugin = this.instrument(trackId, pluginId)
       const count = plugin?.sampler?.slices.length ?? 0
@@ -1440,14 +1451,19 @@ export class ProjectStore {
       const notes = slicesToNotes(count).map((note) => ({ ...note, id: uid('note') }))
       const host = this.project.tracks.find((track) => track.type === 'midi') ?? (trackId === 'master' ? null : this.track(trackId))
       if (!host) return
+      const startBeat = Math.max(0, beat)
+      const bar = Math.floor(startBeat / Math.max(1, this.project.timeSignature.numerator)) + 1
       host.midiClips.push({
         id: uid('midi'),
         name: 'Slices',
-        startBeat: 0,
+        startBeat,
         durationBeats: Math.max(1, notes.length * 0.25),
         notes,
       })
+      placed = `MIDI clip placed on ${host.name} at bar ${bar}`
     })
+    if (placed) this.toast(placed, 'good')
+    else this.toast('Slice the sample before placing MIDI.', 'warn')
   }
 
   armLooper(trackId: string | 'master', pluginId: string, transport: number, beat: number) {

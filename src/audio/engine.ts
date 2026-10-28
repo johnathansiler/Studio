@@ -19,7 +19,8 @@ import { renderNotes } from './rack/dsp'
 import { LibraryHost } from './multisample/host'
 import type { SamplePack } from './multisample/types'
 import { renderQuantizedClip } from '../model/quantize'
-import { patternPlayRange, renderPattern, type RenderedHit } from '../model/steps'
+import { emptyPatternLoopSamples } from '../model/channelRack'
+import { patternPlayRange, renderPattern, type PatternClip, type RenderedHit } from '../model/steps'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav, linearResample } from '../model/wav'
 import { tuneBlockScale } from './plugins/autoTune'
@@ -72,6 +73,25 @@ interface Stoppable {
 }
 
 type PunchInfo = { timelineSample: number; cueEpochHostPerf: number; ctxTime: number }
+
+/**
+ * Arrangement clips win. On an empty song the live transport still loops the
+ * rack, so the active pattern is heard without planting a clip on the timeline.
+ * Offline bounces stay on the clips that were actually placed.
+ */
+function patternClipsToPlay(project: Project, live: boolean): PatternClip[] {
+  const clips = project.patternClips ?? []
+  if (!live || clips.some((clip) => clip.scene == null) || emptyPatternLoopSamples(project) <= 16) return clips
+  const pattern = project.beats?.patterns.find((item) => item.id === project.beats?.activeId)
+  if (!pattern) return clips
+  return [{
+    id: 'live-pattern',
+    patternId: pattern.id,
+    startBeat: 0,
+    lengthBeats: pattern.steps * 0.25,
+    scene: null,
+  }]
+}
 
 export class AudioEngine {
   ctx: AudioContext | null = null
@@ -1609,7 +1629,9 @@ export class AudioEngine {
       const sample = this.heardSample(linear)
       this.positionSamples = sample
       const project = this.project
-      if (project && this.mode === 'arrangement' && !project.loopEnabled && this.status === 'playing') {
+      const patternLoop = project && this.status !== 'recording' ? emptyPatternLoopSamples(project) : 0
+      if (patternLoop > 1) this.positionSamples = sample % patternLoop
+      if (patternLoop <= 1 && project && this.mode === 'arrangement' && !project.loopEnabled && this.status === 'playing') {
         const end = arrangementEndSample(project)
         if (linear > end + this.sampleRate) {
           this.stop()
@@ -1719,6 +1741,20 @@ export class AudioEngine {
 
   private scheduleArrangement(horizon: number) {
     const project = this.project!
+    const patternLoop = this.status === 'recording' ? 0 : emptyPatternLoopSamples(project)
+    if (patternLoop > 16) {
+      if (this.nextLoopCtx == null) {
+        this.nextLoopCtx = this.playOriginCtx
+        this.nextLoopSample = ((this.playOriginSample % patternLoop) + patternLoop) % patternLoop
+      }
+      while (this.nextLoopCtx < horizon) {
+        const samples = Math.max(1, patternLoop - this.nextLoopSample)
+        this.scheduleWindow(this.nextLoopCtx, this.nextLoopSample, this.nextLoopSample + samples)
+        this.nextLoopCtx += samples / this.sampleRate
+        this.nextLoopSample = 0
+      }
+      return
+    }
     const end = arrangementEndSample(project)
     const cycleWhileRecording = this.status === 'recording' && project.record?.loop
     if (!project.loopEnabled || (this.status === 'recording' && !cycleWhileRecording)) {
@@ -1997,7 +2033,8 @@ export class AudioEngine {
     timelineEnd: number,
   ) {
     const midiId = project.tracks.find((track) => track.type === 'midi')?.id
-    for (const clip of project.patternClips ?? []) {
+    const clips = patternClipsToPlay(project, ctx === this.ctx)
+    for (const clip of clips) {
       if (clip.scene != null) continue
       const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
       if (!pattern) continue

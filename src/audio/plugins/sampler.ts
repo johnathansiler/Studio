@@ -135,6 +135,7 @@ export function createSampler(sampleRate: number): SamplerProcessor {
       const cutoff = params.cutoff ?? 16000
       const coeff = 1 - Math.exp((-2 * Math.PI * clamp(cutoff, 40, sampleRate * 0.45)) / sampleRate)
       const gain = clamp(params.gain ?? 0.8, 0, 1)
+      const playRate = state.speed && state.speed > 0 ? state.speed : 1
       const beat = Math.max(2, Math.round((sampleRate * 60) / Math.max(1, ctx.tempo)))
       for (const voice of voices) {
         if (!voice.active || !voice.stretch) continue
@@ -158,8 +159,8 @@ export function createSampler(sampleRate: number): SamplerProcessor {
             voice.loopTo = voice.buffer.length
             voice.pos = 0
           }
-          voice.rate = 1
-        } else voice.rate = 2 ** (semis / 12)
+          voice.rate = playRate
+        } else voice.rate = (2 ** (semis / 12)) * playRate
       }
       for (let i = 0; i < n; i++) {
         let left = 0

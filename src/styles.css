@@ -21,6 +21,18 @@
   --mono: 'IBM Plex Mono', ui-monospace, monospace;
   --dock: 380px;
   --radius: 12px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --control-h: 32px;
+  --control-h-phone: 44px;
+  --radius-control: 8px;
+  --bevel-hi: rgba(255, 255, 255, 0.2);
+  --bevel-shade: rgba(0, 0, 0, 0.38);
+  --face: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03) 42%, rgba(0, 0, 0, 0.28));
+  --raised: inset 0 1px 0 var(--bevel-hi), inset 0 -1px 0 var(--bevel-shade), 0 1px 2px rgba(0, 0, 0, 0.35);
+  --pressed: inset 0 2px 5px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --glow: 0 0 12px color-mix(in srgb, var(--accent) 65%, transparent);
 }
 
 * { box-sizing: border-box; }
@@ -223,7 +235,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .shell.phone .tool-row button.tool { width: 44px; }
 .marquee { position: absolute; z-index: 5; border: 1px solid var(--accent); background: rgba(115, 196, 143, 0.16); pointer-events: none; }
 .shell.phone .tool-row button { min-height: 44px; height: 44px; }
-.arrange { height: auto; flex: 1; min-height: 0; display: grid; grid-template-columns: 210px minmax(0, 1fr); background: #121a16; }
+.arrange { height: auto; flex: 1; min-height: 0; display: grid; grid-template-columns: 260px minmax(0, 1fr); background: #121a16; }
 .follow-banner { padding: 6px 10px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); background: #101814; }
 .heads, .lanes { min-height: 0; min-width: 0; }
 .heads { border-right: 1px solid var(--line); background: #141c18; overflow-x: hidden; overflow-y: auto; }
@@ -251,9 +263,12 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .head { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
 .head header { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
 .head input.name { width: 100%; background: transparent; border: 0; font-weight: 640; padding: 0; }
-.head .row { display: flex; gap: 4px; align-items: center; }
+.head .row { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 .mini {
-  width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 11px;
+  width: auto; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 11px;
+  display: inline-flex; align-items: center; justify-content: center; white-space: nowrap;
+  box-shadow: var(--raised);
 }
 .mini.on-m { background: #3a4048; color: white; }
 .mini.on-s { background: var(--solo); color: #241c04; }
@@ -434,7 +449,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border-top: 0; border-left: 1px solid var(--line);
 }
 .shell.phone .plugin-sheet:has(.faceplate) { max-height: 68vh; }
-.shell.phone .plugin-sheet:has(.sample-panel) { max-height: 74vh; }
+.shell.phone .plugin-sheet:has(.sample-panel) { max-height: 86vh; }
 .clip-sheet {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
   background: #18241d; border-top: 1px solid var(--line);
@@ -812,7 +827,7 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 .shell.phone .tap-tempo { min-width: 44px; padding: 0 12px; }
 .shell.phone .tempo-cluster { flex: 1 1 auto; }
 .shell.phone .tool-slot:not(:empty) { min-height: 44px; }
-.shell.phone .lcd { min-width: 12.75rem; flex: 1 1 12.75rem; padding: 4px 8px; }
+.shell.phone .lcd { min-width: 12.75rem; flex: 1 1 12.75rem; padding: 4px 8px; overflow: visible; }
 .shell.phone .lcd .bars { font-size: 15px; }
 .shell.phone .field input, .shell.phone .field select { width: 68px; min-height: 44px; }
 .shell.phone .t-toggles { flex: 1 1 100%; flex-wrap: wrap; gap: 4px 10px; }
@@ -1867,3 +1882,169 @@ html[data-posture="tabletop"] .shell .master-sheet {
   left: auto; top: 0; width: min(420px, 46vw); max-height: 100dvh; bottom: 0;
   border-top: 0; border-left: 1px solid var(--line);
 }
+
+/* Plugins sit beside the work instead of covering the mixer. */
+.plugin-sheet {
+  top: 88px;
+  right: 8px;
+  bottom: 8px;
+  left: auto;
+  width: min(480px, calc(100vw - 280px));
+  max-height: none;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+.shell.phone .plugin-sheet,
+.shell.fold .plugin-sheet {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto !important;
+  max-height: 46vh;
+  border-radius: 16px 16px 0 0;
+}
+.shell.phone .plugin-sheet.tune-open,
+.shell.fold .plugin-sheet.tune-open,
+.shell.phone.land .plugin-sheet.tune-open {
+  max-height: 46vh;
+}
+.sheet-resize { cursor: ew-resize; width: 14px; height: auto; top: 0; bottom: 0; right: auto; left: 0; position: absolute; }
+.shell.phone .sheet-resize, .shell.fold .sheet-resize { width: auto; height: 14px; right: 0; left: 0; bottom: auto; cursor: ns-resize; }
+
+/* Shared bevel. Feature views inherit this without their own button skins. */
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.15;
+  gap: var(--space-1);
+}
+.topbar,
+.transport,
+.views,
+.rack-bar,
+.tool-row,
+.me-modes,
+.me-bar,
+.scale-bar,
+.t-buttons,
+.t-toggles {
+  align-items: center;
+  gap: var(--space-2);
+}
+.views button,
+.text-btn,
+.icon-btn,
+.t-btn,
+.menu-btn,
+.chip,
+.rack-bar button,
+.rack-extras button,
+.rack-add,
+.rack-cats button,
+.rack-results button,
+.rack-picker button,
+.kit-toggle,
+.kit-fold,
+.tool-slot .timeline-tools button,
+.tool-row button,
+.me-modes button,
+.me-bar button,
+.scale-bar button,
+.strip button,
+.head button,
+.shell-menu button {
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
+.views button.active,
+.text-btn.on,
+.text-btn.primary,
+.t-btn.on,
+.t-btn.play,
+.t-btn.rec.on,
+.menu-btn.on,
+.rack-bar button.on,
+.rack-extras button.on,
+.rack-lengths button.on,
+.tool-slot .timeline-tools button.on,
+.me-modes button.on,
+.me-bar button.on,
+.scale-bar button.on,
+button[aria-pressed='true'] {
+  box-shadow: var(--pressed), var(--glow);
+}
+button:active:not(:disabled) {
+  box-shadow: var(--pressed);
+}
+.piano .scale-bar,
+.piano > .tool-row,
+.midi-dock .me-modes,
+.midi-dock .me-bar {
+  flex-wrap: wrap;
+  overflow: visible;
+  max-width: 100%;
+  height: auto;
+}
+.strip {
+  border-radius: 14px;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent 36%);
+  box-shadow: var(--raised);
+}
+.strip .inserts button,
+.strip .insert-add,
+.strip .sends label span {
+  overflow: visible;
+  text-overflow: unset;
+  white-space: normal;
+  text-align: center;
+  height: auto;
+  line-height: 1.15;
+}
+.shell.phone .topbar button,
+.shell.phone .transport .t-btn,
+.shell.phone .views button,
+.shell.phone .text-btn,
+.shell.phone .menu-btn,
+.shell.phone .rack-bar button {
+  min-height: var(--control-h-phone);
+}
+.board-pop {
+  background:
+    radial-gradient(circle at 20% 0%, rgba(255, 180, 80, 0.16), transparent 42%),
+    linear-gradient(180deg, #3a2a22, #1a120e);
+}
+.board-pop header strong { letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* Plugins sit beside the work instead of covering the mixer. */
+.plugin-sheet {
+  top: 88px;
+  right: 8px;
+  bottom: 8px;
+  left: auto;
+  width: min(480px, calc(100vw - 280px));
+  max-height: none;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+.shell.phone .plugin-sheet,
+.shell.fold .plugin-sheet {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto !important;
+  max-height: 46vh;
+  border-radius: 16px 16px 0 0;
+}
+.shell.phone.land .plugin-sheet.tune-open { max-height: 26dvh; }
+.sheet-resize { cursor: ew-resize; width: 14px; height: auto; top: 0; bottom: 0; right: auto; left: 0; position: absolute; }
+.shell.phone .sheet-resize,
+.shell.fold .sheet-resize { width: auto; height: 14px; left: 0; right: 0; bottom: auto; cursor: ns-resize; }
