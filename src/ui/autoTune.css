@@ -342,9 +342,8 @@
   max-height: 86vh;
 }
 
-.shell.phone.land .plugin-sheet.tune-open,
-.shell.fold.land .plugin-sheet.tune-open {
-  max-height: min(52dvh, 280px);
+.shell.phone.land .plugin-sheet.tune-open {
+  max-height: 26dvh;
 }
 
 .shell.phone.land .tune-board button,
