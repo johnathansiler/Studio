@@ -4,12 +4,23 @@ import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
 import { MasterSheet } from './MasterSheet'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
+import { useLayoutWidth, WidthHandle } from './WidthHandle'
 
 export function MixerView({ store, engine, onTune }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void }) {
   const project = store.project
   const [masterOpen, setMasterOpen] = useState(false)
+  const strip = useLayoutWidth('strip')
   return (
-    <div className="mixer">
+    <div className="mixer-frame" style={{ ['--strip' as string]: `${strip.value}px` }}>
+      <WidthHandle
+        label="Mixer width"
+        value={strip.value}
+        min={strip.bounds.min}
+        max={strip.bounds.max}
+        onChange={strip.setValue}
+        onReset={strip.reset}
+      />
+      <div className="mixer">
       {project.tracks.map((track) => (
         <div className="strip" data-track={track.id} key={track.id}>
           <h3 style={{ color: track.color }}>{track.name}</h3>
@@ -40,6 +51,7 @@ export function MixerView({ store, engine, onTune }: { store: ProjectStore; engi
           <Meter engine={engine} id="master" />
           <input type="range" min={0} max={1.25} step={0.01} value={project.masterVolume} onChange={(event) => store.setMasterVolume(Number(event.target.value))} />
         </div>
+      </div>
       </div>
       {masterOpen && <MasterSheet store={store} engine={engine} onClose={() => setMasterOpen(false)} />}
     </div>

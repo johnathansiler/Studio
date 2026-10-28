@@ -4,6 +4,7 @@ import type { FollowAction, LaunchMode, LaunchQuant } from '../model/types'
 import { quartersPerBar } from '../model/time'
 import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
+import { useLayoutWidth, WidthHandle } from './WidthHandle'
 
 export function SessionView({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
   const project = store.project
@@ -12,8 +13,18 @@ export function SessionView({ store, engine }: { store: ProjectStore; engine: Au
   const edit = store.sessionEdit
   const editTrack = edit ? store.project.tracks.find((track) => track.id === edit.trackId) : undefined
   const editClip = editTrack && edit ? sceneClip(editTrack, edit.scene) : null
+  const slot = useLayoutWidth('slot')
   return (
-    <div className="session-grid">
+    <div className="session-grid" style={{ ['--slot' as string]: `${slot.value}px` }}>
+      <WidthHandle
+        label="Session width"
+        value={slot.value}
+        min={slot.bounds.min}
+        max={slot.bounds.max}
+        onChange={slot.setValue}
+        onReset={slot.reset}
+      />
+      <div className="session-main">
       <div className="session-bar">
         <select aria-label="Launch quantization" value={quant} disabled={store.remoteFollow} onChange={(event) => store.setLaunchQuant(event.target.value as LaunchQuant)}>
           {LAUNCH_QUANTS.map((value) => (
@@ -74,7 +85,7 @@ export function SessionView({ store, engine }: { store: ProjectStore; engine: Au
           <tr>
             <th />
             {store.project.tracks.map((track) => (
-              <th key={track.id} data-track={track.id} style={{ color: track.color }}>
+              <th key={track.id} className="track-col" data-track={track.id} style={{ color: track.color }}>
                 {track.name}
               </th>
             ))}
@@ -125,6 +136,7 @@ export function SessionView({ store, engine }: { store: ProjectStore; engine: Au
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }
