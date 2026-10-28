@@ -61,6 +61,7 @@ import {
   trimLinkedAudio,
   trimLinkedMidi,
 } from '../model/mixGroups'
+import { channelRoute, mirrorTrackMix } from '../model/sharedMix'
 import { demoMidiNotes } from '../model/demo'
 import {
   clipById,
@@ -133,7 +134,7 @@ import { beatsToSamples, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
 import { renderDrum, DRUM_PADS } from '../model/drums'
 import { isDrumTrack, clampRoll, DRUM_STEP, hitAt } from '../model/drumLanes'
-import { clearStep, normalizeMidiEditor, placeStep, tieHeld, type StepTone } from '../model/stepEntry'
+import { clearStep, editorState, normalizeMidiEditor, placeStep, tieHeld, writeRollPrefs, type StepTone } from '../model/stepEntry'
 import {
   chainSong,
   chopSample,
@@ -1092,8 +1093,9 @@ export class ProjectStore {
     this.emit()
   }
 
-  setLoop(enabled: boolean, start?: number, end?: number) {
-    this.mutate(() => {
+  setLoop(enabled: boolean, start?: number, end?: number, drag = false) {
+    const run = (body: () => void) => (drag ? this.draft(body) : this.mutate(body))
+    run(() => {
       this.project.loopEnabled = enabled
       if (start != null) this.project.loopStartSample = Math.max(0, Math.round(start))
       if (end != null) this.project.loopEndSample = Math.max(this.project.loopStartSample + 1, Math.round(end))
@@ -1262,7 +1264,10 @@ export class ProjectStore {
       if (patch.mute != null) mixer.mute = patch.mute
       if (patch.solo != null) mixer.solo = patch.solo
       if (patch.soloSafe != null) mixer.soloSafe = patch.soloSafe
-      if (Object.keys(mixer).length) patchMixer(this.project, id, mixer)
+      if (Object.keys(mixer).length) {
+        patchMixer(this.project, id, mixer)
+        mirrorTrackMix(this.project, id)
+      }
       const rest: Partial<Track> = { ...patch }
       delete rest.volume
       delete rest.pan
@@ -2176,13 +2181,16 @@ export class ProjectStore {
     })
   }
 
-  placePatternClips(moves: { clipId: string; startBeat: number }[]) {
+  placePatternClips(moves: { clipId: string; startBeat: number; trackId?: string }[]) {
     this.mutate(() => {
       for (const move of moves) {
         const clip = this.project.patternClips?.find((item) => item.id === move.clipId)
         if (!clip || clip.scene != null) continue
         clip.placed = true
         clip.startBeat = this.project.snap ? Math.max(0, Math.round(move.startBeat)) : Math.max(0, move.startBeat)
+        if (move.trackId && this.project.tracks.some((track) => track.id === move.trackId && track.type === 'midi')) {
+          clip.trackId = move.trackId
+        }
       }
     })
   }
@@ -2739,6 +2747,7 @@ export class ProjectStore {
       const track = this.track(id)
       if (!track) return
       patchMixer(this.project, id, { [flag]: !track[flag] })
+      mirrorTrackMix(this.project, id)
     })
   }
 
@@ -4161,8 +4170,29 @@ export class ProjectStore {
     run(() => {
       const channel = this.activePattern()?.channels.find((row) => row.id === channelId)
       if (!channel) return
-      Object.assign(channel, patch)
+      const mix: { volume?: number; pan?: number; mute?: boolean; solo?: boolean } = {}
+      if (patch.volume != null) mix.volume = patch.volume
+      if (patch.pan != null) mix.pan = patch.pan
+      if (patch.mute != null) mix.mute = patch.mute
+      if (patch.solo != null) mix.solo = patch.solo
+      if (Object.keys(mix).length) {
+        const trackId = channelRoute(this.project, channel)
+        if (trackId) {
+          patchMixer(this.project, trackId, mix)
+          mirrorTrackMix(this.project, trackId)
+        }
+      }
+      const rest: Partial<typeof patch> = { ...patch }
+      delete rest.volume
+      delete rest.pan
+      delete rest.mute
+      delete rest.solo
+      Object.assign(channel, rest)
       if (patch.steps != null) channel.steps = Math.max(1, Math.min(64, Math.round(patch.steps)))
+      if (patch.output !== undefined) {
+        const next = channelRoute(this.project, channel)
+        if (next) mirrorTrackMix(this.project, next)
+      }
     })
   }
 
@@ -4216,17 +4246,29 @@ export class ProjectStore {
     this.editChannel(channelId, (cells, count) => cells.map((cell, index) => (index < count && clip[index] ? { ...clip[index] } : cell)))
   }
 
-  placePattern(startBeat: number) {
-    let note = ''
+  placePattern(startBeat: number, trackId?: string) {
+    const pattern = this.activePattern()
+    if (!pattern) {
+      this.toast('Choose a pattern first.', 'warn')
+      return
+    }
+    let landed = 'Drums'
     this.mutate(() => {
-      const pattern = this.activePattern()
-      if (!pattern || !this.project.patternClips) return
+      const requested = trackId ? this.project.tracks.find((track) => track.id === trackId && track.type === 'midi') : null
+      const track = requested ?? this.ensureDrumsTrack()
+      landed = track.name
+      if (!this.project.patternClips) this.project.patternClips = []
+      for (const channel of pattern.channels) {
+        if (!channel.output) channel.output = track.id
+      }
+      mirrorTrackMix(this.project, track.id)
       const clip = {
         id: uid('pcl'),
         patternId: pattern.id,
         startBeat: Math.max(0, startBeat),
         lengthBeats: pattern.steps * 0.25,
         scene: null,
+        trackId: track.id,
         placed: true,
         offsetBeats: 0,
       }
@@ -4237,11 +4279,23 @@ export class ProjectStore {
       this.selectedClipIds = []
       this.selectedMidiClipId = null
       this.selectedMidiClipIds = []
-      const routed = pattern.channels.map((channel) => channel.output).find((id) => id)
-      const track = this.project.tracks.find((item) => item.id === routed) ?? this.project.tracks.find((item) => item.type === 'midi')
-      note = `Placed ${pattern.name} on ${track?.name ?? 'the timeline'}`
+      this.selectedTrackId = track.id
     })
-    if (note) this.toast(note, 'good')
+    this.toast(`${pattern.name} is on ${landed}.`, 'good')
+  }
+
+  /** Midi track named Drums. Place creates it when the song does not have one yet. */
+  private ensureDrumsTrack() {
+    const found = this.project.tracks.find((track) => track.type === 'midi' && track.name === 'Drums')
+    if (found) return found
+    const track = makeTrack({
+      name: 'Drums',
+      type: 'midi',
+      color: '#e07a3d',
+      input: 'none',
+    })
+    this.project.tracks.push(track)
+    return track
   }
 
   placePatternScene(scene: number) {
@@ -4328,14 +4382,15 @@ export class ProjectStore {
   }
 
   midiEditor(): MidiEditorPrefs {
-    return normalizeMidiEditor(this.project.midiEditor)
+    return editorState(this.project)
   }
 
   setMidiEditor(patch: Partial<MidiEditorPrefs>, drag = false) {
     const run = (body: () => void) => (drag ? this.draft(body) : this.mutate(body))
     run(() => {
-      this.project.midiEditor = normalizeMidiEditor({ ...normalizeMidiEditor(this.project.midiEditor), ...patch })
+      this.project.midiEditor = normalizeMidiEditor({ ...editorState(this.project), ...patch })
     })
+    if (patch.stepInput != null || patch.follow != null) writeRollPrefs(patch)
   }
 
   /** Notes played together land on the step cursor, then the cursor advances. */

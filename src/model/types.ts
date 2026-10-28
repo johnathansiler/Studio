@@ -355,6 +355,10 @@ export interface MidiEditorPrefs {
   page: number
   /** Score page. Each page is four bars. */
   scorePage: number
+  /** Computer and on-screen keys write a note at the playhead. Off, they only play the sound. */
+  stepInput: boolean
+  /** The piano roll scrolls to keep the playhead in view. */
+  follow: boolean
 }
 
 export interface RecordSettings {

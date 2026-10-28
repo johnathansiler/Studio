@@ -132,6 +132,19 @@
   border-color: transparent;
 }
 
+.rack-loop {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 8px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.rack-loop.on { color: white; background: #2f6b45; border-color: transparent; }
+.shell.phone .rack-loop { min-height: 36px; font-size: 13px; }
 .rack-tool {
   flex: none;
   max-width: 100%;

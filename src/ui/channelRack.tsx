@@ -41,8 +41,7 @@ function usePlaySample(engine: RackEngine) {
   useEffect(() => {
     if (!engine.subscribe) return
     const read = () => {
-      const playing = engine.status === 'playing' || engine.status === 'recording'
-      setLive(playing && engine.currentTimelineSample ? engine.currentTimelineSample() : engine.positionSamples)
+      setLive(engine.positionSamples)
     }
     read()
     return engine.subscribe(read)
@@ -449,6 +448,9 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         {!phone && <TipButton label={sheet('place').label} hint={sheet('place').hint} onClick={placePattern} />}
         <TipButton label={bar('edit').label} hint={bar('edit').hint} pressed={editOpen} onClick={() => setEditOpen((open) => !open)} />
         <span className="rack-tool" role="status" aria-live="polite" title={toolHint}>{toolName}</span>
+        <span className={`rack-loop ${project.loopEnabled ? 'on' : ''}`} data-loop={project.loopEnabled ? 'on' : 'off'} title="The song loop. It is the same region as Arrange, and the playhead wraps inside it.">
+          {project.loopEnabled ? 'Loop on' : 'Loop off'}
+        </span>
       </div>
       <div className={`rack-extras${editOpen ? ' open' : ''}`}>
         {phone && swing}

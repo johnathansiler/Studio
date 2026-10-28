@@ -161,7 +161,7 @@ describe('channel rack', () => {
     expect(loop).toBeGreaterThan(48000)
     store.placePattern(4)
     expect(emptyPatternLoopSamples(store.project)).toBe(0)
-    expect(store.toasts.some((toast) => toast.text.startsWith('Placed Pattern 1 on '))).toBe(true)
+    expect(store.toasts.some((toast) => toast.text.startsWith('Pattern 1 is on '))).toBe(true)
     expect(shortSoundName('long_library_name_here.wav').endsWith('…')).toBe(true)
     const kick = store.activePattern()!.channels[0].id
     store.openChannelRoll(kick)

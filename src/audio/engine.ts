@@ -10,6 +10,7 @@ import { DRUM_PADS, residentDrums, type ResidentDrum } from '../model/drums'
 import { calibrationTrim, contextTimeForEvent, monitoringOffset, type ClockStamp } from '../model/midiClock'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
 import { arrangementEndSample, beatSpanSamples, clickAccent, clickAtOrAfter, meterAtSample, nextClickAfter, projectSampleBeat, tempoAtSample } from '../model/tempoMap'
+import { transportSample } from '../model/transportSync'
 import { beatsToSamples, samplesPerBeatUnit, samplesToBeats } from '../model/time'
 import { matchBufferRate, PatchHost, renderPatchSpan } from '../instruments/patch'
 import { performancesOn, routeScaler } from '../instruments/scaler/model'
@@ -1578,7 +1579,7 @@ export class AudioEngine {
     if (this.scheduler) return
     this.scheduler = window.setInterval(() => {
       this.scheduleAhead()
-      if (this.playing && this.ctx) this.positionSamples = this.currentTimelineSample()
+      if (this.playing && this.ctx) this.positionSamples = this.heardSample(this.currentTimelineSample())
       const now = performance.now()
       if (now - this.lastUiEmit > 50) {
         this.lastUiEmit = now
@@ -1608,27 +1609,31 @@ export class AudioEngine {
     return this.playOriginSample + (ctxTime - this.playOriginCtx) * this.sampleRate
   }
 
+  /** Playhead every view reads. The loop folds it; the raw clock stays in sampleAt. */
+  private heardSample(sample: number) {
+    const project = this.project
+    const linear = Math.max(0, sample)
+    if (
+      project &&
+      project.loopEnabled &&
+      (this.status === 'playing' || (this.status === 'recording' && project.record?.loop))
+    ) {
+      return transportSample(linear, project)
+    }
+    return linear
+  }
+
   private tick = () => {
     if (this.playing && this.ctx) {
-      let sample = this.sampleAt(this.ctx.currentTime)
+      const linear = this.sampleAt(this.ctx.currentTime)
+      const sample = this.heardSample(linear)
+      this.positionSamples = sample
       const project = this.project
-      if (
-        project &&
-        this.mode === 'arrangement' &&
-        project.loopEnabled &&
-        (this.status === 'playing' || (this.status === 'recording' && project.record?.loop))
-      ) {
-        const len = project.loopEndSample - project.loopStartSample
-        if (len > 1 && sample >= project.loopEndSample) {
-          sample = project.loopStartSample + ((sample - project.loopStartSample) % len)
-        }
-      }
       const patternLoop = project && this.status !== 'recording' ? emptyPatternLoopSamples(project) : 0
-      if (patternLoop > 1 && sample >= patternLoop) sample = sample % patternLoop
-      this.positionSamples = Math.max(0, sample)
+      if (patternLoop > 1) this.positionSamples = sample % patternLoop
       if (patternLoop <= 1 && project && this.mode === 'arrangement' && !project.loopEnabled && this.status === 'playing') {
         const end = arrangementEndSample(project)
-        if (sample > end + this.sampleRate) {
+        if (linear > end + this.sampleRate) {
           this.stop()
           return
         }
@@ -2035,7 +2040,7 @@ export class AudioEngine {
       if (!pattern) continue
       const range = patternPlayRange(clip)
       for (const hit of renderPattern(pattern, range.from, range.to)) {
-        if ((hit.output || midiId) !== trackId) continue
+        if ((hit.output || clip.trackId || midiId) !== trackId) continue
         const span = beatSpanSamples(project, clip.startBeat + (hit.startBeat - range.from), hit.durationBeats)
         if (span.start < timelineStart || span.start >= timelineEnd) continue
         const when = ctxTime + (span.start - timelineStart) / this.sampleRate
