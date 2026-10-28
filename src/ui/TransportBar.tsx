@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { emptyTap, pushTap, scaleTempo, tempoFromTaps, roundTempo, type TapMemory } from '../model/tap'
 import { formatBarsBeats, formatTimecode } from '../model/time'
+import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { TRANSPORT_COPY, copyOf } from './chrome'
 import { TipButton } from './Hint'
@@ -26,7 +27,7 @@ export function TransportBar({
   /** Phone: keep play, stop, record, and tempo. To-start and loop live in the menu. */
   simple?: boolean
 }) {
-  const project = store.project
+  const project = selectTransport(store).project
   const [position, setPosition] = useState(engine.positionSamples)
   const [status, setStatus] = useState(engine.status)
   const [tapOpen, setTapOpen] = useState(false)

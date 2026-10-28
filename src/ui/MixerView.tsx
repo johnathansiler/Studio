@@ -1,15 +1,30 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
+import { STRIP_BOUNDS } from '../model/layoutWidth'
+import { selectMixer } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
+import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 
 export function MixerView({ store, engine, onTune }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void }) {
-  const project = store.project
+  return <MixerBody key={store.project.id} store={store} engine={engine} onTune={onTune} />
+}
+
+function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void }) {
+  const project = selectMixer(store).project
+  const { layout, setStrip, resetStrip } = useLayoutWidths(project.id)
+  const areaRef = useRef<HTMLDivElement>(null)
+  const stripRef = useRef(layout.strip)
+  stripRef.current = layout.strip
+  usePinchResize(areaRef, () => stripRef.current, setStrip, STRIP_BOUNDS)
   const [masterOpen, setMasterOpen] = useState(false)
   return (
-    <div className="mixer">
+    <>
+    <div className="mixer-view" ref={areaRef} data-strip-width={layout.strip} style={{ ['--strip' as string]: `${layout.strip}px` }}>
+      <WidthBar axis="strip" value={layout.strip} onChange={setStrip} onReset={resetStrip} />
+      <div className="mixer">
       {project.tracks.map((track) => (
         <div className="strip" data-track={track.id} key={track.id}>
           <h3 style={{ color: track.color }}>{track.name}</h3>
@@ -41,8 +56,10 @@ export function MixerView({ store, engine, onTune }: { store: ProjectStore; engi
           <input type="range" min={0} max={1.25} step={0.01} aria-label="Master volume. How loud the whole mix is." title="How loud the whole mix is." value={project.masterVolume} onChange={(event) => store.setMasterVolume(Number(event.target.value))} />
         </div>
       </div>
-      {masterOpen && <MasterSheet store={store} engine={engine} onClose={() => setMasterOpen(false)} />}
+      </div>
     </div>
+    {masterOpen && <MasterSheet store={store} engine={engine} onClose={() => setMasterOpen(false)} />}
+    </>
   )
 }
 
