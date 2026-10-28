@@ -1,130 +1,134 @@
 import { useEffect, useState, type DragEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
+import { detectedScales, FIFTHS, modulationChords, moodOf, progressionMood, qualityLabel, type Mood } from '../instruments/scaler/face'
 import { SCALER_MIME, activeScaleId, chooseScale as pickScale, encodeScalerDrag, normalizeScaler, padPerformance, progressionPerformance, scalerChords } from '../instruments/scaler/model'
-import { SCALER_PAGES, type ScalerGroup, type ScalerNote, type ScalerPage, type ScalerSound } from '../instruments/scaler/types'
-import { NOTE_NAMES, SCALES } from '../model/scale'
+import type { ScalerGroup, ScalerNote, ScalerSound } from '../instruments/scaler/types'
+import { NOTE_NAMES, type ArpDirection, type RhythmPattern } from '../model/scale'
 import { projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
-import {
-  allScales,
-  getScale,
-  loadScaleCatalog,
-  progressionsFor,
-  scaleFamilies,
-  spellScale,
-  toneName,
-  VOICINGS,
-  type VoicingId,
-} from '../theory'
+import { allScales, getScale, harmonize, loadScaleCatalog, progressionsFor, realizeProgression, scaleFamilies, spellScale, VOICINGS, type VoicingId } from '../theory'
 import { GeneratePanel } from './GeneratePop'
 import { useFormFactor } from './form'
 import { LibraryPanel } from './LibraryPanel'
 import './scaler.css'
 
-const GROUPS: { id: ScalerGroup; label: string; hint: string }[] = [
-  { id: 'triad', label: 'Triads', hint: 'Three-note chords on each scale degree.' },
-  { id: 'seventh', label: '7ths', hint: 'Four-note chords.' },
-  { id: 'ninth', label: '9ths', hint: 'Sevenths plus the ninth.' },
-  { id: 'sus', label: 'Sus', hint: 'Suspended chords that fit this scale.' },
-  { id: 'add', label: 'Add', hint: 'Added tones on a triad.' },
-  { id: 'altered', label: 'Altered', hint: 'Flat and sharp fifths and ninths inside the scale.' },
+const GROUPS: { id: ScalerGroup; label: string }[] = [
+  { id: 'triad', label: 'Triads' },
+  { id: 'seventh', label: '7ths' },
+  { id: 'ninth', label: '9ths' },
+  { id: 'sus', label: 'Sus' },
+  { id: 'add', label: 'Add' },
+  { id: 'altered', label: 'Altered' },
 ]
-
 const SOUNDS: { id: ScalerSound; label: string; hint: string }[] = [
-  { id: 'synth', label: 'Synth', hint: 'Play through this track’s synth.' },
-  { id: 'sampler', label: 'Sampler', hint: 'Play through this track’s sampler.' },
+  { id: 'synth', label: 'Soft Piano', hint: 'Play through the synth on this track.' },
+  { id: 'sampler', label: 'Sampler', hint: 'Play through the sampler on this track.' },
   { id: '808', label: '808', hint: 'Play the chords with the 808.' },
   { id: 'drum-machine', label: 'Drums', hint: 'Play the chords as drum hits.' },
   { id: 'library', label: 'Library', hint: 'Play a multi-sample instrument from the free library.' },
   { id: 'forward', label: 'Track', hint: 'Send the MIDI to another instrument track.' },
 ]
-
-const ARPS = [
-  { id: 'off', label: 'Off' },
-  { id: 'up', label: 'Up' },
-  { id: 'down', label: 'Down' },
-  { id: 'upDown', label: 'Up/down' },
-  { id: 'random', label: 'Random' },
-] as const
-
-const RHYTHMS = [
-  { id: 'block', label: 'Block' },
-  { id: 'quarter', label: 'Quarters' },
-  { id: 'eighth', label: 'Eighths' },
-  { id: 'sync', label: 'Sync' },
-  { id: 'strum', label: 'Strum' },
-] as const
-
-const RATES = [
-  { beats: 2, label: '1/2' },
-  { beats: 1, label: '1/4' },
-  { beats: 0.5, label: '1/8' },
-  { beats: 0.25, label: '1/16' },
-  { beats: 0.125, label: '1/32' },
+const PERFORMS = [
+  { label: 'Block', rhythm: 'block' as RhythmPattern, arp: 'off' as ArpDirection },
+  { label: 'Animando', rhythm: 'eighth' as RhythmPattern, arp: 'up' as ArpDirection },
+  { label: 'Strum', rhythm: 'strum' as RhythmPattern, arp: 'off' as ArpDirection },
+  { label: 'Pulse', rhythm: 'sync' as RhythmPattern, arp: 'off' as ArpDirection },
 ]
+const EXPRESSIONS = ['Still', 'Animando', 'Push']
+const LOCKS = ['Off', 'Scale', 'Chord'] as const
+const HUMAN = ['Off', 'Gentle', 'Strong']
+const GATES = [0.25, 0.5, 0.8, 1]
+const ARPS: ArpDirection[] = ['off', 'up', 'down', 'upDown', 'random']
+const WHITE = new Set([0, 2, 4, 5, 7, 9, 11])
+
+interface Slot { symbol: string; roman: string; notes: ScalerNote[] }
+interface Section { id: string; name: string; slots: (Slot | null)[] }
 
 export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; engine: AudioEngine; trackId: string }) {
   const phone = useFormFactor() === 'phone'
   const [rec, setRec] = useState(false)
   const [pad, setPad] = useState(0)
-  const [line, setLine] = useState('')
+  const [song, setSong] = useState(0)
   const [query, setQuery] = useState('')
   const [family, setFamily] = useState('all')
   const [, setCatalog] = useState(0)
-  const [hint, setHint] = useState('Pads play the chords in this key.')
+  const [hint, setHint] = useState('Click a chord card. It plays, and Edit drops it into the lane.')
+  const [st, setSt] = useState(0)
+  const [locked, setLocked] = useState(false)
+  const [octave, setOctave] = useState(0)
+  const [perform, setPerform] = useState(0)
+  const [expression, setExpression] = useState(0)
+  const [lockMode, setLockMode] = useState(0)
+  const [human, setHuman] = useState(0)
+  const [modKind, setModKind] = useState(0)
+  const [destRoot, setDestRoot] = useState(7)
+  const [tab, setTab] = useState<'diatonic' | 'voicing' | 'variations' | 'modulation'>('diatonic')
+  const [edit, setEdit] = useState(true)
+  const [loop, setLoop] = useState(false)
+  const [slot, setSlot] = useState(0)
+  const [section, setSection] = useState(0)
+  const [sections, setSections] = useState<Section[]>(() => [
+    { id: 'intro', name: 'Intro', slots: blank() },
+    { id: 'a', name: 'Part 1', slots: blank() },
+    { id: 'b', name: 'Part 2', slots: blank() },
+  ])
   useEffect(() => {
     let alive = true
-    void loadScaleCatalog().then(() => {
-      if (alive) setCatalog((value) => value + 1)
-    })
-    return () => {
-      alive = false
-    }
+    void loadScaleCatalog().then(() => { if (alive) setCatalog((value) => value + 1) })
+    return () => { alive = false }
   }, [])
 
   const track = store.track(trackId)
   if (!track || track.type !== 'midi') return null
   const clips = track.midiClips
   const state = normalizeScaler(track.scaler)
-  const page = store.scalerPage
   const scaleId = activeScaleId(state)
   const scaleName = getScale(scaleId).name
   const chords = scalerChords(state)
   const bar = Math.max(1, store.project.timeSignature?.numerator || 4)
-  const lines = progressionsFor(scaleId)
-  const chosenLine = lines.find((item) => item.id === line) ?? lines[0]
+  const songs = progressionsFor(scaleId)
+  const songPattern = songs[song % Math.max(1, songs.length)]
+  const diatonic = harmonize(state.root, scaleId, state.group === 'seventh' || state.group === 'ninth' ? 4 : 3)
   const degrees = spellScale(state.root, scaleId, 3)
+  const scalePcs = new Set(degrees.map((tone) => mod12(tone.midi)))
+  const current = chords[Math.min(pad, Math.max(0, chords.length - 1))]
+  const chordPcs = new Set((current?.tones ?? []).map((tone) => mod12(tone.midi)))
+  const trackNotes = clips.flatMap((clip) => clip.notes.filter((note) => !note.muted).map((note) => ({ midi: note.pitch, cents: note.fine })))
+  const rows = detectedScales(trackNotes, state.root, scaleId)
+  const playedNow = current ? padPerformance(state, Math.min(pad, chords.length - 1), bar) : null
+  const liveNotes = (playedNow?.voiced ?? []).map((tone) => nameMidi(tone.midi)).join(' ')
   const families = scaleFamilies()
   const scales = allScales().filter((item) => {
     if (family !== 'all' && item.family !== family) return false
     const text = query.trim().toLowerCase()
     if (!text) return true
-    return `${item.name} ${item.description} ${item.family}`.toLowerCase().includes(text)
+    return `${item.name} ${item.description}`.toLowerCase().includes(text)
   })
+  const active = sections[section] ?? sections[0]
+  const laneSymbols = active.slots.filter((item): item is Slot => !!item).map((item) => item.symbol)
+  const songChords = songPattern ? realizeProgression(state.root, scaleId, songPattern, bar, 3).map((chord) => chord.symbol) : []
+  const laneMood = progressionMood(laneSymbols.length ? laneSymbols : songChords, scaleId)
+  const mods = ['secondary', 'parallel', 'mediant'] as const
+  const pathway = modulationChords(mods[modKind], destRoot, scaleId)
+  const sound = SOUNDS.find((item) => item.id === state.sound) ?? SOUNDS[0]
+  const gateIndex = GATES.reduce((best, value, index) => Math.abs(value - state.gate) < Math.abs(GATES[best] - state.gate) ? index : best, 0)
+
   function patch(next: Parameters<ProjectStore['setScaler']>[1]) {
+    if (locked && (next.group || next.root != null || next.scale || next.library != null)) return
     store.setScaler(trackId, next)
-    const merged = normalizeScaler({ ...state, ...next })
-    if (!merged.snap) return
-    store.setScale({
-      root: merged.root,
-      scale: merged.scale,
-      library: merged.library,
-      snap: true,
-      voicing: merged.voicing,
-      inversion: merged.inversion,
-      voiceLead: merged.voiceLead,
-      arp: merged.arp,
-      rate: merged.rate,
-      gate: merged.gate,
-      octaves: merged.octaves,
-      rhythm: merged.rhythm,
-    })
   }
 
   function hear(notes: ScalerNote[], voiced?: { midi: number; cents: number }[]) {
+    const shifted = notes
     engine.unlock()
     const beatSec = 60 / Math.max(40, store.project.tempo)
-    engine.auditionScaler(trackId, notes.map((note) => ({
+    const passes = loop ? 2 : 1
+    const span = shifted.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0)
+    const sequence = Array.from({ length: passes }, (_, pass) => shifted.map((note) => ({
+      ...note,
+      startBeat: note.startBeat + pass * span,
+    }))).flat()
+    engine.auditionScaler(trackId, sequence.map((note) => ({
       pitch: note.pitch,
       fine: note.fine,
       delay: note.startBeat * beatSec,
@@ -135,8 +139,7 @@ export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; e
   }
 
   function atBeat(live: boolean) {
-    const sample = engine.currentTimelineSample()
-    const beat = Math.max(0, projectSampleBeat(store.project, sample))
+    const beat = Math.max(0, projectSampleBeat(store.project, engine.currentTimelineSample()))
     const moving = engine.status === 'playing' || engine.status === 'recording'
     if (live && moving) return beat
     if (live) {
@@ -147,234 +150,487 @@ export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; e
     return Math.floor(beat * 4) / 4
   }
 
-  function playPad(index: number, write: boolean) {
+  function playChord(index: number, write: boolean) {
     const played = padPerformance(state, index, bar)
     if (!played) return
     setPad(index)
-    setHint(`${played.symbol}. ${played.roman}.`)
-    hear(played.notes, played.voiced)
+    const notes = place(played.notes, st, octave, human)
+    setHint(`${played.symbol}. ${qualityLabel(played.symbol, played.roman)}. ${moodOf(played.symbol, scaleId).word}.`)
+    hear(notes, played.voiced)
+    if (edit) {
+      setSections((prev) => prev.map((part, partIndex) => {
+        if (partIndex !== section) return part
+        const slots = part.slots.slice()
+        slots[slot % 8] = { symbol: played.symbol, roman: played.roman, notes }
+        return { ...part, slots }
+      }))
+      setSlot((value) => (value + 1) % 8)
+    }
     const capture = write || rec || engine.status === 'recording'
     if (!capture) return
-    if (write && !rec && engine.status !== 'recording') store.writeScalerClip(trackId, played.notes, atBeat(false), played.symbol)
-    else store.recordScalerChord(trackId, played.notes, atBeat(true))
+    if (write && !rec && engine.status !== 'recording') store.writeScalerClip(trackId, notes, atBeat(false), played.symbol)
+    else store.recordScalerChord(trackId, notes, atBeat(true))
   }
 
-  function playLine(id: string, write: boolean) {
-    const played = progressionPerformance(state, id, bar)
-    if (!played) return
-    setLine(id)
-    setHint(played.symbols.join(' '))
-    hear(played.notes, played.voiced)
-    if (write || rec || engine.status === 'recording') store.writeScalerClip(trackId, played.notes, atBeat(false), played.name)
+  function laneNotes(): ScalerNote[] {
+    const filled = active.slots.filter((item): item is Slot => !!item)
+    if (!filled.length && songPattern) {
+      const line = progressionPerformance(state, songPattern.id, bar)
+      return place(line?.notes ?? [], st, octave, human)
+    }
+    const notes: ScalerNote[] = []
+    let beat = 0
+    for (const item of active.slots) {
+      if (!item) continue
+      for (const note of item.notes) notes.push({ ...note, startBeat: beat + note.startBeat })
+      beat += bar
+    }
+    return notes
   }
 
-  function dragPad(event: DragEvent, index: number) {
-    const played = padPerformance(state, index, bar)
-    if (!played) return
-    const raw = encodeScalerDrag({ trackId, name: played.symbol, notes: played.notes })
+  function captureLane() {
+    const notes = laneNotes()
+    if (!notes.length) {
+      setHint('Pick a chord first. Capture writes the lane, or the song if the lane is empty.')
+      return
+    }
+    store.writeScalerClip(trackId, notes, atBeat(false), active.name)
+    setHint(`${active.name} is on the track as MIDI you can edit.`)
+  }
+
+  function loadSong(index: number) {
+    const pattern = songs[index]
+    if (!pattern) return
+    setSong(index)
+    const line = realizeProgression(state.root, scaleId, pattern, bar, 3)
+    setSections((prev) => prev.map((part, partIndex) => {
+      if (partIndex !== section) return part
+      const slots = blank()
+      line.forEach((chord, chordIndex) => {
+        const notes = place(chord.tones.map((tone) => ({
+          pitch: tone.midi,
+          fine: tone.cents ? Math.round(tone.cents) : undefined,
+          startBeat: 0,
+          durationBeats: bar,
+          velocity: 0.82,
+        })), st, octave, human)
+        if (chordIndex < 8) slots[chordIndex] = { symbol: chord.symbol, roman: chord.roman, notes }
+      })
+      return { ...part, slots }
+    }))
+    const played = progressionPerformance(state, pattern.id, bar)
+    if (played) hear(place(played.notes, st, octave, human), played.voiced)
+  }
+
+  function playKey(midi: number) {
+    let pitch = midi
+    if (LOCKS[lockMode] === 'Scale' && !scalePcs.has(mod12(midi))) {
+      pitch = nearestPc(midi, scalePcs)
+    }
+    if (LOCKS[lockMode] === 'Chord' && chordPcs.size && !chordPcs.has(mod12(midi))) {
+      pitch = nearestPc(midi, chordPcs)
+    }
+    hear([{ pitch: pitch + st + octave * 12, startBeat: 0, durationBeats: 0.5, velocity: 0.84 }])
+  }
+
+  function dragChord(event: DragEvent, notes: ScalerNote[], name: string) {
+    const raw = encodeScalerDrag({ trackId, name, notes: place(notes, st, octave, human) })
     event.dataTransfer.setData(SCALER_MIME, raw)
     event.dataTransfer.setData('text/plain', raw)
     event.dataTransfer.effectAllowed = 'copy'
   }
 
+  const fold = phone ? {} : { open: true }
+
   return (
-    <div className={`scaler-panel ${phone ? 'phone' : ''}`} data-scaler="plugin" data-page={page} aria-label="Scaler">
-      <header>
+    <div className={`scaler-panel ${phone ? 'phone' : ''}`} data-scaler="plugin" data-page={store.scalerPage} aria-label="Scaler">
+      <header className="scaler-top">
         <strong>Scaler</strong>
-        <span className="scaler-key">{NOTE_NAMES[state.root]} {scaleName}</span>
-        {phone ? (
-          <select
-            aria-label="Scaler page. Play, key, voice, sound, or write."
-            title="Which part of Scaler is open."
-            value={page}
-            onChange={(event) => store.setScalerPage(event.target.value as ScalerPage)}
-          >
-            {SCALER_PAGES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-          </select>
-        ) : (
-          <div className="scaler-pages" role="group" aria-label="Scaler pages">
-            {SCALER_PAGES.map((item) => (
+        <div className="scaler-readout">
+          <span>MIDI</span>
+          <span>Notes <b>{liveNotes || '—'}</b></span>
+          <span>Chord <b>{current?.symbol ?? '—'}</b></span>
+        </div>
+        <div className="scaler-strip">
+          <Stepper label="Perform" value={PERFORMS[perform].label} hint="How the chord is performed." onStep={(dir) => {
+            const next = cycle(perform, dir, PERFORMS.length)
+            setPerform(next)
+            patch({ rhythm: PERFORMS[next].rhythm, arp: PERFORMS[next].arp })
+          }} />
+          <Stepper label="Expressions" value={EXPRESSIONS[expression]} hint="A little push or stillness in the part." onStep={(dir) => setExpression(cycle(expression, dir, EXPRESSIONS.length))} />
+          <Stepper label="Keys lock" value={LOCKS[lockMode]} hint="Off plays every key. Scale and Chord pull stray keys back." onStep={(dir) => {
+            const next = cycle(lockMode, dir, LOCKS.length)
+            setLockMode(next)
+            patch({ snap: LOCKS[next] !== 'Off' })
+          }} />
+          <Stepper label="Voice grouping" value={VOICINGS[Math.max(0, VOICINGS.findIndex((item) => item.id === state.voicing))]?.name ?? 'Close'} hint="Voicing. How the chord is stacked." onStep={(dir) => {
+            const index = Math.max(0, VOICINGS.findIndex((item) => item.id === state.voicing))
+            patch({ voicing: VOICINGS[cycle(index, dir, VOICINGS.length)].id as VoicingId })
+          }} />
+          <Stepper label="Humanize" value={HUMAN[human]} hint="Leave a little of the played feel in the MIDI." onStep={(dir) => setHuman(cycle(human, dir, HUMAN.length))} />
+          <Stepper label="Arpeggio" value={state.arp === 'off' ? 'Off' : state.arp === 'upDown' ? 'Up/down' : state.arp[0].toUpperCase() + state.arp.slice(1)} hint="Break the chord into single notes." onStep={(dir) => patch({ arp: ARPS[cycle(Math.max(0, ARPS.indexOf(state.arp)), dir, ARPS.length)] })} />
+          <Stepper label="Gate" value={`${Math.round(GATES[gateIndex] * 100)}%`} hint="How long each note holds." onStep={(dir) => patch({ gate: GATES[cycle(gateIndex, dir, GATES.length)] })} />
+        </div>
+        <button type="button" className="scaler-close" title="Close Scaler. The track keeps the instrument." aria-label="Close Scaler. The track keeps the instrument." onClick={() => store.openScaler(trackId)}>×</button>
+      </header>
+
+      <div className="scaler-scroll">
+        <div className="scaler-keys-row">
+          <div className="scaler-sound">
+            <Stepper label="Sound" value={sound.label} hint={sound.hint} onStep={(dir) => {
+              const index = Math.max(0, SOUNDS.findIndex((item) => item.id === state.sound))
+              patch({ sound: SOUNDS[cycle(index, dir, SOUNDS.length)].id })
+            }} />
+            <div className="scaler-sounds" role="group" aria-label="Sound. Which instrument plays the chords.">
+              {SOUNDS.map((item) => (
+                <button key={item.id} type="button" className={state.sound === item.id ? 'on' : ''} aria-pressed={state.sound === item.id} title={item.hint} onClick={() => patch({ sound: item.id })}>{item.label}</button>
+              ))}
+            </div>
+            {state.sound === 'forward' && (
+              <div className="scaler-forward">
+                {store.project.tracks.filter((item) => item.type === 'midi' && item.id !== trackId).map((item) => (
+                  <button key={item.id} type="button" className={state.forwardTrackId === item.id ? 'on' : ''} onClick={() => patch({ forwardTrackId: item.id })}>{item.name}</button>
+                ))}
+              </div>
+            )}
+            {state.sound === 'library' && <LibraryPanel store={store} engine={engine} trackId={trackId} />}
+          </div>
+          <Piano start={24} end={72} scalePcs={scalePcs} chordPcs={chordPcs} locked={LOCKS[lockMode] !== 'Off'} onPlay={playKey} />
+        </div>
+
+        <div className="scaler-browser">
+          <button type="button" title="Guess the key from the MIDI on this track." onClick={() => {
+            if (!store.detectScaler(trackId)) setHint('Draw or record a few notes first. Detect reads the MIDI on this track.')
+            else setHint('Detected a key from the notes on this track.')
+          }}>Detect</button>
+          <button type="button" title="Browse scales inside the plugin." onClick={() => setFamily('all')}>Scales</button>
+          <Stepper label="Songs" value={songPattern?.name ?? 'Song'} hint={songPattern?.description ?? 'A progression in this key.'} onStep={(dir) => loadSong(cycle(song, dir, songs.length))} />
+          <Stepper label="Chord set" value={GROUPS.find((item) => item.id === state.group)?.label ?? 'Triads'} hint="Which chords the pads show." onStep={(dir) => {
+            const index = Math.max(0, GROUPS.findIndex((item) => item.id === state.group))
+            setPad(0)
+            patch({ group: GROUPS[cycle(index, dir, GROUPS.length)].id, lastVoicing: [], lastCents: [] })
+          }} />
+          <button type="button" className={family === 'western' ? 'on' : ''} title="Western scales in the library." onClick={() => setFamily(family === 'western' ? 'all' : 'western')}>User</button>
+          <span className={`mood-pill ${laneMood.feel.toLowerCase()}`} title="Whether this progression feels bright and lifting or dark and tense.">{laneMood.feel}</span>
+        </div>
+
+        <div className="scaler-transport">
+          <Stepper label="St" value={String(st)} hint="Transpose the chords, in semitones." onStep={(dir) => { if (!locked) setSt(clamp(st + dir, -12, 12)) }} />
+          <button type="button" className={locked ? 'on' : ''} aria-pressed={locked} title="Lock the key, the chord set, and transpose." onClick={() => setLocked((value) => !value)}>{locked ? 'Locked' : 'Lock'}</button>
+        </div>
+
+        <div className="scaler-pads" role="group" aria-label="Chord pads">
+          {chords.slice(0, 12).map((chord, index) => {
+            const mood = moodOf(chord.symbol, scaleId)
+            return (
               <button
-                key={item.id}
+                key={`${chord.symbol}-${index}`}
                 type="button"
-                className={page === item.id ? 'on' : ''}
-                aria-pressed={page === item.id}
-                title={item.hint}
-                onClick={() => store.setScalerPage(item.id)}
+                className={`scaler-card ${pad === index ? 'on' : ''}`}
+                aria-pressed={pad === index}
+                draggable
+                title={`Hear ${chord.symbol}. ${qualityLabel(chord.symbol, chord.roman)}. ${mood.word}. Drag it onto a track or into the lane.`}
+                onDragStart={(event) => {
+                  const played = padPerformance(state, index, bar)
+                  if (played) dragChord(event, played.notes, played.symbol)
+                }}
+                onClick={() => playChord(index, false)}
               >
-                {item.label}
+                <i className="bar" data-mood={mood.word} />
+                <b>{chord.symbol}</b>
+                <span>{qualityLabel(chord.symbol, chord.roman)}</span>
+                <MoodMeter mood={mood} />
+              </button>
+            )
+          })}
+          {!chords.length && <p className="scaler-hint">No chords of this kind sit inside the scale.</p>}
+        </div>
+
+        <details className="scaler-fold" {...fold}>
+          <summary>Detected scales</summary>
+          <div className="scaler-table" role="table" aria-label="Detected scales">
+            <div className="head" role="row"><span>Scale</span><span>Notes</span><span>Chords</span><span>Style</span><span>Mode</span></div>
+            {rows.map((row) => (
+              <button key={`${row.root}-${row.scaleId}`} type="button" role="row" className={row.root === state.root && (row.scaleId === scaleId || row.scaleId === state.scale) ? 'on' : ''} onClick={() => {
+                const chosen = pickScale(row.scaleId)
+                patch({ root: row.root, ...chosen, lastVoicing: [], lastCents: [] })
+                const scaleChord = harmonize(row.root, row.scaleId, 3)[0]
+                if (scaleChord) hear(place(scaleChord.tones.map((tone, index) => ({ pitch: tone.midi, fine: tone.cents ? Math.round(tone.cents) : undefined, startBeat: index * 0.5, durationBeats: 0.45, velocity: 0.8 })), st, octave, human))
+              }}>
+                <span><em>▶</em> {NOTE_NAMES[row.root]} {row.name}</span>
+                <span>{row.notes}</span>
+                <span>{row.chords}</span>
+                <span>{row.style}</span>
+                <span>{row.mode}</span>
               </button>
             ))}
           </div>
-        )}
-        <button type="button" className="text-btn" title="Close Scaler. The track keeps the instrument." aria-label="Close Scaler. The track keeps the instrument." onClick={() => store.openScaler(trackId)}>×</button>
-      </header>
-      <p className="scaler-hint">{hint}</p>
-      <div className="scaler-body">
-        {page === 'play' && (
-          <>
-            {phone ? (
-              <select aria-label="Chord set." title="Which chords the pads show." value={state.group} onChange={(event) => patch({ group: event.target.value as ScalerGroup, lastVoicing: [], lastCents: [] })}>
-                {GROUPS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-              </select>
-            ) : (
-              <div className="chip-row" role="group" aria-label="Chord set">
-                {GROUPS.map((item) => (
-                  <button key={item.id} type="button" className={state.group === item.id ? 'on' : ''} aria-pressed={state.group === item.id} title={item.hint} onClick={() => patch({ group: item.id, lastVoicing: [], lastCents: [] })}>{item.label}</button>
+          <div className="scaler-scale-tools">
+            <div className="scaler-families">
+              <button type="button" className={family === 'all' ? 'on' : ''} onClick={() => setFamily('all')}>All</button>
+              {families.slice(0, 8).map((item) => (
+                <button key={item.id} type="button" className={family === item.id ? 'on' : ''} title={item.description} onClick={() => setFamily(item.id)}>{item.name}</button>
+              ))}
+            </div>
+            <input aria-label="Search scales" title="Find a scale by name." placeholder="Search scales" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <div className="scaler-scale-list">
+              {scales.slice(0, 24).map((item) => (
+                <button key={item.id} type="button" className={item.id === scaleId ? 'on' : ''} title={item.description} onClick={() => patch({ ...pickScale(item.id), lastVoicing: [], lastCents: [] })}>{item.name}</button>
+              ))}
+            </div>
+          </div>
+        </details>
+
+        <section className="scaler-selected">
+          <div className="scaler-tabs">
+            <b>{NOTE_NAMES[state.root]} {scaleName}</b>
+            {(['diatonic', 'voicing', 'variations', 'modulation'] as const).map((id) => (
+              <button key={id} type="button" className={tab === id ? 'on' : ''} aria-pressed={tab === id} onClick={() => setTab(id)}>
+                {id === 'voicing' ? `Voicing ${Math.max(1, VOICINGS.findIndex((item) => item.id === state.voicing) + 1)}` : id[0].toUpperCase() + id.slice(1)}
+              </button>
+            ))}
+            <Stepper label="Octave" value={String(octave + 2)} hint="Shift the played chords by octaves." onStep={(dir) => setOctave(clamp(octave + dir, -2, 2))} />
+          </div>
+          {tab === 'diatonic' && (
+            <div className="scaler-pads diatonic" role="group" aria-label="Diatonic chords">
+              {diatonic.map((chord, index) => {
+                const mood = moodOf(chord.symbol, scaleId)
+                return (
+                  <button key={`${chord.symbol}-${index}`} type="button" className="scaler-card" title={`${chord.symbol}. ${qualityLabel(chord.symbol, chord.roman)}. ${mood.word}.`} onClick={() => {
+                    hear(place(chord.tones.map((tone) => ({ pitch: tone.midi, fine: tone.cents ? Math.round(tone.cents) : undefined, startBeat: 0, durationBeats: bar, velocity: 0.84 })), st, octave, human))
+                    if (edit) {
+                      const notes = place(chord.tones.map((tone) => ({ pitch: tone.midi, fine: tone.cents ? Math.round(tone.cents) : undefined, startBeat: 0, durationBeats: bar, velocity: 0.84 })), st, octave, human)
+                      setSections((prev) => prev.map((part, partIndex) => partIndex === section ? { ...part, slots: part.slots.map((item, itemIndex) => itemIndex === slot ? { symbol: chord.symbol, roman: chord.roman, notes } : item) } : part))
+                      setSlot((value) => (value + 1) % 8)
+                    }
+                  }}>
+                    <i className="bar" data-mood={mood.word} />
+                    <b>{chord.symbol}</b>
+                    <span>{qualityLabel(chord.symbol, chord.roman)}</span>
+                    <MoodMeter mood={mood} />
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          {tab === 'voicing' && (
+            <div className="scaler-voice-read">
+              <p>{VOICINGS.find((item) => item.id === state.voicing)?.description}</p>
+              <p className="notes">{liveNotes || 'Play a pad to see the voicing.'}</p>
+              <div className="scaler-families">
+                {VOICINGS.map((item) => (
+                  <button key={item.id} type="button" className={state.voicing === item.id ? 'on' : ''} title={item.description} onClick={() => patch({ voicing: item.id })}>{item.name}</button>
                 ))}
               </div>
-            )}
-            <div className="scaler-pads" role="group" aria-label="Chord pads">
-              {chords.map((chord, index) => (
-                <button
-                  key={`${chord.symbol}-${index}`}
-                  type="button"
-                  className={pad === index ? 'on' : ''}
-                  aria-pressed={pad === index}
-                  draggable
-                  title={`Hear ${chord.symbol}. ${chord.roman}. Drag it onto a track, or turn Rec on to record it.`}
-                  aria-label={`${chord.symbol}. ${chord.roman}.`}
-                  onDragStart={(event) => dragPad(event, index)}
-                  onClick={() => playPad(index, false)}
-                >
-                  <b>{chord.symbol}</b>
-                  <span>{chord.roman}</span>
+              <Stepper label="Inversion" value={state.inversion === 0 ? 'Root' : String(state.inversion)} hint="Which chord tone sits lowest." onStep={(dir) => patch({ inversion: clamp(state.inversion + dir, 0, 3) })} />
+            </div>
+          )}
+          {tab === 'variations' && current && (
+            <div className="scaler-pads" role="group" aria-label="Inversions">
+              {[0, 1, 2, 3].map((inversion) => (
+                <button key={inversion} type="button" className={`scaler-card ${state.inversion === inversion ? 'on' : ''}`} onClick={() => { patch({ inversion }); playChord(pad, false) }}>
+                  <i className="bar" data-mood={moodOf(current.symbol, scaleId).word} />
+                  <b>{current.symbol}</b>
+                  <span>{inversion === 0 ? 'Root' : `Inversion ${inversion}`}</span>
                 </button>
               ))}
-              {!chords.length && <p className="scaler-hint">No chords of this kind sit inside the scale.</p>}
             </div>
-            <div className="scaler-actions">
-              <button type="button" className={rec || engine.status === 'recording' ? 'on' : ''} aria-pressed={rec || engine.status === 'recording'} title="Record each pad as MIDI on this track." onClick={() => setRec((value) => !value)}>Rec</button>
-              <button type="button" title="Put the selected chord on the timeline as MIDI." onClick={() => playPad(pad, true)}>To track</button>
-            </div>
-            {phone ? (
-              <select aria-label="Progression." title="A common progression in this key." value={chosenLine?.id ?? ''} onChange={(event) => { setLine(event.target.value); playLine(event.target.value, false) }}>
-                {lines.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-            ) : (
-              <div className="scaler-lines" role="group" aria-label="Progressions">
-                {lines.map((item) => (
-                  <button key={item.id} type="button" className={chosenLine?.id === item.id ? 'on' : ''} aria-pressed={chosenLine?.id === item.id} title={item.description} onClick={() => playLine(item.id, false)}>
-                    <b>{item.name}</b>
-                    <span>{item.description}</span>
-                  </button>
-                ))}
+          )}
+          {tab === 'modulation' && (
+            <div className="scaler-mod">
+              <Fifths root={destRoot} onPick={(next) => { setDestRoot(next); patch({ root: next, lastVoicing: [], lastCents: [] }) }} />
+              <div>
+                <Stepper label="Modulation" value={['Secondary scale', 'Modal interchange', 'Mediants'][modKind]} hint="A way to move into a new key." onStep={(dir) => setModKind(cycle(modKind, dir, 3))} />
+                <p className="scaler-hint">Destination {NOTE_NAMES[destRoot]} {getScale(scaleId).name}</p>
+                <div className="scaler-pads" aria-label="Modulation pathway">
+                  {pathway.map((step) => {
+                    const chord = harmonize(step.root, step.scaleId, 3)[0]
+                    if (!chord) return null
+                    const mood = moodOf(chord.symbol, step.scaleId)
+                    return (
+                      <button key={step.label + chord.symbol} type="button" className="scaler-card" title={`${step.label}. ${mood.word}.`} onClick={() => {
+                        const chosen = pickScale(step.scaleId)
+                        patch({ root: step.root, ...chosen, lastVoicing: [], lastCents: [] })
+                        setDestRoot(step.root)
+                        hear(place(chord.tones.map((tone) => ({ pitch: tone.midi, startBeat: 0, durationBeats: bar, velocity: 0.84 })), st, octave, human))
+                      }}>
+                        <i className="bar" data-mood={mood.word} />
+                        <b>{chord.symbol}</b>
+                        <span>{step.label}</span>
+                        <MoodMeter mood={mood} />
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
-            )}
-            {chosenLine && <button type="button" title="Put this progression on the timeline as MIDI." onClick={() => playLine(chosenLine.id, true)}>Progression</button>}
-          </>
-        )}
-        {page === 'key' && (
-          <>
-            <div className="scaler-row">
-              <select aria-label="Key. Concert pitch of the tonic." title="Concert pitch of the tonic." value={state.root} onChange={(event) => patch({ root: Number(event.target.value), lastVoicing: [], lastCents: [] })}>
-                {NOTE_NAMES.map((name, index) => <option key={name} value={index}>{name}</option>)}
-              </select>
-              <select aria-label="Scale." title="Which notes are in key." value={state.scale} onChange={(event) => patch({ ...pickScale(event.target.value), lastVoicing: [], lastCents: [] })}>
-                {SCALES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-              <button type="button" title="Guess the key from the MIDI on this track." onClick={() => {
-                if (!store.detectScaler(trackId)) setHint('Draw or record a few notes first. Detect reads the MIDI on this track.')
-                else setHint('Key locked from the notes on this track.')
-              }}>Detect</button>
-              <button type="button" className={state.snap ? 'on' : ''} aria-pressed={state.snap} title="Lock new piano-roll notes to this scale." onClick={() => patch({ snap: !state.snap })}>{state.snap ? 'Locked' : 'Lock'}</button>
             </div>
-            <p className="scaler-hint">{getScale(scaleId).description}</p>
-            <div className="scaler-row">
-              <select aria-label="Tradition." title="Filter scales by tradition." value={family} onChange={(event) => setFamily(event.target.value)}>
-                <option value="all">All</option>
-                {families.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-              <input aria-label="Search scales" title="Find a scale by name." placeholder="Search scales" value={query} onChange={(event) => setQuery(event.target.value)} />
+          )}
+        </section>
+
+        <section className="scaler-lane" aria-label="Progression lane">
+          <div className="scaler-sections">
+            {sections.map((part, index) => (
+              <button key={part.id} type="button" className={section === index ? 'on' : ''} aria-pressed={section === index} onClick={() => { setSection(index); setSlot(0) }}>{part.name}</button>
+            ))}
+            <button type="button" title="Add a section." onClick={() => setSections((prev) => prev.length >= 6 ? prev : [...prev, { id: `part-${prev.length}`, name: `Part ${prev.length}`, slots: blank() }])}>+</button>
+          </div>
+          <div className="scaler-lane-row">
+            <div className="scaler-lane-tools">
+              <button type="button" className={loop ? 'on' : ''} aria-pressed={loop} title="Preview the lane twice." onClick={() => setLoop((value) => !value)}>Loop</button>
+              <button type="button" title="Hear this section." onClick={() => hear(laneNotes())}>Play</button>
+              <button type="button" className={edit ? 'on' : ''} aria-pressed={edit} title="Edit. Clicks also fill the selected slot." onClick={() => setEdit((value) => !value)}>Edit</button>
             </div>
-            {(!phone || query || family !== 'all') && (
-              <div className="scaler-scales" aria-label="Scales">
-                {scales.slice(0, 80).map((item) => (
-                  <button key={item.id} type="button" className={item.id === scaleId ? 'on' : ''} title={item.description} onClick={() => patch({ ...pickScale(item.id), lastVoicing: [], lastCents: [] })}>
-                    <b>{item.name}</b>
-                    <span>{item.description}</span>
-                  </button>
-                ))}
-                {!scales.length && <p className="scaler-hint">No scales match.</p>}
-              </div>
-            )}
-          </>
-        )}
-        {page === 'voice' && (
-          <>
-            <div className="scaler-row">
-              <select aria-label="Voicing. How the chord is stacked." title={VOICINGS.find((item) => item.id === state.voicing)?.description ?? 'How the chord is stacked.'} value={state.voicing} onChange={(event) => patch({ voicing: event.target.value as VoicingId })}>
-                {VOICINGS.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-              <select aria-label="Inversion. Which chord tone sits lowest." title="Which chord tone sits lowest." value={state.inversion} onChange={(event) => patch({ inversion: Number(event.target.value) })}>
-                {[0, 1, 2, 3].map((value) => <option key={value} value={value}>{value === 0 ? 'Root' : `Inversion ${value}`}</option>)}
-              </select>
-              <select aria-label="Bass. Keep the root, or choose another scale tone." title="Keep the root, or choose another scale tone." value={state.bassDegree == null ? '' : String(state.bassDegree)} onChange={(event) => patch({ bassDegree: event.target.value === '' ? null : Number(event.target.value) })}>
-                <option value="">Bass: root</option>
-                {degrees.map((tone, index) => <option key={`${tone.midi}-${index}`} value={index}>{toneName(tone)}</option>)}
-              </select>
-              <button type="button" className={state.voiceLead ? 'on' : ''} aria-pressed={state.voiceLead} title="Move each chord as little as possible from the one before it." onClick={() => patch({ voiceLead: !state.voiceLead })}>Lead</button>
+            <div className="scaler-slots">
+              {active.slots.map((item, index) => (
+                <button
+                  key={index}
+                  type="button"
+                  className={`slot ${slot === index ? 'focus' : ''} ${item ? 'filled' : ''}`}
+                  aria-pressed={slot === index}
+                  onClick={() => setSlot(index)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    const raw = event.dataTransfer.getData(SCALER_MIME) || event.dataTransfer.getData('text/plain')
+                    try {
+                      const parsed = JSON.parse(raw) as { name?: string; notes?: ScalerNote[] }
+                      if (!parsed.notes?.length) return
+                      setSections((prev) => prev.map((part, partIndex) => partIndex === section ? { ...part, slots: part.slots.map((slotItem, slotIndex) => slotIndex === index ? { symbol: parsed.name || 'Chord', roman: '', notes: parsed.notes! } : slotItem) } : part))
+                    } catch { /* not a scaler drag */ }
+                  }}
+                >
+                  {item ? <b>{item.symbol}</b> : <b>{index + 1}</b>}
+                  {item && <span>{qualityLabel(item.symbol, item.roman)}</span>}
+                  {item && <MoodMeter mood={moodOf(item.symbol, scaleId)} />}
+                </button>
+              ))}
             </div>
-            <div className="scaler-row">
-              <select aria-label="Arpeggio." title="Break the chord into single notes." value={state.arp} onChange={(event) => patch({ arp: event.target.value as typeof state.arp })}>
-                {ARPS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-              </select>
-              <select aria-label="Rate." title="How fast each arp step is." value={String(state.rate)} onChange={(event) => patch({ rate: Number(event.target.value) })}>
-                {RATES.map((item) => <option key={item.label} value={item.beats}>{item.label}</option>)}
-              </select>
-              <select aria-label="Rhythm." title="Block chord, pulse, or strum." value={state.rhythm} onChange={(event) => patch({ rhythm: event.target.value as typeof state.rhythm })}>
-                {RHYTHMS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-              </select>
-              <select aria-label="Octaves." title="How many octaves the arp climbs." value={state.octaves} onChange={(event) => patch({ octaves: Number(event.target.value) })}>
-                {[1, 2, 3].map((value) => <option key={value} value={value}>{value}</option>)}
-              </select>
+            <div className="scaler-lane-tools">
+              <button type="button" className={rec || engine.status === 'recording' ? 'on' : ''} aria-pressed={rec} title="Record each pad as MIDI on this track." onClick={() => setRec((value) => !value)}>Rec</button>
+              <button type="button" title="Put the selected chord on the timeline as MIDI." onClick={() => playChord(pad, true)}>To track</button>
+              <button type="button" title="Write this section onto the track as editable MIDI." onClick={captureLane}>MIDI capture</button>
+              <button type="button" title="Drag this section onto a MIDI track." draggable onDragStart={(event) => dragChord(event, laneNotes(), active.name)}>Drag</button>
             </div>
-            <label className="scaler-gate">
-              Gate
-              <input
-                aria-label="Gate. How long each note holds."
-                title="How long each note holds."
-                type="range"
-                min={0.05}
-                max={1}
-                step={0.05}
-                value={state.gate}
-                onChange={(event) => store.setScaler(trackId, { gate: Number(event.target.value) }, true)}
-                onPointerUp={() => store.endDraft()}
-                onPointerCancel={() => store.endDraft()}
-              />
-            </label>
-          </>
-        )}
-        {page === 'sound' && (
-          <>
-            {phone ? (
-              <select aria-label="Sound. Which instrument plays the chords." title="Which instrument plays the chords." value={state.sound} onChange={(event) => patch({ sound: event.target.value as ScalerSound })}>
-                {SOUNDS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-              </select>
-            ) : (
-              <div className="chip-row" role="group" aria-label="Sound">
-                {SOUNDS.map((item) => (
-                  <button key={item.id} type="button" className={state.sound === item.id ? 'on' : ''} aria-pressed={state.sound === item.id} title={item.hint} onClick={() => patch({ sound: item.id })}>{item.label}</button>
-                ))}
-              </div>
-            )}
-            <p className="scaler-hint">{SOUNDS.find((item) => item.id === state.sound)?.hint}</p>
-            {state.sound === 'forward' && (
-              <select aria-label="Forward to. The other instrument that plays these chords." title="The other instrument that plays these chords." value={state.forwardTrackId} onChange={(event) => patch({ forwardTrackId: event.target.value })}>
-                <option value="">Choose a track</option>
-                {store.project.tracks.filter((item) => item.type === 'midi' && item.id !== trackId).map((item) => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
-              </select>
-            )}
-            {state.sound === 'library' && <LibraryPanel store={store} engine={engine} trackId={trackId} />}
-          </>
-        )}
-        {page === 'write' && (
+          </div>
+          <p className="scaler-hint">{hint} This lane feels {laneMood.feel.toLowerCase()} ({laneMood.word}).</p>
+        </section>
+
+        <details className="scaler-fold">
+          <summary>Write</summary>
           <GeneratePanel store={store} engine={engine} trackId={trackId} scale={{ root: state.root, scale: state.scale, library: state.library }} />
-        )}
+        </details>
       </div>
     </div>
   )
+}
+
+function Stepper({ label, value, hint, onStep }: { label: string; value: string; hint: string; onStep: (dir: number) => void }) {
+  return (
+    <div className="stepper" title={hint}>
+      <span>{label}</span>
+      <button type="button" aria-label={`Previous ${label}. ${hint}`} onClick={() => onStep(-1)}>&lt;</button>
+      <b>{value}</b>
+      <button type="button" aria-label={`Next ${label}. ${hint}`} onClick={() => onStep(1)}>&gt;</button>
+    </div>
+  )
+}
+
+function MoodMeter({ mood }: { mood: Mood }) {
+  return (
+    <span className="mood" title={`${mood.word}. ${mood.feel}. Bright is major and lifting. Dark is minor and tense.`}>
+      <i data-mood={mood.word} style={{ width: `${Math.round(((mood.score + 1) / 2) * 100)}%` }} />
+      <em>{mood.word}</em>
+    </span>
+  )
+}
+
+function Piano({ start, end, scalePcs, chordPcs, locked, onPlay }: { start: number; end: number; scalePcs: Set<number>; chordPcs: Set<number>; locked: boolean; onPlay: (midi: number) => void }) {
+  const whites: number[] = []
+  const blacks: { midi: number; after: number }[] = []
+  for (let midi = start; midi <= end; midi++) {
+    if (WHITE.has(midi % 12)) whites.push(midi)
+    else blacks.push({ midi, after: whites.length - 1 })
+  }
+  const klass = (midi: number) => {
+    const pc = midi % 12
+    if (chordPcs.has(pc)) return 'chord'
+    if (scalePcs.has(pc)) return 'scale'
+    return ''
+  }
+  return (
+    <div className="scaler-keys" style={{ ['--whites' as string]: whites.length }} aria-label="Keyboard. Amber keys are in the scale. Cyan keys are the chord.">
+      <div className="scaler-whites">
+        {whites.map((midi) => (
+          <button key={midi} type="button" className={klass(midi)} aria-label={NOTE_NAMES[midi % 12]} onClick={() => onPlay(midi)}>
+            {midi % 12 === 0 && <small>C{Math.floor(midi / 12) - 1}</small>}
+            {locked && scalePcs.has(midi % 12) && <i />}
+          </button>
+        ))}
+      </div>
+      <div className="scaler-blacks">
+        {blacks.map((key) => (
+          <button key={key.midi} type="button" className={klass(key.midi)} style={{ left: `${((key.after + 1) / whites.length) * 100}%` }} aria-label={NOTE_NAMES[key.midi % 12]} onClick={() => onPlay(key.midi)} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function Fifths({ root, onPick }: { root: number; onPick: (pc: number) => void }) {
+  return (
+    <div className="fifths" aria-label="Circle of fifths">
+      <div className="hub">Fifths</div>
+      {FIFTHS.map((pc, index) => (
+        <button
+          key={pc}
+          type="button"
+          className={pc === root ? 'on' : ''}
+          style={{ transform: `rotate(${index * 30}deg) translateY(-78px) rotate(${-index * 30}deg)` }}
+          onClick={() => onPick(pc)}
+        >
+          {NOTE_NAMES[pc]}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function blank(): (Slot | null)[] {
+  return Array.from({ length: 8 }, () => null)
+}
+
+function place(notes: ScalerNote[], semitones: number, octave: number, human: number): ScalerNote[] {
+  return notes.map((note) => {
+    const sway = human === 0 ? 1 : human === 1 ? 0.92 + (note.pitch % 5) * 0.02 : 0.78 + (note.pitch % 7) * 0.04
+    return {
+      ...note,
+      pitch: clamp(Math.round(note.pitch + semitones + octave * 12), 0, 127),
+      velocity: clamp(note.velocity * sway, 0.05, 1),
+    }
+  })
+}
+
+function nearestPc(midi: number, pcs: Set<number>) {
+  if (!pcs.size) return midi
+  for (let step = 0; step < 12; step++) {
+    if (pcs.has(mod12(midi + step))) return midi + step
+    if (pcs.has(mod12(midi - step))) return midi - step
+  }
+  return midi
+}
+
+function nameMidi(midi: number) {
+  return `${NOTE_NAMES[((midi % 12) + 12) % 12]}${Math.floor(midi / 12) - 1}`
+}
+
+function cycle(index: number, dir: number, length: number) {
+  if (!length) return 0
+  return (index + dir + length) % length
+}
+
+function mod12(midi: number) {
+  return ((midi % 12) + 12) % 12
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
 }

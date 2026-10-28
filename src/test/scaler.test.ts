@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { moodOf, progressionMood } from '../instruments/scaler/face'
 import { padPerformance, performancesOn, routeScaler } from '../instruments/scaler/model'
 import { migrateProject } from '../model/schema'
 import { createEmptyProject } from '../model/types'
@@ -88,6 +89,18 @@ describe('scaler instrument', () => {
     const again = routeScaler(store.project, store.track(id)!)
     expect(again.voice.instrument).not.toBe('scaler')
     expect(again.liveStripId).toBe(other)
+  })
+
+  it('reads a major chord as brighter than a diminished one', () => {
+    const major = moodOf('C', 'ionian')
+    const dim = moodOf('Bdim', 'locrian')
+    expect(major.score).toBeGreaterThan(dim.score)
+    expect(major.word).toBe('Bright')
+    expect(dim.word).toBe('Dark')
+    const lift = progressionMood(['C', 'F', 'G', 'C'], 'ionian')
+    const tense = progressionMood(['Am', 'Dm', 'E', 'Am'], 'aeolian')
+    expect(lift.feel).toBe('Uplifting')
+    expect(tense.score).toBeLessThan(lift.score)
   })
 
   it('is not its own view tab', () => {

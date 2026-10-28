@@ -30,9 +30,14 @@ describe('scaler plugin panel', () => {
     expect(html).toContain('aria-label="Scaler"')
     expect(html).not.toContain('role="dialog"')
     expect(html).toContain('Chord pads')
+    expect(html).toContain('scaler-keys')
+    expect(html).toContain('>Modulation<')
+    expect(html).toContain('Progression lane')
+    expect(html).toContain('Detected scales')
     expect(html).toContain('>Rec<')
     expect(html).toContain('To track')
     expect(html).toContain('Axis')
+    expect(html).toContain('Bright')
   })
 
   it('has key, voicing, sound, and generate inside the plugin', () => {

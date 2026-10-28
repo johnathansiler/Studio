@@ -812,8 +812,8 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 .shell.phone .dock-slot > .piano,
 .shell.phone .dock-slot > .rack,
 .shell.phone .dock-slot > .scaler-panel { height: 100%; }
-.shell.phone[data-plugin="scaler"] .dock-slot { flex: 1 1 54%; max-height: none; }
-.shell.phone[data-plugin="scaler"] .main-pane { flex: 1 1 46%; }
+.shell.phone[data-plugin="scaler"] .dock-slot { flex: 1 1 64%; max-height: none; }
+.shell.phone[data-plugin="scaler"] .main-pane { flex: 1 1 36%; }
 .shell.phone .editor { display: flex; flex-direction: column; }
 .shell.phone .mixer,
 .shell.phone .session-grid,
