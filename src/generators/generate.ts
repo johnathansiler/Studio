@@ -1,3 +1,4 @@
+import { findScale } from '../theory/scales'
 import { arpNotes } from './arp'
 import { bassNotes } from './bass'
 import { buildChords, chordNotes, coverChords } from './chords'
@@ -6,7 +7,7 @@ import { melodyNotes } from './melody'
 import { clamp, mod12, roundBeat, channelRng } from './rng'
 import { rhythmNotes } from './rhythm'
 import { styleById } from './styles'
-import type { GeneratedNote, GeneratedPart, GeneratorInput, GeneratorKind } from './types'
+import type { GeneratedNote, GeneratedPart, GeneratorInput, GeneratorKind, ScaleInterval } from './types'
 
 const TRACK: Record<GeneratorKind, string> = {
   chords: 'Chords',
@@ -29,9 +30,11 @@ const KIND_LABEL: Record<GeneratorKind, string> = {
 export function normalizeInput(raw: GeneratorInput): GeneratorInput {
   const bars = clamp(Math.round(raw.bars || 4), 1, 32)
   const beatsPerBar = clamp(raw.beatsPerBar ?? 4, 0.5, 12)
+  const fromLibrary = raw.scaleId ? intervalsFromLibrary(raw.scaleId) : null
   return {
     key: mod12(raw.key || 0),
-    scale: Array.isArray(raw.scale) ? raw.scale : [],
+    scaleId: raw.scaleId,
+    scale: fromLibrary ?? (Array.isArray(raw.scale) ? raw.scale : []),
     chords: Array.isArray(raw.chords) ? raw.chords : [],
     tempo: clamp(raw.tempo || 120, 40, 240),
     bars,
@@ -70,6 +73,12 @@ export function generate(kind: GeneratorKind, raw: GeneratorInput): GeneratedPar
     seed: input.seed,
     variation: input.variation ?? 0,
   }
+}
+
+function intervalsFromLibrary(id: string): ScaleInterval[] | null {
+  const spec = findScale(id)
+  if (!spec) return null
+  return spec.cents.map((cents) => ({ semitones: cents / 100, cents: 0 }))
 }
 
 function notesFor(kind: GeneratorKind, chords: ReturnType<typeof buildChords>, style: ReturnType<typeof styleById>, input: GeneratorInput): GeneratedNote[] {

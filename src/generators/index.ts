@@ -1,4 +1,4 @@
-export { chordsFromNotes, followSource, generatorInput } from './adapt'
+export { activeScaleId, chordsFromNotes, followSource, generatorInput } from './adapt'
 export { generate, normalizeInput } from './generate'
 export { defaultGenerator, normalizeGenerator } from './settings'
 export { STYLES, styleById } from './styles'

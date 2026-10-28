@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { BounceCancelled, runBounce, type BounceJob, type BounceKind } from '../audio/bounce'
 import { decodeWavPCM } from '../model/wav'
+import { selectProject } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { shareOrDownload } from './share'
 
@@ -32,7 +33,12 @@ export function ExportSheet({
   const [quality, setQuality] = useState(2)
   const [audio, setAudio] = useState<'wav' | 'flac'>('wav')
   const [stems, setStems] = useState<'all' | 'selected'>('all')
-  const [title, setTitle] = useState(store.project.name)
+  const projectName = selectProject(store).name
+  const [title, setTitle] = useState(projectName)
+  const [titleEdited, setTitleEdited] = useState(false)
+  useEffect(() => {
+    if (!titleEdited) setTitle(projectName)
+  }, [projectName, titleEdited])
   const [artist, setArtist] = useState('')
   const [artwork, setArtwork] = useState<Uint8Array | null>(null)
   const [progress, setProgress] = useState(0)
@@ -163,7 +169,7 @@ export function ExportSheet({
               <option value="wav">Keep WAV</option>
               <option value="flac">FLAC</option>
             </select>
-            <input aria-label="Title" value={title} onChange={(event) => setTitle(event.target.value)} />
+            <input aria-label="Title" value={title} onChange={(event) => { setTitleEdited(true); setTitle(event.target.value) }} />
             <input aria-label="Artist" value={artist} onChange={(event) => setArtist(event.target.value)} />
             <input aria-label="Artwork" type="file" accept="image/png,image/jpeg" onChange={(event) => {
               const file = event.target.files?.[0]

@@ -16,7 +16,9 @@ import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, sendVideoC
 import { isSilentTake, nextRelayGather, tcpRelayIceServers, udpIceServers, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
 import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_INITIAL_GATHER_MS, ICE_RESTART_VIDEO_HOLD_MS, ICE_STUCK_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
 import { sanitizeDiag, type DiagDirection } from '../model/diag'
-import { arrangementDigest, ASSET_CHUNK_BYTES, ASSET_CHUNK_GAP_MS, assetChunkCount, guestMayRequest, mediaCanCarryAssets, outlineWaveforms, referencedBufferIds } from '../model/sessionSync'
+import { ASSET_CHUNK_BYTES, ASSET_CHUNK_GAP_MS, assetChunkCount, guestMayRequest, mediaCanCarryAssets, outlineWaveforms, referencedBufferIds } from '../model/sessionSync'
+import { syncMessageOk, type ProjectOp, type StampWire, type SyncHello } from '../state/ops'
+import type { ProjectSync } from '../state/sync'
 import { CAP_NOTICE } from '../model/usage'
 import { SfuCall, type SfuKind, type SfuPublication } from './sfuCall'
 import { decodeWavPCM, encodeWav } from '../model/wav'
@@ -254,11 +256,18 @@ export class SessionClient {
   private onTake: ((take: IncomingTake) => void) | null = null
   private onControl: ((cmd: Record<string, unknown>) => void) | null = null
   private onArrangement: ((project: Project, assets: Map<string, AudioAsset>, ready: boolean) => void) | null = null
-  private arrangementStore: { project: Project; buffers: Map<string, AudioAsset> } | null = null
+  private arrangementStore: {
+    project: Project
+    buffers: Map<string, AudioAsset>
+    sync?: ProjectSync
+    applyRemoteOps?: (ops: ProjectOp[]) => boolean
+    mergeRemoteCheckpoint?: (project: Project, stamps: StampWire[] | undefined, prefer: 'local' | 'remote', lamport?: number, actor?: string, seq?: number) => ProjectOp[]
+    remoteFollow?: boolean
+  } | null = null
+  /** Musical sync is ops plus a checkpoint, not a full project on every edit. */
+  usingOps = false
+  private syncPasses = 0
   private sentAssets = new Set<string>()
-  private lastDigest = ''
-  private arrangementRev = 0
-  private incomingRev = 0
   private incomingProject: Project | null = null
   private incomingAssets = new Map<string, AudioAsset>()
   private resumeId = ''
@@ -676,9 +685,11 @@ export class SessionClient {
       this.startMaintenance()
       this.flushOutbox()
       this.resendLiveNegotiation()
+      this.maybeSync()
       return
     }
     if (msg.t === 'roster') {
+      const wasLive = this.state.status === 'live'
       this.state.participants = msg.participants
       if (msg.participants.some((person: Participant) => person.role === 'host')) this.state.hostLeft = false
       const admitted = this.selfAdmitted()
@@ -686,6 +697,7 @@ export class SessionClient {
       this.emit()
       this.syncMesh()
       this.routeTalk()
+      if (!wasLive && this.state.status === 'live') this.maybeSync()
       return
     }
     if (msg.t === 'host-away') {
@@ -756,8 +768,19 @@ export class SessionClient {
       if (this.state.role === 'host' && payload && guestMayRequest(String(payload.action || ''))) this.onControl?.(payload)
       return
     }
-    if (msg.t === 'project' && this.state.role === 'guest') {
-      this.incomingRev = Number(msg.rev) || this.incomingRev
+    if (msg.t === 'sync-hello') {
+      this.answerSyncHello(msg)
+      return
+    }
+    if (msg.t === 'sync-ops') {
+      this.acceptOps(msg.ops)
+      return
+    }
+    if (msg.t === 'sync-checkpoint') {
+      this.acceptCheckpoint(msg)
+      return
+    }
+    if (msg.t === 'project' && this.state.role === 'guest' && !this.usingOps) {
       this.incomingProject = msg.project as Project
       this.applyIncomingArrangement()
       return
@@ -1073,22 +1096,106 @@ export class SessionClient {
   }
 
   /**
-   * Host publishes the arrangement. The project JSON is small and goes on the
-   * signaling socket. The wav files do not: they wait until media is flowing,
-   * then move in small HTTP chunks the guest downloads from the server.
+   * Publish musical edits as compact ops on the signaling socket.
+   * Wav files stay on the HTTP asset pump and never ride Cloudflare.
    */
-  publishArrangement() {
+  publishEdits() {
     const store = this.arrangementStore
-    if (!store || this.state.role !== 'host' || this.state.status !== 'live') return
-    const digest = arrangementDigest(store.project)
-    if (digest !== this.lastDigest) {
-      this.lastDigest = digest
-      this.arrangementRev += 1
-      this.send({ t: 'project', rev: this.arrangementRev, project: { ...store.project, waveforms: outlineWaveforms(store.project, store.buffers) } })
-      this.state.syncLabel = 'Host · guests follow'
-      this.emit()
+    if (!store?.sync || this.state.status !== 'live') return
+    const ops = store.sync.peek()
+    for (let index = 0; index < ops.length; index += 40) {
+      const batch = ops.slice(index, index + 40)
+      const message = { t: 'sync-ops', ops: batch }
+      if (syncMessageOk(message)) this.send(message)
     }
-    this.pumpAssetUpload()
+    if (ops.length) store.sync.drain()
+    if (this.state.role === 'host') {
+      this.state.syncLabel = 'Host · guests follow'
+      this.pumpAssetUpload()
+    }
+  }
+
+  /** Host keeps the asset pump. Musical state itself is ops, not a snapshot. */
+  publishArrangement() {
+    this.publishEdits()
+  }
+
+  private maybeSync() {
+    if (this.state.status !== 'live' || !this.arrangementStore?.sync) return
+    this.usingOps = true
+    this.sendSyncHello()
+    this.publishEdits()
+  }
+
+  private sendSyncHello() {
+    const store = this.arrangementStore
+    if (!store?.sync || this.state.status !== 'live') return
+    const hello = store.sync.hello(store.project)
+    const message = { t: 'sync-hello', ...hello }
+    if (syncMessageOk(message)) this.send(message)
+  }
+
+  private answerSyncHello(msg: { from?: string } & Partial<SyncHello>) {
+    const store = this.arrangementStore
+    if (!store?.sync || !msg.from || msg.from === this.state.selfId) return
+    const reply = store.sync.replyTo(
+      {
+        actor: String(msg.actor || msg.from),
+        seq: Number(msg.seq) || 0,
+        lamport: Number(msg.lamport) || 0,
+        digest: String(msg.digest || ''),
+        seen: msg.seen && typeof msg.seen === 'object' ? msg.seen : {},
+      },
+      store.project,
+    )
+    if (reply.kind === 'ops' && reply.ops.length) {
+      const message = { t: 'sync-ops', to: msg.from, ops: reply.ops }
+      if (syncMessageOk(message)) this.send(message)
+      return
+    }
+    if (reply.kind === 'checkpoint' && reply.project) {
+      const project = { ...reply.project, waveforms: outlineWaveforms(store.project, store.buffers) }
+      const message = {
+        t: 'sync-checkpoint',
+        to: msg.from,
+        host: this.state.role === 'host',
+        actor: store.sync.actor,
+        seq: store.sync.seq,
+        project,
+        stamps: reply.stamps,
+        lamport: reply.lamport,
+        digest: reply.digest,
+      }
+      if (syncMessageOk(message)) this.send(message)
+    }
+  }
+
+  private acceptOps(ops: unknown) {
+    const store = this.arrangementStore
+    if (!store?.applyRemoteOps || !Array.isArray(ops)) return
+    this.usingOps = true
+    const gap = store.applyRemoteOps(ops as ProjectOp[])
+    if (gap) this.sendSyncHello()
+    if (this.state.role === 'host') this.pumpAssetUpload()
+    this.emit()
+  }
+
+  private acceptCheckpoint(msg: { project?: Project; stamps?: StampWire[]; host?: boolean; lamport?: number; digest?: string; actor?: string; seq?: number }) {
+    const store = this.arrangementStore
+    if (!store?.mergeRemoteCheckpoint || !msg.project) return
+    this.usingOps = true
+    if (this.state.role === 'guest') store.remoteFollow = true
+    const reply = store.mergeRemoteCheckpoint(msg.project, msg.stamps, msg.host ? 'remote' : 'local', Number(msg.lamport) || 0, String(msg.actor || ''), Number(msg.seq) || 0)
+    if (reply.length) {
+      const message = { t: 'sync-ops', ops: reply }
+      if (syncMessageOk(message)) this.send(message)
+    }
+    const digest = store.sync?.hello(store.project).digest
+    if (msg.digest && digest && digest !== msg.digest && this.syncPasses < 2) {
+      this.syncPasses += 1
+      this.sendSyncHello()
+    } else this.syncPasses = 0
+    this.applyIncomingArrangement()
   }
 
   private uplinkReady() {
@@ -1212,6 +1319,18 @@ export class SessionClient {
   }
 
   private applyIncomingArrangement() {
+    if (this.usingOps && this.arrangementStore) {
+      const project = this.arrangementStore.project
+      const assets = new Map(this.incomingAssets)
+      const ids = referencedBufferIds(project)
+      const ready = ids.every((id) => assets.has(id) || this.arrangementStore?.buffers.has(id))
+      this.state.preferLocalBacking = ready
+      this.state.syncLabel = ready ? 'Following host' : 'Receiving arrangement'
+      this.refreshCue()
+      this.onArrangement?.(project, assets, ready)
+      this.emit()
+      return
+    }
     const project = this.incomingProject
     if (!project) return
     const assets = new Map(this.incomingAssets)

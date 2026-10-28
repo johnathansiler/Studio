@@ -32,7 +32,9 @@ export interface GeneratorOptions {
 export interface GeneratorInput {
   /** Tonic pitch class, 0–11. */
   key: number
-  /** Intervals from the tonic, including cent offsets for maqam and other tunings. */
+  /** Id from the scale library (`src/theory`). Wins over `scale` when that id is registered. */
+  scaleId?: string
+  /** Intervals from the tonic, including cent offsets. Used when `scaleId` is not registered. */
   scale: ScaleInterval[]
   /** Chords the line should follow. Empty lets the generator write a progression. */
   chords: GeneratorChord[]

@@ -1,7 +1,8 @@
 import { quartersPerBar } from '../model/time'
 import { progressionById, spellProgression, voiceLead } from '../model/progressions'
-import { normalizeScale, scaleById } from '../model/scale'
+import { normalizeScale } from '../model/scale'
 import type { Project } from '../model/types'
+import { findScale } from '../theory/scales'
 import { mod12 } from './rng'
 import { normalizeGenerator } from './settings'
 import type { GeneratorChord, GeneratorInput, GeneratorSettings } from './types'
@@ -70,11 +71,20 @@ export function followSource(project: Project): FollowSource {
   }
 }
 
+/** The scale the project is actually in: a library maqam when one is chosen, otherwise the built-in scale. */
+export function activeScaleId(project: Project) {
+  const scale = normalizeScale(project.scale)
+  if (scale.library && findScale(scale.library)) return scale.library
+  return scale.scale
+}
+
 export function generatorInput(project: Project, settings: GeneratorSettings, chords: GeneratorChord[]): GeneratorInput {
   const scale = normalizeScale(project.scale)
+  const scaleId = activeScaleId(project)
   return {
     key: scale.root,
-    scale: scaleById(scale.scale).intervals.map((semitones) => ({ semitones, cents: 0 })),
+    scaleId,
+    scale: [],
     chords: settings.kind === 'chords' ? [] : chords,
     tempo: project.tempo,
     bars: settings.bars,

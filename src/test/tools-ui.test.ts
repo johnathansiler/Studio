@@ -27,6 +27,7 @@ import {
   SHEET_TOOLS,
   TOOL_ACTIONS,
   TOOL_INFO,
+  compactToolOrder,
   setActiveTool,
   toolChip,
 } from '../state/tools'
@@ -50,11 +51,12 @@ describe('edit tool chrome', () => {
     expect(toolChip('pencil', 'arrange')).toBe('Draw: tap a lane to add a clip')
   })
 
-  it('splits phone tools from the sheet with nothing listed twice', () => {
+  it('puts every tool on the phone strip, essentials first, with nothing listed twice', () => {
     const visible = PRIMARY_TOOLS.map((id) => ({ id }))
-    const sheet = SHEET_TOOLS.map((id) => ({ id }))
-    expect(sharesId(visible, sheet)).toEqual([])
-    expect([...PRIMARY_TOOLS, ...SHEET_TOOLS].sort()).toEqual(ARRANGE_TOOLS.map((tool) => tool.id).sort())
+    const later = SHEET_TOOLS.map((id) => ({ id }))
+    expect(sharesId(visible, later)).toEqual([])
+    expect(compactToolOrder()).toEqual([...PRIMARY_TOOLS, ...SHEET_TOOLS])
+    expect([...compactToolOrder()].sort()).toEqual(ARRANGE_TOOLS.map((tool) => tool.id).sort())
   })
 
   it('describes every tool', () => {
@@ -67,15 +69,17 @@ describe('edit tool chrome', () => {
     }
   })
 
-  it('shows three tools and the active chip on a phone', () => {
+  it('shows every tool inline on a phone, with the active chip and no sheet', () => {
     setActiveTool('pencil')
     const html = markup(true, 'piano')
     expect(html).toContain('Draw: tap to add notes')
     expect(html).toContain('data-active-tool="pencil"')
     expect(html).toContain('aria-pressed="true"')
-    expect(html).toContain('More tools')
-    expect(html).not.toContain('Trim')
-    expect(html).not.toContain('>Duplicate<')
+    expect(html).toContain('class="tool-strip"')
+    expect(html).not.toContain('More tools')
+    expect(html).not.toContain('role="dialog"')
+    for (const tool of ARRANGE_TOOLS) expect(html).toContain(TOOL_INFO[tool.id].label)
+    for (const action of TOOL_ACTIONS) expect(html).toContain(action.hint)
   })
 
   it('shows the full set and the timeline chip on a desk', () => {

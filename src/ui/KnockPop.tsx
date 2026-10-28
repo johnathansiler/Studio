@@ -4,6 +4,7 @@ import { CLICK_NAMES, DRIVE_NAMES, knockPadPitch, noteLabel, NOTE_NAMES, renderK
 import { KNOCK_PRESETS } from '../model/knockPresets'
 import { samplesToBeats } from '../model/time'
 import { uid } from '../model/types'
+import { selectKnock } from '../state/select'
 import type { ProjectStore } from '../state/store'
 
 const MACROS = [
@@ -44,8 +45,9 @@ export function KnockPop({ store, engine, onClose }: { store: ProjectStore; engi
   playedRef.current = setPlayed
   slideRef.current = slideArm
   useEffect(() => store.subscribe(() => setTick((value) => value + 1)), [store])
-  const track = store.project.tracks.find((item) => item.type === 'midi' && item.rack?.devices.some((device) => device.kind === 'knock'))
-  const device = track?.rack?.devices.find((item) => item.kind === 'knock')
+  const knock = selectKnock(store)
+  const track = knock.track
+  const device = knock.device
   const params = device?.params
   const api = useRef({ trackId: track?.id || '', legato: true, fine: 0, root: 0, scale: 0 })
   if (track && params) {

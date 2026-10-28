@@ -1,5 +1,6 @@
 import { renderClipChannels } from '../audio/stretch/engine'
 import { snapPitch, type ScaleId } from './scale'
+import { lockedTone, scaleIsMicrotonal } from '../theory/lock'
 import { STEP_BEAT, emptyCell, type StepCell, type StepChannel } from './steps'
 import { beatsToSamples, samplesToBeats } from './time'
 import type { AudioClip, ClipStretch, MidiNote, Project, WarpMarker } from './types'
@@ -63,6 +64,8 @@ export interface QuantizeContext {
   tempo?: number
   root?: number
   scale?: ScaleId
+  /** Catalog scale. When set, scale snap can land on a quarter tone. */
+  library?: string
   only?: string[]
   rng?: () => number
 }
@@ -236,7 +239,15 @@ export function quantizeMidi(notes: MidiNote[], raw: QuantizeSettings, ctx: Quan
     }
     note.startBeat = Math.max(0, start)
     note.durationBeats = Math.max(0.01, end - note.startBeat)
-    if (settings.scaleSnap && ctx.scale) note.pitch = snapPitch(note.pitch, ctx.root ?? 0, ctx.scale)
+    if (settings.scaleSnap && ctx.scale) {
+      const state = { root: ctx.root ?? 0, scale: ctx.scale, library: ctx.library }
+      const tone = ctx.library || scaleIsMicrotonal(state) ? lockedTone(note.pitch, note.fine ?? 0, state) : { midi: snapPitch(note.pitch, ctx.root ?? 0, ctx.scale), cents: note.fine ?? 0 }
+      note.pitch = tone.midi
+      if (ctx.library || scaleIsMicrotonal(state)) {
+        if (tone.cents) note.fine = Math.max(-100, Math.min(100, Math.round(tone.cents)))
+        else delete note.fine
+      }
+    }
   }
   if (settings.velocity === 'fixed') {
     for (const note of active) note.velocity = nearestEighth(note.velocity)

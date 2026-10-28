@@ -6,6 +6,12 @@ export interface Copy {
   hint: string
 }
 
+export const UNSTUCK_COPY: Copy = {
+  id: 'unstuck',
+  label: 'Unstuck',
+  hint: 'Suggest the next chord, section, transition, or arrangement.',
+}
+
 export const VIEW_COPY: Copy[] = [
   { id: 'arrange', label: 'Arrange', hint: 'Clips on a timeline. The tools above change what a tap does.' },
   { id: 'mix', label: 'Mix', hint: 'Level, pan, and effects for each track.' },

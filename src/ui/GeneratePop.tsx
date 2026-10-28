@@ -2,8 +2,11 @@ import { useEffect } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { followSource, generate, generatorInput, styleById, STYLES } from '../generators'
 import type { ArpPattern, GeneratorKind, StrumPattern } from '../generators'
-import { NOTE_NAMES, scaleById } from '../model/scale'
+import { NOTE_NAMES } from '../model/scale'
+import { selectGenerator } from '../state/select'
 import type { ProjectStore } from '../state/store'
+import { getScale } from '../theory/scales'
+import './generate.css'
 
 const KINDS: { id: GeneratorKind; name: string; hint: string }[] = [
   { id: 'chords', name: 'Chords', hint: 'A progression in your key, as MIDI you can edit.' },
@@ -52,12 +55,13 @@ const STRUMS: { id: StrumPattern; name: string }[] = [
 const BARS = [1, 2, 4, 8, 16]
 
 export function GeneratePop({ store, engine, onClose }: { store: ProjectStore; engine: AudioEngine; onClose: () => void }) {
-  const settings = store.generatorState()
-  const scale = store.scaleState()
+  const view = selectGenerator(store)
+  const settings = view.settings
+  const scale = view.scale
   const style = styleById(settings.style)
   const kind = KINDS.find((item) => item.id === settings.kind) ?? KINDS[0]
-  const source = followSource(store.project)
-  const part = generate(settings.kind, generatorInput(store.project, settings, source.chords))
+  const source = followSource(view.project)
+  const part = generate(settings.kind, generatorInput(view.project, settings, source.chords))
   useEffect(() => () => engine.stopPreview(), [engine])
   useEffect(() => {
     if (settings.kind !== 'chords' && source.source !== 'none') return
@@ -74,13 +78,21 @@ export function GeneratePop({ store, engine, onClose }: { store: ProjectStore; e
           : 'No chords yet, so this writes a progression and follows it.'
   const hear = () => {
     engine.unlock()
-    engine.previewSequence(part.notes, store.project.tempo, settings.kind === 'drums')
+    const beat = 60 / Math.max(40, view.tempo)
+    engine.previewSequence(part.notes.slice(0, 480).map((note) => ({
+      pitch: note.pitch,
+      at: note.startBeat * beat,
+      dur: Math.max(0.05, note.durationBeats * beat),
+      velocity: note.velocity,
+      drum: settings.kind === 'drums',
+      cents: note.fine ?? 0,
+    })))
   }
   return (
     <div className="gen-pop" data-generate="open" role="dialog" aria-label="Generate">
       <header>
         <strong>Generate</strong>
-        <span className="gen-key">{NOTE_NAMES[scale.root]} {scaleById(scale.scale).name} · {Math.round(store.project.tempo)}</span>
+        <span className="gen-key">{NOTE_NAMES[scale.root]} {getScale(view.scaleId).name} · {Math.round(view.tempo)}</span>
         <button type="button" className="text-btn" onClick={onClose} aria-label="Close generate">×</button>
       </header>
       <div className="gen-body">

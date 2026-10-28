@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { chordsFromNotes, followSource, generate, generatorInput, normalizeGenerator, STYLES, styleById } from '../generators'
+import { loadScaleCatalog } from '../theory'
 import type { GeneratorInput, GeneratorKind } from '../generators'
 import { DRUM_PADS } from '../model/drums'
 import { migrateProject } from '../model/schema'
@@ -79,6 +80,16 @@ describe('generators', () => {
     const followed = generate('bass', input({ style: 'afrobeats', seed: 11, chords: invented.chords }))
     expect(followed.notes).toEqual(invented.notes)
     expect(followed.chords.map((chord) => chord.root)).toEqual(invented.chords.map((chord) => chord.root))
+  })
+
+  it('uses a scale-library maqam, including its quarter tones', async () => {
+    await loadScaleCatalog()
+    const store = new ProjectStore(createEmptyProject())
+    store.setScale({ root: 0, library: 'maqam-bayati' })
+    const part = generate('chords', generatorInput(store.project, { ...store.generatorState(), kind: 'chords', style: 'maqam', bars: 1, seed: 2 }, []))
+    const deltas = part.notes.map((note) => ((soundingCents(note.pitch, note.fine) - soundingCents(60)) % 1200 + 1200) % 1200)
+    expect(deltas).toContain(150)
+    expect(part.notes.every((note) => note.pitch >= 0 && note.pitch <= 127)).toBe(true)
   })
 
   it('keeps maqam cent offsets on the sounded pitch', () => {

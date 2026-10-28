@@ -1,4 +1,5 @@
-import { clamp, mod12 } from './rng'
+import { clampMidi, toneFromCents } from '../theory/pitch'
+import { mod12 } from './rng'
 import type { ScaleInterval } from './types'
 
 export interface ScaleStep {
@@ -43,20 +44,10 @@ export function degreeStep(scale: ScaleStep[], degree: number): ScaleStep {
   return { semitones: step.semitones + octave * 12, cents: step.cents }
 }
 
-/** MIDI pitch plus a cent offset. 150 cents above the tonic sounds as a quarter-sharp second. */
+/** MIDI pitch plus a cent offset, folded the same way as the scale library. */
 export function place(tonicMidi: number, semitones: number, cents = 0) {
-  const total = semitones * 100 + cents
-  let pitch = tonicMidi + Math.round(total / 100)
-  let fine = Math.round(total - Math.round(total / 100) * 100)
-  while (fine > 50) {
-    fine -= 100
-    pitch += 1
-  }
-  while (fine < -50) {
-    fine += 100
-    pitch -= 1
-  }
-  return { pitch: clamp(Math.round(pitch), 0, 127), fine }
+  const tone = toneFromCents(tonicMidi * 100 + semitones * 100 + cents)
+  return { pitch: clampMidi(tone.midi), fine: tone.cents }
 }
 
 export function soundingCents(pitch: number, fine = 0) {
