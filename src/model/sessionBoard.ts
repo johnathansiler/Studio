@@ -45,7 +45,7 @@ export const DRUM_DEVICES: BrowserDevice[] = [
 
 export const PLUGIN_DEVICES: BrowserDevice[] = [
   AUDIO_DEVICES[0],
-  MIDI_DEVICES[0],
+  { id: 'scaler', name: 'Scaler', hint: 'Chord instrument. Key, pads, and progressions.', kind: 'instrument' },
 ]
 
 export function browserGroup(group: BrowserGroup): BrowserDevice[] {
@@ -79,7 +79,7 @@ export function sceneTitle(names: string[] | undefined, scene: number): string {
 }
 
 export function instrumentFor(id: string): TrackInstrument | null {
-  if (id === 'synth' || id === 'sampler' || id === 'library' || id === '808' || id === 'drum-machine' || id === 'none') return id
+  if (id === 'synth' || id === 'sampler' || id === 'library' || id === '808' || id === 'drum-machine' || id === 'scaler' || id === 'none') return id
   return null
 }
 

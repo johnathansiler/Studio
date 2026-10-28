@@ -472,6 +472,12 @@ export const CATALOG: PluginDescriptor[] = [
     ],
   },
   {
+    id: 'scaler',
+    name: 'Scaler',
+    version: VERSION,
+    params: [],
+  },
+  {
     id: 'sampler',
     name: 'Sampler',
     version: VERSION,

@@ -183,10 +183,10 @@
   top: 0;
   bottom: 0;
   width: 2px;
-  margin-left: -1px;
   background: #e0b15a;
+  box-shadow: 0 0 0 1px #1a1208, 0 0 10px #e0b15a;
   pointer-events: none;
-  z-index: 5;
+  z-index: 8;
 }
 .roll-playhead::before {
   content: '';

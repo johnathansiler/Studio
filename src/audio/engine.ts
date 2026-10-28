@@ -10,7 +10,7 @@ import { DRUM_PADS, residentDrums, type ResidentDrum } from '../model/drums'
 import { calibrationTrim, contextTimeForEvent, monitoringOffset, type ClockStamp } from '../model/midiClock'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
 import { arrangementEndSample, beatSpanSamples, clickAccent, clickAtOrAfter, meterAtSample, nextClickAfter, projectSampleBeat, tempoAtSample } from '../model/tempoMap'
-import { transportSample } from '../model/transportSync'
+import { playbackStops, transportSample } from '../model/transportSync'
 import { beatsToSamples, samplesPerBeatUnit, samplesToBeats } from '../model/time'
 import { matchBufferRate, PatchHost, renderPatchSpan } from '../instruments/patch'
 import { performancesOn, routeScaler } from '../instruments/scaler/model'
@@ -170,6 +170,7 @@ export class AudioEngine {
   private playOriginCtx = 0
   private playOriginSample = 0
   private arrangementScheduled = false
+  private loopArmed: boolean | null = null
   private nextLoopCtx: number | null = null
   private nextLoopSample = 0
   private nextMetroSample = 0
@@ -428,6 +429,8 @@ export class AudioEngine {
   }
 
   sync(project: Project, assetOf: (id: string) => AudioAsset | undefined) {
+    const loopFlip = this.loopArmed != null && this.loopArmed !== project.loopEnabled
+    this.loopArmed = project.loopEnabled
     this.project = project
     this.assetOf = assetOf
     if (!this.ctx || !this.localBus || !this.remoteBus || !this.masterGain || !this.masterStrip) return
@@ -473,6 +476,7 @@ export class AudioEngine {
       return { sampleRate: asset.sampleRate, channel }
     })
     this.applyMixerAutomation()
+    if (loopFlip && this.playing && this.mode === 'arrangement') this.rearmLoop()
   }
 
   /** Faders, pans, sends, and solo follow the project. Playing lanes are scheduled on the audio clock. */
@@ -1631,9 +1635,8 @@ export class AudioEngine {
       const project = this.project
       const patternLoop = project && this.status !== 'recording' ? emptyPatternLoopSamples(project) : 0
       if (patternLoop > 1) this.positionSamples = sample % patternLoop
-      if (patternLoop <= 1 && project && this.mode === 'arrangement' && !project.loopEnabled && this.status === 'playing') {
-        const end = arrangementEndSample(project)
-        if (linear > end + this.sampleRate) {
+      if (patternLoop <= 1 && project && this.mode === 'arrangement' && this.status === 'playing') {
+        if (playbackStops(linear, project, arrangementEndSample(project), this.sampleRate)) {
           this.stop()
           return
         }
@@ -1737,6 +1740,23 @@ export class AudioEngine {
     osc.start(when)
     osc.stop(when + 0.05)
     this.sources.push(osc)
+  }
+
+  /** Restart arrangement playback at the wrapped playhead so a loop toggle takes effect immediately. */
+  private rearmLoop() {
+    const ctx = this.ctx
+    const project = this.project
+    if (!ctx || !project || !this.playing) return
+    const now = ctx.currentTime + 0.02
+    const sample = this.heardSample(Math.max(0, this.sampleAt(ctx.currentTime)))
+    this.stopSources()
+    this.playOriginCtx = now
+    this.playOriginSample = sample
+    this.positionSamples = sample
+    this.arrangementScheduled = false
+    this.nextLoopCtx = null
+    this.nextMetroSample = clickAtOrAfter(project, sample)
+    this.scheduleAhead()
   }
 
   private scheduleArrangement(horizon: number) {

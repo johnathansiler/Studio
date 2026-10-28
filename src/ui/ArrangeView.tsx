@@ -9,6 +9,7 @@ import { rectsHit } from '../model/edit'
 import { SCALER_MIME, parseScalerDrag } from '../instruments/scaler/model'
 import { patternHostId } from '../model/steps'
 import { arrangementEndSample, gridMarks, mapIsLinear, projectBeatSample, projectSampleBeat, pxAtBeat, snapSampleToMap } from '../model/tempoMap'
+import { displayedPlayhead } from '../model/transportSync'
 import { SongMap, SongMapHead, SmartTempoBar } from './SongMap'
 import type { AudioClip } from '../model/types'
 import { ClipSheet } from './ClipSheet'
@@ -27,6 +28,7 @@ import { useFormFactor } from './form'
 import { ActionSheet, SheetRow, TipButton } from './Hint'
 import { RecordBar } from './RecordBar'
 import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, trimZone } from './touchEdit'
+import { laneDoubleClickAddsClip } from './clipKeys'
 
 export function ArrangeView({
   store,
@@ -579,13 +581,14 @@ export function ArrangeView({
           <div className="ruler" onClick={seekFromEvent}>
             <button
               type="button"
-              className={`loop-toggle ${project.loopEnabled ? 'on' : ''}`}
+              className={`loop-toggle ${project.loopEnabled ? 'on' : 'off'}`}
               aria-pressed={project.loopEnabled}
-              title="Repeat the highlighted region."
+              data-loop={project.loopEnabled ? 'on' : 'off'}
+              title={project.loopEnabled ? 'Loop is on. Playback wraps at the end of the highlighted region.' : 'Loop is off. The region is marked, but playback does not wrap.'}
               onClick={(event) => { event.stopPropagation(); store.toggle('loopEnabled') }}
               onPointerDown={(event) => event.stopPropagation()}
             >
-              Loop
+              {project.loopEnabled ? 'Loop on' : 'Loop off'}
             </button>
             <div
               className={`loop-bar ${project.loopEnabled ? 'on' : ''}`}
@@ -646,6 +649,7 @@ export function ArrangeView({
               style={{ backgroundSize: linear ? `${beatPx}px 100%` : undefined, backgroundImage: linear ? undefined : 'none', ...rowHeight(track, store.selectedClipId, !!store.openLanes[track.id]) }}
               onDoubleClick={(event) => {
                 if (track.type !== 'midi') return
+                if (!laneDoubleClickAddsClip(event.target)) return
                 const bounds = event.currentTarget.getBoundingClientRect()
                 const sample = ((event.clientX - bounds.left) / px) * project.sampleRate
                 store.addMidiClip(track.id, Math.floor(projectSampleBeat(project, sample)))
@@ -728,7 +732,11 @@ export function ArrangeView({
                       if (tool !== 'select') return
                       moveSelection(event, 'midi', track.id, clip.id)
                     }}
-                    onDoubleClick={() => onOpenPiano(track.id, clip.id)}
+                    onDoubleClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      onOpenPiano(track.id, clip.id)
+                    }}
                   >
                     <em>{clip.name}</em>
                     <span className="clip-notes" aria-hidden>
@@ -773,6 +781,10 @@ export function ArrangeView({
                         className={`clip pattern ${picked ? 'selected' : ''}`}
                         style={{ left, width: widthPx, background: pattern?.color || track.color, pointerEvents: passive ? 'none' : undefined, touchAction: passive ? undefined : 'none' }}
                         onContextMenu={(event) => event.preventDefault()}
+                        onDoubleClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                        }}
                         onPointerDown={(event) => {
                           if ((event.target as HTMLElement).closest('.edge')) return
                           if (tool === 'erase') {
@@ -817,7 +829,7 @@ export function ArrangeView({
             </div>
           ))}
           {marquee && <div className="marquee" style={marquee} />}
-          <div className="playhead" style={{ left: (position / project.sampleRate) * px }} />
+          <div className="playhead" data-playhead="arrange" style={{ left: (displayedPlayhead(position, project) / project.sampleRate) * px }} />
         </div>
       </div>
       </div>

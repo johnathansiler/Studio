@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { sessionDragDecision } from '../ui/sessionPointer'
 import { sceneClip } from '../model/launch'
 import {
   createsEmptyMidiClip,
@@ -52,6 +54,25 @@ describe('session gestures', () => {
     expect(shouldCountIn({ enabled: true, stopped: true, intent: 'session-launch' })).toBe(false)
     expect(shouldCountIn({ enabled: true, stopped: false, intent: 'record' })).toBe(false)
     expect(shouldCountIn({ enabled: false, stopped: true, intent: 'record' })).toBe(false)
+  })
+})
+
+describe('session mixer and quick drag', () => {
+  it('starts a short drag and lets a vertical touch keep scrolling', () => {
+    expect(sessionDragDecision(3, 0, 'mouse')).toBe('drag')
+    expect(sessionDragDecision(2, 1, 'mouse')).toBe('wait')
+    expect(sessionDragDecision(2, 12, 'touch')).toBe('scroll')
+    expect(sessionDragDecision(12, 2, 'touch')).toBe('drag')
+  })
+
+  it('keeps the volume fader inside its row so Pan stays visible', () => {
+    const css = readFileSync(new URL('../ui/sessionLive.css', import.meta.url), 'utf8')
+    const fader = css.slice(css.indexOf('.sl-fader {'), css.indexOf('.sl-master {'))
+    expect(fader).toContain('height: 88px')
+    expect(fader).toContain('overflow: hidden')
+    expect(fader).toContain('height: 100%')
+    expect(fader).not.toContain('height: 84px')
+    expect(css).toContain('.sl-pan {')
   })
 })
 

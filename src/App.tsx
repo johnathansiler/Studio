@@ -1250,6 +1250,7 @@ async function importDropped(files: FileList) {
       data-session-dock="closed"
       data-collab={collabShown ? 'open' : 'closed'}
       data-dock={dockShown ? 'open' : 'closed'}
+      data-editor={dockShown ? panel : 'none'}
       data-plugin={dockShown && panel === 'scaler' ? 'scaler' : 'none'}
       onDragOver={(event) => {
         if ([...event.dataTransfer.types].includes('Files')) event.preventDefault()

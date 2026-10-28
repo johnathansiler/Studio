@@ -73,7 +73,7 @@ function SessionBody({
   const rolling = engine.status === 'playing' || engine.status === 'recording' || engine.status === 'counting-in'
   const stopping = Object.keys(store.stopAt).length > 0
   const rows = mixerOn
-    ? `var(--sl-head) repeat(${SESSION_SCENES}, var(--sl-slot)) var(--sl-stop) minmax(188px, auto)`
+    ? `var(--sl-head) repeat(${SESSION_SCENES}, var(--sl-slot)) var(--sl-stop) minmax(248px, auto)`
     : `var(--sl-head) repeat(${SESSION_SCENES}, var(--sl-slot)) var(--sl-stop)`
 
   useEffect(() => {
@@ -526,6 +526,10 @@ function applyDevice(store: ProjectStore, trackId: string, kind: 'audio' | 'midi
   if (kind === 'midi') {
     const fx = midiKind(id)
     if (fx) store.addMidiFx(track.id, fx)
+    return
+  }
+  if (id === 'scaler') {
+    store.addPlugin(track.id, 'scaler')
     return
   }
   const instrument = instrumentFor(id)
