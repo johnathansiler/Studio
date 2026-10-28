@@ -161,41 +161,36 @@ describe('arrange on first load', () => {
       await page.getByRole('button', { name: /^Session/ }).click()
       await page.locator('[data-session-view="open"]').waitFor()
       expect(await page.locator('.track-stop').first().innerText()).toBe('Arm')
+      await page.locator('[data-session-browser="open"]').waitFor()
+      await page.locator('[data-session-detail="open"]').waitFor()
+      await page.locator('[data-mixer]').first().waitFor()
       const slot = page.locator('.session-col').nth(2).locator('.slot').first()
-      await slot.click()
-      await page.locator('.midi-dock').waitFor()
+      await slot.dblclick()
+      await expect.poll(async () => slot.innerText()).toContain('Clip')
+      await page.getByRole('button', { name: /^Play/ }).click()
       await page.waitForFunction(() => /1\.2\./.test(document.querySelector('.lcd .bars')?.textContent || ''), null, { timeout: 8000 })
       await slot.click()
       await page.locator('.slot[data-phase="queued"]').waitFor()
       const fit = await page.evaluate(() => {
-        const dock = document.querySelector('.dock-slot')!.getBoundingClientRect()
+        const browser = document.querySelector('.sl-browser')!.getBoundingClientRect()
+        const detail = document.querySelector('.sl-detail')!.getBoundingClientRect()
         const work = document.querySelector('.workspace')!.getBoundingClientRect()
-        const rights = [...document.querySelectorAll('.midi-dock .scale-bar > *, .midi-dock .tool-row > *, .midi-dock .me-modes > *')].map((el) => el.getBoundingClientRect().right)
+        const rights = [...document.querySelectorAll('.sl-browser button, .sl-detail button, .sl-detail select, .sl-head, .slot')].map((el) => el.getBoundingClientRect().right)
         return {
-          dockRight: dock.right,
-          dockLeft: dock.left,
+          browserRight: browser.right,
+          detailRight: detail.right,
+          detailBottom: detail.bottom,
           workRight: work.right,
           vw: window.innerWidth,
-          resize: !!document.querySelector('.dock-slot > .dock-resize'),
+          vh: window.innerHeight,
           maxControl: Math.max(...rights),
         }
       })
-      expect(fit.resize).toBe(true)
-      expect(fit.dockRight).toBeLessThanOrEqual(fit.vw + 1)
+      expect(fit.browserRight).toBeLessThanOrEqual(fit.vw + 1)
+      expect(fit.detailRight).toBeLessThanOrEqual(fit.vw + 1)
+      expect(fit.detailBottom).toBeLessThanOrEqual(fit.vh + 1)
       expect(fit.workRight).toBeLessThanOrEqual(fit.vw + 1)
-      expect(fit.dockLeft).toBeGreaterThan(200)
       expect(fit.maxControl).toBeLessThanOrEqual(fit.vw + 1)
-      const handle = await page.locator('.dock-slot > .dock-resize').boundingBox()
-      const dockBefore = await page.locator('.dock-slot').boundingBox()
-      if (!handle || !dockBefore) throw new Error('editor resize handle missing')
-      await page.mouse.move(handle.x + 4, handle.y + 80)
-      await page.mouse.down()
-      await page.mouse.move(handle.x - 70, handle.y + 80, { steps: 6 })
-      await page.mouse.up()
-      const dockAfter = await page.locator('.dock-slot').boundingBox()
-      if (!dockAfter) throw new Error('editor dock vanished')
-      expect(dockAfter.width).toBeGreaterThan(dockBefore.width + 30)
-      expect(dockAfter.x + dockAfter.width).toBeLessThanOrEqual(1281)
       expect(await page.getByRole('button', { name: /Create invite/ }).count()).toBe(0)
       expect(await page.locator('[data-collab-panel="open"]').count()).toBe(0)
       for (const tab of [/^Arrange/, /^Mix/, /^Beats/]) {

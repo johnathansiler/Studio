@@ -227,6 +227,8 @@ export interface AudioClip {
   folder?: TakeFolder
   /** Spectral repairs. Playback uses a rendered copy; the source asset stays put. */
   spectral?: SpectralRepair
+  /** Session color. Missing uses the track color. */
+  color?: string
 }
 
 /** One recorded pass inside a take folder. */
@@ -315,6 +317,8 @@ export interface MidiClip {
   /** Earlier loop passes. The clip notes are the active pass. */
   takes?: MidiTake[]
   activeTakeId?: string
+  /** Session color. Missing uses the track color. */
+  color?: string
   /** 0–0.9. Odd sixteenths sound later by this fraction of a sixteenth. */
   swing?: number
 }
@@ -504,6 +508,8 @@ export interface Project {
   liveCapture?: LiveCaptureSettings
   /** Piano roll, step entry, drum lanes, or score. */
   midiEditor?: MidiEditorPrefs
+  /** Names for session scenes. Empty entries use Scene 1, Scene 2, and so on. */
+  sceneNames?: string[]
 }
 
 export interface AudioAsset {

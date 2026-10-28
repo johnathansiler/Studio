@@ -3058,6 +3058,84 @@ export class ProjectStore {
     })
   }
 
+  renameClip(trackId: string, clipId: string, name: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId) ? clipById(this.track(trackId)!, clipId) : null
+      if (!clip) return
+      const next = name.trim()
+      if (next) clip.name = next
+    })
+  }
+
+  recolorClip(trackId: string, clipId: string, color: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId) ? clipById(this.track(trackId)!, clipId) : null
+      if (clip) clip.color = color
+    })
+  }
+
+  setSceneName(scene: number, name: string) {
+    this.mutate(() => {
+      const names = [...(this.project.sceneNames ?? [])]
+      while (names.length <= scene) names.push('')
+      names[scene] = name
+      this.project.sceneNames = names
+    })
+  }
+
+  /** Move a session clip. A filled destination swaps. The clip stays one per slot. */
+  moveClipToSlot(fromTrackId: string, fromScene: number, toTrackId: string, toScene: number) {
+    if (this.remoteFollow) return
+    if (fromTrackId === toTrackId && fromScene === toScene) return
+    const from = this.track(fromTrackId)
+    const to = this.track(toTrackId)
+    if (!from || !to || from.type !== to.type || from.type === 'bus' || from.type === 'group') {
+      this.toast('That clip needs the same kind of track.', 'warn')
+      return
+    }
+    this.mutate(() => {
+      const source = this.track(fromTrackId)
+      const dest = this.track(toTrackId)
+      if (!source || !dest) return
+      this.ensureSlots(source, fromScene)
+      this.ensureSlots(dest, toScene)
+      const sourceSlots = source.type === 'audio' ? source.audioSlots! : source.midiSlots!
+      const destSlots = dest.type === 'audio' ? dest.audioSlots! : dest.midiSlots!
+      const movingId = sourceSlots[fromScene]
+      if (!movingId) return
+      const displacedId = destSlots[toScene] ?? null
+      if (source.id !== dest.id) {
+        transferClip(source, dest, movingId)
+        if (displacedId) transferClip(dest, source, displacedId)
+      }
+      destSlots[toScene] = movingId
+      sourceSlots[fromScene] = displacedId
+      this.selectedTrackId = dest.id
+      this.sessionEdit = { trackId: dest.id, scene: toScene }
+      if (dest.type === 'midi') {
+        this.selectedMidiClipId = movingId
+        this.selectedClipId = null
+      } else {
+        this.selectedClipId = movingId
+        this.selectedMidiClipId = null
+      }
+    })
+  }
+
+  duplicateSlot(trackId: string, scene: number) {
+    const track = this.track(trackId)
+    const clip = track ? sceneClip(track, scene) : null
+    if (!track || !clip) return
+    this.ensureSlots(track, SESSION_SCENES - 1)
+    const slots = track.type === 'audio' ? track.audioSlots! : track.midiSlots!
+    const empty = slots.findIndex((id, index) => index !== scene && !id)
+    if (empty < 0) {
+      this.toast('Every scene on this track already has a clip.', 'warn')
+      return
+    }
+    this.copyIntoSlot(trackId, empty, trackId, clip.id)
+  }
+
   captureToArrangement() {
     if (this.remoteFollow || !this.captureLog.length) return
     const events = this.captureLog
@@ -4566,6 +4644,20 @@ export class ProjectStore {
       }
     })
   }
+}
+
+function transferClip(from: Track, to: Track, clipId: string) {
+  if (from.type === 'audio' && to.type === 'audio') {
+    const index = from.clips.findIndex((clip) => clip.id === clipId)
+    if (index < 0) return
+    const [clip] = from.clips.splice(index, 1)
+    to.clips.push(clip)
+    return
+  }
+  const index = from.midiClips.findIndex((clip) => clip.id === clipId)
+  if (index < 0) return
+  const [clip] = from.midiClips.splice(index, 1)
+  to.midiClips.push(clip)
 }
 
 function rangesOverlap(clip: AudioClip, lane: TakeLane) {

@@ -1113,8 +1113,7 @@ async function importDropped(files: FileList) {
     await importAudio(transfer.files)
   }
 
-  const armedTrack = store.sessionSlot ? store.project.tracks.find((track) => track.id === store.sessionSlot?.trackId) : undefined
-  const rollWanted = !!store.selectedMidiClipId && (store.view === 'arrange' || store.view === 'beats' || (store.view === 'session' && armedTrack?.type === 'midi'))
+  const rollWanted = !!store.selectedMidiClipId && (store.view === 'arrange' || store.view === 'beats')
   const panel: 'room' | 'piano' | 'rack' =
     surface !== 'studio' || phonePane === 'room' ? 'room'
     : pianoOpen ? 'piano'
