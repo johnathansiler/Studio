@@ -224,6 +224,10 @@ export interface MidiNote {
   fine?: number
   /** Slide into this note from the one still held. */
   slide?: boolean
+  /** A quiet grace hit just before this one. Playback expands it. */
+  flam?: boolean
+  /** Repeats inside the hit. 1 is a single hit. */
+  roll?: number
 }
 
 export interface MidiTake {
@@ -254,6 +258,30 @@ export interface MidiClip {
   /** Earlier loop passes. The clip notes are the active pass. */
   takes?: MidiTake[]
   activeTakeId?: string
+  /** 0–0.9. Odd sixteenths sound later by this fraction of a sixteenth. */
+  swing?: number
+}
+
+export type MidiEditorMode = 'roll' | 'step' | 'drums' | 'score'
+
+/** How the MIDI clip editor is entering notes. Saved with the project. */
+export interface MidiEditorPrefs {
+  mode: MidiEditorMode
+  /** Step length in quarter-note beats. */
+  step: number
+  /** Insert position inside the open clip, in beats. */
+  cursor: number
+  /** The next played notes extend a note that already ends here. */
+  tie: boolean
+  velocity: number
+  /** Octave shift for the step keyboard. 0 starts at C3. */
+  octave: number
+  /** Length of a note added from the score, in beats. */
+  scoreDuration: number
+  /** Drum grid page. Each page is 16 steps. */
+  page: number
+  /** Score page. Each page is four bars. */
+  scorePage: number
 }
 
 export interface RecordSettings {
@@ -356,6 +384,8 @@ export interface Project {
   waveforms?: Record<string, { min: number; max: number }[]>
   /** Pad banks, swing, and song chain for the drum deck. */
   padKit?: import('./padMachine').PadProgram
+  /** Piano roll, step entry, drum lanes, or score. */
+  midiEditor?: MidiEditorPrefs
 }
 
 export interface AudioAsset {

@@ -1,5 +1,7 @@
-import type { ScaleState } from '../model/scale'
+import { isDrumTrack } from '../model/drumLanes'
 import type { QuantizeSettings } from '../model/quantize'
+import type { ScaleState } from '../model/scale'
+import { normalizeMidiEditor } from '../model/stepEntry'
 import type { PluginInstance, Project, Track } from '../model/types'
 
 /**
@@ -78,6 +80,15 @@ export function selectTransport(store: { project: Project }) {
 
 export function selectScale(store: { scaleState(): ScaleState }) {
   return store.scaleState()
+}
+
+export function selectMidiEditor(store: Pick<Store, 'project' | 'selectedMidiClipId' | 'scaleState'>) {
+  const piano = selectPiano(store)
+  return {
+    ...piano,
+    editor: normalizeMidiEditor(store.project.midiEditor),
+    drumTrack: piano.track ? isDrumTrack(piano.track) : false,
+  }
 }
 
 export function selectPiano(store: Pick<Store, 'project' | 'selectedMidiClipId' | 'scaleState'>) {

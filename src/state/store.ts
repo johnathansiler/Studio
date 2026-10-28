@@ -64,6 +64,7 @@ import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normal
 import { normalizeScale, patternNotes, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
 import { lockedTone, scaleIsMicrotonal } from '../theory/lock'
 import {
+  clampSwing,
   clonePattern,
   fillEvery,
   humanizeCells,
@@ -73,10 +74,12 @@ import {
   type StepCell,
 } from '../model/steps'
 import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK_COLORS } from '../model/types'
-import type { AudioAsset, AudioClip, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, MidiClip, MidiNote, PluginInstance, Project, RecordSettings, TakeLane, Track } from '../model/types'
+import type { AudioAsset, AudioClip, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, MidiClip, MidiEditorPrefs, MidiNote, PluginInstance, Project, RecordSettings, TakeLane, Track } from '../model/types'
 import { beatsToSamples, quartersPerBar, samplesToBeats, snapSample } from '../model/time'
 import { linearResample } from '../model/wav'
 import { renderDrum, DRUM_PADS } from '../model/drums'
+import { isDrumTrack, clampRoll, DRUM_STEP, hitAt } from '../model/drumLanes'
+import { clearStep, normalizeMidiEditor, placeStep, tieHeld, type StepTone } from '../model/stepEntry'
 import {
   chainSong,
   chopSample,
@@ -2838,6 +2841,197 @@ export class ProjectStore {
       const memory = this.project.roll ?? defaultRoll()
       const last = notes[notes.length - 1]
       if (last) this.project.roll = { ...memory, length: last.durationBeats, velocity: last.velocity }
+    })
+  }
+
+  midiEditor(): MidiEditorPrefs {
+    return normalizeMidiEditor(this.project.midiEditor)
+  }
+
+  setMidiEditor(patch: Partial<MidiEditorPrefs>, drag = false) {
+    const run = (body: () => void) => (drag ? this.draft(body) : this.mutate(body))
+    run(() => {
+      this.project.midiEditor = normalizeMidiEditor({ ...normalizeMidiEditor(this.project.midiEditor), ...patch })
+    })
+  }
+
+  /** Notes played together land on the step cursor, then the cursor advances. */
+  enterSteps(trackId: string, clipId: string, pitches: StepTone[]) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      const clip = track?.midiClips.find((item) => item.id === clipId)
+      if (!track || !clip || !pitches.length) return
+      const editor = normalizeMidiEditor(this.project.midiEditor)
+      const scale = this.scaleState()
+      const tones = pitches.map((tone) => {
+        if (isDrumTrack(track) || !scale.snap) return tone
+        const locked = lockedTone(tone.pitch, tone.fine ?? 0, scale)
+        const next: StepTone = { ...tone, pitch: locked.midi }
+        if (scale.library || scaleIsMicrotonal(scale)) next.fine = locked.cents || undefined
+        return next
+      })
+      const placed = placeStep(clip.notes, editor.cursor, tones, editor.step, editor.velocity, editor.tie, () => uid('note'))
+      clip.notes = placed.notes.map((note) => {
+        if (!note.fine) return note
+        const copy = { ...note }
+        applyFine(copy, note.fine)
+        return copy
+      })
+      clip.durationBeats = Math.max(clip.durationBeats, placed.cursor)
+      this.project.midiEditor = normalizeMidiEditor({ ...editor, cursor: placed.cursor })
+      if (placed.ids.length) {
+        this.selectedNoteId = placed.ids[0]
+        this.selectedNoteIds = placed.ids
+      }
+    })
+  }
+
+  restStep(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      const editor = normalizeMidiEditor(this.project.midiEditor)
+      const cursor = editor.cursor + editor.step
+      clip.durationBeats = Math.max(clip.durationBeats, cursor)
+      this.project.midiEditor = normalizeMidiEditor({ ...editor, cursor })
+    })
+  }
+
+  tieStep(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      const editor = normalizeMidiEditor(this.project.midiEditor)
+      const tied = tieHeld(clip.notes, editor.cursor, editor.step)
+      if (!tied.tied) {
+        this.project.midiEditor = normalizeMidiEditor({ ...editor, tie: !editor.tie })
+        return
+      }
+      clip.notes = tied.notes
+      clip.durationBeats = Math.max(clip.durationBeats, tied.cursor)
+      this.project.midiEditor = normalizeMidiEditor({ ...editor, cursor: tied.cursor })
+    })
+  }
+
+  stepBack() {
+    this.mutate(() => {
+      const editor = normalizeMidiEditor(this.project.midiEditor)
+      this.project.midiEditor = normalizeMidiEditor({ ...editor, cursor: Math.max(0, editor.cursor - editor.step) })
+    })
+  }
+
+  clearCursor(trackId: string, clipId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      const editor = normalizeMidiEditor(this.project.midiEditor)
+      clip.notes = clearStep(clip.notes, editor.cursor, editor.step)
+    })
+  }
+
+  setDrumHit(trackId: string, clipId: string, pitch: number, step: number, patch: { on?: boolean; velocity?: number; flam?: boolean; roll?: number }, drag = false) {
+    const run = (body: () => void) => (drag ? this.draft(body) : this.mutate(body))
+    run(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      const beat = step * DRUM_STEP
+      let note = hitAt(clip.notes, pitch, step)
+      if (patch.on === false) {
+        if (!note) return
+        const id = note.id
+        clip.notes = clip.notes.filter((item) => item.id !== id)
+        if (this.selectedNoteId === id) {
+          this.selectedNoteId = null
+          this.selectedNoteIds = []
+        }
+        return
+      }
+      if (!note) {
+        note = {
+          id: uid('note'),
+          pitch,
+          startBeat: beat,
+          durationBeats: 0.2,
+          velocity: clamp(patch.velocity ?? normalizeMidiEditor(this.project.midiEditor).velocity, 0.05, 1),
+        }
+        clip.notes.push(note)
+        clip.durationBeats = Math.max(clip.durationBeats, beat + DRUM_STEP)
+      }
+      if (!note) return
+      if (patch.velocity != null) note.velocity = clamp(patch.velocity, 0.05, 1)
+      if (patch.flam != null) {
+        if (patch.flam) note.flam = true
+        else delete note.flam
+      }
+      if (patch.roll != null) {
+        const rolls = clampRoll(patch.roll)
+        if (rolls > 1) note.roll = rolls
+        else delete note.roll
+      }
+      this.selectedNoteId = note.id
+      this.selectedNoteIds = [note.id]
+    })
+  }
+
+  setClipSwing(trackId: string, clipId: string, swing: number, drag = false) {
+    const run = (body: () => void) => (drag ? this.draft(body) : this.mutate(body))
+    run(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      const value = clampSwing(swing)
+      if (value <= 0) delete clip.swing
+      else clip.swing = value
+    })
+  }
+
+  putScoreNote(trackId: string, clipId: string, beat: number, pitch: number) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      const editor = normalizeMidiEditor(this.project.midiEditor)
+      const start = Math.max(0, beat)
+      const existing = clip.notes.find((note) => note.pitch === pitch && Math.abs(note.startBeat - start) < 0.02)
+      if (existing) {
+        this.selectedNoteId = existing.id
+        this.selectedNoteIds = [existing.id]
+        return
+      }
+      const note: MidiNote = {
+        id: uid('note'),
+        pitch: clamp(Math.round(pitch), 0, 127),
+        startBeat: start,
+        durationBeats: editor.scoreDuration,
+        velocity: editor.velocity,
+      }
+      clip.notes.push(note)
+      clip.durationBeats = Math.max(clip.durationBeats, note.startBeat + note.durationBeats)
+      this.selectedNoteId = note.id
+      this.selectedNoteIds = [note.id]
+    })
+  }
+
+  editScoreNote(trackId: string, clipId: string, noteId: string, patch: { pitch?: number; durationBeats?: number }) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      const note = clip?.notes.find((item) => item.id === noteId)
+      if (!clip || !note) return
+      if (patch.pitch != null) note.pitch = clamp(Math.round(patch.pitch), 0, 127)
+      if (patch.durationBeats != null) note.durationBeats = Math.max(0.125, patch.durationBeats)
+      clip.durationBeats = Math.max(clip.durationBeats, note.startBeat + note.durationBeats)
+      this.selectedNoteId = note.id
+      this.selectedNoteIds = [note.id]
+    })
+  }
+
+  removeScoreNote(trackId: string, clipId: string, noteId: string) {
+    this.mutate(() => {
+      const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
+      if (!clip) return
+      clip.notes = clip.notes.filter((note) => note.id !== noteId)
+      if (this.selectedNoteId === noteId) {
+        this.selectedNoteId = null
+        this.selectedNoteIds = []
+      }
     })
   }
 

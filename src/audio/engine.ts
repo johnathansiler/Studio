@@ -19,6 +19,7 @@ import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChu
 import { encodeWav, linearResample } from '../model/wav'
 import { scaleById } from '../model/scale'
 import { noteForPlayback } from '../model/padMachine'
+import { soundingNotes } from '../model/drumLanes'
 import { LiveRack } from './liveRack'
 import { renderGraph } from './renderGraph'
 import { loadModule, peekModule } from './plugins/registry'
@@ -1220,7 +1221,7 @@ export class AudioEngine {
         const events = []
         for (const clip of track.midiClips) {
           if (clip.slotOnly || clip.scene != null) continue
-          for (const note of clip.notes) {
+          for (const note of soundingNotes(clip)) {
             const audible = playedNote(project, note, clip.startBeat + note.startBeat)
             if (!audible) continue
             const start = beatsToSamples(clip.startBeat + audible.startBeat, rate, project.tempo)
@@ -1243,7 +1244,7 @@ export class AudioEngine {
         const events = []
         for (const clip of track.midiClips) {
           if (clip.slotOnly || clip.scene != null) continue
-          for (const note of clip.notes) {
+          for (const note of soundingNotes(clip)) {
             const audible = playedNote(project, note, clip.startBeat + note.startBeat)
             if (!audible) continue
             const start = beatsToSamples(clip.startBeat + audible.startBeat, rate, project.tempo)
@@ -1264,7 +1265,7 @@ export class AudioEngine {
       } else {
         for (const clip of track.midiClips) {
           if (clip.slotOnly || clip.scene != null) continue
-          for (const note of clip.notes) {
+          for (const note of soundingNotes(clip)) {
             const audible = playedNote(project, note, clip.startBeat + note.startBeat)
             if (!audible) continue
             const start = beatsToSamples(clip.startBeat + audible.startBeat, rate, project.tempo)
@@ -1645,7 +1646,7 @@ export class AudioEngine {
           this.scheduleHit(this.ctx!, out, hit, when + noteDelay)
         }
       }
-      for (const note of clip.patternId ? [] : clip.notes) {
+      for (const note of clip.patternId ? [] : soundingNotes(clip)) {
         const audible = playedNote(project, note, clip.startBeat + note.startBeat)
         if (!audible) continue
         const noteDelay = beatsToSamples(audible.startBeat, sr, project.tempo) / sr
@@ -1711,7 +1712,7 @@ export class AudioEngine {
       for (const clip of track.midiClips) {
         if (clip.slotOnly || clip.scene != null) continue
         const clipStart = beatsToSamples(clip.startBeat, this.sampleRate, project.tempo)
-        for (const note of clip.notes) {
+        for (const note of soundingNotes(clip)) {
           const audible = playedNote(project, note, clip.startBeat + note.startBeat)
           if (!audible) continue
           const noteStart = clipStart + beatsToSamples(audible.startBeat, this.sampleRate, project.tempo)

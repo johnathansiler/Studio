@@ -2,6 +2,7 @@ import { createPlugin } from './plugins/catalog'
 import { loadModule, peekModule } from './plugins/registry'
 import { renderGraph, type GraphTrack } from './renderGraph'
 import { scaleById } from '../model/scale'
+import { soundingNotes } from '../model/drumLanes'
 import { beatsToSamples, projectEndSample } from '../model/time'
 import { makeTrack, uid, type AudioAsset, type AudioClip, type PluginInstance, type Project, type Track } from '../model/types'
 import { encodeWav, linearResample, type DitherMode, type WavBits } from '../model/wav'
@@ -305,7 +306,7 @@ function mixTrack(track: Track, assets: Map<string, AudioAsset>, start: number, 
     }
   }
   for (const clip of track.midiClips) {
-    for (const note of clip.notes) {
+    for (const note of soundingNotes(clip)) {
       const noteStart = Math.round(beatsToSamples(clip.startBeat + note.startBeat, rate, tempo))
       const duration = Math.round(beatsToSamples(note.durationBeats, rate, tempo))
       addVoice(out, note.pitch, note.velocity, noteStart, duration, start, rate)
