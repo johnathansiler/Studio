@@ -76,6 +76,7 @@ function signature(project: Project): string {
     masterPlugins: meaningfulPlugins(project.masterPlugins ?? []),
     record,
     scale: normalizeScale(project.scale),
+    soundFavorites: project.soundFavorites ?? [],
     players: normalizePlayer(project.players),
     tracks: project.tracks.map(trackSignature),
   })

@@ -69,6 +69,8 @@ export interface SampleZone {
   /** 1-based index inside a round-robin group. */
   seq: number
   seqLength: number
+  /** cycle steps through seq. random picks a seq from the counter. */
+  rrMode: 'cycle' | 'random'
   /** Zones that share a positive id alternate together. 0 alternates alone. */
   rrGroup: number
   /** Latched key that must match. Null plays under every articulation. */
@@ -204,6 +206,7 @@ export function makeZone(partial: Partial<SampleZone> & Pick<SampleZone, 'id' | 
     exclusive: 0,
     offBy: 0,
     ...partial,
+    rrMode: partial.rrMode === 'random' ? 'random' : 'cycle',
     ampeg: { ...DEFAULT_AMP, ...partial.ampeg },
   }
 }

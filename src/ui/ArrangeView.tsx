@@ -653,6 +653,17 @@ export function ArrangeView({
             <InsertList store={store} trackId={sheetTrack.id} />
             <SendList store={store} trackId={sheetTrack.id} />
           </div>
+          {sheetTrack.type === 'audio' && (
+            <SheetRow
+              label="Repair"
+              hint="Spectrogram. Select a spot and remove clicks, hum, or noise."
+              onClick={() => {
+                const clip = sheetTrack.clips.find((item) => item.id === store.selectedClipId) ?? sheetTrack.clips[0]
+                setTrackSheet(null)
+                if (clip) store.openSpectral(sheetTrack.id, clip.id)
+              }}
+            />
+          )}
           <SheetRow label="Analyze" hint="Analyze the key, chords, and sections of this track." onClick={() => { setTrackSheet(null); onAnalyze(sheetTrack.id) }} />
           <SheetRow label={copyOf(TRACK_SHEET, 'remove').label} hint={copyOf(TRACK_SHEET, 'remove').hint} onClick={() => { store.removeTrack(sheetTrack.id); setTrackSheet(null) }} />
         </ActionSheet>
@@ -832,6 +843,7 @@ function ClipView({
         {clip.folder ? ` · ${clip.folder.lanes.length} takes` : ''}
         {clip.source === 'guide' ? ' · guide' : ''}
         {clip.source === 'aligned-take' ? ' · aligned' : ''}
+        {clip.spectral?.ops.length ? ' · repair' : ''}
       </em>
       {clip.folder && store.selectedClipId === clip.id && (
         <div className="take-lanes">
@@ -885,6 +897,7 @@ function ClipView({
         <div className="touch-menu" style={{ left: menu.x, top: menu.y }}>
           <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { onSplit(); setMenu(null) }}>Split</button>
           <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openStems(trackId, clip.id); setMenu(null) }}>Stems</button>
+          <button type="button" title="Spectrogram. Select a spot and remove clicks, hum, or noise." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openSpectral(trackId, clip.id); setMenu(null) }}>Repair</button>
           <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setMenu(null) }}>Delete</button>
         </div>
       )}

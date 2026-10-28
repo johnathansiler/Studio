@@ -1,4 +1,5 @@
 import { clipNeedsStretch, preferStretchCache, renderClipChannels, sourceSamplesOf, timelineSamples } from './stretch/engine'
+import { onSpectralCommit } from './spectral/job'
 import { onStretchCommit, readStretch, storeStretch, stretchCacheKey, stretchSlot } from './stretch/commit'
 import type { StretchMode } from './stretch/engine'
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
@@ -155,6 +156,7 @@ export class AudioEngine {
   private readonly dropCommit = onStretchCommit((key) => {
     if (this.stretchKeys.has(key)) this.adoptCommit()
   })
+  private readonly dropSpectral = onSpectralCommit(() => this.adoptSpectral())
   private recorders = new Map<string, ActiveRec>()
   private pendingRecorders: { key: string; stream: MediaStream; handler: () => void }[] = []
   private rollingChunks: SliceChunk[] = []
@@ -2386,6 +2388,18 @@ export class AudioEngine {
     return readStretch(key, channels, clip, project)
   }
 
+  /** Replay from the playhead so a finished spectral render is what you hear. */
+  private adoptSpectral() {
+    void this.dropSpectral
+    if (!this.playing || !this.ctx || !this.project) return
+    if (this.mode === 'session') {
+      this.stopSources()
+      this.scheduleAhead()
+      return
+    }
+    this.adoptCommit()
+  }
+
   /** Swap a live preview for the committed render without moving the playhead. */
   private adoptCommit() {
     void this.dropCommit
@@ -2510,6 +2524,41 @@ export class AudioEngine {
       try { src.disconnect() } catch { /* already disconnected */ }
     }
     this.previewStops = []
+  }
+
+  /** Speaker-only audition. The cue and the arrangement are left alone. */
+  previewPcm(channels: Float32Array[], sampleRate?: number) {
+    this.stopPreview()
+    const ctx = this.unlock()
+    const out = this.speakerGain
+    const lead = channels[0]
+    if (!out || !lead?.length) return
+    const rate = sampleRate && sampleRate > 0 ? sampleRate : ctx.sampleRate
+    const buffer = ctx.createBuffer(Math.max(1, channels.length), lead.length, rate)
+    channels.forEach((channel, index) => {
+      const data = new Float32Array(lead.length)
+      data.set(channel.subarray(0, Math.min(channel.length, lead.length)))
+      buffer.copyToChannel(data, index)
+    })
+    const src = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    src.buffer = buffer
+    gain.gain.value = 0.9
+    src.connect(gain)
+    gain.connect(out)
+    const stop = () => {
+      try { src.stop() } catch { /* already stopped */ }
+    }
+    const disconnect = () => {
+      try { src.disconnect() } catch { /* already disconnected */ }
+      try { gain.disconnect() } catch { /* already disconnected */ }
+    }
+    src.onended = () => {
+      disconnect()
+      this.previewStops = this.previewStops.filter((item) => item.stop !== stop)
+    }
+    this.previewStops = [{ stop, disconnect }]
+    src.start()
   }
 
   private previewTone(ctx: AudioContext, bus: GainNode, pitch: number, cents: number, when: number, dur: number, velocity: number, stops: Stoppable[]) {

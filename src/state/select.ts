@@ -3,7 +3,7 @@ import { activeScaleId, followSource } from '../generators/adapt'
 import { normalizePlayer } from '../players/settings'
 import type { ScaleState } from '../model/scale'
 import type { QuantizeSettings } from '../model/quantize'
-import type { LiveCaptureSettings, MidiFx, MidiMapEntry, MidiOutSettings, PluginInstance, Project, Track } from '../model/types'
+import type { AudioClip, LiveCaptureSettings, MidiFx, MidiMapEntry, MidiOutSettings, PluginInstance, Project, Track } from '../model/types'
 import {
   defaultLiveCapture,
   defaultMidiOut,
@@ -106,6 +106,20 @@ export function selectPiano(store: Pick<Store, 'project' | 'selectedMidiClipId' 
   }
 }
 
+export function selectInstrument(store: Pick<Store, 'project' | 'track'>, trackId: string) {
+  const track = store.track(trackId) ?? null
+  const program = track?.library ?? null
+  return {
+    project: store.project,
+    track,
+    program,
+    mics: program?.mics ?? [],
+    keyswitches: program?.keyswitches ?? [],
+    activeSwitch: program?.defaultSwitch ?? null,
+    zones: program?.zones.length ?? 0,
+  }
+}
+
 export function selectRack(store: Pick<Store, 'project' | 'track'>, trackId: string) {
   const track = store.track(trackId) ?? null
   return {
@@ -150,6 +164,22 @@ export function selectQuantize(store: Pick<Store, 'project' | 'quantizeOpen' | '
     presets: store.project.quantizePresets ?? [],
     tempo: store.project.tempo,
   }
+}
+
+export function selectSpectral(store: { project: Project; spectralTrackId: string | null; spectralClipId: string | null }) {
+  const track = store.project.tracks.find((item) => item.id === store.spectralTrackId) ?? null
+  const clip = track?.clips.find((item) => item.id === store.spectralClipId) ?? null
+  return {
+    project: store.project,
+    track,
+    clip,
+    repair: clip?.spectral ?? null,
+    sampleRate: store.project.sampleRate,
+  }
+}
+
+export function selectClipRepair(clip: AudioClip | null | undefined) {
+  return clip?.spectral ?? null
 }
 
 export function selectGenerator(store: { project: Project; generatorState(): GeneratorSettings; scaleState(): ScaleState }) {
@@ -206,4 +236,18 @@ export function selectMidiRoutes(project: Project): MidiRoute[] {
 
 export function selectSavedMaps(project: Project): MidiMapEntry[] {
   return sanitizeMaps(project.midiMaps)
+}
+
+/** Sound browser. Favorites live on the project so every screen and device sees them. */
+export function selectSounds(store: { project: Project; selectedTrackId: string | null }) {
+  const tracks = store.project.tracks.filter((track) => track.type === 'audio')
+  const selected = tracks.find((track) => track.id === store.selectedTrackId) ?? tracks[0] ?? null
+  return {
+    favorites: store.project.soundFavorites ?? [],
+    tempo: store.project.tempo,
+    sampleRate: store.project.sampleRate,
+    tracks,
+    trackId: selected?.id ?? null,
+    trackName: selected?.name ?? '',
+  }
 }

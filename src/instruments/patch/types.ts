@@ -5,7 +5,7 @@ export const MAX_ROUTES = 8
 
 export type LayerKind = 'analog' | 'wavetable' | 'fm' | 'sampler' | 'granular'
 
-export type ModSourceId = 'lfo1' | 'lfo2' | 'env1' | 'env2' | 'velocity' | 'aftertouch' | 'modwheel' | 'x' | 'y'
+export type ModSourceId = 'lfo1' | 'lfo2' | 'env1' | 'env2' | 'velocity' | 'aftertouch' | 'modwheel' | 'macro1' | 'macro2' | 'x' | 'y'
 
 export interface GranularSettings {
   /** 0–1 read position inside the audio. */
@@ -117,6 +117,9 @@ export interface OmniPatch {
   env2Release: number
   modWheel: number
   aftertouch: number
+  /** Performance macros. Routes can send them to any layer or synth parameter. */
+  macro1: number
+  macro2: number
   morph: {
     x: number
     y: number
@@ -158,6 +161,8 @@ export const MOD_SOURCES: { id: ModSourceId; name: string; hint: string }[] = [
   { id: 'velocity', name: 'Velocity', hint: 'How hard the note was played.' },
   { id: 'aftertouch', name: 'Aftertouch', hint: 'Pressure while the note is held.' },
   { id: 'modwheel', name: 'Mod wheel', hint: 'The wheel saved on this patch.' },
+  { id: 'macro1', name: 'Macro 1', hint: 'A knob you perform. Route it to any layer or synth setting.' },
+  { id: 'macro2', name: 'Macro 2', hint: 'A second performance knob, independent of Macro 1.' },
   { id: 'x', name: 'Pad X', hint: 'Horizontal position of the morph pad.' },
   { id: 'y', name: 'Pad Y', hint: 'Vertical position of the morph pad.' },
 ]
@@ -194,6 +199,8 @@ export const CONTROL_HELP: Record<string, string> = {
   envAttack: 'How fast the envelope opens after a note.',
   envRelease: 'How fast the envelope closes after you let go.',
   modwheel: 'Wheel amount saved with the patch. Routes can listen to it.',
+  macro1: 'Macro 1. Route it onto any layer, grain, or synth setting.',
+  macro2: 'Macro 2. A second knob for a different setting.',
   aftertouch: 'Pressure amount. Use it when the keys do not send aftertouch.',
   morph: 'Blends the four corner sounds. Drag with a finger.',
   corner: 'Stores the sound you hear into this corner of the pad.',
@@ -218,3 +225,24 @@ export const LAYER_KINDS: { id: LayerKind; name: string }[] = [
 ]
 
 export const MORPH_PARAM_KEYS = ['wave1', 'detune', 'attack', 'release', 'sustain', 'position', 'table', 'index', 'ratio', 'feedback'] as const
+
+/** Ranges for synth parameters a route can target. Layer fields stay in FIELD_RANGE. */
+export const PARAM_RANGE: Record<string, FieldRange> = {
+  detune: { min: 0, max: 50 },
+  attack: { min: 0, max: 4000 },
+  decay: { min: 5, max: 8000 },
+  sustain: { min: 0, max: 1 },
+  release: { min: 5, max: 8000 },
+  wave1: { min: 0, max: 4 },
+  uni: { min: 1, max: 8 },
+  index: { min: 0, max: 8 },
+  ratio: { min: 0.25, max: 8 },
+  feedback: { min: 0, max: 1 },
+  position: { min: 0, max: 1 },
+  warp: { min: 0, max: 1 },
+  table: { min: 0, max: 7 },
+  pitch: { min: -24, max: 24 },
+  gain: { min: 0, max: 1 },
+  cutoff: { min: 40, max: 16000 },
+  res: { min: 0, max: 0.92 },
+}

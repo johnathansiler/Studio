@@ -1,4 +1,5 @@
 import type { SamplerProgram } from '../audio/multisample/types'
+import type { SpectralRepair } from '../audio/spectral/types'
 import type { RollMemory } from './paint'
 import type { QuantizePreset, QuantizeSettings, WarpPoint } from './quantize'
 import type { OmniPatch } from '../instruments/patch/types'
@@ -172,6 +173,8 @@ export interface AudioClip {
   warpPoints?: WarpPoint[]
   /** Swipe-comp take folder. Playback uses the active comp, not the parent buffer. */
   folder?: TakeFolder
+  /** Spectral repairs. Playback uses a rendered copy; the source asset stays put. */
+  spectral?: SpectralRepair
 }
 
 /** One recorded pass inside a take folder. */
@@ -392,6 +395,8 @@ export interface Project {
   quantizeBeats?: number
   /** `${kind}:${name}` factory and user presets marked in the browser. */
   presetFavorites?: string[]
+  /** Ids from the free sound library kept with this project. */
+  soundFavorites?: string[]
   beats?: BeatRack
   patternClips?: PatternClip[]
   roll?: RollMemory
@@ -488,6 +493,7 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     scale: defaultScale(),
     quantizeBeats: 0,
     presetFavorites: [],
+    soundFavorites: [],
   }
 }
 

@@ -19,6 +19,7 @@ export function importSfz(text: string, name = 'SFZ', files?: Map<string, string
   let groupIndex = 0
   const regions: { opcodes: Record<string, string>; groupIndex: number }[] = []
   const labels = new Map<number, string>()
+  let swDefault: number | null = null
   let pending: Record<string, string> | null = null
   let section: 'none' | 'control' | 'global' | 'group' | 'region' = 'none'
 
@@ -57,6 +58,10 @@ export function importSfz(text: string, name = 'SFZ', files?: Map<string, string
     }
     if (!rest) continue
     for (const [key, value] of opcodes(rest)) {
+      if (key === 'sw_default') {
+        const note = parseNote(value)
+        if (note != null) swDefault = note
+      }
       if (section === 'control') {
         if (key === 'default_path') defaultPath = value.replace(/\\/g, '/')
         continue
@@ -145,7 +150,7 @@ export function importSfz(text: string, name = 'SFZ', files?: Map<string, string
   return makeProgram({
     name: name.replace(/\.sfz$/i, ''),
     license: 'CC0-1.0',
-    defaultSwitch: firstSwitch,
+    defaultSwitch: swDefault ?? firstSwitch,
     keyswitches,
     mics: mics.size ? [...mics.values()] : undefined,
     zones,

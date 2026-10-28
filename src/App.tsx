@@ -5,6 +5,7 @@ import { unpackProject } from './model/archive'
 import { renderDemoLoop } from './model/demo'
 import { isSessionLink, isUntouchedEmpty, NEW_PROJECT, planLaunch, readTab, shouldKeepProject, TAB_PROJECT } from './model/launchProject'
 import { punchWindow, sliceCapture } from './model/comp'
+import { watchSpectral } from './audio/spectral/job'
 import { inspectClip } from './audio/stretch/engine'
 import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } from './model/types'
 import { SessionClient } from './remote/session'
@@ -33,6 +34,7 @@ import { GeneratePop } from './ui/GeneratePop'
 import { PlayersSheet } from './ui/PlayersSheet'
 import { UnstuckSheet } from './unstuck/UnstuckSheet'
 import { LibraryPop } from './ui/LibraryPop'
+import { SoundBrowser } from './ui/SoundBrowser'
 import { loadScaleCatalog } from './theory'
 import { AnalysisSheet } from './ui/AnalysisSheet'
 import { QuantizeSheet } from './ui/QuantizeSheet'
@@ -44,6 +46,7 @@ import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
+import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
 import { MENU_COPY, UNSTUCK_COPY, VIEW_COPY, copyOf, described } from './ui/chrome'
 import { HintBubble, MenuRow, TipButton } from './ui/Hint'
@@ -87,6 +90,7 @@ export function App() {
     }, 40)
     return () => window.clearInterval(id)
   }, [engine])
+  useEffect(() => watchSpectral(store), [store])
   const [version, setVersion] = useState(0)
   const [surface, setSurface] = useState<'studio' | 'artist'>('studio')
   const [dock, setDock] = useState(380)
@@ -115,6 +119,7 @@ export function App() {
   const [playersOpen, setPlayersOpen] = useState(() => new URLSearchParams(window.location.search).get('players') === '1')
   const [unstuckOpen, setUnstuckOpen] = useState(() => new URLSearchParams(window.location.search).get('unstuck') === '1')
   const [libraryOpen, setLibraryOpen] = useState(() => new URLSearchParams(window.location.search).get('library') === '1')
+  const [soundsOpen, setSoundsOpen] = useState(() => new URLSearchParams(window.location.search).get('sounds') === '1')
   useEffect(() => {
     void loadScaleCatalog().then(() => setVersion((value) => value + 1))
   }, [])
@@ -1163,6 +1168,7 @@ async function importDropped(files: FileList) {
             <MenuRow label={copyOf(MENU_COPY, 'generate').label} hint={copyOf(MENU_COPY, 'generate').hint} onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); setGenerateOpen(true) }} />
             <MenuRow label={copyOf(MENU_COPY, 'players').label} hint={copyOf(MENU_COPY, 'players').hint} onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); setPlayersOpen(true) }} />
             <MenuRow label="Scales" hint="Browse scales and the chords inside them." onClick={() => { setMenuOpen(false); setLibraryOpen(true) }} />
+            <MenuRow label="Sounds" hint="Browse loops and one-shots. Add one at the playhead." onClick={() => { setMenuOpen(false); setSoundsOpen(true) }} />
             <MenuRow className="split" label={copyOf(MENU_COPY, 'quantize').label} hint={copyOf(MENU_COPY, 'quantize').hint} onClick={() => { setMenuOpen(false); store.quickQuantize() }} />
             <MenuRow label={copyOf(MENU_COPY, 'quantize-more').label} hint={copyOf(MENU_COPY, 'quantize-more').hint} onClick={() => { setMenuOpen(false); store.openQuantize() }} />
             <MenuRow className="split" label={copyOf(MENU_COPY, 'click').label} hint={copyOf(MENU_COPY, 'click').hint} pressed={store.project.metronomeEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('metronomeEnabled')} />
@@ -1333,6 +1339,7 @@ async function importDropped(files: FileList) {
       {playersOpen && <PlayersSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setPlayersOpen(false) }} />}
       {unstuckOpen && <UnstuckSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }} />}
       {libraryOpen && <LibraryPop store={store} engine={engine} onClose={() => setLibraryOpen(false)} />}
+      {soundsOpen && <SoundBrowser store={store} engine={engine} phone={phone} onClose={() => { engine.stopPreview(); setSoundsOpen(false) }} />}
       {analysisTrackId && <AnalysisSheet store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} />}
       {perform && (
         <PerformPop
@@ -1475,6 +1482,7 @@ async function importDropped(files: FileList) {
         </div>
       )}
       {knockOpen && <KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} />}
+      <SpectralSheet store={store} />
       <HintBubble />
       <div className="toasts">
         {store.toasts.map((toast) => (

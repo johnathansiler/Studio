@@ -2,6 +2,7 @@ import type { Project, Track } from '../../model/types'
 import type { StripNodes } from '../strips'
 import { SampleCache } from './cache'
 import { SamplerInstrument, renderSampler, type SamplerNote } from './engine'
+import { isPackAsset, packFromAsset } from './persist'
 import type { SamplePack } from './types'
 
 interface Queued {
@@ -27,7 +28,7 @@ export class LibraryHost {
   private readonly lives = new Map<string, Live>()
   private readonly pending = new Map<string, Queued[]>()
 
-  sync(ctx: AudioContext, project: Project, strips: Map<string, StripNodes>, assetOf: (id: string) => { id: string; sampleRate: number; channels: Float32Array[] } | undefined) {
+  sync(ctx: AudioContext, project: Project, strips: Map<string, StripNodes>, assetOf: (id: string) => { id: string; name?: string; sampleRate: number; channels: Float32Array[] } | undefined) {
     const phone = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
     for (const track of project.tracks) {
       if (track.type !== 'midi' || track.instrument !== 'library' || !track.library) {
@@ -40,11 +41,12 @@ export class LibraryHost {
       this.attach(ctx, live, strip)
       this.installAssets(live, track, assetOf)
       const program = track.library
-      const signature = `${program.id}:${program.zones.length}:${program.samples.length}:${program.zones[0]?.id ?? ''}:${program.zones[program.zones.length - 1]?.id ?? ''}:${program.defaultSwitch ?? ''}`
+      const signature = `${program.id}:${program.zones.length}:${program.samples.length}:${program.zones[0]?.id ?? ''}:${program.zones[program.zones.length - 1]?.id ?? ''}`
       if (signature !== live.signature) {
         live.instrument.setProgram(program)
         live.signature = signature
       }
+      live.instrument.setKeyswitch(program.defaultSwitch)
       live.instrument.applyMics(program.mics)
       live.instrument.setVoiceLimit(phone ? Math.min(12, program.voices) : program.voices)
       for (const note of this.pending.get(track.id) ?? []) live.notes.push(note)
@@ -174,11 +176,20 @@ export class LibraryHost {
     run(rendered, frames)
   }
 
-  private installAssets(live: Live, track: Track, assetOf: (id: string) => { sampleRate: number; channels: Float32Array[] } | undefined) {
+  private installAssets(live: Live, track: Track, assetOf: (id: string) => { id?: string; name?: string; sampleRate: number; channels: Float32Array[] } | undefined) {
+    const seen = new Set<string>()
     for (const sample of track.library?.samples ?? []) {
+      if (sample.packId && !seen.has(sample.packId)) {
+        seen.add(sample.packId)
+        const packed = assetOf(sample.packId)
+        if (packed && isPackAsset(packed)) {
+          const pack = packFromAsset({ id: sample.packId, name: packed.name, channels: packed.channels })
+          if (pack) live.cache.holdPack(pack)
+        }
+      }
       if (!sample.bufferId) continue
       const asset = assetOf(sample.bufferId)
-      if (!asset?.channels?.length) continue
+      if (!asset?.channels?.length || isPackAsset(asset)) continue
       live.cache.holdAudio(sample.id, { sampleRate: asset.sampleRate, channels: asset.channels })
     }
   }
