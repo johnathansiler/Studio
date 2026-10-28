@@ -2,6 +2,20 @@ import { uid, type MidiClip, type MidiNote, type Track } from '../../model/types
 import { normalizeScaler } from './model'
 import type { ScalerNote } from './types'
 
+/** Empty slots stay as rests, so slot 3 is still the third bar. */
+export function notesFromSlots(slots: ({ notes: ScalerNote[] } | null)[], barBeats: number): ScalerNote[] {
+  const bar = Math.max(0.25, barBeats)
+  const notes: ScalerNote[] = []
+  let beat = 0
+  for (const slot of slots) {
+    if (slot) {
+      for (const note of slot.notes) notes.push({ ...note, startBeat: beat + note.startBeat })
+    }
+    beat += bar
+  }
+  return notes
+}
+
 export function clipFromNotes(notes: ScalerNote[], startBeat: number, name: string): MidiClip {
   const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0.25)
   return {

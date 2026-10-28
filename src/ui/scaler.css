@@ -35,6 +35,8 @@
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
   padding: 4px 8px;
   border-radius: 6px;
   background: #121820;
@@ -58,7 +60,7 @@
 }
 .stepper { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; }
 .stepper span { color: #8ea0b4; text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; }
-.stepper b { min-width: 52px; text-align: center; color: #7fe7f5; }
+.stepper b { min-width: 52px; max-width: 8.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; color: #7fe7f5; }
 .stepper button, .scaler-panel button { min-height: 28px; padding: 0 8px; }
 .stepper button { min-width: 26px; padding: 0; }
 .scaler-panel button.on, .scaler-card.on, .slot.focus {
@@ -70,8 +72,18 @@
 .scaler-scroll > * { flex-shrink: 0; }
 .scaler-keys-row { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 8px; align-items: stretch; }
 .scaler-sound { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.scaler-sounds, .scaler-families, .scaler-forward { display: flex; gap: 4px; overflow: auto; }
-.scaler-sounds button, .scaler-families button, .scaler-forward button { flex: none; }
+.scaler-sounds, .scaler-families, .scaler-forward, .scaler-scale-list {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.scaler-sounds, .scaler-forward { flex-wrap: nowrap; overflow-x: auto; }
+.scaler-families, .scaler-scale-list { flex-wrap: wrap; overflow: visible; }
+.scaler-sounds button, .scaler-families button, .scaler-forward button, .scaler-scale-list button {
+  flex: none;
+  white-space: nowrap;
+}
 .scaler-keys {
   position: relative;
   height: 118px;
@@ -125,6 +137,8 @@
   display: flex;
   gap: 8px;
   overflow-x: auto;
+  min-width: 0;
+  max-width: 100%;
   min-height: 96px;
   flex-shrink: 0;
   padding-bottom: 4px;
@@ -158,9 +172,23 @@
 .scaler-card .bar[data-mood="Dark"] { background: linear-gradient(90deg, #3a4e86, #6d4d8a); }
 .scaler-card .bar[data-mood="Mixed"] { background: linear-gradient(90deg, #4d5b6c, #3ec8de); }
 .scaler-card.on .bar { background: #08343c; }
+.scaler-card b, .scaler-card span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scaler-card b { font-size: 14px; }
 .scaler-card span { color: #93a6ba; font-size: 11px; }
-.scaler-card.on span, .scaler-card.on .mood em { color: #08343c; }
+.scaler-panel button.scaler-card.on,
+.scaler-panel button.slot.focus {
+  color: #062028;
+  background: linear-gradient(180deg, #e7fdff 0%, #7ee7f6 42%, #2eb4c8 100%);
+  border-color: #f4feff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 0 0 2px #08343c;
+}
+.scaler-panel button.scaler-card.on b,
+.scaler-panel button.scaler-card.on span,
+.scaler-panel button.scaler-card.on .mood em,
+.scaler-panel button.slot.focus b,
+.scaler-panel button.slot.focus span,
+.scaler-panel button.slot.focus .mood em { color: #062028; }
+.scaler-panel button.scaler-card.on .bar { background: #08343c; }
 .mood { display: flex; align-items: center; gap: 4px; width: 100%; }
 .mood i {
   display: block;
@@ -183,7 +211,7 @@
 }
 .mood-pill.uplifting { color: #f0c14a; }
 .mood-pill.tense { color: #8ea0ff; }
-.scaler-fold { border: 1px solid #2a3442; border-radius: 8px; background: #121820; padding: 6px 8px; }
+.scaler-fold { border: 1px solid #2a3442; border-radius: 8px; background: #121820; padding: 6px 8px; min-width: 0; max-width: 100%; }
 .scaler-fold summary { cursor: pointer; color: #9eb0c3; text-transform: uppercase; letter-spacing: 0.08em; }
 .scaler-table { display: flex; flex-direction: column; margin-top: 6px; max-height: 168px; overflow: auto; }
 .scaler-table .head, .scaler-table button {
@@ -202,9 +230,9 @@
 .scaler-table .head { color: #7f92a6; font-size: 10px; text-transform: uppercase; }
 .scaler-table button.on { background: #16323a; color: #e7fbff; }
 .scaler-table em { color: #3ec8de; font-style: normal; margin-right: 4px; }
-.scaler-scale-tools { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.scaler-scale-tools { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; min-width: 0; max-width: 100%; }
 .scaler-panel input { min-height: 32px; padding: 0 8px; width: 100%; }
-.scaler-scale-list { display: flex; gap: 4px; overflow: auto; }
+.fifths button.home { box-shadow: inset 0 0 0 2px #f0c14a; }
 .scaler-selected { display: flex; flex-direction: column; gap: 8px; }
 .scaler-voice-read p { margin: 0 0 6px; color: #9eb0c3; }
 .scaler-voice-read .notes { color: #e8fbff; font-size: 16px; }

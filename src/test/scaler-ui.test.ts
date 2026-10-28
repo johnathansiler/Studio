@@ -57,6 +57,12 @@ describe('scaler plugin panel', () => {
     expect(write).not.toContain('role="dialog"')
   })
 
+  it('highlights the selected chord and wraps the scale chips', () => {
+    const css = readFileSync(new URL('../ui/scaler.css', import.meta.url), 'utf8')
+    expect(css).toContain('.scaler-panel button.scaler-card.on')
+    expect(css).toMatch(/\.scaler-families, \.scaler-scale-list \{[^}]*flex-wrap:\s*wrap/)
+  })
+
   it('removes the Scales popup and the MIDI library button', () => {
     const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8')
     const dock = readFileSync(new URL('../ui/MidiDock.tsx', import.meta.url), 'utf8')

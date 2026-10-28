@@ -47,7 +47,7 @@ class RackProcessor extends AudioWorkletProcessor {
 
   constructor() {
     super()
-    this.port.onmessage = (event: MessageEvent<NoteMsg | StateMsg | ClockMsg | { type: 'off' }>) => {
+    this.port.onmessage = (event: MessageEvent<NoteMsg | StateMsg | ClockMsg | { type: 'off' } | { type: 'drop'; pitch: number }>) => {
       const data = event.data
       if (data.type === 'clock') {
         this.originTime = data.originTime
@@ -67,6 +67,9 @@ class RackProcessor extends AudioWorkletProcessor {
       } else if (data.type === 'off') {
         this.runtime.allOff()
         this.pending = []
+      } else if (data.type === 'drop') {
+        this.pending = this.pending.filter((note) => note.pitch !== data.pitch)
+        this.runtime.note(data.pitch, 0, this.rack?.polyphony ?? 8, false)
       }
     }
   }

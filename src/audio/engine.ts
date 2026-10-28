@@ -135,6 +135,9 @@ export class AudioEngine {
 
   private sources: Stoppable[] = []
   private previewStops: Stoppable[] = []
+  /** Notes from the last Scaler preview, so the next chord can cut them. */
+  private scalerVoices: Stoppable[] = []
+  private scalerMidi: { pitch: number; onAt: number }[] = []
   private warpPcm = new Map<string, Float32Array[]>()
   private scheduler = 0
   /** Beat repeat is armed, so the look-ahead pump stays up while transport is stopped. */
@@ -479,28 +482,49 @@ export class AudioEngine {
     applyRamps(param, automationSchedule(points, fallback, project, sample, now, end), now)
   }
 
-  /** Play Scaler notes through the track's chosen sound. Stays on the instrument strip. */
+  /** Play Scaler notes through the track's chosen sound. The previous preview chord is released first. */
   auditionScaler(trackId: string, notes: { pitch: number; fine?: number; delay: number; duration: number; velocity: number }[]) {
     this.unlock()
+    if (!notes.length) return
+    this.stopScalerPreview()
     if (this.project) this.sync(this.project, this.assetOf)
     const track = this.project?.tracks.find((item) => item.id === trackId)
     const strip = track ? this.strips.get(track.id) : undefined
     const ctx = this.ctx
-    if (!track || !strip || !ctx || !this.project || !notes.length) return
+    if (!track || !strip || !ctx || !this.project) return
     const routed = routeScaler(this.project, track)
     const out = this.strips.get(routed.liveStripId) ?? strip
     const now = ctx.currentTime + 0.03
     for (const note of notes) {
       const dur = Math.max(0.05, note.duration)
+      const pitch = Math.max(0, Math.min(127, Math.round(note.pitch)))
+      const when = now + Math.max(0, note.delay)
+      this.scalerMidi.push({ pitch, onAt: this.perfForContext(when) })
       this.scheduleVoice(ctx, out, {
         id: 'scaler',
-        pitch: Math.max(0, Math.min(127, Math.round(note.pitch))),
+        pitch,
         fine: note.fine,
         startBeat: 0,
         durationBeats: dur,
         velocity: Math.max(0.05, Math.min(1, note.velocity || 0.8)),
-      }, now + Math.max(0, note.delay), dur, routed.voice)
+      }, when, dur, routed.voice, this.scalerVoices)
     }
+  }
+
+  private stopScalerPreview() {
+    for (const src of this.scalerVoices) {
+      try { src.stop() } catch { /* already stopped */ }
+      try { src.disconnect() } catch { /* already disconnected */ }
+    }
+    this.scalerVoices = []
+    if (this.midiSink) {
+      const now = typeof performance !== 'undefined' ? performance.now() : 0
+      for (const item of this.scalerMidi) {
+        this.midiSink(noteBytes(false, this.midiOutChannel, item.pitch, 0), now)
+        this.midiSink(noteBytes(false, this.midiOutChannel, item.pitch, 0), Math.max(now, item.onAt) + 20)
+      }
+    }
+    this.scalerMidi = []
   }
 
   previewRack(trackId: string, pitch: number, slide = false, hold = false) {
@@ -2895,26 +2919,32 @@ export class AudioEngine {
     if (track?.instrument === 'drum-machine' && this.playDrum(ctx, strip, note, when, bucket)) return
     if (track?.instrument === 'library' && ctx === this.ctx) {
       if (track.library) {
+        const voiceId = track.id
         const at = Math.max(when, ctx.currentTime)
-        this.libraryHost.note(track.id, note.pitch, note.velocity, at)
-        this.libraryHost.note(track.id, note.pitch, 0, at + dur)
+        this.libraryHost.note(voiceId, note.pitch, note.velocity, at)
+        this.libraryHost.note(voiceId, note.pitch, 0, at + dur)
+        this.previewRelease(bucket, () => this.libraryHost.release(voiceId, note.pitch, this.ctx?.currentTime ?? 0))
       }
       return
     }
     if (track?.omniPatch?.enabled) {
       if (ctx === this.ctx) {
+        const voiceId = track.id
         const at = Math.max(when, ctx.currentTime)
-        this.patchHost.note(track.id, note.pitch, note.velocity, at)
-        this.patchHost.note(track.id, note.pitch, 0, at + dur)
+        this.patchHost.note(voiceId, note.pitch, note.velocity, at)
+        this.patchHost.note(voiceId, note.pitch, 0, at + dur)
+        this.previewRelease(bucket, () => this.patchHost.release(voiceId, note.pitch))
         return
       }
       this.schedulePatchOffline(ctx, strip, track, note, when, dur)
       return
     }
     if (track?.rack && ctx === this.ctx) {
+      const voiceId = track.id
       const at = Math.max(when, ctx.currentTime)
-      this.rackHost.note(track.id, note.pitch, note.velocity, at, !!note.slide)
-      this.rackHost.note(track.id, note.pitch, 0, at + dur)
+      this.rackHost.note(voiceId, note.pitch, note.velocity, at, !!note.slide)
+      this.rackHost.note(voiceId, note.pitch, 0, at + dur)
+      this.previewRelease(bucket, () => this.rackHost.release(voiceId, note.pitch, this.ctx?.currentTime ?? 0))
       return
     }
     if (ctx === this.ctx && when < ctx.currentTime) return
@@ -2978,8 +3008,14 @@ export class AudioEngine {
     if (ctx === this.ctx) this.sources.push(src)
   }
 
+  private previewRelease(bucket: Stoppable[] | undefined, stop: () => void) {
+    if (bucket !== this.scalerVoices) return
+    bucket.push({ stop, disconnect() {} })
+  }
+
   private stopSources() {
     this.stopPreview()
+    this.stopScalerPreview()
     for (const src of this.sources) {
       try {
         src.stop()

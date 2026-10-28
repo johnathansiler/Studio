@@ -3393,6 +3393,7 @@ export class ProjectStore {
     this.selectedMidiClipId = null
     this.selectedNoteId = null
     this.selectedNoteIds = []
+    if (this.scalerTrackId && !project.tracks.some((track) => track.id === this.scalerTrackId && track.type === 'midi')) this.scalerTrackId = null
     this.sync.rebase(this.project)
     this.emit()
   }

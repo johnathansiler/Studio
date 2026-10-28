@@ -1,6 +1,7 @@
 import { SCALES } from '../../model/scale'
-import { harmonize, nearestDegree, getScale, NOTE_NAMES } from '../../theory'
-import type { ScaleSpec } from '../../theory'
+import { detectScale, getScale, harmonize, nearestDegree, NOTE_NAMES, spellChord } from '../../theory'
+import type { ScaleSpec, Tone } from '../../theory'
+import type { ScalerNote } from './types'
 
 export interface Mood {
   /** -1 is dark and tense, 1 is bright and lifting. */
@@ -61,18 +62,28 @@ const CHURCH = ['ionian', 'dorian', 'phrygian', 'lydian', 'mixolydian', 'aeolian
 /** Circle of fifths, clockwise from C. */
 export const FIFTHS = [0, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10, 5]
 
+function scaleBias(scaleId: string) {
+  const id = scaleId.toLowerCase()
+  if (id === 'mixolydian') return 0.08
+  if (id === 'phrygiandominant') return -0.05
+  if (id === 'ionian' || id === 'lydian' || id === 'majorpentatonic' || id === 'melodicminor') return 0.16
+  if (id === 'aeolian' || id === 'phrygian' || id === 'locrian' || id === 'harmonicminor' || id === 'minorpentatonic' || id === 'blues') return -0.22
+  if (id.includes('minor') && !id.includes('melodic')) return -0.12
+  if (id.includes('major') || (id.includes('lydian') && !id.includes('mixo'))) return 0.1
+  return 0
+}
+
 export function moodOf(symbol: string, scaleId: string): Mood {
   const suffix = symbol.replace(/^[A-G](?:#|b)?/u, '').toLowerCase()
   let score = 0.05
   if (/dim|ø|m7b5|mb5/.test(suffix)) score -= 0.75
   else if (/aug|\+/.test(suffix)) score -= 0.25
   else if (/min|^m(?!aj)/.test(suffix)) score -= 0.5
-  else if (/maj|add|6|sus2|^$/.test(suffix) || suffix === '') score += 0.62
-  else if (/7/.test(suffix)) score += 0.12
-  else if (/sus/.test(suffix)) score += 0.05
-  const id = scaleId.toLowerCase()
-  if (/aeolian|phrygian|locrian|harmonicminor|minorpent|blues/.test(id)) score -= 0.22
-  if (/ionian|lydian|majorpent|melodicminor/.test(id)) score += 0.16
+  else if (/maj|^$/.test(suffix) || suffix === '') score += 0.62
+  else if (/add|6/.test(suffix)) score += 0.45
+  else if (/sus/.test(suffix)) score += 0.08
+  else if (/7|9|11|13/.test(suffix)) score += 0.12
+  score += scaleBias(scaleId)
   score = Math.max(-1, Math.min(1, score))
   const word = score > 0.18 ? 'Bright' : score < -0.18 ? 'Dark' : 'Mixed'
   const feel = score > 0.12 ? 'Uplifting' : score < -0.12 ? 'Tense' : 'Mixed'
@@ -92,40 +103,63 @@ export function qualityLabel(symbol: string, roman: string) {
   return `${roman} ${suffix || 'M'}`.trim()
 }
 
+export interface ModChord {
+  label: string
+  symbol: string
+  roman: string
+  root: number
+  scaleId: string
+  /** Choosing this chord moves the track into its key. */
+  adopt: boolean
+  tones: Tone[]
+}
+
+/** Still holds back, Animando spreads the notes, Push leans in. */
+export function expressNotes(notes: ScalerNote[], expression: number): ScalerNote[] {
+  return notes.map((note, index) => {
+    let velocity = note.velocity
+    let startBeat = note.startBeat
+    let durationBeats = note.durationBeats
+    if (expression <= 0) velocity *= 0.86
+    else if (expression === 1) {
+      startBeat += index * 0.03
+      velocity *= 0.92 + Math.min(0.16, index * 0.04)
+    } else {
+      velocity *= 1.12
+      durationBeats *= 0.82
+    }
+    return {
+      ...note,
+      startBeat: Math.max(0, startBeat),
+      durationBeats: Math.max(0.05, durationBeats),
+      velocity: Math.min(1, Math.max(0.05, velocity)),
+    }
+  })
+}
+
 export function detectedScales(notes: { midi: number; cents?: number }[], root: number, scaleId: string): DetectedScale[] {
-  const pool = new Map(builtinSpecs().map((scale) => [scale.id, scale]))
   if (notes.length >= 3) {
-    const ranked = rank(notes, [...pool.values()])
-    return ranked.slice(0, 5).map((row) => describe(row.root, row.scaleId, notes))
+    const ranked = detectScale(notes.map((note) => ({ midi: note.midi, cents: note.cents, weight: 1 })), builtinSpecs())
+    const seen = new Set<string>()
+    const top: { root: number; scaleId: string }[] = []
+    for (const row of ranked) {
+      const key = `${row.root}:${row.scaleId}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      top.push({ root: row.root, scaleId: row.scaleId })
+      if (top.length === 5) break
+    }
+    return top.map((row) => describe(row.root, row.scaleId, notes))
   }
   const offset = OFFSET[scaleId] ?? 0
   const parent = (root - offset + 12) % 12
   return CHURCH.map((id) => describe((parent + OFFSET[id]) % 12, id, notes))
 }
 
-export function modulationChords(kind: 'secondary' | 'parallel' | 'mediant', root: number, scaleId: string) {
-  if (kind === 'secondary') {
-    const target = (root + 7) % 12
-    return [
-      { label: NOTE_NAMES[root], root, scaleId },
-      { label: `${NOTE_NAMES[target]} dominant`, root: target, scaleId: 'mixolydian' },
-      { label: `${NOTE_NAMES[target]} major`, root: target, scaleId: 'ionian' },
-    ]
-  }
-  if (kind === 'parallel') {
-    const minor = thirdIsMinor(scaleId) ? 'ionian' : 'aeolian'
-    return [0, 5, 8, 10].map((step) => ({
-      label: NOTE_NAMES[(root + step) % 12],
-      root,
-      scaleId: step === 0 ? scaleId : minor,
-      degree: step,
-    }))
-  }
-  return [3, 4, 8, 9].map((step) => ({
-    label: NOTE_NAMES[(root + step) % 12],
-    root: (root + step) % 12,
-    scaleId: step === 3 || step === 8 ? 'aeolian' : 'ionian',
-  }))
+export function modulationChords(kind: 'secondary' | 'parallel' | 'mediant', homeRoot: number, homeScaleId: string, destRoot = (homeRoot + 7) % 12): ModChord[] {
+  if (kind === 'secondary') return secondaryPathway(homeRoot, homeScaleId, destRoot)
+  if (kind === 'parallel') return parallelChords(homeRoot, homeScaleId)
+  return mediantChords(homeRoot)
 }
 
 function describe(root: number, scaleId: string, notes: { midi: number; cents?: number }[]): DetectedScale {
@@ -153,25 +187,51 @@ function describe(root: number, scaleId: string, notes: { midi: number; cents?: 
   }
 }
 
-function rank(notes: { midi: number; cents?: number }[], scales: ScaleSpec[]) {
-  const rows: { root: number; scaleId: string; score: number }[] = []
-  for (const scale of scales) {
-    for (let root = 0; root < 12; root++) {
-      let score = 0
-      for (const note of notes) {
-        const relative = ((note.midi - root) * 100 + (note.cents ?? 0) + 12000) % 1200
-        score += Math.exp(-(nearestDegree(relative, scale.cents).distance ** 2) / (2 * 40 * 40))
-      }
-      rows.push({ root, scaleId: scale.id, score })
-    }
-  }
-  rows.sort((a, b) => b.score - a.score)
-  const seen = new Set<string>()
-  return rows.filter((row) => {
-    const key = `${row.root}:${row.scaleId}`
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
+function fromDiatonic(chord: { symbol: string; roman: string; tones: Tone[] }, root: number, scaleId: string, adopt: boolean, label = chord.roman): ModChord {
+  return { label, symbol: chord.symbol, roman: chord.roman, root, scaleId, adopt, tones: chord.tones }
+}
+
+function secondaryPathway(homeRoot: number, homeScaleId: string, destRoot: number): ModChord[] {
+  const home = harmonize(homeRoot, homeScaleId, 3)
+  const destScale = thirdIsMinor(homeScaleId) ? 'aeolian' : 'ionian'
+  const dest = harmonize(destRoot, destScale, 3)
+  const fifthUp = (homeRoot + 7) % 12 === destRoot
+  const pivotDegrees = fifthUp && home.length >= 7 ? (thirdIsMinor(homeScaleId) ? [0, 3, 4] : [5, 4, 2, 0]) : [0]
+  const pivots = pivotDegrees
+    .map((index) => home[index])
+    .filter((chord): chord is (typeof home)[number] => !!chord)
+    .map((chord) => fromDiatonic(chord, homeRoot, homeScaleId, false))
+  const dominantPc = (destRoot + 7) % 12
+  const dominant = spellChord(dominantPc, '7')
+  const destination = dest.map((chord, index) => fromDiatonic(chord, destRoot, destScale, true, index === 0 ? `${NOTE_NAMES[destRoot]} key` : chord.roman))
+  return [
+    ...pivots,
+    { label: 'V7', symbol: dominant.symbol, roman: 'V7', root: destRoot, scaleId: destScale, adopt: false, tones: dominant.tones },
+    ...destination,
+  ]
+}
+
+function parallelChords(homeRoot: number, homeScaleId: string): ModChord[] {
+  const other = thirdIsMinor(homeScaleId) ? 'ionian' : 'aeolian'
+  return harmonize(homeRoot, other, 3).map((chord) => fromDiatonic(chord, homeRoot, other, false))
+}
+
+/** Both qualities a minor third and a major third above and below the tonic. */
+function mediantChords(homeRoot: number): ModChord[] {
+  const steps = [
+    { semi: 8, scaleId: 'aeolian' },
+    { semi: 8, scaleId: 'ionian' },
+    { semi: 9, scaleId: 'aeolian' },
+    { semi: 9, scaleId: 'ionian' },
+    { semi: 3, scaleId: 'aeolian' },
+    { semi: 3, scaleId: 'ionian' },
+    { semi: 4, scaleId: 'aeolian' },
+    { semi: 4, scaleId: 'ionian' },
+  ]
+  return steps.flatMap((step) => {
+    const root = (homeRoot + step.semi) % 12
+    const chord = harmonize(root, step.scaleId, 3)[0]
+    return chord ? [fromDiatonic(chord, root, step.scaleId, true, NOTE_NAMES[root])] : []
   })
 }
 

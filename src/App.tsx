@@ -132,12 +132,6 @@ export function App() {
     return () => window.removeEventListener('cueharbor-open-sounds', open)
   }, [])
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('scaler') === '1' || params.get('library') === '1' || params.get('generate') === '1') {
-      store.insertScaler(null, params.get('generate') === '1' ? 'write' : 'play')
-    }
-  }, [store])
-  useEffect(() => {
     void loadScaleCatalog().then(() => setVersion((value) => value + 1))
   }, [])
   const [analysisTrackId, setAnalysisTrackId] = useState<string | null>(null)
@@ -435,6 +429,10 @@ export function App() {
         store.seedCompPreview()
         store.setView('arrange')
         engine.sync(store.project, (id) => store.buffers.get(id))
+        setVersion((value) => value + 1)
+      }
+      if (params.get('scaler') === '1' || params.get('library') === '1' || params.get('generate') === '1') {
+        store.insertScaler(null, params.get('generate') === '1' ? 'write' : 'play')
         setVersion((value) => value + 1)
       }
       saveReady.current = true

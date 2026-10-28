@@ -79,6 +79,21 @@ export class LibraryHost {
     live.notes.sort((a, b) => a.time - b.time)
   }
 
+  /** Drop a pitch's queued notes and release it, so a new chord does not leave the old one held. */
+  release(trackId: string, pitch: number, time: number) {
+    const midi = Math.round(pitch)
+    const live = this.lives.get(trackId)
+    if (!live) {
+      const queue = (this.pending.get(trackId) ?? []).filter((note) => note.pitch !== midi)
+      queue.push({ pitch: midi, vel: 0, time })
+      this.pending.set(trackId, queue)
+      return
+    }
+    live.notes = live.notes.filter((note) => note.pitch !== midi)
+    live.notes.push({ pitch: midi, vel: 0, time })
+    live.notes.sort((a, b) => a.time - b.time)
+  }
+
   holdPack(trackId: string, pack: SamplePack) {
     this.ensure(trackId, 48000).cache.holdPack(pack)
   }
