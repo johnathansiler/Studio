@@ -431,6 +431,10 @@ function applyDevice(store: ProjectStore, trackId: string, kind: 'audio' | 'midi
     if (fx) store.addMidiFx(track.id, fx)
     return
   }
+  if (id === 'scaler') {
+    store.addPlugin(track.id, 'scaler')
+    return
+  }
   const instrument = instrumentFor(id)
   if (instrument) store.updateTrack(track.id, { instrument })
 }

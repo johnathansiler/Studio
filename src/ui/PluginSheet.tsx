@@ -298,7 +298,7 @@ export function InsertList({ store, trackId }: { store: ProjectStore; trackId: s
       ))}
       <select className="insert-add" aria-label="Add insert" title="Add an effect. Auto-Tune is first." value="" onChange={(event) => addChoice(store, trackId, event.target.value)}>
         <option value="">+</option>
-        {orderedInserts(CATALOG.filter((plugin) => plugin.id !== 'meter' && (trackId === 'master' || !(MASTERING_IDS as readonly string[]).includes(plugin.id)))).map((plugin) => (
+        {orderedInserts(CATALOG.filter((plugin) => plugin.id !== 'meter' && !(plugin.id === 'scaler' && trackId === 'master') && (trackId === 'master' || !(MASTERING_IDS as readonly string[]).includes(plugin.id)))).map((plugin) => (
           <option key={plugin.id} value={plugin.id}>{plugin.name}</option>
         ))}
         {trackId !== 'master' && <option value="vocal">Vocal chain</option>}

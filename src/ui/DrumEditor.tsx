@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { drumIndex, DRUM_PADS } from '../model/drums'
 import { DRUM_PAGE, drumRows, hitAt, stepCount } from '../model/drumLanes'
-import { samplesToBeats } from '../model/time'
+import { projectSampleBeat } from '../model/tempoMap'
+import { displayedPlayhead } from '../model/transportSync'
 import { selectMidiEditor } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { TipButton } from './Hint'
@@ -17,11 +18,11 @@ export function DrumEditor({ store, engine }: { store: ProjectStore; engine: Aud
         setNow(-1)
         return
       }
-      const beat = samplesToBeats(engine.positionSamples, project.sampleRate, project.tempo) - clip.startBeat
+      const beat = projectSampleBeat(project, displayedPlayhead(engine.positionSamples, project)) - clip.startBeat
       setNow(Math.floor(beat / 0.25))
     }, 80)
     return () => window.clearInterval(timer)
-  }, [clip, engine, project.sampleRate, project.tempo])
+  }, [clip, engine, project])
 
   if (!track || !clip) return <p className="me-empty">Open a MIDI clip to edit drum lanes.</p>
   const rows = drumRows(clip.notes)

@@ -17,6 +17,7 @@ import {
 } from '../model/channelRack'
 import { type StepCell, type StepChannel } from '../model/steps'
 import { projectSampleBeat } from '../model/tempoMap'
+import { displayedPlayhead } from '../model/transportSync'
 import { fetchSoundBytes } from '../sounds/cache'
 import { catalogMessage, loadSoundCatalog } from '../sounds/catalog'
 import { decodeSoundBytes, matchProjectRate } from '../sounds/place'
@@ -336,7 +337,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
   const focus = selected ?? pattern.channels.find((row) => row.id === graphId) ?? pattern.channels[0]
   const pickedCell = picked ? pattern.channels.find((row) => row.id === picked.channelId)?.cells[picked.index] : undefined
   const outputs = project.tracks.filter((track) => track.type === 'bus' || track.type === 'group' || track.type === 'midi')
-  const beat = projectSampleBeat(project, sample)
+  const beat = projectSampleBeat(project, displayedPlayhead(sample, project))
   const count = pattern.steps
   const soloed = pattern.channels.some((row) => row.solo)
   const toolName = graph ? `Graph · ${GRAPH_LABELS[graphMode]}` : 'Paint'

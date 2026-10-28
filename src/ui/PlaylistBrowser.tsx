@@ -5,6 +5,7 @@ import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { SoundBrowser } from './SoundBrowser'
 import { TipButton } from './Hint'
+import { quickDragArmed } from './clipKeys'
 
 export type BrowserTab = 'sounds' | 'instruments' | 'loops' | 'patterns' | 'plugins' | 'clips'
 
@@ -49,6 +50,7 @@ export function PlaylistBrowser({
   const project = store.project
   const [query, setQuery] = useState('')
   const dragging = useRef(false)
+  const pointerDropped = useRef(0)
   const needle = query.trim().toLowerCase()
   const trackId = store.selectedTrackId || project.tracks[0]?.id || ''
 
@@ -72,6 +74,7 @@ export function PlaylistBrowser({
       const rect = inner?.getBoundingClientRect()
       const sample = rect ? Math.max(0, ((event.clientX - rect.left) / px) * project.sampleRate) : engine.currentTimelineSample()
       if (patternId) {
+        if (performance.now() - pointerDropped.current < 500) return
         store.selectPattern(patternId)
         store.placePattern(Math.max(0, projectSampleBeat(project, sample)), lane?.dataset.track)
         return
@@ -90,6 +93,19 @@ export function PlaylistBrowser({
       window.removeEventListener('drop', drop)
     }
   }, [engine, project, store, trackId])
+
+  function dropPattern(clientX: number, clientY: number, patternId: string) {
+    const hit = document.elementFromPoint(clientX, clientY)
+    if (!hit || hit.closest('.playlist-browser')) return
+    const lane = hit.closest('[data-track]') as HTMLElement | null
+    const inner = (hit.closest('.timeline-inner') ?? document.querySelector('.timeline-inner')) as HTMLElement | null
+    if (!inner && !lane) return
+    const px = Number(inner?.dataset.px) || 90
+    const rect = inner?.getBoundingClientRect()
+    const sample = rect ? Math.max(0, ((clientX - rect.left) / px) * project.sampleRate) : engine.currentTimelineSample()
+    store.selectPattern(patternId)
+    store.placePattern(Math.max(0, projectSampleBeat(project, sample)), lane?.dataset.track)
+  }
 
   const patterns = useMemo(
     () => (project.beats?.patterns ?? []).filter((item) => !needle || item.name.toLowerCase().includes(needle)),
@@ -169,14 +185,29 @@ export function PlaylistBrowser({
                 key={pattern.id}
                 type="button"
                 className="browser-row"
-                draggable={!phone}
-                title="Drag onto the playlist. It lands on Drums."
-                onPointerDown={() => { dragging.current = false }}
-                onDragStart={(event) => {
-                  dragging.current = true
-                  event.dataTransfer.setData(PATTERN_MIME, pattern.id)
-                  event.dataTransfer.setData('text/plain', pattern.id)
-                  event.dataTransfer.effectAllowed = 'copy'
+                title="Drag onto the playlist. It lands on the lane under the pointer."
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return
+                  dragging.current = false
+                  const startX = event.clientX
+                  const startY = event.clientY
+                  const node = event.currentTarget
+                  const move = (ev: PointerEvent) => {
+                    if (!quickDragArmed(ev.clientX - startX, ev.clientY - startY)) return
+                    dragging.current = true
+                    if (!node.hasPointerCapture(ev.pointerId)) node.setPointerCapture(ev.pointerId)
+                  }
+                  const up = (ev: PointerEvent) => {
+                    node.removeEventListener('pointermove', move)
+                    node.removeEventListener('pointerup', up)
+                    node.removeEventListener('pointercancel', up)
+                    if (!dragging.current) return
+                    pointerDropped.current = performance.now()
+                    dropPattern(ev.clientX, ev.clientY, pattern.id)
+                  }
+                  node.addEventListener('pointermove', move)
+                  node.addEventListener('pointerup', up)
+                  node.addEventListener('pointercancel', up)
                 }}
                 onClick={() => {
                   if (dragging.current) return

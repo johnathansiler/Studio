@@ -136,16 +136,22 @@
   font-size: 11px;
 }
 .loop-toggle.on { background: #2f6b45; color: white; border-color: transparent; }
+.loop-toggle.off {
+  background: #1c140c;
+  color: #e0b15a;
+  border-color: #e0b15a;
+}
 .loop-bar {
   position: absolute;
   top: 0;
   height: 8px;
-  background: rgba(115, 196, 143, 0.28);
-  border-bottom: 2px solid rgba(115, 196, 143, 0.45);
+  background: repeating-linear-gradient(90deg, rgba(224, 177, 90, 0.55) 0 8px, transparent 8px 14px);
+  border-bottom: 2px dashed #e0b15a;
   pointer-events: none;
   z-index: 4;
 }
-.loop-bar.on { background: rgba(115, 196, 143, 0.72); border-bottom-color: #73c48f; }
+.loop-bar.on { background: rgba(115, 196, 143, 0.85); border-bottom: 2px solid #73c48f; }
+.loop-bar:not(.on) .loop-handle { background: #e0b15a; }
 .loop-handle {
   position: absolute;
   top: 0;

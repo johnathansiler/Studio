@@ -1279,6 +1279,14 @@ export class ProjectStore {
   }
 
   focusPlugin(trackId: string | null, pluginId: string | null = null) {
+    if (trackId && pluginId) {
+      const plugin = this.pluginList(trackId)?.find((item) => item.id === pluginId)
+      if (plugin?.pluginId === 'scaler' && trackId !== 'master') {
+        this.pluginFocus = null
+        this.openScaler(trackId)
+        return
+      }
+    }
     this.pluginFocus = trackId && pluginId ? { trackId, pluginId } : null
     this.emit()
   }
@@ -1312,12 +1320,33 @@ export class ProjectStore {
   }
 
   addPlugin(trackId: string | 'master', pluginId: string, preset?: string) {
+    if (pluginId === 'scaler') {
+      this.insertScalerPlugin(trackId)
+      return
+    }
     this.mutate(() => {
       const list = this.pluginList(trackId)
       if (!list) return
       const chosen = preset ?? (pluginId === 'tune' ? TUNE_INSERT_PRESET : undefined)
       list.push(createPlugin(pluginId, chosen))
     })
+  }
+
+  /** Scaler is an insert. Adding it opens the same chord faceplate as the track menu. */
+  private insertScalerPlugin(trackId: string | 'master') {
+    let host = trackId !== 'master' ? this.track(trackId) : null
+    if (!host || host.type !== 'midi') host = this.project.tracks.find((track) => track.type === 'midi') ?? null
+    if (!host) {
+      this.insertScaler(null)
+      return
+    }
+    const hostId = host.id
+    this.mutate(() => {
+      const list = this.pluginList(hostId)
+      if (!list || list.some((item) => item.pluginId === 'scaler')) return
+      list.push(createPlugin('scaler'))
+    })
+    this.setTrackInstrument(hostId, 'scaler')
   }
 
   updatePlugin(trackId: string | 'master', pluginId: string, patch: Partial<PluginInstance>) {
