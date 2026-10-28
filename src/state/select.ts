@@ -75,7 +75,12 @@ export function selectBeats(store: { project: Project }) {
   }
 }
 
-export function selectSession(store: { project: Project; launched: Record<string, string | null> }) {
+export function selectSession(store: {
+  project: Project
+  launched: Record<string, string | null>
+  launchAt?: Record<string, number>
+  stopAt?: Record<string, number>
+}) {
   return {
     project: store.project,
     tracks: store.project.tracks,
@@ -83,6 +88,8 @@ export function selectSession(store: { project: Project; launched: Record<string
     launchQuant: store.project.launchQuant ?? '1bar',
     recordBars: store.project.recordBars ?? 0,
     launched: store.launched,
+    launchAt: store.launchAt ?? {},
+    stopAt: store.stopAt ?? {},
   }
 }
 
