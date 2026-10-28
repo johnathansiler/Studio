@@ -1,4 +1,5 @@
 import { clipNeedsStretch, preferStretchCache, renderClipChannels, sourceSamplesOf, timelineSamples } from './stretch/engine'
+import { onSpectralCommit } from './spectral/job'
 import { onStretchCommit, readStretch, storeStretch, stretchCacheKey, stretchSlot } from './stretch/commit'
 import type { StretchMode } from './stretch/engine'
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
@@ -154,6 +155,7 @@ export class AudioEngine {
   private readonly dropCommit = onStretchCommit((key) => {
     if (this.stretchKeys.has(key)) this.adoptCommit()
   })
+  private readonly dropSpectral = onSpectralCommit(() => this.adoptSpectral())
   private recorders = new Map<string, ActiveRec>()
   private pendingRecorders: { key: string; stream: MediaStream; handler: () => void }[] = []
   private rollingChunks: SliceChunk[] = []
@@ -2288,6 +2290,18 @@ export class AudioEngine {
       return pcm
     }
     return readStretch(key, channels, clip, project)
+  }
+
+  /** Replay from the playhead so a finished spectral render is what you hear. */
+  private adoptSpectral() {
+    void this.dropSpectral
+    if (!this.playing || !this.ctx || !this.project) return
+    if (this.mode === 'session') {
+      this.stopSources()
+      this.scheduleAhead()
+      return
+    }
+    this.adoptCommit()
   }
 
   /** Swap a live preview for the committed render without moving the playhead. */

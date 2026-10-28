@@ -1,6 +1,6 @@
 import type { ScaleState } from '../model/scale'
 import type { QuantizeSettings } from '../model/quantize'
-import type { PluginInstance, Project, Track } from '../model/types'
+import type { AudioClip, PluginInstance, Project, Track } from '../model/types'
 
 /**
  * Read models for the studio surfaces.
@@ -137,6 +137,22 @@ export function selectQuantize(store: Pick<Store, 'project' | 'quantizeOpen' | '
     presets: store.project.quantizePresets ?? [],
     tempo: store.project.tempo,
   }
+}
+
+export function selectSpectral(store: { project: Project; spectralTrackId: string | null; spectralClipId: string | null }) {
+  const track = store.project.tracks.find((item) => item.id === store.spectralTrackId) ?? null
+  const clip = track?.clips.find((item) => item.id === store.spectralClipId) ?? null
+  return {
+    project: store.project,
+    track,
+    clip,
+    repair: clip?.spectral ?? null,
+    sampleRate: store.project.sampleRate,
+  }
+}
+
+export function selectClipRepair(clip: AudioClip | null | undefined) {
+  return clip?.spectral ?? null
 }
 
 export function selectKnock(store: { project: Project }) {
