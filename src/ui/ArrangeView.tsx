@@ -18,6 +18,7 @@ import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
 import { AddTrackButton } from './AddTrack'
 import { AutoFader, AutomationModeBar, AutomationOverlay, LanePicker, LinkGroup, MixFlags } from './AutomationLane'
+import { AutoTuneLaneMark, AutoTuneTrackButton, addOrOpenAutoTune } from './AutoTuneFace'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { TRACK_ROW, TRACK_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
@@ -397,6 +398,7 @@ export function ArrangeView({
             </header>
             <div className="row">
               <MixFlags store={store} trackId={track.id} />
+              {track.type === 'audio' && <AutoTuneTrackButton store={store} trackId={track.id} />}
               <button type="button" className={`mini auto-open ${store.openLanes[track.id] ? 'on' : ''}`} aria-pressed={!!store.openLanes[track.id]} aria-label="Automation lane" title="Show the automation lane for this track." onClick={(event) => { event.stopPropagation(); store.toggleAutomation(track.id) }}>
                 Auto
               </button>
@@ -520,6 +522,7 @@ export function ArrangeView({
                 store.addMidiClip(track.id, Math.floor(projectSampleBeat(project, sample)))
               }}
             >
+              <AutoTuneLaneMark plugins={track.plugins} />
               {ghost?.trackId === track.id && (
                 <div className="clip" data-draw="1" style={{ left: ghost.left, width: Math.max(8, ghost.width), opacity: 0.45, pointerEvents: 'none' }} />
               )}
@@ -627,6 +630,17 @@ export function ArrangeView({
               hint={copyOf(TRACK_SHEET, 'monitor').hint}
               pressed={sheetTrack.monitor}
               onClick={() => store.updateTrack(sheetTrack.id, { monitor: !sheetTrack.monitor })}
+            />
+          )}
+          {sheetTrack.type === 'audio' && (
+            <SheetRow
+              label="Auto-Tune"
+              hint="Add or open Auto-Tune."
+              pressed={sheetTrack.plugins.some((plugin) => plugin.pluginId === 'tune' && plugin.enabled)}
+              onClick={() => {
+                addOrOpenAutoTune(store, sheetTrack.id)
+                setTrackSheet(null)
+              }}
             />
           )}
           <label className="sheet-range">

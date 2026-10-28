@@ -3,6 +3,7 @@ import { spectralKey, ensureRepair, pushOp, sliceRegion } from '../audio/spectra
 import { learnOffline } from '../audio/spectral/job'
 import type { SpectralAction, SpectralRegion } from '../audio/spectral/types'
 import { scheduleStretchCommit, stretchCacheKey } from '../audio/stretch/commit'
+import { TUNE_INSERT_PRESET } from '../audio/plugins/autoTune'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
 import {
   detectRoot,
@@ -96,6 +97,7 @@ import { cloneOmni, emptyOmni, type OmniPatch } from '../instruments/patch'
 import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
 import { lockedTone, scaleIsMicrotonal } from '../theory/lock'
+import { applyPatternLength, makeRackChannel, type RackChoice } from '../model/channelRack'
 import {
   clampSwing,
   clonePattern,
@@ -1064,12 +1066,13 @@ export class ProjectStore {
     this.mutate(() => {
       const list = this.pluginList(trackId)
       if (!list) return
-      list.push(createPlugin(pluginId, preset))
+      const chosen = preset ?? (pluginId === 'tune' ? TUNE_INSERT_PRESET : undefined)
+      list.push(createPlugin(pluginId, chosen))
     })
   }
 
   updatePlugin(trackId: string | 'master', pluginId: string, patch: Partial<PluginInstance>) {
-    this.mutate(() => {
+    const edit = () => {
       const plugin = this.pluginList(trackId)?.find((item) => item.id === pluginId)
       if (!plugin) return
       if (patch.enabled != null) plugin.enabled = patch.enabled
@@ -1078,7 +1081,9 @@ export class ProjectStore {
       if (patch.params) plugin.params = { ...plugin.params, ...patch.params }
       if (patch.sampler) plugin.sampler = patch.sampler
       if (patch.looper) plugin.looper = patch.looper
-    })
+    }
+    if (this.touching) this.draft(edit)
+    else this.mutate(edit)
   }
 
   setSampleBuffer(trackId: string | 'master', pluginId: string, bufferId: string) {
@@ -3589,6 +3594,26 @@ export class ProjectStore {
     })
   }
 
+  /** 16, 32, or 64. Channels that matched the old length grow or shrink with it. */
+  setPatternLength(steps: number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (pattern) applyPatternLength(pattern, steps)
+    })
+  }
+
+  addPatternChannel(choice: RackChoice) {
+    let id = ''
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (!pattern) return
+      const channel = makeRackChannel(choice, pattern.steps)
+      pattern.channels.push(channel)
+      id = channel.id
+    })
+    return id
+  }
+
   editChannel(channelId: string, fn: (cells: StepCell[], count: number) => StepCell[] | void, draft = false) {
     const run = (body: () => void) => (draft ? this.draft(body) : this.mutate(body))
     run(() => {
@@ -3601,8 +3626,9 @@ export class ProjectStore {
     })
   }
 
-  editStep(channelId: string, index: number, patch: Partial<Pick<StepCell, 'velocity' | 'pan' | 'pitch' | 'fine' | 'gate'>>) {
-    this.mutate(() => {
+  editStep(channelId: string, index: number, patch: Partial<Pick<StepCell, 'velocity' | 'pan' | 'pitch' | 'fine' | 'gate'>>, drag = false) {
+    const run = (body: () => void) => (drag ? this.draft(body) : this.mutate(body))
+    run(() => {
       const cell = this.activePattern()?.channels.find((row) => row.id === channelId)?.cells[index]
       if (!cell) return
       if (patch.velocity != null) cell.velocity = Math.max(0.05, Math.min(1, patch.velocity))
@@ -3613,8 +3639,9 @@ export class ProjectStore {
     })
   }
 
-  setChannel(channelId: string, patch: Partial<{ volume: number; pan: number; mute: boolean; solo: boolean; output: string | null; steps: number; swing: number | null; name: string }>) {
-    this.mutate(() => {
+  setChannel(channelId: string, patch: Partial<{ volume: number; pan: number; mute: boolean; solo: boolean; output: string | null; steps: number; swing: number | null; name: string }>, drag = false) {
+    const run = (body: () => void) => (drag ? this.draft(body) : this.mutate(body))
+    run(() => {
       const channel = this.activePattern()?.channels.find((row) => row.id === channelId)
       if (!channel) return
       Object.assign(channel, patch)
@@ -3622,11 +3649,12 @@ export class ProjectStore {
     })
   }
 
-  fillChannel(every: number) {
+  fillChannel(every: number, channelId?: string) {
     this.mutate(() => {
       const pattern = this.activePattern()
       if (!pattern) return
       for (const channel of pattern.channels) {
+        if (channelId && channel.id !== channelId) continue
         const count = channel.steps || pattern.steps
         channel.cells = fillEvery(channel.cells, every, count)
       }

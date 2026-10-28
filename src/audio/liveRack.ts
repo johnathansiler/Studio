@@ -1,5 +1,5 @@
 import type { PluginInstance, Project } from '../model/types'
-import { scaleById } from '../model/scale'
+import { tuneBlockScale } from './plugins/autoTune'
 import type { StripNodes } from './strips'
 import { processChain, type ChainSlot } from './plugins/chain'
 import { automationAt, latencyOf } from './plugins/catalog'
@@ -225,7 +225,7 @@ export class LiveRack {
     const output = [event.outputBuffer.getChannelData(0), event.outputBuffer.getChannelData(1)]
     const beatAt = (sample: number) => projectSampleBeat(project, sample)
     const beat = beatAt(this.clock())
-    const scale = scaleById(project.scale?.scale)
+    const scale = tuneBlockScale(project.scale)
     for (const plugin of plugins) {
       const proc = this.processors.get(plugin.id) as Processor & { bind?: (plugin: PluginInstance, channel: (id: string) => Float32Array | null) => void }
       proc?.bind?.(plugin, (id) => this.assetOf(id)?.channels[0] ?? null)
@@ -247,8 +247,9 @@ export class LiveRack {
       tempo: project.tempo,
       sampleTime: origin,
       sidechain: null,
-      scaleRoot: project.scale?.root ?? 0,
-      scaleIntervals: scale.intervals,
+      scaleRoot: scale.scaleRoot,
+      scaleIntervals: scale.scaleIntervals,
+      scaleCents: scale.scaleCents,
       quality: this.quality,
       offline: false,
     }
@@ -450,7 +451,7 @@ export class LiveRack {
   private latency(owner: string, plugins: PluginInstance[], sampleRate: number) {
     const tap = this.taps.get(owner)
     const script = tap && !tap.direct ? 256 : 0
-    return script + plugins.reduce((sum, plugin) => sum + latencyOf(plugin.pluginId, plugin.params, sampleRate, plugin.enabled && plugin.wet > 0), 0)
+    return script + plugins.reduce((sum, plugin) => sum + latencyOf(plugin.pluginId, plugin.params, sampleRate, plugin.enabled && plugin.wet > 0, true), 0)
   }
 
   private link(ctx: AudioContext, from: AudioNode, to: AudioNode, samples: number) {
