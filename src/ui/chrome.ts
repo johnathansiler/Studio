@@ -6,6 +6,12 @@ export interface Copy {
   hint: string
 }
 
+export const UNSTUCK_COPY: Copy = {
+  id: 'unstuck',
+  label: 'Unstuck',
+  hint: 'Suggest the next chord, section, transition, or arrangement.',
+}
+
 export const VIEW_COPY: Copy[] = [
   { id: 'arrange', label: 'Arrange', hint: 'Clips on a timeline. The tools above change what a tap does.' },
   { id: 'mix', label: 'Mix', hint: 'Level, pan, and effects for each track.' },
@@ -32,6 +38,8 @@ export const MENU_COPY: Copy[] = [
   { id: 'keys', label: 'Keys', hint: 'Play the instrument on a keyboard.' },
   { id: 'pads', label: 'Pads', hint: 'Play drums on pads.' },
   { id: 'piano', label: 'Piano', hint: 'Open the piano roll for the instrument track.' },
+  { id: 'generate', label: 'Generate', hint: 'Write chords, bass, melody, arp, strum, or drums onto a track.' },
+  { id: 'players', label: 'Players', hint: 'A drummer, bass, and keys that follow the song. Writes MIDI you can edit.' },
   { id: 'quantize', label: 'Quantize', hint: 'Snap the selected notes onto the grid.' },
   { id: 'quantize-more', label: 'Quantize…', hint: 'Choose the grid and how hard to snap.' },
   { id: 'click', label: 'Click', hint: 'Metronome while you play and record.' },
@@ -51,6 +59,7 @@ export const MENU_COPY: Copy[] = [
 
 export const PIANO_BAR: Copy[] = [
   { id: 'chords', label: 'Chords', hint: 'Pads of chords in the current key.' },
+  { id: 'generate', label: 'Generate', hint: 'Write chords, bass, melody, arp, strum, or drums you can edit.' },
   { id: 'key', label: 'Key', hint: 'The key. Notes in the scale are marked on the keyboard.' },
   { id: 'scale', label: 'Scale', hint: 'Which notes are in key. Others show in amber.' },
   { id: 'snap', label: 'Snap', hint: 'New notes land on the scale.' },
