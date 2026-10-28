@@ -1,5 +1,6 @@
 import type { GeneratorSettings } from '../generators/types'
 import { activeScaleId, followSource } from '../generators/adapt'
+import { isDrumTrack } from '../model/drumLanes'
 import { normalizePlayer } from '../players/settings'
 import type { ScaleState } from '../model/scale'
 import type { QuantizeSettings } from '../model/quantize'
@@ -9,6 +10,7 @@ import { findLane, modeOf, specKey, valueAtMappedSample, type AutoSpec } from '.
 import { groupForTrack } from '../model/mixGroups'
 import { DEVICE_PARAMS } from '../model/rack'
 import { orderedSections } from '../model/sections'
+import { normalizeMidiEditor } from '../model/stepEntry'
 import { meterChanges, projectTempoMap } from '../model/tempoMap'
 import type { AudioClip, LiveCaptureSettings, MeterChange, MidiFx, MidiMapEntry, MidiOutSettings, PluginInstance, Project, SongSection, TempoPoint, Track } from '../model/types'
 import {
@@ -98,6 +100,15 @@ export function selectTransport(store: { project: Project }) {
 
 export function selectScale(store: { scaleState(): ScaleState }) {
   return store.scaleState()
+}
+
+export function selectMidiEditor(store: Pick<Store, 'project' | 'selectedMidiClipId' | 'scaleState'>) {
+  const piano = selectPiano(store)
+  return {
+    ...piano,
+    editor: normalizeMidiEditor(store.project.midiEditor),
+    drumTrack: piano.track ? isDrumTrack(piano.track) : false,
+  }
 }
 
 export function selectPiano(store: Pick<Store, 'project' | 'selectedMidiClipId' | 'scaleState'>) {
