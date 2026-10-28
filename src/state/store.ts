@@ -96,6 +96,7 @@ import {
   type QuantizeSettings,
 } from '../model/quantize'
 import { cloneOmni, emptyOmni, type OmniPatch } from '../instruments/patch'
+import { placeholderInstrumentName } from '../sounds/instruments'
 import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
 import { clipFromNotes, recordOnto, rememberVoice } from '../instruments/scaler/clips'
@@ -238,6 +239,9 @@ export class ProjectStore {
   private tempoGroup = false
   toasts: Toast[] = []
   version = 0
+  /** Project edits since the last successful save. Selecting a track does not count. */
+  private editGeneration = 0
+  private savedGeneration = 0
   rowClipboard: StepCell[] | null = null
   private past: string[] = []
   private future: string[] = []
@@ -355,8 +359,22 @@ export class ProjectStore {
     this.quantizePreview = null
     this.drafted = false
     this.snapshot()
+    this.editGeneration += 1
     fn()
     this.emit()
+  }
+
+  hasUnsavedEdits() {
+    return this.editGeneration !== this.savedGeneration
+  }
+
+  /** Mark the project saved only when nothing newer landed while the write was in flight. */
+  markSaved(stamp = this.editGeneration) {
+    if (stamp === this.editGeneration) this.savedGeneration = stamp
+  }
+
+  editStamp() {
+    return this.editGeneration
   }
 
   /** One undo step for a drag. The first call snapshots; later calls only edit. */
@@ -365,6 +383,7 @@ export class ProjectStore {
     if (!this.drafted) {
       this.snapshot()
       this.drafted = true
+      this.editGeneration += 1
     }
     fn()
     this.emit()
@@ -1116,10 +1135,19 @@ export class ProjectStore {
         track.scaler = normalizeScaler({ ...normalizeScaler(track.scaler), sound: 'library' })
         return
       }
+      this.titleLibrary(track, program)
       track.instrument = 'library'
       track.library = program ?? undefined
       if (!track.rack?.devices?.length) normalizeTrackRack(track)
     })
+  }
+
+  /** The header shows the track name. A placeholder becomes the instrument that just landed. */
+  private titleLibrary(track: Track, program: SamplerProgram | null | undefined) {
+    if (!program?.name) return
+    const previous = track.library?.name
+    if (!placeholderInstrumentName(track.name, previous)) return
+    track.name = program.name.slice(0, 64)
   }
 
   /** Same as setLibrary, and keep imported wavs and SoundFont packs in the project so they save. */
@@ -1134,6 +1162,7 @@ export class ProjectStore {
         if (pack) this.buffers.set(pack.id, packToAsset(pack))
         return
       }
+      this.titleLibrary(track, program)
       track.instrument = 'library'
       track.library = program
       for (const asset of assets) this.buffers.set(asset.id, asset)
@@ -3692,9 +3721,15 @@ export class ProjectStore {
     this.buffers = buffers
     this.selectedTrackId = project.tracks[0]?.id ?? null
     this.selectedClipId = null
+    this.selectedClipIds = []
     this.selectedMidiClipId = null
+    this.selectedMidiClipIds = []
+    this.selectedPatternClipId = null
+    this.selectedPatternClipIds = []
     this.selectedNoteId = null
     this.selectedNoteIds = []
+    this.editGeneration = 0
+    this.savedGeneration = 0
     if (this.scalerTrackId && !project.tracks.some((track) => track.id === this.scalerTrackId && track.type === 'midi')) this.scalerTrackId = null
     this.sync.rebase(this.project)
     this.emit()

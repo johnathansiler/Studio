@@ -5,7 +5,7 @@ import { decodeSlotFile, focusedSlot, SOUND_MIME } from '../audio/sample/slot'
 import { uid } from '../model/types'
 import { fetchSoundBytes, soundCache } from '../sounds/cache'
 import { catalogMessage, filterSounds, loadSoundCatalog, soundKeys } from '../sounds/catalog'
-import { filterStarters, loadStarterOnto, playableAudition, refreshStarterCatalog, starterCatalog } from '../sounds/instruments'
+import { boundLibraryHost, filterStarters, loadStarterOnto, playableAudition, refreshStarterCatalog, starterCatalog } from '../sounds/instruments'
 import { matchCountLabel, readSoundWidth, soundWidthFromDrag, writeSoundWidth } from '../sounds/panel'
 import { audioTrackFor, decodeSoundBytes, placeSound, previewChannelsFor, trackIdFromDrop } from '../sounds/place'
 import { soundFileUrl } from '../sounds/source'
@@ -181,7 +181,7 @@ export function SoundBrowser({
   const total = filtered.length + starterRows.length
   const keys = soundKeys(result.entries)
   const queryActive = Boolean(text || type !== 'all' || bpm !== 'any' || key || favoritesOnly)
-  const waiting = loading || (!startersReady && type !== 'one-shot' && type !== 'loop')
+  const waiting = loading || (!startersReady && type !== 'one-shot' && type !== 'loop' && type !== 'drum')
   const message = waiting
     ? 'Loading sounds…'
     : total
@@ -327,11 +327,7 @@ export function SoundBrowser({
         const choice = program ? playableAudition(program) : { pitch: 60, velocity: 0.9 }
         await engine.auditionLibrary(target, choice.pitch, choice.velocity)
       } else {
-        await loadStarterOnto(entry, target, {
-          setLibrary: (id, program) => store.setLibrary(id, program),
-          holdLibraryPack: engine.holdLibraryPack,
-          auditionLibrary: audition ? engine.auditionLibrary : undefined,
-        }, { audition })
+        await loadStarterOnto(entry, target, boundLibraryHost(engine, (id, program) => store.setLibrary(id, program), audition), { audition })
       }
       const name = store.track(target)?.name ?? 'the track'
       store.toast(`${entry.name} is on ${name}.`, 'good')
@@ -382,10 +378,11 @@ export function SoundBrowser({
           onChange={(event) => setText(event.target.value)}
         />
         {!lockType && (
-          <select aria-label="Kind. One-shots, loops, or instruments." title="One-shots, loops, or instruments." value={type} onChange={(event) => setType(event.target.value as SoundQuery['type'])}>
+          <select aria-label="Kind. One-shots, loops, drums, or instruments." title="One-shots, loops, drums, or instruments." value={type} onChange={(event) => setType(event.target.value as SoundQuery['type'])}>
             <option value="all">All kinds</option>
             <option value="one-shot">One-shots</option>
             <option value="loop">Loops</option>
+            <option value="drum">Drums</option>
             <option value="instrument">Instruments</option>
           </select>
         )}

@@ -242,7 +242,7 @@ export function PianoRoll({ store, engine, onIdeas, onGenerate }: { store: Proje
       engine.unlock()
       void engine.resume()
       if (tone.cents) engine.liveNoteOn(tone.midi, level, -1, 0, { tune: tone.cents / 100 })
-      else engine.liveNoteOn(tone.midi, level)
+      else engine.playThrough(track.id, tone.midi, level)
       fingers.current.set(pointerId, { pitch: tone.midi, fine: tone.cents, eventMs: event.timeStamp, velocity: level })
       return
     }
@@ -250,7 +250,10 @@ export function PianoRoll({ store, engine, onIdeas, onGenerate }: { store: Proje
     fingers.current.delete(pointerId)
     if (!held) return
     const still = [...fingers.current.values()].some((item) => item.pitch === held.pitch)
-    if (!still) engine.liveNoteOff(held.pitch)
+    if (!still) {
+      if (held.fine) engine.liveNoteOff(held.pitch)
+      else engine.releaseThrough(track.id, held.pitch)
+    }
     const playing = engine.status === 'playing' || engine.status === 'recording'
     if (!keyCommitsNote(store.midiEditor().stepInput)) return
     const start = playing ? performanceBeat(store, engine, held.eventMs) : timelineBeat(store, engine)

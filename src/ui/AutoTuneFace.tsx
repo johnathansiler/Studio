@@ -121,6 +121,16 @@ export function AutoTuneFace({
   const rangeAt = nearestRange(values.minHz ?? 80, values.maxHz ?? 1000)
 
   useEffect(() => {
+    const viewBox = canvas.current
+    if (viewBox && viewBox.clientWidth > 0 && viewBox.clientHeight > 0) {
+      const dpr = Math.min(2, window.devicePixelRatio || 1)
+      const width = Math.round(viewBox.clientWidth * dpr)
+      const height = Math.round(viewBox.clientHeight * dpr)
+      if (viewBox.width !== width || viewBox.height !== height) {
+        viewBox.width = width
+        viewBox.height = height
+      }
+    }
     drawGraph(canvas.current, shownTrace, values)
   }, [shownTrace, revision, values, view])
 
@@ -198,7 +208,7 @@ export function AutoTuneFace({
             />
           ) : null}
           <button type="button" title="Save these settings under a name." aria-label="Save preset. Keep these settings under a name." onClick={() => { setDraft(active ?? ''); setNaming((open) => !open) }}>Save</button>
-          <button type="button" className={enabled ? '' : 'on'} aria-pressed={!enabled} title={enabled ? 'Bypass the whole plugin.' : 'Turn correction back on.'} aria-label={enabled ? 'Bypass. Turn correction off.' : 'Bypassed. Turn correction on.'} onClick={onBypass}>{enabled ? 'Bypass' : 'Bypassed'}</button>
+          <button type="button" className={`bypass-toggle ${enabled ? '' : 'lit'}`} data-bypass={enabled ? 'off' : 'on'} aria-pressed={!enabled} title={enabled ? 'Bypass the whole plugin.' : 'Turn correction back on.'} aria-label={enabled ? 'Bypass. Correction is on.' : 'Bypassed. Correction is off.'} onClick={onBypass}>{enabled ? 'Bypass' : 'Bypassed'}</button>
           <button type="button" className={`more ${more ? 'on' : ''}`} aria-pressed={more} title="Show the rest of the controls." aria-label="More. Show flex, vibrato, reference, and tone." onClick={() => setMore((open) => !open)}>More</button>
         </div>
       </header>
