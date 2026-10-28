@@ -130,6 +130,11 @@ export function App() {
   const [soundWidth, setSoundWidth] = useState(() => readSoundWidth(undefined, window.innerWidth))
   const soundReserveRef = useRef(0)
   useEffect(() => {
+    const open = () => setSoundsOpen(true)
+    window.addEventListener('cueharbor-open-sounds', open)
+    return () => window.removeEventListener('cueharbor-open-sounds', open)
+  }, [])
+  useEffect(() => {
     void loadScaleCatalog().then(() => setVersion((value) => value + 1))
   }, [])
   const [analysisTrackId, setAnalysisTrackId] = useState<string | null>(null)

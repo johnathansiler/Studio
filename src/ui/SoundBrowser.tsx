@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
 import type { LibraryEntry } from '../audio/multisample/library'
 import type { SamplePack } from '../audio/multisample/types'
+import { decodeSlotFile, focusedSlot, SOUND_MIME } from '../audio/sample/slot'
+import { uid } from '../model/types'
 import { fetchSoundBytes, soundCache } from '../sounds/cache'
 import { catalogMessage, filterSounds, loadSoundCatalog, soundKeys } from '../sounds/catalog'
 import { filterStarters, loadStarterOnto, playableAudition, refreshStarterCatalog, starterCatalog } from '../sounds/instruments'
@@ -13,7 +15,6 @@ import type { ProjectStore } from '../state/store'
 import { TipButton } from './Hint'
 import './sound-browser.css'
 
-const SOUND_MIME = 'application/x-cueharbor-sound'
 const INSTRUMENT_PREFIX = 'instrument:'
 let dragId = ''
 
@@ -73,6 +74,7 @@ export function SoundBrowser({
   const startersRef = useRef(starters)
   const addRef = useRef<(entry: SoundEntry, trackId?: string | null) => void>(() => undefined)
   const loadRef = useRef<(entry: LibraryEntry, trackId?: string | null) => void>(() => undefined)
+  const slotRef = useRef<(entry: SoundEntry) => void>(() => undefined)
   entriesRef.current = result.entries
   startersRef.current = starters
 
@@ -126,12 +128,17 @@ export function SoundBrowser({
       event.preventDefault()
       dragId = ''
       if (id.startsWith(INSTRUMENT_PREFIX)) {
-        const entry = startersRef.current.find((item) => item.id === id.slice(INSTRUMENT_PREFIX.length))
-        if (entry) loadRef.current(entry, trackIdFromDrop(target))
+        const starter = startersRef.current.find((item) => item.id === id.slice(INSTRUMENT_PREFIX.length))
+        if (starter) loadRef.current(starter, trackIdFromDrop(target))
         return
       }
       const entry = entriesRef.current.find((item) => item.id === id)
-      if (entry) addRef.current(entry, trackIdFromDrop(target))
+      if (!entry) return
+      if (target?.closest('[data-slot-drop]')) {
+        slotRef.current(entry)
+        return
+      }
+      addRef.current(entry, trackIdFromDrop(target))
     }
     window.addEventListener('dragover', allow)
     window.addEventListener('drop', drop)
@@ -171,6 +178,7 @@ export function SoundBrowser({
       ? `${soundWhere} ${instrumentWhere}`
       : soundWhere
   const count = matchCountLabel(total, shown)
+  const slot = focusedSlot(store)
 
   async function reload() {
     setLoading(true)
@@ -247,6 +255,38 @@ export function SoundBrowser({
     void add(entry, trackId)
   }
 
+  async function intoSlot(entry: SoundEntry) {
+    const open = focusedSlot(store)
+    if (!open) {
+      store.toast('Open a sampler or looper first.', 'warn')
+      return
+    }
+    setBusy(entry.id)
+    try {
+      const bytes = await fetchSoundBytes(soundFileUrl(entry.path))
+      const decoded = await decodeSlotFile(bytes)
+      if (!decoded.channels[0]?.length) {
+        store.toast('That sound had no audio.', 'warn')
+        return
+      }
+      store.loadSlotAudio(open.trackId, open.pluginId, {
+        id: uid('smp'),
+        name: entry.name,
+        sampleRate: decoded.sampleRate,
+        channels: decoded.channels,
+      })
+      store.toast(`${entry.name} is in the ${open.kind}.`, 'good')
+    } catch (error) {
+      store.toast(error instanceof Error ? error.message : 'Could not load that sound.', 'warn')
+    } finally {
+      setBusy('')
+    }
+  }
+  slotRef.current = (entry) => {
+    engine.unlock()
+    void intoSlot(entry)
+  }
+
   async function loadInstrument(entry: LibraryEntry, trackId?: string | null, audition = true) {
     if (store.remoteFollow) {
       store.toast('The host owns the arrangement.', 'warn')
@@ -312,7 +352,7 @@ export function SoundBrowser({
       <div className="sound-head">
         <div>
           <h2>Sounds</h2>
-          <p>{phone ? 'Tap Add to put a sound on the selected track.' : 'Drag a sound onto a track, or tap Add. It lands at the playhead.'}</p>
+          <p>{phone ? 'Tap Add to put a sound on the selected track.' : 'Drag a sound onto a track, or into the sampler or looper. It lands at the playhead.'}</p>
         </div>
         <TipButton label="Close" hint="Close the sound browser." onClick={onClose} />
       </div>
@@ -364,6 +404,7 @@ export function SoundBrowser({
       <div className="sound-list">
         {starterRows.map((entry) => {
           const saved = sounds.favorites.includes(entry.id)
+          const loaded = store.track(sounds.instrumentId ?? '')?.library?.id === entry.id
           return (
             <div className="sound-row" key={entry.id}>
               <div
@@ -384,8 +425,8 @@ export function SoundBrowser({
               </div>
               <div className="sound-actions">
                 <TipButton
-                  label={store.track(sounds.instrumentId ?? '')?.library?.id === entry.id ? 'Play' : 'Load'}
-                  hint={store.track(sounds.instrumentId ?? '')?.library?.id === entry.id ? 'Play this instrument on the speakers.' : 'Load it on this track and play a note.'}
+                  label={loaded ? 'Play' : 'Load'}
+                  hint={loaded ? 'Play this instrument on the speakers.' : 'Load it on this track and play a note.'}
                   disabled={busy === entry.id || !sounds.instrumentId}
                   onClick={() => { engine.unlock(); void loadInstrument(entry, null, true) }}
                 />
@@ -411,7 +452,7 @@ export function SoundBrowser({
               <div
                 className="sound-copy"
                 draggable={!phone}
-                title={phone ? undefined : 'Drag onto a track. It lands at the playhead.'}
+                title={phone ? undefined : 'Drag onto a track, or into the sampler or looper.'}
                 onDragStart={(event) => {
                   dragId = entry.id
                   event.dataTransfer.setData(SOUND_MIME, entry.id)
@@ -431,6 +472,7 @@ export function SoundBrowser({
               <div className="sound-actions">
                 <TipButton label={playLabel} hint={playHint} disabled={busy === entry.id} onClick={() => { engine.unlock(); void preview(entry) }} />
                 <TipButton label="Add" hint="Put this sound on the selected track at the playhead." disabled={busy === entry.id || !sounds.trackId} onClick={() => { engine.unlock(); void add(entry) }} />
+                {slot && <TipButton label="Slot" hint="Put this sound in the open sampler or looper." disabled={busy === entry.id} onClick={() => { engine.unlock(); void intoSlot(entry) }} />}
                 <TipButton
                   label={saved ? 'Saved' : 'Save'}
                   hint="Keep this sound in the project favorites."
