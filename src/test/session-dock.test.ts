@@ -17,9 +17,10 @@ describe('session dock choice', () => {
     expect(nextSessionDock({ dockOpen: true, phonePane: 'edit', action: 'session' })).toEqual({ dockOpen: true, phonePane: 'room' })
     expect(nextSessionDock({ dockOpen: true, phonePane: 'room', action: 'hide' })).toEqual({ dockOpen: false, phonePane: 'edit' })
     expect(dockVisible({ surface: 'studio', panel: 'room', dockOpen: false })).toBe(false)
-    expect(dockVisible({ surface: 'studio', panel: 'room', dockOpen: true })).toBe(true)
+    expect(dockVisible({ surface: 'studio', panel: 'room', dockOpen: true })).toBe(false)
     expect(dockVisible({ surface: 'studio', panel: 'piano', dockOpen: false })).toBe(true)
-    expect(dockVisible({ surface: 'artist', panel: 'room', dockOpen: false })).toBe(true)
+    expect(dockVisible({ surface: 'studio', panel: 'rack', dockOpen: false })).toBe(true)
+    expect(dockVisible({ surface: 'artist', panel: 'room', dockOpen: true })).toBe(false)
   })
 })
 
