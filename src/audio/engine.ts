@@ -1824,6 +1824,26 @@ export class AudioEngine {
       this.envelope(ctx, strip, osc, when, Math.min(0.16, dur), hit)
       return
     }
+    if (hit.kind === 'openhat' || hit.kind === 'tom' || hit.kind === 'cymbal') {
+      if (this.playResidentDrum(ctx, strip, hit, when)) return
+      if (hit.kind === 'tom') {
+        const osc = ctx.createOscillator()
+        osc.type = 'sine'
+        const freq = Math.max(70, 80 * 2 ** ((hit.pitch - 36) / 24))
+        osc.frequency.setValueAtTime(freq * 1.4, when)
+        osc.frequency.exponentialRampToValueAtTime(Math.max(45, freq), when + 0.18)
+        this.envelope(ctx, strip, osc, when, Math.min(0.35, Math.max(0.12, dur * 2)), hit)
+        return
+      }
+      const ring = ctx.createBufferSource()
+      ring.buffer = this.noiseBuffer(ctx)
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'highpass'
+      filter.frequency.value = hit.kind === 'cymbal' ? 5000 : 6500
+      ring.connect(filter)
+      this.envelope(ctx, strip, filter, when, hit.kind === 'cymbal' ? 0.7 : 0.5, hit, ring)
+      return
+    }
     const noise = ctx.createBufferSource()
     noise.buffer = this.noiseBuffer(ctx)
     if (hit.kind === 'hat') {
@@ -1866,6 +1886,31 @@ export class AudioEngine {
     }
     const index = DRUM_PADS.findIndex((pad) => pad.pitch === Math.round(pitch))
     return index >= 0 ? list[index] : null
+  }
+
+  /** Designed drum voice. Gate shortens the tail; a normal step plays the whole hit. */
+  private playResidentDrum(ctx: BaseAudioContext, strip: StripNodes, hit: RenderedHit, when: number) {
+    const buffer = this.cachedDrum(ctx, hit.pitch)
+    if (!buffer) return false
+    const src = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    src.buffer = buffer
+    const peak = Math.max(0.001, 0.22 * hit.velocity)
+    gain.gain.setValueAtTime(0.0001, when)
+    gain.gain.exponentialRampToValueAtTime(peak, when + 0.003)
+    src.connect(gain)
+    const pan = hit.pan || 0
+    if (Math.abs(pan) > 0.02 && ctx.createStereoPanner) {
+      const panner = ctx.createStereoPanner()
+      panner.pan.value = Math.max(-1, Math.min(1, pan))
+      gain.connect(panner)
+      panner.connect(strip.input)
+    } else gain.connect(strip.input)
+    const gate = Math.max(0.08, Math.min(1, (hit.durationBeats || 0.2) / 0.2))
+    src.start(when)
+    src.stop(when + Math.max(0.05, buffer.duration * gate))
+    if (ctx === this.ctx) this.sources.push(src)
+    return true
   }
 
   private playDrum(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, bucket?: Stoppable[]) {

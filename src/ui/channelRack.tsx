@@ -14,7 +14,7 @@ import {
   type RackChoice,
 } from '../model/channelRack'
 import { type StepCell, type StepChannel } from '../model/steps'
-import { samplesToBeats } from '../model/time'
+import { projectSampleBeat } from '../model/tempoMap'
 import { fetchSoundBytes } from '../sounds/cache'
 import { catalogMessage, loadSoundCatalog } from '../sounds/catalog'
 import { decodeSoundBytes, matchProjectRate } from '../sounds/place'
@@ -166,6 +166,7 @@ function StepButtons({
         const on = !channel.cells[index]?.on
         painting.current = { on, touch, x: event.clientX, y: event.clientY, index }
         if (!touch) {
+          event.preventDefault()
           onPaint(index, on)
           event.currentTarget.setPointerCapture(event.pointerId)
         }
@@ -234,6 +235,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
   const [library, setLibrary] = useState<SoundEntry[]>([])
   const [libraryNote, setLibraryNote] = useState('')
   const asked = useRef(false)
+  const graphing = useRef(false)
   const phone = useFormFactor() === 'phone'
   const bar = (id: string) => copyOf(BEAT_BAR, id)
   const rowCopy = (id: string) => copyOf(BEAT_ROW, id)
@@ -243,12 +245,12 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
   const focus = pattern.channels.find((row) => row.id === graphId) ?? pattern.channels[0]
   const pickedCell = picked ? pattern.channels.find((row) => row.id === picked.channelId)?.cells[picked.index] : undefined
   const outputs = project.tracks.filter((track) => track.type === 'bus' || track.type === 'group' || track.type === 'midi')
-  const beat = samplesToBeats(sample, project.sampleRate, project.tempo)
+  const beat = projectSampleBeat(project, sample)
   const count = pattern.steps
   const soloed = pattern.channels.some((row) => row.solo)
   const toolName = graph ? `Graph · ${GRAPH_LABELS[graphMode]}` : 'Paint'
   const toolHint = graph
-    ? `${focus?.name ?? 'Channel'}. Drag a bar to set ${GRAPH_LABELS[graphMode].toLowerCase()}.`
+    ? `${focus?.name ?? 'Channel'}. Drag across the bars to set ${GRAPH_LABELS[graphMode].toLowerCase()}. Empty steps turn on.`
     : `${focus?.name ?? 'Channel'}. Tap a step to add or remove a hit.`
 
   function paint(channel: StepChannel, index: number, on: boolean) {
@@ -270,11 +272,12 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
   }
 
   function addChoice(choice: RackChoice, entry?: SoundEntry) {
-    store.addPatternChannel(choice)
+    const id = store.addPatternChannel(choice)
+    if (id) setGraphId(id)
     setAdding(false)
     if (!entry) return
-    const id = choice.sampleId || ''
-    if (!id || store.buffers.has(id)) return
+    const sampleId = choice.sampleId || ''
+    if (!sampleId || store.buffers.has(sampleId)) return
     void (async () => {
       try {
         const bytes = await fetchSoundBytes(soundFileUrl(entry.path))
@@ -284,19 +287,27 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
           store.toast('That sound had no audio.', 'warn')
           return
         }
-        if (!store.buffers.has(id)) store.addAsset({ id, name: entry.name, sampleRate: store.project.sampleRate, channels })
+        if (!store.buffers.has(sampleId)) store.addAsset({ id: sampleId, name: entry.name, sampleRate: store.project.sampleRate, channels })
       } catch (error) {
         store.toast(error instanceof Error ? error.message : 'Could not load that sound.', 'warn')
       }
     })()
   }
 
-  function graphAt(index: number, event: ReactPointerEvent<HTMLDivElement>) {
-    if (!focus) return
+  function writeGraph(index: number, ratio: number) {
+    if (!focus || !Number.isFinite(index)) return
     setPicked({ channelId: focus.id, index })
-    const box = event.currentTarget.getBoundingClientRect()
-    const ratio = box.height > 0 ? 1 - (event.clientY - box.top) / box.height : 0
+    const cell = focus.cells[index]
+    if (cell && !cell.on) store.setStep(focus.id, index, true)
     store.editStep(focus.id, index, valueFromRatio(graphMode, ratio), true)
+    if (index >= focus.steps) store.setChannel(focus.id, { steps: Math.min(64, index + 1) }, true)
+  }
+
+  function graphFromBar(bar: HTMLElement, clientY: number) {
+    const index = Number(bar.dataset.index)
+    const box = bar.getBoundingClientRect()
+    const ratio = box.height > 0 ? 1 - (clientY - box.top) / box.height : 0
+    writeGraph(index, ratio)
   }
 
   function placePattern() {
@@ -418,6 +429,20 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
                 onChange={(event) => store.setChannel(focus.id, { steps: Number(event.target.value) })}
               />
             </label>
+            <label className="rack-field" title={rowCopy('swing').hint}>
+              <span>Row swing</span>
+              <input
+                aria-label={`${focus.name} ${rowCopy('swing').label}. ${rowCopy('swing').hint}`}
+                title={rowCopy('swing').hint}
+                type="number"
+                min={0}
+                max={0.9}
+                step={0.05}
+                placeholder="—"
+                value={focus.swing ?? ''}
+                onChange={(event) => store.setChannel(focus.id, { swing: event.target.value === '' ? null : Number(event.target.value) })}
+              />
+            </label>
           </>
         )}
         {picked && pickedCell && (
@@ -519,7 +544,32 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
                 ))}
               </select>
             </div>
-            <div className="rack-steps">
+            <div
+              className="rack-steps"
+              onPointerDown={(event) => {
+                const bar = (event.target as HTMLElement).closest('.rack-bar-step') as HTMLElement | null
+                if (!bar) return
+                if (event.pointerType !== 'touch') event.preventDefault()
+                graphing.current = true
+                event.currentTarget.setPointerCapture(event.pointerId)
+                graphFromBar(bar, event.clientY)
+              }}
+              onPointerMove={(event) => {
+                if (!graphing.current) return
+                const hit = document.elementFromPoint(event.clientX, event.clientY)
+                const bar = hit?.closest('.rack-bar-step') as HTMLElement | null
+                if (!bar || !event.currentTarget.contains(bar)) return
+                graphFromBar(bar, event.clientY)
+              }}
+              onPointerUp={() => {
+                graphing.current = false
+                store.endDraft()
+              }}
+              onPointerCancel={() => {
+                graphing.current = false
+                store.endDraft()
+              }}
+            >
               {stepGroups(count).map((group, groupIndex) => (
                 <div className={`rack-group${groupIndex % 2 ? ' alt' : ''}`} key={group[0]}>
                   {group.map((index) => {
@@ -531,21 +581,22 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
                     return (
                       <div
                         key={index}
+                        data-index={index}
+                        tabIndex={0}
                         className={`rack-bar-step${cell.on ? '' : ' off'}${look.past ? ' past' : ''}`}
                         role="slider"
-                        title={`Drag to set ${GRAPH_LABELS[graphMode].toLowerCase()}.`}
+                        title={`Drag to set ${GRAPH_LABELS[graphMode].toLowerCase()}. Drag across steps to draw.`}
                         aria-label={`${focus.name} step ${index + 1} ${GRAPH_LABELS[graphMode].toLowerCase()}. Drag up or down.`}
                         aria-valuemin={bounds.min}
                         aria-valuemax={bounds.max}
                         aria-valuenow={shown}
-                        onPointerDown={(event) => {
-                          event.currentTarget.setPointerCapture(event.pointerId)
-                          graphAt(index, event)
+                        onKeyDown={(event) => {
+                          const delta = event.key === 'ArrowUp' || event.key === 'ArrowRight' ? 0.05 : event.key === 'ArrowDown' || event.key === 'ArrowLeft' ? -0.05 : 0
+                          if (!delta) return
+                          event.preventDefault()
+                          writeGraph(index, ratio + delta)
+                          store.endDraft()
                         }}
-                        onPointerMove={(event) => {
-                          if (event.currentTarget.hasPointerCapture(event.pointerId)) graphAt(index, event)
-                        }}
-                        onPointerUp={() => store.endDraft()}
                       >
                         <span style={{ height: `${Math.round(ratio * 100)}%`, background: focus.color }} />
                       </div>

@@ -3492,11 +3492,15 @@ export class ProjectStore {
   }
 
   addPatternChannel(choice: RackChoice) {
+    let id = ''
     this.mutate(() => {
       const pattern = this.activePattern()
       if (!pattern) return
-      pattern.channels.push(makeRackChannel(choice, pattern.steps))
+      const channel = makeRackChannel(choice, pattern.steps)
+      pattern.channels.push(channel)
+      id = channel.id
     })
+    return id
   }
 
   editChannel(channelId: string, fn: (cells: StepCell[], count: number) => StepCell[] | void, draft = false) {

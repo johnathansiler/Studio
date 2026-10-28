@@ -1,4 +1,4 @@
-import { DRUM_PADS, type DrumKind as PadKind } from './drums'
+import { DRUM_PADS } from './drums'
 import { clampStepCount, emptyCell, STEP_BEAT, stepIndexAt, type BeatPattern, type DrumKind, type StepCell, type StepChannel } from './steps'
 import { uid } from './types'
 
@@ -28,17 +28,11 @@ export function choiceColor(index: number) {
   return RACK_COLORS[index % RACK_COLORS.length]
 }
 
-function rackKind(kind: PadKind): DrumKind {
-  if (kind === 'openhat') return 'hat'
-  if (kind === 'kick' || kind === 'snare' || kind === 'clap' || kind === 'hat') return kind
-  return 'perc'
-}
-
-/** Built-in kit. These play without downloading anything. */
+/** Built-in kit. These play without downloading anything. Open hats, toms, and cymbals keep their own voice. */
 export function kitChoices(): RackChoice[] {
   return DRUM_PADS.map((pad, index) => ({
     name: pad.name,
-    kind: rackKind(pad.kind),
+    kind: pad.kind,
     note: pad.pitch,
     color: choiceColor(index),
     sampleId: null,

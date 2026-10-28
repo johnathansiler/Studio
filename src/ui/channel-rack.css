@@ -386,6 +386,10 @@
   min-height: 28px;
 }
 
+.rack-graph .rack-steps {
+  touch-action: none;
+}
+
 .rack-bar-step {
   height: 84px;
   position: relative;

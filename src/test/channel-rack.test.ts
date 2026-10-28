@@ -1,7 +1,8 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { graphRatio, rackPlayIndex, stepLooks, valueFromRatio } from '../model/channelRack'
+import { graphRatio, kitChoices, rackPlayIndex, stepLooks, valueFromRatio } from '../model/channelRack'
+import { renderPattern } from '../model/steps'
 import { ProjectStore } from '../state/store'
 import { BeatView } from '../ui/BeatView'
 import type { AudioEngine } from '../audio/engine'
@@ -46,6 +47,8 @@ describe('channel rack', () => {
     expect(html.match(/data-beat="1"/g)).toHaveLength(1)
     expect(html.match(/data-beat="4"/g)).toHaveLength(1)
     expect(html).toContain('data-tool="paint"')
+    expect(html).toContain('Kick Swing. Swing for this row. Empty uses the pattern swing.')
+    expect(html).toContain('>Row swing<')
   })
 
   it('toggles a step and lights it on the kick row', () => {
@@ -128,9 +131,33 @@ describe('channel rack', () => {
     expect(valueFromRatio('velocity', 0).velocity).toBeCloseTo(0.05)
     const store = new ProjectStore()
     const before = store.activePattern()!.channels.length
-    store.addPatternChannel({ name: 'Rim', kind: 'perc', note: 37, color: '#73c48f' })
+    const id = store.addPatternChannel({ name: 'Rim', kind: 'perc', note: 37, color: '#73c48f' })
     expect(store.activePattern()!.channels).toHaveLength(before + 1)
+    expect(id).toBe(store.activePattern()!.channels.at(-1)!.id)
     expect(store.activePattern()!.channels.at(-1)!.steps).toBe(16)
     expect(row(render(store), 'Rim').match(/data-index="/g)).toHaveLength(16)
+  })
+
+  it('keeps open hats, toms, and cymbals as their own voices', () => {
+    const kit = kitChoices()
+    expect(kit.find((choice) => choice.name === 'Open')?.kind).toBe('openhat')
+    expect(kit.find((choice) => choice.name === 'Tom')?.kind).toBe('tom')
+    expect(kit.find((choice) => choice.name === 'Crash')?.kind).toBe('cymbal')
+    expect(kit.find((choice) => choice.name === 'Kick')?.kind).toBe('kick')
+    const store = new ProjectStore()
+    const added = store.addPatternChannel(kit.find((choice) => choice.name === 'Open')!)
+    const channel = store.activePattern()!.channels.find((row) => row.id === added)!
+    store.setStep(channel.id, 0, true)
+    const hit = renderPattern(store.activePattern()!, 0, 1).find((item) => item.channelId === channel.id)
+    expect(hit?.kind).toBe('openhat')
+    expect(hit?.pitch).toBe(46)
+  })
+
+  it('moves the playhead with the tempo map', () => {
+    const store = new ProjectStore()
+    store.project.tempoMap = [{ beat: 0, bpm: 60 }]
+    const line = row(render(store, 24000), 'Kick')
+    expect(line).toContain('data-index="2" class="rack-step now"')
+    expect(line).not.toContain('data-index="4" class="rack-step on now"')
   })
 })
