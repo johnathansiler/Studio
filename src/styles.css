@@ -707,7 +707,8 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 .unstuck-sheet header button {
   width: 44px; height: 44px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font-size: 22px;
 }
-.unstuck-tabs { display: flex; gap: 6px; overflow-x: auto; padding: 4px 12px 0; flex: none; }
+.unstuck-tabs { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; padding: 4px 12px 0; flex: none; }
+.unstuck-tabs button { flex: none; }
 .unstuck-tabs button, .unstuck-actions button {
   min-height: 44px; border-radius: 8px; border: 1px solid var(--line); background: #18241d; color: var(--text); padding: 0 12px;
 }
