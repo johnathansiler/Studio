@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   BEAT_BAR,
+  BEAT_ROW,
   BEAT_SHEET,
   CALL_COPY,
   MENU_COPY,
@@ -113,6 +114,7 @@ describe('mobile control lists', () => {
     PIANO_BAR,
     PIANO_SHEET,
     BEAT_BAR,
+    BEAT_ROW,
     BEAT_SHEET,
     SESSION_BAR,
     SESSION_SHEET,

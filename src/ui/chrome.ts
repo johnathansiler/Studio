@@ -86,6 +86,20 @@ export const BEAT_BAR: Copy[] = [
   { id: 'edit', label: 'Edit', hint: 'Fills, variations, and placing the pattern on the timeline.' },
 ]
 
+export const BEAT_ROW: Copy[] = [
+  { id: 'mute', label: 'Mute', hint: 'Silence this row.' },
+  { id: 'solo', label: 'Solo', hint: 'Hear only this row.' },
+  { id: 'volume', label: 'Vol', hint: 'How loud this row is.' },
+  { id: 'pan', label: 'Pan', hint: 'Left or right.' },
+  { id: 'output', label: 'Track', hint: 'Where this row plays.' },
+  { id: 'steps', label: 'Steps', hint: 'How many steps this row has.' },
+  { id: 'swing', label: 'Swing', hint: 'Swing for this row. Empty uses the pattern swing.' },
+  { id: 'copy', label: 'Copy', hint: 'Copy this row of steps.' },
+  { id: 'paste', label: 'Paste', hint: 'Paste copied steps onto this row.' },
+  { id: 'more', label: 'More', hint: 'Volume, pan, track, length, copy, and paste.' },
+  { id: 'less', label: 'Less', hint: 'Hide volume, pan, track, length, copy, and paste.' },
+]
+
 export const BEAT_SHEET: Copy[] = [
   { id: 'color', label: 'Color', hint: 'Color of this pattern on the timeline.' },
   { id: 'clone', label: 'Clone', hint: 'Copy this pattern into a new one.' },

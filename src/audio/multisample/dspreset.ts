@@ -1,12 +1,18 @@
-import type { MicPosition, SamplerProgram, ZoneTrigger } from './types'
-import { clampMidi, makeProgram, makeSample, makeZone, samplerId } from './types'
+import type { Ampeg, MicPosition, SamplerProgram, ZoneTrigger } from './types'
+import { clampMidi, emptyAmpeg, makeProgram, makeSample, makeZone, samplerId } from './types'
 import { attr, childrenNamed, parseXml, type XmlNode } from './xml'
 
-/** DecentSampler `.dspreset` XML. Velocities of 0–1 are scaled to MIDI 1–127. */
+/**
+ * DecentSampler `.dspreset` XML. Velocities of 0–1 are scaled to MIDI 1–127.
+ * Amplitude ADSR is the `attack` / `decay` / `sustain` / `release` attributes
+ * (`ampEnvAttack` and the other `ampEnv*` names win when both are set),
+ * inherited from the instrument, then `<groups>`, then `<group>`, then `<sample>`.
+ */
 export function importDecentSampler(xml: string, name = 'Decent Sampler'): SamplerProgram {
   const root = parseXml(xml)
   const groups = collectGroups(root)
   const normalized = velocitiesAreUnit(groups)
+  const inherited = globalEnvelope(root)
   const mics = new Map<string, MicPosition>()
   const samples: SamplerProgram['samples'] = []
   const zones: SamplerProgram['zones'] = []
@@ -18,6 +24,7 @@ export function importDecentSampler(xml: string, name = 'Decent Sampler'): Sampl
     const seqLength = cycling ? Math.max(1, sampleNodes.length) : 1
     if (cycling) rr += 1
     const groupRr = cycling ? rr : 0
+    const groupEnv = mergeEnv(inherited, readEnvelope(group))
     sampleNodes.forEach((sample, index) => {
       const path = attr(sample, 'path') || ''
       if (!path) return
@@ -56,6 +63,7 @@ export function importDecentSampler(xml: string, name = 'Decent Sampler'): Sampl
         gainDb: number(attr(sample, 'volume') ?? attr(group, 'volume'), 0),
         pan: clamp(number(attr(sample, 'pan') ?? attr(group, 'pan'), 0) / 100, -1, 1),
         mic,
+        ampeg: ampegOf(mergeEnv(groupEnv, readEnvelope(sample))),
       }))
     })
   })
@@ -138,4 +146,65 @@ function truthy(value: string | undefined) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
+}
+
+interface EnvParts {
+  attack?: number
+  hold?: number
+  decay?: number
+  sustain?: number
+  release?: number
+}
+
+/** Instrument attributes, then the `<groups>` element. A sample later overrides both. */
+function globalEnvelope(root: XmlNode): EnvParts {
+  return mergeEnv(readEnvelope(root), readEnvelope(childrenNamed(root, 'groups')[0]))
+}
+
+function readEnvelope(node: XmlNode | undefined): EnvParts {
+  if (!node) return {}
+  return {
+    attack: seconds(attr(node, 'ampEnvAttack', 'attack')),
+    hold: seconds(attr(node, 'ampEnvHold')),
+    decay: seconds(attr(node, 'ampEnvDecay', 'decay')),
+    sustain: level(attr(node, 'ampEnvSustain', 'sustain')),
+    release: seconds(attr(node, 'ampEnvRelease', 'release')),
+  }
+}
+
+function mergeEnv(base: EnvParts, over: EnvParts): EnvParts {
+  return {
+    attack: over.attack ?? base.attack,
+    hold: over.hold ?? base.hold,
+    decay: over.decay ?? base.decay,
+    sustain: over.sustain ?? base.sustain,
+    release: over.release ?? base.release,
+  }
+}
+
+function ampegOf(env: EnvParts): Ampeg {
+  const base = emptyAmpeg()
+  return {
+    attack: env.attack ?? base.attack,
+    hold: env.hold ?? base.hold,
+    decay: env.decay ?? base.decay,
+    sustain: env.sustain ?? base.sustain,
+    release: env.release ?? base.release,
+  }
+}
+
+function seconds(value: string | undefined) {
+  if (value == null) return undefined
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return undefined
+  return Math.max(0, parsed)
+}
+
+/** Sustain is 0–1. Values above 1 are percents. */
+function level(value: string | undefined) {
+  if (value == null) return undefined
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return undefined
+  const unit = parsed > 1 ? parsed / 100 : parsed
+  return Math.min(1, Math.max(0, unit))
 }
