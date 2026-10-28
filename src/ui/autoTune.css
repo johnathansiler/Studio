@@ -41,10 +41,22 @@
 .plugin-sheet.tune-open {
   padding-top: 18px;
   overflow: auto;
+  max-height: calc(100dvh - 8px);
+  display: flex;
+  flex-direction: column;
   background:
     radial-gradient(1200px 240px at 20% 0%, rgba(115, 196, 143, 0.08), transparent 50%),
     #121816;
 }
+
+.plugin-sheet.tune-open > .tune-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.strip .inserts button { touch-action: manipulation; }
 
 .tune-resize {
   position: absolute;
@@ -71,9 +83,11 @@
 .tune-board {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  padding: 12px;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 8px 10px;
   border-radius: 16px;
   color: #e7eee9;
   background:
@@ -113,12 +127,26 @@
 
 .tune-tabs button.on,
 .tune-tools button.on,
-.tune-actions button.on,
+.tune-actions button.on:not(.bypass-toggle),
 .tune-notes button.on,
 .tune-meter .readout button.on {
   background: #1d4a34;
   border-color: #73c48f;
   box-shadow: 0 0 12px rgba(115, 196, 143, 0.35);
+}
+
+.tune-actions .bypass-toggle:not(.lit) {
+  background: #121816;
+  border-color: #3a463f;
+  color: #c5d0c8;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.55);
+}
+
+.tune-actions .bypass-toggle.lit {
+  background: #5c4014;
+  border-color: #e0b15a;
+  color: #ffe6b0;
+  box-shadow: inset 0 0 0 1px #e0b15a, 0 0 10px rgba(224, 177, 90, 0.5);
 }
 
 .tune-status {
@@ -315,9 +343,23 @@
 .keybed .black.pass { box-shadow: inset 0 -6px 0 #e0b15a; }
 .keybed .black.off { opacity: 0.55; }
 
-.tune-graph canvas {
+.tune-board.graph .tune-notes,
+.tune-board.graph .tune-piano,
+.tune-board.graph .tune-status,
+.tune-board.graph .tune-tools { display: none; }
+
+.tune-board.graph .tune-graph {
+  flex: 1 1 auto;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+}
+
+.tune-board .tune-graph canvas {
   width: 100%;
-  height: 240px;
+  height: 100%;
+  min-height: 220px;
+  flex: 1 1 auto;
   display: block;
   border-radius: 12px;
   background: #0d1210;
@@ -337,10 +379,28 @@
   padding: 0 8px;
 }
 
+.shell.phone .tune-resize { display: none; }
+
 .shell.phone .plugin-sheet.tune-open,
 .shell.fold .plugin-sheet.tune-open {
-  max-height: 86vh;
+  height: auto !important;
+  max-height: calc(100dvh - 8px);
+  overflow: auto;
 }
+
+.shell.phone .plugin-sheet.tune-open { padding-top: 10px; }
+
+.shell.phone .plugin-sheet.tune-open > .tune-body,
+.shell.fold .plugin-sheet.tune-open > .tune-body,
+.shell.phone .tune-board,
+.shell.fold .tune-board {
+  flex: 0 0 auto;
+  min-height: auto;
+  overflow: visible;
+}
+
+.shell.phone .tune-board.pitch > *,
+.shell.fold .tune-board.pitch > * { flex: 0 0 auto; }
 
 .shell.phone.land .plugin-sheet.tune-open {
   max-height: 26dvh;
@@ -394,4 +454,55 @@
 @media (min-width: 900px) {
   .shell:not(.phone):not(.fold) .tune-board .more { display: none; }
   .shell:not(.phone):not(.fold) .tune-board .side { display: flex; }
+}
+
+.shell:not(.phone):not(.fold) .tune-board.pitch > * { flex: 0 0 auto; }
+.shell:not(.phone):not(.fold) .tune-board.graph > * { flex: 0 0 auto; }
+.shell:not(.phone):not(.fold) .tune-board.graph .tune-graph { flex: 1 1 auto; }
+
+.shell:not(.phone):not(.fold) .tune-meter {
+  width: 158px;
+  max-width: 158px;
+}
+
+.shell:not(.phone):not(.fold) .tune-meter .readout strong { font-size: 42px; }
+.shell:not(.phone):not(.fold) .tune-meter .readout em { font-size: 11px; }
+
+.shell:not(.phone):not(.fold) .tune-knob {
+  min-height: 104px;
+  padding: 4px 2px;
+}
+
+.shell:not(.phone):not(.fold) .tune-knob svg { width: 62px; height: 62px; }
+
+.shell:not(.phone):not(.fold) .tune-knob .cap {
+  top: 14px;
+  width: 38px;
+  height: 38px;
+}
+
+.shell:not(.phone):not(.fold) .tune-knob .cap i {
+  top: 4px;
+  height: 11px;
+  transform-origin: 50% 15px;
+}
+
+.shell:not(.phone):not(.fold) .tune-board button,
+.shell:not(.phone):not(.fold) .tune-name { min-height: 32px; }
+
+.shell:not(.phone):not(.fold) .tune-notes button {
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+}
+
+.shell:not(.phone):not(.fold) .keybed { height: 88px; }
+
+.shell.phone .tune-board.graph .tune-graph,
+.shell.fold .tune-board.graph .tune-graph { min-height: 220px; }
+
+.shell.phone .tune-board .tune-graph canvas,
+.shell.fold .tune-board .tune-graph canvas {
+  min-height: 220px;
+  height: 42dvh;
 }
