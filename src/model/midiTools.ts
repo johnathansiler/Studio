@@ -1,3 +1,4 @@
+import { soundingNotes } from './drumLanes'
 import { noteForPlayback } from './padMachine'
 import { SCALES, snapPitch, type ScaleId } from './scale'
 import type { LiveCaptureSettings, MidiClip, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, Project, Track } from './types'
@@ -201,7 +202,7 @@ export function sanitizeMaps(list: MidiMapEntry[] | undefined): MidiMapEntry[] {
 export function prepareClipNotes(project: Project, track: Track, clip: MidiClip): MidiNote[] {
   const barBeats = Math.max(1, project.timeSignature?.numerator || 4)
   const audible: MidiNote[] = []
-  for (const note of clip.notes) {
+  for (const note of soundingNotes(clip)) {
     const next = noteForPlayback(note, {
       stepBeats: 0.25,
       seed: project.padKit?.seed ?? 1,

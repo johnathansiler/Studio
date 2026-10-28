@@ -39,7 +39,7 @@ import { SoundBrowser } from './ui/SoundBrowser'
 import { loadScaleCatalog } from './theory'
 import { AnalysisSheet } from './ui/AnalysisSheet'
 import { QuantizeSheet } from './ui/QuantizeSheet'
-import { PianoRoll } from './ui/PianoRoll'
+import { MidiDock } from './ui/MidiDock'
 import { KnockPop } from './ui/KnockPop'
 import { ProjectSheet } from './ui/ProjectSheet'
 import { PatchSheet } from './ui/PatchSheet'
@@ -1304,7 +1304,7 @@ async function importDropped(files: FileList) {
             <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
           )}
           {surface === 'studio' && panel === 'piano' && (
-            <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => setGenerateOpen(true)} onLibrary={() => setLibraryOpen(true)} />
+            <MidiDock store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => setGenerateOpen(true)} onLibrary={() => setLibraryOpen(true)} />
           )}
           {(surface !== 'studio' || panel === 'room') && (
             <VideoDock
