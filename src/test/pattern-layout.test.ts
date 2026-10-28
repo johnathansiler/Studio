@@ -14,7 +14,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const css = [
   readFileSync(resolve(root, 'src/styles.css'), 'utf8'),
   readFileSync(resolve(root, 'src/ui/remoteFixes.css'), 'utf8'),
-  readFileSync(resolve(root, 'src/ui/beats.css'), 'utf8'),
+  readFileSync(resolve(root, 'src/ui/channel-rack.css'), 'utf8'),
 ].join('\n')
 
 const PHONES = [
@@ -76,33 +76,48 @@ function markup(width: number, height: number) {
 
 async function measure(page: Page) {
   return page.evaluate(() => {
-    const row = document.querySelector('.beat-row[data-channel="Kick"]') as HTMLElement
-    const grid = row.querySelector('.step-grid') as HTMLElement
-    const steps = [...row.querySelectorAll('.step')].map((el) => {
+    const row = document.querySelector('.rack-row[data-channel="Kick"]') as HTMLElement
+    const steps = [...row.querySelectorAll('.rack-step')].map((el) => {
       const box = el.getBoundingClientRect()
       return { top: box.top, left: box.left, right: box.right, width: box.width, height: box.height }
     })
-    const style = getComputedStyle(grid)
-    const outside = [...document.querySelectorAll('.beats button, .beats input, .beats select, .beats .beat-field')]
+    const lead = row.querySelector('.rack-lead') as HTMLElement
+    const scroller = document.querySelector('.rack-scroll') as HTMLElement
+    const leadBox = lead.getBoundingClientRect()
+    const scrollBox = scroller.getBoundingClientRect()
+    const outside = [...document.querySelectorAll('.rack-bar button, .rack-bar select, .rack-bar input, .rack-lead button, .rack-add, .rack-extras.open button, .rack-extras.open input, .rack-extras.open select')]
       .filter((el) => {
         const box = el.getBoundingClientRect()
         if (box.width < 1 || box.height < 1) return false
         return box.left < -1 || box.right > window.innerWidth + 1
       })
-      .map((el) => `${el.className}`.slice(0, 80))
+      .map((el) => `${(el.getAttribute('aria-label') || el.className || el.tagName)}`.slice(0, 80))
     const tops = steps.map((step) => Math.round(step.top))
     return {
-      display: style.display,
-      direction: style.flexDirection,
-      columns: style.gridTemplateColumns.split(' ').filter((part) => part && part !== 'none').length,
       steps,
       tops: [...new Set(tops)],
-      counts: [...new Set(tops)].map((top) => tops.filter((item) => item === top).length),
       scroll: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       outside,
-      more: row.querySelectorAll('.beat-more').length,
-      swing: document.querySelector('.beat-bar')?.textContent ?? '',
-      rowText: row.textContent ?? '',
+      sticky: getComputedStyle(lead).position,
+      leadLeft: leadBox.left,
+      leadRight: leadBox.right,
+      scrollLeft: scrollBox.left,
+      scrollRight: scrollBox.right,
+      scrollWidth: scroller.scrollWidth,
+      clientWidth: scroller.clientWidth,
+      groups: row.querySelectorAll('.rack-group').length,
+      alt: row.querySelectorAll('.rack-group.alt').length,
+      bar: document.querySelector('.rack-bar')?.textContent ?? '',
+      extras: document.querySelector('.rack-extras')?.textContent ?? '',
+      tool: document.querySelector('.rack-tool')?.textContent ?? '',
+      mute: row.querySelectorAll('.rack-mute').length,
+      ticks: document.querySelectorAll('.rack-ruler .rack-tick').length,
+      align: (() => {
+        const tick = document.querySelector('.rack-ruler .rack-tick')
+        const step = row.querySelector('.rack-step')
+        if (!tick || !step) return 99
+        return Math.abs(tick.getBoundingClientRect().left - step.getBoundingClientRect().left)
+      })(),
     }
   })
 }
@@ -131,57 +146,64 @@ describe('pattern step layout', () => {
         await page.setViewportSize(viewport)
         await page.setContent(markup(viewport.width, viewport.height), { waitUntil: 'load' })
         const box = await measure(page)
-        expect(box.steps, `${viewport.width}x${viewport.height}`).toHaveLength(16)
-        expect(box.direction, `${viewport.width}x${viewport.height} ${box.display}`).not.toBe('column')
+        const where = `${viewport.width}x${viewport.height}`
+        expect(box.steps, where).toHaveLength(16)
         expect(box.steps[1].left, JSON.stringify(box.steps.slice(0, 2))).toBeGreaterThan(box.steps[0].left + 8)
-        expect(Math.abs(box.steps[0].top - box.steps[1].top)).toBeLessThan(2)
-        expect(box.tops.length).toBeLessThanOrEqual(2)
-        expect(box.counts[0]).toBeGreaterThanOrEqual(8)
-        if (box.tops.length === 2) expect(box.counts).toEqual([8, 8])
-        for (const step of box.steps) {
-          expect(step.width).toBeGreaterThanOrEqual(32)
-          expect(step.height).toBeGreaterThanOrEqual(32)
-          expect(step.right).toBeLessThanOrEqual(viewport.width + 1)
-          expect(step.left).toBeGreaterThanOrEqual(-1)
-        }
-        expect(box.scroll).toBeLessThanOrEqual(1)
+        expect(Math.abs(box.steps[0].top - box.steps[1].top), where).toBeLessThan(2)
+        expect(box.tops, where).toHaveLength(1)
+        expect(box.groups, where).toBe(4)
+        expect(box.alt, where).toBe(2)
+        expect(box.sticky, where).toBe('sticky')
+        expect(box.leadLeft, where).toBeGreaterThanOrEqual(-1)
+        expect(box.leadRight, where).toBeLessThanOrEqual(viewport.width + 1)
+        expect(box.scrollRight, where).toBeLessThanOrEqual(viewport.width + 1)
+        expect(box.scroll, where).toBeLessThanOrEqual(1)
         expect(box.outside, box.outside.join(', ')).toEqual([])
-        expect(box.more).toBe(1)
-        expect(box.swing).toContain('Swing')
-        expect(box.swing).toContain('Steps')
-        expect(box.rowText).toContain('Vol')
-        expect(box.rowText).toContain('Pan')
-        await page.evaluate(() => document.querySelector('.beat-row[data-channel="Kick"]')!.classList.add('open'))
+        expect(box.mute, where).toBe(1)
+        expect(box.bar).toContain('Steps')
+        expect(box.bar).toContain('Paint')
+        expect(box.ticks, where).toBe(16)
+        expect(box.align, where).toBeLessThan(2)
+        const phone = viewport.width <= 520 || (viewport.width > viewport.height && viewport.height <= 520)
+        if (phone) expect(box.bar, where).not.toContain('Swing')
+        else expect(box.bar, where).toContain('Swing')
+        for (const step of box.steps) {
+          expect(step.width, where).toBeGreaterThanOrEqual(24)
+          expect(step.height, where).toBeGreaterThanOrEqual(28)
+        }
+        if (viewport.width <= 520) expect(box.scrollWidth, where).toBeGreaterThan(box.clientWidth + 8)
+        await page.evaluate(() => document.querySelector('.rack-extras')!.classList.add('open'))
         const open = await measure(page)
         expect(open.outside, open.outside.join(', ')).toEqual([])
-        expect(open.scroll).toBeLessThanOrEqual(1)
-        expect(open.steps[1].left).toBeGreaterThan(open.steps[0].left + 8)
-        expect(Math.abs(open.steps[0].top - open.steps[1].top)).toBeLessThan(2)
-        const visible = await page.evaluate(() => document.querySelector('.beat-row[data-channel="Kick"] .beat-settings')!.getBoundingClientRect().height)
+        expect(open.scroll, where).toBeLessThanOrEqual(1)
+        expect(open.tops, where).toHaveLength(1)
+        if (phone) expect(open.extras, where).toContain('Swing')
+        const visible = await page.evaluate(() => document.querySelector('.rack-extras')!.getBoundingClientRect().height)
         expect(visible).toBeGreaterThan(32)
       }
 
       await page.setViewportSize({ width: 1440, height: 900 })
       await page.setContent(markup(1440, 900), { waitUntil: 'load' })
       const desk = await measure(page)
-      expect(desk.display).toBe('flex')
-      expect(desk.direction).toBe('row')
-      expect(desk.more).toBe(0)
       expect(desk.steps).toHaveLength(16)
-      expect(new Set(desk.steps.map((step) => Math.round(step.top))).size).toBe(1)
+      expect(desk.tops).toHaveLength(1)
       expect(desk.steps[1].left).toBeGreaterThan(desk.steps[0].left + 8)
       expect(desk.scroll).toBeLessThanOrEqual(1)
       expect(desk.outside, desk.outside.join(', ')).toEqual([])
-      expect(desk.swing).toContain('Swing')
-      expect(desk.rowText).toContain('Vol')
-      expect(desk.rowText).toContain('Pan')
-      const copy = await page.evaluate(() => {
-        const button = [...document.querySelectorAll('.beat-action')].find((el) => el.textContent === 'Copy')
+      expect(desk.sticky).toBe('sticky')
+      expect(desk.bar).toContain('Swing')
+      expect(desk.bar).toContain('Steps')
+      expect(desk.bar).toContain('Paint')
+      expect(desk.ticks).toBe(16)
+      expect(desk.align).toBeLessThan(2)
+      expect(desk.mute).toBe(1)
+      const place = await page.evaluate(() => {
+        const button = [...document.querySelectorAll('.rack-bar button')].find((el) => el.textContent === 'Place')
         const box = button!.getBoundingClientRect()
         return { right: box.right, width: box.width }
       })
-      expect(copy.width).toBeGreaterThan(20)
-      expect(copy.right).toBeLessThanOrEqual(1440 + 1)
+      expect(place.width).toBeGreaterThan(20)
+      expect(place.right).toBeLessThanOrEqual(1440 + 1)
     } finally {
       await browser.close()
     }

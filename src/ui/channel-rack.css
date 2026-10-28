@@ -1,0 +1,476 @@
+/* FL-style channel rack. Names stay sticky while the steps scroll sideways. */
+
+.beats.channel-rack {
+  --lead: 176px;
+  --step: 28px;
+  --step-h: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 8px;
+  background:
+    linear-gradient(180deg, rgba(115, 196, 143, 0.05), transparent 120px),
+    #101614;
+  color: var(--text);
+}
+
+.shell.phone .beats.channel-rack {
+  --lead: 172px;
+  --step: 40px;
+  --step-h: 44px;
+}
+
+.shell.phone.land .beats.channel-rack {
+  --lead: 168px;
+  --step: 36px;
+  --step-h: 40px;
+}
+
+.shell.phone .beats.channel-rack .rack-name {
+  padding: 0 6px;
+  font-size: 14px;
+}
+
+.rack-bar,
+.rack-extras.open {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.rack-extras {
+  display: none;
+}
+
+.rack-extras.open {
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+}
+
+.rack-bar select,
+.rack-bar input,
+.rack-extras select,
+.rack-extras input,
+.rack-bar button,
+.rack-extras button,
+.rack-add,
+.rack-picker button {
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+}
+
+.rack-bar select,
+.rack-extras select,
+.rack-bar input[type='text'],
+.rack-extras input[type='text'],
+.rack-name-field {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 140px;
+}
+
+.rack-lengths {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  max-width: 100%;
+}
+
+.rack-lengths-label,
+.rack-swing span,
+.rack-field span {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.rack-lengths button {
+  min-width: 36px;
+  padding: 0 8px;
+}
+
+.rack-lengths button.on,
+.rack-bar button.on,
+.rack-extras button.on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+
+.rack-tool {
+  flex: none;
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.rack-swing,
+.rack-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 150px;
+  min-width: 0;
+  max-width: 240px;
+}
+
+.rack-swing input[type='range'] {
+  flex: 1 1 72px;
+  min-width: 72px;
+  width: auto;
+}
+
+.rack-field input[type='number'] {
+  width: 72px;
+  flex: none;
+}
+
+.rack-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  width: 100%;
+  min-width: 0;
+  padding-bottom: 4px;
+}
+
+.rack-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  width: max-content;
+  min-width: 100%;
+  margin-bottom: 4px;
+}
+
+.rack-lead {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: var(--lead);
+  flex: 0 0 var(--lead);
+  min-width: var(--lead);
+  height: calc(var(--step-h) + 6px);
+  padding-right: 8px;
+  background: #121a16;
+  box-shadow: 10px 0 14px rgba(8, 12, 10, 0.45);
+}
+
+.rack-row.sel .rack-lead {
+  background: #1a2820;
+}
+
+.rack-mute,
+.rack-knob {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  flex: none;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid #3c5346;
+  background: #1a2420;
+  position: relative;
+}
+
+.rack-mute {
+  display: grid;
+  place-items: center;
+}
+
+.rack-mute::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #243028;
+}
+
+.rack-mute.live::after {
+  background: #f4fff7;
+  box-shadow: 0 0 6px #f4fff7;
+}
+
+.shell.phone .beats.channel-rack .rack-mute,
+.shell.phone .beats.channel-rack .rack-knob,
+.shell.phone .beats.channel-rack .rack-step,
+.shell.phone .beats.channel-rack .rack-bar-step {
+  min-width: var(--step);
+  min-height: var(--step-h);
+}
+
+.shell.phone .beats.channel-rack .rack-mute,
+.shell.phone .beats.channel-rack .rack-knob {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+}
+
+.rack-mute.live {
+  background: var(--accent);
+  border-color: #b7e7c8;
+  box-shadow: 0 0 8px rgba(115, 196, 143, 0.75);
+}
+
+.rack-knob i {
+  position: absolute;
+  left: 50%;
+  top: 5px;
+  width: 2px;
+  height: 8px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--accent);
+  transform-origin: 50% 9px;
+  pointer-events: none;
+}
+
+.rack-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--step-h);
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid #2c4036;
+  background: #1c2822;
+  color: var(--text);
+  font-weight: 650;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rack-name.on {
+  background: #24382c;
+  box-shadow: inset 3px 0 0 currentColor;
+}
+
+.rack-ruler {
+  margin-bottom: 0;
+}
+
+.rack-ruler .rack-lead {
+  height: 16px;
+  min-height: 0;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rack-tick {
+  width: var(--step);
+  height: 12px;
+  flex: 0 0 var(--step);
+  position: relative;
+}
+
+.rack-tick[data-beat]::before {
+  content: attr(data-beat);
+  position: absolute;
+  left: 0;
+  top: -1px;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rack-steps .rack-group:nth-child(4n + 1) .rack-tick[data-beat]::before {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.rack-steps {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.rack-group {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 6px;
+  background: #141c18;
+}
+
+.rack-group.alt {
+  background: #24352c;
+}
+
+.rack-step,
+.rack-bar-step {
+  width: var(--step);
+  height: var(--step-h);
+  flex: 0 0 var(--step);
+  padding: 0;
+  border-radius: 3px;
+  border: 1px solid #2a3a32;
+  background: #151c18;
+}
+
+.rack-group.alt .rack-step:not(.on) {
+  background: #1c2922;
+}
+
+.rack-step.on {
+  border-color: transparent;
+}
+
+.rack-step.past {
+  opacity: 0.32;
+}
+
+.rack-step.loop {
+  box-shadow: inset -3px 0 0 var(--accent);
+}
+
+.rack-step.now {
+  outline: 2px solid #f4f7f1;
+  outline-offset: -2px;
+  z-index: 1;
+}
+
+.rack-graph {
+  align-items: stretch;
+  margin-top: 4px;
+}
+
+.rack-graph .rack-lead {
+  height: auto;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 4px;
+}
+
+.rack-graph-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rack-graph select {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+}
+
+.rack-graph .rack-steps {
+  touch-action: none;
+}
+
+.rack-bar-step {
+  height: 84px;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  background: #121a16;
+  touch-action: none;
+}
+
+.rack-bar-step span {
+  display: block;
+  width: 100%;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.rack-bar-step.off span {
+  opacity: 0.18;
+}
+
+.rack-bar-step.past span {
+  opacity: 0.2;
+}
+
+.rack-graph[data-mode='pitch'] .rack-bar-step::before,
+.rack-graph[data-mode='pan'] .rack-bar-step::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: rgba(238, 243, 234, 0.28);
+}
+
+.rack-add {
+  width: 100%;
+  min-height: 36px;
+  border-style: dashed;
+  color: var(--accent);
+  font-size: 20px;
+  font-weight: 700;
+  background: transparent;
+}
+
+.rack-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.rack-picker-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  max-width: 100%;
+  min-width: 0;
+  padding-bottom: 2px;
+}
+
+.rack-picker-row button {
+  flex: none;
+  padding: 0 10px;
+  min-height: 32px;
+}
+
+.rack-picker p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.shell.phone .beats.channel-rack .rack-bar button,
+.shell.phone .beats.channel-rack .rack-extras button,
+.shell.phone .beats.channel-rack .rack-add,
+.shell.phone .beats.channel-rack .rack-picker button,
+.shell.phone .beats.channel-rack .rack-name,
+.shell.phone .beats.channel-rack select,
+.shell.phone .beats.channel-rack input {
+  min-height: 44px;
+}
