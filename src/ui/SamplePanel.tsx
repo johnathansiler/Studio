@@ -117,6 +117,10 @@ export function SamplePanel({ store, engine, trackId, plugin }: { store: Project
     }
     closeRef.current = capture.close
     if (capture.opened) engine.setLocalMic(capture.stream)
+    if (mode === 'overdub' && looper?.layers.length) {
+      store.updatePlugin(trackId, plugin.id, { looper: { ...looper, transport: 1 }, params: { transport: 1 } })
+      engine.rewindLoop(plugin.id)
+    }
     const maxSamples = looper && looper.sync !== false
       ? syncedLoopSamples(looper.bars || 1, store.project.tempo, capture.source.sampleRate, store.project.timeSignature.numerator)
       : 0
@@ -252,6 +256,8 @@ export function SamplePanel({ store, engine, trackId, plugin }: { store: Project
           {looper && phone && <TipButton label="Dub" hint="Record another pass over the loop." onClick={() => void beginRecord('overdub')} />}
           {sampler && <TipButton label="Slice" hint="Cut the sample into pads across the keyboard." onClick={() => store.chopSample(trackId, plugin.id, 'grid')} />}
           {sampler && <TipButton label="Hits" hint="Cut the sample at the transients." onClick={() => store.chopSample(trackId, plugin.id, 'transient')} />}
+          {sampler && <TipButton label="Beat" hint="Cut the sample on each beat." onClick={() => store.chopSample(trackId, plugin.id, 'beat')} />}
+          {sampler && <TipButton label="MIDI" hint="Write the slices as notes on a MIDI clip." onClick={() => store.exportSlices(trackId, plugin.id)} />}
           {sampler && <TipButton label={noteName(sampler.root)} hint="Move the root note up one semitone. Pads follow this note." onClick={() => setRoot(sampler.root + 1)} />}
           {sampler && <TipButton label="Down" hint="Move the root note down one semitone." onClick={() => setRoot(sampler.root - 1)} />}
           {sampler && <TipButton label="Rev" hint="Reverse the sample." onClick={() => store.editSample(trackId, plugin.id, 'reverse')} />}

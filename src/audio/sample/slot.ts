@@ -476,8 +476,11 @@ interface GainLike extends Connectable {
   gain: { value: number }
 }
 
+/** Parameter checks stay bivariant so a browser AudioContext and a test double both fit. */
+type AudioCallback<T extends (...args: never[]) => void> = { bivarianceHack(...args: Parameters<T>): void }['bivarianceHack']
+
 interface ProcessorLike extends Connectable {
-  onaudioprocess: ((event: { inputBuffer: { getChannelData(channel: number): Float32Array } }) => void) | null
+  onaudioprocess: AudioCallback<(event: { inputBuffer: { getChannelData(channel: number): Float32Array } }) => void> | null
 }
 
 export interface OpenInputOptions {
