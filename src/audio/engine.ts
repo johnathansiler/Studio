@@ -17,7 +17,7 @@ import { renderNotes } from './rack/dsp'
 import { LibraryHost } from './multisample/host'
 import type { SamplePack } from './multisample/types'
 import { renderQuantizedClip } from '../model/quantize'
-import { renderPattern, type RenderedHit } from '../model/steps'
+import { patternPlayRange, renderPattern, type RenderedHit } from '../model/steps'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav, linearResample } from '../model/wav'
 import { tuneBlockScale } from './plugins/autoTune'
@@ -1860,9 +1860,10 @@ export class AudioEngine {
       if (clip.scene != null) continue
       const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
       if (!pattern) continue
-      for (const hit of renderPattern(pattern, 0, clip.lengthBeats)) {
+      const range = patternPlayRange(clip)
+      for (const hit of renderPattern(pattern, range.from, range.to)) {
         if ((hit.output || clip.trackId || midiId) !== trackId) continue
-        const span = beatSpanSamples(project, clip.startBeat + hit.startBeat, hit.durationBeats)
+        const span = beatSpanSamples(project, clip.startBeat + (hit.startBeat - range.from), hit.durationBeats)
         if (span.start < timelineStart || span.start >= timelineEnd) continue
         const when = ctxTime + (span.start - timelineStart) / this.sampleRate
         const liveStrip = ctx === this.ctx && hit.output ? this.strips.get(hit.output) : undefined

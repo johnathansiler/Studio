@@ -71,6 +71,9 @@ export function SoundBrowser({
   const [loading, setLoading] = useState(!initial)
   const [text, setText] = useState('')
   const [type, setType] = useState<SoundQuery['type']>(lockType && lockType !== 'all' ? lockType : 'all')
+  useEffect(() => {
+    setType(lockType && lockType !== 'all' ? lockType : 'all')
+  }, [lockType])
   const [bpm, setBpm] = useState<SoundQuery['bpm']>('any')
   const [key, setKey] = useState('')
   const [favoritesOnly, setFavoritesOnly] = useState(false)

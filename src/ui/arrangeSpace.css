@@ -27,7 +27,23 @@
 .shell.phone .mini-meter { display: none; }
 .shell.phone .pl-head .name { min-width: 52px; }
 
-.arrange .head, .arrange .lane { height: 72px; }
+.arrange { --lane-h: 72px; }
+.shell.phone .arrange { --lane-h: 118px; }
+.shell.phone.land .arrange { --lane-h: 84px; }
+.arrange > .heads .head,
+.arrange .timeline-scroll .lane,
+.shell.phone .arrange > .heads .head,
+.shell.phone .arrange .timeline-scroll .lane,
+.shell.phone.land .arrange > .heads .head,
+.shell.phone.land .arrange .timeline-scroll .lane {
+  height: var(--lane-h);
+  min-height: var(--lane-h);
+  box-sizing: border-box;
+}
+.arrange > .heads,
+.shell.phone .arrange > .heads {
+  overflow: hidden;
+}
 .arrange .head { padding: 0; overflow: hidden; display: block; }
 .pl-head { display: flex; align-items: center; gap: 4px; height: 100%; min-width: 0; padding-right: 4px; }
 .pl-head .swatch { width: 6px; align-self: stretch; flex: none; }
@@ -145,9 +161,9 @@
 .shell.phone:not(.land) .tool-strip { flex: 1 1 100%; min-width: 0; overflow-x: auto; }
 .shell.phone:not(.land) .tool-chip {
   flex: 1 1 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow: visible;
+  line-height: 1.25;
 }
 
 .workspace.session-closed,

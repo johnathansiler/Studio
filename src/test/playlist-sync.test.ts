@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createEmptyProject } from '../model/types'
+import { bindPatternClips, patternHostId } from '../model/steps'
 import { displayedPlayhead, transportSample } from '../model/transportSync'
 import { selectArrange, selectBeats, selectMixer, selectSession, selectTransport } from '../state/select'
 import { ProjectStore } from '../state/store'
@@ -72,9 +73,70 @@ describe('shared transport and mixer', () => {
     expect(store.project.patternClips).toHaveLength(before + 1)
     expect(store.toasts.at(-1)?.text).toContain('Drums')
     expect(selectBeats(store).pattern!.channels[0].output).toBe(drums!.id)
+    expect(store.selectedPatternClipId).toBe(clip.id)
+    expect(clip.placed).toBe(true)
     store.undo()
     expect(store.project.patternClips).toHaveLength(before)
     expect(store.project.tracks.some((track) => track.name === 'Drums')).toBe(false)
+  })
+
+  it('draws a placed pattern on that track lane and leaves a new song empty', () => {
+    vi.stubGlobal('window', { innerWidth: 1280, innerHeight: 800, addEventListener() {}, removeEventListener() {} })
+    const engine = {
+      positionSamples: 0,
+      subscribe: () => () => undefined,
+      currentTimelineSample: () => 0,
+      stopPreview() {},
+      previewPcm() {},
+      unlock() {},
+    }
+    const props = {
+      engine,
+      session: { state: { participants: [], selfId: 'me' } },
+      onSeek: () => undefined,
+      onOpenPiano: () => undefined,
+      onPerform: () => undefined,
+      onQuickPunch: () => undefined,
+      onAnalyze: () => undefined,
+    }
+    const fresh = new ProjectStore(createEmptyProject(48000))
+    const empty = renderToStaticMarkup(createElement(ArrangeView, { store: fresh, ...props } as never))
+    expect(empty).not.toContain('data-pattern="1"')
+
+    const store = new ProjectStore(createEmptyProject(48000))
+    const keys = store.project.tracks.find((track) => track.type === 'midi')!
+    store.placePattern(2, keys.id)
+    const clip = store.project.patternClips![0]
+    expect(clip.trackId).toBe(keys.id)
+    expect(store.project.tracks.some((track) => track.name === 'Drums')).toBe(false)
+    const html = renderToStaticMarkup(createElement(ArrangeView, { store, ...props } as never))
+    const clipAt = html.indexOf('data-pattern="1"')
+    const laneAt = html.lastIndexOf('class="lane"', clipAt)
+    expect(clipAt).toBeGreaterThan(laneAt)
+    const around = html.slice(Math.max(0, clipAt - 240), clipAt + 240)
+    expect(html.slice(laneAt, clipAt)).toContain(`data-track="${keys.id}"`)
+    expect(around).toContain('selected')
+    expect(around).toContain(`data-track="${keys.id}"`)
+    vi.unstubAllGlobals()
+
+    store.placePatternClips([{ clipId: clip.id, startBeat: 6.4, trackId: keys.id }])
+    expect(store.project.patternClips![0].startBeat).toBe(6)
+    expect(store.project.patternClips![0].trackId).toBe(keys.id)
+    store.deleteSelectedClip()
+    expect(store.project.patternClips).toEqual([])
+    store.undo()
+    expect(store.project.patternClips?.map((item) => item.id)).toEqual([clip.id])
+  })
+
+  it('parks a saved pattern clip on a real instrument track', () => {
+    const store = new ProjectStore(createEmptyProject(48000))
+    const keys = store.project.tracks.find((track) => track.type === 'midi')!
+    store.project.patternClips = [{ id: 'kept', patternId: store.activePattern()!.id, startBeat: 4, lengthBeats: 4, scene: null, placed: true }]
+    expect(patternHostId(store.project.tracks, null)).toBeNull()
+    expect(patternHostId(store.project.tracks, keys.id)).toBe(keys.id)
+    expect(patternHostId(store.project.tracks, store.project.tracks[0].id)).toBeNull()
+    bindPatternClips(store.project.patternClips, store.project.tracks)
+    expect(store.project.patternClips[0].trackId).toBe(keys.id)
   })
 })
 

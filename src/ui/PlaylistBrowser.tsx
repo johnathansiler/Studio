@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CATALOG } from '../audio/plugins/catalog'
 import { MASTERING_IDS } from '../audio/master/assistant'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
@@ -48,6 +48,7 @@ export function PlaylistBrowser({
 }) {
   const project = store.project
   const [query, setQuery] = useState('')
+  const dragging = useRef(false)
   const needle = query.trim().toLowerCase()
   const trackId = store.selectedTrackId || project.tracks[0]?.id || ''
 
@@ -63,15 +64,16 @@ export function PlaylistBrowser({
       const patternId = event.dataTransfer?.getData(PATTERN_MIME)
       const pluginId = event.dataTransfer?.getData(PLUGIN_MIME)
       if (!patternId && !pluginId) return
-      event.preventDefault()
       const inner = target.closest('.timeline-inner') as HTMLElement | null
       const lane = target.closest('[data-track]') as HTMLElement | null
+      if (!inner && !lane) return
+      event.preventDefault()
       const px = Number(inner?.dataset.px) || 90
       const rect = inner?.getBoundingClientRect()
       const sample = rect ? Math.max(0, ((event.clientX - rect.left) / px) * project.sampleRate) : engine.currentTimelineSample()
       if (patternId) {
         store.selectPattern(patternId)
-        store.placePattern(Math.max(0, projectSampleBeat(project, sample)))
+        store.placePattern(Math.max(0, projectSampleBeat(project, sample)), lane?.dataset.track)
         return
       }
       const id = lane?.dataset.track || trackId
@@ -169,11 +171,15 @@ export function PlaylistBrowser({
                 className="browser-row"
                 draggable={!phone}
                 title="Drag onto the playlist. It lands on Drums."
+                onPointerDown={() => { dragging.current = false }}
                 onDragStart={(event) => {
+                  dragging.current = true
                   event.dataTransfer.setData(PATTERN_MIME, pattern.id)
+                  event.dataTransfer.setData('text/plain', pattern.id)
                   event.dataTransfer.effectAllowed = 'copy'
                 }}
                 onClick={() => {
+                  if (dragging.current) return
                   store.selectPattern(pattern.id)
                   store.placePattern(Math.max(0, projectSampleBeat(project, engine.currentTimelineSample())))
                 }}
@@ -190,12 +196,15 @@ export function PlaylistBrowser({
                 className="browser-row"
                 draggable={!phone}
                 title="Insert this effect on the selected track."
+                onPointerDown={() => { dragging.current = false }}
                 onDragStart={(event) => {
+                  dragging.current = true
                   event.dataTransfer.setData(PLUGIN_MIME, plugin.id)
+                  event.dataTransfer.setData('text/plain', plugin.id)
                   event.dataTransfer.effectAllowed = 'copy'
                 }}
                 onClick={() => {
-                  if (!trackId) return
+                  if (dragging.current || !trackId) return
                   store.addPlugin(trackId, plugin.id)
                   store.toast(`${plugin.name} is on the track.`, 'good')
                 }}

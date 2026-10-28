@@ -193,6 +193,8 @@ export class ProjectStore {
   selectedClipIds: string[] = []
   selectedMidiClipId: string | null
   selectedMidiClipIds: string[] = []
+  selectedPatternClipId: string | null = null
+  selectedPatternClipIds: string[] = []
   selectedNoteId: string | null
   selectedNoteIds: string[] = []
   view: WorkspaceView = 'arrange'
@@ -409,6 +411,28 @@ export class ProjectStore {
 
   selectClip(trackId: string, clipId: string | null, midi = false, openSheet = true, additive = false) {
     this.selectedTrackId = trackId
+    const patternHit = !!clipId && (this.project.patternClips ?? []).some((clip) => clip.id === clipId)
+    if (patternHit && clipId) {
+      this.selectedClipId = null
+      this.selectedClipIds = []
+      this.selectedMidiClipId = null
+      this.selectedMidiClipIds = []
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
+      this.clipSheet = false
+      if (additive) {
+        const has = this.selectedPatternClipIds.includes(clipId)
+        this.selectedPatternClipIds = has ? this.selectedPatternClipIds.filter((id) => id !== clipId) : [...this.selectedPatternClipIds, clipId]
+        this.selectedPatternClipId = this.selectedPatternClipIds.at(-1) ?? null
+      } else {
+        this.selectedPatternClipId = clipId
+        this.selectedPatternClipIds = [clipId]
+      }
+      this.emit()
+      return
+    }
+    this.selectedPatternClipId = null
+    this.selectedPatternClipIds = []
     if (midi) {
       this.selectedClipId = null
       this.selectedClipIds = []
@@ -451,10 +475,16 @@ export class ProjectStore {
   }
 
   selectRegion(audioIds: string[], midiIds: string[], trackId: string | null, additive = false) {
-    this.selectedClipIds = additive ? uniqueIds([...this.selectedClipIds, ...audioIds]) : audioIds
-    this.selectedMidiClipIds = additive ? uniqueIds([...this.selectedMidiClipIds, ...midiIds]) : midiIds
+    const known = new Set((this.project.patternClips ?? []).map((clip) => clip.id))
+    const patternIds = [...audioIds, ...midiIds].filter((id) => known.has(id))
+    const audio = audioIds.filter((id) => !known.has(id))
+    const midi = midiIds.filter((id) => !known.has(id))
+    this.selectedClipIds = additive ? uniqueIds([...this.selectedClipIds, ...audio]) : audio
+    this.selectedMidiClipIds = additive ? uniqueIds([...this.selectedMidiClipIds, ...midi]) : midi
+    this.selectedPatternClipIds = additive ? uniqueIds([...this.selectedPatternClipIds, ...patternIds]) : patternIds
     this.selectedClipId = this.selectedClipIds.at(-1) ?? null
     this.selectedMidiClipId = this.selectedMidiClipIds.at(-1) ?? null
+    this.selectedPatternClipId = this.selectedPatternClipIds.at(-1) ?? null
     if (trackId) this.selectedTrackId = trackId
     this.clipSheet = false
     this.emit()
@@ -1706,6 +1736,15 @@ export class ProjectStore {
     })
   }
 
+  private dropSelectedPatterns() {
+    const patterns = new Set(this.selectedPatternClipIds.length ? this.selectedPatternClipIds : this.selectedPatternClipId ? [this.selectedPatternClipId] : [])
+    if (!patterns.size || !this.project.patternClips) return false
+    this.project.patternClips = this.project.patternClips.filter((clip) => !patterns.has(clip.id))
+    this.selectedPatternClipId = null
+    this.selectedPatternClipIds = []
+    return true
+  }
+
   deleteSelectedClip() {
     this.mutate(() => {
       const audio = new Set(this.selectedClipIds.length ? this.selectedClipIds : this.selectedClipId ? [this.selectedClipId] : [])
@@ -1719,6 +1758,7 @@ export class ProjectStore {
         for (const track of this.project.tracks) track.clips = track.clips.filter((clip) => !audio.has(clip.id))
         this.selectedClipId = null
         this.selectedClipIds = []
+        this.dropSelectedPatterns()
         return
       }
       if (this.selectedNoteIds.length && this.selectedMidiClipId) {
@@ -1732,10 +1772,12 @@ export class ProjectStore {
         return
       }
       const midi = new Set(this.selectedMidiClipIds.length ? this.selectedMidiClipIds : this.selectedMidiClipId ? [this.selectedMidiClipId] : [])
-      if (!midi.size) return
-      for (const track of this.project.tracks) track.midiClips = track.midiClips.filter((clip) => !midi.has(clip.id))
-      this.selectedMidiClipId = null
-      this.selectedMidiClipIds = []
+      if (midi.size) {
+        for (const track of this.project.tracks) track.midiClips = track.midiClips.filter((clip) => !midi.has(clip.id))
+        this.selectedMidiClipId = null
+        this.selectedMidiClipIds = []
+      }
+      this.dropSelectedPatterns()
     })
   }
 
@@ -1919,6 +1961,41 @@ export class ProjectStore {
     })
   }
 
+  placePatternClips(moves: { clipId: string; startBeat: number; trackId?: string }[]) {
+    this.mutate(() => {
+      for (const move of moves) {
+        const clip = this.project.patternClips?.find((item) => item.id === move.clipId)
+        if (!clip || clip.scene != null) continue
+        clip.placed = true
+        clip.startBeat = this.project.snap ? Math.max(0, Math.round(move.startBeat)) : Math.max(0, move.startBeat)
+        if (move.trackId && this.project.tracks.some((track) => track.id === move.trackId && track.type === 'midi')) {
+          clip.trackId = move.trackId
+        }
+      }
+    })
+  }
+
+  resizePatternClip(clipId: string, edge: 'start' | 'end', beat: number) {
+    this.mutate(() => {
+      const clip = this.project.patternClips?.find((item) => item.id === clipId)
+      if (!clip || clip.scene != null) return
+      const next = snappedClipBeat(this.project, beat)
+      const min = 0.25
+      clip.placed = true
+      if (edge === 'end') {
+        clip.lengthBeats = Math.max(min, next - clip.startBeat)
+        return
+      }
+      const end = clip.startBeat + clip.lengthBeats
+      const offset = clip.offsetBeats || 0
+      const start = Math.max(clip.startBeat - offset, Math.min(next, end - min))
+      const delta = start - clip.startBeat
+      clip.offsetBeats = Math.max(0, offset + delta)
+      clip.startBeat = start
+      clip.lengthBeats = end - start
+    })
+  }
+
   placeNotes(trackId: string, clipId: string, moves: { id: string; startBeat: number; pitch: number; durationBeats: number }[]) {
     this.mutate(() => {
       const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
@@ -1981,6 +2058,8 @@ export class ProjectStore {
         this.selectedMidiClipIds = [clip.id]
         this.selectedClipId = null
         this.selectedClipIds = []
+        this.selectedPatternClipId = null
+        this.selectedPatternClipIds = []
         return
       }
       if (track.type !== 'audio') return
@@ -2004,6 +2083,8 @@ export class ProjectStore {
       this.selectedClipIds = [clip.id]
       this.selectedMidiClipId = null
       this.selectedMidiClipIds = []
+      this.selectedPatternClipId = null
+      this.selectedPatternClipIds = []
     })
   }
 
@@ -2058,6 +2139,25 @@ export class ProjectStore {
       if (nextMidi.length) {
         this.selectedMidiClipIds = nextMidi
         this.selectedMidiClipId = nextMidi.at(-1) ?? null
+      }
+      const patternIds = new Set(this.selectedPatternClipIds)
+      const nextPattern: string[] = []
+      if (this.project.patternClips) {
+        for (const clip of [...this.project.patternClips]) {
+          if (!patternIds.has(clip.id)) continue
+          const copy = {
+            ...clip,
+            id: uid('pcl'),
+            placed: true,
+            startBeat: clip.startBeat + clip.lengthBeats,
+          }
+          this.project.patternClips.push(copy)
+          nextPattern.push(copy.id)
+        }
+      }
+      if (nextPattern.length) {
+        this.selectedPatternClipIds = nextPattern
+        this.selectedPatternClipId = nextPattern.at(-1) ?? null
       }
     })
   }
@@ -3726,30 +3826,42 @@ export class ProjectStore {
     this.editChannel(channelId, (cells, count) => cells.map((cell, index) => (index < count && clip[index] ? { ...clip[index] } : cell)))
   }
 
-  placePattern(startBeat: number) {
+  placePattern(startBeat: number, trackId?: string) {
     const pattern = this.activePattern()
     if (!pattern) {
       this.toast('Choose a pattern first.', 'warn')
       return
     }
+    let landed = 'Drums'
     this.mutate(() => {
-      const track = this.ensureDrumsTrack()
+      const requested = trackId ? this.project.tracks.find((track) => track.id === trackId && track.type === 'midi') : null
+      const track = requested ?? this.ensureDrumsTrack()
+      landed = track.name
       if (!this.project.patternClips) this.project.patternClips = []
       for (const channel of pattern.channels) {
         if (!channel.output) channel.output = track.id
       }
       mirrorTrackMix(this.project, track.id)
-      this.project.patternClips.push({
+      const clip = {
         id: uid('pcl'),
         patternId: pattern.id,
         startBeat: Math.max(0, startBeat),
         lengthBeats: pattern.steps * 0.25,
         scene: null,
         trackId: track.id,
-      })
+        placed: true,
+        offsetBeats: 0,
+      }
+      this.project.patternClips.push(clip)
+      this.selectedPatternClipId = clip.id
+      this.selectedPatternClipIds = [clip.id]
+      this.selectedClipId = null
+      this.selectedClipIds = []
+      this.selectedMidiClipId = null
+      this.selectedMidiClipIds = []
       this.selectedTrackId = track.id
     })
-    this.toast(`${pattern.name} is on Drums.`, 'good')
+    this.toast(`${pattern.name} is on ${landed}.`, 'good')
   }
 
   /** Midi track named Drums. Place creates it when the song does not have one yet. */
