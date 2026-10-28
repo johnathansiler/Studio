@@ -42,6 +42,7 @@ export function importDecentSampler(xml: string, name = 'Decent Sampler'): Sampl
         tuneCents: number(attr(sample, 'tuning') ?? attr(group, 'tuning'), 0),
         seq: cycling ? seq : 1,
         seqLength,
+        rrMode: seqMode === 'random' ? 'random' : 'cycle',
         rrGroup: groupRr,
         swLast: switched(attr(sample, 'swLast', 'sw_last') ?? attr(group, 'swLast', 'sw_last')),
         swLo: switched(attr(sample, 'swLokey', 'sw_lokey') ?? attr(group, 'swLokey', 'sw_lokey')),

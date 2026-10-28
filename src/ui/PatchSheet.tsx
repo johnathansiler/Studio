@@ -157,6 +157,10 @@ export function PatchSheet({ store, engine, trackId }: { store: ProjectStore; en
             ))}
             <button type="button" title={controlHelp('addRoute')} onClick={() => { show('addRoute'); store.updateOmni(trackId, (current) => { const added = addRoute(current); if (added) setRouteId(added.id) }) }}>+</button>
           </div>
+          <div className="patch-knobs">
+            <Knob label="Macro 1" help="macro1" min={0} max={1} step={0.01} value={patch.macro1 ?? 0} show={show} end={() => store.endDraft()} onChange={(value, draft) => store.updateOmni(trackId, (current) => setPerformance(current, { macro1: value }), draft)} />
+            <Knob label="Macro 2" help="macro2" min={0} max={1} step={0.01} value={patch.macro2 ?? 0} show={show} end={() => store.endDraft()} onChange={(value, draft) => store.updateOmni(trackId, (current) => setPerformance(current, { macro2: value }), draft)} />
+          </div>
           {route && (
             <div className="patch-route">
               <label title={controlHelp('source')}>

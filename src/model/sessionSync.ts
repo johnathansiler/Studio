@@ -97,7 +97,10 @@ export function referencedBufferIds(project: Project): string[] {
       for (const lane of clip.folder?.lanes || []) ids.add(lane.bufferId)
     }
     for (const plugin of track.plugins ?? []) collectInstrumentBuffers(plugin, ids)
-    for (const sample of track.library?.samples ?? []) if (sample.bufferId) ids.add(sample.bufferId)
+    for (const sample of track.library?.samples ?? []) {
+      if (sample.bufferId) ids.add(sample.bufferId)
+      if (sample.packId) ids.add(sample.packId)
+    }
   }
   for (const plugin of project.masterPlugins ?? []) collectInstrumentBuffers(plugin, ids)
   for (const id of patchBufferIds(project)) ids.add(id)

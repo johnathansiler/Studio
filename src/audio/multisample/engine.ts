@@ -1,7 +1,8 @@
 import type { SampleBank } from './cache'
 import { MemoryBank } from './cache'
 import { isKeyswitch, selectLayers } from './map'
-import { advancePlayhead, readFrame, type ReadSpan } from './read'
+import { advancePlayhead, readFrame, readFrameAt, type ReadSpan } from './read'
+import { openStream, type SampleStream } from './stream'
 import type { DecodedSample, LoopMode, MappedLayer, MicPosition, SampleRef, SamplerProgram, ZoneTrigger } from './types'
 import { dbToAmp, midiVelocity } from './types'
 
@@ -33,6 +34,7 @@ interface Voice {
   sustain: number
   release: number
   audio: DecodedSample | null
+  stream: SampleStream | null
   ref: SampleRef
   waited: number
   oneShot: boolean
@@ -210,28 +212,39 @@ export class SamplerInstrument {
       for (const voice of this.voices) {
         if (!voice.active) continue
         voice.age += 1
-        if (!voice.audio) {
-          voice.audio = this.bank.get(voice.ref)
+        if (!voice.audio && !voice.stream) {
+          voice.stream = openStream(this.bank, voice.ref)
+          if (!voice.stream) voice.audio = this.bank.get(voice.ref)
           voice.waited += 1
-          if (!voice.audio && voice.waited > sr * 2) voice.active = false
+          if (!voice.audio && !voice.stream && voice.waited > sr * 2) voice.active = false
           continue
         }
         const env = this.envelope(voice, sr)
         if (!voice.active) continue
-        const channelL = voice.audio.channels[0]
-        if (!channelL?.length) continue
-        const channelR = voice.audio.channels[1] ?? channelL
-        const rate = (voice.audio.sampleRate / sr) * voice.tune
+        const channelL = voice.audio?.channels[0]
+        if (!voice.stream && !channelL?.length) continue
+        const channelR = voice.audio?.channels[1] ?? channelL
+        const sourceRate = voice.stream?.sampleRate || voice.audio?.sampleRate || sr
+        const rate = (sourceRate / sr) * voice.tune
         const span = spanOf(voice)
-        const sampleL = readFrame(channelL, voice.pos, rate, span)
-        const sampleR = channelR === channelL ? sampleL : readFrame(channelR, voice.pos, rate, span)
+        const length = voice.stream?.frames || channelL?.length || 0
+        const sampleL = voice.stream
+          ? readFrameAt((index) => voice.stream!.at(0, index), length, voice.pos, rate, span)
+          : readFrame(channelL!, voice.pos, rate, span)
+        const sampleR = voice.stream
+          ? voice.stream.channels > 1
+            ? readFrameAt((index) => voice.stream!.at(1, index), length, voice.pos, rate, span)
+            : sampleL
+          : channelR === channelL
+            ? sampleL
+            : readFrame(channelR!, voice.pos, rate, span)
         const mic = this.mics.get(voice.micId)
         const micGain = !mic || mic.mute ? 0 : mic.gain
         const amp = env * voice.vel * voice.gain * micGain * programGain
         const pan = clamp(voice.pan + (mic?.pan ?? 0), -1, 1)
         left += sampleL * amp * (pan <= 0 ? 1 : 1 - pan)
         right += sampleR * amp * (pan >= 0 ? 1 : 1 + pan)
-        const limit = voice.end > 0 ? voice.end : channelL.length
+        const limit = voice.end > 0 ? voice.end : length
         const stepped = advancePlayhead(voice.pos, rate, limit, span)
         voice.pos = stepped.pos
         if (stepped.done && voice.stage !== 'release') {
@@ -265,8 +278,9 @@ export class SamplerInstrument {
       }
       const zone = layer.zone
       const ref = layer.sample
-      const audio = this.bank.get(ref)
-      if (!audio) this.bank.request(ref)
+      const stream = openStream(this.bank, ref)
+      const audio = stream ? null : this.bank.get(ref)
+      if (!audio && !stream) this.bank.request(ref)
       const loop = zone.loopMode === 'loop' || zone.loopMode === 'sustain'
       const loopEnd = zone.loopEnd > zone.loopStart ? zone.loopEnd : 0
       const fade = loop && loopEnd - zone.loopStart > 16 ? Math.min(256, Math.floor((loopEnd - zone.loopStart) / 8)) : 0
@@ -298,6 +312,7 @@ export class SamplerInstrument {
         sustain: clamp(zone.ampeg.sustain, 0, 1),
         release: Math.max(0.005, zone.ampeg.release),
         audio,
+        stream,
         ref,
         waited: 0,
         oneShot: zone.loopMode === 'one-shot',

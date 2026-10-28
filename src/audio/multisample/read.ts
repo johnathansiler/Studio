@@ -59,37 +59,48 @@ export interface ReadSpan {
 
 /** Fractional read. `pos` is in source frames. */
 export function readFrame(channel: Float32Array, pos: number, rate: number, span: ReadSpan) {
-  if (channel.length < 2 || !Number.isFinite(pos)) return 0
+  return readFrameAt((index) => channel[index] || 0, channel.length, pos, rate, span)
+}
+
+/** Same reader as readFrame, for a sample that is not one contiguous buffer. */
+export function readFrameAt(sampleAt: (index: number) => number, length: number, pos: number, rate: number, span: ReadSpan) {
+  if (length < 2 || !Number.isFinite(pos)) return 0
   const band = bandForRate(rate)
   const phase = pos - Math.floor(pos)
   const row = kernels()[band * PHASES + Math.min(PHASES - 1, Math.max(0, Math.floor(phase * PHASES)))]
   const origin = Math.floor(pos) - (HALF - 1)
   let sample = 0
-  for (let tap = 0; tap < TAPS; tap++) sample += row[tap] * at(channel, origin + tap, span)
+  for (let tap = 0; tap < TAPS; tap++) sample += row[tap] * take(sampleAt, length, origin + tap, span)
   if (span.loop && span.fade > 1 && span.loopEnd > span.loopStart) {
     const fadeStart = span.loopEnd - span.fade
     if (pos >= fadeStart && pos < span.loopEnd) {
       const t = (pos - fadeStart) / span.fade
       const ahead = span.loopStart + (pos - fadeStart)
-      const into = readPlain(channel, ahead, rate)
+      const into = readPlainAt(sampleAt, length, ahead, rate)
       sample = sample * (1 - t) + into * t
     }
   }
   return sample
 }
 
-function readPlain(channel: Float32Array, pos: number, rate: number) {
+function readPlainAt(sampleAt: (index: number) => number, length: number, pos: number, rate: number) {
   const band = bandForRate(rate)
   const phase = pos - Math.floor(pos)
   const row = kernels()[band * PHASES + Math.min(PHASES - 1, Math.max(0, Math.floor(phase * PHASES)))]
   const origin = Math.floor(pos) - (HALF - 1)
   let sample = 0
   const idle: ReadSpan = { loop: false, loopStart: 0, loopEnd: 0, fade: 0 }
-  for (let tap = 0; tap < TAPS; tap++) sample += row[tap] * at(channel, origin + tap, idle)
+  for (let tap = 0; tap < TAPS; tap++) sample += row[tap] * take(sampleAt, length, origin + tap, idle)
   return sample
 }
 
-function at(channel: Float32Array, index: number, span: ReadSpan) {
+function take(sampleAt: (index: number) => number, length: number, index: number, span: ReadSpan) {
+  const frame = resolveFrame(index, span)
+  if (frame < 0 || frame >= length) return 0
+  return sampleAt(frame) || 0
+}
+
+function resolveFrame(index: number, span: ReadSpan) {
   let frame = index
   if (span.loop && span.loopEnd > span.loopStart + 1) {
     const start = span.loopStart + Math.max(0, span.fade)
@@ -100,8 +111,7 @@ function at(channel: Float32Array, index: number, span: ReadSpan) {
       while (frame < start) frame += width
     }
   }
-  if (frame < 0 || frame >= channel.length) return 0
-  return channel[frame] || 0
+  return frame
 }
 
 /** Advance a looping playhead. Returns the next position and whether the voice has ended. */

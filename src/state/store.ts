@@ -23,7 +23,8 @@ import {
 } from '../audio/sample/engine'
 import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
 import { findCycle, MASTER } from '../audio/routing'
-import type { SamplerProgram } from '../audio/multisample/types'
+import { isPackAsset, packToAsset } from '../audio/multisample/persist'
+import type { SamplePack, SamplerProgram } from '../audio/multisample/types'
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
@@ -556,15 +557,25 @@ export class ProjectStore {
     })
   }
 
-  /** Same as setLibrary, and keep imported wavs in the project so they save. */
-  adoptLibrary(trackId: string, program: SamplerProgram, assets: { id: string; name: string; sampleRate: number; channels: Float32Array[] }[]) {
+  /** Same as setLibrary, and keep imported wavs and SoundFont packs in the project so they save. */
+  adoptLibrary(trackId: string, program: SamplerProgram, assets: { id: string; name: string; sampleRate: number; channels: Float32Array[] }[], pack?: SamplePack | null) {
     this.mutate(() => {
       const track = this.track(trackId)
       if (!track || track.type !== 'midi') return
       track.instrument = 'library'
       track.library = program
       for (const asset of assets) this.buffers.set(asset.id, asset)
+      if (pack) this.buffers.set(pack.id, packToAsset(pack))
       if (!track.rack?.devices?.length) normalizeTrackRack(track)
+    })
+  }
+
+  /** Latch a keyswitch on the library instrument. Other views read it from the project. */
+  setLibrarySwitch(trackId: string, note: number | null) {
+    this.mutate(() => {
+      const program = this.track(trackId)?.library
+      if (!program) return
+      program.defaultSwitch = note
     })
   }
 
@@ -2472,6 +2483,7 @@ export class ProjectStore {
     if (this.project.sampleRate === rate) return
     const ratio = rate / this.project.sampleRate
     for (const asset of this.buffers.values()) {
+      if (isPackAsset(asset)) continue
       asset.channels = asset.channels.map((channel) => linearResample(channel, asset.sampleRate, rate))
       asset.sampleRate = rate
     }
