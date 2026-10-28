@@ -1,11 +1,15 @@
+import type { SamplerProgram } from '../audio/multisample/types'
 import type { RollMemory } from './paint'
 import type { QuantizePreset, QuantizeSettings, WarpPoint } from './quantize'
+import type { OmniPatch } from '../instruments/patch/types'
 import type { DevicePreset, RackAutomation, RackPatch, RackState } from './rack'
+import type { GeneratorSettings } from '../generators/types'
+import type { PlayerSettings } from '../players/types'
 import { defaultScale, type ScaleState } from './scale'
 import type { BeatRack, PatternClip } from './steps'
 
 export type TrackType = 'audio' | 'midi' | 'bus' | 'group'
-export type TrackInstrument = 'synth' | 'sampler' | '808' | 'drum-machine' | 'none'
+export type TrackInstrument = 'synth' | 'sampler' | '808' | 'drum-machine' | 'library' | 'none'
 
 export function isLocalInput(input: string) {
   return input === 'mic' || input === 'line'
@@ -305,6 +309,8 @@ export interface Track {
   channels?: 1 | 2
   /** Chosen instrument for a MIDI track. */
   instrument?: TrackInstrument
+  /** Multi-sample program for a library instrument. PCM is not stored here. */
+  library?: SamplerProgram
   inserts: Insert[]
   plugins: PluginInstance[]
   sends: Send[]
@@ -316,6 +322,8 @@ export interface Track {
   midiClips: MidiClip[]
   /** Modular instrument rack. Present on instrument tracks. */
   rack?: RackState
+  /** Layered synth/sample patch. Saved with the project. */
+  omniPatch?: OmniPatch | null
   /** Scene index → clip id. Missing means scene N is clips[N]. */
   audioSlots?: (string | null)[]
   midiSlots?: (string | null)[]
@@ -349,6 +357,8 @@ export interface Project {
   snap: boolean
   devicePresets: DevicePreset[]
   rackPatches: RackPatch[]
+  /** Named layered patches saved with this project. */
+  omniLibrary?: OmniPatch[]
   /** Parameter lanes for devices in the modular rack. */
   rackAutomation: RackAutomation[]
   /** Global clip launch grid. A clip quant overrides it. */
@@ -360,10 +370,16 @@ export interface Project {
   record?: RecordSettings
   /** Key, scale, and chord-pad performance settings. */
   scale?: ScaleState
+  /** Last one-tap generator choices. The MIDI itself lives on the tracks. */
+  generator?: GeneratorSettings
+  /** Drummer and session-player choices. The MIDI itself lives on the tracks. */
+  players?: PlayerSettings
   /** Musical grid for performed MIDI. 0 leaves the note where it was played. */
   quantizeBeats?: number
   /** `${kind}:${name}` factory and user presets marked in the browser. */
   presetFavorites?: string[]
+  /** Ids from the free sound library kept with this project. */
+  soundFavorites?: string[]
   beats?: BeatRack
   patternClips?: PatternClip[]
   roll?: RollMemory
@@ -448,6 +464,7 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     snap: true,
     devicePresets: [],
     rackPatches: [],
+    omniLibrary: [],
     rackAutomation: [],
     launchQuant: '1bar',
     recordBars: 4,
@@ -455,6 +472,7 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     scale: defaultScale(),
     quantizeBeats: 0,
     presetFavorites: [],
+    soundFavorites: [],
   }
 }
 

@@ -1,0 +1,159 @@
+/* Guest take progress and phone landscape compaction.
+   Chrome heights match PHONE_LAND_* in src/ui/phoneLand.ts. */
+
+.transport { position: relative; }
+.hq-take {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 1px;
+  height: 3px;
+  border-radius: 99px;
+  background: rgba(224, 177, 90, 0.28);
+  overflow: hidden;
+  pointer-events: none;
+}
+.hq-take i {
+  display: block;
+  height: 100%;
+  background: var(--amber);
+}
+
+/* One short row each, so the timeline and mixer keep most of a sideways phone.
+   Rows stay auto so a hidden tool row collapses instead of leaving a gap. */
+.shell.phone.land {
+  height: 100dvh;
+}
+.shell.phone.land .topbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  min-height: 0;
+  max-height: 32px;
+  padding: 0 6px;
+  overflow: hidden;
+}
+.shell.phone.land .brand { gap: 4px; }
+.shell.phone.land .brand h1,
+.shell.phone.land .brand p { display: none; }
+.shell.phone.land .mark { width: 20px; height: 20px; }
+.shell.phone.land .project-name {
+  height: 28px;
+  min-height: 0;
+  padding: 0 2px;
+  font-size: 12px;
+  flex: 1 1 4rem;
+}
+.shell.phone.land .views { width: auto; flex: none; padding: 1px; }
+.shell.phone.land .views button {
+  flex: none;
+  height: 26px;
+  min-height: 0;
+  padding: 0 7px;
+  font-size: 11px;
+}
+.shell.phone.land .menu-btn,
+.shell.phone.land .unstuck-btn {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 0;
+}
+.shell.phone.land .transport {
+  flex-wrap: nowrap;
+  align-items: center;
+  overflow-x: auto;
+  height: 32px;
+  min-height: 0;
+  max-height: 32px;
+  gap: 4px;
+  padding: 0 6px;
+}
+.shell.phone.land .t-buttons,
+.shell.phone.land .t-toggles { flex: 0 0 auto; flex-wrap: nowrap; gap: 2px; }
+.shell.phone.land .t-btn,
+.shell.phone.land .t-btn.stop,
+.shell.phone.land .bpm-readout,
+.shell.phone.land .tap-pad button {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 0;
+  padding: 0;
+}
+.shell.phone.land .bpm-readout { width: auto; min-width: 44px; padding: 0 6px; font-size: 12px; }
+.shell.phone.land .lcd { flex: 0 1 132px; padding: 0 6px; }
+.shell.phone.land .lcd .bars { font-size: 12px; }
+.shell.phone.land .lcd .tc { font-size: 10px; }
+.shell.phone.land .tool-slot:not(:empty) {
+  min-height: 0;
+  height: 28px;
+  max-height: 28px;
+  padding: 0 4px;
+  overflow: hidden;
+}
+.shell.phone.land .tool-slot .timeline-tools {
+  flex-wrap: nowrap;
+  height: 28px;
+  min-height: 0;
+  gap: 2px;
+}
+.shell.phone.land .tool-slot .timeline-tools button,
+.shell.phone.land .tool-strip button {
+  width: 28px;
+  height: 26px;
+  min-width: 28px;
+  min-height: 0;
+}
+.shell.phone.land .tool-chip {
+  order: 1;
+  flex: 0 1 96px;
+  max-width: 28%;
+  margin: 0 0 0 4px;
+  font-size: 11px;
+}
+.shell.phone.land .tool-strip { flex: 1 1 auto; min-width: 0; }
+
+.shell.phone.land .plugin-sheet,
+.shell.phone.land .clip-sheet,
+.shell.phone.land .stem-sheet,
+.shell.phone.land .q-sheet,
+.shell.phone.land .unstuck-sheet,
+.shell.phone.land .master-sheet,
+.shell.phone.land .plugin-sheet:has(.faceplate),
+.shell.phone.land .plugin-sheet:has(.sample-panel) {
+  max-height: 26dvh;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  gap: 4px;
+}
+.shell.phone.land .plugin-sheet button,
+.shell.phone.land .clip-sheet button,
+.shell.phone.land .clip-sheet input,
+.shell.phone.land .clip-sheet select,
+.shell.phone.land .stem-sheet .text-btn,
+.shell.phone.land .q-sheet button,
+.shell.phone.land .q-sheet select,
+.shell.phone.land .q-sheet input,
+.shell.phone.land .q-sheet summary,
+.shell.phone.land .master-sheet button,
+.shell.phone.land .master-sheet select,
+.shell.phone.land .master-sheet header button,
+.shell.phone.land .unstuck-sheet header button,
+.shell.phone.land .unstuck-tabs button,
+.shell.phone.land .sample-panel .pads button,
+.shell.phone.land .sample-panel .text-btn,
+.shell.phone.land .knob button,
+.shell.phone.land .tune-keys button {
+  min-height: 28px;
+  min-width: 28px;
+}
+.shell.phone.land .plugin-sheet .spectrum,
+.shell.phone.land .master-sheet .spectrum,
+.shell.phone.land .goniometer { height: 36px; }
+.shell.phone.land .faceplate { padding: 6px; gap: 4px; }
+.shell.phone.land .needle-face { height: 28px; }
+.shell.phone.land .knob { width: 48px; }
+.shell.phone.land .knob button { width: 32px; height: 32px; }

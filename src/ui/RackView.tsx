@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
+import { LibraryPanel } from './LibraryPanel'
 import { DEVICE_KINDS, DEVICE_NAMES, DEVICE_PARAMS, FACTORY_PRESETS, isInstrument, MACRO_TARGETS, PRESET_CATEGORIES, type DeviceKind } from '../model/rack'
+import { selectRack } from '../state/select'
 import type { ProjectStore } from '../state/store'
 
 const KEYS = [
@@ -15,8 +17,9 @@ const KEYS = [
 ] as const
 
 export function RackView({ store, engine, trackId, onOpenKnock }: { store: ProjectStore; engine: AudioEngine; trackId: string; onOpenKnock?: () => void }) {
-  const track = store.track(trackId)
-  const rack = track?.rack
+  const rackState = selectRack(store, trackId)
+  const track = rackState.track
+  const rack = rackState.rack
   const [selected, setSelected] = useState(0)
   const [from, setFrom] = useState<{ id: string; port: string } | null>(null)
   const [query, setQuery] = useState('')
@@ -53,6 +56,7 @@ export function RackView({ store, engine, trackId, onOpenKnock }: { store: Proje
   })
   return (
     <div className="rack">
+      {track.instrument === 'library' && <LibraryPanel store={store} engine={engine} trackId={track.id} />}
       <header>
         <strong>{track.name}</strong>
         <select aria-label="Add device" value="" onChange={(event) => event.target.value && store.addDevice(track.id, event.target.value as DeviceKind)}>
