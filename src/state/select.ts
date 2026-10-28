@@ -5,7 +5,7 @@ import type { ScaleState } from '../model/scale'
 import type { QuantizeSettings } from '../model/quantize'
 import { descriptor } from '../audio/plugins/catalog'
 import { audibleIds } from '../model/audible'
-import { findLane, modeOf, specKey, valueAtSample, type AutoSpec } from '../model/automation'
+import { findLane, modeOf, specKey, valueAtMappedSample, type AutoSpec } from '../model/automation'
 import { groupForTrack } from '../model/mixGroups'
 import { DEVICE_PARAMS } from '../model/rack'
 import { orderedSections } from '../model/sections'
@@ -321,7 +321,7 @@ export function lanePoints(project: Project, spec: AutoSpec) {
 export function automatedValue(project: Project, spec: AutoSpec, sample: number, fallback: number) {
   const points = lanePoints(project, spec)
   if (!points.length) return fallback
-  return valueAtSample(points, sample, project.sampleRate, project.tempo, fallback)
+  return valueAtMappedSample(points, project, sample, fallback)
 }
 
 /**

@@ -6,7 +6,7 @@ import { MODEL_IDS } from '../audio/plugins/models'
 import { AmpPop } from './AmpPop'
 import { Faceplate } from './Faceplate'
 import { NOTE_NAMES, SCALES } from '../model/scale'
-import { samplesToBeats } from '../model/time'
+import { projectSampleBeat } from '../model/tempoMap'
 import { selectPlugin } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { SamplePanel } from './SamplePanel'
@@ -58,7 +58,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   const point = () => {
     const param = last || spec.params[0]?.id
     if (!param) return
-    const beat = samplesToBeats(engine.currentTimelineSample(), engine.sampleRate, store.project.tempo)
+    const beat = projectSampleBeat(store.project, engine.currentTimelineSample())
     store.addAutomationPoint(plugin.id, param, beat, plugin.params[param] ?? 0)
   }
   return (

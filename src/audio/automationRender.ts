@@ -16,6 +16,7 @@ export function processSampleAccurate(
   ctx: BlockContext,
   lanes: AutomationLane[],
   sidechainAt?: (id: string, length: number) => Float32Array | null,
+  beatAt?: (sample: number) => number,
 ) {
   const n = input[0]?.length ?? 0
   const channels = Math.max(1, output.length)
@@ -32,7 +33,7 @@ export function processSampleAccurate(
   for (let i = 0; i < n; i++) {
     oneIn[0][0] = state[0][i] || 0
     oneIn[1][0] = state[1][i] || 0
-    const beat = samplesToBeats(ctx.sampleTime + i, ctx.sampleRate, ctx.tempo)
+    const beat = beatAt ? beatAt(ctx.sampleTime + i) : samplesToBeats(ctx.sampleTime + i, ctx.sampleRate, ctx.tempo)
     for (let s = 0; s < slots.length; s++) {
       const slot = slots[s]
       const params = { ...base[s] }

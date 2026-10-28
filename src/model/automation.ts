@@ -1,6 +1,10 @@
 import type { RackAutomation } from './rack'
+import { projectBeatSample, projectSampleBeat, projectTempoMap } from './tempoMap'
 import type { AutomationLane, AutomationPoint, AutomationWriteMode, Project } from './types'
 import { beatsToSamples, samplesToBeats } from './time'
+
+/** Enough of a project to turn samples into musical beats. */
+export type TempoClock = Pick<Project, 'tempo' | 'sampleRate' | 'tempoMap' | 'automation'>
 
 export type AutoTarget = 'volume' | 'pan' | 'send' | 'plugin' | 'instrument'
 
@@ -52,6 +56,22 @@ export function valueAtSample(points: AutomationPoint[], sample: number, sampleR
   return curveAt(prepareCurve(points), samplesToBeats(sample, sampleRate, tempo), fallback)
 }
 
+/** Lane value at a timeline sample, following tempo steps and ramps. */
+export function valueAtMappedSample(points: AutomationPoint[], project: TempoClock, sample: number, fallback: number) {
+  return curveAt(prepareCurve(points), projectSampleBeat(project, sample), fallback)
+}
+
+export function valueChanges(points: AutomationPoint[], startBeat: number, endBeat: number, fallback: number) {
+  if (!points.length) return false
+  const sorted = prepareCurve(points)
+  const first = curveAt(sorted, startBeat, fallback)
+  if (Math.abs(curveAt(sorted, endBeat, fallback) - first) > 1e-6) return true
+  for (const point of sorted) {
+    if (point.beat > startBeat + 1e-6 && point.beat < endBeat - 1e-6 && Math.abs(point.value - first) > 1e-6) return true
+  }
+  return false
+}
+
 export function curveChanges(points: AutomationPoint[], sampleRate: number, tempo: number, length: number, fallback: number) {
   if (points.length < 2 || length < 2) return false
   const sorted = prepareCurve(points)
@@ -89,6 +109,78 @@ export function rampEvents(
     events.push({ time: originTime + (sample - originSample) / sampleRate, value: point.value })
   }
   return events
+}
+
+/**
+ * Audio-clock breakpoints for a lane. Each time is the tempo-map sample of that beat.
+ * A tempo step adds the breakpoint. A ramp also adds quarter-beat points so a linear
+ * clock ramp stays on the musical curve.
+ */
+export function automationSchedule(
+  points: AutomationPoint[],
+  fallback: number,
+  project: TempoClock,
+  originSample: number,
+  originTime: number,
+  endSample: number,
+) {
+  const sorted = prepareCurve(points)
+  const startBeat = projectSampleBeat(project, originSample)
+  const events: { time: number; value: number }[] = [{
+    time: originTime,
+    value: curveAt(sorted, startBeat, fallback),
+  }]
+  let prevSample = originSample
+  for (const beat of scheduleBeats(project, sorted, startBeat, Math.max(originSample, endSample))) {
+    const sample = projectBeatSample(project, beat)
+    if (sample <= prevSample + 0.5) continue
+    prevSample = sample
+    events.push({
+      time: originTime + (sample - originSample) / project.sampleRate,
+      value: curveAt(sorted, beat, fallback),
+    })
+  }
+  return events
+}
+
+function scheduleBeats(project: TempoClock, sorted: AutomationPoint[], startBeat: number, endSample: number) {
+  const beats: number[] = []
+  const add = (beat: number) => {
+    if (beat <= startBeat + 1e-6) return
+    if (projectBeatSample(project, beat) > endSample + 1) return
+    if (beats.some((item) => Math.abs(item - beat) < 1e-4)) return
+    beats.push(beat)
+  }
+  for (const point of sorted) add(point.beat)
+  const map = projectTempoMap(project)
+  let prev = 0
+  let ramp = false
+  for (const point of map) {
+    if (point.ramp && point.beat > prev) {
+      const from = Math.max(prev, startBeat)
+      const to = Math.min(point.beat, projectSampleBeat(project, endSample))
+      if (to > from + 1e-6) ramp = true
+    }
+    add(point.beat)
+    prev = Math.max(prev, point.beat)
+  }
+  if (ramp) {
+    const step = 0.25
+    for (let index = 1; index * step < projectSampleBeat(project, endSample) + 1; index++) add(index * step)
+  }
+  beats.sort((a, b) => a - b)
+  return beats
+}
+
+/** Per-sample lane gain for a buffer, using the tempo map. A flat lane stays one number. */
+export function curveForLength(points: AutomationPoint[] | undefined, fallback: number, project: TempoClock, length: number) {
+  if (!points?.length || length < 1) return fallback
+  const sorted = prepareCurve(points)
+  const endBeat = projectSampleBeat(project, Math.max(0, length - 1))
+  if (!valueChanges(sorted, 0, endBeat, fallback)) return curveAt(sorted, projectSampleBeat(project, 0), fallback)
+  const out = new Float32Array(length)
+  for (let i = 0; i < length; i++) out[i] = curveAt(sorted, projectSampleBeat(project, i), fallback)
+  return out
 }
 
 export function drawPoint(points: AutomationPoint[], beat: number, value: number, radius = 0.03) {

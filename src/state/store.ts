@@ -1360,7 +1360,7 @@ export class ProjectStore {
         this.write = null
         return
       }
-      const beat = samplesToBeats(sample, this.project.sampleRate, this.project.tempo)
+      const beat = projectSampleBeat(this.project, sample)
       const key = specKey(spec)
       const previous = this.write?.key === key ? this.write : null
       const fromBeat = previous?.beat ?? beat
@@ -1372,7 +1372,7 @@ export class ProjectStore {
 
   sustainAutomation(sample: number) {
     if (modeOf(this.project) !== 'latch' || !this.write || this.touching) return
-    const beat = samplesToBeats(sample, this.project.sampleRate, this.project.tempo)
+    const beat = projectSampleBeat(this.project, sample)
     if (beat <= this.write.beat + 0.02) return
     const cursor = this.write
     this.draft(() => {

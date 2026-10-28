@@ -21,7 +21,7 @@ import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChu
 import { encodeWav, linearResample } from '../model/wav'
 import { scaleById } from '../model/scale'
 import { audibleIds } from '../model/audible'
-import { laneFor, rackLanesFor, rampEvents, valueAtSample } from '../model/automation'
+import { automationSchedule, laneFor, rackLanesFor, valueAtMappedSample } from '../model/automation'
 import { applyRamps } from './paramCurve'
 import { chainContext, enabledFx, LiveMidiChain, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
 import { LiveRack } from './liveRack'
@@ -459,8 +459,8 @@ export class AudioEngine {
       this.scheduleControl(strip.fader.gain, laneFor(project.automation, track.id, 'volume')?.points, track.volume, sample, now, end)
       this.scheduleControl(strip.pan.pan, laneFor(project.automation, track.id, 'pan')?.points, track.pan, sample, now, end)
     }
-    this.rack.applyAutomation(project, this.playing, sample, now, end, this.sampleRate)
-    const originBeat = samplesToBeats(this.playing ? this.playOriginSample : sample, this.sampleRate, project.tempo)
+    this.rack.applyAutomation(project, this.playing, sample, now, end)
+    const originBeat = projectSampleBeat(project, this.playing ? this.playOriginSample : sample)
     this.rackHost.setTransport(project, this.playing ? this.playOriginCtx : now, originBeat)
   }
 
@@ -468,12 +468,12 @@ export class AudioEngine {
     const project = this.project
     if (!project) return
     if (!this.playing || !points?.length) {
-      const value = points?.length ? valueAtSample(points, sample, this.sampleRate, project.tempo, fallback) : fallback
+      const value = points?.length ? valueAtMappedSample(points, project, sample, fallback) : fallback
       param.cancelScheduledValues(now)
       param.setTargetAtTime(value, now, 0.015)
       return
     }
-    applyRamps(param, rampEvents(points, fallback, this.sampleRate, project.tempo, sample, now, end), now)
+    applyRamps(param, automationSchedule(points, fallback, project, sample, now, end), now)
   }
 
   previewRack(trackId: string, pitch: number, slide = false, hold = false) {
@@ -1339,6 +1339,7 @@ export class AudioEngine {
       masterVolume: project.masterVolume,
       sampleRate: rate,
       tempo: project.tempo,
+      tempoMap: project.tempoMap,
       length: end,
       scaleRoot: project.scale?.root ?? 0,
       scaleIntervals: scale.intervals,

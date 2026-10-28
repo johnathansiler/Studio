@@ -1,7 +1,8 @@
 import type { AutomationLane, PluginInstance } from '../model/types'
 import { audibleIds } from '../model/audible'
-import { constantOrCurve, laneFor, pluginLanesMove, sendLane } from '../model/automation'
-import { samplesToBeats } from '../model/time'
+import { curveForLength, laneFor, sendLane, valueChanges } from '../model/automation'
+import { projectSampleBeat } from '../model/tempoMap'
+import type { TempoPoint } from '../model/types'
 import { processChain, type ChainSlot } from './plugins/chain'
 import { automationAt, latencyOf } from './plugins/catalog'
 import { createLoudness, measureLoudness, sanitize } from './plugins/dsp'
@@ -32,6 +33,7 @@ export function renderGraph(opts: {
   masterVolume: number
   sampleRate: number
   tempo: number
+  tempoMap?: TempoPoint[]
   length: number
   scaleRoot: number
   scaleIntervals: readonly number[]
@@ -177,10 +179,12 @@ function slotsFor(
   return slots
 }
 
+type RenderClock = { sampleRate: number; tempo: number; tempoMap?: TempoPoint[]; automation: AutomationLane[] }
+
 function runBlocks(
   slots: ChainSlot[],
   input: Float32Array[],
-  opts: { sampleRate: number; tempo: number; scaleRoot: number; scaleIntervals: readonly number[]; automation: AutomationLane[]; quality?: 'full' | 'eco'; offline?: boolean },
+  opts: RenderClock & { scaleRoot: number; scaleIntervals: readonly number[]; quality?: 'full' | 'eco'; offline?: boolean },
   rendered: Map<string, { pre: Float32Array[]; post: Float32Array[] }>,
   tracks: Map<string, GraphTrack>,
 ) {
@@ -192,7 +196,8 @@ function runBlocks(
     const count = Math.min(block, n - offset)
     const sliceIn = input.map((channel) => channel.subarray(offset, offset + count))
     const sliceOut = output.map((channel) => channel.subarray(offset, offset + count))
-    const beat = samplesToBeats(offset, opts.sampleRate, opts.tempo)
+    const clock = { tempo: opts.tempo, sampleRate: opts.sampleRate, tempoMap: opts.tempoMap, automation: opts.automation }
+    const beat = projectSampleBeat(clock, offset)
     for (const slot of slots) slot.params = automationAt(opts.automation, slot.id, base.get(slot.id) ?? slot.params, beat)
     const blockCtx = {
       sampleRate: opts.sampleRate,
@@ -205,8 +210,10 @@ function runBlocks(
       offline: opts.offline !== false,
     }
     const keyAt = (id: string, keyLength: number) => sidechainMono(id, offset, keyLength, [...tracks.values()], rendered)
-    if (opts.offline !== false && pluginLanesMove(opts.automation, slots.map((slot) => slot.id), opts.sampleRate, opts.tempo, count)) {
-      processSampleAccurate(slots, sliceIn, sliceOut, blockCtx, opts.automation, keyAt)
+    const endBeat = projectSampleBeat(clock, offset + count - 1)
+    const moving = opts.offline !== false && slots.some((slot) => opts.automation.some((lane) => (lane.target == null || lane.target === 'plugin') && lane.pluginId === slot.id && valueChanges(lane.points, beat, endBeat, 0)))
+    if (moving) {
+      processSampleAccurate(slots, sliceIn, sliceOut, blockCtx, opts.automation, keyAt, (sample) => projectSampleBeat(clock, sample))
       continue
     }
     processChain(slots, sliceIn, sliceOut, blockCtx, keyAt)
@@ -220,7 +227,7 @@ function mixIncoming(
   rendered: Map<string, { pre: Float32Array[]; post: Float32Array[] }>,
   delays: Map<string, number>,
   length: number,
-  opts: { automation: AutomationLane[]; sampleRate: number; tempo: number },
+  opts: RenderClock,
 ) {
   for (const edge of edges) {
     const source = rendered.get(edge.from)
@@ -228,7 +235,7 @@ function mixIncoming(
     const buffer = edge.pre ? source.pre : source.post
     const delay = delays.get(`${edge.from}>${edge.to}`) ?? 0
     const lane = edge.sendId ? sendLane(opts.automation, edge.from, edge.sendId) : undefined
-    const gain = constantOrCurve(lane?.points, edge.gain, opts.sampleRate, opts.tempo, length)
+    const gain = curveForLength(lane?.points, edge.gain, opts, length)
     addDelayed(into, buffer, delay, gain, length)
   }
   return into
@@ -272,11 +279,11 @@ function applyGain(input: Float32Array[], volume: number) {
 function applyAutomatedFader(
   input: Float32Array[],
   track: GraphTrack,
-  opts: { automation: AutomationLane[]; sampleRate: number; tempo: number },
+  opts: RenderClock,
 ) {
   const length = input[0]?.length ?? 0
-  const vol = constantOrCurve(laneFor(opts.automation, track.id, 'volume')?.points, track.volume, opts.sampleRate, opts.tempo, length)
-  const pan = constantOrCurve(laneFor(opts.automation, track.id, 'pan')?.points, track.pan, opts.sampleRate, opts.tempo, length)
+  const vol = curveForLength(laneFor(opts.automation, track.id, 'volume')?.points, track.volume, opts, length)
+  const pan = curveForLength(laneFor(opts.automation, track.id, 'pan')?.points, track.pan, opts, length)
   if (typeof vol === 'number' && typeof pan === 'number') return applyFader(input, vol, pan)
   const out = [new Float32Array(length), new Float32Array(length)]
   for (let i = 0; i < length; i++) {
