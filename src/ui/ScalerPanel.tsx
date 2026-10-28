@@ -547,9 +547,12 @@ function Stepper({ label, value, hint, onStep }: { label: string; value: string;
 }
 
 function MoodMeter({ mood }: { mood: Mood }) {
+  const place = Math.round(((mood.score + 1) / 2) * 100)
   return (
-    <span className="mood" title={`${mood.word}. ${mood.feel}. Bright is major and lifting. Dark is minor and tense.`}>
-      <i data-mood={mood.word} style={{ width: `${Math.round(((mood.score + 1) / 2) * 100)}%` }} />
+    <span className="mood" data-mood={mood.word} title={`${mood.word}. ${mood.feel}. Bright is major and lifting. Dark is minor and tense.`}>
+      <span className="mood-scale" aria-hidden="true">
+        <i data-mood={mood.word} style={{ left: `${place}%` }} />
+      </span>
       <em>{mood.word}</em>
     </span>
   )

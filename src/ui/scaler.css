@@ -53,20 +53,48 @@
 }
 .stepper, .scaler-panel button, .scaler-panel input {
   border: 1px solid #0d1218;
-  background: linear-gradient(180deg, #313a48, #222933);
+  background-color: #222933;
+  background-image: var(--face);
   color: #d5deea;
-  border-radius: 6px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  box-shadow: var(--raised);
 }
-.stepper { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; }
-.stepper span { color: #8ea0b4; text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; }
-.stepper b { min-width: 52px; max-width: 8.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; color: #7fe7f5; }
-.stepper button, .scaler-panel button { min-height: 28px; padding: 0 8px; }
-.stepper button { min-width: 26px; padding: 0; }
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 3px 4px 3px 10px;
+}
+.stepper span { color: #8ea0b4; text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; white-space: nowrap; }
+.stepper b {
+  min-width: 3.2rem;
+  padding: 0 4px;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  text-align: center;
+  color: #7fe7f5;
+  font-variant-numeric: tabular-nums;
+}
+.stepper button, .scaler-panel button {
+  min-height: 32px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  white-space: nowrap;
+  overflow: visible;
+  line-height: 1.15;
+}
+.stepper button { min-width: 28px; padding: 0; border-radius: 6px; }
 .scaler-panel button.on, .scaler-card.on, .slot.focus {
   color: #062028;
-  background: linear-gradient(180deg, #8aeffc, #2eb4c8);
+  background-color: #2eb4c8;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.05) 42%, rgba(0, 0, 0, 0.18));
   border-color: #b8f7ff;
+  box-shadow: var(--pressed), 0 0 14px rgba(62, 200, 222, 0.72);
 }
 .scaler-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px; }
 .scaler-scroll > * { flex-shrink: 0; }
@@ -79,35 +107,46 @@
   max-width: 100%;
 }
 .scaler-sounds, .scaler-forward { flex-wrap: nowrap; overflow-x: auto; }
-.scaler-families, .scaler-scale-list { flex-wrap: wrap; overflow: visible; }
+.scaler-families, .scaler-scale-list { flex-wrap: wrap; overflow: visible; justify-content: flex-start; gap: 6px; }
 .scaler-sounds button, .scaler-families button, .scaler-forward button, .scaler-scale-list button {
   flex: none;
   white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background-image: var(--face);
+  box-shadow: var(--raised);
 }
 .scaler-keys {
   position: relative;
-  height: 118px;
+  height: 132px;
   overflow-x: auto;
   overflow-y: hidden;
-  background: #0c1015;
-  border-radius: 8px;
+  background: #070b10;
+  border-radius: 12px;
   border: 1px solid #0a0e13;
-  box-shadow: inset 0 8px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 8px 16px rgba(0, 0, 0, 0.45), var(--raised);
 }
-.scaler-whites { display: flex; height: 100%; min-width: calc(var(--whites) * 28px); gap: 1px; padding: 0 2px 2px; }
+.scaler-whites { display: flex; height: 100%; min-width: calc(var(--whites) * 32px); gap: 2px; padding: 6px 6px 4px; }
 .scaler-whites button {
   position: relative;
   flex: 1;
-  min-width: 26px;
+  min-width: 28px;
   height: 100%;
-  border-radius: 0 0 4px 4px;
-  background: linear-gradient(180deg, #f7f5f0, #d9d3c7 80%, #bdb6aa);
+  border-radius: 0 0 7px 7px;
+  border: 1px solid #c5bfb2;
+  background: linear-gradient(180deg, #fff, #e7e1d6 62%, #b7b0a4);
   color: #243040;
-  padding: 0;
+  padding: 0 0 4px;
+  align-items: flex-end;
+  box-shadow: var(--raised);
 }
-.scaler-whites button.scale { background: linear-gradient(180deg, #fff6d2, #e4b44a); }
-.scaler-whites button.chord { background: linear-gradient(180deg, #e7fdff, #3ec8de); box-shadow: inset 0 0 0 1px #08343c; }
-.scaler-whites small { position: absolute; bottom: 4px; left: 0; right: 0; text-align: center; font-size: 9px; }
+.scaler-whites button.scale { background: linear-gradient(180deg, #fff6d2, #e4b44a 70%, #a67c22); border-color: #f0d48a; }
+.scaler-whites button.chord { background: linear-gradient(180deg, #f4feff, #7ee7f6 55%, #1aa3b8); border-color: #d8fbff; box-shadow: var(--raised), 0 0 10px rgba(62, 200, 222, 0.55); }
+.scaler-whites button:active { box-shadow: var(--pressed), var(--glow); }
+.scaler-whites small { position: absolute; bottom: 4px; left: 0; right: 0; text-align: center; font-size: 10px; font-weight: 700; pointer-events: none; }
 .scaler-whites i {
   position: absolute;
   top: 6px;
@@ -118,20 +157,22 @@
   border-radius: 1px;
   background: #14323a;
 }
-.scaler-blacks { position: absolute; inset: 0 2px auto; height: 62%; min-width: calc(var(--whites) * 28px); pointer-events: none; }
+.scaler-blacks { position: absolute; inset: 6px 6px auto; height: 58%; min-width: calc(var(--whites) * 32px); pointer-events: none; }
 .scaler-blacks button {
   pointer-events: auto;
   position: absolute;
   top: 0;
-  width: calc(100% / var(--whites) * 0.55);
+  width: calc(100% / var(--whites) * 0.58);
   height: 100%;
   transform: translateX(-50%);
-  border-radius: 0 0 3px 3px;
-  background: linear-gradient(180deg, #3c4553, #0e1318);
+  border-radius: 0 0 4px 4px;
+  border: 1px solid #05070a;
+  background: linear-gradient(180deg, #4a5362, #12171d 55%, #07090c);
   padding: 0;
+  box-shadow: var(--raised);
 }
-.scaler-blacks button.scale { background: linear-gradient(180deg, #b08a3a, #5a4212); }
-.scaler-blacks button.chord { background: linear-gradient(180deg, #7eebf7, #0d6572); }
+.scaler-blacks button.scale { background: linear-gradient(180deg, #d7b15a, #6a4c16); }
+.scaler-blacks button.chord { background: linear-gradient(180deg, #b8f6ff, #0e7482); box-shadow: var(--raised), 0 0 10px rgba(62, 200, 222, 0.65); }
 .scaler-browser, .scaler-transport, .scaler-tabs { padding: 0 2px; }
 .scaler-pads {
   display: flex;
@@ -146,18 +187,20 @@
 .scaler-panel button.scaler-card {
   position: relative;
   flex: none;
-  width: 118px;
-  height: 92px;
-  min-height: 92px;
-  border-radius: 10px;
+  width: 124px;
+  height: 104px;
+  min-height: 104px;
+  border-radius: 12px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   justify-content: flex-end;
-  gap: 2px;
-  padding: 16px 8px 8px;
+  gap: 3px;
+  padding: 18px 10px 8px;
   text-align: left;
-  background: linear-gradient(180deg, #2e3846, #232b36);
+  background-color: #1b2430;
+  background-image: var(--face);
+  box-shadow: var(--raised), inset 0 -8px 0 rgba(0, 0, 0, 0.22);
 }
 .scaler-card .bar {
   position: absolute;
@@ -178,9 +221,10 @@
 .scaler-panel button.scaler-card.on,
 .scaler-panel button.slot.focus {
   color: #062028;
-  background: linear-gradient(180deg, #e7fdff 0%, #7ee7f6 42%, #2eb4c8 100%);
+  background-color: #2eb4c8;
+  background-image: linear-gradient(180deg, #f4feff 0%, #8aeffc 38%, #2eb4c8 100%);
   border-color: #f4feff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 0 0 2px #08343c;
+  box-shadow: var(--pressed), 0 0 18px rgba(62, 200, 222, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 .scaler-panel button.scaler-card.on b,
 .scaler-panel button.scaler-card.on span,
@@ -189,17 +233,40 @@
 .scaler-panel button.slot.focus span,
 .scaler-panel button.slot.focus .mood em { color: #062028; }
 .scaler-panel button.scaler-card.on .bar { background: #08343c; }
-.mood { display: flex; align-items: center; gap: 4px; width: 100%; }
-.mood i {
-  display: block;
-  height: 4px;
-  border-radius: 99px;
-  background: #7fe7f5;
-  min-width: 4px;
+.mood {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
 }
-.mood i[data-mood="Dark"] { background: #6d7cff; }
-.mood i[data-mood="Bright"] { background: #f0c14a; }
-.mood em { font-style: normal; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; color: #8ea0b4; }
+.mood-scale {
+  position: relative;
+  height: 12px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #2a3f92 0%, #6a4d86 38%, #8d8a78 50%, #e0b15a 72%, #f4e27a 100%);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.55), var(--raised);
+}
+.mood-scale::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -1px;
+  bottom: -1px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.55);
+}
+.mood-scale i {
+  position: absolute;
+  top: -3px;
+  width: 4px;
+  height: 18px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: #f7fbff;
+  box-shadow: 0 0 8px #e8fbff, var(--raised);
+}
+.mood em { font-style: normal; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; color: #8ea0b4; white-space: nowrap; }
 .mood-pill {
   margin-left: auto;
   padding: 4px 8px;
@@ -228,7 +295,12 @@
   min-height: 32px;
 }
 .scaler-table .head { color: #7f92a6; font-size: 10px; text-transform: uppercase; }
-.scaler-table button.on { background: #16323a; color: #e7fbff; }
+.scaler-table button.on {
+  background-color: #16323a;
+  background-image: linear-gradient(180deg, rgba(127, 231, 245, 0.22), rgba(127, 231, 245, 0.05));
+  color: #e7fbff;
+  box-shadow: inset 3px 0 0 #7fe7f5, 0 0 12px rgba(62, 200, 222, 0.28);
+}
 .scaler-table em { color: #3ec8de; font-style: normal; margin-right: 4px; }
 .scaler-scale-tools { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; min-width: 0; max-width: 100%; }
 .scaler-panel input { min-height: 32px; padding: 0 8px; width: 100%; }
@@ -295,5 +367,17 @@
   .scaler-slots { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .scaler-strip .stepper:nth-child(n + 5) { display: none; }
 }
-.scaler-panel.phone .scaler-keys { height: 92px; }
-.scaler-panel.phone .scaler-card { width: 96px; min-height: 70px; }
+.scaler-panel.phone .scaler-keys { height: 108px; }
+.scaler-panel.phone .scaler-card { width: 108px; min-height: 96px; }
+.scaler-panel.phone .stepper,
+.scaler-panel.phone .scaler-browser button,
+.scaler-panel.phone .scaler-transport button,
+.scaler-panel.phone .scaler-sections button,
+.scaler-panel.phone .scaler-lane-tools button,
+.scaler-panel.phone .scaler-families button,
+.scaler-panel.phone .scaler-scale-list button,
+.scaler-panel.phone .scaler-sounds button {
+  min-height: 44px;
+}
+.scaler-panel.phone .stepper button { min-width: 36px; min-height: 36px; }
+.scaler-panel.phone .scaler-strip { gap: 8px; }
