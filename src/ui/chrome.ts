@@ -33,6 +33,7 @@ export const TRANSPORT_COPY: Copy[] = [
 export const PHONE_TRANSPORT_MENU = ['to-start', 'loop'] as const
 
 export const MENU_COPY: Copy[] = [
+  { id: 'new', label: 'New project', hint: 'Start a fresh session. The timeline starts empty.' },
   { id: 'save', label: 'Save', hint: 'Keep this project in the browser.' },
   { id: 'export', label: 'Export', hint: 'Bounce or download the mix.' },
   { id: 'clips', label: 'Clips', hint: 'Launch clips in slots, like a live set.' },

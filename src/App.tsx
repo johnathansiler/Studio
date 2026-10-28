@@ -3,7 +3,7 @@ import { applyFreeze } from './audio/bounce'
 import { AudioEngine } from './audio/engine'
 import { unpackProject } from './model/archive'
 import { renderDemoLoop } from './model/demo'
-import { isSessionLink, isUntouchedEmpty, NEW_PROJECT, planLaunch, readTab, shouldKeepProject, TAB_PROJECT } from './model/launchProject'
+import { isSessionLink, isUntouchedEmpty, needsNewProjectConfirm, NEW_PROJECT, planLaunch, readTab, shouldKeepProject, TAB_PROJECT } from './model/launchProject'
 import { punchWindow, sliceCapture } from './model/comp'
 import { watchSpectral } from './audio/spectral/job'
 import { inspectClip } from './audio/stretch/engine'
@@ -54,6 +54,7 @@ import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
 import { MENU_COPY, UNSTUCK_COPY, VIEW_COPY, copyOf, described } from './ui/chrome'
 import { EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, readSessionDock, writeSessionDock } from './ui/sessionDock'
+import { deletesSelection } from './ui/clipKeys'
 import { HintBubble, MenuRow, TipButton } from './ui/Hint'
 import { formatBytes } from './ui/share'
 
@@ -367,14 +368,16 @@ export function App() {
     }
     const write = (forceSnapshot = false) => {
       if (!saveReady.current || cancel) return
-      if (isUntouchedEmpty(store.project)) {
+      if (isUntouchedEmpty(store.project) && store.buffers.size === 0) {
         remember(NEW_PROJECT)
         return
       }
       remember(store.project.id)
       const snap = forceSnapshot || Date.now() - lastSnapshot > 20000
       if (snap) lastSnapshot = Date.now()
+      const stamp = store.editStamp()
       void saveProject(store.project, store.buffers, snapshot(), { snapshot: snap }).then((result) => {
+        if (result === 'ok') store.markSaved(stamp)
         if (result === 'quota' && Date.now() - lastQuota > 15000) {
           lastQuota = Date.now()
           store.toast('This browser is out of space, so the latest recording could not be kept.', 'warn')
@@ -655,7 +658,10 @@ export function App() {
       } else if (key === 's' && !meta) {
         const track = store.project.tracks.find((item) => item.id === store.selectedTrackId)
         if (track && !store.remoteFollow) store.updateTrack(track.id, { solo: !track.solo })
-      } else if (event.key === 'Delete' || event.key === 'Backspace') store.deleteSelectedClip()
+      } else if (deletesSelection(event.key, event.target)) {
+        event.preventDefault()
+        store.deleteSelectedClip()
+      }
       else if (key === 'l' && !meta) store.toggle('loopEnabled')
       else if (event.key === 'Home' || event.key === 'Enter') void locate(0)
       else if (event.key === '?' || (event.shiftKey && event.key === '/')) setHelp((open) => !open)
@@ -1020,8 +1026,27 @@ export function App() {
   }
 
   async function persist() {
+    const stamp = store.editStamp()
     const result = await saveProject(store.project, store.buffers, workspaceNow(), { snapshot: true })
+    if (result === 'ok') store.markSaved(stamp)
     store.toast(result === 'quota' ? 'This browser is out of space, so the project could not be kept.' : 'Saved in this browser.', result === 'quota' ? 'warn' : 'good')
+  }
+
+  function beginNewProject() {
+    setMenuOpen(false)
+    if (store.remoteFollow) return
+    if (needsNewProjectConfirm(store.hasUnsavedEdits())) {
+      const discard = window.confirm('This project has unsaved changes. Start a new project without saving them?')
+      if (!discard) return
+    }
+    if (engine.status !== 'stopped') engine.stop()
+    store.loadProject(createEmptyProject(engine.sampleRate), new Map())
+    store.setView('arrange')
+    store.setTransportMode('arrangement')
+    setSurface('studio')
+    engine.seek(0)
+    engine.sync(store.project, (id) => store.buffers.get(id))
+    try { sessionStorage.setItem(TAB_PROJECT, NEW_PROJECT) } catch { /* private mode keeps the in-memory project */ }
   }
 
   async function openProjects() {
@@ -1263,6 +1288,7 @@ async function importDropped(files: FileList) {
         </button>
         {menuOpen && (
           <div className="shell-menu" id="shell-menu">
+            <MenuRow label={copyOf(MENU_COPY, 'new').label} hint={copyOf(MENU_COPY, 'new').hint} disabled={store.remoteFollow} onClick={beginNewProject} />
             <MenuRow id="menu-save" label={copyOf(MENU_COPY, 'save').label} hint={copyOf(MENU_COPY, 'save').hint} onClick={() => { setMenuOpen(false); void openProjects() }} />
             <MenuRow label={copyOf(MENU_COPY, 'export').label} hint={copyOf(MENU_COPY, 'export').hint} onClick={() => { setMenuOpen(false); setExportOpen(true) }} />
             <MenuRow className="split" label={copyOf(MENU_COPY, 'clips').label} hint={copyOf(MENU_COPY, 'clips').hint} onClick={() => showView('session')} />

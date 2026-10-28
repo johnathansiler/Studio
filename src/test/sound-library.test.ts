@@ -9,6 +9,7 @@ import {
   bpmMatchesProject,
   catalogMessage,
   filterSounds,
+  isDrumSound,
   licenseAllowed,
   loadSoundCatalog,
   parseCatalog,
@@ -115,6 +116,11 @@ describe('sound library', () => {
     expect(filterSounds(fixture, { text: '', type: 'loop', bpm: 'project', key: '', favoritesOnly: false, projectBpm: 60, favorites }).map((entry) => entry.id)).toEqual(['dust'])
     expect(filterSounds(fixture, { text: '', type: 'all', bpm: 'any', key: 'C', favoritesOnly: false, projectBpm: 120, favorites }).map((entry) => entry.id)).toEqual(['pad'])
     expect(filterSounds(fixture, { text: '', type: 'all', bpm: 'any', key: '', favoritesOnly: true, projectBpm: 120, favorites }).map((entry) => entry.id)).toEqual(['hat'])
+    expect(isDrumSound(fixture[0])).toBe(true)
+    expect(isDrumSound(fixture[2])).toBe(true)
+    expect(isDrumSound(fixture[1])).toBe(false)
+    expect(isDrumSound({ name: 'Gogodze kit kick', path: 'one-shots/drums/gogodze-kit/kick.wav', tags: ['drums', 'kit', 'kick'] })).toBe(true)
+    expect(filterSounds(fixture, { text: '', type: 'drum', bpm: 'any', key: '', favoritesOnly: false, projectBpm: 120, favorites }).map((entry) => entry.id)).toEqual(['hat', 'dust'])
   })
 
   it('accepts the C major and A minor labels used in the sound index', () => {

@@ -322,8 +322,15 @@ export function ArrangeView({
     )
   }
 
+  function focusTimeline() {
+    const node = scroller.current
+    if (!node) return
+    if (document.activeElement !== node) node.focus({ preventScroll: true })
+  }
+
   function moveSelection(event: ReactPointerEvent, kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
     event.stopPropagation()
+    focusTimeline()
     if (kind === 'pattern') {
       setPatternMenu(null)
       if (touch) event.preventDefault()
@@ -512,8 +519,9 @@ export function ArrangeView({
       <div
         className="timeline-scroll"
         ref={scroller}
+        tabIndex={-1}
         style={{ touchAction: toolClaimsGesture(tool) ? 'none' : 'pan-x pan-y' }}
-        onPointerDown={onTimelineDown}
+        onPointerDown={(event) => { focusTimeline(); onTimelineDown(event) }}
         onWheel={(event) => {
           if (event.ctrlKey || event.metaKey) {
             event.preventDefault()
