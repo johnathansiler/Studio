@@ -173,7 +173,7 @@ export function SheetRow({
   onClick: () => void
 }) {
   return (
-    <button type="button" className={`sheet-row ${pressed ? 'on' : ''}`} disabled={disabled} aria-pressed={pressed} onClick={onClick}>
+    <button type="button" className={`sheet-row ch-row ${pressed ? 'on' : ''}`} disabled={disabled} aria-pressed={pressed} onClick={onClick}>
       <span>{label}</span>
       <small>{hint}</small>
     </button>
@@ -201,7 +201,7 @@ export function MenuRow({
     <button
       type="button"
       id={id}
-      className={className}
+      className={['ch-row', className].filter(Boolean).join(' ')}
       disabled={disabled}
       title={hint}
       aria-label={`${label}. ${hint}`}

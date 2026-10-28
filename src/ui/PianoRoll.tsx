@@ -27,6 +27,7 @@ import { displayedPlayhead, pianoPlayheadBeat, transportMoving } from '../model/
 import { PIANO_BAR, PIANO_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
 import { attachGlissando } from './glissando'
+import { FitRow } from './fitRow'
 import { ActionSheet, SheetRow, TipButton } from './Hint'
 import { coarsePointer, noteGrip } from './touchEdit'
 import {
@@ -714,7 +715,7 @@ export function PianoRoll({
   const gridPx = (roll.grid > 0 ? roll.grid : 1) * pxBeat
   return (
     <div className={`piano ${compact ? 'compact' : ''} ${chrome ? '' : 'bare'}`} ref={pianoRef} data-tool={tool}>
-      {chrome && <div className="scale-bar">
+      {chrome && <FitRow className="scale-bar">
         <TipButton className={`chords-btn ${open ? 'on' : ''}`} label={bar('chords').label} hint={bar('chords').hint} pressed={open} onClick={() => void toggleChords()} />
         <TipButton
           className={store.midiEditor().stepInput ? 'on' : ''}
@@ -742,14 +743,12 @@ export function PianoRoll({
           ))}
         </select>
         <TipButton className={scale.snap ? 'on' : ''} label={bar('snap').label} hint={bar('snap').hint} pressed={scale.snap} onClick={() => store.setScale({ snap: !scale.snap })} />
-        {compact && (
-          <select {...described(bar('grid'))} value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
-            <option value="0">Free</option>
-            <option value="0.25">1/16</option>
-            <option value="0.5">1/8</option>
-            <option value="1">1/4</option>
-          </select>
-        )}
+        <select {...described(bar('grid'))} value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
+          <option value="0">Free</option>
+          <option value="0.25">1/16</option>
+          <option value="0.5">1/8</option>
+          <option value="1">1/4</option>
+        </select>
         {compact && <TipButton label={bar('notes').label} hint={bar('notes').hint} onClick={() => setNotesOpen(true)} />}
         <span className="chord-name">{chord}</span>
         {!compact && (
@@ -771,22 +770,12 @@ export function PianoRoll({
             }}
           />
         )}
-      </div>}
-      {chrome && !compact && (
-        <div className="tool-row">
-          <select {...described(bar('grid'))} value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
-            <option value="0">Free</option>
-            <option value="0.25">1/16</option>
-            <option value="0.5">1/8</option>
-            <option value="1">1/4</option>
-          </select>
-          <TipButton label={sheet('quantize').label} hint={sheet('quantize').hint} onClick={quantize} />
-          <TipButton label={sheet('arp').label} hint={sheet('arp').hint} onClick={arpeggiate} />
-          <TipButton label={sheet('strum').label} hint={sheet('strum').hint} onClick={strum} />
-          <TipButton label={sheet('duplicate').label} hint={sheet('duplicate').hint} onClick={duplicate} />
-          <TipButton label={sheet('delete').label} hint={sheet('delete').hint} onClick={remove} />
-        </div>
-      )}
+        {!compact && <TipButton label={sheet('quantize').label} hint={sheet('quantize').hint} onClick={quantize} />}
+        {!compact && <TipButton label={sheet('arp').label} hint={sheet('arp').hint} onClick={arpeggiate} />}
+        {!compact && <TipButton label={sheet('strum').label} hint={sheet('strum').hint} onClick={strum} />}
+        {!compact && <TipButton label={sheet('duplicate').label} hint={sheet('duplicate').hint} onClick={duplicate} />}
+        {!compact && <TipButton label={sheet('delete').label} hint={sheet('delete').hint} onClick={remove} />}
+      </FitRow>}
       {notesOpen && (
         <ActionSheet title="Notes" hint="Edits for the notes you have selected." onClose={() => setNotesOpen(false)}>
           <SheetRow label={sheet('detect').label} hint={sheet('detect').hint} onClick={() => {
