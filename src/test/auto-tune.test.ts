@@ -305,6 +305,8 @@ describe('Auto-Tune insert', () => {
     expect(css).toContain('.keybed')
     expect(css).toContain('.tune-board.graph .tune-graph')
     expect(css).toContain('.bypass-toggle.lit')
+    expect(css).toContain('.tune-tools,\n.tune-actions { flex-wrap: wrap; }')
+    expect(css).toContain('.shell.phone .tune-notes')
   })
 
   it('starts active and opens from one strip click', () => {
@@ -350,16 +352,25 @@ describe('Auto-Tune insert', () => {
     const button = findButton(InsertList({ store, trackId: vocal.id }), 'Tune')
     expect(button.props.children).toBe('Tune')
     expect(button.props['aria-label']).toContain('Auto-Tune')
-    button.props.onPointerDown({ button: 0, stopPropagation() {} })
+    expect(button.props.onPointerDown).toBeUndefined()
+    button.props.onClick()
     expect(store.pluginFocus).toEqual({ trackId: vocal.id, pluginId: plugin.id })
     expect(store.track(vocal.id)!.plugins.find((item) => item.id === plugin.id)!.enabled).toBe(true)
-    button.props.onClick()
-    expect(store.pluginFocus?.pluginId).toBe(plugin.id)
+    button.props.onDoubleClick()
+    expect(store.track(vocal.id)!.plugins.find((item) => item.id === plugin.id)!.enabled).toBe(false)
+    store.undo()
+    expect(store.track(vocal.id)!.plugins.find((item) => item.id === plugin.id)!.enabled).toBe(true)
+    store.redo()
+    expect(store.track(vocal.id)!.plugins.find((item) => item.id === plugin.id)!.enabled).toBe(false)
+    store.undo()
+    store.updatePlugin(vocal.id, plugin.id, { enabled: false })
+    expect(store.track(vocal.id)!.plugins.find((item) => item.id === plugin.id)!.enabled).toBe(false)
+    store.undo()
     expect(store.track(vocal.id)!.plugins.find((item) => item.id === plugin.id)!.enabled).toBe(true)
   })
 })
 
-function findButton(node: unknown, label: string): { props: { children: string; onClick: () => void; onPointerDown: (event: { button: number; stopPropagation: () => void }) => void; 'aria-label': string } } {
+function findButton(node: unknown, label: string): { props: { children: string; onClick: () => void; onDoubleClick: () => void; onPointerDown?: (event: { button: number; stopPropagation: () => void }) => void; 'aria-label': string } } {
   if (Array.isArray(node)) {
     for (const child of node) {
       try {

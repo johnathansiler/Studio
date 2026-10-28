@@ -112,7 +112,9 @@
   min-width: 0;
 }
 
-.tune-top { flex-wrap: wrap; }
+.tune-top,
+.tune-tools,
+.tune-actions { flex-wrap: wrap; }
 .tune-actions { margin-left: auto; }
 
 .tune-board button,
@@ -207,7 +209,7 @@
 
 .tune-meter .readout strong {
   font-size: 64px;
-  line-height: 0.9;
+  line-height: 1;
   font-weight: 620;
   letter-spacing: -0.04em;
 }
@@ -381,9 +383,13 @@
 
 .shell.phone .tune-resize { display: none; }
 
-.shell.phone .plugin-sheet.tune-open,
-.shell.fold .plugin-sheet.tune-open {
+.shell.phone .plugin-sheet.tune-open {
   height: auto !important;
+  max-height: calc(100dvh - 8px);
+  overflow: auto;
+}
+
+.shell.fold .plugin-sheet.tune-open {
   max-height: calc(100dvh - 8px);
   overflow: auto;
 }
@@ -405,6 +411,15 @@
 .shell.phone.land .plugin-sheet.tune-open {
   max-height: 26dvh;
 }
+
+.shell.phone .tune-notes,
+.shell.fold .tune-notes {
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
+
+.shell.phone.land .tune-piano { padding: 4px; }
+.shell.phone.land .keybed { height: 64px; min-width: 640px; }
 
 .shell.phone.land .tune-board button,
 .shell.fold.land .tune-board button {

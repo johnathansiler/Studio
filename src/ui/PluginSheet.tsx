@@ -264,11 +264,6 @@ export function InsertList({ store, trackId }: { store: ProjectStore; trackId: s
           className={plugin.enabled ? 'on' : ''}
           title={descriptor(plugin.pluginId)?.name ?? plugin.pluginId}
           aria-label={`${descriptor(plugin.pluginId)?.name ?? plugin.pluginId}. Open this insert.`}
-          onPointerDown={(event) => {
-            if (event.button !== 0) return
-            event.stopPropagation()
-            store.focusPlugin(trackId, plugin.id)
-          }}
           onClick={() => store.focusPlugin(trackId, plugin.id)}
           onDoubleClick={() => store.updatePlugin(trackId, plugin.id, { enabled: !plugin.enabled })}
         >
