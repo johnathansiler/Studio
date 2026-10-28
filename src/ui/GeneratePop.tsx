@@ -3,9 +3,11 @@ import type { AudioEngine } from '../audio/engine'
 import { followSource, generate, generatorInput, styleById, STYLES } from '../generators'
 import type { ArpPattern, GeneratorKind, StrumPattern } from '../generators'
 import { NOTE_NAMES } from '../model/scale'
+import { projectSampleBeat } from '../model/tempoMap'
 import { selectGenerator } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { getScale } from '../theory/scales'
+import { useFormFactor } from './form'
 import './generate.css'
 
 const KINDS: { id: GeneratorKind; name: string; hint: string }[] = [
@@ -54,14 +56,28 @@ const STRUMS: { id: StrumPattern; name: string }[] = [
 
 const BARS = [1, 2, 4, 8, 16]
 
-export function GeneratePop({ store, engine, onClose }: { store: ProjectStore; engine: AudioEngine; onClose: () => void }) {
+export function GeneratePanel({
+  store,
+  engine,
+  trackId,
+  scale,
+}: {
+  store: ProjectStore
+  engine: AudioEngine
+  trackId?: string
+  scale?: { root: number; scale: string; library: string }
+}) {
+  const phone = useFormFactor() === 'phone'
   const view = selectGenerator(store)
   const settings = view.settings
-  const scale = view.scale
+  const song = view.scale
   const style = styleById(settings.style)
   const kind = KINDS.find((item) => item.id === settings.kind) ?? KINDS[0]
   const source = followSource(view.project)
-  const part = generate(settings.kind, generatorInput(view.project, settings, source.chords))
+  const made = generatorInput(view.project, settings, source.chords)
+  const part = generate(settings.kind, scale ? { ...made, key: scale.root, scaleId: scale.library || scale.scale } : made)
+  const keyRoot = scale?.root ?? song.root
+  const keyName = getScale(scale?.library || scale?.scale || view.scaleId).name
   useEffect(() => () => engine.stopPreview(), [engine])
   useEffect(() => {
     if (settings.kind !== 'chords' && source.source !== 'none') return
@@ -88,59 +104,110 @@ export function GeneratePop({ store, engine, onClose }: { store: ProjectStore; e
       cents: note.fine ?? 0,
     })))
   }
+  const placeHere = () => {
+    if (!trackId) return
+    engine.stopPreview()
+    const beat = Math.max(0, projectSampleBeat(view.project, engine.currentTimelineSample()))
+    store.writeScalerClip(trackId, part.notes.map((note) => ({
+      pitch: note.pitch,
+      fine: note.fine,
+      startBeat: note.startBeat,
+      durationBeats: note.durationBeats,
+      velocity: note.velocity,
+    })), beat, part.name)
+  }
   return (
-    <div className="gen-pop" data-generate="open" role="dialog" aria-label="Generate">
+    <div className="gen-pop gen-embedded" data-generate="open" aria-label="Generate">
       <header>
         <strong>Generate</strong>
-        <span className="gen-key">{NOTE_NAMES[scale.root]} {getScale(view.scaleId).name} · {Math.round(view.tempo)}</span>
-        <button type="button" className="text-btn" onClick={onClose} aria-label="Close generate">×</button>
+        <span className="gen-key">{NOTE_NAMES[keyRoot]} {keyName} · {Math.round(view.tempo)}</span>
       </header>
       <div className="gen-body">
-        <div className="gen-kinds" role="group" aria-label="Part">
-          {KINDS.map((item) => (
-            <button key={item.id} type="button" className={settings.kind === item.id ? 'on' : ''} aria-pressed={settings.kind === item.id} onClick={() => store.setGenerator({ kind: item.id })}>
-              {item.name}
-            </button>
-          ))}
-        </div>
+        {phone ? (
+          <select aria-label="Part. Chords, bass, melody, arp, strum, or drums." title={kind.hint} value={settings.kind} onChange={(event) => store.setGenerator({ kind: event.target.value as GeneratorKind })}>
+            {KINDS.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+        ) : (
+          <div className="gen-kinds" role="group" aria-label="Part">
+            {KINDS.map((item) => (
+              <button key={item.id} type="button" className={settings.kind === item.id ? 'on' : ''} aria-pressed={settings.kind === item.id} title={item.hint} onClick={() => store.setGenerator({ kind: item.id })}>
+                {item.name}
+              </button>
+            ))}
+          </div>
+        )}
         <p className="gen-hint">{kind.hint}</p>
-        <div className="chip-row" role="group" aria-label="Style">
-          {STYLES.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={settings.style === item.id ? 'on' : ''}
-              aria-pressed={settings.style === item.id}
-              onClick={() => {
-                const next = styleById(item.id)
-                store.setGenerator({
-                  style: item.id,
-                  arpPattern: next.arp.pattern,
-                  rate: next.arp.rate,
-                  octaves: next.arp.octaves,
-                  gate: next.arp.gate,
-                  strum: next.strum,
-                })
-              }}
-            >
-              {item.name}
-            </button>
-          ))}
-        </div>
+        {phone ? (
+          <select
+            aria-label="Style. Sets the groove and the kind of chords."
+            title="Sets the groove and the kind of chords."
+            value={settings.style}
+            onChange={(event) => {
+              const next = styleById(event.target.value)
+              store.setGenerator({
+                style: event.target.value,
+                arpPattern: next.arp.pattern,
+                rate: next.arp.rate,
+                octaves: next.arp.octaves,
+                gate: next.arp.gate,
+                strum: next.strum,
+              })
+            }}
+          >
+            {STYLES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+        ) : (
+          <div className="chip-row" role="group" aria-label="Style">
+            {STYLES.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={settings.style === item.id ? 'on' : ''}
+                aria-pressed={settings.style === item.id}
+                title={item.blurb}
+                onClick={() => {
+                  const next = styleById(item.id)
+                  store.setGenerator({
+                    style: item.id,
+                    arpPattern: next.arp.pattern,
+                    rate: next.arp.rate,
+                    octaves: next.arp.octaves,
+                    gate: next.arp.gate,
+                    strum: next.strum,
+                  })
+                }}
+              >
+                {item.name}
+              </button>
+            ))}
+          </div>
+        )}
         <p className="gen-hint">{style.blurb} Sets the groove and the kind of chords.</p>
-        <div className="gen-step" role="group" aria-label="Bars">
-          {BARS.map((bars) => (
-            <button key={bars} type="button" className={settings.bars === bars ? 'on' : ''} aria-pressed={settings.bars === bars} onClick={() => store.setGenerator({ bars })}>{bars}</button>
-          ))}
-        </div>
+        {phone ? (
+          <select aria-label="Bars. How many bars to write." title="How many bars to write." value={settings.bars} onChange={(event) => store.setGenerator({ bars: Number(event.target.value) })}>
+            {BARS.map((bars) => <option key={bars} value={bars}>{bars}</option>)}
+          </select>
+        ) : (
+          <div className="gen-step" role="group" aria-label="Bars">
+            {BARS.map((bars) => (
+              <button key={bars} type="button" className={settings.bars === bars ? 'on' : ''} aria-pressed={settings.bars === bars} onClick={() => store.setGenerator({ bars })}>{bars}</button>
+            ))}
+          </div>
+        )}
         <p className="gen-hint">How many bars to write.</p>
         {settings.kind === 'arp' && (
           <>
-            <div className="chip-row" role="group" aria-label="Arp pattern">
-              {ARPS.map((item) => (
-                <button key={item.id} type="button" className={settings.arpPattern === item.id ? 'on' : ''} aria-pressed={settings.arpPattern === item.id} onClick={() => store.setGenerator({ arpPattern: item.id })}>{item.name}</button>
-              ))}
-            </div>
+            {phone ? (
+              <select aria-label="Arp pattern. The order the chord notes play." title="The order the chord notes play." value={settings.arpPattern} onChange={(event) => store.setGenerator({ arpPattern: event.target.value as ArpPattern })}>
+                {ARPS.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            ) : (
+              <div className="chip-row" role="group" aria-label="Arp pattern">
+                {ARPS.map((item) => (
+                  <button key={item.id} type="button" className={settings.arpPattern === item.id ? 'on' : ''} aria-pressed={settings.arpPattern === item.id} onClick={() => store.setGenerator({ arpPattern: item.id })}>{item.name}</button>
+                ))}
+              </div>
+            )}
             <p className="gen-hint">The order the chord notes play.</p>
             <div className="chip-row" role="group" aria-label="Arp rate">
               {RATES.map((item) => (
@@ -173,11 +240,17 @@ export function GeneratePop({ store, engine, onClose }: { store: ProjectStore; e
         )}
         {settings.kind === 'rhythm' && (
           <>
-            <div className="chip-row" role="group" aria-label="Strum pattern">
-              {STRUMS.map((item) => (
-                <button key={item.id} type="button" className={settings.strum === item.id ? 'on' : ''} aria-pressed={settings.strum === item.id} onClick={() => store.setGenerator({ strum: item.id })}>{item.name}</button>
-              ))}
-            </div>
+            {phone ? (
+              <select aria-label="Strum pattern. The rhythm played on the chords." title="The rhythm played on the chords." value={settings.strum} onChange={(event) => store.setGenerator({ strum: event.target.value as StrumPattern })}>
+                {STRUMS.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            ) : (
+              <div className="chip-row" role="group" aria-label="Strum pattern">
+                {STRUMS.map((item) => (
+                  <button key={item.id} type="button" className={settings.strum === item.id ? 'on' : ''} aria-pressed={settings.strum === item.id} onClick={() => store.setGenerator({ strum: item.id })}>{item.name}</button>
+                ))}
+              </div>
+            )}
             <p className="gen-hint">The strum or stab rhythm played on the chords.</p>
           </>
         )}
@@ -188,8 +261,9 @@ export function GeneratePop({ store, engine, onClose }: { store: ProjectStore; e
           <button type="button" onClick={hear}>Hear</button>
           <button type="button" onClick={() => store.setGenerator({ seed: Math.floor(Math.random() * 0x7fffffff), variation: 0 })}>New</button>
           <button type="button" onClick={() => store.setGenerator({ variation: settings.variation + 1 })}>Vary</button>
-          <button type="button" onClick={() => { engine.stopPreview(); store.insertGenerated(part, 'part') }}>Add to {part.trackName}</button>
-          <button type="button" className="wide" onClick={() => { engine.stopPreview(); store.insertGenerated(part, 'new') }}>New track</button>
+          {trackId && <button type="button" title="Put this MIDI on the Scaler track." onClick={placeHere}>This track</button>}
+          {!phone && <button type="button" onClick={() => { engine.stopPreview(); store.insertGenerated(part, 'part') }}>Add to {part.trackName}</button>}
+          {!phone && <button type="button" className="wide" onClick={() => { engine.stopPreview(); store.insertGenerated(part, 'new') }}>New track</button>}
         </div>
         <p className="gen-hint">Hear plays it. New picks another seed. Vary changes this idea a little. Add puts editable MIDI on the {part.trackName} track. New track starts a fresh one.</p>
       </div>

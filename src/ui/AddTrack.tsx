@@ -11,6 +11,7 @@ const KINDS: { id: AddKind; label: string }[] = [
   { id: 'bus', label: 'Bus' },
 ]
 const INSTRUMENTS: { id: TrackInstrument; label: string }[] = [
+  { id: 'scaler', label: 'Scaler' },
   { id: 'synth', label: 'Synth' },
   { id: 'sampler', label: 'Sampler' },
   { id: 'library', label: 'Library' },

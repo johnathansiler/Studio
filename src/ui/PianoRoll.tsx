@@ -16,7 +16,7 @@ import {
   type ScaleId,
 } from '../model/scale'
 import { uid, type MidiNote } from '../model/types'
-import { findScale, lockedTone, pitchRole, suggestKey } from '../theory'
+import { lockedTone, pitchRole, suggestKey } from '../theory'
 import { EDITOR_TOOL_KEYS, activeTool, setActiveTool, subscribeTools, toolCursor } from '../state/tools'
 import { selectPiano, selectScale } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -62,7 +62,7 @@ const LOW = 48
 const HIGH = 84
 const VEL_H = 36
 
-export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { store: ProjectStore; engine: AudioEngine; onIdeas?: () => void; onGenerate?: () => void; onLibrary?: () => void }) {
+export function PianoRoll({ store, engine, onIdeas, onGenerate }: { store: ProjectStore; engine: AudioEngine; onIdeas?: () => void; onGenerate?: () => void }) {
   const piano = selectPiano(store)
   const track = piano.track
   const clip = piano.clip
@@ -671,9 +671,6 @@ export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { s
           ))}
         </select>
         <TipButton className={scale.snap ? 'on' : ''} label={bar('snap').label} hint={bar('snap').hint} pressed={scale.snap} onClick={() => store.setScale({ snap: !scale.snap })} />
-        {!compact && onLibrary && (
-          <TipButton label={scale.library ? (findScale(scale.library)?.name ?? 'Scale') : 'Library'} hint="Browse scales, modes, and the chords they contain." onClick={onLibrary} />
-        )}
         {compact && (
           <select {...described(bar('grid'))} value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
             <option value="0">Free</option>
@@ -726,7 +723,6 @@ export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { s
             store.setScale({ root: found.root, scale: found.scale, library: found.library })
             setNotesOpen(false)
           }} />
-          {onLibrary && <SheetRow label={scale.library ? (findScale(scale.library)?.name ?? 'Scale') : 'Library'} hint="Browse scales, modes, and the chords they contain." onClick={() => { setNotesOpen(false); onLibrary() }} />}
           {onIdeas && <SheetRow label={sheet('ideas').label} hint={sheet('ideas').hint} onClick={() => { setNotesOpen(false); onIdeas() }} />}
           {onGenerate && <SheetRow label={bar('generate').label} hint={bar('generate').hint} onClick={() => { setNotesOpen(false); onGenerate() }} />}
           {store.selectedNoteId && (

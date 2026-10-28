@@ -1,3 +1,4 @@
+import { wantsLibrary } from '../../instruments/scaler/model'
 import type { Project, Track } from '../../model/types'
 import type { StripNodes } from '../strips'
 import { SampleCache } from './cache'
@@ -31,7 +32,7 @@ interface Live {
 
 /**
  * Plays library tracks on the instrument strip.
- * The worklet rack is left alone; this host only takes notes for `instrument === 'library'`.
+ * The worklet rack is left alone. Notes play here for a library instrument, or for Scaler when its sound is Library.
  */
 export class LibraryHost {
   private readonly lives = new Map<string, Live>()
@@ -42,8 +43,8 @@ export class LibraryHost {
   sync(ctx: AudioContext, project: Project, strips: Map<string, StripNodes>, assetOf: (id: string) => { id: string; name?: string; sampleRate: number; channels: Float32Array[] } | undefined) {
     const phone = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 520px), (max-height: 520px) and (orientation: landscape)').matches
     for (const track of project.tracks) {
-      if (track.type !== 'midi' || track.instrument !== 'library' || !track.library) {
-        if (track.instrument !== 'library') this.drop(track.id)
+      if (track.type !== 'midi' || !wantsLibrary(track) || !track.library) {
+        if (!wantsLibrary(track)) this.drop(track.id)
         continue
       }
       const strip = strips.get(track.id)
@@ -75,6 +76,21 @@ export class LibraryHost {
       return
     }
     live.notes.push({ pitch, vel, time })
+    live.notes.sort((a, b) => a.time - b.time)
+  }
+
+  /** Drop a pitch's queued notes and release it, so a new chord does not leave the old one held. */
+  release(trackId: string, pitch: number, time: number) {
+    const midi = Math.round(pitch)
+    const live = this.lives.get(trackId)
+    if (!live) {
+      const queue = (this.pending.get(trackId) ?? []).filter((note) => note.pitch !== midi)
+      queue.push({ pitch: midi, vel: 0, time })
+      this.pending.set(trackId, queue)
+      return
+    }
+    live.notes = live.notes.filter((note) => note.pitch !== midi)
+    live.notes.push({ pitch: midi, vel: 0, time })
     live.notes.sort((a, b) => a.time - b.time)
   }
 

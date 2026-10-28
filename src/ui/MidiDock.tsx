@@ -21,13 +21,11 @@ export function MidiDock({
   engine,
   onIdeas,
   onGenerate,
-  onLibrary,
 }: {
   store: ProjectStore
   engine: AudioEngine
   onIdeas?: () => void
   onGenerate?: () => void
-  onLibrary?: () => void
 }) {
   const { editor } = selectMidiEditor(store)
   return (
@@ -46,7 +44,7 @@ export function MidiDock({
       {editor.mode === 'step' && <StepInput store={store} engine={engine} />}
       {editor.mode === 'drums' && <DrumEditor store={store} engine={engine} />}
       {editor.mode === 'score' && <ScoreView store={store} />}
-      {editor.mode === 'roll' && <PianoRoll store={store} engine={engine} onIdeas={onIdeas} onGenerate={onGenerate} onLibrary={onLibrary} />}
+      {editor.mode === 'roll' && <PianoRoll store={store} engine={engine} onIdeas={onIdeas} onGenerate={onGenerate} />}
     </div>
   )
 }

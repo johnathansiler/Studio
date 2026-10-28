@@ -26,7 +26,8 @@ export const TRANSPORT_COPY: Copy[] = [
   { id: 'stop', label: 'Stop', hint: 'Stop playback and recording.' },
   { id: 'record', label: 'Record', hint: 'Record onto armed tracks from the playhead.' },
   { id: 'loop', label: 'Loop', hint: 'Repeat the highlighted region.' },
-  { id: 'tempo', label: 'Tempo', hint: 'Tap the number to set the tempo. Hold it for half-time, double-time, and rounding.' },
+  { id: 'tempo', label: 'Tempo', hint: 'Type a tempo, or drag, scroll, or press the arrow keys.' },
+  { id: 'tap', label: 'Tap', hint: 'Tap in time. The tempo follows your taps.' },
 ]
 
 /** On a phone these leave the transport and live in the menu, so Play stays reachable. */
@@ -40,7 +41,8 @@ export const MENU_COPY: Copy[] = [
   { id: 'keys', label: 'Keys', hint: 'Play the instrument on a keyboard.' },
   { id: 'pads', label: 'Pads', hint: 'Play drums on pads.' },
   { id: 'piano', label: 'Piano', hint: 'Open the piano roll for the instrument track.' },
-  { id: 'generate', label: 'Generate', hint: 'Write chords, bass, melody, arp, strum, or drums onto a track.' },
+  { id: 'generate', label: 'Generate', hint: 'Open Scaler and write chords, bass, melody, arp, strum, or drums.' },
+  { id: 'scaler', label: 'Scaler', hint: 'Chord instrument on this track. Key, pads, and progressions.' },
   { id: 'players', label: 'Players', hint: 'A drummer, bass, and keys that follow the song. Writes MIDI you can edit.' },
   { id: 'quantize', label: 'Quantize', hint: 'Snap the selected notes onto the grid.' },
   { id: 'quantize-more', label: 'Quantize…', hint: 'Choose the grid and how hard to snap.' },
@@ -61,7 +63,7 @@ export const MENU_COPY: Copy[] = [
 
 export const PIANO_BAR: Copy[] = [
   { id: 'chords', label: 'Chords', hint: 'Pads of chords in the current key.' },
-  { id: 'generate', label: 'Generate', hint: 'Write chords, bass, melody, arp, strum, or drums you can edit.' },
+  { id: 'generate', label: 'Generate', hint: 'Open Scaler and write chords, bass, melody, arp, strum, or drums.' },
   { id: 'key', label: 'Key', hint: 'The key. Notes in the scale are marked on the keyboard.' },
   { id: 'scale', label: 'Scale', hint: 'Which notes are in key. Others show in amber.' },
   { id: 'snap', label: 'Snap', hint: 'New notes land on the scale.' },
@@ -142,6 +144,7 @@ export const TRACK_SHEET: Copy[] = [
   { id: 'monitor', label: 'Input monitor', hint: 'Hear the input while you record.' },
   { id: 'volume', label: 'Volume', hint: 'How loud this track is.' },
   { id: 'input', label: 'Input', hint: 'Which mic or guest this track records.' },
+  { id: 'scaler', label: 'Scaler', hint: 'Chord instrument. Key, pads, and progressions on this track.' },
   { id: 'rack', label: 'Rack', hint: 'The instrument and effects on this track.' },
   { id: 'keys', label: 'Keys', hint: 'Play this instrument on a keyboard.' },
   { id: 'drums', label: 'Pads', hint: 'Play this instrument on drum pads.' },

@@ -103,6 +103,25 @@ export class RackHost {
     }
   }
 
+  /** Drop queued events for one pitch and release it. */
+  release(trackId: string, pitch: number, time: number) {
+    const midi = Math.round(pitch)
+    const live = this.lives.get(trackId)
+    if (!live) {
+      const queue = (this.pending.get(trackId) ?? []).filter((note) => note.pitch !== midi)
+      queue.push({ pitch: midi, vel: 0, time, slide: false })
+      this.pending.set(trackId, queue)
+      return
+    }
+    if (live.worklet) {
+      live.worklet.port.postMessage({ type: 'drop', pitch: midi })
+      return
+    }
+    live.notes = live.notes.filter((note) => note.pitch !== midi)
+    live.notes.push({ pitch: midi, vel: 0, time, slide: false })
+    live.notes.sort((a, b) => a.time - b.time)
+  }
+
   allOff() {
     for (const live of this.lives.values()) {
       live.worklet?.port.postMessage({ type: 'off' })

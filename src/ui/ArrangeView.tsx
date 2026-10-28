@@ -6,6 +6,7 @@ import { computePeaks } from '../model/demo'
 import { sourceSamplesOf, stretchEdge } from '../audio/stretch/engine'
 import { trimAudioClip } from '../model/clips'
 import { rectsHit } from '../model/edit'
+import { SCALER_MIME, parseScalerDrag } from '../instruments/scaler/model'
 import { arrangementEndSample, gridMarks, mapIsLinear, projectBeatSample, projectSampleBeat, pxAtBeat, snapSampleToMap } from '../model/tempoMap'
 import { SongMap, SongMapHead, SmartTempoBar } from './SongMap'
 import type { AudioClip } from '../model/types'
@@ -427,6 +428,11 @@ export function ArrangeView({
               ) : (
                 <>
                   {track.type === 'midi' && (
+                    <TipButton className={`mini scaler-open ${store.scalerTrackId === track.id ? 'on' : ''}`} label={copyOf(TRACK_SHEET, 'scaler').label} hint={copyOf(TRACK_SHEET, 'scaler').hint} pressed={store.scalerTrackId === track.id} onClick={(event) => { event.stopPropagation(); store.openScaler(track.id) }}>
+                      Scaler
+                    </TipButton>
+                  )}
+                  {track.type === 'midi' && (
                     <TipButton className={`mini rack-open ${store.rackTrackId === track.id ? 'on' : ''}`} label={copyOf(TRACK_SHEET, 'rack').label} hint={copyOf(TRACK_SHEET, 'rack').hint} pressed={store.rackTrackId === track.id} onClick={(event) => { event.stopPropagation(); store.openRack(track.id) }}>
                       Rack
                     </TipButton>
@@ -567,6 +573,21 @@ export function ArrangeView({
                 const bounds = event.currentTarget.getBoundingClientRect()
                 const sample = ((event.clientX - bounds.left) / px) * project.sampleRate
                 store.addMidiClip(track.id, Math.floor(projectSampleBeat(project, sample)))
+              }}
+              onDragOver={(event) => {
+                if (track.type !== 'midi') return
+                if (![...event.dataTransfer.types].includes(SCALER_MIME)) return
+                event.preventDefault()
+              }}
+              onDrop={(event) => {
+                if (track.type !== 'midi') return
+                const payload = parseScalerDrag(event.dataTransfer.getData(SCALER_MIME) || event.dataTransfer.getData('text/plain'))
+                if (!payload) return
+                event.preventDefault()
+                event.stopPropagation()
+                const sample = sampleAt(event.clientX)
+                const beat = projectSampleBeat(project, project.snap ? snapSampleToMap(sample, project) : sample)
+                store.writeScalerClip(track.id, payload.notes, Math.max(0, beat), payload.name)
               }}
             >
               <AutoTuneLaneMark plugins={track.plugins} />
@@ -768,6 +789,7 @@ export function ArrangeView({
           )}
           {sheetTrack.type === 'midi' && (
             <>
+              <SheetRow label={copyOf(TRACK_SHEET, 'scaler').label} hint={copyOf(TRACK_SHEET, 'scaler').hint} pressed={store.scalerTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openScaler(sheetTrack.id) }} />
               <SheetRow label={copyOf(TRACK_SHEET, 'rack').label} hint={copyOf(TRACK_SHEET, 'rack').hint} pressed={store.rackTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openRack(sheetTrack.id) }} />
               <SheetRow label="Patch" hint="Layered patch: synths, samples, grains, and a morph pad." pressed={store.patchTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openPatch(sheetTrack.id) }} />
               <SheetRow label={copyOf(TRACK_SHEET, 'keys').label} hint={copyOf(TRACK_SHEET, 'keys').hint} onClick={() => { setTrackSheet(null); onPerform('keys') }} />
