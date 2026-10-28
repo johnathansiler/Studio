@@ -127,7 +127,8 @@ export class RackRuntime {
     }
     if (!this.held.includes(midi)) this.held.push(midi)
     if (slide) {
-      const heldVoice = this.voices.find((voice) => voice.active && !voice.released)
+      const sounding = this.voices.filter((voice) => voice.active && !voice.released)
+      const heldVoice = sounding.length === 1 ? sounding[0] : undefined
       if (heldVoice && heldVoice.note !== midi) {
         heldVoice.note = midi
         heldVoice.vel = vel

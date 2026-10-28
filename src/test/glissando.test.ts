@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { glideNotes, glideUpdate } from '../model/glissando'
+import { glideNotes, glideUpdate, pointerAction } from '../model/glissando'
 
 describe('keyboard glissando', () => {
   it('turns each entered key on and the key it left off, one note per pointer', () => {
@@ -23,6 +23,33 @@ describe('keyboard glissando', () => {
     const lift = glideUpdate(held, 2, null, 'up')
     expect(lift.change).toEqual({ pointerId: 2, off: 72, on: null })
     expect(lift.held.get(1)).toBe(64)
+  })
+
+  it('keeps every pointer in a chord sounding together', () => {
+    expect(pointerAction(true, true, 2, 1)).toBe('play')
+    expect(pointerAction(true, true, 3, 2)).toBe('play')
+    expect(pointerAction(false, true, 2, 0)).toBe('ignore')
+    expect(pointerAction(false, false, 2, 1)).toBe('ignore')
+    let held = new Map<number, number>()
+    for (const [id, pitch] of [[1, 60], [2, 64], [3, 67]] as const) {
+      const step = glideUpdate(held, id, pitch, 'down')
+      held = step.held
+      expect(step.change).toEqual({ pointerId: id, off: null, on: pitch })
+    }
+    expect([...held.values()].sort((a, b) => a - b)).toEqual([60, 64, 67])
+    const slide = glideUpdate(held, 2, 65, 'move')
+    expect(slide.change).toEqual({ pointerId: 2, off: 64, on: 65 })
+    expect([...slide.held.values()].sort((a, b) => a - b)).toEqual([60, 65, 67])
+    const notes = glideNotes([
+      { pointerId: 1, phase: 'down', pitch: 60, timeMs: 0 },
+      { pointerId: 2, phase: 'down', pitch: 64, timeMs: 5 },
+      { pointerId: 3, phase: 'down', pitch: 67, timeMs: 8 },
+      { pointerId: 1, phase: 'up', pitch: null, timeMs: 400 },
+      { pointerId: 2, phase: 'up', pitch: null, timeMs: 420 },
+      { pointerId: 3, phase: 'up', pitch: null, timeMs: 450 },
+    ])
+    expect(notes.map((note) => note.pitch)).toEqual([60, 64, 67])
+    expect(Math.max(...notes.map((note) => note.startMs))).toBeLessThan(Math.min(...notes.map((note) => note.endMs)))
   })
 
   it('records each glided key at the pointer time for mouse and touch', () => {

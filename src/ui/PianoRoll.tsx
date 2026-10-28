@@ -80,8 +80,8 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   const dragGen = useRef(0)
   const multi = useRef(false)
   const frameRef = useRef<{ originPx: number; originRow: number; contentX: number; contentY: number; clientX: number; clientY: number } | null>(null)
-  const fingers = useRef(new Map<number, { pitch: number; eventMs: number }>())
-  const playKey = useRef<(pitch: number, event: PointerEvent, pointerId: number, on: boolean) => void>(() => {})
+  const fingers = useRef(new Map<number, { pitch: number; eventMs: number; velocity: number }>())
+  const playKey = useRef<(pitch: number, event: { timeStamp: number }, pointerId: number, on: boolean, velocity?: number) => void>(() => {})
   const tool = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const api = useRef<{ quantize: () => boolean; arpeggiate: () => void; strum: () => void; humanize: () => void; duplicate: () => boolean; remove: () => boolean }>({
     quantize: () => false,
@@ -204,21 +204,48 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   }, [clip?.id])
 
   const midiRef = useRef<MIDIAccess | null>(null)
-  const playRef = useRef<(pitch: number, velocity: number) => void>(() => {})
   const scale = store.scaleState()
   const roll = store.project.roll ?? defaultRoll()
 
-  playRef.current = (pitch, velocity) => {
-    if (!track || !clip) return
-    const current = store.scaleState()
-    const next = current.snap ? snapPitch(pitch, current.root, current.scale) : pitch
-    engine.unlock()
-    engine.previewPitches([next])
-    store.addNote(track.id, clip.id, { pitch: next, startBeat: clipBeat(store, engine, clip.startBeat), durationBeats: 1, velocity })
-  }
-
   useEffect(() => {
+    if (!navigator.requestMIDIAccess) return
+    let dead = false
+    const held = new Map<number, number>()
+    void navigator.requestMIDIAccess().then((access) => {
+      if (dead) return
+      midiRef.current = access
+      const bind = () => {
+        for (const input of access.inputs.values()) {
+          input.onmidimessage = (event) => {
+            const data = event.data
+            if (!data || data.length < 3) return
+            const status = data[0] & 0xf0
+            const pitch = data[1]
+            const velocity = data[2]
+            const on = status === 0x90 && velocity > 0
+            const off = status === 0x80 || (status === 0x90 && velocity === 0)
+            if (!on && !off) return
+            const id = 3000 + pitch
+            const stamp = { timeStamp: event.timeStamp }
+            if (on) {
+              if (held.has(pitch)) return
+              held.set(pitch, id)
+              playKey.current(pitch, stamp, id, true, velocity / 127)
+            } else if (held.has(pitch)) {
+              held.delete(pitch)
+              playKey.current(pitch, stamp, id, false)
+            }
+          }
+        }
+      }
+      bind()
+      access.onstatechange = bind
+    }).catch(() => undefined)
     return () => {
+      dead = true
+      const now = performance.now()
+      for (const [pitch, id] of held) playKey.current(pitch, { timeStamp: now }, id, false)
+      held.clear()
       const access = midiRef.current
       if (!access) return
       access.onstatechange = null
@@ -226,21 +253,23 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     }
   }, [])
 
-  playKey.current = (pitch, event, pointerId, on) => {
+  playKey.current = (pitch, event, pointerId, on, velocity = 0.8) => {
     if (!track || !clip) return
     if (on) {
       const current = store.scaleState()
       const next = current.snap ? snapPitch(pitch, current.root, current.scale) : pitch
+      const level = Math.max(0.05, Math.min(1, velocity))
       engine.unlock()
       void engine.resume()
-      engine.liveNoteOn(next, 0.8)
-      fingers.current.set(pointerId, { pitch: next, eventMs: event.timeStamp })
+      engine.liveNoteOn(next, level)
+      fingers.current.set(pointerId, { pitch: next, eventMs: event.timeStamp, velocity: level })
       return
     }
     const held = fingers.current.get(pointerId)
     fingers.current.delete(pointerId)
     if (!held) return
-    engine.liveNoteOff(held.pitch)
+    const still = [...fingers.current.values()].some((item) => item.pitch === held.pitch)
+    if (!still) engine.liveNoteOff(held.pitch)
     const playing = engine.status === 'playing' || engine.status === 'recording'
     const start = playing ? performanceBeat(store, engine, held.eventMs) : timelineBeat(store, engine)
     const end = playing ? performanceBeat(store, engine, event.timeStamp) : start
@@ -250,7 +279,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
       pitch: held.pitch,
       startBeat: Math.max(0, start - clip.startBeat),
       durationBeats: duration,
-      velocity: 0.8,
+      velocity: held.velocity,
     })
   }
 
@@ -279,6 +308,50 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
       detach()
     }
   }, [clip?.id])
+
+  useEffect(() => {
+    const codes: Record<string, number> = {
+      KeyA: 60, KeyW: 61, KeyS: 62, KeyE: 63, KeyD: 64, KeyF: 65,
+      KeyT: 66, KeyG: 67, KeyY: 68, KeyH: 69, KeyU: 70, KeyJ: 71,
+    }
+    const letters: Record<string, number> = { a: 60, w: 61, s: 62, e: 63, d: 64, f: 65, t: 66, g: 67, y: 68, h: 69, u: 70, j: 71 }
+    const held = new Map<string, number>()
+    let nextId = 4000
+    const tokenOf = (event: KeyboardEvent) => event.code || event.key
+    const down = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const token = tokenOf(event)
+      if (held.has(token)) return
+      const pitch = codes[event.code] ?? letters[event.key.toLowerCase()]
+      if (pitch == null) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      const id = nextId++
+      held.set(token, id)
+      playKey.current(pitch, event, id, true)
+    }
+    const up = (event: KeyboardEvent) => {
+      const id = held.get(tokenOf(event))
+      if (id == null) return
+      held.delete(tokenOf(event))
+      playKey.current(0, event, id, false)
+    }
+    const blur = () => {
+      for (const id of held.values()) playKey.current(0, { timeStamp: performance.now() }, id, false)
+      held.clear()
+    }
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    window.addEventListener('blur', blur)
+    return () => {
+      blur()
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', blur)
+    }
+  }, [])
 
   function quantize() {
     if (!track || !clip) return false
@@ -362,11 +435,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
         }
         return
       }
-      if (key === 'q') {
-        if (api.current.quantize()) event.stopImmediatePropagation()
-      } else if (key === 'a') api.current.arpeggiate()
-      else if (key === 'u') api.current.strum()
-      else if (key === 'h') api.current.humanize()
+      if (key === 'q' && api.current.quantize()) event.stopImmediatePropagation()
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
@@ -607,28 +676,8 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     })
   }
 
-  async function toggleChords() {
-    const next = !open
-    setOpen(next)
-    if (!next || midiRef.current || !navigator.requestMIDIAccess) return
-    try {
-      const access = await navigator.requestMIDIAccess()
-      midiRef.current = access
-      const bind = () => {
-        for (const input of access.inputs.values()) {
-          input.onmidimessage = (event) => {
-            const data = event.data
-            if (!data || data.length < 3) return
-            const status = data[0] & 0xf0
-            if (status === 0x90 && data[2] > 0) playRef.current(data[1], data[2] / 127)
-          }
-        }
-      }
-      bind()
-      access.onstatechange = bind
-    } catch {
-      /* MIDI permission denied or unavailable. */
-    }
+  function toggleChords() {
+    setOpen((value) => !value)
   }
 
   const gridPx = (roll.grid > 0 ? roll.grid : 1) * pxBeat
@@ -891,8 +940,3 @@ function timelineBeat(store: ProjectStore, engine: AudioEngine) {
   if (project.snap) beat = Math.round(beat * 4) / 4
   return Math.max(0, beat)
 }
-
-function clipBeat(store: ProjectStore, engine: AudioEngine, clipStart: number) {
-  return Math.max(0, timelineBeat(store, engine) - clipStart)
-}
-

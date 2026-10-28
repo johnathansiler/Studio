@@ -1,4 +1,4 @@
-import { glideUpdate } from '../model/glissando'
+import { glideUpdate, pointerAction } from '../model/glissando'
 
 export function attachGlissando(root: HTMLElement, opts: {
   accept: (key: HTMLElement) => boolean
@@ -42,23 +42,21 @@ export function attachGlissando(root: HTMLElement, opts: {
     }
   }
 
-  const releaseAll = (event: PointerEvent) => {
-    for (const id of [...held.keys()]) apply(id, event, 'up', null)
-  }
-
   const down = (event: PointerEvent) => {
     if (!root.contains(event.target as Node)) return
     if ((event.target as HTMLElement).closest?.('[data-scroll]')) return
     const found = keyAt(event)
+    const onControl = !!(event.target as HTMLElement).closest?.('[data-pitch], [data-sample]')
     points.set(event.pointerId, { y: event.clientY, key: !!found })
-    if (points.size >= 2 && [...points.values()].some((item) => item.key)) {
-      releaseAll(event)
+    const action = pointerAction(!!found, onControl, points.size, held.size)
+    if (action === 'scroll') {
       scrolling = true
       lastY = centroid()
       return
     }
-    if (!found) return
+    if (action !== 'play' || !found) return
     event.preventDefault()
+    try { root.setPointerCapture(event.pointerId) } catch { /* the pointer is already gone */ }
     apply(event.pointerId, event, 'down', found)
   }
 
@@ -66,7 +64,7 @@ export function attachGlissando(root: HTMLElement, opts: {
     const point = points.get(event.pointerId)
     if (!point) return
     point.y = event.clientY
-    if (scrolling) {
+    if (scrolling && !held.has(event.pointerId)) {
       const y = centroid()
       opts.onTwoFinger?.(y - lastY)
       lastY = y
