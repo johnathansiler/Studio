@@ -1,17 +1,16 @@
-import { useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 import {
   ARRANGE_TOOLS,
-  PRIMARY_TOOLS,
-  SHEET_TOOLS,
   TOOL_ACTIONS,
   TOOL_INFO,
   activeTool,
+  compactToolOrder,
   keyForTool,
   subscribeTools,
   toolChip,
   type ArrangeTool,
 } from '../state/tools'
-import { ActionSheet, SheetRow, TipButton } from './Hint'
+import { TipButton } from './Hint'
 
 export function ToolBar({
   onChange,
@@ -25,46 +24,46 @@ export function ToolBar({
   onDelete: () => void
   /** Piano wording when the roll is the editor in front of you. */
   context?: 'arrange' | 'piano'
-  /** Phone and foldable: three tools, everything else in one sheet. */
+  /** Phone and foldable: one sideways strip under the status line. */
   compact?: boolean
 }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
-  const [more, setMore] = useState(false)
-  const shown = compact ? PRIMARY_TOOLS : ARRANGE_TOOLS.map((tool) => tool.id)
-  const overflowOn = compact && SHEET_TOOLS.includes(value)
+  const stripRef = useRef<HTMLDivElement>(null)
+  const shown = compact ? compactToolOrder() : ARRANGE_TOOLS.map((tool) => tool.id)
   const chip = toolChip(value, context)
+  useEffect(() => {
+    const strip = stripRef.current
+    const button = strip?.querySelector<HTMLButtonElement>('button.on')
+    if (!strip || !button) return
+    const left = button.offsetLeft
+    const right = left + button.offsetWidth
+    if (left < strip.scrollLeft) strip.scrollLeft = left - 4
+    else if (right > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = right - strip.clientWidth + 4
+  }, [value])
   return (
     <div className="timeline-tools" role="toolbar" aria-label="Tools" data-active-tool={value} data-tool-context={context}>
-      {shown.map((id) => {
-        const info = TOOL_INFO[id]
-        const key = keyForTool(id)
-        const label = key ? `${info.label} (${key})` : info.label
-        return (
-          <TipButton
-            key={id}
-            className={`tool ${value === id ? 'on' : ''}`}
-            label={label}
-            hint={info.hint}
-            pressed={value === id}
-            onClick={() => onChange(id)}
-          >
-            <ToolIcon id={id} />
-          </TipButton>
-        )
-      })}
-      {compact && (
-        <TipButton
-          className={`tool ${overflowOn ? 'on' : ''}`}
-          label={overflowOn ? TOOL_INFO[value].label : 'More tools'}
-          hint={overflowOn ? TOOL_INFO[value].hint : 'Box, trim, split, pan, zoom, duplicate, and delete.'}
-          pressed={overflowOn}
-          onClick={() => setMore(true)}
-        >
-          {overflowOn ? <ToolIcon id={value} /> : <MoreIcon />}
-        </TipButton>
-      )}
-      {!compact &&
-        TOOL_ACTIONS.map((action) => (
+      <span className="tool-chip" role="status" aria-live="polite">
+        {chip}
+      </span>
+      <div className="tool-strip" ref={stripRef}>
+        {shown.map((id) => {
+          const info = TOOL_INFO[id]
+          const key = keyForTool(id)
+          const label = key ? `${info.label} (${key})` : info.label
+          return (
+            <TipButton
+              key={id}
+              className={`tool ${value === id ? 'on' : ''}`}
+              label={label}
+              hint={info.hint}
+              pressed={value === id}
+              onClick={() => onChange(id)}
+            >
+              <ToolIcon id={id} />
+            </TipButton>
+          )
+        })}
+        {TOOL_ACTIONS.map((action) => (
           <TipButton
             key={action.id}
             className="tool"
@@ -75,52 +74,8 @@ export function ToolBar({
             <ToolIcon id={action.id} />
           </TipButton>
         ))}
-      <span className="tool-chip" role="status" aria-live="polite">
-        {chip}
-      </span>
-      {more && (
-        <ActionSheet title="Tools" hint={chip} onClose={() => setMore(false)}>
-          {SHEET_TOOLS.map((id) => {
-            const info = TOOL_INFO[id]
-            const key = keyForTool(id)
-            return (
-              <SheetRow
-                key={id}
-                label={key ? `${info.label}  ${key}` : info.label}
-                hint={info.hint}
-                pressed={value === id}
-                onClick={() => {
-                  onChange(id)
-                  setMore(false)
-                }}
-              />
-            )
-          })}
-          {TOOL_ACTIONS.map((action) => (
-            <SheetRow
-              key={action.id}
-              label={action.label}
-              hint={action.hint}
-              onClick={() => {
-                setMore(false)
-                if (action.id === 'duplicate') onDuplicate()
-                else onDelete()
-              }}
-            />
-          ))}
-        </ActionSheet>
-      )}
+      </div>
     </div>
-  )
-}
-
-function MoreIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-      <circle cx="4" cy="9" r="1.3" fill="currentColor" />
-      <circle cx="9" cy="9" r="1.3" fill="currentColor" />
-      <circle cx="14" cy="9" r="1.3" fill="currentColor" />
-    </svg>
   )
 }
 

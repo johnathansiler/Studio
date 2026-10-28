@@ -93,11 +93,16 @@ export const ARRANGE_TOOLS: { id: ArrangeTool; label: string }[] = (
   ['select', 'box', 'pencil', 'trim', 'split', 'erase', 'pan', 'zoom'] as const
 ).map((id) => ({ id, label: TOOL_INFO[id].label }))
 
-/** Kept on screen on a phone or foldable. Everything else is in the tools sheet. */
+/** First in the phone strip, so they sit on screen before a sideways scroll. */
 export const PRIMARY_TOOLS: ArrangeTool[] = ['select', 'pencil', 'erase']
 
-/** Off the main row on touch, so the row stays Select, Draw, and Erase. */
+/** Later in the same strip. They are not behind a menu. */
 export const SHEET_TOOLS: ArrangeTool[] = ['box', 'trim', 'split', 'pan', 'zoom']
+
+/** Select, Draw, and Erase, then the rest, all on one scrolling row. */
+export function compactToolOrder(): ArrangeTool[] {
+  return [...PRIMARY_TOOLS, ...SHEET_TOOLS]
+}
 
 export const TOOL_ACTIONS = [
   { id: 'duplicate', label: 'Duplicate', hint: 'Copy the selected clips and place them just after.' },
