@@ -58,6 +58,17 @@ export class PatchHost {
     live.engine.schedule(pitch, vel, time)
   }
 
+  release(trackId: string, pitch: number) {
+    const midi = Math.round(pitch)
+    const live = this.lives.get(trackId)
+    if (!live) {
+      const queue = (this.pending.get(trackId) ?? []).filter((note) => note.pitch !== midi)
+      this.pending.set(trackId, queue)
+      return
+    }
+    live.engine.releasePitch(midi)
+  }
+
   allOff() {
     for (const live of this.lives.values()) live.engine.allOff()
   }
