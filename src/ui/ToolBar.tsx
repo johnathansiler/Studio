@@ -1,42 +1,126 @@
-import { useSyncExternalStore } from 'react'
-import { ARRANGE_TOOLS, activeTool, keyForTool, subscribeTools, type ArrangeTool } from '../state/tools'
+import { useState, useSyncExternalStore } from 'react'
+import {
+  ARRANGE_TOOLS,
+  PRIMARY_TOOLS,
+  SHEET_TOOLS,
+  TOOL_ACTIONS,
+  TOOL_INFO,
+  activeTool,
+  keyForTool,
+  subscribeTools,
+  toolChip,
+  type ArrangeTool,
+} from '../state/tools'
+import { ActionSheet, SheetRow, TipButton } from './Hint'
 
 export function ToolBar({
   onChange,
   onDuplicate,
   onDelete,
+  context = 'arrange',
+  compact = false,
 }: {
   onChange: (tool: ArrangeTool) => void
   onDuplicate: () => void
   onDelete: () => void
+  /** Piano wording when the roll is the editor in front of you. */
+  context?: 'arrange' | 'piano'
+  /** Phone and foldable: three tools, everything else in one sheet. */
+  compact?: boolean
 }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
+  const [more, setMore] = useState(false)
+  const shown = compact ? PRIMARY_TOOLS : ARRANGE_TOOLS.map((tool) => tool.id)
+  const overflowOn = compact && SHEET_TOOLS.includes(value)
+  const chip = toolChip(value, context)
   return (
-    <div className="timeline-tools" role="toolbar" aria-label="Tools">
-      {ARRANGE_TOOLS.map((tool) => {
-        const key = keyForTool(tool.id)
+    <div className="timeline-tools" role="toolbar" aria-label="Tools" data-active-tool={value} data-tool-context={context}>
+      {shown.map((id) => {
+        const info = TOOL_INFO[id]
+        const key = keyForTool(id)
+        const label = key ? `${info.label} (${key})` : info.label
         return (
-          <button
-            key={tool.id}
-            type="button"
-            className={`tool ${value === tool.id ? 'on' : ''}`}
-            aria-label={tool.label}
-            aria-pressed={value === tool.id}
-            title={key ? `${tool.label} (${key})` : tool.label}
-            onClick={() => onChange(tool.id)}
+          <TipButton
+            key={id}
+            className={`tool ${value === id ? 'on' : ''}`}
+            label={label}
+            hint={info.hint}
+            pressed={value === id}
+            onClick={() => onChange(id)}
           >
-            <ToolIcon id={tool.id} />
-          </button>
+            <ToolIcon id={id} />
+          </TipButton>
         )
       })}
-      <span className="tool-gap" />
-      <button type="button" className="tool" aria-label="Duplicate" title="Duplicate" onClick={onDuplicate}>
-        <ToolIcon id="duplicate" />
-      </button>
-      <button type="button" className="tool" aria-label="Delete" title="Delete" onClick={onDelete}>
-        <ToolIcon id="delete" />
-      </button>
+      {compact && (
+        <TipButton
+          className={`tool ${overflowOn ? 'on' : ''}`}
+          label={overflowOn ? TOOL_INFO[value].label : 'More tools'}
+          hint={overflowOn ? TOOL_INFO[value].hint : 'Box, trim, split, pan, zoom, duplicate, and delete.'}
+          pressed={overflowOn}
+          onClick={() => setMore(true)}
+        >
+          {overflowOn ? <ToolIcon id={value} /> : <MoreIcon />}
+        </TipButton>
+      )}
+      {!compact &&
+        TOOL_ACTIONS.map((action) => (
+          <TipButton
+            key={action.id}
+            className="tool"
+            label={action.label}
+            hint={action.hint}
+            onClick={action.id === 'duplicate' ? onDuplicate : onDelete}
+          >
+            <ToolIcon id={action.id} />
+          </TipButton>
+        ))}
+      <span className="tool-chip" role="status" aria-live="polite">
+        {chip}
+      </span>
+      {more && (
+        <ActionSheet title="Tools" hint={chip} onClose={() => setMore(false)}>
+          {SHEET_TOOLS.map((id) => {
+            const info = TOOL_INFO[id]
+            const key = keyForTool(id)
+            return (
+              <SheetRow
+                key={id}
+                label={key ? `${info.label}  ${key}` : info.label}
+                hint={info.hint}
+                pressed={value === id}
+                onClick={() => {
+                  onChange(id)
+                  setMore(false)
+                }}
+              />
+            )
+          })}
+          {TOOL_ACTIONS.map((action) => (
+            <SheetRow
+              key={action.id}
+              label={action.label}
+              hint={action.hint}
+              onClick={() => {
+                setMore(false)
+                if (action.id === 'duplicate') onDuplicate()
+                else onDelete()
+              }}
+            />
+          ))}
+        </ActionSheet>
+      )}
     </div>
+  )
+}
+
+function MoreIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <circle cx="4" cy="9" r="1.3" fill="currentColor" />
+      <circle cx="9" cy="9" r="1.3" fill="currentColor" />
+      <circle cx="14" cy="9" r="1.3" fill="currentColor" />
+    </svg>
   )
 }
 

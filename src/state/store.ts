@@ -28,6 +28,8 @@ import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
 import { splitMidiClip, stretchMidiClip, trimMidiClip } from '../model/edit'
+import { setPath, type ProjectOp, type StampWire } from './ops'
+import { ProjectSync } from './sync'
 import { activeTool, setActiveTool, type ArrangeTool } from './tools'
 import { demoMidiNotes } from '../model/demo'
 import {
@@ -137,6 +139,8 @@ export class ProjectStore {
   private past: string[] = []
   private future: string[] = []
   private listeners = new Set<Listener>()
+  /** Musical journal shared with every view and with the remote session. */
+  readonly sync = new ProjectSync()
   private takeUndo: { trackId: string; clipId: string; notes: MidiNote[]; durationBeats: number } | null = null
   private drafted = false
 
@@ -164,6 +168,7 @@ export class ProjectStore {
     this.selectedMidiClipId = null
     this.selectedNoteId = null
     this.selectedNoteIds = []
+    this.sync.rebase(this.project)
   }
 
   subscribe = (fn: Listener) => {
@@ -175,7 +180,50 @@ export class ProjectStore {
 
   private emit() {
     this.version += 1
+    if (!this.sync.silence) this.sync.observe(this.project)
     for (const fn of this.listeners) fn()
+  }
+
+  /** Remote field ops. History is patched so a later undo keeps them. */
+  applyRemoteOps(ops: ProjectOp[]) {
+    const { applied, gap } = this.sync.ingest(this.project, ops)
+    if (applied.length) {
+      this.rewriteHistory(applied)
+      this.emit()
+    }
+    return gap
+  }
+
+  /**
+   * Reconnect resync. Local stamps that are newer than the checkpoint are returned
+   * so the other device can catch up without a second full project.
+   */
+  mergeRemoteCheckpoint(remote: Project, stamps: StampWire[] | undefined, prefer: 'local' | 'remote', lamport = 0, actor = '', seq = 0) {
+    this.sync.silence = true
+    const waveforms = remote.waveforms
+    const merged = this.sync.merge(this.project, remote, stamps, prefer, lamport, actor, seq)
+    this.project = normalizeProjectRack(normalizeProject(merged.project))
+    if (waveforms) this.project.waveforms = waveforms
+    this.past = []
+    this.future = []
+    this.sync.adopt(this.project)
+    this.sync.silence = false
+    this.emit()
+    return merged.reply
+  }
+
+  private rewriteHistory(ops: ProjectOp[]) {
+    const apply = (raw: string) => {
+      try {
+        const project = JSON.parse(raw) as Project
+        for (const op of ops) setPath(project, op.p, op.v)
+        return JSON.stringify(project)
+      } catch {
+        return raw
+      }
+    }
+    this.past = this.past.map(apply)
+    this.future = this.future.map(apply)
   }
 
   private snapshot() {
@@ -1364,9 +1412,9 @@ export class ProjectStore {
     })
   }
 
-  addPerformedNotes(trackId: string, clipId: string, notes: Omit<MidiNote, 'id'>[], mode: 'overdub' | 'replace' = 'overdub', fixedBeats = 0) {
+  addPerformedNotes(trackId: string, clipId: string, notes: Omit<MidiNote, 'id'>[], mode: 'overdub' | 'replace' = 'overdub', fixedBeats = 0, coalesce = false) {
     if (!notes.length) return
-    this.mutate(() => {
+    const write = () => {
       const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
       if (!clip) return
       const fixed = fixedBeats > 0 ? fixedBeats : 0
@@ -1387,7 +1435,9 @@ export class ProjectStore {
         for (const note of incoming) end = Math.max(end, note.startBeat + note.durationBeats)
         clip.durationBeats = Math.max(clip.durationBeats, end)
       }
-    })
+    }
+    if (coalesce) this.draft(write)
+    else this.mutate(write)
   }
 
   setClipLength(trackId: string, clipId: string, beats: number) {
@@ -2166,6 +2216,7 @@ export class ProjectStore {
     this.selectedMidiClipId = null
     this.selectedNoteId = null
     this.selectedNoteIds = []
+    this.sync.rebase(this.project)
     this.emit()
   }
 
