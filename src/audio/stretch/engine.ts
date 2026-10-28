@@ -1,7 +1,10 @@
 import { resampleSinc } from '../quality/resample'
+import { beatAtSample, samplesAtBeat, tempoMapOf } from '../../model/tempoMap'
 import { phaseStretch } from './phase'
 import { Psola } from './voice'
 import type { AudioClip, ClipStretch, Project, StretchMode, TempoPoint, WarpMarker } from '../../model/types'
+
+export { samplesAtBeat, tempoMapOf }
 
 export type { ClipStretch, StretchMode, TempoPoint, WarpMarker }
 
@@ -118,48 +121,6 @@ export function quantizeMarkerTargets(markers: WarpMarker[], gridBeats: number, 
   })
 }
 
-export function tempoMapOf(
-  tempo: number,
-  map: TempoPoint[] | undefined,
-  lanes?: { pluginId: string; param: string; points: { beat: number; value: number }[] }[],
-): TempoPoint[] {
-  const automated = (lanes ?? [])
-    .filter((lane) => lane.pluginId === 'transport' && lane.param === 'tempo')
-    .flatMap((lane) => lane.points.map((point) => ({ beat: point.beat, bpm: point.value })))
-  const points = [...(map ?? []), ...automated].filter((point) => point.bpm > 0 && Number.isFinite(point.beat))
-  points.sort((a, b) => a.beat - b.beat)
-  if (!points.length || points[0].beat > 0) points.unshift({ beat: 0, bpm: tempo })
-  return points
-}
-
-/** Samples from the start of the project to a musical beat, following tempo changes. */
-export function samplesAtBeat(beat: number, sampleRate: number, tempo: number, map: TempoPoint[]): number {
-  const target = Math.max(0, beat)
-  const points = map.length ? map : [{ beat: 0, bpm: tempo }]
-  let bpm = tempo
-  for (let i = points.length - 1; i >= 0; i--) {
-    if (points[i].beat <= 0) {
-      bpm = points[i].bpm
-      break
-    }
-  }
-  let cursor = 0
-  let samples = 0
-  for (const point of points) {
-    if (point.beat <= cursor) {
-      if (point.beat <= 0) bpm = point.bpm
-      continue
-    }
-    const end = Math.min(point.beat, target)
-    if (end > cursor) samples += ((end - cursor) * sampleRate * 60) / bpm
-    cursor = end
-    bpm = point.bpm
-    if (cursor >= target - 1e-12) return samples
-  }
-  if (target > cursor) samples += ((target - cursor) * sampleRate * 60) / bpm
-  return samples
-}
-
 export function sourceSamplesOf(clip: AudioClip) {
   const stored = clip.stretch?.sourceSamples
   if (stored && stored > 0) return stored
@@ -190,14 +151,7 @@ export function timelineSamples(clip: AudioClip, project: Project) {
 }
 
 function samplesToBeat(samples: number, sampleRate: number, tempo: number, map: TempoPoint[]) {
-  let lo = 0
-  let hi = Math.max(1, (samples / sampleRate) * (tempo / 60) + 8)
-  for (let i = 0; i < 24; i++) {
-    const mid = (lo + hi) / 2
-    if (samplesAtBeat(mid, sampleRate, tempo, map) < samples) lo = mid
-    else hi = mid
-  }
-  return (lo + hi) / 2
+  return beatAtSample(samples, sampleRate, tempo, map)
 }
 
 function markersDeviate(clip: AudioClip, project: Project) {

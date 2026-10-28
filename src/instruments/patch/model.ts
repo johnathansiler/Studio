@@ -2,9 +2,11 @@ import { uid } from '../../model/types'
 import { clamp } from './dsp'
 import {
   BIPOLAR_SOURCES,
+  FIELD_RANGE,
   MAX_LAYERS,
   MAX_ROUTES,
   MORPH_PARAM_KEYS,
+  PARAM_RANGE,
   type FieldRange,
   type GranularSettings,
   type LayerKind,
@@ -18,7 +20,7 @@ import {
 } from './types'
 
 const CORNER_NAMES = ['A', 'B', 'C', 'D'] as const
-const SOURCES: ModSourceId[] = ['lfo1', 'lfo2', 'env1', 'env2', 'velocity', 'aftertouch', 'modwheel', 'x', 'y']
+const SOURCES: ModSourceId[] = ['lfo1', 'lfo2', 'env1', 'env2', 'velocity', 'aftertouch', 'modwheel', 'macro1', 'macro2', 'x', 'y']
 const KINDS: LayerKind[] = ['analog', 'wavetable', 'fm', 'sampler', 'granular']
 
 export function emptyGranular(): GranularSettings {
@@ -71,6 +73,8 @@ export function emptyOmni(name = 'Patch'): OmniPatch {
     env2Release: 640,
     modWheel: 0,
     aftertouch: 0,
+    macro1: 0,
+    macro2: 0,
     morph: { x: 0, y: 0, corners: [] as unknown as OmniPatch['morph']['corners'] },
   }
   const numbers = captureNumbers(patch)
@@ -215,7 +219,12 @@ export function morphedPatch(patch: OmniPatch): OmniPatch {
     layer.granular.spray = pick('spray', layer.granular.spray)
     layer.granular.pitch = pick('pitch', layer.granular.pitch)
     layer.granular.freeze = pick('freeze', layer.granular.freeze ? 1 : 0) >= 0.5
-    for (const key of MORPH_PARAM_KEYS) {
+    const paramKeys = new Set<string>([
+      ...MORPH_PARAM_KEYS,
+      ...Object.keys(layer.params),
+      ...corners.flatMap((item) => Object.keys(item.values.layers[index]?.params ?? {})),
+    ])
+    for (const key of paramKeys) {
       const samples = corners.map((item) => item.values.layers[index]?.params?.[key])
       if (samples.every((value) => typeof value !== 'number') && typeof layer.params[key] !== 'number') continue
       const fallback = layer.params[key] ?? 0
@@ -398,9 +407,11 @@ export function setRates(patch: OmniPatch, partial: Partial<Pick<OmniPatch, 'lfo
   followCorners(patch)
 }
 
-export function setPerformance(patch: OmniPatch, partial: { modWheel?: number; aftertouch?: number; x?: number; y?: number }) {
+export function setPerformance(patch: OmniPatch, partial: { modWheel?: number; aftertouch?: number; macro1?: number; macro2?: number; x?: number; y?: number }) {
   if (partial.modWheel != null) patch.modWheel = clamp(partial.modWheel, 0, 1)
   if (partial.aftertouch != null) patch.aftertouch = clamp(partial.aftertouch, 0, 1)
+  if (partial.macro1 != null) patch.macro1 = clamp(partial.macro1, 0, 1)
+  if (partial.macro2 != null) patch.macro2 = clamp(partial.macro2, 0, 1)
   if (partial.x != null) patch.morph.x = clamp(partial.x, 0, 1)
   if (partial.y != null) patch.morph.y = clamp(partial.y, 0, 1)
 }
@@ -419,9 +430,31 @@ export function inRange(layer: PatchLayer, note: number, velocity: number) {
 }
 
 export function parseTarget(target: string) {
-  const match = /^layer:(\d+):([A-Za-z]+)$/.exec(target)
+  const param = /^layer:(\d+):param:([A-Za-z][A-Za-z0-9_]*)$/.exec(target)
+  if (param) return { index: Number(param[1]), field: param[2], param: true }
+  const match = /^layer:(\d+):([A-Za-z][A-Za-z0-9_]*)$/.exec(target)
   if (!match) return null
-  return { index: Number(match[1]), field: match[2] }
+  return { index: Number(match[1]), field: match[2], param: false }
+}
+
+const PARAM_DEFAULTS: Record<string, Record<string, number>> = {
+  analog: { detune: 4, attack: 8, release: 280, wave1: 0, cutoff: 14000 },
+  wavetable: { position: 0, attack: 8, release: 280 },
+  fm: { index: 1.1, ratio: 2, feedback: 0.08, attack: 6 },
+  sampler: { pitch: 0, attack: 4, release: 180 },
+  granular: {},
+}
+
+export function rangeFor(field: string, base: number): FieldRange {
+  if (FIELD_RANGE[field]) return FIELD_RANGE[field]
+  if (PARAM_RANGE[field]) return PARAM_RANGE[field]
+  const span = Math.max(1, Math.abs(base))
+  return { min: base - span, max: base + span }
+}
+
+export function paramBase(kind: string, field: string, params: Record<string, number>) {
+  if (typeof params[field] === 'number' && Number.isFinite(params[field])) return params[field]
+  return PARAM_DEFAULTS[kind]?.[field] ?? 0
 }
 
 export function fieldOf(layer: PatchLayer, field: string) {
@@ -448,6 +481,33 @@ export function sourceIsBipolar(id: ModSourceId) {
   return BIPOLAR_SOURCES.has(id)
 }
 
+const KIND_PARAMS: Record<string, { id: string; name: string }[]> = {
+  analog: [
+    { id: 'detune', name: 'detune' },
+    { id: 'wave1', name: 'wave' },
+    { id: 'attack', name: 'attack' },
+    { id: 'release', name: 'release' },
+    { id: 'cutoff', name: 'synth cutoff' },
+  ],
+  wavetable: [
+    { id: 'position', name: 'table position' },
+    { id: 'attack', name: 'attack' },
+    { id: 'release', name: 'release' },
+  ],
+  fm: [
+    { id: 'index', name: 'FM index' },
+    { id: 'ratio', name: 'ratio' },
+    { id: 'feedback', name: 'feedback' },
+    { id: 'attack', name: 'attack' },
+  ],
+  sampler: [
+    { id: 'pitch', name: 'pitch' },
+    { id: 'attack', name: 'attack' },
+    { id: 'release', name: 'release' },
+  ],
+  granular: [],
+}
+
 export function destinationsFor(patch: OmniPatch) {
   const out: { id: string; name: string }[] = []
   patch.layers.forEach((layer, index) => {
@@ -463,6 +523,15 @@ export function destinationsFor(patch: OmniPatch) {
       out.push({ id: `layer:${index}:density`, name: `${label} density` })
       out.push({ id: `layer:${index}:spray`, name: `${label} spray` })
       out.push({ id: `layer:${index}:pitch`, name: `${label} pitch` })
+    }
+    const seen = new Set<string>()
+    for (const item of KIND_PARAMS[layer.kind] ?? []) {
+      seen.add(item.id)
+      out.push({ id: `layer:${index}:param:${item.id}`, name: `${label} ${item.name}` })
+    }
+    for (const key of Object.keys(layer.params)) {
+      if (seen.has(key)) continue
+      out.push({ id: `layer:${index}:param:${key}`, name: `${label} ${key}` })
     }
   })
   return out
@@ -603,6 +672,8 @@ export function normalizeOmni(input: unknown): OmniPatch | null {
   patch.env2Release = numOr(raw.env2Release, patch.env2Release, 5, 8000)
   patch.modWheel = numOr(raw.modWheel, 0, 0, 1)
   patch.aftertouch = numOr(raw.aftertouch, 0, 0, 1)
+  patch.macro1 = numOr(raw.macro1, 0, 0, 1)
+  patch.macro2 = numOr(raw.macro2, 0, 0, 1)
   const morph = raw.morph
   patch.morph.x = numOr(morph?.x, 0, 0, 1)
   patch.morph.y = numOr(morph?.y, 0, 0, 1)

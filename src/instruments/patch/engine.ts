@@ -6,7 +6,9 @@ import {
   inRange,
   modulate,
   morphedPatch,
+  paramBase,
   parseTarget,
+  rangeFor,
   sourceIsBipolar,
 } from './model'
 import { bindStereo, emptyLink, markConnected, releaseOutput, type LayerSource, type OutputLink } from './source'
@@ -185,9 +187,11 @@ export class PatchEngine {
     this.prepare(heard)
     const left = new Float32Array(frames)
     const right = new Float32Array(frames)
+    const liveParam = heard.layers.map((_, index) => this.hasParamRoute(heard, index))
     const baked = new Map<string, Float32Array>()
-    for (const layer of heard.layers) {
-      if (!layer.enabled || layer.kind === 'granular') continue
+    for (let index = 0; index < heard.layers.length; index++) {
+      const layer = heard.layers[index]
+      if (!layer.enabled || layer.kind === 'granular' || liveParam[index]) continue
       const source = this.sources.get(layer.id)
       if (!source) continue
       baked.set(layer.id, source.render(frames))
@@ -213,6 +217,10 @@ export class PatchEngine {
           source.setParam('density', mod.density)
           source.setParam('spray', mod.spray)
           source.setParam('pitch', mod.pitch)
+          if (liveParam[index]) this.pushParams(layer, index, heard, sources, source)
+          sample = source.tick ? source.tick() : source.render(1)[0] || 0
+        } else if (liveParam[index]) {
+          this.pushParams(layer, index, heard, sources, source)
           sample = source.tick ? source.tick() : source.render(1)[0] || 0
         } else sample = baked.get(layer.id)?.[i] || 0
         const shaped = this.shape(layer, sample, mod)
@@ -276,6 +284,8 @@ export class PatchEngine {
       velocity: this.velocity,
       aftertouch: heard.aftertouch,
       modwheel: heard.modWheel,
+      macro1: heard.macro1 ?? 0,
+      macro2: heard.macro2 ?? 0,
       x: heard.morph.x * 2 - 1,
       y: heard.morph.y * 2 - 1,
     }
@@ -293,13 +303,37 @@ export class PatchEngine {
     }
     for (const route of heard.routes) {
       const target = parseTarget(route.target)
-      if (!target || target.index !== index) continue
+      if (!target || target.param || target.index !== index) continue
       const range = FIELD_RANGE[target.field]
       const base = slot[target.field]
       if (!range || base == null) continue
       slot[target.field] = modulate(base, range, route.depth, sources[route.source] ?? 0, sourceIsBipolar(route.source))
     }
     return slot
+  }
+
+  private hasParamRoute(heard: OmniPatch, index: number) {
+    return heard.routes.some((route) => {
+      if (!route.depth) return false
+      const target = parseTarget(route.target)
+      return !!target?.param && target.index === index
+    })
+  }
+
+  private pushParams(layer: PatchLayer, index: number, heard: OmniPatch, sources: Record<string, number>, source: LayerSource) {
+    const keys = new Set(Object.keys(layer.params))
+    for (const route of heard.routes) {
+      const target = parseTarget(route.target)
+      if (target?.param && target.index === index) keys.add(target.field)
+    }
+    const values: Record<string, number> = {}
+    for (const key of keys) values[key] = paramBase(layer.kind, key, layer.params)
+    for (const route of heard.routes) {
+      const target = parseTarget(route.target)
+      if (!target?.param || target.index !== index || !(target.field in values)) continue
+      values[target.field] = modulate(values[target.field], rangeFor(target.field, values[target.field]), route.depth, sources[route.source] ?? 0, sourceIsBipolar(route.source))
+    }
+    for (const [key, value] of Object.entries(values)) source.setParam(key, value)
   }
 
   private shape(layer: PatchLayer, input: number, mod: Record<string, number>) {

@@ -1,13 +1,15 @@
 import { clipNeedsStretch, preferStretchCache, renderClipChannels, sourceSamplesOf, timelineSamples } from './stretch/engine'
+import { onSpectralCommit } from './spectral/job'
 import { onStretchCommit, readStretch, storeStretch, stretchCacheKey, stretchSlot } from './stretch/commit'
 import type { StretchMode } from './stretch/engine'
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
 import { compPieces, recordOffsetSamples } from '../model/comp'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
-import { residentDrums, type ResidentDrum } from '../model/drums'
+import { DRUM_PADS, residentDrums, type ResidentDrum } from '../model/drums'
 import { calibrationTrim, contextTimeForEvent, monitoringOffset, type ClockStamp } from '../model/midiClock'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
-import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToBeats, samplesToMusical } from '../model/time'
+import { arrangementEndSample, beatSpanSamples, clickAccent, clickAtOrAfter, meterAtSample, nextClickAfter, projectSampleBeat, tempoAtSample } from '../model/tempoMap'
+import { beatsToSamples, samplesPerBeatUnit, samplesToBeats } from '../model/time'
 import { matchBufferRate, PatchHost, renderPatchSpan } from '../instruments/patch'
 import { RackHost } from './rack/host'
 import { renderNotes } from './rack/dsp'
@@ -18,8 +20,7 @@ import { renderPattern, type RenderedHit } from '../model/steps'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav, linearResample } from '../model/wav'
 import { scaleById } from '../model/scale'
-import { noteForPlayback } from '../model/padMachine'
-import { soundingNotes } from '../model/drumLanes'
+import { chainContext, enabledFx, LiveMidiChain, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
 import { LiveRack } from './liveRack'
 import { renderGraph } from './renderGraph'
 import { loadModule, peekModule } from './plugins/registry'
@@ -81,6 +82,7 @@ export class AudioEngine {
   private warmVoices: { osc: OscillatorNode; gain: GainNode; busy: boolean; pitch: number; age: number }[] = []
   lastOnsetFrame = -1
   private oneShots: { pitch: number; when: number; stop: () => void }[] = []
+  private drumCache = new WeakMap<BaseAudioContext, AudioBuffer[]>()
 
   private project: Project | null = null
   private assetOf: (id: string) => AudioAsset | undefined = () => undefined
@@ -155,6 +157,7 @@ export class AudioEngine {
   private readonly dropCommit = onStretchCommit((key) => {
     if (this.stretchKeys.has(key)) this.adoptCommit()
   })
+  private readonly dropSpectral = onSpectralCommit(() => this.adoptSpectral())
   private recorders = new Map<string, ActiveRec>()
   private pendingRecorders: { key: string; stream: MediaStream; handler: () => void }[] = []
   private rollingChunks: SliceChunk[] = []
@@ -170,6 +173,12 @@ export class AudioEngine {
   private pcmTapSilent: GainNode | null = null
   private pcmPlayer: AudioWorkletNode | null = null
   private listeners = new Set<() => void>()
+  /** Instrument track whose effects sit in front of on-screen notes. */
+  liveTrackId: string | null = null
+  midiOutChannel = 0
+  /** Hardware note sink. Null leaves notes inside the browser. */
+  midiSink: ((bytes: number[], timeMs?: number) => void) | null = null
+  private chains = new Map<string, LiveMidiChain>()
 
   subscribe(fn: () => void) {
     this.listeners.add(fn)
@@ -867,6 +876,7 @@ export class AudioEngine {
       this.scheduler = 0
     }
     if (this.status !== 'stopped') this.status = 'stopped'
+    for (const chain of this.chains.values()) chain.panic()
     this.emit()
   }
 
@@ -891,12 +901,12 @@ export class AudioEngine {
       this.emit()
     }
     if (opts.countIn && opts.hostPerfAtSample != null && this.project && !this.playing) {
-      const go = await this.holdForDownbeat(opts.hostPerfAtSample, this.project.tempo, this.project.timeSignature)
+      const go = await this.holdForDownbeat(opts.hostPerfAtSample, tempoAtSample(this.project, opts.fromSample), meterAtSample(this.project, opts.fromSample))
       if (!go) return
       punch()
       return
     }
-    if (opts.countIn && this.project?.countIn && !this.playing) await this.runCountIn(punch)
+    if (opts.countIn && this.project?.countIn && !this.playing) await this.runCountIn(punch, opts.fromSample)
     else punch()
   }
 
@@ -1203,7 +1213,7 @@ export class AudioEngine {
 
   async exportMix(project: Project, assets: Map<string, AudioAsset>): Promise<ArrayBuffer> {
     const rate = this.sampleRate
-    const end = Math.max(rate, projectEndSample(project.tracks, rate, project.tempo))
+    const end = Math.max(rate, arrangementEndSample(project))
     const renderedTracks = []
     for (const track of project.tracks) {
       const offline = new OfflineAudioContext(2, end, rate)
@@ -1221,14 +1231,12 @@ export class AudioEngine {
         const events = []
         for (const clip of track.midiClips) {
           if (clip.slotOnly || clip.scene != null) continue
-          for (const note of soundingNotes(clip)) {
-            const audible = playedNote(project, note, clip.startBeat + note.startBeat)
-            if (!audible) continue
-            const start = beatsToSamples(clip.startBeat + audible.startBeat, rate, project.tempo)
-            const dur = beatsToSamples(audible.durationBeats, rate, project.tempo)
+          for (const note of prepareClipNotes(project, track, clip)) {
+            const start = beatsToSamples(clip.startBeat + note.startBeat, rate, project.tempo)
+            const dur = beatsToSamples(note.durationBeats, rate, project.tempo)
             if (start >= end) continue
-            events.push({ sample: Math.max(0, start), pitch: audible.pitch, vel: audible.velocity, slide: !!audible.slide })
-            events.push({ sample: Math.min(end - 1, start + dur), pitch: audible.pitch, vel: 0 })
+            events.push({ sample: Math.max(0, start), pitch: note.pitch, vel: note.velocity, slide: !!note.slide })
+            events.push({ sample: Math.min(end - 1, start + dur), pitch: note.pitch, vel: 0 })
           }
         }
         await this.libraryHost.prepare(track.id, track, events, rate)
@@ -1244,14 +1252,11 @@ export class AudioEngine {
         const events = []
         for (const clip of track.midiClips) {
           if (clip.slotOnly || clip.scene != null) continue
-          for (const note of soundingNotes(clip)) {
-            const audible = playedNote(project, note, clip.startBeat + note.startBeat)
-            if (!audible) continue
-            const start = beatsToSamples(clip.startBeat + audible.startBeat, rate, project.tempo)
-            const dur = beatsToSamples(audible.durationBeats, rate, project.tempo)
-            if (start >= end) continue
-            events.push({ sample: Math.max(0, start), pitch: audible.pitch, vel: audible.velocity, slide: !!audible.slide })
-            events.push({ sample: Math.min(end - 1, start + dur), pitch: audible.pitch, vel: 0 })
+          for (const note of prepareClipNotes(project, track, clip)) {
+            const span = beatSpanSamples(project, clip.startBeat + note.startBeat, note.durationBeats)
+            if (span.start >= end) continue
+            events.push({ sample: Math.max(0, Math.round(span.start)), pitch: note.pitch, vel: note.velocity, slide: !!note.slide })
+            events.push({ sample: Math.min(end - 1, Math.round(span.start + span.duration)), pitch: note.pitch, vel: 0 })
           }
         }
         const rendered = renderNotes(track.rack, events, rate, project.tempo, end, assets, project.rackAutomation)
@@ -1265,13 +1270,10 @@ export class AudioEngine {
       } else {
         for (const clip of track.midiClips) {
           if (clip.slotOnly || clip.scene != null) continue
-          for (const note of soundingNotes(clip)) {
-            const audible = playedNote(project, note, clip.startBeat + note.startBeat)
-            if (!audible) continue
-            const start = beatsToSamples(clip.startBeat + audible.startBeat, rate, project.tempo)
-            const dur = beatsToSamples(audible.durationBeats, rate, project.tempo) / rate
-            if (start >= end) continue
-            this.scheduleVoice(offline, strip, audible, start / rate, dur)
+          for (const note of prepareClipNotes(project, track, clip)) {
+            const span = beatSpanSamples(project, clip.startBeat + note.startBeat, note.durationBeats)
+            if (span.start >= end) continue
+            this.scheduleVoice(offline, strip, note, span.start / rate, span.duration / rate, track)
           }
         }
       }
@@ -1360,11 +1362,13 @@ export class AudioEngine {
     return this.status === 'counting-in'
   }
 
-  private async runCountIn(done: () => void) {
+  private async runCountIn(done: () => void, fromSample = this.positionSamples) {
     const ctx = this.ctx!
     const project = this.project!
-    const beatSec = samplesPerBeatUnit(this.sampleRate, project.tempo, project.timeSignature) / this.sampleRate
-    const beats = project.timeSignature.numerator
+    const tempo = tempoAtSample(project, fromSample)
+    const meter = meterAtSample(project, fromSample)
+    const beatSec = samplesPerBeatUnit(this.sampleRate, tempo, meter) / this.sampleRate
+    const beats = meter.numerator
     const start = ctx.currentTime + 0.06
     for (let i = 0; i < beats; i++) this.click(start + i * beatSec, i === 0)
     this.status = 'counting-in'
@@ -1385,10 +1389,7 @@ export class AudioEngine {
     this.arrangementScheduled = false
     this.sessionStarted.clear()
     this.nextLoopCtx = null
-    const beat = this.project
-      ? samplesPerBeatUnit(this.sampleRate, this.project.tempo, this.project.timeSignature)
-      : this.sampleRate / 2
-    this.nextMetroSample = Math.ceil(fromSample / beat - 1e-6) * beat
+    this.nextMetroSample = this.project ? clickAtOrAfter(this.project, fromSample) : fromSample
     this.ensureScheduler()
     if (!this.raf) this.raf = requestAnimationFrame(() => this.tick())
     this.scheduleAhead()
@@ -1446,7 +1447,7 @@ export class AudioEngine {
       }
       this.positionSamples = Math.max(0, sample)
       if (project && this.mode === 'arrangement' && !project.loopEnabled && this.status === 'playing') {
-        const end = projectEndSample(project.tracks, this.sampleRate, project.tempo)
+        const end = arrangementEndSample(project)
         if (sample > end + this.sampleRate) {
           this.stop()
           return
@@ -1481,15 +1482,15 @@ export class AudioEngine {
   private scheduleMetronome(horizon: number) {
     const project = this.project
     if (!project?.metronomeEnabled || !this.ctx) return
-    const beat = samplesPerBeatUnit(this.sampleRate, project.tempo, project.timeSignature)
-    while (this.nextMetroSample < this.playOriginSample + this.sampleRate * 60 * 10) {
+    const limit = this.playOriginSample + this.sampleRate * 60 * 10
+    let guard = 0
+    while (this.nextMetroSample < limit && guard++ < 64) {
       const when = this.playOriginCtx + (this.nextMetroSample - this.playOriginSample) / this.sampleRate
       if (when > horizon) break
-      if (when >= this.ctx.currentTime - 0.01) {
-        const pos = samplesToMusical(this.nextMetroSample, this.sampleRate, project.tempo, project.timeSignature)
-        this.click(when, pos.beat === 1)
-      }
-      this.nextMetroSample += beat
+      if (when >= this.ctx.currentTime - 0.01) this.click(when, clickAccent(project, this.nextMetroSample))
+      const next = nextClickAfter(project, this.nextMetroSample)
+      if (!(next > this.nextMetroSample + 0.5)) break
+      this.nextMetroSample = next
     }
   }
 
@@ -1511,7 +1512,7 @@ export class AudioEngine {
 
   private scheduleArrangement(horizon: number) {
     const project = this.project!
-    const end = projectEndSample(project.tracks, this.sampleRate, project.tempo)
+    const end = arrangementEndSample(project)
     const cycleWhileRecording = this.status === 'recording' && project.record?.loop
     if (!project.loopEnabled || (this.status === 'recording' && !cycleWhileRecording)) {
       if (this.arrangementScheduled) return
@@ -1632,7 +1633,8 @@ export class AudioEngine {
     const clip = track.midiClips.find((c) => c.id === clipId)
     if (!clip || !this.ctx) return
     const sr = this.sampleRate
-    const durSec = Math.max(0.05, beatsToSamples(Math.max(0.25, clip.durationBeats), sr, project.tempo) / sr)
+    const bpm = tempoAtSample(project, this.positionSamples)
+    const durSec = Math.max(0.05, beatsToSamples(Math.max(0.25, clip.durationBeats), sr, bpm) / sr)
     const looping = clip.mode === 'repeat' || clip.loop !== false
     if (!this.sessionNodes.has(track.id)) this.sessionNodes.set(track.id, [])
     const schedulePass = (when: number) => {
@@ -1641,17 +1643,15 @@ export class AudioEngine {
         const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
         const hits = pattern ? renderPattern(pattern, 0, clip.durationBeats) : []
         for (const hit of hits) {
-          const noteDelay = beatsToSamples(hit.startBeat, sr, project.tempo) / sr
+          const noteDelay = beatsToSamples(hit.startBeat, sr, bpm) / sr
           const out = (hit.output && this.strips.get(hit.output)) || strip
           this.scheduleHit(this.ctx!, out, hit, when + noteDelay)
         }
       }
-      for (const note of clip.patternId ? [] : soundingNotes(clip)) {
-        const audible = playedNote(project, note, clip.startBeat + note.startBeat)
-        if (!audible) continue
-        const noteDelay = beatsToSamples(audible.startBeat, sr, project.tempo) / sr
-        const noteDur = beatsToSamples(audible.durationBeats, sr, project.tempo) / sr
-        this.scheduleVoice(this.ctx!, strip, audible, when + noteDelay, noteDur, track, this.sessionNodes.get(track.id))
+      for (const note of clip.patternId ? [] : prepareClipNotes(project, track, clip)) {
+        const noteDelay = beatsToSamples(note.startBeat, sr, bpm) / sr
+        const noteDur = beatsToSamples(note.durationBeats, sr, bpm) / sr
+        this.scheduleVoice(this.ctx!, strip, note, when + noteDelay, noteDur, track, this.sessionNodes.get(track.id))
       }
       if (!looping) return
       const timer = window.setTimeout(() => schedulePass(when + durSec), Math.max(20, durSec * 1000 - 200))
@@ -1711,16 +1711,12 @@ export class AudioEngine {
       }
       for (const clip of track.midiClips) {
         if (clip.slotOnly || clip.scene != null) continue
-        const clipStart = beatsToSamples(clip.startBeat, this.sampleRate, project.tempo)
-        for (const note of soundingNotes(clip)) {
-          const audible = playedNote(project, note, clip.startBeat + note.startBeat)
-          if (!audible) continue
-          const noteStart = clipStart + beatsToSamples(audible.startBeat, this.sampleRate, project.tempo)
-          const noteDurSamples = beatsToSamples(audible.durationBeats, this.sampleRate, project.tempo)
-          if (noteStart + noteDurSamples <= timelineStart || noteStart >= timelineEnd) continue
-          const when = ctxTime + (noteStart - timelineStart) / this.sampleRate
+        for (const note of prepareClipNotes(project, track, clip)) {
+          const span = beatSpanSamples(project, clip.startBeat + note.startBeat, note.durationBeats)
+          if (span.start + span.duration <= timelineStart || span.start >= timelineEnd) continue
+          const when = ctxTime + (span.start - timelineStart) / this.sampleRate
           if (when < ctx.currentTime) continue
-          this.scheduleVoice(ctx, strip, audible, when, noteDurSamples / this.sampleRate, track)
+          this.scheduleVoice(ctx, strip, note, when, span.duration / this.sampleRate, track)
         }
       }
       this.schedulePatternClips(ctx, strip, project, track.id, ctxTime, timelineStart, timelineEnd)
@@ -1743,17 +1739,18 @@ export class AudioEngine {
       if (!pattern) continue
       for (const hit of renderPattern(pattern, 0, clip.lengthBeats)) {
         if ((hit.output || midiId) !== trackId) continue
-        const sample = beatsToSamples(clip.startBeat + hit.startBeat, this.sampleRate, project.tempo)
-        if (sample < timelineStart || sample >= timelineEnd) continue
-        const when = ctxTime + (sample - timelineStart) / this.sampleRate
+        const span = beatSpanSamples(project, clip.startBeat + hit.startBeat, hit.durationBeats)
+        if (span.start < timelineStart || span.start >= timelineEnd) continue
+        const when = ctxTime + (span.start - timelineStart) / this.sampleRate
         const liveStrip = ctx === this.ctx && hit.output ? this.strips.get(hit.output) : undefined
-        this.scheduleHit(ctx, liveStrip || strip, hit, when)
+        this.scheduleHit(ctx, liveStrip || strip, hit, when, span.duration / this.sampleRate)
       }
     }
   }
 
-  private scheduleHit(ctx: BaseAudioContext, strip: StripNodes, hit: RenderedHit, when: number) {
+  private scheduleHit(ctx: BaseAudioContext, strip: StripNodes, hit: RenderedHit, when: number, durationSec?: number) {
     if (ctx === this.ctx && when < ctx.currentTime) return
+    const dur = durationSec ?? Math.max(0.04, beatsToSamples(hit.durationBeats, this.sampleRate, this.project?.tempo || 120) / this.sampleRate)
     if (hit.kind === 'note' && hit.sampleId) {
       const asset = this.assetOf(hit.sampleId)
       if (asset) {
@@ -1762,7 +1759,7 @@ export class AudioEngine {
         src.buffer = buffer
         const rate = 2 ** ((hit.pitch - 60 + hit.fine / 100) / 12)
         src.playbackRate.value = rate
-        this.envelope(ctx, strip, src, when, Math.max(0.05, beatsToSamples(hit.durationBeats, this.sampleRate, this.project?.tempo || 120) / this.sampleRate), hit)
+        this.envelope(ctx, strip, src, when, Math.max(0.05, dur), hit)
         return
       }
     }
@@ -1775,10 +1772,9 @@ export class AudioEngine {
         startBeat: hit.startBeat,
         durationBeats: hit.durationBeats,
         velocity: hit.velocity,
-      }, when, Math.max(0.05, beatsToSamples(hit.durationBeats, this.sampleRate, this.project?.tempo || 120) / this.sampleRate))
+      }, when, Math.max(0.05, dur))
       return
     }
-    const dur = Math.max(0.04, beatsToSamples(hit.durationBeats, this.sampleRate, this.project?.tempo || 120) / this.sampleRate)
     if (hit.kind === 'kick') {
       const osc = ctx.createOscillator()
       osc.type = 'sine'
@@ -1821,6 +1817,40 @@ export class AudioEngine {
     noise.connect(filter)
     this.envelope(ctx, strip, filter, when, Math.min(0.16, dur), hit, noise)
     this.envelope(ctx, strip, tone, when, 0.08, { ...hit, velocity: hit.velocity * 0.4 })
+  }
+
+  private cachedDrum(ctx: BaseAudioContext, pitch: number) {
+    let list = this.drumCache.get(ctx)
+    if (!list) {
+      const drums = residentDrums(ctx.sampleRate)
+      list = drums.map((drum) => {
+        const buffer = ctx.createBuffer(1, Math.max(1, drum.samples.length), ctx.sampleRate)
+        buffer.getChannelData(0).set(drum.samples)
+        return buffer
+      })
+      this.drumCache.set(ctx, list)
+    }
+    const index = DRUM_PADS.findIndex((pad) => pad.pitch === Math.round(pitch))
+    return index >= 0 ? list[index] : null
+  }
+
+  private playDrum(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, bucket?: Stoppable[]) {
+    const buffer = this.cachedDrum(ctx, note.pitch)
+    if (!buffer) return false
+    if (ctx === this.ctx && when < ctx.currentTime) return true
+    const src = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    src.buffer = buffer
+    gain.gain.setValueAtTime(Math.max(0.001, note.velocity * 0.9), when)
+    src.connect(gain)
+    gain.connect(strip.input)
+    src.start(when)
+    src.stop(when + buffer.duration)
+    if (ctx === this.ctx) {
+      this.sources.push(src)
+      bucket?.push(src)
+    }
+    return true
   }
 
   private noiseBuffer(ctx: BaseAudioContext) {
@@ -1959,11 +1989,12 @@ export class AudioEngine {
   }
 
   playOrigin(): { context: number; beat: number } {
-    const tempo = this.project?.tempo || 120
-    const beatNow = samplesToBeats(this.positionSamples, this.sampleRate, tempo)
+    const project = this.project
+    const beatNow = project ? projectSampleBeat(project, this.positionSamples) : samplesToBeats(this.positionSamples, this.sampleRate, 120)
     const stamp = this.outputStamp()
     if (!this.playing || !this.ctx) return { context: stamp.contextTime, beat: beatNow }
-    return { context: this.playOriginCtx, beat: samplesToBeats(this.playOriginSample, this.sampleRate, tempo) }
+    const origin = project ? projectSampleBeat(project, this.playOriginSample) : samplesToBeats(this.playOriginSample, this.sampleRate, 120)
+    return { context: this.playOriginCtx, beat: origin }
   }
 
   outputStamp(): ClockStamp {
@@ -2105,7 +2136,61 @@ export class AudioEngine {
     src.stop(startAt + buffer.duration * decay + 0.02)
   }
 
+  /** Monitor one track through its MIDI effect chain, then the instrument. */
+  playThrough(trackId: string, pitch: number, velocity: number) {
+    const previous = this.liveTrackId
+    this.liveTrackId = trackId
+    this.liveNoteOn(pitch, velocity)
+    this.liveTrackId = previous
+  }
+
+  releaseThrough(trackId: string, pitch: number) {
+    const previous = this.liveTrackId
+    this.liveTrackId = trackId
+    this.liveNoteOff(pitch)
+    this.liveTrackId = previous
+  }
+
   liveNoteOn(pitch: number, velocity: number, drumIndex = -1, repeatEverySamples = 0, color?: PadColor) {
+    if (this.throughChain(pitch, velocity, drumIndex, repeatEverySamples)) return
+    this.emitLive(pitch, velocity, drumIndex, repeatEverySamples, color)
+  }
+
+  private throughChain(pitch: number, velocity: number, drumIndex: number, repeatEverySamples: number) {
+    if (drumIndex >= 0 || repeatEverySamples > 0 || !this.project || !this.liveTrackId) return false
+    const track = this.project.tracks.find((item) => item.id === this.liveTrackId)
+    if (!track || !enabledFx(track.midiFx).length) return false
+    this.chainFor(track).noteOn(pitch, velocity)
+    return true
+  }
+
+  private chainFor(track: Track) {
+    let chain = this.chains.get(track.id)
+    if (!chain) {
+      chain = new LiveMidiChain(
+        (ms, fn) => {
+          const id = window.setTimeout(fn, ms)
+          return () => window.clearTimeout(id)
+        },
+        () => performance.now(),
+        {
+          on: (pitch, velocity) => this.emitLive(pitch, velocity, -1, 0),
+          off: (pitch) => this.emitLiveOff(pitch),
+        },
+      )
+      this.chains.set(track.id, chain)
+    }
+    const id = track.id
+    chain.configure(
+      () => this.project?.tracks.find((item) => item.id === id)?.midiFx,
+      () => (this.project ? chainContext(this.project, id) : { root: 0, scale: 'ionian', seed: 1 }),
+      () => this.project?.tempo || 120,
+    )
+    return chain
+  }
+
+  private emitLive(pitch: number, velocity: number, drumIndex = -1, repeatEverySamples = 0, color?: PadColor) {
+    this.sendLiveMidi(pitch, velocity)
     if (!this.ctx) this.unlock()
     const level = Math.max(0.05, Math.min(1, velocity))
     if (this.keysNode) {
@@ -2177,6 +2262,16 @@ export class AudioEngine {
   }
 
   liveNoteOff(pitch: number) {
+    const chain = this.liveTrackId ? this.chains.get(this.liveTrackId) : undefined
+    if (chain?.holds(pitch)) {
+      chain.noteOff(pitch)
+      return
+    }
+    this.emitLiveOff(pitch)
+  }
+
+  private emitLiveOff(pitch: number) {
+    if (this.midiSink) this.midiSink(noteBytes(false, this.midiOutChannel, pitch, 0))
     if (this.keysNode) {
       if (!this.pushSab(0, pitch, 0, -1)) this.keysNode.port.postMessage({ type: 'off', pitch })
     }
@@ -2291,6 +2386,18 @@ export class AudioEngine {
     return readStretch(key, channels, clip, project)
   }
 
+  /** Replay from the playhead so a finished spectral render is what you hear. */
+  private adoptSpectral() {
+    void this.dropSpectral
+    if (!this.playing || !this.ctx || !this.project) return
+    if (this.mode === 'session') {
+      this.stopSources()
+      this.scheduleAhead()
+      return
+    }
+    this.adoptCommit()
+  }
+
   /** Swap a live preview for the committed render without moving the playhead. */
   private adoptCommit() {
     void this.dropCommit
@@ -2305,7 +2412,7 @@ export class AudioEngine {
     this.nextLoopCtx = now
     this.nextLoopSample = sample
     this.joining = true
-    const end = projectEndSample(project.tracks, this.sampleRate, project.tempo)
+    const end = arrangementEndSample(project)
     this.scheduleWindow(now, sample, end)
     this.joining = false
   }
@@ -2387,7 +2494,7 @@ export class AudioEngine {
   }
 
   /** Speaker-only sequence. `at` and `dur` are seconds from now. Never enters the cue. */
-  previewSequence(events: { pitch: number; at: number; dur: number; velocity?: number; drum?: boolean }[]) {
+  previewSequence(events: { pitch: number; at: number; dur: number; velocity?: number; drum?: boolean; cents?: number }[]) {
     this.stopPreview()
     const ctx = this.ctx
     const out = this.speakerGain
@@ -2404,7 +2511,7 @@ export class AudioEngine {
       const dur = Math.max(0.05, Math.min(8, event.dur))
       const velocity = Math.max(0.05, Math.min(1, event.velocity ?? 0.7))
       if (event.drum) this.previewHit(ctx, bus, event.pitch, when, dur, velocity, stops)
-      else this.previewTone(ctx, bus, event.pitch, when, dur, velocity, stops)
+      else this.previewTone(ctx, bus, event.pitch, event.cents ?? 0, when, dur, velocity, stops)
     }
     this.previewStops = stops
   }
@@ -2417,11 +2524,46 @@ export class AudioEngine {
     this.previewStops = []
   }
 
-  private previewTone(ctx: AudioContext, bus: GainNode, pitch: number, when: number, dur: number, velocity: number, stops: Stoppable[]) {
+  /** Speaker-only audition. The cue and the arrangement are left alone. */
+  previewPcm(channels: Float32Array[], sampleRate?: number) {
+    this.stopPreview()
+    const ctx = this.unlock()
+    const out = this.speakerGain
+    const lead = channels[0]
+    if (!out || !lead?.length) return
+    const rate = sampleRate && sampleRate > 0 ? sampleRate : ctx.sampleRate
+    const buffer = ctx.createBuffer(Math.max(1, channels.length), lead.length, rate)
+    channels.forEach((channel, index) => {
+      const data = new Float32Array(lead.length)
+      data.set(channel.subarray(0, Math.min(channel.length, lead.length)))
+      buffer.copyToChannel(data, index)
+    })
+    const src = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    src.buffer = buffer
+    gain.gain.value = 0.9
+    src.connect(gain)
+    gain.connect(out)
+    const stop = () => {
+      try { src.stop() } catch { /* already stopped */ }
+    }
+    const disconnect = () => {
+      try { src.disconnect() } catch { /* already disconnected */ }
+      try { gain.disconnect() } catch { /* already disconnected */ }
+    }
+    src.onended = () => {
+      disconnect()
+      this.previewStops = this.previewStops.filter((item) => item.stop !== stop)
+    }
+    this.previewStops = [{ stop, disconnect }]
+    src.start()
+  }
+
+  private previewTone(ctx: AudioContext, bus: GainNode, pitch: number, cents: number, when: number, dur: number, velocity: number, stops: Stoppable[]) {
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
     osc.type = 'triangle'
-    osc.frequency.value = 440 * 2 ** ((Math.round(pitch) - 69) / 12)
+    osc.frequency.value = 440 * 2 ** ((Math.round(pitch) + cents / 100 - 69) / 12)
     gain.gain.setValueAtTime(0.0001, when)
     gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, 0.07 * velocity), when + 0.012)
     gain.gain.exponentialRampToValueAtTime(0.0001, when + dur)
@@ -2514,8 +2656,22 @@ export class AudioEngine {
     }
   }
 
+  private sendLiveMidi(pitch: number, velocity: number) {
+    if (!this.midiSink) return
+    this.midiSink(noteBytes(true, this.midiOutChannel, pitch, midiVelocityByte(velocity)))
+  }
+
+  private sendMidiNote(note: MidiNote, when: number, dur: number, ctx: BaseAudioContext) {
+    if (ctx !== this.ctx || !this.midiSink) return
+    const at = this.perfForContext(when)
+    this.midiSink(noteBytes(true, this.midiOutChannel, note.pitch, midiVelocityByte(note.velocity)), at)
+    this.midiSink(noteBytes(false, this.midiOutChannel, note.pitch, 0), at + Math.max(0, dur) * 1000)
+  }
+
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[]) {
     if (note.muted) return
+    this.sendMidiNote(note, when, dur, ctx)
+    if (track?.instrument === 'drum-machine' && this.playDrum(ctx, strip, note, when, bucket)) return
     if (track?.instrument === 'library' && ctx === this.ctx) {
       if (track.library) {
         const at = Math.max(when, ctx.currentTime)
@@ -2649,15 +2805,6 @@ interface PadColor {
   attack?: number
   filter?: number
   swing?: number
-}
-
-function playedNote(project: Project, note: MidiNote, beat: number): MidiNote | null {
-  return noteForPlayback(note, {
-    stepBeats: 0.25,
-    seed: project.padKit?.seed ?? 1,
-    bar: Math.floor(beat / Math.max(1, project.timeSignature?.numerator || 4)),
-    fill: Boolean(project.padKit?.fill),
-  })
 }
 
 function passthrough(): Processor {

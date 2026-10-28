@@ -62,7 +62,7 @@ const LOW = 48
 const HIGH = 84
 const VEL_H = 36
 
-export function PianoRoll({ store, engine, onIdeas, onLibrary }: { store: ProjectStore; engine: AudioEngine; onIdeas?: () => void; onLibrary?: () => void }) {
+export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { store: ProjectStore; engine: AudioEngine; onIdeas?: () => void; onGenerate?: () => void; onLibrary?: () => void }) {
   const piano = selectPiano(store)
   const track = piano.track
   const clip = piano.clip
@@ -209,55 +209,8 @@ export function PianoRoll({ store, engine, onIdeas, onLibrary }: { store: Projec
     }
   }, [clip?.id])
 
-  const midiRef = useRef<MIDIAccess | null>(null)
   const scale = piano.scale
   const roll = store.project.roll ?? defaultRoll()
-
-  useEffect(() => {
-    if (!navigator.requestMIDIAccess) return
-    let dead = false
-    const held = new Map<number, number>()
-    void navigator.requestMIDIAccess().then((access) => {
-      if (dead) return
-      midiRef.current = access
-      const bind = () => {
-        for (const input of access.inputs.values()) {
-          input.onmidimessage = (event) => {
-            const data = event.data
-            if (!data || data.length < 3) return
-            const status = data[0] & 0xf0
-            const pitch = data[1]
-            const velocity = data[2]
-            const on = status === 0x90 && velocity > 0
-            const off = status === 0x80 || (status === 0x90 && velocity === 0)
-            if (!on && !off) return
-            const id = 3000 + pitch
-            const stamp = { timeStamp: event.timeStamp }
-            if (on) {
-              if (held.has(pitch)) return
-              held.set(pitch, id)
-              playKey.current(pitch, stamp, id, true, velocity / 127)
-            } else if (held.has(pitch)) {
-              held.delete(pitch)
-              playKey.current(pitch, stamp, id, false)
-            }
-          }
-        }
-      }
-      bind()
-      access.onstatechange = bind
-    }).catch(() => undefined)
-    return () => {
-      dead = true
-      const now = performance.now()
-      for (const [pitch, id] of held) playKey.current(pitch, { timeStamp: now }, id, false)
-      held.clear()
-      const access = midiRef.current
-      if (!access) return
-      access.onstatechange = null
-      for (const input of access.inputs.values()) input.onmidimessage = null
-    }
-  }, [])
 
   playKey.current = (pitch, event, pointerId, on, velocity = 0.8, fine?: number) => {
     if (!track || !clip) return
@@ -703,6 +656,7 @@ export function PianoRoll({ store, engine, onIdeas, onLibrary }: { store: Projec
     <div className={`piano ${compact ? 'compact' : ''}`} ref={pianoRef} data-tool={tool}>
       <div className="scale-bar">
         <TipButton className={`chords-btn ${open ? 'on' : ''}`} label={bar('chords').label} hint={bar('chords').hint} pressed={open} onClick={() => void toggleChords()} />
+        {!compact && onGenerate && <TipButton label={bar('generate').label} hint={bar('generate').hint} onClick={onGenerate} />}
         <select {...described(bar('key'))} value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
           {NOTE_NAMES.map((name, index) => (
             <option key={name} value={index}>{name}</option>
@@ -771,6 +725,7 @@ export function PianoRoll({ store, engine, onIdeas, onLibrary }: { store: Projec
           }} />
           {onLibrary && <SheetRow label={scale.library ? (findScale(scale.library)?.name ?? 'Scale') : 'Library'} hint="Browse scales, modes, and the chords they contain." onClick={() => { setNotesOpen(false); onLibrary() }} />}
           {onIdeas && <SheetRow label={sheet('ideas').label} hint={sheet('ideas').hint} onClick={() => { setNotesOpen(false); onIdeas() }} />}
+          {onGenerate && <SheetRow label={bar('generate').label} hint={bar('generate').hint} onClick={() => { setNotesOpen(false); onGenerate() }} />}
           {store.selectedNoteId && (
             <SheetRow
               label={sheet('slide').label}

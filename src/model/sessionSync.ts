@@ -97,7 +97,10 @@ export function referencedBufferIds(project: Project): string[] {
       for (const lane of clip.folder?.lanes || []) ids.add(lane.bufferId)
     }
     for (const plugin of track.plugins ?? []) collectInstrumentBuffers(plugin, ids)
-    for (const sample of track.library?.samples ?? []) if (sample.bufferId) ids.add(sample.bufferId)
+    for (const sample of track.library?.samples ?? []) {
+      if (sample.bufferId) ids.add(sample.bufferId)
+      if (sample.packId) ids.add(sample.packId)
+    }
   }
   for (const plugin of project.masterPlugins ?? []) collectInstrumentBuffers(plugin, ids)
   for (const id of patchBufferIds(project)) ids.add(id)
@@ -141,6 +144,8 @@ export function arrangementDigest(project: Project): string {
       : null,
     patternClips: (project.patternClips ?? []).map((clip) => [clip.id, clip.patternId, clip.startBeat, clip.lengthBeats, clip.scene]),
     tempoMap: project.tempoMap ?? [],
+    meterMap: project.meterMap ?? [],
+    sections: (project.sections ?? []).map((section) => [section.id, section.name, section.kind, section.startBeat, section.durationBeats, section.color]),
     tracks: project.tracks.map((track) => ({
       id: track.id,
       name: track.name,
@@ -180,6 +185,9 @@ export function arrangementDigest(project: Project): string {
         clip.folder?.activeCompId || '',
         (clip.folder?.lanes || []).map((lane) => lane.bufferId).join(','),
         (clip.folder?.comps.find((comp) => comp.id === clip.folder?.activeCompId)?.segments || []).map((segment) => `${segment.laneId}:${segment.startSample}:${segment.endSample}`).join('|'),
+        clip.spectral
+          ? [clip.spectral.enabled ? 1 : 0, clip.spectral.ops.map((op) => op.id).join(','), clip.spectral.renderedKey ?? '', Math.round((clip.spectral.noiseBands?.[0] ?? 0) * 1000)]
+          : 0,
       ]),
       midi: track.midiClips.map((clip) => [
         clip.id,

@@ -1,8 +1,23 @@
+import type { GeneratorSettings } from '../generators/types'
+import { activeScaleId, followSource } from '../generators/adapt'
 import { isDrumTrack } from '../model/drumLanes'
-import type { QuantizeSettings } from '../model/quantize'
+import { normalizePlayer } from '../players/settings'
 import type { ScaleState } from '../model/scale'
+import type { QuantizeSettings } from '../model/quantize'
+import { orderedSections } from '../model/sections'
 import { normalizeMidiEditor } from '../model/stepEntry'
-import type { PluginInstance, Project, Track } from '../model/types'
+import { meterChanges, projectTempoMap } from '../model/tempoMap'
+import type { AudioClip, LiveCaptureSettings, MeterChange, MidiFx, MidiMapEntry, MidiOutSettings, PluginInstance, Project, SongSection, TempoPoint, Track } from '../model/types'
+import {
+  defaultLiveCapture,
+  defaultMidiOut,
+  planAudioRoutes,
+  planMidiRoutes,
+  sanitizeFx,
+  sanitizeMaps,
+  type AudioRoute,
+  type MidiRoute,
+} from '../model/midiTools'
 
 /**
  * Read models for the studio surfaces.
@@ -104,6 +119,20 @@ export function selectPiano(store: Pick<Store, 'project' | 'selectedMidiClipId' 
   }
 }
 
+export function selectInstrument(store: Pick<Store, 'project' | 'track'>, trackId: string) {
+  const track = store.track(trackId) ?? null
+  const program = track?.library ?? null
+  return {
+    project: store.project,
+    track,
+    program,
+    mics: program?.mics ?? [],
+    keyswitches: program?.keyswitches ?? [],
+    activeSwitch: program?.defaultSwitch ?? null,
+    zones: program?.zones.length ?? 0,
+  }
+}
+
 export function selectRack(store: Pick<Store, 'project' | 'track'>, trackId: string) {
   const track = store.track(trackId) ?? null
   return {
@@ -150,8 +179,119 @@ export function selectQuantize(store: Pick<Store, 'project' | 'quantizeOpen' | '
   }
 }
 
+export function selectSpectral(store: { project: Project; spectralTrackId: string | null; spectralClipId: string | null }) {
+  const track = store.project.tracks.find((item) => item.id === store.spectralTrackId) ?? null
+  const clip = track?.clips.find((item) => item.id === store.spectralClipId) ?? null
+  return {
+    project: store.project,
+    track,
+    clip,
+    repair: clip?.spectral ?? null,
+    sampleRate: store.project.sampleRate,
+  }
+}
+
+export function selectClipRepair(clip: AudioClip | null | undefined) {
+  return clip?.spectral ?? null
+}
+
+export function selectGenerator(store: { project: Project; generatorState(): GeneratorSettings; scaleState(): ScaleState }) {
+  const scale = store.scaleState()
+  return {
+    project: store.project,
+    settings: store.generatorState(),
+    scale,
+    scaleId: activeScaleId(store.project),
+    tempo: store.project.tempo,
+    timeSignature: store.project.timeSignature,
+    tracks: store.project.tracks,
+  }
+}
+
+export function selectPlayers(store: { project: Project }) {
+  return {
+    settings: normalizePlayer(store.project.players),
+    follow: followSource(store.project),
+  }
+}
+
 export function selectKnock(store: { project: Project }) {
   const track = store.project.tracks.find((item) => item.type === 'midi' && item.rack?.devices.some((device) => device.kind === 'knock')) ?? null
   const device = track?.rack?.devices.find((item) => item.kind === 'knock') ?? null
   return { project: store.project, track, device, tempo: store.project.tempo }
+}
+
+/** MIDI reads. Writes go through ProjectStore so the undo journal and every screen stay in step. */
+
+export function selectMidiMaps(project: Project): MidiMapEntry[] {
+  return project.midiMaps ?? []
+}
+
+export function selectMidiOut(project: Project): MidiOutSettings {
+  return { ...defaultMidiOut(), ...(project.midiOut || {}) }
+}
+
+export function selectLiveCapture(project: Project): LiveCaptureSettings {
+  return { ...defaultLiveCapture(), ...(project.liveCapture || {}) }
+}
+
+export function selectTrackFx(track: Track | null | undefined): MidiFx[] {
+  return sanitizeFx(track?.midiFx)
+}
+
+export function selectAudioRoutes(project: Project): AudioRoute[] {
+  return planAudioRoutes(project.tracks)
+}
+
+export function selectMidiRoutes(project: Project): MidiRoute[] {
+  return planMidiRoutes(project.tracks)
+}
+
+export function selectSavedMaps(project: Project): MidiMapEntry[] {
+  return sanitizeMaps(project.midiMaps)
+}
+
+/** Sound browser. Favorites live on the project so every screen and device sees them. */
+export function selectSounds(store: { project: Project; selectedTrackId: string | null }) {
+  const tracks = store.project.tracks.filter((track) => track.type === 'audio')
+  const selected = tracks.find((track) => track.id === store.selectedTrackId) ?? tracks[0] ?? null
+  return {
+    favorites: store.project.soundFavorites ?? [],
+    tempo: store.project.tempo,
+    sampleRate: store.project.sampleRate,
+    tracks,
+    trackId: selected?.id ?? null,
+    trackName: selected?.name ?? '',
+  }
+}
+
+/**
+ * Song form for Unstuck, generators, and any other screen.
+ * These read the shared project. They do not keep a second copy.
+ */
+export function selectSections(project: Project): SongSection[] {
+  return orderedSections(project)
+}
+
+export function selectMarkers(project: Project): SongSection[] {
+  return orderedSections(project).filter((section) => section.kind === 'marker' || section.durationBeats <= 0)
+}
+
+export function selectSongParts(project: Project): SongSection[] {
+  return orderedSections(project).filter((section) => section.kind !== 'marker' && section.durationBeats > 0)
+}
+
+/** Smallest section that contains this quarter-note beat, if any. */
+export function selectSectionAt(project: Project, beat: number): SongSection | null {
+  const hits = selectSongParts(project).filter((section) => beat >= section.startBeat - 1e-6 && beat < section.startBeat + section.durationBeats)
+  hits.sort((a, b) => a.durationBeats - b.durationBeats)
+  return hits[0] ?? null
+}
+
+export function selectTempoMap(project: Project): TempoPoint[] {
+  return projectTempoMap(project).map((point) => ({ ...point }))
+}
+
+export function selectMeterMap(project: Project): MeterChange[] {
+  return meterChanges(project).map((change) => ({ ...change }))
 }

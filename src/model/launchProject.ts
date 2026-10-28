@@ -1,3 +1,4 @@
+import { normalizePlayer } from '../players/settings'
 import { normalizeScale } from './scale'
 import { createEmptyProject, defaultRecord, type PluginInstance, type Project, type Track } from './types'
 
@@ -64,6 +65,8 @@ function signature(project: Project): string {
     launchQuant: project.launchQuant ?? '1bar',
     recordBars: project.recordBars ?? 4,
     tempoMap: project.tempoMap ?? [],
+    meterMap: project.meterMap ?? [],
+    sections: project.sections ?? [],
     waveforms: project.waveforms ?? {},
     automation: project.automation ?? [],
     presets: project.presets ?? [],
@@ -75,6 +78,8 @@ function signature(project: Project): string {
     masterPlugins: meaningfulPlugins(project.masterPlugins ?? []),
     record,
     scale: normalizeScale(project.scale),
+    soundFavorites: project.soundFavorites ?? [],
+    players: normalizePlayer(project.players),
     tracks: project.tracks.map(trackSignature),
   })
 }
