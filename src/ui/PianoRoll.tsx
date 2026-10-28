@@ -21,6 +21,9 @@ import { EDITOR_TOOL_KEYS, activeTool, setActiveTool, subscribeTools, toolCursor
 import { selectPiano, selectScale } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { samplesToBeats } from '../model/time'
+import { projectSampleBeat } from '../model/tempoMap'
+import { keyCommitsNote } from '../model/stepEntry'
+import { displayedPlayhead, pianoPlayheadBeat } from '../model/transportSync'
 import { PIANO_BAR, PIANO_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
 import { attachGlissando } from './glissando'
@@ -73,6 +76,24 @@ export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { s
   const [box, setBox] = useState<{ a: number; b: number; p0: number; p1: number } | null>(null)
   const [viewRev, setViewRev] = useState(0)
   const [notesOpen, setNotesOpen] = useState(false)
+  const [head, setHead] = useState(engine.positionSamples)
+  const [rolling, setRolling] = useState(engine.status === 'playing' || engine.status === 'recording')
+  useEffect(() => engine.subscribe(() => {
+    setHead(engine.positionSamples)
+    setRolling(engine.status === 'playing' || engine.status === 'recording')
+  }), [engine])
+  const followPlayhead = store.midiEditor().follow
+  useEffect(() => {
+    if (!followPlayhead || !rolling || !clip) return
+    const rollNode = rollRef.current
+    if (!rollNode) return
+    const beat = pianoPlayheadBeat(projectSampleBeat(store.project, displayedPlayhead(head, store.project)), clip)
+    if (beat == null) return
+    const x = beat * pxRef.current
+    const view = rollNode.clientWidth
+    const left = rollNode.scrollLeft
+    if (x < left + 40 || x > left + view - 48) rollNode.scrollLeft = Math.max(0, x - view * 0.35)
+  }, [followPlayhead, rolling, head, clip, store])
   const compact = useFormFactor() !== 'desk'
   const rowRef = useRef(row)
   const pxRef = useRef(pxBeat)
@@ -231,6 +252,7 @@ export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { s
     const still = [...fingers.current.values()].some((item) => item.pitch === held.pitch)
     if (!still) engine.liveNoteOff(held.pitch)
     const playing = engine.status === 'playing' || engine.status === 'recording'
+    if (!keyCommitsNote(store.midiEditor().stepInput)) return
     const start = playing ? performanceBeat(store, engine, held.eventMs) : timelineBeat(store, engine)
     const end = playing ? performanceBeat(store, engine, event.timeStamp) : start
     const elapsed = Math.max(0, event.timeStamp - held.eventMs) / 1000 * (store.project.tempo / 60)
@@ -397,6 +419,10 @@ export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { s
         return
       }
       if (key === 'q' && api.current.quantize()) event.stopImmediatePropagation()
+      if (key === 'i' && !meta) {
+        event.preventDefault()
+        store.setMidiEditor({ stepInput: !store.midiEditor().stepInput })
+      }
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
@@ -668,6 +694,20 @@ export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { s
           ))}
         </select>
         <TipButton className={scale.snap ? 'on' : ''} label={bar('snap').label} hint={bar('snap').hint} pressed={scale.snap} onClick={() => store.setScale({ snap: !scale.snap })} />
+        <TipButton
+          className={store.midiEditor().stepInput ? 'on' : ''}
+          label="Step input"
+          hint="Keys write a note at the playhead. Off, they only play the sound. Shortcut I."
+          pressed={store.midiEditor().stepInput}
+          onClick={() => store.setMidiEditor({ stepInput: !store.midiEditor().stepInput })}
+        />
+        <TipButton
+          className={store.midiEditor().follow ? 'on' : ''}
+          label="Follow"
+          hint="Scroll the piano roll to keep the playhead in view while playing."
+          pressed={store.midiEditor().follow}
+          onClick={() => store.setMidiEditor({ follow: !store.midiEditor().follow })}
+        />
         {!compact && onLibrary && (
           <TipButton label={scale.library ? (findScale(scale.library)?.name ?? 'Scale') : 'Library'} hint="Browse scales, modes, and the chords they contain." onClick={onLibrary} />
         )}
@@ -805,6 +845,11 @@ export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { s
                 if (![1, 3, 6, 8, 10].includes(pitch % 12)) return null
                 return <div key={pitch} style={{ position: 'absolute', left: 0, right: 0, top: index * row, height: row, background: 'rgba(0,0,0,0.18)', pointerEvents: 'none' }} />
               })}
+              {(() => {
+                const at = pianoPlayheadBeat(projectSampleBeat(store.project, displayedPlayhead(head, store.project)), clip)
+                if (at == null) return null
+                return <div className="roll-playhead" data-playhead="piano" style={{ left: at * pxBeat }} />
+              })()}
               {notes.map((note) => {
                 const noteWidth = Math.max(8, note.durationBeats * pxBeat)
                 const fine = note.fine || 0

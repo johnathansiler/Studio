@@ -1328,6 +1328,7 @@ async function importDropped(files: FileList) {
           <ToolBar
             context={panel === 'piano' ? 'piano' : 'arrange'}
             compact={form !== 'desk'}
+            phone={phone}
             onChange={(tool) => store.setTool(tool)}
             onDuplicate={() => store.duplicateSelection()}
             onDelete={() => store.deleteSelectedClip()}

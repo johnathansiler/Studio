@@ -161,3 +161,24 @@
   body.printing-score .me-bar { display: none !important; }
   body.printing-score .me-staff { overflow: visible; background: white; }
 }
+
+.roll-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #e0b15a;
+  pointer-events: none;
+  z-index: 5;
+}
+.roll-playhead::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -5px;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid #e0b15a;
+}
+.scale-bar button.on { background: var(--accent); color: var(--accent-ink); }

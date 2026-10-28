@@ -1,5 +1,104 @@
 /* Session dock stays out of Arrange until the user opens it. Clip edges stay grabbable. */
 
+.arrange-setup { display: flex; flex-direction: column; min-width: 0; border-bottom: 1px solid var(--line); background: #141c18; }
+.setup-btn {
+  align-self: flex-start;
+  min-height: 44px;
+  min-width: 44px;
+  margin: 4px 8px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #18231d;
+  color: var(--text);
+  font-size: 14px;
+}
+.setup-btn.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.arrange-setup-body { display: flex; flex-direction: column; gap: 6px; padding: 0 8px 8px; max-height: 42vh; overflow: auto; }
+.arrange-setup-body .map-head { height: auto; overflow: visible; }
+.arrange-setup-body .rec-bar { flex-wrap: wrap; }
+
+.shell.phone .arrange { --map-h: 0px; --ruler-h: 44px; }
+.shell.phone .song-map { display: none; }
+.shell.phone .heads { overflow-x: hidden; }
+.shell.phone .head { overflow: hidden; min-width: 0; }
+.shell.phone .head header { min-width: 0; }
+.shell.phone .head input.name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell.phone .head .row { flex-wrap: nowrap; min-width: 0; }
+.shell.phone .head .mini {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  flex: none;
+}
+
+.loop-toggle {
+  position: sticky;
+  left: 4px;
+  z-index: 6;
+  top: 6px;
+  height: 22px;
+  min-height: 22px;
+  margin: 4px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #101814;
+  color: var(--muted);
+  font-size: 11px;
+}
+.loop-toggle.on { background: #2f6b45; color: white; border-color: transparent; }
+.loop-bar {
+  position: absolute;
+  top: 0;
+  height: 8px;
+  background: rgba(115, 196, 143, 0.28);
+  border-bottom: 2px solid rgba(115, 196, 143, 0.45);
+  pointer-events: none;
+  z-index: 4;
+}
+.loop-bar.on { background: rgba(115, 196, 143, 0.72); border-bottom-color: #73c48f; }
+.loop-handle {
+  position: absolute;
+  top: 0;
+  width: 14px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: #73c48f;
+  color: transparent;
+  pointer-events: auto;
+  cursor: ew-resize;
+}
+.loop-handle.end { right: 0; }
+.shell.phone .loop-toggle { height: 36px; min-height: 36px; font-size: 13px; }
+.shell.phone .loop-handle { width: 22px; }
+
+.shell.phone:not(.land) .tool-slot .timeline-tools button {
+  width: auto;
+  min-width: 52px;
+  height: 44px;
+  padding: 0 8px;
+  gap: 4px;
+}
+.tool-label { display: none; font-size: 12px; font-weight: 640; }
+.shell.phone:not(.land) .tool-label { display: inline; }
+.shell.phone:not(.land) .tool-slot .timeline-tools { flex-wrap: nowrap; overflow-x: auto; }
+.shell.phone:not(.land) .tool-chip {
+  flex: 1 1 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .workspace.session-closed,
 .shell.fold .workspace.session-closed,
 .shell:not(.phone) .workspace.session-closed,

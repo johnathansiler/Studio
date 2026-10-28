@@ -39,8 +39,7 @@ function usePlaySample(engine: RackEngine) {
   useEffect(() => {
     if (!engine.subscribe) return
     const read = () => {
-      const playing = engine.status === 'playing' || engine.status === 'recording'
-      setLive(playing && engine.currentTimelineSample ? engine.currentTimelineSample() : engine.positionSamples)
+      setLive(engine.positionSamples)
     }
     read()
     return engine.subscribe(read)

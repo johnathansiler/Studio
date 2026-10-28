@@ -9,6 +9,7 @@ import { DRUM_PADS, residentDrums, type ResidentDrum } from '../model/drums'
 import { calibrationTrim, contextTimeForEvent, monitoringOffset, type ClockStamp } from '../model/midiClock'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
 import { arrangementEndSample, beatSpanSamples, clickAccent, clickAtOrAfter, meterAtSample, nextClickAfter, projectSampleBeat, tempoAtSample } from '../model/tempoMap'
+import { transportSample } from '../model/transportSync'
 import { beatsToSamples, samplesPerBeatUnit, samplesToBeats } from '../model/time'
 import { matchBufferRate, PatchHost, renderPatchSpan } from '../instruments/patch'
 import { RackHost } from './rack/host'
@@ -1471,14 +1472,10 @@ export class AudioEngine {
       const project = this.project
       if (
         project &&
-        this.mode === 'arrangement' &&
         project.loopEnabled &&
         (this.status === 'playing' || (this.status === 'recording' && project.record?.loop))
       ) {
-        const len = project.loopEndSample - project.loopStartSample
-        if (len > 1 && sample >= project.loopEndSample) {
-          sample = project.loopStartSample + ((sample - project.loopStartSample) % len)
-        }
+        sample = transportSample(sample, project)
       }
       this.positionSamples = Math.max(0, sample)
       if (project && this.mode === 'arrangement' && !project.loopEnabled && this.status === 'playing') {
@@ -1773,7 +1770,7 @@ export class AudioEngine {
       const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
       if (!pattern) continue
       for (const hit of renderPattern(pattern, 0, clip.lengthBeats)) {
-        if ((hit.output || midiId) !== trackId) continue
+        if ((hit.output || clip.trackId || midiId) !== trackId) continue
         const span = beatSpanSamples(project, clip.startBeat + hit.startBeat, hit.durationBeats)
         if (span.start < timelineStart || span.start >= timelineEnd) continue
         const when = ctxTime + (span.start - timelineStart) / this.sampleRate

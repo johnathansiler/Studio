@@ -53,14 +53,14 @@ function SessionBody({
   const editClip = editTrack && edit ? sceneClip(editTrack, edit.scene) : null
   const compact = useFormFactor() !== 'desk'
   const [clipOpen, setClipOpen] = useState(false)
-  const [now, setNow] = useState(() => engine.currentTimelineSample())
+  const [now, setNow] = useState(() => engine.positionSamples)
   const bar = (id: string) => copyOf(SESSION_BAR, id)
   const sheet = (id: string) => copyOf(SESSION_SHEET, id)
   const rolling = engine.status === 'playing' || engine.status === 'recording' || engine.status === 'counting-in'
   useEffect(() => {
     let frame = 0
     const tick = () => {
-      setNow(engine.currentTimelineSample())
+      setNow(engine.positionSamples)
       frame = window.requestAnimationFrame(tick)
     }
     frame = window.requestAnimationFrame(tick)

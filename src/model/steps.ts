@@ -57,6 +57,8 @@ export interface PatternClip {
   lengthBeats: number
   /** Session scene, when placed in a clip slot. */
   scene: number | null
+  /** Arrangement track this clip lives on. Place uses the Drums track. */
+  trackId?: string
 }
 
 export interface RenderedHit {
@@ -153,10 +155,10 @@ export function hitsInRange(
         volume: channel.volume,
         pitch: channel.note + (cell.pitch || 0),
         fine: cell.fine || 0,
-        pan: Math.max(-1, Math.min(1, channel.pan + (cell.pan || 0))),
+        pan: Math.max(-1, Math.min(1, cell.pan || 0)),
         startBeat: start,
         durationBeats: span * gate,
-        velocity: Math.max(0.05, Math.min(1, (cell.velocity || 0.8) * channel.volume)),
+        velocity: Math.max(0.05, Math.min(1, cell.velocity || 0.8)),
       })
     }
   }

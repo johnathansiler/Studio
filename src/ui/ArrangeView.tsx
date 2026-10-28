@@ -155,6 +155,20 @@ export function ArrangeView({
     return ((clientX - inner.getBoundingClientRect().left) / pxRef.current) * project.sampleRate
   }
 
+  function dragLoop(event: ReactPointerEvent, edge: 'start' | 'end') {
+    event.stopPropagation()
+    event.preventDefault()
+    const move = (ev: PointerEvent) => {
+      const sample = Math.max(0, snapSampleToMap(sampleAt(ev.clientX), project))
+      const start = edge === 'start' ? sample : project.loopStartSample
+      const end = edge === 'end' ? sample : project.loopEndSample
+      const orderedStart = Math.min(start, end)
+      const orderedEnd = Math.max(start, end, orderedStart + 1)
+      store.setLoop(true, orderedStart, orderedEnd, true)
+    }
+    watch(move, () => store.endDraft())
+  }
+
   function pointAt(clientX: number, clientY: number) {
     const inner = innerRef.current
     if (!inner) return { x: 0, y: 0 }
@@ -349,7 +363,10 @@ export function ArrangeView({
     )
   }
 
-  const touch = useFormFactor() !== 'desk'
+  const form = useFormFactor()
+  const phone = form === 'phone'
+  const touch = form !== 'desk'
+  const [setupOpen, setSetupOpen] = useState(false)
   const [trackSheet, setTrackSheet] = useState<string | null>(null)
   const selected = project.tracks.flatMap((track) => track.clips.filter((clip) => clip.id === store.selectedClipId).map((clip) => ({ track, clip })))[0]
   const sheetTrack = project.tracks.find((track) => track.id === trackSheet) || null
@@ -357,12 +374,36 @@ export function ArrangeView({
   return (
     <div className="arrange-wrap">
       <SmartTempoBar store={store} />
-      <AutomationModeBar store={store} />
-      <RecordBar store={store} engine={engine} session={session} onQuickPunch={onQuickPunch} />
-      <div className="arrange" data-tool={tool}>
+      {phone ? (
+        <div className="arrange-setup">
+          <button
+            type="button"
+            className={`setup-btn ${setupOpen ? 'on' : ''}`}
+            aria-expanded={setupOpen}
+            aria-controls="arrange-setup"
+            title="Automation write mode, record options, and song markers."
+            onClick={() => setSetupOpen((open) => !open)}
+          >
+            Setup
+          </button>
+          {setupOpen && (
+            <div id="arrange-setup" className="arrange-setup-body">
+              <AutomationModeBar store={store} />
+              <RecordBar store={store} engine={engine} session={session} onQuickPunch={onQuickPunch} inline />
+              <SongMapHead store={store} position={position} />
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          <AutomationModeBar store={store} />
+          <RecordBar store={store} engine={engine} session={session} onQuickPunch={onQuickPunch} />
+        </>
+      )}
+      <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'}>
       <div className="heads">
         <div className="ruler-gap">
-          <SongMapHead store={store} position={position} />
+          <SongMapHead store={store} position={position} compact={phone} />
         </div>
         {project.tracks.map((track) => (
           <div className="head" data-track={track.id} key={track.id} style={rowHeight(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => store.selectTrack(track.id)}>
@@ -397,12 +438,14 @@ export function ArrangeView({
               )}
             </header>
             <div className="row">
-              <MixFlags store={store} trackId={track.id} />
-              {track.type === 'audio' && <AutoTuneTrackButton store={store} trackId={track.id} />}
-              <button type="button" className={`mini auto-open ${store.openLanes[track.id] ? 'on' : ''}`} aria-pressed={!!store.openLanes[track.id]} aria-label="Automation lane" title="Show the automation lane for this track." onClick={(event) => { event.stopPropagation(); store.toggleAutomation(track.id) }}>
-                Auto
-              </button>
-              {(track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
+              <MixFlags store={store} trackId={track.id} compact={phone} />
+              {!phone && track.type === 'audio' && <AutoTuneTrackButton store={store} trackId={track.id} />}
+              {!phone && (
+                <button type="button" className={`mini auto-open ${store.openLanes[track.id] ? 'on' : ''}`} aria-pressed={!!store.openLanes[track.id]} aria-label="Automation lane" title="Show the automation lane for this track." onClick={(event) => { event.stopPropagation(); store.toggleAutomation(track.id) }}>
+                  Auto
+                </button>
+              )}
+              {!phone && (track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
                 <TipButton className={`mini ${track.armed ? 'on-r' : ''}`} label={copyOf(TRACK_ROW, 'arm').label} hint={track.type === 'midi' ? 'Record this instrument from its MIDI input.' : copyOf(TRACK_ROW, 'arm').hint} pressed={track.armed} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
                   R
                 </TipButton>
@@ -485,6 +528,43 @@ export function ArrangeView({
         <div className="timeline-inner" ref={innerRef} data-px={px} style={{ width }}>
           <SongMap store={store} px={px} width={width} onSeek={onSeek} />
           <div className="ruler" onClick={seekFromEvent}>
+            <button
+              type="button"
+              className={`loop-toggle ${project.loopEnabled ? 'on' : ''}`}
+              aria-pressed={project.loopEnabled}
+              title="Repeat the highlighted region."
+              onClick={(event) => { event.stopPropagation(); store.toggle('loopEnabled') }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              Loop
+            </button>
+            <div
+              className={`loop-bar ${project.loopEnabled ? 'on' : ''}`}
+              data-loop={project.loopEnabled ? 'on' : 'off'}
+              style={{
+                left: (project.loopStartSample / project.sampleRate) * px,
+                width: Math.max(8, ((project.loopEndSample - project.loopStartSample) / project.sampleRate) * px),
+              }}
+            >
+              <button
+                type="button"
+                className="loop-handle"
+                data-edge="start"
+                aria-label="Loop start. Drag to move the start of the loop."
+                title="Loop start. Drag to move the start of the loop."
+                onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => dragLoop(event, 'start')}
+              />
+              <button
+                type="button"
+                className="loop-handle end"
+                data-edge="end"
+                aria-label="Loop end. Drag to move the end of the loop."
+                title="Loop end. Drag to move the end of the loop."
+                onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => dragLoop(event, 'end')}
+              />
+            </div>
             {marks.map((mark) =>
               mark.downbeat ? (
                 <span key={mark.beat} style={{ left: pxAtBeat(project, mark.beat, px) }}>
@@ -598,9 +678,8 @@ export function ArrangeView({
                   </div>
                 )
               })}
-              {track.id === project.tracks.find((item) => item.type === 'midi')?.id &&
-                (project.patternClips ?? [])
-                  .filter((clip) => clip.scene == null)
+              {(project.patternClips ?? [])
+                  .filter((clip) => clip.scene == null && (clip.trackId ? clip.trackId === track.id : track.id === project.tracks.find((item) => item.type === 'midi')?.id))
                   .map((clip) => {
                     const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
                     const left = pxAtBeat(project, clip.startBeat, px)
@@ -624,6 +703,29 @@ export function ArrangeView({
       ) : null}
       {touch && sheetTrack && (
         <ActionSheet title={sheetTrack.name} hint="Everything else for this track." onClose={() => setTrackSheet(null)}>
+          <SheetRow
+            label={sheetTrack.soloSafe ? 'Solo safe on' : 'Solo safe'}
+            hint="Stay audible when other tracks are soloed."
+            pressed={!!sheetTrack.soloSafe}
+            onClick={() => store.updateTrack(sheetTrack.id, { soloSafe: !sheetTrack.soloSafe })}
+          />
+          <SheetRow
+            label={store.openLanes[sheetTrack.id] ? 'Hide automation' : 'Automation'}
+            hint="Show the automation lane for this track."
+            pressed={!!store.openLanes[sheetTrack.id]}
+            onClick={() => store.toggleAutomation(sheetTrack.id)}
+          />
+          {sheetTrack.type === 'audio' && (
+            <SheetRow label="Auto-Tune" hint="Add Auto-Tune on this track. It starts in key and audible." onClick={() => { setTrackSheet(null); addOrOpenAutoTune(store, sheetTrack.id) }} />
+          )}
+          {(sheetTrack.type === 'audio' || (sheetTrack.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
+            <SheetRow
+              label={sheetTrack.armed ? 'Armed' : 'Arm'}
+              hint={sheetTrack.type === 'midi' ? 'Record this instrument from its MIDI input.' : copyOf(TRACK_ROW, 'arm').hint}
+              pressed={sheetTrack.armed}
+              onClick={() => store.updateTrack(sheetTrack.id, { armed: !sheetTrack.armed })}
+            />
+          )}
           {sheetTrack.type === 'audio' && (
             <SheetRow
               label={copyOf(TRACK_SHEET, 'monitor').label}
