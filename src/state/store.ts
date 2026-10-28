@@ -56,7 +56,8 @@ import {
   type QuantizeSettings,
 } from '../model/quantize'
 import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
-import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
+import { normalizeScale, patternNotes, placePitch, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
+import { splitTuned } from '../theory'
 import {
   clonePattern,
   fillEvery,
@@ -379,7 +380,10 @@ export class ProjectStore {
       const clip = track.midiClips.find((item) => item.id === this.selectedMidiClipId)
       if (!clip) continue
       for (const note of clip.notes) {
-        if (this.selectedNoteIds.includes(note.id)) note.pitch = snapPitch(note.pitch, scale.root, scale.scale)
+        if (!this.selectedNoteIds.includes(note.id)) continue
+        const placed = placePitch(note.pitch + (note.fine || 0) / 100, scale.root, scale.scale)
+        note.pitch = placed.pitch
+        note.fine = placed.cents || undefined
       }
     }
   }
@@ -1676,8 +1680,8 @@ export class ProjectStore {
       const clip = this.track(trackId)?.midiClips.find((c) => c.id === clipId)
       if (!clip) return
       const scale = this.scaleState()
-      const pitch = scale.snap ? snapPitch(note.pitch, scale.root, scale.scale) : note.pitch
-      const next = this.inputNote(clip, { ...note, pitch, id: uid('note') })
+      const placed = scale.snap ? placePitch(note.pitch, scale.root, scale.scale) : splitTuned(note.pitch)
+      const next = this.inputNote(clip, { ...note, pitch: placed.pitch, fine: placed.cents || note.fine, id: uid('note') })
       clip.notes.push(next)
       this.selectedNoteId = next.id
       this.selectedNoteIds = [next.id]
@@ -1689,9 +1693,11 @@ export class ProjectStore {
       const note = this.track(trackId)?.midiClips.find((c) => c.id === clipId)?.notes.find((n) => n.id === noteId)
       if (!note) return
       const scale = this.scaleState()
-      const pitch = patch.pitch == null ? note.pitch : scale.snap ? snapPitch(patch.pitch, scale.root, scale.scale) : patch.pitch
+      const placed = patch.pitch == null ? null : scale.snap ? placePitch(patch.pitch, scale.root, scale.scale) : splitTuned(patch.pitch)
+      const pitch = placed ? placed.pitch : note.pitch
       if (patch.startBeat != null || patch.pitch != null) {
         Object.assign(note, moveMidiNote(note, patch.startBeat ?? note.startBeat, pitch))
+        if (placed) note.fine = placed.cents || undefined
       }
       if (patch.durationBeats != null) Object.assign(note, resizeMidiNote(note, patch.durationBeats))
       if (patch.velocity != null) note.velocity = patch.velocity
@@ -1708,6 +1714,8 @@ export class ProjectStore {
         inversion: scale.inversion,
         spread: scale.spread,
         drop2: scale.drop2,
+        drop3: scale.drop3,
+        shell: scale.shell,
         octave: scale.octave,
         voiceLead: scale.voiceLead,
         previous: scale.lastVoicing,
@@ -1744,7 +1752,14 @@ export class ProjectStore {
     let end = clip.durationBeats
     const ids: string[] = []
     for (const note of performed) {
-      const next = this.inputNote(clip, { ...note, id: uid('note'), startBeat: rel + note.startBeat })
+      const placed = splitTuned(note.pitch)
+      const next = this.inputNote(clip, {
+        ...note,
+        pitch: placed.pitch,
+        fine: placed.cents || undefined,
+        id: uid('note'),
+        startBeat: rel + note.startBeat,
+      })
       clip.notes.push(next)
       ids.push(next.id)
       end = Math.max(end, next.startBeat + next.durationBeats)

@@ -1,6 +1,6 @@
 import type { AudioEngine } from './engine'
 import { heardBeat, midiPerformanceMs, quantizeBeat, repeatIntervalBeats, repeatIntervalSeconds, type RepeatRate } from '../model/midiClock'
-import { snapPitch, type ScaleId } from '../model/scale'
+import { placePitch, type ScaleId } from '../model/scale'
 import {
   chokeTargets,
   effectiveSwing,
@@ -223,7 +223,8 @@ export class Performer {
   private soundingPitch(rawPitch: number) {
     if (this.target()?.drums) return Math.max(0, Math.min(127, rawPitch))
     const shifted = Math.max(0, Math.min(127, rawPitch + this.octave * 12))
-    return this.snap ? snapPitch(shifted, this.root, this.scale) : shifted
+    const placed = placePitch(shifted, this.root, this.scale)
+    return this.snap ? placed.pitch + placed.cents / 100 : shifted
   }
 
   private repeatSeconds() {

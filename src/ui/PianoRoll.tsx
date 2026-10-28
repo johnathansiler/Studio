@@ -3,21 +3,17 @@ import type { AudioEngine } from '../audio/engine'
 import { heardBeat } from '../model/midiClock'
 import { defaultRoll, quantizeNotes, arpeggiateSelection, humanizeNotes, snapBeat, strumSelection } from '../model/paint'
 import {
-  NOTE_NAMES,
-  SCALES,
-  diatonicPads,
   detectKey,
   inScale,
   nameChord,
-  noteName,
-  scaleTones,
-  snapPitch,
+  nearQuarter,
+  NOTE_NAMES,
+  placePitch,
   voiceChord,
   type ArpDirection,
-  type ChordSource,
   type RhythmPattern,
-  type ScaleId,
 } from '../model/scale'
+import { ScaleBrowser, ScaleSelect } from './ScaleBrowser'
 import { uid, type MidiNote } from '../model/types'
 import { EDITOR_TOOLS, EDITOR_TOOL_KEYS, activeTool, keyForTool, setActiveTool, subscribeTools } from '../state/tools'
 import type { ProjectStore } from '../state/store'
@@ -37,23 +33,6 @@ import {
   splitNotes,
   withoutNotes,
 } from './pianoEdit'
-
-const SOURCES: { id: ChordSource; name: string }[] = [
-  { id: 'triads', name: 'Triads' },
-  { id: 'sevenths', name: '7ths' },
-  { id: 'ninths', name: '9ths' },
-  { id: 'sus', name: 'Sus' },
-  { id: 'add', name: 'Add' },
-  { id: 'borrowed', name: 'Borrowed' },
-  { id: 'secondary', name: 'Secondary' },
-  { id: 'pop', name: 'Pop' },
-  { id: 'rnb', name: 'R&B' },
-  { id: 'edm', name: 'EDM' },
-  { id: 'cinematic', name: 'Film' },
-  { id: 'rock', name: 'Rock' },
-  { id: 'jazz', name: 'Jazz' },
-  { id: 'gospel', name: 'Gospel' },
-]
 
 const LOW = 48
 const HIGH = 84
@@ -257,12 +236,13 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     if (!track || !clip) return
     if (on) {
       const current = store.scaleState()
-      const next = current.snap ? snapPitch(pitch, current.root, current.scale) : pitch
+      const placed = current.snap ? placePitch(pitch, current.root, current.scale) : { pitch, cents: 0 }
+      const sounding = placed.pitch + placed.cents / 100
       const level = Math.max(0.05, Math.min(1, velocity))
       engine.unlock()
       void engine.resume()
-      engine.liveNoteOn(next, level)
-      fingers.current.set(pointerId, { pitch: next, eventMs: event.timeStamp, velocity: level })
+      engine.liveNoteOn(sounding, level)
+      fingers.current.set(pointerId, { pitch: sounding, eventMs: event.timeStamp, velocity: level })
       return
     }
     const held = fingers.current.get(pointerId)
@@ -447,9 +427,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   const span = Math.max(clip.durationBeats, 8, ...notes.map((note) => note.startBeat + note.durationBeats + 1))
   const width = span * pxBeat
   const selected = notes.filter((note) => store.selectedNoteIds.includes(note.id))
-  const chord = selected.length ? nameChord(selected.map((note) => note.pitch)) : ''
-  const pads = diatonicPads(scale.root, scale.scale, scale.source)
-  const tones = [...scaleTones(scale.root, scale.scale, 4), ...scaleTones(scale.root, scale.scale, 5)]
+  const chord = selected.length ? nameChord(selected.map((note) => note.pitch + (note.fine || 0) / 100)) : ''
   const cursor = tool === 'pan' ? 'grab' : tool === 'zoom' ? 'zoom-in' : tool === 'select' ? 'default' : 'crosshair'
 
   const onGridDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -499,7 +477,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
 
     if (tool === 'pencil') {
       const gen = ++dragGen.current
-      const pitch = scaleNow.snap ? snapPitch(at.pitch, scaleNow.root, scaleNow.scale) : at.pitch
+      const pitch = scaleNow.snap ? placePitch(at.pitch, scaleNow.root, scaleNow.scale).pitch : at.pitch
       let drawn = pencilNote(at.beat, at.beat, pitch, grid, velocity, '__pencil__')
       setGhost([...base, drawn])
       watch(gen, (ev) => {
@@ -611,7 +589,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     const originY = event.clientY
     const grid = roll.grid
     const scaleNow = store.scaleState()
-    const pitchSnap = scaleNow.snap ? (pitch: number) => snapPitch(pitch, scaleNow.root, scaleNow.scale) : undefined
+    const pitchSnap = scaleNow.snap ? (pitch: number) => placePitch(pitch, scaleNow.root, scaleNow.scale).pitch : undefined
     let latest = base
     let dirty = false
     watch(gen, (ev) => {
@@ -690,11 +668,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
             <option key={name} value={index}>{name}</option>
           ))}
         </select>
-        <select aria-label="Scale" value={scale.scale} onChange={(event) => store.setScale({ scale: event.target.value as ScaleId })}>
-          {SCALES.map((item) => (
-            <option key={item.id} value={item.id}>{item.name}</option>
-          ))}
-        </select>
+        <ScaleSelect value={scale.scale} onChange={(id) => store.setScale({ scale: id })} />
         <button type="button" className={scale.snap ? 'on' : ''} aria-pressed={scale.snap} onClick={() => store.setScale({ snap: !scale.snap })}>Snap</button>
         <button type="button" onClick={() => {
           const found = detectKey(clip.notes.map((note) => ({ pitch: note.pitch, weight: note.durationBeats })))
@@ -736,8 +710,9 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
           {Array.from({ length: HIGH - LOW + 1 }, (_, index) => {
             const pitch = HIGH - index
             const black = [1, 3, 6, 8, 10].includes(pitch % 12)
+            const tone = inScale(pitch, scale.root, scale.scale) ? 'in' : nearQuarter(pitch, scale.root, scale.scale) ? 'micro' : ''
             return (
-              <div key={pitch} data-pitch={pitch} className={`key ${black ? 'black' : ''} ${inScale(pitch, scale.root, scale.scale) ? 'in' : ''}`} style={{ height: row }}>
+              <div key={pitch} data-pitch={pitch} className={`key ${black ? 'black' : ''} ${tone}`} style={{ height: row }}>
                 {pitch % 12 === 0 ? `C${Math.floor(pitch / 12) - 1}` : ''}
               </div>
             )
@@ -793,12 +768,14 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
                 return <div key={pitch} style={{ position: 'absolute', left: 0, right: 0, top: index * row, height: row, background: 'rgba(0,0,0,0.18)', pointerEvents: 'none' }} />
               })}
               {notes.map((note) => {
+                const sounding = note.pitch + (note.fine || 0) / 100
                 const noteWidth = Math.max(8, note.durationBeats * pxBeat)
                 return (
                   <div
                     key={note.id}
                     data-note={note.id}
-                    className={`note ${store.selectedNoteIds.includes(note.id) ? 'selected' : ''} ${inScale(note.pitch, scale.root, scale.scale) ? '' : 'off'} ${note.slide ? 'slide' : ''}`}
+                    className={`note ${store.selectedNoteIds.includes(note.id) ? 'selected' : ''} ${inScale(sounding, scale.root, scale.scale) ? '' : 'off'} ${note.slide ? 'slide' : ''} ${note.fine ? 'micro' : ''}`}
+                    title={note.fine ? nameChord([sounding]) : undefined}
                     style={{ left: note.startBeat * pxBeat, width: noteWidth, top: (HIGH - note.pitch) * row, height: Math.max(12, row - 2), cursor: tool === 'select' ? 'grab' : 'inherit' }}
                     onPointerMove={(event) => {
                       if (tool !== 'select') return
@@ -845,36 +822,26 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
       </div>
       {open && (
         <div className="chord-sheet">
-          <div className="chord-top">
-            <select aria-label="Chord set" value={scale.source} onChange={(event) => store.setScale({ source: event.target.value as ChordSource })}>
-              {SOURCES.map((item) => (
-                <option key={item.id} value={item.id}>{item.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="chord-pads">
-            {pads.map((pad, index) => (
-              <button key={`${pad.label}-${index}`} type="button" onClick={() => playPadNotes(store, engine, track.id, clip.id, pad.pitches)}>{pad.label}</button>
-            ))}
-          </div>
-          <div className="scale-keys">
-            {tones.map((pitch) => (
-              <button key={pitch} type="button" data-pitch={pitch}>
-                {noteName(pitch)}{Math.floor(pitch / 12) - 1}
-              </button>
-            ))}
-          </div>
+          <ScaleBrowser
+            store={store}
+            playhead={() => timelineBeat(store, engine)}
+            beatOnRoll={(x, y) => {
+              const hit = document.elementFromPoint(x, y)
+              if (!hit?.closest('.roll')) return null
+              const rect = gridRef.current?.getBoundingClientRect()
+              if (!rect) return null
+              let local = Math.max(0, (x - rect.left) / Math.max(1, pxRef.current))
+              const grid = roll.grid
+              if (grid > 0) local = Math.round(local / grid) * grid
+              return clip.startBeat + local
+            }}
+            onPlace={(pitches, drop) => {
+              const target = drop?.trackId ? drop : { beat: drop?.beat ?? timelineBeat(store, engine), trackId: track.id, clipId: clip.id }
+              playPadNotes(store, engine, target.trackId, target.clipId, pitches, target.beat)
+            }}
+          />
           <details className="chord-depth">
-            <summary>More</summary>
-            <label>Inv
-              <select aria-label="Inversion" value={scale.inversion} onChange={(event) => store.setScale({ inversion: Number(event.target.value) })}>
-                {[0, 1, 2, 3].map((value) => <option key={value} value={value}>{value}</option>)}
-              </select>
-            </label>
-            <button type="button" className={scale.spread ? 'on' : ''} onClick={() => store.setScale({ spread: !scale.spread })}>Spread</button>
-            <button type="button" className={scale.drop2 ? 'on' : ''} onClick={() => store.setScale({ drop2: !scale.drop2 })}>Drop2</button>
-            <button type="button" className={scale.octave ? 'on' : ''} onClick={() => store.setScale({ octave: !scale.octave })}>Octave</button>
-            <button type="button" className={scale.voiceLead ? 'on' : ''} onClick={() => store.setScale({ voiceLead: !scale.voiceLead })}>Lead</button>
+            <summary>Pattern</summary>
             <select aria-label="Arp" value={scale.arp} onChange={(event) => store.setScale({ arp: event.target.value as ArpDirection })}>
               {(['off', 'up', 'down', 'upDown', 'random'] as const).map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
@@ -903,19 +870,21 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   )
 }
 
-function playPadNotes(store: ProjectStore, engine: AudioEngine, trackId: string, clipId: string, pitches: number[]) {
+function playPadNotes(store: ProjectStore, engine: AudioEngine, trackId: string, clipId: string | null, pitches: number[], beat: number) {
   engine.unlock()
   const current = store.scaleState()
   const voiced = voiceChord(pitches, {
     inversion: current.inversion,
     spread: current.spread,
     drop2: current.drop2,
+    drop3: current.drop3,
+    shell: current.shell,
     octave: current.octave,
     voiceLead: current.voiceLead,
     previous: current.lastVoicing,
   })
   engine.previewPitches(voiced)
-  store.insertPerformance(trackId, clipId, timelineBeat(store, engine), pitches)
+  store.insertPerformance(trackId, clipId, beat, pitches)
 }
 
 function performanceBeat(store: ProjectStore, engine: AudioEngine, eventMs: number) {

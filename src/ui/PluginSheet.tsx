@@ -160,9 +160,9 @@ function ParamControl({ id, min, max, value, onChange }: { id: string; min: numb
     return (
       <select value={Math.round(value)} onChange={(event) => onChange(Number(event.target.value))}>
         <option value={-1}>Project</option>
-        {SCALES.map((scale, index) => (
+        {SCALES.map((scale, index) => index < 19 ? (
           <option key={scale.id} value={index}>{scale.name}</option>
-        ))}
+        ) : null)}
       </select>
     )
   }

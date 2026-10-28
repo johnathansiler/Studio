@@ -86,12 +86,27 @@ function nearestAllowed(midi: number, params: Record<string, number>, ctx: Block
   const root = (params.root ?? -1) >= 0 ? Math.round(params.root) : ctx.scaleRoot
   const scaleIndex = Math.round(params.scaleIndex ?? -1)
   const intervals: readonly number[] = scaleIndex >= 0 && SCALES[scaleIndex] ? SCALES[scaleIndex].intervals : ctx.scaleIntervals
+  const micro = intervals.some((interval) => Math.abs(interval - Math.round(interval)) > 0.001)
   let best = Math.round(midi)
   let bestDist = 99
-  for (let note = Math.floor(midi) - 3; note <= Math.ceil(midi) + 3; note++) {
-    const pc = pitchClass(note)
-    const rel = ((pc - root) % 12 + 12) % 12
-    const allowed = mask > 0 ? (mask & (1 << pc)) !== 0 : chromatic ? true : intervals.some((interval) => interval === rel)
+  if (!micro) {
+    for (let note = Math.floor(midi) - 3; note <= Math.ceil(midi) + 3; note++) {
+      const pc = pitchClass(note)
+      const rel = ((pc - root) % 12 + 12) % 12
+      const allowed = mask > 0 ? (mask & (1 << pc)) !== 0 : chromatic ? true : intervals.some((interval) => interval === rel)
+      if (!allowed) continue
+      const dist = Math.abs(note - midi)
+      if (dist < bestDist || (dist === bestDist && note < best)) {
+        best = note
+        bestDist = dist
+      }
+    }
+    return best
+  }
+  for (let step = Math.floor((midi - 3) * 2); step <= Math.ceil((midi + 3) * 2); step++) {
+    const note = step / 2
+    const rel = (((note - root) % 12) + 12) % 12
+    const allowed = intervals.some((interval) => Math.abs(interval - rel) < 0.02 || Math.abs(interval - (rel - 12)) < 0.02)
     if (!allowed) continue
     const dist = Math.abs(note - midi)
     if (dist < bestDist || (dist === bestDist && note < best)) {

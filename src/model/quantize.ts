@@ -1,5 +1,6 @@
 import { renderClipChannels } from '../audio/stretch/engine'
-import { snapPitch, type ScaleId } from './scale'
+import { isMicrotonal } from '../theory'
+import { placePitch, type ScaleId } from './scale'
 import { STEP_BEAT, emptyCell, type StepCell, type StepChannel } from './steps'
 import { beatsToSamples, samplesToBeats } from './time'
 import type { AudioClip, ClipStretch, MidiNote, Project, WarpMarker } from './types'
@@ -236,7 +237,12 @@ export function quantizeMidi(notes: MidiNote[], raw: QuantizeSettings, ctx: Quan
     }
     note.startBeat = Math.max(0, start)
     note.durationBeats = Math.max(0.01, end - note.startBeat)
-    if (settings.scaleSnap && ctx.scale) note.pitch = snapPitch(note.pitch, ctx.root ?? 0, ctx.scale)
+    if (settings.scaleSnap && ctx.scale) {
+      const placed = placePitch(note.pitch + (note.fine || 0) / 100, ctx.root ?? 0, ctx.scale)
+      note.pitch = placed.pitch
+      if (placed.cents) note.fine = placed.cents
+      else if (isMicrotonal(ctx.scale)) note.fine = undefined
+    }
   }
   if (settings.velocity === 'fixed') {
     for (const note of active) note.velocity = nearestEighth(note.velocity)

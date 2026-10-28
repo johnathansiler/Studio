@@ -3,7 +3,8 @@ import { Performer, pointerVelocity, type PerformTarget } from '../audio/perform
 import type { AudioEngine } from '../audio/engine'
 import { DRUM_PADS, renderDrum } from '../model/drums'
 import type { RepeatRate } from '../model/midiClock'
-import { NOTE_NAMES, SCALES, type ScaleId } from '../model/scale'
+import { NOTE_NAMES, type ScaleId } from '../model/scale'
+import { ScaleSelect } from './ScaleBrowser'
 import { BANKS, gridPitch, PAD_MACROS, sixteenLevels, type GridLayout, type LevelSpread, type PadVoice, type StepCondition } from '../model/padMachine'
 import { decodeWavPCM } from '../model/wav'
 import type { ProjectStore } from '../state/store'
@@ -331,9 +332,7 @@ export function PerformPop({
           <select aria-label="Key" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
             {NOTE_NAMES.map((name, index) => <option key={name} value={index}>{name}</option>)}
           </select>
-          <select aria-label="Scale" value={scale.scale} onChange={(event) => store.setScale({ scale: event.target.value as ScaleId })}>
-            {SCALES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-          </select>
+          <ScaleSelect value={scale.scale} onChange={(id) => store.setScale({ scale: id })} />
         </div>
       )}
       {drums && (
@@ -481,9 +480,7 @@ export function PerformPop({
               <select aria-label="Key" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
                 {NOTE_NAMES.map((name, index) => <option key={name} value={index}>{name}</option>)}
               </select>
-              <select aria-label="Scale" value={scale.scale} onChange={(event) => store.setScale({ scale: event.target.value as ScaleId })}>
-                {SCALES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
+              <ScaleSelect value={scale.scale} onChange={(id) => store.setScale({ scale: id })} />
               <button type="button" className={layout === 'fourths' ? 'on' : ''} onClick={() => setLayout((value) => (value === 'fourths' ? 'sequential' : 'fourths'))}>{layout === 'fourths' ? 'Fourths' : 'Sequential'}</button>
               <button type="button" className={inKey ? 'on' : ''} onClick={() => setInKey((value) => !value)}>{inKey ? 'In key' : 'Chromatic'}</button>
             </div>

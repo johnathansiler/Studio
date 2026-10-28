@@ -2001,10 +2001,11 @@ export class AudioEngine {
   liveNoteOn(pitch: number, velocity: number, drumIndex = -1, repeatEverySamples = 0, color?: PadColor) {
     if (!this.ctx) this.unlock()
     const level = Math.max(0.05, Math.min(1, velocity))
+    const fractional = Math.abs(pitch - Math.round(pitch)) > 0.001
     if (this.keysNode) {
       const every = repeatEverySamples > 0 ? repeatEverySamples : 0
       const swing = color?.swing || 0
-      if (every > 0 || color || !this.pushSab(1, pitch, level, drumIndex)) {
+      if (every > 0 || color || fractional || !this.pushSab(1, pitch, level, drumIndex)) {
         this.keysNode.port.postMessage({
           type: every > 0 ? 'repeat' : 'on',
           pitch,
@@ -2024,8 +2025,9 @@ export class AudioEngine {
   }
 
   liveNoteOff(pitch: number) {
+    const fractional = Math.abs(pitch - Math.round(pitch)) > 0.001
     if (this.keysNode) {
-      if (!this.pushSab(0, pitch, 0, -1)) this.keysNode.port.postMessage({ type: 'off', pitch })
+      if (fractional || !this.pushSab(0, pitch, 0, -1)) this.keysNode.port.postMessage({ type: 'off', pitch })
     }
     for (const shot of this.oneShots) if (shot.pitch === pitch) shot.stop()
     this.oneShots = this.oneShots.filter((shot) => shot.pitch !== pitch)
@@ -2237,8 +2239,11 @@ export class AudioEngine {
     const ctx = this.ctx
     const out = this.speakerGain
     if (!ctx || !out) return
-    const unique = [...new Set(pitches.map((pitch) => Math.round(pitch)).filter((pitch) => pitch >= 0 && pitch <= 127))]
-    if (!unique.length) return
+  const unique = pitches
+    .filter((pitch) => Number.isFinite(pitch) && pitch >= 0 && pitch <= 127)
+    .map((pitch) => Math.round(pitch * 1000) / 1000)
+    .filter((pitch, index, all) => all.indexOf(pitch) === index)
+  if (!unique.length) return
     const now = ctx.currentTime
     const bus = ctx.createGain()
     const level = 0.08 / Math.sqrt(unique.length)
@@ -2270,8 +2275,9 @@ export class AudioEngine {
     if (note.muted) return
     if (track?.rack && ctx === this.ctx) {
       const at = Math.max(when, ctx.currentTime)
-      this.rackHost.note(track.id, note.pitch, note.velocity, at, !!note.slide)
-      this.rackHost.note(track.id, note.pitch, 0, at + dur)
+      const sounding = note.pitch + (note.fine || 0) / 100
+      this.rackHost.note(track.id, sounding, note.velocity, at, !!note.slide)
+      this.rackHost.note(track.id, sounding, 0, at + dur)
       return
     }
     if (ctx === this.ctx && when < ctx.currentTime) return
