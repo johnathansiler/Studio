@@ -1,16 +1,24 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
-import { LAUNCH_QUANTS, QUANT_LABEL, sceneClip } from '../model/launch'
+import { LAUNCH_QUANTS, QUANT_LABEL, sceneClip, SESSION_SCENES } from '../model/launch'
 import { clipLoopSamples, slotDisplay } from '../model/sessionSlots'
 import {
   clipPaint,
   instrumentFor,
   midiKind,
-  parseDeviceDrag,
   sceneTitle,
   sessionPanes,
   sessionTracks,
 } from '../model/sessionBoard'
+import {
+  createsEmptyMidiClip,
+  parseSessionDrag,
+  planSessionDrop,
+  slotGesture,
+  slotLabels,
+  type SessionDrag,
+  type SessionTarget,
+} from '../model/sessionInteract'
 import type { LaunchQuant, Track } from '../model/types'
 import { selectSession } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -18,34 +26,31 @@ import { AddTrackButton } from './AddTrack'
 import { useFormFactor } from './form'
 import { dropLibrarySound, SessionBrowser, soundById } from './sessionBrowser'
 import { SessionDetail } from './sessionDetail'
+import { sessionTargetAt } from './sessionPointer'
 import './sessionGrid.css'
 import './sessionLive.css'
-
-const CLIP_DRAG = /^cueharbor-clip:([^:]+):([^:]+)$/
 
 export function SessionView({
   store,
   engine,
-  onRecord,
   onDropAudio,
 }: {
   store: ProjectStore
   engine: AudioEngine
+  /** Kept so recording stays on the transport. Slot clicks do not start a take. */
   onRecord: () => void
   onDropAudio: (trackId: string, scene: number, file: File) => void
 }) {
-  return <SessionBody key={store.project.id} store={store} engine={engine} onRecord={onRecord} onDropAudio={onDropAudio} />
+  return <SessionBody key={store.project.id} store={store} engine={engine} onDropAudio={onDropAudio} />
 }
 
 function SessionBody({
   store,
   engine,
-  onRecord,
   onDropAudio,
 }: {
   store: ProjectStore
   engine: AudioEngine
-  onRecord: () => void
   onDropAudio: (trackId: string, scene: number, file: File) => void
 }) {
   const grid = selectSession(store)
@@ -55,15 +60,21 @@ function SessionBody({
   const [detailOn, setDetailOn] = useState(panes.detail)
   const [mixerOn, setMixerOn] = useState(panes.mixer)
   const [browserW, setBrowserW] = useState(220)
-  const [detailH, setDetailH] = useState(320)
+  const [detailH, setDetailH] = useState(360)
   const [levels, setLevels] = useState<{ master: number; tracks: Record<string, number> }>({ master: 0, tracks: {} })
   const [now, setNow] = useState(() => engine.currentTimelineSample())
   const clickTimer = useRef(0)
+  const lastClick = useRef<{ key: string; at: number } | null>(null)
   const tracks = sessionTracks(grid.tracks)
   const quant = grid.project.launchQuant ?? '1bar'
   const focus = store.sessionEdit
   const focusTrack = tracks.find((track) => track.id === (focus?.trackId ?? store.selectedTrackId)) ?? tracks[0] ?? null
   const pane = !phone ? 'grid' : browserOn ? 'browser' : detailOn ? 'detail' : 'grid'
+  const rolling = engine.status === 'playing' || engine.status === 'recording' || engine.status === 'counting-in'
+  const stopping = Object.keys(store.stopAt).length > 0
+  const rows = mixerOn
+    ? `var(--sl-head) repeat(${SESSION_SCENES}, var(--sl-slot)) var(--sl-stop) minmax(188px, auto)`
+    : `var(--sl-head) repeat(${SESSION_SCENES}, var(--sl-slot)) var(--sl-stop)`
 
   useEffect(() => {
     const next = sessionPanes(phone)
@@ -90,87 +101,105 @@ function SessionBody({
     return () => window.clearInterval(id)
   }, [engine])
 
-  function recordInto(trackId: string, scene: number) {
-    store.armSlot(trackId, scene)
-    const track = store.project.tracks.find((item) => item.id === trackId)
-    if (track?.type === 'audio') {
-      for (const item of store.project.tracks) {
-        if (item.type === 'audio' && item.id !== trackId && item.armed) store.updateTrack(item.id, { armed: false })
-      }
-      store.updateTrack(trackId, { armed: true })
-    } else if (track?.type === 'midi') {
-      store.updateTrack(trackId, { armed: true, input: track.input === 'none' ? 'midi' : track.input })
-    }
-    onRecord()
-  }
-
-  function openSlot(track: Track, scene: number, clipId: string | null) {
-    window.clearTimeout(clickTimer.current)
-    if (!clipId) {
-      if (track.type === 'midi') store.prepareMidiSlot(track.id, scene)
-      else store.toast('Drop a sound here, or arm the track and click to record.', 'info')
-      store.armSlot(track.id, scene)
-      setDetailOn(true)
-      if (phone) setBrowserOn(false)
-      return
-    }
-    store.armSlot(track.id, scene)
+  function showDetail() {
     setDetailOn(true)
     if (phone) setBrowserOn(false)
   }
 
-  function clickSlot(track: Track, scene: number, clipId: string | null) {
+  function openSlot(track: Track, scene: number) {
+    window.clearTimeout(clickTimer.current)
+    const fresh = store.project.tracks.find((item) => item.id === track.id) ?? track
+    const clip = sceneClip(fresh, scene)
+    if (createsEmptyMidiClip(fresh.type, 'edit', !!clip)) {
+      store.createEmptyMidiSlot(fresh.id, scene)
+      showDetail()
+      return
+    }
+    store.armSlot(fresh.id, scene)
+    if (clip) showDetail()
+    else if (fresh.type !== 'midi') store.toast('Drop a sound here, or arm the track and record.', 'info')
+  }
+
+  function bodyClick(track: Track, scene: number) {
+    const key = `${track.id}:${scene}`
+    const at = performance.now()
+    const prev = lastClick.current
+    if (prev && prev.key === key && at - prev.at < 400) {
+      lastClick.current = null
+      openSlot(track, scene)
+      return
+    }
+    lastClick.current = { key, at }
     window.clearTimeout(clickTimer.current)
     clickTimer.current = window.setTimeout(() => {
-      if (clipId) {
-        store.armSlot(track.id, scene)
-        const clip = sceneClip(track, scene)
-        if (clip && clip.mode !== 'gate') store.launch(track.id, clip.id, engine.currentTimelineSample())
-        return
-      }
-      store.armSlot(track.id, scene)
-      if (track.armed) recordInto(track.id, scene)
-    }, 220)
+      const fresh = store.project.tracks.find((item) => item.id === track.id) ?? track
+      const clip = sceneClip(fresh, scene)
+      store.armSlot(fresh.id, scene)
+      if (clip) showDetail()
+    }, 280)
+  }
+
+  function launchSlot(track: Track, scene: number) {
+    const clip = sceneClip(track, scene)
+    if (!clip || clip.mode === 'gate') return
+    store.launch(track.id, clip.id, engine.currentTimelineSample(), 'start')
   }
 
   function stopTrack(trackId: string) {
     store.launch(trackId, null, engine.currentTimelineSample())
   }
 
-  async function onDrop(trackId: string, scene: number, event: DragEvent) {
-    event.preventDefault()
-    event.stopPropagation()
-    const text = event.dataTransfer.getData('text/plain')
-    const clipDrag = CLIP_DRAG.exec(text)
-    if (clipDrag) {
-      const from = store.project.tracks.find((item) => item.id === clipDrag[1])
-      const fromScene = from ? (from.type === 'audio' ? from.audioSlots : from.midiSlots)?.indexOf(clipDrag[2]) ?? -1 : -1
-      if (from && fromScene >= 0) store.moveClipToSlot(from.id, fromScene, trackId, scene)
-      else store.copyIntoSlot(trackId, scene, clipDrag[1], clipDrag[2])
+  async function applyPlanned(drag: SessionDrag, target: SessionTarget) {
+    const plan = planSessionDrop(drag, target)
+    if (plan.action === 'reject') {
+      store.toast(plan.reason, 'warn')
       return
     }
-    if (text.startsWith('cueharbor-sound:')) {
-      const id = text.slice('cueharbor-sound:'.length)
-      if (!soundById(id)) return
+    if (plan.action === 'place-sound') {
+      if (!soundById(plan.id)) {
+        store.toast('That sound is not in the browser yet.', 'warn')
+        return
+      }
       try {
-        await dropLibrarySound(store, trackId, scene, id)
+        await dropLibrarySound(store, plan.trackId, plan.scene, plan.id)
+        store.armSlot(plan.trackId, plan.scene)
+        showDetail()
       } catch (error) {
         store.toast(error instanceof Error ? error.message : 'Could not add that sound.', 'warn')
       }
       return
     }
-    const device = parseDeviceDrag(text)
-    if (device) {
-      applyDevice(store, trackId, device.kind, device.id)
-      store.armSlot(trackId, scene)
-      setDetailOn(true)
+    if (plan.action === 'load-instrument' || plan.action === 'add-audio-device' || plan.action === 'add-midi-device') {
+      applyDevice(store, plan.trackId, plan.action === 'load-instrument' ? 'instrument' : plan.action === 'add-audio-device' ? 'audio' : 'midi', plan.id)
+      store.armSlot(plan.trackId, 0)
+      showDetail()
       return
     }
-    const file = event.dataTransfer.files?.[0]
-    if (file) onDropAudio(trackId, scene, file)
+    const from = store.project.tracks.find((item) => item.id === plan.fromTrackId)
+    const fromScene = from ? (from.type === 'audio' ? from.audioSlots : from.midiSlots)?.indexOf(plan.clipId) ?? -1 : -1
+    if (from && fromScene >= 0) store.moveClipToSlot(from.id, fromScene, plan.trackId, plan.scene)
+    else store.copyIntoSlot(plan.trackId, plan.scene, plan.fromTrackId, plan.clipId)
+    store.armSlot(plan.trackId, plan.scene)
+    showDetail()
   }
 
-  const rolling = engine.status === 'playing' || engine.status === 'recording' || engine.status === 'counting-in'
+  function readDrop(event: DragEvent, target: SessionTarget) {
+    event.preventDefault()
+    event.stopPropagation()
+    const file = event.dataTransfer.files?.[0]
+    if (file && target.kind === 'slot') {
+      onDropAudio(target.trackId, target.scene, file)
+      return
+    }
+    const drag = parseSessionDrag(event.dataTransfer.getData('text/plain'))
+    if (drag) void applyPlanned(drag, target)
+  }
+
+  const transportNote = !rolling
+    ? ''
+    : stopping
+      ? 'Stopping clips. Transport keeps playing.'
+      : 'Stop all keeps the transport playing.'
 
   return (
     <div className="session-grid sl" data-session-view="open" data-pane={pane} data-mixer={mixerOn ? 'open' : 'closed'}>
@@ -182,7 +211,8 @@ function SessionBody({
         <button type="button" className={detailOn ? 'on' : ''} title="Show or hide clip and device details." onClick={() => { setDetailOn((value) => !value); if (phone) setBrowserOn(false) }}>Detail</button>
         <button type="button" className={mixerOn ? 'on' : ''} title="Show or hide the mixer under the clips." onClick={() => setMixerOn((value) => !value)}>Mix</button>
         {!phone && <button type="button" className="text-btn" title="Print launched clips onto the arrangement." disabled={store.remoteFollow} onClick={() => store.captureToArrangement()}>To arrangement</button>}
-        <button type="button" className="text-btn" title="Stop every clip on the next grid line." onClick={() => store.stopSession(engine.currentTimelineSample(), rolling)}>Stop all</button>
+        <button type="button" className="text-btn" title="Stop every clip on the next grid line. The transport keeps playing." onClick={() => store.stopSession(engine.currentTimelineSample(), rolling)}>{stopping ? 'Stopping' : 'Stop all'}</button>
+        {transportNote && <span className="sl-keep" role="status">{phone ? 'Transport stays on' : transportNote}</span>}
         <AddTrackButton store={store} />
       </div>
       <div className="sl-body">
@@ -191,10 +221,14 @@ function SessionBody({
             width={browserW}
             onResize={setBrowserW}
             onClose={phone ? () => setBrowserOn(false) : undefined}
+            onPointerDrop={(drag, point) => {
+              const target = sessionTargetAt(point.x, point.y)
+              if (target) void applyPlanned(drag, target)
+            }}
           />
         )}
         <div className="sl-stage">
-          <div className="sl-scroller">
+          <div className="sl-scroller" style={{ ['--sl-rows' as string]: rows }}>
             {tracks.map((track, index) => (
               <TrackColumn
                 key={track.id}
@@ -205,17 +239,24 @@ function SessionBody({
                 now={now}
                 level={levels.tracks[track.id] ?? 0}
                 mixer={mixerOn}
-                onClickSlot={clickSlot}
-                onOpenSlot={openSlot}
+                onBody={bodyClick}
+                onOpen={openSlot}
+                onLaunch={launchSlot}
                 onStop={() => stopTrack(track.id)}
-                onDrop={onDrop}
+                onDrop={readDrop}
               />
             ))}
             <div className="sl-scenes" aria-label="Scenes">
               <div className="sl-head" style={{ background: '#c8c2b4' }}>Master</div>
-              {Array.from({ length: 8 }, (_, scene) => (
-                <div key={scene} className="sl-scene">
-                  <button type="button" title={`Launch ${sceneTitle(grid.project.sceneNames, scene)}.`} aria-label={`Scene ${scene + 1}. Launch every clip in this row.`} onClick={() => store.launchScene(scene, engine.currentTimelineSample())}>
+              {Array.from({ length: SESSION_SCENES }, (_, scene) => (
+                <div key={scene} className="sl-scene" data-scene={scene}>
+                  <button
+                    type="button"
+                    data-scene-launch={scene}
+                    title={`Launch ${sceneTitle(grid.project.sceneNames, scene)}. Row ${scene + 1}.`}
+                    aria-label={`Scene ${scene + 1}. Launch every clip in row ${scene + 1}.`}
+                    onClick={() => store.launchScene(scene, engine.currentTimelineSample())}
+                  >
                     <i className="sl-tri" />
                   </button>
                   <input
@@ -227,9 +268,11 @@ function SessionBody({
                   />
                 </div>
               ))}
-              <button type="button" className="sl-stopall" title="Stop every clip on the next grid line." onClick={() => store.stopSession(engine.currentTimelineSample(), rolling)}>Stop all</button>
+              <button type="button" className="sl-stopall" title="Stop every clip on the next grid line. The transport keeps playing." onClick={() => store.stopSession(engine.currentTimelineSample(), rolling)}>
+                {stopping ? 'Stopping' : 'Stop all'}
+              </button>
               {mixerOn && (
-                <div className="sl-mix">
+                <div className="sl-mix sl-master">
                   <div className="sl-fader">
                     <input aria-label="Master volume" title="Master volume." type="range" min={0} max={1.25} step={0.01} value={grid.project.masterVolume} onChange={(event) => store.setMasterVolume(Number(event.target.value))} />
                     <div className="sl-meter" aria-hidden><i style={{ height: `${Math.min(100, levels.master * 140)}%` }} /></div>
@@ -263,8 +306,9 @@ function TrackColumn({
   now,
   level,
   mixer,
-  onClickSlot,
-  onOpenSlot,
+  onBody,
+  onOpen,
+  onLaunch,
   onStop,
   onDrop,
 }: {
@@ -275,21 +319,36 @@ function TrackColumn({
   now: number
   level: number
   mixer: boolean
-  onClickSlot: (track: Track, scene: number, clipId: string | null) => void
-  onOpenSlot: (track: Track, scene: number, clipId: string | null) => void
+  onBody: (track: Track, scene: number) => void
+  onOpen: (track: Track, scene: number) => void
+  onLaunch: (track: Track, scene: number) => void
   onStop: () => void
-  onDrop: (trackId: string, scene: number, event: DragEvent) => void
+  onDrop: (event: DragEvent, target: SessionTarget) => void
 }) {
   const project = store.project
   const playingId = store.launched[track.id]
   const trackLive = !!playingId
   const buses = project.tracks.filter((item) => item.type === 'bus')
+  const names = Array.from({ length: SESSION_SCENES }, (_, scene) => sceneClip(track, scene)?.name ?? null)
+  const labels = slotLabels(names)
+  const slotTarget = (scene: number): SessionTarget => ({ kind: 'slot', trackId: track.id, scene, trackType: track.type })
+  const headTarget: SessionTarget = { kind: 'header', trackId: track.id, trackType: track.type }
   return (
-    <div className="session-col sl-col" data-track={track.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => onDrop(track.id, store.sessionEdit?.scene ?? 0, event)}>
-      <button type="button" className="sl-head" style={{ background: track.color }} title={track.name} onClick={() => { store.selectTrack(track.id); store.armSlot(track.id, store.sessionEdit?.scene ?? 0) }}>
+    <div className="session-col sl-col" data-track={track.id}>
+      <button
+        type="button"
+        className="sl-head"
+        data-session-head={track.id}
+        data-track-type={track.type}
+        style={{ background: track.color }}
+        title={track.name}
+        onClick={() => store.selectTrack(track.id)}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => onDrop(event, headTarget)}
+      >
         <span>{track.name}</span>
       </button>
-      {Array.from({ length: 8 }, (_, scene) => {
+      {Array.from({ length: SESSION_SCENES }, (_, scene) => {
         const clip = sceneClip(track, scene)
         const hand = store.handoff[track.id]
         const phase = slotDisplay({
@@ -302,50 +361,88 @@ function TrackColumn({
           stopAt: store.stopAt[track.id],
           lengthSamples: clip ? clipLoopSamples(clip, project.sampleRate, project.tempo) : 1,
         })
+        const label = labels[scene]
         const phaseLabel = phase.phase === 'queued' ? 'Queued until the next grid line.' : phase.phase === 'playing' ? 'Playing.' : phase.phase === 'stopping' ? 'Stopping at the next grid line.' : ''
         return (
-          <button
+          <div
             key={scene}
-            type="button"
+            data-session-slot={track.id}
+            data-scene={scene}
+            data-track-type={track.type}
             data-phase={phase.phase}
+            role="button"
+            tabIndex={0}
             draggable={!!clip}
             className={`slot ${clip ? 'filled' : ''} ${phase.phase === 'playing' ? 'live' : ''} ${phase.phase === 'queued' ? 'queued' : ''} ${phase.phase === 'stopping' ? 'stopping' : ''}`}
-            style={clip ? { background: clipPaint(clip, track.color) } : undefined}
-            title={clip ? 'Click to launch on the grid. Double-click to edit.' : track.armed ? 'Empty slot. Click to record. Double-click a MIDI track to make a clip.' : 'Empty slot. Arm the track to record, or double-click a MIDI track to make a clip.'}
-            aria-label={clip ? `${clip.name}. ${phaseLabel} Click to launch.` : `${track.name} scene ${scene + 1}. Empty slot.`}
+            style={clip ? { backgroundColor: clipPaint(clip, track.color) } : undefined}
+            title={clip ? label.title : 'Empty slot. Double-click a MIDI track to make a 1-bar clip.'}
+            aria-label={clip ? `${label.title}. ${phaseLabel} Click to edit. The triangle launches.` : `${track.name} scene ${scene + 1}. Empty slot.`}
             onDragStart={(event) => {
               if (!clip) return
               event.dataTransfer.setData('text/plain', `cueharbor-clip:${track.id}:${clip.id}`)
               event.dataTransfer.effectAllowed = 'copy'
             }}
             onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => onDrop(track.id, scene, event)}
-            onDoubleClick={() => onOpenSlot(track, scene, clip?.id ?? null)}
-            onPointerDown={(event) => {
-              if (!clip || (clip.mode ?? 'toggle') !== 'gate') return
-              event.preventDefault()
-              store.launch(track.id, clip.id, engine.currentTimelineSample())
-            }}
-            onPointerUp={() => {
-              if (!clip || clip.mode !== 'gate') return
-              store.launch(track.id, null, engine.currentTimelineSample())
-            }}
+            onDrop={(event) => onDrop(event, slotTarget(scene))}
+            onDoubleClick={() => onOpen(track, scene)}
             onClick={(event) => {
-              if ((event.target as HTMLElement).closest('.sl-sq') && !clip) {
-                onStop()
-                return
-              }
-              if (clip?.mode === 'gate') return
-              onClickSlot(track, scene, clip?.id ?? null)
+              const hit = (event.target as HTMLElement).closest('[data-slot-launch], [data-slot-stop]')
+              if (hit) return
+              if (slotGesture('body', 1) === 'select') onBody(track, scene)
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') onBody(track, scene)
             }}
           >
             {(phase.phase === 'playing' || phase.phase === 'stopping') && (
               <span className="slot-progress" style={{ width: `${Math.round(phase.progress * 100)}%` }} />
             )}
-            {(phase.phase === 'queued' || phase.phase === 'playing' || phase.phase === 'stopping') && <span className="slot-mark" aria-hidden />}
-            {clip ? <i className="sl-tri" /> : <i className="sl-sq" title="Stop this track." />}
-            <span className="slot-name">{clip ? clip.name : ''}</span>
-          </button>
+            {clip ? (
+              <button
+                type="button"
+                data-slot-launch=""
+                className="sl-hit"
+                title={`Launch ${label.title}.`}
+                aria-label={`Launch ${label.title}.`}
+                onPointerDown={(event) => {
+                  if (!clip || (clip.mode ?? 'toggle') !== 'gate') return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  store.launch(track.id, clip.id, engine.currentTimelineSample(), 'start')
+                }}
+                onPointerUp={(event) => {
+                  if (!clip || clip.mode !== 'gate') return
+                  event.stopPropagation()
+                  store.launch(track.id, null, engine.currentTimelineSample())
+                }}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  if (clip.mode === 'gate') return
+                  if (slotGesture('launch', 1) === 'launch') onLaunch(track, scene)
+                }}
+                onDoubleClick={(event) => event.stopPropagation()}
+              >
+                <i className="sl-tri" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                data-slot-stop=""
+                className="sl-hit"
+                title="Stop this track."
+                aria-label={`Stop ${track.name}.`}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  if (slotGesture('stop', 1) === 'stop') onStop()
+                }}
+                onDoubleClick={(event) => event.stopPropagation()}
+              >
+                <i className="sl-sq" />
+              </button>
+            )}
+            <span className="slot-name">{label.text}</span>
+            {label.badge && <span className="slot-num">{label.badge}</span>}
+          </div>
         )
       })}
       <button
@@ -436,5 +533,6 @@ function applyDevice(store: ProjectStore, trackId: string, kind: 'audio' | 'midi
     return
   }
   const instrument = instrumentFor(id)
-  if (instrument) store.updateTrack(track.id, { instrument })
+  if (!instrument) return
+  store.updateTrack(track.id, { instrument, input: track.input === 'none' ? 'midi' : track.input })
 }

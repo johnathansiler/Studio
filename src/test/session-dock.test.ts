@@ -170,7 +170,7 @@ describe('arrange on first load', () => {
       await expect.poll(async () => slot.innerText()).toContain('Clip')
       await page.getByRole('button', { name: /^Play/ }).click()
       await page.waitForFunction(() => /1\.2\./.test(document.querySelector('.lcd .bars')?.textContent || ''), null, { timeout: 8000 })
-      await slot.click()
+      await slot.locator('[data-slot-launch]').click()
       await page.locator('.slot[data-phase="queued"]').waitFor()
       const fit = await page.evaluate(() => {
         const browser = document.querySelector('.sl-browser')!.getBoundingClientRect()

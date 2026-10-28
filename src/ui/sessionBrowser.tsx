@@ -11,7 +11,9 @@ import {
   type BrowserDevice,
   type BrowserGroup,
 } from '../model/sessionBoard'
+import { parseSessionDrag, type SessionDrag } from '../model/sessionInteract'
 import type { ProjectStore } from '../state/store'
+import { beginSessionDrag } from './sessionPointer'
 
 const GROUPS: { id: BrowserGroup; label: string; hint: string }[] = [
   { id: 'sounds', label: 'Sounds', hint: 'Loops and one-shots from the free library.' },
@@ -64,10 +66,12 @@ export function SessionBrowser({
   width,
   onResize,
   onClose,
+  onPointerDrop,
 }: {
   width: number
   onResize: (width: number) => void
   onClose?: () => void
+  onPointerDrop?: (drag: SessionDrag, point: { x: number; y: number }) => void
 }) {
   const [group, setGroup] = useState<BrowserGroup>('sounds')
   const [entries, setEntries] = useState<SoundEntry[]>([])
@@ -123,34 +127,31 @@ export function SessionBrowser({
           <button
             key={entry.id}
             type="button"
-            draggable
+            data-drag-item={entry.id}
             title={`${entry.name}. Drag onto a slot.`}
-            onDragStart={(event) => {
-              event.dataTransfer.setData('text/plain', `cueharbor-sound:${entry.id}`)
-              event.dataTransfer.effectAllowed = 'copy'
-            }}
+            onPointerDown={(event) => beginSessionDrag(event, { kind: 'sound', id: entry.id }, entry.name, (drag, point) => onPointerDrop?.(drag, point))}
           >
             {entry.name}
             <small>{entry.type}</small>
           </button>
         ))}
         {group !== 'sounds' && devices.map((item) => (
-          <DeviceRow key={`${item.kind}:${item.id}`} item={item} />
+          <DeviceRow key={`${item.kind}:${item.id}`} item={item} onPointerDrop={onPointerDrop} />
         ))}
       </div>
     </aside>
   )
 }
 
-function DeviceRow({ item }: { item: BrowserDevice }) {
+function DeviceRow({ item, onPointerDrop }: { item: BrowserDevice; onPointerDrop?: (drag: SessionDrag, point: { x: number; y: number }) => void }) {
+  const drag = parseSessionDrag(deviceDrag(item))
   return (
     <button
       type="button"
-      draggable
-      title={item.hint}
-      onDragStart={(event) => {
-        event.dataTransfer.setData('text/plain', deviceDrag(item))
-        event.dataTransfer.effectAllowed = 'copy'
+      data-drag-item={item.id}
+      title={`${item.hint} Drag onto a track header.`}
+      onPointerDown={(event) => {
+        if (drag) beginSessionDrag(event, drag, item.name, (next, point) => onPointerDrop?.(next, point))
       }}
     >
       {item.name}
