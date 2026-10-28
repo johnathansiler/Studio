@@ -39,6 +39,7 @@ export const MENU_COPY: Copy[] = [
   { id: 'pads', label: 'Pads', hint: 'Play drums on pads.' },
   { id: 'piano', label: 'Piano', hint: 'Open the piano roll for the instrument track.' },
   { id: 'generate', label: 'Generate', hint: 'Write chords, bass, melody, arp, strum, or drums onto a track.' },
+  { id: 'players', label: 'Players', hint: 'A drummer, bass, and keys that follow the song. Writes MIDI you can edit.' },
   { id: 'quantize', label: 'Quantize', hint: 'Snap the selected notes onto the grid.' },
   { id: 'quantize-more', label: 'Quantize…', hint: 'Choose the grid and how hard to snap.' },
   { id: 'click', label: 'Click', hint: 'Metronome while you play and record.' },

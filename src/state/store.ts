@@ -48,6 +48,7 @@ import type { RollTool } from '../model/paint'
 import { defaultRoll } from '../model/paint'
 import type { GeneratedPart } from '../generators/types'
 import { normalizeGenerator } from '../generators/settings'
+import { buildSession, normalizePlayer, type PlayerSettings, type SessionDetection, type SessionPart } from '../players'
 import { progressionById, romanLine, starterParts } from '../model/progressions'
 import { applySuggestion, type Suggestion } from '../unstuck'
 import {
@@ -107,6 +108,12 @@ interface QuantizeResult {
   notes: { trackId: string; clipId: string; notes: MidiNote[] }[]
   channels: { id: string; cells: StepCell[] }[]
   audio: { trackId: string; clipId: string; clip: AudioClip }[]
+}
+
+function samePlayer(name: string, role: SessionPart['role']) {
+  if (role === 'drums') return name === 'Drummer' || name.endsWith(' drummer')
+  if (role === 'bass') return name.endsWith('bass player')
+  return name.endsWith('keys player')
 }
 
 const GENERATED_COLOR: Record<GeneratedPart['kind'], string> = {
@@ -1968,6 +1975,45 @@ export class ProjectStore {
     return normalizeGenerator(this.project.generator)
   }
 
+  playerState() {
+    return normalizePlayer(this.project.players)
+  }
+
+  setPlayers(patch: Partial<PlayerSettings>, draft = false) {
+    const apply = () => {
+      this.project.players = normalizePlayer({ ...this.playerState(), ...patch })
+    }
+    if (draft) this.draft(apply)
+    else this.mutate(apply)
+  }
+
+  /** Write the drummer and session players as editable MIDI. One undo step. */
+  writeSession(found?: SessionDetection, seed?: number) {
+    if (this.remoteFollow) return
+    const settings = normalizePlayer({ ...this.playerState(), ...(seed == null ? {} : { seed }) })
+    const built = buildSession(this.project, settings, found)
+    if (!built.parts.length) {
+      this.toast('Pick drums, bass, or keys.', 'warn')
+      return
+    }
+    this.mutate(() => {
+      this.project.players = settings
+      let selected: { trackId: string; clipId: string; noteIds: string[] } | null = null
+      for (const part of built.parts) {
+        const placed = this.placePlayer(part)
+        if (part.role === 'drums' || !selected) selected = placed
+      }
+      if (selected) {
+        this.selectedTrackId = selected.trackId
+        this.selectedMidiClipId = selected.clipId
+        this.selectedMidiClipIds = [selected.clipId]
+        this.selectedNoteIds = selected.noteIds
+        this.selectedNoteId = selected.noteIds.at(-1) ?? null
+      }
+      this.toast(built.summary)
+    })
+  }
+
   setGenerator(patch: Partial<import('../generators/types').GeneratorSettings>, draft = false) {
     const apply = () => {
       this.project.generator = normalizeGenerator({ ...this.generatorState(), ...patch })
@@ -2030,6 +2076,33 @@ export class ProjectStore {
       if (part.kind === 'chords') this.project.generator = { ...this.generatorState(), chords: part.chords }
       this.toast(`Added ${part.name}`)
     })
+  }
+
+  private placePlayer(part: SessionPart) {
+    const track = this.ensureMidi(part.trackName, part.color)
+    if (part.instrument === 'drum-machine') track.instrument = 'drum-machine'
+    else if (part.instrument === '808' && (!track.instrument || track.instrument === 'none' || track.instrument === 'synth')) track.instrument = '808'
+    else if (!track.instrument || track.instrument === 'none') track.instrument = part.instrument
+    track.midiClips = track.midiClips.filter((clip) => !samePlayer(clip.name, part.role))
+    const end = part.notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), part.durationBeats)
+    const notes: MidiNote[] = part.notes.map((note) => ({
+      id: uid('note'),
+      pitch: note.pitch,
+      startBeat: note.startBeat,
+      durationBeats: note.durationBeats,
+      velocity: note.velocity,
+      ...(note.fine ? { fine: note.fine } : {}),
+      ...(note.slide ? { slide: true } : {}),
+    }))
+    const clip: MidiClip = {
+      id: uid('midi'),
+      name: part.clipName,
+      startBeat: part.startBeat,
+      durationBeats: Math.max(part.durationBeats, end),
+      notes,
+    }
+    track.midiClips.push(clip)
+    return { trackId: track.id, clipId: clip.id, noteIds: notes.map((note) => note.id) }
   }
 
   private freshName(base: string) {

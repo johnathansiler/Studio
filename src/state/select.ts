@@ -1,5 +1,6 @@
 import type { GeneratorSettings } from '../generators/types'
-import { activeScaleId } from '../generators/adapt'
+import { activeScaleId, followSource } from '../generators/adapt'
+import { normalizePlayer } from '../players/settings'
 import type { ScaleState } from '../model/scale'
 import type { QuantizeSettings } from '../model/quantize'
 import type { PluginInstance, Project, Track } from '../model/types'
@@ -151,6 +152,13 @@ export function selectGenerator(store: { project: Project; generatorState(): Gen
     tempo: store.project.tempo,
     timeSignature: store.project.timeSignature,
     tracks: store.project.tracks,
+  }
+}
+
+export function selectPlayers(store: { project: Project }) {
+  return {
+    settings: normalizePlayer(store.project.players),
+    follow: followSource(store.project),
   }
 }
 
