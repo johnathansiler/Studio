@@ -1212,7 +1212,11 @@ html[data-posture="tabletop"] .shell .master-sheet {
   width: min(960px, calc(100vw - 32px)); height: min(680px, calc(100dvh - 96px));
   border-radius: 16px; padding: 12px; min-width: 0;
 }
-.perform-pop header, .perform-pop .scale-row { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; overflow-x: auto; }
+.perform-pop header, .perform-pop .scale-row, .beat-repeat { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; overflow-x: auto; }
+.beat-repeat { flex: none; touch-action: pan-x; }
+.beat-repeat button.beat { touch-action: none; }
+.beat-repeat-hint { margin: 0; color: var(--faint); font-size: 12px; line-height: 1.35; flex: none; }
+.shell.phone.land .beat-repeat-hint { display: none; }
 .perform-pop header strong { margin-right: auto; }
 .perform-pop button, .perform-pop select {
   min-height: 44px; min-width: 44px; border-radius: 8px; border: 1px solid var(--line);
