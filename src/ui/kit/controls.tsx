@@ -171,6 +171,17 @@ export function keyboardNotes(octaves: number, start = 48) {
   return whites
 }
 
+/** Black keys sit only between C-D, D-E, F-G, G-A, and A-B. */
+export function blackAfter(note: number): number | null {
+  const pc = ((note % 12) + 12) % 12
+  if (pc === 0 || pc === 2 || pc === 5 || pc === 7 || pc === 9) return note + 1
+  return null
+}
+
+export function octaveName(note: number) {
+  return `C${Math.floor(note / 12) - 1}`
+}
+
 export function Keyboard({
   compact = false,
   onDown,
@@ -181,25 +192,28 @@ export function Keyboard({
   onUp?: (note: number) => void
 }) {
   const whites = keyboardNotes(compact ? 2 : 3, compact ? 48 : 36)
+  const top = whites[whites.length - 1]
   return (
     <div className={`kit-keys${compact ? ' compact' : ''}`} role="group" aria-label="Keyboard">
       {whites.map((note) => {
-        const pc = ((note % 12) + 12) % 12
-        const black = pc === 4 || pc === 11 ? null : note + 1
+        const black = blackAfter(note)
+        const showBlack = black != null && black < top
         return (
           <div className="slot" key={note}>
             <button
               type="button"
               className="white"
-              aria-label={`Note ${note}`}
+              aria-label={((note % 12) + 12) % 12 === 0 ? octaveName(note) : `Note ${note}`}
               onPointerDown={(event) => {
                 event.currentTarget.setPointerCapture(event.pointerId)
                 onDown?.(note)
               }}
               onPointerUp={() => onUp?.(note)}
               onPointerCancel={() => onUp?.(note)}
-            />
-            {black != null && black <= whites[whites.length - 1] && (
+            >
+              {((note % 12) + 12) % 12 === 0 ? <span>{octaveName(note)}</span> : null}
+            </button>
+            {showBlack && (
               <button
                 type="button"
                 className="black"
@@ -231,6 +245,7 @@ export function Shell({
   return (
     <section
       className={`kit-shell${compact ? ' compact' : ''} face-${theme.id}`}
+      data-family={theme.family}
       aria-label={`${theme.badge} faceplate`}
       style={{
         ['--panel' as string]: theme.panel,

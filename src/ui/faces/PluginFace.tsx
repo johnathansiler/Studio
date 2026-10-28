@@ -1,10 +1,27 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { CATALOG } from '../../audio/plugins/catalog'
 import type { ParamSpec } from '../../audio/plugins/types'
-import { Fader, Knob, Keyboard, Meter, Shell, Toggle } from '../kit/controls'
-import { decaySteps, driveShape, eqPoints, transferPoints } from './curves'
+import { Keyboard, Knob, Shell, Toggle } from '../kit/controls'
+import {
+  EQ_DB_MAX,
+  EQ_DB_MIN,
+  EQ_HZ_MAX,
+  EQ_HZ_MIN,
+  dbToY,
+  decaySteps,
+  eqGainAt,
+  driveShape,
+  eqPath,
+  freqToX,
+  transferPoints,
+  xToFreq,
+  yToDb,
+} from './curves'
 import { TOGGLE_IDS, themeFor, type FaceFamily } from './themes'
 import '../kit/kit.css'
+
+const W = 640
+const H = 220
 
 export function PluginFace({
   pluginId,
@@ -12,7 +29,6 @@ export function PluginFace({
   values,
   vu = -20,
   gr = 0,
-  spectrum,
   compact = false,
   showParams = true,
   keyboard = false,
@@ -35,16 +51,16 @@ export function PluginFace({
 }) {
   const theme = themeFor(pluginId)
   const [open, setOpen] = useState(true)
-  const toggles = params.filter((param) => TOGGLE_IDS.has(param.id) && param.max - param.min <= 1)
-  const continuous = params.filter((param) => !toggles.includes(param) && param.id !== 'mask')
-  const useFader = theme.layout !== 'knobs'
+  const family = theme.family
   return (
     <Shell theme={theme} compact={compact}>
-      <div className="kit-meters">
-        <Meter label="In" value={vu + 20} max={24} />
-        <Meter label="GR" value={gr} max={20} />
-      </div>
-      <Display family={theme.family} pluginId={pluginId} values={values} spectrum={spectrum} />
+      {family === 'eq' && <EqStage pluginId={pluginId} params={params} values={values} onChange={onChange} />}
+      {family === 'dyn' && <DynStage pluginId={pluginId} values={values} vu={vu} gr={gr} />}
+      {family === 'space' && <SpaceStage pluginId={pluginId} values={values} />}
+      {family === 'color' && <ColorStage pluginId={pluginId} values={values} vu={vu} />}
+      {family === 'mod' && <ModStage values={values} />}
+      {family === 'inst' && pluginId !== 'looper' && <InstStage pluginId={pluginId} />}
+      {family === 'util' && <UtilStage pluginId={pluginId} values={values} vu={vu} />}
       {keyboard && <Keyboard compact={compact} onDown={(note) => onNote?.(note, true)} onUp={(note) => onNote?.(note, false)} />}
       {children}
       {showParams && (
@@ -54,106 +70,380 @@ export function PluginFace({
               {open ? 'Hide' : 'Controls'}
             </button>
           )}
-          {(!compact || open) && (
-            <>
-              {toggles.length > 0 && (
-                <div className="kit-toggles">
-                  {toggles.map((param) => (
-                    <Toggle
-                      key={param.id}
-                      label={param.name}
-                      on={(values[param.id] ?? param.default) >= 0.5}
-                      onClick={() => onChange(param.id, (values[param.id] ?? param.default) >= 0.5 ? 0 : 1)}
-                    />
-                  ))}
-                </div>
-              )}
-              <div className={`kit-controls ${theme.layout}`}>
-                {continuous.map((param) => {
-                  const value = values[param.id] ?? param.default
-                  const shared = {
-                    label: param.name,
-                    min: param.min,
-                    max: param.max,
-                    value,
-                    unit: param.unit,
-                    fallback: param.default,
-                    onChange: (next: number) => onChange(param.id, next),
-                  }
-                  return useFader ? <Fader key={param.id} {...shared} /> : <Knob key={param.id} {...shared} />
-                })}
-              </div>
-            </>
-          )}
+          {(!compact || open) && <ParamLayout family={family} pluginId={pluginId} params={params} values={values} onChange={onChange} />}
         </div>
       )}
     </Shell>
   )
 }
 
-export function FaceGallery() {
+export function FaceGallery({ compact = false }: { compact?: boolean }) {
+  const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 720)
+  useEffect(() => {
+    const apply = () => setNarrow(window.innerWidth <= 720)
+    apply()
+    window.addEventListener('resize', apply)
+    return () => window.removeEventListener('resize', apply)
+  }, [])
+  const phone = compact || narrow
   return (
-    <div className="face-gallery" style={{ display: 'grid', gap: 16, padding: 16, background: '#0c110f' }}>
-      {CATALOG.filter((plugin) => plugin.id !== 'tune').map((plugin) => (
-        <div key={plugin.id} id={`face-${plugin.id}`} data-face={plugin.id}>
-          <PluginFace
-            pluginId={plugin.id}
-            params={plugin.params}
-            values={Object.fromEntries(plugin.params.map((param) => [param.id, param.default]))}
-            vu={-6}
-            gr={plugin.id === 'compressor' ? 4 : 0}
-            keyboard={plugin.id === 'sampler' || plugin.id === 'amp'}
-            onChange={() => undefined}
-          />
-        </div>
-      ))}
+    <div className="face-gallery">
+      {CATALOG.filter((plugin) => plugin.id !== 'tune').map((plugin) => {
+        const values = Object.fromEntries(plugin.params.map((param) => [param.id, param.default]))
+        Object.assign(values, GALLERY_BIAS[plugin.id] ?? {})
+        return (
+          <div key={plugin.id} id={`face-${plugin.id}`} data-face={plugin.id}>
+            <PluginFace
+              pluginId={plugin.id}
+              params={plugin.params}
+              values={values}
+              vu={plugin.id === 'meter' ? -3 : -8}
+              gr={themeFor(plugin.id).family === 'dyn' ? 6 : 0}
+              compact={phone}
+              keyboard={plugin.id === 'sampler'}
+              onChange={() => undefined}
+            />
+          </div>
+        )
+      })}
     </div>
   )
 }
 
-function Display({ family, pluginId, values, spectrum }: { family: FaceFamily; pluginId: string; values: Record<string, number>; spectrum?: Float32Array | null }) {
-  if (family === 'eq') return <Curve points={eqPoints(values)} spectrum={spectrum} />
-  if (family === 'dyn') {
-    const raw = values.ratio ?? 2
-    const ratio = pluginId === 'fet' ? [4, 8, 12, 20, 20][Math.round(raw)] ?? 4 : pluginId === 'bus' ? [2, 4, 10][Math.round(raw)] ?? 2 : raw
-    return <Curve points={transferPoints(values.threshold ?? -18, ratio || 2, values.knee ?? 0)} />
+const GALLERY_BIAS: Record<string, Record<string, number>> = {
+  eq: { hp: 70, lowF: 140, lowG: 3, lowQ: 0.8, midF: 2400, midG: -2.5, midQ: 1.4, highF: 9000, highG: 4, highQ: 0.7, lp: 17000 },
+  compressor: { threshold: -22, ratio: 4, attack: 12, release: 140, knee: 8, makeup: 4, mix: 1 },
+  reverb: { size: 0.72, damp: 0.35, mix: 0.28 },
+  delay: { time: 380, feedback: 0.42, mix: 0.3 },
+  tape: { drive: 0.45, wow: 0.2 },
+  saturator: { drive: 0.55, mix: 0.7 },
+}
+
+function ParamLayout({
+  family,
+  pluginId,
+  params,
+  values,
+  onChange,
+}: {
+  family: FaceFamily
+  pluginId: string
+  params: ParamSpec[]
+  values: Record<string, number>
+  onChange: (id: string, value: number) => void
+}) {
+  if (family === 'eq' && bandsOf(params).length) {
+    const bands = bandsOf(params)
+    const used = new Set(bands.flatMap((band) => [band.freqId, band.gainId, band.qId].filter(Boolean) as string[]))
+    const rest = params.filter((param) => !used.has(param.id))
+    return (
+      <div className="eq-bands">
+        {bands.map((band) => (
+          <fieldset key={band.id} className="eq-band">
+            <legend style={{ color: band.color }}>{band.label}</legend>
+            <Row params={pick(params, [band.freqId, band.gainId, band.qId])} values={values} onChange={onChange} />
+          </fieldset>
+        ))}
+        {rest.length > 0 && <Row params={rest} values={values} onChange={onChange} />}
+      </div>
+    )
   }
-  if (family === 'space') return <Bars values={decaySteps(values.size ?? values.time ?? 0.4, values.feedback ?? values.decay ?? values.mix ?? 0.3)} />
-  if (family === 'color') return <Curve points={driveShape(values.drive ?? 0.3)} />
-  if (family === 'mod') return <Bars values={lfo(values.rate ?? values.speed ?? 0.4, values.depth ?? values.mix ?? 0.5)} />
-  return <Bars values={spectrum ? Array.from(spectrum).slice(0, 24) : [0.2, 0.45, 0.7, 0.4, 0.25]} />
+  const size = family === 'dyn' || pluginId === 'compressor' ? 'lg' : family === 'mod' ? 'sm' : 'md'
+  return <Row params={params.filter((param) => param.id !== 'mask')} values={values} onChange={onChange} size={size} />
 }
 
-function lfo(rate: number, depth: number) {
-  return Array.from({ length: 24 }, (_, index) => 0.5 + Math.sin(index * 0.45 * (0.4 + rate)) * 0.45 * Math.max(0.15, depth))
-}
-
-function Curve({ points, spectrum }: { points: number[]; spectrum?: Float32Array | null }) {
-  const min = Math.min(...points, -18)
-  const max = Math.max(...points, 12)
-  const span = max - min || 1
-  const d = points.map((point, index) => {
-    const x = (index / Math.max(1, points.length - 1)) * 300
-    const y = 70 - ((point - min) / span) * 60
-    return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`
-  }).join(' ')
+function Row({
+  params,
+  values,
+  onChange,
+  size = 'md',
+}: {
+  params: ParamSpec[]
+  values: Record<string, number>
+  onChange: (id: string, value: number) => void
+  size?: 'sm' | 'md' | 'lg'
+}) {
+  const toggles = params.filter((param) => TOGGLE_IDS.has(param.id) && param.max <= 1)
+  const knobs = params.filter((param) => !toggles.includes(param))
+  const cols = Math.min(8, Math.max(1, knobs.length))
   return (
-    <svg className="kit-display" viewBox="0 0 300 80" role="img" aria-label="Response">
-      {spectrum && Array.from(spectrum).slice(0, 32).map((mag, index) => (
-        <rect key={index} x={index * (300 / 32)} y={80 - Math.min(1, mag) * 70} width={300 / 32 - 1} height={Math.min(1, mag) * 70} className="spec" />
+    <div className="kit-stack">
+      {toggles.length > 0 && (
+        <div className="kit-toggles">
+          {toggles.map((param) => (
+            <Toggle
+              key={param.id}
+              label={param.name}
+              on={(values[param.id] ?? param.default) >= 0.5}
+              onClick={() => onChange(param.id, (values[param.id] ?? param.default) >= 0.5 ? 0 : 1)}
+            />
+          ))}
+        </div>
+      )}
+      <div className={`kit-row size-${size}`} style={{ ['--cols' as string]: String(cols) }}>
+        {knobs.map((param) => {
+          const value = values[param.id] ?? param.default
+          const shared = {
+            label: param.name,
+            min: param.min,
+            max: param.max,
+            value,
+            unit: param.unit,
+            fallback: param.default,
+            onChange: (next: number) => onChange(param.id, next),
+          }
+          return <Knob key={param.id} {...shared} />
+        })}
+      </div>
+    </div>
+  )
+}
+
+function EqStage({
+  params,
+  values,
+  onChange,
+}: {
+  pluginId: string
+  params: ParamSpec[]
+  values: Record<string, number>
+  onChange: (id: string, value: number) => void
+}) {
+  const bands = bandsOf(params)
+  const drag = useRef<Band | null>(null)
+  const path = eqPath(values, W, H)
+  const move = (clientX: number, clientY: number, box: DOMRect) => {
+    const band = drag.current
+    if (!band) return
+    const freq = clamp(xToFreq(clientX - box.left, box.width), specMin(params, band.freqId, EQ_HZ_MIN), specMax(params, band.freqId, EQ_HZ_MAX))
+    const db = clamp(yToDb(((clientY - box.top) / box.height) * H, H), specMin(params, band.gainId, EQ_DB_MIN), specMax(params, band.gainId, EQ_DB_MAX))
+    onChange(band.freqId, freq)
+    onChange(band.gainId, db)
+  }
+  return (
+    <svg
+      className="kit-eq"
+      viewBox={`0 0 ${W} ${H}`}
+      role="img"
+      aria-label="Frequency response"
+      onPointerDown={(event) => {
+        const box = event.currentTarget.getBoundingClientRect()
+        const x = ((event.clientX - box.left) / box.width) * W
+        drag.current = nearest(bands, values, x)
+        event.currentTarget.setPointerCapture(event.pointerId)
+        move(event.clientX, event.clientY, box)
+      }}
+      onPointerMove={(event) => {
+        if (!drag.current) return
+        move(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect())
+      }}
+      onPointerUp={() => { drag.current = null }}
+      onPointerCancel={() => { drag.current = null }}
+    >
+      {[20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000].map((freq) => (
+        <g key={freq}>
+          <line x1={freqToX(freq, W)} x2={freqToX(freq, W)} y1={0} y2={H} className="grid" />
+          <text x={freqToX(freq, W) + 4} y={H - 6} className="tick">{freq >= 1000 ? `${freq / 1000}k` : freq}</text>
+        </g>
       ))}
-      <path d={d} />
+      {[-12, -6, 0, 6, 12].map((db) => (
+        <g key={db}>
+          <line x1={0} x2={W} y1={dbToY(db, H)} y2={dbToY(db, H)} className={db === 0 ? 'zero' : 'grid'} />
+          <text x={6} y={dbToY(db, H) - 4} className="tick">{db}</text>
+        </g>
+      ))}
+      <path d={path} className="curve" />
+      {bands.map((band) => {
+        const freq = values[band.freqId] ?? 1000
+        const x = freqToX(freq, W)
+        const y = dbToY(eqGainAt(freq, values), H)
+        return <circle key={band.id} cx={x} cy={y} r={9} fill={band.color} className="node" />
+      })}
     </svg>
   )
 }
 
-function Bars({ values }: { values: number[] }) {
-  const peak = Math.max(...values.map((value) => Math.abs(value)), 0.001)
+function DynStage({ pluginId, values, vu, gr }: { pluginId: string; values: Record<string, number>; vu: number; gr: number }) {
+  const raw = values.ratio ?? 2
+  const ratio = pluginId === 'fet' ? [4, 8, 12, 20, 20][Math.round(raw)] ?? 4 : pluginId === 'bus' ? [2, 4, 10][Math.round(raw)] ?? 2 : raw || 2
+  const threshold = values.threshold ?? values.ceiling ?? -12
+  const knee = values.knee ?? 0
+  const points = transferPoints(threshold, ratio, knee, 48)
+  const d = points.map((out, index) => {
+    const input = -60 + (60 * index) / (points.length - 1)
+    const x = ((input + 60) / 60) * W
+    const y = ((0 - Math.max(-60, Math.min(0, out))) / 60) * H
+    return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`
+  }).join(' ')
+  const mark = ((Math.max(-60, Math.min(0, threshold)) + 60) / 60) * W
   return (
-    <div className="kit-bars" aria-hidden="true">
-      {values.map((value, index) => (
-        <i key={index} style={{ height: `${Math.max(4, (Math.abs(value) / peak) * 100)}%` }} />
+    <div className="dyn-stage">
+      <NeedleMeter label="GR" value={Math.max(0, Math.min(20, gr))} min={0} max={20} />
+      <NeedleMeter label="VU" value={vu} min={-20} max={3} />
+      <svg className="kit-eq" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Transfer curve">
+        <line x1={0} y1={H} x2={W} y2={0} className="grid" />
+        {[-48, -36, -24, -12, 0].map((db) => (
+          <line key={db} x1={((db + 60) / 60) * W} x2={((db + 60) / 60) * W} y1={0} y2={H} className="grid" />
+        ))}
+        <path d={d} className="curve" />
+        <line x1={mark} x2={mark} y1={0} y2={H} className="zero" />
+        <text x={Math.min(W - 70, mark + 6)} y={18} className="tick">Thresh</text>
+      </svg>
+    </div>
+  )
+}
+
+function SpaceStage({ pluginId, values }: { pluginId: string; values: Record<string, number> }) {
+  const taps = pluginId === 'reverb' || pluginId === 'plate' || pluginId === 'hall' || pluginId === 'conv'
+  const bars = taps
+    ? decaySteps(values.size ?? 0.6, values.decay ?? values.damp ?? 0.4, 42)
+    : echoTaps(values.time ?? values.division ?? 0.4, values.feedback ?? 0.35)
+  return (
+    <div className={`space-stage${taps ? ' wash' : ' taps'}`} aria-label={taps ? 'Decay' : 'Echo taps'}>
+      {bars.map((value, index) => (
+        <i key={index} style={{ height: `${Math.max(6, Math.min(1, value) * 100)}%`, opacity: 0.35 + Math.min(1, value) * 0.65 }} />
       ))}
     </div>
   )
+}
+
+function ColorStage({ pluginId, values, vu }: { pluginId: string; values: Record<string, number>; vu: number }) {
+  const reels = pluginId === 'tape' || pluginId === 'mtape' || pluginId === 'echo'
+  return (
+    <div className="color-stage">
+      {reels ? (
+        <div className="reels" aria-label="Tape reels">
+          <i style={{ animationDuration: `${1.6 - (values.drive ?? 0.3)}s` }} />
+          <i style={{ animationDuration: `${1.6 - (values.drive ?? 0.3)}s` }} />
+        </div>
+      ) : (
+        <svg className="kit-eq short" viewBox={`0 0 ${W} 120`} aria-label="Drive">
+          <path className="curve" d={driveShape(values.drive ?? 0.3, 48).map((y, index) => {
+            const x = (index / 47) * W
+            const py = 60 - y * 52
+            return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${py.toFixed(1)}`
+          }).join(' ')} />
+        </svg>
+      )}
+      <NeedleMeter label="VU" value={vu} min={-20} max={3} />
+    </div>
+  )
+}
+
+function ModStage({ values }: { values: Record<string, number> }) {
+  const depth = values.depth ?? values.mix ?? 0.4
+  return (
+    <div className="mod-stage" aria-label="Modulation">
+      {Array.from({ length: 5 }, (_, index) => (
+        <i key={index} style={{ animationDelay: `${index * 0.12}s`, transform: `scale(${0.55 + depth * 0.5})` }} />
+      ))}
+    </div>
+  )
+}
+
+function InstStage({ pluginId }: { pluginId: string }) {
+  if (pluginId === 'sampler') {
+    return (
+      <div className="wave" aria-label="Sample">
+        {Array.from({ length: 48 }, (_, index) => {
+          const env = Math.sin(index / 3) * Math.exp(-index / 28)
+          return <i key={index} style={{ height: `${18 + Math.abs(env) * 70}%` }} />
+        })}
+      </div>
+    )
+  }
+  return null
+}
+
+function UtilStage({ pluginId, values, vu }: { pluginId: string; values: Record<string, number>; vu: number }) {
+  if (pluginId === 'meter') {
+    return (
+      <div className="dyn-stage">
+        <NeedleMeter label="L" value={vu} min={-20} max={3} />
+        <NeedleMeter label="R" value={vu - 1} min={-20} max={3} />
+      </div>
+    )
+  }
+  if (pluginId === 'image' || pluginId === 'msbox') {
+    const width = pluginId === 'image' ? values.width ?? 1 : (values.side ?? 0) / 12 + 1
+    return (
+      <div className="image-stage" aria-label="Stereo width">
+        <i style={{ width: `${Math.max(8, Math.min(100, width * 50))}%` }} />
+      </div>
+    )
+  }
+  return <NeedleMeter label="Out" value={vu} min={-20} max={3} />
+}
+
+function NeedleMeter({ label, value, min, max }: { label: string; value: number; min: number; max: number }) {
+  const t = Math.max(0, Math.min(1, (value - min) / (max - min || 1)))
+  const angle = -48 + t * 96
+  return (
+    <div className="needle-meter" aria-label={`${label} ${value.toFixed(1)}`}>
+      <svg viewBox="0 0 120 78">
+        <path d="M14 70 A46 46 0 0 1 106 70" className="arc" />
+        <line x1="60" y1="70" x2="60" y2="28" transform={`rotate(${angle} 60 70)`} className="arm" />
+        <circle cx="60" cy="70" r="4" className="hub" />
+      </svg>
+      <strong>{label}</strong>
+      <em>{value.toFixed(1)}</em>
+    </div>
+  )
+}
+
+interface Band {
+  id: string
+  label: string
+  freqId: string
+  gainId: string
+  qId?: string
+  color: string
+}
+
+function bandsOf(params: ParamSpec[]): Band[] {
+  const ids = new Set(params.map((param) => param.id))
+  const has = (id: string) => ids.has(id)
+  const bands: Band[] = []
+  if (has('lowF') && has('lowG')) bands.push({ id: 'low', label: 'Low', freqId: 'lowF', gainId: 'lowG', qId: has('lowQ') ? 'lowQ' : undefined, color: '#e0b15a' })
+  if (has('midF') && has('midG')) bands.push({ id: 'mid', label: 'Mid', freqId: 'midF', gainId: 'midG', qId: has('midQ') ? 'midQ' : undefined, color: '#3ec6ff' })
+  if (has('highF') && has('highG')) bands.push({ id: 'high', label: 'High', freqId: 'highF', gainId: 'highG', qId: has('highQ') ? 'highQ' : undefined, color: '#f09a6a' })
+  if (has('f0') && has('g0')) bands.push({ id: 'b0', label: 'Low', freqId: 'f0', gainId: 'g0', qId: has('q0') ? 'q0' : undefined, color: '#e0b15a' })
+  if (has('f1') && has('g1')) bands.push({ id: 'b1', label: 'Mid', freqId: 'f1', gainId: 'g1', qId: has('q1') ? 'q1' : undefined, color: '#3ec6ff' })
+  if (has('f2') && has('g2')) bands.push({ id: 'b2', label: 'High', freqId: 'f2', gainId: 'g2', qId: has('q2') ? 'q2' : undefined, color: '#f09a6a' })
+  if (!bands.length && has('freq') && has('gain')) bands.push({ id: 'band', label: 'Band', freqId: 'freq', gainId: 'gain', qId: has('q') ? 'q' : undefined, color: '#c084fc' })
+  return bands
+}
+
+function pick(params: ParamSpec[], ids: (string | undefined)[]) {
+  return ids.filter((id): id is string => !!id).map((id) => params.find((param) => param.id === id)).filter((param): param is ParamSpec => !!param)
+}
+
+function nearest(bands: Band[], values: Record<string, number>, x: number) {
+  let best = bands[0]
+  let dist = Infinity
+  for (const band of bands) {
+    const delta = Math.abs(freqToX(values[band.freqId] ?? 1000, W) - x)
+    if (delta < dist) {
+      dist = delta
+      best = band
+    }
+  }
+  return best
+}
+
+function specMin(params: ParamSpec[], id: string, fallback: number) {
+  return params.find((param) => param.id === id)?.min ?? fallback
+}
+
+function specMax(params: ParamSpec[], id: string, fallback: number) {
+  return params.find((param) => param.id === id)?.max ?? fallback
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
+}
+
+function echoTaps(time: number, feedback: number) {
+  const gap = 2 + Math.round((Math.max(1, time) / 1000) * 8)
+  return Array.from({ length: 36 }, (_, index) => (index % gap === 0 ? Math.pow(Math.max(0.05, Math.min(0.92, feedback)), index / gap) : 0.04))
 }

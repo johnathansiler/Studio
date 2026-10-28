@@ -2,10 +2,10 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { CATALOG } from '../audio/plugins/catalog'
-import { decaySteps, driveShape, eqGainAt, transferGain } from '../ui/faces/curves'
+import { decaySteps, driveShape, eqGainAt, eqPath, transferGain } from '../ui/faces/curves'
 import { FACE_THEMES } from '../ui/faces/themes'
 import { PluginFace } from '../ui/faces/PluginFace'
-import { clampUnit, formatValue, keyboardNotes, valueFromDrag } from '../ui/kit/controls'
+import { blackAfter, clampUnit, formatValue, keyboardNotes, valueFromDrag } from '../ui/kit/controls'
 
 describe('face kit', () => {
   it('gives every insert except the in-flight tuner its own badge and accent', () => {
@@ -34,6 +34,13 @@ describe('face kit', () => {
     expect(valueFromDrag(0, -90, 0, 1, false)).toBeCloseTo(1)
     expect(formatValue(440, 'Hz')).toBe('440 Hz')
     expect(keyboardNotes(2)).toHaveLength(15)
+    expect(blackAfter(60)).toBe(61)
+    expect(blackAfter(64)).toBeNull()
+    expect(blackAfter(65)).toBe(66)
+    expect(blackAfter(71)).toBeNull()
+    const line = eqPath({ midF: 1500, midG: 6, midQ: 1 }, 640, 220)
+    expect(line.startsWith('M0.0 ')).toBe(true)
+    expect(line.endsWith(' 640.0') || line.includes('640.0 ')).toBe(true)
     const html = renderToStaticMarkup(createElement(PluginFace, {
       pluginId: 'eq',
       params: [{ id: 'midG', name: 'Mid', min: -18, max: 12, default: 0, unit: 'dB', automatable: true }],
@@ -53,5 +60,21 @@ describe('face kit', () => {
     }))
     expect(keys).toContain('Pad')
     expect(keys).toContain('aria-label="Keyboard"')
+    expect(keys.match(/class="black"/g)).toHaveLength(15)
+    expect(keys).toContain('>C2<')
+    expect(keys).toContain('>C5<')
+    expect(keys).not.toContain('>GR<')
+    const comp = renderToStaticMarkup(createElement(PluginFace, {
+      pluginId: 'compressor',
+      params: [
+        { id: 'threshold', name: 'Thresh', min: -60, max: 0, default: -18, unit: 'dB', automatable: true },
+        { id: 'ratio', name: 'Ratio', min: 1, max: 20, default: 4, unit: ':1', automatable: true },
+      ],
+      values: { threshold: -18, ratio: 4 },
+      gr: 6,
+      onChange: () => undefined,
+    }))
+    expect(comp).toContain('>GR<')
+    expect(comp).toContain('Thresh')
   })
 })
