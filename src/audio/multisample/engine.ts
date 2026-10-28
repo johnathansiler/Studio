@@ -52,9 +52,15 @@ export interface SamplerNote {
   vel: number
 }
 
+/** One note-on and the files it needs. Release samples are included so the tail is not silent. */
+export interface PlannedNote {
+  attackIds: string[]
+  samples: SampleRef[]
+}
+
 /**
  * Plays a SamplerProgram. Call noteOn / noteOff, then render().
- * Samples are pulled from the bank lazily; a missing file stays silent until it arrives.
+ * A sample that is still downloading keeps the voice until it arrives.
  */
 export class SamplerInstrument {
   private currentProgram: SamplerProgram | null = null
@@ -137,6 +143,60 @@ export class SamplerInstrument {
     }).layers
   }
 
+  /**
+   * Files a series of note-ons will play, in the same order as the audio callback.
+   * Round-robin and keyswitches advance on a copy, so this does not change the live instrument.
+   */
+  plan(events: SamplerNote[]): PlannedNote[] {
+    const program = this.currentProgram
+    if (!program) return []
+    const counters = { ...this.counters }
+    let key = this.key
+    const ordered = events.filter((event) => event.vel > 0).slice().sort((a, b) => a.sample - b.sample)
+    const notes: PlannedNote[] = []
+    for (const event of ordered) {
+      const midi = Math.round(event.pitch)
+      if (isKeyswitch(program, midi)) {
+        key = midi
+        continue
+      }
+      const velocity = midiVelocity(event.vel)
+      if (!velocity) continue
+      const attack = selectLayers(program, {
+        note: midi,
+        velocity,
+        keyswitch: key,
+        roundRobin: counters,
+        trigger: 'attack',
+      })
+      const release = selectLayers(program, {
+        note: midi,
+        velocity,
+        keyswitch: key,
+        roundRobin: counters,
+        trigger: 'release',
+      })
+      for (const group of attack.advance) counters[group] = (counters[group] ?? 0) + 1
+      const samples: SampleRef[] = []
+      const seen = new Set<string>()
+      const attackIds: string[] = []
+      for (const layer of attack.layers) {
+        if (!seen.has(layer.sample.id)) {
+          seen.add(layer.sample.id)
+          samples.push(layer.sample)
+        }
+        attackIds.push(layer.sample.id)
+      }
+      for (const layer of release.layers) {
+        if (seen.has(layer.sample.id)) continue
+        seen.add(layer.sample.id)
+        samples.push(layer.sample)
+      }
+      if (attackIds.length) notes.push({ attackIds, samples })
+    }
+    return notes
+  }
+
   noteOn(note: number, velocity: number): MappedLayer[] {
     const program = this.currentProgram
     const midi = Math.round(note)
@@ -215,8 +275,9 @@ export class SamplerInstrument {
         if (!voice.audio && !voice.stream) {
           voice.stream = openStream(this.bank, voice.ref)
           if (!voice.stream) voice.audio = this.bank.get(voice.ref)
+          if (!voice.audio && !voice.stream && (voice.waited === 0 || voice.waited % Math.max(1, sr >> 2) === 0)) this.bank.request(voice.ref)
           voice.waited += 1
-          if (!voice.audio && !voice.stream && voice.waited > sr * 2) voice.active = false
+          if (!voice.audio && !voice.stream && voice.waited > sr * 12) voice.active = false
           continue
         }
         const env = this.envelope(voice, sr)
