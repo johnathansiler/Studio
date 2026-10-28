@@ -800,11 +800,17 @@ function ClipView({
       if (mode === 'end' && !stretching) latest = trimAudioClip(clip, 'end', snapped(clip.startSample + clip.durationSamples + delta), bufferLength)
       setPreview(latest)
     }
-    const up = () => {
+    const up = (ev: PointerEvent) => {
       window.clearTimeout(timer)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', up)
+      const dropped = Number.isFinite(ev.clientX) ? document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-slot-drop]') : null
+      if (dropped) {
+        window.dispatchEvent(new CustomEvent('cueharbor-slot-clip', { detail: { trackId, clipId: clip.id } }))
+        setPreview(null)
+        return
+      }
       if (held) {
         setPreview(null)
         return

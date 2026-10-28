@@ -1,0 +1,45 @@
+.slot-panel { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.slot-panel .row { flex-wrap: wrap; }
+.slot-wave { position: relative; height: 72px; border-radius: 8px; background: #14241b; touch-action: none; }
+.slot-wave canvas { width: 100%; height: 100%; display: block; }
+.slot-wave .slot-shade { position: absolute; top: 0; bottom: 0; background: rgba(8, 16, 12, 0.55); pointer-events: none; }
+.slot-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  margin-left: -7px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  touch-action: none;
+}
+.slot-handle i {
+  position: absolute;
+  left: 6px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 2px;
+  background: #d7ecdf;
+}
+.slot-handle.loop i { background: #e0b15a; }
+.slot-meter { height: 8px; border-radius: 99px; background: #1c2c23; overflow: hidden; }
+.slot-meter span { display: block; height: 100%; background: #73c48f; width: 0; }
+.slot-status { margin: 0; color: #d7ecdf; font-size: 13px; }
+.slot-upload { position: relative; overflow: hidden; display: inline-flex; }
+.slot-panel .slot-file {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  font-size: 16px;
+  cursor: pointer;
+}
+.slot-panel .pads { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.slot-panel .pads.keys { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+.shell.phone .slot-panel .pads button,
+.shell.phone .slot-panel .text-btn,
+.shell.fold .slot-panel .pads button,
+.shell.fold .slot-panel .text-btn { min-height: 44px; }

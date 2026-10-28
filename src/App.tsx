@@ -124,6 +124,11 @@ export function App() {
   const [libraryOpen, setLibraryOpen] = useState(() => new URLSearchParams(window.location.search).get('library') === '1')
   const [soundsOpen, setSoundsOpen] = useState(() => new URLSearchParams(window.location.search).get('sounds') === '1')
   useEffect(() => {
+    const open = () => setSoundsOpen(true)
+    window.addEventListener('cueharbor-open-sounds', open)
+    return () => window.removeEventListener('cueharbor-open-sounds', open)
+  }, [])
+  useEffect(() => {
     void loadScaleCatalog().then(() => setVersion((value) => value + 1))
   }, [])
   const [analysisTrackId, setAnalysisTrackId] = useState<string | null>(null)
