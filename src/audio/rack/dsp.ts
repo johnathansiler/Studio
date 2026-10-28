@@ -173,10 +173,11 @@ export class RackRuntime {
     const left = new Float32Array(frames)
     const right = new Float32Array(frames)
     const limit = quality === 'eco' ? Math.min(4, rack.polyphony) : rack.polyphony
-    while (this.voices.filter((voice) => voice.active).length > limit) {
-      const extra = this.voices.filter((voice) => voice.active).sort((a, b) => b.age - a.age)[0]
+    while (this.voices.filter((voice) => voice.active && voice.releaseMs == null).length > limit) {
+      const extra = this.voices.filter((voice) => voice.active && voice.releaseMs == null).sort((a, b) => b.age - a.age)[0]
       if (!extra) break
-      extra.active = false
+      extra.released = true
+      extra.releaseMs = 0.3
     }
     const cyclic = audioCycle(rack.cables)
     const audioCables = cyclic ? [] : rack.cables.filter((cable) => cable.toPort === 'audio' || cable.toPort === 'audio2')

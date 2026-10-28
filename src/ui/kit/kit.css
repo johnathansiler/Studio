@@ -160,22 +160,36 @@
 .kit-toggle.on i { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
 .kit-fold { align-self: center; min-height: 36px; }
 .kit-shell.compact .kit-knob button, .kit-shell.compact .kit-fader button { min-width: 44px; min-height: 44px; }
-.kit-keys { position: relative; display: flex; height: 128px; padding: 8px 8px 6px; border-radius: 10px; background: #070a09; user-select: none; touch-action: none; }
-.kit-keys.compact { height: 96px; }
+.kit-keyboard { display: flex; flex-direction: column; gap: 6px; min-width: 0; width: 100%; }
+.kit-octave { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.kit-octave button {
+  width: 36px; height: 32px; min-height: 32px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; border: 1px solid #1c2822;
+  background-color: #24352c; background-image: var(--face); box-shadow: var(--raised); color: var(--text);
+}
+.kit-octave span { min-width: 2.2em; text-align: center; font-size: 12px; font-weight: 650; color: var(--muted); }
+.kit-keys { position: relative; display: flex; height: 128px; min-height: 108px; padding: 8px 8px 6px; border-radius: 10px; background: #070a09; user-select: none; touch-action: none; }
+.kit-keys.compact { height: 112px; min-height: 96px; }
 .kit-keys .slot { position: relative; flex: 1; min-width: 0; }
 .kit-keys .white {
-  width: 100%; height: 100%; border-radius: 0 0 6px 6px; border: 1px solid #cfd6d0;
+  display: flex; width: 100%; height: 100%; min-height: 0; border-radius: 0 0 6px 6px; border: 1px solid #cfd6d0;
   background: linear-gradient(180deg, #fff, #d5ddd8); color: #17211c; padding: 0 0 4px; box-shadow: var(--raised);
-  align-items: flex-end;
+  align-items: flex-end; justify-content: flex-end; overflow: hidden;
 }
-.kit-keys .white span { font-size: 10px; font-weight: 700; letter-spacing: 0.02em; pointer-events: none; }
+.kit-keys .white span { display: block; max-width: 100%; overflow: hidden; font-size: 9px; line-height: 1; font-weight: 700; letter-spacing: 0; pointer-events: none; }
 .kit-keys .black {
-  position: absolute; z-index: 2; top: 0; left: 100%; width: 58%; height: 58%; padding: 0;
+  position: absolute; z-index: 2; top: 0; left: 100%; width: 58%; height: 58%; min-height: 0; padding: 0;
   transform: translateX(-50%);
   border-radius: 0 0 4px 4px; border: 1px solid #111;
   background: linear-gradient(180deg, #3a3a3a, #0c0c0c); box-shadow: var(--raised);
 }
-.kit-keys .white:active, .kit-keys .black:active { box-shadow: var(--pressed), var(--glow); }
+.kit-keys .white.lit, .kit-keys .white:active { background: linear-gradient(180deg, #fff, #b7d7c4); }
+.kit-keys .black.lit, .kit-keys .black:active { background: linear-gradient(180deg, #5a5a5a, #111); }
+.shell.phone .kit-keys button,
+.shell.phone .kit-keyboard .kit-keys .white,
+.shell.phone .kit-keyboard .kit-keys .black { min-height: 0; height: 100%; }
+.shell.phone .kit-octave button { min-height: 36px; height: 36px; width: 40px; }
 .shell.phone .kit-toggle, .shell.phone .kit-fold { min-height: 44px; }
 .kit-shell[data-family='color'] .kit-knob button {
   background:

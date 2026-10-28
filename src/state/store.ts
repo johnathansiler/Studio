@@ -29,7 +29,7 @@ import { assetFromClip, placeLooper, placeSampler, playbackChannel, readSlotPoin
 import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
 import { findCycle, MASTER } from '../audio/routing'
 import { isPackAsset, packToAsset } from '../audio/multisample/persist'
-import type { SamplePack, SamplerProgram } from '../audio/multisample/types'
+import type { InstrumentPlay, SamplePack, SamplerProgram } from '../audio/multisample/types'
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
@@ -1190,6 +1190,79 @@ export class ProjectStore {
     })
   }
 
+  /**
+   * Put a decoded sound on an instrument track as the chromatic sampler.
+   * Root is detected from the audio unless `root` is passed.
+   */
+  loadSamplerSound(trackId: string, asset: AudioAsset, root?: number, loop = false) {
+    let pluginId = ''
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi' || !asset.channels[0]?.length) return
+      track.instrument = 'sampler'
+      track.library = undefined
+      const copy: AudioAsset = {
+        id: asset.id || uid('smp'),
+        name: asset.name || 'Sample',
+        sampleRate: asset.sampleRate || this.project.sampleRate,
+        channels: asset.channels.map((channel) => Float32Array.from(channel)),
+      }
+      this.buffers.set(copy.id, copy)
+      let plugin = track.plugins.find((item) => item.pluginId === 'sampler')
+      if (!plugin) {
+        plugin = createPlugin('sampler', 'Keys')
+        track.plugins.push(plugin)
+      }
+      plugin.enabled = true
+      plugin.params = { ...plugin.params, keys: 1, stretch: 0 }
+      if (plugin.sampler) {
+        placeSampler(plugin.sampler, copy)
+        if (root != null && Number.isFinite(root)) plugin.sampler.root = Math.max(0, Math.min(127, Math.round(root)))
+        plugin.sampler.loopMode = loop ? 0 : 2
+      }
+      pluginId = plugin.id
+      this.selectedTrackId = track.id
+    })
+    if (pluginId) this.showRack(trackId)
+    return pluginId
+  }
+
+  setSamplerRoot(trackId: string, root: number) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      const plugin = track?.plugins.find((item) => item.pluginId === 'sampler')
+      if (!plugin?.sampler) return
+      plugin.sampler.root = Math.max(0, Math.min(127, Math.round(root)))
+    })
+  }
+
+  setSamplerLoop(trackId: string, mode: number) {
+    this.mutate(() => {
+      const plugin = this.track(trackId)?.plugins.find((item) => item.pluginId === 'sampler')
+      if (!plugin?.sampler) return
+      plugin.sampler.loopMode = Math.max(0, Math.min(2, Math.round(mode)))
+    })
+  }
+
+  /** Envelope and tune for a multi-sample instrument. Times are seconds. */
+  setInstrumentPlay(trackId: string, patch: Partial<InstrumentPlay>) {
+    this.mutate(() => {
+      const program = this.track(trackId)?.library
+      if (!program) return
+      const zone = program.zones[0]
+      const amp = zone?.ampeg
+      const base: InstrumentPlay = program.play ?? {
+        tune: 0,
+        attack: amp?.attack ?? 0.004,
+        decay: amp?.decay ?? 0.2,
+        sustain: amp?.sustain ?? 0.85,
+        release: Math.max(0.02, amp?.release ?? 0.2),
+        tone: 20000,
+      }
+      program.play = { ...base, ...patch }
+    })
+  }
+
   setLibraryMic(trackId: string, micId: string, gain: number, mute?: boolean) {
     this.mutate(() => {
       const mic = this.track(trackId)?.library?.mics.find((item) => item.id === micId)
@@ -1390,6 +1463,12 @@ export class ProjectStore {
       if (plugin.sampler) {
         placeSampler(plugin.sampler, copy)
         this.buffers.set(copy.id, copy)
+        const host = trackId === 'master' ? null : this.track(trackId)
+        if (host?.type === 'midi') {
+          host.instrument = 'sampler'
+          host.library = undefined
+          plugin.params = { ...plugin.params, keys: 1, stretch: 0 }
+        }
         return
       }
       if (!plugin.looper) return
@@ -3905,6 +3984,14 @@ export class ProjectStore {
     this.rackTrackId = this.rackTrackId === trackId ? null : trackId
     this.rackFlip = false
     this.rackDetail = false
+    this.emit()
+  }
+
+  /** Open the instrument panel for a track. Does not toggle it shut. */
+  showRack(trackId: string) {
+    this.scalerTrackId = null
+    this.rackTrackId = trackId
+    this.rackFlip = false
     this.emit()
   }
 
