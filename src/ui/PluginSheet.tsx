@@ -7,13 +7,13 @@ import { AmpPop } from './AmpPop'
 import { Faceplate } from './Faceplate'
 import { NOTE_NAMES, SCALES } from '../model/scale'
 import { samplesToBeats } from '../model/time'
-import type { PluginInstance } from '../model/types'
+import { selectPlugin } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { SamplePanel } from './SamplePanel'
 
 export function PluginSheet({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
   const focus = store.pluginFocus
-  const plugin = focus ? findPlugin(store, focus.trackId, focus.pluginId) : null
+  const plugin = focus ? selectPlugin(store, focus.trackId, focus.pluginId) : null
   const spec = plugin ? descriptor(plugin.pluginId) : null
   const [last, setLast] = useState('')
   const canvas = useRef<HTMLCanvasElement>(null)
@@ -259,7 +259,3 @@ function addChoice(store: ProjectStore, trackId: string | 'master', value: strin
   else store.addPlugin(trackId, value)
 }
 
-function findPlugin(store: ProjectStore, trackId: string, pluginId: string): PluginInstance | null {
-  const list = trackId === 'master' ? store.project.masterPlugins : store.track(trackId)?.plugins
-  return list?.find((item) => item.id === pluginId) ?? null
-}

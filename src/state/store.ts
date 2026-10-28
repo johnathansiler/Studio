@@ -23,10 +23,13 @@ import {
 } from '../audio/sample/engine'
 import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
 import { findCycle, MASTER } from '../audio/routing'
+import type { SamplerProgram } from '../audio/multisample/types'
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { splitAudioClip, trimAudioClip, moveAudioClip, clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
 import { splitMidiClip, stretchMidiClip, trimMidiClip } from '../model/edit'
+import { setPath, type ProjectOp, type StampWire } from './ops'
+import { ProjectSync } from './sync'
 import { activeTool, setActiveTool, type ArrangeTool } from './tools'
 import { demoMidiNotes } from '../model/demo'
 import {
@@ -55,8 +58,10 @@ import {
   quantizeMidi,
   type QuantizeSettings,
 } from '../model/quantize'
+import { cloneOmni, emptyOmni, type OmniPatch } from '../instruments/patch'
 import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
-import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
+import { normalizeScale, patternNotes, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
+import { lockedTone, scaleIsMicrotonal } from '../theory/lock'
 import {
   clonePattern,
   fillEvery,
@@ -125,6 +130,8 @@ export class ProjectStore {
   /** Guests mirror the host arrangement and cannot edit it. */
   remoteFollow = false
   rackTrackId: string | null = null
+  /** Open layered patch. Not saved; the patch itself is on the track. */
+  patchTrackId: string | null = null
   rackFlip = false
   rackDetail = false
   /** Letter keys play notes while this is on, so tap-tempo stays off T. */
@@ -136,6 +143,8 @@ export class ProjectStore {
   private past: string[] = []
   private future: string[] = []
   private listeners = new Set<Listener>()
+  /** Musical journal shared with every view and with the remote session. */
+  readonly sync = new ProjectSync()
   private takeUndo: { trackId: string; clipId: string; notes: MidiNote[]; durationBeats: number } | null = null
   private drafted = false
 
@@ -163,6 +172,7 @@ export class ProjectStore {
     this.selectedMidiClipId = null
     this.selectedNoteId = null
     this.selectedNoteIds = []
+    this.sync.rebase(this.project)
   }
 
   subscribe = (fn: Listener) => {
@@ -174,7 +184,50 @@ export class ProjectStore {
 
   private emit() {
     this.version += 1
+    if (!this.sync.silence) this.sync.observe(this.project)
     for (const fn of this.listeners) fn()
+  }
+
+  /** Remote field ops. History is patched so a later undo keeps them. */
+  applyRemoteOps(ops: ProjectOp[]) {
+    const { applied, gap } = this.sync.ingest(this.project, ops)
+    if (applied.length) {
+      this.rewriteHistory(applied)
+      this.emit()
+    }
+    return gap
+  }
+
+  /**
+   * Reconnect resync. Local stamps that are newer than the checkpoint are returned
+   * so the other device can catch up without a second full project.
+   */
+  mergeRemoteCheckpoint(remote: Project, stamps: StampWire[] | undefined, prefer: 'local' | 'remote', lamport = 0, actor = '', seq = 0) {
+    this.sync.silence = true
+    const waveforms = remote.waveforms
+    const merged = this.sync.merge(this.project, remote, stamps, prefer, lamport, actor, seq)
+    this.project = normalizeProjectRack(normalizeProject(merged.project))
+    if (waveforms) this.project.waveforms = waveforms
+    this.past = []
+    this.future = []
+    this.sync.adopt(this.project)
+    this.sync.silence = false
+    this.emit()
+    return merged.reply
+  }
+
+  private rewriteHistory(ops: ProjectOp[]) {
+    const apply = (raw: string) => {
+      try {
+        const project = JSON.parse(raw) as Project
+        for (const op of ops) setPath(project, op.p, op.v)
+        return JSON.stringify(project)
+      } catch {
+        return raw
+      }
+    }
+    this.past = this.past.map(apply)
+    this.future = this.future.map(apply)
   }
 
   private snapshot() {
@@ -379,7 +432,10 @@ export class ProjectStore {
       const clip = track.midiClips.find((item) => item.id === this.selectedMidiClipId)
       if (!clip) continue
       for (const note of clip.notes) {
-        if (this.selectedNoteIds.includes(note.id)) note.pitch = snapPitch(note.pitch, scale.root, scale.scale)
+        if (!this.selectedNoteIds.includes(note.id)) continue
+        const tone = lockedTone(note.pitch, note.fine ?? 0, scale)
+        note.pitch = tone.midi
+        if (scale.library || scaleIsMicrotonal(scale)) applyFine(note, tone.cents)
       }
     }
   }
@@ -461,12 +517,45 @@ export class ProjectStore {
     this.mutate(() => {
       const made = tracksFor(spec, this.project.tracks)
       for (const track of made) if (track.type === 'midi') normalizeTrackRack(track)
+      if (spec.kind === 'midi' && spec.instrument === 'library' && made[0]) this.rackTrackId = made[0].id
       const at = insertIndex(this.project.tracks, this.selectedTrackId)
       this.project.tracks.splice(at, 0, ...made)
       this.selectedTrackId = made[0]?.id ?? this.selectedTrackId
       ids.push(...made.map((track) => track.id))
     })
     return ids
+  }
+
+  /** Install a multi-sample program on a library instrument track. */
+  setLibrary(trackId: string, program: SamplerProgram | null) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      track.instrument = 'library'
+      track.library = program ?? undefined
+      if (!track.rack?.devices?.length) normalizeTrackRack(track)
+    })
+  }
+
+  /** Same as setLibrary, and keep imported wavs in the project so they save. */
+  adoptLibrary(trackId: string, program: SamplerProgram, assets: { id: string; name: string; sampleRate: number; channels: Float32Array[] }[]) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      track.instrument = 'library'
+      track.library = program
+      for (const asset of assets) this.buffers.set(asset.id, asset)
+      if (!track.rack?.devices?.length) normalizeTrackRack(track)
+    })
+  }
+
+  setLibraryMic(trackId: string, micId: string, gain: number, mute?: boolean) {
+    this.mutate(() => {
+      const mic = this.track(trackId)?.library?.mics.find((item) => item.id === micId)
+      if (!mic) return
+      mic.gain = Math.max(0, Math.min(1, gain))
+      if (mute != null) mic.mute = mute
+    })
   }
 
   addTrack(type: Track['type']) {
@@ -1330,9 +1419,9 @@ export class ProjectStore {
     })
   }
 
-  addPerformedNotes(trackId: string, clipId: string, notes: Omit<MidiNote, 'id'>[], mode: 'overdub' | 'replace' = 'overdub', fixedBeats = 0) {
+  addPerformedNotes(trackId: string, clipId: string, notes: Omit<MidiNote, 'id'>[], mode: 'overdub' | 'replace' = 'overdub', fixedBeats = 0, coalesce = false) {
     if (!notes.length) return
-    this.mutate(() => {
+    const write = () => {
       const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
       if (!clip) return
       const fixed = fixedBeats > 0 ? fixedBeats : 0
@@ -1353,7 +1442,9 @@ export class ProjectStore {
         for (const note of incoming) end = Math.max(end, note.startBeat + note.durationBeats)
         clip.durationBeats = Math.max(clip.durationBeats, end)
       }
-    })
+    }
+    if (coalesce) this.draft(write)
+    else this.mutate(write)
   }
 
   setClipLength(trackId: string, clipId: string, beats: number) {
@@ -1676,8 +1767,13 @@ export class ProjectStore {
       const clip = this.track(trackId)?.midiClips.find((c) => c.id === clipId)
       if (!clip) return
       const scale = this.scaleState()
-      const pitch = scale.snap ? snapPitch(note.pitch, scale.root, scale.scale) : note.pitch
-      const next = this.inputNote(clip, { ...note, pitch, id: uid('note') })
+      const drafted: MidiNote = { ...note, id: uid('note') }
+      if (scale.snap) {
+        const tone = lockedTone(note.pitch, note.fine ?? 0, scale)
+        drafted.pitch = tone.midi
+        if (scale.library || scaleIsMicrotonal(scale)) applyFine(drafted, tone.cents)
+      }
+      const next = this.inputNote(clip, drafted)
       clip.notes.push(next)
       this.selectedNoteId = next.id
       this.selectedNoteIds = [next.id]
@@ -1689,10 +1785,17 @@ export class ProjectStore {
       const note = this.track(trackId)?.midiClips.find((c) => c.id === clipId)?.notes.find((n) => n.id === noteId)
       if (!note) return
       const scale = this.scaleState()
-      const pitch = patch.pitch == null ? note.pitch : scale.snap ? snapPitch(patch.pitch, scale.root, scale.scale) : patch.pitch
+      let pitch = patch.pitch == null ? note.pitch : patch.pitch
+      let fine = patch.fine == null ? note.fine : patch.fine
+      if (scale.snap && patch.pitch != null) {
+        const tone = lockedTone(pitch, fine ?? 0, scale)
+        pitch = tone.midi
+        if (scale.library || scaleIsMicrotonal(scale)) fine = tone.cents || undefined
+      }
       if (patch.startBeat != null || patch.pitch != null) {
         Object.assign(note, moveMidiNote(note, patch.startBeat ?? note.startBeat, pitch))
       }
+      if (patch.pitch != null && (scale.library || scaleIsMicrotonal(scale))) applyFine(note, fine ?? 0)
       if (patch.durationBeats != null) Object.assign(note, resizeMidiNote(note, patch.durationBeats))
       if (patch.velocity != null) note.velocity = patch.velocity
       if ('slide' in patch) note.slide = !!patch.slide
@@ -1752,7 +1855,58 @@ export class ProjectStore {
     clip.durationBeats = Math.max(clip.durationBeats, Math.ceil(end * 4) / 4)
     this.selectedNoteIds = ids
     this.selectedNoteId = ids.at(-1) ?? null
-    this.project.scale = { ...scale, lastVoicing: voiced }
+    this.project.scale = { ...scale, lastVoicing: voiced, lastCents: voiced.map(() => 0) }
+  }
+
+  /**
+   * Write voiced tones onto the selected MIDI clip in one undo step.
+   * `start` is beats from the end of the notes already in the clip.
+   */
+  insertLibrary(events: { midi: number; cents: number; start: number; duration: number }[], name = 'Chords') {
+    if (!events.length) return
+    this.mutate(() => {
+      const located = this.libraryClip(name)
+      const clip = located.clip
+      const origin = clip.notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0)
+      const ids: string[] = []
+      for (const event of events) {
+        const note: MidiNote = {
+          id: uid('note'),
+          pitch: event.midi,
+          startBeat: origin + event.start,
+          durationBeats: Math.max(0.05, event.duration),
+          velocity: 0.8,
+        }
+        if (event.cents) note.fine = Math.max(-100, Math.min(100, Math.round(event.cents)))
+        clip.notes.push(note)
+        ids.push(note.id)
+      }
+      const end = clip.notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), clip.durationBeats)
+      clip.durationBeats = Math.max(clip.durationBeats, Math.ceil(end * 4) / 4)
+      this.selectedNoteIds = ids
+      this.selectedNoteId = ids.at(-1) ?? null
+      this.selectedMidiClipId = clip.id
+      this.selectedTrackId = located.track.id
+      const lastStart = Math.max(...events.map((event) => event.start))
+      const last = events.filter((event) => event.start === lastStart)
+      const scale = this.scaleState()
+      this.project.scale = { ...scale, lastVoicing: last.map((tone) => tone.midi), lastCents: last.map((tone) => tone.cents) }
+    })
+  }
+
+  private libraryClip(name: string) {
+    const selected = this.selectedMidiClipId
+      ? this.project.tracks.find((track) => track.midiClips.some((clip) => clip.id === this.selectedMidiClipId))
+      : undefined
+    if (selected) {
+      const clip = selected.midiClips.find((item) => item.id === this.selectedMidiClipId)
+      if (clip) return { track: selected, clip }
+    }
+    const track = this.selectedTrackId ? this.track(this.selectedTrackId) : undefined
+    const host = track?.type === 'midi' ? track : this.ensureMidi(name, '#e0b15a')
+    const clip: MidiClip = { id: uid('midi'), name, startBeat: 0, durationBeats: 4, notes: [] }
+    host.midiClips.push(clip)
+    return { track: host, clip }
   }
 
   /** Drop an idea onto the chord track plus editable bass and drums in that genre. */
@@ -2132,6 +2286,7 @@ export class ProjectStore {
     this.selectedMidiClipId = null
     this.selectedNoteId = null
     this.selectedNoteIds = []
+    this.sync.rebase(this.project)
     this.emit()
   }
 
@@ -2231,6 +2386,55 @@ export class ProjectStore {
     this.rackFlip = false
     this.rackDetail = false
     this.emit()
+  }
+
+  openPatch(trackId: string) {
+    if (this.patchTrackId === trackId) {
+      this.patchTrackId = null
+      this.emit()
+      return
+    }
+    this.patchTrackId = trackId
+    const track = this.track(trackId)
+    if (track?.type === 'midi' && !track.omniPatch) {
+      this.mutate(() => {
+        track.omniPatch = emptyOmni(track.name)
+      })
+      return
+    }
+    this.emit()
+  }
+
+  updateOmni(trackId: string, fn: (patch: OmniPatch) => void, draft = false) {
+    const run = () => {
+      const track = this.track(trackId)
+      if (!track?.omniPatch || track.type !== 'midi') return
+      fn(track.omniPatch)
+    }
+    if (draft) this.draft(run)
+    else this.mutate(run)
+  }
+
+  saveOmniPatch(trackId: string) {
+    this.mutate(() => {
+      const patch = this.track(trackId)?.omniPatch
+      if (!patch) return
+      const copy = cloneOmni(patch, true)
+      copy.name = patch.name.trim() || 'Patch'
+      const library = (this.project.omniLibrary ?? []).filter((item) => item.name !== copy.name)
+      this.project.omniLibrary = [...library, copy]
+    })
+  }
+
+  loadOmniPatch(trackId: string, id: string) {
+    this.mutate(() => {
+      const found = this.project.omniLibrary?.find((item) => item.id === id)
+      const track = this.track(trackId)
+      if (!found || track?.type !== 'midi') return
+      const copy = cloneOmni(found, true)
+      copy.name = found.name
+      track.omniPatch = copy
+    })
   }
 
   flipRack() {
@@ -2761,7 +2965,7 @@ export class ProjectStore {
 
   private quantizeContext(only?: string[]) {
     const scale = this.scaleState()
-    return { tempo: this.project.tempo, root: scale.root, scale: scale.scale as ScaleId, only }
+    return { tempo: this.project.tempo, root: scale.root, scale: scale.scale as ScaleId, library: scale.library, only }
   }
 
   private grooveSources(settings: QuantizeSettings) {
@@ -3090,6 +3294,11 @@ export function seedDemoProject(sampleRate: number, music: Float32Array): { proj
     notes: demoMidiNotes().map((n) => ({ ...n, id: uid('note') })),
   })
   return { project, buffers }
+}
+
+function applyFine(note: { fine?: number }, cents: number) {
+  if (cents) note.fine = Math.max(-100, Math.min(100, Math.round(cents)))
+  else delete note.fine
 }
 
 function clamp(n: number, min: number, max: number) {
