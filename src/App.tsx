@@ -27,6 +27,7 @@ import { PerformPop } from './ui/PerformPop'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
 import { IdeasPop } from './ui/IdeasPop'
+import { UnstuckSheet } from './unstuck/UnstuckSheet'
 import { LibraryPop } from './ui/LibraryPop'
 import { loadScaleCatalog } from './theory'
 import { AnalysisSheet } from './ui/AnalysisSheet'
@@ -40,8 +41,8 @@ import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
 import { VideoDock } from './ui/VideoDock'
-import { MENU_COPY, VIEW_COPY, copyOf, described } from './ui/chrome'
-import { HintBubble, MenuRow } from './ui/Hint'
+import { MENU_COPY, UNSTUCK_COPY, VIEW_COPY, copyOf, described } from './ui/chrome'
+import { HintBubble, MenuRow, TipButton } from './ui/Hint'
 import { formatBytes } from './ui/share'
 
 interface Bundle {
@@ -106,6 +107,7 @@ export function App() {
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
+  const [unstuckOpen, setUnstuckOpen] = useState(() => new URLSearchParams(window.location.search).get('unstuck') === '1')
   const [libraryOpen, setLibraryOpen] = useState(() => new URLSearchParams(window.location.search).get('library') === '1')
   useEffect(() => {
     void loadScaleCatalog().then(() => setVersion((value) => value + 1))
@@ -1166,6 +1168,14 @@ async function importDropped(files: FileList) {
             Session
           </button>
         </div>
+        <TipButton
+          className={`unstuck-btn ${unstuckOpen ? 'on' : ''}`}
+          label={UNSTUCK_COPY.label}
+          hint={UNSTUCK_COPY.hint}
+          pressed={unstuckOpen}
+          disabled={store.remoteFollow}
+          onClick={() => { setMenuOpen(false); setUnstuckOpen((open) => !open) }}
+        />
         <button type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Save, export, clips, and setup." title="Save, export, clips, and setup." aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
           <MenuIcon />
         </button>
@@ -1342,6 +1352,7 @@ async function importDropped(files: FileList) {
       <QuantizeSheet store={store} />
       {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
       {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}
+      {unstuckOpen && <UnstuckSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }} />}
       {libraryOpen && <LibraryPop store={store} engine={engine} onClose={() => setLibraryOpen(false)} />}
       {analysisTrackId && <AnalysisSheet store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} />}
       {perform && (
