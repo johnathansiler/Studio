@@ -1,14 +1,35 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import type { AudioEngine } from '../audio/engine'
-import { stepIndexAt } from '../model/steps'
+import { stepIndexAt, type StepChannel } from '../model/steps'
 import { samplesToBeats } from '../model/time'
 import { selectBeats } from '../state/select'
 import type { ProjectStore } from '../state/store'
-import { BEAT_BAR, BEAT_SHEET, copyOf, described } from './chrome'
+import { BEAT_BAR, BEAT_ROW, BEAT_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
 import { ActionSheet, TipButton } from './Hint'
+import './beats.css'
 
 const COLORS = ['#73c48f', '#ef6b6b', '#79b8d4', '#e0b15a', '#c58be0', '#f09a6a']
+
+function Field({ label, hint, children }: { label: string; hint: string; children: ReactNode }) {
+  return (
+    <label className="beat-field" title={hint}>
+      <span>{label}</span>
+      {children}
+    </label>
+  )
+}
+
+function RowActions({ name, onCopy, onPaste }: { name: string; onCopy: () => void; onPaste: () => void }) {
+  const copy = copyOf(BEAT_ROW, 'copy')
+  const paste = copyOf(BEAT_ROW, 'paste')
+  return (
+    <div className="beat-actions">
+      <button type="button" className="beat-action" title={copy.hint} aria-label={`${copy.label} ${name}. ${copy.hint}`} onClick={onCopy}>{copy.label}</button>
+      <button type="button" className="beat-action" title={paste.hint} aria-label={`${paste.label} ${name}. ${paste.hint}`} onClick={onPaste}>{paste.label}</button>
+    </div>
+  )
+}
 
 export function BeatView({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
   const beatState = selectBeats(store)
@@ -17,6 +38,7 @@ export function BeatView({ store, engine }: { store: ProjectStore; engine: Audio
   const painting = useRef<{ channelId: string; on: boolean } | null>(null)
   const [picked, setPicked] = useState<{ channelId: string; index: number } | null>(null)
   const [editOpen, setEditOpen] = useState(false)
+  const [openRows, setOpenRows] = useState<Record<string, boolean>>({})
   const compact = useFormFactor() !== 'desk'
   if (!pattern) return null
   const pickedChannel = picked ? pattern.channels.find((row) => row.id === picked.channelId) : undefined
@@ -25,6 +47,7 @@ export function BeatView({ store, engine }: { store: ProjectStore; engine: Audio
   const beat = samplesToBeats(engine.positionSamples, project.sampleRate, project.tempo)
   const bar = (id: string) => copyOf(BEAT_BAR, id)
   const sheet = (id: string) => copyOf(BEAT_SHEET, id)
+  const rowCopy = (id: string) => copyOf(BEAT_ROW, id)
   const extras = (
     <>
       <select {...described(sheet('color'))} value={pattern.color} onChange={(event) => store.recolorPattern(event.target.value)}>
@@ -44,6 +67,48 @@ export function BeatView({ store, engine }: { store: ProjectStore; engine: Audio
       <TipButton label={sheet('slot').label} hint={sheet('slot').hint} onClick={() => store.placePatternScene(0)} />
     </>
   )
+  const rowFields = (channel: StepChannel, count: number) => {
+    const volume = rowCopy('volume')
+    const pan = rowCopy('pan')
+    const output = rowCopy('output')
+    const steps = rowCopy('steps')
+    const swing = rowCopy('swing')
+    return (
+      <>
+        <Field label={volume.label} hint={volume.hint}>
+          <input aria-label={`${channel.name} ${volume.label}. ${volume.hint}`} title={volume.hint} type="range" min={0} max={1} step={0.01} value={channel.volume} onChange={(event) => store.setChannel(channel.id, { volume: Number(event.target.value) })} />
+        </Field>
+        <Field label={pan.label} hint={pan.hint}>
+          <input aria-label={`${channel.name} ${pan.label}. ${pan.hint}`} title={pan.hint} type="range" min={-1} max={1} step={0.01} value={channel.pan} onChange={(event) => store.setChannel(channel.id, { pan: Number(event.target.value) })} />
+        </Field>
+        <Field label={output.label} hint={output.hint}>
+          <select aria-label={`${channel.name} ${output.label}. ${output.hint}`} title={output.hint} value={channel.output ?? ''} onChange={(event) => store.setChannel(channel.id, { output: event.target.value || null })}>
+            <option value="">Track</option>
+            {outputs.map((track) => (
+              <option key={track.id} value={track.id}>{track.name}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label={steps.label} hint={steps.hint}>
+          <input aria-label={`${channel.name} ${steps.label}. ${steps.hint}`} title={steps.hint} className="step-count" type="number" min={1} max={64} value={count} onChange={(event) => store.setChannel(channel.id, { steps: Number(event.target.value) })} />
+        </Field>
+        <Field label={swing.label} hint={swing.hint}>
+          <input
+            aria-label={`${channel.name} ${swing.label}. ${swing.hint}`}
+            title={swing.hint}
+            className="step-count"
+            type="number"
+            min={0}
+            max={0.9}
+            step={0.05}
+            placeholder="—"
+            value={channel.swing ?? ''}
+            onChange={(event) => store.setChannel(channel.id, { swing: event.target.value === '' ? null : Number(event.target.value) })}
+          />
+        </Field>
+      </>
+    )
+  }
   return (
     <div className="beats">
       <div className="beat-bar">
@@ -53,8 +118,12 @@ export function BeatView({ store, engine }: { store: ProjectStore; engine: Audio
           ))}
         </select>
         <input {...described(bar('name'))} value={pattern.name} onChange={(event) => store.renamePattern(event.target.value)} />
-        <input {...described(bar('steps'))} type="number" min={1} max={64} value={pattern.steps} onChange={(event) => store.setPatternSteps(Number(event.target.value))} />
-        <input {...described(bar('swing'))} type="range" min={0} max={0.6} step={0.01} value={pattern.swing} onChange={(event) => store.setPatternSwing(Number(event.target.value))} />
+        <Field label={bar('steps').label} hint={bar('steps').hint}>
+          <input {...described(bar('steps'))} type="number" min={1} max={64} value={pattern.steps} onChange={(event) => store.setPatternSteps(Number(event.target.value))} />
+        </Field>
+        <Field label={bar('swing').label} hint={bar('swing').hint}>
+          <input {...described(bar('swing'))} type="range" min={0} max={0.6} step={0.01} value={pattern.swing} onChange={(event) => store.setPatternSwing(Number(event.target.value))} />
+        </Field>
         {compact ? <TipButton label={bar('edit').label} hint={bar('edit').hint} onClick={() => setEditOpen(true)} /> : extras}
         {!compact && picked && pickedCell && (
           <>
@@ -84,33 +153,16 @@ export function BeatView({ store, engine }: { store: ProjectStore; engine: Audio
         const count = channel.steps || pattern.steps
         const cells = store.quantizePreview?.channels.find((row) => row.id === channel.id)?.cells ?? channel.cells
         const playStep = channel.mute ? -1 : stepIndexAt(beat, count, 0.25, channel.swing ?? pattern.swing)
-        return (
-          <div className="beat-row" key={channel.id}>
-            <button type="button" className="beat-name" style={{ color: channel.color }} title="Open this sound in the piano roll." aria-label={`${channel.name}. Open this sound in the piano roll.`} onClick={() => store.openChannelRoll(channel.id)}>{channel.name}</button>
-            <button type="button" className={`mini ${channel.mute ? 'on' : ''}`} title="Silence this row." aria-label={`Mute ${channel.name}. Silence this row.`} onClick={() => store.setChannel(channel.id, { mute: !channel.mute })}>M</button>
-            <button type="button" className={`mini ${channel.solo ? 'on' : ''}`} title="Hear only this row." aria-label={`Solo ${channel.name}. Hear only this row.`} onClick={() => store.setChannel(channel.id, { solo: !channel.solo })}>S</button>
-            <input aria-label={`${channel.name} volume. How loud this row is.`} title="How loud this row is." type="range" min={0} max={1} step={0.01} value={channel.volume} onChange={(event) => store.setChannel(channel.id, { volume: Number(event.target.value) })} />
-            <input aria-label={`${channel.name} pan. Left or right.`} title="Left or right." type="range" min={-1} max={1} step={0.01} value={channel.pan} onChange={(event) => store.setChannel(channel.id, { pan: Number(event.target.value) })} />
-            <select aria-label={`${channel.name} output`} value={channel.output ?? ''} onChange={(event) => store.setChannel(channel.id, { output: event.target.value || null })}>
-              <option value="">Track</option>
-              {outputs.map((track) => (
-                <option key={track.id} value={track.id}>{track.name}</option>
-              ))}
-            </select>
-            <input aria-label={`${channel.name} steps`} className="step-count" type="number" min={1} max={64} value={count} onChange={(event) => store.setChannel(channel.id, { steps: Number(event.target.value) })} />
-            <input
-              aria-label={`${channel.name} swing`}
-              className="step-count"
-              type="number"
-              min={0}
-              max={0.9}
-              step={0.05}
-              placeholder="—"
-              value={channel.swing ?? ''}
-              onChange={(event) => store.setChannel(channel.id, { swing: event.target.value === '' ? null : Number(event.target.value) })}
-            />
+        const open = !!openRows[channel.id]
+        const mute = rowCopy('mute')
+        const solo = rowCopy('solo')
+        const more = rowCopy(open ? 'less' : 'more')
+        const steps = (
+          <div className="step-wrap">
             <div
               className="step-grid"
+              role="group"
+              aria-label={`${channel.name} steps. Tap a pad to add a hit. Drag to paint.`}
               onPointerDown={(event) => {
                 const step = (event.target as HTMLElement).closest('.step') as HTMLElement | null
                 if (!step) return
@@ -148,12 +200,49 @@ export function BeatView({ store, engine }: { store: ProjectStore; engine: Audio
                     data-index={index}
                     className={`step ${cell?.on ? 'on' : ''} ${playStep === index ? 'now' : ''}`}
                     style={cell?.on ? { background: channel.color } : undefined}
+                    aria-label={`${channel.name} step ${index + 1}`}
+                    aria-pressed={!!cell?.on}
                   />
                 )
               })}
             </div>
-            <button type="button" className="mini" onClick={() => store.copyRow(channel.id)}>Copy</button>
-            <button type="button" className="mini" onClick={() => store.pasteRow(channel.id)}>Paste</button>
+          </div>
+        )
+        if (compact) {
+          return (
+            <div className={`beat-row compact${open ? ' open' : ''}`} data-channel={channel.name} key={channel.id}>
+              <div className="beat-lead">
+                <button type="button" className="beat-name" style={{ color: channel.color }} title="Open this sound in the piano roll." aria-label={`${channel.name}. Open this sound in the piano roll.`} onClick={() => store.openChannelRoll(channel.id)}>{channel.name}</button>
+                <button type="button" className={`mini ${channel.mute ? 'on' : ''}`} title={mute.hint} aria-label={`${mute.label} ${channel.name}. ${mute.hint}`} aria-pressed={channel.mute} onClick={() => store.setChannel(channel.id, { mute: !channel.mute })}>M</button>
+                <button type="button" className={`mini ${channel.solo ? 'on' : ''}`} title={solo.hint} aria-label={`${solo.label} ${channel.name}. ${solo.hint}`} aria-pressed={channel.solo} onClick={() => store.setChannel(channel.id, { solo: !channel.solo })}>S</button>
+                <button
+                  type="button"
+                  className={`mini beat-more ${open ? 'on' : ''}`}
+                  aria-expanded={open}
+                  aria-controls={`row-settings-${channel.id}`}
+                  title={more.hint}
+                  aria-label={`${channel.name} ${more.label}. ${more.hint}`}
+                  onClick={() => setOpenRows((rows) => ({ ...rows, [channel.id]: !rows[channel.id] }))}
+                >
+                  {more.label}
+                </button>
+              </div>
+              {steps}
+              <div className="beat-settings" id={`row-settings-${channel.id}`}>
+                {rowFields(channel, count)}
+                <RowActions name={channel.name} onCopy={() => store.copyRow(channel.id)} onPaste={() => store.pasteRow(channel.id)} />
+              </div>
+            </div>
+          )
+        }
+        return (
+          <div className="beat-row" data-channel={channel.name} key={channel.id}>
+            <button type="button" className="beat-name" style={{ color: channel.color }} title="Open this sound in the piano roll." aria-label={`${channel.name}. Open this sound in the piano roll.`} onClick={() => store.openChannelRoll(channel.id)}>{channel.name}</button>
+            <button type="button" className={`mini ${channel.mute ? 'on' : ''}`} title={mute.hint} aria-label={`${mute.label} ${channel.name}. ${mute.hint}`} aria-pressed={channel.mute} onClick={() => store.setChannel(channel.id, { mute: !channel.mute })}>M</button>
+            <button type="button" className={`mini ${channel.solo ? 'on' : ''}`} title={solo.hint} aria-label={`${solo.label} ${channel.name}. ${solo.hint}`} aria-pressed={channel.solo} onClick={() => store.setChannel(channel.id, { solo: !channel.solo })}>S</button>
+            {rowFields(channel, count)}
+            {steps}
+            <RowActions name={channel.name} onCopy={() => store.copyRow(channel.id)} onPaste={() => store.pasteRow(channel.id)} />
           </div>
         )
       })}
