@@ -8,6 +8,7 @@ import { audition, deriveSongContext, suggest, UNSTUCK_BUTTON, UNSTUCK_TABS, typ
 export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; engine: AudioEngine; onClose: () => void }) {
   const [tab, setTab] = useState<SuggestionKind>('progression')
   const [heard, setHeard] = useState<string | null>(null)
+  const [added, setAdded] = useState('')
   const version = store.version
   const context = useMemo(() => {
     const beat = samplesToBeats(engine.positionSamples, store.project.sampleRate, store.project.tempo)
@@ -34,6 +35,7 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
   function useSuggestion(item: Suggestion) {
     engine.stopPreview()
     store.applyUnstuck(item)
+    setAdded('Added. Undo takes it back.')
     store.toast('Added. Undo takes it back.', 'good')
   }
 
@@ -58,8 +60,8 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
           </button>
         ))}
       </div>
-      <p className="unstuck-blurb">{blurb}</p>
-      <p className="unstuck-blurb">Hear plays it after the last chord. Use writes it, and undo takes it back.</p>
+      <p className="unstuck-blurb">{blurb} Hear plays it after the last chord. Use writes it, and undo takes it back.</p>
+      {added && <p className="unstuck-status" role="status">{added}</p>}
       <div className="unstuck-list">
         {items.map((item) => {
           const names = spelledLine(item.line, context.mode, context.key)

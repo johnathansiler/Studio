@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { ProjectStore } from '../state/store'
+import { isUntouchedEmpty } from '../model/launchProject'
 import { createEmptyProject, makeTrack, uid, type MidiNote, type Project } from '../model/types'
 import { spellSymbol } from '../model/progressions'
+import { starterPattern } from '../model/steps'
 import { applySuggestion } from '../unstuck/apply'
 import { deriveSongContext, normalizeSongContext } from '../unstuck/context'
 import { audition } from '../unstuck/preview'
@@ -104,6 +106,19 @@ describe('unstuck context', () => {
 })
 
 describe('unstuck suggestions', () => {
+  it('treats a drum pattern as music and keeps the next idea to four bars', () => {
+    const project = createEmptyProject()
+    const pattern = starterPattern()
+    project.beats = { activeId: pattern.id, patterns: [pattern] }
+    project.patternClips = [{ id: 'pat', patternId: pattern.id, startBeat: 0, lengthBeats: 4, scene: null }]
+    const context = deriveSongContext(project)
+    const next = suggestionsFor(context, 'progression')
+    expect(context.activeRoles).toContain('drums')
+    expect(next[0].why.toLowerCase().includes('nothing is written')).toBe(false)
+    expect(next.every((item) => item.bars <= 4)).toBe(true)
+    expect(suggestionsFor(context, 'arrangement').some((item) => item.id === 'arrange-drop')).toBe(true)
+  })
+
   it('continues a major loop with likely chords, a section, and the five moves', () => {
     const project = song([
       { bar: 0, pitches: [60, 64, 67] },
@@ -187,6 +202,7 @@ describe('unstuck apply', () => {
     expect(Math.min(...keys.midiClips.map((clip) => clip.startBeat))).toBe(0)
     const saved = JSON.parse(JSON.stringify(store.project)) as Project
     expect(saved.tracks.find((track) => track.name === 'Keys')!.midiClips.length).toBeGreaterThan(0)
+    expect(isUntouchedEmpty(store.project)).toBe(false)
     store.undo()
     expect(store.project.tracks[2].midiClips).toHaveLength(1)
     expect(store.project.tracks[2].midiClips[0].notes).toHaveLength(before)

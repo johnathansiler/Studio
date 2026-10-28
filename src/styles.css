@@ -613,6 +613,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .row-btns { display: flex; gap: 8px; justify-content: flex-end; }
 
 .toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 30; }
+body:has(.unstuck-sheet) .toasts { z-index: 90; top: 64px; bottom: auto; }
 .toast { background: #223128; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; max-width: 320px; box-shadow: var(--shadow); }
 .toast.warn { border-color: rgba(224, 177, 90, 0.5); }
 .toast.good { border-color: rgba(115, 196, 143, 0.5); }
@@ -711,7 +712,9 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
   min-height: 44px; border-radius: 8px; border: 1px solid var(--line); background: #18241d; color: var(--text); padding: 0 12px;
 }
 .unstuck-tabs button.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
-.unstuck-blurb { margin: 6px 12px 0; color: var(--muted); font-size: 13px; line-height: 1.35; }
+.unstuck-blurb, .unstuck-status { margin: 6px 12px 0; color: var(--muted); font-size: 13px; line-height: 1.35; }
+.unstuck-status { color: var(--accent); }
+.unstuck-line, .unstuck-why, .unstuck-names, .unstuck-card-top b { overflow-wrap: anywhere; }
 .unstuck-list { overflow: auto; padding: 8px 12px 16px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .unstuck-list article {
   display: flex; flex-direction: column; gap: 4px; padding: 10px; border-radius: 12px; background: #18241d; border: 1px solid transparent;

@@ -136,7 +136,7 @@ function suggestProgressions(context: SongContext): Suggestion[] {
       id: `prog-${slug(line)}`,
       kind: 'progression' as const,
       title,
-      why: last ? progressionWhy(last, path.symbols, mode) : `Nothing is written yet, so this starts on ${degreeKey(path.symbols[0] || tonic(mode))}.`,
+      why: progressionLead(last, path.symbols, mode, context.contentEndBeat > 0 || context.activeRoles.length > 0),
       line,
       startBeat: start,
       bars: path.symbols.length,
@@ -488,12 +488,11 @@ function beam(from: string, mode: Mode): Path[] {
       const prev = path.symbols.at(-1) ?? from
       for (const [symbol, weight] of nextWeights(prev, mode)) {
         const symbols = [...path.symbols, symbol]
-        let score = path.score + Math.log(weight)
-        if (step === 3) score += cadenceScore(symbols, mode)
+        const score = path.score + Math.log(weight)
         next.push({ symbols, score })
       }
     }
-    next.sort((a, b) => b.score - a.score)
+    next.sort((a, b) => finishScore(b, mode) - finishScore(a, mode))
     const seen = new Set<string>()
     paths = []
     for (const path of next) {
@@ -504,24 +503,23 @@ function beam(from: string, mode: Mode): Path[] {
       if (paths.length === 8) break
     }
   }
-  return paths
+  return paths.map((path) => ({ symbols: path.symbols, score: finishScore(path, mode) }))
 }
 
 function libraryPaths(from: string, mode: Mode, tempo: number): Path[] {
   const out: Path[] = []
   for (const item of PROGRESSIONS) {
     if (item.mode !== mode) continue
-    if (item.chords.length < 2 || item.chords.length > 8) continue
+    if (item.chords.length < 2 || item.chords.length > 4) continue
     const symbols = item.chords.map((chord) => chord.symbol)
     const first = weightOf(from, symbols[0], mode)
     if (first <= 0) continue
-    let score = Math.log(first) + 0.2
+    let logSum = Math.log(first)
     for (let index = 1; index < symbols.length; index++) {
       const weight = weightOf(symbols[index - 1], symbols[index], mode)
-      score += Math.log(weight || 0.35)
+      logSum += Math.log(weight || 0.35)
     }
-    score += cadenceScore(symbols, mode)
-    score -= Math.min(0.35, Math.abs(item.tempo - tempo) / 200)
+    const score = logSum / symbols.length + cadenceScore(symbols, mode) + 0.12 - Math.min(0.35, Math.abs(item.tempo - tempo) / 200)
     out.push({ symbols, score })
   }
   return out
@@ -560,6 +558,18 @@ function pickDiverse(paths: Path[], count: number): Path[] {
   take(false)
   if (!picked.length) picked.push({ symbols: ['I', 'V', 'vi', 'IV'], score: 0 })
   return picked.slice(0, count)
+}
+
+function finishScore(path: Path, mode: Mode): number {
+  if (!path.symbols.length) return path.score
+  return path.score / path.symbols.length + cadenceScore(path.symbols, mode)
+}
+
+function progressionLead(last: string, symbols: string[], mode: Mode, hasMusic: boolean): string {
+  if (last) return progressionWhy(last, symbols, mode)
+  const start = degreeKey(symbols[0] || tonic(mode))
+  if (hasMusic) return `No chords yet, so this starts on ${start} in the project key.`
+  return `Nothing is written yet, so this starts on ${start}.`
 }
 
 function progressionTitle(from: string, symbols: string[], used: Set<string>): string {
