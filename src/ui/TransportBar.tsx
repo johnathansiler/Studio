@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { emptyTap, pushTap, scaleTempo, tempoFromTaps, roundTempo, type TapMemory } from '../model/tap'
-import { formatBarsBeats, formatTimecode } from '../model/time'
+import { formatMapBars } from '../model/tempoMap'
+import { formatTimecode } from '../model/time'
 import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { AutomationFollow } from './AutomationLane'
@@ -124,7 +125,7 @@ export function TransportBar({
         </TipButton>
       </div>
       <div className="lcd" aria-live="polite">
-        <div className="bars">{formatBarsBeats(position, project.sampleRate, project.tempo, project.timeSignature)}</div>
+        <div className="bars">{formatMapBars(project, position)}</div>
         <div className="tc">
           {formatTimecode(position, project.sampleRate)} · {status}
           {takeProgress != null ? ` · HQ ${Math.round(takeProgress * 100)}%` : ''}

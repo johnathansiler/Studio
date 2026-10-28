@@ -5,6 +5,7 @@ import { unpackProject } from './model/archive'
 import { renderDemoLoop } from './model/demo'
 import { isSessionLink, isUntouchedEmpty, NEW_PROJECT, planLaunch, readTab, shouldKeepProject, TAB_PROJECT } from './model/launchProject'
 import { channelConstraints, inputChannel, mediaChannelCount, punchWindow, sliceCapture } from './model/comp'
+import { watchSpectral } from './audio/spectral/job'
 import { inspectClip } from './audio/stretch/engine'
 import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } from './model/types'
 import { SessionClient } from './remote/session'
@@ -15,7 +16,8 @@ import { ProjectStore, seedDemoProject } from './state/store'
 import { linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
-import { beatsToSamples, countInSeconds, samplesToBeats } from './model/time'
+import { countInAt, meterAtSample, tempoAtSample } from './model/tempoMap'
+import { beatsToSamples, samplesToBeats } from './model/time'
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { TunerPop } from './ui/AmpPop'
 import { ArrangeView } from './ui/ArrangeView'
@@ -42,6 +44,7 @@ import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
+import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
 import { MENU_COPY, UNSTUCK_COPY, VIEW_COPY, copyOf, described } from './ui/chrome'
 import { HintBubble, MenuRow, TipButton } from './ui/Hint'
@@ -85,6 +88,7 @@ export function App() {
     }, 40)
     return () => window.clearInterval(id)
   }, [engine])
+  useEffect(() => watchSpectral(store), [store])
   const [version, setVersion] = useState(0)
   const [surface, setSurface] = useState<'studio' | 'artist'>('studio')
   const [dock, setDock] = useState(380)
@@ -678,7 +682,7 @@ export function App() {
     if (mode === 'arrangement') store.armArrangement()
     const lead = scheduleLeadMs(session.primaryOneWay()?.ms ?? 40)
     const counting = store.project.countIn && engine.status === 'stopped'
-    const countMs = counting ? countInSeconds(store.project.tempo, store.project.timeSignature) * 1000 : 0
+    const countMs = counting ? countInAt(store.project, sample) * 1000 : 0
     engine.refreshClockAnchor()
     const hostPerf = performance.now() + lead + countMs
     session.broadcastTransport({
@@ -686,15 +690,15 @@ export function App() {
       timelineSample: Math.round(sample),
       hostPerfAtSample: hostPerf,
       mode,
-      tempo: store.project.tempo,
+      tempo: tempoAtSample(store.project, sample),
       countIn: counting,
       countInMs: Math.round(countMs),
-      timeSignature: store.project.timeSignature,
+      timeSignature: meterAtSample(store.project, sample),
       launches: store.launched,
       launchAt: store.launchAt,
       launchGen: store.launchGen,
     })
-    if (counting) engine.armCountIn(store.project.tempo, store.project.timeSignature)
+    if (counting) engine.armCountIn(tempoAtSample(store.project, sample), meterAtSample(store.project, sample))
     await engine.playAtPerf(sample, hostPerf, mode)
   }
 
@@ -975,7 +979,7 @@ export function App() {
     else if (!alreadyPlaying && settings.loop && store.project.loopEnabled) fromSample = store.project.loopStartSample
     const counting = store.project.countIn && !alreadyPlaying
     const lead = scheduleLeadMs(session.primaryOneWay()?.ms ?? 40)
-    const countMs = counting ? countInSeconds(store.project.tempo, store.project.timeSignature) * 1000 : 0
+    const countMs = counting ? countInAt(store.project, fromSample) * 1000 : 0
     engine.refreshClockAnchor()
     const hostPerf = performance.now() + lead + countMs
     if (!alreadyPlaying) {
@@ -984,10 +988,10 @@ export function App() {
         timelineSample: fromSample,
         hostPerfAtSample: hostPerf,
         mode: 'arrangement',
-        tempo: store.project.tempo,
+        tempo: tempoAtSample(store.project, fromSample),
         countIn: counting,
         countInMs: Math.round(countMs),
-        timeSignature: store.project.timeSignature,
+        timeSignature: meterAtSample(store.project, fromSample),
       })
     }
     await engine.beginRecord({
@@ -1513,6 +1517,7 @@ async function importDropped(files: FileList) {
         </div>
       )}
       {knockOpen && <KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} />}
+      <SpectralSheet store={store} />
       <HintBubble />
       <div className="toasts">
         {store.toasts.map((toast) => (

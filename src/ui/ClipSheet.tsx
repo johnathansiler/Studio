@@ -2,6 +2,7 @@ import type { AudioClip, StretchMode } from '../model/types'
 import { sourceSamplesOf } from '../audio/stretch/engine'
 import { selectClip } from '../state/select'
 import type { ProjectStore } from '../state/store'
+import './songMap.css'
 
 const MODES: { id: StretchMode; label: string }[] = [
   { id: 'pro', label: 'Pro' },
@@ -23,6 +24,7 @@ export function ClipSheet({ store, trackId, clip, onClose }: { store: ProjectSto
     <div className="clip-sheet" role="dialog" aria-label="Clip">
       <header>
         <strong>{shown.name}</strong>
+        <button type="button" className="text-btn" title="Spectrogram. Select a spot and remove clicks, hum, or noise." onClick={() => store.openSpectral(trackId, shown.id)}>Repair</button>
         <button type="button" className="text-btn" onClick={onClose}>Close</button>
       </header>
       <div className="row">
@@ -110,6 +112,15 @@ export function ClipSheet({ store, trackId, clip, onClose }: { store: ProjectSto
         </button>
         <button type="button" className="text-btn" aria-label="Add marker" onClick={() => store.addWarpMarker(trackId, shown.id)}>
           +
+        </button>
+      </div>
+      <div className="smart-row">
+        <span>{stretch?.sourceBpm ? `${stretch.sourceBpm.toFixed(1)} BPM in this clip` : 'No tempo in this clip yet'}</span>
+        <button type="button" title="Set the song tempo to this clip" disabled={stretch?.sourceBpm == null} onClick={() => store.adaptClipTempo(trackId, clip.id)}>
+          Use for song
+        </button>
+        <button type="button" title="Stretch this clip to the song tempo without changing its pitch" disabled={stretch?.sourceBpm == null} onClick={() => store.conformClipTempo(trackId, clip.id)}>
+          Fit to song
         </button>
       </div>
       {(stretch?.markers ?? []).map((marker) => (

@@ -7,7 +7,9 @@ import type { Processor } from '../audio/plugins/types'
 import { audibleIds } from '../model/audible'
 import { curveAt, prepareCurve, rampEvents, valueAtSample, writeSegment } from '../model/automation'
 import { arrangementDigest } from '../model/sessionSync'
-import { createEmptyProject, makeTrack, type AudioClip } from '../model/types'
+import { projectSampleBeat, snapSampleToMap } from '../model/tempoMap'
+import { samplesToBeats, snapSample } from '../model/time'
+import { createEmptyProject, makeTrack, type AudioClip, type MidiClip } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { lanePoints } from '../state/select'
 
@@ -213,6 +215,36 @@ describe('solo, mute, and link groups', () => {
     expect(store.project.tracks.every((item) => item.mute)).toBe(true)
     store.moveClip('a', 'c1', 800)
     expect(store.project.tracks.find((item) => item.id === 'b')?.clips[0].startSample).toBe(800)
+  })
+
+  it('links a move and a split on the tempo map, not a fixed tempo', () => {
+    const midi = (id: string): MidiClip => ({ id, name: id, startBeat: 0, durationBeats: 8, notes: [] })
+    const project = createEmptyProject(rate)
+    project.snap = true
+    project.tempoMap = [{ beat: 0, bpm: 120 }, { beat: 1, bpm: 60 }]
+    project.tracks = [
+      makeTrack({ id: 'a', name: 'A', type: 'audio', clips: [clip('c1', 0)], midiClips: [midi('m1')] }),
+      makeTrack({ id: 'b', name: 'B', type: 'audio', clips: [clip('c2', 0)], midiClips: [midi('m2')] }),
+    ]
+    const store = new ProjectStore(project)
+    store.project.snap = true
+    store.project.tempoMap = [{ beat: 0, bpm: 120 }, { beat: 1, bpm: 60 }]
+    store.assignMixGroup('a', 'new')
+    const groupId = store.project.mixGroups?.[0]?.id
+    expect(groupId).toBeTruthy()
+    store.assignMixGroup('b', groupId!)
+    const target = 50000
+    const mapped = snapSampleToMap(target, store.project)
+    expect(mapped).not.toBe(snapSample(target, rate, store.project.tempo, true))
+    store.placeAudioClips([{ trackId: 'a', clipId: 'c1', startSample: target }])
+    expect(store.project.tracks.find((item) => item.id === 'a')?.clips[0].startSample).toBe(mapped)
+    expect(store.project.tracks.find((item) => item.id === 'b')?.clips[0].startSample).toBe(mapped)
+    const beat = projectSampleBeat(store.project, target)
+    expect(beat).not.toBeCloseTo(samplesToBeats(target, rate, store.project.tempo))
+    store.splitAt('a', 'm1', target)
+    const right = (id: string) => store.project.tracks.find((item) => item.id === id)?.midiClips.find((item) => item.startBeat > 0)
+    expect(right('a')?.startBeat).toBeCloseTo(beat)
+    expect(right('b')?.startBeat).toBeCloseTo(beat)
   })
 
   it('writes latch and touch, and leaves read playback untouched', () => {
