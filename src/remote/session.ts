@@ -16,11 +16,14 @@ import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, sendVideoC
 import { isSilentTake, nextRelayGather, tcpRelayIceServers, udpIceServers, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
 import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_INITIAL_GATHER_MS, ICE_RESTART_VIDEO_HOLD_MS, ICE_STUCK_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
 import { sanitizeDiag, type DiagDirection } from '../model/diag'
-import { arrangementDigest, ASSET_CHUNK_BYTES, ASSET_CHUNK_GAP_MS, assetChunkCount, guestMayRequest, mediaCanCarryAssets, outlineWaveforms, referencedBufferIds } from '../model/sessionSync'
+import { ASSET_CHUNK_BYTES, ASSET_CHUNK_GAP_MS, assetChunkCount, guestMayRequest, mediaCanCarryAssets, outlineWaveforms, referencedBufferIds } from '../model/sessionSync'
+import { syncMessageOk, type ProjectOp, type StampWire, type SyncHello } from '../state/ops'
+import type { ProjectSync } from '../state/sync'
 import { CAP_NOTICE } from '../model/usage'
 import { SfuCall, type SfuKind, type SfuPublication } from './sfuCall'
 import { decodeWavPCM, encodeWav } from '../model/wav'
 import { base64ToBytes, bytesToBase64 } from '../storage/idb'
+import { assembleTakeWav, bytesToArrayBuffer, chunkBytes, clockOffsetForTake, packTakeChunk, readTakeChunk, sumRelayBytes, TAKE_CHUNK_BYTES, takeProgress, type RelayPair } from './hqTake'
 import { clearActiveSession, deviceParticipantId, readIdentity } from '../storage/identity'
 import type { AudioAsset, Project } from '../model/types'
 
@@ -192,6 +195,8 @@ interface PeerLink {
   appliedVideoBitrate: number
   appliedVideoHeight: number
   relayProtocols: { udp: number; tcp: number; tls: number }
+  /** Clock and take transfer only. Media stays on the SFU, so this connection must not send tracks. */
+  dataOnly?: boolean
   rtp: {
     outbound: DiagDirection
     inbound: DiagDirection
@@ -254,11 +259,18 @@ export class SessionClient {
   private onTake: ((take: IncomingTake) => void) | null = null
   private onControl: ((cmd: Record<string, unknown>) => void) | null = null
   private onArrangement: ((project: Project, assets: Map<string, AudioAsset>, ready: boolean) => void) | null = null
-  private arrangementStore: { project: Project; buffers: Map<string, AudioAsset> } | null = null
+  private arrangementStore: {
+    project: Project
+    buffers: Map<string, AudioAsset>
+    sync?: ProjectSync
+    applyRemoteOps?: (ops: ProjectOp[]) => boolean
+    mergeRemoteCheckpoint?: (project: Project, stamps: StampWire[] | undefined, prefer: 'local' | 'remote', lamport?: number, actor?: string, seq?: number) => ProjectOp[]
+    remoteFollow?: boolean
+  } | null = null
+  /** Musical sync is ops plus a checkpoint, not a full project on every edit. */
+  usingOps = false
+  private syncPasses = 0
   private sentAssets = new Set<string>()
-  private lastDigest = ''
-  private arrangementRev = 0
-  private incomingRev = 0
   private incomingProject: Project | null = null
   private incomingAssets = new Map<string, AudioAsset>()
   private resumeId = ''
@@ -676,9 +688,11 @@ export class SessionClient {
       this.startMaintenance()
       this.flushOutbox()
       this.resendLiveNegotiation()
+      this.maybeSync()
       return
     }
     if (msg.t === 'roster') {
+      const wasLive = this.state.status === 'live'
       this.state.participants = msg.participants
       if (msg.participants.some((person: Participant) => person.role === 'host')) this.state.hostLeft = false
       const admitted = this.selfAdmitted()
@@ -686,6 +700,7 @@ export class SessionClient {
       this.emit()
       this.syncMesh()
       this.routeTalk()
+      if (!wasLive && this.state.status === 'live') this.maybeSync()
       return
     }
     if (msg.t === 'host-away') {
@@ -756,8 +771,19 @@ export class SessionClient {
       if (this.state.role === 'host' && payload && guestMayRequest(String(payload.action || ''))) this.onControl?.(payload)
       return
     }
-    if (msg.t === 'project' && this.state.role === 'guest') {
-      this.incomingRev = Number(msg.rev) || this.incomingRev
+    if (msg.t === 'sync-hello') {
+      this.answerSyncHello(msg)
+      return
+    }
+    if (msg.t === 'sync-ops') {
+      this.acceptOps(msg.ops)
+      return
+    }
+    if (msg.t === 'sync-checkpoint') {
+      this.acceptCheckpoint(msg)
+      return
+    }
+    if (msg.t === 'project' && this.state.role === 'guest' && !this.usingOps) {
       this.incomingProject = msg.project as Project
       this.applyIncomingArrangement()
       return
@@ -1073,22 +1099,106 @@ export class SessionClient {
   }
 
   /**
-   * Host publishes the arrangement. The project JSON is small and goes on the
-   * signaling socket. The wav files do not: they wait until media is flowing,
-   * then move in small HTTP chunks the guest downloads from the server.
+   * Publish musical edits as compact ops on the signaling socket.
+   * Wav files stay on the HTTP asset pump and never ride Cloudflare.
    */
-  publishArrangement() {
+  publishEdits() {
     const store = this.arrangementStore
-    if (!store || this.state.role !== 'host' || this.state.status !== 'live') return
-    const digest = arrangementDigest(store.project)
-    if (digest !== this.lastDigest) {
-      this.lastDigest = digest
-      this.arrangementRev += 1
-      this.send({ t: 'project', rev: this.arrangementRev, project: { ...store.project, waveforms: outlineWaveforms(store.project, store.buffers) } })
-      this.state.syncLabel = 'Host · guests follow'
-      this.emit()
+    if (!store?.sync || this.state.status !== 'live') return
+    const ops = store.sync.peek()
+    for (let index = 0; index < ops.length; index += 40) {
+      const batch = ops.slice(index, index + 40)
+      const message = { t: 'sync-ops', ops: batch }
+      if (syncMessageOk(message)) this.send(message)
     }
-    this.pumpAssetUpload()
+    if (ops.length) store.sync.drain()
+    if (this.state.role === 'host') {
+      this.state.syncLabel = 'Host · guests follow'
+      this.pumpAssetUpload()
+    }
+  }
+
+  /** Host keeps the asset pump. Musical state itself is ops, not a snapshot. */
+  publishArrangement() {
+    this.publishEdits()
+  }
+
+  private maybeSync() {
+    if (this.state.status !== 'live' || !this.arrangementStore?.sync) return
+    this.usingOps = true
+    this.sendSyncHello()
+    this.publishEdits()
+  }
+
+  private sendSyncHello() {
+    const store = this.arrangementStore
+    if (!store?.sync || this.state.status !== 'live') return
+    const hello = store.sync.hello(store.project)
+    const message = { t: 'sync-hello', ...hello }
+    if (syncMessageOk(message)) this.send(message)
+  }
+
+  private answerSyncHello(msg: { from?: string } & Partial<SyncHello>) {
+    const store = this.arrangementStore
+    if (!store?.sync || !msg.from || msg.from === this.state.selfId) return
+    const reply = store.sync.replyTo(
+      {
+        actor: String(msg.actor || msg.from),
+        seq: Number(msg.seq) || 0,
+        lamport: Number(msg.lamport) || 0,
+        digest: String(msg.digest || ''),
+        seen: msg.seen && typeof msg.seen === 'object' ? msg.seen : {},
+      },
+      store.project,
+    )
+    if (reply.kind === 'ops' && reply.ops.length) {
+      const message = { t: 'sync-ops', to: msg.from, ops: reply.ops }
+      if (syncMessageOk(message)) this.send(message)
+      return
+    }
+    if (reply.kind === 'checkpoint' && reply.project) {
+      const project = { ...reply.project, waveforms: outlineWaveforms(store.project, store.buffers) }
+      const message = {
+        t: 'sync-checkpoint',
+        to: msg.from,
+        host: this.state.role === 'host',
+        actor: store.sync.actor,
+        seq: store.sync.seq,
+        project,
+        stamps: reply.stamps,
+        lamport: reply.lamport,
+        digest: reply.digest,
+      }
+      if (syncMessageOk(message)) this.send(message)
+    }
+  }
+
+  private acceptOps(ops: unknown) {
+    const store = this.arrangementStore
+    if (!store?.applyRemoteOps || !Array.isArray(ops)) return
+    this.usingOps = true
+    const gap = store.applyRemoteOps(ops as ProjectOp[])
+    if (gap) this.sendSyncHello()
+    if (this.state.role === 'host') this.pumpAssetUpload()
+    this.emit()
+  }
+
+  private acceptCheckpoint(msg: { project?: Project; stamps?: StampWire[]; host?: boolean; lamport?: number; digest?: string; actor?: string; seq?: number }) {
+    const store = this.arrangementStore
+    if (!store?.mergeRemoteCheckpoint || !msg.project) return
+    this.usingOps = true
+    if (this.state.role === 'guest') store.remoteFollow = true
+    const reply = store.mergeRemoteCheckpoint(msg.project, msg.stamps, msg.host ? 'remote' : 'local', Number(msg.lamport) || 0, String(msg.actor || ''), Number(msg.seq) || 0)
+    if (reply.length) {
+      const message = { t: 'sync-ops', ops: reply }
+      if (syncMessageOk(message)) this.send(message)
+    }
+    const digest = store.sync?.hello(store.project).digest
+    if (msg.digest && digest && digest !== msg.digest && this.syncPasses < 2) {
+      this.syncPasses += 1
+      this.sendSyncHello()
+    } else this.syncPasses = 0
+    this.applyIncomingArrangement()
   }
 
   private uplinkReady() {
@@ -1212,6 +1322,18 @@ export class SessionClient {
   }
 
   private applyIncomingArrangement() {
+    if (this.usingOps && this.arrangementStore) {
+      const project = this.arrangementStore.project
+      const assets = new Map(this.incomingAssets)
+      const ids = referencedBufferIds(project)
+      const ready = ids.every((id) => assets.has(id) || this.arrangementStore?.buffers.has(id))
+      this.state.preferLocalBacking = ready
+      this.state.syncLabel = ready ? 'Following host' : 'Receiving arrangement'
+      this.refreshCue()
+      this.onArrangement?.(project, assets, ready)
+      this.emit()
+      return
+    }
     const project = this.incomingProject
     if (!project) return
     const assets = new Map(this.incomingAssets)
@@ -1279,10 +1401,13 @@ export class SessionClient {
   }
 
   private closePeer(id: string) {
-    this.remoteStreams.delete(id)
-    this.pendingPubs.delete(id)
-    this.clockOffset.delete(id)
     const link = this.peers.get(id)
+    const keepCall = Boolean(link?.dataOnly && this.state.sfu)
+    if (!keepCall) {
+      this.remoteStreams.delete(id)
+      this.pendingPubs.delete(id)
+      this.clockOffset.delete(id)
+    }
     if (!link) {
       this.engine.setRemoteMusic(id, null)
       this.engine.setTalk(id, null, false)
@@ -1296,6 +1421,7 @@ export class SessionClient {
     if (link.recoveryTimer) window.clearTimeout(link.recoveryTimer)
     link.pc.close()
     this.peers.delete(id)
+    if (keepCall) return
     this.engine.setRemoteMusic(id, null)
     this.engine.setTalk(id, null, false)
     if (this.state.media[id]) {
@@ -1396,6 +1522,7 @@ export class SessionClient {
       } catch {
         bytes = 0
       }
+      bytes += await this.relayBytes([...this.peers.values()].filter((link) => link.dataOnly))
       if (this.sfuCall.sessionId) key = this.sfuCall.sessionId
       if (this.sfuCall.published && this.sfuCall.sessionId) {
         const kinds: SfuKind[] = ['music', 'talk', 'camera', 'screen']
@@ -1409,22 +1536,7 @@ export class SessionClient {
       }
       this.noteSfuState({ connection: this.sfuCall.connection, ice: this.sfuCall.ice, signaling: this.sfuCall.signaling })
     } else {
-      for (const link of this.peers.values()) {
-        try {
-          const stats = await link.pc.getStats()
-          stats.forEach((report) => {
-            const row = report as unknown as Record<string, number | string | boolean>
-            if (report.type !== 'candidate-pair') return
-            const selected = Boolean(row.nominated) || Boolean(row.selected) || row.state === 'succeeded'
-            if (!selected) return
-            const local = stats.get(String(row.localCandidateId || '')) as { candidateType?: string } | undefined
-            if (local?.candidateType !== 'relay') return
-            bytes += Number(row.bytesSent || 0) + Number(row.bytesReceived || 0)
-          })
-        } catch {
-          /* the peer connection is closing */
-        }
-      }
+      bytes = await this.relayBytes(this.peers.values())
     }
     const floor = rememberedUsageFloor()
     try {
@@ -1475,6 +1587,7 @@ export class SessionClient {
     }
     if (this.state.sfu) {
       this.ensureSfu()
+      this.syncDataPeers()
       return
     }
     for (const peer of this.remoteAdmitted()) {
@@ -1484,14 +1597,78 @@ export class SessionClient {
         this.closePeer(peer.id)
       }
       const current = this.peers.get(peer.id)
-      if (current) {
-        if (instance) current.remoteInstance = instance
+      if (current?.dataOnly) this.closePeer(peer.id)
+      const live = this.peers.get(peer.id)
+      if (live) {
+        if (instance) live.remoteInstance = instance
         continue
       }
       void this.enqueueSignal(peer.id, async () => {
         if (!this.peers.has(peer.id)) await this.createPeer(peer.id, instance)
       })
     }
+  }
+
+  /** Takes and the clock stay on a direct data channel while the SFU carries the live media. */
+  private syncDataPeers() {
+    const wanted = new Set(this.dataPeerIds())
+    for (const id of [...this.peers.keys()]) {
+      if (!wanted.has(id)) this.closePeer(id)
+    }
+    for (const id of wanted) {
+      const person = this.state.participants.find((peer) => peer.id === id)
+      const instance = person?.instanceId || ''
+      const link = this.peers.get(id)
+      if (link && !link.dataOnly) this.closePeer(id)
+      if (link && link.dataOnly && !keepPeerConnection({ left: false, remoteInstance: instance, previousInstance: link.remoteInstance || instance })) {
+        this.closePeer(id)
+      }
+      const current = this.peers.get(id)
+      if (current) {
+        if (instance) current.remoteInstance = instance
+        continue
+      }
+      void this.enqueueSignal(id, async () => {
+        if (!this.peers.has(id)) await this.createDataPeer(id, instance)
+      })
+    }
+  }
+
+  private dataPeerIds() {
+    if (this.state.role === 'host') return this.remoteAdmitted().filter((peer) => peer.role === 'guest').map((peer) => peer.id)
+    const host = this.state.participants.find((peer) => peer.role === 'host' && peer.admitted && peer.id !== this.state.selfId)
+    return host ? [host.id] : []
+  }
+
+  private createDataPeer(id: string, remoteInstance = '') {
+    return this.createPeer(id, remoteInstance, true)
+  }
+
+  /** Selected Cloudflare relay pairs. Direct takes add nothing. The monthly cap is untouched. */
+  private async relayBytes(links: Iterable<PeerLink>) {
+    let bytes = 0
+    for (const link of links) {
+      try {
+        const stats = await link.pc.getStats()
+        const pairs: RelayPair[] = []
+        stats.forEach((report) => {
+          const row = report as unknown as Record<string, number | string | boolean>
+          if (report.type !== 'candidate-pair') return
+          const selected = Boolean(row.nominated) || Boolean(row.selected) || row.state === 'succeeded'
+          const local = stats.get(String(row.localCandidateId || '')) as { candidateType?: string } | undefined
+          pairs.push({
+            selected,
+            candidateType: local?.candidateType,
+            bytesSent: Number(row.bytesSent || 0),
+            bytesReceived: Number(row.bytesReceived || 0),
+          })
+        })
+        bytes += sumRelayBytes(pairs)
+      } catch {
+        /* the peer connection is closing */
+      }
+    }
+    return bytes
   }
 
   private enqueueSignal(id: string, job: () => Promise<void>) {
@@ -1516,12 +1693,12 @@ export class SessionClient {
     return this.state.participants.filter((p) => p.admitted && p.id !== this.state.selfId)
   }
 
-  private async createPeer(id: string, remoteInstance = '') {
+  private async createPeer(id: string, remoteInstance = '', dataOnly = false) {
     if (this.peers.has(id)) return this.peers.get(id)!
     const udp = udpIceServers(this.ice)
     const pc = new RTCPeerConnection({
       iceServers: (udp.length ? udp : this.ice) as RTCIceServer[],
-      iceTransportPolicy: this.state.iceTransportPolicy,
+      iceTransportPolicy: dataOnly ? 'all' : this.state.iceTransportPolicy,
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require',
     })
@@ -1567,10 +1744,11 @@ export class SessionClient {
       appliedVideoBitrate: 0,
       appliedVideoHeight: 0,
       relayProtocols: { udp: 0, tcp: 0, tls: 0 },
+      dataOnly,
       rtp: null,
     }
     const impolite = !this.isPolite()
-    if (impolite) {
+    if (impolite && !dataOnly) {
       const video = videoEncodingBudget(this.state.videoBitrate)
       link.musicSender = pc.addTransceiver('audio', { direction: 'sendrecv' })
       link.talkSender = pc.addTransceiver('audio', { direction: 'sendrecv' })
@@ -1651,12 +1829,14 @@ export class SessionClient {
     if (impolite) {
       link.clock = pc.createDataChannel('clock', { ordered: true })
       link.takes = pc.createDataChannel('takes', { ordered: true })
-      link.pcm = pc.createDataChannel('pcm', { ordered: false, maxRetransmits: 0 })
       this.bindChannel(id, link, link.clock)
       this.bindChannel(id, link, link.takes)
-      this.bindChannel(id, link, link.pcm)
+      if (!dataOnly) {
+        link.pcm = pc.createDataChannel('pcm', { ordered: false, maxRetransmits: 0 })
+        this.bindChannel(id, link, link.pcm)
+      }
     }
-    await this.attachSenders(id, link)
+    if (!dataOnly) await this.attachSenders(id, link)
     this.emit()
     return link
   }
@@ -1937,7 +2117,7 @@ export class SessionClient {
     if (!link || link.pc.connectionState === 'closed') {
       if (data.restart) return
       if (link) this.closePeer(from)
-      link = await this.createPeer(from)
+      link = this.state.sfu ? await this.createDataPeer(from) : await this.createPeer(from)
     }
     try {
       if (data.restart) {
@@ -1972,18 +2152,20 @@ export class SessionClient {
         await this.flushIce(link)
         this.scheduleRecovery(from, link)
         if (description.type === 'offer') {
-          this.adoptTransceivers(link)
-          this.preferOpus(link.musicSender)
-          this.preferOpus(link.talkSender)
-          this.preferVideo(link.camSender)
-          this.preferVideo(link.screenSender)
-          await this.attachSenders(from, link)
+          if (!link.dataOnly) {
+            this.adoptTransceivers(link)
+            this.preferOpus(link.musicSender)
+            this.preferOpus(link.talkSender)
+            this.preferVideo(link.camSender)
+            this.preferVideo(link.screenSender)
+            await this.attachSenders(from, link)
+          }
           await this.commitLocal(link, await link.pc.createAnswer())
           link.answeredNegotiationId = negotiationId
           link.answerDescription = link.pc.localDescription
           this.send({ t: 'signal', to: from, data: { description: link.pc.localDescription, negotiationId } })
         }
-        await this.tuneSenders(link)
+        if (!link.dataOnly) await this.tuneSenders(link)
       } else if (Object.prototype.hasOwnProperty.call(data, 'candidate')) {
         const end = !candidate || !candidate.candidate
         if (!end && negotiationId != null && link.remoteNegotiationId != null && negotiationId !== link.remoteNegotiationId) return
@@ -2021,6 +2203,7 @@ export class SessionClient {
   }
 
   private noteMedia(id: string, link: PeerLink) {
+    if (link.dataOnly && this.state.sfu) return
     const previous = this.state.media[id]
     this.state.media = {
       ...this.state.media,
@@ -2623,7 +2806,7 @@ export class SessionClient {
         hostSampleRate: payload.sampleRate,
         oneWayMs: this.state.preferLocalBacking ? 0 : (estimate?.ms ?? payload.oneWayHintMs ?? 30),
       }
-      this.note(`Recording locally against the host grid (−${this.punch.oneWayMs.toFixed(0)} ms compensation armed).`)
+      this.note(`Recording the mic locally at full quality. Alignment −${this.punch.oneWayMs.toFixed(0)} ms.`)
       this.emit()
       return
     }
@@ -2669,8 +2852,8 @@ export class SessionClient {
     this.punch = null
     if (!punch || !this.hostId()) return
     const link = this.peers.get(this.hostId()!)
-    const offset = link?.remoteMinusLocal
-    if (!link || offset == null) {
+    const offset = clockOffsetForTake(link?.remoteMinusLocal, this.clockOffset.get(this.hostId()!)?.remoteMinusLocal)
+    if (offset == null) {
       this.note('Take kept locally but not uploaded: clock sync has no sample yet.')
       this.emit()
       return
@@ -2700,8 +2883,8 @@ export class SessionClient {
       sliced.actualPerfStart,
       punch.hostSampleRate,
     )
-    const wav = encodeWav(channels, this.engine.sampleRate)
-    const detail = `compensated ${window.compensationMs.toFixed(1)} ms via ${this.state.monitorMode}`
+    const wav = encodeWav(channels, this.engine.sampleRate, { bits: 24, dither: 'tpdf' })
+    const detail = `24-bit local mic, compensated ${window.compensationMs.toFixed(1)} ms via ${this.state.monitorMode}`
     await this.sendTake(link, {
       takeId: punch.takeId,
       placeAtSample: placeAt,
@@ -2714,17 +2897,17 @@ export class SessionClient {
   }
 
   private async sendTake(
-    link: PeerLink,
+    link: PeerLink | undefined,
     take: { takeId: string; placeAtSample: number; sampleRate: number; compensationMs: number; detail: string; silent: boolean; wav: ArrayBuffer },
   ) {
-    const channel = await this.waitForTakes(link)
+    const channel = link ? await this.waitForTakes(link) : null
     if (!channel) {
       await this.sendTakeHttp(take)
       return
     }
     const bytes = new Uint8Array(take.wav)
-    const chunkSize = 16 * 1024
-    const total = Math.ceil(bytes.byteLength / chunkSize)
+    const pieces = chunkBytes(bytes, TAKE_CHUNK_BYTES)
+    const total = pieces.length
     channel.send(
       JSON.stringify({
         t: 'begin',
@@ -2740,14 +2923,9 @@ export class SessionClient {
     )
     for (let index = 0; index < total; index++) {
       while (channel.bufferedAmount > 1_000_000) await new Promise((resolve) => window.setTimeout(resolve, 20))
-      const slice = bytes.subarray(index * chunkSize, (index + 1) * chunkSize)
-      const packet = new Uint8Array(8 + slice.byteLength)
-      const view = new DataView(packet.buffer)
-      view.setUint32(0, index)
-      view.setUint32(4, total)
-      packet.set(slice, 8)
+      const packet = new Uint8Array(bytesToArrayBuffer(packTakeChunk(index, total, pieces[index])))
       channel.send(packet)
-      this.state.takeProgress = (index + 1) / total
+      this.state.takeProgress = takeProgress(index + 1, total)
       this.emit()
     }
     channel.send(JSON.stringify({ t: 'end', takeId: take.takeId }))
@@ -2847,10 +3025,11 @@ export class SessionClient {
       return
     }
     if (!link.take) return
-    const view = new DataView(data)
-    const index = view.getUint32(0)
-    link.take.parts[index] = new Uint8Array(data.slice(8))
-    this.state.takeProgress = link.take.parts.filter(Boolean).length / link.take.total
+    const chunk = readTakeChunk(data)
+    if (!chunk) return
+    link.take.parts[chunk.index] = chunk.bytes
+    link.take.total = chunk.total
+    this.state.takeProgress = takeProgress(link.take.parts.filter(Boolean).length, link.take.total)
     this.emit()
   }
 
@@ -2858,18 +3037,14 @@ export class SessionClient {
     const incoming = link.take
     link.take = undefined
     if (!incoming) return
-    const size = incoming.parts.reduce((sum, part) => sum + (part?.byteLength || 0), 0)
-    const wav = new Uint8Array(size)
-    let offset = 0
-    for (const part of incoming.parts) {
-      if (!part) {
-        this.note('Take upload was missing a chunk.')
-        return
-      }
-      wav.set(part, offset)
-      offset += part.byteLength
+    const wav = assembleTakeWav(incoming.parts, incoming.total)
+    if (!wav) {
+      this.note('Take upload was missing a chunk.')
+      this.state.takeProgress = null
+      this.emit()
+      return
     }
-    const decoded = decodeWavPCM(wav.buffer)
+    const decoded = decodeWavPCM(bytesToArrayBuffer(wav))
     const meta = incoming.meta
     this.state.takeProgress = null
     const silent = Boolean(meta.silent) || isSilentTake(decoded.channels)

@@ -18,6 +18,7 @@ import {
 } from '../audio/plugins/ampDsp'
 import type { PluginInstance } from '../model/types'
 import type { ParamSpec } from '../audio/plugins/types'
+import { selectChain } from '../state/select'
 import type { ProjectStore } from '../state/store'
 
 const AMP_KNOBS = ['gain', 'bass', 'mid', 'treble', 'presence', 'master'] as const
@@ -33,6 +34,7 @@ export function AmpPop({
   trackId: string | 'master'
   plugin: PluginInstance
 }) {
+  const chain = selectChain(store, trackId)
   const spec = descriptor('amp')
   const [selected, setSelected] = useState(0)
   const [info, setInfo] = useState(() => engine.monitorInfo(trackId === 'master' ? undefined : trackId))
@@ -163,14 +165,14 @@ export function AmpPop({
           <PedalDetail
             params={params}
             index={selected}
-            trackPlugins={trackId === 'master' ? store.project.masterPlugins : store.track(trackId)?.plugins ?? []}
+            trackPlugins={chain}
             onChange={set}
             onRemove={() => {
               store.updatePlugin(trackId, plugin.id, { params: removePedal(params, selected) })
             }}
             onLoop={(mode) => set('loop', mode)}
             onOpenLoop={() => {
-              const loop = (trackId === 'master' ? store.project.masterPlugins : store.track(trackId)?.plugins ?? []).find((item) => item.pluginId === 'loop')
+              const loop = chain.find((item) => item.pluginId === 'loop')
               if (loop) store.focusPlugin(trackId, loop.id)
             }}
           />

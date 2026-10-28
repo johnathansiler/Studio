@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
+import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { activeComp } from '../model/comp'
 import { computePeaks } from '../model/demo'
 import { sourceSamplesOf, stretchEdge } from '../audio/stretch/engine'
@@ -7,12 +8,19 @@ import { rectsHit } from '../model/edit'
 import { snapSample } from '../model/time'
 import type { AudioClip } from '../model/types'
 import { ClipSheet } from './ClipSheet'
+import { selectArrange } from '../state/select'
+import { TrackReadout } from './AnalysisSheet'
 import type { ProjectStore } from '../state/store'
-import { activeTool, EDITOR_TOOL_KEYS, subscribeTools } from '../state/tools'
+import { activeTool, EDITOR_TOOL_KEYS, subscribeTools, toolClaimsGesture } from '../state/tools'
 import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
 import { AddTrackButton } from './AddTrack'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
+import { TRACK_ROW, TRACK_SHEET, copyOf, described } from './chrome'
+import { useFormFactor } from './form'
+import { ActionSheet, SheetRow, TipButton } from './Hint'
+import { RecordBar } from './RecordBar'
+import { coarsePointer, trimZone } from './touchEdit'
 
 export function ArrangeView({
   store,
@@ -22,6 +30,7 @@ export function ArrangeView({
   onOpenPiano,
   onPerform,
   onQuickPunch,
+  onAnalyze,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -30,8 +39,9 @@ export function ArrangeView({
   onOpenPiano: (trackId: string, clipId?: string) => void
   onPerform: (mode: 'keys' | 'drums') => void
   onQuickPunch: () => void
+  onAnalyze: (trackId: string) => void
 }) {
-  const project = store.project
+  const project = selectArrange(store).project
   const [px, setPx] = useState(90)
   const pxRef = useRef(px)
   pxRef.current = px
@@ -147,18 +157,38 @@ export function ArrangeView({
     const end = (event: PointerEvent) => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
       up(event)
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+  }
+
+  function beginErase(event: ReactPointerEvent) {
+    event.stopPropagation()
+    event.preventDefault()
+    const gone = new Set<string>()
+    const drop = (x: number, y: number) => {
+      const node = document.elementFromPoint(x, y)?.closest('[data-clip]') as HTMLElement | null
+      const id = node?.dataset.clip
+      const trackId = node?.dataset.track
+      if (!id || !trackId || gone.has(id)) return
+      gone.add(id)
+      store.selectClip(trackId, id, node.dataset.midi === '1', false, false)
+      store.deleteSelectedClip()
+    }
+    drop(event.clientX, event.clientY)
+    watch((ev) => drop(ev.clientX, ev.clientY), () => undefined)
   }
 
   function onTimelineDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (event.button !== 0) return
+    if (event.button !== 0 && event.pointerType !== 'touch') return
     const current = activeTool()
     const target = event.target as HTMLElement
     if (target.closest('.clip') && !passive) return
     if (target.closest('.ruler') && current !== 'pan' && current !== 'zoom') return
+    if (toolClaimsGesture(current)) event.preventDefault()
     if (current === 'pan') {
       const el = scroller.current
       if (!el) return
@@ -301,86 +331,14 @@ export function ArrangeView({
     )
   }
 
+  const touch = useFormFactor() !== 'desk'
+  const [trackSheet, setTrackSheet] = useState<string | null>(null)
   const selected = project.tracks.flatMap((track) => track.clips.filter((clip) => clip.id === store.selectedClipId).map((clip) => ({ track, clip })))[0]
-  const record = store.recordSettings()
-  const selectedFolder = project.tracks.flatMap((track) => track.clips.map((clip) => ({ track, clip }))).find((item) => item.clip.id === store.selectedClipId && item.clip.folder)
-  const selectedMidi = project.tracks.flatMap((track) => track.midiClips.map((clip) => ({ track, clip }))).find((item) => item.clip.id === store.selectedMidiClipId)
+  const sheetTrack = project.tracks.find((track) => track.id === trackSheet) || null
 
   return (
     <div className="arrange-wrap">
-      <div className="rec-bar" role="group" aria-label="Recording">
-        <button type="button" className={record.loop ? 'on' : ''} onClick={() => {
-          const next = !record.loop
-          store.setRecord({ loop: next })
-          if (next) store.setLoop(true, project.loopStartSample, project.loopEndSample)
-        }}>Cycle</button>
-        <button type="button" className={record.punchEnabled ? 'on' : ''} onClick={() => store.setRecord({ punchEnabled: !record.punchEnabled, quick: false })}>Punch</button>
-        <button type="button" onClick={() => store.setRecord({ punchIn: Math.round(engine.currentTimelineSample()) })}>In</button>
-        <button type="button" onClick={() => store.setRecord({ punchOut: Math.round(engine.currentTimelineSample()) })}>Out</button>
-        <button type="button" onClick={onQuickPunch}>Quick</button>
-        <label>Pre
-          <input inputMode="decimal" value={record.preRoll} onChange={(event) => store.setRecord({ preRoll: Number(event.target.value) || 0 })} />
-        </label>
-        <label>Post
-          <input inputMode="decimal" value={record.postRoll} onChange={(event) => store.setRecord({ postRoll: Number(event.target.value) || 0 })} />
-        </label>
-        <select value={record.rollUnit} onChange={(event) => store.setRecord({ rollUnit: event.target.value === 'seconds' ? 'seconds' : 'bars' })} aria-label="Roll unit">
-          <option value="bars">Bars</option>
-          <option value="seconds">Seconds</option>
-        </select>
-        {project.tracks.find((track) => track.id === store.selectedTrackId)?.type === 'audio' && (
-          <select
-            aria-label="Track input"
-            value={project.tracks.find((track) => track.id === store.selectedTrackId)?.input || 'mic'}
-            onChange={(event) => {
-              const track = project.tracks.find((item) => item.id === store.selectedTrackId)
-              if (track) store.updateTrack(track.id, { input: event.target.value })
-            }}
-          >
-            <option value="mic">Mic · all</option>
-            <option value="mic:0">Mic 1</option>
-            <option value="mic:1">Mic 2</option>
-            <option value="mic:2">Mic 3</option>
-            <option value="mic:3">Mic 4</option>
-            <option value="none">No input</option>
-            {session.state.participants
-              .filter((person) => person.id !== session.state.selfId)
-              .map((person) => (
-                <option key={person.id} value={`remote:${person.id}`}>{person.name}</option>
-              ))}
-          </select>
-        )}
-        <select value={record.midiLoop} onChange={(event) => store.setRecord({ midiLoop: event.target.value === 'merge' ? 'merge' : 'takes' })} aria-label="MIDI loop mode">
-          <option value="takes">MIDI takes</option>
-          <option value="merge">MIDI merge</option>
-        </select>
-        {selectedMidi && (
-          <button type="button" onClick={() => store.commitMidiPass(selectedMidi.track.id, selectedMidi.clip.id, selectedMidi.clip.notes)}>Save MIDI take</button>
-        )}
-        {selectedMidi?.clip.takes && selectedMidi.clip.takes.length > 0 && (
-          <select aria-label="MIDI take" value={selectedMidi.clip.activeTakeId || ''} onChange={(event) => store.recallMidi(selectedMidi.track.id, selectedMidi.clip.id, event.target.value)}>
-            {selectedMidi.clip.takes.map((take) => (
-              <option key={take.id} value={take.id}>{take.name}</option>
-            ))}
-          </select>
-        )}
-        {selectedFolder?.clip.folder && (
-          <>
-            <select
-              aria-label="Comp"
-              value={selectedFolder.clip.folder.activeCompId}
-              onChange={(event) => store.recallTakeComp(selectedFolder.track.id, selectedFolder.clip.id, event.target.value)}
-            >
-              {selectedFolder.clip.folder.comps.map((comp) => (
-                <option key={comp.id} value={comp.id}>{comp.name}</option>
-              ))}
-            </select>
-            <button type="button" onClick={() => store.saveTakeComp(selectedFolder.track.id, selectedFolder.clip.id)}>Save comp</button>
-            <button type="button" onClick={() => store.flattenTakes(selectedFolder.track.id, selectedFolder.clip.id, false)}>Flatten</button>
-            <button type="button" onClick={() => store.flattenTakes(selectedFolder.track.id, selectedFolder.clip.id, true)}>Merge</button>
-          </>
-        )}
-      </div>
+      <RecordBar store={store} engine={engine} session={session} onQuickPunch={onQuickPunch} />
       <div className="arrange" data-tool={tool}>
       <div className="heads">
         <div className="ruler-gap" />
@@ -389,52 +347,81 @@ export function ArrangeView({
             <header>
               <input
                 className="name"
+                aria-label={`${track.name} name`}
                 style={{ color: track.color }}
                 value={track.name}
                 onChange={(event) => store.updateTrack(track.id, { name: event.target.value })}
               />
-              {track.type === 'midi' && (
-                <button className={`mini rack-open ${store.rackTrackId === track.id ? 'on' : ''}`} onClick={(event) => { event.stopPropagation(); store.openRack(track.id) }}>Rack</button>
-              )}
-              <button className="mini" onClick={() => store.removeTrack(track.id)} title="Remove track">
-                ×
-              </button>
-            </header>
-            <div className="row">
-              <button className={`mini ${track.mute ? 'on-m' : ''}`} onClick={() => store.updateTrack(track.id, { mute: !track.mute })}>
-                M
-              </button>
-              <button className={`mini ${track.solo ? 'on-s' : ''}`} onClick={() => store.updateTrack(track.id, { solo: !track.solo })}>
-                S
-              </button>
-              {(track.type === 'audio' || track.type === 'midi') && (
-                <button className={`mini ${track.armed ? 'on-r' : ''}`} title="Arm this track so record prints its input" onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
-                  R
-                </button>
-              )}
-              {track.type === 'audio' && (
-                <button className={`mini ${track.monitor ? 'on-s' : ''}`} title="Input monitor" onClick={() => store.updateTrack(track.id, { monitor: !track.monitor })}>
-                  I
-                </button>
-              )}
-              {track.type === 'midi' && (
+              {touch ? (
+                <TipButton className="mini" label="Track" hint="Monitor, input, instrument, and removing the track." onClick={(event) => { event.stopPropagation(); setTrackSheet(track.id) }}>
+                  ⋮
+                </TipButton>
+              ) : (
                 <>
-                  <button className="mini" title="Piano roll" onClick={() => onPerform('keys')}>K</button>
-                  <button className="mini" title="Drum machine" onClick={() => onPerform('drums')}>D</button>
+                  {track.type === 'midi' && (
+                    <TipButton className={`mini rack-open ${store.rackTrackId === track.id ? 'on' : ''}`} label={copyOf(TRACK_SHEET, 'rack').label} hint={copyOf(TRACK_SHEET, 'rack').hint} pressed={store.rackTrackId === track.id} onClick={(event) => { event.stopPropagation(); store.openRack(track.id) }}>
+                      Rack
+                    </TipButton>
+                  )}
+                  {track.type === 'midi' && (
+                    <TipButton className={`mini patch-open ${store.patchTrackId === track.id ? 'on' : ''}`} label="Patch" hint="Layered patch: synths, samples, grains, and a morph pad." pressed={store.patchTrackId === track.id} onClick={(event) => { event.stopPropagation(); store.openPatch(track.id) }}>
+                      Patch
+                    </TipButton>
+                  )}
+                  <TipButton className="mini" label={copyOf(TRACK_SHEET, 'remove').label} hint={copyOf(TRACK_SHEET, 'remove').hint} onClick={(event) => { event.stopPropagation(); store.removeTrack(track.id) }}>
+                    ×
+                  </TipButton>
                 </>
               )}
-              <input
-                className="slim"
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={track.volume}
-                onChange={(event) => store.updateTrack(track.id, { volume: Number(event.target.value) })}
-              />
+            </header>
+            <div className="row">
+              <TipButton className={`mini ${track.mute ? 'on-m' : ''}`} label={copyOf(TRACK_ROW, 'mute').label} hint={copyOf(TRACK_ROW, 'mute').hint} pressed={track.mute} onClick={() => store.updateTrack(track.id, { mute: !track.mute })}>
+                M
+              </TipButton>
+              <TipButton className={`mini ${track.solo ? 'on-s' : ''}`} label={copyOf(TRACK_ROW, 'solo').label} hint={copyOf(TRACK_ROW, 'solo').hint} pressed={track.solo} onClick={() => store.updateTrack(track.id, { solo: !track.solo })}>
+                S
+              </TipButton>
+              {(track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
+                <TipButton className={`mini ${track.armed ? 'on-r' : ''}`} label={copyOf(TRACK_ROW, 'arm').label} hint={track.type === 'midi' ? 'Record this instrument from its MIDI input.' : copyOf(TRACK_ROW, 'arm').hint} pressed={track.armed} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
+                  R
+                </TipButton>
+              )}
+              {!touch && track.type === 'audio' && (
+                <TipButton className={`mini ${track.monitor ? 'on-s' : ''}`} label={copyOf(TRACK_SHEET, 'monitor').label} hint={copyOf(TRACK_SHEET, 'monitor').hint} pressed={track.monitor} onClick={() => store.updateTrack(track.id, { monitor: !track.monitor })}>
+                  I
+                </TipButton>
+              )}
+              {!touch && track.type === 'midi' && (
+                <>
+                  <TipButton className="mini" label={copyOf(TRACK_SHEET, 'keys').label} hint={copyOf(TRACK_SHEET, 'keys').hint} onClick={() => onPerform('keys')}>
+                    K
+                  </TipButton>
+                  <TipButton className="mini" label={copyOf(TRACK_SHEET, 'drums').label} hint={copyOf(TRACK_SHEET, 'drums').hint} onClick={() => onPerform('drums')}>
+                    D
+                  </TipButton>
+                </>
+              )}
+              {!touch && (
+                <TipButton className="mini" label="Analyze" hint="Analyze the key, chords, and sections of this track." onClick={(event) => { event.stopPropagation(); onAnalyze(track.id) }}>
+                  An
+                </TipButton>
+              )}
+              {!touch && <TrackReadout trackId={track.id} />}
+              {!touch && (
+                <input
+                  className="slim"
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  {...described(copyOf(TRACK_SHEET, 'volume'))}
+                  value={track.volume}
+                  onChange={(event) => store.updateTrack(track.id, { volume: Number(event.target.value) })}
+                />
+              )}
             </div>
-            {track.type === 'audio' && (
-              <select className="input" value={track.input} onChange={(event) => store.updateTrack(track.id, { input: event.target.value })}>
+            {!touch && track.type === 'audio' && (
+              <select className="input" {...described(copyOf(TRACK_SHEET, 'input'))} value={track.input} onChange={(event) => store.updateTrack(track.id, { input: event.target.value })}>
                 <option value="mic">Mic</option>
                 <option value="line">Line</option>
                 <option value="mic:0">Mic 1</option>
@@ -451,11 +438,13 @@ export function ArrangeView({
                   ))}
               </select>
             )}
-            <div className="head-extra">
-              <RouteFields store={store} trackId={track.id} />
-              <InsertList store={store} trackId={track.id} />
-              <SendList store={store} trackId={track.id} />
-            </div>
+            {!touch && (
+              <div className="head-extra">
+                <RouteFields store={store} trackId={track.id} />
+                <InsertList store={store} trackId={track.id} />
+                <SendList store={store} trackId={track.id} />
+              </div>
+            )}
           </div>
         ))}
         <AddTrackButton store={store} />
@@ -463,7 +452,7 @@ export function ArrangeView({
       <div
         className="timeline-scroll"
         ref={scroller}
-        style={{ touchAction: 'none' }}
+        style={{ touchAction: toolClaimsGesture(tool) ? 'none' : 'pan-x pan-y' }}
         onPointerDown={onTimelineDown}
         onWheel={(event) => {
           if (event.ctrlKey || event.metaKey) {
@@ -525,6 +514,7 @@ export function ArrangeView({
                   passive={passive}
                   onSplitAt={(clientX) => store.splitAt(track.id, clip.id, sampleAt(clientX))}
                   onSplit={() => store.splitSelected(engine.currentTimelineSample())}
+                  onErase={beginErase}
                   onMove={(event) => moveSelection(event, 'audio', track.id, clip.id)}
                 />
               ))}
@@ -546,24 +536,24 @@ export function ArrangeView({
                     style={{ left, width: widthPx, background: track.color, pointerEvents: passive ? 'none' : undefined }}
                     onPointerDown={(event) => {
                       if (tool === 'erase') {
-                        event.stopPropagation()
-                        if (!store.selectedMidiClipIds.includes(clip.id)) store.selectClip(track.id, clip.id, true, false)
-                        store.deleteSelectedClip()
+                        beginErase(event)
                         return
                       }
                       if (tool === 'split') {
                         event.stopPropagation()
+                        event.preventDefault()
                         store.splitAt(track.id, clip.id, sampleAt(event.clientX))
                         return
                       }
                       if (tool === 'trim') {
+                        event.stopPropagation()
+                        event.preventDefault()
                         const edge = (event.target as HTMLElement).dataset.edge
-                        if (edge === 'start' || edge === 'end') {
-                          event.stopPropagation()
-                          trimMidi(event, track.id, clip.id, edge, event.altKey)
-                          return
-                        }
-                        store.selectClip(track.id, clip.id, true, false)
+                        const bounds = event.currentTarget.getBoundingClientRect()
+                        const ratio = (event.clientX - bounds.left) / Math.max(1, bounds.width)
+                        const zone = edge === 'start' || edge === 'end' ? edge : trimZone(ratio, coarsePointer(event.pointerType))
+                        if (zone === 'start' || zone === 'end') trimMidi(event, track.id, clip.id, zone, event.altKey)
+                        else store.selectClip(track.id, clip.id, true, false)
                         return
                       }
                       if (tool !== 'select') return
@@ -607,6 +597,66 @@ export function ArrangeView({
       {store.clipSheet && selected ? (
         <ClipSheet store={store} trackId={selected.track.id} clip={selected.clip} onClose={() => store.closeClipSheet()} />
       ) : null}
+      {touch && sheetTrack && (
+        <ActionSheet title={sheetTrack.name} hint="Everything else for this track." onClose={() => setTrackSheet(null)}>
+          {sheetTrack.type === 'audio' && (
+            <SheetRow
+              label={copyOf(TRACK_SHEET, 'monitor').label}
+              hint={copyOf(TRACK_SHEET, 'monitor').hint}
+              pressed={sheetTrack.monitor}
+              onClick={() => store.updateTrack(sheetTrack.id, { monitor: !sheetTrack.monitor })}
+            />
+          )}
+          <label className="sheet-range">
+            <span>{copyOf(TRACK_SHEET, 'volume').label}</span>
+            <small>{copyOf(TRACK_SHEET, 'volume').hint}</small>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              {...described(copyOf(TRACK_SHEET, 'volume'))}
+              value={sheetTrack.volume}
+              onChange={(event) => store.updateTrack(sheetTrack.id, { volume: Number(event.target.value) })}
+            />
+          </label>
+          {sheetTrack.type === 'audio' && (
+            <label className="sheet-range">
+              <span>{copyOf(TRACK_SHEET, 'input').label}</span>
+              <small>{copyOf(TRACK_SHEET, 'input').hint}</small>
+              <select {...described(copyOf(TRACK_SHEET, 'input'))} value={sheetTrack.input} onChange={(event) => store.updateTrack(sheetTrack.id, { input: event.target.value })}>
+                <option value="mic">Mic</option>
+                <option value="line">Line</option>
+                <option value="mic:0">Mic 1</option>
+                <option value="mic:1">Mic 2</option>
+                <option value="mic:2">Mic 3</option>
+                <option value="mic:3">Mic 4</option>
+                <option value="none">No input</option>
+                {session.state.participants
+                  .filter((person) => person.id !== session.state.selfId)
+                  .map((person) => (
+                    <option key={person.id} value={`remote:${person.id}`}>{person.name} · live</option>
+                  ))}
+              </select>
+            </label>
+          )}
+          {sheetTrack.type === 'midi' && (
+            <>
+              <SheetRow label={copyOf(TRACK_SHEET, 'rack').label} hint={copyOf(TRACK_SHEET, 'rack').hint} pressed={store.rackTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openRack(sheetTrack.id) }} />
+              <SheetRow label="Patch" hint="Layered patch: synths, samples, grains, and a morph pad." pressed={store.patchTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openPatch(sheetTrack.id) }} />
+              <SheetRow label={copyOf(TRACK_SHEET, 'keys').label} hint={copyOf(TRACK_SHEET, 'keys').hint} onClick={() => { setTrackSheet(null); onPerform('keys') }} />
+              <SheetRow label={copyOf(TRACK_SHEET, 'drums').label} hint={copyOf(TRACK_SHEET, 'drums').hint} onClick={() => { setTrackSheet(null); onPerform('drums') }} />
+            </>
+          )}
+          <div className="sheet-fields">
+            <RouteFields store={store} trackId={sheetTrack.id} />
+            <InsertList store={store} trackId={sheetTrack.id} />
+            <SendList store={store} trackId={sheetTrack.id} />
+          </div>
+          <SheetRow label="Analyze" hint="Analyze the key, chords, and sections of this track." onClick={() => { setTrackSheet(null); onAnalyze(sheetTrack.id) }} />
+          <SheetRow label={copyOf(TRACK_SHEET, 'remove').label} hint={copyOf(TRACK_SHEET, 'remove').hint} onClick={() => { store.removeTrack(sheetTrack.id); setTrackSheet(null) }} />
+        </ActionSheet>
+      )}
     </div>
   )
 }
@@ -627,6 +677,7 @@ function ClipView({
   passive,
   onSplitAt,
   onSplit,
+  onErase,
   onMove,
 }: {
   store: ProjectStore
@@ -638,9 +689,10 @@ function ClipView({
   passive: boolean
   onSplitAt: (clientX: number) => void
   onSplit: () => void
+  onErase: (event: ReactPointerEvent) => void
   onMove: (event: ReactPointerEvent) => void
 }) {
-  const project = store.project
+  const project = selectArrange(store).project
   const asset = store.buffers.get(clip.bufferId)
   const [preview, setPreview] = useState<AudioClip | null>(null)
   const ghost = store.quantizePreview?.audio.find((item) => item.clipId === clip.id)?.clip
@@ -688,10 +740,12 @@ function ClipView({
     const stretching = event.altKey
     let latest: AudioClip | null = null
     let held = false
-    const timer = window.setTimeout(() => {
-      held = true
-      setMenu({ x: originX, y: originY })
-    }, 480)
+    const timer = mode === 'move'
+      ? window.setTimeout(() => {
+          held = true
+          setMenu({ x: originX, y: originY })
+        }, 480)
+      : 0
     const snapped = (value: number) => snapSample(value, project.sampleRate, project.tempo, project.snap)
     const move = (ev: PointerEvent) => {
       if (Math.abs(ev.clientX - originX) > 8 || Math.abs(ev.clientY - originY) > 8) window.clearTimeout(timer)
@@ -712,6 +766,7 @@ function ClipView({
       window.clearTimeout(timer)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
       if (held) {
         setPreview(null)
         return
@@ -728,6 +783,7 @@ function ClipView({
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
   }
 
   const fadeIn = (shown.fadeInSamples / project.sampleRate) * px
@@ -741,19 +797,23 @@ function ClipView({
       onPointerDown={(event) => {
         if ((event.target as HTMLElement).closest('.take-lane, .edge')) return
         if (tool === 'erase') {
-          event.stopPropagation()
-          if (!store.selectedClipIds.includes(clip.id)) store.selectClip(trackId, clip.id, false, false)
-          store.deleteSelectedClip()
+          onErase(event)
           return
         }
         if (tool === 'split') {
           event.stopPropagation()
+          event.preventDefault()
           onSplitAt(event.clientX)
           return
         }
         if (tool === 'trim') {
           event.stopPropagation()
-          store.selectClip(trackId, clip.id, false, false)
+          event.preventDefault()
+          const bounds = event.currentTarget.getBoundingClientRect()
+          const ratio = (event.clientX - bounds.left) / Math.max(1, bounds.width)
+          const zone = trimZone(ratio, coarsePointer(event.pointerType))
+          if (zone) pointerDown(event, zone)
+          else store.selectClip(trackId, clip.id, false, false)
           return
         }
         if (tool !== 'select') return

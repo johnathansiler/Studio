@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { Performer, pointerVelocity, type PerformTarget } from '../audio/performer'
 import type { AudioEngine } from '../audio/engine'
 import { DRUM_PADS, renderDrum } from '../model/drums'
+import { beatRepeatHeld, hardwareMidiAllowed } from '../model/beatRepeat'
 import type { RepeatRate } from '../model/midiClock'
 import { NOTE_NAMES, SCALES, type ScaleId } from '../model/scale'
+import { degreeTone, findScale, isBuiltinScale, isTwelveTone, toneName } from '../theory'
 import { BANKS, gridPitch, PAD_MACROS, sixteenLevels, type GridLayout, type LevelSpread, type PadVoice, type StepCondition } from '../model/padMachine'
 import { decodeWavPCM } from '../model/wav'
+import { selectScale } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import type { SessionClient } from '../remote/session'
 import { midiOutputs, onMidiMessage, onMidiPorts } from '../midi/access'
@@ -41,6 +44,7 @@ export function PerformPop({
   session,
   onRecord,
   onClose,
+  onLibrary,
 }: {
   mode: 'keys' | 'drums'
   store: ProjectStore
@@ -48,6 +52,7 @@ export function PerformPop({
   session: SessionClient
   onRecord: () => void
   onClose: () => void
+  onLibrary?: () => void
 }) {
   const drums = mode === 'drums'
   const board = useRef<HTMLDivElement>(null)
@@ -57,8 +62,10 @@ export function PerformPop({
   const bankRef = useRef(0)
   const outputs = useRef<{ send: (data: number[]) => void }[]>([])
   const [octave, setOctave] = useState(0)
-  const [repeat, setRepeat] = useState<RepeatRate | null>(null)
+  const [repeat, setRepeat] = useState<RepeatRate | null>(drums ? '1/16' : null)
   const [triplet, setTriplet] = useState(false)
+  const [repeatOn, setRepeatOn] = useState(false)
+  const [repeatLatch, setRepeatLatch] = useState(false)
   const [latency, setLatency] = useState(() => Math.round(engine.roundTripMs))
   const [focus, setFocus] = useState(engine.performanceMode)
   const [deck, setDeck] = useState<Deck>('pads')
@@ -80,7 +87,7 @@ export function PerformPop({
   const [padMutes, setPadMutes] = useState(false)
   const [soloPads, setSoloPads] = useState(false)
   const [lockParam, setLockParam] = useState('filter')
-  const scale = store.scaleState()
+  const scale = selectScale(store)
   const record = store.recordSettings()
   const clip = currentClip(store)
   const kit = store.padProgram()
@@ -90,13 +97,15 @@ export function PerformPop({
     performer.current = new Performer(
       engine,
       () => target.current,
-      (aimed, notes, takeMode, fixedBeats) => store.addPerformedNotes(aimed.trackId, aimed.clipId, notes, takeMode, fixedBeats),
+      (aimed, notes, takeMode, fixedBeats, coalesce) => store.addPerformedNotes(aimed.trackId, aimed.clipId, notes, takeMode, fixedBeats, coalesce),
       () => engine.status === 'recording',
       (aimed, pitch, from, to) => store.erasePadNotes(aimed.trackId, aimed.clipId, pitch, from, to),
+      () => store.endDraft(),
     )
   }
-  performer.current.setScale(scale.snap, scale.root, scale.scale, octave)
-  performer.current.setRepeat(repeat, triplet)
+  performer.current.setScale(scale.snap, scale.root, scale.scale, octave, scale.library)
+  if (drums) performer.current.setGrid(repeat ?? '1/16', triplet)
+  else performer.current.setRepeat(repeat, triplet)
   performer.current.setQuantize(record.quantizeBeats || 0)
   performer.current.setDeck({
     kit: drums ? kit : null,
@@ -110,10 +119,29 @@ export function PerformPop({
     recordMode,
     sampleOf: (id) => store.buffers.get(id)?.channels[0] ?? null,
   })
+  if (drums) performer.current.setEngaged(repeatOn)
 
   useEffect(() => {
     target.current = ensureTarget(store, drums)
   })
+
+  useEffect(() => {
+    const play = performer.current
+    if (!play) return
+    engine.setBeatPump((now, horizon) => play.pumpRepeats(now, horizon))
+    return () => {
+      play.setEngaged(false)
+      engine.setBeatPump(null)
+      engine.setRepeatWatch(false)
+    }
+  }, [engine])
+
+  useEffect(() => {
+    if (!drums || repeatLatch) return
+    const release = () => setRepeatOn(false)
+    window.addEventListener('blur', release)
+    return () => window.removeEventListener('blur', release)
+  }, [drums, repeatLatch])
 
   useEffect(() => {
     engine.unlock()
@@ -136,7 +164,9 @@ export function PerformPop({
         const key = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('[data-pitch]') as HTMLElement | null
         const level = key?.dataset.level == null ? undefined : Number(key.dataset.level)
         const rect = key?.getBoundingClientRect() ?? { top: event.clientY, height: 1 }
-        play.down(pitch, pointerVelocity(event, rect), event.timeStamp, pointerId, level)
+        const rawFine = key?.dataset.fine
+        const fine = rawFine == null || rawFine === '' ? undefined : Number(rawFine)
+        play.down(pitch, pointerVelocity(event, rect), event.timeStamp, pointerId, level, Number.isFinite(fine) ? fine : undefined)
         light(outputs.current, pitch, 127)
         try { key?.setPointerCapture(pointerId) } catch { /* already released */ }
       },
@@ -266,6 +296,7 @@ export function PerformPop({
   }, [])
 
   useEffect(() => {
+    if (!hardwareMidiAllowed(navigator.userAgent)) return
     const play = performer.current
     const root = board.current
     const refresh = () => {
@@ -304,7 +335,8 @@ export function PerformPop({
             <button type="button" onClick={() => setOctave((value) => Math.max(-3, value - 1))} aria-label="Octave down">−</button>
             <span className="octave">{NOTE_NAMES[(base + octave * 12) % 12]}{Math.floor((base + octave * 12) / 12) - 1}</span>
             <button type="button" onClick={() => setOctave((value) => Math.min(3, value + 1))} aria-label="Octave up">+</button>
-            <button type="button" className={scale.snap ? 'on' : ''} onClick={() => store.setScale({ snap: !scale.snap })}>Scale</button>
+            <button type="button" className={scale.snap ? 'on' : ''} title="Lock played notes to the scale, including quarter tones." onClick={() => store.setScale({ snap: !scale.snap })}>Scale</button>
+            {onLibrary && <button type="button" title="Browse scales and the chords inside them." onClick={onLibrary}>Library</button>}
             {RATES.slice(1).map((rate) => (
               <button key={rate} type="button" className={repeat === rate ? 'on' : ''} onClick={() => setRepeat((value) => (value === rate ? null : rate))}>{rate}</button>
             ))}
@@ -326,14 +358,72 @@ export function PerformPop({
         <button type="button" onClick={() => void session.calibrate()}>Calibrate</button>
         <button type="button" onClick={onClose} aria-label="Close">×</button>
       </header>
+      {drums && (
+        <div className="beat-repeat" role="group" aria-label="Beat repeat">
+          {RATES.map((rate) => (
+            <button
+              key={rate}
+              type="button"
+              className={repeat === rate ? 'on' : ''}
+              aria-label={`${rate} repeat grid`}
+              title={`${rate} grid. Beat repeat locks pads to this value.`}
+              onClick={() => setRepeat(rate)}
+            >{rate}</button>
+          ))}
+          <button
+            type="button"
+            className={triplet ? 'on' : ''}
+            aria-label="Triplet beat repeat"
+            title="Triplet grid. Repeats land on the triplet of the selected value."
+            onClick={() => setTriplet((value) => !value)}
+          >Triplet</button>
+          <button
+            type="button"
+            className={`beat ${repeatOn ? 'on' : ''}`}
+            aria-pressed={repeatOn}
+            aria-label="Beat repeat"
+            title="Hold Beat Repeat and a pad. The pad retriggers on the grid, locked to the tempo. With Latch on, tap Beat to leave it on for one hand."
+            onPointerDown={(event) => {
+              event.preventDefault()
+              try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* already gone */ }
+              setRepeatOn((value) => beatRepeatHeld(value, repeatLatch, 'down'))
+            }}
+            onPointerUp={() => setRepeatOn((value) => beatRepeatHeld(value, repeatLatch, 'up'))}
+            onPointerCancel={() => setRepeatOn((value) => beatRepeatHeld(value, repeatLatch, 'up'))}
+            onContextMenu={(event) => event.preventDefault()}
+            onKeyDown={(event) => {
+              if (event.key !== ' ' && event.key !== 'Enter') return
+              event.preventDefault()
+              if (event.repeat) return
+              setRepeatOn((value) => beatRepeatHeld(value, repeatLatch, 'down'))
+            }}
+            onKeyUp={(event) => {
+              if (event.key !== ' ' && event.key !== 'Enter') return
+              setRepeatOn((value) => beatRepeatHeld(value, repeatLatch, 'up'))
+            }}
+          >Beat</button>
+          <button
+            type="button"
+            className={repeatLatch ? 'on' : ''}
+            aria-pressed={repeatLatch}
+            aria-label="Latch beat repeat"
+            title="Latch beat repeat. A tap on Beat turns repeat on or off so one hand can play the pads."
+            onClick={() => {
+              setRepeatLatch((value) => {
+                if (value) setRepeatOn(false)
+                return !value
+              })
+            }}
+          >Latch</button>
+        </div>
+      )}
+      {drums && <p className="beat-repeat-hint">Hold Beat and a pad to retrigger on the grid. Latch leaves Beat on for one hand.</p>}
       {!drums && (
         <div className="scale-row">
-          <select aria-label="Key" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
+          <select aria-label="Key" title="Concert pitch of the tonic." value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
             {NOTE_NAMES.map((name, index) => <option key={name} value={index}>{name}</option>)}
           </select>
-          <select aria-label="Scale" value={scale.scale} onChange={(event) => store.setScale({ scale: event.target.value as ScaleId })}>
-            {SCALES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-          </select>
+          <ScaleSelect scale={scale} onChange={(id) => store.setScale(isBuiltinScale(id) ? { scale: id, library: '' } : { library: id })} />
         </div>
       )}
       {drums && (
@@ -361,11 +451,7 @@ export function PerformPop({
               <input aria-label="Timing strength" type="range" min={0} max={100} value={Math.round(kit.timingStrength * 100)} onChange={(event) => store.patchKit({ timingStrength: Number(event.target.value) / 100 })} />
             </label>
           )}
-          {RATES.map((rate) => (
-            <button key={rate} type="button" className={repeat === rate ? 'on' : ''} onClick={() => setRepeat((value) => (value === rate ? null : rate))}>{rate}</button>
-          ))}
-          <button type="button" className={triplet ? 'on' : ''} onClick={() => setTriplet((value) => !value)}>Triplet</button>
-          <button type="button" className={latch ? 'on' : ''} onClick={() => setLatch((value) => !value)}>Latch</button>
+          <button type="button" className={latch ? 'on' : ''} title="Pad latch. The pad keeps repeating after you let go. Tap it again to stop." aria-label="Latch pads" onClick={() => setLatch((value) => !value)}>Latch</button>
           <button type="button" className={fullLevel ? 'on' : ''} onClick={() => setFullLevel((value) => !value)}>Full</button>
           <button type="button" className={accent ? 'on' : ''} onClick={() => setAccent((value) => !value)}>Accent</button>
           <button type="button" className={erase ? 'on' : ''} onClick={() => setErase((value) => !value)}>Erase</button>
@@ -394,7 +480,7 @@ export function PerformPop({
           {drums && deck === 'session' ? (
             <SessionPads store={store} mutes={padMutes} solo={soloPads} />
           ) : drums && deck === 'keys' ? (
-            <KeyGrid root={scale.root} scaleId={scale.scale} layout={layout} inKey={inKey} />
+            <KeyGrid root={scale.root} scaleId={scale.library || scale.scale} layout={layout} inKey={inKey} />
           ) : drums ? (
             <>
               {browser && (
@@ -417,7 +503,7 @@ export function PerformPop({
                   >{levels ? levelLabel(index, levels) : pad.name}</button>
                 ))}
               </div>
-              <KeyGrid root={scale.root} scaleId={scale.scale} layout={layout} inKey={inKey} land />
+              <KeyGrid root={scale.root} scaleId={scale.library || scale.scale} layout={layout} inKey={inKey} land />
             </>
           ) : (
             <div className="play-keys">
@@ -478,14 +564,13 @@ export function PerformPop({
             </>
           ) : drums && deck === 'keys' ? (
             <div className="scale-row">
-              <select aria-label="Key" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
+              <select aria-label="Key" title="Concert pitch of the tonic." value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
                 {NOTE_NAMES.map((name, index) => <option key={name} value={index}>{name}</option>)}
               </select>
-              <select aria-label="Scale" value={scale.scale} onChange={(event) => store.setScale({ scale: event.target.value as ScaleId })}>
-                {SCALES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-              <button type="button" className={layout === 'fourths' ? 'on' : ''} onClick={() => setLayout((value) => (value === 'fourths' ? 'sequential' : 'fourths'))}>{layout === 'fourths' ? 'Fourths' : 'Sequential'}</button>
-              <button type="button" className={inKey ? 'on' : ''} onClick={() => setInKey((value) => !value)}>{inKey ? 'In key' : 'Chromatic'}</button>
+              <ScaleSelect scale={scale} onChange={(id) => store.setScale(isBuiltinScale(id) ? { scale: id, library: '' } : { library: id })} />
+              <button type="button" className={layout === 'fourths' ? 'on' : ''} title="Fourths stacks a fourth each row. Sequential walks the scale." onClick={() => setLayout((value) => (value === 'fourths' ? 'sequential' : 'fourths'))}>{layout === 'fourths' ? 'Fourths' : 'Sequential'}</button>
+              <button type="button" className={inKey ? 'on' : ''} title="Lock the pads to the scale, including quarter-tone pitches." onClick={() => setInKey((value) => !value)}>{inKey ? 'In key' : 'Chromatic'}</button>
+              {onLibrary && <button type="button" title="Browse scales and the chords inside them." onClick={onLibrary}>Library</button>}
             </div>
           ) : drums && deck === 'session' ? (
             <div className="tool-row">
@@ -512,15 +597,43 @@ function levelLabel(index: number, spread: LevelSpread) {
   return String(Math.round((spread === 'filter' ? params.filter : spread === 'decay' ? params.decay : params.attack) * 100))
 }
 
-function KeyGrid({ root, scaleId, layout, inKey, land = false }: { root: number; scaleId: ScaleId; layout: GridLayout; inKey: boolean; land?: boolean }) {
-  const cells = []
+function ScaleSelect({ scale, onChange }: { scale: { scale: ScaleId; library: string }; onChange: (id: string) => void }) {
+  const extra = scale.library && !isBuiltinScale(scale.library) ? scale.library : ''
+  return (
+    <select aria-label="Scale" title="The scale the keys and pads follow." value={extra || scale.scale} onChange={(event) => onChange(event.target.value)}>
+      {extra && <option value={extra}>{findScale(extra)?.name ?? 'Scale'}</option>}
+      {SCALES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+    </select>
+  )
+}
+
+function KeyGrid({ root, scaleId, layout, inKey, land = false }: { root: number; scaleId: string; layout: GridLayout; inKey: boolean; land?: boolean }) {
+  const spec = findScale(scaleId)
+  const micro = !!spec && inKey && (!isTwelveTone(spec) || !isBuiltinScale(scaleId))
+  const cells: { pitch: number; fine: number; isRoot: boolean; row: number; column: number; label: string }[] = []
   for (let row = 7; row >= 0; row--) {
-    for (let column = 0; column < 8; column++) cells.push({ ...gridPitch(row, column, root, scaleId, layout, inKey), row, column })
+    for (let column = 0; column < 8; column++) {
+      if (micro && spec) {
+        const index = layout === 'fourths' ? column + row * 3 : row * 8 + column
+        const tone = degreeTone(root, index, scaleId)
+        cells.push({ pitch: tone.midi, fine: tone.cents, isRoot: index % spec.cents.length === 0, row, column, label: toneName(tone) })
+      } else {
+        const cell = gridPitch(row, column, root, isBuiltinScale(scaleId) ? scaleId : 'ionian', layout, inKey)
+        cells.push({ pitch: cell.pitch, fine: 0, isRoot: cell.isRoot, row, column, label: NOTE_NAMES[((cell.pitch % 12) + 12) % 12] })
+      }
+    }
   }
   return (
     <div className={land ? 'grid8 land-grid' : 'grid8'} aria-label={land ? 'Landscape grid' : 'Key grid'}>
       {cells.map((cell) => (
-        <button key={`${cell.row}-${cell.column}`} type="button" data-pitch={cell.pitch} className={cell.isRoot ? 'root' : ''}>{NOTE_NAMES[cell.pitch % 12]}</button>
+        <button
+          key={`${cell.row}-${cell.column}`}
+          type="button"
+          data-pitch={cell.pitch}
+          data-fine={cell.fine ? String(cell.fine) : undefined}
+          className={cell.isRoot ? 'root' : ''}
+          title={cell.fine ? `${cell.label}, ${cell.fine > 0 ? '+' : ''}${cell.fine} cents` : 'Pad pitch'}
+        >{cell.label}</button>
       ))}
     </div>
   )

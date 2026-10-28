@@ -1,4 +1,5 @@
 import { DIVISIONS, MPC_SWING, mpcGroove, type Feel, type QuantizeScope, type RecordQuantize, type SwingUnit, type VelocityMode } from '../model/quantize'
+import { selectQuantize } from '../state/select'
 import type { ProjectStore } from '../state/store'
 
 const FEELS: Feel[] = ['straight', 'triplet', 'dotted', 'quintuplet', 'septuplet', 'custom']
@@ -13,8 +14,9 @@ const FEEL_LABEL: Record<Feel, string> = {
 
 export function QuantizeSheet({ store }: { store: ProjectStore }) {
   if (!store.quantizeOpen) return null
-  const settings = store.quantizeDraft
-  const presets = store.project.quantizePresets ?? []
+  const quantize = selectQuantize(store)
+  const settings = quantize.draft
+  const presets = quantize.presets
   return (
     <div className="q-sheet">
       <div className="row">
