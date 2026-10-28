@@ -1,0 +1,74 @@
+/* Session dock stays out of Arrange until the user opens it. Clip edges stay grabbable. */
+
+.workspace.session-closed,
+.shell.fold .workspace.session-closed,
+.shell:not(.phone) .workspace.session-closed,
+html[data-posture="book"] .shell:not(.phone) .workspace.session-closed {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.workspace.session-closed .dock-slot {
+  display: none;
+}
+
+.shell.phone .workspace.session-closed .main-pane,
+.shell.phone.land .workspace.session-closed .main-pane {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 100%;
+}
+
+.clip .edge,
+.arrange[data-tool="trim"] .clip .edge {
+  left: 0;
+  width: 24px;
+  min-width: 24px;
+  height: 100%;
+  z-index: 4;
+  touch-action: none;
+}
+
+.clip .edge.r,
+.arrange[data-tool="trim"] .clip .edge.r {
+  left: auto;
+  right: 0;
+}
+
+.clip .edge::after {
+  content: "";
+  position: absolute;
+  top: 16%;
+  bottom: 16%;
+  width: 3px;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+}
+
+.clip .edge:not(.r)::after { left: 7px; }
+.clip .edge.r::after { right: 7px; }
+
+.clip.selected .edge::after {
+  opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .clip:hover .edge::after {
+    opacity: 1;
+  }
+}
+
+@media (pointer: coarse) {
+  .clip .edge,
+  .arrange[data-tool="trim"] .clip .edge {
+    width: 28px;
+    min-width: 28px;
+  }
+}
+
+.clip em,
+.clip canvas {
+  pointer-events: none;
+}

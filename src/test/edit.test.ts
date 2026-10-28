@@ -29,10 +29,10 @@ describe('arrangement tool', () => {
     const quarter = 24000
     store.placeAudioClips([{ trackId: audioId, clipId: audio().clips[0].id, startSample: quarter + 80 }])
     expect(audio().clips[0].startSample).toBe(quarter)
-    store.trimClip(audioId, audio().clips[0].id, 'end', audio().clips[0].startSample + 8000)
-    expect(audio().clips[0].durationSamples).toBe(8000)
-    store.stretchClip(audioId, audio().clips[0].id, 'end', audio().clips[0].startSample + 16000)
-    expect(audio().clips[0].durationSamples).toBe(16000)
+    store.trimClip(audioId, audio().clips[0].id, 'end', audio().clips[0].startSample + 24000)
+    expect(audio().clips[0].durationSamples).toBe(24000)
+    store.stretchClip(audioId, audio().clips[0].id, 'end', audio().clips[0].startSample + 48000)
+    expect(audio().clips[0].durationSamples).toBe(48000)
     expect(audio().clips[0].stretch).toBeTruthy()
     const before = audio().clips.length
     store.splitAt(audioId, audio().clips[0].id, audio().clips[0].startSample + 4000)

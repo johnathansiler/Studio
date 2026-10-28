@@ -15,6 +15,7 @@ export function VideoDock({
   onCreate,
   onJoin,
   onNewSession,
+  onHide,
 }: {
   session: SessionClient
   engine: AudioEngine
@@ -22,6 +23,7 @@ export function VideoDock({
   onCreate: () => void
   onJoin: () => void
   onNewSession: () => void
+  onHide?: () => void
 }) {
   const state = session.state
   const phone = useFormFactor() === 'phone'
@@ -153,6 +155,9 @@ export function VideoDock({
       <div className="dock-resize" />
       <div className="dock-bar">
         <strong>{state.code ? `Session ${state.code}` : 'Session'}</strong>
+        {onHide && !simple && (
+          <TipButton className="icon-btn" label="Hide" hint="Close the session panel. The timeline uses the full width." onClick={onHide} />
+        )}
         <span className="spacer" />
         {!phone && (
           <TipButton

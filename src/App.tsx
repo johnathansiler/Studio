@@ -50,6 +50,7 @@ import { ToolBar } from './ui/ToolBar'
 import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
 import { MENU_COPY, UNSTUCK_COPY, VIEW_COPY, copyOf, described } from './ui/chrome'
+import { dockVisible, nextSessionDock, paneAfterRestore, readSessionDock, writeSessionDock } from './ui/sessionDock'
 import { HintBubble, MenuRow, TipButton } from './ui/Hint'
 import { formatBytes } from './ui/share'
 
@@ -112,6 +113,7 @@ export function App() {
   const [land, setLand] = useState(() => window.innerWidth > window.innerHeight)
   const phone = form === 'phone'
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
+  const [sessionDock, setSessionDock] = useState(() => readSessionDock())
   const [pianoOpen, setPianoOpen] = useState(false)
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
@@ -239,7 +241,6 @@ export function App() {
       if (ios && !navigator.userActivation?.isActive) session.holdMediaForGesture()
       session.connect({ name: identity.name || joinName || 'Artist', code: urlCode })
       setSurface(identity.role === 'guest' ? 'artist' : 'studio')
-      setPhonePane('room')
       setJoinOpen(false)
     } else if (urlCode) {
       setJoinCode(urlCode)
@@ -249,7 +250,6 @@ export function App() {
       if (ios && !navigator.userActivation?.isActive) session.holdMediaForGesture()
       session.connect({ name: identity.name || joinName || 'Artist', code: choice.code })
       setSurface(identity.role === 'guest' ? 'artist' : 'studio')
-      setPhonePane('room')
       setJoinOpen(false)
     }
     engine.sync(store.project, (id) => store.buffers.get(id))
@@ -375,7 +375,7 @@ export function App() {
       store.setTransportMode(saved.workspace.transportMode)
       if (saved.workspace.selectedTrackId) store.selectTrack(saved.workspace.selectedTrackId)
       setSurface(saved.workspace.surface)
-      setPhonePane(saved.workspace.phonePane)
+      setPhonePane(paneAfterRestore(saved.workspace.phonePane, readSessionDock()))
       engine.seek(saved.workspace.positionSamples || 0)
       engine.sync(store.project, (id) => store.buffers.get(id))
       remember(saved.project.id)
@@ -1085,6 +1085,14 @@ async function importDropped(files: FileList) {
     : 'room'
   const pianoTrack = store.project.tracks.find((track) => track.id === store.selectedTrackId && track.type === 'midi')
     || store.project.tracks.find((track) => track.type === 'midi')
+  const dockShown = dockVisible({ surface, panel, dockOpen: sessionDock })
+
+  function chooseSessionDock(action: 'session' | 'hide') {
+    const next = nextSessionDock({ dockOpen: sessionDock, phonePane, action })
+    writeSessionDock(next.dockOpen)
+    setSessionDock(next.dockOpen)
+    setPhonePane(next.phonePane)
+  }
 
   function openPiano(trackId: string, clipId?: string) {
     const beat = samplesToBeats(engine.positionSamples, store.project.sampleRate, store.project.tempo)
@@ -1101,6 +1109,8 @@ async function importDropped(files: FileList) {
       style={{ ['--dock' as string]: `${dock}px` }}
       data-version={version}
       data-form={form}
+      data-session-dock={sessionDock ? 'open' : 'closed'}
+      data-dock={dockShown ? 'open' : 'closed'}
       onDragOver={(event) => {
         if ([...event.dataTransfer.types].includes('Files')) event.preventDefault()
       }}
@@ -1139,7 +1149,7 @@ async function importDropped(files: FileList) {
             type="button"
             className={surface === 'studio' && phonePane === 'room' ? 'active' : ''}
             {...described(copyOf(VIEW_COPY, 'session'))}
-            onClick={() => { setPianoOpen(false); setPhonePane('room'); setSurface('studio'); setMenuOpen(false) }}
+            onClick={() => { setPianoOpen(false); setSurface('studio'); setMenuOpen(false); chooseSessionDock('session') }}
           >
             Session
           </button>
@@ -1258,7 +1268,7 @@ async function importDropped(files: FileList) {
           <MidiTools store={store} engine={engine} />
         </div>
       )}
-      <div className={`workspace ${!phone && dockEdge === 'bottom' && surface === 'studio' ? 'dock-bottom' : ''}`}>
+      <div className={`workspace ${dockShown ? '' : 'session-closed'} ${!phone && dockEdge === 'bottom' && surface === 'studio' && dockShown ? 'dock-bottom' : ''}`}>
         {surface === 'studio' && (
           <div className="main-pane">
             <div className="editor">
@@ -1280,7 +1290,7 @@ async function importDropped(files: FileList) {
             </div>
           </div>
         )}
-        <div
+        {dockShown && <div
           className="dock-slot panel-slot"
           onPointerDown={(event) => {
             const handle = (event.target as HTMLElement).closest('.dock-resize')
@@ -1314,6 +1324,8 @@ async function importDropped(files: FileList) {
               onCreate={() => {
                 engine.unlock()
                 session.primeMediaFromGesture()
+                writeSessionDock(true)
+                setSessionDock(true)
                 setSurface('studio')
                 setPhonePane('room')
                 session.connect({ name: joinName || 'Engineer', create: true })
@@ -1321,15 +1333,18 @@ async function importDropped(files: FileList) {
               onNewSession={() => {
                 engine.unlock()
                 session.primeMediaFromGesture()
+                writeSessionDock(true)
+                setSessionDock(true)
                 setSurface('studio')
                 setPhonePane('room')
                 setMenuOpen(false)
                 session.connect({ name: joinName || 'Engineer', create: true, fresh: true })
               }}
               onJoin={() => setJoinOpen(true)}
+              onHide={surface === 'studio' ? () => chooseSessionDock('hide') : undefined}
             />
           )}
-        </div>
+        </div>}
       </div>
       <PluginSheet store={store} engine={engine} />
       {store.patchTrackId && <PatchSheet store={store} engine={engine} trackId={store.patchTrackId} />}
