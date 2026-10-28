@@ -117,6 +117,21 @@ describe('sound library', () => {
     expect(filterSounds(fixture, { text: '', type: 'all', bpm: 'any', key: '', favoritesOnly: true, projectBpm: 120, favorites }).map((entry) => entry.id)).toEqual(['hat'])
   })
 
+  it('accepts the C major and A minor labels used in the sound index', () => {
+    const spelled: SoundEntry[] = [
+      { ...fixture[0], id: 'amin', key: 'A minor' },
+      { ...fixture[1], id: 'cmaj', key: 'C major' },
+      { ...fixture[1], id: 'dmin', name: 'D loop', key: 'D minor' },
+    ]
+    const query = { text: '', type: 'all' as const, bpm: 'any' as const, favoritesOnly: false, projectBpm: 120, favorites: [] as string[] }
+    expect(filterSounds(spelled, { ...query, key: 'C major' }).map((entry) => entry.id)).toEqual(['cmaj'])
+    expect(filterSounds(spelled, { ...query, key: 'A minor' }).map((entry) => entry.id)).toEqual(['amin'])
+    expect(filterSounds(spelled, { ...query, key: 'Am' }).map((entry) => entry.id)).toEqual(['amin'])
+    expect(filterSounds(spelled, { ...query, key: 'C' }).map((entry) => entry.id)).toEqual(['cmaj'])
+    expect(filterSounds(spelled, { ...query, key: 'Dmin' }).map((entry) => entry.id)).toEqual(['dmin'])
+    expect(filterSounds(spelled, { ...query, key: 'C minor' }).map((entry) => entry.id)).toEqual([])
+  })
+
   it('fetches library files from Hugging Face and replays them from storage', async () => {
     const url = soundFileUrl('loops/dust.wav')
     expect(url).toBe('https://huggingface.co/datasets/cueharbor/sound-library/resolve/main/loops/dust.wav')

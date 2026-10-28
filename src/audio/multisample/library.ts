@@ -23,7 +23,7 @@ export const STARTER_CATALOG: LibraryEntry[] = [
     license: 'CC0-1.0',
     path: 'upright-piano/instrument.dspreset',
     bytes: 0,
-    description: 'CC0 upright piano with velocity layers and release samples',
+    description: 'CC0 Knight upright piano (VCSL): 45 sampled notes, 2 velocity layers, release samples',
   },
   {
     id: 'string-section',
@@ -31,15 +31,15 @@ export const STARTER_CATALOG: LibraryEntry[] = [
     license: 'CC0-1.0',
     path: 'string-section/instrument.sfz',
     bytes: 0,
-    description: 'CC0 string section with mixable mic positions',
+    description: 'CC0 VSCO-2 string ensemble: contrabass, celli, violas and violins (sustain vibrato) split across the keyboard',
   },
   {
     id: 'nylon-guitar',
     name: 'Nylon Guitar',
-    license: 'Unlicense',
+    license: 'CC0-1.0',
     path: 'nylon-guitar/instrument.dspreset',
     bytes: 0,
-    description: 'Unlicensed nylon guitar with round-robins',
+    description: 'CC0 Spanish classical (nylon) guitar from FreePats, chromatic',
   },
   {
     id: 'felt-piano',
@@ -47,7 +47,7 @@ export const STARTER_CATALOG: LibraryEntry[] = [
     license: 'public-domain',
     path: 'felt-piano/instrument.sfz',
     bytes: 0,
-    description: 'Public-domain felt piano',
+    description: 'Public-domain Fuchs & Möhr upright with felt (Tom Guder): every key, 3 velocity layers',
   },
 ]
 
