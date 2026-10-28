@@ -4,7 +4,7 @@ import type { StretchMode } from './stretch/engine'
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
 import { compPieces, recordOffsetSamples } from '../model/comp'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
-import { residentDrums, type ResidentDrum } from '../model/drums'
+import { DRUM_PADS, residentDrums, type ResidentDrum } from '../model/drums'
 import { calibrationTrim, contextTimeForEvent, monitoringOffset, type ClockStamp } from '../model/midiClock'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToBeats, samplesToMusical } from '../model/time'
@@ -77,6 +77,8 @@ export class AudioEngine {
   private warmVoices: { osc: OscillatorNode; gain: GainNode; busy: boolean; pitch: number; age: number }[] = []
   lastOnsetFrame = -1
   private oneShots: { pitch: number; stop: () => void }[] = []
+  private previewNodes: Stoppable[] = []
+  private drumCache = new WeakMap<BaseAudioContext, AudioBuffer[]>()
 
   private project: Project | null = null
   private assetOf: (id: string) => AudioAsset | undefined = () => undefined
@@ -1725,6 +1727,40 @@ export class AudioEngine {
     this.envelope(ctx, strip, tone, when, 0.08, { ...hit, velocity: hit.velocity * 0.4 })
   }
 
+  private cachedDrum(ctx: BaseAudioContext, pitch: number) {
+    let list = this.drumCache.get(ctx)
+    if (!list) {
+      const drums = residentDrums(ctx.sampleRate)
+      list = drums.map((drum) => {
+        const buffer = ctx.createBuffer(1, Math.max(1, drum.samples.length), ctx.sampleRate)
+        buffer.getChannelData(0).set(drum.samples)
+        return buffer
+      })
+      this.drumCache.set(ctx, list)
+    }
+    const index = DRUM_PADS.findIndex((pad) => pad.pitch === Math.round(pitch))
+    return index >= 0 ? list[index] : null
+  }
+
+  private playDrum(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, bucket?: Stoppable[]) {
+    const buffer = this.cachedDrum(ctx, note.pitch)
+    if (!buffer) return false
+    if (ctx === this.ctx && when < ctx.currentTime) return true
+    const src = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    src.buffer = buffer
+    gain.gain.setValueAtTime(Math.max(0.001, note.velocity * 0.9), when)
+    src.connect(gain)
+    gain.connect(strip.input)
+    src.start(when)
+    src.stop(when + buffer.duration)
+    if (ctx === this.ctx) {
+      this.sources.push(src)
+      bucket?.push(src)
+    }
+    return true
+  }
+
   private noiseBuffer(ctx: BaseAudioContext) {
     if (this.noise && this.noise.sampleRate === ctx.sampleRate) return this.noise
     const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate)
@@ -2232,6 +2268,62 @@ export class AudioEngine {
     })
   }
 
+  stopPreview() {
+    for (const node of this.previewNodes) {
+      try { node.stop() } catch { /* already stopped */ }
+      try { node.disconnect() } catch { /* already disconnected */ }
+    }
+    this.previewNodes = []
+  }
+
+  /**
+   * Audition a generated part on the speakers only.
+   * Drum mode uses the resident kit so a beat does not play as a chord.
+   */
+  previewSequence(notes: { pitch: number; startBeat: number; durationBeats: number; velocity: number; fine?: number }[], tempo: number, drums = false) {
+    this.unlock()
+    const ctx = this.ctx
+    const out = this.speakerGain
+    if (!ctx || !out || !notes.length) return
+    this.stopPreview()
+    const start = ctx.currentTime + 0.04
+    const beat = 60 / Math.max(40, Math.min(240, tempo))
+    const limit = start + 18
+    for (const note of notes.slice(0, 480)) {
+      const when = start + note.startBeat * beat
+      if (when > limit) break
+      const dur = Math.max(0.04, Math.min(2, note.durationBeats * beat))
+      if (drums) {
+        const buffer = this.cachedDrum(ctx, note.pitch)
+        if (buffer) {
+          const src = ctx.createBufferSource()
+          const gain = ctx.createGain()
+          src.buffer = buffer
+          gain.gain.setValueAtTime(Math.max(0.001, note.velocity * 0.85), when)
+          src.connect(gain)
+          gain.connect(out)
+          src.start(when)
+          src.stop(when + buffer.duration)
+          this.previewNodes.push(src)
+          continue
+        }
+      }
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = note.pitch < 52 ? 'sine' : 'triangle'
+      osc.frequency.value = 440 * 2 ** ((note.pitch + (note.fine || 0) / 100 - 69) / 12)
+      const peak = Math.max(0.001, (note.pitch < 52 ? 0.12 : 0.07) * note.velocity)
+      gain.gain.setValueAtTime(0.0001, when)
+      gain.gain.exponentialRampToValueAtTime(peak, when + 0.012)
+      gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.05, dur))
+      osc.connect(gain)
+      gain.connect(out)
+      osc.start(when)
+      osc.stop(when + dur + 0.02)
+      this.previewNodes.push(osc)
+    }
+  }
+
   /** Local audition only. Stays on the speaker and never enters the cue or mic path. */
   previewPitches(pitches: number[]) {
     const ctx = this.ctx
@@ -2268,6 +2360,7 @@ export class AudioEngine {
 
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[]) {
     if (note.muted) return
+    if (track?.instrument === 'drum-machine' && this.playDrum(ctx, strip, note, when, bucket)) return
     if (track?.rack && ctx === this.ctx) {
       const at = Math.max(when, ctx.currentTime)
       this.rackHost.note(track.id, note.pitch, note.velocity, at, !!note.slide)

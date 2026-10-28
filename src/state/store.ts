@@ -43,6 +43,8 @@ import {
 } from '../model/launch'
 import type { RollTool } from '../model/paint'
 import { defaultRoll } from '../model/paint'
+import type { GeneratedPart } from '../generators/types'
+import { normalizeGenerator } from '../generators/settings'
 import { progressionById, romanLine, starterParts } from '../model/progressions'
 import {
   defaultQuantize,
@@ -99,6 +101,15 @@ interface QuantizeResult {
   notes: { trackId: string; clipId: string; notes: MidiNote[] }[]
   channels: { id: string; cells: StepCell[] }[]
   audio: { trackId: string; clipId: string; clip: AudioClip }[]
+}
+
+const GENERATED_COLOR: Record<GeneratedPart['kind'], string> = {
+  chords: '#e0b15a',
+  bass: '#79b8d4',
+  melody: '#73c48f',
+  arp: '#f09a6a',
+  rhythm: '#ef6b6b',
+  drums: '#c58be0',
 }
 
 export class ProjectStore {
@@ -1782,6 +1793,81 @@ export class ProjectStore {
       const favorites = scale.favorites.includes(id) ? scale.favorites.filter((item) => item !== id) : [...scale.favorites, id]
       this.project.scale = { ...scale, favorites }
     })
+  }
+
+  generatorState() {
+    return normalizeGenerator(this.project.generator)
+  }
+
+  setGenerator(patch: Partial<import('../generators/types').GeneratorSettings>, draft = false) {
+    const apply = () => {
+      this.project.generator = normalizeGenerator({ ...this.generatorState(), ...patch })
+    }
+    if (draft) this.draft(apply)
+    else this.mutate(apply)
+  }
+
+  /** Remember a heard progression without an undo step, so the next part can follow it. */
+  rememberChords(chords: import('../generators/types').GeneratorChord[]) {
+    const current = this.generatorState()
+    if (JSON.stringify(current.chords) === JSON.stringify(chords)) return
+    this.project.generator = { ...current, chords }
+    this.emit()
+  }
+
+  /** Drop generated MIDI on the part's track, or on a fresh one. Notes stay editable. */
+  insertGenerated(part: GeneratedPart, where: 'part' | 'new' = 'part') {
+    this.mutate(() => {
+      const color = GENERATED_COLOR[part.kind]
+      let track
+      if (where === 'new') {
+        track = makeTrack({
+          name: this.freshName(part.trackName),
+          type: 'midi',
+          color,
+          input: 'none',
+          instrument: part.instrument,
+        })
+        this.project.tracks.push(track)
+      } else {
+        track = this.ensureMidi(part.trackName, color)
+        if (part.instrument === 'drum-machine' && (!track.instrument || track.instrument === 'none')) track.instrument = 'drum-machine'
+        if (part.instrument === '808' && (!track.instrument || track.instrument === 'none')) track.instrument = '808'
+      }
+      const span = Math.max(1, part.bars * quartersPerBar(this.project.timeSignature))
+      const end = part.notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), span)
+      const last = track.midiClips.reduce((max, clip) => Math.max(max, clip.startBeat + clip.durationBeats), 0)
+      const clip: MidiClip = {
+        id: uid('midi'),
+        name: part.name,
+        startBeat: track.midiClips.length ? last : 0,
+        durationBeats: Math.max(span, Math.ceil(end * 4) / 4),
+        notes: part.notes.map((note) => ({
+          id: uid('note'),
+          pitch: note.pitch,
+          startBeat: note.startBeat,
+          durationBeats: note.durationBeats,
+          velocity: note.velocity,
+          ...(note.fine ? { fine: note.fine } : {}),
+          ...(note.slide ? { slide: true } : {}),
+        })),
+      }
+      track.midiClips.push(clip)
+      this.selectedTrackId = track.id
+      this.selectedMidiClipId = clip.id
+      this.selectedMidiClipIds = [clip.id]
+      this.selectedNoteIds = clip.notes.map((note) => note.id)
+      this.selectedNoteId = clip.notes.at(-1)?.id ?? null
+      if (part.kind === 'chords') this.project.generator = { ...this.generatorState(), chords: part.chords }
+      this.toast(`Added ${part.name}`)
+    })
+  }
+
+  private freshName(base: string) {
+    if (!this.project.tracks.some((track) => track.name === base)) return base
+    let index = 2
+    while (this.project.tracks.some((track) => track.name === `${base} ${index}`)) index += 1
+    return `${base} ${index}`
   }
 
   private ensureMidi(name: string, color: string) {

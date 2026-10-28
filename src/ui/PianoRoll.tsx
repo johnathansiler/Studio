@@ -59,7 +59,7 @@ const LOW = 48
 const HIGH = 84
 const VEL_H = 36
 
-export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; engine: AudioEngine; onIdeas?: () => void }) {
+export function PianoRoll({ store, engine, onIdeas, onGenerate }: { store: ProjectStore; engine: AudioEngine; onIdeas?: () => void; onGenerate?: () => void }) {
   const track = store.project.tracks.find((item) => item.midiClips.some((clip) => clip.id === store.selectedMidiClipId))
   const clip = track?.midiClips.find((item) => item.id === store.selectedMidiClipId)
   const [open, setOpen] = useState(false)
@@ -685,6 +685,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     <div className="piano" ref={pianoRef} data-tool={tool}>
       <div className="scale-bar">
         <button type="button" className={`chords-btn ${open ? 'on' : ''}`} aria-expanded={open} onClick={() => void toggleChords()}>Chords</button>
+        {onGenerate && <button type="button" onClick={onGenerate}>Generate</button>}
         <select aria-label="Key" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
           {NOTE_NAMES.map((name, index) => (
             <option key={name} value={index}>{name}</option>
