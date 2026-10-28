@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { drumIndex, DRUM_PADS } from '../model/drums'
 import { DRUM_PAGE, drumRows, hitAt, stepCount } from '../model/drumLanes'
-import { projectSampleBeat } from '../model/tempoMap'
+import { loopGridBeats } from '../model/loopEdit'
+import { STEP_BEAT } from '../model/steps'
+import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import { displayedPlayhead } from '../model/transportSync'
 import { selectMidiEditor } from '../state/select'
 import type { ProjectStore } from '../state/store'
+import { useFormFactor } from './form'
 import { TipButton } from './Hint'
+import { LoopRegion } from './LoopRegion'
 
 export function DrumEditor({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
   const { track, clip, editor, project } = selectMidiEditor(store)
@@ -33,6 +37,11 @@ export function DrumEditor({ store, engine }: { store: ProjectStore; engine: Aud
   const to = Math.min(steps, from + DRUM_PAGE)
   const selected = clip.notes.find((note) => note.id === store.selectedNoteId)
   const indexes = Array.from({ length: to - from }, (_, index) => from + index)
+  const phone = useFormFactor() === 'phone'
+  const cell = phone ? 28 : 22
+  const trackW = Math.max(cell, indexes.length * cell + Math.max(0, indexes.length - 1) * 3)
+  const originBeat = clip.startBeat + from * STEP_BEAT
+  const pageBeats = Math.max(STEP_BEAT, (to - from) * STEP_BEAT)
   return (
     <div className="me-drums">
       <div className="me-bar">
@@ -109,6 +118,20 @@ export function DrumEditor({ store, engine }: { store: ProjectStore; engine: Aud
         )}
       </div>
       <div className="me-lanes" role="grid" aria-label="Drum lanes. Each row is a pad. Tap a cell to add a hit.">
+        <div className="me-loop">
+          <span className="me-pad">Loop</span>
+          <div className="me-loop-host" style={{ width: trackW }}>
+            <LoopRegion
+              store={store}
+              project={project}
+              view="drums"
+              gridBeats={loopGridBeats(project, STEP_BEAT)}
+              sampleAt={(clientX, rect) => projectBeatSample(project, Math.max(0, originBeat + ((clientX - rect.left) / Math.max(1, rect.width)) * pageBeats))}
+              xAt={(sample, hostWidth) => ((projectSampleBeat(project, sample) - originBeat) / pageBeats) * hostWidth}
+              onSeek={(sample) => engine.seek(sample)}
+            />
+          </div>
+        </div>
         {rows.map((row) => (
           <div className="me-lane" key={row.pitch} role="row">
             <span className="me-pad" title={`${row.name}. This row edits that pad.`}>{row.name}</span>
