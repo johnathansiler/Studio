@@ -1,12 +1,49 @@
-.sound-back.dock {
-  position: fixed;
-  z-index: 60;
-  top: 58px;
-  right: 8px;
-  bottom: 8px;
-  width: min(380px, calc(100vw - 16px));
+/* Desktop: a column in the workspace, so the timeline shrinks instead of sitting under the panel. */
+.workspace.sounds-open,
+.shell.fold .workspace.sounds-open,
+.shell.artist .workspace.sounds-open {
+  grid-template-columns: minmax(0, 1fr) var(--sounds, 360px) var(--dock);
+}
+
+.workspace.sounds-open.session-closed,
+.shell.fold .workspace.sounds-open.session-closed,
+.shell:not(.phone) .workspace.sounds-open.session-closed,
+.shell.artist .workspace.sounds-open.session-closed,
+html[data-posture="book"] .shell:not(.phone) .workspace.sounds-open.session-closed {
+  grid-template-columns: minmax(0, 1fr) var(--sounds, 360px);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.workspace.dock-bottom.sounds-open {
+  grid-template-columns: minmax(0, 1fr) var(--sounds, 360px);
+  grid-template-rows: minmax(0, 1fr) var(--dock);
+}
+
+.workspace.dock-bottom.sounds-open .dock-slot {
+  grid-column: 1 / -1;
+}
+
+.sound-slot {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
   display: flex;
-  pointer-events: none;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+}
+
+.sound-resize {
+  position: absolute;
+  left: -4px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  z-index: 5;
 }
 
 .sound-back.sheet {
@@ -32,13 +69,17 @@
   color: var(--text);
 }
 
-.sound-back.dock .sound-panel {
+.sound-slot .sound-panel {
   height: 100%;
-  pointer-events: auto;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .sound-back.sheet .sound-panel {
-  max-height: min(78dvh, 720px);
+  width: 100%;
+  height: calc(100dvh - 56px);
+  max-height: calc(100dvh - 56px);
   border-radius: 16px 16px 0 0;
   padding-bottom: calc(12px + env(safe-area-inset-bottom));
 }
@@ -63,6 +104,12 @@
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
+}
+
+.sound-count {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .sound-status button {

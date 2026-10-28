@@ -502,6 +502,23 @@ export class AudioEngine {
     this.rackHost.note(trackId, pitch, 0, when)
   }
 
+  /**
+   * Load the samples for one note, then play it.
+   * The file is requested only after the preset is on the track, from Hugging Face.
+   */
+  async auditionLibrary(trackId: string, pitch = 60) {
+    this.unlock()
+    if (this.project) this.sync(this.project, this.assetOf)
+    const track = this.project?.tracks.find((item) => item.id === trackId)
+    if (!track?.library || track.instrument !== 'library') return
+    const rate = this.ctx?.sampleRate ?? this.sampleRate
+    const missing = await this.libraryHost.prepare(trackId, track, [{ sample: 0, pitch, vel: 0.9 }], rate)
+    if (missing > 0) throw new Error('That instrument sample is not on Hugging Face yet.')
+    const when = (this.ctx?.currentTime ?? 0) + 0.05
+    this.libraryHost.note(trackId, pitch, 0.9, when)
+    this.libraryHost.note(trackId, pitch, 0, when + 1.1)
+  }
+
   holdLibraryPack(trackId: string, pack: SamplePack) {
     this.libraryHost.holdPack(trackId, pack)
   }
@@ -510,11 +527,16 @@ export class AudioEngine {
     this.libraryHost.holdAudio(trackId, samples)
   }
 
-  /** Audition a layered patch. `down` starts the note; a lift releases it. */
+  /** Audition a layered patch. `down` starts the note; a lift releases it. A loaded starter instrument plays instead. */
   previewPatch(trackId: string, pitch: number, down: boolean) {
     this.unlock()
     if (this.project) this.sync(this.project, this.assetOf)
     const when = this.ctx?.currentTime ?? 0
+    const track = this.project?.tracks.find((item) => item.id === trackId)
+    if (track?.instrument === 'library' && track.library) {
+      this.libraryHost.note(trackId, pitch, down ? 0.85 : 0, when)
+      return
+    }
     this.patchHost.note(trackId, pitch, down ? 0.85 : 0, when)
   }
 

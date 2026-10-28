@@ -76,9 +76,10 @@ export class LibraryHost {
     for (const sample of samples) cache.holdAudio(sample.id, { sampleRate: sample.sampleRate, channels: sample.channels })
   }
 
+  /** Loads the samples a note will use. Returns how many of those files failed. */
   async prepare(trackId: string, track: Track, events: SamplerNote[], sampleRate: number) {
     const program = track.library
-    if (!program) return
+    if (!program) return 0
     const live = this.ensure(trackId, sampleRate)
     live.instrument.setProgram(program)
     const ids = new Set<string>()
@@ -86,15 +87,17 @@ export class LibraryHost {
       if (event.vel <= 0) continue
       for (const layer of live.instrument.preview(event.pitch, event.vel)) ids.add(layer.sample.id)
     }
+    let missing = 0
     await Promise.all([...ids].map(async (id) => {
       const sample = program.samples.find((item) => item.id === id)
       if (!sample?.url) return
       try {
         await live.cache.load(sample)
       } catch {
-        /* a missing starter file stays silent */
+        missing += 1
       }
     }))
+    return missing
   }
 
   renderOffline(trackId: string, track: Track, events: SamplerNote[], sampleRate: number, length: number) {
