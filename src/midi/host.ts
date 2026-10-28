@@ -165,6 +165,12 @@ export class MidiHost {
     this.open = []
     for (const [trackId, notes] of this.takes) {
       if (!notes.length) continue
+      const slot = this.store.sessionSlot
+      if (slot && slot.trackId === trackId) {
+        const ordered = [...notes].sort((a, b) => a.startBeat - b.startBeat || a.pitch - b.pitch)
+        this.store.overdubSlot(trackId, slot.scene, ordered, this.store.sessionRecordBeat ?? undefined)
+        continue
+      }
       const start = Math.min(...notes.map((note) => note.startBeat))
       const relative = notes
         .map((note) => ({ ...note, startBeat: Math.max(0, note.startBeat - start) }))

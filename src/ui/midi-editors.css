@@ -12,8 +12,24 @@
   flex: 1 1 auto;
   height: auto;
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
   border-top: 0;
 }
+.shell:not(.phone) .midi-dock .scale-bar,
+.shell:not(.phone) .midi-dock .tool-row,
+.shell:not(.phone) .midi-dock .me-modes {
+  flex-wrap: wrap;
+  overflow: hidden;
+  max-width: 100%;
+  height: auto;
+}
+.midi-dock .piano-body,
+.midi-dock .roll {
+  min-width: 0;
+  max-width: 100%;
+}
+.midi-dock .piano-body { overflow: hidden; }
 .me-modes, .me-bar {
   display: flex;
   align-items: center;
