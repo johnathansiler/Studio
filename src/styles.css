@@ -429,7 +429,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border-top: 0; border-left: 1px solid var(--line);
 }
 .shell.phone .plugin-sheet:has(.faceplate) { max-height: 68vh; }
-.shell.phone .plugin-sheet:has(.sample-panel) { max-height: 74vh; }
+.shell.phone .plugin-sheet:has(.sample-panel) { max-height: 86vh; }
 .clip-sheet {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
   background: #18241d; border-top: 1px solid var(--line);
@@ -1919,6 +1919,10 @@ button {
 .rack-extras button,
 .rack-add,
 .rack-cats button,
+.rack-results button,
+.rack-picker button,
+.kit-toggle,
+.kit-fold,
 .tool-slot .timeline-tools button,
 .tool-row button,
 .me-modes button,

@@ -41,7 +41,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 8px;
   max-width: 100%;
   min-width: 0;
 }
@@ -64,11 +65,32 @@
 .rack-bar button,
 .rack-extras button,
 .rack-add,
-.rack-picker button {
+.rack-cats button,
+.rack-picker button,
+.rack-results button {
   border-radius: 8px;
   border: 1px solid var(--line);
-  background: var(--panel);
+  background-color: var(--panel);
   color: var(--text);
+}
+.rack-bar button,
+.rack-extras button,
+.rack-add,
+.rack-cats button,
+.rack-picker button,
+.rack-results button {
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  min-height: var(--control-h);
+  padding: 6px 12px;
+  line-height: 1.15;
 }
 
 .rack-bar select,
@@ -400,7 +422,8 @@
 }
 
 .rack-group.alt .rack-step:not(.on) {
-  background: #1c2922;
+  background-color: #1c2922;
+  background-image: var(--face);
 }
 
 .rack-step.on {

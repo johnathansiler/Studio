@@ -27,7 +27,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   const autoTune = plugin?.pluginId === 'tune'
   const sampleFace = plugin?.pluginId === 'sampler' || plugin?.pluginId === 'looper'
   const customFace = !!plugin && !autoTune && plugin.pluginId !== 'amp' && !sampleFace
-  const faced = !!autoTune || customFace || (plugin ? MODEL_IDS.includes(plugin.pluginId) : false)
+  const faced = !!autoTune || customFace || sampleFace || (plugin ? MODEL_IDS.includes(plugin.pluginId) : false)
   useEffect(() => {
     if (!faced) return
     const timer = window.setInterval(() => setTick((value) => value + 1), 80)
@@ -165,7 +165,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
           </div>
         </Suspense>
       )}
-      {sampleFace && <SamplePanel store={store} engine={engine} trackId={focus.trackId} plugin={plugin} />}
+      {sampleFace && <SamplePanel store={store} engine={engine} trackId={focus.trackId} plugin={plugin} vu={engine.meter(plugin.id)?.vu} />}
       {autoTune && (
         <div onPointerDownCapture={() => store.beginAutomationTouch()} onPointerUp={() => { store.endAutomationTouch(); store.endDraft() }} onPointerCancel={() => { store.endAutomationTouch(); store.endDraft() }}>
         <AutoTuneFace
@@ -212,7 +212,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
           </label>
         ))}
       </div> : null}
-      <div className="row">
+      <div className="row slot-actions">
         <button className="text-btn" title="Move this plugin earlier." aria-label="Move this plugin earlier." onClick={() => store.movePlugin(focus.trackId, plugin.id, -1)}>←</button>
         <button className="text-btn" title="Move this plugin later." aria-label="Move this plugin later." onClick={() => store.movePlugin(focus.trackId, plugin.id, 1)}>→</button>
         <button className="text-btn" title="Remove this plugin." aria-label="Remove this plugin." onClick={() => store.removePlugin(focus.trackId, plugin.id)}>Remove</button>

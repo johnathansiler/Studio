@@ -16,13 +16,17 @@ import {
   retargetSlices,
   type SlotPoints,
 } from '../audio/sample/slot'
+import { descriptor } from '../audio/plugins/catalog'
 import { uid, type PluginInstance } from '../model/types'
 import { readIdentity } from '../storage/identity'
 import { samplesToBeats } from '../model/time'
 import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
+import { themeFor } from './faces/themes'
 import { useFormFactor } from './form'
 import { TipButton } from './Hint'
+import { Keyboard, Knob } from './kit/controls'
+import './kit/kit.css'
 import './slot.css'
 
 const PADS = Array.from({ length: 16 }, (_, index) => index)
@@ -34,12 +38,14 @@ function noteName(midi: number) {
   return `${NAMES[((note % 12) + 12) % 12]}${Math.floor(note / 12) - 1}`
 }
 
-export function SamplePanel({ store, engine, trackId, plugin }: { store: ProjectStore; engine: AudioEngine; trackId: string | 'master'; plugin: PluginInstance }) {
+export function SamplePanel({ store, engine, trackId, plugin, vu }: { store: ProjectStore; engine: AudioEngine; trackId: string | 'master'; plugin: PluginInstance; vu?: number }) {
   const [more, setMore] = useState(false)
   const [phase, setPhase] = useState<'idle' | 'count-in' | 'recording'>('idle')
   const [take, setTake] = useState<'replace' | 'overdub' | null>(null)
   const [level, setLevel] = useState(0)
   const [countBeat, setCountBeat] = useState(0)
+  const [burst, setBurst] = useState(0)
+  const [litPad, setLitPad] = useState<number | null>(null)
   const stopRef = useRef(false)
   const busyRef = useRef(false)
   const closeRef = useRef<(() => void) | null>(null)
@@ -57,6 +63,12 @@ export function SamplePanel({ store, engine, trackId, plugin }: { store: Project
     stopRef.current = true
     closeRef.current?.()
   }, [])
+
+  useEffect(() => {
+    if (burst <= 0) return
+    const timer = window.setInterval(() => setBurst((value) => (value < 0.04 ? 0 : value * 0.7)), 40)
+    return () => window.clearInterval(timer)
+  }, [burst])
 
   useEffect(() => {
     if (plugin.pluginId !== 'looper') return
@@ -202,11 +214,32 @@ export function SamplePanel({ store, engine, trackId, plugin }: { store: Project
   const recordLabel = recording && !dubbing ? 'Stop' : 'Record'
   const recordHint = recording && !dubbing ? 'Stop and keep what was recorded.' : 'Record the selected mic into this slot, after the count-in.'
   const stopTake = () => { stopRef.current = true }
+  const theme = themeFor(plugin.pluginId)
+  const spec = descriptor(plugin.pluginId)
+  const knobIds = sampler ? ['gain', 'pitch', 'attack', 'release'] : ['level', 'feedback', 'speed']
+  const fromDb = vu == null ? 0 : Math.max(0, Math.min(1, (vu + 48) / 48))
+  const meter = Math.max(fromDb, level, burst)
+  const setParam = (id: string, value: number) => {
+    store.updatePlugin(trackId, plugin.id, { params: { [id]: value } })
+  }
+  const playPad = (pad: number, velocity: number) => {
+    setLitPad(pad)
+    setBurst(Math.max(0.2, Math.min(1, velocity)))
+    engine.previewSample(plugin.id, sampler?.slices[pad]?.root ?? 36 + pad)
+  }
 
   return (
     <div
-      className="sample-panel slot-panel"
+      className="sample-panel slot-panel slot-face"
+      data-kind={plugin.pluginId}
       data-slot-drop="1"
+      style={{
+        ['--accent' as string]: theme.accent,
+        ['--accent2' as string]: theme.accent2,
+        ['--ink' as string]: theme.ink,
+        ['--metal' as string]: theme.metal,
+        ['--panel' as string]: theme.panel,
+      }}
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault()
@@ -214,21 +247,45 @@ export function SamplePanel({ store, engine, trackId, plugin }: { store: Project
         if (file) void onFile(file)
       }}
     >
-      <SlotWave
-        channel={channel}
-        points={points}
-        slices={sampler?.slices ?? []}
-        onDrag={(next) => store.setSlotPoints(trackId, plugin.id, next)}
-        onDone={() => store.endDraft()}
-      />
+      <div className="slot-stage">
+        <SlotWave
+          channel={channel}
+          points={points}
+          slices={sampler?.slices ?? []}
+          onDrag={(next) => store.setSlotPoints(trackId, plugin.id, next)}
+          onDone={() => store.endDraft()}
+        />
+        <OutMeter unit={meter} />
+      </div>
       {(recording || level > 0) && (
-        <>
-          <div className="slot-meter" aria-hidden="true"><span style={{ width: `${Math.round(level * 100)}%` }} /></div>
-          <p className="slot-status">{phase === 'count-in' ? `Count-in ${countBeat}` : 'Recording'}</p>
-        </>
+        <p className="slot-status">{phase === 'count-in' ? `Count-in ${countBeat}` : 'Recording'}</p>
       )}
-      <div className="row">
-        <TipButton className={recording && !dubbing ? 'on' : ''} label={recordLabel} hint={recordHint} pressed={recording && !dubbing} onClick={() => { if (recording) stopTake(); else void beginRecord('replace') }} />
+      <div
+        className="slot-knobs"
+        onPointerDown={() => store.beginAutomationTouch()}
+        onPointerUp={() => { store.endAutomationTouch(); store.endDraft() }}
+        onPointerCancel={() => { store.endAutomationTouch(); store.endDraft() }}
+      >
+        {knobIds.map((id) => {
+          const param = spec?.params.find((item) => item.id === id)
+          if (!param) return null
+          const value = plugin.params[id] ?? param.default
+          return (
+            <Knob
+              key={id}
+              label={param.name}
+              min={param.min}
+              max={param.max}
+              value={value}
+              unit={param.unit}
+              fallback={param.default}
+              onChange={(next) => setParam(id, next)}
+            />
+          )
+        })}
+      </div>
+      <div className="slot-actions">
+        <SlotButton className={recording && !dubbing ? 'on' : ''} label={recordLabel} hint={recordHint} pressed={recording && !dubbing} onClick={() => { if (recording) stopTake(); else void beginRecord('replace') }} />
         <label className="text-btn slot-upload" title="Load a wav, mp3, m4a, ogg, flac, or aiff file from this device.">
           Upload
           <input
@@ -243,16 +300,16 @@ export function SamplePanel({ store, engine, trackId, plugin }: { store: Project
             }}
           />
         </label>
-        <TipButton label="Sounds" hint="Open the sound library and put one in this slot." onClick={() => window.dispatchEvent(new Event(OPEN_SOUNDS))} />
-        {sampler && <TipButton className={plugin.params.keys >= 0.5 ? 'on' : ''} label="Keys" hint="Play the sample from the keyboard instead of the pads." pressed={plugin.params.keys >= 0.5} onClick={() => store.updatePlugin(trackId, plugin.id, { params: { keys: plugin.params.keys >= 0.5 ? 0 : 1 } })} />}
-        {looper && !phone && <TipButton className={dubbing ? 'on' : ''} label={dubbing ? 'Stop' : 'Dub'} hint={dubbing ? 'Stop and keep this pass.' : 'Record another pass over the loop. The loop restarts with the pass.'} pressed={dubbing} onClick={() => { if (recording) stopTake(); else void beginRecord('overdub') }} />}
-        {looper && <TipButton label="Play" hint="Play the loop from the next bar." onClick={() => store.armLooper(trackId, plugin.id, 1, beat())} />}
-        {looper && <TipButton label="Stop" hint="Stop the loop." onClick={() => { stopRef.current = true; store.armLooper(trackId, plugin.id, 0, beat()) }} />}
-        <TipButton className={more ? 'on' : ''} label="More" hint="Trim, normalize, slices, and the clip send." pressed={more} onClick={() => setMore((value) => !value)} />
+        <SlotButton label="Sounds" hint="Open the sound library and put one in this slot." onClick={() => window.dispatchEvent(new Event(OPEN_SOUNDS))} />
+        {sampler && <SlotButton className={plugin.params.keys >= 0.5 ? 'on' : ''} label="Keys" hint="Play the sample from the keyboard instead of the pads." pressed={plugin.params.keys >= 0.5} onClick={() => store.updatePlugin(trackId, plugin.id, { params: { keys: plugin.params.keys >= 0.5 ? 0 : 1 } })} />}
+        {looper && !phone && <SlotButton className={dubbing ? 'on' : ''} label={dubbing ? 'Stop' : 'Dub'} hint={dubbing ? 'Stop and keep this pass.' : 'Record another pass over the loop. The loop restarts with the pass.'} pressed={dubbing} onClick={() => { if (recording) stopTake(); else void beginRecord('overdub') }} />}
+        {looper && <SlotButton label="Play" hint="Play the loop from the next bar." onClick={() => store.armLooper(trackId, plugin.id, 1, beat())} />}
+        {looper && <SlotButton label="Stop" hint="Stop the loop." onClick={() => { stopRef.current = true; store.armLooper(trackId, plugin.id, 0, beat()) }} />}
+        <SlotButton className={more ? 'on' : ''} label="More" hint="Trim, normalize, slices, and the clip send." pressed={more} onClick={() => setMore((value) => !value)} />
       </div>
       {channel && (
-        <div className="row">
-          <TipButton label="Trim" hint="Cut to the start and end handles. A full selection trims silence." onClick={() => {
+        <div className="slot-actions">
+          <SlotButton label="Trim" hint="Cut to the start and end handles. A full selection trims silence." onClick={() => {
             if (looper) {
               if (points.start <= 0.001 && points.end >= 0.999) {
                 store.toast('Drag the start or end handle, then trim.', 'info')
@@ -270,60 +327,96 @@ export function SamplePanel({ store, engine, trackId, plugin }: { store: Project
             const rate = asset?.sampleRate || store.project.sampleRate
             loadDecoded(asset?.name || 'Trimmed', rate, (asset?.channels ?? [channel]).map((item) => item.slice(from, Math.min(item.length, to))))
           }} />
-          <TipButton label="Norm" hint="Raise the sample so its peak is just under full level." onClick={() => {
+          <SlotButton label="Norm" hint="Raise the sample so its peak is just under full level." onClick={() => {
             if (sampler) store.editSample(trackId, plugin.id, 'norm')
             else store.normalizeLooper(trackId, plugin.id)
           }} />
         </div>
       )}
       {sampler && (plugin.params.keys >= 0.5 ? (
-        <div className="pads keys">
-          {['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C'].map((label, index) => {
-            const note = [60, 62, 64, 65, 67, 69, 71, 72][index]
-            return <TipButton key={label + index} label={label} hint={`Play ${label}.`} onClick={() => engine.previewSample(plugin.id, note)} />
-          })}
-        </div>
+        <Keyboard
+          compact={phone}
+          onDown={(note) => {
+            setBurst(0.85)
+            engine.previewSample(plugin.id, note)
+          }}
+        />
       ) : (
-        <div className="pads">
-          {PADS.map((pad) => (
-            <TipButton key={pad} className="slot-pad" label={sampler.slices[pad] ? noteName(sampler.slices[pad].root) : String(pad + 1)} hint={`Play pad ${pad + 1}.`} onClick={() => engine.previewSample(plugin.id, sampler.slices[pad]?.root ?? 36 + pad)} />
-          ))}
+        <div className="pads" role="group" aria-label="Pads">
+          {PADS.map((pad) => {
+            const velocity = litPad === pad ? Math.max(burst, 0.35) : 0
+            return (
+              <TipButton
+                key={pad}
+                className={`slot-pad${litPad === pad ? ' lit' : ''}`}
+                style={{ ['--pad' as string]: PAD_COLORS[pad], ['--vel' as string]: String(velocity) }}
+                label={sampler.slices[pad] ? noteName(sampler.slices[pad].root) : String(pad + 1)}
+                hint={`Play pad ${pad + 1}.`}
+                pressed={litPad === pad}
+                onPress={(event) => {
+                  const pressure = event.pressure > 0 && event.pressure < 1 ? event.pressure : 0.86
+                  playPad(pad, pressure)
+                }}
+                onRelease={() => window.setTimeout(() => setLitPad((current) => (current === pad ? null : current)), 160)}
+              />
+            )
+          })}
         </div>
       ))}
       {more && (
-        <div className="row">
-          <TipButton label="Clip" hint="Copy the selected arrange clip into this slot." onClick={sendSelected} />
-          {looper && phone && <TipButton className={dubbing ? 'on' : ''} label={dubbing ? 'Stop' : 'Dub'} hint={dubbing ? 'Stop and keep this pass.' : 'Record another pass over the loop. The loop restarts with the pass.'} pressed={dubbing} onClick={() => { if (recording) stopTake(); else void beginRecord('overdub') }} />}
-          {sampler && <TipButton label="Slice" hint="Cut the sample into pads across the keyboard." onClick={() => store.chopSample(trackId, plugin.id, 'grid')} />}
-          {sampler && <TipButton label="Hits" hint="Cut the sample at the transients." onClick={() => store.chopSample(trackId, plugin.id, 'transient')} />}
-          {sampler && <TipButton label="Beat" hint="Cut the sample on each beat." onClick={() => store.chopSample(trackId, plugin.id, 'beat')} />}
-          {sampler && <TipButton label="x0.5" hint="Play the sample at half speed." pressed={sampler.speed === 0.5} onClick={() => setSpeed(0.5)} />}
-          {sampler && <TipButton label="x2" hint="Play the sample at double speed." pressed={sampler.speed === 2} onClick={() => setSpeed(2)} />}
-          {sampler && <TipButton label="MIDI" hint="Write the slices as notes on a MIDI clip." onClick={() => store.exportSlices(trackId, plugin.id, beat())} />}
-          {sampler && <TipButton label="Root +" hint="Raise the root note one semitone. Pads follow it." onClick={() => setRoot(sampler.root + 1)} />}
-          {sampler && <TipButton label="Root -" hint="Lower the root note one semitone. Pads follow it." onClick={() => setRoot(sampler.root - 1)} />}
-          {sampler && <TipButton label="Snap" hint="Move the handles to the nearest zero crossing." onClick={() => store.editSample(trackId, plugin.id, 'snap')} />}
-          {sampler && <TipButton label="Fade" hint="Fade the sample in and out so the edges stay quiet." onClick={() => store.editSample(trackId, plugin.id, 'fade')} />}
-          {sampler && <TipButton label="Rev" hint="Reverse the sample." onClick={() => store.editSample(trackId, plugin.id, 'reverse')} />}
-          {looper && <TipButton label="Half" hint="Play the last layer at half speed." onClick={() => {
+        <div className="slot-actions">
+          <SlotButton label="Clip" hint="Copy the selected arrange clip into this slot." onClick={sendSelected} />
+          {looper && phone && <SlotButton className={dubbing ? 'on' : ''} label={dubbing ? 'Stop' : 'Dub'} hint={dubbing ? 'Stop and keep this pass.' : 'Record another pass over the loop. The loop restarts with the pass.'} pressed={dubbing} onClick={() => { if (recording) stopTake(); else void beginRecord('overdub') }} />}
+          {sampler && <SlotButton label="Slice" hint="Cut the sample into pads across the keyboard." onClick={() => store.chopSample(trackId, plugin.id, 'grid')} />}
+          {sampler && <SlotButton label="Hits" hint="Cut the sample at the transients." onClick={() => store.chopSample(trackId, plugin.id, 'transient')} />}
+          {sampler && <SlotButton label="Beat" hint="Cut the sample on each beat." onClick={() => store.chopSample(trackId, plugin.id, 'beat')} />}
+          {sampler && <SlotButton label="x0.5" hint="Play the sample at half speed." pressed={sampler.speed === 0.5} onClick={() => setSpeed(0.5)} />}
+          {sampler && <SlotButton label="x2" hint="Play the sample at double speed." pressed={sampler.speed === 2} onClick={() => setSpeed(2)} />}
+          {sampler && <SlotButton label="MIDI" hint="Write the slices as notes on a MIDI clip." onClick={() => store.exportSlices(trackId, plugin.id, beat())} />}
+          {sampler && <SlotButton label="Root +" hint="Raise the root note one semitone. Pads follow it." onClick={() => setRoot(sampler.root + 1)} />}
+          {sampler && <SlotButton label="Root -" hint="Lower the root note one semitone. Pads follow it." onClick={() => setRoot(sampler.root - 1)} />}
+          {sampler && <SlotButton label="Snap" hint="Move the handles to the nearest zero crossing." onClick={() => store.editSample(trackId, plugin.id, 'snap')} />}
+          {sampler && <SlotButton label="Fade" hint="Fade the sample in and out so the edges stay quiet." onClick={() => store.editSample(trackId, plugin.id, 'fade')} />}
+          {sampler && <SlotButton label="Rev" hint="Reverse the sample." onClick={() => store.editSample(trackId, plugin.id, 'reverse')} />}
+          {looper && <SlotButton label="Half" hint="Play the last layer at half speed." onClick={() => {
             const last = looper.layers[looper.layers.length - 1]
             const speed = (last?.speed || 1) < 1 ? 1 : 0.5
             store.updatePlugin(trackId, plugin.id, { params: { speed }, looper: { ...looper, layers: looper.layers.map((layer, index) => index === looper.layers.length - 1 ? { ...layer, speed } : layer) } })
           }} />}
-          {looper && <TipButton label="Double" hint="Play the last layer at double speed." onClick={() => {
+          {looper && <SlotButton label="Double" hint="Play the last layer at double speed." onClick={() => {
             const last = looper.layers[looper.layers.length - 1]
             const speed = (last?.speed || 1) > 1 ? 1 : 2
             store.updatePlugin(trackId, plugin.id, { params: { speed }, looper: { ...looper, layers: looper.layers.map((layer, index) => index === looper.layers.length - 1 ? { ...layer, speed } : layer) } })
           }} />}
-          {looper && <TipButton label="Rev" hint="Reverse the last layer." onClick={() => store.updatePlugin(trackId, plugin.id, { looper: { ...looper, layers: looper.layers.map((layer, index) => index === looper.layers.length - 1 ? { ...layer, reverse: !layer.reverse } : layer) } })} />}
-          {looper && <TipButton label={`${looper.bars} bar`} hint="Set how many bars the synced loop records." onClick={() => store.updatePlugin(trackId, plugin.id, { looper: { ...looper, bars: looper.bars >= 8 ? 1 : looper.bars + 1 } })} />}
-          {looper && <TipButton className={looper.sync ? 'on' : ''} label="Sync" hint="Record a whole number of bars at the song tempo." pressed={looper.sync} onClick={() => store.updatePlugin(trackId, plugin.id, { looper: { ...looper, sync: !looper.sync } })} />}
-          {looper && <TipButton label="Undo" hint="Remove the last loop layer." onClick={() => store.undoLooper(trackId, plugin.id)} />}
-          {looper && <TipButton label="Redo" hint="Put the last removed layer back." onClick={() => store.redoLooper(trackId, plugin.id)} />}
-          {looper && <TipButton label="Clear" hint="Remove every loop layer." onClick={() => store.clearLooper(trackId, plugin.id)} />}
-          {looper && trackId !== 'master' && <TipButton label="Bounce" hint="Put the mixed loop on the arrange track." onClick={() => store.bounceLooper(trackId, plugin.id, engine.currentTimelineSample())} />}
+          {looper && <SlotButton label="Rev" hint="Reverse the last layer." onClick={() => store.updatePlugin(trackId, plugin.id, { looper: { ...looper, layers: looper.layers.map((layer, index) => index === looper.layers.length - 1 ? { ...layer, reverse: !layer.reverse } : layer) } })} />}
+          {looper && <SlotButton label={`${looper.bars} bar`} hint="Set how many bars the synced loop records." onClick={() => store.updatePlugin(trackId, plugin.id, { looper: { ...looper, bars: looper.bars >= 8 ? 1 : looper.bars + 1 } })} />}
+          {looper && <SlotButton className={looper.sync ? 'on' : ''} label="Sync" hint="Record a whole number of bars at the song tempo." pressed={looper.sync} onClick={() => store.updatePlugin(trackId, plugin.id, { looper: { ...looper, sync: !looper.sync } })} />}
+          {looper && <SlotButton label="Undo" hint="Remove the last loop layer." onClick={() => store.undoLooper(trackId, plugin.id)} />}
+          {looper && <SlotButton label="Redo" hint="Put the last removed layer back." onClick={() => store.redoLooper(trackId, plugin.id)} />}
+          {looper && <SlotButton label="Clear" hint="Remove every loop layer." onClick={() => store.clearLooper(trackId, plugin.id)} />}
+          {looper && trackId !== 'master' && <SlotButton label="Bounce" hint="Put the mixed loop on the arrange track." onClick={() => store.bounceLooper(trackId, plugin.id, engine.currentTimelineSample())} />}
         </div>
       )}
+    </div>
+  )
+}
+
+function SlotButton({ className, ...props }: { className?: string; label: string; hint: string; pressed?: boolean; onClick?: () => void }) {
+  return <TipButton className={['text-btn', className].filter(Boolean).join(' ')} {...props} />
+}
+
+function OutMeter({ unit }: { unit: number }) {
+  const cells = 14
+  const lit = Math.round(Math.max(0, Math.min(1, unit)) * cells)
+  return (
+    <div className="slot-out" aria-label={`Output ${Math.round(unit * 100)}`}>
+      <div>
+        {Array.from({ length: cells }, (_, index) => {
+          const on = cells - 1 - index < lit
+          return <i key={index} className={on ? 'lit' : ''} data-hot={index < 3 ? '1' : undefined} />
+        })}
+      </div>
+      <span>Out</span>
     </div>
   )
 }
@@ -356,7 +449,7 @@ function SlotWave({
     if (!view) return
     const draw = () => {
       const cssW = Math.max(1, view.clientWidth || 320)
-      const cssH = Math.max(1, view.clientHeight || 72)
+      const cssH = Math.max(1, view.clientHeight || 168)
       const dpr = window.devicePixelRatio || 1
       view.width = Math.floor(cssW * dpr)
       view.height = Math.floor(cssH * dpr)
@@ -372,7 +465,14 @@ function SlotWave({
       ctx.stroke()
       if (!channel?.length) return
       const bars = scaledPeaks(channel, Math.max(8, Math.floor(cssW)))
-      ctx.fillStyle = '#73c48f'
+      const style = getComputedStyle(view)
+      const accent = style.getPropertyValue('--accent').trim() || '#73c48f'
+      const accent2 = style.getPropertyValue('--accent2').trim() || '#d7f5e4'
+      const ink = ctx.createLinearGradient(0, 0, 0, cssH)
+      ink.addColorStop(0, accent2)
+      ink.addColorStop(0.55, accent)
+      ink.addColorStop(1, accent)
+      ctx.fillStyle = ink
       bars.forEach((bar, index) => {
         const top = mid - bar.max * (mid - 3)
         const bottom = mid - bar.min * (mid - 3)
@@ -428,7 +528,7 @@ function SlotWave({
   )
   return (
     <div ref={box} className="slot-wave" aria-label="Waveform. Drag the handles to set the start, end, and loop points.">
-      <canvas ref={canvas} width={320} height={72} />
+      <canvas ref={canvas} width={640} height={168} />
       <i className="slot-shade" style={{ left: 0, width: left(points.start) }} />
       <i className="slot-shade" style={{ left: left(points.end), right: 0 }} />
       <i className="slot-loop" style={{ left: left(points.loopStart), width: `${Math.max(0, points.loopEnd - points.loopStart) * 100}%` }} />
@@ -437,7 +537,10 @@ function SlotWave({
       {handle('loopEnd', true)}
       {handle('loopStart', true)}
       {slices.map((slice, index) => (
-        <b key={slice.id} className="slot-slice" style={{ left: `${slice.loopStart * 100}%`, color: PAD_COLORS[index % PAD_COLORS.length] }}>{index + 1}</b>
+        <b key={slice.id} className="slot-slice" style={{ left: `${slice.loopStart * 100}%`, color: PAD_COLORS[index % PAD_COLORS.length] }}>
+          <i />
+          <span>{index + 1}</span>
+        </b>
       ))}
       {active && <p className="slot-status slot-active">{HANDLE_COPY[active].name}</p>}
     </div>

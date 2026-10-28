@@ -8,7 +8,6 @@ import {
   EQ_HZ_MAX,
   EQ_HZ_MIN,
   dbToY,
-  decaySteps,
   eqGainAt,
   driveShape,
   eqPath,
@@ -58,7 +57,7 @@ export function PluginFace({
       {family === 'dyn' && <DynStage pluginId={pluginId} values={values} vu={vu} gr={gr} />}
       {family === 'space' && <SpaceStage pluginId={pluginId} values={values} />}
       {family === 'color' && <ColorStage pluginId={pluginId} values={values} vu={vu} />}
-      {family === 'mod' && <ModStage values={values} />}
+      {family === 'mod' && <ModStage pluginId={pluginId} values={values} />}
       {family === 'inst' && pluginId !== 'looper' && <InstStage pluginId={pluginId} />}
       {family === 'util' && <UtilStage pluginId={pluginId} values={values} vu={vu} />}
       {keyboard && <Keyboard compact={compact} onDown={(note) => onNote?.(note, true)} onUp={(note) => onNote?.(note, false)} />}
@@ -165,7 +164,6 @@ function Row({
 }) {
   const toggles = params.filter((param) => TOGGLE_IDS.has(param.id) && param.max <= 1)
   const knobs = params.filter((param) => !toggles.includes(param))
-  const cols = Math.min(8, Math.max(1, knobs.length))
   return (
     <div className="kit-stack">
       {toggles.length > 0 && (
@@ -180,7 +178,7 @@ function Row({
           ))}
         </div>
       )}
-      <div className={`kit-row size-${size}`} style={{ ['--cols' as string]: String(cols) }}>
+      <div className={`kit-row size-${size}`}>
         {knobs.map((param) => {
           const value = values[param.id] ?? param.default
           const shared = {
@@ -294,31 +292,71 @@ function DynStage({ pluginId, values, vu, gr }: { pluginId: string; values: Reco
 }
 
 function SpaceStage({ pluginId, values }: { pluginId: string; values: Record<string, number> }) {
-  const taps = pluginId === 'reverb' || pluginId === 'plate' || pluginId === 'hall' || pluginId === 'conv'
-  const bars = taps
-    ? decaySteps(values.size ?? 0.6, values.decay ?? values.damp ?? 0.4, 42)
-    : echoTaps(values.time ?? values.division ?? 0.4, values.feedback ?? 0.35)
+  const room = pluginId === 'reverb' || pluginId === 'plate' || pluginId === 'hall' || pluginId === 'conv'
   return (
-    <div className={`space-stage${taps ? ' wash' : ' taps'}`} aria-label={taps ? 'Decay' : 'Echo taps'}>
-      {bars.map((value, index) => (
-        <i key={index} style={{ height: `${Math.max(6, Math.min(1, value) * 100)}%`, opacity: 0.35 + Math.min(1, value) * 0.65 }} />
-      ))}
+    <div className={`space-stage ${pluginId}`} aria-label={room ? 'Decay' : 'Echo taps'}>
+      {room ? <RoomGraphic pluginId={pluginId} values={values} /> : <EchoGraphic pluginId={pluginId} values={values} />}
     </div>
   )
 }
 
-function ColorStage({ pluginId, values, vu }: { pluginId: string; values: Record<string, number>; vu: number }) {
-  const reels = pluginId === 'tape' || pluginId === 'mtape' || pluginId === 'echo'
+function RoomGraphic({ pluginId, values }: { pluginId: string; values: Record<string, number> }) {
+  const size = values.size ?? values.decay ?? 0.6
+  const damp = values.damp ?? values.mix ?? 0.4
+  const rings = pluginId === 'plate' ? 4 : pluginId === 'hall' ? 7 : 5
   return (
-    <div className="color-stage">
+    <svg viewBox="0 0 640 140" role="img" aria-label={pluginId === 'plate' ? 'Plate' : 'Room'}>
+      <rect x="18" y="16" width="604" height="108" rx={pluginId === 'plate' ? 6 : 54} className="room" />
+      {Array.from({ length: rings }, (_, index) => {
+        const t = (index + 1) / rings
+        const rx = 40 + size * 250 * t
+        const ry = 12 + (1 - damp) * 40 * t
+        return <ellipse key={index} cx="320" cy="74" rx={rx} ry={ry} className="ring" opacity={1 - t * 0.72} />
+      })}
+    </svg>
+  )
+}
+
+function EchoGraphic({ pluginId, values }: { pluginId: string; values: Record<string, number> }) {
+  const taps = echoTaps(values.time ?? values.division ?? 0.4, values.feedback ?? 0.35)
+  const marks = taps.map((value, index) => ({ value, index })).filter((tap) => tap.value > 0.2)
+  return (
+    <svg viewBox="0 0 640 140" role="img" aria-label={pluginId === 'bbd' ? 'Bucket delay' : 'Echo'}>
+      <line x1="24" y1="96" x2="616" y2="96" className="grid" />
+      {marks.map((tap) => {
+        const x = 36 + (tap.index / Math.max(1, taps.length - 1)) * 568
+        const h = 16 + tap.value * 70
+        return (
+          <g key={tap.index}>
+            <line x1={x} y1={96} x2={x} y2={96 - h} className="echo" />
+            <circle cx={x} cy={96 - h} r={pluginId === 'digital' ? 3 : 5} className="echo-dot" />
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
+function ColorStage({ pluginId, values, vu }: { pluginId: string; values: Record<string, number>; vu: number }) {
+  const reels = pluginId === 'tape' || pluginId === 'mtape'
+  const drive = values.drive ?? values.ceiling ?? 0.3
+  return (
+    <div className={`color-stage kind-${pluginId}`}>
       {reels ? (
         <div className="reels" aria-label="Tape reels">
-          <i style={{ animationDuration: `${1.6 - (values.drive ?? 0.3)}s` }} />
-          <i style={{ animationDuration: `${1.6 - (values.drive ?? 0.3)}s` }} />
+          <i style={{ animationDuration: `${Math.max(0.6, 1.8 - drive)}s` }} />
+          <i style={{ animationDuration: `${Math.max(0.6, 1.8 - drive)}s` }} />
+        </div>
+      ) : pluginId === 'clip' ? (
+        <div className="clip-lamps" aria-label="Clip">
+          {Array.from({ length: 10 }, (_, index) => (
+            <i key={index} className={index / 10 < drive ? 'hot' : ''} />
+          ))}
         </div>
       ) : (
         <svg className="kit-eq short" viewBox={`0 0 ${W} 120`} aria-label="Drive">
-          <path className="curve" d={driveShape(values.drive ?? 0.3, 48).map((y, index) => {
+          {pluginId === 'saturator' && <circle cx="70" cy="60" r="28" className="tube" />}
+          <path className="curve" d={driveShape(drive, 48).map((y, index) => {
             const x = (index / 47) * W
             const py = 60 - y * 52
             return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${py.toFixed(1)}`
@@ -330,28 +368,44 @@ function ColorStage({ pluginId, values, vu }: { pluginId: string; values: Record
   )
 }
 
-function ModStage({ values }: { values: Record<string, number> }) {
+function ModStage({ pluginId, values }: { pluginId: string; values: Record<string, number> }) {
   const depth = values.depth ?? values.mix ?? 0.4
+  if (pluginId === 'rotor') {
+    return (
+      <div className="mod-stage rotor" aria-label="Rotor">
+        <i className="horn" style={{ animationDuration: `${1.8 - depth}s` }} />
+        <i className="horn bass" style={{ animationDuration: `${2.6 - depth}s` }} />
+      </div>
+    )
+  }
+  if (pluginId === 'phase') {
+    return (
+      <svg className="kit-eq short" viewBox="0 0 640 120" aria-label="Phase">
+        {Array.from({ length: 6 }, (_, index) => {
+          const x = 80 + index * 90 + depth * 20
+          return <path key={index} className="curve" d={`M${x - 30} 20 Q ${x} 100 ${x + 30} 20`} opacity={0.35 + index * 0.1} />
+        })}
+      </svg>
+    )
+  }
+  const voices = pluginId === 'ensemble' ? 6 : pluginId === 'doubler' ? 2 : 3
   return (
-    <div className="mod-stage" aria-label="Modulation">
-      {Array.from({ length: 5 }, (_, index) => (
-        <i key={index} style={{ animationDelay: `${index * 0.12}s`, transform: `scale(${0.55 + depth * 0.5})` }} />
-      ))}
-    </div>
+    <svg className="kit-eq short" viewBox="0 0 640 120" aria-label="Modulation">
+      {Array.from({ length: voices }, (_, voice) => {
+        const amp = 12 + depth * 28
+        const d = Array.from({ length: 32 }, (_, index) => {
+          const x = (index / 31) * 640
+          const y = 60 + Math.sin(index / 3 + voice) * amp
+          return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`
+        }).join(' ')
+        return <path key={voice} className="curve" d={d} opacity={0.45 + voice * 0.15} />
+      })}
+    </svg>
   )
 }
 
 function InstStage({ pluginId }: { pluginId: string }) {
-  if (pluginId === 'sampler') {
-    return (
-      <div className="wave" aria-label="Sample">
-        {Array.from({ length: 48 }, (_, index) => {
-          const env = Math.sin(index / 3) * Math.exp(-index / 28)
-          return <i key={index} style={{ height: `${18 + Math.abs(env) * 70}%` }} />
-        })}
-      </div>
-    )
-  }
+  if (pluginId === 'sampler' || pluginId === 'looper') return null
   return null
 }
 

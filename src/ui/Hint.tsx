@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 interface HintState {
@@ -65,6 +65,9 @@ export function TipButton({
   disabled,
   id,
   onClick,
+  onPress,
+  onRelease,
+  style,
   children,
 }: {
   label: string
@@ -74,6 +77,9 @@ export function TipButton({
   disabled?: boolean
   id?: string
   onClick?: (event: MouseEvent<HTMLButtonElement>) => void
+  onPress?: (event: ReactPointerEvent<HTMLButtonElement>) => void
+  onRelease?: () => void
+  style?: CSSProperties
   children?: ReactNode
 }) {
   const block = useRef(false)
@@ -103,10 +109,20 @@ export function TipButton({
       title={hint}
       aria-label={`${label}. ${hint}`}
       aria-pressed={pressed}
-      onPointerDown={arm}
+      style={style}
+      onPointerDown={(event) => {
+        arm(event)
+        onPress?.(event)
+      }}
       onPointerMove={move}
-      onPointerUp={end}
-      onPointerCancel={end}
+      onPointerUp={() => {
+        end()
+        onRelease?.()
+      }}
+      onPointerCancel={() => {
+        end()
+        onRelease?.()
+      }}
       onClick={(event) => {
         if (block.current) {
           block.current = false
