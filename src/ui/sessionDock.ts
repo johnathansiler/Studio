@@ -60,7 +60,7 @@ export function fittedDockWidth(viewport: number, requested: number, edge: 'righ
 }
 
 /** Piano, rack, and Scaler use the side dock. The call panel is the Collab tab and never this dock. */
-export function dockVisible(input: { surface: 'studio' | 'artist'; panel: 'room' | 'piano' | 'rack' | 'scaler'; dockOpen: boolean }): boolean {
+export function dockVisible(input: { surface: 'studio' | 'artist'; panel: 'room' | 'piano' | 'rack' | 'scaler' | 'pads'; dockOpen: boolean }): boolean {
   if (input.surface !== 'studio') return false
-  return input.panel === 'piano' || input.panel === 'rack' || input.panel === 'scaler'
+  return input.panel === 'piano' || input.panel === 'rack' || input.panel === 'scaler' || input.panel === 'pads'
 }

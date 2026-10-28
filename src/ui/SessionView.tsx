@@ -528,8 +528,8 @@ function applyDevice(store: ProjectStore, trackId: string, kind: 'audio' | 'midi
     if (fx) store.addMidiFx(track.id, fx)
     return
   }
-  if (id === 'scaler') {
-    store.addPlugin(track.id, 'scaler')
+  if (id === 'scaler' || id === 'pads') {
+    store.addPlugin(track.id, id)
     return
   }
   const instrument = instrumentFor(id)

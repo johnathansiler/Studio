@@ -39,7 +39,7 @@ export const MENU_COPY: Copy[] = [
   { id: 'export', label: 'Export', hint: 'Bounce or download the mix.' },
   { id: 'clips', label: 'Clips', hint: 'Launch clips in slots, like a live set.' },
   { id: 'keys', label: 'Keys', hint: 'Play the instrument on a keyboard.' },
-  { id: 'pads', label: 'Pads', hint: 'Play drums on pads.' },
+  { id: 'pads', label: 'Pads', hint: 'MPC drum machine on this track. Hit the pads and record.' },
   { id: 'piano', label: 'Piano', hint: 'Open the piano roll for the instrument track.' },
   { id: 'generate', label: 'Generate', hint: 'Open Scaler and write chords, bass, melody, arp, strum, or drums.' },
   { id: 'scaler', label: 'Scaler', hint: 'Chord instrument on this track. Key, pads, and progressions.' },
@@ -147,7 +147,7 @@ export const TRACK_SHEET: Copy[] = [
   { id: 'scaler', label: 'Scaler', hint: 'Chord instrument. Key, pads, and progressions on this track.' },
   { id: 'rack', label: 'Rack', hint: 'The instrument and effects on this track.' },
   { id: 'keys', label: 'Keys', hint: 'Play this instrument on a keyboard.' },
-  { id: 'drums', label: 'Pads', hint: 'Play this instrument on drum pads.' },
+  { id: 'drums', label: 'Pads', hint: 'MPC drum machine. Pads, banks, and record on this track.' },
   { id: 'remove', label: 'Remove track', hint: 'Delete this track and its clips.' },
 ]
 

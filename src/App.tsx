@@ -37,6 +37,7 @@ import { IdeasPop } from './ui/IdeasPop'
 import { PlayersSheet } from './ui/PlayersSheet'
 import { UnstuckSheet } from './unstuck/UnstuckSheet'
 import { SoundBrowser } from './ui/SoundBrowser'
+import { PadsPanel } from './ui/PadsPanel'
 import { ScalerPanel } from './ui/ScalerPanel'
 import { clampSoundWidth, readSoundWidth } from './sounds/panel'
 import { loadScaleCatalog } from './theory'
@@ -908,6 +909,17 @@ export function App() {
   }
 
   function openPerform(mode: 'keys' | 'drums') {
+    if (mode === 'drums') {
+      hideCollab()
+      setSurface('studio')
+      setPhonePane('edit')
+      setMenuOpen(false)
+      setPianoOpen(false)
+      const midi = store.project.tracks.find((track) => track.id === store.selectedTrackId && track.type === 'midi')
+        || store.project.tracks.find((track) => track.type === 'midi')
+      store.insertPads(midi?.id ?? null)
+      return
+    }
     engine.unlock()
     void engine.resume()
     const midi = store.project.tracks.find((track) => track.id === store.selectedTrackId && track.type === 'midi')
@@ -1166,8 +1178,9 @@ async function importDropped(files: FileList) {
   }
 
   const rollWanted = !!store.selectedMidiClipId && (store.view === 'arrange' || store.view === 'beats')
-  const panel: 'room' | 'piano' | 'rack' | 'scaler' =
+  const panel: 'room' | 'piano' | 'rack' | 'scaler' | 'pads' =
     surface !== 'studio' || phonePane === 'room' ? 'room'
+    : store.padsTrackId ? 'pads'
     : store.scalerTrackId ? 'scaler'
     : pianoOpen ? 'piano'
     : store.rackTrackId ? 'rack'
@@ -1217,6 +1230,7 @@ async function importDropped(files: FileList) {
 
   function openPiano(trackId: string, clipId?: string) {
     store.closeScaler()
+    store.closePads()
     const beat = samplesToBeats(engine.positionSamples, store.project.sampleRate, store.project.tempo)
     store.preparePianoClip(trackId, beat, clipId)
     setSurface('studio')
@@ -1251,7 +1265,7 @@ async function importDropped(files: FileList) {
       data-collab={collabShown ? 'open' : 'closed'}
       data-dock={dockShown ? 'open' : 'closed'}
       data-editor={dockShown ? panel : 'none'}
-      data-plugin={dockShown && panel === 'scaler' ? 'scaler' : 'none'}
+      data-plugin={dockShown && (panel === 'scaler' || panel === 'pads') ? panel : 'none'}
       onDragOver={(event) => {
         if ([...event.dataTransfer.types].includes('Files')) event.preventDefault()
       }}
@@ -1503,6 +1517,15 @@ async function importDropped(files: FileList) {
           />
           {surface === 'studio' && panel === 'scaler' && store.scalerTrackId && (
             <ScalerPanel store={store} engine={engine} trackId={store.scalerTrackId} />
+          )}
+          {surface === 'studio' && panel === 'pads' && store.padsTrackId && (
+            <PadsPanel
+              store={store}
+              engine={engine}
+              trackId={store.padsTrackId}
+              onRecord={() => { void record() }}
+              onEdit={(clipId) => openPiano(store.padsTrackId!, clipId)}
+            />
           )}
           {surface === 'studio' && panel === 'rack' && store.rackTrackId && (
             <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />

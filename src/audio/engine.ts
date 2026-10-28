@@ -14,6 +14,7 @@ import { playbackStops, transportSample } from '../model/transportSync'
 import { beatsToSamples, samplesPerBeatUnit, samplesToBeats } from '../model/time'
 import { matchBufferRate, PatchHost, renderPatchSpan } from '../instruments/patch'
 import { performancesOn, routeScaler } from '../instruments/scaler/model'
+import { chokeTargets } from '../model/padMachine'
 import { RackHost } from './rack/host'
 import { renderNotes } from './rack/dsp'
 import { LibraryHost } from './multisample/host'
@@ -108,6 +109,10 @@ export class AudioEngine {
   private warmVoices: { osc: OscillatorNode; gain: GainNode; busy: boolean; pitch: number; age: number }[] = []
   lastOnsetFrame = -1
   private oneShots: { pitch: number; when: number; stop: () => void }[] = []
+  /** While the Pads faceplate is open, hits go to that track's mixer channel. */
+  private padRouteId: string | null = null
+  private padVoices: { pitch: number; gain: GainNode; stop: (at?: number) => void; born: number; until: number; src: AudioBufferSourceNode }[] = []
+  private padCaches = new WeakMap<BaseAudioContext, Map<string, AudioBuffer>>()
   private drumCache = new WeakMap<BaseAudioContext, AudioBuffer[]>()
 
   private project: Project | null = null
@@ -2434,7 +2439,155 @@ export class AudioEngine {
     }
   }
 
+  /** The open Pads faceplate. Null returns hits to the resident drum path. */
+  setPadRoute(trackId: string | null) {
+    this.padRouteId = trackId
+  }
+
+  private playLivePad(pitch: number, velocity: number, sample: Float32Array | null, color?: PadColor, when?: number): boolean {
+    if (!this.padRouteId) return false
+    const track = this.project?.tracks.find((item) => item.id === this.padRouteId)
+    if (!track || track.instrument !== 'pads') return false
+    if (!this.ctx) this.unlock()
+    const ctx = this.ctx
+    const strip = track.id ? this.strips.get(track.id) : undefined
+    if (!ctx || !strip) return false
+    this.playPadNote(ctx, strip, track, {
+      pitch,
+      velocity,
+      tune: color?.tune,
+      filter: color?.filter,
+      decay: color?.decay,
+    }, when ?? ctx.currentTime, undefined, sample, false)
+    return true
+  }
+
+  private playPadNote(
+    ctx: BaseAudioContext,
+    strip: StripNodes,
+    track: Track,
+    hit: { pitch: number; velocity: number; tune?: number; filter?: number; decay?: number; pan?: number },
+    when: number,
+    bucket: Stoppable[] | undefined,
+    sample: Float32Array | null | undefined,
+    includeLevel: boolean,
+  ) {
+    const pads = track.padKit?.banks.flat() ?? []
+    const pad = pads.find((item) => item.pitch === hit.pitch)
+    if (pad?.muted) return
+    const bus = pad?.busId && this.strips.has(pad.busId) ? this.strips.get(pad.busId) : undefined
+    const dest = bus?.input ?? strip.input
+    const start = ctx === this.ctx ? Math.max(when, ctx.currentTime) : Math.max(0, when)
+    for (const other of chokeTargets(pads.map((item) => ({ pitch: item.pitch, choke: item.choke })), hit.pitch)) this.fadePadPitch(other, start)
+    if (pad?.poly === 'mono') this.fadePadPitch(hit.pitch, start)
+    let pcm = sample ?? null
+    let rate = ctx.sampleRate
+    const bufferId = pad?.layers[0]?.bufferId
+    if (bufferId) {
+      const asset = this.assetOf(bufferId)
+      const channel = asset?.channels[0]
+      if (asset && channel?.length) {
+        pcm = channel
+        rate = asset.sampleRate
+      }
+    }
+    const buffer = pcm?.length && rate > 0
+      ? this.cachedPadBuffer(ctx, `${bufferId || hit.pitch}:${pcm.length}:${rate}`, pcm, rate)
+      : this.cachedDrum(ctx, hit.pitch)
+    if (!buffer) return
+    const live = this.padVoices.filter((voice) => voice.until > start - 0.001)
+    this.padVoices = live
+    while (live.length >= 16) {
+      const oldest = live.shift()
+      if (oldest) this.fadePadVoice(oldest, start)
+    }
+    const src = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    src.buffer = buffer
+    const tune = hit.tune ?? pad?.tune ?? 0
+    src.playbackRate.value = 2 ** (tune / 12)
+    const decay = Math.max(0.05, Math.min(1, hit.decay ?? pad?.decay ?? 1))
+    const level = Math.max(0.0002, Math.min(1, hit.velocity * (includeLevel ? (pad?.level ?? 1) : 1)))
+    const dur = Math.max(0.04, buffer.duration * decay)
+    const attack = Math.min(0.003, dur * 0.25)
+    gain.gain.setValueAtTime(0.0001, start)
+    if (dur > attack + 0.008) {
+      gain.gain.exponentialRampToValueAtTime(level, start + attack)
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + dur)
+    } else {
+      gain.gain.linearRampToValueAtTime(level, start + dur * 0.4)
+      gain.gain.linearRampToValueAtTime(0.0001, start + dur)
+    }
+    const filterAmount = hit.filter ?? pad?.filter ?? 1
+    let node: AudioNode = gain
+    src.connect(gain)
+    if (filterAmount < 0.98) {
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'lowpass'
+      filter.frequency.setValueAtTime(Math.max(80, 180 + filterAmount * 8000), start)
+      gain.connect(filter)
+      node = filter
+    }
+    const pan = hit.pan ?? pad?.pan ?? 0
+    if (Math.abs(pan) > 0.02 && typeof ctx.createStereoPanner === 'function') {
+      const panner = ctx.createStereoPanner()
+      panner.pan.setValueAtTime(Math.max(-1, Math.min(1, pan)), start)
+      node.connect(panner)
+      panner.connect(dest)
+    } else node.connect(dest)
+    const stop = (at?: number) => {
+      try { src.stop(at) } catch { /* already stopped */ }
+    }
+    src.start(start)
+    src.stop(start + dur + 0.01)
+    const voice = { pitch: hit.pitch, gain, stop, born: start, until: start + dur, src }
+    this.padVoices.push(voice)
+    src.onended = () => {
+      this.padVoices = this.padVoices.filter((item) => item.src !== src)
+    }
+    if (ctx === this.ctx) {
+      this.sources.push(src)
+      bucket?.push(src)
+    }
+  }
+
+  private cachedPadBuffer(ctx: BaseAudioContext, key: string, pcm: Float32Array, rate: number) {
+    let map = this.padCaches.get(ctx)
+    if (!map) {
+      map = new Map()
+      this.padCaches.set(ctx, map)
+    }
+    const cached = map.get(key)
+    if (cached) return cached
+    const buffer = ctx.createBuffer(1, pcm.length, rate)
+    buffer.copyToChannel(new Float32Array(pcm), 0)
+    if (map.size >= 64) {
+      const oldest = map.keys().next().value
+      if (oldest) map.delete(oldest)
+    }
+    map.set(key, buffer)
+    return buffer
+  }
+
+  private fadePadPitch(pitch: number, when: number) {
+    for (const voice of this.padVoices) {
+      if (voice.pitch === pitch && voice.until > when) this.fadePadVoice(voice, when)
+    }
+  }
+
+  private fadePadVoice(voice: { gain: GainNode; stop: (at?: number) => void; until: number }, when: number) {
+    const at = Math.max(0, when)
+    try {
+      voice.gain.gain.cancelScheduledValues(at)
+      voice.gain.gain.setValueAtTime(Math.max(0.0001, voice.gain.gain.value || 0.0001), at)
+      voice.gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.008)
+    } catch { /* the voice already ended */ }
+    voice.stop(at + 0.02)
+    voice.until = at
+  }
+
   liveDrum(pitch: number, velocity: number, repeatEverySamples = 0, color?: PadColor) {
+    if (this.playLivePad(pitch, velocity, null, color)) return
     const index = this.drumTable.findIndex((drum) => drum.pitch === pitch)
     if (!this.keysNode && index >= 0) {
       this.playResident(index, velocity, color)
@@ -2445,6 +2598,7 @@ export class AudioEngine {
 
   /** A chopped or recorded pad. The buffer is already decoded. */
   playBuffer(samples: Float32Array, pitch: number, velocity: number, color?: PadColor, when?: number) {
+    if (this.playLivePad(pitch, velocity, samples, color, when)) return
     if (!this.ctx) this.unlock()
     const ctx = this.ctx
     if (!ctx || !this.speakerGain || !samples.length) return
@@ -2594,6 +2748,7 @@ export class AudioEngine {
 
   /** Grid-locked retrigger. `when` is an AudioContext time, not the moment this method runs. */
   schedulePadHit(when: number, pitch: number, velocity: number, color?: PadColor) {
+    if (this.playLivePad(pitch, velocity, null, color, when)) return
     if (!this.ctx) this.unlock()
     const ctx = this.ctx
     if (!ctx) return
@@ -2622,6 +2777,10 @@ export class AudioEngine {
     const ctx = this.ctx
     if (!ctx) return
     this.keysNode?.port.postMessage({ type: 'cancel', pitch, afterFrame: Math.round(afterTime * ctx.sampleRate) })
+    for (const voice of this.padVoices) {
+      if (voice.pitch === pitch && voice.born >= afterTime - 1e-4) voice.stop()
+    }
+    this.padVoices = this.padVoices.filter((voice) => !(voice.pitch === pitch && voice.born >= afterTime - 1e-4))
     for (const shot of this.oneShots) {
       if (shot.pitch === pitch && shot.when >= afterTime - 1e-4) shot.stop()
     }
@@ -2631,6 +2790,7 @@ export class AudioEngine {
   /** Silence the current hit. Later grid hits for that pad stay queued. */
   duckPad(pitch: number) {
     const now = this.ctx?.currentTime ?? 0
+    this.fadePadPitch(pitch, now)
     this.keysNode?.port.postMessage({ type: 'duck', pitch })
     for (const shot of this.oneShots) {
       if (shot.pitch === pitch && shot.when <= now + 0.005) shot.stop()
@@ -3066,6 +3226,17 @@ export class AudioEngine {
       strip = this.strips.get(routed.liveStripId) ?? strip
     }
     this.sendMidiNote(note, when, dur, ctx)
+    if (track?.instrument === 'pads') {
+      this.playPadNote(ctx, strip, track, {
+        pitch: note.pitch,
+        velocity: note.velocity,
+        tune: note.locks?.tune != null ? note.locks.tune + (note.fine || 0) / 100 : (note.fine ? note.fine / 100 : undefined),
+        filter: note.locks?.filter,
+        decay: note.locks?.decay,
+        pan: note.pan,
+      }, when, bucket, null, true)
+      return
+    }
     if (track?.instrument === 'drum-machine' && this.playDrum(ctx, strip, note, when, bucket)) return
     if (track?.instrument === 'library' && ctx === this.ctx) {
       if (track.library) {

@@ -35,6 +35,7 @@ function label(spec: AddTrackSpec) {
   if (spec.kind === 'bus') return 'Bus'
   if (spec.kind === 'drum') return 'Drum'
   if (spec.instrument === 'scaler') return 'Scaler'
+  if (spec.instrument === 'pads') return 'Pads'
   if (spec.instrument === 'library') return 'Library'
   if (spec.instrument === 'sampler') return 'Sampler'
   if (spec.instrument === '808') return '808'

@@ -21,6 +21,7 @@ describe('session dock choice', () => {
     expect(dockVisible({ surface: 'studio', panel: 'piano', dockOpen: false })).toBe(true)
     expect(dockVisible({ surface: 'studio', panel: 'rack', dockOpen: false })).toBe(true)
     expect(dockVisible({ surface: 'studio', panel: 'scaler', dockOpen: false })).toBe(true)
+    expect(dockVisible({ surface: 'studio', panel: 'pads', dockOpen: false })).toBe(true)
     expect(dockVisible({ surface: 'artist', panel: 'room', dockOpen: true })).toBe(false)
   })
 

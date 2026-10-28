@@ -134,7 +134,7 @@ export function SoundBrowser({
       const id = event.dataTransfer?.getData(SOUND_MIME) || dragId
       if (!id) return
       const target = event.target instanceof Element ? event.target : null
-      if (target?.closest('.sound-panel, .sound-slot, .playlist-browser')) return
+      if (target?.closest('.sound-panel, .sound-slot, .playlist-browser, [data-pads]')) return
       event.preventDefault()
       dragId = ''
       if (id.startsWith(INSTRUMENT_PREFIX)) {
