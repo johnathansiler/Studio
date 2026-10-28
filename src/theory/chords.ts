@@ -127,19 +127,17 @@ const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII']
 
 export function romanNumeral(degree: number, intervals: number[], scaleLength: number) {
   const numeral = scaleLength === 7 ? ROMAN[degree] ?? String(degree + 1) : String(degree + 1)
-  const third = intervals[1]
-  const fifth = intervals[2]
+  // The second interval is not always the third: sus2 and add9 put a second there.
+  const third = intervals.find((interval) => interval >= 250 && interval <= 450)
+  const fifth = intervals.find((interval) => interval >= 600 && interval <= 850)
   const neutral = third != null && Math.abs(third - 350) <= 20
   const minor = third != null && third < 360 && !neutral
   let text = minor || neutral ? numeral.toLowerCase() : numeral
   if (neutral) text += 'n'
   if (fifth != null && fifth < 660) text += '°'
   else if (fifth != null && fifth > 760) text += '+'
-  if (intervals.length >= 4) {
-    const seventh = intervals[3]
-    if (seventh >= 1050) text += 'Δ'
-    else if (seventh >= 900 && seventh < 1050) text += '7'
-  }
+  const seventh = third == null ? undefined : intervals.find((interval) => interval >= 900 && interval <= 1200)
+  if (seventh != null) text += seventh >= 1050 ? 'Δ' : '7'
   return text
 }
 

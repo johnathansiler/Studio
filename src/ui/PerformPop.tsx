@@ -44,7 +44,6 @@ export function PerformPop({
   session,
   onRecord,
   onClose,
-  onLibrary,
 }: {
   mode: 'keys' | 'drums'
   store: ProjectStore
@@ -52,7 +51,6 @@ export function PerformPop({
   session: SessionClient
   onRecord: () => void
   onClose: () => void
-  onLibrary?: () => void
 }) {
   const drums = mode === 'drums'
   const board = useRef<HTMLDivElement>(null)
@@ -336,7 +334,6 @@ export function PerformPop({
             <span className="octave">{NOTE_NAMES[(base + octave * 12) % 12]}{Math.floor((base + octave * 12) / 12) - 1}</span>
             <button type="button" onClick={() => setOctave((value) => Math.min(3, value + 1))} aria-label="Octave up">+</button>
             <button type="button" className={scale.snap ? 'on' : ''} title="Lock played notes to the scale, including quarter tones." onClick={() => store.setScale({ snap: !scale.snap })}>Scale</button>
-            {onLibrary && <button type="button" title="Browse scales and the chords inside them." onClick={onLibrary}>Library</button>}
             {RATES.slice(1).map((rate) => (
               <button key={rate} type="button" className={repeat === rate ? 'on' : ''} onClick={() => setRepeat((value) => (value === rate ? null : rate))}>{rate}</button>
             ))}
@@ -570,7 +567,6 @@ export function PerformPop({
               <ScaleSelect scale={scale} onChange={(id) => store.setScale(isBuiltinScale(id) ? { scale: id, library: '' } : { library: id })} />
               <button type="button" className={layout === 'fourths' ? 'on' : ''} title="Fourths stacks a fourth each row. Sequential walks the scale." onClick={() => setLayout((value) => (value === 'fourths' ? 'sequential' : 'fourths'))}>{layout === 'fourths' ? 'Fourths' : 'Sequential'}</button>
               <button type="button" className={inKey ? 'on' : ''} title="Lock the pads to the scale, including quarter-tone pitches." onClick={() => setInKey((value) => !value)}>{inKey ? 'In key' : 'Chromatic'}</button>
-              {onLibrary && <button type="button" title="Browse scales and the chords inside them." onClick={onLibrary}>Library</button>}
             </div>
           ) : drums && deck === 'session' ? (
             <div className="tool-row">
