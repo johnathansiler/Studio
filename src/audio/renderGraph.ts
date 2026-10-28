@@ -37,6 +37,7 @@ export function renderGraph(opts: {
   length: number
   scaleRoot: number
   scaleIntervals: readonly number[]
+  scaleCents?: readonly number[]
   automation: AutomationLane[]
   quality?: 'full' | 'eco'
   /** Mastering uses linear-phase EQ and 4x oversampling on this path. */
@@ -184,7 +185,7 @@ type RenderClock = { sampleRate: number; tempo: number; tempoMap?: TempoPoint[];
 function runBlocks(
   slots: ChainSlot[],
   input: Float32Array[],
-  opts: RenderClock & { scaleRoot: number; scaleIntervals: readonly number[]; quality?: 'full' | 'eco'; offline?: boolean },
+  opts: RenderClock & { scaleRoot: number; scaleIntervals: readonly number[]; scaleCents?: readonly number[]; quality?: 'full' | 'eco'; offline?: boolean },
   rendered: Map<string, { pre: Float32Array[]; post: Float32Array[] }>,
   tracks: Map<string, GraphTrack>,
 ) {
@@ -206,6 +207,7 @@ function runBlocks(
       sidechain: null,
       scaleRoot: opts.scaleRoot,
       scaleIntervals: opts.scaleIntervals,
+      scaleCents: opts.scaleCents,
       quality: opts.quality ?? 'full' as const,
       offline: opts.offline !== false,
     }

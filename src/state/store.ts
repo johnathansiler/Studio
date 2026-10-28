@@ -3,6 +3,7 @@ import { spectralKey, ensureRepair, pushOp, sliceRegion } from '../audio/spectra
 import { learnOffline } from '../audio/spectral/job'
 import type { SpectralAction, SpectralRegion } from '../audio/spectral/types'
 import { scheduleStretchCommit, stretchCacheKey } from '../audio/stretch/commit'
+import { TUNE_INSERT_PRESET } from '../audio/plugins/autoTune'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
 import {
   detectRoot,
@@ -1064,12 +1065,13 @@ export class ProjectStore {
     this.mutate(() => {
       const list = this.pluginList(trackId)
       if (!list) return
-      list.push(createPlugin(pluginId, preset))
+      const chosen = preset ?? (pluginId === 'tune' ? TUNE_INSERT_PRESET : undefined)
+      list.push(createPlugin(pluginId, chosen))
     })
   }
 
   updatePlugin(trackId: string | 'master', pluginId: string, patch: Partial<PluginInstance>) {
-    this.mutate(() => {
+    const edit = () => {
       const plugin = this.pluginList(trackId)?.find((item) => item.id === pluginId)
       if (!plugin) return
       if (patch.enabled != null) plugin.enabled = patch.enabled
@@ -1078,7 +1080,9 @@ export class ProjectStore {
       if (patch.params) plugin.params = { ...plugin.params, ...patch.params }
       if (patch.sampler) plugin.sampler = patch.sampler
       if (patch.looper) plugin.looper = patch.looper
-    })
+    }
+    if (this.touching) this.draft(edit)
+    else this.mutate(edit)
   }
 
   setSampleBuffer(trackId: string | 'master', pluginId: string, bufferId: string) {

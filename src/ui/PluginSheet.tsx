@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { MASTERING_IDS } from '../audio/master/assistant'
+import { activeTunePreset, orderedInserts, tuneScaleOf } from '../audio/plugins/autoTune'
 import { CATALOG, FACTORY, descriptor } from '../audio/plugins/catalog'
 import { MODEL_IDS } from '../audio/plugins/models'
 import { AmpPop } from './AmpPop'
+import { AutoTuneFace } from './AutoTuneFace'
 import { Faceplate } from './Faceplate'
 import { NOTE_NAMES, SCALES } from '../model/scale'
 import { projectSampleBeat } from '../model/tempoMap'
@@ -16,9 +18,11 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   const plugin = focus ? selectPlugin(store, focus.trackId, focus.pluginId) : null
   const spec = plugin ? descriptor(plugin.pluginId) : null
   const [last, setLast] = useState('')
+  const [sheetHeight, setSheetHeight] = useState(680)
   const canvas = useRef<HTMLCanvasElement>(null)
-  const [, setTick] = useState(0)
-  const faced = plugin ? MODEL_IDS.includes(plugin.pluginId) || plugin.pluginId === 'tune' : false
+  const [tick, setTick] = useState(0)
+  const autoTune = plugin?.pluginId === 'tune'
+  const faced = plugin ? MODEL_IDS.includes(plugin.pluginId) || !!autoTune : false
   useEffect(() => {
     if (!faced) return
     const timer = window.setInterval(() => setTick((value) => value + 1), 80)
@@ -53,6 +57,11 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     ...(FACTORY[plugin.pluginId] ?? []).map((item) => item.name),
     ...store.project.presets.filter((item) => item.pluginId === plugin.pluginId).map((item) => item.name),
   ]
+  const song = tuneScaleOf(store.scaleState())
+  const tunePresets = [
+    ...(FACTORY.tune ?? []),
+    ...store.project.presets.filter((item) => item.pluginId === 'tune'),
+  ]
   const buses = store.project.tracks.filter((track) => track.id !== focus.trackId)
   const rolling = () => engine.status === 'playing' || engine.status === 'recording'
   const point = () => {
@@ -61,29 +70,52 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     const beat = projectSampleBeat(store.project, engine.currentTimelineSample())
     store.addAutomationPoint(plugin.id, param, beat, plugin.params[param] ?? 0)
   }
+  const resize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const startY = event.clientY
+    const startH = sheetHeight
+    const move = (ev: PointerEvent) => {
+      const next = Math.min(window.innerHeight * 0.92, Math.max(340, startH + (startY - ev.clientY)))
+      setSheetHeight(next)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
   return (
-    <div className="plugin-sheet" role="dialog" aria-label={spec.name}>
+    <div className={`plugin-sheet ${autoTune ? 'tune-open' : ''}`} role="dialog" aria-label={spec.name} style={autoTune ? { height: sheetHeight } : undefined}>
+      {autoTune && <div className="tune-resize" title="Drag to resize the plugin." aria-label="Resize plugin. Drag up or down." onPointerDown={resize} />}
       <header>
         <strong>{spec.name}</strong>
-        <select value="" onChange={(event) => event.target.value && store.applyPluginPreset(focus.trackId, plugin.id, event.target.value)}>
-          <option value="">Preset</option>
-          {names.map((name) => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-        </select>
-        <button className="text-btn" onClick={() => {
+        {!autoTune && (
+          <select value="" onChange={(event) => event.target.value && store.applyPluginPreset(focus.trackId, plugin.id, event.target.value)}>
+            <option value="">Preset</option>
+            {names.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        )}
+        {!autoTune && (
+        <button className="text-btn" title="Save these settings as a preset." aria-label="Save preset. Keep these settings under a name." onClick={() => {
           const name = window.prompt('Preset')
           if (name) store.savePluginPreset(plugin.pluginId, name.trim(), plugin.params)
         }}>Save</button>
-        <button className={`text-btn ${plugin.enabled ? 'on' : ''}`} onClick={() => store.updatePlugin(focus.trackId, plugin.id, { enabled: !plugin.enabled })}>
-          {plugin.enabled ? 'On' : 'Bypass'}
-        </button>
-        <button className="text-btn" onClick={() => store.focusPlugin(null)}>×</button>
+        )}
+        {!autoTune && (
+          <button className={`text-btn ${plugin.enabled ? 'on' : ''}`} onClick={() => store.updatePlugin(focus.trackId, plugin.id, { enabled: !plugin.enabled })}>
+            {plugin.enabled ? 'On' : 'Bypass'}
+          </button>
+        )}
+        <button className="text-btn" title="Close the plugin." aria-label="Close the plugin." onClick={() => store.focusPlugin(null)}>×</button>
       </header>
+      {plugin.pluginId !== 'tune' && (
       <label className="wet">
         Wet
         <input type="range" min={0} max={1} step={0.01} value={plugin.wet} onChange={(event) => store.updatePlugin(focus.trackId, plugin.id, { wet: Number(event.target.value) })} />
       </label>
+      )}
       {(plugin.pluginId === 'compressor' || plugin.pluginId === 'gate') && (
         <label>
           Sidechain key
@@ -102,7 +134,31 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
       {(plugin.pluginId === 'sampler' || plugin.pluginId === 'looper') && (
         <SamplePanel store={store} engine={engine} trackId={focus.trackId} plugin={plugin} />
       )}
-      {faced && (
+      {autoTune && (
+        <div onPointerDownCapture={() => store.beginAutomationTouch()} onPointerUp={() => { store.endAutomationTouch(); store.endDraft() }} onPointerCancel={() => { store.endAutomationTouch(); store.endDraft() }}>
+        <AutoTuneFace
+          values={plugin.params}
+          trace={engine.trace(plugin.id)}
+          revision={tick}
+          enabled={plugin.enabled}
+          projectKey={song.note}
+          projectScale={song.scaleName}
+          projectRoot={song.root}
+          projectIntervals={song.intervals}
+          active={activeTunePreset(plugin.params, tunePresets)}
+          presets={tunePresets.map((item) => item.name)}
+          onChange={(id, value) => {
+            setLast(id)
+            store.updatePlugin(focus.trackId, plugin.id, { params: { [id]: value } })
+          }}
+          onPatch={(patch) => store.updatePlugin(focus.trackId, plugin.id, { params: patch })}
+          onPreset={(name) => store.applyPluginPreset(focus.trackId, plugin.id, name)}
+          onBypass={() => store.updatePlugin(focus.trackId, plugin.id, { enabled: !plugin.enabled })}
+          onSave={(name) => store.savePluginPreset(plugin.pluginId, name, plugin.params)}
+        />
+        </div>
+      )}
+      {faced && !autoTune && (
         <div onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
         <Faceplate
           pluginId={plugin.pluginId}
@@ -148,10 +204,10 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
         ))}
       </div> : null}
       <div className="row">
-        <button className="text-btn" onClick={() => store.movePlugin(focus.trackId, plugin.id, -1)}>←</button>
-        <button className="text-btn" onClick={() => store.movePlugin(focus.trackId, plugin.id, 1)}>→</button>
-        <button className="text-btn" onClick={() => store.removePlugin(focus.trackId, plugin.id)}>Remove</button>
-        <button className="text-btn" onClick={point}>Point</button>
+        <button className="text-btn" title="Move this plugin earlier." aria-label="Move this plugin earlier." onClick={() => store.movePlugin(focus.trackId, plugin.id, -1)}>←</button>
+        <button className="text-btn" title="Move this plugin later." aria-label="Move this plugin later." onClick={() => store.movePlugin(focus.trackId, plugin.id, 1)}>→</button>
+        <button className="text-btn" title="Remove this plugin." aria-label="Remove this plugin." onClick={() => store.removePlugin(focus.trackId, plugin.id)}>Remove</button>
+        <button className="text-btn" title="Write an automation point." aria-label="Point. Write an automation point." onClick={point}>Point</button>
       </div>
     </div>
   )
@@ -211,9 +267,9 @@ export function InsertList({ store, trackId }: { store: ProjectStore; trackId: s
           {descriptor(plugin.pluginId)?.name ?? plugin.pluginId}
         </button>
       ))}
-      <select className="insert-add" value="" onChange={(event) => addChoice(store, trackId, event.target.value)}>
+      <select className="insert-add" aria-label="Add insert" title="Add an effect. Auto-Tune is first." value="" onChange={(event) => addChoice(store, trackId, event.target.value)}>
         <option value="">+</option>
-        {CATALOG.filter((plugin) => plugin.id !== 'meter' && (trackId === 'master' || !(MASTERING_IDS as readonly string[]).includes(plugin.id))).map((plugin) => (
+        {orderedInserts(CATALOG.filter((plugin) => plugin.id !== 'meter' && (trackId === 'master' || !(MASTERING_IDS as readonly string[]).includes(plugin.id)))).map((plugin) => (
           <option key={plugin.id} value={plugin.id}>{plugin.name}</option>
         ))}
         {trackId !== 'master' && <option value="vocal">Vocal chain</option>}

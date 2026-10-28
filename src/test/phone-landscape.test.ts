@@ -11,7 +11,7 @@ import {
 } from '../ui/phoneLand'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-const css = `${readFileSync(resolve(root, 'src/styles.css'), 'utf8')}\n${readFileSync(resolve(root, 'src/ui/remoteFixes.css'), 'utf8')}`
+const css = `${readFileSync(resolve(root, 'src/styles.css'), 'utf8')}\n${readFileSync(resolve(root, 'src/ui/remoteFixes.css'), 'utf8')}\n${readFileSync(resolve(root, 'src/ui/autoTune.css'), 'utf8')}`
 
 function fixture() {
   const tools = Array.from({ length: 10 }, (_, index) => `<button type="button">T${index}</button>`).join('')
@@ -104,6 +104,12 @@ describe('phone landscape compaction', () => {
           viewportHeight: window.innerHeight,
         }))
         expect(mixer.work / mixer.viewportHeight).toBeGreaterThan(0.75)
+        await page.setContent(fixture().replace('class="plugin-sheet"', 'class="plugin-sheet tune-open"'), { waitUntil: 'load' })
+        const tune = await page.evaluate(() => ({
+          sheet: document.querySelector('.plugin-sheet')!.getBoundingClientRect().height,
+          viewportHeight: window.innerHeight,
+        }))
+        expect(tune.sheet / tune.viewportHeight).toBeLessThanOrEqual(PHONE_LAND_SHEET + 0.02)
       }
     } finally {
       await browser.close()
