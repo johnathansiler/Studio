@@ -16,6 +16,7 @@ import { ProjectStore, seedDemoProject } from './state/store'
 import { linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
+import { shouldCountIn } from './model/sessionInteract'
 import { countInAt, meterAtSample, tempoAtSample } from './model/tempoMap'
 import { beatsToSamples, samplesToBeats } from './model/time'
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
@@ -280,7 +281,7 @@ export function App() {
       const playing = engine.status === 'playing' || engine.status === 'recording'
       if (session.state.role !== 'guest' && pending) {
         if (!playing && store.transportMode === 'session' && Object.values(store.launched).some(Boolean)) {
-          void playFrom(engine.positionSamples, 'session')
+          void playFrom(engine.positionSamples, 'session', 'session-launch')
         } else {
           const at = Number(pending.timelineSample)
           const sample = Number.isFinite(at) ? at : Math.round(engine.currentTimelineSample())
@@ -692,7 +693,7 @@ export function App() {
     await playFrom(engine.currentTimelineSample())
   }
 
-  async function playFrom(sample: number, mode: 'arrangement' | 'session' = 'arrangement') {
+  async function playFrom(sample: number, mode: 'arrangement' | 'session' = 'arrangement', intent: 'play' | 'session-launch' = 'play') {
     if (session.state.role === 'guest') {
       session.requestTransport({ action: 'play', timelineSample: Math.round(sample), mode })
       return
@@ -701,7 +702,7 @@ export function App() {
     await ready()
     if (mode === 'arrangement') store.armArrangement()
     const lead = scheduleLeadMs(session.primaryOneWay()?.ms ?? 40)
-    const counting = store.project.countIn && engine.status === 'stopped'
+    const counting = shouldCountIn({ enabled: store.project.countIn, stopped: engine.status === 'stopped', intent })
     const countMs = counting ? countInAt(store.project, sample) * 1000 : 0
     engine.refreshClockAnchor()
     const hostPerf = performance.now() + lead + countMs
@@ -961,7 +962,7 @@ export function App() {
     let fromSample = Math.round(engine.currentTimelineSample())
     if (!alreadyPlaying && punched) fromSample = punched.playFrom
     else if (!alreadyPlaying && settings.loop && store.project.loopEnabled) fromSample = store.project.loopStartSample
-    const counting = store.project.countIn && !alreadyPlaying
+    const counting = shouldCountIn({ enabled: store.project.countIn, stopped: !alreadyPlaying, intent: 'record' })
     const lead = scheduleLeadMs(session.primaryOneWay()?.ms ?? 40)
     const countMs = counting ? countInAt(store.project, fromSample) * 1000 : 0
     engine.refreshClockAnchor()

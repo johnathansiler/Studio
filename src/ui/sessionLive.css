@@ -1,6 +1,11 @@
 /* Dense session launcher. Square cells, colored headers, mixer under the grid. */
 
 .session-grid.sl {
+  --sl-head: 32px;
+  --sl-slot: 40px;
+  --sl-stop: 28px;
+  --sl-col: 208px;
+  --sl-scene: 116px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   padding: 0;
@@ -24,14 +29,21 @@
 .sl-bar button,
 .sl-detail select,
 .sl-detail button,
-.sl-detail input {
+.sl-detail input,
+.sl-flags button,
+.sl-stopall,
+.session-grid.sl .track-stop {
   min-height: 28px;
-  border-radius: 3px;
-  border: 1px solid #343c36;
-  background: #222824;
+  border-radius: 6px;
+  border: 1px solid #4a564e;
+  background: linear-gradient(180deg, #323c36, #242b27);
   color: #e7eee4;
-  padding: 0 8px;
+  padding: 0 10px;
   font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  text-align: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -1px 0 rgba(0, 0, 0, 0.4);
 }
 
 .sl-bar button.on,
@@ -150,37 +162,52 @@
 }
 
 .sl-scroller {
-  display: flex;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  grid-template-rows: var(--sl-rows);
   align-items: stretch;
-  gap: 0;
   overflow: auto;
   flex: 1;
   min-height: 0;
-  background:
-    linear-gradient(#1a1e1b, #1a1e1b) 0 0 / 100% 28px no-repeat,
-    #121512;
+  background: #121512;
+}
+
+.sl-col,
+.sl-scenes {
+  display: grid;
+  grid-row: 1 / -1;
+  grid-template-rows: subgrid;
+  align-content: start;
+}
+
+@supports not (grid-template-rows: subgrid) {
+  .sl-col,
+  .sl-scenes {
+    grid-template-rows: var(--sl-rows);
+    grid-row: auto;
+  }
 }
 
 .sl-col {
-  flex: 0 0 118px;
-  width: 118px;
-  min-width: 118px;
-  display: flex;
-  flex-direction: column;
+  width: var(--sl-col);
+  min-width: var(--sl-col);
   border-right: 1px solid #2a312b;
   background: #1a1e1b;
 }
 
 .sl-head {
-  height: 28px;
-  min-height: 28px;
+  height: 100%;
+  min-height: 0;
   display: flex;
   align-items: center;
-  padding: 0 6px;
+  justify-content: center;
+  padding: 0 8px;
   font-size: 12px;
   font-weight: 650;
   color: #141816;
   overflow: hidden;
+  text-align: center;
 }
 
 .sl-head span {
@@ -191,20 +218,22 @@
 
 .session-grid.sl .slot {
   width: 100%;
-  min-height: 30px;
-  height: 30px;
+  height: 100%;
+  min-height: 0;
   border-radius: 0;
   border: 1px solid #101310;
-  box-shadow: inset 0 0 0 1px #3e4941;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -1px 0 rgba(0, 0, 0, 0.35);
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 0 4px;
-  text-align: left;
+  padding: 0 6px;
+  text-align: center;
   position: relative;
   overflow: hidden;
-  background: #2c352f;
+  background-color: #2c352f;
   color: #c5d0c6;
+  cursor: pointer;
 }
 
 .session-grid.sl .slot.filled {
@@ -215,12 +244,48 @@
 .session-grid.sl .slot .slot-name {
   position: relative;
   z-index: 1;
+  flex: 1 1 auto;
   min-width: 0;
   padding: 0;
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.2;
+  text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.session-grid.sl .slot .slot-num {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  color: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+
+.session-grid.sl .sl-hit {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  display: grid;
+  place-items: center;
 }
 
 .session-grid.sl .slot .slot-progress {
@@ -266,17 +331,14 @@
 .session-grid.sl .slot.queued .sl-tri { color: #1b160c; }
 
 .session-grid.sl .track-stop {
-  height: 22px;
-  min-height: 22px;
+  height: 100%;
+  min-height: 0;
   border-radius: 0;
-  border: 0;
-  border-top: 1px solid #2a312b;
-  background: #232824;
-  color: #c5d0c6;
   font-size: 11px;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
 }
 
 .session-grid.sl .track-stop .sl-sq {
@@ -291,11 +353,13 @@
 .sl-mix {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 6px 8px 8px;
+  gap: 8px;
+  padding: 8px;
   border-top: 1px solid #2a312b;
   background: #1e2320;
   min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .sl-mix.closed { display: none; }
@@ -311,9 +375,24 @@
   writing-mode: vertical-lr;
   direction: rtl;
   width: 22px;
-  height: 48px;
+  min-width: 0;
+  height: 84px;
   margin: 0;
   accent-color: #d7b15a;
+}
+
+.sl-master {
+  min-height: 0;
+}
+
+.sl-master .sl-fader {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+}
+
+.sl-master .sl-fader input[type="range"] {
+  height: 100%;
 }
 
 .sl-meter {
@@ -336,12 +415,14 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 10px;
-  letter-spacing: 0.06em;
+  font-size: 11px;
+  letter-spacing: 0;
   color: #8d9a90;
+  white-space: nowrap;
+  min-width: 0;
 }
 
-.sl-pan input { flex: 1; min-width: 0; accent-color: #9bb4a4; }
+.sl-pan input { flex: 1; width: 100%; min-width: 0; max-width: 100%; accent-color: #9bb4a4; }
 
 .sl-flags {
   display: flex;
@@ -349,14 +430,11 @@
 }
 
 .sl-flags button {
-  flex: 1;
-  min-height: 22px;
-  height: 22px;
-  border-radius: 2px;
-  border: 1px solid #343c36;
-  background: #262c28;
-  color: #c5d0c6;
-  font-size: 11px;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 26px;
+  height: 26px;
+  font-size: 12px;
   padding: 0;
 }
 
@@ -372,102 +450,146 @@
 
 .sl-sends label {
   display: grid;
-  grid-template-columns: 14px 1fr;
-  gap: 4px;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 6px;
   align-items: center;
-  font-size: 10px;
+  font-size: 11px;
   color: #8d9a90;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.sl-sends input {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .sl-scenes {
-  flex: 0 0 92px;
-  width: 92px;
+  width: var(--sl-scene);
+  min-width: var(--sl-scene);
   position: sticky;
   right: 0;
   background: #1b1f1c;
   border-left: 1px solid #3a433c;
   z-index: 2;
-  display: flex;
-  flex-direction: column;
 }
 
 .sl-scene {
-  height: 30px;
-  min-height: 30px;
+  height: 100%;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 28px minmax(0, 1fr);
   align-items: center;
+  justify-items: center;
   gap: 2px;
   border-bottom: 1px solid #101310;
   padding: 0 4px;
 }
 
 .sl-scene button {
-  width: 16px;
-  height: 16px;
-  min-height: 16px;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
   padding: 0;
   border: 0;
+  border-radius: 4px;
   background: transparent;
+  box-shadow: none;
   color: #c5d0c6;
+  display: grid;
+  place-items: center;
 }
 
 .sl-scene input {
   width: 100%;
   min-width: 0;
   height: 22px;
-  min-height: 22px;
+  min-height: 0;
   border: 0;
+  border-radius: 0;
+  box-shadow: none;
   background: transparent;
   color: #d7ddd4;
   font-size: 11px;
   padding: 0;
+  text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .sl-stopall {
-  height: 22px;
-  min-height: 22px;
-  border: 0;
-  border-top: 1px solid #2a312b;
+  height: 100%;
+  min-height: 0;
+  border-radius: 0;
   background: #2a2420;
   color: #e7c7a2;
   font-size: 11px;
+  padding: 0 4px;
+}
+
+.sl-keep {
+  font-size: 11px;
+  color: #e7c7a2;
+  white-space: nowrap;
 }
 
 .sl-detail {
   grid-area: detail;
-  height: var(--detail, 200px);
+  height: var(--detail, 360px);
   min-height: 0;
   display: flex;
   flex-direction: column;
   border-top: 1px solid #3a433c;
   background: #171b18;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .sl-detail.closed { display: none; }
 
 .sl-detail-resize {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -3px;
-  height: 8px;
+  flex: none;
+  height: 12px;
   cursor: row-resize;
   z-index: 4;
+  touch-action: none;
+  background: linear-gradient(#2a312b, #171b18);
+}
+
+.sl-detail-resize::after {
+  content: "";
+  display: block;
+  width: 42px;
+  height: 3px;
+  margin: 4px auto 0;
+  border-radius: 2px;
+  background: #8d9a90;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .sl-detail-bar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   align-items: center;
   padding: 4px 8px;
   border-bottom: 1px solid #2a312b;
   min-width: 0;
+  min-height: 36px;
+  overflow: hidden;
+}
+
+.sl-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid #2a312b;
+  max-height: 88px;
+  overflow: auto;
+  flex: none;
 }
 
 .sl-detail-bar strong {
@@ -480,10 +602,15 @@
   max-width: 100%;
 }
 
-.sl-detail-bar input,
-.sl-detail-bar select {
-  min-width: 0;
+.sl-detail-bar input {
+  flex: 1 1 auto;
+  min-width: 48px;
   max-width: 100%;
+}
+.sl-detail-bar select,
+.sl-detail-bar button,
+.sl-detail-bar .sl-tool {
+  flex: none;
 }
 
 .sl-swatches { display: flex; gap: 4px; }
@@ -521,7 +648,9 @@
 
 .sl-wave {
   position: relative;
-  height: 96px;
+  flex: 1;
+  min-height: 96px;
+  height: auto;
   margin: 8px;
   background: #101410;
   border: 1px solid #2a312b;
@@ -624,14 +753,16 @@
 .sl-knobs input { width: 100%; accent-color: #d7b15a; }
 
 .sl-detail .piano,
+.sl-detail .piano.bare,
 .shell.phone .sl-detail .piano,
 .shell.fold .sl-detail .piano {
   height: auto;
   flex: 1 1 auto;
-  min-height: 140px;
+  min-height: 0;
   max-height: none;
   border-top: 0;
   overflow: hidden;
+  grid-template-rows: minmax(0, 1fr);
 }
 .sl-detail .piano-body { min-height: 0; overflow: hidden; }
 .sl-detail .scale-bar {
@@ -647,12 +778,19 @@
 
 .sl-detail .timeline-tools button { min-height: 28px; }
 
-.shell.phone .session-grid.sl .slot,
-.shell.fold .session-grid.sl .slot,
-.shell.phone .sl-scene,
-.shell.fold .sl-scene {
-  min-height: 44px;
-  height: 44px;
+.shell.phone .session-grid.sl,
+.shell.fold .session-grid.sl {
+  --sl-head: 36px;
+  --sl-slot: 48px;
+  --sl-stop: 36px;
+  --sl-col: 148px;
+  --sl-scene: 108px;
+}
+
+.shell.phone .session-grid.sl .sl-hit,
+.shell.fold .session-grid.sl .sl-hit {
+  width: 36px;
+  height: 36px;
 }
 .shell.phone .sl-body {
   grid-template-areas: "stage";
@@ -660,7 +798,25 @@
 .shell.phone .session-grid.sl[data-pane="browser"] .sl-body { grid-template-areas: "browser"; }
 .shell.phone .session-grid.sl[data-pane="detail"] .sl-body { grid-template-areas: "detail"; }
 
-.shell.phone .sl-col { flex-basis: 104px; width: 104px; min-width: 104px; }
+.shell.phone .sl-col { width: var(--sl-col); min-width: var(--sl-col); }
+
+.sl-drag-ghost {
+  position: fixed;
+  z-index: 80;
+  max-width: 180px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #d7b15a;
+  color: #1b160c;
+  font-size: 12px;
+  pointer-events: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 6px 16px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sl-list [data-drag-item] { touch-action: pan-y; }
 .shell.phone .sl-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .shell.phone .sl-browser,
 .shell.phone .sl-detail { position: static; width: auto; height: auto; grid-column: 1; grid-row: 1; }

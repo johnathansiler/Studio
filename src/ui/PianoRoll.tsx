@@ -62,7 +62,35 @@ const LOW = 48
 const HIGH = 84
 const VEL_H = 36
 
-export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { store: ProjectStore; engine: AudioEngine; onIdeas?: () => void; onGenerate?: () => void; onLibrary?: () => void }) {
+export interface PianoActions {
+  quantize: () => boolean
+  arpeggiate: () => void
+  strum: () => void
+  humanize: () => void
+  duplicate: () => boolean
+  remove: () => boolean
+}
+
+export function PianoRoll({
+  store,
+  engine,
+  onIdeas,
+  onGenerate,
+  onLibrary,
+  chrome = true,
+  chordsOpen = false,
+  actionsRef,
+}: {
+  store: ProjectStore
+  engine: AudioEngine
+  onIdeas?: () => void
+  onGenerate?: () => void
+  onLibrary?: () => void
+  /** Session detail draws its own one-row toolbar. Arrange keeps the full bars. */
+  chrome?: boolean
+  chordsOpen?: boolean
+  actionsRef?: { current: PianoActions | null }
+}) {
   const piano = selectPiano(store)
   const track = piano.track
   const clip = piano.clip
@@ -369,6 +397,7 @@ export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { s
   }
 
   api.current = { quantize, arpeggiate, strum, humanize, duplicate, remove }
+  if (actionsRef) actionsRef.current = api.current
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -653,8 +682,8 @@ export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { s
 
   const gridPx = (roll.grid > 0 ? roll.grid : 1) * pxBeat
   return (
-    <div className={`piano ${compact ? 'compact' : ''}`} ref={pianoRef} data-tool={tool}>
-      <div className="scale-bar">
+    <div className={`piano ${compact ? 'compact' : ''} ${chrome ? '' : 'bare'}`} ref={pianoRef} data-tool={tool}>
+      {chrome && <div className="scale-bar">
         <TipButton className={`chords-btn ${open ? 'on' : ''}`} label={bar('chords').label} hint={bar('chords').hint} pressed={open} onClick={() => void toggleChords()} />
         {!compact && onGenerate && <TipButton label={bar('generate').label} hint={bar('generate').hint} onClick={onGenerate} />}
         <select {...described(bar('key'))} value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
@@ -700,8 +729,8 @@ export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { s
             }}
           />
         )}
-      </div>
-      {!compact && (
+      </div>}
+      {chrome && !compact && (
         <div className="tool-row">
           <select {...described(bar('grid'))} value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
             <option value="0">Free</option>
@@ -866,7 +895,7 @@ export function PianoRoll({ store, engine, onIdeas, onGenerate, onLibrary }: { s
           </div>
         </div>
       </div>
-      {open && (
+      {(open || chordsOpen) && (
         <div className="chord-sheet">
           <div className="chord-top">
             <select aria-label="Chord set" value={scale.source} onChange={(event) => store.setScale({ source: event.target.value as ChordSource })}>

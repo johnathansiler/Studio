@@ -2879,7 +2879,7 @@ export class ProjectStore {
     this.selectedMidiClipId = clip.id
   }
 
-  launch(trackId: string, clipId: string | null, nowSample = 0) {
+  launch(trackId: string, clipId: string | null, nowSample = 0, intent: 'default' | 'start' = 'default') {
     if (this.remoteFollow) return
     const track = this.track(trackId)
     const clip = track && clipId ? clipById(track, clipId) : null
@@ -2887,7 +2887,7 @@ export class ProjectStore {
     const mode = clip?.mode ?? 'toggle'
     const same = !!clipId && this.launched[trackId] === clipId
     const busy = !!this.launched[trackId]
-    const decision = !clipId ? 'stop' : retrigger(mode, mode === 'toggle' ? same : busy, !!clip?.legato)
+    const decision = !clipId ? 'stop' : intent === 'start' ? 'start' : retrigger(mode, mode === 'toggle' ? same : busy, !!clip?.legato)
     if (decision === 'hold') return
     const quant = clip?.quant ?? this.project.launchQuant ?? '1bar'
     const at = quantizeSample(nowSample, quant, this.project.sampleRate, this.project.tempo, this.project.timeSignature)
@@ -3289,6 +3289,34 @@ export class ProjectStore {
       this.selectedMidiClipId = clip.id
       this.selectedTrackId = trackId
       this.sessionEdit = { trackId, scene }
+    })
+  }
+
+  /** Empty session clip. Always one bar, independent of the record length. */
+  createEmptyMidiSlot(trackId: string, scene: number) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      this.ensureSlots(track, scene)
+      const existingId = track.midiSlots?.[scene]
+      let clip = existingId ? track.midiClips.find((item) => item.id === existingId) : undefined
+      if (!clip) {
+        clip = {
+          id: uid('midi'),
+          name: 'Clip',
+          startBeat: 0,
+          durationBeats: quartersPerBar(this.project.timeSignature),
+          notes: [],
+          slotOnly: true,
+          loop: true,
+        }
+        track.midiClips.push(clip)
+        track.midiSlots![scene] = clip.id
+      }
+      this.selectedMidiClipId = clip.id
+      this.selectedTrackId = trackId
+      this.sessionEdit = { trackId, scene }
+      this.sessionSlot = { trackId, scene }
     })
   }
 
