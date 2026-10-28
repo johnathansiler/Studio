@@ -24,7 +24,7 @@ import {
   trimSilence,
   type LoopTake,
 } from '../audio/sample/engine'
-import { assetFromClip, placeLooper, placeSampler, readSlotPoints, type SlotPoints } from '../audio/sample/slot'
+import { assetFromClip, placeLooper, placeSampler, playbackChannel, readSlotPoints, type SlotPoints } from '../audio/sample/slot'
 import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
 import { findCycle, MASTER } from '../audio/routing'
 import { isPackAsset, packToAsset } from '../audio/multisample/persist'
@@ -1214,7 +1214,10 @@ export class ProjectStore {
       const beats = this.project.timeSignature.numerator
       looper.transport = transport
       looper.startBeat = transport >= 2 ? nextBar(beat, beats) : looper.startBeat
-      if (looper.sync) looper.lengthSamples = syncedLoopSamples(looper.bars, this.project.tempo, this.project.sampleRate, beats)
+      if (looper.sync) {
+        const rate = looper.sourceRate && looper.sourceRate > 0 ? looper.sourceRate : this.project.sampleRate
+        looper.lengthSamples = syncedLoopSamples(looper.bars, this.project.tempo, rate, beats)
+      }
       plugin.looper = looper
       plugin.params = { ...plugin.params, transport }
     })
@@ -1225,12 +1228,16 @@ export class ProjectStore {
       const plugin = this.instrument(trackId, pluginId)
       if (!plugin) return
       const looper = plugin.looper ?? emptyLooper()
+      const targetRate = looper.sourceRate && looper.sourceRate > 0 ? looper.sourceRate : this.project.sampleRate
+      const incoming = Float32Array.from(channel)
+      const matched = targetRate === this.project.sampleRate ? incoming : playbackChannel(incoming, this.project.sampleRate, targetRate)
       const id = uid('loop')
-      this.buffers.set(id, { id, name: 'Loop', sampleRate: this.project.sampleRate, channels: [Float32Array.from(channel)] })
+      this.buffers.set(id, { id, name: 'Loop', sampleRate: targetRate, channels: [matched] })
+      looper.sourceRate = targetRate
       looper.layers = [...looper.layers, { id: uid('lyr'), bufferId: id, gain: 1, mute: false, reverse: false, speed: plugin.params.speed || 1 }]
       looper.undone = []
-      looper.lengthSamples = channel.length
-      if (!looper.sync) this.project.tempo = Math.round(tempoFromLoop(channel.length, this.project.sampleRate, this.project.timeSignature.numerator) * 10) / 10
+      looper.lengthSamples = matched.length
+      if (!looper.sync) this.project.tempo = Math.round(tempoFromLoop(matched.length, targetRate, this.project.timeSignature.numerator) * 10) / 10
       plugin.looper = looper
     })
   }
@@ -1266,6 +1273,57 @@ export class ProjectStore {
     })
   }
 
+  /** Cut every loop layer to the start and end handles, and keep the overdubs. */
+  trimLooperWindow(trackId: string | 'master', pluginId: string) {
+    this.mutate(() => {
+      const looper = this.instrument(trackId, pluginId)?.looper
+      if (!looper?.layers.length) return
+      const points = readSlotPoints(looper)
+      if (points.start <= 0.001 && points.end >= 0.999) return
+      const span = Math.max(0.0001, points.end - points.start)
+      let length = 0
+      for (const layer of looper.layers) {
+        const asset = this.buffers.get(layer.bufferId)
+        const lead = asset?.channels[0]
+        if (!asset || !lead?.length) continue
+        const from = Math.min(lead.length - 2, Math.floor(points.start * lead.length))
+        const to = Math.max(from + 2, Math.min(lead.length, Math.floor(points.end * lead.length)))
+        const id = uid('smp')
+        const channels = asset.channels.map((channel) => channel.slice(from, Math.min(channel.length, to)))
+        this.buffers.set(id, { id, name: asset.name, sampleRate: asset.sampleRate, channels })
+        layer.bufferId = id
+        length = channels[0]?.length || length
+      }
+      Object.assign(looper, readSlotPoints({
+        start: 0,
+        end: 1,
+        loopStart: (points.loopStart - points.start) / span,
+        loopEnd: (points.loopEnd - points.start) / span,
+      }))
+      if (length > 0) looper.lengthSamples = length
+    })
+  }
+
+  /** Raise each loop layer without dropping the earlier passes. */
+  normalizeLooper(trackId: string | 'master', pluginId: string) {
+    this.mutate(() => {
+      const looper = this.instrument(trackId, pluginId)?.looper
+      if (!looper?.layers.length) return
+      for (const layer of looper.layers) {
+        const asset = this.buffers.get(layer.bufferId)
+        if (!asset?.channels[0]?.length) continue
+        const id = uid('smp')
+        this.buffers.set(id, {
+          id,
+          name: asset.name,
+          sampleRate: asset.sampleRate,
+          channels: asset.channels.map((channel) => normalizeChannel(channel)),
+        })
+        layer.bufferId = id
+      }
+    })
+  }
+
   bounceLooper(trackId: string, pluginId: string, startSample: number) {
     this.mutate(() => {
       const plugin = this.instrument(trackId, pluginId)
@@ -1280,15 +1338,17 @@ export class ProjectStore {
       const length = looper.lengthSamples || takes[0]?.samples.length || 0
       if (!length) return
       const mixed = mixTakes({ length, takes, undone: [], feedback: looper.feedback })
+      const rate = looper.sourceRate && looper.sourceRate > 0 ? looper.sourceRate : this.project.sampleRate
+      const atProject = rate === this.project.sampleRate ? mixed : playbackChannel(mixed, rate, this.project.sampleRate)
       const id = uid('bounce')
-      this.buffers.set(id, { id, name: 'Loop bounce', sampleRate: this.project.sampleRate, channels: [mixed] })
+      this.buffers.set(id, { id, name: 'Loop bounce', sampleRate: this.project.sampleRate, channels: [atProject] })
       track.clips.push({
         id: uid('clip'),
         name: 'Loop',
         bufferId: id,
         startSample,
         offsetSamples: 0,
-        durationSamples: mixed.length,
+        durationSamples: atProject.length,
         fadeInSamples: 0,
         fadeOutSamples: 0,
         gain: 1,

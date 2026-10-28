@@ -8,11 +8,13 @@ import { createPlugin } from '../audio/plugins/catalog'
 import { emptyLooper } from '../audio/sample/engine'
 import {
   assetFromClip,
+  audibleLoopSamples,
   captureSlot,
   clampSlotPoints,
   decodeSlotBytes,
   dragSlotPoint,
   fitOverdub,
+  loopRange,
   placeLooper,
   placeSampler,
   readSlotPoints,
@@ -124,7 +126,7 @@ describe('slot handles, slices, and overdub', () => {
     expect(looper.layers).toHaveLength(2)
     expect(looper.layers[0].bufferId).toBe('loop-a')
     expect(looper.loopStart).toBeCloseTo(0.25)
-    expect(Array.from(second.channels[0]).map((sample) => Math.round(sample * 10) / 10)).toEqual([0.1, 0.2, 0, 0])
+    expect(Array.from(second.channels[0]).map((sample) => Math.round(sample * 10) / 10)).toEqual([0, 0.1, 0.2, 0])
     expect(looper.lengthSamples).toBe(4)
   })
 
@@ -300,5 +302,77 @@ describe('slot handles, slices, and overdub', () => {
     expect(html).toContain('aria-label="Loop end. Drag to set where the loop returns."')
     expect(html).toContain('Dub')
     expect(html).toContain('Record')
+    expect(html).toContain('slot-handle edge')
+    expect(html).toContain('slot-handle loop')
+  })
+
+  it('places an overdub in the loop window and keeps the bar length at the file rate', () => {
+    const points = { start: 0, end: 1, loopStart: 0.25, loopEnd: 0.75 }
+    expect(loopRange(8, points)).toEqual({ from: 2, to: 6, span: 4 })
+    expect(audibleLoopSamples(88200, { start: 0, end: 1, loopStart: 0, loopEnd: 1 }, 44100, 48000)).toBe(96000)
+    const placed = fitOverdub(Float32Array.from([0.3, 0.3, 0.3, 0.3]), 48000, 48000, 8, 2, 4)
+    expect(Array.from(placed).map((sample) => Math.round(sample * 10) / 10)).toEqual([0, 0, 0.3, 0.3, 0.3, 0.3, 0, 0])
+
+    const store = new ProjectStore(createEmptyProject())
+    const track = store.project.tracks[0]
+    store.addPlugin(track.id, 'looper')
+    const looper = track.plugins.find((plugin) => plugin.pluginId === 'looper')!
+    store.loadSlotAudio(track.id, looper.id, { id: 'file', name: 'File', sampleRate: 44100, channels: [tone(1000, 0.2)] })
+    const loaded = store.track(track.id)!.plugins.find((plugin) => plugin.id === looper.id)!.looper!
+    expect(loaded.sourceRate).toBe(44100)
+    expect(loaded.lengthSamples).toBe(88200)
+    store.armLooper(track.id, looper.id, 1, 0)
+    expect(store.track(track.id)!.plugins.find((plugin) => plugin.id === looper.id)!.looper!.lengthSamples).toBe(88200)
+
+    store.loadSlotAudio(track.id, looper.id, { id: 'base', name: 'Base', sampleRate: 48000, channels: [tone(8, 0.4)] }, 'replace')
+    const plugin = store.track(track.id)!.plugins.find((item) => item.id === looper.id)!
+    plugin.looper!.sync = false
+    plugin.looper!.lengthSamples = 8
+    plugin.looper!.layers = [{ id: 'keep', bufferId: 'base', gain: 1, mute: false, reverse: false, speed: 1 }]
+    store.buffers.set('base', { id: 'base', name: 'Base', sampleRate: 48000, channels: [tone(8, 0.4)] })
+    store.setSlotPoints(track.id, looper.id, { start: 0, end: 1, loopStart: 0.25, loopEnd: 0.75 })
+    store.endDraft()
+    store.loadSlotAudio(track.id, looper.id, { id: 'dub', name: 'Dub', sampleRate: 48000, channels: [Float32Array.from([0.2, 0.2, 0.2, 0.2])] }, 'overdub')
+    const loop = store.track(track.id)!.plugins.find((plugin) => plugin.id === looper.id)!.looper!
+    expect(loop.layers.map((layer) => layer.bufferId)).toEqual(['base', 'dub'])
+    const dub = store.buffers.get('dub')!
+    expect(Array.from(dub.channels[0]).map((sample) => Math.round(sample * 10) / 10)).toEqual([0, 0, 0.2, 0.2, 0.2, 0.2, 0, 0])
+    store.setSlotPoints(track.id, looper.id, { start: 0.25, end: 0.75, loopStart: 0.25, loopEnd: 0.75 })
+    store.endDraft()
+    store.trimLooperWindow(track.id, looper.id)
+    const trimmed = store.track(track.id)!.plugins.find((plugin) => plugin.id === looper.id)!.looper!
+    expect(trimmed.layers).toHaveLength(2)
+    expect(trimmed.start).toBe(0)
+    expect(trimmed.end).toBe(1)
+    store.normalizeLooper(track.id, looper.id)
+    expect(store.track(track.id)!.plugins.find((plugin) => plugin.id === looper.id)!.looper!.layers).toHaveLength(2)
+  })
+
+  it('does not click by reading past the loop window', () => {
+    const channel = tone(1000, 0.2)
+    channel.fill(0.95, 500)
+    const plugin = createPlugin('sampler')
+    plugin.sampler!.bufferId = 'tone'
+    plugin.sampler!.sourceRate = 48000
+    plugin.sampler!.start = 0
+    plugin.sampler!.end = 1
+    plugin.sampler!.loopStart = 0
+    plugin.sampler!.loopEnd = 0.5
+    plugin.sampler!.loopMode = 0
+    plugin.sampler!.crossfade = 0.02
+    plugin.params = { ...plugin.params, stretch: 0, keys: 1, attack: 0, gain: 1, cutoff: 20000, release: 5 }
+    const played = playSampler(plugin, channel, 620)
+    expect(Math.max(...Array.from(played).map((sample) => Math.abs(sample)))).toBeLessThan(0.45)
+
+    const seam = tone(400, 0.8)
+    seam[0] = -0.8
+    const looped = createPlugin('sampler')
+    looped.sampler!.bufferId = 'seam'
+    looped.sampler!.sourceRate = 48000
+    looped.sampler!.loopMode = 0
+    looped.sampler!.crossfade = 0.05
+    looped.params = { ...plugin.params, stretch: 0, keys: 1, attack: 0, gain: 1, cutoff: 20000 }
+    const across = playSampler(looped, seam, 420)
+    expect(Math.abs((across[400] || 0) - (across[399] || 0))).toBeLessThan(0.35)
   })
 })

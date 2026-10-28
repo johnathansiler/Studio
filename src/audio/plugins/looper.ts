@@ -74,14 +74,20 @@ export function createLooper(sampleRate: number): LooperProcessor {
       }
       const mix = box.length > 0 && transport !== 0 ? mixTakes(box) : null
       const level = params.level ?? 0.9
+      const points = mix?.length ? readSlotPoints(state) : null
+      const from = points ? Math.min(mix!.length - 1, Math.floor(points.loopStart * mix!.length)) : 0
+      const to = points ? Math.max(from + 1, Math.min(mix!.length, Math.ceil(points.loopEnd * mix!.length))) : 0
+      const span = Math.max(1, to - from)
+      const fade = Math.min(Math.floor(span / 3), Math.max(0, Math.floor((rate * 12) / 1000)))
       for (let i = 0; i < n; i++) {
         let sample = 0
         if (mix && mix.length) {
-          const points = readSlotPoints(state)
-          const from = Math.min(mix.length - 1, Math.floor(points.loopStart * mix.length))
-          const to = Math.max(from + 1, Math.min(mix.length, Math.ceil(points.loopEnd * mix.length)))
-          const span = Math.max(1, to - from)
-          sample = mix[from + (cursor % span)] || 0
+          const at = cursor % span
+          sample = mix[from + at] || 0
+          if (fade > 1 && at >= span - fade) {
+            const t = (at - (span - fade) + 1) / fade
+            sample = sample * (1 - t) + (mix[from] || 0) * t
+          }
           cursor += 1
         }
         if (output[0]) output[0][i] = sanitize(sample * level)

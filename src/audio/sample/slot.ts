@@ -1,6 +1,6 @@
 import { resampleSinc } from '../quality/resample'
 import { musicCaptureAttempts } from '../../model/codecs'
-import { uid, type AudioAsset, type AudioClip, type PluginInstance, type Project, type SampleZone, type SamplerState } from '../../model/types'
+import { uid, type AudioAsset, type AudioClip, type Project, type SampleZone, type SamplerState } from '../../model/types'
 import { countInSeconds, type TimeSignature } from '../../model/time'
 import { decodeFlac } from '../../model/flac'
 import { decodeWavPCM, parseWavHeader } from '../../model/wav'
@@ -107,7 +107,7 @@ export async function captureSlot(
 ): Promise<{ channels: Float32Array[]; sampleRate: number } | null> {
   const kept: Float32Array[] = []
   let total = 0
-  let armed = !options.countIn
+  let armed = false
   const stop = await source.start((frame) => {
     const copy = Float32Array.from(frame)
     control.onLevel(peakLevel(copy))
@@ -136,8 +136,8 @@ export async function captureSlot(
       return null
     }
   }
-  armed = true
   control.onPhase('recording')
+  armed = true
   while (!control.shouldStop() && !(options.maxSamples > 0 && total >= options.maxSamples)) {
     await control.wait(40)
   }
@@ -163,13 +163,35 @@ export function fitLoopBuffer(channel: Float32Array, sampleRate: number, sync: b
   return out
 }
 
-/** Match an overdub to the loop's rate and length. Same-rate audio is copied, not resampled. */
-export function fitOverdub(channel: Float32Array, fromRate: number, toRate: number, length: number) {
-  const matched = fromRate === toRate ? channel : playbackChannel(channel, fromRate, toRate)
+/** Sample index range of the repeating loop window. */
+export function loopRange(length: number, points: SlotPoints) {
+  const safe = Math.max(1, length)
+  const clamped = readSlotPoints(points)
+  const from = Math.min(safe - 1, Math.floor(clamped.loopStart * safe))
+  const to = Math.max(from + 1, Math.min(safe, Math.ceil(clamped.loopEnd * safe)))
+  return { from, to, span: Math.max(1, to - from) }
+}
+
+/** How many samples one heard pass of the loop lasts at `toRate`. */
+export function audibleLoopSamples(length: number, points: SlotPoints, fromRate: number, toRate: number) {
+  const span = loopRange(length, points).span
+  if (!(fromRate > 0) || !(toRate > 0) || fromRate === toRate) return span
+  return Math.max(1, Math.round((span * toRate) / fromRate))
+}
+
+/**
+ * Match an overdub to the loop's rate and length.
+ * `offset` and `span` drop it into the repeating window. Same-rate audio that
+ * already fills the whole loop is returned as-is, not resampled.
+ */
+export function fitOverdub(channel: Float32Array, fromRate: number, toRate: number, length: number, offset = 0, span = length) {
   const target = Math.max(1, length)
-  if (matched.length === target && fromRate === toRate) return matched
+  const at = Math.max(0, Math.min(target - 1, Math.round(offset)))
+  const room = Math.max(1, Math.min(target - at, Math.round(span) || target))
+  const matched = fromRate === toRate ? channel : playbackChannel(channel, fromRate, toRate)
+  if (matched.length === target && fromRate === toRate && at === 0 && room >= target) return matched
   const out = new Float32Array(target)
-  out.set(matched.subarray(0, Math.min(matched.length, target)))
+  out.set(matched.subarray(0, Math.min(room, matched.length)), at)
   return out
 }
 
@@ -220,7 +242,8 @@ export function placeLooper(
   }
   const targetRate = looper.sourceRate && looper.sourceRate > 0 ? looper.sourceRate : asset.sampleRate
   const length = looper.lengthSamples || lead.length || 1
-  const fitted = fitOverdub(lead, asset.sampleRate, targetRate, length)
+  const window = loopRange(length, readSlotPoints(looper))
+  const fitted = fitOverdub(lead, asset.sampleRate, targetRate, length, window.from, window.span)
   const stored: AudioAsset = {
     id: asset.id,
     name: asset.name || 'Overdub',
@@ -269,22 +292,20 @@ export function focusedSlot(store: { pluginFocus: { trackId: string; pluginId: s
   return { trackId: focus.trackId, pluginId: focus.pluginId, kind: plugin.pluginId }
 }
 
-export function slotKind(plugin: PluginInstance): 'sampler' | 'looper' | null {
-  if (plugin.pluginId === 'sampler' || plugin.sampler) return plugin.pluginId === 'looper' ? 'looper' : 'sampler'
-  if (plugin.pluginId === 'looper' || plugin.looper) return 'looper'
-  return null
-}
-
 /** Lossless decode for WAV, our FLAC subset, and uncompressed AIFF. Compressed files return null. */
 export function decodeSlotBytes(bytes: ArrayBuffer): DecodedAudio | null {
   if (bytes.byteLength < 12) return null
   const head = new Uint8Array(bytes, 0, 12)
   const kind = ascii(head, 0, 4)
   if (kind === 'RIFF' && ascii(head, 8, 4) === 'WAVE') {
-    const wav = decodeWavPCM(bytes)
-    let bits = 16
-    try { bits = parseWavHeader(bytes).bits } catch { /* the PCM reader already checked the header */ }
-    return { sampleRate: wav.sampleRate, channels: wav.channels, bits }
+    try {
+      const wav = decodeWavPCM(bytes)
+      let bits = 16
+      try { bits = parseWavHeader(bytes).bits } catch { /* the PCM reader already checked the header */ }
+      return { sampleRate: wav.sampleRate, channels: wav.channels, bits }
+    } catch {
+      return null
+    }
   }
   if (kind === 'fLaC') {
     try {
@@ -300,8 +321,10 @@ export function decodeSlotBytes(bytes: ArrayBuffer): DecodedAudio | null {
 }
 
 export async function decodeSlotFile(bytes: ArrayBuffer, decodeNative: (bytes: ArrayBuffer, sampleRate: number | null) => Promise<DecodedAudio> = browserDecode): Promise<DecodedAudio> {
-  const direct = decodeSlotBytes(bytes)
-  if (direct?.channels[0]?.length) return copyDecoded(direct)
+  try {
+    const direct = decodeSlotBytes(bytes)
+    if (direct?.channels[0]?.length) return copyDecoded(direct)
+  } catch { /* an odd lossless file can still play through the browser decoder */ }
   const sniffed = sniffCompressedRate(new Uint8Array(bytes))
   return copyDecoded(await decodeNative(bytes, sniffed))
 }

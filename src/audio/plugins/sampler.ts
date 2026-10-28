@@ -215,11 +215,13 @@ function readVoice(voice: Voice, coeff: number) {
   const loopTo = voice.mode === 2 ? span : clamp(voice.loopTo || span, 2, span)
   const loopFrom = voice.mode === 2 ? 0 : clamp(voice.loopFrom || 0, 0, loopTo - 2)
   const pos = clamp(voice.pos, 0, span - 1.001)
-  let sample = readSample(voice.buffer, pos)
+  const wrap = voice.mode === 0
+  let sample = readSample(voice.buffer, pos, wrap ? loopFrom : null, wrap ? loopTo : null)
   const fade = Math.max(0, Math.min(loopTo - loopFrom - 2, voice.fade))
   if (fade > 1 && voice.mode === 0 && pos >= loopTo - fade && pos < loopTo) {
     const t = (pos - (loopTo - fade)) / fade
-    sample = sample * (1 - t) + readSample(voice.buffer, loopFrom + (pos - (loopTo - fade))) * t
+    const head = readSample(voice.buffer, loopFrom, null, null)
+    sample = sample * (1 - t) + head * t
   }
   voice.low += (sample - voice.low) * coeff
   const step = voice.rate > 0 ? voice.rate : 1
@@ -248,11 +250,14 @@ function readVoice(voice: Voice, coeff: number) {
   return sanitize(voice.low)
 }
 
-function readSample(buffer: Float32Array, at: number) {
+function readSample(buffer: Float32Array, at: number, wrapFrom: number | null, wrapTo: number | null) {
   const pos = clamp(at, 0, Math.max(0, buffer.length - 1.001))
   const index = Math.floor(pos)
   const frac = pos - index
-  return (buffer[index] || 0) * (1 - frac) + (buffer[Math.min(buffer.length - 1, index + 1)] || 0) * frac
+  let next = index + 1
+  if (wrapFrom != null && wrapTo != null && next >= wrapTo) next = Math.min(buffer.length - 1, Math.max(0, Math.floor(wrapFrom)))
+  else next = Math.min(buffer.length - 1, next)
+  return (buffer[Math.min(buffer.length - 1, index)] || 0) * (1 - frac) + (buffer[next] || 0) * frac
 }
 
 function steal(voices: Voice[], note: number, limit: number) {
