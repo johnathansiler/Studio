@@ -32,7 +32,8 @@ export function selectLayers(program: SamplerProgram, query: MapQuery): MapResul
     let chosen = list
     if (seqs.length > 1 && groupId > 0) {
       const counter = query.roundRobin[groupId] ?? 0
-      const pick = seqs[Math.abs(counter) % seqs.length]
+      const mode = list.some((zone) => zone.rrMode === 'random') ? 'random' : 'cycle'
+      const pick = seqs[roundRobinIndex(seqs.length, counter, groupId, mode)]
       chosen = list.filter((zone) => zone.seq === pick)
       advance.push(groupId)
     }
@@ -52,6 +53,20 @@ export function selectLayers(program: SamplerProgram, query: MapQuery): MapResul
 
 export function isKeyswitch(program: SamplerProgram, note: number) {
   return program.keyswitches.some((item) => item.key === note)
+}
+
+/** Index into a sorted seq list. Random is stable for a counter so a note can be replayed. */
+export function roundRobinIndex(length: number, counter: number, group: number, mode: 'cycle' | 'random') {
+  if (length <= 1) return 0
+  const count = Math.abs(Math.trunc(counter))
+  if (mode === 'random') return mix(group, count) % length
+  return count % length
+}
+
+function mix(group: number, counter: number) {
+  let hash = (Math.imul(group + 1, 374761393) ^ Math.imul(counter + 1, 668265263)) >>> 0
+  hash = Math.imul(hash ^ (hash >>> 13), 1274126177)
+  return (hash ^ (hash >>> 16)) >>> 0
 }
 
 export function tuneRatio(zone: SampleZone, note: number) {

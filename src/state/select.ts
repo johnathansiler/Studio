@@ -93,6 +93,20 @@ export function selectPiano(store: Pick<Store, 'project' | 'selectedMidiClipId' 
   }
 }
 
+export function selectInstrument(store: Pick<Store, 'project' | 'track'>, trackId: string) {
+  const track = store.track(trackId) ?? null
+  const program = track?.library ?? null
+  return {
+    project: store.project,
+    track,
+    program,
+    mics: program?.mics ?? [],
+    keyswitches: program?.keyswitches ?? [],
+    activeSwitch: program?.defaultSwitch ?? null,
+    zones: program?.zones.length ?? 0,
+  }
+}
+
 export function selectRack(store: Pick<Store, 'project' | 'track'>, trackId: string) {
   const track = store.track(trackId) ?? null
   return {
