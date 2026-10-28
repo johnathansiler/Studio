@@ -347,6 +347,8 @@ export interface Project {
   quantizeBeats?: number
   /** `${kind}:${name}` factory and user presets marked in the browser. */
   presetFavorites?: string[]
+  /** Ids from the free sound library kept with this project. */
+  soundFavorites?: string[]
   beats?: BeatRack
   patternClips?: PatternClip[]
   roll?: RollMemory
@@ -437,6 +439,7 @@ export function createEmptyProject(sampleRate = 48000, name = 'Untitled session'
     scale: defaultScale(),
     quantizeBeats: 0,
     presetFavorites: [],
+    soundFavorites: [],
   }
 }
 

@@ -2416,6 +2416,41 @@ export class AudioEngine {
     this.previewStops = []
   }
 
+  /** Speaker-only audition. The cue and the arrangement are left alone. */
+  previewPcm(channels: Float32Array[], sampleRate?: number) {
+    this.stopPreview()
+    const ctx = this.unlock()
+    const out = this.speakerGain
+    const lead = channels[0]
+    if (!out || !lead?.length) return
+    const rate = sampleRate && sampleRate > 0 ? sampleRate : ctx.sampleRate
+    const buffer = ctx.createBuffer(Math.max(1, channels.length), lead.length, rate)
+    channels.forEach((channel, index) => {
+      const data = new Float32Array(lead.length)
+      data.set(channel.subarray(0, Math.min(channel.length, lead.length)))
+      buffer.copyToChannel(data, index)
+    })
+    const src = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    src.buffer = buffer
+    gain.gain.value = 0.9
+    src.connect(gain)
+    gain.connect(out)
+    const stop = () => {
+      try { src.stop() } catch { /* already stopped */ }
+    }
+    const disconnect = () => {
+      try { src.disconnect() } catch { /* already disconnected */ }
+      try { gain.disconnect() } catch { /* already disconnected */ }
+    }
+    src.onended = () => {
+      disconnect()
+      this.previewStops = this.previewStops.filter((item) => item.stop !== stop)
+    }
+    this.previewStops = [{ stop, disconnect }]
+    src.start()
+  }
+
   private previewTone(ctx: AudioContext, bus: GainNode, pitch: number, when: number, dur: number, velocity: number, stops: Stoppable[]) {
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()

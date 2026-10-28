@@ -2471,6 +2471,15 @@ export class ProjectStore {
     })
   }
 
+  toggleSoundFavorite(id: string) {
+    const key = id.trim()
+    if (!key) return
+    this.mutate(() => {
+      const list = this.project.soundFavorites ?? []
+      this.project.soundFavorites = list.includes(key) ? list.filter((item) => item !== key) : [...list, key]
+    })
+  }
+
   mutateDevice(trackId: string, deviceId: string, rng: () => number = Math.random) {
     this.mutate(() => {
       const device = this.track(trackId)?.rack?.devices.find((item) => item.id === deviceId)

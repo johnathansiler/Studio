@@ -29,6 +29,7 @@ import { PluginSheet } from './ui/PluginSheet'
 import { IdeasPop } from './ui/IdeasPop'
 import { UnstuckSheet } from './unstuck/UnstuckSheet'
 import { LibraryPop } from './ui/LibraryPop'
+import { SoundBrowser } from './ui/SoundBrowser'
 import { loadScaleCatalog } from './theory'
 import { AnalysisSheet } from './ui/AnalysisSheet'
 import { QuantizeSheet } from './ui/QuantizeSheet'
@@ -109,6 +110,7 @@ export function App() {
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
   const [unstuckOpen, setUnstuckOpen] = useState(() => new URLSearchParams(window.location.search).get('unstuck') === '1')
   const [libraryOpen, setLibraryOpen] = useState(() => new URLSearchParams(window.location.search).get('library') === '1')
+  const [soundsOpen, setSoundsOpen] = useState(() => new URLSearchParams(window.location.search).get('sounds') === '1')
   useEffect(() => {
     void loadScaleCatalog().then(() => setVersion((value) => value + 1))
   }, [])
@@ -1188,6 +1190,7 @@ async function importDropped(files: FileList) {
             <MenuRow label={copyOf(MENU_COPY, 'pads').label} hint={copyOf(MENU_COPY, 'pads').hint} onClick={() => { setMenuOpen(false); openPerform('drums') }} />
             <MenuRow label={copyOf(MENU_COPY, 'piano').label} hint={copyOf(MENU_COPY, 'piano').hint} disabled={!pianoTrack} onClick={() => { if (!pianoTrack) return; setMenuOpen(false); openPiano(pianoTrack.id) }} />
             <MenuRow label="Scales" hint="Browse scales and the chords inside them." onClick={() => { setMenuOpen(false); setLibraryOpen(true) }} />
+            <MenuRow label="Sounds" hint="Browse loops and one-shots. Add one at the playhead." onClick={() => { setMenuOpen(false); setSoundsOpen(true) }} />
             <MenuRow className="split" label={copyOf(MENU_COPY, 'quantize').label} hint={copyOf(MENU_COPY, 'quantize').hint} onClick={() => { setMenuOpen(false); store.quickQuantize() }} />
             <MenuRow label={copyOf(MENU_COPY, 'quantize-more').label} hint={copyOf(MENU_COPY, 'quantize-more').hint} onClick={() => { setMenuOpen(false); store.openQuantize() }} />
             <MenuRow className="split" label={copyOf(MENU_COPY, 'click').label} hint={copyOf(MENU_COPY, 'click').hint} pressed={store.project.metronomeEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('metronomeEnabled')} />
@@ -1354,6 +1357,7 @@ async function importDropped(files: FileList) {
       {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}
       {unstuckOpen && <UnstuckSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }} />}
       {libraryOpen && <LibraryPop store={store} engine={engine} onClose={() => setLibraryOpen(false)} />}
+      {soundsOpen && <SoundBrowser store={store} engine={engine} phone={phone} onClose={() => { engine.stopPreview(); setSoundsOpen(false) }} />}
       {analysisTrackId && <AnalysisSheet store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} />}
       {perform && (
         <PerformPop

@@ -144,3 +144,17 @@ export function selectKnock(store: { project: Project }) {
   const device = track?.rack?.devices.find((item) => item.kind === 'knock') ?? null
   return { project: store.project, track, device, tempo: store.project.tempo }
 }
+
+/** Sound browser. Favorites live on the project so every screen and device sees them. */
+export function selectSounds(store: { project: Project; selectedTrackId: string | null }) {
+  const tracks = store.project.tracks.filter((track) => track.type === 'audio')
+  const selected = tracks.find((track) => track.id === store.selectedTrackId) ?? tracks[0] ?? null
+  return {
+    favorites: store.project.soundFavorites ?? [],
+    tempo: store.project.tempo,
+    sampleRate: store.project.sampleRate,
+    tracks,
+    trackId: selected?.id ?? null,
+    trackName: selected?.name ?? '',
+  }
+}
