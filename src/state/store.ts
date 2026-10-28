@@ -94,6 +94,7 @@ import { cloneOmni, emptyOmni, type OmniPatch } from '../instruments/patch'
 import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
 import { lockedTone, scaleIsMicrotonal } from '../theory/lock'
+import { applyPatternLength, makeRackChannel, type RackChoice } from '../model/channelRack'
 import {
   clampSwing,
   clonePattern,
@@ -3360,6 +3361,22 @@ export class ProjectStore {
     })
   }
 
+  /** 16, 32, or 64. Channels that matched the old length grow or shrink with it. */
+  setPatternLength(steps: number) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (pattern) applyPatternLength(pattern, steps)
+    })
+  }
+
+  addPatternChannel(choice: RackChoice) {
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (!pattern) return
+      pattern.channels.push(makeRackChannel(choice, pattern.steps))
+    })
+  }
+
   editChannel(channelId: string, fn: (cells: StepCell[], count: number) => StepCell[] | void, draft = false) {
     const run = (body: () => void) => (draft ? this.draft(body) : this.mutate(body))
     run(() => {
@@ -3372,8 +3389,9 @@ export class ProjectStore {
     })
   }
 
-  editStep(channelId: string, index: number, patch: Partial<Pick<StepCell, 'velocity' | 'pan' | 'pitch' | 'fine' | 'gate'>>) {
-    this.mutate(() => {
+  editStep(channelId: string, index: number, patch: Partial<Pick<StepCell, 'velocity' | 'pan' | 'pitch' | 'fine' | 'gate'>>, drag = false) {
+    const run = (body: () => void) => (drag ? this.draft(body) : this.mutate(body))
+    run(() => {
       const cell = this.activePattern()?.channels.find((row) => row.id === channelId)?.cells[index]
       if (!cell) return
       if (patch.velocity != null) cell.velocity = Math.max(0.05, Math.min(1, patch.velocity))
@@ -3384,8 +3402,9 @@ export class ProjectStore {
     })
   }
 
-  setChannel(channelId: string, patch: Partial<{ volume: number; pan: number; mute: boolean; solo: boolean; output: string | null; steps: number; swing: number | null; name: string }>) {
-    this.mutate(() => {
+  setChannel(channelId: string, patch: Partial<{ volume: number; pan: number; mute: boolean; solo: boolean; output: string | null; steps: number; swing: number | null; name: string }>, drag = false) {
+    const run = (body: () => void) => (drag ? this.draft(body) : this.mutate(body))
+    run(() => {
       const channel = this.activePattern()?.channels.find((row) => row.id === channelId)
       if (!channel) return
       Object.assign(channel, patch)
