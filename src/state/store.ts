@@ -3168,6 +3168,69 @@ export class ProjectStore {
     })
   }
 
+  /** Replace the host's live guide for this take with the guest's aligned recording. */
+  acceptAlignedTake(take: {
+    peerId: string
+    peerName: string
+    takeId: string
+    placeAtSample: number
+    sampleRate: number
+    channels: Float32Array[]
+    compensationMs: number
+    detail: string
+    silent?: boolean
+  }) {
+    const parked: { trackId: string; scene: number }[] = []
+    for (const track of this.project.tracks) {
+      track.audioSlots?.forEach((id, scene) => {
+        if (!id) return
+        const clip = track.clips.find((item) => item.id === id)
+        if (clip && clip.source === 'guide' && clip.takeId === take.takeId) parked.push({ trackId: track.id, scene })
+      })
+    }
+    this.removeClips((clip) => clip.source === 'guide' && clip.takeId === take.takeId)
+    this.dropGuideLanes(take.takeId)
+    let track = this.project.tracks.find((item) => item.input === `remote:${take.peerId}`)
+    if (!track) {
+      this.ensureRemoteTrack(take.peerId, take.peerName)
+      track = this.project.tracks.find((item) => item.input === `remote:${take.peerId}`)
+    }
+    if (!track || !take.channels[0]?.length) return
+    const bufferId = uid('buf')
+    this.addAsset({
+      id: bufferId,
+      name: `${take.peerName} take`,
+      sampleRate: take.sampleRate,
+      channels: take.channels,
+    })
+    this.addTakeLane(track.id, {
+      id: uid('lane'),
+      name: `${take.peerName} aligned`,
+      bufferId,
+      offsetSamples: 0,
+      startSample: Math.max(0, Math.round(take.placeAtSample)),
+      durationSamples: take.channels[0].length,
+      peerId: take.peerId,
+      takeId: take.takeId,
+      source: 'aligned-take',
+    })
+    const placed = this.selectedClipId
+    if (parked.length && placed) {
+      this.mutate(() => {
+        for (const slot of parked) {
+          const row = this.track(slot.trackId)
+          if (row?.audioSlots) row.audioSlots[slot.scene] = placed
+        }
+      })
+    }
+    this.toast(
+      take.silent
+        ? `${take.peerName} take arrived, but it is silent. Check their performance mic.`
+        : `${take.peerName} aligned −${take.compensationMs.toFixed(0)} ms. ${take.detail}`,
+      take.silent ? 'warn' : 'good',
+    )
+  }
+
   dropGuideLanes(takeId: string) {
     this.mutate(() => {
       for (const track of this.project.tracks) {

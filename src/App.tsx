@@ -7,7 +7,6 @@ import { isSessionLink, isUntouchedEmpty, NEW_PROJECT, planLaunch, readTab, shou
 import { channelConstraints, inputChannel, mediaChannelCount, punchWindow, sliceCapture } from './model/comp'
 import { inspectClip } from './audio/stretch/engine'
 import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } from './model/types'
-import type { IncomingTake } from './remote/session'
 import { SessionClient } from './remote/session'
 import { deleteProject, listProjects, listSnapshots, loadLastProject, loadProject, loadSnapshot, requestPersistentStorage, saveProject, storageReport, type ProjectListItem, type WorkspaceSnapshot } from './storage/idb'
 import { inviteWins } from './model/negotiate'
@@ -140,7 +139,12 @@ export function App() {
 
   useEffect(() => {
     session.bindArrangement(store)
-    session.setTakeHandler((take) => placeTake(store, engine, take))
+    session.setTakeHandler((take) => {
+      const channels = take.sampleRate === engine.sampleRate
+        ? take.channels
+        : take.channels.map((channel) => linearResample(channel, take.sampleRate, engine.sampleRate))
+      store.acceptAlignedTake({ ...take, channels, sampleRate: engine.sampleRate })
+    })
     session.setArrangementHandler((project, assets, ready) => {
       if (session.state.role === 'guest') store.remoteFollow = true
       if (session.usingOps) {
@@ -1261,6 +1265,7 @@ async function importDropped(files: FileList) {
           onStop={() => void stop()}
           onRecord={() => void record()}
           onSeek={(sample) => void locate(sample)}
+          takeProgress={session.state.takeProgress}
         />
       )}
       {surface === 'studio' && phonePane !== 'room' && store.view !== 'mix' && (store.view === 'arrange' || panel === 'piano') && (
@@ -1513,38 +1518,5 @@ function MenuIcon() {
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
       <path d="M3 4.5h10M3 8h10M3 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
-  )
-}
-
-function placeTake(store: ProjectStore, engine: AudioEngine, take: IncomingTake) {
-  const channels = take.channels.map((channel) =>
-    take.sampleRate === engine.sampleRate ? channel : linearResample(channel, take.sampleRate, engine.sampleRate),
-  )
-  store.removeClips((clip) => clip.source === 'guide' && clip.takeId === take.takeId)
-  store.dropGuideLanes(take.takeId)
-  let track = store.project.tracks.find((item) => item.input === `remote:${take.peerId}`)
-  if (!track) {
-    store.ensureRemoteTrack(take.peerId, take.peerName)
-    track = store.project.tracks.find((item) => item.input === `remote:${take.peerId}`)
-  }
-  if (!track) return
-  const bufferId = uid('buf')
-  store.addAsset({ id: bufferId, name: `${take.peerName} take`, sampleRate: engine.sampleRate, channels })
-  store.addTakeLane(track.id, {
-    id: uid('lane'),
-    name: `${take.peerName} aligned`,
-    bufferId,
-    offsetSamples: 0,
-    startSample: Math.max(0, take.placeAtSample),
-    durationSamples: channels[0].length,
-    peerId: take.peerId,
-    takeId: take.takeId,
-    source: 'aligned-take',
-  })
-  store.toast(
-    take.silent
-      ? `${take.peerName} take arrived, but it is silent. Check their performance mic.`
-      : `${take.peerName} aligned −${take.compensationMs.toFixed(0)} ms. ${take.detail}`,
-    take.silent ? 'warn' : 'good',
   )
 }
