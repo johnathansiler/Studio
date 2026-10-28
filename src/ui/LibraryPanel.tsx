@@ -123,7 +123,7 @@ export function LibraryPanel({ store, engine, trackId }: { store: ProjectStore; 
       )}
       <p className="library-status">{status}</p>
       <p className="instrument-hint">{hint}</p>
-      {instrument.mics.length > 0 && (
+      {instrument.mics.length > 1 && (
         <div className="library-mics">
           {instrument.mics.map((mic) => (
             <label key={mic.id} className="instrument-mic" title={`Mix the ${mic.name} microphone. Mute silences only this position.`}>

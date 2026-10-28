@@ -59,13 +59,39 @@ export function filterSounds(entries: SoundEntry[], query: SoundQuery): SoundEnt
     .filter((entry) => {
       if (query.type !== 'all' && entry.type !== query.type) return false
       if (query.favoritesOnly && !query.favorites.includes(entry.id)) return false
-      if (key && (entry.key || '').toLowerCase() !== key) return false
+      if (key && !soundKeyMatches(key, entry.key)) return false
       if (query.bpm === 'project' && (entry.bpm == null || !bpmMatchesProject(entry.bpm, query.projectBpm))) return false
       if (!tokens.length) return true
       const hay = `${entry.name} ${entry.tags.join(' ')} ${entry.key ?? ''} ${entry.type} ${entry.source}`.toLowerCase()
       return tokens.every((token) => hay.includes(token))
     })
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+}
+
+/**
+ * The library index writes "C major" and "A minor".
+ * "C", "Cmaj", and "Am" name the same keys.
+ */
+function soundKeyMatches(query: string, entryKey: string | undefined) {
+  const wanted = query.trim().toLowerCase()
+  if (!wanted) return true
+  const raw = (entryKey ?? '').trim().toLowerCase()
+  if (!raw) return false
+  if (raw === wanted) return true
+  return canonicalSoundKey(wanted) === canonicalSoundKey(raw)
+}
+
+function canonicalSoundKey(value: string) {
+  const text = value.trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ')
+  const match = text.match(/^([a-g])\s*([#b♯♭]?)\s*(major|minor|maj|min|m)?$/)
+  if (!match) return text
+  let accidental = match[2] ?? ''
+  if (accidental === '♯') accidental = '#'
+  if (accidental === '♭') accidental = 'b'
+  const note = `${match[1].toUpperCase()}${accidental}`
+  const mode = match[3] ?? ''
+  const minor = mode === 'm' || mode === 'min' || mode === 'minor'
+  return `${note} ${minor ? 'minor' : 'major'}`
 }
 
 export function soundKeys(entries: SoundEntry[]) {
