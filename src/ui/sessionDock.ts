@@ -41,9 +41,8 @@ export function nextSessionDock(input: {
   return { dockOpen: true, phonePane: 'room' }
 }
 
-/** Piano and rack still use the dock. The call panel does not, until the user opens it. Artist view is the call itself. */
+/** Piano and rack use the side dock. The call panel is the Collab tab and never this dock. */
 export function dockVisible(input: { surface: 'studio' | 'artist'; panel: 'room' | 'piano' | 'rack'; dockOpen: boolean }): boolean {
-  if (input.surface === 'artist') return true
-  if (input.panel === 'piano' || input.panel === 'rack') return true
-  return input.dockOpen
+  if (input.surface !== 'studio') return false
+  return input.panel === 'piano' || input.panel === 'rack'
 }

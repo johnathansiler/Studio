@@ -1,0 +1,126 @@
+.session-grid {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px;
+  background: #121a16;
+}
+
+.session-scroller {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 8px;
+  touch-action: pan-x pan-y;
+}
+
+.session-col {
+  flex: 0 0 var(--col, 148px);
+  width: var(--col, 148px);
+  min-width: 132px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.session-col .col-head,
+.session-scenes .scene-head {
+  min-height: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+.session-grid .slot,
+.session-grid .scene-launch,
+.session-grid .track-stop {
+  width: 100%;
+  min-height: 72px;
+  height: 72px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  position: relative;
+  overflow: hidden;
+  touch-action: manipulation;
+}
+
+.session-grid .slot {
+  background: #18231d;
+  color: var(--muted);
+  padding: 0;
+  text-align: left;
+}
+
+.session-grid .slot.filled { color: var(--accent-ink); font-weight: 640; }
+.session-grid .slot.live { outline: 2px solid var(--amber); }
+.session-grid .slot.armed { border-color: var(--rec); }
+.session-grid .slot .slot-name {
+  position: relative;
+  z-index: 1;
+  display: block;
+  padding: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-grid .slot .slot-progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+}
+.session-grid .slot.queued,
+.session-grid .slot.stopping {
+  animation: cue-slot-blink 0.7s steps(2, end) infinite;
+}
+@keyframes cue-slot-blink {
+  50% { filter: brightness(1.45); }
+}
+
+.session-scenes {
+  position: sticky;
+  right: 0;
+  flex: 0 0 72px;
+  width: 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #121a16;
+  z-index: 2;
+}
+
+.session-grid .scene-launch {
+  background: transparent;
+  color: var(--muted);
+  max-width: none;
+}
+
+.session-grid .track-stop {
+  background: #18231d;
+  color: var(--text);
+  font-size: 13px;
+}
+.session-grid .track-stop.live { color: var(--amber); border-color: var(--amber); }
+.session-grid .track-stop.armed { color: var(--rec); border-color: var(--rec); }
+
+.shell.phone .session-grid .slot,
+.shell.phone .session-grid .scene-launch,
+.shell.fold .session-grid .slot,
+.shell.fold .session-grid .scene-launch {
+  min-height: 88px;
+  height: 88px;
+  font-size: 15px;
+}
+
+.shell.phone .session-col,
+.shell.fold .session-col {
+  flex-basis: max(var(--col, 148px), 156px);
+  width: max(var(--col, 148px), 156px);
+}

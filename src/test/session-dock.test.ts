@@ -17,9 +17,10 @@ describe('session dock choice', () => {
     expect(nextSessionDock({ dockOpen: true, phonePane: 'edit', action: 'session' })).toEqual({ dockOpen: true, phonePane: 'room' })
     expect(nextSessionDock({ dockOpen: true, phonePane: 'room', action: 'hide' })).toEqual({ dockOpen: false, phonePane: 'edit' })
     expect(dockVisible({ surface: 'studio', panel: 'room', dockOpen: false })).toBe(false)
-    expect(dockVisible({ surface: 'studio', panel: 'room', dockOpen: true })).toBe(true)
+    expect(dockVisible({ surface: 'studio', panel: 'room', dockOpen: true })).toBe(false)
     expect(dockVisible({ surface: 'studio', panel: 'piano', dockOpen: false })).toBe(true)
-    expect(dockVisible({ surface: 'artist', panel: 'room', dockOpen: false })).toBe(true)
+    expect(dockVisible({ surface: 'studio', panel: 'rack', dockOpen: false })).toBe(true)
+    expect(dockVisible({ surface: 'artist', panel: 'room', dockOpen: true })).toBe(false)
   })
 })
 
@@ -124,16 +125,24 @@ describe('arrange on first load', () => {
       await page.goto(url, { waitUntil: 'domcontentloaded' })
       await spansArrange(page)
       await page.getByRole('button', { name: /^Session/ }).click()
+      await page.locator('[data-session-view="open"]').waitFor()
+      expect(await page.getByRole('button', { name: /Create invite/ }).count()).toBe(0)
+      expect(await page.locator('[data-collab-panel="open"]').count()).toBe(0)
+      for (const tab of [/^Arrange/, /^Mix/, /^Beats/]) {
+        await page.getByRole('button', { name: tab }).first().click()
+        expect(await page.locator('[data-collab-panel="open"]').count()).toBe(0)
+        expect(await page.getByRole('button', { name: /Create invite/ }).count()).toBe(0)
+      }
+      await page.getByRole('button', { name: /^Collab/ }).click()
       await page.getByRole('button', { name: /Create invite/ }).waitFor()
+      expect(await page.locator('[data-session-view="open"]').count()).toBe(0)
       await page.reload({ waitUntil: 'domcontentloaded' })
       await page.getByRole('button', { name: /Create invite/ }).waitFor()
-      const opened = await page.evaluate(() => {
-        const work = document.querySelector('.workspace')!.getBoundingClientRect().width
-        const main = document.querySelector('.main-pane')!.getBoundingClientRect().width
-        return { work, main, dock: document.querySelector('.shell')?.getAttribute('data-dock') }
-      })
-      expect(opened.dock).toBe('open')
-      expect(opened.main).toBeLessThan(opened.work - 40)
+      const opened = await page.evaluate(() => document.querySelector('.shell')?.getAttribute('data-collab'))
+      expect(opened).toBe('open')
+      await page.getByRole('button', { name: /^Arrange/ }).first().click()
+      expect(await page.locator('[data-collab-panel="open"]').count()).toBe(0)
+      await page.getByRole('button', { name: /^Collab/ }).click()
       await page.getByRole('button', { name: /^Hide/ }).click()
       await spansArrange(page)
       await page.reload({ waitUntil: 'domcontentloaded' })
