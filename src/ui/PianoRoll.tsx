@@ -1,22 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { heardBeat } from '../model/midiClock'
-import { samplesToBeats } from '../model/time'
-import { attachGlissando } from './glissando'
-import {
-  ROLL_TOOLS,
-  arpeggiateSelection,
-  eraseNotes,
-  glueNotes,
-  humanizeNotes,
-  paintCc,
-  paintChords,
-  paintNotes,
-  quantizeNotes,
-  sliceNote,
-  strumSelection,
-  type RollTool,
-} from '../model/paint'
+import { defaultRoll, quantizeNotes, arpeggiateSelection, humanizeNotes, snapBeat, strumSelection } from '../model/paint'
 import {
   NOTE_NAMES,
   SCALES,
@@ -25,7 +10,6 @@ import {
   inScale,
   nameChord,
   noteName,
-  scaleById,
   scaleTones,
   snapPitch,
   voiceChord,
@@ -35,7 +19,24 @@ import {
   type ScaleId,
 } from '../model/scale'
 import { uid, type MidiNote } from '../model/types'
+import { EDITOR_TOOLS, EDITOR_TOOL_KEYS, activeTool, keyForTool, setActiveTool, subscribeTools } from '../state/tools'
 import type { ProjectStore } from '../state/store'
+import { samplesToBeats } from '../model/time'
+import { attachGlissando } from './glissando'
+import {
+  commitMidiNotes,
+  duplicateNotes,
+  forkNotes,
+  hitNote,
+  moveNotes,
+  notesInRect,
+  paintVelocity,
+  pencilNote,
+  pinchZoom,
+  resizeNote,
+  splitNotes,
+  withoutNotes,
+} from './pianoEdit'
 
 const SOURCES: { id: ChordSource; name: string }[] = [
   { id: 'triads', name: 'Triads' },
@@ -54,46 +55,157 @@ const SOURCES: { id: ChordSource; name: string }[] = [
   { id: 'gospel', name: 'Gospel' },
 ]
 
+const LOW = 48
+const HIGH = 84
+const VEL_H = 36
+
 export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; engine: AudioEngine; onIdeas?: () => void }) {
   const track = store.project.tracks.find((item) => item.midiClips.some((clip) => clip.id === store.selectedMidiClipId))
   const clip = track?.midiClips.find((item) => item.id === store.selectedMidiClipId)
   const [open, setOpen] = useState(false)
   const [row, setRow] = useState(16)
+  const [pxBeat, setPxBeat] = useState(70)
+  const [ghost, setGhost] = useState<MidiNote[] | null>(null)
+  const [box, setBox] = useState<{ a: number; b: number; p0: number; p1: number } | null>(null)
+  const [viewRev, setViewRev] = useState(0)
   const rowRef = useRef(row)
+  const pxRef = useRef(pxBeat)
   rowRef.current = row
+  pxRef.current = pxBeat
   const rollRef = useRef<HTMLDivElement>(null)
+  const gridRef = useRef<HTMLDivElement>(null)
   const pianoRef = useRef<HTMLDivElement>(null)
   const keysRef = useRef<HTMLDivElement>(null)
+  const velRef = useRef<HTMLDivElement>(null)
+  const dragGen = useRef(0)
+  const multi = useRef(false)
+  const frameRef = useRef<{ originPx: number; originRow: number; contentX: number; contentY: number; clientX: number; clientY: number } | null>(null)
   const fingers = useRef(new Map<number, { pitch: number; eventMs: number; velocity: number }>())
   const playKey = useRef<(pitch: number, event: { timeStamp: number }, pointerId: number, on: boolean, velocity?: number) => void>(() => {})
+  const tool = useSyncExternalStore(subscribeTools, activeTool, activeTool)
+  const api = useRef<{ quantize: () => boolean; arpeggiate: () => void; strum: () => void; humanize: () => void; duplicate: () => boolean; remove: () => boolean }>({
+    quantize: () => false,
+    arpeggiate: () => {},
+    strum: () => {},
+    humanize: () => {},
+    duplicate: () => false,
+    remove: () => false,
+  })
+
+  function cell(event: { clientX: number; clientY: number }) {
+    const rect = gridRef.current?.getBoundingClientRect()
+    if (!rect) return null
+    return {
+      beat: Math.max(0, (event.clientX - rect.left) / Math.max(1, pxRef.current)),
+      pitch: HIGH - Math.floor((event.clientY - rect.top) / Math.max(1, rowRef.current)),
+    }
+  }
+
+  function watch(gen: number, move: (event: PointerEvent) => void, up: (event: PointerEvent) => void) {
+    const onMove = (event: PointerEvent) => {
+      if (dragGen.current !== gen) return
+      move(event)
+    }
+    const onUp = (event: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      if (dragGen.current !== gen) return
+      up(event)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  }
+
+  function selectIds(ids: string[], additive: boolean) {
+    if (!ids.length) {
+      if (!additive) store.selectNote(null)
+      return
+    }
+    if (!additive) {
+      store.selectNote(ids[0])
+      for (const id of ids.slice(1)) store.selectNote(id, true)
+      return
+    }
+    for (const id of ids) {
+      if (!store.selectedNoteIds.includes(id)) store.selectNote(id, true)
+    }
+  }
+
+  useLayoutEffect(() => {
+    const frame = frameRef.current
+    const view = rollRef.current
+    if (!frame || !view) return
+    const rect = view.getBoundingClientRect()
+    view.scrollLeft = frame.contentX * (pxRef.current / Math.max(1, frame.originPx)) - (frame.clientX - rect.left)
+    view.scrollTop = frame.contentY * (rowRef.current / Math.max(1, frame.originRow)) - (frame.clientY - rect.top)
+    if (keysRef.current) keysRef.current.scrollTop = view.scrollTop
+    if (velRef.current) velRef.current.scrollLeft = view.scrollLeft
+  }, [viewRev])
+
   useEffect(() => {
     const el = rollRef.current
     if (!el) return
-    let startDist = 0
-    let startRow = rowRef.current
+    let start: { dist: number; px: number; row: number; contentX: number; contentY: number } | null = null
     const distance = (touches: TouchList) => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY)
-    const start = (event: TouchEvent) => {
-      if (event.touches.length === 2) {
-        startDist = distance(event.touches)
-        startRow = rowRef.current
+    const centroid = (touches: TouchList) => ({
+      x: (touches[0].clientX + touches[1].clientX) / 2,
+      y: (touches[0].clientY + touches[1].clientY) / 2,
+    })
+    const begin = (event: TouchEvent) => {
+      if (event.touches.length < 2) return
+      multi.current = true
+      dragGen.current += 1
+      setGhost(null)
+      setBox(null)
+      const point = centroid(event.touches)
+      const rect = el.getBoundingClientRect()
+      start = {
+        dist: Math.max(1, distance(event.touches)),
+        px: pxRef.current,
+        row: rowRef.current,
+        contentX: point.x - rect.left + el.scrollLeft,
+        contentY: point.y - rect.top + el.scrollTop,
       }
     }
     const move = (event: TouchEvent) => {
-      if (event.touches.length !== 2 || !startDist) return
+      if (event.touches.length !== 2 || !start) return
       event.preventDefault()
-      setRow(Math.min(44, Math.max(12, startRow * (distance(event.touches) / startDist))))
+      const point = centroid(event.touches)
+      const next = pinchZoom(start.px, start.row, distance(event.touches) / start.dist)
+      frameRef.current = {
+        originPx: start.px,
+        originRow: start.row,
+        contentX: start.contentX,
+        contentY: start.contentY,
+        clientX: point.x,
+        clientY: point.y,
+      }
+      setPxBeat(next.pxBeat)
+      setRow(next.row)
+      setViewRev((value) => value + 1)
     }
-    el.addEventListener('touchstart', start, { passive: true })
+    const end = (event: TouchEvent) => {
+      if (event.touches.length >= 2) return
+      start = null
+      multi.current = false
+    }
+    el.addEventListener('touchstart', begin, { passive: true })
     el.addEventListener('touchmove', move, { passive: false })
+    el.addEventListener('touchend', end)
+    el.addEventListener('touchcancel', end)
     return () => {
-      el.removeEventListener('touchstart', start)
+      el.removeEventListener('touchstart', begin)
       el.removeEventListener('touchmove', move)
+      el.removeEventListener('touchend', end)
+      el.removeEventListener('touchcancel', end)
     }
   }, [clip?.id])
+
   const midiRef = useRef<MIDIAccess | null>(null)
   const scale = store.scaleState()
-  const roll = store.project.roll ?? { tool: 'pen' as RollTool, grid: 0.25, length: 0.25, velocity: 0.8 }
-  const gesture = useRef<{ from: number; to: number; pitch: number; y: number } | null>(null)
+  const roll = store.project.roll ?? defaultRoll()
 
   useEffect(() => {
     if (!navigator.requestMIDIAccess) return
@@ -174,7 +286,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
   useEffect(() => {
     const root = pianoRef.current
     const keys = keysRef.current
-    const roll = rollRef.current
+    const rollNode = rollRef.current
     if (!root) return
     const detach = attachGlissando(root, {
       accept: (key) => !!key.closest('.keys, .scale-keys'),
@@ -183,15 +295,16 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
       onTwoFinger: (dy) => {
         if (!keys) return
         keys.scrollTop -= dy
-        if (roll) roll.scrollTop = keys.scrollTop
+        if (rollNode) rollNode.scrollTop = keys.scrollTop
       },
     })
     const sync = () => {
-      if (keys && roll && keys.scrollTop !== roll.scrollTop) keys.scrollTop = roll.scrollTop
+      if (keys && rollNode && keys.scrollTop !== rollNode.scrollTop) keys.scrollTop = rollNode.scrollTop
+      if (velRef.current && rollNode) velRef.current.scrollLeft = rollNode.scrollLeft
     }
-    roll?.addEventListener('scroll', sync)
+    rollNode?.addEventListener('scroll', sync)
     return () => {
-      roll?.removeEventListener('scroll', sync)
+      rollNode?.removeEventListener('scroll', sync)
       detach()
     }
   }, [clip?.id])
@@ -240,122 +353,336 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
     }
   }, [])
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
-      const tools: Record<string, RollTool> = { '1': 'paint', '2': 'brush', '3': 'pen', '4': 'slice', '5': 'glue', '6': 'mute', '7': 'erase', '8': 'velocity', '9': 'cc' }
-      if (tools[event.key]) store.setRollTool(tools[event.key])
-      else if (event.key === 'q' && !event.metaKey && !event.ctrlKey) quantize()
-      else if (event.key === 'a' && !event.metaKey && !event.ctrlKey) arpeggiate()
-      else if (event.key === 'u' && !event.metaKey && !event.ctrlKey) strum()
-      else if (event.key === 'h' && !event.metaKey && !event.ctrlKey) humanize()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  })
-
-  if (!track || !clip) return null
-  const low = 48
-  const high = 84
-  const pxBeat = 70
-  const width = Math.max(clip.durationBeats, 8) * pxBeat
-  const shown = store.quantizePreview?.notes.find((item) => item.clipId === clip.id)?.notes ?? clip.notes
-  const selected = shown.filter((note) => store.selectedNoteIds.includes(note.id))
-  const chord = selected.length ? nameChord(selected.map((note) => note.pitch)) : ''
-  const pads = diatonicPads(scale.root, scale.scale, scale.source)
-  const tones = [...scaleTones(scale.root, scale.scale, 4), ...scaleTones(scale.root, scale.scale, 5)]
-
-  function withNotes(next: MidiNote[]) {
-    store.replaceNotes(track!.id, clip!.id, next)
-  }
-
   function quantize() {
-    if (!clip) return
+    if (!track || !clip) return false
+    const grid = (store.project.roll ?? defaultRoll()).grid
     const ids = store.selectedNoteIds.length ? store.selectedNoteIds : undefined
-    withNotes(quantizeNotes(clip.notes, roll.grid, ids).map((note) => ({ ...note, id: note.id || uid('note') })))
+    commitMidiNotes(store, track.id, clip.id, quantizeNotes(clip.notes, grid, ids).map((note) => ({ ...note, id: note.id || uid('note') })))
+    return true
   }
-
 
   function arpeggiate() {
-    if (!clip) return
+    if (!track || !clip) return
+    const current = store.scaleState()
     const chosen = clip.notes.filter((note) => !store.selectedNoteIds.length || store.selectedNoteIds.includes(note.id))
     const rest = store.selectedNoteIds.length ? clip.notes.filter((note) => !store.selectedNoteIds.includes(note.id)) : []
-    const played = arpeggiateSelection(chosen, { arp: scale.arp, rate: scale.rate, gate: scale.gate, octaves: scale.octaves, timing: scale.timing, velocity: scale.velocity })
-    withNotes([...rest, ...played.map((note) => ({ ...note, id: uid('note') }))])
+    const played = arpeggiateSelection(chosen, { arp: current.arp, rate: current.rate, gate: current.gate, octaves: current.octaves, timing: current.timing, velocity: current.velocity })
+    commitMidiNotes(store, track.id, clip.id, [...rest, ...played.map((note) => ({ ...note, id: uid('note') }))])
   }
 
   function strum() {
-    if (!clip) return
+    if (!track || !clip) return
     const chosen = clip.notes.filter((note) => !store.selectedNoteIds.length || store.selectedNoteIds.includes(note.id))
     const rest = store.selectedNoteIds.length ? clip.notes.filter((note) => !store.selectedNoteIds.includes(note.id)) : []
-    withNotes([...rest, ...strumSelection(chosen).map((note) => ({ ...note, id: uid('note') }))])
+    commitMidiNotes(store, track.id, clip.id, [...rest, ...strumSelection(chosen).map((note) => ({ ...note, id: uid('note') }))])
   }
 
   function humanize() {
-    if (!clip) return
+    if (!track || !clip) return
+    const current = store.scaleState()
     const chosen = clip.notes.filter((note) => !store.selectedNoteIds.length || store.selectedNoteIds.includes(note.id))
     const rest = store.selectedNoteIds.length ? clip.notes.filter((note) => !store.selectedNoteIds.includes(note.id)) : []
-    withNotes([...rest, ...humanizeNotes(chosen, scale.timing || 0.02, scale.velocity || 0.3)])
+    commitMidiNotes(store, track.id, clip.id, [...rest, ...humanizeNotes(chosen, current.timing || 0.02, current.velocity || 0.3)])
   }
 
-  function commitGesture(from: number, to: number, pitch: number, y: number) {
-    if (!clip) return
-    const length = roll.length || 0.25
-    const velocity = roll.velocity || 0.8
-    if (roll.tool === 'paint') {
-      const notes = paintNotes({ fromBeat: from, toBeat: to, pitch, grid: roll.grid, length, velocity, scaleLock: scale.snap, root: scale.root, scale: scale.scale })
-      withNotes([...clip.notes, ...notes.map((note) => ({ ...note, id: uid('note') }))])
-    } else if (roll.tool === 'brush') {
-      const intervals = scaleById(scale.scale).intervals
-      const notes = paintChords({ fromBeat: from, toBeat: to, pitch, grid: roll.grid, length, velocity, root: scale.root, scale: scale.scale, intervals })
-      withNotes([...clip.notes, ...notes.map((note) => ({ ...note, id: uid('note') }))])
-    } else if (roll.tool === 'pen') {
-      const beat = roll.grid > 0 ? Math.max(0, Math.round(from / roll.grid) * roll.grid) : Math.max(0, from)
-      const nextPitch = scale.snap ? snapPitch(pitch, scale.root, scale.scale) : pitch
-      withNotes([...clip.notes, { id: uid('note'), pitch: nextPitch, startBeat: beat, durationBeats: length, velocity }])
-    } else if (roll.tool === 'erase') {
-      withNotes(eraseNotes(clip.notes, from, Math.max(from + 0.05, to), null))
-    } else if (roll.tool === 'velocity') {
-      const value = Math.max(0.05, Math.min(1, 1 - y))
-      const start = Math.min(from, to)
-      const end = Math.max(from, to)
-      withNotes(clip.notes.map((note) => (note.startBeat >= start && note.startBeat <= end ? { ...note, velocity: value } : note)))
-    } else if (roll.tool === 'cc') {
-      const lane = store.project.automation.find((item) => item.param === 'expression') ?? {
-        id: uid('auto'),
-        pluginId: 'midi',
-        param: 'expression',
-        points: [],
+  function duplicate() {
+    if (!track || !clip) return false
+    const ids = store.selectedNoteIds.filter((id) => clip.notes.some((note) => note.id === id))
+    if (!ids.length) return false
+    const grid = (store.project.roll ?? defaultRoll()).grid
+    const next = duplicateNotes(clip.notes, ids, grid, () => uid('note'))
+    commitMidiNotes(store, track.id, clip.id, next.notes)
+    if (!next.copyIds.length) return false
+    store.selectNote(next.copyIds[0])
+    for (const id of next.copyIds.slice(1)) store.selectNote(id, true)
+    return true
+  }
+
+  function remove() {
+    if (!track || !clip) return false
+    const ids = store.selectedNoteIds.filter((id) => clip.notes.some((note) => note.id === id))
+    if (!ids.length) return false
+    commitMidiNotes(store, track.id, clip.id, withoutNotes(clip.notes, ids))
+    store.selectNote(null)
+    return true
+  }
+
+  api.current = { quantize, arpeggiate, strum, humanize, duplicate, remove }
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.repeat) return
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
+      const key = event.key.toLowerCase()
+      const meta = event.metaKey || event.ctrlKey
+      if (meta) {
+        if (key === 'd' && api.current.duplicate()) {
+          event.preventDefault()
+          event.stopImmediatePropagation()
+        }
+        return
       }
-      const points = paintCc(lane.points, from, to, Math.max(0, Math.min(1, 1 - y)), roll.grid)
-      store.mutateAutomation(lane.id, lane.pluginId, points)
-    } else if (roll.tool === 'glue') {
-      withNotes(glueNotes(clip.notes).map((note) => ({ ...note, id: note.id || uid('note') })))
+      const nextTool = EDITOR_TOOL_KEYS[event.key]
+      if (nextTool) {
+        setActiveTool(nextTool)
+        return
+      }
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        if (api.current.remove()) {
+          event.preventDefault()
+          event.stopImmediatePropagation()
+        }
+        return
+      }
+      if (key === 'q' && api.current.quantize()) event.stopImmediatePropagation()
     }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
+
+  if (!track || !clip) return null
+  const shown = store.quantizePreview?.notes.find((item) => item.clipId === clip.id)?.notes ?? clip.notes
+  const notes = ghost ?? shown
+  const span = Math.max(clip.durationBeats, 8, ...notes.map((note) => note.startBeat + note.durationBeats + 1))
+  const width = span * pxBeat
+  const selected = notes.filter((note) => store.selectedNoteIds.includes(note.id))
+  const chord = selected.length ? nameChord(selected.map((note) => note.pitch)) : ''
+  const pads = diatonicPads(scale.root, scale.scale, scale.source)
+  const tones = [...scaleTones(scale.root, scale.scale, 4), ...scaleTones(scale.root, scale.scale, 5)]
+  const cursor = tool === 'pan' ? 'grab' : tool === 'zoom' ? 'zoom-in' : tool === 'select' ? 'default' : 'crosshair'
+
+  const onGridDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !event.isPrimary || multi.current) return
+    const at = cell(event)
+    if (!at) return
+    const grid = roll.grid
+    const velocity = roll.velocity || 0.8
+    const scaleNow = store.scaleState()
+    const base = clip.notes.map((note) => ({ ...note }))
+    event.preventDefault()
+
+    if (tool === 'pan') {
+      const view = rollRef.current
+      if (!view) return
+      const gen = ++dragGen.current
+      const originX = event.clientX
+      const originY = event.clientY
+      const left = view.scrollLeft
+      const top = view.scrollTop
+      watch(gen, (ev) => {
+        view.scrollLeft = left - (ev.clientX - originX)
+        view.scrollTop = top - (ev.clientY - originY)
+      }, () => {})
+      return
+    }
+
+    if (tool === 'zoom') {
+      const view = rollRef.current
+      if (!view) return
+      const gen = ++dragGen.current
+      const originY = event.clientY
+      const originPx = pxRef.current
+      const originRow = rowRef.current
+      const rect = view.getBoundingClientRect()
+      const contentX = event.clientX - rect.left + view.scrollLeft
+      const contentY = event.clientY - rect.top + view.scrollTop
+      watch(gen, (ev) => {
+        const next = pinchZoom(originPx, originRow, Math.exp((originY - ev.clientY) / 180))
+        frameRef.current = { originPx, originRow, contentX, contentY, clientX: ev.clientX, clientY: ev.clientY }
+        setPxBeat(next.pxBeat)
+        setRow(next.row)
+        setViewRev((value) => value + 1)
+      }, () => {})
+      return
+    }
+
+    if (tool === 'pencil') {
+      const gen = ++dragGen.current
+      const pitch = scaleNow.snap ? snapPitch(at.pitch, scaleNow.root, scaleNow.scale) : at.pitch
+      let drawn = pencilNote(at.beat, at.beat, pitch, grid, velocity, '__pencil__')
+      setGhost([...base, drawn])
+      watch(gen, (ev) => {
+        const point = cell(ev)
+        if (!point) return
+        drawn = pencilNote(at.beat, point.beat, pitch, grid, velocity, '__pencil__')
+        setGhost([...base, drawn])
+      }, () => {
+        setGhost(null)
+        store.addNote(track.id, clip.id, {
+          pitch: drawn.pitch,
+          startBeat: drawn.startBeat,
+          durationBeats: drawn.durationBeats,
+          velocity: drawn.velocity,
+        })
+      })
+      return
+    }
+
+    if (tool === 'box') {
+      const gen = ++dragGen.current
+      const additive = event.shiftKey || event.metaKey
+      const originX = event.clientX
+      const originY = event.clientY
+      let beat = at.beat
+      let pitch = at.pitch
+      setBox({ a: at.beat, b: at.beat, p0: at.pitch, p1: at.pitch })
+      watch(gen, (ev) => {
+        const point = cell(ev)
+        if (!point) return
+        beat = point.beat
+        pitch = point.pitch
+        setBox({ a: at.beat, b: beat, p0: at.pitch, p1: pitch })
+      }, (ev) => {
+        setBox(null)
+        if (Math.hypot(ev.clientX - originX, ev.clientY - originY) < 3) {
+          const hit = hitNote(base, at.beat, at.pitch)
+          if (hit) store.selectNote(hit.id, additive)
+          else if (!additive) store.selectNote(null)
+          return
+        }
+        selectIds(notesInRect(base, at.beat, beat, at.pitch, pitch), additive)
+      })
+      return
+    }
+
+    if (tool === 'erase') {
+      const gen = ++dragGen.current
+      const ids: string[] = []
+      const take = (ev: { clientX: number; clientY: number }) => {
+        const point = cell(ev)
+        if (!point) return
+        const hit = hitNote(base, point.beat, point.pitch)
+        if (!hit || ids.includes(hit.id)) return
+        ids.push(hit.id)
+        setGhost(withoutNotes(base, ids))
+      }
+      take(event)
+      watch(gen, take, () => {
+        setGhost(null)
+        if (ids.length) commitMidiNotes(store, track.id, clip.id, withoutNotes(base, ids))
+      })
+      return
+    }
+
+    if (tool === 'split') {
+      const hit = hitNote(base, at.beat, at.pitch)
+      if (!hit) return
+      const created = uid('note')
+      const next = splitNotes(base, hit.id, snapBeat(at.beat, grid), created)
+      if (!next) return
+      commitMidiNotes(store, track.id, clip.id, next)
+      store.selectNote(created)
+      return
+    }
+
+    if (!(event.target as HTMLElement).closest('.note')) store.selectNote(null)
   }
 
-  function playPad(pitches: number[]) {
-    engine.unlock()
-    const current = store.scaleState()
-    const voiced = voiceChord(pitches, {
-      inversion: current.inversion,
-      spread: current.spread,
-      drop2: current.drop2,
-      octave: current.octave,
-      voiceLead: current.voiceLead,
-      previous: current.lastVoicing,
+  const onNoteDown = (event: ReactPointerEvent<HTMLDivElement>, note: MidiNote) => {
+    if (tool !== 'select') return
+    event.stopPropagation()
+    event.preventDefault()
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const x = event.clientX - bounds.left
+    const grip = Math.min(8, bounds.width * 0.25)
+    if (x <= grip || x >= bounds.width - grip) {
+      onResize(event, note, x <= grip ? 'start' : 'end')
+      return
+    }
+    const additive = event.shiftKey || event.metaKey
+    const selected = store.selectedNoteIds.includes(note.id)
+    if (additive && !event.altKey) {
+      store.selectNote(note.id, true)
+      if (selected) return
+    } else if (!selected) store.selectNote(note.id)
+    const gen = ++dragGen.current
+    let moving = [...store.selectedNoteIds]
+    let base = clip.notes.map((item) => ({ ...item }))
+    let copyIds: string[] = []
+    if (event.altKey) {
+      const forked = forkNotes(base, moving, () => uid('note'))
+      base = forked.notes
+      moving = forked.copyIds
+      copyIds = forked.copyIds
+      setGhost(base)
+    }
+    const originX = event.clientX
+    const originY = event.clientY
+    const grid = roll.grid
+    const scaleNow = store.scaleState()
+    const pitchSnap = scaleNow.snap ? (pitch: number) => snapPitch(pitch, scaleNow.root, scaleNow.scale) : undefined
+    let latest = base
+    let dirty = false
+    watch(gen, (ev) => {
+      if (Math.hypot(ev.clientX - originX, ev.clientY - originY) < 3) return
+      dirty = true
+      latest = moveNotes(base, moving, (ev.clientX - originX) / pxRef.current, (originY - ev.clientY) / rowRef.current, grid, pitchSnap)
+      setGhost(latest)
+    }, () => {
+      setGhost(null)
+      if (!dirty) {
+        if (!event.altKey && !additive) store.selectNote(note.id)
+        return
+      }
+      commitMidiNotes(store, track.id, clip.id, latest)
+      if (!copyIds.length) return
+      store.selectNote(copyIds[0])
+      for (const id of copyIds.slice(1)) store.selectNote(id, true)
     })
-    engine.previewPitches(voiced)
-    store.insertPerformance(track!.id, clip!.id, timelineBeat(store, engine), pitches)
+  }
+
+  const onResize = (event: ReactPointerEvent<HTMLDivElement>, note: MidiNote, edge: 'start' | 'end') => {
+    event.stopPropagation()
+    event.preventDefault()
+    if (!store.selectedNoteIds.includes(note.id)) store.selectNote(note.id)
+    const gen = ++dragGen.current
+    const base = clip.notes.map((item) => ({ ...item }))
+    const grid = roll.grid
+    let latest = base
+    let dirty = false
+    watch(gen, (ev) => {
+      const point = cell(ev)
+      if (!point) return
+      const source = base.find((item) => item.id === note.id)
+      if (!source) return
+      dirty = true
+      latest = base.map((item) => (item.id === note.id ? resizeNote(source, edge, point.beat, grid) : item))
+      setGhost(latest)
+    }, () => {
+      setGhost(null)
+      if (dirty) commitMidiNotes(store, track.id, clip.id, latest)
+    })
+  }
+
+  const onVelocity = (event: ReactPointerEvent<HTMLDivElement>, note: MidiNote) => {
+    event.stopPropagation()
+    event.preventDefault()
+    const gen = ++dragGen.current
+    const selectedIds = store.selectedNoteIds.filter((id) => clip.notes.some((item) => item.id === id))
+    const ids = selectedIds.includes(note.id) ? selectedIds : [note.id]
+    const base = clip.notes.map((item) => ({ ...item }))
+    const lane = event.currentTarget
+    let latest = base
+    const apply = (clientY: number) => {
+      const rect = lane.getBoundingClientRect()
+      latest = paintVelocity(base, ids, 1 - (clientY - rect.top) / Math.max(1, rect.height))
+      setGhost(latest)
+    }
+    apply(event.clientY)
+    watch(gen, (ev) => apply(ev.clientY), () => {
+      setGhost(null)
+      if (latest.some((item, index) => item.velocity !== base[index]?.velocity)) commitMidiNotes(store, track.id, clip.id, latest)
+    })
   }
 
   function toggleChords() {
     setOpen((value) => !value)
   }
 
+  const gridPx = (roll.grid > 0 ? roll.grid : 1) * pxBeat
   return (
-    <div className="piano" ref={pianoRef}>
+    <div className="piano" ref={pianoRef} data-tool={tool}>
       <div className="scale-bar">
         <button type="button" className={`chords-btn ${open ? 'on' : ''}`} aria-expanded={open} onClick={() => void toggleChords()}>Chords</button>
         <select aria-label="Key" value={scale.root} onChange={(event) => store.setScale({ root: Number(event.target.value) })}>
@@ -389,8 +716,8 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
         )}
       </div>
       <div className="tool-row">
-        {ROLL_TOOLS.map((tool) => (
-          <button key={tool} type="button" className={roll.tool === tool ? 'on' : ''} onClick={() => store.setRollTool(tool)}>{tool}</button>
+        {EDITOR_TOOLS.map((item) => (
+          <button key={item} type="button" className={tool === item ? 'on' : ''} aria-pressed={tool === item} title={`${item} (${keyForTool(item)})`} onClick={() => setActiveTool(item)}>{item}</button>
         ))}
         <select aria-label="Grid" value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
           <option value="0">Free</option>
@@ -401,11 +728,13 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
         <button type="button" onClick={quantize}>Quantize</button>
         <button type="button" onClick={arpeggiate}>Arp</button>
         <button type="button" onClick={strum}>Strum</button>
+        <button type="button" onClick={duplicate}>Duplicate</button>
+        <button type="button" onClick={remove}>Delete</button>
       </div>
       <div className="piano-body">
         <div className="keys" ref={keysRef}>
-          {Array.from({ length: high - low + 1 }, (_, index) => {
-            const pitch = high - index
+          {Array.from({ length: HIGH - LOW + 1 }, (_, index) => {
+            const pitch = HIGH - index
             const black = [1, 3, 6, 8, 10].includes(pitch % 12)
             return (
               <div key={pitch} data-pitch={pitch} className={`key ${black ? 'black' : ''} ${inScale(pitch, scale.root, scale.scale) ? 'in' : ''}`} style={{ height: row }}>
@@ -413,6 +742,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
               </div>
             )
           })}
+          <div style={{ height: VEL_H }} />
         </div>
         <div
           className="key-scroll"
@@ -421,15 +751,15 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
           onPointerDown={(event) => {
             event.stopPropagation()
             event.preventDefault()
-            const track = event.currentTarget
+            const trackNode = event.currentTarget
             const move = (ev: PointerEvent) => {
-              const bounds = track.getBoundingClientRect()
+              const bounds = trackNode.getBoundingClientRect()
               const ratio = Math.min(1, Math.max(0, (ev.clientY - bounds.top) / Math.max(1, bounds.height)))
               const keys = keysRef.current
-              const roll = rollRef.current
+              const view = rollRef.current
               if (!keys) return
               keys.scrollTop = ratio * Math.max(0, keys.scrollHeight - keys.clientHeight)
-              if (roll) roll.scrollTop = keys.scrollTop
+              if (view) view.scrollTop = keys.scrollTop
             }
             const up = () => {
               window.removeEventListener('pointermove', move)
@@ -442,85 +772,74 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
             move(event.nativeEvent)
           }}
         />
-        <div className="roll" ref={rollRef}>
-          <div
-            style={{ width, height: (high - low + 1) * row, position: 'relative' }}
-            onPointerDown={(event) => {
-              if ((event.target as HTMLElement).closest('.note')) return
-              const bounds = event.currentTarget.getBoundingClientRect()
-              const beat = (event.clientX - bounds.left) / pxBeat
-              const pitch = high - Math.floor((event.clientY - bounds.top) / row)
-              gesture.current = { from: Math.max(0, beat), to: Math.max(0, beat), pitch, y: (event.clientY - bounds.top) / bounds.height }
-              event.currentTarget.setPointerCapture(event.pointerId)
-            }}
-            onPointerMove={(event) => {
-              if (!gesture.current) return
-              const bounds = event.currentTarget.getBoundingClientRect()
-              gesture.current.to = Math.max(0, (event.clientX - bounds.left) / pxBeat)
-              gesture.current.y = (event.clientY - bounds.top) / Math.max(1, bounds.height)
-            }}
-            onPointerUp={() => {
-              const current = gesture.current
-              gesture.current = null
-              if (!current) return
-              commitGesture(current.from, current.to, current.pitch, current.y)
-            }}
-          >
-            {shown.map((note) => (
-              <div
-                key={note.id}
-                className={`note ${store.selectedNoteIds.includes(note.id) ? 'selected' : ''} ${inScale(note.pitch, scale.root, scale.scale) ? '' : 'off'} ${note.slide ? 'slide' : ''}`}
-                style={{ left: note.startBeat * pxBeat, width: Math.max(8, note.durationBeats * pxBeat), top: (high - note.pitch) * row, height: Math.max(12, row - 2) }}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  store.selectNote(note.id, event.shiftKey || event.metaKey)
-                }}
-                onPointerDown={(event) => {
-                  event.stopPropagation()
-                  if (roll.tool === 'slice') {
-                    const bounds = (event.currentTarget.parentElement as HTMLElement).getBoundingClientRect()
-                    const at = (event.clientX - bounds.left) / pxBeat
-                    const parts = sliceNote(note, at)
-                    if (parts) withNotes(clip.notes.flatMap((item) => (item.id === note.id ? [{ ...parts[0] }, { ...parts[1], id: uid('note') }] : [item])))
-                    return
-                  }
-                  if (roll.tool === 'mute') {
-                    withNotes(clip.notes.map((item) => (item.id === note.id ? { ...item, muted: !item.muted } : item)))
-                    return
-                  }
-                  if (roll.tool === 'erase') {
-                    withNotes(clip.notes.filter((item) => item.id !== note.id))
-                    return
-                  }
-                  if (roll.tool === 'glue') {
-                    withNotes(glueNotes(clip.notes))
-                    return
-                  }
-                  const originX = event.clientX
-                  const originY = event.clientY
-                  const originBeat = note.startBeat
-                  const originPitch = note.pitch
-                  let next = originBeat
-                  let nextPitch = originPitch
-                  const move = (ev: PointerEvent) => {
-                    next = Math.max(0, Math.round((originBeat + (ev.clientX - originX) / pxBeat) * 4) / 4)
-                    nextPitch = Math.max(0, Math.min(127, originPitch + Math.round((originY - ev.clientY) / row)))
-                    const node = event.currentTarget as HTMLDivElement
-                    node.style.left = `${next * pxBeat}px`
-                    node.style.top = `${(high - nextPitch) * row}px`
-                  }
-                  const up = () => {
-                    window.removeEventListener('pointermove', move)
-                    window.removeEventListener('pointerup', up)
-                    if (next !== originBeat || nextPitch !== originPitch) {
-                      store.updateNote(track.id, clip.id, note.id, { startBeat: next, pitch: nextPitch })
-                    }
-                  }
-                  window.addEventListener('pointermove', move)
-                  window.addEventListener('pointerup', up)
-                }}
-              />
-            ))}
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+          <div className="roll" ref={rollRef} style={{ flex: 1, minHeight: 0, touchAction: 'none' }}>
+            <div
+              ref={gridRef}
+              style={{
+                width,
+                height: (HIGH - LOW + 1) * row,
+                position: 'relative',
+                touchAction: 'none',
+                cursor,
+                backgroundImage: 'linear-gradient(to right, rgba(255,255,255,0.07) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.04) 1px, transparent 1px)',
+                backgroundSize: `${gridPx}px ${row}px`,
+              }}
+              onPointerDown={onGridDown}
+            >
+              {Array.from({ length: HIGH - LOW + 1 }, (_, index) => {
+                const pitch = HIGH - index
+                if (![1, 3, 6, 8, 10].includes(pitch % 12)) return null
+                return <div key={pitch} style={{ position: 'absolute', left: 0, right: 0, top: index * row, height: row, background: 'rgba(0,0,0,0.18)', pointerEvents: 'none' }} />
+              })}
+              {notes.map((note) => {
+                const noteWidth = Math.max(8, note.durationBeats * pxBeat)
+                return (
+                  <div
+                    key={note.id}
+                    data-note={note.id}
+                    className={`note ${store.selectedNoteIds.includes(note.id) ? 'selected' : ''} ${inScale(note.pitch, scale.root, scale.scale) ? '' : 'off'} ${note.slide ? 'slide' : ''}`}
+                    style={{ left: note.startBeat * pxBeat, width: noteWidth, top: (HIGH - note.pitch) * row, height: Math.max(12, row - 2), cursor: tool === 'select' ? 'grab' : 'inherit' }}
+                    onPointerMove={(event) => {
+                      if (tool !== 'select') return
+                      const bounds = event.currentTarget.getBoundingClientRect()
+                      const x = event.clientX - bounds.left
+                      const zone = Math.min(8, bounds.width * 0.25)
+                      event.currentTarget.style.cursor = x <= zone || x >= bounds.width - zone ? 'ew-resize' : 'grab'
+                    }}
+                    onPointerDown={(event) => onNoteDown(event, note)}
+                  />
+                )
+              })}
+              {box && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: Math.min(box.a, box.b) * pxBeat,
+                    width: Math.max(1, Math.abs(box.b - box.a) * pxBeat),
+                    top: (HIGH - Math.max(box.p0, box.p1)) * row,
+                    height: (Math.abs(box.p1 - box.p0) + 1) * row,
+                    background: 'rgba(115, 196, 143, 0.22)',
+                    border: '1px solid var(--accent)',
+                    pointerEvents: 'none',
+                  }}
+                />
+              )}
+            </div>
+          </div>
+          <div ref={velRef} aria-label="Velocity" style={{ flex: 'none', height: VEL_H, overflow: 'hidden', borderTop: '1px solid var(--line)', background: '#0c110f' }}>
+            <div style={{ width, height: '100%', position: 'relative' }}>
+              {notes.map((note) => (
+                <div
+                  key={note.id}
+                  title="Velocity"
+                  style={{ position: 'absolute', left: note.startBeat * pxBeat, width: Math.max(4, note.durationBeats * pxBeat), top: 0, bottom: 0, touchAction: 'none' }}
+                  onPointerDown={(event) => onVelocity(event, note)}
+                >
+                  <i style={{ position: 'absolute', display: 'block', left: 1, right: 1, bottom: 0, height: `${Math.max(8, note.velocity * 100)}%`, background: store.selectedNoteIds.includes(note.id) ? 'var(--accent)' : 'var(--blue)', opacity: 0.9, pointerEvents: 'none' }} />
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -535,7 +854,7 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
           </div>
           <div className="chord-pads">
             {pads.map((pad, index) => (
-              <button key={`${pad.label}-${index}`} type="button" onClick={() => playPad(pad.pitches)}>{pad.label}</button>
+              <button key={`${pad.label}-${index}`} type="button" onClick={() => playPadNotes(store, engine, track.id, clip.id, pad.pitches)}>{pad.label}</button>
             ))}
           </div>
           <div className="scale-keys">
@@ -582,6 +901,21 @@ export function PianoRoll({ store, engine, onIdeas }: { store: ProjectStore; eng
       )}
     </div>
   )
+}
+
+function playPadNotes(store: ProjectStore, engine: AudioEngine, trackId: string, clipId: string, pitches: number[]) {
+  engine.unlock()
+  const current = store.scaleState()
+  const voiced = voiceChord(pitches, {
+    inversion: current.inversion,
+    spread: current.spread,
+    drop2: current.drop2,
+    octave: current.octave,
+    voiceLead: current.voiceLead,
+    previous: current.lastVoicing,
+  })
+  engine.previewPitches(voiced)
+  store.insertPerformance(trackId, clipId, timelineBeat(store, engine), pitches)
 }
 
 function performanceBeat(store: ProjectStore, engine: AudioEngine, eventMs: number) {
