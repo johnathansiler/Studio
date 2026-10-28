@@ -133,15 +133,22 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .menu-btn.on { background: var(--accent-dim); color: var(--accent); border-color: transparent; }
 .shell-menu {
   position: absolute; top: calc(100% + 4px); right: 8px; z-index: 80;
-  width: min(240px, calc(100vw - 16px)); max-height: min(78dvh, 720px); overflow: auto;
-  display: flex; flex-direction: column; gap: 1px; padding: 4px;
+  width: min(280px, calc(100vw - 16px));
+  max-height: min(78dvh, calc(100dvh - 64px));
+  overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
   box-shadow: var(--shadow);
 }
 .shell-menu button, .shell-menu .menu-sig {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  width: 100%; min-height: 32px; padding: 0 10px; border: 0; border-radius: 6px;
+  display: flex; align-items: stretch; justify-content: center; flex-direction: column; gap: 2px;
+  width: 100%; height: auto; min-height: 36px; padding: 6px 10px 7px; border: 0; border-radius: 6px;
   background: transparent; color: var(--text); font-size: 13px; font-weight: 520; text-align: left;
+  white-space: normal; overflow: hidden;
+}
+.shell-menu button span, .shell-menu button small {
+  display: block; width: 100%; min-width: 0; max-width: 100%;
+  white-space: normal; overflow-wrap: anywhere; line-height: 1.35;
 }
 .shell-menu button:hover, .shell-menu .menu-sig:hover { background: var(--panel-2); }
 .shell-menu button[aria-pressed="true"] { color: var(--accent); }
@@ -275,6 +282,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .route-fields { display: flex; gap: 4px; }
 .route-fields select { flex: 1; min-width: 0; }
 .timeline-scroll { overflow: auto; position: relative; height: 100%; min-width: 0; max-width: 100%; }
+.timeline-scroll:focus { outline: none; }
 .timeline-inner { position: relative; min-height: 100%; }
 .ruler {
   height: 44px; position: sticky; top: 0; z-index: 3;
@@ -1442,8 +1450,7 @@ html[data-posture="tabletop"] .shell .master-sheet {
   margin: 0 0 0 6px;
 }
 .shell.fold .tool-slot .timeline-tools button { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
-.shell-menu button { flex-direction: column; align-items: flex-start; height: auto; justify-content: center; gap: 1px; }
-.shell-menu button small { color: var(--muted); font-size: 11px; font-weight: 420; line-height: 1.25; }
+.shell-menu button small { color: var(--muted); font-size: 11px; font-weight: 420; }
 .shell-menu button[aria-pressed="true"]::after { display: none; }
 .shell-menu button[aria-pressed="true"] > span::before {
   content: "";
@@ -1903,8 +1910,8 @@ html[data-posture="tabletop"] .shell .master-sheet {
 .shell.phone.land .plugin-sheet.tune-open {
   max-height: 46vh;
 }
-.tune-resize { cursor: ew-resize; width: 14px; height: auto; top: 0; bottom: 0; right: auto; left: 0; }
-.shell.phone .tune-resize, .shell.fold .tune-resize { width: auto; height: 14px; right: 0; bottom: auto; cursor: ns-resize; }
+.sheet-resize { cursor: ew-resize; width: 14px; height: auto; top: 0; bottom: 0; right: auto; left: 0; position: absolute; }
+.shell.phone .sheet-resize, .shell.fold .sheet-resize { width: auto; height: 14px; right: 0; left: 0; bottom: auto; cursor: ns-resize; }
 
 /* Shared bevel. Feature views inherit this without their own button skins. */
 button {
@@ -2038,6 +2045,6 @@ button:active:not(:disabled) {
   border-radius: 16px 16px 0 0;
 }
 .shell.phone.land .plugin-sheet.tune-open { max-height: 26dvh; }
-.tune-resize { cursor: ew-resize; width: 14px; height: auto; top: 0; bottom: 0; right: auto; left: 0; }
-.shell.phone .tune-resize,
-.shell.fold .tune-resize { width: auto; height: 14px; left: 0; right: 0; bottom: auto; cursor: ns-resize; }
+.sheet-resize { cursor: ew-resize; width: 14px; height: auto; top: 0; bottom: 0; right: auto; left: 0; position: absolute; }
+.shell.phone .sheet-resize,
+.shell.fold .sheet-resize { width: auto; height: 14px; left: 0; right: 0; bottom: auto; cursor: ns-resize; }

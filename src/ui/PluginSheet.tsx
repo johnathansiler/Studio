@@ -20,6 +20,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   const plugin = focus ? selectPlugin(store, focus.trackId, focus.pluginId) : null
   const spec = plugin ? descriptor(plugin.pluginId) : null
   const [last, setLast] = useState('')
+  const [sheetHeight, setSheetHeight] = useState(tuneSheetHeight)
   const canvas = useRef<HTMLCanvasElement>(null)
   const [tick, setTick] = useState(0)
   const [sheetWidth, setSheetWidth] = useState(480)
@@ -75,12 +76,24 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     const beat = projectSampleBeat(store.project, engine.currentTimelineSample())
     store.addAutomationPoint(plugin.id, param, beat, plugin.params[param] ?? 0)
   }
-  const resize = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const resizeWidth = (event: ReactPointerEvent<HTMLDivElement>) => {
     const startX = event.clientX
     const startW = sheetWidth
     const move = (ev: PointerEvent) => {
-      const next = Math.min(760, Math.max(320, startW + (startX - ev.clientX)))
-      setSheetWidth(next)
+      setSheetWidth(Math.min(760, Math.max(320, startW + (startX - ev.clientX))))
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+  const resizeHeight = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const startY = event.clientY
+    const startH = sheetHeight
+    const move = (ev: PointerEvent) => {
+      setSheetHeight(Math.min(window.innerHeight - 8, Math.max(420, startH + (startY - ev.clientY))))
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
@@ -90,8 +103,12 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     window.addEventListener('pointerup', up)
   }
   return (
-    <div className={`plugin-sheet ${autoTune ? 'tune-open' : ''}`} role="dialog" aria-label={spec.name} style={compact ? undefined : { width: sheetWidth }}>
-      <div className="tune-resize" title="Drag to resize the plugin." aria-label="Resize plugin. Drag the edge." onPointerDown={resize} />
+    <div className={`plugin-sheet ${autoTune ? 'tune-open' : ''}`} role="dialog" aria-label={spec.name} style={autoTune ? { height: sheetHeight } : compact ? undefined : { width: sheetWidth }}>
+      {autoTune ? (
+        <div className="tune-resize" title="Drag to resize the plugin." aria-label="Resize plugin. Drag up or down." onPointerDown={resizeHeight} />
+      ) : (
+        <div className="sheet-resize" title="Drag to resize the plugin." aria-label="Resize plugin. Drag the edge." onPointerDown={resizeWidth} />
+      )}
       <header>
         <strong>{spec.name}</strong>
         {!autoTune && (
@@ -167,7 +184,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
       )}
       {sampleFace && <SamplePanel store={store} engine={engine} trackId={focus.trackId} plugin={plugin} vu={engine.meter(plugin.id)?.vu} />}
       {autoTune && (
-        <div onPointerDownCapture={() => store.beginAutomationTouch()} onPointerUp={() => { store.endAutomationTouch(); store.endDraft() }} onPointerCancel={() => { store.endAutomationTouch(); store.endDraft() }}>
+        <div className="tune-body" onPointerDownCapture={() => store.beginAutomationTouch()} onPointerUp={() => { store.endAutomationTouch(); store.endDraft() }} onPointerCancel={() => { store.endAutomationTouch(); store.endDraft() }}>
         <AutoTuneFace
           values={plugin.params}
           trace={engine.trace(plugin.id)}
@@ -269,11 +286,14 @@ export function InsertList({ store, trackId }: { store: ProjectStore; trackId: s
       {plugins.map((plugin) => (
         <button
           key={plugin.id}
+          type="button"
           className={plugin.enabled ? 'on' : ''}
+          title={descriptor(plugin.pluginId)?.name ?? plugin.pluginId}
+          aria-label={`${descriptor(plugin.pluginId)?.name ?? plugin.pluginId}. Open this insert.`}
           onClick={() => store.focusPlugin(trackId, plugin.id)}
           onDoubleClick={() => store.updatePlugin(trackId, plugin.id, { enabled: !plugin.enabled })}
         >
-          {descriptor(plugin.pluginId)?.name ?? plugin.pluginId}
+          {insertLabel(plugin.pluginId)}
         </button>
       ))}
       <select className="insert-add" aria-label="Add insert" title="Add an effect. Auto-Tune is first." value="" onChange={(event) => addChoice(store, trackId, event.target.value)}>
@@ -356,6 +376,17 @@ export function RouteFields({ store, trackId }: { store: ProjectStore; trackId: 
       </select>
     </div>
   )
+}
+
+/** Strip slots are narrow. Auto-Tune keeps its full name in the picker and the sheet. */
+export function insertLabel(pluginId: string) {
+  if (pluginId === 'tune') return 'Tune'
+  return descriptor(pluginId)?.name ?? pluginId
+}
+
+function tuneSheetHeight() {
+  if (typeof window === 'undefined') return 680
+  return Math.min(740, Math.max(560, window.innerHeight - 16))
 }
 
 function addChoice(store: ProjectStore, trackId: string | 'master', value: string) {
