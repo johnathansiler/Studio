@@ -146,8 +146,10 @@ import {
   ratchetBeats,
   recordTake,
   type PadProgram,
+  type PadVoice,
   type SequenceNote,
 } from '../model/padMachine'
+import { applyChoke, assignPad, clipBeat, padRecordWindow, recordPadHits, type PadHit } from '../instruments/pads/record'
 
 export type WorkspaceView = 'arrange' | 'mix' | 'session' | 'beats'
 
@@ -229,6 +231,10 @@ export class ProjectStore {
   rackTrackId: string | null = null
   /** Open Scaler panel. The plugin state itself is on the track. */
   scalerTrackId: string | null = null
+  /** Open Pads panel. The kit itself is on the track. */
+  padsTrackId: string | null = null
+  /** Clip and loop the pad recorder is printing into. Not saved. */
+  padRecord: { trackId: string; clipId: string; clipStart: number; loopStart: number; loopEnd: number } | null = null
   /** Which page of the open Scaler panel is showing. Not saved. */
   scalerPage: ScalerPage = 'play'
   /** Open layered patch. Not saved; the patch itself is on the track. */
@@ -723,16 +729,200 @@ export class ProjectStore {
       if (!current || current.type !== 'midi') return
       current.instrument = instrument
       if (instrument === 'scaler') current.scaler = current.scaler ? normalizeScaler(current.scaler) : freshScaler(this.project)
+      if (instrument === 'pads') current.padKit = normalizePadKit(current.padKit ?? this.project.padKit)
     })
     if (instrument === 'scaler') {
       this.rackTrackId = null
       this.patchTrackId = null
+      this.padsTrackId = null
       this.scalerTrackId = trackId
       this.emit()
-    } else if (this.scalerTrackId === trackId) {
+    } else if (instrument === 'pads') {
+      this.rackTrackId = null
+      this.patchTrackId = null
       this.scalerTrackId = null
+      this.padsTrackId = trackId
+      this.emit()
+    } else {
+      if (this.scalerTrackId === trackId) this.scalerTrackId = null
+      if (this.padsTrackId === trackId) this.padsTrackId = null
       this.emit()
     }
+  }
+
+  /** Put Pads on a MIDI track, or make a new one, and open its faceplate. */
+  insertPads(trackId?: string | null): string | null {
+    this.patchTrackId = null
+    const asked = trackId ? this.track(trackId) : undefined
+    const selected = this.selectedTrackId ? this.track(this.selectedTrackId) : undefined
+    const host = asked?.type === 'midi' ? asked : selected?.type === 'midi' ? selected : undefined
+    if (host) {
+      this.insertPadsPlugin(host.id)
+      return host.id
+    }
+    const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'pads', input: 'mic', channels: 1, armed: false })
+    return ids[0] ?? null
+  }
+
+  openPads(trackId: string) {
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return
+    if (track.instrument !== 'pads') {
+      this.setTrackInstrument(trackId, 'pads')
+      return
+    }
+    this.rackTrackId = null
+    this.patchTrackId = null
+    this.scalerTrackId = null
+    if (this.padsTrackId !== trackId) {
+      this.padsTrackId = trackId
+      this.emit()
+      return
+    }
+    this.padsTrackId = null
+    this.emit()
+  }
+
+  closePads() {
+    if (!this.padsTrackId) return
+    this.padsTrackId = null
+    this.emit()
+  }
+
+  trackKit(trackId: string): PadProgram {
+    return normalizePadKit(this.track(trackId)?.padKit)
+  }
+
+  patchTrackKit(trackId: string, patch: Partial<PadProgram>) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const kit = normalizePadKit(track.padKit)
+      track.padKit = normalizePadKit({ ...kit, ...patch, banks: kit.banks })
+    })
+  }
+
+  updateTrackPad(trackId: string, bank: number, index: number, patch: Partial<PadVoice>) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const kit = normalizePadKit(track.padKit)
+      const pad = kit.banks[bank]?.[index]
+      if (!pad) return
+      Object.assign(pad, patch)
+      if (patch.busId === '') pad.busId = undefined
+      track.padKit = normalizePadKit(kit)
+    })
+  }
+
+  assignTrackPad(trackId: string, bank: number, index: number, assignment: { name: string; bufferId?: string; samples?: Float32Array; sampleRate?: number; choke?: number }) {
+    let bufferId = assignment.bufferId
+    if (assignment.samples && assignment.sampleRate) {
+      bufferId = uid('smp')
+      this.buffers.set(bufferId, { id: bufferId, name: assignment.name, sampleRate: assignment.sampleRate, channels: [assignment.samples] })
+    }
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const kit = normalizePadKit(track.padKit)
+      const pad = kit.banks[bank]?.[index]
+      if (!pad) return
+      kit.banks[bank][index] = assignPad(pad, { name: assignment.name, bufferId, choke: assignment.choke })
+      track.padKit = kit
+    })
+  }
+
+  /** Clip that covers the record window. Does not start the transport. */
+  ensurePadClip(trackId: string, playheadBeat: number): string | null {
+    const window = this.padWindow(playheadBeat)
+    let clipId: string | null = null
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      track.instrument = 'pads'
+      track.padKit = normalizePadKit(track.padKit ?? this.project.padKit)
+      let clip = track.midiClips.find((item) => Math.abs(item.startBeat - window.startBeat) < 0.02 && Math.abs(item.durationBeats - window.durationBeats) < 0.05)
+      if (!clip) {
+        clip = { id: uid('midi'), name: 'Pads', startBeat: window.startBeat, durationBeats: window.durationBeats, notes: [] }
+        track.midiClips.push(clip)
+      }
+      this.selectedTrackId = trackId
+      this.selectedMidiClipId = clip.id
+      this.selectedMidiClipIds = [clip.id]
+      clipId = clip.id
+    })
+    return clipId
+  }
+
+  /** Arm the track, turn on the shared loop, and print into one clip. */
+  armPadRecord(trackId: string, playheadBeat: number): string | null {
+    const window = this.padWindow(playheadBeat)
+    const clipId = this.ensurePadClip(trackId, playheadBeat)
+    if (!clipId) return null
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      track.armed = true
+      if (!track.input.startsWith('midi')) track.input = 'midi'
+      this.project.loopEnabled = true
+      this.project.loopStartSample = Math.max(0, Math.round(projectBeatSample(this.project, window.startBeat)))
+      this.project.loopEndSample = Math.max(this.project.loopStartSample + 1, Math.round(projectBeatSample(this.project, window.startBeat + window.durationBeats)))
+      const record = { ...(this.project.record || defaultRecord(this.project.loopEndSample)) }
+      record.loop = true
+      this.project.record = record
+      this.padRecord = {
+        trackId,
+        clipId,
+        clipStart: window.startBeat,
+        loopStart: window.startBeat,
+        loopEnd: window.startBeat + window.durationBeats,
+      }
+    })
+    this.armTakeUndo(trackId, clipId)
+    return clipId
+  }
+
+  commitPadHits(trackId: string, notes: PadHit[], mode: 'overdub' | 'replace' = 'overdub') {
+    if (!notes.length) return
+    const track = this.track(trackId)
+    if (!track) return
+    const rec = this.padRecord?.trackId === trackId ? this.padRecord : null
+    const clip = track.midiClips.find((item) => item.id === (rec?.clipId || this.selectedMidiClipId)) || track.midiClips[0]
+    if (!clip) return
+    const clipStart = rec?.clipStart ?? clip.startBeat
+    const loopStart = rec?.loopStart ?? clipStart
+    const loopEnd = rec?.loopEnd ?? clipStart + clip.durationBeats
+    const pads = (track.padKit?.banks ?? []).flat().map((pad) => ({ pitch: pad.pitch, choke: pad.choke }))
+    const incoming = notes.map((note) => {
+      const start = clipBeat(note.startBeat, clipStart, loopStart, loopEnd)
+      const room = Math.max(0.05, clip.durationBeats - start)
+      return {
+        ...note,
+        id: uid('note'),
+        startBeat: Math.min(start, Math.max(0, clip.durationBeats - 0.05)),
+        durationBeats: Math.max(0.05, Math.min(room, note.durationBeats, 1)),
+        velocity: Math.max(0.05, Math.min(1, note.velocity)),
+      }
+    })
+    this.mutate(() => {
+      const live = this.track(trackId)?.midiClips.find((item) => item.id === clip.id)
+      if (!live) return
+      let next = live.notes
+      for (const hit of incoming) next = applyChoke(next, pads, hit.pitch, hit.startBeat)
+      live.notes = recordPadHits(next, incoming, mode, 0, live.durationBeats)
+    })
+  }
+
+  private padWindow(playheadBeat: number) {
+    const loopStart = projectSampleBeat(this.project, this.project.loopStartSample)
+    const loopEnd = projectSampleBeat(this.project, this.project.loopEndSample)
+    return padRecordWindow({
+      playheadBeat,
+      loopEnabled: this.project.loopEnabled,
+      loopStartBeat: loopStart,
+      loopEndBeat: loopEnd,
+      barBeats: quartersPerBar(this.project.timeSignature),
+    })
   }
 
   openScaler(trackId: string, page?: ScalerPage) {
@@ -745,6 +935,7 @@ export class ProjectStore {
     }
     this.rackTrackId = null
     this.patchTrackId = null
+    this.padsTrackId = null
     if (page || this.scalerTrackId !== trackId) {
       this.scalerTrackId = trackId
       this.emit()
@@ -1130,6 +1321,14 @@ export class ProjectStore {
       if (spec.kind === 'midi' && spec.instrument === 'library' && made[0]) this.rackTrackId = made[0].id
       if (spec.kind === 'midi' && spec.instrument === 'scaler' && made[0]) {
         this.scalerTrackId = made[0].id
+        this.padsTrackId = null
+        this.rackTrackId = null
+      }
+      if (spec.kind === 'midi' && spec.instrument === 'pads' && made[0]) {
+        made[0].padKit = normalizePadKit(made[0].padKit)
+        if (!made[0].plugins.some((plugin) => plugin.pluginId === 'pads')) made[0].plugins.push(createPlugin('pads'))
+        this.padsTrackId = made[0].id
+        this.scalerTrackId = null
         this.rackTrackId = null
       }
       const at = insertIndex(this.project.tracks, this.selectedTrackId)
@@ -1364,6 +1563,11 @@ export class ProjectStore {
         this.openScaler(trackId)
         return
       }
+      if (plugin?.pluginId === 'pads' && trackId !== 'master') {
+        this.pluginFocus = null
+        this.openPads(trackId)
+        return
+      }
     }
     this.pluginFocus = trackId && pluginId ? { trackId, pluginId } : null
     this.emit()
@@ -1402,6 +1606,10 @@ export class ProjectStore {
       this.insertScalerPlugin(trackId)
       return
     }
+    if (pluginId === 'pads') {
+      this.insertPadsPlugin(trackId)
+      return
+    }
     this.mutate(() => {
       const list = this.pluginList(trackId)
       if (!list) return
@@ -1425,6 +1633,23 @@ export class ProjectStore {
       list.push(createPlugin('scaler'))
     })
     this.setTrackInstrument(hostId, 'scaler')
+  }
+
+  /** Pads is an insert. Adding it opens the drum-machine faceplate. */
+  private insertPadsPlugin(trackId: string | 'master') {
+    let host = trackId !== 'master' ? this.track(trackId) : null
+    if (!host || host.type !== 'midi') host = this.project.tracks.find((track) => track.type === 'midi') ?? null
+    if (!host) {
+      this.insertPads(null)
+      return
+    }
+    const hostId = host.id
+    this.mutate(() => {
+      const list = this.pluginList(hostId)
+      if (!list || list.some((item) => item.pluginId === 'pads')) return
+      list.push(createPlugin('pads'))
+    })
+    this.setTrackInstrument(hostId, 'pads')
   }
 
   updatePlugin(trackId: string | 'master', pluginId: string, patch: Partial<PluginInstance>) {
@@ -3906,6 +4131,8 @@ export class ProjectStore {
     this.editGeneration = 0
     this.savedGeneration = 0
     if (this.scalerTrackId && !project.tracks.some((track) => track.id === this.scalerTrackId && track.type === 'midi')) this.scalerTrackId = null
+    if (this.padsTrackId && !project.tracks.some((track) => track.id === this.padsTrackId && track.type === 'midi')) this.padsTrackId = null
+    this.padRecord = null
     this.sync.rebase(this.project)
     this.emit()
   }
@@ -4004,6 +4231,7 @@ export class ProjectStore {
 
   openRack(trackId: string) {
     this.scalerTrackId = null
+    this.padsTrackId = null
     this.rackTrackId = this.rackTrackId === trackId ? null : trackId
     this.rackFlip = false
     this.rackDetail = false
@@ -4020,6 +4248,7 @@ export class ProjectStore {
 
   openPatch(trackId: string) {
     this.scalerTrackId = null
+    this.padsTrackId = null
     if (this.patchTrackId === trackId) {
       this.patchTrackId = null
       this.emit()

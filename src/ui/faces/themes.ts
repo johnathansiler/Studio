@@ -78,6 +78,7 @@ export const FACE_THEMES: Record<string, FaceTheme> = {
   looper: theme('looper', 'Loop', 'LP', 'inst', 'knobs', '#121816', '#73c48f', '#d5f5e3'),
   tune: theme('tune', 'Tune', 'TN', 'util', 'knobs', '#1a160f', '#e8c47a', '#fdebd0'),
   scaler: theme('scaler', 'Chords', 'SC', 'inst', 'knobs', '#151b23', '#3ec8de', '#d8fbff', '#e8fbff', '#243040'),
+  pads: theme('pads', 'Pads', 'MP', 'inst', 'knobs', '#141c18', '#3ddc7a', '#d8ffe6', '#f3fff6', '#1e3a2a'),
 }
 
 export function themeFor(id: string): FaceTheme {

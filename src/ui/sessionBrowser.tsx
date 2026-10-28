@@ -21,7 +21,7 @@ const GROUPS: { id: BrowserGroup; label: string; hint: string }[] = [
   { id: 'drums', label: 'Drums', hint: 'Drag a drum instrument onto a MIDI track.' },
   { id: 'audio', label: 'Audio effects', hint: 'Drag onto a track to insert it.' },
   { id: 'midi', label: 'MIDI effects', hint: 'Drag onto a MIDI track.' },
-  { id: 'plugins', label: 'Plugins', hint: 'Auto-Tune and Scaler.' },
+  { id: 'plugins', label: 'Plugins', hint: 'Auto-Tune, Scaler, and Pads.' },
 ]
 
 const sounds = new Map<string, SoundEntry>()

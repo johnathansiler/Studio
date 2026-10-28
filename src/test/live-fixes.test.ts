@@ -74,7 +74,7 @@ describe('pattern drag', () => {
 describe('scaler insert', () => {
   it('is a searchable insert that opens the chord faceplate', () => {
     expect(CATALOG.find((plugin) => plugin.id === 'scaler')?.name).toBe('Scaler')
-    expect(browserGroup('plugins').map((item) => item.name)).toEqual(['Auto-Tune', 'Scaler'])
+    expect(browserGroup('plugins').map((item) => item.name)).toEqual(['Auto-Tune', 'Scaler', 'Pads'])
     expect(browserGroup('plugins').find((item) => item.name === 'Scaler')?.id).toBe('scaler')
     const store = new ProjectStore(createEmptyProject(48000))
     const vocal = store.project.tracks.find((track) => track.type === 'audio')!

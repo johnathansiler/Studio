@@ -87,7 +87,7 @@ export function FaceGallery({ compact = false }: { compact?: boolean }) {
   const phone = compact || narrow
   return (
     <div className="face-gallery">
-      {CATALOG.filter((plugin) => plugin.id !== 'tune' && plugin.id !== 'scaler').map((plugin) => {
+      {CATALOG.filter((plugin) => plugin.id !== 'tune' && plugin.id !== 'scaler' && plugin.id !== 'pads').map((plugin) => {
         const values = Object.fromEntries(plugin.params.map((param) => [param.id, param.default]))
         Object.assign(values, GALLERY_BIAS[plugin.id] ?? {})
         return (

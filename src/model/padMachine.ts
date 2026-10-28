@@ -49,6 +49,8 @@ export interface PadVoice {
   layerMode: LayerMode
   layers: PadLayer[]
   busId?: string
+  /** Pad mute. Recorded notes stay; the voice does not sound. */
+  muted?: boolean
 }
 
 export interface SequenceNote {
@@ -393,7 +395,8 @@ export function normalizePadKit(value: Partial<PadProgram> | undefined | null): 
       release: clamp(incoming.release ?? 0.1, 0, 2),
       layerMode: incoming.layerMode === 'robin' || incoming.layerMode === 'random' ? incoming.layerMode : 'velocity',
       layers: normalizeLayers(incoming.layers),
-      busId: incoming.busId,
+      busId: incoming.busId || undefined,
+      muted: Boolean(incoming.muted),
     } as PadVoice
   }))
   return {
