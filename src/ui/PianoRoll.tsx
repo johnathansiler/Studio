@@ -20,15 +20,18 @@ import { lockedTone, pitchRole, suggestKey } from '../theory'
 import { EDITOR_TOOL_KEYS, activeTool, setActiveTool, subscribeTools, toolCursor } from '../state/tools'
 import { selectPiano, selectScale } from '../state/select'
 import type { ProjectStore } from '../state/store'
-import { samplesToBeats } from '../model/time'
-import { projectSampleBeat } from '../model/tempoMap'
+import { loopGridBeats } from '../model/loopEdit'
+import { quartersPerBar, samplesToBeats } from '../model/time'
+import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import { keyCommitsNote } from '../model/stepEntry'
 import { displayedPlayhead, pianoPlayheadBeat, transportMoving } from '../model/transportSync'
 import { PIANO_BAR, PIANO_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
 import { attachGlissando } from './glissando'
+import { FitRow } from './fitRow'
 import { ActionSheet, SheetRow, TipButton } from './Hint'
 import { coarsePointer, noteGrip } from './touchEdit'
+import { LoopRegion } from './LoopRegion'
 import {
   commitMidiNotes,
   duplicateNotes,
@@ -109,8 +112,9 @@ export function PianoRoll({
     setRolling(transportMoving(engine.status))
   }), [engine])
   const followPlayhead = store.midiEditor().follow
+  const loopLocalEnd = clip ? projectSampleBeat(store.project, store.project.loopEndSample) - clip.startBeat : 0
   const drawnBeats = clip
-    ? Math.max(clip.durationBeats, 8, ...clip.notes.map((note) => note.startBeat + note.durationBeats + 1))
+    ? Math.max(clip.durationBeats, 8, loopLocalEnd + 1, ...clip.notes.map((note) => note.startBeat + note.durationBeats + 1))
     : 0
   const playBeat = clip
     ? pianoPlayheadBeat(projectSampleBeat(store.project, displayedPlayhead(head, store.project)), clip, drawnBeats)
@@ -121,6 +125,7 @@ export function PianoRoll({
   rowRef.current = row
   pxRef.current = pxBeat
   const rollRef = useRef<HTMLDivElement>(null)
+  const rulerScrollRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     if (!followPlayhead || !rolling || playBeat == null) return
     const rollNode = rollRef.current
@@ -317,6 +322,7 @@ export function PianoRoll({
     const sync = () => {
       if (keys && rollNode && keys.scrollTop !== rollNode.scrollTop) keys.scrollTop = rollNode.scrollTop
       if (velRef.current && rollNode) velRef.current.scrollLeft = rollNode.scrollLeft
+      if (rulerScrollRef.current && rollNode) rulerScrollRef.current.scrollLeft = rollNode.scrollLeft
     }
     rollNode?.addEventListener('scroll', sync)
     return () => {
@@ -465,7 +471,7 @@ export function PianoRoll({
   if (!track || !clip) return null
   const shown = store.quantizePreview?.notes.find((item) => item.clipId === clip.id)?.notes ?? clip.notes
   const notes = ghost ?? shown
-  const span = Math.max(clip.durationBeats, 8, ...notes.map((note) => note.startBeat + note.durationBeats + 1))
+  const span = Math.max(clip.durationBeats, 8, loopLocalEnd + 1, ...notes.map((note) => note.startBeat + note.durationBeats + 1))
   const width = span * pxBeat
   const selected = notes.filter((note) => store.selectedNoteIds.includes(note.id))
   const chord = selected.length ? nameChord(selected.map((note) => note.pitch)) : ''
@@ -714,7 +720,7 @@ export function PianoRoll({
   const gridPx = (roll.grid > 0 ? roll.grid : 1) * pxBeat
   return (
     <div className={`piano ${compact ? 'compact' : ''} ${chrome ? '' : 'bare'}`} ref={pianoRef} data-tool={tool}>
-      {chrome && <div className="scale-bar">
+      {chrome && <FitRow className="scale-bar">
         <TipButton className={`chords-btn ${open ? 'on' : ''}`} label={bar('chords').label} hint={bar('chords').hint} pressed={open} onClick={() => void toggleChords()} />
         <TipButton
           className={store.midiEditor().stepInput ? 'on' : ''}
@@ -742,14 +748,12 @@ export function PianoRoll({
           ))}
         </select>
         <TipButton className={scale.snap ? 'on' : ''} label={bar('snap').label} hint={bar('snap').hint} pressed={scale.snap} onClick={() => store.setScale({ snap: !scale.snap })} />
-        {compact && (
-          <select {...described(bar('grid'))} value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
-            <option value="0">Free</option>
-            <option value="0.25">1/16</option>
-            <option value="0.5">1/8</option>
-            <option value="1">1/4</option>
-          </select>
-        )}
+        <select {...described(bar('grid'))} value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
+          <option value="0">Free</option>
+          <option value="0.25">1/16</option>
+          <option value="0.5">1/8</option>
+          <option value="1">1/4</option>
+        </select>
         {compact && <TipButton label={bar('notes').label} hint={bar('notes').hint} onClick={() => setNotesOpen(true)} />}
         <span className="chord-name">{chord}</span>
         {!compact && (
@@ -771,22 +775,12 @@ export function PianoRoll({
             }}
           />
         )}
-      </div>}
-      {chrome && !compact && (
-        <div className="tool-row">
-          <select {...described(bar('grid'))} value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
-            <option value="0">Free</option>
-            <option value="0.25">1/16</option>
-            <option value="0.5">1/8</option>
-            <option value="1">1/4</option>
-          </select>
-          <TipButton label={sheet('quantize').label} hint={sheet('quantize').hint} onClick={quantize} />
-          <TipButton label={sheet('arp').label} hint={sheet('arp').hint} onClick={arpeggiate} />
-          <TipButton label={sheet('strum').label} hint={sheet('strum').hint} onClick={strum} />
-          <TipButton label={sheet('duplicate').label} hint={sheet('duplicate').hint} onClick={duplicate} />
-          <TipButton label={sheet('delete').label} hint={sheet('delete').hint} onClick={remove} />
-        </div>
-      )}
+        {!compact && <TipButton label={sheet('quantize').label} hint={sheet('quantize').hint} onClick={quantize} />}
+        {!compact && <TipButton label={sheet('arp').label} hint={sheet('arp').hint} onClick={arpeggiate} />}
+        {!compact && <TipButton label={sheet('strum').label} hint={sheet('strum').hint} onClick={strum} />}
+        {!compact && <TipButton label={sheet('duplicate').label} hint={sheet('duplicate').hint} onClick={duplicate} />}
+        {!compact && <TipButton label={sheet('delete').label} hint={sheet('delete').hint} onClick={remove} />}
+      </FitRow>}
       {notesOpen && (
         <ActionSheet title="Notes" hint="Edits for the notes you have selected." onClose={() => setNotesOpen(false)}>
           <SheetRow label={sheet('detect').label} hint={sheet('detect').hint} onClick={() => {
@@ -815,6 +809,23 @@ export function PianoRoll({
         </ActionSheet>
       )}
       <div className="piano-body">
+        <div className="loop-ruler-pad" aria-hidden="true" />
+        <div className="loop-ruler-scroll" ref={rulerScrollRef}>
+          <div className="loop-ruler-inner" style={{ width }}>
+            {Array.from({ length: Math.min(128, Math.floor(span / Math.max(0.25, quartersPerBar(store.project.timeSignature))) + 1) }, (_, index) => (
+              <span key={index} className="loop-tick" style={{ left: index * quartersPerBar(store.project.timeSignature) * pxBeat }}>{index + 1}</span>
+            ))}
+            <LoopRegion
+              store={store}
+              project={store.project}
+              view="piano"
+              gridBeats={loopGridBeats(store.project, roll.grid)}
+              sampleAt={(clientX, rect) => projectBeatSample(store.project, clip.startBeat + (clientX - rect.left) / pxRef.current)}
+              xAt={(sample) => (projectSampleBeat(store.project, sample) - clip.startBeat) * pxBeat}
+              onSeek={(sample) => engine.seek(sample)}
+            />
+          </div>
+        </div>
         <div className="keys" ref={keysRef}>
           {Array.from({ length: HIGH - LOW + 1 }, (_, index) => {
             const pitch = HIGH - index
@@ -855,7 +866,7 @@ export function PianoRoll({
             move(event.nativeEvent)
           }}
         />
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+        <div className="roll-column" style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
           <div className="roll" ref={rollRef} style={{ flex: 1, minHeight: 0, touchAction: 'none' }}>
             <div
               ref={gridRef}

@@ -360,15 +360,19 @@ export function RouteFields({ store, trackId }: { store: ProjectStore; trackId: 
   if (!track) return null
   const targets = store.project.tracks.filter((item) => (item.type === 'bus' || item.type === 'group') && item.id !== track.id)
   const groups = targets.filter((item) => item.type === 'group')
+  const outputLabel = !track.output
+    ? (track.input.startsWith('remote:') ? 'Cue' : 'Master')
+    : targets.find((item) => item.id === track.output)?.name ?? 'Master'
+  const groupLabel = groups.find((item) => item.id === track.groupId)?.name ?? 'No group'
   return (
     <div className="route-fields">
-      <select value={track.output ?? ''} onChange={(event) => store.updateTrack(track.id, { output: event.target.value || null })}>
+      <select title={`Output. ${outputLabel}`} value={track.output ?? ''} onChange={(event) => store.updateTrack(track.id, { output: event.target.value || null })}>
         <option value="">{track.input.startsWith('remote:') ? 'Cue' : 'Master'}</option>
         {targets.map((item) => (
           <option key={item.id} value={item.id}>{item.name}</option>
         ))}
       </select>
-      <select value={track.groupId ?? ''} onChange={(event) => store.updateTrack(track.id, { groupId: event.target.value || null })}>
+      <select title={`Group. ${groupLabel}`} value={track.groupId ?? ''} onChange={(event) => store.updateTrack(track.id, { groupId: event.target.value || null })}>
         <option value="">—</option>
         {groups.map((item) => (
           <option key={item.id} value={item.id}>{item.name}</option>

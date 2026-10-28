@@ -1131,10 +1131,34 @@ export function App() {
     })
   }
 
+  async function importAsInstrument(trackId: string, files: FileList | File[]) {
+    await ready()
+    if (!engine.ctx) return
+    for (const file of files) {
+      try {
+        const decoded = await engine.ctx.decodeAudioData((await file.arrayBuffer()).slice(0))
+        const channels = Array.from({ length: decoded.numberOfChannels }, (_, index) => decoded.getChannelData(index).slice())
+        store.loadSamplerSound(trackId, {
+          id: uid('smp'),
+          name: file.name.replace(/\.[^.]+$/, '') || file.name,
+          sampleRate: decoded.sampleRate,
+          channels,
+        })
+      } catch (error) {
+        store.toast(error instanceof Error ? error.message : 'Could not read that audio file.', 'warn')
+      }
+    }
+  }
+
   async function importAudio(files: FileList | null) {
     if (!files?.length) return
+    const selected = store.project.tracks.find((item) => item.id === store.selectedTrackId)
+    if (selected?.type === 'midi') {
+      await importAsInstrument(selected.id, files)
+      return
+    }
     await ready()
-    const track = store.project.tracks.find((item) => item.id === store.selectedTrackId && item.type === 'audio') || store.project.tracks.find((item) => item.type === 'audio')
+    const track = selected?.type === 'audio' ? selected : store.project.tracks.find((item) => item.type === 'audio')
     if (!track || !engine.ctx) return
     for (const file of files) {
       const decoded = await engine.ctx.decodeAudioData((await file.arrayBuffer()).slice(0))
@@ -1231,7 +1255,10 @@ async function importDropped(files: FileList) {
   function openPiano(trackId: string, clipId?: string) {
     store.closeScaler()
     store.closePads()
-    const beat = samplesToBeats(engine.positionSamples, store.project.sampleRate, store.project.tempo)
+    const project = store.project
+    let sample = engine.positionSamples
+    if (project.loopEnabled && (sample < project.loopStartSample || sample >= project.loopEndSample)) sample = project.loopStartSample
+    const beat = samplesToBeats(sample, project.sampleRate, project.tempo)
     store.preparePianoClip(trackId, beat, clipId)
     setSurface('studio')
     setPhonePane('edit')
@@ -1465,6 +1492,7 @@ async function importDropped(files: FileList) {
                   session={session}
                   onSeek={(sample) => void locate(sample)}
                   onOpenPiano={openPiano}
+                  onImportInstrument={(trackId, files) => { void importAsInstrument(trackId, files) }}
                   onPerform={(mode) => openPerform(mode)}
                   onQuickPunch={() => void quickPunch()}
                   onAnalyze={(trackId) => { setAnalysisTrackId(trackId); setPhonePane('edit'); setSurface('studio') }}
@@ -1480,6 +1508,7 @@ async function importDropped(files: FileList) {
                   engine={engine}
                   onRecord={() => { void record() }}
                   onDropAudio={(trackId, scene, file) => { void dropOnSlot(trackId, scene, file) }}
+                  onOpenPiano={openPiano}
                 />
               )}
             </div>

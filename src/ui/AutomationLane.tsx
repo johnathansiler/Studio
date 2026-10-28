@@ -60,9 +60,10 @@ export function LinkGroup({ store, trackId }: { store: ProjectStore; trackId: st
   const groups = mixGroupsOf(store.project)
   const groupId = trackGroupId(store.project, trackId)
   const group = groups.find((item) => item.id === groupId)
+  const linkLabel = group?.name ?? 'No link'
   return (
     <div className="link-row">
-      <select className="link-pick" aria-label="Link group" title="Link faders, mutes, solos, and edits with other tracks." value={groupId ?? ''} onClick={(event) => event.stopPropagation()} onChange={(event) => store.assignMixGroup(trackId, event.target.value)}>
+      <select className="link-pick" aria-label="Link group" title={`Link group. ${linkLabel}`} value={groupId ?? ''} onClick={(event) => event.stopPropagation()} onChange={(event) => store.assignMixGroup(trackId, event.target.value)}>
         <option value="">No link</option>
         {groups.map((item) => (
           <option key={item.id} value={item.id}>{item.name}</option>

@@ -144,6 +144,12 @@ export function SoundBrowser({
       }
       const entry = entriesRef.current.find((item) => item.id === id)
       if (!entry) return
+      const droppedId = trackIdFromDrop(target)
+      const dropped = droppedId ? store.track(droppedId) : null
+      if (dropped?.type === 'midi') {
+        void playAsInstrument(entry, dropped.id)
+        return
+      }
       if (target?.closest('[data-slot-drop]')) {
         slotRef.current(entry)
         return
@@ -227,6 +233,39 @@ export function SoundBrowser({
       setPlaying(entry.id)
     } catch (error) {
       store.toast(error instanceof Error ? error.message : 'Could not play that sound.', 'warn')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function playAsInstrument(entry: SoundEntry, trackId?: string | null) {
+    if (store.remoteFollow) {
+      store.toast('The host owns the arrangement.', 'warn')
+      return
+    }
+    const dropped = trackId ? store.track(trackId) : null
+    const target = dropped?.type === 'midi' ? dropped.id : sounds.instrumentId
+    if (!target) {
+      store.toast('Add an instrument track first.', 'warn')
+      return
+    }
+    setBusy(entry.id)
+    try {
+      const decoded = await loadEntry(entry)
+      const lead = decoded.channels[0]
+      if (!lead?.length) {
+        store.toast('That sound had no audio.', 'warn')
+        return
+      }
+      store.loadSamplerSound(target, {
+        id: `lib_${entry.id}`,
+        name: entry.name,
+        sampleRate: decoded.sampleRate,
+        channels: decoded.channels,
+      }, undefined, entry.type === 'loop')
+      store.toast(`${entry.name} plays across the keyboard.`, 'good')
+    } catch (error) {
+      store.toast(error instanceof Error ? error.message : 'Could not load that sound.', 'warn')
     } finally {
       setBusy('')
     }
@@ -488,6 +527,7 @@ export function SoundBrowser({
               <div className="sound-actions">
                 <TipButton label={playLabel} hint={playHint} disabled={busy === entry.id} onClick={() => { engine.unlock(); void preview(entry) }} />
                 <TipButton label="Add" hint="Put this sound on the selected track at the playhead." disabled={busy === entry.id || !sounds.trackId} onClick={() => { engine.unlock(); void add(entry) }} />
+                <TipButton label="Keys" hint="Play as instrument. Pitch this sound across the keyboard." disabled={busy === entry.id || !sounds.instrumentId} onClick={() => { engine.unlock(); void playAsInstrument(entry) }} />
                 {slot && <TipButton label="Slot" hint="Put this sound in the open sampler or looper." disabled={busy === entry.id} onClick={() => { engine.unlock(); void intoSlot(entry) }} />}
                 <TipButton
                   label={saved ? 'Saved' : 'Save'}

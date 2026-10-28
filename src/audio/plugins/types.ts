@@ -34,6 +34,8 @@ export interface BlockContext {
   quality: 'full' | 'eco'
   /** Offline bounces use linear-phase EQ and 4x oversampling. Live preview stays lighter. */
   offline?: boolean
+  /** AudioContext time of the first sample in this block. Sampler notes scheduled ahead use it. */
+  playTime?: number
 }
 
 export interface Processor {

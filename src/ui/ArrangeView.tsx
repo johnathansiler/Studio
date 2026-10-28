@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { activeComp } from '../model/comp'
@@ -8,6 +8,7 @@ import { trimAudioClip } from '../model/clips'
 import { rectsHit } from '../model/edit'
 import { SCALER_MIME, parseScalerDrag } from '../instruments/scaler/model'
 import { patternHostId } from '../model/steps'
+import { loopGridBeats } from '../model/loopEdit'
 import { arrangementEndSample, gridMarks, mapIsLinear, projectBeatSample, projectSampleBeat, pxAtBeat, snapSampleToMap } from '../model/tempoMap'
 import { displayedPlayhead } from '../model/transportSync'
 import { SongMap, SongMapHead, SmartTempoBar } from './SongMap'
@@ -29,6 +30,7 @@ import { ActionSheet, SheetRow, TipButton } from './Hint'
 import { RecordBar } from './RecordBar'
 import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, trimZone } from './touchEdit'
 import { laneDoubleClickAddsClip } from './clipKeys'
+import { LoopRegion } from './LoopRegion'
 
 export function ArrangeView({
   store,
@@ -36,6 +38,7 @@ export function ArrangeView({
   session,
   onSeek,
   onOpenPiano,
+  onImportInstrument,
   onPerform,
   onQuickPunch,
   onAnalyze,
@@ -47,6 +50,7 @@ export function ArrangeView({
   session: SessionClient
   onSeek: (sample: number) => void
   onOpenPiano: (trackId: string, clipId?: string) => void
+  onImportInstrument?: (trackId: string, files: FileList) => void
   onPerform: (mode: 'keys' | 'drums') => void
   onQuickPunch: () => void
   onAnalyze: (trackId: string) => void
@@ -168,30 +172,10 @@ export function ArrangeView({
   const beatPx = (60 / project.tempo) * px
   const marks = gridMarks(project, projectSampleBeat(project, seconds * project.sampleRate) + 1)
 
-  function seekFromEvent(event: MouseEvent<HTMLDivElement>) {
-    const bounds = event.currentTarget.getBoundingClientRect()
-    const sample = ((event.clientX - bounds.left) / px) * project.sampleRate
-    onSeek(snapSampleToMap(sample, project))
-  }
-
   function sampleAt(clientX: number) {
     const inner = innerRef.current
     if (!inner) return 0
     return ((clientX - inner.getBoundingClientRect().left) / pxRef.current) * project.sampleRate
-  }
-
-  function dragLoop(event: ReactPointerEvent, edge: 'start' | 'end') {
-    event.stopPropagation()
-    event.preventDefault()
-    const move = (ev: PointerEvent) => {
-      const sample = Math.max(0, snapSampleToMap(sampleAt(ev.clientX), project))
-      const start = edge === 'start' ? sample : project.loopStartSample
-      const end = edge === 'end' ? sample : project.loopEndSample
-      const orderedStart = Math.min(start, end)
-      const orderedEnd = Math.max(start, end, orderedStart + 1)
-      store.setLoop(true, orderedStart, orderedEnd, true)
-    }
-    watch(move, () => store.endDraft())
   }
 
   function laneAt(clientX: number, clientY: number) {
@@ -528,8 +512,18 @@ export function ArrangeView({
           body.scrollTop += event.deltaY
         }}
       >
-        <div className="ruler-gap">
+        <div className="ruler-gap loop-gap">
           <SongMapHead store={store} position={position} compact />
+          <button
+            type="button"
+            className={`loop-toggle ${project.loopEnabled ? 'on' : 'off'}`}
+            aria-pressed={project.loopEnabled}
+            data-loop={project.loopEnabled ? 'on' : 'off'}
+            title={project.loopEnabled ? 'Loop is on. Playback wraps at the end of the highlighted region.' : 'Loop is off. The region is marked, but playback does not wrap.'}
+            onClick={() => store.toggle('loopEnabled')}
+          >
+            {project.loopEnabled ? 'Loop on' : 'Loop off'}
+          </button>
         </div>
         {project.tracks.map((track) => (
           <div className="head" data-track={track.id} key={track.id} style={rowHeight(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => store.selectTrack(track.id)}>
@@ -543,6 +537,19 @@ export function ArrangeView({
                 onChange={(event) => store.updateTrack(track.id, { name: event.target.value })}
               />
               <MixFlags store={store} trackId={track.id} compact />
+              {track.type === 'midi' && (
+                <button
+                  type="button"
+                  className="piano-open"
+                  data-piano={track.id}
+                  aria-label="Piano roll"
+                  title="Piano roll"
+                  onClick={(event) => { event.stopPropagation(); onOpenPiano(track.id) }}
+                >
+                  <PianoIcon />
+                  <span>Roll</span>
+                </button>
+              )}
               {!phone && (track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
                 <TipButton className={`mini ${track.armed ? 'on-r' : ''}`} label={copyOf(TRACK_ROW, 'arm').label} hint={track.type === 'midi' ? 'Record this instrument from its MIDI input.' : copyOf(TRACK_ROW, 'arm').hint} pressed={track.armed} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
                   R
@@ -578,45 +585,17 @@ export function ArrangeView({
       >
         <div className="timeline-inner" ref={innerRef} data-px={px} style={{ width }}>
           <SongMap store={store} px={px} width={width} onSeek={onSeek} />
-          <div className="ruler" onClick={seekFromEvent}>
-            <button
-              type="button"
-              className={`loop-toggle ${project.loopEnabled ? 'on' : 'off'}`}
-              aria-pressed={project.loopEnabled}
-              data-loop={project.loopEnabled ? 'on' : 'off'}
-              title={project.loopEnabled ? 'Loop is on. Playback wraps at the end of the highlighted region.' : 'Loop is off. The region is marked, but playback does not wrap.'}
-              onClick={(event) => { event.stopPropagation(); store.toggle('loopEnabled') }}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              {project.loopEnabled ? 'Loop on' : 'Loop off'}
-            </button>
-            <div
-              className={`loop-bar ${project.loopEnabled ? 'on' : ''}`}
-              data-loop={project.loopEnabled ? 'on' : 'off'}
-              style={{
-                left: (project.loopStartSample / project.sampleRate) * px,
-                width: Math.max(8, ((project.loopEndSample - project.loopStartSample) / project.sampleRate) * px),
-              }}
-            >
-              <button
-                type="button"
-                className="loop-handle"
-                data-edge="start"
-                aria-label="Loop start. Drag to move the start of the loop."
-                title="Loop start. Drag to move the start of the loop."
-                onClick={(event) => event.stopPropagation()}
-                onPointerDown={(event) => dragLoop(event, 'start')}
-              />
-              <button
-                type="button"
-                className="loop-handle end"
-                data-edge="end"
-                aria-label="Loop end. Drag to move the end of the loop."
-                title="Loop end. Drag to move the end of the loop."
-                onClick={(event) => event.stopPropagation()}
-                onPointerDown={(event) => dragLoop(event, 'end')}
-              />
-            </div>
+          <div className="ruler">
+            <LoopRegion
+              store={store}
+              project={project}
+              view="arrange"
+              gridBeats={loopGridBeats(project)}
+              sampleAt={(clientX, rect) => ((clientX - rect.left) / px) * project.sampleRate}
+              xAt={(sample) => (sample / project.sampleRate) * px}
+              onSeek={(sample) => onSeek(snapSampleToMap(sample, project))}
+              yieldEmpty={tool === 'pan' || tool === 'zoom'}
+            />
             {marks.map((mark) =>
               mark.downbeat ? (
                 <span key={mark.beat} style={{ left: pxAtBeat(project, mark.beat, px) }}>
@@ -660,6 +639,12 @@ export function ArrangeView({
                 event.preventDefault()
               }}
               onDrop={(event) => {
+                if (track.type === 'midi' && event.dataTransfer.files.length) {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onImportInstrument?.(track.id, event.dataTransfer.files)
+                  return
+                }
                 if (track.type !== 'midi') return
                 const payload = parseScalerDrag(event.dataTransfer.getData(SCALER_MIME) || event.dataTransfer.getData('text/plain'))
                 if (!payload) return
@@ -1206,6 +1191,15 @@ function ClipView({
         />
       )}
     </div>
+  )
+}
+
+function PianoIcon() {
+  return (
+    <svg width="14" height="12" viewBox="0 0 14 12" aria-hidden="true">
+      <rect x="0.5" y="0.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" />
+      <path d="M3 1v6M6 1v6M9 1v6M11 1v6" stroke="currentColor" />
+    </svg>
   )
 }
 

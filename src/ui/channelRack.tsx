@@ -15,8 +15,9 @@ import {
   type GraphMode,
   type RackChoice,
 } from '../model/channelRack'
-import { type StepCell, type StepChannel } from '../model/steps'
-import { projectSampleBeat } from '../model/tempoMap'
+import { loopGridBeats } from '../model/loopEdit'
+import { STEP_BEAT, type StepCell, type StepChannel } from '../model/steps'
+import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import { displayedPlayhead } from '../model/transportSync'
 import { fetchSoundBytes } from '../sounds/cache'
 import { catalogMessage, loadSoundCatalog } from '../sounds/catalog'
@@ -28,6 +29,7 @@ import type { ProjectStore } from '../state/store'
 import { BEAT_BAR, BEAT_ROW, BEAT_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
 import { TipButton } from './Hint'
+import { LoopRegion } from './LoopRegion'
 import './channel-rack.css'
 
 type RackEngine = {
@@ -35,6 +37,7 @@ type RackEngine = {
   status?: AudioEngine['status']
   subscribe?: (fn: () => void) => () => void
   currentTimelineSample?: () => number
+  seek?: (sample: number) => void
 }
 
 function usePlaySample(engine: RackEngine) {
@@ -549,11 +552,26 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         )}
       </div>
       <div className="rack-scroll">
-        <div className="rack-row rack-ruler" aria-hidden="true">
-          <div className="rack-lead"><span>Beat</span></div>
+        <div className="rack-row rack-ruler">
+          <div className="rack-lead" aria-hidden="true"><span>Beat</span></div>
           <div className="rack-steps">
+            <LoopRegion
+              store={store}
+              project={project}
+              view="rack"
+              gridBeats={loopGridBeats(project, STEP_BEAT)}
+              sampleAt={(clientX, rect) => {
+                const beats = Math.max(STEP_BEAT, count * STEP_BEAT)
+                return projectBeatSample(project, Math.max(0, ((clientX - rect.left) / Math.max(1, rect.width)) * beats))
+              }}
+              xAt={(sample, hostWidth) => {
+                const beats = Math.max(STEP_BEAT, count * STEP_BEAT)
+                return (projectSampleBeat(project, sample) / beats) * hostWidth
+              }}
+              onSeek={(sample) => engine.seek?.(sample)}
+            />
             {stepGroups(count).map((group, groupIndex) => (
-              <div className={`rack-group${groupIndex % 2 ? ' alt' : ''}`} key={group[0]}>
+              <div className={`rack-group${groupIndex % 2 ? ' alt' : ''}`} key={group[0]} aria-hidden="true">
                 {group.map((index) => (
                   <span key={index} className="rack-tick" data-beat={index === group[0] ? String((groupIndex % 4) + 1) : undefined} />
                 ))}

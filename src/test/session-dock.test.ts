@@ -33,6 +33,8 @@ describe('session dock choice', () => {
     expect(1280 - wide).toBeGreaterThanOrEqual(320)
     expect(fittedDockWidth(1100, 760)).toBeLessThanOrEqual(550)
     expect(fittedDockWidth(1280, 200)).toBe(280)
+    expect(fittedDockWidth(500, 400)).toBeLessThanOrEqual(180)
+    expect(500 - fittedDockWidth(500, 400)).toBeGreaterThanOrEqual(320)
     expect(fittedDockWidth(800, 700, 'bottom')).toBeLessThanOrEqual(520)
   })
 })

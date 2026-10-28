@@ -25,7 +25,7 @@ export const TRANSPORT_COPY: Copy[] = [
   { id: 'play', label: 'Play', hint: 'Play from the playhead.' },
   { id: 'stop', label: 'Stop', hint: 'Stop playback and recording.' },
   { id: 'record', label: 'Record', hint: 'Record onto armed tracks from the playhead.' },
-  { id: 'loop', label: 'Loop', hint: 'Repeat the highlighted region.' },
+  { id: 'loop', label: 'Loop', hint: 'Repeat the highlighted region. Drag its edges to change the length.' },
   { id: 'tempo', label: 'Tempo', hint: 'Type a tempo, or drag, scroll, or press the arrow keys.' },
   { id: 'tap', label: 'Tap', hint: 'Tap in time. The tempo follows your taps.' },
 ]
@@ -50,7 +50,7 @@ export const MENU_COPY: Copy[] = [
   { id: 'count-in', label: 'Count-in', hint: 'Count one bar before recording starts.' },
   { id: 'snap', label: 'Snap', hint: 'Line clip edits up to the beat.' },
   { id: 'to-start', label: 'To start', hint: 'Move the playhead back to the beginning.' },
-  { id: 'loop', label: 'Loop', hint: 'Repeat the highlighted region.' },
+  { id: 'loop', label: 'Loop', hint: 'Repeat the highlighted region. Drag its edges to change the length.' },
   { id: 'arrangement', label: 'Arrangement', hint: 'Leave clip launching and go back to the timeline.' },
   { id: 'session-view', label: 'Session view', hint: 'Launch clips in slots instead of the timeline.' },
   { id: 'capture', label: 'Capture', hint: 'Put the clips that are playing onto the timeline.' },

@@ -10,6 +10,7 @@ import { DRUM_PADS, residentDrums, type ResidentDrum } from '../model/drums'
 import { calibrationTrim, contextTimeForEvent, monitoringOffset, type ClockStamp } from '../model/midiClock'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
 import { arrangementEndSample, beatSpanSamples, clickAccent, clickAtOrAfter, meterAtSample, nextClickAfter, projectSampleBeat, tempoAtSample } from '../model/tempoMap'
+import { planLoopAudio } from '../model/loopEdit'
 import { playbackStops, transportSample } from '../model/transportSync'
 import { beatsToSamples, samplesPerBeatUnit, samplesToBeats } from '../model/time'
 import { matchBufferRate, PatchHost, renderPatchSpan } from '../instruments/patch'
@@ -30,6 +31,7 @@ import { automationSchedule, laneFor, rackLanesFor, valueAtMappedSample } from '
 import { applyRamps } from './paramCurve'
 import { chainContext, enabledFx, LiveMidiChain, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
 import { LiveRack } from './liveRack'
+import { renderSamplerSpan } from './plugins/sampler'
 import { renderGraph } from './renderGraph'
 import { loadModule, peekModule } from './plugins/registry'
 import { createLoudness, measureLoudness, type LoudnessState } from './plugins/dsp'
@@ -131,6 +133,8 @@ export class AudioEngine {
   private referenceSource: AudioBufferSourceNode | null = null
   private referenceGain: GainNode | null = null
   private speakerGain: GainNode | null = null
+  /** Safety limiter in front of the speakers. Keeps a summed mix from hard-clipping. */
+  private safety: DynamicsCompressorNode | null = null
   private talkBus: GainNode | null = null
   private metroGain: GainNode | null = null
   private cueDest: MediaStreamAudioDestinationNode | null = null
@@ -176,6 +180,14 @@ export class AudioEngine {
   private playOriginSample = 0
   private arrangementScheduled = false
   private loopArmed: boolean | null = null
+  private loopSpanStart = -1
+  private loopSpanEnd = -1
+  private loopQueuedUntil = 0
+  private loopQueuedCtx = 0
+  private loopRestartAt = 0
+  private loopAudioDirty = false
+  private pendingSchedule = false
+  private scheduling = false
   private nextLoopCtx: number | null = null
   private nextLoopSample = 0
   private nextMetroSample = 0
@@ -420,7 +432,14 @@ export class AudioEngine {
     this.remoteDelay.connect(this.speakerGain)
     this.talkBus.connect(this.talkAnalyser)
     this.talkAnalyser.connect(this.speakerGain)
-    this.speakerGain.connect(ctx.destination)
+    this.safety = ctx.createDynamicsCompressor()
+    this.safety.threshold.value = -1.5
+    this.safety.knee.value = 6
+    this.safety.ratio.value = 20
+    this.safety.attack.value = 0.003
+    this.safety.release.value = 0.08
+    this.speakerGain.connect(this.safety)
+    this.safety.connect(ctx.destination)
     this.metroGain.connect(this.localBus)
     this.drumTable = residentDrums(ctx.sampleRate)
     this.drumBuffers = this.drumTable.map((drum) => {
@@ -481,7 +500,36 @@ export class AudioEngine {
       return { sampleRate: asset.sampleRate, channel }
     })
     this.applyMixerAutomation()
-    if (loopFlip && this.playing && this.mode === 'arrangement') this.rearmLoop()
+    const loopStart = project.loopStartSample
+    const loopEnd = project.loopEndSample
+    const firstSpan = this.loopSpanStart < 0
+    const spanChanged = !firstSpan && (this.loopSpanStart !== loopStart || this.loopSpanEnd !== loopEnd)
+    this.loopSpanStart = loopStart
+    this.loopSpanEnd = loopEnd
+    if (spanChanged && this.ctx) {
+      if (this.playing) {
+        const linear = Math.max(0, this.sampleAt(this.ctx.currentTime))
+        this.positionSamples = this.heardSample(linear)
+        this.loopAudioDirty = this.mode === 'arrangement'
+        this.emit()
+      } else if (project.loopEnabled) {
+        const heard = transportSample(this.positionSamples, project)
+        if (Math.abs(heard - this.positionSamples) > 0.5) {
+          this.positionSamples = heard
+          this.emit()
+        }
+      }
+    }
+    if (loopFlip && this.playing && this.mode === 'arrangement') {
+      this.loopAudioDirty = false
+      this.rearmLoop()
+    } else if (this.loopAudioDirty) {
+      this.applyLoopAudio()
+      if (this.pendingSchedule) {
+        this.pendingSchedule = false
+        this.scheduleAhead()
+      }
+    }
   }
 
   /** Faders, pans, sends, and solo follow the project. Playing lanes are scheduled on the audio clock. */
@@ -562,25 +610,37 @@ export class AudioEngine {
     this.scalerMidi = []
   }
 
-  previewRack(trackId: string, pitch: number, slide = false, hold = false) {
+  previewRack(trackId: string, pitch: number, slide = false, hold = false, velocity = 0.9) {
     this.unlock()
     if (this.project) this.sync(this.project, this.assetOf)
     const when = (this.ctx?.currentTime ?? 0) + (hold ? 0 : 0.03)
+    const level = Math.max(0.05, Math.min(1, velocity))
     const track = this.project?.tracks.find((item) => item.id === trackId)
+    const sampler = samplerInsert(track)
+    if (sampler) {
+      this.rack.trigger(sampler.id, pitch, level)
+      if (!hold) window.setTimeout(() => this.rack.trigger(sampler.id, pitch, 0), 350)
+      return
+    }
     if (track?.instrument === 'library') {
       if (track.library) {
-        this.libraryHost.note(trackId, pitch, 0.9, when)
+        this.libraryHost.note(trackId, pitch, level, when)
         if (!hold) this.libraryHost.note(trackId, pitch, 0, when + 0.35)
       }
       return
     }
-    this.rackHost.note(trackId, pitch, 0.9, when, slide)
+    this.rackHost.note(trackId, pitch, level, when, slide)
     if (!hold) this.rackHost.note(trackId, pitch, 0, when + 0.35)
   }
 
   releaseRack(trackId: string, pitch: number) {
     const when = this.ctx?.currentTime ?? 0
     const track = this.project?.tracks.find((item) => item.id === trackId)
+    const sampler = samplerInsert(track)
+    if (sampler) {
+      this.rack.trigger(sampler.id, pitch, 0)
+      return
+    }
     if (track?.instrument === 'library') {
       this.libraryHost.note(trackId, pitch, 0, when)
       return
@@ -710,11 +770,15 @@ export class AudioEngine {
     return this.rack.spectrum(pluginId)
   }
 
-  previewSample(pluginId: string, note: number) {
+  previewSample(pluginId: string, note: number, velocity = 0.85) {
     this.unlock()
     if (this.project) this.sync(this.project, this.assetOf)
-    this.rack.trigger(pluginId, note, 0.85)
-    window.setTimeout(() => this.rack.trigger(pluginId, note, 0), 280)
+    if (velocity <= 0) {
+      this.rack.trigger(pluginId, note, 0)
+      return
+    }
+    const level = Math.max(0.05, Math.min(1, velocity))
+    this.rack.trigger(pluginId, note, level)
   }
 
   takeLoop(pluginId: string) {
@@ -1432,6 +1496,12 @@ export class AudioEngine {
         src.buffer = buffer
         src.connect(strip.input)
         src.start(0)
+      } else if (samplerInsert(heard.voice)) {
+        for (const item of heard.notes) {
+          const span = beatSpanSamples(project, item.startBeat, item.note.durationBeats)
+          if (span.start >= end) continue
+          this.scheduleVoice(offline, strip, item.note, span.start / rate, span.duration / rate, heard.voice)
+        }
       } else if (track.instrument === 'scaler' && heard.voice.instrument === 'drum-machine') {
         for (const item of heard.notes) {
           const span = beatSpanSamples(project, item.startBeat, item.note.durationBeats)
@@ -1704,16 +1774,24 @@ export class AudioEngine {
   }
 
   private scheduleAhead() {
-    if (!this.ctx) return
-    const now = this.ctx.currentTime
-    const horizon = now + 0.35
-    if (this.beatPump) this.beatPump(now, horizon)
-    if (!this.playing || !this.project) return
-    this.refreshClockAnchor()
-    this.scheduleMetronome(horizon)
-    if (this.mode === 'session') this.scheduleSession(horizon)
-    else this.scheduleArrangement(horizon)
-    if (this.mode === 'arrangement') this.primeLibraryAhead()
+    if (!this.ctx || this.scheduling) return
+    this.scheduling = true
+    try {
+      this.applyLoopAudio()
+      if (this.pendingSchedule) this.pendingSchedule = false
+      if (!this.ctx) return
+      const now = this.ctx.currentTime
+      const horizon = now + 0.35
+      if (this.beatPump) this.beatPump(now, horizon)
+      if (!this.playing || !this.project) return
+      this.refreshClockAnchor()
+      this.scheduleMetronome(horizon)
+      if (this.mode === 'session') this.scheduleSession(horizon)
+      else this.scheduleArrangement(horizon)
+      if (this.mode === 'arrangement') this.primeLibraryAhead()
+    } finally {
+      this.scheduling = false
+    }
   }
 
   private scheduleMetronome(horizon: number) {
@@ -1749,6 +1827,12 @@ export class AudioEngine {
 
   /** Restart arrangement playback at the wrapped playhead so a loop toggle takes effect immediately. */
   private rearmLoop() {
+    this.retargetPlayingLoop()
+    this.scheduleAhead()
+  }
+
+  /** Drop queued arrangement audio and park the clock on the wrapped playhead. Does not schedule. */
+  private retargetPlayingLoop() {
     const ctx = this.ctx
     const project = this.project
     if (!ctx || !project || !this.playing) return
@@ -1760,8 +1844,54 @@ export class AudioEngine {
     this.positionSamples = sample
     this.arrangementScheduled = false
     this.nextLoopCtx = null
+    this.loopQueuedUntil = 0
+    this.loopQueuedCtx = 0
     this.nextMetroSample = clickAtOrAfter(project, sample)
-    this.scheduleAhead()
+  }
+
+  /**
+   * Follow a loop-bound change on the audio scheduler. Extending schedules only the
+   * extra span. Crossing the playhead restarts from the wrapped sample.
+   */
+  private applyLoopAudio() {
+    if (!this.loopAudioDirty || !this.ctx || !this.project || !this.playing) return
+    const project = this.project
+    if (this.mode !== 'arrangement' || !project.loopEnabled || emptyPatternLoopSamples(project) > 16) {
+      this.loopAudioDirty = false
+      return
+    }
+    const nowLinear = Math.max(0, this.sampleAt(this.ctx.currentTime))
+    const wrapQueued = this.nextLoopSample === project.loopStartSample
+      && this.nextLoopCtx != null
+      && this.nextLoopCtx <= this.ctx.currentTime + 0.45
+    const plan = planLoopAudio(project, {
+      nowLinear,
+      scheduledUntil: this.loopQueuedUntil > 0 ? this.loopQueuedUntil : null,
+      wrapQueued,
+    })
+    if (plan.action === 'keep') {
+      this.loopAudioDirty = false
+      if (this.nextLoopCtx != null) this.nextLoopSample = project.loopStartSample
+      return
+    }
+    if (plan.action === 'extend' && this.loopQueuedCtx > this.ctx.currentTime - 0.02) {
+      this.loopAudioDirty = false
+      this.scheduleWindow(this.loopQueuedCtx, plan.from, plan.to)
+      const added = (plan.to - plan.from) / this.sampleRate
+      if (this.nextLoopCtx != null) this.nextLoopCtx += added
+      this.loopQueuedCtx += added
+      this.loopQueuedUntil = plan.to
+      this.nextLoopSample = project.loopStartSample
+      return
+    }
+    const heard = plan.action === 'restart' ? plan.from : transportSample(nowLinear, project)
+    const soon = (project.loopEndSample - heard) / this.sampleRate < 0.25
+    const outside = plan.action === 'restart' && plan.reason === 'outside'
+    if (!outside && !soon && this.ctx.currentTime - this.loopRestartAt < 0.1) return
+    this.loopAudioDirty = false
+    this.loopRestartAt = this.ctx.currentTime
+    this.retargetPlayingLoop()
+    this.pendingSchedule = true
   }
 
   private scheduleArrangement(horizon: number) {
@@ -1796,7 +1926,10 @@ export class AudioEngine {
     }
     while (this.nextLoopCtx < horizon) {
       const samples = Math.max(1, project.loopEndSample - this.nextLoopSample)
-      this.scheduleWindow(this.nextLoopCtx, this.nextLoopSample, this.nextLoopSample + samples)
+      const when = this.nextLoopCtx
+      this.scheduleWindow(when, this.nextLoopSample, this.nextLoopSample + samples)
+      this.loopQueuedUntil = this.nextLoopSample + samples
+      this.loopQueuedCtx = when + samples / this.sampleRate
       this.nextLoopCtx += samples / this.sampleRate
       this.nextLoopSample = project.loopStartSample
     }
@@ -1881,14 +2014,22 @@ export class AudioEngine {
           src.loopEnd = offset + (playRate === 1 ? dur : audio.durationSamples / buffer.sampleRate)
         }
         const gain = this.ctx.createGain()
-        gain.gain.value = audio.gain
+        const peak = Math.max(0.0001, audio.gain)
+        gain.gain.setValueAtTime(0.0001, startWhen)
+        gain.gain.exponentialRampToValueAtTime(peak, startWhen + 0.008)
         src.connect(gain)
         gain.connect(strip.input)
         if (looping) src.start(startWhen, offset)
         else src.start(startWhen, offset, playRate === 1 ? dur : dur / rate)
         this.trackNodes(trackId, {
           stop: (at?: number) => {
-            try { src.stop(at) } catch { /* already stopped */ }
+            const now = at ?? this.ctx?.currentTime ?? startWhen
+            try {
+              gain.gain.cancelScheduledValues(now)
+              gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), now)
+              gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.012)
+            } catch { /* already stopped */ }
+            try { src.stop(now + 0.02) } catch { /* already stopped */ }
           },
           disconnect: () => {
             src.disconnect()
@@ -2611,15 +2752,18 @@ export class AudioEngine {
     src.playbackRate.value = 2 ** ((color?.tune || 0) / 12)
     filter.type = 'lowpass'
     filter.frequency.value = 180 + (color?.filter == null ? 1 : color.filter) * 8000
-    gain.gain.value = Math.max(0.05, Math.min(1, velocity))
+    const peak = Math.max(0.05, Math.min(1, velocity))
     src.connect(filter)
     filter.connect(gain)
     gain.connect(this.speakerGain)
     const decay = color?.decay == null ? 1 : Math.max(0.05, color.decay)
     const startAt = when ?? ctx.currentTime
-    const stop = () => {
-      try { src.stop() } catch { /* already stopped */ }
-    }
+    gain.gain.setValueAtTime(0.0001, startAt)
+    gain.gain.exponentialRampToValueAtTime(peak, startAt + 0.004)
+    const stopAt = startAt + buffer.duration * decay
+    gain.gain.setValueAtTime(peak, Math.max(startAt + 0.006, stopAt - 0.012))
+    gain.gain.exponentialRampToValueAtTime(0.0001, stopAt)
+    const stop = () => fadeSource(ctx, gain, src)
     this.oneShots.push({ pitch, when: startAt, stop })
     src.onended = () => {
       this.oneShots = this.oneShots.filter((shot) => shot.stop !== stop)
@@ -2641,14 +2785,17 @@ export class AudioEngine {
     const gain = ctx.createGain()
     src.buffer = buffer
     src.playbackRate.value = 2 ** ((color?.tune || 0) / 12)
-    gain.gain.value = Math.max(0.05, Math.min(1, velocity))
+    const peak = Math.max(0.05, Math.min(1, velocity))
     src.connect(gain)
     gain.connect(this.speakerGain)
     const decay = color?.decay == null ? 1 : Math.max(0.05, color.decay)
     const startAt = when ?? ctx.currentTime
-    const stop = () => {
-      try { src.stop() } catch { /* already stopped */ }
-    }
+    gain.gain.setValueAtTime(0.0001, startAt)
+    gain.gain.exponentialRampToValueAtTime(peak, startAt + 0.004)
+    const stopAt = startAt + buffer.duration * decay
+    gain.gain.setValueAtTime(peak, Math.max(startAt + 0.006, stopAt - 0.012))
+    gain.gain.exponentialRampToValueAtTime(0.0001, stopAt)
+    const stop = () => fadeSource(ctx, gain, src)
     this.oneShots.push({ pitch: this.drumTable[index]?.pitch ?? -1, when: startAt, stop })
     src.onended = () => {
       this.oneShots = this.oneShots.filter((shot) => shot.stop !== stop)
@@ -2664,6 +2811,14 @@ export class AudioEngine {
       this.previewPatch(trackId, pitch, true, velocity)
       return
     }
+    if (samplerInsert(track)) {
+      this.previewRack(trackId, pitch, false, true, velocity)
+      return
+    }
+    if (track?.rack && track.instrument !== 'drum-machine' && track.instrument !== '808') {
+      this.previewRack(trackId, pitch, false, true, velocity)
+      return
+    }
     const previous = this.liveTrackId
     this.liveTrackId = trackId
     this.liveNoteOn(pitch, velocity)
@@ -2674,6 +2829,10 @@ export class AudioEngine {
     const track = this.project?.tracks.find((item) => item.id === trackId)
     if (track?.instrument === 'library' && track.library) {
       this.previewPatch(trackId, pitch, false)
+      return
+    }
+    if (samplerInsert(track) || (track?.rack && track.instrument !== 'drum-machine' && track.instrument !== '808')) {
+      this.releaseRack(trackId, pitch)
       return
     }
     const previous = this.liveTrackId
@@ -2865,8 +3024,10 @@ export class AudioEngine {
     voice.age = 0
     const at = when ?? this.ctx.currentTime
     voice.osc.frequency.setValueAtTime(440 * 2 ** ((pitch + tune - 69) / 12), at)
+    const level = Math.max(0.001, velocity * 0.2)
     voice.gain.gain.cancelScheduledValues(at)
-    voice.gain.gain.setValueAtTime(Math.max(0.001, velocity * 0.2), at)
+    voice.gain.gain.setValueAtTime(0.0001, at)
+    voice.gain.gain.exponentialRampToValueAtTime(level, at + 0.004)
   }
 
   private attachKeys() {
@@ -3225,6 +3386,32 @@ export class AudioEngine {
       track = routed.voice
       strip = this.strips.get(routed.liveStripId) ?? strip
     }
+    const sampler = samplerInsert(track)
+    if (sampler?.sampler) {
+      this.sendMidiNote(note, when, dur, ctx)
+      if (ctx === this.ctx) {
+        this.rack.schedule(sampler.id, note.pitch, note.velocity, when)
+        this.rack.schedule(sampler.id, note.pitch, 0, when + Math.max(0.02, dur))
+        return
+      }
+      const asset = this.assetOf(sampler.sampler.bufferId)
+      const channel = asset?.channels[0]
+      if (channel?.length) {
+        const length = Math.max(1, Math.ceil((dur + 0.3) * ctx.sampleRate))
+        const rendered = renderSamplerSpan(sampler, channel, [
+          { time: 0, pitch: note.pitch, vel: note.velocity },
+          { time: dur, pitch: note.pitch, vel: 0 },
+        ], ctx.sampleRate, length)
+        const audio = ctx.createBuffer(2, rendered[0].length, ctx.sampleRate)
+        audio.copyToChannel(new Float32Array(rendered[0]), 0)
+        audio.copyToChannel(new Float32Array(rendered[1]), 1)
+        const src = ctx.createBufferSource()
+        src.buffer = audio
+        src.connect(strip.input)
+        src.start(Math.max(0, when))
+      }
+      return
+    }
     this.sendMidiNote(note, when, dur, ctx)
     if (track?.instrument === 'pads') {
       this.playPadNote(ctx, strip, track, {
@@ -3362,12 +3549,27 @@ export class AudioEngine {
   }
 }
 
+function samplerInsert(track: Track | undefined) {
+  if (!track || track.instrument !== 'sampler') return null
+  return track.plugins.find((plugin) => plugin.pluginId === 'sampler' && plugin.enabled && plugin.sampler?.bufferId) ?? null
+}
+
+function fadeSource(ctx: AudioContext, gain: GainNode, src: AudioBufferSourceNode) {
+  const now = ctx.currentTime
+  try {
+    gain.gain.cancelScheduledValues(now)
+    gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), now)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.012)
+  } catch { /* the node is already gone */ }
+  try { src.stop(now + 0.02) } catch { /* already stopped */ }
+}
+
 function openContext(sampleRate?: number) {
   const options: AudioContextOptions[] = []
-  if (sampleRate) options.push({ latencyHint: 0, sampleRate })
-  options.push({ latencyHint: 0 })
   if (sampleRate) options.push({ latencyHint: 'interactive', sampleRate })
   options.push({ latencyHint: 'interactive' })
+  if (sampleRate) options.push({ latencyHint: 'balanced', sampleRate })
+  options.push({ latencyHint: 'balanced' })
   let last: unknown
   for (const option of options) {
     try {

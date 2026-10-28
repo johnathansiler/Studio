@@ -8,10 +8,6 @@
   display: flex;
   flex-direction: column;
   color: var(--text);
-  background:
-    radial-gradient(circle at 12% 0%, rgba(115, 196, 143, 0.16), transparent 42%),
-    linear-gradient(180deg, #2a3830 0%, #18211c 88px, #121916 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 .mpc-top {
@@ -35,22 +31,8 @@
 .mpc-params button,
 .mpc-params select,
 .mpc-params input {
-  border: 1px solid #0d1210;
-  border-radius: 8px;
-  background-color: #222c26;
-  background-image: var(--face);
-  color: var(--text);
-  box-shadow: var(--raised);
   min-height: 32px;
-}
-
-.mpc-top button.on,
-.mpc-params button.on,
-.mpc-top button[aria-pressed='true'],
-.mpc-params button[aria-pressed='true'] {
-  background-color: var(--accent);
-  color: var(--accent-ink);
-  box-shadow: var(--pressed), var(--glow);
+  color: var(--text);
 }
 
 .mpc-close {
@@ -65,8 +47,6 @@
   font-size: 12px;
   letter-spacing: 0.04em;
   color: var(--muted);
-  background: #101814;
-  box-shadow: var(--recessed);
 }
 
 .mpc-tool[data-tool='Record'],
@@ -98,7 +78,7 @@
   gap: 8px;
 }
 
-.mpc-pad {
+.mpc-pad.ch-raised {
   min-width: 0;
   min-height: 64px;
   padding: 8px 6px;
@@ -111,14 +91,11 @@
   text-align: center;
   touch-action: none;
   user-select: none;
-  background:
+  background-color: #24352c;
+  background-image:
     radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.28), transparent 52%),
-    linear-gradient(180deg, #4d6156 0%, #2c3b33 46%, #1a2420 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.4),
-    inset 0 -10px 14px rgba(0, 0, 0, 0.38),
-    0 2px 0 #0c100e,
-    0 8px 16px rgba(0, 0, 0, 0.35);
+    var(--face);
+  box-shadow: var(--raised), inset 0 -10px 14px rgba(0, 0, 0, 0.38), 0 8px 16px rgba(0, 0, 0, 0.35);
 }
 
 .mpc-pad span {
@@ -145,13 +122,10 @@
 .mpc-pad.lit,
 .mpc-pad:active {
   transform: translateY(1px);
-  background:
-    radial-gradient(circle at 50% 42%, rgba(210, 255, 220, 0.72), transparent 58%),
-    linear-gradient(180deg, #b6f0c8 0%, #3d9a62 55%, #1d5a38 100%);
+  background-color: #3d9a62;
+  background-image: radial-gradient(circle at 50% 42%, rgba(210, 255, 220, 0.72), transparent 58%), var(--face);
   color: #062012;
-  box-shadow:
-    inset 0 2px 8px rgba(0, 0, 0, 0.35),
-    0 0 18px rgba(115, 196, 143, 0.9);
+  box-shadow: var(--pressed), var(--glow);
 }
 
 .mpc-pad.muted span { opacity: 0.45; }
@@ -163,8 +137,6 @@
   gap: 8px;
   padding: 10px;
   border-radius: 12px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.2));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), var(--recessed);
 }
 
 .mpc-params h3 {
