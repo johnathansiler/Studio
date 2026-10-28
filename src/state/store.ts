@@ -1378,9 +1378,9 @@ export class ProjectStore {
     })
   }
 
-  addPerformedNotes(trackId: string, clipId: string, notes: Omit<MidiNote, 'id'>[], mode: 'overdub' | 'replace' = 'overdub', fixedBeats = 0) {
+  addPerformedNotes(trackId: string, clipId: string, notes: Omit<MidiNote, 'id'>[], mode: 'overdub' | 'replace' = 'overdub', fixedBeats = 0, coalesce = false) {
     if (!notes.length) return
-    this.mutate(() => {
+    const write = () => {
       const clip = this.track(trackId)?.midiClips.find((item) => item.id === clipId)
       if (!clip) return
       const fixed = fixedBeats > 0 ? fixedBeats : 0
@@ -1401,7 +1401,9 @@ export class ProjectStore {
         for (const note of incoming) end = Math.max(end, note.startBeat + note.durationBeats)
         clip.durationBeats = Math.max(clip.durationBeats, end)
       }
-    })
+    }
+    if (coalesce) this.draft(write)
+    else this.mutate(write)
   }
 
   setClipLength(trackId: string, clipId: string, beats: number) {
