@@ -1740,6 +1740,16 @@ html[data-posture="tabletop"] .shell .master-sheet {
 .shell.phone.land .slot { width: 100%; min-width: 0; max-width: 100%; }
 .library-panel { display: flex; flex-direction: column; gap: 6px; padding: 8px 8px 0; min-height: 0; overflow: auto; max-height: 46%; }
 .library-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.library-row select {
+  flex: 1 1 160px;
+  min-width: 0;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 0 8px;
+}
 .library-row button, .library-file {
   border: 1px solid var(--line);
   background: var(--panel-2);
@@ -1747,6 +1757,8 @@ html[data-posture="tabletop"] .shell .master-sheet {
   padding: 4px 8px;
 }
 .library-file { cursor: pointer; }
+.shell.phone .library-row select,
+.shell.phone .library-file { min-height: 44px; }
 .library-status { margin: 0; color: var(--muted); font-size: 12px; }
 .library-mics { display: flex; flex-wrap: wrap; gap: 8px; }
 .library-mics label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--muted); min-width: 72px; }
@@ -1831,6 +1843,36 @@ html[data-posture="tabletop"] .shell .master-sheet {
   left: auto; top: 0; width: min(420px, 46vw); max-height: 100dvh; bottom: 0;
   border-top: 0; border-left: 1px solid var(--line);
 }
+
+/* Plugins sit beside the work instead of covering the mixer. */
+.plugin-sheet {
+  top: 88px;
+  right: 8px;
+  bottom: 8px;
+  left: auto;
+  width: min(480px, calc(100vw - 280px));
+  max-height: none;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+.shell.phone .plugin-sheet,
+.shell.fold .plugin-sheet {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto !important;
+  max-height: 46vh;
+  border-radius: 16px 16px 0 0;
+}
+.shell.phone .plugin-sheet.tune-open,
+.shell.fold .plugin-sheet.tune-open,
+.shell.phone.land .plugin-sheet.tune-open {
+  max-height: 46vh;
+}
+.tune-resize { cursor: ew-resize; width: 14px; height: auto; top: 0; bottom: 0; right: auto; left: 0; }
+.shell.phone .tune-resize, .shell.fold .tune-resize { width: auto; height: 14px; right: 0; bottom: auto; cursor: ns-resize; }
 
 /* Shared bevel. Feature views inherit this without their own button skins. */
 button {
@@ -1936,3 +1978,30 @@ button:active:not(:disabled) {
     linear-gradient(180deg, #3a2a22, #1a120e);
 }
 .board-pop header strong { letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* Plugins sit beside the work instead of covering the mixer. */
+.plugin-sheet {
+  top: 88px;
+  right: 8px;
+  bottom: 8px;
+  left: auto;
+  width: min(480px, calc(100vw - 280px));
+  max-height: none;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+.shell.phone .plugin-sheet,
+.shell.fold .plugin-sheet {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto !important;
+  max-height: 46vh;
+  border-radius: 16px 16px 0 0;
+}
+.shell.phone.land .plugin-sheet.tune-open { max-height: 26dvh; }
+.tune-resize { cursor: ew-resize; width: 14px; height: auto; top: 0; bottom: 0; right: auto; left: 0; }
+.shell.phone .tune-resize,
+.shell.fold .tune-resize { width: auto; height: 14px; left: 0; right: 0; bottom: auto; cursor: ns-resize; }

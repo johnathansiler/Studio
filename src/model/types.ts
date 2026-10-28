@@ -43,6 +43,10 @@ export interface SamplerState {
   loopMode: number
   root: number
   slices: SampleZone[]
+  /** Captured or file rate. 0 plays the buffer at the engine rate. */
+  sourceRate?: number
+  /** Playback speed. 0.5 is half speed, 2 is double speed. */
+  speed?: number
 }
 
 export interface LooperLayer {
@@ -63,6 +67,13 @@ export interface LooperState {
   transport: number
   startBeat: number
   lengthSamples: number
+  /** Sample rate of the loop layers. 0 plays them at the engine rate. */
+  sourceRate?: number
+  /** Window inside the loop, as fractions of the buffer. Missing means the whole loop. */
+  start?: number
+  end?: number
+  loopStart?: number
+  loopEnd?: number
 }
 
 export interface PluginInstance {

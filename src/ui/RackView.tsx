@@ -46,7 +46,7 @@ export function RackView({ store, engine, trackId, onOpenKnock }: { store: Proje
   })
   return (
     <div className="rack">
-      {track.instrument === 'library' && <LibraryPanel store={store} engine={engine} trackId={track.id} />}
+      <LibraryPanel store={store} engine={engine} trackId={track.id} />
       <header>
         <strong>{track.name}</strong>
         <select aria-label="Add device" value="" onChange={(event) => event.target.value && store.addDevice(track.id, event.target.value as DeviceKind)}>
