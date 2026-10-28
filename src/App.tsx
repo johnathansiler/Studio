@@ -26,6 +26,7 @@ import { PerformPop } from './ui/PerformPop'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
 import { IdeasPop } from './ui/IdeasPop'
+import { GeneratePop } from './ui/GeneratePop'
 import { UnstuckSheet } from './unstuck/UnstuckSheet'
 import { LibraryPop } from './ui/LibraryPop'
 import { loadScaleCatalog } from './theory'
@@ -106,6 +107,7 @@ export function App() {
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
+  const [generateOpen, setGenerateOpen] = useState(() => new URLSearchParams(window.location.search).get('generate') === '1')
   const [unstuckOpen, setUnstuckOpen] = useState(() => new URLSearchParams(window.location.search).get('unstuck') === '1')
   const [libraryOpen, setLibraryOpen] = useState(() => new URLSearchParams(window.location.search).get('library') === '1')
   useEffect(() => {
@@ -1191,6 +1193,7 @@ async function importDropped(files: FileList) {
             <MenuRow label={copyOf(MENU_COPY, 'keys').label} hint={copyOf(MENU_COPY, 'keys').hint} onClick={() => { setMenuOpen(false); openPerform('keys') }} />
             <MenuRow label={copyOf(MENU_COPY, 'pads').label} hint={copyOf(MENU_COPY, 'pads').hint} onClick={() => { setMenuOpen(false); openPerform('drums') }} />
             <MenuRow label={copyOf(MENU_COPY, 'piano').label} hint={copyOf(MENU_COPY, 'piano').hint} disabled={!pianoTrack} onClick={() => { if (!pianoTrack) return; setMenuOpen(false); openPiano(pianoTrack.id) }} />
+            <MenuRow label={copyOf(MENU_COPY, 'generate').label} hint={copyOf(MENU_COPY, 'generate').hint} onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); setGenerateOpen(true) }} />
             <MenuRow label="Scales" hint="Browse scales and the chords inside them." onClick={() => { setMenuOpen(false); setLibraryOpen(true) }} />
             <MenuRow className="split" label={copyOf(MENU_COPY, 'quantize').label} hint={copyOf(MENU_COPY, 'quantize').hint} onClick={() => { setMenuOpen(false); store.quickQuantize() }} />
             <MenuRow label={copyOf(MENU_COPY, 'quantize-more').label} hint={copyOf(MENU_COPY, 'quantize-more').hint} onClick={() => { setMenuOpen(false); store.openQuantize() }} />
@@ -1325,7 +1328,7 @@ async function importDropped(files: FileList) {
             <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
           )}
           {surface === 'studio' && panel === 'piano' && (
-            <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onLibrary={() => setLibraryOpen(true)} />
+            <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => setGenerateOpen(true)} onLibrary={() => setLibraryOpen(true)} />
           )}
           {(surface !== 'studio' || panel === 'room') && (
             <VideoDock
@@ -1357,6 +1360,7 @@ async function importDropped(files: FileList) {
       <QuantizeSheet store={store} />
       {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
       {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}
+      {generateOpen && <GeneratePop store={store} engine={engine} onClose={() => setGenerateOpen(false)} />}
       {unstuckOpen && <UnstuckSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }} />}
       {libraryOpen && <LibraryPop store={store} engine={engine} onClose={() => setLibraryOpen(false)} />}
       {analysisTrackId && <AnalysisSheet store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} />}

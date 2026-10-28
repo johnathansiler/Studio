@@ -1,3 +1,5 @@
+import type { GeneratorSettings } from '../generators/types'
+import { activeScaleId } from '../generators/adapt'
 import type { ScaleState } from '../model/scale'
 import type { QuantizeSettings } from '../model/quantize'
 import type { PluginInstance, Project, Track } from '../model/types'
@@ -136,6 +138,19 @@ export function selectQuantize(store: Pick<Store, 'project' | 'quantizeOpen' | '
     draft: store.quantizeDraft,
     presets: store.project.quantizePresets ?? [],
     tempo: store.project.tempo,
+  }
+}
+
+export function selectGenerator(store: { project: Project; generatorState(): GeneratorSettings; scaleState(): ScaleState }) {
+  const scale = store.scaleState()
+  return {
+    project: store.project,
+    settings: store.generatorState(),
+    scale,
+    scaleId: activeScaleId(store.project),
+    tempo: store.project.tempo,
+    timeSignature: store.project.timeSignature,
+    tracks: store.project.tracks,
   }
 }
 
