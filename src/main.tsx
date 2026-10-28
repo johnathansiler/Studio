@@ -4,6 +4,7 @@ import { App } from './App'
 import './styles.css'
 import './ui/remoteFixes.css'
 import './ui/arrangeSpace.css'
+import './ui/premium.css'
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
