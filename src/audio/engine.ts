@@ -596,6 +596,11 @@ export class AudioEngine {
     return this.rack.keptLoop(pluginId)
   }
 
+  /** Restart a playing loop at its first sample. */
+  rewindLoop(pluginId: string) {
+    this.rack.rewindLoop(pluginId)
+  }
+
   meter(pluginId: string) {
     return this.rack.meter(pluginId)
   }
