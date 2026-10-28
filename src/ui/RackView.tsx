@@ -48,11 +48,11 @@ export function RackView({ store, engine, trackId, onOpenKnock }: { store: Proje
         {!sampled && (
           <div className="inst-devices" role="tablist" aria-label="Instrument devices">
             {rack.devices.map((item, index) => (
-              <button key={item.id} type="button" className={`bevel${item.id === device.id ? ' on' : ''}`} role="tab" aria-selected={item.id === device.id} title={DEVICE_NAMES[item.kind]} onClick={() => setSelected(index)}>{item.name}</button>
+              <button key={item.id} type="button" className={`bevel${item.id === device.id ? ' on' : ''}`} role="tab" aria-selected={item.id === device.id} title={item.name === DEVICE_NAMES[item.kind] ? DEVICE_NAMES[item.kind] : `${DEVICE_NAMES[item.kind]}. ${item.name}`} onClick={() => setSelected(index)}>{item.name === 'Init' ? DEVICE_NAMES[item.kind] : item.name}</button>
             ))}
           </div>
         )}
-        <button type="button" className="bevel" title="Close the instrument panel." onClick={() => store.openRack(track.id)}>Close</button>
+        <button type="button" className="bevel inst-close" aria-label="Close the instrument panel." title="Close the instrument panel." onClick={() => store.openRack(track.id)}>×</button>
       </header>
       {track.instrument === 'library' && <LibraryPanel store={store} engine={engine} trackId={track.id} />}
       {sampled ? (
