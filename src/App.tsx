@@ -27,6 +27,7 @@ import { PerformPop } from './ui/PerformPop'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
 import { IdeasPop } from './ui/IdeasPop'
+import { GeneratePop } from './ui/GeneratePop'
 import { QuantizeSheet } from './ui/QuantizeSheet'
 import { PianoRoll } from './ui/PianoRoll'
 import { KnockPop } from './ui/KnockPop'
@@ -100,6 +101,7 @@ export function App() {
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
+  const [generateOpen, setGenerateOpen] = useState(() => new URLSearchParams(window.location.search).get('generate') === '1')
   const [perform, setPerform] = useState<'keys' | 'drums' | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const projectFileRef = useRef<HTMLInputElement>(null)
@@ -298,6 +300,15 @@ export function App() {
       setSurface('studio')
       setPhonePane('edit')
       setIdeasOpen(true)
+    }
+    if (params.get('generate') === '1') {
+      const track = store.project.tracks.find((item) => item.type === 'midi')
+      if (track && !track.midiClips.length) store.addMidiClip(track.id, 0)
+      if (track) store.selectTrack(track.id)
+      store.setView('arrange')
+      setSurface('studio')
+      setPhonePane('edit')
+      setGenerateOpen(true)
     }
   }, [store])
 
@@ -1156,6 +1167,7 @@ async function importDropped(files: FileList) {
             <button type="button" onClick={() => { setMenuOpen(false); openPerform('keys') }}>Keys</button>
             <button type="button" onClick={() => { setMenuOpen(false); openPerform('drums') }}>Pads</button>
             <button type="button" disabled={!pianoTrack} onClick={() => { if (!pianoTrack) return; setMenuOpen(false); openPiano(pianoTrack.id) }}>Piano</button>
+            <button type="button" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setGenerateOpen(true) }}>Generate</button>
             <button type="button" className="split" onClick={() => { setMenuOpen(false); store.quickQuantize() }}>Quantize</button>
             <button type="button" onClick={() => { setMenuOpen(false); store.openQuantize() }}>Quantize…</button>
             <button type="button" className="split" aria-pressed={store.project.metronomeEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('metronomeEnabled')}>Click</button>
@@ -1279,7 +1291,7 @@ async function importDropped(files: FileList) {
             <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
           )}
           {surface === 'studio' && panel === 'piano' && (
-            <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />
+            <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => setGenerateOpen(true)} />
           )}
           {(surface !== 'studio' || panel === 'room') && (
             <VideoDock
@@ -1310,6 +1322,7 @@ async function importDropped(files: FileList) {
       <QuantizeSheet store={store} />
       {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
       {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}
+      {generateOpen && <GeneratePop store={store} engine={engine} onClose={() => { engine.stopPreview(); setGenerateOpen(false) }} />}
       {perform && (
         <PerformPop
           mode={perform}

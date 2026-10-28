@@ -43,6 +43,7 @@ import {
 } from '../model/launch'
 import type { RollTool } from '../model/paint'
 import { defaultRoll } from '../model/paint'
+import type { GeneratedClip } from '../model/generate'
 import { progressionById, romanLine, starterParts } from '../model/progressions'
 import {
   defaultQuantize,
@@ -1774,6 +1775,50 @@ export class ProjectStore {
       this.project.tempo = progression.tempo
       this.selectedTrackId = chords.id
     })
+  }
+
+  /** Place a generated part on its track as one undoable MIDI clip. Notes stay where the generator put them. */
+  insertGenerated(clip: GeneratedClip, beat?: number) {
+    let clipId: string | null = null
+    this.mutate(() => {
+      let track = this.project.tracks.find((item) => item.type === 'midi' && item.name === clip.track)
+      if (!track) {
+        track = makeTrack({
+          name: clip.track,
+          type: 'midi',
+          color: clip.color,
+          input: 'none',
+          instrument: clip.instrument,
+        })
+        this.project.tracks.push(track)
+      } else if (clip.kind === 'drums' && !track.instrument) {
+        track.instrument = 'drum-machine'
+      }
+      const end = track.midiClips.reduce((max, item) => Math.max(max, item.startBeat + item.durationBeats), 0)
+      const start = beat == null ? Math.ceil(end * 4 - 1e-9) / 4 : Math.max(0, beat)
+      const length = Math.max(clip.bars * clip.beatsPerBar, 1)
+      const midi: MidiClip = {
+        id: uid('midi'),
+        name: clip.name,
+        startBeat: start,
+        durationBeats: length,
+        notes: clip.notes.map((note) => ({
+          id: uid('note'),
+          pitch: note.pitch,
+          startBeat: note.startBeat,
+          durationBeats: note.durationBeats,
+          velocity: note.velocity,
+        })),
+      }
+      track.midiClips.push(midi)
+      this.selectedMidiClipId = midi.id
+      this.selectedTrackId = track.id
+      this.selectedClipId = null
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
+      clipId = midi.id
+    })
+    return clipId
   }
 
   toggleFavorite(id: string) {

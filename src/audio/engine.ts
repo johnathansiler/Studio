@@ -4,7 +4,7 @@ import type { StretchMode } from './stretch/engine'
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
 import { compPieces, recordOffsetSamples } from '../model/comp'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
-import { residentDrums, type ResidentDrum } from '../model/drums'
+import { DRUM_PADS, residentDrums, type ResidentDrum } from '../model/drums'
 import { calibrationTrim, contextTimeForEvent, monitoringOffset, type ClockStamp } from '../model/midiClock'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToBeats, samplesToMusical } from '../model/time'
@@ -119,6 +119,7 @@ export class AudioEngine {
   private talkGains = new Map<string, GainNode>()
 
   private sources: Stoppable[] = []
+  private previewStops: Stoppable[] = []
   private warpPcm = new Map<string, Float32Array[]>()
   private scheduler = 0
   private raf = 0
@@ -750,6 +751,7 @@ export class AudioEngine {
   }
 
   async play(fromSample: number, mode: 'arrangement' | 'session' = 'arrangement') {
+    this.stopPreview()
     await this.resume()
     const startAt = this.ctx!.currentTime + 0.05
     this.startTransport(startAt, fromSample, mode)
@@ -765,6 +767,7 @@ export class AudioEngine {
   }
 
   async playAtPerf(sample: number, perfMs: number, mode: 'arrangement' | 'session' = 'arrangement') {
+    this.stopPreview()
     await this.resume()
     this.refreshClockAnchor()
     const ctx = this.ctx!
@@ -2233,6 +2236,72 @@ export class AudioEngine {
   }
 
   /** Local audition only. Stays on the speaker and never enters the cue or mic path. */
+  stopPreview() {
+    for (const item of this.previewStops) {
+      try { item.stop() } catch { /* already stopped */ }
+      try { item.disconnect() } catch { /* already disconnected */ }
+    }
+    this.previewStops = []
+  }
+
+  /** Audition a generated clip on the speakers. Drums use the resident kit. */
+  previewClip(notes: { pitch: number; startBeat: number; durationBeats: number; velocity: number }[], tempo: number, drums = false) {
+    this.unlock()
+    this.stopPreview()
+    const ctx = this.ctx
+    const out = this.speakerGain
+    if (!ctx || !out || !notes.length) return
+    const now = ctx.currentTime + 0.05
+    const beat = 60 / Math.max(40, Math.min(300, tempo || 120))
+    const bus = ctx.createGain()
+    bus.gain.value = drums ? 0.9 : 0.32
+    bus.connect(out)
+    this.previewStops.push({
+      stop: () => { try { bus.disconnect() } catch { /* already stopped */ } },
+      disconnect: () => { try { bus.disconnect() } catch { /* already disconnected */ } },
+    })
+    for (const note of notes) {
+      const when = now + Math.max(0, note.startBeat) * beat
+      const dur = Math.max(0.04, Math.min(2.4, note.durationBeats * beat * (drums ? 0.45 : 0.92)))
+      if (drums) this.previewDrum(ctx, bus, note.pitch, note.velocity, when, dur)
+      else this.previewTone(ctx, bus, note.pitch, note.velocity, when, dur)
+    }
+  }
+
+  private previewTone(ctx: AudioContext, bus: GainNode, pitch: number, velocity: number, when: number, dur: number) {
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = 'triangle'
+    osc.frequency.value = 440 * 2 ** ((Math.round(pitch) - 69) / 12)
+    const peak = Math.max(0.02, Math.min(0.2, 0.12 * velocity))
+    gain.gain.setValueAtTime(0.0001, when)
+    gain.gain.exponentialRampToValueAtTime(peak, when + 0.01)
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + dur)
+    osc.connect(gain)
+    gain.connect(bus)
+    osc.start(when)
+    osc.stop(when + dur + 0.02)
+    this.previewStops.push(osc)
+  }
+
+  private previewDrum(ctx: AudioContext, bus: GainNode, pitch: number, velocity: number, when: number, dur: number) {
+    const index = this.drumTable.findIndex((drum) => drum.pitch === Math.round(pitch))
+    const buffer = index >= 0 ? this.drumBuffers[index] : undefined
+    if (buffer) {
+      const src = ctx.createBufferSource()
+      const gain = ctx.createGain()
+      src.buffer = buffer
+      gain.gain.value = Math.max(0.08, Math.min(1, velocity))
+      src.connect(gain)
+      gain.connect(bus)
+      src.start(when)
+      src.stop(when + Math.min(buffer.duration, Math.max(dur, 0.12)))
+      this.previewStops.push(src)
+      return
+    }
+    this.previewTone(ctx, bus, pitch, velocity * 0.5, when, Math.min(0.12, dur))
+  }
+
   previewPitches(pitches: number[]) {
     const ctx = this.ctx
     const out = this.speakerGain
@@ -2266,12 +2335,51 @@ export class AudioEngine {
     }
   }
 
+  private playDrumBuffer(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, bucket?: Stoppable[]) {
+    if (ctx !== this.ctx) return false
+    const index = this.drumTable.findIndex((drum) => drum.pitch === Math.round(note.pitch))
+    const buffer = index >= 0 ? this.drumBuffers[index] : undefined
+    if (!buffer) return false
+    const src = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    src.buffer = buffer
+    gain.gain.setValueAtTime(Math.max(0.05, Math.min(1, note.velocity)), when)
+    src.connect(gain)
+    gain.connect(strip.input)
+    src.start(when)
+    src.stop(when + buffer.duration)
+    this.sources.push(src)
+    bucket?.push(src)
+    return true
+  }
+
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[]) {
     if (note.muted) return
     if (track?.rack && ctx === this.ctx) {
       const at = Math.max(when, ctx.currentTime)
       this.rackHost.note(track.id, note.pitch, note.velocity, at, !!note.slide)
       this.rackHost.note(track.id, note.pitch, 0, at + dur)
+      return
+    }
+    if (track?.instrument === 'drum-machine') {
+      if (this.playDrumBuffer(ctx, strip, note, when, bucket)) return
+      const pad = DRUM_PADS.find((item) => item.pitch === Math.round(note.pitch))
+      const kind = pad?.kind === 'kick' || pad?.kind === 'snare' || pad?.kind === 'clap' || pad?.kind === 'hat'
+        ? pad.kind
+        : pad?.kind === 'openhat' ? 'hat' : 'perc'
+      this.scheduleHit(ctx, strip, {
+        channelId: note.id,
+        kind,
+        output: track.id,
+        sampleId: null,
+        volume: 1,
+        pitch: note.pitch,
+        fine: note.fine || 0,
+        pan: note.pan || 0,
+        startBeat: note.startBeat,
+        durationBeats: Math.max(0.05, note.durationBeats),
+        velocity: note.velocity,
+      }, when)
       return
     }
     if (ctx === this.ctx && when < ctx.currentTime) return
