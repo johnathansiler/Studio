@@ -198,7 +198,8 @@ export class LiveRack {
           continue
         }
         tap.proc.onaudioprocess = (event) => {
-          this.blockTime = event.playbackTime
+          const played = event.playbackTime
+          this.blockTime = played && Number.isFinite(played) ? played : (this.ctx?.currentTime ?? 0)
           this.processOwner(owner.id, event)
         }
       }

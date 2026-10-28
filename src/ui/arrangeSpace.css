@@ -80,13 +80,20 @@
 }
 .pl-head .piano-open span { line-height: 1; }
 .shell.phone .pl-head .piano-open {
-  width: 36px;
-  min-width: 36px;
-  height: 36px;
-  min-height: 36px;
-  padding: 0;
+  width: auto;
+  min-width: 0;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 6px;
+  font-size: 11px;
 }
-.shell.phone .pl-head .piano-open span { display: none; }
+.shell.phone .pl-head .piano-open span { display: inline; line-height: 1; }
+.shell.phone .pl-head .mini {
+  width: 28px;
+  min-width: 28px;
+  height: 32px;
+  min-height: 32px;
+}
 .mini-meter { width: 28px; height: 10px; border-radius: 3px; background: #0c110f; overflow: hidden; flex: none; }
 .mini-meter i { display: block; height: 100%; width: 100%; background: #73c48f; transform-origin: left center; }
 
