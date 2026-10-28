@@ -94,7 +94,6 @@ export function App() {
   const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight))
   const [land, setLand] = useState(() => window.innerWidth > window.innerHeight)
   const phone = form === 'phone'
-  const compact = form !== 'desk'
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
   const [pianoOpen, setPianoOpen] = useState(false)
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
@@ -489,6 +488,17 @@ export function App() {
   }, [session, store])
 
   useEffect(() => {
+    if (!menuOpen) return
+    const close = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest('.shell-menu, .menu-btn')) return
+      setMenuOpen(false)
+    }
+    window.addEventListener('pointerdown', close)
+    return () => window.removeEventListener('pointerdown', close)
+  }, [menuOpen])
+
+  useEffect(() => {
     const apply = () => {
       const next = formFactor(window.innerWidth, window.innerHeight)
       setForm(next)
@@ -596,7 +606,10 @@ export function App() {
       else if (key === 'l' && !meta) store.toggle('loopEnabled')
       else if (event.key === 'Home' || event.key === 'Enter') void locate(0)
       else if (event.key === '?' || (event.shiftKey && event.key === '/')) setHelp((open) => !open)
-      else if (event.key === 'Escape') setHelp(false)
+      else if (event.key === 'Escape') {
+        setHelp(false)
+        setMenuOpen(false)
+      }
       else if (event.key === '+' || event.key === '=' || event.key === '-') {
         event.preventDefault()
         window.dispatchEvent(new CustomEvent('cueharbor-zoom', { detail: event.key === '-' ? 0.87 : 1.15 }))
@@ -1068,7 +1081,15 @@ async function importDropped(files: FileList) {
   }
 
   const armedTrack = store.sessionSlot ? store.project.tracks.find((track) => track.id === store.sessionSlot?.trackId) : undefined
-  const showRoll = !!store.selectedMidiClipId && !pianoOpen && (store.view === 'arrange' || store.view === 'beats' || (store.view === 'session' && armedTrack?.type === 'midi'))
+  const rollWanted = !!store.selectedMidiClipId && (store.view === 'arrange' || store.view === 'beats' || (store.view === 'session' && armedTrack?.type === 'midi'))
+  const panel: 'room' | 'piano' | 'rack' =
+    surface !== 'studio' || phonePane === 'room' ? 'room'
+    : pianoOpen ? 'piano'
+    : store.rackTrackId ? 'rack'
+    : rollWanted ? 'piano'
+    : 'room'
+  const pianoTrack = store.project.tracks.find((track) => track.id === store.selectedTrackId && track.type === 'midi')
+    || store.project.tracks.find((track) => track.type === 'midi')
 
   function openPiano(trackId: string, clipId?: string) {
     const beat = samplesToBeats(engine.positionSamples, store.project.sampleRate, store.project.tempo)
@@ -1081,7 +1102,7 @@ async function importDropped(files: FileList) {
 
   return (
     <div
-      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''}`}
+      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''}`}
       style={{ ['--dock' as string]: `${dock}px` }}
       data-version={version}
       data-form={form}
@@ -1096,54 +1117,97 @@ async function importDropped(files: FileList) {
       <header className="topbar">
         <div className="brand">
           <div className="mark" aria-hidden>
-            <svg width="18" height="18" viewBox="0 0 18 18">
-              <path d="M2 12c2-4 3.4-6 7-6s5 2 7 6" fill="none" stroke="#73c48f" strokeWidth="1.6" strokeLinecap="round" />
-              <circle cx="9" cy="5.5" r="1.3" fill="#e0b15a" />
+            <svg width="16" height="16" viewBox="0 0 18 18">
+              <path d="M2 12c2-4 3.4-6 7-6s5 2 7 6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              <circle cx="9" cy="5.5" r="1.3" fill="currentColor" />
             </svg>
           </div>
-          <div>
-            <h1>CueHarbor</h1>
-          </div>
+          <h1>CueHarbor</h1>
         </div>
-        <input className="project-name" value={store.project.name} onChange={(event) => store.renameProject(event.target.value)} />
-        {!phone && (
-          <div className="views">
-            {(['arrange', 'mix', 'beats', 'session'] as const).map((view) => (
-              <button key={view} className={store.view === view ? 'active' : ''} onClick={() => { setSurface('studio'); store.setView(view) }}>
-                {view}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="spacer" />
-        {compact ? (
-          <button className="text-btn menu-btn" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
-            {menuOpen ? 'Close' : 'Menu'}
+        <input className="project-name" aria-label="Project name" value={store.project.name} onChange={(event) => store.renameProject(event.target.value)} />
+        <div className="views">
+          {(['arrange', 'mix', 'beats'] as const).map((view) => (
+            <button
+              key={view}
+              type="button"
+              className={surface === 'studio' && phonePane !== 'room' && store.view === view ? 'active' : ''}
+              onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView(view); setMenuOpen(false) }}
+            >
+              {view === 'arrange' ? 'Arrange' : view === 'mix' ? 'Mix' : 'Beats'}
+            </button>
+          ))}
+          <button
+            type="button"
+            className={surface === 'studio' && phonePane === 'room' ? 'active' : ''}
+            onClick={() => { setPianoOpen(false); setPhonePane('room'); setSurface('studio'); setMenuOpen(false) }}
+          >
+            Session
           </button>
-        ) : (
-          <div className="top-actions">
-            <button className="text-btn" onClick={() => void openProjects()}>Save</button>
-            <button className="text-btn" id="menu-export" onClick={() => setExportOpen(true)}>Export</button>
-            <button className="text-btn" onClick={() => setHelp(true)} title="Shortcuts" aria-label="Shortcuts">?</button>
-            <button className="text-btn" aria-label={surface === 'studio' ? 'Artist view' : 'Studio'} onClick={() => setSurface(surface === 'studio' ? 'artist' : 'studio')}>
+        </div>
+        <button type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu" aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
+          <MenuIcon />
+        </button>
+        {menuOpen && (
+          <div className="shell-menu" id="shell-menu">
+            <button type="button" id="menu-save" onClick={() => { setMenuOpen(false); void openProjects() }}>Save</button>
+            <button type="button" id="menu-export" onClick={() => { setMenuOpen(false); setExportOpen(true) }}>Export</button>
+            <button type="button" className="split" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }}>Clips</button>
+            <button type="button" onClick={() => { setMenuOpen(false); openPerform('keys') }}>Keys</button>
+            <button type="button" onClick={() => { setMenuOpen(false); openPerform('drums') }}>Pads</button>
+            <button type="button" disabled={!pianoTrack} onClick={() => { if (!pianoTrack) return; setMenuOpen(false); openPiano(pianoTrack.id) }}>Piano</button>
+            <button type="button" className="split" onClick={() => { setMenuOpen(false); store.quickQuantize() }}>Quantize</button>
+            <button type="button" onClick={() => { setMenuOpen(false); store.openQuantize() }}>Quantize…</button>
+            <button type="button" className="split" aria-pressed={store.project.metronomeEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('metronomeEnabled')}>Click</button>
+            <button type="button" aria-pressed={store.project.countIn} disabled={store.remoteFollow} onClick={() => store.toggle('countIn')}>Count-in</button>
+            <button type="button" aria-pressed={store.project.snap} disabled={store.remoteFollow} onClick={() => store.toggle('snap')}>Snap</button>
+            <label className="menu-sig">
+              Sig
+              <select
+                aria-label="Time signature"
+                value={`${store.project.timeSignature.numerator}/${store.project.timeSignature.denominator}`}
+                disabled={store.remoteFollow}
+                onChange={(event) => {
+                  const [n, d] = event.target.value.split('/').map(Number)
+                  store.setTimeSignature(n, d)
+                }}
+              >
+                {['4/4', '3/4', '6/8', '5/4', '7/8'].map((sig) => <option key={sig}>{sig}</option>)}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="split"
+              disabled={store.remoteFollow}
+              onClick={() => {
+                setMenuOpen(false)
+                setPhonePane('edit')
+                setSurface('studio')
+                if (store.transportMode === 'session') store.backToArrangement()
+                else store.enterSession()
+              }}
+            >
+              {store.transportMode === 'session' ? 'Arrangement' : 'Session view'}
+            </button>
+            <button type="button" disabled={store.remoteFollow} onClick={() => { setMenuOpen(false); store.captureToArrangement() }}>Capture</button>
+            <button
+              type="button"
+              className="split"
+              onClick={() => {
+                setMenuOpen(false)
+                if (surface === 'studio') {
+                  setSurface('artist')
+                  setPhonePane('room')
+                } else setSurface('studio')
+              }}
+            >
               {surface === 'studio' ? 'Artist' : 'Studio'}
             </button>
-            <button className="text-btn" aria-label={dockEdge === 'right' ? 'Dock bottom' : 'Dock right'} onClick={() => setDockEdge(dockEdge === 'right' ? 'bottom' : 'right')}>
-              {dockEdge === 'right' ? 'Bottom' : 'Side'}
-            </button>
-          </div>
-        )}
-        {compact && menuOpen && (
-          <div className="phone-menu">
-            <button className="text-btn" id="menu-save" onClick={() => { setMenuOpen(false); void openProjects() }}>Save</button>
-            <button className="text-btn" id="menu-export" onClick={() => { setMenuOpen(false); setExportOpen(true) }}>Export</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('beats') }}>Beats</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); store.openQuantize() }}>Quantize</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('session') }}>Clips</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); setHelp(true) }}>Shortcuts</button>
-            <button className="text-btn" onClick={() => { setMenuOpen(false); setSurface(surface === 'studio' ? 'artist' : 'studio'); setPhonePane('room') }}>
-              {surface === 'studio' ? 'Artist' : 'Studio'}
-            </button>
+            {!phone && (
+              <button type="button" aria-label={dockEdge === 'right' ? 'Dock bottom' : 'Dock right'} onClick={() => setDockEdge(dockEdge === 'right' ? 'bottom' : 'right')}>
+                {dockEdge === 'right' ? 'Bottom' : 'Side'}
+              </button>
+            )}
+            <button type="button" onClick={() => { setMenuOpen(false); setHelp(true) }}>Shortcuts</button>
           </div>
         )}
       </header>
@@ -1156,16 +1220,11 @@ async function importDropped(files: FileList) {
           onStop={() => void stop()}
           onRecord={() => void record()}
           onSeek={(sample) => void locate(sample)}
-          onSession={() => { setPhonePane('edit'); setSurface('studio'); store.enterSession() }}
-          onArrange={() => { setPhonePane('edit'); setSurface('studio'); store.backToArrangement() }}
-          onPiano={(trackId) => openPiano(trackId)}
-          onKeys={() => openPerform('keys')}
-          onDrums={() => openPerform('drums')}
-          onQuantize={() => store.openQuantize()}
         />
       )}
+      {surface === 'studio' && <div className="tool-slot" id="tool-slot" data-slot="timeline-tools" />}
       <div className={`workspace ${!phone && dockEdge === 'bottom' && surface === 'studio' ? 'dock-bottom' : ''}`}>
-        {surface === 'studio' && (!phone || phonePane === 'edit') && (
+        {surface === 'studio' && (
           <div className="main-pane">
             <div className="editor">
               {store.view === 'arrange' && (
@@ -1183,18 +1242,10 @@ async function importDropped(files: FileList) {
               {store.view === 'beats' && <BeatView store={store} engine={engine} />}
               {store.view === 'session' && <SessionView store={store} engine={engine} />}
             </div>
-            {store.view === 'arrange' && store.rackTrackId && form !== 'fold' && <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />}
-            {showRoll && form !== 'fold' && !store.rackTrackId && <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />}
           </div>
         )}
-        {form === 'fold' && surface === 'studio' && (showRoll || store.rackTrackId) && (
-          <div className="side-editor">
-            {store.rackTrackId ? <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} /> : <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />}
-          </div>
-        )}
-        {(!phone || phonePane === 'room' || surface === 'artist') && !(form === 'fold' && (showRoll || store.rackTrackId)) && (
         <div
-          className="dock-slot"
+          className="dock-slot panel-slot"
           onPointerDown={(event) => {
             const handle = (event.target as HTMLElement).closest('.dock-resize')
             if (!handle) return
@@ -1213,41 +1264,39 @@ async function importDropped(files: FileList) {
             window.addEventListener('pointerup', up)
           }}
         >
-          <VideoDock
-            simple={surface === 'artist'}
-            session={session}
-            engine={engine}
-            onCreate={() => {
-              engine.unlock()
-              session.primeMediaFromGesture()
-              setSurface('studio')
-              setPhonePane('room')
-              session.connect({ name: joinName || 'Engineer', create: true })
-            }}
-            onNewSession={() => {
-              engine.unlock()
-              session.primeMediaFromGesture()
-              setSurface('studio')
-              setPhonePane('room')
-              setMenuOpen(false)
-              session.connect({ name: joinName || 'Engineer', create: true, fresh: true })
-            }}
-            onJoin={() => setJoinOpen(true)}
-          />
+          {surface === 'studio' && panel === 'rack' && store.rackTrackId && (
+            <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
+          )}
+          {surface === 'studio' && panel === 'piano' && (
+            <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />
+          )}
+          {(surface !== 'studio' || panel === 'room') && (
+            <VideoDock
+              simple={surface === 'artist'}
+              session={session}
+              engine={engine}
+              onCreate={() => {
+                engine.unlock()
+                session.primeMediaFromGesture()
+                setSurface('studio')
+                setPhonePane('room')
+                session.connect({ name: joinName || 'Engineer', create: true })
+              }}
+              onNewSession={() => {
+                engine.unlock()
+                session.primeMediaFromGesture()
+                setSurface('studio')
+                setPhonePane('room')
+                setMenuOpen(false)
+                session.connect({ name: joinName || 'Engineer', create: true, fresh: true })
+              }}
+              onJoin={() => setJoinOpen(true)}
+            />
+          )}
         </div>
-        )}
       </div>
       <PluginSheet store={store} engine={engine} />
       <QuantizeSheet store={store} />
-      {pianoOpen && (
-        <div className="piano-pop" data-piano="open" role="dialog" aria-label="Piano">
-          <header>
-            <strong>Piano</strong>
-            <button type="button" aria-label="Close piano" onClick={() => setPianoOpen(false)}>×</button>
-          </header>
-          <PianoRoll store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} />
-        </div>
-      )}
       {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
       {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}
       {perform && (
@@ -1259,14 +1308,6 @@ async function importDropped(files: FileList) {
           onRecord={() => void record()}
           onClose={() => setPerform(null)}
         />
-      )}
-      {phone && (
-        <nav className="phone-tabs" aria-label="Sections">
-          <button className={phonePane === 'edit' && store.view === 'arrange' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setMenuOpen(false) }}>Arrange</button>
-          <button className={phonePane === 'edit' && store.view === 'mix' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('mix'); setMenuOpen(false) }}>Mix</button>
-          <button className={phonePane === 'edit' && store.view === 'beats' ? 'active' : ''} onClick={() => { setPhonePane('edit'); setSurface('studio'); store.setView('beats'); setMenuOpen(false) }}>Beats</button>
-          <button className={phonePane === 'room' ? 'active' : ''} onClick={() => { setPhonePane('room'); setSurface('studio'); setMenuOpen(false) }}>Session</button>
-        </nav>
       )}
       <input ref={fileRef} type="file" accept="audio/*" multiple hidden onChange={(event) => void importAudio(event.target.files)} />
       <input ref={projectFileRef} type="file" accept=".cueharbor,.json,application/json,application/zip" hidden onChange={(event) => void importProject(event.target.files?.[0] || null)} />
@@ -1405,6 +1446,14 @@ async function importDropped(files: FileList) {
         ))}
       </div>
     </div>
+  )
+}
+
+function MenuIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3 4.5h10M3 8h10M3 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
   )
 }
 
