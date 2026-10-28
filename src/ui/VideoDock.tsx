@@ -3,7 +3,10 @@ import { createRoot, type Root } from 'react-dom/client'
 import type { AudioEngine } from '../audio/engine'
 import type { Participant, SessionClient } from '../remote/session'
 import { mediaStatus } from '../model/media'
+import { CALL_COPY, copyOf } from './chrome'
+import { useFormFactor } from './form'
 import { ms } from './format'
+import { TipButton } from './Hint'
 
 export function VideoDock({
   session,
@@ -21,6 +24,8 @@ export function VideoDock({
   onNewSession: () => void
 }) {
   const state = session.state
+  const phone = useFormFactor() === 'phone'
+  const call = (id: string) => copyOf(CALL_COPY, id)
   const [tab, setTab] = useState<'people' | 'chat'>('people')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [draft, setDraft] = useState('')
@@ -149,21 +154,23 @@ export function VideoDock({
       <div className="dock-bar">
         <strong>{state.code ? `Session ${state.code}` : 'Session'}</strong>
         <span className="spacer" />
-        <button
-          className="icon-btn"
-          onClick={() => session.setMonitorMode(state.monitorMode === 'opus' ? 'pcm' : 'opus')}
-          title="Monitor path"
-          aria-label={state.monitorMode === 'opus' ? 'Opus monitor' : 'PCM monitor'}
-        >
-          {state.monitorMode === 'opus' ? 'Opus' : 'PCM'}
-        </button>
+        {!phone && (
+          <TipButton
+            className="icon-btn"
+            label={call('monitor').label}
+            hint={call('monitor').hint}
+            onClick={() => session.setMonitorMode(state.monitorMode === 'opus' ? 'pcm' : 'opus')}
+          >
+            {state.monitorMode === 'opus' ? 'Opus' : 'PCM'}
+          </TipButton>
+        )}
         <button className="icon-btn pop-out" onClick={(event) => void popOut(event)} title="Pop out" aria-label="Pop out">
           ⧉
         </button>
         {inRoom && (
-          <button type="button" id="new-session" className="text-btn" aria-label="New session" onClick={startNewSession}>
+          <TipButton id="new-session" className="text-btn" label={call('new').label} hint={call('new').hint} onClick={startNewSession}>
             New
-          </button>
+          </TipButton>
         )}
       </div>
       <div className="dock-body">
@@ -224,15 +231,11 @@ export function VideoDock({
       {state.status === 'idle' || state.status === 'error' ? (
         <div className="empty-session">
           {state.error && <p className="hint">{state.error}</p>}
-          <button type="button" className="text-btn primary" onClick={onCreate}>
-            Create invite
-          </button>
-          <button type="button" className="text-btn" id="join-with-code" aria-label="Join with a code" onClick={onJoin}>
-            Join
-          </button>
-          <button type="button" id="new-session" className="text-btn" aria-label="New session" onClick={startNewSession}>
+          <TipButton className="text-btn primary" label={call('create').label} hint={call('create').hint} onClick={onCreate} />
+          <TipButton id="join-with-code" className="text-btn" label={call('join').label} hint={call('join').hint} onClick={onJoin} />
+          <TipButton id="new-session" className="text-btn" label={call('new').label} hint={call('new').hint} onClick={startNewSession}>
             New
-          </button>
+          </TipButton>
         </div>
       ) : (
         <div className={`stage ${featured ? 'speaker' : 'gallery'}`}>
@@ -254,24 +257,24 @@ export function VideoDock({
         </div>
       )}
       <div className="call-controls">
-        <button className={`t-btn ${state.talkOn ? 'on' : ''}`} onClick={() => void session.setTalk(!state.talkOn)} title="Talkback" aria-label={state.talkOn ? 'Mic' : 'Mic off'}>
+        <TipButton className={`t-btn ${state.talkOn ? 'on' : ''}`} label={state.talkOn ? 'Mic on' : 'Mic off'} hint={call('mic').hint} pressed={state.talkOn} onClick={() => void session.setTalk(!state.talkOn)}>
           Mic
-        </button>
-        <button className={`t-btn ${state.camOn ? 'on' : ''}`} onClick={() => void session.setCam(!state.camOn)}>
+        </TipButton>
+        <TipButton className={`t-btn ${state.camOn ? 'on' : ''}`} label={call('cam').label} hint={call('cam').hint} pressed={state.camOn} onClick={() => void session.setCam(!state.camOn)}>
           Cam
-        </button>
-        <button className={`t-btn ${state.screenOn ? 'on' : ''}`} onClick={() => void session.setScreen(!state.screenOn)}>
+        </TipButton>
+        <TipButton className={`t-btn ${state.screenOn ? 'on' : ''}`} label={call('share').label} hint={call('share').hint} pressed={state.screenOn} onClick={() => void session.setScreen(!state.screenOn)}>
           Share
-        </button>
-        <button
-          type="button"
+        </TipButton>
+        <TipButton
           className={`t-btn ${settingsOpen ? 'on' : ''}`}
-          aria-label="Settings"
-          aria-expanded={settingsOpen}
+          label={call('settings').label}
+          hint={call('settings').hint}
+          pressed={settingsOpen}
           onClick={() => setSettingsOpen((open) => !open)}
         >
           <GearIcon />
-        </button>
+        </TipButton>
       </div>
       {settingsOpen && (
         <div className="settings-sheet">
@@ -279,7 +282,17 @@ export function VideoDock({
             Mon {one ? ms(one.ms, 0) : '—'} · Out {plainMs(engine.outputLatencyMs)} · In {plainMs(engine.inputLatencyMs)} · Loop {plainMs(state.loopbackMs)} · Ping {plainMs(state.audioPingMs)}
           </div>
           <div className="settings-actions">
-            <button className={`text-btn ${state.musicOn ? 'primary' : ''}`} onClick={() => void session.setMusic(!state.musicOn)} aria-label="Performance or cue send">
+            {phone && (
+              <TipButton
+                className="text-btn"
+                label={call('monitor').label}
+                hint={call('monitor').hint}
+                onClick={() => session.setMonitorMode(state.monitorMode === 'opus' ? 'pcm' : 'opus')}
+              >
+                {state.monitorMode === 'opus' ? 'Opus' : 'PCM'}
+              </TipButton>
+            )}
+            <button className={`text-btn ${state.musicOn ? 'primary' : ''}`} onClick={() => void session.setMusic(!state.musicOn)} aria-label="Performance or cue send. What the other people hear." title="What the other people hear.">
               {state.role === 'host' ? 'Cue' : 'Perf'}
             </button>
             <button className="text-btn" aria-label="Calibrate I/O" onClick={() => void session.calibrate()}>

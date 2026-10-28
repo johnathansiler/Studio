@@ -1,6 +1,10 @@
 /** Key, scale, chords, voicing, and performance patterns for the MIDI helper. */
 
+import type { VoicingId } from '../theory/types'
+
 export const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
+
+const VOICING_IDS: readonly VoicingId[] = ['close', 'drop2', 'drop3', 'drop24', 'spread', 'shell', 'rootless', 'quartal', 'cluster']
 
 export const SCALES = [
   { id: 'ionian', name: 'Major', intervals: [0, 2, 4, 5, 7, 9, 11] },
@@ -63,6 +67,12 @@ export interface ScaleState {
   timing: number
   velocity: number
   lastVoicing: number[]
+  /** Cent offsets parallel to `lastVoicing`, for microtonal voice leading. */
+  lastCents: number[]
+  /** Catalog scale id from `src/theory`. Empty uses the built-in `scale` field. */
+  library: string
+  /** Stacking recipe used by the scale library. */
+  voicing: VoicingId
   /** Id of the idea last dropped onto the chord, bass, and drum tracks. */
   idea: string
   favorites: string[]
@@ -146,6 +156,9 @@ export function defaultScale(): ScaleState {
     timing: 0.02,
     velocity: 0,
     lastVoicing: [],
+    lastCents: [],
+    library: '',
+    voicing: 'close',
     idea: '',
     favorites: [],
   }
@@ -171,6 +184,9 @@ export function normalizeScale(value: Partial<ScaleState> | undefined): ScaleSta
     timing: clamp(value.timing ?? base.timing, 0, 0.2),
     velocity: clamp(value.velocity ?? 0, 0, 1),
     lastVoicing: Array.isArray(value.lastVoicing) ? value.lastVoicing.filter((n) => Number.isFinite(n)) : [],
+    lastCents: Array.isArray(value.lastCents) ? value.lastCents.filter((n): n is number => Number.isFinite(n)) : [],
+    library: typeof value.library === 'string' ? value.library : '',
+    voicing: VOICING_IDS.includes(value.voicing as VoicingId) ? (value.voicing as VoicingId) : 'close',
     idea: typeof value.idea === 'string' ? value.idea : '',
     favorites: Array.isArray(value.favorites) ? value.favorites.filter((item): item is string => typeof item === 'string') : [],
   }

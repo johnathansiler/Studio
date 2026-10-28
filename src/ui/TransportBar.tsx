@@ -3,7 +3,10 @@ import type { AudioEngine } from '../audio/engine'
 import { emptyTap, pushTap, scaleTempo, tempoFromTaps, roundTempo, type TapMemory } from '../model/tap'
 import { formatMapBars } from '../model/tempoMap'
 import { formatTimecode } from '../model/time'
+import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
+import { TRANSPORT_COPY, copyOf } from './chrome'
+import { TipButton } from './Hint'
 
 export function TransportBar({
   store,
@@ -13,6 +16,8 @@ export function TransportBar({
   onStop,
   onRecord,
   onSeek,
+  simple = false,
+  takeProgress = null,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -21,8 +26,12 @@ export function TransportBar({
   onStop: () => void
   onRecord: () => void
   onSeek: (sample: number) => void
+  /** Phone: keep play, stop, record, and tempo. To-start and loop live in the menu. */
+  simple?: boolean
+  /** 0–1 while a full-quality guest take is moving to the host. */
+  takeProgress?: number | null
 }) {
-  const project = store.project
+  const project = selectTransport(store).project
   const [position, setPosition] = useState(engine.positionSamples)
   const [status, setStatus] = useState(engine.status)
   const [tapOpen, setTapOpen] = useState(false)
@@ -94,26 +103,45 @@ export function TransportBar({
 
   const readout = (shown ?? project.tempo).toFixed(whole || shown == null && Number.isInteger(project.tempo) ? 0 : 1)
   const playing = status === 'playing' || status === 'recording'
+  const transport = (id: string) => copyOf(TRANSPORT_COPY, id)
   return (
     <div className="transport">
       <div className="t-buttons">
-        <button type="button" className="t-btn" onClick={() => onSeek(0)} aria-label="Return to start">
-          <SkipBackIcon />
-        </button>
-        <button type="button" className={`t-btn play ${playing ? 'on' : ''}`} onClick={onPlay} aria-label="Play">
+        {!simple && (
+          <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>
+            <SkipBackIcon />
+          </TipButton>
+        )}
+        <TipButton className={`t-btn play ${playing ? 'on' : ''}`} label={transport('play').label} hint={transport('play').hint} pressed={playing} onClick={onPlay}>
           <PlayIcon />
-        </button>
-        <button type="button" className="t-btn stop" onClick={onStop} aria-label="Stop" disabled={status === 'stopped'}>
+        </TipButton>
+        <TipButton className="t-btn stop" label={transport('stop').label} hint={transport('stop').hint} disabled={status === 'stopped'} onClick={onStop}>
           <StopIcon />
-        </button>
-        <button type="button" className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} onClick={onRecord} aria-label="Record">
+        </TipButton>
+        <TipButton className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={status === 'recording' || status === 'counting-in'} onClick={onRecord}>
           <RecIcon />
-        </button>
+        </TipButton>
       </div>
       <div className="lcd" aria-live="polite">
         <div className="bars">{formatMapBars(project, position)}</div>
-        <div className="tc">{formatTimecode(position, project.sampleRate)} · {status}</div>
+        <div className="tc">
+          {formatTimecode(position, project.sampleRate)} · {status}
+          {takeProgress != null ? ` · HQ ${Math.round(takeProgress * 100)}%` : ''}
+        </div>
       </div>
+      {takeProgress != null && (
+        <div
+          className="hq-take"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(takeProgress * 100)}
+          aria-valuetext={`Full-quality take ${Math.round(takeProgress * 100)} percent`}
+          title="Full-quality take replacing the live guide"
+        >
+          <i style={{ width: `${Math.round(takeProgress * 100)}%` }} />
+        </div>
+      )}
       {tapOpen ? (
         <div className="tap-pad">
           <button type="button" className="bpm-readout" aria-label="Tap tempo" onPointerDown={(event) => register(event.timeStamp)}>
@@ -143,7 +171,8 @@ export function TransportBar({
         <button
           type="button"
           className="bpm-readout"
-          aria-label="BPM"
+          title={transport('tempo').hint}
+          aria-label={`${transport('tempo').label}. ${transport('tempo').hint}`}
           disabled={store.remoteFollow}
           onPointerDown={() => {
             held.current = false
@@ -163,16 +192,18 @@ export function TransportBar({
           {readout}
         </button>
       )}
-      <button
-        type="button"
-        className={`t-btn loop ${project.loopEnabled ? 'on' : ''}`}
-        aria-label="Loop"
-        aria-pressed={project.loopEnabled}
-        disabled={store.remoteFollow}
-        onClick={() => store.toggle('loopEnabled')}
-      >
-        <LoopIcon />
-      </button>
+      {!simple && (
+        <TipButton
+          className={`t-btn loop ${project.loopEnabled ? 'on' : ''}`}
+          label={transport('loop').label}
+          hint={transport('loop').hint}
+          pressed={project.loopEnabled}
+          disabled={store.remoteFollow}
+          onClick={() => store.toggle('loopEnabled')}
+        >
+          <LoopIcon />
+        </TipButton>
+      )}
       {syncLabel && <span className="sync-pill">{syncLabel}</span>}
     </div>
   )

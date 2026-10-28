@@ -1,41 +1,80 @@
-import { useSyncExternalStore } from 'react'
-import { ARRANGE_TOOLS, activeTool, keyForTool, subscribeTools, type ArrangeTool } from '../state/tools'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
+import {
+  ARRANGE_TOOLS,
+  TOOL_ACTIONS,
+  TOOL_INFO,
+  activeTool,
+  compactToolOrder,
+  keyForTool,
+  subscribeTools,
+  toolChip,
+  type ArrangeTool,
+} from '../state/tools'
+import { TipButton } from './Hint'
 
 export function ToolBar({
   onChange,
   onDuplicate,
   onDelete,
+  context = 'arrange',
+  compact = false,
 }: {
   onChange: (tool: ArrangeTool) => void
   onDuplicate: () => void
   onDelete: () => void
+  /** Piano wording when the roll is the editor in front of you. */
+  context?: 'arrange' | 'piano'
+  /** Phone and foldable: one sideways strip under the status line. */
+  compact?: boolean
 }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
+  const stripRef = useRef<HTMLDivElement>(null)
+  const shown = compact ? compactToolOrder() : ARRANGE_TOOLS.map((tool) => tool.id)
+  const chip = toolChip(value, context)
+  useEffect(() => {
+    const strip = stripRef.current
+    const button = strip?.querySelector<HTMLButtonElement>('button.on')
+    if (!strip || !button) return
+    const left = button.offsetLeft
+    const right = left + button.offsetWidth
+    if (left < strip.scrollLeft) strip.scrollLeft = left - 4
+    else if (right > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = right - strip.clientWidth + 4
+  }, [value])
   return (
-    <div className="timeline-tools" role="toolbar" aria-label="Tools">
-      {ARRANGE_TOOLS.map((tool) => {
-        const key = keyForTool(tool.id)
-        return (
-          <button
-            key={tool.id}
-            type="button"
-            className={`tool ${value === tool.id ? 'on' : ''}`}
-            aria-label={tool.label}
-            aria-pressed={value === tool.id}
-            title={key ? `${tool.label} (${key})` : tool.label}
-            onClick={() => onChange(tool.id)}
+    <div className="timeline-tools" role="toolbar" aria-label="Tools" data-active-tool={value} data-tool-context={context}>
+      <span className="tool-chip" role="status" aria-live="polite">
+        {chip}
+      </span>
+      <div className="tool-strip" ref={stripRef}>
+        {shown.map((id) => {
+          const info = TOOL_INFO[id]
+          const key = keyForTool(id)
+          const label = key ? `${info.label} (${key})` : info.label
+          return (
+            <TipButton
+              key={id}
+              className={`tool ${value === id ? 'on' : ''}`}
+              label={label}
+              hint={info.hint}
+              pressed={value === id}
+              onClick={() => onChange(id)}
+            >
+              <ToolIcon id={id} />
+            </TipButton>
+          )
+        })}
+        {TOOL_ACTIONS.map((action) => (
+          <TipButton
+            key={action.id}
+            className="tool"
+            label={action.label}
+            hint={action.hint}
+            onClick={action.id === 'duplicate' ? onDuplicate : onDelete}
           >
-            <ToolIcon id={tool.id} />
-          </button>
-        )
-      })}
-      <span className="tool-gap" />
-      <button type="button" className="tool" aria-label="Duplicate" title="Duplicate" onClick={onDuplicate}>
-        <ToolIcon id="duplicate" />
-      </button>
-      <button type="button" className="tool" aria-label="Delete" title="Delete" onClick={onDelete}>
-        <ToolIcon id="delete" />
-      </button>
+            <ToolIcon id={action.id} />
+          </TipButton>
+        ))}
+      </div>
     </div>
   )
 }

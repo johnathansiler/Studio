@@ -1,3 +1,4 @@
+import { patchBufferIds } from '../instruments/patch/model'
 import { computePeaks } from './demo'
 import { padFingerprint } from './padMachine'
 import type { AudioAsset, Project } from './types'
@@ -96,8 +97,13 @@ export function referencedBufferIds(project: Project): string[] {
       for (const lane of clip.folder?.lanes || []) ids.add(lane.bufferId)
     }
     for (const plugin of track.plugins ?? []) collectInstrumentBuffers(plugin, ids)
+    for (const sample of track.library?.samples ?? []) {
+      if (sample.bufferId) ids.add(sample.bufferId)
+      if (sample.packId) ids.add(sample.packId)
+    }
   }
   for (const plugin of project.masterPlugins ?? []) collectInstrumentBuffers(plugin, ids)
+  for (const id of patchBufferIds(project)) ids.add(id)
   return [...ids]
 }
 
@@ -179,6 +185,9 @@ export function arrangementDigest(project: Project): string {
         clip.folder?.activeCompId || '',
         (clip.folder?.lanes || []).map((lane) => lane.bufferId).join(','),
         (clip.folder?.comps.find((comp) => comp.id === clip.folder?.activeCompId)?.segments || []).map((segment) => `${segment.laneId}:${segment.startSample}:${segment.endSample}`).join('|'),
+        clip.spectral
+          ? [clip.spectral.enabled ? 1 : 0, clip.spectral.ops.map((op) => op.id).join(','), clip.spectral.renderedKey ?? '', Math.round((clip.spectral.noiseBands?.[0] ?? 0) * 1000)]
+          : 0,
       ]),
       midi: track.midiClips.map((clip) => [
         clip.id,
@@ -200,6 +209,7 @@ export function arrangementDigest(project: Project): string {
       midiSlots: track.midiSlots ?? null,
       rack: track.rack?.devices.map((device) => [device.id, device.kind, device.params, device.pattern, device.zones.length]),
       cables: track.rack?.cables.map((cable) => [cable.from, cable.fromPort, cable.to, cable.toPort, cable.amount]),
+      library: track.instrument === 'library' ? [track.library?.id ?? '', track.library?.zones.length ?? 0, track.library?.samples.length ?? 0] : null,
       instruments: (track.plugins ?? []).map((plugin) => [
         plugin.id,
         plugin.pluginId,
@@ -213,5 +223,18 @@ export function arrangementDigest(project: Project): string {
     })),
     pads: project.padKit ? padFingerprint(project.padKit) : '',
     presetFavorites: project.presetFavorites ?? [],
+    omni: omniFingerprint(project),
   })
+}
+
+function omniFingerprint(project: Project) {
+  const library = (project.omniLibrary ?? []).map((patch) => patch.id).join(',')
+  const tracks = project.tracks.map((track) => {
+    const patch = track.omniPatch
+    if (!patch) return ''
+    const layers = patch.layers.map((layer) => [layer.kind, layer.enabled ? 1 : 0, layer.level.toFixed(3), Math.round(layer.cutoff), layer.bufferId, layer.granular.position.toFixed(3), layer.granular.freeze ? 1 : 0].join('.')).join(';')
+    const routes = patch.routes.map((route) => `${route.source}:${route.target}:${route.depth.toFixed(2)}`).join(';')
+    return [patch.id, patch.enabled ? 1 : 0, patch.morph.x.toFixed(3), patch.morph.y.toFixed(3), patch.modWheel.toFixed(2), layers, routes].join(':')
+  }).join('/')
+  return `${library}|${tracks}`
 }

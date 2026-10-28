@@ -1,0 +1,37 @@
+.instrument-switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.instrument-switches button,
+.instrument-mute {
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.instrument-switches button.on,
+.instrument-mute.on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+
+.instrument-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.instrument-mic {
+  min-width: 88px;
+}
+
+.instrument-mic .instrument-mute {
+  align-self: flex-start;
+}

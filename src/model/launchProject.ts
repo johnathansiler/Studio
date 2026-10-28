@@ -1,3 +1,4 @@
+import { normalizePlayer } from '../players/settings'
 import { normalizeScale } from './scale'
 import { createEmptyProject, defaultRecord, type PluginInstance, type Project, type Track } from './types'
 
@@ -72,10 +73,13 @@ function signature(project: Project): string {
     devicePresets: project.devicePresets ?? [],
     rackPatches: project.rackPatches ?? [],
     rackAutomation: project.rackAutomation ?? [],
+    omniLibrary: (project.omniLibrary ?? []).map((patch) => patch.name),
     masterInserts: project.masterInserts ?? [],
     masterPlugins: meaningfulPlugins(project.masterPlugins ?? []),
     record,
     scale: normalizeScale(project.scale),
+    soundFavorites: project.soundFavorites ?? [],
+    players: normalizePlayer(project.players),
     tracks: project.tracks.map(trackSignature),
   })
 }
@@ -108,6 +112,27 @@ function trackSignature(track: Track) {
     clips: track.clips.map((clip) => [clip.bufferId, clip.startSample, clip.durationSamples, clip.gain]),
     midi: track.midiClips.map((clip) => [clip.startBeat, clip.durationBeats, clip.notes.map((note) => [note.pitch, note.startBeat, note.durationBeats, note.velocity])]),
     rack: track.rack?.devices.map((device) => device.kind) ?? [],
+    omni: track.omniPatch
+      ? {
+          name: track.omniPatch.name,
+          enabled: track.omniPatch.enabled,
+          x: track.omniPatch.morph.x,
+          y: track.omniPatch.morph.y,
+          wheel: track.omniPatch.modWheel,
+          layers: track.omniPatch.layers.map((layer) => [
+            layer.kind,
+            layer.enabled ? 1 : 0,
+            layer.level,
+            layer.pan,
+            layer.cutoff,
+            layer.fxSend,
+            layer.bufferId,
+            layer.granular.position,
+            layer.granular.freeze ? 1 : 0,
+          ]),
+          routes: track.omniPatch.routes.map((route) => [route.source, route.target, route.depth]),
+        }
+      : null,
     audioSlots: track.audioSlots ?? [],
     midiSlots: track.midiSlots ?? [],
   }

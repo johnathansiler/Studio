@@ -1,0 +1,31 @@
+.gen-pop {
+  position: fixed; inset: 0; z-index: 61; display: flex; flex-direction: column;
+  background: #121a16; color: var(--text);
+}
+.gen-pop header { display: flex; gap: 8px; align-items: center; padding: 10px 12px; }
+.gen-pop header strong { margin-right: auto; }
+.gen-key { color: var(--muted); font-size: 13px; }
+.gen-pop .chip-row { padding: 0 0 4px; }
+.gen-pop header button, .gen-kinds button, .gen-step button, .gen-actions button, .gen-pop .chip-row button {
+  min-height: 44px; border-radius: 8px; border: 1px solid var(--line); background: #18241d; color: var(--text); padding: 0 12px;
+}
+.gen-pop button.on, .gen-pop .chip-row button.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.gen-body { flex: 1; min-height: 0; overflow: auto; padding: 0 12px 20px; display: flex; flex-direction: column; gap: 8px; }
+.gen-kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.gen-step { display: flex; gap: 8px; }
+.gen-step button { flex: 1; }
+.gen-hint, .gen-follow, .gen-chords { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.35; }
+.gen-follow { color: var(--text); }
+.gen-chords { color: var(--amber); white-space: nowrap; overflow: auto; font-size: 15px; }
+.gen-gate { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.gen-gate input { flex: 1; min-height: 44px; }
+.gen-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.gen-actions .wide { grid-column: 1 / -1; }
+.shell.phone:not(.land) .gen-pop { bottom: env(safe-area-inset-bottom); }
+.shell.fold .gen-pop, .shell.phone.land .gen-pop, .shell.land .gen-pop {
+  top: 64px; left: 50%; transform: translateX(-50%);
+  width: min(560px, calc(100vw - 24px)); height: min(760px, calc(100dvh - 80px));
+  inset: auto; border-radius: 16px; border: 1px solid var(--line);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+}
+body:has(.gen-pop) .toasts { z-index: 90; top: 64px; bottom: auto; }
