@@ -97,7 +97,10 @@ import {
 import { cloneOmni, emptyOmni, type OmniPatch } from '../instruments/patch'
 import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
-import { lockedTone, scaleIsMicrotonal } from '../theory/lock'
+import { clipFromNotes, recordOnto, rememberVoice } from '../instruments/scaler/clips'
+import { freshScaler, normalizeScaler, padPerformance, type ScalerState } from '../instruments/scaler/model'
+import type { ScalerPage } from '../instruments/scaler/types'
+import { lockedTone, scaleIsMicrotonal, suggestKey } from '../theory/lock'
 import { applyPatternLength, makeRackChannel, type RackChoice } from '../model/channelRack'
 import {
   clampSwing,
@@ -121,7 +124,7 @@ import {
   type ParsedMidi,
 } from '../model/midiTools'
 import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK_COLORS } from '../model/types'
-import type { AudioAsset, AudioClip, AutomationWriteMode, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, LiveCaptureSettings, MidiClip, MidiEditorPrefs, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, MixGroup, PluginInstance, Project, RecordSettings, SectionKind, TakeLane, Track } from '../model/types'
+import type { AudioAsset, AudioClip, AutomationWriteMode, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, LiveCaptureSettings, MidiClip, MidiEditorPrefs, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, MixGroup, PluginInstance, Project, RecordSettings, SectionKind, TakeLane, Track, TrackInstrument } from '../model/types'
 import { createSection, deleteSectionContents, duplicateSectionContents, moveSectionContents, resizeSection as setSectionLength, sectionKind } from '../model/sections'
 import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
 import { downbeatAt, projectBeatSample, projectSampleBeat, snapSampleToMap, tempoAtSample } from '../model/tempoMap'
@@ -217,6 +220,10 @@ export class ProjectStore {
   /** Guests mirror the host arrangement and cannot edit it. */
   remoteFollow = false
   rackTrackId: string | null = null
+  /** Open Scaler panel. The plugin state itself is on the track. */
+  scalerTrackId: string | null = null
+  /** Which page of the open Scaler panel is showing. Not saved. */
+  scalerPage: ScalerPage = 'play'
   /** Open layered patch. Not saved; the patch itself is on the track. */
   patchTrackId: string | null = null
   rackFlip = false
@@ -664,6 +671,150 @@ export class ProjectStore {
     return normalizeScale(this.project.scale)
   }
 
+  /** Put Scaler on a MIDI track, or make a new one, and open its panel. */
+  insertScaler(trackId?: string | null, page: ScalerPage = 'play'): string | null {
+    this.scalerPage = page
+    this.patchTrackId = null
+    const asked = trackId ? this.track(trackId) : undefined
+    const selected = this.selectedTrackId ? this.track(this.selectedTrackId) : undefined
+    const host = asked?.type === 'midi' ? asked : selected?.type === 'midi' ? selected : undefined
+    if (host) {
+      if (host.instrument === 'scaler') {
+        this.rackTrackId = null
+        this.scalerTrackId = host.id
+        this.emit()
+      } else this.setTrackInstrument(host.id, 'scaler')
+      return host.id
+    }
+    const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'scaler', input: 'mic', channels: 1, armed: false })
+    return ids[0] ?? null
+  }
+
+  setTrackInstrument(trackId: string, instrument: TrackInstrument) {
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return
+    this.mutate(() => {
+      const current = this.track(trackId)
+      if (!current || current.type !== 'midi') return
+      current.instrument = instrument
+      if (instrument === 'scaler') current.scaler = current.scaler ? normalizeScaler(current.scaler) : freshScaler(this.project)
+    })
+    if (instrument === 'scaler') {
+      this.rackTrackId = null
+      this.patchTrackId = null
+      this.scalerTrackId = trackId
+      this.emit()
+    } else if (this.scalerTrackId === trackId) {
+      this.scalerTrackId = null
+      this.emit()
+    }
+  }
+
+  openScaler(trackId: string, page?: ScalerPage) {
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return
+    if (page) this.scalerPage = page
+    if (track.instrument !== 'scaler') {
+      this.setTrackInstrument(trackId, 'scaler')
+      return
+    }
+    this.rackTrackId = null
+    this.patchTrackId = null
+    if (page || this.scalerTrackId !== trackId) {
+      this.scalerTrackId = trackId
+      this.emit()
+      return
+    }
+    this.scalerTrackId = null
+    this.emit()
+  }
+
+  closeScaler() {
+    if (!this.scalerTrackId) return
+    this.scalerTrackId = null
+    this.emit()
+  }
+
+  setScalerPage(page: ScalerPage) {
+    this.scalerPage = page
+    this.emit()
+  }
+
+  setScaler(trackId: string, patch: Partial<ScalerState>, draft = false) {
+    const run = () => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      track.instrument = 'scaler'
+      track.scaler = normalizeScaler({ ...normalizeScaler(track.scaler), ...patch })
+    }
+    if (draft) this.draft(run)
+    else this.mutate(run)
+  }
+
+  scalerPadNotes(trackId: string, index: number) {
+    const track = this.track(trackId)
+    if (!track?.scaler) return []
+    const span = Math.max(1, this.project.timeSignature?.numerator || 4)
+    return padPerformance(normalizeScaler(track.scaler), index, span)?.notes ?? []
+  }
+
+  detectScaler(trackId: string) {
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return false
+    const notes = track.midiClips.flatMap((clip) => clip.notes.filter((note) => !note.muted).map((note) => ({
+      midi: note.pitch,
+      cents: note.fine ?? 0,
+      weight: Math.max(0.05, note.durationBeats),
+    })))
+    if (notes.length < 3) return false
+    const found = suggestKey(notes)
+    this.setScaler(trackId, { root: found.root, scale: found.scale, library: found.library, snap: true, lastVoicing: [], lastCents: [] })
+    return true
+  }
+
+  /** Voice-leading memory. Not an undo step, so playing pads does not flood the journal. */
+  rememberScalerVoice(trackId: string, midi: number[], cents: number[]) {
+    const track = this.track(trackId)
+    if (!track) return
+    rememberVoice(track, midi, cents)
+    this.emit()
+  }
+
+  /** Drop a chord onto Arrange as its own MIDI clip. */
+  writeScalerClip(trackId: string, notes: { pitch: number; fine?: number; startBeat: number; durationBeats: number; velocity: number }[], startBeat: number, name: string) {
+    if (!notes.length) return null
+    let clipId: string | null = null
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      const clip = clipFromNotes(notes, startBeat, name)
+      track.midiClips.push(clip)
+      clipId = clip.id
+      this.selectedTrackId = track.id
+      this.selectedMidiClipId = clip.id
+      this.selectedMidiClipIds = [clip.id]
+      this.selectedNoteIds = clip.notes.map((note) => note.id)
+      this.selectedNoteId = clip.notes.at(-1)?.id ?? null
+    })
+    return clipId
+  }
+
+  /** Record a played pad onto this track's Scaler take. */
+  recordScalerChord(trackId: string, notes: { pitch: number; fine?: number; startBeat: number; durationBeats: number; velocity: number }[], startBeat: number) {
+    if (!notes.length) return null
+    let clipId: string | null = null
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      const clip = recordOnto(track, notes, startBeat)
+      clipId = clip.id
+      this.selectedTrackId = track.id
+      this.selectedMidiClipId = clip.id
+      this.selectedMidiClipIds = [clip.id]
+    })
+    return clipId
+  }
+
   setScale(patch: Partial<ScaleState>) {
     this.mutate(() => {
       const next = normalizeScale({ ...this.scaleState(), ...patch })
@@ -946,8 +1097,15 @@ export class ProjectStore {
     const ids: string[] = []
     this.mutate(() => {
       const made = tracksFor(spec, this.project.tracks)
-      for (const track of made) if (track.type === 'midi') normalizeTrackRack(track)
+      for (const track of made) {
+        if (track.type === 'midi') normalizeTrackRack(track)
+        if (track.instrument === 'scaler') track.scaler = freshScaler(this.project)
+      }
       if (spec.kind === 'midi' && spec.instrument === 'library' && made[0]) this.rackTrackId = made[0].id
+      if (spec.kind === 'midi' && spec.instrument === 'scaler' && made[0]) {
+        this.scalerTrackId = made[0].id
+        this.rackTrackId = null
+      }
       const at = insertIndex(this.project.tracks, this.selectedTrackId)
       this.project.tracks.splice(at, 0, ...made)
       this.selectedTrackId = made[0]?.id ?? this.selectedTrackId
@@ -961,6 +1119,11 @@ export class ProjectStore {
     this.mutate(() => {
       const track = this.track(trackId)
       if (!track || track.type !== 'midi') return
+      if (track.instrument === 'scaler') {
+        track.library = program ?? undefined
+        track.scaler = normalizeScaler({ ...normalizeScaler(track.scaler), sound: 'library' })
+        return
+      }
       track.instrument = 'library'
       track.library = program ?? undefined
       if (!track.rack?.devices?.length) normalizeTrackRack(track)
@@ -972,6 +1135,13 @@ export class ProjectStore {
     this.mutate(() => {
       const track = this.track(trackId)
       if (!track || track.type !== 'midi') return
+      if (track.instrument === 'scaler') {
+        track.library = program
+        track.scaler = normalizeScaler({ ...normalizeScaler(track.scaler), sound: 'library' })
+        for (const asset of assets) this.buffers.set(asset.id, asset)
+        if (pack) this.buffers.set(pack.id, packToAsset(pack))
+        return
+      }
       track.instrument = 'library'
       track.library = program
       for (const asset of assets) this.buffers.set(asset.id, asset)
@@ -3532,6 +3702,7 @@ export class ProjectStore {
     this.selectedMidiClipId = null
     this.selectedNoteId = null
     this.selectedNoteIds = []
+    if (this.scalerTrackId && !project.tracks.some((track) => track.id === this.scalerTrackId && track.type === 'midi')) this.scalerTrackId = null
     this.sync.rebase(this.project)
     this.emit()
   }
@@ -3629,6 +3800,7 @@ export class ProjectStore {
   }
 
   openRack(trackId: string) {
+    this.scalerTrackId = null
     this.rackTrackId = this.rackTrackId === trackId ? null : trackId
     this.rackFlip = false
     this.rackDetail = false
@@ -3636,6 +3808,7 @@ export class ProjectStore {
   }
 
   openPatch(trackId: string) {
+    this.scalerTrackId = null
     if (this.patchTrackId === trackId) {
       this.patchTrackId = null
       this.emit()

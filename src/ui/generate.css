@@ -29,3 +29,10 @@
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
 }
 body:has(.gen-pop) .toasts { z-index: 90; top: 64px; bottom: auto; }
+.scaler-panel .gen-pop,
+.shell.fold .scaler-panel .gen-pop,
+.shell.phone.land .scaler-panel .gen-pop,
+.shell.land .scaler-panel .gen-pop {
+  position: static; inset: auto; transform: none; width: auto; height: auto;
+  border: 0; box-shadow: none; background: transparent; border-radius: 0;
+}
