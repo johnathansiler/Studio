@@ -70,16 +70,17 @@ export function KnockPop({ store, engine, onClose }: { store: ProjectStore; engi
   useEffect(() => {
     const root = padsRef.current
     if (!root || !track) return
-    const held = new Set<number>()
+    const pointers = new Map<number, { pitch: number; pad: HTMLButtonElement }>()
     const padOf = (event: Event) => (event.target as HTMLElement).closest('button[data-pitch]') as HTMLButtonElement | null
     const down = (event: PointerEvent) => {
+      if (pointers.has(event.pointerId)) return
       const pad = padOf(event)
       if (!pad || !root.contains(pad)) return
       event.preventDefault()
       const pitch = Number(pad.dataset.pitch)
       const info = api.current
-      const slide = slideRef.current || (info.legato && held.size > 0)
-      held.add(pitch)
+      const slide = slideRef.current && pointers.size > 0
+      pointers.set(event.pointerId, { pitch, pad })
       const ctx = engine.ctx
       const perfNow = performance.now()
       const stamp = ctx?.getOutputTimestamp?.()
@@ -113,12 +114,12 @@ export function KnockPop({ store, engine, onClose }: { store: ProjectStore; engi
       pad.classList.add('on')
     }
     const up = (event: PointerEvent) => {
-      const pad = padOf(event)
-      if (!pad) return
-      const pitch = Number(pad.dataset.pitch)
-      held.delete(pitch)
-      engine.releaseRack(api.current.trackId, pitch)
-      pad.classList.remove('on')
+      const current = pointers.get(event.pointerId)
+      if (!current) return
+      pointers.delete(event.pointerId)
+      const still = [...pointers.values()].some((item) => item.pitch === current.pitch)
+      if (!still) engine.releaseRack(api.current.trackId, current.pitch)
+      current.pad.classList.remove('on')
     }
     root.addEventListener('pointerdown', down)
     root.addEventListener('pointerup', up)

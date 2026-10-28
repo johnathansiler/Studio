@@ -7,6 +7,17 @@ export interface GlideChange {
 }
 
 /**
+ * A pointer on a key plays that key. Extra pointers are more notes in the chord,
+ * not a scroll. Scrolling only starts on empty keyboard chrome while nothing is held,
+ * so a second finger never releases the notes already sounding.
+ */
+export function pointerAction(onKey: boolean, onControl: boolean, pointersDown: number, notesHeld: number): 'play' | 'scroll' | 'ignore' {
+  if (onKey) return 'play'
+  if (!onControl && pointersDown >= 2 && notesHeld === 0) return 'scroll'
+  return 'ignore'
+}
+
+/**
  * One held key per pointer. A slide onto a new key releases the previous key
  * before the new note-on. Pointers do not affect each other.
  * `move` does nothing until that pointer has pressed a key.

@@ -43,6 +43,7 @@ export interface Voice {
   /** Samples between repeats. 0 while the voice does not repeat. */
   repeatEvery: number
   repeatCountdown: number
+  age: number
 }
 
 export function createVoices(count = 16): Voice[] {
@@ -56,18 +57,20 @@ export function createVoices(count = 16): Voice[] {
     drumPos: 0,
     repeatEvery: 0,
     repeatCountdown: 0,
+    age: 0,
   }))
 }
 
-/** Reuses a voice slot. Does not allocate a buffer. */
+/** Reuses a free voice, then the oldest. A chord keeps one voice per sounding pitch. */
 export function triggerVoice(voices: Voice[], pitch: number, velocity: number, drumIndex: number, repeatEvery = 0): Voice {
-  let voice = voices[0]
-  for (let i = 0; i < voices.length; i++) {
-    if (!voices[i].active) {
-      voice = voices[i]
-      break
-    }
+  let free: Voice | undefined
+  let oldest: Voice | undefined
+  for (const voice of voices) {
+    if (voice.active) voice.age += 1
+    if (!voice.active && !free) free = voice
+    if (!oldest || voice.age >= oldest.age) oldest = voice
   }
+  const voice = free ?? oldest ?? voices[0]
   voice.active = true
   voice.pitch = pitch
   voice.velocity = velocity
@@ -77,6 +80,7 @@ export function triggerVoice(voices: Voice[], pitch: number, velocity: number, d
   voice.drumPos = 0
   voice.repeatEvery = repeatEvery
   voice.repeatCountdown = repeatEvery
+  voice.age = 0
   return voice
 }
 

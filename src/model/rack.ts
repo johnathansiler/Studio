@@ -508,12 +508,13 @@ export interface VoiceRef {
 
 /** Steal the oldest sounding voice once the polyphony limit is full. */
 export function allocateVoice(voices: VoiceRef[], note: number, limit: number) {
-  const cap = Math.max(1, limit)
+  const cap = Math.max(1, Math.round(Number.isFinite(limit) ? limit : 8))
   for (const voice of voices) if (voice.active) voice.age += 1
   const same = voices.find((voice) => voice.active && voice.note === note)
   if (same) {
     same.age = 0
     same.released = false
+    same.active = true
     return same
   }
   let slot = voices.find((voice) => !voice.active)
@@ -522,7 +523,11 @@ export function allocateVoice(voices: VoiceRef[], note: number, limit: number) {
     voices.push(slot)
     return slot
   }
-  if (!slot) slot = voices.slice().sort((a, b) => b.age - a.age)[0]
+  if (!slot) {
+    const releasing = voices.filter((voice) => voice.released)
+    const pool = releasing.length ? releasing : voices.filter((voice) => voice.active)
+    slot = pool.sort((a, b) => b.age - a.age)[0] ?? voices[0]
+  }
   slot.note = note
   slot.age = 0
   slot.active = true

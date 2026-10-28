@@ -3,7 +3,7 @@ class KeysProcessor extends AudioWorkletProcessor {
     super()
     this.voices = []
     for (let i = 0; i < 16; i++) {
-      this.voices.push({ on: false, pitch: 60, vel: 0, env: 0, phase: 0, drum: -1, pos: 0, every: 0, left: 0 })
+      this.voices.push({ on: false, pitch: 60, vel: 0, env: 0, phase: 0, drum: -1, pos: 0, every: 0, left: 0, age: 0 })
     }
     this.drums = []
     this.pending = []
@@ -23,15 +23,24 @@ class KeysProcessor extends AudioWorkletProcessor {
     }
   }
 
+  claim(pitch, drum) {
+    let reuse = null
+    let free = null
+    let oldest = this.voices[0]
+    for (const voice of this.voices) {
+      if (voice.on) voice.age = (voice.age || 0) + 1
+      if (drum < 0 && voice.on && voice.pitch === pitch) reuse = voice
+      if (!voice.on && !free) free = voice
+      if ((voice.age || 0) >= (oldest.age || 0)) oldest = voice
+    }
+    const voice = reuse || free || oldest
+    voice.age = 0
+    return voice
+  }
+
   take(data) {
     if (data.type === 'on' || data.type === 'repeat') {
-      let voice = this.voices[0]
-      for (let i = 0; i < this.voices.length; i++) {
-        if (!this.voices[i].on) {
-          voice = this.voices[i]
-          break
-        }
-      }
+      const voice = this.claim(data.pitch, data.drum == null ? -1 : data.drum)
       voice.on = true
       voice.pitch = data.pitch
       voice.vel = data.velocity
@@ -70,20 +79,22 @@ class KeysProcessor extends AudioWorkletProcessor {
   drainSab() {
     const sab = this.sab
     if (!sab) return
-    const count = Atomics.load(sab, 0)
-    if (count <= 0) return
-    const take = Math.min(count, 8)
-    for (let i = 0; i < take; i++) {
-      const base = 1 + i * 4
+    let read = Atomics.load(sab, 1)
+    const write = Atomics.load(sab, 0)
+    if (write - read > 8) read = write - 8
+    while (read < write) {
+      const base = 2 + (read % 8) * 4
+      const kind = Atomics.load(sab, base)
       this.take({
-        type: Atomics.load(sab, base) === 2 ? 'repeat' : Atomics.load(sab, base) === 0 ? 'off' : 'on',
+        type: kind === 2 ? 'repeat' : kind === 0 ? 'off' : 'on',
         pitch: Atomics.load(sab, base + 1),
         velocity: Atomics.load(sab, base + 2) / 1000,
         drum: Atomics.load(sab, base + 3),
         every: 0,
       })
+      read += 1
     }
-    Atomics.store(sab, 0, 0)
+    Atomics.store(sab, 1, read)
   }
 
   process(_inputs, outputs) {
