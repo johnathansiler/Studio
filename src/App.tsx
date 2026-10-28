@@ -31,6 +31,7 @@ import { QuantizeSheet } from './ui/QuantizeSheet'
 import { PianoRoll } from './ui/PianoRoll'
 import { KnockPop } from './ui/KnockPop'
 import { ProjectSheet } from './ui/ProjectSheet'
+import { PatchSheet } from './ui/PatchSheet'
 import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
 import { TransportBar } from './ui/TransportBar'
@@ -1327,6 +1328,7 @@ async function importDropped(files: FileList) {
         </div>
       </div>
       <PluginSheet store={store} engine={engine} />
+      {store.patchTrackId && <PatchSheet store={store} engine={engine} trackId={store.patchTrackId} />}
       <QuantizeSheet store={store} />
       {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
       {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}

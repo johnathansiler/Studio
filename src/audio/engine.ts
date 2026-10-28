@@ -8,6 +8,7 @@ import { residentDrums, type ResidentDrum } from '../model/drums'
 import { calibrationTrim, contextTimeForEvent, monitoringOffset, type ClockStamp } from '../model/midiClock'
 import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Project, type Track } from '../model/types'
 import { beatsToSamples, projectEndSample, samplesPerBeatUnit, samplesToBeats, samplesToMusical } from '../model/time'
+import { matchBufferRate, PatchHost, renderPatchSpan } from '../instruments/patch'
 import { RackHost } from './rack/host'
 import { renderNotes } from './rack/dsp'
 import { LibraryHost } from './multisample/host'
@@ -108,6 +109,8 @@ export class AudioEngine {
   private meterScratch = new Float32Array(256)
   private readonly rackHost = new RackHost()
   private readonly libraryHost = new LibraryHost()
+  private readonly patchHost = new PatchHost()
+  private patchRateCache = new Map<string, Float32Array>()
   private readonly rack = new LiveRack()
   private loudness: LoudnessState | null = null
   private lufs = -70
@@ -423,6 +426,12 @@ export class AudioEngine {
     }
     this.rackHost.sync(this.ctx, project, this.strips, buffers)
     this.libraryHost.sync(this.ctx, project, this.strips, assetOf)
+    this.patchHost.sync(this.ctx, project.tracks, this.strips, (id) => {
+      const asset = this.assetOf(id)
+      const channel = asset?.channels[0]
+      if (!asset || !channel?.length) return null
+      return { sampleRate: asset.sampleRate, channel }
+    })
   }
 
   previewRack(trackId: string, pitch: number, slide = false, hold = false) {
@@ -457,6 +466,14 @@ export class AudioEngine {
 
   holdLibraryAudio(trackId: string, samples: { id: string; sampleRate: number; channels: Float32Array[] }[]) {
     this.libraryHost.holdAudio(trackId, samples)
+  }
+
+  /** Audition a layered patch. `down` starts the note; a lift releases it. */
+  previewPatch(trackId: string, pitch: number, down: boolean) {
+    this.unlock()
+    if (this.project) this.sync(this.project, this.assetOf)
+    const when = this.ctx?.currentTime ?? 0
+    this.patchHost.note(trackId, pitch, down ? 0.85 : 0, when)
   }
 
   setCompareGain(gain: number) {
@@ -2411,6 +2428,16 @@ export class AudioEngine {
       }
       return
     }
+    if (track?.omniPatch?.enabled) {
+      if (ctx === this.ctx) {
+        const at = Math.max(when, ctx.currentTime)
+        this.patchHost.note(track.id, note.pitch, note.velocity, at)
+        this.patchHost.note(track.id, note.pitch, 0, at + dur)
+        return
+      }
+      this.schedulePatchOffline(ctx, strip, track, note, when, dur)
+      return
+    }
     if (track?.rack && ctx === this.ctx) {
       const at = Math.max(when, ctx.currentTime)
       this.rackHost.note(track.id, note.pitch, note.velocity, at, !!note.slide)
@@ -2449,6 +2476,35 @@ export class AudioEngine {
     }
   }
 
+  private schedulePatchOffline(ctx: BaseAudioContext, strip: StripNodes, track: Track, note: MidiNote, when: number, dur: number) {
+    const patch = track.omniPatch
+    if (!patch) return
+    const buffers = new Map<string, Float32Array>()
+    for (const layer of patch.layers) {
+      if (!layer.bufferId || buffers.has(layer.bufferId)) continue
+      const asset = this.assetOf(layer.bufferId)
+      const channel = asset?.channels[0]
+      if (!asset || !channel?.length) continue
+      const key = `${layer.bufferId}:${asset.sampleRate}:${channel.length}:${ctx.sampleRate}`
+      let matched = this.patchRateCache.get(key)
+      if (!matched) {
+        const next = matchBufferRate(channel, asset.sampleRate, ctx.sampleRate)
+        this.patchRateCache.set(key, next)
+        matched = next
+      }
+      buffers.set(layer.bufferId, matched)
+    }
+    const rendered = renderPatchSpan(patch, buffers, note.pitch, note.velocity, dur, ctx.sampleRate)
+    const buffer = ctx.createBuffer(2, rendered.left.length, ctx.sampleRate)
+    buffer.copyToChannel(rendered.left, 0)
+    buffer.copyToChannel(rendered.right, 1)
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    src.connect(strip.input)
+    src.start(Math.max(when, 0))
+    if (ctx === this.ctx) this.sources.push(src)
+  }
+
   private stopSources() {
     for (const src of this.sources) {
       try {
@@ -2465,6 +2521,7 @@ export class AudioEngine {
     this.sources = []
     this.rackHost.allOff()
     this.libraryHost.allOff()
+    this.patchHost.allOff()
     this.sessionNodes.clear()
     this.sessionStarted.clear()
     this.sessionClip.clear()

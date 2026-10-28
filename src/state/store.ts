@@ -58,6 +58,7 @@ import {
   quantizeMidi,
   type QuantizeSettings,
 } from '../model/quantize'
+import { cloneOmni, emptyOmni, type OmniPatch } from '../instruments/patch'
 import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, snapPitch, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
 import {
@@ -128,6 +129,8 @@ export class ProjectStore {
   /** Guests mirror the host arrangement and cannot edit it. */
   remoteFollow = false
   rackTrackId: string | null = null
+  /** Open layered patch. Not saved; the patch itself is on the track. */
+  patchTrackId: string | null = null
   rackFlip = false
   rackDetail = false
   /** Letter keys play notes while this is on, so tap-tempo stays off T. */
@@ -2316,6 +2319,55 @@ export class ProjectStore {
     this.rackFlip = false
     this.rackDetail = false
     this.emit()
+  }
+
+  openPatch(trackId: string) {
+    if (this.patchTrackId === trackId) {
+      this.patchTrackId = null
+      this.emit()
+      return
+    }
+    this.patchTrackId = trackId
+    const track = this.track(trackId)
+    if (track?.type === 'midi' && !track.omniPatch) {
+      this.mutate(() => {
+        track.omniPatch = emptyOmni(track.name)
+      })
+      return
+    }
+    this.emit()
+  }
+
+  updateOmni(trackId: string, fn: (patch: OmniPatch) => void, draft = false) {
+    const run = () => {
+      const track = this.track(trackId)
+      if (!track?.omniPatch || track.type !== 'midi') return
+      fn(track.omniPatch)
+    }
+    if (draft) this.draft(run)
+    else this.mutate(run)
+  }
+
+  saveOmniPatch(trackId: string) {
+    this.mutate(() => {
+      const patch = this.track(trackId)?.omniPatch
+      if (!patch) return
+      const copy = cloneOmni(patch, true)
+      copy.name = patch.name.trim() || 'Patch'
+      const library = (this.project.omniLibrary ?? []).filter((item) => item.name !== copy.name)
+      this.project.omniLibrary = [...library, copy]
+    })
+  }
+
+  loadOmniPatch(trackId: string, id: string) {
+    this.mutate(() => {
+      const found = this.project.omniLibrary?.find((item) => item.id === id)
+      const track = this.track(trackId)
+      if (!found || track?.type !== 'midi') return
+      const copy = cloneOmni(found, true)
+      copy.name = found.name
+      track.omniPatch = copy
+    })
   }
 
   flipRack() {

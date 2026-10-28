@@ -359,6 +359,11 @@ export function ArrangeView({
                       Rack
                     </TipButton>
                   )}
+                  {track.type === 'midi' && (
+                    <TipButton className={`mini patch-open ${store.patchTrackId === track.id ? 'on' : ''}`} label="Patch" hint="Layered patch: synths, samples, grains, and a morph pad." pressed={store.patchTrackId === track.id} onClick={(event) => { event.stopPropagation(); store.openPatch(track.id) }}>
+                      Patch
+                    </TipButton>
+                  )}
                   <TipButton className="mini" label={copyOf(TRACK_SHEET, 'remove').label} hint={copyOf(TRACK_SHEET, 'remove').hint} onClick={(event) => { event.stopPropagation(); store.removeTrack(track.id) }}>
                     ×
                   </TipButton>
@@ -628,6 +633,7 @@ export function ArrangeView({
           {sheetTrack.type === 'midi' && (
             <>
               <SheetRow label={copyOf(TRACK_SHEET, 'rack').label} hint={copyOf(TRACK_SHEET, 'rack').hint} pressed={store.rackTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openRack(sheetTrack.id) }} />
+              <SheetRow label="Patch" hint="Layered patch: synths, samples, grains, and a morph pad." pressed={store.patchTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openPatch(sheetTrack.id) }} />
               <SheetRow label={copyOf(TRACK_SHEET, 'keys').label} hint={copyOf(TRACK_SHEET, 'keys').hint} onClick={() => { setTrackSheet(null); onPerform('keys') }} />
               <SheetRow label={copyOf(TRACK_SHEET, 'drums').label} hint={copyOf(TRACK_SHEET, 'drums').hint} onClick={() => { setTrackSheet(null); onPerform('drums') }} />
             </>
