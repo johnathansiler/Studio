@@ -9,7 +9,8 @@ import {
   stepFromBeat,
   type LaneNote,
 } from '../model/patternMidi'
-import { STEP_BEAT, channelSteps, channelSwing } from '../model/steps'
+import { stepGroups } from '../model/channelRack'
+import { STEP_BEAT, channelSteps, channelSwing, stepStart } from '../model/steps'
 import type { ProjectStore } from '../state/store'
 import './drumRoll.css'
 
@@ -18,7 +19,7 @@ type RollEngine = {
   subscribe?: (fn: () => void) => () => void
 }
 
-/** The step pattern as one row per drum lane. Edits write back through the same note map. */
+/** The step pattern as one row per drum lane. Columns match the step grid above. */
 export function DrumRoll({ store, engine }: { store: ProjectStore; engine: RollEngine }) {
   const project = store.project
   const pattern = store.activePattern()
@@ -28,9 +29,9 @@ export function DrumRoll({ store, engine }: { store: ProjectStore; engine: RollE
   useEffect(() => engine.subscribe?.(() => setPlayhead(engine.positionSamples)), [engine])
   if (!pattern) return null
   const notes = patternToLaneNotes(pattern)
-  const length = Math.max(STEP_BEAT, pattern.steps * STEP_BEAT)
-  const px = 64
-  const width = Math.max(240, length * px)
+  const count = Math.max(1, pattern.steps)
+  const length = Math.max(STEP_BEAT, count * STEP_BEAT)
+  const groups = stepGroups(count)
   const beat = projectSampleBeat(project, displayedPlayhead(playhead, project))
   const head = patternPlayBeat(beat, pattern.steps)
 
@@ -42,17 +43,31 @@ export function DrumRoll({ store, engine }: { store: ProjectStore; engine: RollE
     return `${note.channelId}:${note.step}`
   }
 
-  function addAt(channelId: string, clientX: number, row: HTMLElement) {
+  function addAt(channelId: string, clientX: number, grid: HTMLElement) {
     const channel = pattern!.channels.find((item) => item.id === channelId)
     if (!channel) return
-    const count = channelSteps(channel, pattern!.steps)
+    const slots = [...grid.querySelectorAll<HTMLElement>('.drum-slot')]
+    let step = 0
+    let slot = slots[0]
+    for (const item of slots) {
+      const box = item.getBoundingClientRect()
+      step = Number(item.dataset.index)
+      slot = item
+      if (clientX <= box.right) break
+    }
+    if (!slot || !Number.isInteger(step)) return
+    const channelCount = channelSteps(channel, count)
     const swing = channelSwing(channel, pattern!.swing)
-    const rect = row.getBoundingClientRect()
-    const at = Math.max(0, Math.min(length - 0.02, ((clientX - rect.left) / Math.max(1, rect.width)) * length))
-    const placed = stepFromBeat(at, count, swing)
-    if (notes.some((note) => note.channelId === channelId && note.step === placed.step)) return
-    const durationBeats = 0.2
-    const gate = gateForDuration(placed.step, count, swing, placed.nudge, durationBeats)
+    if (notes.some((note) => note.channelId === channelId && note.step === step)) return
+    const box = slot.getBoundingClientRect()
+    const origin = stepStart(step, STEP_BEAT, swing)
+    const nextBeat = step + 1 < count ? stepStart(step + 1, STEP_BEAT, swing) : length
+    const span = Math.max(0.02, nextBeat - origin)
+    const t = Math.max(0, Math.min(0.98, (clientX - box.left) / Math.max(1, box.width)))
+    const at = origin + t * span
+    const placed = stepFromBeat(at, channelCount, swing)
+    const durationBeats = Math.min(0.2, span * 0.8)
+    const gate = gateForDuration(placed.step, channelCount, swing, placed.nudge, durationBeats)
     commit([
       ...notes,
       {
@@ -77,11 +92,16 @@ export function DrumRoll({ store, engine }: { store: ProjectStore; engine: RollE
     event.stopPropagation()
     const channel = pattern!.channels.find((item) => item.id === note.channelId)
     if (!channel) return
-    const count = channelSteps(channel, pattern!.steps)
+    const channelCount = channelSteps(channel, count)
     const swing = channelSwing(channel, pattern!.swing)
+    const slot = (event.currentTarget as HTMLElement).closest('.drum-slot') as HTMLElement | null
+    const originBeat = stepStart(note.step, STEP_BEAT, swing)
+    const nextBeat = note.step + 1 < channelCount ? stepStart(note.step + 1, STEP_BEAT, swing) : length
+    const span = Math.max(0.02, nextBeat - originBeat)
+    const px = Math.max(1, (slot?.getBoundingClientRect().width ?? 28) / span)
     const originX = event.clientX
     const originY = event.clientY
-    const originBeat = note.startBeat
+    const startBeat = note.startBeat
     const originVel = note.velocity
     setSelected(keyOf(note))
     let latest = note
@@ -92,9 +112,9 @@ export function DrumRoll({ store, engine }: { store: ProjectStore; engine: RollE
       if (Math.hypot(ev.clientX - originX, ev.clientY - originY) > 3) moved = true
       const dBeat = (ev.clientX - originX) / px
       const velocity = Math.max(0.05, Math.min(1, originVel + (originY - ev.clientY) / 90))
-      const placed = stepFromBeat(Math.max(0, originBeat + dBeat), count, swing)
-      const gate = gateForDuration(placed.step, count, swing, placed.nudge, note.durationBeats)
-      latest = { ...note, step: placed.step, startBeat: Math.max(0, originBeat + dBeat), nudge: placed.nudge, velocity, gate }
+      const placed = stepFromBeat(Math.max(0, startBeat + dBeat), channelCount, swing)
+      const gate = gateForDuration(placed.step, channelCount, swing, placed.nudge, note.durationBeats)
+      latest = { ...note, step: placed.step, startBeat: Math.max(0, startBeat + dBeat), nudge: placed.nudge, velocity, gate }
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
@@ -119,57 +139,76 @@ export function DrumRoll({ store, engine }: { store: ProjectStore; engine: RollE
     setSelected(null)
   }
 
+  const headPlace = stepFromBeat(Math.max(0, Math.min(length - 0.001, head)), count, 0)
+  const headOrigin = stepStart(headPlace.step, STEP_BEAT, 0)
+  const headNext = headPlace.step + 1 < count ? stepStart(headPlace.step + 1, STEP_BEAT, 0) : length
+  const headLeft = ((head - headOrigin) / Math.max(0.02, headNext - headOrigin)) * 100
+
   return (
     <div className="drum-roll" data-drum-roll="open" aria-label="Drum roll. Each row is a drum lane.">
-      <div className="drum-roll-scroll">
-        <div
-          className="drum-roll-sheet"
-          style={{ ['--timeline' as string]: `${width}px`, ['--head' as string]: `${(head / length) * width}px` }}
-        >
-          <div className="drum-playhead" data-playhead="drums" />
-          {pattern.channels.map((channel) => {
-            const lane = notes.filter((note) => note.channelId === channel.id)
-            return (
-              <div className="drum-lane" key={channel.id} data-lane={channel.id}>
-                <button type="button" className="drum-lane-name" title={laneLabel(channel)} onClick={() => store.selectRackChannel(channel.id)}>
-                  {laneLabel(channel)}
-                </button>
-                <div
-                  className="drum-lane-grid"
-                  style={{ backgroundSize: `${STEP_BEAT * px}px 100%` }}
-                  onPointerDown={(event) => {
-                    if ((event.target as HTMLElement).closest('.drum-note')) return
-                    addAt(channel.id, event.clientX, event.currentTarget)
-                  }}
-                >
-                  {lane.map((note) => (
-                    <button
-                      key={keyOf(note)}
-                      type="button"
-                      className={`drum-note${selected === keyOf(note) ? ' on' : ''}`}
-                      style={{
-                        left: note.startBeat * px,
-                        width: Math.max(8, note.durationBeats * px),
-                        height: `${Math.max(18, note.velocity * 100)}%`,
-                      }}
-                      title={`${laneLabel(channel)}. Velocity ${Math.round(note.velocity * 127)}. Drag sideways to move, up to change velocity.`}
-                      aria-label={`${laneLabel(channel)} step ${note.step + 1}`}
-                      onPointerDown={(event) => drag(note, event)}
-                      onDoubleClick={(event) => {
-                        event.stopPropagation()
-                        remove(note)
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Delete' || event.key === 'Backspace') remove(note)
-                      }}
-                    />
-                  ))}
+      {pattern.channels.map((channel) => {
+        const lane = notes.filter((note) => note.channelId === channel.id)
+        const swing = channelSwing(channel, pattern.swing)
+        return (
+          <div className="rack-row drum-lane" key={channel.id} data-lane={channel.id}>
+            <button type="button" className="rack-lead drum-lane-name" title={laneLabel(channel)} onClick={() => store.selectRackChannel(channel.id)}>
+              {laneLabel(channel)}
+            </button>
+            <div
+              className="rack-steps drum-lane-grid"
+              onPointerDown={(event) => {
+                if ((event.target as HTMLElement).closest('.drum-note')) return
+                addAt(channel.id, event.clientX, event.currentTarget)
+              }}
+            >
+              {groups.map((group, groupIndex) => (
+                <div className={`rack-group${groupIndex % 2 ? ' alt' : ''}`} key={group[0]}>
+                  {group.map((index) => {
+                    const note = lane.find((item) => item.step === index)
+                    const origin = stepStart(index, STEP_BEAT, swing)
+                    const nextBeat = index + 1 < count ? stepStart(index + 1, STEP_BEAT, swing) : length
+                    const span = Math.max(0.02, nextBeat - origin)
+                    const box = note
+                      ? {
+                          left: ((note.startBeat - origin) / span) * 100,
+                          width: Math.max(18, (note.durationBeats / span) * 100),
+                        }
+                      : null
+                    return (
+                      <div className="drum-slot" data-index={index} key={index}>
+                        {headPlace.step === index && (
+                          <i className="drum-playhead" data-playhead="drums" style={{ left: `${headLeft}%` }} />
+                        )}
+                        {note && box && (
+                          <button
+                            type="button"
+                            className={`drum-note${selected === keyOf(note) ? ' on' : ''}`}
+                            style={{
+                              left: `${box.left}%`,
+                              width: `${box.width}%`,
+                              height: `${Math.max(18, note.velocity * 100)}%`,
+                            }}
+                            title={`${laneLabel(channel)}. Velocity ${Math.round(note.velocity * 127)}. Drag sideways to move, up to change velocity.`}
+                            aria-label={`${laneLabel(channel)} step ${note.step + 1}`}
+                            onPointerDown={(event) => drag(note, event)}
+                            onDoubleClick={(event) => {
+                              event.stopPropagation()
+                              remove(note)
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Delete' || event.key === 'Backspace') remove(note)
+                            }}
+                          />
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
+              ))}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

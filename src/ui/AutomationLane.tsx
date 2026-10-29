@@ -146,7 +146,7 @@ export function LanePicker({ store, trackId }: { store: ProjectStore; trackId: s
   )
 }
 
-export function AutoFader({ store, engine, spec, value, label, className }: { store: ProjectStore; engine: AudioEngine; spec: AutoSpec; value: number; label: string; className?: string }) {
+export function AutoFader({ store, engine, spec, value, label, className, vertical: verticalProp }: { store: ProjectStore; engine: AudioEngine; spec: AutoSpec; value: number; label: string; className?: string; vertical?: boolean }) {
   const [sample, setSample] = useState(engine.positionSamples)
   const [status, setStatus] = useState(engine.status)
   useEffect(
@@ -161,7 +161,7 @@ export function AutoFader({ store, engine, spec, value, label, className }: { st
   const mode = channelAutomationMode(store.project, spec.trackId === 'master' ? 'master' : spec.trackId)
   const shown = rolling && mode === 'read' ? automatedValue(store.project, spec, sample, value) : value
   const span = spec.max - spec.min
-  const vertical = className !== 'pan'
+  const vertical = verticalProp ?? className !== 'pan'
   return (
     <TouchSlider
       label={label}

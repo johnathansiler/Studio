@@ -28,13 +28,33 @@ export interface WidthBounds {
 export const STRIP_BOUNDS: WidthBounds = { min: STRIP_MIN, max: STRIP_MAX, fallback: STRIP_DEFAULT }
 export const COLUMN_BOUNDS: WidthBounds = { min: COLUMN_MIN, max: COLUMN_MAX, fallback: COLUMN_DEFAULT }
 
+/** Below this, channel buttons stack one per row instead of sitting side by side. */
+export const NARROW_STRIP = 72
+/** Portrait phones at or under this width open the mixer as rows until the user chooses. */
+export const PHONE_PORTRAIT_MAX = 520
+
+export type MixerFlow = 'columns' | 'rows'
+
 export interface LayoutWidths {
   strip: number
   column: number
+  /** Null until the user picks Columns or Rows. */
+  mixer: MixerFlow | null
 }
 
 export function defaultLayout(): LayoutWidths {
-  return { strip: STRIP_DEFAULT, column: COLUMN_DEFAULT }
+  return { strip: STRIP_DEFAULT, column: COLUMN_DEFAULT, mixer: null }
+}
+
+export function isNarrowStrip(strip: number): boolean {
+  return strip < NARROW_STRIP
+}
+
+/** Saved choice wins. A narrow portrait phone starts on rows. */
+export function mixerFlow(saved: MixerFlow | null, width: number, height: number): MixerFlow {
+  if (saved === 'rows' || saved === 'columns') return saved
+  if (width > 0 && width <= PHONE_PORTRAIT_MAX && height >= width) return 'rows'
+  return 'columns'
 }
 
 export function clampWidth(value: number, bounds: WidthBounds): number {
@@ -43,10 +63,12 @@ export function clampWidth(value: number, bounds: WidthBounds): number {
 }
 
 export function normalizeLayout(input: unknown): LayoutWidths {
-  const raw = input && typeof input === 'object' ? input as { strip?: unknown; column?: unknown } : {}
+  const raw = input && typeof input === 'object' ? input as { strip?: unknown; column?: unknown; mixer?: unknown } : {}
+  const mixer: MixerFlow | null = raw.mixer === 'rows' || raw.mixer === 'columns' ? raw.mixer : null
   return {
     strip: clampWidth(typeof raw.strip === 'number' ? raw.strip : STRIP_DEFAULT, STRIP_BOUNDS),
     column: clampWidth(typeof raw.column === 'number' ? raw.column : COLUMN_DEFAULT, COLUMN_BOUNDS),
+    mixer,
   }
 }
 
@@ -56,6 +78,10 @@ export function withStrip(layout: LayoutWidths, strip: number): LayoutWidths {
 
 export function withColumn(layout: LayoutWidths, column: number): LayoutWidths {
   return normalizeLayout({ ...layout, column })
+}
+
+export function withMixer(layout: LayoutWidths, mixer: MixerFlow): LayoutWidths {
+  return normalizeLayout({ ...layout, mixer })
 }
 
 export function widthFromDrag(start: number, delta: number, bounds: WidthBounds): number {

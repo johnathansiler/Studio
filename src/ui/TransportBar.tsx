@@ -226,19 +226,15 @@ export function TransportBar({
       <AutomationFollow store={store} engine={engine} />
       <div className="t-buttons">
         <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>
-          <SkipBackIcon />
           <span className="t-word">Start</span>
         </TipButton>
         <TipButton className={`t-btn play ${playing ? 'on' : ''}`} label={playing ? transport('pause').label : transport('play').label} hint={playing ? transport('pause').hint : transport('play').hint} pressed={playing} onPress={() => engine.unlock()} onClick={onPlay}>
-          <PlayIcon />
           <span className="t-word">{playing ? 'Pause' : 'Play'}</span>
         </TipButton>
         <TipButton className="t-btn stop" label={transport('stop').label} hint={transport('stop').hint} onClick={onStop}>
-          <StopIcon />
           <span className="t-word">Stop</span>
         </TipButton>
         <TipButton className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={status === 'recording' || status === 'counting-in'} onPress={() => engine.unlock()} onClick={onRecord}>
-          <RecIcon />
           <span className="t-word">Rec</span>
         </TipButton>
         {desk && (
@@ -363,7 +359,6 @@ export function TransportBar({
           disabled={store.remoteFollow}
           onClick={() => store.toggle('loopEnabled')}
         >
-          <LoopIcon />
           <span className="t-word">Loop</span>
         </TipButton>
         <span
@@ -392,39 +387,6 @@ export function TransportBar({
   )
 }
 
-function SkipBackIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M4 3.2v9.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M13 3.4 5.6 8 13 12.6V3.4Z" fill="currentColor" />
-    </svg>
-  )
-}
-
-function PlayIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M5.2 3.1v9.8L13 8 5.2 3.1Z" fill="currentColor" />
-    </svg>
-  )
-}
-
-function StopIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-      <rect x="4" y="4" width="8" height="8" rx="1.2" fill="currentColor" />
-    </svg>
-  )
-}
-
-function RecIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="4" fill="currentColor" />
-    </svg>
-  )
-}
-
 function KeyboardIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
@@ -437,13 +399,3 @@ function KeyboardIcon() {
   )
 }
 
-function LoopIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M4.2 6.2h6.6a1.8 1.8 0 0 1 1.8 1.8V11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <path d="M6.2 4.1 3.8 6.2l2.4 2.1" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M11.8 9.8H5.2A1.8 1.8 0 0 1 3.4 8V5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <path d="M9.8 12 12.2 9.9 9.8 7.8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}

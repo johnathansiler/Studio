@@ -22,7 +22,10 @@ import {
   widthFromDrag,
   widthFromKey,
   widthFromPinch,
+  isNarrowStrip,
+  mixerFlow,
   withColumn,
+  withMixer,
   withStrip,
   writeLayout,
   type LayoutMemory,
@@ -74,21 +77,33 @@ describe('layout widths', () => {
   it('keeps each project width, survives a bad save, and resets one axis', () => {
     const store = memory()
     expect(readLayout('prj_a', store)).toEqual(defaultLayout())
-    writeLayout('prj_a', { strip: 140, column: 110 }, store)
-    writeLayout('prj_b', { strip: 10, column: 999 }, store)
-    expect(readLayout('prj_a', store)).toEqual({ strip: 140, column: 110 })
-    expect(readLayout('prj_b', store)).toEqual({ strip: STRIP_MIN, column: COLUMN_MAX })
+    writeLayout('prj_a', { strip: 140, column: 110, mixer: null }, store)
+    writeLayout('prj_b', { strip: 10, column: 999, mixer: 'rows' }, store)
+    expect(readLayout('prj_a', store)).toEqual({ strip: 140, column: 110, mixer: null })
+    expect(readLayout('prj_b', store)).toEqual({ strip: STRIP_MIN, column: COLUMN_MAX, mixer: 'rows' })
     expect(layoutStorageKey('prj_a')).not.toBe(layoutStorageKey('prj_b'))
 
     const kept = withStrip(readLayout('prj_a', store), STRIP_DEFAULT)
-    expect(kept).toEqual({ strip: STRIP_DEFAULT, column: 110 })
+    expect(kept).toEqual({ strip: STRIP_DEFAULT, column: 110, mixer: null })
     expect(withColumn(kept, COLUMN_DEFAULT)).toEqual(defaultLayout())
+    const rows = withMixer(kept, 'rows')
+    expect(rows.mixer).toBe('rows')
+    expect(withStrip(rows, 140).mixer).toBe('rows')
 
     store.setItem(layoutStorageKey('prj_c'), '{')
     expect(readLayout('prj_c', store)).toEqual(defaultLayout())
     store.setItem(layoutStorageKey('prj_d'), JSON.stringify({ strip: 'wide', column: 80 }))
-    expect(readLayout('prj_d', store)).toEqual({ strip: STRIP_DEFAULT, column: 80 })
+    expect(readLayout('prj_d', store)).toEqual({ strip: STRIP_DEFAULT, column: 80, mixer: null })
     expect(normalizeLayout(null)).toEqual(defaultLayout())
+    expect(normalizeLayout({ mixer: 'rows' }).mixer).toBe('rows')
+    expect(normalizeLayout({ mixer: 'grid' }).mixer).toBeNull()
+    expect(isNarrowStrip(STRIP_HALF)).toBe(true)
+    expect(isNarrowStrip(STRIP_DEFAULT)).toBe(false)
+    expect(mixerFlow(null, 412, 915)).toBe('rows')
+    expect(mixerFlow(null, 1920, 1080)).toBe('columns')
+    expect(mixerFlow(null, 844, 390)).toBe('columns')
+    expect(mixerFlow('columns', 412, 915)).toBe('columns')
+    expect(mixerFlow('rows', 1440, 900)).toBe('rows')
     expect(STRIP_MIN).toBe(STRIP_HALF)
     expect(STRIP_HALF).toBe(Math.round(STRIP_DEFAULT / 2))
     expect(displayedStrip(STRIP_DEFAULT, 80)).toBe(STRIP_HALF)
