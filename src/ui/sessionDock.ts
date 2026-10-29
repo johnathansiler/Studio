@@ -43,12 +43,14 @@ export function nextSessionDock(input: {
 
 export const EDITOR_DOCK_DEFAULT = 380
 export const EDITOR_DOCK_MIN = 280
-export const EDITOR_DOCK_MAX = 760
+export const EDITOR_DOCK_MAX = 1600
+/** Piano roll opens wide. Other editors stay at half the viewport unless resized. */
+export const PIANO_DOCK_FRACTION = 0.72
 /** Arrange or Session keeps at least this much beside a side editor. */
 export const EDITOR_WORK_MIN = 320
 
 /** Side editor width that stays inside the viewport and leaves the work visible. */
-export function fittedDockWidth(viewport: number, requested: number, edge: 'right' | 'bottom' = 'right'): number {
+export function fittedDockWidth(viewport: number, requested: number, edge: 'right' | 'bottom' = 'right', fraction = 0.5): number {
   const view = Number.isFinite(viewport) && viewport > 0 ? viewport : 1280
   const want = Number.isFinite(requested) ? requested : EDITOR_DOCK_DEFAULT
   if (edge === 'bottom') {
@@ -56,9 +58,16 @@ export function fittedDockWidth(viewport: number, requested: number, edge: 'righ
     return Math.round(Math.min(max, Math.max(200, want)))
   }
   const room = Math.max(160, view - EDITOR_WORK_MIN)
-  const cap = Math.min(EDITOR_DOCK_MAX, Math.floor(view * 0.5), room)
+  const share = fraction > 0 && fraction < 1 ? fraction : 0.5
+  const cap = Math.min(EDITOR_DOCK_MAX, Math.floor(view * share), room)
   const floor = Math.min(EDITOR_DOCK_MIN, cap)
   return Math.round(Math.min(cap, Math.max(floor, want)))
+}
+
+/** Side piano roll: about 62% of the viewport, and never under 60% when the arrange can spare it. */
+export function pianoDockWidth(viewport: number): number {
+  const view = Number.isFinite(viewport) && viewport > 0 ? viewport : 1280
+  return fittedDockWidth(view, Math.round(view * 0.62), 'right', PIANO_DOCK_FRACTION)
 }
 
 /** Piano, rack, and Scaler use the side dock. The call panel is the Collab tab and never this dock. */

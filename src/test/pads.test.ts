@@ -9,6 +9,7 @@ import {
   assignPad,
   chokeGroup,
   clipBeat,
+  padFaceName,
   padRecordWindow,
   pickDefaultKit,
   quantizePadBeat,
@@ -106,7 +107,9 @@ describe('pads drum machine', () => {
     const pad = createKit().banks[0][0]
     const next = assignPad(pad, { name: 'Room Kick', bufferId: 'smp_kick' })
     expect(next.pitch).toBe(36)
-    expect(next.name).toBe('Room Kick')
+    expect(next.name).toBe('Kick')
+    expect(next.sampleName).toBe('Room Kick')
+    expect(padFaceName(next)).toBe('Kick')
     expect(next.layers[0].bufferId).toBe('smp_kick')
     expect(next.choke).toBe(0)
     const store = new ProjectStore(createEmptyProject())
@@ -115,7 +118,9 @@ describe('pads drum machine', () => {
     store.assignTrackPad(id, 0, 4, { name: 'Closed Hat', samples: new Float32Array([0.1, -0.1]), sampleRate: 48000 })
     const hat = store.trackKit(id).banks[0][4]
     expect(hat.pitch).toBe(42)
-    expect(hat.name).toBe('Closed Hat')
+    expect(hat.name).toBe('Hat')
+    expect(hat.sampleName).toBe('Closed Hat')
+    expect(padFaceName(hat)).toBe('Hat')
     expect(hat.choke).toBe(1)
     expect(hat.layers[0].bufferId).toBeTruthy()
     store.updateTrackPad(id, 0, 4, { muted: true, level: 0.4, pan: -0.2, tune: 3, decay: 0.5 })
@@ -159,6 +164,8 @@ describe('pads drum machine', () => {
     expect(css).toContain('overflow: visible')
     expect(css).toContain('var(--raised)')
     expect(css).toContain('.mpc-pad.ch-raised')
+    expect(css).toContain('.mpc-meter')
+    expect(css).toContain('translateY(8px)')
     const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8')
     expect(app).toContain('PadsPanel')
     expect(app).toContain('insertPads')
