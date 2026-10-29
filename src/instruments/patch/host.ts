@@ -1,3 +1,4 @@
+import patchWorkletUrl from '../../audio/patch.worklet.ts?worker&url'
 import type { OmniPatch } from './types'
 import type { StripNodes } from '../../audio/strips'
 import { acceptNoteOn, clearNote } from '../../audio/liveStage'
@@ -147,7 +148,7 @@ export class PatchHost {
 
   private load(ctx: AudioContext) {
     if (!this.module) {
-      this.module = ctx.audioWorklet.addModule(new URL('../../audio/patch.worklet.ts', import.meta.url)).then(() => true).catch(() => false)
+      this.module = ctx.audioWorklet.addModule(patchWorkletUrl).then(() => true).catch(() => false)
     }
     return this.module
   }

@@ -1,3 +1,4 @@
+import insertWorkletUrl from './insert.worklet.ts?worker&url'
 import type { PluginInstance, Project } from '../model/types'
 import { tuneBlockScale } from './plugins/autoTune'
 import type { StripNodes } from './strips'
@@ -564,7 +565,7 @@ export class LiveRack {
   private async ensureWorklet(ctx: AudioContext) {
     if (this.workletOk) return true
     if (!this.workletPromise) {
-      this.workletPromise = ctx.audioWorklet.addModule(new URL('./insert.worklet.ts', import.meta.url)).then(() => true).catch(() => false)
+      this.workletPromise = ctx.audioWorklet.addModule(insertWorkletUrl).then(() => true).catch(() => false)
     }
     return this.workletPromise
   }

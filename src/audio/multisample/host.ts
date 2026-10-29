@@ -1,3 +1,4 @@
+import libraryWorkletUrl from '../library.worklet.ts?worker&url'
 import { acceptNoteOn, clearNote } from '../liveStage'
 import { wantsLibrary } from '../../instruments/scaler/model'
 import type { Project, Track } from '../../model/types'
@@ -204,7 +205,7 @@ export class LibraryHost {
 
   private loadModule(ctx: AudioContext) {
     if (!this.module) {
-      this.module = ctx.audioWorklet.addModule(new URL('../library.worklet.ts', import.meta.url)).then(() => true).catch(() => false)
+      this.module = ctx.audioWorklet.addModule(libraryWorkletUrl).then(() => true).catch(() => false)
     }
     return this.module
   }

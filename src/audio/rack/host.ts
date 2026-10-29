@@ -1,3 +1,4 @@
+import rackWorkletUrl from './rack.worklet.ts?worker&url'
 import type { Project } from '../../model/types'
 import type { StripNodes } from '../strips'
 import { RackRuntime, type SampleBuffer } from './dsp'
@@ -133,7 +134,7 @@ export class RackHost {
 
   private async ensure(ctx: AudioContext) {
     if (this.ready) return this.ready
-    this.ready = ctx.audioWorklet.addModule(new URL('./rack.worklet.ts', import.meta.url)).then(() => true).catch(() => false)
+    this.ready = ctx.audioWorklet.addModule(rackWorkletUrl).then(() => true).catch(() => false)
     return this.ready
   }
 
