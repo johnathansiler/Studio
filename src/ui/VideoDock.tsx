@@ -284,7 +284,7 @@ export function VideoDock({
       {settingsOpen && (
         <div className="settings-sheet">
           <div className="settings-stats" title={one?.source || 'not measured'}>
-            Mon {one ? ms(one.ms, 0) : '—'} · Out {plainMs(engine.outputLatencyMs)} · In {plainMs(engine.inputLatencyMs)} · Loop {plainMs(state.loopbackMs)} · Ping {plainMs(state.audioPingMs)}
+            Mon {one ? ms(one.ms, 0) : '—'} · Base {plainMs(engine.baseLatencyMs)} · Out {plainMs(engine.deviceLatencyMs)} · In {plainMs(engine.inputLatencyMs)} · Loop {plainMs(state.loopbackMs)} · Ping {plainMs(state.audioPingMs)}
           </div>
           <div className="settings-actions">
             {phone && (

@@ -517,8 +517,9 @@ export function App() {
 
   useEffect(() => {
     if (!import.meta.env.DEV) return
-    ;(window as unknown as { __cue?: { measure: () => ReturnType<AudioEngine['measureLiveHit']> } }).__cue = {
+    ;(window as unknown as { __cue?: { measure: () => ReturnType<AudioEngine['measureLiveHit']>; probe: () => ReturnType<AudioEngine['liveLatencyProbe']> } }).__cue = {
       measure: () => engine.measureLiveHit(),
+      probe: () => engine.liveLatencyProbe(),
     }
   }, [engine])
 

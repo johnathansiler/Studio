@@ -3,6 +3,7 @@ import { LiveCaptureBuffer, type CapturedClip } from '../model/midiTools'
 const buffer = new LiveCaptureBuffer()
 let enabled = true
 let performanceOwns = false
+let stepOwns = false
 
 /** The drum/keys deck handles notes itself while it is open. */
 export function setPerformanceOwnsMidi(on: boolean) {
@@ -11,6 +12,15 @@ export function setPerformanceOwnsMidi(on: boolean) {
 
 export function performanceOwnsMidi() {
   return performanceOwns
+}
+
+/** Step entry listens itself so a hardware key is not also played by the track listener. */
+export function setStepOwnsMidi(on: boolean) {
+  stepOwns = on
+}
+
+export function stepOwnsMidi() {
+  return stepOwns
 }
 
 export function setCaptureEnabled(on: boolean) {

@@ -1,3 +1,4 @@
+import { continuousCeiling } from '../liveStage'
 import type { SampleBank } from './cache'
 import { MemoryBank } from './cache'
 import { isKeyswitch, selectLayers } from './map'
@@ -491,8 +492,5 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function soft(value: number) {
-  if (!Number.isFinite(value) || Math.abs(value) < 1e-15) return 0
-  if (value > 1) return Math.tanh(value)
-  if (value < -1) return Math.tanh(value)
-  return value
+  return continuousCeiling(value)
 }
