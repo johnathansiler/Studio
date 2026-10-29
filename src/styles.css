@@ -839,11 +839,9 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 }
 .shell.phone .topbar {
   flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
-  grid-template-areas:
-    "brand name hist unstuck menu"
-    "views views views views views";
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   align-items: center;
   gap: 6px 8px;
   height: auto;
@@ -852,13 +850,15 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 }
 .shell.phone .spacer { display: none; }
 .shell.phone .transport { flex: 0 0 auto; }
-.shell.phone .brand { grid-area: brand; min-width: 0; }
+.shell.phone .brand { order: 1; min-width: 0; }
+.shell.phone:not(.land) .brand h1 { display: none; }
 .shell.phone .brand p { display: none; }
-.shell.phone .project-name { grid-area: name; min-width: 0; width: auto; }
-.shell.phone .views { grid-area: views; width: 100%; }
+.shell.phone .project-name { order: 2; flex: 1 1 120px; min-width: 128px; width: auto; }
+.shell.phone .unstuck-btn { order: 3; }
+.shell.phone .menu-btn { order: 4; }
+.shell.phone .views { order: 5; flex: 1 1 100%; width: 100%; }
 .shell.phone .views button { flex: 1; padding: 0 4px; }
-.shell.phone .history-btns { grid-area: hist; }
-.shell.phone .unstuck-btn { grid-area: unstuck; }
+.shell.phone .history-btns { order: 6; }
 .shell.phone .menu-btn { grid-area: menu; width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
 .shell.phone .shell-menu {
   position: fixed; top: auto; left: 0; right: 0; bottom: 0; width: auto;
@@ -1087,7 +1087,10 @@ html[data-posture="book"] .shell:not(.phone) .workspace {
 .shell.fold .topbar { row-gap: 6px; padding-bottom: 6px; }
 .shell.fold .views { order: 3; flex: 1 0 100%; }
 .shell.fold .views button { flex: 1; height: 44px; }
-.shell.fold .transport { flex-wrap: nowrap; padding-top: 6px; padding-bottom: 6px; }
+.shell.fold .transport { flex-wrap: wrap; overflow: visible; padding-top: 6px; padding-bottom: 6px; row-gap: 6px; }
+.shell.fold .lcd { flex: 0 0 auto; min-width: max-content; }
+.shell.fold .lcd .tc,
+.shell.fold .lcd .bars { overflow: visible; }
 .shell.fold .menu-btn,
 .shell.fold .t-btn {
   width: auto;
@@ -1523,6 +1526,14 @@ html[data-posture="tabletop"] .shell .master-sheet {
   flex: 1 1 80px;
   margin: 0 0 0 6px;
 }
+.shell.fold .tool-chip {
+  order: -1;
+  flex: 1 0 100%;
+  margin: 2px 0 4px;
+  white-space: normal;
+  overflow: visible;
+}
+.shell.fold .tool-strip { flex: 1 1 100%; flex-wrap: wrap; overflow: visible; }
 .shell.fold .tool-slot .timeline-tools button {
   width: auto;
   height: 44px;

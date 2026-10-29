@@ -190,7 +190,9 @@
 .tool-label { display: none; font-size: 12px; font-weight: 640; }
 .shell.phone:not(.land) .tool-label,
 .shell.fold .tool-label { display: inline; }
-.shell.fold .arrange { grid-template-columns: 300px minmax(0, 1fr); }
+.shell.fold .arrange { grid-template-columns: 320px minmax(0, 1fr); --lane-h: 112px; }
+.shell.fold .pl-head { flex-wrap: wrap; height: auto; align-content: center; row-gap: 2px; }
+.shell.fold .pl-head .name { flex: 1 1 88px; min-width: 72px; }
 .shell.phone:not(.land) .tool-slot .timeline-tools { flex-wrap: wrap; overflow: visible; }
 .shell.phone:not(.land) .tool-strip { flex: 1 1 100%; min-width: 0; overflow-x: auto; }
 .shell.phone:not(.land) .tool-chip {
