@@ -2824,17 +2824,25 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   padding: 0 4px;
 }
 .shell.phone:not(.land) .history-btns { order: 2; }
-.shell.phone:not(.land) .history-btn { width: 40px; min-width: 40px; height: 40px; min-height: 40px; }
+.shell.phone:not(.land) .history-word { display: inline; }
+.shell.phone:not(.land) .history-icon { display: none; }
+.shell.phone:not(.land) .history-btn {
+  width: auto;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 8px;
+}
 .shell.phone:not(.land) .unstuck-btn { order: 3; height: 40px; min-height: 40px; padding: 0 8px; }
 .shell.phone:not(.land) .menu-btn { order: 4; height: 40px; min-height: 40px; min-width: 40px; }
 .shell.phone:not(.land) .views { order: 5; flex: 1 1 100%; width: 100%; gap: 4px; }
 .shell.phone:not(.land) .views button { height: 40px; min-height: 40px; padding: 0 2px; font-size: 13px; }
 .shell.phone:not(.land) .transport {
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  height: 48px;
-  min-height: 48px;
-  max-height: 48px;
+  flex-wrap: wrap;
+  overflow: visible;
+  height: auto;
+  min-height: 44px;
+  max-height: none;
   padding: 4px 6px;
   gap: 4px;
 }
@@ -2856,14 +2864,6 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   overflow: visible;
 }
 .shell.phone:not(.land) .loop-readout .loop-span { display: none; }
-@media (max-width: 400px) {
-  .shell.phone:not(.land) .transport {
-    flex-wrap: wrap;
-    height: auto;
-    max-height: none;
-    overflow: visible;
-  }
-}
 .shell.phone:not(.land) .lcd .bars { font-size: 13px; }
 .shell.phone:not(.land) .tool-slot:not(:empty) {
   min-height: 44px;

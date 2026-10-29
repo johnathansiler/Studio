@@ -38,7 +38,7 @@
 .playlist-browser .sound-filters button { max-width: 100%; min-width: 0; }
 .shell.phone .playlist-browser .sound-filters { flex-wrap: wrap; overflow-x: hidden; }
 .shell.phone .arrange { grid-template-columns: 188px minmax(0, 1fr); }
-.shell.phone:not(.land) .arrange { grid-template-columns: minmax(168px, 48%) minmax(0, 1fr); --lane-h: 128px; }
+.shell.phone:not(.land) .arrange { grid-template-columns: minmax(168px, 48%) minmax(0, 1fr); --lane-h: 156px; }
 .shell.phone:not(.land) .pl-head {
   display: flex;
   flex-wrap: wrap;
@@ -50,8 +50,10 @@
 }
 .shell.phone:not(.land) .pl-head .swatch { align-self: stretch; height: auto; }
 .shell.phone:not(.land) .pl-head .name {
-  flex: 1 1 calc(100% - 48px);
-  min-width: 72px;
+  flex: 1 1 calc(100% - 18px);
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
   height: 40px;
   min-height: 40px;
   font-size: 15px;

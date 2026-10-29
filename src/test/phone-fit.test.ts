@@ -48,6 +48,30 @@ describe('phone fit at 412x915', () => {
           }))
           return { ratio: lane.height / window.innerHeight, names }
         })
+        const history = await page.evaluate(() => {
+          return ['[data-history="undo"]', '[data-history="redo"]'].map((selector) => {
+            const button = document.querySelector(selector) as HTMLElement
+            const word = button.querySelector('.history-word') as HTMLElement
+            const box = button.getBoundingClientRect()
+            return {
+              text: word.textContent,
+              display: getComputedStyle(word).display,
+              top: box.top,
+              bottom: box.bottom,
+              right: box.right,
+            }
+          })
+        })
+        for (const button of history) {
+          expect(button.display).not.toBe('none')
+          expect(button.text === 'Undo' || button.text === 'Redo').toBe(true)
+          expect(button.top).toBeGreaterThanOrEqual(0)
+          expect(button.bottom).toBeLessThanOrEqual(96)
+          expect(button.right).toBeLessThanOrEqual(412 + 1)
+        }
+        const loop = await page.locator('.t-btn.loop .t-word').boundingBox()
+        expect(loop).toBeTruthy()
+        expect(loop!.x + loop!.width).toBeLessThanOrEqual(412 + 1)
         expect(timeline.ratio).toBeGreaterThanOrEqual(0.65)
         expect(timeline.names.map((item) => item.value)).toEqual(['Vocal', 'Music', 'Keys'])
         for (const name of timeline.names) {

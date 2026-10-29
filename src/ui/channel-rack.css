@@ -748,6 +748,11 @@
 .shell.phone:not(.land) .beats .rack-tool,
 .shell.phone:not(.land) .beats .rack-bar > .rack-loop { display: none; }
 .shell.phone:not(.land) .beats .rack-bar { gap: 4px; }
+.shell.phone:not(.land) .beats .rack-editing select {
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+}
 .shell.phone:not(.land) .beats .pattern-send { flex: 1 1 auto; width: auto; }
 .shell.phone:not(.land) .beats .rack-row,
 .shell.phone:not(.land) .beats .drum-lane {
