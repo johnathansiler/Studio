@@ -40,6 +40,7 @@ function markup(store: ProjectStore) {
 describe('phone mixer at 412x915', () => {
   it('keeps narrow columns tappable, with stacked controls and no clipped text', async () => {
     const store = new ProjectStore()
+    store.updateTrack(store.project.tracks[0].id, { armed: true })
     writeLayout(store.project.id, { strip: STRIP_HALF, column: 70, mixer: 'columns' })
     mkdirSync('/opt/cursor/artifacts', { recursive: true })
     const browser = await chromium.launch({ headless: true })
@@ -69,6 +70,9 @@ describe('phone mixer at 412x915', () => {
           clientWidth: node.clientWidth,
         }))
         const autoBoxes = autos.map((button) => button.getBoundingClientRect())
+        const arm = strip.querySelector('.arm-flag') as HTMLElement
+        const armShown = [...arm.querySelectorAll<HTMLElement>('span')].filter((node) => getComputedStyle(node).display !== 'none').map((node) => (node.textContent || '').trim()).join('')
+        const armStyle = getComputedStyle(arm)
         return {
           layout: mixer.dataset.layout,
           narrow: mixer.dataset.narrow,
@@ -80,6 +84,8 @@ describe('phone mixer at 412x915', () => {
           pressed: autos.some((button) => button.classList.contains('on') && button.getAttribute('aria-pressed') === 'true'),
           fx: !!strip.querySelector('.fx-open'),
           chevron: !!strip.querySelector('select'),
+          armShown,
+          armLit: arm.classList.contains('on-r') && armStyle.backgroundColor !== 'rgba(0, 0, 0, 0)',
           buttons,
           texts,
         }
@@ -94,6 +100,8 @@ describe('phone mixer at 412x915', () => {
       expect(report.pressed).toBe(true)
       expect(report.fx).toBe(true)
       expect(report.chevron).toBe(false)
+      expect(report.armShown).toBe('Arm')
+      expect(report.armLit).toBe(true)
       expect(report.buttons.length).toBeGreaterThan(8)
       for (const button of report.buttons) {
         expect(button.width, button.label).toBeGreaterThanOrEqual(36)
@@ -144,6 +152,8 @@ describe('phone mixer at 412x915', () => {
           scrollWidth: node.scrollWidth,
           clientWidth: node.clientWidth,
         }))
+        const arm = first.querySelector('.arm-flag') as HTMLElement
+        const armShown = [...arm.querySelectorAll<HTMLElement>('span')].filter((node) => getComputedStyle(node).display !== 'none').map((node) => (node.textContent || '').trim()).join('')
         const mix = (document.querySelector('.mixer') as HTMLElement).getBoundingClientRect()
         return {
           layout: mixer.dataset.layout,
@@ -152,11 +162,13 @@ describe('phone mixer at 412x915', () => {
           wide: first.getBoundingClientRect().width >= mix.width - 20,
           horizontal: faderBox.width > faderBox.height,
           touch: getComputedStyle(fader).touchAction,
+          armShown,
           buttons,
           texts,
         }
       })
       expect(report.layout).toBe('rows')
+      expect(report.armShown).toBe('Arm')
       expect(report.narrow).toBe('')
       expect(report.below).toBe(true)
       expect(report.wide).toBe(true)

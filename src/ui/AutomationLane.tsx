@@ -86,7 +86,7 @@ export function MixFlags({ store, trackId, compact = false }: { store: ProjectSt
       {!compact && (
         <button type="button" className={`mini arm-flag ${track.armed ? 'on-r' : ''}`} aria-pressed={track.armed} aria-label={track.armed ? 'Disarm track' : 'Arm track. This track records when you press record.'} title="Arm this track. Only armed tracks record." onClick={(event) => { event.stopPropagation(); store.updateTrack(track.id, { armed: !track.armed }) }}>
           <span className="arm-full">Arm</span>
-          <span className="arm-short">R</span>
+          <span className="arm-compact" aria-hidden="true">A<i className="arm-dot" /></span>
         </button>
       )}
       {!compact && (
