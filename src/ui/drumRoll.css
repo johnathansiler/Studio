@@ -38,6 +38,9 @@
   position: relative;
   min-height: 36px;
 }
+.drum-slot.grid-bar { box-shadow: inset 2px 0 0 rgba(115, 196, 143, 0.9), 0 0 8px rgba(115, 196, 143, 0.35); }
+.drum-slot.grid-beat { box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.4); }
+.drum-slot.grid-snap { box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.16); }
 .drum-slot {
   position: relative;
   width: auto;

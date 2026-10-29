@@ -446,6 +446,21 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   overflow: hidden;
 }
 .ruler span { position: absolute; top: 14px; font-family: var(--mono); font-size: 10px; color: var(--faint); transform: translateX(-50%); }
+.grid-hint {
+  position: sticky;
+  left: 8px;
+  z-index: 4;
+  display: inline-block;
+  margin: 2px 0 0 8px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-style: normal;
+  color: #d7ffe6;
+  background: rgba(16, 33, 23, 0.82);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  pointer-events: none;
+}
 .ruler i { position: absolute; top: 30px; width: 1px; height: 10px; background: var(--line); }
 .lane-add {
   position: absolute; top: 18px; left: 8px; width: 56px; height: 64px;

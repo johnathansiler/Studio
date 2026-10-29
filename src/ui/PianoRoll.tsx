@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, typ
 import type { AudioEngine } from '../audio/engine'
 import { heardBeat } from '../model/midiClock'
 import { defaultRoll, quantizeNotes, arpeggiateSelection, humanizeNotes, snapBeat, strumSelection } from '../model/paint'
+import { gridBackground, gridPaint } from '../model/gridLines'
 import { activeGridBeats } from '../model/snapGrid'
 import {
   NOTE_NAMES,
@@ -725,7 +726,8 @@ export function PianoRoll({
     setOpen((value) => !value)
   }
 
-  const gridPx = (gridNow > 0 ? gridNow : 1) * pxBeat
+  const rollGrid = gridPaint(store.project, pxBeat)
+  const rollLines = gridBackground(rollGrid, pxBeat, row)
   return (
     <div className={`piano ${compact ? 'compact' : ''} ${chrome ? '' : 'bare'}`} ref={pianoRef} data-tool={tool}>
       {chrome && <FitRow className="scale-bar">
@@ -816,6 +818,7 @@ export function PianoRoll({
         <div className="loop-ruler-pad" aria-hidden="true" />
         <div className="loop-ruler-scroll" ref={rulerScrollRef}>
           <div className="loop-ruler-inner" style={{ width }}>
+            {rollGrid.hint && <em className="grid-hint" role="status">{rollGrid.hint}</em>}
             {Array.from({ length: Math.min(128, Math.floor(span / Math.max(0.25, quartersPerBar(store.project.timeSignature))) + 1) }, (_, index) => (
               <span key={index} className="loop-tick" style={{ left: index * quartersPerBar(store.project.timeSignature) * pxBeat }}>{index + 1}</span>
             ))}
@@ -880,8 +883,8 @@ export function PianoRoll({
                 position: 'relative',
                 touchAction: 'none',
                 cursor,
-                backgroundImage: 'linear-gradient(to right, rgba(255,255,255,0.07) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.04) 1px, transparent 1px)',
-                backgroundSize: `${gridPx}px ${row}px`,
+                backgroundImage: `${rollLines.backgroundImage}, linear-gradient(to bottom, rgba(255,255,255,0.04) 1px, transparent 1px)`,
+                backgroundSize: `${rollLines.backgroundSize}, 100% ${row}px`,
               }}
               onPointerDown={onGridDown}
             >
