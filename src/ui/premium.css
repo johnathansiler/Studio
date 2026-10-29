@@ -841,7 +841,12 @@
   right: 0;
   bottom: 0;
   width: auto;
-  max-height: min(72dvh, calc(100dvh - 72px));
+  /* Stay under the top bar, transport, and tool strip, and scroll inside. */
+  max-height: calc(100dvh - 310px);
+}
+
+.shell.phone.land #shell-menu {
+  max-height: calc(100dvh - 96px);
 }
 
 .action-sheet {
