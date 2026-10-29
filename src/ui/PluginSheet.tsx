@@ -9,6 +9,7 @@ import { MODEL_IDS } from '../audio/plugins/models'
 import { AmpPop } from './AmpPop'
 import { AutoTuneFace } from './AutoTuneFace'
 import { useFormFactor } from './form'
+import { BevelSelect } from './BevelSelect'
 import { NOTE_NAMES, SCALES } from '../model/scale'
 import { projectSampleBeat } from '../model/tempoMap'
 import { selectPlugin } from '../state/select'
@@ -366,18 +367,23 @@ export function RouteFields({ store, trackId }: { store: ProjectStore; trackId: 
   const groupLabel = groups.find((item) => item.id === track.groupId)?.name ?? 'No group'
   return (
     <div className="route-fields">
-      <select title={`Output. ${outputLabel}`} value={track.output ?? ''} onChange={(event) => store.updateTrack(track.id, { output: event.target.value || null })}>
-        <option value="">{track.input.startsWith('remote:') ? 'Cue' : 'Master'}</option>
-        {targets.map((item) => (
-          <option key={item.id} value={item.id}>{item.name}</option>
-        ))}
-      </select>
-      <select title={`Group. ${groupLabel}`} value={track.groupId ?? ''} onChange={(event) => store.updateTrack(track.id, { groupId: event.target.value || null })}>
-        <option value="">—</option>
-        {groups.map((item) => (
-          <option key={item.id} value={item.id}>{item.name}</option>
-        ))}
-      </select>
+      <BevelSelect
+        label="Output"
+        hint={`Output. ${outputLabel}`}
+        value={track.output ?? ''}
+        options={[
+          { value: '', label: track.input.startsWith('remote:') ? 'Cue' : 'Master' },
+          ...targets.map((item) => ({ value: item.id, label: item.name })),
+        ]}
+        onChange={(next) => store.updateTrack(track.id, { output: next || null })}
+      />
+      <BevelSelect
+        label="Group"
+        hint={`Group. ${groupLabel}`}
+        value={track.groupId ?? ''}
+        options={[{ value: '', label: 'No group' }, ...groups.map((item) => ({ value: item.id, label: item.name }))]}
+        onChange={(next) => store.updateTrack(track.id, { groupId: next || null })}
+      />
     </div>
   )
 }

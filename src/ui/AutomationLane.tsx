@@ -7,6 +7,7 @@ import { channelAutomationMode } from '../model/automation'
 import { automatedValue, automationWriteMode, laneChoices, lanePoints, mixGroupsOf, trackGroupId } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import type { AutomationWriteMode } from '../model/types'
+import { BevelSelect } from './BevelSelect'
 import './automation.css'
 
 const MODES: { id: AutomationWriteMode; label: string; short: string; title: string }[] = [
@@ -117,13 +118,18 @@ export function LinkGroup({ store, trackId }: { store: ProjectStore; trackId: st
   const linkLabel = group?.name ?? 'No link'
   return (
     <div className="link-row">
-      <select className="link-pick" aria-label="Link group" title={`Link group. ${linkLabel}`} value={groupId ?? ''} onClick={(event) => event.stopPropagation()} onChange={(event) => store.assignMixGroup(trackId, event.target.value)}>
-        <option value="">No link</option>
-        {groups.map((item) => (
-          <option key={item.id} value={item.id}>{item.name}</option>
-        ))}
-        <option value="new">New link</option>
-      </select>
+      <BevelSelect
+        className="link-pick"
+        label="Link group"
+        hint={`Link group. ${linkLabel}`}
+        value={groupId ?? ''}
+        options={[
+          { value: '', label: 'No link' },
+          ...groups.map((item) => ({ value: item.id, label: item.name })),
+          { value: 'new', label: 'New link' },
+        ]}
+        onChange={(next) => store.assignMixGroup(trackId, next)}
+      />
       {group && (
         <>
           <Flag store={store} groupId={group.id} on={group.faders} flag="faders" label="Faders" title="Move faders and pans by the same amount." />

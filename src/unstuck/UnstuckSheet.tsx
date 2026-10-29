@@ -5,6 +5,7 @@ import type { AudioEngine } from '../audio/engine'
 import { samplesToBeats } from '../model/time'
 import type { ProjectStore } from '../state/store'
 import { useFormFactor } from '../ui/form'
+import { GuideLayer } from '../ui/GuideLayer'
 import '../ui/guideSheet.css'
 import { songContext, suggest } from './index'
 import { UNSTUCK_GROUPS, unstuckActions } from './menu'
@@ -54,7 +55,7 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
   }
 
   return (
-    <>
+    <GuideLayer>
       <button type="button" className="guide-scrim" aria-label="Close Unstuck" onClick={onClose} />
       <div className={`guide-sheet unstuck-sheet ${place}`} role="dialog" aria-label="Unstuck" data-unstuck="open">
         {place === 'sheet' && <div className="guide-handle" aria-hidden="true" />}
@@ -91,6 +92,6 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
         })}
         {!actions.length && <p className="guide-note">Nothing to add yet. Record or draw a part, then come back.</p>}
       </div>
-    </>
+    </GuideLayer>
   )
 }
