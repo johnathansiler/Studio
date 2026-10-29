@@ -1,3 +1,5 @@
+import { smoothParam } from './paramCurve'
+
 export interface StripNodes {
   input: GainNode
   eqLow: BiquadFilterNode
@@ -97,38 +99,39 @@ export function applyInserts(
   strip: StripNodes,
   inserts: { type: string; enabled: boolean; params: Record<string, number> }[],
 ) {
+  const now = ctx.currentTime || 0
   const eq = inserts.find((i) => i.type === 'eq' && i.enabled)
-  strip.eqLow.gain.value = eq ? eq.params.low || 0 : 0
-  strip.eqMid.gain.value = eq ? eq.params.mid || 0 : 0
-  strip.eqMid.frequency.value = eq ? clamp(eq.params.midFreq || 1000, 200, 8000) : 1000
-  strip.eqHigh.gain.value = eq ? eq.params.high || 0 : 0
+  smoothParam(strip.eqLow.gain, eq ? eq.params.low || 0 : 0, now)
+  smoothParam(strip.eqMid.gain, eq ? eq.params.mid || 0 : 0, now)
+  smoothParam(strip.eqMid.frequency, eq ? clamp(eq.params.midFreq || 1000, 200, 8000) : 1000, now)
+  smoothParam(strip.eqHigh.gain, eq ? eq.params.high || 0 : 0, now)
 
   const comp = inserts.find((i) => i.type === 'compressor' && i.enabled)
   if (comp) {
-    strip.comp.threshold.value = comp.params.threshold ?? -18
-    strip.comp.knee.value = comp.params.knee ?? 8
-    strip.comp.ratio.value = comp.params.ratio ?? 3
-    strip.comp.attack.value = comp.params.attack ?? 0.003
-    strip.comp.release.value = comp.params.release ?? 0.12
+    smoothParam(strip.comp.threshold, comp.params.threshold ?? -18, now)
+    smoothParam(strip.comp.knee, comp.params.knee ?? 8, now)
+    smoothParam(strip.comp.ratio, comp.params.ratio ?? 3, now)
+    smoothParam(strip.comp.attack, comp.params.attack ?? 0.003, now)
+    smoothParam(strip.comp.release, comp.params.release ?? 0.12, now)
   } else {
-    strip.comp.threshold.value = 0
-    strip.comp.knee.value = 0
-    strip.comp.ratio.value = 1
-    strip.comp.attack.value = 0.003
-    strip.comp.release.value = 0.25
+    smoothParam(strip.comp.threshold, 0, now)
+    smoothParam(strip.comp.knee, 0, now)
+    smoothParam(strip.comp.ratio, 1, now)
+    smoothParam(strip.comp.attack, 0.003, now)
+    smoothParam(strip.comp.release, 0.25, now)
   }
 
   const delay = inserts.find((i) => i.type === 'delay' && i.enabled)
   if (delay) {
-    strip.delay.delayTime.value = clamp(delay.params.time ?? 0.22, 0, 1.2)
-    strip.delayFb.gain.value = clamp(delay.params.feedback ?? 0.3, 0, 0.85)
+    smoothParam(strip.delay.delayTime, clamp(delay.params.time ?? 0.22, 0, 1.2), now)
+    smoothParam(strip.delayFb.gain, clamp(delay.params.feedback ?? 0.3, 0, 0.85), now)
     const mix = clamp(delay.params.mix ?? 0.2, 0, 1)
-    strip.delaySend.gain.value = mix
-    strip.delayWet.gain.value = 1
+    smoothParam(strip.delaySend.gain, mix, now)
+    smoothParam(strip.delayWet.gain, 1, now)
   } else {
-    strip.delayFb.gain.value = 0
-    strip.delaySend.gain.value = 0
-    strip.delayWet.gain.value = 0
+    smoothParam(strip.delayFb.gain, 0, now)
+    smoothParam(strip.delaySend.gain, 0, now)
+    smoothParam(strip.delayWet.gain, 0, now)
   }
 
   const reverb = inserts.find((i) => i.type === 'reverb' && i.enabled)
@@ -140,11 +143,11 @@ export function applyInserts(
       strip.irDecay = rounded
     }
     const mix = clamp(reverb.params.mix ?? 0.18, 0, 1)
-    strip.revSend.gain.value = mix
-    strip.revWet.gain.value = 1
+    smoothParam(strip.revSend.gain, mix, now)
+    smoothParam(strip.revWet.gain, 1, now)
   } else {
-    strip.revSend.gain.value = 0
-    strip.revWet.gain.value = 0
+    smoothParam(strip.revSend.gain, 0, now)
+    smoothParam(strip.revWet.gain, 0, now)
   }
 }
 

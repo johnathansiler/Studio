@@ -1,6 +1,6 @@
 import { MemoryBank } from './multisample/cache'
 import { SamplerInstrument } from './multisample/engine'
-import type { MicPosition, SamplerProgram } from './multisample/types'
+import type { InstrumentPlay, MicPosition, SamplerProgram } from './multisample/types'
 
 declare const sampleRate: number
 declare const currentTime: number
@@ -23,10 +23,11 @@ class LibraryProcessor extends AudioWorkletProcessor {
 
   constructor() {
     super()
-    this.port.onmessage = (event: MessageEvent<{ type?: string; program?: SamplerProgram | null; id?: string; sampleRate?: number; channels?: Float32Array[]; pitch?: number; vel?: number; time?: number; mics?: MicPosition[]; limit?: number; key?: number | null }>) => {
+    this.port.onmessage = (event: MessageEvent<{ type?: string; program?: SamplerProgram | null; play?: InstrumentPlay; id?: string; sampleRate?: number; channels?: Float32Array[]; pitch?: number; vel?: number; time?: number; mics?: MicPosition[]; limit?: number; key?: number | null }>) => {
       const data = event.data
       if (!data?.type) return
       if (data.type === 'program') this.instrument.setProgram(data.program ?? null)
+      else if (data.type === 'play') this.instrument.setPlay(data.play as SamplerProgram['play'])
       else if (data.type === 'sample' && data.id && data.channels) {
         this.bank.put(data.id, { sampleRate: data.sampleRate || sampleRate, channels: data.channels })
       } else if (data.type === 'mics' && data.mics) this.instrument.applyMics(data.mics)

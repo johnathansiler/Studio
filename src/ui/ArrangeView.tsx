@@ -897,6 +897,9 @@ export function ArrangeView({
               step={0.01}
               {...described(copyOf(TRACK_SHEET, 'volume'))}
               value={sheetTrack.volume}
+              onPointerDown={() => store.beginAutomationTouch()}
+              onPointerUp={() => store.endAutomationTouch()}
+              onPointerCancel={() => store.endAutomationTouch()}
               onChange={(event) => store.updateTrack(sheetTrack.id, { volume: Number(event.target.value) })}
             />
           </label>

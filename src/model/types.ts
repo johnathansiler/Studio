@@ -103,8 +103,8 @@ export interface AutomationPoint {
   value: number
 }
 
-/** Read plays lanes. Latch keeps writing the last value until stop. Touch writes only while a control is held. */
-export type AutomationWriteMode = 'read' | 'latch' | 'touch'
+/** Off ignores lanes. Read plays them. Latch keeps writing until stop. Touch writes only while a control is held. */
+export type AutomationWriteMode = 'off' | 'read' | 'latch' | 'touch'
 
 export interface AutomationLane {
   id: string
@@ -454,6 +454,8 @@ export interface Track {
   midiSlots?: (string | null)[]
   /** Effects that reshape notes before they reach the instrument. */
   midiFx?: MidiFx[]
+  /** This channel's automation. Missing follows the project mode. */
+  automationMode?: AutomationWriteMode
 }
 
 /** Bump when saved documents change shape. migrateProject opens older numbers. */
@@ -471,8 +473,10 @@ export interface Project {
   masterInserts: Insert[]
   masterPlugins: PluginInstance[]
   automation: AutomationLane[]
-  /** How fader and plugin moves are written while the transport is rolling. */
+  /** Default automation mode for channels that have not chosen their own. */
   automationMode?: AutomationWriteMode
+  /** Master channel automation. Missing follows automationMode. */
+  masterAutomationMode?: AutomationWriteMode
   /** Control groups. Folder summing still uses track.groupId. */
   mixGroups?: MixGroup[]
   presets: UserPreset[]

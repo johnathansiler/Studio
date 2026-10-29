@@ -16,6 +16,7 @@ interface Live {
   dedupe: Map<number, number>
   patch: OmniPatch | null
   patchSig: string
+  paramSig: string
   sent: Set<string>
   audio: Map<string, Float32Array>
   open: boolean
@@ -50,9 +51,12 @@ export class PatchHost {
       if (!strip) continue
       const live = this.ensure(ctx, track.id, strip)
       live.patch = patch
-      const sig = `${patch.id}:${patch.enabled ? 1 : 0}:${patch.layers.map((layer) => `${layer.id}:${layer.enabled ? 1 : 0}:${layer.kind}`).join(',')}`
-      if (sig !== live.patchSig) {
-        live.patchSig = sig
+      const structure = `${patch.id}:${patch.enabled ? 1 : 0}:${patch.layers.map((layer) => `${layer.id}:${layer.enabled ? 1 : 0}:${layer.kind}`).join(',')}`
+      const params = patch.layers.map((layer) => `${layer.level}:${layer.pan}:${layer.cutoff}:${layer.resonance}:${JSON.stringify(layer.params)}`).join('|')
+        + `:${patch.macro1 ?? 0}:${patch.macro2 ?? 0}:${patch.morph?.x ?? 0}:${patch.morph?.y ?? 0}:${patch.aftertouch}:${patch.modWheel}`
+      if (structure !== live.patchSig || params !== live.paramSig) {
+        live.patchSig = structure
+        live.paramSig = params
         live.engine.setPatch(patch)
         live.worklet?.port.postMessage({ type: 'patch', patch })
       }
@@ -130,7 +134,7 @@ export class PatchHost {
     gain.gain.value = 0.9
     gain.connect(strip.input)
     const engine = new PatchEngine(ctx.sampleRate)
-    const live: Live = { engine, gain, worklet: null, dedupe: new Map(), patch: null, patchSig: '', sent: new Set(), audio: new Map(), open: false, waiting: [] }
+    const live: Live = { engine, gain, worklet: null, dedupe: new Map(), patch: null, patchSig: '', paramSig: '', sent: new Set(), audio: new Map(), open: false, waiting: [] }
     this.lives.set(id, live)
     void this.load(ctx).then((ok) => {
       if (live.worklet || live.open) return

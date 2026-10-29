@@ -1,5 +1,6 @@
 import { moveAudioClip, splitAudioClip, trimAudioClip } from './clips'
 import { splitMidiClip, stretchMidiClip, trimMidiClip } from './edit'
+import { isAutomationMode } from './automation'
 import type { AudioClip, MidiClip, MixGroup, Project, Track } from './types'
 import { uid } from './types'
 
@@ -21,7 +22,8 @@ export function groupForTrack(project: Project, trackId: string) {
 
 export function normalizeMix(project: Project) {
   const mode = project.automationMode
-  project.automationMode = mode === 'latch' || mode === 'touch' ? mode : 'read'
+  project.automationMode = isAutomationMode(mode) ? mode : 'read'
+  if (project.masterAutomationMode != null && !isAutomationMode(project.masterAutomationMode)) delete project.masterAutomationMode
   const known = new Set(project.tracks.map((track) => track.id))
   project.mixGroups = (project.mixGroups ?? [])
     .map((group) => ({
@@ -36,6 +38,7 @@ export function normalizeMix(project: Project) {
     .filter((group) => group.trackIds.length > 0)
   for (const track of project.tracks) {
     track.soloSafe = track.soloSafe === true
+    if (track.automationMode != null && !isAutomationMode(track.automationMode)) delete track.automationMode
     for (const plugin of track.plugins ?? []) plugin.sidechain = plugin.sidechain ?? ''
   }
   for (const plugin of project.masterPlugins ?? []) plugin.sidechain = plugin.sidechain ?? ''

@@ -10,7 +10,7 @@ export const COLUMN_MAX = 240
 /** Narrow enough that a 360px phone shows three clip columns and a 390px phone shows four. */
 export const COLUMN_DEFAULT = 70
 
-export const MIXER_PAD = 8
+export const MIXER_PAD = 0
 export const STRIP_GAP = 6
 export const SESSION_PAD = 8
 export const SESSION_GAP = 6

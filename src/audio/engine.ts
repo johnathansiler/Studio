@@ -27,8 +27,9 @@ import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChu
 import { encodeWav, linearResample } from '../model/wav'
 import { tuneBlockScale } from './plugins/autoTune'
 import { audibleIds } from '../model/audible'
-import { automationSchedule, laneFor, rackLanesFor, valueAtMappedSample } from '../model/automation'
-import { applyRamps } from './paramCurve'
+import { automationSchedule, channelAutomationMode, laneFor, rackLanesFor, valueAtMappedSample } from '../model/automation'
+import { applyRamps, smoothParam } from './paramCurve'
+import { channelRoute } from '../model/sharedMix'
 import { chainContext, enabledFx, LiveMidiChain, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
 import { LiveRack } from './liveRack'
 import { ATTACK_SEC, RELEASE_SEC, builtinLevel, drumLevel, liveWhen, scheduleDelaySeconds } from './liveStage'
@@ -96,7 +97,8 @@ export class AudioEngine {
   private liveBuiltins: { key: string; gain: GainNode; src: AudioScheduledSourceNode }[] = []
   /** While the Pads faceplate is open, hits go to that track's mixer channel. */
   private padRouteId: string | null = null
-  private padVoices: { pitch: number; gain: GainNode; stop: (at?: number) => void; born: number; until: number; src: AudioBufferSourceNode }[] = []
+  private padVoices: { pitch: number; trackId: string; gain: GainNode; level: GainNode; pan: StereoPannerNode; stop: (at?: number) => void; born: number; until: number; src: AudioBufferSourceNode }[] = []
+  private drumTrims = new Map<string, { gain: GainNode; pan: StereoPannerNode; dest: AudioNode }>()
   private padCaches = new WeakMap<BaseAudioContext, Map<string, AudioBuffer>>()
   private drumCache = new WeakMap<BaseAudioContext, AudioBuffer[]>()
 
@@ -556,10 +558,13 @@ export class AudioEngine {
     for (const track of project.tracks) {
       const strip = this.strips.get(track.id)
       if (!strip) continue
+      const follow = channelAutomationMode(project, track.id) !== 'off'
       strip.mute.gain.setTargetAtTime(heard.has(track.id) ? 1 : 0, now, 0.01)
-      this.scheduleControl(strip.fader.gain, laneFor(project.automation, track.id, 'volume')?.points, track.volume, sample, now, end)
-      this.scheduleControl(strip.pan.pan, laneFor(project.automation, track.id, 'pan')?.points, track.pan, sample, now, end)
+      this.scheduleControl(strip.fader.gain, follow ? laneFor(project.automation, track.id, 'volume')?.points : undefined, track.volume, sample, now, end)
+      this.scheduleControl(strip.pan.pan, follow ? laneFor(project.automation, track.id, 'pan')?.points : undefined, track.pan, sample, now, end)
     }
+    this.applyDrumTrims(now)
+    this.applyPadLevels(now)
     this.rack.applyAutomation(project, this.playing, sample, now, end)
     const originBeat = projectSampleBeat(project, this.playing ? this.playOriginSample : sample)
     const originTime = this.playing ? this.playOriginCtx : now
@@ -573,11 +578,67 @@ export class AudioEngine {
     if (!project) return
     if (!this.playing || !points?.length) {
       const value = points?.length ? valueAtMappedSample(points, project, sample, fallback) : fallback
-      param.cancelScheduledValues(now)
-      param.setTargetAtTime(value, now, 0.015)
+      smoothParam(param, value, now)
       return
     }
     applyRamps(param, automationSchedule(points, fallback, project, sample, now, end), now)
+  }
+
+  /** Keep a drum-row fader and pan on nodes that already exist, so a drag is heard immediately. */
+  private applyDrumTrims(now: number) {
+    const project = this.project
+    const ctx = this.ctx
+    if (!project || !ctx || !this.masterStrip) return
+    const patterns = project.beats?.patterns ?? []
+    for (const pattern of patterns) {
+      const solo = pattern.channels.some((channel) => channel.solo)
+      for (const channel of pattern.channels) {
+        const destId = channelRoute(project, channel)
+        const dest = (destId ? this.strips.get(destId)?.input : undefined) ?? this.masterStrip.input
+        this.throughDrum(channel.id, dest)
+        const trim = this.drumTrims.get(channel.id)
+        if (!trim) continue
+        const heard = !channel.mute && (!solo || channel.solo)
+        smoothParam(trim.gain.gain, heard ? Math.max(0, channel.volume) : 0, now)
+        smoothParam(trim.pan.pan, channel.pan || 0, now)
+      }
+    }
+  }
+
+  private applyPadLevels(now: number) {
+    const project = this.project
+    if (!project) return
+    for (const voice of this.padVoices) {
+      const pad = project.tracks.find((track) => track.id === voice.trackId)?.padKit?.banks.flat().find((item) => item.pitch === voice.pitch)
+      if (!pad) continue
+      smoothParam(voice.level.gain, pad.muted ? 0 : pad.level, now)
+      smoothParam(voice.pan.pan, pad.pan || 0, now)
+    }
+  }
+
+  private throughDrum(channelId: string, dest: AudioNode): AudioNode {
+    const ctx = this.ctx
+    if (!ctx) return dest
+    let trim = this.drumTrims.get(channelId)
+    if (!trim || trim.dest !== dest) {
+      try { trim?.pan.disconnect() } catch { /* first connection */ }
+      try { trim?.gain.disconnect() } catch { /* first connection */ }
+      const gain = ctx.createGain()
+      const pan = ctx.createStereoPanner()
+      const mix = this.drumMix(channelId)
+      gain.gain.value = mix.volume
+      pan.pan.value = mix.pan
+      gain.connect(pan)
+      pan.connect(dest)
+      trim = { gain, pan, dest }
+      this.drumTrims.set(channelId, trim)
+    }
+    return trim.gain
+  }
+
+  private drumMix(channelId: string) {
+    const channel = this.project?.beats?.patterns.flatMap((pattern) => pattern.channels).find((item) => item.id === channelId)
+    return { volume: Math.max(0, channel?.volume ?? 1), pan: channel?.pan || 0 }
   }
 
   /** Play Scaler notes through the track's chosen sound. The previous preview chord is released first. */
@@ -773,7 +834,7 @@ export class AudioEngine {
   private applyMasterGain() {
     if (!this.ctx || !this.masterGain || !this.project) return
     const gain = this.referenceOn ? 0 : this.project.masterVolume * this.compareGain
-    this.masterGain.gain.setTargetAtTime(gain, this.ctx.currentTime, 0.015)
+    smoothParam(this.masterGain.gain, gain, this.ctx.currentTime)
   }
 
   /** CPU load and master loudness. Loudness is read from the master analyser and includes the master fader. */
@@ -2239,11 +2300,15 @@ export class AudioEngine {
   }
 
   private scheduleHit(ctx: BaseAudioContext, strip: StripNodes, hit: RenderedHit, when: number, durationSec?: number) {
+    const live = ctx === this.ctx
     const level = Math.max(0, hit.volume ?? 1)
-    if (level <= 0.0001) return
-    if (ctx === this.ctx && when < ctx.currentTime - 0.05) return
-    if (ctx === this.ctx && when < ctx.currentTime) when = ctx.currentTime + 0.001
+    if (!live && level <= 0.0001) return
+    if (live && when < ctx.currentTime - 0.05) return
+    if (live && when < ctx.currentTime) when = ctx.currentTime + 0.001
     const dur = durationSec ?? Math.max(0.04, beatsToSamples(hit.durationBeats, this.sampleRate, this.project?.tempo || 120) / this.sampleRate)
+    const mix = live ? this.drumMix(hit.channelId) : null
+    const shaped = mix ? { ...hit, volume: 1, pan: Math.max(-1, Math.min(1, (hit.pan || 0) - mix.pan)) } : hit
+    const into = live ? this.throughDrum(hit.channelId, strip.input) : strip.input
     if (hit.sampleId) {
       const asset = this.assetOf(hit.sampleId)
       if (asset) {
@@ -2252,7 +2317,7 @@ export class AudioEngine {
         src.buffer = buffer
         const rate = 2 ** ((hit.pitch - 60 + hit.fine / 100) / 12)
         src.playbackRate.value = rate
-        this.envelope(ctx, strip, src, when, Math.max(0.05, dur), hit)
+        this.envelope(ctx, strip, src, when, Math.max(0.05, dur), shaped, undefined, into)
         return
       }
     }
@@ -2273,25 +2338,25 @@ export class AudioEngine {
       osc.type = 'sine'
       osc.frequency.setValueAtTime(160, when)
       osc.frequency.exponentialRampToValueAtTime(48, when + Math.min(0.18, dur))
-      this.envelope(ctx, strip, osc, when, Math.min(0.28, dur + 0.05), hit)
+      this.envelope(ctx, strip, osc, when, Math.min(0.28, dur + 0.05), shaped, undefined, into)
       return
     }
     if (hit.kind === 'perc') {
       const osc = ctx.createOscillator()
       osc.type = 'square'
       osc.frequency.value = 440 * 2 ** ((hit.pitch - 69) / 12)
-      this.envelope(ctx, strip, osc, when, Math.min(0.16, dur), hit)
+      this.envelope(ctx, strip, osc, when, Math.min(0.16, dur), shaped, undefined, into)
       return
     }
     if (hit.kind === 'openhat' || hit.kind === 'tom' || hit.kind === 'cymbal') {
-      if (this.playResidentDrum(ctx, strip, hit, when)) return
+      if (this.playResidentDrum(ctx, strip, shaped, when, into)) return
       if (hit.kind === 'tom') {
         const osc = ctx.createOscillator()
         osc.type = 'sine'
         const freq = Math.max(70, 80 * 2 ** ((hit.pitch - 36) / 24))
         osc.frequency.setValueAtTime(freq * 1.4, when)
         osc.frequency.exponentialRampToValueAtTime(Math.max(45, freq), when + 0.18)
-        this.envelope(ctx, strip, osc, when, Math.min(0.35, Math.max(0.12, dur * 2)), hit)
+        this.envelope(ctx, strip, osc, when, Math.min(0.35, Math.max(0.12, dur * 2)), shaped, undefined, into)
         return
       }
       const ring = ctx.createBufferSource()
@@ -2300,7 +2365,7 @@ export class AudioEngine {
       filter.type = 'highpass'
       filter.frequency.value = hit.kind === 'cymbal' ? 5000 : 6500
       ring.connect(filter)
-      this.envelope(ctx, strip, filter, when, hit.kind === 'cymbal' ? 0.7 : 0.5, hit, ring)
+      this.envelope(ctx, strip, filter, when, hit.kind === 'cymbal' ? 0.7 : 0.5, shaped, ring, into)
       return
     }
     const noise = ctx.createBufferSource()
@@ -2310,7 +2375,7 @@ export class AudioEngine {
       filter.type = 'highpass'
       filter.frequency.value = 7000
       noise.connect(filter)
-      this.envelope(ctx, strip, filter, when, Math.min(0.06, dur), hit, noise)
+      this.envelope(ctx, strip, filter, when, Math.min(0.06, dur), shaped, noise, into)
       return
     }
     if (hit.kind === 'clap') {
@@ -2318,7 +2383,7 @@ export class AudioEngine {
       filter.type = 'bandpass'
       filter.frequency.value = 1400
       noise.connect(filter)
-      this.envelope(ctx, strip, filter, when, Math.min(0.18, dur), hit, noise)
+      this.envelope(ctx, strip, filter, when, Math.min(0.18, dur), shaped, noise, into)
       return
     }
     const tone = ctx.createOscillator()
@@ -2328,8 +2393,8 @@ export class AudioEngine {
     filter.type = 'highpass'
     filter.frequency.value = 800
     noise.connect(filter)
-    this.envelope(ctx, strip, filter, when, Math.min(0.16, dur), hit, noise)
-    this.envelope(ctx, strip, tone, when, 0.08, { ...hit, velocity: hit.velocity * 0.4 })
+    this.envelope(ctx, strip, filter, when, Math.min(0.16, dur), shaped, noise, into)
+    this.envelope(ctx, strip, tone, when, 0.08, { ...shaped, velocity: shaped.velocity * 0.4 }, undefined, into)
   }
 
   private cachedDrum(ctx: BaseAudioContext, pitch: number) {
@@ -2348,7 +2413,7 @@ export class AudioEngine {
   }
 
   /** Designed drum voice. Gate shortens the tail; a normal step plays the whole hit. */
-  private playResidentDrum(ctx: BaseAudioContext, strip: StripNodes, hit: RenderedHit, when: number) {
+  private playResidentDrum(ctx: BaseAudioContext, strip: StripNodes, hit: RenderedHit, when: number, into?: AudioNode) {
     const buffer = this.cachedDrum(ctx, hit.pitch)
     if (!buffer) return false
     const src = ctx.createBufferSource()
@@ -2358,13 +2423,14 @@ export class AudioEngine {
     gain.gain.setValueAtTime(0.0001, when)
     gain.gain.exponentialRampToValueAtTime(peak, when + 0.003)
     src.connect(gain)
+    const dest = into ?? strip.input
     const pan = hit.pan || 0
     if (Math.abs(pan) > 0.02 && ctx.createStereoPanner) {
       const panner = ctx.createStereoPanner()
       panner.pan.value = Math.max(-1, Math.min(1, pan))
       gain.connect(panner)
-      panner.connect(strip.input)
-    } else gain.connect(strip.input)
+      panner.connect(dest)
+    } else gain.connect(dest)
     const gate = Math.max(0.08, Math.min(1, (hit.durationBeats || 0.2) / 0.2))
     src.start(when)
     src.stop(when + Math.max(0.05, buffer.duration * gate))
@@ -2413,6 +2479,7 @@ export class AudioEngine {
     dur: number,
     hit: Pick<RenderedHit, 'velocity' | 'pan' | 'volume'>,
     extra?: AudioNode,
+    into?: AudioNode,
   ) {
     const gain = ctx.createGain()
     const peak = Math.max(0.001, 0.22 * hit.velocity * Math.max(0, hit.volume ?? 1))
@@ -2420,13 +2487,14 @@ export class AudioEngine {
     gain.gain.exponentialRampToValueAtTime(peak, when + 0.005)
     gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.03, dur))
     source.connect(gain)
+    const dest = into ?? strip.input
     const pan = hit.pan || 0
     if (Math.abs(pan) > 0.02 && ctx.createStereoPanner) {
       const panner = ctx.createStereoPanner()
       panner.pan.value = Math.max(-1, Math.min(1, pan))
       gain.connect(panner)
-      panner.connect(strip.input)
-    } else gain.connect(strip.input)
+      panner.connect(dest)
+    } else gain.connect(dest)
     const startable = source as AudioScheduledSourceNode
     if (typeof startable.start === 'function') {
       startable.start(when)
@@ -2629,7 +2697,7 @@ export class AudioEngine {
       tune: color?.tune,
       filter: color?.filter,
       decay: color?.decay,
-    }, when ?? ctx.currentTime, undefined, sample, false)
+    }, when ?? ctx.currentTime, undefined, sample)
     return true
   }
 
@@ -2641,7 +2709,6 @@ export class AudioEngine {
     when: number,
     bucket: Stoppable[] | undefined,
     sample: Float32Array | null | undefined,
-    includeLevel: boolean,
   ) {
     const pads = track.padKit?.banks.flat() ?? []
     const pad = pads.find((item) => item.pitch === hit.pitch)
@@ -2678,17 +2745,19 @@ export class AudioEngine {
     const tune = hit.tune ?? pad?.tune ?? 0
     src.playbackRate.value = 2 ** (tune / 12)
     const decay = Math.max(0.05, Math.min(1, hit.decay ?? pad?.decay ?? 1))
-    const level = Math.max(0.0002, Math.min(1, hit.velocity * (includeLevel ? (pad?.level ?? 1) : 1)))
+    const peak = Math.max(0.0002, Math.min(1, hit.velocity))
     const dur = Math.max(0.04, buffer.duration * decay)
     const attack = Math.min(0.003, dur * 0.25)
     gain.gain.setValueAtTime(0.0001, start)
     if (dur > attack + 0.008) {
-      gain.gain.exponentialRampToValueAtTime(level, start + attack)
+      gain.gain.exponentialRampToValueAtTime(peak, start + attack)
       gain.gain.exponentialRampToValueAtTime(0.0001, start + dur)
     } else {
-      gain.gain.linearRampToValueAtTime(level, start + dur * 0.4)
+      gain.gain.linearRampToValueAtTime(peak, start + dur * 0.4)
       gain.gain.linearRampToValueAtTime(0.0001, start + dur)
     }
+    const level = ctx.createGain()
+    level.gain.value = pad?.muted ? 0 : (pad?.level ?? 1)
     const filterAmount = hit.filter ?? pad?.filter ?? 1
     let node: AudioNode = gain
     src.connect(gain)
@@ -2699,19 +2768,17 @@ export class AudioEngine {
       gain.connect(filter)
       node = filter
     }
-    const pan = hit.pan ?? pad?.pan ?? 0
-    if (Math.abs(pan) > 0.02 && typeof ctx.createStereoPanner === 'function') {
-      const panner = ctx.createStereoPanner()
-      panner.pan.setValueAtTime(Math.max(-1, Math.min(1, pan)), start)
-      node.connect(panner)
-      panner.connect(dest)
-    } else node.connect(dest)
+    node.connect(level)
+    const panner = ctx.createStereoPanner()
+    panner.pan.value = Math.max(-1, Math.min(1, hit.pan ?? pad?.pan ?? 0))
+    level.connect(panner)
+    panner.connect(dest)
     const stop = (at?: number) => {
       try { src.stop(at) } catch { /* already stopped */ }
     }
     src.start(start)
     src.stop(start + dur + 0.01)
-    const voice = { pitch: hit.pitch, gain, stop, born: start, until: start + dur, src }
+    const voice = { pitch: hit.pitch, trackId: track.id, gain, level, pan: panner, stop, born: start, until: start + dur, src }
     this.padVoices.push(voice)
     src.onended = () => {
       this.padVoices = this.padVoices.filter((item) => item.src !== src)
@@ -3515,7 +3582,7 @@ export class AudioEngine {
         filter: note.locks?.filter,
         decay: note.locks?.decay,
         pan: note.pan,
-      }, when, bucket, null, true)
+      }, when, bucket, null)
       return
     }
     if (track?.instrument === 'drum-machine' && this.playDrum(ctx, strip, note, when, bucket)) return
