@@ -1,3 +1,4 @@
+import { acceptNoteOn, clearNote } from '../liveStage'
 import { wantsLibrary } from '../../instruments/scaler/model'
 import type { Project, Track } from '../../model/types'
 import type { StripNodes } from '../strips'
@@ -26,8 +27,11 @@ interface Live {
   cache: SampleCache
   gain: GainNode | null
   script: ScriptProcessorNode | null
+  worklet: AudioWorkletNode | null
   signature: string
   notes: Queued[]
+  sent: Set<string>
+  dedupe: Map<number, number>
 }
 
 /**
@@ -37,6 +41,7 @@ interface Live {
 export class LibraryHost {
   private readonly lives = new Map<string, Live>()
   private readonly pending = new Map<string, Queued[]>()
+  private module: Promise<boolean> | null = null
 
   constructor(private readonly fetchImpl?: FetchLike) {}
 
@@ -54,16 +59,18 @@ export class LibraryHost {
       this.installAssets(live, track, assetOf)
       const program = track.library
       const signature = `${program.id}:${program.zones.length}:${program.samples.length}:${program.zones[0]?.id ?? ''}:${program.zones[program.zones.length - 1]?.id ?? ''}`
-      if (signature !== live.signature) {
+      const changed = signature !== live.signature
+      if (changed) {
         live.instrument.setProgram(program)
         live.signature = signature
       }
       live.instrument.setKeyswitch(program.defaultSwitch)
       live.instrument.applyMics(program.mics)
       live.instrument.setVoiceLimit(phone ? Math.min(12, program.voices) : program.voices)
-      for (const note of this.pending.get(track.id) ?? []) live.notes.push(note)
+      if (changed) this.publish(live, track, phone)
+      else this.flush(live)
+      for (const note of this.pending.get(track.id) ?? []) this.deliver(live, note)
       this.pending.delete(track.id)
-      live.notes.sort((a, b) => a.time - b.time)
     }
   }
 
@@ -75,8 +82,7 @@ export class LibraryHost {
       this.pending.set(trackId, queue)
       return
     }
-    live.notes.push({ pitch, vel, time })
-    live.notes.sort((a, b) => a.time - b.time)
+    this.deliver(live, { pitch, vel, time })
   }
 
   /** Drop a pitch's queued notes and release it, so a new chord does not leave the old one held. */
@@ -89,18 +95,20 @@ export class LibraryHost {
       this.pending.set(trackId, queue)
       return
     }
-    live.notes = live.notes.filter((note) => note.pitch !== midi)
-    live.notes.push({ pitch: midi, vel: 0, time })
-    live.notes.sort((a, b) => a.time - b.time)
+    live.notes = live.notes.filter((note) => Math.round(note.pitch) !== midi)
+    this.deliver(live, { pitch: midi, vel: 0, time })
   }
 
   holdPack(trackId: string, pack: SamplePack) {
-    this.ensure(trackId, 48000).cache.holdPack(pack)
+    const live = this.ensure(trackId, 48000)
+    live.cache.holdPack(pack)
+    this.flush(live)
   }
 
   holdAudio(trackId: string, samples: { id: string; sampleRate: number; channels: Float32Array[] }[]) {
-    const cache = this.ensure(trackId, 48000).cache
-    for (const sample of samples) cache.holdAudio(sample.id, { sampleRate: sample.sampleRate, channels: sample.channels })
+    const live = this.ensure(trackId, 48000)
+    for (const sample of samples) live.cache.holdAudio(sample.id, { sampleRate: sample.sampleRate, channels: sample.channels })
+    this.flush(live)
   }
 
   /**
@@ -138,6 +146,7 @@ export class LibraryHost {
     for (const note of planned) {
       if (note.attackIds.length > 0 && note.attackIds.every((id) => failed.has(id))) missing += 1
     }
+    this.flush(live)
     return { missing, sounding }
   }
 
@@ -151,7 +160,9 @@ export class LibraryHost {
   allOff() {
     for (const live of this.lives.values()) {
       live.notes = []
+      live.dedupe.clear()
       live.instrument.silence()
+      live.worklet?.port.postMessage({ type: 'off' })
     }
   }
 
@@ -170,28 +181,104 @@ export class LibraryHost {
       cache,
       gain: null,
       script: null,
+      worklet: null,
       signature: '',
       notes: [],
+      sent: new Set(),
+      dedupe: new Map(),
     }
     this.lives.set(id, live)
     return live
   }
 
   private attach(ctx: AudioContext, live: Live, strip: StripNodes) {
-    if (live.script) return
+    if (live.script || live.worklet) return
     const gain = ctx.createGain()
     gain.connect(strip.input)
+    live.gain = gain
+    void this.loadModule(ctx).then((ok) => {
+      if (live.worklet || live.script) return
+      if (!ok || !this.mountWorklet(ctx, live, gain)) this.mountScript(ctx, live, gain)
+    })
+  }
+
+  private loadModule(ctx: AudioContext) {
+    if (!this.module) {
+      this.module = ctx.audioWorklet.addModule(new URL('../library.worklet.ts', import.meta.url)).then(() => true).catch(() => false)
+    }
+    return this.module
+  }
+
+  private mountWorklet(ctx: AudioContext, live: Live, gain: GainNode) {
+    try {
+      const node = new AudioWorkletNode(ctx, 'cueharbor-library', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] })
+      node.connect(gain)
+      live.worklet = node
+      const program = live.instrument.program
+      if (program) {
+        node.port.postMessage({ type: 'program', program })
+        node.port.postMessage({ type: 'mics', mics: program.mics })
+        node.port.postMessage({ type: 'limit', limit: program.voices })
+        node.port.postMessage({ type: 'key', key: program.defaultSwitch ?? null })
+      }
+      this.flush(live)
+      const queued = live.notes.splice(0, live.notes.length)
+      for (const note of queued) node.port.postMessage({ type: 'note', pitch: note.pitch, vel: note.vel, time: note.time })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private mountScript(ctx: AudioContext, live: Live, gain: GainNode) {
     let script: ScriptProcessorNode
     try {
       script = ctx.createScriptProcessor(256, 0, 2)
     } catch {
-      live.gain = gain
       return
     }
     script.onaudioprocess = (event) => this.mix(live, event, ctx.sampleRate)
     script.connect(gain)
     live.script = script
-    live.gain = gain
+  }
+
+  private deliver(live: Live, note: Queued) {
+    if (note.vel > 0) {
+      if (!acceptNoteOn(live.dedupe, note.pitch, note.time)) return
+    } else clearNote(live.dedupe, note.pitch)
+    if (live.worklet) {
+      live.worklet.port.postMessage({ type: 'note', pitch: note.pitch, vel: note.vel, time: note.time })
+      return
+    }
+    live.notes.push(note)
+    live.notes.sort((a, b) => a.time - b.time)
+  }
+
+  private publish(live: Live, track: Track, phone: boolean) {
+    const program = track.library
+    if (!program || !live.worklet) return
+    const limit = phone ? Math.min(12, program.voices) : program.voices
+    live.worklet.port.postMessage({ type: 'program', program })
+    live.worklet.port.postMessage({ type: 'mics', mics: program.mics })
+    live.worklet.port.postMessage({ type: 'limit', limit })
+    live.worklet.port.postMessage({ type: 'key', key: program.defaultSwitch ?? null })
+    this.flush(live)
+  }
+
+  private flush(live: Live) {
+    if (!live.worklet) return
+    for (const id of live.cache.loadedIds()) {
+      if (live.sent.has(id)) continue
+      const sample = live.cache.resident(id)
+      if (!sample?.channels?.some((channel) => channel.length > 0)) continue
+      live.sent.add(id)
+      live.worklet.port.postMessage({
+        type: 'sample',
+        id,
+        sampleRate: sample.sampleRate,
+        channels: sample.channels.map((channel) => channel.slice()),
+      })
+    }
   }
 
   private mix(live: Live, event: AudioProcessingEvent, sampleRate: number) {
@@ -242,6 +329,7 @@ export class LibraryHost {
     const live = this.lives.get(id)
     if (!live) return
     try { live.script?.disconnect() } catch { /* already stopped */ }
+    try { live.worklet?.disconnect() } catch { /* already stopped */ }
     try { live.gain?.disconnect() } catch { /* already stopped */ }
     this.lives.delete(id)
     this.pending.delete(id)

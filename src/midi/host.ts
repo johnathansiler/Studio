@@ -12,7 +12,7 @@ import { samplesToBeats } from '../model/time'
 import { selectLiveCapture, selectMidiMaps, selectMidiOut } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { hardwareMidiAllowed, midiOutputs, onMidiMessage, type MidiPortInfo } from './access'
-import { performanceOwnsMidi, rememberOff, rememberOn, setCaptureEnabled } from './remember'
+import { performanceOwnsMidi, rememberOff, rememberOn, setCaptureEnabled, stepOwnsMidi } from './remember'
 
 interface OpenNote {
   trackId: string
@@ -75,7 +75,7 @@ export class MidiHost {
       this.applyCc(message)
       return
     }
-    if (performanceOwnsMidi()) return
+    if (performanceOwnsMidi() || stepOwnsMidi()) return
     const recording = this.engine.status === 'recording'
     const dest = midiDestinations(this.store.project.tracks, input.id, this.store.selectedTrackId, recording)
     const beat = this.beatAt(timeStamp)

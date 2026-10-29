@@ -236,7 +236,11 @@ export class Performer {
       if (pad?.poly === 'mono') this.engine.liveNoteOff(pitch)
     }
     if (sample) this.engine.playBuffer(sample, pitch, gain, color)
-    else if (drums) this.engine.liveDrum(pitch, gain, 0, color)
+    else if (drums) {
+      const aimed = this.target()
+      if (aimed) this.engine.liveTrackId = aimed.trackId
+      this.engine.liveDrum(pitch, gain, 0, color)
+    }
     else {
       const aimed = this.target()
       if (aimed) this.engine.playThrough(aimed.trackId, pitch, gain)

@@ -98,6 +98,7 @@ class KeysProcessor extends AudioWorkletProcessor {
       voice.pitch = data.pitch
       voice.vel = data.velocity
       voice.env = 1
+      voice.attackEnv = 0
       voice.phase = 0
       voice.drum = data.drum
       voice.pos = 0
@@ -198,6 +199,7 @@ class KeysProcessor extends AudioWorkletProcessor {
           voice.bangs.shift()
           voice.vel = voice.bangVel ? voice.bangVel.shift() : voice.vel
           voice.env = 1
+          voice.attackEnv = 0
           voice.pos = 0
           voice.phase = 0
           voice.low = 0
@@ -218,11 +220,9 @@ class KeysProcessor extends AudioWorkletProcessor {
           const limit = buffer.length * (voice.decay == null ? 1 : voice.decay)
           if (voice.pos < limit) {
             const idx = Math.min(buffer.length - 1, voice.pos | 0)
-            let hit = buffer[idx] * voice.vel
-            if (voice.attack > 0) {
-              const fade = voice.attack * buffer.length
-              if (voice.pos < fade) hit *= voice.pos / Math.max(1, fade)
-            }
+            let hit = buffer[idx] * voice.vel * 0.25
+            const fade = Math.max(1, (voice.attack > 0 ? voice.attack : 0.004) * rate)
+            if (voice.pos < fade) hit *= voice.pos / fade
             if (voice.cut < 0.999) {
               voice.low += (hit - (voice.low || 0)) * Math.max(0.02, voice.cut)
               hit = voice.low
@@ -233,12 +233,17 @@ class KeysProcessor extends AudioWorkletProcessor {
         } else {
           const freq = 440 * 2 ** ((voice.pitch - 69) / 12)
           voice.phase += freq / rate
+          if (voice.attackEnv == null) voice.attackEnv = 0
+          voice.attackEnv = Math.min(1, voice.attackEnv + 1 / Math.max(1, 0.004 * rate))
           const tone = Math.sin(2 * Math.PI * voice.phase)
-          sample += tone * voice.env * voice.vel * 0.35
+          sample += tone * voice.env * voice.vel * 0.07 * voice.attackEnv
           voice.env *= 0.9996
           if (voice.env < 0.0008 && !(voice.bangs && voice.bangs.length)) voice.on = false
         }
       }
+      const knee = 0.98
+      const a = sample < 0 ? -sample : sample
+      if (a > knee) sample = (sample < 0 ? -1 : 1) * (knee + (1 - knee) * Math.tanh((a - knee) / (1 - knee)))
       out[i] = sample
     }
     return true

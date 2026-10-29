@@ -351,7 +351,9 @@ export function PerformPop({
           engine.performanceMode = next
           setFocus(next)
         }}>Focus</button>
-        <span className="latency" aria-label="Monitoring latency">{latency} ms</span>
+        <span className="latency" aria-label="Monitoring latency" title={`Schedule ${engine.liveLatencyProbe().scheduleDelayMs.toFixed(2)} ms · base ${engine.baseLatencyMs.toFixed(1)} ms · output ${engine.deviceLatencyMs.toFixed(1)} ms`}>
+          {latency} ms · base {engine.baseLatencyMs.toFixed(1)} · out {engine.deviceLatencyMs.toFixed(1)}
+        </span>
         <button type="button" onClick={() => void session.calibrate()}>Calibrate</button>
         <button type="button" onClick={onClose} aria-label="Close">×</button>
       </header>
