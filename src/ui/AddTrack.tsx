@@ -12,6 +12,14 @@ const KINDS: { id: AddKind; label: string; hint: string }[] = [
   { id: 'drum', label: 'Drums', hint: 'A beat machine for this song.' },
   { id: 'bus', label: 'Bus', hint: 'Group tracks, or return an effect.' },
 ]
+
+function KindIcon({ id }: { id: AddKind }) {
+  const common = { width: 22, height: 22, viewBox: '0 0 22 22', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true as const }
+  if (id === 'audio') return <svg {...common}><rect x="8" y="3" width="6" height="10" rx="3" /><path d="M6 10.5a5 5 0 0010 0M11 15.5V19" /></svg>
+  if (id === 'midi') return <svg {...common}><path d="M4 8h14M4 14h14M7 8v6M11 8v6M15 8v6" /></svg>
+  if (id === 'drum') return <svg {...common}><ellipse cx="11" cy="12" rx="7" ry="3.2" /><path d="M4 12v2.2c0 1.8 3.1 3.2 7 3.2s7-1.4 7-3.2V12" /><path d="M8 7.2l6-2.2" /></svg>
+  return <svg {...common}><path d="M4 7h6v8H4zM12 7h6M12 11h6M12 15h6" /></svg>
+}
 const INSTRUMENTS: { id: TrackInstrument; label: string; hint: string }[] = [
   { id: 'synth', label: 'Keys', hint: 'Play from the on-screen keyboard or a MIDI keyboard.' },
   { id: 'scaler', label: 'Scaler', hint: 'Chord pads that follow the song key.' },
@@ -78,7 +86,7 @@ export function AddTrackPanel({
         <button type="button" className="guide-x" onClick={onCancel} aria-label="Cancel. Close add track.">Cancel</button>
       </header>
       <section className="guide-section">
-        <h3>Track type</h3>
+        <h3>Step 1</h3>
         <div className="guide-cards">
           {KINDS.map((item) => (
             <button
@@ -88,6 +96,7 @@ export function AddTrackPanel({
               aria-pressed={spec.kind === item.id}
               onClick={() => onChange({ ...spec, kind: item.id })}
             >
+              <KindIcon id={item.id} />
               <strong>{item.label}</strong>
               <small>{item.hint}</small>
             </button>
@@ -146,8 +155,8 @@ export function AddTrackPanel({
               aria-pressed={spec.armed}
               onClick={() => onChange({ ...spec, armed: !spec.armed })}
             >
-              <strong>{spec.armed ? 'Arm after adding' : 'Leave disarmed'}</strong>
-              <small>Only an armed track records when you press record. This starts off.</small>
+              <strong>Arm after adding</strong>
+              <small>{spec.armed ? 'On. This track records when you press record.' : 'Off. The new track stays quiet until you arm it.'}</small>
             </button>
           </section>
         </>
@@ -201,7 +210,8 @@ export function AddTrackPanel({
 export function AddTrackButton({ store }: { store: ProjectStore }) {
   const [open, setOpen] = useState(false)
   const [spec, setSpec] = useState<AddTrackSpec>({ ...defaultAddSpec(), inputIndex: 1, instrument: 'synth', count: 1, armed: false })
-  const place = useFormFactor() === 'desk' ? 'pop' : 'sheet'
+  const form = useFormFactor()
+  const place = form === 'desk' ? 'pop' : 'sheet'
   const hold = useRef(0)
   const held = useRef(false)
   const skipTap = useRef(false)
@@ -270,7 +280,7 @@ export function AddTrackButton({ store }: { store: ProjectStore }) {
           repeat()
         }}
       >
-        +
+        {form === 'desk' ? '+' : 'Add'}
       </button>
       {open && (
         <>

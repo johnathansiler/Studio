@@ -23,7 +23,10 @@ describe('add track panel', () => {
     expect(audio).toContain('>Mono<')
     expect(audio).toContain('>Stereo<')
     expect(audio).toContain('Input 1')
-    expect(audio).toContain('Leave disarmed')
+    expect(audio).toContain('Step 1')
+    expect(audio).toContain('Arm after adding')
+    expect(audio).toContain('Off. The new track stays quiet until you arm it.')
+    expect(audio).not.toContain('Leave disarmed')
     expect(audio).toContain('Add Audio track')
     expect(audio).not.toContain('>Keys<')
 
@@ -77,6 +80,22 @@ describe('unstuck menu', () => {
     store.undo()
     expect(store.project.tracks.some((track) => track.midiClips.some((clip) => clip.notes.length > 0))).toBe(true)
     store.undo()
+  })
+
+  it('turns a one-idea card into a different variation on the next tap', () => {
+    const store = new ProjectStore(createEmptyProject())
+    const context = deriveSongContext(store.project)
+    const fill = unstuckActions(suggest(context), context).find((item) => item.key === 'move-fill')!
+    expect(fill.items.length).toBe(3)
+    expect(fill.items[1].id).not.toBe(fill.items[0].id)
+    const notes = (index: number) => JSON.stringify(fill.items[index].parts.map((part) => part.notes))
+    expect(notes(1)).not.toBe(notes(0))
+    store.applyUnstuck(fill.items[0])
+    store.applyUnstuck(fill.items[1])
+    store.undo()
+    expect(store.project.tracks.some((track) => track.midiClips.some((clip) => clip.notes.length > 0))).toBe(true)
+    store.undo()
+    expect(store.project.tracks.every((track) => track.midiClips.every((clip) => clip.notes.length === 0))).toBe(true)
   })
 })
 

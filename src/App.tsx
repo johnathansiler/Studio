@@ -1516,6 +1516,7 @@ async function importDropped(files: FileList) {
       )}
       {surface === 'studio' && !collabShown && phonePane !== 'room' && store.view === 'arrange' && panel !== 'piano' && (
         <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
+          <div className="tool-group">
           <SnapControl store={store} />
           <button
             type="button"
@@ -1531,6 +1532,7 @@ async function importDropped(files: FileList) {
             <strong>Tools</strong>
             <small>Edit modes</small>
           </button>
+          </div>
           {toolsOpen && (
             <ToolBar
               panel

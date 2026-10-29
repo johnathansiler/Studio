@@ -241,8 +241,9 @@
   .strip .fx-open {
     width: 100%;
     min-height: 40px;
-    font-size: 10px;
+    font-size: clamp(8px, 22cqi, 12px);
     letter-spacing: -0.04em;
+    padding: 0 1px;
   }
 }
 .shell .mixer-view[data-layout="rows"] .strip .strip-auto.auto-mode {

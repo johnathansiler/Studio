@@ -48,12 +48,16 @@ function ArrangeChrome({ browserOpen, setupOpen, onBrowser, onSetup }: { browser
   }, [])
   const buttons = (
     <div className="arrange-panels">
-      {!browserOpen && (
-        <button type="button" className="cap-btn" title="Sounds and loops. Open the browser of sounds, instruments, loops, and patterns." onClick={onBrowser}>
-          <strong>Browser</strong>
-          <small>Sounds and loops</small>
-        </button>
-      )}
+      <button
+        type="button"
+        className={`cap-btn${browserOpen ? ' on' : ''}`}
+        aria-pressed={browserOpen}
+        title="Sounds and loops. Open the browser of sounds, instruments, loops, and patterns."
+        onClick={onBrowser}
+      >
+        <strong>Browser</strong>
+        <small>Sounds and loops</small>
+      </button>
       <button
         type="button"
         className={`cap-btn${setupOpen ? ' on' : ''}`}
@@ -464,10 +468,8 @@ export function ArrangeView({
   function moveSelection(event: ReactPointerEvent, kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
     event.stopPropagation()
     focusTimeline()
-    if (kind === 'pattern') {
-      setPatternMenu(null)
-      if (touch) event.preventDefault()
-    }
+    if (touch || event.pointerType === 'touch') event.preventDefault()
+    if (kind === 'pattern') setPatternMenu(null)
     const additive = event.shiftKey || event.metaKey || event.ctrlKey
     const selected = kind === 'audio' ? store.selectedClipIds : kind === 'midi' ? store.selectedMidiClipIds : store.selectedPatternClipIds
     const wasIn = selected.includes(clipId)
@@ -618,7 +620,17 @@ export function ArrangeView({
       <ArrangeChrome
         browserOpen={browserOpen}
         setupOpen={setupOpen}
-        onBrowser={() => { setBrowserOpen(true); rememberPanel('arrangeBrowser', true) }}
+        onBrowser={() => {
+          setBrowserOpen((open) => {
+            const next = !open
+            if (!next) {
+              engine.stopPreview()
+              onLibraryClose?.()
+            }
+            rememberPanel('arrangeBrowser', next)
+            return next
+          })
+        }}
         onSetup={() => setSetupOpen((open) => !open)}
       />
       {setupOpen && (

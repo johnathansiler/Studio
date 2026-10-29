@@ -202,7 +202,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .topbar { grid-area: bar; position: relative; min-height: 48px; z-index: 20; }
 .transport { grid-area: transport; min-height: 48px; justify-content: flex-start; flex-wrap: nowrap; overflow-x: auto; }
-.tool-slot { grid-area: tools; display: flex; align-items: center; gap: 2px; min-width: 0; background: #141c18; }
+.tool-slot { grid-area: tools; display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; background: #141c18; }
 .tool-slot:empty { display: none; }
 .tool-slot:not(:empty) { min-height: 36px; padding: 0 8px; border-bottom: 1px solid var(--line); }
 .tool-slot .timeline-tools { display: flex; align-items: center; gap: 2px; width: 100%; min-width: 0; }
@@ -2889,8 +2889,9 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   padding: 2px 6px;
 }
 .shell.phone:not(.land) .snap-toggle,
-.shell.phone:not(.land) .snap-control select,
-.shell.phone:not(.land) .tool-slot .setup-btn { height: 40px; min-height: 40px; }
+.shell.phone:not(.land) .snap-grid,
+.shell.phone:not(.land) .tool-slot .cap-btn,
+.shell.phone:not(.land) .tool-slot .setup-btn { height: 40px; min-height: 40px; max-height: 40px; }
 .shell.phone:not(.land) .arrange-setup {
   min-height: 44px;
   height: 44px;

@@ -136,9 +136,12 @@ function percHits(count: number, rng: () => number): Map<number, number> {
   return hits
 }
 
-function cymbalHits(count: number): Map<number, number> {
+function cymbalHits(count: number, rng: () => number): Map<number, number> {
   const hits = new Map<number, number>()
-  if (count > 0) hits.set(0, 0.86)
+  if (count <= 0) return hits
+  hits.set(0, 0.8 + rng() * 0.15)
+  if (count > 8 && rng() < 0.55) hits.set(8, 0.5 + rng() * 0.25)
+  if (count > 12 && rng() < 0.35) hits.set(12, 0.4 + rng() * 0.2)
   return hits
 }
 
@@ -158,13 +161,13 @@ export function hitsForRole(role: DrumRole, count: number, rng: () => number): M
   if (role === 'hat') return hatHits(count, rng)
   if (role === 'openhat') return openHatHits(count, rng)
   if (role === 'perc') return percHits(count, rng)
-  if (role === 'cymbal') return cymbalHits(count)
+  if (role === 'cymbal') return cymbalHits(count, rng)
   return otherHits(count, rng)
 }
 
-function chokeHats(pattern: BeatPattern, openSteps: Set<number>) {
+function chokeHats(pattern: BeatPattern, openSteps: Set<number>, chosen: Set<string>) {
   for (const channel of pattern.channels) {
-    if (drumRole(channel) !== 'hat') continue
+    if (!chosen.has(channel.id) || drumRole(channel) !== 'hat') continue
     const count = channel.steps || pattern.steps
     channel.cells = channel.cells.map((cell, index) => (index < count && openSteps.has(index) ? { ...cell, on: false } : cell))
   }
@@ -186,7 +189,7 @@ export function applySmartDrums(pattern: BeatPattern, only: string[] | null, rng
     channel.cells = writeHits(channel.cells, count, hits)
     if (role === 'openhat') for (const step of hits.keys()) openSteps.add(step)
   }
-  if (openSteps.size) chokeHats(pattern, openSteps)
+  if (openSteps.size) chokeHats(pattern, openSteps, chosen)
 }
 
 /** Which steps are lit. Velocity-only changes do not count as a new variation. */

@@ -162,19 +162,41 @@
 }
 .cap-btn strong { font-size: 12px; line-height: 1; }
 .cap-btn small { font-size: 9px; line-height: 1; font-weight: 640; }
+.tool-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding-right: 8px;
+  margin-right: 2px;
+  border-right: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+}
+.tool-group .snap-control { flex: 1.4 1 auto; min-width: 0; }
+.tool-group .cap-btn { flex: 1 1 0; }
 .arrange-panels {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-left: 2px;
-  padding-left: 8px;
-  border-left: 1px solid var(--line);
+  justify-content: space-evenly;
+  gap: 4px;
+  flex: 1 1 0;
+  min-width: 0;
+  margin-left: 0;
+  padding-left: 6px;
 }
+.arrange-panels .cap-btn { flex: 1 1 0; }
 .tool-sheet { width: min(520px, calc(100vw - 16px)); }
 .tool-sheet .guide-cards { grid-template-columns: 1fr; }
 .song-sheet .rec-bar.inline,
 .song-sheet .auto-mode,
-.song-sheet .map-head { display: flex; flex-wrap: wrap; gap: 6px; }
+.song-sheet .map-head,
+.song-sheet .map-head .row { display: flex; flex-wrap: wrap; gap: 6px; }
+.song-sheet .guide-choice input,
+.song-sheet .guide-choice select {
+  width: 100%;
+  min-height: 36px;
+  margin-top: 2px;
+}
 .song-sheet .auto-mode button,
 .song-sheet .rec-bar button,
 .song-sheet .map-head button {
