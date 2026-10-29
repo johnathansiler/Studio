@@ -1,6 +1,7 @@
 /** Pad recording, quantize, choke, and kit assignment. Uses the shared pad machine. */
 
 import { isDrumSound } from '../../sounds/catalog'
+import { DRUM_PADS } from '../../model/drums'
 import { chokeTargets, recordTake, timingCorrect, type PadVoice, type RecordTakeMode } from '../../model/padMachine'
 
 export interface PadHit {
@@ -99,11 +100,20 @@ export interface PadAssignment {
   choke?: number
 }
 
-/** Put a library sound on a pad. The GM pitch stays so the mapping does not move. */
+/** The face stays Kick, Hat, Snare. The library name is the tooltip. */
+export function padFaceName(pad: { pitch: number; name: string }): string {
+  const known = DRUM_PADS.find((item) => item.pitch === pad.pitch)
+  if (known) return known.name
+  return shortPadName(pad.name)
+}
+
+/** Put a library sound on a pad. The GM pitch and short name stay so recording does not rename the face. */
 export function assignPad(pad: PadVoice, assignment: PadAssignment): PadVoice {
+  const sampleName = assignment.name.trim()
   return {
     ...pad,
-    name: assignment.name.trim() || pad.name,
+    name: padFaceName(pad),
+    sampleName: sampleName || pad.sampleName,
     choke: assignment.choke ?? pad.choke,
     layers: [{
       velocityLo: 0,

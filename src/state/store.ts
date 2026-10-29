@@ -96,6 +96,7 @@ import {
   type QuantizeSettings,
 } from '../model/quantize'
 import { cloneOmni, emptyOmni, type OmniPatch } from '../instruments/patch'
+import { isSampledInstrument } from '../instruments/sampled'
 import { placeholderInstrumentName } from '../sounds/instruments'
 import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
@@ -1336,6 +1337,7 @@ export class ProjectStore {
 
   /** Install a multi-sample program on a library instrument track. */
   setLibrary(trackId: string, program: SamplerProgram | null) {
+    let sampled = false
     this.mutate(() => {
       const track = this.track(trackId)
       if (!track || track.type !== 'midi') return
@@ -1348,7 +1350,9 @@ export class ProjectStore {
       track.instrument = 'library'
       track.library = program ?? undefined
       if (!track.rack?.devices?.length) normalizeTrackRack(track)
+      sampled = true
     })
+    if (sampled) this.showRack(trackId)
   }
 
   /** The header shows the track name. A placeholder becomes the instrument that just landed. */
@@ -1361,6 +1365,7 @@ export class ProjectStore {
 
   /** Same as setLibrary, and keep imported wavs and SoundFont packs in the project so they save. */
   adoptLibrary(trackId: string, program: SamplerProgram, assets: { id: string; name: string; sampleRate: number; channels: Float32Array[] }[], pack?: SamplePack | null) {
+    let sampled = false
     this.mutate(() => {
       const track = this.track(trackId)
       if (!track || track.type !== 'midi') return
@@ -1377,7 +1382,9 @@ export class ProjectStore {
       for (const asset of assets) this.buffers.set(asset.id, asset)
       if (pack) this.buffers.set(pack.id, packToAsset(pack))
       if (!track.rack?.devices?.length) normalizeTrackRack(track)
+      sampled = true
     })
+    if (sampled) this.showRack(trackId)
   }
 
   /** Latch a keyswitch on the library instrument. Other views read it from the project. */
@@ -4209,7 +4216,9 @@ export class ProjectStore {
   openRack(trackId: string) {
     this.scalerTrackId = null
     this.padsTrackId = null
-    this.rackTrackId = this.rackTrackId === trackId ? null : trackId
+    const opening = this.rackTrackId !== trackId
+    this.rackTrackId = opening ? trackId : null
+    if (opening) this.patchTrackId = null
     this.rackFlip = false
     this.rackDetail = false
     this.emit()
@@ -4218,12 +4227,29 @@ export class ProjectStore {
   /** Open the instrument panel for a track. Does not toggle it shut. */
   showRack(trackId: string) {
     this.scalerTrackId = null
+    this.padsTrackId = null
+    this.patchTrackId = null
     this.rackTrackId = trackId
     this.rackFlip = false
     this.emit()
   }
 
+  /** Leave the piano roll and return to the tracks. */
+  closePiano() {
+    this.selectedMidiClipId = null
+    this.selectedMidiClipIds = []
+    this.selectedNoteId = null
+    this.selectedNoteIds = []
+    this.emit()
+  }
+
   openPatch(trackId: string) {
+    const track = this.track(trackId)
+    if (isSampledInstrument(track)) {
+      this.patchTrackId = null
+      this.openRack(trackId)
+      return
+    }
     this.scalerTrackId = null
     this.padsTrackId = null
     if (this.patchTrackId === trackId) {
@@ -4232,7 +4258,6 @@ export class ProjectStore {
       return
     }
     this.patchTrackId = trackId
-    const track = this.track(trackId)
     if (track?.type === 'midi' && !track.omniPatch) {
       this.mutate(() => {
         track.omniPatch = emptyOmni(track.name)

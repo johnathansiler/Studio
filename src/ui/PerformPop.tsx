@@ -6,6 +6,7 @@ import { beatRepeatHeld, hardwareMidiAllowed } from '../model/beatRepeat'
 import type { RepeatRate } from '../model/midiClock'
 import { NOTE_NAMES, SCALES, type ScaleId } from '../model/scale'
 import { degreeTone, findScale, isBuiltinScale, isTwelveTone, toneName } from '../theory'
+import { padFaceName } from '../instruments/pads/record'
 import { BANKS, gridPitch, PAD_MACROS, sixteenLevels, type GridLayout, type LevelSpread, type PadVoice, type StepCondition } from '../model/padMachine'
 import { decodeWavPCM } from '../model/wav'
 import { selectScale } from '../state/select'
@@ -497,7 +498,8 @@ export function PerformPop({
                     data-pitch={levels && source ? source.pitch : pad.pitch}
                     data-index={index}
                     data-level={levels ? index : undefined}
-                  >{levels ? levelLabel(index, levels) : pad.name}</button>
+                    title={pad.sampleName && pad.sampleName !== padFaceName(pad) ? `${padFaceName(pad)}. ${pad.sampleName}` : padFaceName(pad)}
+                  >{levels ? levelLabel(index, levels) : padFaceName(pad)}</button>
                 ))}
               </div>
               <KeyGrid root={scale.root} scaleId={scale.library || scale.scale} layout={layout} inKey={inKey} land />
