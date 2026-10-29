@@ -1,5 +1,6 @@
+import { audibleIds } from './audible'
 import { DRUM_PADS } from './drums'
-import { clampStepCount, emptyCell, STEP_BEAT, stepIndexAt, type BeatPattern, type DrumKind, type StepCell, type StepChannel } from './steps'
+import { clampStepCount, emptyCell, patternPlayRange, renderPattern, STEP_BEAT, stepIndexAt, type BeatPattern, type DrumKind, type PatternClip, type RenderedHit, type StepCell, type StepChannel } from './steps'
 import { beatsToSamples } from './time'
 import { uid, type Project } from './types'
 
@@ -133,16 +134,86 @@ export function arrangementIsEmpty(project: Project): boolean {
 }
 
 /**
- * Loop length for an empty song, in samples. 0 means the global transport
- * should play out and stop as usual. The user's loop region wins.
+ * Pattern loops the beat open in the channel rack.
+ * Song plays clips on the arrangement. An empty timeline starts in Pattern
+ * so Play in the drums view is heard before anything is placed.
+ */
+export function rackPlayMode(project: Project): 'pattern' | 'song' {
+  if (project.rackMode === 'pattern' || project.rackMode === 'song') return project.rackMode
+  return arrangementIsEmpty(project) ? 'pattern' : 'song'
+}
+
+export function activeBeatPattern(project: Project): BeatPattern | null {
+  const rack = project.beats
+  if (!rack?.patterns?.length) return null
+  return rack.patterns.find((item) => item.id === rack.activeId) ?? rack.patterns[0]
+}
+
+/**
+ * Samples in one pass of Pattern mode. 0 means Song mode, so the arrangement
+ * loop and the placed clips keep the shared transport.
  */
 export function emptyPatternLoopSamples(project: Project): number {
-  if (project.loopEnabled || !arrangementIsEmpty(project)) return 0
-  const rack = project.beats
-  const pattern = rack?.patterns.find((item) => item.id === rack.activeId)
+  if (rackPlayMode(project) !== 'pattern') return 0
+  const pattern = activeBeatPattern(project)
   if (!pattern) return 0
   const beats = Math.max(STEP_BEAT, pattern.steps * STEP_BEAT)
   return Math.max(1, Math.round(beatsToSamples(beats, project.sampleRate, project.tempo)))
+}
+
+/**
+ * What the live transport schedules. Pattern mode hears the open pattern,
+ * even when the song loop sits somewhere else or the timeline is empty.
+ * Offline renders stay on the clips that were actually placed.
+ */
+export function transportPatternClips(project: Project, live: boolean): PatternClip[] {
+  const clips = project.patternClips ?? []
+  if (!live || rackPlayMode(project) !== 'pattern') return clips
+  const pattern = activeBeatPattern(project)
+  if (!pattern) return clips
+  return [{
+    id: 'live-pattern',
+    patternId: pattern.id,
+    startBeat: 0,
+    lengthBeats: Math.max(STEP_BEAT, pattern.steps * STEP_BEAT),
+    scene: null,
+  }]
+}
+
+/** Hits Play will schedule from the drums view or the song, for one pass. */
+export function scheduledPatternNotes(project: Project): RenderedHit[] {
+  if (rackPlayMode(project) === 'pattern') {
+    const pattern = activeBeatPattern(project)
+    if (!pattern) return []
+    return renderPattern(pattern, 0, Math.max(STEP_BEAT, pattern.steps * STEP_BEAT))
+  }
+  const hits: RenderedHit[] = []
+  for (const clip of project.patternClips ?? []) {
+    if (clip.scene != null) continue
+    const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
+    if (!pattern) continue
+    const range = patternPlayRange(clip)
+    hits.push(...renderPattern(pattern, range.from, range.to))
+  }
+  hits.sort((a, b) => a.startBeat - b.startBeat)
+  return hits
+}
+
+/**
+ * Mixer strip for one hit. An explicit output or a placed clip's lane wins.
+ * A row with no output uses the first audible instrument track, then the master.
+ */
+export function patternHitTrack(
+  project: Project,
+  hit: Pick<RenderedHit, 'output'>,
+  clip: Pick<PatternClip, 'trackId'>,
+): string | null {
+  const live = new Set(project.tracks.map((track) => track.id))
+  if (hit.output && live.has(hit.output)) return hit.output
+  if (clip.trackId && live.has(clip.trackId)) return clip.trackId
+  const heard = audibleIds(project.tracks)
+  const open = project.tracks.find((track) => track.type === 'midi' && heard.has(track.id) && track.volume > 0.001)
+  return open?.id ?? null
 }
 
 export function shortSoundName(name: string): string {
