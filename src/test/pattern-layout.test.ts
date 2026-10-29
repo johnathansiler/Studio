@@ -147,13 +147,21 @@ describe('pattern step layout', () => {
         await page.setContent(markup(viewport.width, viewport.height), { waitUntil: 'load' })
         const box = await measure(page)
         const where = `${viewport.width}x${viewport.height}`
+        const portrait = viewport.width <= 520 && viewport.height > viewport.width
         expect(box.steps, where).toHaveLength(16)
         expect(box.steps[1].left, JSON.stringify(box.steps.slice(0, 2))).toBeGreaterThan(box.steps[0].left + 8)
-        expect(Math.abs(box.steps[0].top - box.steps[1].top), where).toBeLessThan(2)
-        expect(box.tops, where).toHaveLength(1)
         expect(box.groups, where).toBe(4)
         expect(box.alt, where).toBe(2)
-        expect(box.sticky, where).toBe('sticky')
+        if (portrait) {
+          expect(box.tops, where).toHaveLength(2)
+          expect(box.steps[8].top, where).toBeGreaterThan(box.steps[0].top + 30)
+          expect(box.sticky, where).toBe('static')
+          expect(box.scrollWidth, where).toBeLessThanOrEqual(box.clientWidth + 8)
+        } else {
+          expect(Math.abs(box.steps[0].top - box.steps[1].top), where).toBeLessThan(2)
+          expect(box.tops, where).toHaveLength(1)
+          expect(box.sticky, where).toBe('sticky')
+        }
         expect(box.leadLeft, where).toBeGreaterThanOrEqual(-1)
         expect(box.leadRight, where).toBeLessThanOrEqual(viewport.width + 1)
         expect(box.scrollRight, where).toBeLessThanOrEqual(viewport.width + 1)
@@ -168,15 +176,15 @@ describe('pattern step layout', () => {
         if (phone) expect(box.bar, where).not.toContain('Swing')
         else expect(box.bar, where).toContain('Swing')
         for (const step of box.steps) {
-          expect(step.width, where).toBeGreaterThanOrEqual(24)
-          expect(step.height, where).toBeGreaterThanOrEqual(28)
+          expect(step.width, where).toBeGreaterThanOrEqual(portrait ? 36 : 24)
+          expect(step.height, where).toBeGreaterThanOrEqual(portrait ? 40 : 28)
         }
-        if (viewport.width <= 520) expect(box.scrollWidth, where).toBeGreaterThan(box.clientWidth + 8)
+        if (!portrait && viewport.width <= 520) expect(box.scrollWidth, where).toBeGreaterThan(box.clientWidth + 8)
         await page.evaluate(() => document.querySelector('.rack-extras')!.classList.add('open'))
         const open = await measure(page)
         expect(open.outside, open.outside.join(', ')).toEqual([])
         expect(open.scroll, where).toBeLessThanOrEqual(1)
-        expect(open.tops, where).toHaveLength(1)
+        expect(open.tops, where).toHaveLength(portrait ? 2 : 1)
         if (phone) expect(open.extras, where).toContain('Swing')
         const visible = await page.evaluate(() => document.querySelector('.rack-extras')!.getBoundingClientRect().height)
         expect(visible).toBeGreaterThan(32)

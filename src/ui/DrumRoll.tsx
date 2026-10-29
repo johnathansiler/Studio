@@ -146,6 +146,7 @@ export function DrumRoll({ store, engine }: { store: ProjectStore; engine: RollE
 
   return (
     <div className="drum-roll" data-drum-roll="open" aria-label="Drum roll. Each row is a drum lane.">
+      <p className="drum-roll-title">Roll</p>
       {pattern.channels.map((channel) => {
         const lane = notes.filter((note) => note.channelId === channel.id)
         const swing = channelSwing(channel, pattern.swing)

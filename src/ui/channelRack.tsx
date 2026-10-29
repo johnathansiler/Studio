@@ -378,6 +378,11 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
     }
     return () => { cancel = true }
   }, [pattern, sampleKey, sampleRetry, store])
+  useEffect(() => {
+    if (!store.rackRoll) return
+    document.querySelector('.drum-roll')?.scrollIntoView({ block: 'nearest' })
+  }, [store.rackRoll])
+
   const bar = (id: string) => copyOf(BEAT_BAR, id)
   const rowCopy = (id: string) => copyOf(BEAT_ROW, id)
   const sheet = (id: string) => copyOf(BEAT_SHEET, id)
@@ -542,7 +547,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         </div>
         {!phone && swing}
         <TipButton label="Graph" hint="Show the step graph for the selected channel. Drag a bar to change velocity, pan, pitch, or gate." pressed={graph} onClick={() => setGraph((open) => !open)} />
-        {!phone && <TipButton label="Roll" hint="Show this pattern as drum lanes. The notes match the step grid." pressed={store.rackRoll} onClick={() => store.toggleRackRoll()} />}
+        <TipButton label="Roll" hint="Show this pattern as drum lanes. The notes match the step grid." pressed={store.rackRoll} onClick={() => store.toggleRackRoll()} />
         <button type="button" className="rack-random" title="Smart random. A selected sound changes only that row. Nothing selected rebuilds the whole kit." onClick={() => store.smartRandomDrums()}>
           <strong>Random</strong>
           <small>Smart random</small>
@@ -566,7 +571,6 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
       )}
       <div className={`rack-extras${editOpen ? ' open' : ''}`}>
         {phone && swing}
-        {phone && <TipButton label="Roll" hint="Show this pattern as drum lanes. The notes match the step grid." pressed={store.rackRoll} onClick={() => store.toggleRackRoll()} />}
         <input className="rack-name-field" {...described(bar('name'))} value={pattern.name} onChange={(event) => store.renamePattern(event.target.value)} />
         <select {...described(sheet('color'))} value={pattern.color} onChange={(event) => store.recolorPattern(event.target.value)}>
           {RACK_COLORS.map((color) => (

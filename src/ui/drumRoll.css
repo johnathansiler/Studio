@@ -1,5 +1,18 @@
 .drum-roll {
-  display: contents;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  margin-top: 8px;
+}
+.drum-roll-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 740;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 .drum-lane-name.rack-lead {
   width: var(--lead);

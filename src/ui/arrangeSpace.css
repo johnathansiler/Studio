@@ -38,13 +38,40 @@
 .playlist-browser .sound-filters button { max-width: 100%; min-width: 0; }
 .shell.phone .playlist-browser .sound-filters { flex-wrap: wrap; overflow-x: hidden; }
 .shell.phone .arrange { grid-template-columns: 188px minmax(0, 1fr); }
-.shell.phone .pl-head { flex-wrap: nowrap; height: 100%; align-items: center; }
-.shell.phone .pl-head .mini { width: auto; min-width: 40px; height: 40px; min-height: 40px; padding: 0 4px; font-size: 12px; }
-.shell.phone .pl-head .mini-word { display: inline; }
-.shell.phone .pl-head .mini-mark { display: none; }
-.shell.phone .pl-head .name { flex: 1 1 36px; min-width: 28px; font-size: 13px; }
-.shell.phone .head { position: relative; }
-.shell.phone .pl-head .track-more { position: absolute; top: 2px; right: 2px; z-index: 2; }
+.shell.phone:not(.land) .arrange { grid-template-columns: minmax(168px, 48%) minmax(0, 1fr); --lane-h: 156px; }
+.shell.phone:not(.land) .pl-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: center;
+  height: 100%;
+  gap: 2px 4px;
+  padding-right: 2px;
+}
+.shell.phone:not(.land) .pl-head .swatch { align-self: stretch; height: auto; }
+.shell.phone:not(.land) .pl-head .name {
+  flex: 1 1 calc(100% - 18px);
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  height: 40px;
+  min-height: 40px;
+  font-size: 15px;
+  font-weight: 720;
+}
+.shell.phone:not(.land) .pl-head .track-more { position: static; width: 40px; min-width: 40px; height: 40px; }
+.shell.phone:not(.land) .pl-head .mini,
+.shell.phone:not(.land) .pl-head .piano-open {
+  width: auto;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 5px;
+  font-size: 12px;
+}
+.shell.phone:not(.land) .pl-head .piano-open svg { display: none; }
+.shell.phone:not(.land) .pl-head .mini-word { display: inline; }
+.shell.phone:not(.land) .pl-head .mini-mark { display: none; }
 .shell.phone .mini-meter { display: none; }
 .shell.phone .pl-head .name { min-width: 52px; }
 
@@ -101,7 +128,7 @@
   font-size: 11px;
 }
 .shell.phone .pl-head .piano-open span { display: inline; line-height: 1; }
-.shell.phone .pl-head .mini {
+.shell.phone.land .pl-head .mini {
   width: 28px;
   min-width: 28px;
   height: 32px;
