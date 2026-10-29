@@ -33,6 +33,7 @@ import type { InstrumentPlay, SamplePack, SamplerProgram } from '../audio/multis
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
+import { readKeyboardEnabled, writeKeyboardEnabled } from '../model/keyboardPlay'
 import { HistoryJournal } from './history'
 import { type ProjectOp, type StampWire } from './ops'
 import { ProjectSync } from './sync'
@@ -303,7 +304,15 @@ export class ProjectStore {
     this.selectedMidiClipId = null
     this.selectedNoteId = null
     this.selectedNoteIds = []
+    this.keyboardMidi = readKeyboardEnabled()
     this.sync.rebase(this.project)
+  }
+
+  /** Computer keyboard notes and the docked piano. Remembered on this computer. */
+  setKeyboardMidi(on: boolean) {
+    this.keyboardMidi = on
+    writeKeyboardEnabled(on)
+    this.emit()
   }
 
   subscribe = (fn: Listener) => {

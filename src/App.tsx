@@ -60,6 +60,8 @@ import { MainMenu } from './ui/MainMenu'
 import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, pianoDockWidth, readSessionDock, writeSessionDock } from './ui/sessionDock'
 import { deletesSelection } from './ui/clipKeys'
 import { historyCommand, typingTarget } from './state/history'
+import { claimComputerKey } from './model/keyboardPlay'
+import { KeyboardDock } from './ui/KeyboardDock'
 import { HintBubble, TipButton } from './ui/Hint'
 import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
@@ -655,6 +657,17 @@ export function App() {
         return
       }
       if (typing) return
+      const claimed = claimComputerKey({
+        enabled: store.keyboardMidi,
+        typing: false,
+        meta: event.metaKey || event.ctrlKey,
+        alt: event.altKey,
+        repeat: event.repeat,
+        held: false,
+        code: event.code,
+        key: event.key,
+      })
+      if (claimed) return
       const key = event.key.toLowerCase()
       const meta = event.metaKey || event.ctrlKey
       if (key === 't' && !meta && !event.repeat && !store.keyboardMidi) {
@@ -1305,7 +1318,7 @@ async function importDropped(files: FileList) {
 
   return (
     <div
-      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''}`}
+      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''} ${form === 'desk' && store.keyboardMidi ? 'desk-keys' : ''}`}
       style={{ ['--dock' as string]: `${dock}px`, ['--sounds' as string]: `${soundWidth}px` }}
       data-version={version}
       data-form={form}
@@ -1428,6 +1441,7 @@ async function importDropped(files: FileList) {
           engine={engine}
           syncLabel={session.state.syncLabel}
           simple={phone}
+          desk={form === 'desk'}
           onPlay={() => { engine.unlock(); void play() }}
           onStop={() => void stop()}
           onRecord={() => { engine.unlock(); void record() }}
@@ -1704,6 +1718,7 @@ async function importDropped(files: FileList) {
       )}
       {knockOpen && <KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} />}
       <SpectralSheet store={store} />
+      {form === 'desk' && <KeyboardDock store={store} engine={engine} />}
       <HintBubble />
       <div className="toasts">
         {store.toasts.map((toast) => (

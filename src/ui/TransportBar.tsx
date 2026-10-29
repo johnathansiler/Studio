@@ -21,6 +21,7 @@ export function TransportBar({
   onRecord,
   onSeek,
   simple = false,
+  desk = false,
   takeProgress = null,
 }: {
   store: ProjectStore
@@ -32,6 +33,8 @@ export function TransportBar({
   onSeek: (sample: number) => void
   /** Phone: keep play, stop, record, and tempo. To-start and loop live in the menu. */
   simple?: boolean
+  /** Desktop: show the computer-keyboard toggle. */
+  desk?: boolean
   /** 0–1 while a full-quality guest take is moving to the host. */
   takeProgress?: number | null
 }) {
@@ -238,6 +241,22 @@ export function TransportBar({
           <RecIcon />
           <span className="t-word">Rec</span>
         </TipButton>
+        {desk && (
+          <button
+            type="button"
+            className={`keyboard-toggle${store.keyboardMidi ? ' on' : ''}`}
+            aria-pressed={store.keyboardMidi}
+            aria-label="Keyboard. Play notes from the computer keyboard and show the piano."
+            title="Play notes from the computer keyboard and show the piano."
+            onClick={() => {
+              engine.unlock()
+              store.setKeyboardMidi(!store.keyboardMidi)
+            }}
+          >
+            <KeyboardIcon />
+            <span>Keyboard</span>
+          </button>
+        )}
       </div>
       <div className="lcd" aria-live="polite">
         <div className="bars">{formatMapBars(project, position)}</div>
@@ -403,6 +422,18 @@ function RecIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
       <circle cx="8" cy="8" r="4" fill="currentColor" />
+    </svg>
+  )
+}
+
+function KeyboardIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="1.5" y="6" width="3" height="8" rx="0.6" fill="currentColor" />
+      <rect x="6.5" y="6" width="3" height="8" rx="0.6" fill="currentColor" />
+      <rect x="11.5" y="6" width="3" height="8" rx="0.6" fill="currentColor" />
+      <rect x="4.2" y="2" width="2.4" height="6" rx="0.5" fill="currentColor" />
+      <rect x="9.4" y="2" width="2.4" height="6" rx="0.5" fill="currentColor" />
     </svg>
   )
 }

@@ -56,6 +56,7 @@ export function StepInput({ store, engine }: { store: ProjectStore; engine: Audi
 
   useEffect(() => {
     const down = (event: KeyboardEvent) => {
+      if (!store.keyboardMidi) return
       const target = event.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
       if (event.metaKey || event.ctrlKey || event.altKey) return

@@ -23,6 +23,8 @@ import type { ProjectStore } from '../state/store'
 import { loopGridBeats } from '../model/loopEdit'
 import { quartersPerBar, samplesToBeats } from '../model/time'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
+import { setRollOwnsKeys } from '../model/keyboardPlay'
+import { performanceOwnsMidi, stepOwnsMidi } from '../midi/remember'
 import { keyCommitsNote } from '../model/stepEntry'
 import { displayedPlayhead, pianoPlayheadBeat, transportMoving } from '../model/transportSync'
 import { PIANO_BAR, PIANO_SHEET, copyOf, described } from './chrome'
@@ -339,14 +341,17 @@ export function PianoRoll({
     const held = new Map<string, number>()
     let nextId = 4000
     const tokenOf = (event: KeyboardEvent) => event.code || event.key
+    setRollOwnsKeys(true)
     const down = (event: KeyboardEvent) => {
+      if (!store.keyboardMidi || performanceOwnsMidi() || stepOwnsMidi()) return
       const target = event.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
       if (event.metaKey || event.ctrlKey || event.altKey) return
       const token = tokenOf(event)
       if (held.has(token)) return
-      const pitch = codes[event.code] ?? letters[event.key.toLowerCase()]
-      if (pitch == null) return
+      const home = codes[event.code] ?? letters[event.key.toLowerCase()]
+      if (home == null) return
+      const pitch = Math.max(0, Math.min(127, home + store.midiEditor().octave * 12))
       event.preventDefault()
       event.stopImmediatePropagation()
       const id = nextId++
@@ -367,6 +372,7 @@ export function PianoRoll({
     window.addEventListener('keyup', up)
     window.addEventListener('blur', blur)
     return () => {
+      setRollOwnsKeys(false)
       blur()
       window.removeEventListener('keydown', down)
       window.removeEventListener('keyup', up)
