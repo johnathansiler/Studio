@@ -80,6 +80,7 @@ describe('phone mixer at 412x915', () => {
           stacked: autoBoxes.length >= 2 && autoBoxes[1].top >= autoBoxes[0].bottom - 1,
           fullWidth: autoBoxes.length > 0 && autoBoxes[0].width >= strip.getBoundingClientRect().width - 6,
           shorts: autos.map((button) => (button.querySelector('.mode-short') as HTMLElement | null)?.textContent),
+          captions: autos.map((button) => (button.querySelector('.mode-caption') as HTMLElement | null)?.textContent),
           fullHidden: getComputedStyle(autos[0].querySelector('.mode-full') as HTMLElement).display,
           pressed: autos.some((button) => button.classList.contains('on') && button.getAttribute('aria-pressed') === 'true'),
           fx: !!strip.querySelector('.fx-open'),
@@ -96,6 +97,7 @@ describe('phone mixer at 412x915', () => {
       expect(report.stacked).toBe(true)
       expect(report.fullWidth).toBe(true)
       expect(report.shorts).toEqual(['O', 'R', 'T', 'L'])
+      expect(report.captions).toEqual(['Off', 'Read', 'Touch', 'Latch'])
       expect(report.fullHidden).toBe('none')
       expect(report.pressed).toBe(true)
       expect(report.fx).toBe(true)
@@ -152,6 +154,7 @@ describe('phone mixer at 412x915', () => {
           scrollWidth: node.scrollWidth,
           clientWidth: node.clientWidth,
         }))
+        const captions = [...first.querySelectorAll<HTMLElement>('.mode-caption, .mini-caption')].map((node) => (node.textContent || '').trim())
         const arm = first.querySelector('.arm-flag') as HTMLElement
         const armShown = [...arm.querySelectorAll<HTMLElement>('span')].filter((node) => getComputedStyle(node).display !== 'none').map((node) => (node.textContent || '').trim()).join('')
         const mix = (document.querySelector('.mixer') as HTMLElement).getBoundingClientRect()
@@ -163,11 +166,13 @@ describe('phone mixer at 412x915', () => {
           horizontal: faderBox.width > faderBox.height,
           touch: getComputedStyle(fader).touchAction,
           armShown,
+          captions,
           buttons,
           texts,
         }
       })
       expect(report.layout).toBe('rows')
+      expect(report.captions).toEqual(expect.arrayContaining(['Off', 'Read', 'Touch', 'Latch', 'Mute', 'Solo']))
       expect(report.armShown).toBe('Arm')
       expect(report.narrow).toBe('')
       expect(report.below).toBe(true)

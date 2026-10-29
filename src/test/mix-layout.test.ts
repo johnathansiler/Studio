@@ -89,7 +89,7 @@ describe('mix layout', () => {
         })
         expect(box.firstLeft).toBeLessThanOrEqual(box.mixLeft + 1)
         expect(box.firstLeft).toBeGreaterThanOrEqual(box.mixLeft - 1)
-        if (shot.count <= 3) expect(box.lastRight).toBeGreaterThanOrEqual(box.mixRight - 2)
+        if (shot.count <= 3) expect(box.lastRight - box.firstLeft).toBeLessThan(box.mixRight - box.mixLeft - 40)
         if (shot.count >= 8) expect(box.scrollWidth).toBeGreaterThan(box.clientWidth + 8)
         for (const label of box.labels) {
           expect(label.scrollWidth, label.label ?? '').toBeLessThanOrEqual(label.clientWidth + 1)

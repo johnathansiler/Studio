@@ -78,7 +78,6 @@ export const MENU_COPY: MenuSpec[] = [
   { id: 'midi', action: 'midi', group: 'tools', place: 'all', label: 'MIDI', hint: 'Learn knobs, effects, hardware out, live capture, and recording several inputs.' },
   { id: 'click', action: 'click', group: 'settings', place: 'all', label: 'Click', hint: 'Metronome while you play and record.' },
   { id: 'count-in', action: 'count-in', group: 'settings', place: 'all', label: 'Count-in', hint: 'Count one bar before recording starts.' },
-  { id: 'snap', action: 'snap', group: 'settings', place: 'all', label: 'Snap', hint: 'Line clip edits up to the beat.' },
   { id: 'signature', action: 'signature', group: 'settings', place: 'all', label: 'Time', hint: 'Beats in each bar.' },
   { id: 'shortcuts', action: 'shortcuts', group: 'settings', place: 'all', label: 'Shortcuts', hint: 'Keys for play, record, and editing.' },
 ]
@@ -128,7 +127,7 @@ export const PIANO_SHEET: Copy[] = [
 ]
 
 export const BEAT_BAR: Copy[] = [
-  { id: 'pattern', label: 'Pattern', hint: 'Which drum pattern you are editing.' },
+  { id: 'pattern', label: 'Editing', hint: 'The pattern on this step grid. Song mode plays the clips you send to Arrange.' },
   { id: 'name', label: 'Pattern name', hint: 'Rename this pattern.' },
   { id: 'steps', label: 'Steps', hint: 'How many steps are in the pattern.' },
   { id: 'swing', label: 'Swing', hint: 'Push the off-beats late.' },

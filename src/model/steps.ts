@@ -63,6 +63,8 @@ export interface PatternClip {
   placed?: boolean
   /** Beats into the pattern hidden by trimming the left edge. */
   offsetBeats?: number
+  /** A piano-roll copy is the one that plays. */
+  suppressed?: boolean
 }
 
 export interface RenderedHit {

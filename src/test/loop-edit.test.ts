@@ -132,7 +132,8 @@ describe('loop length readout', () => {
     expect(transport).toContain('data-loop-readout="transport"')
     expect(transport).toContain('data-loop-length="4 bars"')
     expect(transport).toContain('1 → 5')
-    expect(transport).toContain('>Fine<')
+    expect(transport).not.toContain('>Fine<')
+    expect(transport).toContain('data-loop-readout="transport"')
 
     const arrange = renderToStaticMarkup(createElement(ArrangeView, {
       store,

@@ -1,3 +1,4 @@
+import { activeGridBeats } from './snapGrid'
 import type { Project } from './types'
 import { quartersPerBar } from './time'
 import { musicalAt, projectBeatSample, projectSampleBeat, type MusicalPlace } from './tempoMap'
@@ -21,11 +22,11 @@ export interface LoopReadout {
   text: string
 }
 
-/** Grid in quarter notes. 0 means free. A view grid wins; otherwise the meter beat when snap is on. */
-export function loopGridBeats(project: Pick<Project, 'snap' | 'timeSignature'>, viewGrid?: number): number {
+/** Grid in quarter notes. 0 means free. An explicit view grid wins; otherwise the shared Snap grid. */
+export function loopGridBeats(project: Pick<Project, 'snap' | 'timeSignature'> & { snapDivision?: string }, viewGrid?: number): number {
   if (!project.snap) return 0
   if (viewGrid != null) return viewGrid > 0 ? viewGrid : 0
-  return 4 / Math.max(1, project.timeSignature.denominator)
+  return activeGridBeats(project)
 }
 
 /** One meter beat, in samples, measured at `atSample` so a tempo map stays honest. */

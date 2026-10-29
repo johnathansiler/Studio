@@ -79,7 +79,11 @@ async function spansArrange(page: Page) {
 }
 
 async function drawAndTrim(page: Page) {
-  await page.getByRole('button', { name: /^Draw/ }).click()
+  const draw = page.getByRole('button', { name: /^Draw/ })
+  if (!(await draw.isVisible().catch(() => false))) {
+    await page.getByRole('button', { name: /^Tools/ }).click()
+  }
+  await draw.click()
   const view = await page.locator('.timeline-scroll').boundingBox()
   const lane = await page.locator('.timeline-scroll .lane').first().boundingBox()
   if (!view || !lane) throw new Error('no lane')
@@ -115,6 +119,9 @@ async function drawAndTrim(page: Page) {
   await page.mouse.move(gripX, gripY)
   await page.mouse.down()
   await page.mouse.move(gripX - drag, gripY, { steps: 12 })
+  if ((await page.evaluate(() => window.innerWidth)) < 500) {
+    await page.screenshot({ path: '/opt/cursor/artifacts/arrange-drag-shadow-412.png' })
+  }
   await page.mouse.up()
   await page.waitForTimeout(80)
   const after = await clip.boundingBox()

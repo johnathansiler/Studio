@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { formatLoopReadout } from '../model/loopEdit'
 import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, type TapMemory, type TapSource } from '../model/tap'
@@ -9,7 +9,6 @@ import type { ProjectStore } from '../state/store'
 import { AutomationFollow } from './AutomationLane'
 import { TRANSPORT_COPY, copyOf } from './chrome'
 import { TipButton } from './Hint'
-import { loopFineSnap, setLoopFineSnap, subscribeLoopFine } from './loopFine'
 import './loopRegion.css'
 
 export function TransportBar({
@@ -220,7 +219,6 @@ export function TransportBar({
   const playing = status === 'playing'
   const transport = (id: string) => copyOf(TRANSPORT_COPY, id)
   const loopRead = formatLoopReadout(project, project.loopStartSample, project.loopEndSample)
-  const fine = useSyncExternalStore(subscribeLoopFine, loopFineSnap, loopFineSnap)
   return (
     <div className={`transport${simple ? ' simple' : ''}`}>
       <AutomationFollow store={store} engine={engine} />
@@ -371,15 +369,6 @@ export function TransportBar({
           <span className="loop-len">{loopRead.length}</span>
           <span className="loop-span">{loopRead.span}</span>
         </span>
-        <button
-          type="button"
-          className={`loop-fine${fine ? ' on' : ''}`}
-          aria-pressed={fine}
-          title="Drag the loop without snapping to the grid. Hold Alt for the same thing."
-          onClick={() => setLoopFineSnap(!fine)}
-        >
-          Fine
-        </button>
       </div>
       {syncLabel && <span className="sync-pill">{syncLabel}</span>}
       {recordHint && <p className="rec-hint" role="status">{recordHint}</p>}

@@ -1,13 +1,12 @@
-import { useLayoutEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
+import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { formatLoopReadout, loopGridBeats, loopLabelCenter, loopMinSamples, resolveLoopDrag, type LoopDragMode } from '../model/loopEdit'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import type { Project } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { useFormFactor } from './form'
-import { loopFineSnap, subscribeLoopFine } from './loopFine'
 import './loopRegion.css'
 
-const GRIP = 36
+const GRIP = 40
 
 export function LoopRegion({
   store,
@@ -31,8 +30,8 @@ export function LoopRegion({
   /** Empty-ruler presses pass through, so pan and zoom still work. */
   yieldEmpty?: boolean
 }) {
-  const fine = useSyncExternalStore(subscribeLoopFine, loopFineSnap, loopFineSnap)
   const phone = useFormFactor() === 'phone'
+  const [finger, setFinger] = useState<number | null>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const labelRef = useRef<HTMLDivElement>(null)
   const drag = useRef<{
@@ -129,7 +128,9 @@ export function LoopRegion({
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const state = drag.current
     if (!state || event.pointerId !== state.pointerId) return
-    if (Math.abs(event.clientX - state.originX) <= 5) return
+    const host = event.currentTarget.getBoundingClientRect()
+    setFinger(event.clientX - host.left)
+    if (Math.abs(event.clientX - state.originX) <= 2) return
     state.moved = true
     const mode: LoopDragMode = state.mode === 'seek' ? 'draw' : state.mode
     state.mode = mode
@@ -139,7 +140,7 @@ export function LoopRegion({
       sampleAt(event.clientX, rect),
       project,
       gridBeats,
-      event.altKey || fine || loopFineSnap(),
+      event.altKey,
       state.minSamples,
     )
     if (next.start === store.project.loopStartSample && next.end === store.project.loopEndSample && store.project.loopEnabled) return
@@ -151,6 +152,7 @@ export function LoopRegion({
     const state = drag.current
     if (!state || event.pointerId !== state.pointerId) return
     drag.current = null
+    setFinger(null)
     if (state.changed) store.endDraft()
     if (!state.moved && state.mode === 'seek') {
       const rect = event.currentTarget.getBoundingClientRect()
@@ -203,6 +205,7 @@ export function LoopRegion({
         aria-label="Loop end. Drag to stretch the loop."
         title="Loop end. Drag to stretch the loop."
       />
+      {finger != null && <i className="snap-line loop-finger" style={{ left: finger }} />}
       <div ref={labelRef} className="loop-read" style={{ left: width ? labelX : '50%' }}>
         <span className="loop-len">{readout.length}</span>
         <span className="loop-span">{readout.span}</span>

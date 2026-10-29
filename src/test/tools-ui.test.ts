@@ -180,14 +180,14 @@ describe('mobile control lists', () => {
       'quantize',
       'session-mode', 'dock',
       'scaler', 'players', 'midi',
-      'click', 'count-in', 'snap', 'signature', 'shortcuts',
+      'click', 'count-in', 'signature', 'shortcuts',
     ])
     expect(phone.map((item) => item.action)).toEqual([
       'new', 'open', 'save', 'export',
       'quantize', 'to-start', 'loop',
       'session-mode', 'capture',
       'players', 'midi',
-      'click', 'count-in', 'snap', 'signature', 'shortcuts',
+      'click', 'count-in', 'signature', 'shortcuts',
     ])
     const phoneCore = phone.filter((item) => !['to-start', 'loop', 'capture'].includes(item.action))
     expect(phoneCore.length).toBeLessThan(desk.length)

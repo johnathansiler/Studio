@@ -1,3 +1,40 @@
+.snap-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #f4fff8;
+  box-shadow: 0 0 8px rgba(244, 255, 248, 0.9);
+  pointer-events: none;
+  z-index: 6;
+}
+.snap-shadow {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 4;
+  background-image: linear-gradient(180deg, rgba(232, 255, 239, 0.42), rgba(96, 186, 128, 0.28));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 0 16px rgba(115, 196, 143, 0.55);
+  border: 1px solid rgba(185, 240, 205, 0.75);
+}
+.snap-read {
+  position: absolute;
+  z-index: 7;
+  top: 2px;
+  transform: translateX(-50%);
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #102117;
+  background-image: linear-gradient(180deg, #f7fff8, #9adcb4);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), 0 1px 2px rgba(0,0,0,0.4);
+  pointer-events: none;
+  white-space: nowrap;
+}
 .loop-host {
   position: absolute;
   inset: 0;

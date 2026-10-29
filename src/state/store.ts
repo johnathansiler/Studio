@@ -143,6 +143,7 @@ import {
   chopsToPads,
   doubleLength,
   eraseWhilePlaying,
+  createKit,
   kitPreset,
   normalizePadKit,
   ratchetBeats,
@@ -153,7 +154,8 @@ import {
 } from '../model/padMachine'
 import { applyChoke, assignPad, clipBeat, padRecordWindow, recordPadHits, type PadHit } from '../instruments/pads/record'
 import { applyLaneNotes, patternToMidiNotes, type LaneNote } from '../model/patternMidi'
-import { createKit } from '../model/padMachine'
+import { clipEndForContent, grownClipEnd, normalizeSnapDivision, snapEditBeat, subdivisionFor, type SnapDivisionId } from '../model/snapGrid'
+import { applySmartDrums, mulberry32 } from '../model/smartDrums'
 
 export type WorkspaceView = 'arrange' | 'mix' | 'session' | 'beats'
 
@@ -189,11 +191,12 @@ const GENERATED_COLOR: Record<GeneratedPart['kind'], string> = {
 /** Snap a clip edge to the tempo map. Whole-beat hits drop sample roundoff. */
 function snappedClipBeat(project: Project, beat: number) {
   if (!project.snap) return Math.max(0, beat)
-  const sample = snapSampleToMap(projectBeatSample(project, beat), project)
-  const next = projectSampleBeat(project, sample)
-  const grid = Math.round(next)
-  if (Math.abs(next - grid) < 1e-3) return Math.max(0, grid)
-  return Math.max(0, next)
+  const sample = snapSampleToMap(projectBeatSample(project, beat), project, subdivisionFor(project))
+  return snapEditBeat(projectSampleBeat(project, sample), project)
+}
+
+function growMidi(clip: { durationBeats: number }, contentEnd: number, project: Project) {
+  clip.durationBeats = grownClipEnd(clip.durationBeats, contentEnd, project)
 }
 
 export class ProjectStore {
@@ -260,6 +263,7 @@ export class ProjectStore {
   private editGeneration = 0
   private savedGeneration = 0
   rowClipboard: StepCell[] | null = null
+  private nextDrumSeed = 1
   /** Patch history. Transport, selection, zoom, and meters are not recorded. */
   private journal = new HistoryJournal()
   private listeners = new Set<Listener>()
@@ -1335,6 +1339,14 @@ export class ProjectStore {
       this.project.loopEnabled = enabled
       if (start != null) this.project.loopStartSample = Math.max(0, Math.round(start))
       if (end != null) this.project.loopEndSample = Math.max(this.project.loopStartSample + 1, Math.round(end))
+    })
+  }
+
+  setSnapDivision(id: SnapDivisionId | string) {
+    const next = normalizeSnapDivision(id)
+    if (normalizeSnapDivision(this.project.snapDivision) === next && this.project.snapDivision === next) return
+    this.mutate(() => {
+      this.project.snapDivision = next
     })
   }
 
@@ -2553,7 +2565,7 @@ export class ProjectStore {
 
   trimClip(trackId: string, clipId: string, edge: 'start' | 'end', sample: number) {
     this.mutate(() => {
-      const at = snapSampleToMap(sample, this.project)
+      const at = snapSampleToMap(sample, this.project, subdivisionFor(this.project))
       const ids = new Set(trimLinkedAudio(this.project, trackId, clipId, edge, at, (clip) => {
         const asset = this.buffers.get(clip.bufferId)
         return asset?.channels[0].length ?? clip.offsetSamples + clip.durationSamples
@@ -2571,7 +2583,7 @@ export class ProjectStore {
         if (done.has(move.clipId)) continue
         const clip = this.track(move.trackId)?.clips.find((item) => item.id === move.clipId)
         if (!clip) continue
-        const start = snapSampleToMap(move.startSample, this.project)
+        const start = snapSampleToMap(move.startSample, this.project, subdivisionFor(this.project))
         for (const id of shiftLinkedAudio(this.project, move.trackId, move.clipId, start)) done.add(id)
       }
     })
@@ -2582,7 +2594,7 @@ export class ProjectStore {
       const done = new Set<string>()
       for (const move of moves) {
         if (done.has(move.clipId)) continue
-        const start = this.project.snap ? Math.max(0, Math.round(move.startBeat)) : Math.max(0, move.startBeat)
+        const start = snapEditBeat(move.startBeat, this.project)
         for (const id of shiftLinkedMidi(this.project, move.trackId, move.clipId, start)) done.add(id)
       }
     })
@@ -2594,7 +2606,7 @@ export class ProjectStore {
         const clip = this.project.patternClips?.find((item) => item.id === move.clipId)
         if (!clip || clip.scene != null) continue
         clip.placed = true
-        clip.startBeat = this.project.snap ? Math.max(0, Math.round(move.startBeat)) : Math.max(0, move.startBeat)
+        clip.startBeat = snapEditBeat(move.startBeat, this.project)
         if (move.trackId && this.project.tracks.some((track) => track.id === move.trackId && track.type === 'midi')) {
           clip.trackId = move.trackId
         }
@@ -2665,8 +2677,9 @@ export class ProjectStore {
     this.mutate(() => {
       const track = this.track(trackId)
       if (!track) return
-      const a = snapSampleToMap(Math.min(startSample, endSample), this.project)
-      let b = snapSampleToMap(Math.max(startSample, endSample), this.project)
+      const grid = subdivisionFor(this.project)
+      const a = snapSampleToMap(Math.min(startSample, endSample), this.project, grid)
+      let b = snapSampleToMap(Math.max(startSample, endSample), this.project, grid)
       const quarter = beatsToSamples(1, this.project.sampleRate, tempoAtSample(this.project, a))
       if (b - a < quarter / 4) b = a + quarter
       this.selectedTrackId = trackId
@@ -2832,9 +2845,9 @@ export class ProjectStore {
       }
       if (fixed) clip.durationBeats = fixed
       else {
-        let end = clip.durationBeats
+        let end = 0
         for (const note of incoming) end = Math.max(end, note.startBeat + note.durationBeats)
-        clip.durationBeats = Math.max(clip.durationBeats, end)
+        growMidi(clip, end, this.project)
       }
     }
     if (coalesce) this.draft(write)
@@ -3176,6 +3189,7 @@ export class ProjectStore {
       }
       const next = this.inputNote(clip, drafted)
       clip.notes.push(next)
+      growMidi(clip, next.startBeat + next.durationBeats, this.project)
       this.selectedNoteId = next.id
       this.selectedNoteIds = [next.id]
     })
@@ -4756,6 +4770,17 @@ export class ProjectStore {
     })
   }
 
+  /** Selected drum rows, or the whole kit when nothing is selected. One undo step. */
+  smartRandomDrums(seed?: number) {
+    const used = seed == null ? this.nextDrumSeed++ : seed
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (!pattern) return
+      const selected = this.selectedRackChannels.filter((id) => pattern.channels.some((channel) => channel.id === id))
+      applySmartDrums(pattern, selected.length ? selected : null, mulberry32(used >>> 0))
+    })
+  }
+
   randomizePattern(rng?: () => number) {
     this.mutate(() => {
       const pattern = this.activePattern()
@@ -4810,7 +4835,7 @@ export class ProjectStore {
         if (!channel.output) channel.output = track.id
       }
       mirrorTrackMix(this.project, track.id)
-      const beat = this.project.snap ? Math.max(0, Math.round(startBeat)) : Math.max(0, startBeat)
+      const beat = snapEditBeat(startBeat, this.project)
       const clip = {
         id: uid('pcl'),
         patternId: pattern.id,
@@ -4830,7 +4855,8 @@ export class ProjectStore {
       this.selectedMidiClipIds = []
       this.selectedTrackId = track.id
     })
-    this.toast(`${pattern.name} is on ${landed}.`, 'good')
+    const hits = patternToMidiNotes(pattern).length
+    this.toast(hits ? `${pattern.name} is on ${landed}.` : 'This pattern has no hits to send.', hits ? 'good' : 'warn')
   }
 
   /** Midi track named Drums. Place creates it when the song does not have one yet. */
@@ -4897,14 +4923,17 @@ export class ProjectStore {
     this.mutate(() => {
       const pattern = this.activePattern()
       if (!pattern) return
-      const snapped = this.project.snap ? Math.max(0, Math.round(beat)) : Math.max(0, beat)
+      const notes = patternToMidiNotes(pattern)
+      if (!notes.length) return
+      const snapped = snapEditBeat(beat, this.project)
+      const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0)
       const track = this.kitTrack(trackId, mode, pattern)
       const clip: MidiClip = {
         id: uid('midi'),
         name: pattern.name,
         startBeat: snapped,
-        durationBeats: Math.max(0.25, pattern.steps * 0.25),
-        notes: patternToMidiNotes(pattern).map((note) => ({ ...note, id: uid('note') })),
+        durationBeats: clipEndForContent(end, this.project),
+        notes: notes.map((note) => ({ ...note, id: uid('note') })),
       }
       track.midiClips.push(clip)
       this.selectedTrackId = track.id
@@ -4916,6 +4945,79 @@ export class ProjectStore {
       result = { trackId: track.id, clipId: clip.id }
     })
     if (result) this.toast(mode === 'instrument' ? 'Pattern is on the instrument.' : 'Pattern is MIDI on the song.', 'good')
+    else this.toast('This pattern has no hits to send.', 'warn')
+    return result
+  }
+
+  /**
+   * Put the current pattern on Arrange as MIDI notes.
+   * The clip length reaches the next snap line, or the next bar when Snap is off.
+   */
+  sendPatternToArrange(startBeat: number, trackId?: string): { trackId: string; clipId: string } | null {
+    const pattern = this.activePattern()
+    if (!pattern) {
+      this.toast('Choose a pattern first.', 'warn')
+      return null
+    }
+    const notes = patternToMidiNotes(pattern)
+    if (!notes.length) {
+      this.toast('This pattern has no hits to send.', 'warn')
+      return null
+    }
+    let result: { trackId: string; clipId: string } | null = null
+    this.mutate(() => {
+      const beat = snapEditBeat(startBeat, this.project)
+      const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0)
+      const track = this.kitTrack(trackId ?? null, 'midi', pattern)
+      const clip: MidiClip = {
+        id: uid('midi'),
+        name: pattern.name,
+        startBeat: beat,
+        durationBeats: clipEndForContent(end, this.project),
+        notes: notes.map((note) => ({ ...note, id: uid('note') })),
+      }
+      track.midiClips.push(clip)
+      this.selectedTrackId = track.id
+      this.selectedMidiClipId = clip.id
+      this.selectedMidiClipIds = [clip.id]
+      this.selectedClipId = null
+      this.selectedClipIds = []
+      this.view = 'arrange'
+      result = { trackId: track.id, clipId: clip.id }
+    })
+    if (result) this.toast(`${pattern.name} is on Arrange.`, 'good')
+    return result
+  }
+
+  /** Open a pattern clip in the piano roll using the pattern's current hits. */
+  mirrorPatternClip(clipId: string): { trackId: string; clipId: string } | null {
+    const source = this.project.patternClips?.find((item) => item.id === clipId)
+    const pattern = this.project.beats?.patterns.find((item) => item.id === source?.patternId)
+    if (!source || !pattern) return null
+    const notes = patternToMidiNotes(pattern)
+    if (!notes.length) {
+      this.toast('This pattern has no hits to send.', 'warn')
+      return null
+    }
+    let result: { trackId: string; clipId: string } | null = null
+    this.mutate(() => {
+      const track = source.trackId ? this.project.tracks.find((item) => item.id === source.trackId && item.type === 'midi') : null
+      const host = track ?? this.kitTrack(null, 'midi', pattern)
+      const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0)
+      const clip: MidiClip = {
+        id: uid('midi'),
+        name: pattern.name,
+        startBeat: source.startBeat,
+        durationBeats: Math.max(source.lengthBeats, clipEndForContent(end, this.project)),
+        notes: notes.map((note) => ({ ...note, id: uid('note') })),
+      }
+      host.midiClips.push(clip)
+      source.suppressed = true
+      this.selectedTrackId = host.id
+      this.selectedMidiClipId = clip.id
+      this.selectedMidiClipIds = [clip.id]
+      result = { trackId: host.id, clipId: clip.id }
+    })
     return result
   }
 
@@ -5012,7 +5114,7 @@ export class ProjectStore {
         applyFine(copy, note.fine)
         return copy
       })
-      clip.durationBeats = Math.max(clip.durationBeats, placed.cursor)
+      growMidi(clip, placed.cursor, this.project)
       this.project.midiEditor = normalizeMidiEditor({ ...editor, cursor: placed.cursor })
       if (placed.ids.length) {
         this.selectedNoteId = placed.ids[0]
@@ -5027,7 +5129,7 @@ export class ProjectStore {
       if (!clip) return
       const editor = normalizeMidiEditor(this.project.midiEditor)
       const cursor = editor.cursor + editor.step
-      clip.durationBeats = Math.max(clip.durationBeats, cursor)
+      growMidi(clip, cursor, this.project)
       this.project.midiEditor = normalizeMidiEditor({ ...editor, cursor })
     })
   }
@@ -5043,7 +5145,7 @@ export class ProjectStore {
         return
       }
       clip.notes = tied.notes
-      clip.durationBeats = Math.max(clip.durationBeats, tied.cursor)
+      growMidi(clip, tied.cursor, this.project)
       this.project.midiEditor = normalizeMidiEditor({ ...editor, cursor: tied.cursor })
     })
   }
@@ -5090,7 +5192,7 @@ export class ProjectStore {
           velocity: clamp(patch.velocity ?? normalizeMidiEditor(this.project.midiEditor).velocity, 0.05, 1),
         }
         clip.notes.push(note)
-        clip.durationBeats = Math.max(clip.durationBeats, beat + DRUM_STEP)
+        growMidi(clip, beat + DRUM_STEP, this.project)
       }
       if (!note) return
       if (patch.velocity != null) note.velocity = clamp(patch.velocity, 0.05, 1)
@@ -5835,7 +5937,7 @@ export class ProjectStore {
         id: uid('midi'),
         name,
         startBeat: Math.max(0, startBeat),
-        durationBeats: Math.max(0.25, end),
+        durationBeats: clipEndForContent(end, this.project),
         notes: notes.map((note) => ({
           id: uid('note'),
           pitch: Math.max(0, Math.min(127, Math.round(note.pitch))),

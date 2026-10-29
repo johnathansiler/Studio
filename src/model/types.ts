@@ -486,6 +486,8 @@ export interface Project {
   metronomeEnabled: boolean
   countIn: boolean
   snap: boolean
+  /** Grid used while Snap is on. Missing means a quarter note. */
+  snapDivision?: string
   devicePresets: DevicePreset[]
   rackPatches: RackPatch[]
   /** Named layered patches saved with this project. */

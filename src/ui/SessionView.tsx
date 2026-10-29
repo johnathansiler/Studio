@@ -24,6 +24,7 @@ import { selectSession } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
 import { useFormFactor } from './form'
+import { panelChoice, rememberPanel } from './panelMemory'
 import { dropLibrarySound, SessionBrowser, soundById } from './sessionBrowser'
 import { SessionDetail } from './sessionDetail'
 import { sessionTargetAt } from './sessionPointer'
@@ -59,11 +60,13 @@ function SessionBody({
   onOpenPiano?: (trackId: string) => void
 }) {
   const grid = selectSession(store)
-  const phone = useFormFactor() === 'phone'
-  const panes = sessionPanes(phone)
-  const [browserOn, setBrowserOn] = useState(panes.browser)
-  const [detailOn, setDetailOn] = useState(panes.detail)
-  const [mixerOn, setMixerOn] = useState(panes.mixer)
+  const form = useFormFactor()
+  const phone = form === 'phone'
+  const compact = form !== 'desk'
+  const panes = sessionPanes(compact)
+  const [browserOn, setBrowserOn] = useState(() => panelChoice('sessionBrowser') ?? panes.browser)
+  const [detailOn, setDetailOn] = useState(() => panelChoice('sessionDetail') ?? panes.detail)
+  const [mixerOn, setMixerOn] = useState(() => panelChoice('sessionMix') ?? panes.mixer)
   const [browserW, setBrowserW] = useState(220)
   const [detailH, setDetailH] = useState(240)
   const clipScroll = useRef<HTMLDivElement>(null)
@@ -89,11 +92,10 @@ function SessionBody({
   }
 
   useEffect(() => {
-    const next = sessionPanes(phone)
-    setBrowserOn(next.browser)
-    setDetailOn(next.detail)
-    setMixerOn(next.mixer)
-  }, [phone])
+    if (panelChoice('sessionBrowser') == null) setBrowserOn(sessionPanes(compact).browser)
+    if (panelChoice('sessionDetail') == null) setDetailOn(sessionPanes(compact).detail)
+    if (panelChoice('sessionMix') == null) setMixerOn(sessionPanes(compact).mixer)
+  }, [compact])
 
   useEffect(() => {
     let frame = 0
@@ -219,9 +221,9 @@ function SessionBody({
         <select aria-label="Launch quantize" title="Clips start on this grid." value={quant} disabled={store.remoteFollow} onChange={(event) => store.setLaunchQuant(event.target.value as LaunchQuant)}>
           {LAUNCH_QUANTS.map((value) => <option key={value} value={value}>{QUANT_LABEL[value]}</option>)}
         </select>
-        <button type="button" className={browserOn ? 'on' : ''} title="Show or hide the browser." onClick={() => { setBrowserOn((value) => !value); if (phone) setDetailOn(false) }}>Browser</button>
-        <button type="button" className={detailOn ? 'on' : ''} title="Show or hide clip and device details." onClick={() => { setDetailOn((value) => !value); if (phone) setBrowserOn(false) }}>Detail</button>
-        <button type="button" className={mixerOn ? 'on' : ''} title="Show or hide the mixer under the clips." onClick={() => setMixerOn((value) => !value)}>Mix</button>
+        <button type="button" className={browserOn ? 'on' : ''} title="Show or hide the browser." onClick={() => { setBrowserOn((value) => { const next = !value; rememberPanel('sessionBrowser', next); return next }); if (compact) setDetailOn(false) }}>Browser</button>
+        <button type="button" className={detailOn ? 'on' : ''} title="Show or hide clip and device details." onClick={() => { setDetailOn((value) => { const next = !value; rememberPanel('sessionDetail', next); return next }); if (compact) setBrowserOn(false) }}>Detail</button>
+        <button type="button" className={mixerOn ? 'on' : ''} title="Show or hide the mixer under the clips." onClick={() => setMixerOn((value) => { const next = !value; rememberPanel('sessionMix', next); return next })}>Mix</button>
         {!phone && <button type="button" className="text-btn" title="Print launched clips onto the arrangement." disabled={store.remoteFollow} onClick={() => store.captureToArrangement()}>To arrangement</button>}
         <button type="button" className="text-btn" title="Stop every clip on the next grid line. The transport keeps playing." onClick={() => store.stopSession(engine.currentTimelineSample(), rolling)}>{stopping ? 'Stopping' : 'Stop all'}</button>
         {transportNote && <span className="sl-keep" role="status">{phone ? 'Transport stays on' : transportNote}</span>}
@@ -354,7 +356,7 @@ function TrackColumn({
   const slotTarget = (scene: number): SessionTarget => ({ kind: 'slot', trackId: track.id, scene, trackType: track.type })
   const headTarget: SessionTarget = { kind: 'header', trackId: track.id, trackType: track.type }
   return (
-    <div className="session-col sl-col" data-track={track.id}>
+    <div className={`session-col sl-col${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id}>
       <div
         className="sl-head"
         data-session-head={track.id}

@@ -20,6 +20,8 @@ export function ToolBar({
   compact = false,
   phone = false,
   words = false,
+  showHint = true,
+  onDismissHint,
 }: {
   onChange: (tool: ArrangeTool) => void
   onDuplicate: () => void
@@ -32,6 +34,8 @@ export function ToolBar({
   phone?: boolean
   /** Foldable: icon plus the short word, same as the phone strip. */
   words?: boolean
+  showHint?: boolean
+  onDismissHint?: () => void
 }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const stripRef = useRef<HTMLDivElement>(null)
@@ -49,9 +53,14 @@ export function ToolBar({
   }, [value])
   return (
     <div className="timeline-tools" role="toolbar" aria-label="Tools" data-active-tool={value} data-tool-context={context}>
-      <span className="tool-chip" role="status" aria-live="polite">
-        {chip}
-      </span>
+      {showHint && (
+        <span className="tool-chip" role="status" aria-live="polite">
+          {chip}
+          {onDismissHint && (
+            <button type="button" className="chip-hide" aria-label="Hide this hint" title="Hide this hint." onClick={onDismissHint}>Hide</button>
+          )}
+        </span>
+      )}
       <div className="tool-strip" ref={stripRef}>
         {shown.map((id) => {
           const info = TOOL_INFO[id]

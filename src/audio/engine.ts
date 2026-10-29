@@ -2316,7 +2316,7 @@ export class AudioEngine {
     const clips = transportPatternClips(project, ctx === this.ctx)
     const masterPass = trackId === project.tracks[0]?.id
     for (const clip of clips) {
-      if (clip.scene != null) continue
+      if (clip.scene != null || clip.suppressed) continue
       const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
       if (!pattern) continue
       const range = patternPlayRange(clip)

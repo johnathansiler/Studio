@@ -11,6 +11,7 @@ import type { ProjectStore } from '../state/store'
 import { useFormFactor } from './form'
 import { TipButton } from './Hint'
 import { LoopRegion } from './LoopRegion'
+import { SnapControl } from './SnapControl'
 
 export function DrumEditor({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
   const { track, clip, editor, project } = selectMidiEditor(store)
@@ -45,6 +46,7 @@ export function DrumEditor({ store, engine }: { store: ProjectStore; engine: Aud
   return (
     <div className="me-drums">
       <div className="me-bar">
+        <SnapControl store={store} />
         <TipButton label="‹" hint="Show the previous 16 steps." disabled={page <= 0} onClick={() => store.setMidiEditor({ page: page - 1 })} />
         <span className="me-place">Steps {from + 1}–{to}</span>
         <TipButton label="›" hint="Show the next 16 steps." disabled={page >= pages - 1} onClick={() => store.setMidiEditor({ page: page + 1 })} />
@@ -125,7 +127,7 @@ export function DrumEditor({ store, engine }: { store: ProjectStore; engine: Aud
               store={store}
               project={project}
               view="drums"
-              gridBeats={loopGridBeats(project, STEP_BEAT)}
+              gridBeats={loopGridBeats(project)}
               sampleAt={(clientX, rect) => projectBeatSample(project, Math.max(0, originBeat + ((clientX - rect.left) / Math.max(1, rect.width)) * pageBeats))}
               xAt={(sample, hostWidth) => ((projectSampleBeat(project, sample) - originBeat) / pageBeats) * hostWidth}
               onSeek={(sample) => engine.seek(sample)}
