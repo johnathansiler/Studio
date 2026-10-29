@@ -106,8 +106,64 @@ describe('phone fit at 412x915', () => {
         expect(grid.height).toBeGreaterThanOrEqual(40)
         expect(grid.rows).toBe(2)
         expect(grid.within).toBe(true)
-        expect(grid.names).toContain('Kick')
+        expect(grid.names).toEqual(expect.arrayContaining(['Kick', 'Snare', 'Clap', 'Hat', 'Perc']))
+        const kit = await page.evaluate(() => {
+          const host = document.querySelector('.beats.channel-rack') as HTMLElement
+          const names = ['Kick', 'Snare', 'Clap', 'Hat', 'Perc']
+          return names.map((name) => {
+            const row = document.querySelector(`.rack-row[data-channel="${name}"]`) as HTMLElement
+            row.scrollIntoView({ block: 'center' })
+            const steps = [...row.querySelectorAll('.rack-step')].map((el) => el.getBoundingClientRect())
+            const label = row.querySelector('.rack-name') as HTMLElement
+            const hostBox = host.getBoundingClientRect()
+            const labelBox = label.getBoundingClientRect()
+            const visibleTop = Math.max(hostBox.top, 0)
+            const visibleBottom = Math.min(hostBox.bottom, window.innerHeight)
+            return {
+              name,
+              count: steps.length,
+              tops: new Set(steps.map((step) => Math.round(step.top))).size,
+              height: steps[0]?.height ?? 0,
+              font: parseFloat(getComputedStyle(label).fontSize),
+              clipped: label.scrollWidth > label.clientWidth + 2,
+              text: (label.textContent ?? '').trim(),
+              inView: labelBox.bottom > visibleTop + 8 && labelBox.top < visibleBottom - 8 && steps.some((step) => step.bottom > visibleTop + 8 && step.top < visibleBottom - 8),
+            }
+          })
+        })
+        for (const row of kit) {
+          expect(row.count, row.name).toBe(16)
+          expect(row.tops, row.name).toBe(2)
+          expect(row.height, row.name).toBeGreaterThanOrEqual(40)
+          expect(row.font, row.name).toBeGreaterThanOrEqual(14)
+          expect(row.clipped, row.name).toBe(false)
+          expect(row.text, row.name).toBe(row.name)
+          expect(row.inView, row.name).toBe(true)
+        }
+        await page.locator('.rack-row[data-channel="Kick"]').scrollIntoViewIfNeeded()
         await shot(page, 'live-beats-steps-412')
+        await page.locator('.rack-row[data-channel="Perc"]').scrollIntoViewIfNeeded()
+        await shot(page, 'live-beats-kit-412')
+        const readMask = () => page.evaluate(() => {
+          return [...document.querySelectorAll('.rack-row[data-channel]')].map((row) => {
+            const on = [...row.querySelectorAll('.rack-step')].map((el) => (el.classList.contains('on') ? '1' : '0')).join('')
+            return `${row.getAttribute('data-channel')}:${on}`
+          }).join('|')
+        })
+        await page.getByRole('button', { name: /Random/ }).click()
+        const firstRandom = await readMask()
+        await page.getByRole('button', { name: /Random/ }).click()
+        const secondRandom = await readMask()
+        expect(secondRandom).not.toEqual(firstRandom)
+        await page.locator('.rack-row[data-channel="Kick"]').scrollIntoViewIfNeeded()
+        await shot(page, 'live-beats-random-412')
+        await page.getByRole('button', { name: /^Kick\./ }).click()
+        const beforeRow = await readMask()
+        await page.getByRole('button', { name: /Random/ }).click()
+        const selected = await readMask()
+        expect(selected).not.toEqual(beforeRow)
+        const rest = (mask: string) => mask.split('|').filter((row) => !row.startsWith('Kick:')).join('|')
+        expect(rest(selected)).toEqual(rest(beforeRow))
         await page.getByRole('button', { name: /^Roll/ }).click()
         await page.locator('[data-drum-roll="open"]').waitFor()
         const roll = await page.locator('.drum-lane').count()

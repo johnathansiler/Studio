@@ -188,3 +188,43 @@ export function applySmartDrums(pattern: BeatPattern, only: string[] | null, rng
   }
   if (openSteps.size) chokeHats(pattern, openSteps)
 }
+
+/** Which steps are lit. Velocity-only changes do not count as a new variation. */
+export function patternOnMask(pattern: BeatPattern, only?: string[] | null): string {
+  const chosen = new Set(only ?? pattern.channels.map((channel) => channel.id))
+  return pattern.channels
+    .filter((channel) => chosen.has(channel.id))
+    .map((channel) => {
+      const count = channel.steps || pattern.steps
+      return `${channel.id}:${channel.cells.slice(0, count).map((cell) => (cell.on ? '1' : '0')).join('')}`
+    })
+    .join('|')
+}
+
+export function clonePatternCells(pattern: BeatPattern): StepCell[][] {
+  return pattern.channels.map((channel) => channel.cells.map((cell) => ({ ...cell })))
+}
+
+export function restorePatternCells(pattern: BeatPattern, cells: StepCell[][]) {
+  pattern.channels.forEach((channel, index) => {
+    const saved = cells[index]
+    if (saved) channel.cells = saved.map((cell) => ({ ...cell }))
+  })
+}
+
+/**
+ * Apply a new seed until the lit steps differ from the pattern as it is now.
+ * Returns the seed that landed. A fixed seed belongs to `applySmartDrums` instead.
+ */
+export function applyFreshDrums(pattern: BeatPattern, only: string[] | null, nextSeed: () => number, limit = 24): number {
+  const beforeCells = clonePatternCells(pattern)
+  const before = patternOnMask(pattern, only)
+  let used = 0
+  for (let attempt = 0; attempt < limit; attempt += 1) {
+    if (attempt > 0) restorePatternCells(pattern, beforeCells)
+    used = nextSeed() >>> 0
+    applySmartDrums(pattern, only, mulberry32(used))
+    if (patternOnMask(pattern, only) !== before) return used
+  }
+  return used
+}

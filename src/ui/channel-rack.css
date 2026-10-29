@@ -734,15 +734,28 @@
   min-height: 44px;
 }
 
-/* Portrait phone: every drum shows all 16 steps, two rows of eight, no sideways strip. */
+/* Portrait phone: every drum shows all 16 steps, two rows of eight, no sideways strip.
+   The row list must grow with the kit. A hidden overflow on the inner scroller
+   shrinks it and clips every row after Snare, so the outer rack is what scrolls. */
 .shell.phone:not(.land) .beats.channel-rack {
   --lead: 100%;
   --step: 0px;
   --step-h: 44px;
   gap: 4px;
   padding: 4px;
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  max-height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
+}
+.shell.phone:not(.land) .beats .rack-scroll {
+  overflow: visible;
+  flex: 0 0 auto;
+  height: auto;
+  min-height: min-content;
+  max-height: none;
 }
 .shell.phone:not(.land) .beats .rack-editing small,
 .shell.phone:not(.land) .beats .rack-tool,
