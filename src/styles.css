@@ -307,7 +307,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   line-height: 1.3;
   color: var(--amber);
 }
-.t-word, .fold-word, .mini-word { display: none; }
+.fold-word, .mini-word { display: none; }
+.t-word { display: inline; font-size: 13px; font-weight: 680; line-height: 1; white-space: nowrap; }
 .shell.fold .t-word,
 .shell.fold .fold-word,
 .shell.fold .mini-word,
@@ -330,12 +331,15 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .shell.phone .history-btn { width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; }
 .shell.phone.land .history-btn { width: 28px; min-width: 28px; height: 28px; min-height: 0; }
 .shell.fold .history-btn { height: 44px; min-height: 44px; }
-.t-btn.play { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
-.t-btn.play.on { color: var(--accent-ink); box-shadow: inset 0 0 0 1px rgba(16, 33, 23, 0.4); }
+.t-btn.play.on {
+  background-color: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+  box-shadow: var(--pressed), var(--glow);
+}
 .t-btn.rec { color: var(--rec); }
 .t-btn.rec.on { background: var(--rec); color: white; border-color: transparent; }
 .t-btn.loop.on, .t-btn.on { color: var(--accent); border-color: rgba(115, 196, 143, 0.45); background: var(--accent-dim); }
-.t-btn.play.on { background: var(--accent); }
 .lcd {
   min-width: 0; flex: 0 1 200px; background: #090d0b; border: 1px solid #2a2416; border-radius: 8px;
   padding: 4px 10px 5px; box-shadow: inset 0 0 0 1px rgba(224, 177, 90, 0.08);
@@ -930,7 +934,22 @@ code { font-family: var(--mono); font-size: 12px; }
 .sync-pill { font-family: var(--mono); font-size: 11px; color: var(--accent); border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; }
 .dock-placeholder { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
 .dock.popped { height: 100%; width: 100%; border: 0; }
-.t-btn.stop { width: 36px; min-width: 36px; padding: 0; }
+.transport .t-btn,
+.transport .t-btn.stop,
+.transport .t-btn.play,
+.transport .t-btn.rec,
+.transport .t-btn.loop {
+  width: auto;
+  min-width: max-content;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+.transport .t-btn svg { display: none; }
 .t-btn.wide { width: auto; min-width: 64px; padding: 0 12px; }
 .media-banner {
   display: block;
@@ -1922,16 +1941,18 @@ html[data-posture="tabletop"] .shell .master-sheet {
   min-width: var(--strip, 84px);
   max-width: var(--strip, 84px);
 }
-.strip h3 {
+.strip h3,
+.strip .strip-name {
   flex: none;
   min-height: 1.2em;
   line-height: 1.15;
   margin: 0;
   font-size: 11px;
-  overflow: visible;
-  text-overflow: unset;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
   text-align: center;
 }
 .shell .strip .auto-mode {
@@ -2337,7 +2358,7 @@ button {
 .text-btn.on,
 .text-btn.primary,
 .t-btn.on,
-.t-btn.play,
+.t-btn.play.on,
 .t-btn.rec.on,
 .menu-btn.on,
 .rack-bar button.on,
@@ -2480,3 +2501,277 @@ button:active:not(:disabled) {
 }
 .shell.phone #shell-menu button,
 .shell.phone #shell-menu .menu-sig { min-height: 0; padding: 8px 12px; }
+
+/* Transport words stay visible on every width. Play is lit only while rolling. */
+.shell.phone .transport .t-btn,
+.shell.fold .transport .t-btn,
+.shell.phone .transport .t-btn.stop,
+.shell.fold .transport .t-btn.stop,
+.shell.phone .transport .t-btn.play,
+.shell.fold .transport .t-btn.play,
+html[data-posture="tabletop"] .shell .transport .t-btn,
+html[data-posture="tabletop"] .shell .transport .t-btn.stop,
+html[data-posture="tabletop"] .shell .transport .t-btn.play {
+  width: auto;
+  min-width: max-content;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.shell.phone .transport .t-btn,
+.shell.fold .transport .t-btn {
+  height: 44px;
+  min-height: 44px;
+}
+.transport .t-btn.play:not(.on) {
+  background-color: var(--panel-2);
+  background-image: var(--face);
+  color: var(--text);
+  border-color: var(--line);
+  box-shadow: var(--raised);
+}
+.transport .t-btn.play.on {
+  background-color: var(--accent);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(0, 0, 0, 0.16));
+  color: var(--accent-ink);
+  border-color: transparent;
+  box-shadow: var(--pressed), var(--glow);
+}
+
+.width-tools { flex-wrap: wrap; }
+.width-reset[aria-pressed='true'] {
+  background-color: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+
+.level-bar,
+.strip-slots {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+}
+.level-bar {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  flex: none;
+}
+.level-bar span,
+.strip-slots button,
+.strip-slots select,
+.level-bar button {
+  min-height: 44px;
+  white-space: nowrap;
+}
+.level-bar span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.level-bar b,
+.strip-slots h3 { color: var(--text); font-variant-numeric: tabular-nums; }
+.strip-slots button,
+.strip-slots select { width: 100%; }
+.strip-slots .sends label { grid-template-columns: minmax(0, 1fr); }
+.strip-slots .sends label span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Narrow columns: one full-width control per row. Rows: one horizontal channel. */
+.shell .mixer-view[data-narrow] .mixer {
+  overflow-x: auto;
+  overflow-y: auto;
+  align-items: flex-start;
+}
+.shell .mixer-view[data-narrow] .strip,
+.shell .mixer-view[data-narrow] .strip.master,
+.shell.phone .mixer-view[data-narrow] .strip,
+.shell.phone .mixer-view[data-narrow] .strip.master,
+.shell.phone.land .mixer-view[data-narrow] .strip,
+.shell.fold .mixer-view[data-narrow] .strip.master {
+  flex: 0 0 var(--strip, 42px);
+  width: var(--strip, 42px);
+  min-width: var(--strip, 42px);
+  max-width: var(--strip, 42px);
+  height: auto;
+  min-height: 0;
+  align-self: flex-start;
+  overflow: visible;
+  padding: 1px;
+  gap: 3px;
+}
+.shell .mixer-view[data-narrow] .strip-auto,
+.shell .mixer-view[data-narrow] .strip .row {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  width: 100%;
+  gap: 3px;
+  padding: 0;
+}
+.shell .mixer-view[data-narrow] .strip-auto button,
+.shell .mixer-view[data-narrow] .strip .mini,
+.shell .mixer-view[data-narrow] .strip .tune-btn,
+.shell .mixer-view[data-narrow] .strip .fx-open,
+.shell .mixer-view[data-narrow] .strip .lvl-open,
+.shell .mixer-view[data-narrow] .strip .master-open,
+.shell.phone .mixer-view[data-narrow] .strip .mini,
+.shell.fold .mixer-view[data-narrow] .strip .mini,
+.shell.phone .mixer-view[data-narrow] .strip-auto button {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: 0 0 auto;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 1px;
+  font-size: 13px;
+  line-height: 1;
+}
+.shell.phone .mixer-view[data-narrow] .strip button,
+.shell.fold .mixer-view[data-narrow] .strip button {
+  min-height: 40px;
+}
+.shell .mixer-view[data-narrow] .strip .fader-row {
+  min-height: 96px;
+  flex: 0 0 96px;
+}
+.shell .mixer-view[data-narrow] .master-short { display: inline; }
+.shell .mixer-view[data-narrow] .master-full { display: none; }
+.master-short { display: none; }
+.shell .mixer-view[data-narrow] .strip .touch-slider.pan { height: 28px; min-height: 28px; }
+
+.shell .mixer-view[data-layout="rows"] .mixer {
+  flex-direction: column;
+  align-items: stretch;
+  overflow-x: hidden;
+  overflow-y: auto;
+  width: 100%;
+  gap: 6px;
+  padding: 6px;
+}
+.shell .mixer-view[data-layout="rows"] .strip,
+.shell .mixer-view[data-layout="rows"] .strip.master,
+.shell.phone .mixer-view[data-layout="rows"] .strip,
+.shell.phone .mixer-view[data-layout="rows"] .strip.master,
+.shell.phone .mixer-view[data-layout="rows"] .strip:not(.master),
+.shell.phone.land .mixer-view[data-layout="rows"] .strip,
+.shell.fold .mixer-view[data-layout="rows"] .strip,
+.shell.fold .mixer-view[data-layout="rows"] .strip.master {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+  padding: 6px;
+  gap: 4px;
+}
+.shell .mixer-view[data-layout="rows"] .strip-name {
+  order: 1;
+  flex: 1 1 72px;
+  min-width: 64px;
+  max-width: 42%;
+  text-align: left;
+  font-size: 13px;
+}
+.shell .mixer-view[data-layout="rows"] .touch-slider.pan {
+  order: 2;
+  flex: 0 1 96px;
+  width: 96px;
+  min-width: 72px;
+  max-width: 120px;
+  height: 28px;
+}
+.shell .mixer-view[data-layout="rows"] .fader-row {
+  order: 3;
+  flex: 1 1 88px;
+  min-width: 72px;
+  height: 44px;
+  min-height: 44px;
+  align-items: center;
+}
+.shell .mixer-view[data-layout="rows"] .fader-row .touch-slider {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  min-height: 28px;
+  touch-action: none;
+}
+.mixer-view .touch-slider,
+.mixer-view .fader-row .touch-slider {
+  touch-action: none;
+}
+.shell .mixer-view[data-layout="rows"] .meter {
+  width: 10px;
+  height: 36px;
+  min-height: 36px;
+  align-self: center;
+}
+.shell .mixer-view[data-layout="rows"] .strip .row,
+.shell .mixer-view[data-layout="rows"] .strip-auto,
+.shell .mixer-view[data-layout="rows"] .fx-open,
+.shell .mixer-view[data-layout="rows"] .master-open,
+.shell .mixer-view[data-layout="rows"] .lvl-open {
+  order: 4;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  width: auto;
+  max-width: 100%;
+  gap: 4px;
+  padding: 0;
+}
+.shell .mixer-view[data-layout="rows"] .strip-auto button,
+.shell .mixer-view[data-layout="rows"] .strip .mini,
+.shell .mixer-view[data-layout="rows"] .strip .fx-open,
+.shell .mixer-view[data-layout="rows"] .strip .lvl-open,
+.shell .mixer-view[data-layout="rows"] .strip .tune-btn,
+.shell .mixer-view[data-layout="rows"] .strip .master-open,
+.shell.phone .mixer-view[data-layout="rows"] .strip .mini,
+.shell.phone .mixer-view[data-layout="rows"] .strip-auto button,
+.shell.fold .mixer-view[data-layout="rows"] .strip .mini {
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  flex: 0 0 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+}
+.shell .mixer-view[data-layout="rows"] .strip .master-open,
+.shell .mixer-view[data-layout="rows"] .strip .tune-btn,
+.shell .mixer-view[data-layout="rows"] .strip .arm-flag {
+  width: auto;
+  min-width: 40px;
+  max-width: none;
+  flex: 0 0 auto;
+  padding: 0 8px;
+}
+.shell .mixer-view[data-layout="rows"] .master-read {
+  order: 5;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.shell .mixer-view[data-layout="rows"] .master-read b { font-size: 14px; }
+.shell .mixer-view[data-layout="rows"] .add-track-slot { align-self: flex-start; }

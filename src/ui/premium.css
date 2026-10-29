@@ -612,7 +612,7 @@
 
   .shell .views button.active:hover,
   .shell .text-btn.primary:hover,
-  .shell .t-btn.play:hover,
+  .shell .t-btn.play.on:hover,
   .shell .tool-row button.on:hover,
   .shell .me-modes button.on:hover,
   .shell button[aria-pressed='true']:hover {

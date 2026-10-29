@@ -910,8 +910,8 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
           </div>
         )}
         {marquee && <div className="rack-marquee" style={marquee} />}
+        {store.rackRoll && <DrumRoll store={store} engine={engine} />}
       </div>
-      {store.rackRoll && <DrumRoll store={store} engine={engine} />}
       <button
         type="button"
         className="rack-add"

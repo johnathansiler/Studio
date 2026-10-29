@@ -86,7 +86,7 @@ export function MixFlags({ store, trackId, compact = false }: { store: ProjectSt
       {!compact && (
         <button type="button" className={`mini arm-flag ${track.armed ? 'on-r' : ''}`} aria-pressed={track.armed} aria-label={track.armed ? 'Disarm track' : 'Arm track. This track records when you press record.'} title="Arm this track. Only armed tracks record." onClick={(event) => { event.stopPropagation(); store.updateTrack(track.id, { armed: !track.armed }) }}>
           <span className="arm-full">Arm</span>
-          <span className="arm-short">R</span>
+          <span className="arm-compact" aria-hidden="true">A<i className="arm-dot" /></span>
         </button>
       )}
       {!compact && (
@@ -146,7 +146,7 @@ export function LanePicker({ store, trackId }: { store: ProjectStore; trackId: s
   )
 }
 
-export function AutoFader({ store, engine, spec, value, label, className }: { store: ProjectStore; engine: AudioEngine; spec: AutoSpec; value: number; label: string; className?: string }) {
+export function AutoFader({ store, engine, spec, value, label, className, vertical: verticalProp }: { store: ProjectStore; engine: AudioEngine; spec: AutoSpec; value: number; label: string; className?: string; vertical?: boolean }) {
   const [sample, setSample] = useState(engine.positionSamples)
   const [status, setStatus] = useState(engine.status)
   useEffect(
@@ -161,7 +161,7 @@ export function AutoFader({ store, engine, spec, value, label, className }: { st
   const mode = channelAutomationMode(store.project, spec.trackId === 'master' ? 'master' : spec.trackId)
   const shown = rolling && mode === 'read' ? automatedValue(store.project, spec, sample, value) : value
   const span = spec.max - spec.min
-  const vertical = className !== 'pan'
+  const vertical = verticalProp ?? className !== 'pan'
   return (
     <TouchSlider
       label={label}

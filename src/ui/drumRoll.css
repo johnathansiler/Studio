@@ -1,38 +1,13 @@
 .drum-roll {
-  border-top: 1px solid var(--line);
-  background: #101612;
-  min-height: 160px;
-  max-height: 42vh;
-  overflow: auto;
+  display: contents;
 }
-.drum-roll-sheet {
-  --lane: 148px;
-  --timeline: 240px;
-  --head: 0px;
-  position: relative;
-  width: calc(var(--lane) + var(--timeline));
-  min-height: 100%;
-}
-.drum-playhead {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: calc(var(--lane) + var(--head));
-  width: 2px;
-  background: var(--amber, #e0b15a);
-  z-index: 2;
-  pointer-events: none;
-}
-.drum-lane {
-  display: grid;
-  grid-template-columns: var(--lane) minmax(0, 1fr);
+.drum-lane-name.rack-lead {
+  width: var(--lead);
+  flex: 0 0 var(--lead);
+  min-width: var(--lead);
+  max-width: var(--lead);
+  height: auto;
   min-height: 36px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-.drum-lane-name {
-  position: sticky;
-  left: 0;
-  z-index: 3;
   text-align: left;
   padding: 0 8px;
   font-size: 12px;
@@ -42,14 +17,32 @@
   border: 0;
   border-right: 1px solid var(--line);
   background-color: #1c2822;
-  background-image: var(--face, linear-gradient(180deg, rgba(255,255,255,0.16), rgba(0,0,0,0.2)));
+  background-image: var(--face, linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(0, 0, 0, 0.2)));
   color: var(--text);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
-.drum-lane-grid {
+.drum-lane .rack-steps {
   position: relative;
   min-height: 36px;
-  background-image: linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px);
+}
+.drum-slot {
+  position: relative;
+  width: auto;
+  min-width: var(--step);
+  flex: 1 1 var(--step);
+  align-self: stretch;
+  min-height: 36px;
+  padding: 0;
+}
+.drum-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--amber, #e0b15a);
+  z-index: 2;
+  pointer-events: none;
 }
 .drum-note {
   position: absolute;
@@ -57,13 +50,14 @@
   border: 1px solid #0e1411;
   border-radius: 6px;
   background-color: #73c48f;
-  background-image: linear-gradient(180deg, rgba(255,255,255,0.45), rgba(0,0,0,0.25));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), inset 0 -2px 0 rgba(0,0,0,0.35);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.45), rgba(0, 0, 0, 0.25));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), inset 0 -2px 0 rgba(0, 0, 0, 0.35);
   padding: 0;
   min-height: 0;
+  min-width: 6px;
 }
 .drum-note.on { outline: 2px solid var(--amber, #e0b15a); }
-.shell.phone .drum-roll-sheet,
-.shell.fold .drum-roll-sheet { --lane: 112px; }
 .shell.phone .drum-lane-name,
 .shell.fold .drum-lane-name { min-height: 44px; font-size: 11px; }
+.shell.phone .drum-note,
+.shell.fold .drum-note { min-height: 0; min-width: 6px; }

@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
-import { STRIP_BOUNDS, displayedStrip } from '../model/layoutWidth'
+import { STRIP_BOUNDS, displayedStrip, isNarrowStrip, mixerFlow } from '../model/layoutWidth'
 import { selectMixer } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
 import { AutoFader, ChannelAutomation, LinkGroup, MixFlags } from './AutomationLane'
+import { showHint } from './Hint'
 import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
@@ -14,38 +15,66 @@ export function MixerView({ store, engine, onTune }: { store: ProjectStore; engi
   return <MixerBody key={store.project.id} store={store} engine={engine} onTune={onTune} />
 }
 
+function readViewport() {
+  if (typeof window === 'undefined') return { width: 1280, height: 800 }
+  return { width: window.innerWidth, height: window.innerHeight }
+}
+
 function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void }) {
   const project = selectMixer(store).project
-  const { layout, setStrip, resetStrip } = useLayoutWidths(project.id)
+  const { layout, setStrip, setMixer, resetStrip } = useLayoutWidths(project.id)
   const areaRef = useRef<HTMLDivElement>(null)
   const stripRef = useRef(layout.strip)
   stripRef.current = layout.strip
   usePinchResize(areaRef, () => stripRef.current, setStrip, STRIP_BOUNDS)
   const [masterOpen, setMasterOpen] = useState(false)
-  const [viewport, setViewport] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth))
+  const [viewport, setViewport] = useState(readViewport)
+  const [fxTrack, setFxTrack] = useState<string | 'master' | null>(null)
+  const [levelsOpen, setLevelsOpen] = useState(false)
   useEffect(() => {
-    const apply = () => setViewport(window.innerWidth)
+    const apply = () => setViewport(readViewport())
     window.addEventListener('resize', apply)
     return () => window.removeEventListener('resize', apply)
   }, [])
-  const strip = displayedStrip(layout.strip, viewport)
+  const strip = displayedStrip(layout.strip, viewport.width)
+  const flow = mixerFlow(layout.mixer, viewport.width, viewport.height)
+  const narrow = flow === 'columns' && isNarrowStrip(strip)
+  const rows = flow === 'rows'
+  const compact = narrow || rows
   return (
     <>
-    <div className="mixer-view" ref={areaRef} data-strip-width={strip} style={{ ['--strip' as string]: `${strip}px` }}>
-      <WidthBar axis="strip" value={layout.strip} onChange={setStrip} onReset={resetStrip} />
+    <div
+      className="mixer-view"
+      ref={areaRef}
+      data-strip-width={strip}
+      data-layout={flow}
+      data-narrow={narrow ? '1' : undefined}
+      style={{ ['--strip' as string]: `${strip}px` }}
+    >
+      <WidthBar axis="strip" value={layout.strip} onChange={setStrip} onReset={resetStrip} mixer={flow} onMixer={setMixer} />
+      {levelsOpen && <LevelBar engine={engine} onClose={() => setLevelsOpen(false)} />}
+      {fxTrack ? (
+        <StripSlots store={store} engine={engine} trackId={fxTrack} onBack={() => setFxTrack(null)} />
+      ) : (
       <div className="mixer">
       {project.tracks.map((track) => (
         <div className="strip" data-track={track.id} key={track.id}>
-          <h3 style={{ color: track.color }}>{track.name}</h3>
+          <StripName name={track.name} narrow={narrow} color={track.color} />
           <ChannelAutomation store={store} trackId={track.id} />
-          <RouteFields store={store} trackId={track.id} />
-          <LinkGroup store={store} trackId={track.id} />
-          <InsertList store={store} trackId={track.id} />
-          <SendList store={store} trackId={track.id} engine={engine} />
+          {compact ? (
+            <button type="button" className="mini fx-open" aria-label={`${track.name} effects. Inserts and sends.`} title="Inserts and sends." onClick={() => setFxTrack(track.id)}>FX</button>
+          ) : (
+            <>
+              <RouteFields store={store} trackId={track.id} />
+              <LinkGroup store={store} trackId={track.id} />
+              <InsertList store={store} trackId={track.id} />
+              <SendList store={store} trackId={track.id} engine={engine} />
+            </>
+          )}
           <AutoFader className="pan" store={store} engine={engine} label={`${track.name} pan. Left or right.`} value={track.pan} spec={{ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }} />
           <div className="fader-row">
             <Meter engine={engine} id={track.id} />
-            <AutoFader store={store} engine={engine} label={`${track.name} volume. How loud this track is.`} value={track.volume} spec={{ trackId: track.id, target: 'volume', param: 'volume', min: 0, max: 1.25 }} />
+            <AutoFader vertical={!rows} store={store} engine={engine} label={`${track.name} volume. How loud this track is.`} value={track.volume} spec={{ trackId: track.id, target: 'volume', param: 'volume', min: 0, max: 1.25 }} />
           </div>
           <div className="row">
             <MixFlags store={store} trackId={track.id} />
@@ -57,14 +86,24 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
       ))}
       <AddTrackButton store={store} />
       <div className="strip master">
-        <h3>Master</h3>
+        <StripName name="Master" narrow={narrow} />
         <ChannelAutomation store={store} trackId="master" />
-        <button id="master-open" className="text-btn master-open" aria-label="Master. Loudness, tone, and the limiter." title="Loudness, tone, and the limiter." onClick={() => setMasterOpen(true)}>Master</button>
-        <MasterReadout engine={engine} />
+        <button id="master-open" className="text-btn master-open" aria-label="Master. Loudness, tone, and the limiter." title="Loudness, tone, and the limiter." onClick={() => setMasterOpen(true)}>
+          <span className="master-full">Master</span>
+          <span className="master-short">Mst</span>
+        </button>
+        {compact ? (
+          <button type="button" className="mini fx-open" aria-label="Master effects. Inserts on the master bus." title="Master inserts." onClick={() => setFxTrack('master')}>FX</button>
+        ) : null}
+        {narrow ? (
+          <LevelButton engine={engine} onOpen={() => setLevelsOpen(true)} />
+        ) : (
+          <MasterReadout engine={engine} />
+        )}
         <div className="fader-row">
           <Meter engine={engine} id="master" />
           <TouchSlider
-            vertical
+            vertical={!rows}
             label="Master volume. How loud the whole mix is."
             title="How loud the whole mix is."
             min={0}
@@ -79,13 +118,62 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
         </div>
       </div>
       </div>
+      )}
     </div>
     {masterOpen && <MasterSheet store={store} engine={engine} onClose={() => setMasterOpen(false)} />}
     </>
   )
 }
 
-function MasterReadout({ engine }: { engine: AudioEngine }) {
+function StripName({ name, narrow, color }: { name: string; narrow: boolean; color?: string }) {
+  const timer = useRef(0)
+  const shown = narrow && name === 'Master' ? 'Mst' : name
+  const hold = (event: ReactPointerEvent<HTMLHeadingElement>) => {
+    const point = { x: event.clientX, y: event.clientY }
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => showHint(name, point.x, point.y), 520)
+  }
+  const cancel = () => window.clearTimeout(timer.current)
+  return (
+    <h3
+      className="strip-name"
+      style={color ? { color } : undefined}
+      title={name}
+      onPointerDown={hold}
+      onPointerUp={cancel}
+      onPointerCancel={cancel}
+      onPointerLeave={cancel}
+    >
+      {shown}
+    </h3>
+  )
+}
+
+function StripSlots({
+  store,
+  engine,
+  trackId,
+  onBack,
+}: {
+  store: ProjectStore
+  engine: AudioEngine
+  trackId: string | 'master'
+  onBack: () => void
+}) {
+  const name = trackId === 'master' ? 'Master' : store.track(trackId)?.name ?? 'Channel'
+  return (
+    <div className="strip-slots" aria-label={`${name} inserts and sends`}>
+      <button type="button" onClick={onBack} aria-label={`Back to ${name}. Close inserts and sends.`}>Back</button>
+      <h3>{name}</h3>
+      {trackId !== 'master' && <RouteFields store={store} trackId={trackId} />}
+      {trackId !== 'master' && <LinkGroup store={store} trackId={trackId} />}
+      <InsertList store={store} trackId={trackId} roomy />
+      {trackId !== 'master' && <SendList store={store} trackId={trackId} engine={engine} roomy />}
+    </div>
+  )
+}
+
+function useMasterText(engine: AudioEngine) {
   const [text, setText] = useState({ lufs: '—', integrated: '—', peak: '—', cpu: '0' })
   useEffect(() => {
     let timer = 0
@@ -104,14 +192,40 @@ function MasterReadout({ engine }: { engine: AudioEngine }) {
     timer = window.setTimeout(tick, 200)
     return () => window.clearTimeout(timer)
   }, [engine])
+  return text
+}
+
+function LevelButton({ engine, onOpen }: { engine: AudioEngine; onOpen: () => void }) {
+  const text = useMasterText(engine)
+  const detail = `LUFS ${text.lufs}. Integrated ${text.integrated}. Peak ${text.peak} dB. CPU ${text.cpu} percent.`
+  return (
+    <button type="button" className="mini lvl-open" aria-label={`Master levels. ${detail}`} title={detail} onClick={onOpen}>
+      Lvl
+    </button>
+  )
+}
+
+function LevelBar({ engine, onClose }: { engine: AudioEngine; onClose: () => void }) {
+  const text = useMasterText(engine)
+  return (
+    <div className="level-bar" id="master-meters" aria-label="Master levels">
+      <span>LUFS <b>{text.lufs}</b></span>
+      <span title="Integrated loudness">Integrated <b>{text.integrated}</b></span>
+      <span>Peak <b>{text.peak} dB</b></span>
+      <span>CPU <b>{text.cpu}%</b></span>
+      <button type="button" onClick={onClose} aria-label="Hide master levels">Hide</button>
+    </div>
+  )
+}
+
+function MasterReadout({ engine }: { engine: AudioEngine }) {
+  const text = useMasterText(engine)
   return (
     <div className="master-read" id="master-meters">
-      <span>LUFS</span>
-      <b>{text.lufs}</b>
-      <span>Integrated</span>
-      <b>{text.integrated}</b>
-      <span>Peak {text.peak} dB</span>
-      <span>CPU {text.cpu}%</span>
+      <span title="Short-term loudness">LUFS <b>{text.lufs}</b></span>
+      <span title="Integrated loudness">I <b>{text.integrated}</b></span>
+      <span title="True peak">TP <b>{text.peak}</b></span>
+      <span>CPU <b>{text.cpu}%</b></span>
     </div>
   )
 }

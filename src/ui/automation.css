@@ -44,8 +44,8 @@
   .touch-slider.pan { width: 100%; min-width: 0; max-width: 100%; }
   .strip .meter,
   .meter { width: 6px; min-width: 6px; }
-  .arm-full { display: none; }
-  .arm-short { display: inline; }
+  .solo-safe .arm-full { display: none; }
+  .solo-safe .arm-short { display: inline; }
   .mini { font-size: 10px; padding: 0; text-align: center; }
   h3 { font-size: 10px; line-height: 1.15; white-space: normal; }
 }
@@ -120,4 +120,62 @@
   min-height: 26px;
   font-size: 10px;
   padding: 1px 0;
+}
+.shell .mixer-view[data-narrow] .mode-full,
+.shell .mixer-view[data-layout="rows"] .mode-full,
+.shell .mixer-view[data-narrow] .solo-safe .arm-full,
+.shell .mixer-view[data-layout="rows"] .solo-safe .arm-full,
+.shell .mixer-view[data-narrow] .mini-word,
+.shell .mixer-view[data-layout="rows"] .mini-word {
+  display: none;
+}
+.shell .mixer-view[data-narrow] .mode-short,
+.shell .mixer-view[data-layout="rows"] .mode-short,
+.shell .mixer-view[data-narrow] .solo-safe .arm-short,
+.shell .mixer-view[data-layout="rows"] .solo-safe .arm-short,
+.shell .mixer-view[data-narrow] .mini-mark,
+.shell .mixer-view[data-layout="rows"] .mini-mark {
+  display: inline;
+}
+.arm-flag { gap: 3px; }
+.arm-compact { display: none; }
+.arm-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--rec, #ef4d4d);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+  flex: none;
+}
+.arm-flag.on-r .arm-dot { background: #fff; }
+.shell .mixer-view .arm-flag.on-r {
+  background-color: var(--rec, #ef4d4d);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(0, 0, 0, 0.22));
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), inset 0 -2px 0 rgba(90, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+/* The word wins when the control is at least 42px. Tighter buttons use A and the record dot. */
+@container channel (max-width: 36px) {
+  .arm-flag .arm-full { display: none; }
+  .arm-flag .arm-compact { display: inline-flex; align-items: center; justify-content: center; gap: 2px; }
+}
+.shell .mixer-view[data-narrow] .strip-auto button.on,
+.shell .mixer-view[data-layout="rows"] .strip-auto button.on {
+  background-color: var(--accent, #73c48f);
+  color: #102117;
+  box-shadow: var(--pressed), var(--glow);
+}
+.shell .mixer-view[data-narrow] .strip .fader-row .touch-slider.vertical {
+  width: 22px;
+  min-width: 22px;
+  flex: 1 1 22px;
+}
+.shell .mixer-view[data-narrow] .strip .meter {
+  width: 8px;
+  min-width: 8px;
+}
+.shell .mixer-view[data-layout="rows"] .fader-row .touch-slider,
+.shell .mixer-view[data-layout="rows"] .touch-slider.pan {
+  height: 36px;
+  min-height: 36px;
 }

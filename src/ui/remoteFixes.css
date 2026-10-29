@@ -91,6 +91,18 @@
   padding: 0 6px;
   font-size: 11px;
 }
+.shell.phone.land .transport .t-btn,
+.shell.phone.land .transport .t-btn.stop,
+.shell.phone.land .transport .t-btn.play,
+.shell.phone.land .transport .t-btn.rec,
+.shell.phone.land .transport .t-btn.loop {
+  width: auto;
+  min-width: max-content;
+  height: 28px;
+  min-height: 0;
+  padding: 0 8px;
+  font-size: 12px;
+}
 .shell.phone.land .bpm-readout {
   width: calc(6.4ch + 12px); min-width: 58px; height: 28px; padding: 0 4px; font-size: 12px;
 }

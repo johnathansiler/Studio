@@ -280,7 +280,7 @@ function formatParam(id: string, value: number, unit: string) {
   return unit ? `${shown} ${unit}` : `${shown}`
 }
 
-export function InsertList({ store, trackId }: { store: ProjectStore; trackId: string | 'master' }) {
+export function InsertList({ store, trackId, roomy = false }: { store: ProjectStore; trackId: string | 'master'; roomy?: boolean }) {
   const plugins = trackId === 'master' ? store.project.masterPlugins : store.track(trackId)?.plugins ?? []
   return (
     <div className="inserts">
@@ -298,7 +298,7 @@ export function InsertList({ store, trackId }: { store: ProjectStore; trackId: s
         </button>
       ))}
       <select className="insert-add" aria-label="Add insert" title="Add an effect. Auto-Tune is first." value="" onChange={(event) => addChoice(store, trackId, event.target.value)}>
-        <option value="">+</option>
+        <option value="">{roomy ? 'Add effect' : '+'}</option>
         {orderedInserts(CATALOG.filter((plugin) => plugin.id !== 'meter' && !((plugin.id === 'scaler' || plugin.id === 'pads') && trackId === 'master') && (trackId === 'master' || !(MASTERING_IDS as readonly string[]).includes(plugin.id)))).map((plugin) => (
           <option key={plugin.id} value={plugin.id}>{plugin.name}</option>
         ))}
@@ -308,7 +308,7 @@ export function InsertList({ store, trackId }: { store: ProjectStore; trackId: s
   )
 }
 
-export function SendList({ store, trackId, engine }: { store: ProjectStore; trackId: string; engine?: AudioEngine }) {
+export function SendList({ store, trackId, engine, roomy = false }: { store: ProjectStore; trackId: string; engine?: AudioEngine; roomy?: boolean }) {
   const track = store.track(trackId)
   if (!track) return null
   const buses = store.project.tracks.filter((item) => (item.type === 'bus' || item.type === 'group') && item.id !== trackId)
@@ -345,7 +345,7 @@ export function SendList({ store, trackId, engine }: { store: ProjectStore; trac
       ))}
       {buses.length > 0 && (
         <select className="insert-add" value="" onChange={(event) => event.target.value && store.addSend(trackId, event.target.value)}>
-          <option value="">+</option>
+          <option value="">{roomy ? 'Add send' : '+'}</option>
           {buses.map((bus) => (
             <option key={bus.id} value={bus.id}>{bus.name}</option>
           ))}
