@@ -157,6 +157,48 @@ describe('pattern step layout', () => {
           expect(box.steps[8].top, where).toBeGreaterThan(box.steps[0].top + 30)
           expect(box.sticky, where).toBe('static')
           expect(box.scrollWidth, where).toBeLessThanOrEqual(box.clientWidth + 8)
+          const kit = await page.evaluate(() => {
+            const host = document.querySelector('.beats.channel-rack') as HTMLElement
+            const names = ['Kick', 'Snare', 'Clap', 'Hat', 'Perc']
+            return names.map((name) => {
+              const row = document.querySelector(`.rack-row[data-channel="${name}"]`) as HTMLElement | null
+              if (!row) return { name, missing: true }
+              row.scrollIntoView({ block: 'center' })
+              const steps = [...row.querySelectorAll('.rack-step')].map((el) => el.getBoundingClientRect())
+              const label = row.querySelector('.rack-name') as HTMLElement
+              const hostBox = host.getBoundingClientRect()
+              const labelBox = label.getBoundingClientRect()
+              const tops = new Set(steps.map((step) => Math.round(step.top)))
+              const visibleTop = Math.max(hostBox.top, 0)
+              const visibleBottom = Math.min(hostBox.bottom, window.innerHeight)
+              return {
+                name,
+                missing: false,
+                count: steps.length,
+                tops: tops.size,
+                height: steps[0]?.height ?? 0,
+                width: steps[0]?.width ?? 0,
+                font: parseFloat(getComputedStyle(label).fontSize),
+                clipped: label.scrollWidth > label.clientWidth + 2,
+                labelWidth: labelBox.width,
+                text: label.textContent?.trim() ?? '',
+                inView: labelBox.bottom > visibleTop + 8 && labelBox.top < visibleBottom - 8 && steps.some((step) => step.bottom > visibleTop + 8 && step.top < visibleBottom - 8),
+              }
+            })
+          })
+          expect(kit.map((row) => row.name), where).toEqual(['Kick', 'Snare', 'Clap', 'Hat', 'Perc'])
+          for (const row of kit) {
+            expect(row.missing, where).toBe(false)
+            expect(row.count, `${where} ${row.name}`).toBe(16)
+            expect(row.tops, `${where} ${row.name}`).toBe(2)
+            expect(row.height, `${where} ${row.name}`).toBeGreaterThanOrEqual(40)
+            expect(row.width, `${where} ${row.name}`).toBeGreaterThanOrEqual(36)
+            expect(row.font, `${where} ${row.name}`).toBeGreaterThanOrEqual(14)
+            expect(row.clipped, `${where} ${row.name}`).toBe(false)
+            expect(row.labelWidth, `${where} ${row.name}`).toBeGreaterThanOrEqual(48)
+            expect(row.text, `${where} ${row.name}`).toBe(row.name)
+            expect(row.inView, `${where} ${row.name}`).toBe(true)
+          }
         } else {
           expect(Math.abs(box.steps[0].top - box.steps[1].top), where).toBeLessThan(2)
           expect(box.tops, where).toHaveLength(1)

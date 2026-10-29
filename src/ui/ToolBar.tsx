@@ -1,4 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ARRANGE_TOOLS,
   TOOL_ACTIONS,
@@ -10,7 +11,15 @@ import {
   toolChip,
   type ArrangeTool,
 } from '../state/tools'
+import { useFormFactor } from './form'
 import { TipButton } from './Hint'
+import './guideSheet.css'
+
+const TOOL_GROUPS: { label: string; ids: ArrangeTool[] }[] = [
+  { label: 'Pick and move', ids: ['select', 'box'] },
+  { label: 'Edit', ids: ['pencil', 'trim', 'split', 'erase'] },
+  { label: 'View', ids: ['pan', 'zoom'] },
+]
 
 export function ToolBar({
   onChange,
@@ -22,6 +31,8 @@ export function ToolBar({
   words = false,
   showHint = true,
   onDismissHint,
+  panel = false,
+  onClose,
 }: {
   onChange: (tool: ArrangeTool) => void
   onDuplicate: () => void
@@ -36,6 +47,9 @@ export function ToolBar({
   words?: boolean
   showHint?: boolean
   onDismissHint?: () => void
+  /** Grouped sheet. Phone and fold use a bottom sheet. Desk uses a popover. */
+  panel?: boolean
+  onClose?: () => void
 }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const stripRef = useRef<HTMLDivElement>(null)
@@ -51,6 +65,18 @@ export function ToolBar({
     if (left < strip.scrollLeft) strip.scrollLeft = left - 4
     else if (right > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = right - strip.clientWidth + 4
   }, [value])
+  if (panel) {
+    return (
+      <ToolPanel
+        value={value}
+        context={context}
+        onChange={onChange}
+        onDuplicate={onDuplicate}
+        onDelete={onDelete}
+        onClose={onClose}
+      />
+    )
+  }
   return (
     <div className="timeline-tools" role="toolbar" aria-label="Tools" data-active-tool={value} data-tool-context={context}>
       {showHint && (
@@ -95,6 +121,84 @@ export function ToolBar({
       </div>
     </div>
   )
+}
+
+function ToolPanel({
+  value,
+  context,
+  onChange,
+  onDuplicate,
+  onDelete,
+  onClose,
+}: {
+  value: ArrangeTool
+  context: 'arrange' | 'piano'
+  onChange: (tool: ArrangeTool) => void
+  onDuplicate: () => void
+  onDelete: () => void
+  onClose?: () => void
+}) {
+  const place = useFormFactor() === 'desk' ? 'pop' : 'sheet'
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose?.()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  const body = (
+    <>
+      <button type="button" className="guide-scrim" aria-label="Close tools" onClick={onClose} />
+      <div className={`guide-sheet tool-sheet ${place}`} role="dialog" aria-label="Tools" data-tool-panel="open">
+        {place === 'sheet' && <div className="guide-handle" aria-hidden="true" />}
+        <header className="guide-head">
+          <div>
+            <h2>Tools</h2>
+            <p>Pick how a tap on the timeline behaves. The lit tool is the one in use.</p>
+          </div>
+          <button type="button" className="guide-x" onClick={onClose} aria-label="Close tools">Cancel</button>
+        </header>
+        {TOOL_GROUPS.map((group) => (
+          <section className="guide-section" key={group.label}>
+            <h3>{group.label}</h3>
+            <div className="guide-cards">
+              {group.ids.map((id) => {
+                const info = TOOL_INFO[id]
+                const line = context === 'piano' ? info.piano : info.arrange
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`guide-card${value === id ? ' on' : ''}`}
+                    aria-pressed={value === id}
+                    title={info.hint}
+                    onClick={() => { onChange(id); onClose?.() }}
+                  >
+                    <strong>{info.label}</strong>
+                    <small>{line}</small>
+                  </button>
+                )
+              })}
+              {group.label === 'Edit' && TOOL_ACTIONS.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  className="guide-choice"
+                  title={action.hint}
+                  onClick={action.id === 'duplicate' ? onDuplicate : onDelete}
+                >
+                  <strong>{action.label}</strong>
+                  <small>{action.hint}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </>
+  )
+  if (typeof document === 'undefined') return body
+  return createPortal(body, document.body)
 }
 
 function ToolIcon({ id }: { id: ArrangeTool | 'duplicate' | 'delete' }) {

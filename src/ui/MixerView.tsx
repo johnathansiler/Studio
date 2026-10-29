@@ -59,7 +59,7 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
       <div className="mixer">
       {project.tracks.map((track) => (
         <div className={`strip${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} onClick={() => store.selectTrack(track.id)}>
-          <StripName name={track.name} narrow={narrow} color={track.color} />
+          <StripName name={track.name} color={track.color} />
           <ChannelAutomation store={store} trackId={track.id} />
           {compact ? (
             <button type="button" className="mini fx-open" aria-label={`${track.name} effects. Inserts and sends.`} title="Inserts and sends." onClick={() => setFxTrack(track.id)}>FX</button>
@@ -86,14 +86,10 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
       ))}
       <AddTrackButton store={store} />
       <div className="strip master">
-        <StripName name="Master" narrow={narrow} />
+        <StripName name="Master" />
         <ChannelAutomation store={store} trackId="master" />
         <button id="master-open" className="text-btn master-open" aria-label="Master. Loudness, tone, and the limiter." title="Loudness, tone, and the limiter." onClick={() => setMasterOpen(true)}>
           <span className="master-full">Master</span>
-          <span className="master-stack">
-            <span className="master-short">Mst</span>
-            <small className="mode-caption">Master</small>
-          </span>
         </button>
         {compact ? (
           <button type="button" className="mini fx-open" aria-label="Master effects. Inserts on the master bus." title="Master inserts." onClick={() => setFxTrack('master')}>FX</button>
@@ -128,9 +124,9 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
   )
 }
 
-function StripName({ name, narrow, color }: { name: string; narrow: boolean; color?: string }) {
+function StripName({ name, color }: { name: string; color?: string }) {
   const timer = useRef(0)
-  const shown = narrow && name === 'Master' ? 'Mst' : name
+  const shown = name
   const hold = (event: ReactPointerEvent<HTMLHeadingElement>) => {
     const point = { x: event.clientX, y: event.clientY }
     window.clearTimeout(timer.current)
@@ -148,7 +144,6 @@ function StripName({ name, narrow, color }: { name: string; narrow: boolean; col
       onPointerLeave={cancel}
     >
       <span className="strip-title">{shown}</span>
-      {narrow && name === 'Master' ? <small className="mode-caption">Master</small> : null}
     </h3>
   )
 }
@@ -204,8 +199,7 @@ function LevelButton({ engine, onOpen }: { engine: AudioEngine; onOpen: () => vo
   const detail = `LUFS ${text.lufs}. Integrated ${text.integrated}. Peak ${text.peak} dB. CPU ${text.cpu} percent.`
   return (
     <button type="button" className="mini lvl-open" aria-label={`Master levels. ${detail}`} title={detail} onClick={onOpen}>
-      <span className="lvl-mark">Lvl</span>
-      <small className="mode-caption">Level</small>
+      <span className="lvl-word">Level</span>
     </button>
   )
 }

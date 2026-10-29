@@ -28,7 +28,7 @@ const engine = {
 } as unknown as AudioEngine
 
 describe('half-width mixer strips', () => {
-  it('uses initials for Off Read Touch Latch and keeps the strip controls on screen', async () => {
+  it('uses the words Off Read Touch Latch and keeps the strip controls on screen', async () => {
     const store = new ProjectStore()
     const html = renderToStaticMarkup(createElement(MixerView, { store, engine })).replace(/--strip:\s*\d+px/g, `--strip:${STRIP_HALF}px`)
     const browser = await chromium.launch({ headless: true })
@@ -65,12 +65,12 @@ describe('half-width mixer strips', () => {
       })
       expect(box.width).toBeLessThanOrEqual(STRIP_HALF + 1)
       expect(box.left).toBeGreaterThanOrEqual(0)
-      expect(box.full).toBe('none')
-      expect(box.short).not.toBe('none')
+      expect(box.full).not.toBe('none')
+      expect(box.short).toBe('none')
       expect(box.shorts).toEqual(['O', 'R', 'T', 'L'])
-      expect(box.buttons.some((label) => label.includes('M'))).toBe(true)
-      expect(box.buttons.some((label) => label.includes('S'))).toBe(true)
-      expect(box.buttons.some((label) => label.includes('R') || label.includes('Arm'))).toBe(true)
+      expect(box.buttons.some((label) => label.includes('Mute'))).toBe(true)
+      expect(box.buttons.some((label) => label.includes('Solo'))).toBe(true)
+      expect(box.buttons.some((label) => label.includes('Arm'))).toBe(true)
       expect(box.name).toBe('Vocal')
       expect(box.nameInside).toBe(true)
       expect(box.faderInside).toBe(true)

@@ -155,7 +155,7 @@ import {
 import { applyChoke, assignPad, clipBeat, padRecordWindow, recordPadHits, type PadHit } from '../instruments/pads/record'
 import { applyLaneNotes, patternToMidiNotes, type LaneNote } from '../model/patternMidi'
 import { clipEndForContent, grownClipEnd, normalizeSnapDivision, snapEditBeat, subdivisionFor, type SnapDivisionId } from '../model/snapGrid'
-import { applySmartDrums, mulberry32 } from '../model/smartDrums'
+import { applyFreshDrums, applySmartDrums, mulberry32 } from '../model/smartDrums'
 
 export type WorkspaceView = 'arrange' | 'mix' | 'session' | 'beats'
 
@@ -4770,14 +4770,23 @@ export class ProjectStore {
     })
   }
 
-  /** Selected drum rows, or the whole kit when nothing is selected. One undo step. */
+  /**
+   * Selected drum rows, or the whole kit when nothing is selected. One undo step.
+   * A number seed is deterministic (tests). A press with no seed draws a new variation
+   * and will not repeat the lit steps that are already on the grid.
+   */
   smartRandomDrums(seed?: number) {
-    const used = seed == null ? this.nextDrumSeed++ : seed
+    const fixed = typeof seed === 'number' && Number.isFinite(seed) ? seed >>> 0 : null
     this.mutate(() => {
       const pattern = this.activePattern()
       if (!pattern) return
       const selected = this.selectedRackChannels.filter((id) => pattern.channels.some((channel) => channel.id === id))
-      applySmartDrums(pattern, selected.length ? selected : null, mulberry32(used >>> 0))
+      const only = selected.length ? selected : null
+      if (fixed != null) {
+        applySmartDrums(pattern, only, mulberry32(fixed))
+        return
+      }
+      applyFreshDrums(pattern, only, () => (this.nextDrumSeed++ ^ Date.now()) >>> 0)
     })
   }
 

@@ -136,9 +136,12 @@ function percHits(count: number, rng: () => number): Map<number, number> {
   return hits
 }
 
-function cymbalHits(count: number): Map<number, number> {
+function cymbalHits(count: number, rng: () => number): Map<number, number> {
   const hits = new Map<number, number>()
-  if (count > 0) hits.set(0, 0.86)
+  if (count <= 0) return hits
+  hits.set(0, 0.8 + rng() * 0.15)
+  if (count > 8 && rng() < 0.55) hits.set(8, 0.5 + rng() * 0.25)
+  if (count > 12 && rng() < 0.35) hits.set(12, 0.4 + rng() * 0.2)
   return hits
 }
 
@@ -158,13 +161,13 @@ export function hitsForRole(role: DrumRole, count: number, rng: () => number): M
   if (role === 'hat') return hatHits(count, rng)
   if (role === 'openhat') return openHatHits(count, rng)
   if (role === 'perc') return percHits(count, rng)
-  if (role === 'cymbal') return cymbalHits(count)
+  if (role === 'cymbal') return cymbalHits(count, rng)
   return otherHits(count, rng)
 }
 
-function chokeHats(pattern: BeatPattern, openSteps: Set<number>) {
+function chokeHats(pattern: BeatPattern, openSteps: Set<number>, chosen: Set<string>) {
   for (const channel of pattern.channels) {
-    if (drumRole(channel) !== 'hat') continue
+    if (!chosen.has(channel.id) || drumRole(channel) !== 'hat') continue
     const count = channel.steps || pattern.steps
     channel.cells = channel.cells.map((cell, index) => (index < count && openSteps.has(index) ? { ...cell, on: false } : cell))
   }
@@ -186,5 +189,45 @@ export function applySmartDrums(pattern: BeatPattern, only: string[] | null, rng
     channel.cells = writeHits(channel.cells, count, hits)
     if (role === 'openhat') for (const step of hits.keys()) openSteps.add(step)
   }
-  if (openSteps.size) chokeHats(pattern, openSteps)
+  if (openSteps.size) chokeHats(pattern, openSteps, chosen)
+}
+
+/** Which steps are lit. Velocity-only changes do not count as a new variation. */
+export function patternOnMask(pattern: BeatPattern, only?: string[] | null): string {
+  const chosen = new Set(only ?? pattern.channels.map((channel) => channel.id))
+  return pattern.channels
+    .filter((channel) => chosen.has(channel.id))
+    .map((channel) => {
+      const count = channel.steps || pattern.steps
+      return `${channel.id}:${channel.cells.slice(0, count).map((cell) => (cell.on ? '1' : '0')).join('')}`
+    })
+    .join('|')
+}
+
+export function clonePatternCells(pattern: BeatPattern): StepCell[][] {
+  return pattern.channels.map((channel) => channel.cells.map((cell) => ({ ...cell })))
+}
+
+export function restorePatternCells(pattern: BeatPattern, cells: StepCell[][]) {
+  pattern.channels.forEach((channel, index) => {
+    const saved = cells[index]
+    if (saved) channel.cells = saved.map((cell) => ({ ...cell }))
+  })
+}
+
+/**
+ * Apply a new seed until the lit steps differ from the pattern as it is now.
+ * Returns the seed that landed. A fixed seed belongs to `applySmartDrums` instead.
+ */
+export function applyFreshDrums(pattern: BeatPattern, only: string[] | null, nextSeed: () => number, limit = 24): number {
+  const beforeCells = clonePatternCells(pattern)
+  const before = patternOnMask(pattern, only)
+  let used = 0
+  for (let attempt = 0; attempt < limit; attempt += 1) {
+    if (attempt > 0) restorePatternCells(pattern, beforeCells)
+    used = nextSeed() >>> 0
+    applySmartDrums(pattern, only, mulberry32(used))
+    if (patternOnMask(pattern, only) !== before) return used
+  }
+  return used
 }

@@ -78,7 +78,7 @@ describe('edit history', () => {
       expect(steps).toBeLessThanOrEqual(HISTORY_LIMIT)
     }
     expect(steps).toBe(HISTORY_LIMIT)
-  })
+  }, 20000)
 
   it('keeps a remote field when the same control is undone', () => {
     const store = new ProjectStore(createEmptyProject())

@@ -111,6 +111,16 @@ export function moveFromPointer(originStart: number, grabBeat: number, pointerBe
   return Math.max(0, snapBeatToGrid(raw, grid))
 }
 
+/** Where a snapped clip starts, as bar.beat with the beat counted from 1. */
+export function positionReadout(beat: number, barBeats: number): string {
+  const width = Math.max(1e-6, barBeats)
+  const safe = Math.max(0, beat)
+  const bar = Math.floor(safe / width + 1e-6) + 1
+  const into = safe - (bar - 1) * width
+  const place = Math.floor(into + 1e-6) + 1
+  return `${bar}.${place}`
+}
+
 export function lengthReadout(start: number, end: number, barBeats: number): string {
   const len = Math.max(0, end - start)
   const bars = len / Math.max(1e-6, barBeats)

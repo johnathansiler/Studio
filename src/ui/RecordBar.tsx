@@ -35,28 +35,52 @@ export function RecordBar({
 
   const fields = (
     <>
-      <TipButton className={record.loop ? 'on' : ''} label={copy('cycle').label} hint={copy('cycle').hint} pressed={record.loop} onClick={() => {
+      <TipButton className={`guide-choice${record.loop ? ' on' : ''}`} label={copy('cycle').label} hint={copy('cycle').hint} pressed={record.loop} onClick={() => {
         const next = !record.loop
         store.setRecord({ loop: next })
         if (next) store.setLoop(true, project.loopStartSample, project.loopEndSample)
-      }} />
-      <TipButton className={record.punchEnabled ? 'on' : ''} label={copy('punch').label} hint={copy('punch').hint} pressed={record.punchEnabled} onClick={() => store.setRecord({ punchEnabled: !record.punchEnabled, quick: false })} />
-      <TipButton label={copy('in').label} hint={copy('in').hint} onClick={() => store.setRecord({ punchIn: Math.round(engine.currentTimelineSample()) })} />
-      <TipButton label={copy('out').label} hint={copy('out').hint} onClick={() => store.setRecord({ punchOut: Math.round(engine.currentTimelineSample()) })} />
-      <TipButton label={copy('quick').label} hint={copy('quick').hint} onClick={onQuickPunch} />
-      <label title={copy('pre').hint}>
-        Pre
+      }}>
+        <strong>{copy('cycle').label}</strong>
+        <small>{copy('cycle').hint}</small>
+      </TipButton>
+      <TipButton className={`guide-choice${record.punchEnabled ? ' on' : ''}`} label={copy('punch').label} hint={copy('punch').hint} pressed={record.punchEnabled} onClick={() => store.setRecord({ punchEnabled: !record.punchEnabled, quick: false })}>
+        <strong>{copy('punch').label}</strong>
+        <small>{copy('punch').hint}</small>
+      </TipButton>
+      <TipButton className="guide-choice" label={copy('in').label} hint={copy('in').hint} onClick={() => store.setRecord({ punchIn: Math.round(engine.currentTimelineSample()) })}>
+        <strong>{copy('in').label}</strong>
+        <small>{copy('in').hint}</small>
+      </TipButton>
+      <TipButton className="guide-choice" label={copy('out').label} hint={copy('out').hint} onClick={() => store.setRecord({ punchOut: Math.round(engine.currentTimelineSample()) })}>
+        <strong>{copy('out').label}</strong>
+        <small>{copy('out').hint}</small>
+      </TipButton>
+      <TipButton className="guide-choice" label={copy('quick').label} hint={copy('quick').hint} onClick={onQuickPunch}>
+        <strong>{copy('quick').label}</strong>
+        <small>{copy('quick').hint}</small>
+      </TipButton>
+      <label className="guide-choice" title={copy('pre').hint}>
+        <strong>{copy('pre').label}</strong>
+        <small>{copy('pre').hint}</small>
         <input aria-label={described(copy('pre'))['aria-label']} inputMode="decimal" value={record.preRoll} onChange={(event) => store.setRecord({ preRoll: Number(event.target.value) || 0 })} />
       </label>
-      <label title={copy('post').hint}>
-        Post
+      <label className="guide-choice" title={copy('post').hint}>
+        <strong>{copy('post').label}</strong>
+        <small>{copy('post').hint}</small>
         <input aria-label={described(copy('post'))['aria-label']} inputMode="decimal" value={record.postRoll} onChange={(event) => store.setRecord({ postRoll: Number(event.target.value) || 0 })} />
       </label>
-      <select {...described(copy('unit'))} value={record.rollUnit} onChange={(event) => store.setRecord({ rollUnit: event.target.value === 'seconds' ? 'seconds' : 'bars' })}>
-        <option value="bars">Bars</option>
-        <option value="seconds">Seconds</option>
-      </select>
+      <label className="guide-choice">
+        <strong>{copy('unit').label}</strong>
+        <small>{copy('unit').hint}</small>
+        <select {...described(copy('unit'))} value={record.rollUnit} onChange={(event) => store.setRecord({ rollUnit: event.target.value === 'seconds' ? 'seconds' : 'bars' })}>
+          <option value="bars">Bars</option>
+          <option value="seconds">Seconds</option>
+        </select>
+      </label>
       {audioTrack && (
+        <label className="guide-choice">
+        <strong>{copy('input').label}</strong>
+        <small>{copy('input').hint}</small>
         <select
           {...described(copy('input'))}
           value={audioTrack.input}
@@ -74,13 +98,21 @@ export function RecordBar({
               <option key={person.id} value={`remote:${person.id}`}>{person.name}</option>
             ))}
         </select>
+        </label>
       )}
-      <select {...described(copy('midi-loop'))} value={record.midiLoop} onChange={(event) => store.setRecord({ midiLoop: event.target.value === 'merge' ? 'merge' : 'takes' })}>
-        <option value="takes">MIDI takes</option>
-        <option value="merge">MIDI merge</option>
-      </select>
+      <label className="guide-choice">
+        <strong>{copy('midi-loop').label}</strong>
+        <small>{copy('midi-loop').hint}</small>
+        <select {...described(copy('midi-loop'))} value={record.midiLoop} onChange={(event) => store.setRecord({ midiLoop: event.target.value === 'merge' ? 'merge' : 'takes' })}>
+          <option value="takes">MIDI takes</option>
+          <option value="merge">MIDI merge</option>
+        </select>
+      </label>
       {selectedMidi && (
-        <TipButton label={copy('save-take').label} hint={copy('save-take').hint} onClick={() => store.commitMidiPass(selectedMidi.track.id, selectedMidi.clip.id, selectedMidi.clip.notes)} />
+        <TipButton className="guide-choice" label={copy('save-take').label} hint={copy('save-take').hint} onClick={() => store.commitMidiPass(selectedMidi.track.id, selectedMidi.clip.id, selectedMidi.clip.notes)}>
+          <strong>{copy('save-take').label}</strong>
+          <small>{copy('save-take').hint}</small>
+        </TipButton>
       )}
       {selectedMidi?.clip.takes && selectedMidi.clip.takes.length > 0 && (
         <select {...described(copy('midi-take'))} value={selectedMidi.clip.activeTakeId || ''} onChange={(event) => store.recallMidi(selectedMidi.track.id, selectedMidi.clip.id, event.target.value)}>
@@ -100,9 +132,18 @@ export function RecordBar({
               <option key={comp.id} value={comp.id}>{comp.name}</option>
             ))}
           </select>
-          <TipButton label={copy('save-comp').label} hint={copy('save-comp').hint} onClick={() => store.saveTakeComp(selectedFolder.track.id, selectedFolder.clip.id)} />
-          <TipButton label={copy('flatten').label} hint={copy('flatten').hint} onClick={() => store.flattenTakes(selectedFolder.track.id, selectedFolder.clip.id, false)} />
-          <TipButton label={copy('merge').label} hint={copy('merge').hint} onClick={() => store.flattenTakes(selectedFolder.track.id, selectedFolder.clip.id, true)} />
+          <TipButton className="guide-choice" label={copy('save-comp').label} hint={copy('save-comp').hint} onClick={() => store.saveTakeComp(selectedFolder.track.id, selectedFolder.clip.id)}>
+            <strong>{copy('save-comp').label}</strong>
+            <small>{copy('save-comp').hint}</small>
+          </TipButton>
+          <TipButton className="guide-choice" label={copy('flatten').label} hint={copy('flatten').hint} onClick={() => store.flattenTakes(selectedFolder.track.id, selectedFolder.clip.id, false)}>
+            <strong>{copy('flatten').label}</strong>
+            <small>{copy('flatten').hint}</small>
+          </TipButton>
+          <TipButton className="guide-choice" label={copy('merge').label} hint={copy('merge').hint} onClick={() => store.flattenTakes(selectedFolder.track.id, selectedFolder.clip.id, true)}>
+            <strong>{copy('merge').label}</strong>
+            <small>{copy('merge').hint}</small>
+          </TipButton>
         </>
       )}
     </>

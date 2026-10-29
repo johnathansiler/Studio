@@ -2,23 +2,36 @@ import { useEffect, useRef, useState } from 'react'
 import { clampCount, defaultAddSpec, type AddKind, type AddTrackSpec } from '../model/addTrack'
 import type { TrackInstrument } from '../model/types'
 import type { ProjectStore } from '../state/store'
+import { useFormFactor } from './form'
+import './guideSheet.css'
 
 const LAST_KEY = 'cueharbor-last-track'
-const KINDS: { id: AddKind; label: string }[] = [
-  { id: 'audio', label: 'Audio' },
-  { id: 'midi', label: 'Inst' },
-  { id: 'drum', label: 'Drum' },
-  { id: 'bus', label: 'Bus' },
+const KINDS: { id: AddKind; label: string; hint: string }[] = [
+  { id: 'audio', label: 'Audio', hint: 'Record a voice or an instrument.' },
+  { id: 'midi', label: 'Instrument', hint: 'Play MIDI or the on-screen keys.' },
+  { id: 'drum', label: 'Drums', hint: 'A beat machine for this song.' },
+  { id: 'bus', label: 'Bus', hint: 'Group tracks, or return an effect.' },
 ]
-const INSTRUMENTS: { id: TrackInstrument; label: string }[] = [
-  { id: 'scaler', label: 'Scaler' },
-  { id: 'pads', label: 'Pads' },
-  { id: 'synth', label: 'Synth' },
-  { id: 'sampler', label: 'Sampler' },
-  { id: 'library', label: 'Library' },
-  { id: '808', label: '808' },
-  { id: 'drum-machine', label: 'Drum machine' },
-  { id: 'none', label: 'None' },
+
+function KindIcon({ id }: { id: AddKind }) {
+  const common = { width: 22, height: 22, viewBox: '0 0 22 22', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true as const }
+  if (id === 'audio') return <svg {...common}><rect x="8" y="3" width="6" height="10" rx="3" /><path d="M6 10.5a5 5 0 0010 0M11 15.5V19" /></svg>
+  if (id === 'midi') return <svg {...common}><path d="M4 8h14M4 14h14M7 8v6M11 8v6M15 8v6" /></svg>
+  if (id === 'drum') return <svg {...common}><ellipse cx="11" cy="12" rx="7" ry="3.2" /><path d="M4 12v2.2c0 1.8 3.1 3.2 7 3.2s7-1.4 7-3.2V12" /><path d="M8 7.2l6-2.2" /></svg>
+  return <svg {...common}><path d="M4 7h6v8H4zM12 7h6M12 11h6M12 15h6" /></svg>
+}
+const INSTRUMENTS: { id: TrackInstrument; label: string; hint: string }[] = [
+  { id: 'synth', label: 'Keys', hint: 'Play from the on-screen keyboard or a MIDI keyboard.' },
+  { id: 'scaler', label: 'Scaler', hint: 'Chord pads that follow the song key.' },
+  { id: 'pads', label: 'Pads', hint: 'A grid of drum and sample pads.' },
+  { id: 'sampler', label: 'Sampler', hint: 'Play a loaded sample across the keys.' },
+  { id: 'library', label: 'Library', hint: 'A multi-sample instrument from the library.' },
+  { id: '808', label: '808', hint: 'Bass and drum tones from an 808.' },
+  { id: 'none', label: 'Empty', hint: 'A MIDI track with no instrument yet.' },
+]
+const KITS: { id: TrackInstrument; label: string; hint: string }[] = [
+  { id: 'drum-machine', label: 'Kit', hint: 'Kick, snare, clap, hat, and perc.' },
+  { id: '808', label: '808', hint: 'The 808 drum instrument.' },
 ]
 
 function readLast(): AddTrackSpec | null {
@@ -47,9 +60,158 @@ function reveal(id: string) {
   })
 }
 
+export function AddTrackPanel({
+  spec,
+  place,
+  onChange,
+  onCancel,
+  onCommit,
+}: {
+  spec: AddTrackSpec
+  place: 'sheet' | 'pop'
+  onChange: (next: AddTrackSpec) => void
+  onCancel: () => void
+  onCommit: () => void
+}) {
+  const kind = KINDS.find((item) => item.id === spec.kind) ?? KINDS[0]
+  const inputNumber = spec.inputIndex ?? 1
+  return (
+    <div className={`guide-sheet add-sheet ${place}`} role="dialog" aria-label="Add track">
+      {place === 'sheet' && <div className="guide-handle" aria-hidden="true" />}
+      <header className="guide-head">
+        <div>
+          <h2>Add track</h2>
+          <p>Pick a type, then add. The new track is selected and stays quiet until you arm it.</p>
+        </div>
+        <button type="button" className="guide-x" onClick={onCancel} aria-label="Cancel. Close add track.">Cancel</button>
+      </header>
+      <section className="guide-section">
+        <h3>Step 1</h3>
+        <div className="guide-cards">
+          {KINDS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`guide-card${spec.kind === item.id ? ' on' : ''}`}
+              aria-pressed={spec.kind === item.id}
+              onClick={() => onChange({ ...spec, kind: item.id })}
+            >
+              <KindIcon id={item.id} />
+              <strong>{item.label}</strong>
+              <small>{item.hint}</small>
+            </button>
+          ))}
+        </div>
+      </section>
+      {spec.kind === 'audio' && (
+        <>
+          <section className="guide-section">
+            <h3>Input</h3>
+            <div className="guide-row">
+              <button type="button" className={`guide-choice${spec.input === 'mic' ? ' on' : ''}`} aria-pressed={spec.input === 'mic'} onClick={() => onChange({ ...spec, input: 'mic' })}>
+                <strong>Mic</strong>
+                <small>The microphone.</small>
+              </button>
+              <button type="button" className={`guide-choice${spec.input === 'line' ? ' on' : ''}`} aria-pressed={spec.input === 'line'} onClick={() => onChange({ ...spec, input: 'line' })}>
+                <strong>Line</strong>
+                <small>A line input, such as a keyboard or interface.</small>
+              </button>
+            </div>
+          </section>
+          <section className="guide-section">
+            <h3>Channels</h3>
+            <div className="guide-row">
+              <button type="button" className={`guide-choice${spec.channels === 1 ? ' on' : ''}`} aria-pressed={spec.channels === 1} onClick={() => onChange({ ...spec, channels: 1 })}>
+                <strong>Mono</strong>
+                <small>One channel.</small>
+              </button>
+              <button type="button" className={`guide-choice${spec.channels === 2 ? ' on' : ''}`} aria-pressed={spec.channels === 2} onClick={() => onChange({ ...spec, channels: 2 })}>
+                <strong>Stereo</strong>
+                <small>Left and right.</small>
+              </button>
+            </div>
+          </section>
+          <section className="guide-section">
+            <h3>Input number</h3>
+            <label className="guide-choice">
+              <strong>Input {inputNumber}</strong>
+              <small>Which numbered input this track records.</small>
+              <select
+                aria-label={`Input number. Input ${inputNumber}.`}
+                value={inputNumber}
+                onChange={(event) => onChange({ ...spec, inputIndex: Number(event.target.value) })}
+              >
+                {Array.from({ length: 8 }, (_, index) => index + 1).map((number) => (
+                  <option key={number} value={number}>Input {number}</option>
+                ))}
+              </select>
+            </label>
+          </section>
+          <section className="guide-section">
+            <h3>Record</h3>
+            <button
+              type="button"
+              className={`guide-choice${spec.armed ? ' on' : ''}`}
+              aria-pressed={spec.armed}
+              onClick={() => onChange({ ...spec, armed: !spec.armed })}
+            >
+              <strong>Arm after adding</strong>
+              <small>{spec.armed ? 'On. This track records when you press record.' : 'Off. The new track stays quiet until you arm it.'}</small>
+            </button>
+          </section>
+        </>
+      )}
+      {spec.kind === 'midi' && (
+        <section className="guide-section">
+          <h3>Instrument</h3>
+          <div className="guide-cards">
+            {INSTRUMENTS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`guide-card${spec.instrument === item.id ? ' on' : ''}`}
+                aria-pressed={spec.instrument === item.id}
+                onClick={() => onChange({ ...spec, instrument: item.id })}
+              >
+                <strong>{item.label}</strong>
+                <small>{item.hint}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      {spec.kind === 'drum' && (
+        <section className="guide-section">
+          <h3>Kit</h3>
+          <div className="guide-row">
+            {KITS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`guide-choice${(spec.instrument === '808' ? '808' : 'drum-machine') === item.id ? ' on' : ''}`}
+                aria-pressed={(spec.instrument === '808' ? '808' : 'drum-machine') === item.id}
+                onClick={() => onChange({ ...spec, instrument: item.id })}
+              >
+                <strong>{item.label}</strong>
+                <small>{item.hint}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      <div className="guide-actions">
+        <button type="button" onClick={onCancel}>Cancel</button>
+        <button type="button" className="primary" onClick={onCommit}>Add {kind.label} track</button>
+      </div>
+    </div>
+  )
+}
+
 export function AddTrackButton({ store }: { store: ProjectStore }) {
   const [open, setOpen] = useState(false)
-  const [spec, setSpec] = useState<AddTrackSpec>(defaultAddSpec)
+  const [spec, setSpec] = useState<AddTrackSpec>({ ...defaultAddSpec(), inputIndex: 1, instrument: 'synth', count: 1, armed: false })
+  const form = useFormFactor()
+  const place = form === 'desk' ? 'pop' : 'sheet'
   const hold = useRef(0)
   const held = useRef(false)
   const skipTap = useRef(false)
@@ -61,12 +223,19 @@ export function AddTrackButton({ store }: { store: ProjectStore }) {
       if (target?.closest('.add-sheet, .add-track-btn')) return
       setOpen(false)
     }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
     window.addEventListener('pointerdown', close)
-    return () => window.removeEventListener('pointerdown', close)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('pointerdown', close)
+      window.removeEventListener('keydown', onKey)
+    }
   }, [open])
 
   function commit(next: AddTrackSpec) {
-    const saved = { ...next, count: clampCount(next.count) }
+    const saved = { ...next, count: clampCount(next.count || 1) }
     const ids = store.addTracks(saved)
     writeLast(saved)
     if (ids[0]) reveal(ids[0])
@@ -111,44 +280,13 @@ export function AddTrackButton({ store }: { store: ProjectStore }) {
           repeat()
         }}
       >
-        +
+        {form === 'desk' ? '+' : 'Add'}
       </button>
       {open && (
-        <div className="add-sheet" role="dialog" aria-label="Add track">
-          <div className="add-row">
-            {KINDS.map((kind) => (
-              <button key={kind.id} type="button" className={spec.kind === kind.id ? 'on' : ''} onClick={() => setSpec({ ...spec, kind: kind.id })}>
-                {kind.label}
-              </button>
-            ))}
-          </div>
-          {spec.kind === 'midi' && (
-            <div className="add-row">
-              {INSTRUMENTS.map((item) => (
-                <button key={item.id} type="button" className={spec.instrument === item.id ? 'on' : ''} onClick={() => setSpec({ ...spec, instrument: item.id })}>
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          )}
-          {spec.kind === 'audio' && (
-            <div className="add-row">
-              <button type="button" className={spec.input === 'mic' ? 'on' : ''} onClick={() => setSpec({ ...spec, input: 'mic' })}>Mic</button>
-              <button type="button" className={spec.input === 'line' ? 'on' : ''} onClick={() => setSpec({ ...spec, input: 'line' })}>Line</button>
-              <button type="button" className={spec.channels === 1 ? 'on' : ''} onClick={() => setSpec({ ...spec, channels: 1 })}>Mono</button>
-              <button type="button" className={spec.channels === 2 ? 'on' : ''} onClick={() => setSpec({ ...spec, channels: 2 })}>Stereo</button>
-              <button type="button" className={spec.armed ? 'on' : ''} onClick={() => setSpec({ ...spec, armed: !spec.armed })}>Arm</button>
-            </div>
-          )}
-          <div className="add-row">
-            {Array.from({ length: 8 }, (_, index) => index + 1).map((count) => (
-              <button key={count} type="button" className={spec.count === count ? 'on' : ''} aria-label={`${count}`} onClick={() => setSpec({ ...spec, count })}>
-                {count}
-              </button>
-            ))}
-          </div>
-          <button type="button" className="add-go" onClick={() => commit(spec)}>Add</button>
-        </div>
+        <>
+          <button type="button" className="guide-scrim" aria-label="Close add track" onClick={() => setOpen(false)} />
+          <AddTrackPanel spec={spec} place={place} onChange={setSpec} onCancel={() => setOpen(false)} onCommit={() => commit(spec)} />
+        </>
       )}
     </div>
   )

@@ -5,6 +5,7 @@ import type { ProjectStore } from '../state/store'
 export function SnapControl({ store }: { store: ProjectStore }) {
   const on = store.project.snap !== false
   const division = normalizeSnapDivision(store.project.snapDivision)
+  const gridLabel = SNAP_DIVISIONS.find((item) => item.id === division)?.label ?? division
   return (
     <div className="snap-control" role="group" aria-label="Snap">
       <button
@@ -17,16 +18,20 @@ export function SnapControl({ store }: { store: ProjectStore }) {
         <strong>Snap</strong>
         <small>{on ? 'On' : 'Fine'}</small>
       </button>
-      <select
-        aria-label="Snap grid"
-        title="Grid size used when Snap is on."
-        value={division}
-        onChange={(event) => store.setSnapDivision(event.target.value as SnapDivisionId)}
-      >
-        {SNAP_DIVISIONS.map((item) => (
-          <option key={item.id} value={item.id}>{item.label}</option>
-        ))}
-      </select>
+      <label className="snap-grid">
+        <strong>{gridLabel}</strong>
+        <small>Grid</small>
+        <select
+          aria-label="Snap grid"
+          title="Grid size used when Snap is on."
+          value={division}
+          onChange={(event) => store.setSnapDivision(event.target.value as SnapDivisionId)}
+        >
+          {SNAP_DIVISIONS.map((item) => (
+            <option key={item.id} value={item.id}>{item.label}</option>
+          ))}
+        </select>
+      </label>
     </div>
   )
 }

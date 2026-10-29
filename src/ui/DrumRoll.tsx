@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { gridPaint, type GridLine } from '../model/gridLines'
+import { useFormFactor } from './form'
 import { displayedPlayhead } from '../model/transportSync'
 import { projectSampleBeat } from '../model/tempoMap'
 import {
@@ -139,6 +141,9 @@ export function DrumRoll({ store, engine }: { store: ProjectStore; engine: RollE
     setSelected(null)
   }
 
+  const form = useFormFactor()
+  const stepPx = form === 'phone' ? 44 : 36
+  const rollPaint = gridPaint(project, stepPx / STEP_BEAT)
   const headPlace = stepFromBeat(Math.max(0, Math.min(length - 0.001, head)), count, 0)
   const headOrigin = stepStart(headPlace.step, STEP_BEAT, 0)
   const headNext = headPlace.step + 1 < count ? stepStart(headPlace.step + 1, STEP_BEAT, 0) : length
@@ -147,6 +152,7 @@ export function DrumRoll({ store, engine }: { store: ProjectStore; engine: RollE
   return (
     <div className="drum-roll" data-drum-roll="open" aria-label="Drum roll. Each row is a drum lane.">
       <p className="drum-roll-title">Roll</p>
+      {rollPaint.hint && <p className="grid-hint" role="status">{rollPaint.hint}</p>}
       {pattern.channels.map((channel) => {
         const lane = notes.filter((note) => note.channelId === channel.id)
         const swing = channelSwing(channel, pattern.swing)
@@ -176,7 +182,7 @@ export function DrumRoll({ store, engine }: { store: ProjectStore; engine: RollE
                         }
                       : null
                     return (
-                      <div className="drum-slot" data-index={index} key={index}>
+                      <div className={`drum-slot${slotGrid(index, rollPaint.lines)}`} data-index={index} key={index}>
                         {headPlace.step === index && (
                           <i className="drum-playhead" data-playhead="drums" style={{ left: `${headLeft}%` }} />
                         )}
@@ -212,4 +218,17 @@ export function DrumRoll({ store, engine }: { store: ProjectStore; engine: RollE
       })}
     </div>
   )
+}
+
+function slotGrid(index: number, lines: GridLine[]) {
+  const beat = index * STEP_BEAT
+  const rank: Record<GridLine['role'], number> = { snap: 1, beat: 2, bar: 3 }
+  let best: GridLine['role'] | null = null
+  for (const line of lines) {
+    if (!(line.beats > 0)) continue
+    const steps = beat / line.beats
+    if (Math.abs(steps - Math.round(steps)) > 1e-3) continue
+    if (!best || rank[line.role] > rank[best]) best = line.role
+  }
+  return best ? ` grid-${best}` : ''
 }

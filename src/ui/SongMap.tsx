@@ -54,20 +54,24 @@ export function SongMapHead({ store, position, compact = false }: { store: Proje
   return (
     <div className="map-head">
       <div className="row">
-        <button type="button" title="Add a named section at the playhead" aria-label="Add section" disabled={store.remoteFollow} onClick={() => store.addSection('verse', playBeat())}>
-          Sec
+        <button type="button" className="guide-choice" title="Add a named section at the playhead." aria-label="Section. Add a named section at the playhead." disabled={store.remoteFollow} onClick={() => store.addSection('verse', playBeat())}>
+          <strong>Section</strong>
+          <small>Name a section at the playhead.</small>
         </button>
-        <button type="button" title="Drop a marker at the playhead" aria-label="Add marker" disabled={store.remoteFollow} onClick={() => store.addSection('marker', playBeat())}>
-          Mark
+        <button type="button" className="guide-choice" title="Drop a marker at the playhead." aria-label="Marker. Drop a marker at the playhead." disabled={store.remoteFollow} onClick={() => store.addSection('marker', playBeat())}>
+          <strong>Marker</strong>
+          <small>Drop a marker at the playhead.</small>
         </button>
         <button
           type="button"
-          title="Add a tempo change at the playhead"
-          aria-label="Add tempo change"
+          className="guide-choice"
+          title="Add a tempo change at the playhead."
+          aria-label="Tempo. Add a tempo change at the playhead."
           disabled={store.remoteFollow}
           onClick={() => store.addTempoPoint(project.snap ? Math.round(playBeat()) : playBeat(), tempoAtSample(project, position))}
         >
-          BPM
+          <strong>Tempo</strong>
+          <small>Change the tempo at the playhead.</small>
         </button>
       </div>
       {section ? (
@@ -90,15 +94,20 @@ export function SongMapHead({ store, position, compact = false }: { store: Proje
               <option key={kind.id} value={kind.id}>{kind.name}</option>
             ))}
           </select>
-          <button type="button" title="Copy this section and everything inside it" aria-label="Duplicate section" disabled={store.remoteFollow} onClick={() => store.duplicateSection(section.id)}>
-            Copy
+          <button type="button" className="guide-choice" title="Copy this section and everything inside it." aria-label="Duplicate section. Copy this section and everything inside it." disabled={store.remoteFollow} onClick={() => store.duplicateSection(section.id)}>
+            <strong>Duplicate</strong>
+            <small>Copy this section and everything inside it.</small>
           </button>
-          <button type="button" title="Remove this section and close the gap" aria-label="Delete section" disabled={store.remoteFollow} onClick={() => store.deleteSection(section.id)}>
-            Del
+          <button type="button" className="guide-choice" title="Remove this section and close the gap." aria-label="Delete section. Remove this section and close the gap." disabled={store.remoteFollow} onClick={() => store.deleteSection(section.id)}>
+            <strong>Delete</strong>
+            <small>Remove this section and close the gap.</small>
           </button>
         </div>
       ) : (
         <div className="row">
+          <label className="guide-choice">
+          <strong>Time</strong>
+          <small>Beats in each bar, starting here.</small>
           <select
             aria-label="Time signature at the playhead"
             title="Time signature starting at this bar"
@@ -113,21 +122,24 @@ export function SongMapHead({ store, position, compact = false }: { store: Proje
               <option key={sig}>{sig}</option>
             ))}
           </select>
+          </label>
           {point && (
             <button
               type="button"
-              className={point.ramp ? 'on' : ''}
+              className={`guide-choice${point.ramp ? ' on' : ''}`}
               aria-pressed={!!point.ramp}
               title="Glide into this tempo instead of jumping"
               disabled={store.remoteFollow}
               onClick={() => store.moveTempoPoint(point.beat, { ramp: !point.ramp })}
             >
-              Ramp
+              <strong>Ramp</strong>
+              <small>Glide into this tempo instead of jumping.</small>
             </button>
           )}
           {point && point.beat > 1e-3 && (
-            <button type="button" title="Remove this tempo change" aria-label="Delete tempo change" disabled={store.remoteFollow} onClick={() => store.removeTempoPoint(point.beat)}>
-              Del
+            <button type="button" className="guide-choice" title="Remove this tempo change." aria-label="Delete tempo. Remove this tempo change." disabled={store.remoteFollow} onClick={() => store.removeTempoPoint(point.beat)}>
+              <strong>Delete</strong>
+              <small>Remove this tempo change.</small>
             </button>
           )}
         </div>

@@ -38,6 +38,7 @@ import { PluginSheet } from './ui/PluginSheet'
 import { IdeasPop } from './ui/IdeasPop'
 import { PlayersSheet } from './ui/PlayersSheet'
 import { UnstuckSheet } from './unstuck/UnstuckSheet'
+import './ui/guideSheet.css'
 import { SoundBrowser } from './ui/SoundBrowser'
 import { PadsPanel } from './ui/PadsPanel'
 import { ScalerPanel } from './ui/ScalerPanel'
@@ -1515,36 +1516,37 @@ async function importDropped(files: FileList) {
       )}
       {surface === 'studio' && !collabShown && phonePane !== 'room' && store.view === 'arrange' && panel !== 'piano' && (
         <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
+          <div className="tool-group">
           <SnapControl store={store} />
-          {form !== 'desk' && (
-            <button
-              type="button"
-              className={`setup-btn${toolsOpen ? ' on' : ''}`}
-              aria-pressed={toolsOpen}
-              title="Show or hide the editing tools."
-              onClick={() => {
-                const next = !toolsOpen
-                setToolsOpen(next)
-                rememberPanel('arrangeTools', next)
-              }}
-            >
-              Tools
-            </button>
-          )}
-          {(form === 'desk' || toolsOpen) && (
+          <button
+            type="button"
+            className={`cap-btn${toolsOpen ? ' on' : ''}`}
+            aria-pressed={toolsOpen}
+            title="Edit modes. Choose select, draw, erase, and the other timeline tools."
+            onClick={() => {
+              const next = !toolsOpen
+              setToolsOpen(next)
+              rememberPanel('arrangeTools', next)
+            }}
+          >
+            <strong>Tools</strong>
+            <small>Edit modes</small>
+          </button>
+          </div>
+          {toolsOpen && (
             <ToolBar
+              panel
               context="arrange"
               compact={form !== 'desk'}
               phone={phone}
               words={form === 'fold'}
-              showHint={form === 'desk' && !panelChoice('hintDismissed')}
-              onDismissHint={() => rememberPanel('hintDismissed', true)}
+              onClose={() => { setToolsOpen(false); rememberPanel('arrangeTools', false) }}
               onChange={(tool) => store.setTool(tool)}
               onDuplicate={() => store.duplicateSelection()}
               onDelete={() => store.deleteSelectedClip()}
             />
           )}
-          {(form === 'desk' || toolsOpen) && <MidiTools store={store} engine={engine} />}
+          {toolsOpen && <MidiTools store={store} engine={engine} />}
         </div>
       )}
       <div className={`workspace ${dockShown ? '' : 'session-closed'} ${soundsOpen && !phone ? 'sounds-open' : ''} ${!phone && dockEdge === 'bottom' && surface === 'studio' && dockShown ? 'dock-bottom' : ''}`}>

@@ -96,7 +96,11 @@ async function drawAndTrim(page: Page) {
   await page.mouse.up()
   const clip = page.locator('[data-clip]').first()
   await clip.waitFor()
-  await page.getByRole('button', { name: /^Select/ }).click()
+  const select = page.getByRole('button', { name: /^Select/ })
+  if (!(await select.isVisible().catch(() => false))) {
+    await page.getByRole('button', { name: /^Tools/ }).click()
+  }
+  await select.click()
   await page.mouse.click(view.x + 30, Math.min(lane.y + 110, view.y + view.height - 12))
   await page.mouse.move(2, 2)
   const edge = clip.locator('[data-edge="end"]')

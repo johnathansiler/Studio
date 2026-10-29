@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { createPortal } from 'react-dom'
 import type { AudioEngine } from '../audio/engine'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { activeComp } from '../model/comp'
@@ -9,7 +10,8 @@ import { rectsHit } from '../model/edit'
 import { SCALER_MIME, parseScalerDrag } from '../instruments/scaler/model'
 import { patternHostId } from '../model/steps'
 import { loopGridBeats } from '../model/loopEdit'
-import { activeGridBeats, edgeFromPointer, lengthReadout, subdivisionFor } from '../model/snapGrid'
+import { gridBackground, gridPaint } from '../model/gridLines'
+import { activeGridBeats, edgeFromPointer, lengthReadout, moveFromPointer, positionReadout, subdivisionFor } from '../model/snapGrid'
 import { quartersPerBar } from '../model/time'
 import { patternToMidiNotes } from '../model/patternMidi'
 import { panelChoice, rememberPanel } from './panelMemory'
@@ -30,12 +32,48 @@ import { AutoTuneLaneMark, addOrOpenAutoTune } from './AutoTuneFace'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { TRACK_ROW, TRACK_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
+import './guideSheet.css'
 import { ActionSheet, SheetRow, TipButton } from './Hint'
 import { RecordBar } from './RecordBar'
 import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, trimZone } from './touchEdit'
 import { laneDoubleClickAddsClip } from './clipKeys'
 import { isSampledInstrument } from '../instruments/sampled'
 import { LoopRegion } from './LoopRegion'
+
+
+function ArrangeChrome({ browserOpen, setupOpen, onBrowser, onSetup }: { browserOpen: boolean; setupOpen: boolean; onBrowser: () => void; onSetup: () => void }) {
+  const [host, setHost] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    setHost(document.getElementById('tool-slot'))
+  }, [])
+  const buttons = (
+    <div className="arrange-panels">
+      <button
+        type="button"
+        className={`cap-btn${browserOpen ? ' on' : ''}`}
+        aria-pressed={browserOpen}
+        title="Sounds and loops. Open the browser of sounds, instruments, loops, and patterns."
+        onClick={onBrowser}
+      >
+        <strong>Browser</strong>
+        <small>Sounds and loops</small>
+      </button>
+      <button
+        type="button"
+        className={`cap-btn${setupOpen ? ' on' : ''}`}
+        aria-expanded={setupOpen}
+        aria-controls="arrange-setup"
+        title="Song. Automation write mode, recording, and markers."
+        onClick={onSetup}
+      >
+        <strong>Song</strong>
+        <small>Record and markers</small>
+      </button>
+    </div>
+  )
+  if (host) return createPortal(buttons, host)
+  return <div className="arrange-setup">{buttons}</div>
+}
 
 export function ArrangeView({
   store,
@@ -186,6 +224,8 @@ export function ArrangeView({
   const width = seconds * px
   const linear = mapIsLinear(project)
   const beatPx = (60 / project.tempo) * px
+  const paint = gridPaint(project, linear ? beatPx : 0)
+  const laneGrid = linear ? gridBackground(paint, beatPx) : null
   const marks = gridMarks(project, projectSampleBeat(project, seconds * project.sampleRate) + 1)
 
   function sampleAt(clientX: number) {
@@ -237,7 +277,7 @@ export function ArrangeView({
     window.addEventListener('pointercancel', end)
   }
 
-  function showEdge(trackId: string, clipId: string, start: number, end: number, rawStart: number, rawEnd: number, edge: 'start' | 'end') {
+  function showEdge(trackId: string, clipId: string, start: number, end: number, rawStart: number, rawEnd: number, edge: 'start' | 'end', label?: string) {
     const pxNow = pxRef.current
     const left = pxAtBeat(project, start, pxNow)
     const right = pxAtBeat(project, end, pxNow)
@@ -250,7 +290,7 @@ export function ArrangeView({
       snapLeft: left,
       snapWidth: Math.max(8, right - left),
       line,
-      label: lengthReadout(start, end, quartersPerBar(project.timeSignature)),
+      label: label ?? lengthReadout(start, end, quartersPerBar(project.timeSignature)),
     })
   }
 
@@ -428,10 +468,8 @@ export function ArrangeView({
   function moveSelection(event: ReactPointerEvent, kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
     event.stopPropagation()
     focusTimeline()
-    if (kind === 'pattern') {
-      setPatternMenu(null)
-      if (touch) event.preventDefault()
-    }
+    if (touch || event.pointerType === 'touch') event.preventDefault()
+    if (kind === 'pattern') setPatternMenu(null)
     const additive = event.shiftKey || event.metaKey || event.ctrlKey
     const selected = kind === 'audio' ? store.selectedClipIds : kind === 'midi' ? store.selectedMidiClipIds : store.selectedPatternClipIds
     const wasIn = selected.includes(clipId)
@@ -455,23 +493,62 @@ export function ArrangeView({
     const originX = event.clientX
     const originY = event.clientY
     const started = performance.now()
+    const grid = activeGridBeats(project)
+    const barBeats = quartersPerBar(project.timeSignature)
+    const grabBeat = projectSampleBeat(project, Math.max(0, sampleAt(event.clientX)))
+    const primary = origins.get(clipId)
+    const lengthOf = (id: string) => {
+      if (kind === 'midi') {
+        for (const track of project.tracks) {
+          const found = track.midiClips.find((item) => item.id === id)
+          if (found) return found.durationBeats
+        }
+      }
+      if (kind === 'audio') {
+        for (const track of project.tracks) {
+          const found = track.clips.find((item) => item.id === id)
+          if (found) return projectSampleBeat(project, found.durationSamples)
+        }
+      }
+      if (kind === 'pattern') return project.patternClips?.find((item) => item.id === id)?.lengthBeats ?? 1
+      return 1
+    }
     const deltas = new Map<string, number>()
     let travel = 0
+    const preview = (clientX: number) => {
+      const pointerBeat = projectSampleBeat(project, Math.max(0, sampleAt(clientX)))
+      const patch: Record<string, number> = {}
+      const deltaBeat = primary && kind !== 'audio' ? moveFromPointer(primary.at, grabBeat, pointerBeat, grid) - primary.at : 0
+      for (const [id, item] of origins) {
+        if (kind === 'audio') {
+          const originBeat = projectSampleBeat(project, item.at)
+          const snappedBeat = moveFromPointer(originBeat, grabBeat, pointerBeat, grid)
+          patch[id] = projectBeatSample(project, snappedBeat) - item.at
+        } else {
+          const start = grid > 0 ? moveFromPointer(item.at, item.at, item.at + deltaBeat, grid) : Math.max(0, item.at + deltaBeat)
+          patch[id] = start - item.at
+        }
+        deltas.set(id, patch[id])
+      }
+      if (primary) {
+        const start = kind === 'audio'
+          ? projectSampleBeat(project, Math.max(0, primary.at + (deltas.get(clipId) ?? 0)))
+          : Math.max(0, primary.at + (deltas.get(clipId) ?? 0))
+        const length = lengthOf(clipId)
+        showEdge(trackId, clipId, start, start + length, start, start + length, 'start', positionReadout(start, barBeats))
+      }
+      setNudge(kind === 'audio' ? { audio: patch, midi: {}, pattern: {} } : kind === 'midi' ? { audio: {}, midi: patch, pattern: {} } : { audio: {}, midi: {}, pattern: patch })
+    }
     watch(
       (ev) => {
         travel = Math.max(travel, Math.hypot(ev.clientX - originX, ev.clientY - originY))
         if (kind === 'pattern' && touch && travel <= PATTERN_HOLD_SLOP) return
-        const sampleDelta = ((ev.clientX - originX) / pxRef.current) * project.sampleRate
-        const patch: Record<string, number> = {}
-        for (const [id, item] of origins) {
-          if (kind === 'audio') patch[id] = sampleDelta
-          else patch[id] = projectSampleBeat(project, projectBeatSample(project, item.at) + sampleDelta) - item.at
-          deltas.set(id, patch[id])
-        }
-        setNudge(kind === 'audio' ? { audio: patch, midi: {}, pattern: {} } : kind === 'midi' ? { audio: {}, midi: patch, pattern: {} } : { audio: {}, midi: {}, pattern: patch })
+        preview(ev.clientX)
       },
       (ev) => {
+        preview(ev.clientX)
         setNudge(null)
+        setDragView(null)
         if (kind === 'pattern' && patternHoldOpensMenu(touch, performance.now() - started, travel)) {
           store.selectClip(trackId, clipId, false, false)
           setPatternMenu(patternMenuPoint(originX, originY, 168, 56, window.innerWidth, window.innerHeight))
@@ -485,13 +562,13 @@ export function ArrangeView({
           return
         }
         if (kind === 'audio') {
-          store.placeAudioClips([...origins].map(([id, item]) => ({ trackId: item.trackId, clipId: id, startSample: item.at + (deltas.get(id) ?? 0) })))
+          store.placeAudioClips([...origins].map(([id, item]) => ({ trackId: item.trackId, clipId: id, startSample: Math.max(0, item.at + (deltas.get(id) ?? 0)) })))
         } else if (kind === 'midi') {
-          store.placeMidiClips([...origins].map(([id, item]) => ({ trackId: item.trackId, clipId: id, startBeat: item.at + (deltas.get(id) ?? 0) })))
+          store.placeMidiClips([...origins].map(([id, item]) => ({ trackId: item.trackId, clipId: id, startBeat: Math.max(0, item.at + (deltas.get(id) ?? 0)) })))
         } else {
           store.placePatternClips([...origins].map(([id, item]) => ({
             clipId: id,
-            startBeat: item.at + (deltas.get(id) ?? 0),
+            startBeat: Math.max(0, item.at + (deltas.get(id) ?? 0)),
             trackId: host && host !== item.trackId ? host : undefined,
           })))
         }
@@ -500,6 +577,14 @@ export function ArrangeView({
   }
 
   const [setupOpen, setSetupOpen] = useState(false)
+  useEffect(() => {
+    if (!setupOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSetupOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [setupOpen])
   const [browserOpen, setBrowserOpen] = useState(() => panelChoice('arrangeBrowser') ?? !compact)
   useEffect(() => {
     if (panelChoice('arrangeBrowser') != null) return
@@ -532,30 +617,52 @@ export function ArrangeView({
   return (
     <div className="arrange-wrap">
       <SmartTempoBar store={store} />
-      <div className="arrange-setup">
-        {!browserOpen && (
-          <button type="button" className="setup-btn" title="Show sounds, patterns, and effects." onClick={() => { setBrowserOpen(true); rememberPanel('arrangeBrowser', true) }}>
-            Browser
-          </button>
-        )}
-        <button
-          type="button"
-          className={`setup-btn ${setupOpen ? 'on' : ''}`}
-          aria-expanded={setupOpen}
-          aria-controls="arrange-setup"
-          title="Automation write mode, record options, and song markers."
-          onClick={() => setSetupOpen((open) => !open)}
-        >
-          Setup
-        </button>
-        {setupOpen && (
-          <div id="arrange-setup" className="arrange-setup-body">
-            <AutomationModeBar store={store} />
-            <RecordBar store={store} engine={engine} session={session} onQuickPunch={onQuickPunch} inline />
-            <SongMapHead store={store} position={position} />
+      <ArrangeChrome
+        browserOpen={browserOpen}
+        setupOpen={setupOpen}
+        onBrowser={() => {
+          setBrowserOpen((open) => {
+            const next = !open
+            if (!next) {
+              engine.stopPreview()
+              onLibraryClose?.()
+            }
+            rememberPanel('arrangeBrowser', next)
+            return next
+          })
+        }}
+        onSetup={() => setSetupOpen((open) => !open)}
+      />
+      {setupOpen && (
+        <>
+          <button type="button" className="guide-scrim" aria-label="Close song setup" onClick={() => setSetupOpen(false)} />
+          <div id="arrange-setup" className={`guide-sheet song-sheet ${compact ? 'sheet' : 'pop'}`} role="dialog" aria-label="Song">
+            {compact && <div className="guide-handle" aria-hidden="true" />}
+            <header className="guide-head">
+              <div>
+                <h2>Song</h2>
+                <p>Automation, recording, and markers. These are not in the menu.</p>
+              </div>
+              <button type="button" className="guide-x" onClick={() => setSetupOpen(false)} aria-label="Close song setup">Cancel</button>
+            </header>
+            <section className="guide-section">
+              <h3>Automation</h3>
+              <p className="guide-note">Off ignores automation. Read plays it. Touch writes while you hold a fader. Latch keeps that value until playback stops.</p>
+              <AutomationModeBar store={store} />
+            </section>
+            <section className="guide-section">
+              <h3>Recording</h3>
+              <p className="guide-note">Where a recording starts and stops, and which input the selected audio track uses.</p>
+              <RecordBar store={store} engine={engine} session={session} onQuickPunch={onQuickPunch} inline />
+            </section>
+            <section className="guide-section">
+              <h3>Markers</h3>
+              <p className="guide-note">Name a section, drop a marker, or change the tempo at the playhead.</p>
+              <SongMapHead store={store} position={position} />
+            </section>
           </div>
-        )}
-      </div>
+        </>
+      )}
       <div className={`playlist-frame ${browserOpen ? 'browser-open' : ''} ${phone ? 'phone-arrange' : ''}`} style={{ ['--browser' as string]: `${browserWidth}px` }}>
       {browserOpen && compact && (
         <button type="button" className="browser-scrim" aria-label="Close browser" title="Close the browser." onClick={() => { engine.stopPreview(); setBrowserOpen(false); rememberPanel('arrangeBrowser', false); onLibraryClose?.() }} />
@@ -661,7 +768,8 @@ export function ArrangeView({
       >
         <div className="timeline-inner" ref={innerRef} data-px={px} style={{ width }}>
           <SongMap store={store} px={px} width={width} onSeek={onSeek} />
-          <div className="ruler">
+          <div className="ruler" style={laneGrid ?? undefined}>
+            {paint.hint && <em className="grid-hint" role="status">{paint.hint}</em>}
             <LoopRegion
               store={store}
               project={project}
@@ -672,15 +780,11 @@ export function ArrangeView({
               onSeek={(sample) => onSeek(snapSampleToMap(sample, project))}
               yieldEmpty={tool === 'pan' || tool === 'zoom'}
             />
-            {marks.map((mark) =>
-              mark.downbeat ? (
-                <span key={mark.beat} style={{ left: pxAtBeat(project, mark.beat, px) }}>
-                  {mark.bar}
-                </span>
-              ) : (
-                <i key={mark.beat} style={{ left: pxAtBeat(project, mark.beat, px) }} />
-              ),
-            )}
+            {marks.filter((mark) => mark.downbeat).map((mark) => (
+              <span key={mark.beat} style={{ left: pxAtBeat(project, mark.beat, px) }}>
+                {mark.bar}
+              </span>
+            ))}
           </div>
           <div className="bar-grid" aria-hidden>
             {marks.filter((mark) => mark.downbeat).map((mark) => (
@@ -701,7 +805,7 @@ export function ArrangeView({
               className={`lane${store.selectedTrackId === track.id ? ' is-selected' : ''}`}
               data-track={track.id}
               key={track.id}
-              style={{ backgroundSize: linear ? `${beatPx}px 100%` : undefined, backgroundImage: linear ? undefined : 'none', ...rowHeight(track, store.selectedClipId, !!store.openLanes[track.id]) }}
+              style={{ ...(laneGrid ?? { backgroundImage: 'none' }), ...rowHeight(track, store.selectedClipId, !!store.openLanes[track.id]) }}
               onDoubleClick={(event) => {
                 if (track.type !== 'midi') return
                 if (!laneDoubleClickAddsClip(event.target)) return
@@ -732,6 +836,13 @@ export function ArrangeView({
               }}
             >
               <AutoTuneLaneMark plugins={track.plugins} />
+              {dragView?.trackId === track.id && (
+                <>
+                  <div className="snap-shadow" data-snap-shadow="1" style={{ left: dragView.snapLeft, width: dragView.snapWidth }} />
+                  <i className="snap-line" style={{ left: dragView.line }} />
+                  <em className="snap-read" style={{ left: dragView.line }}>{dragView.label}</em>
+                </>
+              )}
               {ghost?.trackId === track.id && (
                 <div className="clip" data-draw="1" style={{ left: ghost.left, width: Math.max(8, ghost.width), opacity: 0.45, pointerEvents: 'none' }} />
               )}
@@ -764,13 +875,6 @@ export function ArrangeView({
                 const picked = store.selectedMidiClipIds.includes(clip.id)
                 return (
                   <div key={clip.id} style={{ display: 'contents' }}>
-                  {live && (
-                    <>
-                      <div className="snap-shadow" data-snap-shadow="1" style={{ left: live.snapLeft, width: live.snapWidth }} />
-                      <i className="snap-line" style={{ left: live.line }} />
-                      <em className="snap-read" style={{ left: live.line }}>{live.label}</em>
-                    </>
-                  )}
                   <div
                     data-clip={clip.id}
                     data-midi="1"
@@ -849,13 +953,6 @@ export function ArrangeView({
                     const linked = (project.patternClips ?? []).filter((item) => item.scene == null && item.patternId === clip.patternId).length > 1
                     return (
                       <div key={clip.id} style={{ display: 'contents' }}>
-                      {live && (
-                        <>
-                          <div className="snap-shadow" data-snap-shadow="1" style={{ left: live.snapLeft, width: live.snapWidth }} />
-                          <i className="snap-line" style={{ left: live.line }} />
-                          <em className="snap-read" style={{ left: live.line }}>{live.label}</em>
-                        </>
-                      )}
                       <div
                         data-clip={clip.id}
                         data-pattern="1"
@@ -1158,24 +1255,27 @@ function ClipView({
       if (Math.abs(ev.clientX - originX) > 8 || Math.abs(ev.clientY - originY) > 8) window.clearTimeout(timer)
       if (held) return
       const delta = ((ev.clientX - originX) / px) * project.sampleRate
-      const rawStart = mode === 'move' ? clip.startSample + delta : mode === 'start' ? clip.startSample + delta : clip.startSample
       if (mode === 'move') latest = { ...clip, startSample: snapped(clip.startSample + delta) }
       if (mode === 'start' && stretching) latest = stretchEdge(clip, 'start', snapped(clip.startSample + delta))
       if (mode === 'start' && !stretching) latest = trimAudioClip(clip, 'start', snapped(clip.startSample + delta), bufferLength)
       if (mode === 'end' && stretching) latest = stretchEdge(clip, 'end', snapped(clip.startSample + clip.durationSamples + delta))
       if (mode === 'end' && !stretching) latest = trimAudioClip(clip, 'end', snapped(clip.startSample + clip.durationSamples + delta), bufferLength)
-      const follow = mode === 'move' ? { ...clip, startSample: Math.max(0, rawStart) } : latest
-      setPreview(follow)
+      setPreview(latest)
       if (latest) {
         const left = (latest.startSample / project.sampleRate) * px
         const width = Math.max(8, (latest.durationSamples / project.sampleRate) * px)
-        const line = mode === 'start' ? left : left + width
-        const beats = (latest.durationSamples / project.sampleRate) * (project.tempo / 60)
-        setAudioShadow({ left, width, line, label: lengthReadout(0, beats, quartersPerBar(project.timeSignature)) })
+        const line = mode === 'end' ? left + width : left
+        const startBeat = projectSampleBeat(project, latest.startSample)
+        const endBeat = projectSampleBeat(project, latest.startSample + latest.durationSamples)
+        const label = mode === 'move'
+          ? positionReadout(startBeat, quartersPerBar(project.timeSignature))
+          : lengthReadout(startBeat, endBeat, quartersPerBar(project.timeSignature))
+        setAudioShadow({ left, width, line, label })
       }
     }
     const up = (ev: PointerEvent) => {
       window.clearTimeout(timer)
+      if (Number.isFinite(ev.clientX)) move(ev)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', up)
