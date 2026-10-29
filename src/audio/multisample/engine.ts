@@ -361,9 +361,23 @@ export class SamplerInstrument {
       const stream = openStream(this.bank, ref)
       const audio = stream ? null : this.bank.get(ref)
       if (!audio && !stream) this.bank.request(ref)
-      const loop = zone.loopMode === 'loop' || zone.loopMode === 'sustain'
-      const loopEnd = zone.loopEnd > zone.loopStart ? zone.loopEnd : 0
-      const fade = loop && loopEnd - zone.loopStart > 16 ? Math.min(256, Math.floor((loopEnd - zone.loopStart) / 8)) : 0
+      const forced = play?.loop
+      let loop = zone.loopMode === 'loop' || zone.loopMode === 'sustain'
+      let loopMode = zone.loopMode
+      let loopStart = zone.loopStart
+      let loopEnd = zone.loopEnd > zone.loopStart ? zone.loopEnd : 0
+      if (forced === true) {
+        loop = true
+        loopMode = 'loop'
+        if (!(loopEnd > loopStart)) {
+          loopStart = Math.max(0, zone.offset)
+          loopEnd = zone.end > loopStart + 16 ? zone.end : loopEnd
+        }
+      } else if (forced === false) {
+        loop = false
+        loopMode = 'one-shot'
+      }
+      const fade = loop && loopEnd - loopStart > 16 ? Math.min(256, Math.floor((loopEnd - loopStart) / 8)) : 0
       this.voices.push({
         note,
         vel: Math.max(0, Math.min(1, vel)),
@@ -381,9 +395,9 @@ export class SamplerInstrument {
         gain: dbToAmp(zone.gainDb),
         pan: zone.pan,
         micId: zone.mic,
-        loopMode: zone.loopMode,
+        loopMode,
         looping: loop,
-        loopStart: zone.loopStart,
+        loopStart,
         loopEnd,
         fade,
         end: zone.end,

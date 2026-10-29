@@ -162,6 +162,15 @@
 .shell.phone .me-cell { width: 28px; height: 28px; flex-basis: 28px; }
 .shell.fold .me-modes button,
 .shell.fold .me-bar button { min-height: 40px; }
+.shell .midi-dock .fit-row.me-modes,
+.shell .piano .fit-row.scale-bar {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  height: auto;
+  min-height: 40px;
+}
+.shell.phone .midi-dock .fit-row.me-modes,
+.shell.phone .piano .fit-row.scale-bar { min-height: 48px; }
 
 @media print {
   body.printing-score * { visibility: hidden; }

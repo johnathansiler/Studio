@@ -57,7 +57,7 @@ import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
 import { UNSTUCK_COPY, VIEW_COPY, copyOf, described, visibleMenu } from './ui/chrome'
 import { MainMenu } from './ui/MainMenu'
-import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, readSessionDock, writeSessionDock } from './ui/sessionDock'
+import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, pianoDockWidth, readSessionDock, writeSessionDock } from './ui/sessionDock'
 import { deletesSelection } from './ui/clipKeys'
 import { HintBubble, TipButton } from './ui/Hint'
 import { formatBytes } from './ui/share'
@@ -105,8 +105,9 @@ export function App() {
   const [surface, setSurface] = useState<'studio' | 'artist'>('studio')
   const [dock, setDock] = useState(() => fittedDockWidth(typeof window === 'undefined' ? 1280 : window.innerWidth, EDITOR_DOCK_DEFAULT))
   const [dockEdge, setDockEdge] = useState<'right' | 'bottom'>('right')
+  const editorPanel = useRef('room')
   useEffect(() => {
-    const fit = () => setDock((value) => fittedDockWidth(window.innerWidth, value, dockEdge))
+    const fit = () => setDock((value) => fittedDockWidth(window.innerWidth, value, dockEdge, editorPanel.current === 'piano' ? 0.72 : 0.5))
     window.addEventListener('resize', fit)
     return () => window.removeEventListener('resize', fit)
   }, [dockEdge])
@@ -1213,6 +1214,11 @@ async function importDropped(files: FileList) {
     : 'room'
   const pianoTrack = store.project.tracks.find((track) => track.id === store.selectedTrackId && track.type === 'midi')
     || store.project.tracks.find((track) => track.type === 'midi')
+  editorPanel.current = panel
+  useEffect(() => {
+    if (panel !== 'piano' || phone) return
+    setDock(pianoDockWidth(window.innerWidth))
+  }, [panel, phone])
   const studioTab: StudioTab = collabOpen ? 'collab' : store.view
   const collabShown = collabPanelVisible(studioTab)
   const dockShown = !collabShown && dockVisible({ surface, panel, dockOpen: false })
@@ -1249,8 +1255,16 @@ async function importDropped(files: FileList) {
     hideCollab()
     setSurface('studio')
     setMenuOpen(false)
-    if (view !== 'arrange') setPianoOpen(false)
+    if (view !== 'arrange' || phone) {
+      setPianoOpen(false)
+      if (phone) store.closePiano()
+    }
     store.setView(view)
+  }
+
+  function closePiano() {
+    setPianoOpen(false)
+    store.closePiano()
   }
 
   function openPiano(trackId: string, clipId?: string) {
@@ -1494,7 +1508,7 @@ async function importDropped(files: FileList) {
             const initial = dock
             const move = (ev: PointerEvent) => {
               const delta = dockEdge === 'right' ? start - ev.clientX : start - ev.clientY
-              setDock(fittedDockWidth(window.innerWidth, initial + delta, dockEdge))
+              setDock(fittedDockWidth(window.innerWidth, initial + delta, dockEdge, panel === 'piano' ? 0.72 : 0.5))
             }
             const up = () => {
               window.removeEventListener('pointermove', move)
@@ -1527,7 +1541,7 @@ async function importDropped(files: FileList) {
             <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
           )}
           {surface === 'studio' && panel === 'piano' && (
-            <MidiDock store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => openPlugin('write')} />
+            <MidiDock store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => openPlugin('write')} onClose={phone ? closePiano : undefined} />
           )}
         </div>}
       </div>

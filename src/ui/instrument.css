@@ -1,4 +1,37 @@
 .inst-panel { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; overflow: auto; }
+.sampler-face {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(115, 196, 143, 0.45);
+  background:
+    radial-gradient(circle at 14% 0%, rgba(115, 196, 143, 0.28), transparent 46%),
+    linear-gradient(180deg, #3a5646, #18241c 42%, #0c1210);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), inset 0 -8px 16px rgba(0, 0, 0, 0.35), 0 14px 28px rgba(0, 0, 0, 0.4);
+}
+.sampler-title { margin: 0; font-size: 15px; font-weight: 720; letter-spacing: 0.04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sampler-zones-label { margin: 0; color: var(--muted); font-size: 12px; }
+.sampler-wave {
+  position: relative;
+  height: 72px;
+  min-height: 72px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #070b09;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.sampler-wave canvas { width: 100%; height: 100%; display: block; }
+.sampler-zones i {
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #d7ffe6, #3f9a62);
+  box-shadow: 0 0 8px rgba(115, 196, 143, 0.75);
+}
 .inst-head, .inst-row, .inst-devices { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .inst-head strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
 .inst-devices { flex: 1; min-width: 0; overflow: auto; }
@@ -21,6 +54,11 @@
 .root-step em { font-style: normal; font-size: 10px; color: var(--muted); }
 .root-step b { font-size: 13px; }
 .root-step .bevel { width: 32px; padding: 0; }
+.shell.phone .sampler-title { display: none; }
+.shell.phone .sampler-face { gap: 4px; padding: 6px; }
+.shell.phone .sampler-wave { height: 40px; min-height: 40px; }
+.shell.phone .sampler-face .kit-keys,
+.shell.phone .sampler-face .kit-keys.compact { height: 78px; min-height: 64px; }
 .shell.phone .inst-panel { gap: 6px; padding: 8px; }
 .shell.phone .inst-knobs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .shell.phone .inst-panel .bevel,
