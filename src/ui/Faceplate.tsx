@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import type { ParamSpec } from '../audio/plugins/types'
+import { GestureReadout, useDragValue } from './kit/controls'
 import { NOTE_NAMES } from '../model/scale'
 
 const RATIOS = ['4', '8', '12', '20', 'All']
@@ -70,43 +71,28 @@ function Needle({ label, value, min, max, invert = false }: { label: string; val
 }
 
 function Knob({ spec, value, pluginId, onChange }: { spec: ParamSpec; value: number; pluginId: string; onChange: (value: number) => void }) {
-  const start = useRef({ y: 0, value })
-  const dragging = useRef(false)
-  const [drag, setDrag] = useState(false)
+  const { ref, readout, dragging } = useDragValue<HTMLButtonElement>({
+    min: spec.min,
+    max: spec.max,
+    value,
+    fallback: spec.default,
+    onChange: (next) => onChange(next),
+  })
   const span = spec.max - spec.min || 1
   const unit = Math.max(0, Math.min(1, (value - spec.min) / span))
   const angle = -140 + unit * 280
-  const move = (clientY: number, fine: boolean) => {
-    const delta = (start.current.y - clientY) / (fine ? 220 : 90)
-    const next = clamp(start.current.value + delta * span, spec.min, spec.max)
-    onChange(next)
-  }
   return (
     <div className="knob">
       <button
+        ref={ref}
         type="button"
         role="slider"
-        className={drag ? 'dragging' : ''}
+        className={dragging ? 'dragging' : ''}
         aria-label={spec.name}
         aria-valuemin={spec.min}
         aria-valuemax={spec.max}
         aria-valuenow={Math.round(value * 100) / 100}
         aria-valuetext={shown(pluginId, spec, value)}
-        onDoubleClick={() => onChange(spec.default)}
-        onPointerDown={(event) => {
-          start.current = { y: event.clientY, value }
-          dragging.current = true
-          setDrag(true)
-          event.currentTarget.setPointerCapture(event.pointerId)
-        }}
-        onPointerMove={(event) => {
-          if (!dragging.current) return
-          move(event.clientY, event.shiftKey)
-        }}
-        onPointerUp={() => {
-          dragging.current = false
-          setDrag(false)
-        }}
         onKeyDown={(event) => {
           const step = event.shiftKey ? span / 200 : span / 40
           if (event.key === 'ArrowUp' || event.key === 'ArrowRight') onChange(clamp(value + step, spec.min, spec.max))
@@ -119,6 +105,7 @@ function Knob({ spec, value, pluginId, onChange }: { spec: ParamSpec; value: num
       </button>
       <em>{spec.name}</em>
       <small>{shown(pluginId, spec, value)}</small>
+      <GestureReadout readout={readout} />
     </div>
   )
 }

@@ -8,6 +8,7 @@ import { AutoFader, ChannelAutomation, LinkGroup, MixFlags } from './AutomationL
 import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
+import { TouchSlider } from './kit/controls'
 
 export function MixerView({ store, engine, onTune }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void }) {
   return <MixerBody key={store.project.id} store={store} engine={engine} onTune={onTune} />
@@ -55,18 +56,18 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
         <MasterReadout engine={engine} />
         <div className="fader-row">
           <Meter engine={engine} id="master" />
-          <input
-            type="range"
+          <TouchSlider
+            vertical
+            label="Master volume. How loud the whole mix is."
+            title="How loud the whole mix is."
             min={0}
             max={1.25}
             step={0.01}
-            aria-label="Master volume. How loud the whole mix is."
-            title="How loud the whole mix is."
             value={project.masterVolume}
-            onPointerDown={() => store.beginAutomationTouch()}
-            onPointerUp={() => store.endAutomationTouch()}
-            onPointerCancel={() => store.endAutomationTouch()}
-            onChange={(event) => store.setMasterVolume(Number(event.target.value))}
+            fallback={0.9}
+            onStart={() => store.beginAutomationTouch()}
+            onCommit={() => store.endAutomationTouch()}
+            onChange={(value) => store.setMasterVolume(value)}
           />
         </div>
       </div>

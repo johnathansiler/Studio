@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { installControlGuards } from './ui/gestures'
 import { applyFreeze } from './audio/bounce'
 import { AudioEngine } from './audio/engine'
 import { unpackProject } from './model/archive'
@@ -105,6 +106,7 @@ export function App() {
     return () => window.clearInterval(id)
   }, [engine])
   useEffect(() => watchSpectral(store), [store])
+  useEffect(() => installControlGuards(document), [])
   const [version, setVersion] = useState(0)
   const [surface, setSurface] = useState<'studio' | 'artist'>('studio')
   const [dock, setDock] = useState(() => fittedDockWidth(typeof window === 'undefined' ? 1280 : window.innerWidth, EDITOR_DOCK_DEFAULT))

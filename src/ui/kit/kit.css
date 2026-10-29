@@ -109,6 +109,13 @@
   width: 100%;
 }
 .kit-knob, .kit-fader { width: 100%; max-width: 112px; display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--ink); }
+.kit-knob,
+.kit-knob button,
+.kit-fader,
+.kit-fader button,
+.touch-slider {
+  touch-action: none;
+}
 .kit-knob button, .kit-fader button {
   position: relative;
   width: 58px;
@@ -212,5 +219,57 @@
   .kit-eq { height: 160px; }
   .eq-bands { grid-template-columns: 1fr; }
 }
+.touch-slider {
+  position: relative;
+  display: block;
+  min-width: 88px;
+  height: 28px;
+  border-radius: 9px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 40%),
+    #101814;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.55), inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.touch-slider i {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, var(--accent2, #d5f5e3), var(--accent, #73c48f));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.touch-slider.vertical {
+  width: 36px;
+  min-width: 36px;
+  height: 100%;
+  min-height: 96px;
+}
+.touch-slider.vertical i {
+  left: 8px;
+  right: 8px;
+  top: auto;
+  bottom: 4px;
+  width: auto;
+  border-radius: 5px;
+}
+.touch-slider b {
+  position: absolute;
+  top: 3px;
+  width: 14px;
+  height: 22px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #f4f7f2, #8d9994);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+.touch-slider.vertical b {
+  left: 4px;
+  right: 4px;
+  width: auto;
+  height: 14px;
+  top: auto;
+}
+.touch-slider.dragging { box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--accent, #73c48f); }
 .face-gallery { display: flex; flex-direction: column; gap: 20px; padding: 16px; background: #0c110f; }
 .face-gallery > div { width: min(920px, 100%); margin: 0 auto; }

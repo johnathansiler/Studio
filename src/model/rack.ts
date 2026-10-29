@@ -369,8 +369,7 @@ export const DEVICE_KINDS = Object.keys(DEVICE_NAMES) as DeviceKind[]
 
 export const FACTORY_PRESETS: Record<DeviceKind, { name: string; params: Record<string, number>; category?: string }[]> = {
   sub: [
-    { name: 'Init', category: 'Keys', params: {} },
-    { name: 'Bass', category: 'Bass', params: { cutoff: 420, res: 0.35, mix2: 0.4, detune: 8, famt: 0.55, decay: 180, sustain: 0.4, m1d: 0.4, m1t: 0 } },
+    { name: 'Bass', category: 'Bass', params: { cutoff: 280, res: 0.42, mix2: 0.55, detune: 10, famt: 0.62, decay: 160, sustain: 0.35, drive: 0.2, m1d: 0.45, m1t: 0 } },
     { name: 'Pad', category: 'Pad', params: { attack: 420, release: 900, cutoff: 2200, mix2: 0.45, mix3: 0.2, famt: 0.2, m1d: 0.25, m1t: 0 } },
     { name: 'Pluck', category: 'Pluck', params: { attack: 2, decay: 160, sustain: 0.1, release: 180, cutoff: 3200, famt: 0.7 } },
     ...SUB_PRESETS,
@@ -389,11 +388,11 @@ export const FACTORY_PRESETS: Record<DeviceKind, { name: string; params: Record<
   ],
   drum: [{ name: 'Kit', params: { level: 0.85, swing: 0.08 } }],
   eq: [
-    { name: 'Flat', params: {} },
-    { name: 'Air', params: { high: 3, low: -1 } },
+    { name: 'Vocal', params: { low: -2, mid: 2, midF: 3200, high: 1.5 } },
+    { name: 'Air', params: { high: 4, low: -1, midF: 5000, mid: 1 } },
   ],
   comp: [
-    { name: 'Off', params: { ratio: 1, threshold: 0 } },
+    { name: 'Gentle', params: { threshold: -18, ratio: 2, attack: 18, release: 160, makeup: 1 } },
     { name: 'Glue', params: { threshold: -16, ratio: 3, makeup: 2 } },
   ],
   delay: [
@@ -401,19 +400,36 @@ export const FACTORY_PRESETS: Record<DeviceKind, { name: string; params: Record<
     { name: 'Dotted', params: { time: 0.75, feedback: 0.4, mix: 0.28 } },
   ],
   reverb: [
-    { name: 'Room', params: { size: 0.35, mix: 0.16 } },
-    { name: 'Hall', params: { size: 0.8, mix: 0.22 } },
+    { name: 'Room', params: { size: 0.32, mix: 0.14 } },
+    { name: 'Hall', params: { size: 0.72, mix: 0.2 } },
+    { name: 'Big Hall', params: { size: 0.95, mix: 0.32 } },
   ],
   chorus: [{ name: 'Wide', params: { rate: 0.3, depth: 0.55, mix: 0.35 } }],
   dist: [{ name: 'Warm', params: { drive: 0.45, mix: 0.5 } }],
   filter: [{ name: 'Open', params: { cutoff: 6000, res: 0.1, mode: 0 } }],
-  mix: [{ name: 'Unity', params: { gain: 1 } }],
-  split: [{ name: 'Unity', params: { gain: 1 } }],
+  mix: [
+    { name: 'Boost', params: { gain: 1.25 } },
+    { name: 'Dim', params: { gain: 0.65 } },
+  ],
+  split: [
+    { name: 'Boost', params: { gain: 1.3 } },
+    { name: 'Dim', params: { gain: 0.55 } },
+  ],
   seq: [{ name: 'Rise', params: { s0: 0, s1: 0.25, s2: 0.5, s3: 0.75, s4: 1, s5: 0.6, s6: 0.3, s7: 0.1 } }],
   arp: [
     { name: 'Up', params: { mode: 0, rate: 0.25, gate: 0.6 } },
     { name: 'Down', params: { mode: 1, rate: 0.25, gate: 0.6 } },
   ],
+}
+
+export function activeDevicePreset(kind: DeviceKind, params: Record<string, number>) {
+  const base = defaults(kind)
+  const keys = Object.keys(base)
+  for (const preset of FACTORY_PRESETS[kind]) {
+    const full = { ...base, ...preset.params }
+    if (keys.every((key) => Math.abs((params[key] ?? 0) - (full[key] ?? 0)) < 0.001)) return preset.name
+  }
+  return ''
 }
 
 export function defaults(kind: DeviceKind) {

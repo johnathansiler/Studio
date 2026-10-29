@@ -349,7 +349,7 @@ export function PadsPanel({
           })}
         </div>
         {source && (
-          <aside className="mpc-params ch-recessed" aria-label="Pad settings">
+          <aside className="mpc-params ch-recessed" aria-label="Pad settings" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
             <h3 title={source.sampleName || source.name}>{padFaceName(source)}</h3>
             <div className="mpc-side-meter" aria-label="Pad meter" style={{ ['--vel' as string]: String(meters[selected] ?? 0) }}>
               <i style={{ height: `${Math.round((meters[selected] ?? 0) * 100)}%` }} />

@@ -407,6 +407,7 @@
   overflow: hidden;
 }
 
+.sl-fader .touch-slider.vertical { height: 100%; width: 28px; min-height: 0; }
 .sl-fader input[type="range"] {
   writing-mode: vertical-lr;
   direction: rtl;

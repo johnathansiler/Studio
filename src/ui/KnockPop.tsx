@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import type { AudioEngine } from '../audio/engine'
 import { CLICK_NAMES, DRIVE_NAMES, knockPadPitch, noteLabel, NOTE_NAMES, renderKnockBuffer, SCALE_NAMES, detectPitch } from '../audio/rack/knock'
 import { KNOCK_PRESETS } from '../model/knockPresets'
+import { activeDevicePreset } from '../model/rack'
+import { PresetBar } from './PresetBar'
 import { samplesToBeats } from '../model/time'
 import { uid } from '../model/types'
 import { selectKnock } from '../state/select'
@@ -147,22 +149,17 @@ export function KnockPop({ store, engine, onClose }: { store: ProjectStore; engi
     <div className="knock-pop" data-knock="open">
       <header>
         <strong>Knock</strong>
-        <select
-          aria-label="Preset"
-          value=""
-          onChange={(event) => event.target.value && store.applyDevicePreset(track.id, device.id, event.target.value)}
-        >
-          <option value="">Preset</option>
-          {KNOCK_PRESETS.map((item) => (
-            <option key={item.name} value={item.name}>{item.name}</option>
-          ))}
-        </select>
+        <PresetBar
+          names={KNOCK_PRESETS.map((item) => item.name)}
+          active={activeDevicePreset('knock', params)}
+          onPick={(name) => store.applyDevicePreset(track.id, device.id, name)}
+        />
         <button className={`text-btn ${slideArm ? 'on' : ''}`} onClick={() => setSlideArm((value) => !value)}>Slide</button>
         <button className={`text-btn ${(params.snap || 0) >= 0.5 ? 'on' : ''}`} onClick={() => setParam('snap', (params.snap || 0) >= 0.5 ? 0 : 1)}>Key</button>
         <button className="text-btn" onClick={onClose}>Close</button>
       </header>
       <div className="knock-stage">
-        <div className="knock-controls">
+        <div className="knock-controls" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
           <div className="knock-macros">
             {MACROS.map((macro) => (
               <label key={macro.id}>

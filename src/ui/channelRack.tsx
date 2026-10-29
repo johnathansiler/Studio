@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
+import { GestureReadout, useDragValue } from './kit/controls'
 import type { AudioEngine } from '../audio/engine'
 import {
   GRAPH_LABELS,
@@ -110,18 +111,25 @@ function Knob({
   onChange: (next: number, drag: boolean) => void
   onDone: () => void
 }) {
-  const drag = useRef<{ y: number; value: number } | null>(null)
-  const [live, setLive] = useState(false)
   const set = (next: number, fromDrag: boolean) => {
     const snapped = Math.round(Math.max(min, Math.min(max, next)) / step) * step
     onChange(Number(snapped.toFixed(2)), fromDrag)
   }
+  const { ref, readout, dragging } = useDragValue<HTMLButtonElement>({
+    min,
+    max,
+    value,
+    fallback: (min + max) / 2,
+    onChange: (next) => set(next, true),
+    onCommit: onDone,
+  })
   const span = max - min || 1
   const unit = Math.max(0, Math.min(1, (value - min) / span))
   return (
     <button
+      ref={ref}
       type="button"
-      className={`rack-knob${live ? ' dragging' : ''}`}
+      className={`rack-knob${dragging ? ' dragging' : ''}`}
       role="slider"
       style={{ ['--arc' as string]: String(unit) }}
       title={`${label}. ${hint}`}
@@ -129,34 +137,14 @@ function Knob({
       aria-valuemin={min}
       aria-valuemax={max}
       aria-valuenow={Number(value.toFixed(2))}
-      onDoubleClick={() => set((min + max) / 2, false)}
-      onPointerDown={(event) => {
-        drag.current = { y: event.clientY, value }
-        setLive(true)
-        event.currentTarget.setPointerCapture(event.pointerId)
-      }}
-      onPointerMove={(event) => {
-        if (!drag.current) return
-        const delta = (drag.current.y - event.clientY) / 90
-        set(drag.current.value + delta * (max - min), true)
-      }}
-      onPointerUp={() => {
-        drag.current = null
-        setLive(false)
-        onDone()
-      }}
-      onPointerCancel={() => {
-        drag.current = null
-        setLive(false)
-        onDone()
-      }}
       onKeyDown={(event) => {
         if (event.key === 'ArrowUp' || event.key === 'ArrowRight') set(value + step, false)
         if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') set(value - step, false)
       }}
     >
       <i style={{ transform: `rotate(${knobAngle(value, min, max)}deg)` }} />
-      {live && <em className="rack-readout">{value.toFixed(2)}</em>}
+      {(dragging || readout) && <em className="rack-readout">{readout?.text ?? value.toFixed(2)}</em>}
+      <GestureReadout readout={readout} />
     </button>
   )
 }

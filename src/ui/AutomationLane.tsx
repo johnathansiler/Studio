@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { TouchSlider } from './kit/controls'
 import type { AudioEngine } from '../audio/engine'
 import type { ArrangeTool } from '../state/tools'
 import type { AutoSpec } from '../model/automation'
@@ -148,20 +149,21 @@ export function AutoFader({ store, engine, spec, value, label, className }: { st
   const mode = channelAutomationMode(store.project, spec.trackId === 'master' ? 'master' : spec.trackId)
   const shown = rolling && mode === 'read' ? automatedValue(store.project, spec, sample, value) : value
   const span = spec.max - spec.min
+  const vertical = className !== 'pan'
   return (
-    <input
-      aria-label={label}
+    <TouchSlider
+      label={label}
       title={label}
       className={className}
-      type="range"
+      vertical={vertical}
       min={spec.min}
       max={spec.max}
       step={span <= 2 ? 0.01 : span <= 40 ? 0.1 : 1}
       value={Number.isFinite(shown) ? shown : value}
-      onPointerDown={() => store.beginAutomationTouch()}
-      onPointerUp={() => store.endAutomationTouch()}
-      onPointerCancel={() => store.endAutomationTouch()}
-      onChange={(event) => store.setAutomated(spec, Number(event.target.value), rolling, engine.currentTimelineSample())}
+      fallback={spec.min < 0 ? 0 : spec.max > 1 ? 0.8 : (spec.min + spec.max) / 2}
+      onStart={() => store.beginAutomationTouch()}
+      onCommit={() => store.endAutomationTouch()}
+      onChange={(next) => store.setAutomated(spec, next, rolling, engine.currentTimelineSample())}
     />
   )
 }

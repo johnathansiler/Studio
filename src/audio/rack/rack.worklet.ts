@@ -1,4 +1,5 @@
 import { RackRuntime } from './dsp'
+import { glideValue } from '../paramCurve'
 import type { RackAutomation, RackState } from '../../model/rack'
 import type { SampleBuffer } from './dsp'
 
@@ -44,6 +45,7 @@ class RackProcessor extends AudioWorkletProcessor {
   private lanes: RackAutomation[] = []
   private originTime = 0
   private originBeat = 0
+  private smooth = new Map<string, Record<string, number>>()
 
   constructor() {
     super()
@@ -102,7 +104,7 @@ class RackProcessor extends AudioWorkletProcessor {
       }
       const span = Math.max(1, Math.min(frames - rendered, until - rendered))
       const beat = this.originBeat + (at - this.originTime) * (this.tempo / 60)
-      const block = this.runtime.render(rack, span, this.tempo, this.quality, this.buffers, this.lanes, beat)
+      const block = this.runtime.render(this.glideRack(rack, span), span, this.tempo, this.quality, this.buffers, this.lanes, beat)
       left.set(block[0], rendered)
       if (right) right.set(block[1], rendered)
       rendered += span
@@ -112,6 +114,24 @@ class RackProcessor extends AudioWorkletProcessor {
       this.port.postMessage({ type: 'cpu', value: ((typeof performance !== 'undefined' ? performance.now() : started) - started) / budget })
     }
     return true
+  }
+
+  /** Approach the posted device params inside the block. The graph delay stays the same. */
+  private glideRack(rack: RackState, frames: number): RackState {
+    let changed = false
+    const devices = rack.devices.map((device) => {
+      const prev = this.smooth.get(device.id)
+      const next: Record<string, number> = {}
+      for (const [key, value] of Object.entries(device.params)) {
+        const from = prev && typeof prev[key] === 'number' ? prev[key] : value
+        next[key] = glideValue(from, value, frames, sampleRate)
+        if (Math.abs(next[key] - value) > 1e-4) changed = true
+      }
+      this.smooth.set(device.id, next)
+      if (!prev) return device
+      return { ...device, params: next }
+    })
+    return changed || devices.some((device, index) => device !== rack.devices[index]) ? { ...rack, devices } : rack
   }
 }
 

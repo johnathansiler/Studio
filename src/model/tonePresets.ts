@@ -38,7 +38,6 @@ export const FM_PRESETS: TonePreset[] = [
 ]
 
 export const WAVE_PRESETS: TonePreset[] = [
-  tone('Init', 'Keys', {}),
   tone('Saw', 'Lead', { table: 1, position: 0.4, cutoff: 2400, res: 0.2, famt: 0 }),
   tone('Square', 'Keys', { table: 2, position: 0.2, cutoff: 1800 }),
   tone('Morph', 'Pad', { table: 3, position: 0.55, attack: 400, release: 800, fxChor: 0.3, cutoff: 3000 }),

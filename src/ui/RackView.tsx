@@ -3,7 +3,8 @@ import { Keyboard, Knob } from './kit/controls'
 import type { AudioEngine } from '../audio/engine'
 import { LibraryPanel } from './LibraryPanel'
 import { SamplerFace } from './SamplerFace'
-import { DEVICE_KINDS, DEVICE_NAMES, DEVICE_PARAMS, FACTORY_PRESETS, isInstrument, type DeviceKind } from '../model/rack'
+import { DEVICE_KINDS, DEVICE_NAMES, DEVICE_PARAMS, FACTORY_PRESETS, activeDevicePreset, isInstrument, type DeviceKind } from '../model/rack'
+import { PresetBar } from './PresetBar'
 import { selectRack } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import './kit/kit.css'
@@ -70,12 +71,11 @@ export function RackView({ store, engine, trackId, onOpenKnock }: { store: Proje
       ) : device ? (
         <div className="inst-body">
           <div className="inst-row">
-            <select className="bevel" aria-label="Preset" title="Load a preset for this device." value="" onChange={(event) => event.target.value && store.applyDevicePreset(track.id, device.id, event.target.value)}>
-              <option value="">Preset</option>
-              {FACTORY_PRESETS[device.kind].map((item) => (
-                <option key={item.name} value={item.name}>{item.name}</option>
-              ))}
-            </select>
+            <PresetBar
+              names={FACTORY_PRESETS[device.kind].map((item) => item.name)}
+              active={activeDevicePreset(device.kind, device.params)}
+              onPick={(name) => store.applyDevicePreset(track.id, device.id, name)}
+            />
             <select className="bevel" aria-label="Add device" title="Add a device to this instrument." value="" onChange={(event) => event.target.value && store.addDevice(track.id, event.target.value as DeviceKind)}>
               <option value="">Add</option>
               {DEVICE_KINDS.map((kind) => (

@@ -4,6 +4,7 @@ import { createProcessor } from './plugins/createAll'
 import { projectSampleBeat } from '../model/tempoMap'
 import { valueChanges } from '../model/automation'
 import { automationAt } from './plugins/catalog'
+import { glideValue } from './paramCurve'
 import { transparentLimit } from './liveStage'
 import type { AutomationLane, PluginInstance, TempoPoint } from '../model/types'
 import type { Processor } from './plugins/types'
@@ -230,10 +231,9 @@ class InsertProcessor extends AudioWorkletProcessor {
       this.held.set(id, { ...next })
       return next
     }
-    const alpha = Math.min(1, frames / Math.max(1, 0.01 * sampleRate))
     for (const key of Object.keys(next)) {
       const from = typeof prev[key] === 'number' ? prev[key] : next[key]
-      const value = from + ((next[key] ?? from) - from) * alpha
+      const value = glideValue(from, next[key] ?? from, frames, sampleRate)
       next[key] = value
       prev[key] = value
     }
