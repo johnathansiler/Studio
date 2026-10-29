@@ -457,7 +457,7 @@ export function PerformPop({
           <button type="button" className={erase ? 'on' : ''} onClick={() => setErase((value) => !value)}>Erase</button>
           <button type="button" className={recordMode === 'replace' ? 'on' : ''} onClick={() => setRecordMode((value) => (value === 'overdub' ? 'replace' : 'overdub'))}>{recordMode === 'replace' ? 'Replace' : 'Overdub'}</button>
           <button type="button" onClick={() => clip && store.doubleClip(clip.trackId, clip.clipId)}>Double</button>
-          <button type="button" onClick={() => store.undoTake()}>Undo take</button>
+          <button type="button" title="Undo" disabled={!store.canUndo} onClick={() => store.undo()}>Undo</button>
           <select aria-label="Fixed length" value={fixed} onChange={(event) => setFixed(Number(event.target.value))}>
             <option value={0}>Free</option>
             <option value={4}>1 bar</option>

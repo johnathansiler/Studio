@@ -59,7 +59,9 @@ import { UNSTUCK_COPY, VIEW_COPY, copyOf, described, visibleMenu } from './ui/ch
 import { MainMenu } from './ui/MainMenu'
 import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, pianoDockWidth, readSessionDock, writeSessionDock } from './ui/sessionDock'
 import { deletesSelection } from './ui/clipKeys'
+import { historyCommand, typingTarget } from './state/history'
 import { HintBubble, TipButton } from './ui/Hint'
+import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
 
 interface Bundle {
@@ -644,7 +646,15 @@ export function App() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
+      const typing = typingTarget(target)
+      const command = historyCommand(event, typing)
+      if (command) {
+        event.preventDefault()
+        if (command === 'undo') store.undo()
+        else store.redo()
+        return
+      }
+      if (typing) return
       const key = event.key.toLowerCase()
       const meta = event.metaKey || event.ctrlKey
       if (key === 't' && !meta && !event.repeat && !store.keyboardMidi) {
@@ -656,11 +666,6 @@ export function App() {
         else void stop()
       } else if (key === 'r' && !meta) void record()
       else if (key === 'q' && !meta) store.quickQuantize()
-      else if (meta && key === 'z') {
-        event.preventDefault()
-        if (event.shiftKey) store.redo()
-        else store.undo()
-      } else if (!meta && event.shiftKey && key === 'z') store.redo()
       else if (meta && key === 's') {
         event.preventDefault()
         void persist()
@@ -1361,6 +1366,7 @@ async function importDropped(files: FileList) {
             {collabBadge && <span className="collab-badge" aria-hidden />}
           </button>
         </div>
+        <HistoryButtons canUndo={store.canUndo} canRedo={store.canRedo} onUndo={() => store.undo()} onRedo={() => store.redo()} />
         <TipButton
           className={`unstuck-btn ${unstuckOpen ? 'on' : ''}`}
           label={UNSTUCK_COPY.label}
@@ -1371,6 +1377,7 @@ async function importDropped(files: FileList) {
         />
         <button type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Project, edit, view, and settings." title="Project, edit, view, and settings." aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
           <MenuIcon />
+          <span className="fold-word">Menu</span>
         </button>
         {menuOpen && (
           <MainMenu
@@ -1434,6 +1441,7 @@ async function importDropped(files: FileList) {
             context={panel === 'piano' ? 'piano' : 'arrange'}
             compact={form !== 'desk'}
             phone={phone}
+            words={form === 'fold'}
             onChange={(tool) => store.setTool(tool)}
             onDuplicate={() => store.duplicateSelection()}
             onDelete={() => store.deleteSelectedClip()}
@@ -1676,7 +1684,7 @@ async function importDropped(files: FileList) {
                 ['M', 'Mute the selected track'],
                 ['S', 'Solo the selected track'],
                 ['⌘/Ctrl Z', 'Undo'],
-                ['⇧⌘/Ctrl Z or Shift Z', 'Redo'],
+                ['⇧⌘/Ctrl Z, Ctrl Y, or Shift Z', 'Redo'],
                 ['⌘/Ctrl S', 'Save in this browser'],
                 ['⌘/Ctrl E or B', 'Split the clip at the playhead'],
                 ['Delete', 'Remove the selected clip'],

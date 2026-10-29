@@ -1292,6 +1292,7 @@ body:not(:has(.shell.phone)) .action-sheet {
   min-width: 44px;
   min-height: 44px;
 }
+.shell.fold .inst-close { width: auto; min-width: 44px; height: 44px; min-height: 44px; padding: 0 10px; }
 
 @media (hover: hover) {
   .shell #shell-menu button:hover,

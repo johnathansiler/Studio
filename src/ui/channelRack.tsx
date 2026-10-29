@@ -771,7 +771,9 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
                   aria-label={`${mute.label} ${channel.name}. ${mute.hint}`}
                   aria-pressed={channel.mute}
                   onClick={() => store.setChannel(channel.id, { mute: !channel.mute })}
-                />
+                >
+                  <span className="fold-word">Mute</span>
+                </button>
                 {!phone && (
                   <Knob
                     label={`${channel.name} ${pan.label}`}

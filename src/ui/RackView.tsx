@@ -46,7 +46,7 @@ export function RackView({ store, engine, trackId, onOpenKnock }: { store: Proje
             ))}
           </div>
         )}
-        <button type="button" className="bevel inst-close" aria-label="Close the instrument panel." title="Close the instrument panel." onClick={() => store.openRack(track.id)}>×</button>
+        <button type="button" className="bevel inst-close" aria-label="Close the instrument panel." title="Close the instrument panel." onClick={() => store.openRack(track.id)}>×<span className="fold-word">Close</span></button>
       </header>
       {sampled ? (
         <SamplerFace store={store} engine={engine} trackId={track.id} />

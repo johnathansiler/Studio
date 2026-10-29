@@ -305,7 +305,7 @@ export function PadsPanel({
           onPointerCancel={() => setEraseOn(false)}
           onPointerLeave={() => setEraseOn(false)}
         >Erase</button>
-        <button type="button" className="ch-tab" title="Undo the last record pass." onClick={() => store.undoTake()}>Undo</button>
+        <button type="button" className="ch-tab" title="Undo" disabled={!store.canUndo} onClick={() => store.undo()}>Undo</button>
         <button type="button" className={`ch-tab${store.project.countIn ? ' on' : ''}`} aria-pressed={store.project.countIn} title="Count one bar before recording starts." onClick={() => store.toggle('countIn')}>Count</button>
         <button type="button" className={`ch-tab${store.project.metronomeEnabled ? ' on' : ''}`} aria-pressed={store.project.metronomeEnabled} title="Metronome while the pads record." onClick={() => store.toggle('metronomeEnabled')}>Click</button>
         <select aria-label="16 Levels" title="One pad spread across 16 velocities, tunes, or decays." value={levels} onChange={(event) => setLevels(event.target.value as LevelSpread | '')}>

@@ -555,7 +555,8 @@ export function ArrangeView({
               )}
               {!phone && (track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
                 <TipButton className={`mini ${track.armed ? 'on-r' : ''}`} label={copyOf(TRACK_ROW, 'arm').label} hint={track.type === 'midi' ? 'Record this instrument from its MIDI input.' : copyOf(TRACK_ROW, 'arm').hint} pressed={track.armed} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
-                  R
+                  <span className="mini-mark">R</span>
+                  <span className="mini-word">Arm</span>
                 </TipButton>
               )}
               <span className="mini-meter" aria-hidden><i style={{ transform: `scaleX(${Math.min(1, (levels[track.id] ?? 0) * 3)})` }} /></span>

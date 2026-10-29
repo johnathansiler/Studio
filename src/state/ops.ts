@@ -114,6 +114,13 @@ export function diffProject(before: Project | null, after: Project): RawChange[]
   return out
 }
 
+/** Diff two projects that are already musical clones. Does not copy them again. */
+export function diffCloned(before: Project, after: Project): RawChange[] {
+  const out: RawChange[] = []
+  diffAny(before, after, PROJECT_SCHEMA, '', out)
+  return out
+}
+
 export function packStamps(stamps: Map<string, Stamp>): StampWire[] {
   return [...stamps].map(([path, stamp]) => [path, stamp.l, stamp.a])
 }

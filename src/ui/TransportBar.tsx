@@ -223,16 +223,20 @@ export function TransportBar({
         {!simple && (
           <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>
             <SkipBackIcon />
+            <span className="t-word">Start</span>
           </TipButton>
         )}
         <TipButton className={`t-btn play ${playing ? 'on' : ''}`} label={transport('play').label} hint={transport('play').hint} pressed={playing} onPress={() => engine.unlock()} onClick={onPlay}>
           <PlayIcon />
+          <span className="t-word">Play</span>
         </TipButton>
         <TipButton className="t-btn stop" label={transport('stop').label} hint={transport('stop').hint} disabled={status === 'stopped'} onClick={onStop}>
           <StopIcon />
+          <span className="t-word">Stop</span>
         </TipButton>
         <TipButton className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={status === 'recording' || status === 'counting-in'} onPress={() => engine.unlock()} onClick={onRecord}>
           <RecIcon />
+          <span className="t-word">Rec</span>
         </TipButton>
       </div>
       <div className="lcd" aria-live="polite">
@@ -342,6 +346,7 @@ export function TransportBar({
             onClick={() => store.toggle('loopEnabled')}
           >
             <LoopIcon />
+            <span className="t-word">Loop</span>
           </TipButton>
         )}
         <span
