@@ -740,17 +740,47 @@
   padding: 8px;
 }
 
+.shell #shell-menu .menu-group {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.shell #shell-menu .menu-heading {
+  margin: 2px 0 0;
+  padding: 0 4px;
+  min-height: 0;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--muted);
+  line-height: 1.2;
+}
+
+.shell #shell-menu .menu-group + .menu-group .menu-heading {
+  margin-top: 8px;
+}
+
 .shell #shell-menu button,
 .shell.phone #shell-menu button,
 .shell.fold #shell-menu button,
 .shell #shell-menu .menu-sig {
   flex: 0 0 auto;
   align-self: stretch;
+  align-items: center;
+  justify-content: center;
   min-height: 68px;
   height: auto;
   overflow: visible;
   white-space: normal;
   text-overflow: unset;
+  text-align: center;
   background-color: #1c2b24;
   background-image: var(--face);
   box-shadow: var(--raised);
@@ -763,6 +793,34 @@
   box-shadow: var(--raised);
   border: 1px solid color-mix(in srgb, var(--line) 78%, white);
   min-height: 56px;
+}
+
+.shell #shell-menu button > span,
+.shell #shell-menu button > small,
+.shell #shell-menu .menu-sig > span,
+.shell #shell-menu .menu-sig > small {
+  text-align: center;
+}
+
+.shell #shell-menu .menu-sig {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
+  font-size: 13px;
+  gap: 2px;
+}
+
+.shell #shell-menu .menu-sig > span { font-weight: 640; }
+.shell #shell-menu .menu-sig > small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 420;
+  line-height: 1.35;
+}
+
+.shell #shell-menu .menu-sig select {
+  text-align: center;
+  text-align-last: center;
 }
 
 .shell #shell-menu button > small {
@@ -783,7 +841,12 @@
   right: 0;
   bottom: 0;
   width: auto;
-  max-height: min(72dvh, calc(100dvh - 72px));
+  /* Stay under the top bar, transport, and tool strip, and scroll inside. */
+  max-height: calc(100dvh - 310px);
+}
+
+.shell.phone.land #shell-menu {
+  max-height: calc(100dvh - 96px);
 }
 
 .action-sheet {
