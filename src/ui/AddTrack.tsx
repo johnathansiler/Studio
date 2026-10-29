@@ -3,6 +3,7 @@ import { clampCount, defaultAddSpec, type AddKind, type AddTrackSpec } from '../
 import type { TrackInstrument } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { useFormFactor } from './form'
+import { GuideLayer } from './GuideLayer'
 import './guideSheet.css'
 
 const LAST_KEY = 'cueharbor-last-track'
@@ -283,10 +284,10 @@ export function AddTrackButton({ store }: { store: ProjectStore }) {
         {form === 'desk' ? '+' : 'Add'}
       </button>
       {open && (
-        <>
+        <GuideLayer>
           <button type="button" className="guide-scrim" aria-label="Close add track" onClick={() => setOpen(false)} />
           <AddTrackPanel spec={spec} place={place} onChange={setSpec} onCancel={() => setOpen(false)} onCommit={() => commit(spec)} />
-        </>
+        </GuideLayer>
       )}
     </div>
   )

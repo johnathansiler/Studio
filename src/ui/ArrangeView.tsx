@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
+import { GuideLayer } from './GuideLayer'
 import type { AudioEngine } from '../audio/engine'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { activeComp } from '../model/comp'
@@ -634,7 +635,7 @@ export function ArrangeView({
         onSetup={() => setSetupOpen((open) => !open)}
       />
       {setupOpen && (
-        <>
+        <GuideLayer>
           <button type="button" className="guide-scrim" aria-label="Close song setup" onClick={() => setSetupOpen(false)} />
           <div id="arrange-setup" className={`guide-sheet song-sheet ${compact ? 'sheet' : 'pop'}`} role="dialog" aria-label="Song">
             {compact && <div className="guide-handle" aria-hidden="true" />}
@@ -661,7 +662,7 @@ export function ArrangeView({
               <SongMapHead store={store} position={position} />
             </section>
           </div>
-        </>
+        </GuideLayer>
       )}
       <div className={`playlist-frame ${browserOpen ? 'browser-open' : ''} ${phone ? 'phone-arrange' : ''}`} style={{ ['--browser' as string]: `${browserWidth}px` }}>
       {browserOpen && compact && (

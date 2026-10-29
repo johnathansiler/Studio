@@ -170,37 +170,119 @@ describe('phone fit at 412x915', () => {
         expect(roll).toBeGreaterThan(0)
         await shot(page, 'live-beats-412')
 
+        await page.getByRole('button', { name: /^Arrange/ }).first().click()
+        await page.getByRole('button', { name: /^Add track$/ }).click()
+        await page.getByRole('dialog', { name: 'Add track' }).waitFor()
+        const sheet = await page.evaluate(() => {
+          const panel = document.querySelector('.add-sheet') as HTMLElement
+          const add = [...panel.querySelectorAll('button')].find((button) => (button.textContent || '').includes('Add Audio')) as HTMLElement
+          const hit = document.elementFromPoint(add.getBoundingClientRect().left + 8, add.getBoundingClientRect().top + 8)
+          const bg = getComputedStyle(panel).backgroundColor
+          return {
+            parent: panel.parentElement?.tagName,
+            z: Number(getComputedStyle(panel).zIndex),
+            scrim: !!document.querySelector('.guide-scrim'),
+            opaque: bg.startsWith('rgb(') && !bg.endsWith(', 0)'),
+            hit: hit === add || add.contains(hit),
+          }
+        })
+        expect(sheet.parent).toBe('BODY')
+        expect(sheet.z).toBeGreaterThanOrEqual(200)
+        expect(sheet.scrim).toBe(true)
+        expect(sheet.opaque).toBe(true)
+        expect(sheet.hit).toBe(true)
+        await shot(page, 'live-add-track-412')
+        await page.keyboard.press('Escape')
+
+        await page.getByRole('button', { name: /Snap grid/ }).click()
+        await page.getByRole('dialog', { name: 'Snap grid' }).waitFor()
+        const gridPick = await page.evaluate(() => {
+          const dialog = document.querySelector('[data-picker="Snap grid"]') as HTMLElement
+          const option = [...dialog.querySelectorAll('button')].find((button) => button.textContent === '1/16') as HTMLElement
+          const box = option.getBoundingClientRect()
+          return { height: box.height, top: dialog.compareDocumentPosition(document.body) }
+        })
+        expect(gridPick.height).toBeGreaterThanOrEqual(40)
+        await page.getByRole('button', { name: '1/16', exact: true }).click()
+        await page.getByRole('dialog', { name: 'Snap grid' }).waitFor({ state: 'detached' })
+        await shot(page, 'live-grid-412')
+
         await page.getByRole('button', { name: /^Mix/ }).click()
         await page.locator('.mixer .strip').first().waitFor()
+        await page.getByRole('button', { name: 'Columns' }).click()
         const mix = await page.evaluate(() => {
+          const mixer = document.querySelector('.mixer-view .mixer') as HTMLElement
           const mute = document.querySelector('.strip button[aria-label*="Mute"]') as HTMLElement
-          mute.scrollIntoView({ block: 'center' })
+          const safeButton = document.querySelector('.strip .solo-safe') as HTMLElement
+          const arm = document.querySelector('.strip .arm-flag') as HTMLElement
+          safeButton.scrollIntoView({ block: 'center' })
           const box = mute.getBoundingClientRect()
+          const safeBox = safeButton.getBoundingClientRect()
+          const armBox = arm.getBoundingClientRect()
+          const host = mixer.getBoundingClientRect()
           const word = mute.querySelector('.mini-word') as HTMLElement
-          const safe = document.querySelector('.strip .solo-safe .arm-full') as HTMLElement | null
+          const master = document.querySelector('.strip.master') as HTMLElement
+          const strip = document.querySelector('.strip:not(.master)') as HTMLElement
           return {
             top: box.top,
-            bottom: box.bottom,
+            bottom: safeBox.bottom,
             word: word.textContent,
             wordShown: getComputedStyle(word).display,
-            safe: safe ? safe.textContent : 'missing',
-            safeShown: safe ? getComputedStyle(safe).display : 'missing',
+            safe: safeButton.querySelector('.arm-full')?.textContent ?? 'missing',
+            safeShown: getComputedStyle(safeButton.querySelector('.arm-full') as HTMLElement).display,
+            safeIn: safeBox.top >= host.top - 1 && safeBox.bottom <= Math.min(host.bottom, window.innerHeight) + 1 && safeBox.height >= 40,
+            armIn: armBox.top >= host.top - 1 && armBox.bottom <= Math.min(host.bottom, window.innerHeight) + 1 && armBox.height >= 40,
+            masterWidth: master.getBoundingClientRect().width,
+            stripWidth: strip.getBoundingClientRect().width,
             view: window.innerHeight,
           }
         })
-        expect(mix.top).toBeGreaterThanOrEqual(0)
-        expect(mix.bottom).toBeLessThanOrEqual(mix.view + 1)
         expect(mix.word).toBe('Mute')
         expect(mix.wordShown).not.toBe('none')
         expect(mix.safe).toBe('Safe')
         expect(mix.safeShown).not.toBe('none')
+        expect(mix.safeIn).toBe(true)
+        expect(mix.armIn).toBe(true)
+        expect(Math.abs(mix.masterWidth - mix.stripWidth)).toBeLessThan(2)
         await shot(page, 'live-mix-412')
 
         const fold = await browser.newPage({ viewport: { width: 923, height: 1024 } })
         await fold.goto(url, { waitUntil: 'domcontentloaded' })
         await fold.getByRole('button', { name: /^Arrange/ }).first().waitFor()
+        await fold.getByRole('button', { name: /Snap grid/ }).click()
+        await fold.getByRole('dialog', { name: 'Snap grid' }).waitFor()
+        const foldGrid = await fold.getByRole('button', { name: '1/8', exact: true }).boundingBox()
+        expect(foldGrid!.height).toBeGreaterThanOrEqual(44)
+        await fold.keyboard.press('Escape')
         await shot(fold, 'live-arrange-923')
+        await fold.getByRole('button', { name: /^Mix/ }).click()
+        await fold.locator('.mixer .strip').first().waitFor()
+        const foldMix = await fold.evaluate(() => {
+          const safe = document.querySelector('.strip .solo-safe') as HTMLElement
+          safe.scrollIntoView({ block: 'center' })
+          const box = safe.getBoundingClientRect()
+          const strip = document.querySelector('.strip:not(.master)') as HTMLElement
+          const master = document.querySelector('.strip.master') as HTMLElement
+          return {
+            safe: safe.querySelector('.arm-full')?.textContent,
+            height: box.height,
+            inView: box.top >= 0 && box.bottom <= window.innerHeight + 1,
+            masterWidth: master.getBoundingClientRect().width,
+            stripWidth: strip.getBoundingClientRect().width,
+          }
+        })
+        expect(foldMix.safe).toBe('Safe')
+        expect(foldMix.height).toBeGreaterThanOrEqual(40)
+        expect(foldMix.inView).toBe(true)
+        expect(Math.abs(foldMix.masterWidth - foldMix.stripWidth)).toBeLessThan(2)
         await fold.close()
+
+        const desk = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+        await desk.goto(url, { waitUntil: 'domcontentloaded' })
+        await desk.getByRole('button', { name: /^Arrange/ }).first().waitFor()
+        const deskGrid = await desk.locator('select[aria-label="Snap grid"]').count()
+        expect(deskGrid).toBe(1)
+        await desk.close()
         await page.close()
       } finally {
         await browser.close()
