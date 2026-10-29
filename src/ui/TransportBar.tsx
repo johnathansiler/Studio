@@ -23,6 +23,7 @@ export function TransportBar({
   simple = false,
   desk = false,
   takeProgress = null,
+  recordHint = '',
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -37,6 +38,7 @@ export function TransportBar({
   desk?: boolean
   /** 0–1 while a full-quality guest take is moving to the host. */
   takeProgress?: number | null
+  recordHint?: string
 }) {
   const project = selectTransport(store).project
   const [position, setPosition] = useState(engine.positionSamples)
@@ -215,25 +217,23 @@ export function TransportBar({
     }, 0)
   }
 
-  const playing = status === 'playing' || status === 'recording'
+  const playing = status === 'playing'
   const transport = (id: string) => copyOf(TRANSPORT_COPY, id)
   const loopRead = formatLoopReadout(project, project.loopStartSample, project.loopEndSample)
   const fine = useSyncExternalStore(subscribeLoopFine, loopFineSnap, loopFineSnap)
   return (
-    <div className="transport">
+    <div className={`transport${simple ? ' simple' : ''}`}>
       <AutomationFollow store={store} engine={engine} />
       <div className="t-buttons">
-        {!simple && (
-          <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>
-            <SkipBackIcon />
-            <span className="t-word">Start</span>
-          </TipButton>
-        )}
-        <TipButton className={`t-btn play ${playing ? 'on' : ''}`} label={transport('play').label} hint={transport('play').hint} pressed={playing} onPress={() => engine.unlock()} onClick={onPlay}>
-          <PlayIcon />
-          <span className="t-word">Play</span>
+        <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>
+          <SkipBackIcon />
+          <span className="t-word">Start</span>
         </TipButton>
-        <TipButton className="t-btn stop" label={transport('stop').label} hint={transport('stop').hint} disabled={status === 'stopped'} onClick={onStop}>
+        <TipButton className={`t-btn play ${playing ? 'on' : ''}`} label={playing ? transport('pause').label : transport('play').label} hint={playing ? transport('pause').hint : transport('play').hint} pressed={playing} onPress={() => engine.unlock()} onClick={onPlay}>
+          <PlayIcon />
+          <span className="t-word">{playing ? 'Pause' : 'Play'}</span>
+        </TipButton>
+        <TipButton className="t-btn stop" label={transport('stop').label} hint={transport('stop').hint} onClick={onStop}>
           <StopIcon />
           <span className="t-word">Stop</span>
         </TipButton>
@@ -355,19 +355,17 @@ export function TransportBar({
         </button>
       </div>
       <div className="loop-cluster">
-        {!simple && (
-          <TipButton
-            className={`t-btn loop ${project.loopEnabled ? 'on' : ''}`}
-            label={transport('loop').label}
-            hint={transport('loop').hint}
-            pressed={project.loopEnabled}
-            disabled={store.remoteFollow}
-            onClick={() => store.toggle('loopEnabled')}
-          >
-            <LoopIcon />
-            <span className="t-word">Loop</span>
-          </TipButton>
-        )}
+        <TipButton
+          className={`t-btn loop ${project.loopEnabled ? 'on' : ''}`}
+          label={transport('loop').label}
+          hint={transport('loop').hint}
+          pressed={project.loopEnabled}
+          disabled={store.remoteFollow}
+          onClick={() => store.toggle('loopEnabled')}
+        >
+          <LoopIcon />
+          <span className="t-word">Loop</span>
+        </TipButton>
         <span
           className={`loop-readout${project.loopEnabled ? '' : ' off'}`}
           data-loop-readout="transport"
@@ -389,6 +387,7 @@ export function TransportBar({
         </button>
       </div>
       {syncLabel && <span className="sync-pill">{syncLabel}</span>}
+      {recordHint && <p className="rec-hint" role="status">{recordHint}</p>}
     </div>
   )
 }

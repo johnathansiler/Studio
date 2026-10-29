@@ -972,6 +972,7 @@ export function normalizeProject(project: Project): Project {
   for (const track of project.tracks) {
     normalizeTrackScaler(track)
     if (track.instrument === 'pads' || track.padKit) track.padKit = normalizePadKit(track.padKit)
+    track.armed = track.armed === true
     track.plugins = (track.plugins ?? []).map(fillInstrument)
     track.sends = track.sends ?? []
     track.inserts = track.inserts ?? []

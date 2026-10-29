@@ -165,10 +165,10 @@ describe('channel rack', () => {
     expect(shortSoundName('long_library_name_here.wav').endsWith('…')).toBe(true)
     const kick = store.activePattern()!.channels[0].id
     store.openChannelRoll(kick)
-    expect(store.selectedMidiClipId).toBeTruthy()
+    expect(store.rackRoll).toBe(true)
     store.setView('arrange')
     expect(store.view).toBe('arrange')
-    expect(store.selectedMidiClipId).toBeNull()
+    expect(store.rackRoll).toBe(false)
   })
 
   it('moves the playhead with the tempo map', () => {

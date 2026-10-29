@@ -256,6 +256,11 @@ export function PadsPanel({
       onRecord()
       return
     }
+    const track = store.project.tracks.find((item) => item.id === trackId)
+    if (!track?.armed) {
+      store.toast('Arm this track to record.', 'info')
+      return
+    }
     const beat = projectSampleBeat(store.project, engine.positionSamples)
     store.armPadRecord(trackId, beat)
     onRecord()
@@ -317,7 +322,7 @@ export function PadsPanel({
           <option value="attack">Attack</option>
         </select>
         <button type="button" className="ch-tab" title="Open this clip in the piano roll." onClick={edit}>Roll</button>
-        <button type="button" className="ch-tab mpc-close" title="Close Pads. The track keeps the instrument." aria-label="Close Pads. The track keeps the instrument." onClick={() => store.closePads()}>×</button>
+        <button type="button" className="ch-tab mpc-close" title="Close Pads. The track keeps the instrument." aria-label="Close Pads. The track keeps the instrument." onClick={() => store.closePads()}>Close</button>
       </div>
       <p className="mpc-tool ch-recessed" data-tool={tool}>Tool: <b>{tool}</b></p>
       <div className="mpc-body">

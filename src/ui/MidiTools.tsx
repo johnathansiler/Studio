@@ -360,7 +360,7 @@ function InputsRow({ store }: { store: ProjectStore }) {
               {track.armed ? 'Armed' : 'Arm'}
             </button>
             <span>{track.name}</span>
-            <select aria-label={`${track.name} input`} value={track.input} onChange={(event) => store.updateTrack(track.id, { input: event.target.value, armed: event.target.value !== 'none' })}>
+            <select aria-label={`${track.name} input`} value={track.input} onChange={(event) => store.updateTrack(track.id, { input: event.target.value })}>
               {track.type === 'audio' ? (
                 <>
                   <option value="mic">Mic · all</option>

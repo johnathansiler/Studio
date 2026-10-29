@@ -32,6 +32,9 @@ import { BEAT_BAR, BEAT_ROW, BEAT_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
 import { TipButton } from './Hint'
 import { LoopRegion } from './LoopRegion'
+import { DrumRoll } from './DrumRoll'
+import { PatternSend } from './PatternSend'
+import { patternPlayBeat } from '../model/patternMidi'
 import './channel-rack.css'
 
 type RackEngine = {
@@ -349,7 +352,9 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
   const graphing = useRef(false)
   const inflight = useRef(new Set<string>())
   const scrollRef = useRef<HTMLDivElement>(null)
-  const phone = useFormFactor() === 'phone'
+  const form = useFormFactor()
+  const phone = form === 'phone'
+  const short = form !== 'desk'
   const sampleKey = pattern?.channels.map((row) => `${row.id}:${row.sampleId ?? ''}`).join('|') ?? ''
   useEffect(() => {
     if (!pattern) return
@@ -478,10 +483,6 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
     writeGraph(index, ratio)
   }
 
-  function placePattern() {
-    store.placePattern(Math.max(0, Math.floor(beat)))
-  }
-
   const swing = (
     <label className="rack-swing" title={bar('swing').hint}>
       <span>Swing</span>
@@ -536,8 +537,8 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         </div>
         {!phone && swing}
         <TipButton label="Graph" hint="Show the step graph for the selected channel. Drag a bar to change velocity, pan, pitch, or gate." pressed={graph} onClick={() => setGraph((open) => !open)} />
-        {!phone && <TipButton label="Roll" hint="Open the selected channel in the piano roll." disabled={!selected} onClick={() => selected && store.openChannelRoll(selected.id)} />}
-        {!phone && <TipButton label={sheet('place').label} hint={sheet('place').hint} onClick={placePattern} />}
+        {!phone && <TipButton label="Roll" hint="Show this pattern as drum lanes. The notes match the step grid." pressed={store.rackRoll} onClick={() => store.toggleRackRoll()} />}
+        <PatternSend store={store} beat={Math.max(0, beat)} phone={short} />
         <TipButton label={bar('edit').label} hint={bar('edit').hint} pressed={editOpen} onClick={() => setEditOpen((open) => !open)} />
         <span className="rack-tool" role="status" aria-live="polite" title={toolHint}>{toolName}</span>
         <span className={`rack-loop ${mode === 'pattern' || project.loopEnabled ? 'on' : ''}`} data-loop={project.loopEnabled ? 'on' : 'off'} data-mode={mode} title={mode === 'pattern' ? 'Pattern mode loops this beat. Song mode uses the arrangement loop.' : 'The song loop. It is the same region as Arrange, and the playhead wraps inside it.'}>
@@ -555,8 +556,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
       )}
       <div className={`rack-extras${editOpen ? ' open' : ''}`}>
         {phone && swing}
-        {phone && <TipButton label="Roll" hint="Open the selected channel in the piano roll." disabled={!selected} onClick={() => selected && store.openChannelRoll(selected.id)} />}
-        {phone && <TipButton label={sheet('place').label} hint={sheet('place').hint} onClick={placePattern} />}
+        {phone && <TipButton label="Roll" hint="Show this pattern as drum lanes. The notes match the step grid." pressed={store.rackRoll} onClick={() => store.toggleRackRoll()} />}
         <input className="rack-name-field" {...described(bar('name'))} value={pattern.name} onChange={(event) => store.renamePattern(event.target.value)} />
         <select {...described(sheet('color'))} value={pattern.color} onChange={(event) => store.recolorPattern(event.target.value)}>
           {RACK_COLORS.map((color) => (
@@ -714,6 +714,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         <div className="rack-row rack-ruler">
           <div className="rack-lead" aria-hidden="true"><span>Beat</span></div>
           <div className="rack-steps">
+            <div className="rack-playhead" data-playhead="rack" style={{ left: `${(patternPlayBeat(beat, count) / Math.max(STEP_BEAT, count * STEP_BEAT)) * 100}%` }} />
             <LoopRegion
               store={store}
               project={project}
@@ -910,6 +911,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         )}
         {marquee && <div className="rack-marquee" style={marquee} />}
       </div>
+      {store.rackRoll && <DrumRoll store={store} engine={engine} />}
       <button
         type="button"
         className="rack-add"
@@ -918,7 +920,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         aria-expanded={adding}
         onClick={openAdd}
       >
-        +
+        Add
       </button>
       {adding && (
         <Picker

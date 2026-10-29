@@ -9,42 +9,45 @@ import type { ProjectStore } from '../state/store'
 import type { AutomationWriteMode } from '../model/types'
 import './automation.css'
 
-const MODES: { id: AutomationWriteMode; label: string; title: string }[] = [
-  { id: 'off', label: 'Off', title: 'Off. This channel ignores automation. The faders and knobs always change the sound.' },
-  { id: 'read', label: 'Read', title: 'Read. This channel plays its automation. A control with no lane still changes the sound.' },
-  { id: 'touch', label: 'Touch', title: 'Touch. This channel writes only while you hold the control.' },
-  { id: 'latch', label: 'Latch', title: 'Latch. This channel keeps writing the value you set until playback stops.' },
+const MODES: { id: AutomationWriteMode; label: string; short: string; title: string }[] = [
+  { id: 'off', label: 'Off', short: 'O', title: 'Off. This channel ignores automation. The faders and knobs always change the sound.' },
+  { id: 'read', label: 'Read', short: 'R', title: 'Read. This channel plays its automation. A control with no lane still changes the sound.' },
+  { id: 'touch', label: 'Touch', short: 'T', title: 'Touch. This channel writes only while you hold the control.' },
+  { id: 'latch', label: 'Latch', short: 'L', title: 'Latch. This channel keeps writing the value you set until playback stops.' },
 ]
 
-/** Per-channel automation. One strip does not change the others. */
+/** Per-channel automation. One strip does not change the others. Narrow strips show O, R, T, and L. */
 export function ChannelAutomation({ store, trackId }: { store: ProjectStore; trackId: string | 'master' }) {
   const mode = channelAutomationMode(store.project, trackId)
   const name = trackId === 'master' ? 'Master' : store.project.tracks.find((track) => track.id === trackId)?.name ?? 'Channel'
   return (
-    <div className="strip-auto" role="group" aria-label={`${name} automation`}>
+    <div className="strip-auto auto-mode in-strip" role="group" aria-label={`${name} automation`}>
       {MODES.map((item) => (
         <button
           key={item.id}
           type="button"
           className={mode === item.id ? 'on' : ''}
           aria-pressed={mode === item.id}
+          aria-label={`${item.label}. ${item.title}`}
           title={item.title}
           onClick={() => (trackId === 'master' ? store.setMasterAutomation(item.id) : store.setTrackAutomation(trackId, item.id))}
         >
-          {item.label}
+          <span className="mode-full">{item.label}</span>
+          <span className="mode-short">{item.short}</span>
         </button>
       ))}
     </div>
   )
 }
 
-export function AutomationModeBar({ store }: { store: ProjectStore }) {
+export function AutomationModeBar({ store, embedded = false }: { store: ProjectStore; embedded?: boolean }) {
   const mode = automationWriteMode(store.project)
   return (
-    <div className="auto-mode" role="group" aria-label="Automation write mode">
+    <div className={`auto-mode${embedded ? ' in-strip' : ''}`} role="group" aria-label="Automation write mode">
       {MODES.map((item) => (
-        <button key={item.id} type="button" className={mode === item.id ? 'on' : ''} aria-pressed={mode === item.id} title={item.title} onClick={() => store.setAutomationMode(item.id)}>
-          {item.label}
+        <button key={item.id} type="button" className={mode === item.id ? 'on' : ''} aria-pressed={mode === item.id} aria-label={`${item.label}. ${item.title}`} title={item.title} onClick={() => store.setAutomationMode(item.id)}>
+          <span className="mode-full">{item.label}</span>
+          <span className="mode-short">{item.short}</span>
         </button>
       ))}
     </div>
@@ -81,7 +84,16 @@ export function MixFlags({ store, trackId, compact = false }: { store: ProjectSt
         <span className="mini-word">Solo</span>
       </button>
       {!compact && (
-        <button type="button" className={`mini solo-safe ${track.soloSafe ? 'on' : ''}`} aria-pressed={!!track.soloSafe} aria-label="Solo safe" title="Solo safe: stay audible when other tracks are soloed." onClick={(event) => { event.stopPropagation(); store.updateTrack(track.id, { soloSafe: !track.soloSafe }) }}>Safe</button>
+        <button type="button" className={`mini arm-flag ${track.armed ? 'on-r' : ''}`} aria-pressed={track.armed} aria-label={track.armed ? 'Disarm track' : 'Arm track. This track records when you press record.'} title="Arm this track. Only armed tracks record." onClick={(event) => { event.stopPropagation(); store.updateTrack(track.id, { armed: !track.armed }) }}>
+          <span className="arm-full">Arm</span>
+          <span className="arm-short">R</span>
+        </button>
+      )}
+      {!compact && (
+        <button type="button" className={`mini solo-safe ${track.soloSafe ? 'on' : ''}`} aria-pressed={!!track.soloSafe} aria-label="Solo safe. Stay audible when other tracks are soloed." title="Solo safe: stay audible when other tracks are soloed." onClick={(event) => { event.stopPropagation(); store.updateTrack(track.id, { soloSafe: !track.soloSafe }) }}>
+          <span className="arm-full">Safe</span>
+          <span className="arm-short">Sf</span>
+        </button>
       )}
     </>
   )

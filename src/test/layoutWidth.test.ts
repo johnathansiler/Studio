@@ -7,7 +7,9 @@ import {
   STRIP_BOUNDS,
   STRIP_DEFAULT,
   STRIP_MAX,
+  STRIP_HALF,
   STRIP_MIN,
+  displayedStrip,
   columnRightEdge,
   columnsOnScreen,
   defaultLayout,
@@ -87,6 +89,10 @@ describe('layout widths', () => {
     store.setItem(layoutStorageKey('prj_d'), JSON.stringify({ strip: 'wide', column: 80 }))
     expect(readLayout('prj_d', store)).toEqual({ strip: STRIP_DEFAULT, column: 80 })
     expect(normalizeLayout(null)).toEqual(defaultLayout())
+    expect(STRIP_MIN).toBe(STRIP_HALF)
+    expect(STRIP_HALF).toBe(Math.round(STRIP_DEFAULT / 2))
+    expect(displayedStrip(STRIP_DEFAULT, 80)).toBe(STRIP_HALF)
+    expect(displayedStrip(140, 1280)).toBe(140)
     expect(sessionTableWidth(3, 70)).toBeGreaterThan(columnRightEdge(3))
   })
 })

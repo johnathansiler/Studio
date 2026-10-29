@@ -84,11 +84,12 @@
 .shell.phone.land .t-btn.stop,
 .shell.phone.land .bpm-readout,
 .shell.phone.land .tap-pad button {
-  width: 28px;
+  width: auto;
   height: 28px;
-  min-width: 28px;
+  min-width: 44px;
   min-height: 0;
-  padding: 0;
+  padding: 0 6px;
+  font-size: 11px;
 }
 .shell.phone.land .bpm-readout {
   width: calc(6.4ch + 12px); min-width: 58px; height: 28px; padding: 0 4px; font-size: 12px;

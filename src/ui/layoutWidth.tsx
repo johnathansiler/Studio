@@ -4,6 +4,7 @@ import {
   COLUMN_DEFAULT,
   STRIP_BOUNDS,
   STRIP_DEFAULT,
+  STRIP_HALF,
   readLayout,
   widthFromDrag,
   widthFromKey,
@@ -141,6 +142,18 @@ export function WidthBar({
         onChange={onChange}
       />
       <span className="width-value" aria-hidden>{value}</span>
+      {axis === 'strip' && (
+        <button
+          type="button"
+          className="width-reset"
+          aria-pressed={value <= STRIP_HALF}
+          aria-label={value <= STRIP_HALF ? 'Normal channel width' : 'Narrow channel width'}
+          title={value <= STRIP_HALF ? 'Use the normal channel width.' : 'Make channels half as wide.'}
+          onClick={() => onChange(value <= STRIP_HALF ? STRIP_DEFAULT : STRIP_HALF)}
+        >
+          {value <= STRIP_HALF ? 'Normal' : 'Narrow'}
+        </button>
+      )}
       <button type="button" className="width-reset" aria-label={copy.reset} title={copy.reset} onClick={onReset}>
         Reset
       </button>

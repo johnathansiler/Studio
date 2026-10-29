@@ -146,10 +146,12 @@ describe('mobile control lists', () => {
     expect(sharesId(PRIMARY_TOOLS.map((id) => ({ id })), [...TOOL_ACTIONS])).toEqual([])
   })
 
-  it('moves return and loop off the phone transport and into the menu', () => {
-    expect([...PHONE_TRANSPORT_MENU]).toEqual(['to-start', 'loop'])
-    for (const id of PHONE_TRANSPORT_MENU) {
+  it('keeps start, play, stop, and record on every transport, including the phone', () => {
+    expect([...PHONE_TRANSPORT_MENU]).toEqual([])
+    for (const id of ['to-start', 'play', 'pause', 'stop', 'record', 'loop']) {
       expect(TRANSPORT_COPY.some((item) => item.id === id)).toBe(true)
+    }
+    for (const id of ['to-start', 'loop']) {
       expect(MENU_COPY.some((item) => item.id === id)).toBe(true)
       expect(visibleMenu({ phone: true, session: false, dockBottom: false, hardwareMidi: false }).some((item) => item.id === id)).toBe(true)
       expect(visibleMenu({ phone: false, session: false, dockBottom: false, hardwareMidi: false }).some((item) => item.id === id)).toBe(false)

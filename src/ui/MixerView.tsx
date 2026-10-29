@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
-import { STRIP_BOUNDS } from '../model/layoutWidth'
+import { STRIP_BOUNDS, displayedStrip } from '../model/layoutWidth'
 import { selectMixer } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
@@ -22,9 +22,16 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
   stripRef.current = layout.strip
   usePinchResize(areaRef, () => stripRef.current, setStrip, STRIP_BOUNDS)
   const [masterOpen, setMasterOpen] = useState(false)
+  const [viewport, setViewport] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth))
+  useEffect(() => {
+    const apply = () => setViewport(window.innerWidth)
+    window.addEventListener('resize', apply)
+    return () => window.removeEventListener('resize', apply)
+  }, [])
+  const strip = displayedStrip(layout.strip, viewport)
   return (
     <>
-    <div className="mixer-view" ref={areaRef} data-strip-width={layout.strip} style={{ ['--strip' as string]: `${layout.strip}px` }}>
+    <div className="mixer-view" ref={areaRef} data-strip-width={strip} style={{ ['--strip' as string]: `${strip}px` }}>
       <WidthBar axis="strip" value={layout.strip} onChange={setStrip} onReset={resetStrip} />
       <div className="mixer">
       {project.tracks.map((track) => (
