@@ -5,7 +5,7 @@
   --sl-slot: 40px;
   --sl-stop: 28px;
   --sl-col: 208px;
-  --sl-scene: 116px;
+  --sl-scene: 208px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   padding: 0;
@@ -54,6 +54,7 @@
 }
 
 .sl-body {
+  position: relative;
   min-height: 0;
   min-width: 0;
   display: grid;
@@ -66,6 +67,15 @@
   grid-template-areas: "stage" "detail";
 }
 
+.shell.fold .sl-browser {
+  position: absolute;
+  z-index: 8;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(360px, 86vw);
+  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.45);
+}
 .sl-browser {
   grid-area: browser;
   width: var(--browser, 220px);
@@ -837,7 +847,7 @@
   --sl-slot: 48px;
   --sl-stop: 36px;
   --sl-col: 148px;
-  --sl-scene: 108px;
+  --sl-scene: 148px;
 }
 
 .shell.phone .session-grid.sl .sl-hit,

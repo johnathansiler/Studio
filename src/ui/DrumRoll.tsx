@@ -150,8 +150,8 @@ export function DrumRoll({ store, engine }: { store: ProjectStore; engine: RollE
         const lane = notes.filter((note) => note.channelId === channel.id)
         const swing = channelSwing(channel, pattern.swing)
         return (
-          <div className="rack-row drum-lane" key={channel.id} data-lane={channel.id}>
-            <button type="button" className="rack-lead drum-lane-name" title={laneLabel(channel)} onClick={() => store.selectRackChannel(channel.id)}>
+          <div className={`rack-row drum-lane${store.selectedRackChannels.includes(channel.id) ? ' on' : ''}`} key={channel.id} data-lane={channel.id}>
+            <button type="button" className={`rack-lead drum-lane-name${store.selectedRackChannels.includes(channel.id) ? ' on' : ''}`} title={laneLabel(channel)} onClick={() => store.selectRackChannel(channel.id)}>
               {laneLabel(channel)}
             </button>
             <div

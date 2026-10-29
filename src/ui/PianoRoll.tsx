@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, typ
 import type { AudioEngine } from '../audio/engine'
 import { heardBeat } from '../model/midiClock'
 import { defaultRoll, quantizeNotes, arpeggiateSelection, humanizeNotes, snapBeat, strumSelection } from '../model/paint'
+import { activeGridBeats } from '../model/snapGrid'
 import {
   NOTE_NAMES,
   SCALES,
@@ -21,6 +22,7 @@ import { EDITOR_TOOL_KEYS, activeTool, setActiveTool, subscribeTools, toolCursor
 import { selectPiano, selectScale } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { loopGridBeats } from '../model/loopEdit'
+import { SnapControl } from './SnapControl'
 import { quartersPerBar, samplesToBeats } from '../model/time'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import { setRollOwnsKeys } from '../model/keyboardPlay'
@@ -272,6 +274,7 @@ export function PianoRoll({
 
   const scale = piano.scale
   const roll = store.project.roll ?? defaultRoll()
+  const gridNow = activeGridBeats(store.project)
 
   playKey.current = (pitch, event, pointerId, on, velocity = 0.8, fine?: number) => {
     if (!track || !clip) return
@@ -491,7 +494,7 @@ export function PianoRoll({
     if (event.button !== 0 && event.pointerType !== 'touch') return
     const at = cell(event)
     if (!at) return
-    const grid = roll.grid
+    const grid = gridNow
     const velocity = roll.velocity || 0.8
     const scaleNow = selectScale(store)
     const base = clip.notes.map((note) => ({ ...note }))
@@ -646,7 +649,7 @@ export function PianoRoll({
     }
     const originX = event.clientX
     const originY = event.clientY
-    const grid = roll.grid
+    const grid = gridNow
     const scaleNow = selectScale(store)
     const pitchSnap = scaleNow.snap
       ? (pitch: number) => {
@@ -680,7 +683,7 @@ export function PianoRoll({
     if (!store.selectedNoteIds.includes(note.id)) store.selectNote(note.id)
     const gen = ++dragGen.current
     const base = clip.notes.map((item) => ({ ...item }))
-    const grid = roll.grid
+    const grid = gridNow
     let latest = base
     let dirty = false
     watch(gen, (ev) => {
@@ -722,7 +725,7 @@ export function PianoRoll({
     setOpen((value) => !value)
   }
 
-  const gridPx = (roll.grid > 0 ? roll.grid : 1) * pxBeat
+  const gridPx = (gridNow > 0 ? gridNow : 1) * pxBeat
   return (
     <div className={`piano ${compact ? 'compact' : ''} ${chrome ? '' : 'bare'}`} ref={pianoRef} data-tool={tool}>
       {chrome && <FitRow className="scale-bar">
@@ -753,13 +756,8 @@ export function PianoRoll({
             <option key={item.id} value={item.id}>{item.name}</option>
           ))}
         </select>
-        <TipButton className={scale.snap ? 'on' : ''} label={bar('snap').label} hint={bar('snap').hint} pressed={scale.snap} onClick={() => store.setScale({ snap: !scale.snap })} />
-        <select {...described(bar('grid'))} value={String(roll.grid)} onChange={(event) => store.setRoll({ grid: Number(event.target.value) })}>
-          <option value="0">Free</option>
-          <option value="0.25">1/16</option>
-          <option value="0.5">1/8</option>
-          <option value="1">1/4</option>
-        </select>
+        <TipButton className={scale.snap ? 'on' : ''} label="In key" hint={bar('snap').hint} pressed={scale.snap} onClick={() => store.setScale({ snap: !scale.snap })} />
+        <SnapControl store={store} />
         {compact && <TipButton label={bar('notes').label} hint={bar('notes').hint} onClick={() => setNotesOpen(true)} />}
         <span className="chord-name">{chord}</span>
         {!compact && (
@@ -825,7 +823,7 @@ export function PianoRoll({
               store={store}
               project={store.project}
               view="piano"
-              gridBeats={loopGridBeats(store.project, roll.grid)}
+              gridBeats={loopGridBeats(store.project)}
               sampleAt={(clientX, rect) => projectBeatSample(store.project, clip.startBeat + (clientX - rect.left) / pxRef.current)}
               xAt={(sample) => (projectSampleBeat(store.project, sample) - clip.startBeat) * pxBeat}
               onSeek={(sample) => engine.seek(sample)}

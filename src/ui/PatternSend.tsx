@@ -39,7 +39,7 @@ export function PatternSend({
       </select>
       <TipButton label={midi} hint="Turn this pattern into MIDI on a drum-kit track and open it in the piano roll." onClick={() => send('midi')} />
       <TipButton label={inst} hint="Put this pattern on a drum instrument that plays the same samples, as editable MIDI." onClick={() => send('instrument')} />
-      <TipButton label={arrange} hint="Place this pattern on Arrange at the playhead. It stays linked to the step grid." onClick={() => store.placePattern(Math.max(0, beat), trackId || undefined)} />
+      <TipButton label={arrange} hint="Send this pattern to Arrange as notes you can see and edit." onClick={() => store.sendPatternToArrange(Math.max(0, beat), trackId || undefined)} />
       <TipButton
         label={unique}
         hint="Give the selected Arrange clip its own pattern. Other copies stay linked."

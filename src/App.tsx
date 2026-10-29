@@ -55,6 +55,8 @@ import { collabBadgeOn, collabPanelVisible, type StudioTab } from './ui/collabTa
 import './ui/collab.css'
 import { TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
+import { SnapControl } from './ui/SnapControl'
+import { panelChoice, rememberPanel } from './ui/panelMemory'
 import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
 import { UNSTUCK_COPY, VIEW_COPY, copyOf, described, visibleMenu } from './ui/chrome'
@@ -130,6 +132,7 @@ export function App() {
   const [persisted, setPersisted] = useState(true)
   const [help, setHelp] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(() => panelChoice('arrangeTools') ?? false)
   const [recordHint, setRecordHint] = useState('')
   const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight))
   const [land, setLand] = useState(() => window.innerWidth > window.innerHeight)
@@ -1510,18 +1513,38 @@ async function importDropped(files: FileList) {
           takeProgress={session.state.takeProgress}
         />
       )}
-      {surface === 'studio' && !collabShown && phonePane !== 'room' && store.view !== 'mix' && (store.view === 'arrange' || panel === 'piano') && (
+      {surface === 'studio' && !collabShown && phonePane !== 'room' && store.view === 'arrange' && panel !== 'piano' && (
         <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
-          <ToolBar
-            context={panel === 'piano' ? 'piano' : 'arrange'}
-            compact={form !== 'desk'}
-            phone={phone}
-            words={form === 'fold'}
-            onChange={(tool) => store.setTool(tool)}
-            onDuplicate={() => store.duplicateSelection()}
-            onDelete={() => store.deleteSelectedClip()}
-          />
-          <MidiTools store={store} engine={engine} />
+          <SnapControl store={store} />
+          {form !== 'desk' && (
+            <button
+              type="button"
+              className={`setup-btn${toolsOpen ? ' on' : ''}`}
+              aria-pressed={toolsOpen}
+              title="Show or hide the editing tools."
+              onClick={() => {
+                const next = !toolsOpen
+                setToolsOpen(next)
+                rememberPanel('arrangeTools', next)
+              }}
+            >
+              Tools
+            </button>
+          )}
+          {(form === 'desk' || toolsOpen) && (
+            <ToolBar
+              context="arrange"
+              compact={form !== 'desk'}
+              phone={phone}
+              words={form === 'fold'}
+              showHint={form === 'desk' && !panelChoice('hintDismissed')}
+              onDismissHint={() => rememberPanel('hintDismissed', true)}
+              onChange={(tool) => store.setTool(tool)}
+              onDuplicate={() => store.duplicateSelection()}
+              onDelete={() => store.deleteSelectedClip()}
+            />
+          )}
+          {(form === 'desk' || toolsOpen) && <MidiTools store={store} engine={engine} />}
         </div>
       )}
       <div className={`workspace ${dockShown ? '' : 'session-closed'} ${soundsOpen && !phone ? 'sounds-open' : ''} ${!phone && dockEdge === 'bottom' && surface === 'studio' && dockShown ? 'dock-bottom' : ''}`}>

@@ -193,13 +193,12 @@ export function SoundBrowser({
     : total
       ? ''
       : catalogMessage(result, 0, queryActive || type === 'instrument')
-  const soundWhere = sounds.trackName ? `Adds to ${sounds.trackName} at the playhead.` : 'Add an audio track to place sounds.'
-  const instrumentWhere = sounds.instrumentName ? `Loads onto ${sounds.instrumentName}.` : 'Add an instrument track to load a sound.'
-  const where = type === 'instrument'
-    ? instrumentWhere
-    : starterRows.length
-      ? `${soundWhere} ${instrumentWhere}`
-      : soundWhere
+  const selected = store.project.tracks.find((track) => track.id === store.selectedTrackId) ?? null
+  const where = !selected
+    ? 'Select a track, then load a sound onto it.'
+    : selected.type === 'midi'
+      ? `Loads onto ${selected.name}.`
+      : `Adds to ${selected.name} at the playhead.`
   const count = matchCountLabel(total, shown)
   const slot = focusedSlot(store)
 

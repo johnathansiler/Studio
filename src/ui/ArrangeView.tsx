@@ -9,6 +9,10 @@ import { rectsHit } from '../model/edit'
 import { SCALER_MIME, parseScalerDrag } from '../instruments/scaler/model'
 import { patternHostId } from '../model/steps'
 import { loopGridBeats } from '../model/loopEdit'
+import { activeGridBeats, edgeFromPointer, lengthReadout } from '../model/snapGrid'
+import { quartersPerBar } from '../model/time'
+import { patternToMidiNotes } from '../model/patternMidi'
+import { panelChoice, rememberPanel } from './panelMemory'
 import { arrangementEndSample, gridMarks, mapIsLinear, projectBeatSample, projectSampleBeat, pxAtBeat, snapSampleToMap } from '../model/tempoMap'
 import { displayedPlayhead } from '../model/transportSync'
 import { SongMap, SongMapHead, SmartTempoBar } from './SongMap'
@@ -68,6 +72,17 @@ export function ArrangeView({
   const [nudge, setNudge] = useState<{ audio: Record<string, number>; midi: Record<string, number>; pattern: Record<string, number> } | null>(null)
   const [patternMenu, setPatternMenu] = useState<{ x: number; y: number } | null>(null)
   const form = useFormFactor()
+  const compact = form !== 'desk'
+  const [dragView, setDragView] = useState<null | {
+    trackId: string
+    clipId: string
+    rawStart: number
+    rawLength: number
+    snapLeft: number
+    snapWidth: number
+    line: number
+    label: string
+  }>(null)
   const phone = form === 'phone'
   const touch = form !== 'desk'
   const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
@@ -198,16 +213,45 @@ export function ArrangeView({
 
   const passive = tool === 'box' || tool === 'pencil' || tool === 'pan' || tool === 'zoom'
 
-  function watch(move: (event: PointerEvent) => void, up: (event: PointerEvent) => void) {
+  function watch(move: (event: PointerEvent) => void, up: (event: PointerEvent) => void, capture?: { id: number; node: HTMLElement }) {
+    try { capture?.node.setPointerCapture(capture.id) } catch { /* already gone */ }
+    let frame = 0
+    let last: PointerEvent | null = null
+    const onMove = (event: PointerEvent) => {
+      last = event
+      if (frame) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        if (last) move(last)
+      })
+    }
     const end = (event: PointerEvent) => {
-      window.removeEventListener('pointermove', move)
+      if (frame) window.cancelAnimationFrame(frame)
+      window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', end)
       window.removeEventListener('pointercancel', end)
       up(event)
     }
-    window.addEventListener('pointermove', move)
+    window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', end)
     window.addEventListener('pointercancel', end)
+  }
+
+  function showEdge(trackId: string, clipId: string, start: number, end: number, rawStart: number, rawEnd: number, edge: 'start' | 'end') {
+    const pxNow = pxRef.current
+    const left = pxAtBeat(project, start, pxNow)
+    const right = pxAtBeat(project, end, pxNow)
+    const line = edge === 'end' ? right : left
+    setDragView({
+      trackId,
+      clipId,
+      rawStart,
+      rawLength: Math.max(0.05, rawEnd - rawStart),
+      snapLeft: left,
+      snapWidth: Math.max(8, right - left),
+      line,
+      label: lengthReadout(start, end, quartersPerBar(project.timeSignature)),
+    })
   }
 
   function beginErase(event: ReactPointerEvent) {
@@ -325,32 +369,53 @@ export function ArrangeView({
   function trimPattern(event: ReactPointerEvent, clipId: string, edge: 'start' | 'end') {
     event.stopPropagation()
     event.preventDefault()
-    event.currentTarget.setPointerCapture?.(event.pointerId)
     const clip = project.patternClips?.find((item) => item.id === clipId)
     if (!clip) return
+    const trackId = clip.trackId || ''
+    const grid = activeGridBeats(project)
+    const apply = (clientX: number) => {
+      const beat = projectSampleBeat(project, Math.max(0, sampleAt(clientX)))
+      const snapped = edgeFromPointer(clip.startBeat, clip.startBeat + clip.lengthBeats, beat, edge, grid)
+      const rawEnd = edge === 'end' ? Math.max(clip.startBeat + 0.05, beat) : clip.startBeat + clip.lengthBeats
+      const rawStart = edge === 'start' ? Math.max(0, Math.min(beat, rawEnd - 0.05)) : clip.startBeat
+      showEdge(trackId, clipId, snapped.start, snapped.end, rawStart, rawEnd, edge)
+      return snapped
+    }
+    apply(event.clientX)
     watch(
-      () => undefined,
+      (ev) => { apply(ev.clientX) },
       (ev) => {
-        const sample = Math.max(0, sampleAt(ev.clientX))
-        const beat = projectSampleBeat(project, project.snap ? snapSampleToMap(sample, project) : sample)
-        store.resizePatternClip(clipId, edge, beat)
+        const snapped = apply(ev.clientX)
+        setDragView(null)
+        store.resizePatternClip(clipId, edge, edge === 'end' ? snapped.end : snapped.start)
       },
+      { id: event.pointerId, node: event.currentTarget as HTMLElement },
     )
   }
 
   function trimMidi(event: ReactPointerEvent, trackId: string, clipId: string, edge: 'start' | 'end', stretch: boolean) {
     event.stopPropagation()
     event.preventDefault()
-    event.currentTarget.setPointerCapture?.(event.pointerId)
     const clip = project.tracks.find((track) => track.id === trackId)?.midiClips.find((item) => item.id === clipId)
     if (!clip) return
+    const grid = activeGridBeats(project)
+    const apply = (clientX: number) => {
+      const beat = projectSampleBeat(project, Math.max(0, sampleAt(clientX)))
+      const snapped = edgeFromPointer(clip.startBeat, clip.startBeat + clip.durationBeats, beat, edge, grid)
+      const rawEnd = edge === 'end' ? Math.max(clip.startBeat + 0.05, beat) : clip.startBeat + clip.durationBeats
+      const rawStart = edge === 'start' ? Math.max(0, Math.min(beat, rawEnd - 0.05)) : clip.startBeat
+      showEdge(trackId, clipId, snapped.start, snapped.end, rawStart, rawEnd, edge)
+      return snapped
+    }
+    apply(event.clientX)
     watch(
-      () => undefined,
+      (ev) => { apply(ev.clientX) },
       (ev) => {
-        const sample = Math.max(0, sampleAt(ev.clientX))
-        const beat = projectSampleBeat(project, project.snap ? snapSampleToMap(sample, project) : sample)
-        store.resizeMidiClip(trackId, clipId, edge, beat, stretch)
+        const snapped = apply(ev.clientX)
+        setDragView(null)
+        store.resizeMidiClip(trackId, clipId, edge, edge === 'end' ? snapped.end : snapped.start, stretch)
       },
+      { id: event.pointerId, node: event.currentTarget as HTMLElement },
     )
   }
 
@@ -435,7 +500,11 @@ export function ArrangeView({
   }
 
   const [setupOpen, setSetupOpen] = useState(false)
-  const [browserOpen, setBrowserOpen] = useState(!phone)
+  const [browserOpen, setBrowserOpen] = useState(() => panelChoice('arrangeBrowser') ?? !compact)
+  useEffect(() => {
+    if (panelChoice('arrangeBrowser') != null) return
+    setBrowserOpen(!compact)
+  }, [compact])
   const [browserTab, setBrowserTab] = useState<BrowserTab>(libraryTab || 'sounds')
   const [browserWidth, setBrowserWidth] = useState(300)
   const [trackSheet, setTrackSheet] = useState<string | null>(null)
@@ -465,7 +534,7 @@ export function ArrangeView({
       <SmartTempoBar store={store} />
       <div className="arrange-setup">
         {!browserOpen && (
-          <button type="button" className="setup-btn" title="Show sounds, patterns, and effects." onClick={() => setBrowserOpen(true)}>
+          <button type="button" className="setup-btn" title="Show sounds, patterns, and effects." onClick={() => { setBrowserOpen(true); rememberPanel('arrangeBrowser', true) }}>
             Browser
           </button>
         )}
@@ -488,6 +557,9 @@ export function ArrangeView({
         )}
       </div>
       <div className={`playlist-frame ${browserOpen ? 'browser-open' : ''} ${phone ? 'phone-arrange' : ''}`} style={{ ['--browser' as string]: `${browserWidth}px` }}>
+      {browserOpen && compact && (
+        <button type="button" className="browser-scrim" aria-label="Close browser" title="Close the browser." onClick={() => { engine.stopPreview(); setBrowserOpen(false); rememberPanel('arrangeBrowser', false); onLibraryClose?.() }} />
+      )}
       {browserOpen && (
         <>
           <PlaylistBrowser
@@ -497,7 +569,7 @@ export function ArrangeView({
             tab={browserTab}
             onTab={setBrowserTab}
             onSeek={onSeek}
-            onClose={() => { engine.stopPreview(); setBrowserOpen(false); onLibraryClose?.() }}
+            onClose={() => { engine.stopPreview(); setBrowserOpen(false); rememberPanel('arrangeBrowser', false); onLibraryClose?.() }}
           />
           {!phone && <button type="button" className="browser-resize" aria-label="Browser width. Drag to resize." title="Drag to resize the browser." onPointerDown={resizeBrowser} />}
         </>
@@ -527,7 +599,7 @@ export function ArrangeView({
           </button>
         </div>
         {project.tracks.map((track) => (
-          <div className="head" data-track={track.id} key={track.id} style={rowHeight(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => store.selectTrack(track.id)}>
+          <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} style={rowHeight(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => store.selectTrack(track.id)}>
             <div className="pl-head">
               <i className="swatch" style={{ background: track.color }} />
               <input
@@ -553,14 +625,14 @@ export function ArrangeView({
                   <span>Roll</span>
                 </button>
               )}
-              {!phone && (track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
+              {(track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
                 <TipButton className={`mini ${track.armed ? 'on-r' : ''}`} label={copyOf(TRACK_ROW, 'arm').label} hint={track.type === 'midi' ? 'Record this instrument from its MIDI input.' : copyOf(TRACK_ROW, 'arm').hint} pressed={track.armed} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
                   <span className="mini-mark">R</span>
                   <span className="mini-word">Arm</span>
                 </TipButton>
               )}
               <span className="mini-meter" aria-hidden><i style={{ transform: `scaleX(${Math.min(1, (levels[track.id] ?? 0) * 3)})` }} /></span>
-              <TipButton className="mini" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); setTrackSheet(track.id) }}>
+              <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); setTrackSheet(track.id) }}>
                 ⋮
               </TipButton>
             </div>
@@ -626,7 +698,7 @@ export function ArrangeView({
           )}
           {project.tracks.map((track) => (
             <div
-              className="lane"
+              className={`lane${store.selectedTrackId === track.id ? ' is-selected' : ''}`}
               data-track={track.id}
               key={track.id}
               style={{ backgroundSize: linear ? `${beatPx}px 100%` : undefined, backgroundImage: linear ? undefined : 'none', ...rowHeight(track, store.selectedClipId, !!store.openLanes[track.id]) }}
@@ -684,13 +756,22 @@ export function ArrangeView({
               )}
               <AutomationOverlay store={store} trackId={track.id} px={px} tool={tool} />
               {track.midiClips.filter((clip) => !clip.slotOnly && clip.scene == null).map((clip) => {
-                const beat = clip.startBeat + (nudge?.midi[clip.id] ?? 0)
+                const live = dragView?.clipId === clip.id ? dragView : null
+                const beat = live ? live.rawStart : clip.startBeat + (nudge?.midi[clip.id] ?? 0)
+                const lengthBeats = live ? live.rawLength : clip.durationBeats
                 const left = pxAtBeat(project, beat, px)
-                const widthPx = Math.max(8, pxAtBeat(project, beat + clip.durationBeats, px) - left)
+                const widthPx = Math.max(8, pxAtBeat(project, beat + lengthBeats, px) - left)
                 const picked = store.selectedMidiClipIds.includes(clip.id)
                 return (
+                  <div key={clip.id} style={{ display: 'contents' }}>
+                  {live && (
+                    <>
+                      <div className="snap-shadow" data-snap-shadow="1" style={{ left: live.snapLeft, width: live.snapWidth }} />
+                      <i className="snap-line" style={{ left: live.line }} />
+                      <em className="snap-read" style={{ left: live.line }}>{live.label}</em>
+                    </>
+                  )}
                   <div
-                    key={clip.id}
                     data-clip={clip.id}
                     data-midi="1"
                     data-track={track.id}
@@ -751,20 +832,31 @@ export function ArrangeView({
                       />
                     )}
                   </div>
+                  </div>
                 )
               })}
               {(project.patternClips ?? [])
-                  .filter((clip) => clip.scene == null && clip.trackId === track.id)
+                  .filter((clip) => clip.scene == null && !clip.suppressed && clip.trackId === track.id)
                   .map((clip) => {
                     const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
-                    const beat = clip.startBeat + (nudge?.pattern[clip.id] ?? 0)
+                    const live = dragView?.clipId === clip.id ? dragView : null
+                    const beat = live ? live.rawStart : clip.startBeat + (nudge?.pattern[clip.id] ?? 0)
+                    const lengthBeats = live ? live.rawLength : clip.lengthBeats
                     const left = pxAtBeat(project, beat, px)
-                    const widthPx = Math.max(24, pxAtBeat(project, beat + clip.lengthBeats, px) - left)
+                    const widthPx = Math.max(24, pxAtBeat(project, beat + lengthBeats, px) - left)
+                    const previewNotes = pattern ? patternToMidiNotes(pattern) : []
                     const picked = store.selectedPatternClipIds.includes(clip.id)
                     const linked = (project.patternClips ?? []).filter((item) => item.scene == null && item.patternId === clip.patternId).length > 1
                     return (
+                      <div key={clip.id} style={{ display: 'contents' }}>
+                      {live && (
+                        <>
+                          <div className="snap-shadow" data-snap-shadow="1" style={{ left: live.snapLeft, width: live.snapWidth }} />
+                          <i className="snap-line" style={{ left: live.line }} />
+                          <em className="snap-read" style={{ left: live.line }}>{live.label}</em>
+                        </>
+                      )}
                       <div
-                        key={clip.id}
                         data-clip={clip.id}
                         data-pattern="1"
                         data-track={track.id}
@@ -774,6 +866,8 @@ export function ArrangeView({
                         onDoubleClick={(event) => {
                           event.preventDefault()
                           event.stopPropagation()
+                          const made = store.mirrorPatternClip(clip.id)
+                          if (made) onOpenPiano(made.trackId, made.clipId)
                         }}
                         onPointerDown={(event) => {
                           if ((event.target as HTMLElement).closest('.edge')) return
@@ -810,14 +904,21 @@ export function ArrangeView({
                             Unique
                           </button>
                         )}
-                        <span className="clip-steps" aria-hidden>
-                          {(pattern?.channels ?? []).slice(0, 4).map((channel) => (
-                            <span key={channel.id}>
-                              {channel.cells.slice(0, Math.min(16, pattern?.steps || 16)).map((cell, index) => (
-                                <i key={index} className={cell.on ? 'on' : ''} />
-                              ))}
-                            </span>
-                          ))}
+                        <span className="clip-notes" aria-hidden>
+                          {previewNotes.slice(0, 64).map((note, index) => {
+                            const lo = Math.min(...previewNotes.map((item) => item.pitch))
+                            const hi = Math.max(lo + 1, ...previewNotes.map((item) => item.pitch))
+                            return (
+                              <i
+                                key={`${note.pitch}-${index}`}
+                                style={{
+                                  left: `${(note.startBeat / Math.max(0.25, lengthBeats)) * 100}%`,
+                                  width: `${Math.max(2, (note.durationBeats / Math.max(0.25, lengthBeats)) * 100)}%`,
+                                  top: `${((hi - note.pitch) / (hi - lo)) * 72}%`,
+                                }}
+                              />
+                            )
+                          })}
                         </span>
                         {(tool === 'select' || tool === 'trim') && (
                           <ClipEdges
@@ -827,6 +928,7 @@ export function ArrangeView({
                             onEnd={(event) => trimPattern(event, clip.id, 'end')}
                           />
                         )}
+                      </div>
                       </div>
                     )
                   })}
@@ -996,6 +1098,7 @@ function ClipView({
   const project = selectArrange(store).project
   const asset = store.buffers.get(clip.bufferId)
   const [preview, setPreview] = useState<AudioClip | null>(null)
+  const [audioShadow, setAudioShadow] = useState<{ left: number; width: number; line: number; label: string } | null>(null)
   const ghost = store.quantizePreview?.audio.find((item) => item.clipId === clip.id)?.clip
   const shown = preview ?? ghost ?? clip
   const left = ((shown.startSample + (preview ? 0 : shift)) / project.sampleRate) * px
@@ -1049,18 +1152,27 @@ function ClipView({
           setMenu({ x: originX, y: originY })
         }, 480)
       : 0
-    const snapped = (value: number) => snapSampleToMap(value, project)
+    const snapped = (value: number) => project.snap ? snapSampleToMap(value, project, 1 / Math.max(1e-6, activeGridBeats(project) || 1)) : Math.max(0, value)
     const bufferLength = asset?.channels[0]?.length ?? clip.offsetSamples + clip.durationSamples
     const move = (ev: PointerEvent) => {
       if (Math.abs(ev.clientX - originX) > 8 || Math.abs(ev.clientY - originY) > 8) window.clearTimeout(timer)
       if (held) return
       const delta = ((ev.clientX - originX) / px) * project.sampleRate
+      const rawStart = mode === 'move' ? clip.startSample + delta : mode === 'start' ? clip.startSample + delta : clip.startSample
       if (mode === 'move') latest = { ...clip, startSample: snapped(clip.startSample + delta) }
       if (mode === 'start' && stretching) latest = stretchEdge(clip, 'start', snapped(clip.startSample + delta))
       if (mode === 'start' && !stretching) latest = trimAudioClip(clip, 'start', snapped(clip.startSample + delta), bufferLength)
       if (mode === 'end' && stretching) latest = stretchEdge(clip, 'end', snapped(clip.startSample + clip.durationSamples + delta))
       if (mode === 'end' && !stretching) latest = trimAudioClip(clip, 'end', snapped(clip.startSample + clip.durationSamples + delta), bufferLength)
-      setPreview(latest)
+      const follow = mode === 'move' ? { ...clip, startSample: Math.max(0, rawStart) } : latest
+      setPreview(follow)
+      if (latest) {
+        const left = (latest.startSample / project.sampleRate) * px
+        const width = Math.max(8, (latest.durationSamples / project.sampleRate) * px)
+        const line = mode === 'start' ? left : left + width
+        const beats = (latest.durationSamples / project.sampleRate) * (project.tempo / 60)
+        setAudioShadow({ left, width, line, label: lengthReadout(0, beats, quartersPerBar(project.timeSignature)) })
+      }
     }
     const up = (ev: PointerEvent) => {
       window.clearTimeout(timer)
@@ -1071,14 +1183,17 @@ function ClipView({
       if (dropped) {
         window.dispatchEvent(new CustomEvent('cueharbor-slot-clip', { detail: { trackId, clipId: clip.id } }))
         setPreview(null)
+        setAudioShadow(null)
         return
       }
       if (held) {
         setPreview(null)
+        setAudioShadow(null)
         return
       }
       const next = latest
       setPreview(null)
+      setAudioShadow(null)
       if (held) return
       if (!next) return
       if (
@@ -1101,6 +1216,14 @@ function ClipView({
   const fadeIn = (shown.fadeInSamples / project.sampleRate) * px
   const fadeOut = (shown.fadeOutSamples / project.sampleRate) * px
   return (
+    <div style={{ display: 'contents' }}>
+    {audioShadow && (
+      <>
+        <div className="snap-shadow" data-snap-shadow="1" style={{ left: audioShadow.left, width: audioShadow.width }} />
+        <i className="snap-line" style={{ left: audioShadow.line }} />
+        <em className="snap-read" style={{ left: audioShadow.line }}>{audioShadow.label}</em>
+      </>
+    )}
     <div
       data-clip={clip.id}
       data-track={trackId}
@@ -1213,6 +1336,7 @@ function ClipView({
           onEnd={(event) => pointerDown(event, 'end')}
         />
       )}
+    </div>
     </div>
   )
 }

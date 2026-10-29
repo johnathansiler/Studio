@@ -1989,17 +1989,12 @@ html[data-posture="tabletop"] .shell .master-sheet {
 .strip .fader-row .touch-slider.vertical { width: 32px; min-width: 14px; flex: 1 1 auto; }
 .strip .touch-slider.pan { width: 100%; min-width: 0; max-width: 100%; }
 .strip .meter { width: 14px; flex: none; border-radius: 8px; box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.65), 0 0 8px rgba(115, 196, 143, 0.25); }
-.mixer-view .strip.master {
-  flex: 1 0 148px;
-  width: auto;
-  min-width: 148px;
-  max-width: none;
-}
+.mixer-view .strip.master,
 .strip.master {
-  width: max(var(--strip, 84px), 148px);
-  min-width: 148px;
-  max-width: 180px;
-  flex-basis: 156px;
+  flex: 0 0 var(--strip, 84px);
+  width: var(--strip, 84px);
+  min-width: var(--strip, 84px);
+  max-width: var(--strip, 84px);
 }
 .strip.master .meter { width: 22px; }
 .master-read {
@@ -2047,8 +2042,14 @@ html[data-posture="tabletop"] .shell .master-sheet {
 .shell.phone.land .strip .fader-row { min-height: 140px; height: auto; }
 .shell.phone .strip .fader-row { min-height: 160px; }
 .shell.phone .master-read b { font-size: 16px; }
-.shell.phone .strip.master { min-width: 132px; width: 132px; max-width: 148px; flex-basis: 132px; }
-.shell.phone .mixer-view .strip.master { flex: 1 0 132px; width: auto; min-width: 132px; max-width: none; }
+.shell.phone .strip.master,
+.shell.phone .mixer-view .strip.master,
+.shell.fold .mixer-view .strip.master {
+  flex: 0 0 var(--strip, 84px);
+  width: var(--strip, 84px);
+  min-width: var(--strip, 84px);
+  max-width: var(--strip, 84px);
+}
 .shell.phone .strip select,
 .shell.fold .strip select { font-size: 16px; }
 .width-tools {
@@ -2631,11 +2632,15 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   min-width: 0;
   max-width: none;
   flex: 0 0 auto;
-  height: 40px;
-  min-height: 40px;
-  padding: 0 1px;
-  font-size: 13px;
+  height: 48px;
+  min-height: 48px;
+  padding: 2px 1px;
+  font-size: 12px;
   line-height: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 .shell.phone .mixer-view[data-narrow] .strip button,
 .shell.fold .mixer-view[data-narrow] .strip button {
@@ -2645,8 +2650,16 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   min-height: 96px;
   flex: 0 0 96px;
 }
-.shell .mixer-view[data-narrow] .master-short { display: inline; }
+.shell .mixer-view[data-narrow] .master-short { display: block; }
 .shell .mixer-view[data-narrow] .master-full { display: none; }
+.strip-name { display: flex; flex-direction: column; align-items: center; }
+.head.is-selected,
+.lane.is-selected,
+.strip.is-selected,
+.sl-col.is-selected .sl-head {
+  box-shadow: inset 0 0 0 2px rgba(185, 240, 205, 0.85), 0 0 16px rgba(115, 196, 143, 0.45);
+}
+.lane.is-selected { background-color: rgba(115, 196, 143, 0.08); }
 .master-short { display: none; }
 .shell .mixer-view[data-narrow] .strip .touch-slider.pan { height: 28px; min-height: 28px; }
 
@@ -2747,15 +2760,19 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
 .shell.phone .mixer-view[data-layout="rows"] .strip .mini,
 .shell.phone .mixer-view[data-layout="rows"] .strip-auto button,
 .shell.fold .mixer-view[data-layout="rows"] .strip .mini {
-  width: 40px;
-  min-width: 40px;
-  max-width: 40px;
-  flex: 0 0 40px;
-  height: 40px;
-  min-height: 40px;
-  padding: 0;
-  font-size: 12px;
+  width: auto;
+  min-width: 48px;
+  max-width: 72px;
+  flex: 0 0 auto;
+  height: 48px;
+  min-height: 48px;
+  padding: 2px 3px;
+  font-size: 11px;
   line-height: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 .shell .mixer-view[data-layout="rows"] .strip .master-open,
 .shell .mixer-view[data-layout="rows"] .strip .tune-btn,

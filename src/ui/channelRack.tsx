@@ -34,6 +34,7 @@ import { TipButton } from './Hint'
 import { LoopRegion } from './LoopRegion'
 import { DrumRoll } from './DrumRoll'
 import { PatternSend } from './PatternSend'
+import { SnapControl } from './SnapControl'
 import { patternPlayBeat } from '../model/patternMidi'
 import './channel-rack.css'
 
@@ -517,11 +518,15 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
             onClick={() => { engine.unlock?.(); store.setRackMode('song') }}
           />
         </div>
-        <select {...described(bar('pattern'))} value={pattern.id} onChange={(event) => store.selectPattern(event.target.value)}>
-          {project.beats?.patterns.map((item) => (
-            <option key={item.id} value={item.id}>{item.name}</option>
-          ))}
-        </select>
+        <label className="rack-editing">
+          <span>Editing</span>
+          <select {...described(bar('pattern'))} value={pattern.id} onChange={(event) => store.selectPattern(event.target.value)}>
+            {project.beats?.patterns.map((item) => (
+              <option key={item.id} value={item.id}>{item.name}</option>
+            ))}
+          </select>
+          <small>This beat. Song plays Arrange.</small>
+        </label>
         <div className="rack-lengths" role="group" aria-label={`${bar('steps').label}. ${bar('steps').hint}`}>
           <span className="rack-lengths-label">Steps</span>
           {([16, 32, 64] as const).map((length) => (
@@ -538,6 +543,11 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         {!phone && swing}
         <TipButton label="Graph" hint="Show the step graph for the selected channel. Drag a bar to change velocity, pan, pitch, or gate." pressed={graph} onClick={() => setGraph((open) => !open)} />
         {!phone && <TipButton label="Roll" hint="Show this pattern as drum lanes. The notes match the step grid." pressed={store.rackRoll} onClick={() => store.toggleRackRoll()} />}
+        <button type="button" className="rack-random" title="Smart random. A selected sound changes only that row. Nothing selected rebuilds the whole kit." onClick={() => store.smartRandomDrums()}>
+          <strong>Random</strong>
+          <small>Smart random</small>
+        </button>
+        <SnapControl store={store} />
         <PatternSend store={store} beat={Math.max(0, beat)} phone={short} />
         <TipButton label={bar('edit').label} hint={bar('edit').hint} pressed={editOpen} onClick={() => setEditOpen((open) => !open)} />
         <span className="rack-tool" role="status" aria-live="polite" title={toolHint}>{toolName}</span>
@@ -567,7 +577,6 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         <TipButton label={sheet('fill-2').label} hint={sheet('fill-2').hint} onClick={() => focus && store.fillChannel(2, focus.id)}>2</TipButton>
         <TipButton label={sheet('fill-4').label} hint={sheet('fill-4').hint} onClick={() => focus && store.fillChannel(4, focus.id)}>4</TipButton>
         <TipButton label={sheet('fill-8').label} hint={sheet('fill-8').hint} onClick={() => focus && store.fillChannel(8, focus.id)}>8</TipButton>
-        <TipButton label={sheet('rand').label} hint={sheet('rand').hint} onClick={() => store.randomizePattern()} />
         <TipButton label={sheet('human').label} hint={sheet('human').hint} onClick={() => store.humanizePattern()} />
         <TipButton label={sheet('left').label} hint={sheet('left').hint} onClick={() => store.shiftPattern(-1)}>‹</TipButton>
         <TipButton label={sheet('right').label} hint={sheet('right').hint} onClick={() => store.shiftPattern(1)}>›</TipButton>
@@ -792,11 +801,14 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
                   title={`Play ${channel.name}. Select this channel. Fills and the graph follow it.`}
                   aria-label={`${channel.name}. Play this pad and select this channel.`}
                   aria-pressed={rowOn}
-                  onPointerDown={() => engine.unlock?.()}
+                  onPointerDown={(event) => {
+                    if (event.button !== 0 && event.pointerType === 'mouse') return
+                    engine.unlock?.()
+                    hear(channel)
+                  }}
                   onClick={(event) => {
                     const additive = event.shiftKey || event.metaKey || event.ctrlKey
                     store.selectRackChannel(channel.id, additive)
-                    hear(channel)
                   }}
                 >
                   {channel.name}

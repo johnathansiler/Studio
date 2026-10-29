@@ -170,7 +170,17 @@ describe('library access', () => {
     expect(markup).toContain('https://github.com/sgossner/VCSL')
     expect(markup).not.toContain('href="https://github.com')
     expect(markup).toContain('data-sound-panel')
-    expect(markup).toContain('Adds to Vocal at the playhead. Loads onto Keys.')
+    expect(markup).toContain('Adds to Vocal at the playhead.')
+    store.selectTrack(store.project.tracks.find((track) => track.type === 'midi')!.id)
+    const onKeys = renderToStaticMarkup(createElement(SoundBrowser, {
+      store,
+      phone: false,
+      engine: engineStub(),
+      onClose: () => undefined,
+      initial: { entries: loops, status: 'ok' },
+      instruments: [xylophone],
+    }))
+    expect(onKeys).toContain('Loads onto Keys.')
 
     const phone = renderToStaticMarkup(createElement(SoundBrowser, {
       store,

@@ -22,8 +22,15 @@
 .browser-row i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
 .browser-row strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browser-row span, .browser-body p { color: var(--muted); font-size: 12px; }
-.shell.phone .playlist-frame.browser-open { display: block; }
-.shell.phone .playlist-browser { position: absolute; z-index: 8; top: 0; bottom: 0; left: 0; width: min(320px, 88vw); box-shadow: 8px 0 24px rgba(0,0,0,.45); }
+.shell.phone .playlist-frame.browser-open,
+.shell.fold .playlist-frame.browser-open { display: block; }
+.shell.phone .playlist-browser,
+.shell.fold .playlist-browser { position: absolute; z-index: 8; top: 0; bottom: 0; left: 0; width: min(360px, 88vw); box-shadow: 8px 0 24px rgba(0,0,0,.45); }
+.browser-scrim { position: absolute; inset: 0; z-index: 7; border: 0; padding: 0; background: rgba(0, 0, 0, 0.38); }
+.shell.fold .arrange { grid-template-columns: 220px minmax(0, 1fr); --lane-h: 76px; }
+.shell.fold .pl-head { flex-wrap: nowrap; height: 100%; align-items: center; }
+.shell.fold .mini-meter { display: none; }
+.shell.fold .pl-head .mini { min-height: 40px; height: 40px; }
 .shell.phone .browser-tabs button, .shell.phone .browser-tabs select, .shell.phone .browser-row { min-height: 44px; }
 .playlist-browser .sound-filters { flex-wrap: wrap; max-width: 100%; }
 .playlist-browser .sound-filters select,
@@ -31,7 +38,13 @@
 .playlist-browser .sound-filters button { max-width: 100%; min-width: 0; }
 .shell.phone .playlist-browser .sound-filters { flex-wrap: wrap; overflow-x: hidden; }
 .shell.phone .arrange { grid-template-columns: 188px minmax(0, 1fr); }
-.shell.phone .pl-head .mini { width: 34px; min-width: 34px; height: 40px; min-height: 40px; }
+.shell.phone .pl-head { flex-wrap: nowrap; height: 100%; align-items: center; }
+.shell.phone .pl-head .mini { width: auto; min-width: 40px; height: 40px; min-height: 40px; padding: 0 4px; font-size: 12px; }
+.shell.phone .pl-head .mini-word { display: inline; }
+.shell.phone .pl-head .mini-mark { display: none; }
+.shell.phone .pl-head .name { flex: 1 1 36px; min-width: 28px; font-size: 13px; }
+.shell.phone .head { position: relative; }
+.shell.phone .pl-head .track-more { position: absolute; top: 2px; right: 2px; z-index: 2; }
 .shell.phone .mini-meter { display: none; }
 .shell.phone .pl-head .name { min-width: 52px; }
 
@@ -190,9 +203,9 @@
 .tool-label { display: none; font-size: 12px; font-weight: 640; }
 .shell.phone:not(.land) .tool-label,
 .shell.fold .tool-label { display: inline; }
-.shell.fold .arrange { grid-template-columns: 320px minmax(0, 1fr); --lane-h: 112px; }
-.shell.fold .pl-head { flex-wrap: wrap; height: auto; align-content: center; row-gap: 2px; }
-.shell.fold .pl-head .name { flex: 1 1 88px; min-width: 72px; }
+.shell.fold .arrange { grid-template-columns: 220px minmax(0, 1fr); --lane-h: 76px; }
+.shell.fold .pl-head { flex-wrap: nowrap; height: 100%; align-items: center; }
+.shell.fold .pl-head .name { flex: 1 1 72px; min-width: 56px; }
 .shell.phone:not(.land) .tool-slot .timeline-tools { flex-wrap: wrap; overflow: visible; }
 .shell.phone:not(.land) .tool-strip { flex: 1 1 100%; min-width: 0; overflow-x: auto; }
 .shell.phone:not(.land) .tool-chip {
