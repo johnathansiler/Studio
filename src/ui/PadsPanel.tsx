@@ -164,9 +164,9 @@ export function PadsPanel({
       event.preventDefault()
       const index = Number(key.dataset.pad)
       const pitch = Number(key.dataset.pitch)
-      setSelected(index)
       const velocity = pointerVelocity(event, key.getBoundingClientRect())
       play.down(pitch, velocity, event.timeStamp, event.pointerId, levels ? index : undefined)
+      setSelected(index)
       bumpMeter(index, velocity)
       pointers.set(event.pointerId, index)
       setLitPads([...pointers.values()])
@@ -201,8 +201,8 @@ export function PadsPanel({
       event.preventDefault()
       const pitch = levels && selectedPad ? selectedPad.pitch : pad.pitch
       held.set(event.code, index + 1)
-      setSelected(index)
       play.down(pitch, 0.9, event.timeStamp, index + 1, levels ? index : undefined)
+      setSelected(index)
       bumpMeter(index, 0.9)
       setLitPads((list) => list.includes(index) ? list : [...list, index])
     }
