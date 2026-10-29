@@ -47,6 +47,7 @@ export function BevelSelect({
         aria-label={label}
         title={hint ?? label}
         value={value}
+        onPointerDown={(event) => event.stopPropagation()}
         onChange={(event) => onChange(event.target.value)}
       >
         {options.map((item) => (
@@ -59,11 +60,12 @@ export function BevelSelect({
     <>
       <button
         type="button"
-        className={className}
+        className={`bevel-select ${className ?? ''}`.trim()}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`${label}. ${current}.`}
         title={hint ?? label}
+        onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation()
           setOpen(true)
@@ -73,8 +75,18 @@ export function BevelSelect({
       </button>
       {open && (
         <GuideLayer>
-          <button type="button" className="guide-scrim" aria-label={`Close ${label}`} onClick={() => setOpen(false)} />
-          <div className={`guide-sheet sheet bevel-picker`} role="dialog" aria-label={label} data-picker={label}>
+          <button
+            type="button"
+            className="guide-scrim picker-scrim"
+            aria-label={`Close ${label}`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              setOpen(false)
+            }}
+          />
+          <div className="guide-sheet sheet bevel-picker" role="dialog" aria-label={label} data-picker={label} onPointerDown={(event) => event.stopPropagation()}>
             <div className="guide-handle" aria-hidden="true" />
             <header className="guide-head">
               <div>
@@ -90,6 +102,7 @@ export function BevelSelect({
                   type="button"
                   className={`guide-choice${item.value === value ? ' on' : ''}`}
                   aria-pressed={item.value === value}
+                  onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
                     event.preventDefault()
                     event.stopPropagation()

@@ -249,8 +249,40 @@ describe('phone fit at 412x915', () => {
         const fold = await browser.newPage({ viewport: { width: 923, height: 1024 } })
         await fold.goto(url, { waitUntil: 'domcontentloaded' })
         await fold.getByRole('button', { name: /^Arrange/ }).first().waitFor()
+        await fold.getByRole('button', { name: /Snap grid/ }).click()
+        await fold.getByRole('dialog', { name: 'Snap grid' }).waitFor()
+        const foldGrid = await fold.getByRole('button', { name: '1/8', exact: true }).boundingBox()
+        expect(foldGrid!.height).toBeGreaterThanOrEqual(44)
+        await fold.keyboard.press('Escape')
         await shot(fold, 'live-arrange-923')
+        await fold.getByRole('button', { name: /^Mix/ }).click()
+        await fold.locator('.mixer .strip').first().waitFor()
+        const foldMix = await fold.evaluate(() => {
+          const safe = document.querySelector('.strip .solo-safe') as HTMLElement
+          safe.scrollIntoView({ block: 'center' })
+          const box = safe.getBoundingClientRect()
+          const strip = document.querySelector('.strip:not(.master)') as HTMLElement
+          const master = document.querySelector('.strip.master') as HTMLElement
+          return {
+            safe: safe.querySelector('.arm-full')?.textContent,
+            height: box.height,
+            inView: box.top >= 0 && box.bottom <= window.innerHeight + 1,
+            masterWidth: master.getBoundingClientRect().width,
+            stripWidth: strip.getBoundingClientRect().width,
+          }
+        })
+        expect(foldMix.safe).toBe('Safe')
+        expect(foldMix.height).toBeGreaterThanOrEqual(40)
+        expect(foldMix.inView).toBe(true)
+        expect(Math.abs(foldMix.masterWidth - foldMix.stripWidth)).toBeLessThan(2)
         await fold.close()
+
+        const desk = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+        await desk.goto(url, { waitUntil: 'domcontentloaded' })
+        await desk.getByRole('button', { name: /^Arrange/ }).first().waitFor()
+        const deskGrid = await desk.locator('select[aria-label="Snap grid"]').count()
+        expect(deskGrid).toBe(1)
+        await desk.close()
         await page.close()
       } finally {
         await browser.close()
