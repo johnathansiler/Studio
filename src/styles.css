@@ -2898,19 +2898,13 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   align-self: flex-start;
 }
 .shell.phone:not(.land) .strip .fader-row { min-height: 96px; flex: 0 0 96px; }
-.shell.phone .mixer-view .mini-caption,
-.shell.phone .mixer-view .mode-stack,
-.shell.phone .mixer-view .arm-stack,
-.shell.phone .mixer-view .master-stack {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
 .shell.phone .mixer-view .mini-word,
 .shell.phone .mixer-view .mode-full,
 .shell.phone .mixer-view .master-full,
-.shell.phone .mixer-view .solo-safe .arm-full { display: none; }
+.shell.phone .mixer-view .arm-full,
+.shell.phone .mixer-view .lvl-word {
+  display: inline;
+}
 .shell.phone .mixer-view .mini,
 .shell.phone .mixer-view .strip-auto button,
 .shell.phone .mixer-view .lvl-open,

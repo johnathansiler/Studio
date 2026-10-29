@@ -1,0 +1,192 @@
+/* Shared beveled sheet for Add track, Unstuck, Tools, and Song. */
+
+.guide-sheet {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  max-height: min(78dvh, 680px);
+  overflow: auto;
+  padding: 8px 12px calc(12px + env(safe-area-inset-bottom));
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background-color: #18241d;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.28));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 18px 50px rgba(0, 0, 0, 0.45);
+  color: var(--text);
+}
+.guide-sheet.sheet {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  border-radius: 20px 20px 0 0;
+}
+.guide-sheet.pop {
+  left: auto;
+  right: 16px;
+  bottom: 16px;
+  width: min(440px, calc(100vw - 32px));
+}
+.guide-handle {
+  width: 42px;
+  height: 4px;
+  margin: 2px auto 4px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.guide-sheet.pop .guide-handle { display: none; }
+.guide-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.guide-head > div { min-width: 0; flex: 1 1 auto; }
+.guide-head h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.1;
+}
+.guide-head p,
+.guide-note {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.guide-head button,
+.guide-actions button {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background-color: #121a16;
+  background-image: var(--face, linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(0, 0, 0, 0.28)));
+  box-shadow: var(--raised, inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 2px rgba(0, 0, 0, 0.4));
+  color: var(--text);
+}
+.guide-x { margin-left: auto; padding: 0 12px; }
+.guide-section { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.guide-section h3 {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 740;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.guide-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.guide-card,
+.guide-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  min-height: 44px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background-color: #121a16;
+  background-image: var(--face, linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(0, 0, 0, 0.22)));
+  box-shadow: var(--raised, inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 1px 2px rgba(0, 0, 0, 0.35));
+  color: var(--text);
+  text-align: left;
+}
+.guide-card strong,
+.guide-choice strong { font-size: 14px; line-height: 1.1; }
+.guide-card small,
+.guide-choice small,
+.btn-caption {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 560;
+  line-height: 1.3;
+  white-space: normal;
+}
+.guide-card.on,
+.guide-choice.on,
+.cap-btn.on {
+  border-color: transparent;
+  background-color: #1c3a28;
+  color: #f4fff8;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 0 14px rgba(115, 196, 143, 0.65);
+}
+.guide-card.on small,
+.guide-choice.on small { color: #d7ffe6; }
+.guide-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.guide-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.guide-actions .primary {
+  background-color: var(--accent, #73c48f);
+  color: #102117;
+  border-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 0 12px rgba(115, 196, 143, 0.45);
+}
+.guide-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 79;
+  border: 0;
+  background: rgba(6, 10, 8, 0.45);
+}
+.cap-btn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 44px;
+  min-height: 40px;
+  height: 44px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background-color: #18231d;
+  background-image: var(--face, linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(0, 0, 0, 0.28)));
+  box-shadow: var(--raised, inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 2px rgba(0, 0, 0, 0.4));
+  color: var(--text);
+}
+.cap-btn strong { font-size: 12px; line-height: 1; }
+.cap-btn small { font-size: 9px; line-height: 1; font-weight: 640; }
+.arrange-panels {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 2px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+.tool-sheet { width: min(520px, calc(100vw - 16px)); }
+.tool-sheet .guide-cards { grid-template-columns: 1fr; }
+.song-sheet .rec-bar.inline,
+.song-sheet .auto-mode,
+.song-sheet .map-head { display: flex; flex-wrap: wrap; gap: 6px; }
+.song-sheet .auto-mode button,
+.song-sheet .rec-bar button,
+.song-sheet .map-head button {
+  min-height: 44px;
+  min-width: 44px;
+}
+.guide-sheet.add-sheet,
+.guide-sheet.unstuck-sheet,
+.guide-sheet.tool-sheet,
+.guide-sheet.song-sheet {
+  z-index: 82;
+  background-color: #18241d;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.28));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 18px 50px rgba(0, 0, 0, 0.45);
+}

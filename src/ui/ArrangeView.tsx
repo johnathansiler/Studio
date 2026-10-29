@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { createPortal } from 'react-dom'
 import type { AudioEngine } from '../audio/engine'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { activeComp } from '../model/comp'
@@ -30,12 +31,44 @@ import { AutoTuneLaneMark, addOrOpenAutoTune } from './AutoTuneFace'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { TRACK_ROW, TRACK_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
+import './guideSheet.css'
 import { ActionSheet, SheetRow, TipButton } from './Hint'
 import { RecordBar } from './RecordBar'
 import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, trimZone } from './touchEdit'
 import { laneDoubleClickAddsClip } from './clipKeys'
 import { isSampledInstrument } from '../instruments/sampled'
 import { LoopRegion } from './LoopRegion'
+
+
+function ArrangeChrome({ browserOpen, setupOpen, onBrowser, onSetup }: { browserOpen: boolean; setupOpen: boolean; onBrowser: () => void; onSetup: () => void }) {
+  const [host, setHost] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    setHost(document.getElementById('tool-slot'))
+  }, [])
+  const buttons = (
+    <div className="arrange-panels">
+      {!browserOpen && (
+        <button type="button" className="cap-btn" title="Sounds and loops. Open the browser of sounds, instruments, loops, and patterns." onClick={onBrowser}>
+          <strong>Browser</strong>
+          <small>Sounds and loops</small>
+        </button>
+      )}
+      <button
+        type="button"
+        className={`cap-btn${setupOpen ? ' on' : ''}`}
+        aria-expanded={setupOpen}
+        aria-controls="arrange-setup"
+        title="Song. Automation write mode, recording, and markers."
+        onClick={onSetup}
+      >
+        <strong>Song</strong>
+        <small>Record and markers</small>
+      </button>
+    </div>
+  )
+  if (host) return createPortal(buttons, host)
+  return <div className="arrange-setup">{buttons}</div>
+}
 
 export function ArrangeView({
   store,
@@ -500,6 +533,14 @@ export function ArrangeView({
   }
 
   const [setupOpen, setSetupOpen] = useState(false)
+  useEffect(() => {
+    if (!setupOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSetupOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [setupOpen])
   const [browserOpen, setBrowserOpen] = useState(() => panelChoice('arrangeBrowser') ?? !compact)
   useEffect(() => {
     if (panelChoice('arrangeBrowser') != null) return
@@ -532,30 +573,42 @@ export function ArrangeView({
   return (
     <div className="arrange-wrap">
       <SmartTempoBar store={store} />
-      <div className="arrange-setup">
-        {!browserOpen && (
-          <button type="button" className="setup-btn" title="Show sounds, patterns, and effects." onClick={() => { setBrowserOpen(true); rememberPanel('arrangeBrowser', true) }}>
-            Browser
-          </button>
-        )}
-        <button
-          type="button"
-          className={`setup-btn ${setupOpen ? 'on' : ''}`}
-          aria-expanded={setupOpen}
-          aria-controls="arrange-setup"
-          title="Automation write mode, record options, and song markers."
-          onClick={() => setSetupOpen((open) => !open)}
-        >
-          Setup
-        </button>
-        {setupOpen && (
-          <div id="arrange-setup" className="arrange-setup-body">
-            <AutomationModeBar store={store} />
-            <RecordBar store={store} engine={engine} session={session} onQuickPunch={onQuickPunch} inline />
-            <SongMapHead store={store} position={position} />
+      <ArrangeChrome
+        browserOpen={browserOpen}
+        setupOpen={setupOpen}
+        onBrowser={() => { setBrowserOpen(true); rememberPanel('arrangeBrowser', true) }}
+        onSetup={() => setSetupOpen((open) => !open)}
+      />
+      {setupOpen && (
+        <>
+          <button type="button" className="guide-scrim" aria-label="Close song setup" onClick={() => setSetupOpen(false)} />
+          <div id="arrange-setup" className={`guide-sheet song-sheet ${compact ? 'sheet' : 'pop'}`} role="dialog" aria-label="Song">
+            {compact && <div className="guide-handle" aria-hidden="true" />}
+            <header className="guide-head">
+              <div>
+                <h2>Song</h2>
+                <p>Automation, recording, and markers. These are not in the menu.</p>
+              </div>
+              <button type="button" className="guide-x" onClick={() => setSetupOpen(false)} aria-label="Close song setup">Cancel</button>
+            </header>
+            <section className="guide-section">
+              <h3>Automation</h3>
+              <p className="guide-note">Off ignores automation. Read plays it. Touch writes while you hold a fader. Latch keeps that value until playback stops.</p>
+              <AutomationModeBar store={store} />
+            </section>
+            <section className="guide-section">
+              <h3>Recording</h3>
+              <p className="guide-note">Where a recording starts and stops, and which input the selected audio track uses.</p>
+              <RecordBar store={store} engine={engine} session={session} onQuickPunch={onQuickPunch} inline />
+            </section>
+            <section className="guide-section">
+              <h3>Markers</h3>
+              <p className="guide-note">Name a section, drop a marker, or change the tempo at the playhead.</p>
+              <SongMapHead store={store} position={position} />
+            </section>
           </div>
-        )}
-      </div>
+        </>
+      )}
       <div className={`playlist-frame ${browserOpen ? 'browser-open' : ''} ${phone ? 'phone-arrange' : ''}`} style={{ ['--browser' as string]: `${browserWidth}px` }}>
       {browserOpen && compact && (
         <button type="button" className="browser-scrim" aria-label="Close browser" title="Close the browser." onClick={() => { engine.stopPreview(); setBrowserOpen(false); rememberPanel('arrangeBrowser', false); onLibraryClose?.() }} />

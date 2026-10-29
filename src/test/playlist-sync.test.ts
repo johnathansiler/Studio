@@ -167,7 +167,7 @@ describe('arrange browser', () => {
     for (const label of ['Sounds', 'Instruments', 'Loops', 'Patterns', 'Plugins', 'Clips']) expect(html).toContain(label)
     expect(html).not.toContain('>Read<')
     expect(html).not.toContain('Auto-Tune')
-    expect(html).toContain('>Setup<')
+    expect(html).toContain('>Song<')
   })
 })
 
@@ -197,7 +197,7 @@ describe('phone arrange', () => {
         onAnalyze: () => undefined,
       } as never))
       expect(html).toContain('data-phone-arrange="compact"')
-      expect(html).toContain('>Setup<')
+      expect(html).toContain('>Song<')
       expect(html).toContain('data-loop="off"')
       expect(html).toContain('Loop start')
       expect(html).toContain('Loop end')

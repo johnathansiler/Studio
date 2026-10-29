@@ -54,20 +54,20 @@ export function SongMapHead({ store, position, compact = false }: { store: Proje
   return (
     <div className="map-head">
       <div className="row">
-        <button type="button" title="Add a named section at the playhead" aria-label="Add section" disabled={store.remoteFollow} onClick={() => store.addSection('verse', playBeat())}>
-          Sec
+        <button type="button" title="Add a named section at the playhead." aria-label="Section. Add a named section at the playhead." disabled={store.remoteFollow} onClick={() => store.addSection('verse', playBeat())}>
+          Section
         </button>
-        <button type="button" title="Drop a marker at the playhead" aria-label="Add marker" disabled={store.remoteFollow} onClick={() => store.addSection('marker', playBeat())}>
-          Mark
+        <button type="button" title="Drop a marker at the playhead." aria-label="Marker. Drop a marker at the playhead." disabled={store.remoteFollow} onClick={() => store.addSection('marker', playBeat())}>
+          Marker
         </button>
         <button
           type="button"
-          title="Add a tempo change at the playhead"
-          aria-label="Add tempo change"
+          title="Add a tempo change at the playhead."
+          aria-label="Tempo. Add a tempo change at the playhead."
           disabled={store.remoteFollow}
           onClick={() => store.addTempoPoint(project.snap ? Math.round(playBeat()) : playBeat(), tempoAtSample(project, position))}
         >
-          BPM
+          Tempo
         </button>
       </div>
       {section ? (
@@ -90,11 +90,11 @@ export function SongMapHead({ store, position, compact = false }: { store: Proje
               <option key={kind.id} value={kind.id}>{kind.name}</option>
             ))}
           </select>
-          <button type="button" title="Copy this section and everything inside it" aria-label="Duplicate section" disabled={store.remoteFollow} onClick={() => store.duplicateSection(section.id)}>
-            Copy
+          <button type="button" title="Copy this section and everything inside it." aria-label="Duplicate section. Copy this section and everything inside it." disabled={store.remoteFollow} onClick={() => store.duplicateSection(section.id)}>
+            Duplicate
           </button>
-          <button type="button" title="Remove this section and close the gap" aria-label="Delete section" disabled={store.remoteFollow} onClick={() => store.deleteSection(section.id)}>
-            Del
+          <button type="button" title="Remove this section and close the gap." aria-label="Delete section. Remove this section and close the gap." disabled={store.remoteFollow} onClick={() => store.deleteSection(section.id)}>
+            Delete
           </button>
         </div>
       ) : (
@@ -126,8 +126,8 @@ export function SongMapHead({ store, position, compact = false }: { store: Proje
             </button>
           )}
           {point && point.beat > 1e-3 && (
-            <button type="button" title="Remove this tempo change" aria-label="Delete tempo change" disabled={store.remoteFollow} onClick={() => store.removeTempoPoint(point.beat)}>
-              Del
+            <button type="button" title="Remove this tempo change." aria-label="Delete tempo. Remove this tempo change." disabled={store.remoteFollow} onClick={() => store.removeTempoPoint(point.beat)}>
+              Delete
             </button>
           )}
         </div>

@@ -176,14 +176,24 @@ describe('phone fit at 412x915', () => {
           const mute = document.querySelector('.strip button[aria-label*="Mute"]') as HTMLElement
           mute.scrollIntoView({ block: 'center' })
           const box = mute.getBoundingClientRect()
-          const caption = getComputedStyle(mute.querySelector('.mini-caption')!).display
-          const safe = document.querySelector('.strip .solo-safe .mode-caption') as HTMLElement | null
-          return { top: box.top, bottom: box.bottom, caption, safe: safe ? getComputedStyle(safe).display : 'missing', view: window.innerHeight }
+          const word = mute.querySelector('.mini-word') as HTMLElement
+          const safe = document.querySelector('.strip .solo-safe .arm-full') as HTMLElement | null
+          return {
+            top: box.top,
+            bottom: box.bottom,
+            word: word.textContent,
+            wordShown: getComputedStyle(word).display,
+            safe: safe ? safe.textContent : 'missing',
+            safeShown: safe ? getComputedStyle(safe).display : 'missing',
+            view: window.innerHeight,
+          }
         })
         expect(mix.top).toBeGreaterThanOrEqual(0)
         expect(mix.bottom).toBeLessThanOrEqual(mix.view + 1)
-        expect(mix.caption).not.toBe('none')
-        expect(mix.safe).not.toBe('none')
+        expect(mix.word).toBe('Mute')
+        expect(mix.wordShown).not.toBe('none')
+        expect(mix.safe).toBe('Safe')
+        expect(mix.safeShown).not.toBe('none')
         await shot(page, 'live-mix-412')
 
         const fold = await browser.newPage({ viewport: { width: 923, height: 1024 } })

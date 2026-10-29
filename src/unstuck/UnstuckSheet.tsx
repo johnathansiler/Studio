@@ -2,104 +2,95 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { cachedAnalyses, subscribeAnalysis } from '../analysis/cache'
 import type { AnalysisResult } from '../analysis/types'
 import type { AudioEngine } from '../audio/engine'
-import { spellSymbol, type Mode } from '../model/progressions'
 import { samplesToBeats } from '../model/time'
 import type { ProjectStore } from '../state/store'
-import { audition, songContext, suggest, UNSTUCK_BUTTON, UNSTUCK_TABS, type Suggestion, type SuggestionKind } from './index'
+import { useFormFactor } from '../ui/form'
+import '../ui/guideSheet.css'
+import { songContext, suggest } from './index'
+import { UNSTUCK_GROUPS, unstuckActions } from './menu'
 
 const NO_ANALYSIS: AnalysisResult[] = []
 
 export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; engine: AudioEngine; onClose: () => void }) {
-  const [tab, setTab] = useState<SuggestionKind>('progression')
-  const [heard, setHeard] = useState<string | null>(null)
-  const [added, setAdded] = useState('')
+  const [pass, setPass] = useState<Record<string, number>>({})
+  const [used, setUsed] = useState<string | null>(null)
   const version = store.version
   const analyses = useSyncExternalStore(subscribeAnalysis, cachedAnalyses, () => NO_ANALYSIS)
+  const place = useFormFactor() === 'desk' ? 'pop' : 'sheet'
   const context = useMemo(() => {
     const beat = samplesToBeats(engine.positionSamples, store.project.sampleRate, store.project.tempo)
     return songContext(store.project, beat, analyses)
   }, [store, engine, version, analyses])
-  const items = useMemo(() => suggest(context).filter((item) => item.kind === tab), [context, tab])
-  const blurb = UNSTUCK_TABS.find((item) => item.id === tab)?.description ?? UNSTUCK_BUTTON
+  const actions = useMemo(() => unstuckActions(suggest(context), context, pass), [context, pass])
 
   useEffect(() => () => engine.stopPreview(), [engine])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
     }
+    const close = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest('.unstuck-sheet, .unstuck-btn')) return
+      onClose()
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('pointerdown', close)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('pointerdown', close)
+    }
   }, [onClose])
 
-  function hear(item: Suggestion) {
-    engine.unlock()
-    engine.previewSequence(audition(context, item))
-    setHeard(item.id)
-  }
-
-  function useSuggestion(item: Suggestion) {
+  function run(key: string) {
+    const action = actions.find((item) => item.key === key)
+    if (!action) return
+    const step = pass[key] ?? 0
+    const item = action.items[step % action.items.length]
     engine.stopPreview()
     store.applyUnstuck(item)
-    setAdded('Added. Undo takes it back.')
+    setPass((prev) => ({ ...prev, [key]: step + 1 }))
+    setUsed(key)
     store.toast('Added. Undo takes it back.', 'good')
   }
 
   return (
-    <div className="unstuck-sheet" role="dialog" aria-label="Unstuck" data-unstuck="open">
-      <header>
-        <strong>Unstuck</strong>
-        <button type="button" onClick={onClose} aria-label="Close Unstuck">×</button>
-      </header>
-      <div className="unstuck-tabs" role="tablist" aria-label="Suggestion kind">
-        {UNSTUCK_TABS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === item.id}
-            className={tab === item.id ? 'on' : ''}
-            aria-label={`${item.label}. ${item.description}`}
-            onClick={() => setTab(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-      <p className="unstuck-blurb">{blurb} Hear plays it after the last chord. Use writes it, and undo takes it back.</p>
-      {added && <p className="unstuck-status" role="status">{added}</p>}
-      <div className="unstuck-list">
-        {items.map((item) => {
-          const names = spelledLine(item.line, context.mode, context.key)
-          const bar = Math.floor(item.startBeat / context.beatsPerBar) + 1
+    <>
+      <button type="button" className="guide-scrim" aria-label="Close Unstuck" onClick={onClose} />
+      <div className={`guide-sheet unstuck-sheet ${place}`} role="dialog" aria-label="Unstuck" data-unstuck="open">
+        {place === 'sheet' && <div className="guide-handle" aria-hidden="true" />}
+        <header className="guide-head">
+          <div>
+            <h2>Unstuck</h2>
+            <p>Tap to generate ideas fast. Tap the same idea again for a new variation. Undo takes one tap back.</p>
+          </div>
+          <button type="button" className="guide-x" onClick={onClose} aria-label="Close Unstuck">Cancel</button>
+        </header>
+        {UNSTUCK_GROUPS.map((group) => {
+          const rows = actions.filter((item) => item.group === group)
+          if (!rows.length) return null
           return (
-            <article key={item.id} className={heard === item.id ? 'on' : ''} data-id={item.id} data-kind={item.kind}>
-              <div className="unstuck-card-top">
-                <b>{item.title}</b>
-                <span>Bar {bar}</span>
+            <section className="guide-section" key={group}>
+              <h3>{group}</h3>
+              <div className="guide-cards">
+                {rows.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`guide-card${used === item.key ? ' on' : ''}`}
+                    data-unstuck-action={item.key}
+                    title={item.detail}
+                    onClick={() => run(item.key)}
+                  >
+                    <strong>{item.title}</strong>
+                    <small>{item.detail}</small>
+                  </button>
+                ))}
               </div>
-              <p className="unstuck-line">{item.line}</p>
-              {names && <p className="unstuck-names">{names}</p>}
-              <p className="unstuck-why">{item.why}</p>
-              <div className="unstuck-actions">
-                <button type="button" onClick={() => hear(item)} title="Play it after the last chord, without writing it.">
-                  Hear
-                </button>
-                <button type="button" className="primary" onClick={() => useSuggestion(item)} title="Write it into the song. Undo takes it back.">
-                  Use
-                </button>
-              </div>
-            </article>
+            </section>
           )
         })}
-        {!items.length && <p className="unstuck-empty">No melody on a MIDI track yet. Add one, and chords can follow it.</p>}
+        {!actions.length && <p className="guide-note">Nothing to add yet. Record or draw a part, then come back.</p>}
       </div>
-    </div>
+    </>
   )
-}
-
-function spelledLine(line: string, mode: Mode, key: number): string {
-  if (line.includes(' ') || line.includes('→')) return ''
-  const symbols = line.split('–').map((symbol) => symbol.trim()).filter(Boolean)
-  if (!symbols.length || !symbols.every((symbol) => /^[#b]*(i{1,3}|iv|vi{0,3}|v)/i.test(symbol))) return ''
-  return symbols.map((symbol) => spellSymbol(symbol, mode, key).name).join(' ')
 }

@@ -7,8 +7,17 @@ export interface AddTrackSpec {
   count: number
   instrument: TrackInstrument
   input: 'mic' | 'line'
+  /** 1–8. When set, the audio input is `mic:0` … `line:7`. Omitted keeps `input` as written. */
+  inputIndex?: number
   channels: 1 | 2
   armed: boolean
+}
+
+export function audioInput(spec: AddTrackSpec): string {
+  if (spec.kind !== 'audio') return 'none'
+  if (spec.inputIndex == null) return spec.input
+  const index = Math.min(8, Math.max(1, Math.round(spec.inputIndex))) - 1
+  return `${spec.input}:${index}`
 }
 
 export const defaultAddSpec = (): AddTrackSpec => ({
@@ -33,7 +42,7 @@ export function insertIndex(tracks: { id: string }[], selectedId: string | null)
 function label(spec: AddTrackSpec) {
   if (spec.kind === 'audio') return 'Audio'
   if (spec.kind === 'bus') return 'Bus'
-  if (spec.kind === 'drum') return 'Drum'
+  if (spec.kind === 'drum') return spec.instrument === '808' ? '808' : 'Drum'
   if (spec.instrument === 'scaler') return 'Scaler'
   if (spec.instrument === 'pads') return 'Pads'
   if (spec.instrument === 'library') return 'Library'
@@ -48,7 +57,9 @@ export function tracksFor(spec: AddTrackSpec, existing: Track[]): Track[] {
   const count = clampCount(spec.count)
   const name = label(spec)
   let used = existing.filter((track) => track.name === name || track.name.startsWith(`${name} `)).length
-  const instrument: TrackInstrument = spec.kind === 'drum' ? 'drum-machine' : spec.kind === 'midi' ? spec.instrument : 'none'
+  const instrument: TrackInstrument = spec.kind === 'drum'
+    ? (spec.instrument === '808' ? '808' : 'drum-machine')
+    : spec.kind === 'midi' ? spec.instrument : 'none'
   const type = spec.kind === 'bus' ? 'bus' : spec.kind === 'audio' ? 'audio' : 'midi'
   const made: Track[] = []
   for (let i = 0; i < count; i++) {
@@ -58,7 +69,7 @@ export function tracksFor(spec: AddTrackSpec, existing: Track[]): Track[] {
       type,
       color: TRACK_COLORS[(existing.length + i) % TRACK_COLORS.length],
       instrument,
-      input: type === 'audio' ? spec.input : 'none',
+      input: audioInput(spec),
       channels: type === 'audio' ? spec.channels : 1,
       armed: type === 'audio' && spec.armed,
     }))

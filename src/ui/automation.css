@@ -56,10 +56,10 @@
   }
 }
 @container channel (max-width: 70px) {
-  .auto-mode.in-strip .mode-full { display: none; }
-  .auto-mode.in-strip .mode-stack { display: flex; flex-direction: column; align-items: center; justify-content: center; }
-  .auto-mode.in-strip .mode-short { display: block; }
-  .auto-mode.in-strip button { overflow: visible; min-height: 48px; }
+  .auto-mode.in-strip .mode-full { display: inline; font-size: 9px; letter-spacing: -0.04em; }
+  .auto-mode.in-strip .mode-stack,
+  .auto-mode.in-strip .mode-short { display: none; }
+  .auto-mode.in-strip button { overflow: hidden; min-height: 40px; }
 }
 @container channel (max-width: 72px) {
   .fader-row { gap: 2px; min-width: 0; }
@@ -69,8 +69,9 @@
   .touch-slider.pan { width: 100%; min-width: 0; max-width: 100%; }
   .strip .meter,
   .meter { width: 6px; min-width: 6px; }
-  .solo-safe .arm-full { display: none; }
-  .solo-safe .arm-short { display: inline; }
+  .solo-safe .arm-full { display: inline; font-size: 9px; letter-spacing: -0.04em; }
+  .solo-safe .arm-short,
+  .solo-safe .arm-stack { display: none; }
   .mini { font-size: 10px; padding: 0; text-align: center; }
   h3 { font-size: 10px; line-height: 1.15; white-space: normal; }
 }
@@ -146,41 +147,46 @@
   font-size: 10px;
   padding: 1px 0;
 }
-.shell .mixer-view[data-narrow] .mode-full,
-.shell .mixer-view[data-layout="rows"] .mode-full,
-.shell .mixer-view[data-narrow] .solo-safe .arm-full,
-.shell .mixer-view[data-layout="rows"] .solo-safe .arm-full,
-.shell .mixer-view[data-narrow] .mini-word,
-.shell .mixer-view[data-layout="rows"] .mini-word,
-.shell .mixer-view[data-narrow] .master-full {
+/* Mixer labels are the full word in every layout. The letter stacks stay in the markup for other views. */
+.mixer-view .mode-short,
+.mixer-view .arm-short,
+.mixer-view .master-short,
+.mixer-view .mini-mark,
+.mixer-view .lvl-mark,
+.mixer-view .arm-compact,
+.mixer-view .mode-stack,
+.mixer-view .arm-stack,
+.mixer-view .master-stack,
+.mixer-view .mode-caption,
+.mixer-view .mini-caption,
+.sl-flags .mini-mark {
   display: none;
 }
-.shell .mixer-view[data-narrow] .mode-stack,
-.shell .mixer-view[data-layout="rows"] .mode-stack,
-.shell .mixer-view[data-narrow] .solo-safe .arm-stack,
-.shell .mixer-view[data-layout="rows"] .solo-safe .arm-stack,
-.shell .mixer-view[data-narrow] .master-stack,
-.shell .mixer-view[data-narrow] .mini-caption,
-.shell .mixer-view[data-layout="rows"] .mini-caption {
-  display: flex;
-  flex-direction: column;
+.mixer-view .mode-full,
+.mixer-view .arm-full,
+.mixer-view .master-full,
+.mixer-view .mini-word,
+.mixer-view .lvl-word,
+.sl-flags .mini-word {
+  display: inline;
+}
+.mixer-view .strip-auto button,
+.mixer-view .mix-flags .mini,
+.mixer-view .master-open,
+.mixer-view .lvl-open,
+.mixer-view .fx-open,
+.sl-flags button {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 1px;
-  line-height: 1;
-}
-.shell .mixer-view[data-narrow] .mode-short,
-.shell .mixer-view[data-layout="rows"] .mode-short,
-.shell .mixer-view[data-narrow] .solo-safe .arm-short,
-.shell .mixer-view[data-layout="rows"] .solo-safe .arm-short,
-.shell .mixer-view[data-narrow] .master-short,
-.shell .mixer-view[data-narrow] .mini-mark,
-.shell .mixer-view[data-layout="rows"] .mini-mark,
-.shell .mixer-view[data-narrow] .lvl-mark {
-  display: block;
-  font-size: 12px;
-  font-weight: 760;
-  line-height: 1;
+  text-align: center;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 2px;
+  font-size: clamp(9px, 3.1cqi, 13px);
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  white-space: nowrap;
 }
 .arm-flag { gap: 3px; }
 .arm-compact { display: none; }
@@ -199,10 +205,9 @@
   color: #fff;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), inset 0 -2px 0 rgba(90, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.4);
 }
-/* The word wins when the control is at least 42px. Tighter buttons use A and the record dot. */
 @container channel (max-width: 36px) {
-  .arm-flag .arm-full { display: none; }
-  .arm-flag .arm-compact { display: inline-flex; align-items: center; justify-content: center; gap: 2px; }
+  .mixer-view .arm-flag .arm-full { display: inline; font-size: 8px; letter-spacing: -0.05em; }
+  .mixer-view .arm-flag .arm-compact { display: none; }
 }
 .shell .mixer-view[data-narrow] .strip-auto button.on,
 .shell .mixer-view[data-layout="rows"] .strip-auto button.on {
@@ -218,6 +223,27 @@
 .shell .mixer-view[data-narrow] .strip .strip-auto.auto-mode {
   display: flex;
   flex-direction: column;
+}
+@container channel (max-width: 96px) {
+  .shell .strip .strip-auto.auto-mode {
+    display: flex;
+    flex-direction: column;
+  }
+  .strip .row,
+  .strip .mix-flags {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .strip .strip-auto button,
+  .strip .mix-flags .mini,
+  .strip .master-open,
+  .strip .lvl-open,
+  .strip .fx-open {
+    width: 100%;
+    min-height: 40px;
+    font-size: 10px;
+    letter-spacing: -0.04em;
+  }
 }
 .shell .mixer-view[data-layout="rows"] .strip .strip-auto.auto-mode {
   display: flex;

@@ -504,6 +504,9 @@
 .sl-flags button.on { background: #d7b15a; color: #1b160c; border-color: transparent; }
 .sl-flags button.arm.on { background: #ef4d4d; color: white; }
 .sl-flags button.mute.on { background: #8d9a90; color: #141816; }
+.sl-flags .mini-mark { display: none; }
+.sl-flags .mini-word { display: inline; }
+.sl-flags button { min-height: 40px; height: auto; font-size: clamp(11px, 3cqi, 13px); letter-spacing: -0.02em; }
 
 .sl-sends {
   display: flex;
