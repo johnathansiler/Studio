@@ -237,9 +237,10 @@ export function SongLoopStrip({ store, onSeek }: { store: ProjectStore; onSeek?:
 /** Keep a grip inside the visible ruler, centered on its edge when that edge is on screen. */
 function pinGrip(edge: number, viewLeft: number, viewWidth: number, grip: number) {
   if (!(viewWidth > 0)) return Math.max(0, edge - grip / 2)
-  const min = viewLeft
-  const max = viewLeft + viewWidth - grip
-  if (max <= min) return min
+  const pad = 8
+  const min = viewLeft + pad
+  const max = viewLeft + viewWidth - grip - pad
+  if (max <= min) return viewLeft
   return Math.min(max, Math.max(min, edge - grip / 2))
 }
 

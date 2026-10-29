@@ -831,6 +831,10 @@ body:not(:has(.shell.phone)) .action-sheet {
   max-width: 100%;
 }
 
+.shell:not(.phone):not(.fold)[data-editor="piano"] .workspace:not(.dock-bottom):not(.session-closed) {
+  grid-template-columns: minmax(200px, 1fr) minmax(0, min(var(--dock, 62%), 72%));
+}
+
 .shell .arrange {
   min-width: 0;
   max-width: 100%;

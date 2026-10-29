@@ -51,8 +51,7 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
       <div className="strip master">
         <h3>Master</h3>
         <button id="master-open" className="text-btn master-open" aria-label="Master. Loudness, tone, and the limiter." title="Loudness, tone, and the limiter." onClick={() => setMasterOpen(true)}>Master</button>
-        <MasterMeters engine={engine} />
-        <Readout engine={engine} />
+        <MasterReadout engine={engine} />
         <div className="fader-row">
           <Meter engine={engine} id="master" />
           <input type="range" min={0} max={1.25} step={0.01} aria-label="Master volume. How loud the whole mix is." title="How loud the whole mix is." value={project.masterVolume} onChange={(event) => store.setMasterVolume(Number(event.target.value))} />
@@ -65,38 +64,35 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
   )
 }
 
-function MasterMeters({ engine }: { engine: AudioEngine }) {
-  const [text, setText] = useState('I —   TP —')
-  useEffect(() => {
-    let timer = 0
-    const tick = () => {
-      const reading = engine.masterReading()
-      const integrated = reading && reading.integrated > -60 ? reading.integrated.toFixed(1) : '—'
-      const peak = reading && reading.truePeak > -60 ? reading.truePeak.toFixed(1) : '—'
-      const next = `I ${integrated}   TP ${peak}`
-      setText((prev) => (prev === next ? prev : next))
-      timer = window.setTimeout(tick, 250)
-    }
-    timer = window.setTimeout(tick, 250)
-    return () => window.clearTimeout(timer)
-  }, [engine])
-  return <div className="readout" id="master-meters">{text}</div>
-}
-
-function Readout({ engine }: { engine: AudioEngine }) {
-  const [text, setText] = useState('0% · -70.0 LUFS · -70.0 dB')
+function MasterReadout({ engine }: { engine: AudioEngine }) {
+  const [text, setText] = useState({ lufs: '—', integrated: '—', peak: '—', cpu: '0' })
   useEffect(() => {
     let timer = 0
     const tick = () => {
       const meters = engine.mixMeters()
-      const next = `${Math.round(meters.cpu * 100)}% · ${meters.lufs.toFixed(1)} LUFS · ${meters.truePeak.toFixed(1)} dB`
-      setText((prev) => (prev === next ? prev : next))
+      const reading = engine.masterReading()
+      const next = {
+        lufs: Number.isFinite(meters.lufs) ? meters.lufs.toFixed(1) : '—',
+        integrated: reading && reading.integrated > -70 ? reading.integrated.toFixed(1) : '—',
+        peak: reading && reading.truePeak > -70 ? reading.truePeak.toFixed(1) : (Number.isFinite(meters.truePeak) ? meters.truePeak.toFixed(1) : '—'),
+        cpu: String(Math.round((meters.cpu || 0) * 100)),
+      }
+      setText((prev) => (prev.lufs === next.lufs && prev.integrated === next.integrated && prev.peak === next.peak && prev.cpu === next.cpu ? prev : next))
       timer = window.setTimeout(tick, 200)
     }
     timer = window.setTimeout(tick, 200)
     return () => window.clearTimeout(timer)
   }, [engine])
-  return <div className="readout">{text}</div>
+  return (
+    <div className="master-read" id="master-meters">
+      <span>LUFS</span>
+      <b>{text.lufs}</b>
+      <span>Integrated</span>
+      <b>{text.integrated}</b>
+      <span>Peak {text.peak} dB</span>
+      <span>CPU {text.cpu}%</span>
+    </div>
+  )
 }
 
 function Meter({ engine, id }: { engine: AudioEngine; id: string }) {

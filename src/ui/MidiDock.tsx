@@ -4,9 +4,11 @@ import type { ProjectStore } from '../state/store'
 import type { MidiEditorMode } from '../model/types'
 import { TipButton } from './Hint'
 import { DrumEditor } from './DrumEditor'
+import { FitRow } from './fitRow'
 import { PianoRoll } from './PianoRoll'
 import { ScoreView } from './ScoreView'
 import { StepInput } from './StepInput'
+import { useFormFactor } from './form'
 import './midi-editors.css'
 
 const MODES: { id: MidiEditorMode; label: string; hint: string }[] = [
@@ -21,30 +23,41 @@ export function MidiDock({
   engine,
   onIdeas,
   onGenerate,
+  onClose,
 }: {
   store: ProjectStore
   engine: AudioEngine
   onIdeas?: () => void
   onGenerate?: () => void
+  onClose?: () => void
 }) {
   const { editor } = selectMidiEditor(store)
+  const phone = useFormFactor() === 'phone'
+  const modes = (
+    <>
+      {phone && onClose && <TipButton label="Close" hint="Back to the tracks." onClick={onClose} />}
+      {MODES.map((mode) => (
+        <TipButton
+          key={mode.id}
+          label={mode.label}
+          hint={mode.hint}
+          pressed={editor.mode === mode.id}
+          onClick={() => store.setMidiEditor({ mode: mode.id })}
+        />
+      ))}
+    </>
+  )
   return (
     <div className="midi-dock">
-      <div className="me-modes" role="toolbar" aria-label="MIDI editor">
-        {MODES.map((mode) => (
-          <TipButton
-            key={mode.id}
-            label={mode.label}
-            hint={mode.hint}
-            pressed={editor.mode === mode.id}
-            onClick={() => store.setMidiEditor({ mode: mode.id })}
-          />
-        ))}
-      </div>
+      {editor.mode !== 'roll' && (
+        <FitRow className="me-modes">{modes}</FitRow>
+      )}
       {editor.mode === 'step' && <StepInput store={store} engine={engine} />}
       {editor.mode === 'drums' && <DrumEditor store={store} engine={engine} />}
       {editor.mode === 'score' && <ScoreView store={store} />}
-      {editor.mode === 'roll' && <PianoRoll store={store} engine={engine} onIdeas={onIdeas} onGenerate={onGenerate} />}
+      {editor.mode === 'roll' && (
+        <PianoRoll store={store} engine={engine} onIdeas={onIdeas} onGenerate={onGenerate} leading={modes} />
+      )}
     </div>
   )
 }

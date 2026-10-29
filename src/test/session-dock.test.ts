@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { chromium, type Browser, type Page } from 'playwright'
 import { describe, expect, it } from 'vitest'
-import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, nextSessionDock, paneAfterRestore, sessionDockOpen } from '../ui/sessionDock'
+import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, nextSessionDock, paneAfterRestore, pianoDockWidth, sessionDockOpen } from '../ui/sessionDock'
 
 describe('session dock choice', () => {
   it('stays closed until someone opens it, including older saved rooms', () => {
@@ -36,6 +36,9 @@ describe('session dock choice', () => {
     expect(fittedDockWidth(500, 400)).toBeLessThanOrEqual(180)
     expect(500 - fittedDockWidth(500, 400)).toBeGreaterThanOrEqual(320)
     expect(fittedDockWidth(800, 700, 'bottom')).toBeLessThanOrEqual(520)
+    expect(pianoDockWidth(1280)).toBeGreaterThanOrEqual(Math.round(1280 * 0.6))
+    expect(pianoDockWidth(1440)).toBeGreaterThanOrEqual(Math.round(1440 * 0.6))
+    expect(pianoDockWidth(1280)).toBeLessThanOrEqual(Math.floor(1280 * 0.72))
   })
 })
 

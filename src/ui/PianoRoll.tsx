@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { heardBeat } from '../model/midiClock'
 import { defaultRoll, quantizeNotes, arpeggiateSelection, humanizeNotes, snapBeat, strumSelection } from '../model/paint'
@@ -85,6 +85,7 @@ export function PianoRoll({
   chrome = true,
   chordsOpen = false,
   actionsRef,
+  leading,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -94,6 +95,8 @@ export function PianoRoll({
   chrome?: boolean
   chordsOpen?: boolean
   actionsRef?: { current: PianoActions | null }
+  /** Mode buttons that share this one toolbar row. */
+  leading?: ReactNode
 }) {
   const piano = selectPiano(store)
   const track = piano.track
@@ -717,6 +720,7 @@ export function PianoRoll({
   return (
     <div className={`piano ${compact ? 'compact' : ''} ${chrome ? '' : 'bare'}`} ref={pianoRef} data-tool={tool}>
       {chrome && <FitRow className="scale-bar">
+        {leading}
         <TipButton className={`chords-btn ${open ? 'on' : ''}`} label={bar('chords').label} hint={bar('chords').hint} pressed={open} onClick={() => void toggleChords()} />
         <TipButton
           className={store.midiEditor().stepInput ? 'on' : ''}

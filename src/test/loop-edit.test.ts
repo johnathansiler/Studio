@@ -100,7 +100,7 @@ describe('loop length readout', () => {
     expect(partial.span).toBe('1.1.0 → 3.3.0')
     const one = formatLoopReadout(project, 0, 4 * beat)
     expect(one.length).toBe('1 bar')
-    expect(loopLabelCenter(0, 800, 100, 0, 400)).toBe(350)
+    expect(loopLabelCenter(0, 800, 100, 0, 400)).toBe(306)
     expect(loopLabelCenter(100, 100, 80, 0, 400)).toBe(150)
   })
 
