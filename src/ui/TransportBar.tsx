@@ -21,6 +21,7 @@ export function TransportBar({
   onRecord,
   onSeek,
   simple = false,
+  desk = false,
   takeProgress = null,
   recordHint = '',
 }: {
@@ -33,6 +34,8 @@ export function TransportBar({
   onSeek: (sample: number) => void
   /** Phone: keep play, stop, record, and tempo. To-start and loop live in the menu. */
   simple?: boolean
+  /** Desktop: show the computer-keyboard toggle. */
+  desk?: boolean
   /** 0–1 while a full-quality guest take is moving to the host. */
   takeProgress?: number | null
   recordHint?: string
@@ -223,21 +226,37 @@ export function TransportBar({
       <AutomationFollow store={store} engine={engine} />
       <div className="t-buttons">
         <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>
-          <span className="t-ico"><SkipBackIcon /></span>
-          <span className="t-label">Start</span>
+          <SkipBackIcon />
+          <span className="t-word">Start</span>
         </TipButton>
         <TipButton className={`t-btn play ${playing ? 'on' : ''}`} label={playing ? transport('pause').label : transport('play').label} hint={playing ? transport('pause').hint : transport('play').hint} pressed={playing} onPress={() => engine.unlock()} onClick={onPlay}>
-          <span className="t-ico"><PlayIcon /></span>
-          <span className="t-label">{playing ? 'Pause' : 'Play'}</span>
+          <PlayIcon />
+          <span className="t-word">{playing ? 'Pause' : 'Play'}</span>
         </TipButton>
         <TipButton className="t-btn stop" label={transport('stop').label} hint={transport('stop').hint} onClick={onStop}>
-          <span className="t-ico"><StopIcon /></span>
-          <span className="t-label">Stop</span>
+          <StopIcon />
+          <span className="t-word">Stop</span>
         </TipButton>
         <TipButton className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={status === 'recording' || status === 'counting-in'} onPress={() => engine.unlock()} onClick={onRecord}>
-          <span className="t-ico"><RecIcon /></span>
-          <span className="t-label">Rec</span>
+          <RecIcon />
+          <span className="t-word">Rec</span>
         </TipButton>
+        {desk && (
+          <button
+            type="button"
+            className={`keyboard-toggle${store.keyboardMidi ? ' on' : ''}`}
+            aria-pressed={store.keyboardMidi}
+            aria-label="Keyboard. Play notes from the computer keyboard and show the piano."
+            title="Play notes from the computer keyboard and show the piano."
+            onClick={() => {
+              engine.unlock()
+              store.setKeyboardMidi(!store.keyboardMidi)
+            }}
+          >
+            <KeyboardIcon />
+            <span>Keyboard</span>
+          </button>
+        )}
       </div>
       <div className="lcd" aria-live="polite">
         <div className="bars">{formatMapBars(project, position)}</div>
@@ -344,8 +363,8 @@ export function TransportBar({
           disabled={store.remoteFollow}
           onClick={() => store.toggle('loopEnabled')}
         >
-          <span className="t-ico"><LoopIcon /></span>
-          <span className="t-label">Loop</span>
+          <LoopIcon />
+          <span className="t-word">Loop</span>
         </TipButton>
         <span
           className={`loop-readout${project.loopEnabled ? '' : ' off'}`}
@@ -402,6 +421,18 @@ function RecIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
       <circle cx="8" cy="8" r="4" fill="currentColor" />
+    </svg>
+  )
+}
+
+function KeyboardIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="1.5" y="6" width="3" height="8" rx="0.6" fill="currentColor" />
+      <rect x="6.5" y="6" width="3" height="8" rx="0.6" fill="currentColor" />
+      <rect x="11.5" y="6" width="3" height="8" rx="0.6" fill="currentColor" />
+      <rect x="4.2" y="2" width="2.4" height="6" rx="0.5" fill="currentColor" />
+      <rect x="9.4" y="2" width="2.4" height="6" rx="0.5" fill="currentColor" />
     </svg>
   )
 }

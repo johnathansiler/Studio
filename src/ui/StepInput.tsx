@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
+import { onMidiMessage } from '../midi/access'
+import { setStepOwnsMidi } from '../midi/remember'
 import { STEP_LENGTHS, stepPlace, type StepTone } from '../model/stepEntry'
 import { selectMidiEditor } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -34,10 +36,10 @@ export function StepInput({ store, engine }: { store: ProjectStore; engine: Audi
     held.current.set(token, pitch)
     chord.current.push({ pitch, velocity: level })
     engine.unlock()
-    void engine.resume()
     if (track) engine.playThrough(track.id, pitch, level)
     else engine.liveNoteOn(pitch, level)
-    setLit([...new Set(held.current.values())])
+    const lit = [...new Set(held.current.values())]
+    window.requestAnimationFrame(() => setLit(lit))
   }
 
   function release(token: string) {
@@ -54,6 +56,7 @@ export function StepInput({ store, engine }: { store: ProjectStore; engine: Audi
 
   useEffect(() => {
     const down = (event: KeyboardEvent) => {
+      if (!store.keyboardMidi) return
       const target = event.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
       if (event.metaKey || event.ctrlKey || event.altKey) return
@@ -105,38 +108,29 @@ export function StepInput({ store, engine }: { store: ProjectStore; engine: Audi
   }, [track?.id, clip?.id])
 
   useEffect(() => {
-    if (!hardwareMidiAllowed(navigator.userAgent) || !navigator.requestMIDIAccess) return
-    let dead = false
+    if (!hardwareMidiAllowed(navigator.userAgent)) return
+    setStepOwnsMidi(true)
     const midiHeld = new Map<number, string>()
-    void navigator.requestMIDIAccess().then((access) => {
-      if (dead) return
-      const bind = () => {
-        for (const input of access.inputs.values()) {
-          input.onmidimessage = (event) => {
-            const data = event.data
-            if (!data || data.length < 3) return
-            const status = data[0] & 0xf0
-            const pitch = data[1]
-            const velocity = data[2] / 127
-            const on = status === 0x90 && data[2] > 0
-            const off = status === 0x80 || (status === 0x90 && data[2] === 0)
-            const token = `midi:${pitch}`
-            if (on) {
-              if (midiHeld.has(pitch)) return
-              midiHeld.set(pitch, token)
-              press(token, pitch, Math.max(0.05, velocity))
-            } else if (off && midiHeld.has(pitch)) {
-              midiHeld.delete(pitch)
-              release(token)
-            }
-          }
-        }
+    const stop = onMidiMessage((_input, data) => {
+      if (!data || data.length < 3) return
+      const status = data[0] & 0xf0
+      const pitch = data[1]
+      const velocity = data[2] / 127
+      const on = status === 0x90 && data[2] > 0
+      const off = status === 0x80 || (status === 0x90 && data[2] === 0)
+      const token = `midi:${pitch}`
+      if (on) {
+        if (midiHeld.has(pitch)) return
+        midiHeld.set(pitch, token)
+        press(token, pitch, Math.max(0.05, velocity))
+      } else if (off && midiHeld.has(pitch)) {
+        midiHeld.delete(pitch)
+        release(token)
       }
-      bind()
-      access.onstatechange = bind
-    }).catch(() => undefined)
+    })
     return () => {
-      dead = true
+      stop()
+      setStepOwnsMidi(false)
       for (const token of midiHeld.values()) release(token)
       midiHeld.clear()
     }

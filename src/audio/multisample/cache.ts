@@ -149,6 +149,11 @@ export class SampleCache implements SampleBank {
     return [...new Set([...this.decoded.keys(), ...this.views.keys()])]
   }
 
+  /** Full decoded audio, including long files kept as views. */
+  resident(id: string): DecodedSample | null {
+    return this.decoded.get(id) ?? this.views.get(id) ?? null
+  }
+
   /** Ids installed as a whole decoded buffer. Long files and packed zones stay off this list. */
   fullResidentIds() {
     return [...this.decoded.keys()]

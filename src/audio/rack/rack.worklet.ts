@@ -1,4 +1,5 @@
 import { RackRuntime } from './dsp'
+import { glideValue } from '../paramCurve'
 import type { RackAutomation, RackState } from '../../model/rack'
 import type { SampleBuffer } from './dsp'
 
@@ -44,6 +45,7 @@ class RackProcessor extends AudioWorkletProcessor {
   private lanes: RackAutomation[] = []
   private originTime = 0
   private originBeat = 0
+  private smooth = new Map<string, Record<string, number>>()
 
   constructor() {
     super()
@@ -80,24 +82,56 @@ class RackProcessor extends AudioWorkletProcessor {
     if (!out || !frames) return true
     const now = currentTime
     const rack = this.rack
-    while (this.pending.length && this.pending[0].time <= now) {
-      const note = this.pending.shift()!
-      this.runtime.note(note.pitch, note.vel, rack?.polyphony ?? 8, !!note.slide)
-    }
-    if (!rack) {
-      out[0]?.fill(0)
-      out[1]?.fill(0)
+    const left = out[0]
+    const right = out[1]
+    if (!rack || !left) {
+      left?.fill(0)
+      right?.fill(0)
       return true
     }
     const started = typeof performance !== 'undefined' ? performance.now() : 0
-    const beat = this.originBeat + (now - this.originTime) * (this.tempo / 60)
-    const rendered = this.runtime.render(rack, frames, this.tempo, this.quality, this.buffers, this.lanes, beat)
-    out[0]?.set(rendered[0])
-    if (out[1]) out[1].set(rendered[1])
-    else out[0]?.set(rendered[0])
+    let rendered = 0
+    while (rendered < frames) {
+      const at = now + rendered / sampleRate
+      while (this.pending.length && this.pending[0].time <= at + 0.5 / sampleRate) {
+        const note = this.pending.shift()!
+        this.runtime.note(note.pitch, note.vel, rack.polyphony, !!note.slide)
+      }
+      let until = frames
+      if (this.pending.length) {
+        const next = Math.floor((this.pending[0].time - now) * sampleRate)
+        if (next > rendered) until = Math.min(frames, next)
+      }
+      const span = Math.max(1, Math.min(frames - rendered, until - rendered))
+      const beat = this.originBeat + (at - this.originTime) * (this.tempo / 60)
+      const block = this.runtime.render(this.glideRack(rack, span), span, this.tempo, this.quality, this.buffers, this.lanes, beat)
+      left.set(block[0], rendered)
+      if (right) right.set(block[1], rendered)
+      rendered += span
+    }
     const budget = (frames / sampleRate) * 1000
-    if (budget > 0) this.port.postMessage({ type: 'cpu', value: ((typeof performance !== 'undefined' ? performance.now() : started) - started) / budget })
+    if (budget > 0 && (currentTime * sampleRate) % 2048 < frames) {
+      this.port.postMessage({ type: 'cpu', value: ((typeof performance !== 'undefined' ? performance.now() : started) - started) / budget })
+    }
     return true
+  }
+
+  /** Approach the posted device params inside the block. The graph delay stays the same. */
+  private glideRack(rack: RackState, frames: number): RackState {
+    let changed = false
+    const devices = rack.devices.map((device) => {
+      const prev = this.smooth.get(device.id)
+      const next: Record<string, number> = {}
+      for (const [key, value] of Object.entries(device.params)) {
+        const from = prev && typeof prev[key] === 'number' ? prev[key] : value
+        next[key] = glideValue(from, value, frames, sampleRate)
+        if (Math.abs(next[key] - value) > 1e-4) changed = true
+      }
+      this.smooth.set(device.id, next)
+      if (!prev) return device
+      return { ...device, params: next }
+    })
+    return changed || devices.some((device, index) => device !== rack.devices[index]) ? { ...rack, devices } : rack
   }
 }
 

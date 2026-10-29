@@ -19,6 +19,7 @@ export function ToolBar({
   context = 'arrange',
   compact = false,
   phone = false,
+  words = false,
 }: {
   onChange: (tool: ArrangeTool) => void
   onDuplicate: () => void
@@ -29,11 +30,14 @@ export function ToolBar({
   compact?: boolean
   /** Portrait phone: short labels and only the tools that fit. */
   phone?: boolean
+  /** Foldable: icon plus the short word, same as the phone strip. */
+  words?: boolean
 }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const stripRef = useRef<HTMLDivElement>(null)
   const shown = phone ? (['select', 'pencil', 'split', 'erase'] as ArrangeTool[]) : compact ? compactToolOrder() : ARRANGE_TOOLS.map((tool) => tool.id)
   const chip = toolChip(value, context)
+  const showWord = phone || words
   useEffect(() => {
     const strip = stripRef.current
     const button = strip?.querySelector<HTMLButtonElement>('button.on')
@@ -63,7 +67,7 @@ export function ToolBar({
               onClick={() => onChange(id)}
             >
               <ToolIcon id={id} />
-              {phone && <span className="tool-label">{info.label}</span>}
+              {showWord && <span className="tool-label">{info.label}</span>}
             </TipButton>
           )
         })}
@@ -76,7 +80,7 @@ export function ToolBar({
             onClick={action.id === 'duplicate' ? onDuplicate : onDelete}
           >
             <ToolIcon id={action.id} />
-            {phone && <span className="tool-label">{action.label}</span>}
+            {showWord && <span className="tool-label">{action.label}</span>}
           </TipButton>
         ))}
       </div>

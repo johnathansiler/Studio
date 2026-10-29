@@ -33,15 +33,17 @@ import type { InstrumentPlay, SamplePack, SamplerProgram } from '../audio/multis
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
-import { setPath, type ProjectOp, type StampWire } from './ops'
+import { readKeyboardEnabled, writeKeyboardEnabled } from '../model/keyboardPlay'
+import { HistoryJournal } from './history'
+import { type ProjectOp, type StampWire } from './ops'
 import { ProjectSync } from './sync'
 import { activeTool, setActiveTool, type ArrangeTool } from './tools'
 import {
+  channelAutomationMode,
   drawPoint,
   ensureLane,
   eraseNear,
   findLane,
-  modeOf,
   movePoint,
   specKey,
   writeSegment,
@@ -96,6 +98,7 @@ import {
   type QuantizeSettings,
 } from '../model/quantize'
 import { cloneOmni, emptyOmni, type OmniPatch } from '../instruments/patch'
+import { isSampledInstrument } from '../instruments/sampled'
 import { placeholderInstrumentName } from '../sounds/instruments'
 import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
@@ -257,8 +260,8 @@ export class ProjectStore {
   private editGeneration = 0
   private savedGeneration = 0
   rowClipboard: StepCell[] | null = null
-  private past: string[] = []
-  private future: string[] = []
+  /** Patch history. Transport, selection, zoom, and meters are not recorded. */
+  private journal = new HistoryJournal()
   private listeners = new Set<Listener>()
   /** Musical journal shared with every view and with the remote session. */
   readonly sync = new ProjectSync()
@@ -304,7 +307,15 @@ export class ProjectStore {
     this.selectedMidiClipId = null
     this.selectedNoteId = null
     this.selectedNoteIds = []
+    this.keyboardMidi = readKeyboardEnabled()
     this.sync.rebase(this.project)
+  }
+
+  /** Computer keyboard notes and the docked piano. Remembered on this computer. */
+  setKeyboardMidi(on: boolean) {
+    this.keyboardMidi = on
+    writeKeyboardEnabled(on)
+    this.emit()
   }
 
   subscribe = (fn: Listener) => {
@@ -340,8 +351,7 @@ export class ProjectStore {
     const merged = this.sync.merge(this.project, remote, stamps, prefer, lamport, actor, seq)
     this.project = normalizeProjectRack(normalizeProject(merged.project))
     if (waveforms) this.project.waveforms = waveforms
-    this.past = []
-    this.future = []
+    this.journal.clear()
     this.sync.adopt(this.project)
     this.sync.silence = false
     this.emit()
@@ -349,32 +359,19 @@ export class ProjectStore {
   }
 
   private rewriteHistory(ops: ProjectOp[]) {
-    const apply = (raw: string) => {
-      try {
-        const project = JSON.parse(raw) as Project
-        for (const op of ops) setPath(project, op.p, op.v)
-        return JSON.stringify(project)
-      } catch {
-        return raw
-      }
-    }
-    this.past = this.past.map(apply)
-    this.future = this.future.map(apply)
-  }
-
-  private snapshot() {
-    this.past.push(JSON.stringify(this.project))
-    if (this.past.length > 80) this.past.shift()
-    this.future = []
+    this.journal.absorb(ops)
   }
 
   private mutate(fn: () => void) {
     if (this.remoteFollow) return
     this.quantizePreview = null
     this.drafted = false
-    this.snapshot()
+    this.tempoGroup = false
+    this.journal.seal(this.project)
+    this.journal.open(this.project)
     this.editGeneration += 1
     fn()
+    this.journal.seal(this.project)
     this.emit()
   }
 
@@ -391,41 +388,57 @@ export class ProjectStore {
     return this.editGeneration
   }
 
-  /** One undo step for a drag. The first call snapshots; later calls only edit. */
+  get canUndo() {
+    return this.journal.canUndo
+  }
+
+  get canRedo() {
+    return this.journal.canRedo
+  }
+
+  /** Bytes retained by settled patches. Used to keep a long session from copying the project. */
+  historyBytes() {
+    return this.journal.bytes
+  }
+
+  /** One undo step for a drag. The first call opens the step; later calls only edit. */
   draft(fn: () => void) {
     if (this.remoteFollow) return
     if (!this.drafted) {
-      this.snapshot()
+      this.journal.seal(this.project)
+      this.journal.open(this.project)
       this.drafted = true
       this.editGeneration += 1
     }
+    this.quantizePreview = null
     fn()
     this.emit()
   }
 
   endDraft() {
     this.drafted = false
+    this.journal.seal(this.project)
   }
 
   undo() {
     if (this.remoteFollow) return
     this.tempoGroup = false
-    const prev = this.past.pop()
-    if (!prev) return
-    this.future.push(JSON.stringify(this.project))
-    this.project = JSON.parse(prev) as Project
+    this.drafted = false
+    const step = this.journal.undo(this.project)
+    if (!step) return
     this.quantizePreview = null
+    this.toast(`Undid: ${step.label}`)
     this.emit()
   }
 
   redo() {
     if (this.remoteFollow) return
     this.tempoGroup = false
-    const next = this.future.pop()
-    if (!next) return
-    this.past.push(JSON.stringify(this.project))
-    this.project = JSON.parse(next) as Project
+    this.drafted = false
+    const step = this.journal.redo(this.project)
+    if (!step) return
     this.quantizePreview = null
+    this.toast(`Redid: ${step.label}`)
     this.emit()
   }
 
@@ -445,11 +458,6 @@ export class ProjectStore {
       this.rackRoll = false
     }
     this.view = view
-    this.emit()
-  }
-
-  setKeyboardMidi(on: boolean) {
-    this.keyboardMidi = on
     this.emit()
   }
 
@@ -695,8 +703,8 @@ export class ProjectStore {
 
   private dropSpectralAsset(id?: string) {
     if (!id?.startsWith('spec_')) return
-    const hay = `${this.past.join('\n')}\n${this.future.join('\n')}\n${JSON.stringify(this.project)}`
-    if (!hay.includes(`"${id}"`)) this.buffers.delete(id)
+    const hay = JSON.stringify(this.project)
+    if (!this.journal.mentions(id) && !hay.includes(`"${id}"`)) this.buffers.delete(id)
   }
 
   selectNote(id: string | null, additive = false) {
@@ -810,7 +818,8 @@ export class ProjectStore {
   }
 
   patchTrackKit(trackId: string, patch: Partial<PadProgram>) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const track = this.track(trackId)
       if (!track) return
       const kit = normalizePadKit(track.padKit)
@@ -819,7 +828,8 @@ export class ProjectStore {
   }
 
   updateTrackPad(trackId: string, bank: number, index: number, patch: Partial<PadVoice>) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const track = this.track(trackId)
       if (!track) return
       const kit = normalizePadKit(track.padKit)
@@ -1101,12 +1111,27 @@ export class ProjectStore {
       this.emit()
       return
     }
+    if (group) {
+      if (this.remoteFollow) {
+        this.tempoGroup = true
+        return
+      }
+      this.journal.seal(this.project)
+      this.journal.open(this.project)
+      this.tempoGroup = true
+      this.drafted = false
+      this.quantizePreview = null
+      this.editGeneration += 1
+      apply()
+      this.emit()
+      return
+    }
     this.mutate(apply)
-    this.tempoGroup = group
   }
 
   endTempoGroup() {
     this.tempoGroup = false
+    this.journal.seal(this.project)
   }
 
   private retimeFollow() {
@@ -1320,8 +1345,23 @@ export class ProjectStore {
   }
 
   setMasterVolume(volume: number) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       this.project.masterVolume = clamp(volume, 0, 1.25)
+    })
+  }
+
+  /** One channel's automation mode. Other channels are left alone. */
+  setTrackAutomation(trackId: string, mode: 'off' | 'read' | 'touch' | 'latch') {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (track) track.automationMode = mode
+    })
+  }
+
+  setMasterAutomation(mode: 'off' | 'read' | 'touch' | 'latch') {
+    this.mutate(() => {
+      this.project.masterAutomationMode = mode
     })
   }
 
@@ -1356,6 +1396,7 @@ export class ProjectStore {
 
   /** Install a multi-sample program on a library instrument track. */
   setLibrary(trackId: string, program: SamplerProgram | null) {
+    let sampled = false
     this.mutate(() => {
       const track = this.track(trackId)
       if (!track || track.type !== 'midi') return
@@ -1368,7 +1409,9 @@ export class ProjectStore {
       track.instrument = 'library'
       track.library = program ?? undefined
       if (!track.rack?.devices?.length) normalizeTrackRack(track)
+      sampled = true
     })
+    if (sampled) this.showRack(trackId)
   }
 
   /** The header shows the track name. A placeholder becomes the instrument that just landed. */
@@ -1381,6 +1424,7 @@ export class ProjectStore {
 
   /** Same as setLibrary, and keep imported wavs and SoundFont packs in the project so they save. */
   adoptLibrary(trackId: string, program: SamplerProgram, assets: { id: string; name: string; sampleRate: number; channels: Float32Array[] }[], pack?: SamplePack | null) {
+    let sampled = false
     this.mutate(() => {
       const track = this.track(trackId)
       if (!track || track.type !== 'midi') return
@@ -1397,7 +1441,9 @@ export class ProjectStore {
       for (const asset of assets) this.buffers.set(asset.id, asset)
       if (pack) this.buffers.set(pack.id, packToAsset(pack))
       if (!track.rack?.devices?.length) normalizeTrackRack(track)
+      sampled = true
     })
+    if (sampled) this.showRack(trackId)
   }
 
   /** Latch a keyswitch on the library instrument. Other views read it from the project. */
@@ -1465,7 +1511,8 @@ export class ProjectStore {
 
   /** Envelope and tune for a multi-sample instrument. Times are seconds. */
   setInstrumentPlay(trackId: string, patch: Partial<InstrumentPlay>) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const program = this.track(trackId)?.library
       if (!program) return
       const zone = program.zones[0]
@@ -1483,7 +1530,8 @@ export class ProjectStore {
   }
 
   setLibraryMic(trackId: string, micId: string, gain: number, mute?: boolean) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const mic = this.track(trackId)?.library?.mics.find((item) => item.id === micId)
       if (!mic) return
       mic.gain = Math.max(0, Math.min(1, gain))
@@ -1547,7 +1595,8 @@ export class ProjectStore {
 
   updateTrack(id: string, patch: Partial<Track>) {
     if ((patch.output !== undefined || patch.groupId !== undefined) && this.routeLoops(id, patch)) return
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const track = this.track(id)
       if (!track) return
       const mixer: { volume?: number; pan?: number; mute?: boolean; solo?: boolean; soloSafe?: boolean } = {}
@@ -2081,15 +2130,19 @@ export class ProjectStore {
   }
 
   endAutomationTouch() {
+    const was = this.touching
     this.touching = false
+    if (was && this.drafted) this.endDraft()
   }
 
   /** Move a mixer or plugin control. Latch and touch write a lane while the transport is rolling. */
   setAutomated(spec: AutoSpec, value: number, playing: boolean, sample: number) {
-    const mode = modeOf(this.project)
-    if (playing && mode === 'read') return
+    const mode = channelAutomationMode(this.project, spec.trackId === 'master' ? 'master' : spec.trackId)
+    // Read only locks a control that already has a lane. A bare fader or knob still drives the audio.
+    if (playing && mode === 'read' && this.pointsOf(spec).length > 0) return
     const writing = playing && (mode === 'latch' || (mode === 'touch' && this.touching))
-    const run = writing ? (fn: () => void) => this.draft(fn) : (fn: () => void) => this.mutate(fn)
+    const gesture = this.touching || writing
+    const run = gesture ? (fn: () => void) => this.draft(fn) : (fn: () => void) => this.mutate(fn)
     run(() => {
       this.applySpec(spec, value)
       if (!writing) {
@@ -2107,7 +2160,8 @@ export class ProjectStore {
   }
 
   sustainAutomation(sample: number) {
-    if (modeOf(this.project) !== 'latch' || !this.write || this.touching) return
+    if (!this.write || this.touching) return
+    if (channelAutomationMode(this.project, this.write.spec.trackId === 'master' ? 'master' : this.write.spec.trackId) !== 'latch') return
     const beat = projectSampleBeat(this.project, sample)
     if (beat <= this.write.beat + 0.02) return
     const cursor = this.write
@@ -2196,7 +2250,7 @@ export class ProjectStore {
         track.plugins.push(createPlugin(pluginId, preset))
       }
       const delay = this.ensureBus('Delay', 'delay', 'Ping-pong')
-      const reverb = this.ensureBus('Reverb', 'reverb', 'Hall')
+      const reverb = this.ensureBus('Reverb', 'reverb', 'Big Hall')
       if (!track.sends.some((send) => send.busId === delay.id)) {
         track.sends.push({ id: uid('send'), busId: delay.id, gain: 0.22, preFader: false, enabled: true })
       }
@@ -4130,8 +4184,7 @@ export class ProjectStore {
   }
 
   loadProject(project: Project, buffers: Map<string, AudioAsset>) {
-    this.past = []
-    this.future = []
+    this.journal.clear()
     this.project = normalizeProjectRack(normalizeProject(project))
     this.buffers = buffers
     this.selectedTrackId = project.tracks[0]?.id ?? null
@@ -4247,7 +4300,9 @@ export class ProjectStore {
   openRack(trackId: string) {
     this.scalerTrackId = null
     this.padsTrackId = null
-    this.rackTrackId = this.rackTrackId === trackId ? null : trackId
+    const opening = this.rackTrackId !== trackId
+    this.rackTrackId = opening ? trackId : null
+    if (opening) this.patchTrackId = null
     this.rackFlip = false
     this.rackDetail = false
     this.emit()
@@ -4256,12 +4311,29 @@ export class ProjectStore {
   /** Open the instrument panel for a track. Does not toggle it shut. */
   showRack(trackId: string) {
     this.scalerTrackId = null
+    this.padsTrackId = null
+    this.patchTrackId = null
     this.rackTrackId = trackId
     this.rackFlip = false
     this.emit()
   }
 
+  /** Leave the piano roll and return to the tracks. */
+  closePiano() {
+    this.selectedMidiClipId = null
+    this.selectedMidiClipIds = []
+    this.selectedNoteId = null
+    this.selectedNoteIds = []
+    this.emit()
+  }
+
   openPatch(trackId: string) {
+    const track = this.track(trackId)
+    if (isSampledInstrument(track)) {
+      this.patchTrackId = null
+      this.openRack(trackId)
+      return
+    }
     this.scalerTrackId = null
     this.padsTrackId = null
     if (this.patchTrackId === trackId) {
@@ -4270,7 +4342,6 @@ export class ProjectStore {
       return
     }
     this.patchTrackId = trackId
-    const track = this.track(trackId)
     if (track?.type === 'midi' && !track.omniPatch) {
       this.mutate(() => {
         track.omniPatch = emptyOmni(track.name)
@@ -4383,7 +4454,8 @@ export class ProjectStore {
   }
 
   setDeviceParam(trackId: string, deviceId: string, param: string, value: number) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const device = this.track(trackId)?.rack?.devices.find((item) => item.id === deviceId)
       if (device) device.params[param] = value
     })
@@ -4604,7 +4676,8 @@ export class ProjectStore {
   }
 
   setPatternSwing(swing: number) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const pattern = this.activePattern()
       if (pattern) pattern.swing = Math.max(0, Math.min(0.9, swing))
     })
@@ -5702,7 +5775,8 @@ export class ProjectStore {
   }
 
   setMidiFx(trackId: string, fxId: string, patch: Partial<Pick<MidiFx, 'enabled'>> & { params?: Record<string, number> }) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const effect = this.track(trackId)?.midiFx?.find((item) => item.id === fxId)
       if (!effect) return
       if (patch.enabled != null) effect.enabled = patch.enabled

@@ -8,6 +8,8 @@ import {
   CALL_COPY,
   MENU_COPY,
   PHONE_TRANSPORT_MENU,
+  menuLabelsUnique,
+  visibleMenu,
   PIANO_BAR,
   PIANO_SHEET,
   RECORD_COPY,
@@ -21,6 +23,7 @@ import {
   type Copy,
 } from '../ui/chrome'
 import { noteGrip, trimZone } from '../ui/touchEdit'
+import { MainMenu } from '../ui/MainMenu'
 import { ToolBar } from '../ui/ToolBar'
 import {
   ARRANGE_TOOLS,
@@ -148,5 +151,57 @@ describe('mobile control lists', () => {
     for (const id of ['to-start', 'play', 'pause', 'stop', 'record', 'loop']) {
       expect(TRANSPORT_COPY.some((item) => item.id === id)).toBe(true)
     }
+    for (const id of ['to-start', 'loop']) {
+      expect(MENU_COPY.some((item) => item.id === id)).toBe(true)
+      expect(visibleMenu({ phone: true, session: false, dockBottom: false, hardwareMidi: false }).some((item) => item.id === id)).toBe(true)
+      expect(visibleMenu({ phone: false, session: false, dockBottom: false, hardwareMidi: false }).some((item) => item.id === id)).toBe(false)
+    }
+  })
+
+  it('lists each menu label and action once', () => {
+    const dropped = ['Clips', 'Keys', 'Pads', 'Piano', 'Generate', 'Sounds', 'Quantize…', 'Session view', 'Artist', 'Studio', 'New project']
+    for (const session of [false, true]) {
+      for (const dockBottom of [false, true]) {
+        for (const hardwareMidi of [false, true]) {
+          for (const phone of [false, true]) {
+            const items = visibleMenu({ phone, session, dockBottom, hardwareMidi })
+            expect(menuLabelsUnique(items)).toBe(true)
+            expect(new Set(items.map((item) => item.id)).size).toBe(items.length)
+            for (const label of dropped) expect(items.map((item) => item.label)).not.toContain(label)
+            for (const tab of VIEW_COPY) expect(items.map((item) => item.label)).not.toContain(tab.label)
+          }
+        }
+      }
+    }
+    const desk = visibleMenu({ phone: false, session: false, dockBottom: false, hardwareMidi: true })
+    const phone = visibleMenu({ phone: true, session: false, dockBottom: false, hardwareMidi: true })
+    expect(desk.map((item) => item.action)).toEqual([
+      'new', 'open', 'save', 'export',
+      'quantize',
+      'session-mode', 'dock',
+      'scaler', 'players', 'midi',
+      'click', 'count-in', 'snap', 'signature', 'shortcuts',
+    ])
+    expect(phone.map((item) => item.action)).toEqual([
+      'new', 'open', 'save', 'export',
+      'quantize', 'to-start', 'loop',
+      'session-mode', 'capture',
+      'players', 'midi',
+      'click', 'count-in', 'snap', 'signature', 'shortcuts',
+    ])
+    const phoneCore = phone.filter((item) => !['to-start', 'loop', 'capture'].includes(item.action))
+    expect(phoneCore.length).toBeLessThan(desk.length)
+    const html = renderToStaticMarkup(createElement(MainMenu, {
+      items: desk,
+      pressed: () => false,
+      disabled: () => false,
+      onAction: () => undefined,
+      signature: '4/4',
+      onSignature: () => undefined,
+    }))
+    const actions = [...html.matchAll(/data-menu-action="([^"]+)"/g)].map((match) => match[1])
+    expect(new Set(actions).size).toBe(actions.length)
+    expect(actions).toEqual(desk.map((item) => item.action))
+    for (const item of desk) expect(html).toContain(item.label)
   })
 })

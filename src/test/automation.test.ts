@@ -333,11 +333,17 @@ describe('solo, mute, and link groups', () => {
     const store = new ProjectStore(project)
     const id = store.project.tracks[0].id
     const spec = { trackId: id, target: 'volume' as const, param: 'volume', min: 0, max: 1.25 }
-    const before = store.project.tracks[0].volume
     store.setAutomationMode('read')
     store.setAutomated(spec, 0.15, true, 0)
-    expect(store.project.tracks[0].volume).toBe(before)
+    expect(store.project.tracks[0].volume).toBeCloseTo(0.15)
     expect(lanePoints(store.project, spec)).toHaveLength(0)
+    store.paintAutomation(spec, 0, 0.8)
+    store.endDraft()
+    const held = store.project.tracks[0].volume
+    store.setAutomated(spec, 0.15, true, 0)
+    expect(store.project.tracks[0].volume).toBe(held)
+    expect(lanePoints(store.project, spec).length).toBeGreaterThan(0)
+    store.undo()
     store.setAutomationMode('latch')
     store.beginAutomationTouch()
     store.setAutomated(spec, 0.2, true, 0)

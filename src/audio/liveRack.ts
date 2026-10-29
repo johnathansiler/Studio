@@ -1,11 +1,12 @@
+import insertWorkletUrl from './insert.worklet.ts?worker&url'
 import type { PluginInstance, Project } from '../model/types'
 import { tuneBlockScale } from './plugins/autoTune'
 import type { StripNodes } from './strips'
 import { processChain, type ChainSlot } from './plugins/chain'
 import { automationAt, latencyOf } from './plugins/catalog'
-import { automationSchedule, sendLane, valueChanges } from '../model/automation'
+import { automationSchedule, channelAutomationMode, laneIsLive, sendLane, valueChanges } from '../model/automation'
 import { projectSampleBeat } from '../model/tempoMap'
-import { applyRamps } from './paramCurve'
+import { applyRamps, smoothParam } from './paramCurve'
 import { processSampleAccurate } from './automationRender'
 import { loadModule } from './plugins/registry'
 import type { Processor } from './plugins/types'
@@ -15,8 +16,11 @@ interface Tap {
   input: GainNode
   output: GainNode
   proc: ScriptProcessorNode | null
+  worklet: AudioWorkletNode | null
   direct: boolean
 }
+
+const SCRIPT_BLOCK = 256
 
 /**
  * Inserts the plugin chain in front of each strip and routes buses.
@@ -39,8 +43,16 @@ export class LiveRack {
   private readonly tapsOut = new Map<string, Float32Array>()
   private readonly sendGains = new Map<string, GainNode>()
   private readonly keys = new Map<string, Float32Array>()
-  private readonly keyTaps = new Map<string, ScriptProcessorNode>()
+  private readonly keyTaps = new Map<string, AudioNode>()
   private readonly keySinks = new Map<string, GainNode>()
+  private readonly keptAudio = new Map<string, Float32Array>()
+  private readonly sentBuffers = new Map<string, string>()
+  private workletPromise: Promise<boolean> | null = null
+  private workletOk = false
+  private topology = ''
+  private playing = false
+  private originTime = 0
+  private originSample = 0
   private links: { from: AudioNode; to: AudioNode }[] = []
   private generation = 0
   private signature = ''
@@ -65,12 +77,23 @@ export class LiveRack {
   }
 
   trigger(pluginId: string, note: number, vel: number) {
+    const node = this.nodeFor(pluginId)
+    const time = this.ctx?.currentTime ?? 0
+    if (node) {
+      node.port.postMessage({ type: 'note', id: pluginId, pitch: note, vel, time })
+      return
+    }
     const proc = this.processors.get(pluginId) as Processor & { note?: (pitch: number, vel: number) => void }
     proc?.note?.(note, vel)
   }
 
   /** Queue a sampler note on the audio clock. `time` is an AudioContext time. */
   schedule(pluginId: string, note: number, vel: number, time: number) {
+    const node = this.nodeFor(pluginId)
+    if (node) {
+      node.port.postMessage({ type: 'note', id: pluginId, pitch: note, vel, time })
+      return
+    }
     const proc = this.processors.get(pluginId) as Processor & {
       schedule?: (pitch: number, vel: number, time: number) => void
       note?: (pitch: number, vel: number) => void
@@ -79,13 +102,30 @@ export class LiveRack {
     else proc?.note?.(note, vel)
   }
 
+  /** Transport origin so insert plugins stay on the arrangement clock without a main-thread buffer. */
+  setPerformanceClock(playing: boolean, originTime: number, originSample: number, tempo: number) {
+    this.playing = playing
+    this.originTime = originTime
+    this.originSample = originSample
+    for (const tap of this.taps.values()) {
+      tap.worklet?.port.postMessage({ type: 'clock', playing, originTime, originSample, tempo })
+    }
+  }
+
   keptLoop(pluginId: string) {
+    const cached = this.keptAudio.get(pluginId)
+    if (cached) return cached
     const proc = this.processors.get(pluginId) as Processor & { kept?: () => Float32Array | null }
     return proc?.kept?.() ?? null
   }
 
   /** Start the looper's playhead over so an overdub lines up with the loop. */
   rewindLoop(pluginId: string) {
+    const node = this.nodeFor(pluginId)
+    if (node) {
+      node.port.postMessage({ type: 'reset', id: pluginId })
+      return
+    }
     this.processors.get(pluginId)?.reset()
   }
 
@@ -129,7 +169,6 @@ export class LiveRack {
     localBus: AudioNode,
     remoteBus: AudioNode,
   ) {
-    const generation = ++this.generation
     this.project = project
     this.ctx = ctx
     this.strips = strips
@@ -141,8 +180,20 @@ export class LiveRack {
       const strip = strips.get(track.id)
       if (strip) this.splice(ctx, strip, track.id)
     }
+    const next = this.topologyOf(project)
+    if (next !== this.topology) {
+      this.topology = next
+      const generation = ++this.generation
+      void this.finish(ctx, project, strips, master, generation)
+    } else this.pushParams()
     this.connectIfNeeded()
-    void this.finish(ctx, project, strips, master, generation)
+  }
+
+  private topologyOf(project: Project) {
+    return this.owners(project).map((owner) => {
+      const chain = owner.plugins.map((plugin) => `${plugin.id}:${plugin.pluginId}:${plugin.enabled ? 1 : 0}:${plugin.wet > 0.0001 ? 1 : 0}:${plugin.sidechain}`).join(',')
+      return `${owner.id}[${chain}]`
+    }).join('|')
   }
 
   private dropMissing(strips: Map<string, StripNodes>) {
@@ -153,6 +204,7 @@ export class LiveRack {
       if (!tap) continue
       try { tap.input.disconnect() } catch { /* gone */ }
       try { tap.proc?.disconnect() } catch { /* gone */ }
+      try { tap.worklet?.disconnect() } catch { /* gone */ }
       try { tap.output.disconnect() } catch { /* gone */ }
     }
   }
@@ -169,7 +221,7 @@ export class LiveRack {
     strip.input.connect(input)
     output.connect(strip.eqLow)
     input.connect(output)
-    this.taps.set(id, { input, output, proc: null, direct: true })
+    this.taps.set(id, { input, output, proc: null, worklet: null, direct: true })
   }
 
   private async finish(ctx: AudioContext, project: Project, strips: Map<string, StripNodes>, master: StripNodes, generation: number) {
@@ -177,7 +229,9 @@ export class LiveRack {
     const ids = new Set(owners.flatMap((owner) => owner.plugins.map((plugin) => plugin.pluginId)))
     await Promise.all([...ids].map((id) => loadModule(id)))
     if (generation !== this.generation) return
-    await this.ensureProcessors(project, ctx.sampleRate)
+    this.workletOk = await this.ensureWorklet(ctx)
+    if (generation !== this.generation) return
+    if (!this.workletOk) await this.ensureProcessors(project, ctx.sampleRate)
     if (generation !== this.generation) return
     let activeCount = 0
     for (const owner of owners) {
@@ -190,22 +244,39 @@ export class LiveRack {
         continue
       }
       activeCount += 1
-      if (!tap.proc) {
+      if (this.workletOk && !tap.worklet) {
         try {
-          tap.proc = ctx.createScriptProcessor(1024, 2, 2)
+          const node = new AudioWorkletNode(ctx, 'cueharbor-insert', {
+            numberOfInputs: 1,
+            numberOfOutputs: 1,
+            outputChannelCount: [2],
+            channelCount: 2,
+          })
+          node.port.onmessage = (event) => this.onWorklet(event.data)
+          tap.worklet = node
+        } catch {
+          this.workletOk = false
+        }
+      }
+      if (!tap.worklet && !tap.proc) {
+        try {
+          tap.proc = ctx.createScriptProcessor(SCRIPT_BLOCK, 2, 2)
         } catch {
           this.setDirect(tap, true)
           continue
         }
+        const ownerId = owner.id
         tap.proc.onaudioprocess = (event) => {
           const played = event.playbackTime
           this.blockTime = played && Number.isFinite(played) ? played : (this.ctx?.currentTime ?? 0)
-          this.processOwner(owner.id, event)
+          this.processOwner(ownerId, event)
         }
       }
       this.setDirect(tap, false)
     }
     if (activeCount === 0) this.cpu = 0
+    this.pushParams()
+    this.rebuildKeys()
     this.connectIfNeeded()
   }
 
@@ -217,16 +288,18 @@ export class LiveRack {
   }
 
   private setDirect(tap: Tap, direct: boolean) {
-    if (tap.direct === direct && (direct || tap.proc)) return
+    const node = tap.worklet || tap.proc
+    if (tap.direct === direct && (direct || node)) return
     try { tap.input.disconnect() } catch { /* fresh */ }
     try { tap.proc?.disconnect() } catch { /* fresh */ }
-    if (direct || !tap.proc) {
+    try { tap.worklet?.disconnect() } catch { /* fresh */ }
+    if (direct || !node) {
       tap.input.connect(tap.output)
       tap.direct = true
       return
     }
-    tap.input.connect(tap.proc)
-    tap.proc.connect(tap.output)
+    tap.input.connect(node)
+    node.connect(tap.output)
     tap.direct = false
   }
 
@@ -275,11 +348,12 @@ export class LiveRack {
       return buf.subarray(0, Math.min(buf.length, length))
     }
     const endBeat = beatAt(origin + Math.max(0, input[0].length - 1))
-    const moving = project.automation.some((lane) => (lane.target == null || lane.target === 'plugin') && plugins.some((plugin) => plugin.id === lane.pluginId) && valueChanges(lane.points, beat, endBeat, 0))
+    const automation = project.automation.filter((lane) => laneIsLive(project, lane))
+    const moving = automation.some((lane) => (lane.target == null || lane.target === 'plugin') && plugins.some((plugin) => plugin.id === lane.pluginId) && valueChanges(lane.points, beat, endBeat, 0))
     if (moving) {
-      processSampleAccurate(slots, input, output, blockCtx, project.automation, keyAt, beatAt)
+      processSampleAccurate(slots, input, output, blockCtx, automation, keyAt, beatAt)
     } else {
-      for (const slot of slots) slot.params = automationAt(project.automation, slot.id, slot.params, beat)
+      for (const slot of slots) slot.params = automationAt(automation, slot.id, slot.params, beat)
       processChain(slots, input, output, blockCtx, keyAt)
     }
     for (const slot of slots) {
@@ -341,10 +415,11 @@ export class LiveRack {
   }
 
   private applySendGains(project: Project) {
+    const now = this.ctx?.currentTime ?? 0
     for (const track of project.tracks) {
       for (const send of track.sends) {
         const gain = this.sendGains.get(send.id)
-        if (gain) gain.gain.value = send.gain
+        if (gain) smoothParam(gain.gain, send.gain, now)
       }
     }
   }
@@ -355,10 +430,10 @@ export class LiveRack {
       for (const send of track.sends) {
         const node = this.sendGains.get(send.id)
         if (!node) continue
-        const points = sendLane(project.automation, track.id, send.id)?.points
+        const follow = channelAutomationMode(project, track.id) !== 'off'
+        const points = follow ? sendLane(project.automation, track.id, send.id)?.points : undefined
         if (!playing || !points?.length) {
-          node.gain.cancelScheduledValues(now)
-          node.gain.setTargetAtTime(send.gain, now, 0.015)
+          smoothParam(node.gain, send.gain, now)
           continue
         }
         applyRamps(node.gain, automationSchedule(points, send.gain, project, sample, now, endSample), now)
@@ -386,20 +461,39 @@ export class LiveRack {
       if (this.keyTaps.has(id)) continue
       const strip = this.strips.get(id)
       if (!strip) continue
-      let proc: ScriptProcessorNode
-      try {
-        proc = ctx.createScriptProcessor(1024, 2, 2)
-      } catch {
-        continue
-      }
-      proc.onaudioprocess = (event) => {
-        const left = event.inputBuffer.getChannelData(0)
-        const right = event.inputBuffer.getChannelData(1)
-        const mono = new Float32Array(left.length)
-        for (let i = 0; i < left.length; i++) mono[i] = ((left[i] || 0) + (right[i] || 0)) * 0.5
-        this.keys.set(id, mono)
-        event.outputBuffer.getChannelData(0).set(left)
-        event.outputBuffer.getChannelData(1).set(right)
+      let proc: AudioNode
+      if (this.workletOk) {
+        try {
+          const node = new AudioWorkletNode(ctx, 'cueharbor-key', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] })
+          node.port.postMessage({ id })
+          node.port.onmessage = (event) => {
+            const channel = event.data?.channel
+            if (event.data?.type !== 'key' || !(channel instanceof Float32Array)) return
+            this.keys.set(id, channel)
+            this.forwardKey(id, channel)
+          }
+          proc = node
+        } catch {
+          continue
+        }
+      } else {
+        let script: ScriptProcessorNode
+        try {
+          script = ctx.createScriptProcessor(SCRIPT_BLOCK, 2, 2)
+        } catch {
+          continue
+        }
+        script.onaudioprocess = (event) => {
+          const left = event.inputBuffer.getChannelData(0)
+          const right = event.inputBuffer.getChannelData(1)
+          const mono = new Float32Array(left.length)
+          for (let i = 0; i < left.length; i++) mono[i] = ((left[i] || 0) + (right[i] || 0)) * 0.5
+          this.keys.set(id, mono)
+          this.forwardKey(id, mono)
+          event.outputBuffer.getChannelData(0).set(left)
+          event.outputBuffer.getChannelData(1).set(right)
+        }
+        proc = script
       }
       const sink = ctx.createGain()
       sink.gain.value = 0
@@ -466,8 +560,112 @@ export class LiveRack {
 
   private latency(owner: string, plugins: PluginInstance[], sampleRate: number) {
     const tap = this.taps.get(owner)
-    const script = tap && !tap.direct ? 1024 : 0
+    const script = tap && !tap.direct && !tap.worklet ? SCRIPT_BLOCK : 0
     return script + plugins.reduce((sum, plugin) => sum + latencyOf(plugin.pluginId, plugin.params, sampleRate, plugin.enabled && plugin.wet > 0, true), 0)
+  }
+
+  private async ensureWorklet(ctx: AudioContext) {
+    if (this.workletOk) return true
+    if (!this.workletPromise) {
+      this.workletPromise = ctx.audioWorklet.addModule(insertWorkletUrl).then(() => true).catch(() => false)
+    }
+    return this.workletPromise
+  }
+
+  private pushParams() {
+    const project = this.project
+    if (!project) return
+    const scale = tuneBlockScale(project.scale)
+    for (const owner of this.owners(project)) {
+      const tap = this.taps.get(owner.id)
+      if (!tap?.worklet) continue
+      tap.worklet.port.postMessage({
+        type: 'state',
+        slots: owner.plugins.map((plugin) => ({
+          id: plugin.id,
+          pluginId: plugin.pluginId,
+          enabled: plugin.enabled,
+          wet: plugin.wet,
+          params: { ...plugin.params },
+          sidechain: plugin.sidechain,
+          sampler: plugin.sampler,
+        })),
+        automation: project.automation.filter((lane) => laneIsLive(project, lane)),
+        tempo: project.tempo,
+        projectRate: project.sampleRate,
+        tempoMap: project.tempoMap ?? [],
+        scaleRoot: scale.scaleRoot,
+        scaleIntervals: [...scale.scaleIntervals],
+        scaleCents: scale.scaleCents ? [...scale.scaleCents] : undefined,
+        quality: this.quality,
+        playing: this.playing,
+        originTime: this.originTime,
+        originSample: this.originSample,
+      })
+      this.postBuffers(tap.worklet, owner.plugins)
+    }
+  }
+
+  private postBuffers(node: AudioWorkletNode, plugins: PluginInstance[]) {
+    const ids = new Set<string>()
+    for (const plugin of plugins) {
+      if (plugin.sampler?.bufferId) ids.add(plugin.sampler.bufferId)
+      for (const slice of plugin.sampler?.slices ?? []) if (slice.bufferId) ids.add(slice.bufferId)
+    }
+    for (const id of ids) {
+      const asset = this.assetOf(id)
+      const channel = asset?.channels[0]
+      if (!channel?.length) continue
+      const mark = `${channel.length}:${channel[0] || 0}`
+      if (this.sentBuffers.get(id) === mark) continue
+      this.sentBuffers.set(id, mark)
+      node.port.postMessage({ type: 'buffer', id, channel: channel.slice() })
+    }
+  }
+
+  private nodeFor(pluginId: string) {
+    const project = this.project
+    if (!project) return null
+    for (const owner of this.owners(project)) {
+      if (!owner.plugins.some((plugin) => plugin.id === pluginId)) continue
+      return this.taps.get(owner.id)?.worklet ?? null
+    }
+    return null
+  }
+
+  private forwardKey(id: string, channel: Float32Array) {
+    const project = this.project
+    if (!project) return
+    for (const owner of this.owners(project)) {
+      if (!owner.plugins.some((plugin) => plugin.sidechain === id)) continue
+      this.taps.get(owner.id)?.worklet?.port.postMessage({ type: 'key', id, channel })
+    }
+  }
+
+  private onWorklet(data: { type?: string; rows?: { id: string; failed?: boolean; spectrum?: Float32Array | null; tuner?: { hz: number; cents: number; note: number } | null; meter?: { vu: number; gr: number } | null; trace?: Float32Array | null; meters?: Record<string, number> | null; scope?: Float32Array | null; kept?: Float32Array | null }[] }) {
+    if (data?.type !== 'meters' || !data.rows) return
+    for (const row of data.rows) {
+      if (row.failed) this.failed.add(row.id)
+      if (row.spectrum) this.spectra.set(row.id, row.spectrum)
+      if (row.tuner) this.tuners.set(row.id, row.tuner)
+      if (row.meter) this.meters.set(row.id, row.meter)
+      if (row.trace) this.traces.set(row.id, row.trace)
+      if (row.meters) {
+        this.meterReading = row.meters
+        if (row.scope) this.meterScope = row.scope
+      }
+      if (row.kept?.length) this.keptAudio.set(row.id, row.kept)
+    }
+  }
+
+  private rebuildKeys() {
+    for (const id of [...this.keyTaps.keys()]) {
+      try { this.keyTaps.get(id)?.disconnect() } catch { /* gone */ }
+      try { this.keySinks.get(id)?.disconnect() } catch { /* gone */ }
+      this.keyTaps.delete(id)
+      this.keySinks.delete(id)
+    }
+    if (this.project) this.captureKeys(this.project)
   }
 
   private link(ctx: AudioContext, from: AudioNode, to: AudioNode, samples: number) {

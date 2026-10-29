@@ -2,7 +2,9 @@ import { lazy, Suspense, useEffect, useRef, useState, type PointerEvent as React
 import type { AudioEngine } from '../audio/engine'
 import { MASTERING_IDS } from '../audio/master/assistant'
 import { activeTunePreset, orderedInserts, tuneScaleOf } from '../audio/plugins/autoTune'
-import { CATALOG, FACTORY, descriptor } from '../audio/plugins/catalog'
+import { CATALOG, FACTORY, activePresetName, descriptor } from '../audio/plugins/catalog'
+import { PresetBar } from './PresetBar'
+import { TouchSlider } from './kit/controls'
 import { MODEL_IDS } from '../audio/plugins/models'
 import { AmpPop } from './AmpPop'
 import { AutoTuneFace } from './AutoTuneFace'
@@ -112,12 +114,11 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
       <header>
         <strong>{spec.name}</strong>
         {!autoTune && (
-          <select value="" onChange={(event) => event.target.value && store.applyPluginPreset(focus.trackId, plugin.id, event.target.value)}>
-            <option value="">Preset</option>
-            {names.map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
+          <PresetBar
+            names={names}
+            active={activePresetName(plugin.pluginId, plugin.params, store.project.presets)}
+            onPick={(name) => store.applyPluginPreset(focus.trackId, plugin.id, name)}
+          />
         )}
         {!autoTune && (
         <button className="text-btn" title="Save these settings as a preset." aria-label="Save preset. Keep these settings under a name." onClick={() => {
@@ -133,9 +134,9 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
         <button className="text-btn" title="Close the plugin." aria-label="Close the plugin." onClick={() => store.focusPlugin(null)}>×</button>
       </header>
       {plugin.pluginId !== 'tune' && (
-      <label className="wet">
+      <label className="wet" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
         Wet
-        <input type="range" min={0} max={1} step={0.01} value={plugin.wet} onChange={(event) => store.updatePlugin(focus.trackId, plugin.id, { wet: Number(event.target.value) })} />
+        <TouchSlider label="Wet" min={0} max={1} step={0.01} value={plugin.wet} fallback={1} onChange={(value) => store.updatePlugin(focus.trackId, plugin.id, { wet: value })} />
       </label>
       )}
       {(plugin.pluginId === 'compressor' || plugin.pluginId === 'gate') && (
@@ -270,7 +271,7 @@ function ParamControl({ id, min, max, value, onChange }: { id: string; min: numb
   }
   const span = max - min
   const step = span <= 2 ? 0.01 : span <= 40 ? 0.1 : 1
-  return <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
+  return <TouchSlider label={id} min={min} max={max} step={step} value={value} onChange={onChange} />
 }
 
 function formatParam(id: string, value: number, unit: string) {
@@ -316,22 +317,21 @@ export function SendList({ store, trackId, engine }: { store: ProjectStore; trac
       {track.sends.map((send) => (
         <label key={send.id}>
           <span>{buses.find((bus) => bus.id === send.busId)?.name ?? 'Send'}</span>
-          <input
-            type="range"
+          <TouchSlider
+            label={`${buses.find((bus) => bus.id === send.busId)?.name ?? 'Send'} level`}
+            title="Send level. Latch and touch write this while playing."
             min={0}
             max={1}
             step={0.01}
-            aria-label={`${buses.find((bus) => bus.id === send.busId)?.name ?? 'Send'} level`}
-            title="Send level. Latch and touch write this while playing."
             value={send.gain}
-            onPointerDown={() => store.beginAutomationTouch()}
-            onPointerUp={() => store.endAutomationTouch()}
-            onPointerCancel={() => store.endAutomationTouch()}
-            onChange={(event) => {
+            fallback={0.25}
+            onStart={() => store.beginAutomationTouch()}
+            onCommit={() => store.endAutomationTouch()}
+            onChange={(value) => {
               const rolling = !!engine && (engine.status === 'playing' || engine.status === 'recording')
               store.setAutomated(
                 { trackId, target: 'send', param: 'gain', sendId: send.id, min: 0, max: 1 },
-                Number(event.target.value),
+                value,
                 rolling,
                 engine?.currentTimelineSample() ?? 0,
               )

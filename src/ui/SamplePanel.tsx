@@ -392,8 +392,8 @@ export function SamplePanel({ store, engine, trackId, plugin, vu }: { store: Pro
           {looper && <SlotButton label="Rev" hint="Reverse the last layer." onClick={() => store.updatePlugin(trackId, plugin.id, { looper: { ...looper, layers: looper.layers.map((layer, index) => index === looper.layers.length - 1 ? { ...layer, reverse: !layer.reverse } : layer) } })} />}
           {looper && <SlotButton label={`${looper.bars} bar`} hint="Set how many bars the synced loop records." onClick={() => store.updatePlugin(trackId, plugin.id, { looper: { ...looper, bars: looper.bars >= 8 ? 1 : looper.bars + 1 } })} />}
           {looper && <SlotButton className={looper.sync ? 'on' : ''} label="Sync" hint="Record a whole number of bars at the song tempo." pressed={looper.sync} onClick={() => store.updatePlugin(trackId, plugin.id, { looper: { ...looper, sync: !looper.sync } })} />}
-          {looper && <SlotButton label="Undo" hint="Remove the last loop layer." onClick={() => store.undoLooper(trackId, plugin.id)} />}
-          {looper && <SlotButton label="Redo" hint="Put the last removed layer back." onClick={() => store.redoLooper(trackId, plugin.id)} />}
+          {looper && <SlotButton label="Undo" hint="Undo" disabled={!store.canUndo} onClick={() => store.undo()} />}
+          {looper && <SlotButton label="Redo" hint="Redo" disabled={!store.canRedo} onClick={() => store.redo()} />}
           {looper && <SlotButton label="Clear" hint="Remove every loop layer." onClick={() => store.clearLooper(trackId, plugin.id)} />}
           {looper && trackId !== 'master' && <SlotButton label="Bounce" hint="Put the mixed loop on the arrange track." onClick={() => store.bounceLooper(trackId, plugin.id, engine.currentTimelineSample())} />}
         </div>
@@ -402,7 +402,7 @@ export function SamplePanel({ store, engine, trackId, plugin, vu }: { store: Pro
   )
 }
 
-function SlotButton({ className, ...props }: { className?: string; label: string; hint: string; pressed?: boolean; onClick?: () => void }) {
+function SlotButton({ className, ...props }: { className?: string; label: string; hint: string; pressed?: boolean; disabled?: boolean; onClick?: () => void }) {
   return <TipButton className={['text-btn', className].filter(Boolean).join(' ')} {...props} />
 }
 

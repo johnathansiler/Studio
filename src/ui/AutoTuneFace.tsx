@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { GestureReadout, useDragValue } from './kit/controls'
 import {
   KEYBOARD_END,
   KEYBOARD_START,
@@ -225,12 +226,12 @@ export function AutoTuneFace({
             else if (meter) set('holdMidi', Math.max(0, Math.min(127, Math.round(69 + 12 * Math.log2(meter.hz / a4)))))
           }} />
           <div className="tune-knobs">
-            <Knob label="Retune" hint="How fast the note snaps." value={values.retune ?? 0.95} min={0.02} max={1} text={String(Math.round((values.retune ?? 0.95) * 100))} color="#73c48f" onChange={(value) => set('retune', value)} />
-            <Knob label="Humanize" hint="Leave some of the original pitch." value={values.humanize ?? 0.05} min={0} max={1} text={pct(values.humanize ?? 0.05)} color="#e0b15a" onChange={(value) => set('humanize', value)} />
-            <Knob label="Mix" hint="How much correction you hear." value={values.amount ?? 0.85} min={0} max={1} text={pct(values.amount ?? 0.85)} color="#8fd0c4" onChange={(value) => set('amount', value)} />
-            <Knob label="Flex" hint="Ignore small pitch errors." value={values.flex ?? 0} min={0} max={1} text={pct(values.flex ?? 0)} color="#d7a0c8" side onChange={(value) => set('flex', value)} />
-            <Knob label="Vibrato" hint="Keep the fast pitch movement." value={values.vibrato ?? 0} min={0} max={1} text={pct(values.vibrato ?? 0)} color="#9eb6e0" side onChange={(value) => set('vibrato', value)} />
-            <Knob label="Formant" hint="Let the tone follow the new pitch." value={values.formant ?? 0} min={0} max={1} text={(values.formant ?? 0) < 0.08 ? 'Keep' : pct(values.formant ?? 0)} color="#c4b48a" side onChange={(value) => set('formant', value)} />
+            <Knob label="Retune" hint="How fast the note snaps." value={values.retune ?? 0.95} fallback={0.95} min={0.02} max={1} text={String(Math.round((values.retune ?? 0.95) * 100))} color="#73c48f" onChange={(value) => set('retune', value)} />
+            <Knob label="Humanize" hint="Leave some of the original pitch." value={values.humanize ?? 0.05} fallback={0.05} min={0} max={1} text={pct(values.humanize ?? 0.05)} color="#e0b15a" onChange={(value) => set('humanize', value)} />
+            <Knob label="Mix" hint="How much correction you hear." value={values.amount ?? 0.85} fallback={0.85} min={0} max={1} text={pct(values.amount ?? 0.85)} color="#8fd0c4" onChange={(value) => set('amount', value)} />
+            <Knob label="Flex" hint="Ignore small pitch errors." value={values.flex ?? 0} fallback={0} min={0} max={1} text={pct(values.flex ?? 0)} color="#d7a0c8" side onChange={(value) => set('flex', value)} />
+            <Knob label="Vibrato" hint="Keep the fast pitch movement." value={values.vibrato ?? 0} fallback={0} min={0} max={1} text={pct(values.vibrato ?? 0)} color="#9eb6e0" side onChange={(value) => set('vibrato', value)} />
+            <Knob label="Formant" hint="Let the tone follow the new pitch." value={values.formant ?? 0} fallback={0} min={0} max={1} text={(values.formant ?? 0) < 0.08 ? 'Keep' : pct(values.formant ?? 0)} color="#c4b48a" side onChange={(value) => set('formant', value)} />
           </div>
         </div>
       ) : (
@@ -325,7 +326,7 @@ function PitchMeter({ meter, held, onHold }: { meter: ReturnType<typeof readMete
 }
 
 function Knob({
-  label, hint, value, min, max, text, color, side, onChange,
+  label, hint, value, min, max, text, color, side, fallback, onChange,
 }: {
   label: string
   hint: string
@@ -335,30 +336,19 @@ function Knob({
   text: string
   color: string
   side?: boolean
+  fallback: number
   onChange: (value: number) => void
 }) {
   const ratio = Math.min(1, Math.max(0, (value - min) / (max - min || 1)))
-  const drag = useRef<{ y: number; value: number } | null>(null)
-  const move = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (!drag.current) return
-    const span = max - min
-    const next = drag.current.value + ((drag.current.y - event.clientY) / 140) * span
-    onChange(Math.min(max, Math.max(min, next)))
-  }
+  const { ref, readout } = useDragValue<HTMLButtonElement>({ min, max, value, fallback, onChange: (next) => onChange(next) })
   return (
     <button
+      ref={ref}
       type="button"
       className={`tune-knob ${side ? 'side' : ''}`}
       style={{ ['--p' as string]: String(ratio), ['--arc' as string]: color }}
       aria-label={`${label}. ${hint} ${text}.`}
       title={hint}
-      onPointerDown={(event) => {
-        drag.current = { y: event.clientY, value }
-        event.currentTarget.setPointerCapture(event.pointerId)
-      }}
-      onPointerMove={move}
-      onPointerUp={() => { drag.current = null }}
-      onPointerCancel={() => { drag.current = null }}
       onKeyDown={(event) => {
         const step = (max - min) / 20
         if (event.key === 'ArrowUp' || event.key === 'ArrowRight') onChange(Math.min(max, value + step))
@@ -372,6 +362,7 @@ function Knob({
       <span className="cap"><i /></span>
       <b>{label}</b>
       <em>{text}</em>
+      <GestureReadout readout={readout} />
     </button>
   )
 }

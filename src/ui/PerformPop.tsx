@@ -6,6 +6,7 @@ import { beatRepeatHeld, hardwareMidiAllowed } from '../model/beatRepeat'
 import type { RepeatRate } from '../model/midiClock'
 import { NOTE_NAMES, SCALES, type ScaleId } from '../model/scale'
 import { degreeTone, findScale, isBuiltinScale, isTwelveTone, toneName } from '../theory'
+import { padFaceName } from '../instruments/pads/record'
 import { BANKS, gridPitch, PAD_MACROS, sixteenLevels, type GridLayout, type LevelSpread, type PadVoice, type StepCondition } from '../model/padMachine'
 import { decodeWavPCM } from '../model/wav'
 import { selectScale } from '../state/select'
@@ -351,7 +352,9 @@ export function PerformPop({
           engine.performanceMode = next
           setFocus(next)
         }}>Focus</button>
-        <span className="latency" aria-label="Monitoring latency">{latency} ms</span>
+        <span className="latency" aria-label="Monitoring latency" title={`Schedule ${engine.liveLatencyProbe().scheduleDelayMs.toFixed(2)} ms · base ${engine.baseLatencyMs.toFixed(1)} ms · output ${engine.deviceLatencyMs.toFixed(1)} ms`}>
+          {latency} ms · base {engine.baseLatencyMs.toFixed(1)} · out {engine.deviceLatencyMs.toFixed(1)}
+        </span>
         <button type="button" onClick={() => void session.calibrate()}>Calibrate</button>
         <button type="button" onClick={onClose} aria-label="Close">×</button>
       </header>
@@ -454,7 +457,7 @@ export function PerformPop({
           <button type="button" className={erase ? 'on' : ''} onClick={() => setErase((value) => !value)}>Erase</button>
           <button type="button" className={recordMode === 'replace' ? 'on' : ''} onClick={() => setRecordMode((value) => (value === 'overdub' ? 'replace' : 'overdub'))}>{recordMode === 'replace' ? 'Replace' : 'Overdub'}</button>
           <button type="button" onClick={() => clip && store.doubleClip(clip.trackId, clip.clipId)}>Double</button>
-          <button type="button" onClick={() => store.undoTake()}>Undo take</button>
+          <button type="button" title="Undo" disabled={!store.canUndo} onClick={() => store.undo()}>Undo</button>
           <select aria-label="Fixed length" value={fixed} onChange={(event) => setFixed(Number(event.target.value))}>
             <option value={0}>Free</option>
             <option value={4}>1 bar</option>
@@ -497,7 +500,8 @@ export function PerformPop({
                     data-pitch={levels && source ? source.pitch : pad.pitch}
                     data-index={index}
                     data-level={levels ? index : undefined}
-                  >{levels ? levelLabel(index, levels) : pad.name}</button>
+                    title={pad.sampleName && pad.sampleName !== padFaceName(pad) ? `${padFaceName(pad)}. ${pad.sampleName}` : padFaceName(pad)}
+                  >{levels ? levelLabel(index, levels) : padFaceName(pad)}</button>
                 ))}
               </div>
               <KeyGrid root={scale.root} scaleId={scale.library || scale.scale} layout={layout} inKey={inKey} land />

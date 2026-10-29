@@ -1,3 +1,4 @@
+import { continuousCeiling } from '../liveStage'
 import type { SampleBank } from './cache'
 import { MemoryBank } from './cache'
 import { isKeyswitch, selectLayers } from './map'
@@ -81,6 +82,24 @@ export class SamplerInstrument {
     bank?: SampleBank,
   ) {
     this.bank = bank ?? new MemoryBank()
+  }
+
+  /** Envelope, tune, tone, and loop. Sounding notes keep playing. */
+  setPlay(play: SamplerProgram['play']) {
+    if (!this.currentProgram || !play) return
+    const previous = this.currentProgram.play?.tune ?? 0
+    this.currentProgram.play = play
+    const ratio = 2 ** (((play.tune ?? 0) - previous) / 12)
+    for (const voice of this.voices) {
+      if (!voice.active) continue
+      voice.attack = Math.max(0, play.attack)
+      voice.decay = Math.max(0, play.decay)
+      voice.sustain = Math.max(0, Math.min(1, play.sustain))
+      voice.release = Math.max(0.005, play.release)
+      if ((play.tune ?? 0) !== previous) voice.tune *= ratio
+      if (play.loop === true) voice.looping = true
+      else if (play.loop === false) voice.looping = false
+    }
   }
 
   setProgram(program: SamplerProgram | null) {
@@ -361,9 +380,23 @@ export class SamplerInstrument {
       const stream = openStream(this.bank, ref)
       const audio = stream ? null : this.bank.get(ref)
       if (!audio && !stream) this.bank.request(ref)
-      const loop = zone.loopMode === 'loop' || zone.loopMode === 'sustain'
-      const loopEnd = zone.loopEnd > zone.loopStart ? zone.loopEnd : 0
-      const fade = loop && loopEnd - zone.loopStart > 16 ? Math.min(256, Math.floor((loopEnd - zone.loopStart) / 8)) : 0
+      const forced = play?.loop
+      let loop = zone.loopMode === 'loop' || zone.loopMode === 'sustain'
+      let loopMode = zone.loopMode
+      let loopStart = zone.loopStart
+      let loopEnd = zone.loopEnd > zone.loopStart ? zone.loopEnd : 0
+      if (forced === true) {
+        loop = true
+        loopMode = 'loop'
+        if (!(loopEnd > loopStart)) {
+          loopStart = Math.max(0, zone.offset)
+          loopEnd = zone.end > loopStart + 16 ? zone.end : loopEnd
+        }
+      } else if (forced === false) {
+        loop = false
+        loopMode = 'one-shot'
+      }
+      const fade = loop && loopEnd - loopStart > 16 ? Math.min(256, Math.floor((loopEnd - loopStart) / 8)) : 0
       this.voices.push({
         note,
         vel: Math.max(0, Math.min(1, vel)),
@@ -381,9 +414,9 @@ export class SamplerInstrument {
         gain: dbToAmp(zone.gainDb),
         pan: zone.pan,
         micId: zone.mic,
-        loopMode: zone.loopMode,
+        loopMode,
         looping: loop,
-        loopStart: zone.loopStart,
+        loopStart,
         loopEnd,
         fade,
         end: zone.end,
@@ -477,8 +510,5 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function soft(value: number) {
-  if (!Number.isFinite(value) || Math.abs(value) < 1e-15) return 0
-  if (value > 1) return Math.tanh(value)
-  if (value < -1) return Math.tanh(value)
-  return value
+  return continuousCeiling(value)
 }

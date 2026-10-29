@@ -285,6 +285,20 @@
   box-shadow: 0 0 6px #f4fff7;
 }
 
+.shell.fold .rack-mute {
+  width: auto;
+  min-width: 64px;
+  height: 36px;
+  min-height: 36px;
+  border-radius: 10px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.shell.fold .rack-mute::after { width: 8px; height: 8px; }
+
 .shell.phone .beats.channel-rack .rack-mute,
 .shell.phone .beats.channel-rack .rack-knob,
 .shell.phone .beats.channel-rack .rack-step,
@@ -391,7 +405,7 @@
   margin-bottom: 0;
 }
 .rack-ruler .rack-steps { position: relative; min-height: 40px; }
-.rack-ruler .loop-host { position: absolute; inset: 0; overflow: hidden; }
+.rack-ruler .loop-host { position: absolute; top: 0; bottom: 0; left: 0; right: 48px; width: auto; overflow: hidden; }
 .shell.phone .rack-ruler .rack-steps { min-height: 44px; }
 
 .rack-ruler .rack-lead {

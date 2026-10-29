@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent } fro
 import type { AudioEngine } from '../audio/engine'
 import { Performer, pointerVelocity, type PerformTarget } from '../audio/performer'
 import { ensureDefaultKit } from '../instruments/pads/load'
-import { clipBeat, shortPadName } from '../instruments/pads/record'
+import { clipBeat, padFaceName } from '../instruments/pads/record'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { projectSampleBeat } from '../model/tempoMap'
 import { BANKS, sixteenLevels, type LevelSpread } from '../model/padMachine'
@@ -48,6 +48,7 @@ export function PadsPanel({
   const [eraseOn, setEraseOn] = useState(false)
   const [litPads, setLitPads] = useState<number[]>([])
   const [litNotes, setLitNotes] = useState<number[]>([])
+  const [meters, setMeters] = useState<number[]>(() => Array(16).fill(0))
   const [status, setStatus] = useState(engine.status)
   const sounds = useRef<SoundEntry[]>([])
   const selectedPad = pads[selected] ?? pads[0]
@@ -118,6 +119,25 @@ export function PadsPanel({
   useEffect(() => engine.subscribe(() => setStatus(engine.status)), [engine])
 
   useEffect(() => {
+    const timer = window.setInterval(() => {
+      setMeters((list) => {
+        if (list.every((value) => value === 0)) return list
+        return list.map((value) => (value < 0.04 ? 0 : value * 0.88))
+      })
+    }, 48)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  const bumpMeter = (index: number, velocity: number) => {
+    if (!Number.isFinite(index) || index < 0) return
+    setMeters((list) => {
+      const next = list.slice()
+      next[index] = Math.max(0.15, Math.min(1, velocity))
+      return next
+    })
+  }
+
+  useEffect(() => {
     let last = -1
     const timer = window.setInterval(() => {
       if (engine.status !== 'recording') {
@@ -144,8 +164,10 @@ export function PadsPanel({
       event.preventDefault()
       const index = Number(key.dataset.pad)
       const pitch = Number(key.dataset.pitch)
+      const velocity = pointerVelocity(event, key.getBoundingClientRect())
+      play.down(pitch, velocity, event.timeStamp, event.pointerId, levels ? index : undefined)
       setSelected(index)
-      play.down(pitch, pointerVelocity(event, key.getBoundingClientRect()), event.timeStamp, event.pointerId, levels ? index : undefined)
+      bumpMeter(index, velocity)
       pointers.set(event.pointerId, index)
       setLitPads([...pointers.values()])
       try { key.setPointerCapture(event.pointerId) } catch { /* the pointer already ended */ }
@@ -179,8 +201,9 @@ export function PadsPanel({
       event.preventDefault()
       const pitch = levels && selectedPad ? selectedPad.pitch : pad.pitch
       held.set(event.code, index + 1)
-      setSelected(index)
       play.down(pitch, 0.9, event.timeStamp, index + 1, levels ? index : undefined)
+      setSelected(index)
+      bumpMeter(index, 0.9)
       setLitPads((list) => list.includes(index) ? list : [...list, index])
     }
     const up = (event: KeyboardEvent) => {
@@ -287,7 +310,7 @@ export function PadsPanel({
           onPointerCancel={() => setEraseOn(false)}
           onPointerLeave={() => setEraseOn(false)}
         >Erase</button>
-        <button type="button" className="ch-tab" title="Undo the last record pass." onClick={() => store.undoTake()}>Undo</button>
+        <button type="button" className="ch-tab" title="Undo" disabled={!store.canUndo} onClick={() => store.undo()}>Undo</button>
         <button type="button" className={`ch-tab${store.project.countIn ? ' on' : ''}`} aria-pressed={store.project.countIn} title="Count one bar before recording starts." onClick={() => store.toggle('countIn')}>Count</button>
         <button type="button" className={`ch-tab${store.project.metronomeEnabled ? ' on' : ''}`} aria-pressed={store.project.metronomeEnabled} title="Metronome while the pads record." onClick={() => store.toggle('metronomeEnabled')}>Click</button>
         <select aria-label="16 Levels" title="One pad spread across 16 velocities, tunes, or decays." value={levels} onChange={(event) => setLevels(event.target.value as LevelSpread | '')}>
@@ -306,28 +329,36 @@ export function PadsPanel({
         <div className="mpc-grid" ref={board} aria-label="Drum pads">
           {pads.map((pad, index) => {
             const pitch = levels && source ? source.pitch : pad.pitch
-            const label = levels ? levelLabel(index, levels) : shortPadName(pad.name)
+            const label = levels ? levelLabel(index, levels) : padFaceName(pad)
+            const sampleTitle = pad.sampleName || (pad.layers[0]?.bufferId ? store.buffers.get(pad.layers[0].bufferId)?.name : '') || pad.name
+            const velocity = meters[index] ?? 0
+            const lit = litPads.includes(index) || litNotes.includes(pitch) || velocity > 0.08
             return (
               <button
                 key={`${bank}-${pad.pitch}-${index}`}
                 type="button"
-                className={`mpc-pad ch-raised${litPads.includes(index) || litNotes.includes(pitch) ? ' lit' : ''}${selected === index ? ' sel' : ''}${pad.muted ? ' muted' : ''}`}
+                className={`mpc-pad ch-raised${lit ? ' lit' : ''}${selected === index ? ' sel' : ''}${pad.muted ? ' muted' : ''}`}
                 data-pad={index}
                 data-pitch={pitch}
-                title={`${label}. Drag a sound here. Keys ${PAD_KEYS[index]?.replace('Digit', '').replace('Key', '') ?? ''}.`}
+                style={{ ['--vel' as string]: String(velocity) }}
+                title={`${sampleTitle && sampleTitle !== label ? `${label}. ${sampleTitle}` : label}. Drag a sound here. Keys ${PAD_KEYS[index]?.replace('Digit', '').replace('Key', '') ?? ''}.`}
                 onDragOver={(event) => {
                   if ([...event.dataTransfer.types].includes(SOUND_MIME) || event.dataTransfer.types.includes('text/plain')) event.preventDefault()
                 }}
                 onDrop={(event) => { void dropSound(index, event) }}
               >
                 <span>{label}</span>
+                <i className="mpc-meter" aria-hidden style={{ height: `${Math.round(velocity * 100)}%` }} />
               </button>
             )
           })}
         </div>
         {source && (
-          <aside className="mpc-params ch-recessed" aria-label="Pad settings">
-            <h3>{shortPadName(source.name)}</h3>
+          <aside className="mpc-params ch-recessed" aria-label="Pad settings" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
+            <h3 title={source.sampleName || source.name}>{padFaceName(source)}</h3>
+            <div className="mpc-side-meter" aria-label="Pad meter" style={{ ['--vel' as string]: String(meters[selected] ?? 0) }}>
+              <i style={{ height: `${Math.round((meters[selected] ?? 0) * 100)}%` }} />
+            </div>
             <label>Vol
               <input aria-label="Pad volume" title="How loud this pad is." type="range" min={0} max={1} step={0.01} value={source.level} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { level: Number(event.target.value) })} />
             </label>

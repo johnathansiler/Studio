@@ -34,6 +34,8 @@ export interface PadLayer {
 export interface PadVoice {
   pitch: number
   name: string
+  /** Full library name. The pad face keeps the short role name. */
+  sampleName?: string
   level: number
   pan: number
   send: number

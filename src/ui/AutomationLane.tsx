@@ -1,18 +1,44 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { TouchSlider } from './kit/controls'
 import type { AudioEngine } from '../audio/engine'
 import type { ArrangeTool } from '../state/tools'
 import type { AutoSpec } from '../model/automation'
+import { channelAutomationMode } from '../model/automation'
 import { automatedValue, automationWriteMode, laneChoices, lanePoints, mixGroupsOf, trackGroupId } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import type { AutomationWriteMode } from '../model/types'
 import './automation.css'
 
 const MODES: { id: AutomationWriteMode; label: string; short: string; title: string }[] = [
-  { id: 'off', label: 'Off', short: 'O', title: 'Off ignores automation. The fader stays where you put it.' },
-  { id: 'read', label: 'Read', short: 'R', title: 'Read automation while playing. Controls follow the lane.' },
-  { id: 'touch', label: 'Touch', short: 'T', title: 'Touch writes only while you hold the control.' },
-  { id: 'latch', label: 'Latch', short: 'L', title: 'Latch writes the value you set until playback stops.' },
+  { id: 'off', label: 'Off', short: 'O', title: 'Off. This channel ignores automation. The faders and knobs always change the sound.' },
+  { id: 'read', label: 'Read', short: 'R', title: 'Read. This channel plays its automation. A control with no lane still changes the sound.' },
+  { id: 'touch', label: 'Touch', short: 'T', title: 'Touch. This channel writes only while you hold the control.' },
+  { id: 'latch', label: 'Latch', short: 'L', title: 'Latch. This channel keeps writing the value you set until playback stops.' },
 ]
+
+/** Per-channel automation. One strip does not change the others. Narrow strips show O, R, T, and L. */
+export function ChannelAutomation({ store, trackId }: { store: ProjectStore; trackId: string | 'master' }) {
+  const mode = channelAutomationMode(store.project, trackId)
+  const name = trackId === 'master' ? 'Master' : store.project.tracks.find((track) => track.id === trackId)?.name ?? 'Channel'
+  return (
+    <div className="strip-auto auto-mode in-strip" role="group" aria-label={`${name} automation`}>
+      {MODES.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          className={mode === item.id ? 'on' : ''}
+          aria-pressed={mode === item.id}
+          aria-label={`${item.label}. ${item.title}`}
+          title={item.title}
+          onClick={() => (trackId === 'master' ? store.setMasterAutomation(item.id) : store.setTrackAutomation(trackId, item.id))}
+        >
+          <span className="mode-full">{item.label}</span>
+          <span className="mode-short">{item.short}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
 
 export function AutomationModeBar({ store, embedded = false }: { store: ProjectStore; embedded?: boolean }) {
   const mode = automationWriteMode(store.project)
@@ -49,8 +75,14 @@ export function MixFlags({ store, trackId, compact = false }: { store: ProjectSt
   if (!track) return null
   return (
     <>
-      <button type="button" className={`mini ${track.mute ? 'on-m' : ''}`} aria-label={track.mute ? 'Unmute track' : 'Mute track'} title="Mute this track. Linked tracks mute together." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'mute') }}>M</button>
-      <button type="button" className={`mini ${track.solo ? 'on-s' : ''}`} aria-label={track.solo ? 'Unsolo track' : 'Solo track'} title="Solo this track and keep its path to the master open." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'solo') }}>S</button>
+      <button type="button" className={`mini ${track.mute ? 'on-m' : ''}`} aria-label={track.mute ? 'Unmute track' : 'Mute track'} title="Mute this track. Linked tracks mute together." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'mute') }}>
+        <span className="mini-mark">M</span>
+        <span className="mini-word">Mute</span>
+      </button>
+      <button type="button" className={`mini ${track.solo ? 'on-s' : ''}`} aria-label={track.solo ? 'Unsolo track' : 'Solo track'} title="Solo this track and keep its path to the master open." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'solo') }}>
+        <span className="mini-mark">S</span>
+        <span className="mini-word">Solo</span>
+      </button>
       {!compact && (
         <button type="button" className={`mini arm-flag ${track.armed ? 'on-r' : ''}`} aria-pressed={track.armed} aria-label={track.armed ? 'Disarm track' : 'Arm track. This track records when you press record.'} title="Arm this track. Only armed tracks record." onClick={(event) => { event.stopPropagation(); store.updateTrack(track.id, { armed: !track.armed }) }}>
           <span className="arm-full">Arm</span>
@@ -126,23 +158,24 @@ export function AutoFader({ store, engine, spec, value, label, className }: { st
     [engine],
   )
   const rolling = status === 'playing' || status === 'recording'
-  const mode = automationWriteMode(store.project)
+  const mode = channelAutomationMode(store.project, spec.trackId === 'master' ? 'master' : spec.trackId)
   const shown = rolling && mode === 'read' ? automatedValue(store.project, spec, sample, value) : value
   const span = spec.max - spec.min
+  const vertical = className !== 'pan'
   return (
-    <input
-      aria-label={label}
+    <TouchSlider
+      label={label}
       title={label}
       className={className}
-      type="range"
+      vertical={vertical}
       min={spec.min}
       max={spec.max}
       step={span <= 2 ? 0.01 : span <= 40 ? 0.1 : 1}
       value={Number.isFinite(shown) ? shown : value}
-      onPointerDown={() => store.beginAutomationTouch()}
-      onPointerUp={() => store.endAutomationTouch()}
-      onPointerCancel={() => store.endAutomationTouch()}
-      onChange={(event) => store.setAutomated(spec, Number(event.target.value), rolling, engine.currentTimelineSample())}
+      fallback={spec.min < 0 ? 0 : spec.max > 1 ? 0.8 : (spec.min + spec.max) / 2}
+      onStart={() => store.beginAutomationTouch()}
+      onCommit={() => store.endAutomationTouch()}
+      onChange={(next) => store.setAutomated(spec, next, rolling, engine.currentTimelineSample())}
     />
   )
 }

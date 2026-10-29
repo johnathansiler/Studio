@@ -1,3 +1,4 @@
+import rackWorkletUrl from './rack.worklet.ts?worker&url'
 import type { Project } from '../../model/types'
 import type { StripNodes } from '../strips'
 import { RackRuntime, type SampleBuffer } from './dsp'
@@ -16,6 +17,8 @@ interface Live {
   lanes: RackAutomation[]
   originTime: number
   originBeat: number
+  sig: string
+  bufferSig: string
 }
 
 /**
@@ -131,7 +134,7 @@ export class RackHost {
 
   private async ensure(ctx: AudioContext) {
     if (this.ready) return this.ready
-    this.ready = ctx.audioWorklet.addModule(new URL('./rack.worklet.ts', import.meta.url)).then(() => true).catch(() => false)
+    this.ready = ctx.audioWorklet.addModule(rackWorkletUrl).then(() => true).catch(() => false)
     return this.ready
   }
 
@@ -141,7 +144,7 @@ export class RackHost {
     const gain = ctx.createGain()
     gain.connect(strip.input)
     const runtime = new RackRuntime(ctx.sampleRate)
-    const live: Live = { worklet: null, script: null, runtime, gain, rack: null, tempo: 120, buffers: new Map(), notes: [], lanes: [], originTime: 0, originBeat: 0 }
+    const live: Live = { worklet: null, script: null, runtime, gain, rack: null, tempo: 120, buffers: new Map(), notes: [], lanes: [], originTime: 0, originBeat: 0, sig: '', bufferSig: '' }
     if (this.workletOk) {
       const node = new AudioWorkletNode(ctx, 'cueharbor-rack', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] })
       node.port.onmessage = (event: MessageEvent<{ type?: string; value?: number }>) => {
@@ -188,11 +191,19 @@ export class RackHost {
     live.tempo = tempo
     live.buffers = buffers
     if (!live.worklet) return
-    const packed = [...buffers.entries()].slice(0, 8).map(([id, buffer]) => ({
-      id,
-      sampleRate: buffer.sampleRate,
-      data: buffer.channels[0]?.slice(0, 48000 * 8) ?? new Float32Array(0),
-    }))
+    const bufferSig = [...buffers.keys()].sort().join('|')
+    const sig = `${tempo}:${this.quality}:${rack.polyphony}:${rack.devices.map((device) => `${device.id}:${device.kind}:${JSON.stringify(device.params)}`).join(';')}:${rack.cables?.length ?? 0}`
+    const buffersChanged = bufferSig !== live.bufferSig
+    if (!buffersChanged && sig === live.sig) return
+    live.sig = sig
+    live.bufferSig = bufferSig
+    const packed = buffersChanged
+      ? [...buffers.entries()].slice(0, 8).map(([id, buffer]) => ({
+        id,
+        sampleRate: buffer.sampleRate,
+        data: buffer.channels[0]?.slice(0, 48000 * 8) ?? new Float32Array(0),
+      }))
+      : []
     live.worklet.port.postMessage({ type: 'state', rack, tempo, quality: this.quality, buffers: packed })
   }
 

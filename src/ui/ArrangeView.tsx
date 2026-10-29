@@ -30,6 +30,7 @@ import { ActionSheet, SheetRow, TipButton } from './Hint'
 import { RecordBar } from './RecordBar'
 import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, trimZone } from './touchEdit'
 import { laneDoubleClickAddsClip } from './clipKeys'
+import { isSampledInstrument } from '../instruments/sampled'
 import { LoopRegion } from './LoopRegion'
 
 export function ArrangeView({
@@ -534,6 +535,8 @@ export function ArrangeView({
                 aria-label={`${track.name} name`}
                 style={{ color: track.color }}
                 value={track.name}
+                title={isSampledInstrument(track) ? 'Open the sampler.' : undefined}
+                onClick={() => { if (isSampledInstrument(track)) store.showRack(track.id) }}
                 onChange={(event) => store.updateTrack(track.id, { name: event.target.value })}
               />
               <MixFlags store={store} trackId={track.id} compact />
@@ -552,7 +555,8 @@ export function ArrangeView({
               )}
               {!phone && (track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
                 <TipButton className={`mini ${track.armed ? 'on-r' : ''}`} label={copyOf(TRACK_ROW, 'arm').label} hint={track.type === 'midi' ? 'Record this instrument from its MIDI input.' : copyOf(TRACK_ROW, 'arm').hint} pressed={track.armed} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
-                  R
+                  <span className="mini-mark">R</span>
+                  <span className="mini-word">Arm</span>
                 </TipButton>
               )}
               <span className="mini-meter" aria-hidden><i style={{ transform: `scaleX(${Math.min(1, (levels[track.id] ?? 0) * 3)})` }} /></span>
@@ -893,6 +897,9 @@ export function ArrangeView({
               step={0.01}
               {...described(copyOf(TRACK_SHEET, 'volume'))}
               value={sheetTrack.volume}
+              onPointerDown={() => store.beginAutomationTouch()}
+              onPointerUp={() => store.endAutomationTouch()}
+              onPointerCancel={() => store.endAutomationTouch()}
               onChange={(event) => store.updateTrack(sheetTrack.id, { volume: Number(event.target.value) })}
             />
           </label>
@@ -920,8 +927,8 @@ export function ArrangeView({
             <>
               <SheetRow label={copyOf(TRACK_SHEET, 'scaler').label} hint={copyOf(TRACK_SHEET, 'scaler').hint} pressed={store.scalerTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openScaler(sheetTrack.id) }} />
               <SheetRow label={copyOf(TRACK_SHEET, 'rack').label} hint={copyOf(TRACK_SHEET, 'rack').hint} pressed={store.rackTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openRack(sheetTrack.id) }} />
-              <SheetRow label="Patch" hint="Layered patch: synths, samples, grains, and a morph pad." pressed={store.patchTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openPatch(sheetTrack.id) }} />
-              <SheetRow label={copyOf(TRACK_SHEET, 'keys').label} hint={copyOf(TRACK_SHEET, 'keys').hint} onClick={() => { setTrackSheet(null); onPerform('keys') }} />
+              <SheetRow label="Patch" hint={isSampledInstrument(sheetTrack) ? 'Sampler. Waveform, root, envelope, tone, and the keyboard.' : 'Layered patch: synths, samples, grains, and a morph pad.'} pressed={isSampledInstrument(sheetTrack) ? store.rackTrackId === sheetTrack.id : store.patchTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openPatch(sheetTrack.id) }} />
+              <SheetRow label={copyOf(TRACK_SHEET, 'keys').label} hint={isSampledInstrument(sheetTrack) ? 'Sampler keyboard, root, and envelope.' : copyOf(TRACK_SHEET, 'keys').hint} onClick={() => { setTrackSheet(null); if (isSampledInstrument(sheetTrack)) store.showRack(sheetTrack.id); else onPerform('keys') }} />
               <SheetRow label={copyOf(TRACK_SHEET, 'drums').label} hint={copyOf(TRACK_SHEET, 'drums').hint} onClick={() => { setTrackSheet(null); onPerform('drums') }} />
             </>
           )}

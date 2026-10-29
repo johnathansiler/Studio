@@ -42,8 +42,8 @@ describe('half-width mixer strips', () => {
         const short = strip.querySelector('.mode-short') as HTMLElement
         const shorts = [...strip.querySelectorAll('.mode-short')].map((node) => node.textContent)
         const name = strip.querySelector('h3') as HTMLElement
-        const fader = strip.querySelector('.fader-row input') as HTMLElement
-        const pan = strip.querySelector('input.pan') as HTMLElement
+        const fader = strip.querySelector('.fader-row .touch-slider') as HTMLElement
+        const pan = strip.querySelector('.touch-slider.pan') as HTMLElement
         const meter = strip.querySelector('.meter') as HTMLElement
         const buttons = [...strip.querySelectorAll('.mini')].map((node) => (node.textContent || '').replace(/\s+/g, ''))
         const stripBox = strip.getBoundingClientRect()

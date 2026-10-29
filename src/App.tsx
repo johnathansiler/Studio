@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { installControlGuards } from './ui/gestures'
 import { applyFreeze } from './audio/bounce'
 import { AudioEngine } from './audio/engine'
 import { unpackProject } from './model/archive'
@@ -56,10 +57,15 @@ import { TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
 import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
-import { MENU_COPY, UNSTUCK_COPY, VIEW_COPY, copyOf, described } from './ui/chrome'
-import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, readSessionDock, writeSessionDock } from './ui/sessionDock'
+import { UNSTUCK_COPY, VIEW_COPY, copyOf, described, visibleMenu } from './ui/chrome'
+import { MainMenu } from './ui/MainMenu'
+import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, pianoDockWidth, readSessionDock, writeSessionDock } from './ui/sessionDock'
 import { deletesSelection } from './ui/clipKeys'
-import { HintBubble, MenuRow, TipButton } from './ui/Hint'
+import { historyCommand, typingTarget } from './state/history'
+import { claimComputerKey } from './model/keyboardPlay'
+import { KeyboardDock } from './ui/KeyboardDock'
+import { HintBubble, TipButton } from './ui/Hint'
+import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
 
 interface Bundle {
@@ -101,12 +107,14 @@ export function App() {
     return () => window.clearInterval(id)
   }, [engine])
   useEffect(() => watchSpectral(store), [store])
+  useEffect(() => installControlGuards(document), [])
   const [version, setVersion] = useState(0)
   const [surface, setSurface] = useState<'studio' | 'artist'>('studio')
   const [dock, setDock] = useState(() => fittedDockWidth(typeof window === 'undefined' ? 1280 : window.innerWidth, EDITOR_DOCK_DEFAULT))
   const [dockEdge, setDockEdge] = useState<'right' | 'bottom'>('right')
+  const editorPanel = useRef('room')
   useEffect(() => {
-    const fit = () => setDock((value) => fittedDockWidth(window.innerWidth, value, dockEdge))
+    const fit = () => setDock((value) => fittedDockWidth(window.innerWidth, value, dockEdge, editorPanel.current === 'piano' ? 0.72 : 0.5))
     window.addEventListener('resize', fit)
     return () => window.removeEventListener('resize', fit)
   }, [dockEdge])
@@ -517,8 +525,9 @@ export function App() {
 
   useEffect(() => {
     if (!import.meta.env.DEV) return
-    ;(window as unknown as { __cue?: { measure: () => ReturnType<AudioEngine['measureLiveHit']> } }).__cue = {
+    ;(window as unknown as { __cue?: { measure: () => ReturnType<AudioEngine['measureLiveHit']>; probe: () => ReturnType<AudioEngine['liveLatencyProbe']> } }).__cue = {
       measure: () => engine.measureLiveHit(),
+      probe: () => engine.liveLatencyProbe(),
     }
   }, [engine])
 
@@ -649,7 +658,26 @@ export function App() {
       || store.project.tracks.find((item) => item.type === 'midi')
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
+      const typing = typingTarget(target)
+      const command = historyCommand(event, typing)
+      if (command) {
+        event.preventDefault()
+        if (command === 'undo') store.undo()
+        else store.redo()
+        return
+      }
+      if (typing) return
+      const claimed = claimComputerKey({
+        enabled: store.keyboardMidi,
+        typing: false,
+        meta: event.metaKey || event.ctrlKey,
+        alt: event.altKey,
+        repeat: event.repeat,
+        held: false,
+        code: event.code,
+        key: event.key,
+      })
+      if (claimed) return
       const key = event.key.toLowerCase()
       const meta = event.metaKey || event.ctrlKey
       const typed = noteKeys[event.code]
@@ -670,11 +698,6 @@ export function App() {
         void play()
       } else if (key === 'r' && !meta) void record()
       else if (key === 'q' && !meta) store.quickQuantize()
-      else if (meta && key === 'z') {
-        event.preventDefault()
-        if (event.shiftKey) store.redo()
-        else store.undo()
-      } else if (!meta && event.shiftKey && key === 'z') store.redo()
       else if (meta && key === 's') {
         event.preventDefault()
         void persist()
@@ -1270,6 +1293,11 @@ async function importDropped(files: FileList) {
     : 'room'
   const pianoTrack = store.project.tracks.find((track) => track.id === store.selectedTrackId && track.type === 'midi')
     || store.project.tracks.find((track) => track.type === 'midi')
+  editorPanel.current = panel
+  useEffect(() => {
+    if (panel !== 'piano' || phone) return
+    setDock(pianoDockWidth(window.innerWidth))
+  }, [panel, phone])
   const studioTab: StudioTab = collabOpen ? 'collab' : store.view
   const collabShown = collabPanelVisible(studioTab)
   const dockShown = !collabShown && dockVisible({ surface, panel, dockOpen: false })
@@ -1306,8 +1334,16 @@ async function importDropped(files: FileList) {
     hideCollab()
     setSurface('studio')
     setMenuOpen(false)
-    if (view !== 'arrange') setPianoOpen(false)
+    if (view !== 'arrange' || phone) {
+      setPianoOpen(false)
+      if (phone) store.closePiano()
+    }
     store.setView(view)
+  }
+
+  function closePiano() {
+    setPianoOpen(false)
+    store.closePiano()
   }
 
   function openPiano(trackId: string, clipId?: string) {
@@ -1342,7 +1378,7 @@ async function importDropped(files: FileList) {
 
   return (
     <div
-      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''}`}
+      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''} ${form === 'desk' && store.keyboardMidi ? 'desk-keys' : ''}`}
       style={{ ['--dock' as string]: `${dock}px`, ['--sounds' as string]: `${soundWidth}px` }}
       data-version={version}
       data-form={form}
@@ -1403,6 +1439,7 @@ async function importDropped(files: FileList) {
             {collabBadge && <span className="collab-badge" aria-hidden />}
           </button>
         </div>
+        <HistoryButtons canUndo={store.canUndo} canRedo={store.canRedo} onUndo={() => store.undo()} onRedo={() => store.redo()} />
         <TipButton
           className={`unstuck-btn ${unstuckOpen ? 'on' : ''}`}
           label={UNSTUCK_COPY.label}
@@ -1411,90 +1448,51 @@ async function importDropped(files: FileList) {
           disabled={store.remoteFollow}
           onClick={() => { setMenuOpen(false); setUnstuckOpen((open) => !open) }}
         />
-        <button type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Save, export, clips, and setup." title="Save, export, clips, and setup." aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
-          <span className="menu-word">Menu</span>
-          <span className="menu-ico"><MenuIcon /></span>
+        <button type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Project, edit, view, and settings." title="Project, edit, view, and settings." aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
+          <MenuIcon />
+          <span className="fold-word">Menu</span>
         </button>
         {menuOpen && (
-          <div className="shell-menu" id="shell-menu">
-            <MenuRow label={copyOf(MENU_COPY, 'new').label} hint={copyOf(MENU_COPY, 'new').hint} disabled={store.remoteFollow} onClick={beginNewProject} />
-            <MenuRow id="menu-save" label={copyOf(MENU_COPY, 'save').label} hint={copyOf(MENU_COPY, 'save').hint} onClick={() => { setMenuOpen(false); void openProjects() }} />
-            <MenuRow label={copyOf(MENU_COPY, 'export').label} hint={copyOf(MENU_COPY, 'export').hint} onClick={() => { setMenuOpen(false); setExportOpen(true) }} />
-            <MenuRow className="split" label={copyOf(MENU_COPY, 'clips').label} hint={copyOf(MENU_COPY, 'clips').hint} onClick={() => showView('session')} />
-            <MenuRow label={copyOf(MENU_COPY, 'keys').label} hint={copyOf(MENU_COPY, 'keys').hint} onClick={() => { setMenuOpen(false); openPerform('keys') }} />
-            <MenuRow label={copyOf(MENU_COPY, 'pads').label} hint={copyOf(MENU_COPY, 'pads').hint} onClick={() => { setMenuOpen(false); openPerform('drums') }} />
-            <MenuRow label={copyOf(MENU_COPY, 'piano').label} hint={copyOf(MENU_COPY, 'piano').hint} disabled={!pianoTrack} onClick={() => { if (!pianoTrack) return; setMenuOpen(false); openPiano(pianoTrack.id) }} />
-            {!hidesHardwareMidi(navigator.userAgent) && (
-              <MenuRow className="split" label="MIDI" hint="Learn knobs, effects, hardware out, live capture, and recording several inputs." onClick={() => { setMenuOpen(false); store.setMidiToolsOpen(!store.midiToolsOpen) }} />
-            )}
-            <MenuRow label={copyOf(MENU_COPY, 'generate').label} hint={copyOf(MENU_COPY, 'generate').hint} onClick={() => openPlugin('write')} />
-            <MenuRow label={copyOf(MENU_COPY, 'scaler').label} hint={copyOf(MENU_COPY, 'scaler').hint} pressed={panel === 'scaler'} onClick={() => openPlugin('play')} />
-            <MenuRow label={copyOf(MENU_COPY, 'players').label} hint={copyOf(MENU_COPY, 'players').hint} onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); setPlayersOpen(true) }} />
-            <MenuRow label="Sounds" hint="Browse loops, one-shots, and starter instruments." onClick={() => { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); store.setView('arrange'); setSoundsOpen(true) }} />
-            <MenuRow className="split" label={copyOf(MENU_COPY, 'quantize').label} hint={copyOf(MENU_COPY, 'quantize').hint} onClick={() => { setMenuOpen(false); store.quickQuantize() }} />
-            <MenuRow label={copyOf(MENU_COPY, 'quantize-more').label} hint={copyOf(MENU_COPY, 'quantize-more').hint} onClick={() => { setMenuOpen(false); store.openQuantize() }} />
-            <MenuRow className="split" label={copyOf(MENU_COPY, 'click').label} hint={copyOf(MENU_COPY, 'click').hint} pressed={store.project.metronomeEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('metronomeEnabled')} />
-            <MenuRow label={copyOf(MENU_COPY, 'count-in').label} hint={copyOf(MENU_COPY, 'count-in').hint} pressed={store.project.countIn} disabled={store.remoteFollow} onClick={() => store.toggle('countIn')} />
-            <MenuRow label={copyOf(MENU_COPY, 'snap').label} hint={copyOf(MENU_COPY, 'snap').hint} pressed={store.project.snap} disabled={store.remoteFollow} onClick={() => store.toggle('snap')} />
-            <MenuRow
-              label={store.keyboardMidi ? 'Keyboard on' : 'Keyboard'}
-              hint="Letter keys play the selected instrument. Tap tempo stays off T."
-              pressed={store.keyboardMidi}
-              onClick={() => store.setKeyboardMidi(!store.keyboardMidi)}
-            />
-            <label className="menu-sig">
-              Sig
-              <select
-                aria-label="Time signature. Beats in each bar."
-                title="Beats in each bar."
-                value={`${store.project.timeSignature.numerator}/${store.project.timeSignature.denominator}`}
-                disabled={store.remoteFollow}
-                onChange={(event) => {
-                  const [n, d] = event.target.value.split('/').map(Number)
-                  store.setTimeSignature(n, d)
-                }}
-              >
-                {['4/4', '3/4', '6/8', '5/4', '7/8'].map((sig) => <option key={sig}>{sig}</option>)}
-              </select>
-            </label>
-            <MenuRow
-              className="split"
-              label={store.transportMode === 'session' ? copyOf(MENU_COPY, 'arrangement').label : copyOf(MENU_COPY, 'session-view').label}
-              hint={store.transportMode === 'session' ? copyOf(MENU_COPY, 'arrangement').hint : copyOf(MENU_COPY, 'session-view').hint}
-              disabled={store.remoteFollow}
-              onClick={() => {
+          <MainMenu
+            items={visibleMenu({
+              phone,
+              session: store.transportMode === 'session',
+              dockBottom: dockEdge === 'bottom',
+              hardwareMidi: !hidesHardwareMidi(navigator.userAgent),
+            })}
+            pressed={(action) => action === 'click' ? store.project.metronomeEnabled
+              : action === 'count-in' ? store.project.countIn
+              : action === 'snap' ? store.project.snap
+              : action === 'loop' ? store.project.loopEnabled
+              : false}
+            disabled={(action) => store.remoteFollow && (action === 'new' || action === 'session-mode' || action === 'capture' || action === 'click' || action === 'count-in' || action === 'snap' || action === 'loop' || action === 'signature')}
+            signature={`${store.project.timeSignature.numerator}/${store.project.timeSignature.denominator}`}
+            onSignature={(numerator, denominator) => store.setTimeSignature(numerator, denominator)}
+            onAction={(action) => {
+              if (action === 'new') beginNewProject()
+              else if (action === 'open') { setMenuOpen(false); void openProjects() }
+              else if (action === 'save') { setMenuOpen(false); void persist() }
+              else if (action === 'export') { setMenuOpen(false); setExportOpen(true) }
+              else if (action === 'quantize') { setMenuOpen(false); store.openQuantize() }
+              else if (action === 'to-start') { setMenuOpen(false); void returnToStart() }
+              else if (action === 'loop') store.toggle('loopEnabled')
+              else if (action === 'session-mode') {
                 setMenuOpen(false)
                 hideCollab()
                 setSurface('studio')
                 if (store.transportMode === 'session') store.backToArrangement()
                 else store.enterSession()
-              }}
-            />
-            <MenuRow label={copyOf(MENU_COPY, 'capture').label} hint={copyOf(MENU_COPY, 'capture').hint} disabled={store.remoteFollow} onClick={() => { setMenuOpen(false); store.captureToArrangement() }} />
-            <MenuRow
-              className="split"
-              label={surface === 'studio' ? copyOf(MENU_COPY, 'artist').label : copyOf(MENU_COPY, 'studio').label}
-              hint={surface === 'studio' ? copyOf(MENU_COPY, 'artist').hint : copyOf(MENU_COPY, 'studio').hint}
-              onClick={() => {
-                setMenuOpen(false)
-                if (surface === 'studio') {
-                  openPerform('keys')
-                  setSurface('artist')
-                } else {
-                  setSurface('studio')
-                  setPerform(null)
-                }
-              }}
-            />
-            {!phone && (
-              <MenuRow
-                label={dockEdge === 'right' ? copyOf(MENU_COPY, 'dock-bottom').label : copyOf(MENU_COPY, 'dock-side').label}
-                hint={dockEdge === 'right' ? copyOf(MENU_COPY, 'dock-bottom').hint : copyOf(MENU_COPY, 'dock-side').hint}
-                onClick={() => setDockEdge(dockEdge === 'right' ? 'bottom' : 'right')}
-              />
-            )}
-            <MenuRow label={copyOf(MENU_COPY, 'shortcuts').label} hint={copyOf(MENU_COPY, 'shortcuts').hint} onClick={() => { setMenuOpen(false); setHelp(true) }} />
-          </div>
+              } else if (action === 'capture') { setMenuOpen(false); store.captureToArrangement() }
+              else if (action === 'dock') setDockEdge(dockEdge === 'right' ? 'bottom' : 'right')
+              else if (action === 'scaler') openPlugin('play')
+              else if (action === 'players') { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); setPlayersOpen(true) }
+              else if (action === 'midi') { setMenuOpen(false); store.setMidiToolsOpen(!store.midiToolsOpen) }
+              else if (action === 'click') store.toggle('metronomeEnabled')
+              else if (action === 'count-in') store.toggle('countIn')
+              else if (action === 'snap') store.toggle('snap')
+              else if (action === 'shortcuts') { setMenuOpen(false); setHelp(true) }
+            }}
+          />
         )}
       </header>
       {(surface === 'studio' || surface === 'artist' || session.state.status === 'live') && (
@@ -1503,6 +1501,7 @@ async function importDropped(files: FileList) {
           engine={engine}
           syncLabel={session.state.syncLabel}
           simple={phone}
+          desk={form === 'desk'}
           recordHint={recordHint}
           onPlay={() => { engine.unlock(); void play() }}
           onStop={() => void stop()}
@@ -1517,6 +1516,7 @@ async function importDropped(files: FileList) {
             context={panel === 'piano' ? 'piano' : 'arrange'}
             compact={form !== 'desk'}
             phone={phone}
+            words={form === 'fold'}
             onChange={(tool) => store.setTool(tool)}
             onDuplicate={() => store.duplicateSelection()}
             onDelete={() => store.deleteSelectedClip()}
@@ -1592,7 +1592,7 @@ async function importDropped(files: FileList) {
             const initial = dock
             const move = (ev: PointerEvent) => {
               const delta = dockEdge === 'right' ? start - ev.clientX : start - ev.clientY
-              setDock(fittedDockWidth(window.innerWidth, initial + delta, dockEdge))
+              setDock(fittedDockWidth(window.innerWidth, initial + delta, dockEdge, panel === 'piano' ? 0.72 : 0.5))
             }
             const up = () => {
               window.removeEventListener('pointermove', move)
@@ -1625,7 +1625,7 @@ async function importDropped(files: FileList) {
             <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
           )}
           {surface === 'studio' && panel === 'piano' && (
-            <MidiDock store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => openPlugin('write')} />
+            <MidiDock store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => openPlugin('write')} onClose={phone ? closePiano : undefined} />
           )}
         </div>}
       </div>
@@ -1759,7 +1759,7 @@ async function importDropped(files: FileList) {
                 ['M', 'Mute the selected track'],
                 ['S', 'Solo the selected track'],
                 ['⌘/Ctrl Z', 'Undo'],
-                ['⇧⌘/Ctrl Z or Shift Z', 'Redo'],
+                ['⇧⌘/Ctrl Z, Ctrl Y, or Shift Z', 'Redo'],
                 ['⌘/Ctrl S', 'Save in this browser'],
                 ['⌘/Ctrl E or B', 'Split the clip at the playhead'],
                 ['Delete', 'Remove the selected clip'],
@@ -1779,6 +1779,7 @@ async function importDropped(files: FileList) {
       )}
       {knockOpen && <KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} />}
       <SpectralSheet store={store} />
+      {form === 'desk' && <KeyboardDock store={store} engine={engine} />}
       <HintBubble />
       <div className="toasts">
         {store.toasts.map((toast) => (

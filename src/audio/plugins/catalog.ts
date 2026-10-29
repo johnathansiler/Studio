@@ -600,7 +600,7 @@ export const CATALOG: PluginDescriptor[] = [
     name: 'Max',
     version: VERSION,
     params: [
-      param('target', 'Target', -24, -6, -14, 'LU'),
+      param('target', 'Target', -24, -6, -9, 'LU'),
       param('ceiling', 'Ceiling', -3, 0, -1, 'dB'),
     ],
   },
@@ -663,9 +663,8 @@ export const CATALOG: PluginDescriptor[] = [
 
 export const FACTORY: Record<string, FactoryPreset[]> = {
   eq: [
-    { name: 'Flat', params: {} },
     { name: 'Vocal', params: { hp: 90, lowF: 250, lowG: -1.5, midF: 3200, midG: 2.5, midQ: 1.1, highF: 10000, highG: 1.5, lp: 18000 } },
-    { name: 'Air', params: { highF: 12000, highG: 3, hp: 70 } },
+    { name: 'Vocal Air', params: { hp: 80, lowF: 200, lowG: -1, midF: 4500, midG: 1.5, midQ: 0.8, highF: 12000, highG: 4.5, highQ: 0.6, lp: 20000 } },
     { name: 'Low cut', params: { hp: 120, lowG: -2, lowF: 200 } },
   ],
   compressor: [
@@ -706,7 +705,8 @@ export const FACTORY: Record<string, FactoryPreset[]> = {
   reverb: [
     { name: 'Plate', params: { mode: 0, size: 0.45, damp: 0.35, mix: 0.22 } },
     { name: 'Room', params: { mode: 1, size: 0.35, damp: 0.5, mix: 0.18 } },
-    { name: 'Hall', params: { mode: 2, size: 0.75, damp: 0.4, mix: 0.24 } },
+    { name: 'Hall', params: { mode: 2, size: 0.72, damp: 0.38, mix: 0.22 } },
+    { name: 'Big Hall', params: { mode: 2, size: 0.96, damp: 0.22, mix: 0.34 } },
   ],
   tune: [
     { name: 'Hard tune/T-Pain', params: { retune: 0.95, humanize: 0.05, flex: 0, amount: 0.85, mode: 1, minHz: 80, maxHz: 1000, transpose: 0, formant: 0.15, root: -1, scaleIndex: -1, mask: 0 } },
@@ -796,7 +796,8 @@ export const FACTORY: Record<string, FactoryPreset[]> = {
   hall: [
     { name: 'Vocal', params: { mode: 2, size: 0.5, decay: 0.7, damp: 0.4, mix: 0.2 } },
     { name: 'Drums', params: { mode: 0, size: 0.4, decay: 0.45, damp: 0.5, mix: 0.14 } },
-    { name: 'Hall', params: { mode: 1, size: 0.8, decay: 0.88, damp: 0.35, mix: 0.24 } },
+    { name: 'Hall', params: { mode: 1, size: 0.78, decay: 0.84, damp: 0.38, mix: 0.22 } },
+    { name: 'Big Hall', params: { mode: 1, size: 0.94, decay: 0.97, damp: 0.2, mix: 0.36 } },
     { name: 'Master', params: { mode: 1, size: 0.6, decay: 0.6, damp: 0.5, mix: 0.08 } },
   ],
   conv: [
@@ -829,12 +830,12 @@ export const FACTORY: Record<string, FactoryPreset[]> = {
     { name: 'Slow', params: { rate: 0.08, depth: 0.6, feedback: 0.45, mix: 0.4 } },
   ],
   rotor: [
-    { name: 'Slow', params: { speed: 0, mix: 0.7 } },
+    { name: 'Slow', params: { speed: 0, mix: 0.92 } },
     { name: 'Fast', params: { speed: 1, mix: 0.75 } },
     { name: 'Vocal', params: { speed: 0, mix: 0.4 } },
   ],
   peak: [
-    { name: 'Master', params: { ceiling: -1, release: 80 } },
+    { name: 'Master', params: { ceiling: -1, release: 180 } },
     { name: 'Vocal', params: { ceiling: -1.5, release: 40 } },
     { name: 'Drums', params: { ceiling: -0.8, release: 30 } },
     { name: 'Safe', params: { ceiling: -1.5, release: 120 } },
@@ -850,8 +851,8 @@ export const FACTORY: Record<string, FactoryPreset[]> = {
     { name: 'Free', params: { sync: 0, bars: 1, feedback: 1 } },
   ],
   meq: [
-    { name: 'Flat', params: { phase: 1, lowG: 0, midG: 0, highG: 0 } },
-    { name: 'Air', params: { phase: 1, highG: 2, hp: 30 } },
+    { name: 'Vocal', params: { phase: 1, hp: 90, lowG: -1.5, midF: 3000, midG: 2, highG: 1.2 } },
+    { name: 'Air', params: { phase: 1, highG: 3.5, hp: 40, lp: 20000 } },
     { name: 'Warm', params: { phase: 0, lowG: 1.5, highG: -0.5 } },
   ],
   deq: [
@@ -867,7 +868,7 @@ export const FACTORY: Record<string, FactoryPreset[]> = {
     { name: 'Soft', params: { threshold: -14, ratio: 2, attack: 30, release: 200, releaseMode: 2, mix: 0.7 } },
   ],
   brick: [
-    { name: 'Stream', params: { ceiling: -1, release: 80, lookahead: 5, releaseMode: 1 } },
+    { name: 'Stream', params: { ceiling: -1.5, release: 140, lookahead: 5, releaseMode: 1 } },
     { name: 'CD', params: { ceiling: -0.1, release: 50, lookahead: 5, releaseMode: 0 } },
   ],
   maxim: [
@@ -891,10 +892,10 @@ export const FACTORY: Record<string, FactoryPreset[]> = {
     { name: 'Hard', params: { drive: 0.4, mode: 1, ceiling: -0.3 } },
   ],
   dither: [
-    { name: '24-bit', params: { bits: 24, shape: 1 } },
+    { name: '24-bit', params: { bits: 24, shape: 0 } },
     { name: '16-bit', params: { bits: 16, shape: 2 } },
   ],
-  meter: [{ name: 'Meter', params: {} }],
+  meter: [],
 }
 
 export function descriptor(id: string) {
@@ -1024,6 +1025,20 @@ export function fromLegacy(insert: Insert): PluginInstance {
     plugin.params.mode = 1
   }
   return plugin
+}
+
+/** The factory or saved preset whose full parameter set matches, if any. */
+export function activePresetName(pluginId: string, params: Record<string, number>, user: UserPreset[] = []) {
+  const base = defaultParams(pluginId)
+  const keys = Object.keys(base)
+  if (!keys.length) return ''
+  const list = [...(FACTORY[pluginId] ?? []), ...user.filter((item) => item.pluginId === pluginId)]
+  for (const preset of list) {
+    const full = { ...base, ...preset.params }
+    const match = keys.every((key) => Math.abs((params[key] ?? full[key] ?? 0) - (full[key] ?? 0)) < 0.001)
+    if (match) return preset.name
+  }
+  return ''
 }
 
 export function presetParams(pluginId: string, name: string, user: UserPreset[]) {

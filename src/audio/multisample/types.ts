@@ -112,7 +112,7 @@ export interface SamplerProgram {
   play?: InstrumentPlay
 }
 
-/** Knobs on a sampled instrument. Times are seconds. `tune` is semitones. `tone` is a lowpass in Hz. */
+/** Knobs on a sampled instrument. Times are seconds. `tune` is semitones. `tone` is a lowpass in Hz. `loop` overrides each zone when set. */
 export interface InstrumentPlay {
   tune: number
   attack: number
@@ -120,6 +120,8 @@ export interface InstrumentPlay {
   sustain: number
   release: number
   tone: number
+  /** True forces a loop. False plays once. Absent keeps each zone's own loop. */
+  loop?: boolean
 }
 
 export interface DecodedSample {

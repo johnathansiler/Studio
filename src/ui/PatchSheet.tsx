@@ -1,4 +1,5 @@
-import { useEffect, useState, type PointerEvent } from 'react'
+import { useEffect, useState } from 'react'
+import { GestureReadout, TouchSlider, useDragValue } from './kit/controls'
 import type { AudioEngine } from '../audio/engine'
 import { STARTER_CATALOG, type LibraryEntry } from '../audio/multisample/library'
 import { loadStarterOnto, starterCatalog } from '../sounds/instruments'
@@ -240,21 +241,15 @@ export function PatchSheet({
       )}
       {tab === 'xy' && (
         <div className="patch-body">
-          <div
-            className="xy-pad"
-            role="slider"
-            aria-label="Morph pad"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(patch.morph.x * 100)}
+          <XyPad
+            x={patch.morph.x}
+            y={patch.morph.y}
             title={controlHelp('morph')}
-            onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); show('morph'); movePad(event, store, trackId) }}
-            onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) movePad(event, store, trackId) }}
-            onPointerUp={() => store.endDraft()}
-          >
-            <span className="xy-dot" style={{ left: `${patch.morph.x * 100}%`, top: `${patch.morph.y * 100}%` }} />
-            {patch.morph.corners.map((corner) => <em key={corner.id} className={`xy-name ${corner.name}`}>{corner.name}</em>)}
-          </div>
+            onStart={() => show('morph')}
+            onChange={(x, y) => store.updateOmni(trackId, (current) => setPerformance(current, { x, y }), true)}
+            onCommit={() => store.endDraft()}
+            corners={patch.morph.corners.map((corner) => corner.name)}
+          />
           {morphActive(patch) && <p className="patch-hint">The pad is blending saved corners. Knobs edit the nearest one.</p>}
           <div className="patch-corners">
             {patch.morph.corners.map((corner, index) => (
@@ -383,28 +378,48 @@ function Knob({
   return (
     <label className="patch-knob" title={text}>
       {label}
-      <input
-        type="range"
+      <TouchSlider
+        label={label}
         min={min}
         max={max}
         step={step}
         value={Number.isFinite(value) ? value : min}
-        aria-label={label}
-        onFocus={() => show(help)}
-        onPointerDown={() => show(help)}
-        onChange={(event) => onChange(Number(event.target.value), true)}
-        onPointerUp={end}
-        onBlur={end}
+        onStart={() => show(help)}
+        onChange={(next) => onChange(next, true)}
+        onCommit={end}
       />
     </label>
   )
 }
 
-function movePad(event: PointerEvent<HTMLDivElement>, store: ProjectStore, trackId: string) {
-  const rect = event.currentTarget.getBoundingClientRect()
-  const x = Math.min(1, Math.max(0, (event.clientX - rect.left) / Math.max(1, rect.width)))
-  const y = Math.min(1, Math.max(0, (event.clientY - rect.top) / Math.max(1, rect.height)))
-  store.updateOmni(trackId, (current) => setPerformance(current, { x, y }), true)
+function XyPad({
+  x, y, title, corners, onStart, onChange, onCommit,
+}: {
+  x: number
+  y: number
+  title: string
+  corners: string[]
+  onStart: () => void
+  onChange: (x: number, y: number) => void
+  onCommit: () => void
+}) {
+  const { ref, readout } = useDragValue<HTMLDivElement>({
+    min: 0,
+    max: 1,
+    value: x,
+    fallback: 0.5,
+    axis: 'pad',
+    onStart,
+    onChange: (_value, change) => onChange(change.x, change.y),
+    onCommit,
+  })
+  return (
+    <div ref={ref} className="xy-pad" role="slider" aria-label="Morph pad" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(x * 100)} title={title}>
+      <span className="xy-dot" style={{ left: `${x * 100}%`, top: `${y * 100}%` }} />
+      {corners.map((name) => <em key={name} className={`xy-name ${name}`}>{name}</em>)}
+      <GestureReadout readout={readout} />
+    </div>
+  )
 }
 
 async function loadAudio(file: File, store: ProjectStore, trackId: string, layerId: string) {

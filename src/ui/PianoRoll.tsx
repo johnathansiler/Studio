@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { heardBeat } from '../model/midiClock'
 import { defaultRoll, quantizeNotes, arpeggiateSelection, humanizeNotes, snapBeat, strumSelection } from '../model/paint'
@@ -23,6 +23,8 @@ import type { ProjectStore } from '../state/store'
 import { loopGridBeats } from '../model/loopEdit'
 import { quartersPerBar, samplesToBeats } from '../model/time'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
+import { setRollOwnsKeys } from '../model/keyboardPlay'
+import { performanceOwnsMidi, stepOwnsMidi } from '../midi/remember'
 import { keyCommitsNote } from '../model/stepEntry'
 import { displayedPlayhead, pianoPlayheadBeat, transportMoving } from '../model/transportSync'
 import { PIANO_BAR, PIANO_SHEET, copyOf, described } from './chrome'
@@ -85,6 +87,7 @@ export function PianoRoll({
   chrome = true,
   chordsOpen = false,
   actionsRef,
+  leading,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -94,6 +97,8 @@ export function PianoRoll({
   chrome?: boolean
   chordsOpen?: boolean
   actionsRef?: { current: PianoActions | null }
+  /** Mode buttons that share this one toolbar row. */
+  leading?: ReactNode
 }) {
   const piano = selectPiano(store)
   const track = piano.track
@@ -276,8 +281,7 @@ export function PianoRoll({
       const level = Math.max(0.05, Math.min(1, velocity))
       engine.unlock()
       void engine.resume()
-      if (tone.cents) engine.liveNoteOn(tone.midi, level, -1, 0, { tune: tone.cents / 100 })
-      else engine.playThrough(track.id, tone.midi, level)
+      engine.playThrough(track.id, tone.midi, level, tone.cents)
       fingers.current.set(pointerId, { pitch: tone.midi, fine: tone.cents, eventMs: event.timeStamp, velocity: level })
       return
     }
@@ -285,10 +289,7 @@ export function PianoRoll({
     fingers.current.delete(pointerId)
     if (!held) return
     const still = [...fingers.current.values()].some((item) => item.pitch === held.pitch)
-    if (!still) {
-      if (held.fine) engine.liveNoteOff(held.pitch)
-      else engine.releaseThrough(track.id, held.pitch)
-    }
+    if (!still) engine.releaseThrough(track.id, held.pitch)
     const playing = engine.status === 'playing' || engine.status === 'recording'
     if (!keyCommitsNote(store.midiEditor().stepInput)) return
     const start = playing ? performanceBeat(store, engine, held.eventMs) : timelineBeat(store, engine)
@@ -340,14 +341,17 @@ export function PianoRoll({
     const held = new Map<string, number>()
     let nextId = 4000
     const tokenOf = (event: KeyboardEvent) => event.code || event.key
+    setRollOwnsKeys(true)
     const down = (event: KeyboardEvent) => {
+      if (!store.keyboardMidi || performanceOwnsMidi() || stepOwnsMidi()) return
       const target = event.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
       if (event.metaKey || event.ctrlKey || event.altKey) return
       const token = tokenOf(event)
       if (held.has(token)) return
-      const pitch = codes[event.code] ?? letters[event.key.toLowerCase()]
-      if (pitch == null) return
+      const home = codes[event.code] ?? letters[event.key.toLowerCase()]
+      if (home == null) return
+      const pitch = Math.max(0, Math.min(127, home + store.midiEditor().octave * 12))
       event.preventDefault()
       event.stopImmediatePropagation()
       const id = nextId++
@@ -368,6 +372,7 @@ export function PianoRoll({
     window.addEventListener('keyup', up)
     window.addEventListener('blur', blur)
     return () => {
+      setRollOwnsKeys(false)
       blur()
       window.removeEventListener('keydown', down)
       window.removeEventListener('keyup', up)
@@ -721,6 +726,7 @@ export function PianoRoll({
   return (
     <div className={`piano ${compact ? 'compact' : ''} ${chrome ? '' : 'bare'}`} ref={pianoRef} data-tool={tool}>
       {chrome && <FitRow className="scale-bar">
+        {leading}
         <TipButton className={`chords-btn ${open ? 'on' : ''}`} label={bar('chords').label} hint={bar('chords').hint} pressed={open} onClick={() => void toggleChords()} />
         <TipButton
           className={store.midiEditor().stepInput ? 'on' : ''}

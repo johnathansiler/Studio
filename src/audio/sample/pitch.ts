@@ -1,4 +1,8 @@
+import { continuousCeiling, transparentLimit } from '../liveStage'
+
 /** Chromatic sampler pitch. One sample, every key, relative to a root note. */
+
+export { continuousCeiling, transparentLimit }
 
 const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 
@@ -29,11 +33,12 @@ export function gainStep(current: number, target: number, samples: number) {
   return next
 }
 
-/** Soft knee past full scale, and flush denormals. */
+/**
+ * Soft ceiling past 0.98, continuous with the linear region.
+ * A hard switch to tanh used to drop a sample from 0.98 to about 0.75.
+ */
 export function softClip(sample: number) {
-  if (!Number.isFinite(sample) || Math.abs(sample) < 1e-15) return 0
-  if (sample > 0.98 || sample < -0.98) return Math.tanh(sample)
-  return sample
+  return transparentLimit(sample, 0.98, 1)
 }
 
 function hermite(at: (index: number) => number, pos: number) {

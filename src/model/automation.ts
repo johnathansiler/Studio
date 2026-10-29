@@ -256,10 +256,34 @@ export function rackLanesFor(project: Project, trackId: string): RackAutomation[
   return (project.rackAutomation ?? []).filter((lane) => devices.has(lane.deviceId))
 }
 
+const AUTOMATION_MODES: readonly AutomationWriteMode[] = ['off', 'read', 'touch', 'latch']
+
+export function isAutomationMode(mode: unknown): mode is AutomationWriteMode {
+  return typeof mode === 'string' && (AUTOMATION_MODES as readonly string[]).includes(mode)
+}
+
 export function modeOf(project: Project): AutomationWriteMode {
-  const mode = project.automationMode
-  if (mode === 'off' || mode === 'latch' || mode === 'touch' || mode === 'read') return mode
-  return 'read'
+  return isAutomationMode(project.automationMode) ? project.automationMode : 'read'
+}
+
+/** The mode that drives one mixer channel, including the master. */
+export function channelAutomationMode(project: Project, trackId: string | 'master'): AutomationWriteMode {
+  const own = trackId === 'master'
+    ? project.masterAutomationMode
+    : project.tracks.find((track) => track.id === trackId)?.automationMode
+  if (isAutomationMode(own)) return own
+  return modeOf(project)
+}
+
+/** Plugin and mixer lanes are heard unless that channel is Off. */
+export function laneIsLive(project: Project, lane: AutomationLane): boolean {
+  if (lane.target === 'volume' || lane.target === 'pan' || lane.target === 'send') {
+    return !!lane.trackId && channelAutomationMode(project, lane.trackId) !== 'off'
+  }
+  const owner = project.tracks.find((track) => (track.plugins ?? []).some((plugin) => plugin.id === lane.pluginId))
+  if (owner) return channelAutomationMode(project, owner.id) !== 'off'
+  if ((project.masterPlugins ?? []).some((plugin) => plugin.id === lane.pluginId)) return channelAutomationMode(project, 'master') !== 'off'
+  return true
 }
 
 export interface WriteCursor {

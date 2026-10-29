@@ -1,5 +1,7 @@
+import patchWorkletUrl from '../../audio/patch.worklet.ts?worker&url'
 import type { OmniPatch } from './types'
 import type { StripNodes } from '../../audio/strips'
+import { acceptNoteOn, clearNote } from '../../audio/liveStage'
 import { matchBufferRate, PatchEngine } from './engine'
 
 interface AudioLookup {
@@ -10,6 +12,15 @@ interface AudioLookup {
 interface Live {
   engine: PatchEngine
   gain: GainNode
+  worklet: AudioWorkletNode | null
+  dedupe: Map<number, number>
+  patch: OmniPatch | null
+  patchSig: string
+  paramSig: string
+  sent: Set<string>
+  audio: Map<string, Float32Array>
+  open: boolean
+  waiting: { pitch: number; vel: number; time: number }[]
 }
 
 /**
@@ -21,6 +32,7 @@ export class PatchHost {
   private pending = new Map<string, { pitch: number; vel: number; time: number }[]>()
   private cache = new Map<string, Float32Array>()
   private cacheOrder: string[] = []
+  private module: Promise<boolean> | null = null
 
   sync(
     ctx: AudioContext,
@@ -38,9 +50,18 @@ export class PatchHost {
       const strip = strips.get(track.id)
       if (!strip) continue
       const live = this.ensure(ctx, track.id, strip)
-      live.engine.setPatch(patch)
+      live.patch = patch
+      const structure = `${patch.id}:${patch.enabled ? 1 : 0}:${patch.layers.map((layer) => `${layer.id}:${layer.enabled ? 1 : 0}:${layer.kind}`).join(',')}`
+      const params = patch.layers.map((layer) => `${layer.level}:${layer.pan}:${layer.cutoff}:${layer.resonance}:${JSON.stringify(layer.params)}`).join('|')
+        + `:${patch.macro1 ?? 0}:${patch.macro2 ?? 0}:${patch.morph?.x ?? 0}:${patch.morph?.y ?? 0}:${patch.aftertouch}:${patch.modWheel}`
+      if (structure !== live.patchSig || params !== live.paramSig) {
+        live.patchSig = structure
+        live.paramSig = params
+        live.engine.setPatch(patch)
+        live.worklet?.port.postMessage({ type: 'patch', patch })
+      }
       this.pushBuffers(live, patch, lookup)
-      for (const note of this.pending.get(track.id) ?? []) live.engine.schedule(note.pitch, note.vel, note.time)
+      for (const note of this.pending.get(track.id) ?? []) this.play(live, note.pitch, note.vel, note.time)
       this.pending.delete(track.id)
       used.add(track.id)
     }
@@ -55,7 +76,30 @@ export class PatchHost {
       this.pending.set(trackId, queue)
       return
     }
+    this.play(live, pitch, vel, time)
+  }
+
+  private play(live: Live, pitch: number, vel: number, time: number) {
+    if (vel > 0) {
+      if (!acceptNoteOn(live.dedupe, pitch, time)) return
+    } else clearNote(live.dedupe, pitch)
+    if (live.worklet) {
+      live.worklet.port.postMessage({ type: 'note', pitch, vel, time })
+      return
+    }
+    if (!live.open) {
+      live.waiting.push({ pitch, vel, time })
+      return
+    }
     live.engine.schedule(pitch, vel, time)
+  }
+
+  private flushWaiting(live: Live) {
+    const queued = live.waiting.splice(0, live.waiting.length)
+    for (const note of queued) {
+      if (live.worklet) live.worklet.port.postMessage({ type: 'note', pitch: note.pitch, vel: note.vel, time: note.time })
+      else live.engine.schedule(note.pitch, note.vel, note.time)
+    }
   }
 
   release(trackId: string, pitch: number) {
@@ -66,11 +110,21 @@ export class PatchHost {
       this.pending.set(trackId, queue)
       return
     }
-    live.engine.releasePitch(midi)
+    live.dedupe.delete(midi)
+    live.waiting = live.waiting.filter((note) => Math.round(note.pitch) !== midi)
+    if (live.worklet) {
+      live.worklet.port.postMessage({ type: 'release', pitch: midi })
+      return
+    }
+    if (live.open) live.engine.releasePitch(midi)
   }
 
   allOff() {
-    for (const live of this.lives.values()) live.engine.allOff()
+    for (const live of this.lives.values()) {
+      live.dedupe.clear()
+      live.engine.allOff()
+      live.worklet?.port.postMessage({ type: 'off' })
+    }
   }
 
   private ensure(ctx: AudioContext, id: string, strip: StripNodes) {
@@ -80,10 +134,44 @@ export class PatchHost {
     gain.gain.value = 0.9
     gain.connect(strip.input)
     const engine = new PatchEngine(ctx.sampleRate)
-    engine.connect(gain)
-    const live = { engine, gain }
+    const live: Live = { engine, gain, worklet: null, dedupe: new Map(), patch: null, patchSig: '', paramSig: '', sent: new Set(), audio: new Map(), open: false, waiting: [] }
     this.lives.set(id, live)
+    void this.load(ctx).then((ok) => {
+      if (live.worklet || live.open) return
+      if (ok && this.mount(ctx, live)) {
+        live.open = true
+        this.flushWaiting(live)
+        return
+      }
+      engine.connect(gain)
+      live.open = true
+      this.flushWaiting(live)
+    })
     return live
+  }
+
+  private load(ctx: AudioContext) {
+    if (!this.module) {
+      this.module = ctx.audioWorklet.addModule(patchWorkletUrl).then(() => true).catch(() => false)
+    }
+    return this.module
+  }
+
+  private mount(ctx: AudioContext, live: Live) {
+    try {
+      const node = new AudioWorkletNode(ctx, 'cueharbor-patch', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] })
+      node.connect(live.gain)
+      live.worklet = node
+      if (live.patch) node.port.postMessage({ type: 'patch', patch: live.patch })
+      for (const [id, channel] of live.audio) {
+        if (live.sent.has(id)) continue
+        live.sent.add(id)
+        node.port.postMessage({ type: 'buffer', id, channel: channel.slice() })
+      }
+      return true
+    } catch {
+      return false
+    }
   }
 
   private pushBuffers(live: Live, patch: OmniPatch, lookup: (id: string) => AudioLookup | null) {
@@ -108,6 +196,12 @@ export class PatchHost {
         }
       }
       live.engine.setBuffer(layer.bufferId, channel)
+      live.audio.set(layer.bufferId, channel)
+      const mark = `${layer.bufferId}:${key}`
+      if (live.worklet && !live.sent.has(mark)) {
+        live.sent.add(mark)
+        live.worklet.port.postMessage({ type: 'buffer', id: layer.bufferId, channel: channel.slice() })
+      }
     }
   }
 
@@ -115,6 +209,7 @@ export class PatchHost {
     const live = this.lives.get(id)
     this.lives.delete(id)
     this.pending.delete(id)
+    try { live?.worklet?.disconnect() } catch { /* already disconnected */ }
     live?.engine.dispose()
     try { live?.gain.disconnect() } catch { /* already disconnected */ }
   }

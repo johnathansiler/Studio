@@ -1,13 +1,13 @@
+import { continuousCeiling } from '../../audio/liveStage'
+
 export function clamp(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min
   return Math.min(max, Math.max(min, value))
 }
 
-/** Flush denormals and keep a hard ceiling off the linear range. */
+/** Flush denormals. Full-scale and below stay linear; overs do not collapse. */
 export function san(value: number) {
-  if (!Number.isFinite(value) || Math.abs(value) < 1e-15) return 0
-  if (value > 1 || value < -1) return Math.tanh(value)
-  return value
+  return continuousCeiling(value)
 }
 
 export function hermite(buffer: Float32Array, pos: number) {

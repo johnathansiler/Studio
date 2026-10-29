@@ -407,6 +407,7 @@
   overflow: hidden;
 }
 
+.sl-fader .touch-slider.vertical { height: 100%; width: 28px; min-height: 0; }
 .sl-fader input[type="range"] {
   writing-mode: vertical-lr;
   direction: rtl;
@@ -478,6 +479,16 @@
   height: 26px;
   font-size: 12px;
   padding: 0;
+}
+.shell.fold .sl-flags { flex-wrap: wrap; }
+.shell.fold .sl-flags button {
+  flex: 1 1 auto;
+  width: auto;
+  height: auto;
+  min-height: 36px;
+  padding: 0 6px;
+  overflow: visible;
+  white-space: nowrap;
 }
 
 .sl-flags button.on { background: #d7b15a; color: #1b160c; border-color: transparent; }
