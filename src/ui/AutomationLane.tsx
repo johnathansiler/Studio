@@ -47,8 +47,14 @@ export function MixFlags({ store, trackId, compact = false }: { store: ProjectSt
   if (!track) return null
   return (
     <>
-      <button type="button" className={`mini ${track.mute ? 'on-m' : ''}`} aria-label={track.mute ? 'Unmute track' : 'Mute track'} title="Mute this track. Linked tracks mute together." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'mute') }}>M</button>
-      <button type="button" className={`mini ${track.solo ? 'on-s' : ''}`} aria-label={track.solo ? 'Unsolo track' : 'Solo track'} title="Solo this track and keep its path to the master open." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'solo') }}>S</button>
+      <button type="button" className={`mini ${track.mute ? 'on-m' : ''}`} aria-label={track.mute ? 'Unmute track' : 'Mute track'} title="Mute this track. Linked tracks mute together." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'mute') }}>
+        <span className="mini-mark">M</span>
+        <span className="mini-word">Mute</span>
+      </button>
+      <button type="button" className={`mini ${track.solo ? 'on-s' : ''}`} aria-label={track.solo ? 'Unsolo track' : 'Solo track'} title="Solo this track and keep its path to the master open." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'solo') }}>
+        <span className="mini-mark">S</span>
+        <span className="mini-word">Solo</span>
+      </button>
       {!compact && (
         <button type="button" className={`mini solo-safe ${track.soloSafe ? 'on' : ''}`} aria-pressed={!!track.soloSafe} aria-label="Solo safe" title="Solo safe: stay audible when other tracks are soloed." onClick={(event) => { event.stopPropagation(); store.updateTrack(track.id, { soloSafe: !track.soloSafe }) }}>Safe</button>
       )}

@@ -279,6 +279,7 @@ export function VideoDock({
           onClick={() => setSettingsOpen((open) => !open)}
         >
           <GearIcon />
+          <span className="fold-word">Setup</span>
         </TipButton>
       </div>
       {settingsOpen && (

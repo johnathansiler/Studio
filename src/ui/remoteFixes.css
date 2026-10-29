@@ -42,10 +42,17 @@
 .shell.phone.land .project-name {
   height: 28px;
   min-height: 0;
+  min-width: 4rem;
   padding: 0 2px;
   font-size: 12px;
   flex: 1 1 4rem;
+  order: 3;
 }
+.shell.phone.land .history-btns { order: 2; }
+.shell.phone.land .views { order: 4; }
+.shell.phone.land .unstuck-btn { order: 5; }
+.shell.phone.land .menu-btn { order: 6; }
+.shell.phone.land .topbar { overflow-x: auto; }
 .shell.phone.land .views { width: auto; flex: none; padding: 1px; }
 .shell.phone.land .views button {
   flex: none;

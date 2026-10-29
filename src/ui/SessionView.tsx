@@ -501,8 +501,14 @@ function TrackMix({ store, track, index, level }: { store: ProjectStore; track: 
       </label>
       <div className="sl-flags">
         <button type="button" className={track.mute ? 'mute on' : ''} title="Activator. Turn the track on or off." onClick={() => store.updateTrack(track.id, { mute: !track.mute })}>{index + 1}</button>
-        <button type="button" className={track.solo ? 'on' : ''} title="Solo this track." onClick={() => store.updateTrack(track.id, { solo: !track.solo })}>S</button>
-        <button type="button" className={track.armed ? 'arm on' : ''} title="Arm this track for recording." onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>R</button>
+        <button type="button" className={track.solo ? 'on' : ''} title="Solo this track." onClick={() => store.updateTrack(track.id, { solo: !track.solo })}>
+          <span className="mini-mark">S</span>
+          <span className="mini-word">Solo</span>
+        </button>
+        <button type="button" className={track.armed ? 'arm on' : ''} title="Arm this track for recording." onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
+          <span className="mini-mark">R</span>
+          <span className="mini-word">Arm</span>
+        </button>
       </div>
       <div className="sl-sends">
         {[0, 1].map((sendIndex) => {

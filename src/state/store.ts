@@ -33,7 +33,8 @@ import type { InstrumentPlay, SamplePack, SamplerProgram } from '../audio/multis
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
-import { setPath, type ProjectOp, type StampWire } from './ops'
+import { HistoryJournal } from './history'
+import { type ProjectOp, type StampWire } from './ops'
 import { ProjectSync } from './sync'
 import { activeTool, setActiveTool, type ArrangeTool } from './tools'
 import {
@@ -255,8 +256,8 @@ export class ProjectStore {
   private editGeneration = 0
   private savedGeneration = 0
   rowClipboard: StepCell[] | null = null
-  private past: string[] = []
-  private future: string[] = []
+  /** Patch history. Transport, selection, zoom, and meters are not recorded. */
+  private journal = new HistoryJournal()
   private listeners = new Set<Listener>()
   /** Musical journal shared with every view and with the remote session. */
   readonly sync = new ProjectSync()
@@ -338,8 +339,7 @@ export class ProjectStore {
     const merged = this.sync.merge(this.project, remote, stamps, prefer, lamport, actor, seq)
     this.project = normalizeProjectRack(normalizeProject(merged.project))
     if (waveforms) this.project.waveforms = waveforms
-    this.past = []
-    this.future = []
+    this.journal.clear()
     this.sync.adopt(this.project)
     this.sync.silence = false
     this.emit()
@@ -347,32 +347,19 @@ export class ProjectStore {
   }
 
   private rewriteHistory(ops: ProjectOp[]) {
-    const apply = (raw: string) => {
-      try {
-        const project = JSON.parse(raw) as Project
-        for (const op of ops) setPath(project, op.p, op.v)
-        return JSON.stringify(project)
-      } catch {
-        return raw
-      }
-    }
-    this.past = this.past.map(apply)
-    this.future = this.future.map(apply)
-  }
-
-  private snapshot() {
-    this.past.push(JSON.stringify(this.project))
-    if (this.past.length > 80) this.past.shift()
-    this.future = []
+    this.journal.absorb(ops)
   }
 
   private mutate(fn: () => void) {
     if (this.remoteFollow) return
     this.quantizePreview = null
     this.drafted = false
-    this.snapshot()
+    this.tempoGroup = false
+    this.journal.seal(this.project)
+    this.journal.open(this.project)
     this.editGeneration += 1
     fn()
+    this.journal.seal(this.project)
     this.emit()
   }
 
@@ -389,41 +376,57 @@ export class ProjectStore {
     return this.editGeneration
   }
 
-  /** One undo step for a drag. The first call snapshots; later calls only edit. */
+  get canUndo() {
+    return this.journal.canUndo
+  }
+
+  get canRedo() {
+    return this.journal.canRedo
+  }
+
+  /** Bytes retained by settled patches. Used to keep a long session from copying the project. */
+  historyBytes() {
+    return this.journal.bytes
+  }
+
+  /** One undo step for a drag. The first call opens the step; later calls only edit. */
   draft(fn: () => void) {
     if (this.remoteFollow) return
     if (!this.drafted) {
-      this.snapshot()
+      this.journal.seal(this.project)
+      this.journal.open(this.project)
       this.drafted = true
       this.editGeneration += 1
     }
+    this.quantizePreview = null
     fn()
     this.emit()
   }
 
   endDraft() {
     this.drafted = false
+    this.journal.seal(this.project)
   }
 
   undo() {
     if (this.remoteFollow) return
     this.tempoGroup = false
-    const prev = this.past.pop()
-    if (!prev) return
-    this.future.push(JSON.stringify(this.project))
-    this.project = JSON.parse(prev) as Project
+    this.drafted = false
+    const step = this.journal.undo(this.project)
+    if (!step) return
     this.quantizePreview = null
+    this.toast(`Undid: ${step.label}`)
     this.emit()
   }
 
   redo() {
     if (this.remoteFollow) return
     this.tempoGroup = false
-    const next = this.future.pop()
-    if (!next) return
-    this.past.push(JSON.stringify(this.project))
-    this.project = JSON.parse(next) as Project
+    this.drafted = false
+    const step = this.journal.redo(this.project)
+    if (!step) return
     this.quantizePreview = null
+    this.toast(`Redid: ${step.label}`)
     this.emit()
   }
 
@@ -680,8 +683,8 @@ export class ProjectStore {
 
   private dropSpectralAsset(id?: string) {
     if (!id?.startsWith('spec_')) return
-    const hay = `${this.past.join('\n')}\n${this.future.join('\n')}\n${JSON.stringify(this.project)}`
-    if (!hay.includes(`"${id}"`)) this.buffers.delete(id)
+    const hay = JSON.stringify(this.project)
+    if (!this.journal.mentions(id) && !hay.includes(`"${id}"`)) this.buffers.delete(id)
   }
 
   selectNote(id: string | null, additive = false) {
@@ -1087,12 +1090,27 @@ export class ProjectStore {
       this.emit()
       return
     }
+    if (group) {
+      if (this.remoteFollow) {
+        this.tempoGroup = true
+        return
+      }
+      this.journal.seal(this.project)
+      this.journal.open(this.project)
+      this.tempoGroup = true
+      this.drafted = false
+      this.quantizePreview = null
+      this.editGeneration += 1
+      apply()
+      this.emit()
+      return
+    }
     this.mutate(apply)
-    this.tempoGroup = group
   }
 
   endTempoGroup() {
     this.tempoGroup = false
+    this.journal.seal(this.project)
   }
 
   private retimeFollow() {
@@ -4122,8 +4140,7 @@ export class ProjectStore {
   }
 
   loadProject(project: Project, buffers: Map<string, AudioAsset>) {
-    this.past = []
-    this.future = []
+    this.journal.clear()
     this.project = normalizeProjectRack(normalizeProject(project))
     this.buffers = buffers
     this.selectedTrackId = project.tracks[0]?.id ?? null
