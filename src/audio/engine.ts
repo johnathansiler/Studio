@@ -429,6 +429,7 @@ export class AudioEngine {
     this.safety.connect(ctx.destination)
     this.metroGain.connect(this.localBus)
     this.patternStrip = createStrip(ctx)
+    applyInserts(ctx, this.patternStrip, [])
     this.patternStrip.output.connect(this.localBus)
     this.liveBus = ctx.createGain()
     this.liveBus.gain.value = 1
@@ -542,11 +543,7 @@ export class AudioEngine {
     const follow = modeOf(project) !== 'off'
     const anySolo = project.tracks.some((track) => track.solo)
     if (this.patternStrip) this.patternStrip.mute.gain.setTargetAtTime(anySolo ? 0 : 1, now, 0.01)
-    if (this.liveBus) {
-      const liveId = this.padRouteId || this.liveTrackId
-      const open = liveId ? heard.has(liveId) : !anySolo
-      this.liveBus.gain.setTargetAtTime(open ? 1 : 0, now, 0.01)
-    }
+    if (this.liveBus) this.liveBus.gain.setTargetAtTime(anySolo ? 0 : 1, now, 0.01)
     for (const track of project.tracks) {
       const strip = this.strips.get(track.id)
       if (!strip) continue

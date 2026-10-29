@@ -5,11 +5,19 @@
   max-height: 42vh;
   overflow: auto;
 }
-.drum-roll-sheet { position: relative; min-height: 100%; }
+.drum-roll-sheet {
+  --lane: 148px;
+  --timeline: 240px;
+  --head: 0px;
+  position: relative;
+  width: calc(var(--lane) + var(--timeline));
+  min-height: 100%;
+}
 .drum-playhead {
   position: absolute;
   top: 0;
   bottom: 0;
+  left: calc(var(--lane) + var(--head));
   width: 2px;
   background: var(--amber, #e0b15a);
   z-index: 2;
@@ -17,14 +25,14 @@
 }
 .drum-lane {
   display: grid;
-  grid-template-columns: 148px minmax(0, 1fr);
+  grid-template-columns: var(--lane) minmax(0, 1fr);
   min-height: 36px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 .drum-lane-name {
   position: sticky;
   left: 0;
-  z-index: 1;
+  z-index: 3;
   text-align: left;
   padding: 0 8px;
   font-size: 12px;
@@ -55,7 +63,7 @@
   min-height: 0;
 }
 .drum-note.on { outline: 2px solid var(--amber, #e0b15a); }
-.shell.phone .drum-lane,
-.shell.fold .drum-lane { grid-template-columns: 112px minmax(0, 1fr); }
+.shell.phone .drum-roll-sheet,
+.shell.fold .drum-roll-sheet { --lane: 112px; }
 .shell.phone .drum-lane-name,
 .shell.fold .drum-lane-name { min-height: 44px; font-size: 11px; }

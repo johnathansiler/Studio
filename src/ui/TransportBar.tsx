@@ -214,7 +214,7 @@ export function TransportBar({
     }, 0)
   }
 
-  const playing = status === 'playing' || status === 'recording'
+  const playing = status === 'playing'
   const transport = (id: string) => copyOf(TRANSPORT_COPY, id)
   const loopRead = formatLoopReadout(project, project.loopStartSample, project.loopEndSample)
   const fine = useSyncExternalStore(subscribeLoopFine, loopFineSnap, loopFineSnap)

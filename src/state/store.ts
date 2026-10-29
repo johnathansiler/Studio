@@ -2088,7 +2088,7 @@ export class ProjectStore {
   setAutomated(spec: AutoSpec, value: number, playing: boolean, sample: number) {
     const mode = modeOf(this.project)
     if (playing && mode === 'read') return
-    const writing = playing && (mode === 'latch' || this.touching)
+    const writing = playing && (mode === 'latch' || (mode === 'touch' && this.touching))
     const run = writing ? (fn: () => void) => this.draft(fn) : (fn: () => void) => this.mutate(fn)
     run(() => {
       this.applySpec(spec, value)

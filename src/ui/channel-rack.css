@@ -64,7 +64,10 @@
   gap: 6px;
   align-items: center;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
+.rack-bar .pattern-send { flex: 1 1 100%; }
 .pattern-send select,
 .pattern-send button { min-height: 32px; }
 .shell.phone .pattern-send select,
