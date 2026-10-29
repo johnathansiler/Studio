@@ -54,6 +54,11 @@
 .root-step em { font-style: normal; font-size: 10px; color: var(--muted); }
 .root-step b { font-size: 13px; }
 .root-step .bevel { width: 32px; padding: 0; }
+.shell.phone .sampler-title { display: none; }
+.shell.phone .sampler-face { gap: 4px; padding: 6px; }
+.shell.phone .sampler-wave { height: 40px; min-height: 40px; }
+.shell.phone .sampler-face .kit-keys,
+.shell.phone .sampler-face .kit-keys.compact { height: 78px; min-height: 64px; }
 .shell.phone .inst-panel { gap: 6px; padding: 8px; }
 .shell.phone .inst-knobs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .shell.phone .inst-panel .bevel,

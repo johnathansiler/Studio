@@ -122,7 +122,7 @@ export function PadsPanel({
     const timer = window.setInterval(() => {
       setMeters((list) => {
         if (list.every((value) => value === 0)) return list
-        return list.map((value) => (value < 0.04 ? 0 : value * 0.72))
+        return list.map((value) => (value < 0.04 ? 0 : value * 0.88))
       })
     }, 48)
     return () => window.clearInterval(timer)

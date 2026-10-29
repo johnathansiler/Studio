@@ -902,6 +902,8 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 .shell.phone[data-plugin="pads"] .dock-slot { flex: 1 1 68%; max-height: none; }
 .shell.phone[data-plugin="pads"] .main-pane { flex: 1 1 32%; }
 .shell.phone .dock-slot > .mpc { height: 100%; min-height: 0; }
+.shell.phone[data-editor="rack"] .main-pane { flex: 0 0 72px; max-height: 72px; min-height: 0; }
+.shell.phone[data-editor="rack"] .dock-slot { flex: 1 1 auto; max-height: none; min-height: 0; }
 .shell.phone[data-editor="piano"] .tool-slot { display: none; }
 .shell.phone[data-editor="piano"] .main-pane { display: none; }
 .shell.phone[data-editor="piano"] .dock-slot { flex: 1 1 auto; max-height: none; min-height: 0; width: 100%; }

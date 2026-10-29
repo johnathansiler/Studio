@@ -160,8 +160,9 @@ export function formatLoopReadout(project: Project, startSample: number, endSamp
 export function loopLabelCenter(regionLeft: number, regionWidth: number, labelWidth: number, viewLeft: number, viewWidth: number): number {
   const center = regionLeft + Math.max(0, regionWidth) / 2
   const half = Math.max(0, labelWidth) / 2
-  const min = viewLeft + half
-  const max = viewLeft + Math.max(0, viewWidth) - half
+  const clearance = 44
+  const min = viewLeft + half + clearance
+  const max = viewLeft + Math.max(0, viewWidth) - half - clearance
   if (!(max > min)) return viewLeft + Math.max(0, viewWidth) / 2
   return Math.min(max, Math.max(min, center))
 }
