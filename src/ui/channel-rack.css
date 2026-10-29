@@ -733,3 +733,62 @@
 .shell.phone .beats.channel-rack input {
   min-height: 44px;
 }
+
+/* Portrait phone: every drum shows all 16 steps, two rows of eight, no sideways strip. */
+.shell.phone:not(.land) .beats.channel-rack {
+  --lead: 100%;
+  --step: 0px;
+  --step-h: 44px;
+  gap: 4px;
+  padding: 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.shell.phone:not(.land) .beats .rack-editing small,
+.shell.phone:not(.land) .beats .rack-tool,
+.shell.phone:not(.land) .beats .rack-bar > .rack-loop { display: none; }
+.shell.phone:not(.land) .beats .rack-bar { gap: 4px; }
+.shell.phone:not(.land) .beats .pattern-send { flex: 1 1 auto; width: auto; }
+.shell.phone:not(.land) .beats .rack-row,
+.shell.phone:not(.land) .beats .drum-lane {
+  flex-wrap: wrap;
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 8px;
+}
+.shell.phone:not(.land) .beats .rack-lead,
+.shell.phone:not(.land) .beats .drum-lane-name {
+  position: static;
+  width: 100%;
+  flex: 1 1 100%;
+  min-width: 0;
+  max-width: none;
+  height: 44px;
+  min-height: 44px;
+}
+.shell.phone:not(.land) .beats .rack-name { flex: 1 1 auto; min-width: 72px; font-size: 16px; }
+.shell.phone:not(.land) .beats .rack-steps,
+.shell.phone:not(.land) .beats .drum-lane .rack-steps {
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  width: 100%;
+  min-width: 0;
+  gap: 4px;
+}
+.shell.phone:not(.land) .beats .rack-group {
+  flex: 1 1 calc(50% - 4px);
+  max-width: calc(50% - 2px);
+  min-width: 0;
+}
+.shell.phone:not(.land) .beats .rack-step,
+.shell.phone:not(.land) .beats .rack-bar-step,
+.shell.phone:not(.land) .beats .drum-slot {
+  min-width: 0;
+  width: auto;
+  flex: 1 1 0;
+  height: 44px;
+  min-height: 44px;
+}
+.shell.phone:not(.land) .beats .rack-ruler .loop-host,
+.shell.phone:not(.land) .beats .rack-playhead { display: none; }
+.shell.phone:not(.land) .drum-roll { margin-top: 4px; }

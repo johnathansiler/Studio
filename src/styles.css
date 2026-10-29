@@ -2802,3 +2802,116 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
 }
 .shell .mixer-view[data-layout="rows"] .master-read b { font-size: 14px; }
 .shell .mixer-view[data-layout="rows"] .add-track-slot { align-self: flex-start; }
+
+/* Portrait phone: one slim header, one transport row, one tool strip. Timeline keeps most of the screen. */
+.shell.phone:not(.land) .topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  height: auto;
+  min-height: 0;
+  padding: 4px 6px 4px;
+}
+.shell.phone:not(.land) .brand { display: none; }
+.shell.phone:not(.land) .project-name {
+  order: 1;
+  flex: 1 1 72px;
+  width: auto;
+  min-width: 0;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 4px;
+}
+.shell.phone:not(.land) .history-btns { order: 2; }
+.shell.phone:not(.land) .history-btn { width: 40px; min-width: 40px; height: 40px; min-height: 40px; }
+.shell.phone:not(.land) .unstuck-btn { order: 3; height: 40px; min-height: 40px; padding: 0 8px; }
+.shell.phone:not(.land) .menu-btn { order: 4; height: 40px; min-height: 40px; min-width: 40px; }
+.shell.phone:not(.land) .views { order: 5; flex: 1 1 100%; width: 100%; gap: 4px; }
+.shell.phone:not(.land) .views button { height: 40px; min-height: 40px; padding: 0 2px; font-size: 13px; }
+.shell.phone:not(.land) .transport {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  height: 48px;
+  min-height: 48px;
+  max-height: 48px;
+  padding: 4px 6px;
+  gap: 4px;
+}
+.shell.phone:not(.land) .transport .t-buttons,
+.shell.phone:not(.land) .transport .tempo-cluster,
+.shell.phone:not(.land) .transport .loop-cluster { flex: none; flex-wrap: nowrap; }
+.shell.phone:not(.land) .transport .t-btn,
+.shell.phone:not(.land) .bpm-readout,
+.shell.phone:not(.land) .tap-tempo,
+.shell.phone:not(.land) .loop-readout {
+  height: 44px;
+  min-height: 44px;
+  min-width: 40px;
+  padding: 0 6px;
+}
+.shell.phone:not(.land) .lcd {
+  height: auto;
+  min-height: 44px;
+  overflow: visible;
+}
+.shell.phone:not(.land) .loop-readout .loop-span { display: none; }
+@media (max-width: 400px) {
+  .shell.phone:not(.land) .transport {
+    flex-wrap: wrap;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+}
+.shell.phone:not(.land) .lcd .bars { font-size: 13px; }
+.shell.phone:not(.land) .tool-slot:not(:empty) {
+  min-height: 44px;
+  height: 44px;
+  max-height: 44px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 2px 6px;
+}
+.shell.phone:not(.land) .snap-toggle,
+.shell.phone:not(.land) .snap-control select,
+.shell.phone:not(.land) .tool-slot .setup-btn { height: 40px; min-height: 40px; }
+.shell.phone:not(.land) .arrange-setup {
+  min-height: 44px;
+  height: 44px;
+  max-height: 44px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  padding: 2px 6px;
+}
+.shell.phone:not(.land) .arrange-setup .setup-btn { height: 40px; min-height: 40px; }
+.shell.phone:not(.land) .mixer-view,
+.shell.phone:not(.land) .mixer-view .mixer {
+  overflow-x: auto;
+  overflow-y: auto;
+  align-items: flex-start;
+}
+.shell.phone:not(.land) .mixer-view .strip,
+.shell.phone:not(.land) .strip {
+  height: auto;
+  min-height: min-content;
+  align-self: flex-start;
+}
+.shell.phone:not(.land) .strip .fader-row { min-height: 96px; flex: 0 0 96px; }
+.shell.phone .mixer-view .mini-caption,
+.shell.phone .mixer-view .mode-stack,
+.shell.phone .mixer-view .arm-stack,
+.shell.phone .mixer-view .master-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.shell.phone .mixer-view .mini-word,
+.shell.phone .mixer-view .mode-full,
+.shell.phone .mixer-view .master-full,
+.shell.phone .mixer-view .solo-safe .arm-full { display: none; }
+.shell.phone .mixer-view .mini,
+.shell.phone .mixer-view .strip-auto button,
+.shell.phone .mixer-view .lvl-open,
+.shell.phone .mixer-view .master-open { min-height: 44px; }
