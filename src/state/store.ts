@@ -807,7 +807,8 @@ export class ProjectStore {
   }
 
   patchTrackKit(trackId: string, patch: Partial<PadProgram>) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const track = this.track(trackId)
       if (!track) return
       const kit = normalizePadKit(track.padKit)
@@ -816,7 +817,8 @@ export class ProjectStore {
   }
 
   updateTrackPad(trackId: string, bank: number, index: number, patch: Partial<PadVoice>) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const track = this.track(trackId)
       if (!track) return
       const kit = normalizePadKit(track.padKit)
@@ -2238,7 +2240,7 @@ export class ProjectStore {
         track.plugins.push(createPlugin(pluginId, preset))
       }
       const delay = this.ensureBus('Delay', 'delay', 'Ping-pong')
-      const reverb = this.ensureBus('Reverb', 'reverb', 'Hall')
+      const reverb = this.ensureBus('Reverb', 'reverb', 'Big Hall')
       if (!track.sends.some((send) => send.busId === delay.id)) {
         track.sends.push({ id: uid('send'), busId: delay.id, gain: 0.22, preFader: false, enabled: true })
       }
@@ -4442,7 +4444,8 @@ export class ProjectStore {
   }
 
   setDeviceParam(trackId: string, deviceId: string, param: string, value: number) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const device = this.track(trackId)?.rack?.devices.find((item) => item.id === deviceId)
       if (device) device.params[param] = value
     })
@@ -4663,7 +4666,8 @@ export class ProjectStore {
   }
 
   setPatternSwing(swing: number) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const pattern = this.activePattern()
       if (pattern) pattern.swing = Math.max(0, Math.min(0.9, swing))
     })
@@ -5712,7 +5716,8 @@ export class ProjectStore {
   }
 
   setMidiFx(trackId: string, fxId: string, patch: Partial<Pick<MidiFx, 'enabled'>> & { params?: Record<string, number> }) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const effect = this.track(trackId)?.midiFx?.find((item) => item.id === fxId)
       if (!effect) return
       if (patch.enabled != null) effect.enabled = patch.enabled

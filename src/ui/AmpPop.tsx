@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
-import { descriptor, FACTORY } from '../audio/plugins/catalog'
+import { activePresetName, descriptor, FACTORY } from '../audio/plugins/catalog'
+import { PresetBar } from './PresetBar'
+import { GestureReadout, useDragValue } from './kit/controls'
 import {
   AMPS,
   CABS,
@@ -55,12 +57,12 @@ export function AmpPop({
     <div className="board-pop" data-board="open" role="dialog" aria-label="Amp">
       <header>
         <strong>Amp</strong>
-        <select aria-label="Rig" value="" onChange={(event) => event.target.value && store.applyPluginPreset(trackId, plugin.id, event.target.value)}>
-          <option value="">Rig</option>
-          {presetList(store).map((name) => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-        </select>
+        <PresetBar
+          label="Rig"
+          names={presetList(store)}
+          active={activePresetName('amp', params, store.project.presets)}
+          onPick={(name) => store.applyPluginPreset(trackId, plugin.id, name)}
+        />
         <button type="button" className={info.direct ? 'on' : ''} hidden={!info.directAvailable} onClick={() => engine.setDirectMonitor(!info.direct)}>Direct</button>
         <button type="button" className={(params.mute ?? 0) >= 0.5 ? 'on' : ''} onClick={() => set('mute', (params.mute ?? 0) >= 0.5 ? 0 : 1)}>Mute</button>
         <button type="button" className="text-btn" onClick={() => store.focusPlugin(null)} aria-label="Close amp">×</button>
@@ -344,9 +346,13 @@ function modeValue(value: number) {
 }
 
 function Knob({ spec, value, onChange }: { spec: ParamSpec; value: number; pluginId: string; onChange: (value: number) => void }) {
-  const start = useRef({ y: 0, value })
-  const dragging = useRef(false)
-  const [drag, setDrag] = useState(false)
+  const { ref, readout, dragging } = useDragValue<HTMLButtonElement>({
+    min: spec.min,
+    max: spec.max,
+    value,
+    fallback: spec.default,
+    onChange: (next) => onChange(next),
+  })
   const span = spec.max - spec.min || 1
   const unit = Math.max(0, Math.min(1, (value - spec.min) / span))
   const angle = -140 + unit * 280
@@ -354,35 +360,21 @@ function Knob({ spec, value, onChange }: { spec: ParamSpec; value: number; plugi
   return (
     <div className="knob">
       <button
+        ref={ref}
         type="button"
         role="slider"
-        className={drag ? 'dragging' : ''}
+        className={dragging ? 'dragging' : ''}
         aria-label={spec.name}
         aria-valuemin={spec.min}
         aria-valuemax={spec.max}
         aria-valuenow={Math.round(value * 100) / 100}
         aria-valuetext={shown}
-        onDoubleClick={() => onChange(spec.default)}
-        onPointerDown={(event) => {
-          start.current = { y: event.clientY, value }
-          dragging.current = true
-          setDrag(true)
-          event.currentTarget.setPointerCapture(event.pointerId)
-        }}
-        onPointerMove={(event) => {
-          if (!dragging.current) return
-          const delta = (start.current.y - event.clientY) / (event.shiftKey ? 220 : 90)
-          onChange(Math.max(spec.min, Math.min(spec.max, start.current.value + delta * span)))
-        }}
-        onPointerUp={() => {
-          dragging.current = false
-          setDrag(false)
-        }}
       >
         <span style={{ transform: `rotate(${angle}deg)` }} />
       </button>
       <em>{spec.name}</em>
       <small>{shown}</small>
+      <GestureReadout readout={readout} />
     </div>
   )
 }

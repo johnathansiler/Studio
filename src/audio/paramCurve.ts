@@ -25,6 +25,19 @@ export function smoothParam(param: RampParam, value: number, now: number, second
   else param.linearRampToValueAtTime(target, time + tau)
 }
 
+/**
+ * One audio block of the same 5–15 ms approach `smoothParam` writes onto an AudioParam.
+ * Plugin and instrument worklets use this so a knob does not click and does not add latency.
+ */
+export function glideValue(from: number, to: number, frames: number, rate: number, seconds = PARAM_SMOOTH_SEC) {
+  const start = Number.isFinite(from) ? from : to
+  const target = Number.isFinite(to) ? to : start
+  if (Math.abs(start - target) < 1e-6) return target
+  const tau = Math.min(0.015, Math.max(0.005, seconds))
+  const alpha = 1 - Math.exp(-Math.max(1, frames) / Math.max(1, tau * (rate || 48000)))
+  return start + (target - start) * alpha
+}
+
 /** Sample-accurate line between automation breakpoints on an AudioParam clock. */
 export function applyRamps(param: RampParam, events: { time: number; value: number }[], now: number) {
   if (!events.length) return

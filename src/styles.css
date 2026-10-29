@@ -642,6 +642,61 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .shell.fold .master-sheet { width: min(420px, 46vw); }
 .fader-row { display: flex; gap: 8px; align-items: stretch; height: 180px; }
 .fader-row input[type='range'] { writing-mode: vertical-lr; direction: rtl; width: 28px; }
+.fader-row .touch-slider.vertical { height: 100%; min-height: 0; }
+input[type='range'],
+.knob button,
+.tune-knob,
+.rack-knob,
+.xy-pad,
+.kit-eq {
+  touch-action: none;
+}
+.preset-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  overflow-x: auto;
+  max-width: 100%;
+  min-width: 0;
+  padding: 2px 0 4px;
+  touch-action: pan-x;
+}
+.preset-now {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.preset-bar button {
+  flex: none;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent, #73c48f) 40%, #000);
+  background-color: #1c2822;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  color: inherit;
+}
+.preset-bar button.on {
+  box-shadow: var(--pressed), var(--glow);
+  color: var(--accent, #73c48f);
+}
+.shell.phone .preset-bar button { min-height: 44px; }
+.gesture-readout {
+  position: fixed;
+  z-index: 80;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background-color: #1c2822;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  color: var(--accent, #73c48f);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
 .meter { width: 10px; border-radius: 99px; background: #0c110f; border: 1px solid var(--line); position: relative; overflow: hidden; }
 .meter b { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(#ef4d4d, #e0b15a 30%, #73c48f); }
 .pan { width: 100%; }

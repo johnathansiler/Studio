@@ -249,7 +249,7 @@ function AudioFace({ store, trackId, plugin }: { store: ProjectStore; trackId: s
         <button type="button" title="Remove this device." onClick={() => store.removePlugin(trackId, plugin.id)}>×</button>
       </header>
       <Curve kind={plugin.pluginId} values={plugin.params} />
-      <div className="sl-knobs">
+      <div className="sl-knobs" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
         {params.map((param) => (
           <label key={param.id}>
             {param.name}
@@ -280,7 +280,7 @@ function MidiFace({ store, trackId, fx }: { store: ProjectStore; trackId: string
         <button type="button" title="Remove this device." onClick={() => store.removeMidiFx(trackId, fx.id)}>×</button>
       </header>
       <Curve kind={fx.kind} values={fx.params} />
-      <div className="sl-knobs">
+      <div className="sl-knobs" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
         {entries.map(([id, value]) => (
           <label key={id}>
             {id}
