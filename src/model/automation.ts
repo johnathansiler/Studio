@@ -257,7 +257,9 @@ export function rackLanesFor(project: Project, trackId: string): RackAutomation[
 }
 
 export function modeOf(project: Project): AutomationWriteMode {
-  return project.automationMode === 'latch' || project.automationMode === 'touch' ? project.automationMode : 'read'
+  const mode = project.automationMode
+  if (mode === 'off' || mode === 'latch' || mode === 'touch' || mode === 'read') return mode
+  return 'read'
 }
 
 export interface WriteCursor {

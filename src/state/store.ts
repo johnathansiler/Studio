@@ -110,7 +110,6 @@ import {
   fillEvery,
   humanizeCells,
   randomizeCells,
-  renderPattern,
   shiftCells,
   type StepCell,
 } from '../model/steps'
@@ -150,6 +149,8 @@ import {
   type SequenceNote,
 } from '../model/padMachine'
 import { applyChoke, assignPad, clipBeat, padRecordWindow, recordPadHits, type PadHit } from '../instruments/pads/record'
+import { applyLaneNotes, patternToMidiNotes, type LaneNote } from '../model/patternMidi'
+import { createKit } from '../model/padMachine'
 
 export type WorkspaceView = 'arrange' | 'mix' | 'session' | 'beats'
 
@@ -243,6 +244,8 @@ export class ProjectStore {
   rackDetail = false
   /** Letter keys play notes while this is on, so tap-tempo stays off T. */
   keyboardMidi = false
+  /** Drum roll open beside the step grid. Not saved. */
+  rackRoll = false
   /** MIDI tools strip. Not saved. */
   midiToolsOpen = false
   midiLearnActive = false
@@ -437,8 +440,21 @@ export class ProjectStore {
   }
 
   setView(view: WorkspaceView) {
-    if (view !== 'beats' && this.view === 'beats') this.clearRackRoll()
+    if (view !== 'beats' && this.view === 'beats') {
+      this.clearRackRoll()
+      this.rackRoll = false
+    }
     this.view = view
+    this.emit()
+  }
+
+  setKeyboardMidi(on: boolean) {
+    this.keyboardMidi = on
+    this.emit()
+  }
+
+  toggleRackRoll() {
+    this.rackRoll = !this.rackRoll
     this.emit()
   }
 
@@ -862,7 +878,6 @@ export class ProjectStore {
     this.mutate(() => {
       const track = this.track(trackId)
       if (!track) return
-      track.armed = true
       if (!track.input.startsWith('midi')) track.input = 'midi'
       this.project.loopEnabled = true
       this.project.loopStartSample = Math.max(0, Math.round(projectBeatSample(this.project, window.startBeat)))
@@ -4184,7 +4199,7 @@ export class ProjectStore {
     this.addTrack('audio')
     const id = this.selectedTrackId
     if (!id) return
-    this.updateTrack(id, { name, input, armed: true, monitor: true })
+    this.updateTrack(id, { name, input, armed: false, monitor: true })
   }
 
   placeStems(trackId: string, clipId: string, stems: { name: string; color: string; channels: Float32Array[] }[], intoSampler: boolean) {
@@ -4722,10 +4737,11 @@ export class ProjectStore {
         if (!channel.output) channel.output = track.id
       }
       mirrorTrackMix(this.project, track.id)
+      const beat = this.project.snap ? Math.max(0, Math.round(startBeat)) : Math.max(0, startBeat)
       const clip = {
         id: uid('pcl'),
         patternId: pattern.id,
-        startBeat: Math.max(0, startBeat),
+        startBeat: beat,
         lengthBeats: pattern.steps * 0.25,
         scene: null,
         trackId: track.id,
@@ -4784,37 +4800,85 @@ export class ProjectStore {
     })
   }
 
-  openChannelRoll(channelId: string) {
+  /** The drum roll shows the same notes as the step grid. */
+  openChannelRoll(_channelId?: string) {
+    this.rackRoll = true
+    this.view = 'beats'
+    this.emit()
+  }
+
+  writeLaneNotes(notes: LaneNote[]) {
     this.mutate(() => {
       const pattern = this.activePattern()
-      const channel = pattern?.channels.find((row) => row.id === channelId)
-      const track = this.project.tracks.find((item) => item.type === 'midi')
-      if (!pattern || !channel || !track) return
-      let clip = track.midiClips.find((item) => item.channelId === channelId && item.scene == null)
-      if (!clip) {
-        const hits = renderPattern({ ...pattern, channels: [{ ...channel, mute: false, solo: false }] }, 0, pattern.steps * 0.25)
-        clip = {
-          id: uid('midi'),
-          name: channel.name,
-          startBeat: 0,
-          durationBeats: Math.max(1, pattern.steps * 0.25),
-          channelId,
-          notes: hits.map((hit) => ({
-            id: uid('note'),
-            pitch: hit.pitch,
-            startBeat: hit.startBeat,
-            durationBeats: hit.durationBeats,
-            velocity: hit.velocity,
-            pan: hit.pan,
-            fine: hit.fine,
-          })),
-        }
-        track.midiClips.push(clip)
-      }
-      this.selectedMidiClipId = clip.id
-      this.selectedTrackId = track.id
-      this.view = 'beats'
+      if (!pattern) return
+      applyLaneNotes(pattern, notes)
     })
+  }
+
+  /**
+   * Print the current pattern as MIDI on a drum-kit track.
+   * `midi` is the song clip. `instrument` also installs the kit, including lane samples.
+   */
+  sendPatternToSong(mode: 'midi' | 'instrument', trackId: string | null, beat: number): { trackId: string; clipId: string } | null {
+    let result: { trackId: string; clipId: string } | null = null
+    this.mutate(() => {
+      const pattern = this.activePattern()
+      if (!pattern) return
+      const snapped = this.project.snap ? Math.max(0, Math.round(beat)) : Math.max(0, beat)
+      const track = this.kitTrack(trackId, mode, pattern)
+      const clip: MidiClip = {
+        id: uid('midi'),
+        name: pattern.name,
+        startBeat: snapped,
+        durationBeats: Math.max(0.25, pattern.steps * 0.25),
+        notes: patternToMidiNotes(pattern).map((note) => ({ ...note, id: uid('note') })),
+      }
+      track.midiClips.push(clip)
+      this.selectedTrackId = track.id
+      this.selectedMidiClipId = clip.id
+      this.selectedMidiClipIds = [clip.id]
+      this.selectedClipId = null
+      this.selectedClipIds = []
+      this.view = 'arrange'
+      result = { trackId: track.id, clipId: clip.id }
+    })
+    if (result) this.toast(mode === 'instrument' ? 'Pattern is on the instrument.' : 'Pattern is MIDI on the song.', 'good')
+    return result
+  }
+
+  private kitTrack(trackId: string | null, mode: 'midi' | 'instrument', pattern: NonNullable<ReturnType<ProjectStore['activePattern']>>) {
+    const picked = trackId ? this.project.tracks.find((track) => track.id === trackId && track.type === 'midi') : null
+    const named = !trackId ? this.project.tracks.find((track) => track.type === 'midi' && track.name === 'Drums') : null
+    const track = picked ?? named ?? makeTrack({
+      name: 'Drums',
+      type: 'midi',
+      color: '#e07a3d',
+      input: 'none',
+      armed: false,
+      instrument: 'drum-machine',
+    })
+    if (!picked && !named) this.project.tracks.push(track)
+    const custom = pattern.channels.some((channel) => channel.sampleId)
+    if (mode === 'instrument' || custom) {
+      track.instrument = 'pads'
+      const kit = createKit()
+      const bank = kit.banks[0] ?? []
+      pattern.channels.forEach((channel, index) => {
+        const pad = bank.find((item) => item.pitch === channel.note) ?? bank[index]
+        if (!pad) return
+        pad.name = channel.name
+        pad.pitch = Math.max(0, Math.min(127, channel.note))
+        pad.level = channel.volume
+        pad.pan = channel.pan
+        if (channel.sampleId) {
+          pad.layers = [{ velocityLo: 0, velocityHi: 1, tune: 0, bufferId: channel.sampleId }]
+        }
+      })
+      track.padKit = kit
+    } else if (!track.instrument || track.instrument === 'none') {
+      track.instrument = 'drum-machine'
+    }
+    return track
   }
 
   setRoll(patch: Partial<{ tool: RollTool; grid: number; length: number; velocity: number }>) {

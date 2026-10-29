@@ -130,6 +130,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   display: grid; place-items: center; border-radius: 8px;
   border: 1px solid var(--line); background: var(--panel); color: var(--text);
 }
+.menu-word { display: none; }
+.shell.phone .menu-word, .shell.fold .menu-word { display: inline; font-size: 12px; }
+.shell.phone .menu-ico, .shell.fold .menu-ico { display: none; }
+.shell.phone .menu-btn, .shell.fold .menu-btn { width: auto; min-width: 64px; padding: 0 10px; }
 .menu-btn.on { background: var(--accent-dim); color: var(--accent); border-color: transparent; }
 .shell-menu {
   position: absolute; top: calc(100% + 4px); right: 8px; z-index: 80;
@@ -178,6 +182,13 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   background: var(--panel-2); color: var(--text); display: grid; place-items: center;
 }
 .t-btn svg { display: block; }
+.rec-hint {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--amber);
+}
 .t-btn.play { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 .t-btn.play.on { color: var(--accent-ink); box-shadow: inset 0 0 0 1px rgba(16, 33, 23, 0.4); }
 .t-btn.rec { color: var(--rec); }
@@ -351,7 +362,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--amber); z-index: 4; pointer-events: none; }
 .playhead::before { content: ''; position: absolute; top: 0; left: -4px; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 8px solid var(--amber); }
 
-.mixer { height: 100%; overflow: auto; display: flex; gap: 10px; padding: 16px; background: #121a16; align-items: stretch; }
+.mixer { height: 100%; overflow: auto; display: flex; gap: 10px; padding: 16px; background: #121a16; align-items: stretch; justify-content: flex-start; }
 .strip {
   width: 168px; flex: 0 0 auto; background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
   padding: 10px; display: flex; flex-direction: column; gap: 8px;
@@ -854,7 +865,11 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
   height: auto;
   padding: 6px 8px;
 }
-.shell.phone .t-btn, .shell.phone .t-btn.stop { width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; }
+.shell.phone .t-btn, .shell.phone .t-btn.stop,
+.shell.fold .t-btn, .shell.fold .t-btn.stop { width: auto; min-width: 52px; height: 44px; min-height: 44px; padding: 0 8px; }
+.shell.phone .t-btn .t-ico, .shell.fold .t-btn .t-ico { display: none; }
+.shell.phone .t-btn .t-label, .shell.fold .t-btn .t-label { display: inline; font-size: 12px; line-height: 1; text-align: center; }
+.t-btn .t-label { display: none; }
 .shell.phone .bpm-readout, .shell.phone .tap-pad button, .shell.phone .tap-tempo { height: 44px; min-height: 44px; font-size: 16px; }
 .shell.phone .bpm-readout { width: calc(6.4ch + 16px); min-width: 72px; }
 .shell.phone .tap-tempo { min-width: 44px; padding: 0 12px; }
@@ -1650,10 +1665,28 @@ html[data-posture="tabletop"] .shell .master-sheet {
 .strip h3 {
   flex: none;
   min-height: 1.2em;
-  line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.15;
+  margin: 0;
+  font-size: 11px;
+  overflow: visible;
+  text-overflow: unset;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+.shell .strip .auto-mode {
+  display: flex;
+  flex-wrap: nowrap;
+  width: 100%;
+  gap: 1px;
+  padding: 0;
+}
+.shell .strip .auto-mode button {
+  min-width: 0;
+  flex: 1 1 0;
+  padding: 0;
+  font-size: 11px;
+  text-align: center;
 }
 .strip .readout { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
 .strip .route-fields { flex-direction: column; }

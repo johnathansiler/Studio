@@ -21,17 +21,18 @@ export const VIEW_COPY: Copy[] = [
 ]
 
 export const TRANSPORT_COPY: Copy[] = [
-  { id: 'to-start', label: 'To start', hint: 'Move the playhead back to the beginning.' },
-  { id: 'play', label: 'Play', hint: 'Play from the playhead.' },
-  { id: 'stop', label: 'Stop', hint: 'Stop playback and recording.' },
+  { id: 'to-start', label: 'Start', hint: 'Return to bar 1, or to the loop start when the loop is on.' },
+  { id: 'play', label: 'Play', hint: 'Play from the playhead. Press again to pause. The playhead stays put.' },
+  { id: 'pause', label: 'Pause', hint: 'Pause playback. The playhead stays where it is.' },
+  { id: 'stop', label: 'Stop', hint: 'Stop playback and recording. Press again to return to the start.' },
   { id: 'record', label: 'Record', hint: 'Record onto armed tracks from the playhead.' },
   { id: 'loop', label: 'Loop', hint: 'Repeat the highlighted region. Drag its edges to change the length.' },
   { id: 'tempo', label: 'Tempo', hint: 'Type a tempo, or drag, scroll, or press the arrow keys.' },
   { id: 'tap', label: 'Tap', hint: 'Tap in time. The tempo follows your taps.' },
 ]
 
-/** On a phone these leave the transport and live in the menu, so Play stays reachable. */
-export const PHONE_TRANSPORT_MENU = ['to-start', 'loop'] as const
+/** Phone transport shows the same buttons as the desk. The menu does not repeat them. */
+export const PHONE_TRANSPORT_MENU = [] as const
 
 export const MENU_COPY: Copy[] = [
   { id: 'new', label: 'New project', hint: 'Start a fresh session. The timeline starts empty.' },
@@ -114,7 +115,7 @@ export const BEAT_SHEET: Copy[] = [
   { id: 'human', label: 'Humanize', hint: 'Nudge timing and velocity so it feels less rigid.' },
   { id: 'left', label: 'Shift left', hint: 'Rotate every hit one step earlier.' },
   { id: 'right', label: 'Shift right', hint: 'Rotate every hit one step later.' },
-  { id: 'place', label: 'Place', hint: 'Drop this pattern on the timeline at the playhead.' },
+  { id: 'place', label: 'To Arrange', hint: 'Place this pattern on the Arrange timeline at the playhead.' },
   { id: 'slot', label: 'Slot', hint: 'Put this pattern in the first clip slot.' },
 ]
 

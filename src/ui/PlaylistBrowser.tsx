@@ -5,6 +5,7 @@ import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { SoundBrowser } from './SoundBrowser'
 import { TipButton } from './Hint'
+import { PatternSend, patternBeat } from './PatternSend'
 import { quickDragArmed } from './clipKeys'
 
 export type BrowserTab = 'sounds' | 'instruments' | 'loops' | 'patterns' | 'plugins' | 'clips'
@@ -180,6 +181,9 @@ export function PlaylistBrowser({
         <div className="browser-body">
           <input aria-label="Search the browser" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
           <div className="browser-list">
+            {tab === 'patterns' && (
+              <PatternSend store={store} beat={patternBeat(store, engine.currentTimelineSample())} phone={phone} />
+            )}
             {tab === 'patterns' && patterns.map((pattern) => (
               <button
                 key={pattern.id}

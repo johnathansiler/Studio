@@ -7,19 +7,21 @@ import type { ProjectStore } from '../state/store'
 import type { AutomationWriteMode } from '../model/types'
 import './automation.css'
 
-const MODES: { id: AutomationWriteMode; label: string; title: string }[] = [
-  { id: 'read', label: 'Read', title: 'Read automation while playing. Controls follow the lane.' },
-  { id: 'latch', label: 'Latch', title: 'Latch writes the value you set until playback stops.' },
-  { id: 'touch', label: 'Touch', title: 'Touch writes only while you hold the control.' },
+const MODES: { id: AutomationWriteMode; label: string; short: string; title: string }[] = [
+  { id: 'off', label: 'Off', short: 'O', title: 'Off ignores automation. The fader stays where you put it.' },
+  { id: 'read', label: 'Read', short: 'R', title: 'Read automation while playing. Controls follow the lane.' },
+  { id: 'touch', label: 'Touch', short: 'T', title: 'Touch writes only while you hold the control.' },
+  { id: 'latch', label: 'Latch', short: 'L', title: 'Latch writes the value you set until playback stops.' },
 ]
 
-export function AutomationModeBar({ store }: { store: ProjectStore }) {
+export function AutomationModeBar({ store, embedded = false }: { store: ProjectStore; embedded?: boolean }) {
   const mode = automationWriteMode(store.project)
   return (
-    <div className="auto-mode" role="group" aria-label="Automation write mode">
+    <div className={`auto-mode${embedded ? ' in-strip' : ''}`} role="group" aria-label="Automation write mode">
       {MODES.map((item) => (
-        <button key={item.id} type="button" className={mode === item.id ? 'on' : ''} aria-pressed={mode === item.id} title={item.title} onClick={() => store.setAutomationMode(item.id)}>
-          {item.label}
+        <button key={item.id} type="button" className={mode === item.id ? 'on' : ''} aria-pressed={mode === item.id} aria-label={`${item.label}. ${item.title}`} title={item.title} onClick={() => store.setAutomationMode(item.id)}>
+          <span className="mode-full">{item.label}</span>
+          <span className="mode-short">{item.short}</span>
         </button>
       ))}
     </div>
@@ -50,7 +52,16 @@ export function MixFlags({ store, trackId, compact = false }: { store: ProjectSt
       <button type="button" className={`mini ${track.mute ? 'on-m' : ''}`} aria-label={track.mute ? 'Unmute track' : 'Mute track'} title="Mute this track. Linked tracks mute together." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'mute') }}>M</button>
       <button type="button" className={`mini ${track.solo ? 'on-s' : ''}`} aria-label={track.solo ? 'Unsolo track' : 'Solo track'} title="Solo this track and keep its path to the master open." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'solo') }}>S</button>
       {!compact && (
-        <button type="button" className={`mini solo-safe ${track.soloSafe ? 'on' : ''}`} aria-pressed={!!track.soloSafe} aria-label="Solo safe" title="Solo safe: stay audible when other tracks are soloed." onClick={(event) => { event.stopPropagation(); store.updateTrack(track.id, { soloSafe: !track.soloSafe }) }}>Safe</button>
+        <button type="button" className={`mini arm-flag ${track.armed ? 'on-r' : ''}`} aria-pressed={track.armed} aria-label={track.armed ? 'Disarm track' : 'Arm track. This track records when you press record.'} title="Arm this track. Only armed tracks record." onClick={(event) => { event.stopPropagation(); store.updateTrack(track.id, { armed: !track.armed }) }}>
+          <span className="arm-full">Arm</span>
+          <span className="arm-short">R</span>
+        </button>
+      )}
+      {!compact && (
+        <button type="button" className={`mini solo-safe ${track.soloSafe ? 'on' : ''}`} aria-pressed={!!track.soloSafe} aria-label="Solo safe. Stay audible when other tracks are soloed." title="Solo safe: stay audible when other tracks are soloed." onClick={(event) => { event.stopPropagation(); store.updateTrack(track.id, { soloSafe: !track.soloSafe }) }}>
+          <span className="arm-full">Safe</span>
+          <span className="arm-short">Sf</span>
+        </button>
       )}
     </>
   )

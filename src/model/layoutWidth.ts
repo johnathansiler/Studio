@@ -1,9 +1,11 @@
 /** Mixer strip and session column widths. Chrome numbers match the layout CSS. */
 
-export const STRIP_MIN = 64
 export const STRIP_MAX = 240
 /** Narrow enough that a 360px phone shows three channel strips and a 390px phone shows four. */
 export const STRIP_DEFAULT = 84
+/** Half the normal strip. Faders, meters, and M/S/Arm still fit. */
+export const STRIP_HALF = Math.round(STRIP_DEFAULT / 2)
+export const STRIP_MIN = STRIP_HALF
 
 export const COLUMN_MIN = 60
 export const COLUMN_MAX = 240
@@ -80,6 +82,16 @@ export function widthFromKey(value: number, key: string, bounds: WidthBounds, st
 export function stripRightEdge(count: number, strip = STRIP_DEFAULT): number {
   if (count <= 0) return 0
   return MIXER_PAD + count * strip + (count - 1) * STRIP_GAP + MIXER_PAD
+}
+
+/** Shrink toward half width when two strips would not fit. The saved width is unchanged. */
+export function displayedStrip(saved: number, viewport: number): number {
+  const width = clampWidth(saved, STRIP_BOUNDS)
+  if (!(viewport > 0)) return width
+  if (stripRightEdge(2, width) <= viewport) return width
+  let next = width
+  while (next > STRIP_MIN && stripRightEdge(2, next) > viewport) next -= 1
+  return next
 }
 
 export function stripsOnScreen(viewport: number, strip = STRIP_DEFAULT): number {

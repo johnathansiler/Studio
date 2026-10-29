@@ -21,7 +21,7 @@ export function groupForTrack(project: Project, trackId: string) {
 
 export function normalizeMix(project: Project) {
   const mode = project.automationMode
-  project.automationMode = mode === 'latch' || mode === 'touch' ? mode : 'read'
+  project.automationMode = mode === 'off' || mode === 'latch' || mode === 'touch' ? mode : 'read'
   const known = new Set(project.tracks.map((track) => track.id))
   project.mixGroups = (project.mixGroups ?? [])
     .map((group) => ({

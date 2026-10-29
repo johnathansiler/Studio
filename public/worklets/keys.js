@@ -12,7 +12,19 @@ class KeysProcessor extends AudioWorkletProcessor {
     this.port.onmessage = (event) => {
       const data = event.data
       if (!data) return
-      if (data.type === 'samples') {
+      if (data.type === 'panic') {
+      this.hits = []
+      this.pending = []
+      for (const voice of this.voices) {
+        voice.on = false
+        voice.env = 0
+        voice.every = 0
+        voice.bangs = null
+        voice.bangVel = null
+      }
+      return
+    }
+    if (data.type === 'samples') {
         this.drums = data.samples || []
         return
       }

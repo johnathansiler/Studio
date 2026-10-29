@@ -103,8 +103,8 @@ export interface AutomationPoint {
   value: number
 }
 
-/** Read plays lanes. Latch keeps writing the last value until stop. Touch writes only while a control is held. */
-export type AutomationWriteMode = 'read' | 'latch' | 'touch'
+/** Off ignores lanes. Read plays them. Latch keeps writing until stop. Touch writes only while a control is held. */
+export type AutomationWriteMode = 'off' | 'read' | 'latch' | 'touch'
 
 export interface AutomationLane {
   id: string

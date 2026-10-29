@@ -27,7 +27,7 @@ import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChu
 import { encodeWav, linearResample } from '../model/wav'
 import { tuneBlockScale } from './plugins/autoTune'
 import { audibleIds } from '../model/audible'
-import { automationSchedule, laneFor, rackLanesFor, valueAtMappedSample } from '../model/automation'
+import { automationSchedule, laneFor, modeOf, rackLanesFor, valueAtMappedSample } from '../model/automation'
 import { applyRamps } from './paramCurve'
 import { chainContext, enabledFx, LiveMidiChain, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
 import { LiveRack } from './liveRack'
@@ -103,6 +103,10 @@ export class AudioEngine {
   private audioBuffers = new Map<string, AudioBuffer>()
   private strips = new Map<string, StripNodes>()
   private masterStrip: StripNodes | null = null
+  /** Unrouted drum hits. Solo closes this gain; the master still passes what remains. */
+  private patternStrip: StripNodes | null = null
+  /** Live drums and keys that are not already inside a track strip. */
+  private liveBus: GainNode | null = null
   private localBus: GainNode | null = null
   private remoteBus: GainNode | null = null
   private monitorDelay: DelayNode | null = null
@@ -424,6 +428,11 @@ export class AudioEngine {
     this.speakerGain.connect(this.safety)
     this.safety.connect(ctx.destination)
     this.metroGain.connect(this.localBus)
+    this.patternStrip = createStrip(ctx)
+    this.patternStrip.output.connect(this.localBus)
+    this.liveBus = ctx.createGain()
+    this.liveBus.gain.value = 1
+    this.liveBus.connect(this.localBus)
     this.drumTable = residentDrums(ctx.sampleRate)
     this.drumBuffers = this.drumTable.map((drum) => {
       const buffer = ctx.createBuffer(1, drum.samples.length, ctx.sampleRate)
@@ -530,12 +539,20 @@ export class AudioEngine {
     const now = ctx.currentTime
     const sample = this.playing ? this.currentTimelineSample() : this.positionSamples
     const end = Math.max(sample + this.sampleRate, arrangementEndSample(project))
+    const follow = modeOf(project) !== 'off'
+    const anySolo = project.tracks.some((track) => track.solo)
+    if (this.patternStrip) this.patternStrip.mute.gain.setTargetAtTime(anySolo ? 0 : 1, now, 0.01)
+    if (this.liveBus) {
+      const liveId = this.padRouteId || this.liveTrackId
+      const open = liveId ? heard.has(liveId) : !anySolo
+      this.liveBus.gain.setTargetAtTime(open ? 1 : 0, now, 0.01)
+    }
     for (const track of project.tracks) {
       const strip = this.strips.get(track.id)
       if (!strip) continue
       strip.mute.gain.setTargetAtTime(heard.has(track.id) ? 1 : 0, now, 0.01)
-      this.scheduleControl(strip.fader.gain, laneFor(project.automation, track.id, 'volume')?.points, track.volume, sample, now, end)
-      this.scheduleControl(strip.pan.pan, laneFor(project.automation, track.id, 'pan')?.points, track.pan, sample, now, end)
+      this.scheduleControl(strip.fader.gain, follow ? laneFor(project.automation, track.id, 'volume')?.points : undefined, track.volume, sample, now, end)
+      this.scheduleControl(strip.pan.pan, follow ? laneFor(project.automation, track.id, 'pan')?.points : undefined, track.pan, sample, now, end)
     }
     this.rack.applyAutomation(project, this.playing, sample, now, end)
     const originBeat = projectSampleBeat(project, this.playing ? this.playOriginSample : sample)
@@ -1095,8 +1112,11 @@ export class AudioEngine {
     this.countPlan = null
     this.countWait?.()
     this.countWait = null
+    if (this.playing && this.ctx) {
+      this.positionSamples = Math.max(0, Math.round(this.heardSample(this.sampleAt(this.ctx.currentTime))))
+    }
     this.playing = false
-    this.stopSources()
+    this.silenceNow()
     this.arrangementScheduled = false
     this.sessionStarted.clear()
     this.nextLoopCtx = null
@@ -1105,8 +1125,29 @@ export class AudioEngine {
       this.scheduler = 0
     }
     if (this.status !== 'stopped') this.status = 'stopped'
-    for (const chain of this.chains.values()) chain.panic()
     this.emit()
+  }
+
+  /** Stop every sounding voice, including notes that were already queued. */
+  private silenceNow() {
+    this.stopSources()
+    this.keysNode?.port.postMessage({ type: 'panic' })
+    const now = this.ctx?.currentTime ?? 0
+    for (const voice of this.warmVoices) {
+      try {
+        voice.gain.gain.cancelScheduledValues(now)
+        voice.gain.gain.setValueAtTime(0, now)
+      } catch { /* the voice is already gone */ }
+      voice.busy = false
+    }
+    for (const voice of this.padVoices) {
+      try { voice.gain.gain.setValueAtTime(0.0001, now) } catch { /* ended */ }
+      voice.stop(now)
+    }
+    this.padVoices = []
+    for (const shot of this.oneShots) shot.stop()
+    this.oneShots = []
+    for (const chain of this.chains.values()) chain.panic()
   }
 
   async beginRecord(opts: {
@@ -2202,7 +2243,7 @@ export class AudioEngine {
         const span = beatSpanSamples(project, clip.startBeat + (hit.startBeat - range.from), hit.durationBeats)
         if (span.start < timelineStart || span.start >= timelineEnd) continue
         const when = ctxTime + (span.start - timelineStart) / this.sampleRate
-        const routed = dest ? this.strips.get(dest) : this.masterStrip
+        const routed = dest ? this.strips.get(dest) : (ctx === this.ctx ? this.patternStrip : this.masterStrip)
         const liveStrip = ctx === this.ctx && hit.output ? this.strips.get(hit.output) : undefined
         const bus = liveStrip || routed || strip
         if (!bus) continue
@@ -2753,7 +2794,7 @@ export class AudioEngine {
     const peak = Math.max(0.05, Math.min(1, velocity))
     src.connect(filter)
     filter.connect(gain)
-    gain.connect(this.speakerGain)
+    gain.connect(this.liveBus ?? this.speakerGain)
     const decay = color?.decay == null ? 1 : Math.max(0.05, color.decay)
     const startAt = when ?? ctx.currentTime
     gain.gain.setValueAtTime(0.0001, startAt)
@@ -2785,7 +2826,7 @@ export class AudioEngine {
     src.playbackRate.value = 2 ** ((color?.tune || 0) / 12)
     const peak = Math.max(0.05, Math.min(1, velocity))
     src.connect(gain)
-    gain.connect(this.speakerGain)
+    gain.connect(this.liveBus ?? this.speakerGain)
     const decay = color?.decay == null ? 1 : Math.max(0.05, color.decay)
     const startAt = when ?? ctx.currentTime
     gain.gain.setValueAtTime(0.0001, startAt)
@@ -2996,7 +3037,7 @@ export class AudioEngine {
 
   private armWarmVoices() {
     const ctx = this.ctx
-    const out = this.speakerGain
+    const out = this.liveBus ?? this.speakerGain
     if (!ctx || !out || this.warmVoices.length) return
     for (let i = 0; i < 8; i++) {
       const osc = ctx.createOscillator()
@@ -3030,13 +3071,14 @@ export class AudioEngine {
 
   private attachKeys() {
     const ctx = this.ctx
-    if (!ctx || this.keysNode || !this.speakerGain) return
+    const out = this.liveBus ?? this.speakerGain
+    if (!ctx || this.keysNode || !out) return
     if (!this.drumTable.length) this.drumTable = residentDrums(ctx.sampleRate)
     const node = new AudioWorkletNode(ctx, 'keys-processor', { numberOfOutputs: 1, outputChannelCount: [1] })
     const gain = ctx.createGain()
     gain.gain.value = 0.9
     node.connect(gain)
-    gain.connect(this.speakerGain)
+    gain.connect(out)
     node.port.onmessage = (event) => {
       if (event.data?.type === 'onset') this.lastOnsetFrame = event.data.frame
     }

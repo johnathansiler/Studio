@@ -47,6 +47,31 @@
   min-width: 0;
 }
 
+.rack-steps { position: relative; }
+.rack-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--amber, #e0b15a);
+  pointer-events: none;
+  z-index: 3;
+}
+.pattern-send {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+}
+.pattern-send select,
+.pattern-send button { min-height: 32px; }
+.shell.phone .pattern-send select,
+.shell.phone .pattern-send button,
+.shell.fold .pattern-send select,
+.shell.fold .pattern-send button { min-height: 44px; }
+
 .rack-extras {
   display: none;
 }

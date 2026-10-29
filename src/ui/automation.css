@@ -9,6 +9,41 @@
 .link-row button {
   min-height: 32px;
 }
+.auto-mode .mode-short,
+.arm-short { display: none; }
+.auto-mode .mode-full,
+.arm-full { display: inline; }
+.auto-mode.in-strip {
+  flex-wrap: nowrap;
+  width: 100%;
+  padding: 0;
+  gap: 2px;
+}
+.strip {
+  container-type: inline-size;
+  container-name: channel;
+}
+@container channel (max-width: 180px) {
+  .auto-mode.in-strip .mode-full { display: none; }
+  .auto-mode.in-strip .mode-short { display: inline; }
+  .shell .strip .auto-mode.in-strip button,
+  .auto-mode.in-strip button {
+    min-width: 0;
+    width: auto;
+    flex: 1 1 0;
+    padding: 0;
+    font-size: 11px;
+    text-align: center;
+  }
+}
+@container channel (max-width: 72px) {
+  .fader-row input[type='range'] { width: 14px; min-width: 14px; }
+  .meter { width: 6px; }
+  .arm-full { display: none; }
+  .arm-short { display: inline; }
+  .mini { font-size: 10px; padding: 0; text-align: center; }
+  h3 { font-size: 10px; line-height: 1.15; white-space: normal; }
+}
 .auto-mode button.on,
 .link-row button.on,
 .mini.solo-safe.on {

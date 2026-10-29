@@ -70,17 +70,7 @@ export async function collectRecordInputs(opts: {
     if (!stream) continue
     inputs.push({ key: route.trackId, stream, source: 'guide', peerId: route.peerId, takeId: opts.takeId })
   }
-  if (inputs.length) return inputs
-  const fallback = opts.tracks.find((track) => track.type === 'audio' && track.armed) || opts.tracks.find((track) => track.type === 'audio')
-  if (!fallback) return []
-  try {
-    const stereo = fallback.channels === 2
-    const stream = await opts.openMic(channelConstraints(stereo ? 2 : 1))
-    opts.setLocalMic(stream)
-    return [{ key: fallback.id, stream, source: 'local', takeId: opts.takeId }]
-  } catch {
-    return []
-  }
+  return inputs
 }
 
 function streamChannels(routes: AudioRoute[]): number {

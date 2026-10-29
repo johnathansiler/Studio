@@ -198,7 +198,7 @@ describe('pattern step layout', () => {
       expect(desk.align).toBeLessThan(2)
       expect(desk.mute).toBe(1)
       const place = await page.evaluate(() => {
-        const button = [...document.querySelectorAll('.rack-bar button')].find((el) => el.textContent === 'Place')
+        const button = [...document.querySelectorAll('.rack-bar button')].find((el) => el.textContent === 'To Arrange')
         const box = button!.getBoundingClientRect()
         return { right: box.right, width: box.width }
       })

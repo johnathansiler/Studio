@@ -17,6 +17,7 @@ import { linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
 import { shouldCountIn } from './model/sessionInteract'
+import { hasArmedRecord, homeSample, playPress, stopPress } from './model/transport'
 import { countInAt, meterAtSample, tempoAtSample } from './model/tempoMap'
 import { beatsToSamples, samplesToBeats } from './model/time'
 
@@ -121,6 +122,7 @@ export function App() {
   const [persisted, setPersisted] = useState(true)
   const [help, setHelp] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [recordHint, setRecordHint] = useState('')
   const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight))
   const [land, setLand] = useState(() => window.innerWidth > window.innerHeight)
   const phone = form === 'phone'
@@ -529,7 +531,7 @@ export function App() {
           if (person.role === 'guest' && person.admitted && !armedPeers.current.has(person.id)) {
             armedPeers.current.add(person.id)
             store.ensureRemoteTrack(person.id, person.name)
-            store.toast(`Armed a track for ${person.name}. Record will print a live guide, then replace it with their aligned take.`, 'good')
+            store.toast(`Added a track for ${person.name}. Arm it to record their take.`, 'good')
             session.publishArrangement()
             if (engine.status === 'playing' || engine.status === 'recording') {
               engine.refreshClockAnchor()
@@ -639,18 +641,33 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    const noteKeys: Record<string, number> = {
+      KeyA: 60, KeyW: 61, KeyS: 62, KeyE: 63, KeyD: 64, KeyF: 65,
+      KeyT: 66, KeyG: 67, KeyY: 68, KeyH: 69, KeyU: 70, KeyJ: 71,
+    }
+    const midiTrack = () => store.project.tracks.find((item) => item.id === store.selectedTrackId && item.type === 'midi')
+      || store.project.tracks.find((item) => item.type === 'midi')
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
       const key = event.key.toLowerCase()
       const meta = event.metaKey || event.ctrlKey
+      const typed = noteKeys[event.code]
+      if (store.keyboardMidi && typed != null && !meta && !event.repeat && !document.querySelector('.piano, .me-step, .drum-roll')) {
+        const track = midiTrack()
+        if (track) {
+          event.preventDefault()
+          engine.unlock()
+          engine.playThrough(track.id, typed, 0.8)
+          return
+        }
+      }
       if (key === 't' && !meta && !event.repeat && !store.keyboardMidi) {
         event.preventDefault()
         window.dispatchEvent(new CustomEvent('cueharbor-tap', { detail: performance.now() }))
       } else if (event.code === 'Space') {
         event.preventDefault()
-        if (engine.status === 'stopped') void play()
-        else void stop()
+        void play()
       } else if (key === 'r' && !meta) void record()
       else if (key === 'q' && !meta) store.quickQuantize()
       else if (meta && key === 'z') {
@@ -673,7 +690,7 @@ export function App() {
         store.deleteSelectedClip()
       }
       else if (key === 'l' && !meta) store.toggle('loopEnabled')
-      else if (event.key === 'Home' || event.key === 'Enter') void locate(0)
+      else if (event.key === 'Home' || event.key === 'Enter') void returnToStart()
       else if (event.key === '?' || (event.shiftKey && event.key === '/')) setHelp((open) => !open)
       else if (event.key === 'Escape') {
         setHelp(false)
@@ -689,8 +706,18 @@ export function App() {
         void locate(engine.currentTimelineSample() + delta)
       }
     }
+    const onUp = (event: KeyboardEvent) => {
+      const typed = noteKeys[event.code]
+      if (!store.keyboardMidi || typed == null) return
+      const track = midiTrack()
+      if (track) engine.releaseThrough(track.id, typed)
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keyup', onUp)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onUp)
+    }
   })
 
   async function ready() {
@@ -705,7 +732,32 @@ export function App() {
   }
 
   async function play() {
-    await playFrom(engine.currentTimelineSample())
+    const decision = playPress(engine.status, store.project, engine.currentTimelineSample())
+    if (decision.action === 'ignore') return
+    if (decision.action === 'pause') {
+      if (session.state.role === 'guest') {
+        session.requestTransport({ action: 'stop' })
+        return
+      }
+      engine.stop()
+      session.broadcastTransport({ action: 'stop', timelineSample: Math.round(engine.positionSamples) })
+      return
+    }
+    await playFrom(decision.sample)
+  }
+
+  async function returnToStart() {
+    const home = homeSample(store.project)
+    if (engine.status === 'recording' || engine.status === 'counting-in') {
+      await stop()
+      await locate(home)
+      return
+    }
+    if (engine.status === 'playing') {
+      await playFrom(home)
+      return
+    }
+    await locate(home)
   }
 
   async function playFrom(sample: number, mode: 'arrangement' | 'session' = 'arrangement', intent: 'play' | 'session-launch' = 'play') {
@@ -786,6 +838,12 @@ export function App() {
       session.requestTransport({ action: 'stop' })
       return
     }
+    const decision = stopPress(engine.status, store.project, engine.currentTimelineSample())
+    if (decision.action === 'home') {
+      await locate(decision.sample)
+      return
+    }
+    if (engine.status === 'stopped') return
     const end = Math.round(engine.currentTimelineSample())
     const captures = await engine.finishRecording()
     engine.stop()
@@ -958,14 +1016,13 @@ export function App() {
     const slot = store.sessionSlot
     const slotTrack = slot ? store.project.tracks.find((track) => track.id === slot.trackId) : undefined
     const intoSlot = Boolean(slot && slotTrack && (slotTrack.type === 'audio' || slotTrack.type === 'midi'))
-    if (slot && slotTrack?.type === 'midi') {
-      store.prepareMidiSlot(slot.trackId, slot.scene)
-      const fresh = store.track(slot.trackId)
-      if (fresh && (!fresh.armed || fresh.input === 'none')) {
-        store.updateTrack(slot.trackId, { armed: true, input: fresh.input === 'none' ? 'midi' : fresh.input })
-      }
+    if (!hasArmedRecord(store.project.tracks)) {
+      setRecordHint('Arm a track to record.')
+      window.setTimeout(() => setRecordHint(''), 2800)
+      return
     }
-    if (intoSlot && store.transportMode !== 'session') store.enterSession()
+    if (slot && slotTrack?.type === 'midi' && slotTrack.armed) store.prepareMidiSlot(slot.trackId, slot.scene)
+    if (intoSlot && slotTrack?.armed && store.transportMode !== 'session') store.enterSession()
     await ready()
     const takeId = uid('take')
     const inputs = await collectRecordInputs({
@@ -978,7 +1035,8 @@ export function App() {
     })
     const midiArmed = store.project.tracks.some((track) => track.type === 'midi' && track.armed && track.input.startsWith('midi'))
     if (!inputs.length && !midiArmed) {
-      store.toast('Arm a track with an input to record.', 'warn')
+      setRecordHint('Arm a track to record.')
+      window.setTimeout(() => setRecordHint(''), 2800)
       return
     }
     const settings = store.recordSettings()
@@ -1354,7 +1412,8 @@ async function importDropped(files: FileList) {
           onClick={() => { setMenuOpen(false); setUnstuckOpen((open) => !open) }}
         />
         <button type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Save, export, clips, and setup." title="Save, export, clips, and setup." aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
-          <MenuIcon />
+          <span className="menu-word">Menu</span>
+          <span className="menu-ico"><MenuIcon /></span>
         </button>
         {menuOpen && (
           <div className="shell-menu" id="shell-menu">
@@ -1377,12 +1436,12 @@ async function importDropped(files: FileList) {
             <MenuRow className="split" label={copyOf(MENU_COPY, 'click').label} hint={copyOf(MENU_COPY, 'click').hint} pressed={store.project.metronomeEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('metronomeEnabled')} />
             <MenuRow label={copyOf(MENU_COPY, 'count-in').label} hint={copyOf(MENU_COPY, 'count-in').hint} pressed={store.project.countIn} disabled={store.remoteFollow} onClick={() => store.toggle('countIn')} />
             <MenuRow label={copyOf(MENU_COPY, 'snap').label} hint={copyOf(MENU_COPY, 'snap').hint} pressed={store.project.snap} disabled={store.remoteFollow} onClick={() => store.toggle('snap')} />
-            {phone && (
-              <>
-                <MenuRow label={copyOf(MENU_COPY, 'to-start').label} hint={copyOf(MENU_COPY, 'to-start').hint} onClick={() => { setMenuOpen(false); void locate(0) }} />
-                <MenuRow label={copyOf(MENU_COPY, 'loop').label} hint={copyOf(MENU_COPY, 'loop').hint} pressed={store.project.loopEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('loopEnabled')} />
-              </>
-            )}
+            <MenuRow
+              label={store.keyboardMidi ? 'Keyboard on' : 'Keyboard'}
+              hint="Letter keys play the selected instrument. Tap tempo stays off T."
+              pressed={store.keyboardMidi}
+              onClick={() => store.setKeyboardMidi(!store.keyboardMidi)}
+            />
             <label className="menu-sig">
               Sig
               <select
@@ -1418,8 +1477,13 @@ async function importDropped(files: FileList) {
               hint={surface === 'studio' ? copyOf(MENU_COPY, 'artist').hint : copyOf(MENU_COPY, 'studio').hint}
               onClick={() => {
                 setMenuOpen(false)
-                if (!collabShown) showCollab()
-                else hideCollab()
+                if (surface === 'studio') {
+                  openPerform('keys')
+                  setSurface('artist')
+                } else {
+                  setSurface('studio')
+                  setPerform(null)
+                }
               }}
             />
             {!phone && (
@@ -1433,16 +1497,17 @@ async function importDropped(files: FileList) {
           </div>
         )}
       </header>
-      {(surface === 'studio' || session.state.status === 'live') && (
+      {(surface === 'studio' || surface === 'artist' || session.state.status === 'live') && (
         <TransportBar
           store={store}
           engine={engine}
           syncLabel={session.state.syncLabel}
           simple={phone}
+          recordHint={recordHint}
           onPlay={() => { engine.unlock(); void play() }}
           onStop={() => void stop()}
           onRecord={() => { engine.unlock(); void record() }}
-          onSeek={(sample) => void locate(sample)}
+          onSeek={(sample) => void (sample === 0 ? returnToStart() : locate(sample))}
           takeProgress={session.state.takeProgress}
         />
       )}
