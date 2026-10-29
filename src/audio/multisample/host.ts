@@ -30,6 +30,8 @@ interface Live {
   script: ScriptProcessorNode | null
   worklet: AudioWorkletNode | null
   signature: string
+  playSig: string
+  micSig: string
   notes: Queued[]
   sent: Set<string>
   dedupe: Map<number, number>
@@ -60,16 +62,31 @@ export class LibraryHost {
       this.installAssets(live, track, assetOf)
       const program = track.library
       const signature = `${program.id}:${program.zones.length}:${program.samples.length}:${program.zones[0]?.id ?? ''}:${program.zones[program.zones.length - 1]?.id ?? ''}`
+      const playSig = JSON.stringify(program.play ?? null)
+      const micSig = JSON.stringify(program.mics ?? [])
       const changed = signature !== live.signature
       if (changed) {
         live.instrument.setProgram(program)
         live.signature = signature
+        live.playSig = playSig
+        live.micSig = micSig
       }
       live.instrument.setKeyswitch(program.defaultSwitch)
       live.instrument.applyMics(program.mics)
       live.instrument.setVoiceLimit(phone ? Math.min(12, program.voices) : program.voices)
       if (changed) this.publish(live, track, phone)
-      else this.flush(live)
+      else {
+        if (playSig !== live.playSig) {
+          live.playSig = playSig
+          live.instrument.setPlay(program.play)
+          live.worklet?.port.postMessage({ type: 'play', play: program.play })
+        }
+        if (micSig !== live.micSig) {
+          live.micSig = micSig
+          live.worklet?.port.postMessage({ type: 'mics', mics: program.mics })
+        }
+        this.flush(live)
+      }
       for (const note of this.pending.get(track.id) ?? []) this.deliver(live, note)
       this.pending.delete(track.id)
     }
@@ -173,6 +190,8 @@ export class LibraryHost {
       if (!found.script && found.instrument.sampleRate !== sampleRate) {
         found.instrument = new SamplerInstrument(sampleRate, found.cache)
         found.signature = ''
+        found.playSig = ''
+        found.micSig = ''
       }
       return found
     }
@@ -184,6 +203,8 @@ export class LibraryHost {
       script: null,
       worklet: null,
       signature: '',
+      playSig: '',
+      micSig: '',
       notes: [],
       sent: new Set(),
       dedupe: new Map(),

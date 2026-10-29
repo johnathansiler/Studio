@@ -2,16 +2,40 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import type { AudioEngine } from '../audio/engine'
 import type { ArrangeTool } from '../state/tools'
 import type { AutoSpec } from '../model/automation'
+import { channelAutomationMode } from '../model/automation'
 import { automatedValue, automationWriteMode, laneChoices, lanePoints, mixGroupsOf, trackGroupId } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import type { AutomationWriteMode } from '../model/types'
 import './automation.css'
 
 const MODES: { id: AutomationWriteMode; label: string; title: string }[] = [
-  { id: 'read', label: 'Read', title: 'Read automation while playing. Controls follow the lane.' },
-  { id: 'latch', label: 'Latch', title: 'Latch writes the value you set until playback stops.' },
-  { id: 'touch', label: 'Touch', title: 'Touch writes only while you hold the control.' },
+  { id: 'off', label: 'Off', title: 'Off. This channel ignores automation. The faders and knobs always change the sound.' },
+  { id: 'read', label: 'Read', title: 'Read. This channel plays its automation. A control with no lane still changes the sound.' },
+  { id: 'touch', label: 'Touch', title: 'Touch. This channel writes only while you hold the control.' },
+  { id: 'latch', label: 'Latch', title: 'Latch. This channel keeps writing the value you set until playback stops.' },
 ]
+
+/** Per-channel automation. One strip does not change the others. */
+export function ChannelAutomation({ store, trackId }: { store: ProjectStore; trackId: string | 'master' }) {
+  const mode = channelAutomationMode(store.project, trackId)
+  const name = trackId === 'master' ? 'Master' : store.project.tracks.find((track) => track.id === trackId)?.name ?? 'Channel'
+  return (
+    <div className="strip-auto" role="group" aria-label={`${name} automation`}>
+      {MODES.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          className={mode === item.id ? 'on' : ''}
+          aria-pressed={mode === item.id}
+          title={item.title}
+          onClick={() => (trackId === 'master' ? store.setMasterAutomation(item.id) : store.setTrackAutomation(trackId, item.id))}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 export function AutomationModeBar({ store }: { store: ProjectStore }) {
   const mode = automationWriteMode(store.project)
@@ -121,7 +145,7 @@ export function AutoFader({ store, engine, spec, value, label, className }: { st
     [engine],
   )
   const rolling = status === 'playing' || status === 'recording'
-  const mode = automationWriteMode(store.project)
+  const mode = channelAutomationMode(store.project, spec.trackId === 'master' ? 'master' : spec.trackId)
   const shown = rolling && mode === 'read' ? automatedValue(store.project, spec, sample, value) : value
   const span = spec.max - spec.min
   return (

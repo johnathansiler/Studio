@@ -4,7 +4,7 @@ import { STRIP_BOUNDS } from '../model/layoutWidth'
 import { selectMixer } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
-import { AutoFader, AutomationModeBar, LinkGroup, MixFlags } from './AutomationLane'
+import { AutoFader, ChannelAutomation, LinkGroup, MixFlags } from './AutomationLane'
 import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
@@ -26,10 +26,10 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
     <div className="mixer-view" ref={areaRef} data-strip-width={layout.strip} style={{ ['--strip' as string]: `${layout.strip}px` }}>
       <WidthBar axis="strip" value={layout.strip} onChange={setStrip} onReset={resetStrip} />
       <div className="mixer">
-      <AutomationModeBar store={store} />
       {project.tracks.map((track) => (
         <div className="strip" data-track={track.id} key={track.id}>
           <h3 style={{ color: track.color }}>{track.name}</h3>
+          <ChannelAutomation store={store} trackId={track.id} />
           <RouteFields store={store} trackId={track.id} />
           <LinkGroup store={store} trackId={track.id} />
           <InsertList store={store} trackId={track.id} />
@@ -50,11 +50,24 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
       <AddTrackButton store={store} />
       <div className="strip master">
         <h3>Master</h3>
+        <ChannelAutomation store={store} trackId="master" />
         <button id="master-open" className="text-btn master-open" aria-label="Master. Loudness, tone, and the limiter." title="Loudness, tone, and the limiter." onClick={() => setMasterOpen(true)}>Master</button>
         <MasterReadout engine={engine} />
         <div className="fader-row">
           <Meter engine={engine} id="master" />
-          <input type="range" min={0} max={1.25} step={0.01} aria-label="Master volume. How loud the whole mix is." title="How loud the whole mix is." value={project.masterVolume} onChange={(event) => store.setMasterVolume(Number(event.target.value))} />
+          <input
+            type="range"
+            min={0}
+            max={1.25}
+            step={0.01}
+            aria-label="Master volume. How loud the whole mix is."
+            title="How loud the whole mix is."
+            value={project.masterVolume}
+            onPointerDown={() => store.beginAutomationTouch()}
+            onPointerUp={() => store.endAutomationTouch()}
+            onPointerCancel={() => store.endAutomationTouch()}
+            onChange={(event) => store.setMasterVolume(Number(event.target.value))}
+          />
         </div>
       </div>
       </div>

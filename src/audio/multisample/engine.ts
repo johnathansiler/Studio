@@ -84,6 +84,24 @@ export class SamplerInstrument {
     this.bank = bank ?? new MemoryBank()
   }
 
+  /** Envelope, tune, tone, and loop. Sounding notes keep playing. */
+  setPlay(play: SamplerProgram['play']) {
+    if (!this.currentProgram || !play) return
+    const previous = this.currentProgram.play?.tune ?? 0
+    this.currentProgram.play = play
+    const ratio = 2 ** (((play.tune ?? 0) - previous) / 12)
+    for (const voice of this.voices) {
+      if (!voice.active) continue
+      voice.attack = Math.max(0, play.attack)
+      voice.decay = Math.max(0, play.decay)
+      voice.sustain = Math.max(0, Math.min(1, play.sustain))
+      voice.release = Math.max(0.005, play.release)
+      if ((play.tune ?? 0) !== previous) voice.tune *= ratio
+      if (play.loop === true) voice.looping = true
+      else if (play.loop === false) voice.looping = false
+    }
+  }
+
   setProgram(program: SamplerProgram | null) {
     this.currentProgram = program
     this.silence()

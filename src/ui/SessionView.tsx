@@ -492,12 +492,12 @@ function TrackMix({ store, track, index, level }: { store: ProjectStore; track: 
   return (
     <div className="sl-mix" data-mixer={track.id}>
       <div className="sl-fader">
-        <input aria-label={`${track.name} volume`} title="Volume." type="range" min={0} max={1.25} step={0.01} value={track.volume} onChange={(event) => store.updateTrack(track.id, { volume: Number(event.target.value) })} />
+        <input aria-label={`${track.name} volume`} title="Volume." type="range" min={0} max={1.25} step={0.01} value={track.volume} onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()} onChange={(event) => store.updateTrack(track.id, { volume: Number(event.target.value) })} />
         <div className="sl-meter" aria-hidden><i style={{ height: `${Math.min(100, level * 160)}%` }} /></div>
       </div>
       <label className="sl-pan">
         Pan
-        <input aria-label={`${track.name} pan`} title="Pan." type="range" min={-1} max={1} step={0.01} value={track.pan} onChange={(event) => store.updateTrack(track.id, { pan: Number(event.target.value) })} />
+        <input aria-label={`${track.name} pan`} title="Pan." type="range" min={-1} max={1} step={0.01} value={track.pan} onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()} onChange={(event) => store.updateTrack(track.id, { pan: Number(event.target.value) })} />
       </label>
       <div className="sl-flags">
         <button type="button" className={track.mute ? 'mute on' : ''} title="Activator. Turn the track on or off." onClick={() => store.updateTrack(track.id, { mute: !track.mute })}>{index + 1}</button>

@@ -33,16 +33,17 @@ import type { InstrumentPlay, SamplePack, SamplerProgram } from '../audio/multis
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
+import { readKeyboardEnabled, writeKeyboardEnabled } from '../model/keyboardPlay'
 import { HistoryJournal } from './history'
 import { type ProjectOp, type StampWire } from './ops'
 import { ProjectSync } from './sync'
 import { activeTool, setActiveTool, type ArrangeTool } from './tools'
 import {
+  channelAutomationMode,
   drawPoint,
   ensureLane,
   eraseNear,
   findLane,
-  modeOf,
   movePoint,
   specKey,
   writeSegment,
@@ -303,7 +304,15 @@ export class ProjectStore {
     this.selectedMidiClipId = null
     this.selectedNoteId = null
     this.selectedNoteIds = []
+    this.keyboardMidi = readKeyboardEnabled()
     this.sync.rebase(this.project)
+  }
+
+  /** Computer keyboard notes and the docked piano. Remembered on this computer. */
+  setKeyboardMidi(on: boolean) {
+    this.keyboardMidi = on
+    writeKeyboardEnabled(on)
+    this.emit()
   }
 
   subscribe = (fn: Listener) => {
@@ -1324,8 +1333,23 @@ export class ProjectStore {
   }
 
   setMasterVolume(volume: number) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       this.project.masterVolume = clamp(volume, 0, 1.25)
+    })
+  }
+
+  /** One channel's automation mode. Other channels are left alone. */
+  setTrackAutomation(trackId: string, mode: 'off' | 'read' | 'touch' | 'latch') {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (track) track.automationMode = mode
+    })
+  }
+
+  setMasterAutomation(mode: 'off' | 'read' | 'touch' | 'latch') {
+    this.mutate(() => {
+      this.project.masterAutomationMode = mode
     })
   }
 
@@ -1475,7 +1499,8 @@ export class ProjectStore {
 
   /** Envelope and tune for a multi-sample instrument. Times are seconds. */
   setInstrumentPlay(trackId: string, patch: Partial<InstrumentPlay>) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const program = this.track(trackId)?.library
       if (!program) return
       const zone = program.zones[0]
@@ -1493,7 +1518,8 @@ export class ProjectStore {
   }
 
   setLibraryMic(trackId: string, micId: string, gain: number, mute?: boolean) {
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const mic = this.track(trackId)?.library?.mics.find((item) => item.id === micId)
       if (!mic) return
       mic.gain = Math.max(0, Math.min(1, gain))
@@ -1557,7 +1583,8 @@ export class ProjectStore {
 
   updateTrack(id: string, patch: Partial<Track>) {
     if ((patch.output !== undefined || patch.groupId !== undefined) && this.routeLoops(id, patch)) return
-    this.mutate(() => {
+    const run = this.touching ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
       const track = this.track(id)
       if (!track) return
       const mixer: { volume?: number; pan?: number; mute?: boolean; solo?: boolean; soloSafe?: boolean } = {}
@@ -2091,15 +2118,19 @@ export class ProjectStore {
   }
 
   endAutomationTouch() {
+    const was = this.touching
     this.touching = false
+    if (was && this.drafted) this.endDraft()
   }
 
   /** Move a mixer or plugin control. Latch and touch write a lane while the transport is rolling. */
   setAutomated(spec: AutoSpec, value: number, playing: boolean, sample: number) {
-    const mode = modeOf(this.project)
-    if (playing && mode === 'read') return
-    const writing = playing && (mode === 'latch' || this.touching)
-    const run = writing ? (fn: () => void) => this.draft(fn) : (fn: () => void) => this.mutate(fn)
+    const mode = channelAutomationMode(this.project, spec.trackId === 'master' ? 'master' : spec.trackId)
+    // Read only locks a control that already has a lane. A bare fader or knob still drives the audio.
+    if (playing && mode === 'read' && this.pointsOf(spec).length > 0) return
+    const writing = playing && (mode === 'latch' || (mode === 'touch' && this.touching))
+    const gesture = this.touching || writing
+    const run = gesture ? (fn: () => void) => this.draft(fn) : (fn: () => void) => this.mutate(fn)
     run(() => {
       this.applySpec(spec, value)
       if (!writing) {
@@ -2117,7 +2148,8 @@ export class ProjectStore {
   }
 
   sustainAutomation(sample: number) {
-    if (modeOf(this.project) !== 'latch' || !this.write || this.touching) return
+    if (!this.write || this.touching) return
+    if (channelAutomationMode(this.project, this.write.spec.trackId === 'master' ? 'master' : this.write.spec.trackId) !== 'latch') return
     const beat = projectSampleBeat(this.project, sample)
     if (beat <= this.write.beat + 0.02) return
     const cursor = this.write

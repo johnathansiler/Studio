@@ -4,9 +4,9 @@ import { tuneBlockScale } from './plugins/autoTune'
 import type { StripNodes } from './strips'
 import { processChain, type ChainSlot } from './plugins/chain'
 import { automationAt, latencyOf } from './plugins/catalog'
-import { automationSchedule, sendLane, valueChanges } from '../model/automation'
+import { automationSchedule, channelAutomationMode, laneIsLive, sendLane, valueChanges } from '../model/automation'
 import { projectSampleBeat } from '../model/tempoMap'
-import { applyRamps } from './paramCurve'
+import { applyRamps, smoothParam } from './paramCurve'
 import { processSampleAccurate } from './automationRender'
 import { loadModule } from './plugins/registry'
 import type { Processor } from './plugins/types'
@@ -348,11 +348,12 @@ export class LiveRack {
       return buf.subarray(0, Math.min(buf.length, length))
     }
     const endBeat = beatAt(origin + Math.max(0, input[0].length - 1))
-    const moving = project.automation.some((lane) => (lane.target == null || lane.target === 'plugin') && plugins.some((plugin) => plugin.id === lane.pluginId) && valueChanges(lane.points, beat, endBeat, 0))
+    const automation = project.automation.filter((lane) => laneIsLive(project, lane))
+    const moving = automation.some((lane) => (lane.target == null || lane.target === 'plugin') && plugins.some((plugin) => plugin.id === lane.pluginId) && valueChanges(lane.points, beat, endBeat, 0))
     if (moving) {
-      processSampleAccurate(slots, input, output, blockCtx, project.automation, keyAt, beatAt)
+      processSampleAccurate(slots, input, output, blockCtx, automation, keyAt, beatAt)
     } else {
-      for (const slot of slots) slot.params = automationAt(project.automation, slot.id, slot.params, beat)
+      for (const slot of slots) slot.params = automationAt(automation, slot.id, slot.params, beat)
       processChain(slots, input, output, blockCtx, keyAt)
     }
     for (const slot of slots) {
@@ -414,10 +415,11 @@ export class LiveRack {
   }
 
   private applySendGains(project: Project) {
+    const now = this.ctx?.currentTime ?? 0
     for (const track of project.tracks) {
       for (const send of track.sends) {
         const gain = this.sendGains.get(send.id)
-        if (gain) gain.gain.value = send.gain
+        if (gain) smoothParam(gain.gain, send.gain, now)
       }
     }
   }
@@ -428,10 +430,10 @@ export class LiveRack {
       for (const send of track.sends) {
         const node = this.sendGains.get(send.id)
         if (!node) continue
-        const points = sendLane(project.automation, track.id, send.id)?.points
+        const follow = channelAutomationMode(project, track.id) !== 'off'
+        const points = follow ? sendLane(project.automation, track.id, send.id)?.points : undefined
         if (!playing || !points?.length) {
-          node.gain.cancelScheduledValues(now)
-          node.gain.setTargetAtTime(send.gain, now, 0.015)
+          smoothParam(node.gain, send.gain, now)
           continue
         }
         applyRamps(node.gain, automationSchedule(points, send.gain, project, sample, now, endSample), now)
@@ -588,7 +590,7 @@ export class LiveRack {
           sidechain: plugin.sidechain,
           sampler: plugin.sampler,
         })),
-        automation: project.automation,
+        automation: project.automation.filter((lane) => laneIsLive(project, lane)),
         tempo: project.tempo,
         projectRate: project.sampleRate,
         tempoMap: project.tempoMap ?? [],

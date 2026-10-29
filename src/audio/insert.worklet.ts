@@ -67,6 +67,7 @@ class InsertProcessor extends AudioWorkletProcessor {
   private originTime = 0
   private originSample = 0
   private posts = 0
+  private held = new Map<string, Record<string, number>>()
 
   constructor() {
     super()
@@ -207,7 +208,7 @@ class InsertProcessor extends AudioWorkletProcessor {
     const moving = this.automation.some((lane) => (lane.target == null || lane.target === 'plugin') && chain.some((slot) => slot.id === lane.pluginId) && valueChanges(lane.points, beat, endBeat, 0))
     if (moving) processSampleAccurate(chain, inputChannels, outputChannels, ctx, this.automation, keyAt, beatAt)
     else {
-      for (const slot of chain) slot.params = automationAt(this.automation, slot.id, slot.params, beat)
+      for (const slot of chain) slot.params = this.glide(slot.id, automationAt(this.automation, slot.id, slot.params, beat), frames)
       processChain(chain, inputChannels, outputChannels, ctx, keyAt)
     }
     const outL = output[0]
@@ -219,6 +220,25 @@ class InsertProcessor extends AudioWorkletProcessor {
     this.posts += 1
     if (this.posts % 16 === 0) this.postMeters(chain)
     return true
+  }
+
+  /** Approach the posted value over about 10 ms so a knob does not click. */
+  private glide(id: string, params: Record<string, number>, frames: number) {
+    const prev = this.held.get(id)
+    const next = { ...params }
+    if (!prev) {
+      this.held.set(id, { ...next })
+      return next
+    }
+    const alpha = Math.min(1, frames / Math.max(1, 0.01 * sampleRate))
+    for (const key of Object.keys(next)) {
+      const from = typeof prev[key] === 'number' ? prev[key] : next[key]
+      const value = from + ((next[key] ?? from) - from) * alpha
+      next[key] = value
+      prev[key] = value
+    }
+    for (const key of Object.keys(prev)) if (!(key in next)) delete prev[key]
+    return next
   }
 
   private postMeters(chain: ChainSlot[]) {

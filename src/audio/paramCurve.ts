@@ -1,7 +1,28 @@
 export interface RampParam {
+  value?: number
   cancelScheduledValues(time: number): void
   setValueAtTime(value: number, time: number): void
   linearRampToValueAtTime(value: number, time: number): void
+  setTargetAtTime?(value: number, time: number, timeConstant: number): void
+}
+
+/** About 10 ms. Long enough to hide zipper noise, short enough to feel immediate. */
+export const PARAM_SMOOTH_SEC = 0.01
+
+/**
+ * Move an existing AudioParam to `value` without rebuilding the graph.
+ * The current value is anchored, then a 5–15 ms exponential approach lands on the target.
+ */
+export function smoothParam(param: RampParam, value: number, now: number, seconds = PARAM_SMOOTH_SEC) {
+  const target = Number.isFinite(value) ? value : 0
+  const current = typeof param.value === 'number' && Number.isFinite(param.value) ? param.value : target
+  const time = Number.isFinite(now) ? now : 0
+  const tau = Math.min(0.015, Math.max(0.005, seconds))
+  param.cancelScheduledValues(time)
+  param.setValueAtTime(current, time)
+  if (Math.abs(current - target) < 1e-5) return
+  if (param.setTargetAtTime) param.setTargetAtTime(target, time, tau)
+  else param.linearRampToValueAtTime(target, time + tau)
 }
 
 /** Sample-accurate line between automation breakpoints on an AudioParam clock. */
