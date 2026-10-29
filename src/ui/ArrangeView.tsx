@@ -9,7 +9,7 @@ import { rectsHit } from '../model/edit'
 import { SCALER_MIME, parseScalerDrag } from '../instruments/scaler/model'
 import { patternHostId } from '../model/steps'
 import { loopGridBeats } from '../model/loopEdit'
-import { activeGridBeats, edgeFromPointer, lengthReadout } from '../model/snapGrid'
+import { activeGridBeats, edgeFromPointer, lengthReadout, subdivisionFor } from '../model/snapGrid'
 import { quartersPerBar } from '../model/time'
 import { patternToMidiNotes } from '../model/patternMidi'
 import { panelChoice, rememberPanel } from './panelMemory'
@@ -727,7 +727,7 @@ export function ArrangeView({
                 event.preventDefault()
                 event.stopPropagation()
                 const sample = sampleAt(event.clientX)
-                const beat = projectSampleBeat(project, project.snap ? snapSampleToMap(sample, project) : sample)
+                const beat = projectSampleBeat(project, project.snap ? snapSampleToMap(sample, project, subdivisionFor(project)) : sample)
                 store.writeScalerClip(track.id, payload.notes, Math.max(0, beat), payload.name)
               }}
             >

@@ -308,7 +308,8 @@ export function formatMapBars(project: Project, sample: number): string {
 export function snapSampleToMap(sample: number, project: Project, subdivision = 1): number {
   const rounded = Math.max(0, Math.round(sample))
   if (!project.snap) return rounded
-  const unit = 1 / Math.max(1, subdivision)
+  // 1 is a quarter note. 4 is a sixteenth. 0.25 is a bar in 4/4.
+  const unit = 1 / Math.max(1e-6, subdivision)
   const beat = projectSampleBeat(project, rounded)
   const snapped = Math.max(0, Math.round(beat / unit) * unit)
   return Math.max(0, Math.round(projectBeatSample(project, snapped)))

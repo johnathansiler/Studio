@@ -2619,6 +2619,16 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   gap: 3px;
   padding: 0;
 }
+.shell .mixer-view[data-narrow] .strip .mini,
+.shell .mixer-view[data-layout="rows"] .strip .mini,
+.shell .mixer-view[data-narrow] .strip-auto button,
+.shell .mixer-view[data-layout="rows"] .strip-auto button,
+.shell .mixer-view[data-narrow] .strip .master-open,
+.shell .mixer-view[data-narrow] .strip .lvl-open,
+.shell .mixer-view[data-layout="rows"] .strip .master-open,
+.shell .mixer-view[data-layout="rows"] .strip .lvl-open {
+  flex-direction: column;
+}
 .shell .mixer-view[data-narrow] .strip-auto button,
 .shell .mixer-view[data-narrow] .strip .mini,
 .shell .mixer-view[data-narrow] .strip .tune-btn,

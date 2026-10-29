@@ -11,11 +11,11 @@ export function SnapControl({ store }: { store: ProjectStore }) {
         type="button"
         className={`snap-toggle${on ? ' on' : ''}`}
         aria-pressed={on}
-        title={on ? 'Snap is on. Edits land on the grid.' : 'Fine is on. Edits move in small steps, with no grid.'}
+        title={on ? 'Snap is on. Edits land on the grid. Press to move in small steps.' : 'Snap is off. Edits move in small steps. Press to land on the grid.'}
         onClick={() => store.toggle('snap')}
       >
-        <strong>{on ? 'Snap' : 'Fine'}</strong>
-        <small>{on ? 'On grid' : 'Free'}</small>
+        <strong>Snap</strong>
+        <small>{on ? 'On' : 'Fine'}</small>
       </button>
       <select
         aria-label="Snap grid"

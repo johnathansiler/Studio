@@ -2565,7 +2565,7 @@ export class ProjectStore {
 
   trimClip(trackId: string, clipId: string, edge: 'start' | 'end', sample: number) {
     this.mutate(() => {
-      const at = snapSampleToMap(sample, this.project)
+      const at = snapSampleToMap(sample, this.project, subdivisionFor(this.project))
       const ids = new Set(trimLinkedAudio(this.project, trackId, clipId, edge, at, (clip) => {
         const asset = this.buffers.get(clip.bufferId)
         return asset?.channels[0].length ?? clip.offsetSamples + clip.durationSamples
@@ -2583,7 +2583,7 @@ export class ProjectStore {
         if (done.has(move.clipId)) continue
         const clip = this.track(move.trackId)?.clips.find((item) => item.id === move.clipId)
         if (!clip) continue
-        const start = snapSampleToMap(move.startSample, this.project)
+        const start = snapSampleToMap(move.startSample, this.project, subdivisionFor(this.project))
         for (const id of shiftLinkedAudio(this.project, move.trackId, move.clipId, start)) done.add(id)
       }
     })
@@ -2677,8 +2677,9 @@ export class ProjectStore {
     this.mutate(() => {
       const track = this.track(trackId)
       if (!track) return
-      const a = snapSampleToMap(Math.min(startSample, endSample), this.project)
-      let b = snapSampleToMap(Math.max(startSample, endSample), this.project)
+      const grid = subdivisionFor(this.project)
+      const a = snapSampleToMap(Math.min(startSample, endSample), this.project, grid)
+      let b = snapSampleToMap(Math.max(startSample, endSample), this.project, grid)
       const quarter = beatsToSamples(1, this.project.sampleRate, tempoAtSample(this.project, a))
       if (b - a < quarter / 4) b = a + quarter
       this.selectedTrackId = trackId

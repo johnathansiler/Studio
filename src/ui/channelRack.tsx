@@ -728,7 +728,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
               store={store}
               project={project}
               view="rack"
-              gridBeats={loopGridBeats(project, STEP_BEAT)}
+              gridBeats={loopGridBeats(project)}
               sampleAt={(clientX, rect) => {
                 const beats = Math.max(STEP_BEAT, count * STEP_BEAT)
                 return projectBeatSample(project, Math.max(0, ((clientX - rect.left) / Math.max(1, rect.width)) * beats))

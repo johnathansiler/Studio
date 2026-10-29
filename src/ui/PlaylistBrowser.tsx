@@ -189,7 +189,7 @@ export function PlaylistBrowser({
                 key={pattern.id}
                 type="button"
                 className="browser-row"
-                title="Drag onto the playlist. It lands on the lane under the pointer."
+                title="In song. Place this pattern on Arrange as a linked clip. Editing the pattern updates every copy. Drag to choose the lane."
                 onPointerDown={(event) => {
                   if (event.button !== 0) return
                   dragging.current = false
@@ -222,6 +222,7 @@ export function PlaylistBrowser({
                 <i style={{ background: pattern.color }} />
                 <strong>{pattern.name}</strong>
                 <span>{pattern.steps} steps</span>
+                <span>In song</span>
               </button>
             ))}
             {tab === 'plugins' && plugins.map((plugin) => (

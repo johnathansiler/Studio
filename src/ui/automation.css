@@ -18,14 +18,18 @@
 .auto-mode .mode-full,
 .arm-full,
 .master-full { display: inline; }
-.mode-caption {
-  display: block;
-  font-size: 10px;
+.mode-caption,
+.mini-caption {
+  max-width: 100%;
+  font-size: 8px;
   font-weight: 680;
-  line-height: 1.05;
-  letter-spacing: -0.03em;
+  line-height: 1;
+  letter-spacing: 0;
+  text-align: center;
   color: inherit;
+  white-space: nowrap;
 }
+.mode-caption { display: block; }
 .auto-mode.in-strip {
   flex-wrap: nowrap;
   width: 100%;

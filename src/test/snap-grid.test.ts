@@ -8,9 +8,11 @@ import {
   grownClipEnd,
   snapBeatToGrid,
   snapEditBeat,
+  subdivisionFor,
 } from '../model/snapGrid'
 import { ProjectStore } from '../state/store'
 import { patternToMidiNotes } from '../model/patternMidi'
+import { projectBeatSample, snapSampleToMap } from '../model/tempoMap'
 
 describe('snap grid', () => {
   it('snaps to 1/16, 1/4, a bar, and stays free when snap is off', () => {
@@ -27,6 +29,12 @@ describe('snap grid', () => {
     project.snapDivision = 'bar'
     expect(activeGridBeats(project)).toBeCloseTo(4)
     expect(ceilToGrid(4.2, 4)).toBeCloseTo(8)
+    project.snap = true
+    const barSample = projectBeatSample(project, 2.2)
+    expect(snapSampleToMap(barSample, project, subdivisionFor(project))).toBe(projectBeatSample(project, 4))
+    project.snapDivision = '1/2'
+    expect(subdivisionFor(project)).toBeCloseTo(0.5)
+    expect(snapSampleToMap(projectBeatSample(project, 2.6), project, subdivisionFor(project))).toBe(projectBeatSample(project, 2))
     project.snap = false
     expect(activeGridBeats(project)).toBe(0)
     expect(clipEndForContent(1.2, project)).toBeCloseTo(4)
@@ -73,13 +81,16 @@ describe('clip ends follow the snap grid', () => {
 
     const pattern = store.activePattern()!
     for (const channel of pattern.channels) channel.cells = channel.cells.map((cell) => ({ ...cell, on: false }))
+    pattern.swing = 0.5
     pattern.channels[0].cells[0] = { ...pattern.channels[0].cells[0], on: true, velocity: 0.9 }
-    pattern.channels[1].cells[4] = { ...pattern.channels[1].cells[4], on: true, velocity: 0.8 }
+    pattern.channels[1].cells[1] = { ...pattern.channels[1].cells[1], on: true, velocity: 0.8 }
     const made = store.sendPatternToArrange(0)
     expect(made).toBeTruthy()
     const arranged = store.project.tracks.find((item) => item.id === made!.trackId)!.midiClips.find((item) => item.id === made!.clipId)!
     expect(arranged.notes.map((note) => note.pitch).sort()).toEqual(patternToMidiNotes(pattern).map((note) => note.pitch).sort())
     expect(arranged.notes.length).toBeGreaterThan(0)
+    const swung = arranged.notes.find((note) => note.pitch === pattern.channels[1].note)
+    expect(swung?.startBeat).toBeCloseTo(0.25 + pattern.swing * 0.25)
     expect(arranged.durationBeats).toBeGreaterThanOrEqual(patternToMidiNotes(pattern).reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0) - 1e-6)
   })
 })
