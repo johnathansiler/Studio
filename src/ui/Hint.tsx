@@ -187,6 +187,7 @@ export function MenuRow({
   disabled,
   className,
   id,
+  action,
   onClick,
 }: {
   label: string
@@ -195,6 +196,7 @@ export function MenuRow({
   disabled?: boolean
   className?: string
   id?: string
+  action?: string
   onClick: () => void
 }) {
   return (
@@ -206,6 +208,7 @@ export function MenuRow({
       title={hint}
       aria-label={`${label}. ${hint}`}
       aria-pressed={pressed}
+      data-menu-action={action}
       onClick={onClick}
     >
       <span>{label}</span>
