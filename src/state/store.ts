@@ -1,6 +1,5 @@
 import { isChainPlugin, isDrumsPlugin } from '../audio/plugins/ids'
 import { FEATURES, preferArrangeTransport, preferArrangeView } from '../features'
-import { MASTERING_IDS } from '../audio/master/assistant'
 import { spectralKey, ensureRepair, pushOp, sliceRegion } from '../audio/spectral/edit'
 import { learnOffline } from '../audio/spectral/job'
 import type { SpectralAction, SpectralRegion } from '../audio/spectral/types'
