@@ -15,8 +15,8 @@ import { TouchSlider } from './kit/controls'
 import { TrackPresence } from './presenceMarks'
 import { SecondaryRack, type SecondaryItem } from './SecondaryRack'
 
-export function MixerView({ store, engine, onTune }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void }) {
-  return <MixerBody key={store.project.id} store={store} engine={engine} onTune={onTune} />
+export function MixerView({ store, engine, onTune, onOpenKeyboard }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void; onOpenKeyboard?: (trackId: string) => void }) {
+  return <MixerBody key={store.project.id} store={store} engine={engine} onTune={onTune} onOpenKeyboard={onOpenKeyboard} />
 }
 
 function readViewport() {
@@ -24,7 +24,7 @@ function readViewport() {
   return { width: window.innerWidth, height: window.innerHeight }
 }
 
-function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void }) {
+function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void; onOpenKeyboard?: (trackId: string) => void }) {
   const project = selectMixer(store).project
   const { layout, setStrip, setMixer, resetStrip } = useLayoutWidths(project.id)
   const areaRef = useRef<HTMLDivElement>(null)
@@ -69,6 +69,7 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
           rows={rows}
           selected={store.selectedTrackId === track.id}
           onTune={onTune}
+          onOpenKeyboard={onOpenKeyboard}
           onFx={() => setFxTrack(track.id)}
         />
       ))}
@@ -105,6 +106,7 @@ function ChannelStrip({
   rows,
   selected,
   onTune,
+  onOpenKeyboard,
   onFx,
 }: {
   store: ProjectStore
@@ -113,6 +115,7 @@ function ChannelStrip({
   rows: boolean
   selected: boolean
   onTune?: (trackId: string) => void
+  onOpenKeyboard?: (trackId: string) => void
   onFx: () => void
 }) {
   const track = store.track(trackId)
@@ -134,7 +137,7 @@ function ChannelStrip({
     { id: 'solo', label: 'Solo', node: <MixFlags store={store} trackId={track.id} part="solo" /> },
   ]
   return (
-    <div className={`strip${selected ? ' is-selected' : ''}`} data-track={track.id} onClick={() => store.selectTrack(track.id)}>
+    <div className={`strip${selected ? ' is-selected' : ''}`} data-track={track.id} onClick={() => { store.selectTrack(track.id); onOpenKeyboard?.(track.id) }}>
       {rows ? (
         <>
           <div className="strip-top">

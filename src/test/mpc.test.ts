@@ -354,7 +354,7 @@ describe('sampler drums', () => {
     expect(html).toContain('aria-label="Data wheel"')
     expect(html).toContain('Play start')
     expect(html).not.toContain('Akai')
-    expect(html).toContain('Full level')
+    expect(html).toContain('Full Level')
     expect(html).toContain('velocity 127')
     expect(html).toContain('Humanize')
     expect(html).toContain('aria-label="Humanize timing"')

@@ -14,6 +14,7 @@ import { loopGridBeats } from '../model/loopEdit'
 import { gridBackground, gridPaint } from '../model/gridLines'
 import { activeGridBeats, edgeFromPointer, lengthReadout, moveFromPointer, positionReadout, subdivisionFor } from '../model/snapGrid'
 import { quartersPerBar } from '../model/time'
+import { editorForGesture } from '../model/editorOpen'
 import { patternToMidiNotes } from '../model/patternMidi'
 import { panelChoice, rememberPanel } from './panelMemory'
 import { arrangementEndSample, gridMarks, mapIsLinear, projectBeatSample, projectSampleBeat, pxAtBeat, snapSampleToMap } from '../model/tempoMap'
@@ -85,6 +86,7 @@ export function ArrangeView({
   session,
   onSeek,
   onOpenPiano,
+  onOpenKeyboard,
   onImportInstrument,
   onPerform,
   onOpenBeatMachine,
@@ -98,6 +100,7 @@ export function ArrangeView({
   session: SessionClient
   onSeek: (sample: number) => void
   onOpenPiano: (trackId: string, clipId?: string) => void
+  onOpenKeyboard?: (trackId: string) => void
   onImportInstrument?: (trackId: string, files: FileList) => void
   onPerform: (mode: 'keys' | 'drums') => void
   onOpenBeatMachine?: (trackId: string) => void
@@ -566,6 +569,7 @@ export function ArrangeView({
         const retargeted = !!host && [...origins.values()].some((item) => item.trackId !== host)
         if (!moved && !retargeted) {
           if (additive && wasIn) store.selectClip(trackId, clipId, kind === 'midi', false, true)
+          if (editorForGesture('tap-clip', kind === 'midi' ? 'midi' : 'audio') === 'keyboard') onOpenKeyboard?.(trackId)
           return
         }
         if (kind === 'audio') {
@@ -703,7 +707,7 @@ export function ArrangeView({
           <SongMapHead store={store} position={position} compact />
         </div>
         {project.tracks.map((track) => (
-          <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} style={rowStyle(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => store.selectTrack(track.id)}>
+          <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} style={rowStyle(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => { store.selectTrack(track.id); if (editorForGesture('select-track', track.type) === 'keyboard') onOpenKeyboard?.(track.id) }}>
             <div className="pl-head">
               <i className="swatch" style={{ background: track.color }} />
               <input
@@ -866,7 +870,7 @@ export function ArrangeView({
                 />
               ))}
               {track.type === 'midi' && track.midiClips.every((clip) => clip.slotOnly) && (
-                <button type="button" className="lane-add" aria-label="Add clip" onClick={() => onOpenPiano(track.id)}>+</button>
+                <button type="button" className="lane-add" aria-label="Add clip" onClick={() => { store.addMidiClip(track.id, 0); onOpenKeyboard?.(track.id) }}>+</button>
               )}
               <AutomationOverlay store={store} trackId={track.id} px={px} tool={tool} />
               {track.midiClips.filter((clip) => !clip.slotOnly && clip.scene == null).map((clip) => {
@@ -914,10 +918,21 @@ export function ArrangeView({
                     onDoubleClick={(event) => {
                       event.preventDefault()
                       event.stopPropagation()
-                      onOpenPiano(track.id, clip.id)
+                      store.selectClip(track.id, clip.id, true, false)
+                      if (editorForGesture('tap-clip', 'midi') === 'keyboard') onOpenKeyboard?.(track.id)
                     }}
                   >
                     <em>{clip.name}</em>
+                    {picked && (
+                      <button
+                        type="button"
+                        className="edit-notes"
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => { event.stopPropagation(); if (editorForGesture('edit-notes', 'midi') === 'piano') onOpenPiano(track.id, clip.id) }}
+                      >
+                        Edit Notes
+                      </button>
+                    )}
                     <span className="clip-notes" aria-hidden>
                       {clip.notes.slice(0, 64).map((note) => {
                         const lo = Math.min(...clip.notes.map((item) => item.pitch))
@@ -971,7 +986,7 @@ export function ArrangeView({
                           event.preventDefault()
                           event.stopPropagation()
                           const made = store.mirrorPatternClip(clip.id)
-                          if (made) onOpenPiano(made.trackId, made.clipId)
+                          if (made) onOpenKeyboard?.(made.trackId)
                         }}
                         onPointerDown={(event) => {
                           if ((event.target as HTMLElement).closest('.edge')) return

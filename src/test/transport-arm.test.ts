@@ -14,6 +14,8 @@ import {
   homeSample,
   playOriginSample,
   playPress,
+  playStartsCapture,
+  recordButtonOn,
   recordPress,
   returnSample,
   stopPress,
@@ -82,15 +84,25 @@ describe('transport', () => {
     const project = createEmptyProject()
     expect(project.tracks.every((track) => track.armed === false)).toBe(true)
     expect(hasArmedRecord(project.tracks)).toBe(false)
-    expect(recordPress('stopped', project.tracks)).toBe('empty')
+    expect(recordPress('stopped', project.tracks)).toBe('arm')
+    expect(recordPress('stopped', project.tracks, true)).toBe('disarm')
     expect(recordPress('recording', project.tracks)).toBe('stop')
+    expect(recordButtonOn('playing')).toBe(false)
+    expect(recordButtonOn('counting-in')).toBe(false)
+    expect(recordButtonOn('recording')).toBe(true)
+    expect(playStartsCapture('stopped', false, project.tracks)).toBe(false)
+    expect(playStartsCapture('stopped', true, project.tracks)).toBe(false)
     const vocal = project.tracks[0]
     vocal.armed = true
     expect(armedRecordPlan(project.tracks).audio).toEqual([vocal.id])
     expect(recordPress('stopped', project.tracks)).toBe('start')
+    expect(playStartsCapture('stopped', true, project.tracks)).toBe(true)
+    expect(playStartsCapture('playing', true, project.tracks)).toBe(false)
     vocal.armed = false
     const keys = project.tracks.find((track) => track.type === 'midi')!
     keys.armed = true
+    keys.input = 'none'
+    expect(armedRecordPlan(project.tracks).midi).toEqual([keys.id])
     keys.input = 'midi'
     expect(armedRecordPlan(project.tracks).midi).toEqual([keys.id])
     expect(armedRecordPlan(project.tracks).audio).toEqual([])

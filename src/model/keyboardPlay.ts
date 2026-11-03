@@ -68,13 +68,11 @@ export function claimComputerKey(input: {
   return 'note'
 }
 
-/** The instrument the computer keyboard plays: the selected MIDI track, otherwise an armed one. */
+/** The selected MIDI track. Nothing else is a fallback. */
 export function keyboardTarget(tracks: { id: string; type: string; armed: boolean }[], selectedId: string | null): string | null {
   const selected = tracks.find((track) => track.id === selectedId)
   if (selected?.type === 'midi') return selected.id
-  const armed = tracks.find((track) => track.type === 'midi' && track.armed)
-  if (armed) return armed.id
-  return tracks.find((track) => track.type === 'midi')?.id ?? null
+  return null
 }
 
 export function readKeyboardEnabled(storage: Pick<Storage, 'getItem'> | null = typeof localStorage === 'undefined' ? null : localStorage): boolean {
@@ -109,21 +107,20 @@ export function writeKeyboardOctave(octave: number, storage: Pick<Storage, 'setI
   }
 }
 
-/** The open clip's instrument when a clip is being edited, otherwise the selected or armed MIDI track. */
+/** The selected instrument, and its open clip when that clip belongs to it. */
 export function keyboardDestination(
   tracks: { id: string; type: string; armed: boolean; midiClips?: { id: string; startBeat: number }[] }[],
   selectedTrackId: string | null,
   selectedClipId: string | null,
 ): { trackId: string; clipId: string | null; clipStart: number } | null {
-  if (selectedClipId) {
-    for (const track of tracks) {
-      if (track.type !== 'midi') continue
-      const clip = track.midiClips?.find((item) => item.id === selectedClipId)
-      if (clip) return { trackId: track.id, clipId: clip.id, clipStart: clip.startBeat }
-    }
-  }
   const trackId = keyboardTarget(tracks, selectedTrackId)
-  return trackId ? { trackId, clipId: null, clipStart: 0 } : null
+  if (!trackId) return null
+  const track = tracks.find((item) => item.id === trackId)
+  if (selectedClipId) {
+    const clip = track?.midiClips?.find((item) => item.id === selectedClipId)
+    if (clip) return { trackId, clipId: clip.id, clipStart: clip.startBeat }
+  }
+  return { trackId, clipId: null, clipStart: 0 }
 }
 
 /** The piano roll handles its own keys while it is on screen, so the dock does not play them twice. */

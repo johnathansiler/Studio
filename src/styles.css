@@ -271,28 +271,56 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   box-shadow: var(--glow), inset 0 1px 0 var(--bevel-hi);
 }
 .shell.phone .keyboard-dock { order: 8; max-height: none; }
-.shell.phone.keys-turned {
-  --keys-size: min(52vw, 280px);
-  padding-left: var(--keys-size);
+.keyboard-hint {
+  margin: 0;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--muted);
 }
-.shell.phone.keys-turned .keyboard-dock {
-  position: fixed;
-  z-index: 24;
-  top: 0;
-  left: 0;
-  width: var(--keys-size);
-  height: 100dvh;
-  max-height: none;
-  overflow: hidden;
+.keyboard-edit,
+.edit-notes {
+  min-height: 40px;
+  min-width: 40px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, white);
+  background: #18231d;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 720;
+  white-space: nowrap;
 }
-.shell.phone.keys-turned .keyboard-face {
+.edit-notes {
   position: absolute;
+  z-index: 4;
+  right: 4px;
+  top: 4px;
+  height: 40px;
+}
+.clip.selected { overflow: visible; }
+/* Lock failed: turn the whole phone shell landscape. The dock stays in the shell. */
+.shell.phone.keys-landscape {
+  position: fixed;
+  z-index: 40;
   top: 0;
   left: 0;
   width: 100dvh;
-  height: var(--keys-size);
+  height: 100dvw;
+  max-width: none;
   transform: rotate(90deg) translateY(-100%);
   transform-origin: top left;
+  overflow: hidden;
+  padding-left: 0;
+  padding-right: 0;
+}
+.shell.phone.keys-landscape .keyboard-dock,
+.shell.phone.keys-landscape .keyboard-face {
+  position: static;
+  width: auto;
+  height: auto;
+  max-height: none;
+  transform: none;
 }
 
 .topbar, .transport {

@@ -24,7 +24,9 @@ import { linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
 import { shouldCountIn } from './model/sessionInteract'
-import { hasArmedRecord, homeSample, playPress, stopPress } from './model/transport'
+import { editorForGesture } from './model/editorOpen'
+import { armedRecordPlan, homeSample, playPress, playStartsCapture, recordPress, stopPress } from './model/transport'
+import { keepLandscapeAfterClose } from './ui/keyboardStage'
 import { countInAt, meterAtSample, projectSampleBeat, tempoAtSample } from './model/tempoMap'
 import { displayedPlayhead } from './model/transportSync'
 import { beatsToSamples, countInBarsOf, samplesToBeats } from './model/time'
@@ -215,9 +217,11 @@ export function App() {
   const [invitePending, setInvitePending] = useState(false)
   const [pianoOpen, setPianoOpen] = useState(false)
   const shellRef = useRef<HTMLDivElement>(null)
-  const [keysTurned, setKeysTurned] = useState(false)
+  const [keysLandscape, setKeysLandscape] = useState(false)
   const keysMode = useRef<KeyboardPresentation>('dock')
   const keysFromClick = useRef(false)
+  const recordReady = useRef(false)
+  const holdLandscape = useRef(false)
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
@@ -760,8 +764,7 @@ export function App() {
       KeyA: 60, KeyW: 61, KeyS: 62, KeyE: 63, KeyD: 64, KeyF: 65,
       KeyT: 66, KeyG: 67, KeyY: 68, KeyH: 69, KeyU: 70, KeyJ: 71,
     }
-    const midiTrack = () => store.project.tracks.find((item) => item.id === store.selectedTrackId && item.type === 'midi')
-      || store.project.tracks.find((item) => item.type === 'midi')
+    const midiTrack = () => store.project.tracks.find((item) => item.id === store.selectedTrackId && item.type === 'midi') ?? null
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       const typing = typingTarget(target)
@@ -789,12 +792,11 @@ export function App() {
       const typed = noteKeys[event.code]
       if (store.keyboardMidi && typed != null && !meta && !event.repeat && !document.querySelector('.piano, .me-step, .drum-roll')) {
         const track = midiTrack()
-        if (track) {
-          event.preventDefault()
-          engine.unlock()
-          engine.playThrough(track.id, typed, 0.8)
-          return
-        }
+        if (!track) return
+        event.preventDefault()
+        engine.unlock()
+        engine.playThrough(track.id, typed, 0.8)
+        return
       }
       if (key === 't' && !meta && !event.repeat && !store.keyboardMidi) {
         event.preventDefault()
@@ -884,6 +886,10 @@ export function App() {
       }
       engine.stop()
       session.broadcastTransport({ action: 'stop', timelineSample: Math.round(engine.positionSamples) })
+      return
+    }
+    if (playStartsCapture(engine.status, recordReady.current, store.project.tracks)) {
+      await record()
       return
     }
     await playFrom(decision.sample)
@@ -1126,7 +1132,10 @@ export function App() {
     }
     session.broadcastTransport({ action: 'stop', timelineSample: end })
     store.endTake()
-    if (wasRecording) versionSave.current('record')
+    if (wasRecording) {
+      recordReady.current = false
+      versionSave.current('record')
+    }
   }
 
   async function rememberVersion(reason: VersionReason) {
@@ -1222,18 +1231,27 @@ export function App() {
       return
     }
     void engine.resume()
-    if (engine.status === 'recording' || engine.status === 'counting-in') {
+    const decision = recordPress(engine.status, store.project.tracks, recordReady.current)
+    if (decision === 'stop') {
+      recordReady.current = false
       await stop()
       return
     }
-    const slot = FEATURES.session ? store.sessionSlot : null
-    const slotTrack = slot ? store.project.tracks.find((track) => track.id === slot.trackId) : undefined
-    const intoSlot = Boolean(slot && slotTrack && (slotTrack.type === 'audio' || slotTrack.type === 'midi'))
-    if (!hasArmedRecord(store.project.tracks)) {
+    if (decision === 'disarm') {
+      recordReady.current = false
+      setRecordHint('')
+      return
+    }
+    if (decision === 'arm') {
+      recordReady.current = true
       setRecordHint('Arm a track to record.')
       window.setTimeout(() => setRecordHint(''), 2800)
       return
     }
+    recordReady.current = true
+    const slot = FEATURES.session ? store.sessionSlot : null
+    const slotTrack = slot ? store.project.tracks.find((track) => track.id === slot.trackId) : undefined
+    const intoSlot = Boolean(slot && slotTrack && (slotTrack.type === 'audio' || slotTrack.type === 'midi'))
     if (slot && slotTrack?.type === 'midi' && slotTrack.armed) store.prepareMidiSlot(slot.trackId, slot.scene)
     if (intoSlot && slotTrack?.armed && store.transportMode !== 'session') store.enterSession()
     await ready()
@@ -1246,7 +1264,7 @@ export function App() {
       setLocalMic: (stream) => engine.setLocalMic(stream),
       openMic: (audio) => navigator.mediaDevices.getUserMedia({ audio, video: false }),
     })
-    const midiArmed = store.project.tracks.some((track) => track.type === 'midi' && track.armed && track.input.startsWith('midi'))
+    const midiArmed = armedRecordPlan(store.project.tracks).midi.length > 0
     if (!inputs.length && !midiArmed) {
       setRecordHint('Arm a track to record.')
       window.setTimeout(() => setRecordHint(''), 2800)
@@ -1475,14 +1493,12 @@ async function importDropped(files: FileList) {
     await importAudio(transfer.files)
   }
 
-  const rollWanted = !!store.selectedMidiClipId && (editorView === 'arrange' || editorView === 'beats')
   const panel: 'room' | 'piano' | 'rack' | 'scaler' | 'pads' =
     surface !== 'studio' || phonePane === 'room' ? 'room'
     : store.padsTrackId ? 'pads'
     : store.scalerTrackId ? 'scaler'
     : pianoOpen ? 'piano'
     : store.rackTrackId ? 'rack'
-    : rollWanted ? 'piano'
     : 'room'
   const pianoTrack = store.project.tracks.find((track) => track.id === store.selectedTrackId && track.type === 'midi')
     || store.project.tracks.find((track) => track.type === 'midi')
@@ -1559,20 +1575,45 @@ async function importDropped(files: FileList) {
   }, [panel === 'piano'])
 
   useEffect(() => {
-    const host = () => browserLandscapeHost(shellRef.current, form, window.innerHeight >= window.innerWidth)
+    const orient = typeof screen === 'undefined' ? undefined : screen.orientation
+    if (!orient?.addEventListener) return
+    const onChange = () => {
+      if (!holdLandscape.current) return
+      const report = { type: orient.type, angle: orient.angle }
+      if (!keepLandscapeAfterClose(true, report)) {
+        holdLandscape.current = false
+        setKeysLandscape(false)
+      }
+    }
+    orient.addEventListener('change', onChange)
+    return () => orient.removeEventListener('change', onChange)
+  }, [])
+
+  function landscapeHost() {
+    return browserLandscapeHost(shellRef.current, form, window.innerHeight >= window.innerWidth)
+  }
+
+  async function settleKeyboard(on: boolean) {
+    if (!on || form !== 'phone') {
+      const follow = await dismissKeyboard(landscapeHost(), keysMode.current)
+      keysMode.current = 'dock'
+      holdLandscape.current = follow.holdLandscape
+      const orient = typeof screen === 'undefined' ? undefined : screen.orientation
+      const still = keepLandscapeAfterClose(follow.holdLandscape, orient ? { type: orient.type, angle: orient.angle } : null)
+      setKeysLandscape(false)
+      if (!still) holdLandscape.current = false
+      return
+    }
+    const mode = await presentKeyboard(landscapeHost())
+    keysMode.current = mode
+    holdLandscape.current = false
+    setKeysLandscape(mode === 'shell')
+  }
+
+  useEffect(() => {
     setKeyboardPresenter((on) => {
       keysFromClick.current = true
-      void (async () => {
-        if (!on || form !== 'phone') {
-          await dismissKeyboard(host(), keysMode.current)
-          keysMode.current = 'dock'
-          setKeysTurned(false)
-          return
-        }
-        const mode = await presentKeyboard(host())
-        keysMode.current = mode
-        setKeysTurned(mode === 'turned')
-      })()
+      void settleKeyboard(on)
     })
     return () => setKeyboardPresenter(null)
   }, [form])
@@ -1583,27 +1624,30 @@ async function importDropped(files: FileList) {
       return
     }
     let cancel = false
-    const host = () => browserLandscapeHost(shellRef.current, form, window.innerHeight >= window.innerWidth)
     void (async () => {
-      if (!store.keyboardMidi || form !== 'phone') {
-        await dismissKeyboard(host(), keysMode.current)
-        if (cancel) return
-        keysMode.current = 'dock'
-        setKeysTurned(false)
-        return
-      }
-      const mode = await presentKeyboard(host())
-      if (cancel) {
-        await dismissKeyboard(host(), mode)
-        return
-      }
-      keysMode.current = mode
-      setKeysTurned(mode === 'turned')
+      if (cancel) return
+      await settleKeyboard(store.keyboardMidi)
     })()
     return () => {
       cancel = true
     }
   }, [store.keyboardMidi, form])
+
+  function openKeyboard(trackId: string) {
+    const track = store.project.tracks.find((item) => item.id === trackId)
+    if (!track || editorForGesture('select-track', track.type) !== 'keyboard') return
+    store.setKeyboardMidi(true)
+    setPianoOpen(false)
+  }
+
+  function editNotes() {
+    const selected = store.project.tracks.find((item) => item.id === store.selectedTrackId)
+    const clipTrack = store.project.tracks.find((item) => item.midiClips.some((clip) => clip.id === store.selectedMidiClipId))
+    const track = selected?.type === 'midi' ? selected : clipTrack
+    if (!track || editorForGesture('edit-notes', track.type) !== 'piano') return
+    const clipId = track.midiClips.some((clip) => clip.id === store.selectedMidiClipId) ? store.selectedMidiClipId ?? undefined : undefined
+    openPiano(track.id, clipId)
+  }
 
   function openPiano(trackId: string, clipId?: string) {
     store.closeScaler()
@@ -1638,7 +1682,7 @@ async function importDropped(files: FileList) {
   return (
     <div
       ref={shellRef}
-      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''} ${store.keyboardMidi ? 'keys-open' : ''} ${keysTurned ? 'keys-turned' : ''}`}
+      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''} ${store.keyboardMidi ? 'keys-open' : ''} ${keysLandscape ? 'keys-landscape' : ''}`}
       style={{ ['--dock' as string]: `${dock}px`, ['--sounds' as string]: `${soundWidth}px` }}
       data-version={version}
       data-form={form}
@@ -1810,6 +1854,7 @@ async function importDropped(files: FileList) {
                   session={session}
                   onSeek={(sample) => void locate(sample)}
                   onOpenPiano={openPiano}
+                  onOpenKeyboard={openKeyboard}
                   onImportInstrument={(trackId, files) => { void importAsInstrument(trackId, files) }}
                   onPerform={(mode) => openPerform(mode)}
                   onOpenBeatMachine={(trackId) => {
@@ -1827,7 +1872,7 @@ async function importDropped(files: FileList) {
                   onLibraryClose={() => { engine.stopPreview(); setSoundsOpen(false) }}
                 />
               )}
-              {editorView === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} />}
+              {editorView === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} onOpenKeyboard={openKeyboard} />}
               {editorView === 'beats' && <BeatView store={store} engine={engine} />}
               {FEATURES.session && editorView === 'session' && (
                 <SessionView
@@ -1836,6 +1881,7 @@ async function importDropped(files: FileList) {
                   onRecord={() => { void record() }}
                   onDropAudio={(trackId, scene, file) => { void dropOnSlot(trackId, scene, file) }}
                   onOpenPiano={openPiano}
+                  onOpenKeyboard={openKeyboard}
                 />
               )}
             </div>
@@ -2041,7 +2087,7 @@ async function importDropped(files: FileList) {
       )}
       {knockOpen && <KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} />}
       <SpectralSheet store={store} />
-      <KeyboardDock store={store} engine={engine} />
+      <KeyboardDock store={store} engine={engine} onEditNotes={editNotes} />
       <HintBubble />
       <div className="toasts">
         {store.toasts.map((toast) => (
