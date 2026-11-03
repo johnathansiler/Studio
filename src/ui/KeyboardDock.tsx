@@ -135,6 +135,7 @@ export function KeyboardToggle({ store, engine }: { store: ProjectStore; engine:
       onClick={() => {
         engine.unlock()
         const next = !store.keyboardMidi
+        if (next) store.clearKeyboardReturn()
         store.setKeyboardMidi(next)
         notifyKeyboard(next)
       }}

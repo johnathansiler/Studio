@@ -475,6 +475,13 @@ export function ArrangeView({
     if (document.activeElement !== node) node.focus({ preventScroll: true })
   }
 
+  function revealTrack(trackId: string, gesture: 'select-track' | 'tap-clip') {
+    const track = project.tracks.find((item) => item.id === trackId)
+    const surface = editorForGesture(gesture, track?.type ?? '', track)
+    if (surface === 'pads') onOpenBeatMachine?.(trackId)
+    else if (surface === 'keyboard') onOpenKeyboard?.(trackId)
+  }
+
   function moveSelection(event: ReactPointerEvent, kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
     event.stopPropagation()
     focusTimeline()
@@ -569,7 +576,7 @@ export function ArrangeView({
         const retargeted = !!host && [...origins.values()].some((item) => item.trackId !== host)
         if (!moved && !retargeted) {
           if (additive && wasIn) store.selectClip(trackId, clipId, kind === 'midi', false, true)
-          if (editorForGesture('tap-clip', kind === 'midi' ? 'midi' : 'audio') === 'keyboard') onOpenKeyboard?.(trackId)
+          revealTrack(trackId, 'tap-clip')
           return
         }
         if (kind === 'audio') {
@@ -707,7 +714,7 @@ export function ArrangeView({
           <SongMapHead store={store} position={position} compact />
         </div>
         {project.tracks.map((track) => (
-          <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} style={rowStyle(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => { store.selectTrack(track.id); if (editorForGesture('select-track', track.type) === 'keyboard') onOpenKeyboard?.(track.id) }}>
+          <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} style={rowStyle(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => { store.selectTrack(track.id); revealTrack(track.id, 'select-track') }}>
             <div className="pl-head">
               <i className="swatch" style={{ background: track.color }} />
               <input
@@ -870,7 +877,7 @@ export function ArrangeView({
                 />
               ))}
               {track.type === 'midi' && track.midiClips.every((clip) => clip.slotOnly) && (
-                <button type="button" className="lane-add" aria-label="Add clip" onClick={() => { store.addMidiClip(track.id, 0); onOpenKeyboard?.(track.id) }}>+</button>
+                <button type="button" className="lane-add" aria-label="Add clip" onClick={() => { store.addMidiClip(track.id, 0); revealTrack(track.id, 'tap-clip') }}>+</button>
               )}
               <AutomationOverlay store={store} trackId={track.id} px={px} tool={tool} />
               {track.midiClips.filter((clip) => !clip.slotOnly && clip.scene == null).map((clip) => {
@@ -919,7 +926,7 @@ export function ArrangeView({
                       event.preventDefault()
                       event.stopPropagation()
                       store.selectClip(track.id, clip.id, true, false)
-                      if (editorForGesture('tap-clip', 'midi') === 'keyboard') onOpenKeyboard?.(track.id)
+                      revealTrack(track.id, 'tap-clip')
                     }}
                   >
                     <em>{clip.name}</em>
@@ -986,7 +993,7 @@ export function ArrangeView({
                           event.preventDefault()
                           event.stopPropagation()
                           const made = store.mirrorPatternClip(clip.id)
-                          if (made) onOpenKeyboard?.(made.trackId)
+                          if (made) revealTrack(made.trackId, 'tap-clip')
                         }}
                         onPointerDown={(event) => {
                           if ((event.target as HTMLElement).closest('.edge')) return

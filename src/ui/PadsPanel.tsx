@@ -20,6 +20,7 @@ import { readIdentity } from '../storage/identity'
 import { onMidiMessage } from '../midi/access'
 import { setPerformanceOwnsMidi } from '../midi/remember'
 import { useFormFactor } from './form'
+import { notifyKeyboard } from './keyboardStage'
 import './pads.css'
 
 const PAD_KEYS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyZ', 'KeyX', 'KeyC', 'KeyV']
@@ -31,12 +32,14 @@ export function PadsPanel({
   trackId,
   onRecord,
   onEdit,
+  onKeyboard,
 }: {
   store: ProjectStore
   engine: AudioEngine
   trackId: string
   onRecord: () => void
   onEdit: (clipId: string) => void
+  onKeyboard?: () => void
 }) {
   useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
   const phone = useFormFactor() === 'phone'
@@ -424,7 +427,25 @@ export function PadsPanel({
               ))}
             </div>
           </div>
-          <div className="mpc-brand"><strong>CueHarbor</strong><span>Beat Machine</span></div>
+          <div className="mpc-brand">
+            <strong>CueHarbor</strong>
+            <span>Beat Machine</span>
+            <button
+              type="button"
+              className="mpc-keyboard"
+              data-beat-keyboard={trackId}
+              onClick={() => {
+                engine.unlock()
+                if (onKeyboard) onKeyboard()
+                else {
+                  store.openKeyboardForPads(trackId)
+                  notifyKeyboard(true)
+                }
+              }}
+            >
+              Keyboard
+            </button>
+          </div>
         </section>
 
         <section className="hw-main">

@@ -78,7 +78,7 @@ import { deletesSelection } from './ui/clipKeys'
 import { historyCommand, typingTarget } from './state/history'
 import { claimComputerKey } from './model/keyboardPlay'
 import { KeyboardDock } from './ui/KeyboardDock'
-import { browserLandscapeHost, dismissKeyboard, isPianoHistory, markPianoHistory, presentKeyboard, setKeyboardPresenter, type KeyboardPresentation } from './ui/keyboardStage'
+import { browserLandscapeHost, dismissKeyboard, isPianoHistory, markPianoHistory, notifyKeyboard, presentKeyboard, setKeyboardPresenter, type KeyboardPresentation } from './ui/keyboardStage'
 import { HintBubble, TipButton } from './ui/Hint'
 import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
@@ -1641,9 +1641,40 @@ async function importDropped(files: FileList) {
     }
   }, [store.keyboardMidi, form])
 
+  function openBeatMachine(trackId: string) {
+    hideCollab()
+    setSurface('studio')
+    setPhonePane('edit')
+    setMenuOpen(false)
+    setPianoOpen(false)
+    store.selectTrack(trackId)
+    store.clearKeyboardReturn()
+    if (store.keyboardMidi) {
+      store.setKeyboardMidi(false)
+      notifyKeyboard(false)
+    }
+    store.showPads(trackId)
+  }
+
+  function openBeatKeyboard() {
+    const trackId = store.padsTrackId
+    if (!trackId) return
+    engine.unlock()
+    setPianoOpen(false)
+    store.openKeyboardForPads(trackId)
+    notifyKeyboard(true)
+  }
+
   function openKeyboard(trackId: string) {
     const track = store.project.tracks.find((item) => item.id === trackId)
-    if (!track || editorForGesture('select-track', track.type) !== 'keyboard') return
+    if (!track) return
+    const surface = editorForGesture('select-track', track.type, track)
+    if (surface === 'pads') {
+      openBeatMachine(trackId)
+      return
+    }
+    if (surface !== 'keyboard') return
+    store.clearKeyboardReturn()
     store.setKeyboardMidi(true)
     setPianoOpen(false)
   }
@@ -1865,15 +1896,7 @@ async function importDropped(files: FileList) {
                   onOpenKeyboard={openKeyboard}
                   onImportInstrument={(trackId, files) => { void importAsInstrument(trackId, files) }}
                   onPerform={(mode) => openPerform(mode)}
-                  onOpenBeatMachine={(trackId) => {
-                    hideCollab()
-                    setSurface('studio')
-                    setPhonePane('edit')
-                    setMenuOpen(false)
-                    setPianoOpen(false)
-                    store.selectTrack(trackId)
-                    store.insertPads(trackId)
-                  }}
+                  onOpenBeatMachine={openBeatMachine}
                   onQuickPunch={() => void quickPunch()}
                   onAnalyze={(trackId) => { setAnalysisTrackId(trackId); setPhonePane('edit'); setSurface('studio') }}
                   libraryTab={soundsOpen ? 'sounds' : null}
@@ -1935,6 +1958,7 @@ async function importDropped(files: FileList) {
               trackId={store.padsTrackId}
               onRecord={() => { void record() }}
               onEdit={(clipId) => openPiano(store.padsTrackId!, clipId)}
+              onKeyboard={openBeatKeyboard}
             />
           )}
           {surface === 'studio' && panel === 'rack' && store.rackTrackId && (
