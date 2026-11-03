@@ -7,10 +7,10 @@ import { chromium } from 'playwright'
 import { describe, expect, it } from 'vitest'
 import type { AudioEngine } from '../audio/engine'
 import { readKeyboardOctave, writeKeyboardOctave, keyboardStart } from '../model/keyboardPlay'
-import { armKey, releaseKey, takeGroups } from '../model/keyboardRecord'
+import { armKey, armSounded, releaseGesture, releaseKey, takeGroups } from '../model/keyboardRecord'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
-import { commitKeyboardNotes } from '../ui/KeyboardDock'
+import { commitKeyboardNotes, playKeyboardNote } from '../ui/KeyboardDock'
 import { dismissKeyboard, isPianoHistory, markPianoHistory, presentKeyboard, type LandscapeHost } from '../ui/keyboardStage'
 import { miniPads, padGridColumn } from '../ui/miniKeys'
 import { MidiDock } from '../ui/MidiDock'
@@ -133,6 +133,60 @@ describe('keyboard recording', () => {
       { trackId: track.id, clipId: null, pitch: 67, startBeat: 8, durationBeats: 1, velocity: 0.6 },
     ])
     expect(track.midiClips.some((item) => item.name === 'Keyboard' && item.notes[0]?.pitch === 67)).toBe(true)
+  })
+
+  it('records every pitch a Scaler chord lock sounded, and ends them together', () => {
+    const store = new ProjectStore(createEmptyProject())
+    const track = store.project.tracks.find((item) => item.type === 'midi')!
+    store.setTrackInstrument(track.id, 'scaler')
+    store.setScaler(track.id, { keysLock: 'chord', output: 'audio' })
+    store.selectTrack(track.id)
+    store.preparePianoClip(track.id, 0)
+    const clip = track.midiClips.find((item) => item.id === store.selectedMidiClipId)!
+    const sounded: number[] = []
+    const released: number[] = []
+    const live = {
+      playThrough(_id: string, pitch: number) { sounded.push(pitch) },
+      releaseThrough(_id: string, pitch: number) { released.push(pitch) },
+      unlock() {},
+      liveNoteOn() {},
+      liveNoteOff() {},
+    } as unknown as AudioEngine
+    const pitches = playKeyboardNote(store, live, 60, 0.8)
+    expect(pitches.length).toBeGreaterThan(1)
+    expect(sounded).toEqual(pitches)
+    const start = clip.startBeat + 1
+    let armed = armSounded([], 'ptr:1', pitches, {
+      trackId: track.id,
+      clipId: clip.id,
+      clipStart: clip.startBeat,
+      velocity: 0.8,
+      startBeat: start,
+    })
+    const other = armSounded(armed, 'ptr:2', [pitches[0]], {
+      trackId: track.id,
+      clipId: clip.id,
+      clipStart: clip.startBeat,
+      velocity: 0.8,
+      startBeat: start,
+    })
+    const chord = releaseGesture(other, 'ptr:1', start + 1.5)
+    expect(chord.notes.map((note) => note.pitch).sort((a, b) => a - b)).toEqual([...pitches].sort((a, b) => a - b))
+    expect(new Set(chord.notes.map((note) => note.startBeat))).toEqual(new Set([1]))
+    expect(new Set(chord.notes.map((note) => note.durationBeats))).toEqual(new Set([1.5]))
+    expect(chord.keys.map((key) => key.pitch)).toEqual([pitches[0]])
+    commitKeyboardNotes(store, chord.notes)
+    expect(clip.notes.map((note) => note.pitch).sort((a, b) => a - b)).toEqual([...pitches].sort((a, b) => a - b))
+    for (const pitch of pitches) live.releaseThrough?.(track.id, pitch)
+    expect(released.sort((a, b) => a - b)).toEqual([...pitches].sort((a, b) => a - b))
+    expect(playKeyboardNote(store, live, 61, 0.8)).toEqual([])
+    expect(armSounded([], 'black', [], {
+      trackId: track.id,
+      clipId: clip.id,
+      clipStart: clip.startBeat,
+      velocity: 0.8,
+      startBeat: start,
+    })).toEqual([])
   })
 })
 

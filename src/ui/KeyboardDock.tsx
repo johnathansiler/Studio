@@ -10,7 +10,7 @@ import {
   keyboardStart,
   rollOwnsKeys,
 } from '../model/keyboardPlay'
-import { armKey, releaseKey, takeGroups, type ArmedKey, type RecordedKey } from '../model/keyboardRecord'
+import { armSounded, releaseGesture, releaseKey, takeGroups, type ArmedKey, type RecordedKey } from '../model/keyboardRecord'
 import { samplesToBeats } from '../model/time'
 import { playScalerLive } from '../instruments/scaler/live'
 import { typingTarget } from '../state/history'
@@ -160,15 +160,13 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
     const level = Math.max(0.05, Math.min(1, velocity))
     const sounded = playKeyboardNote(store, engine, pitch, level)
     held.current.set(token, sounded)
-    if (recording.current) {
+    if (recording.current && sounded.length) {
       const dest = keyboardDestination(store.project.tracks, store.selectedTrackId, store.selectedMidiClipId)
       if (dest) {
-        armed.current = armKey(armed.current, {
-          token,
+        armed.current = armSounded(armed.current, token, sounded, {
           trackId: dest.trackId,
           clipId: dest.clipId,
           clipStart: dest.clipStart,
-          pitch,
           velocity: level,
           startBeat: beatAt(store, engine, eventMs),
         })
@@ -184,11 +182,13 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
     held.current.delete(token)
     const others = new Set([...held.current.values()].flat())
     for (const pitch of pitches) if (!others.has(pitch)) releaseKeyboardNote(store, engine, pitch)
-    const released = releaseKey(armed.current, token, beatAt(store, engine, eventMs))
+    const released = releaseGesture(armed.current, token, beatAt(store, engine, eventMs))
     armed.current = released.keys
-    if (released.note && recording.current) {
-      if (released.note.clipId) commitKeyboardNotes(store, [released.note])
-      else pending.current.push(released.note)
+    if (released.notes.length && recording.current) {
+      const intoClip = released.notes.filter((note) => note.clipId)
+      const loose = released.notes.filter((note) => !note.clipId)
+      if (intoClip.length) commitKeyboardNotes(store, intoClip)
+      pending.current.push(...loose)
     }
     paint()
   }
