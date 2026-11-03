@@ -86,6 +86,11 @@ export interface TheoryProgression {
   description: string
   /** Preferred cents of each chord root above the tonic. */
   targets: number[]
+  genre?: string
+  /** Song or artist-style set this progression belongs to. */
+  song?: string
+  /** Spelled chords. When set, these win over the nearest diatonic degree. */
+  spell?: { root: number; chordId: string; roman: string }[]
 }
 
 export interface RealizedChord {

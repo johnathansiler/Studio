@@ -104,6 +104,7 @@ import { placeholderInstrumentName } from '../sounds/instruments'
 import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normalizeProjectRack, normalizeTrackRack, type DeviceKind } from '../model/rack'
 import { normalizeScale, patternNotes, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
 import { clipFromNotes, recordOnto, rememberVoice } from '../instruments/scaler/clips'
+import { audioChordSymbols, pitchesFromAudio } from '../instruments/scaler/listen'
 import { freshScaler, normalizeScaler, padPerformance, type ScalerState } from '../instruments/scaler/model'
 import type { ScalerPage } from '../instruments/scaler/types'
 import { lockedTone, scaleIsMicrotonal, suggestKey } from '../theory/lock'
@@ -1342,11 +1343,36 @@ export class ProjectStore {
   }
 
   /** Voice-leading memory. Not an undo step, so playing pads does not flood the journal. */
-  rememberScalerVoice(trackId: string, midi: number[], cents: number[]) {
+  rememberScalerVoice(trackId: string, midi: number[], cents: number[], chordIndex?: number) {
     const track = this.track(trackId)
     if (!track) return
-    rememberVoice(track, midi, cents)
+    rememberVoice(track, midi, cents, chordIndex)
     this.emit()
+  }
+
+  /**
+   * Detect key, scale, and chords from the first audio clip that has samples.
+   * Returns the pitches and chord symbols, or null when nothing was readable.
+   */
+  detectScalerAudio(trackId: string): { notes: { midi: number; weight: number }[]; chords: string[] } | null {
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return null
+    let best: { notes: { midi: number; weight: number }[]; chords: string[] } | null = null
+    for (const item of this.project.tracks) {
+      for (const clip of item.clips) {
+        const asset = this.buffers.get(clip.bufferId)
+        const channel = asset?.channels[0]
+        if (!channel?.length || !asset) continue
+        const notes = pitchesFromAudio(channel, asset.sampleRate)
+        if (notes.length < 3) continue
+        const chords = audioChordSymbols(channel, asset.sampleRate)
+        if (!best || notes.length > best.notes.length) best = { notes, chords }
+      }
+    }
+    if (!best) return null
+    const found = suggestKey(best.notes)
+    this.setScaler(trackId, { root: found.root, scale: found.scale, library: found.library, snap: true, input: 'audio', lastVoicing: [], lastCents: [] })
+    return best
   }
 
   /** Drop a chord onto Arrange as its own MIDI clip. */

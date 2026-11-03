@@ -12,6 +12,7 @@ import {
 import { samplesToBeats } from '../model/time'
 import { selectLiveCapture, selectMidiMaps, selectMidiOut } from '../state/select'
 import type { ProjectStore } from '../state/store'
+import { playScalerLive } from '../instruments/scaler/live'
 import { hardwareMidiAllowed, midiOutputs, onMidiMessage, type MidiPortInfo } from './access'
 import { performanceOwnsMidi, rememberOff, rememberOn, setCaptureEnabled, stepOwnsMidi } from './remember'
 
@@ -20,6 +21,8 @@ interface OpenNote {
   pitch: number
   startBeat: number
   velocity: number
+  /** The key that started this note. A chord shares one source. */
+  source: number
 }
 
 /**
@@ -33,6 +36,8 @@ export class MidiHost {
   private clockTempo = 0
   private recording = false
   private open: OpenNote[] = []
+  /** Source key to the pitches it actually sounded, so note-off releases the whole chord. */
+  private sounded = new Map<string, number[]>()
   private takes = new Map<string, { pitch: number; startBeat: number; durationBeats: number; velocity: number }[]>()
   private draftTimer = 0
 
@@ -82,17 +87,34 @@ export class MidiHost {
     const beat = this.beatAt(timeStamp)
     if (message.kind === 'note-on') {
       const velocity = message.value / 127
-      for (const id of dest.play) this.engine.playThrough(id, message.number, velocity)
-      if (recording) {
-        for (const id of dest.record) this.open.push({ trackId: id, pitch: message.number, startBeat: beat, velocity })
-      } else {
-        for (const id of dest.play) rememberOn(id, message.number, beat, velocity)
+      for (const id of dest.play) {
+        const pitches = this.sound(id, message.number, velocity)
+        this.sounded.set(`${id}:${message.number}`, pitches)
+        if (recording && dest.record.includes(id)) {
+          for (const pitch of pitches) this.open.push({ trackId: id, pitch, startBeat: beat, velocity, source: message.number })
+        } else if (!recording) {
+          for (const pitch of pitches) rememberOn(id, pitch, beat, velocity)
+        }
       }
       return
     }
-    for (const id of dest.play) this.engine.releaseThrough(id, message.number)
+    for (const id of dest.play) {
+      const pitches = this.sounded.get(`${id}:${message.number}`) ?? [message.number]
+      this.sounded.delete(`${id}:${message.number}`)
+      for (const pitch of pitches) this.engine.releaseThrough(id, pitch)
+      if (!recording) for (const pitch of pitches) rememberOff(id, pitch, beat)
+    }
     if (recording) this.closeRecorded(dest.record, message.number, beat)
-    else for (const id of dest.play) rememberOff(id, message.number, beat)
+  }
+
+  /** Play a key. Scaler may turn it into a chord, or hide it. */
+  private sound(trackId: string, midi: number, velocity: number): number[] {
+    const live = playScalerLive(this.store.project, this.engine, trackId, midi, velocity)
+    if (live === null) {
+      this.engine.playThrough(trackId, midi, velocity)
+      return [midi]
+    }
+    return live.map((note) => note.midi)
   }
 
   private applyCc(message: ParsedMidi) {
@@ -115,7 +137,7 @@ export class MidiHost {
     const wanted = new Set(trackIds)
     const keep: OpenNote[] = []
     for (const note of this.open) {
-      if (note.pitch !== pitch || !wanted.has(note.trackId)) {
+      if (note.source !== pitch || !wanted.has(note.trackId)) {
         keep.push(note)
         continue
       }

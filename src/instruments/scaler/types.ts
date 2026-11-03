@@ -1,6 +1,11 @@
 import type { ArpDirection, RhythmPattern, ScaleId } from '../../model/scale'
 import type { VoicingId } from '../../theory/types'
 
+export type KeysLock = 'off' | 'scale-snap' | 'scale-hide' | 'chord' | 'chord-notes' | 'one-finger'
+export type VoiceGroup = 'all' | 'bass' | 'upper' | 'dynamic'
+export type ScalerOutput = 'audio' | 'midi' | 'both'
+export type ScalerInput = 'midi' | 'audio'
+
 export function defaultScaler(): ScalerState {
   return {
     root: 0,
@@ -21,6 +26,13 @@ export function defaultScaler(): ScalerState {
     forwardTrackId: '',
     lastVoicing: [],
     lastCents: [],
+    keysLock: 'off',
+    performanceId: '',
+    swing: 0,
+    voiceGroup: 'all',
+    output: 'both',
+    input: 'midi',
+    chordIndex: 0,
   }
 }
 
@@ -61,6 +73,18 @@ export interface ScalerState {
   forwardTrackId: string
   lastVoicing: number[]
   lastCents: number[]
+  /** How piano keys, pads, the computer keyboard, and MIDI keys are interpreted. */
+  keysLock: KeysLock
+  /** Empty keeps the block chord. Otherwise a performance from the catalog. */
+  performanceId: string
+  swing: number
+  voiceGroup: VoiceGroup
+  /** Audio plays the instrument. MIDI sends the notes out. Both does each. */
+  output: ScalerOutput
+  /** Detect reads MIDI clips or an audio clip. */
+  input: ScalerInput
+  /** Pad the keys-lock chord modes follow. */
+  chordIndex: number
 }
 
 export interface ScalerNote {
