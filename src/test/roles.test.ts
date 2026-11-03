@@ -7,6 +7,7 @@ import {
   isTimelineComment,
   locksProject,
   mayComment,
+  mayRelayAwareness,
   mayWriteProject,
   opsAllowed,
   parseCollabAccess,
@@ -73,6 +74,10 @@ describe('collab roles', () => {
     expect(relayProjectTraffic('comment', 'asset-index')).toBe(false)
     expect(relayProjectTraffic('edit', 'asset-index')).toBe(true)
     expect(relayProjectTraffic('view', 'sync-hello')).toBe(true)
+    expect(relayProjectTraffic('view', 'aware')).toBe(false)
+    expect(mayRelayAwareness('view')).toBe(true)
+    expect(mayRelayAwareness('comment')).toBe(true)
+    expect(mayRelayAwareness('edit')).toBe(true)
     expect(locksProject('guest', 'view')).toBe(true)
     expect(locksProject('guest', 'comment')).toBe(true)
     expect(locksProject('guest', 'edit')).toBe(false)

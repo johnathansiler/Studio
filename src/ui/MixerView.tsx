@@ -10,6 +10,7 @@ import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { TouchSlider } from './kit/controls'
+import { TrackPresence } from './presenceMarks'
 
 export function MixerView({ store, engine, onTune }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void }) {
   return <MixerBody key={store.project.id} store={store} engine={engine} onTune={onTune} />
@@ -60,6 +61,7 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
       {project.tracks.map((track) => (
         <div className={`strip${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} onClick={() => store.selectTrack(track.id)}>
           <StripName name={track.name} color={track.color} />
+          <TrackPresence trackId={track.id} />
           <ChannelAutomation store={store} trackId={track.id} />
           {compact ? (
             <button type="button" className="mini fx-open" aria-label={`${track.name} effects. Inserts and sends.`} title="Inserts and sends." onClick={() => setFxTrack(track.id)}>FX</button>

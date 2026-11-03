@@ -6,7 +6,8 @@ import { rememberDiag, sanitizeDiag, type DiagReport } from '../src/model/diag.t
 import { canRebuildRoom, sessionHello } from '../src/model/negotiate.ts'
 import { CAP_NOTICE, type UsageSnapshot } from '../src/model/usage.ts'
 import { offersFromSignal, type AssetOffer } from '../src/remote/assetSignal.ts'
-import { accessForInvite, collabAccessFor, mayWriteProject, parseCollabAccess, relayProjectTraffic, sanitizeTimelineComment, syncMessageOk, type CollabAccess, type TimelineComment } from '../src/state/ops.ts'
+import { awareRelayDue, relayAware } from '../src/remote/presence.ts'
+import { accessForInvite, collabAccessFor, mayRelayAwareness, mayWriteProject, parseCollabAccess, relayProjectTraffic, sanitizeTimelineComment, syncMessageOk, type CollabAccess, type TimelineComment } from '../src/state/ops.ts'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -54,6 +55,8 @@ interface Client {
   lastInType: string
   /** peer means the browser or the network closed it. Anything else is this process. */
   closeBy: string
+  /** Last accepted editing-awareness relay. Cursor floods are dropped. */
+  awareAt?: number
 }
 
 interface Session {
@@ -708,6 +711,17 @@ async function handle(client: Client, msg: Record<string, unknown>) {
     self.screen = Boolean(msg.screen)
     if (msg.clearForceMute) self.mutedByHost = false
     emitRoster(session)
+    return
+  }
+  if (msg.t === 'aware' && self.admitted) {
+    const access = seatAccess(self)
+    if (!mayRelayAwareness(access)) return
+    const now = Date.now()
+    if (!awareRelayDue(client.awareAt ?? 0, now)) return
+    const relay = relayAware(client.id, self.name, msg, access)
+    if (!relay) return
+    client.awareAt = now
+    broadcast(session, relay, client.id)
     return
   }
   if (msg.t === 'reaction') {

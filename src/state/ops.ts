@@ -314,6 +314,11 @@ export function relayProjectTraffic(access: CollabAccess, type: string, ops?: un
   return false
 }
 
+/** Awareness is not a project edit. View, Comment, and Edit all stay on screen. */
+export function mayRelayAwareness(access: CollabAccess): boolean {
+  return access === 'view' || access === 'comment' || access === 'edit'
+}
+
 export function accessForInvite(invites: Map<string, CollabAccess> | Record<string, CollabAccess | undefined>, token: string): CollabAccess {
   const key = token.replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
   if (!key) return 'view'

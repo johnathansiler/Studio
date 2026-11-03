@@ -271,6 +271,7 @@ export class SessionClient {
   private relayBins = new Map<string, { take?: NonNullable<PeerLink['take']> }>()
   private onTake: ((take: IncomingTake) => void) | null = null
   private onControl: ((cmd: Record<string, unknown>) => void) | null = null
+  private awareHandler: ((msg: Record<string, unknown>) => void) | null = null
   private onArrangement: ((project: Project, assets: Map<string, AudioAsset>, ready: boolean) => void) | null = null
   private arrangementStore: {
     project: Project
@@ -686,7 +687,12 @@ export class SessionClient {
     }
     if (msg.t === 'peer-left') {
       this.closePeer(String(msg.id || ''))
+      this.awareHandler?.(msg)
       this.emit()
+      return
+    }
+    if (msg.t === 'aware') {
+      this.awareHandler?.(msg)
       return
     }
     if (msg.t === 'peer-resumed') {
@@ -1204,6 +1210,16 @@ export class SessionClient {
 
   setControlHandler(fn: (cmd: Record<string, unknown>) => void) {
     this.onControl = fn
+  }
+
+  setAwarenessHandler(handler: ((msg: Record<string, unknown>) => void) | null) {
+    this.awareHandler = handler
+  }
+
+  /** Editing awareness only. Drop it when the socket is down so it cannot fill the signal outbox. */
+  postAware(message: object) {
+    if (!this.welcomed || this.ws?.readyState !== WebSocket.OPEN) return
+    this.send(message)
   }
 
   setArrangementHandler(fn: (project: Project, assets: Map<string, AudioAsset>, ready: boolean) => void) {
