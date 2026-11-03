@@ -8,19 +8,24 @@ import {
   keyboardTarget,
   rollOwnsKeys,
 } from '../model/keyboardPlay'
+import { playScalerLive } from '../instruments/scaler/live'
 import { typingTarget } from '../state/history'
 import type { ProjectStore } from '../state/store'
 import { blackAfter, keyboardNotes, octaveName } from './kit/controls'
 
-/** Play one note on the same immediate path as a MIDI or on-screen key. */
-export function playKeyboardNote(store: ProjectStore, engine: AudioEngine, pitch: number, velocity = 0.85) {
+/** Play one note, or a Scaler chord when keys lock says so. Returns the pitches that sounded. */
+export function playKeyboardNote(store: ProjectStore, engine: AudioEngine, pitch: number, velocity = 0.85): number[] {
   const trackId = keyboardTarget(store.project.tracks, store.selectedTrackId)
   const level = Math.max(0.05, Math.min(1, velocity))
-  if (trackId) engine.playThrough(trackId, pitch, level)
-  else {
+  if (!trackId) {
     engine.unlock()
     engine.liveNoteOn(pitch, level)
+    return [pitch]
   }
+  const live = playScalerLive(store.project, engine, trackId, pitch, level)
+  if (live !== null) return live.map((note) => note.midi)
+  engine.playThrough(trackId, pitch, level)
+  return [pitch]
 }
 
 export function releaseKeyboardNote(store: ProjectStore, engine: AudioEngine, pitch: number) {
@@ -33,7 +38,7 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
   const editor = store.midiEditor()
   const octave = editor.octave
   const [lit, setLit] = useState<number[]>([])
-  const held = useRef(new Map<string, number>())
+  const held = useRef(new Map<string, number[]>())
   const root = useRef<HTMLDivElement>(null)
   const shiftRef = useRef<(delta: -1 | 1) => void>(() => undefined)
   const octaveRef = useRef(octave)
@@ -46,17 +51,17 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
 
   function down(token: string, pitch: number, velocity = 0.85) {
     if (held.current.has(token)) return
-    held.current.set(token, pitch)
-    playKeyboardNote(store, engine, pitch, velocity)
-    setLit([...new Set(held.current.values())])
+    const sounded = playKeyboardNote(store, engine, pitch, velocity)
+    held.current.set(token, sounded)
+    setLit([...new Set([...held.current.values()].flat())])
   }
 
   function up(token: string) {
-    const pitch = held.current.get(token)
-    if (pitch == null) return
+    const pitches = held.current.get(token)
+    if (!pitches) return
     held.current.delete(token)
-    releaseKeyboardNote(store, engine, pitch)
-    setLit([...new Set(held.current.values())])
+    for (const pitch of pitches) releaseKeyboardNote(store, engine, pitch)
+    setLit([...new Set([...held.current.values()].flat())])
   }
 
   useEffect(() => {
