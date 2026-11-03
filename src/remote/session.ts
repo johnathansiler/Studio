@@ -18,14 +18,15 @@ import { isSilentTake, nextRelayGather, tcpRelayIceServers, udpIceServers, withT
 import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_INITIAL_GATHER_MS, ICE_RESTART_VIDEO_HOLD_MS, ICE_STUCK_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
 import { isUntouchedEmpty } from '../model/launchProject'
 import { sanitizeDiag, type DiagDirection } from '../model/diag'
-import { ASSET_CHUNK_BYTES, ASSET_CHUNK_GAP_MS, assetChunkCount, guestMayRequest, mediaCanCarryAssets, outlineWaveforms, referencedBufferIds } from '../model/sessionSync'
-import { adoptSavedRoom, claimFromHello, collabAccessFor, compareRoomClaims, digestProject, isTimelineComment, locksProject, opsAllowed, parseCollabAccess, relayProjectTraffic, syncMessageOk, type CollabAccess, type ProjectOp, type RoomClaim, type StampWire, type SyncHello, type TimelineComment } from '../state/ops'
+import { guestMayRequest, outlineWaveforms, referencedBufferIds } from '../model/sessionSync'
+import { adoptSavedRoom, claimFromHello, collabAccessFor, compareRoomClaims, digestProject, isTimelineComment, locksProject, mayWriteProject, opsAllowed, parseCollabAccess, relayProjectTraffic, syncMessageOk, type CollabAccess, type ProjectOp, type RoomClaim, type StampWire, type SyncHello, type TimelineComment } from '../state/ops'
 import type { ProjectSync, SyncJournal } from '../state/sync'
 import { CAP_NOTICE } from '../model/usage'
 import { SfuCall, type SfuKind, type SfuPublication } from './sfuCall'
 import { decodeWavPCM, encodeWav } from '../model/wav'
 import { base64ToBytes, bytesToBase64, journalFromRoom, type RoomCopy } from '../storage/idb'
 import { assembleTakeWav, bytesToArrayBuffer, chunkBytes, clockOffsetForTake, packTakeChunk, readTakeChunk, sumRelayBytes, TAKE_CHUNK_BYTES, takeProgress, type RelayPair } from './hqTake'
+import { AssetExchange, assetBytesAllowed, chooseAssetPath, offersFromSignal, sharedAssetStore, type AssetStatus } from './assets'
 import { clearActiveSession, deviceParticipantId, readIdentity } from '../storage/identity'
 import type { AudioAsset, Project } from '../model/types'
 
@@ -94,6 +95,8 @@ export interface SessionState {
   loopbackMs: number | null
   audioPingMs: number | null
   takeProgress: number | null
+  /** Shared wavs moving on a direct data channel. Empty when nothing is in flight. */
+  assetTransfers: AssetStatus[]
   activeSpeakerId: string | null
   reactions: Record<string, { emoji: string; at: number }>
   log: string[]
@@ -147,6 +150,8 @@ interface PeerLink {
   screen: MediaStream
   clock?: RTCDataChannel
   takes?: RTCDataChannel
+  /** Lossless shared wavs. Audio is sent only when the selected pair is direct. */
+  assets?: RTCDataChannel
   pcm?: RTCDataChannel
   remoteMinusLocal: number | null
   clockSamples: { rtt: number; offset: number }[]
@@ -282,7 +287,6 @@ export class SessionClient {
   /** Musical sync is ops plus a checkpoint, not a full project on every edit. */
   usingOps = false
   private syncPasses = 0
-  private sentAssets = new Set<string>()
   private incomingProject: Project | null = null
   private incomingAssets = new Map<string, AudioAsset>()
   private resumeId = ''
@@ -310,9 +314,11 @@ export class SessionClient {
   private welcomed = false
   private outbox: OutboundSignal[] = []
   private lastSent: { t: string; bytes: number } | null = null
-  /** One paced HTTP upload of project audio. It does not start until media is flowing. */
-  private assetJob: { id: string; name: string; sampleRate: number; wav: Uint8Array; index: number; total: number } | null = null
+  /** Shared wavs. The bytes stay on the data channel and in IndexedDB. */
+  private exchange = new AssetExchange(sharedAssetStore())
   private assetTimer = 0
+  private assetRunning = false
+  private assetAgain = false
 
   constructor(private engine: AudioEngine) {
     const saved = readIdentity()
@@ -340,6 +346,7 @@ export class SessionClient {
       loopbackMs: null,
       audioPingMs: null,
       takeProgress: null,
+      assetTransfers: [],
       activeSpeakerId: null,
       reactions: {},
       log: [],
@@ -524,7 +531,9 @@ export class SessionClient {
     window.clearTimeout(this.joinTimer)
     window.clearTimeout(this.reconnectTimer)
     window.clearTimeout(this.assetTimer)
-    this.assetJob = null
+    this.assetTimer = 0
+    this.exchange.reset()
+    this.state.assetTransfers = []
     window.clearInterval(this.usageTimer)
     this.sfuCall?.close()
     this.sfuCall = null
@@ -753,7 +762,10 @@ export class SessionClient {
       this.emit()
       this.syncMesh()
       this.routeTalk()
-      if (!wasLive && this.state.status === 'live') this.maybeSync()
+      if (!wasLive && this.state.status === 'live') {
+        this.maybeSync()
+        this.syncAssets()
+      }
       return
     }
     if (msg.t === 'host-away') {
@@ -858,12 +870,13 @@ export class SessionClient {
       this.applyIncomingArrangement()
       return
     }
-    if (msg.t === 'project-asset' && this.state.role === 'guest') {
-      this.takeAsset(msg.asset as { id: string; name: string; sampleRate: number; wav: string })
-      return
-    }
-    if (msg.t === 'asset-ready' && this.state.role === 'guest') {
-      void this.fetchRemoteAsset(msg.asset as { id?: string; name?: string; sampleRate?: number })
+    if (msg.t === 'asset-index') {
+      const offers = offersFromSignal(msg)
+      const from = String(msg.from || '')
+      if (offers && from && from !== this.state.selfId) {
+        this.exchange.noteCatalog(from, offers)
+        this.syncAssets()
+      }
       return
     }
     if (msg.t === 'take-relay' && this.state.role === 'host') {
@@ -1239,7 +1252,7 @@ export class SessionClient {
 
   /**
    * Publish musical edits as compact ops on the signaling socket.
-   * Wav files stay on the HTTP asset pump and never ride Cloudflare.
+   * Wav files move on a direct data channel. A relay pair carries no audio bytes.
    */
   publishEdits() {
     const store = this.arrangementStore
@@ -1252,10 +1265,8 @@ export class SessionClient {
       if (syncMessageOk(message) && relayProjectTraffic(access, 'sync-ops', batch)) this.send(message)
     }
     if (store.sync.peek().length) store.sync.drain()
-    if (this.state.role === 'host') {
-      this.state.syncLabel = 'Host · guests follow'
-      this.pumpAssetUpload()
-    }
+    if (this.state.role === 'host') this.state.syncLabel = 'Host · guests follow'
+    this.syncAssets()
   }
 
   /** Host keeps the asset pump. Musical state itself is ops, not a snapshot. */
@@ -1324,7 +1335,7 @@ export class SessionClient {
     this.usingOps = true
     const gap = store.applyRemoteOps(ops as ProjectOp[])
     if (gap) this.sendSyncHello()
-    if (this.state.role === 'host') this.pumpAssetUpload()
+    this.syncAssets()
     this.emit()
   }
 
@@ -1544,124 +1555,107 @@ export class SessionClient {
     if (syncMessageOk(message) && relayProjectTraffic(this.selfAccess(), 'sync-checkpoint')) this.send(message)
   }
 
-  private uplinkReady() {
-    if (this.sfuCall) {
-      return this.sfuCall.connection === 'connected' && (this.sfuCall.outboundVideo > 0 || this.sfuCall.outboundAudio > 0)
-    }
-    return mediaCanCarryAssets([...this.peers.values()].map((link) => ({
-      connection: link.pc.connectionState,
-      outboundVideo: link.outboundVideo,
-      outboundAudio: link.outboundAudio,
-    })))
-  }
-
-  /** Start the next wav only while the call is already carrying media. One chunk at a time. */
-  private pumpAssetUpload() {
-    if (this.assetJob || this.assetTimer || this.left) return
-    const store = this.arrangementStore
-    if (!store || this.state.role !== 'host' || this.state.status !== 'live' || !this.state.code || !this.state.selfId) return
-    if (!this.uplinkReady()) return
-    for (const id of referencedBufferIds(store.project)) {
-      if (this.sentAssets.has(id)) continue
-      const asset = store.buffers.get(id)
-      if (!asset) continue
-      let wav: Uint8Array
-      try {
-        wav = new Uint8Array(encodeWav(asset.channels, asset.sampleRate))
-      } catch {
-        this.sentAssets.add(id)
-        continue
-      }
-      const total = assetChunkCount(wav.byteLength)
-      if (!total) {
-        this.sentAssets.add(id)
-        continue
-      }
-      this.assetJob = { id: asset.id, name: asset.name, sampleRate: asset.sampleRate, wav, index: 0, total }
-      void this.sendAssetChunk()
-      return
-    }
-  }
-
-  private async sendAssetChunk() {
-    const job = this.assetJob
-    if (!job || this.left) return
-    if (job.index >= job.total) {
-      this.assetJob = null
-      return
-    }
-    const start = job.index * ASSET_CHUNK_BYTES
-    const slice = job.wav.subarray(start, Math.min(job.wav.byteLength, start + ASSET_CHUNK_BYTES))
-    let complete = false
-    try {
-      const res = await fetch('/api/assets', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          code: this.state.code,
-          from: this.state.selfId,
-          id: job.id,
-          name: job.name,
-          sampleRate: job.sampleRate,
-          index: job.index,
-          total: job.total,
-          chunk: bytesToBase64(slice),
-        }),
-      })
-      const data = await res.json().catch(() => null) as { ok?: boolean; complete?: boolean } | null
-      if (!res.ok || !data?.ok) throw new Error('asset upload rejected')
-      complete = Boolean(data.complete)
-      if (this.assetJob === job && !complete) job.index += 1
-    } catch {
-      /* the same chunk tries again after the gap */
-    }
-    if (this.assetJob !== job || this.left) return
-    if (complete) {
-      this.sentAssets.add(job.id)
-      this.assetJob = null
-      this.pumpAssetUpload()
-      return
-    }
+  /** Ask any peer with a direct channel for each missing wav, and serve the ones we hold. */
+  private syncAssets() {
+    if (this.assetTimer || this.left) return
     this.assetTimer = window.setTimeout(() => {
       this.assetTimer = 0
-      void this.sendAssetChunk()
-    }, ASSET_CHUNK_GAP_MS)
+      void this.runAssetSync()
+    }, 40)
   }
 
-  private async fetchRemoteAsset(asset: { id?: string; name?: string; sampleRate?: number } | undefined) {
-    const id = String(asset?.id || '')
-    if (!id || this.incomingAssets.has(id) || !this.state.code || !this.state.selfId) return
+  private async runAssetSync() {
+    if (this.assetRunning) {
+      this.assetAgain = true
+      return
+    }
+    this.assetRunning = true
     try {
-      const params = new URLSearchParams({ code: this.state.code, id, from: this.state.selfId })
-      const res = await fetch(`/api/assets?${params}`)
-      if (!res.ok) return
-      const decoded = decodeWavPCM(await res.arrayBuffer())
-      this.incomingAssets.set(id, {
-        id,
-        name: asset?.name || 'Audio',
-        sampleRate: decoded.sampleRate || asset?.sampleRate || decoded.sampleRate,
-        channels: decoded.channels,
-      })
+      const busy = await this.pumpAssets()
+      if (!this.left && (busy || this.assetAgain)) {
+        this.assetAgain = false
+        this.syncAssets()
+      }
+    } catch {
+      /* a failed hash or database write retries on the next edit */
+    } finally {
+      this.assetRunning = false
+    }
+  }
+
+  private async pumpAssets() {
+    const store = this.arrangementStore
+    if (!store || this.state.status !== 'live' || !this.state.selfId) return false
+    const referenced = referencedBufferIds(store.project)
+    const publish = mayWriteProject(this.selfAccess())
+    const held = []
+    for (const id of referenced) {
+      const asset = store.buffers.get(id) || this.incomingAssets.get(id)
+      if (asset) held.push(asset)
+    }
+    const peers = [...this.peers.entries()].map(([id, link]) => ({
+      id,
+      path: chooseAssetPath(link.assets?.readyState === 'open', this.state.media[id]?.localType || undefined),
+      buffered: link.assets?.bufferedAmount || 0,
+    }))
+    const result = await this.exchange.tick({ selfId: this.state.selfId, held, referenced, peers, publish })
+    if (result.signal && publish) this.send({ t: 'asset-index', assets: result.signal })
+    this.flushAssetActions(result.actions)
+    for (const asset of result.completed) this.keepSharedAsset(asset)
+    this.publishAssetStatus()
+    return result.busy
+  }
+
+  private keepSharedAsset(asset: AudioAsset) {
+    this.incomingAssets.set(asset.id, asset)
+    if (this.arrangementStore) this.arrangementStore.buffers.set(asset.id, asset)
+    if (this.state.role === 'guest') {
       this.applyIncomingArrangement()
-    } catch {
-      this.note('An arrangement file could not be read.')
+      return
+    }
+    const project = this.arrangementStore?.project
+    if (project) this.onArrangement?.(project, new Map(this.incomingAssets), true)
+  }
+
+  private publishAssetStatus() {
+    const statuses = this.exchange.currentStatuses()
+    if (JSON.stringify(statuses) === JSON.stringify(this.state.assetTransfers)) return
+    this.state.assetTransfers = statuses
+    this.emit()
+  }
+
+  private flushAssetActions(actions: { peerId: string; text?: string; binary?: Uint8Array }[]) {
+    for (const action of actions) {
+      const channel = this.peers.get(action.peerId)?.assets
+      if (!channel || channel.readyState !== 'open') continue
+      try {
+        if (action.binary) {
+          if (!mayWriteProject(this.selfAccess())) continue
+          const path = chooseAssetPath(true, this.state.media[action.peerId]?.localType || undefined)
+          if (!assetBytesAllowed(path)) continue
+          channel.send(bytesToArrayBuffer(action.binary))
+        } else if (action.text) channel.send(action.text)
+      } catch {
+        /* the channel closed between the tick and the send */
+      }
     }
   }
 
-  private takeAsset(asset: { id: string; name: string; sampleRate: number; wav: string } | undefined) {
-    if (!asset?.id || !asset.wav) return
-    try {
-      const decoded = decodeWavPCM(base64ToBytes(asset.wav).buffer as ArrayBuffer)
-      this.incomingAssets.set(asset.id, {
-        id: asset.id,
-        name: asset.name || 'Audio',
-        sampleRate: decoded.sampleRate || asset.sampleRate,
-        channels: decoded.channels,
-      })
-    } catch {
-      this.note('An arrangement file could not be read.')
-    }
-    this.applyIncomingArrangement()
+  private async onAssetControl(id: string, data: string) {
+    this.exchange.setPublishing(mayWriteProject(this.selfAccess()))
+    const path = chooseAssetPath(this.peers.get(id)?.assets?.readyState === 'open', this.state.media[id]?.localType || undefined)
+    const actions = await this.exchange.handleControl(id, data, path)
+    this.flushAssetActions(actions)
+    this.publishAssetStatus()
+    this.syncAssets()
+  }
+
+  private async onAssetBinary(id: string, packet: ArrayBuffer) {
+    const result = await this.exchange.handleBinary(id, packet)
+    this.flushAssetActions(result.actions)
+    for (const asset of result.completed) this.keepSharedAsset(asset)
+    this.publishAssetStatus()
+    if (result.completed.length) this.syncAssets()
   }
 
   private applyIncomingArrangement() {
@@ -1744,6 +1738,7 @@ export class SessionClient {
   }
 
   private closePeer(id: string) {
+    this.exchange.noteCatalog(id, [])
     const link = this.peers.get(id)
     const keepCall = Boolean(link?.dataOnly && this.state.sfu)
     if (!keepCall) {
@@ -1944,6 +1939,7 @@ export class SessionClient {
       const live = this.peers.get(peer.id)
       if (live) {
         if (instance) live.remoteInstance = instance
+        this.ensureAssetChannel(peer.id, live)
         continue
       }
       void this.enqueueSignal(peer.id, async () => {
@@ -1969,6 +1965,7 @@ export class SessionClient {
       const current = this.peers.get(id)
       if (current) {
         if (instance) current.remoteInstance = instance
+        this.ensureAssetChannel(id, current)
         continue
       }
       void this.enqueueSignal(id, async () => {
@@ -1985,6 +1982,18 @@ export class SessionClient {
 
   private createDataPeer(id: string, remoteInstance = '') {
     return this.createPeer(id, remoteInstance, true)
+  }
+
+  /** The caller already has this peer connection. Reopen the asset channel if it died. */
+  private ensureAssetChannel(id: string, link: PeerLink) {
+    if (this.isPolite() || link.pc.connectionState === 'closed') return
+    if (link.assets && link.assets.readyState !== 'closed') return
+    try {
+      link.assets = link.pc.createDataChannel('assets', { ordered: true })
+      this.bindChannel(id, link, link.assets)
+    } catch {
+      /* the peer connection is closing */
+    }
   }
 
   /** Selected Cloudflare relay pairs. Direct takes add nothing. The monthly cap is untouched. */
@@ -2172,8 +2181,10 @@ export class SessionClient {
     if (impolite) {
       link.clock = pc.createDataChannel('clock', { ordered: true })
       link.takes = pc.createDataChannel('takes', { ordered: true })
+      link.assets = pc.createDataChannel('assets', { ordered: true })
       this.bindChannel(id, link, link.clock)
       this.bindChannel(id, link, link.takes)
+      this.bindChannel(id, link, link.assets)
       if (!dataOnly) {
         link.pcm = pc.createDataChannel('pcm', { ordered: false, maxRetransmits: 0 })
         this.bindChannel(id, link, link.pcm)
@@ -2246,10 +2257,16 @@ export class SessionClient {
     channel.binaryType = 'arraybuffer'
     if (channel.label === 'clock') link.clock = channel
     if (channel.label === 'takes') link.takes = channel
+    if (channel.label === 'assets') link.assets = channel
     if (channel.label === 'pcm') link.pcm = channel
+    channel.onopen = () => {
+      if (channel.label === 'assets') this.syncAssets()
+    }
     channel.onmessage = (event) => {
       if (channel.label === 'clock' && typeof event.data === 'string') this.onClock(id, JSON.parse(event.data), 'dc')
       else if (channel.label === 'takes') this.onTakeData(id, link, event.data)
+      else if (channel.label === 'assets' && typeof event.data === 'string') void this.onAssetControl(id, event.data)
+      else if (channel.label === 'assets' && event.data instanceof ArrayBuffer) void this.onAssetBinary(id, event.data)
       else if (channel.label === 'pcm' && event.data instanceof ArrayBuffer) this.onPcm(id, link, event.data)
     }
   }
@@ -3054,7 +3071,7 @@ export class SessionClient {
     this.applyJam()
     this.emit()
     this.postDiag()
-    if (this.state.role === 'host') this.pumpAssetUpload()
+    this.syncAssets()
   }
 
   private postDiag() {
@@ -3243,6 +3260,12 @@ export class SessionClient {
     link: PeerLink | undefined,
     take: { takeId: string; placeAtSample: number; sampleRate: number; compensationMs: number; detail: string; silent: boolean; wav: ArrayBuffer },
   ) {
+    if (!mayWriteProject(this.selfAccess())) {
+      this.state.takeProgress = null
+      this.note('View and Comment can listen. This take stays on this device.')
+      this.emit()
+      return
+    }
     const channel = link ? await this.waitForTakes(link) : null
     if (!channel) {
       await this.sendTakeHttp(take)

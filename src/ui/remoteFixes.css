@@ -19,6 +19,64 @@
   background: var(--amber);
 }
 
+/* Shared audio moving peer to peer. Fixed so it does not take a grid row.
+   Phone and fold get the full width; each row is a text target. */
+.asset-transfers {
+  position: fixed;
+  z-index: 35;
+  left: 8px;
+  right: 8px;
+  top: 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+.asset-transfer {
+  pointer-events: auto;
+  min-height: 40px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto 4px;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 4px;
+  padding: 8px 12px;
+  border-radius: 12px;
+}
+.asset-transfer-name {
+  font-size: 14px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.asset-transfer-state {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 13px;
+  color: var(--accent, #73c48f);
+}
+.asset-transfer-bar {
+  grid-column: 1 / -1;
+  height: 4px;
+  border-radius: 99px;
+  background: rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.asset-transfer-bar i {
+  display: block;
+  height: 100%;
+  background: var(--amber, #e0b15a);
+}
+@media (min-width: 900px) {
+  .asset-transfers {
+    left: auto;
+    right: 12px;
+    width: min(420px, calc(100vw - 24px));
+  }
+}
+
 /* One short row each, so the timeline and mixer keep most of a sideways phone.
    Rows stay auto so a hidden tool row collapses instead of leaving a gap. */
 .shell.phone.land {

@@ -309,7 +309,7 @@ export function opsAllowed(access: CollabAccess, ops: Array<{ p?: unknown }>): b
 export function relayProjectTraffic(access: CollabAccess, type: string, ops?: unknown): boolean {
   if (type === 'sync-hello') return true
   if (type === 'sync-ops') return opsAllowed(access, asOps(ops))
-  if (type === 'sync-checkpoint' || type === 'project' || type === 'project-asset') return mayWriteProject(access)
+  if (type === 'sync-checkpoint' || type === 'project' || type === 'project-asset' || type === 'asset-index') return mayWriteProject(access)
   if (type === 'comment') return mayComment(access)
   return false
 }

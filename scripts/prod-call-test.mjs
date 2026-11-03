@@ -243,9 +243,11 @@ async function sample(page) {
       let audio = 0
       let frames = 0
       let path = ''
+      let dataOut = 0
       try {
         const report = await pc.getStats()
         report.forEach((row) => {
+          if (row.type === 'data-channel') dataOut += row.bytesSent || 0
           if (row.type === 'inbound-rtp' && row.kind === 'video') {
             video += row.bytesReceived || 0
             frames += row.framesDecoded || 0
@@ -270,6 +272,7 @@ async function sample(page) {
         audio,
         frames,
         path,
+        dataOut,
       })
     }
     let stored = ''
@@ -291,6 +294,7 @@ async function sample(page) {
       live: (window.__pcs || []).filter((pc) => pc.connectionState !== 'closed').length,
       big: (window.__bigSends || []).reduce((sum, n) => sum + n, 0),
       assets: window.__assetPosts || 0,
+      dataOut: peers.reduce((sum, peer) => sum + (peer.dataOut || 0), 0),
       sfu: Boolean(window.__cueharborSfu),
       playhead: window.__cueharborPlayhead || 0,
       transport: window.__cueharborStatus || '',
@@ -1131,9 +1135,9 @@ async function runUplink(browser) {
       })
       fails.push(...(await assertGuestWaveform(guest)))
       const done = await sample(host)
-      const moved = Math.max(done.big, done.assets)
-      console.log(label, 'asset', JSON.stringify({ big: done.big, assets: done.assets }))
-      if (moved < 500_000) fails.push(`project asset did not sync (ws ${done.big}, http ${done.assets})`)
+      console.log(label, 'asset', JSON.stringify({ big: done.big, assets: done.assets, dataOut: done.dataOut }))
+      if (done.assets > 0) fails.push('project audio was posted to Render /api/assets')
+      if ((done.dataOut || 0) < 500_000) fails.push(`project asset did not move on the data channel (${done.dataOut || 0} bytes)`)
       console.log(label, fails.length ? 'FAIL' : 'PASS')
       for (const reason of fails) console.log(label, 'reason:', reason)
     } finally {

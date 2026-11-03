@@ -1657,6 +1657,7 @@ async function importDropped(files: FileList) {
           onReset={() => { engine.unlock(); void resetRoom() }}
           roomRole={session.state.role}
           takeProgress={session.state.takeProgress}
+          assetTransfers={session.state.assetTransfers}
         />
       )}
       {surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano' && (
