@@ -138,6 +138,12 @@ export interface PadProgram {
   velocityMin: number
   velocityMax: number
   velocityFixed: number
+  /** Quantize grid id, including a trailing t for triplets. */
+  quantizeRate: string
+  /** Mic level that starts a pad recording. */
+  recordThreshold: number
+  recordTrim: boolean
+  recordChop: boolean
   name?: string
 }
 
@@ -432,6 +438,10 @@ export function createKit(): PadProgram {
     velocityMin: 0,
     velocityMax: 1,
     velocityFixed: 0.85,
+    quantizeRate: '1/16',
+    recordThreshold: 0.08,
+    recordTrim: true,
+    recordChop: false,
   }
 }
 
@@ -498,6 +508,10 @@ export function normalizePadKit(value: Partial<PadProgram> | undefined | null): 
     velocityMin: clamp(value.velocityMin ?? 0, 0, 1),
     velocityMax: clamp(value.velocityMax ?? 1, clamp(value.velocityMin ?? 0, 0, 1), 1),
     velocityFixed: clamp(value.velocityFixed ?? 0.85, 0, 1),
+    quantizeRate: REPEAT_RATES.has(value.quantizeRate ?? '') ? (value.quantizeRate as string) : '1/16',
+    recordThreshold: clamp(value.recordThreshold ?? 0.08, 0.001, 1),
+    recordTrim: value.recordTrim === false ? false : true,
+    recordChop: Boolean(value.recordChop),
     name: value.name,
     banks,
   }

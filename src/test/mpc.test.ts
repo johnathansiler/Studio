@@ -16,6 +16,8 @@ import {
   kitFromSlices,
   loadsIntoSampler,
   mpcTempo,
+  quantizeGridBeats,
+  quantizeNotes,
   repeatSetting,
   repeatVelocity,
   setStepVelocity,
@@ -28,6 +30,7 @@ import {
 } from '../instruments/mpc/model'
 import { pointerVelocity } from '../audio/performer'
 import { preparePadPcm, renderMpcAudio } from '../instruments/mpc/render'
+import { captureSlot } from '../audio/sample/slot'
 import { createKit } from '../model/padMachine'
 import { createEmptyProject, type PluginInstance } from '../model/types'
 import { soundFileUrl } from '../sounds/source'
@@ -247,6 +250,73 @@ describe('sampler drums', () => {
     expect(store.trackKit(id).banks[0][0].velocitySense).toBeCloseTo(0.25)
   })
 
+  it('arms a pad take at the mic threshold, then trims and chops it', async () => {
+    let deliver: (frame: Float32Array) => void = () => undefined
+    let ticks = 0
+    const quiet = new Float32Array(4)
+    const loud = Float32Array.from([0.5, 0.5, 0.5, 0.5])
+    const audio = await captureSlot({
+      sampleRate: 1000,
+      start(onFrame) {
+        deliver = onFrame
+        return () => undefined
+      },
+    }, {
+      countIn: false,
+      tempo: 120,
+      signature: { numerator: 4, denominator: 4 },
+      maxSamples: 8,
+      threshold: 0.2,
+    }, {
+      shouldStop: () => ticks > 6,
+      onLevel: () => undefined,
+      onPhase: () => undefined,
+      wait: async () => {
+        deliver(ticks < 2 ? quiet : loud)
+        ticks += 1
+      },
+    })
+    expect(Array.from(audio?.channels[0] ?? [])).toEqual([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5])
+    const store = new ProjectStore(createEmptyProject())
+    const id = store.project.tracks.find((track) => track.type === 'midi')!.id
+    store.insertPads(id)
+    const padded = new Float32Array(32)
+    padded[8] = 0.4
+    padded[9] = 0.4
+    store.placePadTake(id, 0, 3, padded, 1000, { trim: true, autoChop: false, threshold: 0.08 })
+    const kept = store.buffers.get(store.trackKit(id).banks[0][3].layers[0].bufferId || '')!
+    expect(kept.channels[0].length).toBeLessThan(32)
+    expect(Math.abs(kept.channels[0][0])).toBeGreaterThan(0.2)
+    const chopped = new Float32Array(8000)
+    for (let i = 0; i < 200; i++) chopped[i] = 0.9
+    for (let i = 4000; i < 4200; i++) chopped[i] = 0.9
+    store.placePadTake(id, 0, 0, chopped, 8000, { trim: false, autoChop: true, threshold: 0.08 })
+    const kit = store.trackKit(id)
+    expect(kit.banks[0][0].layers[0].bufferId).toBeTruthy()
+    expect(kit.banks[0][1].layers[0].bufferId).toBeTruthy()
+    expect(kit.banks[0][0].layers[0].bufferId).not.toBe(kit.banks[0][1].layers[0].bufferId)
+  })
+
+  it('quantizes the pattern on a triplet grid and uses the same grid for input', () => {
+    expect(quantizeGridBeats('1/16')).toBeCloseTo(0.25)
+    expect(quantizeGridBeats('1/8t')).toBeCloseTo(1 / 3)
+    expect(quantizeNotes([{ startBeat: 0.2 }], '1/16', 1, 50)[0].startBeat).toBeCloseTo(0.25)
+    expect(quantizeNotes([{ startBeat: 0.2 }], '1/16', 0.5, 50)[0].startBeat).toBeCloseTo(0.225)
+    expect(quantizeNotes([{ startBeat: 0.2 }], '1/16', 0, 75)[0].startBeat).toBeCloseTo(0.2)
+    const store = new ProjectStore(createEmptyProject())
+    const id = store.project.tracks.find((track) => track.type === 'midi')!.id
+    store.insertPads(id)
+    store.armPadRecord(id, 0)
+    store.commitPadHits(id, [{ pitch: 36, startBeat: 0.2, durationBeats: 0.25, velocity: 0.8 }])
+    store.toggleMpcStep(id, 0, 0, 1, 0.7)
+    store.patchTrackKit(id, { quantizeRate: '1/16', timingStrength: 1, swing: 50, timing: true, timingGrid: quantizeGridBeats('1/16') })
+    store.quantizePadTake(id)
+    expect(store.track(id)!.midiClips[0].notes[0].startBeat).toBeCloseTo(0.25)
+    expect(store.trackKit(id).timingGrid).toBeCloseTo(0.25)
+    const step = store.trackKit(id).sequences[0].notes[0]
+    expect(step.startBeat).toBeCloseTo(0.25)
+  })
+
   it('reads velocity from where the finger lands and blends reported pressure', () => {
     expect(smoothPad(0.25)).toBeLessThan(0.25)
     expect(smoothPad(0.75)).toBeGreaterThan(0.75)
@@ -298,6 +368,13 @@ describe('sampler drums', () => {
     expect(html).toContain('>Linear<')
     expect(html).toContain('>Fixed<')
     expect(html).toContain('Thirty-second triplet')
+    expect(html).toContain('Arm pad')
+    expect(html).toContain('aria-label="Record threshold"')
+    expect(html).toContain('Trim')
+    expect(html).toContain('Auto chop')
+    expect(html).toContain('aria-label="Quantize grid"')
+    expect(html).toContain('aria-label="Quantize strength"')
+    expect(html).toContain('Apply quantize')
     expect(html).toContain('aria-label="Step 1"')
     expect(html).toContain('aria-label="Step 16"')
     expect(html).not.toContain('role="dialog"')

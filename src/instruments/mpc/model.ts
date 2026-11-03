@@ -7,6 +7,7 @@ import {
   chopsToPads,
   createKit,
   normalizePadKit,
+  timingCorrect,
   type MpcOutput,
   type PadProgram,
   type PadRegion,
@@ -314,6 +315,21 @@ export function setStepVelocity(notes: SequenceNote[], pitch: number, step: numb
       ? { ...note, velocity: level }
       : note
   ))
+}
+
+/** Grid size in quarter notes, including triplet rates. */
+export function quantizeGridBeats(rate: string): number {
+  return repeatSetting(rate).beats
+}
+
+/** Pull recorded notes onto the grid. Strength 0 leaves them. Swing lands on the off-beat. */
+export function quantizeNotes<T extends { startBeat: number }>(notes: T[], rate: string, strength: number, swing: number): T[] {
+  const grid = quantizeGridBeats(rate)
+  const amount = clamp(strength, 0, 1)
+  return notes.map((note) => ({
+    ...note,
+    startBeat: timingCorrect(note.startBeat, grid, amount, swing, true),
+  }))
 }
 
 export function stepVelocity(notes: SequenceNote[], pitch: number, step: number, stepBeats: number): number | null {
