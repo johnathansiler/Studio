@@ -24,7 +24,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const css = ['src/styles.css', 'src/ui/premium.css'].map((file) => readFileSync(resolve(root, file), 'utf8')).join('\n')
 
 describe('computer keyboard', () => {
-  it('plays the selected or armed instrument and ignores a second press', () => {
+  it('plays only the selected instrument and ignores a second press', () => {
     const tracks = [
       { id: 'audio', type: 'audio' as const, armed: true },
       { id: 'keys', type: 'midi' as const, armed: false },

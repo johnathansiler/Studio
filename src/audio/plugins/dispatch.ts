@@ -19,6 +19,40 @@ import type { BlockContext, PluginModule, Processor } from './types'
 
 const ampDefaults = defaultParams('amp')
 
+function createSynthVoice(sampleRate: number): Processor & { note: (pitch: number, vel: number) => void } {
+  let pitch = 60
+  let vel = 0
+  let env = 0
+  let phase = 0
+  return {
+    latencySamples: 0,
+    reset() {
+      vel = 0
+      env = 0
+      phase = 0
+    },
+    note(next, level) {
+      pitch = Math.max(0, Math.min(127, next))
+      vel = Math.max(0, Math.min(1, level))
+    },
+    process(input, output) {
+      const n = output[0]?.length ?? 0
+      const step = (2 * Math.PI * 440 * 2 ** ((pitch - 69) / 12)) / sampleRate
+      for (let i = 0; i < n; i++) {
+        env += (vel - env) * (vel > env ? 0.25 : 0.04)
+        if (env < 1e-5) env = 0
+        const sample = env > 0 ? Math.sin(phase) * env * 0.35 : 0
+        phase += step
+        if (phase > Math.PI * 2) phase -= Math.PI * 2
+        for (let c = 0; c < output.length; c++) {
+          const dry = input[Math.min(c, input.length - 1)]?.[i] ?? 0
+          output[c][i] = dry + sample
+        }
+      }
+    },
+  }
+}
+
 function passthrough(): Processor {
   return {
     latencySamples: 0,
@@ -173,7 +207,8 @@ function satParams(kind: number, params: Record<string, number>): Record<string,
 
 export function createCore(id: CoreId, sampleRate: number): Processor {
   if (id === 'tune') return createTune(sampleRate)
-  if (id === 'scaler' || id === 'synth') return passthrough()
+  if (id === 'scaler') return passthrough()
+  if (id === 'synth') return createSynthVoice(sampleRate)
   if (id === 'eq') {
     const banks = [
       hold(sampleRate, (rate) => eqModule.create(rate)),

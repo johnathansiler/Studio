@@ -99,7 +99,7 @@ export class Performer {
   private recordMode: 'overdub' | 'replace' = 'overdub'
   private tempoBpm: number | null = null
   private sampleOf: (bufferId: string) => Float32Array | null = () => null
-  private freeOrigin: { context: number; beat: number } | null = null
+  private freeOrigin: { context: number; beat: number; tempo: number } | null = null
 
   constructor(
     private engine: AudioEngine,
@@ -360,6 +360,7 @@ export class Performer {
       fromBeat,
       interval: repeatIntervalBeats(this.grid.rate, this.grid.triplet),
       swing: this.swing,
+      free: !this.engine.transportPlaying,
     })
     this.engine.setRepeatWatch(true)
   }
@@ -455,20 +456,25 @@ export class Performer {
   }
 
   private clockFor(now: number) {
+    const tempo = this.tempoBpm ?? this.engine.tempo
     if (this.engine.transportPlaying) {
       this.freeOrigin = null
       const origin = this.engine.playOrigin()
-      return { originContext: origin.context, originBeat: origin.beat, tempo: this.tempoBpm ?? this.engine.tempo, sampleRate: this.engine.sampleRate }
+      return { originContext: origin.context, originBeat: origin.beat, tempo, sampleRate: this.engine.sampleRate, free: false }
     }
     if (!this.freeOrigin) {
-      const beat = samplesToBeats(this.engine.positionSamples, this.engine.sampleRate, this.engine.tempo)
-      this.freeOrigin = { context: now, beat }
+      const beat = samplesToBeats(this.engine.positionSamples, this.engine.sampleRate, tempo)
+      this.freeOrigin = { context: now, beat, tempo }
+    } else if (Math.abs(this.freeOrigin.tempo - tempo) > 1e-4) {
+      const beatNow = this.freeOrigin.beat + (now - this.freeOrigin.context) * (this.freeOrigin.tempo / 60)
+      this.freeOrigin = { context: now, beat: beatNow, tempo }
     }
     return {
       originContext: this.freeOrigin.context,
       originBeat: this.freeOrigin.beat,
-      tempo: this.tempoBpm ?? this.engine.tempo,
+      tempo,
       sampleRate: this.engine.sampleRate,
+      free: true,
     }
   }
 

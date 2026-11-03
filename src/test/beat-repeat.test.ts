@@ -232,4 +232,45 @@ describe('pad, keyboard, and MIDI input share the grid', () => {
     expect(closed).toBeGreaterThan(0)
     expect(recorded.every((note) => Math.abs(note.startBeat * 4 - Math.round(note.startBeat * 4)) < 1e-6)).toBe(true)
   })
+
+  it('starts on the press while stopped and on the song grid while playing', () => {
+    const stopped = new BeatRepeat()
+    stopped.arm({ pitch: 36, velocity: 1, fromBeat: 0.1, interval: 0.5, swing: 50, free: true })
+    const freeClock = clock(120, 1, 0.1)
+    freeClock.free = true
+    const free = stopped.take(freeClock, 1, 1.8)
+    expect(free.play.map((hit) => Number(hit.beat.toFixed(4)))).toEqual([0.1, 0.6, 1.1, 1.6])
+    expect(free.play[0].when).toBeCloseTo(1, 6)
+    expect(free.play[1].when).toBeCloseTo(1.25, 6)
+    expect(Math.abs(free.play[1].frame - free.play[0].frame - Math.round(0.25 * rate))).toBeLessThan(1)
+
+    const playing = new BeatRepeat()
+    playing.arm({ pitch: 36, velocity: 1, fromBeat: 4.1, interval: 0.25, swing: 50, free: false })
+    const grid = clock(120, 10, 4)
+    const locked = playing.take(grid, 10, 10.6)
+    expect(locked.play[0].beat).toBeCloseTo(4.25)
+    expect(locked.play[0].when).toBeCloseTo(10.125, 6)
+    expect(Math.abs(locked.play[1].frame - locked.play[0].frame - Math.round(0.125 * rate))).toBeLessThan(1)
+  })
+
+  it('follows a new tempo and applies a new rate on the next hit without releasing the pad', () => {
+    const machine = new BeatRepeat()
+    machine.arm({ pitch: 36, velocity: 0.8, fromBeat: 0, interval: 1, swing: 50, free: true })
+    const started = clock(120, 0, 0)
+    started.free = true
+    expect(machine.take(started, 0, 0.2).play.map((hit) => hit.beat)).toEqual([0])
+    const slowed = clock(60, 0.4, 0.8)
+    slowed.free = true
+    const followed = machine.take(slowed, 0.4, 3)
+    expect(followed.play[0].beat).toBeCloseTo(1)
+    expect(followed.play[0].when).toBeCloseTo(0.6, 6)
+    expect(followed.play[1].beat).toBeCloseTo(2)
+    expect(Math.abs(followed.play[1].when - followed.play[0].when - 1)).toBeLessThan(1e-6)
+    machine.retarget(0.5, 50, 1.2, followed.play[0].when)
+    const eighth = machine.take(slowed, followed.play[0].when, 4)
+    expect(eighth.play[0].beat).toBeGreaterThan(1)
+    expect(eighth.play.length).toBeGreaterThan(1)
+    expect(Math.abs((eighth.play[1].beat - eighth.play[0].beat) - 0.5)).toBeLessThan(1e-6)
+    expect(machine.count).toBe(1)
+  })
 })

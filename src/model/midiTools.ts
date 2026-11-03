@@ -570,10 +570,12 @@ export function tracksForPort(tracks: Track[], portId: string): Track[] {
 /** Live notes go to the selected instrument only, and only when this port may reach it. */
 export function midiDestinations(tracks: Track[], portId: string, selectedId: string | null, recording: boolean): { play: string[]; record: string[] } {
   const target = noteTarget(tracks, selectedId)
-  if (target.kind !== 'instrument') return { play: [], record: [] }
-  const track = tracks.find((item) => item.id === target.trackId)
-  if (!track || !hardwareReaches(track.input, portId)) return { play: [], record: [] }
-  return { play: [track.id], record: recording && track.armed ? [track.id] : [] }
+  const track = target.kind === 'instrument' ? tracks.find((item) => item.id === target.trackId) : undefined
+  const plays = !!track && hardwareReaches(track.input, portId)
+  // Armed tracks listening on this port record; with none, the selected armed track does.
+  const matched = tracksForPort(tracks, portId)
+  const record = recording ? (matched.length ? matched.map((item) => item.id) : plays && track!.armed ? [track!.id] : []) : []
+  return { play: plays ? [track!.id] : [], record }
 }
 
 export function planAudioRoutes(tracks: Track[]): AudioRoute[] {

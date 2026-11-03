@@ -1,5 +1,5 @@
 import type { Project } from '../../model/types'
-import { normalizeScaler, scalerChords } from './model'
+import { normalizeScaler, routeScaler, scalerChords } from './model'
 import type { KeysLock, ScalerOutput } from './types'
 import { applyKeysLock, type LockedNote } from './perform'
 
@@ -33,8 +33,10 @@ export function playScalerLive(project: Project, sink: LiveSink, trackId: string
   const live = scalerLiveNotes(project, trackId, midi)
   if (!live) return null
   if (!live.notes.length) return []
+  const track = project.tracks.find((item) => item.id === trackId)
+  const dest = track ? routeScaler(project, track).liveStripId : trackId
   if (live.output !== 'midi') {
-    for (const note of live.notes) sink.playThrough(trackId, note.midi, velocity, note.cents)
+    for (const note of live.notes) sink.playThrough(dest, note.midi, velocity, note.cents)
   }
   if (live.output !== 'audio' && sink.pulseMidi) {
     sink.pulseMidi(live.notes.map((note) => ({ pitch: note.midi, velocity, duration: 0.6 })))
