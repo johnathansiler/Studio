@@ -55,7 +55,7 @@ export class HistoryJournal {
   }
 
   /** Close the open gesture. An unchanged project does not take a step. */
-  seal(project: Project): HistoryStep | null {
+  seal(project: Project, label?: string): HistoryStep | null {
     if (!this.anchor) return null
     const before = this.anchor
     this.anchor = null
@@ -63,7 +63,7 @@ export class HistoryJournal {
     const redo = diffCloned(before, after)
     const undo = diffCloned(after, before)
     if (!redo.length && !undo.length) return null
-    const step: HistoryStep = { label: labelFor(redo, undo), undo, redo }
+    const step: HistoryStep = { label: label || labelFor(redo, undo), undo, redo }
     this.past.push(step)
     if (this.past.length > HISTORY_LIMIT) this.past.shift()
     this.future = []

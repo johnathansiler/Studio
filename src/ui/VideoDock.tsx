@@ -7,28 +7,37 @@ import { CALL_COPY, copyOf } from './chrome'
 import { useFormFactor } from './form'
 import { ms } from './format'
 import { TipButton } from './Hint'
+import { VersionsList } from './VersionsList'
+import type { Project } from '../model/types'
+import type { ProjectStore } from '../state/store'
 
 export function VideoDock({
   session,
   engine,
+  store,
+  versionTick,
   simple,
   onCreate,
   onJoin,
   onNewSession,
   onHide,
+  onSaveVersion,
 }: {
   session: SessionClient
   engine: AudioEngine
+  store: ProjectStore
+  versionTick: number
   simple?: boolean
   onCreate: () => void
   onJoin: () => void
   onNewSession: () => void
   onHide?: () => void
+  onSaveVersion: () => void
 }) {
   const state = session.state
   const phone = useFormFactor() === 'phone'
   const call = (id: string) => copyOf(CALL_COPY, id)
-  const [tab, setTab] = useState<'people' | 'chat'>('people')
+  const [tab, setTab] = useState<'people' | 'chat' | 'versions'>('people')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const [copied, setCopied] = useState(false)
@@ -124,7 +133,7 @@ export function VideoDock({
     const dockRoot = createRoot(mount)
     popRoot.current = dockRoot
     popWindow.current = win
-    dockRoot.render(<LiveDock session={session} engine={engine} simple={simple} onCreate={onCreate} onJoin={onJoin} onNewSession={onNewSession} />)
+    dockRoot.render(<LiveDock session={session} engine={engine} store={store} versionTick={versionTick} simple={simple} onCreate={onCreate} onJoin={onJoin} onNewSession={onNewSession} onSaveVersion={onSaveVersion} />)
     setPopped(true)
     win.addEventListener('pagehide', () => {
       dockRoot.unmount()
@@ -328,9 +337,9 @@ export function VideoDock({
       )}
       <div>
         <div className="side-tabs">
-          {(['people', 'chat'] as const).map((item) => (
-            <button key={item} className={`text-btn ${tab === item ? 'active' : ''}`} onClick={() => setTab(item)}>
-              {item}
+          {(['people', 'chat', 'versions'] as const).map((item) => (
+            <button key={item} type="button" data-tab={item} className={`text-btn ${tab === item ? 'active' : ''}`} onClick={() => setTab(item)}>
+              {item === 'versions' ? 'Versions' : item}
             </button>
           ))}
         </div>
@@ -360,6 +369,14 @@ export function VideoDock({
               <PersonRow key={person.id} person={person} session={session} />
             ))}
           </div>
+        )}
+        {tab === 'versions' && (
+          <VersionsList
+            projectId={store.project.id}
+            tick={versionTick}
+            onSave={onSaveVersion}
+            onRestore={(project: Project) => store.restoreForEveryone(project)}
+          />
         )}
         {tab === 'chat' && (
           <div className="panel">
@@ -393,7 +410,7 @@ export function VideoDock({
   )
 }
 
-function LiveDock(props: { session: SessionClient; engine: AudioEngine; simple?: boolean; onCreate: () => void; onJoin: () => void; onNewSession: () => void }) {
+function LiveDock(props: { session: SessionClient; engine: AudioEngine; store: ProjectStore; versionTick: number; simple?: boolean; onCreate: () => void; onJoin: () => void; onNewSession: () => void; onSaveVersion: () => void }) {
   const [, bump] = useState(0)
   useEffect(() => props.session.subscribe(() => bump((n) => n + 1)), [props.session])
   useEffect(() => props.engine.subscribe(() => bump((n) => n + 1)), [props.engine])

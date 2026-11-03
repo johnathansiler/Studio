@@ -4,16 +4,18 @@ import { applyFreeze } from './audio/bounce'
 import { AudioEngine } from './audio/engine'
 import { unpackProject } from './model/archive'
 import { renderDemoLoop } from './model/demo'
-import { isSessionLink, isUntouchedEmpty, needsNewProjectConfirm, NEW_PROJECT, planLaunch, readTab, shouldKeepProject, TAB_PROJECT } from './model/launchProject'
+import { isSessionLink, isUntouchedEmpty, needsNewProjectConfirm, NEW_PROJECT, planLaunch, readTab, roomOwnsOpenProject, shouldKeepProject, TAB_PROJECT } from './model/launchProject'
 import { punchWindow, sliceCapture } from './model/comp'
 import { watchSpectral } from './audio/spectral/job'
 import { inspectClip } from './audio/stretch/engine'
 import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } from './model/types'
 import { SessionClient } from './remote/session'
-import { deleteProject, listProjects, listSnapshots, loadLastProject, loadProject, loadSnapshot, requestPersistentStorage, saveProject, storageReport, type ProjectListItem, type WorkspaceSnapshot } from './storage/idb'
+import { buildRoomCopy, deleteProject, listProjects, listSnapshots, listVersions, loadLastProject, loadProject, loadRoomCopy, loadSnapshot, requestPersistentStorage, saveProject, saveRoomCopy, saveVersion, storageReport, type ProjectListItem, type WorkspaceSnapshot } from './storage/idb'
 import { inviteWins } from './model/negotiate'
 import { readIdentity, writeIdentity } from './storage/identity'
 import { ProjectStore, seedDemoProject } from './state/store'
+import { digestProject, musicalClone } from './state/ops'
+import { shouldSaveVersion, versionTitle, type VersionReason } from './state/versions'
 import { linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
@@ -172,6 +174,14 @@ export function App() {
   const armedPeers = useRef(new Set<string>())
   const launchKey = useRef('')
   const publishTimer = useRef(0)
+  const roomTimer = useRef(0)
+  const versionSave = useRef<(reason: VersionReason) => void>(() => {})
+  const roomSave = useRef<() => void>(() => {})
+  const [versionTick, setVersionTick] = useState(0)
+  useEffect(() => {
+    const timer = window.setInterval(() => versionSave.current('timer'), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
   const pendingFollow = useRef<Record<string, unknown> | null>(null)
   const workletWarned = useRef(false)
   const surfaceRef = useRef(surface)
@@ -191,6 +201,13 @@ export function App() {
 
   useEffect(() => {
     session.bindArrangement(store)
+    session.setRoomPersistence({
+      load: (code) => loadRoomCopy(code),
+      loadBuffers: async (projectId) => (await loadProject(projectId).catch(() => null))?.buffers ?? new Map(),
+      save: async () => {
+        roomSave.current()
+      },
+    })
     session.setTakeHandler((take) => {
       const channels = take.sampleRate === engine.sampleRate
         ? take.channels
@@ -295,6 +312,10 @@ export function App() {
       if (session.state.status === 'live') {
         window.clearTimeout(publishTimer.current)
         publishTimer.current = window.setTimeout(() => session.publishEdits(), 40)
+        if (session.sharesRoom()) {
+          window.clearTimeout(roomTimer.current)
+          roomTimer.current = window.setTimeout(() => roomSave.current(), 600)
+        }
       }
       const key = `${store.transportMode}:${JSON.stringify(store.launched)}:${JSON.stringify(store.launchAt)}:${JSON.stringify(store.launchGen)}`
       const pending = store.takePendingTransport()
@@ -424,7 +445,9 @@ export function App() {
       await requestPersistentStorage()
       const saved = await loadLastProject().catch(() => null)
       if (cancel) return
-      if (launch.plan === 'empty') {
+      if (roomOwnsOpenProject(session.state.status)) {
+        /* the room copy already replaced this tab */
+      } else if (launch.plan === 'empty') {
         remember(NEW_PROJECT)
         if (!launch.reload && saved && shouldKeepProject(saved.project, saved.buffers.size) && !isSessionLink(window.location.search)) {
           const kept = await saveProject(saved.project, saved.buffers, saved.workspace).catch(() => 'fail' as const)
@@ -479,6 +502,7 @@ export function App() {
     const flush = () => {
       window.clearTimeout(timer)
       write(true)
+      roomSave.current()
     }
     flushSave.current = flush
     const onVisible = () => {
@@ -865,6 +889,7 @@ export function App() {
       session.requestTransport({ action: 'stop' })
       return
     }
+    const wasRecording = engine.status === 'recording'
     const decision = stopPress(engine.status, store.project, engine.currentTimelineSample())
     if (decision.action === 'home') {
       await locate(decision.sample)
@@ -991,6 +1016,57 @@ export function App() {
     }
     session.broadcastTransport({ action: 'stop', timelineSample: end })
     store.endTake()
+    if (wasRecording) versionSave.current('record')
+  }
+
+  async function rememberVersion(reason: VersionReason) {
+    if (isUntouchedEmpty(store.project) && store.buffers.size === 0) return
+    const at = Date.now()
+    const digest = digestProject(store.project)
+    const listed = await listVersions(store.project.id).catch(() => [])
+    const last = listed[0]
+    if (!shouldSaveVersion({ reason, lastAt: last?.at ?? null, now: at, digest, lastDigest: last?.digest ?? null })) return
+    let storedName = ''
+    try { storedName = localStorage.getItem('cueharbor-name') || '' } catch { storedName = '' }
+    const by = session.state.name || storedName || 'You'
+    const result = await saveVersion({
+      id: uid('ver'),
+      projectId: store.project.id,
+      roomCode: session.state.code || '',
+      name: versionTitle(reason, at),
+      by,
+      at,
+      reason,
+      digest,
+      project: musicalClone(store.project),
+    }).catch(() => 'fail' as const)
+    if (result !== 'ok') return
+    if (reason !== 'timer') store.toast(reason === 'record' ? 'Saved a recording version' : 'Saved a version')
+    setVersionTick((value) => value + 1)
+  }
+
+  async function saveSharedRoom() {
+    const code = session.state.code
+    const role = session.state.role
+    if (!code || (role !== 'host' && role !== 'guest') || !session.sharesRoom()) return
+    const copy = buildRoomCopy({
+      code,
+      role,
+      name: session.state.name || 'Guest',
+      savedAt: Date.now(),
+      project: store.project,
+      journal: store.sync.snapshot(),
+    })
+    const result = await saveRoomCopy(copy).catch(() => 'fail' as const)
+    if (result === 'ok') session.markRoomSaved(copy.savedAt, role)
+    if (result === 'quota') store.toast('This browser is out of space, so the room copy could not be kept.', 'warn')
+  }
+
+  versionSave.current = (reason) => {
+    void rememberVersion(reason)
+  }
+  roomSave.current = () => {
+    void saveSharedRoom()
   }
 
   function openPerform(mode: 'keys' | 'drums') {
@@ -1556,6 +1632,9 @@ async function importDropped(files: FileList) {
               simple={false}
               session={session}
               engine={engine}
+              store={store}
+              versionTick={versionTick}
+              onSaveVersion={() => versionSave.current('manual')}
               onCreate={() => {
                 engine.unlock()
                 session.primeMediaFromGesture()
