@@ -20,10 +20,13 @@ import {
   repeatVelocity,
   setStepVelocity,
   shapeVelocity,
+  smoothPad,
   stepOn,
   stepVelocity,
   toggleStep,
+  touchVelocity,
 } from '../instruments/mpc/model'
+import { pointerVelocity } from '../audio/performer'
 import { preparePadPcm, renderMpcAudio } from '../instruments/mpc/render'
 import { createKit } from '../model/padMachine'
 import { createEmptyProject, type PluginInstance } from '../model/types'
@@ -244,6 +247,25 @@ describe('sampler drums', () => {
     expect(store.trackKit(id).banks[0][0].velocitySense).toBeCloseTo(0.25)
   })
 
+  it('reads velocity from where the finger lands and blends reported pressure', () => {
+    expect(smoothPad(0.25)).toBeLessThan(0.25)
+    expect(smoothPad(0.75)).toBeGreaterThan(0.75)
+    expect(touchVelocity({ place: 1 })).toBe(1)
+    expect(touchVelocity({ place: 0 })).toBeCloseTo(1 / 127)
+    expect(touchVelocity({ place: 1 })).toBeGreaterThan(touchVelocity({ place: 0.5 }))
+    expect(touchVelocity({ place: 0.5 })).toBeGreaterThan(touchVelocity({ place: 0 }))
+    const blended = touchVelocity({ place: 1, pressure: 0.2 })
+    expect(blended).toBeLessThan(1)
+    expect(blended).toBeGreaterThan(0.7)
+    expect(touchVelocity({ place: 0.2, radius: 28 })).toBeGreaterThan(touchVelocity({ place: 0.2 }))
+    const pad = { top: 10, height: 100 }
+    expect(pointerVelocity({ clientY: 10, pressure: 0.5, pointerType: 'mouse' }, pad)).toBe(1)
+    expect(pointerVelocity({ clientY: 110, pressure: 0.5, pointerType: 'mouse' }, pad)).toBeCloseTo(1 / 127)
+    const touch = pointerVelocity({ clientY: 10, pressure: 0.2, pointerType: 'touch', width: 2, height: 2 }, pad)
+    expect(touch).toBeLessThan(1)
+    expect(touch).toBeCloseTo(touchVelocity({ place: 1, pressure: 0.2 }))
+  })
+
   it('shows the drums face with full words, 40px pads, and no covering popup', () => {
     const store = new ProjectStore(createEmptyProject())
     const id = store.project.tracks.find((track) => track.type === 'midi')!.id
@@ -255,7 +277,9 @@ describe('sampler drums', () => {
     expect(html).toContain('Audio out')
     expect(html).toContain('Both')
     expect(html).toContain('Note repeat')
+    expect(html).toContain('class="mpc-full ch-raised"')
     expect(html).toContain('Full level')
+    expect(html).toContain('velocity 127')
     expect(html).toContain('Humanize')
     expect(html).toContain('aria-label="Humanize timing"')
     expect(html).toContain('aria-label="Humanize velocity"')

@@ -350,7 +350,6 @@ export function PadsPanel({
           {REPEAT_CHOICES.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
         </select>
         <button type="button" className={`ch-tab${kit.repeatLatch ? ' on' : ''}`} aria-pressed={kit.repeatLatch} title="Latch keeps note repeat playing after the pad is released." onClick={() => store.patchTrackKit(trackId, { repeatLatch: !kit.repeatLatch })}>Latch</button>
-        <button type="button" className={`ch-tab${kit.fullLevel ? ' on' : ''}`} aria-pressed={kit.fullLevel} title="Full level plays every pad at velocity 127." onClick={() => store.patchTrackKit(trackId, { fullLevel: !kit.fullLevel })}>Full level</button>
         <button type="button" className={`ch-tab${recordMode === 'overdub' ? ' on' : ''}`} aria-pressed={recordMode === 'overdub'} title="Overdub keeps the notes already in the loop." onClick={() => setRecordMode('overdub')}>Overdub</button>
         <button type="button" className={`ch-tab${recordMode === 'replace' ? ' on' : ''}`} aria-pressed={recordMode === 'replace'} title="Replace clears the loop while you record." onClick={() => setRecordMode('replace')}>Replace</button>
         <button type="button" className={`ch-tab${kit.syncTempo ? ' on' : ''}`} aria-pressed={kit.syncTempo} title="Sync note repeat to the project tempo." onClick={() => store.patchTrackKit(trackId, { syncTempo: !kit.syncTempo })}>Sync</button>
@@ -408,6 +407,14 @@ export function PadsPanel({
         })()} onChange={(event) => store.setMpcStepVelocity(trackId, bank, selected, stepPick, Number(event.target.value))} />
       </label>
       <div className="mpc-body">
+        <div className="mpc-play">
+        <button
+          type="button"
+          className={`mpc-full ch-raised${kit.fullLevel ? ' on' : ''}`}
+          aria-pressed={kit.fullLevel}
+          title="Full level. Every hit plays at velocity 127, wherever you touch the pad."
+          onClick={() => store.patchTrackKit(trackId, { fullLevel: !kit.fullLevel })}
+        >Full level</button>
         <div className="mpc-grid" ref={board} aria-label="Drum pads">
           {pads.map((pad, index) => {
             const pitch = levels && source ? source.pitch : pad.pitch
@@ -434,6 +441,7 @@ export function PadsPanel({
               </button>
             )
           })}
+        </div>
         </div>
         {source && (
           <aside className="mpc-params ch-recessed" aria-label="Pad settings" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>

@@ -161,6 +161,7 @@ export function formatLoopReadout(project: Project, startSample: number, endSamp
 export function loopLabelCenter(regionLeft: number, regionWidth: number, labelWidth: number, viewLeft: number, viewWidth: number): number {
   const center = regionLeft + Math.max(0, regionWidth) / 2
   const half = Math.max(0, labelWidth) / 2
+  // Matches the phone and fold grip pad so a handle pinned to the screen stays off the label.
   const clearance = 44
   const min = viewLeft + half + clearance
   const max = viewLeft + Math.max(0, viewWidth) - half - clearance

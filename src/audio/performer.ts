@@ -16,7 +16,7 @@ import {
   type PadProgram,
   type PadVoice,
 } from '../model/padMachine'
-import { humanizeHit, shapeVelocity } from '../instruments/mpc/model'
+import { humanizeHit, shapeVelocity, touchVelocity } from '../instruments/mpc/model'
 import { samplesToBeats } from '../model/time'
 
 export interface PlayedNote {
@@ -576,9 +576,14 @@ export class Performer {
   }
 }
 
-export function pointerVelocity(event: { clientY: number; pressure: number; pointerType: string }, rect: { top: number; height: number }) {
-  const along = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
-  const fromPlace = 1 - Math.min(1, Math.max(0, along))
-  if (event.pointerType === 'touch' && event.pressure > 0 && event.pressure < 1) return Math.max(0.15, event.pressure)
-  return Math.max(0.15, fromPlace)
+export function pointerVelocity(event: { clientY: number; pressure: number; pointerType: string; width?: number; height?: number }, rect: { top: number; height: number }) {
+  const along = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 1
+  const place = 1 - Math.min(1, Math.max(0, along))
+  const reported = event.pointerType === 'touch' || event.pointerType === 'pen'
+  const radius = Math.max(event.width ?? 0, event.height ?? 0) / 2
+  return touchVelocity({
+    place,
+    pressure: reported ? event.pressure : undefined,
+    radius: reported && radius > 1 ? radius : undefined,
+  })
 }

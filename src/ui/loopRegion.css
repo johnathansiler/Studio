@@ -65,21 +65,56 @@
     0 0 12px rgba(224, 177, 90, 0.55);
 }
 .loop-host:active .song-loop { cursor: grabbing; }
+/* Invisible hit pad. The slim face is the only thing drawn. */
 .loop-host button.loop-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 40px;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: transparent;
+  cursor: ew-resize;
+  touch-action: none;
+  overflow: visible;
+  -webkit-tap-highlight-color: transparent;
+}
+.shell.phone .loop-host button.loop-grip,
+.shell.fold .loop-host button.loop-grip {
+  width: 44px;
+  min-width: 0;
+  min-height: 0;
+}
+.loop-host button.loop-grip:active,
+.loop-host button.loop-grip:focus {
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  outline: none;
+}
+.loop-host .loop-grip-face {
   position: absolute;
   top: 2px;
   bottom: 2px;
-  height: auto;
-  min-height: 32px;
-  width: 36px;
-  min-width: 36px;
-  padding: 0;
-  border-radius: 8px;
+  width: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transform: none;
+  border-radius: 6px 2px 2px 6px;
   border: 1px solid rgba(255, 255, 255, 0.42);
   color: transparent;
-  cursor: ew-resize;
-  z-index: 3;
-  touch-action: none;
+  font-size: 0;
   background-color: #3e8f5c;
   background-image: linear-gradient(180deg, #f7fff8 0%, #9adcb4 34%, #3f9160 70%, #1c4c32 100%);
   box-shadow:
@@ -88,15 +123,19 @@
     0 1px 2px rgba(0, 0, 0, 0.45),
     0 0 12px rgba(115, 196, 143, 0.9);
 }
-.loop-host button.loop-grip::after {
+.loop-host .loop-grip-face.end { border-radius: 2px 6px 6px 2px; }
+.loop-host .loop-grip-face::after {
   content: '';
-  width: 10px;
-  height: 16px;
-  border-radius: 2px;
-  background: repeating-linear-gradient(90deg, rgba(16, 33, 23, 0.55) 0 2px, transparent 2px 4px);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+  width: 1px;
+  height: 12px;
+  border-radius: 1px;
+  background: rgba(16, 33, 23, 0.42);
+  box-shadow:
+    -3px 0 0 rgba(16, 33, 23, 0.42),
+    3px 0 0 rgba(16, 33, 23, 0.42),
+    0 1px 0 rgba(255, 255, 255, 0.28);
 }
-.loop-host.off button.loop-grip {
+.loop-host.off .loop-grip-face {
   background-color: #c48a28;
   background-image: linear-gradient(180deg, #fff8e8, #f0c56a 40%, #b47820 74%, #6a4010);
   box-shadow:
@@ -104,14 +143,26 @@
     inset 0 -3px 0 rgba(0, 0, 0, 0.4),
     0 0 12px rgba(224, 177, 90, 0.75);
 }
-.loop-host button.loop-grip:active {
+.loop-host button.loop-grip:active .loop-grip-face {
   box-shadow: var(--pressed), 0 0 14px rgba(115, 196, 143, 0.9);
 }
-.shell.phone .loop-host button.loop-grip {
-  width: 44px;
-  min-width: 44px;
+.loop-host.off button.loop-grip:active .loop-grip-face {
+  box-shadow: var(--pressed), 0 0 14px rgba(224, 177, 90, 0.8);
 }
-/* The arrange ruler absolutely positions every span. Keep the readout in normal flow. */
+.loop-host button.loop-grip:focus-visible .loop-grip-face {
+  outline: 2px solid #f4fff8;
+  outline-offset: 1px;
+}
+/* The arrange ruler absolutely positions every span. Keep the readout and the grip cap in their own boxes. */
+.ruler .loop-host .loop-grip-face {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  transform: none;
+  color: transparent;
+  font-family: inherit;
+  font-size: 0;
+}
 .ruler .loop-read span {
   position: static;
   top: auto;

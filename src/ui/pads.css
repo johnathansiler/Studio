@@ -106,6 +106,34 @@
     0 14px 18px rgba(0, 0, 0, 0.45);
 }
 
+.mpc-play {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mpc-play .mpc-grid {
+  flex: 1;
+  min-height: 0;
+}
+
+.mpc-full {
+  flex: none;
+  min-height: 48px;
+  border-radius: 14px;
+  font-weight: 740;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #f4fff6;
+}
+
+.mpc-full.on {
+  color: #e9fff0;
+  box-shadow: var(--pressed), var(--glow), 0 0 18px rgba(140, 255, 180, 0.75);
+}
+
 .mpc-pad {
   min-height: 40px;
 }

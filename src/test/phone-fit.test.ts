@@ -215,6 +215,11 @@ describe('phone fit at 412x915', () => {
           const mute = document.querySelector('.strip button[aria-label*="Mute"]') as HTMLElement
           const safeButton = document.querySelector('.strip .solo-safe') as HTMLElement
           const arm = document.querySelector('.strip .arm-flag') as HTMLElement
+          const details = safeButton.closest('details') as HTMLDetailsElement | null
+          if (details && !details.open) {
+            ;(details.querySelector('summary') as HTMLElement | null)?.click()
+            details.open = true
+          }
           safeButton.scrollIntoView({ block: 'center' })
           const box = mute.getBoundingClientRect()
           const safeBox = safeButton.getBoundingClientRect()
@@ -259,6 +264,11 @@ describe('phone fit at 412x915', () => {
         await fold.locator('.mixer .strip').first().waitFor()
         const foldMix = await fold.evaluate(() => {
           const safe = document.querySelector('.strip .solo-safe') as HTMLElement
+          const details = safe.closest('details') as HTMLDetailsElement | null
+          if (details && !details.open) {
+            ;(details.querySelector('summary') as HTMLElement | null)?.click()
+            details.open = true
+          }
           safe.scrollIntoView({ block: 'center' })
           const box = safe.getBoundingClientRect()
           const strip = document.querySelector('.strip:not(.master)') as HTMLElement

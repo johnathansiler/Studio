@@ -238,6 +238,27 @@ export const VELOCITY_CURVES = [
 ] as const
 
 /** Fixed, scaled, and limited velocity. Sensitivity blends the hit toward the fixed value. */
+/** Smoothstep. The middle of the pad eases instead of jumping. */
+export function smoothPad(place: number): number {
+  const t = clamp(place, 0, 1)
+  return t * t * (3 - 2 * t)
+}
+
+/**
+ * Pad velocity from where the finger landed.
+ * 1 is the top of the pad, 0 is the bottom.
+ * Pressure and contact radius blend in only when the device reports them.
+ */
+export function touchVelocity(opts: { place: number; pressure?: number; radius?: number }): number {
+  const fromPlace = smoothPad(opts.place)
+  const sensed: number[] = []
+  if (opts.pressure != null && opts.pressure > 0) sensed.push(clamp(opts.pressure, 0, 1))
+  if (opts.radius != null && opts.radius > 1) sensed.push(clamp((opts.radius - 4) / 24, 0, 1))
+  if (!sensed.length) return Math.max(1 / 127, fromPlace)
+  const extra = sensed.reduce((sum, value) => sum + value, 0) / sensed.length
+  return Math.max(1 / 127, Math.min(1, fromPlace * 0.7 + extra * 0.3))
+}
+
 export function shapeVelocity(played: number, opts: {
   curve: number
   amount: number
