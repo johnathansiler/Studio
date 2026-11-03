@@ -1,11 +1,10 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ARRANGE_TOOLS,
+  FACE_TOOLS,
   TOOL_ACTIONS,
   TOOL_INFO,
   activeTool,
-  compactToolOrder,
   keyForTool,
   subscribeTools,
   toolChip,
@@ -53,9 +52,12 @@ export function ToolBar({
 }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const stripRef = useRef<HTMLDivElement>(null)
-  const shown = phone ? (['select', 'pencil', 'split', 'erase'] as ArrangeTool[]) : compact ? compactToolOrder() : ARRANGE_TOOLS.map((tool) => tool.id)
+  const shown = FACE_TOOLS
   const chip = toolChip(value, context)
-  const showWord = phone || words
+  const showWord = true
+  void phone
+  void words
+  void compact
   useEffect(() => {
     const strip = stripRef.current
     const button = strip?.querySelector<HTMLButtonElement>('button.on')
@@ -106,7 +108,7 @@ export function ToolBar({
             </TipButton>
           )
         })}
-        {(phone ? TOOL_ACTIONS.filter((action) => action.id === 'delete') : TOOL_ACTIONS).map((action) => (
+        {TOOL_ACTIONS.map((action) => (
           <TipButton
             key={action.id}
             className="tool"

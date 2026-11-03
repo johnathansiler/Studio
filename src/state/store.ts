@@ -155,6 +155,8 @@ import {
   type SequenceNote,
 } from '../model/padMachine'
 import { applyChoke, assignPad, clipBeat, padRecordWindow, recordPadHits, type PadHit } from '../instruments/pads/record'
+import { arrangeSong, chopsFor, chopsOntoPads, expandChord, humanizeNotes, kitFromSlices, mpcTempo, quantizeGridBeats, quantizeNotes, setStepVelocity, toggleStep, withLength } from '../instruments/mpc/model'
+import { renderMpcAudio } from '../instruments/mpc/render'
 import { applyLaneNotes, patternToMidiNotes, type LaneNote } from '../model/patternMidi'
 import { clipEndForContent, grownClipEnd, normalizeSnapDivision, snapEditBeat, subdivisionFor, type SnapDivisionId } from '../model/snapGrid'
 import { applyFreshDrums, applySmartDrums, mulberry32 } from '../model/smartDrums'
@@ -917,6 +919,49 @@ export class ProjectStore {
     })
   }
 
+  /** Put a mic take on the armed pad. Trim drops the quiet ends. Auto chop spreads transients across the bank. */
+  placePadTake(trackId: string, bank: number, index: number, samples: Float32Array, sampleRate: number, opts: { trim: boolean; autoChop: boolean; threshold: number }) {
+    const trimmed = opts.trim ? trimSilence(samples, Math.max(0.0008, opts.threshold * 0.25)) : samples
+    if (trimmed.length < 2) return
+    if (!opts.autoChop) {
+      this.assignTrackPad(trackId, bank, index, { name: 'Pad take', samples: trimmed, sampleRate })
+      return
+    }
+    const pieces = chopsOntoPads(chopsFor(trimmed, sampleRate, 'transient'), 'Pad take')
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const kit = normalizePadKit(track.padKit)
+      for (const piece of pieces) {
+        const slice = trimmed.slice(piece.start, piece.end)
+        if (slice.length < 2) continue
+        const id = uid('smp')
+        this.buffers.set(id, { id, name: piece.name, sampleRate, channels: [slice] })
+        const at = (index + piece.pad) % 16
+        const pad = kit.banks[bank]?.[at]
+        if (!pad) continue
+        kit.banks[bank][at] = assignPad(pad, { name: piece.name, bufferId: id })
+      }
+      track.padKit = kit
+    })
+  }
+
+  /** Snap the recorded pattern and the step sequence to the quantize grid. */
+  quantizePadTake(trackId: string) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      const kit = normalizePadKit(track.padKit)
+      const rate = kit.quantizeRate || '1/16'
+      const strength = kit.timingStrength
+      const swing = kit.swing
+      kit.timingGrid = quantizeGridBeats(rate)
+      for (const sequence of kit.sequences) sequence.notes = quantizeNotes(sequence.notes, rate, strength, swing)
+      for (const clip of track.midiClips) clip.notes = quantizeNotes(clip.notes, rate, strength, swing)
+      track.padKit = kit
+    })
+  }
+
   /** Clip that covers the record window. Does not start the transport. */
   ensurePadClip(trackId: string, playheadBeat: number): string | null {
     const window = this.padWindow(playheadBeat)
@@ -970,30 +1015,255 @@ export class ProjectStore {
     if (!notes.length) return
     const track = this.track(trackId)
     if (!track) return
+    const kit = normalizePadKit(track.padKit)
+    if (kit.output === 'audio') return
+    const chorded = expandChord(notes, kit.banks.flat())
+    this.writePadHits(trackId, chorded, mode)
+    if (kit.midiTrackId && kit.midiTrackId !== trackId) this.writePadHits(kit.midiTrackId, chorded, mode)
+  }
+
+  private writePadHits(trackId: string, notes: PadHit[], mode: 'overdub' | 'replace') {
+    const preview = this.track(trackId)
+    if (!preview || preview.type !== 'midi') return
     const rec = this.padRecord?.trackId === trackId ? this.padRecord : null
-    const clip = track.midiClips.find((item) => item.id === (rec?.clipId || this.selectedMidiClipId)) || track.midiClips[0]
-    if (!clip) return
-    const clipStart = rec?.clipStart ?? clip.startBeat
-    const loopStart = rec?.loopStart ?? clipStart
-    const loopEnd = rec?.loopEnd ?? clipStart + clip.durationBeats
-    const pads = (track.padKit?.banks ?? []).flat().map((pad) => ({ pitch: pad.pitch, choke: pad.choke }))
-    const incoming = notes.map((note) => {
-      const start = clipBeat(note.startBeat, clipStart, loopStart, loopEnd)
-      const room = Math.max(0.05, clip.durationBeats - start)
-      return {
-        ...note,
-        id: uid('note'),
-        startBeat: Math.min(start, Math.max(0, clip.durationBeats - 0.05)),
-        durationBeats: Math.max(0.05, Math.min(room, note.durationBeats, 1)),
-        velocity: Math.max(0.05, Math.min(1, note.velocity)),
-      }
-    })
     this.mutate(() => {
-      const live = this.track(trackId)?.midiClips.find((item) => item.id === clip.id)
-      if (!live) return
-      let next = live.notes
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      let clip = track.midiClips.find((item) => item.id === (rec?.clipId || this.selectedMidiClipId)) || track.midiClips[0]
+      if (!clip) {
+        const window = this.padWindow(0)
+        clip = { id: uid('midi'), name: 'Pads', startBeat: window.startBeat, durationBeats: window.durationBeats, notes: [] }
+        track.midiClips.push(clip)
+      }
+      const clipStart = rec?.clipStart ?? clip.startBeat
+      const loopStart = rec?.loopStart ?? clipStart
+      const loopEnd = rec?.loopEnd ?? clipStart + clip.durationBeats
+      const pads = (track.padKit?.banks ?? []).flat().map((pad) => ({ pitch: pad.pitch, choke: pad.choke }))
+      const incoming = notes.map((note) => {
+        const start = clipBeat(note.startBeat, clipStart, loopStart, loopEnd)
+        const room = Math.max(0.05, clip.durationBeats - start)
+        return {
+          ...note,
+          id: uid('note'),
+          startBeat: Math.min(start, Math.max(0, clip.durationBeats - 0.05)),
+          durationBeats: Math.max(0.05, Math.min(room, note.durationBeats, 1)),
+          velocity: Math.max(0.05, Math.min(1, note.velocity)),
+        }
+      })
+      let next = clip.notes
       for (const hit of incoming) next = applyChoke(next, pads, hit.pitch, hit.startBeat)
-      live.notes = recordPadHits(next, incoming, mode, 0, live.durationBeats)
+      clip.notes = recordPadHits(next, incoming, mode, 0, clip.durationBeats)
+    })
+  }
+
+  toggleMpcStep(trackId: string, bank: number, index: number, step: number, velocity = 0.9) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      const kit = normalizePadKit(track.padKit)
+      const pad = kit.banks[bank]?.[index]
+      if (!pad) return
+      if (!kit.sequences.length) kit.sequences.push({ id: 'A', name: 'Pattern', lengthBeats: 4, notes: [] })
+      const sequence = kit.sequences[0]
+      sequence.notes = toggleStep(sequence.notes, pad.pitch, step, sequence.lengthBeats / 16, kit.fullLevel ? 1 : velocity)
+      track.padKit = kit
+    })
+  }
+
+  setMpcStepVelocity(trackId: string, bank: number, index: number, step: number, velocity: number) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      const kit = normalizePadKit(track.padKit)
+      const pad = kit.banks[bank]?.[index]
+      if (!pad || !kit.sequences.length) return
+      const sequence = kit.sequences[0]
+      sequence.notes = setStepVelocity(sequence.notes, pad.pitch, step, sequence.lengthBeats / 16, velocity)
+      track.padKit = kit
+    })
+  }
+
+  /** Writes Humanize into the pattern and the recorded clips. A second pass uses the next seed. */
+  humanizePadTake(trackId: string) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      const kit = normalizePadKit(track.padKit)
+      const rng = mulberry32(kit.seed || 1)
+      for (const sequence of kit.sequences) sequence.notes = humanizeNotes(sequence.notes, kit.humanizeTime, kit.humanizeVelocity, rng)
+      for (const clip of track.midiClips) clip.notes = humanizeNotes(clip.notes, kit.humanizeTime, kit.humanizeVelocity, rng)
+      kit.seed = (Math.round(kit.seed) + 1) % 100000 || 1
+      track.padKit = kit
+    })
+  }
+
+  setMpcLength(trackId: string, beats: number) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const kit = normalizePadKit(track.padKit)
+      if (!kit.sequences.length) kit.sequences.push({ id: 'A', name: 'Pattern', lengthBeats: 4, notes: [] })
+      kit.sequences[0] = withLength(kit.sequences[0], beats)
+      track.padKit = kit
+    })
+  }
+
+  /** Song order lands on the arrangement. MIDI, audio, or both, matching the pad output. */
+  placeMpcSong(trackId: string) {
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return []
+    const kit = normalizePadKit(track.padKit)
+    const clip = track.midiClips[0]
+    const spans = arrangeSong(kit, clip?.notes ?? [], clip?.durationBeats ?? 4)
+    if (kit.output !== 'audio') {
+      this.mutate(() => {
+        const live = this.track(trackId)
+        if (!live) return
+        const pads = normalizePadKit(live.padKit).banks.flat()
+        for (const span of spans) {
+          live.midiClips.push({
+            id: uid('midi'),
+            name: span.name,
+            startBeat: span.startBeat,
+            durationBeats: span.durationBeats,
+            notes: expandChord(span.notes, pads).map((note) => ({ ...note, id: uid('note') })),
+          })
+        }
+      })
+    }
+    if (kit.output !== 'midi') {
+      const notes = spans.flatMap((span) => span.notes.map((note) => ({ ...note, startBeat: note.startBeat + span.startBeat })))
+      this.printMpcAudio(trackId, notes)
+    }
+    return spans
+  }
+
+  /** Render pad audio onto an audio track. MIDI-only output prints nothing. */
+  printMpcAudio(trackId: string, notes?: { pitch: number; startBeat: number; durationBeats: number; velocity: number }[]) {
+    const track = this.track(trackId)
+    if (!track) return null
+    const kit = normalizePadKit(track.padKit)
+    if (kit.output === 'midi') return null
+    const source = notes ?? track.midiClips.flatMap((item) => item.notes.map((note) => ({
+      pitch: note.pitch,
+      startBeat: item.startBeat + note.startBeat,
+      durationBeats: note.durationBeats,
+      velocity: note.velocity,
+    })))
+    const buffers = new Map<string, { sampleRate: number; samples: Float32Array }>()
+    for (const pad of kit.banks.flat()) {
+      const id = pad.layers[0]?.bufferId
+      const asset = id ? this.buffers.get(id) : undefined
+      const channel = asset?.channels[0]
+      if (id && asset && channel?.length) buffers.set(id, { sampleRate: asset.sampleRate, samples: channel })
+    }
+    const rendered = renderMpcAudio({
+      sampleRate: this.project.sampleRate,
+      tempo: mpcTempo(kit.syncTempo, kit.localBpm, this.project.tempo),
+      notes: source,
+      pads: kit.banks.flat(),
+      buffers,
+      output: kit.output,
+    })
+    if (!rendered.left.length) return null
+    const bufferId = uid('smp')
+    this.buffers.set(bufferId, {
+      id: bufferId,
+      name: 'Sampler drums',
+      sampleRate: this.project.sampleRate,
+      channels: [rendered.left, rendered.right],
+    })
+    let audioId = ''
+    this.mutate(() => {
+      const live = this.track(trackId)
+      const kitNow = normalizePadKit(live?.padKit)
+      let audio = kitNow.audioTrackId ? this.track(kitNow.audioTrackId) : undefined
+      if (!audio || audio.type !== 'audio') {
+        audio = makeTrack({
+          name: 'Sampler drums',
+          type: 'audio',
+          color: TRACK_COLORS[this.project.tracks.length % TRACK_COLORS.length],
+          input: 'none',
+        })
+        this.project.tracks.push(audio)
+        if (live) live.padKit = { ...kitNow, audioTrackId: audio.id }
+      }
+      const clipId = uid('clip')
+      audio.clips.push({
+        id: clipId,
+        name: 'Sampler drums',
+        bufferId,
+        startSample: 0,
+        offsetSamples: 0,
+        durationSamples: rendered.left.length,
+        fadeInSamples: 0,
+        fadeOutSamples: 0,
+        gain: 1,
+        source: 'local',
+      })
+      audioId = audio.id
+      this.selectedTrackId = audio.id
+      this.selectedClipId = clipId
+    })
+    return audioId || null
+  }
+
+  chopTrackPad(trackId: string, bank: number, index: number, mode: 'transient' | 'grid' | 'manual') {
+    const kit = this.trackKit(trackId)
+    const pad = kit.banks[bank]?.[index]
+    const asset = pad?.layers[0]?.bufferId ? this.buffers.get(pad.layers[0].bufferId) : undefined
+    const samples = asset?.channels[0]
+    if (!pad || !samples?.length) return
+    const sampleRate = asset?.sampleRate || this.project.sampleRate
+    const markers = pad.region ? [Math.round(pad.region.start * samples.length), Math.round(pad.region.end * samples.length)] : []
+    const pieces = chopsOntoPads(chopsFor(samples, sampleRate, mode, { regions: 16, bpm: this.project.tempo, markers }), pad.name)
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const next = normalizePadKit(track.padKit)
+      for (const piece of pieces) {
+        const slice = samples.slice(piece.start, piece.end)
+        const id = uid('smp')
+        this.buffers.set(id, { id, name: piece.name, sampleRate, channels: [slice] })
+        const dest = next.banks[bank]?.[piece.pad]
+        if (!dest) continue
+        dest.name = piece.name
+        dest.sampleName = piece.name
+        dest.layers = [{ velocityLo: 0, velocityHi: 1, tune: 0, bufferId: id }]
+        dest.region = { start: 0, end: 1, loop: false, loopStart: 0, loopEnd: 1, reverse: false }
+      }
+      track.padKit = next
+    })
+  }
+
+  resampleTrackPad(trackId: string, bank: number, index: number) {
+    const kit = this.trackKit(trackId)
+    const pad = kit.banks[bank]?.[index]
+    const bufferId = pad?.layers[0]?.bufferId
+    const asset = bufferId ? this.buffers.get(bufferId) : undefined
+    const channel = asset?.channels[0]
+    if (!pad || !bufferId || !asset || !channel?.length) return
+    const rendered = renderMpcAudio({
+      sampleRate: this.project.sampleRate,
+      tempo: mpcTempo(kit.syncTempo, kit.localBpm, this.project.tempo),
+      notes: [{ pitch: pad.pitch, startBeat: 0, durationBeats: 1, velocity: 1 }],
+      pads: [pad],
+      buffers: new Map([[bufferId, { sampleRate: asset.sampleRate, samples: channel }]]),
+      output: 'audio',
+    })
+    const mono = new Float32Array(rendered.left.length)
+    for (let i = 0; i < mono.length; i++) mono[i] = ((rendered.left[i] || 0) + (rendered.right[i] || 0)) * 0.5
+    const id = uid('smp')
+    this.buffers.set(id, { id, name: `${pad.name} resample`, sampleRate: this.project.sampleRate, channels: [mono] })
+    this.mutate(() => {
+      const track = this.track(trackId)
+      const next = normalizePadKit(track?.padKit)
+      const dest = next.banks[bank]?.[index]
+      if (!track || !dest) return
+      dest.layers = [{ velocityLo: 0, velocityHi: 1, tune: 0, bufferId: id }]
+      dest.region = { start: 0, end: 1, loop: false, loopStart: 0, loopEnd: 1, reverse: false }
+      dest.tune = 0
+      track.padKit = next
     })
   }
 
@@ -1781,7 +2051,7 @@ export class ProjectStore {
       this.insertScalerPlugin(trackId)
       return
     }
-    if (pluginId === 'pads') {
+    if (pluginId === 'pads' || pluginId === 'drum-machine' || pluginId === '808' || pluginId === 'drums') {
       this.insertPadsPlugin(trackId)
       return
     }
@@ -1825,8 +2095,11 @@ export class ProjectStore {
     const hostId = host.id
     this.mutate(() => {
       const list = this.pluginList(hostId)
-      if (!list || list.some((item) => isDrumsPlugin(item))) return
+      const track = this.track(hostId)
+      if (!list || !track || list.some((item) => isDrumsPlugin(item))) return
       list.push(createPlugin('pads'))
+      const chromatic = list.find((item) => item.pluginId === 'sampler' && !isDrumsPlugin(item) && item.sampler?.slices.length)
+      if (chromatic?.sampler) track.padKit = kitFromSlices(chromatic.sampler.slices, normalizePadKit(track.padKit))
     })
     this.setTrackInstrument(hostId, 'pads')
   }
