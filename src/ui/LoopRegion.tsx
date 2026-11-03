@@ -4,9 +4,8 @@ import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import type { Project } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { useFormFactor } from './form'
+import { layoutLoopGrips, loopGripHit } from './loopGrips'
 import './loopRegion.css'
-
-const GRIP = 40
 
 export function LoopRegion({
   store,
@@ -30,7 +29,7 @@ export function LoopRegion({
   /** Empty-ruler presses pass through, so pan and zoom still work. */
   yieldEmpty?: boolean
 }) {
-  const phone = useFormFactor() === 'phone'
+  const coarse = useFormFactor() !== 'desk'
   const [finger, setFinger] = useState<number | null>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const labelRef = useRef<HTMLDivElement>(null)
@@ -47,7 +46,7 @@ export function LoopRegion({
     onBody: boolean
   } | null>(null)
   const lastTap = useRef(0)
-  const [box, setBox] = useState({ width: 0, label: 0, viewLeft: 0, viewWidth: 0 })
+  const [box, setBox] = useState({ width: 0, label: 0, labelWidth: 0, viewLeft: 0, viewWidth: 0 })
   const readout = formatLoopReadout(project, project.loopStartSample, project.loopEndSample)
   const xAtRef = useRef(xAt)
   xAtRef.current = xAt
@@ -69,8 +68,16 @@ export function LoopRegion({
       const regionLeft = xAtRef.current(project.loopStartSample, width)
       const regionRight = xAtRef.current(project.loopEndSample, width)
       const center = loopLabelCenter(Math.min(regionLeft, regionRight), Math.abs(regionRight - regionLeft), label.offsetWidth, viewLeft, viewWidth)
-      const next = { width, label: center, viewLeft, viewWidth }
-      setBox((prev) => (near(prev.width, next.width) && near(prev.label, next.label) && near(prev.viewLeft, next.viewLeft) && near(prev.viewWidth, next.viewWidth) ? prev : next))
+      const next = { width, label: center, labelWidth: label.offsetWidth, viewLeft, viewWidth }
+      setBox((prev) => (
+        near(prev.width, next.width) &&
+        near(prev.label, next.label) &&
+        near(prev.labelWidth, next.labelWidth) &&
+        near(prev.viewLeft, next.viewLeft) &&
+        near(prev.viewWidth, next.viewWidth)
+          ? prev
+          : next
+      ))
     }
     measure()
     const scroller = scrollParent(host)
@@ -87,13 +94,19 @@ export function LoopRegion({
   const rawRight = xAt(project.loopEndSample, width)
   const left = Math.min(rawLeft, rawRight)
   const barWidth = Math.max(0, Math.abs(rawRight - rawLeft))
-  const baseGrip = phone ? 44 : GRIP
-  const grip = width > 0 && width < baseGrip * 2 ? Math.max(32, width / 2) : baseGrip
   const viewLeft = box.viewWidth > 0 ? box.viewLeft : 0
   const viewWidth = box.viewWidth > 0 ? box.viewWidth : width
-  const startX = pinGrip(rawLeft, viewLeft, viewWidth, grip)
-  const endX = pinGrip(rawRight, viewLeft, viewWidth, grip)
   const labelX = box.label || left + barWidth / 2
+  const grips = layoutLoopGrips({
+    start: rawLeft,
+    end: rawRight,
+    hostWidth: width,
+    viewLeft,
+    viewWidth,
+    labelCenter: labelX,
+    labelWidth: box.labelWidth,
+    hit: loopGripHit(coarse),
+  })
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!event.isPrimary) return
@@ -187,25 +200,29 @@ export function LoopRegion({
         className="song-loop"
         data-loop-body="1"
         data-loop-edge="move"
-        style={{ left, width: Math.max(barWidth, grip) }}
+        style={{ left, width: barWidth }}
         title={`${readout.text}. Drag to move the loop. Double-click to turn it ${project.loopEnabled ? 'off' : 'on'}.`}
       />
       <button
         type="button"
         className="loop-grip"
         data-loop-edge="start"
-        style={{ left: startX, width: grip }}
+        style={{ left: grips.start.hitLeft, width: grips.start.hitWidth }}
         aria-label="Loop start. Drag to move the start of the loop."
         title="Loop start. Drag to move the start of the loop."
-      />
+      >
+        <span className="loop-grip-face start" style={{ left: grips.start.faceLeft - grips.start.hitLeft, width: grips.start.faceWidth }} aria-hidden="true" />
+      </button>
       <button
         type="button"
         className="loop-grip end"
         data-loop-edge="end"
-        style={{ left: endX, width: grip }}
+        style={{ left: grips.end.hitLeft, width: grips.end.hitWidth }}
         aria-label="Loop end. Drag to stretch the loop."
         title="Loop end. Drag to stretch the loop."
-      />
+      >
+        <span className="loop-grip-face end" style={{ left: grips.end.faceLeft - grips.end.hitLeft, width: grips.end.faceWidth }} aria-hidden="true" />
+      </button>
       {finger != null && <i className="snap-line loop-finger" style={{ left: finger }} />}
       <div ref={labelRef} className="loop-read" style={{ left: width ? labelX : '50%' }}>
         <span className="loop-len">{readout.length}</span>
@@ -236,16 +253,6 @@ export function SongLoopStrip({ store, onSeek }: { store: ProjectStore; onSeek?:
       </div>
     </div>
   )
-}
-
-/** Keep a grip inside the visible ruler, centered on its edge when that edge is on screen. */
-function pinGrip(edge: number, viewLeft: number, viewWidth: number, grip: number) {
-  if (!(viewWidth > 0)) return Math.max(0, edge - grip / 2)
-  const pad = 8
-  const min = viewLeft + pad
-  const max = viewLeft + viewWidth - grip - pad
-  if (max <= min) return viewLeft
-  return Math.min(max, Math.max(min, edge - grip / 2))
 }
 
 function near(a: number, b: number) {

@@ -4,11 +4,14 @@ import { fileSlug, runBounce, type BounceFile, type BounceJob } from '../bounce'
 import { zipFiles } from '../../model/zip'
 import { uid, type AudioAsset, type PluginInstance, type Project } from '../../model/types'
 import type { DitherMode } from '../../model/wav'
-import { MASTERING_IDS, type LoudnessTarget } from './assistant'
+import { isChainPlugin } from '../plugins/ids'
+import type { LoudnessTarget } from './assistant'
 
 export function ditherShape(project: Project): DitherMode {
-  const plugin = project.masterPlugins.find((item) => item.pluginId === 'dither' && item.enabled)
-  const shape = plugin?.params.shape ?? 1
+  const plugin = [...project.masterPlugins].reverse().find((item) => item.pluginId === 'limiter' && item.enabled)
+  const bits = plugin?.params.bits ?? 24
+  const shape = plugin?.params.shape ?? 0
+  if (bits >= 23.5 && shape < 0.5) return 'none'
   if (shape >= 1.5) return 'shaped'
   if (shape >= 0.5) return 'tpdf'
   return 'none'
@@ -16,11 +19,7 @@ export function ditherShape(project: Project): DitherMode {
 
 export function withSharedChain(project: Project, chain: PluginInstance[]): Project {
   const copy = JSON.parse(JSON.stringify(project)) as Project
-  const meter = copy.masterPlugins.find((plugin) => plugin.pluginId === 'meter')
-  copy.masterPlugins = [
-    ...chain.filter((plugin) => plugin.pluginId !== 'meter').map((plugin) => ({ ...plugin, id: uid('fx'), params: { ...plugin.params } })),
-    ...(meter ? [meter] : []),
-  ]
+  copy.masterPlugins = chain.filter((plugin) => plugin.pluginId !== 'meter').map((plugin) => ({ ...plugin, id: uid('fx'), params: { ...plugin.params } }))
   return copy
 }
 
@@ -73,5 +72,5 @@ export async function masterAlbum(entries: { project: Project; assets: AudioAsse
 }
 
 export function sharedChain(project: Project) {
-  return project.masterPlugins.filter((plugin) => plugin.pluginId !== 'meter' && (MASTERING_IDS as readonly string[]).includes(plugin.pluginId))
+  return project.masterPlugins.filter((plugin) => isChainPlugin(plugin))
 }

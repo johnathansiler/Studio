@@ -18,7 +18,7 @@
 .browser-body { display: flex; flex-direction: column; gap: 6px; padding: 8px; min-height: 0; flex: 1; }
 .browser-body input { min-height: 32px; border-radius: 8px; border: 1px solid var(--line); background: #101814; color: var(--text); padding: 0 8px; }
 .browser-list { overflow: auto; display: flex; flex-direction: column; gap: 4px; min-height: 0; }
-.browser-row { display: flex; align-items: center; gap: 8px; text-align: left; min-height: 36px; border-radius: 8px; border: 1px solid var(--line); background: #18231d; color: var(--text); padding: 4px 8px; }
+.browser-row { display: flex; align-items: center; gap: 8px; text-align: left; min-height: 40px; border-radius: 8px; border: 1px solid var(--line); background: #18231d; color: var(--text); padding: 4px 8px; }
 .browser-row i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
 .browser-row strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browser-row span, .browser-body p { color: var(--muted); font-size: 12px; }

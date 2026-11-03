@@ -45,7 +45,7 @@ const VIEWPORTS = [
 ]
 
 describe('transport words', () => {
-  it('shows Reset, Play, Stop, Rec, Click, Count-in, and Loop on desktop, phone, and fold, and lights Play only while playing', async () => {
+  it('shows Start, Play, Stop, Rec, Click, Count, Reset, and Loop on desktop, phone, and fold, and lights Play only while playing', async () => {
     const browser = await chromium.launch({ headless: true })
     try {
       const page = await browser.newPage()
@@ -53,7 +53,7 @@ describe('transport words', () => {
         await page.setViewportSize({ width: viewport.width, height: viewport.height })
         await page.setContent(transportPage(viewport.shell), { waitUntil: 'load' })
         const report = await page.evaluate(() => {
-          const words = ['Reset', 'Play', 'Stop', 'Rec', 'Click', 'Count-in', 'Loop']
+          const words = ['Start', 'Play', 'Stop', 'Rec', 'Click', 'Count', 'Reset', 'Loop']
           const buttons = words.map((word) => {
             const node = [...document.querySelectorAll<HTMLElement>('.transport .t-word')].find((item) => item.textContent === word)!
             const button = node.closest('button') as HTMLElement
@@ -101,9 +101,9 @@ describe('transport words', () => {
           expect(button.right, `${viewport.name} ${button.word}`).toBeLessThanOrEqual(button.boxRight + 1)
           expect(button.scrollWidth, `${viewport.name} ${button.word}`).toBeLessThanOrEqual(button.clientWidth + 1)
           expect(button.scrollHeight, `${viewport.name} ${button.word}`).toBeLessThanOrEqual(button.clientHeight + 1)
-          expect(button.width, `${viewport.name} ${button.word}`).toBeGreaterThanOrEqual(36)
+          expect(button.width, `${viewport.name} ${button.word}`).toBeGreaterThanOrEqual(40)
           if (viewport.name !== 'phone' || viewport.height > viewport.width) {
-            expect(button.height, `${viewport.name} ${button.word}`).toBeGreaterThanOrEqual(36)
+            expect(button.height, `${viewport.name} ${button.word}`).toBeGreaterThanOrEqual(40)
           }
         }
       }

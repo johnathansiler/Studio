@@ -53,31 +53,17 @@ describe('MIDI effects run before the instrument', () => {
     expect(out.every((item) => item.durationBeats === 0.5)).toBe(true)
   })
 
-  it('repeats inside the note and shapes velocity', () => {
-    const repeat = defaultFx('repeat', 'repeat')
-    repeat.params = { rate: 0.5, gate: 0.5 }
-    const curve = defaultFx('velocity', 'curve')
-    curve.params = { curve: 2, amount: 1, floor: 0, ceiling: 1 }
-    const repeated = applyMidiChain([note(60, 0, 1, 0.5)], [repeat], ctx)
-    expect(repeated.map((item) => item.startBeat)).toEqual([0, 0.5])
-    const shaped = applyMidiChain([note(60, 0, 1, 0.25)], [curve], ctx)
-    expect(shaped[0].velocity).toBeCloseTo(0.0625)
-    const soft = defaultFx('velocity', 'soft')
-    soft.params = { curve: 1, amount: 1, floor: 0, ceiling: 1 }
-    expect(applyMidiChain([note(60, 0, 1, 0.25)], [soft], ctx)[0].velocity).toBeCloseTo(0.5)
-  })
-
-  it('humanizes the same way every time and leaves the source notes alone', () => {
-    const human = defaultFx('humanize', 'human')
-    human.params = { time: 0.1, vel: 0.2 }
-    const source = [note(60), note(67, 1)]
-    const once = applyMidiChain(source, [human], ctx)
-    const twice = applyMidiChain(source, [human], ctx)
-    expect(once).toEqual(twice)
-    expect(once[0].startBeat).not.toBe(source[0].startBeat)
+  it('drops retired repeat, velocity, and humanize effects', () => {
+    const source = [note(60, 0, 1, 0.5)]
+    const retired = [
+      { id: 'repeat', kind: 'repeat' as const, enabled: true, params: { rate: 0.5, gate: 0.5 } },
+      { id: 'curve', kind: 'velocity' as const, enabled: true, params: { curve: 2, amount: 1 } },
+      { id: 'human', kind: 'humanize' as const, enabled: true, params: { time: 0.1, vel: 0.2 } },
+    ]
+    const out = applyMidiChain(source, retired as unknown as Parameters<typeof applyMidiChain>[1], ctx)
+    expect(out.map((item) => item.startBeat)).toEqual([0])
+    expect(out[0].velocity).toBeCloseTo(0.5)
     expect(source[0].startBeat).toBe(0)
-    expect(once[0].startBeat).toBeGreaterThanOrEqual(0)
-    expect(once[0].startBeat).toBeLessThanOrEqual(0.1)
   })
 
   it('plays an empty chain unchanged and drops muted notes', () => {

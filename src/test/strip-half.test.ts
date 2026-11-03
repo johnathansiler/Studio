@@ -43,7 +43,7 @@ describe('half-width mixer strips', () => {
         const shorts = [...strip.querySelectorAll('.mode-short')].map((node) => node.textContent)
         const name = strip.querySelector('h3') as HTMLElement
         const fader = strip.querySelector('.fader-row .touch-slider') as HTMLElement
-        const pan = strip.querySelector('.touch-slider.pan') as HTMLElement
+        const pan = strip.querySelector('.pan-knob') as HTMLElement
         const meter = strip.querySelector('.meter') as HTMLElement
         const buttons = [...strip.querySelectorAll('.mini')].map((node) => (node.textContent || '').replace(/\s+/g, ''))
         const stripBox = strip.getBoundingClientRect()
@@ -67,7 +67,7 @@ describe('half-width mixer strips', () => {
       expect(box.left).toBeGreaterThanOrEqual(0)
       expect(box.full).not.toBe('none')
       expect(box.short).toBe('none')
-      expect(box.shorts).toEqual(['O', 'R', 'T', 'L'])
+      expect(box.shorts).toEqual(['R'])
       expect(box.buttons.some((label) => label.includes('Mute'))).toBe(true)
       expect(box.buttons.some((label) => label.includes('Solo'))).toBe(true)
       expect(box.buttons.some((label) => label.includes('Arm'))).toBe(true)

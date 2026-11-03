@@ -51,7 +51,7 @@ describe('pads drum machine', () => {
     expect(clip.notes.map((note) => note.pitch)).toEqual([36, 38, 42])
     expect(clip.notes.map((note) => note.startBeat)).toEqual([0, 1, 1.5])
     expect(store.track(id)?.instrument).toBe('pads')
-    expect(store.track(id)?.plugins.some((plugin) => plugin.pluginId === 'pads')).toBe(true)
+    expect(store.track(id)?.plugins.some((plugin) => plugin.pluginId === 'sampler' && plugin.params.kind === 1)).toBe(true)
     expect(store.padsTrackId).toBe(id)
   })
 
@@ -144,8 +144,8 @@ describe('pads drum machine', () => {
     expect(picks[3].index).toBe(5)
     expect(shortPadName('Bass Drum 1 – BDrumNe w hit v2 rr1 Sum')).toBe('Bass Drum 1')
     expect(shortPadName('Gogodze kit hihat closed vel 1 rr1')).toBe('Gogodze kit hihat closed')
-    expect(CATALOG.find((plugin) => plugin.id === 'pads')?.name).toBe('Pads')
-    expect(browserGroup('plugins').map((item) => item.name)).toContain('Pads')
+    expect(CATALOG.find((plugin) => plugin.id === 'sampler')?.name).toBe('Sampler')
+    expect(browserGroup('plugins').map((item) => item.name)).toContain('Sampler')
     const store = new ProjectStore(createEmptyProject())
     const id = store.project.tracks.find((track) => track.type === 'midi')!.id
     const html = renderToStaticMarkup(createElement(PadsPanel, { store, engine, trackId: id, onRecord: () => {}, onEdit: () => {} }))

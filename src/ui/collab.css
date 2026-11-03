@@ -24,3 +24,45 @@
   height: 100%;
   border-left: 0;
 }
+.version-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 12px;
+  overflow: auto;
+  max-height: 320px;
+}
+.version-panel .text-btn {
+  min-height: 40px;
+  min-width: 40px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background-color: var(--panel-2);
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  color: var(--text);
+  text-align: center;
+}
+.version-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 10px;
+  background-color: var(--panel);
+  background-image: var(--face);
+  box-shadow: var(--raised);
+}
+.version-row strong,
+.version-row span {
+  text-align: left;
+  color: var(--text);
+}
+.version-row span { color: var(--muted); font-size: 12px; }
+.version-empty { margin: 0; color: var(--muted); font-size: 13px; }
+.side-tabs button[data-tab='versions'] { min-height: 40px; }
+.shell.phone .version-panel,
+.shell.fold .version-panel { max-height: none; }
+.shell.phone .version-panel .text-btn,
+.shell.fold .version-panel .text-btn { min-height: 44px; width: 100%; }

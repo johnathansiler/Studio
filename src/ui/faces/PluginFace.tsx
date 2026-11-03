@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { CATALOG } from '../../audio/plugins/catalog'
+import { kindLabels, paramsForKind } from '../../audio/plugins/ids'
 import type { ParamSpec } from '../../audio/plugins/types'
 import { Keyboard, Knob, Shell, Toggle } from '../kit/controls'
 import {
@@ -87,7 +88,7 @@ export function FaceGallery({ compact = false }: { compact?: boolean }) {
   const phone = compact || narrow
   return (
     <div className="face-gallery">
-      {CATALOG.filter((plugin) => plugin.id !== 'tune' && plugin.id !== 'scaler' && plugin.id !== 'pads').map((plugin) => {
+      {CATALOG.filter((plugin) => plugin.id !== 'tune' && plugin.id !== 'scaler' && plugin.id !== 'synth').map((plugin) => {
         const values = Object.fromEntries(plugin.params.map((param) => [param.id, param.default]))
         Object.assign(values, GALLERY_BIAS[plugin.id] ?? {})
         return (
@@ -131,41 +132,59 @@ function ParamLayout({
   values: Record<string, number>
   onChange: (id: string, value: number) => void
 }) {
-  if (family === 'eq' && bandsOf(params).length) {
-    const bands = bandsOf(params)
+  const allow = paramsForKind(pluginId, values.kind ?? 0)
+  const visible = allow ? params.filter((param) => allow.includes(param.id)) : params
+  if (family === 'eq' && bandsOf(visible).length) {
+    const bands = bandsOf(visible)
     const used = new Set(bands.flatMap((band) => [band.freqId, band.gainId, band.qId].filter(Boolean) as string[]))
-    const rest = params.filter((param) => !used.has(param.id))
+    const rest = visible.filter((param) => !used.has(param.id))
     return (
       <div className="eq-bands">
         {bands.map((band) => (
           <fieldset key={band.id} className="eq-band">
             <legend style={{ color: band.color }}>{band.label}</legend>
-            <Row params={pick(params, [band.freqId, band.gainId, band.qId])} values={values} onChange={onChange} />
+            <Row pluginId={pluginId} params={pick(params, [band.freqId, band.gainId, band.qId])} values={values} onChange={onChange} />
           </fieldset>
         ))}
-        {rest.length > 0 && <Row params={rest} values={values} onChange={onChange} />}
+        {rest.length > 0 && <Row pluginId={pluginId} params={rest} values={values} onChange={onChange} />}
       </div>
     )
   }
   const size = family === 'dyn' || pluginId === 'compressor' ? 'lg' : family === 'mod' ? 'sm' : 'md'
-  return <Row params={params.filter((param) => param.id !== 'mask')} values={values} onChange={onChange} size={size} />
+  return <Row pluginId={pluginId} params={visible.filter((param) => param.id !== 'mask')} values={values} onChange={onChange} size={size} />
 }
 
 function Row({
+  pluginId,
   params,
   values,
   onChange,
   size = 'md',
 }: {
+  pluginId: string
   params: ParamSpec[]
   values: Record<string, number>
   onChange: (id: string, value: number) => void
   size?: 'sm' | 'md' | 'lg'
 }) {
-  const toggles = params.filter((param) => TOGGLE_IDS.has(param.id) && param.max <= 1)
-  const knobs = params.filter((param) => !toggles.includes(param))
+  const labels = kindLabels(pluginId)
+  const kind = params.find((param) => param.id === 'kind')
+  const toggles = params.filter((param) => param.id !== 'kind' && TOGGLE_IDS.has(param.id) && param.max <= 1)
+  const knobs = params.filter((param) => param.id !== 'kind' && !toggles.includes(param))
   return (
     <div className="kit-stack">
+      {kind && labels.length > 0 && (
+        <label className="kit-kind">
+          Kind
+          <select
+            aria-label="Kind"
+            value={Math.max(0, Math.min(labels.length - 1, Math.round(values.kind ?? kind.default)))}
+            onChange={(event) => onChange('kind', Number(event.target.value))}
+          >
+            {labels.map((name, index) => <option key={name} value={index}>{name}</option>)}
+          </select>
+        </label>
+      )}
       {toggles.length > 0 && (
         <div className="kit-toggles">
           {toggles.map((param) => (

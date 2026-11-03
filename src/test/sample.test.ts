@@ -86,9 +86,7 @@ describe('sampler and looper', () => {
     const store = new ProjectStore(createEmptyProject())
     const track = store.project.tracks[0]
     store.addPlugin(track.id, 'sampler')
-    store.addPlugin(track.id, 'looper')
     const sampler = track.plugins.find((plugin) => plugin.pluginId === 'sampler')!
-    const looper = track.plugins.find((plugin) => plugin.pluginId === 'looper')!
     const data = sine(8000, 440, 48000)
     data[10] = 0
     store.addAsset({ id: 'tone', name: 'Tone', sampleRate: 48000, channels: [data] })
@@ -99,19 +97,10 @@ describe('sampler and looper', () => {
     store.exportSlices(track.id, sampler.id)
     const midi = store.project.tracks.find((item) => item.type === 'midi')!
     expect(midi.midiClips.some((clip) => clip.name === 'Slices' && clip.notes.length === 16)).toBe(true)
-    store.addLooperLayer(track.id, looper.id, new Float32Array(96000).fill(0.2))
-    store.addLooperLayer(track.id, looper.id, new Float32Array(96000).fill(0.1))
-    store.undoLooper(track.id, looper.id)
-    expect(store.track(track.id)!.plugins.find((plugin) => plugin.id === looper.id)!.looper!.layers).toHaveLength(1)
-    store.undo()
-    expect(store.track(track.id)!.plugins.find((plugin) => plugin.id === looper.id)!.looper!.layers).toHaveLength(2)
     const saved = JSON.parse(JSON.stringify(store.project)) as { tracks: { plugins: PluginInstance[] }[] }
     const savedSampler = saved.tracks[0].plugins.find((plugin) => plugin.pluginId === 'sampler')
     expect(savedSampler?.sampler?.bufferId).toBeTruthy()
     expect(savedSampler?.sampler?.slices.length).toBe(16)
-    expect(saved.tracks[0].plugins.find((plugin) => plugin.pluginId === 'looper')?.looper?.layers).toHaveLength(2)
-    store.bounceLooper(track.id, looper.id, 0)
-    expect(store.track(track.id)!.clips.some((clip) => clip.name === 'Loop')).toBe(true)
   })
 
   it('snaps to a zero crossing and picks the nearest zone', () => {

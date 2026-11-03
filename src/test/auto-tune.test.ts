@@ -315,7 +315,7 @@ describe('Auto-Tune insert', () => {
     store.addPlugin(vocal.id, 'tune')
     const plugin = store.track(vocal.id)!.plugins.at(-1)!
     expect(plugin.enabled).toBe(true)
-    expect(insertLabel('tune')).toBe('Tune')
+    expect(insertLabel('tune')).toBe('Auto-Tune')
     expect(insertLabel('eq')).toBe('EQ')
     const song = tuneScaleOf(store.scaleState())
     const html = renderToStaticMarkup(createElement(AutoTuneFace, {
@@ -349,8 +349,8 @@ describe('Auto-Tune insert', () => {
     expect(bypassed).toContain('data-bypass="on"')
     expect(bypassed).toContain('bypass-toggle lit')
     expect(bypassed).toContain('>Bypassed<')
-    const button = findButton(InsertList({ store, trackId: vocal.id }), 'Tune')
-    expect(button.props.children).toBe('Tune')
+    const button = findButton(InsertList({ store, trackId: vocal.id }), 'Auto-Tune')
+    expect(button.props.children).toBe('Auto-Tune')
     expect(button.props['aria-label']).toContain('Auto-Tune')
     expect(button.props.onPointerDown).toBeUndefined()
     button.props.onClick()

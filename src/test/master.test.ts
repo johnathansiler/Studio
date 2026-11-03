@@ -127,7 +127,7 @@ describe('mastering', () => {
 
   it('builds EQ, compression, saturation, width, and a limiter', () => {
     const chain = buildChain(null, 'Pop', 0.7, targetById('spotify'))
-    expect(chainOrder(chain)).toEqual(['meq', 'glue', 'mtape', 'image', 'maxim', 'brick', 'dither'])
+    expect(chainOrder(chain)).toEqual(['eq', 'compressor', 'saturator', 'limiter'])
     expect(targetVerdict(-14, -1.2, targetById('spotify'))).toBe('pass')
     expect(targetVerdict(-10, -0.2, targetById('spotify'))).toBe('fail')
     expect(loudnessMatch(-20, -14)).toBeCloseTo(10 ** (6 / 20), 5)

@@ -151,10 +151,10 @@ describe('mobile control lists', () => {
 
   it('keeps reset, play, stop, record, loop, click, and count-in on the transport, not in the menu', () => {
     expect([...PHONE_TRANSPORT_MENU]).toEqual([])
-    for (const id of ['to-start', 'play', 'pause', 'stop', 'record', 'loop', 'click', 'count-in']) {
+    for (const id of ['to-start', 'play', 'pause', 'stop', 'record', 'loop', 'click', 'count-in', 'reset']) {
       expect(TRANSPORT_COPY.some((item) => item.id === id)).toBe(true)
     }
-    expect(TRANSPORT_COPY.find((item) => item.id === 'to-start')?.label).toBe('Reset')
+    expect(TRANSPORT_COPY.find((item) => item.id === 'to-start')?.label).toBe('Start')
     for (const id of ['to-start', 'loop', 'click', 'count-in', 'quantize']) {
       expect(MENU_COPY.some((item) => item.id === id)).toBe(false)
       expect(visibleMenu({ phone: true, session: false, dockBottom: false, hardwareMidi: false }).some((item) => item.id === id)).toBe(false)
@@ -182,17 +182,20 @@ describe('mobile control lists', () => {
     expect(desk.map((item) => item.action)).toEqual([
       'new', 'open', 'save', 'export',
       'box', 'erase', 'pan',
-      'session-mode', 'dock',
+      'dock',
       'scaler', 'players', 'midi',
       'signature', 'shortcuts',
     ])
     expect(phone.map((item) => item.action)).toEqual([
       'new', 'open', 'save', 'export',
       'box', 'erase', 'pan',
-      'session-mode', 'capture',
       'players', 'midi',
       'signature', 'shortcuts',
     ])
+    expect(desk.map((item) => item.action)).not.toContain('click')
+    expect(desk.map((item) => item.action)).not.toContain('count-in')
+    expect(phone.map((item) => item.action)).not.toContain('click')
+    expect(phone.map((item) => item.action)).not.toContain('count-in')
     const phoneCore = phone.filter((item) => !['to-start', 'loop', 'capture'].includes(item.action))
     expect(phoneCore.length).toBeLessThan(desk.length)
     const html = renderToStaticMarkup(createElement(MainMenu, {

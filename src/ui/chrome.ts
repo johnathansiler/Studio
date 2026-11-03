@@ -1,3 +1,5 @@
+import { FEATURES } from '../features'
+
 /** Short labels and touch descriptions for the controls people see first. */
 
 export interface Copy {
@@ -20,8 +22,13 @@ export const VIEW_COPY: Copy[] = [
   { id: 'collab', label: 'Collab', hint: 'Call, video, and remote recording. Stays closed until you open this tab.' },
 ]
 
+/** Tabs on the shell. Collab is drawn beside these. Session stays in VIEW_COPY and returns with FEATURES.session. */
+export function studioViewTabs(): Copy[] {
+  return VIEW_COPY.filter((item) => item.id !== 'collab' && (FEATURES.session || item.id !== 'session'))
+}
+
 export const TRANSPORT_COPY: Copy[] = [
-  { id: 'to-start', label: 'Reset', hint: 'Return to bar 1, or to the loop start when the loop is on.' },
+  { id: 'to-start', label: 'Start', hint: 'Return to bar 1, or to the loop start when the loop is on.' },
   { id: 'play', label: 'Play', hint: 'Play from the playhead. Press again to pause. The playhead stays put.' },
   { id: 'pause', label: 'Pause', hint: 'Pause playback. The playhead stays where it is.' },
   { id: 'stop', label: 'Stop', hint: 'Stop playback and recording. Press again to return to the start.' },
@@ -31,6 +38,9 @@ export const TRANSPORT_COPY: Copy[] = [
   { id: 'loop', label: 'Loop', hint: 'Repeat the highlighted region. Drag its edges to change the length.' },
   { id: 'tempo', label: 'Tempo', hint: 'Type a tempo, or drag, scroll, or press the arrow keys.' },
   { id: 'tap', label: 'Tap', hint: 'Tap in time. The tempo follows your taps.' },
+  { id: 'click', label: 'Click', hint: 'Metronome while you play and record.' },
+  { id: 'count-in', label: 'Count', hint: 'Count off, one bar, or two bars before play and record.' },
+  { id: 'reset', label: 'Reset', hint: 'Reset – fix glitches' },
 ]
 
 /** Phone transport shows the same buttons as the desk. The menu does not repeat them. */
@@ -63,6 +73,7 @@ export interface MenuSpec extends Copy {
  * Capture stays on the phone because the session bar hides that button there.
  * Play, Stop, Record, Loop, Click, Count-in, and Reset stay on the transport.
  * Select, Draw, Split, Trim, Zoom, Duplicate, Delete, Quantize, Snap, and Add track stay on the strip.
+ * While FEATURES.session is off, visibleMenu hides Launch, Timeline, and Capture.
  */
 export const MENU_COPY: MenuSpec[] = [
   { id: 'new', action: 'new', group: 'project', place: 'all', label: 'New', hint: 'Start a fresh session. The timeline starts empty.' },
@@ -92,6 +103,7 @@ export function visibleMenu(input: {
 }): MenuSpec[] {
   const place = input.phone ? 'phone' : 'desk'
   return MENU_COPY.filter((item) => {
+    if (!FEATURES.session && (item.action === 'session-mode' || item.action === 'capture')) return false
     if (item.place !== 'all' && item.place !== place) return false
     if (item.action === 'session-mode') return input.session ? item.id === 'arrangement' : item.id === 'session-view'
     if (item.action === 'dock') return input.dockBottom ? item.id === 'dock-side' : item.id === 'dock-bottom'

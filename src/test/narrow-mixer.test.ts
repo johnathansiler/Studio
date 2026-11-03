@@ -69,6 +69,7 @@ describe('phone mixer at 412x915', () => {
           scrollWidth: node.scrollWidth,
           clientWidth: node.clientWidth,
         }))
+        const stripBox = strip.getBoundingClientRect()
         const autoBoxes = autos.map((button) => button.getBoundingClientRect())
         const arm = strip.querySelector('.arm-flag') as HTMLElement
         const armShown = [...arm.querySelectorAll<HTMLElement>('span')].filter((node) => getComputedStyle(node).display !== 'none').map((node) => (node.textContent || '').trim()).join('')
@@ -76,9 +77,9 @@ describe('phone mixer at 412x915', () => {
         return {
           layout: mixer.dataset.layout,
           narrow: mixer.dataset.narrow,
-          stripWidth: strip.getBoundingClientRect().width,
-          stacked: autoBoxes.length >= 2 && autoBoxes[1].top >= autoBoxes[0].bottom - 1,
-          fullWidth: autoBoxes.length > 0 && autoBoxes[0].width >= strip.getBoundingClientRect().width - 6,
+          stripWidth: stripBox.width,
+          modeCount: autos.length,
+          modeInside: autoBoxes.length === 1 && autoBoxes[0].width >= 36 && autoBoxes[0].left >= stripBox.left - 1 && autoBoxes[0].right <= stripBox.right + 1,
           words: autos.map((button) => (button.querySelector('.mode-full') as HTMLElement | null)?.textContent),
           letters: autos.map((button) => getComputedStyle(button.querySelector('.mode-short') as HTMLElement).display),
           pressed: autos.some((button) => button.classList.contains('on') && button.getAttribute('aria-pressed') === 'true'),
@@ -93,9 +94,9 @@ describe('phone mixer at 412x915', () => {
       expect(report.layout).toBe('columns')
       expect(report.narrow).toBe('1')
       expect(report.stripWidth).toBeLessThanOrEqual(STRIP_HALF + 1)
-      expect(report.stacked).toBe(true)
-      expect(report.fullWidth).toBe(true)
-      expect(report.words).toEqual(['Off', 'Read', 'Touch', 'Latch'])
+      expect(report.modeCount).toBe(1)
+      expect(report.modeInside).toBe(true)
+      expect(report.words).toEqual(['Read'])
       expect(report.letters.every((display) => display === 'none')).toBe(true)
       expect(report.pressed).toBe(true)
       expect(report.fx).toBe(true)
@@ -170,7 +171,7 @@ describe('phone mixer at 412x915', () => {
         }
       })
       expect(report.layout).toBe('rows')
-      expect(report.captions).toEqual(expect.arrayContaining(['Off', 'Read', 'Touch', 'Latch', 'Mute', 'Solo']))
+      expect(report.captions).toEqual(expect.arrayContaining(['Read', 'Mute', 'Solo', 'Arm', 'Safe']))
       expect(report.armShown).toBe('Arm')
       expect(report.narrow).toBe('')
       expect(report.below).toBe(true)

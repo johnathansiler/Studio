@@ -1,4 +1,5 @@
-import { MASTERING_IDS } from '../audio/master/assistant'
+import { isChainPlugin, isDrumsPlugin } from '../audio/plugins/ids'
+import { FEATURES, preferArrangeTransport, preferArrangeView } from '../features'
 import { spectralKey, ensureRepair, pushOp, sliceRegion } from '../audio/spectral/edit'
 import { learnOffline } from '../audio/spectral/job'
 import type { SpectralAction, SpectralRegion } from '../audio/spectral/types'
@@ -34,9 +35,9 @@ import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
 import { readKeyboardEnabled, writeKeyboardEnabled } from '../model/keyboardPlay'
-import { HistoryJournal } from './history'
-import { type ProjectOp, type StampWire } from './ops'
-import { ProjectSync } from './sync'
+import { applyChanges, HistoryJournal } from './history'
+import { diffProject, musicalClone, type ProjectOp, type StampWire } from './ops'
+import { ProjectSync, type SyncJournal } from './sync'
 import { activeTool, setActiveTool, type ArrangeTool } from './tools'
 import {
   channelAutomationMode,
@@ -132,7 +133,7 @@ import type { AudioAsset, AudioClip, AutomationWriteMode, ClipStretch, FollowAct
 import { createSection, deleteSectionContents, duplicateSectionContents, moveSectionContents, resizeSection as setSectionLength, sectionKind } from '../model/sections'
 import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
 import { downbeatAt, projectBeatSample, projectSampleBeat, snapSampleToMap, tempoAtSample } from '../model/tempoMap'
-import { beatsToSamples, quartersPerBar, samplesToBeats } from '../model/time'
+import { beatsToSamples, countInBarsOf, cycleCountInBars, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
 import { renderDrum, DRUM_PADS } from '../model/drums'
 import { isDrumTrack, clampRoll, DRUM_STEP, hitAt } from '../model/drumLanes'
@@ -266,6 +267,8 @@ export class ProjectStore {
   private nextDrumSeed = 1
   /** Patch history. Transport, selection, zoom, and meters are not recorded. */
   private journal = new HistoryJournal()
+  /** A guest may undo a restore they just applied. Other guest edits stay blocked. */
+  private allowUndo = false
   private listeners = new Set<Listener>()
   /** Musical journal shared with every view and with the remote session. */
   readonly sync = new ProjectSync()
@@ -356,17 +359,60 @@ export class ProjectStore {
     this.project = normalizeProjectRack(normalizeProject(merged.project))
     if (waveforms) this.project.waveforms = waveforms
     this.journal.clear()
+    this.allowUndo = false
     this.sync.adopt(this.project)
     this.sync.silence = false
     this.emit()
     return merged.reply
   }
 
+  /** The saved room replaces this tab. Undo history from the previous project is dropped. */
+  replaceWithRoom(project: Project, buffers: Map<string, AudioAsset>, journal: SyncJournal) {
+    this.allowUndo = false
+    this.loadProject(project, buffers)
+    this.sync.install(journal, this.project)
+  }
+
+  /** Keep the open project and continue from a newer saved op log. */
+  adoptRoomJournal(journal: SyncJournal) {
+    this.sync.install(journal, this.project)
+  }
+
+  /**
+   * A restarted room picked another participant's copy.
+   * The project is replaced. Local undo does not reach back across that replace.
+   */
+  adoptSharedRoom(remote: Project, stamps: StampWire[] | undefined, lamport: number, actor: string, seq: number) {
+    this.sync.silence = true
+    const waveforms = this.project.waveforms
+    this.project = normalizeProjectRack(normalizeProject(remote))
+    if (waveforms) this.project.waveforms = waveforms
+    this.journal.clear()
+    this.allowUndo = false
+    this.sync.adoptCheckpoint(this.project, stamps, lamport, actor, seq)
+    this.sync.silence = false
+    this.emit()
+  }
+
+  /**
+   * Put a named version back. One undo step, then field ops so every participant follows.
+   * Undo stays on this device. The undo itself is published as ops.
+   */
+  restoreForEveryone(snapshot: Project) {
+    if (this.remoteFollow) return
+    const target = musicalClone(normalizeProjectRack(normalizeProject(snapshot)))
+    this.mutate(() => {
+      applyChanges(this.project, diffProject(this.project, target))
+    }, 'Restore version')
+    this.allowUndo = true
+    this.toast('Restored a version for everyone')
+  }
+
   private rewriteHistory(ops: ProjectOp[]) {
     this.journal.absorb(ops)
   }
 
-  private mutate(fn: () => void) {
+  private mutate(fn: () => void, label?: string) {
     if (this.remoteFollow) return
     this.quantizePreview = null
     this.drafted = false
@@ -375,7 +421,7 @@ export class ProjectStore {
     this.journal.open(this.project)
     this.editGeneration += 1
     fn()
-    this.journal.seal(this.project)
+    this.journal.seal(this.project, label)
     this.emit()
   }
 
@@ -425,7 +471,7 @@ export class ProjectStore {
   }
 
   undo() {
-    if (this.remoteFollow) return
+    if (this.remoteFollow && !this.allowUndo) return
     this.tempoGroup = false
     this.drafted = false
     const step = this.journal.undo(this.project)
@@ -436,7 +482,7 @@ export class ProjectStore {
   }
 
   redo() {
-    if (this.remoteFollow) return
+    if (this.remoteFollow && !this.allowUndo) return
     this.tempoGroup = false
     this.drafted = false
     const step = this.journal.redo(this.project)
@@ -456,12 +502,20 @@ export class ProjectStore {
     }, 4200)
   }
 
+  /** Drop error banners. This does not edit the project or the undo stack. */
+  clearToasts() {
+    if (!this.toasts.length) return
+    this.toasts = []
+    this.emit()
+  }
+
   setView(view: WorkspaceView) {
-    if (view !== 'beats' && this.view === 'beats') {
+    const next = preferArrangeView(view)
+    if (next !== 'beats' && this.view === 'beats') {
       this.clearRackRoll()
       this.rackRoll = false
     }
-    this.view = view
+    this.view = next
     this.emit()
   }
 
@@ -480,7 +534,7 @@ export class ProjectStore {
   }
 
   setTransportMode(mode: 'arrangement' | 'session') {
-    this.transportMode = mode
+    this.transportMode = preferArrangeTransport(mode)
     this.emit()
   }
 
@@ -1352,7 +1406,23 @@ export class ProjectStore {
 
   toggle(flag: 'metronomeEnabled' | 'countIn' | 'snap' | 'loopEnabled') {
     this.mutate(() => {
+      if (flag === 'countIn') {
+        const on = !this.project.countIn
+        this.project.countIn = on
+        this.project.countInBars = on ? (this.project.countInBars === 2 ? 2 : 1) : 0
+        return
+      }
       this.project[flag] = !this.project[flag]
+    })
+  }
+
+  /** Off, one bar, then two bars. Guests follow the host and do not write this. */
+  cycleCountIn() {
+    if (this.remoteFollow) return
+    const next = cycleCountInBars(countInBarsOf(this.project))
+    this.mutate(() => {
+      this.project.countIn = next > 0
+      this.project.countInBars = next
     })
   }
 
@@ -1393,7 +1463,7 @@ export class ProjectStore {
       }
       if (spec.kind === 'midi' && spec.instrument === 'pads' && made[0]) {
         made[0].padKit = normalizePadKit(made[0].padKit)
-        if (!made[0].plugins.some((plugin) => plugin.pluginId === 'pads')) made[0].plugins.push(createPlugin('pads'))
+        if (!made[0].plugins.some((plugin) => isDrumsPlugin(plugin))) made[0].plugins.push(createPlugin('pads'))
         this.padsTrackId = made[0].id
         this.scalerTrackId = null
         this.rackTrackId = null
@@ -1639,9 +1709,15 @@ export class ProjectStore {
         this.openScaler(trackId)
         return
       }
-      if (plugin?.pluginId === 'pads' && trackId !== 'master') {
+      if (plugin && isDrumsPlugin(plugin) && trackId !== 'master') {
         this.pluginFocus = null
         this.openPads(trackId)
+        return
+      }
+      if (plugin?.pluginId === 'synth' && trackId !== 'master') {
+        this.pluginFocus = null
+        if (this.patchTrackId !== trackId) this.openPatch(trackId)
+        else this.emit()
         return
       }
     }
@@ -1651,21 +1727,18 @@ export class ProjectStore {
 
   replaceMasterChain(plugins: PluginInstance[]) {
     this.mutate(() => {
-      const mastering = new Set<string>(MASTERING_IDS)
-      const meter = this.project.masterPlugins.find((plugin) => plugin.pluginId === 'meter') ?? createPlugin('meter')
-      const kept = this.project.masterPlugins.filter((plugin) => plugin.pluginId !== 'meter' && !mastering.has(plugin.pluginId))
-      this.project.masterPlugins = [...plugins, ...kept, meter]
+      const kept = this.project.masterPlugins.filter((plugin) => !isChainPlugin(plugin) && plugin.pluginId !== 'meter')
+      this.project.masterPlugins = [...plugins, ...kept]
     })
   }
 
   /** Bypass the mastering chain so a loudness-matched dry signal can be compared. */
   setMasterBypass(on: boolean) {
     this.mutate(() => {
-      const mastering = new Set<string>(MASTERING_IDS)
       if (on) {
         this.bypassed = this.project.masterPlugins.map((plugin) => ({ id: plugin.id, enabled: plugin.enabled }))
         for (const plugin of this.project.masterPlugins) {
-          if (mastering.has(plugin.pluginId) || plugin.pluginId === 'limiter') plugin.enabled = false
+          if (isChainPlugin(plugin) || plugin.pluginId === 'limiter') plugin.enabled = false
         }
       } else if (this.bypassed) {
         for (const snap of this.bypassed) {
@@ -1684,6 +1757,10 @@ export class ProjectStore {
     }
     if (pluginId === 'pads') {
       this.insertPadsPlugin(trackId)
+      return
+    }
+    if (pluginId === 'synth') {
+      this.insertSynthPlugin(trackId)
       return
     }
     this.mutate(() => {
@@ -1722,10 +1799,30 @@ export class ProjectStore {
     const hostId = host.id
     this.mutate(() => {
       const list = this.pluginList(hostId)
-      if (!list || list.some((item) => item.pluginId === 'pads')) return
+      if (!list || list.some((item) => isDrumsPlugin(item))) return
       list.push(createPlugin('pads'))
     })
     this.setTrackInstrument(hostId, 'pads')
+  }
+
+  /** Synth is an insert. Adding it opens the played synthesizer. */
+  private insertSynthPlugin(trackId: string | 'master') {
+    let host = trackId !== 'master' ? this.track(trackId) : null
+    if (!host || host.type !== 'midi') host = this.project.tracks.find((track) => track.type === 'midi') ?? null
+    if (!host) {
+      const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'synth', input: 'mic', channels: 1, armed: false })
+      if (ids[0]) this.openPatch(ids[0])
+      return
+    }
+    const hostId = host.id
+    this.mutate(() => {
+      const list = this.pluginList(hostId)
+      if (!list || list.some((item) => item.pluginId === 'synth')) return
+      list.push(createPlugin('synth'))
+    })
+    this.setTrackInstrument(hostId, 'synth')
+    this.patchTrackId = null
+    this.openPatch(hostId)
   }
 
   updatePlugin(trackId: string | 'master', pluginId: string, patch: Partial<PluginInstance>) {
@@ -2252,9 +2349,8 @@ export class ProjectStore {
       const track = this.track(trackId)
       if (!track) return
       for (const [pluginId, preset] of [
-        ['gate', 'Vocal'],
+        ['vocal', 'Vocal'],
         ['eq', 'Vocal'],
-        ['deesser', 'Vocal'],
         ['compressor', 'Vocal'],
         ['tune', 'Alto/Tenor'],
         ['saturator', 'Tape'],
@@ -3657,7 +3753,7 @@ export class ProjectStore {
     this.launchGen = launchGen
     this.stopAt = stopAt
     this.transportMode = 'session'
-    this.view = 'session'
+    if (FEATURES.session) this.view = 'session'
     this.pendingTransport = { action: 'scene', scene, timelineSample: at, slots, gen: launchGen }
     this.emit()
   }
@@ -3829,7 +3925,7 @@ export class ProjectStore {
   }
 
   enterSession() {
-    if (this.remoteFollow) return
+    if (this.remoteFollow || !FEATURES.session) return
     this.transportMode = 'session'
     this.view = 'session'
     this.emit()
@@ -3860,8 +3956,8 @@ export class ProjectStore {
     this.launchAt = { ...next.at }
     this.launchGen = { ...next.gen }
     this.stopAt = {}
-    this.transportMode = next.mode
-    if (next.mode === 'session') this.view = 'session'
+    this.transportMode = preferArrangeTransport(next.mode)
+    if (next.mode === 'session' && FEATURES.session) this.view = 'session'
     if (next.mode === 'arrangement') this.view = 'arrange'
     this.pendingTransport = null
     this.emit()
@@ -5669,6 +5765,58 @@ export class ProjectStore {
         : `${take.peerName} aligned −${take.compensationMs.toFixed(0)} ms. ${take.detail}`,
       take.silent ? 'warn' : 'good',
     )
+  }
+
+  /** Replace a compressed relay take with the full-quality wav of the same pass. */
+  upgradeAlignedTake(take: {
+    peerName: string
+    takeId: string
+    sampleRate: number
+    channels: Float32Array[]
+    compensationMs: number
+    detail: string
+    silent?: boolean
+  }): boolean {
+    const length = take.channels[0]?.length || 0
+    if (!length) return false
+    let bufferId = ''
+    for (const track of this.project.tracks) {
+      for (const clip of track.clips) {
+        if (clip.takeId === take.takeId && clip.bufferId) bufferId = clip.bufferId
+        const lane = clip.folder?.lanes.find((item) => item.takeId === take.takeId && item.source === 'aligned-take')
+        if (lane?.bufferId) bufferId = lane.bufferId
+      }
+    }
+    const asset = bufferId ? this.buffers.get(bufferId) : undefined
+    if (!asset) return false
+    this.mutate(() => {
+      asset.sampleRate = take.sampleRate
+      asset.channels = take.channels
+      for (const track of this.project.tracks) {
+        for (const clip of track.clips) {
+          if (clip.bufferId === bufferId) clip.durationSamples = length
+          if (!clip.folder) continue
+          let touched = false
+          for (const lane of clip.folder.lanes) {
+            if (lane.bufferId === bufferId || (lane.takeId === take.takeId && lane.source === 'aligned-take')) {
+              lane.durationSamples = length
+              touched = true
+            }
+          }
+          if (!touched) continue
+          const span = folderSpan(clip.folder)
+          clip.startSample = span.start
+          clip.durationSamples = Math.max(1, span.end - span.start)
+        }
+      }
+    })
+    this.toast(
+      take.silent
+        ? `${take.peerName} full-quality take is silent.`
+        : `${take.peerName} upgraded to full quality. ${take.detail}`,
+      take.silent ? 'warn' : 'good',
+    )
+    return true
   }
 
   dropGuideLanes(takeId: string) {

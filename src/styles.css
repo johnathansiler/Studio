@@ -330,7 +330,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   color: var(--amber);
 }
 .fold-word, .mini-word { display: none; }
-.t-word { display: inline; font-size: 13px; font-weight: 680; line-height: 1; white-space: nowrap; }
+.t-word, .t-state { display: inline; font-size: 13px; font-weight: 680; line-height: 1; white-space: nowrap; }
+.t-state { font-size: 11px; }
+.transport .t-btn.count { gap: 4px; }
 .shell.fold .t-word,
 .shell.fold .fold-word,
 .shell.fold .mini-word,
@@ -555,7 +557,33 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .inserts { display: flex; flex-direction: column; gap: 4px; }
 .inserts button, .insert-add {
   text-align: left; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 7px; font-size: 12px; color: var(--muted);
+  min-height: 40px;
 }
+.plugin-picker { display: flex; flex-direction: column; gap: 4px; }
+.plugin-pick {
+  min-height: 40px;
+  min-width: 40px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line));
+  background-color: #1b2820;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03));
+  box-shadow: var(--raised), 0 8px 18px rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  font-size: 14px;
+}
+.plugin-pick:hover,
+.plugin-pick[aria-expanded='true'] {
+  box-shadow: var(--raised), var(--glow);
+  border-color: color-mix(in srgb, var(--accent) 70%, white);
+}
+.plugin-picks { display: flex; flex-direction: column; gap: 4px; }
+.shell.phone .plugin-pick,
+.shell.fold .plugin-pick,
+.shell.phone .inserts button,
+.shell.fold .inserts button { min-height: 44px; }
 .inserts button.on { color: var(--text); border-color: rgba(115, 196, 143, 0.4); }
 .sends { display: flex; flex-direction: column; gap: 4px; }
 .sends label { display: grid; grid-template-columns: minmax(0, 1fr) 52px auto auto; gap: 4px; align-items: center; font-size: 11px; color: var(--muted); }
@@ -968,6 +996,85 @@ code { font-family: var(--mono); font-size: 12px; }
 }
 .invite-card span { color: var(--muted); font-size: 12px; }
 .invite-card strong { font-family: var(--mono); font-size: 12px; font-weight: 500; word-break: break-all; }
+.invite-card {
+  box-shadow: inset 0 1px 0 var(--bevel-hi), var(--shadow);
+}
+.invite-row, .person-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+}
+.invite-row .text-btn,
+.person-actions .text-btn,
+.role-select,
+.comment-open,
+.comment-pop button,
+.comment-pop input,
+.tl-pin {
+  min-height: 40px;
+  min-width: 40px;
+}
+.role-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.role-select {
+  background: #101814;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 8px;
+  box-shadow: inset 0 1px 0 var(--bevel-hi), var(--shadow);
+}
+.comment-open {
+  position: sticky;
+  left: 6px;
+  z-index: 6;
+  margin: 2px 0 0 6px;
+}
+.comment-pop {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  background: #18241d;
+  box-shadow: inset 0 1px 0 var(--bevel-hi), var(--shadow);
+}
+.comment-pop input {
+  min-width: 140px;
+  flex: 1 1 140px;
+  background: #101814;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 8px;
+}
+.tl-pin {
+  position: absolute;
+  top: 2px;
+  z-index: 5;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  color: var(--text);
+}
 .sync-pill { font-family: var(--mono); font-size: 11px; color: var(--accent); border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; }
 .dock-placeholder { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
 .dock.popped { height: 100%; width: 100%; border: 0; }
@@ -975,9 +1082,12 @@ code { font-family: var(--mono); font-size: 12px; }
 .transport .t-btn.stop,
 .transport .t-btn.play,
 .transport .t-btn.rec,
-.transport .t-btn.loop {
+.transport .t-btn.loop,
+.transport .t-btn.click,
+.transport .t-btn.count,
+.transport .t-btn.reset {
   width: auto;
-  min-width: max-content;
+  min-width: max(40px, max-content);
   height: 40px;
   min-height: 40px;
   padding: 0 12px;
@@ -2021,9 +2131,9 @@ html[data-posture="tabletop"] .shell .master-sheet {
 .strip .sends label { grid-template-columns: minmax(0, 1fr) auto auto; }
 .strip .sends label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .strip .sends input[type='range'] { grid-column: 1 / -1; width: 100%; }
-.strip .fader-row { flex: 1 1 auto; height: auto; min-height: 220px; gap: 8px; min-width: 0; }
+.strip .fader-row { flex: 1 1 auto; height: auto; min-height: 0; gap: 4px; min-width: 0; }
 .strip .fader-row input[type='range'],
-.strip .fader-row .touch-slider.vertical { width: 32px; min-width: 14px; flex: 1 1 auto; }
+.strip .fader-row .touch-slider.vertical { width: auto; min-width: 0; flex: 1 1 auto; height: 100%; }
 .strip .touch-slider.pan { width: 100%; min-width: 0; max-width: 100%; }
 .strip .meter { width: 14px; flex: none; border-radius: 8px; box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.65), 0 0 8px rgba(115, 196, 143, 0.25); }
 .mixer-view .strip.master,
@@ -2076,8 +2186,8 @@ html[data-posture="tabletop"] .shell .master-sheet {
   min-height: 32px;
   font-size: 11px;
 }
-.shell.phone.land .strip .fader-row { min-height: 140px; height: auto; }
-.shell.phone .strip .fader-row { min-height: 160px; }
+.shell.phone.land .strip .fader-row { min-height: 0; height: auto; }
+.shell.phone .strip .fader-row { min-height: 0; }
 .shell.phone .master-read b { font-size: 16px; }
 .shell.phone .strip.master,
 .shell.phone .mixer-view .strip.master,
@@ -2675,17 +2785,17 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
 .shell.phone .mixer-view[data-narrow] .strip .mini,
 .shell.fold .mixer-view[data-narrow] .strip .mini,
 .shell.phone .mixer-view[data-narrow] .strip-auto button {
-  width: 100%;
-  min-width: 0;
+  width: auto;
+  min-width: 40px;
   max-width: none;
   flex: 0 0 auto;
-  height: 48px;
-  min-height: 48px;
-  padding: 2px 1px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 8px;
   font-size: 12px;
   line-height: 1;
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
 }
@@ -2694,8 +2804,9 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   min-height: 40px;
 }
 .shell .mixer-view[data-narrow] .strip .fader-row {
-  min-height: 96px;
-  flex: 0 0 96px;
+  min-height: 0;
+  flex: 1 1 auto;
+  height: auto;
 }
 .shell .mixer-view[data-narrow] .master-short { display: block; }
 .shell .mixer-view[data-narrow] .master-full { display: none; }
@@ -2728,9 +2839,9 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
 .shell.fold .mixer-view[data-layout="rows"] .strip,
 .shell.fold .mixer-view[data-layout="rows"] .strip.master {
   display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
   align-self: stretch;
   width: 100%;
   min-width: 0;
@@ -2738,9 +2849,9 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   flex: 0 0 auto;
   height: auto;
   min-height: 0;
-  overflow: visible;
-  padding: 6px;
-  gap: 4px;
+  overflow: hidden;
+  padding: 2px;
+  gap: 2px;
 }
 .shell .mixer-view[data-layout="rows"] .strip-name {
   order: 1;
@@ -2759,18 +2870,20 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   height: 28px;
 }
 .shell .mixer-view[data-layout="rows"] .fader-row {
-  order: 3;
-  flex: 1 1 88px;
-  min-width: 72px;
-  height: 44px;
-  min-height: 44px;
-  align-items: center;
+  order: 0;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  height: 112px;
+  min-height: 112px;
+  max-height: 112px;
+  align-items: stretch;
 }
 .shell .mixer-view[data-layout="rows"] .fader-row .touch-slider {
   width: 100%;
   min-width: 0;
-  height: 28px;
-  min-height: 28px;
+  height: 100%;
+  min-height: 48px;
   touch-action: none;
 }
 .mixer-view .touch-slider,
@@ -2808,16 +2921,16 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
 .shell.phone .mixer-view[data-layout="rows"] .strip-auto button,
 .shell.fold .mixer-view[data-layout="rows"] .strip .mini {
   width: auto;
-  min-width: 48px;
-  max-width: 72px;
+  min-width: 40px;
+  max-width: none;
   flex: 0 0 auto;
-  height: 48px;
-  min-height: 48px;
-  padding: 2px 3px;
-  font-size: 11px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 8px;
+  font-size: 12px;
   line-height: 1;
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
 }
@@ -2984,13 +3097,22 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   flex: 1 1 auto;
   max-height: 100%;
 }
-.shell.phone .mixer-view .strip,
-.shell.phone .mixer-view .strip.master {
+.shell.phone .mixer-view:not([data-layout="rows"]) .strip,
+.shell.phone .mixer-view:not([data-layout="rows"]) .strip.master {
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  align-self: stretch;
+  overflow: hidden;
+  touch-action: pan-x pan-y;
+}
+.shell.phone .mixer-view[data-layout="rows"] .strip,
+.shell.phone .mixer-view[data-layout="rows"] .strip.master {
   height: auto;
-  min-height: min-content;
+  min-height: 0;
   max-height: none;
-  align-self: flex-start;
-  overflow: visible;
+  align-self: stretch;
+  overflow: hidden;
   touch-action: pan-x pan-y;
 }
 .shell.fold .mixer-view .strip,
@@ -3009,9 +3131,9 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
 }
 .shell.phone:not(.land) .strip .fader-row,
 .shell.phone:not(.land) .mixer-view .strip .fader-row {
-  min-height: 64px;
-  height: 64px;
-  flex: 0 0 64px;
+  min-height: 0;
+  height: auto;
+  flex: 1 1 auto;
 }
 .shell.phone .mixer-view .mini-word,
 .shell.phone .mixer-view .mode-full,
@@ -3023,4 +3145,421 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
 .shell.phone .mixer-view .mini,
 .shell.phone .mixer-view .strip-auto button,
 .shell.phone .mixer-view .lvl-open,
-.shell.phone .mixer-view .master-open { min-height: 44px; }
+.shell.phone .mixer-view .master-open,
+.shell.fold .mixer-view .strip .mini,
+.shell.fold .mixer-view .strip-auto button,
+.shell.fold .mixer-view .lvl-open,
+.shell.fold .mixer-view .master-open { min-height: 40px; height: 40px; }
+
+/* The volume fader is the control. Everything else stays on a short row. */
+.shell .mixer-view .strip-tools,
+.shell .mixer-view .strip-extra,
+.shell .mixer-view .strip-hear,
+.shell .mixer-view .strip-top {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  flex: none;
+}
+.shell .mixer-view .strip-tools,
+.shell .mixer-view .strip-extra {
+  min-height: 40px;
+  max-height: 44px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.shell .mixer-view .strip-top { min-height: 40px; max-height: 44px; }
+.shell .mixer-view .strip-top .strip-name {
+  flex: 1 1 auto;
+  order: 0;
+  max-width: none;
+  text-align: left;
+}
+.shell .mixer-view .strip-hear { min-height: 40px; overflow: hidden; }
+.shell .mixer-view .strip-hear .mini { flex: 1 1 0; min-width: 40px; }
+.shell .mixer-view .strip-auto,
+.shell .mixer-view .strip .strip-auto.auto-mode,
+.shell .mixer-view[data-narrow] .strip .strip-auto.auto-mode,
+.shell .mixer-view[data-layout="rows"] .strip .strip-auto.auto-mode {
+  display: flex;
+  flex-flow: row nowrap;
+  width: auto;
+  gap: 0;
+  padding: 0;
+}
+.shell .mixer-view .volume-row {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 48px;
+  width: 100%;
+  min-width: 0;
+}
+.shell .mixer-view .volume-row .touch-slider,
+.shell .mixer-view .volume-row .touch-slider.vertical {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 40%),
+    linear-gradient(180deg, #070c0a, #18241d);
+  box-shadow:
+    inset 0 3px 8px rgba(0, 0, 0, 0.75),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.18),
+    0 0 16px rgba(115, 196, 143, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.shell .mixer-view .volume-row .touch-slider i {
+  border-radius: 8px;
+  box-shadow: 0 0 12px rgba(115, 196, 143, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+.shell .mixer-view .volume-row .touch-slider.vertical b {
+  height: 44px;
+  min-height: 44px;
+  left: 12%;
+  right: 24%;
+  width: auto;
+  top: auto;
+  bottom: calc(var(--at, 0) * (100% - 44px));
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 50% 28%, #ffffff, transparent 40%),
+    linear-gradient(180deg, #f6faf4, #7d8e86);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.3),
+    0 3px 8px rgba(0, 0, 0, 0.5),
+    0 0 14px rgba(115, 196, 143, 0.45);
+}
+.shell .mixer-view .volume-row .meter {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  right: 6px;
+  top: 10px;
+  bottom: 18px;
+  width: 8px;
+  height: auto;
+  min-height: 0;
+}
+.shell .mixer-view .fader-db {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  left: 8px;
+  right: 20px;
+  top: 6px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 740;
+  font-variant-numeric: tabular-nums;
+  color: #f3fff6;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.shell .mixer-view .pan-knob-wrap { position: relative; width: 40px; height: 40px; flex: none; }
+.shell .mixer-view .pan-knob {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 50% 28%, rgba(255, 255, 255, 0.32), transparent 42%),
+    linear-gradient(180deg, #445249, #101614);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.55),
+    0 0 10px rgba(115, 196, 143, 0.35);
+  color: var(--text);
+}
+.shell .mixer-view .pan-knob i {
+  position: absolute;
+  left: 50%;
+  top: 5px;
+  width: 3px;
+  height: 11px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--accent, #73c48f);
+  transform-origin: 50% 15px;
+  box-shadow: 0 0 6px var(--accent, #73c48f);
+  pointer-events: none;
+}
+.shell .mixer-view .pan-knob span {
+  position: relative;
+  z-index: 1;
+  margin-top: 12px;
+  font-size: 9px;
+  font-weight: 760;
+  line-height: 1;
+}
+.shell .mixer-view .master-read {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 4px;
+  max-height: 18px;
+  overflow: hidden;
+  flex: none;
+}
+.shell .mixer-view .master-read span,
+.shell .mixer-view .master-read b { font-size: 10px; line-height: 1.1; }
+.shell .mixer-view[data-layout="rows"] .volume-row,
+.shell .mixer-view[data-layout="rows"] .strip .volume-row,
+.shell.phone .mixer-view[data-layout="rows"] .strip .fader-row.volume-row {
+  flex: none;
+  width: 100%;
+  height: 112px;
+  min-height: 112px;
+  max-height: 112px;
+}
+.shell .mixer-view[data-layout="rows"] .volume-row .touch-slider b {
+  width: 48px;
+  min-width: 44px;
+  height: calc(100% - 10px);
+  min-height: 44px;
+  top: 5px;
+  bottom: auto;
+  left: calc(var(--at, 0) * (100% - 48px));
+  right: auto;
+}
+.shell .mixer-view[data-layout="rows"] .volume-row .meter {
+  left: 10px;
+  right: auto;
+  top: 16px;
+  bottom: 16px;
+  width: 10px;
+  height: auto;
+  min-height: 0;
+  border-radius: 6px;
+  background: #050807;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.8), 0 0 8px rgba(115, 196, 143, 0.35);
+}
+.shell .mixer-view[data-layout="rows"] .fader-db {
+  left: auto;
+  right: 62px;
+  top: 50%;
+  width: auto;
+  transform: translateY(-50%);
+  text-align: right;
+}
+.shell .mixer-view[data-narrow] .strip-hear {
+  flex-direction: column;
+  max-height: none;
+  align-items: stretch;
+}
+.shell .mixer-view[data-narrow] .strip-hear .mini { width: 100%; flex: none; }
+.shell .mixer-view:not([data-layout="rows"]) .strip,
+.shell .mixer-view:not([data-layout="rows"]) .strip.master,
+.shell.fold .mixer-view:not([data-layout="rows"]) .strip,
+.shell.fold .mixer-view:not([data-layout="rows"]) .strip.master {
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  align-self: stretch;
+  overflow: hidden;
+}
+.shell .mixer-view .strip-tools > *,
+.shell .mixer-view .strip-extra > *,
+.shell .mixer-view .strip-tools .strip-auto,
+.shell .mixer-view .strip-extra .strip-auto,
+.shell .mixer-view .strip-tools .mini,
+.shell .mixer-view .strip-extra .mini,
+.shell .mixer-view .strip-tools .pan-knob-wrap,
+.shell .mixer-view .strip-extra .pan-knob-wrap,
+.shell .mixer-view .strip-tools .master-open,
+.shell .mixer-view .strip-extra .master-open,
+.shell .mixer-view .strip-tools .tune-btn,
+.shell .mixer-view .strip-extra .tune-btn {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 40px;
+  max-width: none;
+  overflow: hidden;
+}
+@container channel (max-width: 140px) {
+  .mixer-view .master-read { display: none; }
+}
+.shell .mixer-view[data-layout="rows"] .strip-extra > *,
+.shell .mixer-view[data-layout="rows"] .strip-extra .strip-auto,
+.shell .mixer-view[data-layout="rows"] .strip-extra .fx-open,
+.shell .mixer-view[data-layout="rows"] .strip-extra .mini,
+.shell .mixer-view[data-layout="rows"] .strip-extra .tune-btn {
+  order: 0;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+/* Secondary controls wrap as the strip narrows. Nothing in this band is clipped. */
+.shell .mixer-view .mixer > .strip,
+.shell.phone .mixer-view:not([data-layout="rows"]) .mixer > .strip,
+.shell.fold .mixer-view:not([data-layout="rows"]) .mixer > .strip,
+.shell .mixer-view[data-layout="rows"] .mixer > .strip,
+.shell.phone .mixer-view[data-layout="rows"] .mixer > .strip,
+.shell.fold .mixer-view[data-layout="rows"] .mixer > .strip {
+  overflow: visible;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone],
+.shell .mixer-view .strip-top,
+.shell .mixer-view .strip-hear,
+.shell .mixer-view .strip-tools,
+.shell .mixer-view .strip-extra {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  align-content: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  max-height: none;
+  height: auto;
+  overflow: visible;
+  flex: none;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone="top"] {
+  width: auto;
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+.shell .mixer-view[data-layout="rows"] .strip .strip-secondary[data-zone] > .secondary-slot,
+.shell .mixer-view[data-layout="rows"] .strip .strip-secondary[data-zone] > .more-fold {
+  padding: 0;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] .secondary-slot,
+.shell .mixer-view .strip .strip-secondary[data-zone] .more-fold,
+.shell .mixer-view .strip .strip-secondary[data-zone] .strip-auto,
+.shell .mixer-view .strip .strip-secondary[data-zone] button,
+.shell .mixer-view .strip .strip-secondary[data-zone] summary {
+  overflow: visible;
+  text-overflow: clip;
+  max-width: 100%;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] .secondary-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 40px;
+  min-height: 40px;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] button:not(.pan-knob),
+.shell .mixer-view .strip .strip-secondary[data-zone] summary.more-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 40px;
+  min-height: 40px;
+  height: auto;
+  padding: 0 8px;
+  border: 1px solid #0e1411;
+  border-radius: 8px;
+  background-color: #24352c;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.06) 42%, rgba(0, 0, 0, 0.42));
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.05;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-align: center;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] button:not(.pan-knob):not(.on):not(.on-m):not(.on-s):not(.on-r),
+.shell .mixer-view .strip .strip-secondary[data-zone] summary.more-open {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.48),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.55),
+    0 2px 3px rgba(0, 0, 0, 0.4),
+    0 0 10px rgba(115, 196, 143, 0.38);
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] summary.more-open {
+  list-style: none;
+  cursor: pointer;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] summary.more-open::-webkit-details-marker { display: none; }
+.shell .mixer-view .strip .strip-secondary[data-zone] summary.more-open::marker { content: ''; }
+.shell .mixer-view .strip .strip-secondary[data-zone] .more-fold {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 40px;
+  max-width: 100%;
+  position: static;
+  overflow: visible;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] .more-fold[open] {
+  flex: 1 0 100%;
+  width: 100%;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] .more-fold:not([open]) .more-drawer {
+  display: none;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] .more-fold[open] .more-drawer {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 2px;
+  flex: 1 0 100%;
+  width: 100%;
+  position: static;
+  overflow: visible;
+  padding: 2px 0 0;
+  background: transparent;
+}
+@container channel (max-width: 280px) {
+  .shell .mixer-view[data-layout="rows"] .strip-top .strip-name {
+    min-width: 0;
+    flex: 1 1 36px;
+    max-width: 46%;
+  }
+}
+@container channel (max-width: 108px) {
+  .shell .mixer-view .strip .strip-secondary[data-zone="tools"] .secondary-slot,
+  .shell .mixer-view .strip .strip-secondary[data-zone="hear"] .secondary-slot,
+  .shell .mixer-view .strip .strip-secondary[data-zone="tools"] .more-fold,
+  .shell .mixer-view .strip .strip-secondary[data-zone="hear"] .more-fold,
+  .shell .mixer-view .strip .strip-secondary[data-zone="tools"] .strip-auto,
+  .shell .mixer-view .strip .strip-secondary[data-zone="hear"] .strip-auto,
+  .shell .mixer-view .strip .strip-secondary[data-zone="tools"] button:not(.pan-knob),
+  .shell .mixer-view .strip .strip-secondary[data-zone="hear"] button:not(.pan-knob),
+  .shell .mixer-view .strip .strip-secondary[data-zone="tools"] summary.more-open,
+  .shell .mixer-view .strip .strip-secondary[data-zone="hear"] summary.more-open {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+  .shell .mixer-view .strip .strip-secondary[data-zone] .secondary-slot:has(.pan-knob) {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+  .shell .mixer-view .strip .strip-secondary[data-zone] .pan-knob {
+    flex: 0 0 40px;
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+  }
+}
+@container channel (max-width: 64px) {
+  .shell .mixer-view .strip .strip-secondary[data-zone] button:not(.pan-knob),
+  .shell .mixer-view .strip .strip-secondary[data-zone] summary.more-open {
+    padding: 0 1px;
+    font-size: 10px;
+    letter-spacing: -0.04em;
+  }
+}

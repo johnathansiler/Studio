@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CATALOG } from '../audio/plugins/catalog'
-import { MASTERING_IDS } from '../audio/master/assistant'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { SoundBrowser } from './SoundBrowser'
@@ -113,7 +112,7 @@ export function PlaylistBrowser({
     [needle, project.beats],
   )
   const plugins = useMemo(
-    () => CATALOG.filter((item) => item.id !== 'meter' && !(MASTERING_IDS as readonly string[]).includes(item.id) && (!needle || item.name.toLowerCase().includes(needle))),
+    () => CATALOG.filter((item) => !needle || item.name.toLowerCase().includes(needle)),
     [needle],
   )
   const clips = useMemo(() => {
