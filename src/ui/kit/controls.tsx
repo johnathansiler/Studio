@@ -11,6 +11,7 @@ export function useDragValue<T extends HTMLElement = HTMLElement>({
   fallback,
   axis = 'y',
   format,
+  matchLength = false,
   onChange,
   onStart,
   onCommit,
@@ -21,13 +22,14 @@ export function useDragValue<T extends HTMLElement = HTMLElement>({
   fallback: number
   axis?: 'x' | 'y' | 'pad'
   format?: (value: number) => string
+  matchLength?: boolean
   onChange: (value: number, change: GestureChange) => void
   onStart?: () => void
   onCommit?: () => void
 }) {
   const ref = useRef<T | null>(null)
-  const latest = useRef({ min, max, value, fallback, axis, format, onChange, onStart, onCommit })
-  latest.current = { min, max, value, fallback, axis, format, onChange, onStart, onCommit }
+  const latest = useRef({ min, max, value, fallback, axis, format, matchLength, onChange, onStart, onCommit })
+  latest.current = { min, max, value, fallback, axis, format, matchLength, onChange, onStart, onCommit }
   const [readout, setReadout] = useState<GestureReadout | null>(null)
   const [dragging, setDragging] = useState(false)
   useEffect(() => {
@@ -39,6 +41,7 @@ export function useDragValue<T extends HTMLElement = HTMLElement>({
       fallback: latest.current.fallback,
       axis: latest.current.axis,
       format: latest.current.format,
+      matchLength: latest.current.matchLength,
       getValue: () => latest.current.value,
       onStart: () => {
         setDragging(true)
@@ -190,6 +193,9 @@ export function TouchSlider({
   vertical = false,
   className = '',
   title,
+  format,
+  matchLength = false,
+  valueText,
   onChange,
   onStart,
   onCommit,
@@ -203,6 +209,9 @@ export function TouchSlider({
   vertical?: boolean
   className?: string
   title?: string
+  format?: (value: number) => string
+  matchLength?: boolean
+  valueText?: string
   onChange: (value: number) => void
   onStart?: () => void
   onCommit?: () => void
@@ -218,12 +227,14 @@ export function TouchSlider({
     value,
     fallback: fallback ?? value,
     axis: vertical ? 'y' : 'x',
+    format,
+    matchLength,
     onChange: (next) => onChange(snap(next)),
     onStart,
     onCommit,
   })
   const unit = clampUnit(value, min, max)
-  const shown = formatValue(value, '')
+  const shown = valueText || (format ? format(value) : formatValue(value, ''))
   return (
     <div
       ref={ref}
@@ -235,9 +246,10 @@ export function TouchSlider({
       aria-valuemax={max}
       aria-valuenow={Math.round(value * 100) / 100}
       aria-valuetext={shown}
+      style={{ ['--at' as string]: String(unit) }}
     >
       <i style={vertical ? { height: `${unit * 100}%` } : { width: `${unit * 100}%` }} />
-      <b style={vertical ? { bottom: `calc(${unit * 100}% - 7px)` } : { left: `calc(${unit * 100}% - 7px)` }} />
+      <b />
       <GestureReadout readout={readout} />
     </div>
   )

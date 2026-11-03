@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { STRIP_BOUNDS, displayedStrip, isNarrowStrip, mixerFlow } from '../model/layoutWidth'
-import { selectMixer } from '../state/select'
+import { gainToDb } from '../model/time'
+import { mixGroupsOf, selectMixer, trackGroupId } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { AddTrackButton } from './AddTrack'
-import { AutoFader, ChannelAutomation, LinkGroup, MixFlags } from './AutomationLane'
+import { AutoFader, ChannelAutomation, LinkGroup, MixFlags, PanKnob } from './AutomationLane'
+import { GuideLayer } from './GuideLayer'
 import { showHint } from './Hint'
 import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
@@ -41,7 +43,6 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
   const flow = mixerFlow(layout.mixer, viewport.width, viewport.height)
   const narrow = flow === 'columns' && isNarrowStrip(strip)
   const rows = flow === 'rows'
-  const compact = narrow || rows
   return (
     <>
     <div
@@ -60,68 +61,207 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
       <div className="mixer">
       {project.tracks.map((track) => (
         <div className={`strip${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} onClick={() => store.selectTrack(track.id)}>
-          <StripName name={track.name} color={track.color} />
-          <TrackPresence trackId={track.id} />
-          <ChannelAutomation store={store} trackId={track.id} />
-          {compact ? (
-            <button type="button" className="mini fx-open" aria-label={`${track.name} effects. Inserts and sends.`} title="Inserts and sends." onClick={() => setFxTrack(track.id)}>FX</button>
+          {rows ? (
+            <>
+              <div className="strip-top">
+                <StripName name={track.name} color={track.color} />
+                <TrackPresence trackId={track.id} />
+                <MixFlags store={store} trackId={track.id} part="hear" />
+              </div>
+              <VolumeLane store={store} engine={engine} trackId={track.id} name={track.name} value={track.volume} vertical={false} />
+              <div className="strip-extra">
+                <ChannelAutomation store={store} trackId={track.id} />
+                <RouteButton store={store} trackId={track.id} />
+                <FxButton name={track.name} onOpen={() => setFxTrack(track.id)} />
+                <PanKnob store={store} engine={engine} label={`${track.name} pan. Left or right.`} value={track.pan} spec={{ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }} />
+                <MixFlags store={store} trackId={track.id} part="extra" />
+                {track.type === 'audio' && onTune && <TuneButton name={track.name} onTune={() => onTune(track.id)} />}
+              </div>
+            </>
           ) : (
             <>
-              <RouteFields store={store} trackId={track.id} />
-              <LinkGroup store={store} trackId={track.id} />
-              <InsertList store={store} trackId={track.id} />
-              <SendList store={store} trackId={track.id} engine={engine} />
+              <StripName name={track.name} color={track.color} />
+                <TrackPresence trackId={track.id} />
+              <div className="strip-tools">
+                <ChannelAutomation store={store} trackId={track.id} />
+                <RouteButton store={store} trackId={track.id} />
+                <FxButton name={track.name} onOpen={() => setFxTrack(track.id)} />
+                <PanKnob store={store} engine={engine} label={`${track.name} pan. Left or right.`} value={track.pan} spec={{ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }} />
+                <MixFlags store={store} trackId={track.id} part="extra" />
+                {track.type === 'audio' && onTune && <TuneButton name={track.name} onTune={() => onTune(track.id)} />}
+              </div>
+              <VolumeLane store={store} engine={engine} trackId={track.id} name={track.name} value={track.volume} vertical />
+              <div className="strip-hear">
+                <MixFlags store={store} trackId={track.id} part="hear" />
+              </div>
             </>
           )}
-          <AutoFader className="pan" store={store} engine={engine} label={`${track.name} pan. Left or right.`} value={track.pan} spec={{ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }} />
-          <div className="fader-row">
-            <Meter engine={engine} id={track.id} />
-            <AutoFader vertical={!rows} store={store} engine={engine} label={`${track.name} volume. How loud this track is.`} value={track.volume} spec={{ trackId: track.id, target: 'volume', param: 'volume', min: 0, max: 1.25 }} />
-          </div>
-          <div className="row">
-            <MixFlags store={store} trackId={track.id} />
-            {track.type === 'audio' && onTune && (
-              <button type="button" className="mini tune-btn" aria-label={`Tune ${track.name}. Check the pitch of this input.`} title="Check the pitch of this input." onClick={() => onTune(track.id)}>Tune</button>
-            )}
-          </div>
         </div>
       ))}
       <AddTrackButton store={store} />
       <div className="strip master">
-        <StripName name="Master" />
-        <ChannelAutomation store={store} trackId="master" />
-        <button id="master-open" className="text-btn master-open" aria-label="Master. Loudness, tone, and the limiter." title="Loudness, tone, and the limiter." onClick={() => setMasterOpen(true)}>
-          <span className="master-full">Master</span>
-        </button>
-        {compact ? (
-          <button type="button" className="mini fx-open" aria-label="Master effects. Inserts on the master bus." title="Master inserts." onClick={() => setFxTrack('master')}>FX</button>
-        ) : null}
-        {narrow ? (
-          <LevelButton engine={engine} onOpen={() => setLevelsOpen(true)} />
+        {rows ? (
+          <>
+            <div className="strip-top">
+              <StripName name="Master" />
+            </div>
+            <MasterLane store={store} engine={engine} value={project.masterVolume} vertical={false} />
+            <div className="strip-extra">
+              <ChannelAutomation store={store} trackId="master" />
+              <MasterOpen onOpen={() => setMasterOpen(true)} />
+              <FxButton name="Master" master onOpen={() => setFxTrack('master')} />
+              <LevelButton engine={engine} onOpen={() => setLevelsOpen(true)} />
+            </div>
+          </>
         ) : (
-          <MasterReadout engine={engine} />
+          <>
+            <StripName name="Master" />
+            <div className="strip-tools">
+              <ChannelAutomation store={store} trackId="master" />
+              <MasterOpen onOpen={() => setMasterOpen(true)} />
+              <FxButton name="Master" master onOpen={() => setFxTrack('master')} />
+              <LevelButton engine={engine} onOpen={() => setLevelsOpen(true)} />
+            </div>
+            {!narrow && <MasterReadout engine={engine} />}
+            <MasterLane store={store} engine={engine} value={project.masterVolume} vertical />
+          </>
         )}
-        <div className="fader-row">
-          <Meter engine={engine} id="master" />
-          <TouchSlider
-            vertical={!rows}
-            label="Master volume. How loud the whole mix is."
-            title="How loud the whole mix is."
-            min={0}
-            max={1.25}
-            step={0.01}
-            value={project.masterVolume}
-            fallback={0.9}
-            onStart={() => store.beginAutomationTouch()}
-            onCommit={() => store.endAutomationTouch()}
-            onChange={(value) => store.setMasterVolume(value)}
-          />
-        </div>
       </div>
       </div>
       )}
     </div>
     {masterOpen && <MasterSheet store={store} engine={engine} onClose={() => setMasterOpen(false)} />}
+    </>
+  )
+}
+
+function FxButton({ name, master = false, onOpen }: { name: string; master?: boolean; onOpen: () => void }) {
+  const label = master ? 'Master effects. Inserts on the master bus.' : `${name} effects. Inserts and sends.`
+  return (
+    <button type="button" className="mini fx-open" aria-label={label} title={master ? 'Master inserts.' : 'Inserts and sends.'} onClick={(event) => { event.stopPropagation(); onOpen() }}>
+      <span className="mini-word">Inserts</span>
+    </button>
+  )
+}
+
+function TuneButton({ name, onTune }: { name: string; onTune: () => void }) {
+  return (
+    <button type="button" className="mini tune-btn" aria-label={`Tune ${name}. Check the pitch of this input.`} title="Check the pitch of this input." onClick={(event) => { event.stopPropagation(); onTune() }}>
+      <span className="mini-word">Tune</span>
+    </button>
+  )
+}
+
+function MasterOpen({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button id="master-open" className="text-btn master-open" aria-label="Master. Loudness, tone, and the limiter." title="Loudness, tone, and the limiter." onClick={(event) => { event.stopPropagation(); onOpen() }}>
+      <span className="master-full">Master</span>
+    </button>
+  )
+}
+
+function VolumeLane({
+  store,
+  engine,
+  trackId,
+  name,
+  value,
+  vertical,
+}: {
+  store: ProjectStore
+  engine: AudioEngine
+  trackId: string
+  name: string
+  value: number
+  vertical: boolean
+}) {
+  return (
+    <div className="fader-row volume-row">
+      <Meter engine={engine} id={trackId} />
+      <AutoFader
+        className="volume"
+        readout
+        vertical={vertical}
+        store={store}
+        engine={engine}
+        label={`${name} volume. How loud this track is.`}
+        value={value}
+        spec={{ trackId, target: 'volume', param: 'volume', min: 0, max: 1.25 }}
+      />
+    </div>
+  )
+}
+
+function MasterLane({ store, engine, value, vertical }: { store: ProjectStore; engine: AudioEngine; value: number; vertical: boolean }) {
+  const db = gainToDb(value)
+  return (
+    <div className="fader-row volume-row">
+      <Meter engine={engine} id="master" />
+      <TouchSlider
+        className="volume"
+        vertical={vertical}
+        label="Master volume. How loud the whole mix is."
+        title="How loud the whole mix is."
+        min={0}
+        max={1.25}
+        step={0.01}
+        value={value}
+        fallback={0.9}
+        format={gainToDb}
+        matchLength
+        valueText={db}
+        onStart={() => store.beginAutomationTouch()}
+        onCommit={() => store.endAutomationTouch()}
+        onChange={(next) => store.setMasterVolume(next)}
+      />
+      <span className="fader-db">{db}</span>
+    </div>
+  )
+}
+
+function RouteButton({ store, trackId }: { store: ProjectStore; trackId: string }) {
+  const [open, setOpen] = useState(false)
+  const track = store.track(trackId)
+  if (!track) return null
+  const targets = store.project.tracks.filter((item) => (item.type === 'bus' || item.type === 'group') && item.id !== track.id)
+  const outputLabel = !track.output
+    ? (track.input.startsWith('remote:') ? 'Cue' : 'Master')
+    : targets.find((item) => item.id === track.output)?.name ?? 'Master'
+  const groupLabel = targets.find((item) => item.type === 'group' && item.id === track.groupId)?.name ?? 'No group'
+  const linkLabel = mixGroupsOf(store.project).find((item) => item.id === trackGroupId(store.project, trackId))?.name ?? 'No link'
+  return (
+    <>
+      <button
+        type="button"
+        className="mini route-open"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={`Routing. Output ${outputLabel}. Group ${groupLabel}. Link ${linkLabel}.`}
+        title={`Output ${outputLabel}. Group ${groupLabel}. Link ${linkLabel}.`}
+        onClick={(event) => {
+          event.stopPropagation()
+          setOpen(true)
+        }}
+      >
+        <span className="mini-word">{outputLabel}</span>
+      </button>
+      {open && (
+        <GuideLayer>
+          <button type="button" className="guide-scrim picker-scrim" aria-label={`Close ${track.name} routing`} onClick={() => setOpen(false)} />
+          <div className="guide-sheet sheet route-sheet" role="dialog" aria-label={`${track.name} routing`} onPointerDown={(event) => event.stopPropagation()}>
+            <div className="guide-handle" aria-hidden="true" />
+            <header className="guide-head">
+              <div>
+                <h2>Routing</h2>
+                <p>Output, group, and link for {track.name}.</p>
+              </div>
+              <button type="button" className="guide-x" aria-label={`Close ${track.name} routing`} onClick={() => setOpen(false)}>Close</button>
+            </header>
+            <RouteFields store={store} trackId={trackId} />
+            <LinkGroup store={store} trackId={trackId} />
+          </div>
+        </GuideLayer>
+      )}
     </>
   )
 }

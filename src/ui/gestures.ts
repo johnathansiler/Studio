@@ -29,6 +29,8 @@ export interface ControlGesture {
   fallback: number
   axis: 'x' | 'y' | 'pad'
   format?: (value: number) => string
+  /** Full-range drag matches the control length, so a long fader moves in small steps. */
+  matchLength?: boolean
   onChange: (change: GestureChange) => void
   onStart?: () => void
   onCommit?: () => void
@@ -53,10 +55,19 @@ export interface GestureElement {
 }
 
 /** Upward or rightward movement raises the value. `fine` stretches the same travel. */
-export function dragValue(start: number, delta: number, min: number, max: number, fine: boolean) {
+export function dragValue(start: number, delta: number, min: number, max: number, fine: boolean, travel?: number) {
   const span = max - min || 1
-  const next = start + (delta / (fine ? FINE_PX : DRAG_PX)) * span
+  const pixels = travel && travel > 0 ? travel : (fine ? FINE_PX : DRAG_PX)
+  const next = start + (delta / pixels) * span
   return clamp(next, min, max)
+}
+
+function travelFor(spec: ControlGesture, el: GestureElement, axis: 'x' | 'y', fine: boolean) {
+  if (!spec.matchLength) return fine ? FINE_PX : DRAG_PX
+  const box = el.getBoundingClientRect?.()
+  const length = axis === 'x' ? box?.width ?? 0 : box?.height ?? 0
+  const base = Math.max(length, DRAG_PX)
+  return fine ? Math.max(base * 2.5, FINE_PX) : base
 }
 
 export function attachControlGesture(el: GestureElement, get: () => ControlGesture) {
@@ -134,7 +145,8 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
       return
     }
     const delta = spec.axis === 'x' ? event.clientX - drag.x : drag.y - event.clientY
-    emit(event, dragValue(drag.value, delta, spec.min, spec.max, fine), event.clientX, event.clientY, fine)
+    const pixels = travelFor(spec, el, spec.axis, fine)
+    emit(event, dragValue(drag.value, delta, spec.min, spec.max, fine, pixels), event.clientX, event.clientY, fine)
   }
 
   const rebase = (event: PointerLike) => {
