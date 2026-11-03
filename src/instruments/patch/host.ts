@@ -127,6 +127,13 @@ export class PatchHost {
     }
   }
 
+  dispose() {
+    for (const id of [...this.lives.keys()]) this.drop(id)
+    this.module = null
+    this.cache.clear()
+    this.cacheOrder = []
+  }
+
   private ensure(ctx: AudioContext, id: string, strip: StripNodes) {
     const existing = this.lives.get(id)
     if (existing) return existing

@@ -13,6 +13,7 @@ import {
   relayPairBytes,
   sumRelayBytes,
   TAKE_CHUNK_BYTES,
+  takeDelivery,
   takeProgress,
   takeRelayCredit,
 } from '../remote/hqTake'
@@ -41,6 +42,10 @@ describe('guest full-quality take transfer', () => {
   it('prefers the data channel and does not bill the server fallback as Cloudflare', () => {
     expect(chooseTakePath(true)).toBe('data')
     expect(chooseTakePath(false)).toBe('server')
+    expect(takeDelivery(true, 'host')).toBe('wav')
+    expect(takeDelivery(true, 'relay')).toBe('compressed')
+    expect(takeDelivery(true, undefined)).toBe('compressed')
+    expect(takeDelivery(false, 'relay')).toBe('none')
     const relay = [{ selected: true, candidateType: 'relay' as const, bytesSent: 8_000, bytesReceived: 200 }]
     expect(takeRelayCredit('data', relay)).toBe(8_200)
     expect(takeRelayCredit('server', relay)).toBe(0)
@@ -126,6 +131,43 @@ describe('guest full-quality take transfer', () => {
     expect(asset?.channels[0][0]).toBeCloseTo(0.25)
     expect(store.sync.peek().some((op) => op.p.includes('clips'))).toBe(true)
     expect(store.toasts.some((toast) => toast.text.includes('Ava aligned'))).toBe(true)
+  })
+
+  it('replaces a compressed take with the full-quality wav', () => {
+    const store = new ProjectStore(createEmptyProject())
+    const track = store.project.tracks[0]
+    track.input = 'remote:guest-1'
+    store.acceptAlignedTake({
+      peerId: 'guest-1',
+      peerName: 'Ava',
+      takeId: 'take-1',
+      placeAtSample: 4800,
+      sampleRate: 48000,
+      channels: [new Float32Array(1200).fill(0.1)],
+      compensationMs: 12,
+      detail: 'opus 160 kbps',
+    })
+    const before = store.project.tracks[0].clips.length
+    const upgraded = store.upgradeAlignedTake({
+      peerName: 'Ava',
+      takeId: 'take-1',
+      sampleRate: 48000,
+      channels: [new Float32Array(1200).fill(0.8)],
+      compensationMs: 12,
+      detail: '24-bit local mic',
+    })
+    expect(upgraded).toBe(true)
+    expect(store.project.tracks[0].clips).toHaveLength(before)
+    const asset = [...store.buffers.values()].find((item) => item.name === 'Ava take')
+    expect(asset?.channels[0][0]).toBeCloseTo(0.8)
+    expect(store.upgradeAlignedTake({
+      peerName: 'Ava',
+      takeId: 'missing',
+      sampleRate: 48000,
+      channels: [new Float32Array(8).fill(1)],
+      compensationMs: 0,
+      detail: '',
+    })).toBe(false)
   })
 
   it('keeps a session slot pointed at the replacement, not the guide', () => {

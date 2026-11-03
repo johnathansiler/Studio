@@ -44,7 +44,6 @@ function fixture() {
       <button type="button" class="active">Arrange</button>
       <button type="button">Mix</button>
       <button type="button">Beats</button>
-      <button type="button">Session</button>
       <button type="button">Collab</button>
     </div>
   </header>

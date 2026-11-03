@@ -485,6 +485,8 @@ export interface Project {
   loopEndSample: number
   metronomeEnabled: boolean
   countIn: boolean
+  /** 0 off, 1 one bar, 2 two bars. Missing means one bar while count-in is on. */
+  countInBars?: 0 | 1 | 2
   snap: boolean
   /** Grid used while Snap is on. Missing means a quarter note. */
   snapDivision?: string

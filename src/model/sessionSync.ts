@@ -1,6 +1,7 @@
 import { patchBufferIds } from '../instruments/patch/model'
 import { computePeaks } from './demo'
 import { padFingerprint } from './padMachine'
+import { countInBarsOf } from './time'
 import type { AudioAsset, Project } from './types'
 
 /** How long the host waits so a guest can receive the start time before the downbeat. */
@@ -40,7 +41,7 @@ export function guestFollowStart(args: {
   return guestStartPerf(args.hostPerfAtSample, args.clockOffsetMs)
 }
 
-/** Small peak outline for each referenced clip. The wav itself stays on HTTP. */
+/** Small peak outline for each referenced clip. The wav itself moves on a direct peer connection. */
 export function outlineWaveforms(project: Project, buffers: Map<string, AudioAsset>): Record<string, { min: number; max: number }[]> {
   const out: Record<string, { min: number; max: number }[]> = {}
   for (const id of referencedBufferIds(project)) {
@@ -71,9 +72,9 @@ export function guestMayRequest(action: string): boolean {
   return action === 'play' || action === 'stop' || action === 'seek'
 }
 
-/** Wav bytes per HTTP chunk. A 1 Mbps uplink still has room for video beside this. */
+/** Former paced HTTP chunk size. Peer transfer uses 16 KB slices on the data channel. */
 export const ASSET_CHUNK_BYTES = 12_000
-/** Gap between chunks so the upload stays behind the call. */
+/** Gap the old upload left between chunks. The data channel paces itself. */
 export const ASSET_CHUNK_GAP_MS = 400
 
 export function assetChunkCount(byteLength: number, chunkBytes = ASSET_CHUNK_BYTES): number {
@@ -128,6 +129,7 @@ export function arrangementDigest(project: Project): string {
     loopEndSample: project.loopEndSample,
     metronomeEnabled: project.metronomeEnabled,
     countIn: project.countIn,
+    countInBars: countInBarsOf(project),
     snap: project.snap,
     launchQuant: project.launchQuant ?? null,
     rackMode: project.rackMode ?? null,

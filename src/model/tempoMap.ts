@@ -1,5 +1,5 @@
 import type { MeterChange, Project, TempoPoint } from './types'
-import { countInSeconds, type TimeSignature } from './time'
+import { countInBarsOf, countInSeconds, type TimeSignature } from './time'
 
 const TICKS = 960
 
@@ -166,8 +166,10 @@ export function meterAtSample(project: Pick<Project, 'tempo' | 'tempoMap' | 'aut
   return meterAtBeat(project, projectSampleBeat(project, sample))
 }
 
-export function countInAt(project: Pick<Project, 'tempo' | 'tempoMap' | 'automation' | 'sampleRate' | 'timeSignature' | 'meterMap'>, sample: number): number {
-  return countInSeconds(tempoAtSample(project, sample), meterAtSample(project, sample))
+export function countInAt(project: Pick<Project, 'tempo' | 'tempoMap' | 'automation' | 'sampleRate' | 'timeSignature' | 'meterMap' | 'countIn' | 'countInBars'>, sample: number): number {
+  const bars = countInBarsOf(project)
+  if (bars <= 0) return 0
+  return countInSeconds(tempoAtSample(project, sample), meterAtSample(project, sample)) * bars
 }
 
 export interface GridMark {

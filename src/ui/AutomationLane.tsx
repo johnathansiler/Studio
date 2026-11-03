@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { TouchSlider } from './kit/controls'
+import { gainToDb } from '../model/time'
+import { GestureReadout, TouchSlider, useDragValue } from './kit/controls'
 import type { AudioEngine } from '../audio/engine'
 import type { ArrangeTool } from '../state/tools'
 import type { AutoSpec } from '../model/automation'
@@ -17,29 +18,34 @@ const MODES: { id: AutomationWriteMode; label: string; short: string; title: str
   { id: 'latch', label: 'Latch', short: 'L', title: 'Latch. This channel keeps writing the value you set until playback stops.' },
 ]
 
-/** Per-channel automation. One strip does not change the others. Narrow strips show O, R, T, and L. */
+/** One cycling button. Tap moves Off, Read, Touch, Latch, then back to Off. */
 export function ChannelAutomation({ store, trackId }: { store: ProjectStore; trackId: string | 'master' }) {
   const mode = channelAutomationMode(store.project, trackId)
   const name = trackId === 'master' ? 'Master' : store.project.tracks.find((track) => track.id === trackId)?.name ?? 'Channel'
+  const index = Math.max(0, MODES.findIndex((item) => item.id === mode))
+  const item = MODES[index]
+  const next = MODES[(index + 1) % MODES.length]
+  const apply = (id: AutomationWriteMode) => (trackId === 'master' ? store.setMasterAutomation(id) : store.setTrackAutomation(trackId, id))
   return (
     <div className="strip-auto auto-mode in-strip" role="group" aria-label={`${name} automation`}>
-      {MODES.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          className={mode === item.id ? 'on' : ''}
-          aria-pressed={mode === item.id}
-          aria-label={`${item.label}. ${item.title}`}
-          title={item.title}
-          onClick={() => (trackId === 'master' ? store.setMasterAutomation(item.id) : store.setTrackAutomation(trackId, item.id))}
-        >
-          <span className="mode-full">{item.label}</span>
-          <span className="mode-stack">
-            <span className="mode-short">{item.short}</span>
-            <small className="mode-caption">{item.label}</small>
-          </span>
-        </button>
-      ))}
+      <button
+        type="button"
+        className={mode === 'off' ? '' : 'on'}
+        aria-pressed={mode !== 'off'}
+        data-mode={mode}
+        aria-label={`${item.label}. ${item.title} Next is ${next.label}.`}
+        title={`${item.title} Tap for ${next.label}.`}
+        onClick={(event) => {
+          event.stopPropagation()
+          apply(next.id)
+        }}
+      >
+        <span className="mode-full">{item.label}</span>
+        <span className="mode-stack">
+          <span className="mode-short">{item.short}</span>
+          <small className="mode-caption">{item.label}</small>
+        </span>
+      </button>
     </div>
   )
 }
@@ -77,28 +83,34 @@ export function AutomationFollow({ store, engine }: { store: ProjectStore; engin
   return null
 }
 
-export function MixFlags({ store, trackId, compact = false }: { store: ProjectStore; trackId: string; compact?: boolean }) {
+export function MixFlags({ store, trackId, compact = false, part = 'all' }: { store: ProjectStore; trackId: string; compact?: boolean; part?: 'all' | 'hear' | 'extra' }) {
   const track = store.project.tracks.find((item) => item.id === trackId)
   if (!track) return null
+  const hear = part === 'all' || part === 'hear'
+  const extra = part === 'extra' || (part === 'all' && !compact)
   return (
     <>
-      <button type="button" className={`mini ${track.mute ? 'on-m' : ''}`} aria-label={track.mute ? 'Unmute track' : 'Mute track'} title="Mute this track. Linked tracks mute together." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'mute') }}>
-        <span className="mini-mark">M</span>
-        <span className="mini-word">Mute</span>
-        <small className="mini-caption">Mute</small>
-      </button>
-      <button type="button" className={`mini ${track.solo ? 'on-s' : ''}`} aria-label={track.solo ? 'Unsolo track' : 'Solo track'} title="Solo this track and keep its path to the master open." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'solo') }}>
-        <span className="mini-mark">S</span>
-        <span className="mini-word">Solo</span>
-        <small className="mini-caption">Solo</small>
-      </button>
-      {!compact && (
+      {hear && (
+        <button type="button" className={`mini ${track.mute ? 'on-m' : ''}`} aria-label={track.mute ? 'Unmute track' : 'Mute track'} title="Mute this track. Linked tracks mute together." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'mute') }}>
+          <span className="mini-mark">M</span>
+          <span className="mini-word">Mute</span>
+          <small className="mini-caption">Mute</small>
+        </button>
+      )}
+      {hear && (
+        <button type="button" className={`mini ${track.solo ? 'on-s' : ''}`} aria-label={track.solo ? 'Unsolo track' : 'Solo track'} title="Solo this track and keep its path to the master open." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'solo') }}>
+          <span className="mini-mark">S</span>
+          <span className="mini-word">Solo</span>
+          <small className="mini-caption">Solo</small>
+        </button>
+      )}
+      {extra && (
         <button type="button" className={`mini arm-flag ${track.armed ? 'on-r' : ''}`} aria-pressed={track.armed} aria-label={track.armed ? 'Disarm track' : 'Arm track. This track records when you press record.'} title="Arm this track. Only armed tracks record." onClick={(event) => { event.stopPropagation(); store.updateTrack(track.id, { armed: !track.armed }) }}>
           <span className="arm-full">Arm</span>
           <span className="arm-compact" aria-hidden="true">A<i className="arm-dot" /></span>
         </button>
       )}
-      {!compact && (
+      {extra && (
         <button type="button" className={`mini solo-safe ${track.soloSafe ? 'on' : ''}`} aria-pressed={!!track.soloSafe} aria-label="Solo safe. Stay audible when other tracks are soloed." title="Solo safe: stay audible when other tracks are soloed." onClick={(event) => { event.stopPropagation(); store.updateTrack(track.id, { soloSafe: !track.soloSafe }) }}>
           <span className="arm-full">Safe</span>
           <span className="arm-stack">
@@ -163,7 +175,7 @@ export function LanePicker({ store, trackId }: { store: ProjectStore; trackId: s
   )
 }
 
-export function AutoFader({ store, engine, spec, value, label, className, vertical: verticalProp }: { store: ProjectStore; engine: AudioEngine; spec: AutoSpec; value: number; label: string; className?: string; vertical?: boolean }) {
+function useShownValue(store: ProjectStore, engine: AudioEngine, spec: AutoSpec, value: number) {
   const [sample, setSample] = useState(engine.positionSamples)
   const [status, setStatus] = useState(engine.status)
   useEffect(
@@ -177,23 +189,94 @@ export function AutoFader({ store, engine, spec, value, label, className, vertic
   const rolling = status === 'playing' || status === 'recording'
   const mode = channelAutomationMode(store.project, spec.trackId === 'master' ? 'master' : spec.trackId)
   const shown = rolling && mode === 'read' ? automatedValue(store.project, spec, sample, value) : value
+  return { rolling, shown: Number.isFinite(shown) ? shown : value }
+}
+
+export function panWords(value: number) {
+  if (Math.abs(value) < 0.02) return 'Center'
+  if (value < 0) return `Left ${Math.round(-value * 100)}`
+  return `Right ${Math.round(value * 100)}`
+}
+
+export function AutoFader({ store, engine, spec, value, label, className, vertical: verticalProp, readout = false }: { store: ProjectStore; engine: AudioEngine; spec: AutoSpec; value: number; label: string; className?: string; vertical?: boolean; readout?: boolean }) {
+  const { rolling, shown } = useShownValue(store, engine, spec, value)
   const span = spec.max - spec.min
   const vertical = verticalProp ?? className !== 'pan'
+  const db = gainToDb(shown)
   return (
-    <TouchSlider
-      label={label}
-      title={label}
-      className={className}
-      vertical={vertical}
-      min={spec.min}
-      max={spec.max}
-      step={span <= 2 ? 0.01 : span <= 40 ? 0.1 : 1}
-      value={Number.isFinite(shown) ? shown : value}
-      fallback={spec.min < 0 ? 0 : spec.max > 1 ? 0.8 : (spec.min + spec.max) / 2}
-      onStart={() => store.beginAutomationTouch()}
-      onCommit={() => store.endAutomationTouch()}
-      onChange={(next) => store.setAutomated(spec, next, rolling, engine.currentTimelineSample())}
-    />
+    <>
+      <TouchSlider
+        label={label}
+        title={label}
+        className={className}
+        vertical={vertical}
+        min={spec.min}
+        max={spec.max}
+        step={span <= 2 ? 0.01 : span <= 40 ? 0.1 : 1}
+        value={shown}
+        fallback={spec.min < 0 ? 0 : spec.max > 1 ? 0.8 : (spec.min + spec.max) / 2}
+        format={readout ? gainToDb : undefined}
+        matchLength={readout}
+        valueText={readout ? db : undefined}
+        onStart={() => store.beginAutomationTouch()}
+        onCommit={() => store.endAutomationTouch()}
+        onChange={(next) => store.setAutomated(spec, next, rolling, engine.currentTimelineSample())}
+      />
+      {readout && <span className="fader-db">{db}</span>}
+    </>
+  )
+}
+
+/** Small pan knob. Drag right to pan right. Shift, or a second finger, moves in finer steps. */
+export function PanKnob({ store, engine, spec, value, label }: { store: ProjectStore; engine: AudioEngine; spec: AutoSpec; value: number; label: string }) {
+  const { rolling, shown } = useShownValue(store, engine, spec, value)
+  const { ref, readout, dragging } = useDragValue<HTMLButtonElement>({
+    min: spec.min,
+    max: spec.max,
+    value: shown,
+    fallback: 0,
+    axis: 'x',
+    format: panWords,
+    onStart: () => store.beginAutomationTouch(),
+    onCommit: () => store.endAutomationTouch(),
+    onChange: (next) => store.setAutomated(spec, next, rolling, engine.currentTimelineSample()),
+  })
+  const unit = Math.max(0, Math.min(1, (shown - spec.min) / ((spec.max - spec.min) || 1)))
+  const angle = -140 + unit * 280
+  const words = panWords(shown)
+  return (
+    <div className={`pan-knob-wrap${dragging ? ' dragging' : ''}`}>
+      <button
+        ref={ref}
+        type="button"
+        className="pan-knob"
+        role="slider"
+        aria-label={label}
+        title={label}
+        aria-valuemin={spec.min}
+        aria-valuemax={spec.max}
+        aria-valuenow={Math.round(shown * 100) / 100}
+        aria-valuetext={words}
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          const span = spec.max - spec.min || 1
+          const step = event.shiftKey ? span / 200 : span / 40
+          const write = (next: number) => {
+            store.beginAutomationTouch()
+            store.setAutomated(spec, Math.max(spec.min, Math.min(spec.max, next)), rolling, engine.currentTimelineSample())
+            store.endAutomationTouch()
+          }
+          if (event.key === 'ArrowUp' || event.key === 'ArrowRight') write(shown + step)
+          if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') write(shown - step)
+          if (event.key === 'Home') write(spec.min)
+          if (event.key === 'End') write(spec.max)
+        }}
+      >
+        <i style={{ transform: `rotate(${angle}deg)` }} />
+        <span>Pan</span>
+      </button>
+      <GestureReadout readout={readout} />
+    </div>
   )
 }
 

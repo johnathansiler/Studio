@@ -37,6 +37,8 @@ import { FitRow } from './fitRow'
 import { ActionSheet, SheetRow, TipButton } from './Hint'
 import { coarsePointer, noteGrip } from './touchEdit'
 import { LoopRegion } from './LoopRegion'
+import { setEditCursor } from '../remote/presence'
+import { RemoteRollCursors, remoteNoteMark, useRemotePeers } from './presenceMarks'
 import {
   commitMidiNotes,
   duplicateNotes,
@@ -106,6 +108,8 @@ export function PianoRoll({
   const piano = selectPiano(store)
   const track = piano.track
   const clip = piano.clip
+  const remotes = useRemotePeers()
+  useEffect(() => () => setEditCursor(null), [clip?.id])
   const [open, setOpen] = useState(false)
   const [row, setRow] = useState(16)
   const [pxBeat, setPxBeat] = useState(70)
@@ -887,6 +891,12 @@ export function PianoRoll({
                 backgroundSize: `${rollLines.backgroundSize}, 100% ${row}px`,
               }}
               onPointerDown={onGridDown}
+              onPointerMove={(event) => {
+                const at = cell(event)
+                if (!at) return
+                setEditCursor({ clipId: clip.id, beat: at.beat, pitch: at.pitch })
+              }}
+              onPointerLeave={() => setEditCursor(null)}
             >
               {Array.from({ length: HIGH - LOW + 1 }, (_, index) => {
                 const pitch = HIGH - index
@@ -897,14 +907,16 @@ export function PianoRoll({
                 const noteWidth = Math.max(8, note.durationBeats * pxBeat)
                 const fine = note.fine || 0
                 const role = pitchRole(note.pitch, fine, scale.root, scale.library || scale.scale)
+                const remoteNote = remoteNoteMark(remotes, note.id, clip.id)
                 return (
                   <div
                     key={note.id}
                     data-note={note.id}
                     data-fine={fine ? `${fine > 0 ? '+' : ''}${fine}` : undefined}
+                    data-remote-note={remoteNote?.id}
                     title={fine ? `${fine} cents` : undefined}
-                    className={`note ${store.selectedNoteIds.includes(note.id) ? 'selected' : ''} ${role === 'out' ? 'off' : ''} ${note.slide ? 'slide' : ''}`}
-                    style={{ left: note.startBeat * pxBeat, width: noteWidth, top: (HIGH - note.pitch) * row - (fine / 100) * row, height: Math.max(12, row - 2), cursor: tool === 'select' ? 'grab' : 'inherit' }}
+                    className={`note ${store.selectedNoteIds.includes(note.id) ? 'selected' : ''} ${role === 'out' ? 'off' : ''} ${note.slide ? 'slide' : ''}${remoteNote ? ' remote-note' : ''}`}
+                    style={{ left: note.startBeat * pxBeat, width: noteWidth, top: (HIGH - note.pitch) * row - (fine / 100) * row, height: Math.max(12, row - 2), cursor: tool === 'select' ? 'grab' : 'inherit', ['--remote' as string]: remoteNote?.color }}
                     onPointerMove={(event) => {
                       if (tool !== 'select') return
                       const bounds = event.currentTarget.getBoundingClientRect()
@@ -925,6 +937,7 @@ export function PianoRoll({
               {playBeat != null && (
                 <div className="roll-playhead" data-playhead="piano" style={{ left: Math.max(0, playBeat * pxBeat) }} />
               )}
+              <RemoteRollCursors peers={remotes} clipId={clip.id} pxBeat={pxBeat} />
               {box && (
                 <div
                   style={{

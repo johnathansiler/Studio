@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
+import { FEATURES } from '../features'
 import { GestureReadout, useDragValue } from './kit/controls'
 import type { AudioEngine } from '../audio/engine'
 import {
@@ -584,7 +585,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         <TipButton label={sheet('human').label} hint={sheet('human').hint} onClick={() => store.humanizePattern()} />
         <TipButton label={sheet('left').label} hint={sheet('left').hint} onClick={() => store.shiftPattern(-1)}>‹</TipButton>
         <TipButton label={sheet('right').label} hint={sheet('right').hint} onClick={() => store.shiftPattern(1)}>›</TipButton>
-        <TipButton label={sheet('slot').label} hint={sheet('slot').hint} onClick={() => store.placePatternScene(0)} />
+        {FEATURES.session && <TipButton label={sheet('slot').label} hint={sheet('slot').hint} onClick={() => store.placePatternScene(0)} />}
         {focus && (
           <>
             <TipButton
