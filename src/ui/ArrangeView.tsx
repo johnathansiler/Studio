@@ -30,6 +30,8 @@ import { AddTrackButton } from './AddTrack'
 import { PlaylistBrowser, type BrowserTab } from './PlaylistBrowser'
 import { AutomationModeBar, AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
 import { AutoTuneLaneMark, addOrOpenAutoTune } from './AutoTuneFace'
+import { OpenBeatMachineButton } from './BeatMachineButton'
+import { showsOpenBeatMachine } from '../instruments/pads/identity'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { TRACK_ROW, TRACK_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
@@ -86,6 +88,7 @@ export function ArrangeView({
   onOpenPiano,
   onImportInstrument,
   onPerform,
+  onOpenBeatMachine,
   onQuickPunch,
   onAnalyze,
   libraryTab,
@@ -98,6 +101,7 @@ export function ArrangeView({
   onOpenPiano: (trackId: string, clipId?: string) => void
   onImportInstrument?: (trackId: string, files: FileList) => void
   onPerform: (mode: 'keys' | 'drums') => void
+  onOpenBeatMachine?: (trackId: string) => void
   onQuickPunch: () => void
   onAnalyze: (trackId: string) => void
   /** Menu asks the Arrange browser to open on this tab. */
@@ -710,7 +714,7 @@ export function ArrangeView({
           </button>
         </div>
         {project.tracks.map((track) => (
-          <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} style={rowHeight(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => store.selectTrack(track.id)}>
+          <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} style={rowStyle(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => store.selectTrack(track.id)}>
             <div className="pl-head">
               <i className="swatch" style={{ background: track.color }} />
               <input
@@ -736,6 +740,9 @@ export function ArrangeView({
                   <PianoIcon />
                   <span>Roll</span>
                 </button>
+              )}
+              {showsOpenBeatMachine(track) && (
+                <OpenBeatMachineButton store={store} trackId={track.id} onOpen={onOpenBeatMachine} />
               )}
               {(track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
                 <TipButton className={`mini ${track.armed ? 'on-r' : ''}`} label={copyOf(TRACK_ROW, 'arm').label} hint={track.type === 'midi' ? 'Record this instrument from its MIDI input.' : copyOf(TRACK_ROW, 'arm').hint} pressed={track.armed} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
@@ -812,7 +819,7 @@ export function ArrangeView({
               className={`lane${store.selectedTrackId === track.id ? ' is-selected' : ''}`}
               data-track={track.id}
               key={track.id}
-              style={{ ...(laneGrid ?? { backgroundImage: 'none' }), ...rowHeight(track, store.selectedClipId, !!store.openLanes[track.id]) }}
+              style={{ ...(laneGrid ?? { backgroundImage: 'none' }), ...rowStyle(track, store.selectedClipId, !!store.openLanes[track.id]) }}
               onDoubleClick={(event) => {
                 if (track.type !== 'midi') return
                 if (!laneDoubleClickAddsClip(event.target)) return
@@ -1141,7 +1148,7 @@ export function ArrangeView({
               <SheetRow label={copyOf(TRACK_SHEET, 'rack').label} hint={copyOf(TRACK_SHEET, 'rack').hint} pressed={store.rackTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openRack(sheetTrack.id) }} />
               <SheetRow label="Patch" hint={isSampledInstrument(sheetTrack) ? 'Sampler. Waveform, root, envelope, tone, and the keyboard.' : 'Layered patch: synths, samples, grains, and a morph pad.'} pressed={isSampledInstrument(sheetTrack) ? store.rackTrackId === sheetTrack.id : store.patchTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openPatch(sheetTrack.id) }} />
               <SheetRow label={copyOf(TRACK_SHEET, 'keys').label} hint={isSampledInstrument(sheetTrack) ? 'Sampler keyboard, root, and envelope.' : copyOf(TRACK_SHEET, 'keys').hint} onClick={() => { setTrackSheet(null); if (isSampledInstrument(sheetTrack)) store.showRack(sheetTrack.id); else onPerform('keys') }} />
-              <SheetRow label={copyOf(TRACK_SHEET, 'drums').label} hint={copyOf(TRACK_SHEET, 'drums').hint} onClick={() => { setTrackSheet(null); onPerform('drums') }} />
+              <SheetRow label={copyOf(TRACK_SHEET, 'drums').label} hint={copyOf(TRACK_SHEET, 'drums').hint} pressed={store.padsTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); if (onOpenBeatMachine) onOpenBeatMachine(sheetTrack.id); else store.insertPads(sheetTrack.id) }} />
             </>
           )}
           <div className="sheet-fields">
@@ -1172,6 +1179,12 @@ function laneStyle(track: { clips: AudioClip[] }, selectedId: string | null): { 
   const open = track.clips.find((clip) => clip.id === selectedId && clip.folder)
   if (!open?.folder) return {}
   return { height: Math.max(168, 40 + open.folder.lanes.length * 48) }
+}
+
+function rowStyle(track: { type: string; instrument?: string; plugins?: { pluginId: string; params?: Record<string, number> }[]; clips: AudioClip[] }, selectedId: string | null, automation: boolean) {
+  const base = rowHeight(track, selectedId, automation)
+  if (!showsOpenBeatMachine(track)) return base
+  return { ...base, minHeight: 'calc(var(--lane-h) + 34px)' }
 }
 
 function rowHeight(track: { clips: AudioClip[] }, selectedId: string | null, automation: boolean) {

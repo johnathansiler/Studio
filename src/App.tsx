@@ -1735,6 +1735,15 @@ async function importDropped(files: FileList) {
                   onOpenPiano={openPiano}
                   onImportInstrument={(trackId, files) => { void importAsInstrument(trackId, files) }}
                   onPerform={(mode) => openPerform(mode)}
+                  onOpenBeatMachine={(trackId) => {
+                    hideCollab()
+                    setSurface('studio')
+                    setPhonePane('edit')
+                    setMenuOpen(false)
+                    setPianoOpen(false)
+                    store.selectTrack(trackId)
+                    store.insertPads(trackId)
+                  }}
                   onQuickPunch={() => void quickPunch()}
                   onAnalyze={(trackId) => { setAnalysisTrackId(trackId); setPhonePane('edit'); setSurface('studio') }}
                   libraryTab={soundsOpen ? 'sounds' : null}

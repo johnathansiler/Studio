@@ -276,9 +276,9 @@ export function PadsPanel({
   const source = levels && selectedPad ? selectedPad : selectedPad
 
   return (
-    <div className={`mpc ch-sheet ${phone ? 'phone' : ''}`} data-pads="plugin" aria-label="Pads">
+    <div className={`mpc ch-sheet ${phone ? 'phone' : ''}`} data-pads="plugin" aria-label="Beat Machine">
       <div className="mpc-top">
-        <strong>Pads</strong>
+        <strong>Beat Machine</strong>
         {VISIBLE_BANKS.map((name, index) => (
           <button
             key={name}
@@ -290,7 +290,7 @@ export function PadsPanel({
           >{name}</button>
         ))}
         <button type="button" className={`ch-tab${recording ? ' on' : ''}`} aria-pressed={recording} title="Record pad hits into a clip on this track, with the count-in and the loop." onClick={record}>Record</button>
-        <button type="button" className={`ch-tab${kit.timing ? ' on' : ''}`} aria-pressed={kit.timing} title="Snap hits to the grid with MPC swing." onClick={() => store.patchTrackKit(trackId, { timing: !kit.timing, timingGrid: 0.25, timingStrength: 1 })}>Quantize</button>
+        <button type="button" className={`ch-tab${kit.timing ? ' on' : ''}`} aria-pressed={kit.timing} title="Snap hits to the grid. 50 is straight and 75 is a shuffle." onClick={() => store.patchTrackKit(trackId, { timing: !kit.timing, timingGrid: 0.25, timingStrength: 1 })}>Quantize</button>
         <button
           type="button"
           className={`ch-tab${repeatOn ? ' on' : ''}`}
@@ -323,7 +323,7 @@ export function PadsPanel({
           <option value="attack">Attack</option>
         </select>
         <button type="button" className="ch-tab" title="Open this clip in the piano roll." onClick={edit}>Roll</button>
-        <button type="button" className="ch-tab mpc-close" title="Close Pads. The track keeps the instrument." aria-label="Close Pads. The track keeps the instrument." onClick={() => store.closePads()}>Close</button>
+        <button type="button" className="ch-tab mpc-close" title="Close Beat Machine. The track keeps the instrument." aria-label="Close Beat Machine. The track keeps the instrument." onClick={() => store.closePads()}>Close</button>
       </div>
       <p className="mpc-tool ch-recessed" data-tool={tool}>Tool: <b>{tool}</b></p>
       <div className="mpc-body">
@@ -377,7 +377,7 @@ export function PadsPanel({
             </label>
             <button type="button" className={`ch-tab${source.muted ? ' on' : ''}`} aria-pressed={!!source.muted} title="Mute this pad. The clip keeps its notes." onClick={() => store.updateTrackPad(trackId, bank, selected, { muted: !source.muted })}>{source.muted ? 'Muted' : 'Mute'}</button>
             <label>Swing
-              <input aria-label="Swing" title="MPC swing for quantize and note repeat. 50 is straight. 75 is a hard shuffle." type="range" min={50} max={75} step={1} value={kit.swing} onChange={(event) => {
+              <input aria-label="Swing" title="Swing for quantize and note repeat. 50 is straight. 75 is a hard shuffle." type="range" min={50} max={75} step={1} value={kit.swing} onChange={(event) => {
                 const swing = Number(event.target.value)
                 store.patchTrackKit(trackId, { swing, trackSwing: swing })
               }} />

@@ -3,6 +3,7 @@ import type { AudioEngine } from '../audio/engine'
 import { activeTunePreset, orderedInserts, tuneScaleOf } from '../audio/plugins/autoTune'
 import { CATALOG, FACTORY, activePresetName, descriptor } from '../audio/plugins/catalog'
 import { INSTRUMENT_IDS, isDrumsPlugin, kindLabels, paramsForKind } from '../audio/plugins/ids'
+import { pluginIsBeatMachine } from '../instruments/pads/identity'
 import { PresetBar } from './PresetBar'
 import { TouchSlider } from './kit/controls'
 import { AmpPop } from './AmpPop'
@@ -305,7 +306,7 @@ export function InsertList({ store, trackId, roomy = false }: { store: ProjectSt
           onClick={() => store.focusPlugin(trackId, plugin.id)}
           onDoubleClick={() => store.updatePlugin(trackId, plugin.id, { enabled: !plugin.enabled })}
         >
-          {insertLabel(plugin.pluginId)}
+          {insertLabel(plugin.pluginId, plugin)}
         </button>
       ))}
       <PluginPicker store={store} trackId={trackId} roomy={roomy} />
@@ -393,13 +394,23 @@ export function RouteFields({ store, trackId }: { store: ProjectStore; trackId: 
 }
 
 /** Full plugin names. The strip can ellipsize; the accessible name stays the word. */
-export function insertLabel(pluginId: string) {
+export function insertLabel(pluginId: string, plugin?: { pluginId: string; params?: Record<string, number> }) {
+  if (plugin && pluginIsBeatMachine(plugin)) return 'Beat Machine'
+  if (pluginId === 'pads' || pluginId === 'drums' || pluginId === 'drum-machine') return 'Beat Machine'
   return descriptor(pluginId)?.name ?? pluginId
+}
+
+/** Instrument and effect choices. Beat Machine leads the list on a MIDI track. */
+export function insertChoices<T extends { id: string; name: string }>(entries: readonly T[], midi: boolean): { id: string; name: string }[] {
+  const ordered = orderedInserts(entries)
+  if (!midi) return [...ordered]
+  return [{ id: 'pads', name: 'Beat Machine' }, ...ordered.filter((item) => item.id !== 'pads')]
 }
 
 function PluginPicker({ store, trackId, roomy }: { store: ProjectStore; trackId: string | 'master'; roomy?: boolean }) {
   const [open, setOpen] = useState(false)
-  const choices = orderedInserts(CATALOG.filter((plugin) => trackId !== 'master' || !INSTRUMENT_IDS.has(plugin.id)))
+  const midi = trackId !== 'master' && store.track(trackId)?.type === 'midi'
+  const choices = insertChoices(CATALOG.filter((plugin) => trackId !== 'master' || !INSTRUMENT_IDS.has(plugin.id)), midi)
   return (
     <div className={`plugin-picker${open ? ' open' : ''}`}>
       <button
@@ -407,13 +418,13 @@ function PluginPicker({ store, trackId, roomy }: { store: ProjectStore; trackId:
         className="plugin-pick insert-add"
         aria-expanded={open}
         aria-label="Add insert"
-        title="Add an effect."
+        title="Add an instrument or effect."
         onClick={() => setOpen((value) => !value)}
       >
         {open ? 'Close' : roomy ? 'Add effect' : 'Add'}
       </button>
       {open && (
-        <div className="plugin-picks" role="group" aria-label="Effects">
+        <div className="plugin-picks" role="group" aria-label="Instruments and effects">
           {choices.map((plugin) => (
             <button
               key={plugin.id}

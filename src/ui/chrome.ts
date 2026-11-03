@@ -66,7 +66,7 @@ export interface MenuSpec extends Copy {
 
 /**
  * Each action appears once. Rows that repeat a tab, a track button, or a plugin insert
- * stay off this list: Session, Roll, Keys, Pads, Generate, Sounds, and Collab.
+ * stay off this list: Session, Roll, Keys, Beat Machine, Generate, Sounds, and Collab.
  * Launch/Timeline is the session transport, which the Session tab does not switch.
  * Capture stays on the phone because the session bar hides that button there.
  * While FEATURES.session is off, visibleMenu hides Launch, Timeline, and Capture.
@@ -201,7 +201,7 @@ export const TRACK_SHEET: Copy[] = [
   { id: 'scaler', label: 'Scaler', hint: 'Chord instrument. Key, pads, and progressions on this track.' },
   { id: 'rack', label: 'Rack', hint: 'The instrument and effects on this track.' },
   { id: 'keys', label: 'Keys', hint: 'Play this instrument on a keyboard.' },
-  { id: 'drums', label: 'Pads', hint: 'MPC drum machine. Pads, banks, and record on this track.' },
+  { id: 'drums', label: 'Open Beat Machine', hint: 'Beat machine. Banks of pads, and record on this track.' },
   { id: 'remove', label: 'Remove track', hint: 'Delete this track and its clips.' },
 ]
 

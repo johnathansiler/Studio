@@ -481,7 +481,7 @@ const LIBRARY: PluginDescriptor[] = [
   },
   {
     id: 'pads',
-    name: 'Pads',
+    name: 'Beat Machine',
     version: VERSION,
     params: [],
   },

@@ -3,7 +3,9 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { AudioEngine } from '../audio/engine'
-import { CATALOG } from '../audio/plugins/catalog'
+import { CATALOG, createPlugin } from '../audio/plugins/catalog'
+import { isDrumsPlugin } from '../audio/plugins/ids'
+import { isBeatMachineId, showsOpenBeatMachine } from '../instruments/pads/identity'
 import {
   applyChoke,
   assignPad,
@@ -22,6 +24,8 @@ import { browserGroup } from '../model/sessionBoard'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { PadsPanel } from '../ui/PadsPanel'
+import { OpenBeatMachineButton } from '../ui/BeatMachineButton'
+import { InsertList, insertChoices, insertLabel } from '../ui/PluginSheet'
 
 const engine = {
   unlock() {},
@@ -46,7 +50,7 @@ describe('pads drum machine', () => {
       { pitch: 38, startBeat: 1, durationBeats: 0.2, velocity: 0.8 },
       { pitch: 42, startBeat: 1.5, durationBeats: 0.1, velocity: 0.6 },
     ])
-    const clip = store.track(id)!.midiClips.find((item) => item.name === 'Pads')!
+    const clip = store.track(id)!.midiClips.find((item) => item.name === 'Beat Machine')!
     expect(clip.durationBeats).toBeCloseTo(4)
     expect(clip.notes.map((note) => note.pitch)).toEqual([36, 38, 42])
     expect(clip.notes.map((note) => note.startBeat)).toEqual([0, 1, 1.5])
@@ -153,7 +157,8 @@ describe('pads drum machine', () => {
     expect(html).toContain('ch-raised')
     expect(html).toContain('ch-tab')
     expect(html).toContain('data-pads="plugin"')
-    expect(html).toContain('aria-label="Pads"')
+    expect(html).toContain('aria-label="Beat Machine"')
+    expect(html).toContain('>Beat Machine<')
     expect(html).not.toContain('role="dialog"')
     expect(html.match(/data-pad=/g)?.length).toBe(16)
     expect(html).toContain('>A<')
@@ -169,5 +174,46 @@ describe('pads drum machine', () => {
     const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8')
     expect(app).toContain('PadsPanel')
     expect(app).toContain('insertPads')
+    expect(app).toContain('onOpenBeatMachine')
+    const arrange = readFileSync(new URL('../ui/ArrangeView.tsx', import.meta.url), 'utf8')
+    expect(arrange).toContain('OpenBeatMachineButton')
+    expect(readFileSync(new URL('../ui/chrome.ts', import.meta.url), 'utf8')).toContain('Open Beat Machine')
+  })
+
+  it('swaps a MIDI track to the beat machine from the insert picker and reopens from the header', () => {
+    for (const id of ['sampler', 'pads', 'drums', 'drum-machine']) expect(isBeatMachineId(id)).toBe(true)
+    const drumsPlugin = createPlugin('pads')
+    expect(drumsPlugin.pluginId).toBe('sampler')
+    expect(isDrumsPlugin(drumsPlugin)).toBe(true)
+    expect(insertLabel(drumsPlugin.pluginId, drumsPlugin)).toBe('Beat Machine')
+    expect(insertLabel('sampler')).toBe('Sampler')
+    const choices = insertChoices(CATALOG, true).map((item) => item.name)
+    expect(choices[0]).toBe('Beat Machine')
+    expect(insertChoices(CATALOG, false).some((item) => item.name === 'Beat Machine')).toBe(false)
+    expect(browserGroup('drums')[0]).toMatchObject({ id: 'pads', name: 'Beat Machine' })
+    expect(browserGroup('instruments')[0]).toMatchObject({ id: 'pads', name: 'Beat Machine' })
+
+    const store = new ProjectStore(createEmptyProject())
+    const id = store.project.tracks.find((track) => track.type === 'midi')!.id
+    expect(showsOpenBeatMachine(store.track(id)!)).toBe(false)
+    store.addPlugin(id, 'sampler')
+    expect(store.track(id)?.instrument).not.toBe('pads')
+    expect(store.track(id)?.plugins.some((plugin) => plugin.pluginId === 'sampler' && !isDrumsPlugin(plugin))).toBe(true)
+    store.addPlugin(id, 'drums')
+    expect(store.track(id)?.instrument).toBe('pads')
+    expect(store.padsTrackId).toBe(id)
+    expect(showsOpenBeatMachine(store.track(id)!)).toBe(true)
+    store.closePads()
+    expect(store.padsTrackId).toBeNull()
+    const header = renderToStaticMarkup(createElement(OpenBeatMachineButton, { store, trackId: id }))
+    expect(header).toContain('Open Beat Machine')
+    expect(header).toContain(`data-beat-machine="${id}"`)
+    store.addPlugin(id, 'drum-machine')
+    expect(store.track(id)?.instrument).toBe('pads')
+    expect(store.padsTrackId).toBe(id)
+    const inserts = renderToStaticMarkup(createElement(InsertList, { store, trackId: id }))
+    expect(inserts).toContain('>Beat Machine<')
+    const made = store.addTracks({ kind: 'midi', count: 1, instrument: 'pads', input: 'mic', channels: 1, armed: false })
+    expect(store.track(made[0])?.name).toBe('Beat Machine 1')
   })
 })
