@@ -76,8 +76,17 @@ export function RackView({ store, engine, trackId, onOpenKnock }: { store: Proje
               active={activeDevicePreset(device.kind, device.params)}
               onPick={(name) => store.applyDevicePreset(track.id, device.id, name)}
             />
-            <select className="bevel" aria-label="Add device" title="Add a device to this instrument." value="" onChange={(event) => event.target.value && store.addDevice(track.id, event.target.value as DeviceKind)}>
+            <select className="bevel" aria-label="Add device" title="Add an instrument or effect. Beat Machine replaces the instrument on this track." value="" onChange={(event) => {
+              const value = event.target.value
+              if (!value) return
+              if (value === 'beat-machine') {
+                store.insertPads(track.id)
+                return
+              }
+              store.addDevice(track.id, value as DeviceKind)
+            }}>
               <option value="">Add</option>
+              <option value="beat-machine">Beat Machine</option>
               {DEVICE_KINDS.map((kind) => (
                 <option key={kind} value={kind}>{DEVICE_NAMES[kind]}</option>
               ))}

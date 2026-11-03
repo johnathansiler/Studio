@@ -208,7 +208,7 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
         <header className="guide-head">
           <div>
             <h2>Unstuck</h2>
-            <p>Pick one part. Full song writes every unlocked part and the sections. Shuffle again keeps the locks.</p>
+            <p>Pick one part. Full song always writes two verses and two choruses, then any extra sections the seed keeps. Shuffle again keeps the locks.</p>
           </div>
           <button type="button" className="guide-x" onClick={onClose} aria-label="Close Unstuck">Close</button>
         </header>

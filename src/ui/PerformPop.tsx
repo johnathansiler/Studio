@@ -321,7 +321,7 @@ export function PerformPop({
   const showEdit = deck === 'steps' || deck === 'mix'
   const lengthSteps = clip ? Math.max(16, Math.round(clip.durationBeats * 4)) : 16
   return (
-    <div className={`perform-pop ${drums ? 'drums' : 'keys'}`} role="dialog" aria-label={drums ? 'Drum machine' : 'Piano roll'}>
+    <div className={`perform-pop ${drums ? 'drums' : 'keys'}`} role="dialog" aria-label={drums ? 'Beat Machine' : 'Piano roll'}>
       <header>
         {drums ? (FEATURES.session ? DECKS : DECKS.filter((item) => item !== 'session')).map((item) => (
           <button key={item} type="button" className={deck === item ? 'on' : ''} onClick={() => setDeck(item)}>{item[0].toUpperCase() + item.slice(1)}</button>

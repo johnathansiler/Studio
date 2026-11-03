@@ -187,7 +187,7 @@ function labelOne(change: RawChange, other: RawChange[]): string {
   if (path === 'automationMode' || path === 'masterAutomationMode') return 'Automation'
   if (path.startsWith('automation') || path.startsWith('rackAutomation')) return 'Automation'
   if (path.startsWith('scale')) return 'Scale'
-  if (path.startsWith('padKit')) return 'Pads'
+  if (path.startsWith('padKit')) return 'Beat Machine'
   if (path.startsWith('beats')) return 'Drum step'
   if (path === 'tracks/@order') return 'Reorder tracks'
   if (path.includes('/notes')) return 'Edit notes'

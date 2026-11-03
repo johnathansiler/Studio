@@ -189,7 +189,10 @@ describe('multi-input recording', () => {
     expect(planMidiRoutes(tracks).map((route) => route.portId)).toEqual(['portA', null])
     expect(tracksForPort(tracks, 'portA').map((track) => track.id)).toEqual([keys.id])
     expect(tracksForPort(tracks, 'portB').map((track) => track.id)).toEqual([drums.id])
-    expect(midiDestinations(tracks, 'portA', null, true).record).toEqual([keys.id])
+    expect(midiDestinations(tracks, 'portA', keys.id, true).record).toEqual([keys.id])
+    expect(midiDestinations(tracks, 'portB', keys.id, true).play).toEqual([])
+    expect(midiDestinations(tracks, 'portA', null, true).play).toEqual([])
+    expect(midiDestinations(tracks, 'portA', vocal.id, true).play).toEqual([])
     let opened = 0
     const inputs = await collectRecordInputs({
       tracks,

@@ -22,18 +22,30 @@ function KindIcon({ id }: { id: AddKind }) {
   return <svg {...common}><path d="M4 7h6v8H4zM12 7h6M12 11h6M12 15h6" /></svg>
 }
 const INSTRUMENTS: { id: TrackInstrument; label: string; hint: string }[] = [
+  { id: 'pads', label: 'Beat Machine', hint: 'Banks of drum and sample pads. Record on this track.' },
   { id: 'synth', label: 'Keys', hint: 'Play from the on-screen keyboard or a MIDI keyboard.' },
   { id: 'scaler', label: 'Scaler', hint: 'Chord pads that follow the song key.' },
-  { id: 'pads', label: 'Pads', hint: 'A grid of drum and sample pads.' },
   { id: 'sampler', label: 'Sampler', hint: 'Play a loaded sample across the keys.' },
   { id: 'library', label: 'Library', hint: 'A multi-sample instrument from the library.' },
   { id: '808', label: '808', hint: 'Bass and drum tones from an 808.' },
   { id: 'none', label: 'Empty', hint: 'A MIDI track with no instrument yet.' },
 ]
 const KITS: { id: TrackInstrument; label: string; hint: string }[] = [
+  { id: 'pads', label: 'Beat Machine', hint: 'Banks of drum and sample pads. Record on this track.' },
   { id: 'drum-machine', label: 'Kit', hint: 'Kick, snare, clap, hat, and perc.' },
   { id: '808', label: '808', hint: 'The 808 drum instrument.' },
 ]
+
+function chooseKind(spec: AddTrackSpec, kind: AddKind): AddTrackSpec {
+  if (kind !== 'drum') return { ...spec, kind }
+  if (spec.instrument === '808' || spec.instrument === 'pads' || spec.instrument === 'drum-machine') return { ...spec, kind }
+  return { ...spec, kind, instrument: 'pads' }
+}
+
+function selectedKit(instrument: TrackInstrument): TrackInstrument {
+  if (instrument === '808' || instrument === 'pads') return instrument
+  return 'drum-machine'
+}
 
 function readLast(): AddTrackSpec | null {
   try {
@@ -95,7 +107,7 @@ export function AddTrackPanel({
               type="button"
               className={`guide-card${spec.kind === item.id ? ' on' : ''}`}
               aria-pressed={spec.kind === item.id}
-              onClick={() => onChange({ ...spec, kind: item.id })}
+              onClick={() => onChange(chooseKind(spec, item.id))}
             >
               <KindIcon id={item.id} />
               <strong>{item.label}</strong>
@@ -189,8 +201,8 @@ export function AddTrackPanel({
               <button
                 key={item.id}
                 type="button"
-                className={`guide-choice${(spec.instrument === '808' ? '808' : 'drum-machine') === item.id ? ' on' : ''}`}
-                aria-pressed={(spec.instrument === '808' ? '808' : 'drum-machine') === item.id}
+                className={`guide-choice${selectedKit(spec.instrument) === item.id ? ' on' : ''}`}
+                aria-pressed={selectedKit(spec.instrument) === item.id}
                 onClick={() => onChange({ ...spec, instrument: item.id })}
               >
                 <strong>{item.label}</strong>

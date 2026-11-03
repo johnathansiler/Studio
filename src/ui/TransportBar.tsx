@@ -4,6 +4,7 @@ import { formatLoopReadout } from '../model/loopEdit'
 import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, type TapMemory, type TapSource } from '../model/tap'
 import { formatMapBars } from '../model/tempoMap'
 import { countInBarsOf, countInCaption, formatTimecode } from '../model/time'
+import { recordButtonOn } from '../model/transport'
 import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import type { AssetStatus } from '../remote/assets'
@@ -245,7 +246,7 @@ export function TransportBar({
         <TipButton className="t-btn stop" label={transport('stop').label} hint={transport('stop').hint} onClick={onStop}>
           <span className="t-word">Stop</span>
         </TipButton>
-        <TipButton className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={status === 'recording' || status === 'counting-in'} onPress={() => engine.unlock()} onClick={onRecord}>
+        <TipButton className={`t-btn rec ${recordButtonOn(status) ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={recordButtonOn(status)} onPress={() => engine.unlock()} onClick={onRecord}>
           <span className="t-word">Rec</span>
         </TipButton>
         <TipButton

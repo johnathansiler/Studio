@@ -31,12 +31,17 @@ describe('add track panel', () => {
     expect(audio).not.toContain('>Keys<')
 
     const midi = renderToStaticMarkup(createElement(AddTrackPanel, { spec: { ...base, kind: 'midi' }, place: 'pop', onChange: () => undefined, onCancel: () => undefined, onCommit: () => undefined }))
+    expect(midi).toContain('>Beat Machine<')
+    expect(midi.indexOf('>Beat Machine<')).toBeLessThan(midi.indexOf('>Keys<'))
     expect(midi).toContain('>Keys<')
     expect(midi).toContain('Play from the on-screen keyboard')
     expect(midi).not.toContain('>Mic<')
     expect(midi).toContain('Add Instrument track')
 
     const drums = renderToStaticMarkup(createElement(AddTrackPanel, { spec: { ...base, kind: 'drum', instrument: 'drum-machine' }, place: 'sheet', onChange: () => undefined, onCancel: () => undefined, onCommit: () => undefined }))
+    expect(drums).toContain('>Beat Machine<')
+    const kits = drums.slice(drums.indexOf('<h3>Kit</h3>'))
+    expect(kits.indexOf('>Beat Machine</strong>')).toBeLessThan(kits.indexOf('>Kit</strong>'))
     expect(drums).toContain('>Kit<')
     expect(drums).toContain('>808<')
     expect(drums).not.toContain('Input number')

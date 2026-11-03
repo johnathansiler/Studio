@@ -432,7 +432,7 @@ export interface Track {
   instrument?: TrackInstrument
   /** Scaler chord instrument. Present when this track's instrument is Scaler. */
   scaler?: ScalerState
-  /** MPC pad kit. Present when this track's instrument is Pads. */
+  /** Pad kit for the beat machine. Present when this track's instrument is the beat machine. */
   padKit?: import('./padMachine').PadProgram
   /** Multi-sample program for a library instrument. PCM is not stored here. */
   library?: SamplerProgram

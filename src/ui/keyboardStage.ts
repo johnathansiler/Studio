@@ -13,7 +13,8 @@ export function markPianoHistory(history: { state: unknown; pushState: (data: un
   return true
 }
 
-export type KeyboardPresentation = 'locked' | 'turned' | 'dock'
+/** locked: the screen itself turned. shell: the browser could not lock, so the whole app shell turns. dock: already landscape, or not a phone. */
+export type KeyboardPresentation = 'locked' | 'shell' | 'dock'
 
 export interface LandscapeHost {
   form: FormFactor
@@ -26,9 +27,19 @@ export interface LandscapeHost {
   unlock?: () => void
 }
 
+export interface CloseFollow {
+  /**
+   * True after a real orientation unlock. The landscape layout stays until the
+   * device reports portrait. Browsers cannot read the OS auto-rotate switch:
+   * if auto-rotate is off, that portrait event never arrives and the phone stays landscape.
+   */
+  holdLandscape: boolean
+}
+
 /**
- * Phones open the keyboard the long way. Fullscreen plus an orientation lock
- * when the browser allows it. Otherwise a portrait phone turns the dock.
+ * Phones open the keyboard across the whole app, not only the dock.
+ * Fullscreen plus screen.orientation.lock('landscape') when the browser allows it.
+ * When that lock is impossible, the caller rotates the whole app shell.
  */
 export async function presentKeyboard(host: LandscapeHost): Promise<KeyboardPresentation> {
   if (host.form !== 'phone') return 'dock'
@@ -48,15 +59,33 @@ export async function presentKeyboard(host: LandscapeHost): Promise<KeyboardPres
       }
     }
   }
-  return 'turned'
+  return 'shell'
 }
 
-export async function dismissKeyboard(host: LandscapeHost, presentation: KeyboardPresentation) {
-  if (presentation !== 'locked') return
+export async function dismissKeyboard(host: LandscapeHost, presentation: KeyboardPresentation): Promise<CloseFollow> {
+  if (presentation !== 'locked') return { holdLandscape: false }
   try { host.unlock?.() } catch { /* already unlocked */ }
   if (host.fullscreenElement) {
     try { await host.exitFullscreen() } catch { /* already left fullscreen */ }
   }
+  return { holdLandscape: true }
+}
+
+/** A portrait reading is the only signal that auto-rotate brought the phone back. */
+export function portraitReported(type?: string | null, angle?: number | null): boolean {
+  if (type && /portrait/i.test(type)) return true
+  if (angle === 0 || angle === 180) return true
+  return false
+}
+
+/**
+ * After unlock, keep landscape until a portrait orientation change is reported.
+ * A missing report means the phone has not rotated back (auto-rotate off, or still held sideways).
+ */
+export function keepLandscapeAfterClose(holdLandscape: boolean, report: { type?: string | null; angle?: number | null } | null): boolean {
+  if (!holdLandscape) return false
+  if (!report) return true
+  return !portraitReported(report.type, report.angle)
 }
 
 let presenter: ((on: boolean) => void) | null = null

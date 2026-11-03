@@ -1,4 +1,4 @@
-/** Drums mode of the Sampler plugin. Old pad and drum ids load as Sampler with kind Drums. */
+/** Beat Machine (the Sampler plugin in drums mode). Old pad and drum ids load into it. */
 
 import { repeatIntervalBeats, type RepeatRate } from '../../model/midiClock'
 import {
@@ -19,7 +19,7 @@ import {
 /** Core plugin id. Drums is params.kind >= 1, not a separate insert. */
 export const SAMPLER_ID = 'sampler'
 
-/** Saved ids that open Sampler in Drums mode. */
+/** Saved ids that open the Beat Machine. */
 export const LEGACY_DRUM_IDS = ['pads', 'drum-machine', '808', 'drums', 'looper'] as const
 
 export type { MpcOutput, PadRegion }

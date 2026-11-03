@@ -39,12 +39,22 @@ export function insertIndex(tracks: { id: string }[], selectedId: string | null)
   return index < 0 ? tracks.length : index + 1
 }
 
+function drumInstrument(instrument: TrackInstrument): TrackInstrument {
+  if (instrument === '808') return '808'
+  if (instrument === 'pads') return 'pads'
+  return 'drum-machine'
+}
+
 function label(spec: AddTrackSpec) {
   if (spec.kind === 'audio') return 'Audio'
   if (spec.kind === 'bus') return 'Bus'
-  if (spec.kind === 'drum') return spec.instrument === '808' ? '808' : 'Drum'
+  if (spec.kind === 'drum') {
+    if (spec.instrument === '808') return '808'
+    if (spec.instrument === 'pads') return 'Beat Machine'
+    return 'Drum'
+  }
   if (spec.instrument === 'scaler') return 'Scaler'
-  if (spec.instrument === 'pads') return 'Pads'
+  if (spec.instrument === 'pads') return 'Beat Machine'
   if (spec.instrument === 'library') return 'Library'
   if (spec.instrument === 'sampler') return 'Sampler'
   if (spec.instrument === '808') return '808'
@@ -58,7 +68,7 @@ export function tracksFor(spec: AddTrackSpec, existing: Track[]): Track[] {
   const name = label(spec)
   let used = existing.filter((track) => track.name === name || track.name.startsWith(`${name} `)).length
   const instrument: TrackInstrument = spec.kind === 'drum'
-    ? (spec.instrument === '808' ? '808' : 'drum-machine')
+    ? drumInstrument(spec.instrument)
     : spec.kind === 'midi' ? spec.instrument : 'none'
   const type = spec.kind === 'bus' ? 'bus' : spec.kind === 'audio' ? 'audio' : 'midi'
   const made: Track[] = []
