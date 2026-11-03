@@ -16,7 +16,7 @@ import {
 
 const MAX_LOG = 180
 
-interface SavedSync {
+export interface SyncJournal {
   projectId: string
   actor: string
   seq: number
@@ -26,6 +26,8 @@ interface SavedSync {
   seen: [string, number][]
   trimmed: [string, number][]
 }
+
+interface SavedSync extends SyncJournal {}
 
 interface MemoryStorage {
   getItem(key: string): string | null
@@ -88,6 +90,70 @@ export class ProjectSync {
     for (const [actor, seq] of this.seen) seen[actor] = seq
     seen[this.actor] = this.seq
     return { actor: this.actor, seq: this.seq, lamport: this.lamport, digest: digestProject(project), seen }
+  }
+
+  /** Op log saved next to the room snapshot. Local undo stays out of this. */
+  snapshot(): SyncJournal {
+    return {
+      projectId: this.projectId,
+      actor: this.actor,
+      seq: this.seq,
+      lamport: this.lamport,
+      log: JSON.parse(JSON.stringify(this.log)) as ProjectOp[],
+      stamps: packStamps(this.stamps),
+      seen: [...this.seen],
+      trimmed: [...this.trimmed],
+    }
+  }
+
+  /** Replace the op log after a room copy is loaded. The project is the baseline. */
+  install(saved: SyncJournal, project: Project) {
+    this.projectId = saved.projectId || project.id || this.projectId
+    this.actor = saved.actor || this.actor
+    this.seq = Number(saved.seq) || 0
+    this.lamport = Number(saved.lamport) || 0
+    this.log = Array.isArray(saved.log) ? saved.log.filter((op) => validOp(op)) : []
+    this.stamps = unpackStamps(saved.stamps)
+    this.seen = new Map(Array.isArray(saved.seen) ? saved.seen : [])
+    this.trimmed = new Map(Array.isArray(saved.trimmed) ? saved.trimmed : [])
+    this.seen.set(this.actor, this.seq)
+    this.pending = []
+    this.buffered.clear()
+    this.baseline = musicalClone(project)
+    this.baselineJson = digestProject(project)
+    this.persist()
+  }
+
+  /** Full musical checkpoint. Used when a restarted room must take one participant's copy. */
+  checkpoint(project: Project): SyncReply {
+    return {
+      kind: 'checkpoint',
+      ops: [],
+      project: musicalClone(project),
+      stamps: packStamps(this.stamps),
+      lamport: this.lamport,
+      digest: digestProject(project),
+    }
+  }
+
+  /**
+   * Take a peer's checkpoint as the room.
+   * The local op log is dropped so stale ops are not sent again.
+   * The next local edit continues this device's sequence.
+   */
+  adoptCheckpoint(project: Project, remoteWire: StampWire[] | undefined, remoteLamport: number, remoteActor: string, remoteSeq: number) {
+    this.projectId = project.id || this.projectId
+    this.baseline = musicalClone(project)
+    this.baselineJson = digestProject(project)
+    this.stamps = unpackStamps(remoteWire)
+    this.lamport = Math.max(this.lamport, remoteLamport)
+    this.log = []
+    this.trimmed.set(this.actor, this.seq)
+    this.seen.set(this.actor, this.seq)
+    if (remoteActor && remoteSeq > 0) this.seen.set(remoteActor, Math.max(this.seen.get(remoteActor) ?? 0, remoteSeq))
+    this.pending = []
+    this.buffered.clear()
+    this.persist()
   }
 
   observe(project: Project): ProjectOp[] {

@@ -16,14 +16,15 @@ import { DEFAULT_OPUS, mungeOpusSdp, type OpusOptions } from '../model/sdp'
 import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, sendVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, VIDEO_START_BITRATE, videoEncodingBudget, videoTargetForBwe } from '../model/codecs'
 import { isSilentTake, nextRelayGather, tcpRelayIceServers, udpIceServers, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
 import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_INITIAL_GATHER_MS, ICE_RESTART_VIDEO_HOLD_MS, ICE_STUCK_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
+import { isUntouchedEmpty } from '../model/launchProject'
 import { sanitizeDiag, type DiagDirection } from '../model/diag'
 import { guestMayRequest, outlineWaveforms, referencedBufferIds } from '../model/sessionSync'
-import { collabAccessFor, isTimelineComment, locksProject, mayWriteProject, opsAllowed, parseCollabAccess, relayProjectTraffic, syncMessageOk, type CollabAccess, type ProjectOp, type StampWire, type SyncHello, type TimelineComment } from '../state/ops'
-import type { ProjectSync } from '../state/sync'
+import { adoptSavedRoom, claimFromHello, collabAccessFor, compareRoomClaims, digestProject, isTimelineComment, locksProject, mayWriteProject, opsAllowed, parseCollabAccess, relayProjectTraffic, syncMessageOk, type CollabAccess, type ProjectOp, type RoomClaim, type StampWire, type SyncHello, type TimelineComment } from '../state/ops'
+import type { ProjectSync, SyncJournal } from '../state/sync'
 import { CAP_NOTICE } from '../model/usage'
 import { SfuCall, type SfuKind, type SfuPublication } from './sfuCall'
 import { decodeWavPCM, encodeWav } from '../model/wav'
-import { base64ToBytes, bytesToBase64 } from '../storage/idb'
+import { base64ToBytes, bytesToBase64, journalFromRoom, type RoomCopy } from '../storage/idb'
 import { assembleTakeWav, bytesToArrayBuffer, chunkBytes, clockOffsetForTake, packTakeChunk, readTakeChunk, sumRelayBytes, TAKE_CHUNK_BYTES, takeProgress, type RelayPair } from './hqTake'
 import { AssetExchange, assetBytesAllowed, chooseAssetPath, offersFromSignal, sharedAssetStore, type AssetStatus } from './assets'
 import { clearActiveSession, deviceParticipantId, readIdentity } from '../storage/identity'
@@ -225,7 +226,7 @@ const PCM_MIN_TARGET = 18
 
 export class SessionClient {
   state: SessionState
-  private connectOpts: { name: string; create?: boolean; code?: string; fresh?: boolean; invite?: string } | null = null
+  private connectOpts: { name: string; create?: boolean; code?: string; fresh?: boolean; rebuild?: boolean; invite?: string } | null = null
   /** Invite token from the share link. The server maps it to View, Comment, or Edit. */
   private inviteToken = ''
   private inviteTokens = new Map<CollabAccess, string>()
@@ -277,6 +278,9 @@ export class SessionClient {
     sync?: ProjectSync
     applyRemoteOps?: (ops: ProjectOp[]) => boolean
     mergeRemoteCheckpoint?: (project: Project, stamps: StampWire[] | undefined, prefer: 'local' | 'remote', lamport?: number, actor?: string, seq?: number) => ProjectOp[]
+    replaceWithRoom?: (project: Project, buffers: Map<string, AudioAsset>, journal: SyncJournal) => void
+    adoptRoomJournal?: (journal: SyncJournal) => void
+    adoptSharedRoom?: (project: Project, stamps: StampWire[] | undefined, lamport: number, actor: string, seq: number) => void
     remoteFollow?: boolean
   } | null = null
   /** Musical sync is ops plus a checkpoint, not a full project on every edit. */
@@ -285,6 +289,20 @@ export class SessionClient {
   private incomingProject: Project | null = null
   private incomingAssets = new Map<string, AudioAsset>()
   private resumeId = ''
+  /** Saved copy role. A guest who rebuilds the empty room does not become the project authority. */
+  private savedRole: 'host' | 'guest' | '' = ''
+  private roomSavedAt = 0
+  /** Hello replies pick one participant copy instead of merging field by field. */
+  private recovering = false
+  private rebuildTried = false
+  /** Blocks the close handler while a dead-room error is checked against IndexedDB. */
+  private holdReconnect = false
+  private preparedCode = ''
+  private roomPrep: Promise<void> | null = null
+  private roomOpen = false
+  private loadRoom: ((code: string) => Promise<RoomCopy | null>) | null = null
+  private loadBuffers: ((projectId: string) => Promise<Map<string, AudioAsset>>) | null = null
+  private saveRoom: (() => Promise<void>) | null = null
   /** null until the session view reports which tiles are on screen. Kept for the panel; it does not change SDP. */
   private incomingVideo: Set<string> | null = null
   private signalLane = new Map<string, Promise<void>>()
@@ -382,10 +400,11 @@ export class SessionClient {
     this.emit()
   }
 
-  connect(opts: { name: string; create?: boolean; code?: string; fresh?: boolean; invite?: string }) {
+  connect(opts: { name: string; create?: boolean; code?: string; fresh?: boolean; rebuild?: boolean; invite?: string }) {
     const next = (opts.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
     const current = (this.state.code || this.connectOpts?.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
     const switching = Boolean(next && current && next !== current)
+    if (opts.fresh || switching) this.resetRoomRecovery()
     if (opts.fresh) this.leave()
     else if (switching) {
       this.left = true
@@ -475,6 +494,7 @@ export class SessionClient {
 
   leave() {
     this.left = true
+    this.resetRoomRecovery()
     clearActiveSession()
     this.send({ t: 'leave' })
     this.stopLocalTracks()
@@ -549,6 +569,7 @@ export class SessionClient {
         code: decision.code,
         resumeId: this.resumeId || undefined,
         instanceId: this.instanceId,
+        rebuild: Boolean(opts.rebuild),
         invite: decision.action === 'join' ? this.inviteToken || undefined : undefined,
       })
     }
@@ -564,7 +585,7 @@ export class SessionClient {
     ws.onclose = (event) => {
       this.welcomed = false
       this.noteSocket('close', { code: event.code, reason: event.reason, wasClean: event.wasClean })
-      if (this.left || this.ws !== ws) return
+      if (this.left || this.holdReconnect || this.ws !== ws) return
       this.ws = null
       this.state.status = 'reconnecting'
       this.note('Signaling dropped. Reconnecting…')
@@ -646,12 +667,19 @@ export class SessionClient {
       this.state.status = 'error'
       this.state.error = message
       if (/no longer live/i.test(message)) {
-        clearActiveSession()
-        this.left = true
-        this.connectOpts = null
+        const code = (this.state.code || this.connectOpts?.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+        this.holdReconnect = true
         const ws = this.ws
         this.ws = null
         ws?.close()
+        if (!this.rebuildTried && code) {
+          this.rebuildTried = true
+          this.emit()
+          void this.tryRebuild(code, message)
+          return
+        }
+        this.failDead(message)
+        return
       }
       this.emit()
       return
@@ -684,6 +712,7 @@ export class SessionClient {
       sessionStorage.setItem(`cueharbor-resume:${msg.code}`, msg.id)
       const askedCreate = Boolean(this.connectOpts?.create)
       this.connectOpts = { name: this.state.name, create: false, code: msg.code }
+      this.rebuildTried = false
       this.state.status = msg.role === 'host' || this.selfAdmitted() ? 'live' : 'waiting'
       const reason = String(msg.reason || '')
       if (askedCreate && reason.startsWith('new session created')) {
@@ -1217,54 +1246,57 @@ export class SessionClient {
 
   private maybeSync() {
     if (this.state.status !== 'live' || !this.arrangementStore?.sync) return
-    this.usingOps = true
-    this.sendSyncHello()
-    this.publishEdits()
+    void this.prepareRoom().then(() => {
+      if (this.left || this.state.status !== 'live' || !this.arrangementStore?.sync) return
+      this.usingOps = true
+      this.sendSyncHello()
+      this.publishEdits()
+    })
   }
 
   private sendSyncHello() {
     const store = this.arrangementStore
     if (!store?.sync || this.state.status !== 'live') return
     const hello = store.sync.hello(store.project)
-    const message = { t: 'sync-hello', ...hello }
+    const message = {
+      t: 'sync-hello',
+      ...hello,
+      savedAt: this.roomSavedAt,
+      role: this.savedRole || this.state.role,
+    }
     if (syncMessageOk(message)) this.send(message)
   }
 
-  private answerSyncHello(msg: { from?: string } & Partial<SyncHello>) {
+  private answerSyncHello(msg: { from?: string; host?: boolean } & Partial<SyncHello>) {
     const store = this.arrangementStore
     if (!store?.sync || !msg.from || msg.from === this.state.selfId) return
-    const reply = store.sync.replyTo(
-      {
-        actor: String(msg.actor || msg.from),
-        seq: Number(msg.seq) || 0,
-        lamport: Number(msg.lamport) || 0,
-        digest: String(msg.digest || ''),
-        seen: msg.seen && typeof msg.seen === 'object' ? msg.seen : {},
-      },
-      store.project,
-    )
+    const hello: SyncHello = {
+      actor: String(msg.actor || msg.from),
+      seq: Number(msg.seq) || 0,
+      lamport: Number(msg.lamport) || 0,
+      digest: String(msg.digest || ''),
+      seen: msg.seen && typeof msg.seen === 'object' ? msg.seen : {},
+      savedAt: Number(msg.savedAt) || 0,
+      role: msg.role === 'host' || msg.role === 'guest' ? msg.role : undefined,
+    }
     const access = this.selfAccess()
+    if (this.recovering) {
+      const ours = this.localClaim()
+      const theirs = claimFromHello(hello, msg.host ? 'host' : 'guest')
+      if (ours.digest === theirs.digest) this.recovering = false
+      else if (compareRoomClaims(ours, theirs) >= 0) {
+        if (relayProjectTraffic(access, 'sync-checkpoint')) this.sendCheckpoint(msg.from)
+        return
+      } else return
+    }
+    const reply = store.sync.replyTo(hello, store.project)
     if (reply.kind === 'ops' && reply.ops.length) {
       const allowed = reply.ops.filter((op) => opsAllowed(access, [op]))
       const message = { t: 'sync-ops', to: msg.from, ops: allowed }
       if (allowed.length && syncMessageOk(message) && relayProjectTraffic(access, 'sync-ops', allowed)) this.send(message)
       return
     }
-    if (reply.kind === 'checkpoint' && reply.project && relayProjectTraffic(access, 'sync-checkpoint')) {
-      const project = { ...reply.project, waveforms: outlineWaveforms(store.project, store.buffers) }
-      const message = {
-        t: 'sync-checkpoint',
-        to: msg.from,
-        host: this.state.role === 'host',
-        actor: store.sync.actor,
-        seq: store.sync.seq,
-        project,
-        stamps: reply.stamps,
-        lamport: reply.lamport,
-        digest: reply.digest,
-      }
-      if (syncMessageOk(message)) this.send(message)
-    }
+    if (reply.kind === 'checkpoint' && reply.project && relayProjectTraffic(access, 'sync-checkpoint')) this.sendCheckpoint(msg.from, reply)
   }
 
   private acceptOps(ops: unknown) {
@@ -1277,11 +1309,37 @@ export class SessionClient {
     this.emit()
   }
 
-  private acceptCheckpoint(msg: { project?: Project; stamps?: StampWire[]; host?: boolean; lamport?: number; digest?: string; actor?: string; seq?: number }) {
+  private acceptCheckpoint(msg: { project?: Project; stamps?: StampWire[]; host?: boolean; lamport?: number; digest?: string; actor?: string; seq?: number; savedAt?: number; role?: 'host' | 'guest' }) {
     const store = this.arrangementStore
     if (!store?.mergeRemoteCheckpoint || !msg.project) return
     this.usingOps = true
-    if (locksProject(this.state.role, this.selfAccess())) store.remoteFollow = true
+    const follow = locksProject(this.state.role, this.selfAccess())
+    if (this.recovering && store.adoptSharedRoom) {
+      const ours = this.localClaim()
+      const theirs = claimFromHello(
+        {
+          actor: String(msg.actor || ''),
+          seq: Number(msg.seq) || 0,
+          lamport: Number(msg.lamport) || 0,
+          digest: String(msg.digest || ''),
+          seen: {},
+          savedAt: Number(msg.savedAt) || 0,
+          role: msg.role,
+        },
+        msg.host ? 'host' : 'guest',
+      )
+      if (ours.digest !== theirs.digest && compareRoomClaims(theirs, ours) > 0) {
+        store.remoteFollow = follow
+        store.adoptSharedRoom(msg.project, msg.stamps, Number(msg.lamport) || 0, String(msg.actor || ''), Number(msg.seq) || 0)
+        this.recovering = false
+        this.roomSavedAt = Math.max(this.roomSavedAt, theirs.savedAt)
+        this.applyIncomingArrangement()
+        return
+      }
+      if (ours.digest !== theirs.digest) return
+      this.recovering = false
+    }
+    store.remoteFollow = follow
     const reply = store.mergeRemoteCheckpoint(msg.project, msg.stamps, msg.host ? 'remote' : 'local', Number(msg.lamport) || 0, String(msg.actor || ''), Number(msg.seq) || 0)
     const access = this.selfAccess()
     const allowed = reply.filter((op) => opsAllowed(access, [op]))
@@ -1295,6 +1353,176 @@ export class SessionClient {
       this.sendSyncHello()
     } else this.syncPasses = 0
     this.applyIncomingArrangement()
+  }
+
+  /** Room snapshot and op log live in IndexedDB on each participant. The server does not keep them. */
+  setRoomPersistence(hooks: {
+    load: (code: string) => Promise<RoomCopy | null>
+    loadBuffers: (projectId: string) => Promise<Map<string, AudioAsset>>
+    save: () => Promise<void>
+  }) {
+    this.loadRoom = hooks.load
+    this.loadBuffers = hooks.loadBuffers
+    this.saveRoom = hooks.save
+  }
+
+  /** The open project was written. Host rank stays with the saved role. */
+  markRoomSaved(savedAt: number, role: 'host' | 'guest') {
+    this.roomSavedAt = savedAt
+    if (!this.savedRole) this.savedRole = role
+  }
+
+  sharesRoom() {
+    return this.roomOpen
+  }
+
+  private resetRoomRecovery() {
+    this.savedRole = ''
+    this.roomSavedAt = 0
+    this.recovering = false
+    this.rebuildTried = false
+    this.holdReconnect = false
+    this.preparedCode = ''
+    this.roomPrep = null
+    this.roomOpen = false
+  }
+
+  private failDead(message: string) {
+    clearActiveSession()
+    this.left = true
+    this.holdReconnect = false
+    this.connectOpts = null
+    this.state.status = 'error'
+    this.state.error = message
+    this.emit()
+    const ws = this.ws
+    this.ws = null
+    ws?.close()
+  }
+
+  private async tryRebuild(code: string, message: string) {
+    let copy: RoomCopy | null = null
+    try {
+      copy = (await this.loadRoom?.(code)) ?? null
+    } catch {
+      copy = null
+    }
+    if (!this.holdReconnect && this.left) return
+    if (!copy) {
+      this.failDead(message)
+      return
+    }
+    this.holdReconnect = false
+    this.recovering = true
+    this.roomSavedAt = copy.savedAt
+    this.savedRole = copy.role
+    this.preparedCode = ''
+    this.left = false
+    this.state.status = 'connecting'
+    this.state.error = undefined
+    this.connectOpts = { name: this.state.name, code, rebuild: true }
+    this.emit()
+    const ws = this.ws
+    this.ws = null
+    ws?.close()
+    this.openSocket()
+  }
+
+  private prepareRoom() {
+    const code = this.state.code || ''
+    if (!code || !this.arrangementStore?.sync) return Promise.resolve()
+    if (this.preparedCode === code) return Promise.resolve()
+    if (this.roomPrep) return this.roomPrep
+    this.roomPrep = this.loadAndAdopt(code).finally(() => {
+      this.roomPrep = null
+    })
+    return this.roomPrep
+  }
+
+  private async loadAndAdopt(code: string) {
+    this.preparedCode = code
+    try {
+      const store = this.arrangementStore
+      if (!store?.sync) return
+      const copy = this.loadRoom ? await this.loadRoom(code) : null
+      if (this.left || this.state.code !== code || !this.arrangementStore?.sync) {
+        this.preparedCode = ''
+        return
+      }
+      const current = this.arrangementStore
+      if (!current.sync) return
+      if (copy) {
+        this.savedRole = copy.role
+        const openDigest = current.sync.hello(current.project).digest
+        const openLamport = current.sync.lamport
+        const untouched = isUntouchedEmpty(current.project) && current.buffers.size === 0
+        const adopt = adoptSavedRoom({
+          openDigest,
+          openLamport,
+          openUntouched: untouched,
+          savedDigest: copy.digest || digestProject(copy.project),
+          savedLamport: copy.lamport,
+        })
+        this.recovering = true
+        if (adopt && current.replaceWithRoom) {
+          const buffers = (await this.loadBuffers?.(copy.projectId).catch(() => current.buffers)) ?? current.buffers
+          if (this.state.code !== code || !this.arrangementStore) {
+            this.preparedCode = ''
+            return
+          }
+          this.roomSavedAt = copy.savedAt
+          this.roomOpen = true
+          current.replaceWithRoom(copy.project, buffers, journalFromRoom(copy))
+        } else {
+          if (copy.seq > current.sync.seq && current.adoptRoomJournal) current.adoptRoomJournal(journalFromRoom(copy))
+          this.roomSavedAt = openLamport > copy.lamport ? Date.now() : copy.savedAt
+          this.roomOpen = true
+        }
+      } else this.roomOpen = true
+      try {
+        await this.saveRoom?.()
+      } catch {
+        /* the room still syncs from memory */
+      }
+    } catch {
+      this.preparedCode = ''
+      this.roomOpen = true
+    }
+  }
+
+  private localClaim(): RoomClaim {
+    const store = this.arrangementStore
+    const hello = store?.sync?.hello(store.project)
+    const role = this.savedRole || (this.state.role === 'host' ? 'host' : 'guest')
+    return {
+      role,
+      savedAt: this.roomSavedAt,
+      lamport: hello?.lamport || 0,
+      actor: hello?.actor || store?.sync?.actor || '',
+      digest: hello?.digest || '',
+    }
+  }
+
+  private sendCheckpoint(to: string, reply?: { project?: Project; stamps?: StampWire[]; lamport?: number; digest?: string }) {
+    const store = this.arrangementStore
+    if (!store?.sync) return
+    const packed = reply ?? store.sync.checkpoint(store.project)
+    if (!packed.project) return
+    const project = { ...packed.project, waveforms: outlineWaveforms(store.project, store.buffers) }
+    const message = {
+      t: 'sync-checkpoint',
+      to,
+      host: this.state.role === 'host',
+      actor: store.sync.actor,
+      seq: store.sync.seq,
+      project,
+      stamps: packed.stamps,
+      lamport: packed.lamport,
+      digest: packed.digest,
+      savedAt: this.roomSavedAt,
+      role: this.savedRole || this.state.role,
+    }
+    if (syncMessageOk(message) && relayProjectTraffic(this.selfAccess(), 'sync-checkpoint')) this.send(message)
   }
 
   /** Ask any peer with a direct channel for each missing wav, and serve the ones we hold. */

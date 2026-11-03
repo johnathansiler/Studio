@@ -35,9 +35,9 @@ import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
 import { readKeyboardEnabled, writeKeyboardEnabled } from '../model/keyboardPlay'
-import { HistoryJournal } from './history'
-import { type ProjectOp, type StampWire } from './ops'
-import { ProjectSync } from './sync'
+import { applyChanges, HistoryJournal } from './history'
+import { diffProject, musicalClone, type ProjectOp, type StampWire } from './ops'
+import { ProjectSync, type SyncJournal } from './sync'
 import { activeTool, setActiveTool, type ArrangeTool } from './tools'
 import {
   channelAutomationMode,
@@ -267,6 +267,8 @@ export class ProjectStore {
   private nextDrumSeed = 1
   /** Patch history. Transport, selection, zoom, and meters are not recorded. */
   private journal = new HistoryJournal()
+  /** A guest may undo a restore they just applied. Other guest edits stay blocked. */
+  private allowUndo = false
   private listeners = new Set<Listener>()
   /** Musical journal shared with every view and with the remote session. */
   readonly sync = new ProjectSync()
@@ -357,17 +359,60 @@ export class ProjectStore {
     this.project = normalizeProjectRack(normalizeProject(merged.project))
     if (waveforms) this.project.waveforms = waveforms
     this.journal.clear()
+    this.allowUndo = false
     this.sync.adopt(this.project)
     this.sync.silence = false
     this.emit()
     return merged.reply
   }
 
+  /** The saved room replaces this tab. Undo history from the previous project is dropped. */
+  replaceWithRoom(project: Project, buffers: Map<string, AudioAsset>, journal: SyncJournal) {
+    this.allowUndo = false
+    this.loadProject(project, buffers)
+    this.sync.install(journal, this.project)
+  }
+
+  /** Keep the open project and continue from a newer saved op log. */
+  adoptRoomJournal(journal: SyncJournal) {
+    this.sync.install(journal, this.project)
+  }
+
+  /**
+   * A restarted room picked another participant's copy.
+   * The project is replaced. Local undo does not reach back across that replace.
+   */
+  adoptSharedRoom(remote: Project, stamps: StampWire[] | undefined, lamport: number, actor: string, seq: number) {
+    this.sync.silence = true
+    const waveforms = this.project.waveforms
+    this.project = normalizeProjectRack(normalizeProject(remote))
+    if (waveforms) this.project.waveforms = waveforms
+    this.journal.clear()
+    this.allowUndo = false
+    this.sync.adoptCheckpoint(this.project, stamps, lamport, actor, seq)
+    this.sync.silence = false
+    this.emit()
+  }
+
+  /**
+   * Put a named version back. One undo step, then field ops so every participant follows.
+   * Undo stays on this device. The undo itself is published as ops.
+   */
+  restoreForEveryone(snapshot: Project) {
+    if (this.remoteFollow) return
+    const target = musicalClone(normalizeProjectRack(normalizeProject(snapshot)))
+    this.mutate(() => {
+      applyChanges(this.project, diffProject(this.project, target))
+    }, 'Restore version')
+    this.allowUndo = true
+    this.toast('Restored a version for everyone')
+  }
+
   private rewriteHistory(ops: ProjectOp[]) {
     this.journal.absorb(ops)
   }
 
-  private mutate(fn: () => void) {
+  private mutate(fn: () => void, label?: string) {
     if (this.remoteFollow) return
     this.quantizePreview = null
     this.drafted = false
@@ -376,7 +421,7 @@ export class ProjectStore {
     this.journal.open(this.project)
     this.editGeneration += 1
     fn()
-    this.journal.seal(this.project)
+    this.journal.seal(this.project, label)
     this.emit()
   }
 
@@ -426,7 +471,7 @@ export class ProjectStore {
   }
 
   undo() {
-    if (this.remoteFollow) return
+    if (this.remoteFollow && !this.allowUndo) return
     this.tempoGroup = false
     this.drafted = false
     const step = this.journal.undo(this.project)
@@ -437,7 +482,7 @@ export class ProjectStore {
   }
 
   redo() {
-    if (this.remoteFollow) return
+    if (this.remoteFollow && !this.allowUndo) return
     this.tempoGroup = false
     this.drafted = false
     const step = this.journal.redo(this.project)
