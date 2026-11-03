@@ -85,21 +85,15 @@ const CHORDS: number[][] = [
 ]
 
 export const FX_LABEL: Record<MidiFxKind, string> = {
-  arp: 'Arp',
+  arp: 'Arpeggio',
   chord: 'Chord',
-  scale: 'Scale',
-  repeat: 'Repeat',
-  humanize: 'Human',
-  velocity: 'Curve',
+  scale: 'Scaler',
 }
 
 export const FX_HINT: Record<MidiFxKind, string> = {
   arp: 'Walks held notes up, down, or at random',
   chord: 'Stacks a chord on each note',
   scale: 'Locks notes to the key',
-  repeat: 'Retriggers a held note',
-  humanize: 'Nudges timing and velocity',
-  velocity: 'Reshapes how hard notes hit',
 }
 
 export const FX_RATES = [
@@ -115,9 +109,6 @@ const DEFAULT_PARAMS: Record<MidiFxKind, Record<string, number>> = {
   arp: { rate: 0.25, direction: 0, octaves: 1, gate: 0.8 },
   chord: { type: 0, inversion: 0 },
   scale: { follow: 1, root: 0, scale: 0 },
-  repeat: { rate: 0.25, gate: 0.5 },
-  humanize: { time: 0.02, vel: 0.08 },
-  velocity: { curve: 0, amount: 1, floor: 0, ceiling: 1 },
 }
 
 export function defaultMidiOut(): MidiOutSettings {
@@ -232,9 +223,7 @@ function runStep(step: MidiFx, notes: MidiNote[], ctx: ChainContext): MidiNote[]
   if (step.kind === 'scale') return notes.map((note) => scaleNote(note, step.params, ctx))
   if (step.kind === 'chord') return notes.flatMap((note) => chordNotes(note, step.params))
   if (step.kind === 'arp') return arpNotes(notes, step.params, ctx)
-  if (step.kind === 'repeat') return repeatNotes(notes, step.params)
-  if (step.kind === 'humanize') return notes.map((note, index) => humanizeNote(note, step.params, ctx, index))
-  return notes.map((note) => velocityNote(note, step.params))
+  return notes
 }
 
 function scaleNote(note: MidiNote, params: Record<string, number>, ctx: ChainContext): MidiNote {
@@ -317,52 +306,6 @@ function arpIndex(direction: number, step: number, length: number, seed: number)
   }
   if (direction === 3) return hash(seed, step + 1) % length
   return step % length
-}
-
-function repeatNotes(notes: MidiNote[], params: Record<string, number>): MidiNote[] {
-  const step = Math.max(0.03125, params.rate || 0.25)
-  const length = Math.max(0.02, step * clamp(params.gate ?? 0.5, 0.05, 1))
-  const out: MidiNote[] = []
-  for (const note of notes) {
-    const end = note.startBeat + Math.max(0.02, note.durationBeats)
-    let index = 0
-    for (let t = note.startBeat; t < end - 1e-6 && index < 512; t += step, index++) {
-      out.push({
-        ...note,
-        id: `${note.id}:r${index}`,
-        startBeat: t,
-        durationBeats: Math.min(length, end - t),
-        velocity: unitVel(note.velocity),
-      })
-    }
-  }
-  return out
-}
-
-function humanizeNote(note: MidiNote, params: Record<string, number>, ctx: ChainContext, index: number): MidiNote {
-  const time = Math.max(0, params.time || 0)
-  const vel = Math.max(0, params.vel || 0)
-  const shift = (unit(hash(ctx.seed, index + 1)) * 2 - 1) * time
-  const delta = (unit(hash(ctx.seed, index + 99)) * 2 - 1) * vel
-  return {
-    ...note,
-    startBeat: Math.max(0, note.startBeat + shift),
-    velocity: clamp(unitVel(note.velocity) + delta, 0.01, 1),
-  }
-}
-
-function velocityNote(note: MidiNote, params: Record<string, number>): MidiNote {
-  const dry = unitVel(note.velocity)
-  const curve = clamp(Math.round(params.curve || 0), 0, 3)
-  const amount = clamp(params.amount ?? 1, 0, 1)
-  let shaped = dry
-  if (curve === 1) shaped = Math.sqrt(dry)
-  else if (curve === 2) shaped = dry * dry
-  else if (curve === 3) shaped = 0.85
-  const mixed = dry + (shaped - dry) * amount
-  const floor = clamp(params.floor ?? 0, 0, 1)
-  const ceiling = clamp(params.ceiling ?? 1, floor, 1)
-  return { ...note, velocity: clamp(mixed, floor, ceiling) }
 }
 
 export function parseMidi(data: ArrayLike<number> | null | undefined): ParsedMidi | null {
@@ -777,7 +720,7 @@ export class LiveMidiChain {
   private sync() {
     const fx = enabledFx(this.fxOf())
     const beat = this.held.size ? Math.max(0, ((this.now() - this.origin) / 1000) * (this.tempoOf() / 60)) : 0
-    const instant = !fx.some((item) => item.kind === 'arp' || item.kind === 'repeat')
+    const instant = !fx.some((item) => item.kind === 'arp')
     const rendered = this.held.size
       ? applyMidiChain(
           [...this.held.entries()].map(([pitch, velocity]) => ({
@@ -806,7 +749,7 @@ export class LiveMidiChain {
   }
 
   private timed() {
-    return enabledFx(this.fxOf()).some((item) => item.kind === 'arp' || item.kind === 'repeat')
+    return enabledFx(this.fxOf()).some((item) => item.kind === 'arp')
   }
 
   private arm() {
@@ -851,10 +794,6 @@ function hash(seed: number, index: number): number {
   return x >>> 0
 }
 
-function unit(value: number): number {
-  return (value >>> 0) / 4294967295
-}
-
 function finite(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
@@ -866,7 +805,7 @@ function numbers(record: Record<string, unknown>): Record<string, number> {
 }
 
 function isKind(value: unknown): value is MidiFxKind {
-  return value === 'arp' || value === 'chord' || value === 'scale' || value === 'repeat' || value === 'humanize' || value === 'velocity'
+  return value === 'arp' || value === 'chord' || value === 'scale'
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

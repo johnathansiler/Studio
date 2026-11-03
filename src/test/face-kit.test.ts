@@ -17,7 +17,7 @@ describe('face kit', () => {
       expect(theme.badge.length).toBeGreaterThan(1)
       accents.add(theme.accent)
     }
-    expect(accents.size).toBeGreaterThan(12)
+    expect(accents.size).toBe(CATALOG.filter((plugin) => plugin.id !== 'tune').length)
   })
 
   it('draws a curve that follows gain and a compressor that holds below the threshold', () => {

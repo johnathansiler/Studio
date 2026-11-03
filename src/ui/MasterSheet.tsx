@@ -39,7 +39,7 @@ export function MasterSheet({ store, engine, onClose }: { store: ProjectStore; e
     const tick = () => {
       const reading = engine.masterReading()
       if (reading) setLive((prev) => (sameReading(prev, reading) ? prev : { ...reading }))
-      const meter = selectMaster(store).plugins.find((plugin) => plugin.pluginId === 'meter')
+      const meter = selectMaster(store).plugins.find((plugin) => plugin.pluginId === 'limiter')
       drawMeters(spectrum.current, scope.current, meter ? engine.spectrum(meter.id) : null, engine.masterScope(), refBands, history.current)
       if (chain) drawSpectrogram(document.querySelector('#master-sheet .spectrogram'), history.current)
       timer = window.setTimeout(tick, 180)
@@ -84,7 +84,7 @@ export function MasterSheet({ store, engine, onClose }: { store: ProjectStore; e
       const wet = await mixAudio()
       const dryProject = {
         ...store.project,
-        masterPlugins: store.project.masterPlugins.map((plugin) => (plugin.pluginId === 'meter' ? plugin : { ...plugin, enabled: false })),
+        masterPlugins: store.project.masterPlugins.map((plugin) => ({ ...plugin, enabled: false })),
       }
       const dry = await renderArrangement(dryProject, new Map(store.buffers), 0, wet[0]?.length ?? store.project.sampleRate, false)
       const wetReading = measureProgram(wet[0] ?? new Float32Array(0), wet[1] ?? null, store.project.sampleRate)

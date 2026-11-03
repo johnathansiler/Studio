@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
-import { activePresetName, descriptor, FACTORY } from '../audio/plugins/catalog'
+import { activePresetName, descriptor, FACTORY, presetParams } from '../audio/plugins/catalog'
 import { PresetBar } from './PresetBar'
 import { GestureReadout, useDragValue } from './kit/controls'
 import {
@@ -61,7 +61,10 @@ export function AmpPop({
           label="Rig"
           names={presetList(store)}
           active={activePresetName('amp', params, store.project.presets)}
-          onPick={(name) => store.applyPluginPreset(trackId, plugin.id, name)}
+          onPick={(name) => {
+            const next = presetParams('amp', name, store.project.presets)
+            if (next) store.updatePlugin(trackId, plugin.id, { params: { ...next, kind: 5 } })
+          }}
         />
         <button type="button" className={info.direct ? 'on' : ''} hidden={!info.directAvailable} onClick={() => engine.setDirectMonitor(!info.direct)}>Direct</button>
         <button type="button" className={(params.mute ?? 0) >= 0.5 ? 'on' : ''} onClick={() => set('mute', (params.mute ?? 0) >= 0.5 ? 0 : 1)}>Mute</button>
