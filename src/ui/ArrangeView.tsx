@@ -36,10 +36,12 @@ import { useFormFactor } from './form'
 import './guideSheet.css'
 import { ActionSheet, SheetRow, TipButton } from './Hint'
 import { RecordBar } from './RecordBar'
+import { RemoteTimeline, TrackPresence, remoteClipMark, useRemotePeers } from './presenceMarks'
 import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, trimZone } from './touchEdit'
 import { laneDoubleClickAddsClip } from './clipKeys'
 import { isSampledInstrument } from '../instruments/sampled'
 import { LoopRegion } from './LoopRegion'
+import { CommentControl, CommentPins } from './timelineComments'
 
 
 function ArrangeChrome({ browserOpen, setupOpen, onBrowser, onSetup }: { browserOpen: boolean; setupOpen: boolean; onBrowser: () => void; onSetup: () => void }) {
@@ -103,6 +105,7 @@ export function ArrangeView({
   onLibraryClose?: () => void
 }) {
   const project = selectArrange(store).project
+  const remotes = useRemotePeers()
   const [px, setPx] = useState(90)
   const pxRef = useRef(px)
   pxRef.current = px
@@ -719,6 +722,7 @@ export function ArrangeView({
                 onClick={() => { if (isSampledInstrument(track)) store.showRack(track.id) }}
                 onChange={(event) => store.updateTrack(track.id, { name: event.target.value })}
               />
+              <TrackPresence trackId={track.id} />
               <MixFlags store={store} trackId={track.id} compact />
               {track.type === 'midi' && (
                 <button
@@ -786,6 +790,8 @@ export function ArrangeView({
                 {mark.bar}
               </span>
             ))}
+            <CommentControl session={session} project={project} position={position} />
+            <CommentPins session={session} project={project} px={px} onSeek={onSeek} />
           </div>
           <div className="bar-grid" aria-hidden>
             {marks.filter((mark) => mark.downbeat).map((mark) => (
@@ -857,6 +863,7 @@ export function ArrangeView({
                   tool={tool}
                   shift={nudge?.audio[clip.id] ?? 0}
                   passive={passive}
+                  remotes={remotes}
                   onSplitAt={(clientX) => store.splitAt(track.id, clip.id, sampleAt(clientX))}
                   onSplit={() => store.splitSelected(engine.currentTimelineSample())}
                   onErase={beginErase}
@@ -874,14 +881,16 @@ export function ArrangeView({
                 const left = pxAtBeat(project, beat, px)
                 const widthPx = Math.max(8, pxAtBeat(project, beat + lengthBeats, px) - left)
                 const picked = store.selectedMidiClipIds.includes(clip.id)
+                const remote = remoteClipMark(remotes, clip.id)
                 return (
                   <div key={clip.id} style={{ display: 'contents' }}>
                   <div
                     data-clip={clip.id}
                     data-midi="1"
                     data-track={track.id}
-                    className={`clip ${picked ? 'selected' : ''}`}
-                    style={{ left, width: widthPx, background: track.color, pointerEvents: passive ? 'none' : undefined }}
+                    data-remote-select={remote?.id}
+                    className={`clip ${picked ? 'selected' : ''}${remote ? ' remote-selected' : ''}`}
+                    style={{ left, width: widthPx, background: track.color, pointerEvents: passive ? 'none' : undefined, ['--remote' as string]: remote?.color }}
                     onPointerDown={(event) => {
                       if (tool === 'erase') {
                         beginErase(event)
@@ -951,6 +960,7 @@ export function ArrangeView({
                     const widthPx = Math.max(24, pxAtBeat(project, beat + lengthBeats, px) - left)
                     const previewNotes = pattern ? patternToMidiNotes(pattern) : []
                     const picked = store.selectedPatternClipIds.includes(clip.id)
+                    const remote = remoteClipMark(remotes, clip.id)
                     const linked = (project.patternClips ?? []).filter((item) => item.scene == null && item.patternId === clip.patternId).length > 1
                     return (
                       <div key={clip.id} style={{ display: 'contents' }}>
@@ -958,8 +968,9 @@ export function ArrangeView({
                         data-clip={clip.id}
                         data-pattern="1"
                         data-track={track.id}
-                        className={`clip pattern ${picked ? 'selected' : ''}`}
-                        style={{ left, width: widthPx, background: pattern?.color || track.color, pointerEvents: passive ? 'none' : undefined, touchAction: passive ? undefined : 'none' }}
+                        data-remote-select={remote?.id}
+                        className={`clip pattern ${picked ? 'selected' : ''}${remote ? ' remote-selected' : ''}`}
+                        style={{ left, width: widthPx, background: pattern?.color || track.color, pointerEvents: passive ? 'none' : undefined, touchAction: passive ? undefined : 'none', ['--remote' as string]: remote?.color }}
                         onContextMenu={(event) => event.preventDefault()}
                         onDoubleClick={(event) => {
                           event.preventDefault()
@@ -1033,6 +1044,7 @@ export function ArrangeView({
             </div>
           ))}
           {marquee && <div className="marquee" style={marquee} />}
+          <RemoteTimeline peers={remotes} sampleRate={project.sampleRate} px={px} />
           <div className="playhead" data-playhead="arrange" style={{ left: (displayedPlayhead(position, project) / project.sampleRate) * px }} />
         </div>
       </div>
@@ -1176,6 +1188,7 @@ function ClipView({
   tool,
   shift,
   passive,
+  remotes,
   onSplitAt,
   onSplit,
   onErase,
@@ -1188,6 +1201,7 @@ function ClipView({
   tool: string
   shift: number
   passive: boolean
+  remotes: readonly { id: string; color: string; selectedClipIds: readonly string[] }[]
   onSplitAt: (clientX: number) => void
   onSplit: () => void
   onErase: (event: ReactPointerEvent) => void
@@ -1316,6 +1330,7 @@ function ClipView({
 
   const fadeIn = (shown.fadeInSamples / project.sampleRate) * px
   const fadeOut = (shown.fadeOutSamples / project.sampleRate) * px
+  const remote = remoteClipMark(remotes, clip.id)
   return (
     <div style={{ display: 'contents' }}>
     {audioShadow && (
@@ -1328,8 +1343,9 @@ function ClipView({
     <div
       data-clip={clip.id}
       data-track={trackId}
-      className={`clip ${store.selectedClipIds.includes(clip.id) ? 'selected' : ''} ${clip.folder && store.selectedClipId === clip.id ? 'open' : ''}`}
-      style={{ left, width, background: store.project.tracks.find((t) => t.id === trackId)?.color, pointerEvents: passive ? 'none' : undefined }}
+      data-remote-select={remote?.id}
+      className={`clip ${store.selectedClipIds.includes(clip.id) ? 'selected' : ''} ${clip.folder && store.selectedClipId === clip.id ? 'open' : ''}${remote ? ' remote-selected' : ''}`}
+      style={{ left, width, background: store.project.tracks.find((t) => t.id === trackId)?.color, pointerEvents: passive ? 'none' : undefined, ['--remote' as string]: remote?.color }}
       onPointerDown={(event) => {
         if ((event.target as HTMLElement).closest('.take-lane, .edge')) return
         if (tool === 'erase') {

@@ -17,6 +17,7 @@ import {
   type SlotPoints,
 } from '../audio/sample/slot'
 import { descriptor } from '../audio/plugins/catalog'
+import { countInBarsOf } from '../model/time'
 import { uid, type PluginInstance } from '../model/types'
 import { readIdentity } from '../storage/identity'
 import { samplesToBeats } from '../model/time'
@@ -159,6 +160,7 @@ export function SamplePanel({ store, engine, trackId, plugin, vu }: { store: Pro
     try {
       const audio = await captureSlot(capture.source, {
         countIn: store.project.countIn,
+        bars: countInBarsOf(store.project),
         tempo: store.project.tempo,
         signature: store.project.timeSignature,
         maxSamples,

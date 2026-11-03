@@ -1,4 +1,5 @@
 import type { AudioEngine } from '../audio/engine'
+import { FEATURES } from '../features'
 import { heardBeat, midiPerformanceMs } from '../model/midiClock'
 import {
   applyMapped,
@@ -166,7 +167,7 @@ export class MidiHost {
     for (const [trackId, notes] of this.takes) {
       if (!notes.length) continue
       const slot = this.store.sessionSlot
-      if (slot && slot.trackId === trackId) {
+      if (FEATURES.session && slot && slot.trackId === trackId) {
         const ordered = [...notes].sort((a, b) => a.startBeat - b.startBeat || a.pitch - b.pitch)
         this.store.overdubSlot(trackId, slot.scene, ordered, this.store.sessionRecordBeat ?? undefined)
         continue

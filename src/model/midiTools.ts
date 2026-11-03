@@ -517,6 +517,17 @@ export function midiClockBytes(kind: 'start' | 'stop' | 'pulse'): number[] {
   return [0xf8]
 }
 
+/** All sound off, all notes off, and reset controllers on every channel, then stop the clock. */
+export function midiPanicMessages(): number[][] {
+  const messages: number[][] = []
+  for (let channel = 0; channel < 16; channel++) {
+    const status = 0xb0 | channel
+    messages.push([status, 120, 0], [status, 123, 0], [status, 121, 0])
+  }
+  messages.push(midiClockBytes('stop'))
+  return messages
+}
+
 export function clockIntervalMs(tempo: number): number {
   return 60000 / Math.max(1, tempo) / 24
 }

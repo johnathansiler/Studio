@@ -12,6 +12,7 @@ import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { TouchSlider } from './kit/controls'
+import { TrackPresence } from './presenceMarks'
 
 export function MixerView({ store, engine, onTune }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void }) {
   return <MixerBody key={store.project.id} store={store} engine={engine} onTune={onTune} />
@@ -64,6 +65,7 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
             <>
               <div className="strip-top">
                 <StripName name={track.name} color={track.color} />
+                <TrackPresence trackId={track.id} />
                 <MixFlags store={store} trackId={track.id} part="hear" />
               </div>
               <VolumeLane store={store} engine={engine} trackId={track.id} name={track.name} value={track.volume} vertical={false} />
@@ -79,6 +81,7 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
           ) : (
             <>
               <StripName name={track.name} color={track.color} />
+                <TrackPresence trackId={track.id} />
               <div className="strip-tools">
                 <ChannelAutomation store={store} trackId={track.id} />
                 <RouteButton store={store} trackId={track.id} />

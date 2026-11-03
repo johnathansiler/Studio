@@ -120,6 +120,10 @@ class InsertProcessor extends AudioWorkletProcessor {
       else proc?.note?.(pitch, vel)
       return
     }
+    if (data.type === 'reset-all') {
+      for (const proc of this.procs.values()) proc.reset()
+      return
+    }
     if (data.type === 'reset' && typeof data.id === 'string') {
       this.procs.get(data.id)?.reset()
     }

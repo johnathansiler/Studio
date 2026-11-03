@@ -28,6 +28,64 @@ export interface SyncHello {
   lamport: number
   digest: string
   seen: Record<string, number>
+  /** When this browser last wrote its room copy. Older clients omit it. */
+  savedAt?: number
+  /** Role stored with that copy. The live roster role is the fallback. */
+  role?: 'host' | 'guest'
+}
+
+/** One browser's saved room, compared with the hello digest. */
+export interface RoomClaim {
+  role: 'host' | 'guest'
+  savedAt: number
+  lamport: number
+  actor: string
+  digest: string
+}
+
+export function claimFromHello(hello: SyncHello, fallbackRole: 'host' | 'guest'): RoomClaim {
+  const role = hello.role === 'host' || hello.role === 'guest' ? hello.role : fallbackRole
+  return {
+    role,
+    savedAt: Number(hello.savedAt) || 0,
+    lamport: Number(hello.lamport) || 0,
+    actor: hello.actor,
+    digest: hello.digest,
+  }
+}
+
+function claimRank(claim: RoomClaim): [number, number, number, string] {
+  return [claim.role === 'host' ? 1 : 0, Number.isFinite(claim.savedAt) ? claim.savedAt : 0, Number.isFinite(claim.lamport) ? claim.lamport : 0, claim.actor || '']
+}
+
+/** Positive when `left` should seed the room. Host outranks every guest. Newest save wins inside that group. */
+export function compareRoomClaims(left: RoomClaim, right: RoomClaim): number {
+  const a = claimRank(left)
+  const b = claimRank(right)
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return (a[i] as number) > (b[i] as number) ? 1 : -1
+  }
+  if (a[3] === b[3]) return 0
+  return a[3] > b[3] ? 1 : -1
+}
+
+/** The copy that rebuilds a room after the server forgets it. */
+export function pickRoomClaim<T extends RoomClaim>(claims: T[]): T | null {
+  let best: T | null = null
+  for (const claim of claims) {
+    if (!best || compareRoomClaims(claim, best) > 0) best = claim
+  }
+  return best
+}
+
+/**
+ * Load the IndexedDB room copy over the open project when this tab has nothing
+ * newer. A matching digest keeps the open project so its audio buffers stay.
+ */
+export function adoptSavedRoom(input: { openDigest: string; openLamport: number; openUntouched: boolean; savedDigest: string; savedLamport: number }): boolean {
+  if (!input.savedDigest || input.openDigest === input.savedDigest) return false
+  if (input.openUntouched) return true
+  return input.savedLamport > input.openLamport
 }
 
 interface Schema {
@@ -180,6 +238,140 @@ export function syncMessageOk(msg: { t?: string; ops?: unknown; project?: unknow
   if (msg.t === 'sync-hello') return text.length <= 16_000
   if (msg.t === 'sync-ops') return text.length <= 96_000 && Array.isArray(msg.ops) && msg.ops.length <= 80
   return text.length <= 400_000
+}
+
+/** What a share link grants after the host admits the guest. Hosts are always Edit. */
+export type CollabAccess = 'view' | 'comment' | 'edit'
+
+export const ACCESS_ROLES: CollabAccess[] = ['view', 'comment', 'edit']
+
+export const ACCESS_COPY: Record<CollabAccess, { label: string; hint: string }> = {
+  view: { label: 'View', hint: 'Listen only.' },
+  comment: { label: 'Comment', hint: 'Add timeline comments and markers.' },
+  edit: { label: 'Edit', hint: 'Full edit.' },
+}
+
+export interface TimelineComment {
+  id: string
+  from: string
+  name: string
+  text: string
+  /** Quarter notes from the start of the song. */
+  beat: number
+  at: number
+}
+
+export function parseCollabAccess(value: unknown): CollabAccess | null {
+  const text = String(value ?? '').trim().toLowerCase()
+  if (text === 'view' || text === 'listen') return 'view'
+  if (text === 'comment' || text === 'comments') return 'comment'
+  if (text === 'edit' || text === 'full') return 'edit'
+  return null
+}
+
+/** Hosts edit. A guest with no invite is View. */
+export function collabAccessFor(seat: 'host' | 'guest', access: unknown): CollabAccess {
+  if (seat === 'host') return 'edit'
+  return parseCollabAccess(access) ?? 'view'
+}
+
+export function mayWriteProject(access: CollabAccess): boolean {
+  return access === 'edit'
+}
+
+export function mayComment(access: CollabAccess): boolean {
+  return access === 'comment' || access === 'edit'
+}
+
+/** View and Comment guests follow the host project. Edit guests change it. */
+export function locksProject(seat: 'host' | 'guest' | undefined, access: CollabAccess): boolean {
+  return seat === 'guest' && !mayWriteProject(access)
+}
+
+/** Comment markers live under `comments/`. Everything else is a project edit. */
+export function isCommentOp(op: { p?: unknown } | null | undefined): boolean {
+  const path = typeof op?.p === 'string' ? op.p : ''
+  return path === 'comments' || path.startsWith('comments/')
+}
+
+/**
+ * Edit may send any musical op.
+ * Comment may send only comment paths.
+ * View may send none.
+ */
+export function opsAllowed(access: CollabAccess, ops: Array<{ p?: unknown }>): boolean {
+  if (mayWriteProject(access)) return true
+  if (!ops.length || !mayComment(access)) return false
+  return ops.every((op) => isCommentOp(op))
+}
+
+/** Server and client gate for project traffic. Sync hello is a read, so every admitted seat may send it. */
+export function relayProjectTraffic(access: CollabAccess, type: string, ops?: unknown): boolean {
+  if (type === 'sync-hello') return true
+  if (type === 'sync-ops') return opsAllowed(access, asOps(ops))
+  if (type === 'sync-checkpoint' || type === 'project' || type === 'project-asset') return mayWriteProject(access)
+  if (type === 'comment') return mayComment(access)
+  return false
+}
+
+/** Awareness is not a project edit. View, Comment, and Edit all stay on screen. */
+export function mayRelayAwareness(access: CollabAccess): boolean {
+  return access === 'view' || access === 'comment' || access === 'edit'
+}
+
+export function accessForInvite(invites: Map<string, CollabAccess> | Record<string, CollabAccess | undefined>, token: string): CollabAccess {
+  const key = token.replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
+  if (!key) return 'view'
+  const role = invites instanceof Map ? invites.get(key) : invites[key]
+  return parseCollabAccess(role) ?? 'view'
+}
+
+/** `/?session=CODE&invite=TOKEN&role=comment`. The token is what the server trusts. */
+export function roleShareUrl(origin: string, code: string, token: string, role: CollabAccess): string {
+  const params = new URLSearchParams({
+    session: code.toUpperCase().replace(/[^A-Z0-9]/g, ''),
+    invite: token.replace(/[^A-Za-z0-9]/g, '').slice(0, 16),
+    role,
+  })
+  return `${origin.replace(/\/$/, '')}/?${params.toString()}`
+}
+
+export function readInviteToken(search: string): string {
+  const query = search.includes('?') ? search.slice(search.indexOf('?')) : search.startsWith('?') ? search : `?${search}`
+  return (new URLSearchParams(query).get('invite') || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
+}
+
+export function sanitizeTimelineComment(input: {
+  text?: unknown
+  beat?: unknown
+  from: string
+  name: string
+  at?: number
+  id?: string
+}): TimelineComment | null {
+  const text = String(input.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 240)
+  const beat = Number(input.beat)
+  if (!text || !Number.isFinite(beat) || beat < 0 || beat > 1_000_000) return null
+  const id = String(input.id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40)
+  return {
+    id: id || `c_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    from: String(input.from || '').slice(0, 80),
+    name: String(input.name || 'Guest').slice(0, 40) || 'Guest',
+    text,
+    beat: Math.round(beat * 1000) / 1000,
+    at: Number.isFinite(input.at) ? Number(input.at) : Date.now(),
+  }
+}
+
+export function isTimelineComment(value: unknown): value is TimelineComment {
+  if (!value || typeof value !== 'object') return false
+  const item = value as TimelineComment
+  return typeof item.id === 'string' && item.id.length > 0 && typeof item.text === 'string' && item.text.length > 0 && typeof item.name === 'string' && Number.isFinite(item.beat)
+}
+
+function asOps(ops: unknown): Array<{ p?: unknown }> {
+  if (!Array.isArray(ops)) return []
+  return ops.filter((op) => op && typeof op === 'object') as Array<{ p?: unknown }>
 }
 
 export function setPath(root: object, path: string, value: unknown) {
