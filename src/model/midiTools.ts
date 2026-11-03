@@ -567,14 +567,10 @@ export function tracksForPort(tracks: Track[], portId: string): Track[] {
 }
 
 export function midiDestinations(tracks: Track[], portId: string, selectedId: string | null, recording: boolean): { play: string[]; record: string[] } {
-  const matched = tracksForPort(tracks, portId)
-  if (matched.length) {
-    const ids = matched.map((track) => track.id)
-    return { play: ids, record: recording ? ids : [] }
-  }
   const selected = tracks.find((track) => track.id === selectedId && track.type === 'midi')
-  const fallback = selected || tracks.find((track) => track.type === 'midi')
-  return { play: fallback ? [fallback.id] : [], record: [] }
+  const matched = tracksForPort(tracks, portId)
+  const record = recording ? (matched.length ? matched.map((track) => track.id) : selected?.armed ? [selected.id] : []) : []
+  return { play: selected ? [selected.id] : [], record }
 }
 
 export function planAudioRoutes(tracks: Track[]): AudioRoute[] {

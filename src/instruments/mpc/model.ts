@@ -81,24 +81,45 @@ export function expandChord<T extends { pitch: number }>(notes: T[], pads: { pit
 export interface RepeatChoice {
   id: string
   label: string
+  /** Short name shown beside the pads: 1/4, 1/4T, and so on. */
+  short: string
   rate: RepeatRate
   triplet: boolean
 }
 
+/** Straight then triplet, slow to fast. The arrows step through this list. */
 export const REPEAT_CHOICES: RepeatChoice[] = [
-  { id: '1/4', label: 'Quarter', rate: '1/4', triplet: false },
-  { id: '1/8', label: 'Eighth', rate: '1/8', triplet: false },
-  { id: '1/16', label: 'Sixteenth', rate: '1/16', triplet: false },
-  { id: '1/32', label: 'Thirty-second', rate: '1/32', triplet: false },
-  { id: '1/4t', label: 'Quarter triplet', rate: '1/4', triplet: true },
-  { id: '1/8t', label: 'Eighth triplet', rate: '1/8', triplet: true },
-  { id: '1/16t', label: 'Sixteenth triplet', rate: '1/16', triplet: true },
-  { id: '1/32t', label: 'Thirty-second triplet', rate: '1/32', triplet: true },
+  { id: '1/4', label: 'Quarter', short: '1/4', rate: '1/4', triplet: false },
+  { id: '1/4t', label: 'Quarter triplet', short: '1/4T', rate: '1/4', triplet: true },
+  { id: '1/8', label: 'Eighth', short: '1/8', rate: '1/8', triplet: false },
+  { id: '1/8t', label: 'Eighth triplet', short: '1/8T', rate: '1/8', triplet: true },
+  { id: '1/16', label: 'Sixteenth', short: '1/16', rate: '1/16', triplet: false },
+  { id: '1/16t', label: 'Sixteenth triplet', short: '1/16T', rate: '1/16', triplet: true },
+  { id: '1/32', label: 'Thirty-second', short: '1/32', rate: '1/32', triplet: false },
+  { id: '1/32t', label: 'Thirty-second triplet', short: '1/32T', rate: '1/32', triplet: true },
 ]
 
 export function repeatSetting(id: string): RepeatChoice & { beats: number } {
-  const found = REPEAT_CHOICES.find((item) => item.id === id) ?? REPEAT_CHOICES[2]
+  const found = REPEAT_CHOICES.find((item) => item.id === id) ?? REPEAT_CHOICES.find((item) => item.id === '1/16') ?? REPEAT_CHOICES[0]
   return { ...found, beats: repeatIntervalBeats(found.rate, found.triplet) }
+}
+
+/** Step the Note Repeat rate. The held pad keeps sounding; the next hit uses the new rate. */
+export function stepRepeatRate(current: string, direction: -1 | 1): string {
+  const index = REPEAT_CHOICES.findIndex((item) => item.id === current)
+  const at = index < 0 ? REPEAT_CHOICES.findIndex((item) => item.id === '1/16') : index
+  const count = REPEAT_CHOICES.length
+  return REPEAT_CHOICES[(at + direction + count) % count].id
+}
+
+/** A key plays the pad with that pitch, or the pad this many steps above kick. */
+export function padPitchForKey(bank: { pitch: number }[], pitch: number): number {
+  const rounded = Math.max(0, Math.min(127, Math.round(pitch)))
+  const exact = bank.find((pad) => pad.pitch === rounded)
+  if (exact) return exact.pitch
+  if (!bank.length) return rounded
+  const index = ((rounded - 36) % bank.length + bank.length) % bank.length
+  return bank[index].pitch
 }
 
 /** Pressure scales the held velocity. Off keeps the velocity the pad was struck with. */

@@ -11,6 +11,8 @@ export interface RepeatClock {
   originBeat: number
   tempo: number
   sampleRate: number
+  /** Transport is stopped. Hits start at the press and step at the rate. */
+  free?: boolean
 }
 
 export interface RepeatHit {
@@ -28,6 +30,8 @@ export interface ArmRepeat {
   fromBeat: number
   interval: number
   swing: number
+  /** Start on this press. Playing transport leaves this off and locks to the song grid. */
+  free?: boolean
 }
 
 interface VelocityMark {
@@ -44,6 +48,8 @@ interface RepeatPad {
   velocities: VelocityMark[]
   nextPlay: number
   queued: RepeatHit[]
+  /** Stopped transport. The phase starts at fromBeat instead of the song grid. */
+  free: boolean
 }
 
 /**
@@ -116,6 +122,25 @@ function velocityAt(pad: RepeatPad, beat: number): number {
   return velocity
 }
 
+function phaseBeat(pad: RepeatPad, index: number): number {
+  const grid = swungGridBeat(index, pad.interval, pad.swing)
+  return pad.free ? pad.fromBeat + grid : grid
+}
+
+/** Next index whose beat is still ahead of `beatNow`. Free clocks count from the press. */
+function nextIndex(pad: RepeatPad, beatNow: number): number {
+  if (!(pad.interval > 0)) return 0
+  if (pad.free) {
+    let index = 0
+    if (pad.interval > 0 && beatNow > pad.fromBeat) {
+      index = Math.max(0, Math.floor((beatNow - pad.fromBeat) / pad.interval) - 1)
+    }
+    while (index < 1_000_000 && phaseBeat(pad, index) < beatNow - 1e-9) index += 1
+    return index
+  }
+  return firstGridIndex(Math.max(pad.fromBeat, beatNow), pad.interval, pad.swing)
+}
+
 function makeHit(pad: RepeatPad, beat: number, clock: RepeatClock): RepeatHit {
   const when = contextAt(clock, beat)
   return {
@@ -143,6 +168,7 @@ export class BeatRepeat {
       return
     }
     const interval = input.interval > 0 ? input.interval : 0
+    const free = input.free === true
     this.pads.set(input.pitch, {
       pitch: input.pitch,
       fromBeat: input.fromBeat,
@@ -150,8 +176,9 @@ export class BeatRepeat {
       swing: input.swing,
       untilBeat: null,
       velocities: [{ beat: input.fromBeat, velocity: input.velocity }],
-      nextPlay: firstGridIndex(input.fromBeat, interval, input.swing),
+      nextPlay: free ? 0 : firstGridIndex(input.fromBeat, interval, input.swing),
       queued: [],
+      free,
     })
   }
 
@@ -168,8 +195,7 @@ export class BeatRepeat {
       if (pad.untilBeat != null) continue
       pad.interval = interval > 0 ? interval : pad.interval
       pad.swing = swing
-      const start = Math.max(pad.fromBeat, beatNow)
-      pad.nextPlay = firstGridIndex(start, pad.interval, pad.swing)
+      pad.nextPlay = nextIndex(pad, Math.max(pad.fromBeat, beatNow))
       pad.queued = pad.queued.filter((hit) => hit.when <= now + 1e-4)
     }
   }
@@ -204,26 +230,32 @@ export class BeatRepeat {
   take(clock: RepeatClock, now: number, horizon: number): { play: RepeatHit[]; record: RepeatHit[]; realigned: boolean } {
     const play: RepeatHit[] = []
     const record: RepeatHit[] = []
-    const key = `${Math.round(clock.originContext * 1e6)}|${Math.round(clock.originBeat * 1e6)}|${clock.tempo}|${clock.sampleRate}`
+    const free = clock.free === true
+    const key = `${Math.round(clock.originContext * 1e6)}|${Math.round(clock.originBeat * 1e6)}|${clock.tempo}|${clock.sampleRate}|${free ? 1 : 0}`
     const realigned = this.originKey !== '' && key !== this.originKey
     this.originKey = key
-    const late = 128 / Math.max(1, clock.sampleRate)
+    const late = free ? 0.08 : 128 / Math.max(1, clock.sampleRate)
     if (realigned) {
       const beatNow = beatAt(clock, now)
       for (const pad of this.pads.values()) {
+        pad.free = free
         pad.queued = pad.queued.filter((hit) => hit.when <= now)
-        if (pad.untilBeat == null) pad.nextPlay = firstGridIndex(Math.max(pad.fromBeat, beatNow), pad.interval, pad.swing)
+        if (pad.untilBeat == null) pad.nextPlay = nextIndex(pad, Math.max(pad.fromBeat, beatNow))
       }
     }
     for (const pad of this.pads.values()) {
       if (!(pad.interval > 0)) continue
       while (pad.nextPlay < 1_000_000) {
-        const beat = swungGridBeat(pad.nextPlay, pad.interval, pad.swing)
+        const beat = phaseBeat(pad, pad.nextPlay)
         if (pad.untilBeat != null && beat >= pad.untilBeat - 1e-9) break
         const when = contextAt(clock, beat)
         if (when >= horizon) break
         if (when >= now - late) {
           const hit = makeHit(pad, beat, clock)
+          if (free && hit.when < now) {
+            hit.when = now
+            hit.frame = hitFrame(now, clock.sampleRate)
+          }
           play.push(hit)
           pad.queued.push(hit)
         }
@@ -239,7 +271,7 @@ export class BeatRepeat {
     }
     for (const [pitch, pad] of this.pads) {
       if (pad.untilBeat == null) continue
-      const upcoming = swungGridBeat(pad.nextPlay, pad.interval, pad.swing)
+      const upcoming = phaseBeat(pad, pad.nextPlay)
       if (upcoming >= pad.untilBeat - 1e-9 && !pad.queued.length) this.pads.delete(pitch)
     }
     return { play, record, realigned }

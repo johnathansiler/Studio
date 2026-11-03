@@ -68,10 +68,10 @@ export function claimComputerKey(input: {
   return 'note'
 }
 
-/** The instrument the computer keyboard plays: the selected MIDI track, otherwise an armed one. */
+/** The instrument the computer keyboard plays. A selected track wins, and a selected audio track does not leak onto another instrument. */
 export function keyboardTarget(tracks: { id: string; type: string; armed: boolean }[], selectedId: string | null): string | null {
   const selected = tracks.find((track) => track.id === selectedId)
-  if (selected?.type === 'midi') return selected.id
+  if (selected) return selected.type === 'midi' ? selected.id : null
   const armed = tracks.find((track) => track.type === 'midi' && track.armed)
   if (armed) return armed.id
   return tracks.find((track) => track.type === 'midi')?.id ?? null

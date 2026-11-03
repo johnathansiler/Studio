@@ -24,14 +24,14 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const css = ['src/styles.css', 'src/ui/premium.css'].map((file) => readFileSync(resolve(root, file), 'utf8')).join('\n')
 
 describe('computer keyboard', () => {
-  it('plays the selected or armed instrument and ignores a second press', () => {
+  it('plays only the selected instrument and ignores a second press', () => {
     const tracks = [
       { id: 'audio', type: 'audio' as const, armed: true },
       { id: 'keys', type: 'midi' as const, armed: false },
       { id: 'bass', type: 'midi' as const, armed: true },
     ]
     expect(keyboardTarget(tracks, 'keys')).toBe('keys')
-    expect(keyboardTarget(tracks, 'audio')).toBe('bass')
+    expect(keyboardTarget(tracks, 'audio')).toBeNull()
     expect(keyboardTarget([{ id: 'pad', type: 'midi', armed: false }], null)).toBe('pad')
     expect(keyboardPitch(60, 0)).toBe(60)
     expect(keyboardPitch(60, 1)).toBe(72)

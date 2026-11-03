@@ -16,7 +16,7 @@ import { beatsToSamples, countInBarsOf, samplesPerBeatUnit, samplesToBeats } fro
 import { matchBufferRate, PatchHost, renderPatchSpan } from '../instruments/patch'
 import { performancesOn, routeScaler } from '../instruments/scaler/model'
 import { chokeTargets, normalizePadKit, padRegion } from '../model/padMachine'
-import { hitRoute } from '../instruments/mpc/model'
+import { hitRoute, padPitchForKey } from '../instruments/mpc/model'
 import { preparePadPcm } from '../instruments/mpc/render'
 import { RackHost } from './rack/host'
 import { renderNotes } from './rack/dsp'
@@ -111,8 +111,11 @@ export class AudioEngine {
   private masterStrip: StripNodes | null = null
   /** Unrouted drum hits. Solo closes this gain; the master still passes what remains. */
   private patternStrip: StripNodes | null = null
-  /** Live drums and keys that are not already inside a track strip. */
+  /** Live drums and keys. Parked into the sounding track so they cannot skip the fader. */
   private liveBus: GainNode | null = null
+  private liveParked: AudioNode | null = null
+  /** Post master-fader meter. The strip analyser is before this fader. */
+  private masterMeter: AnalyserNode | null = null
   private localBus: GainNode | null = null
   private remoteBus: GainNode | null = null
   private monitorDelay: DelayNode | null = null
@@ -345,16 +348,19 @@ export class AudioEngine {
     if (!this.ctx) {
       this.ctx = openContext(48000)
       this.buildMaster()
+      if (this.project) this.sync(this.project, this.assetOf)
     }
     if (this.ctx.state !== 'running') void this.ctx.resume().catch(() => undefined)
     return this.ctx
   }
 
   async resume(preferredRate = 48000) {
+    const fresh = !this.ctx
     if (!this.ctx) {
       this.ctx = openContext(preferredRate)
       this.buildMaster()
     }
+    if (fresh && this.project) this.sync(this.project, this.assetOf)
     if (this.ctx.state !== 'running') {
       try {
         await this.ctx.resume()
@@ -441,8 +447,12 @@ export class AudioEngine {
 
     this.localBus.connect(this.masterStrip.input)
     this.masterStrip.output.connect(this.masterGain)
-    this.masterGain.connect(this.cueDest)
-    this.masterGain.connect(this.monitorDelay)
+    this.masterMeter = ctx.createAnalyser()
+    this.masterMeter.fftSize = 256
+    this.masterMeter.smoothingTimeConstant = 0.35
+    this.masterGain.connect(this.masterMeter)
+    this.masterMeter.connect(this.cueDest)
+    this.masterMeter.connect(this.monitorDelay)
     this.monitorDelay.connect(this.speakerGain)
     this.remoteBus.connect(this.remoteDelay)
     this.remoteDelay.connect(this.speakerGain)
@@ -571,7 +581,7 @@ export class AudioEngine {
     const end = Math.max(sample + this.sampleRate, arrangementEndSample(project))
     const anySolo = project.tracks.some((track) => track.solo)
     if (this.patternStrip) this.patternStrip.mute.gain.setTargetAtTime(anySolo ? 0 : 1, now, 0.01)
-    if (this.liveBus) this.liveBus.gain.setTargetAtTime(anySolo ? 0 : 1, now, 0.01)
+    if (this.liveBus && !this.liveParked) this.liveBus.gain.setTargetAtTime(anySolo ? 0 : 1, now, 0.01)
     for (const track of project.tracks) {
       const strip = this.strips.get(track.id)
       if (!strip) continue
@@ -588,6 +598,7 @@ export class AudioEngine {
     const originSample = this.playing ? this.playOriginSample : sample
     this.rackHost.setTransport(project, originTime, originBeat)
     this.rack.setPerformanceClock(this.playing, originTime, originSample, project.tempo)
+    this.parkLive(this.padRouteId || this.liveTrackId)
   }
 
   private scheduleControl(param: AudioParam, points: { beat: number; value: number }[] | undefined, fallback: number, sample: number, now: number, end: number) {
@@ -1136,7 +1147,11 @@ export class AudioEngine {
     const tracks: Record<string, number> = {}
     for (const [id, strip] of this.strips) tracks[id] = analyserRms(strip.analyser, this.meterScratch)
     return {
-      master: this.masterStrip ? analyserRms(this.masterStrip.analyser, this.meterScratch) : 0,
+      master: this.masterMeter
+        ? analyserRms(this.masterMeter, this.meterScratch)
+        : this.masterStrip
+          ? analyserRms(this.masterStrip.analyser, this.meterScratch)
+          : 0,
       input: this.inputAnalyser ? analyserRms(this.inputAnalyser, this.meterScratch) : 0,
       talk: this.talkAnalyser ? analyserRms(this.talkAnalyser, this.meterScratch) : 0,
       tracks,
@@ -1337,8 +1352,10 @@ export class AudioEngine {
     this.cueReturnGain = null
     this.cueReturnSrc = null
     this.masterStrip = null
+    this.masterMeter = null
     this.patternStrip = null
     this.liveBus = null
+    this.liveParked = null
     this.localMicGain = null
     this.localMicSrc = null
     this.monitorSplit = null
@@ -2512,7 +2529,7 @@ export class AudioEngine {
         const span = beatSpanSamples(project, clip.startBeat + (hit.startBeat - range.from), hit.durationBeats)
         if (span.start < timelineStart || span.start >= timelineEnd) continue
         const when = ctxTime + (span.start - timelineStart) / this.sampleRate
-        const routed = dest ? this.strips.get(dest) : (ctx === this.ctx ? this.patternStrip : this.masterStrip)
+        const routed = dest ? this.strips.get(dest) : this.ownedStrip(ctx)
         const liveStrip = ctx === this.ctx && hit.output ? this.strips.get(hit.output) : undefined
         const bus = liveStrip || routed || strip
         if (!bus) continue
@@ -2900,9 +2917,41 @@ export class AudioEngine {
     }
   }
 
-  /** The open Pads faceplate. Null returns hits to the resident drum path. */
+  /** The open Pads faceplate. Null returns hits to the selected track. */
   setPadRoute(trackId: string | null) {
     this.padRouteId = trackId
+    this.parkLive(trackId || this.liveTrackId)
+  }
+
+  /** Keep live keys and drums inside the selected track's fader, mute, and inserts. */
+  followTrack(trackId: string | null) {
+    if (this.padRouteId) {
+      this.parkLive(this.padRouteId)
+      return
+    }
+    if (trackId && this.project?.tracks.some((track) => track.id === trackId)) this.liveTrackId = trackId
+    else if (!trackId) this.liveTrackId = null
+    this.parkLive(this.liveTrackId)
+  }
+
+  private ownedStrip(ctx: BaseAudioContext): StripNodes | null {
+    const id = this.padRouteId || this.liveTrackId || this.project?.tracks.find((track) => this.strips.has(track.id))?.id
+    const strip = id ? this.strips.get(id) : undefined
+    if (strip) return strip
+    return ctx === this.ctx ? this.patternStrip : this.masterStrip
+  }
+
+  /** Move the shared live bus onto a track input. Sources already plugged into the bus follow. */
+  private parkLive(trackId?: string | null) {
+    const bus = this.liveBus
+    if (!bus) return
+    const id = trackId || this.padRouteId || this.liveTrackId || this.project?.tracks.find((track) => this.strips.has(track.id))?.id || null
+    const dest = id ? this.strips.get(id)?.input ?? null : null
+    if (!dest || dest === this.liveParked) return
+    try { bus.disconnect() } catch { /* the bus was only connected inside buildMaster */ }
+    bus.connect(dest)
+    this.liveParked = dest
+    bus.gain.value = 1
   }
 
   private playLivePad(pitch: number, velocity: number, sample: Float32Array | null, color?: PadColor, when?: number): boolean {
@@ -3091,7 +3140,8 @@ export class AudioEngine {
     if (!this.drumTable.length) this.drumTable = residentDrums(ctx.sampleRate)
     const index = this.drumTable.findIndex((drum) => drum.pitch === pitch)
     const strip = this.liveTrackId ? this.strips.get(this.liveTrackId) : undefined
-    const dest = strip?.input ?? this.speakerGain
+    this.parkLive(this.liveTrackId)
+    const dest = strip?.input ?? this.liveBus
     if (index >= 0 && dest && this.playResident(index, velocity, color, at, dest)) return
     this.liveNoteOn(pitch, velocity, index, repeatEverySamples, color)
   }
@@ -3114,7 +3164,10 @@ export class AudioEngine {
     const peak = drumLevel(velocity)
     src.connect(filter)
     filter.connect(gain)
-    gain.connect(this.liveBus ?? this.speakerGain)
+    this.parkLive(this.padRouteId || this.liveTrackId)
+    const into = this.liveBus ?? this.masterStrip?.input
+    if (!into) return
+    gain.connect(into)
     const decay = color?.decay == null ? 1 : Math.max(0.05, color.decay)
     const startAt = when ?? ctx.currentTime
     gain.gain.setValueAtTime(0.0001, startAt)
@@ -3139,7 +3192,7 @@ export class AudioEngine {
   private playResident(index: number, velocity: number, color?: PadColor, when?: number, dest?: AudioNode) {
     const ctx = this.ctx
     const buffer = this.drumBuffers[index]
-    const out = dest ?? this.liveBus ?? this.speakerGain
+    const out = dest ?? this.liveBus
     if (!ctx || !buffer || !out) return false
     const src = ctx.createBufferSource()
     const gain = ctx.createGain()
@@ -3176,6 +3229,15 @@ export class AudioEngine {
     }
     if (samplerInsert(track)) {
       this.previewRack(trackId, pitch, false, true, velocity)
+      return
+    }
+    if (track?.instrument === 'pads') {
+      const strip = this.strips.get(trackId)
+      const kit = normalizePadKit(track.padKit)
+      const bank = kit.banks[Math.min(kit.banks.length - 1, Math.max(0, kit.activeBank || 0))] ?? []
+      const played = padPitchForKey(bank, pitch)
+      if (!strip || !this.acceptLive(trackId, played, when)) return
+      this.playPadNote(ctx, strip, track, { pitch: played, velocity, tune: fine / 100 }, when, undefined, null)
       return
     }
     if (track?.instrument === 'drum-machine') {
@@ -3346,7 +3408,8 @@ export class AudioEngine {
     if (!this.drumTable.length) this.drumTable = residentDrums(ctx.sampleRate)
     const index = this.drumTable.findIndex((drum) => drum.pitch === pitch)
     const strip = this.liveTrackId ? this.strips.get(this.liveTrackId) : undefined
-    const dest = strip?.input ?? this.speakerGain ?? undefined
+    this.parkLive(this.padRouteId || this.liveTrackId)
+    const dest = strip?.input ?? this.liveBus ?? undefined
     if (index >= 0 && dest && this.playResident(index, level, color, when, dest)) return
     this.warmNote(pitch, level, color?.tune || 0, when)
   }

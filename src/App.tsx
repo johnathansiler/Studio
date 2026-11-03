@@ -111,8 +111,14 @@ export function App() {
   const [{ store, engine, session }] = useState(createBundle)
 
   useEffect(() => {
+    const hook = window as unknown as {
+      __cueharbor?: { engine: AudioEngine; store: ProjectStore }
+      __cueharborPlayhead?: number
+      __cueharborStatus?: string
+      __cueharborRate?: number
+    }
+    hook.__cueharbor = { engine, store }
     const id = window.setInterval(() => {
-      const hook = window as unknown as { __cueharborPlayhead?: number; __cueharborStatus?: string; __cueharborRate?: number }
       hook.__cueharborPlayhead = engine.currentTimelineSample()
       hook.__cueharborStatus = engine.status
       hook.__cueharborRate = engine.sampleRate
@@ -381,8 +387,10 @@ export function App() {
       setJoinOpen(false)
     }
     engine.sync(store.project, (id) => store.buffers.get(id))
+    engine.followTrack(store.selectedTrackId)
     const unsub = store.subscribe(() => {
       engine.sync(store.project, (id) => store.buffers.get(id))
+      engine.followTrack(store.selectedTrackId)
       engine.setLaunches(store.launched)
       engine.setLaunchAt(store.launchAt)
       engine.setLaunchGen(store.launchGen)

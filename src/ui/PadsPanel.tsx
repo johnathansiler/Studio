@@ -7,7 +7,7 @@ import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { countInBarsOf, countInCaption } from '../model/time'
 import { projectSampleBeat } from '../model/tempoMap'
 import { BANKS, sixteenLevels, type LevelSpread } from '../model/padMachine'
-import { REPEAT_CHOICES, VELOCITY_CURVES, quantizeGridBeats, repeatSetting, stepOn, stepVelocity } from '../instruments/mpc/model'
+import { REPEAT_CHOICES, VELOCITY_CURVES, quantizeGridBeats, repeatSetting, stepOn, stepRepeatRate, stepVelocity } from '../instruments/mpc/model'
 import { emptyTap, pushTap } from '../model/tap'
 import type { ProjectStore } from '../state/store'
 import { SOUND_MIME, captureSlot, micChannel, openInputCapture, rememberedSlotInput } from '../audio/sample/slot'
@@ -49,6 +49,7 @@ export function PadsPanel({
   const [selected, setSelected] = useState(0)
   const [levels, setLevels] = useState<LevelSpread | ''>('')
   const [repeatOn, setRepeatOn] = useState(false)
+  const [repeatHeld, setRepeatHeld] = useState(false)
   const [eraseOn, setEraseOn] = useState(false)
   const [recordMode, setRecordMode] = useState<'overdub' | 'replace'>('overdub')
   const [stepPick, setStepPick] = useState(0)
@@ -63,7 +64,6 @@ export function PadsPanel({
   const sounds = useRef<SoundEntry[]>([])
   const selectedPad = pads[selected] ?? pads[0]
   const recording = status === 'recording' || status === 'counting-in'
-  const tool = recording ? 'Record' : eraseOn ? 'Erase' : repeatOn ? 'Repeat' : levels ? '16 Levels' : 'Play'
 
   if (!performer.current) {
     performer.current = new Performer(
@@ -85,9 +85,11 @@ export function PadsPanel({
     )
   }
   const play = performer.current
+  const repeatEngaged = repeatOn || repeatHeld
+  const tool = recording ? 'Record' : eraseOn ? 'Erase' : repeatEngaged ? 'Repeat' : levels ? '16 Levels' : 'Play'
   const repeat = repeatSetting(kit.repeatRate || '1/16')
-  play.setGrid(repeatOn ? repeat.rate : null, repeat.triplet)
-  play.setEngaged(repeatOn)
+  play.setGrid(repeatEngaged ? repeat.rate : null, repeat.triplet)
+  play.setEngaged(repeatEngaged)
   play.setQuantize(0)
   play.setTempo(kit.syncTempo === false && kit.localBpm > 0 ? kit.localBpm : null)
   play.setDeck({
@@ -376,6 +378,26 @@ export function PadsPanel({
     }
   }
 
+  function stepRate(direction: -1 | 1) {
+    const next = stepRepeatRate(kit.repeatRate || '1/16', direction)
+    const setting = repeatSetting(next)
+    if (repeatOn || repeatHeld) play.setGrid(setting.rate, setting.triplet)
+    store.patchTrackKit(trackId, { repeatRate: next })
+  }
+
+  function holdRepeat(event: ReactPointerEvent<HTMLButtonElement>) {
+    event.preventDefault()
+    event.stopPropagation()
+    try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* the pointer already ended */ }
+    setRepeatHeld(true)
+  }
+
+  function releaseRepeat(event: ReactPointerEvent<HTMLButtonElement>) {
+    event.preventDefault()
+    event.stopPropagation()
+    setRepeatHeld(false)
+  }
+
   function tapTempo() {
     const result = pushTap(taps.current, performance.now(), 'pointer')
     taps.current = result.memory
@@ -494,6 +516,43 @@ export function PadsPanel({
                   </button>
                 )
               })}
+            </div>
+            <div className="note-repeat-dock">
+              <button
+                type="button"
+                className={`note-repeat-hold hw-key${repeatEngaged ? ' on' : ''}`}
+                aria-pressed={repeatEngaged}
+                aria-label="Note Repeat"
+                title="Hold Note Repeat. Pads retrigger at this rate while your finger is down."
+                onPointerDown={holdRepeat}
+                onPointerUp={releaseRepeat}
+                onPointerCancel={releaseRepeat}
+              >
+                Note Repeat
+              </button>
+              <div className="note-repeat-rate" role="group" aria-label="Note Repeat rate">
+                <button
+                  type="button"
+                  className="hw-key"
+                  aria-label="Previous rate"
+                  title="Previous Note Repeat rate."
+                  onPointerDown={(event) => { event.preventDefault(); event.stopPropagation() }}
+                  onPointerUp={(event) => { event.preventDefault(); event.stopPropagation(); stepRate(-1) }}
+                >
+                  ←
+                </button>
+                <strong aria-live="polite">{repeat.short}</strong>
+                <button
+                  type="button"
+                  className="hw-key"
+                  aria-label="Next rate"
+                  title="Next Note Repeat rate."
+                  onPointerDown={(event) => { event.preventDefault(); event.stopPropagation() }}
+                  onPointerUp={(event) => { event.preventDefault(); event.stopPropagation(); stepRate(1) }}
+                >
+                  →
+                </button>
+              </div>
             </div>
           </div>
         </section>
