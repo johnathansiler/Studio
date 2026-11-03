@@ -97,6 +97,7 @@ function person(patch: Partial<RemotePresence> & Pick<RemotePresence, 'id' | 'na
     trackId: 'drums',
     playing: true,
     recording: true,
+    access: 'edit',
     seenAt: 0,
     ...patch,
   }
@@ -139,6 +140,27 @@ describe('awareness relay', () => {
       recording: true,
     })
     expect(relay?.color).not.toBe('#000000')
+    expect(relay?.access).toBe('edit')
+    const viewer = relayAware('view-id', '  Bea  ', {
+      cursorSample: 24000,
+      trackId: 'drums',
+      clips: ['clip-1'],
+      notes: ['note-1'],
+      playing: true,
+      recording: true,
+      access: 'edit',
+    }, 'view')
+    expect(viewer).toMatchObject({
+      id: 'view-id',
+      name: 'Bea',
+      access: 'view',
+      cursorSample: 24000,
+      trackId: 'drums',
+      clips: ['clip-1'],
+      notes: ['note-1'],
+      playing: true,
+      recording: false,
+    })
     expect(relayAware('real-id', 'Ada', { cursorSample: Number.NaN })).toBeNull()
     expect(relayAware('', 'Ada', { cursorSample: 1 })).toBeNull()
     const flood = relayAware('real-id', 'Ada', { cursorSample: 1, clips: Array.from({ length: 40 }, (_, index) => `c${index}`) })
@@ -285,6 +307,12 @@ describe('presence marks', () => {
     expect(chips).toContain('data-recording-badge="1"')
     expect(chips).toContain('>Recording<')
     expect(chips).not.toContain('data-presence="bo"')
+    const viewer = person({ id: 'bea', name: 'Bea', access: 'view', recording: false, color: '#73c48f' })
+    const viewChip = renderToStaticMarkup(createElement(TrackChips, { trackId: 'drums', peers: [viewer] }))
+    expect(viewChip).toContain('data-presence-role="view"')
+    expect(viewChip).toContain('>View<')
+    expect(viewChip).toContain('>Bea<')
+    expect(viewChip).not.toContain('>Recording<')
     const timeline = renderToStaticMarkup(createElement(RemoteTimeline, { peers: [ada], sampleRate: 48000, px: 100 }))
     expect(timeline).toContain('data-remote-cursor="ada"')
     expect(timeline).toContain('data-cursor-where="timeline"')

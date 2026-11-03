@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { FEATURES } from '../features'
 import { Performer, pointerVelocity, type PerformTarget } from '../audio/performer'
 import type { AudioEngine } from '../audio/engine'
 import { DRUM_PADS, renderDrum } from '../model/drums'
@@ -322,7 +323,7 @@ export function PerformPop({
   return (
     <div className={`perform-pop ${drums ? 'drums' : 'keys'}`} role="dialog" aria-label={drums ? 'Drum machine' : 'Piano roll'}>
       <header>
-        {drums ? DECKS.map((item) => (
+        {drums ? (FEATURES.session ? DECKS : DECKS.filter((item) => item !== 'session')).map((item) => (
           <button key={item} type="button" className={deck === item ? 'on' : ''} onClick={() => setDeck(item)}>{item[0].toUpperCase() + item.slice(1)}</button>
         )) : <strong>Keys</strong>}
         <button type="button" className={engine.status === 'recording' ? 'on' : ''} onClick={() => {
@@ -477,7 +478,7 @@ export function PerformPop({
       )}
       <div className={`perform-body${showEdit ? ' show-edit' : ''}`}>
         <div className="perform-play" ref={board}>
-          {drums && deck === 'session' ? (
+          {drums && FEATURES.session && deck === 'session' ? (
             <SessionPads store={store} mutes={padMutes} solo={soloPads} />
           ) : drums && deck === 'keys' ? (
             <KeyGrid root={scale.root} scaleId={scale.library || scale.scale} layout={layout} inKey={inKey} />
@@ -572,7 +573,7 @@ export function PerformPop({
               <button type="button" className={layout === 'fourths' ? 'on' : ''} title="Fourths stacks a fourth each row. Sequential walks the scale." onClick={() => setLayout((value) => (value === 'fourths' ? 'sequential' : 'fourths'))}>{layout === 'fourths' ? 'Fourths' : 'Sequential'}</button>
               <button type="button" className={inKey ? 'on' : ''} title="Lock the pads to the scale, including quarter-tone pitches." onClick={() => setInKey((value) => !value)}>{inKey ? 'In key' : 'Chromatic'}</button>
             </div>
-          ) : drums && deck === 'session' ? (
+          ) : drums && FEATURES.session && deck === 'session' ? (
             <div className="tool-row">
               <button type="button" className={padMutes ? 'on' : ''} onClick={() => setPadMutes((value) => !value)}>Mutes</button>
               <button type="button" className={soloPads ? 'on' : ''} onClick={() => setSoloPads((value) => !value)}>Solo</button>

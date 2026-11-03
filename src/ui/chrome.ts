@@ -1,3 +1,5 @@
+import { FEATURES } from '../features'
+
 /** Short labels and touch descriptions for the controls people see first. */
 
 export interface Copy {
@@ -19,6 +21,11 @@ export const VIEW_COPY: Copy[] = [
   { id: 'session', label: 'Session', hint: 'Launch clips in a grid. Tap a slot to play or record.' },
   { id: 'collab', label: 'Collab', hint: 'Call, video, and remote recording. Stays closed until you open this tab.' },
 ]
+
+/** Tabs on the shell. Collab is drawn beside these. Session stays in VIEW_COPY and returns with FEATURES.session. */
+export function studioViewTabs(): Copy[] {
+  return VIEW_COPY.filter((item) => item.id !== 'collab' && (FEATURES.session || item.id !== 'session'))
+}
 
 export const TRANSPORT_COPY: Copy[] = [
   { id: 'to-start', label: 'Start', hint: 'Return to bar 1, or to the loop start when the loop is on.' },
@@ -59,6 +66,7 @@ export interface MenuSpec extends Copy {
  * stay off this list: Session, Roll, Keys, Pads, Generate, Sounds, and Collab.
  * Launch/Timeline is the session transport, which the Session tab does not switch.
  * Capture stays on the phone because the session bar hides that button there.
+ * While FEATURES.session is off, visibleMenu hides Launch, Timeline, and Capture.
  */
 export const MENU_COPY: MenuSpec[] = [
   { id: 'new', action: 'new', group: 'project', place: 'all', label: 'New', hint: 'Start a fresh session. The timeline starts empty.' },
@@ -90,6 +98,7 @@ export function visibleMenu(input: {
 }): MenuSpec[] {
   const place = input.phone ? 'phone' : 'desk'
   return MENU_COPY.filter((item) => {
+    if (!FEATURES.session && (item.action === 'session-mode' || item.action === 'capture')) return false
     if (item.place !== 'all' && item.place !== place) return false
     if (item.action === 'session-mode') return input.session ? item.id === 'arrangement' : item.id === 'session-view'
     if (item.action === 'dock') return input.dockBottom ? item.id === 'dock-side' : item.id === 'dock-bottom'

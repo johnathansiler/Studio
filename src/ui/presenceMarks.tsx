@@ -4,6 +4,7 @@ import {
   editorsOnTrack,
   noteOutline,
   presenceInitial,
+  presenceRoleLabel,
   subscribeAwarenessBinding,
   type RemotePresence,
 } from '../remote/presence'
@@ -29,12 +30,14 @@ export function TrackChips({ trackId, peers }: { trackId: string; peers: readonl
   if (!editors.length) return null
   const recording = editors.some((peer) => peer.recording)
   const names = editors.map((peer) => peer.name).join(', ')
+  const roles = [...new Set(editors.map((peer) => presenceRoleLabel(peer.access)).filter(Boolean))]
+  const watching = editors.every((peer) => peer.access === 'view')
   return (
     <span
       className="presence-chips"
       data-presence-track={trackId}
       role="status"
-      aria-label={`${names} ${editors.length === 1 ? 'is' : 'are'} editing this track${recording ? ', recording' : ''}`}
+      aria-label={`${names} ${editors.length === 1 ? 'is' : 'are'} ${watching ? 'watching' : 'editing'} this track${recording ? ', recording' : ''}`}
       style={{ '--remote': editors[0].color } as CSSProperties}
     >
       {editors.map((peer) => (
@@ -43,6 +46,9 @@ export function TrackChips({ trackId, peers }: { trackId: string; peers: readonl
         </i>
       ))}
       <span className="presence-name">{names}</span>
+      {roles.map((label) => (
+        <em key={label} className="presence-role" data-presence-role={label.toLowerCase()}>{label}</em>
+      ))}
       {recording && <RecordingBadge />}
     </span>
   )
@@ -114,6 +120,7 @@ function RemoteCursor({ peer, left, where }: { peer: RemotePresence; left: numbe
     >
       <span className="remote-cursor-label">
         <span className="remote-cursor-name">{peer.name}</span>
+        {presenceRoleLabel(peer.access) && <em className="presence-role" data-presence-role={peer.access}>{presenceRoleLabel(peer.access)}</em>}
         {peer.recording && <RecordingBadge />}
       </span>
     </div>

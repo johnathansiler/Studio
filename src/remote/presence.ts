@@ -56,9 +56,13 @@ export interface LocalAwareness {
   recording: boolean
 }
 
+export type PresenceAccess = 'view' | 'comment' | 'edit'
+
 export interface RemotePresence extends LocalAwareness {
   id: string
   color: string
+  /** Server seat. View and Comment are visible, and only Edit may show Recording. */
+  access: PresenceAccess
   seenAt: number
 }
 
@@ -76,6 +80,7 @@ export interface AwareMessage {
   trackId: string | null
   playing: boolean
   recording: boolean
+  access: PresenceAccess
 }
 
 export interface AwarenessOptions {
@@ -108,12 +113,24 @@ export function awareRelayDue(lastAt: number, now: number, min = AWARE_RELAY_MIN
   return !lastAt || now - lastAt >= min
 }
 
-/** Server relay. `peerId` and `peerName` win over anything in the payload. */
-export function relayAware(peerId: string, peerName: string, msg: Record<string, unknown>): AwareMessage | null {
+export function presenceAccess(value: unknown): PresenceAccess | null {
+  if (value === 'view' || value === 'comment' || value === 'edit') return value
+  return null
+}
+
+export function presenceRoleLabel(access: PresenceAccess | undefined) {
+  if (access === 'view') return 'View'
+  if (access === 'comment') return 'Comment'
+  return ''
+}
+
+/** Server relay. `peerId`, `peerName`, and `access` win over anything in the payload. */
+export function relayAware(peerId: string, peerName: string, msg: Record<string, unknown>, access?: PresenceAccess): AwareMessage | null {
   const id = cleanId(peerId)
   if (!id) return null
   const cursor = finite(msg.cursorSample, 0, 1e15)
   if (cursor == null) return null
+  const role = access ?? presenceAccess(msg.access) ?? 'edit'
   return {
     t: AWARE_TYPE,
     id,
@@ -127,7 +144,8 @@ export function relayAware(peerId: string, peerName: string, msg: Record<string,
     notes: idList(msg.notes),
     trackId: optionalId(msg.trackId),
     playing: msg.playing === true,
-    recording: msg.recording === true,
+    recording: role === 'edit' && msg.recording === true,
+    access: role,
   }
 }
 
@@ -150,6 +168,7 @@ export function parseAware(msg: unknown, seenAt: number): RemotePresence | null 
     trackId: relay.trackId,
     playing: relay.playing,
     recording: relay.recording,
+    access: relay.access,
     seenAt,
   }
 }
@@ -490,13 +509,14 @@ function wireFields(state: LocalAwareness): Record<string, unknown> {
   }
 }
 
-function splitKey(state: LocalAwareness): KeyParts {
+function splitKey(state: LocalAwareness & { access?: PresenceAccess }): KeyParts {
   const rest = [
     state.name,
     state.trackId ?? '',
     state.rollClipId ?? '',
     state.playing ? 1 : 0,
     state.recording ? 1 : 0,
+    state.access ?? '',
     state.selectedClipIds.join(','),
     state.selectedNoteIds.join(','),
   ].join('|')

@@ -44,6 +44,22 @@
   line-height: 1;
 }
 
+.presence-role {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background-color: #24352c;
+  background-image: var(--face);
+  color: var(--text);
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 760;
+  box-shadow: var(--raised);
+}
+
 .remote-rec {
   flex: none;
   display: inline-flex;
