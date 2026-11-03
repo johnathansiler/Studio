@@ -102,7 +102,7 @@ export function concatFrames(frames: Float32Array[]) {
  */
 export async function captureSlot(
   source: CaptureSource,
-  options: { countIn: boolean; tempo: number; signature: TimeSignature; maxSamples: number },
+  options: { countIn: boolean; bars?: number; tempo: number; signature: TimeSignature; maxSamples: number },
   control: CaptureControl,
 ): Promise<{ channels: Float32Array[]; sampleRate: number } | null> {
   const kept: Float32Array[] = []
@@ -119,9 +119,10 @@ export async function captureSlot(
     kept.push(owned)
     total += owned.length
   })
-  if (options.countIn) {
-    const beats = Math.max(1, Math.round(options.signature.numerator) || 1)
-    const beatMs = (countInSeconds(options.tempo, options.signature) / beats) * 1000
+  const bars = options.countIn ? (options.bars === 2 ? 2 : 1) : 0
+  if (bars > 0) {
+    const beats = Math.max(1, Math.round(options.signature.numerator) || 1) * bars
+    const beatMs = (countInSeconds(options.tempo, options.signature) * bars / beats) * 1000
     for (let beat = 0; beat < beats; beat++) {
       if (control.shouldStop()) {
         stop()

@@ -26,6 +26,26 @@ export function countInSeconds(tempo: number, sig: TimeSignature): number {
   return Math.max(0, sig.numerator) * beat
 }
 
+/** Off, one bar, or two bars. Older projects store only the on/off flag. */
+export type CountInBars = 0 | 1 | 2
+
+export function countInBarsOf(project: { countIn?: boolean; countInBars?: number }): CountInBars {
+  if (!project.countIn) return 0
+  return project.countInBars === 2 ? 2 : 1
+}
+
+export function cycleCountInBars(bars: CountInBars): CountInBars {
+  if (bars <= 0) return 1
+  if (bars === 1) return 2
+  return 0
+}
+
+export function countInCaption(bars: CountInBars): string {
+  if (bars === 1) return '1 bar'
+  if (bars === 2) return '2 bars'
+  return 'Off'
+}
+
 export function beatsToSamples(beats: number, sampleRate: number, tempo: number): number {
   return beats * samplesPerQuarter(sampleRate, tempo)
 }

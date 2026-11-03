@@ -3,7 +3,7 @@ import type { AudioEngine } from '../audio/engine'
 import { formatLoopReadout } from '../model/loopEdit'
 import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, type TapMemory, type TapSource } from '../model/tap'
 import { formatMapBars } from '../model/tempoMap'
-import { formatTimecode } from '../model/time'
+import { countInBarsOf, countInCaption, formatTimecode } from '../model/time'
 import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import type { AssetStatus } from '../remote/assets'
@@ -22,6 +22,8 @@ export function TransportBar({
   onStop,
   onRecord,
   onSeek,
+  onReset,
+  roomRole,
   simple = false,
   desk = false,
   takeProgress = null,
@@ -35,7 +37,10 @@ export function TransportBar({
   onStop: () => void
   onRecord: () => void
   onSeek: (sample: number) => void
-  /** Phone: keep play, stop, record, and tempo. To-start and loop live in the menu. */
+  onReset?: () => void
+  /** Solo and host can reset. A guest sees a disabled Host only control. */
+  roomRole?: 'host' | 'guest'
+  /** Phone uses the same transport controls, with text labels. */
   simple?: boolean
   /** Desktop: show the computer-keyboard toggle. */
   desk?: boolean
@@ -224,6 +229,10 @@ export function TransportBar({
 
   const playing = status === 'playing'
   const transport = (id: string) => copyOf(TRANSPORT_COPY, id)
+  const countBars = countInBarsOf(project)
+  const countCaption = countInCaption(countBars)
+  const guestRoom = roomRole === 'guest'
+  const resetCopy = transport('reset')
   const loopRead = formatLoopReadout(project, project.loopStartSample, project.loopEndSample)
   return (
     <div className={`transport${simple ? ' simple' : ''}`}>
@@ -240,6 +249,39 @@ export function TransportBar({
         </TipButton>
         <TipButton className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={status === 'recording' || status === 'counting-in'} onPress={() => engine.unlock()} onClick={onRecord}>
           <span className="t-word">Rec</span>
+        </TipButton>
+        <TipButton
+          id="transport-click"
+          className={`t-btn click${project.metronomeEnabled ? ' on' : ''}`}
+          label={transport('click').label}
+          hint={transport('click').hint}
+          pressed={project.metronomeEnabled}
+          disabled={store.remoteFollow}
+          onClick={() => store.toggle('metronomeEnabled')}
+        >
+          <span className="t-word">Click</span>
+        </TipButton>
+        <TipButton
+          id="transport-count"
+          className={`t-btn count${countBars > 0 ? ' on' : ''}`}
+          label={transport('count-in').label}
+          hint={`${transport('count-in').hint} Now ${countCaption}.`}
+          pressed={countBars > 0}
+          disabled={store.remoteFollow}
+          onClick={() => store.cycleCountIn()}
+        >
+          <span className="t-word">Count</span>
+          <span className="t-state">{countCaption}</span>
+        </TipButton>
+        <TipButton
+          id="transport-reset"
+          className="t-btn reset"
+          label={guestRoom ? 'Host only' : resetCopy.label}
+          hint={guestRoom ? 'Host only' : resetCopy.hint}
+          disabled={guestRoom}
+          onClick={() => onReset?.()}
+        >
+          <span className="t-word">{guestRoom ? 'Host only' : 'Reset'}</span>
         </TipButton>
         {desk && (
           <button

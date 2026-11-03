@@ -148,7 +148,7 @@ describe('mobile control lists', () => {
 
   it('keeps start, play, stop, and record on every transport, including the phone', () => {
     expect([...PHONE_TRANSPORT_MENU]).toEqual([])
-    for (const id of ['to-start', 'play', 'pause', 'stop', 'record', 'loop']) {
+    for (const id of ['to-start', 'play', 'pause', 'stop', 'record', 'loop', 'click', 'count-in', 'reset']) {
       expect(TRANSPORT_COPY.some((item) => item.id === id)).toBe(true)
     }
     for (const id of ['to-start', 'loop']) {
@@ -180,14 +180,18 @@ describe('mobile control lists', () => {
       'quantize',
       'dock',
       'scaler', 'players', 'midi',
-      'click', 'count-in', 'signature', 'shortcuts',
+      'signature', 'shortcuts',
     ])
     expect(phone.map((item) => item.action)).toEqual([
       'new', 'open', 'save', 'export',
       'quantize', 'to-start', 'loop',
       'players', 'midi',
-      'click', 'count-in', 'signature', 'shortcuts',
+      'signature', 'shortcuts',
     ])
+    expect(desk.map((item) => item.action)).not.toContain('click')
+    expect(desk.map((item) => item.action)).not.toContain('count-in')
+    expect(phone.map((item) => item.action)).not.toContain('click')
+    expect(phone.map((item) => item.action)).not.toContain('count-in')
     const phoneCore = phone.filter((item) => !['to-start', 'loop', 'capture'].includes(item.action))
     expect(phoneCore.length).toBeLessThan(desk.length)
     const html = renderToStaticMarkup(createElement(MainMenu, {

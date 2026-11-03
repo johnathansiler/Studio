@@ -133,7 +133,7 @@ import type { AudioAsset, AudioClip, AutomationWriteMode, ClipStretch, FollowAct
 import { createSection, deleteSectionContents, duplicateSectionContents, moveSectionContents, resizeSection as setSectionLength, sectionKind } from '../model/sections'
 import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
 import { downbeatAt, projectBeatSample, projectSampleBeat, snapSampleToMap, tempoAtSample } from '../model/tempoMap'
-import { beatsToSamples, quartersPerBar, samplesToBeats } from '../model/time'
+import { beatsToSamples, countInBarsOf, cycleCountInBars, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
 import { renderDrum, DRUM_PADS } from '../model/drums'
 import { isDrumTrack, clampRoll, DRUM_STEP, hitAt } from '../model/drumLanes'
@@ -500,6 +500,13 @@ export class ProjectStore {
       this.toasts = this.toasts.filter((t) => t.id !== id)
       this.emit()
     }, 4200)
+  }
+
+  /** Drop error banners. This does not edit the project or the undo stack. */
+  clearToasts() {
+    if (!this.toasts.length) return
+    this.toasts = []
+    this.emit()
   }
 
   setView(view: WorkspaceView) {
@@ -1399,7 +1406,23 @@ export class ProjectStore {
 
   toggle(flag: 'metronomeEnabled' | 'countIn' | 'snap' | 'loopEnabled') {
     this.mutate(() => {
+      if (flag === 'countIn') {
+        const on = !this.project.countIn
+        this.project.countIn = on
+        this.project.countInBars = on ? (this.project.countInBars === 2 ? 2 : 1) : 0
+        return
+      }
       this.project[flag] = !this.project[flag]
+    })
+  }
+
+  /** Off, one bar, then two bars. Guests follow the host and do not write this. */
+  cycleCountIn() {
+    if (this.remoteFollow) return
+    const next = cycleCountInBars(countInBarsOf(this.project))
+    this.mutate(() => {
+      this.project.countIn = next > 0
+      this.project.countInBars = next
     })
   }
 
