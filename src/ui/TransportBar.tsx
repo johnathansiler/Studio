@@ -6,10 +6,13 @@ import { formatMapBars } from '../model/tempoMap'
 import { formatTimecode } from '../model/time'
 import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
+import type { AssetStatus } from '../remote/assets'
 import { AutomationFollow } from './AutomationLane'
+import { AssetTransfers } from './AssetTransfers'
 import { TRANSPORT_COPY, copyOf } from './chrome'
 import { TipButton } from './Hint'
 import './loopRegion.css'
+import './remoteFixes.css'
 
 export function TransportBar({
   store,
@@ -23,6 +26,7 @@ export function TransportBar({
   desk = false,
   takeProgress = null,
   recordHint = '',
+  assetTransfers = [],
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -38,6 +42,8 @@ export function TransportBar({
   /** 0–1 while a full-quality guest take is moving to the host. */
   takeProgress?: number | null
   recordHint?: string
+  /** Shared wavs moving on a direct peer connection. */
+  assetTransfers?: AssetStatus[]
 }) {
   const project = selectTransport(store).project
   const [position, setPosition] = useState(engine.positionSamples)
@@ -372,6 +378,7 @@ export function TransportBar({
       </div>
       {syncLabel && <span className="sync-pill">{syncLabel}</span>}
       {recordHint && <p className="rec-hint" role="status">{recordHint}</p>}
+      <AssetTransfers rows={assetTransfers} />
     </div>
   )
 }

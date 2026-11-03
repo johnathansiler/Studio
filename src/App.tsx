@@ -1512,6 +1512,7 @@ async function importDropped(files: FileList) {
           onRecord={() => { engine.unlock(); void record() }}
           onSeek={(sample) => void (sample === 0 ? returnToStart() : locate(sample))}
           takeProgress={session.state.takeProgress}
+          assetTransfers={session.state.assetTransfers}
         />
       )}
       {surface === 'studio' && !collabShown && phonePane !== 'room' && store.view === 'arrange' && panel !== 'piano' && (

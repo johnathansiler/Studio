@@ -5,6 +5,7 @@ import { createUsageLedger } from './usage.ts'
 import { rememberDiag, sanitizeDiag, type DiagReport } from '../src/model/diag.ts'
 import { sessionHello } from '../src/model/negotiate.ts'
 import { CAP_NOTICE, type UsageSnapshot } from '../src/model/usage.ts'
+import { offersFromSignal, type AssetOffer } from '../src/remote/assetSignal.ts'
 import { syncMessageOk } from '../src/state/ops.ts'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -62,8 +63,8 @@ interface Session {
   clients: Map<string, Client>
   chat: ChatMessage[]
   diag: DiagReport[]
-  /** Finished project audio, fetched by guests over HTTP. */
-  assets: Map<string, { name: string; sampleRate: number; wav: Buffer }>
+  /** Who has which wav. Ids and checksums only. The bytes never land here. */
+  indexes: Map<string, AssetOffer[]>
   /** SFU publications announced by admitted peers. Replayed to a rejoining socket. */
   pubs: Map<string, SfuPublication>
   /** Session ids this room asked Cloudflare to open, so the egress ledger can close them. */
@@ -81,9 +82,6 @@ const sessions = new Map<string, Session>()
 const sockets = new WeakMap<WebSocket, Client>()
 const TAKE_LIMIT = 32 * 1024 * 1024
 const uploads = new Map<string, { total: number; seen: Set<number>; bytes: number }>()
-const ASSET_CHUNK_LIMIT = 16 * 1024
-const ASSET_LIMIT = 8 * 1024 * 1024
-const assetUploads = new Map<string, { total: number; name: string; sampleRate: number; chunks: Map<number, Buffer> }>()
 /** Same cadence as the client ping. A missed pong does not close the socket. */
 const KEEPALIVE_MS = 5000
 
@@ -204,6 +202,12 @@ function partySize(session: Session) {
   return ids.size
 }
 
+function forgetIndex(session: Session, id: string) {
+  if (!id || !session.indexes.has(id)) return
+  session.indexes.delete(id)
+  broadcast(session, { t: 'asset-index', from: id, assets: [] })
+}
+
 function leave(client: Client, announce = false) {
   if (!client.sessionCode) return
   const session = sessions.get(client.sessionCode)
@@ -226,6 +230,7 @@ function leave(client: Client, announce = false) {
   }
   record(session, 'leave', `${client.id} left; the room is kept until it has been empty for 10 minutes`, client.id)
   releaseMedia(session, client.id)
+  forgetIndex(session, client.id)
   if (client.id) broadcast(session, { t: 'peer-left', id: client.id })
   if (session.clients.size === 0) {
     session.emptyAt = Date.now()
@@ -254,8 +259,6 @@ const server = createServer(async (req, res) => {
   const diag = url.pathname.match(/^\/api\/diag\/([A-Za-z0-9]{4,12})$/)
   if (diag && (req.method === 'GET' || req.method === 'POST')) return handleDiag(req, res, diag[1].toUpperCase())
   if (url.pathname === '/api/takes' && req.method === 'POST') return acceptTake(req, res)
-  if (url.pathname === '/api/assets' && req.method === 'POST') return acceptAsset(req, res)
-  if (url.pathname === '/api/assets' && req.method === 'GET') return serveAsset(url, res)
   if (SERVE_STATIC) {
     await serveStatic(url.pathname, res)
     return
@@ -536,91 +539,6 @@ async function acceptTake(req: IncomingMessage, res: ServerResponse) {
   return json(res, { ok: true, received: upload.seen.size, total })
 }
 
-function assetIdOk(id: string) {
-  return /^[A-Za-z0-9_-]{1,80}$/.test(id)
-}
-
-/** The host uploads project audio in small chunks. Guests download the finished wav. It never rides the signaling socket. */
-async function acceptAsset(req: IncomingMessage, res: ServerResponse) {
-  let body: Record<string, unknown>
-  try {
-    body = JSON.parse(await readBody(req, 48_000)) as Record<string, unknown>
-  } catch {
-    return json(res, { error: 'Asset chunk was unreadable.' }, 400)
-  }
-  const code = String(body.code || '')
-  const from = String(body.from || '')
-  const id = String(body.id || '')
-  const index = Number(body.index)
-  const total = Number(body.total)
-  const sampleRate = Number(body.sampleRate)
-  const session = sessions.get(code)
-  const person = session?.participants.get(from)
-  if (!session || !person?.admitted || person.role !== 'host' || person.id !== session.hostId || !assetIdOk(id)) {
-    return json(res, { error: 'Asset upload was rejected.' }, 403)
-  }
-  if (!Number.isInteger(index) || !Number.isInteger(total) || total < 1 || total > 2048 || index < 0 || index >= total) {
-    return json(res, { error: 'Asset chunk was rejected.' }, 400)
-  }
-  if (!Number.isFinite(sampleRate) || sampleRate < 8000 || sampleRate > 192000) {
-    return json(res, { error: 'Asset sample rate was rejected.' }, 400)
-  }
-  const chunk = typeof body.chunk === 'string' ? body.chunk : ''
-  const raw = Buffer.from(chunk, 'base64')
-  if (!raw.byteLength || raw.byteLength > ASSET_CHUNK_LIMIT) return json(res, { error: 'Asset chunk is the wrong size.' }, 413)
-  const key = `${code}:${id}`
-  const upload = assetUploads.get(key) || { total, name: String(body.name || 'Audio').slice(0, 80), sampleRate, chunks: new Map<number, Buffer>() }
-  upload.total = total
-  upload.name = String(body.name || upload.name).slice(0, 80)
-  upload.sampleRate = sampleRate
-  const previous = upload.chunks.get(index)
-  const nextBytes = [...upload.chunks.values()].reduce((sum, part) => sum + part.byteLength, 0) - (previous?.byteLength || 0) + raw.byteLength
-  if (nextBytes > ASSET_LIMIT) {
-    assetUploads.delete(key)
-    return json(res, { error: 'Asset is over 8 MB.' }, 413)
-  }
-  upload.chunks.set(index, raw)
-  let complete = upload.chunks.size >= total
-  if (complete) {
-    for (let i = 0; i < total; i++) {
-      if (!upload.chunks.has(i)) complete = false
-    }
-  }
-  if (!complete) {
-    assetUploads.set(key, upload)
-    return json(res, { ok: true, received: upload.chunks.size, total, complete: false })
-  }
-  const parts: Buffer[] = []
-  for (let i = 0; i < total; i++) parts.push(upload.chunks.get(i)!)
-  const wav = Buffer.concat(parts)
-  assetUploads.delete(key)
-  session.assets.set(id, { name: upload.name, sampleRate: upload.sampleRate, wav })
-  broadcast(session, {
-    t: 'asset-ready',
-    asset: { id, name: upload.name, sampleRate: upload.sampleRate, bytes: wav.byteLength },
-  }, session.hostId)
-  return json(res, { ok: true, received: total, total, complete: true })
-}
-
-function serveAsset(url: URL, res: ServerResponse) {
-  const code = url.searchParams.get('code') || ''
-  const id = url.searchParams.get('id') || ''
-  const from = url.searchParams.get('from') || ''
-  const session = sessions.get(code)
-  const person = session?.participants.get(from)
-  const asset = session && assetIdOk(id) ? session.assets.get(id) : undefined
-  if (!session || !person?.admitted || !asset) {
-    return json(res, { error: 'Asset was not found.' }, 404)
-  }
-  res.writeHead(200, {
-    'content-type': 'audio/wav',
-    'content-length': asset.wav.byteLength,
-    'cache-control': 'no-store',
-    'access-control-allow-origin': '*',
-  })
-  res.end(asset.wav)
-}
-
 function readBody(req: IncomingMessage, limit: number) {
   return new Promise<string>((resolve, reject) => {
     const parts: Buffer[] = []
@@ -771,8 +689,15 @@ async function handle(client: Client, msg: Record<string, unknown>) {
     broadcast(session, payload, client.id)
     return
   }
-  if ((msg.t === 'project' || msg.t === 'project-asset') && self.role === 'host') {
-    broadcast(session, { t: msg.t, from: client.id, project: msg.project, asset: msg.asset, rev: msg.rev }, client.id)
+  if (msg.t === 'project' && self.role === 'host') {
+    broadcast(session, { t: 'project', from: client.id, project: msg.project, rev: msg.rev }, client.id)
+    return
+  }
+  if (msg.t === 'asset-index' && self.admitted) {
+    const offers = offersFromSignal(msg)
+    if (!offers) return
+    session.indexes.set(client.id, offers)
+    broadcast(session, { t: 'asset-index', from: client.id, assets: offers }, client.id)
     return
   }
   if (msg.t === 'clock') {
@@ -804,7 +729,7 @@ async function hello(client: Client, msg: Record<string, unknown>) {
       clients: new Map(),
       chat: [],
       diag: [],
-      assets: new Map(),
+      indexes: new Map(),
       pubs: new Map(),
       sfuSessions: new Map(),
     }
@@ -898,6 +823,10 @@ async function hello(client: Client, msg: Record<string, unknown>) {
 async function sendWelcome(session: Session, client: Client, person: Participant, reason?: string) {
   const { snap, ice } = await welcomeIce()
   send(client.ws, publicSession(session, person, ice, snap, reason))
+  for (const [peerId, assets] of session.indexes) {
+    if (peerId === person.id || !assets.length) continue
+    send(client.ws, { t: 'asset-index', from: peerId, assets })
+  }
   for (const publication of session.pubs.values()) {
     if (publication.peerId === person.id) continue
     send(client.ws, { t: 'sfu-pub', publication })
@@ -939,6 +868,7 @@ function drop(session: Session, id: string, event: 'rejected' | 'removed') {
   session.held.delete(id)
   session.clients.delete(id)
   releaseMedia(session, id)
+  forgetIndex(session, id)
   broadcast(session, { t: 'peer-left', id })
   if (target) {
     target.sessionCode = undefined
@@ -955,9 +885,6 @@ setInterval(() => {
       sessions.delete(code)
       for (const key of uploads.keys()) {
         if (key.startsWith(`${code}:`)) uploads.delete(key)
-      }
-      for (const key of assetUploads.keys()) {
-        if (key.startsWith(`${code}:`)) assetUploads.delete(key)
       }
     }
   }
