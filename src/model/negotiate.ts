@@ -169,6 +169,18 @@ export function keepPeerConnection(input: { left: boolean; remoteInstance: strin
   return true
 }
 
+const ROOM_CODE = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/
+
+/**
+ * The server keeps rooms in memory only. A restart drops them.
+ * A participant with a saved copy may ask for the same code again.
+ * That creates an empty room in memory. It does not read a file.
+ */
+export function canRebuildRoom(code: string, exists: boolean, rebuild: boolean) {
+  if (!rebuild || exists) return false
+  return ROOM_CODE.test(code)
+}
+
 /**
  * A live room this browser already hosts wins over Create.
  * Minting is only New session, or the first Create when this browser has no room.

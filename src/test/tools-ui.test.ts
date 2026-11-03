@@ -178,14 +178,13 @@ describe('mobile control lists', () => {
     expect(desk.map((item) => item.action)).toEqual([
       'new', 'open', 'save', 'export',
       'quantize',
-      'session-mode', 'dock',
+      'dock',
       'scaler', 'players', 'midi',
       'signature', 'shortcuts',
     ])
     expect(phone.map((item) => item.action)).toEqual([
       'new', 'open', 'save', 'export',
       'quantize', 'to-start', 'loop',
-      'session-mode', 'capture',
       'players', 'midi',
       'signature', 'shortcuts',
     ])

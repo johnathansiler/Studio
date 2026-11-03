@@ -28,6 +28,64 @@ export interface SyncHello {
   lamport: number
   digest: string
   seen: Record<string, number>
+  /** When this browser last wrote its room copy. Older clients omit it. */
+  savedAt?: number
+  /** Role stored with that copy. The live roster role is the fallback. */
+  role?: 'host' | 'guest'
+}
+
+/** One browser's saved room, compared with the hello digest. */
+export interface RoomClaim {
+  role: 'host' | 'guest'
+  savedAt: number
+  lamport: number
+  actor: string
+  digest: string
+}
+
+export function claimFromHello(hello: SyncHello, fallbackRole: 'host' | 'guest'): RoomClaim {
+  const role = hello.role === 'host' || hello.role === 'guest' ? hello.role : fallbackRole
+  return {
+    role,
+    savedAt: Number(hello.savedAt) || 0,
+    lamport: Number(hello.lamport) || 0,
+    actor: hello.actor,
+    digest: hello.digest,
+  }
+}
+
+function claimRank(claim: RoomClaim): [number, number, number, string] {
+  return [claim.role === 'host' ? 1 : 0, Number.isFinite(claim.savedAt) ? claim.savedAt : 0, Number.isFinite(claim.lamport) ? claim.lamport : 0, claim.actor || '']
+}
+
+/** Positive when `left` should seed the room. Host outranks every guest. Newest save wins inside that group. */
+export function compareRoomClaims(left: RoomClaim, right: RoomClaim): number {
+  const a = claimRank(left)
+  const b = claimRank(right)
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return (a[i] as number) > (b[i] as number) ? 1 : -1
+  }
+  if (a[3] === b[3]) return 0
+  return a[3] > b[3] ? 1 : -1
+}
+
+/** The copy that rebuilds a room after the server forgets it. */
+export function pickRoomClaim<T extends RoomClaim>(claims: T[]): T | null {
+  let best: T | null = null
+  for (const claim of claims) {
+    if (!best || compareRoomClaims(claim, best) > 0) best = claim
+  }
+  return best
+}
+
+/**
+ * Load the IndexedDB room copy over the open project when this tab has nothing
+ * newer. A matching digest keeps the open project so its audio buffers stay.
+ */
+export function adoptSavedRoom(input: { openDigest: string; openLamport: number; openUntouched: boolean; savedDigest: string; savedLamport: number }): boolean {
+  if (!input.savedDigest || input.openDigest === input.savedDigest) return false
+  if (input.openUntouched) return true
+  return input.savedLamport > input.openLamport
 }
 
 interface Schema {
@@ -254,6 +312,11 @@ export function relayProjectTraffic(access: CollabAccess, type: string, ops?: un
   if (type === 'sync-checkpoint' || type === 'project' || type === 'project-asset') return mayWriteProject(access)
   if (type === 'comment') return mayComment(access)
   return false
+}
+
+/** Awareness is not a project edit. View, Comment, and Edit all stay on screen. */
+export function mayRelayAwareness(access: CollabAccess): boolean {
+  return access === 'view' || access === 'comment' || access === 'edit'
 }
 
 export function accessForInvite(invites: Map<string, CollabAccess> | Record<string, CollabAccess | undefined>, token: string): CollabAccess {

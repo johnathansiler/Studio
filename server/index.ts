@@ -3,10 +3,11 @@ import { currentIce, type IceConfig } from './ice.ts'
 import { sfuCall, sfuConfigured } from './sfu.ts'
 import { createUsageLedger } from './usage.ts'
 import { rememberDiag, sanitizeDiag, type DiagReport } from '../src/model/diag.ts'
-import { sessionHello } from '../src/model/negotiate.ts'
+import { canRebuildRoom, sessionHello } from '../src/model/negotiate.ts'
 import { CAP_NOTICE, type UsageSnapshot } from '../src/model/usage.ts'
 import { relayTransportMessage } from '../src/model/roomReset.ts'
-import { accessForInvite, collabAccessFor, parseCollabAccess, relayProjectTraffic, sanitizeTimelineComment, syncMessageOk, type CollabAccess, type TimelineComment } from '../src/state/ops.ts'
+import { awareRelayDue, relayAware } from '../src/remote/presence.ts'
+import { accessForInvite, collabAccessFor, mayRelayAwareness, parseCollabAccess, relayProjectTraffic, sanitizeTimelineComment, syncMessageOk, type CollabAccess, type TimelineComment } from '../src/state/ops.ts'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -54,6 +55,8 @@ interface Client {
   lastInType: string
   /** peer means the browser or the network closed it. Anything else is this process. */
   closeBy: string
+  /** Last accepted editing-awareness relay. Cursor floods are dropped. */
+  awareAt?: number
 }
 
 interface Session {
@@ -84,6 +87,7 @@ interface SfuPublication {
   tracks: Array<{ trackName: string; kind: string }>
 }
 
+/** Rooms live only in this process. A restart drops them. Clients rebuild from their own copies. */
 const sessions = new Map<string, Session>()
 const sockets = new WeakMap<WebSocket, Client>()
 const TAKE_LIMIT = 32 * 1024 * 1024
@@ -791,6 +795,17 @@ async function handle(client: Client, msg: Record<string, unknown>) {
     emitRoster(session)
     return
   }
+  if (msg.t === 'aware' && self.admitted) {
+    const access = seatAccess(self)
+    if (!mayRelayAwareness(access)) return
+    const now = Date.now()
+    if (!awareRelayDue(client.awareAt ?? 0, now)) return
+    const relay = relayAware(client.id, self.name, msg, access)
+    if (!relay) return
+    client.awareAt = now
+    broadcast(session, relay, client.id)
+    return
+  }
   if (msg.t === 'reaction') {
     broadcast(session, { t: 'reaction', from: client.id, emoji: String(msg.emoji || '').slice(0, 8) })
     return
@@ -896,6 +911,48 @@ async function hello(client: Client, msg: Record<string, unknown>) {
   }
   const code = decision.code || ''
   const session = code ? sessions.get(code) : undefined
+  if (!session && canRebuildRoom(code, false, Boolean(msg.rebuild))) {
+    const id = resumeId || crypto.randomUUID()
+    const rebuilt: Session = {
+      code,
+      hostId: id,
+      participants: new Map(),
+      held: new Map(),
+      clients: new Map(),
+      chat: [],
+      invites: new Map(),
+      inviteByRole: new Map(),
+      comments: [],
+      diag: [],
+      assets: new Map(),
+      pubs: new Map(),
+      sfuSessions: new Map(),
+    }
+    const person: Participant = {
+      id,
+      name,
+      role: 'host',
+      access: 'edit',
+      admitted: true,
+      hand: false,
+      music: true,
+      talk: true,
+      video: true,
+      screen: false,
+      mutedByHost: false,
+      instanceId: String(msg.instanceId || '').slice(0, 80),
+    }
+    rebuilt.participants.set(id, person)
+    rebuilt.clients.set(id, client)
+    client.id = id
+    client.name = name
+    client.sessionCode = code
+    sessions.set(code, rebuilt)
+    const reason = `room ${code} rebuilt in memory because the previous room died`
+    record(rebuilt, 'create', reason, id)
+    await sendWelcome(rebuilt, client, person, reason)
+    return
+  }
   if (!session) {
     const message = code ? `Could not rejoin ${code}. That invite is no longer live.` : 'Could not rejoin the session. Create an invite again.'
     console.log(`[session] join failed: ${code || 'no code'} is not live`)

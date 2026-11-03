@@ -1,26 +1,32 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { FEATURES, preferArrangeTransport, preferArrangeView } from './features'
 import { installControlGuards } from './ui/gestures'
 import { applyFreeze } from './audio/bounce'
 import { AudioEngine } from './audio/engine'
 import { unpackProject } from './model/archive'
 import { renderDemoLoop } from './model/demo'
-import { isSessionLink, isUntouchedEmpty, needsNewProjectConfirm, NEW_PROJECT, planLaunch, readTab, shouldKeepProject, TAB_PROJECT } from './model/launchProject'
+import { isSessionLink, isUntouchedEmpty, needsNewProjectConfirm, NEW_PROJECT, planLaunch, readTab, roomOwnsOpenProject, shouldKeepProject, TAB_PROJECT } from './model/launchProject'
 import { punchWindow, sliceCapture } from './model/comp'
 import { watchSpectral } from './audio/spectral/job'
 import { inspectClip } from './audio/stretch/engine'
 import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } from './model/types'
+import { AwarenessChannel, bindAwareness, currentEditCursor, localAwareness, onPresencePoke } from './remote/presence'
 import { SessionClient } from './remote/session'
-import { deleteProject, listProjects, listSnapshots, loadLastProject, loadProject, loadSnapshot, requestPersistentStorage, saveProject, storageReport, type ProjectListItem, type WorkspaceSnapshot } from './storage/idb'
+import { buildRoomCopy, deleteProject, listProjects, listSnapshots, listVersions, loadLastProject, loadProject, loadRoomCopy, loadSnapshot, requestPersistentStorage, saveProject, saveRoomCopy, saveVersion, storageReport, type ProjectListItem, type WorkspaceSnapshot } from './storage/idb'
 import { inviteWins } from './model/negotiate'
 import { locksProject, readInviteToken } from './state/ops'
 import { readIdentity, writeIdentity } from './storage/identity'
+import { selectPiano } from './state/select'
 import { ProjectStore, seedDemoProject } from './state/store'
+import { digestProject, musicalClone } from './state/ops'
+import { shouldSaveVersion, versionTitle, type VersionReason } from './state/versions'
 import { linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
 import { shouldCountIn } from './model/sessionInteract'
 import { hasArmedRecord, homeSample, playPress, stopPress } from './model/transport'
-import { countInAt, meterAtSample, tempoAtSample } from './model/tempoMap'
+import { countInAt, meterAtSample, projectSampleBeat, tempoAtSample } from './model/tempoMap'
+import { displayedPlayhead } from './model/transportSync'
 import { beatsToSamples, countInBarsOf, samplesToBeats } from './model/time'
 
 const FaceGallery = lazy(() => import('./ui/faces/PluginFace').then((mod) => ({ default: mod.FaceGallery })))
@@ -61,7 +67,8 @@ import { SnapControl } from './ui/SnapControl'
 import { panelChoice, rememberPanel } from './ui/panelMemory'
 import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
-import { UNSTUCK_COPY, VIEW_COPY, copyOf, described, visibleMenu } from './ui/chrome'
+import { UNSTUCK_COPY, visibleMenu } from './ui/chrome'
+import { ViewSwitcher } from './ui/ViewSwitcher'
 import { MainMenu } from './ui/MainMenu'
 import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, pianoDockWidth, readSessionDock, writeSessionDock } from './ui/sessionDock'
 import { deletesSelection } from './ui/clipKeys'
@@ -117,11 +124,68 @@ export function App() {
   const [dock, setDock] = useState(() => fittedDockWidth(typeof window === 'undefined' ? 1280 : window.innerWidth, EDITOR_DOCK_DEFAULT))
   const [dockEdge, setDockEdge] = useState<'right' | 'bottom'>('right')
   const editorPanel = useRef('room')
+  const publishAwareness = useRef<() => void>(() => undefined)
   useEffect(() => {
     const fit = () => setDock((value) => fittedDockWidth(window.innerWidth, value, dockEdge, editorPanel.current === 'piano' ? 0.72 : 0.5))
     window.addEventListener('resize', fit)
     return () => window.removeEventListener('resize', fit)
   }, [dockEdge])
+  useEffect(() => {
+    const channel = new AwarenessChannel((message) => session.postAware(message))
+    bindAwareness(channel)
+    session.setAwarenessHandler((msg) => {
+      if (msg.t === 'peer-left') channel.forget(String(msg.id || ''))
+      else channel.ingest(msg)
+    })
+    const publish = () => {
+      const status = session.state.status
+      if (status === 'idle' || status === 'rejected' || status === 'removed' || status === 'error') {
+        channel.silence()
+        channel.clear()
+        return
+      }
+      const selfId = session.state.selfId
+      if (status !== 'live' || !selfId) {
+        channel.silence()
+        return
+      }
+      channel.setSelf(selfId)
+      const project = store.project
+      const cursorSample = Math.max(0, Math.round(engine.positionSamples))
+      const piano = selectPiano(store)
+      const rollOpen = editorPanel.current === 'piano'
+      channel.publish(selfId, localAwareness({
+        name: session.state.name,
+        cursorSample,
+        songBeat: projectSampleBeat(project, displayedPlayhead(cursorSample, project)),
+        trackId: store.selectedTrackId,
+        clipIds: [...store.selectedClipIds, ...store.selectedMidiClipIds, ...store.selectedPatternClipIds],
+        noteIds: store.selectedNoteIds,
+        playing: engine.status === 'playing' || engine.status === 'recording',
+        recording: session.selfAccess() === 'edit' && engine.status === 'recording',
+        rollOpen,
+        clip: piano.clip,
+        rollTrackId: piano.track?.id ?? null,
+        pointer: currentEditCursor(),
+      }))
+    }
+    publishAwareness.current = publish
+    const stopStore = store.subscribe(publish)
+    const stopEngine = engine.subscribe(publish)
+    const stopSession = session.subscribe(publish)
+    const stopPoke = onPresencePoke(publish)
+    publish()
+    return () => {
+      publishAwareness.current = () => undefined
+      stopStore()
+      stopEngine()
+      stopSession()
+      stopPoke()
+      session.setAwarenessHandler(null)
+      bindAwareness(null)
+      channel.dispose()
+    }
+  }, [engine, session, store])
   const [joinOpen, setJoinOpen] = useState(false)
   const [joinCode, setJoinCode] = useState('')
   const [joinName, setJoinName] = useState(store.project.name ? localStorage.getItem('cueharbor-name') || 'Artist' : 'Artist')
@@ -139,7 +203,8 @@ export function App() {
   const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight))
   const [land, setLand] = useState(() => window.innerWidth > window.innerHeight)
   const phone = form === 'phone'
-  const rackRoll = store.view === 'beats' && store.project.tracks.some((track) => track.midiClips.some((clip) => clip.id === store.selectedMidiClipId && clip.channelId))
+  const editorView = preferArrangeView(store.view)
+  const rackRoll = editorView === 'beats' && store.project.tracks.some((track) => track.midiClips.some((clip) => clip.id === store.selectedMidiClipId && clip.channelId))
   useEffect(() => {
     if (!rackRoll || phone) return
     setDock((value) => (value < 640 ? 640 : value))
@@ -173,6 +238,14 @@ export function App() {
   const armedPeers = useRef(new Set<string>())
   const launchKey = useRef('')
   const publishTimer = useRef(0)
+  const roomTimer = useRef(0)
+  const versionSave = useRef<(reason: VersionReason) => void>(() => {})
+  const roomSave = useRef<() => void>(() => {})
+  const [versionTick, setVersionTick] = useState(0)
+  useEffect(() => {
+    const timer = window.setInterval(() => versionSave.current('timer'), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
   const pendingFollow = useRef<Record<string, unknown> | null>(null)
   const workletWarned = useRef(false)
   const surfaceRef = useRef(surface)
@@ -192,6 +265,13 @@ export function App() {
 
   useEffect(() => {
     session.bindArrangement(store)
+    session.setRoomPersistence({
+      load: (code) => loadRoomCopy(code),
+      loadBuffers: async (projectId) => (await loadProject(projectId).catch(() => null))?.buffers ?? new Map(),
+      save: async () => {
+        roomSave.current()
+      },
+    })
     session.setTakeHandler((take) => {
       const channels = take.sampleRate === engine.sampleRate
         ? take.channels
@@ -213,7 +293,7 @@ export function App() {
     session.setControlHandler((cmd) => {
       const action = String(cmd.action || '')
       if (action === 'launch' || action === 'scene' || action === 'stop-clips' || action === 'back') {
-        if (session.state.role === 'host') return
+        if (!FEATURES.session || session.state.role === 'host') return
         const next = applyTransportLaunch(
           { launched: store.launched, at: store.launchAt, gen: store.launchGen, mode: store.transportMode },
           {
@@ -302,12 +382,17 @@ export function App() {
       if (session.state.status === 'live') {
         window.clearTimeout(publishTimer.current)
         publishTimer.current = window.setTimeout(() => session.publishEdits(), 40)
+        if (session.sharesRoom()) {
+          window.clearTimeout(roomTimer.current)
+          roomTimer.current = window.setTimeout(() => roomSave.current(), 600)
+        }
       }
       const key = `${store.transportMode}:${JSON.stringify(store.launched)}:${JSON.stringify(store.launchAt)}:${JSON.stringify(store.launchGen)}`
       const pending = store.takePendingTransport()
       const playing = engine.status === 'playing' || engine.status === 'recording'
       if (session.state.role !== 'guest' && pending) {
-        if (!playing && store.transportMode === 'session' && Object.values(store.launched).some(Boolean)) {
+        const sessionLaunch = FEATURES.session && store.transportMode === 'session'
+        if (!playing && sessionLaunch && Object.values(store.launched).some(Boolean)) {
           void playFrom(engine.positionSamples, 'session', 'session-launch')
         } else {
           const at = Number(pending.timelineSample)
@@ -319,9 +404,9 @@ export function App() {
             hostPerfAtSample: engine.perfAtTimeline(sample) ?? performance.now() + lead,
             tempo: store.project.tempo,
             timeSignature: store.project.timeSignature,
-            mode: store.transportMode,
+            mode: preferArrangeTransport(store.transportMode),
           })
-          if (playing && store.transportMode === 'session') {
+          if (playing && sessionLaunch) {
             if (engine.currentMode() !== 'session') engine.adoptSession()
             else engine.kickSession()
           } else if (playing && pending.action === 'back') engine.adoptArrangement()
@@ -329,7 +414,7 @@ export function App() {
       }
       if (key !== launchKey.current) {
         launchKey.current = key
-        if (session.state.role === 'guest') {
+        if (FEATURES.session && session.state.role === 'guest') {
           if (store.transportMode === 'arrangement') {
             if (playing && engine.currentMode() === 'session') engine.adoptArrangement()
           } else if (playing && engine.currentMode() !== 'session') engine.adoptSession()
@@ -340,7 +425,7 @@ export function App() {
     })
     const followTimer = window.setInterval(() => {
       if (session.state.role === 'guest') return
-      const rolling = (engine.status === 'playing' || engine.status === 'recording') && store.transportMode === 'session'
+      const rolling = FEATURES.session && (engine.status === 'playing' || engine.status === 'recording') && store.transportMode === 'session'
       store.tickSession(engine.currentTimelineSample(), rolling)
     }, 40)
     return () => {
@@ -382,8 +467,8 @@ export function App() {
     let lastQuota = 0
     let cancel = false
     const snapshot = (): WorkspaceSnapshot => ({
-      view: store.view,
-      transportMode: store.transportMode,
+      view: preferArrangeView(store.view),
+      transportMode: preferArrangeTransport(store.transportMode),
       positionSamples: Math.round(engine.positionSamples),
       selectedTrackId: store.selectedTrackId,
       surface: surfaceRef.current,
@@ -413,8 +498,8 @@ export function App() {
     }
     const restoreSaved = (saved: NonNullable<Awaited<ReturnType<typeof loadLastProject>>>) => {
       store.loadProject(saved.project, saved.buffers)
-      store.setView(saved.workspace.view)
-      store.setTransportMode(saved.workspace.transportMode)
+      store.setView(preferArrangeView(saved.workspace.view))
+      store.setTransportMode(preferArrangeTransport(saved.workspace.transportMode))
       if (saved.workspace.selectedTrackId) store.selectTrack(saved.workspace.selectedTrackId)
       if (saved.workspace.surface === 'artist') {
         setSurface('studio')
@@ -431,7 +516,9 @@ export function App() {
       await requestPersistentStorage()
       const saved = await loadLastProject().catch(() => null)
       if (cancel) return
-      if (launch.plan === 'empty') {
+      if (roomOwnsOpenProject(session.state.status)) {
+        /* the room copy already replaced this tab */
+      } else if (launch.plan === 'empty') {
         remember(NEW_PROJECT)
         if (!launch.reload && saved && shouldKeepProject(saved.project, saved.buffers.size) && !isSessionLink(window.location.search)) {
           const kept = await saveProject(saved.project, saved.buffers, saved.workspace).catch(() => 'fail' as const)
@@ -486,6 +573,7 @@ export function App() {
     const flush = () => {
       window.clearTimeout(timer)
       write(true)
+      roomSave.current()
     }
     flushSave.current = flush
     const onVisible = () => {
@@ -827,7 +915,7 @@ export function App() {
 
   async function followPlay(cmd: Record<string, unknown>) {
     await ready()
-    if (cmd.launches && typeof cmd.launches === 'object') {
+    if (FEATURES.session && cmd.launches && typeof cmd.launches === 'object') {
       store.replaceSession({
         launched: cmd.launches as Record<string, string | null>,
         at: cmd.launchAt && typeof cmd.launchAt === 'object' ? (cmd.launchAt as Record<string, number>) : {},
@@ -848,7 +936,7 @@ export function App() {
       nowPerf: performance.now(),
       countInMs: counting ? Number(cmd.countInMs) || 0 : 0,
     })
-    const mode = cmd.mode === 'session' ? 'session' : 'arrangement'
+    const mode = preferArrangeTransport(cmd.mode === 'session' ? 'session' : 'arrangement')
     if (counting) engine.armCountIn(tempo, signature, Number(cmd.countInBars) === 2 ? 2 : 1)
     await engine.playAtPerf(Number(cmd.timelineSample) || 0, localPerf, mode)
   }
@@ -890,6 +978,7 @@ export function App() {
       session.requestTransport({ action: 'stop' })
       return
     }
+    const wasRecording = engine.status === 'recording'
     const decision = stopPress(engine.status, store.project, engine.currentTimelineSample())
     if (decision.action === 'home') {
       await locate(decision.sample)
@@ -912,7 +1001,7 @@ export function App() {
         || store.project.tracks.find((item) => item.armed && (capture.peerId ? item.input === `remote:${capture.peerId}` : isLocalInput(item.input) || item.input.startsWith('mic:')))
       if (!track) continue
       const slot = store.sessionSlot
-      const intoSlot = slot && slot.trackId === track.id && capture.source === 'local'
+      const intoSlot = FEATURES.session && slot && slot.trackId === track.id && capture.source === 'local'
       if (intoSlot && slot) {
         const bufferId = uid('buf')
         store.addAsset({
@@ -1016,6 +1105,57 @@ export function App() {
     }
     session.broadcastTransport({ action: 'stop', timelineSample: end })
     store.endTake()
+    if (wasRecording) versionSave.current('record')
+  }
+
+  async function rememberVersion(reason: VersionReason) {
+    if (isUntouchedEmpty(store.project) && store.buffers.size === 0) return
+    const at = Date.now()
+    const digest = digestProject(store.project)
+    const listed = await listVersions(store.project.id).catch(() => [])
+    const last = listed[0]
+    if (!shouldSaveVersion({ reason, lastAt: last?.at ?? null, now: at, digest, lastDigest: last?.digest ?? null })) return
+    let storedName = ''
+    try { storedName = localStorage.getItem('cueharbor-name') || '' } catch { storedName = '' }
+    const by = session.state.name || storedName || 'You'
+    const result = await saveVersion({
+      id: uid('ver'),
+      projectId: store.project.id,
+      roomCode: session.state.code || '',
+      name: versionTitle(reason, at),
+      by,
+      at,
+      reason,
+      digest,
+      project: musicalClone(store.project),
+    }).catch(() => 'fail' as const)
+    if (result !== 'ok') return
+    if (reason !== 'timer') store.toast(reason === 'record' ? 'Saved a recording version' : 'Saved a version')
+    setVersionTick((value) => value + 1)
+  }
+
+  async function saveSharedRoom() {
+    const code = session.state.code
+    const role = session.state.role
+    if (!code || (role !== 'host' && role !== 'guest') || !session.sharesRoom()) return
+    const copy = buildRoomCopy({
+      code,
+      role,
+      name: session.state.name || 'Guest',
+      savedAt: Date.now(),
+      project: store.project,
+      journal: store.sync.snapshot(),
+    })
+    const result = await saveRoomCopy(copy).catch(() => 'fail' as const)
+    if (result === 'ok') session.markRoomSaved(copy.savedAt, role)
+    if (result === 'quota') store.toast('This browser is out of space, so the room copy could not be kept.', 'warn')
+  }
+
+  versionSave.current = (reason) => {
+    void rememberVersion(reason)
+  }
+  roomSave.current = () => {
+    void saveSharedRoom()
   }
 
   function openPerform(mode: 'keys' | 'drums') {
@@ -1065,7 +1205,7 @@ export function App() {
       await stop()
       return
     }
-    const slot = store.sessionSlot
+    const slot = FEATURES.session ? store.sessionSlot : null
     const slotTrack = slot ? store.project.tracks.find((track) => track.id === slot.trackId) : undefined
     const intoSlot = Boolean(slot && slotTrack && (slotTrack.type === 'audio' || slotTrack.type === 'midi'))
     if (!hasArmedRecord(store.project.tracks)) {
@@ -1094,7 +1234,7 @@ export function App() {
     const settings = store.recordSettings()
     const punched = settings.punchEnabled ? punchWindow(settings, store.project.sampleRate, store.project.tempo, store.project.timeSignature) : null
     const alreadyPlaying = engine.status === 'playing'
-    const transportMode = intoSlot || store.transportMode === 'session' || engine.currentMode() === 'session' ? 'session' : 'arrangement'
+    const transportMode = FEATURES.session && (intoSlot || store.transportMode === 'session' || engine.currentMode() === 'session') ? 'session' : 'arrangement'
     let fromSample = Math.round(engine.currentTimelineSample())
     if (!alreadyPlaying && punched) fromSample = punched.playFrom
     else if (!alreadyPlaying && settings.loop && store.project.loopEnabled) fromSample = store.project.loopStartSample
@@ -1148,8 +1288,8 @@ export function App() {
 
   function workspaceNow(): WorkspaceSnapshot {
     return {
-      view: store.view,
-      transportMode: store.transportMode,
+      view: preferArrangeView(store.view),
+      transportMode: preferArrangeTransport(store.transportMode),
       positionSamples: Math.round(engine.positionSamples),
       selectedTrackId: store.selectedTrackId,
       surface,
@@ -1314,7 +1454,7 @@ async function importDropped(files: FileList) {
     await importAudio(transfer.files)
   }
 
-  const rollWanted = !!store.selectedMidiClipId && (store.view === 'arrange' || store.view === 'beats')
+  const rollWanted = !!store.selectedMidiClipId && (editorView === 'arrange' || editorView === 'beats')
   const panel: 'room' | 'piano' | 'rack' | 'scaler' | 'pads' =
     surface !== 'studio' || phonePane === 'room' ? 'room'
     : store.padsTrackId ? 'pads'
@@ -1327,10 +1467,13 @@ async function importDropped(files: FileList) {
     || store.project.tracks.find((track) => track.type === 'midi')
   editorPanel.current = panel
   useEffect(() => {
+    publishAwareness.current()
+  }, [panel])
+  useEffect(() => {
     if (panel !== 'piano' || phone) return
     setDock(pianoDockWidth(window.innerWidth))
   }, [panel, phone])
-  const studioTab: StudioTab = collabOpen ? 'collab' : store.view
+  const studioTab: StudioTab = collabOpen ? 'collab' : editorView
   const collabShown = collabPanelVisible(studioTab)
   const dockShown = !collabShown && dockVisible({ surface, panel, dockOpen: false })
   const soundReserve = !phone && dockShown && dockEdge === 'right' ? dock : 0
@@ -1363,14 +1506,15 @@ async function importDropped(files: FileList) {
   }
 
   function showView(view: 'arrange' | 'mix' | 'beats' | 'session') {
+    const next = preferArrangeView(view)
     hideCollab()
     setSurface('studio')
     setMenuOpen(false)
-    if (view !== 'arrange' || phone) {
+    if (next !== 'arrange' || phone) {
       setPianoOpen(false)
       if (phone) store.closePiano()
     }
-    store.setView(view)
+    store.setView(next)
   }
 
   function closePiano() {
@@ -1438,39 +1582,14 @@ async function importDropped(files: FileList) {
           <h1>CueHarbor</h1>
         </div>
         <input className="project-name" aria-label="Project name" value={store.project.name} onChange={(event) => store.renameProject(event.target.value)} />
-        <div className="views">
-          {(['arrange', 'mix', 'beats'] as const).map((view) => {
-            const copy = copyOf(VIEW_COPY, view)
-            return (
-              <button
-                key={view}
-                type="button"
-                className={surface === 'studio' && !collabShown && phonePane !== 'room' && store.view === view ? 'active' : ''}
-                {...described(copy)}
-                onClick={() => showView(view)}
-              >
-                {copy.label}
-              </button>
-            )
-          })}
-          <button
-            type="button"
-            className={surface === 'studio' && !collabShown && store.view === 'session' ? 'active' : ''}
-            {...described(copyOf(VIEW_COPY, 'session'))}
-            onClick={() => showView('session')}
-          >
-            Session
-          </button>
-          <button
-            type="button"
-            className={`collab-tab ${collabShown ? 'active' : ''}`}
-            {...described(copyOf(VIEW_COPY, 'collab'))}
-            onClick={showCollab}
-          >
-            Collab
-            {collabBadge && <span className="collab-badge" aria-hidden />}
-          </button>
-        </div>
+        <ViewSwitcher
+          active={surface === 'studio' ? editorView : null}
+          collabShown={collabShown}
+          phonePane={phonePane}
+          collabBadge={collabBadge}
+          onView={showView}
+          onCollab={showCollab}
+        />
         <HistoryButtons canUndo={store.canUndo} canRedo={store.canRedo} onUndo={() => store.undo()} onRedo={() => store.redo()} />
         <TipButton
           className={`unstuck-btn ${unstuckOpen ? 'on' : ''}`}
@@ -1506,13 +1625,13 @@ async function importDropped(files: FileList) {
               else if (action === 'quantize') { setMenuOpen(false); store.openQuantize() }
               else if (action === 'to-start') { setMenuOpen(false); void returnToStart() }
               else if (action === 'loop') store.toggle('loopEnabled')
-              else if (action === 'session-mode') {
+              else if (FEATURES.session && action === 'session-mode') {
                 setMenuOpen(false)
                 hideCollab()
                 setSurface('studio')
                 if (store.transportMode === 'session') store.backToArrangement()
                 else store.enterSession()
-              } else if (action === 'capture') { setMenuOpen(false); store.captureToArrangement() }
+              } else if (FEATURES.session && action === 'capture') { setMenuOpen(false); store.captureToArrangement() }
               else if (action === 'dock') setDockEdge(dockEdge === 'right' ? 'bottom' : 'right')
               else if (action === 'scaler') openPlugin('play')
               else if (action === 'players') { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); setPlayersOpen(true) }
@@ -1540,7 +1659,7 @@ async function importDropped(files: FileList) {
           takeProgress={session.state.takeProgress}
         />
       )}
-      {surface === 'studio' && !collabShown && phonePane !== 'room' && store.view === 'arrange' && panel !== 'piano' && (
+      {surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano' && (
         <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
           <div className="tool-group">
           <SnapControl store={store} />
@@ -1582,6 +1701,9 @@ async function importDropped(files: FileList) {
               simple={false}
               session={session}
               engine={engine}
+              store={store}
+              versionTick={versionTick}
+              onSaveVersion={() => versionSave.current('manual')}
               onCreate={() => {
                 engine.unlock()
                 session.primeMediaFromGesture()
@@ -1601,7 +1723,7 @@ async function importDropped(files: FileList) {
         {surface === 'studio' && !collabShown && (
           <div className="main-pane">
             <div className="editor">
-              {store.view === 'arrange' && (
+              {editorView === 'arrange' && (
                 <ArrangeView
                   store={store}
                   engine={engine}
@@ -1616,9 +1738,9 @@ async function importDropped(files: FileList) {
                   onLibraryClose={() => { engine.stopPreview(); setSoundsOpen(false) }}
                 />
               )}
-              {store.view === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} />}
-              {store.view === 'beats' && <BeatView store={store} engine={engine} />}
-              {store.view === 'session' && (
+              {editorView === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} />}
+              {editorView === 'beats' && <BeatView store={store} engine={engine} />}
+              {FEATURES.session && editorView === 'session' && (
                 <SessionView
                   store={store}
                   engine={engine}
@@ -1630,7 +1752,7 @@ async function importDropped(files: FileList) {
             </div>
           </div>
         )}
-        {soundsOpen && store.view !== 'arrange' && (
+        {soundsOpen && editorView !== 'arrange' && (
           <SoundBrowser store={store} engine={engine} phone={phone} reserve={soundReserve} onWidth={setSoundWidth} onClose={() => { engine.stopPreview(); setSoundsOpen(false) }} />
         )}
         {dockShown && <div

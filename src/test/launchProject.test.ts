@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { emptyOmni } from '../instruments/patch'
-import { isSessionLink, isUntouchedEmpty, needsNewProjectConfirm, NEW_PROJECT, planLaunch, readTab, shouldKeepProject, TAB_LIVE, TAB_PROJECT } from '../model/launchProject'
+import { isSessionLink, isUntouchedEmpty, needsNewProjectConfirm, NEW_PROJECT, planLaunch, readTab, roomOwnsOpenProject, shouldKeepProject, TAB_LIVE, TAB_PROJECT } from '../model/launchProject'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
 
@@ -25,6 +25,8 @@ describe('fresh project launch', () => {
 
   it('opens a blank project on a fresh launch and restores on reload', () => {
     expect(planLaunch({ reload: false, search: '', current: null })).toBe('empty')
+    expect(roomOwnsOpenProject('idle')).toBe(false)
+    expect(roomOwnsOpenProject('live')).toBe(true)
     expect(planLaunch({ reload: true, search: '', current: 'prj_song' })).toBe('restore')
     expect(planLaunch({ reload: true, search: '', current: null })).toBe('restore')
     expect(planLaunch({ reload: true, search: '', current: NEW_PROJECT })).toBe('empty')

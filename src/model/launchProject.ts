@@ -26,6 +26,11 @@ export function isSessionLink(search: string): boolean {
 
 export type LaunchPlan = 'restore' | 'empty'
 
+/** A live room owns the open project. Launch must not replace it with a blank or an older local file. */
+export function roomOwnsOpenProject(status: string) {
+  return status === 'live'
+}
+
 /**
  * A new tab starts empty. Reloading the same tab restores.
  * A session invite restores, so the room opens instead of a blank project.
