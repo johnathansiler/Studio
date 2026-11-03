@@ -224,6 +224,38 @@ describe('peer asset transfer', () => {
     expect(assetRelayCredit('relay', [{ selected: true, candidateType: 'relay', bytesSent: 9_000_000, bytesReceived: 1 }])).toBe(0)
   })
 
+  it('lets a View seat request audio and refuses to publish it', async () => {
+    const asset = tone(8000)
+    const view = new AssetExchange(memoryAssetStore())
+    const quiet = await view.tick({
+      selfId: 'view',
+      held: [asset],
+      referenced: ['buf_vocal'],
+      peers: [peer('late', 'direct')],
+      publish: false,
+    })
+    expect(quiet.signal ?? []).toEqual([])
+    expect(quiet.actions.some((action) => action.binary || action.text?.includes('"want"'))).toBe(false)
+    const refused = await view.handleControl('late', JSON.stringify({ t: 'want', id: 'buf_vocal', sha256: 'ab'.repeat(32), have: [] }), 'direct')
+    expect(refused.some((action) => action.binary)).toBe(false)
+    expect(refused.some((action) => action.text?.includes('"miss"'))).toBe(true)
+
+    const listener = new AssetExchange(memoryAssetStore())
+    const host = new AssetExchange(memoryAssetStore())
+    const listed = await host.tick({ selfId: 'host', held: [asset], referenced: ['buf_vocal'], peers: [peer('view', 'direct')] })
+    listener.noteCatalog('host', listed.signal || [])
+    const need = await listener.tick({
+      selfId: 'view',
+      held: [],
+      referenced: ['buf_vocal'],
+      peers: [peer('host', 'direct')],
+      publish: false,
+    })
+    expect(need.actions.some((action) => action.text?.includes('"want"'))).toBe(true)
+    expect(need.actions.some((action) => action.binary)).toBe(false)
+    expect(need.signal ?? []).toEqual([])
+  })
+
   it('shows a labeled transfer row', () => {
     expect(assetStatusLabel('receiving', 0.4, false)).toBe('Receiving 40%')
     expect(assetStatusLabel('waiting', 0, false)).toBe('Waiting for a direct link')

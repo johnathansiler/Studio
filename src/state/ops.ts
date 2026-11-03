@@ -182,6 +182,135 @@ export function syncMessageOk(msg: { t?: string; ops?: unknown; project?: unknow
   return text.length <= 400_000
 }
 
+/** What a share link grants after the host admits the guest. Hosts are always Edit. */
+export type CollabAccess = 'view' | 'comment' | 'edit'
+
+export const ACCESS_ROLES: CollabAccess[] = ['view', 'comment', 'edit']
+
+export const ACCESS_COPY: Record<CollabAccess, { label: string; hint: string }> = {
+  view: { label: 'View', hint: 'Listen only.' },
+  comment: { label: 'Comment', hint: 'Add timeline comments and markers.' },
+  edit: { label: 'Edit', hint: 'Full edit.' },
+}
+
+export interface TimelineComment {
+  id: string
+  from: string
+  name: string
+  text: string
+  /** Quarter notes from the start of the song. */
+  beat: number
+  at: number
+}
+
+export function parseCollabAccess(value: unknown): CollabAccess | null {
+  const text = String(value ?? '').trim().toLowerCase()
+  if (text === 'view' || text === 'listen') return 'view'
+  if (text === 'comment' || text === 'comments') return 'comment'
+  if (text === 'edit' || text === 'full') return 'edit'
+  return null
+}
+
+/** Hosts edit. A guest with no invite is View. */
+export function collabAccessFor(seat: 'host' | 'guest', access: unknown): CollabAccess {
+  if (seat === 'host') return 'edit'
+  return parseCollabAccess(access) ?? 'view'
+}
+
+export function mayWriteProject(access: CollabAccess): boolean {
+  return access === 'edit'
+}
+
+export function mayComment(access: CollabAccess): boolean {
+  return access === 'comment' || access === 'edit'
+}
+
+/** View and Comment guests follow the host project. Edit guests change it. */
+export function locksProject(seat: 'host' | 'guest' | undefined, access: CollabAccess): boolean {
+  return seat === 'guest' && !mayWriteProject(access)
+}
+
+/** Comment markers live under `comments/`. Everything else is a project edit. */
+export function isCommentOp(op: { p?: unknown } | null | undefined): boolean {
+  const path = typeof op?.p === 'string' ? op.p : ''
+  return path === 'comments' || path.startsWith('comments/')
+}
+
+/**
+ * Edit may send any musical op.
+ * Comment may send only comment paths.
+ * View may send none.
+ */
+export function opsAllowed(access: CollabAccess, ops: Array<{ p?: unknown }>): boolean {
+  if (mayWriteProject(access)) return true
+  if (!ops.length || !mayComment(access)) return false
+  return ops.every((op) => isCommentOp(op))
+}
+
+/** Server and client gate for project traffic. Sync hello is a read, so every admitted seat may send it. */
+export function relayProjectTraffic(access: CollabAccess, type: string, ops?: unknown): boolean {
+  if (type === 'sync-hello') return true
+  if (type === 'sync-ops') return opsAllowed(access, asOps(ops))
+  if (type === 'sync-checkpoint' || type === 'project' || type === 'project-asset' || type === 'asset-index') return mayWriteProject(access)
+  if (type === 'comment') return mayComment(access)
+  return false
+}
+
+export function accessForInvite(invites: Map<string, CollabAccess> | Record<string, CollabAccess | undefined>, token: string): CollabAccess {
+  const key = token.replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
+  if (!key) return 'view'
+  const role = invites instanceof Map ? invites.get(key) : invites[key]
+  return parseCollabAccess(role) ?? 'view'
+}
+
+/** `/?session=CODE&invite=TOKEN&role=comment`. The token is what the server trusts. */
+export function roleShareUrl(origin: string, code: string, token: string, role: CollabAccess): string {
+  const params = new URLSearchParams({
+    session: code.toUpperCase().replace(/[^A-Z0-9]/g, ''),
+    invite: token.replace(/[^A-Za-z0-9]/g, '').slice(0, 16),
+    role,
+  })
+  return `${origin.replace(/\/$/, '')}/?${params.toString()}`
+}
+
+export function readInviteToken(search: string): string {
+  const query = search.includes('?') ? search.slice(search.indexOf('?')) : search.startsWith('?') ? search : `?${search}`
+  return (new URLSearchParams(query).get('invite') || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
+}
+
+export function sanitizeTimelineComment(input: {
+  text?: unknown
+  beat?: unknown
+  from: string
+  name: string
+  at?: number
+  id?: string
+}): TimelineComment | null {
+  const text = String(input.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 240)
+  const beat = Number(input.beat)
+  if (!text || !Number.isFinite(beat) || beat < 0 || beat > 1_000_000) return null
+  const id = String(input.id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40)
+  return {
+    id: id || `c_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    from: String(input.from || '').slice(0, 80),
+    name: String(input.name || 'Guest').slice(0, 40) || 'Guest',
+    text,
+    beat: Math.round(beat * 1000) / 1000,
+    at: Number.isFinite(input.at) ? Number(input.at) : Date.now(),
+  }
+}
+
+export function isTimelineComment(value: unknown): value is TimelineComment {
+  if (!value || typeof value !== 'object') return false
+  const item = value as TimelineComment
+  return typeof item.id === 'string' && item.id.length > 0 && typeof item.text === 'string' && item.text.length > 0 && typeof item.name === 'string' && Number.isFinite(item.beat)
+}
+
+function asOps(ops: unknown): Array<{ p?: unknown }> {
+  if (!Array.isArray(ops)) return []
+  return ops.filter((op) => op && typeof op === 'object') as Array<{ p?: unknown }>
+}
+
 export function setPath(root: object, path: string, value: unknown) {
   const parts = path.split('/')
   let node: any = root

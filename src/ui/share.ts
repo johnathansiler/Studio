@@ -1,5 +1,24 @@
 import { downloadBlob } from './format'
 
+/** Phones use the system share sheet. Everywhere else copies the link. */
+export async function presentShare(url: string, title: string): Promise<'shared' | 'copied' | 'aborted' | 'failed'> {
+  const nav = navigator as Navigator & { share?: (data: ShareData) => Promise<void> }
+  if (typeof nav.share === 'function') {
+    try {
+      await nav.share({ title, text: title, url })
+      return 'shared'
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return 'aborted'
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(url)
+    return 'copied'
+  } catch {
+    return 'failed'
+  }
+}
+
 export async function shareOrDownload(filename: string, blob: Blob, phone: boolean): Promise<'shared' | 'downloaded'> {
   const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' })
   const nav = navigator as Navigator & { canShare?: (data?: ShareData) => boolean }

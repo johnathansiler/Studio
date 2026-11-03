@@ -6,7 +6,7 @@ import { rememberDiag, sanitizeDiag, type DiagReport } from '../src/model/diag.t
 import { sessionHello } from '../src/model/negotiate.ts'
 import { CAP_NOTICE, type UsageSnapshot } from '../src/model/usage.ts'
 import { offersFromSignal, type AssetOffer } from '../src/remote/assetSignal.ts'
-import { syncMessageOk } from '../src/state/ops.ts'
+import { accessForInvite, collabAccessFor, mayWriteProject, parseCollabAccess, relayProjectTraffic, sanitizeTimelineComment, syncMessageOk, type CollabAccess, type TimelineComment } from '../src/state/ops.ts'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -23,6 +23,8 @@ interface Participant {
   id: string
   name: string
   role: 'host' | 'guest'
+  /** View listens. Comment adds markers. Edit changes the project. Hosts are Edit. */
+  access: CollabAccess
   admitted: boolean
   hand: boolean
   music: boolean
@@ -62,6 +64,10 @@ interface Session {
   held: Map<string, Participant>
   clients: Map<string, Client>
   chat: ChatMessage[]
+  /** Share tokens minted by the host. The link carries the token; the role stays here. */
+  invites: Map<string, CollabAccess>
+  inviteByRole: Map<CollabAccess, string>
+  comments: TimelineComment[]
   diag: DiagReport[]
   /** Who has which wav. Ids and checksums only. The bytes never land here. */
   indexes: Map<string, AssetOffer[]>
@@ -106,6 +112,20 @@ function freshCode() {
   return code
 }
 
+function mintInvite(session: Session, role: CollabAccess) {
+  const existing = session.inviteByRole.get(role)
+  if (existing) return existing
+  let token = codeAlphabet() + codeAlphabet().slice(0, 2)
+  while (session.invites.has(token)) token = codeAlphabet() + codeAlphabet().slice(0, 2)
+  session.invites.set(token, role)
+  session.inviteByRole.set(role, token)
+  return token
+}
+
+function seatAccess(person: Participant) {
+  return collabAccessFor(person.role, person.access)
+}
+
 function roster(session: Session) {
   return [...session.participants.values()]
 }
@@ -134,6 +154,7 @@ function publicSession(session: Session, self: Participant, ice: IceConfig, snap
     iceTransportPolicy: ice.iceTransportPolicy,
     participants: roster(session),
     chat: session.chat.slice(-80),
+    comments: session.comments.slice(-200),
     reason: reason || '',
     sfu,
     usage: {
@@ -517,7 +538,7 @@ async function acceptTake(req: IncomingMessage, res: ServerResponse) {
   const session = sessions.get(code)
   const person = session?.participants.get(from)
   const host = session ? session.clients.get(session.hostId) : undefined
-  if (!session || !person?.admitted || person.role !== 'guest' || !host || !takeId || !Number.isInteger(index) || !Number.isInteger(total) || total < 1 || index < 0 || index >= total) {
+  if (!session || !person?.admitted || person.role !== 'guest' || !mayWriteProject(seatAccess(person)) || !host || !takeId || !Number.isInteger(index) || !Number.isInteger(total) || total < 1 || index < 0 || index >= total) {
     return json(res, { error: 'Take upload was rejected.' }, 403)
   }
   const chunk = typeof body.chunk === 'string' ? body.chunk : ''
@@ -584,6 +605,38 @@ async function handle(client: Client, msg: Record<string, unknown>) {
   const self = session.participants.get(client.id)
   if (!self) return
 
+  if (msg.t === 'invite' && self.role === 'host') {
+    const role = parseCollabAccess(msg.role)
+    if (!role) return
+    const token = mintInvite(session, role)
+    send(client.ws, { t: 'invite', role, token })
+    return
+  }
+  if (msg.t === 'access' && self.role === 'host') {
+    const person = session.participants.get(String(msg.id))
+    const role = parseCollabAccess(msg.role)
+    if (!person || person.role === 'host' || !role) return
+    person.access = role
+    if (!mayWriteProject(seatAccess(person))) forgetIndex(session, person.id)
+    emitRoster(session)
+    record(session, 'access', `${person.id} is now ${role}`, client.id)
+    return
+  }
+  if (msg.t === 'comment' && self.admitted) {
+    if (!relayProjectTraffic(seatAccess(self), 'comment')) return
+    const comment = sanitizeTimelineComment({
+      text: msg.text,
+      beat: msg.beat,
+      from: client.id,
+      name: self.name,
+      id: crypto.randomUUID().replace(/-/g, '').slice(0, 16),
+    })
+    if (!comment) return
+    session.comments.push(comment)
+    if (session.comments.length > 200) session.comments.shift()
+    broadcast(session, { t: 'comment', comment })
+    return
+  }
   if (msg.t === 'admit' && self.role === 'host') {
     const person = session.participants.get(String(msg.id))
     if (!person) return
@@ -680,6 +733,7 @@ async function handle(client: Client, msg: Record<string, unknown>) {
   }
   if ((msg.t === 'sync-hello' || msg.t === 'sync-ops' || msg.t === 'sync-checkpoint') && self.admitted) {
     if (!syncMessageOk(msg)) return
+    if (!relayProjectTraffic(seatAccess(self), String(msg.t), msg.ops)) return
     const payload = { ...msg, from: client.id }
     if (msg.to) {
       const target = session.clients.get(String(msg.to))
@@ -689,11 +743,11 @@ async function handle(client: Client, msg: Record<string, unknown>) {
     broadcast(session, payload, client.id)
     return
   }
-  if (msg.t === 'project' && self.role === 'host') {
+  if (msg.t === 'project' && self.role === 'host' && relayProjectTraffic(seatAccess(self), 'project')) {
     broadcast(session, { t: 'project', from: client.id, project: msg.project, rev: msg.rev }, client.id)
     return
   }
-  if (msg.t === 'asset-index' && self.admitted) {
+  if (msg.t === 'asset-index' && self.admitted && relayProjectTraffic(seatAccess(self), 'asset-index')) {
     const offers = offersFromSignal(msg)
     if (!offers) return
     session.indexes.set(client.id, offers)
@@ -728,6 +782,9 @@ async function hello(client: Client, msg: Record<string, unknown>) {
       held: new Map(),
       clients: new Map(),
       chat: [],
+      invites: new Map(),
+      inviteByRole: new Map(),
+      comments: [],
       diag: [],
       indexes: new Map(),
       pubs: new Map(),
@@ -737,6 +794,7 @@ async function hello(client: Client, msg: Record<string, unknown>) {
       id,
       name,
       role: 'host',
+      access: 'edit',
       admitted: true,
       hand: false,
       music: true,
@@ -781,6 +839,7 @@ async function hello(client: Client, msg: Record<string, unknown>) {
       }
     }
     session.held.delete(resumeId)
+    if (existing.role !== 'host' && !existing.access) existing.access = 'view'
     session.participants.set(resumeId, existing)
     existing.name = name || existing.name
     session.clients.set(resumeId, client)
@@ -788,7 +847,10 @@ async function hello(client: Client, msg: Record<string, unknown>) {
     client.name = existing.name
     client.sessionCode = code
     session.emptyAt = undefined
-    if (resumeId === session.hostId) existing.role = 'host'
+    if (resumeId === session.hostId) {
+      existing.role = 'host'
+      existing.access = 'edit'
+    }
     record(session, 'join', decision.reason, resumeId)
     await sendWelcome(session, client, existing, decision.reason)
     emitRoster(session)
@@ -801,6 +863,7 @@ async function hello(client: Client, msg: Record<string, unknown>) {
     id,
     name,
     role: 'guest',
+    access: accessForInvite(session.invites, msg.invite ? String(msg.invite) : ''),
     admitted: false,
     hand: false,
     music: true,

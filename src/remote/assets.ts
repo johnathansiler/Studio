@@ -384,6 +384,10 @@ export class AssetExchange {
   private skipUntil = new Map<string, number>()
   private attempts = new Map<string, number>()
   private statuses = new Map<string, StatusDraft>()
+  /** Ids we already have and must not request again. View seats are not a source. */
+  private satisfied = new Set<string>()
+  /** Edit seats send bytes. View and Comment only request what they are missing. */
+  private publishing = true
   private announced = ''
   private readonly store: AssetByteStore
   private readonly now: () => number
@@ -402,7 +406,15 @@ export class AssetExchange {
     this.skipUntil.clear()
     this.attempts.clear()
     this.statuses.clear()
+    this.satisfied.clear()
+    this.publishing = true
     this.announced = ''
+  }
+
+  /** A live role change stops or resumes sending. Receiving does not use this flag. */
+  setPublishing(publish: boolean) {
+    this.publishing = publish
+    if (!publish) this.outbound.clear()
   }
 
   noteCatalog(peerId: string, offers: AssetOffer[]) {
@@ -480,7 +492,7 @@ export class AssetExchange {
     return { actions: [], completed: [audio] }
   }
 
-  async tick(input: { selfId: string; held: AudioAsset[]; referenced: string[]; peers: AssetPeerPath[] }): Promise<{
+  async tick(input: { selfId: string; held: AudioAsset[]; referenced: string[]; peers: AssetPeerPath[]; publish?: boolean }): Promise<{
     signal: AssetOffer[] | null
     actions: AssetAction[]
     completed: AudioAsset[]
@@ -489,9 +501,18 @@ export class AssetExchange {
   }> {
     const actions: AssetAction[] = []
     const completed: AudioAsset[] = []
-    for (const asset of input.held) await this.rememberAsset(asset)
+    const publish = input.publish !== false
+    this.setPublishing(publish)
+    if (!publish) {
+      for (const id of this.local.keys()) this.satisfied.add(id)
+      this.local.clear()
+    }
+    for (const asset of input.held) {
+      if (publish) await this.rememberAsset(asset)
+      else this.satisfied.add(asset.id)
+    }
     const paths = Object.fromEntries(input.peers.map((peer) => [peer.id, peer.path]))
-    const missing = input.referenced.filter((id) => !this.local.has(id))
+    const missing = input.referenced.filter((id) => !this.local.has(id) && !this.satisfied.has(id))
     for (const id of missing) {
       const holders = this.holdersOf(id)
       const offer = holders.offers[0]
@@ -533,7 +554,7 @@ export class AssetExchange {
         text: JSON.stringify({ t: 'want', id, sha256: offer?.sha256 || partial?.offer.sha256 || '', have } satisfies AssetControlWant),
       })
     }
-    for (const peer of input.peers) {
+    for (const peer of publish ? input.peers : []) {
       const job = this.outbound.get(peer.id)
       if (!job) continue
       if (!assetBytesAllowed(peer.path)) continue
@@ -565,6 +586,7 @@ export class AssetExchange {
   }
 
   private async answerWant(peerId: string, message: AssetControlWant, path: AssetPath): Promise<AssetAction[]> {
+    if (!this.publishing) return [{ peerId, text: JSON.stringify({ t: 'miss', id: message.id } satisfies AssetControlMiss) }]
     const local = this.local.get(message.id)
     if (!local) return [{ peerId, text: JSON.stringify({ t: 'miss', id: message.id } satisfies AssetControlMiss) }]
     if (!assetBytesAllowed(path)) return [{ peerId, text: JSON.stringify({ t: 'wait', id: message.id } satisfies AssetControlWait) }]

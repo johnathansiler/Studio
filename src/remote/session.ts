@@ -18,7 +18,7 @@ import { isSilentTake, nextRelayGather, tcpRelayIceServers, udpIceServers, withT
 import { answerMatches, enqueueSignal, iceDisconnectLimit, ICE_INITIAL_GATHER_MS, ICE_RESTART_VIDEO_HOLD_MS, ICE_STUCK_RESTART_MS, iceRecoveryAction, ignoreIncomingOffer, keepPeerConnection, repeatedOffer, sessionHello, SIGNAL_KEEPALIVE_MS, socketMayOpen, type OutboundSignal } from '../model/negotiate'
 import { sanitizeDiag, type DiagDirection } from '../model/diag'
 import { guestMayRequest, outlineWaveforms, referencedBufferIds } from '../model/sessionSync'
-import { syncMessageOk, type ProjectOp, type StampWire, type SyncHello } from '../state/ops'
+import { collabAccessFor, isTimelineComment, locksProject, mayWriteProject, opsAllowed, parseCollabAccess, relayProjectTraffic, syncMessageOk, type CollabAccess, type ProjectOp, type StampWire, type SyncHello, type TimelineComment } from '../state/ops'
 import type { ProjectSync } from '../state/sync'
 import { CAP_NOTICE } from '../model/usage'
 import { SfuCall, type SfuKind, type SfuPublication } from './sfuCall'
@@ -33,6 +33,7 @@ export interface Participant {
   id: string
   name: string
   role: 'host' | 'guest'
+  access?: CollabAccess
   admitted: boolean
   hand: boolean
   music: boolean
@@ -74,6 +75,7 @@ export interface SessionState {
   name: string
   participants: Participant[]
   chat: ChatMessage[]
+  comments: TimelineComment[]
   musicOn: boolean
   talkOn: boolean
   camOn: boolean
@@ -223,7 +225,11 @@ const PCM_MIN_TARGET = 18
 
 export class SessionClient {
   state: SessionState
-  private connectOpts: { name: string; create?: boolean; code?: string; fresh?: boolean } | null = null
+  private connectOpts: { name: string; create?: boolean; code?: string; fresh?: boolean; invite?: string } | null = null
+  /** Invite token from the share link. The server maps it to View, Comment, or Edit. */
+  private inviteToken = ''
+  private inviteTokens = new Map<CollabAccess, string>()
+  private inviteWait = new Map<CollabAccess, Array<(token: string) => void>>()
   private ws: WebSocket | null = null
   /** One id per page load. A reload mints another so the other side can renegotiate. */
   private instanceId = crypto.randomUUID()
@@ -302,6 +308,7 @@ export class SessionClient {
       name: saved?.name || localStorage.getItem('cueharbor-name') || 'Engineer',
       participants: [],
       chat: [],
+      comments: [],
       musicOn: saved?.musicOn ?? true,
       talkOn: true,
       camOn: saved?.camOn ?? true,
@@ -375,7 +382,7 @@ export class SessionClient {
     this.emit()
   }
 
-  connect(opts: { name: string; create?: boolean; code?: string; fresh?: boolean }) {
+  connect(opts: { name: string; create?: boolean; code?: string; fresh?: boolean; invite?: string }) {
     const next = (opts.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
     const current = (this.state.code || this.connectOpts?.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
     const switching = Boolean(next && current && next !== current)
@@ -391,6 +398,9 @@ export class SessionClient {
     } else if (this.ws && !socketMayOpen(this.ws.readyState)) return
     this.left = false
     this.state.name = opts.name.trim() || 'Guest'
+    if (opts.fresh || opts.create) this.inviteToken = ''
+    else if (opts.invite) this.inviteToken = opts.invite.replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
+    else if (opts.code) this.inviteToken = ''
     localStorage.setItem('cueharbor-name', this.state.name)
     this.state.status = 'connecting'
     this.state.error = undefined
@@ -473,6 +483,10 @@ export class SessionClient {
     this.state.code = undefined
     this.state.role = undefined
     this.state.participants = []
+    this.state.comments = []
+    this.inviteToken = ''
+    this.inviteTokens.clear()
+    this.inviteWait.clear()
     this.state.media = {}
     this.state.hostLeft = false
     this.emit()
@@ -535,6 +549,7 @@ export class SessionClient {
         code: decision.code,
         resumeId: this.resumeId || undefined,
         instanceId: this.instanceId,
+        invite: decision.action === 'join' ? this.inviteToken || undefined : undefined,
       })
     }
     ws.onmessage = (event) => {
@@ -659,6 +674,7 @@ export class SessionClient {
       this.state.code = msg.code
       this.state.participants = msg.participants
       this.state.chat = msg.chat || []
+      this.state.comments = Array.isArray(msg.comments) ? msg.comments.filter(isTimelineComment).slice(-200) : []
       this.rememberIce(msg.iceServers || [], msg.turn || 'none', msg.turnError, msg.iceTransportPolicy)
       this.state.sfu = Boolean(msg.sfu)
       this.state.usageNotice = String(msg.usage?.notice || '')
@@ -737,6 +753,23 @@ export class SessionClient {
     }
     if (msg.t === 'chat') {
       this.state.chat = [...this.state.chat, msg.message]
+      this.emit()
+      return
+    }
+    if (msg.t === 'comment' && isTimelineComment(msg.comment)) {
+      this.state.comments = [...this.state.comments, msg.comment].slice(-200)
+      this.emit()
+      return
+    }
+    if (msg.t === 'invite') {
+      const role = parseCollabAccess(msg.role)
+      const token = String(msg.token || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
+      if (role && token) {
+        this.inviteTokens.set(role, token)
+        const waiters = this.inviteWait.get(role) || []
+        this.inviteWait.delete(role)
+        for (const resolve of waiters) resolve(token)
+      }
       this.emit()
       return
     }
@@ -823,6 +856,50 @@ export class SessionClient {
 
   private hostId() {
     return this.state.participants.find((p) => p.role === 'host')?.id
+  }
+
+  /** Host is Edit. Guests use the access on their roster row. */
+  selfAccess(): CollabAccess {
+    if (this.state.role === 'host') return 'edit'
+    const self = this.state.participants.find((person) => person.id === this.state.selfId)
+    return collabAccessFor('guest', self?.access)
+  }
+
+  /** Ask the server for the stable token for this role, then the UI copies or shares the link. */
+  requestInvite(role: CollabAccess): Promise<string> {
+    const cached = this.inviteTokens.get(role)
+    if (cached) return Promise.resolve(cached)
+    return new Promise((resolve, reject) => {
+      let settled = false
+      const finish = (token: string) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timer)
+        resolve(token)
+      }
+      const timer = window.setTimeout(() => {
+        if (settled) return
+        settled = true
+        const left = (this.inviteWait.get(role) || []).filter((fn) => fn !== finish)
+        if (left.length) this.inviteWait.set(role, left)
+        else this.inviteWait.delete(role)
+        reject(new Error('The invite link did not arrive.'))
+      }, 4000)
+      const waiters = this.inviteWait.get(role) || []
+      waiters.push(finish)
+      this.inviteWait.set(role, waiters)
+      if (waiters.length === 1) this.send({ t: 'invite', role })
+    })
+  }
+
+  setAccess(id: string, role: CollabAccess) {
+    if (this.state.role !== 'host' || !parseCollabAccess(role)) return
+    this.send({ t: 'access', id, role })
+  }
+
+  sendComment(text: string, beat: number) {
+    if (!relayProjectTraffic(this.selfAccess(), 'comment')) return
+    this.send({ t: 'comment', text, beat })
   }
 
   admit(id: string) {
@@ -1121,13 +1198,14 @@ export class SessionClient {
   publishEdits() {
     const store = this.arrangementStore
     if (!store?.sync || this.state.status !== 'live') return
-    const ops = store.sync.peek()
+    const access = this.selfAccess()
+    const ops = store.sync.peek().filter((op) => opsAllowed(access, [op]))
     for (let index = 0; index < ops.length; index += 40) {
       const batch = ops.slice(index, index + 40)
       const message = { t: 'sync-ops', ops: batch }
-      if (syncMessageOk(message)) this.send(message)
+      if (syncMessageOk(message) && relayProjectTraffic(access, 'sync-ops', batch)) this.send(message)
     }
-    if (ops.length) store.sync.drain()
+    if (store.sync.peek().length) store.sync.drain()
     if (this.state.role === 'host') this.state.syncLabel = 'Host · guests follow'
     this.syncAssets()
   }
@@ -1165,12 +1243,14 @@ export class SessionClient {
       },
       store.project,
     )
+    const access = this.selfAccess()
     if (reply.kind === 'ops' && reply.ops.length) {
-      const message = { t: 'sync-ops', to: msg.from, ops: reply.ops }
-      if (syncMessageOk(message)) this.send(message)
+      const allowed = reply.ops.filter((op) => opsAllowed(access, [op]))
+      const message = { t: 'sync-ops', to: msg.from, ops: allowed }
+      if (allowed.length && syncMessageOk(message) && relayProjectTraffic(access, 'sync-ops', allowed)) this.send(message)
       return
     }
-    if (reply.kind === 'checkpoint' && reply.project) {
+    if (reply.kind === 'checkpoint' && reply.project && relayProjectTraffic(access, 'sync-checkpoint')) {
       const project = { ...reply.project, waveforms: outlineWaveforms(store.project, store.buffers) }
       const message = {
         t: 'sync-checkpoint',
@@ -1201,11 +1281,13 @@ export class SessionClient {
     const store = this.arrangementStore
     if (!store?.mergeRemoteCheckpoint || !msg.project) return
     this.usingOps = true
-    if (this.state.role === 'guest') store.remoteFollow = true
+    if (locksProject(this.state.role, this.selfAccess())) store.remoteFollow = true
     const reply = store.mergeRemoteCheckpoint(msg.project, msg.stamps, msg.host ? 'remote' : 'local', Number(msg.lamport) || 0, String(msg.actor || ''), Number(msg.seq) || 0)
-    if (reply.length) {
-      const message = { t: 'sync-ops', ops: reply }
-      if (syncMessageOk(message)) this.send(message)
+    const access = this.selfAccess()
+    const allowed = reply.filter((op) => opsAllowed(access, [op]))
+    if (allowed.length) {
+      const message = { t: 'sync-ops', ops: allowed }
+      if (syncMessageOk(message) && relayProjectTraffic(access, 'sync-ops', allowed)) this.send(message)
     }
     const digest = store.sync?.hello(store.project).digest
     if (msg.digest && digest && digest !== msg.digest && this.syncPasses < 2) {
@@ -1247,6 +1329,7 @@ export class SessionClient {
     const store = this.arrangementStore
     if (!store || this.state.status !== 'live' || !this.state.selfId) return false
     const referenced = referencedBufferIds(store.project)
+    const publish = mayWriteProject(this.selfAccess())
     const held = []
     for (const id of referenced) {
       const asset = store.buffers.get(id) || this.incomingAssets.get(id)
@@ -1257,8 +1340,8 @@ export class SessionClient {
       path: chooseAssetPath(link.assets?.readyState === 'open', this.state.media[id]?.localType || undefined),
       buffered: link.assets?.bufferedAmount || 0,
     }))
-    const result = await this.exchange.tick({ selfId: this.state.selfId, held, referenced, peers })
-    if (result.signal) this.send({ t: 'asset-index', assets: result.signal })
+    const result = await this.exchange.tick({ selfId: this.state.selfId, held, referenced, peers, publish })
+    if (result.signal && publish) this.send({ t: 'asset-index', assets: result.signal })
     this.flushAssetActions(result.actions)
     for (const asset of result.completed) this.keepSharedAsset(asset)
     this.publishAssetStatus()
@@ -1289,6 +1372,7 @@ export class SessionClient {
       if (!channel || channel.readyState !== 'open') continue
       try {
         if (action.binary) {
+          if (!mayWriteProject(this.selfAccess())) continue
           const path = chooseAssetPath(true, this.state.media[action.peerId]?.localType || undefined)
           if (!assetBytesAllowed(path)) continue
           channel.send(bytesToArrayBuffer(action.binary))
@@ -1300,6 +1384,7 @@ export class SessionClient {
   }
 
   private async onAssetControl(id: string, data: string) {
+    this.exchange.setPublishing(mayWriteProject(this.selfAccess()))
     const path = chooseAssetPath(this.peers.get(id)?.assets?.readyState === 'open', this.state.media[id]?.localType || undefined)
     const actions = await this.exchange.handleControl(id, data, path)
     this.flushAssetActions(actions)
@@ -2917,6 +3002,12 @@ export class SessionClient {
     link: PeerLink | undefined,
     take: { takeId: string; placeAtSample: number; sampleRate: number; compensationMs: number; detail: string; silent: boolean; wav: ArrayBuffer },
   ) {
+    if (!mayWriteProject(this.selfAccess())) {
+      this.state.takeProgress = null
+      this.note('View and Comment can listen. This take stays on this device.')
+      this.emit()
+      return
+    }
     const channel = link ? await this.waitForTakes(link) : null
     if (!channel) {
       await this.sendTakeHttp(take)
