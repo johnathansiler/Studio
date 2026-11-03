@@ -34,6 +34,7 @@ import { PIANO_BAR, PIANO_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
 import { attachGlissando } from './glissando'
 import { FitRow } from './fitRow'
+import { EditorPinned } from './KeyboardDock'
 import { ActionSheet, SheetRow, TipButton } from './Hint'
 import { coarsePointer, noteGrip } from './touchEdit'
 import { LoopRegion } from './LoopRegion'
@@ -89,6 +90,7 @@ export function PianoRoll({
   engine,
   onIdeas,
   onGenerate,
+  onClose,
   chrome = true,
   chordsOpen = false,
   actionsRef,
@@ -98,6 +100,8 @@ export function PianoRoll({
   engine: AudioEngine
   onIdeas?: () => void
   onGenerate?: () => void
+  /** Leave the clip and return to the arrange view. */
+  onClose?: () => void
   /** Session detail draws its own one-row toolbar. Arrange keeps the full bars. */
   chrome?: boolean
   chordsOpen?: boolean
@@ -734,7 +738,9 @@ export function PianoRoll({
   const rollLines = gridBackground(rollGrid, pxBeat, row)
   return (
     <div className={`piano ${compact ? 'compact' : ''} ${chrome ? '' : 'bare'}`} ref={pianoRef} data-tool={tool}>
-      {chrome && <FitRow className="scale-bar">
+      {chrome && <div className="roll-head">
+        <EditorPinned store={store} engine={engine} onClose={onClose} />
+        <FitRow className="scale-bar">
         {leading}
         <TipButton className={`chords-btn ${open ? 'on' : ''}`} label={bar('chords').label} hint={bar('chords').hint} pressed={open} onClick={() => void toggleChords()} />
         <TipButton
@@ -790,7 +796,8 @@ export function PianoRoll({
         {!compact && <TipButton label={sheet('strum').label} hint={sheet('strum').hint} onClick={strum} />}
         {!compact && <TipButton label={sheet('duplicate').label} hint={sheet('duplicate').hint} onClick={duplicate} />}
         {!compact && <TipButton label={sheet('delete').label} hint={sheet('delete').hint} onClick={remove} />}
-      </FitRow>}
+        </FitRow>
+      </div>}
       {notesOpen && (
         <ActionSheet title="Notes" hint="Edits for the notes you have selected." onClose={() => setNotesOpen(false)}>
           <SheetRow label={sheet('detect').label} hint={sheet('detect').hint} onClick={() => {

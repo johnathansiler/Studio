@@ -4,11 +4,11 @@ import type { ProjectStore } from '../state/store'
 import type { MidiEditorMode } from '../model/types'
 import { TipButton } from './Hint'
 import { DrumEditor } from './DrumEditor'
+import { EditorPinned } from './KeyboardDock'
 import { FitRow } from './fitRow'
 import { PianoRoll } from './PianoRoll'
 import { ScoreView } from './ScoreView'
 import { StepInput } from './StepInput'
-import { useFormFactor } from './form'
 import './midi-editors.css'
 
 const MODES: { id: MidiEditorMode; label: string; hint: string }[] = [
@@ -32,10 +32,8 @@ export function MidiDock({
   onClose?: () => void
 }) {
   const { editor } = selectMidiEditor(store)
-  const phone = useFormFactor() === 'phone'
   const modes = (
     <>
-      {phone && onClose && <TipButton label="Close" hint="Back to the tracks." onClick={onClose} />}
       {MODES.map((mode) => (
         <TipButton
           key={mode.id}
@@ -50,13 +48,16 @@ export function MidiDock({
   return (
     <div className="midi-dock">
       {editor.mode !== 'roll' && (
-        <FitRow className="me-modes">{modes}</FitRow>
+        <div className="roll-head">
+          <EditorPinned store={store} engine={engine} onClose={onClose} />
+          <FitRow className="me-modes">{modes}</FitRow>
+        </div>
       )}
       {editor.mode === 'step' && <StepInput store={store} engine={engine} />}
       {editor.mode === 'drums' && <DrumEditor store={store} engine={engine} />}
       {editor.mode === 'score' && <ScoreView store={store} />}
       {editor.mode === 'roll' && (
-        <PianoRoll store={store} engine={engine} onIdeas={onIdeas} onGenerate={onGenerate} leading={modes} />
+        <PianoRoll store={store} engine={engine} onIdeas={onIdeas} onGenerate={onGenerate} onClose={onClose} leading={modes} />
       )}
     </div>
   )
