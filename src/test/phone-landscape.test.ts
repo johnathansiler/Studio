@@ -30,7 +30,7 @@ function fixture(land = true) {
       <button type="button" class="active">Arrange</button>
       <button type="button">Mix</button>
       <button type="button">Beats</button>
-      <button type="button">Session</button>
+      <button type="button">Collab</button>
     </div>
     <button type="button" class="menu-btn" aria-label="Menu">Menu</button>
   </header>
