@@ -33,6 +33,8 @@ export const TRANSPORT_COPY: Copy[] = [
   { id: 'pause', label: 'Pause', hint: 'Pause playback. The playhead stays where it is.' },
   { id: 'stop', label: 'Stop', hint: 'Stop playback and recording. Press again to return to the start.' },
   { id: 'record', label: 'Record', hint: 'Record onto armed tracks from the playhead.' },
+  { id: 'click', label: 'Click', hint: 'Metronome while you play and record.' },
+  { id: 'count-in', label: 'Count-in', hint: 'Count one bar before recording starts.' },
   { id: 'loop', label: 'Loop', hint: 'Repeat the highlighted region. Drag its edges to change the length.' },
   { id: 'tempo', label: 'Tempo', hint: 'Type a tempo, or drag, scroll, or press the arrow keys.' },
   { id: 'tap', label: 'Tap', hint: 'Tap in time. The tempo follows your taps.' },
@@ -69,6 +71,8 @@ export interface MenuSpec extends Copy {
  * stay off this list: Session, Roll, Keys, Pads, Generate, Sounds, and Collab.
  * Launch/Timeline is the session transport, which the Session tab does not switch.
  * Capture stays on the phone because the session bar hides that button there.
+ * Play, Stop, Record, Loop, Click, Count-in, and Reset stay on the transport.
+ * Select, Draw, Split, Trim, Zoom, Duplicate, Delete, Quantize, Snap, and Add track stay on the strip.
  * While FEATURES.session is off, visibleMenu hides Launch, Timeline, and Capture.
  */
 export const MENU_COPY: MenuSpec[] = [
@@ -76,9 +80,9 @@ export const MENU_COPY: MenuSpec[] = [
   { id: 'open', action: 'open', group: 'project', place: 'all', label: 'Open', hint: 'Open a project saved in this browser.' },
   { id: 'save', action: 'save', group: 'project', place: 'all', label: 'Save', hint: 'Keep this project in the browser.' },
   { id: 'export', action: 'export', group: 'project', place: 'all', label: 'Export', hint: 'Bounce or download the mix.' },
-  { id: 'quantize', action: 'quantize', group: 'edit', place: 'all', label: 'Quantize', hint: 'Choose the grid and how hard to snap.' },
-  { id: 'to-start', action: 'to-start', group: 'edit', place: 'phone', label: 'To start', hint: 'Move the playhead back to the beginning.' },
-  { id: 'loop', action: 'loop', group: 'edit', place: 'phone', label: 'Loop', hint: 'Repeat the highlighted region. Drag its edges to change the length.' },
+  { id: 'box', action: 'box', group: 'edit', place: 'all', label: 'Box', hint: 'Drag a rectangle to select several clips or notes.' },
+  { id: 'erase', action: 'erase', group: 'edit', place: 'all', label: 'Erase', hint: 'Tap a clip or note to delete it. Drag to delete more.' },
+  { id: 'pan', action: 'pan', group: 'edit', place: 'all', label: 'Pan', hint: 'Drag to scroll the timeline or the piano roll.' },
   { id: 'session-view', action: 'session-mode', group: 'view', place: 'all', label: 'Launch', hint: 'Play clips from slots instead of the timeline.' },
   { id: 'arrangement', action: 'session-mode', group: 'view', place: 'all', label: 'Timeline', hint: 'Leave clip launching and go back to the arrangement.' },
   { id: 'capture', action: 'capture', group: 'view', place: 'phone', label: 'Capture', hint: 'Put the clips that are playing onto the timeline.' },

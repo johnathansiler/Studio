@@ -60,10 +60,10 @@ export const TOOL_INFO: Record<ArrangeTool, ToolInfo> = {
     cursor: 'ew-resize',
   },
   split: {
-    label: 'Slice',
+    label: 'Split',
     hint: 'Tap a clip or note where you want the cut.',
-    arrange: 'Slice: tap a clip to cut it',
-    piano: 'Slice: tap a note to cut it',
+    arrange: 'Split: tap a clip to cut it',
+    piano: 'Split: tap a note to cut it',
     cursor: 'col-resize',
   },
   erase: {
@@ -93,15 +93,21 @@ export const ARRANGE_TOOLS: { id: ArrangeTool; label: string }[] = (
   ['select', 'box', 'pencil', 'trim', 'split', 'erase', 'pan', 'zoom'] as const
 ).map((id) => ({ id, label: TOOL_INFO[id].label }))
 
-/** First in the phone strip, so they sit on screen before a sideways scroll. */
-export const PRIMARY_TOOLS: ArrangeTool[] = ['select', 'pencil', 'erase']
+/** Always on the arrange strip. One tap, on phone, fold, and desktop. */
+export const FACE_TOOLS: ArrangeTool[] = ['select', 'pencil', 'split', 'trim', 'zoom']
 
-/** Later in the same strip. They are not behind a menu. */
-export const SHEET_TOOLS: ArrangeTool[] = ['box', 'trim', 'split', 'pan', 'zoom']
+/** Rare edit modes. They live in the menu, not on the strip. */
+export const MENU_TOOLS: ArrangeTool[] = ['box', 'erase', 'pan']
 
-/** Select, Draw, and Erase, then the rest, all on one scrolling row. */
+/** Face tools first. Kept so older checks can list the strip, then the menu. */
+export const PRIMARY_TOOLS: ArrangeTool[] = FACE_TOOLS
+
+/** Menu-only tools. They are not repeated on the strip. */
+export const SHEET_TOOLS: ArrangeTool[] = MENU_TOOLS
+
+/** Face tools, then the menu tools. Nothing is listed twice. */
 export function compactToolOrder(): ArrangeTool[] {
-  return [...PRIMARY_TOOLS, ...SHEET_TOOLS]
+  return [...FACE_TOOLS, ...MENU_TOOLS]
 }
 
 export const TOOL_ACTIONS = [

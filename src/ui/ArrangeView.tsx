@@ -26,7 +26,6 @@ import type { ProjectStore } from '../state/store'
 import { activeTool, EDITOR_TOOL_KEYS, subscribeTools, toolClaimsGesture } from '../state/tools'
 import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
-import { AddTrackButton } from './AddTrack'
 import { PlaylistBrowser, type BrowserTab } from './PlaylistBrowser'
 import { AutomationModeBar, AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
 import { AutoTuneLaneMark, addOrOpenAutoTune } from './AutoTuneFace'
@@ -47,7 +46,7 @@ import { CommentControl, CommentPins } from './timelineComments'
 function ArrangeChrome({ browserOpen, setupOpen, onBrowser, onSetup }: { browserOpen: boolean; setupOpen: boolean; onBrowser: () => void; onSetup: () => void }) {
   const [host, setHost] = useState<HTMLElement | null>(null)
   useEffect(() => {
-    setHost(document.getElementById('tool-slot'))
+    setHost(document.getElementById('command-strip') || document.getElementById('tool-slot'))
   }, [])
   const buttons = (
     <div className="arrange-panels">
@@ -698,16 +697,6 @@ export function ArrangeView({
       >
         <div className="ruler-gap loop-gap">
           <SongMapHead store={store} position={position} compact />
-          <button
-            type="button"
-            className={`loop-toggle ${project.loopEnabled ? 'on' : 'off'}`}
-            aria-pressed={project.loopEnabled}
-            data-loop={project.loopEnabled ? 'on' : 'off'}
-            title={project.loopEnabled ? 'Loop is on. Playback wraps at the end of the highlighted region.' : 'Loop is off. The region is marked, but playback does not wrap.'}
-            onClick={() => store.toggle('loopEnabled')}
-          >
-            {project.loopEnabled ? 'Loop on' : 'Loop off'}
-          </button>
         </div>
         {project.tracks.map((track) => (
           <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} style={rowHeight(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => store.selectTrack(track.id)}>
@@ -751,7 +740,6 @@ export function ArrangeView({
             <LanePicker store={store} trackId={track.id} />
           </div>
         ))}
-        <AddTrackButton store={store} />
       </div>
       <div
         className="timeline-scroll"
