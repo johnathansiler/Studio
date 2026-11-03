@@ -154,6 +154,7 @@ import {
   type PadVoice,
   type SequenceNote,
 } from '../model/padMachine'
+import { insertsBeatMachine } from '../instruments/pads/identity'
 import { applyChoke, assignPad, clipBeat, padRecordWindow, recordPadHits, type PadHit } from '../instruments/pads/record'
 import { arrangeSong, chopsFor, chopsOntoPads, expandChord, humanizeNotes, kitFromSlices, mpcTempo, quantizeGridBeats, quantizeNotes, setStepVelocity, toggleStep, withLength } from '../instruments/mpc/model'
 import { renderMpcAudio } from '../instruments/mpc/render'
@@ -973,7 +974,7 @@ export class ProjectStore {
       track.padKit = normalizePadKit(track.padKit ?? this.project.padKit)
       let clip = track.midiClips.find((item) => Math.abs(item.startBeat - window.startBeat) < 0.02 && Math.abs(item.durationBeats - window.durationBeats) < 0.05)
       if (!clip) {
-        clip = { id: uid('midi'), name: 'Pads', startBeat: window.startBeat, durationBeats: window.durationBeats, notes: [] }
+        clip = { id: uid('midi'), name: 'Beat Machine', startBeat: window.startBeat, durationBeats: window.durationBeats, notes: [] }
         track.midiClips.push(clip)
       }
       this.selectedTrackId = trackId
@@ -1757,7 +1758,7 @@ export class ProjectStore {
         this.padsTrackId = null
         this.rackTrackId = null
       }
-      if (spec.kind === 'midi' && spec.instrument === 'pads' && made[0]) {
+      if (made[0]?.instrument === 'pads') {
         made[0].padKit = normalizePadKit(made[0].padKit)
         if (!made[0].plugins.some((plugin) => isDrumsPlugin(plugin))) made[0].plugins.push(createPlugin('pads'))
         this.padsTrackId = made[0].id
@@ -2051,7 +2052,7 @@ export class ProjectStore {
       this.insertScalerPlugin(trackId)
       return
     }
-    if (pluginId === 'pads' || pluginId === 'drum-machine' || pluginId === '808' || pluginId === 'drums') {
+    if (insertsBeatMachine(pluginId)) {
       this.insertPadsPlugin(trackId)
       return
     }
@@ -2084,7 +2085,7 @@ export class ProjectStore {
     this.setTrackInstrument(hostId, 'scaler')
   }
 
-  /** Pads is an insert. Adding it opens the drum-machine faceplate. */
+  /** Beat Machine is an insert. Adding it swaps the instrument and opens the faceplate. */
   private insertPadsPlugin(trackId: string | 'master') {
     let host = trackId !== 'master' ? this.track(trackId) : null
     if (!host || host.type !== 'midi') host = this.project.tracks.find((track) => track.type === 'midi') ?? null

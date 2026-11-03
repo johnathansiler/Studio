@@ -30,21 +30,24 @@ export const MIDI_DEVICES: BrowserDevice[] = [
 ]
 
 export const INSTRUMENT_DEVICES: BrowserDevice[] = [
+  { id: 'pads', name: 'Beat Machine', hint: 'Banks of drum and sample pads. Record on this track.', kind: 'instrument' },
   { id: 'synth', name: 'Synth', hint: 'A played synthesizer.', kind: 'instrument' },
   { id: 'sampler', name: 'Sampler', hint: 'Play a loaded sample across the keys.', kind: 'instrument' },
   { id: 'library', name: 'Library', hint: 'A multi-sampled instrument from the library.', kind: 'instrument' },
 ]
 
 export const DRUM_DEVICES: BrowserDevice[] = [
-  { id: 'drum-machine', name: 'Drum machine', hint: 'Pads for a drum kit.', kind: 'drum' },
+  { id: 'pads', name: 'Beat Machine', hint: 'Banks of drum and sample pads. Record on this track.', kind: 'drum' },
+  { id: 'drum-machine', name: 'Kit', hint: 'Kick, snare, clap, hat, and perc.', kind: 'drum' },
   { id: '808', name: '808', hint: 'Bass and drum machine.', kind: 'drum' },
 ]
 
 export const PLUGIN_DEVICES: BrowserDevice[] = [
   AUDIO_DEVICES[0],
+  { id: 'pads', name: 'Beat Machine', hint: 'Banks of drum and sample pads. Record on this track.', kind: 'instrument' },
   { id: 'scaler', name: 'Scaler', hint: 'Chord instrument. Key, pads, and progressions.', kind: 'instrument' },
   { id: 'synth', name: 'Synth', hint: 'A played synthesizer.', kind: 'instrument' },
-  { id: 'sampler', name: 'Sampler', hint: 'Sampler and drum pads.', kind: 'instrument' },
+  { id: 'sampler', name: 'Sampler', hint: 'Play a loaded sample across the keys.', kind: 'instrument' },
 ]
 
 export function browserGroup(group: BrowserGroup): BrowserDevice[] {

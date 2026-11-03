@@ -385,12 +385,12 @@ export function PadsPanel({
   }
 
   return (
-    <div className={`mpc hw ch-sheet ${phone ? 'phone' : ''}`} data-pads="plugin" data-hardware="mpc" aria-label="Pads">
+    <div className={`mpc hw ch-sheet ${phone ? 'phone' : ''}`} data-pads="plugin" data-hardware="mpc" aria-label="Beat Machine">
       <div className="hw-body">
         <section className="hw-top">
           <div className="hw-screen">
             <div className="lcd" aria-label="Screen">
-              <strong>Sampler</strong>
+              <strong>Beat Machine</strong>
               <span className="mpc-kind">Drums</span>
               <p className="mpc-tool ch-recessed" data-tool={tool}>Tool: <b>{tool}</b></p>
               <p className="lcd-page">{screens[soft - 1]}</p>
@@ -414,7 +414,7 @@ export function PadsPanel({
 
         <section className="hw-main">
           <label className="hw-slider">Data
-            <input aria-label="Swing" title="Data slider. MPC swing. 50 is straight. 75 is a hard shuffle." type="range" min={50} max={75} step={1} value={kit.swing} onChange={(event) => {
+            <input aria-label="Swing" title="Data slider. Swing. 50 is straight. 75 is a hard shuffle." type="range" min={50} max={75} step={1} value={kit.swing} onChange={(event) => {
               const swing = Number(event.target.value)
               store.patchTrackKit(trackId, { swing, trackSwing: swing })
             }} />
@@ -463,7 +463,7 @@ export function PadsPanel({
               <button type="button" className="hw-key ch-tab" title="Open this clip in the piano roll." onClick={edit}>Roll</button>
               <button type="button" className={`hw-key ch-tab${store.project.countIn ? ' on' : ''}`} aria-pressed={store.project.countIn} title={`Count-in is ${countInCaption(countInBarsOf(store.project))}. Tap for off, one bar, or two bars.`} onClick={() => store.cycleCountIn()}>Count</button>
               <button type="button" className={`hw-key ch-tab${store.project.metronomeEnabled ? ' on' : ''}`} aria-pressed={store.project.metronomeEnabled} title="Metronome while the pads record." onClick={() => store.toggle('metronomeEnabled')}>Click</button>
-              <button type="button" className="hw-key ch-tab mpc-close" title="Close Pads. The track keeps the instrument." aria-label="Close Pads. The track keeps the instrument." onClick={() => store.closePads()}>Close</button>
+              <button type="button" className="hw-key ch-tab mpc-close" title="Close Beat Machine. The track keeps the instrument." aria-label="Close Beat Machine. The track keeps the instrument." onClick={() => store.closePads()}>Close</button>
             </div>
           </div>
 

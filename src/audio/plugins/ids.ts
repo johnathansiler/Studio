@@ -105,7 +105,7 @@ export const KIND_LABELS: Record<string, string[]> = {
   reverb: ['Algorithm', 'Plate', 'Hall', 'Space'],
   delay: ['Studio', 'Echo', 'Bucket', 'Digital'],
   mod: ['Chorus', 'Double', 'Ensemble', 'Phase', 'Rotor', 'Shift'],
-  sampler: ['Sampler', 'Drums'],
+  sampler: ['Sampler', 'Beat Machine'],
   limiter: ['Transparent', 'Brick', 'Loud'],
 }
 
