@@ -1,5 +1,6 @@
 /** One-step note entry. Notes land on the cursor, then the cursor moves forward. */
 
+import { clampKeyboardOctave, readKeyboardOctave } from './keyboardPlay'
 import { quartersPerBar, type TimeSignature } from './time'
 import type { MidiEditorMode, MidiEditorPrefs, MidiNote } from './types'
 
@@ -60,7 +61,7 @@ export function normalizeMidiEditor(value: Partial<MidiEditorPrefs> | undefined)
     cursor: Number.isFinite(value.cursor) ? Math.max(0, value.cursor as number) : 0,
     tie: value.tie === true,
     velocity: clamp(value.velocity ?? base.velocity, 0.05, 1),
-    octave: clamp(Math.round(value.octave ?? 0), -3, 3),
+    octave: clampKeyboardOctave(value.octave ?? 0),
     scoreDuration: nearestScore(value.scoreDuration ?? base.scoreDuration),
     page: Math.max(0, Math.round(value.page ?? 0) || 0),
     scorePage: Math.max(0, Math.round(value.scorePage ?? 0) || 0),
@@ -102,6 +103,7 @@ export function editorState(project: { midiEditor?: Partial<MidiEditorPrefs> }, 
   const memory = readRollPrefs(storage)
   if (project.midiEditor?.stepInput == null && memory.stepInput != null) editor.stepInput = memory.stepInput
   if (project.midiEditor?.follow == null && memory.follow != null) editor.follow = memory.follow
+  if (project.midiEditor?.octave == null) editor.octave = readKeyboardOctave()
   return editor
 }
 

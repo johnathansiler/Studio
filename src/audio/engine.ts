@@ -15,7 +15,9 @@ import { playbackStops, transportSample } from '../model/transportSync'
 import { beatsToSamples, countInBarsOf, samplesPerBeatUnit, samplesToBeats } from '../model/time'
 import { matchBufferRate, PatchHost, renderPatchSpan } from '../instruments/patch'
 import { performancesOn, routeScaler } from '../instruments/scaler/model'
-import { chokeTargets } from '../model/padMachine'
+import { chokeTargets, normalizePadKit, padRegion } from '../model/padMachine'
+import { hitRoute } from '../instruments/mpc/model'
+import { preparePadPcm } from '../instruments/mpc/render'
 import { RackHost } from './rack/host'
 import { renderNotes } from './rack/dsp'
 import { LibraryHost } from './multisample/host'
@@ -657,7 +659,7 @@ export class AudioEngine {
   }
 
   /** Play Scaler notes through the track's chosen sound. The previous preview chord is released first. */
-  auditionScaler(trackId: string, notes: { pitch: number; fine?: number; delay: number; duration: number; velocity: number }[]) {
+  auditionScaler(trackId: string, notes: { pitch: number; fine?: number; delay: number; duration: number; velocity: number }[], output: 'audio' | 'midi' | 'both' = 'both') {
     this.unlock()
     if (!notes.length) return
     this.stopScalerPreview()
@@ -669,19 +671,35 @@ export class AudioEngine {
     const routed = routeScaler(this.project, track)
     const out = this.strips.get(routed.liveStripId) ?? strip
     const now = liveWhen(ctx.currentTime)
+    const wantAudio = output !== 'midi'
+    const wantMidi = output !== 'audio'
     for (const note of notes) {
       const dur = Math.max(0.05, note.duration)
       const pitch = Math.max(0, Math.min(127, Math.round(note.pitch)))
       const when = now + Math.max(0, note.delay)
-      this.scalerMidi.push({ pitch, onAt: this.perfForContext(when) })
-      this.scheduleVoice(ctx, out, {
+      const voice = {
         id: 'scaler',
         pitch,
         fine: note.fine,
         startBeat: 0,
         durationBeats: dur,
         velocity: Math.max(0.05, Math.min(1, note.velocity || 0.8)),
-      }, when, dur, routed.voice, this.scalerVoices)
+      }
+      if (wantMidi) this.scalerMidi.push({ pitch, onAt: this.perfForContext(when) })
+      if (wantAudio) this.scheduleVoice(ctx, out, voice, when, dur, routed.voice, this.scalerVoices, !wantMidi)
+      else if (wantMidi) this.sendMidiNote(voice, when, dur, ctx)
+    }
+  }
+
+  /** Live MIDI out for a keyboard chord, without starting a new audio preview. */
+  pulseMidi(notes: { pitch: number; velocity: number; duration: number }[]) {
+    if (!this.midiSink || !notes.length) return
+    const now = typeof performance !== 'undefined' ? performance.now() : 0
+    for (const note of notes) {
+      const pitch = Math.max(0, Math.min(127, Math.round(note.pitch)))
+      const dur = Math.max(0.05, note.duration)
+      this.midiSink(noteBytes(true, this.midiOutChannel, pitch, midiVelocityByte(note.velocity)), now)
+      this.midiSink(noteBytes(false, this.midiOutChannel, pitch, 0), now + dur * 1000)
     }
   }
 
@@ -2895,14 +2913,38 @@ export class AudioEngine {
     const ctx = this.ctx
     const strip = track.id ? this.strips.get(track.id) : undefined
     if (!ctx || !strip) return false
-    this.playPadNote(ctx, strip, track, {
-      pitch,
-      velocity,
-      tune: color?.tune,
-      filter: color?.filter,
-      decay: color?.decay,
-    }, when ?? ctx.currentTime, undefined, sample)
+    const kit = normalizePadKit(track.padKit)
+    const pad = kit.banks.flat().find((item) => item.pitch === pitch)
+    const route = hitRoute(kit, pad ?? { muted: false })
+    const at = when ?? ctx.currentTime
+    if (route.audio) {
+      this.playPadNote(ctx, strip, track, {
+        pitch,
+        velocity,
+        tune: color?.tune,
+        filter: color?.filter,
+        decay: color?.decay,
+      }, at, undefined, sample)
+      for (const extra of pad?.chord ?? []) {
+        if (extra !== pitch) this.playPadNote(ctx, strip, track, { pitch: extra, velocity, tune: color?.tune, filter: color?.filter, decay: color?.decay }, at, undefined, null)
+      }
+    }
+    if (route.midi) {
+      this.sendLiveMidi(pitch, velocity)
+      for (const extra of pad?.chord ?? []) if (extra !== pitch) this.sendLiveMidi(extra, velocity)
+      this.forwardMpc(track, pitch, velocity, at)
+    }
     return true
+  }
+
+  /** Drive another instrument from a pad. The routed call does not bounce back. */
+  private forwardMpc(track: Track, pitch: number, velocity: number, when: number) {
+    const targetId = track.padKit?.midiTrackId
+    if (!targetId || targetId === track.id || !this.ctx) return
+    const other = this.project?.tracks.find((item) => item.id === targetId && item.type === 'midi')
+    const strip = other ? this.strips.get(other.id) : undefined
+    if (!other || !strip) return
+    this.scheduleVoice(this.ctx, strip, { id: 'mpc', pitch, startBeat: 0, durationBeats: 0.25, velocity }, when, 0.25, other, undefined, true)
   }
 
   private playPadNote(
@@ -2917,15 +2959,17 @@ export class AudioEngine {
     const pads = track.padKit?.banks.flat() ?? []
     const pad = pads.find((item) => item.pitch === hit.pitch)
     if (pad?.muted) return
-    const bus = pad?.busId && this.strips.has(pad.busId) ? this.strips.get(pad.busId) : undefined
+    const route = hitRoute(normalizePadKit(track.padKit), pad ?? { muted: false })
+    const bus = route.busId && this.strips.has(route.busId) ? this.strips.get(route.busId) : undefined
     const dest = bus?.input ?? strip.input
     const start = ctx === this.ctx ? Math.max(when, ctx.currentTime) : Math.max(0, when)
     for (const other of chokeTargets(pads.map((item) => ({ pitch: item.pitch, choke: item.choke })), hit.pitch)) this.fadePadPitch(other, start)
     if (pad?.poly === 'mono') this.fadePadPitch(hit.pitch, start)
     let pcm = sample ?? null
     let rate = ctx.sampleRate
-    const bufferId = pad?.layers[0]?.bufferId
-    if (bufferId) {
+    const layer = pad?.layers.find((item) => item.bufferId) ?? pad?.layers[0]
+    const bufferId = layer?.bufferId
+    if (!sample && bufferId) {
       const asset = this.assetOf(bufferId)
       const channel = asset?.channels[0]
       if (asset && channel?.length) {
@@ -2933,8 +2977,10 @@ export class AudioEngine {
         rate = asset.sampleRate
       }
     }
-    const buffer = pcm?.length && rate > 0
-      ? this.cachedPadBuffer(ctx, `${bufferId || hit.pitch}:${pcm.length}:${rate}`, pcm, rate)
+    const region = padRegion(pad)
+    const prepared = pcm?.length ? preparePadPcm(pcm, region) : null
+    const buffer = prepared?.length && rate > 0
+      ? this.cachedPadBuffer(ctx, `${bufferId || hit.pitch}:${prepared.length}:${rate}:${region.start}:${region.end}:${region.reverse ? 1 : 0}`, prepared, rate)
       : this.cachedDrum(ctx, hit.pitch)
     if (!buffer) return
     const live = this.padVoices.filter((voice) => voice.until > start - 0.001)
@@ -2946,8 +2992,16 @@ export class AudioEngine {
     const src = ctx.createBufferSource()
     const gain = ctx.createGain()
     src.buffer = buffer
-    const tune = hit.tune ?? pad?.tune ?? 0
+    const tune = (hit.tune ?? pad?.tune ?? 0) + (layer?.tune ?? 0)
     src.playbackRate.value = 2 ** (tune / 12)
+    if (region.loop && buffer.duration > 0.02) {
+      const span = Math.max(0.0001, region.end - region.start)
+      const loopStart = Math.max(0, Math.min(0.98, (region.loopStart - region.start) / span))
+      const loopEnd = Math.max(loopStart + 0.01, Math.min(1, (region.loopEnd - region.start) / span))
+      src.loop = true
+      src.loopStart = buffer.duration * loopStart
+      src.loopEnd = Math.min(buffer.duration, Math.max(src.loopStart + 0.01, buffer.duration * loopEnd))
+    }
     const decay = Math.max(0.05, Math.min(1, hit.decay ?? pad?.decay ?? 1))
     const peak = Math.max(0.0002, Math.min(1, hit.velocity))
     const dur = Math.max(0.04, buffer.duration * decay)
@@ -3028,17 +3082,17 @@ export class AudioEngine {
     voice.until = at
   }
 
-  liveDrum(pitch: number, velocity: number, repeatEverySamples = 0, color?: PadColor) {
-    if (this.playLivePad(pitch, velocity, null, color)) return
+  liveDrum(pitch: number, velocity: number, repeatEverySamples = 0, color?: PadColor, when?: number) {
+    if (this.playLivePad(pitch, velocity, null, color, when)) return
     const ctx = this.ctx ?? this.unlock()
-    const when = liveWhen(ctx.currentTime)
+    const at = when ?? liveWhen(ctx.currentTime)
     const trackId = this.liveTrackId || 'drums'
-    if (!this.acceptLive(trackId, pitch, when)) return
+    if (!this.acceptLive(trackId, pitch, at)) return
     if (!this.drumTable.length) this.drumTable = residentDrums(ctx.sampleRate)
     const index = this.drumTable.findIndex((drum) => drum.pitch === pitch)
     const strip = this.liveTrackId ? this.strips.get(this.liveTrackId) : undefined
     const dest = strip?.input ?? this.speakerGain
-    if (index >= 0 && dest && this.playResident(index, velocity, color, when, dest)) return
+    if (index >= 0 && dest && this.playResident(index, velocity, color, at, dest)) return
     this.liveNoteOn(pitch, velocity, index, repeatEverySamples, color)
   }
 
@@ -3745,7 +3799,7 @@ export class AudioEngine {
     return { voice, notes }
   }
 
-  private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[]) {
+  private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[], routed = false) {
     if (note.muted) return
     if (track?.instrument === 'scaler' && this.project) {
       const routed = routeScaler(this.project, track)
@@ -3754,7 +3808,7 @@ export class AudioEngine {
     }
     const sampler = samplerInsert(track)
     if (sampler?.sampler) {
-      this.sendMidiNote(note, when, dur, ctx)
+      if (!routed) this.sendMidiNote(note, when, dur, ctx)
       if (ctx === this.ctx) {
         this.rack.schedule(sampler.id, note.pitch, note.velocity, when)
         this.rack.schedule(sampler.id, note.pitch, 0, when + Math.max(0.02, dur))
@@ -3778,18 +3832,25 @@ export class AudioEngine {
       }
       return
     }
-    this.sendMidiNote(note, when, dur, ctx)
     if (track?.instrument === 'pads') {
-      this.playPadNote(ctx, strip, track, {
-        pitch: note.pitch,
-        velocity: note.velocity,
-        tune: note.locks?.tune != null ? note.locks.tune + (note.fine || 0) / 100 : (note.fine ? note.fine / 100 : undefined),
-        filter: note.locks?.filter,
-        decay: note.locks?.decay,
-        pan: note.pan,
-      }, when, bucket, null)
+      const kit = normalizePadKit(track.padKit)
+      const pad = kit.banks.flat().find((item) => item.pitch === note.pitch)
+      const route = hitRoute(kit, pad ?? { muted: Boolean(note.muted) })
+      if (route.midi && !routed) this.sendMidiNote(note, when, dur, ctx)
+      if (route.audio) {
+        this.playPadNote(ctx, strip, track, {
+          pitch: note.pitch,
+          velocity: note.velocity,
+          tune: note.locks?.tune != null ? note.locks.tune + (note.fine || 0) / 100 : (note.fine ? note.fine / 100 : undefined),
+          filter: note.locks?.filter,
+          decay: note.locks?.decay,
+          pan: note.pan,
+        }, when, bucket, null)
+      }
+      if (!routed && route.midi) this.forwardMpc(track, note.pitch, note.velocity, when)
       return
     }
+    if (!routed) this.sendMidiNote(note, when, dur, ctx)
     if (track?.instrument === 'drum-machine' && this.playDrum(ctx, strip, note, when, bucket)) return
     if (track?.instrument === 'library' && ctx === this.ctx) {
       if (track.library) {

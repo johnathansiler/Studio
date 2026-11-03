@@ -13,6 +13,18 @@ export type GridLayout = 'fourths' | 'sequential'
 export type RecordTakeMode = 'overdub' | 'replace'
 export type ChopMode = 'transient' | 'regions' | 'bpm'
 export type PadPoly = 'poly' | 'mono'
+/** MIDI clips, rendered audio, or both at once. */
+export type MpcOutput = 'midi' | 'audio' | 'both'
+
+/** Start, end, and loop are fractions of the sample. */
+export interface PadRegion {
+  start: number
+  end: number
+  loop: boolean
+  loopStart: number
+  loopEnd: number
+  reverse: boolean
+}
 
 export const PAD_MACROS = ['tune', 'filter', 'attack', 'decay', 'sustain', 'release', 'pan', 'level'] as const
 
@@ -53,6 +65,14 @@ export interface PadVoice {
   busId?: string
   /** Pad mute. Recorded notes stay; the voice does not sound. */
   muted?: boolean
+  /** Sample window. Missing plays the whole buffer forward. */
+  region?: PadRegion
+  /** Extra pitches that sound and record with this pad. */
+  chord?: number[]
+  /** Track insert this pad prefers when multi-out is on. */
+  insertId?: string
+  /** 1 follows the hit. 0 plays the fixed velocity. */
+  velocitySense?: number
 }
 
 export interface SequenceNote {
@@ -92,6 +112,38 @@ export interface PadProgram {
   timingGrid: number
   sequences: PadSequence[]
   song: SongSlot[]
+  output: MpcOutput
+  /** Each pad can leave the track and hit its own bus. */
+  multiOut: boolean
+  /** Other instrument track that receives pad notes. Empty stays on this track. */
+  midiTrackId: string
+  /** Audio track that receives a printed clip. Empty creates one on print. */
+  audioTrackId: string
+  fullLevel: boolean
+  /** 1/4 through 1/32. A trailing t is the triplet. */
+  repeatRate: string
+  repeatLatch: boolean
+  repeatPressure: boolean
+  /** On follows the project tempo. Off uses localBpm for note repeat. */
+  syncTempo: boolean
+  localBpm: number
+  /** Beats of timing scatter. 0 leaves the hit where it was played. */
+  humanizeTime: number
+  /** Velocity scatter added around the played velocity. */
+  humanizeVelocity: number
+  /** 0 linear, 1 soft, 2 hard, 3 fixed. */
+  velocityCurve: number
+  /** How far the curve pulls the played velocity. */
+  velocityAmount: number
+  velocityMin: number
+  velocityMax: number
+  velocityFixed: number
+  /** Quantize grid id, including a trailing t for triplets. */
+  quantizeRate: string
+  /** Mic level that starts a pad recording. */
+  recordThreshold: number
+  recordTrim: boolean
+  recordChop: boolean
   name?: string
 }
 
@@ -369,6 +421,27 @@ export function createKit(): PadProgram {
     timingGrid: 0.25,
     sequences: [],
     song: [],
+    output: 'both',
+    multiOut: false,
+    midiTrackId: '',
+    audioTrackId: '',
+    fullLevel: false,
+    repeatRate: '1/16',
+    repeatLatch: false,
+    repeatPressure: true,
+    syncTempo: true,
+    localBpm: 0,
+    humanizeTime: 0,
+    humanizeVelocity: 0,
+    velocityCurve: 0,
+    velocityAmount: 1,
+    velocityMin: 0,
+    velocityMax: 1,
+    velocityFixed: 0.85,
+    quantizeRate: '1/16',
+    recordThreshold: 0.08,
+    recordTrim: true,
+    recordChop: false,
   }
 }
 
@@ -399,8 +472,13 @@ export function normalizePadKit(value: Partial<PadProgram> | undefined | null): 
       layers: normalizeLayers(incoming.layers),
       busId: incoming.busId || undefined,
       muted: Boolean(incoming.muted),
+      region: padRegion(incoming),
+      chord: chordPitches(incoming.chord),
+      insertId: incoming.insertId?.trim() || undefined,
+      velocitySense: clamp(incoming.velocitySense ?? 1, 0, 1),
     } as PadVoice
   }))
+  const anyBus = banks.some((row) => row.some((pad) => pad.busId))
   return {
     ...base,
     swing: clampSwing(value.swing ?? 50),
@@ -413,9 +491,60 @@ export function normalizePadKit(value: Partial<PadProgram> | undefined | null): 
     timingGrid: value.timingGrid && value.timingGrid > 0 ? value.timingGrid : 0.25,
     sequences: Array.isArray(value.sequences) ? value.sequences : [],
     song: Array.isArray(value.song) ? value.song : [],
+    output: value.output === 'midi' || value.output === 'audio' || value.output === 'both' ? value.output : 'both',
+    multiOut: value.multiOut != null ? Boolean(value.multiOut) : anyBus,
+    midiTrackId: typeof value.midiTrackId === 'string' ? value.midiTrackId : '',
+    audioTrackId: typeof value.audioTrackId === 'string' ? value.audioTrackId : '',
+    fullLevel: Boolean(value.fullLevel),
+    repeatRate: REPEAT_RATES.has(value.repeatRate ?? '') ? (value.repeatRate as string) : '1/16',
+    repeatLatch: Boolean(value.repeatLatch),
+    repeatPressure: value.repeatPressure === false ? false : true,
+    syncTempo: value.syncTempo === false ? false : true,
+    localBpm: value.localBpm && value.localBpm > 0 ? clamp(value.localBpm, 30, 300) : 0,
+    humanizeTime: clamp(value.humanizeTime ?? 0, 0, 0.25),
+    humanizeVelocity: clamp(value.humanizeVelocity ?? 0, 0, 1),
+    velocityCurve: clamp(Math.round(value.velocityCurve ?? 0), 0, 3),
+    velocityAmount: clamp(value.velocityAmount ?? 1, 0, 1),
+    velocityMin: clamp(value.velocityMin ?? 0, 0, 1),
+    velocityMax: clamp(value.velocityMax ?? 1, clamp(value.velocityMin ?? 0, 0, 1), 1),
+    velocityFixed: clamp(value.velocityFixed ?? 0.85, 0, 1),
+    quantizeRate: REPEAT_RATES.has(value.quantizeRate ?? '') ? (value.quantizeRate as string) : '1/16',
+    recordThreshold: clamp(value.recordThreshold ?? 0.08, 0.001, 1),
+    recordTrim: value.recordTrim === false ? false : true,
+    recordChop: Boolean(value.recordChop),
     name: value.name,
     banks,
   }
+}
+
+const REPEAT_RATES = new Set(['1/4', '1/8', '1/16', '1/32', '1/4t', '1/8t', '1/16t', '1/32t'])
+
+export function padRegion(pad: { region?: PadRegion } | null | undefined): PadRegion {
+  const region = pad?.region
+  const start = clamp(region?.start ?? 0, 0, 1)
+  const end = Math.max(start, clamp(region?.end ?? 1, 0, 1))
+  const loopStart = clamp(region?.loopStart ?? start, start, end)
+  const loopEnd = clamp(region?.loopEnd ?? end, loopStart, end)
+  return {
+    start,
+    end,
+    loop: Boolean(region?.loop),
+    loopStart,
+    loopEnd,
+    reverse: Boolean(region?.reverse),
+  }
+}
+
+function chordPitches(values: number[] | undefined): number[] {
+  if (!Array.isArray(values)) return []
+  const out: number[] = []
+  for (const value of values) {
+    if (!Number.isFinite(value)) continue
+    const pitch = clamp(Math.round(value), 0, 127)
+    if (!out.includes(pitch)) out.push(pitch)
+    if (out.length >= 4) break
+  }
+  return out
 }
 
 export function padFingerprint(kit: PadProgram): string {
@@ -427,7 +556,9 @@ export function padFingerprint(kit: PadProgram): string {
     timing: kit.timing,
     timingStrength: kit.timingStrength,
     name: kit.name || '',
-    banks: kit.banks.map((row) => row.map((pad) => [pad.choke, pad.level, pad.pan, pad.send, pad.tune, pad.decay, pad.busId || '', pad.layers[0]?.bufferId || ''])),
+    output: kit.output,
+    multiOut: kit.multiOut,
+    banks: kit.banks.map((row) => row.map((pad) => [pad.choke, pad.level, pad.pan, pad.send, pad.tune, pad.decay, pad.busId || '', pad.layers[0]?.bufferId || '', pad.chord?.join('.') || ''])),
   })
 }
 
@@ -451,6 +582,9 @@ function makePad(bank: number, index: number): PadVoice {
     release: 0.1,
     layerMode: 'velocity',
     layers: [{ velocityLo: 0, velocityHi: 1, tune: 0 }],
+    region: { start: 0, end: 1, loop: false, loopStart: 0, loopEnd: 1, reverse: false },
+    chord: [],
+    velocitySense: 1,
   }
 }
 

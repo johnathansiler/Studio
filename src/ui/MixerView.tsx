@@ -13,6 +13,7 @@ import { MasterSheet } from './MasterSheet'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { TouchSlider } from './kit/controls'
 import { TrackPresence } from './presenceMarks'
+import { SecondaryRack, type SecondaryItem } from './SecondaryRack'
 
 export function MixerView({ store, engine, onTune }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void }) {
   return <MixerBody key={store.project.id} store={store} engine={engine} onTune={onTune} />
@@ -60,78 +61,145 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
       ) : (
       <div className="mixer">
       {project.tracks.map((track) => (
-        <div className={`strip${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} onClick={() => store.selectTrack(track.id)}>
-          {rows ? (
-            <>
-              <div className="strip-top">
-                <StripName name={track.name} color={track.color} />
-                <TrackPresence trackId={track.id} />
-                <MixFlags store={store} trackId={track.id} part="hear" />
-              </div>
-              <VolumeLane store={store} engine={engine} trackId={track.id} name={track.name} value={track.volume} vertical={false} />
-              <div className="strip-extra">
-                <ChannelAutomation store={store} trackId={track.id} />
-                <RouteButton store={store} trackId={track.id} />
-                <FxButton name={track.name} onOpen={() => setFxTrack(track.id)} />
-                <PanKnob store={store} engine={engine} label={`${track.name} pan. Left or right.`} value={track.pan} spec={{ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }} />
-                <MixFlags store={store} trackId={track.id} part="extra" />
-                {track.type === 'audio' && onTune && <TuneButton name={track.name} onTune={() => onTune(track.id)} />}
-              </div>
-            </>
-          ) : (
-            <>
-              <StripName name={track.name} color={track.color} />
-                <TrackPresence trackId={track.id} />
-              <div className="strip-tools">
-                <ChannelAutomation store={store} trackId={track.id} />
-                <RouteButton store={store} trackId={track.id} />
-                <FxButton name={track.name} onOpen={() => setFxTrack(track.id)} />
-                <PanKnob store={store} engine={engine} label={`${track.name} pan. Left or right.`} value={track.pan} spec={{ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }} />
-                <MixFlags store={store} trackId={track.id} part="extra" />
-                {track.type === 'audio' && onTune && <TuneButton name={track.name} onTune={() => onTune(track.id)} />}
-              </div>
-              <VolumeLane store={store} engine={engine} trackId={track.id} name={track.name} value={track.volume} vertical />
-              <div className="strip-hear">
-                <MixFlags store={store} trackId={track.id} part="hear" />
-              </div>
-            </>
-          )}
-        </div>
+        <ChannelStrip
+          key={track.id}
+          store={store}
+          engine={engine}
+          trackId={track.id}
+          rows={rows}
+          selected={store.selectedTrackId === track.id}
+          onTune={onTune}
+          onFx={() => setFxTrack(track.id)}
+        />
       ))}
       <AddTrackButton store={store} />
-      <div className="strip master">
-        {rows ? (
-          <>
-            <div className="strip-top">
-              <StripName name="Master" />
-            </div>
-            <MasterLane store={store} engine={engine} value={project.masterVolume} vertical={false} />
-            <div className="strip-extra">
-              <ChannelAutomation store={store} trackId="master" />
-              <MasterOpen onOpen={() => setMasterOpen(true)} />
-              <FxButton name="Master" master onOpen={() => setFxTrack('master')} />
-              <LevelButton engine={engine} onOpen={() => setLevelsOpen(true)} />
-            </div>
-          </>
-        ) : (
-          <>
-            <StripName name="Master" />
-            <div className="strip-tools">
-              <ChannelAutomation store={store} trackId="master" />
-              <MasterOpen onOpen={() => setMasterOpen(true)} />
-              <FxButton name="Master" master onOpen={() => setFxTrack('master')} />
-              <LevelButton engine={engine} onOpen={() => setLevelsOpen(true)} />
-            </div>
-            {!narrow && <MasterReadout engine={engine} />}
-            <MasterLane store={store} engine={engine} value={project.masterVolume} vertical />
-          </>
-        )}
-      </div>
+      <MasterStrip
+        store={store}
+        engine={engine}
+        rows={rows}
+        narrow={narrow}
+        onOpen={() => setMasterOpen(true)}
+        onFx={() => setFxTrack('master')}
+        onLevels={() => setLevelsOpen(true)}
+      />
       </div>
       )}
     </div>
     {masterOpen && <MasterSheet store={store} engine={engine} onClose={() => setMasterOpen(false)} />}
     </>
+  )
+}
+
+function routingCaption(store: ProjectStore, trackId: string) {
+  const track = store.track(trackId)
+  if (!track) return 'Master'
+  const targets = store.project.tracks.filter((item) => (item.type === 'bus' || item.type === 'group') && item.id !== track.id)
+  if (!track.output) return track.input.startsWith('remote:') ? 'Cue' : 'Master'
+  return targets.find((item) => item.id === track.output)?.name ?? 'Master'
+}
+
+function ChannelStrip({
+  store,
+  engine,
+  trackId,
+  rows,
+  selected,
+  onTune,
+  onFx,
+}: {
+  store: ProjectStore
+  engine: AudioEngine
+  trackId: string
+  rows: boolean
+  selected: boolean
+  onTune?: (trackId: string) => void
+  onFx: () => void
+}) {
+  const track = store.track(trackId)
+  if (!track) return null
+  const output = routingCaption(store, trackId)
+  const tools: SecondaryItem[] = [
+    { id: 'automation', label: 'Touch', node: <ChannelAutomation store={store} trackId={track.id} /> },
+    { id: 'routing', label: output, node: <RouteButton store={store} trackId={track.id} /> },
+    { id: 'inserts', label: 'Inserts', node: <FxButton name={track.name} onOpen={onFx} /> },
+    { id: 'pan', label: 'Pan', width: 40, node: <PanKnob store={store} engine={engine} label={`${track.name} pan. Left or right.`} value={track.pan} spec={{ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }} /> },
+    { id: 'arm', label: 'Arm', node: <MixFlags store={store} trackId={track.id} part="arm" /> },
+    { id: 'safe', label: 'Safe', node: <MixFlags store={store} trackId={track.id} part="safe" /> },
+  ]
+  if (track.type === 'audio' && onTune) {
+    tools.push({ id: 'tune', label: 'Tune', node: <TuneButton name={track.name} onTune={() => onTune(track.id)} /> })
+  }
+  const hear: SecondaryItem[] = [
+    { id: 'mute', label: 'Mute', node: <MixFlags store={store} trackId={track.id} part="mute" /> },
+    { id: 'solo', label: 'Solo', node: <MixFlags store={store} trackId={track.id} part="solo" /> },
+  ]
+  return (
+    <div className={`strip${selected ? ' is-selected' : ''}`} data-track={track.id} onClick={() => store.selectTrack(track.id)}>
+      {rows ? (
+        <>
+          <div className="strip-top">
+            <StripName name={track.name} color={track.color} />
+            <TrackPresence trackId={track.id} />
+            <SecondaryRack zone="top" className="strip-hear" items={hear} />
+          </div>
+          <VolumeLane store={store} engine={engine} trackId={track.id} name={track.name} value={track.volume} vertical={false} />
+          <SecondaryRack zone="tools" className="strip-extra" items={tools} />
+        </>
+      ) : (
+        <>
+          <StripName name={track.name} color={track.color} />
+          <TrackPresence trackId={track.id} />
+          <SecondaryRack zone="tools" className="strip-tools" items={tools} />
+          <VolumeLane store={store} engine={engine} trackId={track.id} name={track.name} value={track.volume} vertical />
+          <SecondaryRack zone="hear" className="strip-hear" items={hear} />
+        </>
+      )}
+    </div>
+  )
+}
+
+function MasterStrip({
+  store,
+  engine,
+  rows,
+  narrow,
+  onOpen,
+  onFx,
+  onLevels,
+}: {
+  store: ProjectStore
+  engine: AudioEngine
+  rows: boolean
+  narrow: boolean
+  onOpen: () => void
+  onFx: () => void
+  onLevels: () => void
+}) {
+  const tools: SecondaryItem[] = [
+    { id: 'automation', label: 'Touch', node: <ChannelAutomation store={store} trackId="master" /> },
+    { id: 'master', label: 'Master', node: <MasterOpen onOpen={onOpen} /> },
+    { id: 'inserts', label: 'Inserts', node: <FxButton name="Master" master onOpen={onFx} /> },
+    { id: 'level', label: 'Level', node: <LevelButton engine={engine} onOpen={onLevels} /> },
+  ]
+  return (
+    <div className="strip master">
+      {rows ? (
+        <>
+          <div className="strip-top">
+            <StripName name="Master" />
+          </div>
+          <MasterLane store={store} engine={engine} value={store.project.masterVolume} vertical={false} />
+          <SecondaryRack zone="tools" className="strip-extra" items={tools} />
+        </>
+      ) : (
+        <>
+          <StripName name="Master" />
+          <SecondaryRack zone="tools" className="strip-tools" items={tools} />
+          {!narrow && <MasterReadout engine={engine} />}
+          <MasterLane store={store} engine={engine} value={store.project.masterVolume} vertical />
+        </>
+      )}
+    </div>
   )
 }
 
@@ -224,9 +292,7 @@ function RouteButton({ store, trackId }: { store: ProjectStore; trackId: string 
   const track = store.track(trackId)
   if (!track) return null
   const targets = store.project.tracks.filter((item) => (item.type === 'bus' || item.type === 'group') && item.id !== track.id)
-  const outputLabel = !track.output
-    ? (track.input.startsWith('remote:') ? 'Cue' : 'Master')
-    : targets.find((item) => item.id === track.output)?.name ?? 'Master'
+  const outputLabel = routingCaption(store, trackId)
   const groupLabel = targets.find((item) => item.type === 'group' && item.id === track.groupId)?.name ?? 'No group'
   const linkLabel = mixGroupsOf(store.project).find((item) => item.id === trackGroupId(store.project, trackId))?.name ?? 'No link'
   return (

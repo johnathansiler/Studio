@@ -64,7 +64,8 @@ import './ui/collab.css'
 import { TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
 import { SnapControl } from './ui/SnapControl'
-import { panelChoice, rememberPanel } from './ui/panelMemory'
+import { AddTrackButton } from './ui/AddTrack'
+import { activeTool } from './state/tools'
 import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
 import { UNSTUCK_COPY, visibleMenu } from './ui/chrome'
@@ -75,6 +76,7 @@ import { deletesSelection } from './ui/clipKeys'
 import { historyCommand, typingTarget } from './state/history'
 import { claimComputerKey } from './model/keyboardPlay'
 import { KeyboardDock } from './ui/KeyboardDock'
+import { browserLandscapeHost, dismissKeyboard, isPianoHistory, markPianoHistory, presentKeyboard, setKeyboardPresenter, type KeyboardPresentation } from './ui/keyboardStage'
 import { HintBubble, TipButton } from './ui/Hint'
 import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
@@ -198,7 +200,6 @@ export function App() {
   const [persisted, setPersisted] = useState(true)
   const [help, setHelp] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [toolsOpen, setToolsOpen] = useState(() => panelChoice('arrangeTools') ?? false)
   const [recordHint, setRecordHint] = useState('')
   const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight))
   const [land, setLand] = useState(() => window.innerWidth > window.innerHeight)
@@ -213,6 +214,10 @@ export function App() {
   const [collabOpen, setCollabOpen] = useState(() => readSessionDock())
   const [invitePending, setInvitePending] = useState(false)
   const [pianoOpen, setPianoOpen] = useState(false)
+  const shellRef = useRef<HTMLDivElement>(null)
+  const [keysTurned, setKeysTurned] = useState(false)
+  const keysMode = useRef<KeyboardPresentation>('dock')
+  const keysFromClick = useRef(false)
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
@@ -817,6 +822,20 @@ export function App() {
       else if (event.key === 'Home' || event.key === 'Enter') void returnToStart()
       else if (event.key === '?' || (event.shiftKey && event.key === '/')) setHelp((open) => !open)
       else if (event.key === 'Escape') {
+        if (help) {
+          setHelp(false)
+          return
+        }
+        if (menuOpen) {
+          setMenuOpen(false)
+          return
+        }
+        if (editorPanel.current === 'piano') {
+          event.preventDefault()
+          if (isPianoHistory(history.state)) history.back()
+          else closePiano()
+          return
+        }
         setHelp(false)
         setMenuOpen(false)
       }
@@ -1524,6 +1543,68 @@ async function importDropped(files: FileList) {
     store.closePiano()
   }
 
+  useEffect(() => {
+    if (panel !== 'piano') return
+    markPianoHistory(history)
+    let popped = false
+    const onPop = () => {
+      popped = true
+      closePiano()
+    }
+    window.addEventListener('popstate', onPop)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      if (!popped && isPianoHistory(history.state)) history.back()
+    }
+  }, [panel === 'piano'])
+
+  useEffect(() => {
+    const host = () => browserLandscapeHost(shellRef.current, form, window.innerHeight >= window.innerWidth)
+    setKeyboardPresenter((on) => {
+      keysFromClick.current = true
+      void (async () => {
+        if (!on || form !== 'phone') {
+          await dismissKeyboard(host(), keysMode.current)
+          keysMode.current = 'dock'
+          setKeysTurned(false)
+          return
+        }
+        const mode = await presentKeyboard(host())
+        keysMode.current = mode
+        setKeysTurned(mode === 'turned')
+      })()
+    })
+    return () => setKeyboardPresenter(null)
+  }, [form])
+
+  useEffect(() => {
+    if (keysFromClick.current) {
+      keysFromClick.current = false
+      return
+    }
+    let cancel = false
+    const host = () => browserLandscapeHost(shellRef.current, form, window.innerHeight >= window.innerWidth)
+    void (async () => {
+      if (!store.keyboardMidi || form !== 'phone') {
+        await dismissKeyboard(host(), keysMode.current)
+        if (cancel) return
+        keysMode.current = 'dock'
+        setKeysTurned(false)
+        return
+      }
+      const mode = await presentKeyboard(host())
+      if (cancel) {
+        await dismissKeyboard(host(), mode)
+        return
+      }
+      keysMode.current = mode
+      setKeysTurned(mode === 'turned')
+    })()
+    return () => {
+      cancel = true
+    }
+  }, [store.keyboardMidi, form])
+
   function openPiano(trackId: string, clipId?: string) {
     store.closeScaler()
     store.closePads()
@@ -1556,7 +1637,8 @@ async function importDropped(files: FileList) {
 
   return (
     <div
-      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''} ${form === 'desk' && store.keyboardMidi ? 'desk-keys' : ''}`}
+      ref={shellRef}
+      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''} ${store.keyboardMidi ? 'keys-open' : ''} ${keysTurned ? 'keys-turned' : ''}`}
       style={{ ['--dock' as string]: `${dock}px`, ['--sounds' as string]: `${soundWidth}px` }}
       data-version={version}
       data-form={form}
@@ -1613,10 +1695,11 @@ async function importDropped(files: FileList) {
               dockBottom: dockEdge === 'bottom',
               hardwareMidi: !hidesHardwareMidi(navigator.userAgent),
             })}
-            pressed={(action) => action === 'snap' ? store.project.snap
+            pressed={(action) => action === 'box' || action === 'erase' || action === 'pan' ? activeTool() === action
+              : action === 'snap' ? store.project.snap
               : action === 'loop' ? store.project.loopEnabled
               : false}
-            disabled={(action) => store.remoteFollow && (action === 'new' || action === 'session-mode' || action === 'capture' || action === 'snap' || action === 'loop' || action === 'signature')}
+            disabled={(action) => store.remoteFollow && (action === 'new' || action === 'session-mode' || action === 'capture' || action === 'snap' || action === 'loop' || action === 'signature' || action === 'box' || action === 'erase' || action === 'pan')}
             signature={`${store.project.timeSignature.numerator}/${store.project.timeSignature.denominator}`}
             onSignature={(numerator, denominator) => store.setTimeSignature(numerator, denominator)}
             onAction={(action) => {
@@ -1624,6 +1707,7 @@ async function importDropped(files: FileList) {
               else if (action === 'open') { setMenuOpen(false); void openProjects() }
               else if (action === 'save') { setMenuOpen(false); void persist() }
               else if (action === 'export') { setMenuOpen(false); setExportOpen(true) }
+              else if (action === 'box' || action === 'erase' || action === 'pan') { setMenuOpen(false); store.setTool(action) }
               else if (action === 'quantize') { setMenuOpen(false); store.openQuantize() }
               else if (action === 'to-start') { setMenuOpen(false); void returnToStart() }
               else if (action === 'loop') store.toggle('loopEnabled')
@@ -1650,7 +1734,6 @@ async function importDropped(files: FileList) {
           engine={engine}
           syncLabel={session.state.syncLabel}
           simple={phone}
-          desk={form === 'desk'}
           recordHint={recordHint}
           onPlay={() => { engine.unlock(); void play() }}
           onStop={() => void stop()}
@@ -1664,37 +1747,31 @@ async function importDropped(files: FileList) {
       )}
       {surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano' && (
         <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
-          <div className="tool-group">
-          <SnapControl store={store} />
-          <button
-            type="button"
-            className={`cap-btn${toolsOpen ? ' on' : ''}`}
-            aria-pressed={toolsOpen}
-            title="Edit modes. Choose select, draw, erase, and the other timeline tools."
-            onClick={() => {
-              const next = !toolsOpen
-              setToolsOpen(next)
-              rememberPanel('arrangeTools', next)
-            }}
-          >
-            <strong>Tools</strong>
-            <small>Edit modes</small>
-          </button>
-          </div>
-          {toolsOpen && (
+          <div className="command-strip" id="command-strip" role="toolbar" aria-label="Edit">
             <ToolBar
-              panel
               context="arrange"
-              compact={form !== 'desk'}
-              phone={phone}
-              words={form === 'fold'}
-              onClose={() => { setToolsOpen(false); rememberPanel('arrangeTools', false) }}
+              words
+              showHint={false}
               onChange={(tool) => store.setTool(tool)}
               onDuplicate={() => store.duplicateSelection()}
               onDelete={() => store.deleteSelectedClip()}
             />
-          )}
-          {toolsOpen && <MidiTools store={store} engine={engine} />}
+            <TipButton
+              className="tool"
+              label="Quantize"
+              hint="Choose the grid and how hard to snap, then apply it."
+              disabled={store.remoteFollow}
+              onClick={() => store.openQuantize()}
+            >
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+                <path d="M3 9h12M9 3v12M5.5 5.5l7 7M12.5 5.5l-7 7" />
+              </svg>
+              <span className="tool-label">Quantize</span>
+            </TipButton>
+            <AddTrackButton store={store} />
+            <SnapControl store={store} />
+          </div>
+          <MidiTools store={store} engine={engine} />
         </div>
       )}
       <div className={`workspace ${dockShown ? '' : 'session-closed'} ${soundsOpen && !phone ? 'sounds-open' : ''} ${!phone && dockEdge === 'bottom' && surface === 'studio' && dockShown ? 'dock-bottom' : ''}`}>
@@ -1810,7 +1887,7 @@ async function importDropped(files: FileList) {
             <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
           )}
           {surface === 'studio' && panel === 'piano' && (
-            <MidiDock store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => openPlugin('write')} onClose={phone ? closePiano : undefined} />
+            <MidiDock store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => openPlugin('write')} onClose={closePiano} />
           )}
         </div>}
       </div>
@@ -1964,7 +2041,7 @@ async function importDropped(files: FileList) {
       )}
       {knockOpen && <KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} />}
       <SpectralSheet store={store} />
-      {form === 'desk' && <KeyboardDock store={store} engine={engine} />}
+      <KeyboardDock store={store} engine={engine} />
       <HintBubble />
       <div className="toasts">
         {store.toasts.map((toast) => (

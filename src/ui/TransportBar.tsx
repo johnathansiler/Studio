@@ -10,6 +10,7 @@ import type { AssetStatus } from '../remote/assets'
 import { AutomationFollow } from './AutomationLane'
 import { AssetTransfers } from './AssetTransfers'
 import { TRANSPORT_COPY, copyOf } from './chrome'
+import { KeyboardToggle } from './KeyboardDock'
 import { TipButton } from './Hint'
 import './loopRegion.css'
 import './remoteFixes.css'
@@ -25,7 +26,6 @@ export function TransportBar({
   onReset,
   roomRole,
   simple = false,
-  desk = false,
   takeProgress = null,
   recordHint = '',
   assetTransfers = [],
@@ -42,8 +42,6 @@ export function TransportBar({
   roomRole?: 'host' | 'guest'
   /** Phone uses the same transport controls, with text labels. */
   simple?: boolean
-  /** Desktop: show the computer-keyboard toggle. */
-  desk?: boolean
   /** 0–1 while a full-quality guest take is moving to the host. */
   takeProgress?: number | null
   recordHint?: string
@@ -283,22 +281,7 @@ export function TransportBar({
         >
           <span className="t-word">{guestRoom ? 'Host only' : 'Reset'}</span>
         </TipButton>
-        {desk && (
-          <button
-            type="button"
-            className={`keyboard-toggle${store.keyboardMidi ? ' on' : ''}`}
-            aria-pressed={store.keyboardMidi}
-            aria-label="Keyboard. Play notes from the computer keyboard and show the piano."
-            title="Play notes from the computer keyboard and show the piano."
-            onClick={() => {
-              engine.unlock()
-              store.setKeyboardMidi(!store.keyboardMidi)
-            }}
-          >
-            <KeyboardIcon />
-            <span>Keyboard</span>
-          </button>
-        )}
+        <KeyboardToggle store={store} engine={engine} />
       </div>
       <div className="lcd" aria-live="polite">
         <div className="bars">{formatMapBars(project, position)}</div>
@@ -425,15 +408,4 @@ export function TransportBar({
   )
 }
 
-function KeyboardIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-      <rect x="1.5" y="6" width="3" height="8" rx="0.6" fill="currentColor" />
-      <rect x="6.5" y="6" width="3" height="8" rx="0.6" fill="currentColor" />
-      <rect x="11.5" y="6" width="3" height="8" rx="0.6" fill="currentColor" />
-      <rect x="4.2" y="2" width="2.4" height="6" rx="0.5" fill="currentColor" />
-      <rect x="9.4" y="2" width="2.4" height="6" rx="0.5" fill="currentColor" />
-    </svg>
-  )
-}
 

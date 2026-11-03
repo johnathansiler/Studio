@@ -266,6 +266,7 @@ export function AddTrackButton({ store }: { store: ProjectStore }) {
         type="button"
         className="add-track-btn"
         aria-label="Add track"
+        title="Add a track. Hold to repeat the last kind."
         onPointerDown={() => {
           held.current = false
           window.clearTimeout(hold.current)
@@ -293,7 +294,10 @@ export function AddTrackButton({ store }: { store: ProjectStore }) {
           repeat()
         }}
       >
-        {form === 'desk' ? '+' : 'Add'}
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+          <path d="M9 3.5v11M3.5 9h11" />
+        </svg>
+        <span className="tool-label">Add track</span>
       </button>
       {open && (
         <GuideLayer>

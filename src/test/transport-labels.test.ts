@@ -26,7 +26,6 @@ function transportPage(shell: string) {
   const html = renderToStaticMarkup(createElement(TransportBar, {
     store,
     engine: engine as never,
-    desk: shell === 'studio',
     onPlay() {},
     onStop() {},
     onRecord() {},
@@ -45,7 +44,7 @@ const VIEWPORTS = [
 ]
 
 describe('transport words', () => {
-  it('shows Start, Play, Stop, Rec, and Loop on desktop, phone, and fold, and lights Play only while playing', async () => {
+  it('shows Start, Play, Stop, Rec, Click, Count, Reset, and Loop on desktop, phone, and fold, and lights Play only while playing', async () => {
     const browser = await chromium.launch({ headless: true })
     try {
       const page = await browser.newPage()

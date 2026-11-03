@@ -22,7 +22,7 @@ export function isBeatMachineId(id: string): id is BeatMachineId {
 
 /** Plugin and device ids that swap a MIDI track onto the beat machine. A plain sampler insert stays chromatic. */
 export function insertsBeatMachine(id: string): boolean {
-  return id === 'pads' || id === 'drums' || id === 'drum-machine'
+  return id === 'pads' || id === 'drums' || id === 'drum-machine' || id === '808'
 }
 
 export function pluginIsBeatMachine(plugin: { pluginId: string; params?: Record<string, number> }): boolean {

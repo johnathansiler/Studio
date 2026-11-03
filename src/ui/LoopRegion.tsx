@@ -185,6 +185,7 @@ export function LoopRegion({
     <div
       ref={hostRef}
       className={`loop-host${project.loopEnabled ? '' : ' off'}`}
+      data-loop={project.loopEnabled ? 'on' : 'off'}
       data-loop-region={view}
       data-loop-length={readout.length}
       data-loop-span={readout.span}
