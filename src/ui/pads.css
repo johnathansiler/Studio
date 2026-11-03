@@ -106,6 +106,10 @@
     0 14px 18px rgba(0, 0, 0, 0.45);
 }
 
+.mpc-pad {
+  min-height: 40px;
+}
+
 .mpc-pad span {
   position: relative;
   z-index: 1;
@@ -113,9 +117,10 @@
   width: 100%;
   max-height: none;
   text-align: center;
-  white-space: nowrap;
+  white-space: normal;
   overflow: visible;
   text-overflow: clip;
+  word-break: normal;
   line-height: 1.15;
   font-size: clamp(12px, 2.2vw, 16px);
   font-weight: 740;
@@ -238,9 +243,43 @@
 }
 
 .shell.phone .mpc .mpc-pad {
-  min-height: 0;
+  min-height: 40px;
   height: 100%;
   border-radius: 14px;
+}
+
+.mpc-kind {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #d8ffe6;
+}
+
+.mpc-tools,
+.mpc-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
+}
+
+.mpc-tools button,
+.mpc-tools select,
+.mpc-steps button,
+.mpc-step-velocity input {
+  min-height: 40px;
+  min-width: 40px;
+}
+
+.mpc-tools label,
+.mpc-step-velocity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+}
+
+.mpc-step-velocity {
+  padding: 0 10px 8px;
 }
 .shell.phone .mpc .mpc-pad.ch-raised:not(.lit) {
   box-shadow:

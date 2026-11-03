@@ -1,4 +1,4 @@
-/** Sampler/drums. Old drum plugin ids load this instrument. The chromatic sampler keeps its own processor. */
+/** Drums mode of the Sampler plugin. Old pad and drum ids load as Sampler with kind Drums. */
 
 import { repeatIntervalBeats, type RepeatRate } from '../../model/midiClock'
 import {
@@ -7,7 +7,6 @@ import {
   chopsToPads,
   createKit,
   normalizePadKit,
-  padRegion,
   type MpcOutput,
   type PadProgram,
   type PadRegion,
@@ -16,22 +15,21 @@ import {
   type SequenceNote,
 } from '../../model/padMachine'
 
-export const SAMPLER_DRUMS_ID = 'sampler-drums'
-export const SAMPLER_DRUMS_NAME = 'Sampler/drums'
+/** Core plugin id. Drums is params.kind >= 1, not a separate insert. */
+export const SAMPLER_ID = 'sampler'
 
-/** Drum-machine ids that become the core plugin when a project opens. */
-export const LEGACY_DRUM_IDS = ['pads', 'drum-machine', '808', 'drums'] as const
+/** Saved ids that open Sampler in Drums mode. */
+export const LEGACY_DRUM_IDS = ['pads', 'drum-machine', '808', 'drums', 'looper'] as const
 
 export type { MpcOutput, PadRegion }
 
-export function canonicalizePluginId(id: string): string {
-  if ((LEGACY_DRUM_IDS as readonly string[]).includes(id)) return SAMPLER_DRUMS_ID
-  return id
+export function drumsMode(id: string): boolean {
+  return (LEGACY_DRUM_IDS as readonly string[]).includes(id) && id !== 'looper'
 }
 
-/** Sampler stays a chromatic player. Its slices can still feed the pads. */
-export function loadsIntoSamplerDrums(id: string): boolean {
-  return id === SAMPLER_DRUMS_ID || id === 'sampler' || (LEGACY_DRUM_IDS as readonly string[]).includes(id)
+/** Sampler, pads, and the looper all load as the Sampler plugin. */
+export function loadsIntoSampler(id: string): boolean {
+  return id === SAMPLER_ID || (LEGACY_DRUM_IDS as readonly string[]).includes(id)
 }
 
 export function hostsSamplerDrums(track: { type: string } | null | undefined): boolean {
@@ -230,6 +228,78 @@ export function padStrip(pad: PadVoice) {
     mute: Boolean(pad.muted),
     poly: pad.poly,
   }
+}
+
+export const VELOCITY_CURVES = [
+  { id: 0, label: 'Linear' },
+  { id: 1, label: 'Soft' },
+  { id: 2, label: 'Hard' },
+  { id: 3, label: 'Fixed' },
+] as const
+
+/** Fixed, scaled, and limited velocity. Sensitivity blends the hit toward the fixed value. */
+export function shapeVelocity(played: number, opts: {
+  curve: number
+  amount: number
+  min: number
+  max: number
+  fixed: number
+  sensitivity: number
+}): number {
+  const dry = clamp(played, 0, 1)
+  const sense = clamp(opts.sensitivity, 0, 1)
+  const felt = clamp(opts.fixed, 0, 1) * (1 - sense) + dry * sense
+  const curve = clamp(Math.round(opts.curve), 0, 3)
+  let shaped = felt
+  if (curve === 1) shaped = Math.sqrt(felt)
+  else if (curve === 2) shaped = felt * felt
+  else if (curve === 3) shaped = clamp(opts.fixed, 0, 1)
+  const mixed = curve === 3 ? shaped : felt + (shaped - felt) * clamp(opts.amount, 0, 1)
+  const floor = clamp(opts.min, 0, 1)
+  const ceiling = clamp(opts.max, floor, 1)
+  return clamp(mixed, floor, ceiling)
+}
+
+/** Timing and velocity scatter. unitTime and unitVel are 0–1. */
+export function humanizeHit(beat: number, velocity: number, timing: number, velAmount: number, unitTime: number, unitVel: number) {
+  const shift = (clamp(unitTime, 0, 1) * 2 - 1) * Math.max(0, timing)
+  const delta = (clamp(unitVel, 0, 1) * 2 - 1) * Math.max(0, velAmount)
+  return {
+    beat: Math.max(0, beat + shift),
+    velocity: clamp(velocity + delta, 0.01, 1),
+    shift,
+  }
+}
+
+/** Rewrites a recorded pattern. The same random sequence always makes the same edit. */
+export function humanizeNotes<T extends { startBeat: number; velocity: number }>(
+  notes: T[],
+  timing: number,
+  velAmount: number,
+  rng: () => number,
+): T[] {
+  return notes.map((note) => {
+    const next = humanizeHit(note.startBeat, note.velocity, timing, velAmount, rng(), rng())
+    return { ...note, startBeat: next.beat, velocity: next.velocity }
+  })
+}
+
+export function setStepVelocity(notes: SequenceNote[], pitch: number, step: number, stepBeats: number, velocity: number): SequenceNote[] {
+  const beats = stepBeats > 0 ? stepBeats : 0.25
+  const start = Math.max(0, step) * beats
+  const level = clamp(velocity, 0.01, 1)
+  return notes.map((note) => (
+    note.pitch === pitch && Math.abs(note.startBeat - start) < beats * 0.45
+      ? { ...note, velocity: level }
+      : note
+  ))
+}
+
+export function stepVelocity(notes: SequenceNote[], pitch: number, step: number, stepBeats: number): number | null {
+  const beats = stepBeats > 0 ? stepBeats : 0.25
+  const start = step * beats
+  const note = notes.find((item) => item.pitch === pitch && Math.abs(item.startBeat - start) < beats * 0.45)
+  return note ? note.velocity : null
 }
 
 export function windowOf(region: PadRegion): { start: number; end: number } {

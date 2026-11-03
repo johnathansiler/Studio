@@ -11,9 +11,12 @@ import {
   pickLayer,
   sixteenLevels,
   timingCorrect,
+  unitHash,
   type LevelSpread,
   type PadProgram,
+  type PadVoice,
 } from '../model/padMachine'
+import { humanizeHit, shapeVelocity } from '../instruments/mpc/model'
 import { samplesToBeats } from '../model/time'
 
 export interface PlayedNote {
@@ -52,6 +55,8 @@ interface HeldNote {
   color?: PadColor
   choke: number[]
   repeated: boolean
+  /** Beats added by Humanize. Printed onto the recorded note. */
+  nudge: number
 }
 
 interface RepeatVoice {
@@ -92,6 +97,7 @@ export class Performer {
   private robin = 0
   private fixedBeats = 0
   private recordMode: 'overdub' | 'replace' = 'overdub'
+  private tempoBpm: number | null = null
   private sampleOf: (bufferId: string) => Float32Array | null = () => null
   private freeOrigin: { context: number; beat: number } | null = null
 
@@ -153,6 +159,11 @@ export class Performer {
     this.quantizeBeats = beats > 0 ? beats : 0
   }
 
+  /** Null follows the project tempo. A number is the pad machine's own tempo. */
+  setTempo(bpm: number | null) {
+    this.tempoBpm = bpm && bpm > 0 ? bpm : null
+  }
+
   setDeck(opts: {
     kit: PadProgram | null
     swing: number
@@ -185,7 +196,7 @@ export class Performer {
     const pitch = sounded.midi
     const fine = sounded.cents
     if (this.erase && (this.target()?.drums ?? false)) {
-      this.held.set(pointerId, { pitch, fine: 0, eventMs, velocity, erase: true, sample: null, choke: [], repeated: false })
+      this.held.set(pointerId, { pitch, fine: 0, eventMs, velocity, erase: true, sample: null, choke: [], repeated: false, nudge: 0 })
       return
     }
     if (this.latch && this.engaged && this.latched.has(pitch)) {
@@ -217,16 +228,18 @@ export class Performer {
       if (layer?.bufferId) sample = this.sampleOf(layer.bufferId)
       if (layer?.tune && color) color.tune = (color.tune || 0) + layer.tune
     }
-    const gain = level * (pad?.level ?? 1)
     const choke = drums ? chokeTargets(this.chokePads(), pitch) : []
     const repeated = this.engaged && !!this.grid
-    const note: HeldNote = { pitch, fine, eventMs, velocity: gain, erase: false, locks, sample, color, choke, repeated }
+    const voiced = drums && !repeated ? this.express(pitch, level, pad, this.transportBeat(eventMs)) : { velocity: level, shift: 0, beat: 0 }
+    const gain = voiced.velocity * (pad?.level ?? 1)
+    const note: HeldNote = { pitch, fine, eventMs, velocity: gain, erase: false, locks, sample, color, choke, repeated, nudge: voiced.shift }
+    const when = this.heardWhen(voiced.shift)
     this.held.set(pointerId, note)
     if (repeated) {
       const count = (this.holders.get(pitch) ?? 0) + 1
       this.holders.set(pitch, count)
-      if (count === 1) this.startRepeat(pitch, gain, this.transportBeat(eventMs), sample, color, locks, choke)
-      else this.beat.pressure(pitch, gain, this.transportBeat(eventMs))
+      if (count === 1) this.startRepeat(pitch, level, this.transportBeat(eventMs), sample, color, locks, choke)
+      else this.beat.pressure(pitch, level, this.transportBeat(eventMs))
       if (this.latch) this.latched.set(pitch, note)
       this.pumpNow()
       return
@@ -235,11 +248,11 @@ export class Performer {
       for (const other of choke) this.engine.liveNoteOff(other)
       if (pad?.poly === 'mono') this.engine.liveNoteOff(pitch)
     }
-    if (sample) this.engine.playBuffer(sample, pitch, gain, color)
+    if (sample) this.engine.playBuffer(sample, pitch, gain, color, when)
     else if (drums) {
       const aimed = this.target()
       if (aimed) this.engine.liveTrackId = aimed.trackId
-      this.engine.liveDrum(pitch, gain, 0, color)
+      this.engine.liveDrum(pitch, gain, 0, color, when)
     }
     else {
       const aimed = this.target()
@@ -276,15 +289,15 @@ export class Performer {
       if (aimed && !aimed.drums && !held.sample) this.engine.releaseThrough(aimed.trackId, held.pitch)
       else this.engine.liveNoteOff(held.pitch)
     }
-    this.print(held.pitch, held.fine, held.velocity, held.eventMs, eventMs, held.locks)
+    this.print(held.pitch, held.fine, held.velocity, held.eventMs, eventMs, held.locks, held.nudge)
   }
 
-  pressure(pointerId: number, velocity: number) {
+  pressure(pointerId: number, velocity: number, eventMs = performance.now()) {
     const held = this.held.get(pointerId)
     if (!held || held.erase) return
     const level = padVelocity(velocity, this.fullLevel, this.accent)
     held.velocity = level
-    if (held.repeated) this.beat.pressure(held.pitch, level, this.transportBeat(performance.now()))
+    if (held.repeated) this.beat.pressure(held.pitch, level, this.transportBeat(eventMs))
     this.engine.liveGain(held.pitch, level)
   }
 
@@ -378,19 +391,23 @@ export class Performer {
   private sound(hit: RepeatHit) {
     const voice = this.voices.get(hit.pitch)
     if (!voice) return
-    if (voice.sample) this.engine.playBuffer(voice.sample, hit.pitch, hit.velocity, voice.color, hit.when)
-    else this.engine.schedulePadHit(hit.when, hit.pitch, hit.velocity, voice.color)
+    const voiced = this.express(hit.pitch, hit.velocity, this.padFor(hit.pitch), hit.beat)
+    const when = hit.when + Math.max(0, voiced.shift) * (60 / Math.max(1, this.tempoBpm ?? this.engine.tempo))
+    const level = voiced.velocity * (this.padFor(hit.pitch)?.level ?? 1)
+    if (voice.sample) this.engine.playBuffer(voice.sample, hit.pitch, level, voice.color, when)
+    else this.engine.schedulePadHit(when, hit.pitch, level, voice.color)
     for (const other of voice.choke) this.engine.duckPad(other)
   }
 
   private remember(hits: RepeatHit[]) {
     for (const hit of hits) {
       const voice = this.voices.get(hit.pitch)
+      const voiced = this.express(hit.pitch, hit.velocity, this.padFor(hit.pitch), hit.beat)
       this.pending.push({
         pitch: hit.pitch,
-        startBeat: Math.max(0, hit.beat),
+        startBeat: Math.max(0, voiced.beat),
         durationBeats: hit.durationBeats,
-        velocity: hit.velocity,
+        velocity: voiced.velocity * (this.padFor(hit.pitch)?.level ?? 1),
         locks: voice?.locks,
       })
     }
@@ -441,7 +458,7 @@ export class Performer {
     if (this.engine.transportPlaying) {
       this.freeOrigin = null
       const origin = this.engine.playOrigin()
-      return { originContext: origin.context, originBeat: origin.beat, tempo: this.engine.tempo, sampleRate: this.engine.sampleRate }
+      return { originContext: origin.context, originBeat: origin.beat, tempo: this.tempoBpm ?? this.engine.tempo, sampleRate: this.engine.sampleRate }
     }
     if (!this.freeOrigin) {
       const beat = samplesToBeats(this.engine.positionSamples, this.engine.sampleRate, this.engine.tempo)
@@ -450,7 +467,7 @@ export class Performer {
     return {
       originContext: this.freeOrigin.context,
       originBeat: this.freeOrigin.beat,
-      tempo: this.engine.tempo,
+      tempo: this.tempoBpm ?? this.engine.tempo,
       sampleRate: this.engine.sampleRate,
     }
   }
@@ -515,10 +532,39 @@ export class Performer {
     return quantizeBeat(beat, this.quantizeBeats)
   }
 
-  private print(pitch: number, fine: number, velocity: number, startMs: number, endMs: number, locks?: Record<string, number>) {
+  /** Velocity curve, pad sensitivity, then humanize. The same beat and pitch match twice. */
+  private express(pitch: number, velocity: number, pad: PadVoice | undefined, beat: number) {
+    const kit = this.kit
+    const shaped = shapeVelocity(velocity, {
+      curve: kit?.velocityCurve ?? 0,
+      amount: kit?.velocityAmount ?? 1,
+      min: kit?.velocityMin ?? 0,
+      max: kit?.velocityMax ?? 1,
+      fixed: kit?.velocityFixed ?? 0.85,
+      sensitivity: pad?.velocitySense ?? 1,
+    })
+    const seed = kit?.seed ?? 1
+    const key = Math.round(beat * 1000)
+    return humanizeHit(
+      beat,
+      shaped,
+      kit?.humanizeTime ?? 0,
+      kit?.humanizeVelocity ?? 0,
+      unitHash(seed, key, pitch),
+      unitHash(seed, key, pitch + 4096),
+    )
+  }
+
+  private heardWhen(shift: number) {
+    if (!(shift > 0)) return undefined
+    const ctx = this.engine.unlock()
+    return ctx.currentTime + shift * (60 / Math.max(1, this.tempoBpm ?? this.engine.tempo))
+  }
+
+  private print(pitch: number, fine: number, velocity: number, startMs: number, endMs: number, locks?: Record<string, number>, nudge = 0) {
     const target = this.target()
     if (!target) return
-    const startBeat = Math.max(0, this.place(startMs))
+    const startBeat = Math.max(0, this.place(startMs) + nudge)
     const endBeat = Math.max(startBeat + 0.05, this.place(endMs))
     const notes = [{ pitch, velocity, startBeat, durationBeats: endBeat - startBeat, locks, ...(fine ? { fine: Math.round(fine) } : {}) }]
     if (this.recording()) this.commit(target, notes, this.recordMode, this.fixedBeats)

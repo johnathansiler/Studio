@@ -7,6 +7,8 @@ import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { countInBarsOf, countInCaption } from '../model/time'
 import { projectSampleBeat } from '../model/tempoMap'
 import { BANKS, sixteenLevels, type LevelSpread } from '../model/padMachine'
+import { REPEAT_CHOICES, VELOCITY_CURVES, repeatSetting, stepOn, stepVelocity } from '../instruments/mpc/model'
+import { emptyTap, pushTap } from '../model/tap'
 import type { ProjectStore } from '../state/store'
 import { SOUND_MIME } from '../audio/sample/slot'
 import { fetchSoundBytes, soundCache } from '../sounds/cache'
@@ -47,6 +49,9 @@ export function PadsPanel({
   const [levels, setLevels] = useState<LevelSpread | ''>('')
   const [repeatOn, setRepeatOn] = useState(false)
   const [eraseOn, setEraseOn] = useState(false)
+  const [recordMode, setRecordMode] = useState<'overdub' | 'replace'>('overdub')
+  const [stepPick, setStepPick] = useState(0)
+  const taps = useRef(emptyTap())
   const [litPads, setLitPads] = useState<number[]>([])
   const [litNotes, setLitNotes] = useState<number[]>([])
   const [meters, setMeters] = useState<number[]>(() => Array(16).fill(0))
@@ -76,19 +81,21 @@ export function PadsPanel({
     )
   }
   const play = performer.current
-  play.setGrid(repeatOn ? '1/16' : null, false)
+  const repeat = repeatSetting(kit.repeatRate || '1/16')
+  play.setGrid(repeatOn ? repeat.rate : null, repeat.triplet)
   play.setEngaged(repeatOn)
   play.setQuantize(0)
+  play.setTempo(kit.syncTempo === false && kit.localBpm > 0 ? kit.localBpm : null)
   play.setDeck({
     kit,
     swing: kit.trackSwing,
-    fullLevel: false,
+    fullLevel: kit.fullLevel,
     accent: false,
     erase: eraseOn,
-    latch: false,
+    latch: kit.repeatLatch,
     levels: levels || null,
     fixedBeats: 0,
-    recordMode: 'overdub',
+    recordMode,
     sampleOf: (id) => store.buffers.get(id)?.channels[0] ?? null,
   })
 
@@ -179,15 +186,23 @@ export function PadsPanel({
       pointers.delete(event.pointerId)
       setLitPads([...pointers.values()])
     }
+    const move = (event: PointerEvent) => {
+      if (!kit.repeatPressure || !pointers.has(event.pointerId)) return
+      const key = (event.target as HTMLElement).closest?.('[data-pad]') as HTMLElement | null
+      if (!key) return
+      play.pressure(event.pointerId, pointerVelocity(event, key.getBoundingClientRect()), event.timeStamp)
+    }
     root.addEventListener('pointerdown', down)
+    root.addEventListener('pointermove', move)
     root.addEventListener('pointerup', up)
     root.addEventListener('pointercancel', up)
     return () => {
       root.removeEventListener('pointerdown', down)
+      root.removeEventListener('pointermove', move)
       root.removeEventListener('pointerup', up)
       root.removeEventListener('pointercancel', up)
     }
-  }, [levels, play])
+  }, [kit.repeatPressure, levels, play])
 
   useEffect(() => {
     const held = new Map<string, number>()
@@ -278,7 +293,8 @@ export function PadsPanel({
   return (
     <div className={`mpc ch-sheet ${phone ? 'phone' : ''}`} data-pads="plugin" aria-label="Pads">
       <div className="mpc-top">
-        <strong>Pads</strong>
+        <strong>Sampler</strong>
+        <span className="mpc-kind">Drums</span>
         {VISIBLE_BANKS.map((name, index) => (
           <button
             key={name}
@@ -295,12 +311,9 @@ export function PadsPanel({
           type="button"
           className={`ch-tab${repeatOn ? ' on' : ''}`}
           aria-pressed={repeatOn}
-          title="Hold for note repeat. The pad retriggers on 16ths."
-          onPointerDown={(event) => { event.preventDefault(); setRepeatOn(true) }}
-          onPointerUp={() => setRepeatOn(false)}
-          onPointerCancel={() => setRepeatOn(false)}
-          onPointerLeave={() => setRepeatOn(false)}
-        >Repeat</button>
+          title="Note repeat. The pad retriggers at the chosen rate."
+          onClick={() => setRepeatOn((value) => !value)}
+        >Note repeat</button>
         <button
           type="button"
           className={`ch-tab${eraseOn ? ' on' : ''}`}
@@ -326,6 +339,74 @@ export function PadsPanel({
         <button type="button" className="ch-tab mpc-close" title="Close Pads. The track keeps the instrument." aria-label="Close Pads. The track keeps the instrument." onClick={() => store.closePads()}>Close</button>
       </div>
       <p className="mpc-tool ch-recessed" data-tool={tool}>Tool: <b>{tool}</b></p>
+      <div className="mpc-tools">
+        <select aria-label="Output" title="MIDI out records clips and can drive another instrument. Audio out renders the pads. Both does both." value={kit.output} onChange={(event) => store.patchTrackKit(trackId, { output: event.target.value as 'midi' | 'audio' | 'both' })}>
+          <option value="midi">MIDI out</option>
+          <option value="audio">Audio out</option>
+          <option value="both">Both</option>
+        </select>
+        <button type="button" className={`ch-tab${kit.multiOut ? ' on' : ''}`} aria-pressed={kit.multiOut} title="Send each pad to its own bus." onClick={() => store.patchTrackKit(trackId, { multiOut: !kit.multiOut })}>Multi out</button>
+        <select aria-label="Note repeat rate" title="Straight notes and triplets, from a quarter to a thirty-second." value={kit.repeatRate} onChange={(event) => store.patchTrackKit(trackId, { repeatRate: event.target.value })}>
+          {REPEAT_CHOICES.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
+        </select>
+        <button type="button" className={`ch-tab${kit.repeatLatch ? ' on' : ''}`} aria-pressed={kit.repeatLatch} title="Latch keeps note repeat playing after the pad is released." onClick={() => store.patchTrackKit(trackId, { repeatLatch: !kit.repeatLatch })}>Latch</button>
+        <button type="button" className={`ch-tab${kit.fullLevel ? ' on' : ''}`} aria-pressed={kit.fullLevel} title="Full level plays every pad at velocity 127." onClick={() => store.patchTrackKit(trackId, { fullLevel: !kit.fullLevel })}>Full level</button>
+        <button type="button" className={`ch-tab${recordMode === 'overdub' ? ' on' : ''}`} aria-pressed={recordMode === 'overdub'} title="Overdub keeps the notes already in the loop." onClick={() => setRecordMode('overdub')}>Overdub</button>
+        <button type="button" className={`ch-tab${recordMode === 'replace' ? ' on' : ''}`} aria-pressed={recordMode === 'replace'} title="Replace clears the loop while you record." onClick={() => setRecordMode('replace')}>Replace</button>
+        <button type="button" className={`ch-tab${kit.syncTempo ? ' on' : ''}`} aria-pressed={kit.syncTempo} title="Sync note repeat to the project tempo." onClick={() => store.patchTrackKit(trackId, { syncTempo: !kit.syncTempo })}>Sync</button>
+        <button type="button" className="ch-tab" title="Tap tempo. With sync on, this sets the project tempo." onClick={() => {
+          const result = pushTap(taps.current, performance.now(), 'pointer')
+          taps.current = result.memory
+          if (result.bpm == null) return
+          if (kit.syncTempo) store.setTempo(result.bpm)
+          else store.patchTrackKit(trackId, { localBpm: result.bpm, syncTempo: false })
+        }}>Tap tempo</button>
+        <button type="button" className="ch-tab" title="Chop the selected pad on transients and spread the slices across this bank." onClick={() => store.chopTrackPad(trackId, bank, selected, 'transient')}>Transient</button>
+        <button type="button" className="ch-tab" title="Chop the selected pad on a grid and spread the slices across this bank." onClick={() => store.chopTrackPad(trackId, bank, selected, 'grid')}>Grid</button>
+        <button type="button" className="ch-tab" title="Chop the selected pad at its start and end and spread the slices across this bank." onClick={() => store.chopTrackPad(trackId, bank, selected, 'manual')}>Manual</button>
+        <button type="button" className="ch-tab" title="Place the song chain on the arrangement." onClick={() => store.placeMpcSong(trackId)}>Place song</button>
+        <button type="button" className="ch-tab" title="Render the pattern to an audio clip." onClick={() => store.printMpcAudio(trackId)}>Print audio</button>
+        <label>Timing
+          <input aria-label="Humanize timing" title="How far live hits and the Humanize edit may move, in beats." type="range" min={0} max={0.25} step={0.005} value={kit.humanizeTime} onChange={(event) => store.patchTrackKit(trackId, { humanizeTime: Number(event.target.value) })} />
+        </label>
+        <label>Velocity
+          <input aria-label="Humanize velocity" title="How far live hits and the Humanize edit may change velocity." type="range" min={0} max={1} step={0.01} value={kit.humanizeVelocity} onChange={(event) => store.patchTrackKit(trackId, { humanizeVelocity: Number(event.target.value) })} />
+        </label>
+        <button type="button" className="ch-tab" title="Rewrite the pattern and the recorded clip with this timing and velocity scatter." onClick={() => store.humanizePadTake(trackId)}>Humanize</button>
+        <select aria-label="Velocity curve" title="Linear, soft, hard, or a fixed velocity." value={kit.velocityCurve} onChange={(event) => store.patchTrackKit(trackId, { velocityCurve: Number(event.target.value) })}>
+          {VELOCITY_CURVES.map((curve) => <option key={curve.id} value={curve.id}>{curve.label}</option>)}
+        </select>
+        <label>Scale
+          <input aria-label="Velocity scale" title="How strongly the curve replaces the played velocity." type="range" min={0} max={1} step={0.01} value={kit.velocityAmount} onChange={(event) => store.patchTrackKit(trackId, { velocityAmount: Number(event.target.value) })} />
+        </label>
+        <label>Minimum
+          <input aria-label="Velocity minimum" title="Softest velocity the curve may produce." type="range" min={0} max={1} step={0.01} value={kit.velocityMin} onChange={(event) => store.patchTrackKit(trackId, { velocityMin: Number(event.target.value) })} />
+        </label>
+        <label>Maximum
+          <input aria-label="Velocity maximum" title="Loudest velocity the curve may produce." type="range" min={0} max={1} step={0.01} value={kit.velocityMax} onChange={(event) => store.patchTrackKit(trackId, { velocityMax: Number(event.target.value) })} />
+        </label>
+        <label>Fixed
+          <input aria-label="Fixed velocity" title="Velocity used by Fixed curve and by pads with no sensitivity." type="range" min={0.01} max={1} step={0.01} value={kit.velocityFixed} onChange={(event) => store.patchTrackKit(trackId, { velocityFixed: Number(event.target.value) })} />
+        </label>
+      </div>
+      <div className="mpc-steps" aria-label="Steps">
+        {Array.from({ length: 16 }, (_, step) => {
+          const sequence = kit.sequences[0]
+          const stepBeats = (sequence?.lengthBeats || 4) / 16
+          const on = sequence ? stepOn(sequence.notes, pads[selected]?.pitch ?? 0, step, stepBeats) : false
+          const level = sequence ? stepVelocity(sequence.notes, pads[selected]?.pitch ?? 0, step, stepBeats) : null
+          return (
+            <button key={step} type="button" className={`ch-tab${on ? ' on' : ''}${stepPick === step ? ' sel' : ''}`} aria-pressed={on} aria-label={`Step ${step + 1}`} title={level == null ? `Step ${step + 1}` : `Step ${step + 1}. Velocity ${Math.round(level * 127)}.`} onClick={() => { setStepPick(step); store.toggleMpcStep(trackId, bank, selected, step, kit.velocityFixed) }}>{step + 1}</button>
+          )
+        })}
+      </div>
+      <label className="mpc-step-velocity">Step velocity
+        <input aria-label="Step velocity" title="Velocity of the selected step. Turn the step on, then set how hard it hits." type="range" min={0.01} max={1} step={0.01} value={(() => {
+          const sequence = kit.sequences[0]
+          const beats = (sequence?.lengthBeats || 4) / 16
+          return stepVelocity(sequence?.notes ?? [], pads[selected]?.pitch ?? 0, stepPick, beats) ?? kit.velocityFixed
+        })()} onChange={(event) => store.setMpcStepVelocity(trackId, bank, selected, stepPick, Number(event.target.value))} />
+      </label>
       <div className="mpc-body">
         <div className="mpc-grid" ref={board} aria-label="Drum pads">
           {pads.map((pad, index) => {
@@ -372,6 +453,21 @@ export function PadsPanel({
             <label>Decay
               <input aria-label="Pad decay" title="How long this pad rings." type="range" min={0.05} max={1} step={0.01} value={source.decay} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { decay: Number(event.target.value) })} />
             </label>
+            <label>Attack
+              <input aria-label="Attack" title="Fade in for this pad." type="range" min={0} max={1} step={0.01} value={source.attack} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { attack: Number(event.target.value) })} />
+            </label>
+            <label>Filter
+              <input aria-label="Filter" title="Low-pass cutoff for this pad." type="range" min={0} max={1} step={0.01} value={source.filter} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { filter: Number(event.target.value) })} />
+            </label>
+            <label>Sensitivity
+              <input aria-label="Velocity sensitivity" title="How much this pad follows how hard you hit. Zero uses the fixed velocity." type="range" min={0} max={1} step={0.01} value={source.velocitySense ?? 1} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { velocitySense: Number(event.target.value) })} />
+            </label>
+            <label>Send
+              <input aria-label="Send" title="How much of this pad goes to the send." type="range" min={0} max={1} step={0.01} value={source.send} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { send: Number(event.target.value) })} />
+            </label>
+            <button type="button" className={`ch-tab${source.region?.reverse ? ' on' : ''}`} aria-pressed={!!source.region?.reverse} title="Play this pad backwards." onClick={() => store.updateTrackPad(trackId, bank, selected, { region: { ...(source.region ?? { start: 0, end: 1, loop: false, loopStart: 0, loopEnd: 1, reverse: false }), reverse: !source.region?.reverse } })}>Reverse</button>
+            <button type="button" className={`ch-tab${source.region?.loop ? ' on' : ''}`} aria-pressed={!!source.region?.loop} title="Loop the sample window." onClick={() => store.updateTrackPad(trackId, bank, selected, { region: { ...(source.region ?? { start: 0, end: 1, loop: false, loopStart: 0, loopEnd: 1, reverse: false }), loop: !source.region?.loop } })}>Loop</button>
+            <button type="button" className={`ch-tab${source.poly === 'mono' ? ' on' : ''}`} aria-pressed={source.poly === 'mono'} title="Mono retriggers this pad. Poly lets notes overlap." onClick={() => store.updateTrackPad(trackId, bank, selected, { poly: source.poly === 'mono' ? 'poly' : 'mono' })}>{source.poly === 'mono' ? 'Mono' : 'Poly'}</button>
             <label>Choke
               <input aria-label="Choke group" title="Pads in the same group cut each other. Hats use group 1." type="number" min={0} max={8} value={source.choke} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { choke: Number(event.target.value) })} />
             </label>
