@@ -1,6 +1,10 @@
 import type { AudioAsset, Project } from '../model/types'
 import { decodeWavPCM, encodeWav } from '../model/wav'
 import { migrateProject } from '../model/schema'
+import { digestProject, musicalClone } from '../state/ops'
+import type { SyncJournal } from '../state/sync'
+import type { VersionListItem, VersionReason } from '../state/versions'
+import { expiredVersionIds } from '../state/versions'
 import { chooseCurrent, contentHash, dedupeBlobs, longestPeaks, planCommit, type AssetRef, type ProjectDoc, type SnapshotDoc, type WorkspaceSnapshot } from './content'
 import { mirrorBlob, mirrorProject, removeMirror } from './opfs'
 
@@ -10,6 +14,64 @@ const META = 'meta'
 const BLOBS = 'blobs'
 const SNAPSHOTS = 'snapshots'
 const STAGING = 'staging'
+const ROOMS = 'rooms'
+const VERSIONS = 'versions'
+
+/** Shared project plus the op log. One row per room code on this browser. */
+export interface RoomCopy {
+  code: string
+  projectId: string
+  role: 'host' | 'guest'
+  actor: string
+  name: string
+  savedAt: number
+  digest: string
+  project: Project
+  seq: number
+  lamport: number
+  log: SyncJournal['log']
+  stamps: SyncJournal['stamps']
+  seen: SyncJournal['seen']
+  trimmed: SyncJournal['trimmed']
+}
+
+export interface VersionDoc extends VersionListItem {
+  project: Project
+}
+
+export function buildRoomCopy(input: { code: string; role: 'host' | 'guest'; name: string; savedAt: number; project: Project; journal: SyncJournal }): RoomCopy {
+  const code = input.code.toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const project = musicalClone(input.project)
+  return {
+    code,
+    projectId: project.id,
+    role: input.role,
+    actor: input.journal.actor,
+    name: (input.name || 'Guest').slice(0, 80),
+    savedAt: input.savedAt,
+    digest: digestProject(project),
+    project,
+    seq: input.journal.seq,
+    lamport: input.journal.lamport,
+    log: input.journal.log,
+    stamps: input.journal.stamps,
+    seen: input.journal.seen,
+    trimmed: input.journal.trimmed,
+  }
+}
+
+export function journalFromRoom(copy: RoomCopy): SyncJournal {
+  return {
+    projectId: copy.projectId,
+    actor: copy.actor,
+    seq: copy.seq,
+    lamport: copy.lamport,
+    log: copy.log ?? [],
+    stamps: copy.stamps ?? [],
+    seen: copy.seen ?? [],
+    trimmed: copy.trimmed ?? [],
+  }
+}
 
 export type { WorkspaceSnapshot } from './content'
 
@@ -44,7 +106,7 @@ function openDb(): Promise<IDBDatabase> {
   if (cached) return Promise.resolve(cached)
   if (!opening) {
     opening = new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, 3)
+      const req = indexedDB.open(DB_NAME, 4)
       req.onupgradeneeded = () => {
         const db = req.result
         if (!db.objectStoreNames.contains(PROJECTS)) db.createObjectStore(PROJECTS, { keyPath: 'id' })
@@ -52,6 +114,8 @@ function openDb(): Promise<IDBDatabase> {
         if (!db.objectStoreNames.contains(BLOBS)) db.createObjectStore(BLOBS, { keyPath: 'hash' })
         if (!db.objectStoreNames.contains(SNAPSHOTS)) db.createObjectStore(SNAPSHOTS, { keyPath: 'key' })
         if (!db.objectStoreNames.contains(STAGING)) db.createObjectStore(STAGING, { keyPath: 'id' })
+        if (!db.objectStoreNames.contains(ROOMS)) db.createObjectStore(ROOMS, { keyPath: 'code' })
+        if (!db.objectStoreNames.contains(VERSIONS)) db.createObjectStore(VERSIONS, { keyPath: 'id' })
       }
       req.onsuccess = () => {
         cached = req.result
@@ -315,6 +379,70 @@ function idbDelete(db: IDBDatabase, store: string, key: IDBValidKey) {
     tx.onabort = () => reject(tx.error)
     tx.onerror = () => reject(tx.error)
   })
+}
+
+export async function saveRoomCopy(copy: RoomCopy): Promise<'ok' | 'quota'> {
+  try {
+    await enqueue(async () => {
+      const db = await openDb()
+      await idbPut(db, ROOMS, copy)
+    })
+    return 'ok'
+  } catch (error) {
+    if (isQuotaError(error)) return 'quota'
+    throw error
+  }
+}
+
+export async function loadRoomCopy(code: string): Promise<RoomCopy | null> {
+  const key = code.toUpperCase().replace(/[^A-Z0-9]/g, '')
+  if (!key) return null
+  return enqueue(async () => {
+    const db = await openDb()
+    const row = await idbGet<RoomCopy>(db, ROOMS, key)
+    if (!row?.project || row.code !== key) return null
+    return row
+  })
+}
+
+export async function saveVersion(doc: VersionDoc): Promise<'ok' | 'quota'> {
+  try {
+    await enqueue(async () => {
+      const db = await openDb()
+      await idbPut(db, VERSIONS, doc)
+      const rows = (await idbAll<VersionDoc>(db, VERSIONS)).filter((item) => item.projectId === doc.projectId)
+      for (const id of expiredVersionIds(rows)) await idbDelete(db, VERSIONS, id)
+    })
+    return 'ok'
+  } catch (error) {
+    if (isQuotaError(error)) return 'quota'
+    throw error
+  }
+}
+
+export async function listVersions(projectId: string): Promise<VersionListItem[]> {
+  const db = await openDb()
+  const rows = await idbAll<VersionDoc>(db, VERSIONS)
+  return rows
+    .filter((row) => row?.projectId === projectId && row.id)
+    .map((row) => ({
+      id: row.id,
+      projectId: row.projectId,
+      roomCode: row.roomCode || '',
+      name: row.name || 'Version',
+      by: row.by || 'You',
+      at: row.at || 0,
+      reason: (row.reason || 'manual') as VersionReason,
+      digest: row.digest || '',
+    }))
+    .sort((left, right) => right.at - left.at)
+}
+
+export async function loadVersion(id: string): Promise<VersionDoc | null> {
+  const db = await openDb()
+  const row = await idbGet<VersionDoc>(db, VERSIONS, id)
+  if (!row?.project) return null
+  return row
 }
 
 export function bytesToBase64(bytes: Uint8Array): string {
