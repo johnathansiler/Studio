@@ -1,7 +1,11 @@
+import { spellChord, harmonize } from './chords'
+import { generatedProgressions, songSetsFrom } from './library'
 import { centDistance } from './pitch'
-import { harmonize } from './chords'
 import { getScale } from './scales'
 import type { RealizedChord, TheoryProgression } from './types'
+
+export { GENRE_INFO } from './library'
+export type { SongSet } from './library'
 
 const MAJOR: TheoryProgression[] = [
   { id: 'axis', name: 'Axis', description: 'I–V–vi–IV. The open pop loop.', targets: [0, 700, 900, 500] },
@@ -20,11 +24,48 @@ const MINOR: TheoryProgression[] = [
   { id: 'step', name: 'Climb', description: 'i–VII–VI–VII. The flat seven keeps it open.', targets: [0, 1000, 800, 1000] },
 ]
 
+const META: Record<string, { genre: string; song: string }> = {
+  axis: { genre: 'pop', song: 'Open Air' },
+  sensitive: { genre: 'pop', song: 'Open Air' },
+  fifties: { genre: 'pop', song: 'Bright Corner' },
+  cadence: { genre: 'jazz', song: 'Long Cadence' },
+  plagal: { genre: 'gospel', song: 'Choir Lift' },
+  circle: { genre: 'jazz', song: 'Fifth Fall' },
+  'minor-loop': { genre: 'edm', song: 'Night Drive' },
+  andalusian: { genre: 'film', song: 'Descending Gate' },
+  step: { genre: 'trap', song: 'Low Loop' },
+}
+
 export function progressionsFor(scaleId: string): TheoryProgression[] {
-  return thirdIsMinor(scaleId) ? MINOR : MAJOR
+  const head = (thirdIsMinor(scaleId) ? MINOR : MAJOR).map(decorate)
+  const taken = new Set(head.map((item) => item.id))
+  const extra = generatedProgressions().filter((item) => !taken.has(item.id))
+  return preferWorld(scaleId, [...head, ...extra])
+}
+
+/** Major and minor lists together, so song sets can see every genre. */
+export function allProgressions(): TheoryProgression[] {
+  const seen = new Set<string>()
+  const out: TheoryProgression[] = []
+  for (const item of [...progressionsFor('ionian'), ...progressionsFor('aeolian')]) {
+    if (seen.has(item.id)) continue
+    seen.add(item.id)
+    out.push(item)
+  }
+  return out
+}
+
+export function songSets() {
+  return songSetsFrom(allProgressions())
 }
 
 export function realizeProgression(rootPc: number, scaleId: string, progression: TheoryProgression, beats = 4, size: 3 | 4 = 3): RealizedChord[] {
+  if (progression.spell?.length) {
+    return progression.spell.map((step) => {
+      const spelled = spellChord((rootPc + step.root) % 12, step.chordId, 4)
+      return { symbol: spelled.symbol, roman: step.roman || spelled.symbol, degree: step.root, beats, tones: spelled.tones }
+    })
+  }
   const diatonic = harmonize(rootPc, scaleId, size)
   if (!diatonic.length) return []
   return progression.targets.map((target) => {
@@ -32,6 +73,27 @@ export function realizeProgression(rootPc: number, scaleId: string, progression:
     const chord = diatonic[degree] ?? diatonic[0]
     return { symbol: chord.symbol, roman: chord.roman, degree: chord.degree, beats, tones: chord.tones }
   })
+}
+
+function decorate(item: TheoryProgression): TheoryProgression {
+  const meta = META[item.id]
+  return meta ? { ...item, genre: meta.genre, song: meta.song } : item
+}
+
+function preferWorld(scaleId: string, items: TheoryProgression[]) {
+  const id = scaleId.toLowerCase()
+  const world = /maqam|makam|dastgah|raga|mela-|hirajoshi|insen|japanese/.test(id)
+  if (!world) return items
+  const wanted = id.includes('raga') || id.includes('mela-')
+    ? new Set(['raga'])
+    : id.includes('makam')
+      ? new Set(['makam', 'maqam'])
+      : id.includes('hirajoshi') || id.includes('insen') || id.includes('japanese')
+        ? new Set(['japanese'])
+        : new Set(['maqam', 'makam', 'raga', 'japanese'])
+  const front = items.filter((item) => item.genre && wanted.has(item.genre))
+  const rest = items.filter((item) => !item.genre || !wanted.has(item.genre))
+  return [...front, ...rest]
 }
 
 function thirdIsMinor(scaleId: string) {

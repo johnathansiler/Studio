@@ -657,7 +657,7 @@ export class AudioEngine {
   }
 
   /** Play Scaler notes through the track's chosen sound. The previous preview chord is released first. */
-  auditionScaler(trackId: string, notes: { pitch: number; fine?: number; delay: number; duration: number; velocity: number }[]) {
+  auditionScaler(trackId: string, notes: { pitch: number; fine?: number; delay: number; duration: number; velocity: number }[], output: 'audio' | 'midi' | 'both' = 'both') {
     this.unlock()
     if (!notes.length) return
     this.stopScalerPreview()
@@ -669,19 +669,35 @@ export class AudioEngine {
     const routed = routeScaler(this.project, track)
     const out = this.strips.get(routed.liveStripId) ?? strip
     const now = liveWhen(ctx.currentTime)
+    const wantAudio = output !== 'midi'
+    const wantMidi = output !== 'audio'
     for (const note of notes) {
       const dur = Math.max(0.05, note.duration)
       const pitch = Math.max(0, Math.min(127, Math.round(note.pitch)))
       const when = now + Math.max(0, note.delay)
-      this.scalerMidi.push({ pitch, onAt: this.perfForContext(when) })
-      this.scheduleVoice(ctx, out, {
+      const voice = {
         id: 'scaler',
         pitch,
         fine: note.fine,
         startBeat: 0,
         durationBeats: dur,
         velocity: Math.max(0.05, Math.min(1, note.velocity || 0.8)),
-      }, when, dur, routed.voice, this.scalerVoices)
+      }
+      if (wantMidi) this.scalerMidi.push({ pitch, onAt: this.perfForContext(when) })
+      if (wantAudio) this.scheduleVoice(ctx, out, voice, when, dur, routed.voice, this.scalerVoices, wantMidi)
+      else if (wantMidi) this.sendMidiNote(voice, when, dur, ctx)
+    }
+  }
+
+  /** Live MIDI out for a keyboard chord, without starting a new audio preview. */
+  pulseMidi(notes: { pitch: number; velocity: number; duration: number }[]) {
+    if (!this.midiSink || !notes.length) return
+    const now = typeof performance !== 'undefined' ? performance.now() : 0
+    for (const note of notes) {
+      const pitch = Math.max(0, Math.min(127, Math.round(note.pitch)))
+      const dur = Math.max(0.05, note.duration)
+      this.midiSink(noteBytes(true, this.midiOutChannel, pitch, midiVelocityByte(note.velocity)), now)
+      this.midiSink(noteBytes(false, this.midiOutChannel, pitch, 0), now + dur * 1000)
     }
   }
 
@@ -3745,7 +3761,7 @@ export class AudioEngine {
     return { voice, notes }
   }
 
-  private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[]) {
+  private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[], emitMidi = true) {
     if (note.muted) return
     if (track?.instrument === 'scaler' && this.project) {
       const routed = routeScaler(this.project, track)
@@ -3754,7 +3770,7 @@ export class AudioEngine {
     }
     const sampler = samplerInsert(track)
     if (sampler?.sampler) {
-      this.sendMidiNote(note, when, dur, ctx)
+      if (emitMidi) this.sendMidiNote(note, when, dur, ctx)
       if (ctx === this.ctx) {
         this.rack.schedule(sampler.id, note.pitch, note.velocity, when)
         this.rack.schedule(sampler.id, note.pitch, 0, when + Math.max(0.02, dur))
@@ -3778,7 +3794,7 @@ export class AudioEngine {
       }
       return
     }
-    this.sendMidiNote(note, when, dur, ctx)
+    if (emitMidi) this.sendMidiNote(note, when, dur, ctx)
     if (track?.instrument === 'pads') {
       this.playPadNote(ctx, strip, track, {
         pitch: note.pitch,
