@@ -13,6 +13,7 @@ import { samplesToBeats } from '../model/time'
 import { selectLiveCapture, selectMidiMaps, selectMidiOut } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { playScalerLive } from '../instruments/scaler/live'
+import { noteTarget } from '../model/noteTarget'
 import { hardwareMidiAllowed, midiOutputs, onMidiMessage, type MidiPortInfo } from './access'
 import { performanceOwnsMidi, rememberOff, rememberOn, setCaptureEnabled, stepOwnsMidi } from './remember'
 
@@ -82,6 +83,15 @@ export class MidiHost {
       return
     }
     if (performanceOwnsMidi() || stepOwnsMidi()) return
+    const target = noteTarget(this.store.project.tracks, this.store.selectedTrackId)
+    if (target.kind === 'silent') return
+    if (target.kind === 'tune') {
+      const held = message.kind === 'note-on' ? message.number : -1
+      if (message.kind === 'note-on' || message.kind === 'note-off') {
+        this.store.updatePlugin(target.trackId, target.pluginId, { params: { holdMidi: held } })
+      }
+      return
+    }
     const recording = this.engine.status === 'recording'
     const dest = midiDestinations(this.store.project.tracks, input.id, this.store.selectedTrackId, recording)
     const beat = this.beatAt(timeStamp)
@@ -143,7 +153,7 @@ export class MidiHost {
       }
       const list = this.takes.get(note.trackId) || []
       list.push({
-        pitch,
+        pitch: note.pitch,
         startBeat: note.startBeat,
         durationBeats: Math.max(0.05, beat - note.startBeat),
         velocity: note.velocity,

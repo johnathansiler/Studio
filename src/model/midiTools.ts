@@ -1,4 +1,5 @@
 import { soundingNotes } from './drumLanes'
+import { hardwareReaches, noteTarget } from './noteTarget'
 import { noteForPlayback } from './padMachine'
 import { SCALES, snapPitch, type ScaleId } from './scale'
 import type { LiveCaptureSettings, MidiClip, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, Project, Track } from './types'
@@ -566,15 +567,13 @@ export function tracksForPort(tracks: Track[], portId: string): Track[] {
   return armed.filter((track) => track.input === 'midi' || track.input === 'midi:all')
 }
 
+/** Live notes go to the selected instrument only, and only when this port may reach it. */
 export function midiDestinations(tracks: Track[], portId: string, selectedId: string | null, recording: boolean): { play: string[]; record: string[] } {
-  const matched = tracksForPort(tracks, portId)
-  if (matched.length) {
-    const ids = matched.map((track) => track.id)
-    return { play: ids, record: recording ? ids : [] }
-  }
-  const selected = tracks.find((track) => track.id === selectedId && track.type === 'midi')
-  const fallback = selected || tracks.find((track) => track.type === 'midi')
-  return { play: fallback ? [fallback.id] : [], record: [] }
+  const target = noteTarget(tracks, selectedId)
+  if (target.kind !== 'instrument') return { play: [], record: [] }
+  const track = tracks.find((item) => item.id === target.trackId)
+  if (!track || !hardwareReaches(track.input, portId)) return { play: [], record: [] }
+  return { play: [track.id], record: recording && track.armed ? [track.id] : [] }
 }
 
 export function planAudioRoutes(tracks: Track[]): AudioRoute[] {
@@ -588,12 +587,17 @@ export function planAudioRoutes(tracks: Track[]): AudioRoute[] {
   return routes
 }
 
+function acceptsMidiRecord(input: string) {
+  return input === 'none' || input === 'midi' || input === 'midi:all' || input.startsWith('midi:')
+}
+
+/** Armed instrument tracks record, including the on-screen keyboard when no hardware port is chosen. */
 export function planMidiRoutes(tracks: Track[]): MidiRoute[] {
   return tracks
-    .filter((track) => track.type === 'midi' && track.armed && (track.input === 'midi' || track.input === 'midi:all' || track.input.startsWith('midi:')))
+    .filter((track) => track.type === 'midi' && track.armed && acceptsMidiRecord(track.input))
     .map((track) => ({
       trackId: track.id,
-      portId: track.input === 'midi' || track.input === 'midi:all' ? null : track.input.slice('midi:'.length),
+      portId: track.input === 'midi' || track.input === 'midi:all' || track.input === 'none' ? null : track.input.slice('midi:'.length),
     }))
 }
 

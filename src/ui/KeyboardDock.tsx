@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { performanceOwnsMidi, stepOwnsMidi } from '../midi/remember'
 import { heardBeat } from '../model/midiClock'
+import { INSTRUMENT_HINT, noteTarget } from '../model/noteTarget'
 import {
   claimComputerKey,
   keyboardDestination,
@@ -21,23 +22,32 @@ import { miniPads, padGridColumn, padLabel } from './miniKeys'
 
 /** Play one note, or a Scaler chord when keys lock says so. Returns the pitches that sounded. */
 export function playKeyboardNote(store: ProjectStore, engine: AudioEngine, pitch: number, velocity = 0.85): number[] {
-  const trackId = keyboardDestination(store.project.tracks, store.selectedTrackId, store.selectedMidiClipId)?.trackId
+  const target = noteTarget(store.project.tracks, store.selectedTrackId)
   const level = Math.max(0.05, Math.min(1, velocity))
-  if (!trackId) {
-    engine.unlock()
-    engine.liveNoteOn(pitch, level)
+  if (target.kind === 'silent') return []
+  if (target.kind === 'tune') {
+    store.updatePlugin(target.trackId, target.pluginId, { params: { holdMidi: Math.max(0, Math.min(127, Math.round(pitch))) } })
     return [pitch]
   }
-  const live = playScalerLive(store.project, engine, trackId, pitch, level)
+  const live = playScalerLive(store.project, engine, target.trackId, pitch, level)
   if (live !== null) return live.map((note) => note.midi)
-  engine.playThrough(trackId, pitch, level)
+  engine.playThrough(target.trackId, pitch, level)
   return [pitch]
 }
 
 export function releaseKeyboardNote(store: ProjectStore, engine: AudioEngine, pitch: number) {
-  const trackId = keyboardDestination(store.project.tracks, store.selectedTrackId, store.selectedMidiClipId)?.trackId
-  if (trackId) engine.releaseThrough(trackId, pitch)
-  else engine.liveNoteOff(pitch)
+  const target = noteTarget(store.project.tracks, store.selectedTrackId)
+  if (target.kind === 'tune') {
+    store.updatePlugin(target.trackId, target.pluginId, { params: { holdMidi: -1 } })
+    return
+  }
+  if (target.kind === 'instrument') engine.releaseThrough(target.trackId, pitch)
+}
+
+export function holdTune(store: ProjectStore, midi: number | null) {
+  const target = noteTarget(store.project.tracks, store.selectedTrackId)
+  if (target.kind !== 'tune') return
+  store.updatePlugin(target.trackId, target.pluginId, { params: { holdMidi: midi == null ? -1 : midi } })
 }
 
 /** Open-clip notes join that clip. Other notes become one MIDI take per track. */
@@ -119,7 +129,9 @@ export function EditorPinned({
   )
 }
 
-export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
+export function KeyboardDock({ store, engine, onEditNotes }: { store: ProjectStore; engine: AudioEngine; onEditNotes?: () => void }) {
+  useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
+  const route = noteTarget(store.project.tracks, store.selectedTrackId)
   const editor = store.midiEditor()
   const octave = editor.octave
   const [lit, setLit] = useState<number[]>([])
@@ -157,12 +169,16 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
 
   function press(token: string, pitch: number, velocity = 0.85, eventMs = performance.now()) {
     if (held.current.has(token)) return
+    const target = noteTarget(store.project.tracks, store.selectedTrackId)
+    if (target.kind === 'silent') return
     const level = Math.max(0.05, Math.min(1, velocity))
     const sounded = playKeyboardNote(store, engine, pitch, level)
+    if (!sounded.length) return
     held.current.set(token, sounded)
-    if (recording.current && sounded.length) {
+    recording.current = engine.status === 'recording'
+    if (recording.current && target.kind === 'instrument' && target.armed) {
       const dest = keyboardDestination(store.project.tracks, store.selectedTrackId, store.selectedMidiClipId)
-      if (dest) {
+      if (dest && dest.trackId === target.trackId) {
         armed.current = armSounded(armed.current, token, sounded, {
           trackId: dest.trackId,
           clipId: dest.clipId,
@@ -180,6 +196,13 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
     const pitches = held.current.get(token)
     if (!pitches) return
     held.current.delete(token)
+    const target = noteTarget(store.project.tracks, store.selectedTrackId)
+    if (target.kind === 'tune') {
+      const rest = [...held.current.values()].flat()
+      holdTune(store, rest.length ? rest[rest.length - 1] : null)
+      paint()
+      return
+    }
     const others = new Set([...held.current.values()].flat())
     for (const pitch of pitches) if (!others.has(pitch)) releaseKeyboardNote(store, engine, pitch)
     const released = releaseGesture(armed.current, token, beatAt(store, engine, eventMs))
@@ -260,8 +283,10 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
         <button type="button" disabled={atBottom} onClick={() => shift(-1)}>Octave Down</button>
         <span aria-live="polite">{name}</span>
         <button type="button" disabled={atTop} onClick={() => shift(1)}>Octave Up</button>
+        <button type="button" className="keyboard-edit" onClick={() => onEditNotes?.()}>Edit Notes</button>
         <button type="button" className="keyboard-close" onClick={() => { store.setKeyboardMidi(false); notifyKeyboard(false) }}>Close</button>
       </div>
+      {route.kind === 'silent' && <p className="keyboard-hint" role="status">{INSTRUMENT_HINT}</p>}
       <div className="mini-board" role="group" aria-label="Piano keyboard">
         {pads.sharps.map((pad) => (
           <button

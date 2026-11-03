@@ -37,6 +37,7 @@ export function SessionView({
   engine,
   onDropAudio,
   onOpenPiano,
+  onOpenKeyboard,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -44,8 +45,9 @@ export function SessionView({
   onRecord: () => void
   onDropAudio: (trackId: string, scene: number, file: File) => void
   onOpenPiano?: (trackId: string) => void
+  onOpenKeyboard?: (trackId: string) => void
 }) {
-  return <SessionBody key={store.project.id} store={store} engine={engine} onDropAudio={onDropAudio} onOpenPiano={onOpenPiano} />
+  return <SessionBody key={store.project.id} store={store} engine={engine} onDropAudio={onDropAudio} onOpenPiano={onOpenPiano} onOpenKeyboard={onOpenKeyboard} />
 }
 
 function SessionBody({
@@ -53,11 +55,13 @@ function SessionBody({
   engine,
   onDropAudio,
   onOpenPiano,
+  onOpenKeyboard,
 }: {
   store: ProjectStore
   engine: AudioEngine
   onDropAudio: (trackId: string, scene: number, file: File) => void
   onOpenPiano?: (trackId: string) => void
+  onOpenKeyboard?: (trackId: string) => void
 }) {
   const grid = selectSession(store)
   const form = useFormFactor()
@@ -266,6 +270,7 @@ function SessionBody({
                 onStop={() => stopTrack(track.id)}
                 onDrop={readDrop}
                 onOpenPiano={onOpenPiano}
+                onOpenKeyboard={onOpenKeyboard}
               />
             ))}
             <div className="sl-scenes" aria-label="Scenes">
@@ -336,6 +341,7 @@ function TrackColumn({
   onStop,
   onDrop,
   onOpenPiano,
+  onOpenKeyboard,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -347,6 +353,7 @@ function TrackColumn({
   onStop: () => void
   onDrop: (event: DragEvent, target: SessionTarget) => void
   onOpenPiano?: (trackId: string) => void
+  onOpenKeyboard?: (trackId: string) => void
 }) {
   const project = store.project
   const playingId = store.launched[track.id]
@@ -366,7 +373,7 @@ function TrackColumn({
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => onDrop(event, headTarget)}
       >
-        <button type="button" className="sl-name" onClick={() => store.selectTrack(track.id)}>{track.name}</button>
+        <button type="button" className="sl-name" onClick={() => { store.selectTrack(track.id); if (track.type === 'midi') onOpenKeyboard?.(track.id) }}>{track.name}</button>
         {track.type === 'midi' && onOpenPiano && (
           <button
             type="button"

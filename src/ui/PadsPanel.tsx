@@ -402,14 +402,7 @@ export function PadsPanel({
               ))}
             </div>
           </div>
-          <div className="hw-knobs" aria-label="Knobs">
-            <label>Tune
-              <input className="hw-knob" aria-label="Pad tune" title="Tune of the selected pad, in semitones." type="range" min={-12} max={12} step={0.1} value={source?.tune ?? 0} style={{ ['--turn' as string]: String(((source?.tune ?? 0) + 12) / 24) }} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { tune: Number(event.target.value) })} />
-            </label>
-            <label>Filter
-              <input className="hw-knob" aria-label="Filter" title="Low-pass cutoff for this pad." type="range" min={0} max={1} step={0.01} value={source?.filter ?? 1} style={{ ['--turn' as string]: String(source?.filter ?? 1) }} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { filter: Number(event.target.value) })} />
-            </label>
-          </div>
+          <div className="mpc-brand"><strong>CueHarbor</strong><span>Beat Machine</span></div>
         </section>
 
         <section className="hw-main">
@@ -438,22 +431,12 @@ export function PadsPanel({
               </div>
             </div>
             <div className="hw-keys">
-              <button type="button" className={`hw-key ch-tab mpc-full${kit.fullLevel ? ' on' : ''}`} aria-pressed={kit.fullLevel} title="Full level. Every hit plays at velocity 127, wherever you touch the pad." onClick={() => store.patchTrackKit(trackId, { fullLevel: !kit.fullLevel })}>Full level</button>
-              <select className="hw-key ch-tab" aria-label="16 Levels" title="One pad spread across 16 velocities, tunes, or decays." value={levels} onChange={(event) => setLevels(event.target.value as LevelSpread | '')}>
-                <option value="">16 Levels</option>
-                <option value="velocity">Velocity</option>
-                <option value="tune">Tune</option>
-                <option value="filter">Filter</option>
-                <option value="decay">Decay</option>
-                <option value="attack">Attack</option>
-              </select>
               <button type="button" className="hw-key ch-tab" title="Next sequence. Lengthens the pattern one step at a time." onClick={() => store.setMpcLength(trackId, kit.sequences[0]?.lengthBeats === 32 ? 4 : (kit.sequences[0]?.lengthBeats || 4) * 2)}>Next seq</button>
               <button type="button" className={`hw-key ch-tab${source?.muted ? ' on' : ''}`} aria-pressed={!!source?.muted} title="Track mute. Mute this pad. The clip keeps its notes." onClick={() => source && store.updateTrackPad(trackId, bank, selected, { muted: !source.muted })}>Track mute</button>
               {VISIBLE_BANKS.map((name, index) => (
                 <button key={name} type="button" className={`hw-key ch-tab${bank === index ? ' on' : ''}`} aria-pressed={bank === index} title={`Pad bank ${name}. Sixteen pads.`} onClick={() => store.patchTrackKit(trackId, { activeBank: index })}>Pad bank <b>{name}</b></button>
               ))}
               <button type="button" className="hw-key ch-tab" title="Tap tempo. With sync on, this sets the project tempo." onClick={tapTempo}>Tap tempo</button>
-              <button type="button" className={`hw-key ch-tab${repeatOn ? ' on' : ''}`} aria-pressed={repeatOn} title="Note repeat. The pad retriggers at the chosen rate." onClick={() => setRepeatOn((value) => !value)}>Note repeat</button>
               <button type="button" className="hw-key ch-tab" title="Undo sequence" disabled={!store.canUndo} onClick={() => store.undo()}>Undo seq</button>
               <button type="button" className={`hw-key ch-tab${eraseOn ? ' on' : ''}`} aria-pressed={eraseOn} title="Hold Erase and a pad to clear that sound while the loop plays." onPointerDown={(event) => { event.preventDefault(); setEraseOn(true) }} onPointerUp={() => setEraseOn(false)} onPointerCancel={() => setEraseOn(false)} onPointerLeave={() => setEraseOn(false)}>Erase</button>
               <button type="button" className={`hw-key ch-tab${soft === 1 ? ' on' : ''}`} title="Main screen" onClick={() => setSoft(1)}>Main screen</button>
@@ -468,6 +451,26 @@ export function PadsPanel({
           </div>
 
           <div className="mpc-play hw-pads">
+            <div className="mpc-pad-tools">
+              <div className="hw-knobs" aria-label="Knobs">
+                <label>Tune
+                  <input className="hw-knob" aria-label="Pad tune" title="Tune of the selected pad, in semitones." type="range" min={-12} max={12} step={0.1} value={source?.tune ?? 0} style={{ ['--turn' as string]: String(((source?.tune ?? 0) + 12) / 24) }} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { tune: Number(event.target.value) })} />
+                </label>
+                <label>Filter
+                  <input className="hw-knob" aria-label="Filter" title="Low-pass cutoff for this pad." type="range" min={0} max={1} step={0.01} value={source?.filter ?? 1} style={{ ['--turn' as string]: String(source?.filter ?? 1) }} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { filter: Number(event.target.value) })} />
+                </label>
+              </div>
+              <button type="button" className={`hw-key ch-tab mpc-full${kit.fullLevel ? ' on' : ''}`} aria-pressed={kit.fullLevel} title="Full level. Every hit plays at velocity 127, wherever you touch the pad." onClick={() => store.patchTrackKit(trackId, { fullLevel: !kit.fullLevel })}>Full Level</button>
+              <select className="hw-key ch-tab" aria-label="16 Levels" title="One pad spread across 16 velocities, tunes, or decays." value={levels} onChange={(event) => setLevels(event.target.value as LevelSpread | '')}>
+                <option value="">16 Levels</option>
+                <option value="velocity">Velocity</option>
+                <option value="tune">Tune</option>
+                <option value="filter">Filter</option>
+                <option value="decay">Decay</option>
+                <option value="attack">Attack</option>
+              </select>
+              <button type="button" className={`hw-key ch-tab${repeatOn ? ' on' : ''}`} aria-pressed={repeatOn} title="Note repeat. The pad retriggers at the chosen rate." onClick={() => setRepeatOn((value) => !value)}>Note Repeat</button>
+            </div>
             <div className="mpc-grid" ref={board} aria-label="Drum pads">
               {pads.map((pad, index) => {
                 const pitch = levels && source ? source.pitch : pad.pitch

@@ -11,7 +11,7 @@ import { armKey, armSounded, releaseGesture, releaseKey, takeGroups } from '../m
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { commitKeyboardNotes, playKeyboardNote } from '../ui/KeyboardDock'
-import { dismissKeyboard, isPianoHistory, markPianoHistory, presentKeyboard, type LandscapeHost } from '../ui/keyboardStage'
+import { dismissKeyboard, isPianoHistory, keepLandscapeAfterClose, markPianoHistory, portraitReported, presentKeyboard, type LandscapeHost } from '../ui/keyboardStage'
 import { miniPads, padGridColumn } from '../ui/miniKeys'
 import { MidiDock } from '../ui/MidiDock'
 
@@ -266,18 +266,25 @@ describe('piano roll close', () => {
 })
 
 describe('phone keyboard orientation', () => {
-  it('locks landscape inside fullscreen and otherwise turns a portrait phone', async () => {
+  it('locks the whole phone landscape, and rotates the shell only when the lock is impossible', async () => {
     const locked = host()
     expect(await presentKeyboard(locked)).toBe('locked')
     expect(locked.locked).toEqual(['landscape'])
     expect(locked.entered).toBe(1)
-    await dismissKeyboard(locked, 'locked')
+    const closed = await dismissKeyboard(locked, 'locked')
+    expect(closed.holdLandscape).toBe(true)
+    expect(keepLandscapeAfterClose(closed.holdLandscape, null)).toBe(true)
+    expect(keepLandscapeAfterClose(closed.holdLandscape, { type: 'landscape-primary', angle: 90 })).toBe(true)
+    expect(portraitReported('portrait-primary', 0)).toBe(true)
+    expect(keepLandscapeAfterClose(closed.holdLandscape, { type: 'portrait-primary', angle: 0 })).toBe(false)
 
     const refused = host({
       async lock() { throw new Error('unsupported') },
     })
-    expect(await presentKeyboard(refused)).toBe('turned')
+    expect(await presentKeyboard(refused)).toBe('shell')
     expect(refused.exited).toBe(1)
+    expect((await dismissKeyboard(refused, 'shell')).holdLandscape).toBe(false)
+    expect(keepLandscapeAfterClose(false, null)).toBe(false)
 
     const wide = host({ form: 'fold', portrait: false })
     expect(await presentKeyboard(wide)).toBe('dock')
@@ -285,7 +292,7 @@ describe('phone keyboard orientation', () => {
     expect(await presentKeyboard(already)).toBe('dock')
   })
 
-  it('turns the dock along the long side without covering the arrange view', async () => {
+  it('turns the whole app shell landscape when the orientation lock is unavailable', async () => {
     mkdirSync('/opt/cursor/artifacts', { recursive: true })
     const store = new ProjectStore(createEmptyProject())
     store.keyboardMidi = true
@@ -299,7 +306,7 @@ describe('phone keyboard orientation', () => {
         ${css}
         .shell { height: 844px; width: 390px; }
       </style></head><body>
-        <div class="shell phone keys-open keys-turned">
+        <div class="shell phone keys-open keys-landscape">
           <header class="topbar"><h1>CueHarbor</h1></header>
           <div class="transport"></div>
           <div class="tool-slot"></div>
@@ -308,38 +315,35 @@ describe('phone keyboard orientation', () => {
         </div>
       </body></html>`, { waitUntil: 'load' })
       const box = await page.evaluate(() => {
-        const shell = document.querySelector('.shell')!.getBoundingClientRect()
-        const dockNode = document.querySelector('.keyboard-dock')!.getBoundingClientRect()
-        const work = document.querySelector('.workspace')!.getBoundingClientRect()
+        const shell = document.querySelector('.shell') as HTMLElement
+        const dockNode = document.querySelector('.keyboard-dock') as HTMLElement
+        const work = document.querySelector('.workspace') as HTMLElement
         const face = document.querySelector('.keyboard-face') as HTMLElement
         const down = [...document.querySelectorAll('button')].find((node) => node.textContent === 'Octave Down')!
         const close = [...document.querySelectorAll('button')].find((node) => node.textContent === 'Close')!
-        const faceBox = face.getBoundingClientRect()
+        const edit = [...document.querySelectorAll('button')].find((node) => node.textContent === 'Edit Notes')!
         return {
-          dockWidth: dockNode.width,
-          dockHeight: dockNode.height,
-          dockLeft: dockNode.left,
-          workLeft: work.left,
-          workRight: work.right,
-          shellRight: shell.right,
-          faceRight: faceBox.right,
-          faceLayoutWidth: face.offsetWidth,
-          faceLayoutHeight: face.offsetHeight,
+          shellWide: shell.offsetWidth > shell.offsetHeight,
+          containsDock: shell.contains(dockNode),
+          containsWork: shell.contains(work),
+          dockBelowWork: dockNode.offsetTop + 1 >= work.offsetTop,
+          faceTransform: getComputedStyle(face).transform,
           down: down.getBoundingClientRect().height,
           close: close.getBoundingClientRect().height,
+          edit: edit.getBoundingClientRect().height,
           naturals: document.querySelectorAll('.mini-pad.natural').length,
         }
       })
-      expect(box.dockLeft).toBeLessThanOrEqual(1)
-      expect(box.dockHeight).toBeGreaterThan(box.dockWidth)
-      expect(box.workLeft).toBeGreaterThanOrEqual(box.dockWidth - 1)
-      expect(box.workRight).toBeLessThanOrEqual(box.shellRight + 1)
-      expect(box.faceRight).toBeLessThanOrEqual(box.workLeft + 2)
-      expect(box.faceLayoutWidth).toBeGreaterThan(box.faceLayoutHeight)
+      expect(box.shellWide).toBe(true)
+      expect(box.containsDock).toBe(true)
+      expect(box.containsWork).toBe(true)
+      expect(box.dockBelowWork).toBe(true)
+      expect(box.faceTransform === 'none' || box.faceTransform === 'matrix(1, 0, 0, 1, 0, 0)').toBe(true)
       expect(box.down).toBeGreaterThanOrEqual(40)
       expect(box.close).toBeGreaterThanOrEqual(40)
+      expect(box.edit).toBeGreaterThanOrEqual(40)
       expect(box.naturals).toBe(7)
-      await page.screenshot({ path: '/opt/cursor/artifacts/keyboard-phone-turned.png' })
+      await page.screenshot({ path: '/opt/cursor/artifacts/keyboard-phone-landscape.png' })
       await page.close()
     } finally {
       await browser.close()

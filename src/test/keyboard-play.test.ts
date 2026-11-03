@@ -31,8 +31,8 @@ describe('computer keyboard', () => {
       { id: 'bass', type: 'midi' as const, armed: true },
     ]
     expect(keyboardTarget(tracks, 'keys')).toBe('keys')
-    expect(keyboardTarget(tracks, 'audio')).toBe('bass')
-    expect(keyboardTarget([{ id: 'pad', type: 'midi', armed: false }], null)).toBe('pad')
+    expect(keyboardTarget(tracks, 'audio')).toBeNull()
+    expect(keyboardTarget([{ id: 'pad', type: 'midi', armed: false }], null)).toBeNull()
     expect(keyboardPitch(60, 0)).toBe(60)
     expect(keyboardPitch(60, 1)).toBe(72)
     expect(keyboardPitch(60, -1)).toBe(48)

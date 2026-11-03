@@ -72,9 +72,25 @@ export function hasArmedRecord(tracks: Track[]): boolean {
   return plan.audio.length + plan.midi.length > 0
 }
 
-export type RecordPress = 'stop' | 'start' | 'empty'
+export type RecordPress = 'stop' | 'start' | 'arm' | 'disarm'
 
-export function recordPress(phase: TransportPhase, tracks: Track[]): RecordPress {
+/**
+ * Record arms global record. With an armed track it also starts capture.
+ * A second press before anything is armed clears that standby.
+ * Play does not record unless this standby is already on.
+ */
+export function recordPress(phase: TransportPhase, tracks: Track[], globalArmed = false): RecordPress {
   if (phase === 'recording' || phase === 'counting-in') return 'stop'
-  return hasArmedRecord(tracks) ? 'start' : 'empty'
+  if (!hasArmedRecord(tracks)) return globalArmed ? 'disarm' : 'arm'
+  return 'start'
+}
+
+/** The next Play captures only when Record is already armed and a track is armed. */
+export function playStartsCapture(phase: TransportPhase, globalArmed: boolean, tracks: Track[]): boolean {
+  return phase === 'stopped' && globalArmed && hasArmedRecord(tracks)
+}
+
+/** Lit only while samples or notes are actually being captured. Count-in and Play stay dark. */
+export function recordButtonOn(phase: TransportPhase): boolean {
+  return phase === 'recording'
 }
