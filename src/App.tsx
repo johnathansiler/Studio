@@ -9,17 +9,20 @@ import { punchWindow, sliceCapture } from './model/comp'
 import { watchSpectral } from './audio/spectral/job'
 import { inspectClip } from './audio/stretch/engine'
 import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } from './model/types'
+import { AwarenessChannel, bindAwareness, currentEditCursor, localAwareness, onPresencePoke } from './remote/presence'
 import { SessionClient } from './remote/session'
 import { deleteProject, listProjects, listSnapshots, loadLastProject, loadProject, loadSnapshot, requestPersistentStorage, saveProject, storageReport, type ProjectListItem, type WorkspaceSnapshot } from './storage/idb'
 import { inviteWins } from './model/negotiate'
 import { readIdentity, writeIdentity } from './storage/identity'
+import { selectPiano } from './state/select'
 import { ProjectStore, seedDemoProject } from './state/store'
 import { linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
 import { shouldCountIn } from './model/sessionInteract'
 import { hasArmedRecord, homeSample, playPress, stopPress } from './model/transport'
-import { countInAt, meterAtSample, tempoAtSample } from './model/tempoMap'
+import { countInAt, meterAtSample, projectSampleBeat, tempoAtSample } from './model/tempoMap'
+import { displayedPlayhead } from './model/transportSync'
 import { beatsToSamples, samplesToBeats } from './model/time'
 
 const FaceGallery = lazy(() => import('./ui/faces/PluginFace').then((mod) => ({ default: mod.FaceGallery })))
@@ -116,11 +119,68 @@ export function App() {
   const [dock, setDock] = useState(() => fittedDockWidth(typeof window === 'undefined' ? 1280 : window.innerWidth, EDITOR_DOCK_DEFAULT))
   const [dockEdge, setDockEdge] = useState<'right' | 'bottom'>('right')
   const editorPanel = useRef('room')
+  const publishAwareness = useRef<() => void>(() => undefined)
   useEffect(() => {
     const fit = () => setDock((value) => fittedDockWidth(window.innerWidth, value, dockEdge, editorPanel.current === 'piano' ? 0.72 : 0.5))
     window.addEventListener('resize', fit)
     return () => window.removeEventListener('resize', fit)
   }, [dockEdge])
+  useEffect(() => {
+    const channel = new AwarenessChannel((message) => session.postAware(message))
+    bindAwareness(channel)
+    session.setAwarenessHandler((msg) => {
+      if (msg.t === 'peer-left') channel.forget(String(msg.id || ''))
+      else channel.ingest(msg)
+    })
+    const publish = () => {
+      const status = session.state.status
+      if (status === 'idle' || status === 'rejected' || status === 'removed' || status === 'error') {
+        channel.silence()
+        channel.clear()
+        return
+      }
+      const selfId = session.state.selfId
+      if (status !== 'live' || !selfId) {
+        channel.silence()
+        return
+      }
+      channel.setSelf(selfId)
+      const project = store.project
+      const cursorSample = Math.max(0, Math.round(engine.positionSamples))
+      const piano = selectPiano(store)
+      const rollOpen = editorPanel.current === 'piano'
+      channel.publish(selfId, localAwareness({
+        name: session.state.name,
+        cursorSample,
+        songBeat: projectSampleBeat(project, displayedPlayhead(cursorSample, project)),
+        trackId: store.selectedTrackId,
+        clipIds: [...store.selectedClipIds, ...store.selectedMidiClipIds, ...store.selectedPatternClipIds],
+        noteIds: store.selectedNoteIds,
+        playing: engine.status === 'playing' || engine.status === 'recording',
+        recording: engine.status === 'recording',
+        rollOpen,
+        clip: piano.clip,
+        rollTrackId: piano.track?.id ?? null,
+        pointer: currentEditCursor(),
+      }))
+    }
+    publishAwareness.current = publish
+    const stopStore = store.subscribe(publish)
+    const stopEngine = engine.subscribe(publish)
+    const stopSession = session.subscribe(publish)
+    const stopPoke = onPresencePoke(publish)
+    publish()
+    return () => {
+      publishAwareness.current = () => undefined
+      stopStore()
+      stopEngine()
+      stopSession()
+      stopPoke()
+      session.setAwarenessHandler(null)
+      bindAwareness(null)
+      channel.dispose()
+    }
+  }, [engine, session, store])
   const [joinOpen, setJoinOpen] = useState(false)
   const [joinCode, setJoinCode] = useState('')
   const [joinName, setJoinName] = useState(store.project.name ? localStorage.getItem('cueharbor-name') || 'Artist' : 'Artist')
@@ -1298,6 +1358,9 @@ async function importDropped(files: FileList) {
   const pianoTrack = store.project.tracks.find((track) => track.id === store.selectedTrackId && track.type === 'midi')
     || store.project.tracks.find((track) => track.type === 'midi')
   editorPanel.current = panel
+  useEffect(() => {
+    publishAwareness.current()
+  }, [panel])
   useEffect(() => {
     if (panel !== 'piano' || phone) return
     setDock(pianoDockWidth(window.innerWidth))

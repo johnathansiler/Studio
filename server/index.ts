@@ -5,6 +5,7 @@ import { createUsageLedger } from './usage.ts'
 import { rememberDiag, sanitizeDiag, type DiagReport } from '../src/model/diag.ts'
 import { sessionHello } from '../src/model/negotiate.ts'
 import { CAP_NOTICE, type UsageSnapshot } from '../src/model/usage.ts'
+import { awareRelayDue, relayAware } from '../src/remote/presence.ts'
 import { syncMessageOk } from '../src/state/ops.ts'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -51,6 +52,8 @@ interface Client {
   lastInType: string
   /** peer means the browser or the network closed it. Anything else is this process. */
   closeBy: string
+  /** Last accepted editing-awareness relay. Cursor floods are dropped. */
+  awareAt?: number
 }
 
 interface Session {
@@ -736,6 +739,15 @@ async function handle(client: Client, msg: Record<string, unknown>) {
     self.screen = Boolean(msg.screen)
     if (msg.clearForceMute) self.mutedByHost = false
     emitRoster(session)
+    return
+  }
+  if (msg.t === 'aware' && self.admitted) {
+    const now = Date.now()
+    if (!awareRelayDue(client.awareAt ?? 0, now)) return
+    const relay = relayAware(client.id, self.name, msg)
+    if (!relay) return
+    client.awareAt = now
+    broadcast(session, relay, client.id)
     return
   }
   if (msg.t === 'reaction') {
