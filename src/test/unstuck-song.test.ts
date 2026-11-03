@@ -7,7 +7,7 @@ import type { AudioEngine } from '../audio/engine'
 import { createEmptyProject, uid, type MidiNote, type Project } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { composeUnstuck, pickTempo } from '../unstuck/compose'
-import { normalizeBrief, type UnstuckBrief } from '../unstuck/brief'
+import { formOf, normalizeBrief, STRUCTURES, type StructureId, type UnstuckBrief } from '../unstuck/brief'
 import type { ComposeContext } from '../unstuck/draft'
 import { applyUnstuckDraft } from '../unstuck/place'
 import { readClip } from '../unstuck/read'
@@ -59,6 +59,42 @@ function chordClip(project: Project) {
   return keys
 }
 
+describe('unstuck full song structure', () => {
+  const optionalName = (name: string) => name.replace(/ \d+$/, '')
+
+  it('keeps two verses and two choruses across seeds, and sometimes adds no extra sections', () => {
+    const structures = STRUCTURES.map((item) => item.id)
+    const seen = new Set<string>()
+    let bare = 0
+    const baseOrder = new Map<StructureId, string>()
+    for (let seed = 1; seed <= 160; seed++) {
+      for (const structure of structures) {
+        const form = formOf(brief({ seed, structure, length: 'medium' }))
+        const again = formOf(brief({ seed, structure, length: 'medium' }))
+        expect(again.map((section) => section.name)).toEqual(form.map((section) => section.name))
+        const verses = form.filter((section) => section.kind === 'verse')
+        const choruses = form.filter((section) => section.kind === 'chorus')
+        expect(verses.length).toBeGreaterThanOrEqual(2)
+        expect(choruses.length).toBeGreaterThanOrEqual(2)
+        const extras = form.filter((section) => section.kind !== 'verse' && section.kind !== 'chorus')
+        if (!extras.length) bare += 1
+        for (const section of extras) seen.add(optionalName(section.name))
+        if (seed === 1) {
+          baseOrder.set(structure, form.filter((section) => section.kind === 'verse' || section.kind === 'chorus').map((section) => section.kind).join(','))
+        }
+      }
+    }
+    expect(bare).toBeGreaterThan(0)
+    expect(seen).toEqual(new Set(['Intro', 'Pre-Chorus', 'Post-Chorus', 'Bridge', 'Breakdown', 'Instrumental', 'Outro']))
+    expect(baseOrder.get('pop')).toBe('verse,chorus,verse,chorus')
+    expect(baseOrder.get('verse-chorus')).toBe('verse,chorus,verse,chorus')
+    expect(baseOrder.get('ballad')).toBe('verse,verse,chorus,chorus')
+    expect(baseOrder.get('club')).toBe('chorus,verse,chorus,verse')
+    const pop = composeUnstuck(brief({ seed: 42, structure: 'pop' }), { action: 'full' }, ctx())
+    expect(pop.sections.map((section) => section.name)).toEqual(formOf(brief({ seed: 42, structure: 'pop' })).map((section) => section.name))
+  })
+})
+
 describe('unstuck songs', () => {
   it('repeats a seed and changes when the seed changes', () => {
     const first = composeUnstuck(brief({ seed: 4 }), { action: 'full' }, ctx())
@@ -78,15 +114,16 @@ describe('unstuck songs', () => {
 
     const song = composeUnstuck(brief({ structure: 'pop', length: 'medium' }), { action: 'full' }, ctx())
     const kinds = song.sections.map((section) => section.kind)
-    expect(kinds).toEqual(expect.arrayContaining(['intro', 'verse', 'pre', 'chorus', 'bridge', 'outro']))
+    expect(kinds.filter((kind) => kind === 'verse').length).toBeGreaterThanOrEqual(2)
+    expect(kinds.filter((kind) => kind === 'chorus').length).toBeGreaterThanOrEqual(2)
     expect(song.tracks.map((track) => track.role)).toEqual(expect.arrayContaining(['drums', 'bass', 'chords', 'melody']))
     expect(song.sectionMode).toBe('add')
     const drumClips = song.tracks.find((track) => track.role === 'drums')!.clips
-    const intro = drumClips.find((clip) => clip.name.includes('Intro'))!
-    const chorus = drumClips.find((clip) => clip.name.includes('Chorus') && !clip.name.includes('2') && !clip.name.includes('3'))!
-    expect(intro.notes.map((note) => [note.pitch, note.startBeat])).not.toEqual(chorus.notes.map((note) => [note.pitch, note.startBeat]))
-    const verseChords = song.tracks.find((track) => track.role === 'chords')!.clips.find((clip) => clip.name.includes('Verse') && !clip.name.includes('2'))!
-    const chorusChords = song.tracks.find((track) => track.role === 'chords')!.clips.find((clip) => clip.name.includes('Chorus') && !clip.name.includes('2') && !clip.name.includes('3'))!
+    const verseDrums = drumClips.find((clip) => clip.name.endsWith('· Verse'))!
+    const chorusDrums = drumClips.find((clip) => clip.name.endsWith('· Chorus'))!
+    expect(verseDrums.notes.map((note) => [note.pitch, note.startBeat])).not.toEqual(chorusDrums.notes.map((note) => [note.pitch, note.startBeat]))
+    const verseChords = song.tracks.find((track) => track.role === 'chords')!.clips.find((clip) => clip.name.endsWith('· Verse'))!
+    const chorusChords = song.tracks.find((track) => track.role === 'chords')!.clips.find((clip) => clip.name.endsWith('· Chorus'))!
     expect(verseChords.notes.map((note) => note.pitch).join()).not.toBe(chorusChords.notes.map((note) => note.pitch).join())
     const stacked = chorusChords.notes.some((note) => chorusChords.notes.filter((other) => Math.abs(other.startBeat - note.startBeat) < 0.02).length >= 2)
     expect(stacked).toBe(true)

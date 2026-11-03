@@ -6,7 +6,7 @@
 import { NOTE_NAMES, SCALES, type ScaleId } from '../model/scale'
 import type { SectionKind } from '../model/types'
 import { registerScales, findScale } from '../theory/scales'
-import { clamp } from '../generators/rng'
+import { clamp, hashSeed, mulberry32 } from '../generators/rng'
 
 export const ROLES = [
   { id: 'drums', name: 'Drums', track: 'Drums', color: '#c58be0', instrument: 'pads', plugin: 'pads', mix: 'compressor', volume: 0.82, pan: 0 },
@@ -145,42 +145,33 @@ export interface FormSection {
   energy: number
 }
 
-const FORMS: Record<StructureId, FormSection[]> = {
-  loop: [{ kind: 'custom', name: 'Loop', bars: 8, energy: 0.75 }],
-  'verse-chorus': [
-    { kind: 'verse', name: 'Verse', bars: 8, energy: 0.62 },
-    { kind: 'chorus', name: 'Chorus', bars: 8, energy: 1 },
-    { kind: 'verse', name: 'Verse 2', bars: 8, energy: 0.68 },
-    { kind: 'chorus', name: 'Chorus 2', bars: 8, energy: 1 },
-  ],
-  pop: [
-    { kind: 'intro', name: 'Intro', bars: 4, energy: 0.38 },
-    { kind: 'verse', name: 'Verse', bars: 8, energy: 0.64 },
-    { kind: 'pre', name: 'Pre', bars: 4, energy: 0.8 },
-    { kind: 'chorus', name: 'Chorus', bars: 8, energy: 1 },
-    { kind: 'verse', name: 'Verse 2', bars: 8, energy: 0.7 },
-    { kind: 'chorus', name: 'Chorus 2', bars: 8, energy: 1 },
-    { kind: 'bridge', name: 'Bridge', bars: 8, energy: 0.48 },
-    { kind: 'chorus', name: 'Chorus 3', bars: 8, energy: 1 },
-    { kind: 'outro', name: 'Outro', bars: 4, energy: 0.36 },
-  ],
-  ballad: [
-    { kind: 'intro', name: 'Intro', bars: 4, energy: 0.3 },
-    { kind: 'verse', name: 'Verse', bars: 8, energy: 0.5 },
-    { kind: 'chorus', name: 'Chorus', bars: 8, energy: 0.78 },
-    { kind: 'verse', name: 'Verse 2', bars: 8, energy: 0.55 },
-    { kind: 'bridge', name: 'Bridge', bars: 8, energy: 0.4 },
-    { kind: 'chorus', name: 'Chorus 2', bars: 8, energy: 0.82 },
-    { kind: 'outro', name: 'Outro', bars: 4, energy: 0.28 },
-  ],
-  club: [
-    { kind: 'intro', name: 'Intro', bars: 8, energy: 0.45 },
-    { kind: 'breakdown', name: 'Breakdown', bars: 8, energy: 0.3 },
-    { kind: 'chorus', name: 'Chorus', bars: 8, energy: 1 },
-    { kind: 'breakdown', name: 'Breakdown 2', bars: 8, energy: 0.35 },
-    { kind: 'chorus', name: 'Chorus 2', bars: 16, energy: 1 },
-    { kind: 'outro', name: 'Outro', bars: 8, energy: 0.4 },
-  ],
+/** Every full song keeps these. Structure only changes their order. */
+const REQUIRED_SLOTS = new Set(['verse', 'chorus'])
+
+type FormSlot = 'intro' | 'verse' | 'pre' | 'chorus' | 'post' | 'breakdown' | 'bridge' | 'instrumental' | 'outro'
+
+const SLOT: Record<FormSlot, { kind: SectionKind; name: string; bars: number; energy: number }> = {
+  intro: { kind: 'intro', name: 'Intro', bars: 4, energy: 0.38 },
+  verse: { kind: 'verse', name: 'Verse', bars: 8, energy: 0.64 },
+  pre: { kind: 'pre', name: 'Pre-Chorus', bars: 4, energy: 0.8 },
+  chorus: { kind: 'chorus', name: 'Chorus', bars: 8, energy: 1 },
+  post: { kind: 'custom', name: 'Post-Chorus', bars: 4, energy: 0.86 },
+  breakdown: { kind: 'breakdown', name: 'Breakdown', bars: 8, energy: 0.32 },
+  bridge: { kind: 'bridge', name: 'Bridge', bars: 8, energy: 0.48 },
+  instrumental: { kind: 'solo', name: 'Instrumental', bars: 8, energy: 0.58 },
+  outro: { kind: 'outro', name: 'Outro', bars: 4, energy: 0.36 },
+}
+
+/**
+ * Optional slots sit in structure order. The seed keeps or drops each one.
+ * Verse and chorus slots always stay, and every order has two of each.
+ */
+const ORDERS: Record<StructureId, FormSlot[]> = {
+  loop: ['intro', 'verse', 'chorus', 'post', 'verse', 'chorus', 'outro'],
+  'verse-chorus': ['intro', 'verse', 'pre', 'chorus', 'post', 'verse', 'pre', 'chorus', 'bridge', 'outro'],
+  pop: ['intro', 'verse', 'pre', 'chorus', 'post', 'breakdown', 'verse', 'chorus', 'bridge', 'instrumental', 'outro'],
+  ballad: ['intro', 'verse', 'verse', 'pre', 'chorus', 'bridge', 'instrumental', 'chorus', 'outro'],
+  club: ['intro', 'breakdown', 'chorus', 'verse', 'post', 'instrumental', 'chorus', 'verse', 'outro'],
 }
 
 const NEXT_KIND: Partial<Record<SectionKind, SectionKind>> = {
@@ -306,11 +297,56 @@ export function scaleBars(bars: number, length: LengthId) {
   return bars
 }
 
+/** Two verses and two choruses, plus the optional sections this seed keeps. */
 export function formOf(brief: UnstuckBrief): FormSection[] {
-  return FORMS[brief.structure].map((section) => ({
-    ...section,
-    bars: scaleBars(section.bars, brief.length),
-  }))
+  const order = ORDERS[brief.structure]
+  const keep = keptSlots(brief.seed, brief.structure, order)
+  const slots = order.filter((slot, index) => REQUIRED_SLOTS.has(slot) || keep[index])
+  const verses = slots.filter((slot) => slot === 'verse').length
+  const choruses = slots.filter((slot) => slot === 'chorus').length
+  for (let extra = verses; extra < 2; extra++) slots.push('verse')
+  for (let extra = choruses; extra < 2; extra++) slots.push('chorus')
+  const seen = new Map<string, number>()
+  return slots.map((slot) => {
+    const spec = SLOT[slot]
+    const count = (seen.get(spec.name) ?? 0) + 1
+    seen.set(spec.name, count)
+    return {
+      kind: spec.kind,
+      name: count === 1 ? spec.name : `${spec.name} ${count}`,
+      bars: scaleBars(spec.bars, brief.length),
+      energy: spec.energy,
+    }
+  })
+}
+
+function keptSlots(seed: number, structure: string, order: FormSlot[]) {
+  const rng = mulberry32(hashSeed(seed >>> 0, structureSalt(structure), 41))
+  const flags = order.map(() => false)
+  const optional = order.map((slot, index) => REQUIRED_SLOTS.has(slot) ? -1 : index).filter((index) => index >= 0)
+  if (!optional.length) return flags
+  const roll = rng()
+  let count = 0
+  if (roll < 0.2) count = 0
+  else if (roll < 0.42) count = 1
+  else if (roll < 0.66) count = 2
+  else if (roll < 0.84) count = 3
+  else count = Math.min(optional.length, 4 + Math.floor(rng() * Math.max(1, optional.length - 3)))
+  const bag = [...optional]
+  for (let index = bag.length - 1; index > 0; index--) {
+    const swap = Math.floor(rng() * (index + 1))
+    const held = bag[index]
+    bag[index] = bag[swap]
+    bag[swap] = held
+  }
+  for (const index of bag.slice(0, count)) flags[index] = true
+  return flags
+}
+
+function structureSalt(structure: string) {
+  let hash = 0
+  for (let index = 0; index < structure.length; index++) hash = (hash + structure.charCodeAt(index) * (index + 3)) >>> 0
+  return hash || 1
 }
 
 export function nextKind(kind: SectionKind | undefined): SectionKind {
@@ -319,7 +355,7 @@ export function nextKind(kind: SectionKind | undefined): SectionKind {
 }
 
 export function sectionEnergy(kind: SectionKind) {
-  const found = Object.values(FORMS).flat().find((section) => section.kind === kind)
+  const found = Object.values(SLOT).find((section) => section.kind === kind)
   return found?.energy ?? 0.7
 }
 

@@ -16,7 +16,7 @@ import type { SongDraft } from './draft'
 
 export const UNSTUCK_MARK = 'Unstuck '
 
-const OURS = /^(Intro|Verse|Pre|Chorus|Bridge|Outro|Loop|Breakdown|Break)( \d+)?$/
+const OURS = /^(Intro|Verse|Pre-Chorus|Pre|Post-Chorus|Chorus|Bridge|Instrumental|Outro|Loop|Breakdown|Break)( \d+)?$/
 
 export function unstuckNamed(name: string) {
   return name.startsWith(UNSTUCK_MARK)
