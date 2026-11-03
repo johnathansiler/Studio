@@ -86,7 +86,7 @@ import type { GeneratedPart } from '../generators/types'
 import { normalizeGenerator } from '../generators/settings'
 import { buildSession, normalizePlayer, type PlayerSettings, type SessionDetection, type SessionPart } from '../players'
 import { progressionById, romanLine, starterParts } from '../model/progressions'
-import { applySuggestion, type Suggestion } from '../unstuck'
+import { applySuggestion, applyUnstuckDraft, type SongDraft, type Suggestion } from '../unstuck'
 import {
   defaultQuantize,
   detectTransients,
@@ -3731,6 +3731,21 @@ export class ProjectStore {
         this.selectedNoteIds = []
       }
     })
+  }
+
+  /** Write one Unstuck action. Locked parts and everything outside the span stay put. Undo restores it. */
+  writeUnstuck(draft: SongDraft) {
+    this.mutate(() => {
+      const placed = applyUnstuckDraft(this.project, draft)
+      if (placed.trackId) this.selectedTrackId = placed.trackId
+      if (placed.clipId) {
+        this.selectedMidiClipId = placed.clipId
+        this.selectedMidiClipIds = [placed.clipId]
+        this.selectedNoteId = null
+        this.selectedNoteIds = []
+      }
+    })
+    this.toast(draft.summary, draft.tracks.length ? 'good' : 'warn')
   }
 
   /** Drop an idea onto the chord track plus editable bass and drums in that genre. */

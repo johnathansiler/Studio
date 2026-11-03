@@ -26,9 +26,32 @@ export { suggest, suggestionsFor } from './suggest'
 export { applySuggestion } from './apply'
 export { audition, type AuditionNote } from './preview'
 export { degreeKey, nextWeights, sectionWeights } from './theory'
+export { applyUnstuckDraft, arrangementEnd, collectRole, unstuckSpan } from './place'
+export { composeUnstuck, pickTempo } from './compose'
+export { readClip, complementRole } from './read'
+export { varyNotes } from './vary'
+export {
+  AMOUNTS,
+  FEELS,
+  GENRES,
+  LENGTHS,
+  MAQAMS,
+  MOODS,
+  ROLES,
+  SCALE_CHOICES,
+  STRUCTURES,
+  briefFromProject,
+  defaultBrief,
+  formOf,
+  genreById,
+  normalizeBrief,
+  roleLabel,
+} from './brief'
+export type { AmountId, FeelId, LengthId, MoodId, RoleId, StructureId, UnstuckBrief } from './brief'
+export type { ComposeContext, SongDraft, UnstuckJob } from './draft'
 
 /** Shown on the button and at the top of the sheet. */
-export const UNSTUCK_BUTTON = 'Suggest the next chord, section, transition, or arrangement.'
+export const UNSTUCK_BUTTON = 'Pick a part, or write a full song. The MIDI stays editable.'
 
 export const UNSTUCK_TABS = [
   { id: 'progression', label: 'Next', description: 'Chord progressions that follow this song.' },

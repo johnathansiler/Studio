@@ -11,7 +11,7 @@ export interface Copy {
 export const UNSTUCK_COPY: Copy = {
   id: 'unstuck',
   label: 'Unstuck',
-  hint: 'Suggest the next chord, section, transition, or arrangement.',
+  hint: 'Pick a part, or write a full song. The MIDI stays editable.',
 }
 
 export const VIEW_COPY: Copy[] = [
