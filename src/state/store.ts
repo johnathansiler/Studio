@@ -154,7 +154,7 @@ import {
   type SequenceNote,
 } from '../model/padMachine'
 import { applyChoke, assignPad, clipBeat, padRecordWindow, recordPadHits, type PadHit } from '../instruments/pads/record'
-import { arrangeSong, chopsFor, chopsOntoPads, expandChord, humanizeNotes, kitFromSlices, mpcTempo, setStepVelocity, toggleStep, withLength } from '../instruments/mpc/model'
+import { arrangeSong, chopsFor, chopsOntoPads, expandChord, humanizeNotes, kitFromSlices, mpcTempo, quantizeGridBeats, quantizeNotes, setStepVelocity, toggleStep, withLength } from '../instruments/mpc/model'
 import { renderMpcAudio } from '../instruments/mpc/render'
 import { applyLaneNotes, patternToMidiNotes, type LaneNote } from '../model/patternMidi'
 import { clipEndForContent, grownClipEnd, normalizeSnapDivision, snapEditBeat, subdivisionFor, type SnapDivisionId } from '../model/snapGrid'
@@ -914,6 +914,49 @@ export class ProjectStore {
       const pad = kit.banks[bank]?.[index]
       if (!pad) return
       kit.banks[bank][index] = assignPad(pad, { name: assignment.name, bufferId, choke: assignment.choke })
+      track.padKit = kit
+    })
+  }
+
+  /** Put a mic take on the armed pad. Trim drops the quiet ends. Auto chop spreads transients across the bank. */
+  placePadTake(trackId: string, bank: number, index: number, samples: Float32Array, sampleRate: number, opts: { trim: boolean; autoChop: boolean; threshold: number }) {
+    const trimmed = opts.trim ? trimSilence(samples, Math.max(0.0008, opts.threshold * 0.25)) : samples
+    if (trimmed.length < 2) return
+    if (!opts.autoChop) {
+      this.assignTrackPad(trackId, bank, index, { name: 'Pad take', samples: trimmed, sampleRate })
+      return
+    }
+    const pieces = chopsOntoPads(chopsFor(trimmed, sampleRate, 'transient'), 'Pad take')
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const kit = normalizePadKit(track.padKit)
+      for (const piece of pieces) {
+        const slice = trimmed.slice(piece.start, piece.end)
+        if (slice.length < 2) continue
+        const id = uid('smp')
+        this.buffers.set(id, { id, name: piece.name, sampleRate, channels: [slice] })
+        const at = (index + piece.pad) % 16
+        const pad = kit.banks[bank]?.[at]
+        if (!pad) continue
+        kit.banks[bank][at] = assignPad(pad, { name: piece.name, bufferId: id })
+      }
+      track.padKit = kit
+    })
+  }
+
+  /** Snap the recorded pattern and the step sequence to the quantize grid. */
+  quantizePadTake(trackId: string) {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      const kit = normalizePadKit(track.padKit)
+      const rate = kit.quantizeRate || '1/16'
+      const strength = kit.timingStrength
+      const swing = kit.swing
+      kit.timingGrid = quantizeGridBeats(rate)
+      for (const sequence of kit.sequences) sequence.notes = quantizeNotes(sequence.notes, rate, strength, swing)
+      for (const clip of track.midiClips) clip.notes = quantizeNotes(clip.notes, rate, strength, swing)
       track.padKit = kit
     })
   }

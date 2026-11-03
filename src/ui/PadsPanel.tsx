@@ -7,15 +7,16 @@ import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { countInBarsOf, countInCaption } from '../model/time'
 import { projectSampleBeat } from '../model/tempoMap'
 import { BANKS, sixteenLevels, type LevelSpread } from '../model/padMachine'
-import { REPEAT_CHOICES, VELOCITY_CURVES, repeatSetting, stepOn, stepVelocity } from '../instruments/mpc/model'
+import { REPEAT_CHOICES, VELOCITY_CURVES, quantizeGridBeats, repeatSetting, stepOn, stepVelocity } from '../instruments/mpc/model'
 import { emptyTap, pushTap } from '../model/tap'
 import type { ProjectStore } from '../state/store'
-import { SOUND_MIME } from '../audio/sample/slot'
+import { SOUND_MIME, captureSlot, micChannel, openInputCapture, rememberedSlotInput } from '../audio/sample/slot'
 import { fetchSoundBytes, soundCache } from '../sounds/cache'
 import { loadSoundCatalog } from '../sounds/catalog'
 import { decodeSoundBytes } from '../sounds/place'
 import { soundFileUrl } from '../sounds/source'
 import type { SoundEntry } from '../sounds/types'
+import { readIdentity } from '../storage/identity'
 import { onMidiMessage } from '../midi/access'
 import { setPerformanceOwnsMidi } from '../midi/remember'
 import { useFormFactor } from './form'
@@ -53,6 +54,8 @@ export function PadsPanel({
   const [stepPick, setStepPick] = useState(0)
   const [soft, setSoft] = useState<1 | 2 | 3 | 4 | 5 | 6>(1)
   const taps = useRef(emptyTap())
+  const stopRec = useRef(false)
+  const [padArm, setPadArm] = useState<'idle' | 'count-in' | 'recording'>('idle')
   const [litPads, setLitPads] = useState<number[]>([])
   const [litNotes, setLitNotes] = useState<number[]>([])
   const [meters, setMeters] = useState<number[]>(() => Array(16).fill(0))
@@ -316,6 +319,63 @@ export function PadsPanel({
     window.addEventListener('pointerup', up)
   }
 
+  async function armPad() {
+    if (padArm !== 'idle') {
+      stopRec.current = true
+      return
+    }
+    stopRec.current = false
+    const ctx = engine.unlock()
+    const remembered = rememberedSlotInput()
+    const deviceId = remembered.deviceId || readIdentity()?.micId || ''
+    const input = store.track(trackId)?.input
+    let capture: Awaited<ReturnType<typeof openInputCapture>>
+    try {
+      capture = await openInputCapture({
+        deviceId,
+        stream: remembered.stream,
+        context: ctx,
+        channel: micChannel(input),
+        request: (audio) => navigator.mediaDevices.getUserMedia({ audio, video: false }),
+      })
+    } catch (error) {
+      store.toast(error instanceof Error ? error.message : 'Could not open the microphone.', 'warn')
+      return
+    }
+    if (capture.opened) {
+      try { engine.setLocalMic(capture.stream) } catch { /* the slot is already listening to this stream */ }
+    }
+    try {
+      const audio = await captureSlot(capture.source, {
+        countIn: store.project.countIn,
+        bars: countInBarsOf(store.project),
+        tempo: store.project.tempo,
+        signature: store.project.timeSignature,
+        maxSamples: Math.round(capture.source.sampleRate * 8),
+        threshold: kit.recordThreshold,
+      }, {
+        shouldStop: () => stopRec.current,
+        onLevel: () => undefined,
+        onPhase: (next) => setPadArm(next === 'count-in' ? 'count-in' : 'recording'),
+        wait: (ms) => new Promise((resolve) => { window.setTimeout(resolve, ms) }),
+        click: () => { if (engine.ctx) engine.playCuePing(engine.ctx.currentTime) },
+      })
+      const channel = audio?.channels[0]
+      if (audio && channel?.length) {
+        store.placePadTake(trackId, bank, selected, channel, audio.sampleRate, {
+          trim: kit.recordTrim,
+          autoChop: kit.recordChop,
+          threshold: kit.recordThreshold,
+        })
+      }
+    } catch (error) {
+      store.toast(error instanceof Error ? error.message : 'Recording failed.', 'warn')
+    } finally {
+      capture.close()
+      setPadArm('idle')
+    }
+  }
+
   function tapTempo() {
     const result = pushTap(taps.current, performance.now(), 'pointer')
     taps.current = result.memory
@@ -398,7 +458,8 @@ export function PadsPanel({
               <button type="button" className={`hw-key ch-tab${eraseOn ? ' on' : ''}`} aria-pressed={eraseOn} title="Hold Erase and a pad to clear that sound while the loop plays." onPointerDown={(event) => { event.preventDefault(); setEraseOn(true) }} onPointerUp={() => setEraseOn(false)} onPointerCancel={() => setEraseOn(false)} onPointerLeave={() => setEraseOn(false)}>Erase</button>
               <button type="button" className={`hw-key ch-tab${soft === 1 ? ' on' : ''}`} title="Main screen" onClick={() => setSoft(1)}>Main screen</button>
               <button type="button" className={`hw-key ch-tab${soft === 6 ? ' on' : ''}`} title="Open window. Pad, chop, and mix controls." onClick={() => setSoft(6)}>Open window</button>
-              <button type="button" className={`hw-key ch-tab${kit.timing ? ' on' : ''}`} aria-pressed={kit.timing} title="Snap hits to the grid with MPC swing." onClick={() => store.patchTrackKit(trackId, { timing: !kit.timing, timingGrid: 0.25, timingStrength: 1 })}>Quantize</button>
+              <button type="button" className={`hw-key ch-tab${kit.timing ? ' on' : ''}`} aria-pressed={kit.timing} title="Input quantize. Snap new hits to the grid by the strength and swing." onClick={() => store.patchTrackKit(trackId, { timing: !kit.timing, timingGrid: quantizeGridBeats(kit.quantizeRate || '1/16') })}>Quantize</button>
+              <button type="button" className={`hw-key ch-tab${padArm !== 'idle' ? ' on' : ''}`} aria-pressed={padArm !== 'idle'} title="Arm this pad. Recording starts when the mic crosses the threshold." onClick={() => { void armPad() }}>{padArm === 'idle' ? 'Arm pad' : 'Stop pad'}</button>
               <button type="button" className="hw-key ch-tab" title="Open this clip in the piano roll." onClick={edit}>Roll</button>
               <button type="button" className={`hw-key ch-tab${store.project.countIn ? ' on' : ''}`} aria-pressed={store.project.countIn} title={`Count-in is ${countInCaption(countInBarsOf(store.project))}. Tap for off, one bar, or two bars.`} onClick={() => store.cycleCountIn()}>Count</button>
               <button type="button" className={`hw-key ch-tab${store.project.metronomeEnabled ? ' on' : ''}`} aria-pressed={store.project.metronomeEnabled} title="Metronome while the pads record." onClick={() => store.toggle('metronomeEnabled')}>Click</button>
@@ -465,6 +526,18 @@ export function PadsPanel({
             <button type="button" className="hw-key ch-tab" title="Place the song chain on the arrangement." onClick={() => store.placeMpcSong(trackId)}>Place song</button>
             <button type="button" className="hw-key ch-tab" title="Render the pattern to an audio clip." onClick={() => store.printMpcAudio(trackId)}>Print audio</button>
             <button type="button" className="hw-key ch-tab" title="Rewrite the pattern and the recorded clip with this timing and velocity scatter." onClick={() => store.humanizePadTake(trackId)}>Humanize</button>
+            <select aria-label="Quantize grid" title="Grid for input quantize and for applying quantize to the pattern, including triplets." value={kit.quantizeRate || '1/16'} onChange={(event) => store.patchTrackKit(trackId, { quantizeRate: event.target.value, timingGrid: quantizeGridBeats(event.target.value) })}>
+              {REPEAT_CHOICES.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
+            </select>
+            <label>Strength
+              <input aria-label="Quantize strength" title="How far notes move toward the grid. 100 percent is fully on the grid." type="range" min={0} max={100} step={1} value={Math.round((kit.timingStrength ?? 1) * 100)} onChange={(event) => store.patchTrackKit(trackId, { timingStrength: Number(event.target.value) / 100 })} />
+            </label>
+            <button type="button" className="hw-key ch-tab" title="Apply quantize to the recorded pattern and the step sequence." onClick={() => store.quantizePadTake(trackId)}>Apply quantize</button>
+            <label>Threshold
+              <input aria-label="Record threshold" title="Mic level that starts the armed pad." type="range" min={0.01} max={0.5} step={0.01} value={kit.recordThreshold} onChange={(event) => store.patchTrackKit(trackId, { recordThreshold: Number(event.target.value) })} />
+            </label>
+            <button type="button" className={`hw-key ch-tab${kit.recordTrim ? ' on' : ''}`} aria-pressed={kit.recordTrim} title="Trim silence from the pad take." onClick={() => store.patchTrackKit(trackId, { recordTrim: !kit.recordTrim })}>Trim</button>
+            <button type="button" className={`hw-key ch-tab${kit.recordChop ? ' on' : ''}`} aria-pressed={!!kit.recordChop} title="Chop the pad take on transients across this bank." onClick={() => store.patchTrackKit(trackId, { recordChop: !kit.recordChop })}>Auto chop</button>
             <label>Timing
               <input aria-label="Humanize timing" title="How far live hits and the Humanize edit may move, in beats." type="range" min={0} max={0.25} step={0.005} value={kit.humanizeTime} onChange={(event) => store.patchTrackKit(trackId, { humanizeTime: Number(event.target.value) })} />
             </label>
