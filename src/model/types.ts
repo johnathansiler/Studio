@@ -375,7 +375,7 @@ export interface RecordSettings {
   quick: boolean
 }
 
-export type MidiFxKind = 'arp' | 'chord' | 'scale' | 'repeat' | 'humanize' | 'velocity'
+export type MidiFxKind = 'arp' | 'chord' | 'scale'
 
 /** One MIDI effect in the chain that sits in front of an instrument. */
 export interface MidiFx {

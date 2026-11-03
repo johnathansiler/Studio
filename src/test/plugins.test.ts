@@ -436,10 +436,10 @@ describe('mix graph', () => {
     const vocal = store.project.tracks.find((track) => track.name === 'Vocal')!
     store.addVocalChain(vocal.id)
     const names = store.track(vocal.id)!.plugins.map((plugin) => plugin.pluginId)
-    expect(names).toEqual(['gate', 'eq', 'deesser', 'compressor', 'tune', 'saturator'])
+    expect(names).toEqual(['vocal', 'eq', 'compressor', 'tune', 'saturator'])
     expect(store.track(vocal.id)!.sends.length).toBe(2)
     const saved = JSON.parse(JSON.stringify(store.project)) as typeof store.project
-    expect(saved.tracks.find((track) => track.id === vocal.id)?.plugins).toHaveLength(6)
+    expect(saved.tracks.find((track) => track.id === vocal.id)?.plugins).toHaveLength(5)
     expect(saved.masterPlugins.some((plugin) => plugin.pluginId === 'limiter' && !plugin.enabled)).toBe(true)
   })
 })

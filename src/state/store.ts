@@ -1,4 +1,4 @@
-import { MASTERING_IDS } from '../audio/master/assistant'
+import { isChainPlugin, isDrumsPlugin } from '../audio/plugins/ids'
 import { spectralKey, ensureRepair, pushOp, sliceRegion } from '../audio/spectral/edit'
 import { learnOffline } from '../audio/spectral/job'
 import type { SpectralAction, SpectralRegion } from '../audio/spectral/types'
@@ -1393,7 +1393,7 @@ export class ProjectStore {
       }
       if (spec.kind === 'midi' && spec.instrument === 'pads' && made[0]) {
         made[0].padKit = normalizePadKit(made[0].padKit)
-        if (!made[0].plugins.some((plugin) => plugin.pluginId === 'pads')) made[0].plugins.push(createPlugin('pads'))
+        if (!made[0].plugins.some((plugin) => isDrumsPlugin(plugin))) made[0].plugins.push(createPlugin('pads'))
         this.padsTrackId = made[0].id
         this.scalerTrackId = null
         this.rackTrackId = null
@@ -1639,9 +1639,15 @@ export class ProjectStore {
         this.openScaler(trackId)
         return
       }
-      if (plugin?.pluginId === 'pads' && trackId !== 'master') {
+      if (plugin && isDrumsPlugin(plugin) && trackId !== 'master') {
         this.pluginFocus = null
         this.openPads(trackId)
+        return
+      }
+      if (plugin?.pluginId === 'synth' && trackId !== 'master') {
+        this.pluginFocus = null
+        if (this.patchTrackId !== trackId) this.openPatch(trackId)
+        else this.emit()
         return
       }
     }
@@ -1651,21 +1657,18 @@ export class ProjectStore {
 
   replaceMasterChain(plugins: PluginInstance[]) {
     this.mutate(() => {
-      const mastering = new Set<string>(MASTERING_IDS)
-      const meter = this.project.masterPlugins.find((plugin) => plugin.pluginId === 'meter') ?? createPlugin('meter')
-      const kept = this.project.masterPlugins.filter((plugin) => plugin.pluginId !== 'meter' && !mastering.has(plugin.pluginId))
-      this.project.masterPlugins = [...plugins, ...kept, meter]
+      const kept = this.project.masterPlugins.filter((plugin) => !isChainPlugin(plugin) && plugin.pluginId !== 'meter')
+      this.project.masterPlugins = [...plugins, ...kept]
     })
   }
 
   /** Bypass the mastering chain so a loudness-matched dry signal can be compared. */
   setMasterBypass(on: boolean) {
     this.mutate(() => {
-      const mastering = new Set<string>(MASTERING_IDS)
       if (on) {
         this.bypassed = this.project.masterPlugins.map((plugin) => ({ id: plugin.id, enabled: plugin.enabled }))
         for (const plugin of this.project.masterPlugins) {
-          if (mastering.has(plugin.pluginId) || plugin.pluginId === 'limiter') plugin.enabled = false
+          if (isChainPlugin(plugin) || plugin.pluginId === 'limiter') plugin.enabled = false
         }
       } else if (this.bypassed) {
         for (const snap of this.bypassed) {
@@ -1684,6 +1687,10 @@ export class ProjectStore {
     }
     if (pluginId === 'pads') {
       this.insertPadsPlugin(trackId)
+      return
+    }
+    if (pluginId === 'synth') {
+      this.insertSynthPlugin(trackId)
       return
     }
     this.mutate(() => {
@@ -1722,10 +1729,30 @@ export class ProjectStore {
     const hostId = host.id
     this.mutate(() => {
       const list = this.pluginList(hostId)
-      if (!list || list.some((item) => item.pluginId === 'pads')) return
+      if (!list || list.some((item) => isDrumsPlugin(item))) return
       list.push(createPlugin('pads'))
     })
     this.setTrackInstrument(hostId, 'pads')
+  }
+
+  /** Synth is an insert. Adding it opens the played synthesizer. */
+  private insertSynthPlugin(trackId: string | 'master') {
+    let host = trackId !== 'master' ? this.track(trackId) : null
+    if (!host || host.type !== 'midi') host = this.project.tracks.find((track) => track.type === 'midi') ?? null
+    if (!host) {
+      const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'synth', input: 'mic', channels: 1, armed: false })
+      if (ids[0]) this.openPatch(ids[0])
+      return
+    }
+    const hostId = host.id
+    this.mutate(() => {
+      const list = this.pluginList(hostId)
+      if (!list || list.some((item) => item.pluginId === 'synth')) return
+      list.push(createPlugin('synth'))
+    })
+    this.setTrackInstrument(hostId, 'synth')
+    this.patchTrackId = null
+    this.openPatch(hostId)
   }
 
   updatePlugin(trackId: string | 'master', pluginId: string, patch: Partial<PluginInstance>) {
@@ -2252,9 +2279,8 @@ export class ProjectStore {
       const track = this.track(trackId)
       if (!track) return
       for (const [pluginId, preset] of [
-        ['gate', 'Vocal'],
+        ['vocal', 'Vocal'],
         ['eq', 'Vocal'],
-        ['deesser', 'Vocal'],
         ['compressor', 'Vocal'],
         ['tune', 'Alto/Tenor'],
         ['saturator', 'Tape'],
