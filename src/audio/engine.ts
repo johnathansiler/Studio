@@ -12,7 +12,7 @@ import { isLocalInput, type AudioAsset, type AudioClip, type MidiNote, type Proj
 import { arrangementEndSample, beatSpanSamples, clickAccent, clickAtOrAfter, meterAtSample, nextClickAfter, projectSampleBeat, tempoAtSample } from '../model/tempoMap'
 import { planLoopAudio } from '../model/loopEdit'
 import { playbackStops, transportSample } from '../model/transportSync'
-import { beatsToSamples, samplesPerBeatUnit, samplesToBeats } from '../model/time'
+import { beatsToSamples, countInBarsOf, samplesPerBeatUnit, samplesToBeats } from '../model/time'
 import { matchBufferRate, PatchHost, renderPatchSpan } from '../instruments/patch'
 import { performancesOn, routeScaler } from '../instruments/scaler/model'
 import { chokeTargets } from '../model/padMachine'
@@ -30,7 +30,7 @@ import { audibleIds } from '../model/audible'
 import { automationSchedule, channelAutomationMode, laneFor, rackLanesFor, valueAtMappedSample } from '../model/automation'
 import { applyRamps, smoothParam } from './paramCurve'
 import { channelRoute } from '../model/sharedMix'
-import { chainContext, enabledFx, LiveMidiChain, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
+import { chainContext, enabledFx, LiveMidiChain, midiPanicMessages, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
 import { LiveRack } from './liveRack'
 import { ATTACK_SEC, RELEASE_SEC, builtinLevel, drumLevel, liveWhen, scheduleDelaySeconds } from './liveStage'
 import { renderSamplerSpan } from './plugins/sampler'
@@ -151,6 +151,8 @@ export class AudioEngine {
   private directMonitor = false
   private tuneMuted = false
   private remoteGains = new Map<string, { src: MediaStreamAudioSourceNode; gain: GainNode }>()
+  private remoteStreams = new Map<string, MediaStream>()
+  private micStream: MediaStream | null = null
   private talkGains = new Map<string, GainNode>()
 
   private sources: Stoppable[] = []
@@ -210,7 +212,7 @@ export class AudioEngine {
   private rollingSilent: GainNode | null = null
   private countTimer = 0
   private countWait: (() => void) | null = null
-  private countPlan: { tempo: number; numerator: number; denominator: number } | null = null
+  private countPlan: { tempo: number; numerator: number; denominator: number; bars: number } | null = null
   private noise: AudioBuffer | null = null
   private lastUiEmit = 0
   private pcmTap: AudioWorkletNode | null = null
@@ -976,6 +978,7 @@ export class AudioEngine {
   }
 
   setLocalMic(stream: MediaStream | null) {
+    this.micStream = stream
     if (!this.ctx || !this.localMicGain || !this.inputAnalyser) return
     this.localMicSrc?.disconnect()
     this.localMicSrc = null
@@ -1042,6 +1045,8 @@ export class AudioEngine {
   }
 
   setRemoteMusic(peerId: string, stream: MediaStream | null) {
+    if (stream) this.remoteStreams.set(peerId, stream)
+    else this.remoteStreams.delete(peerId)
     const prev = this.remoteGains.get(peerId)
     prev?.src.disconnect()
     prev?.gain.disconnect()
@@ -1149,8 +1154,8 @@ export class AudioEngine {
    * A late call skips ahead instead of starting the downbeat in the past.
    */
   /** Clicks land on the beats before the next playAtPerf downbeat. */
-  armCountIn(tempo: number, signature: { numerator: number; denominator: number }) {
-    this.countPlan = { tempo, numerator: signature.numerator, denominator: signature.denominator }
+  armCountIn(tempo: number, signature: { numerator: number; denominator: number }, bars = 1) {
+    this.countPlan = { tempo, numerator: signature.numerator, denominator: signature.denominator, bars: bars === 2 ? 2 : 1 }
   }
 
   async playAtPerf(sample: number, perfMs: number, mode: 'arrangement' | 'session' = 'arrangement') {
@@ -1167,7 +1172,7 @@ export class AudioEngine {
     }
     const plan = this.countPlan
     this.countPlan = null
-    if (plan) this.scheduleCountClicks(startAt, plan.tempo, plan)
+    if (plan) this.scheduleCountClicks(startAt, plan.tempo, plan, plan.bars)
     this.startTransport(startAt, from, mode)
     if (plan && startAt > ctx.currentTime + 0.05) {
       this.status = 'counting-in'
@@ -1192,7 +1197,7 @@ export class AudioEngine {
   }
 
   stop() {
-    window.clearTimeout(this.countTimer)
+    clearTimeout(this.countTimer)
     this.countPlan = null
     this.countWait?.()
     this.countWait = null
@@ -1210,6 +1215,165 @@ export class AudioEngine {
     }
     if (this.status !== 'stopped') this.status = 'stopped'
     this.emit()
+  }
+
+  /**
+   * Stop the performance and clear stuck audio without touching the project.
+   * A closed or interrupted context is rebuilt. A suspended one is resumed.
+   */
+  async panic() {
+    this.discardCapture()
+    this.stop()
+    this.positionSamples = 0
+    this.liveOnAt.clear()
+    this.sendMidiPanic()
+    const rebuild = this.contextBroken()
+    if (rebuild) this.dropGraph()
+    else this.flushLiveAudio()
+    await this.recoverContext()
+    if (rebuild) this.reattachInputs()
+    if (this.project && this.ctx && this.localBus && this.masterStrip) this.sync(this.project, this.assetOf)
+    this.playing = false
+    this.positionSamples = 0
+    this.status = 'stopped'
+    this.refreshClockAnchor()
+    if (this.ctx?.state === 'running') this.workletError = ''
+    this.emit()
+  }
+
+  private contextBroken() {
+    if (!this.ctx) return true
+    const state = this.ctx.state as string
+    return state === 'closed' || state === 'interrupted'
+  }
+
+  private flushLiveAudio() {
+    this.rack.resetAll()
+    this.audioBuffers.clear()
+    this.warpPcm.clear()
+    this.noise = null
+    this.patchRateCache.clear()
+  }
+
+  private async recoverContext() {
+    const rate = this.project?.sampleRate || 48000
+    try {
+      await this.resume(rate)
+    } catch {
+      this.dropGraph()
+      try {
+        await this.resume(rate)
+      } catch {
+        /* This environment has no audio device. The playhead is still home. */
+      }
+    }
+    if (this.ctx && this.ctx.state !== 'running') {
+      try {
+        await this.ctx.resume()
+      } catch {
+        /* A later tap resumes a context the browser is holding. */
+      }
+    }
+    if (this.ctx && (this.ctx.state as string) === 'closed') {
+      this.dropGraph()
+      try {
+        await this.resume(rate)
+      } catch {
+        /* Still unavailable. */
+      }
+    }
+  }
+
+  private reattachInputs() {
+    if (!this.ctx) return
+    if (this.micStream) this.setLocalMic(this.micStream)
+    for (const [peerId, stream] of this.remoteStreams) this.setRemoteMusic(peerId, stream)
+  }
+
+  private dropGraph() {
+    this.rack.dispose()
+    this.libraryHost.dispose()
+    this.patchHost.dispose()
+    this.rackHost.dispose()
+    const dead = this.ctx
+    this.ctx = null
+    try {
+      void dead?.close()
+    } catch {
+      /* Already closed. */
+    }
+    this.localBus = null
+    this.remoteBus = null
+    this.monitorDelay = null
+    this.remoteDelay = null
+    this.masterGain = null
+    this.speakerGain = null
+    this.safety = null
+    this.talkBus = null
+    this.metroGain = null
+    this.cueDest = null
+    this.recordSink = null
+    this.inputAnalyser = null
+    this.tuneAnalyser = null
+    this.talkAnalyser = null
+    this.cueReturnGain = null
+    this.cueReturnSrc = null
+    this.masterStrip = null
+    this.patternStrip = null
+    this.liveBus = null
+    this.localMicGain = null
+    this.localMicSrc = null
+    this.monitorSplit = null
+    this.strips.clear()
+    this.remoteGains.clear()
+    this.talkGains.clear()
+    this.audioBuffers.clear()
+    this.warpPcm.clear()
+    this.noise = null
+    this.patchRateCache.clear()
+    this.drumBuffers = []
+    this.drumTable = []
+    this.warmVoices = []
+    this.keysNode = null
+    this.keysSab = null
+    this.workletsReady = false
+    this.stretchReady = false
+    this.pcmTap = null
+    this.pcmTapSilent = null
+    this.pcmPlayer = null
+    this.rollingNode = null
+    this.rollingSrc = null
+    this.rollingSilent = null
+    this.sources = []
+    this.oneShots = []
+    this.padVoices = []
+    this.liveBuiltins = []
+  }
+
+  private discardCapture() {
+    clearTimeout(this.countTimer)
+    this.countPlan = null
+    const release = this.countWait
+    this.countWait = null
+    release?.()
+    for (const rec of this.recorders.values()) {
+      try { rec.node.port.postMessage({ type: 'stop' }) } catch { /* already gone */ }
+      try { rec.source.disconnect() } catch { /* already gone */ }
+      try { rec.node.disconnect() } catch { /* already gone */ }
+      try { rec.silent.disconnect() } catch { /* already gone */ }
+    }
+    this.recorders.clear()
+    for (const pending of this.pendingRecorders) {
+      try { pending.stream.removeEventListener('addtrack', pending.handler) } catch { /* already gone */ }
+    }
+    this.pendingRecorders = []
+    try { this.stopRolling() } catch { /* the rolling tap is already gone */ }
+  }
+
+  private sendMidiPanic() {
+    const sink = this.midiSink
+    if (!sink) return
+    for (const bytes of midiPanicMessages()) sink(bytes)
   }
 
   /** Stop every sounding voice, including notes that were already queued. */
@@ -1265,7 +1429,8 @@ export class AudioEngine {
       this.emit()
     }
     if (opts.countIn && opts.hostPerfAtSample != null && this.project && !this.playing) {
-      const go = await this.holdForDownbeat(opts.hostPerfAtSample, tempoAtSample(this.project, opts.fromSample), meterAtSample(this.project, opts.fromSample))
+      const bars = Math.max(1, countInBarsOf(this.project))
+      const go = await this.holdForDownbeat(opts.hostPerfAtSample, tempoAtSample(this.project, opts.fromSample), meterAtSample(this.project, opts.fromSample), bars)
       if (!go) return
       punch()
       return
@@ -1703,23 +1868,24 @@ export class AudioEngine {
     return buffer
   }
 
-  private scheduleCountClicks(startAt: number, tempo: number, signature: { numerator: number; denominator: number }) {
+  private scheduleCountClicks(startAt: number, tempo: number, signature: { numerator: number; denominator: number }, bars = 1) {
     if (!this.ctx) return
     const beatSec = samplesPerBeatUnit(this.sampleRate, tempo, signature) / this.sampleRate
-    const beats = Math.max(1, signature.numerator)
-    for (let i = 0; i < beats; i++) {
-      const when = startAt - (beats - i) * beatSec
-      if (when >= this.ctx.currentTime - 0.02) this.click(when, i === 0)
+    const perBar = Math.max(1, signature.numerator)
+    const total = perBar * (bars === 2 ? 2 : 1)
+    for (let i = 0; i < total; i++) {
+      const when = startAt - (total - i) * beatSec
+      if (when >= this.ctx.currentTime - 0.02) this.click(when, i % perBar === 0)
     }
   }
 
   /** Play the count-in and resolve at the downbeat. Stop during the wait resolves false. */
-  private async holdForDownbeat(downbeatPerf: number, tempo: number, signature: { numerator: number; denominator: number }) {
+  private async holdForDownbeat(downbeatPerf: number, tempo: number, signature: { numerator: number; denominator: number }, bars = 1) {
     await this.resume()
     this.refreshClockAnchor()
     const ctx = this.ctx!
     const startAt = Math.max(this.contextForPerf(downbeatPerf), ctx.currentTime + 0.02)
-    this.scheduleCountClicks(startAt, tempo, signature)
+    this.scheduleCountClicks(startAt, tempo, signature, bars)
     this.status = 'counting-in'
     this.emit()
     const wait = Math.max(0, (startAt - ctx.currentTime) * 1000)
@@ -1739,9 +1905,10 @@ export class AudioEngine {
     const tempo = tempoAtSample(project, fromSample)
     const meter = meterAtSample(project, fromSample)
     const beatSec = samplesPerBeatUnit(this.sampleRate, tempo, meter) / this.sampleRate
-    const beats = meter.numerator
+    const perBar = Math.max(1, meter.numerator)
+    const beats = perBar * (countInBarsOf(project) === 2 ? 2 : 1)
     const start = ctx.currentTime + 0.06
-    for (let i = 0; i < beats; i++) this.click(start + i * beatSec, i === 0)
+    for (let i = 0; i < beats; i++) this.click(start + i * beatSec, i % perBar === 0)
     this.status = 'counting-in'
     this.emit()
     const runAt = start + beats * beatSec

@@ -1155,6 +1155,20 @@ export class SessionClient {
     this.send({ t: 'transport', payload })
   }
 
+  /** Stop local playback, recording, and stuck audio. Does not edit the project. */
+  async applyLocalReset() {
+    this.punch = null
+    await this.engine.panic()
+    const stream = this.musicStream
+    if (stream && this.state.role === 'guest') {
+      try {
+        await this.engine.startRolling(stream)
+      } catch {
+        /* The next record opens the rolling buffer again. */
+      }
+    }
+  }
+
   requestTransport(payload: Record<string, unknown>) {
     if (!guestMayRequest(String(payload.action || ''))) return
     this.send({ t: 'transport-request', payload })
@@ -2903,7 +2917,7 @@ export class SessionClient {
       this.onControl?.(payload)
       return
     }
-    if (payload.action === 'play' || payload.action === 'stop' || payload.action === 'seek') {
+    if (payload.action === 'play' || payload.action === 'stop' || payload.action === 'seek' || payload.action === 'reset') {
       this.onControl?.(payload)
       return
     }

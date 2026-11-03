@@ -308,7 +308,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   color: var(--amber);
 }
 .fold-word, .mini-word { display: none; }
-.t-word { display: inline; font-size: 13px; font-weight: 680; line-height: 1; white-space: nowrap; }
+.t-word, .t-state { display: inline; font-size: 13px; font-weight: 680; line-height: 1; white-space: nowrap; }
+.t-state { font-size: 11px; }
+.transport .t-btn.count { gap: 4px; }
 .shell.fold .t-word,
 .shell.fold .fold-word,
 .shell.fold .mini-word,
@@ -1032,11 +1034,14 @@ code { font-family: var(--mono); font-size: 12px; }
 .transport .t-btn.stop,
 .transport .t-btn.play,
 .transport .t-btn.rec,
-.transport .t-btn.loop {
+.transport .t-btn.loop,
+.transport .t-btn.click,
+.transport .t-btn.count,
+.transport .t-btn.reset {
   width: auto;
-  min-width: max-content;
-  height: 36px;
-  min-height: 36px;
+  min-width: max(40px, max-content);
+  height: 40px;
+  min-height: 40px;
   padding: 0 12px;
   display: inline-flex;
   align-items: center;
