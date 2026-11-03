@@ -276,7 +276,9 @@ export function App() {
       const channels = take.sampleRate === engine.sampleRate
         ? take.channels
         : take.channels.map((channel) => linearResample(channel, take.sampleRate, engine.sampleRate))
-      store.acceptAlignedTake({ ...take, channels, sampleRate: engine.sampleRate })
+      const next = { ...take, channels, sampleRate: engine.sampleRate }
+      if (take.upgrade && store.upgradeAlignedTake(next)) return
+      store.acceptAlignedTake(next)
     })
     session.setArrangementHandler((project, assets, ready) => {
       if (locksProject(session.state.role, session.selfAccess())) store.remoteFollow = true

@@ -9,6 +9,9 @@ export const ASSET_SIGNAL_LIMIT = 12_000
 export const ASSET_ID = /^[A-Za-z0-9_-]{1,80}$/
 export const ASSET_HASH = /^[a-f0-9]{64}$/
 const FORBIDDEN_KEY = new Set(['wav', 'chunk', 'channels', 'samples', 'pcm', 'audio', 'buffer', 'blob', 'base64'])
+const CODECS = new Set<AssetCodec>(['wav', 'opus', 'mp3'])
+
+export type AssetCodec = 'wav' | 'opus' | 'mp3'
 
 export interface AssetOffer {
   id: string
@@ -17,6 +20,12 @@ export interface AssetOffer {
   bytes: number
   sha256: string
   total: number
+  /** Absent on a full-quality wav. Opus or MP3 is the relay copy. */
+  codec?: AssetCodec
+  /** Bits per second of a compressed copy. Always 128000–160000. */
+  bitrate?: number
+  /** SHA-256 of the wav this compressed copy can be replaced by. */
+  upgrade?: string
 }
 
 export function sanitizeOffer(value: unknown): AssetOffer | null {
@@ -33,7 +42,35 @@ export function sanitizeOffer(value: unknown): AssetOffer | null {
   if (!Number.isInteger(bytes) || bytes < 44 || bytes > 64 * 1024 * 1024) return null
   if (!Number.isInteger(total) || total < 1 || total > 4096) return null
   if (total !== Math.ceil(bytes / ASSET_CHUNK_BYTES)) return null
-  return { id, name, sampleRate, bytes, sha256, total }
+  let codec: AssetCodec | undefined
+  if (row.codec != null && row.codec !== '') {
+    const name = String(row.codec)
+    if (!CODECS.has(name as AssetCodec)) return null
+    codec = name as AssetCodec
+  }
+  let bitrate: number | undefined
+  if (row.bitrate != null && row.bitrate !== '') {
+    bitrate = Number(row.bitrate)
+    if (!Number.isInteger(bitrate) || bitrate < 128_000 || bitrate > 160_000) return null
+  }
+  let upgrade: string | undefined
+  if (row.upgrade != null && row.upgrade !== '') {
+    upgrade = String(row.upgrade)
+    if (!ASSET_HASH.test(upgrade)) return null
+  }
+  if ((codec === 'opus' || codec === 'mp3') && bitrate == null) return null
+  if ((!codec || codec === 'wav') && bitrate != null) return null
+  return {
+    id,
+    name,
+    sampleRate,
+    bytes,
+    sha256,
+    total,
+    ...(codec && codec !== 'wav' ? { codec } : {}),
+    ...(bitrate ? { bitrate } : {}),
+    ...(upgrade ? { upgrade } : {}),
+  }
 }
 
 function signalTooBig(value: unknown, depth: number): boolean {

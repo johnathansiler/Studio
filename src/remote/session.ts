@@ -25,8 +25,9 @@ import { CAP_NOTICE } from '../model/usage'
 import { SfuCall, type SfuKind, type SfuPublication } from './sfuCall'
 import { decodeWavPCM, encodeWav } from '../model/wav'
 import { base64ToBytes, bytesToBase64, journalFromRoom, type RoomCopy } from '../storage/idb'
-import { assembleTakeWav, bytesToArrayBuffer, chunkBytes, clockOffsetForTake, packTakeChunk, readTakeChunk, sumRelayBytes, TAKE_CHUNK_BYTES, takeProgress, type RelayPair } from './hqTake'
-import { AssetExchange, assetBytesAllowed, chooseAssetPath, offersFromSignal, sharedAssetStore, type AssetStatus } from './assets'
+import { assembleTakeWav, bytesToArrayBuffer, chunkBytes, clockOffsetForTake, packTakeChunk, readTakeChunk, sumRelayBytes, TAKE_CHUNK_BYTES, takeDelivery, takeProgress, type RelayPair } from './hqTake'
+import { AssetExchange, assetBytesAllowed, assetDelivery, chooseAssetPath, offersFromSignal, sharedAssetStore, type AssetStatus } from './assets'
+import { browserTakeCodec } from './takeCodec'
 import { clearActiveSession, deviceParticipantId, readIdentity } from '../storage/identity'
 import type { AudioAsset, Project } from '../model/types'
 
@@ -120,6 +121,16 @@ export interface SessionState {
   sfu: boolean
 }
 
+interface PunchTake {
+  takeId: string
+  placeAtSample: number
+  sampleRate: number
+  compensationMs: number
+  detail: string
+  silent: boolean
+  wav: ArrayBuffer
+}
+
 export interface IncomingTake {
   peerId: string
   peerName: string
@@ -130,6 +141,8 @@ export interface IncomingTake {
   compensationMs: number
   detail: string
   silent?: boolean
+  /** The wav that replaces a compressed copy already on the timeline. */
+  upgrade?: boolean
 }
 
 interface IceServer {
@@ -150,7 +163,7 @@ interface PeerLink {
   screen: MediaStream
   clock?: RTCDataChannel
   takes?: RTCDataChannel
-  /** Lossless shared wavs. Audio is sent only when the selected pair is direct. */
+  /** Shared takes. A direct pair carries wav. A relay pair carries compressed audio. */
   assets?: RTCDataChannel
   pcm?: RTCDataChannel
   remoteMinusLocal: number | null
@@ -314,8 +327,11 @@ export class SessionClient {
   private welcomed = false
   private outbox: OutboundSignal[] = []
   private lastSent: { t: string; bytes: number } | null = null
-  /** Shared wavs. The bytes stay on the data channel and in IndexedDB. */
-  private exchange = new AssetExchange(sharedAssetStore())
+  /** Shared wavs and relay copies. The bytes stay on the data channel and in IndexedDB. */
+  private takeCodec = browserTakeCodec()
+  private exchange = new AssetExchange(sharedAssetStore(), () => Date.now(), this.takeCodec)
+  /** Full-quality wavs waiting for a direct pair after a compressed relay send. */
+  private pendingTakeUpgrade = new Map<string, PunchTake>()
   private assetTimer = 0
   private assetRunning = false
   private assetAgain = false
@@ -1624,7 +1640,7 @@ export class SessionClient {
     this.emit()
   }
 
-  private flushAssetActions(actions: { peerId: string; text?: string; binary?: Uint8Array }[]) {
+  private flushAssetActions(actions: { peerId: string; assetId?: string; text?: string; binary?: Uint8Array; delivery?: 'wav' | 'compressed' | 'none' }[]) {
     for (const action of actions) {
       const channel = this.peers.get(action.peerId)?.assets
       if (!channel || channel.readyState !== 'open') continue
@@ -1632,11 +1648,14 @@ export class SessionClient {
         if (action.binary) {
           if (!mayWriteProject(this.selfAccess())) continue
           const path = chooseAssetPath(true, this.state.media[action.peerId]?.localType || undefined)
-          if (!assetBytesAllowed(path)) continue
+          const delivery = action.delivery || 'wav'
+          if (delivery === 'compressed') {
+            if (assetDelivery(path) !== 'compressed') continue
+          } else if (!assetBytesAllowed(path)) continue
           channel.send(bytesToArrayBuffer(action.binary))
         } else if (action.text) channel.send(action.text)
       } catch {
-        /* the channel closed between the tick and the send */
+        this.exchange.noteDirectFailed(action.peerId, action.assetId || '')
       }
     }
   }
@@ -1996,7 +2015,11 @@ export class SessionClient {
     }
   }
 
-  /** Selected Cloudflare relay pairs. Direct takes add nothing. The monthly cap is untouched. */
+  /**
+   * Selected Cloudflare relay pairs. Direct takes add nothing.
+   * Compressed takes ride this same pair, so their bytes are already included.
+   * The monthly cap is untouched.
+   */
   private async relayBytes(links: Iterable<PeerLink>) {
     let bytes = 0
     for (const link of links) {
@@ -3072,6 +3095,7 @@ export class SessionClient {
     this.emit()
     this.postDiag()
     this.syncAssets()
+    this.upgradePendingTakes()
   }
 
   private postDiag() {
@@ -3256,10 +3280,7 @@ export class SessionClient {
     })
   }
 
-  private async sendTake(
-    link: PeerLink | undefined,
-    take: { takeId: string; placeAtSample: number; sampleRate: number; compensationMs: number; detail: string; silent: boolean; wav: ArrayBuffer },
-  ) {
+  private async sendTake(link: PeerLink | undefined, take: PunchTake) {
     if (!mayWriteProject(this.selfAccess())) {
       this.state.takeProgress = null
       this.note('View and Comment can listen. This take stays on this device.')
@@ -3267,37 +3288,100 @@ export class SessionClient {
       return
     }
     const channel = link ? await this.waitForTakes(link) : null
+    const peerId = this.hostId() || ''
     if (!channel) {
       await this.sendTakeHttp(take)
       return
     }
-    const bytes = new Uint8Array(take.wav)
+    const delivery = await this.deliveryFor(peerId, channel)
+    if (delivery === 'compressed') {
+      const sent = await this.sendCompressedTake(channel, take)
+      if (sent) {
+        if (peerId) this.pendingTakeUpgrade.set(peerId, take)
+        this.note('Compressed take sent over the relay. Full quality follows if a direct link appears.')
+        this.emit()
+        return
+      }
+      if (peerId) this.pendingTakeUpgrade.set(peerId, take)
+      this.note('Could not compress the take for the relay. It stays on this device until a direct link appears.')
+      this.emit()
+      return
+    }
+    if (delivery === 'wav') {
+      await this.sendTakeWav(channel, take, false)
+      return
+    }
+    await this.sendTakeHttp(take)
+  }
+
+  private async deliveryFor(id: string, channel: RTCDataChannel): Promise<'wav' | 'compressed' | 'none'> {
+    for (let i = 0; i < 8; i++) {
+      const type = this.state.media[id]?.localType
+      if (type === 'relay' || type === 'host' || type === 'srflx' || type === 'prflx') return takeDelivery(true, type)
+      if (channel.readyState !== 'open') return 'none'
+      await new Promise((resolve) => window.setTimeout(resolve, 150))
+    }
+    return takeDelivery(channel.readyState === 'open', this.state.media[id]?.localType || undefined)
+  }
+
+  private async sendCompressedTake(channel: RTCDataChannel, take: PunchTake) {
+    const decoded = decodeWavPCM(take.wav)
+    const encoded = await this.takeCodec.encode(decoded.channels, decoded.sampleRate).catch(() => null)
+    if (!encoded?.bytes.byteLength) return false
+    await this.writeTakeChannel(channel, encoded.bytes, {
+      t: 'begin',
+      takeId: take.takeId,
+      placeAtSample: take.placeAtSample,
+      sampleRate: take.sampleRate,
+      compensationMs: take.compensationMs,
+      detail: `${take.detail}; ${encoded.codec} ${Math.round(encoded.bitrate / 1000)} kbps`,
+      silent: take.silent,
+      codec: encoded.codec,
+      bitrate: encoded.bitrate,
+    })
+    this.state.takeProgress = null
+    return true
+  }
+
+  private async sendTakeWav(channel: RTCDataChannel, take: PunchTake, upgrade: boolean) {
+    await this.writeTakeChannel(channel, new Uint8Array(take.wav), {
+      t: 'begin',
+      takeId: take.takeId,
+      placeAtSample: take.placeAtSample,
+      sampleRate: take.sampleRate,
+      compensationMs: take.compensationMs,
+      detail: take.detail,
+      silent: take.silent,
+      upgrade,
+    })
+    this.state.takeProgress = null
+    this.note(upgrade ? 'Full-quality take replaced the compressed copy.' : 'Full-quality take delivered to the host timeline.')
+    this.emit()
+  }
+
+  private async writeTakeChannel(channel: RTCDataChannel, bytes: Uint8Array, begin: Record<string, unknown>) {
     const pieces = chunkBytes(bytes, TAKE_CHUNK_BYTES)
     const total = pieces.length
-    channel.send(
-      JSON.stringify({
-        t: 'begin',
-        takeId: take.takeId,
-        placeAtSample: take.placeAtSample,
-        sampleRate: take.sampleRate,
-        compensationMs: take.compensationMs,
-        detail: take.detail,
-        silent: take.silent,
-        total,
-        bytes: bytes.byteLength,
-      }),
-    )
+    channel.send(JSON.stringify({ ...begin, total, bytes: bytes.byteLength }))
     for (let index = 0; index < total; index++) {
       while (channel.bufferedAmount > 1_000_000) await new Promise((resolve) => window.setTimeout(resolve, 20))
-      const packet = new Uint8Array(bytesToArrayBuffer(packTakeChunk(index, total, pieces[index])))
-      channel.send(packet)
+      channel.send(new Uint8Array(bytesToArrayBuffer(packTakeChunk(index, total, pieces[index]))))
       this.state.takeProgress = takeProgress(index + 1, total)
       this.emit()
     }
-    channel.send(JSON.stringify({ t: 'end', takeId: take.takeId }))
-    this.state.takeProgress = null
-    this.note('Full-quality take delivered to the host timeline.')
-    this.emit()
+    channel.send(JSON.stringify({ t: 'end', takeId: begin.takeId }))
+  }
+
+  private upgradePendingTakes() {
+    for (const [id, take] of this.pendingTakeUpgrade) {
+      const channel = this.peers.get(id)?.takes
+      const path = chooseAssetPath(channel?.readyState === 'open', this.state.media[id]?.localType || undefined)
+      if (path !== 'direct' || !channel || channel.readyState !== 'open') continue
+      this.pendingTakeUpgrade.delete(id)
+      void this.sendTakeWav(channel, take, true).catch(() => {
+        this.pendingTakeUpgrade.set(id, take)
+      })
+    }
   }
 
   private async waitForTakes(link: PeerLink) {
@@ -3308,7 +3392,7 @@ export class SessionClient {
     return null
   }
 
-  private async sendTakeHttp(take: { takeId: string; placeAtSample: number; sampleRate: number; compensationMs: number; detail: string; silent: boolean; wav: ArrayBuffer }) {
+  private async sendTakeHttp(take: PunchTake) {
     const bytes = new Uint8Array(take.wav)
     if (bytes.byteLength > 32 * 1024 * 1024) {
       this.note('The take is over 32 MB, so it was not uploaded.')
@@ -3386,7 +3470,7 @@ export class SessionClient {
       if (msg.t === 'begin') {
         link.take = { takeId: msg.takeId, total: msg.total, parts: [], meta: msg }
       } else if (msg.t === 'end' && link.take) {
-        this.finishIncoming(id, link)
+        void this.finishIncoming(id, link)
       }
       return
     }
@@ -3399,7 +3483,7 @@ export class SessionClient {
     this.emit()
   }
 
-  private finishIncoming(id: string, link: { take?: NonNullable<PeerLink['take']> }) {
+  private async finishIncoming(id: string, link: { take?: NonNullable<PeerLink['take']> }) {
     const incoming = link.take
     link.take = undefined
     if (!incoming) return
@@ -3410,20 +3494,45 @@ export class SessionClient {
       this.emit()
       return
     }
-    const decoded = decodeWavPCM(bytesToArrayBuffer(wav))
     const meta = incoming.meta
+    const codec = String(meta.codec || '')
+    let channels: Float32Array[]
+    let sampleRate: number
+    if (codec === 'opus' || codec === 'mp3') {
+      const decoded = await this.takeCodec.decode(wav).catch(() => null)
+      if (!decoded?.channels.length) {
+        this.note('The compressed take could not be decoded.')
+        this.state.takeProgress = null
+        this.emit()
+        return
+      }
+      channels = decoded.channels
+      sampleRate = decoded.sampleRate
+    } else {
+      try {
+        const decoded = decodeWavPCM(bytesToArrayBuffer(wav))
+        channels = decoded.channels
+        sampleRate = decoded.sampleRate
+      } catch {
+        this.note('Take upload was not a wav.')
+        this.state.takeProgress = null
+        this.emit()
+        return
+      }
+    }
     this.state.takeProgress = null
-    const silent = Boolean(meta.silent) || isSilentTake(decoded.channels)
+    const silent = Boolean(meta.silent) || isSilentTake(channels)
     this.onTake?.({
       peerId: id,
       peerName: this.nameOf(id),
       takeId: String(meta.takeId),
       placeAtSample: Number(meta.placeAtSample),
-      sampleRate: decoded.sampleRate,
-      channels: decoded.channels,
+      sampleRate,
+      channels,
       compensationMs: Number(meta.compensationMs),
       detail: String(meta.detail || ''),
       silent,
+      upgrade: meta.upgrade === true,
     })
     this.note(
       silent

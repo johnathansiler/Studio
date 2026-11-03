@@ -23,6 +23,19 @@ export function chooseTakePath(channelOpen: boolean): TakePath {
   return channelOpen ? 'data' : 'server'
 }
 
+export type TakeDelivery = 'wav' | 'compressed' | 'none'
+
+/**
+ * A direct pair carries the 24-bit wav. A relay pair, or an open channel whose
+ * pair is not known yet, carries compressed audio so a mobile TURN link is not
+ * handed a wav. A closed channel sends nothing here.
+ */
+export function takeDelivery(channelOpen: boolean, candidateType?: string): TakeDelivery {
+  if (!channelOpen) return 'none'
+  if (candidateType === 'host' || candidateType === 'srflx' || candidateType === 'prflx') return 'wav'
+  return 'compressed'
+}
+
 /**
  * Clock offset for alignment. The data-channel sample wins when it exists.
  * The signaling-socket sample is used when the SFU is carrying media and the

@@ -34,6 +34,9 @@ import {
 } from '../remote/assets'
 import { AssetTransfers } from '../ui/AssetTransfers'
 import type { AudioAsset } from '../model/types'
+import { MPEGDecoder } from 'mpg123-decoder'
+import { clampTakeBitrate, chooseTakeEncoder, encodeMp3Take, readTakeContainer, TAKE_BITRATE, testTakeCodec } from '../remote/takeCodec'
+import { takeDelivery } from '../remote/hqTake'
 
 function tone(length = 8000): AudioAsset {
   return {
@@ -59,7 +62,7 @@ async function consume(target: AssetExchange, from: string, actions: AssetAction
 }
 
 describe('peer asset transfer', () => {
-  it('keeps audio off a relay and does not change the relay cap', () => {
+  it('keeps the lossless wav off a relay and does not change the relay cap', () => {
     expect(chooseAssetPath(false, 'host')).toBe('closed')
     expect(chooseAssetPath(true, undefined)).toBe('unknown')
     expect(chooseAssetPath(true, 'relay')).toBe('relay')
@@ -104,6 +107,25 @@ describe('peer asset transfer', () => {
     expect(decoded.channels[0][4000]).toBe(asset.channels[0][4000])
   })
 
+  it('accepts compressed metadata and still rejects audio bytes', () => {
+    const offer = {
+      id: 'buf_vocal',
+      name: 'Vocal',
+      sampleRate: 48000,
+      bytes: ASSET_CHUNK_BYTES,
+      sha256: 'ab'.repeat(32),
+      total: 1,
+    }
+    const compressed = offersFromSignal({
+      assets: [{ ...offer, codec: 'opus', bitrate: 160_000, upgrade: 'cd'.repeat(32) }],
+    })
+    expect(compressed?.[0].codec).toBe('opus')
+    expect(compressed?.[0].bitrate).toBe(160_000)
+    expect(offersFromSignal({ assets: [{ ...offer, codec: 'opus' }] })).toBeNull()
+    expect(offersFromSignal({ assets: [{ ...offer, codec: 'opus', bitrate: 510_000 }] })).toBeNull()
+    expect(JSON.stringify(compressed)).not.toMatch(/UklG|chunk|samples/)
+  })
+
   it('rejects a signaling catalog that carries audio bytes', () => {
     const offer = {
       id: 'buf_vocal',
@@ -125,7 +147,7 @@ describe('peer asset transfer', () => {
     })
   })
 
-  it('asks any direct peer that has the file and skips a relay', () => {
+  it('asks a direct peer first and a relay peer when that is the only link', () => {
     expect(pickAssetPeer({
       selfId: 'late',
       holders: ['host', 'guest', 'late'],
@@ -141,6 +163,12 @@ describe('peer asset transfer', () => {
       selfId: 'late',
       holders: ['host'],
       paths: { host: 'relay' },
+    })).toBe('host')
+    expect(pickAssetPeer({
+      selfId: 'late',
+      holders: ['host'],
+      paths: { host: 'relay' },
+      directOnly: true,
     })).toBeNull()
   })
 
@@ -178,7 +206,7 @@ describe('peer asset transfer', () => {
     expect(late.currentStatuses().find((item) => item.id === 'buf_vocal')?.label).toBe('Saved on this device')
   })
 
-  it('resumes from the slices already stored and sends nothing over a relay', async () => {
+  it('resumes from the slices already stored', async () => {
     const asset = tone(40_000)
     const pieces = splitAssetWav(encodeLosslessWav(asset.channels, asset.sampleRate))
     expect(pieces.length).toBeGreaterThan(ASSET_CHUNKS_PER_TURN)
@@ -212,16 +240,6 @@ describe('peer asset transfer', () => {
       audio = (await consume(resumed, 'host', more.actions, 'direct')).completed
     }
     expect(audio[0].channels[0][10]).toBe(asset.channels[0][10])
-
-    const blocked = new AssetExchange(memoryAssetStore())
-    blocked.noteCatalog('host', listed.signal || [])
-    const waiting = await blocked.tick({ selfId: 'guest', held: [], referenced: ['buf_vocal'], peers: [peer('host', 'relay')] })
-    expect(waiting.actions.some((action) => action.binary)).toBe(false)
-    expect(waiting.statuses.find((row) => row.id === 'buf_vocal')?.label).toBe('Waiting for a direct link')
-    const refused = await host.handleControl('guest', JSON.stringify({ t: 'want', id: 'buf_vocal', sha256: listed.signal?.[0].sha256, have: [] }), 'relay')
-    expect(refused.some((action) => action.binary)).toBe(false)
-    expect(refused.some((action) => action.text?.includes('"wait"'))).toBe(true)
-    expect(assetRelayCredit('relay', [{ selected: true, candidateType: 'relay', bytesSent: 9_000_000, bytesReceived: 1 }])).toBe(0)
   })
 
   it('lets a View seat request audio and refuses to publish it', async () => {
@@ -254,6 +272,86 @@ describe('peer asset transfer', () => {
     expect(need.actions.some((action) => action.text?.includes('"want"'))).toBe(true)
     expect(need.actions.some((action) => action.binary)).toBe(false)
     expect(need.signal ?? []).toEqual([])
+  })
+
+  it('sends a compressed take over a relay and upgrades it when a direct link appears', async () => {
+    const asset = tone(8000)
+    const codec = testTakeCodec(0.5)
+    const host = new AssetExchange(memoryAssetStore(), () => Date.now(), codec)
+    const guest = new AssetExchange(memoryAssetStore(), () => Date.now(), codec)
+    const listed = await host.tick({ selfId: 'host', held: [asset], referenced: ['buf_vocal'], peers: [peer('guest', 'relay')] })
+    expect(listed.signal?.[0].id).toBe('buf_vocal')
+    expect(listed.signal?.[0].codec).toBeUndefined()
+    expect(JSON.stringify(listed.signal)).not.toMatch(/UklG|samples|chunk/)
+    expect(listed.actions.some((action) => action.binary)).toBe(false)
+    guest.noteCatalog('host', listed.signal || [])
+    const asked = await guest.tick({ selfId: 'guest', held: [], referenced: ['buf_vocal'], peers: [peer('host', 'relay')] })
+    expect(asked.actions.some((action) => action.text?.includes('"want"'))).toBe(true)
+    const reply = await consume(host, 'guest', asked.actions, 'relay')
+    const begin = reply.replies.find((action) => action.text?.includes('"begin"'))
+    expect(begin?.text).toContain('"codec":"opus"')
+    expect(begin?.text).toContain(`"bitrate":${TAKE_BITRATE}`)
+    const payload = reply.replies.filter((action) => action.binary).reduce((sum, action) => sum + (action.binary?.byteLength || 0), 0)
+    expect(payload).toBeGreaterThan(0)
+    expect(assetRelayCredit('relay', [{ selected: true, candidateType: 'relay', bytesSent: 9_000_000, bytesReceived: 1 }], payload)).toBe(payload)
+    expect(capGigabytes('750')).toBe(750)
+    const got = await consume(guest, 'host', reply.replies, 'relay')
+    expect(got.completed[0].channels[0][100]).toBeCloseTo(asset.channels[0][100] * 0.5, 5)
+    expect(guest.currentStatuses().find((row) => row.id === 'buf_vocal')?.label).toBe('Compressed copy on this device')
+
+    const quiet = new AssetExchange(memoryAssetStore(), () => Date.now(), codec)
+    const refused = await quiet.tick({
+      selfId: 'view',
+      held: [asset],
+      referenced: ['buf_vocal'],
+      peers: [peer('guest', 'relay')],
+      publish: false,
+    })
+    expect(refused.actions.some((action) => action.binary)).toBe(false)
+    expect(refused.signal ?? []).toEqual([])
+
+    const upgrade = await guest.tick({
+      selfId: 'guest',
+      held: [got.completed[0]],
+      referenced: ['buf_vocal'],
+      peers: [peer('host', 'direct')],
+      publish: true,
+    })
+    expect(upgrade.actions.some((action) => action.text?.includes('"want"'))).toBe(true)
+    expect(upgrade.statuses.find((row) => row.id === 'buf_vocal')?.label).toBe('Upgrading to full quality')
+    const wavReply = await consume(host, 'guest', upgrade.actions, 'direct')
+    expect(wavReply.replies.some((action) => action.text?.includes('"codec"'))).toBe(false)
+    let full = await consume(guest, 'host', wavReply.replies, 'direct')
+    if (!full.completed.length) {
+      const more = await host.tick({ selfId: 'host', held: [asset], referenced: ['buf_vocal'], peers: [peer('guest', 'direct')] })
+      full = await consume(guest, 'host', more.actions, 'direct')
+    }
+    expect(full.completed[0].channels[0][100]).toBe(asset.channels[0][100])
+    expect(guest.currentStatuses().find((row) => row.id === 'buf_vocal')?.label).toBe('Saved on this device')
+  })
+
+  it('picks Opus around 160 kbps and falls back to an MP3 the browser can encode', async () => {
+    expect(chooseTakeEncoder({ webcodecsOpus: true, mediaRecorderOpus: true, mp3: true })).toEqual({ id: 'opus', bitrate: 160_000, via: 'webcodecs' })
+    expect(chooseTakeEncoder({ mediaRecorderOpus: true })).toEqual({ id: 'opus', bitrate: 160_000, via: 'media-recorder' })
+    expect(chooseTakeEncoder({})).toEqual({ id: 'mp3', bitrate: 160_000, via: 'mp3' })
+    expect(chooseTakeEncoder({ mp3: false })).toBeNull()
+    expect(clampTakeBitrate(96_000)).toBe(128_000)
+    expect(clampTakeBitrate(510_000)).toBe(160_000)
+    expect(takeDelivery(true, 'relay')).toBe('compressed')
+    expect(takeDelivery(true, 'srflx')).toBe('wav')
+    expect(takeDelivery(false, 'relay')).toBe('none')
+    const audio = Float32Array.from({ length: 48000 }, (_, index) => Math.sin(index / 20) * 0.4)
+    const wrapped = encodeMp3Take([audio], 48000, TAKE_BITRATE)
+    expect(wrapped).not.toBeNull()
+    const container = readTakeContainer(wrapped!)
+    expect(container?.kind).toBe(2)
+    expect(container?.bitrate).toBe(160_000)
+    const decoder = new MPEGDecoder()
+    await decoder.ready
+    const decoded = decoder.decode(container!.frames[0].bytes)
+    decoder.free()
+    expect(decoded.errors).toHaveLength(0)
+    expect(decoded.samplesDecoded / decoded.sampleRate).toBeGreaterThan(0.9)
   })
 
   it('shows a labeled transfer row', () => {
