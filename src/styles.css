@@ -263,6 +263,12 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   justify-self: center;
   align-self: center;
 }
+.mini-pad.beat {
+  font-size: 11px;
+  line-height: 1.05;
+  padding: 2px;
+  white-space: normal;
+}
 .mini-pad.lit,
 .mini-pad:active {
   background: var(--accent);
