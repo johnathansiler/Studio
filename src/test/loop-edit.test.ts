@@ -148,7 +148,7 @@ describe('loop length readout', () => {
     expect(arrange).toContain('data-loop-region="arrange"')
     expect(arrange).toContain('data-loop-edge="end"')
     expect(arrange).toContain('data-loop-length="4 bars"')
-    expect(arrange).toContain('Loop off')
+    expect(arrange).toContain('data-loop="off"')
 
     const rack = renderToStaticMarkup(createElement(ChannelRack, { store, engine }))
     expect(rack).toContain('data-loop-region="rack"')

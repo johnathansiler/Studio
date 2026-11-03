@@ -102,16 +102,23 @@ export function concatFrames(frames: Float32Array[]) {
  */
 export async function captureSlot(
   source: CaptureSource,
-  options: { countIn: boolean; bars?: number; tempo: number; signature: TimeSignature; maxSamples: number },
+  options: { countIn: boolean; bars?: number; tempo: number; signature: TimeSignature; maxSamples: number; threshold?: number },
   control: CaptureControl,
 ): Promise<{ channels: Float32Array[]; sampleRate: number } | null> {
   const kept: Float32Array[] = []
   let total = 0
   let armed = false
+  const gate = options.threshold && options.threshold > 0 ? options.threshold : 0
+  let started = gate === 0
   const stop = await source.start((frame) => {
     const copy = Float32Array.from(frame)
-    control.onLevel(peakLevel(copy))
+    const level = peakLevel(copy)
+    control.onLevel(level)
     if (!armed) return
+    if (!started) {
+      if (level < gate) return
+      started = true
+    }
     if (options.maxSamples > 0 && total >= options.maxSamples) return
     const room = options.maxSamples > 0 ? options.maxSamples - total : copy.length
     const take = room < copy.length ? copy.subarray(0, room) : copy
