@@ -4,9 +4,8 @@ export const TARGET_PX = 40
 export const GAP_PX = 2
 
 /**
- * Higher stays on the strip longer.
- * Mute and Solo are the controls under a finger.
- * Tune, Safe, and Arm are the first to step behind More.
+ * Kept so a caller can still rank controls.
+ * The mixer no longer hides any of them: every control stays on the strip.
  */
 export const SECONDARY_KEEP: Record<string, number> = {
   mute: 100,
@@ -24,8 +23,7 @@ export const SECONDARY_KEEP: Record<string, number> = {
 
 /**
  * Full-word button widths at the mixer face (12px, semibold, horizontal padding).
- * A little wider than the measured glyphs so a control moves behind More
- * before its word is clipped.
+ * A little wider than the measured glyphs so a word is not clipped on a narrow strip.
  */
 export const CONTROL_WIDTH: Record<string, number> = {
   Off: 46,
@@ -85,43 +83,23 @@ export function rowsFor(width: number, itemWidths: number[], gap = GAP_PX) {
   return rows
 }
 
-/**
- * Keep every control on the strip while they fit in `maxRows`.
- * When they do not, move the least-used into the drawer and reserve one More button.
- * Shown order is the keep order, so the row fills with the controls people reach for.
- */
-export function fitSecondary(width: number, items: SecondarySlot[], maxRows: number, moreWidth = controlWidth('More')): SecondaryFit {
-  const normalized = items.map((item) => ({
+/** Every control stays on the strip, in the order it was given. A tall band scrolls. */
+export function fitSecondary(width: number, items: SecondarySlot[]): SecondaryFit {
+  const ordered = items.map((item) => ({
     id: item.id,
     width: Math.max(TARGET_PX, item.width),
-    keep: item.keep ?? SECONDARY_KEEP[item.id] ?? 0,
   }))
-  const ordered = [...normalized].sort((a, b) => b.keep - a.keep || a.id.localeCompare(b.id))
   if (!ordered.length) return { shown: [], drawer: [], rows: 0 }
-  const budget = Math.max(1, maxRows)
-  const widths = (list: { width: number }[], more: boolean) => {
-    const values = list.map((item) => item.width)
-    if (more) values.push(Math.max(TARGET_PX, moreWidth))
-    return values
-  }
-  if (rowsFor(width, widths(ordered, false)) <= budget) {
-    return { shown: ordered.map((item) => item.id), drawer: [], rows: rowsFor(width, widths(ordered, false)) }
-  }
-  const kept = [...ordered]
-  const drawer: typeof ordered = []
-  while (kept.length > 1 && rowsFor(width, widths(kept, true)) > budget) drawer.push(kept.pop()!)
-  drawer.sort((a, b) => b.keep - a.keep || a.id.localeCompare(b.id))
   return {
-    shown: kept.map((item) => item.id),
-    drawer: drawer.map((item) => item.id),
-    rows: rowsFor(width, widths(kept, drawer.length > 0)),
+    shown: ordered.map((item) => item.id),
+    drawer: [],
+    rows: rowsFor(width, ordered.map((item) => item.width)),
   }
 }
 
 /**
- * How many closed rows this band can spend before the volume fader stops being the main control.
- * Rows stay on one line so several tracks still fit on a phone.
- * Columns stack, then More, because a 40px strip can hold one word per line.
+ * How many rows a closed band used to spend before the fader stopped being the main control.
+ * The mixer ignores this budget now and scrolls the secondary band instead.
  */
 export function secondaryRowBudget(flow: 'columns' | 'rows', zone: 'tools' | 'hear' | 'top', width: number) {
   if (zone === 'hear' || zone === 'top') return width < 112 ? 2 : 1
