@@ -377,6 +377,27 @@
 }
 .mpc-brand strong { font-size: 18px; }
 .mpc-brand span { font-size: 11px; letter-spacing: 0.22em; color: #c8c8c8; }
+.mpc-keyboard {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 44px;
+  height: 44px;
+  margin-top: 8px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background-color: var(--accent);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.28), transparent 70%);
+  color: var(--accent-ink);
+  font-size: 15px;
+  font-weight: 720;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 var(--bevel-hi), var(--glow);
+}
 .mpc-pad-tools {
   display: grid;
   grid-template-columns: repeat(3, minmax(40px, 1fr));
@@ -435,7 +456,9 @@
   .hw-transport { order: 4; }
   .hw-keys { order: 5; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hw-keys > .hw-key, .hw-transport > .hw-key, .softkeys > .hw-key, .mpc-pad-tools > .hw-key { min-width: 0; }
-  .hw-slider, .hw-wheel, .hw-cursor, .hw-knobs, .mpc-brand { order: 6; }
+  .hw-slider, .hw-wheel, .hw-cursor, .hw-knobs { order: 6; }
+  .mpc-brand { order: 0; width: 100%; align-items: stretch; }
+  .mpc-keyboard { width: 100%; }
   .hw-window { order: 7; }
   .hw-lip { order: 8; }
   .hw-keys, .hw-transport, .mpc-tools, .mpc-steps { flex-wrap: wrap; overflow: visible; }

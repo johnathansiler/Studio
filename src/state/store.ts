@@ -34,7 +34,7 @@ import type { InstrumentPlay, SamplePack, SamplerProgram } from '../audio/multis
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
-import { readKeyboardEnabled, writeKeyboardEnabled, writeKeyboardOctave } from '../model/keyboardPlay'
+import { writeKeyboardEnabled, writeKeyboardOctave } from '../model/keyboardPlay'
 import { applyChanges, HistoryJournal } from './history'
 import { diffProject, musicalClone, type ProjectOp, type StampWire } from './ops'
 import { ProjectSync, type SyncJournal } from './sync'
@@ -253,8 +253,10 @@ export class ProjectStore {
   patchTrackId: string | null = null
   rackFlip = false
   rackDetail = false
-  /** Letter keys play notes while this is on, so tap-tempo stays off T. */
+  /** Letter keys play notes while this is on, so tap-tempo stays off T. Starts closed every launch. */
   keyboardMidi = false
+  /** Beat Machine to show again when the keyboard opened from that panel closes. Not saved. */
+  private keyboardReturnId: string | null = null
   /** Drum roll open beside the step grid. Not saved. */
   rackRoll = false
   /** MIDI tools strip. Not saved. */
@@ -318,15 +320,53 @@ export class ProjectStore {
     this.selectedMidiClipId = null
     this.selectedNoteId = null
     this.selectedNoteIds = []
-    this.keyboardMidi = readKeyboardEnabled()
+    this.keyboardMidi = false
     this.sync.rebase(this.project)
   }
 
-  /** Computer keyboard notes and the docked piano. Remembered on this computer. */
+  /**
+   * Computer keyboard notes and the docked piano.
+   * A saved choice is written for this computer, and is not applied on the next launch.
+   * Closing a keyboard that was opened from the Beat Machine shows that panel again.
+   */
   setKeyboardMidi(on: boolean) {
     this.keyboardMidi = on
     writeKeyboardEnabled(on)
+    const back = on ? null : this.keyboardReturnId
+    if (!on) this.keyboardReturnId = null
     this.emit()
+    if (back) this.showPads(back)
+  }
+
+  /** Closing the keyboard should leave the panels as they are. */
+  clearKeyboardReturn() {
+    this.keyboardReturnId = null
+  }
+
+  /** Open the Beat Machine without toggling it shut when it is already open. */
+  showPads(trackId: string) {
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return
+    if (track.instrument !== 'pads') {
+      this.setTrackInstrument(trackId, 'pads')
+      return
+    }
+    this.rackTrackId = null
+    this.patchTrackId = null
+    this.scalerTrackId = null
+    if (this.padsTrackId === trackId) return
+    this.padsTrackId = trackId
+    this.emit()
+  }
+
+  /** Play this Beat Machine from the dock. Closing the dock opens the panel again. */
+  openKeyboardForPads(trackId: string) {
+    const track = this.track(trackId)
+    if (!track || track.type !== 'midi') return
+    this.selectTrack(trackId)
+    this.keyboardReturnId = trackId
+    this.closePads()
+    this.setKeyboardMidi(true)
   }
 
   subscribe = (fn: Listener) => {
