@@ -42,10 +42,15 @@ export function recordOnto(track: Track, notes: ScalerNote[], startBeat: number)
   return open
 }
 
-export function rememberVoice(track: Track, midi: number[], cents: number[]) {
+export function rememberVoice(track: Track, midi: number[], cents: number[], chordIndex?: number) {
   if (!track.scaler && track.instrument !== 'scaler') return
   const state = normalizeScaler(track.scaler)
-  track.scaler = { ...state, lastVoicing: midi, lastCents: cents }
+  track.scaler = {
+    ...state,
+    lastVoicing: midi,
+    lastCents: cents,
+    chordIndex: chordIndex == null ? state.chordIndex : Math.max(0, Math.min(32, Math.round(chordIndex))),
+  }
 }
 
 function toNote(note: ScalerNote, startBeat: number): MidiNote {

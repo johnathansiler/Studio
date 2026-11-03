@@ -18,6 +18,9 @@ export interface DetectedScale {
   mode: string
   notes: string
   chords: string
+  /** Note names in the scale, starting at the detected root. */
+  spell: string
+  mood: Mood['word']
 }
 
 const STYLE: Record<string, string> = {
@@ -176,6 +179,8 @@ function describe(root: number, scaleId: string, notes: { midi: number; cents?: 
   const noteNum = classes.length ? Math.min(noteDen, fit) : Math.min(noteDen, spec.cents.length)
   const chordDen = Math.max(1, Math.min(4, diatonic.length))
   const chordNum = classes.length ? Math.min(chordDen, hit) : Math.min(chordDen, diatonic.length)
+  const spell = spec.cents.map((cents) => NOTE_NAMES[(root + Math.round(cents / 100) + 12) % 12]).join(' ')
+  const mood = moodOf(diatonic[0]?.symbol || NOTE_NAMES[root], scaleId)
   return {
     root,
     scaleId,
@@ -184,6 +189,8 @@ function describe(root: number, scaleId: string, notes: { midi: number; cents?: 
     mode: MODE[scaleId] ?? spec.name,
     notes: `${noteNum}/${noteDen}`,
     chords: `${chordNum}/${chordDen}`,
+    spell,
+    mood: mood.word,
   }
 }
 

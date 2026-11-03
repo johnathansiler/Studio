@@ -64,7 +64,8 @@ import './ui/collab.css'
 import { TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
 import { SnapControl } from './ui/SnapControl'
-import { panelChoice, rememberPanel } from './ui/panelMemory'
+import { AddTrackButton } from './ui/AddTrack'
+import { activeTool } from './state/tools'
 import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
 import { UNSTUCK_COPY, visibleMenu } from './ui/chrome'
@@ -199,7 +200,6 @@ export function App() {
   const [persisted, setPersisted] = useState(true)
   const [help, setHelp] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [toolsOpen, setToolsOpen] = useState(() => panelChoice('arrangeTools') ?? false)
   const [recordHint, setRecordHint] = useState('')
   const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight))
   const [land, setLand] = useState(() => window.innerWidth > window.innerHeight)
@@ -1695,10 +1695,11 @@ async function importDropped(files: FileList) {
               dockBottom: dockEdge === 'bottom',
               hardwareMidi: !hidesHardwareMidi(navigator.userAgent),
             })}
-            pressed={(action) => action === 'snap' ? store.project.snap
+            pressed={(action) => action === 'box' || action === 'erase' || action === 'pan' ? activeTool() === action
+              : action === 'snap' ? store.project.snap
               : action === 'loop' ? store.project.loopEnabled
               : false}
-            disabled={(action) => store.remoteFollow && (action === 'new' || action === 'session-mode' || action === 'capture' || action === 'snap' || action === 'loop' || action === 'signature')}
+            disabled={(action) => store.remoteFollow && (action === 'new' || action === 'session-mode' || action === 'capture' || action === 'snap' || action === 'loop' || action === 'signature' || action === 'box' || action === 'erase' || action === 'pan')}
             signature={`${store.project.timeSignature.numerator}/${store.project.timeSignature.denominator}`}
             onSignature={(numerator, denominator) => store.setTimeSignature(numerator, denominator)}
             onAction={(action) => {
@@ -1706,6 +1707,7 @@ async function importDropped(files: FileList) {
               else if (action === 'open') { setMenuOpen(false); void openProjects() }
               else if (action === 'save') { setMenuOpen(false); void persist() }
               else if (action === 'export') { setMenuOpen(false); setExportOpen(true) }
+              else if (action === 'box' || action === 'erase' || action === 'pan') { setMenuOpen(false); store.setTool(action) }
               else if (action === 'quantize') { setMenuOpen(false); store.openQuantize() }
               else if (action === 'to-start') { setMenuOpen(false); void returnToStart() }
               else if (action === 'loop') store.toggle('loopEnabled')
@@ -1745,37 +1747,31 @@ async function importDropped(files: FileList) {
       )}
       {surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano' && (
         <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
-          <div className="tool-group">
-          <SnapControl store={store} />
-          <button
-            type="button"
-            className={`cap-btn${toolsOpen ? ' on' : ''}`}
-            aria-pressed={toolsOpen}
-            title="Edit modes. Choose select, draw, erase, and the other timeline tools."
-            onClick={() => {
-              const next = !toolsOpen
-              setToolsOpen(next)
-              rememberPanel('arrangeTools', next)
-            }}
-          >
-            <strong>Tools</strong>
-            <small>Edit modes</small>
-          </button>
-          </div>
-          {toolsOpen && (
+          <div className="command-strip" id="command-strip" role="toolbar" aria-label="Edit">
             <ToolBar
-              panel
               context="arrange"
-              compact={form !== 'desk'}
-              phone={phone}
-              words={form === 'fold'}
-              onClose={() => { setToolsOpen(false); rememberPanel('arrangeTools', false) }}
+              words
+              showHint={false}
               onChange={(tool) => store.setTool(tool)}
               onDuplicate={() => store.duplicateSelection()}
               onDelete={() => store.deleteSelectedClip()}
             />
-          )}
-          {toolsOpen && <MidiTools store={store} engine={engine} />}
+            <TipButton
+              className="tool"
+              label="Quantize"
+              hint="Choose the grid and how hard to snap, then apply it."
+              disabled={store.remoteFollow}
+              onClick={() => store.openQuantize()}
+            >
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+                <path d="M3 9h12M9 3v12M5.5 5.5l7 7M12.5 5.5l-7 7" />
+              </svg>
+              <span className="tool-label">Quantize</span>
+            </TipButton>
+            <AddTrackButton store={store} />
+            <SnapControl store={store} />
+          </div>
+          <MidiTools store={store} engine={engine} />
         </div>
       )}
       <div className={`workspace ${dockShown ? '' : 'session-closed'} ${soundsOpen && !phone ? 'sounds-open' : ''} ${!phone && dockEdge === 'bottom' && surface === 'studio' && dockShown ? 'dock-bottom' : ''}`}>

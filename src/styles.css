@@ -305,18 +305,40 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .topbar { grid-area: bar; position: relative; min-height: 48px; z-index: 20; }
 .transport { grid-area: transport; min-height: 48px; justify-content: flex-start; flex-wrap: nowrap; overflow-x: auto; }
-.tool-slot { grid-area: tools; display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; background: #141c18; }
+.tool-slot { grid-area: tools; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px; min-width: 0; background: #141c18; }
 .tool-slot:empty { display: none; }
-.tool-slot:not(:empty) { min-height: 36px; padding: 0 8px; border-bottom: 1px solid var(--line); }
-.tool-slot .timeline-tools { display: flex; align-items: center; gap: 2px; width: 100%; min-width: 0; }
-.tool-slot .timeline-tools button {
-  width: 32px; height: 32px; min-width: 32px; min-height: 32px; padding: 0;
-  border: 0; border-radius: 8px; background: transparent; color: var(--muted);
-  display: grid; place-items: center;
+.tool-slot:not(:empty) { min-height: 40px; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.command-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; flex: 1 1 auto; }
+.command-strip .timeline-tools,
+.command-strip .tool-strip,
+.command-strip .add-track-slot,
+.command-strip .arrange-panels { display: contents; }
+.tool-slot .timeline-tools button,
+.command-strip > .tool,
+.command-strip .add-track-btn {
+  width: auto; min-width: 40px; height: 40px; min-height: 40px; padding: 0 8px; gap: 4px;
+  border: 1px solid var(--line); border-radius: 10px; color: var(--text);
+  background-color: #18231d; background-image: var(--face);
+  box-shadow: var(--raised);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 650;
 }
-.tool-slot .timeline-tools button.on { background: var(--accent); color: var(--accent-ink); }
+.tool-slot .timeline-tools button.on,
+.command-strip > .tool.on { background-color: var(--accent); color: var(--accent-ink); border-color: transparent; box-shadow: var(--pressed), var(--glow); }
 .tool-slot .timeline-tools .tool-gap { flex: 1; }
-.shell.phone .tool-slot .timeline-tools button { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
+.shell.phone .tool-slot .timeline-tools button,
+.shell.phone .command-strip > .tool,
+.shell.phone .command-strip .add-track-btn { width: auto; height: 44px; min-width: 40px; min-height: 44px; }
+.tool-slot .arrange-panels { flex: 0 0 auto; margin: 0; padding: 0; justify-content: flex-start; }
+.command-strip .cap-btn {
+  flex: 0 0 auto;
+  flex-direction: row;
+  width: auto;
+  height: 40px;
+  min-height: 40px;
+  gap: 4px;
+}
+.command-strip .cap-btn small { display: none; }
 .brand { display: flex; align-items: center; gap: 8px; min-width: 0; flex: none; }
 .mark {
   width: 24px; height: 24px; border-radius: 6px; color: var(--accent);
@@ -422,9 +444,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .shell.fold .mini-mark { display: none; }
 .history-btns { display: flex; align-items: center; gap: 4px; flex: none; }
 .history-btn {
-  min-width: 44px;
-  height: 36px;
-  min-height: 36px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
   padding: 0 10px;
   gap: 4px;
   font-weight: 650;
@@ -505,7 +527,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .ruler-gap { height: 44px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 6px; padding: 0 6px; }
 .add-track-btn, .t-btn.piano-btn { min-height: 44px; min-width: 44px; }
 .add-track-slot { position: sticky; bottom: 0; z-index: 2; display: flex; padding: 6px; background: #141c18; }
-.add-track-btn { width: 44px; border-radius: 10px; border: 1px solid var(--line); background: #18231d; font-size: 22px; }
+.add-track-btn { width: auto; min-width: 40px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line); background: #18231d; font-size: 13px; font-weight: 650; }
 .add-sheet {
   position: fixed; z-index: 70; left: 8px; right: 8px; bottom: calc(12px + env(safe-area-inset-bottom));
   background: #18241d; border: 1px solid var(--line); border-radius: 16px; padding: 8px;
@@ -1226,7 +1248,7 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 }
 .shell.phone .workspace { flex: 1 1 auto; min-height: 0; height: auto; }
 .unstuck-btn {
-  flex: none; height: 36px; min-height: 36px; padding: 0 10px; border-radius: 8px;
+  flex: none; height: 44px; min-height: 44px; padding: 0 12px; border-radius: 8px;
   border: 1px solid var(--line); background: var(--panel); color: var(--text);
   font-size: 13px; font-weight: 640; white-space: nowrap;
 }
@@ -3113,13 +3135,57 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
 .shell.phone:not(.land) .loop-readout .loop-span { display: none; }
 .shell.phone:not(.land) .lcd .bars { font-size: 13px; }
 .shell.phone:not(.land) .tool-slot:not(:empty) {
-  min-height: 44px;
-  height: 44px;
-  max-height: 44px;
+  min-height: 0;
+  height: 92px;
+  max-height: 92px;
   flex-wrap: nowrap;
-  overflow-x: auto;
-  padding: 2px 6px;
+  overflow: hidden;
+  padding: 4px 6px;
 }
+.shell.phone:not(.land) .command-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: 40px 40px;
+  grid-auto-columns: max-content;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  max-width: 100%;
+  height: 84px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.shell.phone:not(.land) .command-strip .snap-control { display: contents; }
+.shell.phone:not(.land) .command-strip .tool,
+.shell.phone:not(.land) .tool-slot .timeline-tools button,
+.shell.phone:not(.land) .command-strip .add-track-btn,
+.shell.phone:not(.land) .command-strip .cap-btn,
+.shell.phone:not(.land) .command-strip .snap-toggle,
+.shell.phone:not(.land) .command-strip .snap-grid {
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  padding: 0 5px;
+  gap: 3px;
+}
+.shell.phone:not(.land) .command-strip .tool-label,
+.shell.phone:not(.land) .command-strip .snap-toggle strong,
+.shell.phone:not(.land) .command-strip .cap-btn strong { font-size: 11px; }
+.shell.phone:not(.land) .command-strip svg { width: 16px; height: 16px; }
+.shell.phone:not(.land) .transport {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  max-height: 100px;
+  overflow: hidden;
+  padding: 4px 6px;
+  gap: 4px;
+}
+.shell.phone:not(.land) .transport .t-buttons { order: 1; }
+.shell.phone:not(.land) .transport .loop-cluster { order: 2; }
+.shell.phone:not(.land) .transport .tempo-cluster { order: 3; }
+.shell.phone:not(.land) .transport .lcd { order: 4; min-width: 7.5rem; flex: 1 1 7.5rem; }
 .shell.phone:not(.land) .snap-toggle,
 .shell.phone:not(.land) .snap-grid,
 .shell.phone:not(.land) .tool-slot .cap-btn,
@@ -3451,4 +3517,168 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   order: 0;
   padding-left: 6px;
   padding-right: 6px;
+}
+
+/* Secondary controls wrap as the strip narrows. Nothing in this band is clipped. */
+.shell .mixer-view .mixer > .strip,
+.shell.phone .mixer-view:not([data-layout="rows"]) .mixer > .strip,
+.shell.fold .mixer-view:not([data-layout="rows"]) .mixer > .strip,
+.shell .mixer-view[data-layout="rows"] .mixer > .strip,
+.shell.phone .mixer-view[data-layout="rows"] .mixer > .strip,
+.shell.fold .mixer-view[data-layout="rows"] .mixer > .strip {
+  overflow: visible;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone],
+.shell .mixer-view .strip-top,
+.shell .mixer-view .strip-hear,
+.shell .mixer-view .strip-tools,
+.shell .mixer-view .strip-extra {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  align-content: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  max-height: none;
+  height: auto;
+  overflow: visible;
+  flex: none;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone="top"] {
+  width: auto;
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+.shell .mixer-view[data-layout="rows"] .strip .strip-secondary[data-zone] > .secondary-slot,
+.shell .mixer-view[data-layout="rows"] .strip .strip-secondary[data-zone] > .more-fold {
+  padding: 0;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] .secondary-slot,
+.shell .mixer-view .strip .strip-secondary[data-zone] .more-fold,
+.shell .mixer-view .strip .strip-secondary[data-zone] .strip-auto,
+.shell .mixer-view .strip .strip-secondary[data-zone] button,
+.shell .mixer-view .strip .strip-secondary[data-zone] summary {
+  overflow: visible;
+  text-overflow: clip;
+  max-width: 100%;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] .secondary-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 40px;
+  min-height: 40px;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] button:not(.pan-knob),
+.shell .mixer-view .strip .strip-secondary[data-zone] summary.more-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 40px;
+  min-height: 40px;
+  height: auto;
+  padding: 0 8px;
+  border: 1px solid #0e1411;
+  border-radius: 8px;
+  background-color: #24352c;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.06) 42%, rgba(0, 0, 0, 0.42));
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.05;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-align: center;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] button:not(.pan-knob):not(.on):not(.on-m):not(.on-s):not(.on-r),
+.shell .mixer-view .strip .strip-secondary[data-zone] summary.more-open {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.48),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.55),
+    0 2px 3px rgba(0, 0, 0, 0.4),
+    0 0 10px rgba(115, 196, 143, 0.38);
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] summary.more-open {
+  list-style: none;
+  cursor: pointer;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] summary.more-open::-webkit-details-marker { display: none; }
+.shell .mixer-view .strip .strip-secondary[data-zone] summary.more-open::marker { content: ''; }
+.shell .mixer-view .strip .strip-secondary[data-zone] .more-fold {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 40px;
+  max-width: 100%;
+  position: static;
+  overflow: visible;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] .more-fold[open] {
+  flex: 1 0 100%;
+  width: 100%;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] .more-fold:not([open]) .more-drawer {
+  display: none;
+}
+.shell .mixer-view .strip .strip-secondary[data-zone] .more-fold[open] .more-drawer {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 2px;
+  flex: 1 0 100%;
+  width: 100%;
+  position: static;
+  overflow: visible;
+  padding: 2px 0 0;
+  background: transparent;
+}
+@container channel (max-width: 280px) {
+  .shell .mixer-view[data-layout="rows"] .strip-top .strip-name {
+    min-width: 0;
+    flex: 1 1 36px;
+    max-width: 46%;
+  }
+}
+@container channel (max-width: 108px) {
+  .shell .mixer-view .strip .strip-secondary[data-zone="tools"] .secondary-slot,
+  .shell .mixer-view .strip .strip-secondary[data-zone="hear"] .secondary-slot,
+  .shell .mixer-view .strip .strip-secondary[data-zone="tools"] .more-fold,
+  .shell .mixer-view .strip .strip-secondary[data-zone="hear"] .more-fold,
+  .shell .mixer-view .strip .strip-secondary[data-zone="tools"] .strip-auto,
+  .shell .mixer-view .strip .strip-secondary[data-zone="hear"] .strip-auto,
+  .shell .mixer-view .strip .strip-secondary[data-zone="tools"] button:not(.pan-knob),
+  .shell .mixer-view .strip .strip-secondary[data-zone="hear"] button:not(.pan-knob),
+  .shell .mixer-view .strip .strip-secondary[data-zone="tools"] summary.more-open,
+  .shell .mixer-view .strip .strip-secondary[data-zone="hear"] summary.more-open {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+  .shell .mixer-view .strip .strip-secondary[data-zone] .secondary-slot:has(.pan-knob) {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+  .shell .mixer-view .strip .strip-secondary[data-zone] .pan-knob {
+    flex: 0 0 40px;
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+  }
+}
+@container channel (max-width: 64px) {
+  .shell .mixer-view .strip .strip-secondary[data-zone] button:not(.pan-knob),
+  .shell .mixer-view .strip .strip-secondary[data-zone] summary.more-open {
+    padding: 0 1px;
+    font-size: 10px;
+    letter-spacing: -0.04em;
+  }
 }

@@ -12,21 +12,26 @@ import {
 } from '../model/keyboardPlay'
 import { armKey, releaseKey, takeGroups, type ArmedKey, type RecordedKey } from '../model/keyboardRecord'
 import { samplesToBeats } from '../model/time'
+import { playScalerLive } from '../instruments/scaler/live'
 import { typingTarget } from '../state/history'
 import type { ProjectStore } from '../state/store'
 import { octaveName } from './kit/controls'
 import { notifyKeyboard } from './keyboardStage'
 import { miniPads, padGridColumn, padLabel } from './miniKeys'
 
-/** Play one note on the same immediate path as a MIDI or on-screen key. */
-export function playKeyboardNote(store: ProjectStore, engine: AudioEngine, pitch: number, velocity = 0.85) {
+/** Play one note, or a Scaler chord when keys lock says so. Returns the pitches that sounded. */
+export function playKeyboardNote(store: ProjectStore, engine: AudioEngine, pitch: number, velocity = 0.85): number[] {
   const trackId = keyboardDestination(store.project.tracks, store.selectedTrackId, store.selectedMidiClipId)?.trackId
   const level = Math.max(0.05, Math.min(1, velocity))
-  if (trackId) engine.playThrough(trackId, pitch, level)
-  else {
+  if (!trackId) {
     engine.unlock()
     engine.liveNoteOn(pitch, level)
+    return [pitch]
   }
+  const live = playScalerLive(store.project, engine, trackId, pitch, level)
+  if (live !== null) return live.map((note) => note.midi)
+  engine.playThrough(trackId, pitch, level)
+  return [pitch]
 }
 
 export function releaseKeyboardNote(store: ProjectStore, engine: AudioEngine, pitch: number) {
@@ -118,7 +123,7 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
   const editor = store.midiEditor()
   const octave = editor.octave
   const [lit, setLit] = useState<number[]>([])
-  const held = useRef(new Map<string, number>())
+  const held = useRef(new Map<string, number[]>())
   const armed = useRef<ArmedKey[]>([])
   const pending = useRef<RecordedKey[]>([])
   const recording = useRef(engine.status === 'recording')
@@ -134,7 +139,7 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
   shiftRef.current = shift
 
   function paint() {
-    setLit([...new Set(held.current.values())])
+    setLit([...new Set([...held.current.values()].flat())])
   }
 
   function flush(nowMs: number) {
@@ -153,8 +158,8 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
   function press(token: string, pitch: number, velocity = 0.85, eventMs = performance.now()) {
     if (held.current.has(token)) return
     const level = Math.max(0.05, Math.min(1, velocity))
-    held.current.set(token, pitch)
-    playKeyboardNote(store, engine, pitch, level)
+    const sounded = playKeyboardNote(store, engine, pitch, level)
+    held.current.set(token, sounded)
     if (recording.current) {
       const dest = keyboardDestination(store.project.tracks, store.selectedTrackId, store.selectedMidiClipId)
       if (dest) {
@@ -174,11 +179,11 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
   pressRef.current = press
 
   function release(token: string, eventMs = performance.now()) {
-    const pitch = held.current.get(token)
-    if (pitch == null) return
+    const pitches = held.current.get(token)
+    if (!pitches) return
     held.current.delete(token)
-    const still = [...held.current.values()].some((item) => item === pitch)
-    if (!still) releaseKeyboardNote(store, engine, pitch)
+    const others = new Set([...held.current.values()].flat())
+    for (const pitch of pitches) if (!others.has(pitch)) releaseKeyboardNote(store, engine, pitch)
     const released = releaseKey(armed.current, token, beatAt(store, engine, eventMs))
     armed.current = released.keys
     if (released.note && recording.current) {

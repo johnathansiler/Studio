@@ -57,7 +57,8 @@ export { VOICINGS, voiceTones, voiceLead, movementCents, type VoiceOptions } fro
 
 export { detectScale } from './detect'
 
-export { progressionsFor, realizeProgression } from './progress'
+export { progressionsFor, realizeProgression, allProgressions, songSets, GENRE_INFO } from './progress'
+export type { SongSet } from './progress'
 
 export { loadScaleCatalog, catalogLoaded } from './catalog'
 

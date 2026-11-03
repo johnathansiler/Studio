@@ -15,7 +15,8 @@ import {
   type ChordGroup,
   type Tone,
 } from '../../theory'
-import { defaultScaler, type ScalerGroup, type ScalerNote, type ScalerSound, type ScalerState } from './types'
+import { applyVoiceGroup, renderPerformance } from './perform'
+import { defaultScaler, type KeysLock, type ScalerGroup, type ScalerInput, type ScalerNote, type ScalerOutput, type ScalerSound, type ScalerState, type VoiceGroup } from './types'
 
 export type { ScalerGroup, ScalerNote, ScalerSound, ScalerState } from './types'
 export { defaultScaler } from './types'
@@ -24,6 +25,10 @@ const GROUPS: ScalerGroup[] = ['triad', 'seventh', 'ninth', 'sus', 'add', 'alter
 const SOUNDS = ['synth', 'sampler', '808', 'drum-machine', 'library', 'forward'] as const
 const ARP = ['off', 'up', 'down', 'upDown', 'random'] as const
 const RHYTHM = ['block', 'quarter', 'eighth', 'sync', 'strum'] as const
+const LOCKS: KeysLock[] = ['off', 'scale-snap', 'scale-hide', 'chord', 'chord-notes', 'one-finger']
+const GROUPS_VOICE: VoiceGroup[] = ['all', 'bass', 'upper', 'dynamic']
+const OUTPUTS: ScalerOutput[] = ['audio', 'midi', 'both']
+const INPUTS: ScalerInput[] = ['midi', 'audio']
 
 export const SCALER_MIME = 'application/x-cueharbor-scaler'
 
@@ -73,6 +78,13 @@ export function normalizeScaler(value: Partial<ScalerState> | undefined | null):
     forwardTrackId: typeof value.forwardTrackId === 'string' ? value.forwardTrackId : '',
     lastVoicing: Array.isArray(value.lastVoicing) ? value.lastVoicing.filter((n) => Number.isFinite(n)) : [],
     lastCents: Array.isArray(value.lastCents) ? value.lastCents.filter((n): n is number => Number.isFinite(n)) : [],
+    keysLock: LOCKS.includes(value.keysLock as KeysLock) ? value.keysLock! : base.keysLock,
+    performanceId: typeof value.performanceId === 'string' ? value.performanceId.slice(0, 80) : '',
+    swing: clamp(value.swing ?? 0, 0, 0.7),
+    voiceGroup: GROUPS_VOICE.includes(value.voiceGroup as VoiceGroup) ? value.voiceGroup! : base.voiceGroup,
+    output: OUTPUTS.includes(value.output as ScalerOutput) ? value.output! : base.output,
+    input: INPUTS.includes(value.input as ScalerInput) ? value.input! : base.input,
+    chordIndex: clamp(Math.round(value.chordIndex ?? 0), 0, 32),
   }
 }
 
@@ -102,16 +114,21 @@ export function voiceScaler(state: ScalerState, tones: Tone[]): Tone[] {
     const bass = degrees[state.bassDegree]
     if (bass) base = placeBass(tones, bass)
   }
-  return voiceTones(base, {
+  const voiced = voiceTones(base, {
     inversion: state.inversion,
     voicing: state.voicing,
-    voiceLead: state.voiceLead && previous.length > 0,
+    voiceLead: (state.voiceLead || state.voiceGroup === 'dynamic') && previous.length > 0,
     previous,
   })
+  return applyVoiceGroup(voiced, state.voiceGroup)
 }
 
 export function notesFromTones(state: ScalerState, tones: Tone[], spanBeats: number): { notes: ScalerNote[]; voiced: Tone[] } {
   const voiced = voiceScaler(state, tones)
+  if (state.performanceId) {
+    const performed = renderPerformance(voiced, state.performanceId, Math.max(0.25, spanBeats), state.rate, state.swing)
+    if (performed.length) return { notes: performed, voiced }
+  }
   const played = patternNotes(voiced.map((tone) => tone.midi), {
     arp: state.arp,
     rate: state.rate,
