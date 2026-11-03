@@ -3165,6 +3165,18 @@ export class AudioEngine {
     return true
   }
 
+  /** The same voice a pad hit uses, including the kit sample, tune, and level. */
+  triggerPad(trackId: string, pitch: number, velocity: number) {
+    const savedRoute = this.padRouteId
+    const savedLive = this.liveTrackId
+    this.padRouteId = trackId
+    this.liveTrackId = trackId
+    const played = this.playLivePad(pitch, velocity, null)
+    if (!played) this.liveDrum(pitch, velocity)
+    this.padRouteId = savedRoute
+    this.liveTrackId = savedLive
+  }
+
   /** Monitor one track through its MIDI effect chain, then the instrument. */
   playThrough(trackId: string, pitch: number, velocity: number, fine = 0) {
     const ctx = this.unlock()
