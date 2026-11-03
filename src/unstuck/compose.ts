@@ -184,7 +184,10 @@ function chordsFor(brief: UnstuckBrief, job: UnstuckJob, ctx: ComposeContext, pl
 function harmonicChords(brief: UnstuckBrief, bars: number, barBeats: number, rotation: number): GeneratorChord[] {
   const scaleId = ensureScale(brief.scale)
   const list = progressionsFor(scaleId)
-  const pattern = list[(brief.seed + rotation) % Math.max(1, list.length)]
+  const picked = list[(brief.seed + rotation) % Math.max(1, list.length)]
+  // Spelled progressions are 12-tone. Microtonal scales keep their own degrees so quarter tones survive.
+  const microtonal = getScale(scaleId).cents.some((cents) => cents % 100 !== 0)
+  const pattern = picked && microtonal && picked.spell ? { ...picked, spell: undefined } : picked
   const size = brief.complexity >= 0.66 ? 4 : 3
   const realized = pattern ? realizeProgression(brief.key, scaleId, pattern, barBeats, size as 3 | 4) : []
   if (realized.length) {
