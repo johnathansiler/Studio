@@ -83,34 +83,36 @@ export function AutomationFollow({ store, engine }: { store: ProjectStore; engin
   return null
 }
 
-export function MixFlags({ store, trackId, compact = false, part = 'all' }: { store: ProjectStore; trackId: string; compact?: boolean; part?: 'all' | 'hear' | 'extra' }) {
+export function MixFlags({ store, trackId, compact = false, part = 'all' }: { store: ProjectStore; trackId: string; compact?: boolean; part?: 'all' | 'hear' | 'extra' | 'mute' | 'solo' | 'arm' | 'safe' }) {
   const track = store.project.tracks.find((item) => item.id === trackId)
   if (!track) return null
-  const hear = part === 'all' || part === 'hear'
-  const extra = part === 'extra' || (part === 'all' && !compact)
+  const mute = part === 'all' || part === 'hear' || part === 'mute'
+  const solo = part === 'all' || part === 'hear' || part === 'solo'
+  const arm = part === 'arm' || part === 'extra' || (part === 'all' && !compact)
+  const safe = part === 'safe' || part === 'extra' || (part === 'all' && !compact)
   return (
     <>
-      {hear && (
+      {mute && (
         <button type="button" className={`mini ${track.mute ? 'on-m' : ''}`} aria-label={track.mute ? 'Unmute track' : 'Mute track'} title="Mute this track. Linked tracks mute together." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'mute') }}>
           <span className="mini-mark">M</span>
           <span className="mini-word">Mute</span>
           <small className="mini-caption">Mute</small>
         </button>
       )}
-      {hear && (
+      {solo && (
         <button type="button" className={`mini ${track.solo ? 'on-s' : ''}`} aria-label={track.solo ? 'Unsolo track' : 'Solo track'} title="Solo this track and keep its path to the master open." onClick={(event) => { event.stopPropagation(); store.toggleTrack(track.id, 'solo') }}>
           <span className="mini-mark">S</span>
           <span className="mini-word">Solo</span>
           <small className="mini-caption">Solo</small>
         </button>
       )}
-      {extra && (
+      {arm && (
         <button type="button" className={`mini arm-flag ${track.armed ? 'on-r' : ''}`} aria-pressed={track.armed} aria-label={track.armed ? 'Disarm track' : 'Arm track. This track records when you press record.'} title="Arm this track. Only armed tracks record." onClick={(event) => { event.stopPropagation(); store.updateTrack(track.id, { armed: !track.armed }) }}>
           <span className="arm-full">Arm</span>
           <span className="arm-compact" aria-hidden="true">A<i className="arm-dot" /></span>
         </button>
       )}
-      {extra && (
+      {safe && (
         <button type="button" className={`mini solo-safe ${track.soloSafe ? 'on' : ''}`} aria-pressed={!!track.soloSafe} aria-label="Solo safe. Stay audible when other tracks are soloed." title="Solo safe: stay audible when other tracks are soloed." onClick={(event) => { event.stopPropagation(); store.updateTrack(track.id, { soloSafe: !track.soloSafe }) }}>
           <span className="arm-full">Safe</span>
           <span className="arm-stack">
