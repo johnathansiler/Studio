@@ -40,6 +40,7 @@ import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoin
 import { laneDoubleClickAddsClip } from './clipKeys'
 import { isSampledInstrument } from '../instruments/sampled'
 import { LoopRegion } from './LoopRegion'
+import { CommentControl, CommentPins } from './timelineComments'
 
 
 function ArrangeChrome({ browserOpen, setupOpen, onBrowser, onSetup }: { browserOpen: boolean; setupOpen: boolean; onBrowser: () => void; onSetup: () => void }) {
@@ -786,6 +787,8 @@ export function ArrangeView({
                 {mark.bar}
               </span>
             ))}
+            <CommentControl session={session} project={project} position={position} />
+            <CommentPins session={session} project={project} px={px} onSeek={onSeek} />
           </div>
           <div className="bar-grid" aria-hidden>
             {marks.filter((mark) => mark.downbeat).map((mark) => (

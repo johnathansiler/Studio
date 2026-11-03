@@ -12,6 +12,7 @@ import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } 
 import { SessionClient } from './remote/session'
 import { deleteProject, listProjects, listSnapshots, loadLastProject, loadProject, loadSnapshot, requestPersistentStorage, saveProject, storageReport, type ProjectListItem, type WorkspaceSnapshot } from './storage/idb'
 import { inviteWins } from './model/negotiate'
+import { locksProject, readInviteToken } from './state/ops'
 import { readIdentity, writeIdentity } from './storage/identity'
 import { ProjectStore, seedDemoProject } from './state/store'
 import { linearResample } from './model/wav'
@@ -198,7 +199,8 @@ export function App() {
       store.acceptAlignedTake({ ...take, channels, sampleRate: engine.sampleRate })
     })
     session.setArrangementHandler((project, assets, ready) => {
-      if (session.state.role === 'guest') store.remoteFollow = true
+      if (locksProject(session.state.role, session.selfAccess())) store.remoteFollow = true
+      else if (session.state.role === 'guest' && session.selfAccess() === 'edit') store.remoteFollow = false
       if (session.usingOps) {
         for (const [id, asset] of assets) store.buffers.set(id, asset)
         engine.sync(store.project, (id) => assets.get(id) || store.buffers.get(id))
@@ -269,6 +271,7 @@ export function App() {
       }
     }
     const urlCode = (params.get('session') || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+    const urlInvite = readInviteToken(location.search)
     const identity = readIdentity()
     const choice = inviteWins(urlCode, identity?.code || '')
     if (choice.dropStored && identity) writeIdentity({ ...identity, code: '' })
@@ -276,14 +279,14 @@ export function App() {
     const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
     if (urlCode && identity?.participantId && identity.code === urlCode) {
       if (ios && !navigator.userActivation?.isActive) session.holdMediaForGesture()
-      session.connect({ name: identity.name || joinName || 'Artist', code: urlCode })
+      session.connect({ name: identity.name || joinName || 'Artist', code: urlCode, invite: urlInvite })
       setJoinOpen(false)
     } else if (urlCode) {
       setJoinCode(urlCode)
       setInvitePending(true)
     } else if (choice.code && identity?.participantId) {
       if (ios && !navigator.userActivation?.isActive) session.holdMediaForGesture()
-      session.connect({ name: identity.name || joinName || 'Artist', code: choice.code })
+      session.connect({ name: identity.name || joinName || 'Artist', code: choice.code, invite: choice.code === urlCode ? urlInvite : '' })
       setJoinOpen(false)
     }
     engine.sync(store.project, (id) => store.buffers.get(id))
@@ -562,8 +565,8 @@ export function App() {
           }
         }
       }
-      if (session.state.role === 'guest' && session.state.status === 'live') store.remoteFollow = true
       if (session.state.status === 'idle') store.remoteFollow = false
+      else if (session.state.role === 'guest') store.remoteFollow = locksProject(session.state.role, session.selfAccess())
     })
   }, [session, store])
 
@@ -1169,7 +1172,9 @@ export function App() {
   function joinSession() {
     engine.unlock()
     session.primeMediaFromGesture()
-    session.connect({ name: joinName || 'Artist', code: joinCode.trim() })
+    const typed = joinCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+    const linked = new URLSearchParams(location.search).get('session')?.toUpperCase().replace(/[^A-Z0-9]/g, '') || ''
+    session.connect({ name: joinName || 'Artist', code: joinCode.trim(), invite: linked && linked === typed ? readInviteToken(location.search) : '' })
     setJoinOpen(false)
     setInvitePending(false)
   }

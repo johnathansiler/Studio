@@ -7,6 +7,8 @@ import { CALL_COPY, copyOf } from './chrome'
 import { useFormFactor } from './form'
 import { ms } from './format'
 import { TipButton } from './Hint'
+import { ACCESS_COPY, ACCESS_ROLES, roleShareUrl, type CollabAccess } from '../state/ops'
+import { presentShare } from './share'
 
 export function VideoDock({
   session,
@@ -26,14 +28,15 @@ export function VideoDock({
   onHide?: () => void
 }) {
   const state = session.state
-  const phone = useFormFactor() === 'phone'
+  const form = useFormFactor()
+  const phone = form === 'phone'
+  const touchShare = form !== 'desk'
   const call = (id: string) => copyOf(CALL_COPY, id)
   const [tab, setTab] = useState<'people' | 'chat'>('people')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [draft, setDraft] = useState('')
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState<CollabAccess | null>(null)
   const [levels, setLevels] = useState({ input: 0, talk: 0 })
-  const inviteUrl = state.code ? `${location.origin}/?session=${state.code}` : ''
   const root = useRef<HTMLDivElement>(null)
   const popRoot = useRef<Root | null>(null)
   const popWindow = useRef<Window | null>(null)
@@ -211,26 +214,71 @@ export function VideoDock({
           )}
         </div>
       )}
-      {inviteUrl && (
+      {state.code && state.role === 'host' && (
         <div className="invite-card">
-          <strong>{inviteUrl}</strong>
-          <button
-            className="text-btn"
-            aria-label="Copy invite link"
-            onClick={(event) => {
-              const view = event.currentTarget.ownerDocument.defaultView || window
-              void view.navigator.clipboard.writeText(inviteUrl).then(
-                () => {
-                  setCopied(true)
-                  view.setTimeout(() => setCopied(false), 1600)
-                  session.note('Invite link copied.')
-                },
-                () => session.note(`Copy this link: ${inviteUrl}`),
-              )
-            }}
-          >
-            {copied ? 'Copied' : 'Copy'}
-          </button>
+          <span>Share a role. A code alone joins as View.</span>
+          {ACCESS_ROLES.map((role) => {
+            const copy = ACCESS_COPY[role]
+            return (
+              <div className="invite-row" key={role}>
+                <strong>{copy.label}</strong>
+                <span>{copy.hint}</span>
+                <button
+                  type="button"
+                  className="text-btn"
+                  aria-label={`Copy ${copy.label} link`}
+                  onClick={(event) => {
+                    const view = event.currentTarget.ownerDocument.defaultView || window
+                    void session.requestInvite(role).then(
+                      (token) => {
+                        const url = roleShareUrl(view.location.origin, state.code || '', token, role)
+                        void view.navigator.clipboard.writeText(url).then(
+                          () => {
+                            setCopied(role)
+                            view.setTimeout(() => setCopied((current) => (current === role ? null : current)), 1600)
+                            session.note(`${copy.label} link copied.`)
+                          },
+                          () => session.note(url),
+                        )
+                      },
+                      () => session.note('The invite link did not arrive.'),
+                    )
+                  }}
+                >
+                  {copied === role ? 'Copied' : 'Copy'}
+                </button>
+                {touchShare && (
+                  <button
+                    type="button"
+                    className="text-btn"
+                    aria-label={`Share ${copy.label} link`}
+                    onClick={() => {
+                      void session.requestInvite(role).then(
+                        (token) => {
+                          const url = roleShareUrl(location.origin, state.code || '', token, role)
+                          void presentShare(url, `CueHarbor ${copy.label}`).then((result) => {
+                            if (result === 'shared') session.note(`${copy.label} link shared.`)
+                            else if (result === 'copied') session.note(`${copy.label} link copied.`)
+                            else if (result === 'failed') session.note(url)
+                          })
+                        },
+                        () => session.note('The invite link did not arrive.'),
+                      )
+                    }}
+                  >
+                    Share
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {state.code && state.role === 'guest' && (
+        <div className="invite-card">
+          <span>Your role</span>
+          <strong>{ACCESS_COPY[session.selfAccess()].label}</strong>
+          <span>{ACCESS_COPY[session.selfAccess()].hint}</span>
         </div>
       )}
       {state.status === 'idle' || state.status === 'error' ? (
@@ -343,7 +391,8 @@ export function VideoDock({
                   <div className="person" key={person.id}>
                     <span>{person.name}</span>
                     {state.role === 'host' && (
-                      <span>
+                      <span className="person-actions">
+                        <RoleSelect person={person} session={session} />
                         <button className="text-btn primary" onClick={() => session.admit(person.id)}>
                           Admit
                         </button>
@@ -504,13 +553,38 @@ function Tile({
   )
 }
 
+function accessWord(person: Participant) {
+  if (person.role === 'host') return 'Host'
+  return ACCESS_COPY[person.access || 'view'].label
+}
+
+function RoleSelect({ person, session }: { person: Participant; session: SessionClient }) {
+  return (
+    <label className="role-field">
+      Role
+      <select
+        className="role-select"
+        aria-label={`Role for ${person.name}`}
+        value={person.access || 'view'}
+        onChange={(event) => session.setAccess(person.id, event.target.value as CollabAccess)}
+      >
+        {ACCESS_ROLES.map((role) => (
+          <option key={role} value={role}>
+            {ACCESS_COPY[role].label}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
 function PersonRow({ person, session }: { person: Participant; session: SessionClient }) {
   const self = person.id === session.state.selfId
   return (
     <div className="person">
       <div className="who">
         <span>
-          {person.name} {person.role === 'host' ? '· host' : ''}
+          {person.name} · {accessWord(person)}
         </span>
         <small>
           {person.hand ? 'hand · ' : ''}
@@ -519,7 +593,8 @@ function PersonRow({ person, session }: { person: Participant; session: SessionC
         </small>
       </div>
       {session.state.role === 'host' && !self && (
-        <span>
+        <span className="person-actions">
+          <RoleSelect person={person} session={session} />
           <button className="text-btn" onClick={() => session.forceMute(person.id, !person.mutedByHost)}>
             {person.mutedByHost ? 'Unmute' : 'Mute'}
           </button>
