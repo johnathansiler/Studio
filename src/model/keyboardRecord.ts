@@ -25,6 +25,34 @@ export function armKey(keys: ArmedKey[], key: ArmedKey): ArmedKey[] {
   return [...keys, key]
 }
 
+/** One held chord: every pitch that sounded, started together and ended by one gesture. */
+export function armSounded(
+  keys: ArmedKey[],
+  gesture: string,
+  pitches: number[],
+  shared: Omit<ArmedKey, 'token' | 'pitch'>,
+): ArmedKey[] {
+  let next = keys
+  for (const pitch of [...new Set(pitches)]) {
+    next = armKey(next, { ...shared, token: `${gesture}#${pitch}`, pitch })
+  }
+  return next
+}
+
+/** Note-offs for every pitch that gesture sounded. Other held keys stay open. */
+export function releaseGesture(keys: ArmedKey[], gesture: string, endBeat: number): { keys: ArmedKey[]; notes: RecordedKey[] } {
+  const mark = `${gesture}#`
+  const mine = keys.filter((key) => key.token === gesture || key.token.startsWith(mark))
+  let rest = keys
+  const notes: RecordedKey[] = []
+  for (const key of mine) {
+    const released = releaseKey(rest, key.token, endBeat)
+    rest = released.keys
+    if (released.note) notes.push(released.note)
+  }
+  return { keys: rest, notes }
+}
+
 export function releaseKey(keys: ArmedKey[], token: string, endBeat: number): { keys: ArmedKey[]; note: RecordedKey | null } {
   const found = keys.find((item) => item.token === token)
   if (!found) return { keys, note: null }
