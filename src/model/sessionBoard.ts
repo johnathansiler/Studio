@@ -14,22 +14,19 @@ export interface BrowserDevice {
 export const AUDIO_DEVICES: BrowserDevice[] = [
   { id: 'tune', name: 'Auto-Tune', hint: 'Pull notes toward the song key.', kind: 'audio' },
   { id: 'eq', name: 'EQ', hint: 'Shape lows, mids, and highs.', kind: 'audio' },
-  { id: 'compressor', name: 'Compressor', hint: 'Even out the level.', kind: 'audio' },
-  { id: 'gate', name: 'Gate', hint: 'Quiet the noise between notes.', kind: 'audio' },
-  { id: 'saturator', name: 'Saturator', hint: 'Add harmonic grit.', kind: 'audio' },
+  { id: 'compressor', name: 'Comp', hint: 'Even out the level.', kind: 'audio' },
+  { id: 'vocal', name: 'Vocal Clean', hint: 'De-ess and gate a voice.', kind: 'audio' },
+  { id: 'saturator', name: 'Sat', hint: 'Add harmonic grit.', kind: 'audio' },
   { id: 'delay', name: 'Delay', hint: 'Repeat the sound in time.', kind: 'audio' },
   { id: 'reverb', name: 'Reverb', hint: 'Add room and space.', kind: 'audio' },
-  { id: 'chorus', name: 'Chorus', hint: 'Widen with a slow detune.', kind: 'audio' },
-  { id: 'limiter', name: 'Limiter', hint: 'Catch peaks at the ceiling.', kind: 'audio' },
+  { id: 'mod', name: 'Mod', hint: 'Chorus, phase, and width.', kind: 'audio' },
+  { id: 'limiter', name: 'Master Limiter', hint: 'Catch peaks at the ceiling.', kind: 'audio' },
 ]
 
 export const MIDI_DEVICES: BrowserDevice[] = [
   { id: 'scale', name: 'Scaler', hint: 'Lock notes to a scale and stack chords.', kind: 'midi' },
-  { id: 'arp', name: 'Arp', hint: 'Turn a held chord into a pattern.', kind: 'midi' },
+  { id: 'arp', name: 'Arpeggio', hint: 'Turn a held chord into a pattern.', kind: 'midi' },
   { id: 'chord', name: 'Chord', hint: 'Add chord tones above the note.', kind: 'midi' },
-  { id: 'repeat', name: 'Repeat', hint: 'Retrigger each note.', kind: 'midi' },
-  { id: 'humanize', name: 'Humanize', hint: 'Nudge timing and velocity.', kind: 'midi' },
-  { id: 'velocity', name: 'Velocity', hint: 'Shape how hard notes play.', kind: 'midi' },
 ]
 
 export const INSTRUMENT_DEVICES: BrowserDevice[] = [
@@ -46,7 +43,8 @@ export const DRUM_DEVICES: BrowserDevice[] = [
 export const PLUGIN_DEVICES: BrowserDevice[] = [
   AUDIO_DEVICES[0],
   { id: 'scaler', name: 'Scaler', hint: 'Chord instrument. Key, pads, and progressions.', kind: 'instrument' },
-  { id: 'pads', name: 'Pads', hint: 'MPC drum machine. Hit the pads and record.', kind: 'instrument' },
+  { id: 'synth', name: 'Synth', hint: 'A played synthesizer.', kind: 'instrument' },
+  { id: 'sampler', name: 'Sampler', hint: 'Sampler and drum pads.', kind: 'instrument' },
 ]
 
 export function browserGroup(group: BrowserGroup): BrowserDevice[] {
@@ -85,7 +83,7 @@ export function instrumentFor(id: string): TrackInstrument | null {
 }
 
 export function midiKind(id: string): MidiFxKind | null {
-  if (id === 'arp' || id === 'chord' || id === 'scale' || id === 'repeat' || id === 'humanize' || id === 'velocity') return id
+  if (id === 'arp' || id === 'chord' || id === 'scale') return id
   return null
 }
 

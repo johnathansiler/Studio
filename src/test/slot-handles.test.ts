@@ -151,9 +151,7 @@ describe('slot handles, slices, and overdub', () => {
     const store = new ProjectStore(createEmptyProject())
     const track = store.project.tracks[0]
     store.addPlugin(track.id, 'sampler')
-    store.addPlugin(track.id, 'looper')
     const sampler = track.plugins.find((plugin) => plugin.pluginId === 'sampler')!
-    const looper = track.plugins.find((plugin) => plugin.pluginId === 'looper')!
     const channel = tone(96000, 0, 0, 96000)
     channel.fill(0.2, 48000)
     store.loadSlotAudio(track.id, sampler.id, { id: 'tone', name: 'Tone', sampleRate: 48000, channels: [channel] })
@@ -180,19 +178,6 @@ describe('slot handles, slices, and overdub', () => {
     const click = new Float32Array(40)
     click[3] = 0.02
     expect(Math.max(...scaledPeaks(click, 40).map((bar) => bar.max))).toBeCloseTo(1)
-
-    store.loadSlotAudio(track.id, looper.id, { id: 'base', name: 'Base', sampleRate: 48000, channels: [Float32Array.from([0.4, 0.4, 0.4, 0.4])] })
-    store.setSlotPoints(track.id, looper.id, { start: 0.1, end: 0.9, loopStart: 0.2, loopEnd: 0.8 })
-    store.endDraft()
-    store.loadSlotAudio(track.id, looper.id, { id: 'dub', name: 'Dub', sampleRate: 48000, channels: [Float32Array.from([0.05, 0.05, 0.05, 0.05])] }, 'overdub')
-    const loop = store.track(track.id)!.plugins.find((plugin) => plugin.id === looper.id)!.looper!
-    expect(loop.layers).toHaveLength(2)
-    expect(loop.loopStart).toBeCloseTo(0.2)
-    expect(loop.layers[0].bufferId).toBe('base')
-    store.loadSlotAudio(track.id, looper.id, { id: 'next', name: 'Next', sampleRate: 48000, channels: [Float32Array.from([0.3, 0.3, 0.3, 0.3])] }, 'replace')
-    const replaced = store.track(track.id)!.plugins.find((plugin) => plugin.id === looper.id)!.looper!
-    expect(replaced.layers).toHaveLength(1)
-    expect(replaced.layers[0].bufferId).toBe('next')
 
     const clip: AudioClip = {
       id: 'clip',
@@ -264,7 +249,7 @@ describe('slot handles, slices, and overdub', () => {
     expect(sliced[20]).toBeGreaterThan(0.1)
     expect(sliced[20]).toBeLessThan(0.35)
 
-    const loopPlugin = createPlugin('looper')
+    const loopPlugin = createPlugin('sampler')
     const data = tone(100, 0.25)
     data.fill(0.8, 50)
     loopPlugin.looper = {
@@ -290,8 +275,8 @@ describe('slot handles, slices, and overdub', () => {
   it('shows start, end, and loop handles on the waveform', () => {
     const store = new ProjectStore(createEmptyProject())
     const track = store.project.tracks[0]
-    store.addPlugin(track.id, 'looper')
-    const plugin = track.plugins.find((item) => item.pluginId === 'looper')!
+    store.addPlugin(track.id, 'sampler')
+    const plugin = track.plugins.find((item) => item.pluginId === 'sampler')!
     store.loadSlotAudio(track.id, plugin.id, { id: 'loop', name: 'Loop', sampleRate: 48000, channels: [tone(32, 0.2)] })
     const engine = {
       takeLoop: () => null,
@@ -304,12 +289,11 @@ describe('slot handles, slices, and overdub', () => {
     expect(html).toContain('aria-label="End. Drag to set where the sample ends."')
     expect(html).toContain('aria-label="Loop start. Drag to set where the loop repeats."')
     expect(html).toContain('aria-label="Loop end. Drag to set where the loop returns."')
-    expect(html).toContain('Dub')
     expect(html).toContain('Record')
     expect(html).toContain('text-btn')
-    expect(html).toContain('aria-label="Level"')
-    expect(html).toContain('aria-label="Decay"')
-    expect(html).toContain('aria-label="Speed"')
+    expect(html).toContain('aria-label="Gain"')
+    expect(html).toContain('aria-label="Pitch"')
+    expect(html).not.toContain('>Dub<')
     expect(html).toContain('slot-out')
     expect(html).toContain('slot-handle edge')
     expect(html).toContain('slot-handle loop')
@@ -348,39 +332,9 @@ describe('slot handles, slices, and overdub', () => {
     const placed = fitOverdub(Float32Array.from([0.3, 0.3, 0.3, 0.3]), 48000, 48000, 8, 2, 4)
     expect(Array.from(placed).map((sample) => Math.round(sample * 10) / 10)).toEqual([0, 0, 0.3, 0.3, 0.3, 0.3, 0, 0])
 
-    const store = new ProjectStore(createEmptyProject())
-    const track = store.project.tracks[0]
-    store.addPlugin(track.id, 'looper')
-    const looper = track.plugins.find((plugin) => plugin.pluginId === 'looper')!
-    store.loadSlotAudio(track.id, looper.id, { id: 'file', name: 'File', sampleRate: 44100, channels: [tone(1000, 0.2)] })
-    const loaded = store.track(track.id)!.plugins.find((plugin) => plugin.id === looper.id)!.looper!
-    expect(loaded.sourceRate).toBe(44100)
-    expect(loaded.lengthSamples).toBe(88200)
-    store.armLooper(track.id, looper.id, 1, 0)
-    expect(store.track(track.id)!.plugins.find((plugin) => plugin.id === looper.id)!.looper!.lengthSamples).toBe(88200)
-
-    store.loadSlotAudio(track.id, looper.id, { id: 'base', name: 'Base', sampleRate: 48000, channels: [tone(8, 0.4)] }, 'replace')
-    const plugin = store.track(track.id)!.plugins.find((item) => item.id === looper.id)!
-    plugin.looper!.sync = false
-    plugin.looper!.lengthSamples = 8
-    plugin.looper!.layers = [{ id: 'keep', bufferId: 'base', gain: 1, mute: false, reverse: false, speed: 1 }]
-    store.buffers.set('base', { id: 'base', name: 'Base', sampleRate: 48000, channels: [tone(8, 0.4)] })
-    store.setSlotPoints(track.id, looper.id, { start: 0, end: 1, loopStart: 0.25, loopEnd: 0.75 })
-    store.endDraft()
-    store.loadSlotAudio(track.id, looper.id, { id: 'dub', name: 'Dub', sampleRate: 48000, channels: [Float32Array.from([0.2, 0.2, 0.2, 0.2])] }, 'overdub')
-    const loop = store.track(track.id)!.plugins.find((plugin) => plugin.id === looper.id)!.looper!
-    expect(loop.layers.map((layer) => layer.bufferId)).toEqual(['base', 'dub'])
-    const dub = store.buffers.get('dub')!
-    expect(Array.from(dub.channels[0]).map((sample) => Math.round(sample * 10) / 10)).toEqual([0, 0, 0.2, 0.2, 0.2, 0.2, 0, 0])
-    store.setSlotPoints(track.id, looper.id, { start: 0.25, end: 0.75, loopStart: 0.25, loopEnd: 0.75 })
-    store.endDraft()
-    store.trimLooperWindow(track.id, looper.id)
-    const trimmed = store.track(track.id)!.plugins.find((plugin) => plugin.id === looper.id)!.looper!
-    expect(trimmed.layers).toHaveLength(2)
-    expect(trimmed.start).toBe(0)
-    expect(trimmed.end).toBe(1)
-    store.normalizeLooper(track.id, looper.id)
-    expect(store.track(track.id)!.plugins.find((plugin) => plugin.id === looper.id)!.looper!.layers).toHaveLength(2)
+    const sampler = createPlugin('sampler')
+    expect(sampler.pluginId).toBe('sampler')
+    expect(sampler.looper).toBeUndefined()
   })
 
   it('does not click by reading past the loop window', () => {

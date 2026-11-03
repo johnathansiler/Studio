@@ -12,6 +12,8 @@ import { bindPatternClips, normalizeBeats, repairArrangementIdentities } from '.
 import { normalizeMix } from '../../model/mixGroups'
 import { normalizeOmniProject } from '../../instruments/patch/model'
 import { tuneLiveLatency } from './autoTune'
+import { CORE_CATALOG } from './coreCatalog'
+import { effectLatency, migratePlugin, migratePreset, targetOf, MOVES } from './ids'
 import type { FactoryPreset, ParamSpec, PluginDescriptor } from './types'
 
 const VERSION = '1'
@@ -52,7 +54,7 @@ function ampDescriptor(): PluginDescriptor {
   return { id: 'amp', name: 'Amp', version: VERSION, params }
 }
 
-export const CATALOG: PluginDescriptor[] = [
+const LIBRARY: PluginDescriptor[] = [
   {
     id: 'tune',
     name: 'Auto-Tune',
@@ -661,6 +663,8 @@ export const CATALOG: PluginDescriptor[] = [
   },
 ]
 
+export const CATALOG: PluginDescriptor[] = CORE_CATALOG
+
 export const FACTORY: Record<string, FactoryPreset[]> = {
   eq: [
     { name: 'Vocal', params: { hp: 90, lowF: 250, lowG: -1.5, midF: 3200, midG: 2.5, midQ: 1.1, highF: 10000, highG: 1.5, lp: 18000 } },
@@ -682,12 +686,15 @@ export const FACTORY: Record<string, FactoryPreset[]> = {
     { name: 'Tight', params: { threshold: -36, ratio: 14, attack: 1, release: 50, hold: 10, range: 60 } },
   ],
   limiter: [
-    { name: 'Transparent', params: { threshold: 0, release: 40, ceiling: -0.1 } },
-    { name: 'Safe', params: { threshold: -6, release: 80, ceiling: -1 } },
+    { name: 'Transparent', params: { kind: 0, threshold: 0, release: 40, ceiling: -0.1 } },
+    { name: 'Safe', params: { kind: 0, threshold: -6, release: 80, ceiling: -1 } },
+    { name: 'Stream', params: { kind: 1, ceiling: -1.5, release: 140, lookahead: 5, releaseMode: 1 } },
+    { name: 'Club', params: { kind: 2, target: -6, ceiling: -0.3, release: 80, lookahead: 5, width: 1.15 } },
   ],
   saturator: [
-    { name: 'Tape', params: { drive: 0.35, tone: 7000, mix: 0.5 } },
-    { name: 'Warm', params: { drive: 0.2, tone: 5000, mix: 0.7 } },
+    { name: 'Tape', params: { kind: 1, drive: 0.35, tone: 7000, mix: 0.5, speed: 1, bias: 0.35, wow: 0.08 } },
+    { name: 'Warm', params: { kind: 0, drive: 0.2, tone: 5000, mix: 0.7 } },
+    { name: 'Amp', params: { kind: 5, gain: 0.55, bass: 0.6, mid: 0.45, treble: 0.58, presence: 0.4, master: 0.7 } },
   ],
   doubler: [
     { name: 'Wide', params: { width: 0.8, delay: 22, depth: 0.4, mix: 0.45 } },
@@ -698,15 +705,17 @@ export const FACTORY: Record<string, FactoryPreset[]> = {
     { name: 'Wide', params: { rate: 0.6, depth: 0.7, mix: 0.45 } },
   ],
   delay: [
-    { name: 'Quarter', params: { sync: 1, division: 1, feedback: 0.3, pingpong: 0, filter: 6000, mix: 0.28 } },
-    { name: 'Dotted', params: { sync: 1, division: 0.75, feedback: 0.38, pingpong: 1, filter: 4500, mix: 0.3 } },
-    { name: 'Ping-pong', params: { sync: 1, division: 0.375, feedback: 0.42, pingpong: 1, filter: 4000, mix: 0.32 } },
+    { name: 'Quarter', params: { kind: 0, sync: 1, division: 1, feedback: 0.3, pingpong: 0, filter: 6000, mix: 0.28 } },
+    { name: 'Dotted', params: { kind: 0, sync: 1, division: 0.75, feedback: 0.38, pingpong: 1, filter: 4500, mix: 0.3 } },
+    { name: 'Ping-pong', params: { kind: 0, sync: 1, division: 0.375, feedback: 0.42, pingpong: 1, filter: 4000, mix: 0.32 } },
+    { name: 'Echo', params: { kind: 1, time: 320, feedback: 0.28, wow: 0.3, drive: 0.35, mix: 0.22 } },
   ],
   reverb: [
-    { name: 'Plate', params: { mode: 0, size: 0.45, damp: 0.35, mix: 0.22 } },
-    { name: 'Room', params: { mode: 1, size: 0.35, damp: 0.5, mix: 0.18 } },
-    { name: 'Hall', params: { mode: 2, size: 0.72, damp: 0.38, mix: 0.22 } },
-    { name: 'Big Hall', params: { mode: 2, size: 0.96, damp: 0.22, mix: 0.34 } },
+    { name: 'Plate', params: { kind: 1, mode: 0, size: 0.45, decay: 0.68, damp: 0.35, mix: 0.22 } },
+    { name: 'Room', params: { kind: 0, mode: 1, size: 0.35, damp: 0.5, mix: 0.18 } },
+    { name: 'Hall', params: { kind: 2, mode: 1, size: 0.72, decay: 0.8, damp: 0.38, mix: 0.22 } },
+    { name: 'Big Hall', params: { kind: 2, mode: 1, size: 0.96, decay: 0.94, damp: 0.22, mix: 0.34 } },
+    { name: 'Space', params: { kind: 3, ir: 0, mix: 0.28 } },
   ],
   tune: [
     { name: 'Hard tune/T-Pain', params: { retune: 0.95, humanize: 0.05, flex: 0, amount: 0.85, mode: 1, minHz: 80, maxHz: 1000, transpose: 0, formant: 0.15, root: -1, scaleIndex: -1, mask: 0 } },
@@ -896,10 +905,21 @@ export const FACTORY: Record<string, FactoryPreset[]> = {
     { name: '16-bit', params: { bits: 16, shape: 2 } },
   ],
   meter: [],
+  vocal: [
+    { name: 'Vocal', params: { kind: 0, freq: 6800, threshold: -22, amount: 0.55, gate: -42, gateRatio: 8, gateAtk: 3, gateRel: 90, hold: 25, range: 36 } },
+    { name: 'De-ess', params: { kind: 1, freq: 6500, threshold: -24, amount: 0.7 } },
+    { name: 'Gate', params: { kind: 2, gate: -36, gateRatio: 12, gateAtk: 1, gateRel: 60, hold: 12, range: 60 } },
+  ],
+  mod: [
+    { name: 'Soft', params: { kind: 0, rate: 0.3, depth: 0.35, mix: 0.3 } },
+    { name: 'Double', params: { kind: 1, width: 0.8, delay: 22, depth: 0.35, mix: 0.45 } },
+    { name: 'Phase', params: { kind: 3, rate: 0.2, depth: 0.6, feedback: 0.4, mix: 0.4 } },
+    { name: 'Shift', params: { kind: 5, semis: 0, harmony: 7, harmonyMix: 0.45, mix: 0.7 } },
+  ],
 }
 
 export function descriptor(id: string) {
-  return CATALOG.find((plugin) => plugin.id === id) ?? null
+  return CATALOG.find((plugin) => plugin.id === id) ?? LIBRARY.find((plugin) => plugin.id === id) ?? null
 }
 
 export function defaultParams(id: string) {
@@ -911,34 +931,36 @@ export function defaultParams(id: string) {
 }
 
 export function createPlugin(pluginId: string, preset?: string): PluginInstance {
-  const params = defaultParams(pluginId)
-  const chosen = (FACTORY[pluginId] ?? []).find((item) => item.name === preset)
+  const move = MOVES[pluginId] ?? { to: 'eq' as const, kind: 0 }
+  const core = move.remove ? 'limiter' : move.to
+  const params = defaultParams(core)
+  if (pluginId === 'amp') Object.assign(params, defaultParams('amp'))
+  const chosen = (FACTORY[pluginId] ?? FACTORY[core] ?? []).find((item) => item.name === preset)
   if (chosen) Object.assign(params, chosen.params)
+  if (chosen?.params.kind == null) params.kind = move.kind
+  if (move.chain && pluginId !== core) params.chain = 1
   return {
     id: uid('fx'),
-    pluginId,
-    version: descriptor(pluginId)?.version ?? VERSION,
+    pluginId: core,
+    version: descriptor(core)?.version ?? VERSION,
     enabled: true,
     wet: 1,
     params,
     sidechain: '',
-    sampler: pluginId === 'sampler' ? emptySampler() : undefined,
-    looper: pluginId === 'looper' ? emptyLooper() : undefined,
+    sampler: core === 'sampler' ? emptySampler() : undefined,
   }
 }
 
 export function latencyOf(pluginId: string, params: Record<string, number>, sampleRate: number, enabled = true, live = false) {
   if (!enabled) return 0
-  if (pluginId === 'tune' && (params.amount ?? 0) > 0.001) {
+  const id = targetOf(pluginId)
+  const kind = Math.round(params.kind ?? MOVES[pluginId]?.kind ?? 0)
+  if (id === 'tune' && (params.amount ?? 0) > 0.001) {
     if (live && (params.hq ?? 0) < 0.5) return tuneLiveLatency(sampleRate)
     return tuneLatency(sampleRate)
   }
-  if (pluginId === 'pitch' && (params.mix ?? 0) > 0.001) return tuneLatency(sampleRate)
-  if (pluginId === 'limiter') return 64
-  if (pluginId === 'peak') return 96
-  if (pluginId === 'focus' && (params.linear ?? 0) >= 0.5) return 256
-  if (pluginId === 'brick' || pluginId === 'maxim') return Math.round(((params.lookahead || 5) / 1000) * sampleRate)
-  return 0
+  if (id === 'mod' && kind === 5 && (params.mix ?? 0) > 0.001) return tuneLatency(sampleRate)
+  return effectLatency(id, { ...params, kind }, sampleRate)
 }
 
 function fillInstrument(plugin: PluginInstance): PluginInstance {
@@ -965,15 +987,18 @@ export function normalizeProject(project: Project): Project {
   project.quantize = normalizeQuantize(project.quantize)
   project.quantizePresets = project.quantizePresets ?? []
   project.record = { ...defaultRecord(project.loopEndSample || 0), ...(project.record || {}) }
-  project.masterPlugins = (project.masterPlugins ?? []).map(fillInstrument)
+  project.masterPlugins = migrateList(project.masterPlugins)
   project.automation = project.automation ?? []
-  project.presets = project.presets ?? []
+  project.presets = (project.presets ?? []).flatMap((preset) => {
+    const next = migratePreset(preset)
+    return next ? [next] : []
+  })
   project.masterInserts = project.masterInserts ?? []
   for (const track of project.tracks) {
     normalizeTrackScaler(track)
     if (track.instrument === 'pads' || track.padKit) track.padKit = normalizePadKit(track.padKit)
     track.armed = track.armed === true
-    track.plugins = (track.plugins ?? []).map(fillInstrument)
+    track.plugins = migrateList(track.plugins)
     track.sends = track.sends ?? []
     track.inserts = track.inserts ?? []
     track.output = track.output ?? null
@@ -992,10 +1017,16 @@ export function normalizeProject(project: Project): Project {
     limiter.enabled = false
     project.masterPlugins.unshift(limiter)
   }
-  if (!project.masterPlugins.some((plugin) => plugin.pluginId === 'meter')) {
-    project.masterPlugins.push(createPlugin('meter'))
-  }
   return normalizeMix(project)
+}
+
+function migrateList(list: PluginInstance[] | undefined): PluginInstance[] {
+  const out: PluginInstance[] = []
+  for (const plugin of list ?? []) {
+    const next = migratePlugin(fillInstrument(plugin), defaultParams)
+    if (next) out.push(next)
+  }
+  return out
 }
 
 export function fromLegacy(insert: Insert): PluginInstance {

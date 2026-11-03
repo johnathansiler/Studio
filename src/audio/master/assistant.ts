@@ -126,11 +126,11 @@ export function matchEq(mix: Float32Array, reference: Float32Array, sampleRate: 
 
 function withParams(pluginId: string, params: Record<string, number>): PluginInstance {
   const plugin = createPlugin(pluginId)
-  plugin.params = { ...plugin.params, ...params }
+  plugin.params = { ...plugin.params, ...params, chain: 1 }
   return plugin
 }
 
-/** EQ, glue, tape, imager, maximizer, then the true-peak limiter. */
+/** EQ, compression, tape, then one master limiter that widens, maximizes, and catches peaks. */
 export function buildChain(report: MixReport | null, genre: string, intensity: number, target: LoudnessTarget): PluginInstance[] {
   const amount = Math.max(0, Math.min(1, intensity))
   const curve = CURVES[genre] ?? CURVES.Pop
@@ -150,13 +150,10 @@ export function buildChain(report: MixReport | null, genre: string, intensity: n
   if (correlation < 0.2) width = 1 - 0.3 * amount
   const bass = genre === 'Classical' || genre === 'Jazz' || genre === 'Acoustic' ? 80 : 120
   return [
-    withParams('meq', { phase: 1, ms: 0, lowG, midG, highG, midF: 1400, hp: bass === 80 ? 30 : 35 }),
-    withParams('glue', { threshold, ratio, attack: 10, release: 120, releaseMode: 1, makeup: amount * 2, mix: 0.8 }),
-    withParams('mtape', { drive: 0.12 + amount * 0.35, color: genre === 'Rock' || genre === 'Jazz' ? 1 : 0, mix: 0.45 + amount * 0.25 }),
-    withParams('image', { width, bass, low: 0.85, high: width }),
-    withParams('maxim', { target: target.lufs, ceiling: target.truePeak }),
-    withParams('brick', { ceiling: target.truePeak, release: 80, lookahead: 5, releaseMode: 1 }),
-    withParams('dither', { bits: 24, shape: 1 }),
+    withParams('eq', { kind: 6, phase: 1, lowG, midG, highG, midF: 1400, hp: bass === 80 ? 30 : 35 }),
+    withParams('compressor', { kind: 5, threshold, ratio, attack: 10, release: 120, releaseMode: 1, makeup: amount * 2, mix: 0.8 }),
+    withParams('saturator', { kind: 3, drive: 0.12 + amount * 0.35, color: genre === 'Rock' || genre === 'Jazz' ? 1 : 0, mix: 0.45 + amount * 0.25 }),
+    withParams('limiter', { kind: 2, target: target.lufs, ceiling: target.truePeak, release: 80, lookahead: 5, releaseMode: 1, width, bass, low: 0.85, high: width, bits: 24, shape: 1 }),
   ]
 }
 

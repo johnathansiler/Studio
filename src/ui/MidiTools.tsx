@@ -21,10 +21,9 @@ import type { ProjectStore } from '../state/store'
 import type { MidiFx, MidiFxKind, Track } from '../model/types'
 import './midiTools.css'
 
-const KINDS: MidiFxKind[] = ['arp', 'chord', 'scale', 'repeat', 'humanize', 'velocity']
+const KINDS: MidiFxKind[] = ['arp', 'chord', 'scale']
 const CHORD_NAMES = ['Maj', 'Min', 'Sus2', 'Sus4', '7', 'm7', 'Dim', 'Aug']
 const ARP_DIRS = ['Up', 'Down', 'Up/Down', 'Random']
-const CURVES = ['Linear', 'Soft', 'Hard', 'Fixed']
 
 export function MidiTools({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
   const hide = hidesHardwareMidi(typeof navigator === 'undefined' ? '' : navigator.userAgent)
@@ -197,7 +196,7 @@ function FxParams({ store, trackId, effect }: { store: ProjectStore; trackId: st
   })
   return (
     <div className="midi-row">
-      {(effect.kind === 'arp' || effect.kind === 'repeat') && (
+      {effect.kind === 'arp' && (
         <select aria-label="Rate" value={nearestRate(effect.params.rate)} onChange={(event) => set('rate', Number(event.target.value))}>
           {FX_RATES.map((rate) => <option key={rate.label} value={rate.beats}>{rate.label}</option>)}
         </select>
@@ -212,7 +211,7 @@ function FxParams({ store, trackId, effect }: { store: ProjectStore; trackId: st
           </label>
         </>
       )}
-      {(effect.kind === 'arp' || effect.kind === 'repeat') && (
+      {effect.kind === 'arp' && (
         <label>Gate
           <input aria-label="Gate" type="range" min={0.05} max={1} step={0.01} value={effect.params.gate ?? 0.8} {...target('gate', 'Gate', 0.05, 1)} onChange={(event) => set('gate', Number(event.target.value))} />
         </label>
@@ -236,26 +235,6 @@ function FxParams({ store, trackId, effect }: { store: ProjectStore; trackId: st
           <select aria-label="Scale" value={effect.params.scale || 0} onChange={(event) => set('scale', Number(event.target.value))}>
             {SCALES.map((scale, index) => <option key={scale.id} value={index}>{scale.name}</option>)}
           </select>
-        </>
-      )}
-      {effect.kind === 'humanize' && (
-        <>
-          <label>Time
-            <input aria-label="Timing drift" type="range" min={0} max={0.25} step={0.005} value={effect.params.time || 0} {...target('time', 'Human time', 0, 0.25)} onChange={(event) => set('time', Number(event.target.value))} />
-          </label>
-          <label>Vel
-            <input aria-label="Velocity drift" type="range" min={0} max={0.5} step={0.01} value={effect.params.vel || 0} {...target('vel', 'Human velocity', 0, 0.5)} onChange={(event) => set('vel', Number(event.target.value))} />
-          </label>
-        </>
-      )}
-      {effect.kind === 'velocity' && (
-        <>
-          <select aria-label="Velocity curve" value={effect.params.curve || 0} onChange={(event) => set('curve', Number(event.target.value))}>
-            {CURVES.map((name, index) => <option key={name} value={index}>{name}</option>)}
-          </select>
-          <label>Amt
-            <input aria-label="Curve amount" type="range" min={0} max={1} step={0.01} value={effect.params.amount ?? 1} {...target('amount', 'Curve amount', 0, 1)} onChange={(event) => set('amount', Number(event.target.value))} />
-          </label>
         </>
       )}
     </div>

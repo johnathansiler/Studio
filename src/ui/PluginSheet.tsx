@@ -1,11 +1,10 @@
 import { lazy, Suspense, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
-import { MASTERING_IDS } from '../audio/master/assistant'
 import { activeTunePreset, orderedInserts, tuneScaleOf } from '../audio/plugins/autoTune'
 import { CATALOG, FACTORY, activePresetName, descriptor } from '../audio/plugins/catalog'
+import { INSTRUMENT_IDS, isDrumsPlugin, kindLabels, paramsForKind } from '../audio/plugins/ids'
 import { PresetBar } from './PresetBar'
 import { TouchSlider } from './kit/controls'
-import { MODEL_IDS } from '../audio/plugins/models'
 import { AmpPop } from './AmpPop'
 import { AutoTuneFace } from './AutoTuneFace'
 import { useFormFactor } from './form'
@@ -29,16 +28,17 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   const [sheetWidth, setSheetWidth] = useState(480)
   const compact = useFormFactor() !== 'desk'
   const autoTune = plugin?.pluginId === 'tune'
-  const sampleFace = plugin?.pluginId === 'sampler' || plugin?.pluginId === 'looper'
-  const customFace = !!plugin && !autoTune && plugin.pluginId !== 'amp' && !sampleFace
-  const faced = !!autoTune || customFace || sampleFace || (plugin ? MODEL_IDS.includes(plugin.pluginId) : false)
+  const sampleFace = plugin?.pluginId === 'sampler' && !isDrumsPlugin(plugin)
+  const ampFace = plugin?.pluginId === 'saturator' && Math.round(plugin.params.kind ?? 0) === 5
+  const customFace = !!plugin && !autoTune && !ampFace && !sampleFace
+  const faced = !!autoTune || customFace || sampleFace || ampFace
   useEffect(() => {
     if (!faced) return
     const timer = window.setInterval(() => setTick((value) => value + 1), 80)
     return () => window.clearInterval(timer)
   }, [faced, plugin?.id])
   useEffect(() => {
-    if (!plugin || engine.performanceMode || (plugin.pluginId !== 'eq' && plugin.pluginId !== 'meq' && plugin.pluginId !== 'meter')) return
+    if (!plugin || engine.performanceMode || (plugin.pluginId !== 'eq' && plugin.pluginId !== 'limiter')) return
     let timer = 0
     const draw = () => {
       const spectrum = engine.spectrum(plugin.id)
@@ -61,7 +61,9 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     return () => window.clearTimeout(timer)
   }, [engine, plugin])
   if (!focus || !plugin || !spec) return null
-  if (plugin.pluginId === 'amp') return <AmpPop store={store} engine={engine} trackId={focus.trackId} plugin={plugin} />
+  if (ampFace) return <AmpPop store={store} engine={engine} trackId={focus.trackId} plugin={plugin} />
+  const shown = paramsForKind(plugin.pluginId, plugin.params.kind ?? 0)
+  const faceParams = shown ? spec.params.filter((param) => shown.includes(param.id)) : spec.params
   const names = [
     ...(FACTORY[plugin.pluginId] ?? []).map((item) => item.name),
     ...store.project.presets.filter((item) => item.pluginId === plugin.pluginId).map((item) => item.name),
@@ -140,7 +142,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
         <TouchSlider label="Wet" min={0} max={1} step={0.01} value={plugin.wet} fallback={1} onChange={(value) => store.updatePlugin(focus.trackId, plugin.id, { wet: value })} />
       </label>
       )}
-      {(plugin.pluginId === 'compressor' || plugin.pluginId === 'gate') && (
+      {(plugin.pluginId === 'compressor' || plugin.pluginId === 'vocal') && (
         <label>
           Sidechain key
           <select aria-label="Sidechain key" title="Route any track or bus into this compressor or gate." value={plugin.sidechain} onChange={(event) => store.updatePlugin(focus.trackId, plugin.id, { sidechain: event.target.value })}>
@@ -159,7 +161,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
           <div onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
             <PluginFace
               pluginId={plugin.pluginId}
-              params={spec.params}
+              params={faceParams}
               values={plugin.params}
               vu={engine.meter(plugin.id)?.vu ?? -20}
               gr={engine.meter(plugin.id)?.gr ?? 0}
@@ -210,13 +212,14 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
         </div>
       )}
       {!customFace && !autoTune && !sampleFace ? <div className="knobs" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
-        {spec.params.map((param) => (
+        {faceParams.map((param) => (
           <label key={param.id}>
             {param.name} {formatParam(param.id, plugin.params[param.id] ?? param.default, param.unit)}
             <ParamControl
               id={param.id}
               min={param.min}
               max={param.max}
+              labels={param.id === 'kind' ? kindLabels(plugin.pluginId) : []}
               value={plugin.params[param.id] ?? param.default}
               onChange={(value) => {
                 setLast(param.id)
@@ -241,7 +244,14 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   )
 }
 
-function ParamControl({ id, min, max, value, onChange }: { id: string; min: number; max: number; value: number; onChange: (value: number) => void }) {
+function ParamControl({ id, min, max, value, onChange, labels = [] }: { id: string; min: number; max: number; value: number; onChange: (value: number) => void; labels?: string[] }) {
+  if (id === 'kind' && labels.length) {
+    return (
+      <select aria-label="Kind" value={Math.max(0, Math.min(labels.length - 1, Math.round(value)))} onChange={(event) => onChange(Number(event.target.value))}>
+        {labels.map((name, index) => <option key={name} value={index}>{name}</option>)}
+      </select>
+    )
+  }
   if (id === 'mode') {
     return (
       <select value={value >= 0.5 ? 1 : 0} onChange={(event) => onChange(Number(event.target.value))}>
@@ -298,13 +308,7 @@ export function InsertList({ store, trackId, roomy = false }: { store: ProjectSt
           {insertLabel(plugin.pluginId)}
         </button>
       ))}
-      <select className="insert-add" aria-label="Add insert" title="Add an effect. Auto-Tune is first." value="" onChange={(event) => addChoice(store, trackId, event.target.value)}>
-        <option value="">{roomy ? 'Add effect' : '+'}</option>
-        {orderedInserts(CATALOG.filter((plugin) => plugin.id !== 'meter' && !((plugin.id === 'scaler' || plugin.id === 'pads') && trackId === 'master') && (trackId === 'master' || !(MASTERING_IDS as readonly string[]).includes(plugin.id)))).map((plugin) => (
-          <option key={plugin.id} value={plugin.id}>{plugin.name}</option>
-        ))}
-        {trackId !== 'master' && <option value="vocal">Vocal chain</option>}
-      </select>
+      <PluginPicker store={store} trackId={trackId} roomy={roomy} />
     </div>
   )
 }
@@ -388,10 +392,45 @@ export function RouteFields({ store, trackId }: { store: ProjectStore; trackId: 
   )
 }
 
-/** Strip slots are narrow. Auto-Tune keeps its full name in the picker and the sheet. */
+/** Full plugin names. The strip can ellipsize; the accessible name stays the word. */
 export function insertLabel(pluginId: string) {
-  if (pluginId === 'tune') return 'Tune'
   return descriptor(pluginId)?.name ?? pluginId
+}
+
+function PluginPicker({ store, trackId, roomy }: { store: ProjectStore; trackId: string | 'master'; roomy?: boolean }) {
+  const [open, setOpen] = useState(false)
+  const choices = orderedInserts(CATALOG.filter((plugin) => trackId !== 'master' || !INSTRUMENT_IDS.has(plugin.id)))
+  return (
+    <div className={`plugin-picker${open ? ' open' : ''}`}>
+      <button
+        type="button"
+        className="plugin-pick insert-add"
+        aria-expanded={open}
+        aria-label="Add insert"
+        title="Add an effect."
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? 'Close' : roomy ? 'Add effect' : 'Add'}
+      </button>
+      {open && (
+        <div className="plugin-picks" role="group" aria-label="Effects">
+          {choices.map((plugin) => (
+            <button
+              key={plugin.id}
+              type="button"
+              className="plugin-pick"
+              onClick={() => {
+                addChoice(store, trackId, plugin.id)
+                setOpen(false)
+              }}
+            >
+              {plugin.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function tuneSheetHeight() {
