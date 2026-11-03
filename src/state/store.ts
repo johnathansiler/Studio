@@ -5741,6 +5741,58 @@ export class ProjectStore {
     )
   }
 
+  /** Replace a compressed relay take with the full-quality wav of the same pass. */
+  upgradeAlignedTake(take: {
+    peerName: string
+    takeId: string
+    sampleRate: number
+    channels: Float32Array[]
+    compensationMs: number
+    detail: string
+    silent?: boolean
+  }): boolean {
+    const length = take.channels[0]?.length || 0
+    if (!length) return false
+    let bufferId = ''
+    for (const track of this.project.tracks) {
+      for (const clip of track.clips) {
+        if (clip.takeId === take.takeId && clip.bufferId) bufferId = clip.bufferId
+        const lane = clip.folder?.lanes.find((item) => item.takeId === take.takeId && item.source === 'aligned-take')
+        if (lane?.bufferId) bufferId = lane.bufferId
+      }
+    }
+    const asset = bufferId ? this.buffers.get(bufferId) : undefined
+    if (!asset) return false
+    this.mutate(() => {
+      asset.sampleRate = take.sampleRate
+      asset.channels = take.channels
+      for (const track of this.project.tracks) {
+        for (const clip of track.clips) {
+          if (clip.bufferId === bufferId) clip.durationSamples = length
+          if (!clip.folder) continue
+          let touched = false
+          for (const lane of clip.folder.lanes) {
+            if (lane.bufferId === bufferId || (lane.takeId === take.takeId && lane.source === 'aligned-take')) {
+              lane.durationSamples = length
+              touched = true
+            }
+          }
+          if (!touched) continue
+          const span = folderSpan(clip.folder)
+          clip.startSample = span.start
+          clip.durationSamples = Math.max(1, span.end - span.start)
+        }
+      }
+    })
+    this.toast(
+      take.silent
+        ? `${take.peerName} full-quality take is silent.`
+        : `${take.peerName} upgraded to full quality. ${take.detail}`,
+      take.silent ? 'warn' : 'good',
+    )
+    return true
+  }
+
   dropGuideLanes(takeId: string) {
     this.mutate(() => {
       for (const track of this.project.tracks) {

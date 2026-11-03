@@ -1,9 +1,10 @@
 /**
  * Shared takes and arrangement audio.
- * Bytes move on a direct WebRTC data channel, in order, and can resume after a drop.
- * A nominated relay pair is Cloudflare egress, so this module sends no audio there.
- * The monthly relay cap is not read or changed here.
- * The signaling server may forward the short catalog below. It never receives the wav.
+ * A direct pair carries a lossless wav. A relay pair carries high-quality
+ * compressed audio on the same data channel, and the wav replaces it if a
+ * direct link appears later. The signaling server may forward the short catalog
+ * below. It never receives the audio, and this module does not read or change
+ * the monthly relay cap.
  */
 
 import { decodeWavPCM, encodeWav } from '../model/wav'
@@ -19,6 +20,7 @@ import {
   type RelayPair,
 } from './hqTake'
 import { ASSET_CHUNK_BYTES, ASSET_HASH, ASSET_ID, offersFromSignal, sanitizeOffer, type AssetOffer } from './assetSignal'
+import { browserTakeCodec, type TakeAudioCodec } from './takeCodec'
 
 export { ASSET_CHUNK_BYTES, offersFromSignal, sanitizeOffer }
 export type { AssetOffer }
@@ -27,6 +29,8 @@ export type { AssetOffer }
 export const ASSET_CHUNKS_PER_TURN = 8
 
 export type AssetPath = 'direct' | 'relay' | 'closed' | 'unknown'
+
+export type AssetDelivery = 'wav' | 'compressed' | 'none'
 
 export type AssetPhase = 'queued' | 'receiving' | 'sending' | 'verifying' | 'saved' | 'waiting' | 'failed'
 
@@ -48,8 +52,11 @@ export type AssetControl = AssetControlCatalog | AssetControlWant | AssetControl
 
 export interface AssetAction {
   peerId: string
+  assetId?: string
   text?: string
   binary?: Uint8Array
+  /** Wav on a direct pair. Compressed audio on a relay pair. */
+  delivery?: AssetDelivery
 }
 
 export interface AssetPeerPath {
@@ -64,6 +71,10 @@ export interface SharedAssetRecord {
   sampleRate: number
   sha256: string
   wav: Uint8Array
+  quality?: 'wav' | 'compressed'
+  upgrade?: string
+  codec?: 'opus' | 'mp3'
+  bitrate?: number
 }
 
 export interface SharedPartialRecord {
@@ -80,7 +91,7 @@ export interface AssetByteStore {
   deletePartial(id: string): Promise<void>
 }
 
-/** Audio is allowed only when the selected pair is a direct candidate. */
+/** Direct, relay, or not yet known. The candidate type decides what may be sent. */
 export function chooseAssetPath(channelOpen: boolean, candidateType?: string): AssetPath {
   if (!channelOpen) return 'closed'
   if (candidateType === 'relay') return 'relay'
@@ -88,17 +99,31 @@ export function chooseAssetPath(channelOpen: boolean, candidateType?: string): A
   return 'unknown'
 }
 
+/** Lossless wav on a direct pair. Compressed audio on a relay pair. Nothing until the pair is known. */
+export function assetDelivery(path: AssetPath): AssetDelivery {
+  if (path === 'direct') return 'wav'
+  if (path === 'relay') return 'compressed'
+  return 'none'
+}
+
+/** The lossless wav is allowed only on a direct pair. */
 export function assetBytesAllowed(path: AssetPath): boolean {
-  return path === 'direct'
+  return assetDelivery(path) === 'wav'
 }
 
 /**
- * Relay bytes this transfer would add. Audio never takes a relay path, so the
- * credit stays zero and the existing cap is left alone. A direct path counts
- * only a selected relay pair, which is empty when the path really is direct.
+ * Bytes this transfer adds on Cloudflare.
+ * A relay path contributes the compressed payload only. Those bytes are already
+ * inside the selected pair's stats, so the caller passes the payload size and
+ * does not add the pair again. A direct path counts a selected relay pair,
+ * which is empty when the pair really is direct. The monthly cap is not read.
  */
-export function assetRelayCredit(path: AssetPath, pairs: RelayPair[]): number {
-  if (!assetBytesAllowed(path)) return 0
+export function assetRelayCredit(path: AssetPath, pairs: RelayPair[], compressedBytes = 0): number {
+  if (path === 'relay') {
+    const sent = Number(compressedBytes)
+    return Math.max(0, Math.round(Number.isFinite(sent) ? sent : 0))
+  }
+  if (path !== 'direct') return 0
   return sumRelayBytes(pairs)
 }
 
@@ -145,12 +170,14 @@ export function assetProgress(done: number, total: number): number {
   return takeProgress(done, total)
 }
 
-export function assetStatusLabel(phase: AssetPhase, progress: number, stored: boolean): string {
+export function assetStatusLabel(phase: AssetPhase, progress: number, stored: boolean, quality: 'wav' | 'compressed' = 'wav'): string {
   const pct = Math.round(Math.min(1, Math.max(0, progress)) * 100)
-  if (phase === 'receiving') return `Receiving ${pct}%`
-  if (phase === 'sending') return `Sending ${pct}%`
+  if (phase === 'receiving') return quality === 'compressed' ? `Receiving compressed ${pct}%` : `Receiving ${pct}%`
+  if (phase === 'sending') return quality === 'compressed' ? `Sending compressed ${pct}%` : `Sending ${pct}%`
   if (phase === 'verifying') return 'Checking the file'
+  if (phase === 'saved' && quality === 'compressed') return 'Compressed copy on this device'
   if (phase === 'saved') return stored ? 'Saved on this device' : 'Saved for this session'
+  if (phase === 'queued' && quality === 'compressed') return 'Upgrading to full quality'
   if (phase === 'waiting') return 'Waiting for a direct link'
   if (phase === 'failed') return 'Check failed, retrying'
   return 'Queued'
@@ -203,19 +230,23 @@ function indexList(value: unknown, total: number): number[] {
 }
 
 /**
- * A late joiner asks any peer that advertised the file and has a direct channel.
- * Relay and closed peers are skipped. Already-tried peers are skipped too.
+ * Prefer a direct peer so the wav can move. When none is open, a relay peer
+ * can still send the compressed copy. Closed peers are skipped.
  */
 export function pickAssetPeer(input: {
   selfId: string
   holders: string[]
   paths: Record<string, AssetPath>
   skip?: string[]
+  /** Set while upgrading a compressed copy. Relay peers are not asked again. */
+  directOnly?: boolean
 }): string | null {
   const skip = new Set(input.skip || [])
-  const holders = [...input.holders].filter((id) => id && id !== input.selfId && !skip.has(id) && input.paths[id] === 'direct')
-  holders.sort()
-  return holders[0] || null
+  const eligible = (path: AssetPath) => input.holders.filter((id) => id && id !== input.selfId && !skip.has(id) && input.paths[id] === path).sort()
+  const direct = eligible('direct')
+  if (direct.length) return direct[0]
+  if (input.directOnly) return null
+  return eligible('relay')[0] || null
 }
 
 export function audioFromVerifiedWav(id: string, name: string, sampleRate: number, wav: Uint8Array): AudioAsset | null {
@@ -231,6 +262,14 @@ export function audioFromVerifiedWav(id: string, name: string, sampleRate: numbe
   } catch {
     return null
   }
+}
+
+function compressedOffer(offer: AssetOffer): boolean {
+  return offer.codec === 'opus' || offer.codec === 'mp3'
+}
+
+function filledIndexes(partial: SharedPartialRecord): number[] {
+  return partial.parts.map((part, index) => (part?.byteLength ? index : -1)).filter((index) => index >= 0)
 }
 
 function cloneBytes(bytes: Uint8Array): Uint8Array {
@@ -304,21 +343,45 @@ export function indexedDbAssetStore(): AssetByteStore {
   return {
     async getAsset(id) {
       const db = await openAssetDb()
-      const row = await idbRequest<{ id: string; name: string; sampleRate: number; sha256: string; wav: Blob } | undefined>(
+      const row = await idbRequest<{
+        id: string
+        name: string
+        sampleRate: number
+        sha256: string
+        wav: Blob
+        quality?: 'wav' | 'compressed'
+        upgrade?: string
+        codec?: 'opus' | 'mp3'
+        bitrate?: number
+      } | undefined>(
         db.transaction('assets', 'readonly').objectStore('assets').get(id),
       )
       if (!row?.wav) return null
-      return { id: row.id, name: row.name, sampleRate: row.sampleRate, sha256: row.sha256, wav: new Uint8Array(await row.wav.arrayBuffer()) }
+      return {
+        id: row.id,
+        name: row.name,
+        sampleRate: row.sampleRate,
+        sha256: row.sha256,
+        wav: new Uint8Array(await row.wav.arrayBuffer()),
+        quality: row.quality,
+        upgrade: row.upgrade,
+        codec: row.codec,
+        bitrate: row.bitrate,
+      }
     },
     async putAsset(record) {
       const db = await openAssetDb()
-      const wav = new Blob([wavBuffer(record.wav)], { type: 'audio/wav' })
+      const wav = new Blob([wavBuffer(record.wav)], { type: record.quality === 'compressed' ? 'application/octet-stream' : 'audio/wav' })
       await idbRequest(db.transaction('assets', 'readwrite').objectStore('assets').put({
         id: record.id,
         name: record.name,
         sampleRate: record.sampleRate,
         sha256: record.sha256,
         wav,
+        quality: record.quality || 'wav',
+        upgrade: record.upgrade || '',
+        codec: record.codec || '',
+        bitrate: record.bitrate || 0,
       }))
       await idbRequest(db.transaction('partials', 'readwrite').objectStore('partials').delete(record.id))
     },
@@ -354,12 +417,23 @@ interface LocalWav {
   wav: Uint8Array
   channels: Float32Array[]
   sampleRate: number
+  compressed?: { bytes: Uint8Array; offer: AssetOffer }
+}
+
+interface HeardAsset {
+  quality: 'wav' | 'compressed'
+  channels: Float32Array[]
+  sampleRate: number
+  upgrade?: string
 }
 
 interface OutboundJob {
   id: string
   queue: number[]
   total: number
+  payload: Uint8Array
+  offer: AssetOffer
+  delivery: 'wav' | 'compressed'
 }
 
 interface InboundJob {
@@ -373,6 +447,7 @@ interface StatusDraft {
   phase: AssetPhase
   progress: number
   stored: boolean
+  quality?: 'wav' | 'compressed'
 }
 
 export class AssetExchange {
@@ -384,17 +459,21 @@ export class AssetExchange {
   private skipUntil = new Map<string, number>()
   private attempts = new Map<string, number>()
   private statuses = new Map<string, StatusDraft>()
-  /** Ids we already have and must not request again. View seats are not a source. */
+  /** Ids we already have at full quality and must not request again. */
   private satisfied = new Set<string>()
+  /** What this device can already play, including a compressed relay copy. */
+  private played = new Map<string, HeardAsset>()
   /** Edit seats send bytes. View and Comment only request what they are missing. */
   private publishing = true
   private announced = ''
   private readonly store: AssetByteStore
   private readonly now: () => number
+  private readonly codec: TakeAudioCodec
 
-  constructor(store: AssetByteStore = memoryAssetStore(), now: () => number = () => Date.now()) {
+  constructor(store: AssetByteStore = memoryAssetStore(), now: () => number = () => Date.now(), codec: TakeAudioCodec = browserTakeCodec()) {
     this.store = store
     this.now = now
+    this.codec = codec
   }
 
   reset() {
@@ -407,8 +486,17 @@ export class AssetExchange {
     this.attempts.clear()
     this.statuses.clear()
     this.satisfied.clear()
+    this.played.clear()
     this.publishing = true
     this.announced = ''
+  }
+
+  /** A direct send failed. Skip that peer briefly so a relay path can carry the compressed copy. */
+  noteDirectFailed(peerId: string, assetId: string) {
+    if (!peerId || !assetId) return
+    this.outbound.delete(peerId)
+    this.inflight.delete(assetId)
+    this.skipUntil.set(`${peerId}:${assetId}`, this.now() + 2000)
   }
 
   /** A live role change stops or resumes sending. Receiving does not use this flag. */
@@ -428,7 +516,7 @@ export class AssetExchange {
       name: row.name,
       phase: row.phase,
       progress: row.progress,
-      label: assetStatusLabel(row.phase, row.progress, row.stored),
+      label: assetStatusLabel(row.phase, row.progress, row.stored, row.quality || 'wav'),
     }))
   }
 
@@ -459,11 +547,12 @@ export class AssetExchange {
     const chunk = readAssetChunk(packet)
     if (!job || !chunk || chunk.total !== job.offer.total) return { actions: [], completed: [] }
     if (!job.parts[chunk.index]) job.parts[chunk.index] = chunk.bytes
+    const quality = compressedOffer(job.offer) ? 'compressed' : 'wav'
     const filled = job.offer.total - missingChunkIndexes(job.parts, job.offer.total).length
-    this.setStatus({ id: job.offer.id, name: job.offer.name, phase: 'receiving', progress: assetProgress(filled, job.offer.total), stored: false })
+    this.setStatus({ id: job.offer.id, name: job.offer.name, phase: 'receiving', progress: assetProgress(filled, job.offer.total), stored: false, quality })
     await this.persistPartial(job)
     if (filled < job.offer.total) return { actions: [], completed: [] }
-    this.setStatus({ id: job.offer.id, name: job.offer.name, phase: 'verifying', progress: 1, stored: false })
+    this.setStatus({ id: job.offer.id, name: job.offer.name, phase: 'verifying', progress: 1, stored: false, quality })
     const wav = assembleAssetWav(job.parts, job.offer.total)
     this.inbound.delete(peerId)
     this.inflight.delete(job.offer.id)
@@ -471,24 +560,36 @@ export class AssetExchange {
       await this.store.deletePartial(job.offer.id).catch(() => undefined)
       const attempts = (this.attempts.get(job.offer.id) || 0) + 1
       this.attempts.set(job.offer.id, attempts)
-      this.setStatus({ id: job.offer.id, name: job.offer.name, phase: 'failed', progress: 0, stored: false })
+      this.setStatus({ id: job.offer.id, name: job.offer.name, phase: 'failed', progress: 0, stored: false, quality })
       return { actions: [], completed: [] }
     }
-    const audio = audioFromVerifiedWav(job.offer.id, job.offer.name, job.offer.sampleRate, wav)
+    const audio = quality === 'compressed' ? await this.audioFromCompressed(job.offer, wav) : audioFromVerifiedWav(job.offer.id, job.offer.name, job.offer.sampleRate, wav)
     if (!audio) {
-      this.setStatus({ id: job.offer.id, name: job.offer.name, phase: 'failed', progress: 0, stored: false })
+      this.setStatus({ id: job.offer.id, name: job.offer.name, phase: 'failed', progress: 0, stored: false, quality })
       return { actions: [], completed: [] }
     }
     let stored = false
     try {
-      await this.store.putAsset({ id: audio.id, name: audio.name, sampleRate: audio.sampleRate, sha256: job.offer.sha256, wav })
+      await this.store.putAsset({
+        id: audio.id,
+        name: audio.name,
+        sampleRate: audio.sampleRate,
+        sha256: job.offer.sha256,
+        wav,
+        quality,
+        upgrade: job.offer.upgrade,
+        codec: job.offer.codec === 'opus' || job.offer.codec === 'mp3' ? job.offer.codec : undefined,
+        bitrate: job.offer.bitrate,
+      })
       stored = true
     } catch {
       stored = false
     }
-    this.remember(audio, wav, job.offer)
+    if (quality === 'compressed') {
+      this.played.set(audio.id, { quality: 'compressed', channels: audio.channels, sampleRate: audio.sampleRate, upgrade: job.offer.upgrade })
+    } else this.remember(audio, wav, job.offer)
     this.attempts.delete(job.offer.id)
-    this.setStatus({ id: audio.id, name: audio.name, phase: 'saved', progress: 1, stored })
+    this.setStatus({ id: audio.id, name: audio.name, phase: 'saved', progress: 1, stored, quality })
     return { actions: [], completed: [audio] }
   }
 
@@ -503,114 +604,159 @@ export class AssetExchange {
     const completed: AudioAsset[] = []
     const publish = input.publish !== false
     this.setPublishing(publish)
-    if (!publish) {
-      for (const id of this.local.keys()) this.satisfied.add(id)
-      this.local.clear()
-    }
+    if (!publish) this.local.clear()
     for (const asset of input.held) {
+      if (this.played.get(asset.id)?.quality === 'compressed') continue
       if (publish) await this.rememberAsset(asset)
-      else this.satisfied.add(asset.id)
+      else {
+        this.played.set(asset.id, { quality: 'wav', channels: asset.channels, sampleRate: asset.sampleRate })
+        this.satisfied.add(asset.id)
+      }
     }
     const paths = Object.fromEntries(input.peers.map((peer) => [peer.id, peer.path]))
-    const missing = input.referenced.filter((id) => !this.local.has(id) && !this.satisfied.has(id))
+    const missing = input.referenced.filter((id) => {
+      if (this.satisfied.has(id) || this.local.has(id)) return false
+      return this.played.get(id)?.quality !== 'wav'
+    })
     for (const id of missing) {
       const holders = this.holdersOf(id)
-      const offer = holders.offers[0]
+      const offer = holders.offers.find((item) => !item.codec || item.codec === 'wav') || holders.offers[0]
       const name = offer?.name || this.statuses.get(id)?.name || 'Audio'
       if ((this.attempts.get(id) || 0) >= 4) {
         this.setStatus({ id, name, phase: 'failed', progress: 0, stored: false })
         continue
       }
-      const fromDisk = await this.loadStored(id)
-      if (fromDisk) {
-        completed.push(fromDisk)
-        continue
+      const heard = this.played.get(id)
+      if (!heard) {
+        const fromDisk = await this.loadStored(id)
+        if (fromDisk) {
+          completed.push(fromDisk)
+          if (this.played.get(id)?.quality !== 'compressed') continue
+        }
       }
       if (this.inboundBusy(id) || this.inflight.has(id)) {
         const phase = this.inboundBusy(id) ? 'receiving' : 'queued'
-        this.setStatus({ id, name, phase, progress: this.statuses.get(id)?.progress || 0, stored: false })
+        this.setStatus({ id, name, phase, progress: this.statuses.get(id)?.progress || 0, stored: false, quality: this.played.get(id)?.quality })
         continue
       }
+      const upgrading = this.played.get(id)?.quality === 'compressed'
       const skip = this.skipped(id)
-      const peerId = pickAssetPeer({ selfId: input.selfId, holders: holders.peers, paths, skip })
+      const peerId = pickAssetPeer({ selfId: input.selfId, holders: holders.peers, paths, skip, directOnly: upgrading })
       if (!peerId) {
         const announced = holders.peers.length > 0
-        const direct = holders.peers.some((peer) => paths[peer] === 'direct')
+        const reachable = holders.peers.some((peer) => paths[peer] === 'direct' || paths[peer] === 'relay')
         this.setStatus({
           id,
           name,
-          phase: announced && !direct ? 'waiting' : 'queued',
-          progress: this.statuses.get(id)?.progress || 0,
-          stored: false,
+          phase: upgrading ? 'saved' : announced && !reachable ? 'waiting' : 'queued',
+          progress: upgrading ? 1 : this.statuses.get(id)?.progress || 0,
+          stored: upgrading,
+          quality: upgrading ? 'compressed' : 'wav',
         })
         continue
       }
-      const partial = await this.partialFor(id, offer)
-      const have = partial ? [...partial.parts.keys()].filter((index) => partial.parts[index]?.byteLength) : []
+      const partial = await this.resumePartial(id, offer, assetDelivery(paths[peerId] || 'closed'))
+      const have = partial ? filledIndexes(partial) : []
+      const sha = partial?.offer.sha256 || offer?.sha256 || ''
       this.inflight.set(id, { peerId, at: this.now() })
-      this.setStatus({ id, name, phase: 'queued', progress: assetProgress(have.length, offer?.total || 1), stored: false })
+      this.setStatus({
+        id,
+        name,
+        phase: 'queued',
+        progress: assetProgress(have.length, partial?.offer.total || offer?.total || 1),
+        stored: false,
+        quality: upgrading ? 'compressed' : 'wav',
+      })
       actions.push({
         peerId,
-        text: JSON.stringify({ t: 'want', id, sha256: offer?.sha256 || partial?.offer.sha256 || '', have } satisfies AssetControlWant),
+        assetId: id,
+        delivery: assetDelivery(paths[peerId] || 'closed'),
+        text: JSON.stringify({ t: 'want', id, sha256: sha, have } satisfies AssetControlWant),
       })
     }
     for (const peer of publish ? input.peers : []) {
       const job = this.outbound.get(peer.id)
       if (!job) continue
-      if (!assetBytesAllowed(peer.path)) continue
-      if (peer.buffered > 256_000) continue
-      const local = this.local.get(job.id)
-      if (!local) {
+      if (assetDelivery(peer.path) !== job.delivery) {
         this.outbound.delete(peer.id)
         continue
       }
-      const pieces = splitAssetWav(local.wav)
+      if (peer.buffered > 256_000) continue
+      const pieces = splitAssetWav(job.payload)
       let sent = 0
       while (job.queue.length && sent < ASSET_CHUNKS_PER_TURN) {
         const index = job.queue.shift()!
         const slice = pieces[index]
         if (!slice) continue
-        actions.push({ peerId: peer.id, binary: packAssetChunk(index, pieces.length, slice) })
+        actions.push({ peerId: peer.id, assetId: job.id, delivery: job.delivery, binary: packAssetChunk(index, pieces.length, slice) })
         sent += 1
       }
       const done = job.total - job.queue.length
-      this.setStatus({ id: job.id, name: local.offer.name, phase: job.queue.length ? 'sending' : 'saved', progress: assetProgress(done, job.total), stored: true })
+      this.setStatus({
+        id: job.id,
+        name: job.offer.name,
+        phase: job.queue.length ? 'sending' : 'saved',
+        progress: assetProgress(done, job.total),
+        stored: true,
+        quality: job.delivery === 'compressed' ? 'compressed' : 'wav',
+      })
       if (!job.queue.length) this.outbound.delete(peer.id)
     }
     const offers = [...this.local.values()].map((item) => item.offer).sort((a, b) => (a.id < b.id ? -1 : 1))
     const signature = JSON.stringify(offers)
     const signal = signature === this.announced ? null : offers
     if (signal) this.announced = signature
-    const busy = input.peers.some((peer) => assetBytesAllowed(peer.path) && (this.outbound.get(peer.id)?.queue.length || 0) > 0)
+    const busy = input.peers.some((peer) => {
+      const job = this.outbound.get(peer.id)
+      return Boolean(job && job.queue.length && assetDelivery(peer.path) === job.delivery)
+    })
     return { signal, actions, completed, statuses: this.currentStatuses(), busy }
   }
 
   private async answerWant(peerId: string, message: AssetControlWant, path: AssetPath): Promise<AssetAction[]> {
-    if (!this.publishing) return [{ peerId, text: JSON.stringify({ t: 'miss', id: message.id } satisfies AssetControlMiss) }]
+    const miss = { peerId, assetId: message.id, text: JSON.stringify({ t: 'miss', id: message.id } satisfies AssetControlMiss) }
+    const wait = { peerId, assetId: message.id, text: JSON.stringify({ t: 'wait', id: message.id } satisfies AssetControlWait) }
+    if (!this.publishing) return [miss]
     const local = this.local.get(message.id)
-    if (!local) return [{ peerId, text: JSON.stringify({ t: 'miss', id: message.id } satisfies AssetControlMiss) }]
-    if (!assetBytesAllowed(path)) return [{ peerId, text: JSON.stringify({ t: 'wait', id: message.id } satisfies AssetControlWait) }]
+    if (!local) return [miss]
+    const delivery = assetDelivery(path)
+    if (delivery === 'none') return [wait]
     const active = this.outbound.get(peerId)
-    if (active && active.queue.length && active.id !== message.id) {
-      return [{ peerId, text: JSON.stringify({ t: 'wait', id: message.id } satisfies AssetControlWait) }]
-    }
-    const pieces = splitAssetWav(local.wav)
-    const have = new Set(message.have.filter((index) => index >= 0 && index < pieces.length))
-    const queue = pieces.map((_, index) => index).filter((index) => !have.has(index))
-    this.outbound.set(peerId, { id: local.offer.id, queue: queue.slice(), total: pieces.length })
-    const begin: AssetControlBegin = { t: 'begin', offer: local.offer, send: queue }
-    const actions: AssetAction[] = [{ peerId, text: JSON.stringify(begin) }]
+    if (active && active.queue.length && active.id !== message.id) return [wait]
+    if (delivery === 'wav') return this.queueSend(peerId, 'wav', local.offer, local.wav, message.have)
+    const compressed = await this.compressedFor(local)
+    if (!compressed) return [wait]
+    const have = message.sha256 === compressed.offer.sha256 ? message.have : []
+    return this.queueSend(peerId, 'compressed', compressed.offer, compressed.bytes, have)
+  }
+
+  private queueSend(peerId: string, delivery: 'wav' | 'compressed', offer: AssetOffer, payload: Uint8Array, have: number[]): AssetAction[] {
+    const pieces = splitAssetWav(payload)
+    const owned = new Set(have.filter((index) => index >= 0 && index < pieces.length))
+    const queue = pieces.map((_, index) => index).filter((index) => !owned.has(index))
+    this.outbound.set(peerId, { id: offer.id, queue: queue.slice(), total: pieces.length, payload, offer, delivery })
+    const begin: AssetControlBegin = { t: 'begin', offer, send: queue.slice() }
+    const actions: AssetAction[] = [{ peerId, assetId: offer.id, delivery, text: JSON.stringify(begin) }]
     let sent = 0
     while (queue.length && sent < ASSET_CHUNKS_PER_TURN) {
       const index = queue.shift()!
-      actions.push({ peerId, binary: packAssetChunk(index, pieces.length, pieces[index]) })
+      const slice = pieces[index]
+      if (!slice) continue
+      actions.push({ peerId, assetId: offer.id, delivery, binary: packAssetChunk(index, pieces.length, slice) })
       sent += 1
     }
     const job = this.outbound.get(peerId)
     if (job) job.queue = queue
     if (!queue.length) this.outbound.delete(peerId)
     const done = pieces.length - queue.length
-    this.setStatus({ id: local.offer.id, name: local.offer.name, phase: queue.length ? 'sending' : 'saved', progress: assetProgress(done, pieces.length), stored: true })
+    this.setStatus({
+      id: offer.id,
+      name: offer.name,
+      phase: queue.length ? 'sending' : 'saved',
+      progress: assetProgress(done, pieces.length),
+      stored: true,
+      quality: delivery === 'compressed' ? 'compressed' : 'wav',
+    })
     return actions
   }
 
@@ -633,6 +779,7 @@ export class AssetExchange {
       phase: 'receiving',
       progress: assetProgress(filled, message.offer.total),
       stored: false,
+      quality: compressedOffer(message.offer) ? 'compressed' : 'wav',
     })
   }
 
@@ -674,7 +821,7 @@ export class AssetExchange {
   }
 
   private async loadStored(id: string): Promise<AudioAsset | null> {
-    if ((this.attempts.get(id) || 0) >= 4) return null
+    if ((this.attempts.get(id) || 0) >= 4 || this.played.has(id)) return null
     let row: SharedAssetRecord | null = null
     try {
       row = await this.store.getAsset(id)
@@ -682,9 +829,27 @@ export class AssetExchange {
       return null
     }
     if (!row) return null
-    const announced = this.holdersOf(id).offers[0]
-    if (announced && announced.sha256 !== row.sha256) return null
+    const announced = this.holdersOf(id).offers.find((item) => !item.codec || item.codec === 'wav') || this.holdersOf(id).offers[0]
     if (!(await verifyAssetWav(row.wav, row.sha256))) return null
+    if (row.quality === 'compressed') {
+      if (announced && row.upgrade && announced.sha256 !== row.upgrade) return null
+      const audio = await this.audioFromCompressed({
+        id: row.id,
+        name: row.name,
+        sampleRate: row.sampleRate,
+        bytes: row.wav.byteLength,
+        sha256: row.sha256,
+        total: Math.ceil(row.wav.byteLength / ASSET_CHUNK_BYTES),
+        codec: row.codec,
+        bitrate: row.bitrate,
+        upgrade: row.upgrade,
+      }, row.wav)
+      if (!audio) return null
+      this.played.set(audio.id, { quality: 'compressed', channels: audio.channels, sampleRate: audio.sampleRate, upgrade: row.upgrade })
+      this.setStatus({ id: audio.id, name: audio.name, phase: 'saved', progress: 1, stored: true, quality: 'compressed' })
+      return audio
+    }
+    if (announced && announced.sha256 !== row.sha256) return null
     const audio = audioFromVerifiedWav(row.id, row.name, row.sampleRate, row.wav)
     if (!audio) return null
     const offer = announced || {
@@ -696,7 +861,7 @@ export class AssetExchange {
       total: Math.ceil(row.wav.byteLength / ASSET_CHUNK_BYTES),
     }
     this.remember(audio, row.wav, offer)
-    this.setStatus({ id: audio.id, name: audio.name, phase: 'saved', progress: 1, stored: true })
+    this.setStatus({ id: audio.id, name: audio.name, phase: 'saved', progress: 1, stored: true, quality: 'wav' })
     return audio
   }
 
@@ -725,7 +890,11 @@ export class AssetExchange {
   }
 
   private remember(asset: AudioAsset, wav: Uint8Array, offer: AssetOffer) {
-    this.local.set(asset.id, { offer, wav, channels: asset.channels, sampleRate: asset.sampleRate })
+    this.played.set(asset.id, { quality: 'wav', channels: asset.channels, sampleRate: asset.sampleRate })
+    this.satisfied.delete(asset.id)
+    if (!this.publishing) return
+    const cached = this.local.get(asset.id)
+    this.local.set(asset.id, { offer, wav, channels: asset.channels, sampleRate: asset.sampleRate, compressed: cached?.compressed })
   }
 
   private async rememberAsset(asset: AudioAsset) {
@@ -748,7 +917,63 @@ export class AssetExchange {
       total: Math.ceil(wav.byteLength / ASSET_CHUNK_BYTES),
     }
     if (!sanitizeOffer(offer)) return
-    this.local.set(asset.id, { offer, wav, channels: asset.channels, sampleRate: asset.sampleRate })
+    this.local.set(asset.id, { offer, wav, channels: asset.channels, sampleRate: asset.sampleRate, compressed: cached?.compressed })
+    this.played.set(asset.id, { quality: 'wav', channels: asset.channels, sampleRate: asset.sampleRate })
+    this.satisfied.delete(asset.id)
+  }
+
+  private async compressedFor(local: LocalWav): Promise<{ bytes: Uint8Array; offer: AssetOffer } | null> {
+    if (local.compressed) return local.compressed
+    let encoded: Awaited<ReturnType<TakeAudioCodec['encode']>> = null
+    try {
+      encoded = await this.codec.encode(local.channels, local.sampleRate)
+    } catch {
+      encoded = null
+    }
+    if (!encoded?.bytes.byteLength) return null
+    const sha256 = await hashWav(encoded.bytes)
+    const offer: AssetOffer = {
+      id: local.offer.id,
+      name: local.offer.name,
+      sampleRate: local.sampleRate,
+      bytes: encoded.bytes.byteLength,
+      sha256,
+      total: Math.ceil(encoded.bytes.byteLength / ASSET_CHUNK_BYTES),
+      codec: encoded.codec,
+      bitrate: encoded.bitrate,
+      upgrade: local.offer.sha256,
+    }
+    if (!sanitizeOffer(offer)) return null
+    local.compressed = { bytes: encoded.bytes, offer }
+    return local.compressed
+  }
+
+  private async audioFromCompressed(offer: AssetOffer, bytes: Uint8Array): Promise<AudioAsset | null> {
+    let decoded: Awaited<ReturnType<TakeAudioCodec['decode']>> = null
+    try {
+      decoded = await this.codec.decode(bytes)
+    } catch {
+      decoded = null
+    }
+    if (!decoded?.channels.length || !decoded.channels[0].length) return null
+    return {
+      id: offer.id,
+      name: offer.name || 'Audio',
+      sampleRate: decoded.sampleRate || offer.sampleRate,
+      channels: decoded.channels,
+    }
+  }
+
+  private async resumePartial(id: string, offer: AssetOffer | undefined, delivery: AssetDelivery): Promise<SharedPartialRecord | null> {
+    try {
+      const row = await this.store.getPartial(id)
+      if (!row) return null
+      if (delivery === 'compressed' && offer && row.offer.upgrade === offer.sha256) return row
+      if (offer && row.offer.sha256 === offer.sha256) return row
+      return null
+    } catch {
+      return null
+    }
   }
 
   private setStatus(row: StatusDraft) {
