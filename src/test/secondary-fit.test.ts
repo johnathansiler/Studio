@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  controlWidth,
-  fitSecondary,
-  rowsFor,
-  secondaryContentWidth,
-  secondaryRowBudget,
-} from '../model/secondaryFit'
+import { controlWidth, fitSecondary, rowsFor, secondaryContentWidth } from '../model/secondaryFit'
 
 const tools = [
   { id: 'automation', width: controlWidth('Touch') },
@@ -22,48 +16,31 @@ const hear = [
   { id: 'solo', width: controlWidth('Solo') },
 ]
 
-function pack(width: number, flow: 'columns' | 'rows', zone: 'tools' | 'hear' | 'top' = 'tools') {
-  const items = zone === 'tools' ? tools : hear
-  return fitSecondary(width, items, secondaryRowBudget(flow, zone, width))
-}
-
 describe('secondary control fit', () => {
-  it('keeps every word on a wide row and folds the least-used as the row gets narrower', () => {
+  it('keeps every control on the strip at 200, 280, 360, and 600', () => {
     const widths = [600, 360, 280, 200].map((viewport) => secondaryContentWidth('rows', 84, viewport))
-    let previous = new Set(tools.map((item) => item.id))
     for (const width of widths) {
-      const fit = pack(width, 'rows')
-      const all = new Set([...fit.shown, ...fit.drawer])
-      expect(all).toEqual(new Set(tools.map((item) => item.id)))
-      expect(fit.shown.length).toBeGreaterThan(0)
-      expect(fit.rows).toBeLessThanOrEqual(1)
-      for (const id of fit.shown) expect(previous.has(id)).toBe(true)
-      if (fit.drawer.length) {
-        expect(fit.drawer).toContain('tune')
-        expect(fit.shown).toContain('automation')
-        expect(rowsFor(width, [...fit.shown.map((id) => tools.find((item) => item.id === id)!.width), controlWidth('More')])).toBeLessThanOrEqual(1)
-      }
-      previous = new Set(fit.shown)
+      const fit = fitSecondary(width, tools)
+      expect(fit.shown).toEqual(tools.map((item) => item.id))
+      expect(fit.drawer).toEqual([])
+      expect(fit.rows).toBe(rowsFor(width, tools.map((item) => item.width)))
+      expect(fit.shown).toContain('tune')
+      expect(fit.shown).toContain('automation')
     }
-    expect(pack(widths[0], 'rows').drawer).toEqual([])
-    expect(pack(widths[3], 'rows').drawer.length).toBeGreaterThan(0)
-    expect(pack(widths[3], 'rows').shown.length).toBeLessThan(pack(widths[0], 'rows').shown.length)
+    expect(widths[3]).toBeLessThan(widths[0])
+    expect(fitSecondary(widths[3], tools).rows).toBeGreaterThan(fitSecondary(widths[0], tools).rows)
   })
 
-  it('stacks column controls and still reserves More on a narrow strip', () => {
-    const wide = pack(secondaryContentWidth('columns', 240, 900), 'columns')
-    const mid = pack(secondaryContentWidth('columns', 200, 900), 'columns')
-    const phone = pack(secondaryContentWidth('columns', 84, 900), 'columns')
-    const narrow = pack(secondaryContentWidth('columns', 42, 900), 'columns')
-    expect(wide.drawer).toEqual([])
-    expect(mid.shown.length).toBeGreaterThanOrEqual(phone.shown.length)
-    expect(phone.drawer).toContain('tune')
-    expect(phone.drawer).toContain('safe')
-    expect(phone.shown).toContain('automation')
-    expect(phone.rows).toBeLessThanOrEqual(4)
-    expect(narrow.drawer.length).toBeGreaterThanOrEqual(phone.drawer.length)
-    expect(narrow.shown).toContain('automation')
-    const flags = pack(secondaryContentWidth('columns', 42, 900), 'columns', 'hear')
+  it('stacks every column control, including the ones a narrow strip used to hide', () => {
+    for (const strip of [240, 200, 84, 42]) {
+      const fit = fitSecondary(secondaryContentWidth('columns', strip, 900), tools)
+      expect(fit.drawer).toEqual([])
+      expect(fit.shown).toEqual(tools.map((item) => item.id))
+      expect(fit.shown).toContain('tune')
+      expect(fit.shown).toContain('safe')
+      expect(fit.shown).toContain('arm')
+    }
+    const flags = fitSecondary(secondaryContentWidth('columns', 42, 900), hear)
     expect(flags.shown).toEqual(['mute', 'solo'])
     expect(flags.drawer).toEqual([])
     expect(flags.rows).toBe(2)

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { STRIP_BOUNDS, displayedStrip, isNarrowStrip, mixerFlow } from '../model/layoutWidth'
-import { secondaryContentWidth } from '../model/secondaryFit'
 import { gainToDb } from '../model/time'
 import { mixGroupsOf, selectMixer, trackGroupId } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -68,7 +67,6 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
           engine={engine}
           trackId={track.id}
           rows={rows}
-          band={secondaryContentWidth(flow, strip, viewport.width)}
           selected={store.selectedTrackId === track.id}
           onTune={onTune}
           onFx={() => setFxTrack(track.id)}
@@ -80,7 +78,6 @@ function MixerBody({ store, engine, onTune }: { store: ProjectStore; engine: Aud
         engine={engine}
         rows={rows}
         narrow={narrow}
-        band={secondaryContentWidth(flow, strip, viewport.width)}
         onOpen={() => setMasterOpen(true)}
         onFx={() => setFxTrack('master')}
         onLevels={() => setLevelsOpen(true)}
@@ -106,7 +103,6 @@ function ChannelStrip({
   engine,
   trackId,
   rows,
-  band,
   selected,
   onTune,
   onFx,
@@ -115,14 +111,12 @@ function ChannelStrip({
   engine: AudioEngine
   trackId: string
   rows: boolean
-  band: number
   selected: boolean
   onTune?: (trackId: string) => void
   onFx: () => void
 }) {
   const track = store.track(trackId)
   if (!track) return null
-  const flow = rows ? 'rows' : 'columns'
   const output = routingCaption(store, trackId)
   const tools: SecondaryItem[] = [
     { id: 'automation', label: 'Touch', node: <ChannelAutomation store={store} trackId={track.id} /> },
@@ -146,18 +140,18 @@ function ChannelStrip({
           <div className="strip-top">
             <StripName name={track.name} color={track.color} />
             <TrackPresence trackId={track.id} />
-            <SecondaryRack flow={flow} zone="top" width={Math.max(80, band - 72)} className="strip-hear" items={hear} />
+            <SecondaryRack zone="top" className="strip-hear" items={hear} />
           </div>
           <VolumeLane store={store} engine={engine} trackId={track.id} name={track.name} value={track.volume} vertical={false} />
-          <SecondaryRack flow={flow} zone="tools" width={band} className="strip-extra" items={tools} />
+          <SecondaryRack zone="tools" className="strip-extra" items={tools} />
         </>
       ) : (
         <>
           <StripName name={track.name} color={track.color} />
           <TrackPresence trackId={track.id} />
-          <SecondaryRack flow={flow} zone="tools" width={band} className="strip-tools" items={tools} />
+          <SecondaryRack zone="tools" className="strip-tools" items={tools} />
           <VolumeLane store={store} engine={engine} trackId={track.id} name={track.name} value={track.volume} vertical />
-          <SecondaryRack flow={flow} zone="hear" width={band} className="strip-hear" items={hear} />
+          <SecondaryRack zone="hear" className="strip-hear" items={hear} />
         </>
       )}
     </div>
@@ -169,7 +163,6 @@ function MasterStrip({
   engine,
   rows,
   narrow,
-  band,
   onOpen,
   onFx,
   onLevels,
@@ -178,12 +171,10 @@ function MasterStrip({
   engine: AudioEngine
   rows: boolean
   narrow: boolean
-  band: number
   onOpen: () => void
   onFx: () => void
   onLevels: () => void
 }) {
-  const flow = rows ? 'rows' : 'columns'
   const tools: SecondaryItem[] = [
     { id: 'automation', label: 'Touch', node: <ChannelAutomation store={store} trackId="master" /> },
     { id: 'master', label: 'Master', node: <MasterOpen onOpen={onOpen} /> },
@@ -198,12 +189,12 @@ function MasterStrip({
             <StripName name="Master" />
           </div>
           <MasterLane store={store} engine={engine} value={store.project.masterVolume} vertical={false} />
-          <SecondaryRack flow={flow} zone="tools" width={band} className="strip-extra" items={tools} />
+          <SecondaryRack zone="tools" className="strip-extra" items={tools} />
         </>
       ) : (
         <>
           <StripName name="Master" />
-          <SecondaryRack flow={flow} zone="tools" width={band} className="strip-tools" items={tools} />
+          <SecondaryRack zone="tools" className="strip-tools" items={tools} />
           {!narrow && <MasterReadout engine={engine} />}
           <MasterLane store={store} engine={engine} value={store.project.masterVolume} vertical />
         </>

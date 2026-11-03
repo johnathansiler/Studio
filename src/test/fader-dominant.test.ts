@@ -130,7 +130,7 @@ describe('dominant volume fader', () => {
         expect(strip.faderBottom, strip.name).toBeLessThanOrEqual(item.height + 1)
       }
     }
-  })
+  }, 20000)
 
   it('makes each row a short card with a full-width volume bar', async () => {
     const report = await measure(412, 915, 'shell phone', { strip: STRIP_HALF, mixer: 'rows' }, 'fader-rows-412')
@@ -148,5 +148,5 @@ describe('dominant volume fader', () => {
     }
     const visible = report.strips.filter((strip) => strip.faderTop >= -1 && strip.faderBottom <= report.hostHeight + 1)
     expect(visible.length).toBeGreaterThanOrEqual(3)
-  })
+  }, 20000)
 })

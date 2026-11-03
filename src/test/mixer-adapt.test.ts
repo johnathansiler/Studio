@@ -54,13 +54,13 @@ function markup(store: ProjectStore, width: number, height: number, shell: strin
   </body></html>`
 }
 
-const WORDS = ['Mute', 'Solo', 'Off', 'Read', 'Touch', 'Latch', 'Inserts', 'Pan', 'Arm', 'Safe', 'Tune', 'More', 'Level', 'Master', 'Cue']
+const WORDS = ['Mute', 'Solo', 'Off', 'Read', 'Touch', 'Latch', 'Inserts', 'Pan', 'Arm', 'Safe', 'Tune', 'Level', 'Master', 'Cue']
 
 async function readStrips(page: Page) {
   return page.evaluate((words) => {
     return [...document.querySelectorAll<HTMLElement>('.mixer > .strip')].map((strip) => {
       const box = strip.getBoundingClientRect()
-      const fader = strip.querySelector('.volume-row') as HTMLElement
+      const fader = strip.querySelector('.volume-row .touch-slider') as HTMLElement
       const faderBox = fader.getBoundingClientRect()
       const racks = [...strip.querySelectorAll<HTMLElement>('.strip-secondary')].map((rack) => {
         const style = getComputedStyle(rack)
@@ -69,11 +69,13 @@ async function readStrips(page: Page) {
           overflowX: style.overflowX,
           overflowY: style.overflowY,
           wrap: style.flexWrap,
+          direction: style.flexDirection,
           shown: rack.dataset.shown || '',
           drawer: rack.dataset.drawer || '',
+          scroll: rack.scrollHeight > rack.clientHeight + 1,
         }
       })
-      const controls = [...strip.querySelectorAll<HTMLElement>('button, summary.more-open')].filter((node) => {
+      const controls = [...strip.querySelectorAll<HTMLElement>('button, summary')].filter((node) => {
         const style = getComputedStyle(node)
         const rect = node.getBoundingClientRect()
         return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
@@ -88,114 +90,137 @@ async function readStrips(page: Page) {
           clientWidth: node.clientWidth,
           scrollHeight: node.scrollHeight,
           clientHeight: node.clientHeight,
-          inside: rect.left >= box.left - 1 && rect.right <= box.right + 1 && rect.top >= box.top - 1 && rect.bottom <= box.bottom + 1,
+          across: rect.left >= box.left - 1 && rect.right <= box.right + 1,
           full: words.some((item) => word === item || word.startsWith(`${item} `) || word.includes(item)),
         }
       })
-      const drawer = strip.querySelector('.more-drawer') as HTMLElement | null
-      const drawerStyle = drawer ? getComputedStyle(drawer) : null
       return {
         name: (strip.querySelector('h3')?.textContent || '').trim(),
         master: strip.classList.contains('master'),
         width: box.width,
         height: box.height,
+        faderHeight: faderBox.height,
+        faderWidth: faderBox.width,
         ratio: faderBox.height / box.height,
-        vertical: fader.querySelector('.touch-slider')?.classList.contains('vertical') ?? false,
+        vertical: fader.classList.contains('vertical'),
+        more: !!strip.querySelector('.more-open, .more-fold, .more-drawer'),
         racks,
         controls,
-        drawerPosition: drawerStyle?.position ?? '',
-        drawerHidden: !drawer || drawer.getClientRects().length === 0,
       }
-    }).map((strip) => strip)
+    })
   }, WORDS)
 }
 
-async function openFirstDrawer(page: Page) {
-  return page.evaluate(() => {
-    const overlaps = (a: DOMRect, b: DOMRect) => a.left < b.right - 1 && a.right > b.left + 1 && a.top < b.bottom - 1 && a.bottom > b.top + 1
-    const strip = document.querySelector('.mixer > .strip') as HTMLElement
-    const summary = strip.querySelector('summary.more-open') as HTMLElement | null
-    if (!summary) return { opened: false, overlap: false, position: '', words: [] as string[], short: false }
-    summary.click()
-    const details = summary.closest('details') as HTMLDetailsElement | null
-    if (details) details.open = true
-    const drawer = strip.querySelector('.more-drawer') as HTMLElement
-    const fader = strip.querySelector('.volume-row') as HTMLElement
-    const style = getComputedStyle(drawer)
-    const buttons = [...drawer.querySelectorAll<HTMLElement>('button')].map((button) => ({
-      word: (button.innerText || '').replace(/\s+/g, ' ').trim(),
-      width: button.getBoundingClientRect().width,
-      height: button.getBoundingClientRect().height,
-      scrollWidth: button.scrollWidth,
-      clientWidth: button.clientWidth,
-      scrollHeight: button.scrollHeight,
-      clientHeight: button.clientHeight,
-    }))
-    return {
-      opened: drawer.getClientRects().length > 0,
-      overlap: overlaps(drawer.getBoundingClientRect(), fader.getBoundingClientRect()),
-      position: style.position,
-      words: buttons.map((button) => button.word),
-      short: buttons.some((button) => button.width < 40 || button.height < 40 || button.scrollWidth > button.clientWidth + 1 || button.scrollHeight > button.clientHeight + 1),
+async function scrollTools(page: Page) {
+  await page.evaluate(() => {
+    for (const rack of document.querySelectorAll<HTMLElement>('.strip-secondary[data-zone="tools"]')) {
+      rack.scrollTop = rack.scrollHeight
     }
   })
+  return readStrips(page)
 }
 
-describe('adaptive mixer secondary controls', () => {
-  it('wraps at 200, 280, 360, and 600 without clipping columns, rows, or the master', async () => {
-    const cases = [
-      { width: 600, height: 900, shell: 'shell studio', strip: 84, mixer: 'rows' as const },
-      { width: 360, height: 900, shell: 'shell phone', strip: 84, mixer: 'rows' as const },
-      { width: 280, height: 900, shell: 'shell phone', strip: 84, mixer: 'rows' as const },
-      { width: 200, height: 900, shell: 'shell phone', strip: 84, mixer: 'rows' as const },
-      { width: 900, height: 900, shell: 'shell studio', strip: 200, mixer: 'columns' as const },
-      { width: 900, height: 900, shell: 'shell studio', strip: 84, mixer: 'columns' as const },
-      { width: 900, height: 800, shell: 'shell phone', strip: 42, mixer: 'columns' as const },
-    ]
+describe('mixer fader stays full size', () => {
+  it('matches with every secondary control shown at widths 200, 280, 360, and 600', async () => {
+    const widths = [200, 280, 360, 600]
     const browser = await chromium.launch({ headless: true })
+    const rowHeights: number[] = []
     try {
-      for (const item of cases) {
+      for (const width of widths) {
         const store = new ProjectStore()
-        writeLayout(store.project.id, { strip: item.strip, column: 70, mixer: item.mixer })
-        const page = await browser.newPage({ viewport: { width: item.width, height: item.height } })
-        await page.setContent(markup(store, item.width, item.height, item.shell), { waitUntil: 'load' })
+        writeLayout(store.project.id, { strip: 84, column: 70, mixer: 'rows' })
+        const page = await browser.newPage({ viewport: { width, height: 900 } })
+        await page.setContent(markup(store, width, 900, width >= 600 ? 'shell studio' : 'shell phone'), { waitUntil: 'load' })
         const strips = await readStrips(page)
-        const where = `${item.mixer} ${item.width} strip ${item.strip}`
+        const where = `rows ${width}`
         expect(strips.length, where).toBeGreaterThan(1)
         const channel = strips.find((strip) => !strip.master)!
-        const master = strips.find((strip) => strip.master)!
-        for (const strip of [channel, master]) {
-          expect(strip.ratio, `${where} ${strip.name}`).toBeGreaterThanOrEqual(0.5)
-          expect(strip.racks.length, strip.name).toBeGreaterThan(0)
-          for (const rack of strip.racks) {
-            expect(rack.overflowX, `${strip.name} ${rack.zone}`).not.toBe('hidden')
-            expect(rack.overflowY, `${strip.name} ${rack.zone}`).not.toBe('hidden')
-            expect(rack.wrap, rack.zone).toBe('wrap')
-          }
+        expect(strips.every((strip) => !strip.more), where).toBe(true)
+        expect(channel.controls.some((control) => control.word === 'More'), where).toBe(false)
+        const labels = channel.controls.map((control) => control.word)
+        for (const word of ['Mute', 'Solo', 'Inserts', 'Pan', 'Arm', 'Safe', 'Tune']) {
+          expect(labels, `${where} ${word}`).toContain(word)
+        }
+        expect(channel.racks.find((rack) => rack.zone === 'tools')?.shown, where).toContain('tune')
+        expect(channel.racks.every((rack) => rack.drawer === ''), where).toBe(true)
+        const tools = channel.racks.find((rack) => rack.zone === 'tools')!
+        expect(tools.direction, where).toBe('column')
+        expect(['auto', 'scroll'], where).toContain(tools.overflowY)
+        const heights = strips.map((strip) => strip.faderHeight)
+        expect(Math.max(...heights) - Math.min(...heights), where).toBeLessThanOrEqual(1)
+        expect(heights[0], where).toBeGreaterThanOrEqual(48)
+        for (const strip of strips) {
+          expect(strip.vertical, strip.name).toBe(false)
+          expect(strip.faderWidth, strip.name).toBeGreaterThanOrEqual(strip.width - 16)
           for (const control of strip.controls) {
             expect(control.width, `${where} ${strip.name} ${control.word}`).toBeGreaterThanOrEqual(40)
             expect(control.height, `${where} ${strip.name} ${control.word}`).toBeGreaterThanOrEqual(40)
             expect(control.scrollWidth, `${where} ${strip.name} ${control.word}`).toBeLessThanOrEqual(control.clientWidth + 1)
             expect(control.scrollHeight, `${where} ${strip.name} ${control.word}`).toBeLessThanOrEqual(control.clientHeight + 1)
-            expect(control.inside, `${where} ${strip.name} ${control.word}`).toBe(true)
+            expect(control.across, `${where} ${strip.name} ${control.word}`).toBe(true)
             expect(control.full, `${where} ${strip.name} ${control.word}`).toBe(true)
           }
-          if (strip.drawerPosition) expect(['static', 'relative'], `${strip.name} drawer`).toContain(strip.drawerPosition)
         }
-        const labels = channel.controls.map((control) => control.word)
-        expect(labels, where).toContain('Mute')
-        expect(labels, where).toContain('Solo')
-        expect(labels.some((label) => ['Off', 'Read', 'Touch', 'Latch'].includes(label)), where).toBe(true)
-        if (item.mixer === 'rows' && item.width >= 600) expect(channel.racks.some((rack) => rack.drawer.length > 0), where).toBe(false)
-        if (item.mixer === 'rows' && item.width <= 280) expect(channel.racks.some((rack) => rack.zone === 'tools' && rack.drawer.includes('tune')), where).toBe(true)
-        if (item.mixer === 'columns' && item.strip <= 84) expect(channel.racks.some((rack) => rack.zone === 'tools' && rack.drawer.includes('tune')), where).toBe(true)
-        const opened = await openFirstDrawer(page)
-        if (channel.racks.some((rack) => rack.drawer.length > 0)) {
-          expect(opened.opened, where).toBe(true)
-          expect(opened.overlap, where).toBe(false)
-          expect(['static', 'relative'], where).toContain(opened.position)
-          expect(opened.short, where).toBe(false)
-          expect(opened.words.length, where).toBeGreaterThan(0)
+        const scrolled = await scrollTools(page)
+        const scrolledHeights = scrolled.map((strip) => strip.faderHeight)
+        expect(Math.max(...scrolledHeights) - Math.min(...heights), where).toBeLessThanOrEqual(1)
+        expect(Math.max(...heights) - Math.min(...scrolledHeights), where).toBeLessThanOrEqual(1)
+        rowHeights.push(heights[0])
+        await page.close()
+      }
+      expect(Math.max(...rowHeights) - Math.min(...rowHeights)).toBeLessThanOrEqual(1)
+
+      for (const width of widths) {
+        const store = new ProjectStore()
+        writeLayout(store.project.id, { strip: 84, column: 70, mixer: 'columns' })
+        const page = await browser.newPage({ viewport: { width, height: 900 } })
+        await page.setContent(markup(store, width, 900, 'shell phone'), { waitUntil: 'load' })
+        const strips = await readStrips(page)
+        const where = `columns viewport ${width}`
+        const heights = strips.map((strip) => strip.faderHeight)
+        const widthsOfFader = strips.map((strip) => strip.faderWidth)
+        expect(Math.max(...heights) - Math.min(...heights), where).toBeLessThanOrEqual(1)
+        expect(Math.max(...widthsOfFader) - Math.min(...widthsOfFader), where).toBeLessThanOrEqual(1)
+        for (const strip of strips) {
+          expect(strip.more, strip.name).toBe(false)
+          expect(strip.ratio, strip.name).toBeGreaterThanOrEqual(0.5)
+          expect(strip.vertical, strip.name).toBe(true)
+          expect(strip.faderHeight, strip.name).toBeGreaterThanOrEqual(48)
+        }
+        const channel = strips.find((strip) => !strip.master)!
+        expect(channel.racks.find((rack) => rack.zone === 'tools')?.shown.split(' '), where).toEqual(expect.arrayContaining(['automation', 'routing', 'inserts', 'pan', 'arm', 'safe', 'tune']))
+        const scrolled = await scrollTools(page)
+        expect(Math.abs(scrolled[0].faderHeight - heights[0]), where).toBeLessThanOrEqual(1)
+        expect(Math.abs(scrolled[0].faderWidth - widthsOfFader[0]), where).toBeLessThanOrEqual(1)
+        await page.close()
+      }
+
+      const narrow = [
+        { width: 900, height: 900, shell: 'shell studio', strip: 200 },
+        { width: 900, height: 900, shell: 'shell studio', strip: 84 },
+        { width: 900, height: 800, shell: 'shell phone', strip: 42 },
+      ]
+      for (const item of narrow) {
+        const store = new ProjectStore()
+        writeLayout(store.project.id, { strip: item.strip, column: 70, mixer: 'columns' })
+        const page = await browser.newPage({ viewport: { width: item.width, height: item.height } })
+        await page.setContent(markup(store, item.width, item.height, item.shell), { waitUntil: 'load' })
+        const strips = await readStrips(page)
+        const where = `columns strip ${item.strip}`
+        const heights = strips.map((strip) => strip.faderHeight)
+        expect(Math.max(...heights) - Math.min(...heights), where).toBeLessThanOrEqual(1)
+        for (const strip of strips) {
+          expect(strip.ratio, `${where} ${strip.name}`).toBeGreaterThanOrEqual(0.5)
+          expect(strip.more, strip.name).toBe(false)
+          const tools = strip.racks.find((rack) => rack.zone === 'tools')
+          expect(tools?.direction, strip.name).toBe('column')
+          expect(['auto', 'scroll'], strip.name).toContain(tools?.overflowY)
+          for (const control of strip.controls) {
+            expect(control.width, `${where} ${strip.name} ${control.word}`).toBeGreaterThanOrEqual(40)
+            expect(control.height, `${where} ${strip.name} ${control.word}`).toBeGreaterThanOrEqual(40)
+            expect(control.scrollWidth, `${where} ${strip.name} ${control.word}`).toBeLessThanOrEqual(control.clientWidth + 1)
+            expect(control.across, `${where} ${strip.name} ${control.word}`).toBe(true)
+          }
         }
         await page.close()
       }
