@@ -1123,7 +1123,7 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 }
 .shell.phone .workspace { flex: 1 1 auto; min-height: 0; height: auto; }
 .unstuck-btn {
-  flex: none; height: 36px; min-height: 36px; padding: 0 10px; border-radius: 8px;
+  flex: none; height: 44px; min-height: 44px; padding: 0 12px; border-radius: 8px;
   border: 1px solid var(--line); background: var(--panel); color: var(--text);
   font-size: 13px; font-weight: 640; white-space: nowrap;
 }
