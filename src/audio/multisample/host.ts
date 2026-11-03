@@ -184,6 +184,11 @@ export class LibraryHost {
     }
   }
 
+  dispose() {
+    for (const id of [...this.lives.keys()]) this.drop(id)
+    this.module = null
+  }
+
   private ensure(id: string, sampleRate: number) {
     const found = this.lives.get(id)
     if (found) {

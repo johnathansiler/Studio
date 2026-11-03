@@ -5,6 +5,7 @@ import { createUsageLedger } from './usage.ts'
 import { rememberDiag, sanitizeDiag, type DiagReport } from '../src/model/diag.ts'
 import { canRebuildRoom, sessionHello } from '../src/model/negotiate.ts'
 import { CAP_NOTICE, type UsageSnapshot } from '../src/model/usage.ts'
+import { relayTransportMessage } from '../src/model/roomReset.ts'
 import { awareRelayDue, relayAware } from '../src/remote/presence.ts'
 import { accessForInvite, collabAccessFor, mayRelayAwareness, parseCollabAccess, relayProjectTraffic, sanitizeTimelineComment, syncMessageOk, type CollabAccess, type TimelineComment } from '../src/state/ops.ts'
 import { readFile, stat } from 'node:fs/promises'
@@ -818,9 +819,13 @@ async function handle(client: Client, msg: Record<string, unknown>) {
     if (target) send(target.ws, { t: 'force-mute', muted: person.mutedByHost })
     return
   }
-  if (msg.t === 'transport' && self.role === 'host') {
-    broadcast(session, { t: 'transport', from: client.id, payload: msg.payload }, client.id)
-    return
+  const transportRelay = relayTransportMessage(self.role, msg)
+  if (transportRelay) {
+    if (transportRelay.error) send(client.ws, { t: 'error', message: transportRelay.error })
+    if (transportRelay.broadcast !== undefined) {
+      broadcast(session, { t: 'transport', from: client.id, payload: transportRelay.broadcast }, client.id)
+    }
+    if (msg.t === 'transport' || transportRelay.error) return
   }
   if (msg.t === 'transport-request' && self.admitted && self.role === 'guest') {
     const host = session.clients.get(session.hostId)

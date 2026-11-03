@@ -36,6 +36,9 @@ export const TRANSPORT_COPY: Copy[] = [
   { id: 'loop', label: 'Loop', hint: 'Repeat the highlighted region. Drag its edges to change the length.' },
   { id: 'tempo', label: 'Tempo', hint: 'Type a tempo, or drag, scroll, or press the arrow keys.' },
   { id: 'tap', label: 'Tap', hint: 'Tap in time. The tempo follows your taps.' },
+  { id: 'click', label: 'Click', hint: 'Metronome while you play and record.' },
+  { id: 'count-in', label: 'Count', hint: 'Count off, one bar, or two bars before play and record.' },
+  { id: 'reset', label: 'Reset', hint: 'Reset – fix glitches' },
 ]
 
 /** Phone transport shows the same buttons as the desk. The menu does not repeat them. */
@@ -84,8 +87,6 @@ export const MENU_COPY: MenuSpec[] = [
   { id: 'scaler', action: 'scaler', group: 'tools', place: 'desk', label: 'Scaler', hint: 'Chord instrument. Play pads, or open Write to generate MIDI.' },
   { id: 'players', action: 'players', group: 'tools', place: 'all', label: 'Players', hint: 'A drummer, bass, and keys that follow the song. Writes MIDI you can edit.' },
   { id: 'midi', action: 'midi', group: 'tools', place: 'all', label: 'MIDI', hint: 'Learn knobs, effects, hardware out, live capture, and recording several inputs.' },
-  { id: 'click', action: 'click', group: 'settings', place: 'all', label: 'Click', hint: 'Metronome while you play and record.' },
-  { id: 'count-in', action: 'count-in', group: 'settings', place: 'all', label: 'Count-in', hint: 'Count one bar before recording starts.' },
   { id: 'signature', action: 'signature', group: 'settings', place: 'all', label: 'Time', hint: 'Beats in each bar.' },
   { id: 'shortcuts', action: 'shortcuts', group: 'settings', place: 'all', label: 'Shortcuts', hint: 'Keys for play, record, and editing.' },
 ]

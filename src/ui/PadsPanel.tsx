@@ -4,6 +4,7 @@ import { Performer, pointerVelocity, type PerformTarget } from '../audio/perform
 import { ensureDefaultKit } from '../instruments/pads/load'
 import { clipBeat, padFaceName } from '../instruments/pads/record'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
+import { countInBarsOf, countInCaption } from '../model/time'
 import { projectSampleBeat } from '../model/tempoMap'
 import { BANKS, sixteenLevels, type LevelSpread } from '../model/padMachine'
 import type { ProjectStore } from '../state/store'
@@ -311,7 +312,7 @@ export function PadsPanel({
           onPointerLeave={() => setEraseOn(false)}
         >Erase</button>
         <button type="button" className="ch-tab" title="Undo" disabled={!store.canUndo} onClick={() => store.undo()}>Undo</button>
-        <button type="button" className={`ch-tab${store.project.countIn ? ' on' : ''}`} aria-pressed={store.project.countIn} title="Count one bar before recording starts." onClick={() => store.toggle('countIn')}>Count</button>
+        <button type="button" className={`ch-tab${store.project.countIn ? ' on' : ''}`} aria-pressed={store.project.countIn} title={`Count-in is ${countInCaption(countInBarsOf(store.project))}. Tap for off, one bar, or two bars.`} onClick={() => store.cycleCountIn()}>Count</button>
         <button type="button" className={`ch-tab${store.project.metronomeEnabled ? ' on' : ''}`} aria-pressed={store.project.metronomeEnabled} title="Metronome while the pads record." onClick={() => store.toggle('metronomeEnabled')}>Click</button>
         <select aria-label="16 Levels" title="One pad spread across 16 velocities, tunes, or decays." value={levels} onChange={(event) => setLevels(event.target.value as LevelSpread | '')}>
           <option value="">16 Levels</option>

@@ -1,6 +1,7 @@
 import { patchBufferIds } from '../instruments/patch/model'
 import { computePeaks } from './demo'
 import { padFingerprint } from './padMachine'
+import { countInBarsOf } from './time'
 import type { AudioAsset, Project } from './types'
 
 /** How long the host waits so a guest can receive the start time before the downbeat. */
@@ -128,6 +129,7 @@ export function arrangementDigest(project: Project): string {
     loopEndSample: project.loopEndSample,
     metronomeEnabled: project.metronomeEnabled,
     countIn: project.countIn,
+    countInBars: countInBarsOf(project),
     snap: project.snap,
     launchQuant: project.launchQuant ?? null,
     rackMode: project.rackMode ?? null,

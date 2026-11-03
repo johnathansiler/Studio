@@ -27,7 +27,7 @@ import { shouldCountIn } from './model/sessionInteract'
 import { hasArmedRecord, homeSample, playPress, stopPress } from './model/transport'
 import { countInAt, meterAtSample, projectSampleBeat, tempoAtSample } from './model/tempoMap'
 import { displayedPlayhead } from './model/transportSync'
-import { beatsToSamples, samplesToBeats } from './model/time'
+import { beatsToSamples, countInBarsOf, samplesToBeats } from './model/time'
 
 const FaceGallery = lazy(() => import('./ui/faces/PluginFace').then((mod) => ({ default: mod.FaceGallery })))
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
@@ -317,6 +317,10 @@ export function App() {
           })
           void engine.playAtPerf(Number(cmd.timelineSample) || 0, localPerf, 'session')
         }
+        return
+      }
+      if (action === 'reset') {
+        void applyLocalReset()
         return
       }
       if (session.state.role === 'host') {
@@ -899,12 +903,13 @@ export function App() {
       tempo: tempoAtSample(store.project, sample),
       countIn: counting,
       countInMs: Math.round(countMs),
+      countInBars: counting ? countInBarsOf(store.project) : 0,
       timeSignature: meterAtSample(store.project, sample),
       launches: store.launched,
       launchAt: store.launchAt,
       launchGen: store.launchGen,
     })
-    if (counting) engine.armCountIn(tempoAtSample(store.project, sample), meterAtSample(store.project, sample))
+    if (counting) engine.armCountIn(tempoAtSample(store.project, sample), meterAtSample(store.project, sample), countInBarsOf(store.project))
     await engine.playAtPerf(sample, hostPerf, mode)
   }
 
@@ -932,8 +937,25 @@ export function App() {
       countInMs: counting ? Number(cmd.countInMs) || 0 : 0,
     })
     const mode = preferArrangeTransport(cmd.mode === 'session' ? 'session' : 'arrangement')
-    if (counting) engine.armCountIn(tempo, signature)
+    if (counting) engine.armCountIn(tempo, signature, Number(cmd.countInBars) === 2 ? 2 : 1)
     await engine.playAtPerf(Number(cmd.timelineSample) || 0, localPerf, mode)
+  }
+
+  async function resetRoom() {
+    if (session.state.role === 'guest') return
+    if (session.state.role === 'host') session.broadcastTransport({ action: 'reset' })
+    await applyLocalReset()
+  }
+
+  async function applyLocalReset() {
+    pendingFollow.current = null
+    if (punchTimer.current) {
+      window.clearTimeout(punchTimer.current)
+      punchTimer.current = 0
+    }
+    setRecordHint('')
+    await session.applyLocalReset()
+    store.clearToasts()
   }
 
   async function locate(sample: number) {
@@ -1230,6 +1252,7 @@ export function App() {
         tempo: tempoAtSample(store.project, fromSample),
         countIn: counting,
         countInMs: Math.round(countMs),
+        countInBars: counting ? countInBarsOf(store.project) : 0,
         timeSignature: meterAtSample(store.project, fromSample),
       })
     }
@@ -1588,12 +1611,10 @@ async function importDropped(files: FileList) {
               dockBottom: dockEdge === 'bottom',
               hardwareMidi: !hidesHardwareMidi(navigator.userAgent),
             })}
-            pressed={(action) => action === 'click' ? store.project.metronomeEnabled
-              : action === 'count-in' ? store.project.countIn
-              : action === 'snap' ? store.project.snap
+            pressed={(action) => action === 'snap' ? store.project.snap
               : action === 'loop' ? store.project.loopEnabled
               : false}
-            disabled={(action) => store.remoteFollow && (action === 'new' || action === 'session-mode' || action === 'capture' || action === 'click' || action === 'count-in' || action === 'snap' || action === 'loop' || action === 'signature')}
+            disabled={(action) => store.remoteFollow && (action === 'new' || action === 'session-mode' || action === 'capture' || action === 'snap' || action === 'loop' || action === 'signature')}
             signature={`${store.project.timeSignature.numerator}/${store.project.timeSignature.denominator}`}
             onSignature={(numerator, denominator) => store.setTimeSignature(numerator, denominator)}
             onAction={(action) => {
@@ -1615,8 +1636,6 @@ async function importDropped(files: FileList) {
               else if (action === 'scaler') openPlugin('play')
               else if (action === 'players') { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); setPlayersOpen(true) }
               else if (action === 'midi') { setMenuOpen(false); store.setMidiToolsOpen(!store.midiToolsOpen) }
-              else if (action === 'click') store.toggle('metronomeEnabled')
-              else if (action === 'count-in') store.toggle('countIn')
               else if (action === 'snap') store.toggle('snap')
               else if (action === 'shortcuts') { setMenuOpen(false); setHelp(true) }
             }}
@@ -1635,6 +1654,8 @@ async function importDropped(files: FileList) {
           onStop={() => void stop()}
           onRecord={() => { engine.unlock(); void record() }}
           onSeek={(sample) => void (sample === 0 ? returnToStart() : locate(sample))}
+          onReset={() => { engine.unlock(); void resetRoom() }}
+          roomRole={session.state.role}
           takeProgress={session.state.takeProgress}
         />
       )}

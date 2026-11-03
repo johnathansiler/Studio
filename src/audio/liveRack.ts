@@ -129,6 +129,47 @@ export class LiveRack {
     this.processors.get(pluginId)?.reset()
   }
 
+  /** Clear reverb, delay, tuner, sampler, and looper state without changing the project. */
+  resetAll() {
+    for (const proc of this.processors.values()) {
+      try { proc.reset() } catch { /* the next block bypasses a plugin that cannot reset */ }
+    }
+    for (const tap of this.taps.values()) tap.worklet?.port.postMessage({ type: 'reset-all' })
+    this.keptAudio.clear()
+  }
+
+  /** Drop the live graph so a rebuilt AudioContext can connect a fresh one. */
+  dispose() {
+    this.resetAll()
+    for (const tap of this.taps.values()) {
+      try { tap.input.disconnect() } catch { /* gone */ }
+      try { tap.proc?.disconnect() } catch { /* gone */ }
+      try { tap.worklet?.disconnect() } catch { /* gone */ }
+      try { tap.output.disconnect() } catch { /* gone */ }
+    }
+    this.taps.clear()
+    this.processors.clear()
+    this.failed.clear()
+    this.spectra.clear()
+    this.tuners.clear()
+    this.meters.clear()
+    this.traces.clear()
+    this.tapsOut.clear()
+    this.sendGains.clear()
+    this.keys.clear()
+    this.keyTaps.clear()
+    this.keySinks.clear()
+    this.keptAudio.clear()
+    this.sentBuffers.clear()
+    this.workletPromise = null
+    this.workletOk = false
+    this.topology = ''
+    this.generation += 1
+    this.signature = ''
+    this.ctx = null
+    this.links = []
+  }
+
   tuner(pluginId: string) {
     return this.tuners.get(pluginId) ?? null
   }

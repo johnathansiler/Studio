@@ -132,6 +132,19 @@ export class RackHost {
     }
   }
 
+  dispose() {
+    for (const live of this.lives.values()) {
+      try { live.worklet?.disconnect() } catch { /* gone */ }
+      try { live.script?.disconnect() } catch { /* gone */ }
+      try { live.gain.disconnect() } catch { /* gone */ }
+      live.runtime.allOff()
+    }
+    this.lives.clear()
+    this.pending.clear()
+    this.ready = null
+    this.workletOk = false
+  }
+
   private async ensure(ctx: AudioContext) {
     if (this.ready) return this.ready
     this.ready = ctx.audioWorklet.addModule(rackWorkletUrl).then(() => true).catch(() => false)
