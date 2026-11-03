@@ -131,20 +131,23 @@ describe('named versions', () => {
     expect(guest.canUndo).toBe(false)
   })
 
-  it('lets a following guest restore and undo that step only', () => {
+  it('lets an Edit guest restore and undo, and keeps View from restoring', () => {
     const host = new ProjectStore(createEmptyProject(48000, 'Guest restore'))
     host.setTempo(110)
     const saved = musicalClone(host.project)
     host.setTempo(140)
-    const guest = new ProjectStore(musicalClone(host.project))
-    guest.remoteFollow = true
-    guest.setTempo(90)
-    expect(guest.project.tempo).toBe(140)
-    guest.restoreForEveryone(saved)
-    expect(guest.project.tempo).toBe(110)
-    expect(guest.canUndo).toBe(true)
-    guest.undo()
-    expect(guest.project.tempo).toBe(140)
-    expect(guest.sync.peek().some((op) => op.p === 'tempo')).toBe(true)
+    const view = new ProjectStore(musicalClone(host.project))
+    view.remoteFollow = true
+    view.restoreForEveryone(saved)
+    expect(view.project.tempo).toBe(140)
+    expect(view.canUndo).toBe(false)
+
+    const editor = new ProjectStore(musicalClone(host.project))
+    editor.restoreForEveryone(saved)
+    expect(editor.project.tempo).toBe(110)
+    expect(editor.canUndo).toBe(true)
+    editor.undo()
+    expect(editor.project.tempo).toBe(140)
+    expect(editor.sync.peek().some((op) => op.p === 'tempo')).toBe(true)
   })
 })

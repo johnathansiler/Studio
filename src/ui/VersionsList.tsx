@@ -6,11 +6,14 @@ import { versionWhen, type VersionListItem } from '../state/versions'
 export function VersionsList({
   projectId,
   tick,
+  canRestore,
   onSave,
   onRestore,
 }: {
   projectId: string
   tick: number
+  /** Host and Edit may put a version back for the room. View and Comment may not. */
+  canRestore: boolean
   onSave: () => void
   onRestore: (project: Project) => void
 }) {
@@ -41,17 +44,19 @@ export function VersionsList({
           <span>
             {item.by} · {versionWhen(item.at)}
           </span>
-          <button
-            type="button"
-            className="text-btn"
-            onClick={() => {
-              void loadVersion(item.id).then((doc) => {
-                if (doc?.project) onRestore(doc.project)
-              })
-            }}
-          >
-            Restore for everyone
-          </button>
+          {canRestore && (
+            <button
+              type="button"
+              className="text-btn"
+              onClick={() => {
+                void loadVersion(item.id).then((doc) => {
+                  if (doc?.project) onRestore(doc.project)
+                })
+              }}
+            >
+              Restore for everyone
+            </button>
+          )}
         </div>
       ))}
     </div>

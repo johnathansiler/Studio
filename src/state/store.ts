@@ -1,3 +1,4 @@
+import { FEATURES, preferArrangeTransport, preferArrangeView } from '../features'
 import { MASTERING_IDS } from '../audio/master/assistant'
 import { spectralKey, ensureRepair, pushOp, sliceRegion } from '../audio/spectral/edit'
 import { learnOffline } from '../audio/spectral/job'
@@ -398,13 +399,11 @@ export class ProjectStore {
    * Undo stays on this device. The undo itself is published as ops.
    */
   restoreForEveryone(snapshot: Project) {
+    if (this.remoteFollow) return
     const target = musicalClone(normalizeProjectRack(normalizeProject(snapshot)))
-    const follow = this.remoteFollow
-    this.remoteFollow = false
     this.mutate(() => {
       applyChanges(this.project, diffProject(this.project, target))
     }, 'Restore version')
-    this.remoteFollow = follow
     this.allowUndo = true
     this.toast('Restored a version for everyone')
   }
@@ -504,11 +503,12 @@ export class ProjectStore {
   }
 
   setView(view: WorkspaceView) {
-    if (view !== 'beats' && this.view === 'beats') {
+    const next = preferArrangeView(view)
+    if (next !== 'beats' && this.view === 'beats') {
       this.clearRackRoll()
       this.rackRoll = false
     }
-    this.view = view
+    this.view = next
     this.emit()
   }
 
@@ -527,7 +527,7 @@ export class ProjectStore {
   }
 
   setTransportMode(mode: 'arrangement' | 'session') {
-    this.transportMode = mode
+    this.transportMode = preferArrangeTransport(mode)
     this.emit()
   }
 
@@ -3704,7 +3704,7 @@ export class ProjectStore {
     this.launchGen = launchGen
     this.stopAt = stopAt
     this.transportMode = 'session'
-    this.view = 'session'
+    if (FEATURES.session) this.view = 'session'
     this.pendingTransport = { action: 'scene', scene, timelineSample: at, slots, gen: launchGen }
     this.emit()
   }
@@ -3876,7 +3876,7 @@ export class ProjectStore {
   }
 
   enterSession() {
-    if (this.remoteFollow) return
+    if (this.remoteFollow || !FEATURES.session) return
     this.transportMode = 'session'
     this.view = 'session'
     this.emit()
@@ -3907,8 +3907,8 @@ export class ProjectStore {
     this.launchAt = { ...next.at }
     this.launchGen = { ...next.gen }
     this.stopAt = {}
-    this.transportMode = next.mode
-    if (next.mode === 'session') this.view = 'session'
+    this.transportMode = preferArrangeTransport(next.mode)
+    if (next.mode === 'session' && FEATURES.session) this.view = 'session'
     if (next.mode === 'arrangement') this.view = 'arrange'
     this.pendingTransport = null
     this.emit()
