@@ -227,14 +227,12 @@
   padding: 0 8px;
   gap: 4px;
 }
-.tool-label { display: none; font-size: 12px; font-weight: 640; }
-.shell.phone:not(.land) .tool-label,
-.shell.fold .tool-label { display: inline; }
+.tool-label { display: inline; font-size: 12px; font-weight: 650; line-height: 1; white-space: nowrap; }
 .shell.fold .arrange { grid-template-columns: 220px minmax(0, 1fr); --lane-h: 76px; }
 .shell.fold .pl-head { flex-wrap: nowrap; height: 100%; align-items: center; }
 .shell.fold .pl-head .name { flex: 1 1 72px; min-width: 56px; }
 .shell.phone:not(.land) .tool-slot .timeline-tools { flex-wrap: wrap; overflow: visible; }
-.shell.phone:not(.land) .tool-strip { flex: 1 1 100%; min-width: 0; overflow-x: auto; }
+.shell.phone:not(.land) .tool-strip { flex: 1 1 auto; min-width: 0; overflow: visible; }
 .shell.phone:not(.land) .tool-chip {
   flex: 1 1 100%;
   white-space: normal;

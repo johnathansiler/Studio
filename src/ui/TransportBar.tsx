@@ -224,7 +224,7 @@ export function TransportBar({
       <AutomationFollow store={store} engine={engine} />
       <div className="t-buttons">
         <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>
-          <span className="t-word">Start</span>
+          <span className="t-word">Reset</span>
         </TipButton>
         <TipButton className={`t-btn play ${playing ? 'on' : ''}`} label={playing ? transport('pause').label : transport('play').label} hint={playing ? transport('pause').hint : transport('play').hint} pressed={playing} onPress={() => engine.unlock()} onClick={onPlay}>
           <span className="t-word">{playing ? 'Pause' : 'Play'}</span>
@@ -234,6 +234,12 @@ export function TransportBar({
         </TipButton>
         <TipButton className={`t-btn rec ${status === 'recording' || status === 'counting-in' ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={status === 'recording' || status === 'counting-in'} onPress={() => engine.unlock()} onClick={onRecord}>
           <span className="t-word">Rec</span>
+        </TipButton>
+        <TipButton className={`t-btn click ${project.metronomeEnabled ? 'on' : ''}`} label={transport('click').label} hint={transport('click').hint} pressed={project.metronomeEnabled} disabled={store.remoteFollow} onClick={() => store.toggle('metronomeEnabled')}>
+          <span className="t-word">Click</span>
+        </TipButton>
+        <TipButton className={`t-btn count ${project.countIn ? 'on' : ''}`} label={transport('count-in').label} hint={transport('count-in').hint} pressed={project.countIn} disabled={store.remoteFollow} onClick={() => store.toggle('countIn')}>
+          <span className="t-word">Count-in</span>
         </TipButton>
         {desk && (
           <button

@@ -118,7 +118,10 @@
   height: 28px;
   max-height: 28px;
   padding: 0 4px;
-  overflow: hidden;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
 .shell.phone.land .tool-slot .timeline-tools {
   flex-wrap: nowrap;
@@ -127,12 +130,17 @@
   gap: 2px;
 }
 .shell.phone.land .tool-slot .timeline-tools button,
-.shell.phone.land .tool-strip button {
-  width: 28px;
+.shell.phone.land .tool-strip button,
+.shell.phone.land .command-strip > .tool,
+.shell.phone.land .command-strip .add-track-btn {
+  width: auto;
   height: 26px;
-  min-width: 28px;
+  min-width: 40px;
   min-height: 0;
+  padding: 0 6px;
 }
+.shell.phone.land .command-strip { flex-wrap: nowrap; }
+.shell.phone.land .tool-label { font-size: 11px; }
 .shell.phone.land .tool-chip {
   order: 1;
   flex: 0 1 96px;

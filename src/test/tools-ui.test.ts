@@ -55,9 +55,11 @@ describe('edit tool chrome', () => {
     expect(toolChip('pencil', 'arrange')).toBe('Draw: tap a lane to add a clip')
   })
 
-  it('puts every tool on the phone strip, essentials first, with nothing listed twice', () => {
+  it('keeps the common tools on the strip and the rare tools for the menu, with nothing listed twice', () => {
     const visible = PRIMARY_TOOLS.map((id) => ({ id }))
     const later = SHEET_TOOLS.map((id) => ({ id }))
+    expect(PRIMARY_TOOLS).toEqual(['select', 'pencil', 'split', 'trim', 'zoom'])
+    expect(SHEET_TOOLS).toEqual(['box', 'erase', 'pan'])
     expect(sharesId(visible, later)).toEqual([])
     expect(compactToolOrder()).toEqual([...PRIMARY_TOOLS, ...SHEET_TOOLS])
     expect([...compactToolOrder()].sort()).toEqual(ARRANGE_TOOLS.map((tool) => tool.id).sort())
@@ -73,7 +75,7 @@ describe('edit tool chrome', () => {
     }
   })
 
-  it('shows every tool inline on a phone, with the active chip and no sheet', () => {
+  it('shows the common tools inline, with the active chip and no sheet', () => {
     setActiveTool('pencil')
     const html = markup(true, 'piano')
     expect(html).toContain('Draw: tap to add notes')
@@ -82,7 +84,8 @@ describe('edit tool chrome', () => {
     expect(html).toContain('class="tool-strip"')
     expect(html).not.toContain('More tools')
     expect(html).not.toContain('role="dialog"')
-    for (const tool of ARRANGE_TOOLS) expect(html).toContain(TOOL_INFO[tool.id].label)
+    for (const id of PRIMARY_TOOLS) expect(html).toContain(TOOL_INFO[id].label)
+    for (const id of SHEET_TOOLS) expect(html).not.toContain(`>${TOOL_INFO[id].label}<`)
     for (const action of TOOL_ACTIONS) expect(html).toContain(action.hint)
   })
 
@@ -146,14 +149,15 @@ describe('mobile control lists', () => {
     expect(sharesId(PRIMARY_TOOLS.map((id) => ({ id })), [...TOOL_ACTIONS])).toEqual([])
   })
 
-  it('keeps start, play, stop, and record on every transport, including the phone', () => {
+  it('keeps reset, play, stop, record, loop, click, and count-in on the transport, not in the menu', () => {
     expect([...PHONE_TRANSPORT_MENU]).toEqual([])
-    for (const id of ['to-start', 'play', 'pause', 'stop', 'record', 'loop']) {
+    for (const id of ['to-start', 'play', 'pause', 'stop', 'record', 'loop', 'click', 'count-in']) {
       expect(TRANSPORT_COPY.some((item) => item.id === id)).toBe(true)
     }
-    for (const id of ['to-start', 'loop']) {
-      expect(MENU_COPY.some((item) => item.id === id)).toBe(true)
-      expect(visibleMenu({ phone: true, session: false, dockBottom: false, hardwareMidi: false }).some((item) => item.id === id)).toBe(true)
+    expect(TRANSPORT_COPY.find((item) => item.id === 'to-start')?.label).toBe('Reset')
+    for (const id of ['to-start', 'loop', 'click', 'count-in', 'quantize']) {
+      expect(MENU_COPY.some((item) => item.id === id)).toBe(false)
+      expect(visibleMenu({ phone: true, session: false, dockBottom: false, hardwareMidi: false }).some((item) => item.id === id)).toBe(false)
       expect(visibleMenu({ phone: false, session: false, dockBottom: false, hardwareMidi: false }).some((item) => item.id === id)).toBe(false)
     }
   })
@@ -177,17 +181,17 @@ describe('mobile control lists', () => {
     const phone = visibleMenu({ phone: true, session: false, dockBottom: false, hardwareMidi: true })
     expect(desk.map((item) => item.action)).toEqual([
       'new', 'open', 'save', 'export',
-      'quantize',
+      'box', 'erase', 'pan',
       'session-mode', 'dock',
       'scaler', 'players', 'midi',
-      'click', 'count-in', 'signature', 'shortcuts',
+      'signature', 'shortcuts',
     ])
     expect(phone.map((item) => item.action)).toEqual([
       'new', 'open', 'save', 'export',
-      'quantize', 'to-start', 'loop',
+      'box', 'erase', 'pan',
       'session-mode', 'capture',
       'players', 'midi',
-      'click', 'count-in', 'signature', 'shortcuts',
+      'signature', 'shortcuts',
     ])
     const phoneCore = phone.filter((item) => !['to-start', 'loop', 'capture'].includes(item.action))
     expect(phoneCore.length).toBeLessThan(desk.length)

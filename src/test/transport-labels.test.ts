@@ -45,7 +45,7 @@ const VIEWPORTS = [
 ]
 
 describe('transport words', () => {
-  it('shows Start, Play, Stop, Rec, and Loop on desktop, phone, and fold, and lights Play only while playing', async () => {
+  it('shows Reset, Play, Stop, Rec, Click, Count-in, and Loop on desktop, phone, and fold, and lights Play only while playing', async () => {
     const browser = await chromium.launch({ headless: true })
     try {
       const page = await browser.newPage()
@@ -53,7 +53,7 @@ describe('transport words', () => {
         await page.setViewportSize({ width: viewport.width, height: viewport.height })
         await page.setContent(transportPage(viewport.shell), { waitUntil: 'load' })
         const report = await page.evaluate(() => {
-          const words = ['Start', 'Play', 'Stop', 'Rec', 'Loop']
+          const words = ['Reset', 'Play', 'Stop', 'Rec', 'Click', 'Count-in', 'Loop']
           const buttons = words.map((word) => {
             const node = [...document.querySelectorAll<HTMLElement>('.transport .t-word')].find((item) => item.textContent === word)!
             const button = node.closest('button') as HTMLElement
