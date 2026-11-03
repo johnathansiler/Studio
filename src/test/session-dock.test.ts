@@ -150,7 +150,7 @@ async function drawAndTrim(page: Page) {
 }
 
 describe('arrange on first load', () => {
-  it('keeps Session closed at phone and desktop widths, and trims a clip from its edge', async () => {
+  it('keeps Arrange and Collab working with no Session UI, and trims a clip from its edge', async () => {
     const port = 4179
     const url = `http://127.0.0.1:${port}`
     const child = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
@@ -176,39 +176,15 @@ describe('arrange on first load', () => {
       const page = await context.newPage()
       await page.goto(url, { waitUntil: 'domcontentloaded' })
       await spansArrange(page)
-      await page.getByRole('button', { name: /^Session/ }).click()
-      await page.locator('[data-session-view="open"]').waitFor()
-      expect(await page.locator('.track-stop').first().getAttribute('aria-label')).toMatch(/Stop/)
-      await page.locator('[data-session-browser="open"]').waitFor()
-      await page.locator('[data-session-detail="open"]').waitFor()
-      await page.locator('[data-mixer]').first().waitFor()
-      const slot = page.locator('.session-col').nth(2).locator('.slot').first()
-      await slot.dblclick()
-      await expect.poll(async () => slot.innerText()).toContain('Clip')
-      await page.getByRole('button', { name: /^Play/ }).click()
-      await page.waitForFunction(() => /1\.2\./.test(document.querySelector('.lcd .bars')?.textContent || ''), null, { timeout: 8000 })
-      await slot.locator('[data-slot-launch]').click()
-      await page.locator('.slot[data-phase="queued"]').waitFor()
-      const fit = await page.evaluate(() => {
-        const browser = document.querySelector('.sl-browser')!.getBoundingClientRect()
-        const detail = document.querySelector('.sl-detail')!.getBoundingClientRect()
-        const work = document.querySelector('.workspace')!.getBoundingClientRect()
-        const rights = [...document.querySelectorAll('.sl-browser button, .sl-detail button, .sl-detail select, .sl-head, .slot')].map((el) => el.getBoundingClientRect().right)
-        return {
-          browserRight: browser.right,
-          detailRight: detail.right,
-          detailBottom: detail.bottom,
-          workRight: work.right,
-          vw: window.innerWidth,
-          vh: window.innerHeight,
-          maxControl: Math.max(...rights),
-        }
-      })
-      expect(fit.browserRight).toBeLessThanOrEqual(fit.vw + 1)
-      expect(fit.detailRight).toBeLessThanOrEqual(fit.vw + 1)
-      expect(fit.detailBottom).toBeLessThanOrEqual(fit.vh + 1)
-      expect(fit.workRight).toBeLessThanOrEqual(fit.vw + 1)
-      expect(fit.maxControl).toBeLessThanOrEqual(fit.vw + 1)
+      expect(await page.getByRole('button', { name: /^Session/ }).count()).toBe(0)
+      expect(await page.locator('[data-session-view="open"]').count()).toBe(0)
+      expect(await page.locator('[data-session-browser="open"]').count()).toBe(0)
+      expect(await page.getByRole('button', { name: /To arrangement/ }).count()).toBe(0)
+      await page.getByRole('button', { name: /^Menu/ }).click()
+      const actions = await page.locator('#shell-menu [data-menu-action]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-menu-action')))
+      expect(actions).not.toContain('session-mode')
+      expect(actions).not.toContain('capture')
+      await page.keyboard.press('Escape')
       expect(await page.getByRole('button', { name: /Create invite/ }).count()).toBe(0)
       expect(await page.locator('[data-collab-panel="open"]').count()).toBe(0)
       for (const tab of [/^Arrange/, /^Mix/, /^Beats/]) {
