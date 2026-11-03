@@ -1,20 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { performanceOwnsMidi, stepOwnsMidi } from '../midi/remember'
+import { heardBeat } from '../model/midiClock'
 import {
   claimComputerKey,
+  keyboardDestination,
   keyboardHome,
   keyboardPitch,
-  keyboardTarget,
+  keyboardStart,
   rollOwnsKeys,
 } from '../model/keyboardPlay'
+import { armKey, releaseKey, takeGroups, type ArmedKey, type RecordedKey } from '../model/keyboardRecord'
+import { samplesToBeats } from '../model/time'
 import { typingTarget } from '../state/history'
 import type { ProjectStore } from '../state/store'
-import { blackAfter, keyboardNotes, octaveName } from './kit/controls'
+import { octaveName } from './kit/controls'
+import { notifyKeyboard } from './keyboardStage'
+import { miniPads, padGridColumn, padLabel } from './miniKeys'
 
 /** Play one note on the same immediate path as a MIDI or on-screen key. */
 export function playKeyboardNote(store: ProjectStore, engine: AudioEngine, pitch: number, velocity = 0.85) {
-  const trackId = keyboardTarget(store.project.tracks, store.selectedTrackId)
+  const trackId = keyboardDestination(store.project.tracks, store.selectedTrackId, store.selectedMidiClipId)?.trackId
   const level = Math.max(0.05, Math.min(1, velocity))
   if (trackId) engine.playThrough(trackId, pitch, level)
   else {
@@ -24,9 +30,88 @@ export function playKeyboardNote(store: ProjectStore, engine: AudioEngine, pitch
 }
 
 export function releaseKeyboardNote(store: ProjectStore, engine: AudioEngine, pitch: number) {
-  const trackId = keyboardTarget(store.project.tracks, store.selectedTrackId)
+  const trackId = keyboardDestination(store.project.tracks, store.selectedTrackId, store.selectedMidiClipId)?.trackId
   if (trackId) engine.releaseThrough(trackId, pitch)
   else engine.liveNoteOff(pitch)
+}
+
+/** Open-clip notes join that clip. Other notes become one MIDI take per track. */
+export function commitKeyboardNotes(store: ProjectStore, notes: RecordedKey[]) {
+  for (const note of notes) {
+    if (!note.clipId) continue
+    store.addNote(note.trackId, note.clipId, {
+      pitch: note.pitch,
+      startBeat: note.startBeat,
+      durationBeats: note.durationBeats,
+      velocity: note.velocity,
+    })
+  }
+  for (const group of takeGroups(notes)) {
+    if (!group.notes.length) continue
+    store.placeMidiTake(group.trackId, group.startBeat, group.notes, 'Keyboard')
+  }
+}
+
+function beatAt(store: ProjectStore, engine: AudioEngine, eventMs: number) {
+  if (typeof engine.playOrigin === 'function' && typeof engine.outputStamp === 'function' && typeof engine.clockCompensation === 'function') {
+    const origin = engine.playOrigin()
+    const clock = engine.clockCompensation()
+    return Math.max(0, heardBeat({
+      eventMs,
+      stamp: engine.outputStamp(),
+      originContext: origin.context,
+      originBeat: origin.beat,
+      tempo: store.project.tempo,
+      outputLatency: clock.outputLatency,
+      baseLatency: clock.baseLatency,
+      calibrationSec: clock.calibrationSec,
+      quantizeBeats: store.project.quantizeBeats || 0,
+    }))
+  }
+  return Math.max(0, samplesToBeats(engine.positionSamples || 0, store.project.sampleRate, store.project.tempo))
+}
+
+export function KeyboardToggle({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
+  return (
+    <button
+      type="button"
+      className={`keyboard-toggle${store.keyboardMidi ? ' on' : ''}`}
+      aria-pressed={store.keyboardMidi}
+      aria-label="Keyboard. Show the on-screen piano."
+      title="Show the on-screen piano."
+      onClick={() => {
+        engine.unlock()
+        const next = !store.keyboardMidi
+        store.setKeyboardMidi(next)
+        notifyKeyboard(next)
+      }}
+    >
+      <KeyboardIcon />
+      <span>Keyboard</span>
+    </button>
+  )
+}
+
+/** Close and Keyboard stay outside the scrolling tool row. */
+export function EditorPinned({
+  store,
+  engine,
+  onClose,
+}: {
+  store: ProjectStore
+  engine: AudioEngine
+  onClose?: () => void
+}) {
+  return (
+    <div className="roll-pinned">
+      {onClose && (
+        <button type="button" className="roll-close" onClick={onClose}>
+          Close
+        </button>
+      )}
+      <KeyboardToggle store={store} engine={engine} />
+    </div>
+  )
 }
 
 export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
@@ -34,9 +119,13 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
   const octave = editor.octave
   const [lit, setLit] = useState<number[]>([])
   const held = useRef(new Map<string, number>())
-  const root = useRef<HTMLDivElement>(null)
+  const armed = useRef<ArmedKey[]>([])
+  const pending = useRef<RecordedKey[]>([])
+  const recording = useRef(engine.status === 'recording')
   const shiftRef = useRef<(delta: -1 | 1) => void>(() => undefined)
   const octaveRef = useRef(octave)
+  const pressRef = useRef<(token: string, pitch: number, velocity: number, eventMs: number) => void>(() => undefined)
+  const releaseRef = useRef<(token: string, eventMs: number) => void>(() => undefined)
   octaveRef.current = octave
 
   function shift(delta: -1 | 1) {
@@ -44,23 +133,72 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
   }
   shiftRef.current = shift
 
-  function down(token: string, pitch: number, velocity = 0.85) {
-    if (held.current.has(token)) return
-    held.current.set(token, pitch)
-    playKeyboardNote(store, engine, pitch, velocity)
+  function paint() {
     setLit([...new Set(held.current.values())])
   }
 
-  function up(token: string) {
+  function flush(nowMs: number) {
+    const end = beatAt(store, engine, nowMs)
+    const finished: RecordedKey[] = []
+    for (const key of armed.current) {
+      const released = releaseKey([key], key.token, end)
+      if (released.note) finished.push(released.note)
+    }
+    armed.current = []
+    finished.push(...pending.current)
+    pending.current = []
+    if (finished.length) commitKeyboardNotes(store, finished)
+  }
+
+  function press(token: string, pitch: number, velocity = 0.85, eventMs = performance.now()) {
+    if (held.current.has(token)) return
+    const level = Math.max(0.05, Math.min(1, velocity))
+    held.current.set(token, pitch)
+    playKeyboardNote(store, engine, pitch, level)
+    if (recording.current) {
+      const dest = keyboardDestination(store.project.tracks, store.selectedTrackId, store.selectedMidiClipId)
+      if (dest) {
+        armed.current = armKey(armed.current, {
+          token,
+          trackId: dest.trackId,
+          clipId: dest.clipId,
+          clipStart: dest.clipStart,
+          pitch,
+          velocity: level,
+          startBeat: beatAt(store, engine, eventMs),
+        })
+      }
+    }
+    paint()
+  }
+  pressRef.current = press
+
+  function release(token: string, eventMs = performance.now()) {
     const pitch = held.current.get(token)
     if (pitch == null) return
     held.current.delete(token)
-    releaseKeyboardNote(store, engine, pitch)
-    setLit([...new Set(held.current.values())])
+    const still = [...held.current.values()].some((item) => item === pitch)
+    if (!still) releaseKeyboardNote(store, engine, pitch)
+    const released = releaseKey(armed.current, token, beatAt(store, engine, eventMs))
+    armed.current = released.keys
+    if (released.note && recording.current) {
+      if (released.note.clipId) commitKeyboardNotes(store, [released.note])
+      else pending.current.push(released.note)
+    }
+    paint()
   }
+  releaseRef.current = release
 
   useEffect(() => {
-    const keys = held.current
+    recording.current = engine.status === 'recording'
+    return engine.subscribe(() => {
+      const next = engine.status === 'recording'
+      if (recording.current && !next) flush(performance.now())
+      recording.current = next
+    })
+  }, [store, engine])
+
+  useEffect(() => {
     const onDown = (event: KeyboardEvent) => {
       const claim = claimComputerKey({
         enabled: store.keyboardMidi,
@@ -68,7 +206,7 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
         meta: event.metaKey || event.ctrlKey,
         alt: event.altKey,
         repeat: event.repeat,
-        held: keys.has(event.code || event.key),
+        held: held.current.has(event.code || event.key),
         code: event.code,
         key: event.key,
       })
@@ -84,15 +222,15 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
       if (claim === 'note') {
         const home = keyboardHome(event.code, event.key)
         if (home == null) return
-        down(event.code || event.key, keyboardPitch(home, octaveRef.current))
+        pressRef.current(event.code || event.key, keyboardPitch(home, octaveRef.current), 0.85, event.timeStamp)
       }
     }
     const onUp = (event: KeyboardEvent) => {
       if (!store.keyboardMidi) return
-      up(event.code || event.key)
+      releaseRef.current(event.code || event.key, event.timeStamp)
     }
     const blur = () => {
-      for (const token of [...keys.keys()]) up(token)
+      for (const token of [...held.current.keys()]) releaseRef.current(token, performance.now())
     }
     window.addEventListener('keydown', onDown)
     window.addEventListener('keyup', onUp)
@@ -106,55 +244,76 @@ export function KeyboardDock({ store, engine }: { store: ProjectStore; engine: A
   }, [store, engine, store.keyboardMidi])
 
   if (!store.keyboardMidi) return null
-  const start = 48 + octave * 12
-  const whites = keyboardNotes(2, Math.max(0, Math.min(96, start)))
-  const top = whites[whites.length - 1]
-  const name = octaveName(60 + octave * 12)
+  const pads = miniPads(octave)
+  const name = octaveName(keyboardStart(octave))
+  const atBottom = octave <= -4
+  const atTop = octave >= 5
   return (
-    <div className="keyboard-dock" data-keyboard-dock="open" ref={root}>
+    <div className="keyboard-dock" data-keyboard-dock="open" data-keyboard="pads">
+      <div className="keyboard-face">
       <div className="keyboard-octave" role="group" aria-label="Octave">
-        <button type="button" aria-label="Octave down" title="Z lowers the keyboard by one octave." onClick={() => shift(-1)}>Z</button>
+        <button type="button" disabled={atBottom} onClick={() => shift(-1)}>Octave Down</button>
         <span aria-live="polite">{name}</span>
-        <button type="button" aria-label="Octave up" title="X raises the keyboard by one octave." onClick={() => shift(1)}>X</button>
+        <button type="button" disabled={atTop} onClick={() => shift(1)}>Octave Up</button>
+        <button type="button" className="keyboard-close" onClick={() => { store.setKeyboardMidi(false); notifyKeyboard(false) }}>Close</button>
       </div>
-      <div className="keyboard-keys" role="group" aria-label="Piano keyboard">
-        {whites.map((note) => {
-          const black = blackAfter(note)
-          const showBlack = black != null && black < top
-          return (
-            <div className="slot" key={note}>
-              <button
-                type="button"
-                className={`white${lit.includes(note) ? ' lit' : ''}`}
-                data-pitch={note}
-                aria-label={((note % 12) + 12) % 12 === 0 ? octaveName(note) : `Note ${note}`}
-                onPointerDown={(event) => {
-                  event.preventDefault()
-                  try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* already released */ }
-                  down(`ptr:${event.pointerId}`, note, event.pressure > 0 && event.pressure < 1 ? event.pressure : 0.85)
-                }}
-                onPointerUp={(event) => up(`ptr:${event.pointerId}`)}
-                onPointerCancel={(event) => up(`ptr:${event.pointerId}`)}
-              />
-              {showBlack && (
-                <button
-                  type="button"
-                  className={`black${lit.includes(black) ? ' lit' : ''}`}
-                  data-pitch={black}
-                  aria-label={`Note ${black}`}
-                  onPointerDown={(event) => {
-                    event.preventDefault()
-                    try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* already released */ }
-                    down(`ptr:${event.pointerId}`, black, event.pressure > 0 && event.pressure < 1 ? event.pressure : 0.85)
-                  }}
-                  onPointerUp={(event) => up(`ptr:${event.pointerId}`)}
-                  onPointerCancel={(event) => up(`ptr:${event.pointerId}`)}
-                />
-              )}
-            </div>
-          )
-        })}
+      <div className="mini-board" role="group" aria-label="Piano keyboard">
+        {pads.sharps.map((pad) => (
+          <button
+            key={pad.pitch}
+            type="button"
+            className={`mini-pad sharp${lit.includes(pad.pitch) ? ' lit' : ''}`}
+            data-pitch={pad.pitch}
+            data-key={pad.kind}
+            aria-label={padLabel(pad, name)}
+            style={{ gridColumn: padGridColumn(pad) }}
+            onPointerDown={(event) => {
+              event.preventDefault()
+              try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* already released */ }
+              press(`ptr:${event.pointerId}`, pad.pitch, event.pressure > 0 && event.pressure < 1 ? event.pressure : 0.85, event.timeStamp)
+            }}
+            onPointerUp={(event) => release(`ptr:${event.pointerId}`, event.timeStamp)}
+            onPointerCancel={(event) => release(`ptr:${event.pointerId}`, event.timeStamp)}
+            onLostPointerCapture={(event) => release(`ptr:${event.pointerId}`, event.timeStamp)}
+          >
+            {pad.name}
+          </button>
+        ))}
+        {pads.naturals.map((pad) => (
+          <button
+            key={pad.pitch}
+            type="button"
+            className={`mini-pad natural${lit.includes(pad.pitch) ? ' lit' : ''}`}
+            data-pitch={pad.pitch}
+            data-key={pad.kind}
+            aria-label={padLabel(pad, name)}
+            style={{ gridColumn: padGridColumn(pad) }}
+            onPointerDown={(event) => {
+              event.preventDefault()
+              try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* already released */ }
+              press(`ptr:${event.pointerId}`, pad.pitch, event.pressure > 0 && event.pressure < 1 ? event.pressure : 0.85, event.timeStamp)
+            }}
+            onPointerUp={(event) => release(`ptr:${event.pointerId}`, event.timeStamp)}
+            onPointerCancel={(event) => release(`ptr:${event.pointerId}`, event.timeStamp)}
+            onLostPointerCapture={(event) => release(`ptr:${event.pointerId}`, event.timeStamp)}
+          >
+            {pad.name}
+          </button>
+        ))}
+      </div>
       </div>
     </div>
+  )
+}
+
+function KeyboardIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="1.5" y="6" width="3" height="8" rx="0.6" fill="currentColor" />
+      <rect x="6.5" y="6" width="3" height="8" rx="0.6" fill="currentColor" />
+      <rect x="11.5" y="6" width="3" height="8" rx="0.6" fill="currentColor" />
+      <rect x="4.2" y="2" width="2.4" height="6" rx="0.5" fill="currentColor" />
+      <rect x="9.4" y="2" width="2.4" height="6" rx="0.5" fill="currentColor" />
+    </svg>
   )
 }

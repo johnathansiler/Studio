@@ -18,7 +18,7 @@ import { createEmptyProject } from '../model/types'
 import { typingTarget } from '../state/history'
 import { ProjectStore } from '../state/store'
 import { TransportBar } from '../ui/TransportBar'
-import { playKeyboardNote } from '../ui/KeyboardDock'
+import { KeyboardDock, playKeyboardNote } from '../ui/KeyboardDock'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const css = ['src/styles.css', 'src/ui/premium.css'].map((file) => readFileSync(resolve(root, file), 'utf8')).join('\n')
@@ -77,7 +77,7 @@ describe('computer keyboard', () => {
     expect(played[0]).toBe(`${midi.id}:64`)
   })
 
-  it('shows a beveled Keyboard button on the desktop transport', () => {
+  it('shows a beveled Keyboard button on the transport for every screen', () => {
     const store = new ProjectStore(createEmptyProject())
     store.keyboardMidi = true
     const engine = {
@@ -89,7 +89,6 @@ describe('computer keyboard', () => {
     const html = renderToStaticMarkup(createElement(TransportBar, {
       store,
       engine,
-      desk: true,
       onPlay() {},
       onStop() {},
       onRecord() {},
@@ -98,22 +97,32 @@ describe('computer keyboard', () => {
     expect(html).toContain('keyboard-toggle on')
     expect(html).toContain('>Keyboard<')
     expect(html).toContain('aria-pressed="true"')
-    const hidden = renderToStaticMarkup(createElement(TransportBar, {
+    store.keyboardMidi = false
+    const off = renderToStaticMarkup(createElement(TransportBar, {
       store,
       engine,
-      desk: false,
       onPlay() {},
       onStop() {},
       onRecord() {},
       onSeek() {},
     }))
-    expect(hidden).not.toContain('keyboard-toggle')
+    expect(off).toContain('keyboard-toggle')
+    expect(off).toContain('aria-pressed="false"')
   })
 })
 
 describe('keyboard dock screenshot', () => {
-  it('shows the toggle on and the piano docked at the bottom', async () => {
+  it('shows the toggle on and the pad keyboard docked at the bottom', async () => {
     mkdirSync('/opt/cursor/artifacts', { recursive: true })
+    const store = new ProjectStore(createEmptyProject())
+    store.keyboardMidi = true
+    const engine = {
+      unlock() {},
+      positionSamples: 0,
+      status: 'stopped',
+      subscribe: () => () => undefined,
+    } as unknown as AudioEngine
+    const dock = renderToStaticMarkup(createElement(KeyboardDock, { store, engine }))
     const browser = await chromium.launch()
     try {
       const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
@@ -122,10 +131,10 @@ describe('keyboard dock screenshot', () => {
 <head><style>
   html, body { margin: 0; height: 100%; background: #0e1512; }
   ${css}
-  .shell { height: 800px; }
+  .shell { height: 800px; --accent: #c45b73; --accent-ink: #1a0c10; }
 </style></head>
 <body>
-<div class="shell studio desk-keys" data-form="desk">
+<div class="shell studio keys-open" data-form="desk">
   <header class="topbar"><div class="brand"><h1>CueHarbor</h1></div></header>
   <div class="transport">
     <div class="t-buttons">
@@ -134,37 +143,57 @@ describe('keyboard dock screenshot', () => {
   </div>
   <div class="tool-slot"></div>
   <div class="workspace"><div class="arrange" style="background:#121a16"></div></div>
-  <div class="keyboard-dock" data-keyboard-dock="open">
-    <div class="keyboard-octave" role="group" aria-label="Octave">
-      <button type="button">Z</button>
-      <span>C4</span>
-      <button type="button">X</button>
-    </div>
-    <div class="keyboard-keys" role="group" aria-label="Piano keyboard">
-      ${Array.from({ length: 14 }, () => '<div class="slot"><button type="button" class="white"></button></div>').join('')}
-    </div>
-  </div>
+  ${dock}
 </div>
 </body></html>`, { waitUntil: 'load' })
       const box = await page.evaluate(() => {
         const shell = document.querySelector('.shell')!.getBoundingClientRect()
-        const dock = document.querySelector('.keyboard-dock')!.getBoundingClientRect()
+        const dockNode = document.querySelector('.keyboard-dock')!.getBoundingClientRect()
         const work = document.querySelector('.workspace')!.getBoundingClientRect()
         const button = document.querySelector('.keyboard-toggle')!.getBoundingClientRect()
-        const label = document.querySelector('.keyboard-toggle span')!.textContent
+        const pad = document.querySelector('.mini-pad.natural') as HTMLElement
+        const sharp = document.querySelector('.mini-pad.sharp') as HTMLElement
+        const down = [...document.querySelectorAll('.keyboard-octave button')].find((node) => node.textContent === 'Octave Down') as HTMLElement
+        const style = getComputedStyle(pad)
+        const accent = getComputedStyle(document.querySelector('.shell')!).getPropertyValue('--accent').trim()
         return {
-          dockTop: dock.top,
+          dockTop: dockNode.top,
           workBottom: work.bottom,
           shellBottom: shell.bottom,
-          dockBottom: dock.bottom,
+          dockBottom: dockNode.bottom,
           buttonWidth: button.width,
-          label,
+          buttonHeight: button.height,
+          label: document.querySelector('.keyboard-toggle span')!.textContent,
           octave: document.querySelector('.keyboard-octave span')!.textContent,
+          naturals: document.querySelectorAll('.mini-pad.natural').length,
+          sharps: document.querySelectorAll('.mini-pad.sharp').length,
+          padHeight: pad.getBoundingClientRect().height,
+          sharpHeight: sharp.getBoundingClientRect().height,
+          downHeight: down.getBoundingClientRect().height,
+          downBottom: down.getBoundingClientRect().bottom,
+          padTop: pad.getBoundingClientRect().top,
+          sharpTop: sharp.getBoundingClientRect().top,
+          downLabel: down.textContent,
+          border: style.borderTopColor,
+          accent,
+          background: style.backgroundColor,
         }
       })
       expect(box.label).toBe('Keyboard')
       expect(box.buttonWidth).toBeGreaterThan(80)
-      expect(box.octave).toBe('C4')
+      expect(box.buttonHeight).toBeGreaterThanOrEqual(40)
+      expect(box.octave).toBe('C3')
+      expect(box.naturals).toBe(7)
+      expect(box.sharps).toBe(5)
+      expect(box.padHeight).toBeGreaterThanOrEqual(40)
+      expect(box.sharpHeight).toBeGreaterThanOrEqual(40)
+      expect(box.downHeight).toBeGreaterThanOrEqual(40)
+      expect(box.downLabel).toBe('Octave Down')
+      expect(box.downBottom).toBeLessThanOrEqual(box.sharpTop + 1)
+      expect(box.downBottom).toBeLessThanOrEqual(box.padTop + 1)
+      expect(box.accent).toBe('#c45b73')
+      expect(box.background).not.toBe('rgb(115, 196, 143)')
+      expect(box.border).not.toBe('rgb(115, 196, 143)')
       expect(box.dockTop).toBeGreaterThanOrEqual(box.workBottom - 1)
       expect(box.dockBottom).toBeLessThanOrEqual(box.shellBottom + 1)
       await page.screenshot({ path: '/opt/cursor/artifacts/keyboard-desktop.png' })

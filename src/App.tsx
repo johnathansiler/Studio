@@ -75,6 +75,7 @@ import { deletesSelection } from './ui/clipKeys'
 import { historyCommand, typingTarget } from './state/history'
 import { claimComputerKey } from './model/keyboardPlay'
 import { KeyboardDock } from './ui/KeyboardDock'
+import { browserLandscapeHost, dismissKeyboard, isPianoHistory, markPianoHistory, presentKeyboard, setKeyboardPresenter, type KeyboardPresentation } from './ui/keyboardStage'
 import { HintBubble, TipButton } from './ui/Hint'
 import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
@@ -213,6 +214,10 @@ export function App() {
   const [collabOpen, setCollabOpen] = useState(() => readSessionDock())
   const [invitePending, setInvitePending] = useState(false)
   const [pianoOpen, setPianoOpen] = useState(false)
+  const shellRef = useRef<HTMLDivElement>(null)
+  const [keysTurned, setKeysTurned] = useState(false)
+  const keysMode = useRef<KeyboardPresentation>('dock')
+  const keysFromClick = useRef(false)
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
@@ -817,6 +822,20 @@ export function App() {
       else if (event.key === 'Home' || event.key === 'Enter') void returnToStart()
       else if (event.key === '?' || (event.shiftKey && event.key === '/')) setHelp((open) => !open)
       else if (event.key === 'Escape') {
+        if (help) {
+          setHelp(false)
+          return
+        }
+        if (menuOpen) {
+          setMenuOpen(false)
+          return
+        }
+        if (editorPanel.current === 'piano') {
+          event.preventDefault()
+          if (isPianoHistory(history.state)) history.back()
+          else closePiano()
+          return
+        }
         setHelp(false)
         setMenuOpen(false)
       }
@@ -1524,6 +1543,68 @@ async function importDropped(files: FileList) {
     store.closePiano()
   }
 
+  useEffect(() => {
+    if (panel !== 'piano') return
+    markPianoHistory(history)
+    let popped = false
+    const onPop = () => {
+      popped = true
+      closePiano()
+    }
+    window.addEventListener('popstate', onPop)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      if (!popped && isPianoHistory(history.state)) history.back()
+    }
+  }, [panel === 'piano'])
+
+  useEffect(() => {
+    const host = () => browserLandscapeHost(shellRef.current, form, window.innerHeight >= window.innerWidth)
+    setKeyboardPresenter((on) => {
+      keysFromClick.current = true
+      void (async () => {
+        if (!on || form !== 'phone') {
+          await dismissKeyboard(host(), keysMode.current)
+          keysMode.current = 'dock'
+          setKeysTurned(false)
+          return
+        }
+        const mode = await presentKeyboard(host())
+        keysMode.current = mode
+        setKeysTurned(mode === 'turned')
+      })()
+    })
+    return () => setKeyboardPresenter(null)
+  }, [form])
+
+  useEffect(() => {
+    if (keysFromClick.current) {
+      keysFromClick.current = false
+      return
+    }
+    let cancel = false
+    const host = () => browserLandscapeHost(shellRef.current, form, window.innerHeight >= window.innerWidth)
+    void (async () => {
+      if (!store.keyboardMidi || form !== 'phone') {
+        await dismissKeyboard(host(), keysMode.current)
+        if (cancel) return
+        keysMode.current = 'dock'
+        setKeysTurned(false)
+        return
+      }
+      const mode = await presentKeyboard(host())
+      if (cancel) {
+        await dismissKeyboard(host(), mode)
+        return
+      }
+      keysMode.current = mode
+      setKeysTurned(mode === 'turned')
+    })()
+    return () => {
+      cancel = true
+    }
+  }, [store.keyboardMidi, form])
+
   function openPiano(trackId: string, clipId?: string) {
     store.closeScaler()
     store.closePads()
@@ -1556,7 +1637,8 @@ async function importDropped(files: FileList) {
 
   return (
     <div
-      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''} ${form === 'desk' && store.keyboardMidi ? 'desk-keys' : ''}`}
+      ref={shellRef}
+      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''} ${store.keyboardMidi ? 'keys-open' : ''} ${keysTurned ? 'keys-turned' : ''}`}
       style={{ ['--dock' as string]: `${dock}px`, ['--sounds' as string]: `${soundWidth}px` }}
       data-version={version}
       data-form={form}
@@ -1650,7 +1732,6 @@ async function importDropped(files: FileList) {
           engine={engine}
           syncLabel={session.state.syncLabel}
           simple={phone}
-          desk={form === 'desk'}
           recordHint={recordHint}
           onPlay={() => { engine.unlock(); void play() }}
           onStop={() => void stop()}
@@ -1801,7 +1882,7 @@ async function importDropped(files: FileList) {
             <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
           )}
           {surface === 'studio' && panel === 'piano' && (
-            <MidiDock store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => openPlugin('write')} onClose={phone ? closePiano : undefined} />
+            <MidiDock store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => openPlugin('write')} onClose={closePiano} />
           )}
         </div>}
       </div>
@@ -1955,7 +2036,7 @@ async function importDropped(files: FileList) {
       )}
       {knockOpen && <KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} />}
       <SpectralSheet store={store} />
-      {form === 'desk' && <KeyboardDock store={store} engine={engine} />}
+      <KeyboardDock store={store} engine={engine} />
       <HintBubble />
       <div className="toasts">
         {store.toasts.map((toast) => (

@@ -34,7 +34,7 @@ import type { InstrumentPlay, SamplePack, SamplerProgram } from '../audio/multis
 import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
-import { readKeyboardEnabled, writeKeyboardEnabled } from '../model/keyboardPlay'
+import { readKeyboardEnabled, writeKeyboardEnabled, writeKeyboardOctave } from '../model/keyboardPlay'
 import { applyChanges, HistoryJournal } from './history'
 import { diffProject, musicalClone, type ProjectOp, type StampWire } from './ops'
 import { ProjectSync, type SyncJournal } from './sync'
@@ -5195,6 +5195,7 @@ export class ProjectStore {
       this.project.midiEditor = normalizeMidiEditor({ ...editorState(this.project), ...patch })
     })
     if (patch.stepInput != null || patch.follow != null) writeRollPrefs(patch)
+    if (patch.octave != null) writeKeyboardOctave(patch.octave)
   }
 
   /** Notes played together land on the step cursor, then the cursor advances. */

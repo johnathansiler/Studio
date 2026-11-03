@@ -26,7 +26,6 @@ function transportPage(shell: string) {
   const html = renderToStaticMarkup(createElement(TransportBar, {
     store,
     engine: engine as never,
-    desk: shell === 'studio',
     onPlay() {},
     onStop() {},
     onRecord() {},
