@@ -224,6 +224,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
               max={param.max}
               labels={param.id === 'kind' ? kindLabels(plugin.pluginId) : []}
               value={plugin.params[param.id] ?? param.default}
+              fallback={param.default}
               onChange={(value) => {
                 setLast(param.id)
                 store.setAutomated(
@@ -247,7 +248,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   )
 }
 
-function ParamControl({ id, min, max, value, onChange, labels = [] }: { id: string; min: number; max: number; value: number; onChange: (value: number) => void; labels?: string[] }) {
+function ParamControl({ id, min, max, value, fallback, onChange, labels = [] }: { id: string; min: number; max: number; value: number; fallback?: number; onChange: (value: number) => void; labels?: string[] }) {
   if (id === 'kind' && labels.length) {
     return (
       <select aria-label="Kind" value={Math.max(0, Math.min(labels.length - 1, Math.round(value)))} onChange={(event) => onChange(Number(event.target.value))}>
@@ -285,7 +286,7 @@ function ParamControl({ id, min, max, value, onChange, labels = [] }: { id: stri
   }
   const span = max - min
   const step = span <= 2 ? 0.01 : span <= 40 ? 0.1 : 1
-  return <TouchSlider label={id} min={min} max={max} step={step} value={value} onChange={onChange} />
+  return <TouchSlider label={id} min={min} max={max} step={step} value={value} fallback={fallback} onChange={onChange} />
 }
 
 function formatParam(id: string, value: number, unit: string) {

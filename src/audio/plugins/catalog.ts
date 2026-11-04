@@ -957,6 +957,18 @@ export function descriptor(id: string) {
   return CATALOG.find((plugin) => plugin.id === id) ?? LIBRARY.find((plugin) => plugin.id === id) ?? null
 }
 
+/** Core plugins first, then any legacy processor that has not moved. */
+export function pluginSpecs(): PluginDescriptor[] {
+  const seen = new Set<string>()
+  const out: PluginDescriptor[] = []
+  for (const plugin of [...CATALOG, ...LIBRARY]) {
+    if (seen.has(plugin.id)) continue
+    seen.add(plugin.id)
+    out.push(plugin)
+  }
+  return out
+}
+
 export function defaultParams(id: string) {
   const spec = descriptor(id)
   const params: Record<string, number> = {}
