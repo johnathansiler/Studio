@@ -1,0 +1,226 @@
+/* Browser and plugins slide on the compositor. Width is set once, not tweened. */
+
+.playlist-frame.browser-open {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.playlist-frame.browser-open > .playlist-browser {
+  position: relative;
+  z-index: auto;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
+  flex: 0 0 var(--browser, 320px);
+  width: var(--browser, 320px);
+  max-width: none;
+  height: auto;
+  max-height: none;
+  box-shadow: none;
+  transform: translateX(-100%);
+  transition: transform 200ms ease;
+  will-change: transform;
+}
+
+.playlist-frame.browser-open > .arrange {
+  flex: 1 1 auto;
+  min-width: 0;
+  transform: translateX(calc(var(--browser, 320px) * -1));
+  transition: transform 200ms ease;
+  will-change: transform;
+}
+
+.playlist-frame[data-push='in'] > .playlist-browser,
+.playlist-frame[data-push='in'] > .arrange {
+  transition: none;
+}
+
+.playlist-frame[data-push='on'] > .playlist-browser,
+.playlist-frame[data-push='on'] > .arrange,
+.playlist-frame[data-push='dragging'] > .playlist-browser,
+.playlist-frame[data-push='dragging'] > .arrange {
+  transform: none;
+}
+
+.playlist-frame[data-push='dragging'] > .playlist-browser,
+.playlist-frame[data-push='dragging'] > .arrange {
+  transition: none;
+}
+
+.playlist-frame[data-push='out'] > .playlist-browser {
+  transform: translateX(-100%);
+}
+
+.playlist-frame[data-push='out'] > .arrange {
+  transform: translateX(calc(var(--browser, 320px) * -1));
+}
+
+.shell.phone .playlist-frame.browser-open,
+.shell.fold .playlist-frame.browser-open {
+  display: flex;
+}
+
+.shell.phone:not(.land) .playlist-frame.browser-open > .playlist-browser {
+  flex-basis: var(--browser, 66%);
+  width: var(--browser, 66%);
+  max-width: 70%;
+}
+
+.shell.phone:not(.land) .playlist-frame.browser-open > .arrange {
+  grid-template-columns: minmax(88px, 46%) minmax(0, 1fr);
+}
+
+.browser-resize {
+  flex: 0 0 10px;
+  width: 10px;
+  min-width: 10px;
+  align-self: stretch;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.browser-resize::before {
+  content: '';
+  display: block;
+  width: 2px;
+  height: 36px;
+  margin: 0 auto;
+  border-radius: 2px;
+  background: var(--line, #31443a);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* Plugins drawer slides in from the right and the tracks keep the rest. */
+.arrange-stage.plugins-side > .plugins-drawer {
+  transform: translateX(100%);
+  transition: transform 200ms ease;
+  will-change: transform;
+}
+
+.arrange-stage.plugins-side[data-push='in'] > .plugins-drawer {
+  transition: none;
+}
+
+.arrange-stage.plugins-side[data-push='on'] > .plugins-drawer,
+.arrange-stage.plugins-side[data-push='dragging'] > .plugins-drawer {
+  transform: none;
+}
+
+.arrange-stage.plugins-bottom > .plugins-drawer {
+  transform: translateY(100%);
+  transition: transform 200ms ease;
+  will-change: transform;
+}
+
+.arrange-stage.plugins-bottom[data-push='in'] > .plugins-drawer {
+  transition: none;
+}
+
+.arrange-stage.plugins-bottom[data-push='on'] > .plugins-drawer {
+  transform: none;
+}
+
+/* Mix and Collab: the same browser is a column that pushes the view. */
+.workspace.browser-docked {
+  grid-template-columns: var(--browser, 320px) minmax(0, 1fr);
+}
+
+.workspace.browser-docked:not(.session-closed) {
+  grid-template-columns: var(--browser, 320px) minmax(0, 1fr) minmax(220px, min(var(--dock), 42vw));
+}
+
+.shell-browser {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  overflow: hidden;
+  background: #121814;
+  border-right: 1px solid var(--line);
+  transform: translateX(-100%);
+  transition: transform 200ms ease;
+  will-change: transform;
+}
+
+.shell-browser > .playlist-browser {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  position: relative;
+}
+
+.workspace[data-push='in'] > .shell-browser,
+.workspace[data-push='in'] > .main-pane,
+.workspace[data-push='in'] > .collab-pane {
+  transition: none;
+}
+
+.workspace[data-push='in'] > .main-pane,
+.workspace[data-push='in'] > .collab-pane {
+  transform: translateX(calc(var(--browser, 320px) * -1));
+}
+
+.workspace[data-push='on'] > .shell-browser,
+.workspace[data-push='on'] > .main-pane,
+.workspace[data-push='on'] > .collab-pane,
+.workspace[data-push='dragging'] > .shell-browser,
+.workspace[data-push='dragging'] > .main-pane,
+.workspace[data-push='dragging'] > .collab-pane {
+  transform: none;
+}
+
+.workspace[data-push='on'] > .shell-browser,
+.workspace[data-push='on'] > .main-pane,
+.workspace[data-push='on'] > .collab-pane {
+  transition: transform 200ms ease;
+}
+
+.workspace[data-push='dragging'] > .shell-browser,
+.workspace[data-push='dragging'] > .main-pane,
+.workspace[data-push='dragging'] > .collab-pane {
+  transition: none;
+}
+
+.workspace[data-push='out'] > .shell-browser {
+  transform: translateX(-100%);
+  transition: transform 200ms ease;
+}
+
+.workspace[data-push='out'] > .main-pane,
+.workspace[data-push='out'] > .collab-pane {
+  transform: translateX(calc(var(--browser, 320px) * -1));
+  transition: transform 200ms ease;
+}
+
+.shell.phone .workspace.browser-docked,
+.shell.phone.land .workspace.browser-docked {
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+}
+
+.shell.phone .workspace.browser-docked > .shell-browser {
+  flex: 0 0 var(--browser, 66%);
+  width: var(--browser, 66%);
+  max-width: 70%;
+  height: auto;
+}
+
+.shell.phone .workspace.browser-docked > .main-pane,
+.shell.phone .workspace.browser-docked > .collab-pane {
+  flex: 1 1 auto;
+  width: auto;
+  max-width: none;
+  min-width: 0;
+}
+
+.shell.phone.land .workspace.browser-docked > .shell-browser {
+  max-width: 46%;
+}

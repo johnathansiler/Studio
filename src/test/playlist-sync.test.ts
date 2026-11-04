@@ -165,7 +165,8 @@ describe('arrange browser', () => {
       onAnalyze: () => undefined,
     } as never))
     expect(html).toContain('>Browser<')
-    expect(html).not.toContain('data-playlist-browser="open"')
+    expect(html).toContain('data-playlist-browser="open"')
+    expect(html).not.toContain('data-screen-overlay')
     const browser = renderToStaticMarkup(createElement(PlaylistBrowser, {
       store,
       engine: {
@@ -181,7 +182,7 @@ describe('arrange browser', () => {
       onSeek() {},
     }))
     expect(browser).toContain('data-playlist-browser="open"')
-    expect(browser).toContain('data-screen-overlay')
+    expect(browser).not.toContain('data-screen-overlay')
     for (const label of ['Sounds', 'Instruments', 'Loops', 'Patterns', 'Plugins', 'Clips']) expect(browser).toContain(label)
     expect(html).not.toContain('>Read<')
     expect(html).not.toContain('Auto-Tune')

@@ -7,7 +7,9 @@ import { fetchSoundBytes, soundCache } from '../sounds/cache'
 import { catalogMessage, filterSounds, loadSoundCatalog, soundKeys } from '../sounds/catalog'
 import { boundLibraryHost, filterStarters, loadStarterOnto, playableAudition, refreshStarterCatalog, starterCatalog } from '../sounds/instruments'
 import { matchCountLabel, readSoundWidth, soundWidthFromDrag, writeSoundWidth } from '../sounds/panel'
-import { audioTrackFor, decodeSoundBytes, placeSound, previewChannelsFor, trackIdFromDrop } from '../sounds/place'
+import { loopBarCount, waveformPeaks } from '../model/playheadPlace'
+import { quartersPerBar } from '../model/time'
+import { decodeSoundBytes, placeSound, previewChannelsFor, trackIdFromDrop } from '../sounds/place'
 import { soundFileUrl } from '../sounds/source'
 import type { CatalogResult, SoundEntry, SoundKind, SoundQuery } from '../sounds/types'
 import { selectSounds } from '../state/select'
@@ -124,8 +126,10 @@ function until<T>(work: Promise<T>, ms: number): Promise<T> {
 type PreviewEngine = {
   unlock: () => void
   stopPreview: () => void
-  previewPcm: (channels: Float32Array[], sampleRate?: number) => void
+  previewPcm: (channels: Float32Array[], sampleRate?: number, loop?: boolean) => void
   currentTimelineSample: () => number
+  decodeLibrary?: (bytes: ArrayBuffer) => Promise<{ sampleRate: number; channels: Float32Array[] }>
+  previewHead?: (now?: number) => { ratio: number; loop: boolean; duration: number; done: boolean } | null
   holdLibraryPack?: (trackId: string, pack: SamplePack) => void
   auditionLibrary?: (trackId: string, pitch?: number, velocity?: number) => Promise<void>
 }
@@ -174,6 +178,8 @@ export function SoundBrowser({
   }, [lockType])
   const [busy, setBusy] = useState('')
   const [playing, setPlaying] = useState('')
+  const [wave, setWave] = useState<{ id: string; peaks: number[]; bars: number } | null>(null)
+  const [head, setHead] = useState(0)
   const entriesRef = useRef(result.entries)
   const startersRef = useRef(starters)
   const addRef = useRef<(entry: SoundEntry, trackId?: string | null, startSample?: number) => void>(() => undefined)
@@ -214,6 +220,22 @@ export function SoundBrowser({
   }, [instrumentSeed])
 
   useEffect(() => () => engine.stopPreview(), [engine])
+  useEffect(() => {
+    if (!playing || !engine.previewHead) return
+    let frame = 0
+    const tick = () => {
+      const next = engine.previewHead?.()
+      if (next?.done) {
+        setPlaying('')
+        setHead(0)
+        return
+      }
+      if (next) setHead(next.ratio)
+      frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [playing, engine])
 
   useEffect(() => {
     if (embedded) return
@@ -256,14 +278,7 @@ export function SoundBrowser({
         slotRef.current(entry)
         return
       }
-      const inner = target?.closest('.timeline-inner') as HTMLElement | null
-      let at: number | undefined
-      if (inner) {
-        const px = Number(inner.dataset.px) || 90
-        const rect = inner.getBoundingClientRect()
-        at = Math.max(0, ((event.clientX - rect.left) / px) * (store.project.sampleRate || 48000))
-      }
-      addRef.current(entry, trackIdFromDrop(target), at)
+      addRef.current(entry, trackIdFromDrop(target), engine.currentTimelineSample())
     }
     window.addEventListener('dragover', allow)
     window.addEventListener('drop', drop)
@@ -298,13 +313,12 @@ export function SoundBrowser({
         ? catalogMessage({ entries: result.entries, status: 'missing' }, 0, false)
         : catalogMessage(result, 0, queryActive || type === 'instrument')
   const selected = store.project.tracks.find((track) => track.id === store.selectedTrackId) ?? null
-  const where = selected?.type === 'midi'
+  const where = selected?.type === 'audio'
+    ? `Adds to ${selected.name} at the playhead.`
+    : 'Adds on a new audio track at the playhead.'
+  const instrumentWhere = selected?.type === 'midi'
     ? `Loads onto ${selected.name}.`
-    : selected?.type === 'audio'
-      ? `Adds to ${selected.name} at the playhead.`
-      : sounds.trackId
-        ? `Adds to ${sounds.trackName} at the playhead.`
-        : 'Adds on a new track.'
+    : 'Loads onto an instrument track.'
   const count = matchCountLabel(total, shown)
 
   async function reload() {
@@ -325,11 +339,12 @@ export function SoundBrowser({
   }
 
   function audioTarget(trackId?: string | null) {
-    const found = audioTrackFor(store.project, sounds.trackId, trackId)
-    if (found) return found
+    const dropped = trackId ? store.track(trackId) : null
+    if (dropped?.type === 'audio') return dropped.id
     if (trackId) return null
-    const ids = store.addTracks({ kind: 'audio', count: 1, instrument: 'none', input: 'mic', channels: 1, armed: false })
-    return ids[0] ?? null
+    const selected = store.project.tracks.find((track) => track.id === store.selectedTrackId)
+    if (selected?.type === 'audio') return selected.id
+    return null
   }
 
   function instrumentTarget(trackId?: string | null) {
@@ -343,20 +358,35 @@ export function SoundBrowser({
 
   async function loadEntry(entry: SoundEntry) {
     const bytes = await fetchSoundBytes(soundFileUrl(entry.path))
+    if (engine.decodeLibrary) return engine.decodeLibrary(bytes)
     return decodeSoundBytes(bytes)
   }
 
   async function preview(entry: SoundEntry) {
     if (playing === entry.id) {
+      previewGen.current += 1
       engine.stopPreview()
       setPlaying('')
+      setWave(null)
+      setHead(0)
       return
     }
+    const gen = ++previewGen.current
+    engine.stopPreview()
     setBusy(entry.id)
     try {
       const decoded = await loadEntry(entry)
+      if (gen !== previewGen.current) return
       const channels = previewChannelsFor(entry, decoded.channels, decoded.sampleRate, store.project, engine.currentTimelineSample())
-      engine.previewPcm(channels, store.project.sampleRate)
+      const lead = channels[0]
+      engine.previewPcm(channels, store.project.sampleRate, entry.type === 'loop')
+      const seconds = lead?.length ? lead.length / store.project.sampleRate : 0
+      setWave({
+        id: entry.id,
+        peaks: waveformPeaks(lead ?? new Float32Array()),
+        bars: entry.type === 'loop' ? loopBarCount(seconds, store.project.tempo, quartersPerBar(store.project.timeSignature)) : 0,
+      })
+      setHead(0)
       setPlaying(entry.id)
     } catch (error) {
       store.toast(error instanceof Error ? error.message : 'Could not play that sound.', 'warn')
@@ -403,13 +433,8 @@ export function SoundBrowser({
       return
     }
     const dropped = trackId ? store.track(trackId) : null
-    if (dropped?.type === 'midi' || (!trackId && selected?.type === 'midi')) {
-      await playAsInstrument(entry, dropped?.type === 'midi' ? dropped.id : selected?.id)
-      return
-    }
-    const target = audioTarget(trackId)
-    if (!target) {
-      store.toast('Could not add a track for that sound.', 'warn')
+    if (dropped?.type === 'midi') {
+      await playAsInstrument(entry, dropped.id)
       return
     }
     setBusy(entry.id)
@@ -420,7 +445,7 @@ export function SoundBrowser({
         channels: decoded.channels,
         fileRate: decoded.sampleRate,
         project: store.project,
-        startSample: startSample ?? engine.currentTimelineSample(),
+        startSample: 0,
         bufferId: `lib_${entry.id}`,
       })
       if (!placed) {
@@ -428,7 +453,8 @@ export function SoundBrowser({
         return
       }
       if (!store.buffers.has(placed.asset.id)) store.addAsset(placed.asset)
-      store.addAudioClip(target, placed.clip)
+      const host = audioTarget(trackId)
+      store.placeClipAtPlayhead(host, placed.clip, startSample ?? engine.currentTimelineSample())
       const conformed = entry.type === 'loop' && placed.clip.stretch?.followTempo
       store.toast(conformed ? `${entry.name} is on the track at the song tempo.` : `${entry.name} is on the track.`, 'good')
     } catch (error) {
@@ -531,8 +557,9 @@ export function SoundBrowser({
   }
 
   const dragMoved = useRef(false)
+  const previewGen = useRef(0)
   const instrumentHint = selected?.type === 'midi'
-    ? `Load it on this track and play a note. ${where}`
+    ? `Load it on this track and play a note. ${instrumentWhere}`
     : 'Load it on this track and play a note.'
 
   function beginDrag(id: string, name: string, event: ReactDragEvent) {
@@ -666,7 +693,18 @@ export function SoundBrowser({
                   void preview(entry)
                 }}
               >
-                {on && <i className="sound-live" aria-hidden="true" />}
+                {on && wave?.id === entry.id && (
+                  <span className="sound-wave" aria-hidden="true">
+                    {wave.peaks.map((peak, index) => (
+                      <i key={index} style={{ height: `${Math.max(12, peak * 100)}%` }} />
+                    ))}
+                    <b className="sound-shade" style={{ width: `${head * 100}%` }} />
+                    <b className="sound-head" style={{ left: `${head * 100}%` }} />
+                    {wave.bars > 1 && Array.from({ length: wave.bars - 1 }, (_, index) => (
+                      <b key={index} className="sound-bar" style={{ left: `${((index + 1) / wave.bars) * 100}%` }} />
+                    ))}
+                  </span>
+                )}
                 <strong>{entry.name}</strong>
                 <span className="sound-meta">{on ? 'Playing' : KIND_LABEL[entry.type]}</span>
               </button>
@@ -703,7 +741,7 @@ export function SoundBrowser({
 
   if (phone) {
     return (
-      <div className="sound-back sheet" data-screen-overlay="" aria-label="Sounds">
+      <div className="sound-back sheet" aria-label="Sounds">
         <button type="button" className="sound-dismiss" aria-label="Close sounds" title="Close the sound browser." onClick={onClose} />
         {panel}
       </div>
@@ -711,7 +749,7 @@ export function SoundBrowser({
   }
 
   return (
-    <aside className="sound-slot" data-sound-panel="open" data-screen-overlay="" aria-label="Sounds">
+    <aside className="sound-slot" data-sound-panel="open" aria-label="Sounds">
       <button
         type="button"
         className="sound-resize"

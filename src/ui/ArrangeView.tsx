@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { useScreenOverlay } from './screenOverlay'
+import { browserWidthFor, usePushPhase } from './dockPush'
 import { createPortal } from 'react-dom'
 import type { AudioEngine } from '../audio/engine'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
@@ -129,6 +130,8 @@ export function ArrangeView({
   onAnalyze,
   libraryTab,
   onLibraryClose,
+  browserDock,
+  onBrowserDock,
   pluginsDrawer,
   pluginsMenu,
 }: {
@@ -147,6 +150,9 @@ export function ArrangeView({
   /** Menu asks the Arrange browser to open on this tab. */
   libraryTab?: BrowserTab | null
   onLibraryClose?: () => void
+  /** Shared with Mix and Collab so the dock stays open when the view changes. */
+  browserDock?: boolean
+  onBrowserDock?: (open: boolean) => void
   /** Force the plugins drawer. Omit to open it on a computer and keep it closed on a phone or fold. */
   pluginsDrawer?: boolean
   /** Open the add list with the drawer. */
@@ -176,7 +182,7 @@ export function ArrangeView({
   }>(null)
   const phone = form === 'phone'
   const touch = form !== 'desk'
-  const [pluginsOpen, setPluginsOpen] = useState(() => !!pluginsDrawer)
+  const [pluginsOpen, setPluginsOpen] = useState(() => pluginsDrawer ?? form === 'desk')
   const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
   const [ghost, setGhost] = useState<{ trackId: string; left: number; width: number } | null>(null)
   const [tool, setToolState] = useState(activeTool)
@@ -659,16 +665,19 @@ export function ArrangeView({
   }
 
   const [setupOpen, setSetupOpen] = useState(false)
-  const [browserOpen, setBrowserOpen] = useState(() => panelChoice('arrangeBrowser') ?? false)
+  const [browserOwned, setBrowserOwned] = useState(() => browserDock ?? panelChoice('arrangeBrowser') ?? form === 'desk')
+  const browserOpen = browserDock ?? browserOwned
+  function setBrowserOpen(next: boolean) {
+    setBrowserOwned(next)
+    onBrowserDock?.(next)
+    rememberPanel('arrangeBrowser', next)
+  }
+  const browserPhase = usePushPhase(browserOpen)
+  const pluginsPhase = usePushPhase(pluginsOpen)
   useScreenOverlay(() => setSetupOpen(false), setupOpen)
-  useScreenOverlay(() => {
-    engine.stopPreview()
-    setBrowserOpen(false)
-    rememberPanel('arrangeBrowser', false)
-  }, browserOpen)
   useScreenOverlay(() => setPluginsOpen(false), pluginsOpen)
   const [browserTab, setBrowserTab] = useState<BrowserTab>(libraryTab || 'sounds')
-  const [browserWidth, setBrowserWidth] = useState(260)
+  const [browserWidth, setBrowserWidth] = useState(() => browserWidthFor(typeof window === 'undefined' ? 1440 : window.innerWidth, typeof window === 'undefined' ? 900 : window.innerHeight))
   const [trackSheet, setTrackSheet] = useState<string | null>(null)
   useScreenOverlay(() => setTrackSheet(null), trackSheet != null)
   const [trackAnchor, setTrackAnchor] = useState<HTMLElement | null>(null)
@@ -684,8 +693,11 @@ export function ArrangeView({
     event.preventDefault()
     const startX = event.clientX
     const start = browserWidth
+    const frame = (event.currentTarget.parentElement as HTMLElement | null)
+    frame?.setAttribute('data-push', 'dragging')
     const move = (ev: PointerEvent) => setBrowserWidth(Math.min(520, Math.max(220, start + (ev.clientX - startX))))
     const up = () => {
+      frame?.setAttribute('data-push', 'on')
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
     }
@@ -702,15 +714,12 @@ export function ArrangeView({
         pluginsOpen={pluginsOpen}
         onPlugins={() => setPluginsOpen((open) => !open)}
         onBrowser={() => {
-          setBrowserOpen((open) => {
-            const next = !open
-            if (!next) {
-              engine.stopPreview()
-              onLibraryClose?.()
-            }
-            rememberPanel('arrangeBrowser', next)
-            return next
-          })
+          const next = !browserOpen
+          if (!next) {
+            engine.stopPreview()
+            onLibraryClose?.()
+          }
+          setBrowserOpen(next)
         }}
         onSetup={() => setSetupOpen((open) => !open)}
       />
@@ -725,12 +734,9 @@ export function ArrangeView({
           onQuickPunch={onQuickPunch}
         />
       )}
-      <div className={`arrange-stage${pluginsOpen ? (phone ? ' plugins-bottom' : ' plugins-side') : ''}`} data-plugins-drawer={pluginsOpen ? (phone ? 'bottom' : 'side') : 'closed'}>
-      <div className={`playlist-frame ${browserOpen ? 'browser-open' : ''} ${phone ? 'phone-arrange' : ''}`} style={{ ['--browser' as string]: `${browserWidth}px` }}>
-      {browserOpen && compact && (
-        <button type="button" className="browser-scrim" aria-label="Close browser" title="Close the browser." onClick={() => { engine.stopPreview(); setBrowserOpen(false); rememberPanel('arrangeBrowser', false); onLibraryClose?.() }} />
-      )}
-      {browserOpen && (
+      <div className={`arrange-stage${pluginsPhase !== 'off' ? (phone ? ' plugins-bottom' : ' plugins-side') : ''}`} data-plugins-drawer={pluginsPhase !== 'off' ? (phone ? 'bottom' : 'side') : 'closed'} data-push={pluginsPhase} style={{ ['--push' as string]: '280px' }}>
+      <div className={`playlist-frame ${browserPhase !== 'off' ? 'browser-open' : ''} ${phone ? 'phone-arrange' : ''}`} data-push={browserPhase} style={{ ['--browser' as string]: `${browserWidth}px`, ['--push' as string]: `${browserWidth}px` }}>
+      {browserPhase !== 'off' && (
         <>
           <PlaylistBrowser
             store={store}
@@ -1142,7 +1148,7 @@ export function ArrangeView({
         </div>
       </div>
       </div>
-      {pluginsOpen && <PluginsDrawer store={store} place={phone ? 'bottom' : 'side'} menuOpen={pluginsMenu} onClose={() => setPluginsOpen(false)} />}
+      {pluginsPhase !== 'off' && <PluginsDrawer store={store} place={phone ? 'bottom' : 'side'} menuOpen={pluginsMenu} onClose={() => setPluginsOpen(false)} />}
       </div>
       <AnchoredMenu
         open={!!patternMenu}

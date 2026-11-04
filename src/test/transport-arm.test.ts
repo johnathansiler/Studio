@@ -255,14 +255,14 @@ describe('pattern to song', () => {
     const track = store.project.tracks.find((item) => item.id === made!.trackId)!
     expect(track.instrument === 'drum-machine' || track.instrument === 'pads').toBe(true)
     const clip = track.midiClips.find((item) => item.id === made!.clipId)!
-    expect(clip.startBeat).toBe(4)
+    expect(clip.startBeat).toBe(4.4)
     expect(clip.notes.map((note) => note.pitch)).toEqual(patternToMidiNotes(store.activePattern()!).map((note) => note.pitch))
     store.undo()
     expect(store.project.tracks.some((item) => item.midiClips.some((item) => item.id === clip.id))).toBe(false)
 
     store.placePattern(6.2)
     const placed = store.project.patternClips![0]
-    expect(placed.startBeat).toBe(6)
+    expect(placed.startBeat).toBe(6.2)
     expect(placed.patternId).toBe(store.activePattern()!.id)
     store.placePattern(10)
     store.makePatternClipUnique(store.project.patternClips![1].id)

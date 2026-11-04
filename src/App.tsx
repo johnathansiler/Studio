@@ -50,7 +50,9 @@ import { IdeasPop } from './ui/IdeasPop'
 import { PlayersSheet } from './ui/PlayersSheet'
 import { UnstuckSheet } from './unstuck/UnstuckSheet'
 import './ui/guideSheet.css'
-import { SoundBrowser } from './ui/SoundBrowser'
+import { panelChoice } from './ui/panelMemory'
+import { ShellBrowser } from './ui/PlaylistBrowser'
+import { browserWidthFor, usePushPhase } from './ui/dockPush'
 import { PadsPanel } from './ui/PadsPanel'
 import { ScalerPanel } from './ui/ScalerPanel'
 import { clampSoundWidth, readSoundWidth } from './sounds/panel'
@@ -265,7 +267,11 @@ export function App() {
   const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
   const [playersOpen, setPlayersOpen] = useState(() => new URLSearchParams(window.location.search).get('players') === '1')
   const [unstuckOpen, setUnstuckOpen] = useState(() => new URLSearchParams(window.location.search).get('unstuck') === '1')
-  const [soundsOpen, setSoundsOpen] = useState(() => new URLSearchParams(window.location.search).get('sounds') === '1')
+  const [soundsOpen, setSoundsOpen] = useState(() => {
+    if (new URLSearchParams(window.location.search).get('sounds') === '1') return true
+    return panelChoice('arrangeBrowser') ?? formFactor(window.innerWidth, window.innerHeight) === 'desk'
+  })
+  const [shellWidth] = useState(() => browserWidthFor(typeof window === 'undefined' ? 1440 : window.innerWidth, typeof window === 'undefined' ? 900 : window.innerHeight))
   const [soundWidth, setSoundWidth] = useState(() => readSoundWidth(undefined, window.innerWidth))
   const soundReserveRef = useRef(0)
   useEffect(() => {
@@ -1848,7 +1854,8 @@ async function importDropped(files: FileList) {
   useScreenOverlay(() => setIdeasOpen(false), ideasOpen)
   useScreenOverlay(() => { engine.stopPreview(); setPlayersOpen(false) }, playersOpen)
   useScreenOverlay(() => { engine.stopPreview(); setUnstuckOpen(false) }, unstuckOpen)
-  useScreenOverlay(() => { engine.stopPreview(); setSoundsOpen(false) }, soundsOpen)
+  const shellOpen = soundsOpen && editorView !== 'arrange' && surface === 'studio'
+  const shellPhase = usePushPhase(shellOpen)
   useScreenOverlay(() => setAnalysisTrackId(null), analysisTrackId != null)
   useScreenOverlay(() => setPerform(null), perform != null)
   useScreenOverlay(() => { setPianoOpen(false); store.closePiano() }, pianoOpen)
@@ -2008,7 +2015,22 @@ async function importDropped(files: FileList) {
           <MidiTools store={store} engine={engine} />
         </div>
       )}
-      <div className={`workspace ${dockShown ? '' : 'session-closed'} ${soundsOpen && !phone ? 'sounds-open' : ''} ${!phone && dockEdge === 'bottom' && surface === 'studio' && dockShown ? 'dock-bottom' : ''}`}>
+      <div
+        className={`workspace ${dockShown ? '' : 'session-closed'} ${shellPhase !== 'off' ? 'browser-docked' : ''} ${!phone && dockEdge === 'bottom' && surface === 'studio' && dockShown ? 'dock-bottom' : ''}`}
+        data-push={shellPhase}
+        style={{ ['--browser' as string]: `${shellWidth}px` }}
+      >
+        {shellPhase !== 'off' && (
+          <div className="shell-browser">
+            <ShellBrowser
+              store={store}
+              engine={engine}
+              phone={phone}
+              onSeek={(sample) => void locate(sample)}
+              onClose={() => { engine.stopPreview(); setSoundsOpen(false) }}
+            />
+          </div>
+        )}
         {collabShown && (
           <div className="collab-pane" data-collab-panel="open">
             <VideoDock
@@ -2045,6 +2067,8 @@ async function importDropped(files: FileList) {
                   onQuickPunch={() => void quickPunch()}
                   onAnalyze={(trackId) => { setAnalysisTrackId(trackId); setPhonePane('edit'); setSurface('studio') }}
                   libraryTab={soundsOpen ? 'sounds' : null}
+                  browserDock={soundsOpen}
+                  onBrowserDock={setSoundsOpen}
                   onLibraryClose={() => { engine.stopPreview(); setSoundsOpen(false) }}
                 />
               )}
@@ -2061,9 +2085,6 @@ async function importDropped(files: FileList) {
               )}
             </div>
           </div>
-        )}
-        {soundsOpen && editorView !== 'arrange' && (
-          <SoundBrowser store={store} engine={engine} phone={phone} reserve={soundReserve} onWidth={setSoundWidth} onClose={() => { engine.stopPreview(); setSoundsOpen(false) }} />
         )}
         {dockShown && <div
           className="dock-slot panel-slot"

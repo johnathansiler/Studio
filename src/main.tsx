@@ -9,6 +9,7 @@ import './ui/premium.css'
 import './ui/pluginStage.css'
 import './ui/buttonTiers.css'
 import './ui/screenOverlay.css'
+import './ui/dockPush.css'
 
 scheduleWasmPreload()
 

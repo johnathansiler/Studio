@@ -266,7 +266,7 @@ describe('arrange plugins drawer', () => {
     expect(drawer).not.toContain('store.addPlugin')
   })
 
-  it('stays closed until opened, on the phone, the fold, and a computer', () => {
+  it('starts closed on a phone and fold, and open beside the tracks on a computer', () => {
     expect(formFactor(390, 844)).toBe('phone')
     expect(formFactor(476, 752)).toBe('phone')
     expect(formFactor(880, 1000)).toBe('fold')
@@ -286,8 +286,11 @@ describe('arrange plugins drawer', () => {
     expect(fold).toContain('data-plugins-drawer="closed"')
 
     const desk = arrange(store, 1440, 900)
-    expect(desk).toContain('data-plugins-drawer="closed"')
-    expect(desk).not.toContain('id="arrange-plugins"')
+    expect(desk).toContain('data-plugins-drawer="side"')
+    expect(desk).toContain('plugins-side')
+    expect(desk).toContain('id="arrange-plugins"')
+    expect(desk).not.toContain('data-screen-overlay')
+    expect(desk.indexOf('class="playlist-frame')).toBeLessThan(desk.indexOf('id="arrange-plugins"'))
 
     const phoneOpen = arrange(store, 390, 844, true)
     expect(phoneOpen).toContain('data-plugins-drawer="bottom"')
