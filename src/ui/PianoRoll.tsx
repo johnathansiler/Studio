@@ -35,7 +35,8 @@ import { useFormFactor } from './form'
 import { attachGlissando } from './glissando'
 import { FitRow } from './fitRow'
 import { EditorPinned } from './KeyboardDock'
-import { ActionSheet, SheetRow, TipButton } from './Hint'
+import { SheetRow, TipButton } from './Hint'
+import { AnchoredMenu } from './AnchoredMenu'
 import { coarsePointer, noteGrip } from './touchEdit'
 import { LoopRegion } from './LoopRegion'
 import { setEditCursor } from '../remote/presence'
@@ -121,6 +122,7 @@ export function PianoRoll({
   const [box, setBox] = useState<{ a: number; b: number; p0: number; p1: number } | null>(null)
   const [viewRev, setViewRev] = useState(0)
   const [notesOpen, setNotesOpen] = useState(false)
+  const notesButton = useRef<HTMLSpanElement>(null)
   const [head, setHead] = useState(engine.positionSamples)
   const [rolling, setRolling] = useState(transportMoving(engine.status))
   useEffect(() => engine.subscribe(() => {
@@ -770,7 +772,11 @@ export function PianoRoll({
         </select>
         <TipButton className={scale.snap ? 'on' : ''} label="In key" hint={bar('snap').hint} pressed={scale.snap} onClick={() => store.setScale({ snap: !scale.snap })} />
         <SnapControl store={store} />
-        {compact && <TipButton label={bar('notes').label} hint={bar('notes').hint} onClick={() => setNotesOpen(true)} />}
+        {compact && (
+          <span ref={notesButton}>
+            <TipButton label={bar('notes').label} hint={bar('notes').hint} pressed={notesOpen} onClick={() => setNotesOpen((open) => !open)} />
+          </span>
+        )}
         <span className="chord-name">{chord}</span>
         {!compact && (
           <TipButton label={sheet('detect').label} hint={sheet('detect').hint} onClick={() => {
@@ -798,8 +804,7 @@ export function PianoRoll({
         {!compact && <TipButton label={sheet('delete').label} hint={sheet('delete').hint} onClick={remove} />}
         </FitRow>
       </div>}
-      {notesOpen && (
-        <ActionSheet title="Notes" hint="Edits for the notes you have selected." onClose={() => setNotesOpen(false)}>
+      <AnchoredMenu open={notesOpen} onClose={() => setNotesOpen(false)} label="Notes" triggerRef={notesButton} prefer="down">
           <SheetRow label={sheet('detect').label} hint={sheet('detect').hint} onClick={() => {
             const found = suggestKey(clip.notes.map((note) => ({ midi: note.pitch, cents: note.fine, weight: note.durationBeats })))
             store.setScale({ root: found.root, scale: found.scale, library: found.library })
@@ -823,8 +828,7 @@ export function PianoRoll({
           <SheetRow label={sheet('strum').label} hint={sheet('strum').hint} onClick={() => { strum(); setNotesOpen(false) }} />
           <SheetRow label={sheet('duplicate').label} hint={sheet('duplicate').hint} onClick={() => { duplicate(); setNotesOpen(false) }} />
           <SheetRow label={sheet('delete').label} hint={sheet('delete').hint} onClick={() => { remove(); setNotesOpen(false) }} />
-        </ActionSheet>
-      )}
+      </AnchoredMenu>
       <div className="piano-body">
         <div className="loop-ruler-pad" aria-hidden="true" />
         <div className="loop-ruler-scroll" ref={rulerScrollRef}>

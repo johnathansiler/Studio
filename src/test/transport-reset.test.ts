@@ -71,7 +71,7 @@ describe('count-in on the transport', () => {
     const off = markup(store)
     expect(off).toContain('id="transport-click"')
     expect(off).toContain('id="transport-count"')
-    expect(off).toContain('>Click<')
+    expect(off).toContain('>Metronome<')
     expect(off).toContain('>Count<')
     expect(off).toContain('>Off<')
     expect(off).not.toContain('click on')

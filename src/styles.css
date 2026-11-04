@@ -56,12 +56,12 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   min-width: 0;
   overflow-x: hidden;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   grid-template-areas:
     "bar"
     "transport"
-    "tools"
-    "work";
+    "work"
+    "tools";
   background:
     radial-gradient(1200px 400px at 10% -10%, rgba(115, 196, 143, 0.08), transparent 50%),
     var(--bg);
@@ -75,12 +75,12 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .shell.keys-open,
 .shell.desk-keys {
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   grid-template-areas:
     "bar"
     "transport"
-    "tools"
     "work"
+    "tools"
     "keys";
 }
 .shell.artist.keys-open,
@@ -339,9 +339,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .topbar { grid-area: bar; position: relative; min-height: 48px; z-index: 20; }
 .transport { grid-area: transport; min-height: 48px; justify-content: flex-start; flex-wrap: nowrap; overflow-x: auto; }
-.tool-slot { grid-area: tools; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px; min-width: 0; background: #141c18; }
+.tool-slot { grid-area: tools; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px; min-width: 0; background: #141c18; z-index: 5; }
 .tool-slot:empty { display: none; }
-.tool-slot:not(:empty) { min-height: 40px; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.tool-slot:not(:empty) { min-height: 40px; padding: 4px 8px calc(4px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
 .command-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; flex: 1 1 auto; }
 .command-strip .timeline-tools,
 .command-strip .tool-strip,
@@ -1578,7 +1578,7 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 .shell.phone .tap-reconnect { bottom: calc(12px + env(safe-area-inset-bottom)); }
 
 @media (orientation: landscape) and (max-height: 520px) {
-  .shell:not(.phone) { grid-template-rows: auto auto auto minmax(0, 1fr); height: 100dvh; }
+  .shell:not(.phone) { grid-template-rows: auto auto minmax(0, 1fr) auto; height: 100dvh; }
   .shell:not(.phone) .transport { min-height: 44px; }
   .shell:not(.phone) .workspace { grid-template-columns: minmax(0, 1fr) minmax(220px, 46vw); grid-template-rows: minmax(0, 1fr); }
 }
@@ -1590,20 +1590,20 @@ html[data-posture="book"] .shell:not(.phone) .workspace {
 
 .shell.fold {
   height: 100dvh;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   grid-template-areas:
     "bar"
     "transport"
-    "tools"
-    "work";
+    "work"
+    "tools";
 }
 .shell.fold.keys-open {
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   grid-template-areas:
     "bar"
     "transport"
-    "tools"
     "work"
+    "tools"
     "keys";
 }
 .shell.fold .main-pane,
@@ -1727,9 +1727,9 @@ html[data-posture="tabletop"] .shell {
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   grid-template-areas:
     "bar"
-    "tools"
+    "transport"
     "work"
-    "transport";
+    "tools";
 }
 html[data-posture="tabletop"] .shell .topbar { min-width: 0; height: auto; }
 html[data-posture="tabletop"] .shell .workspace { min-width: 0; min-height: 0; padding-top: 0; }
@@ -3855,13 +3855,39 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
 }
 .transport.simple .t-main .tempo-cluster { flex: 1.15 1 0; min-width: 48px; display: flex; padding: 0; }
 .transport.simple .t-main .tempo-cluster .bpm-readout { flex: 1 1 auto; width: 100%; min-width: 0; height: 40px; max-height: 40px; }
-.bpm-readout.tempo-tap {
+.bpm-readout.tempo-tap,
+.bpm-readout.tempo-edit {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 0;
   cursor: pointer;
   font-weight: 680;
+  line-height: 1;
 }
+.tempo-kicker {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  color: var(--muted);
+}
+.tempo-figure {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 740;
+  line-height: 1.05;
+  text-align: center;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  height: auto;
+}
+.tempo-tap.flash .tempo-kicker { color: inherit; }
 .bpm-readout.tempo-tap.flash {
   background: var(--accent);
   color: var(--accent-ink);
@@ -4003,4 +4029,34 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   height: 40px;
   min-height: 40px;
   max-height: 40px;
+}
+
+/* The edit bar sits on the bottom edge. Sheets open above it instead of underneath. */
+.shell:has(.tool-slot:not(:empty)) {
+  --edit-bar: calc(48px + env(safe-area-inset-bottom));
+}
+.shell:not(:has(.tool-slot:not(:empty))) {
+  --edit-bar: env(safe-area-inset-bottom);
+}
+.shell.phone:not(:has(.tool-slot:not(:empty))) {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.shell.phone .tool-slot {
+  order: 7;
+  flex: 0 0 auto;
+}
+.shell.phone:not(.land) .transport.simple .t-main > .tempo-cluster,
+.shell.fold .transport.simple .t-main > .tempo-cluster {
+  order: 0;
+}
+.shell:has(.tool-slot:not(:empty)) :is(
+  .plugin-sheet,
+  .clip-sheet,
+  .stem-sheet,
+  .q-sheet,
+  .unstuck-sheet,
+  .master-sheet,
+  .analysis-sheet
+) {
+  bottom: var(--edit-bar);
 }

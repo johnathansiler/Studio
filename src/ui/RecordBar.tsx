@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import type { SessionClient } from '../remote/session'
 import type { ProjectStore } from '../state/store'
 import { RECORD_COPY, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
-import { ActionSheet, TipButton } from './Hint'
+import { TipButton } from './Hint'
+import { AnchoredMenu } from './AnchoredMenu'
 
 export function RecordBar({
   store,
@@ -24,6 +25,7 @@ export function RecordBar({
   const record = store.recordSettings()
   const compact = useFormFactor() !== 'desk'
   const [open, setOpen] = useState(false)
+  const optionsButton = useRef<HTMLSpanElement>(null)
   const selectedFolder = project.tracks
     .flatMap((track) => track.clips.map((clip) => ({ track, clip })))
     .find((item) => item.clip.id === store.selectedClipId && item.clip.folder)
@@ -168,14 +170,14 @@ export function RecordBar({
   const options = copy('options')
   return (
     <div className="rec-bar" role="group" aria-label="Recording">
-      <TipButton label={options.label} hint={options.hint} onClick={() => setOpen(true)} />
+      <span ref={optionsButton}>
+        <TipButton label={options.label} hint={options.hint} pressed={open} onClick={() => setOpen((value) => !value)} />
+      </span>
       {record.loop && <span className="tool-chip">Cycle on</span>}
       {record.punchEnabled && <span className="tool-chip">Punch on</span>}
-      {open && (
-        <ActionSheet title={options.label} hint={options.hint} onClose={() => setOpen(false)}>
-          <div className="sheet-fields">{fields}</div>
-        </ActionSheet>
-      )}
+      <AnchoredMenu open={open} onClose={() => setOpen(false)} label={options.label} triggerRef={optionsButton}>
+        <div className="sheet-fields">{fields}</div>
+      </AnchoredMenu>
     </div>
   )
 }

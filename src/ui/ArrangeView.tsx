@@ -41,7 +41,8 @@ import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { TRACK_ROW, TRACK_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
 import './guideSheet.css'
-import { ActionSheet, SheetRow, TipButton } from './Hint'
+import { SheetRow, TipButton } from './Hint'
+import { AnchoredMenu } from './AnchoredMenu'
 import { RecordBar } from './RecordBar'
 import { RemoteTimeline, TrackPresence, remoteClipMark, useRemotePeers } from './presenceMarks'
 import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, trimZone } from './touchEdit'
@@ -55,11 +56,18 @@ function ArrangeChrome({ browserOpen, setupOpen, onBrowser, onSetup }: { browser
   const [host, setHost] = useState<HTMLElement | null>(null)
   useEffect(() => {
     const pick = () => {
-      setHost(document.getElementById('transport-more-extra') || document.getElementById('command-strip') || document.getElementById('tool-slot'))
+      const extra = document.getElementById('transport-menu-extra')
+      const extraOpen = extra && !extra.closest('[hidden]')
+      setHost((extraOpen ? extra : null) || document.getElementById('command-strip') || document.getElementById('tool-slot'))
     }
     pick()
+    const observer = new MutationObserver(pick)
+    observer.observe(document.body, { childList: true, subtree: true })
     window.addEventListener('resize', pick)
-    return () => window.removeEventListener('resize', pick)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', pick)
+    }
   }, [])
   const buttons = (
     <div className="arrange-panels">
@@ -644,6 +652,7 @@ export function ArrangeView({
   const [browserTab, setBrowserTab] = useState<BrowserTab>(libraryTab || 'sounds')
   const [browserWidth, setBrowserWidth] = useState(300)
   const [trackSheet, setTrackSheet] = useState<string | null>(null)
+  const [trackAnchor, setTrackAnchor] = useState<HTMLElement | null>(null)
   useEffect(() => {
     if (!libraryTab) return
     setBrowserOpen(true)
@@ -808,7 +817,7 @@ export function ArrangeView({
                   <i style={{ transform: `scaleX(${levels[track.id] ?? 0})` }} />
                 </span>
               </span>
-              <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); setTrackSheet(track.id) }}>
+              <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); setTrackAnchor(event.currentTarget); setTrackSheet(track.id) }}>
                 ⋮
               </TipButton>
             </div>
@@ -1125,19 +1134,24 @@ export function ArrangeView({
       </div>
       </div>
       </div>
-      {patternMenu && (
-        <div className="touch-menu" style={{ left: patternMenu.x, top: patternMenu.y }}>
-          <button type="button" title="Copy this pattern clip and place it just after." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.duplicateSelection(); setPatternMenu(null) }}>Duplicate</button>
-          <button type="button" title="Give this clip its own pattern so edits stay here." onPointerDown={(event) => event.stopPropagation()} onClick={() => { const id = store.selectedPatternClipId; if (id) store.makePatternClipUnique(id); setPatternMenu(null) }}>Make unique</button>
-          <button type="button" title="Remove this pattern clip from the arrangement." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setPatternMenu(null) }}>Delete</button>
-        </div>
-      )}
+      <AnchoredMenu
+        open={!!patternMenu}
+        onClose={() => setPatternMenu(null)}
+        label="Pattern clip"
+        anchor={patternMenu ? { left: patternMenu.x, top: patternMenu.y, width: 28, height: 28 } : null}
+        prefer="down"
+      >
+        <button type="button" title="Copy this pattern clip and place it just after." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.duplicateSelection(); setPatternMenu(null) }}>Duplicate</button>
+        <button type="button" title="Give this clip its own pattern so edits stay here." onPointerDown={(event) => event.stopPropagation()} onClick={() => { const id = store.selectedPatternClipId; if (id) store.makePatternClipUnique(id); setPatternMenu(null) }}>Make unique</button>
+        <button type="button" title="Remove this pattern clip from the arrangement." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setPatternMenu(null) }}>Delete</button>
+      </AnchoredMenu>
       <StemSheet store={store} />
       {store.clipSheet && selected ? (
         <ClipSheet store={store} trackId={selected.track.id} clip={selected.clip} onClose={() => store.closeClipSheet()} />
       ) : null}
-      {sheetTrack && (
-        <ActionSheet title={sheetTrack.name} hint="Everything else for this track." onClose={() => setTrackSheet(null)}>
+      <AnchoredMenu open={!!sheetTrack} onClose={() => setTrackSheet(null)} label={sheetTrack?.name ?? 'Track'} trigger={trackAnchor} prefer="down">
+        {sheetTrack && (
+        <>
           <SheetRow
             label={sheetTrack.soloSafe ? 'Solo safe on' : 'Solo safe'}
             hint="Stay audible when other tracks are soloed."
@@ -1237,8 +1251,9 @@ export function ArrangeView({
           )}
           <SheetRow label="Analyze" hint="Analyze the key, chords, and sections of this track." onClick={() => { setTrackSheet(null); onAnalyze(sheetTrack.id) }} />
           <SheetRow label={copyOf(TRACK_SHEET, 'remove').label} hint={copyOf(TRACK_SHEET, 'remove').hint} onClick={() => { store.removeTrack(sheetTrack.id); setTrackSheet(null) }} />
-        </ActionSheet>
-      )}
+        </>
+        )}
+      </AnchoredMenu>
     </div>
   )
 }
@@ -1517,14 +1532,18 @@ function ClipView({
           })}
         </div>
       )}
-      {menu && (
-        <div className="touch-menu" style={{ left: menu.x, top: menu.y }}>
-          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { onSplit(); setMenu(null) }}>Split</button>
-          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openStems(trackId, clip.id); setMenu(null) }}>Stems</button>
-          <button type="button" title="Spectrogram. Select a spot and remove clicks, hum, or noise." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openSpectral(trackId, clip.id); setMenu(null) }}>Repair</button>
-          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setMenu(null) }}>Delete</button>
-        </div>
-      )}
+      <AnchoredMenu
+        open={!!menu}
+        onClose={() => setMenu(null)}
+        label="Clip"
+        anchor={menu ? { left: menu.x, top: menu.y, width: 28, height: 28 } : null}
+        prefer="down"
+      >
+        <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { onSplit(); setMenu(null) }}>Split</button>
+        <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openStems(trackId, clip.id); setMenu(null) }}>Stems</button>
+        <button type="button" title="Spectrogram. Select a spot and remove clicks, hum, or noise." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openSpectral(trackId, clip.id); setMenu(null) }}>Repair</button>
+        <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setMenu(null) }}>Delete</button>
+      </AnchoredMenu>
       {(shown.stretch?.markers ?? []).map((marker) => (
         <i key={marker.id} className="warp" style={{ left: `${(marker.source / Math.max(1, sourceLen)) * 100}%` }} />
       ))}

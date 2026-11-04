@@ -20,6 +20,7 @@ import { readIdentity } from '../storage/identity'
 import { onMidiMessage } from '../midi/access'
 import { setPerformanceOwnsMidi } from '../midi/remember'
 import { useFormFactor } from './form'
+import { AnchoredMenu } from './AnchoredMenu'
 import { ChopDrawer } from './ChopDrawer'
 import { notifyKeyboard } from './keyboardStage'
 import './pads.css'
@@ -73,6 +74,8 @@ export function PadsPanel({
   const [padPage, setPadPage] = useState<0 | 1>(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [chopOpen, setChopOpen] = useState(chopStartsOpen)
+  const [kitOpen, setKitOpen] = useState(false)
+  const kitButton = useRef<HTMLButtonElement>(null)
   const taps = useRef(emptyTap())
   const stopRec = useRef(false)
   const [padArm, setPadArm] = useState<'idle' | 'count-in' | 'recording'>('idle')
@@ -447,18 +450,34 @@ export function PadsPanel({
         <div className="mpc-banks" role="group" aria-label="Pad banks">
           <button type="button" className={`hw-key ch-tab${padPage === 0 ? ' on' : ''}`} aria-pressed={padPage === 0} title="Bank A. Pads 1 to 8. Sounds and patterns stay on these pads." onClick={() => showPadPage(0)}>Bank A</button>
           <button type="button" className={`hw-key ch-tab${padPage === 1 ? ' on' : ''}`} aria-pressed={padPage === 1} title="Bank B. Pads 9 to 16. Sounds and patterns stay on these pads." onClick={() => showPadPage(1)}>Bank B</button>
-          <select
+          <button
+            ref={kitButton}
+            type="button"
             className="hw-key ch-tab mpc-kit"
             aria-label="Kit"
+            aria-expanded={kitOpen}
             title="Kit bank. Each kit keeps sixteen pads. Bank A and Bank B show eight at a time."
-            value={bank}
-            onChange={(event) => {
-              store.patchTrackKit(trackId, { activeBank: Number(event.target.value) })
-              showPadPage(0)
-            }}
+            onClick={() => setKitOpen((open) => !open)}
           >
-            {BANKS.map((name, index) => <option key={name} value={index}>Kit {name}</option>)}
-          </select>
+            <span>Kit {BANKS[bank]}</span>
+          </button>
+          <AnchoredMenu open={kitOpen} onClose={() => setKitOpen(false)} label="Kit" triggerRef={kitButton} prefer="down">
+            {BANKS.map((name, index) => (
+              <button
+                key={name}
+                type="button"
+                className={index === bank ? 'on' : ''}
+                aria-pressed={index === bank}
+                onClick={() => {
+                  store.patchTrackKit(trackId, { activeBank: index })
+                  showPadPage(0)
+                  setKitOpen(false)
+                }}
+              >
+                <span>Kit {name}</span>
+              </button>
+            ))}
+          </AnchoredMenu>
           <button type="button" className={`hw-key ch-tab${chopOpen ? ' on' : ''}`} aria-pressed={chopOpen} aria-expanded={chopOpen} onClick={() => setChopOpen((value) => !value)}>Chop</button>
         </div>
         {chopOpen && <ChopDrawer store={store} engine={engine} trackId={trackId} vintageStartsOpen={vintageStartsOpen} />}

@@ -26,7 +26,7 @@ import { applyTransportLaunch, recordedLength } from './model/launch'
 import { shouldCountIn } from './model/sessionInteract'
 import { editorForGesture, releaseKeyboardForPiano } from './model/editorOpen'
 import { shouldCloseOnscreenPiano } from './model/onscreenPiano'
-import { armedRecordPlan, homeSample, playPress, playStartsCapture, recordPress, stopPress } from './model/transport'
+import { armedRecordPlan, playPress, playStartsCapture, recordPress, startPress, stopPress } from './model/transport'
 import { keepLandscapeAfterClose } from './ui/keyboardStage'
 import { countInAt, meterAtSample, projectSampleBeat, tempoAtSample } from './model/tempoMap'
 import { displayedPlayhead } from './model/transportSync'
@@ -65,6 +65,7 @@ import { RackView } from './ui/RackView'
 import { SessionView } from './ui/SessionView'
 import { collabBadgeOn, collabPanelVisible, type StudioTab } from './ui/collabTab'
 import './ui/collab.css'
+import { AnchoredMenu } from './ui/AnchoredMenu'
 import { TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
 import { SnapControl } from './ui/SnapControl'
@@ -230,6 +231,7 @@ export function App() {
   const [collabOpen, setCollabOpen] = useState(() => readSessionDock())
   const [pianoOpen, setPianoOpen] = useState(false)
   const shellRef = useRef<HTMLDivElement>(null)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
   const [keysLandscape, setKeysLandscape] = useState(false)
   const keysMode = useRef<KeyboardPresentation>('dock')
   const keysFromClick = useRef(false)
@@ -907,17 +909,11 @@ export function App() {
   }
 
   async function returnToStart() {
-    const home = homeSample(store.project)
-    if (engine.status === 'recording' || engine.status === 'counting-in') {
-      await stop()
-      await locate(home)
+    if (startPress(engine.status).action === 'roll') {
+      await playFrom(0)
       return
     }
-    if (engine.status === 'playing') {
-      await playFrom(home)
-      return
-    }
-    await locate(home)
+    await locate(0)
   }
 
   async function playFrom(sample: number, mode: 'arrangement' | 'session' = 'arrangement', intent: 'play' | 'session-launch' = 'play') {
@@ -1287,7 +1283,6 @@ export function App() {
     const transportMode = FEATURES.session && (intoSlot || store.transportMode === 'session' || engine.currentMode() === 'session') ? 'session' : 'arrangement'
     let fromSample = Math.round(engine.currentTimelineSample())
     if (!alreadyPlaying && punched) fromSample = punched.playFrom
-    else if (!alreadyPlaying && settings.loop && store.project.loopEnabled) fromSample = store.project.loopStartSample
     const counting = shouldCountIn({ enabled: store.project.countIn, stopped: !alreadyPlaying, intent: 'record' })
     const lead = scheduleLeadMs(session.primaryOneWay()?.ms ?? 40)
     const countMs = counting ? countInAt(store.project, fromSample) * 1000 : 0
@@ -1798,7 +1793,7 @@ async function importDropped(files: FileList) {
       }}
     >
       <header className="topbar">
-        <button type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Project, edit, view, and settings." title="Project, edit, view, and settings." aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
+        <button ref={menuButtonRef} type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Project, edit, view, and settings." title="Project, edit, view, and settings." aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
           <MenuIcon />
           <span className="menu-word">Menu</span>
         </button>
@@ -1829,7 +1824,7 @@ async function importDropped(files: FileList) {
           disabled={store.remoteFollow}
           onClick={() => { setMenuOpen(false); setUnstuckOpen((open) => !open) }}
         />
-        {menuOpen && (
+        <AnchoredMenu open={menuOpen} onClose={() => setMenuOpen(false)} label="Project menu" triggerRef={menuButtonRef} prefer="down">
           <MainMenu
             items={visibleMenu({
               phone,
@@ -1874,7 +1869,7 @@ async function importDropped(files: FileList) {
               else if (action === 'shortcuts') { setMenuOpen(false); setHelp(true) }
             }}
           />
-        )}
+        </AnchoredMenu>
       </header>
       {(surface === 'studio' || surface === 'artist' || session.state.status === 'live') && !collabShown && (
         <TransportBar
@@ -1899,13 +1894,13 @@ async function importDropped(files: FileList) {
             <ToolBar
               context="arrange"
               words
-              tucked={phone && !land}
+              tucked
               showHint={false}
               onChange={(tool) => store.setTool(tool)}
               onDuplicate={() => store.duplicateSelection()}
               onDelete={() => store.deleteSelectedClip()}
             />
-            <SnapControl store={store} inline={phone && !land} />
+            <SnapControl store={store} inline />
           </div>
           <MidiTools store={store} engine={engine} />
         </div>

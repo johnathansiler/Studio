@@ -9,20 +9,25 @@ export interface TransportSpan {
   loopEndSample: number
 }
 
-/** Where Play begins. Inside the loop, the playhead wins. Outside it, the loop start does. */
-export function playOriginSample(project: TransportSpan, playhead: number): number {
-  const head = Math.max(0, Math.round(playhead))
-  if (!project.loopEnabled) return head
-  const start = Math.max(0, Math.round(project.loopStartSample))
-  const end = Math.max(start + 1, Math.round(project.loopEndSample))
-  if (head < start || head >= end) return start
-  return head
+/** Where Play begins. Resume from the current playhead, even outside the loop. */
+export function playOriginSample(_project: TransportSpan, playhead: number): number {
+  return Math.max(0, Math.round(playhead))
 }
 
-/** Bar 1, or the loop start while the loop is on. */
-export function homeSample(project: TransportSpan): number {
-  if (!project.loopEnabled) return 0
-  return Math.max(0, Math.round(project.loopStartSample))
+/** Bar 1. Start always uses time 0, whether or not the loop is on. */
+export function homeSample(_project: TransportSpan): number {
+  return 0
+}
+
+export type StartPress = { action: 'roll'; sample: 0 } | { action: 'park'; sample: 0 }
+
+/**
+ * Start moves the playhead to bar 1 and keeps the transport state.
+ * Playing and recording keep rolling from the top. Stopped stays stopped.
+ */
+export function startPress(phase: TransportPhase): StartPress {
+  if (phase === 'playing' || phase === 'recording' || phase === 'counting-in') return { action: 'roll', sample: 0 }
+  return { action: 'park', sample: 0 }
 }
 
 export type PlayPress =
@@ -31,8 +36,8 @@ export type PlayPress =
   | { action: 'ignore' }
 
 /**
- * Play starts from the playhead. Pressing it again pauses and leaves the playhead.
- * Recording is ended with Record or Stop, so Play does not restart a take.
+ * Play resumes from the playhead. Pressing it again pauses and leaves the playhead.
+ * It does not jump to bar 1 or the loop start. Recording is ended with Record or Stop.
  */
 export function playPress(phase: TransportPhase, project: TransportSpan, playhead: number): PlayPress {
   if (phase === 'counting-in' || phase === 'recording') return { action: 'ignore' }

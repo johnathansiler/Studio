@@ -27,10 +27,10 @@ export function studioViewTabs(): Copy[] {
 }
 
 export const TRANSPORT_COPY: Copy[] = [
-  { id: 'to-start', label: 'Start', hint: 'Return to bar 1, or to the loop start when the loop is on.' },
-  { id: 'play', label: 'Play', hint: 'Play from the playhead. Press again to pause. The playhead stays put.' },
+  { id: 'to-start', label: 'Start', hint: 'Move to bar 1. Playing keeps playing from the top. Stopped stays stopped.' },
+  { id: 'play', label: 'Play', hint: 'Play from the playhead. After Stop, Play continues from there.' },
   { id: 'pause', label: 'Pause', hint: 'Pause playback. The playhead stays where it is.' },
-  { id: 'stop', label: 'Stop', hint: 'Stop playback and recording. Press again to return to the start.' },
+  { id: 'stop', label: 'Stop', hint: 'Stop playback and recording. The playhead stays where it is.' },
   { id: 'record', label: 'Record', hint: 'Record onto armed tracks from the playhead.' },
   { id: 'click', label: 'Click', hint: 'Metronome while you play and record.' },
   { id: 'count-in', label: 'Count-in', hint: 'Count one bar before recording starts.' },
