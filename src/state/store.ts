@@ -155,6 +155,8 @@ import {
   type PadVoice,
   type SequenceNote,
 } from '../model/padMachine'
+import { assignPlan, detectSampleBpm, detectToneKey, emptyChop, slicesFor, type ChopSetup } from '../model/padChop'
+import { setPadRegion, setPadVintage } from '../ui/padVoiceAdapter'
 import { insertsBeatMachine } from '../instruments/pads/identity'
 import { applyChoke, assignPad, clipBeat, padRecordWindow, recordPadHits, type PadHit } from '../instruments/pads/record'
 import { arrangeSong, chopsFor, chopsOntoPads, expandChord, humanizeNotes, kitFromSlices, mpcTempo, quantizeGridBeats, quantizeNotes, setStepVelocity, toggleStep, withLength } from '../instruments/mpc/model'
@@ -1295,6 +1297,67 @@ export class ProjectStore {
       this.selectedClipId = clipId
     })
     return audioId || null
+  }
+
+  /** Keep the chopped sample, its key, and its tempo on the kit. */
+  setChopSample(trackId: string, samples: Float32Array, sampleRate: number, name: string) {
+    const id = uid('smp')
+    this.buffers.set(id, { id, name, sampleRate, channels: [samples] })
+    const key = detectToneKey(samples, sampleRate)
+    const bpm = detectSampleBpm(samples, sampleRate)
+    const chop = emptyChop(id, name, this.project.tempo)
+    chop.root = key.root
+    chop.modeName = key.mode
+    if (bpm) {
+      chop.sampleBpm = bpm
+      chop.tempoSource = 'sample'
+    }
+    this.patchTrackKit(trackId, { chop })
+    return chop
+  }
+
+  patchChop(trackId: string, patch: Partial<ChopSetup>) {
+    const current = this.trackKit(trackId).chop
+    if (!current) return
+    this.patchTrackKit(trackId, { chop: { ...current, ...patch, bufferId: current.bufferId } })
+  }
+
+  /**
+   * Map slices 1–16 onto Bank A then Bank B of the current kit.
+   * Regions stay on the one sample so each pad can still trim its window.
+   */
+  assignChopToPads(trackId: string) {
+    const kit = this.trackKit(trackId)
+    const chop = kit.chop
+    const asset = chop ? this.buffers.get(chop.bufferId) : undefined
+    const samples = asset?.channels[0]
+    if (!chop || !samples?.length) return { assigned: 0, left: 0 }
+    const slices = slicesFor(chop, samples, asset?.sampleRate || this.project.sampleRate, this.project.tempo)
+    const plan = assignPlan(slices.length)
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const next = normalizePadKit(track.padKit)
+      const bank = Math.min(next.banks.length - 1, Math.max(0, next.activeBank || 0))
+      for (let index = 0; index < plan.assigned; index++) {
+        const pad = next.banks[bank]?.[index]
+        const slice = slices[index]
+        if (!pad || !slice) continue
+        const voiced = setPadRegion(pad, chop.bufferId, slice.start / samples.length, slice.end / samples.length)
+        voiced.name = `Slice ${index + 1}`
+        voiced.sampleName = chop.name
+        voiced.tune = chop.semitones
+        voiced.tuneCents = chop.cents
+        voiced.pitchMode = chop.pitchMode
+        voiced.highpass = chop.highpass
+        next.banks[bank][index] = voiced
+      }
+      next.chop = chop
+      track.padKit = normalizePadKit(next)
+    })
+    // Seam for the voice: scaled depths, plus the macro and the 100% table.
+    setPadVintage(this.trackKit(trackId).vintage)
+    return plan
   }
 
   chopTrackPad(trackId: string, bank: number, index: number, mode: 'transient' | 'grid' | 'manual') {

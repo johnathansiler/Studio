@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import type { AudioEngine } from '../audio/engine'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
+import { FACTORY_VINTAGE } from '../model/padChop'
 import { PadsPanel } from '../ui/PadsPanel'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -41,6 +42,7 @@ describe('beat machine layout', () => {
         { name: 'phone360', width: 360, height: 844 },
         { name: 'phone', width: 390, height: 844 },
         { name: 'phone412', width: 412, height: 844 },
+        { name: 'folded', width: 673, height: 841 },
         { name: 'unfold', width: 880, height: 1000 },
         { name: 'desktop', width: 1440, height: 900 },
       ]) {
@@ -118,6 +120,106 @@ describe('beat machine layout', () => {
       </body></html>`, { waitUntil: 'load' })
       await page.screenshot({ path: '/opt/cursor/artifacts/beat-compare.png' })
       await page.close()
+    } finally {
+      await browser.close()
+    }
+  })
+
+  it('shows the chop editor and the vintage menu at phone, fold, and desktop', async () => {
+    mkdirSync('/opt/cursor/artifacts', { recursive: true })
+    const store = new ProjectStore(createEmptyProject())
+    const id = store.project.tracks.find((track) => track.type === 'midi')!.id
+    store.insertPads(id)
+    const rate = 48000
+    const beat = Math.round(rate * 60 / 120)
+    const samples = new Float32Array(beat * 8)
+    const hz = 261.625565
+    for (let i = 0; i < samples.length; i++) {
+      const env = (i % beat) < 3600 ? 1 : 0.12
+      samples[i] = Math.sin((2 * Math.PI * hz * i) / rate) * env
+    }
+    store.setChopSample(id, samples, rate, 'Soul loop')
+    store.patchChop(id, { sampleBpm: 120, tempoSource: 'sample', root: 0, modeName: 'minor' })
+    store.patchTrackKit(id, { vintage: { macro: 0.65, table: FACTORY_VINTAGE[0].table, presetName: 'SP-1200' } })
+    const open = renderToStaticMarkup(createElement(PadsPanel, { store, engine, trackId: id, onRecord: () => {}, onEdit: () => {}, chopStartsOpen: true }))
+    const menu = renderToStaticMarkup(createElement(PadsPanel, { store, engine, trackId: id, onRecord: () => {}, onEdit: () => {}, chopStartsOpen: true, vintageStartsOpen: true }))
+    const browser = await chromium.launch()
+    try {
+      const views = [
+        { name: 'phone', width: 390, height: 844, html: open, vintage: false },
+        { name: 'folded', width: 673, height: 841, html: open, vintage: false },
+        { name: 'unfold', width: 880, height: 1000, html: open, vintage: false },
+        { name: 'desktop', width: 1440, height: 900, html: open, vintage: false },
+        { name: 'vintage-phone', width: 390, height: 844, html: menu, vintage: true },
+        { name: 'vintage-desktop', width: 1440, height: 900, html: menu, vintage: true },
+      ]
+      for (const viewport of views) {
+        const page = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height } })
+        await page.setContent(`<!doctype html><html><head><style>
+          ${css}
+          html, body { margin: 0; height: auto; overflow: visible; background: #1a1a1a; }
+          .stage { width: ${viewport.width}px; min-height: ${viewport.height}px; height: auto; }
+          .mpc, .hw-body { height: auto; overflow: visible; }
+          ${viewport.vintage ? '.vintage-menu { position: relative; top: auto; left: auto; max-height: none; width: min(360px, 100%); }' : ''}
+        </style></head><body><div class="stage">${viewport.html}</div></body></html>`, { waitUntil: 'load' })
+        await page.evaluate(() => {
+          const canvas = document.querySelector('.chop-wave canvas') as HTMLCanvasElement | null
+          if (!canvas) return
+          const width = Math.max(280, Math.floor(canvas.clientWidth || 320))
+          const height = 96
+          canvas.width = width
+          canvas.height = height
+          const ctx = canvas.getContext('2d')
+          if (!ctx) return
+          ctx.fillStyle = '#101010'
+          ctx.fillRect(0, 0, width, height)
+          ctx.strokeStyle = '#9ec8ff'
+          ctx.beginPath()
+          for (let x = 0; x < width; x++) {
+            const peak = Math.abs(Math.sin(x / 7)) * (0.25 + 0.75 * ((Math.floor(x / 28) % 2)))
+            ctx.moveTo(x, height / 2 - peak * height / 2)
+            ctx.lineTo(x, height / 2 + peak * height / 2)
+          }
+          ctx.stroke()
+        })
+        const report = await page.evaluate(() => {
+          const chop = document.querySelector('[data-chop="open"]') as HTMLElement | null
+          const mpc = document.querySelector('.mpc') as HTMLElement | null
+          const body = document.querySelector('.hw-body') as HTMLElement | null
+          const stage = document.querySelector('.stage') as HTMLElement | null
+          const bottom = chop ? Math.ceil(chop.getBoundingClientRect().bottom + 28) : 900
+          for (const node of [document.documentElement, document.body, stage, mpc]) {
+            if (!node) continue
+            node.style.height = `${bottom}px`
+            node.style.overflow = 'visible'
+          }
+          if (body) {
+            body.style.height = 'auto'
+            body.style.overflow = 'visible'
+            body.style.flex = 'none'
+          }
+          return {
+            chop: chop != null,
+            vintage: document.querySelector('[aria-label="Vintage"]') != null,
+            menu: document.querySelector('[aria-label="Vintage menu"]') != null,
+            amounts: [...document.querySelectorAll('.vintage-menu label')].map((node) => node.textContent?.trim().slice(0, 48) || ''),
+            scrollWidth: document.documentElement.scrollWidth,
+            clientWidth: document.documentElement.clientWidth,
+            bottom,
+          }
+        })
+        const path = `/opt/cursor/artifacts/beat-chop-${viewport.name}-${viewport.width}x${viewport.height}.png`
+        await page.screenshot({ path, fullPage: true })
+        expect(report.chop, viewport.name).toBe(true)
+        expect(report.vintage, viewport.name).toBe(true)
+        expect(report.scrollWidth, viewport.name).toBeLessThanOrEqual(viewport.width + 1)
+        if (viewport.vintage) {
+          expect(report.menu, viewport.name).toBe(true)
+          expect(report.amounts.join(' ')).toContain('Tape wow and flutter')
+          expect(report.amounts.join(' ')).toContain('Sample-rate reduction')
+        }
+        await page.close()
+      }
     } finally {
       await browser.close()
     }

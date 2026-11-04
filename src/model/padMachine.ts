@@ -1,5 +1,7 @@
 /** Pad banks, swing, chops, and step logic for the drum deck. */
 
+import type { ChopSetup, VintageState } from './padChop'
+import { normalizeChop, normalizeVintage } from './padChop'
 import { DRUM_PADS } from './drums'
 import { quantizeBeat } from './midiClock'
 import { scaleById, pitchClass, type ScaleId } from './scale'
@@ -73,6 +75,16 @@ export interface PadVoice {
   insertId?: string
   /** 1 follows the hit. 0 plays the fixed velocity. */
   velocitySense?: number
+  /** One shot plays the slice through. Hold follows the finger. */
+  gate?: 'shot' | 'hold'
+  /** Fine pitch on top of tune, in cents. */
+  tuneCents?: number
+  /** Vinyl moves speed with pitch. Stretch keeps the tempo. */
+  pitchMode?: 'vinyl' | 'stretch'
+  /** 50 is straight. Missing follows the kit swing. */
+  swing?: number
+  /** 0 is open. 1 is a strong high-pass. */
+  highpass?: number
 }
 
 export interface SequenceNote {
@@ -145,6 +157,10 @@ export interface PadProgram {
   recordTrim: boolean
   recordChop: boolean
   name?: string
+  /** Sample chop for this kit. Saved with the project. */
+  chop?: ChopSetup
+  /** Vintage macro and the depths it scales. Saved with the project. */
+  vintage?: VintageState
 }
 
 const FREE_PITCHES: number[] = []
@@ -476,6 +492,11 @@ export function normalizePadKit(value: Partial<PadProgram> | undefined | null): 
       chord: chordPitches(incoming.chord),
       insertId: incoming.insertId?.trim() || undefined,
       velocitySense: clamp(incoming.velocitySense ?? 1, 0, 1),
+      gate: incoming.gate === 'hold' ? 'hold' : 'shot',
+      tuneCents: clamp(incoming.tuneCents ?? 0, -100, 100),
+      pitchMode: incoming.pitchMode === 'stretch' ? 'stretch' : 'vinyl',
+      swing: incoming.swing == null ? undefined : clamp(incoming.swing, 50, 75),
+      highpass: clamp(incoming.highpass ?? 0, 0, 1),
     } as PadVoice
   }))
   const anyBus = banks.some((row) => row.some((pad) => pad.busId))
@@ -513,6 +534,8 @@ export function normalizePadKit(value: Partial<PadProgram> | undefined | null): 
     recordTrim: value.recordTrim === false ? false : true,
     recordChop: Boolean(value.recordChop),
     name: value.name,
+    chop: normalizeChop(value.chop),
+    vintage: normalizeVintage(value.vintage),
     banks,
   }
 }
