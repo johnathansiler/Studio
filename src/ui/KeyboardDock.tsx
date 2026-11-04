@@ -19,6 +19,7 @@ import { typingTarget } from '../state/history'
 import type { ProjectStore } from '../state/store'
 import { octaveName } from './kit/controls'
 import { hidePianoRoll, notifyKeyboard } from './keyboardStage'
+import { useScreenOverlay } from './screenOverlay'
 import { miniPads, padGridColumn, padLabel } from './miniKeys'
 
 /**
@@ -199,6 +200,7 @@ export function EditorPinned({
 
 export function KeyboardDock({ store, engine, onEditNotes }: { store: ProjectStore; engine: AudioEngine; onEditNotes?: () => void }) {
   useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
+  useScreenOverlay(() => { store.setKeyboardMidi(false); notifyKeyboard(false) }, store.keyboardMidi)
   const route = noteTarget(store.project.tracks, store.selectedTrackId)
   const editor = store.midiEditor()
   const octave = editor.octave
@@ -363,7 +365,7 @@ export function KeyboardDock({ store, engine, onEditNotes }: { store: ProjectSto
         <span aria-live="polite">{name}</span>
         <button type="button" disabled={atTop} onClick={() => shift(1)}>Octave Up</button>
         <button type="button" className="keyboard-edit" onClick={() => onEditNotes?.()}>Edit Notes</button>
-        <button type="button" className="keyboard-close" onClick={() => { store.setKeyboardMidi(false); notifyKeyboard(false) }}>Close</button>
+        <button type="button" className="keyboard-close overlay-close" onClick={() => { store.setKeyboardMidi(false); notifyKeyboard(false) }}>Close</button>
       </div>
       {route.kind === 'silent' && <p className="keyboard-hint" role="status">{INSTRUMENT_HINT}</p>}
       <div className="mini-board" role="group" aria-label={beatKit ? 'Beat machine pads' : 'Piano keyboard'}>

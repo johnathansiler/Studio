@@ -145,7 +145,7 @@ export function KnockPop({ store, engine, onClose }: { store: ProjectStore; engi
     setParam('punch', y * 24)
   }
   return (
-    <div className="knock-pop" data-knock="open">
+    <div className="knock-pop" data-knock="open" data-screen-overlay="" role="dialog" aria-label="Knock">
       <header>
         <strong>Knock</strong>
         <PresetControls
@@ -157,7 +157,7 @@ export function KnockPop({ store, engine, onClose }: { store: ProjectStore; engi
         />
         <button className={`text-btn ${slideArm ? 'on' : ''}`} onClick={() => setSlideArm((value) => !value)}>Slide</button>
         <button className={`text-btn ${(params.snap || 0) >= 0.5 ? 'on' : ''}`} onClick={() => setParam('snap', (params.snap || 0) >= 0.5 ? 0 : 1)}>Key</button>
-        <button className="text-btn" onClick={onClose}>Close</button>
+        <button className="text-btn overlay-close" onClick={onClose}>Close</button>
       </header>
       <div className="knock-stage">
         <div className="knock-controls" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>

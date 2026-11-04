@@ -55,7 +55,7 @@ export function AmpPop({
   const target = heard ? targetNote(heard.note + heard.cents / 100, preset) : (TUNE_PRESETS[preset]?.strings[0] ?? 40)
   const cents = heard ? (heard.note + heard.cents / 100 - target) * 100 : 0
   return (
-    <div className="board-pop" data-board="open" role="dialog" aria-label="Amp">
+    <div className="board-pop" data-board="open" data-screen-overlay="" role="dialog" aria-label="Amp">
       <header>
         <strong>Amp</strong>
         <PresetControls
@@ -217,7 +217,7 @@ export function TunerPop({
     return () => window.clearInterval(timer)
   }, [engine, a4, preset])
   return (
-    <div className="board-pop tune-pop" data-tuner="open" role="dialog" aria-label="Tuner">
+    <div className="board-pop tune-pop" data-tuner="open" data-screen-overlay="" role="dialog" aria-label="Tuner">
       <header>
         <strong>Tuner</strong>
         <button type="button" className={info.direct ? 'on' : ''} hidden={!info.directAvailable} onClick={() => engine.setDirectMonitor(!info.direct)}>Direct</button>

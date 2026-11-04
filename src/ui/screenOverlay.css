@@ -1,0 +1,149 @@
+/* View tabs stay above every menu. Overlays fill the screen from the bottom of that bar. */
+
+:root {
+  --view-tabs-z: 480;
+  --overlay-z: 360;
+  --view-tabs-top: 0px;
+  --view-tabs-height: 48px;
+  --view-tabs-bottom: 48px;
+  --view-tabs-left: 0px;
+  --view-tabs-right: 100vw;
+}
+
+.views {
+  position: relative;
+  z-index: var(--view-tabs-z);
+}
+
+[data-screen-overlay] {
+  position: fixed !important;
+  z-index: var(--overlay-z) !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  top: var(--view-tabs-bottom, 48px) !important;
+  width: auto !important;
+  max-width: none !important;
+  height: auto !important;
+  max-height: none !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: auto !important;
+  box-sizing: border-box;
+  background-color: #141c18;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 72px);
+  color: var(--text);
+}
+
+.guide-scrim,
+.browser-scrim,
+.sheet-back {
+  top: var(--view-tabs-bottom, 48px);
+  z-index: calc(var(--overlay-z) - 1);
+}
+
+[data-screen-overlay].modal-back {
+  padding: 0;
+  place-items: stretch;
+  background: #141c18;
+}
+
+[data-screen-overlay].modal-back > .modal,
+[data-screen-overlay] > .modal {
+  width: 100%;
+  max-width: none;
+  height: auto;
+  min-height: 100%;
+  max-height: none;
+  border-radius: 0;
+  margin: 0;
+}
+
+[data-screen-overlay] #shell-menu,
+[data-screen-overlay].anchored-menu #shell-menu {
+  position: static;
+  top: auto;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  height: auto;
+  flex: 1 1 auto;
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+[data-screen-overlay] .preset-list,
+[data-screen-overlay] .add-track-menu,
+[data-screen-overlay] .plugins-drawer-body,
+[data-screen-overlay] .scaler-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+[data-screen-overlay].step-sequencer,
+[data-screen-overlay].mpc,
+[data-screen-overlay].scaler-panel,
+[data-screen-overlay].midi-dock,
+[data-screen-overlay].keyboard-dock {
+  overflow: hidden;
+}
+
+[data-screen-overlay].step-sequencer > .beats,
+[data-screen-overlay].step-sequencer .beats.channel-rack {
+  flex: 1 1 auto;
+  height: auto !important;
+  min-height: 0;
+  overflow: auto;
+}
+
+[data-screen-overlay] .preset-list,
+[data-screen-overlay] .preset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+[data-screen-overlay] .preset-list {
+  flex-direction: column;
+}
+
+[data-screen-overlay] .preset-list button,
+[data-screen-overlay] .add-choice,
+[data-screen-overlay] .guide-choice {
+  width: 100%;
+  min-height: 40px;
+}
+
+button.overlay-close {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  min-width: 40px;
+  min-height: 40px;
+  height: 40px;
+  margin: 8px 8px 0 0;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line, #31443a);
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: var(--muted, #93a399);
+  font-size: 14px;
+  font-weight: 560;
+}
+
+button.overlay-close:hover,
+button.overlay-close:focus-visible {
+  color: var(--text, #eef3ea);
+  border-color: var(--muted, #93a399);
+}

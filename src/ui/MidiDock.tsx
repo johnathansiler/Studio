@@ -10,6 +10,7 @@ import { PianoRoll } from './PianoRoll'
 import { ScoreView } from './ScoreView'
 import { StepInput } from './StepInput'
 import './midi-editors.css'
+import { useScreenOverlay } from './screenOverlay'
 
 const MODES: { id: MidiEditorMode; label: string; hint: string }[] = [
   { id: 'roll', label: 'Roll', hint: 'Piano roll. Draw and move notes on a grid.' },
@@ -32,6 +33,7 @@ export function MidiDock({
   onClose?: () => void
 }) {
   const { editor } = selectMidiEditor(store)
+  useScreenOverlay(() => onClose?.())
   const modes = (
     <>
       {MODES.map((mode) => (
@@ -46,7 +48,7 @@ export function MidiDock({
     </>
   )
   return (
-    <div className="midi-dock">
+    <div className="midi-dock" data-screen-overlay="" aria-label="Piano roll">
       {editor.mode !== 'roll' && (
         <div className="roll-head">
           <EditorPinned store={store} engine={engine} onClose={onClose} />

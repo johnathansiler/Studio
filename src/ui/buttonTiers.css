@@ -189,8 +189,8 @@
   box-shadow: var(--btn-bevel);
 }
 
-/* Quiet: utility, navigation, and toggles that are off. Hug the words. */
-.shell .views button:not(.active),
+/* Quiet: utility, navigation, and toggles that are off. Hug the words.
+   View tabs are not in this tier. They stay large and fill their row. */
 .shell .mpc-keyboard,
 .shell .mpc-close,
 .shell .pl-head .piano-open,
@@ -313,9 +313,7 @@
 .shell .stepper button[aria-label^="Previous"]::after { content: "Previous"; font-size: 12px; font-weight: 640; color: var(--btn-quiet-ink); }
 .shell .stepper button[aria-label^="Next"]::after { content: "Next"; font-size: 12px; font-weight: 640; color: var(--btn-quiet-ink); }
 
-/* Active toggles: clear, not a second primary. */
-.shell .views button.active,
-.shell .views button.collab-tab.active,
+/* Active toggles: clear, not a second primary. View tabs keep their own accent. */
 .shell .cap-btn.on,
 .shell .snap-toggle.on,
 .shell .tool-slot .timeline-tools button.tool.on,
@@ -395,7 +393,6 @@
 }
 
 /* Touch floor. Quiet pills stay 40px even where an older rule shrank them. */
-.shell .views button,
 .shell .pl-head .mini,
 .shell .pl-head .piano-open,
 .shell .pl-head .beat-open,
@@ -422,14 +419,11 @@
   min-height: var(--btn-min);
 }
 
-.shell.phone .views button,
-.shell.fold .views button,
 .shell.phone .pl-head .piano-open,
 .shell.fold .pl-head .piano-open,
 .shell.phone .pl-head .beat-open,
 .shell.fold .pl-head .beat-open,
-.shell.phone.land .history-btn,
-.shell.phone.land .views button {
+.shell.phone.land .history-btn {
   flex: 0 0 auto;
   width: max-content;
   min-width: max(var(--btn-min), max-content);
@@ -440,7 +434,6 @@
 @media (hover: hover) {
   .shell .menu-btn:hover,
   .shell .history-btn:hover,
-  .shell .views button:not(.active):hover,
   .shell .text-btn:not(.primary):hover,
   .shell .t-btn:not(.play):not(.rec):hover,
   .shell .mini:not(.on-m):not(.on-s):not(.on-r):hover,
@@ -527,4 +520,82 @@
   color: var(--btn-toggle-ink);
   border-color: var(--btn-toggle-border);
   box-shadow: var(--btn-bevel-pressed);
+}
+
+/* View tabs are the one exception to the quiet tier.
+   Before the tiers they were equal-width beveled buttons filling their row
+   (phone 40px / 13px, fold 44px, shared face and raised shadow, accent when on). */
+.shell .topbar {
+  flex-wrap: wrap;
+}
+.shell .views {
+  order: 8;
+  flex: 1 0 100%;
+  width: 100%;
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+}
+.shell .views button,
+.shell .views button.collab-tab {
+  flex: 1 1 0;
+  width: auto;
+  max-width: none;
+  min-width: 0;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background-color: #18231d;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 640;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+.shell.fold .views button,
+.shell.fold .views button.collab-tab {
+  height: 44px;
+  min-height: 44px;
+}
+/* Sideways phones keep one chrome row so the mixer fader still has its throw.
+   The tabs share that row, equal width, at the earlier landscape height. */
+.shell.phone.land .topbar {
+  flex-wrap: nowrap;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  overflow: hidden;
+  padding: 0 6px;
+}
+.shell.phone.land .views {
+  order: 4;
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  height: 36px;
+  padding: 2px;
+}
+.shell.phone.land .views button,
+.shell.phone.land .views button.collab-tab {
+  flex: 1 1 0;
+  width: auto;
+  max-width: none;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 4px;
+  font-size: 13px;
+}
+.shell .views button.active,
+.shell .views button.collab-tab.active {
+  background-color: var(--accent);
+  background-image: var(--face);
+  color: var(--accent-ink);
+  border-color: transparent;
+  box-shadow: var(--pressed), var(--glow);
+  font-weight: 740;
 }

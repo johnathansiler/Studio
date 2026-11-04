@@ -101,9 +101,10 @@ export function ExportSheet({
   }
 
   return (
-    <div className="modal-back" onClick={onClose}>
+    <div className="modal-back" data-screen-overlay="" role="dialog" aria-label="Export" onClick={onClose}>
       <div className="modal" id="export-sheet" onClick={(event) => event.stopPropagation()}>
         <h2>Export</h2>
+        <button type="button" className="overlay-close" onClick={onClose}>Close</button>
         <select id="export-format" aria-label="Format" value={format} onChange={(event) => setFormat(event.target.value as BounceKind)}>
           <option value="wav">WAV</option>
           <option value="mp3">MP3</option>

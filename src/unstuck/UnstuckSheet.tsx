@@ -203,14 +203,14 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
 
   return (
     <GuideLayer>
-      <div className={`guide-sheet unstuck-sheet unstuck-dock ${place}`} role="dialog" aria-label="Unstuck" data-unstuck="open">
+      <div className={`guide-sheet unstuck-sheet unstuck-dock ${place}`} role="dialog" aria-label="Unstuck" data-unstuck="open" data-screen-overlay="">
         {place === 'sheet' && <div className="guide-handle" aria-hidden="true" />}
         <header className="guide-head">
           <div>
             <h2>Unstuck</h2>
             <p>Pick one part. Full song always writes two verses and two choruses, then any extra sections the seed keeps. Shuffle again keeps the locks.</p>
           </div>
-          <button type="button" className="guide-x" onClick={onClose} aria-label="Close Unstuck">Close</button>
+          <button type="button" className="guide-x overlay-close" onClick={onClose} aria-label="Close Unstuck">Close</button>
         </header>
         <div className="unstuck-grid" data-unstuck="parts">
           {ROLES.map((role) => (

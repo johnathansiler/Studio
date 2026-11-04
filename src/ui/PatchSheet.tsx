@@ -96,7 +96,7 @@ export function PatchSheet({
     store.updateOmni(trackId, (current) => editLayer(current, id, partial), draft)
   }
   return (
-    <section className="patch-sheet" role="dialog" aria-label="Layered patch">
+    <section className="patch-sheet" data-screen-overlay="" role="dialog" aria-label="Layered patch">
       <header>
         <input
           aria-label="Patch name"
@@ -126,7 +126,7 @@ export function PatchSheet({
             </optgroup>
           )}
         </select>
-        <button type="button" className="text-btn" onClick={() => store.openPatch(trackId)} aria-label="Close patch">Close</button>
+        <button type="button" className="text-btn overlay-close" onClick={() => store.openPatch(trackId)} aria-label="Close patch">Close</button>
       </header>
       <div className="patch-tabs" role="tablist">
         {TABS.map(([id, label, help]) => (

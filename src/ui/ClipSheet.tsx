@@ -21,7 +21,7 @@ export function ClipSheet({ store, trackId, clip, onClose }: { store: ProjectSto
   const source = sourceSamplesOf(shown)
   const percent = Math.round((shown.durationSamples / Math.max(1, source)) * 1000) / 10
   return (
-    <div className="clip-sheet" role="dialog" aria-label="Clip">
+    <div className="clip-sheet" data-screen-overlay="" role="dialog" aria-label="Clip">
       <header>
         <strong>{shown.name}</strong>
         <button type="button" className="text-btn" title="Play as instrument. Pitch this recording across the keyboard." onClick={() => {
@@ -36,7 +36,7 @@ export function ClipSheet({ store, trackId, clip, onClose }: { store: ProjectSto
           onClose()
         }}>As keys</button>
         <button type="button" className="text-btn" title="Spectrogram. Select a spot and remove clicks, hum, or noise." onClick={() => store.openSpectral(trackId, shown.id)}>Repair</button>
-        <button type="button" className="text-btn" onClick={onClose}>Close</button>
+        <button type="button" className="text-btn overlay-close" onClick={onClose}>Close</button>
       </header>
       <div className="row">
         <label>

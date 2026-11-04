@@ -8,6 +8,7 @@ import './ui/arrangeSpace.css'
 import './ui/premium.css'
 import './ui/pluginStage.css'
 import './ui/buttonTiers.css'
+import './ui/screenOverlay.css'
 
 scheduleWasmPreload()
 

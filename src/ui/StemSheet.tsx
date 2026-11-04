@@ -30,10 +30,10 @@ export function StemSheet({ store }: { store: ProjectStore }) {
     startStems(store, { trackId, clipId, mode, quality: quality === 'high' && budget.allowHigh ? 'high' : 'fast' })
   }
   return (
-    <div className="stem-sheet" role="dialog" aria-label="Stems">
+    <div className="stem-sheet" data-screen-overlay="" role="dialog" aria-label="Stems">
       <header>
         <strong>Stems</strong>
-        <button type="button" className="text-btn" onClick={() => store.closeStems()}>×</button>
+        <button type="button" className="text-btn overlay-close" onClick={() => store.closeStems()}>Close</button>
       </header>
       {store.stemStatus ? (
         <div className="row">

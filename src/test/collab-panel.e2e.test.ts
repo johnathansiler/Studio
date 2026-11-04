@@ -188,6 +188,8 @@ describe('collab session panel', () => {
         for (const name of ['Opus', 'Ping', 'Jam', 'Calibrate', 'Play together', 'Check connection']) {
           expect(await pane.getByRole('button', { name, exact: true }).count()).toBe(0)
         }
+        const setupClose = pane.locator('[data-screen-overlay] .overlay-close')
+        if (await setupClose.count()) await setupClose.first().click()
         await pane.getByRole('button', { name: 'Leave', exact: true }).click()
         await pane.getByRole('button', { name: /Host a Collab/ }).waitFor()
         await pane.getByRole('button', { name: /Join a Collab/ }).waitFor()

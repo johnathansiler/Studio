@@ -27,6 +27,7 @@ import { PresetControls } from './PresetControls'
 import { ChopDrawer } from './ChopDrawer'
 import { PadScreen } from './PadScreen'
 import { notifyKeyboard, releaseOrientation } from './keyboardStage'
+import { useScreenOverlay } from './screenOverlay'
 import { residentDrums } from '../model/drums'
 import { slicesFor } from '../model/padChop'
 import { resolveHighpass } from '../audio/voices/program'
@@ -76,6 +77,10 @@ export function PadsPanel({
   vintageStartsOpen?: boolean
 }) {
   useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
+  useScreenOverlay(() => {
+    store.closePads()
+    void releaseOrientation()
+  })
   const phone = useFormFactor() === 'phone'
   const kit = store.trackKit(trackId)
   const bank = Math.min(BANKS.length - 1, Math.max(0, kit.activeBank || 0))
@@ -445,7 +450,7 @@ export function PadsPanel({
   }
 
   return (
-    <div className={`mpc hw ch-sheet ${phone ? 'phone' : ''}`} data-pads="plugin" data-hardware="mpc" data-pad-count={FACE_PADS} aria-label="Beat Machine">
+    <div className={`mpc hw ch-sheet ${phone ? 'phone' : ''}`} data-pads="plugin" data-hardware="mpc" data-pad-count={FACE_PADS} data-screen-overlay="" aria-label="Beat Machine">
       <div className="hw-body">
         <header className="mpc-brand">
           <div className="mpc-title">

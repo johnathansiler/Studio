@@ -703,7 +703,7 @@ export function SoundBrowser({
 
   if (phone) {
     return (
-      <div className="sound-back sheet">
+      <div className="sound-back sheet" data-screen-overlay="" aria-label="Sounds">
         <button type="button" className="sound-dismiss" aria-label="Close sounds" title="Close the sound browser." onClick={onClose} />
         {panel}
       </div>
@@ -711,7 +711,7 @@ export function SoundBrowser({
   }
 
   return (
-    <aside className="sound-slot" data-sound-panel="open">
+    <aside className="sound-slot" data-sound-panel="open" data-screen-overlay="" aria-label="Sounds">
       <button
         type="button"
         className="sound-resize"

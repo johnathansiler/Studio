@@ -40,7 +40,7 @@ export function ProjectSheet({
   onKeep: () => void
 }) {
   return (
-    <div className="modal-back" onClick={onClose}>
+    <div className="modal-back" data-screen-overlay="" role="dialog" aria-label="Projects" onClick={onClose}>
       <div className="modal" id="project-sheet" onClick={(event) => event.stopPropagation()}>
         <h2>Projects</h2>
         <input aria-label="Name" value={name} onChange={(event) => onName(event.target.value)} />
@@ -76,7 +76,7 @@ export function ProjectSheet({
         <div className="row-btns">
           <span>{usage}</span>
           {!persisted && <button className="text-btn" onClick={onKeep}>Keep</button>}
-          <button className="text-btn" onClick={onClose}>Close</button>
+          <button className="text-btn overlay-close" onClick={onClose}>Close</button>
         </div>
       </div>
     </div>

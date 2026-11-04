@@ -39,6 +39,19 @@ describe('anchored menu placement', () => {
     expect(tall.left + Math.min(500, tall.maxWidth)).toBeLessThanOrEqual(viewport.width - 8)
   })
 
+  it('stays below the view tabs when that band is reserved', () => {
+    const trigger = { left: 16, top: 8, width: 72, height: 36 }
+    const place = placeAnchoredMenu({
+      trigger,
+      menu: { width: 220, height: 280 },
+      viewport,
+      prefer: 'down',
+      clearTop: 52,
+    })
+    expect(place.top).toBeGreaterThanOrEqual(52)
+    expect(place.top + 40).toBeLessThanOrEqual(viewport.height)
+  })
+
   it('closes on an outside press and leaves the trigger and the menu alone', () => {
     const triggerNode = {} as Node
     const menuNode = {} as Node

@@ -18,6 +18,7 @@ import { projectSampleBeat } from '../model/tempoMap'
 import { selectPlugin } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { SamplePanel } from './SamplePanel'
+import { useScreenOverlay } from './screenOverlay'
 
 const PluginFace = lazy(() => import('./faces/PluginFace').then((mod) => ({ default: mod.PluginFace })))
 
@@ -36,6 +37,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   const ampFace = plugin?.pluginId === 'saturator' && Math.round(plugin.params.kind ?? 0) === 5
   const customFace = !!plugin && !autoTune && !ampFace && !sampleFace
   const faced = !!autoTune || customFace || sampleFace || ampFace
+  useScreenOverlay(() => store.focusPlugin(null), !!(focus && plugin && spec))
   useEffect(() => {
     if (!faced) return
     const timer = window.setInterval(() => setTick((value) => value + 1), 80)
@@ -108,7 +110,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     window.addEventListener('pointerup', up)
   }
   return (
-    <div className={`plugin-sheet ${autoTune ? 'tune-open' : ''}`} role="dialog" aria-label={spec.name} style={autoTune ? { height: sheetHeight } : compact ? undefined : { width: sheetWidth }}>
+    <div className={`plugin-sheet ${autoTune ? 'tune-open' : ''}`} role="dialog" aria-label={spec.name} data-screen-overlay="" style={autoTune ? { height: sheetHeight } : compact ? undefined : { width: sheetWidth }}>
       {autoTune ? (
         <div className="tune-resize" title="Drag to resize the plugin." aria-label="Resize plugin. Drag up or down." onPointerDown={resizeHeight} />
       ) : (
@@ -128,7 +130,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
             {plugin.enabled ? 'On' : 'Bypass'}
           </button>
         )}
-        <button className="text-btn" title="Close the plugin." aria-label="Close the plugin." onClick={() => store.focusPlugin(null)}>×</button>
+        <button className="text-btn overlay-close" title="Close the plugin." aria-label="Close the plugin." onClick={() => store.focusPlugin(null)}>Close</button>
       </header>
       {plugin.pluginId !== 'tune' && (
       <label className="wet" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
@@ -345,7 +347,7 @@ function AddScalerInstrument({ store, trackId }: { store: ProjectStore; trackId:
       >
         Add instrument
       </button>
-      <AnchoredMenu open={open} onClose={() => setOpen(false)} label="Add instrument" triggerRef={button} prefer="down">
+      <AnchoredMenu fill open={open} onClose={() => setOpen(false)} label="Add instrument" triggerRef={button} prefer="down">
         <button type="button" onClick={() => { store.addScalerSound(trackId, 'synth'); setOpen(false) }}>Synth</button>
         <button type="button" onClick={() => { store.addScalerSound(trackId, 'sampler'); setOpen(false) }}>Sampler</button>
         <button type="button" onClick={() => { store.addScalerSound(trackId, 'pads'); setOpen(false) }}>Beat Machine</button>

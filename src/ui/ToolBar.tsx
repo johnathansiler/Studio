@@ -12,6 +12,7 @@ import {
 } from '../state/tools'
 import { useFormFactor } from './form'
 import { AnchoredMenu } from './AnchoredMenu'
+import { useScreenOverlay } from './screenOverlay'
 import { TipButton } from './Hint'
 import './guideSheet.css'
 
@@ -102,7 +103,7 @@ export function ToolBar({
           <ToolIcon id="duplicate" />
           <span className="tool-label">{copy.label}</span>
         </TipButton>
-        <AnchoredMenu id="tool-choices" open={toolsOpen} onClose={() => setToolsOpen(false)} label="Choose a tool" triggerRef={toolButton} prefer="up">
+        <AnchoredMenu fill id="tool-choices" open={toolsOpen} onClose={() => setToolsOpen(false)} label="Choose a tool" triggerRef={toolButton} prefer="up">
           {shown.map((id) => {
             const info = TOOL_INFO[id]
             const key = keyForTool(id)
@@ -114,7 +115,7 @@ export function ToolBar({
                 label={label}
                 hint={info.hint}
                 pressed={value === id}
-                onClick={() => onChange(id)}
+                onClick={() => { onChange(id); setToolsOpen(false) }}
               >
                 <ToolIcon id={id} />
                 <span className="tool-label">{info.label}</span>
@@ -199,6 +200,7 @@ function ToolPanel({
   onClose?: () => void
 }) {
   const place = useFormFactor() === 'desk' ? 'pop' : 'sheet'
+  useScreenOverlay(() => onClose?.())
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose?.()
@@ -209,14 +211,14 @@ function ToolPanel({
   const body = (
     <>
       <button type="button" className="guide-scrim" aria-label="Close tools" onClick={onClose} />
-      <div className={`guide-sheet tool-sheet ${place}`} role="dialog" aria-label="Tools" data-tool-panel="open">
+      <div className={`guide-sheet tool-sheet ${place}`} role="dialog" aria-label="Tools" data-tool-panel="open" data-screen-overlay="">
         {place === 'sheet' && <div className="guide-handle" aria-hidden="true" />}
         <header className="guide-head">
           <div>
             <h2>Tools</h2>
             <p>Pick how a tap on the timeline behaves. The lit tool is the one in use.</p>
           </div>
-          <button type="button" className="guide-x" onClick={onClose} aria-label="Close tools">Cancel</button>
+          <button type="button" className="guide-x overlay-close" onClick={onClose} aria-label="Close tools">Close</button>
         </header>
         {TOOL_GROUPS.map((group) => (
           <section className="guide-section" key={group.label}>

@@ -46,7 +46,7 @@ export function IdeasPop({ store, engine, onClose }: { store: ProjectStore; engi
     })
   }
   return (
-    <div className="ideas-pop" data-ideas="open" role="dialog" aria-label="Ideas">
+    <div className="ideas-pop" data-ideas="open" data-screen-overlay="" role="dialog" aria-label="Ideas">
       <header>
         <strong>Ideas</strong>
         <input aria-label="Search ideas" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -58,7 +58,7 @@ export function IdeasPop({ store, engine, onClose }: { store: ProjectStore; engi
           setQuery('')
           setMood('all')
         }}>Random</button>
-        <button type="button" className="text-btn" onClick={onClose} aria-label="Close ideas">×</button>
+        <button type="button" className="text-btn overlay-close" onClick={onClose} aria-label="Close ideas">Close</button>
       </header>
       <div className="chip-row" aria-label="Genre">
         <button type="button" className={genre === 'all' ? 'on' : ''} onClick={() => setGenre('all')}>All</button>

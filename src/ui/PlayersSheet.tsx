@@ -56,7 +56,7 @@ export function PlayersSheet({ store, engine, onClose }: { store: ProjectStore; 
         : 'No chord track yet. The players write a progression, unless Analyze found chords.'
 
   return (
-    <aside className="players-dock" aria-label="Players">
+    <aside className="players-dock" data-screen-overlay="" aria-label="Players">
       <header>
         <strong>Players</strong>
         <TipButton label="Close" hint={CLOSE} onClick={onClose} />

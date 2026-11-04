@@ -17,6 +17,7 @@ import { commitScalerPreset } from '../presets/project'
 import { ScalerPerformances } from './ScalerPerformances'
 import { useFormFactor } from './form'
 import { PresetControls } from './PresetControls'
+import { useScreenOverlay } from './screenOverlay'
 import { LibraryPanel } from './LibraryPanel'
 import './scaler.css'
 
@@ -79,6 +80,7 @@ export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; e
   const [expression, setExpression] = useState(0)
   const [human, setHuman] = useState(0)
   const [perfOpen, setPerfOpen] = useState(false)
+  useScreenOverlay(() => store.closeScaler())
   const perfButton = useRef<HTMLButtonElement>(null)
   const [audioHeard, setAudioHeard] = useState<string[]>([])
   const [modKind, setModKind] = useState(0)
@@ -305,7 +307,7 @@ export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; e
   const performanceCount = performanceCatalog().length
 
   return (
-    <div className={`scaler-panel ${form === 'desk' ? '' : form}`} data-scaler="plugin" data-page={store.scalerPage} data-progressions={progressCount} data-patterns={patternCount} data-performances={performanceCount} aria-label="Scaler">
+    <div className={`scaler-panel ${form === 'desk' ? '' : form}`} data-scaler="plugin" data-page={store.scalerPage} data-progressions={progressCount} data-patterns={patternCount} data-performances={performanceCount} data-screen-overlay="" aria-label="Scaler">
       <PresetControls
         pluginId="scaler"
         instanceKey={`scaler:${trackId}`}
@@ -378,7 +380,7 @@ export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; e
           <Stepper label="Arpeggio" value={state.arp === 'off' ? 'Off' : state.arp === 'upDown' ? 'Up down' : state.arp[0].toUpperCase() + state.arp.slice(1)} hint="Break the chord into single notes when no performance is chosen." onStep={(dir) => patch({ arp: ARPS[cycle(Math.max(0, ARPS.indexOf(state.arp)), dir, ARPS.length)], performanceId: '' })} />
           <Stepper label="Gate" value={`${Math.round(GATES[gateIndex] * 100)} percent`} hint="How long each note holds." onStep={(dir) => patch({ gate: GATES[cycle(gateIndex, dir, GATES.length)] })} />
         </div>
-        <button type="button" className="scaler-close" title="Close Scaler. The track keeps the instrument." aria-label="Close Scaler. The track keeps the instrument." onClick={() => store.openScaler(trackId)}>Close</button>
+        <button type="button" className="scaler-close overlay-close" title="Close Scaler. The track keeps the instrument." aria-label="Close Scaler. The track keeps the instrument." onClick={() => store.openScaler(trackId)}>Close</button>
       </header>
 
       <div className="scaler-scroll">

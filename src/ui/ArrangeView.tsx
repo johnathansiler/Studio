@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useScreenOverlay } from './screenOverlay'
 import { createPortal } from 'react-dom'
 import type { AudioEngine } from '../audio/engine'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
@@ -175,7 +176,7 @@ export function ArrangeView({
   }>(null)
   const phone = form === 'phone'
   const touch = form !== 'desk'
-  const [pluginsOpen, setPluginsOpen] = useState(() => (pluginsDrawer == null ? form === 'desk' : pluginsDrawer))
+  const [pluginsOpen, setPluginsOpen] = useState(() => !!pluginsDrawer)
   const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
   const [ghost, setGhost] = useState<{ trackId: string; left: number; width: number } | null>(null)
   const [tool, setToolState] = useState(activeTool)
@@ -658,14 +659,18 @@ export function ArrangeView({
   }
 
   const [setupOpen, setSetupOpen] = useState(false)
-  const [browserOpen, setBrowserOpen] = useState(() => panelChoice('arrangeBrowser') ?? !compact)
-  useEffect(() => {
-    if (panelChoice('arrangeBrowser') != null) return
-    setBrowserOpen(!compact)
-  }, [compact])
+  const [browserOpen, setBrowserOpen] = useState(() => panelChoice('arrangeBrowser') ?? false)
+  useScreenOverlay(() => setSetupOpen(false), setupOpen)
+  useScreenOverlay(() => {
+    engine.stopPreview()
+    setBrowserOpen(false)
+    rememberPanel('arrangeBrowser', false)
+  }, browserOpen)
+  useScreenOverlay(() => setPluginsOpen(false), pluginsOpen)
   const [browserTab, setBrowserTab] = useState<BrowserTab>(libraryTab || 'sounds')
   const [browserWidth, setBrowserWidth] = useState(260)
   const [trackSheet, setTrackSheet] = useState<string | null>(null)
+  useScreenOverlay(() => setTrackSheet(null), trackSheet != null)
   const [trackAnchor, setTrackAnchor] = useState<HTMLElement | null>(null)
   useEffect(() => {
     if (!libraryTab) return
@@ -1137,7 +1142,7 @@ export function ArrangeView({
         </div>
       </div>
       </div>
-      {pluginsOpen && <PluginsDrawer store={store} place={phone ? 'bottom' : 'side'} menuOpen={pluginsMenu} />}
+      {pluginsOpen && <PluginsDrawer store={store} place={phone ? 'bottom' : 'side'} menuOpen={pluginsMenu} onClose={() => setPluginsOpen(false)} />}
       </div>
       <AnchoredMenu
         open={!!patternMenu}
