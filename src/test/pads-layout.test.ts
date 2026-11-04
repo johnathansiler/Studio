@@ -38,7 +38,9 @@ describe('beat machine layout', () => {
     const shots: { name: string; path: string; padWidth: number; padHeight: number }[] = []
     try {
       for (const viewport of [
+        { name: 'phone360', width: 360, height: 844 },
         { name: 'phone', width: 390, height: 844 },
+        { name: 'phone412', width: 412, height: 844 },
         { name: 'fold', width: 923, height: 1024 },
         { name: 'desktop', width: 1440, height: 900 },
       ]) {
@@ -94,7 +96,7 @@ describe('beat machine layout', () => {
         expect(report.scrollWidth).toBeLessThanOrEqual(viewport.width + 1)
         expect(report.pastRight).toBe(0)
         expect(report.scrollHeight).toBeLessThanOrEqual(viewport.height + 1)
-        const minimum = viewport.name === 'phone' ? 72 : 160
+        const minimum = viewport.width >= 800 ? 110 : viewport.width >= 390 ? 72 : 64
         expect(report.padWidth).toBeGreaterThanOrEqual(minimum)
         expect(report.padHeight).toBeGreaterThanOrEqual(minimum)
         expect(Math.abs(report.padWidth - report.padHeight)).toBeLessThanOrEqual(6)

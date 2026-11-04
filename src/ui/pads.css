@@ -98,9 +98,9 @@
 
 .mpc-pad-tools {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
-  align-items: end;
+  align-items: stretch;
   min-width: 0;
 }
 
@@ -281,17 +281,40 @@
 .mpc-tools > .hw-key,
 .mpc-steps > .hw-key { min-width: 0; }
 
-.note-repeat-dock {
+.note-repeat-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(44px, auto) minmax(0, 1fr);
   gap: 6px;
+  align-items: stretch;
   width: 100%;
   min-width: 0;
 }
 
+.mpc-knob-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(72px, 1fr) minmax(72px, 1fr);
+  gap: 8px;
+  align-items: end;
+  min-width: 0;
+}
+
+.mpc-knob-row .mpc-full {
+  min-height: 56px;
+  align-self: end;
+}
+
+.pad-move {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pad-move .hw-key { min-height: 44px; min-width: 0; }
+
 .note-repeat-hold {
   min-height: 48px;
-  min-width: 0;
+  min-width: 40px;
   padding: 8px;
   font-size: 15px;
   font-weight: 700;
@@ -302,18 +325,12 @@
   user-select: none;
 }
 
-.note-repeat-rate {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  gap: 4px;
-  align-items: stretch;
-  min-width: 0;
-}
+.note-repeat-rate { display: contents; }
 
 .note-repeat-rate button,
 .note-repeat-rate strong {
   min-height: 44px;
-  min-width: 0;
+  min-width: 40px;
 }
 
 .note-repeat-rate button {
@@ -325,15 +342,28 @@
   padding: 4px;
 }
 
-.note-repeat-rate strong {
+.note-repeat-rate-read {
   display: flex;
   align-items: center;
   justify-content: center;
   min-width: 44px;
+  min-height: 44px;
   padding: 0 6px;
+  border: 1px solid #070707;
   border-radius: 2px;
   background: #141414;
   color: #f3f3f3;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.note-repeat-rate-read.on {
+  color: #fff6c8;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.65), 0 0 10px rgba(255, 196, 80, 0.35);
+}
+
+.note-repeat-rate strong {
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0;
@@ -509,34 +539,16 @@
 .hw-lip strong { letter-spacing: 0.12em; text-transform: uppercase; font-size: 16px; }
 .hw-lip span { letter-spacing: 0.08em; text-transform: uppercase; font-size: 13px; }
 
-/* Wide face: pads stay the largest squares that fit, controls sit in a short band. */
+/* Wide face keeps the same row order. Pads stay the largest squares that fit. */
 @container (min-width: 800px) {
   .hw-body { gap: 8px; padding: 12px; }
   .mpc-brand { flex-direction: row; align-items: center; justify-content: space-between; }
   .mpc-actions { width: auto; }
   .mpc-keyboard, .mpc-close { flex: 0 0 auto; }
   .mpc-grid { gap: 12px; }
-  .hw-deck {
-    display: grid;
-    grid-template-columns: minmax(0, 1.1fr) minmax(240px, 0.9fr);
-    grid-template-areas:
-      "tools repeat"
-      "transport console";
-    align-items: center;
-  }
-  .mpc-pad-tools { grid-area: tools; }
-  .note-repeat-dock { grid-area: repeat; }
-  .hw-transport { grid-area: transport; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .hw-console {
-    grid-area: console;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: center;
-  }
+  .note-repeat-row { grid-template-columns: minmax(160px, 240px) minmax(100px, 1fr) minmax(64px, auto) minmax(100px, 1fr); }
   .hw-slider { flex-direction: row; align-items: center; gap: 8px; }
   .hw-slider input { flex: 1 1 auto; }
-  .hw-wheel { width: 72px; height: 72px; }
   .hw-keys { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .mpc-banks { grid-template-columns: 160px 160px 140px; justify-content: start; }
   .mpc-tools { grid-template-columns: repeat(4, minmax(0, 1fr)); }
