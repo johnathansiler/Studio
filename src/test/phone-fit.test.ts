@@ -69,10 +69,12 @@ describe('phone fit at 412x915', () => {
           expect(button.bottom).toBeLessThanOrEqual(96)
           expect(button.right).toBeLessThanOrEqual(412 + 1)
         }
+        expect(timeline.ratio).toBeGreaterThanOrEqual(0.65)
+        await page.getByRole('button', { name: /^More\./ }).click()
         const loop = await page.locator('.t-btn.loop .t-word').boundingBox()
         expect(loop).toBeTruthy()
         expect(loop!.x + loop!.width).toBeLessThanOrEqual(412 + 1)
-        expect(timeline.ratio).toBeGreaterThanOrEqual(0.65)
+        await page.getByRole('button', { name: /^More\./ }).click()
         expect(timeline.names.map((item) => item.value)).toEqual(['Vocal', 'Music', 'Keys'])
         for (const name of timeline.names) {
           expect(name.width, name.value).toBeGreaterThan(48)
@@ -184,17 +186,11 @@ describe('phone fit at 412x915', () => {
         await shot(page, 'live-add-track-412')
         await page.keyboard.press('Escape')
 
-        await page.getByRole('button', { name: /Snap grid/ }).click()
-        await page.getByRole('dialog', { name: 'Snap grid' }).waitFor()
-        const gridPick = await page.evaluate(() => {
-          const dialog = document.querySelector('[data-picker="Snap grid"]') as HTMLElement
-          const option = [...dialog.querySelectorAll('button')].find((button) => button.textContent === '1/16') as HTMLElement
-          const box = option.getBoundingClientRect()
-          return { height: box.height, top: dialog.compareDocumentPosition(document.body) }
-        })
-        expect(gridPick.height).toBeGreaterThanOrEqual(40)
+        await page.getByRole('button', { name: /^Snap / }).click()
+        await page.locator('#snap-choices').waitFor()
+        const gridPick = await page.getByRole('button', { name: '1/16', exact: true }).boundingBox()
+        expect(gridPick!.height).toBeGreaterThanOrEqual(40)
         await page.getByRole('button', { name: '1/16', exact: true }).click()
-        await page.getByRole('dialog', { name: 'Snap grid' }).waitFor({ state: 'detached' })
         await shot(page, 'live-grid-412')
 
         await page.getByRole('button', { name: /^Mix/ }).click()

@@ -71,7 +71,8 @@ export interface MenuSpec extends Copy {
  * Launch/Timeline is the session transport, which the Session tab does not switch.
  * Capture stays on the phone because the session bar hides that button there.
  * Play, Stop, Record, Loop, Click, Count-in, and Reset stay on the transport.
- * Select, Draw, Split, Trim, Zoom, Duplicate, Delete, Quantize, Snap, and Add track stay on the strip.
+ * Select, Draw, Split, Trim, Zoom, Duplicate, Delete, and Snap stay on the strip.
+ * Quantize stays in the piano roll and the beat pad, not on this strip.
  * While FEATURES.session is off, visibleMenu hides Launch, Timeline, and Capture.
  */
 export const MENU_COPY: MenuSpec[] = [

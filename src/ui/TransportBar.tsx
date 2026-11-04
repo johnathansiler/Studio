@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import type { AudioEngine } from '../audio/engine'
 import { formatLoopReadout } from '../model/loopEdit'
 import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, type TapMemory, type TapSource } from '../model/tap'
-import { formatMapBars } from '../model/tempoMap'
-import { countInBarsOf, countInCaption, formatTimecode } from '../model/time'
+import { formatMapBars, projectBeatSample, projectSampleBeat } from '../model/tempoMap'
+import { countInBarsOf, countInCaption, formatTimecode, quartersPerBar } from '../model/time'
 import { recordButtonOn } from '../model/transport'
 import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -15,6 +15,20 @@ import { KeyboardToggle } from './KeyboardDock'
 import { TipButton } from './Hint'
 import './loopRegion.css'
 import './remoteFixes.css'
+
+const LOOP_CHOICES = [1, 2, 4, 8] as const
+
+function loopMatchesBars(project: ProjectStore['project'], bars: number) {
+  const span = projectSampleBeat(project, project.loopEndSample) - projectSampleBeat(project, project.loopStartSample)
+  return Math.abs(span - bars * quartersPerBar(project.timeSignature)) < 0.02
+}
+
+function applyLoopBars(store: ProjectStore, bars: number) {
+  const project = store.project
+  const startBeat = projectSampleBeat(project, project.loopStartSample)
+  const end = projectBeatSample(project, startBeat + bars * quartersPerBar(project.timeSignature))
+  store.setLoop(project.loopEnabled, project.loopStartSample, end)
+}
 
 export function TransportBar({
   store,
@@ -64,6 +78,8 @@ export function TransportBar({
   const suppressFocus = useRef(false)
   const tapping = useRef(false)
   const flashTimer = useRef(0)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [lengthOpen, setLengthOpen] = useState(false)
   const tempo = live ?? project.tempo
   const tempoCopy = copyOf(TRANSPORT_COPY, 'tempo')
   const tapCopy = copyOf(TRANSPORT_COPY, 'tap')
@@ -227,84 +243,16 @@ export function TransportBar({
   }
 
   const playing = status === 'playing'
+  const running = status === 'playing' || status === 'recording' || status === 'counting-in'
   const transport = (id: string) => copyOf(TRANSPORT_COPY, id)
   const countBars = countInBarsOf(project)
   const countCaption = countInCaption(countBars)
   const guestRoom = roomRole === 'guest'
   const resetCopy = transport('reset')
   const loopRead = formatLoopReadout(project, project.loopStartSample, project.loopEndSample)
-  return (
-    <div className={`transport${simple ? ' simple' : ''}`}>
-      <AutomationFollow store={store} engine={engine} />
-      <div className="t-buttons">
-        <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>
-          <span className="t-word">Start</span>
-        </TipButton>
-        <TipButton className={`t-btn play ${playing ? 'on' : ''}`} label={playing ? transport('pause').label : transport('play').label} hint={playing ? transport('pause').hint : transport('play').hint} pressed={playing} onPress={() => engine.unlock()} onClick={onPlay}>
-          <span className="t-word">{playing ? 'Pause' : 'Play'}</span>
-        </TipButton>
-        <TipButton className="t-btn stop" label={transport('stop').label} hint={transport('stop').hint} onClick={onStop}>
-          <span className="t-word">Stop</span>
-        </TipButton>
-        <TipButton className={`t-btn rec ${recordButtonOn(status) ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={recordButtonOn(status)} onPress={() => engine.unlock()} onClick={onRecord}>
-          <span className="t-word">Rec</span>
-        </TipButton>
-        <TipButton
-          id="transport-click"
-          className={`t-btn click${project.metronomeEnabled ? ' on' : ''}`}
-          label={transport('click').label}
-          hint={transport('click').hint}
-          pressed={project.metronomeEnabled}
-          disabled={store.remoteFollow}
-          onClick={() => store.toggle('metronomeEnabled')}
-        >
-          <span className="t-word">Click</span>
-        </TipButton>
-        <TipButton
-          id="transport-count"
-          className={`t-btn count${countBars > 0 ? ' on' : ''}`}
-          label={transport('count-in').label}
-          hint={`${transport('count-in').hint} Now ${countCaption}.`}
-          pressed={countBars > 0}
-          disabled={store.remoteFollow}
-          onClick={() => store.cycleCountIn()}
-        >
-          <span className="t-word">Count</span>
-          <span className="t-state">{countCaption}</span>
-        </TipButton>
-        <TipButton
-          id="transport-reset"
-          className="t-btn reset"
-          label={guestRoom ? 'Host only' : resetCopy.label}
-          hint={guestRoom ? 'Host only' : resetCopy.hint}
-          disabled={guestRoom}
-          onClick={() => onReset?.()}
-        >
-          <span className="t-word">{guestRoom ? 'Host only' : 'Reset'}</span>
-        </TipButton>
-        <KeyboardToggle store={store} engine={engine} />
-      </div>
-      <div className="lcd" aria-live="polite">
-        <div className="bars">{formatMapBars(project, position)}</div>
-        <div className="tc">
-          {formatTimecode(position, project.sampleRate)} · {status}
-          {takeProgress != null ? ` · HQ ${Math.round(takeProgress * 100)}%` : ''}
-        </div>
-      </div>
-      {takeProgress != null && (
-        <div
-          className="hq-take"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(takeProgress * 100)}
-          aria-valuetext={`Full-quality take ${Math.round(takeProgress * 100)} percent`}
-          title="Full-quality take replacing the live guide"
-        >
-          <i style={{ width: `${Math.round(takeProgress * 100)}%` }} />
-        </div>
-      )}
-      <div className="tempo-cluster" role="group" aria-label="Tempo">
+  const inSession = roomRole === 'host' || roomRole === 'guest'
+  const moreHint = 'Metronome, tap tempo, loop, reset, on-screen piano, playhead, and sounds.'
+  const tempoField = (
         <input
           ref={fieldRef}
           className="bpm-readout"
@@ -346,6 +294,8 @@ export function TransportBar({
           onPointerUp={onTempoPointerUp}
           onPointerCancel={onTempoPointerUp}
         />
+  )
+  const tapButton = (
         <button
           type="button"
           className={`tap-tempo${flash ? ' on' : ''}`}
@@ -379,30 +329,198 @@ export function TransportBar({
         >
           Tap
         </button>
-      </div>
-      <div className="loop-cluster">
-        <TipButton
-          className={`t-btn loop ${project.loopEnabled ? 'on' : ''}`}
-          label={transport('loop').label}
-          hint={transport('loop').hint}
-          pressed={project.loopEnabled}
-          disabled={store.remoteFollow}
-          onClick={() => store.toggle('loopEnabled')}
-        >
-          <span className="t-word">Loop</span>
-        </TipButton>
-        <span
-          className={`loop-readout${project.loopEnabled ? '' : ' off'}`}
+  )
+  const loopControl = (
+    <>
+      <div className={`loop-combo${project.loopEnabled ? ' on' : ''}`} role="group" aria-label="Loop">
+        <button
+          type="button"
+          className={`t-btn loop${project.loopEnabled ? ' on' : ''}`}
           data-loop-readout="transport"
           data-loop-length={loopRead.length}
           data-loop-span={loopRead.span}
-          title={loopRead.text}
+          title={`${transport('loop').hint} ${loopRead.text}`}
+          aria-label={`Loop ${loopRead.length}. ${transport('loop').hint}`}
+          aria-pressed={project.loopEnabled}
+          disabled={store.remoteFollow}
+          onClick={() => store.toggle('loopEnabled')}
         >
-          <span className="loop-len">{loopRead.length}</span>
-          <span className="loop-span">{loopRead.span}</span>
-        </span>
+          <span className="t-word">Loop {loopRead.length}</span>
+        </button>
+        <button
+          type="button"
+          className={`t-btn loop-length${lengthOpen ? ' on' : ''}`}
+          aria-expanded={lengthOpen}
+          aria-controls="loop-length-choices"
+          title="Choose 1, 2, 4, or 8 bars. The loop stays where it is."
+          aria-label="Loop length. Choose 1, 2, 4, or 8 bars."
+          disabled={store.remoteFollow}
+          onClick={() => setLengthOpen((open) => !open)}
+        >
+          <span className="t-word">Length</span>
+        </button>
       </div>
-      {syncLabel && <span className="sync-pill">{syncLabel}</span>}
+      {lengthOpen && (
+        <div id="loop-length-choices" className="inline-choices loop-lengths" role="group" aria-label="Loop length">
+          {LOOP_CHOICES.map((bars) => {
+            const chosen = loopMatchesBars(project, bars)
+            const label = bars === 1 ? '1 bar' : `${bars} bars`
+            return (
+              <button
+                key={bars}
+                type="button"
+                className={chosen ? 'on' : ''}
+                aria-pressed={chosen}
+                title={`Set the loop to ${label}.`}
+                onClick={() => applyLoopBars(store, bars)}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </>
+  )
+  const clickButton = (
+        <TipButton
+          id="transport-click"
+          className={`t-btn click${project.metronomeEnabled ? ' on' : ''}`}
+          label={simple ? 'Metronome' : transport('click').label}
+          hint={transport('click').hint}
+          pressed={project.metronomeEnabled}
+          disabled={store.remoteFollow}
+          onClick={() => store.toggle('metronomeEnabled')}
+        >
+          <span className="t-word">{simple ? 'Metronome' : 'Click'}</span>
+          {simple && <span className="t-state">{project.metronomeEnabled ? 'On' : 'Off'}</span>}
+        </TipButton>
+  )
+  const countButton = (
+        <TipButton
+          id="transport-count"
+          className={`t-btn count${countBars > 0 ? ' on' : ''}`}
+          label={transport('count-in').label}
+          hint={`${transport('count-in').hint} Now ${countCaption}.`}
+          pressed={countBars > 0}
+          disabled={store.remoteFollow}
+          onClick={() => store.cycleCountIn()}
+        >
+          <span className="t-word">Count</span>
+          <span className="t-state">{countCaption}</span>
+        </TipButton>
+  )
+  const resetButton = (
+        <TipButton
+          id="transport-reset"
+          className="t-btn reset"
+          label={guestRoom ? 'Host only' : resetCopy.label}
+          hint={guestRoom ? 'Host only' : resetCopy.hint}
+          disabled={guestRoom}
+          onClick={() => onReset?.()}
+        >
+          <span className="t-word">{guestRoom ? 'Host only' : 'Reset'}</span>
+        </TipButton>
+  )
+  const positionReadout = (
+      <div className="lcd" aria-live="polite" aria-label="Position">
+        <div className="bars">{formatMapBars(project, position)}</div>
+        <div className="tc">
+          {formatTimecode(position, project.sampleRate)} · {status}
+          {takeProgress != null ? ` · HQ ${Math.round(takeProgress * 100)}%` : ''}
+        </div>
+      </div>
+  )
+  return (
+    <div className={`transport${simple ? ' simple' : ''}`}>
+      <AutomationFollow store={store} engine={engine} />
+      {inSession && syncLabel ? <span className="sync-pill">{syncLabel}</span> : null}
+      {simple ? (
+        <>
+          <div className="t-main">
+            <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>
+              <span className="t-word">Start</span>
+            </TipButton>
+            <TipButton
+              className={`t-btn play${running ? ' on' : ''}`}
+              label={running ? transport('stop').label : transport('play').label}
+              hint={running ? transport('stop').hint : transport('play').hint}
+              pressed={running}
+              onPress={() => engine.unlock()}
+              onClick={running ? onStop : onPlay}
+            >
+              <span className="t-word">{running ? 'Stop' : 'Play'}</span>
+            </TipButton>
+            <TipButton className={`t-btn rec ${recordButtonOn(status) ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={recordButtonOn(status)} onPress={() => engine.unlock()} onClick={onRecord}>
+              <span className="t-word">Record</span>
+            </TipButton>
+            {tempoField}
+            <button
+              type="button"
+              className={`t-btn more${moreOpen ? ' on' : ''}`}
+              aria-expanded={moreOpen}
+              aria-controls="transport-more"
+              title={moreHint}
+              aria-label={`More. ${moreHint}`}
+              onClick={() => setMoreOpen((open) => !open)}
+            >
+              <span className="t-word">More</span>
+            </button>
+          </div>
+          <div id="transport-more" className="transport-drawer" hidden={!moreOpen} data-open={moreOpen ? 'true' : 'false'}>
+            {loopControl}
+            <div className="metro-combo" role="group" aria-label="Metronome">
+              {clickButton}
+              {countButton}
+            </div>
+            {tapButton}
+            {resetButton}
+            <KeyboardToggle store={store} engine={engine} word="On-screen Piano" hint="Show or hide the on-screen piano. Play notes on the keys." />
+            {positionReadout}
+            <div id="transport-more-extra" className="transport-more-extra" />
+          </div>
+        </>
+      ) : (
+      <>
+      <div className="t-buttons">
+        <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>
+          <span className="t-word">Start</span>
+        </TipButton>
+        <TipButton className={`t-btn play ${playing ? 'on' : ''}`} label={playing ? transport('pause').label : transport('play').label} hint={playing ? transport('pause').hint : transport('play').hint} pressed={playing} onPress={() => engine.unlock()} onClick={onPlay}>
+          <span className="t-word">{playing ? 'Pause' : 'Play'}</span>
+        </TipButton>
+        <TipButton className="t-btn stop" label={transport('stop').label} hint={transport('stop').hint} onClick={onStop}>
+          <span className="t-word">Stop</span>
+        </TipButton>
+        <TipButton className={`t-btn rec ${recordButtonOn(status) ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={recordButtonOn(status)} onPress={() => engine.unlock()} onClick={onRecord}>
+          <span className="t-word">Rec</span>
+        </TipButton>
+        {clickButton}
+        {countButton}
+        {resetButton}
+        <KeyboardToggle store={store} engine={engine} />
+      </div>
+      {positionReadout}
+      <div className="tempo-cluster" role="group" aria-label="Tempo">
+        {tempoField}
+        {tapButton}
+      </div>
+      {loopControl}
+      </>
+      )}
+      {takeProgress != null && (
+        <div
+          className="hq-take"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(takeProgress * 100)}
+          aria-valuetext={`Full-quality take ${Math.round(takeProgress * 100)} percent`}
+          title="Full-quality take replacing the live guide"
+        >
+          <i style={{ width: `${Math.round(takeProgress * 100)}%` }} />
+        </div>
+      )}
       {recordHint && <p className="rec-hint" role="status">{recordHint}</p>}
       <AssetTransfers rows={assetTransfers} />
     </div>

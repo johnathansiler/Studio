@@ -134,14 +134,25 @@ function beatAt(store: ProjectStore, engine: AudioEngine, eventMs: number) {
   return Math.max(0, samplesToBeats(engine.positionSamples || 0, store.project.sampleRate, store.project.tempo))
 }
 
-export function KeyboardToggle({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
+export function KeyboardToggle({
+  store,
+  engine,
+  word = 'Keyboard',
+  hint = 'Show the on-screen piano.',
+}: {
+  store: ProjectStore
+  engine: AudioEngine
+  /** Visible name. The phone drawer uses a full phrase for the same control. */
+  word?: string
+  hint?: string
+}) {
   return (
     <button
       type="button"
       className={`keyboard-toggle${store.keyboardMidi ? ' on' : ''}`}
       aria-pressed={store.keyboardMidi}
-      aria-label="Keyboard. Show the on-screen piano."
-      title="Show the on-screen piano."
+      aria-label={`${word}. ${hint}`}
+      title={hint}
       onClick={() => {
         engine.unlock()
         const next = !store.keyboardMidi
@@ -154,7 +165,7 @@ export function KeyboardToggle({ store, engine }: { store: ProjectStore; engine:
       }}
     >
       <KeyboardIcon />
-      <span>Keyboard</span>
+      <span>{word}</span>
     </button>
   )
 }
