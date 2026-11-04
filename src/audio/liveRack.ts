@@ -2,13 +2,14 @@ import insertWorkletUrl from './insert.worklet.ts?worker&url'
 import type { PluginInstance, Project } from '../model/types'
 import { tuneBlockScale } from './plugins/autoTune'
 import type { StripNodes } from './strips'
-import { processChain, type ChainSlot } from './plugins/chain'
+import { prepareChainPool, processChain, type ChainPool, type ChainSlot } from './plugins/chain'
+import { prepareAccurate, processSampleAccurate, type AccurateScratch } from './automationRender'
 import { primeProcessor } from './core/adapt'
-import { automationAt, latencyOf } from './plugins/catalog'
+import { reportedLatency } from './core/latency'
+import { automationAt } from './plugins/catalog'
 import { automationSchedule, channelAutomationMode, laneIsLive, sendLane, valueChanges } from '../model/automation'
 import { projectSampleBeat } from '../model/tempoMap'
 import { applyRamps, smoothParam } from './paramCurve'
-import { processSampleAccurate } from './automationRender'
 import { loadModule } from './plugins/registry'
 import type { Processor } from './plugins/types'
 import { MASTER, REMOTE, edgeDelays, findCycle, type RoutePoint } from './routing'
@@ -61,6 +62,9 @@ export class LiveRack {
   private meterReading: Record<string, number> | null = null
   private meterScope: Float32Array | null = null
   private blockTime = 0
+  private scriptPool: ChainPool = prepareChainPool(24, 2, SCRIPT_BLOCK)
+  private scriptScratch: AccurateScratch = prepareAccurate(24, SCRIPT_BLOCK)
+  private readonly pluginLatency = new Map<string, number>()
   private ctx: AudioContext | null = null
   private strips: Map<string, StripNodes> = new Map()
   private localBus: AudioNode | null = null
@@ -392,11 +396,13 @@ export class LiveRack {
     const endBeat = beatAt(origin + Math.max(0, input[0].length - 1))
     const automation = project.automation.filter((lane) => laneIsLive(project, lane))
     const moving = automation.some((lane) => (lane.target == null || lane.target === 'plugin') && plugins.some((plugin) => plugin.id === lane.pluginId) && valueChanges(lane.points, beat, endBeat, 0))
+    const pool = input[0].length <= this.scriptPool.frames ? this.scriptPool : undefined
+    const scratch = input[0].length <= this.scriptScratch.frames ? this.scriptScratch : undefined
     if (moving) {
-      processSampleAccurate(slots, input, output, blockCtx, automation, keyAt, beatAt)
+      processSampleAccurate(slots, input, output, blockCtx, automation, keyAt, beatAt, scratch, pool)
     } else {
       for (const slot of slots) slot.params = automationAt(automation, slot.id, slot.params, beat)
-      processChain(slots, input, output, blockCtx, keyAt)
+      processChain(slots, input, output, blockCtx, keyAt, pool)
     }
     for (const slot of slots) {
       if (slot.failed) this.failed.add(slot.id)
@@ -409,7 +415,12 @@ export class LiveRack {
         this.meterScope = slot.processor.scope ?? this.meterScope
       }
     }
-    this.tapsOut.set(owner, Float32Array.from(output[0]))
+    let tap = this.tapsOut.get(owner)
+    if (!tap || tap.length !== output[0].length) {
+      tap = new Float32Array(output[0].length)
+      this.tapsOut.set(owner, tap)
+    }
+    tap.set(output[0])
     const budget = (input[0].length / rate) * 1000
     const load = budget > 0 ? (performance.now() - started) / budget : 0
     this.cpu = this.cpu * 0.8 + Math.min(4, load) * 0.2
@@ -605,7 +616,12 @@ export class LiveRack {
   private latency(owner: string, plugins: PluginInstance[], sampleRate: number) {
     const tap = this.taps.get(owner)
     const script = tap && !tap.direct && !tap.worklet ? SCRIPT_BLOCK : 0
-    return script + plugins.reduce((sum, plugin) => sum + latencyOf(plugin.pluginId, plugin.params, sampleRate, plugin.enabled && plugin.wet > 0, true), 0)
+    return script + plugins.reduce((sum, plugin) => {
+      const enabled = plugin.enabled && plugin.wet > 0
+      const processor = this.processors.get(plugin.id)
+      const posted = this.pluginLatency.get(plugin.id) ?? 0
+      return sum + reportedLatency(plugin.pluginId, plugin.params, sampleRate, enabled, Math.max(processor?.latencySamples ?? 0, posted), true)
+    }, 0)
   }
 
   private async ensureWorklet(ctx: AudioContext) {
@@ -686,7 +702,7 @@ export class LiveRack {
     }
   }
 
-  private onWorklet(data: { type?: string; rows?: { id: string; failed?: boolean; spectrum?: Float32Array | null; tuner?: { hz: number; cents: number; note: number } | null; meter?: { vu: number; gr: number } | null; trace?: Float32Array | null; meters?: Record<string, number> | null; scope?: Float32Array | null; kept?: Float32Array | null }[] }) {
+  private onWorklet(data: { type?: string; rows?: { id: string; latency?: number; failed?: boolean; spectrum?: Float32Array | null; tuner?: { hz: number; cents: number; note: number } | null; meter?: { vu: number; gr: number } | null; trace?: Float32Array | null; meters?: Record<string, number> | null; scope?: Float32Array | null; kept?: Float32Array | null }[] }) {
     if (data?.type !== 'meters' || !data.rows) return
     for (const row of data.rows) {
       if (row.failed) this.failed.add(row.id)
@@ -699,6 +715,7 @@ export class LiveRack {
         if (row.scope) this.meterScope = row.scope
       }
       if (row.kept?.length) this.keptAudio.set(row.id, row.kept)
+      if (typeof row.latency === 'number') this.pluginLatency.set(row.id, row.latency)
     }
   }
 

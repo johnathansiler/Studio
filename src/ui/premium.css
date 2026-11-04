@@ -823,6 +823,11 @@
   text-align-last: center;
 }
 
+.shell #shell-menu .latency-choice select {
+  min-height: 44px;
+  font-size: 16px;
+}
+
 .shell #shell-menu button > small {
   display: block;
   min-height: 2.7em;

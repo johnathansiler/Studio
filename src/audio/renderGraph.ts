@@ -3,10 +3,11 @@ import { audibleIds } from '../model/audible'
 import { curveForLength, laneFor, sendLane, valueChanges } from '../model/automation'
 import { projectSampleBeat } from '../model/tempoMap'
 import type { TempoPoint } from '../model/types'
-import { processChain, type ChainSlot } from './plugins/chain'
-import { automationAt, latencyOf } from './plugins/catalog'
+import { prepareChainPool, processChain, type ChainPool, type ChainSlot } from './plugins/chain'
+import { prepareAccurate, processSampleAccurate, type AccurateScratch } from './automationRender'
+import { automationAt } from './plugins/catalog'
+import { reportedLatency } from './core/latency'
 import { createLoudness, measureLoudness, sanitize } from './plugins/dsp'
-import { processSampleAccurate } from './automationRender'
 import { sidechainMono } from './sidechain'
 import { MASTER, REMOTE, edgeDelays, findCycle, type RoutePoint } from './routing'
 import type { Processor } from './plugins/types'
@@ -50,12 +51,15 @@ export function renderGraph(opts: {
   const anySolo = opts.tracks.some((track) => track.solo)
   const heard = audibleIds(opts.tracks)
   const processors = new Map<string, ChainSlot[]>()
+  const block = 128
+  const pool = prepareChainPool(24, 2, block)
+  const scratch = prepareAccurate(24, block)
   const latencyFor = (plugins: PluginInstance[], owner: string) => {
     const slots = slotsFor(plugins, opts.create, opts.sampleRate, processors, owner)
     return slots.reduce((sum, slot, index) => {
       const plugin = plugins[index]
       if (!plugin?.enabled) return sum
-      return sum + Math.max(slot.processor?.latencySamples ?? 0, latencyOf(plugin.pluginId, plugin.params, opts.sampleRate, true))
+      return sum + reportedLatency(plugin.pluginId, plugin.params, opts.sampleRate, true, slot.processor?.latencySamples ?? 0, opts.offline === false)
     }, 0)
   }
 
@@ -95,7 +99,7 @@ export function renderGraph(opts: {
     const base = mixIncoming(blank(), incoming.get(id) ?? [], rendered, delays, length, opts)
     add(base, fit(track.buffer, length))
     const slots = slotsFor(track.plugins, opts.create, opts.sampleRate, processors, id)
-    const processed = runBlocks(slots, base, opts, rendered, byId)
+    const processed = runBlocks(slots, base, opts, rendered, byId, pool, scratch)
     const pre = soloedOut ? blank() : processed
     const post = audible ? applyAutomatedFader(processed, track, opts) : blank()
     rendered.set(id, { pre, post })
@@ -103,7 +107,7 @@ export function renderGraph(opts: {
 
   const masterIn = mixIncoming(blank(), incoming.get(MASTER) ?? [], rendered, delays, length, opts)
   const masterSlots = slotsFor(opts.masterPlugins, opts.create, opts.sampleRate, processors, MASTER)
-  const mastered = runBlocks(masterSlots, masterIn, opts, rendered, byId)
+  const mastered = runBlocks(masterSlots, masterIn, opts, rendered, byId, pool, scratch)
   const master = applyGain(mastered, opts.masterVolume)
   for (const channel of master) for (let i = 0; i < channel.length; i++) channel[i] = sanitize(channel[i])
   const loudness = measureLoudness(createLoudness(opts.sampleRate), master[0], master[1], opts.sampleRate)
@@ -188,10 +192,12 @@ function runBlocks(
   opts: RenderClock & { scaleRoot: number; scaleIntervals: readonly number[]; scaleCents?: readonly number[]; quality?: 'full' | 'eco'; offline?: boolean },
   rendered: Map<string, { pre: Float32Array[]; post: Float32Array[] }>,
   tracks: Map<string, GraphTrack>,
+  pool: ChainPool,
+  scratch: AccurateScratch,
 ) {
   const n = input[0].length
   const output = [new Float32Array(n), new Float32Array(n)]
-  const block = 128
+  const block = pool.frames
   const base = new Map(slots.map((slot) => [slot.id, { ...slot.params }]))
   for (let offset = 0; offset < n; offset += block) {
     const count = Math.min(block, n - offset)
@@ -215,10 +221,10 @@ function runBlocks(
     const endBeat = projectSampleBeat(clock, offset + count - 1)
     const moving = opts.offline !== false && slots.some((slot) => opts.automation.some((lane) => (lane.target == null || lane.target === 'plugin') && lane.pluginId === slot.id && valueChanges(lane.points, beat, endBeat, 0)))
     if (moving) {
-      processSampleAccurate(slots, sliceIn, sliceOut, blockCtx, opts.automation, keyAt, (sample) => projectSampleBeat(clock, sample))
+      processSampleAccurate(slots, sliceIn, sliceOut, blockCtx, opts.automation, keyAt, (sample) => projectSampleBeat(clock, sample), scratch, pool)
       continue
     }
-    processChain(slots, sliceIn, sliceOut, blockCtx, keyAt)
+    processChain(slots, sliceIn, sliceOut, blockCtx, keyAt, pool)
   }
   return output
 }

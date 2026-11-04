@@ -1,5 +1,5 @@
 import { descriptor, FACTORY } from './catalog'
-import { copyCoeffs, designBiquad, sanitize, tickBiquad, type Biquad } from './dsp'
+import { copyCoeffs, designBiquad, freshStamp, sanitize, stampMoved, tickBiquad, type Biquad } from './dsp'
 import type { PluginModule, Processor } from './types'
 
 const desc = descriptor('eq')!
@@ -9,7 +9,7 @@ export const presets = FACTORY.eq
 export function create(sampleRate: number): Processor {
   const filters: Biquad[] = Array.from({ length: 10 }, () => designBiquad('peaking', sampleRate, 1000, 1, 0))
   const spectrum = new Float32Array(32)
-  let designed = ''
+  const stamp = freshStamp(11)
   return {
     latencySamples: 0,
     spectrum,
@@ -19,8 +19,7 @@ export function create(sampleRate: number): Processor {
       }
     },
     process(input, output, params, ctx) {
-      const key = JSON.stringify(params)
-      if (key !== designed) {
+      if (stampMoved(stamp, [params.hp, params.lowF, params.lowQ, params.lowG, params.midF, params.midQ, params.midG, params.highF, params.highQ, params.highG, params.lp])) {
         const next = [
           designBiquad('highpass', ctx.sampleRate, params.hp, 0.7),
           designBiquad('lowshelf', ctx.sampleRate, params.lowF, params.lowQ, params.lowG),
@@ -32,7 +31,6 @@ export function create(sampleRate: number): Processor {
           copyCoeffs(filters[index], filter)
           copyCoeffs(filters[index + 5], filter)
         })
-        designed = key
       }
       const n = input[0]?.length ?? 0
       for (let c = 0; c < output.length; c++) {

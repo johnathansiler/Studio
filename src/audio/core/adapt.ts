@@ -1,4 +1,4 @@
-import { ParamSmoother } from './smooth'
+import { isSteppedParam, ParamSmoother } from './smooth'
 import type { AudioBlock, ControlLayout, MidiBlock, NativePlugin, PluginLayout } from './contract'
 import { EMPTY_MIDI } from './contract'
 import type { BlockContext, ParamSpec, Processor } from '../plugins/types'
@@ -92,6 +92,7 @@ export function adaptProcessor(options: AdaptOptions): NativePlugin {
       maxBlock = Math.max(1, Math.min(MAX_PREPARED, block || 128))
       ctx.sampleRate = sampleRate
       smoother.prepare(keys.length, sampleRate)
+      for (let i = 0; i < keys.length; i++) smoother.markStepped(i, isSteppedParam(keys[i]))
       snapAll()
       inner = options.create(sampleRate)
       prepared = true
@@ -112,7 +113,6 @@ export function adaptProcessor(options: AdaptOptions): NativePlugin {
       if (!prepared || !inner) return
       const frames = Math.max(0, Math.min(audio.numSamples, input[0].length, audio.channels[0]?.length ?? 0))
       if (!frames) return
-      dispatchNotes(inner, midi, options.note)
       const view = viewsFor(frames)
       const channels = Math.max(1, Math.min(audio.numChannels, audio.channels.length, 2))
       for (let c = 0; c < channels; c++) {
@@ -125,9 +125,29 @@ export function adaptProcessor(options: AdaptOptions): NativePlugin {
         const src = view.input[0]
         for (let i = 0; i < frames; i++) dst[i] = src[i]
       }
-      for (let i = 0; i < keys.length; i++) smoothed[keys[i]] = smoother.nextBlock(i, frames)
       const output = audio.channels
-      inner.process(view.input, output, smoothed, ctx)
+      const notes = noteOffsets(midi, frames)
+      if (!options.note || notes.length === 0) {
+        for (let i = 0; i < keys.length; i++) smoothed[keys[i]] = smoother.nextBlock(i, frames)
+        inner.process(view.input, output, smoothed, ctx)
+        return
+      }
+      let cursor = 0
+      let index = 0
+      while (cursor < frames) {
+        while (index < notes.length && notes[index].offset <= cursor) {
+          options.note(inner, notes[index].pitch, notes[index].velocity)
+          index += 1
+        }
+        const end = index < notes.length ? Math.min(frames, Math.max(cursor + 1, notes[index].offset)) : frames
+        if (end > cursor) {
+          for (let i = 0; i < keys.length; i++) smoothed[keys[i]] = smoother.nextBlock(i, end - cursor)
+          const sliceIn = [view.input[0].subarray(cursor, end), view.input[1].subarray(cursor, end)]
+          const sliceOut = [output[0].subarray(cursor, end), (output[1] ?? output[0]).subarray(cursor, end)]
+          inner.process(sliceIn, sliceOut, smoothed, ctx)
+        }
+        cursor = end
+      }
     },
     setParameter(paramId, value) {
       if (paramId < 0 || paramId >= keys.length) return
@@ -246,21 +266,19 @@ export function primeProcessor(proc: Processor, sampleRate: number, frames: numb
   }
 }
 
-function dispatchNotes(
-  proc: Processor,
-  midi: MidiBlock,
-  note?: (proc: Processor, pitch: number, velocity: number) => void,
-) {
-  if (!note || midi.numEvents <= 0) return
-  const events = midi.events
-  const count = Math.min(midi.numEvents, events.length)
+function noteOffsets(midi: MidiBlock, frames: number) {
+  const notes: { offset: number; pitch: number; velocity: number }[] = []
+  const count = Math.min(midi.numEvents, midi.events.length)
   for (let i = 0; i < count; i++) {
-    const event = events[i]
+    const event = midi.events[i]
     const status = event.status & 0xf0
     if (status !== 0x90 && status !== 0x80) continue
     const velocity = status === 0x80 || event.data2 === 0 ? 0 : Math.max(0, Math.min(1, event.data2 / 127))
-    note(proc, event.data1, velocity)
+    const offset = Math.max(0, Math.min(Math.max(0, frames - 1), event.sampleOffset | 0))
+    notes.push({ offset, pitch: event.data1, velocity })
   }
+  notes.sort((a, b) => a.offset - b.offset)
+  return notes
 }
 
 function encodeState(params: Record<string, number>) {

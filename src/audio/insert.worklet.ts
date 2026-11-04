@@ -1,5 +1,5 @@
-import { prepareChainPool, processChain, type ChainPool, type ChainSlot } from './plugins/chain'
-import { prepareAccurate, processSampleAccurate, type AccurateScratch } from './automationRender'
+import { prepareChainPool, preseedChain, processChain, type ChainPool, type ChainSlot, type SlotNote } from './plugins/chain'
+import { prepareAccurate, preseedAccurate, processSampleAccurate, type AccurateScratch } from './automationRender'
 import { createProcessor } from './plugins/createAll'
 import { projectSampleBeat } from '../model/tempoMap'
 import { valueChanges } from '../model/automation'
@@ -51,7 +51,8 @@ type LiveProc = Processor & {
   kept?: () => Float32Array | null
 }
 
-const QUANTA = [128, 256, 512]
+const QUANTA = [128, 256, 512, 1024, 2048]
+const MAX_BLOCK = 2048
 const MAX_SLOTS = 24
 
 interface MeterRow {
@@ -65,6 +66,7 @@ interface MeterRow {
   scope: Float32Array | null
   kept: Float32Array | null
   outputPeak: number
+  latency: number
 }
 
 class InsertProcessor extends AudioWorkletProcessor {
@@ -94,9 +96,9 @@ class InsertProcessor extends AudioWorkletProcessor {
   private outs: Float32Array[] = [new Float32Array(0), new Float32Array(0)]
   private clock = { tempo: 120, tempoMap: [] as TempoPoint[], automation: [] as AutomationLane[], sampleRate: 48000 }
   private keyViews = new Map<string, { buf: Float32Array; view: Float32Array; length: number }>()
-  private pools = new Map<number, ChainPool>()
-  private accurate = new Map<number, AccurateScratch>()
-  private silence = new Float32Array(512)
+  private pool: ChainPool = prepareChainPool(MAX_SLOTS, 2, MAX_BLOCK)
+  private scratch: AccurateScratch = prepareAccurate(MAX_SLOTS, MAX_BLOCK)
+  private silence = new Float32Array(MAX_BLOCK)
   private silenceViews = new Map<number, Float32Array>()
   private blockCtx: BlockContext = {
     sampleRate: 48000,
@@ -112,17 +114,17 @@ class InsertProcessor extends AudioWorkletProcessor {
   private sincePost = 0
   private knownIds = new Set<string>()
   private binds: PluginInstance[] = []
+  private pending = new Map<string, { time: number | null; pitch: number; vel: number }[]>()
+  private noteLists: SlotNote[][] = []
   private readonly asset = (id: string) => this.buffers.get(id) ?? null
   private readonly readKey = (id: string, length: number) => this.keyView(id, length)
   private readonly beatAt = (sample: number) => projectSampleBeat(this.clock, sample)
 
   constructor() {
     super()
-    for (const frames of QUANTA) {
-      this.pools.set(frames, prepareChainPool(MAX_SLOTS, 2, frames))
-      this.accurate.set(frames, prepareAccurate(MAX_SLOTS, frames))
-      this.silenceViews.set(frames, this.silence.subarray(0, frames))
-    }
+    preseedChain(this.pool, QUANTA)
+    preseedAccurate(this.scratch, QUANTA)
+    for (const frames of QUANTA) this.silenceViews.set(frames, this.silence.subarray(0, frames))
     this.port.onmessage = (event: MessageEvent<StateMsg | { type: string; [key: string]: unknown }>) => {
       this.onMessage(event.data)
     }
@@ -167,8 +169,13 @@ class InsertProcessor extends AudioWorkletProcessor {
       const pitch = Number(data.pitch) || 0
       const vel = Number(data.vel) || 0
       const time = Number(data.time)
-      if (proc?.schedule && Number.isFinite(time)) proc.schedule(pitch, vel, time)
-      else proc?.note?.(pitch, vel)
+      if (proc?.schedule && Number.isFinite(time)) {
+        proc.schedule(pitch, vel, time)
+        return
+      }
+      const queued = this.pending.get(data.id) ?? []
+      queued.push({ time: Number.isFinite(time) ? time : null, pitch, vel })
+      this.pending.set(data.id, queued)
       return
     }
     if (data.type === 'reset-all') {
@@ -235,15 +242,11 @@ class InsertProcessor extends AudioWorkletProcessor {
       for (const key of Object.keys(target)) if (!keys.includes(key)) delete target[key]
       const held = this.heldParams[i]
       if (held) for (const key of Object.keys(held)) if (!keys.includes(key)) delete held[key]
-      for (const frames of QUANTA) {
-        const scratch = this.accurate.get(frames)
-        if (!scratch) continue
-        scratch.paramKeys[i] = keys
-        const base = scratch.base[i]
-        const liveRow = scratch.live[i]
-        if (base) for (const key of Object.keys(base)) if (!keys.includes(key)) delete base[key]
-        if (liveRow) for (const key of Object.keys(liveRow)) if (!keys.includes(key)) delete liveRow[key]
-      }
+      this.scratch.paramKeys[i] = keys
+      const base = this.scratch.base[i]
+      const liveRow = this.scratch.live[i]
+      if (base) for (const key of Object.keys(base)) if (!keys.includes(key)) delete base[key]
+      if (liveRow) for (const key of Object.keys(liveRow)) if (!keys.includes(key)) delete liveRow[key]
     }
   }
 
@@ -324,6 +327,7 @@ class InsertProcessor extends AudioWorkletProcessor {
       shell.sidechain = slot.sidechain
       shell.processor = this.procs.get(slot.id) ?? null
     }
+    this.assignNotes(count, frames)
     const endBeat = projectSampleBeat(this.clock, sampleTime + Math.max(0, frames - 1))
     let moving = false
     const lanes = this.automation
@@ -342,8 +346,7 @@ class InsertProcessor extends AudioWorkletProcessor {
         copyKeys(this.targets[i], this.slots[i].params, this.paramKeys[i])
         this.shells[i].params = this.targets[i]
       }
-      const scratch = this.accurate.get(frames)
-      processSampleAccurate(this.shells, this.ins, this.outs, ctx, lanes, this.readKey, this.beatAt, scratch)
+      processSampleAccurate(this.shells, this.ins, this.outs, ctx, lanes, this.readKey, this.beatAt, frames <= this.scratch.frames ? this.scratch : undefined, frames <= this.pool.frames ? this.pool : undefined)
       for (let i = 0; i < count; i++) this.shells[i].params = this.heldParams[i]
     } else {
       for (let i = 0; i < count; i++) {
@@ -351,7 +354,7 @@ class InsertProcessor extends AudioWorkletProcessor {
         automationAt(lanes, shell.id, this.slots[i].params, beat, this.targets[i], this.paramKeys[i])
         shell.params = this.smoother.apply(shell.id, this.targets[i], frames, sampleRate, this.heldParams[i], this.paramKeys[i])
       }
-      processChain(this.shells, this.ins, this.outs, ctx, this.readKey, this.pools.get(frames), count)
+      processChain(this.shells, this.ins, this.outs, ctx, this.readKey, frames <= this.pool.frames ? this.pool : undefined, count)
     }
     const outL = output[0]
     const outR = output[1]
@@ -372,6 +375,43 @@ class InsertProcessor extends AudioWorkletProcessor {
     this.posts += 1
     if (this.posts % 16 === 0) this.postMeters(count)
     return true
+  }
+
+  private assignNotes(count: number, frames: number) {
+    const blockEnd = currentTime + frames / sampleRate
+    for (let i = 0; i < count; i++) {
+      const id = this.shells[i].id
+      let list = this.noteLists[i]
+      if (!list) {
+        list = []
+        this.noteLists[i] = list
+      }
+      let used = 0
+      const queued = this.pending.get(id)
+      if (queued?.length) {
+        let keep = 0
+        for (let n = 0; n < queued.length; n++) {
+          const item = queued[n]
+          if (item.time != null && item.time >= blockEnd) {
+            queued[keep] = item
+            keep += 1
+            continue
+          }
+          const offset = item.time == null
+            ? 0
+            : Math.max(0, Math.min(frames - 1, Math.round((item.time - currentTime) * sampleRate)))
+          const slot = list[used] ?? { offset: 0, pitch: 0, vel: 0 }
+          slot.offset = offset
+          slot.pitch = item.pitch
+          slot.vel = item.vel
+          list[used] = slot
+          used += 1
+        }
+        queued.length = keep
+      }
+      list.length = used
+      this.shells[i].notes = list
+    }
   }
 
   private keyView(id: string, length: number) {
@@ -399,6 +439,7 @@ class InsertProcessor extends AudioWorkletProcessor {
         scope: null,
         kept: null,
         outputPeak: 0,
+        latency: 0,
       })
     }
     for (let i = 0; i < count; i++) {
@@ -415,6 +456,7 @@ class InsertProcessor extends AudioWorkletProcessor {
       row.scope = copyInto(row.scope, proc?.scope)
       row.kept = (proc as LiveProc | null)?.kept?.() ?? null
       row.outputPeak = i === 0 ? this.sincePost : 0
+      row.latency = proc?.latencySamples || 0
     }
     rows.length = count
     this.sincePost = 0

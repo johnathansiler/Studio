@@ -1,8 +1,9 @@
 import { sanitize } from './plugins/dsp'
-import type { ChainSlot } from './plugins/chain'
+import { mixChainSlot, type ChainPool, type ChainSlot } from './plugins/chain'
 import type { AutomationLane, AutomationPoint } from '../model/types'
 import { curveAt, prepareCurve } from '../model/automation'
 import { samplesToBeats } from '../model/time'
+import { isSteppedParam, usesBlockValue } from './core/smooth'
 import type { BlockContext } from './plugins/types'
 
 interface CurveRef {
@@ -26,6 +27,9 @@ export interface AccurateScratch {
   oneWet: Float32Array[]
   step: BlockContext
   keySample: Float32Array
+  blockWet: Float32Array[]
+  wetViews: Map<number, Float32Array[]>
+  stateViews: Map<number, Float32Array[]>
 }
 
 export function prepareAccurate(slots: number, frames: number): AccurateScratch {
@@ -54,6 +58,19 @@ export function prepareAccurate(slots: number, frames: number): AccurateScratch 
     oneWet: [new Float32Array(1), new Float32Array(1)],
     step,
     keySample: new Float32Array(1),
+    blockWet: [new Float32Array(n), new Float32Array(n)],
+    wetViews: new Map(),
+    stateViews: new Map(),
+  }
+}
+
+export function preseedAccurate(scratch: AccurateScratch, sizes: readonly number[]) {
+  for (let i = 0; i < sizes.length; i++) {
+    const frames = sizes[i] | 0
+    if (frames > 0 && frames <= scratch.frames) {
+      viewPair(scratch.stateViews, scratch.state, frames)
+      viewPair(scratch.wetViews, scratch.blockWet, frames)
+    }
   }
 }
 
@@ -71,6 +88,7 @@ export function processSampleAccurate(
   sidechainAt?: (id: string, length: number) => Float32Array | null,
   beatAt?: (sample: number) => number,
   scratch?: AccurateScratch,
+  pool?: ChainPool,
 ) {
   const n = input[0]?.length ?? 0
   const channels = Math.max(1, output.length)
@@ -115,37 +133,61 @@ export function processSampleAccurate(
     copyState(input, state, n)
     fillStep(step, ctx)
   }
-  for (let i = 0; i < n; i++) {
-    oneIn[0][0] = state[0][i] || 0
-    oneIn[1][0] = state[1][i] || 0
-    const beat = beatAt ? beatAt(ctx.sampleTime + i) : samplesToBeats(ctx.sampleTime + i, ctx.sampleRate, ctx.tempo)
-    for (let s = 0; s < slots.length; s++) {
-      const slot = slots[s]
-      const params = live[s]
-      for (const curve of curves[s]) params[curve.param] = curveAt(curve.points, beat, curve.fallback)
-      const active = slot.enabled && !slot.failed && slot.processor && slot.wet > 0.0001
-      if (!active || !slot.processor) continue
-      try {
-        const side = keys[s]
-        let key: Float32Array | null = null
-        if (side && i < side.length) {
-          keySample[0] = side[i]
-          key = keySample
+  const wetBlock = pooled ? viewPair(scratch.wetViews, scratch.blockWet, n) : [new Float32Array(n), new Float32Array(n)]
+  const stateView = pooled ? viewPair(scratch.stateViews, state, n) : state
+  for (let s = 0; s < slots.length; s++) {
+    const slot = slots[s]
+    const params = live[s]
+    const active = slot.enabled && !slot.failed && slot.processor && slot.wet > 0.0001
+    if (!active || !slot.processor) continue
+    const blockScoped = usesBlockValue(slot.pluginId, slot.processor.latencySamples || 0, params)
+    try {
+      if (blockScoped) {
+        const beat0 = beatAt ? beatAt(ctx.sampleTime) : samplesToBeats(ctx.sampleTime, ctx.sampleRate, ctx.tempo)
+        writeCurves(params, curves[s], beat0)
+        step.sampleTime = ctx.sampleTime
+        step.sidechain = keys[s]
+        slot.processor.process(stateView, wetBlock, params, step)
+      } else {
+        for (let i = 0; i < n; i++) {
+          const beat = beatAt ? beatAt(ctx.sampleTime + i) : samplesToBeats(ctx.sampleTime + i, ctx.sampleRate, ctx.tempo)
+          writeCurves(params, curves[s], beat)
+          oneIn[0][0] = state[0][i] || 0
+          oneIn[1][0] = state[1][i] || 0
+          const side = keys[s]
+          let key: Float32Array | null = null
+          if (side && i < side.length) {
+            keySample[0] = side[i]
+            key = keySample
+          }
+          step.sampleTime = ctx.sampleTime + i
+          step.sidechain = key
+          slot.processor.process(oneIn, oneWet, params, step)
+          wetBlock[0][i] = oneWet[0][0] || 0
+          wetBlock[1][i] = oneWet[1][0] || 0
         }
-        step.sampleTime = ctx.sampleTime + i
-        step.sidechain = key
-        slot.processor.process(oneIn, oneWet, params, step)
-        const mix = Math.min(1, Math.max(0, slot.wet))
-        oneIn[0][0] = sanitize((oneIn[0][0] || 0) * (1 - mix) + (oneWet[0][0] || 0) * mix)
-        oneIn[1][0] = sanitize((oneIn[1][0] || 0) * (1 - mix) + (oneWet[1][0] || 0) * mix)
-      } catch {
-        slot.failed = true
       }
+      const mix = Math.min(1, Math.max(0, slot.wet))
+      if (mix >= 0.9995 && (slot.processor.latencySamples || 0) <= 0) {
+        for (let i = 0; i < n; i++) {
+          state[0][i] = sanitize(wetBlock[0][i] || 0)
+          state[1][i] = sanitize(wetBlock[1][i] || 0)
+        }
+      } else {
+        mixChainSlot(slot, s, stateView, wetBlock, stateView, channels, n, ctx.sampleRate, pool)
+      }
+    } catch {
+      slot.failed = true
     }
-    state[0][i] = oneIn[0][0] || 0
-    state[1][i] = oneIn[1][0] || 0
   }
-  for (let c = 0; c < channels; c++) output[c].set(state[Math.min(c, state.length - 1)])
+  for (let c = 0; c < channels; c++) {
+    const src = state[Math.min(c, state.length - 1)]
+    const dest = output[c]
+    if (!dest || !src) continue
+    const count = Math.min(n, dest.length, src.length)
+    if (src.length === dest.length) dest.set(src)
+    else for (let i = 0; i < count; i++) dest[i] = src[i]
+  }
 }
 
 function curvesFor(slot: ChainSlot, lanes: AutomationLane[], base: Record<string, number>): CurveRef[] {
@@ -190,6 +232,23 @@ function copyNamed(dest: Record<string, number>, src: Record<string, number>, ke
     return
   }
   for (const key of Object.keys(src)) dest[key] = src[key]
+}
+
+function viewPair(cache: Map<number, Float32Array[]>, buffers: Float32Array[], frames: number) {
+  if (buffers[0]?.length === frames) return buffers
+  const hit = cache.get(frames)
+  if (hit) return hit
+  const view = buffers.map((buffer) => buffer.subarray(0, frames))
+  cache.set(frames, view)
+  return view
+}
+
+function writeCurves(params: Record<string, number>, curves: CurveRef[], beat: number) {
+  for (let i = 0; i < curves.length; i++) {
+    const curve = curves[i]
+    const raw = curveAt(curve.points, beat, curve.fallback)
+    params[curve.param] = isSteppedParam(curve.param) ? Math.round(raw) : raw
+  }
 }
 
 function fillStep(target: BlockContext, ctx: BlockContext) {

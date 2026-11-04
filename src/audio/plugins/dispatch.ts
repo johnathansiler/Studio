@@ -39,15 +39,18 @@ function createSynthVoice(sampleRate: number): Processor & { note: (pitch: numbe
       const n = output[0]?.length ?? 0
       const step = (2 * Math.PI * 440 * 2 ** ((pitch - 69) / 12)) / sampleRate
       for (let i = 0; i < n; i++) {
+        const dryAt = (channel: number) => input[Math.min(channel, input.length - 1)]?.[i] ?? 0
+        if (vel <= 0 && env <= 1e-5) {
+          env = 0
+          for (let c = 0; c < output.length; c++) output[c][i] = dryAt(c)
+          continue
+        }
         env += (vel - env) * (vel > env ? 0.25 : 0.04)
         if (env < 1e-5) env = 0
         const sample = env > 0 ? Math.sin(phase) * env * 0.35 : 0
         phase += step
         if (phase > Math.PI * 2) phase -= Math.PI * 2
-        for (let c = 0; c < output.length; c++) {
-          const dry = input[Math.min(c, input.length - 1)]?.[i] ?? 0
-          output[c][i] = dry + sample
-        }
+        for (let c = 0; c < output.length; c++) output[c][i] = dryAt(c) + sample
       }
     },
   }
@@ -98,20 +101,59 @@ function series(
   }
 }
 
+const PREPARED_BLOCKS = [128, 256, 512, 1024, 2048]
+
+function preparedPair() {
+  const full = [new Float32Array(2048), new Float32Array(2048)]
+  const views = new Map<number, Float32Array[]>()
+  for (let i = 0; i < PREPARED_BLOCKS.length; i++) {
+    const n = PREPARED_BLOCKS[i]
+    views.set(n, [full[0].subarray(0, n), full[1].subarray(0, n)])
+  }
+  return (frames: number) => {
+    const n = Math.max(1, frames | 0)
+    const hit = views.get(n)
+    if (hit) return hit
+    if (n > full[0].length) {
+      full[0] = new Float32Array(n)
+      full[1] = new Float32Array(n)
+    }
+    const view = [full[0].subarray(0, n), full[1].subarray(0, n)]
+    views.set(n, view)
+    return view
+  }
+}
+
 function stageBuffer(pool: Float32Array[][], index: number, output: Float32Array[]) {
   const n = output[0]?.length ?? 0
   const channels = output.length
   let row = pool[index]
-  if (!row || row.length < channels || row[0].length !== n) {
-    row = Array.from({ length: channels }, () => new Float32Array(Math.max(1, n)))
+  if (!row || row.length < channels || row[0].length < n) {
+    row = Array.from({ length: channels }, () => new Float32Array(Math.max(2048, n)))
     pool[index] = row
   }
-  return row
+  if (row[0].length === n) return row
+  const key = n
+  const cached = row as Float32Array[] & { views?: Map<number, Float32Array[]> }
+  if (!cached.views) cached.views = new Map()
+  const hit = cached.views.get(key)
+  if (hit) return hit
+  const view = row.map((buffer) => buffer.subarray(0, n))
+  cached.views.set(key, view)
+  return view
+}
+
+function preseedStages(pool: Float32Array[][], count: number) {
+  for (let i = 0; i < PREPARED_BLOCKS.length; i++) {
+    const n = PREPARED_BLOCKS[i]
+    const fake = [new Float32Array(n), new Float32Array(n)]
+    for (let s = 0; s < count; s++) stageBuffer(pool, s, fake)
+  }
 }
 
 function wrap(sampleRate: number, pick: (kind: number) => Processor, map: (kind: number, params: Record<string, number>) => Record<string, number>, latency = 0): Processor {
   const meter = createMasterMeter(sampleRate)
-  const scratch = [new Float32Array(0), new Float32Array(0)]
+  const scratch = preparedPair()
   const self: Processor = {
     latencySamples: latency,
     spectrum: meter.spectrum,
@@ -131,11 +173,7 @@ function wrap(sampleRate: number, pick: (kind: number) => Processor, map: (kind:
       self.trace = child.trace
       if (child.spectrum) self.spectrum = child.spectrum
       const n = output[0]?.length ?? 0
-      if (scratch[0].length !== n) {
-        scratch[0] = new Float32Array(n)
-        scratch[1] = new Float32Array(n)
-      }
-      meter.process(output, scratch, {}, ctx)
+      meter.process(output, scratch(n), {}, ctx)
       if (!child.spectrum) self.spectrum = meter.spectrum
       self.meters = meter.meters
       self.scope = meter.scope
@@ -301,7 +339,7 @@ export function createCore(id: CoreId, sampleRate: number): Processor {
 function createVocal(sampleRate: number): Processor {
   const gate = createGate(sampleRate)
   const ess = createDeesser(sampleRate)
-  const mid = [new Float32Array(0), new Float32Array(0)]
+  const mid = preparedPair()
   return {
     latencySamples: 0,
     meter: ess.meter,
@@ -312,10 +350,7 @@ function createVocal(sampleRate: number): Processor {
     process(input, output, params, ctx) {
       const kind = Math.round(params.kind ?? 0)
       const n = input[0]?.length ?? 0
-      if (mid[0].length !== n) {
-        mid[0] = new Float32Array(n)
-        mid[1] = new Float32Array(n)
-      }
+      const between = mid(n)
       const gateParams = {
         threshold: kind === 1 ? -80 : (params.gate ?? -80),
         ratio: kind === 1 ? 1 : (params.gateRatio ?? 1),
@@ -343,8 +378,8 @@ function createVocal(sampleRate: number): Processor {
         gate.process(input, output, gateParams, ctx)
         return
       }
-      gate.process(input, mid, gateParams, ctx)
-      ess.process(mid, output, essParams, ctx)
+      gate.process(input, between, gateParams, ctx)
+      ess.process(between, output, essParams, ctx)
     },
   }
 }
@@ -385,8 +420,9 @@ function createMaster(sampleRate: number): Processor {
   const image = createImager(sampleRate)
   const dither = createDither()
   const meter = createMasterMeter(sampleRate)
-  const scratch = [new Float32Array(0), new Float32Array(0)]
+  const scratch = preparedPair()
   const stages: Float32Array[][] = []
+  preseedStages(stages, 4)
   return {
     latencySamples: 64,
     spectrum: meter.spectrum,
@@ -412,11 +448,7 @@ function createMaster(sampleRate: number): Processor {
       if ((params.bits ?? 24) < 23.5 || (params.shape ?? 0) > 0.05) chain.push(dither)
       series(chain, input, output, params, ctx, stages)
       const n = output[0]?.length ?? 0
-      if (scratch[0].length !== n) {
-        scratch[0] = new Float32Array(n)
-        scratch[1] = new Float32Array(n)
-      }
-      meter.process(output, scratch, {}, ctx)
+      meter.process(output, scratch(n), {}, ctx)
       this.latencySamples = kind >= 1 ? brick.latencySamples : clean.latencySamples
       this.meter = kind >= 1 ? brick.meter : clean.meter
       this.spectrum = meter.spectrum

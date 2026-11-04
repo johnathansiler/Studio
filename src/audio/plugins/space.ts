@@ -1,3 +1,4 @@
+import { SampleGlide } from '../core/smooth'
 import { clamp, designBiquad, sanitize, tickBiquad } from './dsp'
 import type { Processor } from './types'
 
@@ -8,6 +9,7 @@ export function createDelay(sampleRate: number): Processor {
   let write = 0
   let filter = designBiquad('lowpass', sampleRate, 5000, 0.7)
   let freq = 5000
+  const mixGlide = new SampleGlide()
   return {
     latencySamples: 0,
     reset() {
@@ -22,7 +24,8 @@ export function createDelay(sampleRate: number): Processor {
         filter = { ...filter, b0: next.b0, b1: next.b1, b2: next.b2, a1: next.a1, a2: next.a2 }
         freq = params.filter
       }
-      const mix = clamp(params.mix, 0, 1)
+      const mixTarget = clamp(params.mix, 0, 1)
+      mixGlide.prepare(ctx.sampleRate)
       const feedback = clamp(params.feedback, 0, 0.9)
       const samples = params.sync >= 0.5
         ? Math.max(1, (60 / Math.max(1, ctx.tempo)) * params.division * ctx.sampleRate)
@@ -30,6 +33,7 @@ export function createDelay(sampleRate: number): Processor {
       const ping = params.pingpong >= 0.5
       const n = input[0]?.length ?? 0
       for (let i = 0; i < n; i++) {
+        const mix = mixGlide.next(mixTarget)
         const dryL = input[0][i] || 0
         const dryR = input[1]?.[i] ?? dryL
         const tapL = readAt(left, write, samples)
@@ -53,6 +57,7 @@ export function createReverb(sampleRate: number): Processor {
     buf: new Float32Array(Math.max(8, Math.round((prime * sampleRate) / 48000))),
     index: 0,
   }))
+  const mixGlide = new SampleGlide()
   return {
     latencySamples: 0,
     reset() {
@@ -67,7 +72,8 @@ export function createReverb(sampleRate: number): Processor {
       }
     },
     process(input, output, params, ctx) {
-      const mix = clamp(params.mix, 0, 1)
+      const mixTarget = clamp(params.mix, 0, 1)
+      mixGlide.prepare(ctx.sampleRate)
       const size = clamp(params.size, 0.05, 1)
       const damp = clamp(params.damp, 0, 0.95)
       const mode = Math.round(clamp(params.mode, 0, 2))
@@ -75,6 +81,7 @@ export function createReverb(sampleRate: number): Processor {
       const used = ctx.quality === 'eco' ? 4 : combCount
       const n = input[0]?.length ?? 0
       for (let i = 0; i < n; i++) {
+        const mix = mixGlide.next(mixTarget)
         const dryL = input[0][i] || 0
         const dryR = input[1]?.[i] ?? dryL
         const mono = (dryL + dryR) * 0.5

@@ -37,6 +37,7 @@ import { channelRoute } from '../model/sharedMix'
 import { chainContext, enabledFx, LiveMidiChain, midiPanicMessages, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
 import { LiveRack } from './liveRack'
 import { audioStateOf, planRecovery, type RecoveryAction } from './core/session'
+import { bufferHintOf, formatLatencyReadout, latencyHintOrder, readBufferHint, writeBufferHint, type BufferHint } from './core/buffer'
 import { ATTACK_SEC, RELEASE_SEC, builtinLevel, drumLevel, liveWhen, scheduleDelaySeconds } from './liveStage'
 import { renderSamplerSpan } from './plugins/sampler'
 import { renderGraph } from './renderGraph'
@@ -216,6 +217,7 @@ export class AudioEngine {
   private launchGen = new Map<string, number>()
   private perfAtCtx0 = 0
   private workletsReady = false
+  private bufferHint: BufferHint = readBufferHint(hintStorage())
   private stretchReady = false
   private readonly stretchKeys = new Set<string>()
   private joining = false
@@ -281,6 +283,49 @@ export class AudioEngine {
 
   get baseLatencyMs() {
     return (this.ctx?.baseLatency || 0) * 1000
+  }
+
+  /** Lowest, Balanced, or Playback. The running context uses this hint. */
+  get latencyChoice() {
+    return this.bufferHint
+  }
+
+  latencyReadout() {
+    if (!this.ctx) return formatLatencyReadout(null, null)
+    return formatLatencyReadout(this.baseLatencyMs, this.deviceLatencyMs)
+  }
+
+  /**
+   * Switch the device buffer. A running context is rebuilt so the new hint
+   * applies. The project and playhead stay.
+   */
+  async setLatencyChoice(hint: BufferHint) {
+    const next = bufferHintOf(hint)
+    this.bufferHint = next
+    writeBufferHint(next, hintStorage())
+    if (!this.ctx) return this.latencyReadout()
+    this.rememberTransport()
+    const project = this.project
+    const position = this.heldPosition
+    const wasPlaying = this.heldPlaying
+    const mode = this.heldMode
+    try {
+      this.stop()
+    } catch {
+      this.playing = false
+    }
+    this.dropGraph()
+    try {
+      await this.resume(project?.sampleRate || this.sampleRate || 48000, false)
+    } catch {
+      /* This environment has no audio device. The choice is still saved. */
+    }
+    if (project && this.ctx) this.sync(project, this.assetOf)
+    this.positionSamples = position
+    const running = (this.ctx?.state as string | undefined) === 'running'
+    if (wasPlaying && running) void this.play(position, mode)
+    this.emit()
+    return this.latencyReadout()
   }
 
   /** Device output latency, not including the audio graph's baseLatency. */
@@ -360,7 +405,7 @@ export class AudioEngine {
   /** Call from the tap handler itself. Creates the context and resumes it before any await. */
   unlock() {
     if (!this.ctx) {
-      this.ctx = openContext(48000)
+      this.ctx = openContext(48000, this.bufferHint)
       this.buildMaster()
       this.bindAudioSession(this.ctx)
       if (this.project) this.sync(this.project, this.assetOf)
@@ -372,7 +417,7 @@ export class AudioEngine {
   async resume(preferredRate = 48000, settle = true) {
     const fresh = !this.ctx
     if (!this.ctx) {
-      this.ctx = openContext(preferredRate)
+      this.ctx = openContext(preferredRate, this.bufferHint)
       this.buildMaster()
     }
     this.bindAudioSession(this.ctx)
@@ -4268,12 +4313,20 @@ function fadeSource(ctx: AudioContext, gain: GainNode, src: AudioBufferSourceNod
   try { src.stop(now + 0.02) } catch { /* already stopped */ }
 }
 
-function openContext(sampleRate?: number) {
+function hintStorage() {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage
+  } catch {
+    return null
+  }
+}
+
+function openContext(sampleRate: number | undefined, hint: BufferHint) {
   const options: AudioContextOptions[] = []
-  if (sampleRate) options.push({ latencyHint: 'interactive', sampleRate })
-  options.push({ latencyHint: 'interactive' })
-  if (sampleRate) options.push({ latencyHint: 'balanced', sampleRate })
-  options.push({ latencyHint: 'balanced' })
+  for (const item of latencyHintOrder(hint)) {
+    if (sampleRate) options.push({ latencyHint: item, sampleRate })
+    options.push({ latencyHint: item })
+  }
   let last: unknown
   for (const option of options) {
     try {

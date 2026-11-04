@@ -208,6 +208,15 @@ export function App() {
   const [persisted, setPersisted] = useState(true)
   const [help, setHelp] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [latencyHint, setLatencyHint] = useState(() => engine.latencyChoice)
+  const [latencyReadout, setLatencyReadout] = useState(() => engine.latencyReadout())
+  useEffect(() => {
+    if (!menuOpen) return
+    const tick = () => setLatencyReadout(engine.latencyReadout())
+    tick()
+    const timer = window.setInterval(tick, 500)
+    return () => window.clearInterval(timer)
+  }, [menuOpen, engine])
   const [recordHint, setRecordHint] = useState('')
   const [form, setForm] = useState<FormFactor>(() => formFactor(window.innerWidth, window.innerHeight))
   const [land, setLand] = useState(() => window.innerWidth > window.innerHeight)
@@ -1842,6 +1851,12 @@ async function importDropped(files: FileList) {
             disabled={(action) => store.remoteFollow && (action === 'new' || action === 'session-mode' || action === 'capture' || action === 'snap' || action === 'loop' || action === 'signature' || action === 'box' || action === 'erase' || action === 'pan')}
             signature={`${store.project.timeSignature.numerator}/${store.project.timeSignature.denominator}`}
             onSignature={(numerator, denominator) => store.setTimeSignature(numerator, denominator)}
+            latencyHint={latencyHint}
+            latencyReadout={latencyReadout}
+            onLatency={(hint) => {
+              setLatencyHint(hint)
+              void engine.setLatencyChoice(hint).then((readout) => setLatencyReadout(readout))
+            }}
             onAction={(action) => {
               if (action === 'new') beginNewProject()
               else if (action === 'open') { setMenuOpen(false); void openProjects() }

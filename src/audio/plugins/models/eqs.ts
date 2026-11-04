@@ -1,6 +1,7 @@
 import { descriptor, FACTORY } from '../catalog'
 import { tickBiquad, type Biquad } from '../dsp'
 import type { PluginModule, Processor } from '../types'
+import { freshStamp, stampMoved, stampParams } from '../dsp'
 import {
   applyFilters,
   cascadeDb,
@@ -33,7 +34,7 @@ function stereoWrite(output: Float32Array[], index: number, left: number, right:
 export function createPassive(sampleRate: number): Processor {
   const filters = passiveFilters(sampleRate, {})
   const right = passiveFilters(sampleRate, {})
-  let key = ''
+  const stamp = freshStamp(8)
   const meter = createMeter()
   return {
     latencySamples: 0,
@@ -42,11 +43,9 @@ export function createPassive(sampleRate: number): Processor {
       for (const bank of [filters, right]) for (const filter of bank) filter.x1 = filter.x2 = filter.y1 = filter.y2 = 0
     },
     process(input, output, params, ctx) {
-      const nextKey = JSON.stringify([params.lowF, params.lowBoost, params.lowAtten, params.highF, params.highBoost, params.highBw, params.highAtten, params.highAttenF])
-      if (nextKey !== key) {
+      if (stampMoved(stamp, [params.lowF, params.lowBoost, params.lowAtten, params.highF, params.highBoost, params.highBw, params.highAtten, params.highAttenF])) {
         refresh(filters, passiveFilters(ctx.sampleRate, params))
         refresh(right, passiveFilters(ctx.sampleRate, params))
-        key = nextKey
       }
       const n = input[0]?.length ?? 0
       for (let i = 0; i < n; i++) {
@@ -62,7 +61,8 @@ export function createPassive(sampleRate: number): Processor {
 export function createPre(sampleRate: number): Processor {
   const filters = preFilters(sampleRate, {})
   const right = preFilters(sampleRate, {})
-  let key = ''
+  const stamp = freshStamp(7)
+  let count = filters.length
   const shapers = [createShaper(4), createShaper(4)]
   const meter = createMeter()
   return {
@@ -77,18 +77,16 @@ export function createPre(sampleRate: number): Processor {
         shapers[0] = createShaper(factor)
         shapers[1] = createShaper(factor)
       }
-      const nextKey = JSON.stringify([params.hp, params.lowF, params.lowG, params.midF, params.midG, params.highF, params.highG])
-      if (nextKey !== key) {
+      if (stampMoved(stamp, [params.hp, params.lowF, params.lowG, params.midF, params.midG, params.highF, params.highG])) {
         const designed = preFilters(ctx.sampleRate, params)
         while (filters.length < designed.length) filters.push(designBiquad('peaking', ctx.sampleRate, 1000, 1, 0))
         while (right.length < designed.length) right.push(designBiquad('peaking', ctx.sampleRate, 1000, 1, 0))
         refresh(filters, designed)
         refresh(right, designed)
-        key = nextKey
+        count = designed.length
       }
       const drive = clamp(params.drive ?? 0, 0, 1)
       const n = input[0]?.length ?? 0
-      const count = preFilters(ctx.sampleRate, params).length
       for (let i = 0; i < n; i++) {
         const left = oversample(shapers[0], applyCounted(filters, count, input[0]?.[i] || 0), drive)
         const rightIn = input[1]?.[i] ?? input[0]?.[i] ?? 0
@@ -115,7 +113,7 @@ function channelFilters(sampleRate: number, params: Record<string, number>) {
 }
 
 export function createChannel(sampleRate: number): Processor {
-  return biquadPlugin(sampleRate, channelFilters, 'channel')
+  return biquadPlugin(sampleRate, channelFilters, 'channel', ['lfF', 'lfG', 'lmfF', 'lmfG', 'hmfF', 'hmfG', 'hfF', 'hfG', 'curve'])
 }
 
 const PROP_FREQS = [50, 80, 150, 300, 500, 800, 1500, 2500, 5000, 8000, 12000]
@@ -127,13 +125,13 @@ function propFilters(sampleRate: number, params: Record<string, number>) {
 }
 
 export function createProp(sampleRate: number): Processor {
-  return biquadPlugin(sampleRate, propFilters, 'prop')
+  return biquadPlugin(sampleRate, propFilters, 'prop', ['gain', 'freq'])
 }
 
-function biquadPlugin(sampleRate: number, design: (sampleRate: number, params: Record<string, number>) => Biquad[], id: string): Processor {
+function biquadPlugin(sampleRate: number, design: (sampleRate: number, params: Record<string, number>) => Biquad[], id: string, keys: readonly string[]): Processor {
   const left = design(sampleRate, {})
   const right = design(sampleRate, {})
-  let key = ''
+  const stamp = freshStamp(keys.length)
   const meter = createMeter()
   return {
     latencySamples: 0,
@@ -142,11 +140,9 @@ function biquadPlugin(sampleRate: number, design: (sampleRate: number, params: R
       for (const bank of [left, right]) for (const filter of bank) filter.x1 = filter.x2 = filter.y1 = filter.y2 = 0
     },
     process(input, output, params, ctx) {
-      const nextKey = JSON.stringify(params)
-      if (nextKey !== key) {
+      if (stampParams(stamp, params, keys)) {
         refresh(left, design(ctx.sampleRate, params))
         refresh(right, design(ctx.sampleRate, params))
-        key = nextKey
       }
       const n = input[0]?.length ?? 0
       for (let i = 0; i < n; i++) {
@@ -166,7 +162,7 @@ export function createFocus(sampleRate: number): Processor {
   const meter = createMeter()
   let left = focusFilters(sampleRate, {})
   let right = focusFilters(sampleRate, {})
-  let key = ''
+  const stamp = freshStamp(9)
   let env = 0
   const size = 512
   const window = new Float32Array(size)
@@ -175,6 +171,7 @@ export function createFocus(sampleRate: number): Processor {
   const overlap = [new Float32Array(size), new Float32Array(size)]
   let filled = 0
   let read = 0
+  const fftScratch = [makeFftScratch(size), makeFftScratch(size)]
   return {
     latencySamples: 0,
     spectrum,
@@ -190,11 +187,9 @@ export function createFocus(sampleRate: number): Processor {
     process(input, output, params, ctx) {
       const linear = (params.linear ?? 0) >= 0.5 && ctx.quality !== 'eco'
       this.latencySamples = linear ? size / 2 : 0
-      const nextKey = JSON.stringify([params.f0, params.g0, params.q0, params.f1, params.g1, params.q1, params.f2, params.g2, params.q2])
-      if (nextKey !== key) {
+      if (stampMoved(stamp, [params.f0, params.g0, params.q0, params.f1, params.g1, params.q1, params.f2, params.g2, params.q2])) {
         left = focusFilters(ctx.sampleRate, params)
         right = focusFilters(ctx.sampleRate, params)
-        key = nextKey
       }
       const dynamic = clamp(params.dynamic ?? 0, 0, 1)
       const mode = Math.round(params.ms ?? 0)
@@ -219,7 +214,7 @@ export function createFocus(sampleRate: number): Processor {
           collect[1][filled] = dryR
           filled += 1
           if (filled === size) {
-            const shaped = [zeroPhase(collect[0], left, ctx.sampleRate, window), zeroPhase(collect[1], right, ctx.sampleRate, window)]
+            const shaped = [zeroPhase(collect[0], left, ctx.sampleRate, window, fftScratch[0]), zeroPhase(collect[1], right, ctx.sampleRate, window, fftScratch[1])]
             for (let k = 0; k < size; k++) {
               overlap[0][(read + k) % size] += shaped[0][k]
               overlap[1][(read + k) % size] += shaped[1][k]
@@ -291,11 +286,23 @@ function fillSpectrum(input: Float32Array | undefined, spectrum: Float32Array) {
   }
 }
 
-function zeroPhase(frame: Float32Array, filters: Biquad[], sampleRate: number, window: Float32Array) {
+interface FftScratch {
+  out: Float32Array
+  re: Float64Array
+  im: Float64Array
+}
+
+function makeFftScratch(size: number): FftScratch {
+  return { out: new Float32Array(size), re: new Float64Array(size), im: new Float64Array(size) }
+}
+
+function zeroPhase(frame: Float32Array, filters: Biquad[], sampleRate: number, window: Float32Array, scratch: FftScratch) {
   const n = frame.length
-  const out = new Float32Array(n)
-  const re = new Float64Array(n)
-  const im = new Float64Array(n)
+  const out = scratch.out
+  const re = scratch.re
+  const im = scratch.im
+  re.fill(0)
+  im.fill(0)
   for (let i = 0; i < n; i++) re[i] = frame[i] * window[i]
   fft(re, im, false)
   for (let bin = 0; bin <= n / 2; bin++) {
