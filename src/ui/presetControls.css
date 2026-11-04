@@ -1,0 +1,121 @@
+.preset-dock {
+  position: relative;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 100%;
+}
+.preset-dock button {
+  height: 40px;
+  min-height: 40px;
+  min-width: 40px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.preset-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 10px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 640;
+}
+.preset-name b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preset-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--amber);
+  flex: 0 0 auto;
+}
+.preset-anchor {
+  position: relative;
+  flex: 0 0 auto;
+}
+.preset-anchor > button[aria-expanded='true'] {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-color: transparent;
+  position: relative;
+  z-index: 9;
+}
+.preset-menu {
+  position: absolute;
+  top: calc(100% - 1px);
+  right: 0;
+  z-index: 8;
+  width: min(320px, calc(100vw - 24px));
+  max-height: min(320px, 46vh);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px 0 12px 12px;
+  background: #18241d;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.45);
+}
+.preset-menu button {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+  border-radius: 8px;
+}
+.preset-menu button.on {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.preset-menu button:disabled {
+  opacity: 0.45;
+}
+.preset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.preset-actions button {
+  width: auto;
+  flex: 1 1 auto;
+}
+.preset-menu input {
+  width: 100%;
+  min-height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #101814;
+  color: var(--text);
+  padding: 0 10px;
+}
+.preset-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.shell.phone .preset-dock button,
+.shell.fold .preset-dock button,
+.shell.phone .preset-menu button,
+.shell.fold .preset-menu button,
+.shell.phone .preset-menu input,
+.shell.fold .preset-menu input {
+  min-height: 40px;
+  height: 40px;
+}

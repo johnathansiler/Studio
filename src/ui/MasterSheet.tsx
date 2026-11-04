@@ -9,7 +9,9 @@ import { decodeWavPCM, linearResample } from '../model/wav'
 import { listProjects, loadProject } from '../storage/idb'
 import { selectMaster } from '../state/select'
 import type { ProjectStore } from '../state/store'
+import { commitPluginPreset } from '../presets/project'
 import { formFactor } from './form'
+import { PresetControls } from './PresetControls'
 import { InsertList } from './PluginSheet'
 import { shareOrDownload } from './share'
 
@@ -195,8 +197,18 @@ export function MasterSheet({ store, engine, onClose }: { store: ProjectStore; e
     }
   }
 
+  const limiter = selectMaster(store).plugins.find((plugin) => plugin.pluginId === 'limiter')
   return (
     <div className="plugin-sheet master-sheet" id="master-sheet" role="dialog" aria-label="Master">
+      {limiter && (
+        <PresetControls
+          pluginId="master"
+          instanceKey={limiter.id}
+          values={limiter.params}
+          presets={store.project.presets}
+          onCommit={(next) => commitPluginPreset(store, 'master', limiter.id, next.params, next.presets)}
+        />
+      )}
       <header>
         <strong>Master</strong>
         <select aria-label="Genre" value={genre} onChange={(event) => setGenre(event.target.value as (typeof GENRES)[number])}>

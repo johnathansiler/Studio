@@ -11,7 +11,10 @@ import { projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { allProgressions, allScales, GENRE_INFO, getScale, harmonize, loadScaleCatalog, progressionsFor, realizeProgression, scaleFamilies, songSets, spellScale, VOICINGS, type VoicingId } from '../theory'
 import { GeneratePanel } from './GeneratePop'
+import { scalerPatch } from '../presets/apply'
+import { commitScalerPreset } from '../presets/project'
 import { useFormFactor } from './form'
+import { PresetControls } from './PresetControls'
 import { LibraryPanel } from './LibraryPanel'
 import './scaler.css'
 
@@ -310,6 +313,23 @@ export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; e
 
   return (
     <div className={`scaler-panel ${form === 'desk' ? '' : form}`} data-scaler="plugin" data-page={store.scalerPage} data-progressions={progressCount} data-patterns={patternCount} data-performances={performanceCount} aria-label="Scaler">
+      <PresetControls
+        pluginId="scaler"
+        instanceKey={`scaler:${trackId}`}
+        values={{
+          root: state.root,
+          inversion: state.inversion,
+          gate: state.gate,
+          rate: state.rate,
+          swing: state.swing,
+          octaves: state.octaves,
+          snap: state.snap ? 1 : 0,
+          voiceLead: state.voiceLead ? 1 : 0,
+        }}
+        text={{ scale: state.scale, group: state.group, voicing: state.voicing, sound: state.sound, arp: state.arp, rhythm: state.rhythm }}
+        presets={store.project.presets}
+        onCommit={(next) => commitScalerPreset(store, trackId, scalerPatch(next.params, next.text), next.presets)}
+      />
       <header className="scaler-top">
         <div className="scaler-brand"><i>C</i><strong>CueHarbor Scaler</strong></div>
         <div className="scaler-readout">
