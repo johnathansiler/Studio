@@ -12,13 +12,14 @@ import { MixerView } from '../ui/MixerView'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const css = [
-  'src/styles.css',
-  'src/ui/remoteFixes.css',
-  'src/ui/arrangeSpace.css',
-  'src/ui/premium.css',
   'src/ui/kit/kit.css',
   'src/ui/automation.css',
   'src/ui/mixer.css',
+  'src/ui/remoteFixes.css',
+  'src/styles.css',
+  'src/ui/arrangeSpace.css',
+  'src/ui/premium.css',
+  'src/ui/buttonTiers.css',
 ].map((file) => readFileSync(resolve(root, file), 'utf8')).join('\n')
 
 const engine = {
@@ -256,19 +257,21 @@ describe('short landscape mixer', () => {
           expect(strip.db, `${where} ${strip.name} db`).toMatch(/dB|inf/)
           expect(strip.dbBox.height, `${where} ${strip.name} db`).toBeGreaterThanOrEqual(10)
           expect(strip.marks.map((mark) => mark.text), `${where} ${strip.name} scale`).toEqual(['0', '-6', '-12', '-18'])
-          const inside = [strip.nameBox, strip.dbBox, strip.fader, strip.meter, ...strip.marks.map((mark) => mark.box), ...strip.controls.map((control) => control.box)]
+          const inside = [strip.nameBox, strip.dbBox, strip.fader, strip.meter, strip.thumb, ...strip.marks.map((mark) => mark.box), ...strip.controls.map((control) => control.box)]
           for (const part of inside) {
             expect(part.left, `${where} ${strip.name}`).toBeGreaterThanOrEqual(strip.box.left - 1)
             expect(part.right, `${where} ${strip.name}`).toBeLessThanOrEqual(strip.box.right + 1)
             expect(part.top, `${where} ${strip.name}`).toBeGreaterThanOrEqual(strip.box.top - 1)
             expect(part.bottom, `${where} ${strip.name}`).toBeLessThanOrEqual(strip.box.bottom + 1)
           }
-          const stacked = [strip.nameBox, strip.dbBox, strip.fader, ...strip.controls.map((control) => control.box)]
+          const stacked = [strip.nameBox, strip.fader, ...strip.controls.map((control) => control.box)]
           for (let i = 0; i < stacked.length; i += 1) {
             for (let j = i + 1; j < stacked.length; j += 1) {
               expect(overlaps(stacked[i], stacked[j]), `${where} ${strip.name} stack`).toBe(false)
             }
           }
+          expect(overlaps(strip.dbBox, strip.nameBox), `${where} ${strip.name} db`).toBe(false)
+          expect(overlaps(strip.dbBox, strip.thumb), `${where} ${strip.name} db`).toBe(false)
           for (let i = 0; i < strip.marks.length; i += 1) {
             for (let j = i + 1; j < strip.marks.length; j += 1) {
               expect(overlaps(strip.marks[i].box, strip.marks[j].box), `${where} ${strip.name} scale`).toBe(false)
