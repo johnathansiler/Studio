@@ -20,6 +20,7 @@ import { readIdentity } from '../storage/identity'
 import { onMidiMessage } from '../midi/access'
 import { setPerformanceOwnsMidi } from '../midi/remember'
 import { useFormFactor } from './form'
+import { ChopDrawer } from './ChopDrawer'
 import { notifyKeyboard } from './keyboardStage'
 import './pads.css'
 
@@ -42,6 +43,8 @@ export function PadsPanel({
   onRecord,
   onEdit,
   onKeyboard,
+  chopStartsOpen = false,
+  vintageStartsOpen = false,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -49,6 +52,9 @@ export function PadsPanel({
   onRecord: () => void
   onEdit: (clipId: string) => void
   onKeyboard?: () => void
+  /** First paint only, so a static render can show the chop editor. */
+  chopStartsOpen?: boolean
+  vintageStartsOpen?: boolean
 }) {
   useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
   const phone = useFormFactor() === 'phone'
@@ -66,6 +72,7 @@ export function PadsPanel({
   const [stepPick, setStepPick] = useState(0)
   const [padPage, setPadPage] = useState<0 | 1>(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [chopOpen, setChopOpen] = useState(chopStartsOpen)
   const taps = useRef(emptyTap())
   const stopRec = useRef(false)
   const [padArm, setPadArm] = useState<'idle' | 'count-in' | 'recording'>('idle')
@@ -452,7 +459,9 @@ export function PadsPanel({
           >
             {BANKS.map((name, index) => <option key={name} value={index}>Kit {name}</option>)}
           </select>
+          <button type="button" className={`hw-key ch-tab${chopOpen ? ' on' : ''}`} aria-pressed={chopOpen} aria-expanded={chopOpen} onClick={() => setChopOpen((value) => !value)}>Chop</button>
         </div>
+        {chopOpen && <ChopDrawer store={store} engine={engine} trackId={trackId} vintageStartsOpen={vintageStartsOpen} />}
 
         <div className="mpc-grid-wrap">
           <div className="mpc-grid" ref={board} aria-label="Drum pads" data-pad-bank={padPage === 0 ? 'A' : 'B'}>
@@ -680,6 +689,17 @@ export function PadsPanel({
                 <input aria-label="Send" title="How much of this pad goes to the send." type="range" min={0} max={1} step={0.01} value={source.send} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { send: Number(event.target.value) })} />
               </label>
               <button type="button" className={`hw-key ch-tab${region.reverse ? ' on' : ''}`} aria-pressed={region.reverse} title="Play this pad backwards." onClick={() => store.updateTrackPad(trackId, bank, selected, { region: { ...region, reverse: !region.reverse } })}>Reverse</button>
+              <button type="button" className={`hw-key ch-tab${source.gate === 'hold' ? ' on' : ''}`} aria-pressed={source.gate === 'hold'} title="Hold follows your finger. One shot plays the slice through." onClick={() => store.updateTrackPad(trackId, bank, selected, { gate: source.gate === 'hold' ? 'shot' : 'hold' })}>{source.gate === 'hold' ? 'Hold' : 'One shot'}</button>
+              <button type="button" className={`hw-key ch-tab${source.pitchMode === 'stretch' ? ' on' : ''}`} title="Vinyl changes speed and pitch together. Stretch changes pitch and keeps the tempo." onClick={() => store.updateTrackPad(trackId, bank, selected, { pitchMode: source.pitchMode === 'stretch' ? 'vinyl' : 'stretch' })}>{source.pitchMode === 'stretch' ? 'Stretch' : 'Vinyl'}</button>
+              <label>Cents
+                <input aria-label="Pad cents" title="Fine pitch for this pad, in cents." type="range" min={-100} max={100} step={1} value={source.tuneCents ?? 0} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { tuneCents: Number(event.target.value) })} />
+              </label>
+              <label>Pad swing
+                <input aria-label="Pad swing" title="Swing for this pad. 50 is straight." type="range" min={50} max={75} step={1} value={source.swing ?? kit.swing} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { swing: Number(event.target.value) })} />
+              </label>
+              <label>High pass
+                <input aria-label="Pad high pass" title="Remove bass from this pad." type="range" min={0} max={1} step={0.01} value={source.highpass ?? 0} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { highpass: Number(event.target.value) })} />
+              </label>
               <button type="button" className={`hw-key ch-tab${region.loop ? ' on' : ''}`} aria-pressed={region.loop} title="Loop the sample window." onClick={() => store.updateTrackPad(trackId, bank, selected, { region: { ...region, loop: !region.loop } })}>Loop</button>
               <button type="button" className={`hw-key ch-tab${source.poly === 'mono' ? ' on' : ''}`} aria-pressed={source.poly === 'mono'} title="Mono retriggers this pad. Poly lets notes overlap." onClick={() => store.updateTrackPad(trackId, bank, selected, { poly: source.poly === 'mono' ? 'poly' : 'mono' })}>{source.poly === 'mono' ? 'Mono' : 'Poly'}</button>
               <label>Choke

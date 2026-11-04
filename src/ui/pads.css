@@ -108,7 +108,7 @@
 
 .mpc-banks {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(88px, 0.8fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(72px, 0.7fr) minmax(64px, 0.55fr);
   gap: 6px;
   min-width: 0;
 }
@@ -550,6 +550,83 @@
   .hw-slider { flex-direction: row; align-items: center; gap: 8px; }
   .hw-slider input { flex: 1 1 auto; }
   .hw-keys { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .mpc-banks { grid-template-columns: 160px 160px 140px; justify-content: start; }
+  .mpc-banks { grid-template-columns: 160px 160px 140px 100px; justify-content: start; }
   .mpc-tools { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
+
+.chop-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: #1a1a1a;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.55);
+}
+
+.chop-bar, .chop-key, .chop-pitch, .chop-fit, .chop-tempo, .chop-slices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.chop-anchor { position: relative; min-width: 0; }
+.chop-menu {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% - 1px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: max(100%, 220px);
+  max-width: min(360px, 100vw - 24px);
+  max-height: 280px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid #070707;
+  border-radius: 0 8px 8px 8px;
+  background: #242424;
+  box-shadow: 0 12px 20px rgba(0, 0, 0, 0.45);
+}
+.chop-menu .hw-key { width: 100%; min-height: 44px; }
+.chop-file { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.chop-readout, .chop-left, .chop-pitch p, .chop-fit p { margin: 0; font-size: 13px; }
+.chop-wave {
+  position: relative;
+  min-height: 96px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #101010;
+}
+.chop-wave canvas { width: 100%; height: 96px; display: block; }
+.chop-marker {
+  position: absolute;
+  top: 0;
+  width: 40px;
+  height: 100%;
+  margin-left: -20px;
+  border: 0;
+  background: transparent;
+}
+.chop-marker::after {
+  content: '';
+  position: absolute;
+  left: 19px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #f2f2f2;
+}
+.chop-marker.on::after { background: #f3fff6; box-shadow: 0 0 8px #9ec8ff; }
+.vintage-anchor { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.vintage-knob { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+.vintage-knob .hw-knob { width: 72px; height: 72px; }
+.vintage-menu { width: min(320px, 100%); }
+.vintage-menu p { margin: 0 0 4px; font-size: 13px; line-height: 1.35; }
+.vintage-menu label { display: flex; flex-direction: column; gap: 4px; min-height: 44px; font-size: 13px; }
+.vintage-menu label span { color: #c8c8c8; font-size: 12px; }
+.chop-sense { display: flex; align-items: center; gap: 8px; min-height: 44px; }
