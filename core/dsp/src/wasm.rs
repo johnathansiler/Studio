@@ -3,6 +3,7 @@
 
 use crate::contract::{AudioBlock, NativePlugin, EMPTY_MIDI};
 use crate::eq::EqProcessor;
+use crate::plugin::CuePlugin;
 use crate::smooth::glide_block;
 use crate::state::write_layout;
 
@@ -172,4 +173,144 @@ pub extern "C" fn ch_eq_layout(ptr: *mut WasmEq) -> u32 {
 #[no_mangle]
 pub extern "C" fn ch_glide_block(from: f64, to: f64, frames: u32, rate: f64) -> f64 {
     glide_block(from, to, frames as usize, rate)
+}
+
+struct WasmPlug {
+    cue: CuePlugin,
+    left: Vec<f32>,
+    right: Vec<f32>,
+    side: Vec<f32>,
+    state: Vec<u8>,
+    max_block: usize,
+}
+
+fn plug_mut<'a>(ptr: *mut WasmPlug) -> Option<&'a mut WasmPlug> {
+    if ptr.is_null() {
+        None
+    } else {
+        Some(unsafe { &mut *ptr })
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_plug_create(code: u32) -> *mut WasmPlug {
+    Box::into_raw(Box::new(WasmPlug {
+        cue: CuePlugin::new(code, 48_000.0),
+        left: Vec::new(),
+        right: Vec::new(),
+        side: Vec::new(),
+        state: vec![0; STATE_CAP],
+        max_block: 0,
+    }))
+}
+
+#[no_mangle]
+pub extern "C" fn ch_plug_destroy(ptr: *mut WasmPlug) {
+    if !ptr.is_null() {
+        unsafe { drop(Box::from_raw(ptr)) }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_plug_prepare(ptr: *mut WasmPlug, sample_rate: f64, max_block: u32) {
+    let Some(plugin) = plug_mut(ptr) else { return };
+    let frames = (max_block as usize).clamp(1, MAX_BLOCK);
+    plugin.left.resize(frames, 0.0);
+    plugin.right.resize(frames, 0.0);
+    plugin.side.resize(frames, 0.0);
+    if plugin.state.len() < STATE_CAP {
+        plugin.state.resize(STATE_CAP, 0);
+    }
+    plugin.max_block = frames;
+    plugin.cue.prepare(sample_rate, frames);
+}
+
+#[no_mangle]
+pub extern "C" fn ch_plug_reset(ptr: *mut WasmPlug) {
+    if let Some(plugin) = plug_mut(ptr) {
+        plugin.cue.reset();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_plug_set_param(ptr: *mut WasmPlug, param_id: u32, value: f64) {
+    if let Some(plugin) = plug_mut(ptr) {
+        plugin.cue.set_parameter(param_id, value);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_plug_get_param(ptr: *mut WasmPlug, param_id: u32) -> f64 {
+    plug_mut(ptr).map(|plugin| plugin.cue.get_parameter(param_id)).unwrap_or(0.0)
+}
+
+#[no_mangle]
+pub extern "C" fn ch_plug_latency(ptr: *mut WasmPlug) -> u32 {
+    plug_mut(ptr).map(|plugin| plugin.cue.latency_in_samples()).unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn ch_plug_set_transport(ptr: *mut WasmPlug, tempo: f64, eco: u32, offline: u32, scale_root: i32) {
+    let Some(plugin) = plug_mut(ptr) else { return };
+    plugin.cue.tempo = if tempo.is_finite() && tempo > 0.0 { tempo } else { 120.0 };
+    plugin.cue.eco = eco != 0;
+    plugin.cue.offline = offline != 0;
+    plugin.cue.scale_root = scale_root;
+}
+
+#[no_mangle]
+pub extern "C" fn ch_plug_set_scale_len(ptr: *mut WasmPlug, intervals: u32, cents: u32) {
+    let Some(plugin) = plug_mut(ptr) else { return };
+    plugin.cue.set_scale_len(intervals as usize, cents as usize);
+}
+
+#[no_mangle]
+pub extern "C" fn ch_plug_set_interval(ptr: *mut WasmPlug, index: u32, interval: i32) {
+    if let Some(plugin) = plug_mut(ptr) {
+        plugin.cue.set_interval(index as usize, interval);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_plug_set_cents(ptr: *mut WasmPlug, index: u32, cents: f64) {
+    if let Some(plugin) = plug_mut(ptr) {
+        plugin.cue.set_cents(index as usize, cents);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_plug_note(ptr: *mut WasmPlug, pitch: f64, vel: f64) {
+    if let Some(plugin) = plug_mut(ptr) {
+        plugin.cue.note(pitch, vel);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_plug_midi(ptr: *mut WasmPlug, offset: u32, pitch: f64, vel: f64) {
+    if let Some(plugin) = plug_mut(ptr) {
+        plugin.cue.push_note(offset, pitch, vel);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_plug_channel_ptr(ptr: *mut WasmPlug, channel: u32) -> *mut f32 {
+    match plug_mut(ptr) {
+        Some(plugin) if channel == 0 => plugin.left.as_mut_ptr(),
+        Some(plugin) if channel == 1 => plugin.right.as_mut_ptr(),
+        Some(plugin) => plugin.side.as_mut_ptr(),
+        None => std::ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_plug_process(ptr: *mut WasmPlug, channels: u32, frames: u32, side_frames: u32) {
+    let Some(plugin) = plug_mut(ptr) else { return };
+    let frames = (frames as usize).min(plugin.max_block);
+    if frames == 0 || plugin.left.len() < frames || plugin.right.len() < frames {
+        return;
+    }
+    plugin.cue.side_frames = if side_frames == 0 { 0 } else { frames.min(side_frames as usize) };
+    let WasmPlug { cue, left, right, side, .. } = plugin;
+    cue.process(&mut left[..frames], &mut right[..frames], &side[..frames.min(side.len())], frames);
+    let _ = channels;
 }

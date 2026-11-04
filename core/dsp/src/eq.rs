@@ -155,6 +155,13 @@ impl EqProcessor {
         self.prepared
     }
 
+    /// Use these values for the next block. The live chain already smoothed them.
+    pub fn snap_parameters(&mut self, values: &[f64]) {
+        for (index, value) in values.iter().enumerate().take(EQ_PARAMS) {
+            self.smoother.snap(index, *value);
+        }
+    }
+
     fn snap_targets(&mut self) {
         for index in 0..EQ_PARAMS {
             self.smoother.snap(index, self.smoother.target(index));

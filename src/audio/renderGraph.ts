@@ -10,6 +10,7 @@ import { createLoudness, measureLoudness, sanitize } from './plugins/dsp'
 import { sidechainMono } from './sidechain'
 import { MASTER, REMOTE } from './routing'
 import { renderInserts, type InsertClock, type InsertJob, type InsertPlugin } from './renderChain'
+import { wasmDspRequested } from './wasm/flag'
 import type { Processor } from './plugins/types'
 
 export interface GraphTrack {
@@ -173,6 +174,7 @@ export function insertJob(state: RenderState, plugins: PluginInstance[], input: 
     plugins: plugins.map(insertPlugin),
     input,
     keys: [],
+    wasmDsp: wasmDspRequested(),
   }
 }
 

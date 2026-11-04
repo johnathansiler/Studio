@@ -82,11 +82,14 @@ export interface InsertJob extends InsertClock {
   plugins: InsertPlugin[]
   input: Float32Array[]
   keys: { id: string; samples: Float32Array }[]
+  /** Set on the main thread. Workers have no `location.search`. */
+  wasmDsp?: boolean
 }
 
 export async function renderInsertJob(job: InsertJob) {
   const ids = [...new Set(job.plugins.map((plugin) => plugin.pluginId))]
   await Promise.all(ids.map((id) => loadModule(id)))
+  const flagged = await wasmProcessors(job)
   const slots: ChainSlot[] = job.plugins.map((plugin) => ({
     id: plugin.id,
     pluginId: plugin.pluginId,
@@ -95,7 +98,7 @@ export async function renderInsertJob(job: InsertJob) {
     params: { ...plugin.params },
     failed: false,
     sidechain: plugin.sidechain,
-    processor: peekModule(plugin.pluginId)?.create(job.sampleRate) ?? passthrough(),
+    processor: flagged?.(plugin.pluginId, job.sampleRate) ?? peekModule(plugin.pluginId)?.create(job.sampleRate) ?? passthrough(),
   }))
   const keys = new Map(job.keys.map((key) => [key.id, key.samples]))
   const block = 128
@@ -109,6 +112,23 @@ export async function renderInsertJob(job: InsertJob) {
     for (let i = 0; i < count; i++) out[i] = channel[offset + i] || 0
     return out
   }, pool, scratch)
+}
+
+async function wasmProcessors(job: InsertJob): Promise<((id: string, sampleRate: number) => Processor | null) | null> {
+  const host = globalThis as { __CUEHARBOR_WASM_DSP__?: boolean }
+  if (!job.wasmDsp) {
+    delete host.__CUEHARBOR_WASM_DSP__
+    return null
+  }
+  host.__CUEHARBOR_WASM_DSP__ = true
+  try {
+    const mod = await import('./plugins/createAll')
+    await mod.preloadWasmInserts()
+    return mod.createProcessor
+  } catch (error) {
+    delete host.__CUEHARBOR_WASM_DSP__
+    throw error
+  }
 }
 
 function passthrough(): Processor {

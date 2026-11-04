@@ -5,7 +5,7 @@ type FlagGlobal = typeof globalThis & {
   location?: { search?: string }
 }
 
-/** The Rust EQ stays off unless a test or the page sets this. The live graph does not read it. */
+/** The Rust insert chain stays off unless a test or the page sets `?wasmDsp=1`. */
 export function wasmDspRequested(global: FlagGlobal = globalThis as FlagGlobal): boolean {
   if (global[FLAG] === true) return true
   const search = global.location?.search

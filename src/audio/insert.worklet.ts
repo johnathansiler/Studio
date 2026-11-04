@@ -1,6 +1,6 @@
 import { prepareChainPool, preseedChain, processChain, type ChainPool, type ChainSlot, type SlotNote } from './plugins/chain'
 import { prepareAccurate, preseedAccurate, processSampleAccurate, type AccurateScratch } from './automationRender'
-import { createProcessor } from './plugins/createAll'
+import { createProcessor, preloadWasmInserts } from './plugins/createAll'
 import { projectSampleBeat } from '../model/tempoMap'
 import { valueChanges } from '../model/automation'
 import { automationAt } from './plugins/catalog'
@@ -113,6 +113,7 @@ class InsertProcessor extends AudioWorkletProcessor {
   private meterMsg: { type: 'meters'; rows: MeterRow[] } = { type: 'meters', rows: this.meterRows }
   private sincePost = 0
   private knownIds = new Set<string>()
+  private stateEpoch = 0
   private binds: PluginInstance[] = []
   private pending = new Map<string, { time: number | null; pitch: number; vel: number }[]>()
   private noteLists: SlotNote[][] = []
@@ -133,20 +134,16 @@ class InsertProcessor extends AudioWorkletProcessor {
   private onMessage(data: StateMsg | { type?: string; [key: string]: unknown }) {
     if (!data?.type) return
     if (data.type === 'state') {
-      const msg = data as unknown as StateMsg
-      this.slots = msg.slots || []
-      this.automation = msg.automation || []
-      this.tempo = msg.tempo || 120
-      this.projectRate = msg.projectRate || sampleRate
-      this.tempoMap = msg.tempoMap || []
-      this.scaleRoot = msg.scaleRoot || 0
-      this.scaleIntervals = msg.scaleIntervals?.length ? msg.scaleIntervals : this.scaleIntervals
-      this.scaleCents = msg.scaleCents
-      this.quality = msg.quality === 'eco' ? 'eco' : 'full'
-      this.playing = !!msg.playing
-      this.originTime = msg.originTime || 0
-      this.originSample = msg.originSample || 0
-      this.ensureProcs()
+      const msg = data as unknown as StateMsg & { wasmDsp?: boolean }
+      const epoch = ++this.stateEpoch
+      if (msg.wasmDsp) {
+        void this.installWasm(msg, epoch)
+        return
+      }
+      if (typeof msg.wasmDsp === 'boolean') {
+        ;(globalThis as { __CUEHARBOR_WASM_DSP__?: boolean }).__CUEHARBOR_WASM_DSP__ = false
+      }
+      this.applyState(msg)
       return
     }
     if (data.type === 'clock') {
@@ -185,6 +182,34 @@ class InsertProcessor extends AudioWorkletProcessor {
     if (data.type === 'reset' && typeof data.id === 'string') {
       this.procs.get(data.id)?.reset()
     }
+  }
+
+  /** The DSP chunk loads only for `?wasmDsp=1`. `process()` keeps the previous chain until it arrives. */
+  private async installWasm(msg: StateMsg & { wasmDsp?: boolean }, epoch: number) {
+    ;(globalThis as { __CUEHARBOR_WASM_DSP__?: boolean }).__CUEHARBOR_WASM_DSP__ = true
+    try {
+      await preloadWasmInserts()
+    } catch {
+      // TypeScript processors still build when the chunk fails.
+    }
+    if (epoch !== this.stateEpoch) return
+    this.applyState(msg)
+  }
+
+  private applyState(msg: StateMsg) {
+    this.slots = msg.slots || []
+    this.automation = msg.automation || []
+    this.tempo = msg.tempo || 120
+    this.projectRate = msg.projectRate || sampleRate
+    this.tempoMap = msg.tempoMap || []
+    this.scaleRoot = msg.scaleRoot || 0
+    this.scaleIntervals = msg.scaleIntervals?.length ? msg.scaleIntervals : this.scaleIntervals
+    this.scaleCents = msg.scaleCents
+    this.quality = msg.quality === 'eco' ? 'eco' : 'full'
+    this.playing = !!msg.playing
+    this.originTime = msg.originTime || 0
+    this.originSample = msg.originSample || 0
+    this.ensureProcs()
   }
 
   private ensureProcs() {

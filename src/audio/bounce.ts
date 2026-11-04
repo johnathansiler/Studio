@@ -1,5 +1,6 @@
 import { createPlugin } from './plugins/catalog'
 import { loadModule, peekModule } from './plugins/registry'
+import { createProcessor, preloadWasmInserts } from './plugins/createAll'
 import { type GraphTrack } from './renderGraph'
 import { renderGraphParallel } from './parallelRender'
 import { prepareClipNotes } from '../model/midiTools'
@@ -214,6 +215,7 @@ export function applyFreeze(project: Project, buffers: Map<string, AudioAsset>, 
 
 async function renderChannels(project: Project, assets: Map<string, AudioAsset>, start: number, length: number, limiter: boolean, stemId: string | null) {
   await ensurePlugins(project)
+  await preloadWasmInserts()
   const scale = tuneBlockScale(project.scale)
   const routed = routeForStem(project.tracks, stemId)
   let masterPlugins = project.masterPlugins.map(copyPlugin)
@@ -256,7 +258,7 @@ async function renderChannels(project: Project, assets: Map<string, AudioAsset>,
     scaleCents: scale.scaleCents,
     automation: project.automation,
     liveRemote: false,
-    create: (pluginId, sampleRate) => peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
+    create: (pluginId, sampleRate) => createProcessor(pluginId, sampleRate) ?? peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
   })
 }
 

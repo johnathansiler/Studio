@@ -42,6 +42,7 @@ import { ATTACK_SEC, RELEASE_SEC, builtinLevel, drumLevel, liveWhen, scheduleDel
 import { renderSamplerSpan } from './plugins/sampler'
 import { renderGraphParallel } from './parallelRender'
 import { loadModule, peekModule } from './plugins/registry'
+import { createProcessor, preloadWasmInserts } from './plugins/createAll'
 import { createLoudness, measureLoudness, type LoudnessState } from './plugins/dsp'
 import type { Processor } from './plugins/types'
 
@@ -2105,6 +2106,7 @@ export class AudioEngine {
     for (const track of project.tracks) for (const plugin of track.plugins) ids.add(plugin.pluginId)
     for (const plugin of project.masterPlugins) ids.add(plugin.pluginId)
     await Promise.all([...ids].map((id) => loadModule(id)))
+    await preloadWasmInserts()
     const scale = tuneBlockScale(project.scale)
     const graph = await renderGraphParallel({
       tracks: renderedTracks,
@@ -2119,7 +2121,7 @@ export class AudioEngine {
       scaleCents: scale.scaleCents,
       automation: project.automation,
       liveRemote: false,
-      create: (pluginId, sampleRate) => peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
+      create: (pluginId, sampleRate) => createProcessor(pluginId, sampleRate) ?? peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
     })
     return encodeWav(graph.master, rate, { dither: 'tpdf' })
   }
