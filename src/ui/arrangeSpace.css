@@ -113,6 +113,28 @@
 .pl-head .swatch { width: 6px; align-self: stretch; flex: none; }
 .pl-head .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: transparent; border: 0; font-weight: 640; padding: 0 2px; }
 .pl-head .mini { flex: none; }
+.pl-head:has(.onscreen-piano) {
+  flex-wrap: wrap;
+  align-content: center;
+  height: auto;
+  min-height: 100%;
+}
+.pl-head .onscreen-piano-slot { flex: 1 0 100%; min-width: 0; display: flex; }
+.pl-head .onscreen-piano {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  height: 40px;
+  max-width: 100%;
+  padding: 0 8px;
+}
+.pl-head .onscreen-piano svg { display: none; }
+.shell.phone .pl-head .onscreen-piano,
+.shell.fold .pl-head .onscreen-piano {
+  min-height: 44px;
+  height: 44px;
+}
 .pl-head .piano-open {
   flex: 0 0 auto;
   display: inline-flex;
@@ -288,6 +310,19 @@
 .shell.fold .arrange { grid-template-columns: 220px minmax(0, 1fr); --lane-h: 76px; }
 .shell.fold .pl-head { flex-wrap: nowrap; height: 100%; align-items: center; }
 .shell.fold .pl-head .name { flex: 1 1 72px; min-width: 56px; }
+.shell.phone .pl-head:has(.onscreen-piano),
+.shell.fold .pl-head:has(.onscreen-piano),
+.pl-head:has(.onscreen-piano) {
+  flex-wrap: wrap;
+  align-content: center;
+  height: auto;
+  min-height: 100%;
+}
+.shell.fold .head:has(.onscreen-piano),
+.shell.fold .lane:has(.onscreen-piano),
+.head:has(.onscreen-piano) {
+  overflow: hidden;
+}
 .shell.phone:not(.land) .tool-slot .timeline-tools { flex-wrap: wrap; overflow: visible; }
 .shell.phone:not(.land) .tool-strip { flex: 1 1 auto; min-width: 0; overflow: visible; }
 .shell.phone:not(.land) .tool-chip {

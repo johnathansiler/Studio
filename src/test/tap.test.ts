@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { createEmptyProject } from '../model/types'
-import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, scaleTempo, shownTempo, tempoFromTaps } from '../model/tap'
+import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, scaleTempo, shouldOpenExactTempo, shownTempo, tempoFromTaps } from '../model/tap'
 import { ProjectStore } from '../state/store'
 
 describe('tap tempo', () => {
+  it('opens exact tempo only after a lone tap, not after a tempo has been set', () => {
+    const first = pushTap(emptyTap(), 0, 'pointer')
+    expect(shouldOpenExactTempo(first)).toBe(true)
+    const second = pushTap(first.memory, 500, 'pointer')
+    expect(shouldOpenExactTempo(second)).toBe(false)
+    expect(shouldOpenExactTempo({ bpm: null, ignored: true })).toBe(false)
+    expect(shouldOpenExactTempo(null)).toBe(false)
+  })
+
   it('turns steady 500 ms taps into 120 BPM from the second tap', () => {
     let memory = emptyTap()
     let result = pushTap(memory, 0)

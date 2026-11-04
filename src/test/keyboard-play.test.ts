@@ -77,7 +77,7 @@ describe('computer keyboard', () => {
     expect(played[0]).toBe(`${midi.id}:64`)
   })
 
-  it('shows a beveled Keyboard button on the transport for every screen', () => {
+  it('keeps the on-screen piano off the transport', () => {
     const store = new ProjectStore(createEmptyProject())
     store.keyboardMidi = true
     const engine = {
@@ -89,16 +89,15 @@ describe('computer keyboard', () => {
     const html = renderToStaticMarkup(createElement(TransportBar, {
       store,
       engine,
+      simple: true,
       onPlay() {},
       onStop() {},
       onRecord() {},
       onSeek() {},
     }))
-    expect(html).toContain('keyboard-toggle on')
-    expect(html).toContain('>Keyboard<')
-    expect(html).toContain('aria-pressed="true"')
-    store.keyboardMidi = false
-    const off = renderToStaticMarkup(createElement(TransportBar, {
+    expect(html).not.toContain('keyboard-toggle')
+    expect(html).not.toContain('On-screen Piano')
+    const desk = renderToStaticMarkup(createElement(TransportBar, {
       store,
       engine,
       onPlay() {},
@@ -106,8 +105,8 @@ describe('computer keyboard', () => {
       onRecord() {},
       onSeek() {},
     }))
-    expect(off).toContain('keyboard-toggle')
-    expect(off).toContain('aria-pressed="false"')
+    expect(desk).not.toContain('keyboard-toggle')
+    expect(desk).not.toContain('>Keyboard<')
   })
 })
 

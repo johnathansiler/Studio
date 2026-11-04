@@ -25,6 +25,7 @@ import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
 import { shouldCountIn } from './model/sessionInteract'
 import { editorForGesture, releaseKeyboardForPiano } from './model/editorOpen'
+import { shouldCloseOnscreenPiano } from './model/onscreenPiano'
 import { armedRecordPlan, homeSample, playPress, playStartsCapture, recordPress, stopPress } from './model/transport'
 import { keepLandscapeAfterClose } from './ui/keyboardStage'
 import { countInAt, meterAtSample, projectSampleBeat, tempoAtSample } from './model/tempoMap'
@@ -1640,6 +1641,14 @@ async function importDropped(files: FileList) {
     setPianoHider(() => setPianoOpen(false))
     return () => setPianoHider(null)
   }, [])
+
+  useEffect(() => {
+    const track = store.project.tracks.find((item) => item.id === store.selectedTrackId)
+    if (!shouldCloseOnscreenPiano(track, store.keyboardMidi)) return
+    store.clearKeyboardReturn()
+    store.setKeyboardMidi(false)
+    notifyKeyboard(false)
+  }, [store, version])
 
   useEffect(() => {
     if (keysFromClick.current) {

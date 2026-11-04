@@ -35,7 +35,7 @@ export const TRANSPORT_COPY: Copy[] = [
   { id: 'click', label: 'Click', hint: 'Metronome while you play and record.' },
   { id: 'count-in', label: 'Count-in', hint: 'Count one bar before recording starts.' },
   { id: 'loop', label: 'Loop', hint: 'Repeat the highlighted region. Drag its edges to change the length.' },
-  { id: 'tempo', label: 'Tempo', hint: 'Type a tempo, or drag, scroll, or press the arrow keys.' },
+  { id: 'tempo', label: 'Tempo', hint: 'Tap to set tempo. Pause after one tap to type an exact tempo. Scroll or the arrow keys nudge it.' },
   { id: 'tap', label: 'Tap', hint: 'Tap in time. The tempo follows your taps.' },
   { id: 'click', label: 'Click', hint: 'Metronome while you play and record.' },
   { id: 'count-in', label: 'Count', hint: 'Count off, one bar, or two bars before play and record.' },

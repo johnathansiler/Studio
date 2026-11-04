@@ -142,14 +142,14 @@ export function KeyboardToggle({
 }: {
   store: ProjectStore
   engine: AudioEngine
-  /** Visible name. The phone drawer uses a full phrase for the same control. */
+  /** Visible name. The track header and the note editor use a full phrase. */
   word?: string
   hint?: string
 }) {
   return (
     <button
       type="button"
-      className={`keyboard-toggle${store.keyboardMidi ? ' on' : ''}`}
+      className={`keyboard-toggle onscreen-piano${store.keyboardMidi ? ' on' : ''}`}
       aria-pressed={store.keyboardMidi}
       aria-label={`${word}. ${hint}`}
       title={hint}
@@ -187,7 +187,12 @@ export function EditorPinned({
           Close
         </button>
       )}
-      <KeyboardToggle store={store} engine={engine} />
+      <KeyboardToggle
+        store={store}
+        engine={engine}
+        word="On-screen Piano"
+        hint="Show the on-screen piano for this track. Edit Notes brings the note editor back."
+      />
     </div>
   )
 }

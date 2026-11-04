@@ -3842,71 +3842,91 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   min-width: 0;
 }
 .transport.simple .t-main .t-btn,
-.transport.simple .t-main .bpm-readout {
+.transport.simple .t-main .bpm-readout,
+.transport.simple .t-main .tempo-cluster {
   flex: 1 1 0;
   width: auto;
   min-width: 0;
-  height: 44px;
-  min-height: 44px;
-  max-height: none;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
   padding: 0 4px;
-  font-size: 13px;
+  font-size: 12px;
 }
-.transport.simple .t-main .bpm-readout { flex: 1.15 1 0; min-width: 52px; }
+.transport.simple .t-main .tempo-cluster { flex: 1.15 1 0; min-width: 48px; display: flex; padding: 0; }
+.transport.simple .t-main .tempo-cluster .bpm-readout { flex: 1 1 auto; width: 100%; min-width: 0; height: 40px; max-height: 40px; }
+.bpm-readout.tempo-tap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-weight: 680;
+}
+.bpm-readout.tempo-tap.flash {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
 .transport.simple .t-main .t-word { font-size: 12px; }
 .transport.simple .sync-pill { flex: 1 0 100%; }
 .transport-drawer {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  align-content: flex-start;
+  gap: 4px;
   width: 100%;
   flex: 1 0 100%;
   min-width: 0;
 }
 .transport-drawer[hidden] { display: none !important; }
 .transport-drawer .t-btn,
-.transport-drawer .tap-tempo,
-.transport-drawer .keyboard-toggle,
-.transport-drawer .lcd {
-  min-height: 44px;
-  height: auto;
+.transport-drawer .loop-combo,
+.transport-drawer .metro-combo,
+.transport-drawer .reset,
+.transport-drawer .cap-btn {
+  flex: 0 1 auto;
+  width: auto;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  padding: 0 8px;
+  font-size: 12px;
 }
-.transport-drawer .loop-combo { flex: 1 1 100%; min-width: 0; }
-.transport-drawer .loop-combo .t-btn.loop { flex: 1 1 auto; }
+.transport-drawer .loop-combo { min-width: 0; }
+.transport-drawer .loop-combo .t-btn { height: 40px; min-height: 40px; max-height: 40px; padding: 0 8px; font-size: 12px; }
 .transport-drawer .metro-combo {
   display: flex;
-  flex: 1 1 100%;
-  min-width: 0;
+  width: auto;
   gap: 4px;
-}
-.transport-drawer .metro-combo .t-btn { flex: 1 1 0; min-width: 0; min-height: 44px; height: 44px; }
-.transport-drawer .tap-tempo,
-.transport-drawer .reset,
-.transport-drawer .keyboard-toggle {
-  flex: 1 1 calc(50% - 6px);
-  min-width: 40px;
-  min-height: 44px;
-  height: 44px;
-}
-.transport-drawer .lcd { flex: 1 1 100%; min-width: 0; overflow: visible; }
-.transport-drawer .transport-more-extra,
-.transport-drawer .arrange-panels {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  width: 100%;
-  flex: 1 0 100%;
-  min-width: 0;
-  margin: 0;
   padding: 0;
 }
-.transport-drawer .cap-btn {
-  flex: 1 1 calc(50% - 6px);
-  min-height: 44px;
-  height: auto;
+.transport-drawer .metro-combo .t-btn { flex: 0 1 auto; width: auto; height: 40px; min-height: 40px; max-height: 40px; padding: 0 8px; }
+.transport-drawer .lcd {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1 0 100%;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 22px;
+  max-height: 22px;
+  padding: 0 2px;
+  overflow: hidden;
 }
-.transport-drawer .cap-btn small { display: block; font-size: 11px; }
+.transport-drawer .lcd .bars,
+.transport-drawer .lcd .tc { display: inline; font-size: 12px; line-height: 22px; white-space: nowrap; }
+.transport-drawer .transport-more-extra,
+.transport-drawer .arrange-panels {
+  display: contents;
+}
+.transport-drawer .cap-btn {
+  flex-direction: row;
+  gap: 4px;
+}
+.transport-drawer .cap-btn small { display: none; }
 .shell.phone:not(.land) .tool-slot:has(.command-strip.tucked) {
   display: block;
   height: auto;
@@ -3916,9 +3936,11 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   padding: 4px 6px 6px;
 }
 .shell.phone:not(.land) .transport.simple .transport-drawer .lcd {
-  order: 0;
-  flex: 1 1 100%;
+  order: 8;
+  flex: 1 0 100%;
   min-width: 0;
+  height: 22px;
+  max-height: 22px;
 }
 .shell.phone:not(.land) .command-strip.tucked {
   display: flex;
@@ -3960,13 +3982,25 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   width: auto;
   min-width: 0;
   max-width: none;
-  height: 44px;
-  min-height: 44px;
-  max-height: none;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
   padding: 0 4px;
 }
-.shell.phone:not(.land) .command-strip.tucked .tool-label { font-size: 12px; }
+.shell.phone:not(.land) .command-strip.tucked .tool-label { font-size: 11px; }
 .shell.phone:not(.land) .command-strip.tucked .inline-choices button {
-  min-height: 44px;
-  height: 44px;
+  min-height: 40px;
+  height: 40px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+.shell.phone:not(.land) .transport.simple .t-main .t-btn,
+.shell.phone:not(.land) .transport.simple .t-main .bpm-readout,
+.shell.phone:not(.land) .transport.simple .t-main .tempo-cluster,
+.shell.phone:not(.land) .transport.simple .transport-drawer .t-btn,
+.shell.phone:not(.land) .transport.simple .transport-drawer .loop-combo,
+.shell.phone:not(.land) .transport.simple .transport-drawer .cap-btn {
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
 }

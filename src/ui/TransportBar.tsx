@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { formatLoopReadout } from '../model/loopEdit'
-import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, type TapMemory, type TapSource } from '../model/tap'
+import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, shouldOpenExactTempo, type TapMemory, type TapSource } from '../model/tap'
 import { formatMapBars, projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import { countInBarsOf, countInCaption, formatTimecode, quartersPerBar } from '../model/time'
 import { recordButtonOn } from '../model/transport'
@@ -11,7 +11,6 @@ import type { AssetStatus } from '../remote/assets'
 import { AutomationFollow } from './AutomationLane'
 import { AssetTransfers } from './AssetTransfers'
 import { TRANSPORT_COPY, copyOf } from './chrome'
-import { KeyboardToggle } from './KeyboardDock'
 import { TipButton } from './Hint'
 import './loopRegion.css'
 import './remoteFixes.css'
@@ -80,9 +79,11 @@ export function TransportBar({
   const flashTimer = useRef(0)
   const [moreOpen, setMoreOpen] = useState(false)
   const [lengthOpen, setLengthOpen] = useState(false)
+  const [editingTempo, setEditingTempo] = useState(false)
+  const editTimer = useRef(0)
+  const tempoWrap = useRef<HTMLDivElement>(null)
   const tempo = live ?? project.tempo
   const tempoCopy = copyOf(TRANSPORT_COPY, 'tempo')
-  const tapCopy = copyOf(TRANSPORT_COPY, 'tap')
 
   useEffect(
     () =>
@@ -178,11 +179,19 @@ export function TransportBar({
 
   useEffect(() => () => {
     window.clearTimeout(flashTimer.current)
+    window.clearTimeout(editTimer.current)
     store.endTempoGroup()
   }, [store])
 
   useEffect(() => {
+    if (!editingTempo) return
     const node = fieldRef.current
+    node?.focus()
+    node?.select()
+  }, [editingTempo])
+
+  useEffect(() => {
+    const node = tempoWrap.current
     if (!node) return
     const onWheel = (event: WheelEvent) => {
       if (store.remoteFollow) return
@@ -251,8 +260,14 @@ export function TransportBar({
   const resetCopy = transport('reset')
   const loopRead = formatLoopReadout(project, project.loopStartSample, project.loopEndSample)
   const inSession = roomRole === 'host' || roomRole === 'guest'
-  const moreHint = 'Metronome, tap tempo, loop, reset, on-screen piano, playhead, and sounds.'
-  const tempoField = (
+  const moreHint = 'Metronome, loop, reset, playhead, and sounds.'
+  function armExactTempo(result: { bpm: number | null; ignored: boolean } | null) {
+    window.clearTimeout(editTimer.current)
+    if (!shouldOpenExactTempo(result) || store.remoteFollow) return
+    editTimer.current = window.setTimeout(() => setEditingTempo(true), 1500)
+  }
+  const tempoLabel = `${tempoCopy.label}. Tap to set tempo. ${tempoCopy.hint}`
+  const tempoField = editingTempo ? (
         <input
           ref={fieldRef}
           className="bpm-readout"
@@ -262,7 +277,7 @@ export function TransportBar({
           max={300}
           step={0.1}
           title={tempoCopy.hint}
-          aria-label={`${tempoCopy.label}. ${tempoCopy.hint}`}
+          aria-label={`${tempoCopy.label}. Type an exact tempo.`}
           disabled={store.remoteFollow}
           value={draft ?? formatTempo(tempo)}
           onFocus={(event) => {
@@ -278,7 +293,10 @@ export function TransportBar({
             draftRef.current = event.currentTarget.value
             setDraft(event.currentTarget.value)
           }}
-          onBlur={(event) => commitDraft(event.currentTarget.value)}
+          onBlur={(event) => {
+            commitDraft(event.currentTarget.value)
+            setEditingTempo(false)
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.currentTarget.blur()
@@ -294,16 +312,18 @@ export function TransportBar({
           onPointerUp={onTempoPointerUp}
           onPointerCancel={onTempoPointerUp}
         />
-  )
-  const tapButton = (
+  ) : (
         <button
           type="button"
-          className={`tap-tempo${flash ? ' on' : ''}`}
-          title={tapCopy.hint}
-          aria-label={`${tapCopy.label}. ${tapCopy.hint}`}
+          className={`bpm-readout tempo-tap${flash ? ' flash' : ''}`}
+          title="Tap to set tempo. Pause after one tap to type an exact tempo."
+          aria-label={tempoLabel}
           disabled={store.remoteFollow}
           onKeyDown={(event) => {
-            if (event.key === ' ' || event.key === 'Enter') event.stopPropagation()
+            if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+            event.preventDefault()
+            const delta = (event.shiftKey ? 1 : 0.1) * (event.key === 'ArrowUp' ? 1 : -1)
+            bump(delta)
           }}
           onPointerDown={(event) => {
             if (event.button !== 0 || store.remoteFollow) return
@@ -314,7 +334,7 @@ export function TransportBar({
               /* The pointer can already be gone. */
             }
             pulse()
-            applyTap(performance.now(), 'pointer')
+            armExactTempo(applyTap(performance.now(), 'pointer'))
           }}
           onPointerUp={() => {
             memory.current = noteTapRelease(memory.current, performance.now())
@@ -322,12 +342,8 @@ export function TransportBar({
           onPointerCancel={() => {
             memory.current = noteTapRelease(memory.current, performance.now())
           }}
-          onClick={() => {
-            const result = applyTap(performance.now(), 'click')
-            if (result && !result.ignored) pulse()
-          }}
         >
-          Tap
+          {formatTempo(tempo)}
         </button>
   )
   const loopControl = (
@@ -454,7 +470,7 @@ export function TransportBar({
             <TipButton className={`t-btn rec ${recordButtonOn(status) ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={recordButtonOn(status)} onPress={() => engine.unlock()} onClick={onRecord}>
               <span className="t-word">Record</span>
             </TipButton>
-            {tempoField}
+            <div className="tempo-cluster" ref={tempoWrap}>{tempoField}</div>
             <button
               type="button"
               className={`t-btn more${moreOpen ? ' on' : ''}`}
@@ -473,9 +489,7 @@ export function TransportBar({
               {clickButton}
               {countButton}
             </div>
-            {tapButton}
             {resetButton}
-            <KeyboardToggle store={store} engine={engine} word="On-screen Piano" hint="Show or hide the on-screen piano. Play notes on the keys." />
             {positionReadout}
             <div id="transport-more-extra" className="transport-more-extra" />
           </div>
@@ -498,12 +512,10 @@ export function TransportBar({
         {clickButton}
         {countButton}
         {resetButton}
-        <KeyboardToggle store={store} engine={engine} />
       </div>
       {positionReadout}
-      <div className="tempo-cluster" role="group" aria-label="Tempo">
+      <div className="tempo-cluster" role="group" aria-label="Tempo" ref={tempoWrap}>
         {tempoField}
-        {tapButton}
       </div>
       {loopControl}
       </>
