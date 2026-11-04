@@ -11,7 +11,7 @@ import { ProjectStore } from '../state/store'
 import { MixerView } from '../ui/MixerView'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-const css = ['src/styles.css', 'src/ui/premium.css', 'src/ui/kit/kit.css', 'src/ui/automation.css', 'src/ui/remoteFixes.css']
+const css = ['src/styles.css', 'src/ui/premium.css', 'src/ui/kit/kit.css', 'src/ui/automation.css', 'src/ui/remoteFixes.css', 'src/ui/mixer.css']
   .map((file) => readFileSync(resolve(root, file), 'utf8'))
   .join('\n')
 
@@ -91,7 +91,7 @@ async function measure(width: number, height: number, shell: string, layout: { s
             vertical: fader.classList.contains('vertical'),
             db,
             mode,
-            tuneInside: !tuneBox || (tuneBox.left >= box.left - 1 && tuneBox.right <= box.right + 1 && tuneBox.height >= 40),
+            tuneInside: !tuneBox || tuneBox.height < 1 || (tuneBox.left >= box.left - 1 && tuneBox.right <= box.right + 1 && tuneBox.height >= 40),
             ratio: faderBox.height / box.height,
           }
         }),

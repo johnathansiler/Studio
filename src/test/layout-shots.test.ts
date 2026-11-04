@@ -19,6 +19,7 @@ const css = [
   'src/ui/premium.css',
   'src/ui/kit/kit.css',
   'src/ui/automation.css',
+  'src/ui/mixer.css',
   'src/ui/arrangeSpace.css',
   'src/ui/channel-rack.css',
   'src/ui/sessionLive.css',

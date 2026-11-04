@@ -225,8 +225,8 @@ describe('phone fit at 412x915', () => {
             safeShown: getComputedStyle(safeButton.querySelector('.arm-full') as HTMLElement).display,
             safeIn: safeBox.top >= host.top - 1 && safeBox.bottom <= Math.min(host.bottom, window.innerHeight) + 1 && safeBox.height >= 40,
             armIn: armBox.top >= host.top - 1 && armBox.bottom <= Math.min(host.bottom, window.innerHeight) + 1 && armBox.height >= 40,
-            masterWidth: master.getBoundingClientRect().width,
-            stripWidth: strip.getBoundingClientRect().width,
+            masterWidth: (master.querySelector('.strip-col') as HTMLElement | null ?? master).getBoundingClientRect().width,
+            stripWidth: (strip.querySelector('.strip-col') as HTMLElement | null ?? strip).getBoundingClientRect().width,
             view: window.innerHeight,
           }
         })
@@ -320,8 +320,8 @@ describe('phone fit at 412x915', () => {
             safe: safe.querySelector('.arm-full')?.textContent,
             height: box.height,
             inView: box.top >= 0 && box.bottom <= window.innerHeight + 1,
-            masterWidth: master.getBoundingClientRect().width,
-            stripWidth: strip.getBoundingClientRect().width,
+            masterWidth: (master.querySelector('.strip-col') as HTMLElement | null ?? master).getBoundingClientRect().width,
+            stripWidth: (strip.querySelector('.strip-col') as HTMLElement | null ?? strip).getBoundingClientRect().width,
           }
         })
         expect(foldMix.safe).toBe('Safe')
