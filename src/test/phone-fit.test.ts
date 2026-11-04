@@ -74,7 +74,7 @@ describe('phone fit at 412x915', () => {
         const loop = await page.locator('.t-btn.loop .t-word').boundingBox()
         expect(loop).toBeTruthy()
         expect(loop!.x + loop!.width).toBeLessThanOrEqual(412 + 1)
-        await page.locator('.transport').getByRole('button', { name: /^Menu/ }).click()
+        await page.keyboard.press('Escape')
         expect(timeline.names.map((item) => item.value)).toEqual(['Vocal', 'Music', 'Keys'])
         for (const name of timeline.names) {
           expect(name.width, name.value).toBeGreaterThan(48)

@@ -90,7 +90,13 @@ function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup
         aria-expanded={setupOpen}
         aria-controls="arrange-setup"
         title="Song. Automation write mode, recording, and markers."
-        onClick={onSetup}
+        onClick={(event) => {
+          const opening = !setupOpen
+          onSetup()
+          if (opening && event.currentTarget.closest('#transport-menu, .transport-drawer')) {
+            document.dispatchEvent(new CustomEvent('cueharbor-close-transport-menu'))
+          }
+        }}
       >
         <strong>Song</strong>
         <small>Record and markers</small>
@@ -745,6 +751,10 @@ export function ArrangeView({
         </>
       )}
       <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'}>
+      <div className="heads-col">
+      <div className="arrange-add">
+        <AddTrackButton store={store} prominent onAdded={onTrackAdded} />
+      </div>
       <div
         className="heads"
         ref={headsRef}
@@ -755,9 +765,6 @@ export function ArrangeView({
           body.scrollTop += event.deltaY
         }}
       >
-        <div className="arrange-add">
-          <AddTrackButton store={store} prominent onAdded={onTrackAdded} />
-        </div>
         <div className="ruler-gap loop-gap">
           <SongMapHead store={store} position={position} compact />
         </div>
@@ -828,6 +835,9 @@ export function ArrangeView({
           </div>
         ))}
       </div>
+      </div>
+      <div className="timeline-col">
+      <div className="timeline-add-spacer" aria-hidden="true" />
       <div
         className="timeline-scroll"
         ref={scroller}
@@ -847,7 +857,6 @@ export function ArrangeView({
         }}
       >
         <div className="timeline-inner" ref={innerRef} data-px={px} style={{ width }}>
-          <div className="timeline-add-spacer" aria-hidden="true" />
           <SongMap store={store} px={px} width={width} onSeek={onSeek} />
           <div className="ruler" style={laneGrid ?? undefined}>
             {paint.hint && <em className="grid-hint" role="status">{paint.hint}</em>}
@@ -1142,6 +1151,7 @@ export function ArrangeView({
         </div>
       </div>
       </div>
+      </div>
       {pluginsOpen && <PluginsDrawer store={store} place={phone ? 'bottom' : 'side'} menuOpen={pluginsMenu} onClose={() => setPluginsOpen(false)} />}
       </div>
       <AnchoredMenu
@@ -1159,7 +1169,7 @@ export function ArrangeView({
       {store.clipSheet && selected ? (
         <ClipSheet store={store} trackId={selected.track.id} clip={selected.clip} onClose={() => store.closeClipSheet()} />
       ) : null}
-      <AnchoredMenu open={!!sheetTrack} onClose={() => setTrackSheet(null)} label={sheetTrack?.name ?? 'Track'} trigger={trackAnchor} prefer="down">
+      <AnchoredMenu fill open={!!sheetTrack} onClose={() => setTrackSheet(null)} label={sheetTrack?.name ?? 'Track'} trigger={trackAnchor} prefer="down">
         {sheetTrack && (
         <>
           <SheetRow

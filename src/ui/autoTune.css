@@ -286,7 +286,17 @@
   font-weight: 600;
   font-size: 13px;
 }
-.tune-step button, .tune-ref button { width: 40px; min-width: 40px; padding: 0; }
+.shell .tune-step button,
+.shell .tune-ref button,
+.tune-step button,
+.tune-ref button {
+  flex: 0 0 40px;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+}
 
 .tune-notes {
   display: flex;

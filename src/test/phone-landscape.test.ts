@@ -71,7 +71,7 @@ describe('phone landscape compaction', () => {
   it('leaves most of 844x390 and 915x412 for the timeline', () => {
     for (const viewport of PHONE_LAND_VIEWPORTS) {
       expect(phoneLandscape(viewport.width, viewport.height)).toBe(true)
-      expect(landscapeWorkShare(viewport.height)).toBeGreaterThan(0.7)
+      expect(landscapeWorkShare(viewport.height)).toBeGreaterThan(0.6)
     }
     expect(PHONE_LAND_SHEET).toBeLessThanOrEqual(0.3)
   })
@@ -147,11 +147,13 @@ describe('phone landscape compaction', () => {
         }
         expect(box.viewportHeight).toBe(viewport.height)
         expect(box.top).toBeLessThanOrEqual(48)
-        expect(box.transport).toBeLessThanOrEqual(34)
-        expect(box.tools).toBeLessThanOrEqual(30)
-        expect(box.play).toBeLessThanOrEqual(32)
-        expect(box.work / box.viewportHeight).toBeGreaterThan(0.7)
-        expect(box.timeline / box.viewportHeight).toBeGreaterThan(0.7)
+        expect(box.top).toBeGreaterThanOrEqual(40)
+        expect(box.transport).toBeGreaterThanOrEqual(40)
+        expect(box.transport).toBeLessThanOrEqual(44)
+        expect(box.tools).toBeGreaterThanOrEqual(40)
+        expect(box.play).toBeGreaterThanOrEqual(40)
+        expect(box.work / box.viewportHeight).toBeGreaterThan(0.55)
+        expect(box.timeline / box.viewportHeight).toBeGreaterThan(0.55)
         expect(box.sheet / box.viewportHeight).toBeLessThanOrEqual(PHONE_LAND_SHEET + 0.02)
         await page.evaluate(() => document.getElementById('tool-slot')?.remove())
         const mixer = await page.evaluate(() => ({

@@ -139,7 +139,10 @@
 }
 .guide-scrim {
   position: fixed;
-  inset: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: var(--view-tabs-bottom, 48px);
   z-index: 210;
   border: 0;
   padding: 0;

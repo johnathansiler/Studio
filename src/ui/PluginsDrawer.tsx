@@ -132,12 +132,12 @@ export function PluginsDrawerView({
       data-screen-overlay=""
       aria-label={track ? `Plugins on ${track.name}` : 'Plugins'}
     >
+      <header className="plugins-drawer-head">
+        <strong>Plugins</strong>
+        <span>{track ? track.name : 'No track'}</span>
+        {onClose && <button type="button" className="overlay-close" onClick={onClose}>Close</button>}
+      </header>
       <div className="plugins-drawer-body">
-        <header className="plugins-drawer-head">
-          <strong>Plugins</strong>
-          <span>{track ? track.name : 'No track'}</span>
-          {onClose && <button type="button" className="overlay-close" onClick={onClose}>Close</button>}
-        </header>
         <p className="plugins-drawer-note">
           {track ? `${track.name}. In the order sound passes through.` : 'Tap a track header to load its plugins.'}
         </p>
@@ -168,6 +168,10 @@ export function PluginsDrawerView({
                     onClick={() => {
                       addInsert(store, track.id, item.id)
                       onMenu(false)
+                      const landed = store.track(track.id)?.plugins.some((plugin) => plugin.pluginId === item.id)
+                      if (landed) return
+                      const host = store.project.tracks.find((candidate) => candidate.plugins.some((plugin) => plugin.pluginId === item.id))
+                      if (host && host.id !== track.id) store.selectTrack(host.id)
                     }}
                   >
                     <strong>{item.name}</strong>

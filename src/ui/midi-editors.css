@@ -41,15 +41,16 @@
   background: #101714;
 }
 .me-modes button, .me-bar button, .me-bar select {
-  height: 28px;
-  min-height: 28px;
+  height: 40px;
+  min-height: 40px;
+  min-width: 40px;
   border: 0;
   border-bottom: 1px solid var(--line);
   background: transparent;
   color: var(--text);
   border-radius: 0;
-  padding: 0 8px;
-  font-size: 12px;
+  padding: 0 10px;
+  font-size: 13px;
   flex: 0 0 auto;
 }
 .me-modes button.on, .me-bar button.on { color: var(--accent); border-bottom-color: var(--accent); }
@@ -157,8 +158,8 @@
 .shell.phone .me-modes button,
 .shell.phone .me-bar button,
 .shell.phone .me-bar select,
-.shell.phone .me-cell,
-.shell.phone .step-piano .white { min-height: 36px; }
+.shell.phone .step-piano .white { min-height: 40px; min-width: 40px; }
+.shell.phone .me-cell { min-height: 36px; }
 .shell.phone .me-cell { width: 28px; height: 28px; flex-basis: 28px; }
 .shell.fold .me-modes button,
 .shell.fold .me-bar button { min-height: 40px; }
