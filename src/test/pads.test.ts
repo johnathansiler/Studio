@@ -19,6 +19,7 @@ import {
   shortPadName,
   swingPercent,
 } from '../instruments/pads/record'
+import { BeatRepeat } from '../model/beatRepeat'
 import { createKit } from '../model/padMachine'
 import { browserGroup } from '../model/sessionBoard'
 import { createEmptyProject } from '../model/types'
@@ -50,7 +51,9 @@ describe('pads drum machine', () => {
       { pitch: 38, startBeat: 1, durationBeats: 0.2, velocity: 0.8 },
       { pitch: 42, startBeat: 1.5, durationBeats: 0.1, velocity: 0.6 },
     ])
+    store.finishPadRecord(4)
     const clip = store.track(id)!.midiClips.find((item) => item.name === 'Beat Machine')!
+    expect(clip.startBeat).toBeCloseTo(0)
     expect(clip.durationBeats).toBeCloseTo(4)
     expect(clip.notes.map((note) => note.pitch)).toEqual([36, 38, 42])
     expect(clip.notes.map((note) => note.startBeat)).toEqual([0, 1, 1.5])
@@ -70,12 +73,66 @@ describe('pads drum machine', () => {
       { pitch: 36, startBeat: 6, durationBeats: 0.2, velocity: 0.8 },
     ])
     const notes = store.track(id)!.midiClips[0].notes
+    expect(store.track(id)!.midiClips).toHaveLength(1)
     expect(notes).toHaveLength(3)
     expect(notes.map((note) => note.pitch)).toEqual([36, 38, 36])
-    expect(notes[1].startBeat).toBeCloseTo(0.5)
-    expect(notes[2].startBeat).toBeCloseTo(2)
-    const replaced = recordPadHits(notes.map((note) => ({ startBeat: note.startBeat })), [{ startBeat: 1 }], 'replace', 0, 4)
-    expect(replaced.map((note) => note.startBeat)).toEqual([1])
+    expect(notes[1].startBeat).toBeCloseTo(4.5)
+    expect(notes[2].startBeat).toBeCloseTo(6)
+    expect(notes[0].startBeat).toBeCloseTo(0)
+    const replaced = recordPadHits([{ startBeat: 0 }, { startBeat: 2 }, { startBeat: 5 }], [{ startBeat: 1 }], 'replace', 0, 4)
+    expect(replaced.map((note) => note.startBeat)).toEqual([5, 1])
+  })
+
+  it('records each Note Repeat hit, merges an overdub, and does not copy the take into the pattern', () => {
+    const store = new ProjectStore(createEmptyProject())
+    const id = store.project.tracks.find((track) => track.type === 'midi')!.id
+    store.insertPads(id)
+    store.updateTrack(id, { armed: true })
+    store.armPadRecord(id, 0)
+    const one = heldRepeats([36], 4)
+    expect(one).toHaveLength(16)
+    store.commitPadHits(id, one)
+    store.finishPadRecord(4)
+    const clip = store.track(id)!.midiClips.find((item) => item.name === 'Beat Machine')!
+    expect(clip.notes).toHaveLength(16)
+    expect(clip.notes.map((note) => Number(note.startBeat.toFixed(4)))).toEqual(one.map((note) => Number(note.startBeat.toFixed(4))))
+    expect(new Set(clip.notes.map((note) => note.startBeat)).size).toBe(16)
+    expect(clip.notes.every((note) => note.pitch === 36)).toBe(true)
+    expect(clip.notes[0].velocity).toBeCloseTo(one[0].velocity)
+    expect(clip.durationBeats).toBeCloseTo(4)
+    expect(store.trackKit(id).sequences.flatMap((sequence) => sequence.notes)).toEqual([])
+
+    store.armPadRecord(id, 0)
+    store.commitPadHits(id, [{ pitch: 38, startBeat: 0.5, durationBeats: 0.2, velocity: 0.55 }])
+    expect(store.track(id)!.midiClips).toHaveLength(1)
+    expect(store.track(id)!.midiClips[0].notes).toHaveLength(17)
+    expect(store.track(id)!.midiClips[0].notes.some((note) => note.pitch === 36 && note.startBeat === 0)).toBe(true)
+    expect(store.track(id)!.midiClips[0].notes.some((note) => note.pitch === 38 && Math.abs(note.startBeat - 0.5) < 1e-6)).toBe(true)
+
+    const raw = new ProjectStore(createEmptyProject())
+    const rawId = raw.project.tracks.find((track) => track.type === 'midi')!.id
+    raw.insertPads(rawId)
+    raw.armPadRecord(rawId, 1.1)
+    raw.commitPadHits(rawId, [{ pitch: 36, startBeat: 1.37, durationBeats: 0.2, velocity: 0.42 }])
+    const placed = raw.track(rawId)!.midiClips[0].notes[0]
+    expect(raw.track(rawId)!.midiClips[0].startBeat).toBeCloseTo(1.1)
+    expect(placed.startBeat).toBeCloseTo(0.27)
+    expect(placed.velocity).toBeCloseTo(0.42)
+
+    const both = new ProjectStore(createEmptyProject())
+    const bothId = both.project.tracks.find((track) => track.type === 'midi')!.id
+    both.insertPads(bothId)
+    both.armPadRecord(bothId, 0)
+    const pair = heldRepeats([36, 38], 4)
+    expect(pair.filter((note) => note.pitch === 36)).toHaveLength(16)
+    expect(pair.filter((note) => note.pitch === 38)).toHaveLength(16)
+    both.commitPadHits(bothId, pair)
+    both.finishPadRecord(4)
+    const recorded = both.track(bothId)!.midiClips[0]
+    expect(recorded.notes).toHaveLength(32)
+    expect(recorded.notes.filter((note) => note.pitch === 36)).toHaveLength(16)
+    expect(recorded.notes.filter((note) => note.pitch === 38)).toHaveLength(16)
+    expect(both.trackKit(bothId).sequences.flatMap((sequence) => sequence.notes)).toEqual([])
   })
 
   it('quantizes with MPC swing and leaves timing alone when quantize is off', () => {
@@ -230,3 +287,25 @@ describe('pads drum machine', () => {
     expect(store.track(made[0])?.name).toBe('Beat Machine 1')
   })
 })
+
+/** One bar of free 1/16 repeats, the hits a held pad would print. */
+function heldRepeats(pitches: number[], untilBeat: number) {
+  const tempo = 120
+  const clock = { originContext: 0, originBeat: 0, tempo, sampleRate: 48000, free: true as const }
+  const beat = new BeatRepeat()
+  for (const pitch of pitches) beat.arm({ pitch, velocity: 0.8, fromBeat: 0, interval: 0.25, swing: 50, free: true })
+  const hits: { pitch: number; startBeat: number; durationBeats: number; velocity: number }[] = []
+  const seconds = (untilBeat * 60) / tempo
+  for (let now = 0; now <= seconds + 0.02; now += 0.01) {
+    for (const hit of beat.take(clock, now, now + 0.01).record) {
+      hits.push({ pitch: hit.pitch, startBeat: hit.beat, durationBeats: hit.durationBeats, velocity: hit.velocity })
+    }
+  }
+  for (const pitch of pitches) beat.release(pitch, untilBeat)
+  for (const hit of beat.take(clock, seconds + 0.02, seconds + 0.2).record) {
+    hits.push({ pitch: hit.pitch, startBeat: hit.beat, durationBeats: hit.durationBeats, velocity: hit.velocity })
+  }
+  return hits
+    .filter((hit) => hit.startBeat < untilBeat - 1e-6)
+    .sort((a, b) => a.startBeat - b.startBeat || a.pitch - b.pitch)
+}

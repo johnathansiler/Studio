@@ -41,7 +41,7 @@ describe('beat machine layout', () => {
         { name: 'phone360', width: 360, height: 844 },
         { name: 'phone', width: 390, height: 844 },
         { name: 'phone412', width: 412, height: 844 },
-        { name: 'fold', width: 923, height: 1024 },
+        { name: 'unfold', width: 880, height: 1000 },
         { name: 'desktop', width: 1440, height: 900 },
       ]) {
         const page = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height } })

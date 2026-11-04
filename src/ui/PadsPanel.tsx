@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { Performer, pointerVelocity, type PerformTarget } from '../audio/performer'
 import { ensureDefaultKit } from '../instruments/pads/load'
@@ -61,7 +61,6 @@ export function PadsPanel({
   const [selected, setSelected] = useState(0)
   const [levels, setLevels] = useState<LevelSpread | ''>('')
   const [repeatOn, setRepeatOn] = useState(false)
-  const [repeatHeld, setRepeatHeld] = useState(false)
   const [eraseOn, setEraseOn] = useState(false)
   const [recordMode, setRecordMode] = useState<'overdub' | 'replace'>('overdub')
   const [stepPick, setStepPick] = useState(0)
@@ -98,10 +97,9 @@ export function PadsPanel({
     )
   }
   const play = performer.current
-  const repeatEngaged = repeatOn || repeatHeld
   const repeat = repeatSetting(kit.repeatRate || '1/16')
-  play.setGrid(repeatEngaged ? repeat.rate : null, repeat.triplet)
-  play.setEngaged(repeatEngaged)
+  play.setGrid(repeatOn ? repeat.rate : null, repeat.triplet)
+  play.setEngaged(repeatOn)
   play.setQuantize(0)
   play.setTempo(kit.syncTempo === false && kit.localBpm > 0 ? kit.localBpm : null)
   play.setDeck({
@@ -389,21 +387,8 @@ export function PadsPanel({
   function stepRate(direction: -1 | 1) {
     const next = stepRepeatRate(kit.repeatRate || '1/16', direction)
     const setting = repeatSetting(next)
-    if (repeatOn || repeatHeld) play.setGrid(setting.rate, setting.triplet)
+    if (repeatOn) play.setGrid(setting.rate, setting.triplet)
     store.patchTrackKit(trackId, { repeatRate: next })
-  }
-
-  function holdRepeat(event: ReactPointerEvent<HTMLButtonElement>) {
-    event.preventDefault()
-    event.stopPropagation()
-    try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* the pointer already ended */ }
-    setRepeatHeld(true)
-  }
-
-  function releaseRepeat(event: ReactPointerEvent<HTMLButtonElement>) {
-    event.preventDefault()
-    event.stopPropagation()
-    setRepeatHeld(false)
   }
 
   function tapTempo() {
@@ -504,13 +489,11 @@ export function PadsPanel({
           <div className="note-repeat-row">
             <button
               type="button"
-              className={`note-repeat-hold hw-key${repeatEngaged ? ' on' : ''}`}
-              aria-pressed={repeatEngaged}
-              aria-label="Note Repeat"
-              title="Hold Note Repeat. Pads retrigger at this rate while your finger is down."
-              onPointerDown={holdRepeat}
-              onPointerUp={releaseRepeat}
-              onPointerCancel={releaseRepeat}
+              className={`note-repeat-hold hw-key${repeatOn ? ' on' : ''}`}
+              aria-pressed={repeatOn}
+              aria-label="Note Repeat: tap to turn on or off"
+              title="Note Repeat: tap to turn on or off. While it is on, pads repeat at this rate."
+              onClick={() => setRepeatOn((value) => !value)}
             >
               Note Repeat
             </button>
@@ -527,11 +510,10 @@ export function PadsPanel({
               </button>
               <button
                 type="button"
-                className={`hw-key note-repeat-rate-read${repeatOn ? ' on' : ''}`}
-                aria-pressed={repeatOn}
-                aria-label="Keep note repeat on"
-                title="Tap the rate to leave Note Repeat on. Hold Note Repeat to repeat only while your finger is down."
-                onClick={() => setRepeatOn((value) => !value)}
+                className="hw-key note-repeat-rate-read"
+                aria-label="Note repeat rate"
+                title="Tap for the next Note Repeat rate."
+                onClick={() => stepRate(1)}
               >
                 <strong aria-live="polite">{repeat.short}</strong>
               </button>
