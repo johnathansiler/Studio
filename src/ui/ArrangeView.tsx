@@ -52,7 +52,12 @@ import { CommentControl, CommentPins } from './timelineComments'
 function ArrangeChrome({ browserOpen, setupOpen, onBrowser, onSetup }: { browserOpen: boolean; setupOpen: boolean; onBrowser: () => void; onSetup: () => void }) {
   const [host, setHost] = useState<HTMLElement | null>(null)
   useEffect(() => {
-    setHost(document.getElementById('command-strip') || document.getElementById('tool-slot'))
+    const pick = () => {
+      setHost(document.getElementById('transport-more-extra') || document.getElementById('command-strip') || document.getElementById('tool-slot'))
+    }
+    pick()
+    window.addEventListener('resize', pick)
+    return () => window.removeEventListener('resize', pick)
   }, [])
   const buttons = (
     <div className="arrange-panels">

@@ -1872,7 +1872,7 @@ async function importDropped(files: FileList) {
           store={store}
           engine={engine}
           syncLabel={session.state.syncLabel}
-          simple={phone}
+          simple={phone && !land}
           recordHint={recordHint}
           onPlay={() => { engine.unlock(); void play() }}
           onStop={() => void stop()}
@@ -1886,28 +1886,17 @@ async function importDropped(files: FileList) {
       )}
       {surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano' && (
         <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
-          <div className="command-strip" id="command-strip" role="toolbar" aria-label="Edit">
+          <div className={`command-strip${phone && !land ? ' tucked' : ''}`} id="command-strip" role="toolbar" aria-label="Edit">
             <ToolBar
               context="arrange"
               words
+              tucked={phone && !land}
               showHint={false}
               onChange={(tool) => store.setTool(tool)}
               onDuplicate={() => store.duplicateSelection()}
               onDelete={() => store.deleteSelectedClip()}
             />
-            <TipButton
-              className="tool"
-              label="Quantize"
-              hint="Choose the grid and how hard to snap, then apply it."
-              disabled={store.remoteFollow}
-              onClick={() => store.openQuantize()}
-            >
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
-                <path d="M3 9h12M9 3v12M5.5 5.5l7 7M12.5 5.5l-7 7" />
-              </svg>
-              <span className="tool-label">Quantize</span>
-            </TipButton>
-            <SnapControl store={store} />
+            <SnapControl store={store} inline={phone && !land} />
           </div>
           <MidiTools store={store} engine={engine} />
         </div>

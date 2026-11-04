@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import {
   FACE_TOOLS,
@@ -32,6 +32,7 @@ export function ToolBar({
   onDismissHint,
   panel = false,
   onClose,
+  tucked = false,
 }: {
   onChange: (tool: ArrangeTool) => void
   onDuplicate: () => void
@@ -49,9 +50,12 @@ export function ToolBar({
   /** Grouped sheet. Phone and fold use a bottom sheet. Desk uses a popover. */
   panel?: boolean
   onClose?: () => void
+  /** Portrait phone: one Tool button that opens an inline row. */
+  tucked?: boolean
 }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const stripRef = useRef<HTMLDivElement>(null)
+  const [toolsOpen, setToolsOpen] = useState(false)
   const shown = FACE_TOOLS
   const chip = toolChip(value, context)
   const showWord = true
@@ -67,6 +71,59 @@ export function ToolBar({
     if (left < strip.scrollLeft) strip.scrollLeft = left - 4
     else if (right > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = right - strip.clientWidth + 4
   }, [value])
+  if (tucked) {
+    const current = TOOL_INFO[value]
+    const remove = TOOL_ACTIONS.find((action) => action.id === 'delete')!
+    const copy = TOOL_ACTIONS.find((action) => action.id === 'duplicate')!
+    return (
+      <div className="timeline-tools tucked" role="toolbar" aria-label="Tools" data-active-tool={value} data-tool-context={context}>
+        <span className="tool-now" role="status" aria-live="polite">{chip}</span>
+        <button
+          type="button"
+          className="tool tool-current on"
+          aria-pressed="true"
+          aria-expanded={toolsOpen}
+          aria-controls="tool-choices"
+          title={current.hint}
+          aria-label={`Tool: ${current.label}. ${current.hint}`}
+          onClick={() => setToolsOpen((open) => !open)}
+        >
+          <ToolIcon id={value} />
+          <span className="tool-label">Tool: {current.label}</span>
+        </button>
+        <TipButton className="tool tool-quick delete" label={remove.label} hint={remove.hint} onClick={onDelete}>
+          <ToolIcon id="delete" />
+          <span className="tool-label">{remove.label}</span>
+        </TipButton>
+        <TipButton className="tool tool-quick duplicate" label={copy.label} hint={copy.hint} onClick={onDuplicate}>
+          <ToolIcon id="duplicate" />
+          <span className="tool-label">{copy.label}</span>
+        </TipButton>
+        {toolsOpen && (
+          <div id="tool-choices" className="inline-choices tool-choices" role="group" aria-label="Choose a tool">
+            {shown.map((id) => {
+              const info = TOOL_INFO[id]
+              const key = keyForTool(id)
+              const label = key ? `${info.label} (${key})` : info.label
+              return (
+                <TipButton
+                  key={id}
+                  className={`tool ${value === id ? 'on' : ''}`}
+                  label={label}
+                  hint={info.hint}
+                  pressed={value === id}
+                  onClick={() => onChange(id)}
+                >
+                  <ToolIcon id={id} />
+                  <span className="tool-label">{info.label}</span>
+                </TipButton>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
   if (panel) {
     return (
       <ToolPanel
