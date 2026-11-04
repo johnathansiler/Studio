@@ -16,7 +16,7 @@ import {
   type Tone,
 } from '../../theory'
 import { applyVoiceGroup, renderPerformance } from './perform'
-import { defaultScaler, type KeysLock, type ScalerGroup, type ScalerInput, type ScalerNote, type ScalerOutput, type ScalerSound, type ScalerState, type VoiceGroup } from './types'
+import { defaultScaler, type EvolveMode, type KeysLock, type RecordSource, type ScalerGroup, type ScalerInput, type ScalerNote, type ScalerOutput, type ScalerSound, type ScalerState, type VariationAmount, type VoiceGroup } from './types'
 
 export type { ScalerGroup, ScalerNote, ScalerSound, ScalerState } from './types'
 export { defaultScaler } from './types'
@@ -29,6 +29,9 @@ const LOCKS: KeysLock[] = ['off', 'scale-snap', 'scale-hide', 'chord', 'chord-no
 const GROUPS_VOICE: VoiceGroup[] = ['all', 'bass', 'upper', 'dynamic']
 const OUTPUTS: ScalerOutput[] = ['audio', 'midi', 'both']
 const INPUTS: ScalerInput[] = ['midi', 'audio']
+const AMOUNTS: VariationAmount[] = ['subtle', 'medium', 'major']
+const EVOLVE: EvolveMode[] = ['off', 'bar', 'loop']
+const RECORDS: RecordSource[] = ['input', 'output']
 
 export const SCALER_MIME = 'application/x-cueharbor-scaler'
 
@@ -85,6 +88,16 @@ export function normalizeScaler(value: Partial<ScalerState> | undefined | null):
     output: OUTPUTS.includes(value.output as ScalerOutput) ? value.output! : base.output,
     input: INPUTS.includes(value.input as ScalerInput) ? value.input! : base.input,
     chordIndex: clamp(Math.round(value.chordIndex ?? 0), 0, 32),
+    variation: AMOUNTS.includes(value.variation as VariationAmount) ? value.variation! : base.variation,
+    variationSeed: clamp(Math.round(value.variationSeed ?? base.variationSeed), 1, 0x7fffffff),
+    variationLock: value.variationLock === true,
+    variationTakes: takeSeeds(value.variationTakes),
+    variationTake: clamp(Math.round(value.variationTake ?? 0), 0, 7),
+    evolve: EVOLVE.includes(value.evolve as EvolveMode) ? value.evolve! : base.evolve,
+    favorites: idList(value.favorites, 64),
+    thru: value.thru === true,
+    recordSource: RECORDS.includes(value.recordSource as RecordSource) ? value.recordSource! : base.recordSource,
+    midiTo: idList(value.midiTo, 8),
   }
 }
 
@@ -123,10 +136,17 @@ export function voiceScaler(state: ScalerState, tones: Tone[]): Tone[] {
   return applyVoiceGroup(voiced, state.voiceGroup)
 }
 
-export function notesFromTones(state: ScalerState, tones: Tone[], spanBeats: number): { notes: ScalerNote[]; voiced: Tone[] } {
+export function notesFromTones(state: ScalerState, tones: Tone[], spanBeats: number, pass = 0): { notes: ScalerNote[]; voiced: Tone[] } {
   const voiced = voiceScaler(state, tones)
   if (state.performanceId) {
-    const performed = renderPerformance(voiced, state.performanceId, Math.max(0.25, spanBeats), state.rate, state.swing)
+    const performed = renderPerformance(voiced, state.performanceId, Math.max(0.25, spanBeats), state.rate, state.swing, {
+      seed: state.variationSeed || 1,
+      amount: state.variation,
+      root: state.root,
+      scaleId: activeScaleId(state),
+      pass: state.evolve === 'off' ? 0 : pass,
+      evolve: state.evolve,
+    })
     if (performed.length) return { notes: performed, voiced }
   }
   const played = patternNotes(voiced.map((tone) => tone.midi), {
@@ -155,11 +175,11 @@ export function notesFromTones(state: ScalerState, tones: Tone[], spanBeats: num
   return { notes, voiced }
 }
 
-export function padPerformance(state: ScalerState, index: number, spanBeats: number) {
+export function padPerformance(state: ScalerState, index: number, spanBeats: number, pass = 0) {
   const chords = scalerChords(state)
   const chord = chords[index]
   if (!chord) return null
-  const played = notesFromTones(state, chord.tones, spanBeats)
+  const played = notesFromTones(state, chord.tones, spanBeats, pass)
   return { ...played, symbol: chord.symbol, roman: chord.roman }
 }
 
@@ -173,8 +193,8 @@ export function progressionPerformance(state: ScalerState, progressionId: string
   const notes: ScalerNote[] = []
   let beat = 0
   let voiced: Tone[] = []
-  for (const chord of chords) {
-    const played = notesFromTones(current, chord.tones, chord.beats)
+  chords.forEach((chord, index) => {
+    const played = notesFromTones(current, chord.tones, chord.beats, state.evolve === 'bar' ? index : 0)
     voiced = played.voiced
     for (const note of played.notes) notes.push({ ...note, startBeat: beat + note.startBeat })
     beat += chord.beats
@@ -183,7 +203,7 @@ export function progressionPerformance(state: ScalerState, progressionId: string
       lastVoicing: voiced.map((tone) => tone.midi),
       lastCents: voiced.map((tone) => tone.cents),
     }
-  }
+  })
   return { notes, voiced, name: pattern.name, symbols: chords.map((chord) => chord.symbol) }
 }
 
@@ -196,15 +216,29 @@ export function chooseScale(id: string): { scale: ScaleId; library: string } {
   return { scale: nearestBuiltin(getScale(id).cents), library: id }
 }
 
+/** True when Scaler is the instrument or a MIDI effect in front of one. */
+export function trackHasScaler(track: { instrument?: string; plugins?: { pluginId: string; enabled?: boolean }[]; scaler?: ScalerState }) {
+  if (track.instrument === 'scaler') return true
+  return (track.plugins ?? []).some((plugin) => plugin.pluginId === 'scaler' && plugin.enabled !== false)
+}
+
+/** Scaler is playing its built-in preview because the track has no synth, sampler, or beat machine yet. */
+export function needsScalerSound(track: Track) {
+  if (!trackHasScaler(track)) return false
+  if (track.plugins?.some((plugin) => plugin.pluginId === 'synth' || plugin.pluginId === 'sampler' || plugin.pluginId === 'pads')) return false
+  return track.instrument === 'scaler' || !track.instrument || track.instrument === 'none'
+}
+
 /** Where a Scaler track's notes should sound. One hop only, so two forwards cannot loop. */
 export function routeScaler(project: Project, track: Track): { voice: Track; liveStripId: string } {
-  if (track.instrument !== 'scaler') return { voice: track, liveStripId: track.id }
+  if (!trackHasScaler(track)) return { voice: track, liveStripId: track.id }
   const state = normalizeScaler(track.scaler)
   if (state.sound === 'forward') {
     const dest = project.tracks.find((item) => item.id === state.forwardTrackId && item.id !== track.id && item.type === 'midi')
     if (dest) return { voice: localVoice(dest), liveStripId: dest.id }
     return { voice: soundVoice(track, 'synth'), liveStripId: track.id }
   }
+  if (track.instrument !== 'scaler') return { voice: track, liveStripId: track.id }
   return { voice: soundVoice(track, state.sound), liveStripId: track.id }
 }
 
@@ -219,15 +253,17 @@ export function performancesOn(project: Project, track: Track): HeardMidi[] {
   const out: HeardMidi[] = []
   if (!forwardsAway(project, track)) out.push({ voice: localVoice(track), owner: track, clips: track.midiClips })
   for (const other of project.tracks) {
-    if (other.id === track.id || other.instrument !== 'scaler') continue
+    if (other.id === track.id || !trackHasScaler(other)) continue
     const state = normalizeScaler(other.scaler)
-    if (state.sound === 'forward' && state.forwardTrackId === track.id) out.push({ voice: localVoice(track), owner: other, clips: other.midiClips })
+    const forwarded = state.sound === 'forward' && state.forwardTrackId === track.id
+    const layered = state.midiTo.includes(track.id)
+    if (forwarded || layered) out.push({ voice: localVoice(track), owner: other, clips: other.midiClips })
   }
   return out
 }
 
 function forwardsAway(project: Project, track: Track) {
-  if (track.instrument !== 'scaler') return false
+  if (!trackHasScaler(track)) return false
   const state = normalizeScaler(track.scaler)
   if (state.sound !== 'forward') return false
   return project.tracks.some((item) => item.id === state.forwardTrackId && item.id !== track.id && item.type === 'midi')
@@ -283,6 +319,16 @@ function placeBass(tones: Tone[], bass: Tone): Tone[] {
   const placed = toneFromCents(abs)
   if (placed.midi < 0 || placed.midi > 127) return voiced
   return [placed, ...voiced.filter((tone) => tone.midi !== placed.midi || tone.cents !== placed.cents)]
+}
+
+function takeSeeds(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is number => Number.isFinite(item)).map((item) => clamp(Math.round(item), 1, 0x7fffffff)).slice(-8)
+}
+
+function idList(value: unknown, limit: number) {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === 'string' && item.length > 0).map((item) => item.slice(0, 80)).slice(0, limit)
 }
 
 function clamp(value: number, min: number, max: number) {

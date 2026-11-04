@@ -4,6 +4,8 @@ import { activeTunePreset, orderedInserts, tuneScaleOf } from '../audio/plugins/
 import { CATALOG, FACTORY, activePresetName, descriptor } from '../audio/plugins/catalog'
 import { INSTRUMENT_IDS, isDrumsPlugin, kindLabels, paramsForKind } from '../audio/plugins/ids'
 import { pluginIsBeatMachine } from '../instruments/pads/identity'
+import { chainSections, trackHasScaler } from '../instruments/scaler/chain'
+import { AnchoredMenu } from './AnchoredMenu'
 import { PresetBar } from './PresetBar'
 import { TouchSlider } from './kit/controls'
 import { AmpPop } from './AmpPop'
@@ -293,24 +295,69 @@ function formatParam(id: string, value: number, unit: string) {
 }
 
 export function InsertList({ store, trackId, roomy = false }: { store: ProjectStore; trackId: string | 'master'; roomy?: boolean }) {
-  const plugins = trackId === 'master' ? store.project.masterPlugins : store.track(trackId)?.plugins ?? []
+  const track = trackId === 'master' ? null : store.track(trackId)
+  const plugins = trackId === 'master' ? store.project.masterPlugins : track?.plugins ?? []
+  if (track && trackHasScaler(track)) {
+    const sections = chainSections(track)
+    return (
+      <div className="inserts" data-chain="midi-sound">
+        <span className="chain-part">MIDI</span>
+        {sections.midi.map((plugin) => insertButton(store, trackId, plugin))}
+        <span className="chain-part">Sound</span>
+        {sections.sound.map((plugin) => insertButton(store, trackId, plugin))}
+        {sections.caption && <span className="chain-fallback">{sections.caption}</span>}
+        {sections.addInstrument && <AddScalerInstrument store={store} trackId={track.id} />}
+        {sections.rest.map((plugin) => insertButton(store, trackId, plugin))}
+        <PluginPicker store={store} trackId={trackId} roomy={roomy} />
+      </div>
+    )
+  }
   return (
     <div className="inserts">
-      {plugins.map((plugin) => (
-        <button
-          key={plugin.id}
-          type="button"
-          className={plugin.enabled ? 'on' : ''}
-          title={descriptor(plugin.pluginId)?.name ?? plugin.pluginId}
-          aria-label={`${descriptor(plugin.pluginId)?.name ?? plugin.pluginId}. Open this insert.`}
-          onClick={() => store.focusPlugin(trackId, plugin.id)}
-          onDoubleClick={() => store.updatePlugin(trackId, plugin.id, { enabled: !plugin.enabled })}
-        >
-          {insertLabel(plugin.pluginId, plugin)}
-        </button>
-      ))}
+      {plugins.map((plugin) => insertButton(store, trackId, plugin))}
       <PluginPicker store={store} trackId={trackId} roomy={roomy} />
     </div>
+  )
+}
+
+function insertButton(store: ProjectStore, trackId: string | 'master', plugin: { id: string; pluginId: string; enabled: boolean; params?: Record<string, number> }) {
+  return (
+    <button
+      key={plugin.id}
+      type="button"
+      className={plugin.enabled ? 'on' : ''}
+      title={descriptor(plugin.pluginId)?.name ?? plugin.pluginId}
+      aria-label={`${descriptor(plugin.pluginId)?.name ?? plugin.pluginId}. Open this insert.`}
+      onClick={() => store.focusPlugin(trackId, plugin.id)}
+      onDoubleClick={() => store.updatePlugin(trackId, plugin.id, { enabled: !plugin.enabled })}
+    >
+      {insertLabel(plugin.pluginId, plugin)}
+    </button>
+  )
+}
+
+function AddScalerInstrument({ store, trackId }: { store: ProjectStore; trackId: string }) {
+  const [open, setOpen] = useState(false)
+  const button = useRef<HTMLButtonElement>(null)
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        className="insert-add"
+        aria-expanded={open}
+        aria-label="Add instrument"
+        title="Add a synth, sampler, or Beat Machine under Scaler."
+        onClick={() => setOpen((value) => !value)}
+      >
+        Add instrument
+      </button>
+      <AnchoredMenu open={open} onClose={() => setOpen(false)} label="Add instrument" triggerRef={button} prefer="down">
+        <button type="button" onClick={() => { store.addScalerSound(trackId, 'synth'); setOpen(false) }}>Synth</button>
+        <button type="button" onClick={() => { store.addScalerSound(trackId, 'sampler'); setOpen(false) }}>Sampler</button>
+        <button type="button" onClick={() => { store.addScalerSound(trackId, 'pads'); setOpen(false) }}>Beat Machine</button>
+      </AnchoredMenu>
+    </>
   )
 }
 

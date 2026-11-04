@@ -1,16 +1,18 @@
-import { useEffect, useState, type DragEvent } from 'react'
+import { useEffect, useRef, useState, type DragEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { detectedScales, FIFTHS, modulationChords, moodOf, progressionMood, qualityLabel, type ModChord, type Mood } from '../instruments/scaler/face'
 import { notesFromSlots } from '../instruments/scaler/clips'
+import { playScalerLive } from '../instruments/scaler/live'
 import { chordsFromMidi } from '../instruments/scaler/listen'
 import { SCALER_MIME, activeScaleId, chooseScale as pickScale, encodeScalerDrag, normalizeScaler, padPerformance, progressionPerformance, scalerChords } from '../instruments/scaler/model'
-import { applyExpression, applyKeysLock, EXPRESSIONS, humanizeNotes, KEYS_LOCK_LABELS, KEYS_LOCKS, lockPadNotes, moveItem, patternCatalog, performanceCatalog, type KeysLock } from '../instruments/scaler/perform'
+import { applyExpression, EXPRESSIONS, humanizeNotes, KEYS_LOCK_LABELS, KEYS_LOCKS, loadPerformanceLibrary, lockPadNotes, moveItem, patternCatalog, performanceCatalog, styleCatalog, type KeysLock } from '../instruments/scaler/perform'
 import type { ScalerGroup, ScalerInput, ScalerNote, ScalerOutput, ScalerSound, VoiceGroup } from '../instruments/scaler/types'
 import { NOTE_NAMES, type ArpDirection } from '../model/scale'
 import { projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { allProgressions, allScales, GENRE_INFO, getScale, harmonize, loadScaleCatalog, progressionsFor, realizeProgression, scaleFamilies, songSets, spellScale, VOICINGS, type VoicingId } from '../theory'
 import { GeneratePanel } from './GeneratePop'
+import { ScalerPerformances } from './ScalerPerformances'
 import { useFormFactor } from './form'
 import { LibraryPanel } from './LibraryPanel'
 import './scaler.css'
@@ -73,6 +75,8 @@ export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; e
   const [octave, setOctave] = useState(0)
   const [expression, setExpression] = useState(0)
   const [human, setHuman] = useState(0)
+  const [perfOpen, setPerfOpen] = useState(false)
+  const perfButton = useRef<HTMLButtonElement>(null)
   const [audioHeard, setAudioHeard] = useState<string[]>([])
   const [modKind, setModKind] = useState(0)
   const [destRoot, setDestRoot] = useState(7)
@@ -89,6 +93,7 @@ export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; e
   useEffect(() => {
     let alive = true
     void loadScaleCatalog().then(() => { if (alive) setCatalog((value) => value + 1) })
+    void loadPerformanceLibrary().then(() => { if (alive) setCatalog((value) => value + 1) })
     return () => { alive = false }
   }, [])
 
@@ -113,7 +118,10 @@ export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; e
   const trackNotes = clips.flatMap((clip) => clip.notes.filter((note) => !note.muted).map((note) => ({ midi: note.pitch, cents: note.fine, startBeat: note.startBeat, durationBeats: note.durationBeats })))
   const rows = detectedScales(trackNotes, state.root, scaleId)
   const midiChords = chordsFromMidi(trackNotes)
-  const performances = performanceCatalog().filter((item) => category === 'All' || item.category === category)
+  const styled = styleCatalog()
+  const performances = styled.length
+    ? styled.filter((item) => category === 'All' || item.category === category)
+    : performanceCatalog().filter((item) => category === 'All' || item.category === category)
   const performance = performances.find((item) => item.id === state.performanceId) ?? performanceCatalog().find((item) => item.id === state.performanceId)
   const expressionId = EXPRESSIONS[expression]?.id ?? 'still'
   const voiceLabel = VOICE_GROUPS.find((item) => item.id === state.voiceGroup && (item.voicing == null || item.voicing === state.voicing))?.label
@@ -200,8 +208,9 @@ export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; e
     }
     const capture = write || rec || engine.status === 'recording'
     if (!capture) return
-    if (write && !rec && engine.status !== 'recording') store.writeScalerClip(trackId, notes, atBeat(false), played.symbol)
-    else store.recordScalerChord(trackId, notes, atBeat(true))
+    const written = state.recordSource === 'input' ? notes.slice(0, 1) : notes
+    if (write && !rec && engine.status !== 'recording') store.writeScalerClip(trackId, written, atBeat(false), played.symbol)
+    else store.recordScalerChord(trackId, written, atBeat(true))
   }
 
   function laneNotes(): ScalerNote[] {
@@ -246,27 +255,11 @@ export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; e
   }
 
   function playKey(midi: number) {
-    const lockedKey = applyKeysLock({
-      mode: state.keysLock,
-      midi,
-      root: state.root,
-      scale: state.scale,
-      library: state.library,
-      chordPcs: [...chordPcs],
-      chords: chords.map((chord) => chord.tones.map((tone) => ({ midi: tone.midi, cents: tone.cents }))),
-      current: (current?.tones ?? []).map((tone) => ({ midi: tone.midi, cents: tone.cents })),
-    })
-    if (!lockedKey.notes?.length) return
-    const shifted = lockedKey.notes.map((note) => clamp(note.midi + st + octave * 12, 0, 127))
-    hear(shifted.map((pitch, index) => ({
-      pitch,
-      fine: lockedKey.notes?.[index]?.cents ? Math.round(lockedKey.notes[index].cents) : undefined,
-      startBeat: 0,
-      durationBeats: 0.5,
-      velocity: 0.84,
-    })))
+    const played = playScalerLive(store.project, engine, trackId, midi + st + octave * 12, 0.84)
+    if (!played?.length) return
+    setHint(`${played.length === 1 ? 'One note' : `${played.length} notes`} through Scaler.`)
     const capture = rec || engine.status === 'recording'
-    if (capture && shifted.length > 1) store.recordScalerChord(trackId, shifted.map((pitch) => ({ pitch, startBeat: 0, durationBeats: bar, velocity: 0.84 })), atBeat(true))
+    if (capture) store.recordScalerChord(trackId, played.map((note) => ({ pitch: note.midi, fine: note.cents ? Math.round(note.cents) : undefined, startBeat: 0, durationBeats: bar, velocity: 0.84 })), atBeat(true))
   }
 
   function playMod(step: ModChord) {
@@ -323,6 +316,26 @@ export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; e
           <button type="button" className={state.output !== 'audio' ? 'on' : ''} aria-pressed={state.output !== 'audio'} title="Send the chords as MIDI." onClick={() => patch({ output: (state.output === 'midi' ? 'both' : state.output === 'both' ? 'audio' : 'midi') satisfies ScalerOutput })}>MIDI output</button>
         </div>
         <div className="scaler-strip">
+          <button
+            ref={perfButton}
+            type="button"
+            className={perfOpen ? 'on' : ''}
+            aria-expanded={perfOpen}
+            aria-label="Performances"
+            title="Styles, packs, variation, and where the MIDI goes."
+            onClick={() => setPerfOpen((value) => !value)}
+          >Performances</button>
+          <ScalerPerformances
+            open={perfOpen}
+            onClose={() => setPerfOpen(false)}
+            triggerRef={perfButton}
+            store={store}
+            trackId={trackId}
+            state={state}
+            pad={pad}
+            bar={bar}
+            onHear={(notes) => hear(notes)}
+          />
           <Stepper label="Perform" value={performance?.name ?? 'Block'} hint="Arpeggio, strum, rhythm, bass, melody, or comping." onStep={(dir) => {
             const list = performances.length ? performances : performanceCatalog()
             const index = Math.max(0, list.findIndex((item) => item.id === state.performanceId))

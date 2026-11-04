@@ -2,6 +2,7 @@ import { soundingNotes } from './drumLanes'
 import { hardwareReaches, noteTarget } from './noteTarget'
 import { noteForPlayback } from './padMachine'
 import { SCALES, snapPitch, type ScaleId } from './scale'
+import { notesAfterScaler } from '../instruments/scaler/route'
 import type { LiveCaptureSettings, MidiClip, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, Project, Track } from './types'
 
 export interface ChainContext {
@@ -203,7 +204,7 @@ export function prepareClipNotes(project: Project, track: Track, clip: MidiClip)
     })
     if (next) audible.push(next)
   }
-  return applyMidiChain(audible, track.midiFx, chainContext(project, clip.id))
+  return notesAfterScaler(project, track, applyMidiChain(audible, track.midiFx, chainContext(project, clip.id)))
 }
 
 /** Notes that reach the instrument. The clip itself is left untouched. */
