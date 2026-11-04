@@ -17,7 +17,7 @@ import {
   videoSendChanged,
 } from '../model/callVideo'
 import { joinAction, parseCollabTarget } from '../model/negotiate'
-import { collabChoosing } from '../ui/collabTab'
+import { collabChoosing, connectionLine, personConnection, selfConnection, worstConnection } from '../ui/collabTab'
 import { copyOf, CALL_COPY } from '../ui/chrome'
 import { withoutInviteParams } from '../storage/identity'
 import { shareSessionLink } from '../ui/share'
@@ -61,6 +61,39 @@ describe('automatic call sound and connection grade', () => {
     expect(connectionWord({ status: 'reconnecting', failed: false, oneWayMs: 20 })).toBe('OK')
     expect(connectionWord({ status: 'live', failed: true, oneWayMs: 20 })).toBe('Poor')
     expect(connectionWord({ status: 'live', failed: false, oneWayMs: null })).toBe('Good')
+  })
+
+  it('writes a full-word connection line and keeps the worst grade', () => {
+    expect(connectionLine('Good')).toBe('Connection: Good. Audio and video are smooth.')
+    expect(connectionLine('OK')).toBe('Connection: OK. Audio and video may hesitate.')
+    expect(connectionLine('Poor')).toBe('Connection: Poor. Audio and video may cut out.')
+    expect(worstConnection(['Good', 'OK'])).toBe('OK')
+    expect(worstConnection(['Good', 'Poor', 'OK'])).toBe('Poor')
+    expect(worstConnection(['Good'])).toBe('Good')
+    expect(personConnection({ self: true, status: 'live', link: undefined, oneWayMs: 40 })).toBe('Good')
+    expect(personConnection({ self: false, status: 'live', link: undefined, oneWayMs: null })).toBe('OK')
+    expect(personConnection({
+      self: false,
+      status: 'live',
+      link: { connection: 'failed', ice: 'failed' },
+      oneWayMs: 20,
+    })).toBe('Poor')
+    expect(personConnection({
+      self: false,
+      status: 'live',
+      link: { connection: 'connected', ice: 'connected' },
+      oneWayMs: 120,
+    })).toBe('OK')
+    expect(personConnection({
+      self: false,
+      status: 'live',
+      link: { connection: 'connected', ice: 'connected' },
+      oneWayMs: 30,
+    })).toBe('Good')
+    expect(selfConnection({ status: 'live', oneWayMs: null, peers: 0, linksUp: 0, linksFailed: 0 })).toBe('Good')
+    expect(selfConnection({ status: 'waiting', oneWayMs: 20, peers: 1, linksUp: 0, linksFailed: 0 })).toBe('OK')
+    expect(selfConnection({ status: 'live', oneWayMs: 20, peers: 1, linksUp: 0, linksFailed: 1 })).toBe('Poor')
+    expect(selfConnection({ status: 'live', oneWayMs: 30, peers: 1, linksUp: 1, linksFailed: 0 })).toBe('Good')
   })
 })
 
