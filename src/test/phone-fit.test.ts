@@ -70,11 +70,11 @@ describe('phone fit at 412x915', () => {
           expect(button.right).toBeLessThanOrEqual(412 + 1)
         }
         expect(timeline.ratio).toBeGreaterThanOrEqual(0.65)
-        await page.getByRole('button', { name: /^More\./ }).click()
+        await page.locator('.transport').getByRole('button', { name: /^Menu/ }).click()
         const loop = await page.locator('.t-btn.loop .t-word').boundingBox()
         expect(loop).toBeTruthy()
         expect(loop!.x + loop!.width).toBeLessThanOrEqual(412 + 1)
-        await page.getByRole('button', { name: /^More\./ }).click()
+        await page.locator('.transport').getByRole('button', { name: /^Menu/ }).click()
         expect(timeline.names.map((item) => item.value)).toEqual(['Vocal', 'Music', 'Keys'])
         for (const name of timeline.names) {
           expect(name.width, name.value).toBeGreaterThan(48)
@@ -297,10 +297,10 @@ describe('phone fit at 412x915', () => {
         }
         await shot(fold, 'add-track-923')
         await fold.keyboard.press('Escape')
-        await fold.getByRole('button', { name: /Snap grid/ }).click()
-        await fold.getByRole('dialog', { name: 'Snap grid' }).waitFor()
+        await fold.locator('.snap-inline').click()
+        await fold.locator('#snap-choices').waitFor()
         const foldGrid = await fold.getByRole('button', { name: '1/8', exact: true }).boundingBox()
-        expect(foldGrid!.height).toBeGreaterThanOrEqual(44)
+        expect(foldGrid!.height).toBeGreaterThanOrEqual(40)
         await fold.keyboard.press('Escape')
         await shot(fold, 'live-arrange-923')
         await fold.getByRole('button', { name: /^Mix/ }).click()
@@ -333,8 +333,7 @@ describe('phone fit at 412x915', () => {
         const desk = await browser.newPage({ viewport: { width: 1280, height: 800 } })
         await desk.goto(url, { waitUntil: 'domcontentloaded' })
         await desk.getByRole('button', { name: /^Arrange/ }).first().waitFor()
-        const deskGrid = await desk.locator('select[aria-label="Snap grid"]').count()
-        expect(deskGrid).toBe(1)
+        expect(await desk.locator('.snap-inline').count()).toBe(1)
         await desk.close()
         await page.close()
       } finally {

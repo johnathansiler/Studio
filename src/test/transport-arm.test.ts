@@ -18,6 +18,7 @@ import {
   recordButtonOn,
   recordPress,
   returnSample,
+  startPress,
   stopPress,
 } from '../model/transport'
 import { ProjectStore } from '../state/store'
@@ -59,25 +60,36 @@ describe('transport', () => {
   const loop = { loopEnabled: true, loopStartSample: 48000, loopEndSample: 96000 }
   const free = { loopEnabled: false, loopStartSample: 0, loopEndSample: 192000 }
 
-  it('starts play at the playhead, or the loop start when the playhead is outside', () => {
+  it('resumes play from the playhead and does not jump to the loop start', () => {
     expect(playOriginSample(free, 1200)).toBe(1200)
     expect(playOriginSample(loop, 50000)).toBe(50000)
-    expect(playOriginSample(loop, 10)).toBe(48000)
+    expect(playOriginSample(loop, 10)).toBe(10)
+    expect(playOriginSample(loop, 99000)).toBe(99000)
     expect(playPress('stopped', free, 1200)).toEqual({ action: 'start', sample: 1200 })
+    expect(playPress('stopped', loop, 10)).toEqual({ action: 'start', sample: 10 })
+    expect(playPress('stopped', loop, 99000)).toEqual({ action: 'start', sample: 99000 })
     expect(playPress('playing', free, 1200)).toEqual({ action: 'pause' })
     expect(playPress('recording', free, 1200)).toEqual({ action: 'ignore' })
     expect(playPress('counting-in', free, 0)).toEqual({ action: 'ignore' })
   })
 
-  it('stops once in place and returns home on the next stop', () => {
+  it('keeps playing or stopped when Start returns to bar 1', () => {
+    expect(homeSample(free)).toBe(0)
+    expect(homeSample(loop)).toBe(0)
+    expect(returnSample(free)).toBe(0)
+    expect(returnSample(loop)).toBe(0)
+    expect(startPress('playing')).toEqual({ action: 'roll', sample: 0 })
+    expect(startPress('recording')).toEqual({ action: 'roll', sample: 0 })
+    expect(startPress('counting-in')).toEqual({ action: 'roll', sample: 0 })
+    expect(startPress('stopped')).toEqual({ action: 'park', sample: 0 })
+  })
+
+  it('stops once in place and returns to bar 1 on the next stop', () => {
     expect(stopPress('playing', free, 8000)).toEqual({ action: 'halt' })
     expect(stopPress('recording', loop, 60000)).toEqual({ action: 'halt' })
     expect(stopPress('stopped', free, 8000)).toEqual({ action: 'home', sample: 0 })
-    expect(stopPress('stopped', loop, 80000)).toEqual({ action: 'home', sample: 48000 })
+    expect(stopPress('stopped', loop, 80000)).toEqual({ action: 'home', sample: 0 })
     expect(stopPress('stopped', free, 0)).toEqual({ action: 'halt' })
-    expect(homeSample(loop)).toBe(48000)
-    expect(returnSample(free)).toBe(0)
-    expect(returnSample(loop)).toBe(loop.loopStartSample)
   })
 
   it('records only armed tracks and refuses a take when nothing is armed', () => {

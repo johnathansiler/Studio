@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { TRACK_CHOICES, type TrackChoice } from '../model/addTrack'
 import type { ProjectStore } from '../state/store'
+import { AnchoredMenu } from './AnchoredMenu'
 
 function ChoiceIcon({ id }: { id: TrackChoice }) {
   const common = { width: 28, height: 28, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true as const }
@@ -27,39 +28,6 @@ export function AddTrackButton({
 }) {
   const [open, setOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
-  const [place, setPlace] = useState<{ top: number; left: number; width: number } | null>(null)
-
-  function placeMenu() {
-    const button = buttonRef.current
-    if (!button) return
-    const rect = button.getBoundingClientRect()
-    const width = Math.min(420, window.innerWidth - 16)
-    const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8))
-    const estimated = 248
-    let top = rect.bottom + 4
-    if (top + estimated > window.innerHeight - 8) top = Math.max(8, rect.top - estimated - 4)
-    setPlace({ top, left, width })
-  }
-
-  useEffect(() => {
-    if (!open) return
-    const close = (event: PointerEvent) => {
-      const target = event.target as HTMLElement | null
-      if (target?.closest('.add-track-slot')) return
-      setOpen(false)
-    }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('pointerdown', close)
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('resize', placeMenu)
-    return () => {
-      window.removeEventListener('pointerdown', close)
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('resize', placeMenu)
-    }
-  }, [open])
 
   function add(choice: TrackChoice) {
     const id = store.addQuickTrack(choice)
@@ -78,27 +46,15 @@ export function AddTrackButton({
         aria-expanded={open}
         aria-label="Add Track"
         title="Add Track. Pick what the new track is for."
-        onClick={() => {
-          if (open) {
-            setOpen(false)
-            return
-          }
-          placeMenu()
-          setOpen(true)
-        }}
+        onClick={() => setOpen((value) => !value)}
       >
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
           <path d="M9 3.5v11M3.5 9h11" />
         </svg>
         <span>Add Track</span>
       </button>
-      {open && (
-        <div
-          className="add-track-menu"
-          role="group"
-          aria-label="Add Track"
-          style={place ? { position: 'fixed', top: place.top, left: place.left, width: place.width, zIndex: 80 } : undefined}
-        >
+      <AnchoredMenu className="add-track-menu" open={open} onClose={() => setOpen(false)} label="Add Track" triggerRef={buttonRef} prefer="down">
+        <div role="group" aria-label="Add Track">
           {TRACK_CHOICES.map((choice) => (
             <button
               key={choice.id}
@@ -115,7 +71,7 @@ export function AddTrackButton({
             </button>
           ))}
         </div>
-      )}
+      </AnchoredMenu>
     </div>
   )
 }

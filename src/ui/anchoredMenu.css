@@ -1,0 +1,154 @@
+.anchored-menu {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 160px;
+  width: max-content;
+  max-width: min(340px, calc(100vw - 16px));
+  padding: 6px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background-color: #18241d;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.18));
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+
+.anchored-menu[hidden] {
+  display: none !important;
+}
+
+.anchored-menu[data-side='down'] {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.anchored-menu[data-side='up'] {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.anchored-trigger[data-anchor-side='down'] {
+  position: relative;
+  z-index: 81;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-color: transparent;
+  background-color: #18241d;
+  background-image: none;
+}
+
+.anchored-trigger[data-anchor-side='up'] {
+  position: relative;
+  z-index: 81;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top-color: transparent;
+  background-color: #18241d;
+  background-image: none;
+}
+
+.anchored-menu .t-btn,
+.anchored-menu .ch-row,
+.anchored-menu .sheet-row,
+.anchored-menu .add-choice,
+.anchored-menu .guide-choice,
+.anchored-menu button {
+  min-height: 40px;
+  min-width: 40px;
+}
+
+.anchored-menu.transport-drawer {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: flex-start;
+  width: min(340px, calc(100vw - 16px));
+}
+
+.anchored-menu.transport-drawer .t-btn,
+.anchored-menu.transport-drawer .loop-combo,
+.anchored-menu.transport-drawer .metro-combo,
+.anchored-menu.transport-drawer .reset,
+.anchored-menu.transport-drawer .cap-btn {
+  flex: 0 1 auto;
+  width: auto;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.anchored-menu.transport-drawer .metro-combo,
+.anchored-menu.transport-drawer .transport-menu-extra,
+.anchored-menu.transport-drawer .arrange-panels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.anchored-menu.transport-drawer .lcd {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1 0 100%;
+  min-height: 0;
+  height: auto;
+  padding: 0 2px;
+}
+
+.anchored-menu.transport-drawer .lcd .bars,
+.anchored-menu.transport-drawer .lcd .tc {
+  display: inline;
+  font-size: 12px;
+  line-height: 22px;
+  white-space: nowrap;
+}
+
+.shell .anchored-menu #shell-menu,
+.shell.phone .anchored-menu #shell-menu,
+.shell.fold .anchored-menu #shell-menu,
+.anchored-menu #shell-menu {
+  position: static;
+  top: auto;
+  right: auto;
+  left: auto;
+  bottom: auto;
+  width: min(300px, calc(100vw - 16px));
+  max-height: none;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.anchored-menu #shell-menu button,
+.anchored-menu #shell-menu .menu-sig,
+.shell.phone .anchored-menu #shell-menu button,
+.shell.fold .anchored-menu #shell-menu button {
+  min-height: 40px;
+  height: auto;
+  padding: 6px 8px;
+}
+
+.shell .mixer-view.mixer-console .mix-more[open] > summary {
+  background-color: #18241d;
+  background-image: none;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right-color: #18241d;
+}
+
+.shell .mixer-view.mixer-console .strip:has(.mix-more[open]) .mix-panel {
+  border-bottom-left-radius: 0;
+  border-top-left-radius: 12px;
+}

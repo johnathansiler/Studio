@@ -11,6 +11,7 @@ import {
   type ArrangeTool,
 } from '../state/tools'
 import { useFormFactor } from './form'
+import { AnchoredMenu } from './AnchoredMenu'
 import { TipButton } from './Hint'
 import './guideSheet.css'
 
@@ -55,6 +56,7 @@ export function ToolBar({
 }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const stripRef = useRef<HTMLDivElement>(null)
+  const toolButton = useRef<HTMLButtonElement>(null)
   const [toolsOpen, setToolsOpen] = useState(false)
   const shown = FACE_TOOLS
   const chip = toolChip(value, context)
@@ -79,6 +81,7 @@ export function ToolBar({
       <div className="timeline-tools tucked" role="toolbar" aria-label="Tools" data-active-tool={value} data-tool-context={context}>
         <span className="tool-now" role="status" aria-live="polite">{chip}</span>
         <button
+          ref={toolButton}
           type="button"
           className="tool tool-current on"
           aria-pressed="true"
@@ -99,28 +102,26 @@ export function ToolBar({
           <ToolIcon id="duplicate" />
           <span className="tool-label">{copy.label}</span>
         </TipButton>
-        {toolsOpen && (
-          <div id="tool-choices" className="inline-choices tool-choices" role="group" aria-label="Choose a tool">
-            {shown.map((id) => {
-              const info = TOOL_INFO[id]
-              const key = keyForTool(id)
-              const label = key ? `${info.label} (${key})` : info.label
-              return (
-                <TipButton
-                  key={id}
-                  className={`tool ${value === id ? 'on' : ''}`}
-                  label={label}
-                  hint={info.hint}
-                  pressed={value === id}
-                  onClick={() => onChange(id)}
-                >
-                  <ToolIcon id={id} />
-                  <span className="tool-label">{info.label}</span>
-                </TipButton>
-              )
-            })}
-          </div>
-        )}
+        <AnchoredMenu id="tool-choices" open={toolsOpen} onClose={() => setToolsOpen(false)} label="Choose a tool" triggerRef={toolButton} prefer="up">
+          {shown.map((id) => {
+            const info = TOOL_INFO[id]
+            const key = keyForTool(id)
+            const label = key ? `${info.label} (${key})` : info.label
+            return (
+              <TipButton
+                key={id}
+                className={`tool ${value === id ? 'on' : ''}`}
+                label={label}
+                hint={info.hint}
+                pressed={value === id}
+                onClick={() => onChange(id)}
+              >
+                <ToolIcon id={id} />
+                <span className="tool-label">{info.label}</span>
+              </TipButton>
+            )
+          })}
+        </AnchoredMenu>
       </div>
     )
   }

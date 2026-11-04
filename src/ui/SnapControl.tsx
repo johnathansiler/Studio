@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { SNAP_DIVISIONS, normalizeSnapDivision, type SnapDivisionId } from '../model/snapGrid'
 import type { ProjectStore } from '../state/store'
 import { BevelSelect } from './BevelSelect'
+import { AnchoredMenu } from './AnchoredMenu'
 import { useFormFactor } from './form'
 
 /** One Snap control. On follows the grid. Off is free, small steps. */
@@ -12,6 +13,7 @@ export function SnapControl({ store, inline = false }: { store: ProjectStore; in
   const form = useFormFactor()
   const options = SNAP_DIVISIONS.map((item) => ({ value: item.id, label: item.label }))
   const [open, setOpen] = useState(false)
+  const snapButton = useRef<HTMLButtonElement>(null)
   if (inline) {
     const snapHint = on
       ? 'Snap is on. Edits land on the grid. Open this to change the grid or turn snap off.'
@@ -19,6 +21,7 @@ export function SnapControl({ store, inline = false }: { store: ProjectStore; in
     return (
       <div className="snap-control inline" role="group" aria-label="Snap">
         <button
+          ref={snapButton}
           type="button"
           className={`snap-toggle snap-inline${on ? ' on' : ''}`}
           aria-pressed={on}
@@ -30,34 +33,36 @@ export function SnapControl({ store, inline = false }: { store: ProjectStore; in
         >
           <span className="tool-label">Snap {on ? gridLabel : 'Off'}</span>
         </button>
-        {open && (
-          <div id="snap-choices" className="inline-choices snap-choices" role="group" aria-label="Snap settings">
+        <AnchoredMenu id="snap-choices" className="snap-choices" open={open} onClose={() => setOpen(false)} label="Snap settings" triggerRef={snapButton} prefer="up">
+          <button
+            type="button"
+            className={on ? 'on' : ''}
+            aria-pressed={on}
+            title={on ? 'Snap is on. Press to move in small steps.' : 'Snap is off. Press to land on the grid.'}
+            onClick={() => {
+              store.toggle('snap')
+              setOpen(false)
+            }}
+          >
+            {on ? 'Snap On' : 'Snap Off'}
+          </button>
+          {SNAP_DIVISIONS.map((item) => (
             <button
+              key={item.id}
               type="button"
-              className={on ? 'on' : ''}
-              aria-pressed={on}
-              title={on ? 'Snap is on. Press to move in small steps.' : 'Snap is off. Press to land on the grid.'}
-              onClick={() => store.toggle('snap')}
+              className={on && item.id === division ? 'on' : ''}
+              aria-pressed={on && item.id === division}
+              title={`Grid size ${item.label}. Used when Snap is on.`}
+              onClick={() => {
+                store.setSnapDivision(item.id)
+                if (store.project.snap === false) store.toggle('snap')
+                setOpen(false)
+              }}
             >
-              {on ? 'Snap On' : 'Snap Off'}
+              {item.label}
             </button>
-            {SNAP_DIVISIONS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={on && item.id === division ? 'on' : ''}
-                aria-pressed={on && item.id === division}
-                title={`Grid size ${item.label}. Used when Snap is on.`}
-                onClick={() => {
-                  store.setSnapDivision(item.id)
-                  if (store.project.snap === false) store.toggle('snap')
-                }}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        )}
+          ))}
+        </AnchoredMenu>
       </div>
     )
   }

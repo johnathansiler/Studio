@@ -118,6 +118,15 @@ export function catalogMessage(result: CatalogResult, filteredCount: number, que
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 
+const CATALOG_TIMEOUT_MS = 8000
+
+function fetchWithTimeout(fetchImpl: FetchLike, url: string, init?: RequestInit) {
+  const timer = new AbortController()
+  const timeout = setTimeout(() => timer.abort(), CATALOG_TIMEOUT_MS)
+  const signal = init?.signal ?? timer.signal
+  return fetchImpl(url, { ...init, signal }).finally(() => clearTimeout(timeout))
+}
+
 function bytesOf(text: string) {
   const encoded = new TextEncoder().encode(text)
   return encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength)
@@ -131,7 +140,7 @@ export async function loadSoundCatalog(fetchImpl: FetchLike = (input, init) => f
   const url = soundIndexUrl()
   const store = cache
   try {
-    const response = await fetchImpl(url, { cache: 'no-store' })
+    const response = await fetchWithTimeout(fetchImpl, url, { cache: 'no-store' })
     if (response.ok) {
       const text = await response.text()
       let json: unknown

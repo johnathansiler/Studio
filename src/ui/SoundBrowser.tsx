@@ -187,9 +187,9 @@ export function SoundBrowser({
   const total = filtered.length + starterRows.length
   const keys = soundKeys(result.entries)
   const queryActive = Boolean(text || type !== 'all' || bpm !== 'any' || key || favoritesOnly)
-  const waiting = loading || (!startersReady && type !== 'one-shot' && type !== 'loop' && type !== 'drum')
+  const waiting = loading
   const message = waiting
-    ? 'Loading sounds…'
+    ? ''
     : total
       ? ''
       : catalogMessage(result, 0, queryActive || type === 'instrument')

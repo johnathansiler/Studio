@@ -76,8 +76,10 @@ describe('studio navigation', () => {
       await page.locator('.step-close').click()
       await page.locator('[data-step-sequencer="open"]').waitFor({ state: 'detached' })
 
-      const click = page.getByRole('button', { name: /^Click/ }).first()
+      await page.locator('.transport').getByRole('button', { name: /^Menu/ }).click()
+      const click = page.getByRole('button', { name: /^Metronome/ }).first()
       if (await click.getAttribute('aria-pressed') === 'true') await click.click()
+      await page.keyboard.press('Escape')
       await page.getByRole('button', { name: /^Play/ }).first().click()
       await page.waitForFunction(() => {
         const host = window as unknown as {

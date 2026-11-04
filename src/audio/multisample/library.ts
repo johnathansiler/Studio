@@ -55,19 +55,23 @@ export const STARTER_CATALOG: LibraryEntry[] = [
 
 const LICENSES = new Set<SampleLicense>(['CC0-1.0', 'Unlicense', 'public-domain'])
 
-type FetchLike = (input: string, init?: { headers?: Record<string, string> }) => Promise<Response>
+type FetchLike = (input: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => Promise<Response>
 
-/** `catalog.json` at the dataset root. A missing file keeps the built-in list. */
+/** `catalog.json` at the dataset root. A missing or hung file keeps the built-in list. */
 export async function fetchCatalog(base: string, fetchImpl: FetchLike = (input, init) => fetch(input, init)): Promise<LibraryEntry[]> {
   const url = libraryFileUrl(base, 'catalog.json')
+  const timer = new AbortController()
+  const timeout = setTimeout(() => timer.abort(), 8000)
   try {
-    const response = await fetchImpl(url)
+    const response = await fetchImpl(url, { signal: timer.signal })
     if (!response.ok) return STARTER_CATALOG.map((entry) => ({ ...entry }))
     const body = (await response.json()) as { instruments?: unknown }
     const parsed = parseCatalog(body?.instruments)
     return parsed.length ? parsed : STARTER_CATALOG.map((entry) => ({ ...entry }))
   } catch {
     return STARTER_CATALOG.map((entry) => ({ ...entry }))
+  } finally {
+    clearTimeout(timeout)
   }
 }
 

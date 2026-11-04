@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { AudioEngine } from '../audio/engine'
 import type { Participant, SessionClient } from '../remote/session'
@@ -10,6 +10,7 @@ import { collabChoosing, connectionLine, linkLooksFailed, personConnection, self
 import { SETUP_PLAIN } from './collabCopy'
 import { useFormFactor } from './form'
 import { TipButton } from './Hint'
+import { AnchoredMenu } from './AnchoredMenu'
 import { VersionsList } from './VersionsList'
 import type { Project } from '../model/types'
 import type { ProjectStore } from '../state/store'
@@ -553,6 +554,21 @@ function gradeForPerson(session: SessionClient, person: Participant): Connection
   })
 }
 
+function ManageMenu({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const button = useRef<HTMLButtonElement>(null)
+  return (
+    <>
+      <button ref={button} type="button" className="text-btn person-menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        Manage
+      </button>
+      <AnchoredMenu open={open} onClose={() => setOpen(false)} label="Manage" triggerRef={button}>
+        <span className="person-actions">{children}</span>
+      </AnchoredMenu>
+    </>
+  )
+}
+
 function ConnectionMark({ grade }: { grade: ConnectionGrade }) {
   return (
     <p className="connection-word" data-grade={grade}>
@@ -588,15 +604,12 @@ function PeoplePanel({
                   <button type="button" className="text-btn primary" onClick={() => session.admit(person.id)}>
                     Admit
                   </button>
-                  <details className="person-menu">
-                    <summary>Manage</summary>
-                    <span className="person-actions">
-                      <RoleSelect person={person} session={session} />
-                      <button type="button" className="text-btn" onClick={() => session.reject(person.id)}>
-                        Reject
-                      </button>
-                    </span>
-                  </details>
+                  <ManageMenu>
+                    <RoleSelect person={person} session={session} />
+                    <button type="button" className="text-btn" onClick={() => session.reject(person.id)}>
+                      Reject
+                    </button>
+                  </ManageMenu>
                 </span>
               )}
             </div>
@@ -691,18 +704,15 @@ function PersonRow({ person, session }: { person: Participant; session: SessionC
         </small>
       </div>
       {session.state.role === 'host' && !self && (
-        <details className="person-menu">
-          <summary>Manage</summary>
-          <span className="person-actions">
-            <RoleSelect person={person} session={session} />
-            <button className="text-btn" onClick={() => session.forceMute(person.id, !person.mutedByHost)}>
-              {person.mutedByHost ? 'Unmute' : 'Mute'}
-            </button>
-            <button className="text-btn" onClick={() => session.remove(person.id)}>
-              Remove
-            </button>
-          </span>
-        </details>
+        <ManageMenu>
+          <RoleSelect person={person} session={session} />
+          <button className="text-btn" onClick={() => session.forceMute(person.id, !person.mutedByHost)}>
+            {person.mutedByHost ? 'Unmute' : 'Mute'}
+          </button>
+          <button className="text-btn" onClick={() => session.remove(person.id)}>
+            Remove
+          </button>
+        </ManageMenu>
       )}
     </div>
   )

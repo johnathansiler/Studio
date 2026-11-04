@@ -21,12 +21,12 @@ const engine = {
   unlock() {},
 }
 
-function transportPage(shell: string, simple = false) {
+function transportPage(shell: string) {
   const store = new ProjectStore()
   const html = renderToStaticMarkup(createElement(TransportBar, {
     store,
     engine: engine as never,
-    simple,
+    simple: true,
     onPlay() {},
     onStop() {},
     onRecord() {},
@@ -39,10 +39,9 @@ function transportPage(shell: string, simple = false) {
 }
 
 const VIEWPORTS = [
-  { name: 'desktop', width: 1920, height: 1080, shell: 'studio', simple: false, words: ['Start', 'Play', 'Stop', 'Rec', 'Click', 'Count', 'Reset', 'Loop'] },
-  { name: 'phone', width: 412, height: 915, shell: 'phone', simple: true, words: ['Start', 'Play', 'Record', 'More'] },
-  { name: 'phone-360', width: 360, height: 800, shell: 'phone', simple: true, words: ['Start', 'Play', 'Record', 'More'] },
-  { name: 'fold', width: 768, height: 900, shell: 'fold', simple: false, words: ['Start', 'Play', 'Stop', 'Rec', 'Click', 'Count', 'Reset', 'Loop'] },
+  { name: 'desk', width: 1440, height: 900, shell: 'studio', words: ['Start', 'Play', 'Record', 'Menu'] },
+  { name: 'phone', width: 390, height: 844, shell: 'phone', words: ['Start', 'Play', 'Record', 'Menu'] },
+  { name: 'fold', width: 880, height: 1000, shell: 'fold', words: ['Start', 'Play', 'Record', 'Menu'] },
 ]
 
 describe('transport words', () => {
@@ -52,7 +51,7 @@ describe('transport words', () => {
       const page = await browser.newPage()
       for (const viewport of VIEWPORTS) {
         await page.setViewportSize({ width: viewport.width, height: viewport.height })
-        await page.setContent(transportPage(viewport.shell, viewport.simple), { waitUntil: 'load' })
+        await page.setContent(transportPage(viewport.shell), { waitUntil: 'load' })
         const report = await page.evaluate((words) => {
           const buttons = words.map((word) => {
             const node = [...document.querySelectorAll<HTMLElement>('.transport .t-word')].find((item) => item.textContent === word || item.textContent?.startsWith(`${word} `))!
@@ -100,32 +99,41 @@ describe('transport words', () => {
         expect(report.playClass).not.toContain(' on')
         expect(report.stopped).toBe(report.idle)
         expect(report.playing).not.toBe(report.stopped)
-        if (viewport.simple) {
-          expect(report.barRight).toBeLessThanOrEqual(report.viewport + 1)
-          expect(report.barScroll).toBeLessThanOrEqual(report.barClient + 1)
-          const packed = await page.evaluate(() => {
-            const drawer = document.querySelector('.transport-drawer') as HTMLElement
-            drawer.hidden = false
-            const buttons = [...drawer.querySelectorAll('button')].map((node) => {
-              const box = node.getBoundingClientRect()
-              return { text: (node.textContent || '').replace(/\s+/g, ' ').trim(), top: box.top, height: box.height, width: box.width }
-            })
-            const tempo = document.querySelector('.tempo-tap')
-            return {
-              buttons,
-              tapButton: buttons.some((button) => button.text === 'Tap'),
-              tempoLabel: tempo?.getAttribute('aria-label') || '',
-              rows: new Set(buttons.map((button) => Math.round(button.top))).size,
-            }
+        expect(report.barRight).toBeLessThanOrEqual(report.viewport + 1)
+        expect(report.barScroll).toBeLessThanOrEqual(report.barClient + 1)
+        const order = await page.evaluate(() => {
+          const words = [...document.querySelectorAll('.t-main .t-word, .t-main .tempo-kicker')].map((node) => (node.textContent || '').trim())
+          const menu = document.querySelector('.t-main .t-btn.menu')!.getBoundingClientRect()
+          const drawer = document.querySelector('.transport-drawer') as HTMLElement
+          drawer.hidden = false
+          drawer.removeAttribute('hidden')
+          drawer.style.display = 'flex'
+          const panel = drawer.getBoundingClientRect()
+          const buttons = [...drawer.querySelectorAll('button')].map((node) => {
+            const box = node.getBoundingClientRect()
+            return { text: (node.textContent || '').replace(/\s+/g, ' ').trim(), top: box.top, height: box.height, width: box.width }
           })
-          expect(packed.tapButton, viewport.name).toBe(false)
-          expect(packed.tempoLabel).toContain('Tap to set tempo')
-          expect(packed.rows, viewport.name).toBeLessThanOrEqual(2)
-          for (const button of packed.buttons) {
-            expect(button.height, `${viewport.name} ${button.text}`).toBeGreaterThanOrEqual(40)
-            expect(button.height, `${viewport.name} ${button.text}`).toBeLessThanOrEqual(42)
-            expect(button.width, `${viewport.name} ${button.text}`).toBeLessThan(viewport.width - 24)
+          const tempo = document.querySelector('.tempo-tap')
+          return {
+            words,
+            kicker: document.querySelector('.tempo-kicker')?.textContent,
+            buttons,
+            tapButton: buttons.some((button) => button.text === 'Tap'),
+            tempoLabel: tempo?.getAttribute('aria-label') || '',
+            lengthButton: buttons.some((button) => button.text === 'Length'),
+            menuTop: menu.top,
+            panelTop: panel.top,
           }
+        })
+        expect(order.words.slice(0, 5), viewport.name).toEqual(['Start', 'Play', 'Record', 'Tempo', 'Menu'])
+        expect(order.kicker).toBe('Tempo')
+        expect(order.tapButton, viewport.name).toBe(false)
+        expect(order.lengthButton, viewport.name).toBe(false)
+        expect(order.tempoLabel).toContain('Tap to set tempo')
+        expect(order.panelTop, viewport.name).toBeGreaterThanOrEqual(0)
+        for (const button of order.buttons) {
+          expect(button.height, `${viewport.name} ${button.text}`).toBeGreaterThanOrEqual(40)
+          expect(button.width, `${viewport.name} ${button.text}`).toBeLessThan(viewport.width - 8)
         }
         for (const button of report.buttons) {
           expect(button.display, `${viewport.name} ${button.word}`).not.toBe('none')

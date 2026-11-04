@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
 import { FEATURES } from '../features'
 import { GestureReadout, useDragValue } from './kit/controls'
+import { AnchoredMenu } from './AnchoredMenu'
 import type { AudioEngine } from '../audio/engine'
 import {
   GRAPH_LABELS,
@@ -342,6 +343,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
   const [graphMode, setGraphMode] = useState<GraphMode>('velocity')
   const [editOpen, setEditOpen] = useState(false)
   const [adding, setAdding] = useState(false)
+  const addButton = useRef<HTMLButtonElement>(null)
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('All')
   const [library, setLibrary] = useState<SoundEntry[]>([])
@@ -930,6 +932,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         {store.rackRoll && <DrumRoll store={store} engine={engine} />}
       </div>
       <button
+        ref={addButton}
         type="button"
         className="rack-add"
         title="Add a channel. Choose a kit sound or a library sound."
@@ -939,7 +942,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
       >
         Add
       </button>
-      {adding && (
+      <AnchoredMenu open={adding} onClose={() => setAdding(false)} label="Sounds to add" triggerRef={addButton} prefer="up">
         <Picker
           kit={kitChoices()}
           library={library}
@@ -951,7 +954,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
           onKit={(choice) => addChoice(choice)}
           onLibrary={(entry, index) => addChoice(libraryChoice(entry, index), entry)}
         />
-      )}
+      </AnchoredMenu>
     </div>
   )
 }

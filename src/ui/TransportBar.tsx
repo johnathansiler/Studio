@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { AnchoredMenu } from './AnchoredMenu'
 import type { AudioEngine } from '../audio/engine'
 import { formatLoopReadout } from '../model/loopEdit'
 import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, shouldOpenExactTempo, type TapMemory, type TapSource } from '../model/tap'
-import { formatMapBars, projectBeatSample, projectSampleBeat } from '../model/tempoMap'
-import { countInBarsOf, countInCaption, formatTimecode, quartersPerBar } from '../model/time'
+import { formatMapBars } from '../model/tempoMap'
+import { countInBarsOf, countInCaption, formatTimecode } from '../model/time'
 import { recordButtonOn } from '../model/transport'
 import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -14,20 +15,6 @@ import { TRANSPORT_COPY, copyOf } from './chrome'
 import { TipButton } from './Hint'
 import './loopRegion.css'
 import './remoteFixes.css'
-
-const LOOP_CHOICES = [1, 2, 4, 8] as const
-
-function loopMatchesBars(project: ProjectStore['project'], bars: number) {
-  const span = projectSampleBeat(project, project.loopEndSample) - projectSampleBeat(project, project.loopStartSample)
-  return Math.abs(span - bars * quartersPerBar(project.timeSignature)) < 0.02
-}
-
-function applyLoopBars(store: ProjectStore, bars: number) {
-  const project = store.project
-  const startBeat = projectSampleBeat(project, project.loopStartSample)
-  const end = projectBeatSample(project, startBeat + bars * quartersPerBar(project.timeSignature))
-  store.setLoop(project.loopEnabled, project.loopStartSample, end)
-}
 
 export function TransportBar({
   store,
@@ -77,8 +64,8 @@ export function TransportBar({
   const suppressFocus = useRef(false)
   const tapping = useRef(false)
   const flashTimer = useRef(0)
-  const [moreOpen, setMoreOpen] = useState(false)
-  const [lengthOpen, setLengthOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuButton = useRef<HTMLButtonElement>(null)
   const [editingTempo, setEditingTempo] = useState(false)
   const editTimer = useRef(0)
   const tempoWrap = useRef<HTMLDivElement>(null)
@@ -251,8 +238,8 @@ export function TransportBar({
     }, 0)
   }
 
-  const playing = status === 'playing'
   const running = status === 'playing' || status === 'recording' || status === 'counting-in'
+  void simple
   const transport = (id: string) => copyOf(TRANSPORT_COPY, id)
   const countBars = countInBarsOf(project)
   const countCaption = countInCaption(countBars)
@@ -260,7 +247,7 @@ export function TransportBar({
   const resetCopy = transport('reset')
   const loopRead = formatLoopReadout(project, project.loopStartSample, project.loopEndSample)
   const inSession = roomRole === 'host' || roomRole === 'guest'
-  const moreHint = 'Metronome, loop, reset, playhead, and sounds.'
+  const menuHint = 'Metronome, loop, reset, playhead, and sounds.'
   function armExactTempo(result: { bpm: number | null; ignored: boolean } | null) {
     window.clearTimeout(editTimer.current)
     if (!shouldOpenExactTempo(result) || store.remoteFollow) return
@@ -268,9 +255,11 @@ export function TransportBar({
   }
   const tempoLabel = `${tempoCopy.label}. Tap to set tempo. ${tempoCopy.hint}`
   const tempoField = editingTempo ? (
-        <input
+        <label className="bpm-readout tempo-edit">
+          <span className="tempo-kicker">Tempo</span>
+          <input
           ref={fieldRef}
-          className="bpm-readout"
+          className="tempo-figure"
           type="number"
           inputMode="decimal"
           min={30}
@@ -312,6 +301,7 @@ export function TransportBar({
           onPointerUp={onTempoPointerUp}
           onPointerCancel={onTempoPointerUp}
         />
+        </label>
   ) : (
         <button
           type="button"
@@ -343,73 +333,39 @@ export function TransportBar({
             memory.current = noteTapRelease(memory.current, performance.now())
           }}
         >
-          {formatTempo(tempo)}
+          <span className="tempo-kicker">Tempo</span>
+          <span className="tempo-figure">{formatTempo(tempo)}</span>
         </button>
   )
+  const loopWord = project.loopEnabled ? `Loop ${loopRead.length}` : 'Loop'
   const loopControl = (
-    <>
-      <div className={`loop-combo${project.loopEnabled ? ' on' : ''}`} role="group" aria-label="Loop">
-        <button
-          type="button"
-          className={`t-btn loop${project.loopEnabled ? ' on' : ''}`}
-          data-loop-readout="transport"
-          data-loop-length={loopRead.length}
-          data-loop-span={loopRead.span}
-          title={`${transport('loop').hint} ${loopRead.text}`}
-          aria-label={`Loop ${loopRead.length}. ${transport('loop').hint}`}
-          aria-pressed={project.loopEnabled}
-          disabled={store.remoteFollow}
-          onClick={() => store.toggle('loopEnabled')}
-        >
-          <span className="t-word">Loop {loopRead.length}</span>
-        </button>
-        <button
-          type="button"
-          className={`t-btn loop-length${lengthOpen ? ' on' : ''}`}
-          aria-expanded={lengthOpen}
-          aria-controls="loop-length-choices"
-          title="Choose 1, 2, 4, or 8 bars. The loop stays where it is."
-          aria-label="Loop length. Choose 1, 2, 4, or 8 bars."
-          disabled={store.remoteFollow}
-          onClick={() => setLengthOpen((open) => !open)}
-        >
-          <span className="t-word">Length</span>
-        </button>
-      </div>
-      {lengthOpen && (
-        <div id="loop-length-choices" className="inline-choices loop-lengths" role="group" aria-label="Loop length">
-          {LOOP_CHOICES.map((bars) => {
-            const chosen = loopMatchesBars(project, bars)
-            const label = bars === 1 ? '1 bar' : `${bars} bars`
-            return (
-              <button
-                key={bars}
-                type="button"
-                className={chosen ? 'on' : ''}
-                aria-pressed={chosen}
-                title={`Set the loop to ${label}.`}
-                onClick={() => applyLoopBars(store, bars)}
-              >
-                {label}
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </>
+    <button
+      type="button"
+      className={`t-btn loop${project.loopEnabled ? ' on' : ''}`}
+      data-loop-readout="transport"
+      data-loop-length={loopRead.length}
+      data-loop-span={loopRead.span}
+      title={`${transport('loop').hint} ${loopRead.text}`}
+      aria-label={`${loopWord}. ${transport('loop').hint}`}
+      aria-pressed={project.loopEnabled}
+      disabled={store.remoteFollow}
+      onClick={() => store.toggle('loopEnabled')}
+    >
+      <span className="t-word">{loopWord}</span>
+    </button>
   )
   const clickButton = (
         <TipButton
           id="transport-click"
           className={`t-btn click${project.metronomeEnabled ? ' on' : ''}`}
-          label={simple ? 'Metronome' : transport('click').label}
+          label="Metronome"
           hint={transport('click').hint}
           pressed={project.metronomeEnabled}
           disabled={store.remoteFollow}
           onClick={() => store.toggle('metronomeEnabled')}
         >
-          <span className="t-word">{simple ? 'Metronome' : 'Click'}</span>
-          {simple && <span className="t-state">{project.metronomeEnabled ? 'On' : 'Off'}</span>}
+          <span className="t-word">Metronome</span>
+          <span className="t-state">{project.metronomeEnabled ? 'On' : 'Off'}</span>
         </TipButton>
   )
   const countButton = (
@@ -448,78 +404,58 @@ export function TransportBar({
       </div>
   )
   return (
-    <div className={`transport${simple ? ' simple' : ''}`}>
+    <div className="transport simple">
       <AutomationFollow store={store} engine={engine} />
       {inSession && syncLabel ? <span className="sync-pill">{syncLabel}</span> : null}
-      {simple ? (
-        <>
-          <div className="t-main">
-            <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>
-              <span className="t-word">Start</span>
-            </TipButton>
-            <TipButton
-              className={`t-btn play${running ? ' on' : ''}`}
-              label={running ? transport('stop').label : transport('play').label}
-              hint={running ? transport('stop').hint : transport('play').hint}
-              pressed={running}
-              onPress={() => engine.unlock()}
-              onClick={running ? onStop : onPlay}
-            >
-              <span className="t-word">{running ? 'Stop' : 'Play'}</span>
-            </TipButton>
-            <TipButton className={`t-btn rec ${recordButtonOn(status) ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={recordButtonOn(status)} onPress={() => engine.unlock()} onClick={onRecord}>
-              <span className="t-word">Record</span>
-            </TipButton>
-            <div className="tempo-cluster" ref={tempoWrap}>{tempoField}</div>
-            <button
-              type="button"
-              className={`t-btn more${moreOpen ? ' on' : ''}`}
-              aria-expanded={moreOpen}
-              aria-controls="transport-more"
-              title={moreHint}
-              aria-label={`More. ${moreHint}`}
-              onClick={() => setMoreOpen((open) => !open)}
-            >
-              <span className="t-word">More</span>
-            </button>
-          </div>
-          <div id="transport-more" className="transport-drawer" hidden={!moreOpen} data-open={moreOpen ? 'true' : 'false'}>
-            {loopControl}
-            <div className="metro-combo" role="group" aria-label="Metronome">
-              {clickButton}
-              {countButton}
-            </div>
-            {resetButton}
-            {positionReadout}
-            <div id="transport-more-extra" className="transport-more-extra" />
-          </div>
-        </>
-      ) : (
-      <>
-      <div className="t-buttons">
+      <div className="t-main">
         <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>
           <span className="t-word">Start</span>
         </TipButton>
-        <TipButton className={`t-btn play ${playing ? 'on' : ''}`} label={playing ? transport('pause').label : transport('play').label} hint={playing ? transport('pause').hint : transport('play').hint} pressed={playing} onPress={() => engine.unlock()} onClick={onPlay}>
-          <span className="t-word">{playing ? 'Pause' : 'Play'}</span>
-        </TipButton>
-        <TipButton className="t-btn stop" label={transport('stop').label} hint={transport('stop').hint} onClick={onStop}>
-          <span className="t-word">Stop</span>
+        <TipButton
+          className={`t-btn play${running ? ' on' : ''}`}
+          label={running ? transport('stop').label : transport('play').label}
+          hint={running ? transport('stop').hint : transport('play').hint}
+          pressed={running}
+          onPress={() => engine.unlock()}
+          onClick={running ? onStop : onPlay}
+        >
+          <span className="t-word">{running ? 'Stop' : 'Play'}</span>
         </TipButton>
         <TipButton className={`t-btn rec ${recordButtonOn(status) ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={recordButtonOn(status)} onPress={() => engine.unlock()} onClick={onRecord}>
-          <span className="t-word">Rec</span>
+          <span className="t-word">Record</span>
         </TipButton>
-        {clickButton}
-        {countButton}
+        <div className="tempo-cluster" role="group" aria-label="Tempo" ref={tempoWrap}>{tempoField}</div>
+        <button
+          ref={menuButton}
+          type="button"
+          className={`t-btn menu${menuOpen ? ' on' : ''}`}
+          aria-expanded={menuOpen}
+          aria-controls="transport-menu"
+          title={menuHint}
+          aria-label={`Menu. ${menuHint}`}
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          <span className="t-word">Menu</span>
+        </button>
+      </div>
+      <AnchoredMenu
+        id="transport-menu"
+        className="transport-drawer"
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        label="Menu"
+        triggerRef={menuButton}
+        prefer="down"
+      >
+        {loopControl}
+        <div className="metro-combo" role="group" aria-label="Metronome">
+          {clickButton}
+          {countButton}
+        </div>
         {resetButton}
-      </div>
-      {positionReadout}
-      <div className="tempo-cluster" role="group" aria-label="Tempo" ref={tempoWrap}>
-        {tempoField}
-      </div>
-      {loopControl}
-      </>
-      )}
+        {positionReadout}
+        <div id="transport-menu-extra" className="transport-menu-extra" />
+      </AnchoredMenu>
       {takeProgress != null && (
         <div
           className="hq-take"

@@ -1,0 +1,152 @@
+.menu-library,
+.menu-song {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(340px, calc(100vw - 24px));
+  max-height: min(420px, 62vh);
+  min-width: 0;
+}
+
+.menu-search,
+.menu-field input,
+.menu-field select,
+.menu-row input {
+  height: 40px;
+  min-height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #101714;
+  color: var(--text);
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+.menu-search { width: 100%; }
+
+.menu-chips,
+.menu-pills,
+.menu-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.menu-chips button,
+.menu-pills button,
+.menu-tabs button,
+.menu-play,
+.menu-add,
+.menu-field,
+.menu-row button,
+.menu-hint button {
+  min-height: 40px;
+  height: 40px;
+  min-width: 40px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #1c2b24;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.menu-chips button.on,
+.menu-pills button.on,
+.menu-tabs button.on,
+.menu-play.on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+
+.menu-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.menu-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+}
+
+.menu-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+  min-height: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.menu-row-main strong,
+.menu-row input {
+  font-size: 13px;
+  font-weight: 680;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.menu-row-main small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.1;
+}
+
+.menu-row input { flex: 1 1 auto; min-width: 0; }
+
+.menu-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+}
+
+.menu-field input,
+.menu-field select {
+  width: 72px;
+  height: 32px;
+  min-height: 32px;
+}
+
+.menu-skel {
+  height: 40px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #1c2b24, #24352c, #1c2b24);
+  background-size: 200% 100%;
+  animation: menu-skel 1.1s linear infinite;
+}
+
+@keyframes menu-skel {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+.anchored-menu .menu-library,
+.anchored-menu .menu-song {
+  flex: 1 0 100%;
+}

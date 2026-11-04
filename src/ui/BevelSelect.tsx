@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { useFormFactor } from './form'
-import { GuideLayer } from './GuideLayer'
+import { AnchoredMenu } from './AnchoredMenu'
 import './guideSheet.css'
 
 export interface BevelOption {
@@ -31,15 +31,8 @@ export function BevelSelect({
 }) {
   const [open, setOpen] = useState(false)
   const form = useFormFactor()
+  const buttonRef = useRef<HTMLButtonElement>(null)
   const current = options.find((item) => item.value === value)?.label ?? value
-  useEffect(() => {
-    if (!open) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open])
   if (form === 'desk') {
     return (
       <select
@@ -59,6 +52,7 @@ export function BevelSelect({
   return (
     <>
       <button
+        ref={buttonRef}
         type="button"
         className={`bevel-select ${className ?? ''}`.trim()}
         aria-haspopup="dialog"
@@ -68,55 +62,31 @@ export function BevelSelect({
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation()
-          setOpen(true)
+          setOpen((shown) => !shown)
         }}
       >
         {children ?? current}
       </button>
-      {open && (
-        <GuideLayer>
+      <AnchoredMenu className="bevel-picker" open={open} onClose={() => setOpen(false)} label={label} triggerRef={buttonRef}>
+        {options.map((item) => (
           <button
+            key={item.value}
             type="button"
-            className="guide-scrim picker-scrim"
-            aria-label={`Close ${label}`}
+            className={`guide-choice${item.value === value ? ' on' : ''}`}
+            aria-pressed={item.value === value}
+            data-picker={label}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.preventDefault()
               event.stopPropagation()
+              onChange(item.value)
               setOpen(false)
             }}
-          />
-          <div className="guide-sheet sheet bevel-picker" role="dialog" aria-label={label} data-picker={label} onPointerDown={(event) => event.stopPropagation()}>
-            <div className="guide-handle" aria-hidden="true" />
-            <header className="guide-head">
-              <div>
-                <h2>{label}</h2>
-                {hint && <p>{hint}</p>}
-              </div>
-              <button type="button" className="guide-x" onClick={() => setOpen(false)} aria-label={`Close ${label}`}>Cancel</button>
-            </header>
-            <div className="guide-cards bevel-options">
-              {options.map((item) => (
-                <button
-                  key={item.value}
-                  type="button"
-                  className={`guide-choice${item.value === value ? ' on' : ''}`}
-                  aria-pressed={item.value === value}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    onChange(item.value)
-                    setOpen(false)
-                  }}
-                >
-                  <strong>{item.label}</strong>
-                </button>
-              ))}
-            </div>
-          </div>
-        </GuideLayer>
-      )}
+          >
+            <strong>{item.label}</strong>
+          </button>
+        ))}
+      </AnchoredMenu>
     </>
   )
 }

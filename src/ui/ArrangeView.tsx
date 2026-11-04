@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { GuideLayer } from './GuideLayer'
 import type { AudioEngine } from '../audio/engine'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { activeComp } from '../model/comp'
@@ -28,8 +27,10 @@ import type { ProjectStore } from '../state/store'
 import { activeTool, EDITOR_TOOL_KEYS, subscribeTools, toolClaimsGesture } from '../state/tools'
 import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
-import { PlaylistBrowser, type BrowserTab } from './PlaylistBrowser'
-import { AutomationModeBar, AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
+import type { BrowserTab } from './PlaylistBrowser'
+import { MenuLibrary } from './MenuLibrary'
+import { MenuSong } from './MenuSong'
+import { AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
 import { AutoTuneLaneMark, addOrOpenAutoTune } from './AutoTuneFace'
 import { OpenBeatMachineButton } from './BeatMachineButton'
 import { AddTrackButton } from './AddTrack'
@@ -41,8 +42,8 @@ import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { TRACK_ROW, TRACK_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
 import './guideSheet.css'
-import { ActionSheet, SheetRow, TipButton } from './Hint'
-import { RecordBar } from './RecordBar'
+import { SheetRow, TipButton } from './Hint'
+import { AnchoredMenu } from './AnchoredMenu'
 import { RemoteTimeline, TrackPresence, remoteClipMark, useRemotePeers } from './presenceMarks'
 import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, trimZone } from './touchEdit'
 import { laneDoubleClickAddsClip } from './clipKeys'
@@ -51,15 +52,36 @@ import { LoopRegion } from './LoopRegion'
 import { CommentControl, CommentPins } from './timelineComments'
 
 
-function ArrangeChrome({ browserOpen, setupOpen, onBrowser, onSetup }: { browserOpen: boolean; setupOpen: boolean; onBrowser: () => void; onSetup: () => void }) {
+function ArrangeChrome({
+  browserOpen,
+  setupOpen,
+  onBrowser,
+  onSetup,
+  browser,
+  song,
+}: {
+  browserOpen: boolean
+  setupOpen: boolean
+  onBrowser: () => void
+  onSetup: () => void
+  browser: ReactNode
+  song: ReactNode
+}) {
   const [host, setHost] = useState<HTMLElement | null>(null)
   useEffect(() => {
     const pick = () => {
-      setHost(document.getElementById('transport-more-extra') || document.getElementById('command-strip') || document.getElementById('tool-slot'))
+      const extra = document.getElementById('transport-menu-extra')
+      const extraOpen = extra && !extra.closest('[hidden]')
+      setHost((extraOpen ? extra : null) || document.getElementById('command-strip') || document.getElementById('tool-slot'))
     }
     pick()
+    const observer = new MutationObserver(pick)
+    observer.observe(document.body, { childList: true, subtree: true })
     window.addEventListener('resize', pick)
-    return () => window.removeEventListener('resize', pick)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', pick)
+    }
   }, [])
   const buttons = (
     <div className="arrange-panels">
@@ -84,6 +106,8 @@ function ArrangeChrome({ browserOpen, setupOpen, onBrowser, onSetup }: { browser
         <strong>Song</strong>
         <small>Record and markers</small>
       </button>
+      {browserOpen ? browser : null}
+      {setupOpen ? song : null}
     </div>
   )
   if (host) return createPortal(buttons, host)
@@ -636,14 +660,11 @@ export function ArrangeView({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [setupOpen])
-  const [browserOpen, setBrowserOpen] = useState(() => panelChoice('arrangeBrowser') ?? !compact)
-  useEffect(() => {
-    if (panelChoice('arrangeBrowser') != null) return
-    setBrowserOpen(!compact)
-  }, [compact])
+  const [browserOpen, setBrowserOpen] = useState(() => panelChoice('arrangeBrowser') ?? false)
   const [browserTab, setBrowserTab] = useState<BrowserTab>(libraryTab || 'sounds')
-  const [browserWidth, setBrowserWidth] = useState(300)
+  const [browserWidth] = useState(300)
   const [trackSheet, setTrackSheet] = useState<string | null>(null)
+  const [trackAnchor, setTrackAnchor] = useState<HTMLElement | null>(null)
   useEffect(() => {
     if (!libraryTab) return
     setBrowserOpen(true)
@@ -652,26 +673,16 @@ export function ArrangeView({
   const selected = project.tracks.flatMap((track) => track.clips.filter((clip) => clip.id === store.selectedClipId).map((clip) => ({ track, clip })))[0]
   const sheetTrack = project.tracks.find((track) => track.id === trackSheet) || null
 
-  function resizeBrowser(event: ReactPointerEvent) {
-    event.preventDefault()
-    const startX = event.clientX
-    const start = browserWidth
-    const move = (ev: PointerEvent) => setBrowserWidth(Math.min(520, Math.max(220, start + (ev.clientX - startX))))
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-  }
-
   return (
     <div className="arrange-wrap">
       <SmartTempoBar store={store} />
       <ArrangeChrome
         browserOpen={browserOpen}
         setupOpen={setupOpen}
+        browser={<MenuLibrary store={store} engine={engine} />}
+        song={<MenuSong store={store} engine={engine} session={session} onQuickPunch={onQuickPunch} onSeek={onSeek} />}
         onBrowser={() => {
+          setSetupOpen(false)
           setBrowserOpen((open) => {
             const next = !open
             if (!next) {
@@ -682,56 +693,12 @@ export function ArrangeView({
             return next
           })
         }}
-        onSetup={() => setSetupOpen((open) => !open)}
+        onSetup={() => {
+          setBrowserOpen(false)
+          setSetupOpen((open) => !open)
+        }}
       />
-      {setupOpen && (
-        <GuideLayer>
-          <button type="button" className="guide-scrim" aria-label="Close song setup" onClick={() => setSetupOpen(false)} />
-          <div id="arrange-setup" className={`guide-sheet song-sheet ${compact ? 'sheet' : 'pop'}`} role="dialog" aria-label="Song">
-            {compact && <div className="guide-handle" aria-hidden="true" />}
-            <header className="guide-head">
-              <div>
-                <h2>Song</h2>
-                <p>Automation, recording, and markers. These are not in the menu.</p>
-              </div>
-              <button type="button" className="guide-x" onClick={() => setSetupOpen(false)} aria-label="Close song setup">Cancel</button>
-            </header>
-            <section className="guide-section">
-              <h3>Automation</h3>
-              <p className="guide-note">Off ignores automation. Read plays it. Touch writes while you hold a fader. Latch keeps that value until playback stops.</p>
-              <AutomationModeBar store={store} />
-            </section>
-            <section className="guide-section">
-              <h3>Recording</h3>
-              <p className="guide-note">Where a recording starts and stops, and which input the selected audio track uses.</p>
-              <RecordBar store={store} engine={engine} session={session} onQuickPunch={onQuickPunch} inline />
-            </section>
-            <section className="guide-section">
-              <h3>Markers</h3>
-              <p className="guide-note">Name a section, drop a marker, or change the tempo at the playhead.</p>
-              <SongMapHead store={store} position={position} />
-            </section>
-          </div>
-        </GuideLayer>
-      )}
-      <div className={`playlist-frame ${browserOpen ? 'browser-open' : ''} ${phone ? 'phone-arrange' : ''}`} style={{ ['--browser' as string]: `${browserWidth}px` }}>
-      {browserOpen && compact && (
-        <button type="button" className="browser-scrim" aria-label="Close browser" title="Close the browser." onClick={() => { engine.stopPreview(); setBrowserOpen(false); rememberPanel('arrangeBrowser', false); onLibraryClose?.() }} />
-      )}
-      {browserOpen && (
-        <>
-          <PlaylistBrowser
-            store={store}
-            engine={engine}
-            phone={phone}
-            tab={browserTab}
-            onTab={setBrowserTab}
-            onSeek={onSeek}
-            onClose={() => { engine.stopPreview(); setBrowserOpen(false); rememberPanel('arrangeBrowser', false); onLibraryClose?.() }}
-          />
-          {!phone && <button type="button" className="browser-resize" aria-label="Browser width. Drag to resize." title="Drag to resize the browser." onPointerDown={resizeBrowser} />}
-        </>
-      )}
+      <div className={`playlist-frame ${phone ? 'phone-arrange' : ''}`} style={{ ['--browser' as string]: `${browserWidth}px` }}>
       <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'}>
       <div
         className="heads"
@@ -808,7 +775,7 @@ export function ArrangeView({
                   <i style={{ transform: `scaleX(${levels[track.id] ?? 0})` }} />
                 </span>
               </span>
-              <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); setTrackSheet(track.id) }}>
+              <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); setTrackAnchor(event.currentTarget); setTrackSheet(track.id) }}>
                 ⋮
               </TipButton>
             </div>
@@ -1125,19 +1092,24 @@ export function ArrangeView({
       </div>
       </div>
       </div>
-      {patternMenu && (
-        <div className="touch-menu" style={{ left: patternMenu.x, top: patternMenu.y }}>
-          <button type="button" title="Copy this pattern clip and place it just after." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.duplicateSelection(); setPatternMenu(null) }}>Duplicate</button>
-          <button type="button" title="Give this clip its own pattern so edits stay here." onPointerDown={(event) => event.stopPropagation()} onClick={() => { const id = store.selectedPatternClipId; if (id) store.makePatternClipUnique(id); setPatternMenu(null) }}>Make unique</button>
-          <button type="button" title="Remove this pattern clip from the arrangement." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setPatternMenu(null) }}>Delete</button>
-        </div>
-      )}
+      <AnchoredMenu
+        open={!!patternMenu}
+        onClose={() => setPatternMenu(null)}
+        label="Pattern clip"
+        anchor={patternMenu ? { left: patternMenu.x, top: patternMenu.y, width: 28, height: 28 } : null}
+        prefer="down"
+      >
+        <button type="button" title="Copy this pattern clip and place it just after." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.duplicateSelection(); setPatternMenu(null) }}>Duplicate</button>
+        <button type="button" title="Give this clip its own pattern so edits stay here." onPointerDown={(event) => event.stopPropagation()} onClick={() => { const id = store.selectedPatternClipId; if (id) store.makePatternClipUnique(id); setPatternMenu(null) }}>Make unique</button>
+        <button type="button" title="Remove this pattern clip from the arrangement." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setPatternMenu(null) }}>Delete</button>
+      </AnchoredMenu>
       <StemSheet store={store} />
       {store.clipSheet && selected ? (
         <ClipSheet store={store} trackId={selected.track.id} clip={selected.clip} onClose={() => store.closeClipSheet()} />
       ) : null}
-      {sheetTrack && (
-        <ActionSheet title={sheetTrack.name} hint="Everything else for this track." onClose={() => setTrackSheet(null)}>
+      <AnchoredMenu open={!!sheetTrack} onClose={() => setTrackSheet(null)} label={sheetTrack?.name ?? 'Track'} trigger={trackAnchor} prefer="down">
+        {sheetTrack && (
+        <>
           <SheetRow
             label={sheetTrack.soloSafe ? 'Solo safe on' : 'Solo safe'}
             hint="Stay audible when other tracks are soloed."
@@ -1237,8 +1209,9 @@ export function ArrangeView({
           )}
           <SheetRow label="Analyze" hint="Analyze the key, chords, and sections of this track." onClick={() => { setTrackSheet(null); onAnalyze(sheetTrack.id) }} />
           <SheetRow label={copyOf(TRACK_SHEET, 'remove').label} hint={copyOf(TRACK_SHEET, 'remove').hint} onClick={() => { store.removeTrack(sheetTrack.id); setTrackSheet(null) }} />
-        </ActionSheet>
-      )}
+        </>
+        )}
+      </AnchoredMenu>
     </div>
   )
 }
@@ -1517,14 +1490,18 @@ function ClipView({
           })}
         </div>
       )}
-      {menu && (
-        <div className="touch-menu" style={{ left: menu.x, top: menu.y }}>
-          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { onSplit(); setMenu(null) }}>Split</button>
-          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openStems(trackId, clip.id); setMenu(null) }}>Stems</button>
-          <button type="button" title="Spectrogram. Select a spot and remove clicks, hum, or noise." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openSpectral(trackId, clip.id); setMenu(null) }}>Repair</button>
-          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setMenu(null) }}>Delete</button>
-        </div>
-      )}
+      <AnchoredMenu
+        open={!!menu}
+        onClose={() => setMenu(null)}
+        label="Clip"
+        anchor={menu ? { left: menu.x, top: menu.y, width: 28, height: 28 } : null}
+        prefer="down"
+      >
+        <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { onSplit(); setMenu(null) }}>Split</button>
+        <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openStems(trackId, clip.id); setMenu(null) }}>Stems</button>
+        <button type="button" title="Spectrogram. Select a spot and remove clicks, hum, or noise." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openSpectral(trackId, clip.id); setMenu(null) }}>Repair</button>
+        <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setMenu(null) }}>Delete</button>
+      </AnchoredMenu>
       {(shown.stretch?.markers ?? []).map((marker) => (
         <i key={marker.id} className="warp" style={{ left: `${(marker.source / Math.max(1, sourceLen)) * 100}%` }} />
       ))}
