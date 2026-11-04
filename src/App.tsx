@@ -13,7 +13,7 @@ import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } 
 import { AwarenessChannel, bindAwareness, currentEditCursor, localAwareness, onPresencePoke } from './remote/presence'
 import { SessionClient } from './remote/session'
 import { buildRoomCopy, deleteProject, listProjects, listSnapshots, listVersions, loadLastProject, loadProject, loadRoomCopy, loadSnapshot, requestPersistentStorage, saveProject, saveRoomCopy, saveVersion, storageReport, type ProjectListItem, type WorkspaceSnapshot } from './storage/idb'
-import { inviteWins } from './model/negotiate'
+import { inviteWins, joinAction } from './model/negotiate'
 import { locksProject, readInviteToken } from './state/ops'
 import { readIdentity, writeIdentity } from './storage/identity'
 import { selectPiano } from './state/select'
@@ -379,16 +379,21 @@ export function App() {
     if (choice.dropStored && identity) writeIdentity({ ...identity, code: '' })
     if (identity?.transportMode) store.setTransportMode(identity.transportMode)
     const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-    if (urlCode && identity?.participantId && identity.code === urlCode) {
+    const action = joinAction({ urlCode, storedCode: identity?.code || '', hasParticipant: Boolean(identity?.participantId) })
+    const joinNameNow = identity?.name || joinName || 'Artist'
+    if (action === 'reconnect-url' || action === 'auto-join') {
+      if (urlCode) setJoinCode(urlCode)
       if (ios && !navigator.userActivation?.isActive) session.holdMediaForGesture()
-      session.connect({ name: identity.name || joinName || 'Artist', code: urlCode, invite: urlInvite })
+      session.connect({ name: joinNameNow, code: urlCode, invite: urlInvite })
       setJoinOpen(false)
-    } else if (urlCode) {
-      setJoinCode(urlCode)
-      setInvitePending(true)
-    } else if (choice.code && identity?.participantId) {
+      setInvitePending(false)
+      if (action === 'auto-join') {
+        writeSessionDock(true)
+        setCollabOpen(true)
+      }
+    } else if (action === 'resume-stored') {
       if (ios && !navigator.userActivation?.isActive) session.holdMediaForGesture()
-      session.connect({ name: identity.name || joinName || 'Artist', code: choice.code, invite: choice.code === urlCode ? urlInvite : '' })
+      session.connect({ name: joinNameNow, code: choice.code, invite: '' })
       setJoinOpen(false)
     }
     engine.sync(store.project, (id) => store.buffers.get(id))

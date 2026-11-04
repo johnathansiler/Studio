@@ -12,6 +12,7 @@ import {
   shiftPlacementForLateBuffer,
   type TimedPeak,
 } from '../model/latency'
+import { automaticMonitorMode, liveMediaTracks, MESH_TRANSCEIVER_KINDS, needsFreshCapture, offerAfterVideoAttach, relayOnlyGather, remoteTrackSlot, trackFact, videoSendChanged } from '../model/callVideo'
 import { DEFAULT_OPUS, mungeOpusSdp, type OpusOptions } from '../model/sdp'
 import { cameraAttempts, DEFAULT_VIDEO_BITRATE, musicCaptureAttempts, sendVideoCodecs, scaleResolutionDownBy, shouldSetVideoCodecPreferences, VIDEO_BITRATES, VIDEO_START_BITRATE, videoEncodingBudget, videoTargetForBwe } from '../model/codecs'
 import { isSilentTake, nextRelayGather, tcpRelayIceServers, udpIceServers, withTimeout, type IcePolicy, type MediaLink, type MediaPath, type TurnProvider } from '../model/media'
@@ -219,6 +220,12 @@ interface PeerLink {
   relayProtocols: { udp: number; tcp: number; tls: number }
   /** Clock and take transfer only. Media stays on the SFU, so this connection must not send tracks. */
   dataOnly?: boolean
+  /** The last offer or answer included a live camera or screen track. */
+  offeredLiveVideo: boolean
+  /** One ICE restart after a relay-only gather, so video is not stuck on the first offer. */
+  relayVideoRestarted: boolean
+  pendingVideoOffer: boolean
+  pendingVideoRestart: boolean
   rtp: {
     outbound: DiagDirection
     inbound: DiagDirection
@@ -259,6 +266,9 @@ export class SessionClient {
   private talkStream: MediaStream | null = null
   private screenStream: MediaStream | null = null
   private preview: MediaStream | null = null
+  /** Bumped on Leave so an in-flight capture cannot put stopped tracks back on screen. */
+  private captureGen = 0
+  private cameraJob: Promise<void> | null = null
   private left = false
   private backoff = 400
   private clockTimer = 0
@@ -349,7 +359,7 @@ export class SessionClient {
       camOn: saved?.camOn ?? true,
       screenOn: false,
       hand: false,
-      monitorMode: saved?.monitorMode || 'opus',
+      monitorMode: automaticMonitorMode,
       jamEnabled: saved?.jamEnabled ?? false,
       jamDelayMs: saved?.jamDelayMs ?? 40,
       opus: { ...DEFAULT_OPUS },
@@ -510,6 +520,7 @@ export class SessionClient {
   }
 
   leave() {
+    this.captureGen += 1
     this.left = true
     this.resetRoomRecovery()
     clearActiveSession()
@@ -750,17 +761,22 @@ export class SessionClient {
       this.state.hostLeft = false
       window.clearTimeout(this.joinTimer)
       this.emit()
-      const keepMedia = Boolean(this.musicStream || this.talkStream)
+      const audioLive = liveMediaTracks([...(this.musicStream?.getAudioTracks() || []), ...(this.talkStream?.getAudioTracks() || [])]).length > 0
+      const videoLive = liveMediaTracks(this.preview?.getVideoTracks() || []).length > 0
       // Subscribe as soon as the room is live. Waiting on the mic prompt, or on
       // a tap, was leaving the iPhone with no remote camera.
       this.syncMesh()
-      if (!keepMedia) {
+      if (!audioLive) {
         void this.openDevices()
           .catch((error) => {
             this.note(error instanceof Error ? `${error.message}. You are still in the room.` : 'Microphone setup did not finish. You are still in the room.')
           })
           .finally(() => { void this.markSoundLock() })
+      } else if (needsFreshCapture({ audioLive: true, videoLive, camOn: this.state.camOn })) {
+        void this.reopenCamera()
+        void this.markSoundLock()
       } else {
+        this.applySendTracks()
         void this.markSoundLock()
       }
       this.startMaintenance()
@@ -1094,37 +1110,49 @@ export class SessionClient {
   }
 
   private async captureDevices() {
+    const generation = this.captureGen
+    const stale = () => generation !== this.captureGen
+    const stopTracks = (stream: MediaStream | null | undefined) => {
+      stream?.getTracks().forEach((track) => {
+        track.onended = null
+        track.stop()
+      })
+    }
     try {
       await withTimeout(this.engine.resume(), 4000, 'Audio')
     } catch {
       this.note('Audio is locked until the next tap. The camera still opens.')
     }
+    if (stale()) return
     const primedMusic = this.primedMusic
     const primedCamera = this.primedCamera
     this.primedMusic = null
     this.primedCamera = null
     try {
-      this.musicStream?.getTracks().forEach((track) => track.stop())
+      stopTracks(this.musicStream)
       const stream = primedMusic
         ? await primedMusic
         : await this.gestureCapture(musicCaptureAttempts(this.state.micId).map((audio) => () => navigator.mediaDevices.getUserMedia({ audio, video: false })))
-      if (!stream) throw new Error('no microphone')
-      this.musicStream = stream
-      rememberSlotInput(this.state.micId, stream)
-      const track = this.musicStream.getAudioTracks()[0]
-      if (track) {
-        track.contentHint = 'music'
-        try {
-          await track.applyConstraints({
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
-            channelCount: { ideal: 2 },
-            sampleRate: { ideal: 48000 },
-          })
-        } catch {
-          this.note('Browser kept some mic processing on. The take is still recorded locally.')
-        }
+      if (stale()) {
+        stopTracks(stream)
+        return
+      }
+      const liveAudio = liveMediaTracks(stream?.getAudioTracks())
+      if (!liveAudio.length) throw new Error('no microphone')
+      this.musicStream = new MediaStream(liveAudio)
+      rememberSlotInput(this.state.micId, this.musicStream)
+      const track = liveAudio[0]
+      track.contentHint = 'music'
+      try {
+        await track.applyConstraints({
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: { ideal: 2 },
+          sampleRate: { ideal: 48000 },
+        })
+      } catch {
+        this.note('Browser kept some mic processing on. The take is still recorded locally.')
       }
       this.engine.setLocalMic(this.musicStream)
       if (this.state.role === 'guest') {
@@ -1135,15 +1163,30 @@ export class SessionClient {
         }
       }
     } catch {
-      this.note('Microphone permission is blocked. You can still listen.')
+      if (!stale()) this.note('Microphone permission is blocked. You can still listen.')
     }
-    if (this.talkStream && this.talkStream !== this.musicStream) this.talkStream.getTracks().forEach((track) => track.stop())
+    if (stale()) return
+    stopTracks(this.talkStream)
     let videoTracks: MediaStreamTrack[] = []
     if (this.state.camOn) {
       const camera = primedCamera
         ? await primedCamera
         : await this.gestureCapture(cameraAttempts(this.state.camId).map((video) => () => navigator.mediaDevices.getUserMedia({ audio: false, video })))
-      videoTracks = camera?.getVideoTracks() || []
+      if (stale()) {
+        stopTracks(camera)
+        return
+      }
+      videoTracks = liveMediaTracks(camera?.getVideoTracks())
+      for (const track of camera?.getVideoTracks() || []) {
+        if (track.readyState !== 'live') track.stop()
+      }
+    } else if (primedCamera) {
+      const camera = await primedCamera
+      stopTracks(camera)
+    }
+    if (stale()) {
+      videoTracks.forEach((track) => track.stop())
+      return
     }
     let talk: MediaStreamTrack | null = null
     try {
@@ -1160,20 +1203,20 @@ export class SessionClient {
         8000,
         'Talkback',
       )
-      talk = spoken.getAudioTracks()[0] || null
+      talk = spoken.getAudioTracks().find((track) => track.readyState === 'live') || null
       if (talk) talk.contentHint = 'speech'
     } catch {
-      this.note('Talkback mic failed. The performance mic is still available.')
+      if (!stale()) this.note('Talkback mic failed. The performance mic is still available.')
     }
-    if (!videoTracks.length && this.state.camOn) this.note('Camera failed. Check the browser camera permission.')
-    this.talkStream = new MediaStream([...(talk ? [talk] : []), ...videoTracks])
-    this.preview = new MediaStream(videoTracks)
-    for (const track of videoTracks) {
-      track.onended = () => {
-        if (this.state.camOn && document.visibilityState === 'visible') void this.openDevices()
-      }
+    if (stale()) {
+      talk?.stop()
+      videoTracks.forEach((track) => track.stop())
+      return
     }
-    const listed = await navigator.mediaDevices.enumerateDevices()
+    if (!videoTracks.length && this.state.camOn) this.note('Camera permission is blocked. You can still listen.')
+    this.installPreview(videoTracks, talk)
+    const listed = await navigator.mediaDevices.enumerateDevices().catch(() => [] as MediaDeviceInfo[])
+    if (stale()) return
     this.state.devices = listed.map((device) => ({ deviceId: device.deviceId, label: device.label || device.kind, kind: device.kind }))
     this.state.mediaTick += 1
     this.applySendTracks()
@@ -1181,11 +1224,72 @@ export class SessionClient {
     this.emit()
   }
 
+  /** Replace the self-view with live tracks only. Ended tracks are stopped and never reused. */
+  private installPreview(videoTracks: MediaStreamTrack[], talk: MediaStreamTrack | null) {
+    const previous = this.preview?.getVideoTracks() || []
+    this.preview = videoTracks.length ? new MediaStream(videoTracks) : null
+    this.talkStream = new MediaStream([...(talk ? [talk] : []), ...videoTracks])
+    for (const track of previous) {
+      if (!videoTracks.includes(track)) {
+        track.onended = null
+        if (track.readyState !== 'ended') track.stop()
+      }
+    }
+    for (const track of videoTracks) {
+      track.onended = () => {
+        if (!this.state.camOn || document.visibilityState === 'hidden') return
+        if (track.readyState === 'ended') void this.reopenCamera()
+      }
+    }
+  }
+
+  private reopenCamera() {
+    if (this.cameraJob) return this.cameraJob
+    const job = this.captureCamera().finally(() => {
+      if (this.cameraJob === job) this.cameraJob = null
+    })
+    this.cameraJob = job
+    return job
+  }
+
+  /** Ask for the camera again after Leave or after iOS ends the track. A denial stays in the room. */
+  private async captureCamera() {
+    if (!this.state.camOn) {
+      this.preview = null
+      this.state.mediaTick += 1
+      this.emit()
+      return
+    }
+    const generation = this.captureGen
+    const primed = this.primedCamera
+    this.primedCamera = null
+    const camera = primed
+      ? await primed
+      : await this.gestureCapture(cameraAttempts(this.state.camId).map((video) => () => navigator.mediaDevices.getUserMedia({ audio: false, video })))
+    if (generation !== this.captureGen) {
+      camera?.getTracks().forEach((track) => track.stop())
+      return
+    }
+    const live = liveMediaTracks(camera?.getVideoTracks())
+    if (!live.length) {
+      this.note('Camera permission is blocked. You can still listen.')
+      this.preview = null
+      this.state.mediaTick += 1
+      this.emit()
+      return
+    }
+    const talkAudio = liveMediaTracks(this.talkStream?.getAudioTracks() || [])
+    this.installPreview(live, talkAudio[0] || null)
+    this.applySendTracks()
+    this.state.mediaTick += 1
+    this.emit()
+  }
+
   /** iOS suspends the camera in the background. A visible page asks for it again if the track ended. */
   reviveMedia() {
     void this.engine.resume()
-    const video = this.preview?.getVideoTracks()[0]
-    if (this.state.camOn && (!video || video.readyState === 'ended')) void this.openDevices()
+    const video = liveMediaTracks(this.preview?.getVideoTracks())[0]
+    if (this.state.camOn && !video) void this.reopenCamera()
   }
 
   async calibrate() {
@@ -2120,20 +2224,14 @@ export class SessionClient {
       appliedVideoHeight: 0,
       relayProtocols: { udp: 0, tcp: 0, tls: 0 },
       dataOnly,
+      offeredLiveVideo: false,
+      relayVideoRestarted: false,
+      pendingVideoOffer: false,
+      pendingVideoRestart: false,
       rtp: null,
     }
     const impolite = !this.isPolite()
-    if (impolite && !dataOnly) {
-      const video = videoEncodingBudget(this.state.videoBitrate)
-      link.musicSender = pc.addTransceiver('audio', { direction: 'sendrecv' })
-      link.talkSender = pc.addTransceiver('audio', { direction: 'sendrecv' })
-      link.camSender = pc.addTransceiver('video', { direction: 'sendrecv', sendEncodings: [{ maxBitrate: video.maxBitrate, maxFramerate: video.maxFramerate, priority: video.priority }] })
-      link.screenSender = pc.addTransceiver('video', { direction: 'sendrecv', sendEncodings: [{ maxBitrate: video.maxBitrate, maxFramerate: video.maxFramerate, priority: video.priority }] })
-      this.preferOpus(link.musicSender)
-      this.preferVideo(link.camSender)
-      this.preferVideo(link.screenSender)
-      this.preferOpus(link.talkSender)
-    }
+    if (impolite && !dataOnly) this.ensureMeshTransceivers(link)
     this.peers.set(id, link)
     pc.onicecandidate = (event) => {
       const negotiationId = link.candidateNegotiationId
@@ -2157,37 +2255,10 @@ export class SessionClient {
       void this.enqueueSignal(id, () => this.onNegotiationNeeded(id, link))
     }
     pc.ontrack = (event) => {
-      const transceivers = pc.getTransceivers()
-      let index = transceivers.indexOf(event.transceiver)
-      if (index < 0 && event.transceiver.mid) index = transceivers.findIndex((item) => item.mid === event.transceiver.mid)
-      const track = event.track
-      const fresh = new MediaStream([track])
-      if (index === 0) link.music = fresh
-      else if (index === 1) link.talk = fresh
-      else if (index === 2) link.camera = fresh
-      else if (index === 3) link.screen = fresh
-      else if (track.kind === 'audio') {
-        if (!link.music.getAudioTracks().length) {
-          link.music = fresh
-          index = 0
-        } else {
-          link.talk = fresh
-          index = 1
-        }
-      } else if (!link.camera.getVideoTracks().length) {
-        link.camera = fresh
-        index = 2
-      } else {
-        link.screen = fresh
-        index = 3
-      }
-      this.tuneReceiver(event.receiver, index === 0)
-      track.onunmute = () => {
-        this.state.mediaTick += 1
-        this.emit()
-      }
-      this.state.mediaTick += 1
-      this.routeIncoming(id, index)
+      this.bindRemoteTrack(id, link, event.transceiver, event.track)
+    }
+    pc.onsignalingstatechange = () => {
+      if (pc.signalingState === 'stable') this.flushPendingVideo(id, link)
     }
     pc.ondatachannel = (event) => this.bindChannel(id, link, event.channel)
     pc.onconnectionstatechange = () => {
@@ -2220,6 +2291,124 @@ export class SessionClient {
 
   private isPolite() {
     return this.state.role !== 'host'
+  }
+
+  /** Video m-lines exist before createOffer. A camera that opens later renegotiates onto them. */
+  private ensureMeshTransceivers(link: PeerLink) {
+    if (link.dataOnly || link.camSender) return
+    const pc = link.pc
+    const video = videoEncodingBudget(this.state.videoBitrate)
+    const encoding = { maxBitrate: video.maxBitrate, maxFramerate: video.maxFramerate, priority: video.priority }
+    let audio = 0
+    let videos = 0
+    for (const kind of MESH_TRANSCEIVER_KINDS) {
+      const transceiver = pc.addTransceiver(kind, kind === 'video'
+        ? { direction: 'sendrecv' as const, sendEncodings: [{ ...encoding }] }
+        : { direction: 'sendrecv' as const })
+      if (kind === 'audio') {
+        if (audio === 0) link.musicSender = transceiver
+        else link.talkSender = transceiver
+        audio += 1
+        this.preferOpus(transceiver)
+      } else {
+        if (videos === 0) link.camSender = transceiver
+        else link.screenSender = transceiver
+        videos += 1
+        this.preferVideo(transceiver)
+      }
+    }
+  }
+
+  private bindRemoteTrack(id: string, link: PeerLink, transceiver: RTCRtpTransceiver, track: MediaStreamTrack) {
+    if (track.readyState === 'ended') return
+    const slot = this.slotFor(link, transceiver, track)
+    this.placeRemoteTrack(id, link, slot, track)
+    this.tuneReceiver(transceiver.receiver, slot === 'music')
+    if (track.onunmute) return
+    track.onunmute = () => {
+      this.placeRemoteTrack(id, link, slot, track)
+      this.state.mediaTick += 1
+      this.emit()
+    }
+    track.onended = () => {
+      this.state.mediaTick += 1
+      this.emit()
+    }
+  }
+
+  private slotFor(link: PeerLink, transceiver: RTCRtpTransceiver, track: MediaStreamTrack): 'music' | 'talk' | 'camera' | 'screen' {
+    if (link.camSender && (transceiver === link.camSender || (transceiver.mid && transceiver.mid === link.camSender.mid))) return 'camera'
+    if (link.screenSender && (transceiver === link.screenSender || (transceiver.mid && transceiver.mid === link.screenSender.mid))) return 'screen'
+    if (link.musicSender && (transceiver === link.musicSender || (transceiver.mid && transceiver.mid === link.musicSender.mid))) return 'music'
+    if (link.talkSender && (transceiver === link.talkSender || (transceiver.mid && transceiver.mid === link.talkSender.mid))) return 'talk'
+    const transceivers = link.pc.getTransceivers()
+    let index = transceivers.indexOf(transceiver)
+    if (index < 0 && transceiver.mid) index = transceivers.findIndex((item) => item.mid === transceiver.mid)
+    return remoteTrackSlot({
+      index,
+      kind: track.kind === 'video' ? 'video' : 'audio',
+      musicFilled: liveMediaTracks(link.music.getAudioTracks()).length > 0,
+      cameraFilled: liveMediaTracks(link.camera.getVideoTracks()).length > 0,
+    })
+  }
+
+  private placeRemoteTrack(id: string, link: PeerLink, slot: 'music' | 'talk' | 'camera' | 'screen', track: MediaStreamTrack) {
+    if (track.readyState === 'ended') return
+    const current = link[slot].getTracks()[0]
+    if (current?.id === track.id && current.readyState === 'live') return
+    link[slot] = new MediaStream([track])
+    if (slot === 'music' || slot === 'talk') this.routeIncoming(id, slot === 'music' ? 0 : 1)
+    this.state.mediaTick += 1
+    this.emit()
+  }
+
+  /** Picks up a video track that arrived after the first offer, including when ontrack fired early. */
+  private adoptRemoteReceivers(id: string, link: PeerLink) {
+    for (const transceiver of link.pc.getTransceivers()) {
+      const track = transceiver.receiver?.track
+      if (!track || track.readyState === 'ended') continue
+      this.bindRemoteTrack(id, link, transceiver, track)
+    }
+  }
+
+  private queueVideoRenegotiation(id: string, link: PeerLink, iceRestart: boolean) {
+    if (link.dataOnly || this.peers.get(id) !== link) return
+    if (this.isPolite()) {
+      this.send({ t: 'signal', to: id, data: { renegotiate: true, restart: iceRestart || undefined } })
+      return
+    }
+    if (link.pc.signalingState !== 'stable' || link.makingOffer) {
+      link.pendingVideoOffer = true
+      link.pendingVideoRestart = link.pendingVideoRestart || iceRestart
+      return
+    }
+    if (iceRestart) {
+      this.restartIce(link)
+      return
+    }
+    void this.enqueueSignal(id, () => this.onNegotiationNeeded(id, link))
+  }
+
+  private flushPendingVideo(id: string, link: PeerLink) {
+    if (!link.pendingVideoOffer || link.makingOffer || link.pc.signalingState !== 'stable') return
+    const restart = link.pendingVideoRestart
+    link.pendingVideoOffer = false
+    link.pendingVideoRestart = false
+    this.queueVideoRenegotiation(id, link, restart)
+  }
+
+  private acceptVideoRenegotiation(id: string, link: PeerLink, restart: boolean) {
+    if (this.isPolite() || this.peers.get(id) !== link) return
+    if (link.makingOffer || link.pc.signalingState !== 'stable') {
+      link.pendingVideoOffer = true
+      link.pendingVideoRestart = link.pendingVideoRestart || restart
+      return
+    }
+    if (restart) {
+      this.restartIce(link)
+      return
+    }
+    void this.enqueueSignal(id, () => this.onNegotiationNeeded(id, link))
   }
 
   /** Point the four slots at the m-lines the remote description actually negotiated. */
@@ -2298,6 +2487,10 @@ export class SessionClient {
     if (this.isPolite() || this.peers.get(id) !== link || link.pc.signalingState !== 'stable') return
     try {
       link.makingOffer = true
+      if (!link.dataOnly) {
+        this.ensureMeshTransceivers(link)
+        await this.attachSenders(id, link)
+      }
       const restart = Boolean(link.wantsRestart)
       link.wantsRestart = false
       link.negotiationId += 1
@@ -2307,6 +2500,8 @@ export class SessionClient {
       link.gatheringDone = false
       await this.commitLocal(link, await link.pc.createOffer(restart ? { iceRestart: true } : undefined))
       link.offers += 1
+      const sendingVideo = link.camSender?.sender.track?.readyState === 'live' || link.screenSender?.sender.track?.readyState === 'live'
+      if (sendingVideo) link.offeredLiveVideo = true
       this.sendOffer(id, link)
     } catch (error) {
       this.notePeerError(link, error)
@@ -2503,6 +2698,10 @@ export class SessionClient {
       link = this.state.sfu ? await this.createDataPeer(from) : await this.createPeer(from)
     }
     try {
+      if (data.renegotiate) {
+        this.acceptVideoRenegotiation(from, link, Boolean(data.restart))
+        return
+      }
       if (data.restart) {
         this.acceptRestartRequest(from, link)
         return
@@ -2544,11 +2743,16 @@ export class SessionClient {
             await this.attachSenders(from, link)
           }
           await this.commitLocal(link, await link.pc.createAnswer())
+          const sendingVideo = link.camSender?.sender.track?.readyState === 'live' || link.screenSender?.sender.track?.readyState === 'live'
+          if (sendingVideo) link.offeredLiveVideo = true
           link.answeredNegotiationId = negotiationId
           link.answerDescription = link.pc.localDescription
           this.send({ t: 'signal', to: from, data: { description: link.pc.localDescription, negotiationId } })
         }
-        if (!link.dataOnly) await this.tuneSenders(link)
+        if (!link.dataOnly) {
+          await this.tuneSenders(link)
+          this.adoptRemoteReceivers(from, link)
+        }
       } else if (Object.prototype.hasOwnProperty.call(data, 'candidate')) {
         const end = !candidate || !candidate.candidate
         if (!end && negotiationId != null && link.remoteNegotiationId != null && negotiationId !== link.remoteNegotiationId) return
@@ -2749,20 +2953,35 @@ export class SessionClient {
     return track
   }
 
-  private async attachSenders(_id: string, link: PeerLink) {
+  private async attachSenders(id: string, link: PeerLink) {
     // The answerer starts recvonly until we attach a track. Direction is set here,
     // before createAnswer, so the answer is willing to send. This is not an SDP rewrite.
     for (const transceiver of [link.musicSender, link.talkSender, link.camSender, link.screenSender]) {
       if (!transceiver || transceiver.direction === 'stopped' || transceiver.direction === 'sendrecv' || transceiver.direction === 'sendonly') continue
       transceiver.direction = 'sendrecv'
     }
+    const previousCam = trackFact(link.camSender?.sender.track)
+    const previousScreen = trackFact(link.screenSender?.sender.track)
     await link.musicSender?.sender.replaceTrack(this.performanceTrack())
-    const talk = this.state.talkOn ? this.talkStream?.getAudioTracks()[0] || null : null
+    const talk = this.state.talkOn ? this.talkStream?.getAudioTracks().find((track) => track.readyState === 'live') || null : null
     await link.talkSender?.sender.replaceTrack(talk)
     const cam = this.cameraTrack()
     await link.camSender?.sender.replaceTrack(cam)
     const screen = this.screenTrack()
     await link.screenSender?.sender.replaceTrack(screen)
+    const camChanged = videoSendChanged(previousCam, trackFact(cam))
+    const screenChanged = videoSendChanged(previousScreen, trackFact(screen))
+    const negotiated = link.offers > 0 || link.answeredNegotiationId != null
+    if (!link.dataOnly && !link.makingOffer && negotiated && (camChanged || screenChanged)) {
+      link.offeredLiveVideo = false
+      const plan = offerAfterVideoAttach({
+        trackBecameLive: true,
+        relayOnly: relayOnlyGather(link.gathered) && (link.everConnected || link.gatheringDone),
+        alreadyRestarted: link.relayVideoRestarted,
+      })
+      if (plan.iceRestart) link.relayVideoRestarted = true
+      this.queueVideoRenegotiation(id, link, plan.iceRestart)
+    }
     this.enableTrack(link.musicSender, this.state.musicOn)
     this.enableTrack(link.talkSender, this.state.talkOn)
     if (cam) cam.enabled = true
@@ -2904,6 +3123,7 @@ export class SessionClient {
       speaker = this.state.selfId || null
     }
     for (const [id, link] of this.peers) {
+      if (!link.dataOnly) this.adoptRemoteReceivers(id, link)
       const stats = await link.pc.getStats()
       let rtt: number | null = null
       let jitter: number | null = null
@@ -3543,16 +3763,17 @@ export class SessionClient {
   }
 
   videoStream(peerId: string, kind: 'camera' | 'screen' | 'self') {
-    if (kind === 'self') return this.preview?.getVideoTracks().length ? this.preview : null
-    const remote = this.remoteStreams.get(peerId)
-    if (remote) {
-      const stream = kind === 'camera' ? remote.camera : remote.screen
-      return stream.getVideoTracks().length ? stream : null
+    const liveOf = (stream: MediaStream | null | undefined) => {
+      const live = liveMediaTracks(stream?.getVideoTracks())
+      if (!live.length) return null
+      return live.length === (stream?.getVideoTracks().length || 0) ? stream || null : new MediaStream(live)
     }
+    if (kind === 'self') return liveOf(this.preview)
+    const remote = this.remoteStreams.get(peerId)
+    if (remote) return liveOf(kind === 'camera' ? remote.camera : remote.screen)
     const link = this.peers.get(peerId)
     if (!link) return null
-    const stream = kind === 'camera' ? link.camera : link.screen
-    return stream.getVideoTracks().length ? stream : null
+    return liveOf(kind === 'camera' ? link.camera : link.screen)
   }
 
   private nameOf(id: string) {

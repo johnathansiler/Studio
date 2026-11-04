@@ -1,6 +1,34 @@
 import { downloadBlob } from './format'
 
 /** Phones use the system share sheet. Everywhere else copies the link. */
+export async function shareSessionLink(
+  url: string,
+  input: {
+    phone: boolean
+    share?: (data: ShareData) => Promise<void>
+    writeText?: (value: string) => Promise<void>
+  },
+): Promise<'shared' | 'copied' | 'aborted' | 'failed'> {
+  const nav = navigator as Navigator & { share?: (data: ShareData) => Promise<void> }
+  const share = input.share ?? (input.phone ? nav.share?.bind(nav) : undefined)
+  if (input.phone && typeof share === 'function') {
+    try {
+      await share({ title: 'CueHarbor session', url })
+      return 'shared'
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return 'aborted'
+    }
+  }
+  const write = input.writeText ?? ((value: string) => navigator.clipboard.writeText(value))
+  try {
+    await write(url)
+    return 'copied'
+  } catch {
+    return 'failed'
+  }
+}
+
+/** Phones use the system share sheet. Everywhere else copies the link. */
 export async function presentShare(url: string, title: string): Promise<'shared' | 'copied' | 'aborted' | 'failed'> {
   const nav = navigator as Navigator & { share?: (data: ShareData) => Promise<void> }
   if (typeof nav.share === 'function') {

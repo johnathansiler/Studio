@@ -22,7 +22,7 @@ export const VIEW_COPY: Copy[] = [
   { id: 'collab', label: 'Collab', hint: 'Call, video, and remote recording. Stays closed until you open this tab.' },
 ]
 
-/** Tabs on the shell. Collab is drawn beside these. Session stays in VIEW_COPY and returns with FEATURES.session. */
+/** Tabs beside Collab. Collab itself is the first tab in the bar. Session stays in VIEW_COPY and returns with FEATURES.session. */
 export function studioViewTabs(): Copy[] {
   return VIEW_COPY.filter((item) => item.id !== 'collab' && (FEATURES.session || item.id !== 'session'))
 }
@@ -233,7 +233,7 @@ export const CALL_COPY: Copy[] = [
   { id: 'mic', label: 'Mic', hint: 'Your talkback mic in the call. This is not the recording input.' },
   { id: 'cam', label: 'Cam', hint: 'Show or hide your camera.' },
   { id: 'share', label: 'Share', hint: 'Share your screen with the room.' },
-  { id: 'settings', label: 'Call setup', hint: 'Cue mix, calibration, jam, and devices.' },
+  { id: 'settings', label: 'Call setup', hint: 'Your sound, recording delay, and which devices to use.' },
   { id: 'monitor', label: 'Monitor', hint: 'Switch the cue you hear between Opus and PCM.' },
   { id: 'create', label: 'Create invite', hint: 'Start a room and get a link to share.' },
   { id: 'join', label: 'Join', hint: 'Enter a room with an invite code.' },

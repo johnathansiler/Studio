@@ -151,6 +151,25 @@ export function ignoreIncomingOffer(input: {
   return !input.polite && !readyForOffer
 }
 
+/**
+ * A shared link joins by itself.
+ * The same browser opening its own link reconnects.
+ * A saved room with no link in the URL comes back without a setup step.
+ */
+export function joinAction(input: {
+  urlCode: string
+  storedCode: string
+  hasParticipant: boolean
+}): 'reconnect-url' | 'auto-join' | 'resume-stored' | 'none' {
+  const url = (input.urlCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const stored = (input.storedCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const choice = inviteWins(url, stored)
+  if (url && input.hasParticipant && stored === url) return 'reconnect-url'
+  if (url) return 'auto-join'
+  if (choice.code && input.hasParticipant) return 'resume-stored'
+  return 'none'
+}
+
 /** An invite link wins. The stored code is used only when the URL has none. */
 export function inviteWins(urlCode: string, storedCode: string) {
   const url = (urlCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
