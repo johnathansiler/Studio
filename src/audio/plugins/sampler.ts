@@ -1,3 +1,4 @@
+import { SampleGlide } from '../core/smooth'
 import { descriptor, FACTORY } from './catalog'
 import { clamp, sanitize } from './dsp'
 import { renderStretch } from '../stretch/engine'
@@ -131,6 +132,8 @@ export function createSampler(sampleRate: number): SamplerProcessor {
   const played = new Map<string, Float32Array>()
   const tails: Tail[] = []
   const pending: ScheduledNote[] = []
+  const gainGlide = new SampleGlide()
+  const panGlide = new SampleGlide()
   const hear = (id: string, channel: Float32Array | null) => {
     if (!channel?.length) return null
     const fileRate = state.sourceRate && state.sourceRate > 0 ? state.sourceRate : sampleRate
@@ -256,7 +259,10 @@ export function createSampler(sampleRate: number): SamplerProcessor {
       const tailRelease = Math.max(32, Math.round(sampleRate * 0.008))
       const cutoff = params.cutoff ?? 16000
       const coeff = 1 - Math.exp((-2 * Math.PI * clamp(cutoff, 40, sampleRate * 0.45)) / sampleRate)
-      const gain = clamp(params.gain ?? 0.8, 0, 1)
+      const gainTarget = clamp(params.gain ?? 0.8, 0, 1)
+      const panTarget = clamp(params.pan ?? 0, -1, 1)
+      gainGlide.prepare(ctx.sampleRate)
+      panGlide.prepare(ctx.sampleRate)
       const playRate = state.speed && state.speed > 0 ? state.speed : 1
       const beat = Math.max(2, Math.round((sampleRate * 60) / Math.max(1, ctx.tempo)))
       for (const voice of voices) {
@@ -284,6 +290,8 @@ export function createSampler(sampleRate: number): SamplerProcessor {
         } else voice.rate = playbackRateFor(voice.note + (params.pitch ?? 0), voice.root || state.root) * playRate
       }
       for (let i = 0; i < n; i++) {
+        const gain = gainGlide.next(gainTarget)
+        const pan = panGlide.next(panTarget)
         let left = 0
         let right = 0
         for (const voice of voices) {
@@ -306,7 +314,6 @@ export function createSampler(sampleRate: number): SamplerProcessor {
             continue
           }
           const sample = readVoice(voice, coeff) * voice.env * voice.vel * gain
-          const pan = clamp(params.pan ?? 0, -1, 1)
           left += sample * (pan <= 0 ? 1 : 1 - pan)
           right += sample * (pan >= 0 ? 1 : 1 + pan)
         }

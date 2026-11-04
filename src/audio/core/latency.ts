@@ -1,3 +1,4 @@
+import { latencyOf } from '../plugins/catalog'
 import { edgeDelays, type RoutePoint } from '../routing'
 
 /** Sum of reported plugin latencies, ignoring bypassed slots. */
@@ -8,6 +9,24 @@ export function sumLatency(samples: readonly number[]) {
     if (n > 0) total += n
   }
   return total
+}
+
+/**
+ * Latency the mixer should align to.
+ * The processor's own report wins when it is larger than the catalog formula,
+ * which is what a worklet posts after it has rendered.
+ */
+export function reportedLatency(
+  pluginId: string,
+  params: Record<string, number>,
+  sampleRate: number,
+  enabled: boolean,
+  processorSamples = 0,
+  live = true,
+) {
+  if (!enabled) return 0
+  const declared = latencyOf(pluginId, params, sampleRate, true, live)
+  return Math.max(0, declared, processorSamples)
 }
 
 /**

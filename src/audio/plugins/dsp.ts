@@ -97,6 +97,37 @@ export function copyCoeffs(target: Biquad, next: Biquad) {
 }
 
 /** Replace non-finite samples and flush denormals. */
+/** Compares parameter numbers without building a string on the audio thread. */
+export function stampMoved(held: Float64Array, values: readonly number[]) {
+  let moved = false
+  for (let i = 0; i < held.length; i++) {
+    const value = values[i] ?? 0
+    if (held[i] !== value) {
+      held[i] = value
+      moved = true
+    }
+  }
+  return moved
+}
+
+export function stampParams(held: Float64Array, params: Record<string, number>, keys: readonly string[]) {
+  let moved = false
+  for (let i = 0; i < keys.length; i++) {
+    const value = params[keys[i]] ?? 0
+    if (held[i] !== value) {
+      held[i] = value
+      moved = true
+    }
+  }
+  return moved
+}
+
+export function freshStamp(count: number) {
+  const held = new Float64Array(count)
+  held.fill(Number.NaN)
+  return held
+}
+
 export function sanitize(sample: number) {
   if (!Number.isFinite(sample) || Math.abs(sample) < 1e-15) return 0
   return sample

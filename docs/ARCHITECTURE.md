@@ -6,7 +6,7 @@ This is a gap analysis of the current browser app against the professional DAW e
 - Native apps: that core on CoreAudio / AVAudioEngine (iOS) and Oboe / AAudio (Android).
 - DAW plugin: the same core behind VST3, AU, and AAX.
 
-Phase 1 (this change) adds the host-agnostic plugin contract and tightens the browser render loop. It does not change the mix, the meters' paint behavior, or the screen.
+Phase 1 added the host-agnostic plugin contract and tightened the browser render loop. Phase 2, this change, makes stepped parameters jump, smooths simple gains per sample, delays a latent plugin's dry path, splits instrument blocks on MIDI sample offsets, prepares the heavy plugin windows, and adds a latency setting. It does not change the meters' paint behavior. The native port in `core/` is a separate builder and is not part of this change.
 
 ## How the spec maps onto the browser
 
@@ -15,14 +15,20 @@ Phase 1 (this change) adds the host-agnostic plugin contract and tightens the br
 | Render thread | AudioWorklet `process()` (`src/audio/insert.worklet.ts`). A ScriptProcessor remains only as a fallback in `src/audio/liveRack.ts`. | Real-time audio callback. No DOM and no Web Audio types in `src/audio/core`. |
 | DSP core | TypeScript processors under `src/audio/plugins`. WASM later, only where a profiler says the TS loop is the limit. | Same processors compiled from the shared core. |
 | Thread queues | MessagePort today. `SharedArrayBuffer` only when `crossOriginIsolated` is already true (`src/audio/engine.ts` key note path, `src/audio/core/meter.ts`). | Lock-free SPSC rings. |
-| Buffer size | `AudioContext` `latencyHint` (`interactive`, then `balanced`) in `openContext` (`src/audio/engine.ts`). `baseLatency` and `outputLatency` are read for monitoring delay. | 64 / 128 / 256 / 512 / 1024 / 2048 sample callbacks. |
+| Buffer size | Settings → Latency offers Lowest, Balanced, and Playback. Those are `AudioContext` `latencyHint` values `interactive`, `balanced`, and `playback` (`src/audio/core/buffer.ts`, `openContext` in `src/audio/engine.ts`). The same row shows measured base and output latency. | 64 / 128 / 256 / 512 / 1024 / 2048 sample callbacks. |
 | Interruptions | `visibilitychange` in `src/App.tsx`, plus `AudioContext` `statechange` including iOS `interrupted` (`src/audio/core/session.ts`, `AudioEngine.recoverAudioSession`). | OS audio-session notifications. |
 | Meters | DOM strips with `holdMeter` (`src/ui/levels.ts`, `src/ui/MixerView.tsx`, `src/ui/ArrangeView.tsx`) so a short drum hit stays visible. Canvas is used for waveforms and the tune graph, not as the mixer meter. | Metal (iOS) or Vulkan / OpenGL (Android). The plugin format's UI framework for VST3 / AU / AAX. |
 | Plugin loading | JSON manifests from `pluginManifests()` (`src/audio/core/registry.ts`). Modules load through the existing registry (`src/audio/plugins/registry.ts`). | Compiled bundles. `dlopen` stays inside the native host, not in this contract. |
 
 AAudio, Oboe, CoreAudio, `mmap`, Metal, Vulkan, and `dlopen` are not implemented. They are the native column above, not features the web build pretends to have.
 
-`SharedArrayBuffer` needs `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy`. Those headers break cross-origin loads this app depends on (Hugging Face sample libraries, the pinned jsDelivr ONNX runtime) and can break WebRTC video. The web build does not send them. The meter bus uses a plain `Float32Array` unless the page is already cross-origin isolated.
+`SharedArrayBuffer` needs `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`. The web build does not send them. The meter bus uses a plain `Float32Array` unless the page is already cross-origin isolated.
+
+Checked on 4 Nov 2026, without turning the headers on:
+
+- **jsDelivr would survive.** `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/ort-wasm-simd-threaded.wasm` answered `Cross-Origin-Resource-Policy: cross-origin` and `Access-Control-Allow-Origin: *`. The pinned ONNX runtime can load under `require-corp`.
+- **Hugging Face fetches would survive. A no-cors embed would not.** The stem weight at `huggingface.co/.../resolve/main/htdemucs_fp16weights.onnx`, requested with `Origin: https://cueharbor.onrender.com`, answered `Access-Control-Allow-Origin: https://cueharbor.onrender.com` and redirected to a CDN that answered `Access-Control-Allow-Origin: *`. Neither response sent `Cross-Origin-Resource-Policy`. This app loads libraries and stem weights with `fetch()`, which is CORS mode, so `require-corp` allows them. An audio or image tag without CORS would be blocked because the CORP header is missing.
+- **WebRTC should survive, and was not placed under the headers.** Calls, `getUserMedia`, and Cloudflare TURN are not cross-origin page subresources. `same-origin` COOP would drop `window.opener` for a cross-origin popup. This app joins the call in the same page. A live call on an isolated document was not run, so the headers stay off.
 
 ## 2. Core engine
 
@@ -32,7 +38,9 @@ AAudio, Oboe, CoreAudio, `mmap`, Metal, Vulkan, and `dlopen` are not implemented
 
 **Phase 1.** The worklet prepares chain pools, automation scratch, parameter objects, and meter rows before `process()`. A steady 128, 256, or 512 sample quantum does not allocate those. Plugin internals that sized themselves on the first block are primed from the state message via `primeProcessor` (`src/audio/core/adapt.ts`). The master limiter's multi-stage buffer is reused (`series` in `src/audio/plugins/dispatch.ts`). There is still no lock and no `await` in `process()`.
 
-**Not done.** Some plugin code (reverb, tune, the first block after a quantum the pool does not know) can still allocate. Offline rendering allocates on purpose. There is no user control for 64–2048 samples and no automatic buffer growth when the device is hot. Compensation lines up tracks, buses, and sends. It does not delay the dry path inside one plugin when wet is below 1, so a latent plugin that is not fully wet can still comb-filter.
+**Phase 2.** Reverb modes, the tune and amp analysis windows, linear-EQ FFT scratch, and the insert scratch pairs are built before `process`. EQ parameter checks no longer build a JSON string on the audio thread. The worklet prepares chain and automation buffers for 128, 256, 512, 1024, and 2048 sample quanta. A steady quantum in that range does not allocate those. A quantum above 2048, or a note slice's buffer view on the block that contains a MIDI event, can still allocate once. Offline rendering still allocates its output buffers on purpose. There is no automatic buffer growth when the device is hot. The latency setting is the buffer control that exists on the web.
+
+**Phase 2 delay.** When a plugin reports latency and wet is below 1, `processChain` delays the dry samples by that amount before the crossfade. Track, send, and master edges use `reportedLatency`, which is the larger of the catalog formula and the processor's own `latencySamples` (the worklet posts that number). A pure delay at half wet matches the fully wet path. Parallel branches that `compensateGraph` lines up cancel.
 
 ### 2.2 Multi-core task graph
 
@@ -42,7 +50,7 @@ AAudio, Oboe, CoreAudio, `mmap`, Metal, Vulkan, and `dlopen` are not implemented
 
 ### 2.3 Transport and timing
 
-**What exists.** `projectSampleBeat` / `samplesAtBeat` (`src/model/tempoMap.ts`) convert beats and samples, including tempo ramps. Automation can be applied per sample (`processSampleAccurate`). Clips, count-in, and the step sequencer are scheduled against the audio clock in `src/audio/engine.ts`. MIDI notes into the insert worklet are still messages, not sample offsets inside the block. The new `MidiEvent.sampleOffset` field is on the contract. Legacy `note(pitch, velocity)` is called at the start of `processBlock`, which matches today's block delivery.
+**What exists.** `projectSampleBeat` / `samplesAtBeat` (`src/model/tempoMap.ts`) convert beats and samples, including tempo ramps. Automation of a cheap gain can be applied per sample (`processSampleAccurate`). A look-ahead or pitch plugin keeps one value for the block. Clips, count-in, and the step sequencer are scheduled against the audio clock in `src/audio/engine.ts`. `processBlock` and the insert chain split at `MidiEvent.sampleOffset`, so a note starts on that sample. The worklet turns a note message's audio-clock time into an offset inside the current quantum. Sampler `schedule` was already sample-accurate and is left on that path. A note at offset 0 matches a note that starts the block.
 
 ### 2.4 Memory and streaming
 
@@ -79,7 +87,7 @@ The live worklet still calls `processor.process` directly so the sound path stay
 
 ### 3.2 Architecture principles
 
-**Smoothing.** `ParamSmoother` and `BlockSmoother` (`src/audio/core/smooth.ts`) use the same 5–15 ms exponential approach as `glideValue` (`src/audio/paramCurve.ts`). The worklet smooths every numeric parameter once per block, which is what it already did, without building a new parameter object per quantum. Per-sample stepping is implemented and tested. Existing processors still receive one value per block, because calling them one sample at a time would change filters and look-ahead plugins.
+**Smoothing.** `ParamSmoother` and `BlockSmoother` (`src/audio/core/smooth.ts`) use the same 5–15 ms exponential approach as `glideValue` (`src/audio/paramCurve.ts`). Stepped and enum parameters, including `kind` and `mode`, jump to the new value. Gain, pan, mix, drive, output, and the insert wet crossfade move one sample at a time (`SampleGlide`) so a knob does not zipper. Look-ahead and pitch plugins still receive one value per block. Cheap automation, such as a gain lane, is applied per sample. A moving control on a look-ahead plugin stays one value for that block.
 
 **Meters.** `writeMeter` / `readMeter` (`src/audio/core/meter.ts`) are a single-writer cell. A short peak is held until `consumeMeter`. The mixer and arrange headers keep `holdMeter`, which is what makes a one-block drum hit readable. The worklet posts plugin meters on the existing MessagePort, reusing row objects, and includes the loudest output sample since the last post. Strip meters are still the `AnalyserNode` path in `AudioEngine.levels`.
 
@@ -91,7 +99,7 @@ The live worklet still calls `processor.process` directly so the sound path stay
 
 ### 4.1 Drivers
 
-Web: Web Audio. `openContext` asks for `interactive` latency, then `balanced`. Monitoring delay uses `baseLatency` and `outputLatency`.
+Web: Web Audio. Settings → Latency asks for Lowest (`interactive`), Balanced (`balanced`), or Playback (`playback`), and shows measured `baseLatency` and `outputLatency`. The choice is saved in this browser. Changing it rebuilds the audio context and keeps the project and the playhead.
 
 Native app, not started: CoreAudio and AVAudioEngine on iOS, Oboe or AAudio on Android.
 
@@ -111,13 +119,13 @@ Plugin, not started: the format's audio callback (VST3, AU, AAX) calls `processB
 
 | Feature | Web build | Native app / plugin build | Status | Required action |
 | --- | --- | --- | --- | --- |
-| Audio thread safety | Worklet chain, automation scratch, and meter rows are prepared. No `await` or logging in `process()`. Some plugin DSP can still allocate. | Same rule inside the audio callback. The shared core does not exist yet. | Partial | Phase 2: move remaining plugin buffers into `prepare`. |
+| Audio thread safety | Steady 128–2048 sample quanta reuse prepared chain, automation, meter, reverb, tune, and EQ windows. No `await` or logging in `process()`. A larger quantum, and the buffer view for a block that contains a MIDI note, can still allocate once. Offline bounce still allocates its output. | Same rule inside the audio callback. The shared core is a separate port and was not changed here. | Pass | None on the web render thread for a normal quantum. Keep new plugin windows in `prepare`. |
 | Graph scheduling | One audio thread. Topological sort for routes and offline render. | Worker threads per independent track, then buses. | Partial | Later native scheduler. Do not fake it with extra Web Audio nodes. |
-| Plugin delay compensation | `edgeDelays` on track, send, and master, live and offline. Per-plugin `getLatencyInSamples`. | Same numbers inside the shared core. | Partial | Phase 3: delay the dry path of a latent plugin when wet is below 1. |
-| Sample-accurate timing | Tempo map and automation are sample-accurate. MIDI into instruments is still block-quantized. | `MidiEvent.sampleOffset` splits the block. | Partial | Phase 4: split `processBlock` at MIDI offsets for instruments. |
-| Plugin base | `NativePlugin` wraps the current processors, including tune, step sequencer, sampler / Beat Machine, and the synth. | Rust or C++ with the same fields. | Partial | Phase 5: one plugin compiled to WASM and checked against the TS processor. |
-| Parameter smoothing | Block exponential glide on the worklet, same curve as before. Per-sample stepper exists and is not wired through legacy processors. | Per-sample in the core for gain-class parameters. | Partial | Phase 6: per-sample smoothing for parameters that are read every sample, leaving look-ahead and FFT plugins on a block value. |
-| Mobile audio drivers | Web Audio `latencyHint`, `baseLatency`, `outputLatency`. | CoreAudio / AVAudioEngine and Oboe / AAudio. | Partial | Port track. No AAudio or CoreAudio code in this repo yet. |
+| Plugin delay compensation | Dry path of a latent plugin is delayed when wet is below 1. Track, send, and master edges use the reported latency, live and offline. | Same numbers inside the shared core. | Pass | None for the mix graph. A plugin that reports the wrong latency will still be compensated to that wrong number. |
+| Sample-accurate timing | Tempo map, cheap automation, and instrument notes use sample offsets. A note at offset 0 matches a note at the start of the block. | `MidiEvent.sampleOffset` splits the block. | Pass | Clip-edge fades are still not applied on every audio region. That is the arranger row, not this one. |
+| Plugin base | `NativePlugin` wraps the current processors, including tune, step sequencer, sampler / Beat Machine, and the synth. | Rust or C++ with the same fields. A separate builder owns `core/`. | Partial | One plugin compiled to WASM and checked against the TS processor. Not this change. |
+| Parameter smoothing | Stepped and enum values jump. Gain, pan, mix, drive, output, and wet move per sample. Look-ahead and pitch plugins keep one value per block. | Per-sample in the core for gain-class parameters. | Pass | None for the web processors that read those gains in their sample loop. |
+| Mobile audio drivers | Settings offers Lowest, Balanced, and Playback and shows measured base and output latency. | CoreAudio / AVAudioEngine and Oboe / AAudio. | Partial | Native port. No AAudio or CoreAudio code in this repo. |
 | Interruption handling | `statechange` (`interrupted`, `suspended`, `closed`) and `visibilitychange`. Project and playhead are kept. | OS session notifications calling the same plan. | Partial | Confirm on a real iPhone. This environment cannot open an interrupted iOS context. |
 
 ## Roadmap
@@ -126,14 +134,14 @@ Each step is small enough to listen to on its own. Do not start the native port 
 
 ### Web
 
-1. **Done here.** Portable `NativePlugin`, manifests, block smoothing, prepared worklet pools, latency reporting, the existing compensation pass, interruption recovery, meter hold.
-2. **Stepped parameters.** Do not glide `kind` and other non-automatable integers. Listen to an EQ mode change and a Beat Machine / Sampler switch.
-3. **Dry/wet alignment.** When a plugin reports latency and wet is below 1, delay the dry samples by that amount inside `processChain`. Compare a half-wet limiter to the fully wet and fully dry cases.
-4. **Sample-offset MIDI.** Split instrument `processBlock` at `MidiEvent.sampleOffset`. Keys and pads should not move earlier or later when the offset is 0.
-5. **Prepare the heavy plugins.** Reverb, tune, and convolution allocate their windows in `prepare`, not on the first `process`. Compare a recorded vocal before and after.
-6. **Per-sample smoothing for simple gains.** Drive, mix, and output gain read the per-sample value. Look-ahead and pitch plugins keep one value per block.
-7. **Buffer hint.** A setting maps to `latencyHint` and shows `baseLatency`. Count dropouts. Do not add COOP/COEP in this step.
-8. **Isolation experiment.** Try COOP/COEP on a branch only if Hugging Face audio, jsDelivr ONNX, and a WebRTC call still load. If any of those break, keep the MessagePort meter.
+1. **Done.** Portable `NativePlugin`, manifests, block smoothing, prepared worklet pools, latency reporting, the existing compensation pass, interruption recovery, meter hold.
+2. **Done here.** Stepped parameters jump. `kind`, `mode`, and the other enum ids are not glided.
+3. **Done here.** When a plugin reports latency and wet is below 1, the dry samples are delayed inside `processChain`. A half-wet pure delay matches the fully wet delay. Track, send, and master alignment uses the reported latencies.
+4. **Done here.** Instrument `processBlock` splits at `MidiEvent.sampleOffset`. A note at offset 0 matches a note at the start of the block. The worklet maps an audio-clock note onto an offset in the current quantum.
+5. **Done here.** Reverb modes, tune and amp analysis windows, and the linear-EQ FFT scratch are allocated before `process`. A normal worklet quantum reuses the chain pool.
+6. **Done here.** Drive, mix, output gain, pan, and the wet crossfade move per sample. Look-ahead and pitch plugins keep one value per block.
+7. **Done here.** Settings → Latency maps to `latencyHint` and shows measured base and output latency. COOP/COEP were not added.
+8. **Investigated, not enabled.** jsDelivr would survive `require-corp`. Hugging Face CORS fetches would survive; a no-cors embed would not. WebRTC should survive and was not tested under the headers. The MessagePort meter stays.
 
 ### Shared core, app, and plugin
 
@@ -153,3 +161,5 @@ Each step is small enough to listen to on its own. Do not start the native port 
 - `src/audio/core/session.ts` — interruption plan
 - `src/audio/core/meter.ts` — peak cell with hold
 - `src/test/engine-core.test.ts`
+
+Phase 2 adds `src/audio/core/buffer.ts` and `src/test/engine-phase2.test.ts`.

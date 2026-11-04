@@ -159,14 +159,35 @@ export function targetNote(midi: number, preset: number) {
  * Chromatic pitch for a clean periodic tone.
  * Coarse YIN runs on a 2× downsample, then a full-rate parabolic fit lands within a cent.
  */
-export function tunePitch(frame: Float32Array, sampleRate: number, a4 = 440): PitchRead | null {
-  const n = frame.length
+export interface TuneWindows {
+  centered: Float32Array
+  half: Float32Array
+  diff: Float32Array
+  cmnd: Float32Array
+  refine: Float32Array
+}
+
+/** Analysis buffers for the amp tuner. Built once, reused on every frame. */
+export function prepareTuneWindows(frame: number): TuneWindows {
+  const n = Math.max(512, frame | 0)
+  const half = Math.floor(n / 2)
+  return {
+    centered: new Float32Array(n),
+    half: new Float32Array(half),
+    diff: new Float32Array(half + 2),
+    cmnd: new Float32Array(half + 2),
+    refine: new Float32Array(n),
+  }
+}
+
+export function tunePitch(frame: Float32Array, sampleRate: number, a4 = 440, windows?: TuneWindows, count = frame.length): PitchRead | null {
+  const n = Math.min(frame.length, count)
   if (n < 512 || sampleRate < 8000) return null
   let mean = 0
   for (let i = 0; i < n; i++) mean += frame[i]
   mean /= n
   let energy = 0
-  const centered = new Float32Array(n)
+  const centered = windows && windows.centered.length >= n ? windows.centered : new Float32Array(n)
   for (let i = 0; i < n; i++) {
     const sample = frame[i] - mean
     centered[i] = sample
@@ -174,23 +195,23 @@ export function tunePitch(frame: Float32Array, sampleRate: number, a4 = 440): Pi
   }
   if (energy / n < 1e-7) return null
   const halfN = Math.floor(n / 2)
-  const half = new Float32Array(halfN)
+  const half = windows && windows.half.length >= halfN ? windows.half : new Float32Array(halfN)
   for (let i = 0; i < halfN; i++) half[i] = (centered[i * 2] + centered[i * 2 + 1]) * 0.5
   const halfRate = sampleRate / 2
-  const coarse = yinTau(half, halfRate, 32, 1600)
+  const coarse = yinTau(half, halfRate, 32, 1600, windows, halfN)
   if (coarse == null) return null
   const guess = coarse * 2
-  const tau = refineTau(centered, guess)
+  const tau = refineTau(centered, guess, windows, n)
   const hz = sampleRate / tau
   return describePitch(hz, a4)
 }
 
-function yinTau(frame: Float32Array, sampleRate: number, minHz: number, maxHz: number) {
-  const n = frame.length
+function yinTau(frame: Float32Array, sampleRate: number, minHz: number, maxHz: number, windows?: TuneWindows, count = frame.length) {
+  const n = Math.min(frame.length, count)
   const tauMin = Math.max(2, Math.floor(sampleRate / maxHz))
   const tauMax = Math.min(n - 3, Math.floor(sampleRate / minHz))
   if (tauMax <= tauMin + 2) return null
-  const diff = new Float32Array(tauMax + 1)
+  const diff = windows && windows.diff.length > tauMax ? windows.diff : new Float32Array(tauMax + 1)
   for (let tau = 1; tau <= tauMax; tau++) {
     let sum = 0
     const limit = n - tau
@@ -200,7 +221,7 @@ function yinTau(frame: Float32Array, sampleRate: number, minHz: number, maxHz: n
     }
     diff[tau] = sum
   }
-  const cmnd = new Float32Array(tauMax + 1)
+  const cmnd = windows && windows.cmnd.length > tauMax ? windows.cmnd : new Float32Array(tauMax + 1)
   let running = 0
   for (let tau = 1; tau <= tauMax; tau++) {
     running += diff[tau]
@@ -223,12 +244,12 @@ function yinTau(frame: Float32Array, sampleRate: number, minHz: number, maxHz: n
   return tau + parabola(cmnd[tau - 1], cmnd[tau], cmnd[tau + 1])
 }
 
-function refineTau(frame: Float32Array, guess: number) {
-  const n = frame.length
+function refineTau(frame: Float32Array, guess: number, windows?: TuneWindows, count = frame.length) {
+  const n = Math.min(frame.length, count)
   const center = Math.max(2, Math.round(guess))
   const from = Math.max(2, center - 5)
   const to = Math.min(n - 3, center + 5)
-  const diff = new Float32Array(to + 1)
+  const diff = windows && windows.refine.length > to ? windows.refine : new Float32Array(to + 1)
   let best = center
   let bestDiff = Number.POSITIVE_INFINITY
   for (let tau = from; tau <= to; tau++) {
@@ -456,6 +477,8 @@ export interface AmpState {
   irKey: string
   pedals: PedalState[]
   tune: Float32Array
+  tuneFrame: Float32Array
+  tuneWindows: TuneWindows
   tuneWrite: number
   tuneCount: number
   readout: PitchRead | null
@@ -473,6 +496,8 @@ export function createAmpState(sampleRate: number): AmpState {
     irKey: '',
     pedals: Array.from({ length: SLOT_COUNT }, () => createPedal(sampleRate)),
     tune: new Float32Array(8192),
+    tuneFrame: new Float32Array(8192),
+    tuneWindows: prepareTuneWindows(8192),
     tuneWrite: 0,
     tuneCount: 0,
     readout: null,
@@ -972,12 +997,12 @@ export function processAmp(
     if (output[1]) output[1][i] = sanitize(right)
   }
   if (hearTuner && state.tuneCount >= 4096) {
-    const frame = new Float32Array(Math.min(8192, state.tuneCount))
-    for (let i = 0; i < frame.length; i++) {
-      const index = (state.tuneWrite - frame.length + i + state.tune.length) % state.tune.length
-      frame[i] = state.tune[index]
+    const length = Math.min(state.tuneFrame.length, state.tuneCount)
+    for (let i = 0; i < length; i++) {
+      const index = (state.tuneWrite - length + i + state.tune.length) % state.tune.length
+      state.tuneFrame[i] = state.tune[index]
     }
-    state.readout = tunePitch(frame, ctx.sampleRate, params.cal ?? 440)
+    state.readout = tunePitch(state.tuneFrame, ctx.sampleRate, params.cal ?? 440, state.tuneWindows, length)
     state.tuneCount = 4096
   }
   void ctx.loopLinked

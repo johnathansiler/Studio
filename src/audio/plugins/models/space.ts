@@ -1,3 +1,4 @@
+import { SampleGlide } from '../../core/smooth'
 import { descriptor, FACTORY } from '../catalog'
 import { designBiquad, tickBiquad, type Biquad } from '../dsp'
 import type { PluginModule, Processor } from '../types'
@@ -36,6 +37,7 @@ class Comb {
 function verb(sampleRate: number, scales: number[], decayDefault: number): Processor {
   const combs = scales.map((scale) => new Comb(Math.round(sampleRate * scale)))
   const meter = createMeter()
+  const mixGlide = new SampleGlide()
   return {
     latencySamples: 0,
     meter,
@@ -46,11 +48,13 @@ function verb(sampleRate: number, scales: number[], decayDefault: number): Proce
       const size = clamp(params.size ?? 0.6, 0.15, 1)
       const decay = clamp(params.decay ?? decayDefault, 0.05, 0.98)
       const damp = clamp(params.damp ?? 0.4, 0, 0.95)
-      const amount = clamp(params.mix ?? 0.25, 0, 1)
+      const amountTarget = clamp(params.mix ?? 0.25, 0, 1)
+      mixGlide.prepare(ctx.sampleRate)
       const feedback = decay * (0.55 + size * 0.4)
       const n = input[0]?.length ?? 0
       const used = ctx.quality === 'eco' ? Math.max(2, combs.length - 2) : combs.length
       for (let i = 0; i < n; i++) {
+        const amount = mixGlide.next(amountTarget)
         const left = input[0]?.[i] || 0
         const right = input[1]?.[i] ?? left
         let wetL = 0
@@ -79,18 +83,20 @@ export function createHall(sampleRate: number): Processor {
     [0.031, 0.043, 0.057, 0.071, 0.083, 0.097],
     [0.024, 0.03, 0.038, 0.046, 0.055],
   ]
-  let mode = -1
-  let processor = verb(sampleRate, rooms[1], 0.8)
+  const decays = [0.62, 0.86, 0.62]
+  const banks = rooms.map((room, index) => verb(sampleRate, room, decays[index]))
+  let mode = 1
+  let processor = banks[1]
   return {
     latencySamples: 0,
     meter: processor.meter,
     reset() {
-      processor.reset()
+      for (const bank of banks) bank.reset()
     },
     process(input, output, params, ctx) {
       const next = clamp(Math.round(params.mode ?? 1), 0, 2)
       if (next !== mode) {
-        processor = verb(ctx.sampleRate, rooms[next], next === 1 ? 0.86 : 0.62)
+        processor = banks[next]
         mode = next
         this.meter = processor.meter
       }

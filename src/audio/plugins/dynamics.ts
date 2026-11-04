@@ -1,3 +1,4 @@
+import { SampleGlide } from '../core/smooth'
 import { descriptor, FACTORY } from './catalog'
 import { clamp, dbToGain, designBiquad, gainToDb, sanitize, tickBiquad, type Biquad } from './dsp'
 import type { Processor } from './types'
@@ -154,18 +155,22 @@ function envelopeProcessor(
   read: () => number,
   write: (value: number) => void,
 ): Processor {
+  const mixGlide = new SampleGlide()
   return {
     latencySamples: 0,
     reset() {
       write(0)
+      mixGlide.reset()
     },
     process(input, output, params, ctx) {
       const n = input[0]?.length ?? 0
       const attack = coeff(params.attack || 10, ctx.sampleRate)
       const release = coeff(params.release || 80, ctx.sampleRate)
-      const mix = params.mix == null ? 1 : clamp(params.mix, 0, 1)
+      const mixTarget = params.mix == null ? 1 : clamp(params.mix, 0, 1)
+      mixGlide.prepare(ctx.sampleRate)
       let env = read()
       for (let i = 0; i < n; i++) {
+        const mix = mixGlide.next(mixTarget)
         const left = input[0][i] || 0
         const right = input[1]?.[i] ?? left
         const side = ctx.sidechain

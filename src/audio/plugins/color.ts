@@ -1,3 +1,4 @@
+import { SampleGlide } from '../core/smooth'
 import { createShaperState, oversampleShape, shaperLatencySamples, type ShaperState } from '../quality/oversample'
 import { clamp, designBiquad, sanitize, tickBiquad } from './dsp'
 import type { Processor } from './types'
@@ -6,6 +7,8 @@ export function createSaturator(sampleRate: number): Processor {
   let tone = designBiquad('lowpass', sampleRate, 8000, 0.7)
   let freq = 8000
   const shapers: ShaperState[] = [createShaperState(), createShaperState()]
+  const driveGlide = new SampleGlide()
+  const mixGlide = new SampleGlide()
   return {
     latencySamples: 0,
     reset() {
@@ -19,13 +22,17 @@ export function createSaturator(sampleRate: number): Processor {
         tone = { ...tone, b0: next.b0, b1: next.b1, b2: next.b2, a1: next.a1, a2: next.a2 }
         freq = params.tone
       }
-      const drive = clamp(params.drive, 0, 1)
-      const mix = clamp(params.mix ?? 1, 0, 1)
-      const shape = 1 + drive * 8
-      const neutral = drive <= 0.0001
-      this.latencySamples = neutral ? 0 : shaperLatencySamples()
+      const driveTarget = clamp(params.drive, 0, 1)
+      const mixTarget = clamp(params.mix ?? 1, 0, 1)
+      driveGlide.prepare(ctx.sampleRate)
+      mixGlide.prepare(ctx.sampleRate)
+      const neutral = driveTarget <= 0.0001 && (!driveGlide.settled || driveGlide.peek() <= 0.0001)
+      this.latencySamples = driveTarget <= 0.0001 ? 0 : shaperLatencySamples()
       const n = input[0]?.length ?? 0
       for (let i = 0; i < n; i++) {
+        const drive = driveGlide.next(driveTarget)
+        const mix = mixGlide.next(mixTarget)
+        const shape = 1 + drive * 8
         for (let c = 0; c < output.length; c++) {
           const dry = input[Math.min(c, input.length - 1)]?.[i] ?? 0
           const bent = neutral ? dry : oversampleShape(shapers[Math.min(c, shapers.length - 1)], dry, drive, shape)
