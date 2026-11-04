@@ -589,3 +589,253 @@
 .shell.phone .mixer-view.mixer-console .strip.master:has(.mix-more[open]) .mix-panel {
   left: 4px;
 }
+
+/* Portrait strips share one width with Master, so Add Track stays in that column
+   instead of running under the pinned master. */
+.shell.phone:not(.land) .mixer-view.mixer-console .add-track-slot {
+  width: var(--mix-col, var(--strip, 84px));
+  min-width: var(--mix-col, var(--strip, 84px));
+  max-width: var(--mix-col, var(--strip, 84px));
+  flex: 0 0 var(--mix-col, var(--strip, 84px));
+}
+
+.shell.phone:not(.land) .mixer-view.mixer-console .add-track-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  min-height: 44px;
+  padding: 4px 1px;
+  font-size: 12px;
+  line-height: 1.1;
+  white-space: normal;
+}
+
+.shell.phone:not(.land) .mixer-view.mixer-console .add-track-btn span {
+  white-space: normal;
+}
+
+/* Short wide screens (landscape phones and the fold cover on its side).
+   The fader and meter keep the height. Name, decibels, Mute, Solo, and More
+   stay on the strip. Width and the flow sentence step aside so the throw
+   can reach about 160px under the phone chrome. */
+.shell .mixer-view.mixer-console .fader-scale {
+  display: none;
+}
+
+.shell .mixer-view.mixer-console[data-short] {
+  --face: 16px;
+  --foot: 120px;
+}
+
+/* Later shell rules set channel width from --strip and leave Master on --mix-col.
+   Repeat the shared column here so both stay the same width. */
+.shell.phone .mixer-view.mixer-console .mixer > .strip,
+.shell.phone.land .mixer-view.mixer-console .mixer > .strip,
+.shell.fold .mixer-view.mixer-console .mixer > .strip,
+.shell.phone .mixer-view.mixer-console .mixer-bay > .strip.master,
+.shell.phone.land .mixer-view.mixer-console .mixer-bay > .strip.master,
+.shell.fold .mixer-view.mixer-console .mixer-bay > .strip.master {
+  width: var(--mix-col, var(--strip, 84px));
+  min-width: var(--mix-col, var(--strip, 84px));
+  max-width: var(--mix-col, var(--strip, 84px));
+  flex: 0 0 var(--mix-col, var(--strip, 84px));
+}
+
+.shell .mixer-view.mixer-console[data-short] .width-tools {
+  display: none;
+}
+
+.shell .mixer-view.mixer-console[data-short] .mix-flow {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip-head {
+  justify-content: flex-start;
+  align-items: stretch;
+  padding: 0 2px;
+  overflow: hidden;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip-kind,
+.shell .mixer-view.mixer-console[data-short] .strip-path {
+  display: none;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip-name,
+.shell .mixer-view.mixer-console[data-short] .strip h3 {
+  width: 100%;
+  height: 16px;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 16px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip-title {
+  -webkit-line-clamp: 1;
+  white-space: nowrap;
+}
+
+.shell .mixer-view.mixer-console[data-short] .volume-row,
+.shell .mixer-view.mixer-console[data-short] .strip .fader-row.volume-row,
+.shell.phone .mixer-view.mixer-console[data-short] .strip .fader-row,
+.shell.phone.land .mixer-view.mixer-console[data-short] .strip .fader-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 8px;
+  grid-template-areas: 'scale fader meter';
+  column-gap: 2px;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  width: 100%;
+}
+
+.shell .mixer-view.mixer-console[data-short] .fader-scale {
+  display: block;
+  grid-area: scale;
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shell .mixer-view.mixer-console[data-short] .fader-scale::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  right: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #ef6b6b, #e0b15a 28%, #73c48f);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset -1px 0 0 rgba(0, 0, 0, 0.45);
+}
+
+.shell .mixer-view.mixer-console[data-short] .fader-scale li {
+  position: absolute;
+  left: 0;
+  right: 5px;
+  transform: translateY(50%);
+  font-size: 9px;
+  font-weight: 740;
+  line-height: 1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #f4fff8;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.85);
+}
+
+.shell .mixer-view.mixer-console[data-short] .fader-scale li::after {
+  content: '';
+  position: absolute;
+  right: -5px;
+  top: 50%;
+  width: 5px;
+  height: 2px;
+  margin-top: -1px;
+  background: #f4fff8;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.55);
+}
+
+.shell .mixer-view.mixer-console[data-short] .volume-row .touch-slider,
+.shell .mixer-view.mixer-console[data-short] .volume-row .touch-slider.vertical {
+  grid-area: fader;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+}
+
+.shell .mixer-view.mixer-console[data-short] .volume-row .touch-slider.vertical b {
+  left: 3px;
+  right: 3px;
+  height: 44px;
+  min-height: 44px;
+  bottom: calc(var(--at, 0) * (100% - 60px));
+}
+
+.shell .mixer-view.mixer-console[data-short] .volume-row .touch-slider.vertical b::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 1px;
+  background: rgba(16, 22, 20, 0.55);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.shell .mixer-view.mixer-console[data-short] .volume-row .meter {
+  position: relative;
+  grid-area: meter;
+  inset: auto;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
+  z-index: 1;
+  width: 8px;
+  height: 100%;
+  min-height: 0;
+  align-self: stretch;
+  border-radius: 6px;
+  background: #070c0a;
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.75),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.16),
+    0 0 8px rgba(115, 196, 143, 0.28);
+}
+
+.shell .mixer-view.mixer-console[data-short] .fader-db {
+  top: 2px;
+  left: 28px;
+  right: 10px;
+  width: auto;
+  height: 14px;
+  line-height: 14px;
+  font-size: 10px;
+  font-weight: 740;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip-foot {
+  grid-template-rows: 40px 40px 40px;
+  gap: 0;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip-foot .mini,
+.shell .mixer-view.mixer-console[data-short] .strip-foot .more-open,
+.shell.phone .mixer-view.mixer-console[data-short] .strip-foot .mini,
+.shell.fold .mixer-view.mixer-console[data-short] .strip-foot .mini,
+.shell .mixer-view.mixer-console[data-short] .mix-more,
+.shell .mixer-view.mixer-console[data-short] .mix-more > summary,
+.shell .mixer-view.mixer-console[data-short] .strip-note {
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}
