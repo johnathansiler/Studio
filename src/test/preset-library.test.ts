@@ -4,8 +4,9 @@ import { createKit } from '../model/padMachine'
 import { starterPattern } from '../model/steps'
 import { ProjectStore } from '../state/store'
 import { applyBeatMachinePreset } from '../presets/beatMachine'
-import { applyGroove, scalerPatch } from '../presets/apply'
-import { boundsFor, resolveParams } from '../presets/bounds'
+import { applyGroove, readKit, scalerPatch } from '../presets/apply'
+import { boundsFor, resolveParams, sameParams } from '../presets/bounds'
+import { DEVICE_PRESET_IDS } from '../presets/devices'
 import { allFactoryPresets, factoryPresets, PRESET_PLUGINS } from '../presets/factory'
 import { importPresetDocument, presetDocument, readPresetDocument } from '../presets/files'
 import {
@@ -18,22 +19,30 @@ import {
   saveUserPreset,
 } from '../presets/library'
 import { memoryPresetBook } from '../presets/memory'
-import { commitPluginPreset } from '../presets/project'
+import { commitAmpPreset, commitPadPreset, commitPluginPreset } from '../presets/project'
 import { INIT_NAME } from '../presets/types'
+
+const PLUGIN_IDS = [...PRESET_PLUGINS, ...DEVICE_PRESET_IDS]
 
 describe('shared plugin presets', () => {
   it('loads every factory preset inside its parameter range', () => {
     const all = allFactoryPresets()
-    expect(all.length).toBeGreaterThan(PRESET_PLUGINS.length * 6)
-    for (const pluginId of PRESET_PLUGINS) {
+    expect(all.length).toBe(PLUGIN_IDS.length * 8)
+    const names = ['Vocal Presence', 'Kick Punch', 'Low Cut 80 Hz', 'Telephone', 'Vocal Leveling', 'Drum Bus Glue', 'Parallel Smash', 'Bass Control', 'Small Room', 'Plate Vocal', 'Large Hall', 'Slapback', '1/4 Ping-Pong', 'Dub Throw', 'Studio Clean', 'Tight Kit']
+    for (const name of names) expect(all.some((item) => item.name === name)).toBe(true)
+    for (const pluginId of PLUGIN_IDS) {
       const presets = factoryPresets(pluginId)
-      expect(presets.length).toBeGreaterThanOrEqual(6)
-      expect(presets.length).toBeLessThanOrEqual(12)
-      const names = new Set(presets.map((item) => item.name))
-      expect(names.size).toBe(presets.length)
+      expect(presets.length).toBe(8)
+      const seen = new Set(presets.map((item) => item.name))
+      expect(seen.size).toBe(presets.length)
+      const init = resolveParams(pluginId, {})
+      const resolvedList: Record<string, number>[] = []
       for (const preset of presets) {
         expect(preset.source).toBe('factory')
         const resolved = resolveParams(pluginId, preset.params)
+        expect(sameParams(resolved, init), `${pluginId} ${preset.name} matches Init`).toBe(false)
+        for (const other of resolvedList) expect(sameParams(resolved, other), `${pluginId} ${preset.name} matches another preset`).toBe(false)
+        resolvedList.push(resolved)
         for (const bound of boundsFor(pluginId)) {
           expect(Number.isFinite(resolved[bound.id]), `${pluginId} ${preset.name} ${bound.id}`).toBe(true)
           expect(resolved[bound.id], `${pluginId} ${preset.name} ${bound.id}`).toBeGreaterThanOrEqual(bound.min)
@@ -114,5 +123,36 @@ describe('shared plugin presets', () => {
     expect(first.changed).toBe(false)
     const next = commitChoice([], 'room', presetByName('reverb', [], 'Small Room')!)
     expect(describePreset('reverb', next.params, undefined, next.presets, 'room').name).toBe('Small Room')
+  })
+
+  it('keeps scaler words with the saved preset', () => {
+    const saved = saveUserPreset([], 'scaler', 'My Pop', { root: 5 }, { scale: 'dorian', group: 'seventh' })
+    expect(saved.presets.some((item) => item.pluginId === '__text' && item.name.includes('dorian'))).toBe(true)
+    expect(presetByName('scaler', saved.presets, 'My Pop')?.text?.scale).toBe('dorian')
+    const loaded = commitChoice(saved.presets, 'scaler-1', presetByName('scaler', saved.presets, 'My Pop')!)
+    expect(loaded.text?.scale).toBe('dorian')
+    const raw = presetDocument('scaler', [{ name: 'Night', params: { root: 2 }, text: { scale: 'aeolian' } }])
+    const imported = importPresetDocument([], 'scaler', raw)
+    expect(presetByName('scaler', imported, 'Night')?.text?.scale).toBe('aeolian')
+    const removed = deleteUserPreset(saved.presets, 'scaler', saved.preset.id)
+    expect(removed?.some((item) => item.id === `text:${saved.preset.id}`)).toBe(false)
+  })
+
+  it('applies an amp rig and a beat machine kit through the shared library', () => {
+    const store = new ProjectStore(createEmptyProject(48000))
+    const track = store.project.tracks[0]
+    store.addPlugin(track.id, 'saturator')
+    const amp = store.track(track.id)!.plugins.find((plugin) => plugin.pluginId === 'saturator')!
+    const rig = presetByName('amp', [], 'Studio Clean')!
+    const loaded = commitChoice([], amp.id, rig)
+    commitAmpPreset(store, track.id, amp.id, loaded.params, loaded.presets)
+    expect(amp.params.kind).toBe(5)
+    expect(amp.params.gain).toBeCloseTo(0.16)
+    expect(describePreset('amp', amp.params, undefined, store.project.presets, amp.id).changed).toBe(false)
+    const kitPreset = presetByName('pads', [], 'Tight Kit')!
+    const kitLoad = commitChoice(store.project.presets, `pads:${track.id}`, kitPreset)
+    commitPadPreset(store, track.id, kitLoad.params, kitLoad.presets)
+    expect(readKit(store.track(track.id)!.padKit!).tune).toBeCloseTo(2)
+    expect(readKit(store.track(track.id)!.padKit!).decay).toBeCloseTo(0.45)
   })
 })

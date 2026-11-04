@@ -1,3 +1,4 @@
+import { DEVICE_PRESET_IDS, deviceDrafts } from './devices'
 import type { CuePreset } from './types'
 import { INIT_NAME } from './types'
 
@@ -5,6 +6,7 @@ export const PRESET_PLUGINS = [
   'eq',
   'compressor',
   'saturator',
+  'amp',
   'vocal',
   'reverb',
   'delay',
@@ -71,13 +73,23 @@ const FACTORY_DRAFTS: Record<PresetPluginId, Draft[]> = {
   ],
   saturator: [
     { name: 'Tape Warmth', params: { kind: 1, drive: 0.28, tone: 6000, mix: 0.55, speed: 1, bias: 0.35, wow: 0.08, bump: 0.3 } },
-    { name: 'Tube Glow', params: { kind: 0, drive: 0.22, tone: 5000, mix: 0.7, tube: 0.6 } },
+    { name: 'Tube Glow', params: { kind: 2, drive: 0.22, tube: 0.6 } },
     { name: 'Console Dirt', params: { kind: 0, drive: 0.18, tone: 8000, mix: 0.4 } },
-    { name: 'Drum Crush', params: { kind: 0, drive: 0.55, tone: 4500, mix: 0.65, ceiling: -0.8 } },
+    { name: 'Drum Crush', params: { kind: 0, drive: 0.55, tone: 4500, mix: 0.65 } },
     { name: 'Bass Growl', params: { kind: 0, drive: 0.42, tone: 2200, mix: 0.6 } },
-    { name: 'Vocal Sheen', params: { kind: 1, drive: 0.16, tone: 9000, mix: 0.35, bias: 0.25, hiss: 0.02 } },
-    { name: 'Lo-fi Tape', params: { kind: 1, drive: 0.48, tone: 3200, mix: 0.8, wow: 0.35, hiss: 0.2, bump: 0.45 } },
-    { name: 'Soft Clip', params: { kind: 0, drive: 0.3, clipMode: 0, ceiling: -0.3, mix: 1, tone: 7000 } },
+    { name: 'Vocal Sheen', params: { kind: 1, drive: 0.16, bias: 0.25, hiss: 0.02, wow: 0.06, bump: 0.2 } },
+    { name: 'Lo-fi Tape', params: { kind: 1, drive: 0.48, wow: 0.35, hiss: 0.2, bump: 0.45, bias: 0.55 } },
+    { name: 'Soft Clip', params: { kind: 4, drive: 0.3, clipMode: 0, ceiling: -0.3 } },
+  ],
+  amp: [
+    { name: 'Studio Clean', params: { model: 0, gain: 0.16, bass: 0.46, mid: 0.48, treble: 0.55, presence: 0.42, master: 0.6, cabA: 3, distance: 0.3 } },
+    { name: 'Glass Room', params: { model: 0, gain: 0.22, bright: 1, treble: 0.62, presence: 0.5, master: 0.62, cabA: 0, s0: 1, a0: 0.45 } },
+    { name: 'Stack Song', params: { model: 1, gain: 0.58, bass: 0.52, mid: 0.64, treble: 0.5, presence: 0.48, master: 0.66, cabA: 2 } },
+    { name: 'Crunch Lane', params: { model: 1, gain: 0.7, bass: 0.48, mid: 0.5, treble: 0.58, presence: 0.58, master: 0.64, cabA: 2, cabB: 4, blend: 0.35 } },
+    { name: 'Modern Tight', params: { model: 2, gain: 0.72, bass: 0.58, mid: 0.36, treble: 0.55, presence: 0.62, master: 0.68, cabA: 4, s0: 2, a0: 0.42 } },
+    { name: 'Neck Blues', params: { model: 3, gain: 0.55, bass: 0.66, mid: 0.48, treble: 0.4, presence: 0.36, master: 0.6, cabA: 0, mic: 2, axis: 0.4 } },
+    { name: 'Edge Bite', params: { model: 4, gain: 0.62, bass: 0.5, mid: 0.58, treble: 0.52, presence: 0.6, master: 0.64, cabA: 1 } },
+    { name: 'Finger Warm', params: { model: 6, gain: 0.34, bass: 0.64, mid: 0.48, treble: 0.46, presence: 0.4, master: 0.62, cabA: 6 } },
   ],
   vocal: [
     { name: 'Vocal De-ess', params: { kind: 1, freq: 6800, threshold: -22, amount: 0.55 } },
@@ -111,9 +123,9 @@ const FACTORY_DRAFTS: Record<PresetPluginId, Draft[]> = {
   ],
   mod: [
     { name: 'Soft Chorus', params: { kind: 0, rate: 0.3, depth: 0.35, mix: 0.3 } },
-    { name: 'Wide Ensemble', params: { kind: 0, rate: 0.18, depth: 0.55, width: 0.8, mix: 0.42 } },
+    { name: 'Wide Ensemble', params: { kind: 2, rate: 0.18, depth: 0.55, mode: 1, mix: 0.42 } },
     { name: 'Slow Phaser', params: { kind: 3, rate: 0.12, depth: 0.6, feedback: 0.45, mix: 0.4 } },
-    { name: 'Rotary Slow', params: { kind: 0, rate: 0.4, depth: 0.5, mix: 0.55, speed: 0 } },
+    { name: 'Rotary Slow', params: { kind: 4, speed: 0, mix: 0.55 } },
     { name: 'Tape Double', params: { kind: 1, width: 0.7, delay: 22, depth: 0.3, mix: 0.4 } },
     { name: 'Shimmer Fifth', params: { kind: 5, semis: 0, harmony: 7, harmonyMix: 0.45, mix: 0.55 } },
     { name: 'Tremolo', params: { kind: 0, rate: 3.2, depth: 0.7, mix: 0.65 } },
@@ -121,13 +133,13 @@ const FACTORY_DRAFTS: Record<PresetPluginId, Draft[]> = {
   ],
   limiter: [
     { name: 'Transparent Ceiling', params: { kind: 0, threshold: 0, release: 40, ceiling: -0.3 } },
-    { name: 'Streaming -14', params: { kind: 1, ceiling: -1, target: -14, release: 140, lookahead: 5, releaseMode: 1 } },
+    { name: 'Streaming -14', params: { kind: 2, ceiling: -1, target: -14, release: 140, lookahead: 5, width: 1 } },
     { name: 'Club Loud', params: { kind: 2, target: -8, ceiling: -0.3, release: 80, width: 1.1 } },
     { name: 'Podcast Safe', params: { kind: 0, threshold: -6, ceiling: -1.5, release: 100 } },
     { name: 'Gentle Catch', params: { kind: 0, threshold: -3, ceiling: -0.8, release: 70 } },
     { name: 'Drum Peak', params: { kind: 0, threshold: -2, ceiling: -0.5, release: 25 } },
     { name: 'Master Glue', params: { kind: 0, threshold: -4, ceiling: -0.8, release: 120 } },
-    { name: 'Broadcast', params: { kind: 1, ceiling: -1, target: -16, release: 160, lookahead: 6 } },
+    { name: 'Broadcast', params: { kind: 2, ceiling: -1, target: -16, release: 160, lookahead: 6, width: 1 } },
   ],
   tune: [
     { name: 'Natural', params: { retune: 0.42, humanize: 0.55, flex: 0.35, amount: 0.72, mode: 1 } },
@@ -190,26 +202,24 @@ const FACTORY_DRAFTS: Record<PresetPluginId, Draft[]> = {
     { name: 'Dry Close', params: { tune: 1, decay: 0.35, attack: 0, swing: 50, humanize: 0, level: 0.78 } },
   ],
   master: [
-    { name: 'Streaming -14', params: { kind: 1, ceiling: -1, target: -14, release: 140, lookahead: 5, releaseMode: 1, width: 1 } },
+    { name: 'Streaming -14', params: { kind: 2, ceiling: -1, target: -14, release: 140, lookahead: 5, width: 1 } },
     { name: 'Club', params: { kind: 2, ceiling: -0.3, target: -8, release: 80, width: 1.12 } },
-    { name: 'Podcast', params: { kind: 0, ceiling: -1.5, threshold: -6, release: 120, target: -16, width: 1 } },
+    { name: 'Podcast', params: { kind: 0, ceiling: -1.5, threshold: -6, release: 120, width: 1 } },
     { name: 'Vinyl Warm', params: { kind: 0, ceiling: -1, threshold: -3, release: 160, width: 0.95 } },
     { name: 'Gentle Master', params: { kind: 0, ceiling: -1, threshold: -2, release: 100, width: 1 } },
     { name: 'Loud Pop', params: { kind: 2, ceiling: -0.5, target: -9, release: 70, width: 1.08 } },
-    { name: 'Jazz Dynamic', params: { kind: 0, ceiling: -1.2, threshold: -1, release: 180, target: -18, width: 1 } },
-    { name: 'Broadcast', params: { kind: 1, ceiling: -1, target: -16, release: 150, lookahead: 6, width: 1 } },
+    { name: 'Jazz Dynamic', params: { kind: 0, ceiling: -1.2, threshold: -1, release: 180, width: 1 } },
+    { name: 'Broadcast', params: { kind: 2, ceiling: -1, target: -16, release: 150, lookahead: 6, width: 1 } },
   ],
 }
 
-const FACTORY: Record<string, CuePreset[]> = {}
-for (const pluginId of PRESET_PLUGINS) FACTORY[pluginId] = pack(pluginId, FACTORY_DRAFTS[pluginId])
-
 export function factoryPresets(pluginId: string): CuePreset[] {
-  return (FACTORY[pluginId] ?? []).map((preset) => ({ ...preset, params: { ...preset.params }, text: preset.text ? { ...preset.text } : undefined }))
+  const drafts = FACTORY_DRAFTS[pluginId as PresetPluginId] ?? deviceDrafts(pluginId)
+  return pack(pluginId, drafts)
 }
 
 export function allFactoryPresets(): CuePreset[] {
-  return PRESET_PLUGINS.flatMap((pluginId) => factoryPresets(pluginId))
+  return [...PRESET_PLUGINS, ...DEVICE_PRESET_IDS].flatMap((pluginId) => factoryPresets(pluginId))
 }
 
 export function initPreset(pluginId: string): CuePreset {

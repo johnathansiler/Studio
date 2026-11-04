@@ -79,6 +79,18 @@ export function applyGroove(pattern: BeatPattern, params: Record<string, number>
   }
 }
 
+export function readKit(kit: PadProgram): Record<string, number> {
+  const pad = kit.banks[0]?.[0]
+  return {
+    tune: pad?.tune ?? 0,
+    decay: pad?.decay ?? 1,
+    attack: pad?.attack ?? 0,
+    swing: kit.swing ?? 50,
+    humanize: kit.humanizeTime ?? 0,
+    level: pad?.level ?? 0.8,
+  }
+}
+
 export function applyKit(kit: PadProgram, params: Record<string, number>): PadProgram {
   const tune = params.tune ?? 0
   const decay = params.decay ?? 1

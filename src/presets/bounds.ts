@@ -65,11 +65,12 @@ export function baseParams(pluginId: string): Record<string, number> {
 
 /** Merge a partial preset onto the init patch and keep every value inside its range. */
 export function resolveParams(pluginId: string, partial: Record<string, number>): Record<string, number> {
-  const next = { ...baseParams(pluginId), ...partial }
+  const base = baseParams(pluginId)
+  const next: Record<string, number> = {}
   for (const bound of boundsFor(pluginId)) {
-    const value = next[bound.id]
-    const safe = typeof value === 'number' && Number.isFinite(value) ? value : bound.fallback
-    next[bound.id] = Math.min(bound.max, Math.max(bound.min, safe))
+    const raw = partial[bound.id]
+    const value = typeof raw === 'number' && Number.isFinite(raw) ? raw : (base[bound.id] ?? bound.fallback)
+    next[bound.id] = Math.min(bound.max, Math.max(bound.min, value))
   }
   return next
 }

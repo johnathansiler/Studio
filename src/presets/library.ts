@@ -11,6 +11,41 @@ export interface PresetView {
 }
 
 const ACTIVE_PLUGIN = '__active'
+const TEXT_PLUGIN = '__text'
+
+function textRowId(id: string): string {
+  return `text:${id}`
+}
+
+function readText(stored: readonly UserPreset[], id: string): PresetText | undefined {
+  const row = stored.find((item) => item.id === textRowId(id) && item.pluginId === TEXT_PLUGIN)
+  if (!row?.name) return undefined
+  try {
+    const parsed = JSON.parse(row.name) as Record<string, unknown>
+    const text: PresetText = {}
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === 'string') text[key] = value
+    }
+    return Object.keys(text).length ? text : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function withText(stored: UserPreset[], id: string, text?: PresetText): UserPreset[] {
+  const next = stored.filter((item) => item.id !== textRowId(id))
+  if (!id || !text || !Object.keys(text).length) return next
+  next.push({ id: textRowId(id), pluginId: TEXT_PLUGIN, name: JSON.stringify(text), params: {} })
+  return next
+}
+
+/** User presets for one plugin, plus the text rows that belong to them. */
+export function rowsForPlugin(stored: readonly UserPreset[], pluginId: string): UserPreset[] {
+  const mine = stored.filter((item) => isLibraryPreset(item) && item.pluginId === pluginId)
+  const ids = new Set(mine.map((item) => item.id))
+  const text = stored.filter((item) => item.pluginId === TEXT_PLUGIN && ids.has(item.id.slice(5)))
+  return [...mine, ...text]
+}
 
 export function userPresets(pluginId: string, stored: readonly UserPreset[]): CuePreset[] {
   return stored.filter((item) => isLibraryPreset(item) && item.pluginId === pluginId).map((item) => ({
@@ -19,6 +54,7 @@ export function userPresets(pluginId: string, stored: readonly UserPreset[]): Cu
     name: item.name,
     source: 'user' as const,
     params: { ...item.params },
+    text: readText(stored, item.id),
   }))
 }
 
@@ -107,12 +143,16 @@ export function saveUserPreset(stored: UserPreset[], pluginId: string, name: str
   }
   const existing = stored.find((item) => isLibraryPreset(item) && item.pluginId === pluginId && item.name.toLowerCase() === clean.toLowerCase())
   if (existing) {
-    const presets = stored.map((item) => item.id === existing.id ? { ...item, params: { ...params } } : item)
+    const presets = withText(
+      stored.map((item) => item.id === existing.id ? { ...item, params: { ...params } } : item),
+      existing.id,
+      text,
+    )
     return { presets, preset: { id: existing.id, pluginId, name: existing.name, source: 'user', params: { ...params }, text } }
   }
   const preset: CuePreset = { id: freshId(clean), pluginId, name: clean, source: 'user', params: { ...params }, text }
   return {
-    presets: [...stored, { id: preset.id, pluginId, name: clean, params: { ...params } }],
+    presets: withText([...stored, { id: preset.id, pluginId, name: clean, params: { ...params } }], preset.id, text),
     preset,
   }
 }
@@ -121,6 +161,7 @@ export function renameUserPreset(stored: UserPreset[], pluginId: string, id: str
   const target = stored.find((item) => item.id === id && item.pluginId === pluginId && isLibraryPreset(item))
   if (!target) return null
   const clean = uniqueName(pluginId, stored.filter((item) => item.id !== id), name)
+  if (clean.toLowerCase() === INIT_NAME.toLowerCase()) return null
   if (factoryPresets(pluginId).some((item) => item.name.toLowerCase() === clean.toLowerCase())) return null
   return stored.map((item) => item.id === id ? { ...item, name: clean } : item)
 }
@@ -128,7 +169,7 @@ export function renameUserPreset(stored: UserPreset[], pluginId: string, id: str
 export function deleteUserPreset(stored: UserPreset[], pluginId: string, id: string): UserPreset[] | null {
   const target = stored.find((item) => item.id === id && item.pluginId === pluginId && isLibraryPreset(item))
   if (!target) return null
-  return stored.filter((item) => item.id !== id)
+  return stored.filter((item) => item.id !== id && item.id !== textRowId(id))
 }
 
 export function duplicatePreset(stored: UserPreset[], pluginId: string, source: CuePreset): { presets: UserPreset[]; preset: CuePreset } {

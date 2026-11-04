@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { CLICK_NAMES, DRIVE_NAMES, knockPadPitch, noteLabel, NOTE_NAMES, renderKnockBuffer, SCALE_NAMES, detectPitch } from '../audio/rack/knock'
-import { KNOCK_PRESETS } from '../model/knockPresets'
-import { activeDevicePreset } from '../model/rack'
-import { PresetBar } from './PresetBar'
+import { commitDevicePreset } from '../presets/project'
+import { PresetControls } from './PresetControls'
 import { samplesToBeats } from '../model/time'
 import { uid } from '../model/types'
 import { selectKnock } from '../state/select'
@@ -149,10 +148,12 @@ export function KnockPop({ store, engine, onClose }: { store: ProjectStore; engi
     <div className="knock-pop" data-knock="open">
       <header>
         <strong>Knock</strong>
-        <PresetBar
-          names={KNOCK_PRESETS.map((item) => item.name)}
-          active={activeDevicePreset('knock', params)}
-          onPick={(name) => store.applyDevicePreset(track.id, device.id, name)}
+        <PresetControls
+          pluginId="device:knock"
+          instanceKey={device.id}
+          values={params}
+          presets={store.project.presets}
+          onCommit={(next) => commitDevicePreset(store, track.id, device.id, next.params, next.presets)}
         />
         <button className={`text-btn ${slideArm ? 'on' : ''}`} onClick={() => setSlideArm((value) => !value)}>Slide</button>
         <button className={`text-btn ${(params.snap || 0) >= 0.5 ? 'on' : ''}`} onClick={() => setParam('snap', (params.snap || 0) >= 0.5 ? 0 : 1)}>Key</button>

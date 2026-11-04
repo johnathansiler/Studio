@@ -1,9 +1,10 @@
 import { normalizeScaler } from '../instruments/scaler/model'
 import type { ScalerState } from '../instruments/scaler/types'
+import { normalizePadKit } from '../model/padMachine'
 import type { ProjectStore } from '../state/store'
 import { selectPlugin } from '../state/select'
 import type { UserPreset } from '../model/types'
-import { applyGroove } from './apply'
+import { applyGroove, applyKit } from './apply'
 
 type Editable = { mutate: (fn: () => void, label?: string) => void }
 
@@ -51,6 +52,20 @@ export function commitDevicePreset(store: ProjectStore, trackId: string, deviceI
   edit(store, () => {
     const device = store.track(trackId)?.rack?.devices.find((item) => item.id === deviceId)
     if (device) device.params = { ...params }
+    store.project.presets = presets
+  })
+}
+
+/** Amp is the saturator face. The stored kind stays on Amp so the face does not close. */
+export function commitAmpPreset(store: ProjectStore, trackId: string | 'master', instanceId: string, params: Record<string, number>, presets: UserPreset[]) {
+  commitPluginPreset(store, trackId, instanceId, { ...params, kind: 5 }, presets)
+}
+
+export function commitPadPreset(store: ProjectStore, trackId: string, params: Record<string, number>, presets: UserPreset[]) {
+  edit(store, () => {
+    const track = store.track(trackId)
+    if (!track) return
+    track.padKit = normalizePadKit(applyKit(normalizePadKit(track.padKit), params))
     store.project.presets = presets
   })
 }
