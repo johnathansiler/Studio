@@ -460,10 +460,22 @@ export function insertChoices<T extends { id: string; name: string }>(entries: r
   ]
 }
 
+/** Same insert list Mix shows for this track. */
+export function insertMenuChoices(store: ProjectStore, trackId: string | 'master') {
+  const midi = trackId !== 'master' && store.track(trackId)?.type === 'midi'
+  return insertChoices(CATALOG.filter((plugin) => trackId !== 'master' || !INSTRUMENT_IDS.has(plugin.id)), midi)
+}
+
+/** Same insert action Mix uses. Vocal Clean adds the vocal chain. */
+export function addInsert(store: ProjectStore, trackId: string | 'master', value: string) {
+  if (!value) return
+  if (value === 'vocal' && trackId !== 'master') store.addVocalChain(trackId)
+  else store.addPlugin(trackId, value)
+}
+
 function PluginPicker({ store, trackId, roomy }: { store: ProjectStore; trackId: string | 'master'; roomy?: boolean }) {
   const [open, setOpen] = useState(false)
-  const midi = trackId !== 'master' && store.track(trackId)?.type === 'midi'
-  const choices = insertChoices(CATALOG.filter((plugin) => trackId !== 'master' || !INSTRUMENT_IDS.has(plugin.id)), midi)
+  const choices = insertMenuChoices(store, trackId)
   return (
     <div className={`plugin-picker${open ? ' open' : ''}`}>
       <button
@@ -484,7 +496,7 @@ function PluginPicker({ store, trackId, roomy }: { store: ProjectStore; trackId:
               type="button"
               className="plugin-pick"
               onClick={() => {
-                addChoice(store, trackId, plugin.id)
+                addInsert(store, trackId, plugin.id)
                 setOpen(false)
               }}
             >
@@ -500,11 +512,5 @@ function PluginPicker({ store, trackId, roomy }: { store: ProjectStore; trackId:
 function tuneSheetHeight() {
   if (typeof window === 'undefined') return 680
   return Math.min(740, Math.max(560, window.innerHeight - 16))
-}
-
-function addChoice(store: ProjectStore, trackId: string | 'master', value: string) {
-  if (!value) return
-  if (value === 'vocal' && trackId !== 'master') store.addVocalChain(trackId)
-  else store.addPlugin(trackId, value)
 }
 
