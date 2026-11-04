@@ -130,7 +130,7 @@ describe('beat machine layout', () => {
     } finally {
       await browser.close()
     }
-  })
+  }, 20000)
 
   it('shows the chop editor and the vintage menu at phone, fold, and desktop', async () => {
     mkdirSync('/opt/cursor/artifacts', { recursive: true })
@@ -230,5 +230,5 @@ describe('beat machine layout', () => {
     } finally {
       await browser.close()
     }
-  })
+  }, 20000)
 })

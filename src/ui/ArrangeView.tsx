@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { AudioEngine } from '../audio/engine'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { activeComp } from '../model/comp'
-import { computePeaks } from '../model/demo'
+import { clipPlayRatio, snapClipTimeline } from '../audio/clipSnap'
 import { sourceSamplesOf, stretchEdge } from '../audio/stretch/engine'
 import { trimAudioClip } from '../model/clips'
 import { rectsHit } from '../model/edit'
@@ -49,6 +49,8 @@ import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoin
 import { laneDoubleClickAddsClip } from './clipKeys'
 import { isSampledInstrument } from '../instruments/sampled'
 import { LoopRegion } from './LoopRegion'
+import { WaveformView } from './WaveformView'
+import { sampleAtX, type WaveSpan } from './waveZoom'
 import { CommentControl, CommentPins } from './timelineComments'
 
 
@@ -934,7 +936,12 @@ export function ArrangeView({
                   passive={passive}
                   remotes={remotes}
                   onSplitAt={(clientX) => store.splitAt(track.id, clip.id, sampleAt(clientX))}
-                  onSplit={() => store.splitSelected(engine.currentTimelineSample())}
+                  onSplit={(enabled) => {
+                    const at = engine.currentTimelineSample()
+                    const channel = store.buffers.get(clip.bufferId)?.channels[0]
+                    const next = enabled ? snapClipTimeline(clip, channel, at, true).sample : at
+                    store.splitSelected(next)
+                  }}
                   onErase={beginErase}
                   onMove={(event) => moveSelection(event, 'audio', track.id, clip.id)}
                 />
@@ -1299,52 +1306,31 @@ function ClipView({
   passive: boolean
   remotes: readonly { id: string; color: string; selectedClipIds: readonly string[] }[]
   onSplitAt: (clientX: number) => void
-  onSplit: () => void
+  onSplit: (snapToZero: boolean) => void
   onErase: (event: ReactPointerEvent) => void
   onMove: (event: ReactPointerEvent) => void
 }) {
   const project = selectArrange(store).project
   const asset = store.buffers.get(clip.bufferId)
   const [preview, setPreview] = useState<AudioClip | null>(null)
-  const [audioShadow, setAudioShadow] = useState<{ left: number; width: number; line: number; label: string } | null>(null)
+  const [audioShadow, setAudioShadow] = useState<{ left: number; width: number; line: number; label: string; lock?: boolean } | null>(null)
+  const [snapZero, setSnapZero] = useState(true)
+  const clipRef = useRef<HTMLDivElement>(null)
+  const spanRef = useRef<WaveSpan | null>(null)
+  const pinchLock = useRef(false)
   const ghost = store.quantizePreview?.audio.find((item) => item.clipId === clip.id)?.clip
   const shown = preview ?? ghost ?? clip
   const left = ((shown.startSample + (preview ? 0 : shift)) / project.sampleRate) * px
   const width = Math.max(8, (shown.durationSamples / project.sampleRate) * px)
-  const canvas = useRef<HTMLCanvasElement>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [swipe, setSwipe] = useState<{ laneId: string; from: number; to: number } | null>(null)
   const outline = project.waveforms?.[clip.bufferId]
   const sourceLen = sourceSamplesOf(shown)
-  const peaks = useMemo(() => {
-    if (asset?.channels[0]?.length) {
-      const slice = asset.channels[0].subarray(shown.offsetSamples, Math.min(asset.channels[0].length, shown.offsetSamples + sourceLen))
-      return computePeaks(slice, Math.max(8, Math.round(width)))
-    }
-    return outline || []
-  }, [asset, outline, shown.offsetSamples, sourceLen, width])
-
-  useEffect(() => {
-    const node = canvas.current
-    if (!node || !peaks.length) return
-    const columns = Math.max(8, Math.round(width))
-    node.width = columns
-    node.height = 64
-    const ctx = node.getContext('2d')
-    if (!ctx) return
-    ctx.clearRect(0, 0, node.width, node.height)
-    ctx.fillStyle = 'rgba(255,255,255,0.85)'
-    for (let x = 0; x < columns; x++) {
-      const peak = peaks[Math.min(peaks.length - 1, Math.floor((x * peaks.length) / columns))]
-      if (!peak) continue
-      const y1 = (1 - peak.max) * 32
-      const y2 = (1 - peak.min) * 32
-      ctx.fillRect(x, y1, 1, Math.max(1, y2 - y1))
-    }
-  }, [peaks, width])
+  const selected = store.selectedClipIds.includes(clip.id)
 
   function pointerDown(event: ReactPointerEvent, mode: 'move' | 'start' | 'end') {
-    if (event.button === 2) return
+    if (event.button === 2 || clipRef.current?.dataset.wavePinch === '1') return
+    pinchLock.current = false
     event.stopPropagation()
     event.preventDefault()
     event.currentTarget.setPointerCapture?.(event.pointerId)
@@ -1352,7 +1338,9 @@ function ClipView({
     const originX = event.clientX
     const originY = event.clientY
     const stretching = event.altKey
-    let latest: AudioClip | null = null
+    const channel = asset?.channels[0]
+    let finger: AudioClip | null = null
+    let landed: AudioClip | null = null
     let held = false
     const timer = mode === 'move'
       ? window.setTimeout(() => {
@@ -1361,35 +1349,74 @@ function ClipView({
         }, 480)
       : 0
     const snapped = (value: number) => project.snap ? snapSampleToMap(value, project, 1 / Math.max(1e-6, activeGridBeats(project) || 1)) : Math.max(0, value)
-    const bufferLength = asset?.channels[0]?.length ?? clip.offsetSamples + clip.durationSamples
+    const bufferLength = channel?.length ?? clip.offsetSamples + clip.durationSamples
+    const place = (edge: 'start' | 'end', timeline: number, zero: boolean) => {
+      const raw = trimAudioClip(clip, edge, timeline, bufferLength)
+      if (!zero || stretching) return { raw, landed: trimAudioClip(clip, edge, snapped(timeline), bufferLength), lock: false }
+      const hit = snapClipTimeline(clip, channel, edge === 'start' ? raw.startSample : raw.startSample + raw.durationSamples, true)
+      return { raw, landed: trimAudioClip(clip, edge, hit.sample, bufferLength), lock: hit.locked }
+    }
     const move = (ev: PointerEvent) => {
+      if (clipRef.current?.dataset.wavePinch === '1' || pinchLock.current) {
+        finger = null
+        landed = null
+        return
+      }
       if (Math.abs(ev.clientX - originX) > 8 || Math.abs(ev.clientY - originY) > 8) window.clearTimeout(timer)
       if (held) return
       const delta = ((ev.clientX - originX) / px) * project.sampleRate
-      if (mode === 'move') latest = { ...clip, startSample: snapped(clip.startSample + delta) }
-      if (mode === 'start' && stretching) latest = stretchEdge(clip, 'start', snapped(clip.startSample + delta))
-      if (mode === 'start' && !stretching) latest = trimAudioClip(clip, 'start', snapped(clip.startSample + delta), bufferLength)
-      if (mode === 'end' && stretching) latest = stretchEdge(clip, 'end', snapped(clip.startSample + clip.durationSamples + delta))
-      if (mode === 'end' && !stretching) latest = trimAudioClip(clip, 'end', snapped(clip.startSample + clip.durationSamples + delta), bufferLength)
-      setPreview(latest)
-      if (latest) {
-        const left = (latest.startSample / project.sampleRate) * px
-        const width = Math.max(8, (latest.durationSamples / project.sampleRate) * px)
-        const line = mode === 'end' ? left + width : left
-        const startBeat = projectSampleBeat(project, latest.startSample)
-        const endBeat = projectSampleBeat(project, latest.startSample + latest.durationSamples)
+      let lock = false
+      if (mode === 'move') {
+        finger = { ...clip, startSample: snapped(clip.startSample + delta) }
+        landed = finger
+      }
+      if (mode === 'start' && stretching) {
+        finger = stretchEdge(clip, 'start', snapped(clip.startSample + delta))
+        landed = finger
+      }
+      if (mode === 'end' && stretching) {
+        finger = stretchEdge(clip, 'end', snapped(clip.startSample + clip.durationSamples + delta))
+        landed = finger
+      }
+      if (mode === 'start' && !stretching) {
+        const next = place('start', clip.startSample + delta, snapZero)
+        finger = next.raw
+        landed = next.landed
+        lock = next.lock
+      }
+      if (mode === 'end' && !stretching) {
+        const next = place('end', clip.startSample + clip.durationSamples + delta, snapZero)
+        finger = next.raw
+        landed = next.landed
+        lock = next.lock
+      }
+      setPreview(mode === 'move' || stretching ? landed : finger)
+      const ghostClip = landed
+      if (ghostClip) {
+        const ghostLeft = (ghostClip.startSample / project.sampleRate) * px
+        const ghostWidth = Math.max(8, (ghostClip.durationSamples / project.sampleRate) * px)
+        const line = mode === 'end' ? ghostLeft + ghostWidth : ghostLeft
+        const startBeat = projectSampleBeat(project, ghostClip.startSample)
+        const endBeat = projectSampleBeat(project, ghostClip.startSample + ghostClip.durationSamples)
         const label = mode === 'move'
           ? positionReadout(startBeat, quartersPerBar(project.timeSignature))
           : lengthReadout(startBeat, endBeat, quartersPerBar(project.timeSignature))
-        setAudioShadow({ left, width, line, label })
+        setAudioShadow({ left: ghostLeft, width: ghostWidth, line, label, lock })
       }
     }
     const up = (ev: PointerEvent) => {
       window.clearTimeout(timer)
-      if (Number.isFinite(ev.clientX)) move(ev)
+      const pinching = pinchLock.current || clipRef.current?.dataset.wavePinch === '1'
+      pinchLock.current = false
+      if (!pinching && Number.isFinite(ev.clientX)) move(ev)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', up)
+      if (pinching) {
+        setPreview(null)
+        setAudioShadow(null)
+        return
+      }
       const dropped = Number.isFinite(ev.clientX) ? document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-slot-drop]') : null
       if (dropped) {
         window.dispatchEvent(new CustomEvent('cueharbor-slot-clip', { detail: { trackId, clipId: clip.id } }))
@@ -1402,10 +1429,9 @@ function ClipView({
         setAudioShadow(null)
         return
       }
-      const next = latest
+      const next = mode === 'move' || stretching ? finger : landed
       setPreview(null)
       setAudioShadow(null)
-      if (held) return
       if (!next) return
       if (
         mode !== 'move'
@@ -1416,8 +1442,8 @@ function ClipView({
       if (mode === 'move') store.moveClip(trackId, clip.id, next.startSample)
       if (stretching && mode === 'start') store.stretchClip(trackId, clip.id, 'start', next.startSample)
       if (stretching && mode === 'end') store.stretchClip(trackId, clip.id, 'end', next.startSample + next.durationSamples)
-      if (!stretching && mode === 'start') store.trimClip(trackId, clip.id, 'start', next.startSample)
-      if (!stretching && mode === 'end') store.trimClip(trackId, clip.id, 'end', next.startSample + next.durationSamples)
+      if (!stretching && mode === 'start') store.trimClip(trackId, clip.id, 'start', next.startSample, snapZero)
+      if (!stretching && mode === 'end') store.trimClip(trackId, clip.id, 'end', next.startSample + next.durationSamples, snapZero)
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -1432,18 +1458,20 @@ function ClipView({
     {audioShadow && (
       <>
         <div className="snap-shadow" data-snap-shadow="1" style={{ left: audioShadow.left, width: audioShadow.width }} />
-        <i className="snap-line" style={{ left: audioShadow.line }} />
+        <i className="snap-line" data-zero-lock={audioShadow.lock ? '1' : '0'} style={{ left: audioShadow.line }} />
         <em className="snap-read" style={{ left: audioShadow.line }}>{audioShadow.label}</em>
       </>
     )}
     <div
+      ref={clipRef}
       data-clip={clip.id}
       data-track={trackId}
+      data-snap-zero={snapZero ? '1' : '0'}
       data-remote-select={remote?.id}
-      className={`clip ${store.selectedClipIds.includes(clip.id) ? 'selected' : ''} ${clip.folder && store.selectedClipId === clip.id ? 'open' : ''}${remote ? ' remote-selected' : ''}`}
+      className={`clip ${selected ? 'selected' : ''} ${clip.folder && store.selectedClipId === clip.id ? 'open' : ''}${remote ? ' remote-selected' : ''}`}
       style={{ left, width, background: store.project.tracks.find((t) => t.id === trackId)?.color, pointerEvents: passive ? 'none' : undefined, ['--remote' as string]: remote?.color }}
       onPointerDown={(event) => {
-        if ((event.target as HTMLElement).closest('.take-lane, .edge')) return
+        if ((event.target as HTMLElement).closest('.take-lane, .edge, .wave-zoom')) return
         if (tool === 'erase') {
           onErase(event)
           return
@@ -1451,7 +1479,17 @@ function ClipView({
         if (tool === 'split') {
           event.stopPropagation()
           event.preventDefault()
-          onSplitAt(event.clientX)
+          if (!snapZero) {
+            onSplitAt(event.clientX)
+            return
+          }
+          const bounds = event.currentTarget.getBoundingClientRect()
+          const ratio = clipPlayRatio(clip)
+          const source = spanRef.current
+            ? sampleAtX(spanRef.current, event.clientX - bounds.left, bounds.width)
+            : clip.offsetSamples + ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * sourceLen
+          const timeline = clip.startSample + (source - clip.offsetSamples) * ratio
+          store.splitAt(trackId, clip.id, snapClipTimeline(clip, asset?.channels[0], timeline, true).sample)
           return
         }
         if (tool === 'trim') {
@@ -1473,7 +1511,20 @@ function ClipView({
         store.openStems(trackId, clip.id)
       }}
     >
-      <canvas ref={canvas} />
+      <WaveformView
+        channel={asset?.channels[0]}
+        outline={asset ? null : outline}
+        bounds={asset ? { start: shown.offsetSamples, end: shown.offsetSamples + sourceLen } : { start: 0, end: outline?.length || 1 }}
+        ariaLabel="Clip waveform"
+        className="clip-wave"
+        color="rgba(255,255,255,0.9)"
+        chrome={selected ? 'inside' : 'auto'}
+        snap={snapZero}
+        onSnap={setSnapZero}
+        listenRef={clipRef}
+        onPinch={(active) => { if (active) pinchLock.current = true }}
+        onSpan={(span) => { spanRef.current = span }}
+      />
       <em>
         {clip.name}
         {clip.stretch && Math.abs(clip.durationSamples - sourceSamplesOf(clip)) > 1 ? ` ${Math.round((clip.durationSamples / sourceSamplesOf(clip)) * 100)}%` : ''}
@@ -1537,7 +1588,7 @@ function ClipView({
         anchor={menu ? { left: menu.x, top: menu.y, width: 28, height: 28 } : null}
         prefer="down"
       >
-        <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { onSplit(); setMenu(null) }}>Split</button>
+        <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { onSplit(snapZero); setMenu(null) }}>Split</button>
         <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openStems(trackId, clip.id); setMenu(null) }}>Stems</button>
         <button type="button" title="Spectrogram. Select a spot and remove clicks, hum, or noise." onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openSpectral(trackId, clip.id); setMenu(null) }}>Repair</button>
         <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.deleteSelectedClip(); setMenu(null) }}>Delete</button>

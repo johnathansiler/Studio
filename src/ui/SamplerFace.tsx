@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import type { SamplerProgram } from '../audio/multisample/types'
 import { noteName } from '../audio/sample/pitch'
-import { scaledPeaks } from '../audio/sample/engine'
+import { dragSlotPoint, readSlotPoints, type SlotPoints } from '../audio/sample/slot'
 import type { ProjectStore } from '../state/store'
 import { Keyboard, Knob } from './kit/controls'
+import { WaveformView, type WaveMarker } from './WaveformView'
 import './kit/kit.css'
 
 const LOOP = ['Loop', 'Ping', 'Once']
@@ -48,9 +48,7 @@ export function SamplerFace({ store, engine, trackId }: { store: ProjectStore; e
       {program ? (
         <ZoneMap program={program} />
       ) : (
-        <div className="sampler-wave">
-          <SampleWave channel={channel} />
-        </div>
+        <SampleWave store={store} trackId={track.id} pluginId={sampler?.id} channel={channel} points={sampler?.sampler ? readSlotPoints(sampler.sampler) : null} />
       )}
       <p className="sampler-zones-label">{program ? zoneSummary(program) : (sampleName || 'No sample yet')}</p>
       <div className="inst-knobs" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
@@ -148,44 +146,51 @@ function ZoneMap({ program }: { program: SamplerProgram }) {
   )
 }
 
-function SampleWave({ channel }: { channel?: Float32Array }) {
-  const ref = useRef<HTMLCanvasElement>(null)
-  useEffect(() => {
-    const canvas = ref.current
-    if (!canvas) return
-    const draw = () => {
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
-      const width = canvas.clientWidth || 320
-      const height = canvas.clientHeight || 72
-      const dpr = window.devicePixelRatio || 1
-      canvas.width = Math.max(1, Math.floor(width * dpr))
-      canvas.height = Math.max(1, Math.floor(height * dpr))
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      ctx.clearRect(0, 0, width, height)
-      ctx.strokeStyle = 'rgba(115, 196, 143, 0.35)'
-      ctx.beginPath()
-      ctx.moveTo(0, height / 2)
-      ctx.lineTo(width, height / 2)
-      ctx.stroke()
-      if (!channel?.length) return
-      const peaks = scaledPeaks(channel, Math.max(24, Math.floor(width / 3)))
-      const bar = width / peaks.length
-      ctx.fillStyle = '#8ee0ae'
-      ctx.shadowColor = 'rgba(115, 196, 143, 0.85)'
-      ctx.shadowBlur = 6
-      peaks.forEach((peak, index) => {
-        const top = (0.5 - peak.max * 0.46) * height
-        const bottom = (0.5 - peak.min * 0.46) * height
-        ctx.fillRect(index * bar, top, Math.max(1, bar - 1), Math.max(1, bottom - top))
-      })
-    }
-    draw()
-    const observer = new ResizeObserver(draw)
-    observer.observe(canvas)
-    return () => observer.disconnect()
-  }, [channel])
-  return <canvas ref={ref} aria-label="Sample waveform" />
+const SAMPLE_HANDLES: Record<keyof SlotPoints, { name: string; label: string; loop: boolean }> = {
+  start: { name: 'Start', label: 'Start. Drag to set where the sample begins.', loop: false },
+  end: { name: 'End', label: 'End. Drag to set where the sample ends.', loop: false },
+  loopStart: { name: 'Loop start', label: 'Loop start. Drag to set where the loop repeats.', loop: true },
+  loopEnd: { name: 'Loop end', label: 'Loop end. Drag to set where the loop returns.', loop: true },
+}
+
+function SampleWave({
+  store,
+  trackId,
+  pluginId,
+  channel,
+  points,
+}: {
+  store: ProjectStore
+  trackId: string
+  pluginId?: string
+  channel?: Float32Array
+  points: SlotPoints | null
+}) {
+  const markers: WaveMarker[] = points
+    ? (['start', 'end', 'loopEnd', 'loopStart'] as const).map((which) => ({
+      id: which,
+      at: points[which],
+      className: `slot-handle ${SAMPLE_HANDLES[which].loop ? 'loop' : 'edge'}`,
+      label: SAMPLE_HANDLES[which].label,
+      title: SAMPLE_HANDLES[which].label.replace(`${SAMPLE_HANDLES[which].name}. `, ''),
+      name: SAMPLE_HANDLES[which].name,
+    }))
+    : []
+  return (
+    <WaveformView
+      channel={channel}
+      className="sampler-wave"
+      ariaLabel="Sample waveform"
+      color="#8ee0ae"
+      chrome="below"
+      markers={markers}
+      onMarker={(id, fraction, phase) => {
+        if (!pluginId || !points) return
+        if (phase === 'move') store.setSlotPoints(trackId, pluginId, dragSlotPoint(points, id as keyof SlotPoints, fraction))
+        else store.endDraft()
+      }}
+    />
+  )
 }
 
 function RootStep({ label, value, onChange }: { label: string; value: number; onChange: (note: number) => void }) {
