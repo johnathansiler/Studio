@@ -53,7 +53,7 @@ export function AddTrackButton({
         </svg>
         <span>Add Track</span>
       </button>
-      <AnchoredMenu className="add-track-menu" open={open} onClose={() => setOpen(false)} label="Add Track" triggerRef={buttonRef} prefer="down">
+      <AnchoredMenu fill className="add-track-menu" open={open} onClose={() => setOpen(false)} label="Add Track" triggerRef={buttonRef} prefer="down">
         <div role="group" aria-label="Add Track">
           {TRACK_CHOICES.map((choice) => (
             <button

@@ -215,7 +215,7 @@ export function SpectralSheet({ store }: { store: ProjectStore }) {
   }
 
   return (
-    <div className="spectral-sheet" role="dialog" aria-label="Spectral repair">
+    <div className="spectral-sheet" data-screen-overlay="" role="dialog" aria-label="Spectral repair">
       <header>
         <strong>Spectral repair</strong>
         <TipButton label="Undo" hint="Undo the last edit." onClick={() => store.undo()} />

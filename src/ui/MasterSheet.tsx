@@ -199,7 +199,7 @@ export function MasterSheet({ store, engine, onClose }: { store: ProjectStore; e
 
   const limiter = selectMaster(store).plugins.find((plugin) => plugin.pluginId === 'limiter')
   return (
-    <div className="plugin-sheet master-sheet" id="master-sheet" role="dialog" aria-label="Master">
+    <div className="plugin-sheet master-sheet" id="master-sheet" data-screen-overlay="" role="dialog" aria-label="Master">
       {limiter && (
         <PresetControls
           pluginId="master"
@@ -216,7 +216,7 @@ export function MasterSheet({ store, engine, onClose }: { store: ProjectStore; e
         </select>
         <button id="master-apply" className="text-btn" disabled={!!busy} onClick={() => void apply()}>{busy || 'Apply'}</button>
         <button id="master-chain" className={`text-btn ${chain ? 'on' : ''}`} aria-expanded={chain} onClick={() => setChain((open) => !open)}>Chain</button>
-        <button className="text-btn" onClick={onClose}>×</button>
+        <button className="text-btn overlay-close" onClick={onClose}>Close</button>
       </header>
       <label className="wet">
         Intensity

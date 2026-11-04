@@ -7,6 +7,7 @@ import { displayedPlayhead, transportSample } from '../model/transportSync'
 import { selectArrange, selectBeats, selectMixer, selectSession, selectTransport } from '../state/select'
 import { ProjectStore } from '../state/store'
 import { ArrangeView } from '../ui/ArrangeView'
+import { PlaylistBrowser } from '../ui/PlaylistBrowser'
 
 describe('shared transport and mixer', () => {
   it('wraps every view to the same playhead inside the loop', () => {
@@ -163,8 +164,25 @@ describe('arrange browser', () => {
       onQuickPunch: () => undefined,
       onAnalyze: () => undefined,
     } as never))
-    expect(html).toContain('data-playlist-browser="open"')
-    for (const label of ['Sounds', 'Instruments', 'Loops', 'Patterns', 'Plugins', 'Clips']) expect(html).toContain(label)
+    expect(html).toContain('>Browser<')
+    expect(html).not.toContain('data-playlist-browser="open"')
+    const browser = renderToStaticMarkup(createElement(PlaylistBrowser, {
+      store,
+      engine: {
+        unlock() {},
+        stopPreview() {},
+        previewPcm() {},
+        currentTimelineSample: () => 0,
+      },
+      phone: false,
+      tab: 'sounds',
+      onTab() {},
+      onClose() {},
+      onSeek() {},
+    }))
+    expect(browser).toContain('data-playlist-browser="open"')
+    expect(browser).toContain('data-screen-overlay')
+    for (const label of ['Sounds', 'Instruments', 'Loops', 'Patterns', 'Plugins', 'Clips']) expect(browser).toContain(label)
     expect(html).not.toContain('>Read<')
     expect(html).not.toContain('Auto-Tune')
     expect(html).toContain('>Song<')

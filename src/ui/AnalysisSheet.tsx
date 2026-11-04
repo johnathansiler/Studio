@@ -130,10 +130,10 @@ export function AnalysisSheet({
   }
 
   return (
-    <div className="analysis-sheet" role="dialog" aria-label="Analysis">
+    <div className="analysis-sheet" data-screen-overlay="" role="dialog" aria-label="Analysis">
       <header>
         <strong>{track ? track.name : 'Analysis'}</strong>
-        <button type="button" className="text-btn" aria-describedby="analysis-close-hint" onClick={onClose}>Close</button>
+        <button type="button" className="text-btn overlay-close" aria-describedby="analysis-close-hint" onClick={onClose}>Close</button>
       </header>
       <p className="hint" id="analysis-close-hint">{CLOSE}</p>
       <label className="analysis-field">

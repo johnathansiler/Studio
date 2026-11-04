@@ -10,12 +10,14 @@ import { selectRack } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import './kit/kit.css'
 import './instrument.css'
+import { useScreenOverlay } from './screenOverlay'
 
 export function RackView({ store, engine, trackId, onOpenKnock }: { store: ProjectStore; engine: AudioEngine; trackId: string; onOpenKnock?: () => void }) {
   const rackState = selectRack(store, trackId)
   const track = rackState.track
   const rack = rackState.rack
   const [selected, setSelected] = useState(0)
+  useScreenOverlay(() => { if (store.rackTrackId === trackId) store.openRack(trackId) })
   const [from, setFrom] = useState<{ id: string; port: string } | null>(null)
   const [more, setMore] = useState(false)
   if (!track) return null
@@ -38,7 +40,7 @@ export function RackView({ store, engine, trackId, onOpenKnock }: { store: Proje
     )
   }
   return (
-    <div className={`rack inst-panel${sampled ? ' sampled' : ''}`}>
+    <div className={`rack inst-panel${sampled ? ' sampled' : ''}`} data-screen-overlay="" aria-label="Instrument">
       <header className="inst-head">
         <strong>{track.instrument === 'library' && track.library ? track.library.name : track.name}</strong>
         {!sampled && rack && (
@@ -48,7 +50,7 @@ export function RackView({ store, engine, trackId, onOpenKnock }: { store: Proje
             ))}
           </div>
         )}
-        <button type="button" className="bevel inst-close" aria-label="Close the instrument panel." title="Close the instrument panel." onClick={() => store.openRack(track.id)}>×<span className="fold-word">Close</span></button>
+        <button type="button" className="bevel inst-close overlay-close" aria-label="Close the instrument panel." title="Close the instrument panel." onClick={() => store.openRack(track.id)}>Close</button>
       </header>
       {sampled ? (
         <SamplerFace store={store} engine={engine} trackId={track.id} />

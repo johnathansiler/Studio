@@ -353,7 +353,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border-bottom: 1px solid var(--line);
   background: #121916;
 }
-.topbar { grid-area: bar; position: relative; min-height: 48px; z-index: 20; }
+.topbar { grid-area: bar; position: relative; min-height: 48px; z-index: auto; }
 .transport { grid-area: transport; min-height: 48px; justify-content: flex-start; flex-wrap: nowrap; overflow-x: auto; }
 .tool-slot { grid-area: tools; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px; min-width: 0; background: #141c18; z-index: 5; }
 .tool-slot:empty { display: none; }
@@ -408,6 +408,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .views {
   display: flex; flex: none; background: var(--panel); border: 1px solid var(--line);
   border-radius: 8px; padding: 2px; gap: 2px;
+  position: relative; z-index: var(--view-tabs-z, 480);
 }
 .views button, .chip, .icon-btn, .text-btn {
   border: 0; background: transparent; color: var(--muted); border-radius: 999px; padding: 6px 12px;

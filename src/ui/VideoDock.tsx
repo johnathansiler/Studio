@@ -11,6 +11,7 @@ import { SETUP_PLAIN } from './collabCopy'
 import { useFormFactor } from './form'
 import { TipButton } from './Hint'
 import { AnchoredMenu } from './AnchoredMenu'
+import { useScreenOverlay } from './screenOverlay'
 import { VersionsList } from './VersionsList'
 import type { Project } from '../model/types'
 import type { ProjectStore } from '../state/store'
@@ -41,6 +42,7 @@ export function VideoDock({
   const call = (id: string) => copyOf(CALL_COPY, id)
   const [tab, setTab] = useState<'people' | 'chat' | 'versions'>('people')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  useScreenOverlay(() => setSettingsOpen(false), settingsOpen)
   const [linkNote, setLinkNote] = useState('')
   const [joinForm, setJoinForm] = useState(false)
   const [joinDraft, setJoinDraft] = useState('')
@@ -341,7 +343,8 @@ export function VideoDock({
         </div>
       )}
       {!choosing && settingsOpen && (
-        <div className="settings-sheet" data-setup="open">
+        <div className="settings-sheet" data-setup="open" data-screen-overlay="" aria-label="Collab setup">
+          <button type="button" className="overlay-close" onClick={() => setSettingsOpen(false)}>Close</button>
           <div className="setup-list">
             <SetupRow
               label={SETUP_PLAIN.hear.label}

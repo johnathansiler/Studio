@@ -18,7 +18,7 @@ export function QuantizeSheet({ store }: { store: ProjectStore }) {
   const settings = quantize.draft
   const presets = quantize.presets
   return (
-    <div className="q-sheet">
+    <div className="q-sheet" data-screen-overlay="" role="dialog" aria-label="Quantize">
       <div className="row">
         <select aria-label="Grid" value={settings.division} onChange={(event) => store.setQuantizeDraft({ division: Number(event.target.value) as (typeof DIVISIONS)[number] })}>
           {DIVISIONS.map((division) => (
@@ -38,7 +38,7 @@ export function QuantizeSheet({ store }: { store: ProjectStore }) {
           <option value="pattern">Pat</option>
         </select>
         <button type="button" onClick={() => store.commitQuantize()}>Apply</button>
-        <button type="button" onClick={() => store.closeQuantize()}>Close</button>
+        <button type="button" className="overlay-close" onClick={() => store.closeQuantize()}>Close</button>
       </div>
       <details>
         <summary>More</summary>

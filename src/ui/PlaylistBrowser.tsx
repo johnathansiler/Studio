@@ -5,6 +5,7 @@ import type { ProjectStore } from '../state/store'
 import { SoundBrowser } from './SoundBrowser'
 import { PatternSend, patternBeat } from './PatternSend'
 import { quickDragArmed } from './clipKeys'
+import { useScreenOverlay } from './screenOverlay'
 
 export type BrowserTab = 'sounds' | 'drums' | 'instruments' | 'loops' | 'patterns' | 'plugins' | 'clips'
 
@@ -150,9 +151,10 @@ export function PlaylistBrowser({
   }, [needle, project, trackId])
 
   const soundLock = tab === 'instruments' ? 'instrument' : tab === 'loops' ? 'loop' : tab === 'drums' ? 'drum' : tab === 'sounds' ? 'all' : null
+  useScreenOverlay(onClose)
 
   return (
-    <aside className="playlist-browser" data-playlist-browser="open" aria-label="Browser">
+    <aside className="playlist-browser" data-playlist-browser="open" data-screen-overlay="" aria-label="Browser">
       <div className="browser-tabs">
         <div className="browser-chip-scroll" role="tablist" aria-label="Browser">
           {TABS.map((item) => (
@@ -161,7 +163,7 @@ export function PlaylistBrowser({
             </button>
           ))}
         </div>
-        <button type="button" className="browser-close" title="Hide the browser. The playlist stays put." onClick={onClose}>Close</button>
+        <button type="button" className="browser-close overlay-close" title="Hide the browser. The playlist stays put." onClick={onClose}>Close</button>
       </div>
       {soundLock ? (
         <SoundBrowser

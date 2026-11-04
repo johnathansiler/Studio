@@ -3,6 +3,7 @@ import { isSoundPlugin } from '../instruments/scaler/chain'
 import type { PluginInstance } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { addInsert, insertLabel, insertMenuChoices } from './PluginSheet'
+import { useScreenOverlay } from './screenOverlay'
 import './pluginsDrawer.css'
 
 /** One line under each plugin in the add list. */
@@ -82,21 +83,24 @@ export function PluginsDrawer({
   store,
   place,
   menuOpen = false,
+  onClose,
 }: {
   store: ProjectStore
   place: 'bottom' | 'side'
   menuOpen?: boolean
+  onClose?: () => void
 }) {
   useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
   const trackId = store.selectedTrackId
   const [menu, setMenu] = useState(menuOpen)
+  useScreenOverlay(() => onClose?.(), true)
   const previous = useRef(trackId)
   useEffect(() => {
     if (previous.current === trackId) return
     previous.current = trackId
     setMenu(false)
   }, [trackId])
-  return <PluginsDrawerView store={store} place={place} trackId={trackId} menuOpen={menu} onMenu={setMenu} />
+  return <PluginsDrawerView store={store} place={place} trackId={trackId} menuOpen={menu} onMenu={setMenu} onClose={onClose} />
 }
 
 export function PluginsDrawerView({
@@ -105,12 +109,14 @@ export function PluginsDrawerView({
   trackId,
   menuOpen,
   onMenu,
+  onClose,
 }: {
   store: ProjectStore
   place: 'bottom' | 'side'
   trackId: string | null
   menuOpen: boolean
   onMenu: (open: boolean) => void
+  onClose?: () => void
 }) {
   const track = trackId ? store.track(trackId) : null
   const plugins = track?.plugins ?? []
@@ -123,12 +129,14 @@ export function PluginsDrawerView({
       id="arrange-plugins"
       data-place={place}
       data-plugins-panel="open"
+      data-screen-overlay=""
       aria-label={track ? `Plugins on ${track.name}` : 'Plugins'}
     >
       <div className="plugins-drawer-body">
         <header className="plugins-drawer-head">
           <strong>Plugins</strong>
           <span>{track ? track.name : 'No track'}</span>
+          {onClose && <button type="button" className="overlay-close" onClick={onClose}>Close</button>}
         </header>
         <p className="plugins-drawer-note">
           {track ? `${track.name}. In the order sound passes through.` : 'Tap a track header to load its plugins.'}

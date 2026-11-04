@@ -321,7 +321,7 @@ export function PerformPop({
   const showEdit = deck === 'steps' || deck === 'mix'
   const lengthSteps = clip ? Math.max(16, Math.round(clip.durationBeats * 4)) : 16
   return (
-    <div className={`perform-pop ${drums ? 'drums' : 'keys'}`} role="dialog" aria-label={drums ? 'Beat Machine' : 'Piano roll'}>
+    <div className={`perform-pop ${drums ? 'drums' : 'keys'}`} data-screen-overlay="" role="dialog" aria-label={drums ? 'Beat Machine' : 'Piano roll'}>
       <header>
         {drums ? (FEATURES.session ? DECKS : DECKS.filter((item) => item !== 'session')).map((item) => (
           <button key={item} type="button" className={deck === item ? 'on' : ''} onClick={() => setDeck(item)}>{item[0].toUpperCase() + item.slice(1)}</button>
@@ -357,7 +357,7 @@ export function PerformPop({
           {latency} ms · base {engine.baseLatencyMs.toFixed(1)} · out {engine.deviceLatencyMs.toFixed(1)}
         </span>
         <button type="button" onClick={() => void session.calibrate()}>Calibrate</button>
-        <button type="button" onClick={onClose} aria-label="Close">×</button>
+        <button type="button" className="overlay-close" onClick={onClose} aria-label="Close">Close</button>
       </header>
       {drums && (
         <div className="beat-repeat" role="group" aria-label="Beat repeat">

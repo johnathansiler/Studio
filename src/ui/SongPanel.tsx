@@ -6,6 +6,7 @@ import { AutomationModeBar } from './AutomationLane'
 import { GuideLayer } from './GuideLayer'
 import { RecordBar } from './RecordBar'
 import { SongMapHead } from './SongMap'
+import { useScreenOverlay } from './screenOverlay'
 import './song-panel.css'
 
 const TABS = [
@@ -35,6 +36,7 @@ export function SongPanel({
   onQuickPunch: () => void
 }) {
   const [tab, setTab] = useState<SongTab>('automation')
+  useScreenOverlay(onClose)
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
@@ -46,10 +48,10 @@ export function SongPanel({
   return (
     <GuideLayer>
       <button type="button" className="guide-scrim song-scrim" aria-label="Close song" onClick={onClose} />
-      <div id="arrange-setup" className={`guide-sheet song-sheet ${compact ? 'sheet' : 'pop'}`} role="dialog" aria-label="Song">
+      <div id="arrange-setup" className={`guide-sheet song-sheet ${compact ? 'sheet' : 'pop'}`} role="dialog" aria-label="Song" data-screen-overlay="">
         <header className="song-head">
           <h2>Song</h2>
-          <button type="button" className="song-close" onClick={onClose}>Close</button>
+          <button type="button" className="song-close overlay-close" onClick={onClose}>Close</button>
         </header>
         <div className="song-pills" role="tablist" aria-label="Song sections">
           {TABS.map((item) => (

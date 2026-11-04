@@ -81,6 +81,8 @@ import { historyCommand, typingTarget } from './state/history'
 import { claimComputerKey } from './model/keyboardPlay'
 import { KeyboardDock } from './ui/KeyboardDock'
 import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark, keyboardShellTurn, notifyKeyboard, PADS_HISTORY, PIANO_HISTORY, presentKeyboard, releaseOrientation, setKeyboardPresenter, setPianoHider, STEPS_HISTORY, type EditorHistoryMark, type KeyboardPresentation } from './ui/keyboardStage'
+import { onViewTab, syncViewTabFrame } from './ui/overlayHost'
+import { useScreenOverlay } from './ui/screenOverlay'
 import { HintBubble, TipButton } from './ui/Hint'
 import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
@@ -233,6 +235,19 @@ export function App() {
   const [pianoOpen, setPianoOpen] = useState(false)
   const shellRef = useRef<HTMLDivElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
+  useLayoutEffect(() => {
+    const place = () => syncViewTabFrame(shellRef.current)
+    place()
+    const observer = new ResizeObserver(place)
+    if (shellRef.current) observer.observe(shellRef.current)
+    const bar = shellRef.current?.querySelector('.views')
+    if (bar) observer.observe(bar)
+    window.addEventListener('resize', place)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', place)
+    }
+  }, [form, land, phone])
   const [keysLandscape, setKeysLandscape] = useState(false)
   const [screenAngle, setScreenAngle] = useState<number | null>(() => {
     if (typeof screen === 'undefined' || !screen.orientation) return null
@@ -1558,37 +1573,35 @@ async function importDropped(files: FileList) {
     setPhonePane('edit')
   }
 
+  function dismissForTab() {
+    onViewTab({
+      keyboardOpen: store.keyboardMidi || keysLandscape,
+      orientationLocked: keysMode.current === 'locked',
+      releaseOrientation: () => { void releaseOrientation() },
+      hideKeyboard: () => {
+        if (store.keyboardMidi) {
+          store.clearKeyboardReturn()
+          store.setKeyboardMidi(false)
+          notifyKeyboard(false)
+        }
+        setKeysLandscape(false)
+      },
+    })
+  }
+
   function showCollab() {
+    dismissForTab()
     writeSessionDock(true)
     setCollabOpen(true)
     setSurface('studio')
     setPhonePane('edit')
-    setPianoOpen(false)
-    setMenuOpen(false)
-    if (store.keyboardMidi) {
-      store.setKeyboardMidi(false)
-      notifyKeyboard(false)
-    }
-    setKeysLandscape(false)
-    void releaseOrientation()
   }
 
   function showView(view: 'arrange' | 'mix' | 'beats' | 'session') {
     const next = preferArrangeView(view)
+    dismissForTab()
     hideCollab()
     setSurface('studio')
-    setMenuOpen(false)
-    if (next !== 'arrange' || phone) {
-      setPianoOpen(false)
-      if (phone) store.closePiano()
-    }
-    if (store.keyboardMidi) {
-      store.clearKeyboardReturn()
-      store.setKeyboardMidi(false)
-      notifyKeyboard(false)
-    }
-    setKeysLandscape(false)
-    void releaseOrientation()
     store.setView(next)
   }
 
@@ -1827,6 +1840,33 @@ async function importDropped(files: FileList) {
     store.insertScaler(pianoTrack?.id ?? null, page)
   }
 
+  useScreenOverlay(() => setExportOpen(false), exportOpen)
+  useScreenOverlay(() => setHelp(false), help)
+  useScreenOverlay(() => setProjectsOpen(false), projectsOpen)
+  useScreenOverlay(() => setTuneOpen(false), tuneOpen)
+  useScreenOverlay(() => setKnockOpen(false), knockOpen)
+  useScreenOverlay(() => setIdeasOpen(false), ideasOpen)
+  useScreenOverlay(() => { engine.stopPreview(); setPlayersOpen(false) }, playersOpen)
+  useScreenOverlay(() => { engine.stopPreview(); setUnstuckOpen(false) }, unstuckOpen)
+  useScreenOverlay(() => { engine.stopPreview(); setSoundsOpen(false) }, soundsOpen)
+  useScreenOverlay(() => setAnalysisTrackId(null), analysisTrackId != null)
+  useScreenOverlay(() => setPerform(null), perform != null)
+  useScreenOverlay(() => { setPianoOpen(false); store.closePiano() }, pianoOpen)
+  useScreenOverlay(() => {
+    store.clearKeyboardReturn()
+    store.setKeyboardMidi(false)
+    notifyKeyboard(false)
+  }, store.keyboardMidi)
+  useScreenOverlay(() => store.closeSteps(), store.stepTrackId != null)
+  useScreenOverlay(() => store.closePads(), store.padsTrackId != null)
+  useScreenOverlay(() => store.closeScaler(), store.scalerTrackId != null)
+  useScreenOverlay(() => store.focusPlugin(null), store.pluginFocus != null)
+  useScreenOverlay(() => store.closeQuantize(), store.quantizeOpen)
+  useScreenOverlay(() => { if (store.patchTrackId) store.openPatch(store.patchTrackId) }, store.patchTrackId != null)
+  useScreenOverlay(() => store.closeStems(), store.stemTrackId != null)
+  useScreenOverlay(() => store.closeSpectral(), store.spectralTrackId != null)
+  useScreenOverlay(() => store.closeClipSheet(), store.clipSheet)
+
   if (new URLSearchParams(window.location.search).get('faces') === '1') {
     return (
       <Suspense fallback={null}>
@@ -1887,7 +1927,7 @@ async function importDropped(files: FileList) {
           disabled={store.remoteFollow}
           onClick={() => { setMenuOpen(false); setUnstuckOpen((open) => !open) }}
         />
-        <AnchoredMenu open={menuOpen} onClose={() => setMenuOpen(false)} label="Project menu" triggerRef={menuButtonRef} prefer="down">
+        <AnchoredMenu fill open={menuOpen} onClose={() => setMenuOpen(false)} label="Project menu" triggerRef={menuButtonRef} prefer="down">
           <MainMenu
             items={visibleMenu({
               phone,
@@ -2173,7 +2213,7 @@ async function importDropped(files: FileList) {
         />
       )}
       {help && (
-        <div className="modal-back" onClick={() => setHelp(false)}>
+        <div className="modal-back" data-screen-overlay="" role="dialog" aria-label="Shortcuts" onClick={() => setHelp(false)}>
           <div className="modal help" onClick={(event) => event.stopPropagation()}>
             <h2>Shortcuts</h2>
             <div className="help-grid">
@@ -2203,7 +2243,7 @@ async function importDropped(files: FileList) {
                 </p>
               ))}
             </div>
-            <button className="text-btn" onClick={() => setHelp(false)}>Close</button>
+            <button className="overlay-close" onClick={() => setHelp(false)}>Close</button>
           </div>
         </div>
       )}

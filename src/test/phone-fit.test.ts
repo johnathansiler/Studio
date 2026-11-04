@@ -182,7 +182,7 @@ describe('phone fit at 412x915', () => {
         expect(addBox!.x).toBeLessThan(80)
         await add.click()
         await page.getByRole('group', { name: 'Add Track' }).waitFor()
-        expect(await page.getByRole('dialog').count()).toBe(0)
+        await page.locator('[data-screen-overlay]').first().waitFor()
         await shot(page, 'live-add-track-412')
         await page.keyboard.press('Escape')
 
