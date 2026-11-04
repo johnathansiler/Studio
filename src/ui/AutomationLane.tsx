@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { gainToDb } from '../model/time'
+import { controlDefault } from './paramDefaults'
 import { GestureReadout, TouchSlider, useDragValue } from './kit/controls'
 import type { AudioEngine } from '../audio/engine'
 import type { ArrangeTool } from '../state/tools'
@@ -216,7 +217,7 @@ export function AutoFader({ store, engine, spec, value, label, className, vertic
         max={spec.max}
         step={span <= 2 ? 0.01 : span <= 40 ? 0.1 : 1}
         value={shown}
-        fallback={spec.min < 0 ? 0 : spec.max > 1 ? 0.8 : (spec.min + spec.max) / 2}
+        fallback={controlDefault({ label, className, param: spec.param, target: spec.target, min: spec.min, max: spec.max }) ?? spec.min}
         format={readout ? gainToDb : undefined}
         matchLength={readout}
         valueText={readout ? db : undefined}
