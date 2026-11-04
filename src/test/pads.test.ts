@@ -23,7 +23,7 @@ import { createKit } from '../model/padMachine'
 import { browserGroup } from '../model/sessionBoard'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
-import { PadsPanel } from '../ui/PadsPanel'
+import { facePadIndex, PadsPanel } from '../ui/PadsPanel'
 import { OpenBeatMachineButton } from '../ui/BeatMachineButton'
 import { InsertList, insertChoices, insertLabel } from '../ui/PluginSheet'
 
@@ -162,10 +162,19 @@ describe('pads drum machine', () => {
     expect(html).toContain('aria-label="Beat Machine"')
     expect(html).toContain('>Beat Machine<')
     expect(html).not.toContain('role="dialog"')
-    expect(html.match(/data-pad=/g)?.length).toBe(16)
-    expect(html).toContain('>A<')
-    expect(html).toContain('>D<')
+    expect(html).not.toContain('aria-label="Screen"')
+    expect(html.match(/data-pad=/g)?.length).toBe(8)
+    expect(html).toContain('>Bank A<')
+    expect(html).toContain('>Bank B<')
+    expect(html).toContain('>Kit A<')
+    expect(html).toContain('>Kit H<')
     expect(html).toContain('>Record<')
+    const slots = [0, 1].flatMap((page) => Array.from({ length: 8 }, (_, slot) => facePadIndex(page, slot)))
+    expect(slots).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+    store.assignTrackPad(id, 0, 8, { name: 'Saved crash', samples: new Float32Array([0.2, -0.2]), sampleRate: 48000 })
+    expect(store.trackKit(id).banks[0][8].sampleName).toBe('Saved crash')
+    expect(store.trackKit(id).banks[0][8].pitch).toBe(41)
+    expect(facePadIndex(1, 0)).toBe(8)
     const css = readFileSync(new URL('../ui/pads.css', import.meta.url), 'utf8')
     expect(css).toContain('text-align: center')
     expect(css).toContain('overflow: visible')
