@@ -2,11 +2,11 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { AudioEngine } from '../audio/engine'
 import type { Participant, SessionClient } from '../remote/session'
-import { previewPlayback } from '../model/callVideo'
+import { previewPlayback, type ConnectionGrade } from '../model/callVideo'
 import { mediaStatus } from '../model/media'
 import { parseCollabTarget } from '../model/negotiate'
 import { CALL_COPY, copyOf } from './chrome'
-import { collabChoosing } from './collabTab'
+import { collabChoosing, connectionLine, linkLooksFailed, personConnection, selfConnection, worstConnection } from './collabTab'
 import { SETUP_PLAIN } from './collabCopy'
 import { useFormFactor } from './form'
 import { TipButton } from './Hint'
@@ -107,6 +107,14 @@ export function VideoDock({
   })
 
   const choosing = collabChoosing(state.status)
+  const wideRoom = form !== 'phone'
+  const grades = [...waiting, ...admitted].map((person) => gradeForPerson(session, person))
+  const overall = worstConnection(grades.length ? grades : [personConnection({
+    self: true,
+    status: state.status,
+    link: undefined,
+    oneWayMs: session.primaryOneWay()?.ms ?? null,
+  })])
   useEffect(() => {
     if (!choosing) setJoinForm(false)
   }, [choosing])
@@ -175,8 +183,8 @@ export function VideoDock({
     }
   }
 
-  async function popOut(event: MouseEvent<HTMLButtonElement>) {
-    const here = event.currentTarget.ownerDocument.defaultView
+  async function popOut(event?: MouseEvent<HTMLButtonElement>) {
+    const here = event?.currentTarget.ownerDocument.defaultView || window
     const pip = window.documentPictureInPicture
     if (here && pip?.window && here === pip.window) {
       pip.window.close()
@@ -227,18 +235,15 @@ export function VideoDock({
     <aside className={`dock ${simple ? 'simple' : ''}`} ref={root} data-collab-phase={choosing ? 'start' : 'room'}>
       <div className="dock-resize" />
       {!choosing && (
-        <div className="dock-bar">
+        <div className="dock-bar session-head">
           <strong>{state.code ? `Session ${state.code}` : 'Session'}</strong>
-          <span className="spacer" />
-          <button className="icon-btn pop-out" onClick={(event) => void popOut(event)} title="Pop out" aria-label="Pop out">
-            Pop out
-          </button>
+          <ConnectionMark grade={overall} />
         </div>
       )}
       <div className="dock-body">
       {!choosing && state.usageNotice && <div className="media-banner bad">{state.usageNotice}</div>}
       {!choosing && state.hostLeft && <div className="media-banner bad">The host left this session.</div>}
-      {!choosing && !state.hostLeft && link && <div className={`media-banner ${link.tone}`}>{link.text}</div>}
+      {!choosing && !state.hostLeft && link && link.tone !== 'good' && <div className={`media-banner ${link.tone}`}>{link.text}</div>}
       {!choosing && simple && (
         <div className="artist-card">
           <div className="meter tall">
@@ -308,28 +313,29 @@ export function VideoDock({
       )}
       {!choosing && (
         <div className="call-controls">
-          <TipButton className={`t-btn ${state.talkOn ? 'on' : ''}`} label={state.talkOn ? 'Mic on' : 'Mic off'} hint={call('mic').hint} pressed={state.talkOn} onClick={() => void session.setTalk(!state.talkOn)}>
-            Mic
-          </TipButton>
-          <TipButton className={`t-btn ${state.camOn ? 'on' : ''}`} label={call('cam').label} hint={call('cam').hint} pressed={state.camOn} onClick={() => void session.setCam(!state.camOn)}>
-            Cam
-          </TipButton>
-          <button type="button" className="text-btn primary copy-link" aria-label="Copy Link" onClick={(event) => void copyInviteLink(event)}>
-            Copy Link
-          </button>
-          <button type="button" className="text-btn warn leave-btn" aria-label="Leave" onClick={() => session.leave()}>
-            Leave
-          </button>
-          <TipButton
-            className={`t-btn ${settingsOpen ? 'on' : ''}`}
-            label={call('settings').label}
-            hint={call('settings').hint}
-            pressed={settingsOpen}
-            onClick={() => setSettingsOpen((open) => !open)}
-          >
-            <GearIcon />
-            <span className="setup-word">Setup</span>
-          </TipButton>
+          <div className="call-pills">
+            <TipButton className={`t-btn ${state.talkOn ? 'on' : ''}`} label={state.talkOn ? 'Mic on' : 'Mic off'} hint={call('mic').hint} pressed={state.talkOn} onClick={() => void session.setTalk(!state.talkOn)}>
+              Mic
+            </TipButton>
+            <TipButton className={`t-btn ${state.camOn ? 'on' : ''}`} label={call('cam').label} hint={call('cam').hint} pressed={state.camOn} onClick={() => void session.setCam(!state.camOn)}>
+              Cam
+            </TipButton>
+            <button type="button" className="text-btn primary copy-link" aria-label="Copy Link" onClick={(event) => void copyInviteLink(event)}>
+              Copy Link
+            </button>
+            <button type="button" className="text-btn warn leave-btn" aria-label="Leave" onClick={() => session.leave()}>
+              Leave
+            </button>
+            <TipButton
+              className={`t-btn ${settingsOpen ? 'on' : ''}`}
+              label={call('settings').label}
+              hint={call('settings').hint}
+              pressed={settingsOpen}
+              onClick={() => setSettingsOpen((open) => !open)}
+            >
+              Setup
+            </TipButton>
+          </div>
           {linkNote && <span className="link-note" role="status">{linkNote}</span>}
         </div>
       )}
@@ -347,13 +353,20 @@ export function VideoDock({
               detail={SETUP_PLAIN.calibrate.detail}
               onClick={() => void session.calibrate()}
             />
+            {wideRoom && (
+              <SetupRow
+                label="Pop out"
+                detail="Open the session in its own window."
+                onClick={(event) => void popOut(event)}
+              />
+            )}
           </div>
           <DevicePick session={session} />
           {state.takeProgress != null && <div>Take {Math.round(state.takeProgress * 100)}%</div>}
         </div>
       )}
       {!choosing && (
-      <div className="collab-lower">
+      <div className="collab-lower" data-collab-layout={wideRoom && tab !== 'versions' ? 'split' : 'stack'}>
         <div className="side-tabs">
           {([
             ['people', 'People'],
@@ -365,68 +378,25 @@ export function VideoDock({
             </button>
           ))}
         </div>
-        {tab === 'people' && (
-          <div className="panel">
-            {waiting.length > 0 && (
-              <div className="waiting">
-                Waiting room
-                {waiting.map((person) => (
-                  <div className="person" key={person.id}>
-                    <span>{person.name}</span>
-                    {state.role === 'host' && (
-                      <span className="person-actions">
-                        <RoleSelect person={person} session={session} />
-                        <button className="text-btn primary" onClick={() => session.admit(person.id)}>
-                          Admit
-                        </button>
-                        <button className="text-btn" onClick={() => session.reject(person.id)}>
-                          Reject
-                        </button>
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
+        {wideRoom && tab !== 'versions' ? (
+          <div className="collab-split">
+            <PeoplePanel session={session} admitted={admitted} waiting={waiting} />
+            <ChatPanel session={session} draft={draft} onDraft={setDraft} />
+          </div>
+        ) : (
+          <>
+            {tab === 'people' && <PeoplePanel session={session} admitted={admitted} waiting={waiting} />}
+            {tab === 'versions' && (
+              <VersionsList
+                projectId={store.project.id}
+                tick={versionTick}
+                canRestore={mayWriteProject(session.selfAccess())}
+                onSave={onSaveVersion}
+                onRestore={(project: Project) => store.restoreForEveryone(project)}
+              />
             )}
-            {admitted.map((person) => (
-              <PersonRow key={person.id} person={person} session={session} />
-            ))}
-          </div>
-        )}
-        {tab === 'versions' && (
-          <VersionsList
-            projectId={store.project.id}
-            tick={versionTick}
-            canRestore={mayWriteProject(session.selfAccess())}
-            onSave={onSaveVersion}
-            onRestore={(project: Project) => store.restoreForEveryone(project)}
-          />
-        )}
-        {tab === 'chat' && (
-          <div className="panel">
-            {state.chat.map((message) => (
-              <div key={message.id} className="chat-line">
-                <span>
-                  <small>{message.name}</small>
-                  <div>{message.text}</div>
-                </span>
-              </div>
-            ))}
-            <form
-              className="chat-form"
-              onSubmit={(event) => {
-                event.preventDefault()
-                if (!draft.trim()) return
-                session.sendChat(draft.trim())
-                setDraft('')
-              }}
-            >
-              <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Message the room" aria-label="Message the room" />
-              <button className="text-btn" type="submit">
-                Send
-              </button>
-            </form>
-          </div>
+            {tab === 'chat' && <ChatPanel session={session} draft={draft} onDraft={setDraft} />}
+          </>
         )}
       </div>
       )}
@@ -557,6 +527,128 @@ function Tile({
   )
 }
 
+function linkIsUp(link: { connection: string; ice: string } | undefined): boolean {
+  if (!link) return false
+  return link.connection === 'connected' || link.ice === 'connected' || link.ice === 'completed'
+}
+
+function gradeForPerson(session: SessionClient, person: Participant): ConnectionGrade {
+  const self = person.id === session.state.selfId
+  if (self) {
+    const peers = session.state.participants.filter((other) => other.id !== person.id)
+    const links = peers.map((other) => session.state.media[other.id])
+    return selfConnection({
+      status: session.state.status,
+      oneWayMs: session.primaryOneWay()?.ms ?? null,
+      peers: peers.length,
+      linksUp: links.filter(linkIsUp).length,
+      linksFailed: links.filter(linkLooksFailed).length,
+    })
+  }
+  return personConnection({
+    self: false,
+    status: session.state.status,
+    link: session.state.media[person.id],
+    oneWayMs: session.state.latency[person.id]?.oneWayMs ?? null,
+  })
+}
+
+function ConnectionMark({ grade }: { grade: ConnectionGrade }) {
+  return (
+    <p className="connection-word" data-grade={grade}>
+      <span className="connection-dot" aria-hidden="true" />
+      <span className="connection-label">{grade}</span>
+      <span className="connection-detail">{connectionLine(grade)}</span>
+    </p>
+  )
+}
+
+function PeoplePanel({
+  session,
+  admitted,
+  waiting,
+}: {
+  session: SessionClient
+  admitted: Participant[]
+  waiting: Participant[]
+}) {
+  return (
+    <div className="panel people-panel">
+      {waiting.length > 0 && (
+        <div className="waiting">
+          Waiting room
+          {waiting.map((person) => (
+            <div className="person" key={person.id}>
+              <div className="who">
+                <span className="person-name">{person.name}</span>
+                <ConnectionMark grade={gradeForPerson(session, person)} />
+              </div>
+              {session.state.role === 'host' && (
+                <span className="person-actions">
+                  <button type="button" className="text-btn primary" onClick={() => session.admit(person.id)}>
+                    Admit
+                  </button>
+                  <details className="person-menu">
+                    <summary>Manage</summary>
+                    <span className="person-actions">
+                      <RoleSelect person={person} session={session} />
+                      <button type="button" className="text-btn" onClick={() => session.reject(person.id)}>
+                        Reject
+                      </button>
+                    </span>
+                  </details>
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {admitted.map((person) => (
+        <PersonRow key={person.id} person={person} session={session} />
+      ))}
+    </div>
+  )
+}
+
+function ChatPanel({
+  session,
+  draft,
+  onDraft,
+}: {
+  session: SessionClient
+  draft: string
+  onDraft: (value: string) => void
+}) {
+  return (
+    <div className="panel chat-panel">
+      <div className="chat-log">
+        {session.state.chat.map((message) => (
+          <div key={message.id} className="chat-line">
+            <span>
+              <small>{message.name}</small>
+              <div>{message.text}</div>
+            </span>
+          </div>
+        ))}
+      </div>
+      <form
+        className="chat-form"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (!draft.trim()) return
+          session.sendChat(draft.trim())
+          onDraft('')
+        }}
+      >
+        <input value={draft} onChange={(event) => onDraft(event.target.value)} placeholder="Message the room" aria-label="Message the room" />
+        <button className="text-btn" type="submit">
+          Send
+        </button>
+      </form>
+    </div>
+  )
+}
+
 function accessWord(person: Participant) {
   if (person.role === 'host') return 'Host'
   return ACCESS_COPY[person.access || 'view'].label
@@ -588,8 +680,10 @@ function PersonRow({ person, session }: { person: Participant; session: SessionC
     <div className="person">
       <div className="who">
         <span>
-          {person.name} · {accessWord(person)}
+          <span className="person-name">{person.name}</span>
+          {` · ${accessWord(person)}`}
         </span>
+        <ConnectionMark grade={gradeForPerson(session, person)} />
         <small>
           {person.hand ? 'hand · ' : ''}
           {person.music ? 'perf' : 'muted'}
@@ -597,21 +691,24 @@ function PersonRow({ person, session }: { person: Participant; session: SessionC
         </small>
       </div>
       {session.state.role === 'host' && !self && (
-        <span className="person-actions">
-          <RoleSelect person={person} session={session} />
-          <button className="text-btn" onClick={() => session.forceMute(person.id, !person.mutedByHost)}>
-            {person.mutedByHost ? 'Unmute' : 'Mute'}
-          </button>
-          <button className="text-btn" onClick={() => session.remove(person.id)}>
-            Remove
-          </button>
-        </span>
+        <details className="person-menu">
+          <summary>Manage</summary>
+          <span className="person-actions">
+            <RoleSelect person={person} session={session} />
+            <button className="text-btn" onClick={() => session.forceMute(person.id, !person.mutedByHost)}>
+              {person.mutedByHost ? 'Unmute' : 'Mute'}
+            </button>
+            <button className="text-btn" onClick={() => session.remove(person.id)}>
+              Remove
+            </button>
+          </span>
+        </details>
       )}
     </div>
   )
 }
 
-function SetupRow({ label, detail, onClick, pressed }: { label: string; detail: string; onClick: () => void; pressed?: boolean }) {
+function SetupRow({ label, detail, onClick, pressed }: { label: string; detail: string; onClick: (event: MouseEvent<HTMLButtonElement>) => void; pressed?: boolean }) {
   return (
     <div className="setup-row">
       <button type="button" className={`text-btn ${pressed ? 'primary' : ''}`} aria-label={label} onClick={onClick}>
@@ -619,17 +716,6 @@ function SetupRow({ label, detail, onClick, pressed }: { label: string; detail: 
       </button>
       <p>{detail}</p>
     </div>
-  )
-}
-
-function GearIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M19.4 13.5a7.6 7.6 0 0 0 .1-1.5 7.6 7.6 0 0 0-.1-1.5l2-1.6-2-3.4-2.5 1a7.4 7.4 0 0 0-2.6-1.5l-.4-2.6h-4l-.4 2.6a7.4 7.4 0 0 0-2.6 1.5l-2.5-1-2 3.4 2 1.6a7.6 7.6 0 0 0-.1 1.5 7.6 7.6 0 0 0 .1 1.5l-2 1.6 2 3.4 2.5-1a7.4 7.4 0 0 0 2.6 1.5l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 2.6-1.5l2.5 1 2-3.4-2-1.6zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"
-      />
-    </svg>
   )
 }
 

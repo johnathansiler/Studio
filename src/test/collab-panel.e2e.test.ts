@@ -148,11 +148,29 @@ describe('collab session panel', () => {
         const box = await copy.boundingBox()
         expect(box?.height).toBeGreaterThanOrEqual(40)
         await pane.getByRole('button', { name: 'Leave', exact: true }).waitFor()
+        await pane.getByText(/Connection: (Good|OK|Poor)\./).first().waitFor()
+        const pills = pane.locator('.call-pills button')
+        expect(await pills.count()).toBe(5)
+        const pillBoxes: Array<{ x: number; y: number; width: number; height: number } | null> = []
+        for (let index = 0; index < 5; index += 1) pillBoxes.push(await pills.nth(index).boundingBox())
+        const pillTops = pillBoxes.map((box) => Math.round(box?.y || 0))
+        expect(Math.max(...pillTops) - Math.min(...pillTops)).toBeLessThan(2)
+        for (const pill of pillBoxes) {
+          expect(pill?.height).toBeGreaterThanOrEqual(40)
+          expect(pill?.height).toBeLessThan(42)
+          expect(pill?.width).toBeGreaterThanOrEqual(40)
+        }
+        if (viewport.width <= 520) {
+          const row = await pane.locator('.call-pills').boundingBox()
+          const last = pillBoxes[pillBoxes.length - 1]
+          expect((row?.y || 0) + (row?.height || 0)).toBeLessThan((pillBoxes[0]?.y || 0) + 56)
+          expect((last?.x || 0) + (last?.width || 0)).toBeLessThanOrEqual(viewport.width + 1)
+        }
         await pane.getByRole('button', { name: 'People', exact: true }).waitFor()
         await pane.getByRole('button', { name: 'Chat', exact: true }).waitFor()
         await pane.getByRole('button', { name: 'Versions', exact: true }).waitFor()
         await expectCollabFills(page)
-        const peopleBox = await pane.locator('.collab-lower .panel').boundingBox()
+        const peopleBox = await pane.locator('.collab-lower .people-panel').boundingBox()
         expect(peopleBox?.height).toBeGreaterThan(80)
         for (const name of ['Hear myself', 'Fix delay', 'Opus', 'Ping', 'Jam', 'Calibrate']) {
           expect(await pane.getByRole('button', { name, exact: true }).count()).toBe(0)
@@ -203,6 +221,11 @@ describe('collab session panel', () => {
       await guest.locator('[data-collab-panel="open"]').waitFor()
       await guest.locator('.panel').getByText('Host Harper · Host').waitFor({ timeout: 15000 })
       await host.locator('.panel').getByText('Guest Riley', { exact: true }).waitFor({ timeout: 15000 })
+      await guest.locator('.session-head .connection-detail').waitFor()
+      const detail = await guest.locator('.person .connection-detail').first().innerText()
+      expect(detail).toMatch(/Connection: (Good|OK|Poor)\./)
+      expect(await guest.locator('.collab-split').count()).toBe(0)
+      expect(await host.locator('.collab-split .panel').count()).toBe(2)
       expect(await guest.locator('#join-session').count()).toBe(0)
       expect(await guest.getByRole('button', { name: /Join a Collab/ }).count()).toBe(0)
       expect(await guest.getByRole('dialog').count()).toBe(0)
