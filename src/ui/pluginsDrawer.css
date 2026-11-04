@@ -1,0 +1,178 @@
+/* Arrange plugins drawer. It sits in the layout and never covers the tracks. */
+
+.arrange-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.arrange-stage > .playlist-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.arrange-stage.plugins-side {
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.arrange-stage.plugins-side > .plugins-drawer {
+  flex: 0 0 280px;
+  width: 280px;
+  max-width: 36%;
+  min-width: 200px;
+  align-self: stretch;
+}
+
+.arrange-stage.plugins-bottom > .plugins-drawer {
+  flex: 0 1 auto;
+  max-height: 46%;
+}
+
+.plugins-drawer {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  color: var(--text);
+  background-color: #141c18;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.22));
+  box-shadow: inset 0 1px 0 var(--bevel-hi);
+}
+
+.plugins-drawer[data-place='side'] {
+  border-left: 1px solid var(--line);
+  height: 100%;
+}
+
+.plugins-drawer[data-place='bottom'] {
+  border-top: 1px solid var(--line);
+}
+
+.plugins-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+
+.plugins-drawer-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.plugins-drawer-head strong {
+  font-size: 16px;
+}
+
+.plugins-drawer-head span,
+.plugins-drawer-note,
+.plugins-empty {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.plugins-drawer-note,
+.plugins-empty {
+  margin: 0;
+}
+
+.plugins-drawer button {
+  min-height: 40px;
+  min-width: 40px;
+}
+
+.plugins-drawer button.plugins-add {
+  width: 100%;
+}
+
+.plugins-drawer button.plugins-pill {
+  flex: 0 0 auto;
+}
+
+.plugins-drawer button.plugins-pill:disabled {
+  opacity: 0.45;
+}
+
+.plugins-menu,
+.plugins-band {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plugins-group h3,
+.plugins-band h3 {
+  margin: 6px 0 0;
+  font-size: 13px;
+  font-weight: 680;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+}
+
+.plugins-drawer button.plugins-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  height: auto;
+  min-height: 44px;
+  padding: 8px 12px;
+  text-align: left;
+  white-space: normal;
+  border-radius: 12px;
+}
+
+.plugins-drawer button.plugins-choice strong {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.plugins-drawer button.plugins-choice small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: normal;
+}
+
+.plugins-drawer .plugin-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background-color: var(--panel-2);
+  background-image: var(--face);
+  box-shadow: var(--raised);
+}
+
+.plugins-drawer .plugin-row.is-off {
+  background-image: none;
+  background-color: #121614;
+  box-shadow: var(--recessed, inset 0 1px 2px rgba(0, 0, 0, 0.55));
+}
+
+.plugins-drawer .plugin-row-name {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  font-size: 15px;
+}
+
+.plugins-drawer .plugin-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

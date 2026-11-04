@@ -1,4 +1,5 @@
 import { detectTransients } from '../stretch/engine'
+import { nearestZeroIndex } from '../zeroCross'
 import { clamp, sanitize } from '../plugins/dsp'
 import type { LooperLayer, LooperState, SamplerState, SampleZone } from '../../model/types'
 
@@ -123,23 +124,7 @@ export function trimSilence(channel: Float32Array, threshold = 0.001) {
 }
 
 export function snapZero(channel: Float32Array, index: number, radius = 256) {
-  const at = clamp(Math.round(index), 0, Math.max(0, channel.length - 1))
-  let best = at
-  let bestDist = radius + 1
-  const from = Math.max(1, at - radius)
-  const to = Math.min(channel.length - 1, at + radius)
-  for (let i = from; i <= to; i++) {
-    const prev = channel[i - 1] || 0
-    const value = channel[i] || 0
-    if (prev === 0 || prev * value < 0 || Math.abs(value) < 1e-5) {
-      const dist = Math.abs(i - at)
-      if (dist < bestDist) {
-        best = i
-        bestDist = dist
-      }
-    }
-  }
-  return best
+  return nearestZeroIndex(channel, index, radius)
 }
 
 export function sliceEven(length: number, count: number) {

@@ -19,7 +19,7 @@ export function useDragValue<T extends HTMLElement = HTMLElement>({
   min: number
   max: number
   value: number
-  fallback: number
+  fallback: number | null
   axis?: 'x' | 'y' | 'pad'
   format?: (value: number) => string
   matchLength?: boolean
@@ -50,7 +50,6 @@ export function useDragValue<T extends HTMLElement = HTMLElement>({
       onChange: (change) => latest.current.onChange(change.value, change),
       onCommit: () => {
         setDragging(false)
-        setReadout(null)
         latest.current.onCommit?.()
       },
       onReadout: setReadout,
@@ -225,7 +224,7 @@ export function TouchSlider({
     min,
     max,
     value,
-    fallback: fallback ?? value,
+    fallback: fallback ?? null,
     axis: vertical ? 'y' : 'x',
     format,
     matchLength,

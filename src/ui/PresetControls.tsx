@@ -84,16 +84,17 @@ export function PresetControls({
 
   return (
     <div className="preset-dock" data-preset-dock={pluginId}>
-      <button type="button" aria-label="Previous preset" title="Load the previous preset." onClick={() => apply(cyclePreset(pluginId, stored, view.name, -1).name)}>Previous</button>
+      <button type="button" className="btn-quiet" aria-label="Previous preset" title="Load the previous preset." onClick={() => apply(cyclePreset(pluginId, stored, view.name, -1).name)}>Previous</button>
       <span className="preset-name" data-preset-name={view.name} data-preset-changed={view.changed ? 'yes' : 'no'} title={view.changed ? `${view.name} has unsaved changes.` : view.name}>
         {view.changed && <i className="preset-dot" aria-hidden="true" />}
         <b>{view.name}</b>
       </span>
-      <button type="button" aria-label="Next preset" title="Load the next preset." onClick={() => apply(cyclePreset(pluginId, stored, view.name, 1).name)}>Next</button>
+      <button type="button" className="btn-quiet" aria-label="Next preset" title="Load the next preset." onClick={() => apply(cyclePreset(pluginId, stored, view.name, 1).name)}>Next</button>
       <div className="preset-anchor">
         <button
           ref={menuButton}
           type="button"
+          className={`btn-quiet${open ? ' on' : ''}`}
           aria-expanded={open}
           aria-controls={`${instanceKey}-presets`}
           title="Open the preset list."
@@ -116,7 +117,7 @@ export function PresetControls({
           prefer="down"
         >
           <div className="preset-actions">
-            <button type="button" title="Save over this preset. Factory presets ask for a new name." onClick={() => {
+            <button type="button" className="btn-quiet" title="Save over this preset. Factory presets ask for a new name." onClick={() => {
               if (view.source === 'user' && active) {
                 const saved = saveUserPreset(stored, pluginId, active.name, resolveParams(pluginId, values), text)
                 if (saved.preset.id) {
@@ -128,9 +129,9 @@ export function PresetControls({
               setDraft(view.name === INIT_NAME ? '' : view.name)
               setMode('save')
             }}>Save</button>
-            <button type="button" title="Save these settings under a new name." onClick={() => { setDraft(''); setMode('save') }}>Save As</button>
-            <button type="button" title="Rename this preset." disabled={view.source !== 'user' || !active} onClick={() => { setDraft(view.name); setMode('rename') }}>Rename</button>
-            <button type="button" title="Delete this preset." disabled={view.source !== 'user' || !active} onClick={() => {
+            <button type="button" className="btn-quiet" title="Save these settings under a new name." onClick={() => { setDraft(''); setMode('save') }}>Save As</button>
+            <button type="button" className="btn-quiet" title="Rename this preset." disabled={view.source !== 'user' || !active} onClick={() => { setDraft(view.name); setMode('rename') }}>Rename</button>
+            <button type="button" className="btn-quiet" title="Delete this preset." disabled={view.source !== 'user' || !active} onClick={() => {
               if (!active) return
               const next = deleteUserPreset(stored, pluginId, active.id)
               if (!next) return
@@ -141,17 +142,17 @@ export function PresetControls({
               setExtra(rowsForPlugin(next, pluginId))
               setNote('Deleted')
             }}>Delete</button>
-            <button type="button" title="Reset every control to the starting preset." onClick={() => apply(INIT_NAME)}>Init</button>
+            <button type="button" className="btn-quiet" title="Reset every control to the starting preset." onClick={() => apply(INIT_NAME)}>Init</button>
           </div>
           <div className="preset-list" role="group" aria-label="Preset names">
             {choices.map((item) => (
-              <button key={item.id} type="button" className={item.name === view.name ? 'on' : ''} onClick={() => apply(item.name)}>
+              <button key={item.id} type="button" className={`btn-quiet${item.name === view.name ? ' on' : ''}`} onClick={() => apply(item.name)}>
                 {item.name}
               </button>
             ))}
           </div>
           <div className="preset-actions">
-            <button type="button" title="Copy this preset under a new name." onClick={() => {
+            <button type="button" className="btn-quiet" title="Copy this preset under a new name." onClick={() => {
               const source = active ?? presetChoices(pluginId, stored)[0]
               const copied = duplicatePreset(stored, pluginId, { ...source, params: resolveParams(pluginId, values), text })
               if (!copied.preset.id) return
@@ -159,7 +160,7 @@ export function PresetControls({
               keepLibrary(copied.presets, copied.preset.name)
               setNote('Duplicated')
             }}>Duplicate</button>
-            <button type="button" title="Put the controls back to the loaded preset." onClick={() => apply(view.name)}>Revert</button>
+            <button type="button" className="btn-quiet" title="Put the controls back to the loaded preset." onClick={() => apply(view.name)}>Revert</button>
           </div>
           {(mode === 'save' || mode === 'rename') && (
             <form onSubmit={(event) => {
@@ -184,12 +185,12 @@ export function PresetControls({
               setNote('Saved')
             }}>
               <input aria-label="Preset name" value={draft} autoFocus onChange={(event) => setDraft(event.target.value)} />
-              <button type="submit">{mode === 'rename' ? 'Rename' : 'Save'}</button>
+              <button type="submit" className="btn-quiet">{mode === 'rename' ? 'Rename' : 'Save'}</button>
             </form>
           )}
           <div className="preset-actions">
-            <button type="button" title="Load presets from a JSON file." onClick={() => file.current?.click()}>Import</button>
-            <button type="button" title="Download your presets as a JSON file." onClick={() => downloadPreset(pluginId, exportablePresets(pluginId, stored))}>Export</button>
+            <button type="button" className="btn-quiet" title="Load presets from a JSON file." onClick={() => file.current?.click()}>Import</button>
+            <button type="button" className="btn-quiet" title="Download your presets as a JSON file." onClick={() => downloadPreset(pluginId, exportablePresets(pluginId, stored))}>Export</button>
           </div>
           {note && <p className="preset-note" role="status">{note}</p>}
           <input

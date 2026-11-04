@@ -5,21 +5,33 @@ import { fileURLToPath } from 'node:url'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import {
+  TUNE_APPENDED_IDS,
+  TUNE_ORIGINAL_IDS,
   activeNoteMask,
   activeTunePreset,
   blobMidi,
+  correctionRate,
+  detectKey,
   dragNudge,
+  dragRegionCents,
   graphNotes,
+  harmonyName,
+  keyFromHist,
+  matchRegion,
   nextScaleMask,
   nudgeKey,
   orderedInserts,
   readMeter,
+  regionPatch,
+  stepHarmony,
+  trackingGate,
   tuneBlockScale,
   tuneLiveLatency,
   tuneScaleOf,
   tuneSnapMidi,
+  vocalNotes,
 } from '../audio/plugins/autoTune'
-import { CATALOG, FACTORY, createPlugin, defaultParams, latencyOf, tuneLatency } from '../audio/plugins/catalog'
+import { CATALOG, FACTORY, createPlugin, defaultParams, descriptor, latencyOf, tuneLatency } from '../audio/plugins/catalog'
 import { createTune } from '../audio/plugins/tune'
 import { yinPitch } from '../audio/plugins/psola'
 import { renderGraph } from '../audio/renderGraph'
@@ -295,6 +307,15 @@ describe('Auto-Tune insert', () => {
     expect(html).toContain('data-note="F#"')
     expect(html).toContain('data-key="60"')
     expect(html).toContain('Graph')
+    expect(html).toContain('Auto Key')
+    expect(html).toContain('Follow key')
+    expect(html).toContain('MIDI control')
+    expect(html).toContain('Tracking')
+    expect(html).toContain('Note transition')
+    expect(html).toContain('Throat')
+    expect(html).toContain('Harmony')
+    expect(html).toContain('Vocal MIDI')
+    expect(html).toContain('Voice 1')
     expect(html).not.toContain('<select')
     expect(html).toContain('aria-pressed="true"')
     const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../ui/autoTune.css'), 'utf8')
@@ -307,6 +328,9 @@ describe('Auto-Tune insert', () => {
     expect(css).toContain('.bypass-toggle.lit')
     expect(css).toContain('.tune-tools,\n.tune-actions { flex-wrap: wrap; }')
     expect(css).toContain('.shell.phone .tune-notes')
+    expect(css).toContain('.tune-drawer')
+    expect(css).toContain('.tune-regions')
+    expect(css).toContain('min-height: 40px')
   })
 
   it('starts active and opens from one strip click', () => {
@@ -369,6 +393,121 @@ describe('Auto-Tune insert', () => {
     expect(store.track(vocal.id)!.plugins.find((item) => item.id === plugin.id)!.enabled).toBe(true)
   })
 })
+
+describe('Auto-Tune upgrades', () => {
+  it('appends parameters after n11 and keeps the Rust key order', () => {
+    const spec = descriptor('tune')
+    expect(spec).toBeTruthy()
+    const ids = spec!.params.map((param) => param.id)
+    expect(ids.slice(0, TUNE_ORIGINAL_IDS.length)).toEqual([...TUNE_ORIGINAL_IDS])
+    expect(ids.slice(TUNE_ORIGINAL_IDS.length)).toEqual([...TUNE_APPENDED_IDS])
+    const rust = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../core/dsp/src/plugin.rs'), 'utf8')
+    const keys = rustList(rust, 'TUNE_KEYS').map((item) => item.replaceAll('"', ''))
+    const defaults = rustList(rust, 'TUNE_DEFAULTS').map(Number)
+    expect(keys).toEqual(ids)
+    expect(defaults).toHaveLength(ids.length)
+    spec!.params.forEach((param, index) => expect(defaults[index]).toBe(param.default))
+    expect(defaultParams('tune').tracking).toBe(0.5)
+    expect(defaultParams('tune').transition).toBe(1)
+    expect(defaultParams('tune').harmony).toBe(0)
+    expect(defaultParams('tune').amount).toBeGreaterThan(0.5)
+    expect(FACTORY.tune.map((preset) => preset.name)).toEqual(expect.arrayContaining(['Hard tune/T-Pain', 'Classic', 'Harmony', 'MIDI target']))
+  })
+
+  it('finds a key, edits one note, and lists vocal MIDI', () => {
+    expect(trackingGate(0.5)).toBe(0.7)
+    expect(trackingGate(0)).toBeCloseTo(0.95)
+    expect(correctionRate(1, false, 1, true)).toBe(1)
+    expect(correctionRate(1, false, 0.25, true)).toBeCloseTo(0.25)
+    expect(correctionRate(1, true, 1, false)).toBe(1)
+    const hist = new Array(12).fill(0)
+    hist[0] = 8
+    hist[4] = 6
+    hist[7] = 6
+    expect(keyFromHist(hist)).toMatchObject({ root: 0, scaleIndex: 0, name: 'C Major' })
+    const trace = new Float32Array(16)
+    for (let i = 0; i < 4; i++) {
+      trace[i * 2] = 261.63
+      trace[i * 2 + 1] = 261.63
+    }
+    for (let i = 4; i < 8; i++) {
+      trace[i * 2] = 329.63
+      trace[i * 2 + 1] = 329.63
+    }
+    expect(detectKey(trace)?.name).toBe('C Major')
+    expect(vocalNotes(trace).map((note) => note.name)).toEqual(['C4', 'E4'])
+    const placed = regionPatch({}, 65, 0)
+    expect(placed.slot).toBe(0)
+    expect(placed.patch).toEqual({ r0lo: 65, r0hi: 65, r0ct: 0, r0amt: 1 })
+    const moved = { ...placed.patch, r0ct: dragRegionCents(65, 66, 0) }
+    expect(matchRegion(moved, 65)).toMatchObject({ ct: 100, amt: 1, slot: 0 })
+    expect(matchRegion(moved, 64)).toBeNull()
+    expect(harmonyName(7)).toBe('Fifth')
+    expect(stepHarmony(7, 1)).toBe(12)
+    expect(stepHarmony(0, -1)).toBe(12)
+  })
+
+  it('follows MIDI, a correction region, throat, vibrato, harmony, and auto key', () => {
+    const params = hard()
+    const open = run(createTune(rate), sine(445, 0.45), { ...params, mode: 0, midi: 1, holdMidi: -1 }, { offline: true })
+    expect(cents(pitchAt(open, tuneLatency(rate) + 4000), 445)).toBeLessThan(25)
+    const aimed = run(createTune(rate), sine(445, 0.45), { ...params, mode: 0, midi: 1, holdMidi: 69 }, { offline: true })
+    expect(cents(pitchAt(aimed, tuneLatency(rate) + 4000), 440)).toBeLessThan(30)
+    const played = createTune(rate)
+    played.note(69, 0.8)
+    const fromNote = run(played, sine(445, 0.45), { ...params, mode: 0, midi: 1, holdMidi: -1 }, { offline: true })
+    expect(cents(pitchAt(fromNote, tuneLatency(rate) + 4000), 440)).toBeLessThan(30)
+    played.note(69, 0)
+    const region = run(createTune(rate), sine(360, 0.5), { ...params, r0lo: 65, r0hi: 65, r0ct: 100, r0amt: 1 }, { offline: true })
+    expect(cents(pitchAt(region, tuneLatency(rate) + 5000), hzOf(66))).toBeLessThan(30)
+    const plain = run(createTune(rate), sine(360, 0.4), params, { offline: true })
+    const bright = run(createTune(rate), sine(360, 0.4), { ...params, throat: 1 }, { offline: true })
+    let changed = 0
+    for (let i = 0; i < plain.length; i++) changed = Math.max(changed, Math.abs(plain[i] - bright[i]))
+    expect(changed).toBeGreaterThan(0.01)
+    const still = run(createTune(rate), sine(440, 0.45), { ...params, mode: 0 }, { offline: true })
+    const wobbled = run(createTune(rate), sine(440, 0.45), { ...params, mode: 0, vibeDepth: 80, vibeRate: 5.5 }, { offline: true })
+    let wobble = 0
+    for (let i = 0; i < still.length; i++) wobble = Math.max(wobble, Math.abs(still[i] - wobbled[i]))
+    expect(wobble).toBeGreaterThan(0.01)
+    const lead = run(createTune(rate), sine(440, 0.45), { ...params, mode: 0 }, { offline: true })
+    const stacked = run(createTune(rate), sine(440, 0.45), { ...params, mode: 0, harmony: 0.8, h1: 12, h2: 7, h3: 0, h4: 0 }, { offline: true })
+    let stack = 0
+    let peak = 0
+    for (let i = 0; i < lead.length; i++) {
+      stack = Math.max(stack, Math.abs(lead[i] - stacked[i]))
+      peak = Math.max(peak, Math.abs(stacked[i]))
+    }
+    expect(stack).toBeGreaterThan(0.02)
+    expect(peak).toBeLessThan(1.5)
+    expect(cents(pitchAt(stacked, tuneLatency(rate) + 4000), 440)).toBeLessThan(40)
+    const between = 440 * 2 ** ((60.4 - 69) / 12)
+    const melody = phrase([hzOf(60), hzOf(64), hzOf(67), between])
+    const followed = run(createTune(rate), melody, { ...params, autoKey: 1 }, { scaleRoot: 9, scaleIntervals: major, scaleCents: majorCents, offline: true })
+    const skip = tuneLatency(rate) + Math.floor(rate * 0.78)
+    expect(cents(pitchAt(followed, skip), hzOf(60))).toBeLessThan(35)
+    expect(cents(pitchAt(followed, skip), hzOf(61))).toBeGreaterThan(40)
+    const processor = createTune(rate)
+    run(processor, sine(440, 0.35), { ...params, mode: 0, vocal: 1 }, { offline: true })
+    expect(processor.vocalMidi.some((note) => note.name === 'A4')).toBe(true)
+  })
+})
+
+function phrase(steps: number[]) {
+  const data = new Float32Array(Math.floor(rate * 0.22) * steps.length)
+  steps.forEach((hz, index) => {
+    const start = Math.floor(rate * 0.22) * index
+    const end = start + Math.floor(rate * 0.22)
+    for (let i = start; i < end; i++) data[i] = Math.sin((2 * Math.PI * hz * (i - start)) / rate) * 0.35
+  })
+  return data
+}
+
+function rustList(source: string, name: string) {
+  const match = source.match(new RegExp(`const ${name}:[\\s\\S]*?= &\\[([\\s\\S]*?)\\];`))
+  if (!match) throw new Error(`missing ${name}`)
+  return match[1].split(',').map((item) => item.trim()).filter(Boolean)
+}
 
 function findButton(node: unknown, label: string): { props: { children: string; onClick: () => void; onDoubleClick: () => void; onPointerDown?: (event: { button: number; stopPropagation: () => void }) => void; 'aria-label': string } } {
   if (Array.isArray(node)) {

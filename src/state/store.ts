@@ -106,7 +106,8 @@ import { cloneRack, defaults, DEVICE_PARAMS, FACTORY_PRESETS, makeDevice, normal
 import { normalizeScale, patternNotes, voiceChord, type PlayNote, type ScaleId, type ScaleState } from '../model/scale'
 import { clipFromNotes, recordOnto, rememberVoice } from '../instruments/scaler/clips'
 import { audioChordSymbols, pitchesFromAudio } from '../instruments/scaler/listen'
-import { freshScaler, normalizeScaler, padPerformance, type ScalerState } from '../instruments/scaler/model'
+import { ensureScalerPlugin, isHeldSound, orderScalerPlugins, soundInstrumentOf } from '../instruments/scaler/chain'
+import { freshScaler, normalizeScaler, padPerformance, trackHasScaler, type ScalerState } from '../instruments/scaler/model'
 import type { ScalerPage } from '../instruments/scaler/types'
 import { lockedTone, scaleIsMicrotonal, suggestKey } from '../theory/lock'
 import { applyPatternLength, makeRackChannel, type RackChoice } from '../model/channelRack'
@@ -149,6 +150,7 @@ import {
   createKit,
   kitPreset,
   normalizePadKit,
+  padRegion,
   ratchetBeats,
   recordTake,
   type PadProgram,
@@ -859,8 +861,14 @@ export class ProjectStore {
     this.mutate(() => {
       const current = this.track(trackId)
       if (!current || current.type !== 'midi') return
+      const previous = current.instrument
       current.instrument = instrument
-      if (instrument === 'scaler') current.scaler = current.scaler ? normalizeScaler(current.scaler) : freshScaler(this.project)
+      if (instrument === 'scaler') {
+        current.scaler = current.scaler ? normalizeScaler(current.scaler) : freshScaler(this.project)
+        ensureScalerPlugin(current)
+        const sound = soundInstrumentOf(current) ?? (isHeldSound(previous) ? previous : null)
+        if (sound) current.instrument = sound
+      }
       if (instrument === 'pads') current.padKit = normalizePadKit(current.padKit ?? this.project.padKit)
     })
     if (instrument === 'scaler') {
@@ -946,6 +954,23 @@ export class ProjectStore {
       if (!pad) return
       Object.assign(pad, patch)
       if (patch.busId === '') pad.busId = undefined
+      track.padKit = normalizePadKit(kit)
+    })
+  }
+
+  /** Save a pad's start and end. A drag is one undo step. */
+  setPadWindow(trackId: string, bank: number, index: number, start: number, end: number, drag = false) {
+    const run = drag ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const kit = normalizePadKit(track.padKit)
+      const pad = kit.banks[bank]?.[index]
+      if (!pad) return
+      const region = padRegion(pad)
+      const from = Math.min(1, Math.max(0, start))
+      const to = Math.min(1, Math.max(from, end))
+      pad.region = { ...region, start: from, end: Math.max(from + 1e-4, to) }
       track.padKit = normalizePadKit(kit)
     })
   }
@@ -1255,6 +1280,8 @@ export class ProjectStore {
       pads: kit.banks.flat(),
       buffers,
       output: kit.output,
+      vintage: kit.vintage,
+      chop: kit.chop,
     })
     if (!rendered.left.length) return null
     const bufferId = uid('smp')
@@ -1346,10 +1373,10 @@ export class ProjectStore {
         const voiced = setPadRegion(pad, chop.bufferId, slice.start / samples.length, slice.end / samples.length)
         voiced.name = `Slice ${index + 1}`
         voiced.sampleName = chop.name
-        voiced.tune = chop.semitones
-        voiced.tuneCents = chop.cents
+        voiced.tune = 0
+        voiced.tuneCents = 0
         voiced.pitchMode = chop.pitchMode
-        voiced.highpass = chop.highpass
+        voiced.highpass = 0
         next.banks[bank][index] = voiced
       }
       next.chop = chop
@@ -1402,6 +1429,8 @@ export class ProjectStore {
       pads: [pad],
       buffers: new Map([[bufferId, { sampleRate: asset.sampleRate, samples: channel }]]),
       output: 'audio',
+      vintage: kit.vintage,
+      chop: kit.chop,
     })
     const mono = new Float32Array(rendered.left.length)
     for (let i = 0; i < mono.length; i++) mono[i] = ((rendered.left[i] || 0) + (rendered.right[i] || 0)) * 0.5
@@ -1435,7 +1464,7 @@ export class ProjectStore {
     const track = this.track(trackId)
     if (!track || track.type !== 'midi') return
     if (page) this.scalerPage = page
-    if (track.instrument !== 'scaler') {
+    if (!trackHasScaler(track)) {
       this.setTrackInstrument(trackId, 'scaler')
       return
     }
@@ -1466,8 +1495,11 @@ export class ProjectStore {
     const run = () => {
       const track = this.track(trackId)
       if (!track || track.type !== 'midi') return
-      track.instrument = 'scaler'
       track.scaler = normalizeScaler({ ...normalizeScaler(track.scaler), ...patch })
+      ensureScalerPlugin(track)
+      const sound = soundInstrumentOf(track)
+      if (sound) track.instrument = sound
+      else if (!isHeldSound(track.instrument)) track.instrument = 'scaler'
     }
     if (draft) this.draft(run)
     else this.mutate(run)
@@ -1544,6 +1576,31 @@ export class ProjectStore {
       this.selectedNoteId = clip.notes.at(-1)?.id ?? null
     })
     return clipId
+  }
+
+  /**
+   * Put a synth, sampler, or Beat Machine under Scaler.
+   * The built-in Scaler sound stays until this runs.
+   */
+  addScalerSound(trackId: string, kind: 'synth' | 'sampler' | 'pads') {
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track || track.type !== 'midi') return
+      if (!track.scaler) track.scaler = freshScaler(this.project)
+      ensureScalerPlugin(track)
+      if (kind === 'synth') {
+        if (!track.plugins.some((plugin) => plugin.pluginId === 'synth')) track.plugins.push(createPlugin('synth'))
+        track.instrument = 'synth'
+      } else if (kind === 'pads') {
+        if (!track.plugins.some((plugin) => isDrumsPlugin(plugin))) track.plugins.push(createPlugin('pads'))
+        track.padKit = normalizePadKit(track.padKit ?? this.project.padKit)
+        track.instrument = 'pads'
+      } else if (!track.plugins.some((plugin) => plugin.pluginId === 'sampler' && !isDrumsPlugin(plugin))) {
+        track.plugins.push(createPlugin('sampler'))
+        track.instrument = 'sampler'
+      } else track.instrument = 'sampler'
+      track.plugins = orderScalerPlugins(track.plugins)
+    })
   }
 
   /** Record a played pad onto this track's Scaler take. */
@@ -2390,12 +2447,13 @@ export class ProjectStore {
       else if (op === 'trim') next = trimSilence(channel)
       else if (op === 'fade') next = fadeChannel(channel, Math.round(sampler.fadeIn * channel.length), Math.round((sampler.fadeOut || 0.01) * channel.length))
       else {
-        const start = snapZero(channel, Math.round(sampler.start * channel.length))
-        const end = snapZero(channel, Math.round(sampler.end * channel.length))
+        const reach = channel.length
+        const start = snapZero(channel, Math.round(sampler.start * channel.length), reach)
+        const end = snapZero(channel, Math.round(sampler.end * channel.length), reach)
         sampler.start = start / channel.length
         sampler.end = Math.max(sampler.start + 2 / channel.length, end / channel.length)
-        sampler.loopStart = snapZero(channel, Math.round(sampler.loopStart * channel.length)) / channel.length
-        sampler.loopEnd = snapZero(channel, Math.round(sampler.loopEnd * channel.length)) / channel.length
+        sampler.loopStart = snapZero(channel, Math.round(sampler.loopStart * channel.length), reach) / channel.length
+        sampler.loopEnd = snapZero(channel, Math.round(sampler.loopEnd * channel.length), reach) / channel.length
         return
       }
       const id = uid('smp')
@@ -3136,9 +3194,9 @@ export class ProjectStore {
     return inspectClip(channel.subarray(clip.offsetSamples, clip.offsetSamples + source), asset?.sampleRate ?? this.project.sampleRate, this.project.tempo).sourceBpm
   }
 
-  trimClip(trackId: string, clipId: string, edge: 'start' | 'end', sample: number) {
+  trimClip(trackId: string, clipId: string, edge: 'start' | 'end', sample: number, exact = false) {
     this.mutate(() => {
-      const at = snapSampleToMap(sample, this.project, subdivisionFor(this.project))
+      const at = exact ? Math.max(0, Math.round(sample)) : snapSampleToMap(sample, this.project, subdivisionFor(this.project))
       const ids = new Set(trimLinkedAudio(this.project, trackId, clipId, edge, at, (clip) => {
         const asset = this.buffers.get(clip.bufferId)
         return asset?.channels[0].length ?? clip.offsetSamples + clip.durationSamples

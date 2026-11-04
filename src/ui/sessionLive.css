@@ -101,9 +101,18 @@
   z-index: 3;
 }
 
+.sl-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 6px 0;
+  min-width: 0;
+}
+
 .shell .sl-browser .sl-search,
 .sl-search {
-  flex: none;
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 40px;
   height: 40px;
   margin: 6px 6px 0;
@@ -112,6 +121,17 @@
   background: #101814;
   color: #f2f6f0;
   padding: 0 10px;
+}
+
+.shell .sl-browser .sl-search-row .sl-search,
+.sl-search-row .sl-search {
+  margin: 0;
+}
+
+.sl-search-row .sound-filter {
+  flex: none;
+  min-width: 40px;
+  min-height: 40px;
 }
 
 .sl-groups {
@@ -163,7 +183,15 @@
 }
 
 .sl-row.is-playing small { color: #9be7b5; font-weight: 700; }
-.sl-row > button:first-child { flex: 1; width: auto; min-width: 0; }
+.sl-row > button:first-child {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+}
 .sound-live {
   width: 8px;
   height: 8px;
@@ -190,18 +218,37 @@
   cursor: grab;
 }
 
-.sl-list .sl-add {
+.sl-list .sl-add,
+.sl-list .sl-save {
   width: auto;
   flex: none;
   min-width: 40px;
+  min-height: 40px;
   cursor: pointer;
   border: 1px solid #2a312b;
   border-radius: 8px;
   justify-content: center;
+  background-color: #18231d;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(0, 0, 0, 0.2));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.sl-list .sl-save.on {
+  background-color: #73c48f;
+  background-image: none;
+  color: #102016;
+  border-color: transparent;
+}
+
+.shell.phone .sl-list .sl-add,
+.shell.phone .sl-list .sl-save,
+.shell.phone .sl-search-row .sound-filter {
+  min-height: 44px;
 }
 
 .sl-list strong {
-  flex: 1;
+  flex: none;
+  width: 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -807,12 +854,16 @@
   top: 0;
   bottom: 0;
   width: 14px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   cursor: ew-resize;
   z-index: 2;
   touch-action: none;
 }
 
-.sl-wave .mark[data-marker="end"] { right: 0; left: auto; }
+.sl-wave .mark { margin-left: -7px; }
 
 .sl-wave .mark::after {
   content: "";
@@ -825,8 +876,7 @@
 }
 
 @media (pointer: coarse) {
-  .sl-wave .mark { width: 28px; }
-  .sl-wave .mark[data-marker="end"] { right: -6px; }
+  .sl-wave .mark { width: 28px; margin-left: -14px; }
 }
 
 .sl-wave .loopbar {

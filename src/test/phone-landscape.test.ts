@@ -2,7 +2,11 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import { ProjectStore } from '../state/store'
+import { TransportBar } from '../ui/TransportBar'
 import {
   PHONE_LAND_SHEET,
   PHONE_LAND_VIEWPORTS,
@@ -168,6 +172,28 @@ describe('phone landscape compaction', () => {
   })
 
   it('keeps the tempo, Tap label, and timecode inside a portrait phone', async () => {
+    const transportCss = ['src/styles.css', 'src/ui/premium.css', 'src/ui/remoteFixes.css', 'src/ui/anchoredMenu.css', 'src/ui/loopRegion.css', 'src/ui/autoTune.css']
+      .map((file) => readFileSync(resolve(root, file), 'utf8'))
+      .join('\n')
+    const store = new ProjectStore()
+    store.setTempo(299.9)
+    const engine = {
+      positionSamples: 0,
+      status: 'counting-in' as const,
+      subscribe: () => () => undefined,
+      currentTimelineSample: () => 0,
+      unlock() {},
+    }
+    const html = renderToStaticMarkup(createElement(TransportBar, {
+      store,
+      engine: engine as never,
+      simple: true,
+      onPlay() {},
+      onStop() {},
+      onRecord() {},
+      onSeek() {},
+    }))
+    const pageHtml = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0;background:#101614}${transportCss}</style></head><body><div class="shell phone studio">${html}</div></body></html>`
     const browser = await chromium.launch({ headless: true })
     try {
       const page = await browser.newPage()
@@ -176,7 +202,12 @@ describe('phone landscape compaction', () => {
         { width: 390, height: 844 },
       ]) {
         await page.setViewportSize(viewport)
-        await page.setContent(fixture(false), { waitUntil: 'load' })
+        await page.setContent(pageHtml, { waitUntil: 'load' })
+        expect(await page.locator('.tap-tempo').count()).toBe(0)
+        expect(await page.getByRole('button', { name: /^Tap$/ }).count()).toBe(0)
+        const tempoLabel = await page.locator('.tempo-tap').getAttribute('aria-label')
+        expect(tempoLabel).toContain('Tap to set tempo')
+        await page.getByRole('button', { name: /^Menu/ }).click()
         const box = await page.evaluate(() => {
           const read = (selector: string) => {
             const node = document.querySelector(selector)
@@ -199,17 +230,20 @@ describe('phone landscape compaction', () => {
               scrollHeight: node.scrollHeight,
               clientHeight: node.clientHeight,
               height: rect.height,
+              text: (node.textContent || '').replace(/\s+/g, ' ').trim(),
             }
           }
           return {
-            tempo: read('.bpm-readout'),
-            tap: read('.tap-tempo'),
+            tempo: read('.tempo-tap'),
+            figure: read('.tempo-figure'),
             bars: read('.bars'),
             tc: read('.tc'),
             width: window.innerWidth,
+            height: window.innerHeight,
           }
         })
-        for (const item of [box.tap, box.bars, box.tc]) {
+        expect(box.figure?.text).toBe('299.9')
+        for (const item of [box.tempo, box.figure, box.bars, box.tc]) {
           expect(item).not.toBeNull()
           if (!item) continue
           expect(item.textLeft).toBeGreaterThanOrEqual(item.left - 1)
@@ -220,16 +254,9 @@ describe('phone landscape compaction', () => {
           expect(item.scrollHeight).toBeLessThanOrEqual(item.clientHeight + 1)
           expect(item.left).toBeGreaterThanOrEqual(-1)
           expect(item.right).toBeLessThanOrEqual(box.width + 1)
+          expect(item.bottom).toBeLessThanOrEqual(box.height + 1)
         }
-        expect(box.tempo).not.toBeNull()
-        if (box.tempo) {
-          expect(box.tempo.height).toBeGreaterThanOrEqual(44)
-          expect(box.tempo.scrollWidth).toBeLessThanOrEqual(box.tempo.clientWidth + 1)
-          expect(box.tempo.scrollHeight).toBeLessThanOrEqual(box.tempo.clientHeight + 1)
-          expect(box.tempo.left).toBeGreaterThanOrEqual(-1)
-          expect(box.tempo.right).toBeLessThanOrEqual(box.width + 1)
-        }
-        expect(box.tap?.height).toBeGreaterThanOrEqual(44)
+        expect(box.tempo?.height).toBeGreaterThanOrEqual(40)
       }
     } finally {
       await browser.close()

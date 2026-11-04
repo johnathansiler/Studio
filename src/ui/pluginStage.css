@@ -1,0 +1,54 @@
+/* Step Sequencer and Beat Machine fill the area under the transport and above the edit bar. */
+
+.shell[data-plugin="steps"] .workspace,
+.shell[data-plugin="pads"] .workspace {
+  position: relative;
+}
+
+.shell[data-plugin="steps"] .workspace > .dock-slot,
+.shell[data-plugin="pads"] .workspace > .dock-slot {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  width: auto;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  min-height: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.shell[data-plugin="steps"] .workspace > .dock-slot > .dock-resize,
+.shell[data-plugin="pads"] .workspace > .dock-slot > .dock-resize {
+  display: none;
+}
+
+.shell[data-plugin="steps"] .workspace > .main-pane,
+.shell[data-plugin="pads"] .workspace > .main-pane {
+  pointer-events: none;
+}
+
+.shell[data-plugin="steps"] .workspace > .dock-slot > .step-sequencer,
+.shell[data-plugin="pads"] .workspace > .dock-slot > .mpc {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+.shell[data-plugin="pads"] .mpc > .hw-body {
+  padding-top: 0;
+}
+
+.shell.phone .mpc-keyboard,
+.shell.phone .mpc-close,
+.shell.phone .step-close,
+.shell.fold .mpc-keyboard,
+.shell.fold .mpc-close,
+.shell.fold .step-close {
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}

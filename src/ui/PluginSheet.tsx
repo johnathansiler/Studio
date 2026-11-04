@@ -5,6 +5,8 @@ import { CATALOG, FACTORY, descriptor } from '../audio/plugins/catalog'
 import { commitPluginPreset } from '../presets/project'
 import { INSTRUMENT_IDS, isDrumsPlugin, kindLabels, paramsForKind } from '../audio/plugins/ids'
 import { pluginIsBeatMachine } from '../instruments/pads/identity'
+import { chainSections, trackHasScaler } from '../instruments/scaler/chain'
+import { AnchoredMenu } from './AnchoredMenu'
 import { PresetControls } from './PresetControls'
 import { TouchSlider } from './kit/controls'
 import { AmpPop } from './AmpPop'
@@ -214,6 +216,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
               max={param.max}
               labels={param.id === 'kind' ? kindLabels(plugin.pluginId) : []}
               value={plugin.params[param.id] ?? param.default}
+              fallback={param.default}
               onChange={(value) => {
                 setLast(param.id)
                 store.setAutomated(
@@ -237,7 +240,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   )
 }
 
-function ParamControl({ id, min, max, value, onChange, labels = [] }: { id: string; min: number; max: number; value: number; onChange: (value: number) => void; labels?: string[] }) {
+function ParamControl({ id, min, max, value, fallback, onChange, labels = [] }: { id: string; min: number; max: number; value: number; fallback?: number; onChange: (value: number) => void; labels?: string[] }) {
   if (id === 'kind' && labels.length) {
     return (
       <select aria-label="Kind" value={Math.max(0, Math.min(labels.length - 1, Math.round(value)))} onChange={(event) => onChange(Number(event.target.value))}>
@@ -275,7 +278,7 @@ function ParamControl({ id, min, max, value, onChange, labels = [] }: { id: stri
   }
   const span = max - min
   const step = span <= 2 ? 0.01 : span <= 40 ? 0.1 : 1
-  return <TouchSlider label={id} min={min} max={max} step={step} value={value} onChange={onChange} />
+  return <TouchSlider label={id} min={min} max={max} step={step} value={value} fallback={fallback} onChange={onChange} />
 }
 
 function formatParam(id: string, value: number, unit: string) {
@@ -285,24 +288,69 @@ function formatParam(id: string, value: number, unit: string) {
 }
 
 export function InsertList({ store, trackId, roomy = false }: { store: ProjectStore; trackId: string | 'master'; roomy?: boolean }) {
-  const plugins = trackId === 'master' ? store.project.masterPlugins : store.track(trackId)?.plugins ?? []
+  const track = trackId === 'master' ? null : store.track(trackId)
+  const plugins = trackId === 'master' ? store.project.masterPlugins : track?.plugins ?? []
+  if (track && trackHasScaler(track)) {
+    const sections = chainSections(track)
+    return (
+      <div className="inserts" data-chain="midi-sound">
+        <span className="chain-part">MIDI</span>
+        {sections.midi.map((plugin) => insertButton(store, trackId, plugin))}
+        <span className="chain-part">Sound</span>
+        {sections.sound.map((plugin) => insertButton(store, trackId, plugin))}
+        {sections.caption && <span className="chain-fallback">{sections.caption}</span>}
+        {sections.addInstrument && <AddScalerInstrument store={store} trackId={track.id} />}
+        {sections.rest.map((plugin) => insertButton(store, trackId, plugin))}
+        <PluginPicker store={store} trackId={trackId} roomy={roomy} />
+      </div>
+    )
+  }
   return (
     <div className="inserts">
-      {plugins.map((plugin) => (
-        <button
-          key={plugin.id}
-          type="button"
-          className={plugin.enabled ? 'on' : ''}
-          title={descriptor(plugin.pluginId)?.name ?? plugin.pluginId}
-          aria-label={`${descriptor(plugin.pluginId)?.name ?? plugin.pluginId}. Open this insert.`}
-          onClick={() => store.focusPlugin(trackId, plugin.id)}
-          onDoubleClick={() => store.updatePlugin(trackId, plugin.id, { enabled: !plugin.enabled })}
-        >
-          {insertLabel(plugin.pluginId, plugin)}
-        </button>
-      ))}
+      {plugins.map((plugin) => insertButton(store, trackId, plugin))}
       <PluginPicker store={store} trackId={trackId} roomy={roomy} />
     </div>
+  )
+}
+
+function insertButton(store: ProjectStore, trackId: string | 'master', plugin: { id: string; pluginId: string; enabled: boolean; params?: Record<string, number> }) {
+  return (
+    <button
+      key={plugin.id}
+      type="button"
+      className={plugin.enabled ? 'on' : ''}
+      title={descriptor(plugin.pluginId)?.name ?? plugin.pluginId}
+      aria-label={`${descriptor(plugin.pluginId)?.name ?? plugin.pluginId}. Open this insert.`}
+      onClick={() => store.focusPlugin(trackId, plugin.id)}
+      onDoubleClick={() => store.updatePlugin(trackId, plugin.id, { enabled: !plugin.enabled })}
+    >
+      {insertLabel(plugin.pluginId, plugin)}
+    </button>
+  )
+}
+
+function AddScalerInstrument({ store, trackId }: { store: ProjectStore; trackId: string }) {
+  const [open, setOpen] = useState(false)
+  const button = useRef<HTMLButtonElement>(null)
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        className="insert-add"
+        aria-expanded={open}
+        aria-label="Add instrument"
+        title="Add a synth, sampler, or Beat Machine under Scaler."
+        onClick={() => setOpen((value) => !value)}
+      >
+        Add instrument
+      </button>
+      <AnchoredMenu open={open} onClose={() => setOpen(false)} label="Add instrument" triggerRef={button} prefer="down">
+        <button type="button" onClick={() => { store.addScalerSound(trackId, 'synth'); setOpen(false) }}>Synth</button>
+        <button type="button" onClick={() => { store.addScalerSound(trackId, 'sampler'); setOpen(false) }}>Sampler</button>
+        <button type="button" onClick={() => { store.addScalerSound(trackId, 'pads'); setOpen(false) }}>Beat Machine</button>
+      </AnchoredMenu>
+    </>
   )
 }
 
@@ -404,10 +452,22 @@ export function insertChoices<T extends { id: string; name: string }>(entries: r
   ]
 }
 
+/** Same insert list Mix shows for this track. */
+export function insertMenuChoices(store: ProjectStore, trackId: string | 'master') {
+  const midi = trackId !== 'master' && store.track(trackId)?.type === 'midi'
+  return insertChoices(CATALOG.filter((plugin) => trackId !== 'master' || !INSTRUMENT_IDS.has(plugin.id)), midi)
+}
+
+/** Same insert action Mix uses. Vocal Clean adds the vocal chain. */
+export function addInsert(store: ProjectStore, trackId: string | 'master', value: string) {
+  if (!value) return
+  if (value === 'vocal' && trackId !== 'master') store.addVocalChain(trackId)
+  else store.addPlugin(trackId, value)
+}
+
 function PluginPicker({ store, trackId, roomy }: { store: ProjectStore; trackId: string | 'master'; roomy?: boolean }) {
   const [open, setOpen] = useState(false)
-  const midi = trackId !== 'master' && store.track(trackId)?.type === 'midi'
-  const choices = insertChoices(CATALOG.filter((plugin) => trackId !== 'master' || !INSTRUMENT_IDS.has(plugin.id)), midi)
+  const choices = insertMenuChoices(store, trackId)
   return (
     <div className={`plugin-picker${open ? ' open' : ''}`}>
       <button
@@ -428,7 +488,7 @@ function PluginPicker({ store, trackId, roomy }: { store: ProjectStore; trackId:
               type="button"
               className="plugin-pick"
               onClick={() => {
-                addChoice(store, trackId, plugin.id)
+                addInsert(store, trackId, plugin.id)
                 setOpen(false)
               }}
             >
@@ -444,11 +504,5 @@ function PluginPicker({ store, trackId, roomy }: { store: ProjectStore; trackId:
 function tuneSheetHeight() {
   if (typeof window === 'undefined') return 680
   return Math.min(740, Math.max(560, window.innerHeight - 16))
-}
-
-function addChoice(store: ProjectStore, trackId: string | 'master', value: string) {
-  if (!value) return
-  if (value === 'vocal' && trackId !== 'master') store.addVocalChain(trackId)
-  else store.addPlugin(trackId, value)
 }
 

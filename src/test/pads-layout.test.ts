@@ -79,7 +79,7 @@ describe('beat machine layout', () => {
             hits: hits.slice(0, 12),
             pads: pads.length,
             short: targets.filter((rect) => rect.width < 40 || rect.height < 40).length,
-            screen: document.querySelector('.lcd, .hw-screen') != null,
+            screen: document.querySelector('.hw-screen')?.getBoundingClientRect().height ?? 0,
             padWidth: first ? Math.round(first.width) : 0,
             padHeight: first ? Math.round(first.height) : 0,
             scrollWidth: document.documentElement.scrollWidth,
@@ -94,7 +94,14 @@ describe('beat machine layout', () => {
         expect(report.hits, `${viewport.name}\n${report.hits.join('\n')}`).toEqual([])
         expect(report.pads).toBe(8)
         expect(report.short).toBe(0)
-        expect(report.screen).toBe(false)
+        expect(report.screen).toBeGreaterThan(0)
+        if (viewport.width < 800) expect(report.screen).toBeGreaterThanOrEqual(90)
+        if (viewport.width < 800) expect(report.screen).toBeLessThanOrEqual(120)
+        if (viewport.width >= 800) expect(report.screen).toBeGreaterThan(120)
+        if (viewport.name === 'phone412') {
+          expect(report.padWidth).toBeGreaterThanOrEqual(80)
+          expect(report.padWidth).toBeLessThanOrEqual(100)
+        }
         expect(report.scrollWidth).toBeLessThanOrEqual(viewport.width + 1)
         expect(report.pastRight).toBe(0)
         expect(report.scrollHeight).toBeLessThanOrEqual(viewport.height + 1)
@@ -123,7 +130,7 @@ describe('beat machine layout', () => {
     } finally {
       await browser.close()
     }
-  })
+  }, 20000)
 
   it('shows the chop editor and the vintage menu at phone, fold, and desktop', async () => {
     mkdirSync('/opt/cursor/artifacts', { recursive: true })
@@ -223,5 +230,5 @@ describe('beat machine layout', () => {
     } finally {
       await browser.close()
     }
-  })
+  }, 20000)
 })

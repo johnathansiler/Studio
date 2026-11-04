@@ -1,18 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { fetchSoundBytes, soundCache } from '../sounds/cache'
-import { loadSoundCatalog } from '../sounds/catalog'
+import { filterSounds, loadSoundCatalog, soundKeys } from '../sounds/catalog'
 import { audioTrackFor, decodeSoundBytes, placeSound, previewChannelsFor } from '../sounds/place'
 import { soundFileUrl } from '../sounds/source'
-import type { SoundEntry } from '../sounds/types'
+import type { SoundEntry, SoundQuery } from '../sounds/types'
 import type { ProjectStore } from '../state/store'
 import {
   browserGroup,
   deviceDrag,
+  instrumentFor,
+  midiKind,
+  parseDeviceDrag,
   type BrowserDevice,
   type BrowserGroup,
 } from '../model/sessionBoard'
 import { parseSessionDrag, type SessionDrag } from '../model/sessionInteract'
 import { beginSessionDrag } from './sessionPointer'
+import { SoundFilterButton } from './SoundBrowser'
 
 const CATALOG_WAIT_MS = 8000
 
@@ -86,6 +90,71 @@ export async function dropLibrarySound(store: ProjectStore, trackId: string, sce
   store.placeInSlot(trackId, scene, placed.clip)
 }
 
+/** Puts a browser device on the selected track, or on a track of the right kind. */
+export function addBrowserDevice(store: ProjectStore, item: BrowserDevice) {
+  if (store.remoteFollow) {
+    store.toast('The host owns the arrangement.', 'warn')
+    return
+  }
+  const parsed = parseDeviceDrag(deviceDrag(item))
+  if (!parsed) return
+  const selected = store.selectedTrackId ? store.track(store.selectedTrackId) : null
+  if (parsed.kind === 'audio') {
+    let trackId = selected?.id ?? store.project.tracks.find((track) => track.type === 'audio' || track.type === 'midi')?.id ?? null
+    if (!trackId) {
+      trackId = store.addTracks({ kind: 'audio', count: 1, instrument: 'none', input: 'mic', channels: 1, armed: false })[0] ?? null
+    }
+    if (!trackId) {
+      store.toast('Could not add a track for that effect.', 'warn')
+      return
+    }
+    store.addPlugin(trackId, parsed.id)
+    if (parsed.id === 'tune') {
+      const plugin = store.track(trackId)?.plugins.at(-1)
+      if (plugin?.pluginId === 'tune') store.updatePlugin(trackId, plugin.id, { params: { amount: Math.max(plugin.params.amount ?? 0, 0.85) } })
+    }
+    store.toast(`${item.name} is on the track.`, 'good')
+    return
+  }
+  const midiId = selected?.type === 'midi' ? selected.id : null
+  if (parsed.kind === 'midi') {
+    let trackId = midiId ?? store.project.tracks.find((track) => track.type === 'midi')?.id ?? null
+    if (!trackId) {
+      trackId = store.addTracks({ kind: 'midi', count: 1, instrument: 'library', input: 'mic', channels: 1, armed: false })[0] ?? null
+    }
+    const fx = midiKind(parsed.id)
+    if (!trackId || !fx) {
+      store.toast('That device goes on a MIDI track.', 'warn')
+      return
+    }
+    store.addMidiFx(trackId, fx)
+    store.toast(`${item.name} is on the track.`, 'good')
+    return
+  }
+  if (parsed.id === 'steps' || parsed.id === 'scaler' || parsed.id === 'synth' || parsed.id === 'pads') {
+    store.addPlugin(midiId ?? 'master', parsed.id)
+    store.toast(`${item.name} is on the track.`, 'good')
+    return
+  }
+  const instrument = instrumentFor(parsed.id)
+  if (!instrument) {
+    store.toast('Could not add that instrument.', 'warn')
+    return
+  }
+  if (midiId) {
+    store.setTrackInstrument(midiId, instrument)
+    if (selected?.input === 'none') store.updateTrack(midiId, { input: 'midi' })
+    store.toast(`${item.name} is on the track.`, 'good')
+    return
+  }
+  const created = store.addTracks({ kind: 'midi', count: 1, instrument, input: 'mic', channels: 1, armed: false })
+  if (!created[0]) {
+    store.toast('Could not add a track for that instrument.', 'warn')
+    return
+  }
+  store.toast(`${item.name} is on the track.`, 'good')
+}
+
 export function SessionBrowser({
   width,
   onResize,
@@ -105,8 +174,16 @@ export function SessionBrowser({
   const [entries, setEntries] = useState<SoundEntry[]>([])
   const [phase, setPhase] = useState<'loading' | 'error' | 'ready'>('loading')
   const [query, setQuery] = useState('')
+  const [bpm, setBpm] = useState<SoundQuery['bpm']>('any')
+  const [soundKey, setSoundKey] = useState('')
+  const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [playing, setPlaying] = useState('')
   const [busy, setBusy] = useState('')
+  useSyncExternalStore(
+    (listener) => store ? store.subscribe(listener) : () => undefined,
+    () => store?.version ?? 0,
+    () => 0,
+  )
 
   async function loadCatalog() {
     setPhase('loading')
@@ -138,8 +215,18 @@ export function SessionBrowser({
   }, [])
 
   const needle = query.trim().toLowerCase()
-  const shownSounds = entries.filter((entry) => !needle || `${entry.name} ${entry.type} ${entry.tags.join(' ')}`.toLowerCase().includes(needle)).slice(0, 200)
+  const favorites = store?.project.soundFavorites ?? []
+  const shownSounds = filterSounds(entries, {
+    text: query,
+    type: 'all',
+    bpm,
+    key: soundKey,
+    favoritesOnly,
+    projectBpm: store?.project.tempo ?? 120,
+    favorites,
+  }).slice(0, 200)
   const devices = browserGroup(group).filter((item) => !needle || `${item.name} ${item.hint}`.toLowerCase().includes(needle))
+  const keys = soundKeys(entries)
 
   async function preview(entry: SoundEntry) {
     if (!engine || !store) return
@@ -204,7 +291,21 @@ export function SessionBrowser({
           window.addEventListener('pointerup', up)
         }}
       />
-      <input className="sl-search" aria-label="Search browser" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
+      <div className="sl-search-row">
+        <input className="sl-search" aria-label="Search browser" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
+        {group === 'sounds' && (
+          <SoundFilterButton
+            bpm={bpm}
+            soundKey={soundKey}
+            favoritesOnly={favoritesOnly}
+            keys={keys}
+            showTempoKey
+            onBpm={setBpm}
+            onKey={setSoundKey}
+            onFavorites={setFavoritesOnly}
+          />
+        )}
+      </div>
       <div className="sl-groups">
         <div className="sl-chip-scroll" role="tablist" aria-label="Browser">
           {GROUPS.map((item) => (
@@ -239,11 +340,22 @@ export function SessionBrowser({
               <strong>{entry.name}</strong>
               <small>{playing === entry.id ? 'Playing' : entry.type}</small>
             </button>
-            <button type="button" className="sl-add" disabled={busy === entry.id || !store} aria-label={`Add. ${entry.name}`} onClick={() => void addSound(entry)}>Add</button>
+            <button type="button" className="sl-add" disabled={busy === entry.id || !store || store.remoteFollow} aria-label={`Add. ${entry.name}`} onClick={() => void addSound(entry)}>Add</button>
+            <button
+              type="button"
+              className={`sl-save${favorites.includes(entry.id) ? ' on' : ''}`}
+              aria-pressed={favorites.includes(entry.id)}
+              disabled={!store || store.remoteFollow}
+              aria-label={favorites.includes(entry.id) ? `Saved. ${entry.name} is in favorites.` : `Save. Keep ${entry.name} in favorites.`}
+              title="Keep this sound in the project favorites."
+              onClick={() => store?.toggleSoundFavorite(entry.id)}
+            >
+              {favorites.includes(entry.id) ? 'Saved' : 'Save'}
+            </button>
           </div>
         ))}
         {group !== 'sounds' && devices.map((item) => (
-          <DeviceRow key={`${item.kind}:${item.id}`} item={item} onPointerDrop={onPointerDrop} />
+          <DeviceRow key={`${item.kind}:${item.id}`} item={item} store={store} onPointerDrop={onPointerDrop} />
         ))}
         {group !== 'sounds' && !devices.length && <p className="sl-note">Nothing matches.</p>}
       </div>
@@ -251,8 +363,9 @@ export function SessionBrowser({
   )
 }
 
-function DeviceRow({ item, onPointerDrop }: { item: BrowserDevice; onPointerDrop?: (drag: SessionDrag, point: { x: number; y: number }) => void }) {
+function DeviceRow({ item, store, onPointerDrop }: { item: BrowserDevice; store?: ProjectStore; onPointerDrop?: (drag: SessionDrag, point: { x: number; y: number }) => void }) {
   const drag = parseSessionDrag(deviceDrag(item))
+  const where = item.kind === 'audio' ? 'Add it to the selected track.' : 'Add it to the selected MIDI track.'
   return (
     <div className="sl-row">
       <button
@@ -265,6 +378,16 @@ function DeviceRow({ item, onPointerDrop }: { item: BrowserDevice; onPointerDrop
       >
         <strong>{item.name}</strong>
         <small>{item.kind}</small>
+      </button>
+      <button
+        type="button"
+        className="sl-add"
+        disabled={!store || store.remoteFollow}
+        aria-label={`Add. ${item.name}. ${where}`}
+        title={`${where} ${item.hint}`}
+        onClick={() => { if (store) addBrowserDevice(store, item) }}
+      >
+        Add
       </button>
     </div>
   )

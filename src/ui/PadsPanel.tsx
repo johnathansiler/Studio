@@ -25,10 +25,25 @@ import { commitPadPreset } from '../presets/project'
 import { AnchoredMenu } from './AnchoredMenu'
 import { PresetControls } from './PresetControls'
 import { ChopDrawer } from './ChopDrawer'
-import { notifyKeyboard } from './keyboardStage'
+import { PadScreen } from './PadScreen'
+import { notifyKeyboard, releaseOrientation } from './keyboardStage'
+import { residentDrums } from '../model/drums'
+import { slicesFor } from '../model/padChop'
+import { resolveHighpass } from '../audio/voices/program'
 import './pads.css'
 
 const PAD_KEYS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyZ', 'KeyX', 'KeyC', 'KeyV']
+const residentWaves = new Map<number, Map<number, Float32Array>>()
+
+function residentWave(sampleRate: number, pitch: number | undefined) {
+  if (pitch == null) return null
+  let kit = residentWaves.get(sampleRate)
+  if (!kit) {
+    kit = new Map(residentDrums(sampleRate).map((drum) => [drum.pitch, drum.samples]))
+    residentWaves.set(sampleRate, kit)
+  }
+  return kit.get(pitch) ?? null
+}
 
 /** Pads drawn on the face. Bank A is 1–8. Bank B is 9–16 of the same stored kit bank. */
 export const FACE_PADS = 8
@@ -83,6 +98,7 @@ export function PadsPanel({
   const stopRec = useRef(false)
   const [padArm, setPadArm] = useState<'idle' | 'count-in' | 'recording'>('idle')
   const [litPads, setLitPads] = useState<number[]>([])
+  const [hitToken, setHitToken] = useState(0)
   const [litNotes, setLitNotes] = useState<number[]>([])
   const [meters, setMeters] = useState<number[]>(() => Array(16).fill(0))
   const [status, setStatus] = useState(engine.status)
@@ -204,6 +220,7 @@ export function PadsPanel({
       const velocity = pointerVelocity(event, key.getBoundingClientRect())
       play.down(pitch, velocity, event.timeStamp, event.pointerId, levels ? index : undefined)
       setSelected(index)
+      setHitToken((token) => token + 1)
       bumpMeter(index, velocity)
       pointers.set(event.pointerId, index)
       setLitPads([...pointers.values()])
@@ -248,6 +265,7 @@ export function PadsPanel({
       held.set(event.code, index + 1)
       play.down(pitch, 0.9, event.timeStamp, index + 1, levels ? index : undefined)
       setSelected(index)
+      setHitToken((token) => token + 1)
       setPadPage(index >= FACE_PADS ? 1 : 0)
       bumpMeter(index, 0.9)
       setLitPads((list) => list.includes(index) ? list : [...list, index])
@@ -320,6 +338,13 @@ export function PadsPanel({
 
   const source = levels && selectedPad ? selectedPad : selectedPad
   const region = source?.region ?? { start: 0, end: 1, loop: false, loopStart: 0, loopEnd: 1, reverse: false }
+  const screenLayer = source?.layers.find((item) => item.bufferId) ?? source?.layers[0]
+  const screenAsset = screenLayer?.bufferId ? store.buffers.get(screenLayer.bufferId) : undefined
+  const screenRate = screenAsset?.sampleRate || store.project.sampleRate
+  const screenSamples = screenAsset?.channels[0] ?? residentWave(screenRate, source?.pitch)
+  const chopForPad = kit.chop && screenLayer?.bufferId === kit.chop.bufferId ? kit.chop : undefined
+  const heardMode: 'vinyl' | 'stretch' = (chopForPad ? chopForPad.pitchMode : source?.pitchMode) === 'stretch' ? 'stretch' : 'vinyl'
+  const screenHighpass = source ? resolveHighpass(source, kit.chop) : 0
   const stepBeats = (kit.sequences[0]?.lengthBeats || 4) / 16
   const stepLevel = stepVelocity(kit.sequences[0]?.notes ?? [], pads[selected]?.pitch ?? 0, stepPick, stepBeats) ?? kit.velocityFixed
   const pageStart = padPage * FACE_PADS
@@ -330,14 +355,21 @@ export function PadsPanel({
     setSelected((current) => page * FACE_PADS + (current % FACE_PADS))
   }
 
-  function nudgePad(dx: number, dy: number) {
-    const col = selected % 4
-    const row = Math.floor(selected / 4)
-    const nextRow = Math.min(3, Math.max(0, row + dy))
-    const nextCol = Math.min(3, Math.max(0, col + dx))
-    const next = nextRow * 4 + nextCol
-    setSelected(next)
-    setPadPage(next >= FACE_PADS ? 1 : 0)
+  function resetWindow() {
+    const layer = source?.layers.find((item) => item.bufferId) ?? source?.layers[0]
+    const asset = layer?.bufferId ? store.buffers.get(layer.bufferId) : undefined
+    const channel = asset?.channels[0]
+    let from = 0
+    let to = 1
+    if (kit.chop && channel && layer?.bufferId === kit.chop.bufferId) {
+      const slices = slicesFor(kit.chop, channel, asset?.sampleRate || store.project.sampleRate, store.project.tempo)
+      const slice = slices[selected]
+      if (slice && channel.length > 1) {
+        from = slice.start / channel.length
+        to = slice.end / channel.length
+      }
+    }
+    store.setPadWindow(trackId, bank, selected, from, to, false)
   }
 
   async function armPad() {
@@ -421,34 +453,89 @@ export function PadsPanel({
             <span>Beat Machine</span>
             <span className="mpc-kind">Drums</span>
           </div>
-          <div className="mpc-actions">
-            <button
-              type="button"
-              className="mpc-keyboard"
-              data-beat-keyboard={trackId}
-              onClick={() => {
-                engine.unlock()
-                if (onKeyboard) onKeyboard()
-                else {
-                  store.openKeyboardForPads(trackId)
-                  notifyKeyboard(true)
-                }
-              }}
-            >
-              Keyboard
-            </button>
-            <button
-              type="button"
-              className="mpc-close"
-              data-beat-close={trackId}
-              title="Close Beat Machine. The track keeps the instrument."
-              aria-label="Close Beat Machine. The track keeps the instrument."
-              onClick={() => store.closePads()}
-            >
-              Close
-            </button>
-          </div>
+          <button
+            type="button"
+            className="mpc-keyboard"
+            data-beat-keyboard={trackId}
+            onClick={() => {
+              engine.unlock()
+              if (onKeyboard) onKeyboard()
+              else {
+                store.openKeyboardForPads(trackId)
+                notifyKeyboard(true)
+              }
+            }}
+          >
+            Keyboard
+          </button>
+          <button
+            type="button"
+            className="mpc-close"
+            data-beat-close={trackId}
+            title="Close Beat Machine. The track keeps the instrument."
+            aria-label="Close Beat Machine. The track keeps the instrument."
+            onClick={() => {
+              store.closePads()
+              void releaseOrientation()
+            }}
+          >
+            Close
+          </button>
         </header>
+
+        <PadScreen
+          name={source ? padFaceName(source) : 'Pad'}
+          samples={screenSamples}
+          sampleRate={screenRate}
+          start={region.start}
+          end={region.end}
+          reverse={region.reverse}
+          tune={source?.tune ?? 0}
+          tuneCents={source?.tuneCents ?? 0}
+          pitchMode={heardMode}
+          filter={source?.filter ?? 1}
+          highpass={screenHighpass}
+          vintage={kit.vintage?.macro ?? 0}
+          level={source?.level ?? 1}
+          gate={source?.gate === 'hold' ? 'hold' : 'shot'}
+          swing={source?.swing ?? kit.swing}
+          tempo={store.project.tempo}
+          hitToken={hitToken}
+          onTrim={(from, to) => store.setPadWindow(trackId, bank, selected, from, to, true)}
+          onTrimEnd={() => store.endDraft()}
+          onReset={resetWindow}
+        />
+
+        <div className="mpc-grid-wrap">
+          <div className="mpc-grid" ref={board} aria-label="Drum pads" data-pad-bank={padPage === 0 ? 'A' : 'B'}>
+            {visiblePads.map((pad, offset) => {
+              const index = pageStart + offset
+              const pitch = levels && source ? source.pitch : pad.pitch
+              const label = levels ? levelLabel(index, levels) : padFaceName(pad)
+              const sampleTitle = pad.sampleName || (pad.layers[0]?.bufferId ? store.buffers.get(pad.layers[0].bufferId)?.name : '') || pad.name
+              const velocity = meters[index] ?? 0
+              const lit = litPads.includes(index) || litNotes.includes(pitch) || velocity > 0.08
+              return (
+                <button
+                  key={`${bank}-${pad.pitch}-${index}`}
+                  type="button"
+                  className={`mpc-pad ch-raised${lit ? ' lit' : ''}${selected === index ? ' sel' : ''}${pad.muted ? ' muted' : ''}`}
+                  data-pad={index}
+                  data-pitch={pitch}
+                  style={{ ['--vel' as string]: String(velocity) }}
+                  title={`${sampleTitle && sampleTitle !== label ? `${label}. ${sampleTitle}` : label}. Drag a sound here.`}
+                  onDragOver={(event) => {
+                    if ([...event.dataTransfer.types].includes(SOUND_MIME) || event.dataTransfer.types.includes('text/plain')) event.preventDefault()
+                  }}
+                  onDrop={(event) => { void dropSound(index, event) }}
+                >
+                  <span>{label}</span>
+                  <i className="mpc-meter" aria-hidden style={{ height: `${Math.round(velocity * 100)}%` }} />
+                </button>
+              )
+            })}
+          </div>
+        </div>
 
         <div className="mpc-banks" role="group" aria-label="Pad banks">
           <button type="button" className={`hw-key ch-tab${padPage === 0 ? ' on' : ''}`} aria-pressed={padPage === 0} title="Bank A. Pads 1 to 8. Sounds and patterns stay on these pads." onClick={() => showPadPage(0)}>Bank A</button>
@@ -484,37 +571,6 @@ export function PadsPanel({
           <button type="button" className={`hw-key ch-tab${chopOpen ? ' on' : ''}`} aria-pressed={chopOpen} aria-expanded={chopOpen} onClick={() => setChopOpen((value) => !value)}>Chop</button>
         </div>
         {chopOpen && <ChopDrawer store={store} engine={engine} trackId={trackId} vintageStartsOpen={vintageStartsOpen} />}
-
-        <div className="mpc-grid-wrap">
-          <div className="mpc-grid" ref={board} aria-label="Drum pads" data-pad-bank={padPage === 0 ? 'A' : 'B'}>
-            {visiblePads.map((pad, offset) => {
-              const index = pageStart + offset
-              const pitch = levels && source ? source.pitch : pad.pitch
-              const label = levels ? levelLabel(index, levels) : padFaceName(pad)
-              const sampleTitle = pad.sampleName || (pad.layers[0]?.bufferId ? store.buffers.get(pad.layers[0].bufferId)?.name : '') || pad.name
-              const velocity = meters[index] ?? 0
-              const lit = litPads.includes(index) || litNotes.includes(pitch) || velocity > 0.08
-              return (
-                <button
-                  key={`${bank}-${pad.pitch}-${index}`}
-                  type="button"
-                  className={`mpc-pad ch-raised${lit ? ' lit' : ''}${selected === index ? ' sel' : ''}${pad.muted ? ' muted' : ''}`}
-                  data-pad={index}
-                  data-pitch={pitch}
-                  style={{ ['--vel' as string]: String(velocity) }}
-                  title={`${sampleTitle && sampleTitle !== label ? `${label}. ${sampleTitle}` : label}. Drag a sound here.`}
-                  onDragOver={(event) => {
-                    if ([...event.dataTransfer.types].includes(SOUND_MIME) || event.dataTransfer.types.includes('text/plain')) event.preventDefault()
-                  }}
-                  onDrop={(event) => { void dropSound(index, event) }}
-                >
-                  <span>{label}</span>
-                  <i className="mpc-meter" aria-hidden style={{ height: `${Math.round(velocity * 100)}%` }} />
-                </button>
-              )
-            })}
-          </div>
-        </div>
 
         <div className="hw-deck">
           <div className="note-repeat-row">
@@ -600,12 +656,6 @@ export function PadsPanel({
               store.patchTrackKit(trackId, { swing, trackSwing: swing })
             }} />
           </label>
-          <div className="pad-move" role="group" aria-label="Selected pad">
-            <button type="button" className="hw-key ch-tab" title="Select the pad above. The top of Bank B returns to Bank A." onClick={() => nudgePad(0, -1)}>Pad above</button>
-            <button type="button" className="hw-key ch-tab" title="Select the pad below. The bottom of Bank A opens Bank B." onClick={() => nudgePad(0, 1)}>Pad below</button>
-            <button type="button" className="hw-key ch-tab" title="Select the pad to the left." onClick={() => nudgePad(-1, 0)}>Pad left</button>
-            <button type="button" className="hw-key ch-tab" title="Select the pad to the right." onClick={() => nudgePad(1, 0)}>Pad right</button>
-          </div>
         </div>
 
         <section className={`hw-window${settingsOpen ? ' open' : ''}`} aria-label="Pad settings">
@@ -712,7 +762,11 @@ export function PadsPanel({
               </label>
               <button type="button" className={`hw-key ch-tab${region.reverse ? ' on' : ''}`} aria-pressed={region.reverse} title="Play this pad backwards." onClick={() => store.updateTrackPad(trackId, bank, selected, { region: { ...region, reverse: !region.reverse } })}>Reverse</button>
               <button type="button" className={`hw-key ch-tab${source.gate === 'hold' ? ' on' : ''}`} aria-pressed={source.gate === 'hold'} title="Hold follows your finger. One shot plays the slice through." onClick={() => store.updateTrackPad(trackId, bank, selected, { gate: source.gate === 'hold' ? 'shot' : 'hold' })}>{source.gate === 'hold' ? 'Hold' : 'One shot'}</button>
-              <button type="button" className={`hw-key ch-tab${source.pitchMode === 'stretch' ? ' on' : ''}`} title="Vinyl changes speed and pitch together. Stretch changes pitch and keeps the tempo." onClick={() => store.updateTrackPad(trackId, bank, selected, { pitchMode: source.pitchMode === 'stretch' ? 'vinyl' : 'stretch' })}>{source.pitchMode === 'stretch' ? 'Stretch' : 'Vinyl'}</button>
+              <button type="button" className={`hw-key ch-tab${heardMode === 'stretch' ? ' on' : ''}`} title="Vinyl changes speed and pitch together. Stretch changes pitch and keeps the tempo." onClick={() => {
+                const next = heardMode === 'stretch' ? 'vinyl' : 'stretch'
+                if (chopForPad) store.patchChop(trackId, { pitchMode: next })
+                store.updateTrackPad(trackId, bank, selected, { pitchMode: next })
+              }}>{heardMode === 'stretch' ? 'Stretch' : 'Vinyl'}</button>
               <label>Cents
                 <input aria-label="Pad cents" title="Fine pitch for this pad, in cents." type="range" min={-100} max={100} step={1} value={source.tuneCents ?? 0} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { tuneCents: Number(event.target.value) })} />
               </label>

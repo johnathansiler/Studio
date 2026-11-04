@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FEATURES, preferArrangeTransport, preferArrangeView } from './features'
 import { installControlGuards } from './ui/gestures'
 import { applyFreeze } from './audio/bounce'
@@ -80,10 +80,11 @@ import { deletesSelection } from './ui/clipKeys'
 import { historyCommand, typingTarget } from './state/history'
 import { claimComputerKey } from './model/keyboardPlay'
 import { KeyboardDock } from './ui/KeyboardDock'
-import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark, notifyKeyboard, PADS_HISTORY, PIANO_HISTORY, presentKeyboard, setKeyboardPresenter, setPianoHider, STEPS_HISTORY, type EditorHistoryMark, type KeyboardPresentation } from './ui/keyboardStage'
+import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark, keyboardShellTurn, notifyKeyboard, PADS_HISTORY, PIANO_HISTORY, presentKeyboard, releaseOrientation, setKeyboardPresenter, setPianoHider, STEPS_HISTORY, type EditorHistoryMark, type KeyboardPresentation } from './ui/keyboardStage'
 import { HintBubble, TipButton } from './ui/Hint'
 import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
+import { alignPluginClose } from './ui/pluginStage'
 
 interface Bundle {
   store: ProjectStore
@@ -233,8 +234,14 @@ export function App() {
   const shellRef = useRef<HTMLDivElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const [keysLandscape, setKeysLandscape] = useState(false)
+  const [screenAngle, setScreenAngle] = useState<number | null>(() => {
+    if (typeof screen === 'undefined' || !screen.orientation) return null
+    return screen.orientation.angle
+  })
   const keysMode = useRef<KeyboardPresentation>('dock')
   const keysFromClick = useRef(false)
+  const settleGen = useRef(0)
+  const ignorePop = useRef(0)
   const editorHistory = useRef<EditorHistoryMark | null>(null)
   const recordReady = useRef(false)
   const holdLandscape = useRef(false)
@@ -844,6 +851,8 @@ export function App() {
         if (document.querySelector('.add-track-menu')) return
         if (editorPanel.current === 'piano' || editorPanel.current === 'pads' || editorPanel.current === 'steps') {
           event.preventDefault()
+          void releaseOrientation()
+          setKeysLandscape(false)
           const mark = editorPanel.current === 'piano' ? PIANO_HISTORY : editorPanel.current === 'steps' ? STEPS_HISTORY : PADS_HISTORY
           if (isHistoryMark(history.state, mark)) history.back()
           else if (editorPanel.current === 'piano') closePiano()
@@ -1518,6 +1527,18 @@ async function importDropped(files: FileList) {
   const studioTab: StudioTab = collabOpen ? 'collab' : editorView
   const collabShown = collabPanelVisible(studioTab)
   const dockShown = !collabShown && dockVisible({ surface, panel, dockOpen: false })
+  useLayoutEffect(() => {
+    if (panel !== 'pads' && panel !== 'steps') return
+    const place = () => alignPluginClose(shellRef.current)
+    place()
+    const observer = new ResizeObserver(place)
+    if (shellRef.current) observer.observe(shellRef.current)
+    window.addEventListener('resize', place)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', place)
+    }
+  }, [panel, phone, land, form])
   const soundReserve = !phone && dockShown && dockEdge === 'right' ? dock : 0
   soundReserveRef.current = soundReserve
   useEffect(() => {
@@ -1548,6 +1569,8 @@ async function importDropped(files: FileList) {
       store.setKeyboardMidi(false)
       notifyKeyboard(false)
     }
+    setKeysLandscape(false)
+    void releaseOrientation()
   }
 
   function showView(view: 'arrange' | 'mix' | 'beats' | 'session') {
@@ -1559,6 +1582,13 @@ async function importDropped(files: FileList) {
       setPianoOpen(false)
       if (phone) store.closePiano()
     }
+    if (store.keyboardMidi) {
+      store.clearKeyboardReturn()
+      store.setKeyboardMidi(false)
+      notifyKeyboard(false)
+    }
+    setKeysLandscape(false)
+    void releaseOrientation()
     store.setView(next)
   }
 
@@ -1576,10 +1606,15 @@ async function importDropped(files: FileList) {
     else if (step === 'replace' && shownEditor) {
       if (isHistoryMark(history.state, previous ?? '')) history.replaceState({ cueharbor: shownEditor }, '')
       else history.pushState({ cueharbor: shownEditor }, '')
-    } else if (step === 'back' && previous && isHistoryMark(history.state, previous)) history.back()
+    } else if (step === 'back' && previous && isHistoryMark(history.state, previous)) {
+      ignorePop.current += 1
+      history.back()
+    }
     if (!shownEditor) return
     const onPop = () => {
       editorHistory.current = null
+      setKeysLandscape(false)
+      void releaseOrientation()
       if (shownEditor === PIANO_HISTORY) closePiano()
       else if (shownEditor === STEPS_HISTORY) store.closeSteps()
       else store.closePads()
@@ -1592,6 +1627,7 @@ async function importDropped(files: FileList) {
     const orient = typeof screen === 'undefined' ? undefined : screen.orientation
     if (!orient?.addEventListener) return
     const onChange = () => {
+      setScreenAngle(orient.angle)
       if (!holdLandscape.current) return
       const report = { type: orient.type, angle: orient.angle }
       if (!keepLandscapeAfterClose(true, report)) {
@@ -1599,17 +1635,38 @@ async function importDropped(files: FileList) {
         setKeysLandscape(false)
       }
     }
+    setScreenAngle(orient.angle)
     orient.addEventListener('change', onChange)
     return () => orient.removeEventListener('change', onChange)
   }, [])
+
+  useEffect(() => {
+    const onPop = () => {
+      if (ignorePop.current > 0) {
+        ignorePop.current -= 1
+        return
+      }
+      setKeysLandscape(false)
+      void releaseOrientation()
+      if (store.keyboardMidi) {
+        store.clearKeyboardReturn()
+        store.setKeyboardMidi(false)
+        notifyKeyboard(false)
+      }
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [store])
 
   function landscapeHost() {
     return browserLandscapeHost(shellRef.current, form, window.innerHeight >= window.innerWidth)
   }
 
   async function settleKeyboard(on: boolean) {
+    const generation = ++settleGen.current
     if (!on || form !== 'phone') {
       const follow = await dismissKeyboard(landscapeHost(), keysMode.current)
+      if (generation !== settleGen.current) return
       keysMode.current = 'dock'
       holdLandscape.current = follow.holdLandscape
       const orient = typeof screen === 'undefined' ? undefined : screen.orientation
@@ -1619,6 +1676,10 @@ async function importDropped(files: FileList) {
       return
     }
     const mode = await presentKeyboard(landscapeHost())
+    if (generation !== settleGen.current) {
+      if (mode === 'locked') await releaseOrientation()
+      return
+    }
     keysMode.current = mode
     holdLandscape.current = false
     setKeysLandscape(mode === 'shell')
@@ -1672,6 +1733,8 @@ async function importDropped(files: FileList) {
 
   function closeStepSequencer() {
     store.closeSteps()
+    setKeysLandscape(false)
+    void releaseOrientation()
   }
 
   function onTrackAdded(id: string, choice: TrackChoice) {
@@ -1775,7 +1838,7 @@ async function importDropped(files: FileList) {
   return (
     <div
       ref={shellRef}
-      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''} ${store.keyboardMidi ? 'keys-open' : ''} ${keysLandscape ? 'keys-landscape' : ''}`}
+      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''} ${store.keyboardMidi ? 'keys-open' : ''} ${keysLandscape && keyboardShellTurn(screenAngle) === 'upside-down' ? 'orient-180' : ''} ${keysLandscape && keyboardShellTurn(screenAngle) !== 'upside-down' ? 'keys-landscape' : ''}`}
       style={{ ['--dock' as string]: `${dock}px`, ['--sounds' as string]: `${soundWidth}px` }}
       data-version={version}
       data-form={form}

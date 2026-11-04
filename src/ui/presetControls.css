@@ -13,24 +13,15 @@
 .preset-anchor {
   flex: 0 0 auto;
 }
-.preset-dock button {
-  height: 40px;
+.preset-dock .btn-quiet {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: max(40px, max-content);
   min-height: 40px;
-  min-width: 40px;
-  padding: 0 12px;
-  border-radius: 10px;
-  border: 1px solid var(--line, #3d5246);
-  background-color: #24352c;
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(0, 0, 0, 0.22));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 1px 2px rgba(0, 0, 0, 0.45);
-  color: var(--text, #f4fff8);
-  font-size: 13px;
-  font-weight: 640;
-  line-height: 1;
-  white-space: nowrap;
+  height: 40px;
 }
-.preset-dock button:active {
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.5);
+.preset-dock .btn-quiet:active {
+  box-shadow: var(--btn-bevel-pressed, inset 0 2px 4px rgba(0, 0, 0, 0.5));
 }
 .preset-name {
   flex: 1 1 auto;
@@ -71,25 +62,12 @@
   gap: 6px;
   padding: 8px;
 }
-.anchored-menu.preset-menu button {
+.anchored-menu.preset-menu .preset-list .btn-quiet {
   width: 100%;
   justify-content: flex-start;
   text-align: left;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  background-color: #24352c;
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(0, 0, 0, 0.18));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
-  color: var(--text, #f4fff8);
-  font-size: 13px;
-  font-weight: 640;
 }
-.anchored-menu.preset-menu button.on {
-  border-color: var(--accent, #73c48f);
-  background-color: rgba(115, 196, 143, 0.16);
-  color: var(--accent, #73c48f);
-}
-.anchored-menu.preset-menu button:disabled {
+.anchored-menu.preset-menu .btn-quiet:disabled {
   opacity: 0.45;
 }
 .preset-list {

@@ -1,6 +1,14 @@
+import { mkdirSync } from 'node:fs'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { chromium, type Browser, type Page } from 'playwright'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import { AUDIO_DEVICES, DRUM_DEVICES, INSTRUMENT_DEVICES, MIDI_DEVICES, PLUGIN_DEVICES } from '../model/sessionBoard'
+import type { SoundEntry } from '../sounds/types'
+import { ProjectStore } from '../state/store'
+import { addBrowserDevice } from '../ui/sessionBrowser'
+import { SoundBrowser } from '../ui/SoundBrowser'
 import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, nextSessionDock, paneAfterRestore, pianoDockWidth, sessionDockOpen } from '../ui/sessionDock'
 
 describe('session dock choice', () => {
@@ -125,6 +133,7 @@ async function drawAndTrim(page: Page) {
   await page.mouse.down()
   await page.mouse.move(gripX - drag, gripY, { steps: 12 })
   if ((await page.evaluate(() => window.innerWidth)) < 500) {
+    mkdirSync('/opt/cursor/artifacts', { recursive: true })
     await page.screenshot({ path: '/opt/cursor/artifacts/arrange-drag-shadow-412.png' })
   }
   await page.mouse.up()
@@ -149,6 +158,65 @@ async function drawAndTrim(page: Page) {
   expect(trimmedStart.x).toBeGreaterThan(mid.x + 12)
   expect(trimmedStart.width).toBeLessThan(mid.width - 12)
 }
+
+const loop: SoundEntry = {
+  id: 'loop-dust',
+  path: 'loops/dust.wav',
+  name: 'Dust',
+  type: 'loop',
+  tags: ['pad'],
+  bpm: 90,
+  key: 'C major',
+  durationSec: 2,
+  sampleRate: 48000,
+  license: 'CC0',
+  source: 'CueHarbor',
+}
+
+describe('session browser devices', () => {
+  it('keeps tempo, key, and favorites inside the Filter menu', () => {
+    const store = new ProjectStore()
+    const markup = renderToStaticMarkup(createElement(SoundBrowser, {
+      store,
+      phone: true,
+      engine: { unlock() {}, stopPreview() {}, previewPcm() {}, currentTimelineSample: () => 0 },
+      onClose() {},
+      initial: { entries: [loop], status: 'ok' },
+      instruments: [],
+    }))
+    expect(markup).toContain('>Filter<')
+    expect(markup).toContain('sound-filter-menu')
+    expect(markup).toContain('Any tempo')
+    expect(markup).toContain('Song tempo')
+    expect(markup).toContain('Any key')
+    expect(markup).toContain('C major')
+    expect(markup).toContain('Favorites')
+    expect(markup).toContain('>Save<')
+  })
+
+  it('adds an effect, an instrument, and a plugin from the browser onto a track', () => {
+    const store = new ProjectStore()
+    const vocal = store.project.tracks.find((track) => track.name === 'Vocal')!
+    const keys = store.project.tracks.find((track) => track.name === 'Keys')!
+    store.selectTrack(vocal.id)
+    addBrowserDevice(store, AUDIO_DEVICES.find((item) => item.id === 'eq')!)
+    expect(store.track(vocal.id)!.plugins.some((plugin) => plugin.pluginId === 'eq')).toBe(true)
+    addBrowserDevice(store, INSTRUMENT_DEVICES.find((item) => item.id === 'synth')!)
+    expect(store.track(keys.id)!.instrument).toBe('synth')
+    addBrowserDevice(store, MIDI_DEVICES.find((item) => item.id === 'arp')!)
+    expect(store.track(keys.id)!.midiFx?.some((fx) => fx.kind === 'arp')).toBe(true)
+    store.selectTrack(keys.id)
+    addBrowserDevice(store, PLUGIN_DEVICES.find((item) => item.id === 'steps')!)
+    expect(store.track(keys.id)!.plugins.some((plugin) => plugin.pluginId === 'steps')).toBe(true)
+    addBrowserDevice(store, AUDIO_DEVICES.find((item) => item.id === 'reverb')!)
+    expect(store.track(keys.id)!.plugins.some((plugin) => plugin.pluginId === 'reverb')).toBe(true)
+    addBrowserDevice(store, DRUM_DEVICES.find((item) => item.id === '808')!)
+    expect(store.track(keys.id)!.instrument).toBe('808')
+    addBrowserDevice(store, DRUM_DEVICES.find((item) => item.id === 'drum-machine')!)
+    expect(store.track(keys.id)!.instrument).toBe('drum-machine')
+    expect(store.track(keys.id)!.plugins.some((plugin) => plugin.pluginId === 'steps')).toBe(true)
+  })
+})
 
 describe('arrange on first load', () => {
   it('keeps Arrange and Collab working with no Session UI, and trims a clip from its edge', async () => {

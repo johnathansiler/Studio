@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { GestureReadout, useDragValue } from './kit/controls'
 import {
+  HARMONY_STEPS,
   KEYBOARD_END,
   KEYBOARD_START,
   TUNE_NAME,
@@ -9,15 +10,22 @@ import {
   activeNoteMask,
   bitOn,
   blobMidi,
-  dragNudge,
+  detectKey,
+  dragRegionCents,
   graphNotes,
+  harmonyName,
   heardPitchClass,
-  nudgeKey,
   isBlackKey,
   nextScaleMask,
   readMeter,
+  readRegions,
+  regionActive,
+  regionForBlob,
+  stepHarmony,
   tuneOnTrack,
+  vocalNotes,
 } from '../audio/plugins/autoTune'
+import { AnchoredMenu } from './AnchoredMenu'
 import { NOTE_NAMES, SCALES } from '../model/scale'
 import type { ProjectStore } from '../state/store'
 import { TipButton } from './Hint'
@@ -107,13 +115,21 @@ export function AutoTuneFace({
   const [more, setMore] = useState(false)
   const [naming, setNaming] = useState(false)
   const [draft, setDraft] = useState('')
+  const [hint, setHint] = useState('')
+  const [voiceMenu, setVoiceMenu] = useState<number | null>(null)
+  const [regionSlot, setRegionSlot] = useState<number | null>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
+  const voiceRef0 = useRef<HTMLButtonElement>(null)
+  const voiceRef1 = useRef<HTMLButtonElement>(null)
+  const voiceRef2 = useRef<HTMLButtonElement>(null)
+  const voiceRef3 = useRef<HTMLButtonElement>(null)
+  const voiceRefs = [voiceRef0, voiceRef1, voiceRef2, voiceRef3]
   const a4 = values.a4 || 440
   const shownTrace = enabled && (values.amount ?? 0) > 0.001 ? trace : null
   const blobs = graphNotes(shownTrace, a4)
   const notes = useRef(blobs)
   notes.current = blobs
-  const drag = useRef<{ startMidi: number; startCents: number; pc: number } | null>(null)
+  const drag = useRef<{ startMidi: number; startCents: number; slotMidi: number; slot: number; amount: number } | null>(null)
   const moment = useRef<Record<string, number> | null>(null)
   const meter = readMeter(shownTrace, a4)
   const mask = activeNoteMask(values, projectRoot, projectIntervals)
@@ -121,8 +137,14 @@ export function AutoTuneFace({
   const names = presets?.length ? [...presets] : TUNE_PRESET_META.map((item) => item.name)
   const presetAt = active && names.includes(active) ? names.indexOf(active) : -1
   const scaleLabel = scaleText(values, projectScale)
-  const keyLabel = (values.root ?? -1) < 0 ? `Project · ${projectKey}` : NOTE_NAMES[Math.round(values.root)] ?? projectKey
+  const heardKey = (values.autoKey ?? 0) >= 0.5 ? detectKey(shownTrace, a4) : null
+  const keyLabel = heardKey
+    ? `Heard · ${heardKey.name}`
+    : (values.root ?? -1) < 0 ? `Project · ${projectKey}` : NOTE_NAMES[Math.round(values.root)] ?? projectKey
   const rangeAt = nearestRange(values.minHz ?? 80, values.maxHz ?? 1000)
+  const presetHint = TUNE_PRESET_META.find((item) => item.name === active)?.hint
+  const sung = (values.vocal ?? 0) >= 0.5 ? vocalNotes(shownTrace, a4) : []
+  const regions = readRegions(values)
 
   useEffect(() => {
     const viewBox = canvas.current
@@ -221,7 +243,7 @@ export function AutoTuneFace({
 
       <div className="tune-status" data-tool={tool}>
         <i />
-        <span>{tool === 'remove' ? 'Remove is on. Tap a note to drop it.' : 'Bypass is on. Tap a note to let it through.'} {latch ? 'Latch.' : 'Momentary.'}</span>
+        <span>{tool === 'remove' ? 'Remove is on. Tap a note to drop it.' : 'Bypass is on. Tap a note to let it through.'} {latch ? 'Latch.' : 'Momentary.'} {hint}</span>
       </div>
 
       {view === 'pitch' ? (
@@ -240,9 +262,18 @@ export function AutoTuneFace({
           </div>
         </div>
       ) : (
-        <div className="tune-graph" onPointerDown={(event) => beginDrag(event, canvas.current, notes.current, values, a4, drag)} onPointerMove={(event) => moveDrag(event, canvas.current, drag, set)} onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }}>
-          <canvas ref={canvas} width={960} height={320} aria-label="Pitch notes. Drag a blob up or down to retune it." />
-          <p>{blobs.length ? 'Drag a note up or down. That pitch class follows.' : 'Sing or play to see the pitch'}</p>
+        <div className="tune-graph" onPointerDown={(event) => beginDrag(event, canvas.current, notes.current, values, a4, drag, setRegionSlot)} onPointerMove={(event) => moveDrag(event, canvas.current, drag, patch)} onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }}>
+          <canvas ref={canvas} width={960} height={320} aria-label="Pitch notes. Drag one note up or down to retune it." />
+          <p>{blobs.length ? 'Drag one note up or down. Only that note moves.' : 'Sing or play to see the pitch'}</p>
+          <RegionEditor
+            regions={regions}
+            slot={regionSlot}
+            onSlot={setRegionSlot}
+            onPatch={patch}
+          />
+          {(values.vocal ?? 0) >= 0.5 ? (
+            <p className="tune-vocal" data-vocal="on">{sung.length ? `Vocal MIDI ${sung.map((note) => note.name).join(' ')}` : 'Vocal MIDI is waiting for a note'}</p>
+          ) : null}
         </div>
       )}
 
@@ -271,7 +302,18 @@ export function AutoTuneFace({
           if (pc != null) set('root', pc)
         }}>Listen</button>
         <button type="button" className={`side ${(values.hq ?? 0) >= 0.5 ? 'on' : ''}`} aria-pressed={(values.hq ?? 0) >= 0.5} title={(values.hq ?? 0) >= 0.5 ? 'HQ correction, with more delay.' : 'Low latency while you play.'} aria-label={(values.hq ?? 0) >= 0.5 ? 'HQ. Cleaner correction, more delay.' : 'Low latency. Short delay while you play.'} onClick={() => set('hq', (values.hq ?? 0) >= 0.5 ? 0 : 1)}>{(values.hq ?? 0) >= 0.5 ? 'HQ' : 'Low latency'}</button>
-        <button type="button" className={`side ${(values.color ?? 0) >= 0.5 ? 'on' : ''}`} aria-pressed={(values.color ?? 0) >= 0.5} title={(values.color ?? 0) >= 0.5 ? 'Classic is a harder snap.' : 'Modern keeps the flex window.'} aria-label={(values.color ?? 0) >= 0.5 ? 'Classic. Harder snap.' : 'Modern. Softer snap.'} onClick={() => set('color', (values.color ?? 0) >= 0.5 ? 0 : 1)}>{(values.color ?? 0) >= 0.5 ? 'Classic' : 'Modern'}</button>
+        <button type="button" className={`side ${(values.color ?? 0) >= 0.5 ? 'on' : ''}`} aria-pressed={(values.color ?? 0) >= 0.5} title={(values.color ?? 0) >= 0.5 ? 'Classic is a harder snap. Tracking and note transition shape it.' : 'Modern keeps the flex window.'} aria-label={(values.color ?? 0) >= 0.5 ? 'Classic. Harder snap.' : 'Modern. Softer snap.'} onClick={() => set('color', (values.color ?? 0) >= 0.5 ? 0 : 1)}>{(values.color ?? 0) >= 0.5 ? 'Classic' : 'Modern'}</button>
+        <button type="button" title="Set the key from the notes you just sang." aria-label="Auto Key. Set the key from the notes you just sang." onClick={() => {
+          const found = detectKey(shownTrace, a4)
+          if (!found) {
+            setHint('Sing a phrase, then tap Auto Key.')
+            return
+          }
+          setHint(`Key set to ${found.name}.`)
+          patch({ root: found.root, scaleIndex: found.scaleIndex, mode: 1, custom: 0, mask: 0 })
+        }}>Auto Key</button>
+        <button type="button" className={(values.autoKey ?? 0) >= 0.5 ? 'on' : ''} aria-pressed={(values.autoKey ?? 0) >= 0.5} title="Keep following the key you sing." aria-label="Follow key. Keep following the key you sing." onClick={() => set('autoKey', (values.autoKey ?? 0) >= 0.5 ? 0 : 1)}>Follow key</button>
+        <button type="button" className={(values.midi ?? 0) >= 0.5 ? 'on' : ''} aria-pressed={(values.midi ?? 0) >= 0.5} title="Correct to the MIDI note you play. Open audio passes through." aria-label="MIDI control. Correct to the note you play." onClick={() => set('midi', (values.midi ?? 0) >= 0.5 ? 0 : 1)}>MIDI control</button>
       </div>
 
       <div className="tune-notes" role="group" aria-label="Scale notes">
@@ -306,6 +348,45 @@ export function AutoTuneFace({
             <Key key={midi} midi={midi} mask={mask} passMask={Math.round(values.bypassMask || 0)} onDown={editNote} onUp={(pc) => { if (!latch) editNote(pc, false) }} />
           ))}
         </div>
+      </div>
+
+      <div className="tune-drawer side">
+        <p>{presetHint ? `${presetHint} ` : ''}Classic mode uses tracking and note transition. Throat shifts the tone, vibrato adds a wobble, and four harmony voices stack above the lead.</p>
+        <div className="tune-knobs">
+          <Knob label="Tracking" hint="How firmly the pitch detector holds on." value={values.tracking ?? 0.5} fallback={0.5} min={0} max={1} text={pct(values.tracking ?? 0.5)} color="#8fb7d8" onChange={(value) => set('tracking', value)} />
+          <Knob label="Note transition" hint="How quickly a new note is allowed to move." value={values.transition ?? 1} fallback={1} min={0} max={1} text={pct(values.transition ?? 1)} color="#d7a0c8" onChange={(value) => set('transition', value)} />
+          <Knob label="Throat" hint="Shorter throat is brighter. Longer throat is darker." value={values.throat ?? 0} fallback={0} min={-1} max={1} text={throatText(values.throat ?? 0)} color="#c4b48a" onChange={(value) => set('throat', value)} />
+          <Knob label="Vibrato rate" hint="Speed of the vibrato that is added." value={values.vibeRate ?? 5} fallback={5} min={0.2} max={8} text={`${(values.vibeRate ?? 5).toFixed(1)} Hz`} color="#9eb6e0" onChange={(value) => set('vibeRate', value)} />
+          <Knob label="Vibrato depth" hint="How wide the added vibrato is." value={values.vibeDepth ?? 0} fallback={0} min={0} max={100} text={`${Math.round(values.vibeDepth ?? 0)} ct`} color="#9eb6e0" onChange={(value) => set('vibeDepth', value)} />
+          <Knob label="Vibrato onset" hint="How long a note waits before vibrato starts." value={values.vibeOnset ?? 0} fallback={0} min={0} max={1} text={pct(values.vibeOnset ?? 0)} color="#9eb6e0" onChange={(value) => set('vibeOnset', value)} />
+          <Knob label="Harmony" hint="How loud the four harmony voices are." value={values.harmony ?? 0} fallback={0} min={0} max={1} text={pct(values.harmony ?? 0)} color="#73c48f" onChange={(value) => set('harmony', value)} />
+        </div>
+        <div className="tune-harmony" role="group" aria-label="Harmony voices">
+          {[1, 2, 3, 4].map((voice) => {
+            const id = `h${voice}`
+            const current = values[id] ?? 0
+            return (
+              <div className="tune-step" key={id}>
+                <span>Voice {voice}</span>
+                <small>Harmony interval.</small>
+                <div>
+                  <button type="button" aria-label={`Previous Voice ${voice} interval.`} title="Previous harmony interval." onClick={() => set(id, stepHarmony(current, -1))}>‹</button>
+                  <button type="button" ref={voiceRefs[voice - 1]} aria-label={`Voice ${voice} interval. ${harmonyName(current)}.`} title="Choose a harmony interval." onClick={() => setVoiceMenu((open) => open === voice ? null : voice)}>{harmonyName(current)}</button>
+                  <button type="button" aria-label={`Next Voice ${voice} interval.`} title="Next harmony interval." onClick={() => set(id, stepHarmony(current, 1))}>›</button>
+                </div>
+                {voiceMenu === voice ? (
+                  <AnchoredMenu className="tune-intervals" open label={`Voice ${voice} interval`} triggerRef={voiceRefs[voice - 1]} onClose={() => setVoiceMenu(null)}>
+                    {HARMONY_STEPS.map((semis) => (
+                      <button type="button" key={semis} role="menuitem" onClick={() => { set(id, semis); setVoiceMenu(null) }}>{harmonyName(semis)}</button>
+                    ))}
+                  </AnchoredMenu>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+        <button type="button" className={(values.vocal ?? 0) >= 0.5 ? 'on' : ''} aria-pressed={(values.vocal ?? 0) >= 0.5} title="Turn the sung melody into MIDI note names." aria-label="Vocal MIDI. Show the notes you sang." onClick={() => set('vocal', (values.vocal ?? 0) >= 0.5 ? 0 : 1)}>Vocal MIDI</button>
+        {(values.vocal ?? 0) >= 0.5 ? <p className="tune-vocal">{sung.length ? sung.map((note) => note.name).join(' ') : 'Sing to build a MIDI melody.'}</p> : null}
       </div>
     </section>
   )
@@ -587,7 +668,8 @@ function beginDrag(
   blobs: ReturnType<typeof graphNotes>,
   values: Record<string, number>,
   a4: number,
-  drag: { current: { startMidi: number; startCents: number; pc: number } | null },
+  drag: { current: { startMidi: number; startCents: number; slotMidi: number; slot: number; amount: number } | null },
+  select: (slot: number) => void,
 ) {
   if (!view) return
   const rect = view.getBoundingClientRect()
@@ -600,20 +682,86 @@ function beginDrag(
   })
   if (!hit) return
   const visual = blobMidi(hit, a4)
-  const id = nudgeKey(visual, values)
-  drag.current = { startMidi: visual, startCents: values[id] ?? 0, pc: Number(id.slice(1)) }
+  const regions = readRegions(values)
+  const existing = regionForBlob(values, visual)
+  const empty = regions.findIndex((region) => !regionActive(region))
+  const slot = existing >= 0 ? existing : empty >= 0 ? empty : 0
+  const source = existing >= 0 ? regions[existing].lo : Math.max(1, Math.min(127, Math.round(visual)))
+  drag.current = {
+    startMidi: visual,
+    startCents: existing >= 0 ? regions[existing].ct : 0,
+    slotMidi: source,
+    slot,
+    amount: existing >= 0 ? regions[existing].amt : 1,
+  }
+  select(slot)
   event.currentTarget.setPointerCapture(event.pointerId)
 }
 
 function moveDrag(
   event: ReactPointerEvent<HTMLDivElement>,
   view: HTMLCanvasElement | null,
-  drag: { current: { startMidi: number; startCents: number; pc: number } | null },
-  set: (id: string, value: number) => void,
+  drag: { current: { startMidi: number; startCents: number; slotMidi: number; slot: number; amount: number } | null },
+  patch: (next: Record<string, number>) => void,
 ) {
   if (!view || !drag.current) return
   const rect = view.getBoundingClientRect()
   const y = ((event.clientY - rect.top) / rect.height) * view.height
-  const next = dragNudge(drag.current.startMidi, yToMidi(y, view.height), drag.current.startCents, drag.current.pc)
-  set(next.id, next.cents)
+  const cents = dragRegionCents(drag.current.startMidi, yToMidi(y, view.height), drag.current.startCents)
+  const slot = drag.current.slot
+  patch({
+    [`r${slot}lo`]: drag.current.slotMidi,
+    [`r${slot}hi`]: drag.current.slotMidi,
+    [`r${slot}ct`]: cents,
+    [`r${slot}amt`]: drag.current.amount,
+  })
+}
+
+function RegionEditor({
+  regions,
+  slot,
+  onSlot,
+  onPatch,
+}: {
+  regions: ReturnType<typeof readRegions>
+  slot: number | null
+  onSlot: (slot: number) => void
+  onPatch: (next: Record<string, number>) => void
+}) {
+  const selected = slot == null ? null : regions[slot]
+  return (
+    <div className="tune-regions" role="group" aria-label="Correction regions">
+      {regions.map((region, index) => (
+        <button
+          key={index}
+          type="button"
+          className={slot === index ? 'on' : ''}
+          aria-pressed={slot === index}
+          data-region={index + 1}
+          title={regionActive(region) ? 'Edit this correction region.' : 'Empty correction region.'}
+          aria-label={regionActive(region) ? `Region ${index + 1}. ${midiName(region.lo)} to ${midiName(region.hi)}, ${Math.round(region.ct)} cents.` : `Region ${index + 1}. Empty.`}
+          onClick={() => onSlot(index)}
+        >
+          {regionActive(region) ? `${midiName(region.lo)} ${Math.round(region.ct)} ct` : `Region ${index + 1}`}
+        </button>
+      ))}
+      {selected && slot != null ? (
+        <div className="tune-region-edit">
+          <Knob label="Correction" hint="How hard this region is tuned." value={selected.amt} fallback={1} min={0} max={1} text={pct(selected.amt)} color="#73c48f" onChange={(value) => onPatch({ [`r${slot}amt`]: value })} />
+          <button type="button" title="Clear this correction region." aria-label="Clear region. Remove this note edit." onClick={() => onPatch({ [`r${slot}lo`]: 0, [`r${slot}hi`]: 0, [`r${slot}ct`]: 0, [`r${slot}amt`]: 1 })}>Clear region</button>
+        </div>
+      ) : <p>Select a note, then drag it. Each note keeps its own correction.</p>}
+    </div>
+  )
+}
+
+function midiName(midi: number) {
+  const note = Math.round(midi)
+  const name = NOTE_NAMES[((note % 12) + 12) % 12] ?? 'C'
+  return `${name}${Math.floor(note / 12) - 1}`
+}
+
+function throatText(value: number) {
+  if (Math.abs(value) < 0.04) return 'Center'
+  return value > 0 ? `Short ${pct(value)}` : `Long ${pct(Math.abs(value))}`
 }

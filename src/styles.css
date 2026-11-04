@@ -320,8 +320,24 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   padding-left: 0;
   padding-right: 0;
 }
+/* 180° is upside down. It must not share the upright portrait layout or the 90° sideways turn. */
+.shell.phone.orient-180 {
+  position: fixed;
+  z-index: 40;
+  inset: 0;
+  width: 100dvw;
+  height: 100dvh;
+  max-width: none;
+  transform: rotate(180deg);
+  transform-origin: center center;
+  overflow: hidden;
+  padding-left: 0;
+  padding-right: 0;
+}
 .shell.phone.keys-landscape .keyboard-dock,
-.shell.phone.keys-landscape .keyboard-face {
+.shell.phone.keys-landscape .keyboard-face,
+.shell.phone.orient-180 .keyboard-dock,
+.shell.phone.orient-180 .keyboard-face {
   position: static;
   width: auto;
   height: auto;
@@ -584,11 +600,21 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .add-choice strong { display: block; font-size: 16px; }
 .add-choice small { display: block; color: var(--muted); font-size: 13px; }
 .step-sequencer { display: flex; flex-direction: column; height: 100%; min-height: 0; background: #101614; }
-.step-sequencer-bar { display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 8px; border-bottom: 1px solid var(--line); }
-.step-sequencer-bar h2 { margin: 0; flex: 1; font-size: 16px; }
+.step-sequencer-bar {
+  display: flex; align-items: center; gap: 8px; position: relative;
+  height: 40px; min-height: 40px; max-height: 40px; padding: 0 84px 0 8px;
+  border-bottom: 1px solid var(--line); flex: 0 0 auto;
+}
+.step-sequencer-bar h2 { margin: 0; flex: 0 1 auto; min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .step-close {
-  min-width: 48px; min-height: 48px; padding: 0 16px; border: 0; border-radius: 10px;
-  background: var(--accent); color: var(--accent-ink); font-weight: 740;
+  position: absolute; top: 0; right: 0;
+  width: auto; min-width: 40px; height: 40px; min-height: 40px; max-height: 40px;
+  padding: 0 12px; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background-color: #3a3a3a;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.04) 42%, rgba(0, 0, 0, 0.35));
+  color: #f4f4f4; font-size: 13px; font-weight: 680;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 -1px 0 rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 .step-sequencer .beats { flex: 1; min-height: 0; }
 .shell.phone[data-plugin="steps"] .dock-slot { flex: 1 1 68%; max-height: none; }
@@ -722,6 +748,26 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .strip.master { background: #1b2820; border-color: rgba(115, 196, 143, 0.4); }
 .strip h3 { margin: 0; font-size: 13px; }
 .inserts { display: flex; flex-direction: column; gap: 4px; }
+.sheet-fields .inserts[data-chain='midi-sound'] { flex: 1 1 100%; min-width: min(100%, 280px); }
+.chain-part {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 6px 2px 0;
+}
+.chain-fallback {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background-color: var(--panel-2);
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  color: var(--text);
+}
 .inserts button, .insert-add {
   text-align: left; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 7px; font-size: 12px; color: var(--muted);
   min-height: 40px;

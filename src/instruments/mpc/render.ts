@@ -1,7 +1,9 @@
 /** Offline pad render. Voices come from the shared sample pool. */
 
 import { createSamplePool } from '../../audio/voices/engine'
-import { padRegion, type MpcOutput, type PadRegion, type PadVoice } from '../../model/padMachine'
+import { applyPlan, planPads } from '../../audio/voices/program'
+import type { MpcOutput, PadRegion, PadVoice } from '../../model/padMachine'
+import type { ChopSetup, VintageState } from '../../model/padChop'
 import { samplesPerQuarter } from '../../model/time'
 import { hearsAudio } from './model'
 
@@ -47,6 +49,8 @@ export function renderMpcAudio(opts: {
   output: MpcOutput
   /** When set, only pads routed to this bus are printed. */
   busId?: string
+  vintage?: VintageState
+  chop?: ChopSetup
 }): { left: Float32Array; right: Float32Array } {
   if (!hearsAudio(opts.output)) return { left: new Float32Array(0), right: new Float32Array(0) }
   const rate = Math.max(8000, opts.sampleRate)
@@ -61,48 +65,36 @@ export function renderMpcAudio(opts: {
   const left = new Float32Array(frames)
   const right = new Float32Array(frames)
   const pool = createSamplePool(rate)
-  const ids = new Map<string, number>()
-  let nextId = 1
-  for (const [key, buffer] of opts.buffers) {
-    if (nextId > 32) break
-    ids.set(key, nextId)
-    pool.load(nextId, buffer.samples, buffer.sampleRate)
-    nextId += 1
-  }
-  const padSlot = new Map<number, number>()
-  let slot = 0
   const byPitch = new Map(opts.pads.map((pad) => [pad.pitch, pad]))
+  const pitches: number[] = []
   for (const note of opts.notes) {
     const pad = byPitch.get(note.pitch)
-    if (pad?.muted) continue
-    if (opts.busId && (pad?.busId || '') !== opts.busId) continue
-    if (padSlot.has(note.pitch) || slot >= 16) continue
-    const layer = pad?.layers.find((item) => item.bufferId) ?? pad?.layers[0]
-    const id = layer?.bufferId ? ids.get(layer.bufferId) ?? 0 : 0
-    const asset = layer?.bufferId ? opts.buffers.get(layer.bufferId) : undefined
-    if (!id || !asset) continue
-    const region = padRegion(pad)
-    const length = asset.samples.length
-    const start = Math.floor(Math.max(0, Math.min(1, region.start)) * length)
-    const end = Math.min(length, Math.max(start + 2, Math.ceil(Math.max(region.start, region.end) * length)))
-    const voice = pool.pad(slot)
-    voice.setRegion(id, start, end)
-    voice.setPitch((pad?.tune ?? 0) + (layer?.tune ?? 0), 0, 'vinyl')
-    voice.setReverse(region.reverse)
-    voice.setHold(false)
-    voice.setChokeGroup(pad?.choke ?? 0)
-    voice.setLevel(pad?.level ?? 1, pad?.pan ?? 0)
-    const filter = pad?.filter ?? 1
-    if (filter < 0.98) voice.setFilter(0, 80 + Math.max(0, Math.min(1, filter)) * 16000)
-    const swing = (pad as { swing?: number } | undefined)?.swing
-    if (swing) voice.setSwing(swing)
-    padSlot.set(note.pitch, slot)
-    slot += 1
+    if (!pad || pad.muted) continue
+    if (opts.busId && (pad.busId || '') !== opts.busId) continue
+    if (!pitches.includes(note.pitch)) pitches.push(note.pitch)
   }
+  const plan = planPads({
+    pads: opts.pads,
+    buffers: [...opts.buffers].map(([id, buffer]) => ({ id, samples: buffer.samples, sampleRate: buffer.sampleRate })),
+    vintage: opts.vintage,
+    chop: opts.chop,
+    sampleRate: rate,
+    tempo,
+    pitches,
+  })
+  applyPlan(pool, plan)
+  const padSlot = new Map(plan.slots.map((slot) => [slot.pitch, slot.slot]))
+  const held = new Set(plan.slots.filter((slot) => slot.hold).map((slot) => slot.slot))
   const events = opts.notes.flatMap((note) => {
     const at = padSlot.get(note.pitch)
     if (at == null) return []
-    return [{ sample: Math.round(Math.max(0, note.startBeat) * quarter), pad: at, velocity: note.velocity }]
+    const sample = Math.round(Math.max(0, note.startBeat) * quarter)
+    const hit = [{ sample, pad: at, velocity: note.velocity }]
+    if (held.has(at)) {
+      const dur = Math.max(1, Math.round(Math.max(0.05, note.durationBeats) * quarter))
+      hit.push({ sample: sample + dur, pad: at, velocity: 0 })
+    }
+    return hit
   })
   const block = 128
   for (let offset = 0; offset < frames; offset += block) {

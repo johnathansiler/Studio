@@ -1,10 +1,12 @@
 import type { Project } from '../../model/types'
-import { normalizeScaler, routeScaler, scalerChords } from './model'
+import { normalizeScaler, scalerChords } from './model'
+import { planLive } from './route'
 import type { KeysLock, ScalerOutput } from './types'
 import { applyKeysLock, type LockedNote } from './perform'
 
 export interface LiveSink {
-  playThrough(trackId: string, pitch: number, velocity: number, fine?: number): void
+  /** `shaped` is the sound under Scaler. The engine must not run Scaler again. */
+  playThrough(trackId: string, pitch: number, velocity: number, fine?: number, shaped?: boolean): void
   pulseMidi?(notes: { pitch: number; velocity: number; duration: number }[]): void
 }
 
@@ -30,18 +32,15 @@ export function scalerLiveNotes(project: Project, trackId: string, midi: number)
 }
 
 export function playScalerLive(project: Project, sink: LiveSink, trackId: string, midi: number, velocity: number): LockedNote[] | null {
-  const live = scalerLiveNotes(project, trackId, midi)
-  if (!live) return null
-  if (!live.notes.length) return []
-  const track = project.tracks.find((item) => item.id === trackId)
-  const dest = track ? routeScaler(project, track).liveStripId : trackId
-  if (live.output !== 'midi') {
-    for (const note of live.notes) sink.playThrough(dest, note.midi, velocity, note.cents)
+  const plan = planLive(project, trackId, midi, velocity)
+  if (!plan) return null
+  if (plan.output !== 'midi') {
+    for (const note of plan.play) sink.playThrough(note.trackId, note.pitch, note.velocity, note.fine, true)
   }
-  if (live.output !== 'audio' && sink.pulseMidi) {
-    sink.pulseMidi(live.notes.map((note) => ({ pitch: note.midi, velocity, duration: 0.6 })))
+  if (plan.output !== 'audio' && plan.play.length && sink.pulseMidi) {
+    sink.pulseMidi(plan.play.map((note) => ({ pitch: note.pitch, velocity: note.velocity, duration: 0.6 })))
   }
-  return live.notes
+  return plan.record.map((pitch) => ({ midi: pitch, cents: 0 }))
 }
 
 export function hiddenPitchClass(mode: KeysLock, midi: number, scalePcs: Set<number>, chordPcs: Set<number>) {

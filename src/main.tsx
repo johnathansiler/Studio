@@ -6,6 +6,8 @@ import './styles.css'
 import './ui/remoteFixes.css'
 import './ui/arrangeSpace.css'
 import './ui/premium.css'
+import './ui/pluginStage.css'
+import './ui/buttonTiers.css'
 
 scheduleWasmPreload()
 

@@ -1,6 +1,10 @@
 import type { ArpDirection, RhythmPattern, ScaleId } from '../../model/scale'
 import type { VoicingId } from '../../theory/types'
 
+export type VariationAmount = 'subtle' | 'medium' | 'major'
+export type EvolveMode = 'off' | 'bar' | 'loop'
+export type RecordSource = 'input' | 'output'
+
 export type KeysLock = 'off' | 'scale-snap' | 'scale-hide' | 'chord' | 'chord-notes' | 'one-finger'
 export type VoiceGroup = 'all' | 'bass' | 'upper' | 'dynamic'
 export type ScalerOutput = 'audio' | 'midi' | 'both'
@@ -33,6 +37,16 @@ export function defaultScaler(): ScalerState {
     output: 'both',
     input: 'midi',
     chordIndex: 0,
+    variation: 'subtle',
+    variationSeed: 1,
+    variationLock: false,
+    variationTakes: [],
+    variationTake: 0,
+    evolve: 'off',
+    favorites: [],
+    thru: false,
+    recordSource: 'output',
+    midiTo: [],
   }
 }
 
@@ -85,6 +99,24 @@ export interface ScalerState {
   input: ScalerInput
   /** Pad the keys-lock chord modes follow. */
   chordIndex: number
+  /** How far a new take may wander from the style. */
+  variation: VariationAmount
+  /** Seed of the take that is playing. Locked takes keep this in the project. */
+  variationSeed: number
+  variationLock: boolean
+  /** Recent seeds, newest last. About eight. */
+  variationTakes: number[]
+  variationTake: number
+  /** Off repeats the take. Bar and loop derive the next pass from the seed. */
+  evolve: EvolveMode
+  /** Performance, pack, and scale ids marked in the browser. */
+  favorites: string[]
+  /** Also send the note that came in, beside Scaler's output. */
+  thru: boolean
+  /** Record the keys that were played, or the notes Scaler generated. */
+  recordSource: RecordSource
+  /** Other tracks that also receive Scaler's notes. */
+  midiTo: string[]
 }
 
 export interface ScalerNote {
