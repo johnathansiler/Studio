@@ -50,12 +50,44 @@ export function writeIdentity(identity: DeviceIdentity) {
   localStorage.setItem('cueharbor-name', identity.name)
 }
 
+/** Drop `session`, `invite`, and `role` so a reload is a normal open. */
+export function withoutInviteParams(search: string): string {
+  const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search)
+  params.delete('session')
+  params.delete('invite')
+  params.delete('role')
+  const next = params.toString()
+  return next ? `?${next}` : ''
+}
+
+export function replaceInviteUrl() {
+  try {
+    const next = withoutInviteParams(location.search)
+    if ((location.search || '') === next) return
+    history.replaceState(null, '', `${location.pathname}${next}${location.hash}`)
+  } catch {
+    /* a non-browser test has no history */
+  }
+}
+
+/** Forget a room saved by an older build. Name and devices stay. */
+export function forgetStoredCollab() {
+  try {
+    const current = readIdentity()
+    if (current?.code) writeIdentity({ ...current, code: '' })
+    const drop: string[] = []
+    for (let i = 0; i < sessionStorage.length; i += 1) {
+      const key = sessionStorage.key(i)
+      if (key && key.startsWith('cueharbor-resume:')) drop.push(key)
+    }
+    for (const key of drop) sessionStorage.removeItem(key)
+  } catch {
+    /* private mode has nothing to forget */
+  }
+}
+
 export function clearActiveSession() {
   const current = readIdentity()
   if (current) writeIdentity({ ...current, code: '', role: 'host' })
-  const url = new URL(location.href)
-  if (url.searchParams.has('session')) {
-    url.searchParams.delete('session')
-    history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
-  }
+  replaceInviteUrl()
 }

@@ -152,22 +152,30 @@ export function ignoreIncomingOffer(input: {
 }
 
 /**
- * A shared link joins by itself.
- * The same browser opening its own link reconnects.
- * A saved room with no link in the URL comes back without a setup step.
+ * Only an invite link joins by itself.
+ * A room code saved in localStorage or sessionStorage is ignored.
  */
 export function joinAction(input: {
   urlCode: string
-  storedCode: string
-  hasParticipant: boolean
-}): 'reconnect-url' | 'auto-join' | 'resume-stored' | 'none' {
+  storedCode?: string
+  hasParticipant?: boolean
+}): 'auto-join' | 'none' {
   const url = (input.urlCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
-  const stored = (input.storedCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
-  const choice = inviteWins(url, stored)
-  if (url && input.hasParticipant && stored === url) return 'reconnect-url'
   if (url) return 'auto-join'
-  if (choice.code && input.hasParticipant) return 'resume-stored'
   return 'none'
+}
+
+/** A typed room code, or a pasted `?session=` invite link. */
+export function parseCollabTarget(raw: string): { code: string; invite: string } {
+  const text = raw.trim().split('#')[0]
+  const queryAt = text.indexOf('?')
+  if (queryAt >= 0) {
+    const params = new URLSearchParams(text.slice(queryAt + 1))
+    const code = (params.get('session') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12)
+    const invite = (params.get('invite') || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
+    if (code) return { code, invite }
+  }
+  return { code: text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12), invite: '' }
 }
 
 /** An invite link wins. The stored code is used only when the URL has none. */

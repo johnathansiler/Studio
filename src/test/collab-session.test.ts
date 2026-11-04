@@ -16,7 +16,10 @@ import {
   videoMLinesReady,
   videoSendChanged,
 } from '../model/callVideo'
-import { joinAction } from '../model/negotiate'
+import { joinAction, parseCollabTarget } from '../model/negotiate'
+import { collabChoosing } from '../ui/collabTab'
+import { copyOf, CALL_COPY } from '../ui/chrome'
+import { withoutInviteParams } from '../storage/identity'
 import { shareSessionLink } from '../ui/share'
 import { SETUP_PLAIN } from '../ui/collabCopy'
 import { ViewSwitcher } from '../ui/ViewSwitcher'
@@ -62,13 +65,41 @@ describe('automatic call sound and connection grade', () => {
 })
 
 describe('auto-join', () => {
-  it('joins a shared link, reconnects the same browser, and resumes a stored room', () => {
+  it('joins a shared link and ignores a stored room', () => {
     expect(joinAction({ urlCode: 'AB12CD', storedCode: '', hasParticipant: false })).toBe('auto-join')
-    expect(joinAction({ urlCode: 'AB12CD', storedCode: 'AB12CD', hasParticipant: true })).toBe('reconnect-url')
-    expect(joinAction({ urlCode: '', storedCode: 'ZZ99ZZ', hasParticipant: true })).toBe('resume-stored')
+    expect(joinAction({ urlCode: 'AB12CD', storedCode: 'AB12CD', hasParticipant: true })).toBe('auto-join')
+    expect(joinAction({ urlCode: 'AB12CD', storedCode: 'ZZ99ZZ', hasParticipant: true })).toBe('auto-join')
+    expect(joinAction({ urlCode: '', storedCode: 'ZZ99ZZ', hasParticipant: true })).toBe('none')
     expect(joinAction({ urlCode: '', storedCode: '', hasParticipant: false })).toBe('none')
+    expect(joinAction({ urlCode: '', storedCode: 'ZZ99ZZ', hasParticipant: false })).toBe('none')
     expect(joinPlayback(true)).toBe('talk')
     expect(joinPlayback(false)).toBe('listen')
+  })
+
+  it('reads a pasted code or invite link and drops it from the address after joining', () => {
+    expect(parseCollabTarget('ab12cd')).toEqual({ code: 'AB12CD', invite: '' })
+    expect(parseCollabTarget('https://cueharbor.app/?session=AB12CD&invite=tokcomment&role=comment')).toEqual({
+      code: 'AB12CD',
+      invite: 'tokcomment',
+    })
+    expect(parseCollabTarget('?session=EEVEDR')).toEqual({ code: 'EEVEDR', invite: '' })
+    expect(parseCollabTarget('')).toEqual({ code: '', invite: '' })
+    expect(withoutInviteParams('?session=AB12CD&invite=tokcomment&role=comment')).toBe('')
+    expect(withoutInviteParams('?session=AB12CD&knock=1')).toBe('?knock=1')
+    expect(withoutInviteParams('')).toBe('')
+  })
+
+  it('starts on Host and Join until a session is open', () => {
+    expect(copyOf(CALL_COPY, 'create').label).toBe('Host a Collab')
+    expect(copyOf(CALL_COPY, 'join').label).toBe('Join a Collab')
+    expect(collabChoosing('idle')).toBe(true)
+    expect(collabChoosing('error')).toBe(true)
+    expect(collabChoosing('rejected')).toBe(true)
+    expect(collabChoosing('removed')).toBe(true)
+    expect(collabChoosing('connecting')).toBe(false)
+    expect(collabChoosing('waiting')).toBe(false)
+    expect(collabChoosing('live')).toBe(false)
+    expect(collabChoosing('reconnecting')).toBe(false)
   })
 })
 
