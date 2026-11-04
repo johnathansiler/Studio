@@ -2,22 +2,39 @@
 //! around the audio callback. `prepare` is allowed to allocate.
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::cell::Cell;
 
-static TEST_LOCK: Mutex<()> = Mutex::new(());
+use cueharbor_dsp::{AudioBlock, CuePlugin, EqProcessor, NativePlugin, VoiceEngine, Vintage, PLUGIN_COMP, PLUGIN_LIMIT, PLUGIN_REVERB, EMPTY_MIDI, SP1200_BITS, SP1200_RATE};
 
-use cueharbor_dsp::{AudioBlock, CuePlugin, EqProcessor, NativePlugin, PLUGIN_COMP, PLUGIN_LIMIT, PLUGIN_REVERB, EMPTY_MIDI};
+thread_local! {
+    static ARMED: Cell<bool> = const { Cell::new(false) };
+    static ALLOCS: Cell<usize> = const { Cell::new(0) };
+}
 
-static ARMED: AtomicUsize = AtomicUsize::new(0);
-static ALLOCS: AtomicUsize = AtomicUsize::new(0);
+fn arm() {
+    ALLOCS.with(|count| count.set(0));
+    ARMED.with(|flag| flag.set(true));
+}
+
+fn disarm() -> usize {
+    ARMED.with(|flag| flag.set(false));
+    ALLOCS.with(|count| count.get())
+}
+
+fn allocs() -> usize {
+    ALLOCS.with(|count| count.get())
+}
 
 struct Guard;
 
 unsafe impl GlobalAlloc for Guard {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if ARMED.load(Ordering::SeqCst) == 1 && layout.size() != 0 {
-            ALLOCS.fetch_add(1, Ordering::SeqCst);
+        if layout.size() != 0 {
+            let _ = ARMED.try_with(|flag| {
+                if flag.get() {
+                    let _ = ALLOCS.try_with(|count| count.set(count.get() + 1));
+                }
+            });
         }
         System.alloc(layout)
     }
@@ -27,8 +44,12 @@ unsafe impl GlobalAlloc for Guard {
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        if ARMED.load(Ordering::SeqCst) == 1 && new_size != 0 {
-            ALLOCS.fetch_add(1, Ordering::SeqCst);
+        if new_size != 0 {
+            let _ = ARMED.try_with(|flag| {
+                if flag.get() {
+                    let _ = ALLOCS.try_with(|count| count.set(count.get() + 1));
+                }
+            });
         }
         System.realloc(ptr, layout, new_size)
     }
@@ -39,7 +60,6 @@ static GLOBAL: Guard = Guard;
 
 #[test]
 fn process_block_does_not_allocate() {
-    let _guard = TEST_LOCK.lock().unwrap();
     let mut eq = EqProcessor::new();
     eq.prepare(48_000.0, 512);
     eq.set_parameter(7, 6.0);
@@ -52,8 +72,7 @@ fn process_block_does_not_allocate() {
         right[index] = sample * 0.5;
     }
 
-    ARMED.store(1, Ordering::SeqCst);
-    ALLOCS.store(0, Ordering::SeqCst);
+    arm();
     for block in 0..8 {
         if block == 3 {
             eq.set_parameter(4, -4.0);
@@ -74,14 +93,12 @@ fn process_block_does_not_allocate() {
         num_samples: 128,
     };
     eq.process_block(&mut audio, &EMPTY_MIDI);
-    let allocations = ALLOCS.load(Ordering::SeqCst);
-    ARMED.store(0, Ordering::SeqCst);
+    let allocations = disarm();
     assert_eq!(allocations, 0);
 }
 
 #[test]
 fn insert_process_does_not_allocate() {
-    let _guard = TEST_LOCK.lock().unwrap();
     let mut plugins = [
         CuePlugin::new(PLUGIN_COMP, 48_000.0),
         CuePlugin::new(PLUGIN_REVERB, 48_000.0),
@@ -94,8 +111,7 @@ fn insert_process_does_not_allocate() {
     let mut left = vec![0.2f32; 256];
     let mut right = vec![-0.1f32; 256];
     for (index, plugin) in plugins.iter_mut().enumerate() {
-        ARMED.store(1, Ordering::SeqCst);
-        ALLOCS.store(0, Ordering::SeqCst);
+        arm();
         plugin.set_parameter(1, -12.0);
         let mut audio = AudioBlock {
             channels: [&mut left, &mut right],
@@ -103,11 +119,51 @@ fn insert_process_does_not_allocate() {
             num_samples: 128,
         };
         plugin.process_block(&mut audio, &EMPTY_MIDI);
-        let during_process = ALLOCS.load(Ordering::SeqCst);
+        let during_process = allocs();
         plugin.reset();
-        let during_reset = ALLOCS.load(Ordering::SeqCst);
-        ARMED.store(0, Ordering::SeqCst);
+        let during_reset = disarm();
         assert_eq!(during_process, 0, "plugin {index} allocated in process");
         assert_eq!(during_reset, 0, "plugin {index} allocated in reset");
     }
+}
+
+#[test]
+fn voice_process_does_not_allocate() {
+    let mut engine = VoiceEngine::new(48_000.0);
+    engine.prepare(48_000.0, 128);
+    let mut data = vec![0.0f32; 4_000];
+    for (index, sample) in data.iter_mut().enumerate() {
+        *sample = ((index as f32) * 0.05).sin() * 0.4;
+    }
+    engine.load_sample(1, &data, 48_000.0);
+    for pad in 0..8 {
+        engine.set_region(pad, 1, pad * 400, pad * 400 + 400);
+        engine.set_pitch(pad, pad as f64 - 4.0, 15.0, pad % 2 == 0);
+        engine.set_vintage(pad, Vintage {
+            bit_depth: SP1200_BITS,
+            sample_rate: SP1200_RATE,
+            wow: 0.2,
+            flutter: 0.1,
+            noise: 0.05,
+            crackle: 0.02,
+            lowpass: 8_000.0,
+        });
+        engine.set_filter(pad, 40.0, 12_000.0);
+        engine.set_choke_group(pad, 1);
+        engine.set_reverse(pad, pad == 3);
+        engine.set_hold(pad, pad == 1);
+        engine.set_swing(pad, 4);
+    }
+    let mut left = vec![0.0f32; 128];
+    let mut right = vec![0.0f32; 128];
+    arm();
+    for pad in 0..8 {
+        engine.note(pad * 2, pad, 0.8);
+    }
+    engine.process(&mut left, &mut right);
+    engine.note(10, 1, 0.0);
+    engine.process(&mut left, &mut right);
+    engine.reset();
+    let allocations = disarm();
+    assert_eq!(allocations, 0);
 }

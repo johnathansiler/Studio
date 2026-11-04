@@ -22,6 +22,7 @@ mod state;
 mod synth;
 mod tune;
 mod util;
+mod voice;
 
 #[cfg(target_arch = "wasm32")]
 #[allow(private_interfaces)]
@@ -34,3 +35,4 @@ pub use contract::{
 pub use eq::{EqProcessor, EQ_PARAMS};
 pub use plugin::{CuePlugin, PLUGIN_COMP, PLUGIN_DELAY, PLUGIN_EQ, PLUGIN_LIMIT, PLUGIN_MOD, PLUGIN_REVERB, PLUGIN_SAT, PLUGIN_SCALER, PLUGIN_SYNTH, PLUGIN_TUNE, PLUGIN_VOCAL};
 pub use smooth::{glide_block, glide_sample, sample_alpha, ParamSmoother, SampleGlide};
+pub use voice::{VoiceEngine, Vintage, MAX_PADS, MAX_SAMPLES, MAX_VOICES, SP1200_BITS, SP1200_RATE, MPC60_BITS, MPC60_RATE};

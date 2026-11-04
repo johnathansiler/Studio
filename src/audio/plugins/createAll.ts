@@ -7,6 +7,7 @@ import { wasmInsertSupported } from '../wasm/codes'
 type WasmFactory = (id: string, sampleRate: number) => Processor
 
 let wasmFactory: WasmFactory | null = null
+let wasmSampler: ((sampleRate: number) => Processor) | null = null
 let wasmPreload: Promise<void> | null = null
 let wasmGaveUp = false
 
@@ -25,7 +26,10 @@ export function preloadWasmInserts(): Promise<void> {
         import('../wasm/insert'),
       ])
       await loadDspWasmBytes()
+      const voices = await import('../wasm/voices')
+      await voices.preloadVoices()
       wasmFactory = insert.createWasmInsert
+      wasmSampler = voices.createWasmSampler
     } catch {
       wasmGaveUp = true
       wasmFactory = null
@@ -37,6 +41,13 @@ export function preloadWasmInserts(): Promise<void> {
 /** Every insert, created inside the audio thread. The UI still loads plugins one at a time. */
 export function createProcessor(id: string, sampleRate: number): Processor | null {
   const core = targetOf(id)
+  if (wasmDspRequested() && core === 'sampler' && wasmSampler) {
+    try {
+      return wasmSampler(sampleRate)
+    } catch {
+      return createFallback(core, sampleRate)
+    }
+  }
   if (wasmDspRequested() && wasmFactory && wasmInsertSupported(core)) {
     try {
       return wasmFactory(core, sampleRate)
