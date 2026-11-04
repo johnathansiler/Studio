@@ -127,6 +127,8 @@ describe('pads drum machine', () => {
     expect(padFaceName(hat)).toBe('Hat')
     expect(hat.choke).toBe(1)
     expect(hat.layers[0].bufferId).toBeTruthy()
+    const stored = store.buffers.get(hat.layers[0].bufferId!)!.channels[0]
+    expect(Math.max(...stored.map((sample) => Math.abs(sample)))).toBeGreaterThan(0.9)
     store.updateTrackPad(id, 0, 4, { muted: true, level: 0.4, pan: -0.2, tune: 3, decay: 0.5 })
     const edited = store.trackKit(id).banks[0][4]
     expect(edited.muted).toBe(true)

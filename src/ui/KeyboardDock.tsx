@@ -21,6 +21,16 @@ import { octaveName } from './kit/controls'
 import { hidePianoRoll, notifyKeyboard } from './keyboardStage'
 import { miniPads, padGridColumn, padLabel } from './miniKeys'
 
+/**
+ * How hard a dock key was struck.
+ * A mouse always reports pressure 0.5, which is not a soft hit. Pens and fingers keep their pressure.
+ */
+export function dockStrike(pointerType: string, pressure: number, fallback = 0.85): number {
+  if (pointerType === 'mouse') return fallback
+  if (pressure > 0 && pressure < 1) return pressure
+  return fallback
+}
+
 /** What a dock key should play. A beat-machine key becomes that pad's note. */
 export function keyboardHit(store: ProjectStore, pitch: number, velocity = 0.85): BeatHit | null {
   const target = noteTarget(store.project.tracks, store.selectedTrackId)
@@ -359,7 +369,7 @@ export function KeyboardDock({ store, engine, onEditNotes }: { store: ProjectSto
                 if (beatKit && !heard) return
                 event.preventDefault()
                 try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* already released */ }
-                press(`ptr:${event.pointerId}`, pad.pitch, event.pressure > 0 && event.pressure < 1 ? event.pressure : 0.85, event.timeStamp)
+                press(`ptr:${event.pointerId}`, pad.pitch, dockStrike(event.pointerType, event.pressure), event.timeStamp)
               }}
               onPointerUp={(event) => release(`ptr:${event.pointerId}`, event.timeStamp)}
               onPointerCancel={(event) => release(`ptr:${event.pointerId}`, event.timeStamp)}
