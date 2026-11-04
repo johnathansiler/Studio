@@ -16,6 +16,9 @@ export const TUNE_PRESET_NAMES = [
   'Alto/Tenor',
   'Low male',
   'Instrument',
+  'Classic',
+  'Harmony',
+  'MIDI target',
 ] as const
 
 export const TUNE_PRESET_META: { name: (typeof TUNE_PRESET_NAMES)[number]; short: string; hint: string }[] = [
@@ -25,6 +28,9 @@ export const TUNE_PRESET_META: { name: (typeof TUNE_PRESET_NAMES)[number]; short
   { name: 'Alto/Tenor', short: 'Alto', hint: 'Mid voice range. Follows the project key.' },
   { name: 'Low male', short: 'Low', hint: 'Low voice range. Follows the project key.' },
   { name: 'Instrument', short: 'Inst', hint: 'Chromatic snap for instruments.' },
+  { name: 'Classic', short: 'Classic', hint: 'Harder snap, with tracking and a slower note transition.' },
+  { name: 'Harmony', short: 'Harmony', hint: 'Lead plus third, fifth, and both octaves.' },
+  { name: 'MIDI target', short: 'MIDI', hint: 'Correct only while a MIDI note is held.' },
 ]
 
 /** Pairs of detected Hz, corrected Hz. Index 2k is detected, 2k+1 is the correction target. */
@@ -358,3 +364,274 @@ export function isBlackKey(pc: number) {
 
 export const KEYBOARD_START = 48
 export const KEYBOARD_END = 84
+
+/**
+ * Appended after n11. Do not insert anything earlier: the Rust layout and the
+ * TypeScript catalog share these indexes.
+ */
+export const TUNE_APPENDED_IDS = [
+  'tracking', 'transition', 'throat', 'vibeRate', 'vibeDepth', 'vibeOnset',
+  'autoKey', 'midi', 'harmony', 'h1', 'h2', 'h3', 'h4', 'vocal',
+  'r0lo', 'r0hi', 'r0ct', 'r0amt',
+  'r1lo', 'r1hi', 'r1ct', 'r1amt',
+  'r2lo', 'r2hi', 'r2ct', 'r2amt',
+  'r3lo', 'r3hi', 'r3ct', 'r3amt',
+] as const
+
+export const TUNE_ORIGINAL_IDS = [
+  'retune', 'humanize', 'flex', 'amount', 'transpose', 'formant', 'mode', 'root', 'scaleIndex', 'minHz', 'maxHz', 'mask', 'custom', 'bypassMask', 'a4', 'hq', 'color', 'vibrato', 'holdMidi', 'n0', 'n1', 'n2', 'n3', 'n4', 'n5', 'n6', 'n7', 'n8', 'n9', 'n10', 'n11',
+] as const
+
+/** Major then minor weights. The same literals live in `core/dsp/src/tune.rs`. */
+const MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
+const MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
+
+export interface DetectedKey {
+  root: number
+  scaleIndex: number
+  name: string
+}
+
+/** Best major or minor key. Null until a few notes have been counted. */
+export function keyFromHist(hist: readonly number[]): DetectedKey | null {
+  let total = 0
+  for (let i = 0; i < 12; i++) total += hist[i] || 0
+  if (total < 4) return null
+  let bestScore = -Infinity
+  let bestRoot = 0
+  let bestMinor = false
+  for (let root = 0; root < 12; root++) {
+    let major = 0
+    let minor = 0
+    for (let degree = 0; degree < 12; degree++) {
+      const weight = hist[(root + degree) % 12] || 0
+      major += weight * MAJOR_PROFILE[degree]
+      minor += weight * MINOR_PROFILE[degree]
+    }
+    if (major > bestScore) {
+      bestScore = major
+      bestRoot = root
+      bestMinor = false
+    }
+    if (minor > bestScore) {
+      bestScore = minor
+      bestRoot = root
+      bestMinor = true
+    }
+  }
+  const scaleIndex = bestMinor ? 5 : 0
+  const scaleName = bestMinor ? 'Minor' : 'Major'
+  return { root: bestRoot, scaleIndex, name: `${NOTE_NAMES[bestRoot]} ${scaleName}` }
+}
+
+/** Key of the notes in a pitch trace. Uses the sung pitch, not the corrected one. */
+export function detectKey(trace: Float32Array | null, a4 = 440): DetectedKey | null {
+  if (!trace) return null
+  const hist = new Array(12).fill(0)
+  const ref = a4 > 0 ? a4 : 440
+  for (let i = 0; i + 1 < trace.length; i += 2) {
+    const hz = trace[i] || 0
+    if (hz <= 0) continue
+    const midi = Math.round(69 + 12 * Math.log2(hz / ref))
+    hist[((midi % 12) + 12) % 12] += 1
+  }
+  return keyFromHist(hist)
+}
+
+/** Confidence floor. The default tracking of 0.5 keeps the original 0.7 gate. */
+export function trackingGate(tracking: number) {
+  if (Math.abs(tracking - 0.5) <= 1e-12) return 0.7
+  const amount = Math.max(0, Math.min(1, tracking))
+  return 0.95 - amount * 0.5
+}
+
+/** Retune speed. Note transition slows only the hop where the target note changes. */
+export function correctionRate(speed: number, classic: boolean, transition: number, changed: boolean) {
+  const clipped = Math.max(0.02, Math.min(1, speed))
+  let rate = classic ? Math.min(1, 0.35 + clipped * 0.65) : clipped
+  if (changed && transition < 0.999) rate = Math.max(0.02, rate * Math.max(0, Math.min(1, transition)))
+  return rate
+}
+
+export function throatCoeff(sampleRate: number) {
+  const rate = sampleRate > 0 ? sampleRate : 48000
+  return 1 - Math.exp((-2 * Math.PI * 1400) / rate)
+}
+
+export const HARMONY_STEPS = [0, -12, -7, -5, -4, -3, 3, 4, 5, 7, 12] as const
+
+const HARMONY_NAMES: Record<number, string> = {
+  0: 'Off',
+  [-12]: 'Octave down',
+  [-7]: 'Fifth down',
+  [-5]: 'Fourth down',
+  [-4]: 'Major third down',
+  [-3]: 'Minor third down',
+  3: 'Minor third',
+  4: 'Major third',
+  5: 'Fourth',
+  7: 'Fifth',
+  12: 'Octave',
+}
+
+export function harmonyName(semis: number) {
+  const rounded = Math.round(semis)
+  return HARMONY_NAMES[rounded] ?? `${rounded > 0 ? '+' : ''}${rounded} semitones`
+}
+
+export function stepHarmony(semis: number, dir: number) {
+  const rounded = Math.round(semis)
+  let at = HARMONY_STEPS.indexOf(rounded as (typeof HARMONY_STEPS)[number])
+  if (at < 0) {
+    let best = 99
+    HARMONY_STEPS.forEach((item, index) => {
+      const dist = Math.abs(item - rounded)
+      if (dist < best) {
+        best = dist
+        at = index
+      }
+    })
+  }
+  return HARMONY_STEPS[(at + dir + HARMONY_STEPS.length) % HARMONY_STEPS.length]
+}
+
+export interface TuneRegion {
+  lo: number
+  hi: number
+  ct: number
+  amt: number
+}
+
+export function readRegions(params: Record<string, number>): TuneRegion[] {
+  const regions: TuneRegion[] = []
+  for (let i = 0; i < 4; i++) {
+    regions.push({
+      lo: Math.round(params[`r${i}lo`] ?? 0),
+      hi: Math.round(params[`r${i}hi`] ?? 0),
+      ct: params[`r${i}ct`] ?? 0,
+      amt: params[`r${i}amt`] ?? 1,
+    })
+  }
+  return regions
+}
+
+export function regionActive(region: TuneRegion) {
+  return region.hi >= region.lo && (region.lo > 0 || region.hi > 0)
+}
+
+/** Cents and amount for a snapped MIDI note, when a correction region covers it. */
+export function matchRegion(params: Record<string, number>, midi: number) {
+  const note = Math.round(midi)
+  if (!Number.isFinite(note)) return null
+  const regions = readRegions(params)
+  for (let i = 0; i < regions.length; i++) {
+    const region = regions[i]
+    if (!regionActive(region)) continue
+    if (note >= region.lo && note <= region.hi) return { ct: region.ct, amt: region.amt, slot: i }
+  }
+  return null
+}
+
+/** Which single-note region a graph blob is showing, after its cents offset. */
+export function regionForBlob(params: Record<string, number>, visualMidi: number) {
+  const regions = readRegions(params)
+  let best = -1
+  let bestDist = 0.75
+  for (let i = 0; i < regions.length; i++) {
+    const region = regions[i]
+    if (!regionActive(region) || region.hi !== region.lo) continue
+    const dist = Math.abs(region.lo + region.ct / 100 - visualMidi)
+    if (dist < bestDist) {
+      bestDist = dist
+      best = i
+    }
+  }
+  return best
+}
+
+export function regionPatch(params: Record<string, number>, midi: number, cents: number, amount?: number) {
+  const note = Math.max(1, Math.min(127, Math.round(midi)))
+  const regions = readRegions(params)
+  let slot = regions.findIndex((region) => regionActive(region) && region.lo === note && region.hi === note)
+  if (slot < 0) slot = regions.findIndex((region) => !regionActive(region))
+  if (slot < 0) slot = 0
+  const prev = regions[slot]
+  const ct = Math.max(-200, Math.min(200, Math.round(cents)))
+  const amt = amount == null ? (regionActive(prev) ? prev.amt : 1) : Math.max(0, Math.min(1, amount))
+  return {
+    slot,
+    patch: {
+      [`r${slot}lo`]: note,
+      [`r${slot}hi`]: note,
+      [`r${slot}ct`]: ct,
+      [`r${slot}amt`]: amt,
+    },
+  }
+}
+
+export function dragRegionCents(startMidi: number, nextMidi: number, startCents: number) {
+  return Math.max(-200, Math.min(200, Math.round(startCents + (nextMidi - startMidi) * 100)))
+}
+
+export interface VocalMidiNote {
+  midi: number
+  start: number
+  end: number
+  name: string
+}
+
+/** Notes a singer produced, for the vocal-to-MIDI readout. */
+export function vocalNotes(trace: Float32Array | null, a4 = 440): VocalMidiNote[] {
+  if (!trace) return []
+  const ref = a4 > 0 ? a4 : 440
+  const notes: VocalMidiNote[] = []
+  let start = -1
+  let midi = 0
+  const flush = (end: number) => {
+    if (start < 0 || end - start < 2) {
+      start = -1
+      return
+    }
+    const name = NOTE_NAMES[((midi % 12) + 12) % 12] ?? 'C'
+    notes.push({ midi, start, end, name: `${name}${Math.floor(midi / 12) - 1}` })
+    start = -1
+  }
+  const frames = Math.floor(trace.length / 2)
+  for (let i = 0; i < frames; i++) {
+    const hz = trace[i * 2] || 0
+    if (hz <= 0) {
+      flush(i)
+      continue
+    }
+    const next = Math.round(69 + 12 * Math.log2(hz / ref))
+    if (start < 0 || next !== midi) {
+      flush(i)
+      start = i
+      midi = next
+      continue
+    }
+  }
+  flush(frames)
+  return notes
+}
+
+export const TUNE_EXTRA_PRESETS: { name: string; short: string; hint: string; params: Record<string, number> }[] = [
+  {
+    name: 'Classic',
+    short: 'Classic',
+    hint: 'Harder snap, with tracking and a slower note transition.',
+    params: { color: 1, tracking: 0.35, transition: 0.4, retune: 0.8, humanize: 0.12, flex: 0, amount: 0.88, mode: 1, formant: 0, root: -1, scaleIndex: -1, mask: 0, minHz: 80, maxHz: 1000, transpose: 0 },
+  },
+  {
+    name: 'Harmony',
+    short: 'Harmony',
+    hint: 'Lead plus third, fifth, and both octaves.',
+    params: { harmony: 0.45, h1: 3, h2: 7, h3: 12, h4: -12, retune: 0.62, humanize: 0.2, flex: 0.1, amount: 0.8, mode: 1, formant: 0.25, root: -1, scaleIndex: -1, mask: 0, minHz: 80, maxHz: 1000, transpose: 0 },
+  },
+  {
+    name: 'MIDI target',
+    short: 'MIDI',
+    hint: 'Correct only while a MIDI note is held.',
+    params: { midi: 1, retune: 1, humanize: 0, flex: 0, amount: 1, mode: 1, formant: 0, root: -1, scaleIndex: -1, mask: 0, minHz: 80, maxHz: 1000, transpose: 0 },
+  },
+]

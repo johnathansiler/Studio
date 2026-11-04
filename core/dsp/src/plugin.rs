@@ -28,9 +28,13 @@ pub const PLUGIN_SCALER: u32 = 10;
 
 const TUNE_KEYS: &[&str] = &[
     "retune", "humanize", "flex", "amount", "transpose", "formant", "mode", "root", "scaleIndex", "minHz", "maxHz", "mask", "custom", "bypassMask", "a4", "hq", "color", "vibrato", "holdMidi", "n0", "n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8", "n9", "n10", "n11",
+    "tracking", "transition", "throat", "vibeRate", "vibeDepth", "vibeOnset", "autoKey", "midi", "harmony", "h1", "h2", "h3", "h4", "vocal",
+    "r0lo", "r0hi", "r0ct", "r0amt", "r1lo", "r1hi", "r1ct", "r1amt", "r2lo", "r2hi", "r2ct", "r2amt", "r3lo", "r3hi", "r3ct", "r3amt",
 ];
 const TUNE_DEFAULTS: &[f64] = &[
     0.95, 0.05, 0.0, 0.85, 0.0, 0.0, 1.0, -1.0, -1.0, 80.0, 1000.0, 0.0, 0.0, 0.0, 440.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.5, 1.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0,
 ];
 const COMP_KEYS: &[&str] = &[
     "kind", "threshold", "ratio", "attack", "release", "knee", "makeup", "mix", "releaseMode", "fetIn", "fetOut", "fetRatio", "fetAtk", "fetRel", "optoPeak", "optoGain", "busThresh", "busRatio", "busAtk", "busRel", "hpf", "busMakeup", "variTime", "variIn", "variOut", "variColor", "bands", "x1", "x2", "x3", "x4",
@@ -166,8 +170,10 @@ impl CuePlugin {
     }
 
     pub fn note(&mut self, pitch: f64, vel: f64) {
-        if let Body::Synth(synth) = &mut self.body {
-            synth.note(pitch, vel);
+        match &mut self.body {
+            Body::Synth(synth) => synth.note(pitch, vel),
+            Body::Tune(tune) => tune.note(pitch, vel),
+            _ => {}
         }
     }
 
@@ -198,6 +204,10 @@ impl CuePlugin {
         queued[..note_len].copy_from_slice(&self.notes[..note_len]);
         self.latency = match &mut self.body {
             Body::Tune(tune) => {
+                if note_len > 0 {
+                    let last = queued[note_len - 1];
+                    tune.note(last.pitch, last.vel);
+                }
                 tune.process(left, right, frames, params, rate, offline, eco, scale_root, &self.intervals[..interval_len], &self.cents[..cent_len]);
                 tune.latency
             }
