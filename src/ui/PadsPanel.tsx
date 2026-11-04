@@ -23,7 +23,7 @@ import { useFormFactor } from './form'
 import { AnchoredMenu } from './AnchoredMenu'
 import { ChopDrawer } from './ChopDrawer'
 import { PadScreen } from './PadScreen'
-import { notifyKeyboard } from './keyboardStage'
+import { notifyKeyboard, releaseOrientation } from './keyboardStage'
 import { residentDrums } from '../model/drums'
 import { slicesFor } from '../model/padChop'
 import { resolveHighpass } from '../audio/voices/program'
@@ -471,7 +471,10 @@ export function PadsPanel({
             data-beat-close={trackId}
             title="Close Beat Machine. The track keeps the instrument."
             aria-label="Close Beat Machine. The track keeps the instrument."
-            onClick={() => store.closePads()}
+            onClick={() => {
+              store.closePads()
+              void releaseOrientation()
+            }}
           >
             Close
           </button>
