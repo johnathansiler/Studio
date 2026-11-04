@@ -1,4 +1,4 @@
-/* MPC-style chassis. Phone first: eight square pads, no display.
+/* MPC-style chassis. The screen and the pads lead. Other controls are quiet pills.
    Bevels are state, not looping animation. */
 
 .mpc {
@@ -123,15 +123,15 @@
 
 .mpc-banks {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(72px, 0.7fr) minmax(64px, 0.55fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 0.7fr);
   gap: 6px;
   min-width: 0;
+  flex: none;
 }
 
 .mpc-banks .hw-key,
 .mpc-kit {
   min-width: 0;
-  min-height: 44px;
   width: 100%;
 }
 
@@ -145,25 +145,24 @@
 }
 
 .mpc-grid-wrap {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
+  width: 100%;
   min-width: 0;
-  min-height: 120px;
-  container-type: size;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
+  min-height: auto;
+  display: block;
+  overflow: visible;
 }
 
 .mpc-grid {
-  /* Largest 4×2 squares that fit the open space, and never the header. */
-  width: min(100cqi, max(168px, calc(100cqb * 2)));
+  /* Width sets the size, so a 4×2 grid fills the phone instead of floating. */
+  width: 100%;
   max-width: 100%;
-  max-height: 100%;
+  height: auto;
   aspect-ratio: 2 / 1;
   min-width: 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-template-rows: repeat(2, minmax(40px, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -314,21 +313,19 @@
 }
 
 .mpc-knob-row .mpc-full {
-  min-height: 56px;
-  align-self: end;
+  min-height: 40px;
+  height: 40px;
+  align-self: center;
 }
 
-.pad-move {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  min-width: 0;
+.mpc-knob-row .hw-knob {
+  width: 40px;
+  height: 40px;
 }
-
-.pad-move .hw-key { min-height: 44px; min-width: 0; }
 
 .note-repeat-hold {
-  min-height: 48px;
+  min-height: 40px;
+  height: 40px;
   min-width: 40px;
   padding: 8px;
   font-size: 15px;
@@ -344,7 +341,8 @@
 
 .note-repeat-rate button,
 .note-repeat-rate strong {
-  min-height: 44px;
+  min-height: 40px;
+  height: 40px;
   min-width: 40px;
 }
 
@@ -362,7 +360,8 @@
   align-items: center;
   justify-content: center;
   min-width: 44px;
-  min-height: 44px;
+  min-height: 40px;
+  height: 40px;
   padding: 0 6px;
   border: 1px solid #070707;
   border-radius: 2px;
@@ -457,10 +456,152 @@
 .mpc-pad.muted span { opacity: 0.4; }
 
 .mpc-full {
-  min-height: 48px;
+  min-height: 40px;
+  height: 40px;
   min-width: 0;
-  font-weight: 740;
+  font-weight: 650;
 }
+
+/* Quiet pills. Accent only when a control is actually on, and only as a thin edge. */
+.mpc .hw-key {
+  min-height: 40px;
+  height: 40px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #242424;
+  background-color: #2c2c2c;
+  background-image: linear-gradient(180deg, #3a3a3a, #262626);
+  color: #b7b7b7;
+  font-size: 12px;
+  font-weight: 620;
+  letter-spacing: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 1px 0 #121212;
+}
+
+.mpc .hw-key.on,
+.mpc .hw-key[aria-pressed='true'] {
+  background-color: #313a34;
+  background-image: linear-gradient(180deg, #3a463e, #2a322c);
+  color: #d7ebdd;
+  border-color: #4d6756;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0 0 1px rgba(115, 196, 143, 0.22);
+}
+
+.mpc .hw-transport .rec,
+.mpc .hw-transport .dub {
+  background-color: #2c2c2c;
+  background-image: linear-gradient(180deg, #3a3a3a, #262626);
+  color: #b7b7b7;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 1px 0 #121212;
+}
+
+.mpc .hw-transport .rec[aria-pressed='true'] {
+  background-color: #3a2c2c;
+  background-image: linear-gradient(180deg, #4a3434, #2c2222);
+  color: #f0d0d0;
+  border-color: #6a4444;
+}
+
+.mpc .hw-window .hw-key {
+  height: auto;
+  white-space: normal;
+}
+
+.pad-screen {
+  position: relative;
+  flex: 0 0 108px;
+  height: 108px;
+  min-width: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0c100c;
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.75),
+    inset 0 0 0 1px #1c2418,
+    0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.pad-screen-wave {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+}
+
+.pad-screen-wave canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.pad-screen-zero {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: rgba(186, 214, 170, 0.55);
+  pointer-events: none;
+}
+
+.pad-screen-playhead {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  margin-left: -1px;
+  background: #f4f7c8;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pad-marker {
+  position: absolute;
+  top: 18%;
+  width: 44px;
+  height: 44px;
+  margin-left: -22px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: inset 2px 0 0 #f2f2f2, inset -18px 0 0 transparent;
+  touch-action: none;
+}
+
+.pad-marker-end { box-shadow: inset -2px 0 0 #f2f2f2; }
+
+.pad-marker.is-locked {
+  background: rgba(240, 215, 138, 0.28);
+  box-shadow: inset 2px 0 0 #f0d78a, 0 0 0 1px #f0d78a;
+}
+
+.pad-screen-readout {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  pointer-events: none;
+  color: #d5e6cf;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.pad-screen-readout strong { font-size: 13px; color: #f4ffe8; }
+
+.pad-lock { color: #f0d78a; }
+
+.pad-screen-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.pad-screen-tools .hw-key { flex: 0 0 auto; }
 
 .hw-transport .rec,
 .hw-transport .dub {
@@ -556,6 +697,8 @@
 
 /* Wide face keeps the same row order. Pads stay the largest squares that fit. */
 @container (min-width: 800px) {
+  .pad-screen { flex-basis: 168px; height: 168px; }
+  .mpc-grid { width: min(100%, 640px); margin-inline: auto; gap: 12px; }
   .hw-body { gap: 8px; padding: 12px; }
   .mpc-brand { flex-direction: row; align-items: center; justify-content: flex-start; }
   .mpc-keyboard, .mpc-close { flex: 0 0 auto; width: auto; }
