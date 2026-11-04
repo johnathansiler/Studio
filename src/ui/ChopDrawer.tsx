@@ -129,7 +129,7 @@ export function ChopDrawer({
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
-    const decoded = await decodeSoundBytes(new Uint8Array(await file.arrayBuffer()))
+    const decoded = await decodeSoundBytes(await file.arrayBuffer())
     const channel = decoded.channels[0]
     if (channel?.length) await useSamples(file.name, channel, decoded.sampleRate)
   }
@@ -156,7 +156,8 @@ export function ChopDrawer({
         onPhase: () => undefined,
         wait: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
       })
-      const channel = audio?.channels[0]
+      if (!audio) return
+      const channel = audio.channels[0]
       if (channel?.length) await useSamples(name, channel, audio.sampleRate)
     } finally {
       capture.close()
