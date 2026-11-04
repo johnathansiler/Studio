@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["dsp", "plugin"]
+
+# Release builds cover the WASM DSP and the plugin shell. Debug stays the default
+# for `cargo test`, so the realtime allocation check still sees debug code.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"
+opt-level = 3
+panic = "abort"

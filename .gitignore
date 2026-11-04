@@ -7,3 +7,5 @@ dist
 coverage
 playwright-report
 test-results
+target
+core/target

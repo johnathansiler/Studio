@@ -1,0 +1,19 @@
+[package]
+name = "cueharbor-plugin"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "VST3 and CLAP shell around the shared CueHarbor EQ."
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+# VST3 links vst3-sys, which is GPLv3. The DSP crate does not depend on this.
+# `cargo build -p cueharbor-plugin --no-default-features` builds the CLAP shell only.
+default = ["vst3"]
+vst3 = ["nih_plug/vst3"]
+
+[dependencies]
+cueharbor-dsp = { path = "../dsp" }
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de421011f41a6d10fc8c7a6084e4f4dee0143683", default-features = false }

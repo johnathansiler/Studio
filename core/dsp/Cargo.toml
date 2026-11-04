@@ -1,0 +1,12 @@
+[package]
+name = "cueharbor-dsp"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Shared CueHarbor DSP core. process_block does not allocate."
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[dependencies]
+ryu = "1"
