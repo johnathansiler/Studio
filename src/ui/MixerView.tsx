@@ -4,17 +4,17 @@ import { STRIP_BOUNDS, displayedStrip, isNarrowStrip } from '../model/layoutWidt
 import { gainToDb } from '../model/time'
 import { mixGroupsOf, selectMixer, trackGroupId } from '../state/select'
 import type { ProjectStore } from '../state/store'
+import type { Track } from '../model/types'
 import { AddTrackButton } from './AddTrack'
-import { AutoFader, ChannelAutomation, LinkGroup, MixFlags, PanKnob } from './AutomationLane'
-import { GuideLayer } from './GuideLayer'
+import { AutoFader, ChannelAutomation, MixFlags, PanKnob } from './AutomationLane'
 import { showHint } from './Hint'
 import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
-import { InsertList, RouteFields, SendList } from './PluginSheet'
+import { InsertList } from './PluginSheet'
 import { TouchSlider } from './kit/controls'
 import { holdMeter } from './levels'
 import { TrackPresence } from './presenceMarks'
-import { SecondaryRack, type SecondaryItem } from './SecondaryRack'
+import './mixer.css'
 
 export function MixerView({ store, engine, onTune, onOpenKeyboard }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void; onOpenKeyboard?: (trackId: string) => void }) {
   return <MixerBody key={store.project.id} store={store} engine={engine} onTune={onTune} onOpenKeyboard={onOpenKeyboard} />
@@ -32,63 +32,59 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
   const stripRef = useRef(layout.strip)
   stripRef.current = layout.strip
   usePinchResize(areaRef, () => stripRef.current, setStrip, STRIP_BOUNDS)
-  const [masterOpen, setMasterOpen] = useState(false)
   const [viewport, setViewport] = useState(readViewport)
-  const [fxTrack, setFxTrack] = useState<string | 'master' | null>(null)
-  const [levelsOpen, setLevelsOpen] = useState(false)
   useEffect(() => {
     const apply = () => setViewport(readViewport())
     window.addEventListener('resize', apply)
     return () => window.removeEventListener('resize', apply)
   }, [])
   const strip = displayedStrip(layout.strip, viewport.width)
-  const flow = 'columns' as const
   const narrow = isNarrowStrip(strip)
-  const rows = false
+  const channels = project.tracks.filter((track) => track.type !== 'bus' && track.type !== 'group')
+  const buses = project.tracks.filter((track) => track.type === 'bus' || track.type === 'group')
+  const flow = buses.length
+    ? 'Tracks feed buses. Buses feed the master.'
+    : 'Tracks feed the master. A bus sums tracks before it.'
   return (
-    <>
     <div
-      className="mixer-view"
+      className="mixer-view mixer-console"
       ref={areaRef}
       data-strip-width={strip}
-      data-layout={flow}
+      data-layout="columns"
       data-narrow={narrow ? '1' : undefined}
       style={{ ['--strip' as string]: `${strip}px` }}
     >
       <WidthBar axis="strip" value={layout.strip} onChange={setStrip} onReset={resetStrip} />
-      {levelsOpen && <LevelBar engine={engine} onClose={() => setLevelsOpen(false)} />}
-      {fxTrack ? (
-        <StripSlots store={store} engine={engine} trackId={fxTrack} onBack={() => setFxTrack(null)} />
-      ) : (
+      <p className="mix-flow" aria-label={`Signal flow. ${flow}`}>{flow}</p>
       <div className="mixer">
-      {project.tracks.map((track) => (
-        <ChannelStrip
-          key={track.id}
-          store={store}
-          engine={engine}
-          trackId={track.id}
-          rows={rows}
-          selected={store.selectedTrackId === track.id}
-          onTune={onTune}
-          onOpenKeyboard={onOpenKeyboard}
-          onFx={() => setFxTrack(track.id)}
-        />
-      ))}
-      <AddTrackButton store={store} />
-      <MasterStrip
-        store={store}
-        engine={engine}
-        rows={rows}
-        narrow={narrow}
-        onOpen={() => setMasterOpen(true)}
-        onFx={() => setFxTrack('master')}
-        onLevels={() => setLevelsOpen(true)}
-      />
+        {channels.map((track) => (
+          <ChannelStrip
+            key={track.id}
+            store={store}
+            engine={engine}
+            trackId={track.id}
+            flow="track"
+            selected={store.selectedTrackId === track.id}
+            onTune={onTune}
+            onOpenKeyboard={onOpenKeyboard}
+          />
+        ))}
+        <AddTrackButton store={store} />
+        {buses.map((track) => (
+          <ChannelStrip
+            key={track.id}
+            store={store}
+            engine={engine}
+            trackId={track.id}
+            flow="bus"
+            selected={store.selectedTrackId === track.id}
+            onTune={onTune}
+            onOpenKeyboard={onOpenKeyboard}
+          />
+        ))}
+        <MasterStrip store={store} engine={engine} />
       </div>
-      )}
     </div>
-    {masterOpen && <MasterSheet store={store} engine={engine} onClose={() => setMasterOpen(false)} />}
-    </>
   )
 }
 
@@ -104,113 +100,183 @@ function ChannelStrip({
   store,
   engine,
   trackId,
-  rows,
+  flow,
   selected,
   onTune,
   onOpenKeyboard,
-  onFx,
 }: {
   store: ProjectStore
   engine: AudioEngine
   trackId: string
-  rows: boolean
+  flow: 'track' | 'bus'
   selected: boolean
   onTune?: (trackId: string) => void
   onOpenKeyboard?: (trackId: string) => void
-  onFx: () => void
 }) {
   const track = store.track(trackId)
   if (!track) return null
   const output = routingCaption(store, trackId)
-  const tools: SecondaryItem[] = [
-    { id: 'automation', label: 'Touch', node: <ChannelAutomation store={store} trackId={track.id} /> },
-    { id: 'routing', label: output, node: <RouteButton store={store} trackId={track.id} /> },
-    { id: 'inserts', label: 'Inserts', node: <FxButton name={track.name} onOpen={onFx} /> },
-    { id: 'pan', label: 'Pan', width: 40, node: <PanKnob store={store} engine={engine} label={`${track.name} pan. Left or right.`} value={track.pan} spec={{ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }} /> },
-    { id: 'arm', label: 'Arm', node: <MixFlags store={store} trackId={track.id} part="arm" /> },
-    { id: 'safe', label: 'Safe', node: <MixFlags store={store} trackId={track.id} part="safe" /> },
-  ]
-  if (track.type === 'audio' && onTune) {
-    tools.push({ id: 'tune', label: 'Tune', node: <TuneButton name={track.name} onTune={() => onTune(track.id)} /> })
-  }
-  const hear: SecondaryItem[] = [
-    { id: 'mute', label: 'Mute', node: <MixFlags store={store} trackId={track.id} part="mute" /> },
-    { id: 'solo', label: 'Solo', node: <MixFlags store={store} trackId={track.id} part="solo" /> },
-  ]
+  const kind = flow === 'bus' ? 'Bus' : 'Track'
   return (
-    <div className={`strip${selected ? ' is-selected' : ''}`} data-track={track.id} onClick={() => { store.selectTrack(track.id); onOpenKeyboard?.(track.id) }}>
-      {rows ? (
-        <>
-          <div className="strip-top">
-            <StripName name={track.name} color={track.color} />
-            <TrackPresence trackId={track.id} />
-            <SecondaryRack zone="top" className="strip-hear" items={hear} />
-          </div>
-          <VolumeLane store={store} engine={engine} trackId={track.id} name={track.name} value={track.volume} vertical={false} />
-          <SecondaryRack zone="tools" className="strip-extra" items={tools} />
-        </>
-      ) : (
-        <>
+    <div
+      className={`strip${selected ? ' is-selected' : ''}${flow === 'bus' ? ' is-bus' : ''}`}
+      data-track={track.id}
+      data-flow={flow}
+      onClick={() => { store.selectTrack(track.id); onOpenKeyboard?.(track.id) }}
+    >
+      <div className="strip-col">
+        <div className="strip-head">
+          <p className="strip-kind">{kind}</p>
           <StripName name={track.name} color={track.color} />
+          <p className="strip-path" title={`${kind} ${track.name} feeds ${output}.`}>To {output}</p>
           <TrackPresence trackId={track.id} />
-          <SecondaryRack zone="tools" className="strip-tools" items={tools} />
-          <VolumeLane store={store} engine={engine} trackId={track.id} name={track.name} value={track.volume} vertical />
-          <SecondaryRack zone="hear" className="strip-hear" items={hear} />
-        </>
-      )}
+        </div>
+        <VolumeLane store={store} engine={engine} trackId={track.id} name={track.name} value={track.volume} vertical />
+        <div className="strip-foot">
+          <MixFlags store={store} trackId={track.id} part="mute" />
+          <MixFlags store={store} trackId={track.id} part="solo" />
+          <ChannelMore store={store} engine={engine} track={track} output={output} onTune={onTune} />
+        </div>
+      </div>
     </div>
   )
 }
 
-function MasterStrip({
+function MasterStrip({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
+  return (
+    <div className="strip master" data-flow="master">
+      <div className="strip-col">
+        <div className="strip-head">
+          <p className="strip-kind">Master</p>
+          <StripName name="Master" />
+          <p className="strip-path" title="Tracks and buses arrive here, then leave to the speakers.">Output</p>
+        </div>
+        <MasterLane store={store} engine={engine} value={store.project.masterVolume} vertical />
+        <div className="strip-foot">
+          <div className="strip-note" title="Tracks and buses arrive on the master."><span>Arrives</span></div>
+          <div className="strip-note" title="The mix leaves through the speakers."><span>Leaves</span></div>
+          <MasterMore store={store} engine={engine} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ChannelMore({
   store,
   engine,
-  rows,
-  narrow,
-  onOpen,
-  onFx,
-  onLevels,
+  track,
+  output,
+  onTune,
 }: {
   store: ProjectStore
   engine: AudioEngine
-  rows: boolean
-  narrow: boolean
-  onOpen: () => void
-  onFx: () => void
-  onLevels: () => void
+  track: Track
+  output: string
+  onTune?: (trackId: string) => void
 }) {
-  const tools: SecondaryItem[] = [
-    { id: 'automation', label: 'Touch', node: <ChannelAutomation store={store} trackId="master" /> },
-    { id: 'master', label: 'Master', node: <MasterOpen onOpen={onOpen} /> },
-    { id: 'inserts', label: 'Inserts', node: <FxButton name="Master" master onOpen={onFx} /> },
-    { id: 'level', label: 'Level', node: <LevelButton engine={engine} onOpen={onLevels} /> },
-  ]
   return (
-    <div className="strip master">
-      {rows ? (
-        <>
-          <div className="strip-top">
-            <StripName name="Master" />
+    <details className="mix-more" onClick={(event) => event.stopPropagation()}>
+      <summary className="more-open" aria-label={`More. Inserts, sends, pan, phase, and routing for ${track.name}.`} title="Inserts, sends, pan, phase, and routing.">
+        <span className="more-closed">More</span>
+        <span className="more-open-word">Close</span>
+      </summary>
+      <div className="mix-panel" aria-label={`${track.name} channel`}>
+        <section className="mix-block">
+          <h4>Automation</h4>
+          <p>Off ignores lanes. Read plays them. Touch and Latch write while you move a control.</p>
+          <ChannelAutomation store={store} trackId={track.id} />
+        </section>
+        <section className="mix-block">
+          <h4>Pan</h4>
+          <p>Place this channel left or right.</p>
+          <PanKnob store={store} engine={engine} label={`${track.name} pan. Left or right.`} value={track.pan} spec={{ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }} />
+        </section>
+        <section className="mix-block">
+          <h4>Phase</h4>
+          <p>Sweep this channel with a phase effect.</p>
+          <PhaseButton store={store} trackId={track.id} name={track.name} />
+        </section>
+        <section className="mix-block">
+          <h4>Record</h4>
+          <p>Arm records on this channel. Safe stays audible when other channels are soloed.</p>
+          <div className="mix-pair">
+            <MixFlags store={store} trackId={track.id} part="arm" />
+            <MixFlags store={store} trackId={track.id} part="safe" />
           </div>
-          <MasterLane store={store} engine={engine} value={store.project.masterVolume} vertical={false} />
-          <SecondaryRack zone="tools" className="strip-extra" items={tools} />
-        </>
-      ) : (
-        <>
-          <StripName name="Master" />
-          <SecondaryRack zone="tools" className="strip-tools" items={tools} />
-          {!narrow && <MasterReadout engine={engine} />}
-          <MasterLane store={store} engine={engine} value={store.project.masterVolume} vertical />
-        </>
-      )}
-    </div>
+          {track.type === 'audio' && onTune && <TuneButton name={track.name} onTune={() => onTune(track.id)} />}
+        </section>
+        <section className="mix-block">
+          <h4>Inserts</h4>
+          <p>Instruments and effects on this channel, in order.</p>
+          <FxButton name={track.name} />
+          <InsertList store={store} trackId={track.id} roomy />
+        </section>
+        <section className="mix-block">
+          <h4>Sends</h4>
+          <p>A copy of this channel, sent to a bus.</p>
+          <SendRows store={store} engine={engine} trackId={track.id} />
+        </section>
+        <section className="mix-block">
+          <h4>Routing</h4>
+          <p>Output {output}. Choose where this channel goes next, and which channels move together.</p>
+          <RoutePicks store={store} trackId={track.id} />
+        </section>
+      </div>
+    </details>
   )
 }
 
-function FxButton({ name, master = false, onOpen }: { name: string; master?: boolean; onOpen: () => void }) {
+function MasterMore({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
+  const [mastering, setMastering] = useState(false)
+  return (
+    <details className="mix-more" onClick={(event) => event.stopPropagation()}>
+      <summary className="more-open" aria-label="More. Levels, inserts, and mastering for the master." title="Levels, inserts, and mastering.">
+        <span className="more-closed">More</span>
+        <span className="more-open-word">Close</span>
+      </summary>
+      <div className="mix-panel" aria-label="Master channel">
+        <section className="mix-block">
+          <h4>Automation</h4>
+          <p>Off ignores lanes. Read plays them. Touch and Latch write while you move a control.</p>
+          <ChannelAutomation store={store} trackId="master" />
+        </section>
+        <section className="mix-block">
+          <h4>Levels</h4>
+          <p>Loudness and the highest peak on the master.</p>
+          <LevelReadout engine={engine} />
+        </section>
+        <section className="mix-block">
+          <h4>Inserts</h4>
+          <p>Effects on the master bus, in order.</p>
+          <FxButton name="Master" master />
+          <InsertList store={store} trackId="master" roomy />
+        </section>
+        <section className="mix-block">
+          <h4>Mastering</h4>
+          <p>Loudness, tone, and the limiter.</p>
+          <button
+            id="master-open"
+            type="button"
+            className="text-btn master-open"
+            aria-expanded={mastering}
+            aria-label="Master. Loudness, tone, and the limiter."
+            title="Loudness, tone, and the limiter."
+            onClick={() => setMastering((open) => !open)}
+          >
+            <span className="master-full">{mastering ? 'Close' : 'Master'}</span>
+          </button>
+          {mastering && <MasterSheet store={store} engine={engine} onClose={() => setMastering(false)} />}
+        </section>
+      </div>
+    </details>
+  )
+}
+
+function FxButton({ name, master = false }: { name: string; master?: boolean }) {
   const label = master ? 'Master effects. Inserts on the master bus.' : `${name} effects. Inserts and sends.`
   return (
-    <button type="button" className="mini fx-open" aria-label={label} title={master ? 'Master inserts.' : 'Inserts and sends.'} onClick={(event) => { event.stopPropagation(); onOpen() }}>
+    <button type="button" className="mini fx-open" aria-label={label} title={master ? 'Master inserts.' : 'Inserts and sends.'}>
       <span className="mini-word">Inserts</span>
     </button>
   )
@@ -224,10 +290,21 @@ function TuneButton({ name, onTune }: { name: string; onTune: () => void }) {
   )
 }
 
-function MasterOpen({ onOpen }: { onOpen: () => void }) {
+function PhaseButton({ store, trackId, name }: { store: ProjectStore; trackId: string; name: string }) {
+  const plugin = store.track(trackId)?.plugins.find((item) => item.pluginId === 'phase')
   return (
-    <button id="master-open" className="text-btn master-open" aria-label="Master. Loudness, tone, and the limiter." title="Loudness, tone, and the limiter." onClick={(event) => { event.stopPropagation(); onOpen() }}>
-      <span className="master-full">Master</span>
+    <button
+      type="button"
+      className="mini phase-btn"
+      aria-label={plugin ? `Phase. Open the phase effect on ${name}.` : `Phase. Add a phase effect on ${name}.`}
+      title={plugin ? 'Open the phase effect.' : 'Add a phase effect.'}
+      onClick={(event) => {
+        event.stopPropagation()
+        if (plugin) store.focusPlugin(trackId, plugin.id)
+        else store.addPlugin(trackId, 'phase')
+      }}
+    >
+      <span className="mini-word">Phase</span>
     </button>
   )
 }
@@ -291,54 +368,185 @@ function MasterLane({ store, engine, value, vertical }: { store: ProjectStore; e
   )
 }
 
-function RouteButton({ store, trackId }: { store: ProjectStore; trackId: string }) {
-  const [open, setOpen] = useState(false)
+function SendRows({ store, engine, trackId }: { store: ProjectStore; engine: AudioEngine; trackId: string }) {
+  const track = store.track(trackId)
+  if (!track) return null
+  const buses = store.project.tracks.filter((item) => (item.type === 'bus' || item.type === 'group') && item.id !== trackId)
+  const used = new Set(track.sends.map((send) => send.busId))
+  const open = buses.filter((bus) => !used.has(bus.id))
+  return (
+    <div className="sends">
+      {track.sends.map((send) => {
+        const busName = buses.find((bus) => bus.id === send.busId)?.name ?? 'Send'
+        return (
+          <div className="send-row" key={send.id}>
+            <span>{busName}</span>
+            <small>{send.preFader ? 'Before the fader.' : 'After the fader.'}</small>
+            <TouchSlider
+              label={`${busName} send level. How much of this channel goes to the bus.`}
+              title="Send level. Latch and touch write this while playing."
+              min={0}
+              max={1}
+              step={0.01}
+              value={send.gain}
+              fallback={0.25}
+              onStart={() => store.beginAutomationTouch()}
+              onCommit={() => store.endAutomationTouch()}
+              onChange={(value) => {
+                const rolling = engine.status === 'playing' || engine.status === 'recording'
+                store.setAutomated(
+                  { trackId, target: 'send', param: 'gain', sendId: send.id, min: 0, max: 1 },
+                  value,
+                  rolling,
+                  engine.currentTimelineSample(),
+                )
+              }}
+            />
+            <div className="mix-pair">
+              <button
+                type="button"
+                className={`mini ${send.preFader ? 'on' : ''}`}
+                aria-pressed={send.preFader}
+                aria-label={send.preFader ? 'Before. This send ignores the fader.' : 'After. This send follows the fader.'}
+                title={send.preFader ? 'This send ignores the fader.' : 'This send follows the fader.'}
+                onClick={() => store.updateSend(trackId, send.id, { preFader: !send.preFader })}
+              >
+                <span className="mini-word">{send.preFader ? 'Before' : 'After'}</span>
+              </button>
+              <button type="button" className="mini" aria-label={`Remove the send to ${busName}.`} title="Take this send away." onClick={() => store.removeSend(trackId, send.id)}>
+                <span className="mini-word">Remove</span>
+              </button>
+            </div>
+          </div>
+        )
+      })}
+      {open.map((bus) => (
+        <button key={bus.id} type="button" className="mini send-add" aria-label={`Send. Add a send to ${bus.name}.`} title={`Add a send to ${bus.name}.`} onClick={() => store.addSend(trackId, bus.id)}>
+          <span className="mini-word">Send</span>
+          <small>Add a send to {bus.name}.</small>
+        </button>
+      ))}
+      {buses.length === 0 && <p className="mix-empty">No bus yet. Add a bus, then send this channel to it.</p>}
+    </div>
+  )
+}
+
+function RoutePicks({ store, trackId }: { store: ProjectStore; trackId: string }) {
   const track = store.track(trackId)
   if (!track) return null
   const targets = store.project.tracks.filter((item) => (item.type === 'bus' || item.type === 'group') && item.id !== track.id)
-  const outputLabel = routingCaption(store, trackId)
-  const groupLabel = targets.find((item) => item.type === 'group' && item.id === track.groupId)?.name ?? 'No group'
-  const linkLabel = mixGroupsOf(store.project).find((item) => item.id === trackGroupId(store.project, trackId))?.name ?? 'No link'
+  const groups = targets.filter((item) => item.type === 'group')
+  const output = !track.output ? (track.input.startsWith('remote:') ? 'Cue' : 'Master') : targets.find((item) => item.id === track.output)?.name ?? 'Master'
+  const groupLabel = groups.find((item) => item.id === track.groupId)?.name ?? 'No group'
+  const links = mixGroupsOf(store.project)
+  const linkId = trackGroupId(store.project, trackId) ?? ''
+  const link = links.find((item) => item.id === linkId)
   return (
-    <>
+    <div className="route-fields">
+      <InlinePick
+        label="Output"
+        hint="Where this channel goes next."
+        value={track.output ?? ''}
+        options={[
+          { value: '', label: track.input.startsWith('remote:') ? 'Cue' : 'Master' },
+          ...targets.map((item) => ({ value: item.id, label: item.name })),
+        ]}
+        onChange={(next) => store.updateTrack(track.id, { output: next || null })}
+      />
+      <p className="mix-current">Now {output}.</p>
+      <InlinePick
+        label="Group"
+        hint="A folder that sums this channel."
+        value={track.groupId ?? ''}
+        options={[{ value: '', label: 'No group' }, ...groups.map((item) => ({ value: item.id, label: item.name }))]}
+        onChange={(next) => store.updateTrack(track.id, { groupId: next || null })}
+      />
+      <p className="mix-current">Now {groupLabel}.</p>
+      <InlinePick
+        label="Link"
+        hint="Channels that move together."
+        value={linkId}
+        options={[
+          { value: '', label: 'No link' },
+          ...links.map((item) => ({ value: item.id, label: item.name })),
+          { value: 'new', label: 'New link' },
+        ]}
+        onChange={(next) => store.assignMixGroup(trackId, next)}
+      />
+      {link && (
+        <div className="link-row">
+          <Flag store={store} groupId={link.id} on={link.faders} flag="faders" label="Faders" title="Move faders and pans by the same amount." />
+          <Flag store={store} groupId={link.id} on={link.mutes} flag="mutes" label="Mutes" title="Mute and unmute the linked tracks together." />
+          <Flag store={store} groupId={link.id} on={link.solos} flag="solos" label="Solos" title="Solo and unsolo the linked tracks together." />
+          <Flag store={store} groupId={link.id} on={link.edits} flag="edits" label="Edits" title="Move, trim, and split overlapping clips together." />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Flag({ store, groupId, on, flag, label, title }: { store: ProjectStore; groupId: string; on: boolean; flag: 'faders' | 'mutes' | 'solos' | 'edits'; label: string; title: string }) {
+  return (
+    <button type="button" className={on ? 'on' : ''} aria-pressed={on} aria-label={`${label}. ${title}`} title={title} onClick={() => store.setMixLink(groupId, { [flag]: !on })}>
+      {label}
+    </button>
+  )
+}
+
+function InlinePick({
+  label,
+  hint,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  hint: string
+  value: string
+  options: { value: string; label: string }[]
+  onChange: (value: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const current = options.find((item) => item.value === value)?.label ?? value
+  return (
+    <div className={`inline-pick${open ? ' open' : ''}`}>
       <button
         type="button"
-        className="mini route-open"
-        aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`Routing. Output ${outputLabel}. Group ${groupLabel}. Link ${linkLabel}.`}
-        title={`Output ${outputLabel}. Group ${groupLabel}. Link ${linkLabel}.`}
+        aria-label={`${label}. ${current}. ${hint}`}
+        title={hint}
         onClick={(event) => {
           event.stopPropagation()
-          setOpen(true)
+          setOpen((shown) => !shown)
         }}
       >
-        <span className="mini-word">{outputLabel}</span>
+        <span>{label}</span>
+        <small>{current}. {hint}</small>
       </button>
       {open && (
-        <GuideLayer>
-          <button type="button" className="guide-scrim picker-scrim" aria-label={`Close ${track.name} routing`} onClick={() => setOpen(false)} />
-          <div className="guide-sheet sheet route-sheet" role="dialog" aria-label={`${track.name} routing`} onPointerDown={(event) => event.stopPropagation()}>
-            <div className="guide-handle" aria-hidden="true" />
-            <header className="guide-head">
-              <div>
-                <h2>Routing</h2>
-                <p>Output, group, and link for {track.name}.</p>
-              </div>
-              <button type="button" className="guide-x" aria-label={`Close ${track.name} routing`} onClick={() => setOpen(false)}>Close</button>
-            </header>
-            <RouteFields store={store} trackId={trackId} />
-            <LinkGroup store={store} trackId={trackId} />
-          </div>
-        </GuideLayer>
+        <div role="group" aria-label={label}>
+          {options.map((item) => (
+            <button
+              key={item.value || 'none'}
+              type="button"
+              aria-pressed={item.value === value}
+              onClick={(event) => {
+                event.stopPropagation()
+                onChange(item.value)
+                setOpen(false)
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       )}
-    </>
+    </div>
   )
 }
 
 function StripName({ name, color }: { name: string; color?: string }) {
   const timer = useRef(0)
-  const shown = name
   const hold = (event: ReactPointerEvent<HTMLHeadingElement>) => {
     const point = { x: event.clientX, y: event.clientY }
     window.clearTimeout(timer.current)
@@ -355,32 +563,8 @@ function StripName({ name, color }: { name: string; color?: string }) {
       onPointerCancel={cancel}
       onPointerLeave={cancel}
     >
-      <span className="strip-title">{shown}</span>
+      <span className="strip-title">{name}</span>
     </h3>
-  )
-}
-
-function StripSlots({
-  store,
-  engine,
-  trackId,
-  onBack,
-}: {
-  store: ProjectStore
-  engine: AudioEngine
-  trackId: string | 'master'
-  onBack: () => void
-}) {
-  const name = trackId === 'master' ? 'Master' : store.track(trackId)?.name ?? 'Channel'
-  return (
-    <div className="strip-slots" aria-label={`${name} inserts and sends`}>
-      <button type="button" onClick={onBack} aria-label={`Back to ${name}. Close inserts and sends.`}>Back</button>
-      <h3>{name}</h3>
-      {trackId !== 'master' && <RouteFields store={store} trackId={trackId} />}
-      {trackId !== 'master' && <LinkGroup store={store} trackId={trackId} />}
-      <InsertList store={store} trackId={trackId} roomy />
-      {trackId !== 'master' && <SendList store={store} trackId={trackId} engine={engine} roomy />}
-    </div>
   )
 }
 
@@ -406,37 +590,14 @@ function useMasterText(engine: AudioEngine) {
   return text
 }
 
-function LevelButton({ engine, onOpen }: { engine: AudioEngine; onOpen: () => void }) {
-  const text = useMasterText(engine)
-  const detail = `LUFS ${text.lufs}. Integrated ${text.integrated}. Peak ${text.peak} dB. CPU ${text.cpu} percent.`
-  return (
-    <button type="button" className="mini lvl-open" aria-label={`Master levels. ${detail}`} title={detail} onClick={onOpen}>
-      <span className="lvl-word">Level</span>
-    </button>
-  )
-}
-
-function LevelBar({ engine, onClose }: { engine: AudioEngine; onClose: () => void }) {
+function LevelReadout({ engine }: { engine: AudioEngine }) {
   const text = useMasterText(engine)
   return (
-    <div className="level-bar" id="master-meters" aria-label="Master levels">
-      <span>LUFS <b>{text.lufs}</b></span>
-      <span title="Integrated loudness">Integrated <b>{text.integrated}</b></span>
-      <span>Peak <b>{text.peak} dB</b></span>
-      <span>CPU <b>{text.cpu}%</b></span>
-      <button type="button" onClick={onClose} aria-label="Hide master levels">Hide</button>
-    </div>
-  )
-}
-
-function MasterReadout({ engine }: { engine: AudioEngine }) {
-  const text = useMasterText(engine)
-  return (
-    <div className="master-read" id="master-meters">
-      <span title="Short-term loudness">LUFS <b>{text.lufs}</b></span>
-      <span title="Integrated loudness">I <b>{text.integrated}</b></span>
-      <span title="True peak">TP <b>{text.peak}</b></span>
-      <span>CPU <b>{text.cpu}%</b></span>
+    <div className="level-read" id="master-meters" aria-label="Master levels">
+      <p><span>Short-term</span> <b>{text.lufs}</b> <small>Loudness right now, in LUFS.</small></p>
+      <p><span>Integrated</span> <b>{text.integrated}</b> <small>Loudness of the whole play.</small></p>
+      <p><span>Peak</span> <b>{text.peak} dB</b> <small>Highest true peak.</small></p>
+      <p><span>Processor</span> <b>{text.cpu}%</b> <small>How hard the mix is working.</small></p>
     </div>
   )
 }
@@ -461,7 +622,7 @@ function Meter({ engine, id }: { engine: AudioEngine; id: string }) {
     return () => window.cancelAnimationFrame(frame)
   }, [engine, id])
   return (
-    <div className="meter">
+    <div className="meter" aria-hidden="true">
       <b style={{ height: `${level * 100}%` }} />
     </div>
   )

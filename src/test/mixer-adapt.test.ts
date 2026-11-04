@@ -11,7 +11,7 @@ import { ProjectStore } from '../state/store'
 import { MixerView } from '../ui/MixerView'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-const css = ['src/styles.css', 'src/ui/premium.css', 'src/ui/kit/kit.css', 'src/ui/automation.css', 'src/ui/remoteFixes.css']
+const css = ['src/styles.css', 'src/ui/premium.css', 'src/ui/kit/kit.css', 'src/ui/automation.css', 'src/ui/remoteFixes.css', 'src/ui/mixer.css']
   .map((file) => readFileSync(resolve(root, file), 'utf8'))
   .join('\n')
 
@@ -54,7 +54,7 @@ function markup(store: ProjectStore, width: number, height: number, shell: strin
   </body></html>`
 }
 
-const WORDS = ['Mute', 'Solo', 'Off', 'Read', 'Touch', 'Latch', 'Inserts', 'Pan', 'Arm', 'Safe', 'Tune', 'Level', 'Master', 'Cue']
+const WORDS = ['Mute', 'Solo', 'More', 'Close', 'Off', 'Read', 'Touch', 'Latch', 'Inserts', 'Pan', 'Phase', 'Arm', 'Safe', 'Tune', 'Level', 'Master', 'Cue', 'Output', 'Group', 'Link', 'Send', 'Before', 'After', 'Remove', 'Faders', 'Mutes', 'Solos', 'Edits', 'Arrives', 'Leaves']
 
 async function readStrips(page: Page) {
   return page.evaluate((words) => {
@@ -113,9 +113,8 @@ async function readStrips(page: Page) {
 
 async function scrollTools(page: Page) {
   await page.evaluate(() => {
-    for (const rack of document.querySelectorAll<HTMLElement>('.strip-secondary[data-zone="tools"]')) {
-      rack.scrollTop = rack.scrollHeight
-    }
+    for (const details of document.querySelectorAll<HTMLDetailsElement>('details.mix-more')) details.open = true
+    for (const panel of document.querySelectorAll<HTMLElement>('.mix-panel')) panel.scrollTop = panel.scrollHeight
   })
   return readStrips(page)
 }
@@ -135,17 +134,14 @@ describe('mixer fader stays full size', () => {
         const where = `columns from saved rows ${width}`
         expect(strips.length, where).toBeGreaterThan(1)
         const channel = strips.find((strip) => !strip.master)!
-        expect(strips.every((strip) => !strip.more), where).toBe(true)
-        expect(channel.controls.some((control) => control.word === 'More'), where).toBe(false)
+        expect(strips.every((strip) => strip.more), where).toBe(true)
+        expect(channel.controls.some((control) => control.word === 'More'), where).toBe(true)
         const labels = channel.controls.map((control) => control.word)
-        for (const word of ['Mute', 'Solo', 'Inserts', 'Pan', 'Arm', 'Safe', 'Tune']) {
+        for (const word of ['Mute', 'Solo', 'More']) {
           expect(labels, `${where} ${word}`).toContain(word)
         }
-        expect(channel.racks.find((rack) => rack.zone === 'tools')?.shown, where).toContain('tune')
-        expect(channel.racks.every((rack) => rack.drawer === ''), where).toBe(true)
-        const tools = channel.racks.find((rack) => rack.zone === 'tools')!
-        expect(tools.direction, where).toBe('column')
-        expect(['auto', 'scroll'], where).toContain(tools.overflowY)
+        expect(labels, where).not.toContain('Inserts')
+        expect(labels, where).not.toContain('Pan')
         const heights = strips.map((strip) => strip.faderHeight)
         expect(Math.max(...heights) - Math.min(...heights), where).toBeLessThanOrEqual(1)
         expect(heights[0], where).toBeGreaterThanOrEqual(48)
@@ -182,13 +178,13 @@ describe('mixer fader stays full size', () => {
         expect(Math.max(...heights) - Math.min(...heights), where).toBeLessThanOrEqual(1)
         expect(Math.max(...widthsOfFader) - Math.min(...widthsOfFader), where).toBeLessThanOrEqual(1)
         for (const strip of strips) {
-          expect(strip.more, strip.name).toBe(false)
+          expect(strip.more, strip.name).toBe(true)
           expect(strip.ratio, strip.name).toBeGreaterThanOrEqual(0.5)
           expect(strip.vertical, strip.name).toBe(true)
           expect(strip.faderHeight, strip.name).toBeGreaterThanOrEqual(48)
         }
         const channel = strips.find((strip) => !strip.master)!
-        expect(channel.racks.find((rack) => rack.zone === 'tools')?.shown.split(' '), where).toEqual(expect.arrayContaining(['automation', 'routing', 'inserts', 'pan', 'arm', 'safe', 'tune']))
+        expect(channel.controls.map((control) => control.word), where).toEqual(expect.arrayContaining(['Mute', 'Solo', 'More']))
         const scrolled = await scrollTools(page)
         expect(Math.abs(scrolled[0].faderHeight - heights[0]), where).toBeLessThanOrEqual(1)
         expect(Math.abs(scrolled[0].faderWidth - widthsOfFader[0]), where).toBeLessThanOrEqual(1)
@@ -211,10 +207,12 @@ describe('mixer fader stays full size', () => {
         expect(Math.max(...heights) - Math.min(...heights), where).toBeLessThanOrEqual(1)
         for (const strip of strips) {
           expect(strip.ratio, `${where} ${strip.name}`).toBeGreaterThanOrEqual(0.5)
-          expect(strip.more, strip.name).toBe(false)
+          expect(strip.more, strip.name).toBe(true)
           const tools = strip.racks.find((rack) => rack.zone === 'tools')
-          expect(tools?.direction, strip.name).toBe('column')
-          expect(['auto', 'scroll'], strip.name).toContain(tools?.overflowY)
+          if (tools) {
+            expect(tools.direction, strip.name).toBe('column')
+            expect(['auto', 'scroll'], strip.name).toContain(tools.overflowY)
+          }
           for (const control of strip.controls) {
             expect(control.width, `${where} ${strip.name} ${control.word}`).toBeGreaterThanOrEqual(40)
             expect(control.height, `${where} ${strip.name} ${control.word}`).toBeGreaterThanOrEqual(40)

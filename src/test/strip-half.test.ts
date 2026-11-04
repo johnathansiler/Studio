@@ -15,6 +15,7 @@ const css = [
   readFileSync(resolve(root, 'src/styles.css'), 'utf8'),
   readFileSync(resolve(root, 'src/ui/premium.css'), 'utf8'),
   readFileSync(resolve(root, 'src/ui/automation.css'), 'utf8'),
+  readFileSync(resolve(root, 'src/ui/mixer.css'), 'utf8'),
 ].join('\n')
 
 const engine = {

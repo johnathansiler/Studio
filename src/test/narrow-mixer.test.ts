@@ -11,7 +11,7 @@ import { ProjectStore } from '../state/store'
 import { MixerView } from '../ui/MixerView'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-const css = ['src/styles.css', 'src/ui/premium.css', 'src/ui/kit/kit.css', 'src/ui/automation.css', 'src/ui/remoteFixes.css']
+const css = ['src/styles.css', 'src/ui/premium.css', 'src/ui/kit/kit.css', 'src/ui/automation.css', 'src/ui/remoteFixes.css', 'src/ui/mixer.css']
   .map((file) => readFileSync(resolve(root, file), 'utf8'))
   .join('\n')
 
@@ -48,6 +48,7 @@ describe('phone mixer at 412x915', () => {
       const page = await browser.newPage({ viewport: { width: 412, height: 915 } })
       await page.setContent(markup(store), { waitUntil: 'load' })
       const report = await page.evaluate(() => {
+        for (const details of document.querySelectorAll<HTMLDetailsElement>('details.mix-more')) details.open = true
         const mixer = document.querySelector('.mixer-view') as HTMLElement
         const strip = document.querySelector('.strip') as HTMLElement
         const autos = [...strip.querySelectorAll<HTMLElement>('.strip-auto button')]
@@ -70,6 +71,8 @@ describe('phone mixer at 412x915', () => {
           clientWidth: node.clientWidth,
         }))
         const stripBox = strip.getBoundingClientRect()
+        const face = (strip.querySelector('.strip-col') as HTMLElement | null) ?? strip
+        const faceBox = face.getBoundingClientRect()
         const autoBoxes = autos.map((button) => button.getBoundingClientRect())
         const arm = strip.querySelector('.arm-flag') as HTMLElement
         const armShown = [...arm.querySelectorAll<HTMLElement>('span')].filter((node) => getComputedStyle(node).display !== 'none').map((node) => (node.textContent || '').trim()).join('')
@@ -77,7 +80,7 @@ describe('phone mixer at 412x915', () => {
         return {
           layout: mixer.dataset.layout,
           narrow: mixer.dataset.narrow,
-          stripWidth: stripBox.width,
+          stripWidth: faceBox.width,
           modeCount: autos.length,
           modeInside: autoBoxes.length === 1 && autoBoxes[0].width >= 36 && autoBoxes[0].left >= stripBox.left - 1 && autoBoxes[0].right <= stripBox.right + 1,
           words: autos.map((button) => (button.querySelector('.mode-full') as HTMLElement | null)?.textContent),
