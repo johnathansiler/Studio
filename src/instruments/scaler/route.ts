@@ -20,11 +20,20 @@ export interface RoutedNote {
 }
 
 export interface LivePlan {
-  /** Null when this track has no Scaler. */
+  /** True when Scaler rewrote this key. */
   shaped: boolean
   output: ScalerState['output']
   play: RoutedNote[]
   record: number[]
+}
+
+export interface StepSound {
+  trackId: string
+  pitch: number
+  fine?: number
+  velocity: number
+  durationBeats: number
+  hear: ScalerState['output']
 }
 
 /** Which pitches a take should store. Output is what Scaler generated. Input is the key that was played. */
@@ -38,12 +47,13 @@ export function recordedPitches(mode: RecordSource, input: number, output: numbe
  * One incoming MIDI note through Scaler, then to this track's sound and any MIDI-to tracks.
  * Returns null when Scaler is not on the track.
  */
-export function planLive(project: Project, trackId: string, midi: number, velocity = 0.8, pass = 0): LivePlan | null {
+export function planLive(project: Project, trackId: string, midi: number, velocity = 0.8, pass = 0, span = 2): LivePlan | null {
   const track = project.tracks.find((item) => item.id === trackId)
   if (!track || !trackHasScaler(track)) return null
   const state = normalizeScaler(track.scaler)
-  const produced = produce(state, midi, 2, pass)
-  const notes = state.thru ? withThru(produced, midi, velocity) : produced
+  const produced = produce(state, midi, span, pass)
+  if (produced.hidden) return { shaped: true, output: state.output, play: [], record: [] }
+  const notes = state.thru ? withThru(produced.notes, midi, velocity) : produced.notes
   const targets = playTargets(project, track)
   const level = clamp(velocity, 0.05, 1)
   const play = targets.flatMap((id) => notes.map((note) => ({
@@ -60,15 +70,43 @@ export function planLive(project: Project, trackId: string, midi: number, veloci
   }
 }
 
+/**
+ * Clips store either the keys (record input) or the notes Scaler already made (record output).
+ * Input is shaped on the way to the instrument. Output is left as written.
+ */
+export function notesAfterScaler(project: Project, track: Track, notes: MidiNote[], pass = 0): MidiNote[] {
+  if (!trackHasScaler(track) || !notes.length) return notes
+  const state = normalizeScaler(track.scaler)
+  if (state.recordSource === 'output') return notes
+  return shapeScalerNotes(project, track, notes, pass)
+}
+
+/** Step hits are triggers. Null when this track has no Scaler. */
+export function stepNotes(project: Project, track: Track, pitch: number, velocity: number, durationBeats: number, pass = 0): StepSound[] | null {
+  const plan = planLive(project, track.id, pitch, velocity, pass, Math.max(0.05, durationBeats))
+  if (!plan) return null
+  const duration = Math.max(0.05, durationBeats)
+  return plan.play.map((note) => ({
+    trackId: note.trackId,
+    pitch: note.pitch,
+    fine: note.fine,
+    velocity: note.velocity,
+    durationBeats: duration,
+    hear: plan.output,
+  }))
+}
+
 /** MIDI clips and the step sequencer. Each incoming note becomes Scaler's performance or chord. */
-export function shapeScalerNotes(project: Project, track: Track, notes: MidiNote[], pass = 0): MidiNote[] {
+export function shapeScalerNotes(_project: Project, track: Track, notes: MidiNote[], pass = 0): MidiNote[] {
   if (!trackHasScaler(track) || !notes.length) return notes
   const state = normalizeScaler(track.scaler)
   const out: MidiNote[] = []
-  notes.forEach((note, index) => {
+  notes.forEach((note) => {
     const bar = state.evolve === 'bar' ? Math.floor(note.startBeat / 4) : pass
     const produced = produce(state, note.pitch, Math.max(0.25, note.durationBeats), bar)
-    const list = state.thru ? withThru(produced, note.pitch, note.velocity) : produced
+    if (produced.hidden) return
+    const heard = produced.notes
+    const list = state.thru ? withThru(heard, note.pitch, note.velocity) : heard
     const source = list.length ? list : [{ pitch: note.pitch, startBeat: 0, durationBeats: note.durationBeats, velocity: note.velocity }]
     source.forEach((item, itemIndex) => {
       out.push({
@@ -99,11 +137,12 @@ export function playTargets(project: Project, track: Track): string[] {
   return ids
 }
 
-function produce(state: ScalerState, midi: number, span: number, pass: number): ScalerNote[] {
+function produce(state: ScalerState, midi: number, span: number, pass: number): { notes: ScalerNote[]; hidden: boolean } {
   const locked = lockedChord(state, midi)
-  if (!locked.length) return []
+  if (locked.hidden) return { notes: [], hidden: true }
+  if (!locked.notes.length) return { notes: [], hidden: false }
   if (state.performanceId) {
-    const rendered = renderPerformance(locked, state.performanceId, Math.max(0.25, span), state.rate, state.swing, {
+    const rendered = renderPerformance(locked.notes, state.performanceId, Math.max(0.25, span), state.rate, state.swing, {
       seed: state.variationSeed || 1,
       amount: state.variation,
       root: state.root,
@@ -111,18 +150,21 @@ function produce(state: ScalerState, midi: number, span: number, pass: number): 
       pass: state.evolve === 'off' ? 0 : pass,
       evolve: state.evolve,
     })
-    if (rendered.length) return rendered
+    if (rendered.length) return { notes: rendered, hidden: false }
   }
-  return locked.map((tone) => ({
-    pitch: tone.midi,
-    fine: tone.cents ? Math.round(tone.cents) : undefined,
-    startBeat: 0,
-    durationBeats: Math.max(0.25, span),
-    velocity: 0.84,
-  }))
+  return {
+    notes: locked.notes.map((tone) => ({
+      pitch: tone.midi,
+      fine: tone.cents ? Math.round(tone.cents) : undefined,
+      startBeat: 0,
+      durationBeats: Math.max(0.25, span),
+      velocity: 0.84,
+    })),
+    hidden: false,
+  }
 }
 
-function lockedChord(state: ScalerState, midi: number) {
+function lockedChord(state: ScalerState, midi: number): { notes: { midi: number; cents: number }[]; hidden: boolean } {
   const chords = scalerChords(state)
   const current = chords[Math.min(state.chordIndex, Math.max(0, chords.length - 1))]
   const currentTones = (current?.tones ?? []).map((tone) => ({ midi: tone.midi, cents: tone.cents }))
@@ -136,7 +178,8 @@ function lockedChord(state: ScalerState, midi: number) {
     chords: chords.map((chord) => chord.tones.map((tone) => ({ midi: tone.midi, cents: tone.cents }))),
     current: currentTones,
   })
-  return locked.notes ?? []
+  if (locked.hidden || !locked.notes?.length) return { notes: [], hidden: locked.hidden || !locked.notes }
+  return { notes: locked.notes, hidden: false }
 }
 
 function withThru(notes: ScalerNote[], midi: number, velocity: number): ScalerNote[] {

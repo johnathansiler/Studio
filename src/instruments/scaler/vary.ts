@@ -322,14 +322,14 @@ function hits(style: PlayStyle, tones: Tone[], rhythm: number[], span: number, s
 
 function humanize(style: PlayStyle, notes: ScalerNote[], amount: VariationAmount, rng: () => number, span: number): ScalerNote[] {
   const depth = style.humanize * (amount === 'subtle' ? 0.45 : amount === 'medium' ? 0.75 : 1)
-  return notes.map((note, index) => {
+  return notes.map((note) => {
     const sway = (rng() - 0.5) * 2 * depth
     const vel = clamp(note.velocity * (0.9 + rng() * 0.18), 0.05, 1)
     return { ...note, startBeat: clamp(note.startBeat + sway, 0, Math.max(0, span - 0.04)), velocity: vel, durationBeats: note.durationBeats }
   }).map((note, index) => ({ ...note, velocity: curveValue(style, index, note.velocity) }))
 }
 
-function colorTones(style: PlayStyle, notes: ScalerNote[], tones: Tone[], ctx: VariationContext, rng: () => number, span: number, amount: VariationAmount): ScalerNote[] {
+function colorTones(style: PlayStyle, notes: ScalerNote[], _tones: Tone[], ctx: VariationContext, rng: () => number, span: number, amount: VariationAmount): ScalerNote[] {
   const next = notes.slice()
   const room = Math.max(0, barMax(style, span) - next.length)
   if (room < 1 || rng() > (amount === 'subtle' ? 0.55 : 0.85)) return next
@@ -364,7 +364,7 @@ function majorColor(style: PlayStyle, notes: ScalerNote[], tones: Tone[], ctx: V
   }
   if (next.length + 1 <= max && next.length) {
     const call = next[0]
-    const answer = neighborTone({ pitch: call.pitch, fine: call.fine, startBeat: 0, durationBeats: 0.2, velocity: call.velocity }, ctx, 1)
+    const answer = neighborTone({ pitch: call.pitch, fine: call.fine }, ctx, 1)
     next.push(noteOf(answer, Math.min(span * 0.75, span - 0.08), 0.3, clamp(call.velocity * 0.8, 0.05, 1)))
   }
   return next

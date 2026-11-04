@@ -128,7 +128,7 @@
   white-space: nowrap;
   overflow: visible;
   text-overflow: clip;
-  min-height: 32px;
+  min-height: 40px;
   padding: 0 12px;
   border-radius: 999px;
   background-image: var(--face);
@@ -414,3 +414,29 @@
 }
 .scaler-panel.phone .stepper button,
 .scaler-panel.fold .stepper button { min-width: 44px; min-height: 44px; }
+.perf-menu { width: min(440px, calc(100vw - 16px)); gap: 8px; }
+.perf-menu input,
+.perf-menu select,
+.perf-menu button { min-height: 40px; min-width: 40px; }
+.perf-filters, .perf-variation, .perf-route, .perf-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.perf-filter { display: flex; flex-direction: column; gap: 2px; min-width: 120px; font-size: 12px; }
+.perf-filter select, .perf-menu input {
+  border-radius: 8px;
+  border: 1px solid var(--line, #0d1218);
+  background-color: #222933;
+  background-image: var(--face);
+  color: inherit;
+  box-shadow: var(--raised);
+  padding: 0 10px;
+}
+.perf-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto; }
+.perf-row strong { flex: 1 1 140px; }
+.perf-note { margin: 0; color: #8ea0b4; }
+@media (max-width: 900px) {
+  .perf-menu button, .perf-menu input, .perf-menu select { min-height: 44px; }
+}
