@@ -26,7 +26,7 @@ import { applyTransportLaunch, recordedLength } from './model/launch'
 import { shouldCountIn } from './model/sessionInteract'
 import { editorForGesture, releaseKeyboardForPiano } from './model/editorOpen'
 import { shouldCloseOnscreenPiano } from './model/onscreenPiano'
-import { armedRecordPlan, homeSample, playPress, playStartsCapture, recordPress, stopPress } from './model/transport'
+import { armedRecordPlan, playPress, playStartsCapture, recordPress, startPress, stopPress } from './model/transport'
 import { keepLandscapeAfterClose } from './ui/keyboardStage'
 import { countInAt, meterAtSample, projectSampleBeat, tempoAtSample } from './model/tempoMap'
 import { displayedPlayhead } from './model/transportSync'
@@ -909,17 +909,11 @@ export function App() {
   }
 
   async function returnToStart() {
-    const home = homeSample(store.project)
-    if (engine.status === 'recording' || engine.status === 'counting-in') {
-      await stop()
-      await locate(home)
+    if (startPress(engine.status).action === 'roll') {
+      await playFrom(0)
       return
     }
-    if (engine.status === 'playing') {
-      await playFrom(home)
-      return
-    }
-    await locate(home)
+    await locate(0)
   }
 
   async function playFrom(sample: number, mode: 'arrangement' | 'session' = 'arrangement', intent: 'play' | 'session-launch' = 'play') {

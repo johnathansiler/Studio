@@ -4041,6 +4041,14 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
 .shell.phone:not(:has(.tool-slot:not(:empty))) {
   padding-bottom: env(safe-area-inset-bottom);
 }
+.shell.phone .tool-slot {
+  order: 7;
+  flex: 0 0 auto;
+}
+.shell.phone:not(.land) .transport.simple .t-main > .tempo-cluster,
+.shell.fold .transport.simple .t-main > .tempo-cluster {
+  order: 0;
+}
 .shell:has(.tool-slot:not(:empty)) :is(
   .plugin-sheet,
   .clip-sheet,
