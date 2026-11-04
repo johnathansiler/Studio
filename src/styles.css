@@ -3746,3 +3746,31 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
     letter-spacing: -0.04em;
   }
 }
+
+/* Foldable width keeps the same 40px touch floor as a phone. */
+.shell.fold .bpm-readout,
+.shell.fold .tap-tempo {
+  height: 44px;
+  min-height: 44px;
+}
+.shell.fold .tap-tempo { min-width: 44px; }
+.shell.fold .project-name,
+.shell.fold .pl-head .name {
+  min-height: 40px;
+}
+.shell.fold .pl-head .piano-open,
+.shell.fold .pl-head .beat-open {
+  height: 40px;
+  min-height: 40px;
+  min-width: 40px;
+}
+.shell.fold .tempo-point {
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border: 0;
+  background: radial-gradient(circle, var(--amber) 0 6px, transparent 7px);
+}
+.shell.fold .loop-host button.loop-grip {
+  min-height: 40px;
+}

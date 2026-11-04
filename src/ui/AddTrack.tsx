@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { TRACK_CHOICES, type TrackChoice } from '../model/addTrack'
 import type { ProjectStore } from '../state/store'
 
@@ -26,6 +26,20 @@ export function AddTrackButton({
   onAdded?: (id: string, choice: TrackChoice) => void
 }) {
   const [open, setOpen] = useState(false)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const [place, setPlace] = useState<{ top: number; left: number; width: number } | null>(null)
+
+  function placeMenu() {
+    const button = buttonRef.current
+    if (!button) return
+    const rect = button.getBoundingClientRect()
+    const width = Math.min(420, window.innerWidth - 16)
+    const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8))
+    const estimated = 248
+    let top = rect.bottom + 4
+    if (top + estimated > window.innerHeight - 8) top = Math.max(8, rect.top - estimated - 4)
+    setPlace({ top, left, width })
+  }
 
   useEffect(() => {
     if (!open) return
@@ -39,9 +53,11 @@ export function AddTrackButton({
     }
     window.addEventListener('pointerdown', close)
     window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', placeMenu)
     return () => {
       window.removeEventListener('pointerdown', close)
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', placeMenu)
     }
   }, [open])
 
@@ -57,11 +73,19 @@ export function AddTrackButton({
     <div className={`add-track-slot${prominent ? ' prominent' : ''}`}>
       <button
         type="button"
+        ref={buttonRef}
         className="add-track-btn"
         aria-expanded={open}
         aria-label="Add Track"
         title="Add Track. Pick what the new track is for."
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          if (open) {
+            setOpen(false)
+            return
+          }
+          placeMenu()
+          setOpen(true)
+        }}
       >
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
           <path d="M9 3.5v11M3.5 9h11" />
@@ -69,7 +93,12 @@ export function AddTrackButton({
         <span>Add Track</span>
       </button>
       {open && (
-        <div className="add-track-menu" role="group" aria-label="Add Track">
+        <div
+          className="add-track-menu"
+          role="group"
+          aria-label="Add Track"
+          style={place ? { position: 'fixed', top: place.top, left: place.left, width: place.width, zIndex: 80 } : undefined}
+        >
           {TRACK_CHOICES.map((choice) => (
             <button
               key={choice.id}

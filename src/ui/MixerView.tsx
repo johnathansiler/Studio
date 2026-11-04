@@ -12,7 +12,7 @@ import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { TouchSlider } from './kit/controls'
-import { meterFill } from './levels'
+import { holdMeter } from './levels'
 import { TrackPresence } from './presenceMarks'
 import { SecondaryRack, type SecondaryItem } from './SecondaryRack'
 
@@ -444,15 +444,21 @@ function MasterReadout({ engine }: { engine: AudioEngine }) {
 function Meter({ engine, id }: { engine: AudioEngine; id: string }) {
   const [level, setLevel] = useState(0)
   useEffect(() => {
-    let timer = 0
-    const tick = () => {
+    let frame = 0
+    const hold = { value: 0, at: 0 }
+    let painted = 0
+    const tick = (now: number) => {
       const levels = engine.levels()
-      const value = meterFill(id === 'master' ? levels.master : levels.tracks[id] || 0)
-      setLevel((prev) => (Math.abs(prev - value) < 0.03 ? prev : value))
-      timer = window.setTimeout(tick, 80)
+      const raw = id === 'master' ? levels.master : (levels.tracks[id] || 0)
+      const shown = holdMeter(hold, raw, now)
+      if (Math.abs(painted - shown) >= 0.015) {
+        painted = shown
+        setLevel(shown)
+      }
+      frame = window.requestAnimationFrame(tick)
     }
-    timer = window.setTimeout(tick, 80)
-    return () => window.clearTimeout(timer)
+    frame = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(frame)
   }, [engine, id])
   return (
     <div className="meter">

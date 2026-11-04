@@ -198,8 +198,10 @@ describe('phone fit at 412x915', () => {
         await shot(page, 'live-grid-412')
 
         await page.getByRole('button', { name: /^Mix/ }).click()
+        await page.locator('.mixer-view[data-layout="columns"]').waitFor()
         await page.locator('.mixer .strip').first().waitFor()
-        await page.getByRole('button', { name: 'Columns' }).click()
+        expect(await page.getByRole('button', { name: 'Columns' }).count()).toBe(0)
+        expect(await page.getByRole('button', { name: 'Rows' }).count()).toBe(0)
         const mix = await page.evaluate(() => {
           const mixer = document.querySelector('.mixer-view .mixer') as HTMLElement
           const mute = document.querySelector('.strip button[aria-label*="Mute"]') as HTMLElement
@@ -241,9 +243,64 @@ describe('phone fit at 412x915', () => {
         expect(Math.abs(mix.masterWidth - mix.stripWidth)).toBeLessThan(2)
         await shot(page, 'live-mix-412')
 
+        const phone = await browser.newPage({ viewport: { width: 390, height: 844 } })
+        await phone.goto(url, { waitUntil: 'domcontentloaded' })
+        await phone.getByRole('button', { name: /^Arrange/ }).first().waitFor()
+        const phoneAdd = await phone.getByRole('button', { name: 'Add Track' }).boundingBox()
+        expect(phoneAdd!.height).toBeGreaterThanOrEqual(48)
+        expect(phoneAdd!.width).toBeGreaterThanOrEqual(40)
+        await phone.getByRole('button', { name: 'Add Track' }).click()
+        const phoneChoices = phone.locator('.add-choice')
+        expect(await phoneChoices.count()).toBe(4)
+        for (let i = 0; i < 4; i++) {
+          const choice = await phoneChoices.nth(i).boundingBox()
+          expect(choice!.height).toBeGreaterThanOrEqual(40)
+          expect(choice!.width).toBeGreaterThanOrEqual(40)
+        }
+        const phoneWords = await phone.evaluate(() => {
+          return [...document.querySelectorAll('.add-choice strong, .add-choice small')].map((el) => {
+            const box = el.getBoundingClientRect()
+            return {
+              text: (el.textContent || '').trim(),
+              clipped: el.scrollWidth > el.clientWidth + 1,
+              off: box.right > window.innerWidth + 1 || box.left < -1,
+            }
+          })
+        })
+        for (const word of phoneWords) {
+          expect(word.clipped, word.text).toBe(false)
+          expect(word.off, word.text).toBe(false)
+        }
+        await shot(phone, 'add-track-390')
+        await phone.keyboard.press('Escape')
+        await phone.close()
+
         const fold = await browser.newPage({ viewport: { width: 923, height: 1024 } })
         await fold.goto(url, { waitUntil: 'domcontentloaded' })
         await fold.getByRole('button', { name: /^Arrange/ }).first().waitFor()
+        const foldAdd = await fold.getByRole('button', { name: 'Add Track' }).boundingBox()
+        expect(foldAdd!.height).toBeGreaterThanOrEqual(48)
+        expect(foldAdd!.width).toBeGreaterThanOrEqual(40)
+        await fold.getByRole('button', { name: 'Add Track' }).click()
+        const foldChoices = fold.locator('.add-choice')
+        expect(await foldChoices.count()).toBe(4)
+        for (let i = 0; i < 4; i++) {
+          const choice = await foldChoices.nth(i).boundingBox()
+          expect(choice!.height).toBeGreaterThanOrEqual(40)
+        }
+        const foldWords = await fold.evaluate(() => {
+          return [...document.querySelectorAll('.add-choice strong, .add-choice small')].map((el) => ({
+            text: (el.textContent || '').trim(),
+            clipped: el.scrollWidth > el.clientWidth + 1,
+            right: el.getBoundingClientRect().right,
+          }))
+        })
+        for (const word of foldWords) {
+          expect(word.clipped, word.text).toBe(false)
+          expect(word.right, word.text).toBeLessThanOrEqual(923 + 1)
+        }
+        await shot(fold, 'add-track-923')
+        await fold.keyboard.press('Escape')
         await fold.getByRole('button', { name: /Snap grid/ }).click()
         await fold.getByRole('dialog', { name: 'Snap grid' }).waitFor()
         const foldGrid = await fold.getByRole('button', { name: '1/8', exact: true }).boundingBox()
@@ -290,5 +347,5 @@ describe('phone fit at 412x915', () => {
     } finally {
       child.kill('SIGTERM')
     }
-  }, 60000)
+  }, 90000)
 })

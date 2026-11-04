@@ -9,7 +9,7 @@ import { editorForGesture, noteEditorsAfterOpen, releaseKeyboardForPiano } from 
 import { midiLit, pruneMidiMarks } from '../model/midiActivity'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
-import { meterFill } from '../ui/levels'
+import { holdMeter, meterFill } from '../ui/levels'
 import { editorHistoryStep, isPadsHistory, isPianoHistory } from '../ui/keyboardStage'
 import { ArrangeView } from '../ui/ArrangeView'
 import { PadsPanel } from '../ui/PadsPanel'
@@ -112,6 +112,12 @@ describe('beat machine close and live meters', () => {
     expect(meterFill(0.25)).toBeCloseTo(0.8)
     expect(meterFill(2)).toBe(1)
     expect(meterFill(Number.NaN)).toBe(0)
+    const hold = { value: 0, at: 0 }
+    expect(holdMeter(hold, 0.05, 1000)).toBeCloseTo(meterFill(0.05))
+    expect(holdMeter(hold, 0, 1100)).toBeCloseTo(meterFill(0.05))
+    expect(holdMeter(hold, 0, 1000 + 220 + 280)).toBe(0)
+    const rising = { value: 0.1, at: 0 }
+    expect(holdMeter(rising, 0.5, 50)).toBeCloseTo(meterFill(0.5))
   })
 
   it('lights only the tracks that have a note in the window', () => {
