@@ -9,6 +9,7 @@ import { normalizeTrackScaler } from '../../instruments/scaler/model'
 import { normalizeScale } from '../../model/scale'
 import { normalizePadKit } from '../../model/padMachine'
 import { bindPatternClips, normalizeBeats, repairArrangementIdentities } from '../../model/steps'
+import { adoptStepSequencers, createStepsPlugin } from '../../model/stepPlugin'
 import { normalizeMix } from '../../model/mixGroups'
 import { normalizeOmniProject } from '../../instruments/patch/model'
 import { tuneLiveLatency } from './autoTune'
@@ -931,6 +932,7 @@ export function defaultParams(id: string) {
 }
 
 export function createPlugin(pluginId: string, preset?: string): PluginInstance {
+  if (pluginId === 'steps') return createStepsPlugin()
   const move = MOVES[pluginId] ?? { to: 'eq' as const, kind: 0 }
   const core = move.remove ? 'limiter' : move.to
   const params = defaultParams(core)
@@ -982,6 +984,7 @@ export function normalizeProject(project: Project): Project {
   const beats = normalizeBeats(project.beats, project.patternClips)
   project.beats = beats.beats
   project.patternClips = bindPatternClips(beats.patternClips, project.tracks)
+  adoptStepSequencers(project)
   repairArrangementIdentities(project)
   project.roll = { ...defaultRoll(), ...project.roll }
   project.quantize = normalizeQuantize(project.quantize)

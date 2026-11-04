@@ -403,17 +403,18 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .views button.active { background: var(--accent); color: var(--accent-ink); font-weight: 640; }
 .spacer { flex: 1; }
 .menu-btn {
-  width: 36px; height: 36px; min-width: 36px; padding: 0; flex: none;
-  display: grid; place-items: center; border-radius: 8px;
+  width: auto; height: 40px; min-width: 40px; min-height: 40px; padding: 0 10px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 8px;
   border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  font-size: 13px; font-weight: 650;
 }
-.menu-word { display: none; }
+.menu-word { display: inline; font-size: 13px; font-weight: 650; line-height: 1; }
 .shell.phone .menu-word, .shell.fold .menu-word { display: inline; font-size: 12px; }
 .shell.phone .menu-ico, .shell.fold .menu-ico { display: none; }
 .shell.phone .menu-btn, .shell.fold .menu-btn { width: auto; min-width: 64px; padding: 0 10px; }
 .menu-btn.on { background: var(--accent-dim); color: var(--accent); border-color: transparent; }
 .shell-menu {
-  position: absolute; top: calc(100% + 4px); right: 8px; z-index: 80;
+  position: absolute; top: calc(100% + 4px); left: 8px; right: auto; z-index: 80;
   width: min(280px, calc(100vw - 16px));
   max-height: min(78dvh, calc(100dvh - 64px));
   overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
@@ -560,8 +561,37 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .lanes { overflow: hidden; }
 .ruler-gap { height: 44px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 6px; padding: 0 6px; }
 .add-track-btn, .t-btn.piano-btn { min-height: 44px; min-width: 44px; }
-.add-track-slot { position: sticky; bottom: 0; z-index: 2; display: flex; padding: 6px; background: #141c18; }
-.add-track-btn { width: auto; min-width: 40px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line); background: #18231d; font-size: 13px; font-weight: 650; }
+.add-track-slot { position: relative; z-index: 2; display: flex; padding: 6px; background: #141c18; }
+.add-track-slot.prominent { flex: 1; padding: 0; background: transparent; }
+.add-track-btn { width: auto; min-width: 48px; min-height: 48px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: #18231d; font-size: 16px; font-weight: 740; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.add-track-slot.prominent .add-track-btn,
+.arrange-add .add-track-btn { width: 100%; height: 52px; min-height: 52px; }
+.arrange-add {
+  position: sticky; top: 0; z-index: 6; height: 56px; min-height: 56px;
+  display: flex; align-items: stretch; padding: 4px; background: #141c18; border-bottom: 1px solid var(--line);
+}
+.timeline-add-spacer { height: 56px; min-height: 56px; }
+.add-track-menu {
+  position: absolute; left: 0; top: calc(100% + 4px); z-index: 40;
+  width: min(420px, calc(100vw - 16px));
+  display: flex; flex-direction: column; gap: 8px; padding: 8px;
+  background: #18241d; border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow);
+}
+.add-choice {
+  display: flex; align-items: center; gap: 12px; min-height: 56px; width: 100%;
+  padding: 8px 12px; text-align: left; border-radius: 12px; border: 1px solid var(--line); background: #121a16; color: var(--text);
+}
+.add-choice strong { display: block; font-size: 16px; }
+.add-choice small { display: block; color: var(--muted); font-size: 13px; }
+.step-sequencer { display: flex; flex-direction: column; height: 100%; min-height: 0; background: #101614; }
+.step-sequencer-bar { display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 8px; border-bottom: 1px solid var(--line); }
+.step-sequencer-bar h2 { margin: 0; flex: 1; font-size: 16px; }
+.step-close {
+  min-width: 48px; min-height: 48px; padding: 0 16px; border: 0; border-radius: 10px;
+  background: var(--accent); color: var(--accent-ink); font-weight: 740;
+}
+.step-sequencer .beats { flex: 1; min-height: 0; }
+.shell.phone[data-plugin="steps"] .dock-slot { flex: 1 1 68%; max-height: none; }
 .add-sheet {
   position: fixed; z-index: 70; left: 8px; right: 8px; bottom: calc(12px + env(safe-area-inset-bottom));
   background: #18241d; border: 1px solid var(--line); border-radius: 16px; padding: 8px;
@@ -1344,7 +1374,7 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 .shell.phone .brand p { display: none; }
 .shell.phone .project-name { order: 2; flex: 1 1 120px; min-width: 128px; width: auto; }
 .shell.phone .unstuck-btn { order: 3; }
-.shell.phone .menu-btn { order: 4; }
+.shell.phone .menu-btn { order: -1; }
 .shell.phone .views { order: 5; flex: 1 1 100%; width: 100%; }
 .shell.phone .views button { flex: 1; padding: 0 4px; }
 .shell.phone .history-btns { order: 6; }
@@ -3137,7 +3167,7 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   padding: 0 8px;
 }
 .shell.phone:not(.land) .unstuck-btn { order: 3; height: 40px; min-height: 40px; padding: 0 8px; }
-.shell.phone:not(.land) .menu-btn { order: 4; height: 40px; min-height: 40px; min-width: 40px; }
+.shell.phone:not(.land) .menu-btn { order: -1; height: 40px; min-height: 40px; min-width: 40px; }
 .shell.phone:not(.land) .views { order: 5; flex: 1 1 100%; width: 100%; gap: 4px; }
 .shell.phone:not(.land) .views button { height: 40px; min-height: 40px; padding: 0 2px; font-size: 13px; }
 .shell.phone:not(.land) .transport {

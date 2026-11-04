@@ -148,6 +148,6 @@ describe('scaler instrument', () => {
   })
 
   it('is not its own view tab', () => {
-    expect(VIEW_COPY.map((item) => item.id)).toEqual(['arrange', 'mix', 'beats', 'session', 'collab'])
+    expect(VIEW_COPY.map((item) => item.id)).toEqual(['arrange', 'mix', 'session', 'collab'])
   })
 })

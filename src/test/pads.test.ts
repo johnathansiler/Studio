@@ -190,10 +190,12 @@ describe('pads drum machine', () => {
     expect(insertLabel(drumsPlugin.pluginId, drumsPlugin)).toBe('Beat Machine')
     expect(insertLabel('sampler')).toBe('Sampler')
     const choices = insertChoices(CATALOG, true).map((item) => item.name)
-    expect(choices[0]).toBe('Beat Machine')
+    expect(choices[0]).toBe('Step Sequencer')
+    expect(choices[1]).toBe('Beat Machine')
     expect(insertChoices(CATALOG, false).some((item) => item.name === 'Beat Machine')).toBe(false)
     expect(browserGroup('drums')[0]).toMatchObject({ id: 'pads', name: 'Beat Machine' })
-    expect(browserGroup('instruments')[0]).toMatchObject({ id: 'pads', name: 'Beat Machine' })
+    expect(browserGroup('instruments')[0]).toMatchObject({ id: 'steps', name: 'Step Sequencer' })
+    expect(browserGroup('instruments')[1]).toMatchObject({ id: 'pads', name: 'Beat Machine' })
 
     const store = new ProjectStore(createEmptyProject())
     const id = store.project.tracks.find((track) => track.type === 'midi')!.id

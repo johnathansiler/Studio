@@ -131,15 +131,11 @@ export function WidthBar({
   value,
   onChange,
   onReset,
-  mixer,
-  onMixer,
 }: {
   axis: 'strip' | 'column'
   value: number
   onChange: (next: number) => void
   onReset: () => void
-  mixer?: MixerFlow
-  onMixer?: (next: MixerFlow) => void
 }) {
   const copy = COPY[axis]
   const bounds = axis === 'strip' ? STRIP_BOUNDS : COLUMN_BOUNDS
@@ -166,30 +162,6 @@ export function WidthBar({
         >
           {value <= STRIP_HALF ? 'Normal' : 'Narrow'}
         </button>
-      )}
-      {axis === 'strip' && onMixer && (
-        <>
-          <button
-            type="button"
-            className="width-reset"
-            aria-pressed={mixer === 'columns'}
-            aria-label="Columns. Channel strips stand side by side."
-            title="Channel strips stand side by side."
-            onClick={() => onMixer('columns')}
-          >
-            Columns
-          </button>
-          <button
-            type="button"
-            className="width-reset"
-            aria-pressed={mixer === 'rows'}
-            aria-label="Rows. Each channel is one horizontal row."
-            title="Each channel is one horizontal row. The rows scroll up and down."
-            onClick={() => onMixer('rows')}
-          >
-            Rows
-          </button>
-        </>
       )}
       <button type="button" className="width-reset" aria-label={copy.reset} title={copy.reset} onClick={onReset}>
         Reset

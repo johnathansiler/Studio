@@ -1,10 +1,10 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { audioInput, tracksFor } from '../model/addTrack'
+import { audioInput, TRACK_CHOICES, tracksFor } from '../model/addTrack'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
-import { AddTrackPanel } from '../ui/AddTrack'
+import { AddTrackButton } from '../ui/AddTrack'
 import { deriveSongContext } from '../unstuck/context'
 import { actionDetail, unstuckActions } from '../unstuck/menu'
 import { suggest } from '../unstuck/suggest'
@@ -14,44 +14,18 @@ import { ToolBar } from '../ui/ToolBar'
 describe('add track panel', () => {
   const base = { kind: 'audio' as const, count: 1, instrument: 'synth' as const, input: 'mic' as const, inputIndex: 1, channels: 1 as const, armed: false }
 
-  it('shows only the options for the chosen type, with disarmed audio defaults', () => {
-    const audio = renderToStaticMarkup(createElement(AddTrackPanel, { spec: base, place: 'sheet', onChange: () => undefined, onCancel: () => undefined, onCommit: () => undefined }))
-    expect(audio).toContain('Add track')
-    expect(audio).toContain('Record a voice or an instrument.')
-    expect(audio).toContain('>Mic<')
-    expect(audio).toContain('>Line<')
-    expect(audio).toContain('>Mono<')
-    expect(audio).toContain('>Stereo<')
-    expect(audio).toContain('Input 1')
-    expect(audio).toContain('Step 1')
-    expect(audio).toContain('Arm after adding')
-    expect(audio).toContain('Off. The new track stays quiet until you arm it.')
-    expect(audio).not.toContain('Leave disarmed')
-    expect(audio).toContain('Add Audio track')
-    expect(audio).not.toContain('>Keys<')
-
-    const midi = renderToStaticMarkup(createElement(AddTrackPanel, { spec: { ...base, kind: 'midi' }, place: 'pop', onChange: () => undefined, onCancel: () => undefined, onCommit: () => undefined }))
-    expect(midi).toContain('>Beat Machine<')
-    expect(midi.indexOf('>Beat Machine<')).toBeLessThan(midi.indexOf('>Keys<'))
-    expect(midi).toContain('>Keys<')
-    expect(midi).toContain('Play from the on-screen keyboard')
-    expect(midi).not.toContain('>Mic<')
-    expect(midi).toContain('Add Instrument track')
-
-    const drums = renderToStaticMarkup(createElement(AddTrackPanel, { spec: { ...base, kind: 'drum', instrument: 'drum-machine' }, place: 'sheet', onChange: () => undefined, onCancel: () => undefined, onCommit: () => undefined }))
-    expect(drums).toContain('>Beat Machine<')
-    const kits = drums.slice(drums.indexOf('<h3>Kit</h3>'))
-    expect(kits.indexOf('>Beat Machine</strong>')).toBeLessThan(kits.indexOf('>Kit</strong>'))
-    expect(drums).toContain('>Kit<')
-    expect(drums).toContain('>808<')
-    expect(drums).not.toContain('Input number')
-    expect(drums).toContain('Add Drums track')
-
-    const bus = renderToStaticMarkup(createElement(AddTrackPanel, { spec: { ...base, kind: 'bus' }, place: 'sheet', onChange: () => undefined, onCancel: () => undefined, onCommit: () => undefined }))
-    expect(bus).toContain('Group tracks, or return an effect.')
-    expect(bus).not.toContain('>Mic<')
-    expect(bus).not.toContain('>Kit<')
-    expect(bus).toContain('Add Bus track')
+  it('offers four one-tap choices and a large Add Track button', () => {
+    expect(TRACK_CHOICES.map((item) => `${item.name} (${item.detail})`)).toEqual([
+      'Instrument (Play keys)',
+      'Step Sequencer (Program beats)',
+      'Beat Machine (Pads)',
+      'Audio / Vocal (Record mic)',
+    ])
+    const store = new ProjectStore(createEmptyProject())
+    const html = renderToStaticMarkup(createElement(AddTrackButton, { store, prominent: true }))
+    expect(html).toContain('Add Track')
+    expect(html).toContain('add-track-btn')
+    expect(html).not.toContain('role="dialog"')
   })
 
   it('numbers the audio input and leaves other tracks disarmed', () => {

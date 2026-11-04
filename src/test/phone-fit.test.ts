@@ -88,8 +88,9 @@ describe('phone fit at 412x915', () => {
         expect(buttonsFit).toBe(true)
         await shot(page, 'live-arrange-412')
 
-        await page.getByRole('button', { name: /^Beats/ }).click()
-        await page.locator('.rack-step').first().waitFor()
+        await page.getByRole('button', { name: 'Add Track' }).click()
+        await page.getByRole('button', { name: /Step Sequencer\. Program beats/ }).click()
+        await page.locator('[data-step-sequencer="open"] .rack-step').first().waitFor()
         const grid = await page.evaluate(() => {
           const steps = [...document.querySelectorAll('.rack-row[data-channel="Kick"] .rack-step')].map((el) => el.getBoundingClientRect())
           const view = document.querySelector('.rack-scroll')?.getBoundingClientRect()
@@ -170,27 +171,16 @@ describe('phone fit at 412x915', () => {
         expect(roll).toBeGreaterThan(0)
         await shot(page, 'live-beats-412')
 
+        await page.locator('.step-close').click()
+        await page.locator('[data-step-sequencer="open"]').waitFor({ state: 'detached' })
         await page.getByRole('button', { name: /^Arrange/ }).first().click()
-        await page.getByRole('button', { name: /^Add track$/ }).click()
-        await page.getByRole('dialog', { name: 'Add track' }).waitFor()
-        const sheet = await page.evaluate(() => {
-          const panel = document.querySelector('.add-sheet') as HTMLElement
-          const add = [...panel.querySelectorAll('button')].find((button) => (button.textContent || '').includes('Add Audio')) as HTMLElement
-          const hit = document.elementFromPoint(add.getBoundingClientRect().left + 8, add.getBoundingClientRect().top + 8)
-          const bg = getComputedStyle(panel).backgroundColor
-          return {
-            parent: panel.parentElement?.tagName,
-            z: Number(getComputedStyle(panel).zIndex),
-            scrim: !!document.querySelector('.guide-scrim'),
-            opaque: bg.startsWith('rgb(') && !bg.endsWith(', 0)'),
-            hit: hit === add || add.contains(hit),
-          }
-        })
-        expect(sheet.parent).toBe('BODY')
-        expect(sheet.z).toBeGreaterThanOrEqual(200)
-        expect(sheet.scrim).toBe(true)
-        expect(sheet.opaque).toBe(true)
-        expect(sheet.hit).toBe(true)
+        const add = page.getByRole('button', { name: 'Add Track' })
+        const addBox = await add.boundingBox()
+        expect(addBox!.height).toBeGreaterThanOrEqual(48)
+        expect(addBox!.x).toBeLessThan(80)
+        await add.click()
+        await page.getByRole('group', { name: 'Add Track' }).waitFor()
+        expect(await page.getByRole('dialog').count()).toBe(0)
         await shot(page, 'live-add-track-412')
         await page.keyboard.press('Escape')
 

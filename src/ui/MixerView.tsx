@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
-import { STRIP_BOUNDS, displayedStrip, isNarrowStrip, mixerFlow } from '../model/layoutWidth'
+import { STRIP_BOUNDS, displayedStrip, isNarrowStrip } from '../model/layoutWidth'
 import { gainToDb } from '../model/time'
 import { mixGroupsOf, selectMixer, trackGroupId } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -27,7 +27,7 @@ function readViewport() {
 
 function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void; onOpenKeyboard?: (trackId: string) => void }) {
   const project = selectMixer(store).project
-  const { layout, setStrip, setMixer, resetStrip } = useLayoutWidths(project.id)
+  const { layout, setStrip, resetStrip } = useLayoutWidths(project.id)
   const areaRef = useRef<HTMLDivElement>(null)
   const stripRef = useRef(layout.strip)
   stripRef.current = layout.strip
@@ -42,9 +42,9 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
     return () => window.removeEventListener('resize', apply)
   }, [])
   const strip = displayedStrip(layout.strip, viewport.width)
-  const flow = mixerFlow(layout.mixer, viewport.width, viewport.height)
-  const narrow = flow === 'columns' && isNarrowStrip(strip)
-  const rows = flow === 'rows'
+  const flow = 'columns' as const
+  const narrow = isNarrowStrip(strip)
+  const rows = false
   return (
     <>
     <div
@@ -55,7 +55,7 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
       data-narrow={narrow ? '1' : undefined}
       style={{ ['--strip' as string]: `${strip}px` }}
     >
-      <WidthBar axis="strip" value={layout.strip} onChange={setStrip} onReset={resetStrip} mixer={flow} onMixer={setMixer} />
+      <WidthBar axis="strip" value={layout.strip} onChange={setStrip} onReset={resetStrip} />
       {levelsOpen && <LevelBar engine={engine} onClose={() => setLevelsOpen(false)} />}
       {fxTrack ? (
         <StripSlots store={store} engine={engine} trackId={fxTrack} onBack={() => setFxTrack(null)} />

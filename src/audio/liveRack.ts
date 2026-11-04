@@ -324,7 +324,7 @@ export class LiveRack {
   private owners(project: Project) {
     return [
       { id: 'master', plugins: project.masterPlugins },
-      ...project.tracks.map((track) => ({ id: track.id, plugins: track.plugins })),
+      ...project.tracks.map((track) => ({ id: track.id, plugins: track.plugins.filter((plugin) => plugin.pluginId !== 'steps') })),
     ]
   }
 

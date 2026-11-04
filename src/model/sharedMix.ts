@@ -1,8 +1,13 @@
 import type { Project, Track } from './types'
 import type { StepChannel } from './steps'
+import { stepHostForChannel } from './stepPlugin'
 
-/** Where a Beats row follows the mixer. An empty output uses the first instrument track. */
-export function channelRoute(project: Project, channel: Pick<StepChannel, 'output'>): string | null {
+/** Where a step row is heard. A Step Sequencer row uses its own track. */
+export function channelRoute(project: Project, channel: Pick<StepChannel, 'id' | 'output'>): string | null {
+  if (channel.id) {
+    const host = stepHostForChannel(project, channel.id)
+    if (host) return host
+  }
   if (channel.output) return channel.output
   return project.tracks.find((track) => track.type === 'midi')?.id ?? null
 }

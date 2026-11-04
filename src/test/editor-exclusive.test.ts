@@ -303,9 +303,8 @@ describe('editors, close, and header meters in the app', () => {
         expect(muted.Keys.lit, `${label} muted midi`).toBe(true)
         await keysHead.getByRole('button', { name: 'Unmute track' }).click()
 
-        await page.getByRole('button', { name: 'Add track' }).click()
-        await page.getByRole('button', { name: /^Drums\b/ }).click()
-        await page.getByRole('button', { name: 'Add Drums track' }).click()
+        await page.getByRole('button', { name: 'Add Track' }).click()
+        await page.getByRole('button', { name: /Beat Machine\. Pads/ }).click()
         await page.locator('[data-pads="plugin"]').waitFor()
         expect(await page.locator('[data-keyboard-dock="open"]').count(), label).toBe(0)
         expect(await page.locator('[data-editor="piano"]').count(), label).toBe(0)

@@ -120,7 +120,7 @@ describe('phone mixer at 412x915', () => {
     }
   })
 
-  it('stacks channels as horizontal rows with tappable controls', async () => {
+  it('keeps a saved rows choice on side-by-side columns', async () => {
     const store = new ProjectStore()
     writeLayout(store.project.id, { strip: STRIP_HALF, column: 70, mixer: 'rows' })
     mkdirSync('/opt/cursor/artifacts', { recursive: true })
@@ -170,13 +170,11 @@ describe('phone mixer at 412x915', () => {
           texts,
         }
       })
-      expect(report.layout).toBe('rows')
+      expect(report.layout).toBe('columns')
       expect(report.captions).toEqual(expect.arrayContaining(['Read', 'Mute', 'Solo', 'Arm', 'Safe']))
       expect(report.armShown).toBe('Arm')
-      expect(report.narrow).toBe('')
-      expect(report.below).toBe(true)
-      expect(report.wide).toBe(true)
-      expect(report.horizontal).toBe(true)
+      expect(report.below).toBe(false)
+      expect(report.horizontal).toBe(false)
       expect(report.touch).toBe('none')
       for (const button of report.buttons) {
         expect(button.width, button.label).toBeGreaterThanOrEqual(36)

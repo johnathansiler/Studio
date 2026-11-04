@@ -1,7 +1,11 @@
 import { showsOpenBeatMachine } from '../instruments/pads/identity'
 
 export type EditorGesture = 'select-track' | 'tap-clip' | 'edit-notes'
-export type EditorSurface = 'keyboard' | 'piano' | 'pads' | 'none'
+export type EditorSurface = 'keyboard' | 'piano' | 'pads' | 'steps' | 'none'
+
+export function hasStepSequencer(track?: { plugins?: { pluginId: string }[] } | null): boolean {
+  return !!track?.plugins?.some((plugin) => plugin.pluginId === 'steps')
+}
 
 export interface GestureTrack {
   instrument?: string
@@ -17,6 +21,7 @@ export function editorForGesture(gesture: EditorGesture, trackType: string, trac
   if (gesture === 'edit-notes' || gesture === 'tap-clip') return trackType === 'midi' ? 'piano' : 'none'
   if (trackType === 'midi' && gesture === 'select-track') {
     if (track && showsOpenBeatMachine({ type: 'midi', instrument: track.instrument, plugins: track.plugins })) return 'pads'
+    if (track && hasStepSequencer(track)) return 'steps'
     return 'keyboard'
   }
   return 'none'

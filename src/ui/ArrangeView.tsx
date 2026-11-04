@@ -32,6 +32,8 @@ import { PlaylistBrowser, type BrowserTab } from './PlaylistBrowser'
 import { AutomationModeBar, AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
 import { AutoTuneLaneMark, addOrOpenAutoTune } from './AutoTuneFace'
 import { OpenBeatMachineButton } from './BeatMachineButton'
+import { AddTrackButton } from './AddTrack'
+import type { TrackChoice } from '../model/addTrack'
 import { showsOpenBeatMachine } from '../instruments/pads/identity'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { TRACK_ROW, TRACK_SHEET, copyOf, described } from './chrome'
@@ -91,6 +93,7 @@ export function ArrangeView({
   onImportInstrument,
   onPerform,
   onOpenBeatMachine,
+  onTrackAdded,
   onQuickPunch,
   onAnalyze,
   libraryTab,
@@ -105,6 +108,7 @@ export function ArrangeView({
   onImportInstrument?: (trackId: string, files: FileList) => void
   onPerform: (mode: 'keys' | 'drums') => void
   onOpenBeatMachine?: (trackId: string) => void
+  onTrackAdded?: (id: string, choice: TrackChoice) => void
   onQuickPunch: () => void
   onAnalyze: (trackId: string) => void
   /** Menu asks the Arrange browser to open on this tab. */
@@ -715,6 +719,9 @@ export function ArrangeView({
           body.scrollTop += event.deltaY
         }}
       >
+        <div className="arrange-add">
+          <AddTrackButton store={store} prominent onAdded={onTrackAdded} />
+        </div>
         <div className="ruler-gap loop-gap">
           <SongMapHead store={store} position={position} compact />
         </div>
@@ -794,6 +801,7 @@ export function ArrangeView({
         }}
       >
         <div className="timeline-inner" ref={innerRef} data-px={px} style={{ width }}>
+          <div className="timeline-add-spacer" aria-hidden="true" />
           <SongMap store={store} px={px} width={width} onSeek={onSeek} />
           <div className="ruler" style={laneGrid ?? undefined}>
             {paint.hint && <em className="grid-hint" role="status">{paint.hint}</em>}

@@ -222,6 +222,7 @@ function copyParams(move: Move, from: Record<string, number>, defaults: Record<s
 
 /** Load a saved insert as the core plugin it now belongs to. Null drops the insert. */
 export function migratePlugin(plugin: PluginInstance, defaults: (id: string) => Record<string, number>): PluginInstance | null {
+  if (plugin.pluginId === 'steps') return plugin
   const move = MOVES[plugin.pluginId]
   if (!move) return isCoreId(plugin.pluginId) ? plugin : null
   if (move.remove) return null

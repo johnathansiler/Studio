@@ -140,9 +140,8 @@ describe('beat machine keyboard in the app', () => {
         await page.reload({ waitUntil: 'domcontentloaded' })
         await noKeyboard(page)
 
-        await page.getByRole('button', { name: 'Add track' }).click()
-        await page.getByRole('button', { name: /^Drums\b/ }).click()
-        await page.getByRole('button', { name: 'Add Drums track' }).click()
+        await page.getByRole('button', { name: 'Add Track' }).click()
+        await page.getByRole('button', { name: /Beat Machine\. Pads/ }).click()
         await page.locator('[data-pads="plugin"]').waitFor()
         expect(await page.locator('[data-keyboard-dock="open"]').count()).toBe(0)
         await page.getByRole('button', { name: 'Close Beat Machine. The track keeps the instrument.' }).click()

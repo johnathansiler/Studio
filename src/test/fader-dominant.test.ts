@@ -132,21 +132,17 @@ describe('dominant volume fader', () => {
     }
   }, 20000)
 
-  it('makes each row a short card with a full-width volume bar', async () => {
-    const report = await measure(412, 915, 'shell phone', { strip: STRIP_HALF, mixer: 'rows' }, 'fader-rows-412')
-    expect(report.layout).toBe('rows')
+  it('keeps phone width on vertical columns even when rows was saved', async () => {
+    const report = await measure(412, 915, 'shell phone', { strip: STRIP_HALF, mixer: 'rows' }, 'fader-columns-phone')
+    expect(report.layout).toBe('columns')
     const channels = report.strips.filter((strip) => strip.name !== 'Master')
     expect(channels.length).toBeGreaterThanOrEqual(3)
     for (const strip of report.strips) {
       expect(strip.ratio, strip.name).toBeGreaterThanOrEqual(0.5)
-      expect(strip.vertical, strip.name).toBe(false)
+      expect(strip.vertical, strip.name).toBe(true)
       expect(strip.faderHeight, strip.name).toBeGreaterThanOrEqual(48)
-      expect(strip.faderWidth, strip.name).toBeGreaterThanOrEqual(strip.stripWidth - 16)
-      expect(strip.thumbWidth, strip.name).toBeGreaterThanOrEqual(44)
       expect(strip.db, strip.name).toMatch(/dB|inf/)
       expect(strip.tuneInside, strip.name).toBe(true)
     }
-    const visible = report.strips.filter((strip) => strip.faderTop >= -1 && strip.faderBottom <= report.hostHeight + 1)
-    expect(visible.length).toBeGreaterThanOrEqual(3)
   }, 20000)
 })

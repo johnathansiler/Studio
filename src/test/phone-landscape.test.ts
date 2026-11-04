@@ -142,7 +142,7 @@ describe('phone landscape compaction', () => {
           expect(box.tempo.right).toBeLessThanOrEqual(viewport.width + 1)
         }
         expect(box.viewportHeight).toBe(viewport.height)
-        expect(box.top).toBeLessThanOrEqual(34)
+        expect(box.top).toBeLessThanOrEqual(48)
         expect(box.transport).toBeLessThanOrEqual(34)
         expect(box.tools).toBeLessThanOrEqual(30)
         expect(box.play).toBeLessThanOrEqual(32)

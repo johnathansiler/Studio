@@ -395,6 +395,7 @@ export function RouteFields({ store, trackId }: { store: ProjectStore; trackId: 
 
 /** Full plugin names. The strip can ellipsize; the accessible name stays the word. */
 export function insertLabel(pluginId: string, plugin?: { pluginId: string; params?: Record<string, number> }) {
+  if (pluginId === 'steps') return 'Step Sequencer'
   if (plugin && pluginIsBeatMachine(plugin)) return 'Beat Machine'
   if (pluginId === 'pads' || pluginId === 'drums' || pluginId === 'drum-machine') return 'Beat Machine'
   return descriptor(pluginId)?.name ?? pluginId
@@ -404,7 +405,11 @@ export function insertLabel(pluginId: string, plugin?: { pluginId: string; param
 export function insertChoices<T extends { id: string; name: string }>(entries: readonly T[], midi: boolean): { id: string; name: string }[] {
   const ordered = orderedInserts(entries)
   if (!midi) return [...ordered]
-  return [{ id: 'pads', name: 'Beat Machine' }, ...ordered.filter((item) => item.id !== 'pads')]
+  return [
+    { id: 'steps', name: 'Step Sequencer' },
+    { id: 'pads', name: 'Beat Machine' },
+    ...ordered.filter((item) => item.id !== 'pads' && item.id !== 'steps'),
+  ]
 }
 
 function PluginPicker({ store, trackId, roomy }: { store: ProjectStore; trackId: string | 'master'; roomy?: boolean }) {
