@@ -91,6 +91,7 @@ describe('beat machine layout', () => {
       }
       const desktop = readFileSync(shots.find((shot) => shot.name === 'desktop')!.path).toString('base64')
       const photoPath = '/home/ubuntu/.cursor/projects/agent-repos-Studio/assets/mpc2000xl.jpg'
+      // Reference photo is not in the repo. Layout checks above still run; the side-by-side shot is skipped.
       if (!existsSync(photoPath)) return
       const photo = readFileSync(photoPath).toString('base64')
       const page = await browser.newPage({ viewport: { width: 1600, height: 900 } })

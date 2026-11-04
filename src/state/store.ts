@@ -947,7 +947,9 @@ export class ProjectStore {
     let bufferId = assignment.bufferId
     if (assignment.samples && assignment.sampleRate) {
       bufferId = uid('smp')
-      this.buffers.set(bufferId, { id: bufferId, name: assignment.name, sampleRate: assignment.sampleRate, channels: [assignment.samples] })
+      // Library one-shots often peak far below full scale. A pad plays the hit at full scale; the pad level sets the strip.
+      const samples = normalizeChannel(assignment.samples)
+      this.buffers.set(bufferId, { id: bufferId, name: assignment.name, sampleRate: assignment.sampleRate, channels: [samples] })
     }
     this.mutate(() => {
       const track = this.track(trackId)

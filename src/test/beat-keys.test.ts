@@ -5,7 +5,7 @@ import type { AudioEngine } from '../audio/engine'
 import { beatKeyAt, beatKeyForPitch, beatOctaveHasPads, beatPageLabel } from '../model/beatKeys'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
-import { commitDockNotes, KeyboardDock, playKeyboardNote } from '../ui/KeyboardDock'
+import { commitDockNotes, dockStrike, KeyboardDock, playKeyboardNote } from '../ui/KeyboardDock'
 
 const engine = {
   positionSamples: 0,
@@ -20,6 +20,13 @@ const engine = {
 } as unknown as AudioEngine
 
 describe('beat machine keys', () => {
+  it('treats a mouse click as a full strike', () => {
+    expect(dockStrike('mouse', 0.5)).toBe(0.85)
+    expect(dockStrike('pen', 0.4)).toBe(0.4)
+    expect(dockStrike('touch', 0)).toBe(0.85)
+    expect(dockStrike('touch', 1)).toBe(0.85)
+  })
+
   it('maps twelve keys across the current bank and the next bank', () => {
     const store = new ProjectStore(createEmptyProject())
     const id = store.project.tracks.find((track) => track.type === 'midi')!.id
