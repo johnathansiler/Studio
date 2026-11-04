@@ -3,6 +3,7 @@ import type { PluginInstance, Project } from '../model/types'
 import { tuneBlockScale } from './plugins/autoTune'
 import type { StripNodes } from './strips'
 import { processChain, type ChainSlot } from './plugins/chain'
+import { primeProcessor } from './core/adapt'
 import { automationAt, latencyOf } from './plugins/catalog'
 import { automationSchedule, channelAutomationMode, laneIsLive, sendLane, valueChanges } from '../model/automation'
 import { projectSampleBeat } from '../model/tempoMap'
@@ -423,7 +424,9 @@ export class LiveRack {
       const module = await loadModule(plugin.pluginId)
       if (!module) return
       try {
-        this.processors.set(plugin.id, module.create(sampleRate))
+        const proc = module.create(sampleRate)
+        primeProcessor(proc, sampleRate, SCRIPT_BLOCK)
+        this.processors.set(plugin.id, proc)
       } catch {
         this.failed.add(plugin.id)
       }

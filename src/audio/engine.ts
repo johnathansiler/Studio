@@ -36,6 +36,7 @@ import { applyRamps, smoothParam } from './paramCurve'
 import { channelRoute } from '../model/sharedMix'
 import { chainContext, enabledFx, LiveMidiChain, midiPanicMessages, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
 import { LiveRack } from './liveRack'
+import { audioStateOf, planRecovery, type RecoveryAction } from './core/session'
 import { ATTACK_SEC, RELEASE_SEC, builtinLevel, drumLevel, liveWhen, scheduleDelaySeconds } from './liveStage'
 import { renderSamplerSpan } from './plugins/sampler'
 import { renderGraph } from './renderGraph'
@@ -178,6 +179,13 @@ export class AudioEngine {
   private beatPump: ((now: number, horizon: number) => void) | null = null
   private raf = 0
   private playing = false
+  private sessionWatch: (() => void) | null = null
+  private sessionBusy = false
+  private heldPlaying = false
+  private heldPosition = 0
+  private heldMode: 'arrangement' | 'session' = 'arrangement'
+  /** One rebuild per interruption. A still-busy device is not torn down on every tap. */
+  private rebuiltUntilRunning = false
   private playOriginCtx = 0
   private playOriginSample = 0
   private arrangementScheduled = false
@@ -354,18 +362,20 @@ export class AudioEngine {
     if (!this.ctx) {
       this.ctx = openContext(48000)
       this.buildMaster()
+      this.bindAudioSession(this.ctx)
       if (this.project) this.sync(this.project, this.assetOf)
     }
     if (this.ctx.state !== 'running') void this.ctx.resume().catch(() => undefined)
     return this.ctx
   }
 
-  async resume(preferredRate = 48000) {
+  async resume(preferredRate = 48000, settle = true) {
     const fresh = !this.ctx
     if (!this.ctx) {
       this.ctx = openContext(preferredRate)
       this.buildMaster()
     }
+    this.bindAudioSession(this.ctx)
     if (fresh && this.project) this.sync(this.project, this.assetOf)
     if (this.ctx.state !== 'running') {
       try {
@@ -376,6 +386,7 @@ export class AudioEngine {
     }
     await this.ensureWorklets()
     this.refreshClockAnchor()
+    if (settle) await this.finishSession()
     return this.ctx
   }
 
@@ -1372,6 +1383,93 @@ export class AudioEngine {
     return state === 'closed' || state === 'interrupted'
   }
 
+  private pageVisible() {
+    return typeof document === 'undefined' || document.visibilityState !== 'hidden'
+  }
+
+  private bindAudioSession(ctx: AudioContext) {
+    this.unbindAudioSession()
+    const onState = () => {
+      const action = planRecovery(audioStateOf(String(ctx.state)), this.pageVisible())
+      if (action === 'none') return
+      void this.recoverAudioSession(action)
+    }
+    ctx.addEventListener('statechange', onState)
+    this.sessionWatch = () => ctx.removeEventListener('statechange', onState)
+  }
+
+  private unbindAudioSession() {
+    this.sessionWatch?.()
+    this.sessionWatch = null
+  }
+
+  private rememberTransport() {
+    this.heldPlaying = this.playing
+    this.heldMode = this.mode
+    try {
+      if (this.playing && this.ctx && (this.ctx.state as string) !== 'closed') {
+        this.heldPosition = Math.max(0, Math.round(this.heardSample(this.sampleAt(this.ctx.currentTime))))
+      } else {
+        this.heldPosition = this.positionSamples
+      }
+    } catch {
+      this.heldPosition = this.positionSamples
+    }
+  }
+
+  /** Resume or rebuild the device. The project and playhead stay. */
+  private async finishSession() {
+    if (!this.ctx || this.sessionBusy) return
+    const action = planRecovery(audioStateOf(String(this.ctx.state)), this.pageVisible())
+    if (action === 'none') return
+    await this.recoverAudioSession(action)
+  }
+
+  private async recoverAudioSession(action: RecoveryAction) {
+    if (this.sessionBusy) return
+    this.sessionBusy = true
+    try {
+      this.rememberTransport()
+      const project = this.project
+      if (this.ctx && (this.ctx.state as string) === 'running') this.rebuiltUntilRunning = false
+      if (action === 'resume' && this.ctx && (this.ctx.state as string) !== 'closed') {
+        try {
+          await this.ctx.resume()
+        } catch {
+          /* Fall through and rebuild if the device will not resume. */
+        }
+        if (this.ctx && (this.ctx.state as string) === 'running') {
+          this.rebuiltUntilRunning = false
+          this.refreshClockAnchor()
+          if (project) this.sync(project, this.assetOf)
+          this.emit()
+          return
+        }
+      }
+      if (this.rebuiltUntilRunning && (this.ctx?.state as string | undefined) !== 'closed') return
+      this.rebuiltUntilRunning = true
+      const rate = project?.sampleRate || this.sampleRate || 48000
+      const position = this.heldPosition
+      const wasPlaying = this.heldPlaying
+      const mode = this.heldMode
+      try {
+        this.stop()
+      } catch {
+        this.playing = false
+      }
+      this.dropGraph()
+      await this.resume(rate, false)
+      if (project && this.ctx) this.sync(project, this.assetOf)
+      this.positionSamples = position
+      const running = (this.ctx?.state as string | undefined) === 'running'
+      if (running) this.rebuiltUntilRunning = false
+      if (wasPlaying && running) void this.play(position, mode)
+      this.emit()
+    } finally {
+      this.sessionBusy = false
+    }
+  }
+
   private flushLiveAudio() {
     this.rack.resetAll()
     this.audioBuffers.clear()
@@ -1416,6 +1514,7 @@ export class AudioEngine {
   }
 
   private dropGraph() {
+    this.unbindAudioSession()
     this.rack.dispose()
     this.libraryHost.dispose()
     this.patchHost.dispose()

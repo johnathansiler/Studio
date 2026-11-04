@@ -1083,8 +1083,22 @@ export function presetParams(pluginId: string, name: string, user: UserPreset[])
   return null
 }
 
-export function automationAt(lanes: AutomationLane[], pluginId: string, params: Record<string, number>, beat: number) {
-  const next = { ...params }
+export function automationAt(
+  lanes: AutomationLane[],
+  pluginId: string,
+  params: Record<string, number>,
+  beat: number,
+  into?: Record<string, number>,
+  keys?: readonly string[],
+) {
+  const next = into ?? { ...params }
+  if (into) {
+    if (keys && keys.length) {
+      for (let i = 0; i < keys.length; i++) next[keys[i]] = params[keys[i]]
+    } else {
+      for (const key of Object.keys(params)) next[key] = params[key]
+    }
+  }
   for (const lane of lanes) {
     if (lane.target && lane.target !== 'plugin') continue
     if (lane.pluginId !== pluginId || !lane.points.length) continue
