@@ -6,6 +6,7 @@ use crate::eq::EqProcessor;
 use crate::plugin::CuePlugin;
 use crate::smooth::glide_block;
 use crate::state::write_layout;
+use crate::voice::{Vintage, VoiceEngine};
 
 const STATE_CAP: usize = 16384;
 const MAX_BLOCK: usize = 8192;
@@ -313,4 +314,149 @@ pub extern "C" fn ch_plug_process(ptr: *mut WasmPlug, channels: u32, frames: u32
     let WasmPlug { cue, left, right, side, .. } = plugin;
     cue.process(&mut left[..frames], &mut right[..frames], &side[..frames.min(side.len())], frames);
     let _ = channels;
+}
+
+fn voice_mut<'a>(ptr: *mut VoiceEngine) -> Option<&'a mut VoiceEngine> {
+    if ptr.is_null() { None } else { Some(unsafe { &mut *ptr }) }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_create(sample_rate: f64) -> *mut VoiceEngine {
+    Box::into_raw(Box::new(VoiceEngine::new(sample_rate)))
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_destroy(ptr: *mut VoiceEngine) {
+    if !ptr.is_null() {
+        unsafe { drop(Box::from_raw(ptr)) }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_prepare(ptr: *mut VoiceEngine, sample_rate: f64, max_block: u32) {
+    if let Some(engine) = voice_mut(ptr) {
+        engine.prepare(sample_rate, max_block as usize);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_reset(ptr: *mut VoiceEngine) {
+    if let Some(engine) = voice_mut(ptr) {
+        engine.reset();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_load_ptr(ptr: *mut VoiceEngine, len: u32) -> *mut f32 {
+    voice_mut(ptr).map(|engine| engine.begin_load(len as usize)).unwrap_or(std::ptr::null_mut())
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_load(ptr: *mut VoiceEngine, id: u32, len: u32, file_rate: f64) {
+    if let Some(engine) = voice_mut(ptr) {
+        engine.commit_load(id, len as usize, file_rate);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_set_region(ptr: *mut VoiceEngine, pad: u32, sample_id: u32, start: u32, end: u32) {
+    if let Some(engine) = voice_mut(ptr) {
+        engine.set_region(pad, sample_id, start, end);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_set_fade(ptr: *mut VoiceEngine, pad: u32, fade_in: u32, fade_out: u32) {
+    if let Some(engine) = voice_mut(ptr) {
+        engine.set_fade(pad, fade_in, fade_out);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_set_pitch(ptr: *mut VoiceEngine, pad: u32, semis: f64, cents: f64, stretch: u32) {
+    if let Some(engine) = voice_mut(ptr) {
+        engine.set_pitch(pad, semis, cents, stretch != 0);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_set_vintage(
+    ptr: *mut VoiceEngine,
+    pad: u32,
+    bit_depth: u32,
+    sample_rate: f64,
+    wow: f64,
+    flutter: f64,
+    noise: f64,
+    crackle: f64,
+    lowpass: f64,
+) {
+    if let Some(engine) = voice_mut(ptr) {
+        engine.set_vintage(pad, Vintage { bit_depth, sample_rate, wow, flutter, noise, crackle, lowpass });
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_set_filter(ptr: *mut VoiceEngine, pad: u32, highpass: f64, lowpass: f64) {
+    if let Some(engine) = voice_mut(ptr) {
+        engine.set_filter(pad, highpass, lowpass);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_set_choke(ptr: *mut VoiceEngine, pad: u32, group: u32) {
+    if let Some(engine) = voice_mut(ptr) {
+        engine.set_choke_group(pad, group);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_set_reverse(ptr: *mut VoiceEngine, pad: u32, on: u32) {
+    if let Some(engine) = voice_mut(ptr) {
+        engine.set_reverse(pad, on != 0);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_set_hold(ptr: *mut VoiceEngine, pad: u32, on: u32) {
+    if let Some(engine) = voice_mut(ptr) {
+        engine.set_hold(pad, on != 0);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_set_swing(ptr: *mut VoiceEngine, pad: u32, samples: u32) {
+    if let Some(engine) = voice_mut(ptr) {
+        engine.set_swing(pad, samples);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_set_level(ptr: *mut VoiceEngine, pad: u32, level: f64, pan: f64) {
+    if let Some(engine) = voice_mut(ptr) {
+        engine.set_level(pad, level, pan);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_note(ptr: *mut VoiceEngine, offset: u32, pad: u32, velocity: f64) {
+    if let Some(engine) = voice_mut(ptr) {
+        engine.note(offset, pad, velocity);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_channel_ptr(ptr: *mut VoiceEngine, channel: u32) -> *mut f32 {
+    match voice_mut(ptr) {
+        Some(engine) if channel == 0 => engine.left_ptr(),
+        Some(engine) => engine.right_ptr(),
+        None => std::ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ch_voice_process(ptr: *mut VoiceEngine, frames: u32) {
+    if let Some(engine) = voice_mut(ptr) {
+        engine.process_prepared(frames as usize);
+    }
 }
