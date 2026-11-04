@@ -4,7 +4,7 @@ import { onStretchCommit, readStretch, storeStretch, stretchCacheKey, stretchSlo
 import type { StretchMode } from './stretch/engine'
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
 import { midiLit, pruneMidiMarks, type MidiMark } from '../model/midiActivity'
-import { compPieces, recordOffsetSamples } from '../model/comp'
+import { compPieces } from '../model/comp'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
 import { clipLoops, holdUntilGrid, sessionStartContext } from '../model/sessionSlots'
 import { DRUM_PADS, residentDrums, type ResidentDrum } from '../model/drums'
@@ -36,8 +36,10 @@ import { applyRamps, smoothParam } from './paramCurve'
 import { channelRoute } from '../model/sharedMix'
 import { chainContext, enabledFx, LiveMidiChain, midiPanicMessages, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
 import { LiveRack } from './liveRack'
-import { audioStateOf, planRecovery, type RecoveryAction } from './core/session'
-import { bufferHintOf, formatLatencyReadout, latencyHintOrder, readBufferHint, writeBufferHint, type BufferHint } from './core/buffer'
+import { audioStateOf, planInterruption, planRecovery, type RecoveryAction } from './core/session'
+import { publishNotice } from './core/notice'
+import { deviceKind, initialBufferHint, recordingAlignmentSamples, resumeNeedsGesture, routeChangePlan, routeOf, type RouteSnapshot } from './core/driver'
+import { bufferHintOf, formatLatencyReadout, latencyHintOrder, writeBufferHint, type BufferHint } from './core/buffer'
 import { ATTACK_SEC, RELEASE_SEC, builtinLevel, drumLevel, liveWhen, scheduleDelaySeconds } from './liveStage'
 import { renderSamplerSpan } from './plugins/sampler'
 import { renderGraphParallel } from './parallelRender'
@@ -218,7 +220,16 @@ export class AudioEngine {
   private launchGen = new Map<string, number>()
   private perfAtCtx0 = 0
   private workletsReady = false
-  private bufferHint: BufferHint = readBufferHint(hintStorage())
+  private bufferHint: BufferHint = initialBufferHint(hintStorage(), typeof navigator === 'undefined' ? '' : navigator.userAgent)
+  /** Set from the first tap. iOS will not resume a suspended context before this. */
+  private hadGesture = false
+  private routeSnap: RouteSnapshot | null = null
+  private routeWatch: (() => void) | null = null
+  private pageWatch: (() => void) | null = null
+  /** Takes assembled when a call, lock, or background tab interrupted the recorder. */
+  private keptTakes: CaptureResult[] = []
+  /** Status line text. Empty when audio is running. */
+  sessionNotice = ''
   private stretchReady = false
   private readonly stretchKeys = new Set<string>()
   private joining = false
@@ -406,6 +417,7 @@ export class AudioEngine {
   /** Call from the tap handler itself. Creates the context and resumes it before any await. */
   unlock() {
     void preloadWasmInserts()
+    this.hadGesture = true
     if (!this.ctx) {
       this.ctx = openContext(48000, this.bufferHint)
       this.buildMaster()
@@ -1196,7 +1208,7 @@ export class AudioEngine {
   latencyCompensationSamples() {
     const ctx = this.ctx
     if (!ctx) return 0
-    return recordOffsetSamples(ctx.baseLatency || 0, ctx.outputLatency || 0, ctx.sampleRate)
+    return recordingAlignmentSamples(ctx.baseLatency || 0, ctx.outputLatency || 0, ctx.sampleRate)
   }
 
   setRemoteMusic(peerId: string, stream: MediaStream | null) {
@@ -1439,17 +1451,121 @@ export class AudioEngine {
   private bindAudioSession(ctx: AudioContext) {
     this.unbindAudioSession()
     const onState = () => {
-      const action = planRecovery(audioStateOf(String(ctx.state)), this.pageVisible())
+      const state = audioStateOf(String(ctx.state))
+      const kind = deviceKind(typeof navigator === 'undefined' ? '' : navigator.userAgent)
+      if (resumeNeedsGesture(kind, state, this.hadGesture)) {
+        this.postNotice('Tap Play to resume audio.')
+        return
+      }
+      const visible = this.pageVisible()
+      const plan = planInterruption({
+        state,
+        visible,
+        hiddenKind: this.hiddenKind(visible),
+        ios: kind === 'ios-safari',
+        recording: this.status === 'recording',
+      })
+      if (plan.notice) this.postNotice(plan.notice)
+      if (plan.finalizeTake) void this.holdTake()
+      const action = planRecovery(state, visible)
       if (action === 'none') return
       void this.recoverAudioSession(action)
     }
     ctx.addEventListener('statechange', onState)
     this.sessionWatch = () => ctx.removeEventListener('statechange', onState)
+    this.bindPage()
+    this.bindRoute()
   }
 
   private unbindAudioSession() {
     this.sessionWatch?.()
     this.sessionWatch = null
+    this.routeWatch?.()
+    this.routeWatch = null
+  }
+
+  private hiddenKind(visible: boolean): 'tab' | 'lock' | undefined {
+    if (visible) return undefined
+    const kind = deviceKind(typeof navigator === 'undefined' ? '' : navigator.userAgent)
+    return kind === 'ios-safari' || kind === 'android-chrome' ? 'lock' : 'tab'
+  }
+
+  private postNotice(text: string) {
+    this.sessionNotice = text
+    publishNotice(text)
+    this.emit()
+  }
+
+  private bindPage() {
+    if (this.pageWatch || typeof document === 'undefined') return
+    const onVis = () => {
+      void this.onVisibility(document.visibilityState !== 'hidden')
+    }
+    document.addEventListener('visibilitychange', onVis)
+    this.pageWatch = () => document.removeEventListener('visibilitychange', onVis)
+  }
+
+  private bindRoute() {
+    if (this.routeWatch || typeof navigator === 'undefined' || !navigator.mediaDevices?.addEventListener) return
+    const onDevice = () => {
+      void this.noteRoute()
+    }
+    navigator.mediaDevices.addEventListener('devicechange', onDevice)
+    this.routeWatch = () => navigator.mediaDevices.removeEventListener('devicechange', onDevice)
+    void this.noteRoute()
+  }
+
+  private async noteRoute() {
+    const ctx = this.ctx
+    if (!ctx) return
+    let label = ''
+    try {
+      const list = await navigator.mediaDevices.enumerateDevices()
+      label = list.filter((device) => device.kind === 'audiooutput').map((device) => device.label).join(' ')
+    } catch {
+      label = ''
+    }
+    const next: RouteSnapshot = {
+      sampleRate: ctx.sampleRate,
+      route: routeOf(label),
+      outputLatency: ctx.outputLatency || 0,
+    }
+    const plan = routeChangePlan(this.routeSnap, next)
+    const first = this.routeSnap == null
+    this.routeSnap = next
+    if (first) return
+    if (plan === 'rebuild') void this.recoverAudioSession('rebuild')
+    else if (plan === 'resume' && (ctx.state as string) !== 'running') void ctx.resume().catch(() => undefined)
+  }
+
+  private async onVisibility(visible: boolean) {
+    const kind = deviceKind(typeof navigator === 'undefined' ? '' : navigator.userAgent)
+    const plan = planInterruption({
+      state: audioStateOf(this.ctx ? String(this.ctx.state) : 'missing'),
+      visible,
+      hiddenKind: this.hiddenKind(visible),
+      ios: kind === 'ios-safari',
+      recording: this.status === 'recording',
+    })
+    if (plan.notice) this.postNotice(plan.notice)
+    if (plan.finalizeTake) await this.holdTake()
+    if (!visible && plan.pause && this.playing) {
+      this.rememberTransport()
+      this.heldPlaying = true
+      try {
+        this.stop()
+      } catch {
+        this.playing = false
+      }
+      this.heldPosition = this.positionSamples
+      this.emit()
+      return
+    }
+    if (visible && this.heldPlaying && !this.playing) {
+      if (plan.notice) this.postNotice('')
+      await this.finishSession()
+      if (!this.playing && (this.ctx?.state as string | undefined) === 'running') void this.play(this.positionSamples, this.heldMode)
+    }
   }
 
   private rememberTransport() {
@@ -1478,6 +1594,7 @@ export class AudioEngine {
     if (this.sessionBusy) return
     this.sessionBusy = true
     try {
+      if (this.status === 'recording') await this.holdTake()
       this.rememberTransport()
       const project = this.project
       if (this.ctx && (this.ctx.state as string) === 'running') this.rebuiltUntilRunning = false
@@ -1715,6 +1832,18 @@ export class AudioEngine {
   }
 
   async finishRecording(): Promise<CaptureResult[]> {
+    const fresh = await this.drainRecorders()
+    const kept = this.keptTakes.splice(0)
+    return kept.concat(fresh)
+  }
+
+  /** Assemble whatever has already reached the recorder, then keep it for the next stop. */
+  private async holdTake() {
+    const fresh = await this.drainRecorders()
+    if (fresh.length) this.keptTakes.push(...fresh)
+  }
+
+  private async drainRecorders(): Promise<CaptureResult[]> {
     const waits: Promise<void>[] = []
     for (const rec of this.recorders.values()) {
       waits.push(

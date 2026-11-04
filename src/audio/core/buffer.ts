@@ -30,6 +30,17 @@ export function latencyHintOrder(hint: BufferHint): BufferHint[] {
   return [first, ...rest]
 }
 
+/** Null when the listener has not chosen a hint. The device policy picks one then. */
+export function readStoredBufferHint(storage: { getItem(key: string): string | null } | null): BufferHint | null {
+  try {
+    const value = storage?.getItem(STORAGE_KEY)
+    if (value === 'balanced' || value === 'playback' || value === 'interactive') return value
+    return null
+  } catch {
+    return null
+  }
+}
+
 export function readBufferHint(storage: { getItem(key: string): string | null } | null): BufferHint {
   try {
     return bufferHintOf(storage?.getItem(STORAGE_KEY))

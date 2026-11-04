@@ -12,6 +12,7 @@ import { accessForInvite, collabAccessFor, mayRelayAwareness, mayWriteProject, p
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
+import { withIsolation } from './headers.ts'
 
 const usage = createUsageLedger()
 
@@ -434,7 +435,7 @@ async function serveStatic(pathname: string, res: ServerResponse) {
     const info = await stat(filePath)
     const finalPath = info.isDirectory() ? path.join(filePath, 'index.html') : filePath
     const data = await readFile(finalPath)
-    const headers: Record<string, string> = { 'content-type': contentType(finalPath) }
+    const headers: Record<string, string> = withIsolation({ 'content-type': contentType(finalPath) })
     headers['cache-control'] = finalPath.includes(`${path.sep}assets${path.sep}`)
       ? 'public, max-age=31536000, immutable'
       : 'no-cache'
@@ -448,7 +449,7 @@ async function serveStatic(pathname: string, res: ServerResponse) {
     }
     try {
       const data = await readFile(path.join(STATIC_ROOT, 'index.html'))
-      res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-cache' })
+      res.writeHead(200, withIsolation({ 'content-type': 'text/html', 'cache-control': 'no-cache' }))
       res.end(data)
     } catch {
       res.writeHead(404)

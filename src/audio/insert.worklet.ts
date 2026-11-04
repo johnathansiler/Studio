@@ -6,6 +6,7 @@ import { valueChanges } from '../model/automation'
 import { automationAt } from './plugins/catalog'
 import { transparentLimit } from './liveStage'
 import { primeProcessor } from './core/adapt'
+import { publishTrack, takeTrack } from './core/sabClock'
 import { BlockSmoother } from './core/smooth'
 import type { AutomationLane, PluginInstance, TempoPoint } from '../model/types'
 import type { BlockContext, Processor } from './plugins/types'
@@ -120,6 +121,12 @@ class InsertProcessor extends AudioWorkletProcessor {
   private readonly asset = (id: string) => this.buffers.get(id) ?? null
   private readonly readKey = (id: string, length: number) => this.keyView(id, length)
   private readonly beatAt = (sample: number) => projectSampleBeat(this.clock, sample)
+  private parallelSlot = -1
+  private parallelSab: SharedArrayBuffer | null = null
+  private parallelMisses = 0
+  private parallelPrimed = false
+  private parallelFrames = 0
+  private parallelHold = [new Float32Array(2048), new Float32Array(2048)]
 
   constructor() {
     super()
@@ -133,6 +140,13 @@ class InsertProcessor extends AudioWorkletProcessor {
 
   private onMessage(data: StateMsg | { type?: string; [key: string]: unknown }) {
     if (!data?.type) return
+    if (data.type === 'parallel' && data.sab instanceof SharedArrayBuffer && typeof data.slot === 'number') {
+      this.parallelSab = data.sab
+      this.parallelSlot = data.slot
+      this.parallelMisses = 0
+      this.parallelPrimed = false
+      return
+    }
     if (data.type === 'state') {
       const msg = data as unknown as StateMsg & { wasmDsp?: boolean }
       const epoch = ++this.stateEpoch
@@ -321,6 +335,12 @@ class InsertProcessor extends AudioWorkletProcessor {
     const right = output[1] ?? output[0]
     this.outs[0] = output[0]
     this.outs[1] = right
+    if (this.parallelSab && this.parallelSlot >= 0 && this.playParallel(left, rightIn, output[0], right, frames)) {
+      this.limitOutput(output[0], right, frames)
+      this.posts += 1
+      if (this.posts % 16 === 0) this.postMeters(Math.min(this.slots.length, this.shells.length))
+      return true
+    }
     const sampleTime = this.playing
       ? this.originSample + (currentTime - this.originTime) * sampleRate
       : this.originSample
@@ -450,6 +470,55 @@ class InsertProcessor extends AudioWorkletProcessor {
     return view
   }
 
+  private playParallel(inL: Float32Array, inR: Float32Array, outL: Float32Array, outR: Float32Array, frames: number) {
+    const sab = this.parallelSab
+    if (!sab || this.parallelSlot < 0) return false
+    const took = takeTrack(sab, this.parallelSlot, outL, outR, frames)
+    if (took === 'busy' || (this.parallelPrimed && took !== 'ready')) {
+      this.parallelMisses += 1
+      if (this.parallelMisses > 6) {
+        this.parallelSlot = -1
+        return false
+      }
+      const n = Math.min(frames, this.parallelHold[0].length, outL.length)
+      outL.set(this.parallelHold[0].subarray(0, n))
+      outR.set(this.parallelHold[1].subarray(0, n))
+      return true
+    }
+    if (took !== 'ready') {
+      const n = Math.min(frames, inL.length, outL.length)
+      for (let i = 0; i < n; i++) {
+        outL[i] = inL[i] || 0
+        outR[i] = (inR[i] ?? inL[i]) || 0
+      }
+    }
+    this.parallelMisses = 0
+    this.parallelPrimed = true
+    this.parallelFrames = frames
+    const held = Math.min(frames, this.parallelHold[0].length, outL.length)
+    this.parallelHold[0].set(outL.subarray(0, held))
+    this.parallelHold[1].set(outR.subarray(0, held))
+    publishTrack(sab, this.parallelSlot, inL, inR, frames)
+    return true
+  }
+
+  private limitOutput(outL: Float32Array, outR: Float32Array, frames: number) {
+    let peak = this.sincePost
+    for (let i = 0; i < frames; i++) {
+      const limited = transparentLimit(outL[i] || 0)
+      outL[i] = limited
+      const abs = limited < 0 ? -limited : limited
+      if (abs > peak) peak = abs
+      if (outR !== outL) {
+        const rightLimited = transparentLimit(outR[i] || 0)
+        outR[i] = rightLimited
+        const rightAbs = rightLimited < 0 ? -rightLimited : rightLimited
+        if (rightAbs > peak) peak = rightAbs
+      }
+    }
+    this.sincePost = peak
+  }
+
   private postMeters(count: number) {
     const rows = this.meterRows
     while (rows.length < count) {
@@ -481,7 +550,7 @@ class InsertProcessor extends AudioWorkletProcessor {
       row.scope = copyInto(row.scope, proc?.scope)
       row.kept = (proc as LiveProc | null)?.kept?.() ?? null
       row.outputPeak = i === 0 ? this.sincePost : 0
-      row.latency = proc?.latencySamples || 0
+      row.latency = (proc?.latencySamples || 0) + (this.parallelSlot >= 0 ? this.parallelFrames : 0)
     }
     rows.length = count
     this.sincePost = 0
