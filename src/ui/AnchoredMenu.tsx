@@ -1,9 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { placeAnchoredMenu, anchoredShouldClose, type AnchorBox } from './anchorPlace'
+import { placeAnchoredMenu, anchoredShouldClose, menuFillsViewport, type AnchorBox } from './anchorPlace'
 import { useScreenOverlay } from './screenOverlay'
 import './anchoredMenu.css'
 import './screenOverlay.css'
+
+type MenuSize = 'dock' | 'fill' | 'pending'
 
 export function AnchoredMenu({
   open,
@@ -28,17 +30,40 @@ export function AnchoredMenu({
   prefer?: 'down' | 'up' | 'auto'
   id?: string
   className?: string
-  /** Full-screen sheet under the view tabs. Small selects leave this off. */
+  /** Eligible to fill the screen. A short menu still docks under its button. */
   fill?: boolean
   children: ReactNode
 }) {
-  useScreenOverlay(onClose, open && fill)
+  useScreenOverlay(onClose, open)
   const menuRef = useRef<HTMLDivElement>(null)
+  const [mode, setMode] = useState<MenuSize>(open && fill ? 'pending' : 'dock')
   const [style, setStyle] = useState<{ top: number; left: number; maxHeight: number; maxWidth: number; side: 'down' | 'up' } | null>(null)
+  const sizing = open && fill
+  const [tracked, setTracked] = useState(sizing)
+  if (sizing !== tracked) {
+    setTracked(sizing)
+    setMode(sizing ? 'pending' : 'dock')
+  }
 
   useLayoutEffect(() => {
-    if (!open || fill) {
-      setStyle(null)
+    if (!open || !fill || mode !== 'pending') return
+    const node = menuRef.current
+    if (!node) return
+    const clearTop = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--view-tabs-bottom')) || 0
+    const fills = menuFillsViewport(
+      { width: node.scrollWidth, height: node.scrollHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+      clearTop,
+    )
+    setMode(fills ? 'fill' : 'dock')
+  }, [open, fill, mode, children])
+
+  const filling = open && fill && mode === 'fill'
+  const measuring = open && fill && mode === 'pending'
+
+  useLayoutEffect(() => {
+    if (!open || filling || measuring) {
+      if (!open) setStyle(null)
       return
     }
     const place = () => {
@@ -71,12 +96,12 @@ export function AnchoredMenu({
       live?.classList.remove('anchored-trigger')
       live?.removeAttribute('data-anchor-side')
     }
-  }, [open, anchor, prefer, trigger, triggerRef, fill])
+  }, [open, anchor, prefer, trigger, triggerRef, filling, measuring])
 
   useEffect(() => {
     if (!open) return
     const onPointer = (event: PointerEvent) => {
-      if (fill) return
+      if (filling) return
       const live = trigger ?? triggerRef?.current ?? null
       if (anchoredShouldClose(event.target as Node | null, live, menuRef.current)) onClose()
     }
@@ -89,27 +114,26 @@ export function AnchoredMenu({
       window.removeEventListener('pointerdown', onPointer, true)
       window.removeEventListener('keydown', onKey)
     }
-  }, [open, onClose, trigger, triggerRef, fill])
+  }, [open, onClose, trigger, triggerRef, filling])
 
-  if (fill && open) {
-    const sheet = (
-      <div
-        id={id}
-        className={['anchored-menu', 'screen-overlay', className].filter(Boolean).join(' ')}
-        role="dialog"
-        aria-label={label}
-        data-screen-overlay=""
-        data-open="true"
-      >
-        <button type="button" className="overlay-close" onClick={onClose}>Close</button>
-        {children}
-      </div>
-    )
-    if (typeof document === 'undefined') return sheet
-    return createPortal(sheet, document.body)
-  }
+  if (!open && typeof document !== 'undefined') return null
 
-  const panel = (
+  const showClose = Boolean(fill && open && !measuring)
+  const sheet = filling ? (
+    <div
+      id={id}
+      className={['anchored-menu', 'screen-overlay', className].filter(Boolean).join(' ')}
+      role="dialog"
+      aria-label={label}
+      data-screen-overlay=""
+      data-open={open ? 'true' : 'false'}
+      hidden={!open}
+      data-menu-size="fill"
+    >
+      <button type="button" className="overlay-close" onClick={onClose}>Close</button>
+      {children}
+    </div>
+  ) : (
     <div
       ref={menuRef}
       id={id}
@@ -119,17 +143,18 @@ export function AnchoredMenu({
       data-side={style?.side ?? (prefer === 'up' ? 'up' : 'down')}
       data-open={open ? 'true' : 'false'}
       hidden={!open}
-      style={style ? {
+      data-menu-size={measuring ? 'pending' : 'dock'}
+      style={measuring || !style ? undefined : {
         top: style.top,
         left: style.left,
         maxHeight: style.maxHeight,
         maxWidth: style.maxWidth,
-      } : undefined}
+      }}
     >
+      {showClose ? <button type="button" className="overlay-close" onClick={onClose}>Close</button> : null}
       {children}
     </div>
   )
-  if (!open && typeof document !== 'undefined') return null
-  if (typeof document === 'undefined') return panel
-  return createPortal(panel, document.body)
+  if (typeof document === 'undefined') return sheet
+  return createPortal(sheet, document.body)
 }

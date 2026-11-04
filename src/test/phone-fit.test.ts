@@ -70,7 +70,7 @@ describe('phone fit at 412x915', () => {
           expect(button.right).toBeLessThanOrEqual(412 + 1)
         }
         expect(timeline.ratio).toBeGreaterThanOrEqual(0.65)
-        await page.locator('.transport').getByRole('button', { name: /^Menu/ }).click()
+        await page.locator('.transport').getByRole('button', { name: /^More/ }).click()
         const loop = await page.locator('.t-btn.loop .t-word').boundingBox()
         expect(loop).toBeTruthy()
         expect(loop!.x + loop!.width).toBeLessThanOrEqual(412 + 1)
@@ -182,7 +182,6 @@ describe('phone fit at 412x915', () => {
         expect(addBox!.x).toBeLessThan(80)
         await add.click()
         await page.getByRole('group', { name: 'Add Track' }).waitFor()
-        await page.locator('[data-screen-overlay]').first().waitFor()
         await shot(page, 'live-add-track-412')
         await page.keyboard.press('Escape')
 

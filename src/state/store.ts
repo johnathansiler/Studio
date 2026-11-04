@@ -550,10 +550,13 @@ export class ProjectStore {
     const id = uid('toast')
     this.toasts = [...this.toasts, { id, text, tone }]
     this.emit()
-    setTimeout(() => {
-      this.toasts = this.toasts.filter((t) => t.id !== id)
-      this.emit()
-    }, 4200)
+    setTimeout(() => this.dismissToast(id), 4200)
+  }
+
+  dismissToast(id: string) {
+    if (!this.toasts.some((toast) => toast.id === id)) return
+    this.toasts = this.toasts.filter((toast) => toast.id !== id)
+    this.emit()
   }
 
   /** Drop error banners. This does not edit the project or the undo stack. */

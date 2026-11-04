@@ -8,6 +8,29 @@ export function loopGripHit(coarse: boolean) {
   return coarse ? LOOP_GRIP_HIT_COARSE : LOOP_GRIP_HIT
 }
 
+/**
+ * Which part of the loop a press hits. Handles win over the body, even when
+ * the visible cap sits on the bar. A press on neither is a seek.
+ */
+export function loopEdgeAt(
+  x: number,
+  grips: { start: LoopGripBox; end: LoopGripBox },
+  body: { left: number; right: number },
+): 'start' | 'end' | 'move' | 'seek' {
+  const on = (box: LoopGripBox) => x >= box.hitLeft && x <= box.hitLeft + box.hitWidth
+  const start = on(grips.start)
+  const end = on(grips.end)
+  if (start && end) {
+    const startMid = grips.start.hitLeft + grips.start.hitWidth / 2
+    const endMid = grips.end.hitLeft + grips.end.hitWidth / 2
+    return Math.abs(x - startMid) <= Math.abs(x - endMid) ? 'start' : 'end'
+  }
+  if (start) return 'start'
+  if (end) return 'end'
+  if (x >= body.left && x <= body.right) return 'move'
+  return 'seek'
+}
+
 export interface LoopGripBox {
   hitLeft: number
   hitWidth: number

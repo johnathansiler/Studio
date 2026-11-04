@@ -1,4 +1,5 @@
 import { clipNeedsStretch, preferStretchCache, renderClipChannels, sourceSamplesOf, timelineSamples } from './stretch/engine'
+import { clickVoice } from './metroClick'
 import { onSpectralCommit } from './spectral/job'
 import { onStretchCommit, readStretch, storeStretch, stretchCacheKey, stretchSlot } from './stretch/commit'
 import type { StretchMode } from './stretch/engine'
@@ -2309,7 +2310,7 @@ export class AudioEngine {
     const total = perBar * (bars === 2 ? 2 : 1)
     for (let i = 0; i < total; i++) {
       const when = startAt - (total - i) * beatSec
-      if (when >= this.ctx.currentTime - 0.02) this.click(when, i % perBar === 0)
+      if (when >= this.ctx.currentTime - 0.02) this.click(when, i % perBar === 0, true)
     }
   }
 
@@ -2342,7 +2343,7 @@ export class AudioEngine {
     const perBar = Math.max(1, meter.numerator)
     const beats = perBar * (countInBarsOf(project) === 2 ? 2 : 1)
     const start = ctx.currentTime + 0.06
-    for (let i = 0; i < beats; i++) this.click(start + i * beatSec, i % perBar === 0)
+    for (let i = 0; i < beats; i++) this.click(start + i * beatSec, i % perBar === 0, true)
     this.status = 'counting-in'
     this.emit()
     const runAt = start + beats * beatSec
@@ -2523,16 +2524,26 @@ export class AudioEngine {
     }
   }
 
-  private click(when: number, accent: boolean) {
+  private click(when: number, accent: boolean, countIn = false) {
     if (!this.ctx || !this.metroGain) return
+    const voice = clickVoice(accent, countIn)
     const osc = this.ctx.createOscillator()
     const gain = this.ctx.createGain()
-    osc.type = 'square'
-    osc.frequency.value = accent ? 1760 : 1180
+    osc.type = voice.type
+    osc.frequency.setValueAtTime(voice.frequency, when)
     gain.gain.setValueAtTime(0.0001, when)
-    gain.gain.exponentialRampToValueAtTime(accent ? 0.35 : 0.18, when + 0.002)
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, voice.peak), when + 0.002)
     gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.045)
-    osc.connect(gain)
+    let tail: AudioNode = osc
+    if (voice.lowpass != null) {
+      const filter = this.ctx.createBiquadFilter()
+      filter.type = 'lowpass'
+      filter.frequency.setValueAtTime(voice.lowpass, when)
+      filter.Q.setValueAtTime(0.7, when)
+      osc.connect(filter)
+      tail = filter
+    }
+    tail.connect(gain)
     gain.connect(this.metroGain)
     osc.start(when)
     osc.stop(when + 0.05)

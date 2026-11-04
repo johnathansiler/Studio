@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { bindSwipeDismiss } from './swipeDismiss'
 
 interface HintState {
   text: string
@@ -42,16 +43,25 @@ export function HintBubble() {
   useEffect(() => {
     if (!hint) return
     const timer = window.setTimeout(hideHint, 2400)
-    const hide = () => hideHint()
+    const hide = (event: PointerEvent) => {
+      if (bubble.current?.contains(event.target as Node)) return
+      hideHint()
+    }
     window.addEventListener('pointerdown', hide)
     return () => {
       window.clearTimeout(timer)
       window.removeEventListener('pointerdown', hide)
     }
   }, [hint])
+  const bubble = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = bubble.current
+    if (!hint || !el) return
+    return bindSwipeDismiss(el, hideHint)
+  }, [hint])
   if (!hint) return null
   return (
-    <div className="hint-bubble" role="tooltip" style={{ left: hint.x, top: hint.y }}>
+    <div ref={bubble} className="hint-bubble" role="tooltip" style={{ left: hint.x, top: hint.y }}>
       {hint.text}
     </div>
   )

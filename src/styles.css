@@ -344,6 +344,72 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   max-height: none;
   transform: none;
 }
+.shell.phone.keys-landscape.keys-open,
+.shell.phone.orient-180.keys-open,
+.shell.phone.land.keys-open {
+  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-areas:
+    "bar"
+    "transport"
+    "keys";
+}
+.shell.phone.keys-landscape.keys-open .workspace,
+.shell.phone.keys-landscape.keys-open .tool-slot,
+.shell.phone.orient-180.keys-open .workspace,
+.shell.phone.orient-180.keys-open .tool-slot,
+.shell.phone.land.keys-open .workspace,
+.shell.phone.land.keys-open .tool-slot {
+  display: none;
+}
+.shell.phone.keys-landscape .keyboard-dock,
+.shell.phone.orient-180 .keyboard-dock,
+.shell.phone.land.keys-open .keyboard-dock {
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
+}
+.shell.phone.keys-landscape .keyboard-face,
+.shell.phone.orient-180 .keyboard-face,
+.shell.phone.land.keys-open .keyboard-face {
+  height: 100%;
+  gap: 4px;
+  padding: 4px 6px calc(4px + env(safe-area-inset-bottom));
+}
+.shell.phone.keys-landscape .keyboard-octave,
+.shell.phone.orient-180 .keyboard-octave,
+.shell.phone.land.keys-open .keyboard-octave {
+  gap: 4px;
+}
+.shell.phone.keys-landscape .keyboard-octave button,
+.shell.phone.orient-180 .keyboard-octave button,
+.shell.phone.land.keys-open .keyboard-octave button {
+  height: 40px;
+  min-height: 40px;
+}
+.shell.phone.keys-landscape .keyboard-hint,
+.shell.phone.orient-180 .keyboard-hint,
+.shell.phone.land.keys-open .keyboard-hint {
+  display: none;
+}
+.shell.phone.keys-landscape .mini-board,
+.shell.phone.orient-180 .mini-board,
+.shell.phone.land.keys-open .mini-board {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  gap: 4px 3px;
+}
+.shell.phone.keys-landscape .mini-pad.sharp,
+.shell.phone.orient-180 .mini-pad.sharp,
+.shell.phone.land.keys-open .mini-pad.sharp {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  aspect-ratio: auto;
+  align-self: stretch;
+  justify-self: stretch;
+}
 
 .topbar, .transport {
   display: flex;
@@ -1185,9 +1251,9 @@ input[type='range'],
 .modal input { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
 .row-btns { display: flex; gap: 8px; justify-content: flex-end; }
 
-.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 30; }
+.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 30; pointer-events: none; }
 body:has(.unstuck-sheet) .toasts { z-index: 90; top: 64px; bottom: auto; }
-.toast { background: #223128; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; max-width: 320px; box-shadow: var(--shadow); }
+.toast { background: #223128; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; max-width: min(320px, calc(100vw - 24px)); box-shadow: var(--shadow); pointer-events: auto; touch-action: pan-y; }
 .toast.warn { border-color: rgba(224, 177, 90, 0.5); }
 .toast.good { border-color: rgba(115, 196, 143, 0.5); }
 
@@ -2148,7 +2214,8 @@ html[data-posture="tabletop"] .shell .master-sheet {
   color: var(--text);
   font-size: 13px;
   line-height: 1.35;
-  pointer-events: none;
+  pointer-events: auto;
+  touch-action: pan-y;
   box-shadow: var(--shadow);
 }
 .sheet-back {

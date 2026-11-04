@@ -71,6 +71,27 @@ export function placeAnchoredMenu(input: {
   }
 }
 
+/**
+ * A menu fills the screen under the tabs only when its content is large.
+ * A short list docks under the button that opened it.
+ */
+export function menuFillsViewport(
+  content: { width: number; height: number },
+  viewport: { width: number; height: number },
+  clearTop = 0,
+) {
+  const roomH = Math.max(1, viewport.height - Math.max(0, clearTop))
+  const roomW = Math.max(1, viewport.width)
+  const height = Math.max(0, content.height)
+  const width = Math.max(0, content.width)
+  if (height <= 0) return false
+  const heightShare = height / roomH
+  const widthShare = Math.min(width, roomW) / roomW
+  const tooTallForDropdown = height > roomH * 0.72
+  const coversMost = heightShare >= 0.62 && widthShare >= 0.7
+  return tooTallForDropdown || coversMost
+}
+
 /** A press outside the trigger and the menu should close it. The trigger itself toggles. */
 export function anchoredShouldClose(target: Node | null, trigger: Node | null, menu: Node | null): boolean {
   if (!target) return true

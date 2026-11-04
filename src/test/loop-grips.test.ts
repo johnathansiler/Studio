@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { loopLabelCenter } from '../model/loopEdit'
-import { LOOP_GRIP_HIT, LOOP_GRIP_VISUAL, layoutLoopGrips, loopGripHit } from '../ui/loopGrips'
+import { LOOP_GRIP_HIT, LOOP_GRIP_VISUAL, layoutLoopGrips, loopEdgeAt, loopGripHit } from '../ui/loopGrips'
 
 function overlaps(a0: number, a1: number, b0: number, b1: number) {
   return Math.min(a1, b1) - Math.max(a0, b0) > 0.5
@@ -153,5 +153,27 @@ describe('loop edge grips', () => {
     expect(grips.end.hitWidth).toBeGreaterThanOrEqual(LOOP_GRIP_HIT)
     expect(grips.start.faceLeft + grips.start.faceWidth).toBeLessThanOrEqual(grips.end.faceLeft)
     expectClear(grips.start, null, grips.end)
+  })
+
+  it('lets either handle win over the loop body, including a touch on the visible cap', () => {
+    const grips = layoutLoopGrips({
+      start: 120,
+      end: 420,
+      hostWidth: 800,
+      viewLeft: 0,
+      viewWidth: 800,
+      labelCenter: 0,
+      labelWidth: 0,
+      hit: 44,
+    })
+    const body = { left: 120, right: 420 }
+    const startFace = grips.start.faceLeft + grips.start.faceWidth / 2
+    const endFace = grips.end.faceLeft + grips.end.faceWidth / 2
+    expect(grips.start.hitWidth).toBeGreaterThanOrEqual(40)
+    expect(grips.end.hitWidth).toBeGreaterThanOrEqual(40)
+    expect(loopEdgeAt(startFace, grips, body)).toBe('start')
+    expect(loopEdgeAt(endFace, grips, body)).toBe('end')
+    expect(loopEdgeAt((body.left + body.right) / 2, grips, body)).toBe('move')
+    expect(loopEdgeAt(700, grips, body)).toBe('seek')
   })
 })

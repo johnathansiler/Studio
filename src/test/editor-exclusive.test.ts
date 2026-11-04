@@ -253,6 +253,9 @@ describe('editors, close, and header meters in the app', () => {
           return hook!.store.selectedMidiClipId
         })
         await page.locator(`[data-clip="${clipId}"]`).click()
+        await page.waitForTimeout(400)
+        expect(await page.locator('[data-editor="piano"]').count(), label).toBe(0)
+        await page.locator(`[data-clip="${clipId}"]`).dblclick()
         await page.locator('[data-editor="piano"]').waitFor()
         await page.locator('[data-keyboard-dock="open"]').waitFor({ state: 'detached' })
         if (viewport.phone) {
@@ -352,7 +355,7 @@ describe('editors, close, and header meters in the app', () => {
           hook.store.addMidiClip(beat.id, 0)
           return hook.store.selectedMidiClipId
         })
-        await page.locator(`[data-clip="${beatClip}"]`).click()
+        await page.locator(`[data-clip="${beatClip}"]`).dblclick()
         await page.locator('[data-editor="piano"]').waitFor()
         expect(await page.locator('[data-pads="plugin"]').count(), label).toBe(0)
         expect(await page.locator('[data-keyboard-dock="open"]').count(), label).toBe(0)

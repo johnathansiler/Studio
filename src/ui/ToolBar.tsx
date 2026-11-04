@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
   FACE_TOOLS,
@@ -35,6 +35,7 @@ export function ToolBar({
   panel = false,
   onClose,
   tucked = false,
+  extra,
 }: {
   onChange: (tool: ArrangeTool) => void
   onDuplicate: () => void
@@ -54,6 +55,8 @@ export function ToolBar({
   onClose?: () => void
   /** Portrait phone: one Tool button that opens an inline row. */
   tucked?: boolean
+  /** Sits in the same row as Select, Delete, and Duplicate. */
+  extra?: ReactNode
 }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const stripRef = useRef<HTMLDivElement>(null)
@@ -81,6 +84,7 @@ export function ToolBar({
     return (
       <div className="timeline-tools tucked" role="toolbar" aria-label="Tools" data-active-tool={value} data-tool-context={context}>
         <span className="tool-now" role="status" aria-live="polite">{chip}</span>
+        <div className="clip-actions">
         <button
           ref={toolButton}
           type="button"
@@ -93,8 +97,9 @@ export function ToolBar({
           onClick={() => setToolsOpen((open) => !open)}
         >
           <ToolIcon id={value} />
-          <span className="tool-label">Tool: {current.label}</span>
+          <span className="tool-label">{current.label}</span>
         </button>
+        {extra}
         <TipButton className="tool tool-quick delete" label={remove.label} hint={remove.hint} onClick={onDelete}>
           <ToolIcon id="delete" />
           <span className="tool-label">{remove.label}</span>
@@ -103,6 +108,7 @@ export function ToolBar({
           <ToolIcon id="duplicate" />
           <span className="tool-label">{copy.label}</span>
         </TipButton>
+        </div>
         <AnchoredMenu fill id="tool-choices" open={toolsOpen} onClose={() => setToolsOpen(false)} label="Choose a tool" triggerRef={toolButton} prefer="up">
           {shown.map((id) => {
             const info = TOOL_INFO[id]

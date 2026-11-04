@@ -85,6 +85,7 @@ import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark
 import { onViewTab, syncViewTabFrame } from './ui/overlayHost'
 import { useScreenOverlay } from './ui/screenOverlay'
 import { HintBubble, TipButton } from './ui/Hint'
+import { Toasts } from './ui/Toasts'
 import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
 import { alignPluginClose } from './ui/pluginStage'
@@ -1999,17 +2000,17 @@ async function importDropped(files: FileList) {
       )}
       {surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano' && (
         <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
-          <div className={`command-strip${phone && !land ? ' tucked' : ''}`} id="command-strip" role="toolbar" aria-label="Edit">
+          <div className={`command-strip${(phone && !land) || form === 'fold' ? ' tucked' : ''}`} id="command-strip" role="toolbar" aria-label="Edit">
             <ToolBar
               context="arrange"
               words
               tucked
               showHint={false}
+              extra={<SnapControl store={store} inline />}
               onChange={(tool) => store.setTool(tool)}
               onDuplicate={() => store.duplicateSelection()}
               onDelete={() => store.deleteSelectedClip()}
             />
-            <SnapControl store={store} inline />
           </div>
           <MidiTools store={store} engine={engine} />
         </div>
@@ -2268,13 +2269,7 @@ async function importDropped(files: FileList) {
       <SpectralSheet store={store} />
       <KeyboardDock store={store} engine={engine} onEditNotes={editNotes} />
       <HintBubble />
-      <div className="toasts">
-        {store.toasts.map((toast) => (
-          <div key={toast.id} className={`toast ${toast.tone || ''}`}>
-            {toast.text}
-          </div>
-        ))}
-      </div>
+      <Toasts store={store} />
     </div>
   )
 }

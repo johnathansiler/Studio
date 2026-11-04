@@ -17,7 +17,16 @@ export function deletesSelection(key: string, target: EventTarget | KeyHost | nu
 
 type ClipHost = { closest?: (selector: string) => unknown }
 
-/** Double-click on an empty lane can add a clip. A click on a clip only opens its editor. */
+/** A single tap only selects. A second tap soon after opens the editor. */
+export const CLIP_DOUBLE_MS = 350
+
+export function clipTapAction(input: { moved: boolean; sinceLastMs: number; kind: 'audio' | 'midi' | 'pattern' }): 'drag' | 'select' | 'edit' {
+  if (input.moved) return 'drag'
+  if (input.kind !== 'pattern' && input.sinceLastMs >= 0 && input.sinceLastMs < CLIP_DOUBLE_MS) return 'edit'
+  return 'select'
+}
+
+/** Double-click on an empty lane can add a clip. A click on a clip does not. */
 export function laneDoubleClickAddsClip(target: EventTarget | ClipHost | null) {
   const el = target as ClipHost | null
   if (!el || typeof el.closest !== 'function') return true
