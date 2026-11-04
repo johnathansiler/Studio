@@ -201,6 +201,7 @@ describe('scaler plugin panel', () => {
             audioOut: rect(audioOut),
             midiOut: rect(midiOut),
             optionsButton: rect(optionsButton),
+            outputButtons: [...pills.querySelectorAll('button')].map((button) => ({ label: button.textContent ?? '', ...rect(button) })),
             hidden: options.hidden,
             notes: [...picker.querySelectorAll('button')].map((button) => ({ name: button.getAttribute('aria-label'), ...rect(button) })),
           }
@@ -237,6 +238,16 @@ describe('scaler plugin panel', () => {
         expect(box.optionsButton.left, where).toBeGreaterThanOrEqual(-1)
         expect(box.optionsButton.right, where).toBeLessThanOrEqual(viewport.width + 1)
         expect(box.optionsButton.height, where).toBeGreaterThanOrEqual(40)
+        const outputRows = new Set(box.outputButtons.map((button) => Math.round(button.top / 8)))
+        for (const button of box.outputButtons) {
+          expect(button.height, `${where} ${button.label}`).toBeGreaterThanOrEqual(40)
+          expect(button.width, `${where} ${button.label}`).toBeGreaterThanOrEqual(40)
+          expect(button.left, `${where} ${button.label}`).toBeGreaterThanOrEqual(box.pills.left - 1)
+          expect(button.right, `${where} ${button.label}`).toBeLessThanOrEqual(box.pills.right + 1)
+          expect(button.top, `${where} ${button.label}`).toBeGreaterThanOrEqual(box.pills.top - 1)
+          expect(button.bottom, `${where} ${button.label}`).toBeLessThanOrEqual(box.pills.bottom + 1)
+        }
+        if (viewport.width <= 520) expect(outputRows.size, where).toBeLessThanOrEqual(2)
         for (const note of box.notes) {
           expect(note.height, `${where} ${note.name}`).toBeGreaterThanOrEqual(40)
           expect(note.width, `${where} ${note.name}`).toBeGreaterThanOrEqual(36)

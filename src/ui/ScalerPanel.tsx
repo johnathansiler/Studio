@@ -374,19 +374,6 @@ const scaleList = allScales()
         <button type="button" className={`btn-quiet ${state.output !== 'audio' ? 'on' : ''}`} aria-pressed={state.output !== 'audio'} title="Send the chords as MIDI." onClick={() => patch({ output: (state.output === 'midi' ? 'both' : state.output === 'both' ? 'audio' : 'midi') satisfies ScalerOutput })}>MIDI output</button>
         <button type="button" className={`btn-quiet ${state.input === 'midi' ? 'on' : ''}`} aria-pressed={state.input === 'midi'} title="Detect reads the MIDI on this track." onClick={() => patch({ input: 'midi' satisfies ScalerInput })}>MIDI input</button>
         <button type="button" className={`btn-quiet ${state.input === 'audio' ? 'on' : ''}`} aria-pressed={state.input === 'audio'} title="Detect reads an audio clip in this project." onClick={() => patch({ input: 'audio' satisfies ScalerInput })}>Audio input</button>
-        {SOUNDS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={`btn-quiet ${state.sound === item.id ? 'on' : ''}`}
-            aria-pressed={state.sound === item.id}
-            title={item.hint}
-            onClick={() => {
-              patch({ sound: item.id })
-              if (item.id === 'library' || item.id === 'forward') setOptions(true)
-            }}
-          >{item.label}</button>
-        ))}
         </div>
         <button type="button" className={`btn-quiet ${options ? 'on' : ''}`} aria-expanded={options} aria-controls="scaler-options" title="Chords, songs, performances, and the rest of Scaler." onClick={() => setOptions((value) => !value)}>Options</button>
       </div>
