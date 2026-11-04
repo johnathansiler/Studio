@@ -44,8 +44,8 @@ let readyBytes: Uint8Array<ArrayBuffer> | null = null
 let pendingBytes: Promise<Uint8Array<ArrayBuffer>> | null = null
 
 /**
- * The base64 module is its own chunk. Call this only when `?wasmDsp=1` is set.
- * A normal page load never reaches it, so the bytes stay out of the main bundle.
+ * The base64 module is its own chunk. The page loads it for the default Rust chain.
+ * `?wasmDsp=0` never reaches it, so those sessions do not download the bytes.
  */
 export function loadDspWasmBytes(): Promise<Uint8Array<ArrayBuffer>> {
   if (readyBytes) return Promise.resolve(readyBytes)
