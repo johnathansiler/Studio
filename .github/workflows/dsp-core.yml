@@ -19,3 +19,5 @@ jobs:
         run: cargo build -p cueharbor-plugin --manifest-path core/Cargo.toml
       - name: Build the WASM DSP
         run: cargo build -p cueharbor-dsp --release --target wasm32-unknown-unknown --manifest-path core/Cargo.toml
+      - name: Check the committed WASM matches the Rust source
+        run: node scripts/check-dsp-hash.mjs

@@ -8,9 +8,10 @@
     "dev": "concurrently -n web,signal -c green,cyan \"vite --host 0.0.0.0 --port 5173\" \"tsx server/index.ts\"",
     "server": "tsx server/index.ts",
     "build": "node scripts/build-dsp.mjs && tsc -p tsconfig.json --noEmit && vite build",
+    "build:dsp": "node scripts/build-dsp.mjs --force",
     "check:size": "node --experimental-strip-types scripts/check-size.ts",
     "serve": "NODE_ENV=production node --experimental-strip-types server/index.ts",
-    "test": "node scripts/build-dsp.mjs && vitest run",
+    "test": "vitest run",
     "test:watch": "vitest"
   },
   "engines": {
