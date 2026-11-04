@@ -377,14 +377,23 @@
 }
 .mpc-brand strong { font-size: 18px; }
 .mpc-brand span { font-size: 11px; letter-spacing: 0.22em; color: #c8c8c8; }
-.mpc-keyboard {
+.mpc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  width: 100%;
+  justify-content: flex-end;
+}
+.mpc-keyboard,
+.mpc-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 40px;
   min-height: 44px;
   height: 44px;
-  margin-top: 8px;
+  margin-top: 0;
   padding: 0 16px;
   border: 0;
   border-radius: 8px;
@@ -458,7 +467,8 @@
   .hw-keys > .hw-key, .hw-transport > .hw-key, .softkeys > .hw-key, .mpc-pad-tools > .hw-key { min-width: 0; }
   .hw-slider, .hw-wheel, .hw-cursor, .hw-knobs { order: 6; }
   .mpc-brand { order: 0; width: 100%; align-items: stretch; }
-  .mpc-keyboard { width: 100%; }
+  .mpc-actions { justify-content: stretch; }
+  .mpc-keyboard, .mpc-close { flex: 1 0 40px; width: auto; }
   .hw-window { order: 7; }
   .hw-lip { order: 8; }
   .hw-keys, .hw-transport, .mpc-tools, .mpc-steps { flex-wrap: wrap; overflow: visible; }

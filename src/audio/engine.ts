@@ -3,6 +3,7 @@ import { onSpectralCommit } from './spectral/job'
 import { onStretchCommit, readStretch, storeStretch, stretchCacheKey, stretchSlot } from './stretch/commit'
 import type { StretchMode } from './stretch/engine'
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
+import { midiLit, pruneMidiMarks, type MidiMark } from '../model/midiActivity'
 import { compPieces, recordOffsetSamples } from '../model/comp'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
 import { clipLoops, holdUntilGrid, sessionStartContext } from '../model/sessionSlots'
@@ -114,7 +115,11 @@ export class AudioEngine {
   /** Live drums and keys. Parked into the sounding track so they cannot skip the fader. */
   private liveBus: GainNode | null = null
   private liveParked: AudioNode | null = null
-  /** Post master-fader meter. The strip analyser is before this fader. */
+  /** Notes that should light an arrange MIDI indicator, in audio-clock seconds. */
+  private midiMarks: MidiMark[] = []
+  /** Keys still held on a track. The indicator stays on until the last one releases. */
+  private midiHeld = new Map<string, number>()
+  /** Post master-fader meter. The strip analyser is after the track fader and mute. */
   private masterMeter: AnalyserNode | null = null
   private localBus: GainNode | null = null
   private remoteBus: GainNode | null = null
@@ -1141,6 +1146,32 @@ export class AudioEngine {
 
   setCueAudible(on: boolean) {
     if (this.cueReturnGain && this.ctx) this.cueReturnGain.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.02)
+  }
+
+  /** Remember a MIDI note on this track so the arrange header can light up. */
+  markMidi(trackId: string | null | undefined, when?: number, dur = 0.16) {
+    if (!trackId) return
+    const now = this.ctx?.currentTime ?? 0
+    const from = when ?? now
+    this.midiMarks.push({ id: trackId, from, until: from + Math.max(0.08, dur) })
+    if (this.midiMarks.length > 512) this.midiMarks.splice(0, this.midiMarks.length - 256)
+  }
+
+  /** A held key, pad, or incoming MIDI note. Pair +1 with a later -1. */
+  holdMidi(trackId: string | null | undefined, delta: 1 | -1) {
+    if (!trackId) return
+    const next = (this.midiHeld.get(trackId) ?? 0) + delta
+    if (next <= 0) this.midiHeld.delete(trackId)
+    else this.midiHeld.set(trackId, next)
+    if (delta > 0) this.markMidi(trackId)
+  }
+
+  /** Tracks with MIDI sounding right now. Playback, keys, pads, hardware, and Note Repeat share this. */
+  midiActivity(): Record<string, boolean> {
+    const now = this.ctx?.currentTime ?? 0
+    const lit = midiLit(this.midiMarks, new Set(this.midiHeld.keys()), now)
+    this.midiMarks = pruneMidiMarks(this.midiMarks, now)
+    return lit
   }
 
   levels() {
@@ -2962,6 +2993,7 @@ export class AudioEngine {
     const ctx = this.ctx
     const strip = track.id ? this.strips.get(track.id) : undefined
     if (!ctx || !strip) return false
+    this.markMidi(track.id, when, 0.2)
     const kit = normalizePadKit(track.padKit)
     const pad = kit.banks.flat().find((item) => item.pitch === pitch)
     const route = hitRoute(kit, pad ?? { muted: false })
@@ -3220,6 +3252,7 @@ export class AudioEngine {
 
   /** The same voice a pad hit uses, including the kit sample, tune, and level. */
   triggerPad(trackId: string, pitch: number, velocity: number) {
+    this.markMidi(trackId, undefined, 0.22)
     const savedRoute = this.padRouteId
     const savedLive = this.liveTrackId
     this.padRouteId = trackId
@@ -3232,6 +3265,7 @@ export class AudioEngine {
 
   /** Monitor one track through its MIDI effect chain, then the instrument. */
   playThrough(trackId: string, pitch: number, velocity: number, fine = 0) {
+    this.holdMidi(trackId, 1)
     const ctx = this.unlock()
     const when = liveWhen(ctx.currentTime)
     const track = this.project?.tracks.find((item) => item.id === trackId)
@@ -3272,6 +3306,7 @@ export class AudioEngine {
   }
 
   releaseThrough(trackId: string, pitch: number) {
+    this.holdMidi(trackId, -1)
     this.clearLive(trackId, pitch)
     const when = this.ctx?.currentTime ?? 0
     this.stopBuiltin(`${trackId}:${Math.round(pitch)}`, when)
@@ -3385,6 +3420,7 @@ export class AudioEngine {
   }
 
   private emitLive(pitch: number, velocity: number, drumIndex = -1, repeatEverySamples = 0, color?: PadColor) {
+    this.markMidi(this.padRouteId || this.liveTrackId, undefined, repeatEverySamples > 0 ? 0.2 : 0.12)
     this.sendLiveMidi(pitch, velocity)
     if (!this.ctx) this.unlock()
     const level = Math.max(0.05, Math.min(1, velocity))
@@ -3412,6 +3448,7 @@ export class AudioEngine {
 
   /** Grid-locked retrigger. `when` is an AudioContext time, not the moment this method runs. */
   schedulePadHit(when: number, pitch: number, velocity: number, color?: PadColor) {
+    this.markMidi(this.padRouteId || this.liveTrackId, when, 0.14)
     if (this.playLivePad(pitch, velocity, null, color, when)) return
     if (!this.ctx) this.unlock()
     const ctx = this.ctx
@@ -3876,6 +3913,7 @@ export class AudioEngine {
 
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[], routed = false) {
     if (note.muted) return
+    if (ctx === this.ctx && track) this.markMidi(track.id, when, dur)
     if (track?.instrument === 'scaler' && this.project) {
       const routed = routeScaler(this.project, track)
       track = routed.voice

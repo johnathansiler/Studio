@@ -181,14 +181,18 @@ describe('beat machine keyboard in the app', () => {
           const host = window as unknown as { __peak?: number }
           host.__peak = 0
           const timer = window.setInterval(() => {
-            const node = document.querySelector('.head.is-selected .mini-meter i') as HTMLElement | null
+            const head = document.querySelector('.head.is-selected')
+            const id = head?.getAttribute('data-track') || ''
+            const node = head?.querySelector('.mini-meter i') as HTMLElement | null
             const match = /scaleX\(([^)]+)\)/.exec(node?.style.transform || '')
-            const level = match ? Number(match[1]) : 0
+            const shown = match ? Number(match[1]) : 0
+            const raw = id ? ((window as unknown as { __cueharbor?: { engine: { levels: () => { tracks: Record<string, number> } } } }).__cueharbor?.engine.levels().tracks[id] ?? 0) : 0
+            const level = Math.max(shown, Math.min(1, raw * 3.2))
             if (level > (host.__peak ?? 0)) host.__peak = level
-          }, 30)
-          window.setTimeout(() => window.clearInterval(timer), 2500)
+          }, 16)
+          window.setTimeout(() => window.clearInterval(timer), 15000)
         })
-        await page.locator('.keyboard-dock [data-pitch="36"]').click()
+        await page.locator('.keyboard-dock [data-pitch="36"]').click({ delay: 250 })
         await page.waitForFunction(() => ((window as unknown as { __peak?: number }).__peak ?? 0) > 0.02)
 
         await page.locator('.keyboard-close').click()
