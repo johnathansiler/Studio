@@ -1,5 +1,5 @@
+import { scheduleRoutes, type RouteInput } from './graph'
 import { latencyOf } from '../plugins/catalog'
-import { edgeDelays, type RoutePoint } from '../routing'
 
 /** Sum of reported plugin latencies, ignoring bypassed slots. */
 export function sumLatency(samples: readonly number[]) {
@@ -31,8 +31,10 @@ export function reportedLatency(
 
 /**
  * Sample delays that line up track, send, and master branches.
- * This is the compensation pass the live graph and the offline renderer already run.
+ * The numbers come from the mix DAG: each edge waits until the slowest
+ * input of its destination has arrived. The live graph and the offline
+ * renderer both apply this map.
  */
-export function compensateGraph(nodes: RoutePoint[]) {
-  return edgeDelays(nodes)
+export function compensateGraph(nodes: readonly RouteInput[]) {
+  return scheduleRoutes(nodes).delays
 }

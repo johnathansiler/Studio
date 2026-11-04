@@ -28,6 +28,7 @@ import {
 } from '../audio/sample/engine'
 import { assetFromClip, placeLooper, placeSampler, playbackChannel, readSlotPoints, type SlotPoints } from '../audio/sample/slot'
 import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
+import { feedbackMessage } from '../audio/core/graph'
 import { findCycle, MASTER } from '../audio/routing'
 import { isPackAsset, packToAsset } from '../audio/multisample/persist'
 import type { InstrumentPlay, SamplePack, SamplerProgram } from '../audio/multisample/types'
@@ -2775,7 +2776,11 @@ export class ProjectStore {
         latency: 0,
       }
     })
-    return findCycle(points) != null
+    const cycle = findCycle(points)
+    if (!cycle) return false
+    const named = cycle.map((id) => this.project.tracks.find((track) => track.id === id)?.name || id)
+    this.toast(feedbackMessage(named), 'warn')
+    return true
   }
 
   addInsert(trackId: string | 'master', type: InsertType) {
