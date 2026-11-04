@@ -205,12 +205,14 @@ export function SessionBrowser({
         }}
       />
       <input className="sl-search" aria-label="Search browser" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
-      <div className="sl-groups" role="tablist" aria-label="Browser">
-        {GROUPS.map((item) => (
-          <button key={item.id} type="button" className={group === item.id ? 'on' : ''} title={item.hint} aria-pressed={group === item.id} onClick={() => setGroup(item.id)}>
-            {item.label}
-          </button>
-        ))}
+      <div className="sl-groups">
+        <div className="sl-chip-scroll" role="tablist" aria-label="Browser">
+          {GROUPS.map((item) => (
+            <button key={item.id} type="button" className={group === item.id ? 'on' : ''} title={item.hint} aria-pressed={group === item.id} onClick={() => setGroup(item.id)}>
+              {item.label}
+            </button>
+          ))}
+        </div>
         {onClose && <button type="button" title="Hide the browser." onClick={onClose}>Close</button>}
       </div>
       <div className="sl-list" role="list">

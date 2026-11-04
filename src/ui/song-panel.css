@@ -4,7 +4,7 @@
   z-index: 220;
   left: auto;
   right: 8px;
-  bottom: 8px;
+  bottom: 72px;
   width: min(420px, calc(100vw - 16px));
   max-height: min(68dvh, 520px);
   gap: 8px;
@@ -98,6 +98,7 @@
 
 .song-sheet .guide-choice strong {
   font-size: 13px;
+  white-space: nowrap;
 }
 
 .song-sheet .guide-choice input,

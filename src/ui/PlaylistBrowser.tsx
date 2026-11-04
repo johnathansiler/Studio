@@ -154,12 +154,14 @@ export function PlaylistBrowser({
   return (
     <aside className="playlist-browser" data-playlist-browser="open" aria-label="Browser">
       <div className="browser-tabs">
-        {TABS.map((item) => (
-          <button key={item.id} type="button" className={tab === item.id ? 'on' : ''} title={item.hint} aria-pressed={tab === item.id} onClick={() => onTab(item.id)}>
-            {item.label}
-          </button>
-        ))}
-        <button type="button" title="Hide the browser. The playlist stays put." onClick={onClose}>Close</button>
+        <div className="browser-chip-scroll" role="tablist" aria-label="Browser">
+          {TABS.map((item) => (
+            <button key={item.id} type="button" className={tab === item.id ? 'on' : ''} title={item.hint} aria-pressed={tab === item.id} onClick={() => onTab(item.id)}>
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="browser-close" title="Hide the browser. The playlist stays put." onClick={onClose}>Close</button>
       </div>
       {soundLock ? (
         <SoundBrowser

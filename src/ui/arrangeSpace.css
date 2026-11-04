@@ -7,8 +7,16 @@
   background: #121814; border-right: 1px solid var(--line); overflow: hidden;
 }
 .browser-resize { width: 8px; padding: 0; border: 0; background: transparent; cursor: col-resize; }
-.browser-tabs { display: flex; flex-wrap: nowrap; gap: 4px; align-items: center; padding: 4px 6px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.browser-tabs { display: flex; flex-wrap: nowrap; gap: 4px; align-items: center; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.browser-chip-scroll { display: flex; flex: 1; min-width: 0; gap: 4px; overflow-x: auto; }
 .browser-tabs button, .browser-tabs select { min-height: 40px; flex: none; border-radius: 999px; border: 1px solid var(--line); background: #18231d; color: var(--text); padding: 0 12px; font-size: 13px; }
+.browser-close { border-radius: 8px; }
+.shell .playlist-browser .sound-filters input,
+.shell .sound-panel .sound-filters input,
+.shell .browser-body input {
+  min-height: 40px;
+  height: 40px;
+}
 .browser-tabs button.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 .playlist-browser .sound-panel { flex: 1 1 auto; border: 0; border-radius: 0; box-shadow: none; height: auto; min-height: 0; overflow: hidden; }
 .playlist-browser .sound-count,

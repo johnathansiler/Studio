@@ -101,9 +101,11 @@
   z-index: 3;
 }
 
+.shell .sl-browser .sl-search,
 .sl-search {
   flex: none;
   min-height: 40px;
+  height: 40px;
   margin: 6px 6px 0;
   border-radius: 8px;
   border: 1px solid #2a312b;
@@ -119,6 +121,13 @@
   gap: 4px;
   padding: 6px;
   border-bottom: 1px solid #2a312b;
+  align-items: center;
+}
+.sl-chip-scroll {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 4px;
   overflow-x: auto;
 }
 
