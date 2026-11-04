@@ -1,6 +1,8 @@
 import type { KeysLock, ScalerNote, VoiceGroup } from './types'
 import { expressNotes } from './face'
 import { lockedTone, pitchRole } from '../../theory/lock'
+import { renderStyled, type PlayStyle, type VariationContext } from './vary'
+import type { GenrePack } from './catalog/library'
 
 export const KEYS_LOCKS = ['off', 'scale-snap', 'scale-hide', 'chord', 'chord-notes', 'one-finger'] as const
 export type { KeysLock, VoiceGroup } from './types'
@@ -139,7 +141,10 @@ export function renderPerformance(
   spanBeats: number,
   rate = 0.5,
   swingAdd = 0,
+  context?: Partial<VariationContext>,
 ): ScalerNote[] {
+  const styled = styleById(performanceId)
+  if (styled) return renderStyled(styled, tones, spanBeats, rate, swingAdd, context)
   const spec = performanceById(performanceId)
   const grid = spec ? GRID_BY_ID.get(spec.patternId) : undefined
   if (!spec || !grid || !tones.length) return []
@@ -394,3 +399,32 @@ function clamp(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min
   return Math.min(max, Math.max(min, value))
 }
+
+let styles: PlayStyle[] | null = null
+let packs: GenrePack[] | null = null
+let loading: Promise<void> | null = null
+
+/** Lazy catalog of play styles and genre packs. Safe to call more than once. */
+export function loadPerformanceLibrary(): Promise<void> {
+  if (!loading) {
+    loading = import('./catalog/library').then((mod) => {
+      styles = mod.PLAY_STYLES
+      packs = mod.GENRE_PACKS
+    })
+  }
+  return loading
+}
+
+export function styleCatalog(): PlayStyle[] {
+  return styles ?? []
+}
+
+export function packCatalog(): GenrePack[] {
+  return packs ?? []
+}
+
+export function styleById(id: string) {
+  return styles?.find((item) => item.id === id) ?? null
+}
+
+void loadPerformanceLibrary()
