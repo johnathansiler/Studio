@@ -74,7 +74,14 @@ function hold(sampleRate: number, factory: (rate: number) => Processor) {
   return () => (proc ??= factory(sampleRate))
 }
 
-function series(chain: Processor[], input: Float32Array[], output: Float32Array[], params: Record<string, number>, ctx: BlockContext) {
+function series(
+  chain: Processor[],
+  input: Float32Array[],
+  output: Float32Array[],
+  params: Record<string, number>,
+  ctx: BlockContext,
+  pool?: Float32Array[][],
+) {
   if (!chain.length) {
     passthrough().process(input, output, params, ctx)
     return
@@ -82,12 +89,24 @@ function series(chain: Processor[], input: Float32Array[], output: Float32Array[
   let current = input
   for (let i = 0; i < chain.length; i++) {
     const last = i === chain.length - 1
-    const dest = last
-      ? output
-      : output.map((channel) => new Float32Array(channel.length))
+    let dest: Float32Array[]
+    if (last) dest = output
+    else if (pool) dest = stageBuffer(pool, i, output)
+    else dest = output.map((channel) => new Float32Array(channel.length))
     chain[i].process(current, dest, params, ctx)
     current = dest
   }
+}
+
+function stageBuffer(pool: Float32Array[][], index: number, output: Float32Array[]) {
+  const n = output[0]?.length ?? 0
+  const channels = output.length
+  let row = pool[index]
+  if (!row || row.length < channels || row[0].length !== n) {
+    row = Array.from({ length: channels }, () => new Float32Array(Math.max(1, n)))
+    pool[index] = row
+  }
+  return row
 }
 
 function wrap(sampleRate: number, pick: (kind: number) => Processor, map: (kind: number, params: Record<string, number>) => Record<string, number>, latency = 0): Processor {
@@ -367,6 +386,7 @@ function createMaster(sampleRate: number): Processor {
   const dither = createDither()
   const meter = createMasterMeter(sampleRate)
   const scratch = [new Float32Array(0), new Float32Array(0)]
+  const stages: Float32Array[][] = []
   return {
     latencySamples: 64,
     spectrum: meter.spectrum,
@@ -390,7 +410,7 @@ function createMaster(sampleRate: number): Processor {
       if (kind >= 1) chain.push(brick)
       else chain.push(clean)
       if ((params.bits ?? 24) < 23.5 || (params.shape ?? 0) > 0.05) chain.push(dither)
-      series(chain, input, output, params, ctx)
+      series(chain, input, output, params, ctx, stages)
       const n = output[0]?.length ?? 0
       if (scratch[0].length !== n) {
         scratch[0] = new Float32Array(n)
