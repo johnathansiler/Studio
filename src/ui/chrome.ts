@@ -234,8 +234,8 @@ export const CALL_COPY: Copy[] = [
   { id: 'share', label: 'Share', hint: 'Share your screen with the room.' },
   { id: 'settings', label: 'Call setup', hint: 'Your sound, recording delay, and which devices to use.' },
   { id: 'monitor', label: 'Monitor', hint: 'Switch the cue you hear between Opus and PCM.' },
-  { id: 'create', label: 'Create invite', hint: 'Start a room and get a link to share.' },
-  { id: 'join', label: 'Join', hint: 'Enter a room with an invite code.' },
+  { id: 'create', label: 'Host a Collab', hint: 'Start a session and get a link to share.' },
+  { id: 'join', label: 'Join a Collab', hint: 'Enter or paste an invite code or link.' },
   { id: 'new', label: 'New', hint: 'Start a fresh room and leave this one.' },
 ]
 

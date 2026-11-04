@@ -4,7 +4,9 @@ import type { AudioEngine } from '../audio/engine'
 import type { Participant, SessionClient } from '../remote/session'
 import { previewPlayback } from '../model/callVideo'
 import { mediaStatus } from '../model/media'
+import { parseCollabTarget } from '../model/negotiate'
 import { CALL_COPY, copyOf } from './chrome'
+import { collabChoosing } from './collabTab'
 import { SETUP_PLAIN } from './collabCopy'
 import { useFormFactor } from './form'
 import { TipButton } from './Hint'
@@ -21,9 +23,7 @@ export function VideoDock({
   versionTick,
   simple,
   onCreate,
-  onJoin,
-  onNewSession,
-  onHide,
+  onJoinInvite,
   onSaveVersion,
 }: {
   session: SessionClient
@@ -32,9 +32,7 @@ export function VideoDock({
   versionTick: number
   simple?: boolean
   onCreate: () => void
-  onJoin: () => void
-  onNewSession: () => void
-  onHide?: () => void
+  onJoinInvite: (input: { name: string; code: string; invite: string }) => void
   onSaveVersion: () => void
 }) {
   const state = session.state
@@ -43,6 +41,10 @@ export function VideoDock({
   const [tab, setTab] = useState<'people' | 'chat' | 'versions'>('people')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [linkNote, setLinkNote] = useState('')
+  const [joinForm, setJoinForm] = useState(false)
+  const [joinDraft, setJoinDraft] = useState('')
+  const [nameDraft, setNameDraft] = useState(state.name)
+  const [joinNote, setJoinNote] = useState('')
   const [draft, setDraft] = useState('')
   const [levels, setLevels] = useState({ input: 0, talk: 0 })
   const root = useRef<HTMLDivElement>(null)
@@ -104,12 +106,22 @@ export function VideoDock({
     live: state.status === 'live',
   })
 
-  const inRoom = state.status === 'live' || state.status === 'waiting' || state.status === 'reconnecting'
+  const choosing = collabChoosing(state.status)
+  useEffect(() => {
+    if (!choosing) setJoinForm(false)
+  }, [choosing])
+  const startNote = state.error
+    || (state.status === 'rejected' ? 'The host declined this session.' : '')
+    || (state.status === 'removed' ? 'You were removed from this session.' : '')
 
-  function startNewSession() {
-    const others = state.participants.some((person) => person.id !== state.selfId)
-    if (inRoom && others && !window.confirm('Leave this session and start a new one?')) return
-    onNewSession()
+  function submitJoin() {
+    const target = parseCollabTarget(joinDraft)
+    if (!target.code) {
+      setJoinNote('Enter a code or paste a link.')
+      return
+    }
+    setJoinNote('')
+    onJoinInvite({ name: nameDraft.trim() || state.name || 'Artist', code: target.code, invite: target.invite })
   }
 
   function sessionReady(status: string, code?: string) {
@@ -185,7 +197,7 @@ export function VideoDock({
     const dockRoot = createRoot(mount)
     popRoot.current = dockRoot
     popWindow.current = win
-    dockRoot.render(<LiveDock session={session} engine={engine} store={store} versionTick={versionTick} simple={simple} onCreate={onCreate} onJoin={onJoin} onNewSession={onNewSession} onSaveVersion={onSaveVersion} />)
+    dockRoot.render(<LiveDock session={session} engine={engine} store={store} versionTick={versionTick} simple={simple} onCreate={onCreate} onJoinInvite={onJoinInvite} onSaveVersion={onSaveVersion} />)
     setPopped(true)
     win.addEventListener('pagehide', () => {
       dockRoot.unmount()
@@ -212,28 +224,22 @@ export function VideoDock({
   }
 
   return (
-    <aside className={`dock ${simple ? 'simple' : ''}`} ref={root}>
+    <aside className={`dock ${simple ? 'simple' : ''}`} ref={root} data-collab-phase={choosing ? 'start' : 'room'}>
       <div className="dock-resize" />
-      <div className="dock-bar">
-        <strong>{state.code ? `Session ${state.code}` : 'Session'}</strong>
-        {onHide && !simple && (
-          <TipButton className="icon-btn" label="Hide" hint="Close the session panel. The timeline uses the full width." onClick={onHide} />
-        )}
-        <span className="spacer" />
-        <button className="icon-btn pop-out" onClick={(event) => void popOut(event)} title="Pop out" aria-label="Pop out">
-          Pop out
-        </button>
-        {inRoom && (
-          <TipButton id="new-session" className="text-btn" label={call('new').label} hint={call('new').hint} onClick={startNewSession}>
-            New
-          </TipButton>
-        )}
-      </div>
+      {!choosing && (
+        <div className="dock-bar">
+          <strong>{state.code ? `Session ${state.code}` : 'Session'}</strong>
+          <span className="spacer" />
+          <button className="icon-btn pop-out" onClick={(event) => void popOut(event)} title="Pop out" aria-label="Pop out">
+            Pop out
+          </button>
+        </div>
+      )}
       <div className="dock-body">
-      {state.usageNotice && <div className="media-banner bad">{state.usageNotice}</div>}
-      {state.hostLeft && <div className="media-banner bad">The host left this session.</div>}
-      {!state.hostLeft && link && <div className={`media-banner ${link.tone}`}>{link.text}</div>}
-      {simple && (
+      {!choosing && state.usageNotice && <div className="media-banner bad">{state.usageNotice}</div>}
+      {!choosing && state.hostLeft && <div className="media-banner bad">The host left this session.</div>}
+      {!choosing && !state.hostLeft && link && <div className={`media-banner ${link.tone}`}>{link.text}</div>}
+      {!choosing && simple && (
         <div className="artist-card">
           <div className="meter tall">
             <b style={{ width: `${Math.min(100, levels.input * 320)}%` }} />
@@ -245,14 +251,41 @@ export function VideoDock({
           )}
         </div>
       )}
-      {state.status === 'idle' || state.status === 'error' ? (
-        <div className="empty-session">
-          {state.error && <p className="hint">{state.error}</p>}
-          <TipButton className="text-btn primary" label={call('create').label} hint={call('create').hint} onClick={onCreate} />
-          <TipButton id="join-with-code" className="text-btn" label={call('join').label} hint={call('join').hint} onClick={onJoin} />
-          <TipButton id="new-session" className="text-btn" label={call('new').label} hint={call('new').hint} onClick={startNewSession}>
-            New
-          </TipButton>
+      {choosing ? (
+        <div className="collab-start" data-collab-start="open">
+          {startNote && <p className="hint">{startNote}</p>}
+          {joinForm ? (
+            <form
+              className="collab-join"
+              onSubmit={(event) => {
+                event.preventDefault()
+                submitJoin()
+              }}
+            >
+              <label className="collab-field">
+                Your name
+                <input value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} autoComplete="name" />
+              </label>
+              <label className="collab-field">
+                Invite code or link
+                <input
+                  value={joinDraft}
+                  onChange={(event) => setJoinDraft(event.target.value)}
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+              </label>
+              {joinNote && <p className="hint" role="status">{joinNote}</p>}
+              <button type="submit" className="text-btn primary">Join</button>
+              <button type="button" className="text-btn" onClick={() => { setJoinForm(false); setJoinNote('') }}>Back</button>
+            </form>
+          ) : (
+            <>
+              <TipButton className="text-btn primary" label={call('create').label} hint={call('create').hint} onClick={onCreate} />
+              <TipButton id="join-with-code" className="text-btn" label={call('join').label} hint={call('join').hint} onClick={() => setJoinForm(true)} />
+            </>
+          )}
         </div>
       ) : (
         <div className={`stage ${featured ? 'speaker' : 'gallery'}`}>
@@ -273,32 +306,34 @@ export function VideoDock({
             ))}
         </div>
       )}
-      <div className="call-controls">
-        <TipButton className={`t-btn ${state.talkOn ? 'on' : ''}`} label={state.talkOn ? 'Mic on' : 'Mic off'} hint={call('mic').hint} pressed={state.talkOn} onClick={() => void session.setTalk(!state.talkOn)}>
-          Mic
-        </TipButton>
-        <TipButton className={`t-btn ${state.camOn ? 'on' : ''}`} label={call('cam').label} hint={call('cam').hint} pressed={state.camOn} onClick={() => void session.setCam(!state.camOn)}>
-          Cam
-        </TipButton>
-        <button type="button" className="text-btn primary copy-link" aria-label="Copy Link" onClick={(event) => void copyInviteLink(event)}>
-          Copy Link
-        </button>
-        <button type="button" className="text-btn warn leave-btn" aria-label="Leave" disabled={!state.code} onClick={() => session.leave()}>
-          Leave
-        </button>
-        <TipButton
-          className={`t-btn ${settingsOpen ? 'on' : ''}`}
-          label={call('settings').label}
-          hint={call('settings').hint}
-          pressed={settingsOpen}
-          onClick={() => setSettingsOpen((open) => !open)}
-        >
-          <GearIcon />
-          <span className="setup-word">Setup</span>
-        </TipButton>
-        {linkNote && <span className="link-note" role="status">{linkNote}</span>}
-      </div>
-      {settingsOpen && (
+      {!choosing && (
+        <div className="call-controls">
+          <TipButton className={`t-btn ${state.talkOn ? 'on' : ''}`} label={state.talkOn ? 'Mic on' : 'Mic off'} hint={call('mic').hint} pressed={state.talkOn} onClick={() => void session.setTalk(!state.talkOn)}>
+            Mic
+          </TipButton>
+          <TipButton className={`t-btn ${state.camOn ? 'on' : ''}`} label={call('cam').label} hint={call('cam').hint} pressed={state.camOn} onClick={() => void session.setCam(!state.camOn)}>
+            Cam
+          </TipButton>
+          <button type="button" className="text-btn primary copy-link" aria-label="Copy Link" onClick={(event) => void copyInviteLink(event)}>
+            Copy Link
+          </button>
+          <button type="button" className="text-btn warn leave-btn" aria-label="Leave" onClick={() => session.leave()}>
+            Leave
+          </button>
+          <TipButton
+            className={`t-btn ${settingsOpen ? 'on' : ''}`}
+            label={call('settings').label}
+            hint={call('settings').hint}
+            pressed={settingsOpen}
+            onClick={() => setSettingsOpen((open) => !open)}
+          >
+            <GearIcon />
+            <span className="setup-word">Setup</span>
+          </TipButton>
+          {linkNote && <span className="link-note" role="status">{linkNote}</span>}
+        </div>
+      )}
+      {!choosing && settingsOpen && (
         <div className="settings-sheet" data-setup="open">
           <div className="setup-list">
             <SetupRow
@@ -317,11 +352,16 @@ export function VideoDock({
           {state.takeProgress != null && <div>Take {Math.round(state.takeProgress * 100)}%</div>}
         </div>
       )}
-      <div>
+      {!choosing && (
+      <div className="collab-lower">
         <div className="side-tabs">
-          {(['people', 'chat', 'versions'] as const).map((item) => (
+          {([
+            ['people', 'People'],
+            ['chat', 'Chat'],
+            ['versions', 'Versions'],
+          ] as const).map(([item, label]) => (
             <button key={item} type="button" data-tab={item} className={`text-btn ${tab === item ? 'active' : ''}`} onClick={() => setTab(item)}>
-              {item === 'versions' ? 'Versions' : item}
+              {label}
             </button>
           ))}
         </div>
@@ -381,7 +421,7 @@ export function VideoDock({
                 setDraft('')
               }}
             >
-              <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Message the room" />
+              <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Message the room" aria-label="Message the room" />
               <button className="text-btn" type="submit">
                 Send
               </button>
@@ -389,12 +429,13 @@ export function VideoDock({
           </div>
         )}
       </div>
+      )}
       </div>
     </aside>
   )
 }
 
-function LiveDock(props: { session: SessionClient; engine: AudioEngine; store: ProjectStore; versionTick: number; simple?: boolean; onCreate: () => void; onJoin: () => void; onNewSession: () => void; onSaveVersion: () => void }) {
+function LiveDock(props: { session: SessionClient; engine: AudioEngine; store: ProjectStore; versionTick: number; simple?: boolean; onCreate: () => void; onJoinInvite: (input: { name: string; code: string; invite: string }) => void; onSaveVersion: () => void }) {
   const [, bump] = useState(0)
   useEffect(() => props.session.subscribe(() => bump((n) => n + 1)), [props.session])
   useEffect(() => props.engine.subscribe(() => bump((n) => n + 1)), [props.engine])

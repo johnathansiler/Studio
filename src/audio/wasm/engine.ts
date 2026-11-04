@@ -1,5 +1,3 @@
-import { DSP_WASM_BASE64 } from './dspBytes'
-
 export interface WasmLayoutControl {
   paramId: number
   key: string
@@ -42,9 +40,32 @@ const STATE_CAP = 16384
 
 const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
+let readyBytes: Uint8Array<ArrayBuffer> | null = null
+let pendingBytes: Promise<Uint8Array<ArrayBuffer>> | null = null
+
+/**
+ * The base64 module is its own chunk. Call this only when `?wasmDsp=1` is set.
+ * A normal page load never reaches it, so the bytes stay out of the main bundle.
+ */
+export function loadDspWasmBytes(): Promise<Uint8Array<ArrayBuffer>> {
+  if (readyBytes) return Promise.resolve(readyBytes)
+  pendingBytes ??= import('./dspBytes').then(({ DSP_WASM_BASE64 }) => {
+    readyBytes = decodeWasm(DSP_WASM_BASE64)
+    return readyBytes
+  }).catch((error: unknown) => {
+    pendingBytes = null
+    throw error
+  })
+  return pendingBytes
+}
+
 /** AudioWorklet has no `atob`. This is the same alphabet Node and browsers use. */
 export function dspWasmBytes(): Uint8Array<ArrayBuffer> {
-  const input = DSP_WASM_BASE64
+  if (!readyBytes) throw new Error('DSP module is not loaded')
+  return readyBytes
+}
+
+function decodeWasm(input: string): Uint8Array<ArrayBuffer> {
   const table = new Uint8Array(128)
   for (let i = 0; i < BASE64.length; i++) table[BASE64.charCodeAt(i)] = i
   const padding = input.endsWith('==') ? 2 : input.endsWith('=') ? 1 : 0
@@ -77,7 +98,7 @@ export class WasmEq {
   }
 
   static async create(): Promise<WasmEq> {
-    const module = await WebAssembly.compile(dspWasmBytes())
+    const module = await WebAssembly.compile(await loadDspWasmBytes())
     const instance = await WebAssembly.instantiate(module)
     const exp = instance.exports as unknown as WasmExports
     return new WasmEq(exp, exp.ch_eq_create())

@@ -13,9 +13,9 @@ import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } 
 import { AwarenessChannel, bindAwareness, currentEditCursor, localAwareness, onPresencePoke } from './remote/presence'
 import { SessionClient } from './remote/session'
 import { buildRoomCopy, deleteProject, listProjects, listSnapshots, listVersions, loadLastProject, loadProject, loadRoomCopy, loadSnapshot, requestPersistentStorage, saveProject, saveRoomCopy, saveVersion, storageReport, type ProjectListItem, type WorkspaceSnapshot } from './storage/idb'
-import { inviteWins, joinAction } from './model/negotiate'
+import { joinAction } from './model/negotiate'
 import { locksProject, readInviteToken } from './state/ops'
-import { readIdentity, writeIdentity } from './storage/identity'
+import { forgetStoredCollab, readIdentity, replaceInviteUrl, writeIdentity } from './storage/identity'
 import { selectPiano } from './state/select'
 import { ProjectStore, seedDemoProject } from './state/store'
 import { digestProject, musicalClone } from './state/ops'
@@ -196,8 +196,6 @@ export function App() {
       channel.dispose()
     }
   }, [engine, session, store])
-  const [joinOpen, setJoinOpen] = useState(false)
-  const [joinCode, setJoinCode] = useState('')
   const [joinName, setJoinName] = useState(store.project.name ? localStorage.getItem('cueharbor-name') || 'Artist' : 'Artist')
   const [projects, setProjects] = useState<ProjectListItem[]>([])
   const [snapshots, setSnapshots] = useState<{ key: string; savedAt: number }[]>([])
@@ -229,7 +227,6 @@ export function App() {
   }, [rackRoll, phone])
   const [phonePane, setPhonePane] = useState<'edit' | 'room'>('edit')
   const [collabOpen, setCollabOpen] = useState(() => readSessionDock())
-  const [invitePending, setInvitePending] = useState(false)
   const [pianoOpen, setPianoOpen] = useState(false)
   const shellRef = useRef<HTMLDivElement>(null)
   const [keysLandscape, setKeysLandscape] = useState(false)
@@ -383,27 +380,17 @@ export function App() {
     }
     const urlCode = (params.get('session') || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
     const urlInvite = readInviteToken(location.search)
+    forgetStoredCollab()
     const identity = readIdentity()
-    const choice = inviteWins(urlCode, identity?.code || '')
-    if (choice.dropStored && identity) writeIdentity({ ...identity, code: '' })
     if (identity?.transportMode) store.setTransportMode(identity.transportMode)
     const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-    const action = joinAction({ urlCode, storedCode: identity?.code || '', hasParticipant: Boolean(identity?.participantId) })
+    const action = joinAction({ urlCode, storedCode: '', hasParticipant: Boolean(identity?.participantId) })
     const joinNameNow = identity?.name || joinName || 'Artist'
-    if (action === 'reconnect-url' || action === 'auto-join') {
-      if (urlCode) setJoinCode(urlCode)
+    if (action === 'auto-join') {
       if (ios && !navigator.userActivation?.isActive) session.holdMediaForGesture()
       session.connect({ name: joinNameNow, code: urlCode, invite: urlInvite })
-      setJoinOpen(false)
-      setInvitePending(false)
-      if (action === 'auto-join') {
-        writeSessionDock(true)
-        setCollabOpen(true)
-      }
-    } else if (action === 'resume-stored') {
-      if (ios && !navigator.userActivation?.isActive) session.holdMediaForGesture()
-      session.connect({ name: joinNameNow, code: choice.code, invite: '' })
-      setJoinOpen(false)
+      writeSessionDock(true)
+      setCollabOpen(true)
     }
     engine.sync(store.project, (id) => store.buffers.get(id))
     engine.followTrack(store.selectedTrackId)
@@ -639,7 +626,7 @@ export function App() {
       participantId: id,
       name: session.state.name,
       role,
-      code,
+      code: '',
       camOn: session.state.camOn,
       micId: session.state.micId,
       outId: session.state.outId,
@@ -649,11 +636,7 @@ export function App() {
       monitorMode: session.state.monitorMode,
       transportMode: store.transportMode,
     })
-    const url = new URL(location.href)
-    if (url.searchParams.get('session') !== code) {
-      url.searchParams.set('session', code)
-      history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
-    }
+    replaceInviteUrl()
   }, [session, store, version])
 
   useEffect(() => {
@@ -1398,14 +1381,12 @@ export function App() {
     void requestPersistentStorage()
   }
 
-  function joinSession() {
+  function joinCollab(input: { name: string; code: string; invite: string }) {
     engine.unlock()
     session.primeMediaFromGesture()
-    const typed = joinCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
-    const linked = new URLSearchParams(location.search).get('session')?.toUpperCase().replace(/[^A-Z0-9]/g, '') || ''
-    session.connect({ name: joinName || 'Artist', code: joinCode.trim(), invite: linked && linked === typed ? readInviteToken(location.search) : '' })
-    setJoinOpen(false)
-    setInvitePending(false)
+    const name = input.name.trim() || joinName || 'Artist'
+    setJoinName(name)
+    session.connect({ name, code: input.code, invite: input.invite })
   }
 
   function saveAs(name: string) {
@@ -1550,14 +1531,13 @@ async function importDropped(files: FileList) {
   const collabBadge = collabBadgeOn({
     tab: studioTab,
     status: session.state.status,
-    pendingInvite: invitePending,
+    pendingInvite: false,
     waiting: waitingGuests,
   })
 
   function hideCollab() {
     writeSessionDock(false)
     setCollabOpen(false)
-    setJoinOpen(false)
     setPhonePane('edit')
   }
 
@@ -1568,6 +1548,10 @@ async function importDropped(files: FileList) {
     setPhonePane('edit')
     setPianoOpen(false)
     setMenuOpen(false)
+    if (store.keyboardMidi) {
+      store.setKeyboardMidi(false)
+      notifyKeyboard(false)
+    }
   }
 
   function showView(view: 'arrange' | 'mix' | 'beats' | 'session') {
@@ -1883,7 +1867,7 @@ async function importDropped(files: FileList) {
           />
         )}
       </header>
-      {(surface === 'studio' || surface === 'artist' || session.state.status === 'live') && (
+      {(surface === 'studio' || surface === 'artist' || session.state.status === 'live') && !collabShown && (
         <TransportBar
           store={store}
           engine={engine}
@@ -1943,14 +1927,7 @@ async function importDropped(files: FileList) {
                 session.primeMediaFromGesture()
                 session.connect({ name: joinName || 'Engineer', create: true })
               }}
-              onNewSession={() => {
-                engine.unlock()
-                session.primeMediaFromGesture()
-                setMenuOpen(false)
-                session.connect({ name: joinName || 'Engineer', create: true, fresh: true })
-              }}
-              onJoin={() => setJoinOpen(true)}
-              onHide={hideCollab}
+              onJoinInvite={joinCollab}
             />
           </div>
         )}
@@ -2071,23 +2048,6 @@ async function importDropped(files: FileList) {
         }}>
           Tap for sound
         </button>
-      )}
-      {collabShown && joinOpen && (
-        <div className="modal-back">
-          <div className="modal">
-            <h2>Join</h2>
-            <div className="stack">
-              <input value={joinName} onChange={(event) => setJoinName(event.target.value)} placeholder="Your name" />
-              <input value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} placeholder="Invite code" />
-              <div className="row-btns">
-                <button type="button" className="text-btn" onClick={() => setJoinOpen(false)}>Cancel</button>
-                <button type="button" className="text-btn primary" id="join-session" onClick={joinSession}>
-                  Join
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
       {projectsOpen && (
         <ProjectSheet

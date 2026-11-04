@@ -5,6 +5,11 @@ export function collabPanelVisible(tab: StudioTab): boolean {
   return tab === 'collab'
 }
 
+/** Idle, failed, and ended calls show Host and Join. A live call does not. */
+export function collabChoosing(status: string): boolean {
+  return status === 'idle' || status === 'error' || status === 'rejected' || status === 'removed'
+}
+
 export function collabBadgeOn(input: {
   tab: StudioTab
   status: 'idle' | 'connecting' | 'waiting' | 'live' | 'reconnecting' | 'rejected' | 'removed' | 'error'

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createElement } from 'react'
@@ -35,12 +35,12 @@ describe('beat machine layout', () => {
     store.insertPads(id)
     const html = renderToStaticMarkup(createElement(PadsPanel, { store, engine, trackId: id, onRecord: () => {}, onEdit: () => {} }))
     const browser = await chromium.launch()
-    const shots: { name: string; path: string }[] = []
+    const shots: { name: string; path: string; padWidth: number; padHeight: number }[] = []
     try {
       for (const viewport of [
         { name: 'phone', width: 390, height: 844 },
-        { name: 'fold', width: 673, height: 841 },
-        { name: 'desktop', width: 1280, height: 800 },
+        { name: 'fold', width: 923, height: 1024 },
+        { name: 'desktop', width: 1440, height: 900 },
       ]) {
         const page = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height } })
         await page.setContent(`<!doctype html><html><head><style>
@@ -49,11 +49,11 @@ describe('beat machine layout', () => {
           .stage { width: ${viewport.width}px; height: ${viewport.height}px; }
         </style></head><body><div class="stage">${html}</div></body></html>`, { waitUntil: 'load' })
         const report = await page.evaluate(() => {
-          const nodes = [...document.querySelectorAll('.lcd, .mpc-grid, .mpc-pad, .hw-key, .hw-wheel, .hw-knob, .mpc-brand, .hw-lip, .hw-transport')]
+          const nodes = [...document.querySelectorAll('.mpc-grid, .mpc-pad, .hw-key, .hw-wheel, .hw-knob, .mpc-brand, .hw-lip, .hw-transport, .mpc-keyboard, .mpc-close, .hw-slider input')]
           const boxes = nodes.map((node) => {
             const rect = node.getBoundingClientRect()
             return { name: node.className.toString().slice(0, 40), top: rect.top, left: rect.left, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height, node }
-          })
+          }).filter((box) => box.width > 0 && box.height > 0)
           const hits: string[] = []
           for (let i = 0; i < boxes.length; i++) {
             for (let j = i + 1; j < boxes.length; j++) {
@@ -66,29 +66,42 @@ describe('beat machine layout', () => {
             }
           }
           const pads = [...document.querySelectorAll('.mpc-pad')].map((node) => node.getBoundingClientRect())
-          const keys = [...document.querySelectorAll('.hw-key, .mpc-pad')]
+          const targets = [...document.querySelectorAll('.hw-key, .mpc-pad, .hw-knob, .hw-wheel, .mpc-keyboard, .mpc-close, .hw-slider input, .mpc select')]
             .map((node) => node.getBoundingClientRect())
             .filter((rect) => rect.width > 0 && rect.height > 0)
-            .map((rect) => rect.height)
-          const firstPad = document.querySelector('.mpc-pad')?.getBoundingClientRect().top ?? 0
-          const screen = document.querySelector('.lcd')?.getBoundingClientRect().top ?? 0
+          const mpc = document.querySelector('.mpc')?.getBoundingClientRect()
+          const first = pads[0]
           return {
-            hits: hits.slice(0, 8),
+            hits: hits.slice(0, 12),
             pads: pads.length,
-            short: keys.filter((height) => height < 40).length,
-            padsBeforeScreen: firstPad < screen,
-            width: document.querySelector('.mpc')?.getBoundingClientRect().width ?? 0,
+            short: targets.filter((rect) => rect.width < 40 || rect.height < 40).length,
+            screen: document.querySelector('.lcd, .hw-screen') != null,
+            padWidth: first ? Math.round(first.width) : 0,
+            padHeight: first ? Math.round(first.height) : 0,
+            scrollWidth: document.documentElement.scrollWidth,
+            clientWidth: document.documentElement.clientWidth,
+            scrollHeight: document.documentElement.scrollHeight,
+            mpcRight: mpc ? Math.round(mpc.right) : 0,
+            pastRight: boxes.filter((box) => box.right > (mpc?.right ?? 0) + 1).length,
           }
         })
-        expect(report.hits, `${viewport.name}\n${report.hits.join('\n')}`).toEqual([])
-        expect(report.pads).toBe(16)
-        expect(report.short).toBe(0)
-        if (viewport.width < 720) expect(report.padsBeforeScreen).toBe(true)
-        const path = `/opt/cursor/artifacts/beat-${viewport.name}.png`
+        const path = `/opt/cursor/artifacts/beat-${viewport.name}-${viewport.width}x${viewport.height}.png`
         await page.screenshot({ path, fullPage: true })
-        shots.push({ name: viewport.name, path })
+        expect(report.hits, `${viewport.name}\n${report.hits.join('\n')}`).toEqual([])
+        expect(report.pads).toBe(8)
+        expect(report.short).toBe(0)
+        expect(report.screen).toBe(false)
+        expect(report.scrollWidth).toBeLessThanOrEqual(viewport.width + 1)
+        expect(report.pastRight).toBe(0)
+        expect(report.scrollHeight).toBeLessThanOrEqual(viewport.height + 1)
+        const minimum = viewport.name === 'phone' ? 72 : 160
+        expect(report.padWidth).toBeGreaterThanOrEqual(minimum)
+        expect(report.padHeight).toBeGreaterThanOrEqual(minimum)
+        expect(Math.abs(report.padWidth - report.padHeight)).toBeLessThanOrEqual(6)
+        shots.push({ name: viewport.name, path, padWidth: report.padWidth, padHeight: report.padHeight })
         await page.close()
       }
+      writeFileSync('/opt/cursor/artifacts/beat-pad-sizes.json', JSON.stringify(shots, null, 2))
       const desktop = readFileSync(shots.find((shot) => shot.name === 'desktop')!.path).toString('base64')
       const photoPath = '/home/ubuntu/.cursor/projects/agent-repos-Studio/assets/mpc2000xl.jpg'
       // Reference photo is not in the repo. Layout checks above still run; the side-by-side shot is skipped.

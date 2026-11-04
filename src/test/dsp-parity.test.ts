@@ -1,18 +1,26 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { createNativePlugin } from '../audio/core/registry'
-import { FACTORY, defaultParams, descriptor } from '../audio/plugins/catalog'
+import { FACTORY, createPlugin, defaultParams, descriptor } from '../audio/plugins/catalog'
 import { createCore } from '../audio/plugins/dispatch'
 import { prepareChainPool, processChain, type ChainSlot } from '../audio/plugins/chain'
-import { createProcessor } from '../audio/plugins/createAll'
+import { createProcessor, preloadWasmInserts } from '../audio/plugins/createAll'
+import { loadModule } from '../audio/plugins/registry'
+import { createNodePool } from '../audio/nodePool'
+import { renderGraphParallel } from '../audio/parallelRender'
+import { renderGraph } from '../audio/renderGraph'
 import { create as createEq } from '../audio/plugins/eq'
 import { glideValue } from '../audio/paramCurve'
 import { DSP_WASM_BYTE_LENGTH } from '../audio/wasm/dspBytes'
-import { WasmEq } from '../audio/wasm/engine'
+import { loadDspWasmBytes, WasmEq } from '../audio/wasm/engine'
 import { WasmInsert } from '../audio/wasm/insert'
 import { wasmDspRequested } from '../audio/wasm/flag'
 import { loadWasmEqWorklet } from '../audio/wasm/loader'
 
 const TOLERANCE = 1e-6
+
+beforeAll(async () => {
+  await loadDspWasmBytes()
+})
 
 function sine(freq: number, frames: number, rate: number, amp: number) {
   const data = new Float32Array(frames)
@@ -443,18 +451,71 @@ describe('rust insert parity', () => {
     for (const score of scores) console.log(`DSP_PARITY_PLUGIN ${score.name} maxAbs=${score.max}`)
   })
 
-  it('runs the insert chain through WASM when the flag is on', () => {
+  it('runs the insert chain through WASM when the flag is on', async () => {
     const rate = 48000
     const frames = 2048
     const block = 128
     const left = sine(330, frames, rate, 0.4)
     const right = sine(440, frames, rate, 0.25)
-    const plain = renderChain(false, left, right, rate, block)
-    const flagged = renderChain(true, left, right, rate, block)
+    const plain = await renderChain(false, left, right, rate, block)
+    const flagged = await renderChain(true, left, right, rate, block)
     const max = Math.max(maxAbs(plain.left, flagged.left), maxAbs(plain.right, flagged.right))
     console.log(`DSP_PARITY_CHAIN maxAbs=${max}`)
     expect(max).toBeLessThan(PARITY_LIMIT)
     expect(flagged.latency).toBe(plain.latency)
+  })
+
+  it('keeps the flagged chain when offline bounce runs on workers', async () => {
+    const host = globalThis as { __CUEHARBOR_WASM_DSP__?: boolean }
+    host.__CUEHARBOR_WASM_DSP__ = true
+    await preloadWasmInserts()
+    await loadModule('eq')
+    const rate = 48000
+    const length = 256
+    const tone = sine(330, length, rate, 0.4)
+    const plugin = createPlugin('eq')
+    plugin.params.midG = 4
+    const opts = {
+      tracks: [{
+        id: 'vocal',
+        type: 'audio',
+        input: 'none',
+        buffer: [tone, tone.slice()],
+        volume: 1,
+        pan: 0,
+        mute: false,
+        solo: false,
+        plugins: [plugin],
+        sends: [],
+        output: null,
+        groupId: null,
+      }],
+      masterPlugins: [],
+      masterVolume: 1,
+      sampleRate: rate,
+      tempo: 120,
+      length,
+      scaleRoot: 0,
+      scaleIntervals: [0, 2, 4, 5, 7, 9, 11],
+      automation: [],
+      offline: true,
+      create: (pluginId: string, sampleRate: number) => {
+        const proc = createProcessor(pluginId, sampleRate)
+        if (!proc) throw new Error(`Missing ${pluginId}`)
+        expect(proc).toBeInstanceOf(WasmInsert)
+        return proc
+      },
+    }
+    const sequential = renderGraph(opts)
+    const runner = createNodePool(1)
+    try {
+      const parallel = await renderGraphParallel(opts, runner)
+      const max = Math.max(maxAbs(sequential.master[0], parallel.master[0]), maxAbs(sequential.master[1], parallel.master[1]))
+      expect(max).toBeLessThan(PARITY_LIMIT)
+    } finally {
+      await runner.close()
+      delete host.__CUEHARBOR_WASM_DSP__
+    }
   })
 })
 
@@ -492,10 +553,12 @@ function glideInsert(id: 'compressor' | 'saturator', key: string, target: number
   return worst
 }
 
-function renderChain(flag: boolean, left: Float32Array, right: Float32Array, rate: number, block: number) {
+async function renderChain(flag: boolean, left: Float32Array, right: Float32Array, rate: number, block: number) {
   const host = globalThis as { __CUEHARBOR_WASM_DSP__?: boolean }
-  if (flag) host.__CUEHARBOR_WASM_DSP__ = true
-  else delete host.__CUEHARBOR_WASM_DSP__
+  if (flag) {
+    host.__CUEHARBOR_WASM_DSP__ = true
+    await preloadWasmInserts()
+  } else delete host.__CUEHARBOR_WASM_DSP__
   const ids = ['eq', 'compressor', 'saturator', 'reverb', 'limiter']
   const params = [
     { ...defaultParams('eq'), midG: 3, midF: 1200 },
@@ -514,6 +577,9 @@ function renderChain(flag: boolean, left: Float32Array, right: Float32Array, rat
     sidechain: '',
     processor: createProcessor(id, rate),
   }))
+  if (flag) {
+    for (const slot of slots) expect(slot.processor).toBeInstanceOf(WasmInsert)
+  }
   const pool = prepareChainPool(slots.length, 2, block)
   const outL = new Float32Array(left.length)
   const outR = new Float32Array(right.length)

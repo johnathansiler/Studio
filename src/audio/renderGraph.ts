@@ -1,15 +1,16 @@
 import type { AutomationLane, PluginInstance } from '../model/types'
 import { audibleIds } from '../model/audible'
-import { curveForLength, laneFor, sendLane, valueChanges } from '../model/automation'
-import { projectSampleBeat } from '../model/tempoMap'
+import { curveForLength, laneFor, sendLane } from '../model/automation'
 import type { TempoPoint } from '../model/types'
-import { prepareChainPool, processChain, type ChainPool, type ChainSlot } from './plugins/chain'
-import { prepareAccurate, processSampleAccurate, type AccurateScratch } from './automationRender'
-import { automationAt } from './plugins/catalog'
+import { prepareChainPool, type ChainPool, type ChainSlot } from './plugins/chain'
+import { prepareAccurate, type AccurateScratch } from './automationRender'
 import { reportedLatency } from './core/latency'
+import { scheduleRoutes, type MixSchedule, type RouteInput } from './core/graph'
 import { createLoudness, measureLoudness, sanitize } from './plugins/dsp'
 import { sidechainMono } from './sidechain'
-import { MASTER, REMOTE, edgeDelays, findCycle, type RoutePoint } from './routing'
+import { MASTER, REMOTE } from './routing'
+import { renderInserts, type InsertClock, type InsertJob, type InsertPlugin } from './renderChain'
+import { wasmDspRequested } from './wasm/flag'
 import type { Processor } from './plugins/types'
 
 export interface GraphTrack {
@@ -28,7 +29,7 @@ export interface GraphTrack {
   groupId: string | null
 }
 
-export function renderGraph(opts: {
+export interface RenderOptions {
   tracks: GraphTrack[]
   masterPlugins: PluginInstance[]
   masterVolume: number
@@ -45,9 +46,40 @@ export function renderGraph(opts: {
   offline?: boolean
   liveRemote?: boolean
   create: (pluginId: string, sampleRate: number) => Processor
-}) {
+}
+
+export function renderGraph(opts: RenderOptions) {
+  const state = prepareRender(opts)
+  for (const id of state.schedule.order) {
+    if (id === MASTER || id === REMOTE) continue
+    const track = state.byId.get(id)
+    if (!track) continue
+    const input = nodeInput(state, id)
+    const slots = slotsFor(track.plugins, opts.create, opts.sampleRate, state.processors, id)
+    commitTrack(state, id, renderInserts(slots, input, clockOf(opts), keyFor(state), state.pool, state.scratch))
+  }
+  const masterSlots = slotsFor(opts.masterPlugins, opts.create, opts.sampleRate, state.processors, MASTER)
+  return finishMaster(state, renderInserts(masterSlots, masterInput(state), clockOf(opts), keyFor(state), state.pool, state.scratch))
+}
+
+export interface RenderState {
+  opts: RenderOptions
+  length: number
+  schedule: MixSchedule
+  incoming: Map<string, Edge[]>
+  byId: Map<string, GraphTrack>
+  heard: Set<string>
+  anySolo: boolean
+  processors: Map<string, ChainSlot[]>
+  pool: ChainPool
+  scratch: AccurateScratch
+  rendered: Map<string, { pre: Float32Array[]; post: Float32Array[] }>
+  cyclic: string[]
+  feedback: string
+}
+
+export function prepareRender(opts: RenderOptions): RenderState {
   const length = Math.max(1, opts.length)
-  const blank = () => [new Float32Array(length), new Float32Array(length)]
   const anySolo = opts.tracks.some((track) => track.solo)
   const heard = audibleIds(opts.tracks)
   const processors = new Map<string, ChainSlot[]>()
@@ -63,57 +95,122 @@ export function renderGraph(opts: {
     }, 0)
   }
 
-  const points: RoutePoint[] = opts.tracks.map((track) => ({
+  const points: RouteInput[] = opts.tracks.map((track) => ({
     id: track.id,
     dest: destination(track, opts.liveRemote === true),
     sends: track.sends.filter((send) => send.enabled).map((send) => send.busId),
     latency: latencyFor(track.plugins, track.id),
+    kind: track.type === 'bus' ? 'bus' : track.type === 'group' ? 'group' : 'track',
   }))
-  points.push({ id: MASTER, dest: null, sends: [], latency: latencyFor(opts.masterPlugins, MASTER) })
-  points.push({ id: REMOTE, dest: null, sends: [], latency: 0 })
-  const cyclic = findCycle(points)
-  const safe = cyclic
+  points.push({ id: MASTER, dest: null, sends: [], latency: latencyFor(opts.masterPlugins, MASTER), kind: 'master' })
+  points.push({ id: REMOTE, dest: null, sends: [], latency: 0, kind: 'remote' })
+  const first = scheduleRoutes(points)
+  const cycle = first.feedback
+  const safe = cycle
     ? points.map((point) => (point.id === MASTER || point.id === REMOTE ? point : { ...point, dest: MASTER, sends: [] }))
     : points
-  const delays = edgeDelays(safe)
+  const schedule = cycle ? scheduleRoutes(safe) : first
   const byId = new Map(opts.tracks.map((track) => [track.id, track]))
   const incoming = new Map<string, Edge[]>()
   for (const point of safe) {
     if (point.dest) pushEdge(incoming, point.dest, { from: point.id, to: point.dest, gain: 1, pre: false })
     const track = byId.get(point.id)
-    if (!track || cyclic) continue
+    if (!track || cycle) continue
     for (const send of track.sends) {
       if (!send.enabled) continue
       pushEdge(incoming, send.busId, { from: track.id, to: send.busId, gain: send.gain, pre: send.preFader, sendId: send.id })
     }
   }
-
-  const order = topo(safe.map((point) => point.id), incoming)
-  const rendered = new Map<string, { pre: Float32Array[]; post: Float32Array[] }>()
-  for (const id of order) {
-    if (id === MASTER || id === REMOTE) continue
-    const track = byId.get(id)
-    if (!track) continue
-    const audible = heard.has(id)
-    const soloedOut = anySolo && !heard.has(id)
-    const base = mixIncoming(blank(), incoming.get(id) ?? [], rendered, delays, length, opts)
-    add(base, fit(track.buffer, length))
-    const slots = slotsFor(track.plugins, opts.create, opts.sampleRate, processors, id)
-    const processed = runBlocks(slots, base, opts, rendered, byId, pool, scratch)
-    const pre = soloedOut ? blank() : processed
-    const post = audible ? applyAutomatedFader(processed, track, opts) : blank()
-    rendered.set(id, { pre, post })
+  return {
+    opts,
+    length,
+    schedule,
+    incoming,
+    byId,
+    heard,
+    anySolo,
+    processors,
+    pool,
+    scratch,
+    rendered: new Map(),
+    cyclic: cycle?.path ?? [],
+    feedback: cycle?.message ?? '',
   }
+}
 
-  const masterIn = mixIncoming(blank(), incoming.get(MASTER) ?? [], rendered, delays, length, opts)
-  const masterSlots = slotsFor(opts.masterPlugins, opts.create, opts.sampleRate, processors, MASTER)
-  const mastered = runBlocks(masterSlots, masterIn, opts, rendered, byId, pool, scratch)
-  const master = applyGain(mastered, opts.masterVolume)
+export function nodeInput(state: RenderState, id: string) {
+  const track = state.byId.get(id)
+  const base = mixIncoming(blank(state.length), state.incoming.get(id) ?? [], state.rendered, state.schedule.delays, state.length, state.opts)
+  if (track) add(base, fit(track.buffer, state.length))
+  return base
+}
+
+export function masterInput(state: RenderState) {
+  return mixIncoming(blank(state.length), state.incoming.get(MASTER) ?? [], state.rendered, state.schedule.delays, state.length, state.opts)
+}
+
+export function commitTrack(state: RenderState, id: string, processed: Float32Array[]) {
+  const track = state.byId.get(id)
+  if (!track) return
+  const audible = state.heard.has(id)
+  const soloedOut = state.anySolo && !state.heard.has(id)
+  const pre = soloedOut ? blank(state.length) : processed
+  const post = audible ? applyAutomatedFader(processed, track, state.opts) : blank(state.length)
+  state.rendered.set(id, { pre, post })
+}
+
+export function finishMaster(state: RenderState, mastered: Float32Array[]) {
+  const master = applyGain(mastered, state.opts.masterVolume)
   for (const channel of master) for (let i = 0; i < channel.length; i++) channel[i] = sanitize(channel[i])
-  const loudness = measureLoudness(createLoudness(opts.sampleRate), master[0], master[1], opts.sampleRate)
+  const loudness = measureLoudness(createLoudness(state.opts.sampleRate), master[0], master[1], state.opts.sampleRate)
   const delayMap: Record<string, number> = {}
-  for (const [key, value] of delays) delayMap[key] = value
-  return { master, delays: delayMap, ...loudness, cyclic: cyclic ?? [] }
+  for (const [key, value] of state.schedule.delays) delayMap[key] = value
+  return { master, delays: delayMap, ...loudness, cyclic: state.cyclic, feedback: state.feedback }
+}
+
+export function insertJob(state: RenderState, plugins: PluginInstance[], input: Float32Array[]): InsertJob {
+  return {
+    ...clockOf(state.opts),
+    plugins: plugins.map(insertPlugin),
+    input,
+    keys: [],
+    wasmDsp: wasmDspRequested(),
+  }
+}
+
+export function graphHasSidechain(opts: Pick<RenderOptions, 'tracks' | 'masterPlugins'>) {
+  const plugins = [...opts.masterPlugins, ...opts.tracks.flatMap((track) => track.plugins)]
+  return plugins.some((plugin) => plugin.enabled && plugin.sidechain)
+}
+
+function insertPlugin(plugin: PluginInstance): InsertPlugin {
+  return {
+    id: plugin.id,
+    pluginId: plugin.pluginId,
+    enabled: plugin.enabled,
+    wet: plugin.wet,
+    params: { ...plugin.params },
+    sidechain: plugin.sidechain,
+  }
+}
+
+function clockOf(opts: RenderOptions): InsertClock {
+  return {
+    sampleRate: opts.sampleRate,
+    tempo: opts.tempo,
+    tempoMap: opts.tempoMap,
+    automation: opts.automation,
+    scaleRoot: opts.scaleRoot,
+    scaleIntervals: opts.scaleIntervals,
+    scaleCents: opts.scaleCents,
+    quality: opts.quality,
+    offline: opts.offline,
+  }
+}
+
+function keyFor(state: RenderState) {
+  const tracks = [...state.byId.values()]
+  return (id: string, offset: number, count: number) => sidechainMono(id, offset, count, tracks, state.rendered)
 }
 
 function destination(track: GraphTrack, liveRemote: boolean) {
@@ -135,30 +232,6 @@ function pushEdge(map: Map<string, Edge[]>, to: string, edge: Edge) {
   const list = map.get(to) ?? []
   list.push(edge)
   map.set(to, list)
-}
-
-function topo(ids: string[], incoming: Map<string, { from: string }[]>) {
-  const pending = new Map(ids.map((id) => [id, (incoming.get(id) ?? []).filter((edge) => ids.includes(edge.from)).length]))
-  const ready = ids.filter((id) => (pending.get(id) ?? 0) === 0)
-  const ordered: string[] = []
-  const downstream = new Map<string, string[]>()
-  for (const [to, edges] of incoming) {
-    for (const edge of edges) {
-      const list = downstream.get(edge.from) ?? []
-      list.push(to)
-      downstream.set(edge.from, list)
-    }
-  }
-  while (ready.length) {
-    const id = ready.shift()!
-    ordered.push(id)
-    for (const next of downstream.get(id) ?? []) {
-      pending.set(next, (pending.get(next) ?? 1) - 1)
-      if ((pending.get(next) ?? 0) === 0) ready.push(next)
-    }
-  }
-  for (const id of ids) if (!ordered.includes(id)) ordered.push(id)
-  return ordered
 }
 
 function slotsFor(
@@ -184,49 +257,8 @@ function slotsFor(
   return slots
 }
 
-type RenderClock = { sampleRate: number; tempo: number; tempoMap?: TempoPoint[]; automation: AutomationLane[] }
-
-function runBlocks(
-  slots: ChainSlot[],
-  input: Float32Array[],
-  opts: RenderClock & { scaleRoot: number; scaleIntervals: readonly number[]; scaleCents?: readonly number[]; quality?: 'full' | 'eco'; offline?: boolean },
-  rendered: Map<string, { pre: Float32Array[]; post: Float32Array[] }>,
-  tracks: Map<string, GraphTrack>,
-  pool: ChainPool,
-  scratch: AccurateScratch,
-) {
-  const n = input[0].length
-  const output = [new Float32Array(n), new Float32Array(n)]
-  const block = pool.frames
-  const base = new Map(slots.map((slot) => [slot.id, { ...slot.params }]))
-  for (let offset = 0; offset < n; offset += block) {
-    const count = Math.min(block, n - offset)
-    const sliceIn = input.map((channel) => channel.subarray(offset, offset + count))
-    const sliceOut = output.map((channel) => channel.subarray(offset, offset + count))
-    const clock = { tempo: opts.tempo, sampleRate: opts.sampleRate, tempoMap: opts.tempoMap, automation: opts.automation }
-    const beat = projectSampleBeat(clock, offset)
-    for (const slot of slots) slot.params = automationAt(opts.automation, slot.id, base.get(slot.id) ?? slot.params, beat)
-    const blockCtx = {
-      sampleRate: opts.sampleRate,
-      tempo: opts.tempo,
-      sampleTime: offset,
-      sidechain: null,
-      scaleRoot: opts.scaleRoot,
-      scaleIntervals: opts.scaleIntervals,
-      scaleCents: opts.scaleCents,
-      quality: opts.quality ?? 'full' as const,
-      offline: opts.offline !== false,
-    }
-    const keyAt = (id: string, keyLength: number) => sidechainMono(id, offset, keyLength, [...tracks.values()], rendered)
-    const endBeat = projectSampleBeat(clock, offset + count - 1)
-    const moving = opts.offline !== false && slots.some((slot) => opts.automation.some((lane) => (lane.target == null || lane.target === 'plugin') && lane.pluginId === slot.id && valueChanges(lane.points, beat, endBeat, 0)))
-    if (moving) {
-      processSampleAccurate(slots, sliceIn, sliceOut, blockCtx, opts.automation, keyAt, (sample) => projectSampleBeat(clock, sample), scratch, pool)
-      continue
-    }
-    processChain(slots, sliceIn, sliceOut, blockCtx, keyAt, pool)
-  }
-  return output
+function blank(length: number) {
+  return [new Float32Array(length), new Float32Array(length)]
 }
 
 function mixIncoming(
@@ -235,7 +267,7 @@ function mixIncoming(
   rendered: Map<string, { pre: Float32Array[]; post: Float32Array[] }>,
   delays: Map<string, number>,
   length: number,
-  opts: RenderClock,
+  opts: InsertClock,
 ) {
   for (const edge of edges) {
     const source = rendered.get(edge.from)
@@ -279,7 +311,8 @@ function fit(buffer: Float32Array[], length: number) {
 function applyGain(input: Float32Array[], volume: number) {
   return input.map((channel) => {
     const out = new Float32Array(channel.length)
-    for (let i = 0; i < channel.length; i++) out[i] = channel[i] * volume
+    const gain = volume
+    for (let i = 0; i < channel.length; i++) out[i] = channel[i] * gain
     return out
   })
 }
@@ -287,7 +320,7 @@ function applyGain(input: Float32Array[], volume: number) {
 function applyAutomatedFader(
   input: Float32Array[],
   track: GraphTrack,
-  opts: RenderClock,
+  opts: InsertClock,
 ) {
   const length = input[0]?.length ?? 0
   const vol = curveForLength(laneFor(opts.automation, track.id, 'volume')?.points, track.volume, opts, length)
