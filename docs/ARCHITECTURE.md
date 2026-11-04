@@ -137,11 +137,42 @@ Each step is small enough to listen to on its own. Do not start the native port 
 
 ### Shared core, app, and plugin
 
-9. **Shared DSP core.** Move `NativePlugin` and one processor (a gain or the clean EQ) into Rust or C++. Compile it to WASM for the web. The TS processor stays until the WASM output matches it on a sine, noise, and silence.
+9. **Shared DSP core (started).** `core/` is a Cargo workspace. `cueharbor-dsp` mirrors `NativePlugin`: `prepare`, `process_block` (sample-offset MIDI on the trait; the EQ ignores it), parameter ids, `latency_in_samples`, and version-1 JSON state. `process_block` does not allocate. Block-sized WASM buffers and the plugin's mono scratch buffer are reserved in `prepare`. Parameters use the same 10 ms block glide as `glideValue`. `kind` does not glide. Per-sample glide is in the core for a later gain-class port. The first port is the clean five-band EQ in `src/audio/plugins/eq.ts` (`designBiquad`). Parameter ids match the live EQ manifest in `coreCatalog.ts` (version 2, `kind` then the clean bands, then the other model knobs). Those other knobs are stored so state round-trips. The kind switch in `dispatch.ts` is not ported. The TypeScript EQ still runs the live graph. `src/test/dsp-parity.test.ts` renders silence, sine, and noise through both and compares them. The WASM module is generated into `src/audio/wasm/dspBytes.ts` and bundled with the app. It loads only when `?wasmDsp=1` is set (or a test sets `__CUEHARBOR_WASM_DSP__`). That flag is off by default, and the insert chain does not call the loader.
 10. **App shell.** Wrap the current web app in Capacitor so it installs on a phone. Audio stays Web Audio. This proves the UI, not the driver.
 11. **Native audio engine.** Replace the Capacitor audio path with AVAudioEngine / CoreAudio on iOS and Oboe / AAudio on Android. The callback calls `processBlock`. Web Audio remains the browser build.
-12. **VST3 and AU.** A plugin that loads a CueHarbor session, talks, and records. The remote path stays the existing collab stack. RTAS is discontinued. AAX replaced it. Do not target RTAS.
-13. **AAX.** Same plugin, after an Avid developer account and Avid signing. Unsigned AAX will not load in Pro Tools.
+12. **VST3 and AU.** A plugin that loads a CueHarbor session, talks, and records. The remote path stays the existing collab stack. RTAS is discontinued. AAX replaced it. Do not target RTAS. The EQ shell in `core/plugin` is the format proof, not that session plugin.
+13. **AAX.** Same plugin, after an Avid developer account and Avid signing. Unsigned AAX will not load in Pro Tools. No Avid SDK in this repo.
+
+#### Build the shared core
+
+From the repository root, with Rust stable and the `wasm32-unknown-unknown` target:
+
+```bash
+cargo test
+cargo test --manifest-path core/Cargo.toml
+cargo build -p cueharbor-plugin
+cargo build -p cueharbor-plugin --no-default-features
+node scripts/build-dsp.mjs
+```
+
+`cargo test` covers the EQ, the block glide, state, and a check that `process_block` does not allocate. It also builds the nih-plug shell and checks that the shell's stereo path matches the core. The same tests run with `--manifest-path core/Cargo.toml`. The default plugin build exports CLAP and VST3. `--no-default-features` exports CLAP only. `node scripts/build-dsp.mjs` writes the release WASM into `src/audio/wasm/dspBytes.ts`. `npm test` and `npm run build` run that script first. The bytes are small DSP code in the JS bundle, not a separate library or model file, and not loaded from Render or Cloudflare.
+
+AU is not built here. It needs a macOS host. AAX is not started.
+
+#### Licenses
+
+`cueharbor-dsp` has no third-party audio code. nih-plug is ISC. CLAP (`clap-sys`) is MIT. The VST3 export links `vst3-sys`, which is GPLv3, so a VST3 build of `cueharbor-plugin` is a GPLv3 binary. The DSP crate does not depend on nih-plug, and the web app does not link the plugin shell. A proprietary VST3 later needs a permissive binding (the `vst3` crate used by the nice-plug fork) instead of `vst3-sys`. Nothing here is paid. The 750 GB relay cap is unchanged.
+
+#### Next port steps
+
+1. Port the compressor the same way, then the other inserts. Keep the TypeScript processor until the parity test is inside the same tolerance on sine, noise, and silence.
+2. When a port is a simple gain, read `glide_sample` per sample. Leave the EQ, look-ahead, and pitch plugins on one value per block.
+3. Turn the flag on inside the insert worklet for the EQ only, and listen to it against the TypeScript EQ. The loader is already behind the flag. Do not switch the default until that listen passes.
+4. Wrap the current UI in Capacitor. Leave the audio on Web Audio for that step.
+5. Add the CoreAudio / Oboe callback that calls `process_block`.
+6. Build the session plugin (talk and record) on the CLAP/VST3 shell. The remote path stays the existing collab stack.
+7. Add AU on a Mac build. Add AAX only after Avid signing.
+8. Before shipping a closed-source VST3, swap `vst3-sys` for a permissive binding.
 
 ## Files added for Phase 1
 

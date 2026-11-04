@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["core/dsp", "core/plugin"]
+
+# Same release settings as core/Cargo.toml so `cargo test` and
+# `cargo build --manifest-path core/Cargo.toml` optimize the same way.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"
+opt-level = 3
+panic = "abort"
