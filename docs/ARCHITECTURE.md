@@ -22,7 +22,7 @@ Phase 1 added the host-agnostic plugin contract and tightened the browser render
 
 AAudio, Oboe, CoreAudio, `mmap`, Metal, Vulkan, and `dlopen` are not implemented. They are the native column above, not features the web build pretends to have.
 
-`SharedArrayBuffer` needs `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`. The web build does not send them. The meter bus uses a plain `Float32Array` unless the page is already cross-origin isolated.
+The Render server sends `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` on static files (`server/headers.ts`). `credentialless` is what keeps Google fonts, Hugging Face fetches, and jsDelivr loads working: no-cors responses do not need `Cross-Origin-Resource-Policy`. `require-corp` would block the font stylesheet. WebRTC and TURN are not page subresources, so the call stays on the same document. Safari ignores `credentialless`, `crossOriginIsolated` stays false, and playback stays on one thread. Chromium gets `SharedArrayBuffer` and may run independent insert chains on workers.
 
 Checked on 4 Nov 2026, without turning the headers on:
 
@@ -60,7 +60,7 @@ Offline bounce can wait. `renderGraphParallel` (`src/audio/parallelRender.ts`) u
 
 **Native plan.** The callback owns a pool of workers and runs this scheduler. `take` and `complete` are the only coordination. Buses are ordinary nodes with dependencies. No lock is held while a bus waits. The web types stay out of `src/audio/core/graph.ts`.
 
-**Not done.** Live playback is still one audio thread. Multi-core realtime waits on that native pool. Do not add COOP/COEP, and do not add worklets to imitate it.
+**Realtime.** When the page is cross-origin isolated, `measureRealtime` times one quantum on shared memory. The pool is kept only when workers finish inside the buffer and beat one thread. Eligible tracks (no sampler, Beat Machine, synth, or sidechain) then hand the quantum to that pool from the insert worklet and play the previous block, so the audio thread copies instead of running the chain. A miss streak falls back to the audio thread. Buses and the master stay on the audio thread so a send is not delayed a second block. On the 4-core machine that added this, 8 tracks with EQ, compressor, and saturator finished with zero misses and matching samples. A quiet run took 9.36 ms on one thread and 4.01 ms across workers. Under load the same quantum was 15.48 ms versus 6.11 ms. The handoff into shared memory stayed under half a millisecond. The 128-sample budget is 2.67 ms, so that heavy quantum is not adopted and the audio thread keeps the chain. The native plan is unchanged: the callback's own workers run `take` / `complete`.
 
 ### 2.3 Transport and timing
 
@@ -113,9 +113,9 @@ The live worklet still calls `processor.process` directly so the sound path stay
 
 ### 4.1 Drivers
 
-Web: Web Audio. Settings → Latency asks for Lowest (`interactive`), Balanced (`balanced`), or Playback (`playback`), and shows measured `baseLatency` and `outputLatency`. The choice is saved in this browser. Changing it rebuilds the audio context and keeps the project and the playhead.
+Web: `src/audio/core/driver.ts` picks the hint when the listener has not saved one. iOS Safari asks for Balanced (256 samples) on the speaker or a wired output and Playback (1024) on Bluetooth. Android Chrome asks for Lowest (128) unless the output is Bluetooth, which asks for Balanced. A saved Settings choice still wins. A sample-rate change or a wired/Bluetooth switch rebuilds the context. A latency jump on the same route resumes it. iOS will not leave `suspended` until the first tap. Output latency is added to the recording shift and to the monitoring total. It is not inserted as a DelayNode, which would delay the speaker by the hardware buffer again.
 
-Native app, not started: CoreAudio and AVAudioEngine on iOS, Oboe or AAudio on Android.
+Native app, not started: CoreAudio and AVAudioEngine on iOS, Oboe or AAudio on Android. The same policy is what that port should keep.
 
 Plugin, not started: the format's audio callback (VST3, AU, AAX) calls `processBlock`.
 
@@ -127,20 +127,20 @@ Plugin, not started: the format's audio callback (VST3, AU, AAX) calls `processB
 - `suspended` or iOS `interrupted`: `AudioContext.resume()`
 - `closed` or missing: rebuild the graph once
 
-`AudioEngine.recoverAudioSession` keeps the project and the playhead. If playback was running and the device is actually running again, transport starts from that playhead. A device that stays interrupted is rebuilt at most once, so a tap does not tear the graph down on every try. `panic()` is unchanged and still returns the playhead home. An in-progress recording that was inside a closed context cannot be continued on the dead nodes. The project document is not discarded.
+`planInterruption` names the cause: a call or Siri (`interrupted` on iOS), another app, the screen locking (a phone hiding the page), or a background tab. Playback pauses, the playhead stays, and a recording is assembled up to that moment and returned by the next `finishRecording` so the take is not dropped when the context dies. A status line (`cueharbor-session-notice`) says which of those happened. It is not a dialog. When the page is visible again and the device is running, playback continues from the same playhead. `panic()` is unchanged and still returns the playhead home. The project document is not discarded.
 
 ## 5. Checklist
 
 | Feature | Web build | Native app / plugin build | Status | Required action |
 | --- | --- | --- | --- | --- |
 | Audio thread safety | Steady 128–2048 sample quanta reuse prepared chain, automation, meter, reverb, tune, and EQ windows. No `await` or logging in `process()`. A larger quantum, and the buffer view for a block that contains a MIDI note, can still allocate once. Offline bounce still allocates its output. | Same rule inside the audio callback. The shared core is a separate port and was not changed here. | Pass | None on the web render thread for a normal quantum. Keep new plugin windows in `prepare`. |
-| Graph scheduling | DAG in `src/audio/core/graph.ts`: topo order, feedback refusal, dependency latency into the PDC pass. Live playback is one audio thread. Offline bounce runs independent tracks on workers; a bus starts when its inputs finish. | The same pull scheduler on the audio callback's worker pool. A worker takes the next ready node and does not block on a bus. | Partial | Realtime multi-core waits on the native pool. Do not add COOP/COEP or extra worklets. |
+| Graph scheduling | DAG in `src/audio/core/graph.ts`. Offline bounce and, when COOP/COEP `credentialless` isolates the page, realtime insert quanta share memory with workers. The pool is used only if it beats one thread inside the buffer. Otherwise the audio thread keeps the chain. Safari stays single-thread. | The same pull scheduler on the audio callback's worker pool. | Pass | Confirm a Chromium phone shows `crossOriginIsolated`. iOS Safari ignores `credentialless`. |
 | Plugin delay compensation | Dry path of a latent plugin is delayed when wet is below 1. Track, send, and master edges use the reported latency, live and offline. | Same numbers inside the shared core. | Pass | None for the mix graph. A plugin that reports the wrong latency will still be compensated to that wrong number. |
 | Sample-accurate timing | Tempo map, cheap automation, and instrument notes use sample offsets. A note at offset 0 matches a note at the start of the block. | `MidiEvent.sampleOffset` splits the block. | Pass | Clip-edge fades are still not applied on every audio region. That is the arranger row, not this one. |
 | Plugin base | The live insert chain is the Rust core by default. Sampler and Beat Machine pad voices use the same sample pool (`VoiceEngine` / `SamplePool`). `?wasmDsp=0`, or a failed fetch, runs the TypeScript pool. The chop UI calls `pad.setRegion`, `pad.setPitch`, `pad.setVintage`, `pad.setFilter`, `pad.setChokeGroup`, `pad.setReverse`, `pad.setHold`, and `pad.setSwing`. | `core/dsp/src/voice.rs` is that pool: sixteen pads, shared buffers, vinyl or granular stretch, vintage, filters, choke, reverse, hold or one-shot, and swing. No Web Audio types. `process` does not allocate. The nih-plug shell is still the EQ only. | Pass | Native apps and the multi-output plugin are not built yet. Whole-file time-stretch of a sampler recording stays on the host. |
 | Parameter smoothing | Stepped and enum values jump. Gain, pan, mix, drive, output, and wet move per sample. Look-ahead and pitch plugins keep one value per block. | Per-sample in the core for gain-class parameters. | Pass | None for the web processors that read those gains in their sample loop. |
-| Mobile audio drivers | Settings offers Lowest, Balanced, and Playback and shows measured base and output latency. | CoreAudio / AVAudioEngine and Oboe / AAudio. | Partial | Native port. No AAudio or CoreAudio code in this repo. |
-| Interruption handling | `statechange` (`interrupted`, `suspended`, `closed`) and `visibilitychange`. Project and playhead are kept. | OS session notifications calling the same plan. | Partial | Confirm on a real iPhone. This environment cannot open an interrupted iOS context. |
+| Mobile audio drivers | iOS Safari and Android Chrome pick a latency hint from the output route. Sample-rate and Bluetooth/wired changes rebuild the context. Output latency shifts the recording and the monitoring total, not a second DelayNode. | CoreAudio / AVAudioEngine and Oboe / AAudio using the same hint and route rules. | Partial | Listen on a real iPhone and Android for a Bluetooth switch and a sample-rate change. No AAudio or CoreAudio code in this repo. |
+| Interruption handling | Call, Siri, another app, screen lock, and a hidden tab pause playback, keep the playhead, finalize a take up to that moment, and show a status line. Visible again resumes from that playhead. | OS session notifications calling the same plan. | Partial | Place a real call, trigger Siri, lock the screen, and background the tab on a phone. |
 
 ## Roadmap
 

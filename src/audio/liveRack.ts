@@ -15,6 +15,9 @@ import { createProcessor, preloadWasmInserts } from './plugins/createAll'
 import { wasmDspRequested } from './wasm/flag'
 import type { Processor } from './plugins/types'
 import { MASTER, REMOTE, edgeDelays, findCycle, type RoutePoint } from './routing'
+import { canOffloadChain, isolationAvailable } from './core/isolate'
+import { startBrowserRealtime, type RealtimeHandle } from './realtimePool'
+import { measureRealtime } from './realtimeMeasure'
 
 interface Tap {
   input: GainNode
@@ -67,6 +70,9 @@ export class LiveRack {
   private scriptPool: ChainPool = prepareChainPool(24, 2, SCRIPT_BLOCK)
   private scriptScratch: AccurateScratch = prepareAccurate(24, SCRIPT_BLOCK)
   private readonly pluginLatency = new Map<string, number>()
+  private realtime: RealtimeHandle | null = null
+  private realtimeTried = false
+  private nextSlot = 0
   private ctx: AudioContext | null = null
   private strips: Map<string, StripNodes> = new Map()
   private localBus: AudioNode | null = null
@@ -148,6 +154,9 @@ export class LiveRack {
   /** Drop the live graph so a rebuilt AudioContext can connect a fresh one. */
   dispose() {
     this.resetAll()
+    const pool = this.realtime
+    this.realtime = null
+    if (pool) void pool.close()
     for (const tap of this.taps.values()) {
       try { tap.input.disconnect() } catch { /* gone */ }
       try { tap.proc?.disconnect() } catch { /* gone */ }
@@ -280,6 +289,8 @@ export class LiveRack {
     if (generation !== this.generation) return
     this.workletOk = await this.ensureWorklet(ctx)
     if (generation !== this.generation) return
+    await this.prepareRealtime(ctx.sampleRate)
+    if (generation !== this.generation) return
     if (!this.workletOk) await this.ensureProcessors(project, ctx.sampleRate)
     if (generation !== this.generation) return
     let activeCount = 0
@@ -303,6 +314,23 @@ export class LiveRack {
           })
           node.port.onmessage = (event) => this.onWorklet(event.data)
           tap.worklet = node
+          const track = project.tracks.find((item) => item.id === owner.id)
+          const eligible = !!track && track.type !== 'bus' && track.type !== 'group' && canOffloadChain(owner.plugins)
+          if (eligible && this.realtime && this.nextSlot < this.realtime.tracks) {
+            const slot = this.nextSlot
+            this.nextSlot += 1
+            const plugins = owner.plugins.map((plugin) => ({
+              id: plugin.id,
+              pluginId: plugin.pluginId,
+              enabled: plugin.enabled,
+              wet: plugin.wet,
+              params: { ...plugin.params },
+              sidechain: plugin.sidechain || '',
+            }))
+            void this.realtime.configure(slot, ctx.sampleRate, plugins).then(() => {
+              node.port.postMessage({ type: 'parallel', slot, sab: this.realtime?.sab })
+            }).catch(() => undefined)
+          }
         } catch {
           this.workletOk = false
         }
@@ -626,6 +654,20 @@ export class LiveRack {
       const posted = this.pluginLatency.get(plugin.id) ?? 0
       return sum + reportedLatency(plugin.pluginId, plugin.params, sampleRate, enabled, Math.max(processor?.latencySamples ?? 0, posted), true)
     }, 0)
+  }
+
+  private async prepareRealtime(sampleRate: number) {
+    if (this.realtimeTried || !isolationAvailable()) return
+    this.realtimeTried = true
+    const handle = startBrowserRealtime()
+    if (!handle) return
+    try {
+      const measured = await measureRealtime(handle, { sampleRate, tracks: 4, rounds: 4 })
+      if (measured.adopt) this.realtime = handle
+      else await handle.close()
+    } catch {
+      await handle.close()
+    }
   }
 
   private async ensureWorklet(ctx: AudioContext) {
