@@ -40,6 +40,7 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
   }, [])
   const strip = displayedStrip(layout.strip, viewport.width)
   const narrow = isNarrowStrip(strip)
+  const short = viewport.height < 500 && viewport.width > viewport.height
   const channels = project.tracks.filter((track) => track.type !== 'bus' && track.type !== 'group')
   const buses = project.tracks.filter((track) => track.type === 'bus' || track.type === 'group')
   const flow = buses.length
@@ -52,6 +53,7 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
       data-strip-width={strip}
       data-layout="columns"
       data-narrow={narrow ? '1' : undefined}
+      data-short={short ? '1' : undefined}
       style={{ ['--strip' as string]: `${strip}px` }}
     >
       <WidthBar axis="strip" value={layout.strip} onChange={setStrip} onReset={resetStrip} />
@@ -312,6 +314,24 @@ function PhaseButton({ store, trackId, name }: { store: ProjectStore; trackId: s
   )
 }
 
+const VOLUME_SPAN = 1.25
+const FADER_MARKS = [
+  { label: '0', gain: 1 },
+  { label: '-6', gain: 0.5 },
+  { label: '-12', gain: 0.25 },
+  { label: '-18', gain: 0.125 },
+]
+
+function FaderScale() {
+  return (
+    <ol className="fader-scale" aria-hidden="true">
+      {FADER_MARKS.map((mark) => (
+        <li key={mark.label} style={{ bottom: `${(mark.gain / VOLUME_SPAN) * 100}%` }}>{mark.label}</li>
+      ))}
+    </ol>
+  )
+}
+
 function VolumeLane({
   store,
   engine,
@@ -329,6 +349,7 @@ function VolumeLane({
 }) {
   return (
     <div className="fader-row volume-row">
+      <FaderScale />
       <Meter engine={engine} id={trackId} />
       <AutoFader
         className="volume"
@@ -348,6 +369,7 @@ function MasterLane({ store, engine, value, vertical }: { store: ProjectStore; e
   const db = gainToDb(value)
   return (
     <div className="fader-row volume-row">
+      <FaderScale />
       <Meter engine={engine} id="master" />
       <TouchSlider
         className="volume"
