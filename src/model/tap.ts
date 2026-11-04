@@ -46,6 +46,11 @@ export function shownTempo(previous: number, result: { bpm: number | null }) {
   return result.bpm == null ? previous : result.bpm
 }
 
+/** A lone tap, not a continued tempo, may open the exact-tempo field after a pause. */
+export function shouldOpenExactTempo(result: { bpm: number | null; ignored: boolean } | null) {
+  return !!result && !result.ignored && result.bpm == null
+}
+
 function gapsOf(taps: number[]) {
   const gaps: number[] = []
   for (let i = 1; i < taps.length; i++) gaps.push(taps[i] - taps[i - 1])

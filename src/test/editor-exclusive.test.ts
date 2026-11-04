@@ -257,7 +257,7 @@ describe('editors, close, and header meters in the app', () => {
           await page.waitForFunction(() => !document.querySelector('.shell')?.classList.contains('keys-landscape'))
         }
 
-        await page.getByRole('button', { name: 'Keyboard. Show the on-screen piano.' }).first().click()
+        await page.locator('.roll-pinned .keyboard-toggle').click()
         await page.locator('[data-keyboard-dock="open"]').waitFor()
         await page.locator('[data-editor="piano"]').waitFor({ state: 'detached' })
         if (viewport.phone) {

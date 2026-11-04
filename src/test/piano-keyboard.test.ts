@@ -212,7 +212,7 @@ describe('piano roll close', () => {
       onClose: () => { closed += 1 },
     }))
     expect(html).toContain('>Close<')
-    expect(html).toContain('>Keyboard<')
+    expect(html).toContain('>On-screen Piano<')
     expect(html).toContain('class="roll-close"')
     expect(html).not.toContain('fit-item"><button type="button" class="roll-close"')
     expect(closed).toBe(0)
@@ -254,7 +254,7 @@ describe('piano roll close', () => {
         expect(box.label).toBe('Close')
         expect(box.height).toBeGreaterThanOrEqual(40)
         expect(box.width).toBeGreaterThanOrEqual(40)
-        expect(box.keyLabel).toBe('Keyboard')
+        expect(box.keyLabel).toBe('On-screen Piano')
         expect(box.keyHeight).toBeGreaterThanOrEqual(40)
         await page.screenshot({ path: `/opt/cursor/artifacts/piano-close-${viewport.name}.png` })
         await page.close()

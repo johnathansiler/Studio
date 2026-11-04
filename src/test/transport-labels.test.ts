@@ -103,6 +103,29 @@ describe('transport words', () => {
         if (viewport.simple) {
           expect(report.barRight).toBeLessThanOrEqual(report.viewport + 1)
           expect(report.barScroll).toBeLessThanOrEqual(report.barClient + 1)
+          const packed = await page.evaluate(() => {
+            const drawer = document.querySelector('.transport-drawer') as HTMLElement
+            drawer.hidden = false
+            const buttons = [...drawer.querySelectorAll('button')].map((node) => {
+              const box = node.getBoundingClientRect()
+              return { text: (node.textContent || '').replace(/\s+/g, ' ').trim(), top: box.top, height: box.height, width: box.width }
+            })
+            const tempo = document.querySelector('.tempo-tap')
+            return {
+              buttons,
+              tapButton: buttons.some((button) => button.text === 'Tap'),
+              tempoLabel: tempo?.getAttribute('aria-label') || '',
+              rows: new Set(buttons.map((button) => Math.round(button.top))).size,
+            }
+          })
+          expect(packed.tapButton, viewport.name).toBe(false)
+          expect(packed.tempoLabel).toContain('Tap to set tempo')
+          expect(packed.rows, viewport.name).toBeLessThanOrEqual(2)
+          for (const button of packed.buttons) {
+            expect(button.height, `${viewport.name} ${button.text}`).toBeGreaterThanOrEqual(40)
+            expect(button.height, `${viewport.name} ${button.text}`).toBeLessThanOrEqual(42)
+            expect(button.width, `${viewport.name} ${button.text}`).toBeLessThan(viewport.width - 24)
+          }
         }
         for (const button of report.buttons) {
           expect(button.display, `${viewport.name} ${button.word}`).not.toBe('none')
