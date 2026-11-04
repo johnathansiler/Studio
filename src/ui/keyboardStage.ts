@@ -2,8 +2,9 @@ import type { FormFactor } from './form'
 
 export const PIANO_HISTORY = 'piano'
 export const PADS_HISTORY = 'pads'
+export const STEPS_HISTORY = 'steps'
 
-export type EditorHistoryMark = typeof PIANO_HISTORY | typeof PADS_HISTORY
+export type EditorHistoryMark = typeof PIANO_HISTORY | typeof PADS_HISTORY | typeof STEPS_HISTORY
 
 export function historyMark(state: unknown): string | null {
   if (!state || typeof state !== 'object') return null
@@ -25,7 +26,7 @@ export function isPadsHistory(state: unknown) {
 
 export function isEditorHistory(state: unknown) {
   const mark = historyMark(state)
-  return mark === PIANO_HISTORY || mark === PADS_HISTORY
+  return mark === PIANO_HISTORY || mark === PADS_HISTORY || mark === STEPS_HISTORY
 }
 
 /** Push one history entry so the Android back gesture closes the piano roll. */

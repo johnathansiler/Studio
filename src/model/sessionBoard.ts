@@ -30,6 +30,7 @@ export const MIDI_DEVICES: BrowserDevice[] = [
 ]
 
 export const INSTRUMENT_DEVICES: BrowserDevice[] = [
+  { id: 'steps', name: 'Step Sequencer', hint: 'Program beats on a step grid. The sound stays on this track.', kind: 'instrument' },
   { id: 'pads', name: 'Beat Machine', hint: 'Banks of drum and sample pads. Record on this track.', kind: 'instrument' },
   { id: 'synth', name: 'Synth', hint: 'A played synthesizer.', kind: 'instrument' },
   { id: 'sampler', name: 'Sampler', hint: 'Play a loaded sample across the keys.', kind: 'instrument' },
@@ -44,6 +45,7 @@ export const DRUM_DEVICES: BrowserDevice[] = [
 
 export const PLUGIN_DEVICES: BrowserDevice[] = [
   AUDIO_DEVICES[0],
+  { id: 'steps', name: 'Step Sequencer', hint: 'Program beats on a step grid. The sound stays on this track.', kind: 'instrument' },
   { id: 'pads', name: 'Beat Machine', hint: 'Banks of drum and sample pads. Record on this track.', kind: 'instrument' },
   { id: 'scaler', name: 'Scaler', hint: 'Chord instrument. Key, pads, and progressions.', kind: 'instrument' },
   { id: 'synth', name: 'Synth', hint: 'A played synthesizer.', kind: 'instrument' },

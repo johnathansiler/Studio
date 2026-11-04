@@ -25,6 +25,7 @@ import { LibraryHost } from './multisample/host'
 import type { SamplePack } from './multisample/types'
 import { renderQuantizedClip } from '../model/quantize'
 import { emptyPatternLoopSamples, patternHitTrack, rackPlayMode, transportPatternClips } from '../model/channelRack'
+import { findStepChannel, stepPatternOwner } from '../model/stepPlugin'
 import { patternPlayRange, renderPattern, type RenderedHit } from '../model/steps'
 import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChunksByPerf } from '../model/latency'
 import { encodeWav, linearResample } from '../model/wav'
@@ -670,8 +671,68 @@ export class AudioEngine {
   }
 
   private drumMix(channelId: string) {
-    const channel = this.project?.beats?.patterns.flatMap((pattern) => pattern.channels).find((item) => item.id === channelId)
+    const channel = this.project ? findStepChannel(this.project, channelId) : null
     return { volume: Math.max(0, channel?.volume ?? 1), pan: channel?.pan || 0 }
+  }
+
+  /** Step Sequencer hits always enter that track's strip, then the master. */
+  private scheduleStepSequencers(
+    ctx: BaseAudioContext,
+    project: Project,
+    ctxTime: number,
+    timelineStart: number,
+    timelineEnd: number,
+  ) {
+    const fromBeat = projectSampleBeat(project, timelineStart)
+    const toBeat = projectSampleBeat(project, timelineEnd)
+    for (const track of project.tracks) {
+      const plugin = track.plugins.find((item) => item.pluginId === 'steps' && item.enabled && item.steps?.patterns.length)
+      if (!plugin?.steps) continue
+      const strip = this.strips.get(track.id)
+      if (!strip) continue
+      const song = (plugin.params.song ?? 0) >= 0.5
+      const owned = new Set(plugin.steps.patterns.map((pattern) => pattern.id))
+      const clips = (project.patternClips ?? []).filter((clip) => (
+        clip.scene == null
+        && !clip.suppressed
+        && owned.has(clip.patternId)
+        && (!clip.trackId || clip.trackId === track.id)
+      ))
+      if (song && clips.length) {
+        for (const clip of clips) {
+          const pattern = plugin.steps.patterns.find((item) => item.id === clip.patternId)
+          if (!pattern) continue
+          const range = patternPlayRange(clip)
+          for (const hit of renderPattern(pattern, range.from, range.to)) {
+            this.fireStep(ctx, strip, track.id, project, hit, clip.startBeat + (hit.startBeat - range.from), ctxTime, timelineStart, timelineEnd)
+          }
+        }
+        continue
+      }
+      const pattern = plugin.steps.patterns.find((item) => item.id === plugin.steps!.activeId) ?? plugin.steps.patterns[0]
+      if (!pattern) continue
+      for (const hit of renderPattern(pattern, fromBeat, toBeat)) {
+        this.fireStep(ctx, strip, track.id, project, hit, hit.startBeat, ctxTime, timelineStart, timelineEnd)
+      }
+    }
+  }
+
+  private fireStep(
+    ctx: BaseAudioContext,
+    strip: StripNodes,
+    trackId: string,
+    project: Project,
+    hit: RenderedHit,
+    startBeat: number,
+    ctxTime: number,
+    timelineStart: number,
+    timelineEnd: number,
+  ) {
+    const span = beatSpanSamples(project, startBeat, hit.durationBeats)
+    if (span.start < timelineStart || span.start >= timelineEnd) return
+    const when = ctxTime + (span.start - timelineStart) / this.sampleRate
+    if (ctx === this.ctx) this.markMidi(trackId, when, Math.max(0.08, span.duration / this.sampleRate))
+    this.scheduleHit(ctx, strip, { ...hit, output: null }, when, span.duration / this.sampleRate)
   }
 
   /** Play Scaler notes through the track's chosen sound. The previous preview chord is released first. */
@@ -2506,6 +2567,7 @@ export class AudioEngine {
     const project = this.project
     const ctx = this.ctx
     if (!project || !ctx) return
+    this.scheduleStepSequencers(ctx, project, ctxTime, timelineStart, timelineEnd)
     for (const track of project.tracks) {
       const strip = this.strips.get(track.id)
       if (!strip) continue
@@ -2550,6 +2612,8 @@ export class AudioEngine {
     const masterPass = trackId === project.tracks[0]?.id
     for (const clip of clips) {
       if (clip.scene != null || clip.suppressed) continue
+      if (clip.id === 'live-pattern') continue
+      if (stepPatternOwner(project, clip.patternId)) continue
       const pattern = project.beats?.patterns.find((item) => item.id === clip.patternId)
       if (!pattern) continue
       const range = patternPlayRange(clip)
@@ -2576,9 +2640,10 @@ export class AudioEngine {
     if (live && when < ctx.currentTime - 0.05) return
     if (live && when < ctx.currentTime) when = ctx.currentTime + 0.001
     const dur = durationSec ?? Math.max(0.04, beatsToSamples(hit.durationBeats, this.sampleRate, this.project?.tempo || 120) / this.sampleRate)
-    const mix = live ? this.drumMix(hit.channelId) : null
+    const routed = live && hit.output != null
+    const mix = routed ? this.drumMix(hit.channelId) : null
     const shaped = mix ? { ...hit, volume: 1, pan: Math.max(-1, Math.min(1, (hit.pan || 0) - mix.pan)) } : hit
-    const into = live ? this.throughDrum(hit.channelId, strip.input) : strip.input
+    const into = routed ? this.throughDrum(hit.channelId, strip.input) : strip.input
     if (hit.sampleId) {
       const asset = this.assetOf(hit.sampleId)
       if (asset) {
@@ -2607,7 +2672,7 @@ export class AudioEngine {
       const osc = ctx.createOscillator()
       osc.type = 'sine'
       osc.frequency.setValueAtTime(160, when)
-      osc.frequency.exponentialRampToValueAtTime(48, when + Math.min(0.18, dur))
+      osc.frequency.exponentialRampToValueAtTime(48, when + Math.max(0.02, Math.min(0.18, dur)))
       this.envelope(ctx, strip, osc, when, Math.min(0.28, dur + 0.05), shaped, undefined, into)
       return
     }

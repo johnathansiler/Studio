@@ -15,7 +15,7 @@ import { gridBackground, gridPaint } from '../model/gridLines'
 import { activeGridBeats, edgeFromPointer, lengthReadout, moveFromPointer, positionReadout, subdivisionFor } from '../model/snapGrid'
 import { quartersPerBar } from '../model/time'
 import { editorForGesture } from '../model/editorOpen'
-import { meterFill } from './levels'
+import { holdMeter } from './levels'
 import { patternToMidiNotes } from '../model/patternMidi'
 import { panelChoice, rememberPanel } from './panelMemory'
 import { arrangementEndSample, gridMarks, mapIsLinear, projectBeatSample, projectSampleBeat, pxAtBeat, snapSampleToMap } from '../model/tempoMap'
@@ -32,6 +32,8 @@ import { PlaylistBrowser, type BrowserTab } from './PlaylistBrowser'
 import { AutomationModeBar, AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
 import { AutoTuneLaneMark, addOrOpenAutoTune } from './AutoTuneFace'
 import { OpenBeatMachineButton } from './BeatMachineButton'
+import { AddTrackButton } from './AddTrack'
+import type { TrackChoice } from '../model/addTrack'
 import { showsOpenBeatMachine } from '../instruments/pads/identity'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { TRACK_ROW, TRACK_SHEET, copyOf, described } from './chrome'
@@ -91,6 +93,7 @@ export function ArrangeView({
   onImportInstrument,
   onPerform,
   onOpenBeatMachine,
+  onTrackAdded,
   onQuickPunch,
   onAnalyze,
   libraryTab,
@@ -105,6 +108,7 @@ export function ArrangeView({
   onImportInstrument?: (trackId: string, files: FileList) => void
   onPerform: (mode: 'keys' | 'drums') => void
   onOpenBeatMachine?: (trackId: string) => void
+  onTrackAdded?: (id: string, choice: TrackChoice) => void
   onQuickPunch: () => void
   onAnalyze: (trackId: string) => void
   /** Menu asks the Arrange browser to open on this tab. */
@@ -144,16 +148,33 @@ export function ArrangeView({
   useEffect(() => subscribeTools(() => setToolState(activeTool())), [])
   useEffect(() => engine.subscribe(() => setPosition(engine.positionSamples)), [engine])
   useEffect(() => {
-    let timer = 0
-    const tick = () => {
+    let frame = 0
+    const holds: Record<string, { value: number; at: number }> = {}
+    let painted: Record<string, number> = {}
+    const tick = (now: number) => {
       const next = engine.levels?.()
-      if (next) setLevels(next.tracks)
+      if (next) {
+        const peaks: Record<string, number> = {}
+        let changed = false
+        const ids = new Set([...Object.keys(holds), ...Object.keys(next.tracks)])
+        for (const id of ids) {
+          const hold = holds[id] ?? (holds[id] = { value: 0, at: now })
+          const shown = holdMeter(hold, next.tracks[id] ?? 0, now)
+          if (shown <= 0) delete holds[id]
+          peaks[id] = shown
+          if (Math.abs((painted[id] ?? 0) - shown) >= 0.015) changed = true
+        }
+        if (changed) {
+          painted = peaks
+          setLevels(peaks)
+        }
+      }
       const midi = engine.midiActivity?.()
       if (midi) setMidiOn(midi)
-      timer = window.setTimeout(tick, 40)
+      frame = window.requestAnimationFrame(tick)
     }
-    timer = window.setTimeout(tick, 40)
-    return () => window.clearTimeout(timer)
+    frame = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(frame)
   }, [engine])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -715,6 +736,9 @@ export function ArrangeView({
           body.scrollTop += event.deltaY
         }}
       >
+        <div className="arrange-add">
+          <AddTrackButton store={store} prominent onAdded={onTrackAdded} />
+        </div>
         <div className="ruler-gap loop-gap">
           <SongMapHead store={store} position={position} compact />
         </div>
@@ -764,7 +788,7 @@ export function ArrangeView({
                   aria-label={midiOn[track.id] ? 'MIDI activity. Notes are playing.' : 'MIDI activity. Idle.'}
                 />
                 <span className="mini-meter" data-arrange-meter={track.id} aria-hidden>
-                  <i style={{ transform: `scaleX(${meterFill(levels[track.id] ?? 0)})` }} />
+                  <i style={{ transform: `scaleX(${levels[track.id] ?? 0})` }} />
                 </span>
               </span>
               <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); setTrackSheet(track.id) }}>
@@ -794,6 +818,7 @@ export function ArrangeView({
         }}
       >
         <div className="timeline-inner" ref={innerRef} data-px={px} style={{ width }}>
+          <div className="timeline-add-spacer" aria-hidden="true" />
           <SongMap store={store} px={px} width={width} onSeek={onSeek} />
           <div className="ruler" style={laneGrid ?? undefined}>
             {paint.hint && <em className="grid-hint" role="status">{paint.hint}</em>}

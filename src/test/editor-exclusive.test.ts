@@ -9,7 +9,7 @@ import { editorForGesture, noteEditorsAfterOpen, releaseKeyboardForPiano } from 
 import { midiLit, pruneMidiMarks } from '../model/midiActivity'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
-import { meterFill } from '../ui/levels'
+import { holdMeter, meterFill } from '../ui/levels'
 import { editorHistoryStep, isPadsHistory, isPianoHistory } from '../ui/keyboardStage'
 import { ArrangeView } from '../ui/ArrangeView'
 import { PadsPanel } from '../ui/PadsPanel'
@@ -112,6 +112,12 @@ describe('beat machine close and live meters', () => {
     expect(meterFill(0.25)).toBeCloseTo(0.8)
     expect(meterFill(2)).toBe(1)
     expect(meterFill(Number.NaN)).toBe(0)
+    const hold = { value: 0, at: 0 }
+    expect(holdMeter(hold, 0.05, 1000)).toBeCloseTo(meterFill(0.05))
+    expect(holdMeter(hold, 0, 1100)).toBeCloseTo(meterFill(0.05))
+    expect(holdMeter(hold, 0, 1000 + 220 + 280)).toBe(0)
+    const rising = { value: 0.1, at: 0 }
+    expect(holdMeter(rising, 0.5, 50)).toBeCloseTo(meterFill(0.5))
   })
 
   it('lights only the tracks that have a note in the window', () => {
@@ -303,9 +309,8 @@ describe('editors, close, and header meters in the app', () => {
         expect(muted.Keys.lit, `${label} muted midi`).toBe(true)
         await keysHead.getByRole('button', { name: 'Unmute track' }).click()
 
-        await page.getByRole('button', { name: 'Add track' }).click()
-        await page.getByRole('button', { name: /^Drums\b/ }).click()
-        await page.getByRole('button', { name: 'Add Drums track' }).click()
+        await page.getByRole('button', { name: 'Add Track' }).click()
+        await page.getByRole('button', { name: /Beat Machine\. Pads/ }).click()
         await page.locator('[data-pads="plugin"]').waitFor()
         expect(await page.locator('[data-keyboard-dock="open"]').count(), label).toBe(0)
         expect(await page.locator('[data-editor="piano"]').count(), label).toBe(0)

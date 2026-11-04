@@ -92,7 +92,7 @@
 .shell.fold .loop-host button.loop-grip {
   width: 44px;
   min-width: 0;
-  min-height: 0;
+  min-height: 40px;
 }
 .loop-host button.loop-grip:active,
 .loop-host button.loop-grip:focus {

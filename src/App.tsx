@@ -35,7 +35,8 @@ const FaceGallery = lazy(() => import('./ui/faces/PluginFace').then((mod) => ({ 
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
 import { TunerPop } from './ui/AmpPop'
 import { ArrangeView } from './ui/ArrangeView'
-import { BeatView } from './ui/BeatView'
+import { StepSequencerPanel } from './ui/StepSequencerPanel'
+import type { TrackChoice } from './model/addTrack'
 import { ExportSheet } from './ui/ExportSheet'
 import { collectRecordInputs } from './midi/inputs'
 import { hidesHardwareMidi } from './model/midiTools'
@@ -66,7 +67,6 @@ import './ui/collab.css'
 import { TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
 import { SnapControl } from './ui/SnapControl'
-import { AddTrackButton } from './ui/AddTrack'
 import { activeTool } from './state/tools'
 import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
@@ -78,7 +78,7 @@ import { deletesSelection } from './ui/clipKeys'
 import { historyCommand, typingTarget } from './state/history'
 import { claimComputerKey } from './model/keyboardPlay'
 import { KeyboardDock } from './ui/KeyboardDock'
-import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark, notifyKeyboard, PADS_HISTORY, PIANO_HISTORY, presentKeyboard, setKeyboardPresenter, setPianoHider, type EditorHistoryMark, type KeyboardPresentation } from './ui/keyboardStage'
+import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark, notifyKeyboard, PADS_HISTORY, PIANO_HISTORY, presentKeyboard, setKeyboardPresenter, setPianoHider, STEPS_HISTORY, type EditorHistoryMark, type KeyboardPresentation } from './ui/keyboardStage'
 import { HintBubble, TipButton } from './ui/Hint'
 import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
@@ -846,11 +846,13 @@ export function App() {
           setMenuOpen(false)
           return
         }
-        if (editorPanel.current === 'piano' || editorPanel.current === 'pads') {
+        if (document.querySelector('.add-track-menu')) return
+        if (editorPanel.current === 'piano' || editorPanel.current === 'pads' || editorPanel.current === 'steps') {
           event.preventDefault()
-          const mark = editorPanel.current === 'piano' ? PIANO_HISTORY : PADS_HISTORY
+          const mark = editorPanel.current === 'piano' ? PIANO_HISTORY : editorPanel.current === 'steps' ? STEPS_HISTORY : PADS_HISTORY
           if (isHistoryMark(history.state, mark)) history.back()
           else if (editorPanel.current === 'piano') closePiano()
+          else if (editorPanel.current === 'steps') store.closeSteps()
           else store.closePads()
           return
         }
@@ -1509,8 +1511,9 @@ async function importDropped(files: FileList) {
     await importAudio(transfer.files)
   }
 
-  const panel: 'room' | 'piano' | 'rack' | 'scaler' | 'pads' =
+  const panel: 'room' | 'piano' | 'rack' | 'scaler' | 'pads' | 'steps' =
     surface !== 'studio' || phonePane === 'room' ? 'room'
+    : store.stepTrackId ? 'steps'
     : store.padsTrackId ? 'pads'
     : store.scalerTrackId ? 'scaler'
     : pianoOpen ? 'piano'
@@ -1575,7 +1578,7 @@ async function importDropped(files: FileList) {
     store.closePiano()
   }
 
-  const shownEditor: EditorHistoryMark | null = panel === 'piano' ? PIANO_HISTORY : panel === 'pads' ? PADS_HISTORY : null
+  const shownEditor: EditorHistoryMark | null = panel === 'piano' ? PIANO_HISTORY : panel === 'pads' ? PADS_HISTORY : panel === 'steps' ? STEPS_HISTORY : null
   useEffect(() => {
     const previous = editorHistory.current
     const step = editorHistoryStep(previous, shownEditor)
@@ -1589,6 +1592,7 @@ async function importDropped(files: FileList) {
     const onPop = () => {
       editorHistory.current = null
       if (shownEditor === PIANO_HISTORY) closePiano()
+      else if (shownEditor === STEPS_HISTORY) store.closeSteps()
       else store.closePads()
     }
     window.addEventListener('popstate', onPop)
@@ -1659,6 +1663,36 @@ async function importDropped(files: FileList) {
     }
   }, [store.keyboardMidi, form])
 
+  function openStepSequencer(trackId: string) {
+    hideCollab()
+    setSurface('studio')
+    setPhonePane('edit')
+    setMenuOpen(false)
+    setPianoOpen(false)
+    store.closePads()
+    store.openSteps(trackId)
+  }
+
+  function closeStepSequencer() {
+    store.closeSteps()
+  }
+
+  function onTrackAdded(id: string, choice: TrackChoice) {
+    hideCollab()
+    setSurface('studio')
+    setPhonePane('edit')
+    store.setView('arrange')
+    if (choice !== 'steps') store.closeSteps()
+    if (choice !== 'pads') store.closePads()
+    if (choice === 'instrument') openKeyboard(id)
+    else if (choice === 'pads') openBeatMachine(id)
+    else if (choice === 'steps') openStepSequencer(id)
+    else {
+      setPianoOpen(false)
+      if (store.keyboardMidi) store.setKeyboardMidi(false)
+    }
+  }
+
   function openBeatMachine(trackId: string) {
     hideCollab()
     setSurface('studio')
@@ -1689,6 +1723,10 @@ async function importDropped(files: FileList) {
     const surface = editorForGesture('select-track', track.type, track)
     if (surface === 'pads') {
       openBeatMachine(trackId)
+      return
+    }
+    if (surface === 'steps') {
+      openStepSequencer(trackId)
       return
     }
     if (surface !== 'keyboard') return
@@ -1748,7 +1786,7 @@ async function importDropped(files: FileList) {
       data-collab={collabShown ? 'open' : 'closed'}
       data-dock={dockShown ? 'open' : 'closed'}
       data-editor={dockShown ? panel : 'none'}
-      data-plugin={dockShown && (panel === 'scaler' || panel === 'pads') ? panel : 'none'}
+      data-plugin={dockShown && (panel === 'scaler' || panel === 'pads' || panel === 'steps') ? panel : 'none'}
       onDragOver={(event) => {
         if ([...event.dataTransfer.types].includes('Files')) event.preventDefault()
       }}
@@ -1758,6 +1796,10 @@ async function importDropped(files: FileList) {
       }}
     >
       <header className="topbar">
+        <button type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Project, edit, view, and settings." title="Project, edit, view, and settings." aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
+          <MenuIcon />
+          <span className="menu-word">Menu</span>
+        </button>
         <div className="brand">
           <div className="mark" aria-hidden>
             <svg width="16" height="16" viewBox="0 0 18 18">
@@ -1785,10 +1827,6 @@ async function importDropped(files: FileList) {
           disabled={store.remoteFollow}
           onClick={() => { setMenuOpen(false); setUnstuckOpen((open) => !open) }}
         />
-        <button type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Project, edit, view, and settings." title="Project, edit, view, and settings." aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
-          <MenuIcon />
-          <span className="fold-word">Menu</span>
-        </button>
         {menuOpen && (
           <MainMenu
             items={visibleMenu({
@@ -1870,7 +1908,6 @@ async function importDropped(files: FileList) {
               </svg>
               <span className="tool-label">Quantize</span>
             </TipButton>
-            <AddTrackButton store={store} />
             <SnapControl store={store} />
           </div>
           <MidiTools store={store} engine={engine} />
@@ -1916,6 +1953,7 @@ async function importDropped(files: FileList) {
                   onImportInstrument={(trackId, files) => { void importAsInstrument(trackId, files) }}
                   onPerform={(mode) => openPerform(mode)}
                   onOpenBeatMachine={openBeatMachine}
+                  onTrackAdded={onTrackAdded}
                   onQuickPunch={() => void quickPunch()}
                   onAnalyze={(trackId) => { setAnalysisTrackId(trackId); setPhonePane('edit'); setSurface('studio') }}
                   libraryTab={soundsOpen ? 'sounds' : null}
@@ -1923,7 +1961,6 @@ async function importDropped(files: FileList) {
                 />
               )}
               {editorView === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} onOpenKeyboard={openKeyboard} />}
-              {editorView === 'beats' && <BeatView store={store} engine={engine} />}
               {FEATURES.session && editorView === 'session' && (
                 <SessionView
                   store={store}
@@ -1969,6 +2006,9 @@ async function importDropped(files: FileList) {
           />
           {surface === 'studio' && panel === 'scaler' && store.scalerTrackId && (
             <ScalerPanel store={store} engine={engine} trackId={store.scalerTrackId} />
+          )}
+          {surface === 'studio' && panel === 'steps' && store.stepTrackId && (
+            <StepSequencerPanel store={store} engine={engine} onClose={closeStepSequencer} />
           )}
           {surface === 'studio' && panel === 'pads' && store.padsTrackId && (
             <PadsPanel

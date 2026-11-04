@@ -31,7 +31,7 @@ import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stret
 import { findCycle, MASTER } from '../audio/routing'
 import { isPackAsset, packToAsset } from '../audio/multisample/persist'
 import type { InstrumentPlay, SamplePack, SamplerProgram } from '../audio/multisample/types'
-import { insertIndex, tracksFor, type AddTrackSpec } from '../model/addTrack'
+import { insertIndex, nextTrackName, tracksFor, type AddTrackSpec, type TrackChoice } from '../model/addTrack'
 import { addLane, applyMidiPass, createFolder, flattenPieces, folderClip, folderSpan, quickPunch as quickPunchSettings, recallComp, recallMidiTake, renderComp, saveComp, swipeComp } from '../model/comp'
 import { clampFade, moveMidiNote, resizeMidiNote } from '../model/clips'
 import { writeKeyboardEnabled, writeKeyboardOctave } from '../model/keyboardPlay'
@@ -245,6 +245,8 @@ export class ProjectStore {
   scalerTrackId: string | null = null
   /** Open Pads panel. The kit itself is on the track. */
   padsTrackId: string | null = null
+  /** Track whose Step Sequencer panel is open. */
+  stepTrackId: string | null = null
   /** Clip and loop the pad recorder is printing into. Not saved. */
   padRecord: { trackId: string; clipId: string; clipStart: number; loopStart: number; loopEnd: number } | null = null
   /** Which page of the open Scaler panel is showing. Not saved. */
@@ -354,6 +356,7 @@ export class ProjectStore {
     this.rackTrackId = null
     this.patchTrackId = null
     this.scalerTrackId = null
+    this.stepTrackId = null
     if (this.padsTrackId === trackId) return
     this.padsTrackId = trackId
     this.emit()
@@ -900,6 +903,7 @@ export class ProjectStore {
     this.rackTrackId = null
     this.patchTrackId = null
     this.scalerTrackId = null
+    this.stepTrackId = null
     if (this.padsTrackId !== trackId) {
       this.padsTrackId = trackId
       this.emit()
@@ -1797,15 +1801,28 @@ export class ProjectStore {
       if (spec.kind === 'midi' && spec.instrument === 'library' && made[0]) this.rackTrackId = made[0].id
       if (spec.kind === 'midi' && spec.instrument === 'scaler' && made[0]) {
         this.scalerTrackId = made[0].id
-        this.padsTrackId = null
-        this.rackTrackId = null
-      }
-      if (made[0]?.instrument === 'pads') {
+      this.padsTrackId = null
+      this.rackTrackId = null
+      this.stepTrackId = null
+    }
+    if (spec.choice === 'instrument' && made[0]) made[0].name = nextTrackName(this.project.tracks, 'Instrument')
+    if (spec.choice === 'audio' && made[0]) made[0].armed = true
+    if (spec.choice === 'steps' && made[0]) {
+      made[0].name = nextTrackName(this.project.tracks, 'Step Sequencer')
+      if (!made[0].plugins.some((plugin) => plugin.pluginId === 'steps')) made[0].plugins.push(createPlugin('steps'))
+      const sequencer = made[0].plugins.find((plugin) => plugin.pluginId === 'steps')
+      if (sequencer?.steps) this.project.beats = sequencer.steps
+      this.stepTrackId = made[0].id
+      this.padsTrackId = null
+      this.keyboardMidi = false
+    }
+    if (made[0]?.instrument === 'pads') {
         made[0].padKit = normalizePadKit(made[0].padKit)
         if (!made[0].plugins.some((plugin) => isDrumsPlugin(plugin))) made[0].plugins.push(createPlugin('pads'))
         this.padsTrackId = made[0].id
         this.scalerTrackId = null
         this.rackTrackId = null
+        this.stepTrackId = null
       }
       const at = insertIndex(this.project.tracks, this.selectedTrackId)
       this.project.tracks.splice(at, 0, ...made)
@@ -2053,6 +2070,11 @@ export class ProjectStore {
         this.openPads(trackId)
         return
       }
+      if (plugin?.pluginId === 'steps' && trackId !== 'master') {
+        this.pluginFocus = null
+        this.openSteps(trackId)
+        return
+      }
       if (plugin?.pluginId === 'synth' && trackId !== 'master') {
         this.pluginFocus = null
         if (this.patchTrackId !== trackId) this.openPatch(trackId)
@@ -2090,6 +2112,10 @@ export class ProjectStore {
   }
 
   addPlugin(trackId: string | 'master', pluginId: string, preset?: string) {
+    if (pluginId === 'steps') {
+      this.insertStepsPlugin(trackId)
+      return
+    }
     if (pluginId === 'scaler') {
       this.insertScalerPlugin(trackId)
       return
@@ -4667,6 +4693,7 @@ export class ProjectStore {
     this.savedGeneration = 0
     if (this.scalerTrackId && !project.tracks.some((track) => track.id === this.scalerTrackId && track.type === 'midi')) this.scalerTrackId = null
     if (this.padsTrackId && !project.tracks.some((track) => track.id === this.padsTrackId && track.type === 'midi')) this.padsTrackId = null
+    if (this.stepTrackId && !project.tracks.some((track) => track.id === this.stepTrackId)) this.stepTrackId = null
     this.padRecord = null
     this.sync.rebase(this.project)
     this.emit()
@@ -5032,10 +5059,76 @@ export class ProjectStore {
   }
 
   setRackMode(mode: 'pattern' | 'song') {
-    if (this.project.rackMode === mode) return
     this.mutate(() => {
       this.project.rackMode = mode
+      const plugin = this.stepTrackId
+        ? this.track(this.stepTrackId)?.plugins.find((item) => item.pluginId === 'steps')
+        : null
+      if (plugin) plugin.params = { ...plugin.params, song: mode === 'song' ? 1 : 0 }
     })
+  }
+
+  /** Open the Step Sequencer for a track. The small keyboard stays closed. */
+  openSteps(trackId: string) {
+    const track = this.track(trackId)
+    const plugin = track?.plugins.find((item) => item.pluginId === 'steps')
+    if (!track || track.type !== 'midi' || !plugin?.steps) return
+    this.project.beats = plugin.steps
+    this.padsTrackId = null
+    this.scalerTrackId = null
+    this.rackTrackId = null
+    this.patchTrackId = null
+    this.pluginFocus = null
+    this.keyboardMidi = false
+    this.selectedTrackId = trackId
+    this.stepTrackId = trackId
+    this.emit()
+  }
+
+  closeSteps() {
+    if (!this.stepTrackId) return
+    this.stepTrackId = null
+    this.emit()
+  }
+
+  /** One tap from the Add Track menu. The new track is selected. */
+  addQuickTrack(choice: TrackChoice): string | null {
+    if (choice === 'pads') {
+      const ids = this.addTracks({ kind: 'drum', count: 1, instrument: 'pads', input: 'mic', channels: 1, armed: false, choice })
+      this.stepTrackId = null
+      return ids[0] ?? null
+    }
+    if (choice === 'audio') {
+      const ids = this.addTracks({ kind: 'audio', count: 1, instrument: 'none', input: 'mic', inputIndex: 1, channels: 1, armed: true, choice })
+      return ids[0] ?? null
+    }
+    if (choice === 'steps') {
+      const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'synth', input: 'mic', channels: 1, armed: false, choice })
+      return ids[0] ?? null
+    }
+    const ids = this.addTracks({ kind: 'midi', count: 1, instrument: 'synth', input: 'mic', channels: 1, armed: false, choice: 'instrument' })
+    return ids[0] ?? null
+  }
+
+  private insertStepsPlugin(trackId: string | 'master') {
+    let host = trackId !== 'master' ? this.track(trackId) : null
+    if (!host || host.type !== 'midi') host = this.project.tracks.find((track) => track.type === 'midi') ?? null
+    if (!host) {
+      this.addQuickTrack('steps')
+      return
+    }
+    const hostId = host.id
+    this.mutate(() => {
+      const list = this.pluginList(hostId)
+      if (!list) return
+      let plugin = list.find((item) => item.pluginId === 'steps')
+      if (!plugin) {
+        plugin = createPlugin('steps')
+        list.push(plugin)
+      }
+      if (plugin.steps) this.project.beats = plugin.steps
+    })
+    this.openSteps(hostId)
   }
 
   selectRackStep(channelId: string, index: number, additive = false) {
@@ -5364,7 +5457,6 @@ export class ProjectStore {
   /** The drum roll shows the same notes as the step grid. */
   openChannelRoll(_channelId?: string) {
     this.rackRoll = true
-    this.view = 'beats'
     this.emit()
   }
 

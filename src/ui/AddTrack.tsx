@@ -1,70 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { clampCount, defaultAddSpec, type AddKind, type AddTrackSpec } from '../model/addTrack'
-import type { TrackInstrument } from '../model/types'
+import { TRACK_CHOICES, type TrackChoice } from '../model/addTrack'
 import type { ProjectStore } from '../state/store'
-import { useFormFactor } from './form'
-import { GuideLayer } from './GuideLayer'
-import './guideSheet.css'
 
-const LAST_KEY = 'cueharbor-last-track'
-const KINDS: { id: AddKind; label: string; hint: string }[] = [
-  { id: 'audio', label: 'Audio', hint: 'Record a voice or an instrument.' },
-  { id: 'midi', label: 'Instrument', hint: 'Play MIDI or the on-screen keys.' },
-  { id: 'drum', label: 'Drums', hint: 'A beat machine for this song.' },
-  { id: 'bus', label: 'Bus', hint: 'Group tracks, or return an effect.' },
-]
-
-function KindIcon({ id }: { id: AddKind }) {
-  const common = { width: 22, height: 22, viewBox: '0 0 22 22', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true as const }
-  if (id === 'audio') return <svg {...common}><rect x="8" y="3" width="6" height="10" rx="3" /><path d="M6 10.5a5 5 0 0010 0M11 15.5V19" /></svg>
-  if (id === 'midi') return <svg {...common}><path d="M4 8h14M4 14h14M7 8v6M11 8v6M15 8v6" /></svg>
-  if (id === 'drum') return <svg {...common}><ellipse cx="11" cy="12" rx="7" ry="3.2" /><path d="M4 12v2.2c0 1.8 3.1 3.2 7 3.2s7-1.4 7-3.2V12" /><path d="M8 7.2l6-2.2" /></svg>
-  return <svg {...common}><path d="M4 7h6v8H4zM12 7h6M12 11h6M12 15h6" /></svg>
-}
-const INSTRUMENTS: { id: TrackInstrument; label: string; hint: string }[] = [
-  { id: 'pads', label: 'Beat Machine', hint: 'Banks of drum and sample pads. Record on this track.' },
-  { id: 'synth', label: 'Keys', hint: 'Play from the on-screen keyboard or a MIDI keyboard.' },
-  { id: 'scaler', label: 'Scaler', hint: 'Chord pads that follow the song key.' },
-  { id: 'sampler', label: 'Sampler', hint: 'Play a loaded sample across the keys.' },
-  { id: 'library', label: 'Library', hint: 'A multi-sample instrument from the library.' },
-  { id: '808', label: '808', hint: 'Bass and drum tones from an 808.' },
-  { id: 'none', label: 'Empty', hint: 'A MIDI track with no instrument yet.' },
-]
-const KITS: { id: TrackInstrument; label: string; hint: string }[] = [
-  { id: 'pads', label: 'Beat Machine', hint: 'Banks of drum and sample pads. Record on this track.' },
-  { id: 'drum-machine', label: 'Kit', hint: 'Kick, snare, clap, hat, and perc.' },
-  { id: '808', label: '808', hint: 'The 808 drum instrument.' },
-]
-
-function chooseKind(spec: AddTrackSpec, kind: AddKind): AddTrackSpec {
-  if (kind !== 'drum') return { ...spec, kind }
-  if (spec.instrument === '808' || spec.instrument === 'pads' || spec.instrument === 'drum-machine') return { ...spec, kind }
-  return { ...spec, kind, instrument: 'pads' }
-}
-
-function selectedKit(instrument: TrackInstrument): TrackInstrument {
-  if (instrument === '808' || instrument === 'pads') return instrument
-  return 'drum-machine'
-}
-
-function readLast(): AddTrackSpec | null {
-  try {
-    const raw = localStorage.getItem(LAST_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as AddTrackSpec
-    if (!KINDS.some((kind) => kind.id === parsed.kind)) return null
-    return { ...defaultAddSpec(), ...parsed, count: clampCount(parsed.count) }
-  } catch {
-    return null
-  }
-}
-
-function writeLast(spec: AddTrackSpec) {
-  try {
-    localStorage.setItem(LAST_KEY, JSON.stringify(spec))
-  } catch {
-    /* the track is still created */
-  }
+function ChoiceIcon({ id }: { id: TrackChoice }) {
+  const common = { width: 28, height: 28, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true as const }
+  if (id === 'audio') return <svg {...common}><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M6 11a6 6 0 0012 0M12 17v3" /></svg>
+  if (id === 'instrument') return <svg {...common}><path d="M4 8h16M4 16h16M8 8v8M12 8v8M16 8v8" /></svg>
+  if (id === 'steps') return <svg {...common}><rect x="3" y="5" width="4" height="4" rx="1" /><rect x="10" y="5" width="4" height="4" rx="1" /><rect x="17" y="5" width="4" height="4" rx="1" /><rect x="3" y="15" width="4" height="4" rx="1" /><rect x="10" y="15" width="4" height="4" rx="1" /></svg>
+  return <svg {...common}><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>
 }
 
 function reveal(id: string) {
@@ -73,167 +16,36 @@ function reveal(id: string) {
   })
 }
 
-export function AddTrackPanel({
-  spec,
-  place,
-  onChange,
-  onCancel,
-  onCommit,
+export function AddTrackButton({
+  store,
+  prominent = false,
+  onAdded,
 }: {
-  spec: AddTrackSpec
-  place: 'sheet' | 'pop'
-  onChange: (next: AddTrackSpec) => void
-  onCancel: () => void
-  onCommit: () => void
+  store: ProjectStore
+  prominent?: boolean
+  onAdded?: (id: string, choice: TrackChoice) => void
 }) {
-  const kind = KINDS.find((item) => item.id === spec.kind) ?? KINDS[0]
-  const inputNumber = spec.inputIndex ?? 1
-  return (
-    <div className={`guide-sheet add-sheet ${place}`} role="dialog" aria-label="Add track">
-      {place === 'sheet' && <div className="guide-handle" aria-hidden="true" />}
-      <header className="guide-head">
-        <div>
-          <h2>Add track</h2>
-          <p>Pick a type, then add. The new track is selected and stays quiet until you arm it.</p>
-        </div>
-        <button type="button" className="guide-x" onClick={onCancel} aria-label="Cancel. Close add track.">Cancel</button>
-      </header>
-      <section className="guide-section">
-        <h3>Step 1</h3>
-        <div className="guide-cards">
-          {KINDS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`guide-card${spec.kind === item.id ? ' on' : ''}`}
-              aria-pressed={spec.kind === item.id}
-              onClick={() => onChange(chooseKind(spec, item.id))}
-            >
-              <KindIcon id={item.id} />
-              <strong>{item.label}</strong>
-              <small>{item.hint}</small>
-            </button>
-          ))}
-        </div>
-      </section>
-      {spec.kind === 'audio' && (
-        <>
-          <section className="guide-section">
-            <h3>Input</h3>
-            <div className="guide-row">
-              <button type="button" className={`guide-choice${spec.input === 'mic' ? ' on' : ''}`} aria-pressed={spec.input === 'mic'} onClick={() => onChange({ ...spec, input: 'mic' })}>
-                <strong>Mic</strong>
-                <small>The microphone.</small>
-              </button>
-              <button type="button" className={`guide-choice${spec.input === 'line' ? ' on' : ''}`} aria-pressed={spec.input === 'line'} onClick={() => onChange({ ...spec, input: 'line' })}>
-                <strong>Line</strong>
-                <small>A line input, such as a keyboard or interface.</small>
-              </button>
-            </div>
-          </section>
-          <section className="guide-section">
-            <h3>Channels</h3>
-            <div className="guide-row">
-              <button type="button" className={`guide-choice${spec.channels === 1 ? ' on' : ''}`} aria-pressed={spec.channels === 1} onClick={() => onChange({ ...spec, channels: 1 })}>
-                <strong>Mono</strong>
-                <small>One channel.</small>
-              </button>
-              <button type="button" className={`guide-choice${spec.channels === 2 ? ' on' : ''}`} aria-pressed={spec.channels === 2} onClick={() => onChange({ ...spec, channels: 2 })}>
-                <strong>Stereo</strong>
-                <small>Left and right.</small>
-              </button>
-            </div>
-          </section>
-          <section className="guide-section">
-            <h3>Input number</h3>
-            <label className="guide-choice">
-              <strong>Input {inputNumber}</strong>
-              <small>Which numbered input this track records.</small>
-              <select
-                aria-label={`Input number. Input ${inputNumber}.`}
-                value={inputNumber}
-                onChange={(event) => onChange({ ...spec, inputIndex: Number(event.target.value) })}
-              >
-                {Array.from({ length: 8 }, (_, index) => index + 1).map((number) => (
-                  <option key={number} value={number}>Input {number}</option>
-                ))}
-              </select>
-            </label>
-          </section>
-          <section className="guide-section">
-            <h3>Record</h3>
-            <button
-              type="button"
-              className={`guide-choice${spec.armed ? ' on' : ''}`}
-              aria-pressed={spec.armed}
-              onClick={() => onChange({ ...spec, armed: !spec.armed })}
-            >
-              <strong>Arm after adding</strong>
-              <small>{spec.armed ? 'On. This track records when you press record.' : 'Off. The new track stays quiet until you arm it.'}</small>
-            </button>
-          </section>
-        </>
-      )}
-      {spec.kind === 'midi' && (
-        <section className="guide-section">
-          <h3>Instrument</h3>
-          <div className="guide-cards">
-            {INSTRUMENTS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`guide-card${spec.instrument === item.id ? ' on' : ''}`}
-                aria-pressed={spec.instrument === item.id}
-                onClick={() => onChange({ ...spec, instrument: item.id })}
-              >
-                <strong>{item.label}</strong>
-                <small>{item.hint}</small>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-      {spec.kind === 'drum' && (
-        <section className="guide-section">
-          <h3>Kit</h3>
-          <div className="guide-row">
-            {KITS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`guide-choice${selectedKit(spec.instrument) === item.id ? ' on' : ''}`}
-                aria-pressed={selectedKit(spec.instrument) === item.id}
-                onClick={() => onChange({ ...spec, instrument: item.id })}
-              >
-                <strong>{item.label}</strong>
-                <small>{item.hint}</small>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-      <div className="guide-actions">
-        <button type="button" onClick={onCancel}>Cancel</button>
-        <button type="button" className="primary" onClick={onCommit}>Add {kind.label} track</button>
-      </div>
-    </div>
-  )
-}
-
-export function AddTrackButton({ store }: { store: ProjectStore }) {
   const [open, setOpen] = useState(false)
-  const [spec, setSpec] = useState<AddTrackSpec>({ ...defaultAddSpec(), inputIndex: 1, instrument: 'synth', count: 1, armed: false })
-  const form = useFormFactor()
-  const place = form === 'desk' ? 'pop' : 'sheet'
-  const hold = useRef(0)
-  const held = useRef(false)
-  const skipTap = useRef(false)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const [place, setPlace] = useState<{ top: number; left: number; width: number } | null>(null)
+
+  function placeMenu() {
+    const button = buttonRef.current
+    if (!button) return
+    const rect = button.getBoundingClientRect()
+    const width = Math.min(420, window.innerWidth - 16)
+    const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8))
+    const estimated = 248
+    let top = rect.bottom + 4
+    if (top + estimated > window.innerHeight - 8) top = Math.max(8, rect.top - estimated - 4)
+    setPlace({ top, left, width })
+  }
 
   useEffect(() => {
     if (!open) return
     const close = (event: PointerEvent) => {
       const target = event.target as HTMLElement | null
-      if (target?.closest('.add-sheet, .add-track-btn')) return
+      if (target?.closest('.add-track-slot')) return
       setOpen(false)
     }
     const onKey = (event: KeyboardEvent) => {
@@ -241,69 +53,68 @@ export function AddTrackButton({ store }: { store: ProjectStore }) {
     }
     window.addEventListener('pointerdown', close)
     window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', placeMenu)
     return () => {
       window.removeEventListener('pointerdown', close)
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', placeMenu)
     }
   }, [open])
 
-  function commit(next: AddTrackSpec) {
-    const saved = { ...next, count: clampCount(next.count || 1) }
-    const ids = store.addTracks(saved)
-    writeLast(saved)
-    if (ids[0]) reveal(ids[0])
-    setSpec(saved)
+  function add(choice: TrackChoice) {
+    const id = store.addQuickTrack(choice)
     setOpen(false)
-  }
-
-  function repeat() {
-    commit(readLast() ?? spec)
+    if (!id) return
+    reveal(id)
+    onAdded?.(id, choice)
   }
 
   return (
-    <div className="add-track-slot">
+    <div className={`add-track-slot${prominent ? ' prominent' : ''}`}>
       <button
         type="button"
+        ref={buttonRef}
         className="add-track-btn"
-        aria-label="Add track"
-        title="Add a track. Hold to repeat the last kind."
-        onPointerDown={() => {
-          held.current = false
-          window.clearTimeout(hold.current)
-          hold.current = window.setTimeout(() => {
-            held.current = true
-            repeat()
-          }, 450)
-        }}
-        onPointerUp={() => {
-          window.clearTimeout(hold.current)
-          if (skipTap.current) {
-            skipTap.current = false
+        aria-expanded={open}
+        aria-label="Add Track"
+        title="Add Track. Pick what the new track is for."
+        onClick={() => {
+          if (open) {
+            setOpen(false)
             return
           }
-          if (!held.current) setOpen(true)
-          held.current = false
-        }}
-        onPointerLeave={() => window.clearTimeout(hold.current)}
-        onContextMenu={(event) => {
-          event.preventDefault()
-          skipTap.current = true
-          window.clearTimeout(hold.current)
-          held.current = false
-          setOpen(false)
-          repeat()
+          placeMenu()
+          setOpen(true)
         }}
       >
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
           <path d="M9 3.5v11M3.5 9h11" />
         </svg>
-        <span className="tool-label">Add track</span>
+        <span>Add Track</span>
       </button>
       {open && (
-        <GuideLayer>
-          <button type="button" className="guide-scrim" aria-label="Close add track" onClick={() => setOpen(false)} />
-          <AddTrackPanel spec={spec} place={place} onChange={setSpec} onCancel={() => setOpen(false)} onCommit={() => commit(spec)} />
-        </GuideLayer>
+        <div
+          className="add-track-menu"
+          role="group"
+          aria-label="Add Track"
+          style={place ? { position: 'fixed', top: place.top, left: place.left, width: place.width, zIndex: 80 } : undefined}
+        >
+          {TRACK_CHOICES.map((choice) => (
+            <button
+              key={choice.id}
+              type="button"
+              className="add-choice"
+              aria-label={`${choice.name}. ${choice.detail}.`}
+              onClick={() => add(choice.id)}
+            >
+              <ChoiceIcon id={choice.id} />
+              <span>
+                <strong>{choice.name}</strong>
+                <small>{choice.detail}</small>
+              </span>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   )

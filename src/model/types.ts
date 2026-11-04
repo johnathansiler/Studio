@@ -88,6 +88,8 @@ export interface PluginInstance {
   sidechain: string
   sampler?: SamplerState
   looper?: LooperState
+  /** Step Sequencer patterns. Saved with the plugin. */
+  steps?: import('./steps').BeatRack
 }
 
 export interface Send {

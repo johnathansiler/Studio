@@ -43,17 +43,15 @@ export interface LayoutWidths {
 }
 
 export function defaultLayout(): LayoutWidths {
-  return { strip: STRIP_DEFAULT, column: COLUMN_DEFAULT, mixer: null }
+  return { strip: STRIP_DEFAULT, column: COLUMN_DEFAULT, mixer: 'columns' }
 }
 
 export function isNarrowStrip(strip: number): boolean {
   return strip < NARROW_STRIP
 }
 
-/** Saved choice wins. A narrow portrait phone starts on rows. */
-export function mixerFlow(saved: MixerFlow | null, width: number, height: number): MixerFlow {
-  if (saved === 'rows' || saved === 'columns') return saved
-  if (width > 0 && width <= PHONE_PORTRAIT_MAX && height >= width) return 'rows'
+/** Channel strips always stand side by side. A saved rows choice is ignored. */
+export function mixerFlow(_saved: MixerFlow | null, _width: number, _height: number): MixerFlow {
   return 'columns'
 }
 
@@ -64,7 +62,7 @@ export function clampWidth(value: number, bounds: WidthBounds): number {
 
 export function normalizeLayout(input: unknown): LayoutWidths {
   const raw = input && typeof input === 'object' ? input as { strip?: unknown; column?: unknown; mixer?: unknown } : {}
-  const mixer: MixerFlow | null = raw.mixer === 'rows' || raw.mixer === 'columns' ? raw.mixer : null
+  const mixer: MixerFlow = 'columns'
   return {
     strip: clampWidth(typeof raw.strip === 'number' ? raw.strip : STRIP_DEFAULT, STRIP_BOUNDS),
     column: clampWidth(typeof raw.column === 'number' ? raw.column : COLUMN_DEFAULT, COLUMN_BOUNDS),
@@ -191,7 +189,10 @@ export function readLayout(projectId: string, storage: LayoutMemory = layoutMemo
   try {
     const raw = storage.getItem(layoutStorageKey(projectId))
     if (!raw) return defaultLayout()
-    return normalizeLayout(JSON.parse(raw) as unknown)
+    const parsed = JSON.parse(raw) as { mixer?: unknown }
+    const layout = normalizeLayout(parsed)
+    if (parsed.mixer === 'rows') writeLayout(projectId, layout, storage)
+    return layout
   } catch {
     return defaultLayout()
   }

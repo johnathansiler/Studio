@@ -132,7 +132,7 @@ describe('mixer fader stays full size', () => {
         const page = await browser.newPage({ viewport: { width, height: 900 } })
         await page.setContent(markup(store, width, 900, width >= 600 ? 'shell studio' : 'shell phone'), { waitUntil: 'load' })
         const strips = await readStrips(page)
-        const where = `rows ${width}`
+        const where = `columns from saved rows ${width}`
         expect(strips.length, where).toBeGreaterThan(1)
         const channel = strips.find((strip) => !strip.master)!
         expect(strips.every((strip) => !strip.more), where).toBe(true)
@@ -150,8 +150,8 @@ describe('mixer fader stays full size', () => {
         expect(Math.max(...heights) - Math.min(...heights), where).toBeLessThanOrEqual(1)
         expect(heights[0], where).toBeGreaterThanOrEqual(48)
         for (const strip of strips) {
-          expect(strip.vertical, strip.name).toBe(false)
-          expect(strip.faderWidth, strip.name).toBeGreaterThanOrEqual(strip.width - 16)
+          expect(strip.vertical, strip.name).toBe(true)
+          expect(strip.faderHeight, strip.name).toBeGreaterThanOrEqual(48)
           for (const control of strip.controls) {
             expect(control.width, `${where} ${strip.name} ${control.word}`).toBeGreaterThanOrEqual(40)
             expect(control.height, `${where} ${strip.name} ${control.word}`).toBeGreaterThanOrEqual(40)
@@ -168,7 +168,7 @@ describe('mixer fader stays full size', () => {
         rowHeights.push(heights[0])
         await page.close()
       }
-      expect(Math.max(...rowHeights) - Math.min(...rowHeights)).toBeLessThanOrEqual(1)
+      expect(rowHeights.every((height) => height >= 48)).toBe(true)
 
       for (const width of widths) {
         const store = new ProjectStore()

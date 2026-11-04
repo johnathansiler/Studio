@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
-import { STRIP_BOUNDS, displayedStrip, isNarrowStrip, mixerFlow } from '../model/layoutWidth'
+import { STRIP_BOUNDS, displayedStrip, isNarrowStrip } from '../model/layoutWidth'
 import { gainToDb } from '../model/time'
 import { mixGroupsOf, selectMixer, trackGroupId } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -12,7 +12,7 @@ import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { TouchSlider } from './kit/controls'
-import { meterFill } from './levels'
+import { holdMeter } from './levels'
 import { TrackPresence } from './presenceMarks'
 import { SecondaryRack, type SecondaryItem } from './SecondaryRack'
 
@@ -27,7 +27,7 @@ function readViewport() {
 
 function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void; onOpenKeyboard?: (trackId: string) => void }) {
   const project = selectMixer(store).project
-  const { layout, setStrip, setMixer, resetStrip } = useLayoutWidths(project.id)
+  const { layout, setStrip, resetStrip } = useLayoutWidths(project.id)
   const areaRef = useRef<HTMLDivElement>(null)
   const stripRef = useRef(layout.strip)
   stripRef.current = layout.strip
@@ -42,9 +42,9 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
     return () => window.removeEventListener('resize', apply)
   }, [])
   const strip = displayedStrip(layout.strip, viewport.width)
-  const flow = mixerFlow(layout.mixer, viewport.width, viewport.height)
-  const narrow = flow === 'columns' && isNarrowStrip(strip)
-  const rows = flow === 'rows'
+  const flow = 'columns' as const
+  const narrow = isNarrowStrip(strip)
+  const rows = false
   return (
     <>
     <div
@@ -55,7 +55,7 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
       data-narrow={narrow ? '1' : undefined}
       style={{ ['--strip' as string]: `${strip}px` }}
     >
-      <WidthBar axis="strip" value={layout.strip} onChange={setStrip} onReset={resetStrip} mixer={flow} onMixer={setMixer} />
+      <WidthBar axis="strip" value={layout.strip} onChange={setStrip} onReset={resetStrip} />
       {levelsOpen && <LevelBar engine={engine} onClose={() => setLevelsOpen(false)} />}
       {fxTrack ? (
         <StripSlots store={store} engine={engine} trackId={fxTrack} onBack={() => setFxTrack(null)} />
@@ -444,15 +444,21 @@ function MasterReadout({ engine }: { engine: AudioEngine }) {
 function Meter({ engine, id }: { engine: AudioEngine; id: string }) {
   const [level, setLevel] = useState(0)
   useEffect(() => {
-    let timer = 0
-    const tick = () => {
+    let frame = 0
+    const hold = { value: 0, at: 0 }
+    let painted = 0
+    const tick = (now: number) => {
       const levels = engine.levels()
-      const value = meterFill(id === 'master' ? levels.master : levels.tracks[id] || 0)
-      setLevel((prev) => (Math.abs(prev - value) < 0.03 ? prev : value))
-      timer = window.setTimeout(tick, 80)
+      const raw = id === 'master' ? levels.master : (levels.tracks[id] || 0)
+      const shown = holdMeter(hold, raw, now)
+      if (Math.abs(painted - shown) >= 0.015) {
+        painted = shown
+        setLevel(shown)
+      }
+      frame = window.requestAnimationFrame(tick)
     }
-    timer = window.setTimeout(tick, 80)
-    return () => window.clearTimeout(timer)
+    frame = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(frame)
   }, [engine, id])
   return (
     <div className="meter">

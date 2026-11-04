@@ -8,6 +8,7 @@ export const FEATURES: { readonly session: boolean } = {
 }
 
 export function preferArrangeView<T extends string>(view: T): T | 'arrange' {
+  if (view === 'beats') return 'arrange'
   if (!FEATURES.session && view === 'session') return 'arrange'
   return view
 }

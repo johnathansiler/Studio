@@ -2,6 +2,16 @@ import { makeTrack, TRACK_COLORS, type Track, type TrackInstrument } from './typ
 
 export type AddKind = 'audio' | 'midi' | 'drum' | 'bus'
 
+/** One tap in the Add Track menu. */
+export type TrackChoice = 'instrument' | 'steps' | 'pads' | 'audio'
+
+export const TRACK_CHOICES: { id: TrackChoice; name: string; detail: string }[] = [
+  { id: 'instrument', name: 'Instrument', detail: 'Play keys' },
+  { id: 'steps', name: 'Step Sequencer', detail: 'Program beats' },
+  { id: 'pads', name: 'Beat Machine', detail: 'Pads' },
+  { id: 'audio', name: 'Audio / Vocal', detail: 'Record mic' },
+]
+
 export interface AddTrackSpec {
   kind: AddKind
   count: number
@@ -11,6 +21,13 @@ export interface AddTrackSpec {
   inputIndex?: number
   channels: 1 | 2
   armed: boolean
+  /** Names the track for the one-tap menu. */
+  choice?: TrackChoice
+}
+
+export function nextTrackName(tracks: { name: string }[], base: string) {
+  const used = tracks.filter((track) => track.name === base || track.name.startsWith(`${base} `)).length
+  return `${base} ${used + 1}`
 }
 
 export function audioInput(spec: AddTrackSpec): string {

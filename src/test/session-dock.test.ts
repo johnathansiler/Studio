@@ -187,7 +187,8 @@ describe('arrange on first load', () => {
       await page.keyboard.press('Escape')
       expect(await page.getByRole('button', { name: /Create invite/ }).count()).toBe(0)
       expect(await page.locator('[data-collab-panel="open"]').count()).toBe(0)
-      for (const tab of [/^Arrange/, /^Mix/, /^Beats/]) {
+      expect(await page.locator('.views button').count()).toBe(3)
+      for (const tab of [/^Arrange/, /^Mix/]) {
         await page.getByRole('button', { name: tab }).first().click()
         expect(await page.locator('[data-collab-panel="open"]').count()).toBe(0)
         expect(await page.getByRole('button', { name: /Create invite/ }).count()).toBe(0)

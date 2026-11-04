@@ -17,7 +17,6 @@ export const UNSTUCK_COPY: Copy = {
 export const VIEW_COPY: Copy[] = [
   { id: 'arrange', label: 'Arrange', hint: 'Clips on a timeline. The tools above change what a tap does.' },
   { id: 'mix', label: 'Mix', hint: 'Level, pan, and effects for each track.' },
-  { id: 'beats', label: 'Beats', hint: 'Channel rack. One row per sound. Tap a step to add a hit.' },
   { id: 'session', label: 'Session', hint: 'Launch clips in a grid. Tap a slot to play or record.' },
   { id: 'collab', label: 'Collab', hint: 'Call, video, and remote recording. Stays closed until you open this tab.' },
 ]

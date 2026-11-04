@@ -166,8 +166,8 @@ describe('channel rack', () => {
     const kick = store.activePattern()!.channels[0].id
     store.openChannelRoll(kick)
     expect(store.rackRoll).toBe(true)
-    store.setView('arrange')
     expect(store.view).toBe('arrange')
+    store.toggleRackRoll()
     expect(store.rackRoll).toBe(false)
   })
 
