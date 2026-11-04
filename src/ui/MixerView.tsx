@@ -56,32 +56,35 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
     >
       <WidthBar axis="strip" value={layout.strip} onChange={setStrip} onReset={resetStrip} />
       <p className="mix-flow" aria-label={`Signal flow. ${flow}`}>{flow}</p>
-      <div className="mixer">
-        {channels.map((track) => (
-          <ChannelStrip
-            key={track.id}
-            store={store}
-            engine={engine}
-            trackId={track.id}
-            flow="track"
-            selected={store.selectedTrackId === track.id}
-            onTune={onTune}
-            onOpenKeyboard={onOpenKeyboard}
-          />
-        ))}
-        <AddTrackButton store={store} />
-        {buses.map((track) => (
-          <ChannelStrip
-            key={track.id}
-            store={store}
-            engine={engine}
-            trackId={track.id}
-            flow="bus"
-            selected={store.selectedTrackId === track.id}
-            onTune={onTune}
-            onOpenKeyboard={onOpenKeyboard}
-          />
-        ))}
+      <div className="mixer-bay">
+        <div className="mixer">
+          {channels.map((track) => (
+            <ChannelStrip
+              key={track.id}
+              store={store}
+              engine={engine}
+              trackId={track.id}
+              flow="track"
+              selected={store.selectedTrackId === track.id}
+              onTune={onTune}
+              onOpenKeyboard={onOpenKeyboard}
+            />
+          ))}
+          <AddTrackButton store={store} />
+          {buses.map((track) => (
+            <ChannelStrip
+              key={track.id}
+              store={store}
+              engine={engine}
+              trackId={track.id}
+              flow="bus"
+              selected={store.selectedTrackId === track.id}
+              onTune={onTune}
+              onOpenKeyboard={onOpenKeyboard}
+            />
+          ))}
+        </div>
+        <div className="mix-divider" aria-hidden="true" />
         <MasterStrip store={store} engine={engine} />
       </div>
     </div>
