@@ -152,10 +152,10 @@ cargo test
 cargo test --manifest-path core/Cargo.toml
 cargo build -p cueharbor-plugin
 cargo build -p cueharbor-plugin --no-default-features
-node scripts/build-dsp.mjs
+npm run build:dsp
 ```
 
-`cargo test` covers the EQ, the block glide, state, and a check that `process_block` does not allocate. It also builds the nih-plug shell and checks that the shell's stereo path matches the core. The same tests run with `--manifest-path core/Cargo.toml`. The default plugin build exports CLAP and VST3. `--no-default-features` exports CLAP only. `node scripts/build-dsp.mjs` writes the release WASM into `src/audio/wasm/dspBytes.ts`. `npm test` and `npm run build` run that script first. The bytes are small DSP code in the JS bundle, not a separate library or model file, and not loaded from Render or Cloudflare.
+`cargo test` covers the EQ, the block glide, state, and a check that `process_block` does not allocate. It also builds the nih-plug shell and checks that the shell's stereo path matches the core. The same tests run with `--manifest-path core/Cargo.toml`. The default plugin build exports CLAP and VST3. `--no-default-features` exports CLAP only. `npm run build:dsp` rewrites `src/audio/wasm/dspBytes.ts` and `src/audio/wasm/dspBytes.sha256` from a release WASM build. `npm run build` calls the same script, which rebuilds when `cargo` is on `PATH` and otherwise keeps the committed module. The app build does not need Rust. CI hashes a fresh WASM build and fails if it differs from that committed module. The bytes are small DSP code in the JS bundle, not a separate library or model file, and not loaded from Render or Cloudflare.
 
 AU is not built here. It needs a macOS host. AAX is not started.
 
