@@ -3,8 +3,9 @@ import { Keyboard, Knob } from './kit/controls'
 import type { AudioEngine } from '../audio/engine'
 import { LibraryPanel } from './LibraryPanel'
 import { SamplerFace } from './SamplerFace'
-import { DEVICE_KINDS, DEVICE_NAMES, DEVICE_PARAMS, FACTORY_PRESETS, activeDevicePreset, isInstrument, type DeviceKind } from '../model/rack'
-import { PresetBar } from './PresetBar'
+import { DEVICE_KINDS, DEVICE_NAMES, DEVICE_PARAMS, isInstrument, type DeviceKind } from '../model/rack'
+import { commitDevicePreset } from '../presets/project'
+import { PresetControls } from './PresetControls'
 import { selectRack } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import './kit/kit.css'
@@ -71,10 +72,12 @@ export function RackView({ store, engine, trackId, onOpenKnock }: { store: Proje
       ) : device ? (
         <div className="inst-body">
           <div className="inst-row">
-            <PresetBar
-              names={FACTORY_PRESETS[device.kind].map((item) => item.name)}
-              active={activeDevicePreset(device.kind, device.params)}
-              onPick={(name) => store.applyDevicePreset(track.id, device.id, name)}
+            <PresetControls
+              pluginId={device.kind === 'sub' ? 'synth' : `device:${device.kind}`}
+              instanceKey={device.id}
+              values={device.params}
+              presets={store.project.presets}
+              onCommit={(next) => commitDevicePreset(store, track.id, device.id, next.params, next.presets)}
             />
             <select className="bevel" aria-label="Add device" title="Add an instrument or effect. Beat Machine replaces the instrument on this track." value="" onChange={(event) => {
               const value = event.target.value

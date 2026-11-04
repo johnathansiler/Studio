@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
-import { activePresetName, descriptor, FACTORY, presetParams } from '../audio/plugins/catalog'
-import { PresetBar } from './PresetBar'
+import { descriptor } from '../audio/plugins/catalog'
+import { commitAmpPreset } from '../presets/project'
+import { PresetControls } from './PresetControls'
 import { GestureReadout, useDragValue } from './kit/controls'
 import {
   AMPS,
@@ -57,14 +58,12 @@ export function AmpPop({
     <div className="board-pop" data-board="open" role="dialog" aria-label="Amp">
       <header>
         <strong>Amp</strong>
-        <PresetBar
-          label="Rig"
-          names={presetList(store)}
-          active={activePresetName('amp', params, store.project.presets)}
-          onPick={(name) => {
-            const next = presetParams('amp', name, store.project.presets)
-            if (next) store.updatePlugin(trackId, plugin.id, { params: { ...next, kind: 5 } })
-          }}
+        <PresetControls
+          pluginId="amp"
+          instanceKey={plugin.id}
+          values={params}
+          presets={store.project.presets}
+          onCommit={(next) => commitAmpPreset(store, trackId, plugin.id, next.params, next.presets)}
         />
         <button type="button" className={info.direct ? 'on' : ''} hidden={!info.directAvailable} onClick={() => engine.setDirectMonitor(!info.direct)}>Direct</button>
         <button type="button" className={(params.mute ?? 0) >= 0.5 ? 'on' : ''} onClick={() => set('mute', (params.mute ?? 0) >= 0.5 ? 0 : 1)}>Mute</button>
@@ -189,13 +188,6 @@ export function AmpPop({
       </div>
     </div>
   )
-}
-
-function presetList(store: ProjectStore) {
-  const names = new Set<string>()
-  for (const item of FACTORY.amp ?? []) names.add(item.name)
-  for (const item of store.project.presets) if (item.pluginId === 'amp') names.add(item.name)
-  return [...names]
 }
 
 export function TunerPop({

@@ -1,12 +1,13 @@
 import { lazy, Suspense, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { activeTunePreset, orderedInserts, tuneScaleOf } from '../audio/plugins/autoTune'
-import { CATALOG, FACTORY, activePresetName, descriptor } from '../audio/plugins/catalog'
+import { CATALOG, FACTORY, descriptor } from '../audio/plugins/catalog'
+import { commitPluginPreset } from '../presets/project'
 import { INSTRUMENT_IDS, isDrumsPlugin, kindLabels, paramsForKind } from '../audio/plugins/ids'
 import { pluginIsBeatMachine } from '../instruments/pads/identity'
 import { chainSections, trackHasScaler } from '../instruments/scaler/chain'
 import { AnchoredMenu } from './AnchoredMenu'
-import { PresetBar } from './PresetBar'
+import { PresetControls } from './PresetControls'
 import { TouchSlider } from './kit/controls'
 import { AmpPop } from './AmpPop'
 import { AutoTuneFace } from './AutoTuneFace'
@@ -67,10 +68,6 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   if (ampFace) return <AmpPop store={store} engine={engine} trackId={focus.trackId} plugin={plugin} />
   const shown = paramsForKind(plugin.pluginId, plugin.params.kind ?? 0)
   const faceParams = shown ? spec.params.filter((param) => shown.includes(param.id)) : spec.params
-  const names = [
-    ...(FACTORY[plugin.pluginId] ?? []).map((item) => item.name),
-    ...store.project.presets.filter((item) => item.pluginId === plugin.pluginId).map((item) => item.name),
-  ]
   const song = tuneScaleOf(store.scaleState())
   const tunePresets = [
     ...(FACTORY.tune ?? []),
@@ -119,19 +116,13 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
       )}
       <header>
         <strong>{spec.name}</strong>
-        {!autoTune && (
-          <PresetBar
-            names={names}
-            active={activePresetName(plugin.pluginId, plugin.params, store.project.presets)}
-            onPick={(name) => store.applyPluginPreset(focus.trackId, plugin.id, name)}
-          />
-        )}
-        {!autoTune && (
-        <button className="text-btn" title="Save these settings as a preset." aria-label="Save preset. Keep these settings under a name." onClick={() => {
-          const name = window.prompt('Preset')
-          if (name) store.savePluginPreset(plugin.pluginId, name.trim(), plugin.params)
-        }}>Save</button>
-        )}
+        <PresetControls
+          pluginId={plugin.pluginId}
+          instanceKey={plugin.id}
+          values={plugin.params}
+          presets={store.project.presets}
+          onCommit={(next) => commitPluginPreset(store, focus.trackId, plugin.id, next.params, next.presets, plugin.pluginId === 'steps')}
+        />
         {!autoTune && (
           <button className={`text-btn ${plugin.enabled ? 'on' : ''}`} onClick={() => store.updatePlugin(focus.trackId, plugin.id, { enabled: !plugin.enabled })}>
             {plugin.enabled ? 'On' : 'Bypass'}
@@ -203,6 +194,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
           projectIntervals={song.intervals}
           active={activeTunePreset(plugin.params, tunePresets)}
           presets={tunePresets.map((item) => item.name)}
+          sharedBar
           onChange={(id, value) => {
             setLast(id)
             store.updatePlugin(focus.trackId, plugin.id, { params: { [id]: value } })

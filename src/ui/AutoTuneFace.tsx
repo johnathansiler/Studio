@@ -84,6 +84,7 @@ export function AutoTuneFace({
   projectIntervals = MAJOR,
   active,
   presets,
+  sharedBar,
   onChange,
   onPatch,
   onPreset,
@@ -100,6 +101,8 @@ export function AutoTuneFace({
   projectIntervals?: readonly number[]
   active?: string | null
   presets?: readonly string[]
+  /** The sheet draws the shared preset bar, so this face hides its own. */
+  sharedBar?: boolean
   onChange: (id: string, value: number) => void
   onPatch?: (patch: Record<string, number>) => void
   onPreset: (name: string) => void
@@ -204,16 +207,18 @@ export function AutoTuneFace({
           <button type="button" className={view === 'pitch' ? 'on' : ''} aria-pressed={view === 'pitch'} title="Meter, knobs, and the scale keyboard." aria-label="Pitch. Meter, knobs, and the scale keyboard." onClick={() => setView('pitch')}>Pitch</button>
           <button type="button" className={view === 'graph' ? 'on' : ''} aria-pressed={view === 'graph'} title="Notes on a pitch grid. Drag a note to retune it." aria-label="Graph. Notes on a pitch grid. Drag a note to retune it." onClick={() => setView('graph')}>Graph</button>
         </div>
-        <Stepper
-          label="Preset"
-          hint="Previous or next preset."
-          value={presetAt < 0 ? 'Custom' : names[presetAt]}
-          preset={presetAt < 0 ? undefined : names[presetAt]}
-          onPrev={() => onPreset(names[presetAt < 0 ? names.length - 1 : (presetAt - 1 + names.length) % names.length])}
-          onNext={() => onPreset(names[presetAt < 0 ? 0 : (presetAt + 1) % names.length])}
-        />
+        {!sharedBar && (
+          <Stepper
+            label="Preset"
+            hint="Previous or next preset."
+            value={presetAt < 0 ? 'Custom' : names[presetAt]}
+            preset={presetAt < 0 ? undefined : names[presetAt]}
+            onPrev={() => onPreset(names[presetAt < 0 ? names.length - 1 : (presetAt - 1 + names.length) % names.length])}
+            onNext={() => onPreset(names[presetAt < 0 ? 0 : (presetAt + 1) % names.length])}
+          />
+        )}
         <div className="tune-actions">
-          {naming ? (
+          {naming && !sharedBar ? (
             <input
               className="tune-name"
               aria-label="Preset name. Type a name and press enter."
@@ -230,7 +235,7 @@ export function AutoTuneFace({
               }}
             />
           ) : null}
-          <button type="button" title="Save these settings under a name." aria-label="Save preset. Keep these settings under a name." onClick={() => { setDraft(active ?? ''); setNaming((open) => !open) }}>Save</button>
+          {!sharedBar && <button type="button" title="Save these settings under a name." aria-label="Save preset. Keep these settings under a name." onClick={() => { setDraft(active ?? ''); setNaming((open) => !open) }}>Save</button>}
           <button type="button" className={`bypass-toggle ${enabled ? '' : 'lit'}`} data-bypass={enabled ? 'off' : 'on'} aria-pressed={!enabled} title={enabled ? 'Bypass the whole plugin.' : 'Turn correction back on.'} aria-label={enabled ? 'Bypass. Correction is on.' : 'Bypassed. Correction is off.'} onClick={onBypass}>{enabled ? 'Bypass' : 'Bypassed'}</button>
           <button type="button" className={`more ${more ? 'on' : ''}`} aria-pressed={more} title="Show the rest of the controls." aria-label="More. Show flex, vibrato, reference, and tone." onClick={() => setMore((open) => !open)}>More</button>
         </div>

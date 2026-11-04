@@ -1,0 +1,118 @@
+.preset-dock {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  flex: 1 1 100%;
+}
+.preset-dock > button,
+.preset-anchor {
+  flex: 0 0 auto;
+}
+.preset-dock .btn-quiet {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: max(40px, max-content);
+  min-height: 40px;
+  height: 40px;
+}
+.preset-dock .btn-quiet:active {
+  box-shadow: var(--btn-bevel-pressed, inset 0 2px 4px rgba(0, 0, 0, 0.5));
+}
+.preset-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line, #3d5246);
+  background: #101814;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.55);
+  color: var(--text, #f4fff8);
+  font-size: 13px;
+  font-weight: 640;
+}
+.preset-name b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preset-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--amber, #e0b15a);
+  box-shadow: 0 0 6px rgba(224, 177, 90, 0.8);
+  flex: 0 0 auto;
+}
+.preset-anchor {
+  position: relative;
+  flex: 0 0 auto;
+}
+.anchored-menu.preset-menu {
+  width: min(320px, calc(100vw - 16px));
+  gap: 6px;
+  padding: 8px;
+}
+.anchored-menu.preset-menu .preset-list .btn-quiet {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+}
+.anchored-menu.preset-menu .btn-quiet:disabled {
+  opacity: 0.45;
+}
+.preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.preset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.anchored-menu.preset-menu .preset-actions button {
+  width: auto;
+  flex: 1 1 auto;
+}
+.anchored-menu.preset-menu input,
+.anchored-menu.preset-menu form {
+  width: 100%;
+}
+.anchored-menu.preset-menu form {
+  display: flex;
+  gap: 6px;
+}
+.anchored-menu.preset-menu input {
+  min-height: 40px;
+  flex: 1 1 auto;
+  border-radius: 8px;
+  border: 1px solid var(--line, #3d5246);
+  background: #101814;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.45);
+  color: var(--text, #f4fff8);
+  padding: 0 10px;
+}
+.preset-note {
+  margin: 0;
+  color: var(--muted, #b7c4bb);
+  font-size: 12px;
+}
+.shell.phone .preset-dock button,
+.shell.fold .preset-dock button,
+.shell.phone .anchored-menu.preset-menu button,
+.shell.fold .anchored-menu.preset-menu button,
+.shell.phone .anchored-menu.preset-menu input,
+.shell.fold .anchored-menu.preset-menu input {
+  min-height: 40px;
+  height: 40px;
+}

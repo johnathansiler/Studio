@@ -20,7 +20,10 @@ import { readIdentity } from '../storage/identity'
 import { onMidiMessage } from '../midi/access'
 import { setPerformanceOwnsMidi } from '../midi/remember'
 import { useFormFactor } from './form'
+import { readKit } from '../presets/apply'
+import { commitPadPreset } from '../presets/project'
 import { AnchoredMenu } from './AnchoredMenu'
+import { PresetControls } from './PresetControls'
 import { ChopDrawer } from './ChopDrawer'
 import { PadScreen } from './PadScreen'
 import { notifyKeyboard, releaseOrientation } from './keyboardStage'
@@ -790,8 +793,14 @@ export function PadsPanel({
           )}
         </section>
         <footer className="hw-lip">
-          <strong>CueHarbor</strong>
-          <span>Sampler</span>
+          <span className="mpc-lip-word">Sampler</span>
+          <PresetControls
+            pluginId="pads"
+            instanceKey={`pads:${trackId}`}
+            values={readKit(kit)}
+            presets={store.project.presets}
+            onCommit={(next) => commitPadPreset(store, trackId, next.params, next.presets)}
+          />
         </footer>
       </div>
     </div>
