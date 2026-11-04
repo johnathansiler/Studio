@@ -38,6 +38,7 @@ import { showsOpenBeatMachine } from '../instruments/pads/identity'
 import { showsOnscreenPiano } from '../model/onscreenPiano'
 import { KeyboardToggle } from './KeyboardDock'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
+import { PluginsDrawer } from './PluginsDrawer'
 import { TRACK_ROW, TRACK_SHEET, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
 import './guideSheet.css'
@@ -51,7 +52,7 @@ import { LoopRegion } from './LoopRegion'
 import { CommentControl, CommentPins } from './timelineComments'
 
 
-function ArrangeChrome({ browserOpen, setupOpen, onBrowser, onSetup }: { browserOpen: boolean; setupOpen: boolean; onBrowser: () => void; onSetup: () => void }) {
+function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup, onPlugins }: { browserOpen: boolean; setupOpen: boolean; pluginsOpen: boolean; onBrowser: () => void; onSetup: () => void; onPlugins: () => void }) {
   const [host, setHost] = useState<HTMLElement | null>(null)
   useEffect(() => {
     const pick = () => {
@@ -91,6 +92,19 @@ function ArrangeChrome({ browserOpen, setupOpen, onBrowser, onSetup }: { browser
         <strong>Song</strong>
         <small>Record and markers</small>
       </button>
+      <button
+        type="button"
+        className={`cap-btn${pluginsOpen ? ' on' : ''}`}
+        aria-pressed={pluginsOpen}
+        aria-expanded={pluginsOpen}
+        aria-controls="arrange-plugins"
+        data-arrange-plugins="toggle"
+        title="Plugins. The chain on the selected track."
+        onClick={onPlugins}
+      >
+        <strong>Plugins</strong>
+        <small>Chain</small>
+      </button>
     </div>
   )
   if (host) return createPortal(buttons, host)
@@ -112,6 +126,8 @@ export function ArrangeView({
   onAnalyze,
   libraryTab,
   onLibraryClose,
+  pluginsDrawer,
+  pluginsMenu,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -128,6 +144,10 @@ export function ArrangeView({
   /** Menu asks the Arrange browser to open on this tab. */
   libraryTab?: BrowserTab | null
   onLibraryClose?: () => void
+  /** Force the plugins drawer. Omit to open it on a computer and keep it closed on a phone or fold. */
+  pluginsDrawer?: boolean
+  /** Open the add list with the drawer. */
+  pluginsMenu?: boolean
 }) {
   const project = selectArrange(store).project
   const remotes = useRemotePeers()
@@ -153,6 +173,7 @@ export function ArrangeView({
   }>(null)
   const phone = form === 'phone'
   const touch = form !== 'desk'
+  const [pluginsOpen, setPluginsOpen] = useState(() => (pluginsDrawer == null ? form === 'desk' : pluginsDrawer))
   const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
   const [ghost, setGhost] = useState<{ trackId: string; left: number; width: number } | null>(null)
   const [tool, setToolState] = useState(activeTool)
@@ -671,6 +692,8 @@ export function ArrangeView({
       <ArrangeChrome
         browserOpen={browserOpen}
         setupOpen={setupOpen}
+        pluginsOpen={pluginsOpen}
+        onPlugins={() => setPluginsOpen((open) => !open)}
         onBrowser={() => {
           setBrowserOpen((open) => {
             const next = !open
@@ -695,6 +718,7 @@ export function ArrangeView({
           onQuickPunch={onQuickPunch}
         />
       )}
+      <div className={`arrange-stage${pluginsOpen ? (phone ? ' plugins-bottom' : ' plugins-side') : ''}`} data-plugins-drawer={pluginsOpen ? (phone ? 'bottom' : 'side') : 'closed'}>
       <div className={`playlist-frame ${browserOpen ? 'browser-open' : ''} ${phone ? 'phone-arrange' : ''}`} style={{ ['--browser' as string]: `${browserWidth}px` }}>
       {browserOpen && compact && (
         <button type="button" className="browser-scrim" aria-label="Close browser" title="Close the browser." onClick={() => { engine.stopPreview(); setBrowserOpen(false); rememberPanel('arrangeBrowser', false); onLibraryClose?.() }} />
@@ -1103,8 +1127,10 @@ export function ArrangeView({
           <RemoteTimeline peers={remotes} sampleRate={project.sampleRate} px={px} />
           <div className="playhead" data-playhead="arrange" style={{ left: (displayedPlayhead(position, project) / project.sampleRate) * px }} />
         </div>
+        </div>
       </div>
       </div>
+      {pluginsOpen && <PluginsDrawer store={store} place={phone ? 'bottom' : 'side'} menuOpen={pluginsMenu} />}
       </div>
       <AnchoredMenu
         open={!!patternMenu}
