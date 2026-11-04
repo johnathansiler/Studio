@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { GuideLayer } from './GuideLayer'
 import type { AudioEngine } from '../audio/engine'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { activeComp } from '../model/comp'
@@ -29,7 +28,8 @@ import { activeTool, EDITOR_TOOL_KEYS, subscribeTools, toolClaimsGesture } from 
 import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
 import { PlaylistBrowser, type BrowserTab } from './PlaylistBrowser'
-import { AutomationModeBar, AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
+import { SongPanel } from './SongPanel'
+import { AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
 import { AutoTuneLaneMark, addOrOpenAutoTune } from './AutoTuneFace'
 import { OpenBeatMachineButton } from './BeatMachineButton'
 import { AddTrackButton } from './AddTrack'
@@ -43,7 +43,6 @@ import { useFormFactor } from './form'
 import './guideSheet.css'
 import { SheetRow, TipButton } from './Hint'
 import { AnchoredMenu } from './AnchoredMenu'
-import { RecordBar } from './RecordBar'
 import { RemoteTimeline, TrackPresence, remoteClipMark, useRemotePeers } from './presenceMarks'
 import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, trimZone } from './touchEdit'
 import { laneDoubleClickAddsClip } from './clipKeys'
@@ -636,21 +635,13 @@ export function ArrangeView({
   }
 
   const [setupOpen, setSetupOpen] = useState(false)
-  useEffect(() => {
-    if (!setupOpen) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSetupOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [setupOpen])
   const [browserOpen, setBrowserOpen] = useState(() => panelChoice('arrangeBrowser') ?? !compact)
   useEffect(() => {
     if (panelChoice('arrangeBrowser') != null) return
     setBrowserOpen(!compact)
   }, [compact])
   const [browserTab, setBrowserTab] = useState<BrowserTab>(libraryTab || 'sounds')
-  const [browserWidth, setBrowserWidth] = useState(300)
+  const [browserWidth, setBrowserWidth] = useState(260)
   const [trackSheet, setTrackSheet] = useState<string | null>(null)
   const [trackAnchor, setTrackAnchor] = useState<HTMLElement | null>(null)
   useEffect(() => {
@@ -694,34 +685,15 @@ export function ArrangeView({
         onSetup={() => setSetupOpen((open) => !open)}
       />
       {setupOpen && (
-        <GuideLayer>
-          <button type="button" className="guide-scrim" aria-label="Close song setup" onClick={() => setSetupOpen(false)} />
-          <div id="arrange-setup" className={`guide-sheet song-sheet ${compact ? 'sheet' : 'pop'}`} role="dialog" aria-label="Song">
-            {compact && <div className="guide-handle" aria-hidden="true" />}
-            <header className="guide-head">
-              <div>
-                <h2>Song</h2>
-                <p>Automation, recording, and markers. These are not in the menu.</p>
-              </div>
-              <button type="button" className="guide-x" onClick={() => setSetupOpen(false)} aria-label="Close song setup">Cancel</button>
-            </header>
-            <section className="guide-section">
-              <h3>Automation</h3>
-              <p className="guide-note">Off ignores automation. Read plays it. Touch writes while you hold a fader. Latch keeps that value until playback stops.</p>
-              <AutomationModeBar store={store} />
-            </section>
-            <section className="guide-section">
-              <h3>Recording</h3>
-              <p className="guide-note">Where a recording starts and stops, and which input the selected audio track uses.</p>
-              <RecordBar store={store} engine={engine} session={session} onQuickPunch={onQuickPunch} inline />
-            </section>
-            <section className="guide-section">
-              <h3>Markers</h3>
-              <p className="guide-note">Name a section, drop a marker, or change the tempo at the playhead.</p>
-              <SongMapHead store={store} position={position} />
-            </section>
-          </div>
-        </GuideLayer>
+        <SongPanel
+          store={store}
+          engine={engine}
+          session={session}
+          position={position}
+          compact={compact}
+          onClose={() => setSetupOpen(false)}
+          onQuickPunch={onQuickPunch}
+        />
       )}
       <div className={`playlist-frame ${browserOpen ? 'browser-open' : ''} ${phone ? 'phone-arrange' : ''}`} style={{ ['--browser' as string]: `${browserWidth}px` }}>
       {browserOpen && compact && (

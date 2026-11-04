@@ -101,23 +101,37 @@
   z-index: 3;
 }
 
+.sl-search {
+  flex: none;
+  min-height: 40px;
+  margin: 6px 6px 0;
+  border-radius: 8px;
+  border: 1px solid #2a312b;
+  background: #101814;
+  color: #f2f6f0;
+  padding: 0 10px;
+}
+
 .sl-groups {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 4px;
   padding: 6px;
   border-bottom: 1px solid #2a312b;
+  overflow-x: auto;
 }
 
 .sl-groups button {
-  text-align: left;
-  min-height: 28px;
-  border: 0;
-  border-radius: 3px;
+  text-align: center;
+  min-height: 40px;
+  flex: none;
+  border: 1px solid #2a312b;
+  border-radius: 999px;
   background: transparent;
   color: #b7c2b8;
-  padding: 0 8px;
-  font-size: 12px;
+  padding: 0 12px;
+  font-size: 13px;
 }
 
 .sl-groups button.on {
@@ -132,9 +146,29 @@
   padding: 4px;
 }
 
+.sl-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+}
+
+.sl-row.is-playing small { color: #9be7b5; font-weight: 700; }
+.sl-row > button:first-child { flex: 1; width: auto; min-width: 0; }
+.sound-live {
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  background: #73c48f;
+  align-self: center;
+  flex: none;
+}
+
 .sl-list button,
 .sl-list [draggable="true"] {
-  display: block;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   width: 100%;
   text-align: left;
   min-height: 40px;
@@ -143,15 +177,35 @@
   background: transparent;
   color: #d5ddd4;
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: 13px;
   cursor: grab;
+}
+
+.sl-list .sl-add {
+  width: auto;
+  flex: none;
+  min-width: 40px;
+  cursor: pointer;
+  border: 1px solid #2a312b;
+  border-radius: 8px;
+  justify-content: center;
+}
+
+.sl-list strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 640;
 }
 
 .sl-list button:hover,
 .sl-list [draggable="true"]:hover { background: #2a332d; }
 
 .sl-list small {
-  display: block;
+  display: inline;
+  flex: none;
   color: #8d9a90;
   font-size: 11px;
 }
@@ -160,6 +214,20 @@
   margin: 8px;
   color: #8d9a90;
   font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sl-note button {
+  min-height: 40px;
+  min-width: 40px;
+  width: auto;
+  border: 1px solid #2a312b;
+  border-radius: 8px;
+  background: #18231d;
+  color: #f2f6f0;
+  padding: 0 12px;
 }
 
 .sl-stage {

@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import type { LibraryEntry } from '../audio/multisample/library'
 import type { SamplePack } from '../audio/multisample/types'
 import { decodeSlotFile, focusedSlot, SOUND_MIME } from '../audio/sample/slot'
 import { uid } from '../model/types'
 import { fetchSoundBytes, soundCache } from '../sounds/cache'
-import { catalogMessage, filterSounds, loadSoundCatalog, soundKeys } from '../sounds/catalog'
+import { catalogMessage, filterSounds, loadSoundCatalog } from '../sounds/catalog'
 import { boundLibraryHost, filterStarters, loadStarterOnto, playableAudition, refreshStarterCatalog, starterCatalog } from '../sounds/instruments'
 import { matchCountLabel, readSoundWidth, soundWidthFromDrag, writeSoundWidth } from '../sounds/panel'
 import { audioTrackFor, decodeSoundBytes, placeSound, previewChannelsFor, trackIdFromDrop } from '../sounds/place'
@@ -12,7 +12,6 @@ import { soundFileUrl } from '../sounds/source'
 import type { CatalogResult, SoundEntry, SoundKind, SoundQuery } from '../sounds/types'
 import { selectSounds } from '../state/select'
 import type { ProjectStore } from '../state/store'
-import { TipButton } from './Hint'
 import './sound-browser.css'
 
 const INSTRUMENT_PREFIX = 'instrument:'
@@ -25,6 +24,31 @@ const KIND_LABEL: Record<SoundKind, string> = {
 }
 
 const LIST_CAP = 200
+const CATALOG_WAIT_MS = 8000
+
+const KIND_CHIPS: { id: SoundQuery['type']; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'one-shot', label: 'One-shots' },
+  { id: 'loop', label: 'Loops' },
+  { id: 'drum', label: 'Drums' },
+  { id: 'instrument', label: 'Instruments' },
+]
+
+function until<T>(work: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timed out')), ms)
+    work.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error instanceof Error ? error : new Error('Could not load sounds.'))
+      },
+    )
+  })
+}
 
 type PreviewEngine = {
   unlock: () => void
@@ -67,16 +91,13 @@ export function SoundBrowser({
   const sounds = selectSounds(store)
   const [result, setResult] = useState<CatalogResult>(initial ?? { entries: [], status: 'missing' })
   const [starters, setStarters] = useState<LibraryEntry[]>(instrumentSeed ?? [])
-  const [startersReady, setStartersReady] = useState(Boolean(instrumentSeed) || Boolean(initial))
   const [loading, setLoading] = useState(!initial)
+  const [failed, setFailed] = useState(false)
   const [text, setText] = useState('')
   const [type, setType] = useState<SoundQuery['type']>(lockType && lockType !== 'all' ? lockType : 'all')
   useEffect(() => {
     setType(lockType && lockType !== 'all' ? lockType : 'all')
   }, [lockType])
-  const [bpm, setBpm] = useState<SoundQuery['bpm']>('any')
-  const [key, setKey] = useState('')
-  const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [busy, setBusy] = useState('')
   const [playing, setPlaying] = useState('')
   const entriesRef = useRef(result.entries)
@@ -90,9 +111,17 @@ export function SoundBrowser({
   useEffect(() => {
     if (initial) return
     let alive = true
-    void loadSoundCatalog(fetch, soundCache()).then((next) => {
+    setLoading(true)
+    setFailed(false)
+    void until(loadSoundCatalog(fetch, soundCache()), CATALOG_WAIT_MS).then((next) => {
       if (!alive) return
       setResult(next)
+      setFailed(false)
+      setLoading(false)
+    }).catch(() => {
+      if (!alive) return
+      setResult({ entries: [], status: 'missing' })
+      setFailed(true)
       setLoading(false)
     })
     return () => { alive = false }
@@ -104,9 +133,8 @@ export function SoundBrowser({
     void starterCatalog().then((next) => {
       if (!alive) return
       setStarters(next)
-      setStartersReady(true)
     }).catch(() => {
-      if (alive) setStartersReady(true)
+      /* the sound list still shows */
     })
     return () => { alive = false }
   }, [instrumentSeed])
@@ -174,9 +202,9 @@ export function SoundBrowser({
   const query: SoundQuery = {
     text,
     type,
-    bpm,
-    key,
-    favoritesOnly,
+    bpm: 'any',
+    key: '',
+    favoritesOnly: false,
     projectBpm: sounds.tempo,
     favorites: sounds.favorites,
   }
@@ -185,32 +213,57 @@ export function SoundBrowser({
   const shownSounds = filtered.slice(0, LIST_CAP)
   const shown = shownSounds.length + starterRows.length
   const total = filtered.length + starterRows.length
-  const keys = soundKeys(result.entries)
-  const queryActive = Boolean(text || type !== 'all' || bpm !== 'any' || key || favoritesOnly)
-  const waiting = loading || (!startersReady && type !== 'one-shot' && type !== 'loop' && type !== 'drum')
-  const message = waiting
-    ? 'Loading sounds…'
-    : total
+  const queryActive = Boolean(text || type !== 'all')
+  const offline = failed || result.status === 'missing'
+  const message = loading && !shown
+    ? 'Loading'
+    : shown
       ? ''
-      : catalogMessage(result, 0, queryActive || type === 'instrument')
+      : offline
+        ? catalogMessage({ entries: result.entries, status: 'missing' }, 0, false)
+        : catalogMessage(result, 0, queryActive || type === 'instrument')
   const selected = store.project.tracks.find((track) => track.id === store.selectedTrackId) ?? null
-  const where = !selected
-    ? 'Select a track, then load a sound onto it.'
-    : selected.type === 'midi'
-      ? `Loads onto ${selected.name}.`
-      : `Adds to ${selected.name} at the playhead.`
+  const where = selected?.type === 'midi'
+    ? `Loads onto ${selected.name}.`
+    : selected?.type === 'audio'
+      ? `Adds to ${selected.name} at the playhead.`
+      : sounds.trackId
+        ? `Adds to ${sounds.trackName} at the playhead.`
+        : 'Adds on a new track.'
   const count = matchCountLabel(total, shown)
-  const slot = focusedSlot(store)
 
   async function reload() {
     setLoading(true)
-    const [next, list] = await Promise.all([
-      loadSoundCatalog(fetch, soundCache()),
-      refreshStarterCatalog().catch(() => starters),
-    ])
-    setResult(next)
-    setStarters(list)
+    setFailed(false)
+    try {
+      const next = await until(loadSoundCatalog(fetch, soundCache()), CATALOG_WAIT_MS)
+      setResult(next)
+      setFailed(false)
+    } catch {
+      setResult({ entries: [], status: 'missing' })
+      setFailed(true)
+    }
+    try {
+      setStarters(await until(refreshStarterCatalog(), CATALOG_WAIT_MS))
+    } catch { /* keep the instruments already on screen */ }
     setLoading(false)
+  }
+
+  function audioTarget(trackId?: string | null) {
+    const found = audioTrackFor(store.project, sounds.trackId, trackId)
+    if (found) return found
+    if (trackId) return null
+    const ids = store.addTracks({ kind: 'audio', count: 1, instrument: 'none', input: 'mic', channels: 1, armed: false })
+    return ids[0] ?? null
+  }
+
+  function instrumentTarget(trackId?: string | null) {
+    const dropped = trackId ? store.track(trackId) : null
+    if (dropped?.type === 'midi') return dropped.id
+    if (dropped) return null
+    if (sounds.instrumentId) return sounds.instrumentId
+    const ids = store.addTracks({ kind: 'midi', count: 1, instrument: 'library', input: 'mic', channels: 1, armed: false })
+    return ids[0] ?? null
   }
 
   async function loadEntry(entry: SoundEntry) {
@@ -242,10 +295,9 @@ export function SoundBrowser({
       store.toast('The host owns the arrangement.', 'warn')
       return
     }
-    const dropped = trackId ? store.track(trackId) : null
-    const target = dropped?.type === 'midi' ? dropped.id : sounds.instrumentId
+    const target = instrumentTarget(trackId)
     if (!target) {
-      store.toast('Add an instrument track first.', 'warn')
+      store.toast('Instruments load onto an instrument track.', 'warn')
       return
     }
     setBusy(entry.id)
@@ -275,9 +327,14 @@ export function SoundBrowser({
       store.toast('The host owns the arrangement.', 'warn')
       return
     }
-    const target = audioTrackFor(store.project, sounds.trackId, trackId)
+    const dropped = trackId ? store.track(trackId) : null
+    if (dropped?.type === 'midi' || (!trackId && selected?.type === 'midi')) {
+      await playAsInstrument(entry, dropped?.type === 'midi' ? dropped.id : selected?.id)
+      return
+    }
+    const target = audioTarget(trackId)
     if (!target) {
-      store.toast('Add an audio track first.', 'warn')
+      store.toast('Could not add a track for that sound.', 'warn')
       return
     }
     setBusy(entry.id)
@@ -352,9 +409,9 @@ export function SoundBrowser({
       store.toast('Instruments load onto an instrument track.', 'warn')
       return
     }
-    const target = dropped?.type === 'midi' ? dropped.id : sounds.instrumentId
+    const target = instrumentTarget(trackId)
     if (!target) {
-      store.toast('Add an instrument track first.', 'warn')
+      store.toast('Could not add an instrument track.', 'warn')
       return
     }
     const already = store.track(target)?.library?.id === entry.id
@@ -398,144 +455,133 @@ export function SoundBrowser({
     window.addEventListener('pointerup', up)
   }
 
+  const dragMoved = useRef(false)
+  const instrumentHint = selected?.type === 'midi'
+    ? `Load it on this track and play a note. ${where}`
+    : 'Load it on this track and play a note.'
+
+  function beginDrag(id: string, name: string, event: ReactDragEvent) {
+    dragMoved.current = true
+    dragId = id
+    event.dataTransfer.setData(SOUND_MIME, id)
+    event.dataTransfer.setData('text/plain', name)
+    event.dataTransfer.effectAllowed = 'copy'
+  }
+
   const panel = (
-    <div className="sound-panel" id="sound-browser" role="complementary" aria-label="Sounds. Loops, one-shots, and instruments from the free library.">
-      <div className="sound-head">
-        <div>
+    <div
+      className="sound-panel"
+      id="sound-browser"
+      role="complementary"
+      aria-label="Sounds. Loops, one-shots, and instruments from the free library."
+      title={phone ? 'Tap a row to preview. Add puts it on the selected track.' : 'Drag a sound onto a track, or tap Add.'}
+    >
+      {!embedded && (
+        <div className="sound-head">
           <h2>Sounds</h2>
-          <p>{phone ? 'Tap Add to put a sound on the selected track.' : 'Drag a sound onto a track, or into the sampler or looper. It lands at the playhead.'}</p>
+          <button type="button" className="sound-close" onClick={onClose}>Close</button>
         </div>
-        <TipButton label="Close" hint="Close the sound browser." onClick={onClose} />
-      </div>
+      )}
       <div className="sound-filters">
         <input
-          aria-label="Search sounds. Matches names and tags."
-          title="Matches names and tags."
-          placeholder="Search tags"
+          aria-label="Search sounds"
+          placeholder="Search"
           value={text}
           onChange={(event) => setText(event.target.value)}
         />
-        {!lockType && (
-          <select aria-label="Kind. One-shots, loops, drums, or instruments." title="One-shots, loops, drums, or instruments." value={type} onChange={(event) => setType(event.target.value as SoundQuery['type'])}>
-            <option value="all">All kinds</option>
-            <option value="one-shot">One-shots</option>
-            <option value="loop">Loops</option>
-            <option value="drum">Drums</option>
-            <option value="instrument">Instruments</option>
-          </select>
-        )}
-        {type !== 'instrument' && (
-          <>
-            <select aria-label="Tempo. Loops near the song tempo, including half-time and double-time." title="Loops near the song tempo, including half-time and double-time." value={bpm} onChange={(event) => setBpm(event.target.value as SoundQuery['bpm'])}>
-              <option value="any">Any tempo</option>
-              <option value="project">Song tempo</option>
-            </select>
-            <select aria-label="Key. Only sounds in this key." title="Only sounds in this key." value={key} onChange={(event) => setKey(event.target.value)}>
-              <option value="">Any key</option>
-              {keys.map((item) => <option key={item} value={item}>{item}</option>)}
-            </select>
-          </>
-        )}
-        <TipButton
-          label="Favorites"
-          hint="Only sounds saved in this project."
-          pressed={favoritesOnly}
-          onClick={() => setFavoritesOnly((value) => !value)}
-        />
       </div>
-      <p className="sound-where">{where}</p>
+      {!embedded && !lockType && (
+        <div className="sound-chips" role="group" aria-label="Kind">
+          {KIND_CHIPS.map((chip) => (
+            <button key={chip.id} type="button" className={type === chip.id ? 'on' : ''} aria-pressed={type === chip.id} onClick={() => setType(chip.id)}>
+              {chip.label}
+            </button>
+          ))}
+        </div>
+      )}
       {message && (
-        <p className="sound-status">
+        <p className="sound-status" role="status">
           {message}
-          {result.status === 'missing' && !waiting && starterRows.length === 0 && (
-            <>
-              {' '}
-              <button type="button" title="Check the sound library again." aria-label="Try again. Check the sound library again." onClick={() => void reload()}>Try again</button>
-            </>
+          {!loading && (failed || result.status === 'missing') && (
+            <button type="button" onClick={() => void reload()}>Retry</button>
           )}
         </p>
       )}
       <div className="sound-list">
         {starterRows.map((entry) => {
-          const saved = sounds.favorites.includes(entry.id)
-          const loaded = store.track(sounds.instrumentId ?? '')?.library?.id === entry.id
+          const on = playing === entry.id
+          const credit = `${entry.description} ${entry.license} · Hugging Face`
           return (
-            <div className="sound-row" key={entry.id}>
-              <div
+            <div className={`sound-row${on ? ' is-playing' : ''}`} key={entry.id}>
+              <button
+                type="button"
                 className="sound-copy"
                 draggable={!phone}
-                title={phone ? entry.description : `Drag onto an instrument track. ${entry.description}`}
-                onDragStart={(event) => {
-                  dragId = `${INSTRUMENT_PREFIX}${entry.id}`
-                  event.dataTransfer.setData(SOUND_MIME, dragId)
-                  event.dataTransfer.setData('text/plain', entry.name)
-                  event.dataTransfer.effectAllowed = 'copy'
+                aria-pressed={on}
+                title={credit}
+                disabled={busy === entry.id}
+                onDragStart={(event) => beginDrag(`${INSTRUMENT_PREFIX}${entry.id}`, entry.name, event)}
+                onDragEnd={() => { dragId = ''; window.setTimeout(() => { dragMoved.current = false }, 0) }}
+                onClick={() => {
+                  if (dragMoved.current) return
+                  engine.unlock()
+                  setPlaying(on ? '' : entry.id)
+                  if (on) engine.stopPreview()
+                  else void loadInstrument(entry, null, true)
                 }}
-                onDragEnd={() => { dragId = '' }}
               >
+                {on && <i className="sound-live" aria-hidden="true" />}
                 <strong>{entry.name}</strong>
-                <span className="sound-meta">Instrument{entry.category ? ` · ${entry.category}` : ''}</span>
-                <span className="sound-info" title={`${entry.description} Audio streams from Hugging Face.`}>{entry.license} · Hugging Face</span>
-              </div>
-              <div className="sound-actions">
-                <TipButton
-                  label={loaded ? 'Play' : 'Load'}
-                  hint={loaded ? 'Play this instrument on the speakers.' : 'Load it on this track and play a note.'}
-                  disabled={busy === entry.id || !sounds.instrumentId}
-                  onClick={() => { engine.unlock(); void loadInstrument(entry, null, true) }}
-                />
-                <TipButton
-                  label={saved ? 'Saved' : 'Save'}
-                  hint="Keep this sound in the project favorites."
-                  pressed={saved}
-                  disabled={store.remoteFollow}
-                  onClick={() => store.toggleSoundFavorite(entry.id)}
-                />
-              </div>
+                <span className="sound-meta">{on ? 'Playing' : 'Instrument'}</span>
+              </button>
+              <button
+                type="button"
+                className="sound-add"
+                disabled={busy === entry.id || store.remoteFollow}
+                aria-label={`Add. ${instrumentHint}`}
+                title={instrumentHint}
+                onClick={() => { engine.unlock(); void loadInstrument(entry, null, true) }}
+              >
+                Add
+              </button>
             </div>
           )
         })}
         {shownSounds.map((entry) => {
-          const saved = sounds.favorites.includes(entry.id)
-          const playLabel = playing === entry.id ? 'Stop' : 'Play'
-          const playHint = entry.type === 'loop'
-            ? 'Play on the speakers at the song tempo.'
-            : 'Play this sound on the speakers.'
+          const on = playing === entry.id
+          const playHint = entry.type === 'loop' ? 'Play on the speakers at the song tempo.' : 'Play this sound on the speakers.'
+          const credit = `${entry.license} · ${entry.source || 'Source not listed'}`
           return (
-            <div className="sound-row" key={entry.id}>
-              <div
+            <div className={`sound-row${on ? ' is-playing' : ''}`} key={entry.id}>
+              <button
+                type="button"
                 className="sound-copy"
                 draggable={!phone}
-                title={phone ? undefined : 'Drag onto a track, or into the sampler or looper.'}
-                onDragStart={(event) => {
-                  dragId = entry.id
-                  event.dataTransfer.setData(SOUND_MIME, entry.id)
-                  event.dataTransfer.setData('text/plain', entry.name)
-                  event.dataTransfer.effectAllowed = 'copy'
+                aria-pressed={on}
+                title={`${playHint} ${credit}. Hugging Face.`}
+                disabled={busy === entry.id}
+                onDragStart={(event) => beginDrag(entry.id, entry.name, event)}
+                onDragEnd={() => { dragId = ''; window.setTimeout(() => { dragMoved.current = false }, 0) }}
+                onClick={() => {
+                  if (dragMoved.current) return
+                  engine.unlock()
+                  void preview(entry)
                 }}
-                onDragEnd={() => { dragId = '' }}
               >
+                {on && <i className="sound-live" aria-hidden="true" />}
                 <strong>{entry.name}</strong>
-                <span className="sound-meta">
-                  {KIND_LABEL[entry.type]}
-                  {entry.bpm ? ` · ${Math.round(entry.bpm)} bpm` : ''}
-                  {entry.key ? ` · ${entry.key}` : ''}
-                </span>
-                <span className="sound-info" title="Credit for this recording. The audio file plays from Hugging Face.">{entry.license} · {entry.source || 'Source not listed'}</span>
-              </div>
-              <div className="sound-actions">
-                <TipButton label={playLabel} hint={playHint} disabled={busy === entry.id} onClick={() => { engine.unlock(); void preview(entry) }} />
-                <TipButton label="Add" hint="Put this sound on the selected track at the playhead." disabled={busy === entry.id || !sounds.trackId} onClick={() => { engine.unlock(); void add(entry) }} />
-                <TipButton label="Keys" hint="Play as instrument. Pitch this sound across the keyboard." disabled={busy === entry.id || !sounds.instrumentId} onClick={() => { engine.unlock(); void playAsInstrument(entry) }} />
-                {slot && <TipButton label="Slot" hint="Put this sound in the open sampler or looper." disabled={busy === entry.id} onClick={() => { engine.unlock(); void intoSlot(entry) }} />}
-                <TipButton
-                  label={saved ? 'Saved' : 'Save'}
-                  hint="Keep this sound in the project favorites."
-                  pressed={saved}
-                  disabled={store.remoteFollow}
-                  onClick={() => store.toggleSoundFavorite(entry.id)}
-                />
-              </div>
+                <span className="sound-meta">{on ? 'Playing' : KIND_LABEL[entry.type]}</span>
+              </button>
+              <button
+                type="button"
+                className="sound-add"
+                disabled={busy === entry.id || store.remoteFollow}
+                aria-label={`Add. ${where}`}
+                title={where}
+                onClick={() => { engine.unlock(); void add(entry) }}
+              >
+                Add
+              </button>
             </div>
           )
         })}
