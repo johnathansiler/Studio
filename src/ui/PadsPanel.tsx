@@ -329,21 +329,6 @@ export function PadsPanel({
     setPadPage(next >= FACE_PADS ? 1 : 0)
   }
 
-  function dragWheel(event: ReactPointerEvent<HTMLButtonElement>) {
-    const startY = event.clientY
-    const start = kit.swing
-    const move = (ev: PointerEvent) => {
-      const next = Math.min(75, Math.max(50, Math.round(start + (startY - ev.clientY) * 0.2)))
-      store.patchTrackKit(trackId, { swing: next, trackSwing: next })
-    }
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-  }
-
   async function armPad() {
     if (padArm !== 'idle') {
       stopRec.current = true
@@ -516,29 +501,7 @@ export function PadsPanel({
         </div>
 
         <div className="hw-deck">
-          <div className="mpc-pad-tools">
-            <div className="hw-knobs" aria-label="Knobs">
-              <label>Tune
-                <input className="hw-knob" aria-label="Pad tune" title="Tune of the selected pad, in semitones." type="range" min={-12} max={12} step={0.1} value={source?.tune ?? 0} style={{ ['--turn' as string]: String(((source?.tune ?? 0) + 12) / 24) }} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { tune: Number(event.target.value) })} />
-              </label>
-              <label>Filter
-                <input className="hw-knob" aria-label="Filter" title="Low-pass cutoff for this pad." type="range" min={0} max={1} step={0.01} value={source?.filter ?? 1} style={{ ['--turn' as string]: String(source?.filter ?? 1) }} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { filter: Number(event.target.value) })} />
-              </label>
-            </div>
-            <button type="button" className={`hw-key ch-tab mpc-full${kit.fullLevel ? ' on' : ''}`} aria-pressed={kit.fullLevel} title="Full level. Every hit plays at velocity 127, wherever you touch the pad." onClick={() => store.patchTrackKit(trackId, { fullLevel: !kit.fullLevel })}>Full Level</button>
-            <select className="hw-key ch-tab" aria-label="16 Levels" title="One pad spread across 16 velocities, tunes, or decays. Bank B continues the upper eight." value={levels} onChange={(event) => setLevels(event.target.value as LevelSpread | '')}>
-              <option value="">16 Levels</option>
-              <option value="velocity">Velocity</option>
-              <option value="tune">Tune</option>
-              <option value="filter">Filter</option>
-              <option value="decay">Decay</option>
-              <option value="attack">Attack</option>
-            </select>
-            <button type="button" className={`hw-key ch-tab${repeatOn ? ' on' : ''}`} aria-pressed={repeatOn} title="Note repeat. The pad retriggers at the chosen rate." onClick={() => setRepeatOn((value) => !value)}>Note Repeat</button>
-            <button type="button" className={`hw-key ch-tab${settingsOpen ? ' on' : ''}`} aria-pressed={settingsOpen} aria-expanded={settingsOpen} title="Pad settings. Steps, mix, chop, and the other controls." onClick={() => setSettingsOpen((value) => !value)}>Pad settings</button>
-          </div>
-
-          <div className="note-repeat-dock">
+          <div className="note-repeat-row">
             <button
               type="button"
               className={`note-repeat-hold hw-key${repeatEngaged ? ' on' : ''}`}
@@ -562,7 +525,16 @@ export function PadsPanel({
               >
                 Previous
               </button>
-              <strong aria-live="polite">{repeat.short}</strong>
+              <button
+                type="button"
+                className={`hw-key note-repeat-rate-read${repeatOn ? ' on' : ''}`}
+                aria-pressed={repeatOn}
+                aria-label="Keep note repeat on"
+                title="Tap the rate to leave Note Repeat on. Hold Note Repeat to repeat only while your finger is down."
+                onClick={() => setRepeatOn((value) => !value)}
+              >
+                <strong aria-live="polite">{repeat.short}</strong>
+              </button>
               <button
                 type="button"
                 className="hw-key"
@@ -576,6 +548,30 @@ export function PadsPanel({
             </div>
           </div>
 
+          <div className="mpc-knob-row">
+            <button type="button" className={`hw-key ch-tab mpc-full${kit.fullLevel ? ' on' : ''}`} aria-pressed={kit.fullLevel} title="Full level. Every hit plays at velocity 127, wherever you touch the pad." onClick={() => store.patchTrackKit(trackId, { fullLevel: !kit.fullLevel })}>Full Level</button>
+            <div className="hw-knobs" aria-label="Knobs">
+              <label>Tune
+                <input className="hw-knob" aria-label="Pad tune" title="Tune of the selected pad, in semitones." type="range" min={-12} max={12} step={0.1} value={source?.tune ?? 0} style={{ ['--turn' as string]: String(((source?.tune ?? 0) + 12) / 24) }} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { tune: Number(event.target.value) })} />
+              </label>
+              <label>Filter
+                <input className="hw-knob" aria-label="Filter" title="Low-pass cutoff for this pad." type="range" min={0} max={1} step={0.01} value={source?.filter ?? 1} style={{ ['--turn' as string]: String(source?.filter ?? 1) }} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { filter: Number(event.target.value) })} />
+              </label>
+            </div>
+          </div>
+
+          <div className="mpc-pad-tools">
+            <select className="hw-key ch-tab" aria-label="16 Levels" title="One pad spread across 16 velocities, tunes, or decays. Bank B continues the upper eight." value={levels} onChange={(event) => setLevels(event.target.value as LevelSpread | '')}>
+              <option value="">16 Levels</option>
+              <option value="velocity">Velocity</option>
+              <option value="tune">Tune</option>
+              <option value="filter">Filter</option>
+              <option value="decay">Decay</option>
+              <option value="attack">Attack</option>
+            </select>
+            <button type="button" className={`hw-key ch-tab${settingsOpen ? ' on' : ''}`} aria-pressed={settingsOpen} aria-expanded={settingsOpen} title="Pad settings. Steps, mix, chop, and the other controls." onClick={() => setSettingsOpen((value) => !value)}>Pad settings</button>
+          </div>
+
           <div className="hw-transport" aria-label="Transport">
             <button type="button" className={`hw-key rec ch-tab${recording ? ' on' : ''}`} aria-pressed={recording} title="Record pad hits into a clip on this track, with the count-in and the loop." onClick={record}>Record</button>
             <button type="button" className={`hw-key dub ch-tab${recordMode === 'overdub' ? ' on' : ''}`} aria-pressed={recordMode === 'overdub'} title="Overdub keeps the notes already in the loop." onClick={() => setRecordMode(recordMode === 'overdub' ? 'replace' : 'overdub')}>Overdub</button>
@@ -585,29 +581,17 @@ export function PadsPanel({
             <button type="button" className={`hw-key ch-tab${eraseOn ? ' on' : ''}`} aria-pressed={eraseOn} title="Hold Erase and a pad to clear that sound while the loop plays." onPointerDown={(event) => { event.preventDefault(); setEraseOn(true) }} onPointerUp={() => setEraseOn(false)} onPointerCancel={() => setEraseOn(false)} onPointerLeave={() => setEraseOn(false)}>Erase</button>
           </div>
 
-          <div className="hw-console">
-            <label className="hw-slider">Swing {Math.round(kit.swing)}
-              <input aria-label="Swing" title="Swing. 50 is straight. 75 is a hard shuffle." type="range" min={50} max={75} step={1} value={kit.swing} onChange={(event) => {
-                const swing = Number(event.target.value)
-                store.patchTrackKit(trackId, { swing, trackSwing: swing })
-              }} />
-            </label>
-            <div className="hw-wheel-row">
-              <button type="button" className="hw-wheel" aria-label="Swing wheel" title="Swing wheel. Drag up or down to change swing." onPointerDown={dragWheel}>
-                <svg viewBox="0 0 100 100" aria-hidden="true">
-                  <circle cx="50" cy="50" r="46" className="wheel-rim" />
-                  <circle cx="50" cy="50" r="34" className="wheel-face" />
-                  <circle cx="50" cy="18" r="4" className="wheel-mark" />
-                  <circle cx="50" cy="50" r="8" className="wheel-hub" />
-                </svg>
-              </button>
-              <div className="hw-cursor" aria-label="Cursor">
-                <button type="button" className="hw-key ch-tab" aria-label="Cursor up" title="Move to the pad above." onClick={() => nudgePad(0, -1)}>Up</button>
-                <button type="button" className="hw-key ch-tab" aria-label="Cursor down" title="Move to the pad below." onClick={() => nudgePad(0, 1)}>Down</button>
-                <button type="button" className="hw-key ch-tab" aria-label="Cursor left" title="Move to the pad on the left." onClick={() => nudgePad(-1, 0)}>Left</button>
-                <button type="button" className="hw-key ch-tab" aria-label="Cursor right" title="Move to the pad on the right." onClick={() => nudgePad(1, 0)}>Right</button>
-              </div>
-            </div>
+          <label className="hw-slider">Swing {Math.round(kit.swing)}
+            <input aria-label="Swing" title="Swing. 50 is straight. 75 is a hard shuffle." type="range" min={50} max={75} step={1} value={kit.swing} onChange={(event) => {
+              const swing = Number(event.target.value)
+              store.patchTrackKit(trackId, { swing, trackSwing: swing })
+            }} />
+          </label>
+          <div className="pad-move" role="group" aria-label="Selected pad">
+            <button type="button" className="hw-key ch-tab" title="Select the pad above. The top of Bank B returns to Bank A." onClick={() => nudgePad(0, -1)}>Pad above</button>
+            <button type="button" className="hw-key ch-tab" title="Select the pad below. The bottom of Bank A opens Bank B." onClick={() => nudgePad(0, 1)}>Pad below</button>
+            <button type="button" className="hw-key ch-tab" title="Select the pad to the left." onClick={() => nudgePad(-1, 0)}>Pad left</button>
+            <button type="button" className="hw-key ch-tab" title="Select the pad to the right." onClick={() => nudgePad(1, 0)}>Pad right</button>
           </div>
         </div>
 
