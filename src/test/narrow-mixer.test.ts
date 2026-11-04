@@ -70,10 +70,11 @@ describe('phone mixer at 412x915', () => {
           scrollWidth: node.scrollWidth,
           clientWidth: node.clientWidth,
         }))
-        const stripBox = strip.getBoundingClientRect()
         const face = (strip.querySelector('.strip-col') as HTMLElement | null) ?? strip
         const faceBox = face.getBoundingClientRect()
         const autoBoxes = autos.map((button) => button.getBoundingClientRect())
+        const panel = strip.querySelector('.mix-panel') as HTMLElement
+        const panelBox = panel.getBoundingClientRect()
         const arm = strip.querySelector('.arm-flag') as HTMLElement
         const armShown = [...arm.querySelectorAll<HTMLElement>('span')].filter((node) => getComputedStyle(node).display !== 'none').map((node) => (node.textContent || '').trim()).join('')
         const armStyle = getComputedStyle(arm)
@@ -82,7 +83,7 @@ describe('phone mixer at 412x915', () => {
           narrow: mixer.dataset.narrow,
           stripWidth: faceBox.width,
           modeCount: autos.length,
-          modeInside: autoBoxes.length === 1 && autoBoxes[0].width >= 36 && autoBoxes[0].left >= stripBox.left - 1 && autoBoxes[0].right <= stripBox.right + 1,
+          modeInside: autoBoxes.length === 1 && autoBoxes[0].width >= 36 && autoBoxes[0].height >= 40 && autoBoxes[0].left >= panelBox.left - 1 && autoBoxes[0].right <= panelBox.right + 1 && panelBox.left <= 1 && panelBox.width >= window.innerWidth - 2,
           words: autos.map((button) => (button.querySelector('.mode-full') as HTMLElement | null)?.textContent),
           letters: autos.map((button) => getComputedStyle(button.querySelector('.mode-short') as HTMLElement).display),
           pressed: autos.some((button) => button.classList.contains('on') && button.getAttribute('aria-pressed') === 'true'),

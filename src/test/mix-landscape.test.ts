@@ -325,11 +325,23 @@ describe('short landscape mixer', () => {
           const fader = (strip.querySelector('.volume-row .touch-slider') as HTMLElement).getBoundingClientRect()
           const panel = (strip.querySelector('.mix-panel') as HTMLElement).getBoundingClientRect()
           const arm = [...strip.querySelectorAll('button')].some((button) => (button.textContent || '').includes('Arm') && button.getBoundingClientRect().height >= 40)
-          return { before, after: fader.height, panelTop: panel.top, panelHeight: panel.height, faderRight: fader.right, panelLeft: panel.left, arm }
+          return {
+            before,
+            after: fader.height,
+            panelTop: panel.top,
+            panelLeft: panel.left,
+            panelRight: panel.right,
+            panelBottom: panel.bottom,
+            arm,
+            vw: window.innerWidth,
+            vh: window.innerHeight,
+          }
         })
         expect(open.after, where).toBeGreaterThanOrEqual(160)
         expect(Math.abs(open.after - open.before), where).toBeLessThanOrEqual(1)
-        expect(open.panelLeft, where).toBeGreaterThanOrEqual(open.faderRight - 1)
+        expect(open.panelLeft, where).toBeLessThanOrEqual(1)
+        expect(open.panelRight, where).toBeGreaterThanOrEqual(open.vw - 1)
+        expect(open.panelBottom, where).toBeGreaterThanOrEqual(open.vh - 1)
         expect(open.arm, where).toBe(true)
         await page.close()
       }

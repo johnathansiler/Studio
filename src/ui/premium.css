@@ -946,19 +946,19 @@ body:not(:has(.shell.phone)) .action-sheet {
 
 .fit-item {
   display: flex;
-  flex: none;
-  min-width: 0;
+  flex: 0 0 auto;
+  min-width: max-content;
   align-items: center;
 }
 
 .fit-item[hidden] { display: none !important; }
 
 .shell .fit-row button.fit-more {
-  flex: none;
+  flex: 0 0 auto;
   margin-left: auto;
   min-width: 64px;
-  height: 32px;
-  min-height: 32px;
+  height: 40px;
+  min-height: 40px;
   padding: 0 10px;
   border-radius: 8px;
   border: 1px solid color-mix(in srgb, var(--line) 78%, white);

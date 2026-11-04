@@ -266,6 +266,18 @@ describe('arrange plugins drawer', () => {
     expect(drawer).not.toContain('store.addPlugin')
   })
 
+  it('lists Scaler on the track that received it', () => {
+    const store = new ProjectStore(createEmptyProject())
+    const vocal = store.project.tracks.find((track) => track.name === 'Vocal')!
+    store.selectTrack(vocal.id)
+    const panel = drawer(store, true)
+    panel.choose('scaler')
+    const html = renderToStaticMarkup(createElement(PluginsDrawer, { store, place: 'bottom' }))
+    expect(html).toContain('data-chain-plugin="scaler"')
+    expect(html).toContain('>Scaler<')
+    expect(html).not.toContain('No plugins on this track yet.')
+  })
+
   it('starts closed on a phone and fold, and open beside the tracks on a computer', () => {
     expect(formFactor(390, 844)).toBe('phone')
     expect(formFactor(476, 752)).toBe('phone')

@@ -14,7 +14,13 @@ import { InsertList } from './PluginSheet'
 import { TouchSlider } from './kit/controls'
 import { holdMeter } from './levels'
 import { TrackPresence } from './presenceMarks'
+import { useScreenOverlay } from './screenOverlay'
 import './mixer.css'
+
+/** Full-screen channel sheet. A view tab closes it with the other overlays. */
+function useMixSheet(open: boolean, close: () => void) {
+  useScreenOverlay(close, open)
+}
 
 export function MixerView({ store, engine, onTune, onOpenKeyboard }: { store: ProjectStore; engine: AudioEngine; onTune?: (trackId: string) => void; onOpenKeyboard?: (trackId: string) => void }) {
   return <MixerBody key={store.project.id} store={store} engine={engine} onTune={onTune} onOpenKeyboard={onOpenKeyboard} />
@@ -180,13 +186,25 @@ function ChannelMore({
   output: string
   onTune?: (trackId: string) => void
 }) {
+  const detailsRef = useRef<HTMLDetailsElement>(null)
+  const [open, setOpen] = useState(false)
+  useMixSheet(open, () => {
+    if (detailsRef.current) detailsRef.current.open = false
+    setOpen(false)
+  })
   return (
-    <details className="mix-more" onClick={(event) => event.stopPropagation()}>
+    <details
+      ref={detailsRef}
+      className="mix-more"
+      onClick={(event) => event.stopPropagation()}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary className="more-open" aria-label={`More. Inserts, sends, pan, phase, and routing for ${track.name}.`} title="Inserts, sends, pan, phase, and routing.">
         <span className="more-closed">More</span>
         <span className="more-open-word">Close</span>
       </summary>
       <div className="mix-panel" aria-label={`${track.name} channel`}>
+        <button type="button" className="overlay-close" onClick={() => { if (detailsRef.current) detailsRef.current.open = false }}>Close</button>
         <section className="mix-block">
           <h4>Automation</h4>
           <p>Off ignores lanes. Read plays them. Touch and Latch write while you move a control.</p>
@@ -234,13 +252,25 @@ function ChannelMore({
 
 function MasterMore({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
   const [mastering, setMastering] = useState(false)
+  const detailsRef = useRef<HTMLDetailsElement>(null)
+  const [open, setOpen] = useState(false)
+  useMixSheet(open, () => {
+    if (detailsRef.current) detailsRef.current.open = false
+    setOpen(false)
+  })
   return (
-    <details className="mix-more" onClick={(event) => event.stopPropagation()}>
+    <details
+      ref={detailsRef}
+      className="mix-more"
+      onClick={(event) => event.stopPropagation()}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary className="more-open" aria-label="More. Levels, inserts, and mastering for the master." title="Levels, inserts, and mastering.">
         <span className="more-closed">More</span>
         <span className="more-open-word">Close</span>
       </summary>
       <div className="mix-panel" aria-label="Master channel">
+        <button type="button" className="overlay-close" onClick={() => { if (detailsRef.current) detailsRef.current.open = false }}>Close</button>
         <section className="mix-block">
           <h4>Automation</h4>
           <p>Off ignores lanes. Read plays them. Touch and Latch write while you move a control.</p>

@@ -3,9 +3,9 @@
  * At 844×390 and 915×412 the timeline row keeps most of the screen.
  */
 
-export const PHONE_LAND_TOP = 32
-export const PHONE_LAND_TRANSPORT = 32
-export const PHONE_LAND_TOOLS = 28
+export const PHONE_LAND_TOP = 48
+export const PHONE_LAND_TRANSPORT = 40
+export const PHONE_LAND_TOOLS = 40
 /** Open sheets stay under this share of the viewport so the timeline is still visible. */
 export const PHONE_LAND_SHEET = 0.26
 
