@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FEATURES, preferArrangeTransport, preferArrangeView } from './features'
 import { installControlGuards } from './ui/gestures'
 import { applyFreeze } from './audio/bounce'
@@ -84,6 +84,7 @@ import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark
 import { HintBubble, TipButton } from './ui/Hint'
 import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
+import { alignPluginClose } from './ui/pluginStage'
 
 interface Bundle {
   store: ProjectStore
@@ -1518,6 +1519,18 @@ async function importDropped(files: FileList) {
   const studioTab: StudioTab = collabOpen ? 'collab' : editorView
   const collabShown = collabPanelVisible(studioTab)
   const dockShown = !collabShown && dockVisible({ surface, panel, dockOpen: false })
+  useLayoutEffect(() => {
+    if (panel !== 'pads' && panel !== 'steps') return
+    const place = () => alignPluginClose(shellRef.current)
+    place()
+    const observer = new ResizeObserver(place)
+    if (shellRef.current) observer.observe(shellRef.current)
+    window.addEventListener('resize', place)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', place)
+    }
+  }, [panel, phone, land, form])
   const soundReserve = !phone && dockShown && dockEdge === 'right' ? dock : 0
   soundReserveRef.current = soundReserve
   useEffect(() => {

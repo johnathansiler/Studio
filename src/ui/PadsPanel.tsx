@@ -418,33 +418,31 @@ export function PadsPanel({
             <span>Beat Machine</span>
             <span className="mpc-kind">Drums</span>
           </div>
-          <div className="mpc-actions">
-            <button
-              type="button"
-              className="mpc-keyboard"
-              data-beat-keyboard={trackId}
-              onClick={() => {
-                engine.unlock()
-                if (onKeyboard) onKeyboard()
-                else {
-                  store.openKeyboardForPads(trackId)
-                  notifyKeyboard(true)
-                }
-              }}
-            >
-              Keyboard
-            </button>
-            <button
-              type="button"
-              className="mpc-close"
-              data-beat-close={trackId}
-              title="Close Beat Machine. The track keeps the instrument."
-              aria-label="Close Beat Machine. The track keeps the instrument."
-              onClick={() => store.closePads()}
-            >
-              Close
-            </button>
-          </div>
+          <button
+            type="button"
+            className="mpc-keyboard"
+            data-beat-keyboard={trackId}
+            onClick={() => {
+              engine.unlock()
+              if (onKeyboard) onKeyboard()
+              else {
+                store.openKeyboardForPads(trackId)
+                notifyKeyboard(true)
+              }
+            }}
+          >
+            Keyboard
+          </button>
+          <button
+            type="button"
+            className="mpc-close"
+            data-beat-close={trackId}
+            title="Close Beat Machine. The track keeps the instrument."
+            aria-label="Close Beat Machine. The track keeps the instrument."
+            onClick={() => store.closePads()}
+          >
+            Close
+          </button>
         </header>
 
         <div className="mpc-banks" role="group" aria-label="Pad banks">
