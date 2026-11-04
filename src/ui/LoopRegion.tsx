@@ -1,10 +1,10 @@
 import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { formatLoopReadout, loopGridBeats, loopLabelCenter, loopMinSamples, resolveLoopDrag, type LoopDragMode } from '../model/loopEdit'
+import { formatLoopReadout, loopGridBeats, loopMinSamples, resolveLoopDrag, type LoopDragMode } from '../model/loopEdit'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import type { Project } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { useFormFactor } from './form'
-import { layoutLoopGrips, loopGripHit } from './loopGrips'
+import { layoutLoopGrips, loopEdgeAt, loopGripHit } from './loopGrips'
 import './loopRegion.css'
 
 export function LoopRegion({
@@ -32,7 +32,6 @@ export function LoopRegion({
   const coarse = useFormFactor() !== 'desk'
   const [finger, setFinger] = useState<number | null>(null)
   const hostRef = useRef<HTMLDivElement>(null)
-  const labelRef = useRef<HTMLDivElement>(null)
   const drag = useRef<{
     pointerId: number
     mode: LoopDragMode | 'seek'
@@ -46,15 +45,14 @@ export function LoopRegion({
     onBody: boolean
   } | null>(null)
   const lastTap = useRef(0)
-  const [box, setBox] = useState({ width: 0, label: 0, labelWidth: 0, viewLeft: 0, viewWidth: 0 })
+  const [box, setBox] = useState({ width: 0, viewLeft: 0, viewWidth: 0 })
   const readout = formatLoopReadout(project, project.loopStartSample, project.loopEndSample)
   const xAtRef = useRef(xAt)
   xAtRef.current = xAt
 
   useLayoutEffect(() => {
     const host = hostRef.current
-    const label = labelRef.current
-    if (!host || !label) return
+    if (!host) return
     const measure = () => {
       const width = host.clientWidth
       const scroller = scrollParent(host)
@@ -65,14 +63,9 @@ export function LoopRegion({
       const viewLeft = Math.max(0, rawLeft)
       const viewRight = Math.min(width, rawRight)
       const viewWidth = Math.max(0, viewRight - viewLeft) || width
-      const regionLeft = xAtRef.current(project.loopStartSample, width)
-      const regionRight = xAtRef.current(project.loopEndSample, width)
-      const center = loopLabelCenter(Math.min(regionLeft, regionRight), Math.abs(regionRight - regionLeft), label.offsetWidth, viewLeft, viewWidth)
-      const next = { width, label: center, labelWidth: label.offsetWidth, viewLeft, viewWidth }
+      const next = { width, viewLeft, viewWidth }
       setBox((prev) => (
         near(prev.width, next.width) &&
-        near(prev.label, next.label) &&
-        near(prev.labelWidth, next.labelWidth) &&
         near(prev.viewLeft, next.viewLeft) &&
         near(prev.viewWidth, next.viewWidth)
           ? prev
@@ -87,7 +80,7 @@ export function LoopRegion({
       scroller.removeEventListener('scroll', measure)
       window.removeEventListener('resize', measure)
     }
-  }, [project.loopStartSample, project.loopEndSample, readout.text, gridBeats])
+  }, [project.loopStartSample, project.loopEndSample, gridBeats])
 
   const width = box.width
   const rawLeft = xAt(project.loopStartSample, width)
@@ -96,27 +89,26 @@ export function LoopRegion({
   const barWidth = Math.max(0, Math.abs(rawRight - rawLeft))
   const viewLeft = box.viewWidth > 0 ? box.viewLeft : 0
   const viewWidth = box.viewWidth > 0 ? box.viewWidth : width
-  const labelX = box.label || left + barWidth / 2
   const grips = layoutLoopGrips({
     start: rawLeft,
     end: rawRight,
     hostWidth: width,
     viewLeft,
     viewWidth,
-    labelCenter: labelX,
-    labelWidth: box.labelWidth,
+    labelCenter: 0,
+    labelWidth: 0,
     hit: loopGripHit(coarse),
   })
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!event.isPrimary) return
     if (event.button !== 0 && event.pointerType !== 'touch') return
-    const target = event.target as HTMLElement
-    const edge = target.closest('[data-loop-edge]')?.getAttribute('data-loop-edge')
-    const onBody = !!target.closest('[data-loop-body], [data-loop-edge]')
-    if (yieldEmpty && !onBody) return
     const rect = event.currentTarget.getBoundingClientRect()
-    const mode: LoopDragMode | 'seek' = edge === 'start' || edge === 'end' || edge === 'move' ? edge : 'seek'
+    const localX = event.clientX - rect.left
+    const edge = loopEdgeAt(localX, grips, { left, right: left + barWidth })
+    const onBody = edge !== 'seek'
+    if (yieldEmpty && !onBody) return
+    const mode: LoopDragMode | 'seek' = edge
     event.stopPropagation()
     event.preventDefault()
     try {
@@ -224,10 +216,6 @@ export function LoopRegion({
         <span className="loop-grip-face end" style={{ left: grips.end.faceLeft - grips.end.hitLeft, width: grips.end.faceWidth }} aria-hidden="true" />
       </button>
       {finger != null && <i className="snap-line loop-finger" style={{ left: finger }} />}
-      <div ref={labelRef} className="loop-read" style={{ left: width ? labelX : '50%' }}>
-        <span className="loop-len">{readout.length}</span>
-        <span className="loop-span">{readout.span}</span>
-      </div>
     </div>
   )
 }

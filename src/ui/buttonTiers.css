@@ -695,13 +695,82 @@
   overflow: visible;
   padding: 0 10px;
 }
-.shell.phone .timeline-tools.tucked .tool svg {
+.shell.phone .timeline-tools.tucked .tool svg,
+.shell.fold .timeline-tools.tucked .tool svg {
   display: none;
 }
-.shell.phone .timeline-tools.tucked .tool-label {
+.shell.phone .timeline-tools.tucked .tool-label,
+.shell.fold .timeline-tools.tucked .tool-label {
   overflow: visible;
   text-overflow: clip;
   white-space: nowrap;
+  font-size: clamp(11px, 3.1vw, 13px);
+  line-height: 1;
+}
+.clip-actions { display: contents; }
+.shell.fold .command-strip.tucked .timeline-tools,
+.shell.fold .command-strip.tucked .snap-control.inline,
+.shell.phone:not(.land) .command-strip.tucked .snap-control.inline {
+  display: contents;
+}
+.shell.fold .command-strip.tucked .tool-now {
+  flex: 1 0 100%;
+  min-width: 0;
+}
+.shell.phone:not(.land) .command-strip.tucked .clip-actions,
+.shell.fold .command-strip.tucked .clip-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.shell.phone:not(.land) .command-strip.tucked .clip-actions .arrange-panels,
+.shell.fold .command-strip.tucked .clip-actions .arrange-panels {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+.shell.phone:not(.land) .command-strip.tucked,
+.shell.fold .command-strip.tucked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.shell.phone:not(.land) .command-strip.tucked .tool-current,
+.shell.phone:not(.land) .command-strip.tucked .tool-quick,
+.shell.phone:not(.land) .command-strip.tucked .snap-inline,
+.shell.fold .command-strip.tucked .tool-current,
+.shell.fold .command-strip.tucked .tool-quick,
+.shell.fold .command-strip.tucked .snap-inline,
+.shell.fold .command-strip.tucked .snap-toggle,
+.shell.fold .command-strip.tucked .snap-grid {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: max-content;
+  max-width: none;
+  min-height: 40px;
+  height: 40px;
+  overflow: visible;
+  padding: 0 10px;
+}
+.shell.phone:not(.land) .command-strip.tucked .tool-label,
+.shell.fold .command-strip.tucked .tool-label,
+.shell.phone:not(.land) .command-strip.tucked .snap-toggle strong,
+.shell.fold .command-strip.tucked .snap-toggle strong {
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 /* Sideways phone: every chrome control is at least 40px, in one compact row

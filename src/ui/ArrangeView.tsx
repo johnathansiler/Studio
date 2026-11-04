@@ -48,7 +48,7 @@ import { SheetRow, TipButton } from './Hint'
 import { AnchoredMenu } from './AnchoredMenu'
 import { RemoteTimeline, TrackPresence, remoteClipMark, useRemotePeers } from './presenceMarks'
 import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, trimZone } from './touchEdit'
-import { laneDoubleClickAddsClip } from './clipKeys'
+import { clipTapAction, laneDoubleClickAddsClip } from './clipKeys'
 import { isSampledInstrument } from '../instruments/sampled'
 import { LoopRegion } from './LoopRegion'
 import { WaveformView } from './WaveformView'
@@ -62,7 +62,8 @@ function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup
     const pick = () => {
       const extra = document.getElementById('transport-menu-extra')
       const extraOpen = extra && !extra.closest('[hidden]')
-      setHost((extraOpen ? extra : null) || document.getElementById('command-strip') || document.getElementById('tool-slot'))
+      const actions = document.querySelector('.command-strip .clip-actions')
+      setHost((extraOpen ? extra : null) || (actions instanceof HTMLElement ? actions : null) || document.getElementById('command-strip') || document.getElementById('tool-slot'))
     }
     pick()
     const observer = new MutationObserver(pick)
@@ -193,6 +194,7 @@ export function ArrangeView({
   const [ghost, setGhost] = useState<{ trackId: string; left: number; width: number } | null>(null)
   const [tool, setToolState] = useState(activeTool)
   const scroller = useRef<HTMLDivElement>(null)
+  const lastClipTap = useRef({ id: '', at: 0 })
   const headsRef = useRef<HTMLDivElement>(null)
   const innerRef = useRef<HTMLDivElement>(null)
   useEffect(() => subscribeTools(() => setToolState(activeTool())), [])
@@ -550,6 +552,23 @@ export function ArrangeView({
     if (document.activeElement !== node) node.focus({ preventScroll: true })
   }
 
+  function openClipEditor(kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
+    if (kind === 'midi') onOpenPiano(trackId, clipId)
+    else if (kind === 'audio') store.selectClip(trackId, clipId, false, true)
+  }
+
+  function noteClipTap(kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
+    const now = performance.now()
+    const since = clipId === lastClipTap.current.id ? now - lastClipTap.current.at : Number.POSITIVE_INFINITY
+    const action = clipTapAction({ moved: false, sinceLastMs: since, kind })
+    if (action === 'edit') {
+      lastClipTap.current = { id: '', at: 0 }
+      openClipEditor(kind, trackId, clipId)
+      return
+    }
+    lastClipTap.current = { id: clipId, at: now }
+  }
+
   function revealTrack(trackId: string, gesture: 'select-track' | 'tap-clip', clipId?: string) {
     const track = project.tracks.find((item) => item.id === trackId)
     const surface = editorForGesture(gesture, track?.type ?? '', track)
@@ -652,7 +671,7 @@ export function ArrangeView({
         const retargeted = !!host && [...origins.values()].some((item) => item.trackId !== host)
         if (!moved && !retargeted) {
           if (additive && wasIn) store.selectClip(trackId, clipId, kind === 'midi', false, true)
-          revealTrack(trackId, 'tap-clip', kind === 'midi' ? clipId : undefined)
+          noteClipTap(kind, trackId, clipId)
           return
         }
         if (kind === 'audio') {
@@ -1015,8 +1034,9 @@ export function ArrangeView({
                     onDoubleClick={(event) => {
                       event.preventDefault()
                       event.stopPropagation()
+                      lastClipTap.current = { id: '', at: 0 }
                       store.selectClip(track.id, clip.id, true, false)
-                      revealTrack(track.id, 'tap-clip', clip.id)
+                      onOpenPiano(track.id, clip.id)
                     }}
                   >
                     <em>{clip.name}</em>
@@ -1525,6 +1545,11 @@ function ClipView({
         }
         if (tool !== 'select') return
         onMove(event)
+      }}
+      onDoubleClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        store.selectClip(trackId, clip.id, false, true)
       }}
       onContextMenu={(event) => {
         event.preventDefault()

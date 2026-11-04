@@ -209,7 +209,7 @@ describe('phone landscape compaction', () => {
         expect(await page.getByRole('button', { name: /^Tap$/ }).count()).toBe(0)
         const tempoLabel = await page.locator('.tempo-tap').getAttribute('aria-label')
         expect(tempoLabel).toContain('Tap to set tempo')
-        await page.getByRole('button', { name: /^Menu/ }).click()
+        await page.getByRole('button', { name: /^More/ }).click()
         const box = await page.evaluate(() => {
           const read = (selector: string) => {
             const node = document.querySelector(selector)

@@ -39,9 +39,9 @@ function transportPage(shell: string) {
 }
 
 const VIEWPORTS = [
-  { name: 'desk', width: 1440, height: 900, shell: 'studio', words: ['Start', 'Play', 'Record', 'Menu'] },
-  { name: 'phone', width: 390, height: 844, shell: 'phone', words: ['Start', 'Play', 'Record', 'Menu'] },
-  { name: 'fold', width: 880, height: 1000, shell: 'fold', words: ['Start', 'Play', 'Record', 'Menu'] },
+  { name: 'desk', width: 1440, height: 900, shell: 'studio', words: ['Start', 'Play', 'Record', 'More'] },
+  { name: 'phone', width: 390, height: 844, shell: 'phone', words: ['Start', 'Play', 'Record', 'More'] },
+  { name: 'fold', width: 880, height: 1000, shell: 'fold', words: ['Start', 'Play', 'Record', 'More'] },
 ]
 
 describe('transport words', () => {
@@ -125,7 +125,7 @@ describe('transport words', () => {
             panelTop: panel.top,
           }
         })
-        expect(order.words.slice(0, 5), viewport.name).toEqual(['Start', 'Play', 'Record', 'Tempo', 'Menu'])
+        expect(order.words.slice(0, 5), viewport.name).toEqual(['Start', 'Play', 'Record', 'Tempo', 'More'])
         expect(order.kicker).toBe('Tempo')
         expect(order.tapButton, viewport.name).toBe(false)
         expect(order.lengthButton, viewport.name).toBe(false)

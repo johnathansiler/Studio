@@ -437,10 +437,10 @@ export function TransportBar({
           aria-expanded={menuOpen}
           aria-controls="transport-menu"
           title={menuHint}
-          aria-label={`Menu. ${menuHint}`}
+          aria-label={`More. ${menuHint}`}
           onClick={() => setMenuOpen((open) => !open)}
         >
-          <span className="t-word">Menu</span>
+          <span className="t-word">More</span>
         </button>
       </div>
       <AnchoredMenu
@@ -449,7 +449,7 @@ export function TransportBar({
         fill
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
-        label="Menu"
+        label="More"
         triggerRef={menuButton}
         prefer="down"
       >

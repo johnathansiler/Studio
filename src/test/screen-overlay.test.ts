@@ -184,8 +184,41 @@ async function assertOverlay(page: Page) {
   }
 }
 
+async function assertDocked(page: Page) {
+  const result = await page.evaluate(() => {
+    const tabs = [...document.querySelectorAll('.views button')] as HTMLElement[]
+    const tabHits = tabs.map((tab) => {
+      const box = tab.getBoundingClientRect()
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+      return { label: (tab.textContent || '').replace(/\s+/g, ' ').trim(), ok: !!hit && (hit === tab || tab.contains(hit)) }
+    })
+    const view = document.querySelector('.views')!.getBoundingClientRect()
+    const menu = document.querySelector('.anchored-menu[data-menu-size="dock"]') as HTMLElement
+    const box = menu.getBoundingClientRect()
+    return {
+      tabHits,
+      viewBottom: view.bottom,
+      top: box.top,
+      left: box.left,
+      right: box.right,
+      bottom: box.bottom,
+      overlay: menu.hasAttribute('data-screen-overlay'),
+      vw: window.innerWidth,
+      vh: window.innerHeight,
+    }
+  })
+  for (const tab of result.tabHits) expect(tab.ok, tab.label).toBe(true)
+  expect(result.overlay).toBe(false)
+  expect(result.top).toBeGreaterThanOrEqual(result.viewBottom - 2)
+  expect(result.right - result.left).toBeLessThan(result.vw - 16)
+  expect(result.bottom).toBeLessThanOrEqual(result.vh + 1)
+}
+
 async function settleClosed(page: Page) {
-  await page.waitForFunction(() => document.querySelectorAll('[data-screen-overlay]').length === 0)
+  await page.waitForFunction(() => {
+    return document.querySelectorAll('[data-screen-overlay]').length === 0
+      && document.querySelectorAll('.anchored-menu[data-menu-size="dock"]').length === 0
+  })
 }
 
 describe('screen overlays leave the view tabs free', () => {
@@ -324,8 +357,12 @@ describe('screen overlays leave the view tabs free', () => {
 
         for (const opener of openers) {
           await opener.open()
-          await page.locator('[data-screen-overlay]').first().waitFor({ timeout: 8000 })
-          await assertOverlay(page)
+          await page.waitForFunction(() => {
+            return document.querySelector('[data-screen-overlay]')
+              || document.querySelector('.anchored-menu[data-menu-size="dock"]')
+          }, undefined, { timeout: 8000 })
+          if (await page.locator('[data-screen-overlay]').count()) await assertOverlay(page)
+          else await assertDocked(page)
           if (opener.shot) await page.screenshot({ path: `${artifacts}/overlay-${opener.name}-${layout.name}.png` })
           await page.getByRole('button', { name: /^Arrange/ }).first().click()
           await settleClosed(page)
