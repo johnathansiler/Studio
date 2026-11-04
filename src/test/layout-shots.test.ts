@@ -27,6 +27,7 @@ const css = [
   'src/ui/remoteFixes.css',
   'src/ui/loopRegion.css',
   'src/ui/drumRoll.css',
+  'src/ui/buttonTiers.css',
 ].map((file) => readFileSync(resolve(root, file), 'utf8')).join('\n')
 
 const engine = {
