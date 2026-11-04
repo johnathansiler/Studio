@@ -112,7 +112,7 @@ describe('live signal in the browser', () => {
     }
   }, 40000)
 
-  it('holds Note Repeat beside the pads and steps the rate without letting go', async () => {
+  it('latches Note Repeat and steps the rate while it stays on', async () => {
     const { child, browser, page } = await boot()
     try {
       await page.evaluate(() => {
@@ -143,7 +143,7 @@ describe('live signal in the browser', () => {
       expect(nextBox && nextBox.height).toBeGreaterThanOrEqual(40)
       const rateText = async () => (await page.locator('.note-repeat-rate strong').innerText()).trim()
       expect(await rateText()).toBe('1/16')
-      await hold.dispatchEvent('pointerdown', { pointerId: 7, pointerType: 'touch', isPrimary: false })
+      await hold.click()
       expect(await hold.getAttribute('aria-pressed')).toBe('true')
       const pad = page.locator('.mpc-pad').first()
       await pad.dispatchEvent('pointerdown', { pointerId: 8, pointerType: 'touch', isPrimary: false })
@@ -154,7 +154,8 @@ describe('live signal in the browser', () => {
       await previous.dispatchEvent('pointerdown', { pointerId: 10, pointerType: 'touch', isPrimary: false })
       await previous.dispatchEvent('pointerup', { pointerId: 10, pointerType: 'touch' })
       expect(await rateText()).toBe('1/16')
-      await hold.dispatchEvent('pointerup', { pointerId: 7, pointerType: 'touch' })
+      expect(await hold.getAttribute('aria-pressed')).toBe('true')
+      await hold.click()
       expect(await hold.getAttribute('aria-pressed')).toBe('false')
       await pad.dispatchEvent('pointerup', { pointerId: 8, pointerType: 'touch' })
     } finally {

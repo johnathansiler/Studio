@@ -361,6 +361,8 @@ describe('sampler drums', () => {
     expect(html).toContain('>Pad left<')
     expect(html).toContain('>Pad right<')
     expect(html.match(/>Note Repeat</g)?.length).toBe(1)
+    expect(html).toContain('Note Repeat: tap to turn on or off')
+    expect(html).not.toContain('Keep note repeat on')
     expect(html).toContain('Play start')
     expect(html).not.toContain('Akai')
     expect(html).toContain('Full Level')

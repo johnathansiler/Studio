@@ -248,8 +248,8 @@ export class ProjectStore {
   padsTrackId: string | null = null
   /** Track whose Step Sequencer panel is open. */
   stepTrackId: string | null = null
-  /** Clip and loop the pad recorder is printing into. Not saved. */
-  padRecord: { trackId: string; clipId: string; clipStart: number; loopStart: number; loopEnd: number } | null = null
+  /** Clip the pad recorder is printing into. A zero loop span grows with the take. Not saved. */
+  padRecord: { trackId: string; clipId: string; clipStart: number; loopStart: number; loopEnd: number; fresh: boolean } | null = null
   /** Which page of the open Scaler panel is showing. Not saved. */
   scalerPage: ScalerPage = 'play'
   /** Open layered patch. Not saved; the patch itself is on the track. */
@@ -1032,31 +1032,66 @@ export class ProjectStore {
     return clipId
   }
 
-  /** Arm the track, turn on the shared loop, and print into one clip. */
+  /**
+   * Open a Beat Machine take at the record start.
+   * An existing clip that already covers that beat is overdubbed. Otherwise a new Arrange clip starts there and grows until stop.
+   */
   armPadRecord(trackId: string, playheadBeat: number): string | null {
-    const window = this.padWindow(playheadBeat)
-    const clipId = this.ensurePadClip(trackId, playheadBeat)
-    if (!clipId) return null
+    const beat = Math.max(0, Number.isFinite(playheadBeat) ? playheadBeat : 0)
+    let clipId: string | null = null
     this.mutate(() => {
       const track = this.track(trackId)
-      if (!track) return
+      if (!track || track.type !== 'midi') return
+      track.instrument = 'pads'
+      track.padKit = normalizePadKit(track.padKit ?? this.project.padKit)
       if (!track.input.startsWith('midi')) track.input = 'midi'
-      this.project.loopEnabled = true
-      this.project.loopStartSample = Math.max(0, Math.round(projectBeatSample(this.project, window.startBeat)))
-      this.project.loopEndSample = Math.max(this.project.loopStartSample + 1, Math.round(projectBeatSample(this.project, window.startBeat + window.durationBeats)))
-      const record = { ...(this.project.record || defaultRecord(this.project.loopEndSample)) }
-      record.loop = true
-      this.project.record = record
+      const covering = track.midiClips.find((item) => !item.slotOnly && item.scene == null && item.startBeat <= beat + 0.02 && beat < item.startBeat + item.durationBeats + 0.02)
+      let clip = covering
+      let fresh = false
+      if (!clip) {
+        clip = { id: uid('midi'), name: 'Beat Machine', startBeat: beat, durationBeats: 0.25, notes: [] }
+        track.midiClips.push(clip)
+        fresh = true
+      }
+      this.selectedTrackId = trackId
+      this.selectedMidiClipId = clip.id
+      this.selectedMidiClipIds = [clip.id]
       this.padRecord = {
         trackId,
-        clipId,
-        clipStart: window.startBeat,
-        loopStart: window.startBeat,
-        loopEnd: window.startBeat + window.durationBeats,
+        clipId: clip.id,
+        clipStart: clip.startBeat,
+        loopStart: clip.startBeat,
+        loopEnd: clip.startBeat,
+        fresh,
       }
+      clipId = clip.id
     })
-    this.armTakeUndo(trackId, clipId)
+    if (clipId) this.armTakeUndo(trackId, clipId)
     return clipId
+  }
+
+  /** Set the clip length to the stop beat. An empty take that this record created is removed. The step pattern is left alone. */
+  finishPadRecord(endBeat: number | null) {
+    const rec = this.padRecord
+    if (!rec) return
+    this.mutate(() => {
+      const track = this.track(rec.trackId)
+      const clip = track?.midiClips.find((item) => item.id === rec.clipId)
+      this.padRecord = null
+      if (!track || !clip) return
+      if (!clip.notes.length && rec.fresh) {
+        track.midiClips = track.midiClips.filter((item) => item.id !== clip.id)
+        if (this.selectedMidiClipId === clip.id) {
+          this.selectedMidiClipId = null
+          this.selectedMidiClipIds = []
+        }
+        return
+      }
+      let end = 0.25
+      for (const note of clip.notes) end = Math.max(end, note.startBeat + note.durationBeats)
+      if (endBeat != null && Number.isFinite(endBeat)) end = Math.max(end, endBeat - rec.clipStart)
+      clip.durationBeats = end
+    })
   }
 
   commitPadHits(trackId: string, notes: PadHit[], mode: 'overdub' | 'replace' = 'overdub') {
@@ -1086,15 +1121,21 @@ export class ProjectStore {
       const clipStart = rec?.clipStart ?? clip.startBeat
       const loopStart = rec?.loopStart ?? clipStart
       const loopEnd = rec?.loopEnd ?? clipStart + clip.durationBeats
+      const linear = !!rec && rec.loopEnd - rec.loopStart <= 0.01
       const pads = (track.padKit?.banks ?? []).flat().map((pad) => ({ pitch: pad.pitch, choke: pad.choke }))
-      const incoming = notes.map((note) => {
-        const start = clipBeat(note.startBeat, clipStart, loopStart, loopEnd)
+      const ordered = [...notes].sort((a, b) => a.startBeat - b.startBeat)
+      const incoming = ordered.map((note) => {
+        const start = linear
+          ? Math.max(0, note.startBeat - clipStart)
+          : clipBeat(note.startBeat, clipStart, loopStart, loopEnd)
+        const length = Math.max(0.05, Math.min(1, note.durationBeats))
+        if (linear) clip.durationBeats = Math.max(clip.durationBeats, start + length)
         const room = Math.max(0.05, clip.durationBeats - start)
         return {
           ...note,
           id: uid('note'),
-          startBeat: Math.min(start, Math.max(0, clip.durationBeats - 0.05)),
-          durationBeats: Math.max(0.05, Math.min(room, note.durationBeats, 1)),
+          startBeat: start,
+          durationBeats: Math.max(0.05, Math.min(room, length)),
           velocity: Math.max(0.05, Math.min(1, note.velocity)),
         }
       })
@@ -5852,12 +5893,23 @@ export class ProjectStore {
     return this.quantizeOpen ? this.quantizeDraft : normalizeQuantize(this.project.quantize)
   }
 
-  beginTake() {
+  beginTake(fromSample?: number) {
     this.takeOpen = true
     this.takeNotes = []
+    if (fromSample == null || !Number.isFinite(fromSample)) return
+    const beat = projectSampleBeat(this.project, fromSample)
+    for (const track of this.project.tracks) {
+      if (track.type !== 'midi' || !track.armed) continue
+      if (track.instrument !== 'pads' && track.instrument !== 'drum-machine') continue
+      this.armPadRecord(track.id, beat)
+    }
   }
 
-  endTake() {
+  endTake(endSample?: number) {
+    if (this.padRecord) {
+      const beat = endSample == null || !Number.isFinite(endSample) ? null : projectSampleBeat(this.project, endSample)
+      this.finishPadRecord(beat)
+    }
     const pending = this.takeNotes
     this.takeOpen = false
     this.takeNotes = []

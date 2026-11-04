@@ -1142,7 +1142,7 @@ export function App() {
       takeRef.current = null
     }
     session.broadcastTransport({ action: 'stop', timelineSample: end })
-    store.endTake()
+    store.endTake(end)
     if (wasRecording) {
       recordReady.current = false
       versionSave.current('record')
@@ -1317,7 +1317,7 @@ export function App() {
           store.sessionRecordBeat = samplesToBeats(info.timelineSample, store.project.sampleRate, store.project.tempo)
         }
         takeRef.current = { id: takeId, endSample: info.timelineSample }
-        store.beginTake()
+        store.beginTake(info.timelineSample)
         if (punched) {
           const remain = (punched.stopAt - info.timelineSample) / engine.sampleRate
           if (punchTimer.current) window.clearTimeout(punchTimer.current)
