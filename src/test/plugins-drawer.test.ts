@@ -323,6 +323,7 @@ describe('plugins drawer screenshots', () => {
       'src/ui/guideSheet.css',
       'src/ui/arrangeSpace.css',
       'src/ui/pluginsDrawer.css',
+      'src/ui/buttonTiers.css',
     ].map((file) => readFileSync(resolve(root, file), 'utf8')).join('\n')
     const store = new ProjectStore(createEmptyProject())
     const keys = store.project.tracks.find((track) => track.name === 'Keys')!
@@ -356,11 +357,11 @@ describe('plugins drawer screenshots', () => {
         await page.screenshot({ path: `/opt/cursor/artifacts/${name}.png` })
         await page.close()
       }
-      await shot('plugins_phone_chain', 390, 844, 'shell studio phone', false)
-      await shot('plugins_fold_cover_chain', 476, 752, 'shell studio phone', false)
-      await shot('plugins_unfolded_chain', 880, 1000, 'shell studio fold', false)
-      await shot('plugins_computer_chain', 1440, 900, 'shell studio', false)
-      await shot('plugins_unfolded_menu', 880, 1000, 'shell studio fold', true)
+      await shot('plugins_phone_tiers', 390, 844, 'shell studio phone', false)
+      await shot('plugins_fold_cover_tiers', 476, 752, 'shell studio phone', false)
+      await shot('plugins_unfolded_tiers', 880, 1000, 'shell studio fold', false)
+      await shot('plugins_computer_tiers', 1440, 900, 'shell studio', false)
+      await shot('plugins_unfolded_menu_tiers', 880, 1000, 'shell studio fold', true)
     } finally {
       await browser.close()
     }
