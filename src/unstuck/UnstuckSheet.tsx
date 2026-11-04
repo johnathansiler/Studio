@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
+import { projectSampleBeat } from '../model/tempoMap'
 import { quartersPerBar } from '../model/time'
 import type { SectionKind } from '../model/types'
 import type { ProjectStore } from '../state/store'
@@ -26,7 +27,7 @@ import {
 } from './brief'
 import { composeUnstuck } from './compose'
 import type { ComposeContext, PlanSection, UnstuckJob } from './draft'
-import { arrangementEnd, unstuckSpan } from './place'
+import { unstuckSpan } from './place'
 import { complementLabel, complementRole, readClip } from './read'
 
 interface Memory {
@@ -115,16 +116,17 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
     if (job.action === 'rewrite') {
       return { ...base, startBeat: job.startBeat, replace: true, previousEnd: job.startBeat + job.bars * bar }
     }
+    const playhead = Math.max(0, projectSampleBeat(store.project, engine.currentTimelineSample()))
     if (job.action === 'full') {
-      const start = span ? span.start : snap(arrangementEnd(store.project), bar)
+      const start = span ? span.start : playhead
       return { ...base, startBeat: start, replace: Boolean(span), previousEnd: span?.end }
     }
     if (job.action === 'next-section') {
-      const start = span ? snap(span.end, bar) : snap(arrangementEnd(store.project), bar)
+      const start = span ? span.end : playhead
       const last = [...(store.project.sections ?? [])].reverse().find((section) => section.durationBeats > 0)
       return { ...base, startBeat: start, replace: false, afterKind: last?.kind }
     }
-    const start = span ? span.start : snap(arrangementEnd(store.project), bar)
+    const start = span ? span.start : playhead
     const end = span?.end ?? start + bar
     const followed = job.action === 'part' ? plansBetween(start, end) : undefined
     const at = job.action === 'fill' || job.action === 'transition' ? Math.max(start, end - bar) : start
@@ -373,10 +375,6 @@ function boundsOf(draft: { tracks: { clips: { startBeat: number; durationBeats: 
   }
   if (draft.replace) end = Math.max(end, draft.replace.endBeat)
   return { start: Number.isFinite(start) ? start : 0, end }
-}
-
-function snap(beat: number, bar: number) {
-  return Math.max(0, Math.round(beat / bar) * bar)
 }
 
 function scaleLabel(id: string) {

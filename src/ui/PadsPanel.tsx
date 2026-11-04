@@ -691,8 +691,8 @@ export function PadsPanel({
             <button type="button" className="hw-key ch-tab" title="Chop the selected pad on transients and spread the slices across this bank." onClick={() => store.chopTrackPad(trackId, bank, selected, 'transient')}>Transient</button>
             <button type="button" className="hw-key ch-tab" title="Chop the selected pad on a grid and spread the slices across this bank." onClick={() => store.chopTrackPad(trackId, bank, selected, 'grid')}>Grid</button>
             <button type="button" className="hw-key ch-tab" title="Chop the selected pad at its start and end and spread the slices across this bank." onClick={() => store.chopTrackPad(trackId, bank, selected, 'manual')}>Manual</button>
-            <button type="button" className="hw-key ch-tab" title="Place the song chain on the arrangement." onClick={() => store.placeMpcSong(trackId)}>Place song</button>
-            <button type="button" className="hw-key ch-tab" title="Render the pattern to an audio clip." onClick={() => store.printMpcAudio(trackId)}>Print audio</button>
+            <button type="button" className="hw-key ch-tab" title="Place the song chain on the arrangement." onClick={() => store.placeMpcSong(trackId, projectSampleBeat(store.project, engine.currentTimelineSample()))}>Place song</button>
+            <button type="button" className="hw-key ch-tab" title="Render the pattern to an audio clip." onClick={() => store.printMpcAudio(trackId, undefined, engine.currentTimelineSample())}>Print audio</button>
             <button type="button" className="hw-key ch-tab" title="Rewrite the pattern and the recorded clip with this timing and velocity scatter." onClick={() => store.humanizePadTake(trackId)}>Humanize</button>
             <select aria-label="Quantize grid" title="Grid for input quantize and for applying quantize to the pattern, including triplets." value={kit.quantizeRate || '1/16'} onChange={(event) => store.patchTrackKit(trackId, { quantizeRate: event.target.value, timingGrid: quantizeGridBeats(event.target.value) })}>
               {REPEAT_CHOICES.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}

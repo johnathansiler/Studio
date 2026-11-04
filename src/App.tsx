@@ -1,7 +1,6 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FEATURES, preferArrangeTransport, preferArrangeView } from './features'
 import { installControlGuards } from './ui/gestures'
-import { applyFreeze } from './audio/bounce'
 import { AudioEngine } from './audio/engine'
 import { unpackProject } from './model/archive'
 import { renderDemoLoop } from './model/demo'
@@ -2222,13 +2221,10 @@ async function importDropped(files: FileList) {
           store={store}
           phone={phone || form === 'fold'}
           onClose={() => setExportOpen(false)}
-          onFreeze={(audio, start) => {
+          onFreeze={(audio) => {
             const source = store.selectedTrackId
             if (!source) return
-            const next = applyFreeze(store.project, store.buffers, source, audio, start)
-            store.replace(next.project, next.buffers)
-            const created = next.project.tracks.find((track) => track.name.endsWith(' bounce'))
-            if (created) store.selectTrack(created.id)
+            store.receiveFreeze(source, audio, engine.currentTimelineSample())
             setExportOpen(false)
           }}
         />

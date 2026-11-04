@@ -262,8 +262,8 @@ export function GeneratePanel({
           <button type="button" onClick={() => store.setGenerator({ seed: Math.floor(Math.random() * 0x7fffffff), variation: 0 })}>New</button>
           <button type="button" onClick={() => store.setGenerator({ variation: settings.variation + 1 })}>Vary</button>
           {trackId && <button type="button" title="Put this MIDI on the Scaler track." onClick={placeHere}>This track</button>}
-          {!phone && <button type="button" onClick={() => { engine.stopPreview(); store.insertGenerated(part, 'part') }}>Add to {part.trackName}</button>}
-          {!phone && <button type="button" className="wide" onClick={() => { engine.stopPreview(); store.insertGenerated(part, 'new') }}>New track</button>}
+          {!phone && <button type="button" onClick={() => { engine.stopPreview(); store.insertGenerated(part, 'part', Math.max(0, projectSampleBeat(view.project, engine.currentTimelineSample()))) }}>Add to {part.trackName}</button>}
+          {!phone && <button type="button" className="wide" onClick={() => { engine.stopPreview(); store.insertGenerated(part, 'new', Math.max(0, projectSampleBeat(view.project, engine.currentTimelineSample()))) }}>New track</button>}
         </div>
         <p className="gen-hint">Hear plays it. New picks another seed. Vary changes this idea a little. Add puts editable MIDI on the {part.trackName} track. New track starts a fresh one.</p>
       </div>

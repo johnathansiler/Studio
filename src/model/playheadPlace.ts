@@ -21,7 +21,13 @@ export function stampClipAtPlayhead<T extends AudioClip | MidiClip>(clip: T, pla
   if (isAudioArrangeClip(clip)) {
     return { ...clip, startSample: Math.round(playhead.sample) }
   }
-  return { ...clip, startBeat: playhead.beat }
+  return stampMidiAtBeat(clip, playhead.beat) as T
+}
+
+/** MIDI sibling of the sample stamp. The beat is exact: no grid snap. Notes stay relative. */
+export function stampMidiAtBeat<T extends MidiClip>(clip: T, beat: number): T {
+  const at = Math.max(0, Number.isFinite(beat) ? beat : 0)
+  return { ...clip, startBeat: at }
 }
 
 /** 0..1 across the file. Loops wrap. A finished one-shot stays at the end. */

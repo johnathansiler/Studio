@@ -10,6 +10,7 @@ import { normalizeScaler } from '../instruments/scaler/model'
 import { normalizePadKit } from '../model/padMachine'
 import { sectionKind } from '../model/sections'
 import { normalizeScale } from '../model/scale'
+import { stampMidiAtBeat } from '../model/playheadPlace'
 import { makeTrack, uid, type MidiClip, type MidiNote, type Project, type Track } from '../model/types'
 import { ensureScale, roleById, roleLabel, scaleIsBuiltin, type RoleId } from './brief'
 import type { SongDraft } from './draft'
@@ -155,13 +156,13 @@ function pushClip(track: Track, clip: SongDraft['tracks'][number]['clips'][numbe
     ...(note.slide ? { slide: true } : {}),
   }))
   const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0.25)
-  const created: MidiClip = {
+  const created: MidiClip = stampMidiAtBeat({
     id: uid('midi'),
     name: clip.name,
-    startBeat: Math.max(0, clip.startBeat),
+    startBeat: 0,
     durationBeats: Math.max(clip.durationBeats, end),
     notes,
-  }
+  }, clip.startBeat)
   track.midiClips.push(created)
   return created.id
 }

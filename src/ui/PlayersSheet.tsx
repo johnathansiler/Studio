@@ -4,6 +4,7 @@ import { cachedAnalyses, subscribeAnalysis } from '../analysis/cache'
 import type { AnalysisResult } from '../analysis/types'
 import type { AudioEngine } from '../audio/engine'
 import { STYLES } from '../generators/styles'
+import { projectSampleBeat } from '../model/tempoMap'
 import { buildSession } from '../players'
 import { selectPlayers } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -149,8 +150,8 @@ export function PlayersSheet({ store, engine, onClose }: { store: ProjectStore; 
       </div>
       <div className="players-actions">
         <TipButton label="Hear" hint={HEAR} onClick={preview} />
-        <TipButton label="Write" hint={WRITE} className="primary" disabled={store.remoteFollow || (!settings.drummer && !settings.bass && !settings.keys)} onClick={() => store.writeSession(detected)} />
-        <TipButton label="Another" hint={ANOTHER} disabled={store.remoteFollow} onClick={() => store.writeSession(detected, (settings.seed + 1) >>> 0)} />
+        <TipButton label="Write" hint={WRITE} className="primary" disabled={store.remoteFollow || (!settings.drummer && !settings.bass && !settings.keys)} onClick={() => store.writeSession(detected, undefined, projectSampleBeat(store.project, engine.currentTimelineSample()))} />
+        <TipButton label="Another" hint={ANOTHER} disabled={store.remoteFollow} onClick={() => store.writeSession(detected, (settings.seed + 1) >>> 0, projectSampleBeat(store.project, engine.currentTimelineSample()))} />
       </div>
     </aside>
   )

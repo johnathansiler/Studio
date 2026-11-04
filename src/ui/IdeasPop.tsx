@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { NOTE_NAMES } from '../model/scale'
+import { projectSampleBeat } from '../model/tempoMap'
 import {
   GENRES,
   MOODS,
@@ -94,7 +95,7 @@ export function IdeasPop({ store, engine, onClose }: { store: ProjectStore; engi
                   root={scale.root}
                   favorite={scale.favorites.includes(item.id)}
                   onHear={() => hear(item)}
-                  onUse={() => store.insertIdea(item.id, 0)}
+                  onUse={() => store.insertIdea(item.id, projectSampleBeat(store.project, engine.currentTimelineSample()))}
                   onFavorite={() => store.toggleFavorite(item.id)}
                   onVariation={(index) => hear(item, item.variations[index]?.chords ?? item.chords)}
                   onSimilar={(id) => {
@@ -114,7 +115,7 @@ export function IdeasPop({ store, engine, onClose }: { store: ProjectStore; engi
               root={scale.root}
               favorite={scale.favorites.includes(current.id)}
               onHear={() => hear(current)}
-              onUse={() => store.insertIdea(current.id, 0)}
+              onUse={() => store.insertIdea(current.id, projectSampleBeat(store.project, engine.currentTimelineSample()))}
               onFavorite={() => store.toggleFavorite(current.id)}
               onVariation={(index) => hear(current, current.variations[index]?.chords ?? current.chords)}
               onSimilar={(id) => {

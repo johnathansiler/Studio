@@ -135,7 +135,8 @@ import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK
 import type { AudioAsset, AudioClip, AutomationWriteMode, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, LiveCaptureSettings, MidiClip, MidiEditorPrefs, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, MixGroup, PluginInstance, Project, RecordSettings, SectionKind, TakeLane, Track, TrackInstrument } from '../model/types'
 import { createSection, deleteSectionContents, duplicateSectionContents, moveSectionContents, resizeSection as setSectionLength, sectionKind } from '../model/sections'
 import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
-import { isAudioArrangeClip, readPlayhead, stampClipAtPlayhead } from '../model/playheadPlace'
+import { applyFreeze } from '../audio/bounce'
+import { isAudioArrangeClip, readPlayhead, stampClipAtPlayhead, stampMidiAtBeat } from '../model/playheadPlace'
 import { downbeatAt, projectBeatSample, projectSampleBeat, snapSampleToMap, tempoAtSample } from '../model/tempoMap'
 import { beatsToSamples, countInBarsOf, cycleCountInBars, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
@@ -1225,38 +1226,50 @@ export class ProjectStore {
     })
   }
 
-  /** Song order lands on the arrangement. MIDI, audio, or both, matching the pad output. */
-  placeMpcSong(trackId: string) {
+  /** Song order lands on the arrangement at the playhead. MIDI, audio, or both. One undo step. */
+  placeMpcSong(trackId: string, playheadBeat = 0) {
     const track = this.track(trackId)
     if (!track || track.type !== 'midi') return []
     const kit = normalizePadKit(track.padKit)
     const clip = track.midiClips[0]
     const spans = arrangeSong(kit, clip?.notes ?? [], clip?.durationBeats ?? 4)
-    if (kit.output !== 'audio') {
-      this.mutate(() => {
+    const at = Math.max(0, Number.isFinite(playheadBeat) ? playheadBeat : 0)
+    const songNotes = spans.flatMap((span) => span.notes.map((note) => ({ ...note, startBeat: note.startBeat + span.startBeat })))
+    const printed = kit.output === 'midi' ? null : this.renderPadBuffer(trackId, songNotes)
+    this.mutate(() => {
+      if (kit.output !== 'audio') {
         const live = this.track(trackId)
-        if (!live) return
-        const pads = normalizePadKit(live.padKit).banks.flat()
-        for (const span of spans) {
-          live.midiClips.push({
-            id: uid('midi'),
-            name: span.name,
-            startBeat: span.startBeat,
-            durationBeats: span.durationBeats,
-            notes: expandChord(span.notes, pads).map((note) => ({ ...note, id: uid('note') })),
-          })
+        if (live?.type === 'midi') {
+          const pads = normalizePadKit(live.padKit).banks.flat()
+          for (const span of spans) {
+            const made = stampMidiAtBeat({
+              id: uid('midi'),
+              name: span.name,
+              startBeat: 0,
+              durationBeats: span.durationBeats,
+              notes: expandChord(span.notes, pads).map((note) => ({ ...note, id: uid('note') })),
+            }, span.startBeat + at)
+            this.commitArrangedClip(live.id, made)
+          }
         }
-      })
-    }
-    if (kit.output !== 'midi') {
-      const notes = spans.flatMap((span) => span.notes.map((note) => ({ ...note, startBeat: note.startBeat + span.startBeat })))
-      this.printMpcAudio(trackId, notes)
-    }
+      }
+      if (printed) this.commitPadAudio(trackId, printed, projectBeatSample(this.project, at))
+    })
     return spans
   }
 
-  /** Render pad audio onto an audio track. MIDI-only output prints nothing. */
-  printMpcAudio(trackId: string, notes?: { pitch: number; startBeat: number; durationBeats: number; velocity: number }[]) {
+  /** Render pad audio onto an audio track at the playhead. MIDI-only output prints nothing. */
+  printMpcAudio(trackId: string, notes?: { pitch: number; startBeat: number; durationBeats: number; velocity: number }[], playheadSample = 0) {
+    const printed = this.renderPadBuffer(trackId, notes)
+    if (!printed) return null
+    let audioId = ''
+    this.mutate(() => {
+      audioId = this.commitPadAudio(trackId, printed, playheadSample) ?? ''
+    })
+    return audioId || null
+  }
+
+  private renderPadBuffer(trackId: string, notes?: { pitch: number; startBeat: number; durationBeats: number; velocity: number }[]) {
     const track = this.track(trackId)
     if (!track) return null
     const kit = normalizePadKit(track.padKit)
@@ -1292,39 +1305,30 @@ export class ProjectStore {
       sampleRate: this.project.sampleRate,
       channels: [rendered.left, rendered.right],
     })
-    let audioId = ''
-    this.mutate(() => {
-      const live = this.track(trackId)
-      const kitNow = normalizePadKit(live?.padKit)
-      let audio = kitNow.audioTrackId ? this.track(kitNow.audioTrackId) : undefined
-      if (!audio || audio.type !== 'audio') {
-        audio = makeTrack({
-          name: 'Sampler drums',
-          type: 'audio',
-          color: TRACK_COLORS[this.project.tracks.length % TRACK_COLORS.length],
-          input: 'none',
-        })
-        this.project.tracks.push(audio)
-        if (live) live.padKit = { ...kitNow, audioTrackId: audio.id }
-      }
-      const clipId = uid('clip')
-      audio.clips.push({
-        id: clipId,
-        name: 'Sampler drums',
-        bufferId,
-        startSample: 0,
-        offsetSamples: 0,
-        durationSamples: rendered.left.length,
-        fadeInSamples: 0,
-        fadeOutSamples: 0,
-        gain: 1,
-        source: 'local',
-      })
-      audioId = audio.id
-      this.selectedTrackId = audio.id
-      this.selectedClipId = clipId
-    })
-    return audioId || null
+    const clip: AudioClip = {
+      id: uid('clip'),
+      name: 'Sampler drums',
+      bufferId,
+      startSample: 0,
+      offsetSamples: 0,
+      durationSamples: rendered.left.length,
+      fadeInSamples: 0,
+      fadeOutSamples: 0,
+      gain: 1,
+      source: 'local',
+    }
+    return clip
+  }
+
+  private commitPadAudio(trackId: string, clip: AudioClip, playheadSample: number) {
+    const live = this.track(trackId)
+    const placed = stampClipAtPlayhead(clip, readPlayhead(this.project, playheadSample))
+    const result = this.commitArrangedClip(null, placed)
+    if (live && result) {
+      const kitNow = normalizePadKit(live.padKit)
+      live.padKit = { ...kitNow, audioTrackId: result.trackId }
+    }
+    return result?.trackId ?? null
   }
 
   /** Keep the chopped sample, its key, and its tempo on the kit. */
@@ -1560,21 +1564,19 @@ export class ProjectStore {
     return best
   }
 
-  /** Drop a chord onto Arrange as its own MIDI clip. */
-  writeScalerClip(trackId: string, notes: { pitch: number; fine?: number; startBeat: number; durationBeats: number; velocity: number }[], startBeat: number, name: string) {
+  /** Drop a chord onto Arrange as its own MIDI clip, at the exact beat. */
+  writeScalerClip(trackId: string | null, notes: { pitch: number; fine?: number; startBeat: number; durationBeats: number; velocity: number }[], startBeat: number, name: string) {
     if (!notes.length) return null
     let clipId: string | null = null
     this.mutate(() => {
-      const track = this.track(trackId)
-      if (!track || track.type !== 'midi') return
-      const clip = clipFromNotes(notes, startBeat, name)
-      track.midiClips.push(clip)
-      clipId = clip.id
-      this.selectedTrackId = track.id
-      this.selectedMidiClipId = clip.id
-      this.selectedMidiClipIds = [clip.id]
-      this.selectedNoteIds = clip.notes.map((note) => note.id)
-      this.selectedNoteId = clip.notes.at(-1)?.id ?? null
+      const clip = stampMidiAtBeat(clipFromNotes(notes, startBeat, name), startBeat)
+      const placed = this.commitArrangedClip(trackId, clip)
+      if (!placed) return
+      clipId = placed.clipId
+      const host = this.track(placed.trackId)
+      const notesOn = host?.midiClips.find((item) => item.id === placed.clipId)?.notes ?? []
+      this.selectedNoteIds = notesOn.map((note) => note.id)
+      this.selectedNoteId = notesOn.at(-1)?.id ?? null
     })
     return clipId
   }
@@ -2492,18 +2494,18 @@ export class ProjectStore {
       const count = plugin?.sampler?.slices.length ?? 0
       if (!count) return
       const notes = slicesToNotes(count).map((note) => ({ ...note, id: uid('note') }))
-      const host = this.project.tracks.find((track) => track.type === 'midi') ?? (trackId === 'master' ? null : this.track(trackId))
-      if (!host) return
-      const startBeat = Math.max(0, beat)
-      const bar = Math.floor(startBeat / Math.max(1, this.project.timeSignature.numerator)) + 1
-      host.midiClips.push({
+      const clip = stampMidiAtBeat({
         id: uid('midi'),
         name: 'Slices',
-        startBeat,
+        startBeat: 0,
         durationBeats: Math.max(1, notes.length * 0.25),
         notes,
-      })
-      placed = `MIDI clip placed on ${host.name} at bar ${bar}`
+      }, beat)
+      const result = this.commitArrangedClip(null, clip)
+      if (!result) return
+      const host = this.track(result.trackId)
+      const bar = Math.floor(clip.startBeat / Math.max(1, this.project.timeSignature.numerator)) + 1
+      placed = `MIDI clip placed on ${host?.name ?? 'MIDI'} at bar ${bar}`
     })
     if (placed) this.toast(placed, 'good')
     else this.toast('Slice the sample before placing MIDI.', 'warn')
@@ -2645,18 +2647,19 @@ export class ProjectStore {
       const atProject = rate === this.project.sampleRate ? mixed : playbackChannel(mixed, rate, this.project.sampleRate)
       const id = uid('bounce')
       this.buffers.set(id, { id, name: 'Loop bounce', sampleRate: this.project.sampleRate, channels: [atProject] })
-      track.clips.push({
+      const clip: AudioClip = stampClipAtPlayhead({
         id: uid('clip'),
         name: 'Loop',
         bufferId: id,
-        startSample,
+        startSample: 0,
         offsetSamples: 0,
         durationSamples: atProject.length,
         fadeInSamples: 0,
         fadeOutSamples: 0,
         gain: 1,
         source: 'local',
-      })
+      }, readPlayhead(this.project, startSample))
+      this.commitArrangedClip(null, clip)
     })
   }
 
@@ -2992,50 +2995,74 @@ export class ProjectStore {
   }
 
   /**
-   * Put a new clip on Arrange at the playhead, with no extra snap.
-   * Audio uses the given track when it is audio, otherwise the selected audio
-   * track, otherwise a new audio track named after the clip.
-   * MIDI uses the given track when it is MIDI, otherwise the selected MIDI track.
+   * Put a new clip on Arrange at the playhead sample, with no extra snap.
+   * Uses `trackId` when that track can hold the clip. Otherwise the selected
+   * track when it can (audio on audio, MIDI on a MIDI or instrument track).
+   * Otherwise a new track of the right kind, which becomes the selection.
+   * One undo step.
    */
   placeClipAtPlayhead(trackId: string | null, clip: AudioClip | MidiClip, playheadSample: number) {
     const playhead = readPlayhead(this.project, playheadSample)
     const placed = stampClipAtPlayhead(clip, playhead)
     this.mutate(() => {
-      if (isAudioArrangeClip(placed)) {
-        let host = trackId ? this.track(trackId) : null
-        if (host?.type !== 'audio') host = null
-        if (!host && this.selectedTrackId) {
-          const selected = this.track(this.selectedTrackId)
-          if (selected?.type === 'audio') host = selected
-        }
-        if (!host) {
-          const made = tracksFor({ kind: 'audio', count: 1, instrument: 'none', input: 'mic', channels: 1, armed: false }, this.project.tracks)
-          const created = made[0]
-          if (!created) return
-          created.name = placed.name || 'Audio'
-          created.armed = false
-          this.project.tracks.push(created)
-          host = created
-        }
-        host.clips.push(placed)
-        this.selectedTrackId = host.id
-        this.selectedClipId = placed.id
-        this.selectedClipIds = [placed.id]
-        this.offerSmartTempo(host.id, placed)
-        return
-      }
-      let host = trackId ? this.track(trackId) : null
-      if (host?.type !== 'midi') host = null
-      if (!host && this.selectedTrackId) {
-        const selected = this.track(this.selectedTrackId)
-        if (selected?.type === 'midi') host = selected
-      }
-      if (!host) return
-      host.midiClips.push(placed)
-      this.selectedTrackId = host.id
-      this.selectedMidiClipId = placed.id
-      this.selectedMidiClipIds = [placed.id]
+      this.commitArrangedClip(trackId, placed)
     })
+  }
+
+  /**
+   * MIDI sibling of placeClipAtPlayhead. `playheadBeat` is the exact beat.
+   * Same track rule. One undo step.
+   */
+  placeMidiClipAtPlayhead(trackId: string | null, clip: MidiClip, playheadBeat: number): { trackId: string; clipId: string } | null {
+    const placed = stampMidiAtBeat(clip, playheadBeat)
+    let result: { trackId: string; clipId: string } | null = null
+    this.mutate(() => {
+      result = this.commitArrangedClip(trackId, placed)
+    })
+    return result
+  }
+
+  /** Host plus clip, inside the caller's undo step. Does not open a new one. */
+  private commitArrangedClip(trackId: string | null, clip: AudioClip | MidiClip): { trackId: string; clipId: string } | null {
+    const audio = isAudioArrangeClip(clip)
+    const host = this.hostForArrange(audio ? 'audio' : 'midi', trackId, clip.name || (audio ? 'Audio' : 'MIDI'))
+    if (!host) return null
+    if (audio && host.type === 'audio') {
+      host.clips.push(clip)
+      this.selectedTrackId = host.id
+      this.selectedClipId = clip.id
+      this.selectedClipIds = [clip.id]
+      this.offerSmartTempo(host.id, clip)
+      return { trackId: host.id, clipId: clip.id }
+    }
+    if (!audio && host.type === 'midi') {
+      host.midiClips.push(clip)
+      this.selectedTrackId = host.id
+      this.selectedMidiClipId = clip.id
+      this.selectedMidiClipIds = [clip.id]
+      this.selectedClipId = null
+      this.selectedClipIds = []
+      return { trackId: host.id, clipId: clip.id }
+    }
+    return null
+  }
+
+  /** Given track, then the selected track, then a new one. Audio or MIDI only. */
+  private hostForArrange(kind: 'audio' | 'midi', trackId: string | null, name: string): Track | null {
+    const given = trackId ? this.track(trackId) : null
+    if (given?.type === kind) return given
+    if (this.selectedTrackId) {
+      const selected = this.track(this.selectedTrackId)
+      if (selected?.type === kind) return selected
+    }
+    const made = tracksFor({ kind, count: 1, instrument: 'none', input: 'mic', channels: 1, armed: false }, this.project.tracks)
+    const created = made[0]
+    if (!created) return null
+    created.name = name || (kind === 'audio' ? 'Audio' : 'MIDI')
+    created.armed = false
+    if (kind === 'midi') created.input = 'none'
+    this.project.tracks.push(created)
+    return created
   }
 
   private offerSmartTempo(trackId: string, clip: AudioClip) {
@@ -3691,7 +3718,7 @@ export class ProjectStore {
     })
   }
 
-  flattenPad(bank: number, index: number) {
+  flattenPad(bank: number, index: number, playheadSample = 0) {
     const kit = normalizePadKit(this.project.padKit)
     const pad = kit.banks[bank][index]
     const asset = pad.layers[0]?.bufferId ? this.buffers.get(pad.layers[0].bufferId) : undefined
@@ -3701,13 +3728,7 @@ export class ProjectStore {
     const id = uid('smp')
     this.buffers.set(id, { id, name: pad.name, sampleRate, channels: [new Float32Array(samples)] })
     this.mutate(() => {
-      const track = makeTrack({
-        name: pad.name,
-        type: 'audio',
-        color: TRACK_COLORS[this.project.tracks.length % TRACK_COLORS.length],
-        output: pad.busId || null,
-      })
-      track.clips.push({
+      const clip: AudioClip = stampClipAtPlayhead({
         id: uid('clip'),
         name: pad.name,
         bufferId: id,
@@ -3718,10 +3739,10 @@ export class ProjectStore {
         fadeOutSamples: 0,
         gain: pad.level,
         source: 'local',
-      })
-      this.project.tracks.push(track)
-      this.selectedTrackId = track.id
-      this.selectedClipId = track.clips[0].id
+      }, readPlayhead(this.project, playheadSample))
+      const host = this.commitArrangedClip(null, clip)
+      const track = host ? this.track(host.trackId) : null
+      if (track && pad.busId) track.output = pad.busId
     })
   }
 
@@ -3818,7 +3839,7 @@ export class ProjectStore {
     })
   }
 
-  commitSong(trackId: string) {
+  commitSong(trackId: string, playheadBeat = 0) {
     this.mutate(() => {
       const kit = normalizePadKit(this.project.padKit)
       const spans = chainSong(kit.song, kit.sequences.map((sequence) => ({ id: sequence.id, lengthBeats: sequence.lengthBeats })))
@@ -3832,16 +3853,20 @@ export class ProjectStore {
         }
       }
       const track = this.track(trackId)
-      if (!track) return
+      if (!track || track.type !== 'midi') return
+      const length = spans.at(-1)?.end ?? 4
       let clip = track.midiClips.find((item) => item.name === 'Song')
       if (!clip) {
-        clip = { id: uid('midi'), name: 'Song', startBeat: 0, durationBeats: spans.at(-1)?.end ?? 4, notes }
-        track.midiClips.push(clip)
+        clip = stampMidiAtBeat({ id: uid('midi'), name: 'Song', startBeat: 0, durationBeats: length, notes }, playheadBeat)
+        this.commitArrangedClip(track.id, clip)
       } else {
         clip.notes = notes
-        clip.durationBeats = spans.at(-1)?.end ?? clip.durationBeats
+        clip.durationBeats = length
+        clip.startBeat = stampMidiAtBeat(clip, playheadBeat).startBeat
+        this.selectedTrackId = track.id
+        this.selectedMidiClipId = clip.id
+        this.selectedMidiClipIds = [clip.id]
       }
-      this.selectedMidiClipId = clip.id
       this.project.padKit = kit
     })
   }
@@ -4077,8 +4102,8 @@ export class ProjectStore {
     else this.mutate(apply)
   }
 
-  /** Write the drummer and session players as editable MIDI. One undo step. */
-  writeSession(found?: SessionDetection, seed?: number) {
+  /** Write the drummer and session players as editable MIDI. One undo step. The block starts at the playhead when one is given. */
+  writeSession(found?: SessionDetection, seed?: number, playheadBeat?: number) {
     if (this.remoteFollow) return
     const settings = normalizePlayer({ ...this.playerState(), ...(seed == null ? {} : { seed }) })
     const built = buildSession(this.project, settings, found)
@@ -4086,11 +4111,14 @@ export class ProjectStore {
       this.toast('Pick drums, bass, or keys.', 'warn')
       return
     }
+    const bar = quartersPerBar(this.project.timeSignature)
+    const base = settings.startBar * bar
+    const origin = playheadBeat == null || !Number.isFinite(playheadBeat) ? 0 : playheadBeat - base
     this.mutate(() => {
       this.project.players = settings
       let selected: { trackId: string; clipId: string; noteIds: string[] } | null = null
       for (const part of built.parts) {
-        const placed = this.placePlayer(part)
+        const placed = this.placePlayer(part, origin)
         if (part.role === 'drums' || !selected) selected = placed
       }
       if (selected) {
@@ -4120,8 +4148,8 @@ export class ProjectStore {
     this.emit()
   }
 
-  /** Drop generated MIDI on the part's track, or on a fresh one. Notes stay editable. */
-  insertGenerated(part: GeneratedPart, where: 'part' | 'new' = 'part') {
+  /** Drop generated MIDI on the part's track, or on a fresh one, starting at the playhead. Notes stay editable. */
+  insertGenerated(part: GeneratedPart, where: 'part' | 'new' = 'part', playheadBeat = 0) {
     this.mutate(() => {
       const color = GENERATED_COLOR[part.kind]
       let track
@@ -4135,17 +4163,17 @@ export class ProjectStore {
         })
         this.project.tracks.push(track)
       } else {
-        track = this.ensureMidi(part.trackName, color)
+        const selected = this.selectedTrackId ? this.track(this.selectedTrackId) : null
+        track = selected?.type === 'midi' ? selected : this.ensureMidi(part.trackName, color)
         if (part.instrument === 'drum-machine' && (!track.instrument || track.instrument === 'none')) track.instrument = 'drum-machine'
         if (part.instrument === '808' && (!track.instrument || track.instrument === 'none')) track.instrument = '808'
       }
       const span = Math.max(1, part.bars * quartersPerBar(this.project.timeSignature))
       const end = part.notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), span)
-      const last = track.midiClips.reduce((max, clip) => Math.max(max, clip.startBeat + clip.durationBeats), 0)
-      const clip: MidiClip = {
+      const clip: MidiClip = stampMidiAtBeat({
         id: uid('midi'),
         name: part.name,
-        startBeat: track.midiClips.length ? last : 0,
+        startBeat: 0,
         durationBeats: Math.max(span, Math.ceil(end * 4) / 4),
         notes: part.notes.map((note) => ({
           id: uid('note'),
@@ -4156,11 +4184,8 @@ export class ProjectStore {
           ...(note.fine ? { fine: note.fine } : {}),
           ...(note.slide ? { slide: true } : {}),
         })),
-      }
-      track.midiClips.push(clip)
-      this.selectedTrackId = track.id
-      this.selectedMidiClipId = clip.id
-      this.selectedMidiClipIds = [clip.id]
+      }, playheadBeat)
+      this.commitArrangedClip(track.id, clip)
       this.selectedNoteIds = clip.notes.map((note) => note.id)
       this.selectedNoteId = clip.notes.at(-1)?.id ?? null
       if (part.kind === 'chords') this.project.generator = { ...this.generatorState(), chords: part.chords }
@@ -4168,7 +4193,7 @@ export class ProjectStore {
     })
   }
 
-  private placePlayer(part: SessionPart) {
+  private placePlayer(part: SessionPart, origin = 0) {
     const track = this.ensureMidi(part.trackName, part.color)
     if (part.instrument === 'drum-machine') track.instrument = 'drum-machine'
     else if (part.instrument === '808' && (!track.instrument || track.instrument === 'none' || track.instrument === 'synth')) track.instrument = '808'
@@ -4184,13 +4209,13 @@ export class ProjectStore {
       ...(note.fine ? { fine: note.fine } : {}),
       ...(note.slide ? { slide: true } : {}),
     }))
-    const clip: MidiClip = {
+    const clip: MidiClip = stampMidiAtBeat({
       id: uid('midi'),
       name: part.clipName,
-      startBeat: part.startBeat,
+      startBeat: 0,
       durationBeats: Math.max(part.durationBeats, end),
       notes,
-    }
+    }, part.startBeat + origin)
     track.midiClips.push(clip)
     return { trackId: track.id, clipId: clip.id, noteIds: notes.map((note) => note.id) }
   }
@@ -4520,6 +4545,27 @@ export class ProjectStore {
       this.project = project
       if (buffers) this.buffers = buffers
     })
+  }
+
+  /**
+   * Freeze a rendered mix onto Arrange at the playhead. One undo step.
+   * An audio track other than the source gets the clip. Otherwise a new bounce track does.
+   */
+  receiveFreeze(sourceId: string, audio: { sampleRate: number; channels: Float32Array[] }, playheadSample: number) {
+    const selected = this.selectedTrackId
+    const dest = selected && selected !== sourceId && this.track(selected)?.type === 'audio' ? selected : null
+    const next = applyFreeze(this.project, this.buffers, sourceId, audio, playheadSample, dest)
+    this.replace(next.project, next.buffers)
+    const host = dest
+      ? this.track(dest)
+      : this.project.tracks.find((track) => track.name.endsWith(' bounce'))
+    if (!host) return
+    this.selectedTrackId = host.id
+    const clip = host.clips.at(-1)
+    if (clip) {
+      this.selectedClipId = clip.id
+      this.selectedClipIds = [clip.id]
+    }
   }
 
   enterSession() {
@@ -5597,15 +5643,15 @@ export class ProjectStore {
     }
     let landed = 'Drums'
     this.mutate(() => {
-      const requested = trackId ? this.project.tracks.find((track) => track.id === trackId && track.type === 'midi') : null
-      const track = requested ?? this.ensureDrumsTrack()
+      const track = this.hostForArrange('midi', trackId ?? null, 'Drums')
+      if (!track) return
       landed = track.name
       if (!this.project.patternClips) this.project.patternClips = []
       for (const channel of pattern.channels) {
         if (!channel.output) channel.output = track.id
       }
       mirrorTrackMix(this.project, track.id)
-      const beat = Math.max(0, startBeat)
+      const beat = Math.max(0, Number.isFinite(startBeat) ? startBeat : 0)
       const clip = {
         id: uid('pcl'),
         patternId: pattern.id,
@@ -5627,20 +5673,6 @@ export class ProjectStore {
     })
     const hits = patternToMidiNotes(pattern).length
     this.toast(hits ? `${pattern.name} is on ${landed}.` : 'This pattern has no hits to send.', hits ? 'good' : 'warn')
-  }
-
-  /** Midi track named Drums. Place creates it when the song does not have one yet. */
-  private ensureDrumsTrack() {
-    const found = this.project.tracks.find((track) => track.type === 'midi' && track.name === 'Drums')
-    if (found) return found
-    const track = makeTrack({
-      name: 'Drums',
-      type: 'midi',
-      color: '#e07a3d',
-      input: 'none',
-    })
-    this.project.tracks.push(track)
-    return track
   }
 
   placePatternScene(scene: number) {
@@ -5694,24 +5726,19 @@ export class ProjectStore {
       if (!pattern) return
       const notes = patternToMidiNotes(pattern)
       if (!notes.length) return
-      const snapped = Math.max(0, beat)
       const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0)
       const track = this.kitTrack(trackId, mode, pattern)
-      const clip: MidiClip = {
+      const clip: MidiClip = stampMidiAtBeat({
         id: uid('midi'),
         name: pattern.name,
-        startBeat: snapped,
+        startBeat: 0,
         durationBeats: clipEndForContent(end, this.project),
         notes: notes.map((note) => ({ ...note, id: uid('note') })),
-      }
-      track.midiClips.push(clip)
-      this.selectedTrackId = track.id
-      this.selectedMidiClipId = clip.id
-      this.selectedMidiClipIds = [clip.id]
-      this.selectedClipId = null
-      this.selectedClipIds = []
+      }, beat)
+      const placed = this.commitArrangedClip(track.id, clip)
+      if (!placed) return
       this.view = 'arrange'
-      result = { trackId: track.id, clipId: clip.id }
+      result = placed
     })
     if (result) this.toast(mode === 'instrument' ? 'Pattern is on the instrument.' : 'Pattern is MIDI on the song.', 'good')
     else this.toast('This pattern has no hits to send.', 'warn')
@@ -5719,8 +5746,8 @@ export class ProjectStore {
   }
 
   /**
-   * Put the current pattern on Arrange as MIDI notes.
-   * The clip length reaches the next snap line, or the next bar when Snap is off.
+   * Put the current pattern on Arrange as MIDI notes at the exact beat.
+   * The clip length still reaches the next snap line, or the next bar when Snap is off.
    */
   sendPatternToArrange(startBeat: number, trackId?: string): { trackId: string; clipId: string } | null {
     const pattern = this.activePattern()
@@ -5735,24 +5762,19 @@ export class ProjectStore {
     }
     let result: { trackId: string; clipId: string } | null = null
     this.mutate(() => {
-      const beat = Math.max(0, startBeat)
       const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0)
       const track = this.kitTrack(trackId ?? null, 'midi', pattern)
-      const clip: MidiClip = {
+      const clip: MidiClip = stampMidiAtBeat({
         id: uid('midi'),
         name: pattern.name,
-        startBeat: beat,
+        startBeat: 0,
         durationBeats: clipEndForContent(end, this.project),
         notes: notes.map((note) => ({ ...note, id: uid('note') })),
-      }
-      track.midiClips.push(clip)
-      this.selectedTrackId = track.id
-      this.selectedMidiClipId = clip.id
-      this.selectedMidiClipIds = [clip.id]
-      this.selectedClipId = null
-      this.selectedClipIds = []
+      }, startBeat)
+      const placed = this.commitArrangedClip(track.id, clip)
+      if (!placed) return
       this.view = 'arrange'
-      result = { trackId: track.id, clipId: clip.id }
+      result = placed
     })
     if (result) this.toast(`${pattern.name} is on Arrange.`, 'good')
     return result
@@ -5770,30 +5792,25 @@ export class ProjectStore {
     }
     let result: { trackId: string; clipId: string } | null = null
     this.mutate(() => {
-      const track = source.trackId ? this.project.tracks.find((item) => item.id === source.trackId && item.type === 'midi') : null
-      const host = track ?? this.kitTrack(null, 'midi', pattern)
       const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0)
-      const clip: MidiClip = {
+      const host = this.kitTrack(source.trackId ?? null, 'midi', pattern)
+      const clip: MidiClip = stampMidiAtBeat({
         id: uid('midi'),
         name: pattern.name,
-        startBeat: source.startBeat,
+        startBeat: 0,
         durationBeats: Math.max(source.lengthBeats, clipEndForContent(end, this.project)),
         notes: notes.map((note) => ({ ...note, id: uid('note') })),
-      }
-      host.midiClips.push(clip)
+      }, source.startBeat)
+      const placed = this.commitArrangedClip(host.id, clip)
+      if (!placed) return
       source.suppressed = true
-      this.selectedTrackId = host.id
-      this.selectedMidiClipId = clip.id
-      this.selectedMidiClipIds = [clip.id]
-      result = { trackId: host.id, clipId: clip.id }
+      result = placed
     })
     return result
   }
 
   private kitTrack(trackId: string | null, mode: 'midi' | 'instrument', pattern: NonNullable<ReturnType<ProjectStore['activePattern']>>) {
-    const picked = trackId ? this.project.tracks.find((track) => track.id === trackId && track.type === 'midi') : null
-    const named = !trackId ? this.project.tracks.find((track) => track.type === 'midi' && track.name === 'Drums') : null
-    const track = picked ?? named ?? makeTrack({
+    const track = this.hostForArrange('midi', trackId, 'Drums') ?? makeTrack({
       name: 'Drums',
       type: 'midi',
       color: '#e07a3d',
@@ -5801,7 +5818,7 @@ export class ProjectStore {
       armed: false,
       instrument: 'drum-machine',
     })
-    if (!picked && !named) this.project.tracks.push(track)
+    if (!this.project.tracks.includes(track)) this.project.tracks.push(track)
     const custom = pattern.channels.some((channel) => channel.sampleId)
     if (mode === 'instrument' || custom) {
       track.instrument = 'pads'
@@ -6766,10 +6783,10 @@ export class ProjectStore {
       const track = this.track(trackId)
       if (!track || track.type !== 'midi') return
       const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0.25)
-      const clip: MidiClip = {
+      const clip: MidiClip = stampMidiAtBeat({
         id: uid('midi'),
         name,
-        startBeat: Math.max(0, startBeat),
+        startBeat: 0,
         durationBeats: clipEndForContent(end, this.project),
         notes: notes.map((note) => ({
           id: uid('note'),
@@ -6778,10 +6795,8 @@ export class ProjectStore {
           durationBeats: Math.max(0.05, note.durationBeats),
           velocity: Math.max(0.05, Math.min(1, note.velocity)),
         })),
-      }
-      track.midiClips.push(clip)
-      this.selectedTrackId = trackId
-      this.selectedMidiClipId = clip.id
+      }, startBeat)
+      this.commitArrangedClip(track.id, clip)
     })
   }
 
