@@ -3,14 +3,14 @@ import { CATALOG } from '../audio/plugins/catalog'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { SoundBrowser } from './SoundBrowser'
-import { TipButton } from './Hint'
 import { PatternSend, patternBeat } from './PatternSend'
 import { quickDragArmed } from './clipKeys'
 
-export type BrowserTab = 'sounds' | 'instruments' | 'loops' | 'patterns' | 'plugins' | 'clips'
+export type BrowserTab = 'sounds' | 'drums' | 'instruments' | 'loops' | 'patterns' | 'plugins' | 'clips'
 
 const TABS: { id: BrowserTab; label: string; hint: string }[] = [
   { id: 'sounds', label: 'Sounds', hint: 'Loops, one-shots, and instruments from the free library.' },
+  { id: 'drums', label: 'Drums', hint: 'Drum one-shots and kits.' },
   { id: 'instruments', label: 'Instruments', hint: 'Starter instruments. Drag one onto an instrument track.' },
   { id: 'loops', label: 'Loops', hint: 'Loops that follow the song tempo.' },
   { id: 'patterns', label: 'Patterns', hint: 'Patterns from the Beats rack. Drag one onto the playlist.' },
@@ -149,29 +149,25 @@ export function PlaylistBrowser({
     return rows.filter((row) => !needle || `${row.name} ${row.where}`.toLowerCase().includes(needle))
   }, [needle, project, trackId])
 
-  const soundLock = tab === 'instruments' ? 'instrument' : tab === 'loops' ? 'loop' : tab === 'sounds' ? 'all' : null
+  const soundLock = tab === 'instruments' ? 'instrument' : tab === 'loops' ? 'loop' : tab === 'drums' ? 'drum' : tab === 'sounds' ? 'all' : null
 
   return (
     <aside className="playlist-browser" data-playlist-browser="open" aria-label="Browser">
       <div className="browser-tabs">
-        {phone ? (
-          <select aria-label="Browser section" value={tab} onChange={(event) => onTab(event.target.value as BrowserTab)}>
-            {TABS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-          </select>
-        ) : (
-          TABS.map((item) => (
+        <div className="browser-chip-scroll" role="tablist" aria-label="Browser">
+          {TABS.map((item) => (
             <button key={item.id} type="button" className={tab === item.id ? 'on' : ''} title={item.hint} aria-pressed={tab === item.id} onClick={() => onTab(item.id)}>
               {item.label}
             </button>
-          ))
-        )}
-        <TipButton label="Hide" hint="Hide the browser. The playlist stays put." onClick={onClose} />
+          ))}
+        </div>
+        <button type="button" className="browser-close" title="Hide the browser. The playlist stays put." onClick={onClose}>Close</button>
       </div>
       {soundLock ? (
         <SoundBrowser
           store={store}
           engine={engine}
-          phone={false}
+          phone={phone}
           embedded
           lockType={soundLock === 'all' ? undefined : soundLock}
           onClose={onClose}
@@ -221,7 +217,7 @@ export function PlaylistBrowser({
                 <i style={{ background: pattern.color }} />
                 <strong>{pattern.name}</strong>
                 <span>{pattern.steps} steps</span>
-                <span>In song</span>
+                <span>Add</span>
               </button>
             ))}
             {tab === 'plugins' && plugins.map((plugin) => (
@@ -245,7 +241,7 @@ export function PlaylistBrowser({
                 }}
               >
                 <strong>{plugin.name}</strong>
-                <span>Insert</span>
+                <span>Add</span>
               </button>
             ))}
             {tab === 'clips' && clips.map((clip) => (

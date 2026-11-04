@@ -142,9 +142,9 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   z-index: auto;
   flex: 0 1 auto;
   width: 100%;
-  height: min(52dvh, 460px);
-  min-height: 280px;
-  max-height: min(52dvh, 460px);
+  height: min(42dvh, 380px);
+  min-height: 220px;
+  max-height: min(42dvh, 380px);
   overflow: hidden;
   pointer-events: auto;
   background: var(--panel);
@@ -171,24 +171,26 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
 
 .sound-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-height: 40px;
 }
 
 .sound-head h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 640;
 }
 
-.sound-head p,
-.sound-where,
 .sound-status {
-  margin: 2px 0 0;
+  margin: 0;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .sound-count {
@@ -197,28 +199,28 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   font-size: 12px;
 }
 
-.sound-status button {
-  min-height: 36px;
-  margin-left: 4px;
+.sound-status button,
+.sound-close,
+.sound-add,
+.sound-chips button {
+  min-height: 40px;
+  min-width: 40px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--panel-2);
   color: var(--text);
-  padding: 0 10px;
+  padding: 0 12px;
+  font-size: 13px;
 }
 
 .sound-filters {
   display: flex;
-  flex-wrap: wrap;
   gap: 6px;
 }
 
 .sound-filters input,
-.sound-filters select,
-.sound-filters button,
-.sound-actions button,
 .sound-head button {
-  min-height: 36px;
+  min-height: 40px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-2);
@@ -231,8 +233,16 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   min-width: 0;
 }
 
-.sound-filters button.on,
-.sound-actions button.on {
+.sound-chips {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow-x: auto;
+  flex: none;
+}
+
+.sound-chips button.on,
+.sound-row.is-playing {
   background: var(--accent-dim);
   color: var(--accent);
   border-color: transparent;
@@ -250,8 +260,9 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
 .sound-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 4px 0 2px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--bg);
@@ -260,34 +271,46 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
 .sound-copy {
   flex: 1;
   min-width: 0;
+  min-height: 40px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 0 6px;
 }
 
 .sound-copy strong,
-.sound-meta,
-.sound-info {
-  display: block;
+.sound-meta {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sound-copy strong { font-size: 14px; font-weight: 620; }
-.sound-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
-.sound-info { color: var(--faint); font-size: 12px; margin-top: 2px; }
-
-.sound-actions {
-  display: flex;
+.sound-copy strong { font-size: 13px; font-weight: 620; flex: 1; min-width: 0; }
+.sound-meta { color: var(--muted); font-size: 11px; flex: none; }
+.sound-live {
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--accent, #73c48f);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #73c48f) 35%, transparent);
+  align-self: center;
   flex: none;
-  gap: 4px;
 }
+.sound-row.is-playing .sound-meta { color: var(--accent, #73c48f); font-weight: 700; }
+
+.sound-add { flex: none; border-radius: 8px; }
 
 .sound-copy[draggable="true"] { cursor: grab; }
 
 .shell.phone .sound-filters input,
-.shell.phone .sound-filters select,
-.shell.phone .sound-filters button,
-.shell.phone .sound-actions button,
-.shell.phone .sound-head button {
+.shell.phone .sound-chips button,
+.shell.phone .sound-add,
+.shell.phone .sound-close,
+.shell.phone .sound-copy {
   min-height: 44px;
 }
 

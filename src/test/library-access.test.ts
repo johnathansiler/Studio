@@ -194,8 +194,8 @@ describe('library access', () => {
     expect(phone).toContain('sound-dismiss')
     expect(phone).not.toContain('sound-resize')
     expect(phone).toContain('Close')
-    expect(phone).toContain('Load. Load it on this track and play a note.')
-    expect(phone).toContain('>Drums</option>')
+    expect(phone).toContain('Add. Load it on this track and play a note.')
+    expect(phone).toContain('>Drums<')
     expect(phone).not.toContain('role="dialog"')
   })
 

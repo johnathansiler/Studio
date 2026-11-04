@@ -237,6 +237,8 @@ function SessionBody({
         {browserOn && (
           <SessionBrowser
             width={browserW}
+            store={store}
+            engine={engine}
             onResize={setBrowserW}
             onClose={phone ? () => setBrowserOn(false) : undefined}
             onPointerDrop={(drag, point) => {
