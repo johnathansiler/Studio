@@ -95,8 +95,10 @@ describe('sampler and looper', () => {
     store.chopSample(track.id, sampler.id, 'grid')
     expect(store.track(track.id)!.plugins.find((plugin) => plugin.id === sampler.id)!.sampler!.slices).toHaveLength(16)
     store.exportSlices(track.id, sampler.id)
-    const midi = store.project.tracks.find((item) => item.type === 'midi')!
-    expect(midi.midiClips.some((clip) => clip.name === 'Slices' && clip.notes.length === 16)).toBe(true)
+    const slices = store.project.tracks.flatMap((item) => item.midiClips).find((clip) => clip.name === 'Slices')
+    expect(slices?.notes).toHaveLength(16)
+    expect(slices?.startBeat).toBe(0)
+    expect(store.project.tracks.find((item) => item.midiClips.some((clip) => clip.name === 'Slices'))?.type).toBe('midi')
     const saved = JSON.parse(JSON.stringify(store.project)) as { tracks: { plugins: PluginInstance[] }[] }
     const savedSampler = saved.tracks[0].plugins.find((plugin) => plugin.pluginId === 'sampler')
     expect(savedSampler?.sampler?.bufferId).toBeTruthy()

@@ -172,9 +172,10 @@ describe('slot handles, slices, and overdub', () => {
     store.chopSample(track.id, sampler.id, 'grid')
     expect(store.track(track.id)!.plugins.find((plugin) => plugin.id === sampler.id)!.sampler!.slices).toHaveLength(16)
     store.exportSlices(track.id, sampler.id, 4)
-    const midi = store.project.tracks.find((item) => item.type === 'midi')!
-    expect(midi.midiClips.some((clip) => clip.name === 'Slices' && clip.notes.length === 16)).toBe(true)
-    expect(store.toasts.some((toast) => toast.text === 'MIDI clip placed on Keys at bar 2')).toBe(true)
+    const host = store.project.tracks.find((item) => item.midiClips.some((clip) => clip.name === 'Slices'))!
+    expect(host.type).toBe('midi')
+    expect(host.midiClips.some((clip) => clip.name === 'Slices' && clip.notes.length === 16 && clip.startBeat === 4)).toBe(true)
+    expect(store.toasts.some((toast) => toast.text === `MIDI clip placed on ${host.name} at bar 2`)).toBe(true)
     const click = new Float32Array(40)
     click[3] = 0.02
     expect(Math.max(...scaledPeaks(click, 40).map((bar) => bar.max))).toBeCloseTo(1)

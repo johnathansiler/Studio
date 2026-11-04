@@ -1208,8 +1208,16 @@ body:not(:has(.shell.phone)) .action-sheet {
 
 .shell .rack-bar button.on,
 .shell .rack-lengths button.on,
-.shell .rack-extras button.on {
-  box-shadow: var(--pressed), var(--glow);
+.shell .rack-extras button.on,
+.shell .rack-mode button[aria-pressed='true'],
+.shell .rack-bar button[aria-pressed='true'],
+.shell .rack-lengths button[aria-pressed='true'] {
+  background-color: var(--accent, #73c48f);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.36), rgba(255, 255, 255, 0.08) 42%, rgba(0, 0, 0, 0.12));
+  color: var(--accent-ink, #102117);
+  border-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 0 0 1px color-mix(in srgb, var(--accent, #73c48f) 80%, white), 0 0 12px color-mix(in srgb, var(--accent, #73c48f) 55%, transparent);
+  opacity: 1;
 }
 
 .shell .me-cell:not(.on) {

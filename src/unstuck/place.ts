@@ -27,15 +27,14 @@ export function nameHasRole(name: string, label: string) {
   return unstuckNamed(name) && name.includes(label)
 }
 
-export function applyUnstuckDraft(project: Project, draft: SongDraft, selectedTrackId?: string | null): { trackId: string | null; clipId: string | null } {
+export function applyUnstuckDraft(project: Project, draft: SongDraft): { trackId: string | null; clipId: string | null } {
   if (draft.tempo) project.tempo = draft.tempo
   if (draft.key != null && draft.scaleId) applyKey(project, draft.key, draft.scaleId)
   let trackId: string | null = null
   let clipId: string | null = null
   const labels = new Set((draft.replace?.roles ?? []).map((role) => roleLabel(role)))
-  const single = draft.tracks.length === 1
   for (const spec of draft.tracks) {
-    const track = ensureTrack(project, spec, single ? selectedTrackId : null)
+    const track = ensureTrack(project, spec)
     if (draft.replace && labels.has(roleLabel(spec.role))) {
       exciseRole(track, roleLabel(spec.role), new Set(spec.clips.map((clip) => clip.name)), draft.replace.startBeat, draft.replace.endBeat)
     }
@@ -102,13 +101,8 @@ function applyKey(project: Project, key: number, scaleId: string) {
   project.scale = { ...scale, root: key, scale: chosen.scale, library: id }
 }
 
-function ensureTrack(project: Project, spec: SongDraft['tracks'][number], selectedTrackId?: string | null) {
+function ensureTrack(project: Project, spec: SongDraft['tracks'][number]) {
   const meta = roleById(spec.role)
-  const selected = selectedTrackId ? project.tracks.find((item) => item.id === selectedTrackId && item.type === 'midi') : null
-  if (selected) {
-    claim(selected, spec, !selected.instrument || selected.instrument === 'none', meta.instrument)
-    return selected
-  }
   let track = project.tracks.find((item) => item.type === 'midi' && item.name === spec.name)
   const fresh = !track
   if (!track) {

@@ -21,7 +21,7 @@ export function stampClipAtPlayhead<T extends AudioClip | MidiClip>(clip: T, pla
   if (isAudioArrangeClip(clip)) {
     return { ...clip, startSample: Math.round(playhead.sample) }
   }
-  return stampMidiAtBeat(clip, playhead.beat)
+  return stampMidiAtBeat(clip, playhead.beat) as T
 }
 
 /** MIDI sibling of the sample stamp. The beat is exact: no grid snap. Notes stay relative. */

@@ -4045,7 +4045,7 @@ export class ProjectStore {
   /** Write one Unstuck action. Locked parts and everything outside the span stay put. Undo restores it. */
   writeUnstuck(draft: SongDraft) {
     this.mutate(() => {
-      const placed = applyUnstuckDraft(this.project, draft, this.selectedTrackId)
+      const placed = applyUnstuckDraft(this.project, draft)
       if (placed.trackId) this.selectedTrackId = placed.trackId
       if (placed.clipId) {
         this.selectedMidiClipId = placed.clipId
