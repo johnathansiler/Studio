@@ -18,7 +18,7 @@ import { beatHitForTrack, beatKeyAt, beatOctaveHasPads, beatPageLabel, isBeatMac
 import { typingTarget } from '../state/history'
 import type { ProjectStore } from '../state/store'
 import { octaveName } from './kit/controls'
-import { notifyKeyboard } from './keyboardStage'
+import { hidePianoRoll, notifyKeyboard } from './keyboardStage'
 import { miniPads, padGridColumn, padLabel } from './miniKeys'
 
 /** What a dock key should play. A beat-machine key becomes that pad's note. */
@@ -135,7 +135,10 @@ export function KeyboardToggle({ store, engine }: { store: ProjectStore; engine:
       onClick={() => {
         engine.unlock()
         const next = !store.keyboardMidi
-        if (next) store.clearKeyboardReturn()
+        if (next) {
+          store.clearKeyboardReturn()
+          hidePianoRoll()
+        }
         store.setKeyboardMidi(next)
         notifyKeyboard(next)
       }}

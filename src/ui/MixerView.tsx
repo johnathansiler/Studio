@@ -12,6 +12,7 @@ import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
 import { InsertList, RouteFields, SendList } from './PluginSheet'
 import { TouchSlider } from './kit/controls'
+import { meterFill } from './levels'
 import { TrackPresence } from './presenceMarks'
 import { SecondaryRack, type SecondaryItem } from './SecondaryRack'
 
@@ -446,7 +447,7 @@ function Meter({ engine, id }: { engine: AudioEngine; id: string }) {
     let timer = 0
     const tick = () => {
       const levels = engine.levels()
-      const value = Math.min(1, (id === 'master' ? levels.master : levels.tracks[id] || 0) * 3.2)
+      const value = meterFill(id === 'master' ? levels.master : levels.tracks[id] || 0)
       setLevel((prev) => (Math.abs(prev - value) < 0.03 ? prev : value))
       timer = window.setTimeout(tick, 80)
     }

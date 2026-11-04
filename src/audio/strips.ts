@@ -47,6 +47,8 @@ export function createStrip(ctx: BaseAudioContext): StripNodes {
   analyser.fftSize = 256
   analyser.smoothingTimeConstant = 0.35
   const mute = ctx.createGain()
+  const post = ctx.createGain()
+  post.gain.value = 1
 
   input.connect(eqLow)
   eqLow.connect(eqMid)
@@ -63,9 +65,11 @@ export function createStrip(ctx: BaseAudioContext): StripNodes {
   revSend.connect(convolver)
   convolver.connect(revWet)
   revWet.connect(pan)
+  // Post-fader and post-mute, so the mixer strip and the arrange header read the same signal and a muted track stays silent.
   pan.connect(fader)
-  fader.connect(analyser)
-  analyser.connect(mute)
+  fader.connect(mute)
+  mute.connect(analyser)
+  analyser.connect(post)
 
   delayWet.gain.value = 0
   delaySend.gain.value = 0
@@ -89,7 +93,7 @@ export function createStrip(ctx: BaseAudioContext): StripNodes {
     fader,
     mute,
     analyser,
-    output: mute,
+    output: post,
     irDecay: 0,
   }
 }

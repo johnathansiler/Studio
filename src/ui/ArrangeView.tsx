@@ -15,6 +15,7 @@ import { gridBackground, gridPaint } from '../model/gridLines'
 import { activeGridBeats, edgeFromPointer, lengthReadout, moveFromPointer, positionReadout, subdivisionFor } from '../model/snapGrid'
 import { quartersPerBar } from '../model/time'
 import { editorForGesture } from '../model/editorOpen'
+import { meterFill } from './levels'
 import { patternToMidiNotes } from '../model/patternMidi'
 import { panelChoice, rememberPanel } from './panelMemory'
 import { arrangementEndSample, gridMarks, mapIsLinear, projectBeatSample, projectSampleBeat, pxAtBeat, snapSampleToMap } from '../model/tempoMap'
@@ -117,6 +118,7 @@ export function ArrangeView({
   pxRef.current = px
   const [position, setPosition] = useState(engine.positionSamples)
   const [levels, setLevels] = useState<Record<string, number>>({})
+  const [midiOn, setMidiOn] = useState<Record<string, boolean>>({})
   const [nudge, setNudge] = useState<{ audio: Record<string, number>; midi: Record<string, number>; pattern: Record<string, number> } | null>(null)
   const [patternMenu, setPatternMenu] = useState<{ x: number; y: number } | null>(null)
   const form = useFormFactor()
@@ -146,9 +148,11 @@ export function ArrangeView({
     const tick = () => {
       const next = engine.levels?.()
       if (next) setLevels(next.tracks)
-      timer = window.setTimeout(tick, 120)
+      const midi = engine.midiActivity?.()
+      if (midi) setMidiOn(midi)
+      timer = window.setTimeout(tick, 40)
     }
-    timer = window.setTimeout(tick, 120)
+    timer = window.setTimeout(tick, 40)
     return () => window.clearTimeout(timer)
   }, [engine])
   useEffect(() => {
@@ -475,11 +479,12 @@ export function ArrangeView({
     if (document.activeElement !== node) node.focus({ preventScroll: true })
   }
 
-  function revealTrack(trackId: string, gesture: 'select-track' | 'tap-clip') {
+  function revealTrack(trackId: string, gesture: 'select-track' | 'tap-clip', clipId?: string) {
     const track = project.tracks.find((item) => item.id === trackId)
     const surface = editorForGesture(gesture, track?.type ?? '', track)
     if (surface === 'pads') onOpenBeatMachine?.(trackId)
     else if (surface === 'keyboard') onOpenKeyboard?.(trackId)
+    else if (surface === 'piano') onOpenPiano(trackId, clipId)
   }
 
   function moveSelection(event: ReactPointerEvent, kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
@@ -576,7 +581,7 @@ export function ArrangeView({
         const retargeted = !!host && [...origins.values()].some((item) => item.trackId !== host)
         if (!moved && !retargeted) {
           if (additive && wasIn) store.selectClip(trackId, clipId, kind === 'midi', false, true)
-          revealTrack(trackId, 'tap-clip')
+          revealTrack(trackId, 'tap-clip', kind === 'midi' ? clipId : undefined)
           return
         }
         if (kind === 'audio') {
@@ -750,7 +755,18 @@ export function ArrangeView({
                   <span className="mini-word">Arm</span>
                 </TipButton>
               )}
-              <span className="mini-meter" aria-hidden><i style={{ transform: `scaleX(${Math.min(1, (levels[track.id] ?? 0) * 3)})` }} /></span>
+              <span className="track-live" data-track-live={track.id}>
+                <i
+                  className="midi-activity"
+                  data-midi-activity={track.id}
+                  data-lit={midiOn[track.id] ? '1' : '0'}
+                  role="img"
+                  aria-label={midiOn[track.id] ? 'MIDI activity. Notes are playing.' : 'MIDI activity. Idle.'}
+                />
+                <span className="mini-meter" data-arrange-meter={track.id} aria-hidden>
+                  <i style={{ transform: `scaleX(${meterFill(levels[track.id] ?? 0)})` }} />
+                </span>
+              </span>
               <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); setTrackSheet(track.id) }}>
                 ⋮
               </TipButton>
@@ -877,7 +893,7 @@ export function ArrangeView({
                 />
               ))}
               {track.type === 'midi' && track.midiClips.every((clip) => clip.slotOnly) && (
-                <button type="button" className="lane-add" aria-label="Add clip" onClick={() => { store.addMidiClip(track.id, 0); revealTrack(track.id, 'tap-clip') }}>+</button>
+                <button type="button" className="lane-add" aria-label="Add clip" onClick={() => { store.addMidiClip(track.id, 0); revealTrack(track.id, 'tap-clip', store.selectedMidiClipId ?? undefined) }}>+</button>
               )}
               <AutomationOverlay store={store} trackId={track.id} px={px} tool={tool} />
               {track.midiClips.filter((clip) => !clip.slotOnly && clip.scene == null).map((clip) => {
@@ -926,7 +942,7 @@ export function ArrangeView({
                       event.preventDefault()
                       event.stopPropagation()
                       store.selectClip(track.id, clip.id, true, false)
-                      revealTrack(track.id, 'tap-clip')
+                      revealTrack(track.id, 'tap-clip', clip.id)
                     }}
                   >
                     <em>{clip.name}</em>

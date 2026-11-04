@@ -430,21 +430,33 @@ export function PadsPanel({
           <div className="mpc-brand">
             <strong>CueHarbor</strong>
             <span>Beat Machine</span>
-            <button
-              type="button"
-              className="mpc-keyboard"
-              data-beat-keyboard={trackId}
-              onClick={() => {
-                engine.unlock()
-                if (onKeyboard) onKeyboard()
-                else {
-                  store.openKeyboardForPads(trackId)
-                  notifyKeyboard(true)
-                }
-              }}
-            >
-              Keyboard
-            </button>
+            <div className="mpc-actions">
+              <button
+                type="button"
+                className="mpc-keyboard"
+                data-beat-keyboard={trackId}
+                onClick={() => {
+                  engine.unlock()
+                  if (onKeyboard) onKeyboard()
+                  else {
+                    store.openKeyboardForPads(trackId)
+                    notifyKeyboard(true)
+                  }
+                }}
+              >
+                Keyboard
+              </button>
+              <button
+                type="button"
+                className="mpc-close"
+                data-beat-close={trackId}
+                title="Close Beat Machine. The track keeps the instrument."
+                aria-label="Close Beat Machine. The track keeps the instrument."
+                onClick={() => store.closePads()}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </section>
 
@@ -489,7 +501,6 @@ export function PadsPanel({
               <button type="button" className="hw-key ch-tab" title="Open this clip in the piano roll." onClick={edit}>Roll</button>
               <button type="button" className={`hw-key ch-tab${store.project.countIn ? ' on' : ''}`} aria-pressed={store.project.countIn} title={`Count-in is ${countInCaption(countInBarsOf(store.project))}. Tap for off, one bar, or two bars.`} onClick={() => store.cycleCountIn()}>Count</button>
               <button type="button" className={`hw-key ch-tab${store.project.metronomeEnabled ? ' on' : ''}`} aria-pressed={store.project.metronomeEnabled} title="Metronome while the pads record." onClick={() => store.toggle('metronomeEnabled')}>Click</button>
-              <button type="button" className="hw-key ch-tab mpc-close" title="Close Beat Machine. The track keeps the instrument." aria-label="Close Beat Machine. The track keeps the instrument." onClick={() => store.closePads()}>Close</button>
             </div>
           </div>
 

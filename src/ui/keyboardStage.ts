@@ -1,9 +1,31 @@
 import type { FormFactor } from './form'
 
 export const PIANO_HISTORY = 'piano'
+export const PADS_HISTORY = 'pads'
+
+export type EditorHistoryMark = typeof PIANO_HISTORY | typeof PADS_HISTORY
+
+export function historyMark(state: unknown): string | null {
+  if (!state || typeof state !== 'object') return null
+  const mark = (state as { cueharbor?: unknown }).cueharbor
+  return typeof mark === 'string' ? mark : null
+}
+
+export function isHistoryMark(state: unknown, mark: string) {
+  return historyMark(state) === mark
+}
 
 export function isPianoHistory(state: unknown) {
-  return !!state && typeof state === 'object' && (state as { cueharbor?: string }).cueharbor === PIANO_HISTORY
+  return isHistoryMark(state, PIANO_HISTORY)
+}
+
+export function isPadsHistory(state: unknown) {
+  return isHistoryMark(state, PADS_HISTORY)
+}
+
+export function isEditorHistory(state: unknown) {
+  const mark = historyMark(state)
+  return mark === PIANO_HISTORY || mark === PADS_HISTORY
 }
 
 /** Push one history entry so the Android back gesture closes the piano roll. */
@@ -11,6 +33,17 @@ export function markPianoHistory(history: { state: unknown; pushState: (data: un
   if (isPianoHistory(history.state)) return false
   history.pushState({ cueharbor: PIANO_HISTORY }, '')
   return true
+}
+
+/**
+ * Opening one editor replaces the other's history entry.
+ * Closing the last editor goes back. Staying put does nothing.
+ */
+export function editorHistoryStep(current: EditorHistoryMark | null, next: EditorHistoryMark | null): 'keep' | 'push' | 'replace' | 'back' {
+  if (current === next) return 'keep'
+  if (next && current) return 'replace'
+  if (next) return 'push'
+  return 'back'
 }
 
 /** locked: the screen itself turned. shell: the browser could not lock, so the whole app shell turns. dock: already landscape, or not a phone. */
@@ -97,6 +130,17 @@ export function setKeyboardPresenter(fn: ((on: boolean) => void) | null) {
 
 export function notifyKeyboard(on: boolean) {
   presenter?.(on)
+}
+
+let pianoHider: (() => void) | null = null
+
+/** The shell registers this so opening the small keyboard can close the piano roll in the same click. */
+export function setPianoHider(fn: (() => void) | null) {
+  pianoHider = fn
+}
+
+export function hidePianoRoll() {
+  pianoHider?.()
 }
 
 export function browserLandscapeHost(root: HTMLElement | null, form: FormFactor, portrait: boolean): LandscapeHost {

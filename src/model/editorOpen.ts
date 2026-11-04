@@ -9,14 +9,33 @@ export interface GestureTrack {
 }
 
 /**
- * Selecting an instrument track, or tapping a MIDI clip, opens the one-octave keyboard.
- * A Beat Machine track opens its pad panel instead. Edit Notes opens the piano roll.
+ * A track header opens the one-octave keyboard. A Beat Machine header opens its pad panel.
+ * Tapping a MIDI clip, including a clip on a Beat Machine track, opens the piano roll for that clip.
+ * Edit Notes opens the piano roll. Audio clips have no notes, so a tap leaves the editors alone.
  */
 export function editorForGesture(gesture: EditorGesture, trackType: string, track?: GestureTrack | null): EditorSurface {
-  if (gesture === 'edit-notes') return trackType === 'midi' ? 'piano' : 'none'
-  if (trackType === 'midi' && (gesture === 'select-track' || gesture === 'tap-clip')) {
+  if (gesture === 'edit-notes' || gesture === 'tap-clip') return trackType === 'midi' ? 'piano' : 'none'
+  if (trackType === 'midi' && gesture === 'select-track') {
     if (track && showsOpenBeatMachine({ type: 'midi', instrument: track.instrument, plugins: track.plugins })) return 'pads'
     return 'keyboard'
   }
   return 'none'
+}
+
+/** The one-octave keyboard and the piano roll never share the screen. */
+export function noteEditorsAfterOpen(open: 'keyboard' | 'piano'): { keyboard: boolean; piano: boolean } {
+  if (open === 'keyboard') return { keyboard: true, piano: false }
+  return { keyboard: false, piano: true }
+}
+
+/** Close the small keyboard so the piano roll can take the screen, without bouncing back to Beat Machine. */
+export function releaseKeyboardForPiano(store: {
+  keyboardMidi: boolean
+  clearKeyboardReturn(): void
+  setKeyboardMidi(on: boolean): void
+}): boolean {
+  if (!store.keyboardMidi) return false
+  store.clearKeyboardReturn()
+  store.setKeyboardMidi(false)
+  return true
 }

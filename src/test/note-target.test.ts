@@ -71,12 +71,13 @@ describe('selected track notes', () => {
 })
 
 describe('keyboard before the piano roll', () => {
-  it('opens the dock from a track or a clip, and the piano roll from Edit Notes', () => {
+  it('opens the dock from a track header, and the piano roll from a clip or Edit Notes', () => {
     expect(editorForGesture('select-track', 'midi')).toBe('keyboard')
-    expect(editorForGesture('tap-clip', 'midi')).toBe('keyboard')
+    expect(editorForGesture('tap-clip', 'midi')).toBe('piano')
     expect(editorForGesture('select-track', 'midi', { instrument: 'synth' })).toBe('keyboard')
     expect(editorForGesture('select-track', 'midi', { instrument: 'pads' })).toBe('pads')
-    expect(editorForGesture('tap-clip', 'midi', { instrument: 'drum-machine' })).toBe('pads')
+    expect(editorForGesture('tap-clip', 'midi', { instrument: 'drum-machine' })).toBe('piano')
+    expect(editorForGesture('tap-clip', 'midi', { instrument: 'pads' })).toBe('piano')
     expect(editorForGesture('edit-notes', 'midi')).toBe('piano')
     expect(editorForGesture('select-track', 'audio')).toBe('none')
     expect(editorForGesture('tap-clip', 'audio')).toBe('none')

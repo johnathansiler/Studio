@@ -24,7 +24,7 @@ import { linearResample } from './model/wav'
 import { isSilentTake } from './model/media'
 import { applyTransportLaunch, recordedLength } from './model/launch'
 import { shouldCountIn } from './model/sessionInteract'
-import { editorForGesture } from './model/editorOpen'
+import { editorForGesture, releaseKeyboardForPiano } from './model/editorOpen'
 import { armedRecordPlan, homeSample, playPress, playStartsCapture, recordPress, stopPress } from './model/transport'
 import { keepLandscapeAfterClose } from './ui/keyboardStage'
 import { countInAt, meterAtSample, projectSampleBeat, tempoAtSample } from './model/tempoMap'
@@ -78,7 +78,7 @@ import { deletesSelection } from './ui/clipKeys'
 import { historyCommand, typingTarget } from './state/history'
 import { claimComputerKey } from './model/keyboardPlay'
 import { KeyboardDock } from './ui/KeyboardDock'
-import { browserLandscapeHost, dismissKeyboard, isPianoHistory, markPianoHistory, notifyKeyboard, presentKeyboard, setKeyboardPresenter, type KeyboardPresentation } from './ui/keyboardStage'
+import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark, notifyKeyboard, PADS_HISTORY, PIANO_HISTORY, presentKeyboard, setKeyboardPresenter, setPianoHider, type EditorHistoryMark, type KeyboardPresentation } from './ui/keyboardStage'
 import { HintBubble, TipButton } from './ui/Hint'
 import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
@@ -226,6 +226,7 @@ export function App() {
   const [keysLandscape, setKeysLandscape] = useState(false)
   const keysMode = useRef<KeyboardPresentation>('dock')
   const keysFromClick = useRef(false)
+  const editorHistory = useRef<EditorHistoryMark | null>(null)
   const recordReady = useRef(false)
   const holdLandscape = useRef(false)
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
@@ -840,10 +841,12 @@ export function App() {
           setMenuOpen(false)
           return
         }
-        if (editorPanel.current === 'piano') {
+        if (editorPanel.current === 'piano' || editorPanel.current === 'pads') {
           event.preventDefault()
-          if (isPianoHistory(history.state)) history.back()
-          else closePiano()
+          const mark = editorPanel.current === 'piano' ? PIANO_HISTORY : PADS_HISTORY
+          if (isHistoryMark(history.state, mark)) history.back()
+          else if (editorPanel.current === 'piano') closePiano()
+          else store.closePads()
           return
         }
         setHelp(false)
@@ -1567,20 +1570,25 @@ async function importDropped(files: FileList) {
     store.closePiano()
   }
 
+  const shownEditor: EditorHistoryMark | null = panel === 'piano' ? PIANO_HISTORY : panel === 'pads' ? PADS_HISTORY : null
   useEffect(() => {
-    if (panel !== 'piano') return
-    markPianoHistory(history)
-    let popped = false
+    const previous = editorHistory.current
+    const step = editorHistoryStep(previous, shownEditor)
+    editorHistory.current = shownEditor
+    if (step === 'push' && shownEditor) history.pushState({ cueharbor: shownEditor }, '')
+    else if (step === 'replace' && shownEditor) {
+      if (isHistoryMark(history.state, previous ?? '')) history.replaceState({ cueharbor: shownEditor }, '')
+      else history.pushState({ cueharbor: shownEditor }, '')
+    } else if (step === 'back' && previous && isHistoryMark(history.state, previous)) history.back()
+    if (!shownEditor) return
     const onPop = () => {
-      popped = true
-      closePiano()
+      editorHistory.current = null
+      if (shownEditor === PIANO_HISTORY) closePiano()
+      else store.closePads()
     }
     window.addEventListener('popstate', onPop)
-    return () => {
-      window.removeEventListener('popstate', onPop)
-      if (!popped && isPianoHistory(history.state)) history.back()
-    }
-  }, [panel === 'piano'])
+    return () => window.removeEventListener('popstate', onPop)
+  }, [shownEditor])
 
   useEffect(() => {
     const orient = typeof screen === 'undefined' ? undefined : screen.orientation
@@ -1625,6 +1633,11 @@ async function importDropped(files: FileList) {
     })
     return () => setKeyboardPresenter(null)
   }, [form])
+
+  useEffect(() => {
+    setPianoHider(() => setPianoOpen(false))
+    return () => setPianoHider(null)
+  }, [])
 
   useEffect(() => {
     if (keysFromClick.current) {
@@ -1689,6 +1702,7 @@ async function importDropped(files: FileList) {
   }
 
   function openPiano(trackId: string, clipId?: string) {
+    if (releaseKeyboardForPiano(store)) notifyKeyboard(false)
     store.closeScaler()
     store.closePads()
     const project = store.project
