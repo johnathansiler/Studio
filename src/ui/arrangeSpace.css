@@ -1,7 +1,7 @@
 /* Session dock stays out of Arrange until the user opens it. Clip edges stay grabbable. */
 
 .playlist-frame { flex: 1; min-height: 0; display: flex; position: relative; }
-.playlist-frame.browser-open { display: grid; grid-template-columns: var(--browser, 300px) 8px minmax(0, 1fr); }
+.playlist-frame.browser-open { display: flex; }
 .playlist-browser {
   min-width: 0; min-height: 0; display: flex; flex-direction: column;
   background: #121814; border-right: 1px solid var(--line); overflow: hidden;
@@ -31,10 +31,9 @@
 .browser-row strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browser-row span, .browser-body p { color: var(--muted); font-size: 12px; }
 .shell.phone .playlist-frame.browser-open,
-.shell.fold .playlist-frame.browser-open { display: block; }
+.shell.fold .playlist-frame.browser-open { display: flex; }
 .shell.phone .playlist-browser,
-.shell.fold .playlist-browser { position: absolute; z-index: 8; top: 0; bottom: 0; left: 0; width: min(360px, 88vw); box-shadow: 8px 0 24px rgba(0,0,0,.45); }
-.browser-scrim { position: absolute; inset: 0; z-index: 7; border: 0; padding: 0; background: rgba(0, 0, 0, 0.38); }
+.shell.fold .playlist-browser { position: relative; z-index: auto; width: var(--browser, 66%); max-width: 70%; box-shadow: none; }
 .shell.fold .arrange { grid-template-columns: 220px minmax(0, 1fr); --lane-h: 76px; }
 .shell.fold .pl-head { flex-wrap: nowrap; height: 100%; align-items: center; }
 .shell.fold .track-live { flex: none; }

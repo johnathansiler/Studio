@@ -262,6 +262,57 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   min-width: 220px;
 }
 
+/* The filter stays an anchored menu. It sits above the docked browser (360) and under the view tabs (480). */
+.anchored-menu.sound-filter-menu {
+  z-index: calc(var(--view-tabs-z, 480) - 20);
+}
+
+.sound-wave {
+  position: absolute;
+  inset: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  pointer-events: none;
+}
+
+.sound-wave > i {
+  flex: 1 1 0;
+  min-width: 1px;
+  background: color-mix(in srgb, var(--accent, #73c48f) 55%, transparent);
+  border-radius: 1px;
+}
+
+.sound-shade,
+.sound-head,
+.sound-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.sound-shade {
+  left: 0;
+  background: color-mix(in srgb, var(--accent, #73c48f) 22%, transparent);
+}
+
+.sound-head {
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ink, #f4f7f2);
+}
+
+.sound-bar {
+  width: 1px;
+  background: color-mix(in srgb, var(--ink, #f4f7f2) 45%, transparent);
+}
+
+/* The menu is portaled to the body. It has to sit above the browser panel
+   (overlay or dock) and stay under the view tabs. */
+.anchored-menu.sound-filter-menu {
+  z-index: calc(var(--view-tabs-z, 480) - 20);
+}
+
 .sound-filter-menu .filter-label:first-child { margin-top: 0; }
 .sound-filter-menu .filter-label {
   margin: 8px 2px 0;
@@ -336,6 +387,7 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
 }
 
 .sound-copy {
+  position: relative;
   flex: 1;
   min-width: 0;
   min-height: 40px;

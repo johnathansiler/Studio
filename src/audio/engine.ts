@@ -4150,16 +4150,47 @@ export class AudioEngine {
     this.previewStops = stops
   }
 
+  private previewClock: { start: number; duration: number; loop: boolean } | null = null
+
   stopPreview() {
     for (const src of this.previewStops) {
       try { src.stop() } catch { /* already stopped */ }
       try { src.disconnect() } catch { /* already disconnected */ }
     }
     this.previewStops = []
+    this.previewClock = null
+  }
+
+  /** Playhead across the current preview, from the audio clock. Loops wrap. */
+  previewHead(now?: number) {
+    const clock = this.previewClock
+    const ctx = this.ctx
+    if (!clock || !ctx || !(clock.duration > 0)) return null
+    const time = now ?? ctx.currentTime
+    const elapsed = Math.max(0, time - clock.start)
+    const wrapped = clock.loop ? elapsed % clock.duration : Math.min(elapsed, clock.duration)
+    return {
+      ratio: wrapped / clock.duration,
+      loop: clock.loop,
+      duration: clock.duration,
+      done: !clock.loop && elapsed >= clock.duration - 0.001,
+    }
+  }
+
+  /** Decode with the playback context so a second AudioContext does not suspend it. */
+  async decodeLibrary(bytes: ArrayBuffer) {
+    const ctx = this.unlock()
+    if (ctx.state !== 'running') await ctx.resume()
+    const decoded = await ctx.decodeAudioData(bytes.slice(0))
+    if (ctx.state !== 'running') await ctx.resume()
+    return {
+      sampleRate: decoded.sampleRate,
+      channels: Array.from({ length: decoded.numberOfChannels }, (_, index) => decoded.getChannelData(index).slice()),
+    }
   }
 
   /** Speaker-only audition. The cue and the arrangement are left alone. */
-  previewPcm(channels: Float32Array[], sampleRate?: number) {
+  previewPcm(channels: Float32Array[], sampleRate?: number, loop = false) {
     this.stopPreview()
     const ctx = this.unlock()
     const out = this.speakerGain
@@ -4175,7 +4206,8 @@ export class AudioEngine {
     const src = ctx.createBufferSource()
     const gain = ctx.createGain()
     src.buffer = buffer
-    gain.gain.value = 0.9
+    src.loop = loop
+    gain.gain.value = 0.8
     src.connect(gain)
     gain.connect(out)
     const stop = () => {
@@ -4188,9 +4220,15 @@ export class AudioEngine {
     src.onended = () => {
       disconnect()
       this.previewStops = this.previewStops.filter((item) => item.stop !== stop)
+      if (!loop) this.previewClock = null
     }
     this.previewStops = [{ stop, disconnect }]
-    src.start()
+    const arm = () => {
+      this.previewClock = { start: ctx.currentTime, duration: buffer.duration, loop }
+      try { src.start() } catch { /* context closed */ }
+    }
+    if (ctx.state === 'running') arm()
+    else void ctx.resume().then(() => { if (this.previewStops.some((item) => item.stop === stop)) arm() })
   }
 
   private previewTone(ctx: AudioContext, bus: GainNode, pitch: number, cents: number, when: number, dur: number, velocity: number, stops: Stoppable[]) {

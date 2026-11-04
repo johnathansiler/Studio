@@ -135,6 +135,7 @@ import { createEmptyProject, defaultInsert, defaultRecord, makeTrack, uid, TRACK
 import type { AudioAsset, AudioClip, AutomationWriteMode, ClipStretch, FollowAction, InsertType, LaunchMode, LaunchQuant, LiveCaptureSettings, MidiClip, MidiEditorPrefs, MidiFx, MidiFxKind, MidiMapEntry, MidiNote, MidiOutSettings, MixGroup, PluginInstance, Project, RecordSettings, SectionKind, TakeLane, Track, TrackInstrument } from '../model/types'
 import { createSection, deleteSectionContents, duplicateSectionContents, moveSectionContents, resizeSection as setSectionLength, sectionKind } from '../model/sections'
 import { adaptProjectTempo, clipTempo, conformStretchPatch } from '../model/smartTempo'
+import { isAudioArrangeClip, readPlayhead, stampClipAtPlayhead } from '../model/playheadPlace'
 import { downbeatAt, projectBeatSample, projectSampleBeat, snapSampleToMap, tempoAtSample } from '../model/tempoMap'
 import { beatsToSamples, countInBarsOf, cycleCountInBars, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
@@ -2990,6 +2991,53 @@ export class ProjectStore {
     })
   }
 
+  /**
+   * Put a new clip on Arrange at the playhead, with no extra snap.
+   * Audio uses the given track when it is audio, otherwise the selected audio
+   * track, otherwise a new audio track named after the clip.
+   * MIDI uses the given track when it is MIDI, otherwise the selected MIDI track.
+   */
+  placeClipAtPlayhead(trackId: string | null, clip: AudioClip | MidiClip, playheadSample: number) {
+    const playhead = readPlayhead(this.project, playheadSample)
+    const placed = stampClipAtPlayhead(clip, playhead)
+    this.mutate(() => {
+      if (isAudioArrangeClip(placed)) {
+        let host = trackId ? this.track(trackId) : null
+        if (host?.type !== 'audio') host = null
+        if (!host && this.selectedTrackId) {
+          const selected = this.track(this.selectedTrackId)
+          if (selected?.type === 'audio') host = selected
+        }
+        if (!host) {
+          const made = tracksFor({ kind: 'audio', count: 1, instrument: 'none', input: 'mic', channels: 1, armed: false }, this.project.tracks)
+          const created = made[0]
+          if (!created) return
+          created.name = placed.name || 'Audio'
+          created.armed = false
+          this.project.tracks.push(created)
+          host = created
+        }
+        host.clips.push(placed)
+        this.selectedTrackId = host.id
+        this.selectedClipId = placed.id
+        this.selectedClipIds = [placed.id]
+        this.offerSmartTempo(host.id, placed)
+        return
+      }
+      let host = trackId ? this.track(trackId) : null
+      if (host?.type !== 'midi') host = null
+      if (!host && this.selectedTrackId) {
+        const selected = this.track(this.selectedTrackId)
+        if (selected?.type === 'midi') host = selected
+      }
+      if (!host) return
+      host.midiClips.push(placed)
+      this.selectedTrackId = host.id
+      this.selectedMidiClipId = placed.id
+      this.selectedMidiClipIds = [placed.id]
+    })
+  }
+
   private offerSmartTempo(trackId: string, clip: AudioClip) {
     if (clip.slotOnly || (clip.source !== 'import' && clip.source !== 'local')) return
     const bpm = clip.stretch?.sourceBpm
@@ -5557,7 +5605,7 @@ export class ProjectStore {
         if (!channel.output) channel.output = track.id
       }
       mirrorTrackMix(this.project, track.id)
-      const beat = snapEditBeat(startBeat, this.project)
+      const beat = Math.max(0, startBeat)
       const clip = {
         id: uid('pcl'),
         patternId: pattern.id,
@@ -5646,7 +5694,7 @@ export class ProjectStore {
       if (!pattern) return
       const notes = patternToMidiNotes(pattern)
       if (!notes.length) return
-      const snapped = snapEditBeat(beat, this.project)
+      const snapped = Math.max(0, beat)
       const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0)
       const track = this.kitTrack(trackId, mode, pattern)
       const clip: MidiClip = {
@@ -5687,7 +5735,7 @@ export class ProjectStore {
     }
     let result: { trackId: string; clipId: string } | null = null
     this.mutate(() => {
-      const beat = snapEditBeat(startBeat, this.project)
+      const beat = Math.max(0, startBeat)
       const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0)
       const track = this.kitTrack(trackId ?? null, 'midi', pattern)
       const clip: MidiClip = {

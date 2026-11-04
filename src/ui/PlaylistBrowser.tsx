@@ -5,7 +5,6 @@ import type { ProjectStore } from '../state/store'
 import { SoundBrowser } from './SoundBrowser'
 import { PatternSend, patternBeat } from './PatternSend'
 import { quickDragArmed } from './clipKeys'
-import { useScreenOverlay } from './screenOverlay'
 
 export type BrowserTab = 'sounds' | 'drums' | 'instruments' | 'loops' | 'patterns' | 'plugins' | 'clips'
 
@@ -151,10 +150,9 @@ export function PlaylistBrowser({
   }, [needle, project, trackId])
 
   const soundLock = tab === 'instruments' ? 'instrument' : tab === 'loops' ? 'loop' : tab === 'drums' ? 'drum' : tab === 'sounds' ? 'all' : null
-  useScreenOverlay(onClose)
 
   return (
-    <aside className="playlist-browser" data-playlist-browser="open" data-screen-overlay="" aria-label="Browser">
+    <aside className="playlist-browser" data-playlist-browser="open" aria-label="Browser">
       <div className="browser-tabs">
         <div className="browser-chip-scroll" role="tablist" aria-label="Browser">
           {TABS.map((item) => (
@@ -268,4 +266,22 @@ export function PlaylistBrowser({
       )}
     </aside>
   )
+}
+
+/** The same browser, beside Mix or Collab. Arrange draws its own copy in the playlist frame. */
+export function ShellBrowser({
+  store,
+  engine,
+  phone,
+  onClose,
+  onSeek,
+}: {
+  store: ProjectStore
+  engine: PreviewEngine
+  phone: boolean
+  onClose: () => void
+  onSeek: (sample: number) => void
+}) {
+  const [tab, setTab] = useState<BrowserTab>('sounds')
+  return <PlaylistBrowser store={store} engine={engine} phone={phone} tab={tab} onTab={setTab} onClose={onClose} onSeek={onSeek} />
 }
