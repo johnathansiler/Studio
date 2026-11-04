@@ -44,7 +44,7 @@ function host(patch: Partial<LandscapeHost> = {}) {
     locked: [],
     async requestFullscreen() { result.entered += 1 },
     async exitFullscreen() { result.exited += 1 },
-    async lock(kind: 'landscape') { result.locked.push(kind) },
+    async lock(kind: 'landscape' | 'landscape-primary' | 'portrait-primary') { result.locked.push(kind) },
     unlock() {},
   }
   return Object.assign(result, patch)
@@ -269,14 +269,17 @@ describe('phone keyboard orientation', () => {
   it('locks the whole phone landscape, and rotates the shell only when the lock is impossible', async () => {
     const locked = host()
     expect(await presentKeyboard(locked)).toBe('locked')
-    expect(locked.locked).toEqual(['landscape'])
+    expect(locked.locked).toEqual(['landscape-primary'])
     expect(locked.entered).toBe(1)
     const closed = await dismissKeyboard(locked, 'locked')
     expect(closed.holdLandscape).toBe(true)
     expect(keepLandscapeAfterClose(closed.holdLandscape, null)).toBe(true)
     expect(keepLandscapeAfterClose(closed.holdLandscape, { type: 'landscape-primary', angle: 90 })).toBe(true)
     expect(portraitReported('portrait-primary', 0)).toBe(true)
+    expect(portraitReported('portrait-secondary', 180)).toBe(false)
+    expect(portraitReported(undefined, 180)).toBe(false)
     expect(keepLandscapeAfterClose(closed.holdLandscape, { type: 'portrait-primary', angle: 0 })).toBe(false)
+    expect(keepLandscapeAfterClose(closed.holdLandscape, { type: 'portrait-secondary', angle: 180 })).toBe(true)
 
     const refused = host({
       async lock() { throw new Error('unsupported') },

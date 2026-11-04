@@ -320,8 +320,24 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   padding-left: 0;
   padding-right: 0;
 }
+/* 180° is upside down. It must not share the upright portrait layout or the 90° sideways turn. */
+.shell.phone.orient-180 {
+  position: fixed;
+  z-index: 40;
+  inset: 0;
+  width: 100dvw;
+  height: 100dvh;
+  max-width: none;
+  transform: rotate(180deg);
+  transform-origin: center center;
+  overflow: hidden;
+  padding-left: 0;
+  padding-right: 0;
+}
 .shell.phone.keys-landscape .keyboard-dock,
-.shell.phone.keys-landscape .keyboard-face {
+.shell.phone.keys-landscape .keyboard-face,
+.shell.phone.orient-180 .keyboard-dock,
+.shell.phone.orient-180 .keyboard-face {
   position: static;
   width: auto;
   height: auto;
