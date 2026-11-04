@@ -149,6 +149,7 @@ import {
   createKit,
   kitPreset,
   normalizePadKit,
+  padRegion,
   ratchetBeats,
   recordTake,
   type PadProgram,
@@ -950,6 +951,23 @@ export class ProjectStore {
     })
   }
 
+  /** Save a pad's start and end. A drag is one undo step. */
+  setPadWindow(trackId: string, bank: number, index: number, start: number, end: number, drag = false) {
+    const run = drag ? (body: () => void) => this.draft(body) : (body: () => void) => this.mutate(body)
+    run(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const kit = normalizePadKit(track.padKit)
+      const pad = kit.banks[bank]?.[index]
+      if (!pad) return
+      const region = padRegion(pad)
+      const from = Math.min(1, Math.max(0, start))
+      const to = Math.min(1, Math.max(from, end))
+      pad.region = { ...region, start: from, end: Math.max(from + 1e-4, to) }
+      track.padKit = normalizePadKit(kit)
+    })
+  }
+
   assignTrackPad(trackId: string, bank: number, index: number, assignment: { name: string; bufferId?: string; samples?: Float32Array; sampleRate?: number; choke?: number }) {
     let bufferId = assignment.bufferId
     if (assignment.samples && assignment.sampleRate) {
@@ -1255,6 +1273,8 @@ export class ProjectStore {
       pads: kit.banks.flat(),
       buffers,
       output: kit.output,
+      vintage: kit.vintage,
+      chop: kit.chop,
     })
     if (!rendered.left.length) return null
     const bufferId = uid('smp')
@@ -1346,10 +1366,10 @@ export class ProjectStore {
         const voiced = setPadRegion(pad, chop.bufferId, slice.start / samples.length, slice.end / samples.length)
         voiced.name = `Slice ${index + 1}`
         voiced.sampleName = chop.name
-        voiced.tune = chop.semitones
-        voiced.tuneCents = chop.cents
+        voiced.tune = 0
+        voiced.tuneCents = 0
         voiced.pitchMode = chop.pitchMode
-        voiced.highpass = chop.highpass
+        voiced.highpass = 0
         next.banks[bank][index] = voiced
       }
       next.chop = chop
@@ -1402,6 +1422,8 @@ export class ProjectStore {
       pads: [pad],
       buffers: new Map([[bufferId, { sampleRate: asset.sampleRate, samples: channel }]]),
       output: 'audio',
+      vintage: kit.vintage,
+      chop: kit.chop,
     })
     const mono = new Float32Array(rendered.left.length)
     for (let i = 0; i < mono.length; i++) mono[i] = ((rendered.left[i] || 0) + (rendered.right[i] || 0)) * 0.5

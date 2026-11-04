@@ -428,6 +428,17 @@ export function registerWasmPool(factory: (sampleRate: number) => SamplePool) {
   wasmFactory = factory
 }
 
+export function wasmPoolReady() {
+  return wasmFactory != null
+}
+
+/** Tests swap the bridge. The returned function puts the previous one back. */
+export function swapWasmPool(factory: ((sampleRate: number) => SamplePool) | null) {
+  const previous = wasmFactory
+  wasmFactory = factory
+  return () => { wasmFactory = previous }
+}
+
 export function createSamplePool(sampleRate: number): SamplePool {
   if (wasmDspRequested() && wasmFactory) {
     try { return wasmFactory(sampleRate) } catch { /* TypeScript fallback */ }
