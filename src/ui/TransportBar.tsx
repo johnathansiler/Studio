@@ -65,6 +65,11 @@ export function TransportBar({
   const tapping = useRef(false)
   const flashTimer = useRef(0)
   const [menuOpen, setMenuOpen] = useState(false)
+  useEffect(() => {
+    const close = () => setMenuOpen(false)
+    document.addEventListener('cueharbor-close-transport-menu', close)
+    return () => document.removeEventListener('cueharbor-close-transport-menu', close)
+  }, [])
   const menuButton = useRef<HTMLButtonElement>(null)
   const [editingTempo, setEditingTempo] = useState(false)
   const editTimer = useRef(0)
@@ -441,6 +446,7 @@ export function TransportBar({
       <AnchoredMenu
         id="transport-menu"
         className="transport-drawer"
+        fill
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
         label="Menu"

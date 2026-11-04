@@ -56,13 +56,14 @@
 .tempo-curve polyline { fill: none; stroke: var(--amber); stroke-width: 1.5; }
 .tempo-point {
   position: absolute;
-  width: 14px;
-  height: 14px;
-  margin: -7px 0 0 -7px;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
   border-radius: 50%;
-  border: 2px solid #241c04;
-  background: var(--amber);
+  border: 0;
   padding: 0;
+  background: radial-gradient(circle, var(--amber) 0 6px, transparent 7px);
+  box-shadow: none;
   touch-action: none;
 }
 .tempo-point.on { outline: 2px solid white; }

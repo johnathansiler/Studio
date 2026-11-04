@@ -339,11 +339,18 @@
 
 .note-repeat-rate { display: contents; }
 
-.note-repeat-rate button,
-.note-repeat-rate strong {
+.note-repeat-rate button {
   min-height: 40px;
   height: 40px;
   min-width: 40px;
+}
+.note-repeat-rate strong {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: auto;
+  min-height: 0;
+  line-height: 1;
 }
 
 .note-repeat-rate button {
@@ -356,13 +363,14 @@
 }
 
 .note-repeat-rate-read {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 44px;
   min-height: 40px;
   height: 40px;
-  padding: 0 6px;
+  padding: 0 8px;
+  line-height: 1;
   border: 1px solid #070707;
   border-radius: 2px;
   background: #141414;

@@ -7,7 +7,7 @@
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  flex: 1 1 100%;
+  flex: 0 0 auto;
 }
 .preset-dock > button,
 .preset-anchor {

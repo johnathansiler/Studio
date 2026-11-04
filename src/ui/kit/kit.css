@@ -221,6 +221,11 @@
   .kit-eq { height: 160px; }
   .eq-bands { grid-template-columns: 1fr; }
 }
+.plugin-sheet label.wet .touch-slider,
+.sample-panel label.wet .touch-slider {
+  height: 40px;
+  min-height: 40px;
+}
 .touch-slider {
   position: relative;
   display: block;

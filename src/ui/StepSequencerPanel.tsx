@@ -22,6 +22,10 @@ export function StepSequencerPanel({
   useScreenOverlay(onClose)
   return (
     <section className="step-sequencer" data-step-sequencer="open" data-screen-overlay="" aria-label="Step Sequencer">
+      <header className="step-sequencer-bar">
+        <h2>Step Sequencer</h2>
+        <button type="button" className="step-close overlay-close" onClick={onClose}>Close</button>
+      </header>
       {plugin && pattern && trackId && (
         <PresetControls
           pluginId="steps"
@@ -31,10 +35,6 @@ export function StepSequencerPanel({
           onCommit={(next) => commitPluginPreset(store, trackId, plugin.id, next.params, next.presets, true)}
         />
       )}
-      <header className="step-sequencer-bar">
-        <h2>Step Sequencer</h2>
-        <button type="button" className="step-close overlay-close" onClick={onClose}>Close</button>
-      </header>
       <BeatView store={store} engine={engine} />
     </section>
   )
