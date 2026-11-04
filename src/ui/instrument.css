@@ -16,8 +16,8 @@
 .sampler-zones-label { margin: 0; color: var(--muted); font-size: 12px; }
 .sampler-wave {
   position: relative;
-  height: 72px;
-  min-height: 72px;
+  height: 96px;
+  min-height: 96px;
   border-radius: 12px;
   overflow: hidden;
   background: #070b09;
@@ -56,7 +56,7 @@
 .root-step .bevel { width: 32px; padding: 0; }
 .shell.phone .sampler-title { display: none; }
 .shell.phone .sampler-face { gap: 4px; padding: 6px; }
-.shell.phone .sampler-wave { height: 40px; min-height: 40px; }
+.shell.phone .sampler-wave { height: 88px; min-height: 88px; }
 .shell.phone .sampler-face .kit-keys,
 .shell.phone .sampler-face .kit-keys.compact { height: 78px; min-height: 64px; }
 .shell.phone .inst-panel { gap: 6px; padding: 8px; }

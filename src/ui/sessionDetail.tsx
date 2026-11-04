@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { descriptor } from '../audio/plugins/catalog'
 import type { AudioEngine } from '../audio/engine'
-import { computePeaks } from '../model/demo'
+import { snapClipTimeline } from '../audio/clipSnap'
+import { sourceSamplesOf } from '../audio/stretch/engine'
 import { FOLLOW_ACTIONS, LAUNCH_MODES, LAUNCH_QUANTS, QUANT_LABEL, sceneClip } from '../model/launch'
 import { quartersPerBar } from '../model/time'
 import { CLIP_SWATCHES, curvePath } from '../model/sessionBoard'
@@ -13,6 +14,7 @@ import type { ProjectStore } from '../state/store'
 import { useFormFactor } from './form'
 import { SongLoopStrip } from './LoopRegion'
 import { PianoRoll, type PianoActions } from './PianoRoll'
+import { WaveformView, type WaveMarker } from './WaveformView'
 
 export function SessionDetail({
   store,
@@ -155,7 +157,7 @@ export function SessionDetail({
           {'bufferId' in clip ? (
             <>
               <SongLoopStrip store={store} onSeek={(sample) => engine.seek(sample)} />
-              <Waveform store={store} trackId={track.id} clip={clip} />
+              <Waveform store={store} trackId={track.id} clip={clip} engine={engine} />
             </>
           ) : (
             <PianoRoll store={store} engine={engine} chrome={false} chordsOpen={chords} actionsRef={actions} />
@@ -166,57 +168,60 @@ export function SessionDetail({
   )
 }
 
-function Waveform({ store, trackId, clip }: { store: ProjectStore; trackId: string; clip: AudioClip }) {
+function Waveform({ store, trackId, clip, engine }: { store: ProjectStore; trackId: string; clip: AudioClip; engine: AudioEngine }) {
   const asset = store.buffers.get(clip.bufferId)
-  const canvas = useRef<HTMLCanvasElement>(null)
-  const source = asset?.channels[0]
-  const peaks = useMemo(() => {
-    if (!source?.length) return []
-    const slice = source.subarray(clip.offsetSamples, Math.min(source.length, clip.offsetSamples + Math.max(1, clip.durationSamples)))
-    return computePeaks(slice, 240)
-  }, [source, clip.offsetSamples, clip.durationSamples])
-
-  useEffect(() => {
-    const node = canvas.current
-    if (!node) return
-    const width = 480
-    node.width = width
-    node.height = 96
-    const ctx = node.getContext('2d')
-    if (!ctx) return
-    ctx.clearRect(0, 0, width, 96)
-    ctx.fillStyle = 'rgba(255,255,255,0.85)'
-    peaks.forEach((peak, index) => {
-      const x = Math.floor((index / Math.max(1, peaks.length)) * width)
-      const y1 = (1 - peak.max) * 48
-      const y2 = (1 - peak.min) * 48
-      ctx.fillRect(x, y1, 2, Math.max(1, y2 - y1))
-    })
-  }, [peaks])
-
-  function drag(edge: 'start' | 'end', event: ReactPointerEvent) {
-    event.preventDefault()
-    event.stopPropagation()
-    const bounds = (event.currentTarget.parentElement as HTMLElement).getBoundingClientRect()
-    const origin = event.clientX
-    const length = asset?.channels[0]?.length ?? clip.offsetSamples + clip.durationSamples
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener('pointerup', up)
-      const delta = ((ev.clientX - origin) / Math.max(1, bounds.width)) * clip.durationSamples
-      const sample = edge === 'start' ? clip.startSample + delta : clip.startSample + clip.durationSamples + delta
-      store.trimClip(trackId, clip.id, edge, sample)
-      if (edge === 'end' && sample > clip.startSample + length) return
-    }
-    window.addEventListener('pointerup', up)
-  }
-
+  const channel = asset?.channels[0]
+  const length = Math.max(1, channel?.length ?? clip.offsetSamples + clip.durationSamples)
+  const source = sourceSamplesOf(clip)
+  const ratio = clip.durationSamples / Math.max(1, source)
+  const [snap, setSnap] = useState(true)
+  const offset = Math.min(length - 1, Math.max(0, clip.offsetSamples))
+  const endSource = Math.min(length, Math.max(offset + 1, clip.offsetSamples + source))
+  const markers: WaveMarker[] = [
+    { id: 'start', at: offset / length, className: 'mark', marker: 'start', name: 'Start', label: 'Clip start. Drag to trim the beginning.', title: 'Clip start. Drag to set the start offset on a zero crossing.' },
+    { id: 'end', at: endSource / length, className: 'mark', marker: 'end', name: 'End', label: 'Clip end. Drag to trim the length.', title: 'Clip end. Drag to set the end on a zero crossing.' },
+  ]
+  const home = { start: offset, end: endSource }
   return (
-    <div className="sl-wave" data-waveform="clip">
-      <canvas ref={canvas} />
+    <WaveformView
+      channel={channel}
+      className="sl-wave"
+      dataWaveform="clip"
+      ariaLabel="Clip waveform"
+      color="rgba(255,255,255,0.9)"
+      chrome="above"
+      snap={snap}
+      onSnap={setSnap}
+      bounds={{ start: 0, end: length }}
+      home={home}
+      markers={markers}
+      toolbarExtra={(
+        <button
+          type="button"
+          className="wave-zoom-btn"
+          title="Split the clip at the playhead, on a zero crossing."
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={() => {
+            const at = engine.currentTimelineSample()
+            const inside = at > clip.startSample && at < clip.startSample + clip.durationSamples
+            const timeline = inside ? at : clip.startSample + clip.durationSamples / 2
+            const snapped = snapClipTimeline(clip, channel, timeline, snap)
+            store.splitAt(trackId, clip.id, snapped.sample)
+          }}
+        >Split</button>
+      )}
+      onMarker={(id, fraction, phase) => {
+        if (phase !== 'commit') return
+        const edge = id === 'end' ? 'end' : 'start'
+        const sourceIndex = fraction * length
+        const timeline = clip.startSample + (sourceIndex - clip.offsetSamples) * ratio
+        const current = edge === 'start' ? clip.startSample : clip.startSample + clip.durationSamples
+        if (Math.round(timeline) === current) return
+        store.trimClip(trackId, clip.id, edge, timeline, snap)
+      }}
+    >
       {clip.loop !== false && <i className="loopbar" />}
-      <div className="mark" data-marker="start" title="Clip start. Drag to trim the beginning." onPointerDown={(event) => drag('start', event)} />
-      <div className="mark" data-marker="end" title="Clip end. Drag to trim the length." onPointerDown={(event) => drag('end', event)} />
-    </div>
+    </WaveformView>
   )
 }
 

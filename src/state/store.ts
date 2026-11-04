@@ -2425,12 +2425,13 @@ export class ProjectStore {
       else if (op === 'trim') next = trimSilence(channel)
       else if (op === 'fade') next = fadeChannel(channel, Math.round(sampler.fadeIn * channel.length), Math.round((sampler.fadeOut || 0.01) * channel.length))
       else {
-        const start = snapZero(channel, Math.round(sampler.start * channel.length))
-        const end = snapZero(channel, Math.round(sampler.end * channel.length))
+        const reach = channel.length
+        const start = snapZero(channel, Math.round(sampler.start * channel.length), reach)
+        const end = snapZero(channel, Math.round(sampler.end * channel.length), reach)
         sampler.start = start / channel.length
         sampler.end = Math.max(sampler.start + 2 / channel.length, end / channel.length)
-        sampler.loopStart = snapZero(channel, Math.round(sampler.loopStart * channel.length)) / channel.length
-        sampler.loopEnd = snapZero(channel, Math.round(sampler.loopEnd * channel.length)) / channel.length
+        sampler.loopStart = snapZero(channel, Math.round(sampler.loopStart * channel.length), reach) / channel.length
+        sampler.loopEnd = snapZero(channel, Math.round(sampler.loopEnd * channel.length), reach) / channel.length
         return
       }
       const id = uid('smp')
@@ -3171,9 +3172,9 @@ export class ProjectStore {
     return inspectClip(channel.subarray(clip.offsetSamples, clip.offsetSamples + source), asset?.sampleRate ?? this.project.sampleRate, this.project.tempo).sourceBpm
   }
 
-  trimClip(trackId: string, clipId: string, edge: 'start' | 'end', sample: number) {
+  trimClip(trackId: string, clipId: string, edge: 'start' | 'end', sample: number, exact = false) {
     this.mutate(() => {
-      const at = snapSampleToMap(sample, this.project, subdivisionFor(this.project))
+      const at = exact ? Math.max(0, Math.round(sample)) : snapSampleToMap(sample, this.project, subdivisionFor(this.project))
       const ids = new Set(trimLinkedAudio(this.project, trackId, clipId, edge, at, (clip) => {
         const asset = this.buffers.get(clip.bufferId)
         return asset?.channels[0].length ?? clip.offsetSamples + clip.durationSamples

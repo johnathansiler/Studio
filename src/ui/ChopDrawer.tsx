@@ -1,6 +1,6 @@
 /** Inline chop editor. Menus hang off the button that opened them. Nothing here leaves the device. */
 
-import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useRef, useState, type ChangeEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { preparePadPcm } from '../instruments/mpc/render'
 import { captureSlot, openInputCapture, SLOT_ACCEPT } from '../audio/sample/slot'
@@ -25,6 +25,7 @@ import {
   type VintageTable,
 } from '../model/padChop'
 import { setPadVintage } from './padVoiceAdapter'
+import { WaveformView } from './WaveformView'
 import type { ProjectStore } from '../state/store'
 
 const PRESET_KEY = 'cueharbor-vintage-presets'
@@ -56,7 +57,8 @@ export function ChopDrawer({
   const slices = chop && samples ? slicesFor(chop, samples, sampleRate, store.project.tempo) : []
   const plan = assignPlan(slices.length)
   const fileRef = useRef<HTMLInputElement>(null)
-  const waveRef = useRef<HTMLCanvasElement>(null)
+  const chopping = useRef(false)
+  const [snapZero, setSnapZero] = useState(true)
   const [loadOpen, setLoadOpen] = useState(false)
   const [modeOpen, setModeOpen] = useState(false)
   const [vintageOpen, setVintageOpen] = useState(vintageStartsOpen)
@@ -66,33 +68,6 @@ export function ChopDrawer({
   const [picked, setPicked] = useState<number | null>(null)
   const vintage = kit.vintage
   const scaled = setPadVintage(vintage)
-
-  useEffect(() => {
-    const canvas = waveRef.current
-    if (!canvas || !samples) return
-    const width = Math.max(280, Math.floor(canvas.clientWidth || 320))
-    const height = 96
-    canvas.width = width
-    canvas.height = height
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.clearRect(0, 0, width, height)
-    ctx.fillStyle = '#101010'
-    ctx.fillRect(0, 0, width, height)
-    ctx.strokeStyle = '#9ec8ff'
-    ctx.beginPath()
-    const size = Math.max(1, Math.floor(samples.length / width))
-    for (let x = 0; x < width; x++) {
-      let peak = 0
-      const from = x * size
-      const to = Math.min(samples.length, from + size)
-      for (let i = from; i < to; i++) peak = Math.max(peak, Math.abs(samples[i] || 0))
-      const y = (1 - peak) * (height / 2)
-      ctx.moveTo(x, height / 2 - (height / 2 - y))
-      ctx.lineTo(x, height / 2 + (height / 2 - y))
-    }
-    ctx.stroke()
-  }, [samples, chop?.mode, chop?.grid, slices.length])
 
   function patch(next: Partial<ChopSetup>) {
     store.patchChop(trackId, next)
@@ -191,33 +166,35 @@ export function ChopDrawer({
     engine.playBuffer(preparePadPcm(samples, region), 60, 1)
   }
 
-  function onWave(event: ReactPointerEvent<HTMLDivElement>) {
+  function placeMarker(fraction: number) {
     if (!chop || chop.mode !== 'manual') return
-    const rect = event.currentTarget.getBoundingClientRect()
-    const fraction = Math.min(0.98, Math.max(0.02, (event.clientX - rect.left) / rect.width))
-    patch({ markers: [...chop.markers, fraction].sort((a, b) => a - b) })
+    const at = Math.min(0.98, Math.max(0.02, fraction))
+    patch({ markers: [...chop.markers, at].sort((a, b) => a - b) })
   }
 
-  function moveMarker(index: number, event: ReactPointerEvent<HTMLButtonElement>) {
+  function moveMarker(id: string, fraction: number, phase: 'move' | 'commit') {
     if (!chop) return
-    const host = event.currentTarget.parentElement
-    if (!host) return
-    const rect = host.getBoundingClientRect()
+    const index = Number(id)
+    if (!Number.isInteger(index) || index < 0 || index >= chop.markers.length) return
+    const at = Math.min(0.98, Math.max(0.02, fraction))
+    if (phase === 'move') {
+      if (!chopping.current) {
+        chopping.current = true
+        store.beginAutomationTouch()
+      }
+      const markers = chop.markers.slice()
+      markers[index] = at
+      patch({ markers })
+      return
+    }
+    if (!chopping.current) return
+    chopping.current = false
     const markers = chop.markers.slice()
-    const move = (ev: PointerEvent) => {
-      markers[index] = Math.min(0.98, Math.max(0.02, (ev.clientX - rect.left) / Math.max(1, rect.width)))
-      patch({ markers: markers.slice() })
-    }
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      const fraction = markers[index]
-      const sorted = markers.slice().sort((a, b) => a - b)
-      patch({ markers: sorted })
-      setPicked(sorted.indexOf(fraction))
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    markers[index] = at
+    const sorted = markers.slice().sort((a, b) => a - b)
+    patch({ markers: sorted })
+    setPicked(sorted.indexOf(at))
+    store.endAutomationTouch()
   }
 
   const label = chop ? `${shiftedKey(chop.root, chop.modeName, chop.semitones, chop.cents)}, ${Math.round((chop.tempoSource === 'sample' ? chop.sampleBpm : store.project.tempo) * 10) / 10} BPM` : 'No sample yet'
@@ -311,19 +288,30 @@ export function ChopDrawer({
               <input aria-label="Transient sensitivity" type="range" min={0} max={1} step={0.01} value={chop.sensitivity} onChange={(event) => patch({ sensitivity: Number(event.target.value) })} />
             </label>
           )}
-          <div className="chop-wave" onPointerDown={onWave}>
-            <canvas ref={waveRef} aria-label="Waveform" />
-            {chop.mode === 'manual' && chop.markers.map((marker, index) => (
-              <button
-                key={index}
-                type="button"
-                className={`chop-marker${picked === index ? ' on' : ''}`}
-                style={{ left: `${marker * 100}%` }}
-                aria-label={`Marker ${index + 1}`}
-                onPointerDown={(event) => { event.stopPropagation(); setPicked(index); moveMarker(index, event) }}
-              />
-            ))}
-          </div>
+          <WaveformView
+            channel={samples}
+            className="chop-wave"
+            ariaLabel="Waveform"
+            color="#9ec8ff"
+            chrome="above"
+            snap={snapZero}
+            onSnap={setSnapZero}
+            markers={chop.mode === 'manual' ? chop.markers.map((marker, index) => ({
+              id: String(index),
+              at: marker,
+              className: `chop-marker${picked === index ? ' on' : ''}`,
+              label: `Marker ${index + 1}`,
+              title: 'Slice marker. Drag to a zero crossing.',
+              name: `Marker ${index + 1}`,
+              grip: false,
+            })) : []}
+            onMarker={(id, fraction, phase) => { setPicked(Number(id)); moveMarker(id, fraction, phase) }}
+            onPlace={chop.mode === 'manual' ? (fraction) => placeMarker(fraction) : undefined}
+          >
+            {(view) => samples ? slices.map((slice, index) => (
+              <i key={`${slice.start}-${index}`} className="chop-slice-line" style={{ left: `${view.percent(slice.start / samples.length)}%` }} />
+            )) : null}
+          </WaveformView>
           {chop.mode === 'manual' && (
             <button type="button" className="hw-key ch-tab" disabled={picked == null} onClick={() => { if (picked == null) return; patch({ markers: chop.markers.filter((_, index) => index !== picked) }); setPicked(null) }}>Remove marker</button>
           )}

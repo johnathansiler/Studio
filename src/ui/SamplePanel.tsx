@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
-import { scaledPeaks, syncedLoopSamples } from '../audio/sample/engine'
+import { syncedLoopSamples } from '../audio/sample/engine'
+import { WaveformView, type WaveMarker } from './WaveformView'
 import {
   OPEN_SOUNDS,
   SLOT_ACCEPT,
@@ -444,108 +445,43 @@ function SlotWave({
   onDrag: (points: SlotPoints) => void
   onDone: () => void
 }) {
-  const canvas = useRef<HTMLCanvasElement>(null)
-  const box = useRef<HTMLDivElement>(null)
-  const [active, setActive] = useState<keyof SlotPoints | null>(null)
-  useEffect(() => {
-    const view = canvas.current
-    if (!view) return
-    const draw = () => {
-      const cssW = Math.max(1, view.clientWidth || 320)
-      const cssH = Math.max(1, view.clientHeight || 168)
-      const dpr = window.devicePixelRatio || 1
-      view.width = Math.floor(cssW * dpr)
-      view.height = Math.floor(cssH * dpr)
-      const ctx = view.getContext('2d')
-      if (!ctx) return
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      ctx.clearRect(0, 0, cssW, cssH)
-      const mid = cssH / 2
-      ctx.strokeStyle = 'rgba(215, 236, 223, 0.28)'
-      ctx.beginPath()
-      ctx.moveTo(0, mid)
-      ctx.lineTo(cssW, mid)
-      ctx.stroke()
-      if (!channel?.length) return
-      const bars = scaledPeaks(channel, Math.max(8, Math.floor(cssW)))
-      const style = getComputedStyle(view)
-      const accent = style.getPropertyValue('--accent').trim() || '#73c48f'
-      const accent2 = style.getPropertyValue('--accent2').trim() || '#d7f5e4'
-      const ink = ctx.createLinearGradient(0, 0, 0, cssH)
-      ink.addColorStop(0, accent2)
-      ink.addColorStop(0.55, accent)
-      ink.addColorStop(1, accent)
-      ctx.fillStyle = ink
-      bars.forEach((bar, index) => {
-        const top = mid - bar.max * (mid - 3)
-        const bottom = mid - bar.min * (mid - 3)
-        ctx.fillRect(index, top, 1, Math.max(1, bottom - top))
-      })
-    }
-    draw()
-    const watch = new ResizeObserver(draw)
-    watch.observe(view)
-    return () => watch.disconnect()
-  }, [channel])
-  const move = (which: keyof SlotPoints) => (event: ReactPointerEvent<HTMLButtonElement>) => {
-    const host = box.current
-    if (!host) return
-    event.preventDefault()
-    event.stopPropagation()
-    const pointer = event.pointerId
-    const origin = points[which]
-    const originX = event.clientX
-    setActive(which)
-    const drag = (ev: PointerEvent) => {
-      if (ev.pointerId !== pointer) return
-      ev.preventDefault()
-      const rect = host.getBoundingClientRect()
-      const delta = (ev.clientX - originX) / Math.max(1, rect.width)
-      onDrag(dragSlotPoint(points, which, origin + delta))
-    }
-    const up = (ev: PointerEvent) => {
-      if (ev.pointerId !== pointer) return
-      window.removeEventListener('pointermove', drag)
-      window.removeEventListener('pointerup', up)
-      window.removeEventListener('pointercancel', up)
-      setActive(null)
-      onDone()
-    }
-    window.addEventListener('pointermove', drag)
-    window.addEventListener('pointerup', up)
-    window.addEventListener('pointercancel', up)
-  }
-  const left = (value: number) => `${value * 100}%`
-  const handle = (which: keyof SlotPoints, loop: boolean) => (
-    <button
-      type="button"
-      className={`slot-handle ${loop ? 'loop' : 'edge'}${active === which ? ' on' : ''}`}
-      style={{ left: left(points[which]) }}
-      aria-label={HANDLE_COPY[which].label}
-      title={HANDLE_COPY[which].label.replace(`${HANDLE_COPY[which].name}. `, '')}
-      aria-pressed={active === which}
-      onPointerDown={move(which)}
-    >
-      <i />
-    </button>
-  )
+  const markers: WaveMarker[] = (['start', 'end', 'loopEnd', 'loopStart'] as const).map((which) => ({
+    id: which,
+    at: points[which],
+    className: `slot-handle ${which === 'loopStart' || which === 'loopEnd' ? 'loop' : 'edge'}`,
+    label: HANDLE_COPY[which].label,
+    title: HANDLE_COPY[which].label.replace(`${HANDLE_COPY[which].name}. `, ''),
+    name: HANDLE_COPY[which].name,
+  }))
   return (
-    <div ref={box} className="slot-wave" aria-label="Waveform. Drag the handles to set the start, end, and loop points.">
-      <canvas ref={canvas} width={640} height={168} />
-      <i className="slot-shade" style={{ left: 0, width: left(points.start) }} />
-      <i className="slot-shade" style={{ left: left(points.end), right: 0 }} />
-      <i className="slot-loop" style={{ left: left(points.loopStart), width: `${Math.max(0, points.loopEnd - points.loopStart) * 100}%` }} />
-      {handle('start', false)}
-      {handle('end', false)}
-      {handle('loopEnd', true)}
-      {handle('loopStart', true)}
-      {slices.map((slice, index) => (
-        <b key={slice.id} className="slot-slice" style={{ left: `${slice.loopStart * 100}%`, color: PAD_COLORS[index % PAD_COLORS.length] }}>
-          <i />
-          <span>{index + 1}</span>
-        </b>
-      ))}
-      {active && <p className="slot-status slot-active">{HANDLE_COPY[active].name}</p>}
-    </div>
+    <WaveformView
+      channel={channel}
+      className="slot-wave"
+      ariaLabel="Waveform. Drag the handles to set the start, end, and loop points."
+      markers={markers}
+      statusClass="slot-status slot-active"
+      chrome="above"
+      onMarker={(id, fraction, phase) => {
+        if (phase === 'move') onDrag(dragSlotPoint(points, id as keyof SlotPoints, fraction))
+        else onDone()
+      }}
+    >
+      {(view) => {
+        const endLeft = view.percent(points.end)
+        return (
+          <>
+            <i className="slot-shade" style={{ left: 0, width: `${Math.max(0, view.percent(points.start))}%` }} />
+            <i className="slot-shade" style={{ left: `${Math.min(100, Math.max(0, endLeft))}%`, right: 0 }} />
+            <i className="slot-loop" style={{ left: `${view.percent(points.loopStart)}%`, width: `${Math.max(0, view.percent(points.loopEnd) - view.percent(points.loopStart))}%` }} />
+            {slices.map((slice, index) => (
+              <b key={slice.id} className="slot-slice" style={{ left: `${view.percent(slice.loopStart)}%`, color: PAD_COLORS[index % PAD_COLORS.length] }}>
+                <i />
+                <span>{index + 1}</span>
+              </b>
+            ))}
+          </>
+        )
+      }}
+    </WaveformView>
   )
 }
