@@ -13,7 +13,7 @@ import { SCALER_MIME, parseScalerDrag } from '../instruments/scaler/model'
 import { patternHostId } from '../model/steps'
 import { loopGridBeats } from '../model/loopEdit'
 import { gridBackground, gridPaint } from '../model/gridLines'
-import { activeGridBeats, edgeFromPointer, lengthReadout, moveFromPointer, positionReadout, subdivisionFor } from '../model/snapGrid'
+import { activeGridBeats, edgeFromPointer, lengthReadout, moveFromPointer, positionReadout } from '../model/snapGrid'
 import { quartersPerBar } from '../model/time'
 import { editorForGesture } from '../model/editorOpen'
 import { holdMeter } from './levels'
@@ -920,7 +920,7 @@ export function ArrangeView({
                 event.preventDefault()
                 event.stopPropagation()
                 const sample = sampleAt(event.clientX)
-                const beat = projectSampleBeat(project, project.snap ? snapSampleToMap(sample, project, subdivisionFor(project)) : sample)
+                const beat = projectSampleBeat(project, sample)
                 store.writeScalerClip(track.id, payload.notes, Math.max(0, beat), payload.name)
               }}
             >

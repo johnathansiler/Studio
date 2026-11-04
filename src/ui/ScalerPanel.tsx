@@ -183,13 +183,11 @@ export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; e
   function atBeat(live: boolean) {
     const beat = Math.max(0, projectSampleBeat(store.project, engine.currentTimelineSample()))
     const moving = engine.status === 'playing' || engine.status === 'recording'
-    if (live && moving) return beat
-    if (live) {
-      const take = clips.find((clip) => clip.name === 'Scaler')
-      if (take) return take.startBeat + take.durationBeats
-    }
-    if (store.project.snap) return Math.floor(beat / bar) * bar
-    return Math.floor(beat * 4) / 4
+    if (!live) return beat
+    if (moving) return beat
+    const take = clips.find((clip) => clip.name === 'Scaler')
+    if (take) return take.startBeat + take.durationBeats
+    return beat
   }
 
   function playChord(index: number, write: boolean, override?: Partial<typeof state>) {

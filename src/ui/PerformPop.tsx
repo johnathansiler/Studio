@@ -6,6 +6,7 @@ import { DRUM_PADS, renderDrum } from '../model/drums'
 import { beatRepeatHeld, hardwareMidiAllowed } from '../model/beatRepeat'
 import type { RepeatRate } from '../model/midiClock'
 import { NOTE_NAMES, SCALES, type ScaleId } from '../model/scale'
+import { projectSampleBeat } from '../model/tempoMap'
 import { degreeTone, findScale, isBuiltinScale, isTwelveTone, toneName } from '../theory'
 import { padFaceName } from '../instruments/pads/record'
 import { BANKS, gridPitch, PAD_MACROS, sixteenLevels, type GridLayout, type LevelSpread, type PadVoice, type StepCondition } from '../model/padMachine'
@@ -528,7 +529,7 @@ export function PerformPop({
               samples={source.layers[0]?.bufferId ? store.buffers.get(source.layers[0].bufferId)?.channels[0] : undefined}
               onChange={(patch) => store.updatePad(bank, selectedPad, patch)}
               onBus={() => store.routePad(bank, selectedPad)}
-              onFlatten={() => store.flattenPad(bank, selectedPad)}
+              onFlatten={() => store.flattenPad(bank, selectedPad, engine.currentTimelineSample())}
             />
           ) : drums && (deck === 'steps' || deck === 'pads') && clip ? (
             <>
@@ -544,7 +545,7 @@ export function PerformPop({
                     store.rememberSequence(clip.trackId, clip.clipId)
                     store.addSongSlot(clip.clipId, 1)
                   }}
-                  onPlaySong={() => store.commitSong(clip.trackId)}
+                  onPlaySong={() => store.commitSong(clip.trackId, projectSampleBeat(store.project, engine.currentTimelineSample()))}
                 />
               )}
               <StepEditor

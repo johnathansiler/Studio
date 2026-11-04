@@ -6,6 +6,7 @@ import { renderGraphParallel } from './parallelRender'
 import { prepareClipNotes } from '../model/midiTools'
 import { tuneBlockScale } from './plugins/autoTune'
 import { beatsToSamples, projectEndSample } from '../model/time'
+import { readPlayhead, stampClipAtPlayhead } from '../model/playheadPlace'
 import { makeTrack, uid, type AudioAsset, type AudioClip, type PluginInstance, type Project, type Track } from '../model/types'
 import { encodeWav, linearResample, type DitherMode, type WavBits } from '../model/wav'
 import { encodeFlac } from '../model/flac'
@@ -183,33 +184,38 @@ export function fileSlug(name: string) {
   return slug || 'cueharbor'
 }
 
-export function applyFreeze(project: Project, buffers: Map<string, AudioAsset>, sourceId: string, audio: { sampleRate: number; channels: Float32Array[] }, startSample: number) {
+export function applyFreeze(project: Project, buffers: Map<string, AudioAsset>, sourceId: string, audio: { sampleRate: number; channels: Float32Array[] }, startSample: number, destId?: string | null) {
   const next = JSON.parse(JSON.stringify(project)) as Project
   const source = next.tracks.find((track) => track.id === sourceId)
   const map = new Map(buffers)
   if (!source) return { project: next, buffers: map }
   const id = uid('buf')
-  const track = makeTrack({ name: `${source.name} bounce`, type: 'audio', input: 'none', color: source.color })
-  track.volume = 1
-  track.pan = 0
-  const clip: AudioClip = {
+  const name = `${source.name} bounce`
+  const clip: AudioClip = stampClipAtPlayhead({
     id: uid('clip'),
-    name: track.name,
+    name,
     bufferId: id,
-    startSample: Math.max(0, startSample),
+    startSample: 0,
     offsetSamples: 0,
     durationSamples: audio.channels[0]?.length ?? 0,
     fadeInSamples: 0,
     fadeOutSamples: 0,
     gain: 1,
     source: 'import',
+  }, readPlayhead(next, startSample))
+  const dest = destId ? next.tracks.find((track) => track.id === destId && track.type === 'audio' && track.id !== sourceId) : null
+  if (dest) dest.clips.push(clip)
+  else {
+    const track = makeTrack({ name, type: 'audio', input: 'none', color: source.color })
+    track.volume = 1
+    track.pan = 0
+    track.clips = [clip]
+    const index = next.tracks.findIndex((item) => item.id === sourceId)
+    next.tracks.splice(index + 1, 0, track)
   }
-  track.clips = [clip]
-  const index = next.tracks.findIndex((item) => item.id === sourceId)
-  next.tracks.splice(index + 1, 0, track)
   source.mute = true
   source.plugins = source.plugins.map((plugin) => ({ ...plugin, enabled: false }))
-  map.set(id, { id, name: track.name, sampleRate: audio.sampleRate, channels: audio.channels })
+  map.set(id, { id, name, sampleRate: audio.sampleRate, channels: audio.channels })
   return { project: next, buffers: map }
 }
 

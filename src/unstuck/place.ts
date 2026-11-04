@@ -10,6 +10,7 @@ import { normalizeScaler } from '../instruments/scaler/model'
 import { normalizePadKit } from '../model/padMachine'
 import { sectionKind } from '../model/sections'
 import { normalizeScale } from '../model/scale'
+import { stampMidiAtBeat } from '../model/playheadPlace'
 import { makeTrack, uid, type MidiClip, type MidiNote, type Project, type Track } from '../model/types'
 import { ensureScale, roleById, roleLabel, scaleIsBuiltin, type RoleId } from './brief'
 import type { SongDraft } from './draft'
@@ -26,14 +27,15 @@ export function nameHasRole(name: string, label: string) {
   return unstuckNamed(name) && name.includes(label)
 }
 
-export function applyUnstuckDraft(project: Project, draft: SongDraft): { trackId: string | null; clipId: string | null } {
+export function applyUnstuckDraft(project: Project, draft: SongDraft, selectedTrackId?: string | null): { trackId: string | null; clipId: string | null } {
   if (draft.tempo) project.tempo = draft.tempo
   if (draft.key != null && draft.scaleId) applyKey(project, draft.key, draft.scaleId)
   let trackId: string | null = null
   let clipId: string | null = null
   const labels = new Set((draft.replace?.roles ?? []).map((role) => roleLabel(role)))
+  const single = draft.tracks.length === 1
   for (const spec of draft.tracks) {
-    const track = ensureTrack(project, spec)
+    const track = ensureTrack(project, spec, single ? selectedTrackId : null)
     if (draft.replace && labels.has(roleLabel(spec.role))) {
       exciseRole(track, roleLabel(spec.role), new Set(spec.clips.map((clip) => clip.name)), draft.replace.startBeat, draft.replace.endBeat)
     }
@@ -100,8 +102,13 @@ function applyKey(project: Project, key: number, scaleId: string) {
   project.scale = { ...scale, root: key, scale: chosen.scale, library: id }
 }
 
-function ensureTrack(project: Project, spec: SongDraft['tracks'][number]) {
+function ensureTrack(project: Project, spec: SongDraft['tracks'][number], selectedTrackId?: string | null) {
   const meta = roleById(spec.role)
+  const selected = selectedTrackId ? project.tracks.find((item) => item.id === selectedTrackId && item.type === 'midi') : null
+  if (selected) {
+    claim(selected, spec, !selected.instrument || selected.instrument === 'none', meta.instrument)
+    return selected
+  }
   let track = project.tracks.find((item) => item.type === 'midi' && item.name === spec.name)
   const fresh = !track
   if (!track) {
@@ -155,13 +162,13 @@ function pushClip(track: Track, clip: SongDraft['tracks'][number]['clips'][numbe
     ...(note.slide ? { slide: true } : {}),
   }))
   const end = notes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0.25)
-  const created: MidiClip = {
+  const created: MidiClip = stampMidiAtBeat({
     id: uid('midi'),
     name: clip.name,
-    startBeat: Math.max(0, clip.startBeat),
+    startBeat: 0,
     durationBeats: Math.max(clip.durationBeats, end),
     notes,
-  }
+  }, clip.startBeat)
   track.midiClips.push(created)
   return created.id
 }

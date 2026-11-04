@@ -21,8 +21,7 @@ import { descriptor } from '../audio/plugins/catalog'
 import { countInBarsOf } from '../model/time'
 import { uid, type PluginInstance } from '../model/types'
 import { readIdentity } from '../storage/identity'
-import { samplesToBeats } from '../model/time'
-import { selectTransport } from '../state/select'
+import { projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { themeFor } from './faces/themes'
 import { useFormFactor } from './form'
@@ -58,8 +57,7 @@ export function SamplePanel({ store, engine, trackId, plugin, vu }: { store: Pro
   const channel = asset?.channels[0]
   const points = readSlotPoints(sampler ?? looper)
   const phone = useFormFactor() === 'phone'
-  const transport = selectTransport(store)
-  const beat = () => samplesToBeats(engine.currentTimelineSample(), engine.sampleRate, transport.tempo)
+  const beat = () => projectSampleBeat(store.project, engine.currentTimelineSample())
 
   useEffect(() => () => {
     stopRef.current = true
