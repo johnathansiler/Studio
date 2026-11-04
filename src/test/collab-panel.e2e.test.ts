@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { mkdirSync } from 'node:fs'
 import { chromium, type Browser, type Page } from 'playwright'
 import { describe, expect, it } from 'vitest'
 
@@ -26,6 +27,39 @@ async function openCollab(page: Page) {
   await page.locator('[data-collab-panel="open"]').waitFor()
 }
 
+async function expectCollabFills(page: Page) {
+  const box = await page.evaluate(() => {
+    const shell = document.querySelector('.shell')!.getBoundingClientRect()
+    const pane = document.querySelector('[data-collab-panel="open"]')!.getBoundingClientRect()
+    const header = document.querySelector('header.topbar')!.getBoundingClientRect()
+    const lower = document.querySelector('.collab-lower')
+    const lowerBox = lower?.getBoundingClientRect()
+    const panel = document.querySelector('.collab-lower .panel, .collab-lower .version-panel')
+    const panelBox = panel?.getBoundingClientRect()
+    return {
+      transport: document.querySelectorAll('.transport').length,
+      paneTop: pane.top,
+      headerBottom: header.bottom,
+      paneBottom: pane.bottom,
+      shellBottom: shell.bottom,
+      paneWidth: pane.width,
+      shellWidth: shell.width,
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+      lowerBottom: lowerBox?.bottom ?? null,
+      panelBottom: panelBox?.bottom ?? null,
+    }
+  })
+  expect(box.transport).toBe(0)
+  expect(box.paneTop).toBeLessThanOrEqual(box.headerBottom + 2)
+  expect(box.shellBottom - box.paneBottom).toBeLessThan(8)
+  expect(Math.abs(box.shellWidth - box.paneWidth)).toBeLessThan(8)
+  expect(box.scrollWidth).toBeLessThanOrEqual(box.clientWidth + 1)
+  if (box.lowerBottom != null && box.panelBottom != null) {
+    expect(box.lowerBottom - box.panelBottom).toBeLessThan(8)
+  }
+}
+
 describe('collab session panel', () => {
   it('puts Collab first, hides advanced controls, and auto-joins a copied link', async () => {
     const port = 4193
@@ -48,8 +82,42 @@ describe('collab session panel', () => {
         headless: true,
         args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
       })
+      mkdirSync('/opt/cursor/artifacts', { recursive: true })
+      const stale = await browser.newContext({ viewport: { width: 390, height: 844 } })
+      await stale.addInitScript(() => {
+        const identity = {
+          participantId: 'old-person',
+          name: 'Old Host',
+          role: 'host',
+          code: 'ZZ99ZZ',
+          camOn: true,
+          micId: '',
+          outId: '',
+          musicOn: true,
+          jamEnabled: false,
+          jamDelayMs: 40,
+          monitorMode: 'opus',
+          transportMode: 'arrangement',
+        }
+        localStorage.setItem('cueharbor-identity', JSON.stringify(identity))
+        sessionStorage.setItem('cueharbor-identity', JSON.stringify(identity))
+        sessionStorage.setItem('cueharbor-resume:ZZ99ZZ', 'old-person')
+      })
+      const stalePage = await stale.newPage()
+      stalePage.on('dialog', () => { throw new Error('plain load opened a dialog') })
+      await stalePage.goto(url, { waitUntil: 'domcontentloaded' })
+      await openCollab(stalePage)
+      await stalePage.getByRole('button', { name: /Host a Collab/ }).waitFor()
+      await stalePage.getByRole('button', { name: /Join a Collab/ }).waitFor()
+      expect(await stalePage.getByRole('button', { name: /^Mic/ }).count()).toBe(0)
+      expect(await stalePage.locator('[data-collab-phase="room"]').count()).toBe(0)
+      expect(await stalePage.getByText('ZZ99ZZ').count()).toBe(0)
+      expect(await stalePage.getByText(/Could not rejoin|Reconnecting/).count()).toBe(0)
+      await stale.close()
+
       for (const viewport of [
         { width: 390, height: 844 },
+        { width: 412, height: 915 },
         { width: 1280, height: 800 },
       ]) {
         const context = await browser.newContext({ viewport })
@@ -57,6 +125,22 @@ describe('collab session panel', () => {
         await page.goto(url, { waitUntil: 'domcontentloaded' })
         await openCollab(page)
         const pane = page.locator('[data-collab-panel="open"]')
+        await pane.getByRole('button', { name: /Host a Collab/ }).waitFor()
+        await pane.getByRole('button', { name: /Join a Collab/ }).waitFor()
+        const hostButton = await pane.getByRole('button', { name: /Host a Collab/ }).boundingBox()
+        expect(hostButton?.height).toBeGreaterThanOrEqual(40)
+        expect(await pane.getByRole('button', { name: /^Mic/ }).count()).toBe(0)
+        expect(await pane.getByRole('button', { name: 'Copy Link' }).count()).toBe(0)
+        expect(await pane.getByRole('button', { name: 'Leave', exact: true }).count()).toBe(0)
+        expect(await pane.getByRole('button', { name: /^Hide/ }).count()).toBe(0)
+        expect(await pane.locator('[data-tab]').count()).toBe(0)
+        expect(await page.locator('.transport').count()).toBe(0)
+        await expectCollabFills(page)
+        if (viewport.width < 500) {
+          await page.screenshot({ path: `/opt/cursor/artifacts/collab_start_${viewport.width}x${viewport.height}.png` })
+        }
+        await pane.getByRole('button', { name: /Host a Collab/ }).click()
+        await pane.locator('[data-collab-phase="room"]').waitFor()
         await pane.getByRole('button', { name: /^Mic/ }).first().waitFor()
         await pane.getByRole('button', { name: /^Cam/ }).first().waitFor()
         const copy = pane.getByRole('button', { name: 'Copy Link' })
@@ -64,9 +148,12 @@ describe('collab session panel', () => {
         const box = await copy.boundingBox()
         expect(box?.height).toBeGreaterThanOrEqual(40)
         await pane.getByRole('button', { name: 'Leave', exact: true }).waitFor()
-        await pane.locator('[data-tab="people"]').waitFor()
-        await pane.locator('[data-tab="chat"]').waitFor()
-        await pane.locator('[data-tab="versions"]').waitFor()
+        await pane.getByRole('button', { name: 'People', exact: true }).waitFor()
+        await pane.getByRole('button', { name: 'Chat', exact: true }).waitFor()
+        await pane.getByRole('button', { name: 'Versions', exact: true }).waitFor()
+        await expectCollabFills(page)
+        const peopleBox = await pane.locator('.collab-lower .panel').boundingBox()
+        expect(peopleBox?.height).toBeGreaterThan(80)
         for (const name of ['Hear myself', 'Fix delay', 'Opus', 'Ping', 'Jam', 'Calibrate']) {
           expect(await pane.getByRole('button', { name, exact: true }).count()).toBe(0)
         }
@@ -83,6 +170,11 @@ describe('collab session panel', () => {
         for (const name of ['Opus', 'Ping', 'Jam', 'Calibrate', 'Play together', 'Check connection']) {
           expect(await pane.getByRole('button', { name, exact: true }).count()).toBe(0)
         }
+        await pane.getByRole('button', { name: 'Leave', exact: true }).click()
+        await pane.getByRole('button', { name: /Host a Collab/ }).waitFor()
+        await pane.getByRole('button', { name: /Join a Collab/ }).waitFor()
+        expect(await pane.getByRole('button', { name: /^Mic/ }).count()).toBe(0)
+        expect(await pane.locator('[data-tab]').count()).toBe(0)
         await context.close()
       }
 
@@ -94,6 +186,7 @@ describe('collab session panel', () => {
       const host = await hostContext.newPage()
       await host.goto(url, { waitUntil: 'domcontentloaded' })
       await openCollab(host)
+      await host.getByRole('button', { name: /Host a Collab/ }).click()
       await host.getByRole('button', { name: 'Copy Link' }).click()
       await host.getByText('Link copied').waitFor({ timeout: 15000 })
       const link = await host.evaluate(() => navigator.clipboard.readText())
@@ -105,13 +198,46 @@ describe('collab session panel', () => {
       })
       await guestContext.addInitScript(() => localStorage.setItem('cueharbor-name', 'Guest Riley'))
       const guest = await guestContext.newPage()
+      guest.on('dialog', () => { throw new Error('invite link opened a dialog') })
       await guest.goto(link, { waitUntil: 'domcontentloaded' })
       await guest.locator('[data-collab-panel="open"]').waitFor()
       await guest.locator('.panel').getByText('Host Harper · Host').waitFor({ timeout: 15000 })
       await host.locator('.panel').getByText('Guest Riley', { exact: true }).waitFor({ timeout: 15000 })
       expect(await guest.locator('#join-session').count()).toBe(0)
+      expect(await guest.getByRole('button', { name: /Join a Collab/ }).count()).toBe(0)
+      expect(await guest.getByRole('dialog').count()).toBe(0)
+      await guest.waitForFunction(() => !/[?&](session|invite|role)=/.test(location.search))
+      expect(guest.url()).not.toMatch(/[?&](session|invite|role)=/)
+      await expectCollabFills(guest)
+      await guest.screenshot({ path: '/opt/cursor/artifacts/collab_joined_390x844.png' })
+
+      const wideGuestContext = await browser.newContext({
+        viewport: { width: 412, height: 915 },
+        permissions: ['microphone', 'camera'],
+      })
+      await wideGuestContext.addInitScript(() => localStorage.setItem('cueharbor-name', 'Guest Quinn'))
+      const wideGuest = await wideGuestContext.newPage()
+      wideGuest.on('dialog', () => { throw new Error('invite link opened a dialog') })
+      await wideGuest.goto(link, { waitUntil: 'domcontentloaded' })
+      await wideGuest.locator('.panel').getByText('Host Harper · Host').waitFor({ timeout: 15000 })
+      await wideGuest.waitForFunction(() => !/[?&](session|invite|role)=/.test(location.search))
+      expect(wideGuest.url()).not.toMatch(/[?&](session|invite|role)=/)
+      await expectCollabFills(wideGuest)
+      await wideGuest.screenshot({ path: '/opt/cursor/artifacts/collab_joined_412x915.png' })
+
+      await guest.reload({ waitUntil: 'domcontentloaded' })
+      await guest.getByRole('button', { name: /Host a Collab/ }).waitFor()
+      await guest.getByRole('button', { name: /Join a Collab/ }).waitFor()
+      expect(await guest.getByRole('button', { name: /^Mic/ }).count()).toBe(0)
+      expect(guest.url()).not.toMatch(/[?&]session=/)
+
+      await host.getByRole('button', { name: 'Leave', exact: true }).click()
+      await host.getByRole('button', { name: /Host a Collab/ }).waitFor()
+      await host.getByRole('button', { name: /Join a Collab/ }).waitFor()
+      expect(await host.getByRole('button', { name: /^Mic/ }).count()).toBe(0)
       await hostContext.close()
       await guestContext.close()
+      await wideGuestContext.close()
     } finally {
       await browser?.close()
       for (const child of [signal, web]) {
@@ -119,5 +245,5 @@ describe('collab session panel', () => {
         try { process.kill(-child.pid, 'SIGTERM') } catch { /* already exited */ }
       }
     }
-  }, 120000)
+  }, 180000)
 })

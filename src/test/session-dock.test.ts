@@ -69,7 +69,7 @@ async function spansArrange(page: Page) {
       main: main.width,
       dock: dock ? dock.getBoundingClientRect().width : 0,
       open: document.querySelector('.shell')?.getAttribute('data-dock'),
-      invite: !!document.body.textContent?.includes('Create invite'),
+      invite: !!document.body.textContent?.includes('Host a Collab'),
     }
   })
   expect(box.open).toBe('closed')
@@ -185,25 +185,25 @@ describe('arrange on first load', () => {
       expect(actions).not.toContain('session-mode')
       expect(actions).not.toContain('capture')
       await page.keyboard.press('Escape')
-      expect(await page.getByRole('button', { name: /Create invite/ }).count()).toBe(0)
+      expect(await page.getByRole('button', { name: /Host a Collab/ }).count()).toBe(0)
       expect(await page.locator('[data-collab-panel="open"]').count()).toBe(0)
       expect(await page.locator('.views button').count()).toBe(3)
       for (const tab of [/^Arrange/, /^Mix/]) {
         await page.getByRole('button', { name: tab }).first().click()
         expect(await page.locator('[data-collab-panel="open"]').count()).toBe(0)
-        expect(await page.getByRole('button', { name: /Create invite/ }).count()).toBe(0)
+        expect(await page.getByRole('button', { name: /Host a Collab/ }).count()).toBe(0)
       }
       await page.getByRole('button', { name: /^Collab/ }).click()
-      await page.getByRole('button', { name: /Create invite/ }).waitFor()
+      await page.getByRole('button', { name: /Host a Collab/ }).waitFor()
       expect(await page.locator('[data-session-view="open"]').count()).toBe(0)
       await page.reload({ waitUntil: 'domcontentloaded' })
-      await page.getByRole('button', { name: /Create invite/ }).waitFor()
+      await page.getByRole('button', { name: /Host a Collab/ }).waitFor()
       const opened = await page.evaluate(() => document.querySelector('.shell')?.getAttribute('data-collab'))
       expect(opened).toBe('open')
       await page.getByRole('button', { name: /^Arrange/ }).first().click()
       expect(await page.locator('[data-collab-panel="open"]').count()).toBe(0)
       await page.getByRole('button', { name: /^Collab/ }).click()
-      await page.getByRole('button', { name: /^Hide/ }).click()
+      await page.getByRole('button', { name: /^Arrange/ }).first().click()
       await spansArrange(page)
       await page.reload({ waitUntil: 'domcontentloaded' })
       await spansArrange(page)
