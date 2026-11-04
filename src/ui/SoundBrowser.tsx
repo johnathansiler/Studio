@@ -4,7 +4,7 @@ import type { SamplePack } from '../audio/multisample/types'
 import { decodeSlotFile, focusedSlot, SOUND_MIME } from '../audio/sample/slot'
 import { uid } from '../model/types'
 import { fetchSoundBytes, soundCache } from '../sounds/cache'
-import { catalogMessage, filterSounds, loadSoundCatalog } from '../sounds/catalog'
+import { catalogMessage, filterSounds, loadSoundCatalog, soundKeys } from '../sounds/catalog'
 import { boundLibraryHost, filterStarters, loadStarterOnto, playableAudition, refreshStarterCatalog, starterCatalog } from '../sounds/instruments'
 import { matchCountLabel, readSoundWidth, soundWidthFromDrag, writeSoundWidth } from '../sounds/panel'
 import { audioTrackFor, decodeSoundBytes, placeSound, previewChannelsFor, trackIdFromDrop } from '../sounds/place'
@@ -12,7 +12,78 @@ import { soundFileUrl } from '../sounds/source'
 import type { CatalogResult, SoundEntry, SoundKind, SoundQuery } from '../sounds/types'
 import { selectSounds } from '../state/select'
 import type { ProjectStore } from '../state/store'
+import { AnchoredMenu } from './AnchoredMenu'
 import './sound-browser.css'
+
+export function SoundFilterButton({
+  bpm,
+  soundKey,
+  favoritesOnly,
+  keys,
+  showTempoKey,
+  onBpm,
+  onKey,
+  onFavorites,
+}: {
+  bpm: SoundQuery['bpm']
+  soundKey: string
+  favoritesOnly: boolean
+  keys: string[]
+  showTempoKey: boolean
+  onBpm: (bpm: SoundQuery['bpm']) => void
+  onKey: (key: string) => void
+  onFavorites: (value: boolean) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const summary = [bpm === 'project' ? 'Song tempo' : '', soundKey, favoritesOnly ? 'Favorites' : ''].filter(Boolean).join(', ')
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        className={`sound-filter${bpm !== 'any' || soundKey || favoritesOnly ? ' on' : ''}`}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={summary ? `Filter. ${summary}.` : 'Filter. Tempo, key, and favorites.'}
+        title="Tempo, key, and favorites."
+        onClick={() => setOpen((value) => !value)}
+      >
+        Filter
+      </button>
+      <AnchoredMenu className="sound-filter-menu" open={open} onClose={() => setOpen(false)} label="Filter" triggerRef={buttonRef}>
+        {showTempoKey && (
+          <>
+            <p className="filter-label">Tempo</p>
+            <div className="filter-row" role="group" aria-label="Tempo. Loops near the song tempo, including half-time and double-time.">
+              <button type="button" className={`filter-choice${bpm === 'any' ? ' on' : ''}`} aria-pressed={bpm === 'any'} title="Loops near the song tempo, including half-time and double-time." onClick={() => onBpm('any')}>Any tempo</button>
+              <button type="button" className={`filter-choice${bpm === 'project' ? ' on' : ''}`} aria-pressed={bpm === 'project'} title="Loops near the song tempo, including half-time and double-time." onClick={() => onBpm('project')}>Song tempo</button>
+            </div>
+            <p className="filter-label">Key</p>
+            <div className="filter-row" role="group" aria-label="Key. Only sounds in this key.">
+              <button type="button" className={`filter-choice${!soundKey ? ' on' : ''}`} aria-pressed={!soundKey} title="Only sounds in this key." onClick={() => onKey('')}>Any key</button>
+              {keys.map((item) => (
+                <button key={item} type="button" className={`filter-choice${soundKey === item ? ' on' : ''}`} aria-pressed={soundKey === item} title="Only sounds in this key." onClick={() => onKey(item)}>{item}</button>
+              ))}
+            </div>
+          </>
+        )}
+        <p className="filter-label">Favorites</p>
+        <div className="filter-row">
+          <button
+            type="button"
+            className={`filter-choice${favoritesOnly ? ' on' : ''}`}
+            aria-pressed={favoritesOnly}
+            title="Only sounds saved in this project."
+            onClick={() => onFavorites(!favoritesOnly)}
+          >
+            Favorites
+          </button>
+        </div>
+      </AnchoredMenu>
+    </>
+  )
+}
 
 const INSTRUMENT_PREFIX = 'instrument:'
 let dragId = ''
@@ -95,6 +166,9 @@ export function SoundBrowser({
   const [failed, setFailed] = useState(false)
   const [text, setText] = useState('')
   const [type, setType] = useState<SoundQuery['type']>(lockType && lockType !== 'all' ? lockType : 'all')
+  const [bpm, setBpm] = useState<SoundQuery['bpm']>('any')
+  const [soundKey, setSoundKey] = useState('')
+  const [favoritesOnly, setFavoritesOnly] = useState(false)
   useEffect(() => {
     setType(lockType && lockType !== 'all' ? lockType : 'all')
   }, [lockType])
@@ -202,9 +276,9 @@ export function SoundBrowser({
   const query: SoundQuery = {
     text,
     type,
-    bpm: 'any',
-    key: '',
-    favoritesOnly: false,
+    bpm,
+    key: soundKey,
+    favoritesOnly,
     projectBpm: sounds.tempo,
     favorites: sounds.favorites,
   }
@@ -213,7 +287,8 @@ export function SoundBrowser({
   const shownSounds = filtered.slice(0, LIST_CAP)
   const shown = shownSounds.length + starterRows.length
   const total = filtered.length + starterRows.length
-  const queryActive = Boolean(text || type !== 'all')
+  const queryActive = Boolean(text || type !== 'all' || bpm !== 'any' || soundKey || favoritesOnly)
+  const keys = soundKeys(result.entries)
   const offline = failed || result.status === 'missing'
   const message = loading && !shown
     ? 'Loading'
@@ -489,6 +564,16 @@ export function SoundBrowser({
           value={text}
           onChange={(event) => setText(event.target.value)}
         />
+        <SoundFilterButton
+          bpm={bpm}
+          soundKey={soundKey}
+          favoritesOnly={favoritesOnly}
+          keys={keys}
+          showTempoKey={type !== 'instrument'}
+          onBpm={setBpm}
+          onKey={setSoundKey}
+          onFavorites={setFavoritesOnly}
+        />
       </div>
       {!embedded && !lockType && (
         <div className="sound-chips" role="group" aria-label="Kind">
@@ -510,6 +595,7 @@ export function SoundBrowser({
       <div className="sound-list">
         {starterRows.map((entry) => {
           const on = playing === entry.id
+          const saved = sounds.favorites.includes(entry.id)
           const credit = `${entry.description} ${entry.license} · Hugging Face`
           return (
             <div className={`sound-row${on ? ' is-playing' : ''}`} key={entry.id}>
@@ -544,11 +630,23 @@ export function SoundBrowser({
               >
                 Add
               </button>
+              <button
+                type="button"
+                className={`sound-save${saved ? ' on' : ''}`}
+                aria-pressed={saved}
+                disabled={store.remoteFollow}
+                aria-label={saved ? `Saved. ${entry.name} is in favorites.` : `Save. Keep ${entry.name} in favorites.`}
+                title="Keep this sound in the project favorites."
+                onClick={() => store.toggleSoundFavorite(entry.id)}
+              >
+                {saved ? 'Saved' : 'Save'}
+              </button>
             </div>
           )
         })}
         {shownSounds.map((entry) => {
           const on = playing === entry.id
+          const saved = sounds.favorites.includes(entry.id)
           const playHint = entry.type === 'loop' ? 'Play on the speakers at the song tempo.' : 'Play this sound on the speakers.'
           const credit = `${entry.license} · ${entry.source || 'Source not listed'}`
           return (
@@ -581,6 +679,17 @@ export function SoundBrowser({
                 onClick={() => { engine.unlock(); void add(entry) }}
               >
                 Add
+              </button>
+              <button
+                type="button"
+                className={`sound-save${saved ? ' on' : ''}`}
+                aria-pressed={saved}
+                disabled={store.remoteFollow}
+                aria-label={saved ? `Saved. ${entry.name} is in favorites.` : `Save. Keep ${entry.name} in favorites.`}
+                title="Keep this sound in the project favorites."
+                onClick={() => store.toggleSoundFavorite(entry.id)}
+              >
+                {saved ? 'Saved' : 'Save'}
               </button>
             </div>
           )
