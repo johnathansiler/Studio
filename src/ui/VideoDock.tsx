@@ -2,16 +2,17 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { AudioEngine } from '../audio/engine'
 import type { Participant, SessionClient } from '../remote/session'
+import { previewPlayback } from '../model/callVideo'
 import { mediaStatus } from '../model/media'
 import { CALL_COPY, copyOf } from './chrome'
+import { SETUP_PLAIN } from './collabCopy'
 import { useFormFactor } from './form'
-import { ms } from './format'
 import { TipButton } from './Hint'
 import { VersionsList } from './VersionsList'
 import type { Project } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { ACCESS_COPY, ACCESS_ROLES, mayWriteProject, roleShareUrl, type CollabAccess } from '../state/ops'
-import { presentShare } from './share'
+import { shareSessionLink } from './share'
 
 export function VideoDock({
   session,
@@ -38,13 +39,11 @@ export function VideoDock({
 }) {
   const state = session.state
   const form = useFormFactor()
-  const phone = form === 'phone'
-  const touchShare = form !== 'desk'
   const call = (id: string) => copyOf(CALL_COPY, id)
   const [tab, setTab] = useState<'people' | 'chat' | 'versions'>('people')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [linkNote, setLinkNote] = useState('')
   const [draft, setDraft] = useState('')
-  const [copied, setCopied] = useState<CollabAccess | null>(null)
   const [levels, setLevels] = useState({ input: 0, talk: 0 })
   const root = useRef<HTMLDivElement>(null)
   const popRoot = useRef<Root | null>(null)
@@ -98,7 +97,6 @@ export function VideoDock({
   const admitted = state.participants.filter((person) => person.admitted)
   const waiting = state.participants.filter((person) => !person.admitted && person.role !== 'host')
   const featured = state.activeSpeakerId
-  const one = session.primaryOneWay()
   const link = mediaStatus({
     turn: state.turn,
     turnError: state.turnError,
@@ -112,6 +110,57 @@ export function VideoDock({
     const others = state.participants.some((person) => person.id !== state.selfId)
     if (inRoom && others && !window.confirm('Leave this session and start a new one?')) return
     onNewSession()
+  }
+
+  function sessionReady(status: string, code?: string) {
+    return Boolean(code && (status === 'live' || status === 'waiting' || status === 'reconnecting'))
+  }
+
+  function ensureSessionCode(): Promise<string> {
+    if (sessionReady(session.state.status, session.state.code)) return Promise.resolve(session.state.code || '')
+    onCreate()
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        stop()
+        reject(new Error('timeout'))
+      }, 8000)
+      const stop = session.subscribe(() => {
+        if (sessionReady(session.state.status, session.state.code)) {
+          window.clearTimeout(timer)
+          stop()
+          resolve(session.state.code || '')
+        } else if (session.state.status === 'error') {
+          window.clearTimeout(timer)
+          stop()
+          reject(new Error(session.state.error || 'error'))
+        }
+      })
+    })
+  }
+
+  async function copyInviteLink(event: MouseEvent<HTMLButtonElement>) {
+    const view = event.currentTarget.ownerDocument.defaultView || window
+    try {
+      const code = await ensureSessionCode()
+      let url = `${view.location.origin}/?session=${code}`
+      if (session.state.role === 'host') {
+        try {
+          const token = await session.requestInvite('view')
+          url = roleShareUrl(view.location.origin, code, token, 'view')
+        } catch {
+          /* a code on its own still joins as view */
+        }
+      }
+      const result = await shareSessionLink(url, { phone: form === 'phone' })
+      if (result === 'copied' || result === 'shared') {
+        setLinkNote('Link copied')
+        view.setTimeout(() => setLinkNote((current) => (current === 'Link copied' ? '' : current)), 1600)
+      } else if (result === 'failed') {
+        setLinkNote(url)
+      }
+    } catch {
+      session.note('The invite link did not arrive.')
+    }
   }
 
   async function popOut(event: MouseEvent<HTMLButtonElement>) {
@@ -171,18 +220,8 @@ export function VideoDock({
           <TipButton className="icon-btn" label="Hide" hint="Close the session panel. The timeline uses the full width." onClick={onHide} />
         )}
         <span className="spacer" />
-        {!phone && (
-          <TipButton
-            className="icon-btn"
-            label={call('monitor').label}
-            hint={call('monitor').hint}
-            onClick={() => session.setMonitorMode(state.monitorMode === 'opus' ? 'pcm' : 'opus')}
-          >
-            {state.monitorMode === 'opus' ? 'Opus' : 'PCM'}
-          </TipButton>
-        )}
         <button className="icon-btn pop-out" onClick={(event) => void popOut(event)} title="Pop out" aria-label="Pop out">
-          ⧉
+          Pop out
         </button>
         {inRoom && (
           <TipButton id="new-session" className="text-btn" label={call('new').label} hint={call('new').hint} onClick={startNewSession}>
@@ -194,23 +233,6 @@ export function VideoDock({
       {state.usageNotice && <div className="media-banner bad">{state.usageNotice}</div>}
       {state.hostLeft && <div className="media-banner bad">The host left this session.</div>}
       {!state.hostLeft && link && <div className={`media-banner ${link.tone}`}>{link.text}</div>}
-      {(state.status === 'live' || state.status === 'waiting' || state.status === 'reconnecting') && (
-        <details className="connection-details">
-          <summary>Connection</summary>
-          {session.onScreenCount() != null && <p>{session.onScreenCount()} tiles</p>}
-          {Object.keys(state.media).length === 0 && <p>No peer yet</p>}
-          {Object.entries(state.media).map(([id, item]) => {
-            const person = state.participants.find((entry) => entry.id === id)
-            const kind = item.localType || (item.path === 'relay' ? 'relay' : item.path === 'direct' ? 'host' : 'none yet')
-            return (
-              <p key={id}>
-                {person?.name || 'Peer'}: {item.connection} · ice {item.ice} · {item.signaling || 'signaling'} · {kind}
-                {item.remoteType ? ` / ${item.remoteType}` : ''}
-              </p>
-            )
-          })}
-        </details>
-      )}
       {simple && (
         <div className="artist-card">
           <div className="meter tall">
@@ -221,73 +243,6 @@ export function VideoDock({
               {engine.status === 'recording' ? 'Recording' : engine.status === 'playing' ? 'Playing' : engine.status === 'counting-in' ? 'Count-in' : 'Stopped'}
             </strong>
           )}
-        </div>
-      )}
-      {state.code && state.role === 'host' && (
-        <div className="invite-card">
-          <span>Share a role. A code alone joins as View.</span>
-          {ACCESS_ROLES.map((role) => {
-            const copy = ACCESS_COPY[role]
-            return (
-              <div className="invite-row" key={role}>
-                <strong>{copy.label}</strong>
-                <span>{copy.hint}</span>
-                <button
-                  type="button"
-                  className="text-btn"
-                  aria-label={`Copy ${copy.label} link`}
-                  onClick={(event) => {
-                    const view = event.currentTarget.ownerDocument.defaultView || window
-                    void session.requestInvite(role).then(
-                      (token) => {
-                        const url = roleShareUrl(view.location.origin, state.code || '', token, role)
-                        void view.navigator.clipboard.writeText(url).then(
-                          () => {
-                            setCopied(role)
-                            view.setTimeout(() => setCopied((current) => (current === role ? null : current)), 1600)
-                            session.note(`${copy.label} link copied.`)
-                          },
-                          () => session.note(url),
-                        )
-                      },
-                      () => session.note('The invite link did not arrive.'),
-                    )
-                  }}
-                >
-                  {copied === role ? 'Copied' : 'Copy'}
-                </button>
-                {touchShare && (
-                  <button
-                    type="button"
-                    className="text-btn"
-                    aria-label={`Share ${copy.label} link`}
-                    onClick={() => {
-                      void session.requestInvite(role).then(
-                        (token) => {
-                          const url = roleShareUrl(location.origin, state.code || '', token, role)
-                          void presentShare(url, `CueHarbor ${copy.label}`).then((result) => {
-                            if (result === 'shared') session.note(`${copy.label} link shared.`)
-                            else if (result === 'copied') session.note(`${copy.label} link copied.`)
-                            else if (result === 'failed') session.note(url)
-                          })
-                        },
-                        () => session.note('The invite link did not arrive.'),
-                      )
-                    }}
-                  >
-                    Share
-                  </button>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-      {state.code && state.role === 'guest' && (
-        <div className="invite-card">
-          <span>Your role</span>
-          <strong>{ACCESS_COPY[session.selfAccess()].label}</strong>
-          <span>{ACCESS_COPY[session.selfAccess()].hint}</span>
         </div>
       )}
       {state.status === 'idle' || state.status === 'error' ? (
@@ -325,9 +280,12 @@ export function VideoDock({
         <TipButton className={`t-btn ${state.camOn ? 'on' : ''}`} label={call('cam').label} hint={call('cam').hint} pressed={state.camOn} onClick={() => void session.setCam(!state.camOn)}>
           Cam
         </TipButton>
-        <TipButton className={`t-btn ${state.screenOn ? 'on' : ''}`} label={call('share').label} hint={call('share').hint} pressed={state.screenOn} onClick={() => void session.setScreen(!state.screenOn)}>
-          Share
-        </TipButton>
+        <button type="button" className="text-btn primary copy-link" aria-label="Copy Link" onClick={(event) => void copyInviteLink(event)}>
+          Copy Link
+        </button>
+        <button type="button" className="text-btn warn leave-btn" aria-label="Leave" disabled={!state.code} onClick={() => session.leave()}>
+          Leave
+        </button>
         <TipButton
           className={`t-btn ${settingsOpen ? 'on' : ''}`}
           label={call('settings').label}
@@ -336,49 +294,25 @@ export function VideoDock({
           onClick={() => setSettingsOpen((open) => !open)}
         >
           <GearIcon />
-          <span className="fold-word">Setup</span>
+          <span className="setup-word">Setup</span>
         </TipButton>
+        {linkNote && <span className="link-note" role="status">{linkNote}</span>}
       </div>
       {settingsOpen && (
-        <div className="settings-sheet">
-          <div className="settings-stats" title={one?.source || 'not measured'}>
-            Mon {one ? ms(one.ms, 0) : '—'} · Base {plainMs(engine.baseLatencyMs)} · Out {plainMs(engine.deviceLatencyMs)} · In {plainMs(engine.inputLatencyMs)} · Loop {plainMs(state.loopbackMs)} · Ping {plainMs(state.audioPingMs)}
+        <div className="settings-sheet" data-setup="open">
+          <div className="setup-list">
+            <SetupRow
+              label={SETUP_PLAIN.hear.label}
+              detail={SETUP_PLAIN.hear.detail}
+              pressed={state.musicOn}
+              onClick={() => void session.setMusic(!state.musicOn)}
+            />
+            <SetupRow
+              label={SETUP_PLAIN.calibrate.label}
+              detail={SETUP_PLAIN.calibrate.detail}
+              onClick={() => void session.calibrate()}
+            />
           </div>
-          <div className="settings-actions">
-            {phone && (
-              <TipButton
-                className="text-btn"
-                label={call('monitor').label}
-                hint={call('monitor').hint}
-                onClick={() => session.setMonitorMode(state.monitorMode === 'opus' ? 'pcm' : 'opus')}
-              >
-                {state.monitorMode === 'opus' ? 'Opus' : 'PCM'}
-              </TipButton>
-            )}
-            <button className={`text-btn ${state.musicOn ? 'primary' : ''}`} onClick={() => void session.setMusic(!state.musicOn)} aria-label="Performance or cue send. What the other people hear." title="What the other people hear.">
-              {state.role === 'host' ? 'Cue' : 'Perf'}
-            </button>
-            <button className="text-btn" aria-label="Calibrate I/O" onClick={() => void session.calibrate()}>
-              Calibrate
-            </button>
-            <button className="text-btn" aria-label="Ping cue path" onClick={() => void session.measureOpusPath()}>
-              Ping
-            </button>
-            <button className={`text-btn ${state.jamEnabled ? 'primary' : ''}`} aria-label="Jam mode" onClick={() => session.setJam(!state.jamEnabled)}>
-              Jam
-            </button>
-            {state.code && (
-              <button className="text-btn warn" onClick={() => session.leave()}>
-                Leave
-              </button>
-            )}
-          </div>
-          {state.jamEnabled && (
-            <label className="settings-delay">
-              Delay
-              <input type="number" value={state.jamDelayMs} onChange={(event) => session.setJam(true, Number(event.target.value))} />
-            </label>
-          )}
           <DevicePick session={session} />
           {state.takeProgress != null && <div>Take {Math.round(state.takeProgress * 100)}%</div>}
         </div>
@@ -482,23 +416,28 @@ function copyDockStyles(win: Window) {
   }
 }
 
+const playHooks = new WeakSet<MediaStreamTrack>()
+
 function playVideo(el: HTMLVideoElement | null, stream: MediaStream | null, muted: boolean) {
   if (!el) return
-  const playable = stream && stream.getVideoTracks().length ? stream : null
+  const live = stream?.getVideoTracks().filter((track) => track.readyState === 'live') ?? []
+  const plan = previewPlayback(live[0] ?? null)
   el.autoplay = true
-  el.playsInline = true
+  el.playsInline = plan.playsInline
   el.muted = muted
   el.setAttribute('playsinline', 'true')
   el.setAttribute('webkit-playsinline', 'true')
-  if (!playable) {
+  if (!plan.attach || !stream) {
     if (el.srcObject) el.srcObject = null
     return
   }
+  const playable = live.length === stream.getVideoTracks().length ? stream : new MediaStream(live)
   const current = el.srcObject instanceof MediaStream ? el.srcObject : null
-  const nextId = playable.getVideoTracks()[0]?.id
-  const same = current?.getVideoTracks()[0]?.id === nextId && nextId
-  if (!same) el.srcObject = playable
+  const next = live[0]
+  const currentLive = current?.getVideoTracks().find((track) => track.id === next.id && track.readyState === 'live')
+  if (!currentLive) el.srcObject = playable
   const start = () => {
+    if (!plan.play) return
     void el.play().then(
       () => { el.dataset.playError = '' },
       (error: unknown) => { el.dataset.playError = error instanceof Error ? error.name : 'play' },
@@ -506,8 +445,14 @@ function playVideo(el: HTMLVideoElement | null, stream: MediaStream | null, mute
   }
   start()
   el.onloadedmetadata = start
-  const track = playable.getVideoTracks()[0]
-  if (track) track.onunmute = start
+  if (!playHooks.has(next)) {
+    playHooks.add(next)
+    const prior = next.onunmute
+    next.onunmute = () => {
+      start()
+      if (typeof prior === 'function') prior.call(next, new Event('unmute'))
+    }
+  }
 }
 
 function Tile({
@@ -625,9 +570,15 @@ function PersonRow({ person, session }: { person: Participant; session: SessionC
   )
 }
 
-function plainMs(value: number | null | undefined) {
-  if (value == null || Number.isNaN(value)) return '—'
-  return String(Math.round(value))
+function SetupRow({ label, detail, onClick, pressed }: { label: string; detail: string; onClick: () => void; pressed?: boolean }) {
+  return (
+    <div className="setup-row">
+      <button type="button" className={`text-btn ${pressed ? 'primary' : ''}`} aria-label={label} onClick={onClick}>
+        {label}
+      </button>
+      <p>{detail}</p>
+    </div>
+  )
 }
 
 function GearIcon() {
