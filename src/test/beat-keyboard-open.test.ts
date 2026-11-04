@@ -165,8 +165,8 @@ describe('beat machine keyboard in the app', () => {
           return { text: node.textContent, background: style.backgroundColor, color: style.color }
         })
         expect(paint.text).toBe('Keyboard')
-        expect(paint.background).toBe('rgb(58, 58, 58)')
-        expect(paint.color).toBe('rgb(244, 244, 244)')
+        expect(paint.background).toBe('rgb(20, 28, 24)')
+        expect(paint.color).toBe('rgb(197, 210, 201)')
 
         await keyboard.click()
         await page.locator('[data-keyboard-dock="open"]').waitFor()

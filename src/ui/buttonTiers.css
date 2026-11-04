@@ -1,0 +1,530 @@
+/* Button tiers. One shared bevel, three levels of contrast.
+   Primary is the action you came to do. Secondary is a normal tool.
+   Quiet is navigation, utility, and a toggle that is off.
+   Loaded last so these tokens win over older one-off fills. */
+
+:root {
+  --btn-min: 40px;
+  --btn-radius: 10px;
+  --btn-bevel:
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.48),
+    0 1px 2px rgba(0, 0, 0, 0.38);
+  --btn-bevel-pressed:
+    inset 0 2px 4px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+
+  --btn-primary-bg: var(--accent);
+  --btn-primary-ink: var(--accent-ink);
+  --btn-primary-face: linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.06) 46%, rgba(0, 0, 0, 0.16));
+  --btn-rec-bg: #8f3030;
+  --btn-rec-ink: #fff4f4;
+  --btn-rec-face: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(0, 0, 0, 0.2));
+
+  --btn-secondary-bg: #24352c;
+  --btn-secondary-ink: #e7eee8;
+  --btn-secondary-border: #3c5448;
+  --btn-secondary-face: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03) 44%, rgba(0, 0, 0, 0.3));
+
+  --btn-quiet-bg: #141c18;
+  --btn-quiet-ink: #c5d2c9;
+  --btn-quiet-border: #2c3b33;
+  --btn-quiet-face: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.32));
+
+  --btn-toggle-bg: #2a6846;
+  --btn-toggle-ink: #f3fff8;
+  --btn-toggle-border: #8ed4ab;
+  --btn-toggle-mute-bg: #8e9aa6;
+  --btn-toggle-mute-ink: #141816;
+  --btn-toggle-solo-bg: #b8923a;
+  --btn-toggle-solo-ink: #241c04;
+  --btn-toggle-arm-bg: #a34a4a;
+  --btn-toggle-arm-ink: #fff6f6;
+}
+
+.btn-primary,
+.btn-secondary,
+.btn-quiet,
+.btn-tertiary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-height: var(--btn-min);
+  height: var(--btn-min);
+  min-width: var(--btn-min);
+  width: auto;
+  padding: 0 12px;
+  border-radius: var(--btn-radius);
+  border-style: solid;
+  border-width: 1px;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  box-shadow: var(--btn-bevel);
+}
+
+.btn-primary {
+  background-color: var(--btn-primary-bg);
+  background-image: var(--btn-primary-face);
+  color: var(--btn-primary-ink);
+  border-color: transparent;
+  font-weight: 740;
+}
+
+.btn-secondary {
+  background-color: var(--btn-secondary-bg);
+  background-image: var(--btn-secondary-face);
+  color: var(--btn-secondary-ink);
+  border-color: var(--btn-secondary-border);
+}
+
+.btn-quiet,
+.btn-tertiary {
+  background-color: var(--btn-quiet-bg);
+  background-image: var(--btn-quiet-face);
+  color: var(--btn-quiet-ink);
+  border-color: var(--btn-quiet-border);
+  border-radius: 999px;
+  font-weight: 640;
+  font-size: 12px;
+  padding: 0 10px;
+}
+
+.btn-quiet.on,
+.btn-tertiary.on,
+.btn-toggle.on {
+  background-color: var(--btn-toggle-bg);
+  background-image: var(--btn-quiet-face);
+  color: var(--btn-toggle-ink);
+  border-color: var(--btn-toggle-border);
+  box-shadow: var(--btn-bevel-pressed);
+}
+
+/* Primary: Play, Record, Add Track. Pads and clips keep their own faces. */
+.shell .add-track-btn,
+.shell .text-btn.primary {
+  background-color: var(--btn-primary-bg);
+  background-image: var(--btn-primary-face);
+  color: var(--btn-primary-ink);
+  border-color: transparent;
+  box-shadow: var(--btn-bevel);
+  font-weight: 740;
+}
+
+.shell .transport .t-btn.play {
+  background-color: var(--accent-dim);
+  background-image: var(--btn-primary-face);
+  color: #e7fff0;
+  border-color: color-mix(in srgb, var(--accent) 62%, #000);
+  box-shadow: var(--btn-bevel);
+  font-weight: 760;
+}
+
+.shell .transport .t-btn.play.on {
+  background-color: var(--btn-primary-bg);
+  color: var(--btn-primary-ink);
+  border-color: transparent;
+  box-shadow: var(--btn-bevel-pressed);
+}
+
+.shell .transport .t-btn.rec {
+  background-color: #3a1e1e;
+  background-image: var(--btn-rec-face);
+  color: #ffd4d4;
+  border-color: color-mix(in srgb, var(--rec) 55%, #000);
+  box-shadow: var(--btn-bevel);
+  font-weight: 760;
+}
+
+.shell .transport .t-btn.rec.on,
+.shell .mpc .hw-key.rec.on {
+  background-color: var(--rec);
+  background-image: var(--btn-rec-face);
+  color: white;
+  border-color: transparent;
+  box-shadow: var(--btn-bevel-pressed);
+}
+
+.shell .mpc .hw-key.rec:not(.on) {
+  background-color: #3a1e1e;
+  background-image: var(--btn-rec-face);
+  color: #ffd4d4;
+  border-color: color-mix(in srgb, var(--rec) 45%, #000);
+  box-shadow: var(--btn-bevel);
+}
+
+/* Secondary: normal tools. Neutral bevel, medium contrast. */
+.shell .menu-btn,
+.shell .history-btn,
+.shell .unstuck-btn,
+.shell .transport .t-btn:not(.play):not(.rec):not(.reset):not(.loop):not(.click):not(.count),
+.shell .cap-btn:not(.on),
+.shell .snap-toggle:not(.on),
+.shell .tool-slot .timeline-tools button.tool:not(.on),
+.shell .command-strip > .tool:not(.on),
+.shell .text-btn:not(.primary):not(.on):not(.warn),
+.shell .plugin-sheet header .text-btn:not(.primary):not(.on),
+.shell .dock .call-controls .t-btn:not(.on),
+.shell .dock .text-btn:not(.primary):not(.warn):not(.on),
+.shell .version-panel .text-btn:not(.primary),
+.shell .inserts button:not(.on),
+.shell .plugin-pick,
+.shell .insert-add,
+.shell .mpc-banks .hw-key:not(.on),
+.shell .note-repeat-hold:not(.on),
+.shell .mpc-full:not(.on),
+.shell .song-sheet .auto-mode button:not(.on),
+.shell .song-sheet .rec-bar button:not(.on),
+.shell .master-open,
+.shell .fx-open {
+  background-color: var(--btn-secondary-bg);
+  background-image: var(--btn-secondary-face);
+  color: var(--btn-secondary-ink);
+  border: 1px solid var(--btn-secondary-border);
+  box-shadow: var(--btn-bevel);
+}
+
+/* Quiet: utility, navigation, and toggles that are off. Hug the words. */
+.shell .views button:not(.active),
+.shell .mpc-keyboard,
+.shell .mpc-close,
+.shell .pl-head .piano-open,
+.shell .pl-head .beat-open,
+.shell .pl-head .onscreen-piano,
+.shell .pl-head .keyboard-toggle:not(.on),
+.shell .keyboard-toggle:not(.on),
+.shell .keyboard-close,
+.shell .roll-close,
+.shell .song-close,
+.shell .browser-close,
+.shell .sound-close,
+.shell .step-close,
+.shell .scaler-close,
+.shell .inst-close,
+.shell .guide-x,
+.shell .transport .t-btn.reset,
+.shell .width-reset,
+.shell .t-btn.loop:not(.on),
+.shell .t-btn.click:not(.on),
+.shell .t-btn.count:not(.on),
+.shell .pl-head .mini:not(.on-m):not(.on-s):not(.on-r):not(.on),
+.shell .sl-flags button:not(.on):not(.mute):not(.arm),
+.shell .sound-filter:not(.on),
+.shell .sound-chips button:not(.on),
+.shell .browser-tabs button:not(.on),
+.shell .song-pills button:not(.on),
+.shell .note-repeat-rate > button.hw-key:not(.note-repeat-rate-read),
+.shell .tool-slot .timeline-tools button.tool[aria-label^="Zoom"]:not(.on),
+.shell button[aria-label^="Close"]:not(.guide-scrim):not(.browser-scrim):not(.song-scrim):not(.sound-dismiss),
+.shell button[aria-label^="Previous"],
+.shell button[aria-label^="Next"] {
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: 100%;
+  min-width: max(var(--btn-min), max-content);
+  min-height: var(--btn-min);
+  height: var(--btn-min);
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--btn-quiet-border);
+  background-color: var(--btn-quiet-bg);
+  background-image: var(--btn-quiet-face);
+  color: var(--btn-quiet-ink);
+  box-shadow: var(--btn-bevel);
+  font-size: 12px;
+  font-weight: 640;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.shell .mpc-actions {
+  justify-content: flex-start;
+  width: auto;
+}
+
+.shell .pl-head .onscreen-piano-slot {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.shell .pl-head .onscreen-piano,
+.shell .keyboard-toggle,
+.shell .pl-head .beat-open,
+.shell .pl-head .piano-open {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: max(var(--btn-min), max-content);
+  max-width: 100%;
+}
+
+/* Full words on track flags. The letter marks stay in the markup for tight mixers. */
+.shell .pl-head .mini-mark,
+.shell .pl-head .arm-compact,
+.shell .head .mini-mark {
+  display: none;
+}
+
+.shell .pl-head .mini-word,
+.shell .pl-head .arm-full,
+.shell .head .mini-word {
+  display: inline;
+}
+
+/* A close control that only drew a cross still reads as the word. */
+.shell button[aria-label^="Close"]:not(.guide-scrim):not(.browser-scrim):not(.song-scrim):not(.sound-dismiss):not(.inst-close):not(.guide-x) {
+  font-size: 0;
+}
+
+.shell button[aria-label^="Close"]:not(.guide-scrim):not(.browser-scrim):not(.song-scrim):not(.sound-dismiss):not(.inst-close):not(.guide-x)::after {
+  content: "Close";
+  font-size: 12px;
+  font-weight: 640;
+  line-height: 1;
+  color: var(--btn-quiet-ink);
+}
+
+.shell .inst-close {
+  width: auto;
+  min-width: var(--btn-min);
+  height: var(--btn-min);
+  padding: 0 10px;
+  font-size: 0;
+}
+
+.shell .inst-close .fold-word {
+  display: inline;
+  font-size: 12px;
+  font-weight: 640;
+  color: var(--btn-quiet-ink);
+}
+
+.shell .stepper button[aria-label^="Previous"],
+.shell .stepper button[aria-label^="Next"] {
+  font-size: 0;
+}
+
+.shell .stepper button[aria-label^="Previous"]::after { content: "Previous"; font-size: 12px; font-weight: 640; color: var(--btn-quiet-ink); }
+.shell .stepper button[aria-label^="Next"]::after { content: "Next"; font-size: 12px; font-weight: 640; color: var(--btn-quiet-ink); }
+
+/* Active toggles: clear, not a second primary. */
+.shell .views button.active,
+.shell .views button.collab-tab.active,
+.shell .cap-btn.on,
+.shell .snap-toggle.on,
+.shell .tool-slot .timeline-tools button.tool.on,
+.shell .command-strip > .tool.on,
+.shell .t-btn.loop.on,
+.shell .t-btn.click.on,
+.shell .t-btn.count.on,
+.shell .t-btn.on:not(.play):not(.rec),
+.shell .keyboard-toggle.on,
+.shell .text-btn.on,
+.shell .menu-btn.on,
+.shell .mpc-banks .ch-tab.on,
+.shell .mpc-full.on,
+.shell .mpc .ch-tab.on:not(.rec),
+.shell .note-repeat-hold.on,
+.shell .sound-filter.on,
+.shell .sound-chips button.on,
+.shell .browser-tabs button.on,
+.shell .song-pills button.on,
+.shell .song-sheet .auto-mode button.on,
+.shell .inserts button.on,
+.shell .plugin-sheet .text-btn.on,
+.shell .dock .call-controls .t-btn.on,
+.shell .mini.on:not(.on-m):not(.on-s):not(.on-r) {
+  background-color: var(--btn-toggle-bg);
+  background-image: var(--btn-quiet-face);
+  color: var(--btn-toggle-ink);
+  border: 1px solid var(--btn-toggle-border);
+  box-shadow: var(--btn-bevel-pressed);
+}
+
+/* Mix flags share the strip's row. Color only, so the fader layout stays put. */
+.shell .strip .mini:not(.on-m):not(.on-s):not(.on-r):not(.on) {
+  background-color: var(--btn-quiet-bg);
+  background-image: var(--btn-quiet-face);
+  color: var(--btn-quiet-ink);
+  border: 1px solid var(--btn-quiet-border);
+  box-shadow: var(--btn-bevel);
+}
+
+.shell .sl-flags button.on:not(.mute):not(.arm) {
+  background-color: var(--btn-toggle-solo-bg);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.32), rgba(0, 0, 0, 0.14));
+  color: var(--btn-toggle-solo-ink);
+  border-color: transparent;
+  box-shadow: var(--btn-bevel-pressed);
+}
+
+.shell .mini.on-m,
+.shell .strip .mini.on-m,
+.shell .sl-flags button.mute.on {
+  background-color: var(--btn-toggle-mute-bg);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(0, 0, 0, 0.12));
+  color: var(--btn-toggle-mute-ink);
+  border-color: transparent;
+  box-shadow: var(--btn-bevel-pressed);
+}
+
+.shell .mini.on-s,
+.shell .strip .mini.on-s {
+  background-color: var(--btn-toggle-solo-bg);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.32), rgba(0, 0, 0, 0.14));
+  color: var(--btn-toggle-solo-ink);
+  border-color: transparent;
+  box-shadow: var(--btn-bevel-pressed);
+}
+
+.shell .mini.on-r,
+.shell .strip .mini.on-r,
+.shell .mixer-view .arm-flag.on-r,
+.shell .sl-flags button.arm.on {
+  background-color: var(--btn-toggle-arm-bg);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(0, 0, 0, 0.18));
+  color: var(--btn-toggle-arm-ink);
+  border-color: transparent;
+  box-shadow: var(--btn-bevel-pressed);
+}
+
+/* Touch floor. Quiet pills stay 40px even where an older rule shrank them. */
+.shell .views button,
+.shell .pl-head .mini,
+.shell .pl-head .piano-open,
+.shell .pl-head .beat-open,
+.shell .pl-head .onscreen-piano,
+.shell .strip .mini,
+.shell .history-btn,
+.shell .transport .t-btn,
+.shell .menu-btn,
+.shell .mpc-keyboard,
+.shell .mpc-close,
+.shell .song-close,
+.shell .browser-close,
+.shell .sound-close,
+.shell .step-close,
+.shell .scaler-close,
+.shell .width-reset,
+.shell .sound-filter,
+.shell .browser-tabs button,
+.shell .song-pills button,
+.shell .plugin-sheet .text-btn,
+.shell .text-btn,
+.shell .cap-btn,
+.shell .tool-slot .timeline-tools button {
+  min-height: var(--btn-min);
+}
+
+.shell.phone .views button,
+.shell.fold .views button,
+.shell.phone .pl-head .piano-open,
+.shell.fold .pl-head .piano-open,
+.shell.phone .pl-head .beat-open,
+.shell.fold .pl-head .beat-open,
+.shell.phone.land .history-btn,
+.shell.phone.land .views button {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: max(var(--btn-min), max-content);
+  min-height: var(--btn-min);
+  height: var(--btn-min);
+}
+
+@media (hover: hover) {
+  .shell .menu-btn:hover,
+  .shell .history-btn:hover,
+  .shell .views button:not(.active):hover,
+  .shell .text-btn:not(.primary):hover,
+  .shell .t-btn:not(.play):not(.rec):hover,
+  .shell .mini:not(.on-m):not(.on-s):not(.on-r):hover,
+  .shell .cap-btn:hover,
+  .shell .tool-row button:hover,
+  .shell .browser-tabs button:not(.on):hover,
+  .shell .mpc-keyboard:hover,
+  .shell .mpc-close:hover,
+  .shell .pl-head .beat-open:hover,
+  .shell .pl-head .piano-open:hover {
+    box-shadow: var(--btn-bevel);
+  }
+
+  .shell .add-track-btn:hover,
+  .shell .text-btn.primary:hover,
+  .shell .transport .t-btn.play:hover,
+  .shell .transport .t-btn.rec:hover {
+    box-shadow: var(--btn-bevel), 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+}
+
+/* Desk and fold headers wrap so the track name stays readable beside full words. */
+.shell:not(.phone) .arrange {
+  --lane-h: 108px;
+}
+
+.shell:not(.phone) .arrange .pl-head {
+  flex-wrap: wrap;
+  align-content: center;
+  align-items: center;
+  row-gap: 2px;
+  height: 100%;
+}
+
+.shell:not(.phone) .arrange .pl-head .swatch {
+  align-self: stretch;
+}
+
+.shell:not(.phone) .arrange .pl-head .name {
+  flex: 1 0 calc(100% - 16px);
+  min-width: calc(100% - 16px);
+  width: auto;
+  height: 40px;
+  min-height: 40px;
+}
+
+/* Sheets and menus portal to the body, outside .shell. */
+.song-sheet .song-close,
+.song-sheet .song-pills button,
+.song-sheet .auto-mode button,
+.guide-sheet .guide-x,
+.anchored-menu .inserts button,
+.anchored-menu .plugin-pick,
+.anchored-menu .insert-add {
+  min-height: var(--btn-min);
+  min-width: var(--btn-min);
+  height: var(--btn-min);
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--btn-quiet-border);
+  background: var(--btn-quiet-face), var(--btn-quiet-bg);
+  color: var(--btn-quiet-ink);
+  box-shadow: var(--btn-bevel);
+  font-size: 12px;
+  font-weight: 640;
+}
+
+.anchored-menu .inserts button:not(.on),
+.anchored-menu .plugin-pick,
+.anchored-menu .insert-add,
+.song-sheet .auto-mode button:not(.on),
+.song-sheet .rec-bar button:not(.on) {
+  border-color: var(--btn-secondary-border);
+  background: var(--btn-secondary-face), var(--btn-secondary-bg);
+  color: var(--btn-secondary-ink);
+}
+
+.song-sheet .song-pills button.on,
+.song-sheet .auto-mode button.on,
+.song-sheet .rec-bar button.on,
+.anchored-menu .inserts button.on,
+.auto-mode button.on {
+  background: var(--btn-quiet-face), var(--btn-toggle-bg);
+  color: var(--btn-toggle-ink);
+  border-color: var(--btn-toggle-border);
+  box-shadow: var(--btn-bevel-pressed);
+}
