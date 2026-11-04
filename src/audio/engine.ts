@@ -405,6 +405,7 @@ export class AudioEngine {
 
   /** Call from the tap handler itself. Creates the context and resumes it before any await. */
   unlock() {
+    void preloadWasmInserts()
     if (!this.ctx) {
       this.ctx = openContext(48000, this.bufferHint)
       this.buildMaster()
@@ -416,6 +417,7 @@ export class AudioEngine {
   }
 
   async resume(preferredRate = 48000, settle = true) {
+    const wasmReady = preloadWasmInserts()
     const fresh = !this.ctx
     if (!this.ctx) {
       this.ctx = openContext(preferredRate, this.bufferHint)
@@ -430,6 +432,7 @@ export class AudioEngine {
         /* iOS rejects resume outside a tap. The camera must still open. */
       }
     }
+    await wasmReady
     await this.ensureWorklets()
     this.refreshClockAnchor()
     if (settle) await this.finishSession()

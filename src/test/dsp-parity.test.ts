@@ -283,7 +283,12 @@ describe('rust EQ parity', () => {
     rust.destroy()
   })
 
-  it('runs the AudioWorklet processor class when the flag is on, and skips it when off', async () => {
+  it('runs the AudioWorklet processor class by default, and skips it for wasmDsp=0', async () => {
+    const flagHost = globalThis as { __CUEHARBOR_WASM_DSP__?: boolean }
+    expect(wasmDspRequested()).toBe(true)
+    expect(wasmDspRequested({ location: { search: '?wasmDsp=0' } } as typeof globalThis & { location?: { search?: string } })).toBe(false)
+    expect(wasmDspRequested({ location: { search: '?wasmDsp=1' } } as typeof globalThis & { location?: { search?: string } })).toBe(true)
+    flagHost.__CUEHARBOR_WASM_DSP__ = false
     expect(wasmDspRequested()).toBe(false)
     const blocked = {
       audioWorklet: {
@@ -558,7 +563,7 @@ async function renderChain(flag: boolean, left: Float32Array, right: Float32Arra
   if (flag) {
     host.__CUEHARBOR_WASM_DSP__ = true
     await preloadWasmInserts()
-  } else delete host.__CUEHARBOR_WASM_DSP__
+  } else host.__CUEHARBOR_WASM_DSP__ = false
   const ids = ['eq', 'compressor', 'saturator', 'reverb', 'limiter']
   const params = [
     { ...defaultParams('eq'), midG: 3, midF: 1200 },

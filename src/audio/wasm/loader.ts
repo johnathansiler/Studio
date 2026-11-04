@@ -6,7 +6,7 @@ type AudioHost = typeof globalThis & {
   AudioWorkletNode?: typeof AudioWorkletNode
 }
 
-/** Load the Rust EQ worklet. Returns null while the flag is off, which is the default. */
+/** Load the Rust EQ worklet. Returns null when `?wasmDsp=0` forces the TypeScript processors. */
 export async function loadWasmEqWorklet(ctx: AudioContext): Promise<AudioWorkletNode | null> {
   if (!wasmDspRequested()) return null
   const HostNode = (globalThis as AudioHost).AudioWorkletNode
@@ -19,7 +19,7 @@ export async function loadWasmEqWorklet(ctx: AudioContext): Promise<AudioWorklet
   })
 }
 
-/** Used only when `wasmDsp=1` or the test flag is set. A normal launch never calls this. */
+/** Standalone EQ worklet. The insert chain does not use this entry. */
 export async function bootWasmDsp(): Promise<AudioWorkletNode | null> {
   if (!wasmDspRequested()) return null
   const HostContext = (globalThis as AudioHost).AudioContext

@@ -8,26 +8,29 @@ type WasmFactory = (id: string, sampleRate: number) => Processor
 
 let wasmFactory: WasmFactory | null = null
 let wasmPreload: Promise<void> | null = null
+let wasmGaveUp = false
 
 /**
- * Load the Rust insert chunk. Returns immediately while the flag is off,
- * so a normal session never fetches `dspBytes`.
- * `createProcessor` stays synchronous: await this before building a flagged chain.
+ * Load the Rust insert chunk. Returns immediately for `?wasmDsp=0`.
+ * A failed fetch or instantiate is swallowed so the TypeScript processors run instead.
+ * `createProcessor` stays synchronous: await this before building a chain.
  */
 export function preloadWasmInserts(): Promise<void> {
   if (!wasmDspRequested()) return Promise.resolve()
-  if (wasmFactory) return Promise.resolve()
+  if (wasmFactory || wasmGaveUp) return Promise.resolve()
   wasmPreload ??= (async () => {
-    const [{ loadDspWasmBytes }, insert] = await Promise.all([
-      import('../wasm/engine'),
-      import('../wasm/insert'),
-    ])
-    await loadDspWasmBytes()
-    wasmFactory = insert.createWasmInsert
-  })().catch((error: unknown) => {
-    wasmPreload = null
-    throw error
-  })
+    try {
+      const [{ loadDspWasmBytes }, insert] = await Promise.all([
+        import('../wasm/engine'),
+        import('../wasm/insert'),
+      ])
+      await loadDspWasmBytes()
+      wasmFactory = insert.createWasmInsert
+    } catch {
+      wasmGaveUp = true
+      wasmFactory = null
+    }
+  })()
   return wasmPreload
 }
 

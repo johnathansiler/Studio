@@ -117,7 +117,7 @@ export async function renderInsertJob(job: InsertJob) {
 async function wasmProcessors(job: InsertJob): Promise<((id: string, sampleRate: number) => Processor | null) | null> {
   const host = globalThis as { __CUEHARBOR_WASM_DSP__?: boolean }
   if (!job.wasmDsp) {
-    delete host.__CUEHARBOR_WASM_DSP__
+    host.__CUEHARBOR_WASM_DSP__ = false
     return null
   }
   host.__CUEHARBOR_WASM_DSP__ = true
@@ -125,9 +125,9 @@ async function wasmProcessors(job: InsertJob): Promise<((id: string, sampleRate:
     const mod = await import('./plugins/createAll')
     await mod.preloadWasmInserts()
     return mod.createProcessor
-  } catch (error) {
+  } catch {
     delete host.__CUEHARBOR_WASM_DSP__
-    throw error
+    return null
   }
 }
 

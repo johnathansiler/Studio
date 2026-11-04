@@ -184,7 +184,7 @@ class InsertProcessor extends AudioWorkletProcessor {
     }
   }
 
-  /** The DSP chunk loads only for `?wasmDsp=1`. `process()` keeps the previous chain until it arrives. */
+  /** The DSP chunk loads for the default Rust chain. `process()` keeps the previous chain until it arrives. */
   private async installWasm(msg: StateMsg & { wasmDsp?: boolean }, epoch: number) {
     ;(globalThis as { __CUEHARBOR_WASM_DSP__?: boolean }).__CUEHARBOR_WASM_DSP__ = true
     try {
