@@ -40,7 +40,7 @@ import { audioStateOf, planRecovery, type RecoveryAction } from './core/session'
 import { bufferHintOf, formatLatencyReadout, latencyHintOrder, readBufferHint, writeBufferHint, type BufferHint } from './core/buffer'
 import { ATTACK_SEC, RELEASE_SEC, builtinLevel, drumLevel, liveWhen, scheduleDelaySeconds } from './liveStage'
 import { renderSamplerSpan } from './plugins/sampler'
-import { renderGraph } from './renderGraph'
+import { renderGraphParallel } from './parallelRender'
 import { loadModule, peekModule } from './plugins/registry'
 import { createLoudness, measureLoudness, type LoudnessState } from './plugins/dsp'
 import type { Processor } from './plugins/types'
@@ -2106,7 +2106,7 @@ export class AudioEngine {
     for (const plugin of project.masterPlugins) ids.add(plugin.pluginId)
     await Promise.all([...ids].map((id) => loadModule(id)))
     const scale = tuneBlockScale(project.scale)
-    const graph = renderGraph({
+    const graph = await renderGraphParallel({
       tracks: renderedTracks,
       masterPlugins: project.masterPlugins,
       masterVolume: project.masterVolume,

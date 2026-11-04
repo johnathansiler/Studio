@@ -44,9 +44,23 @@ Checked on 4 Nov 2026, without turning the headers on:
 
 ### 2.2 Multi-core task graph
 
-**What exists.** `renderGraph` (`src/audio/renderGraph.ts`) topologically sorts tracks, groups, and the master, and refuses a cycle (`findCycle` in `src/audio/routing.ts`). The live graph connects the same routes on one audio thread.
+**What exists.** Tracks, sends, buses, and the master are a DAG in `src/audio/core/graph.ts`. That file has no DOM and no Web Audio types. `scheduleRoutes` topologically orders the graph, builds parallel waves, and refuses a feedback route. The refusal text names the loop (`Feedback route refused: a → b → a`). The store shows that text and does not apply the route. `walkLatency` is the dependency latency: a node's output time is its own latency plus the slowest input, and each edge is delayed so the inputs of the next node arrive together. `compensateGraph` (`src/audio/core/latency.ts`) returns that delay map, which is the PDC pass the live `DelayNode`s and the offline renderer already apply.
 
-**Not done.** Independent tracks are not farmed out to worker cores. A browser cannot share the live `AudioContext` graph across threads without copying audio, so a multi-core scheduler waits on the native core.
+`createScheduler` is the pull queue. `take` returns a node whose inputs are finished, or nothing. `complete` releases whatever was waiting only on that node. A bus stays pending until the tracks that feed it finish. The worker that finished is not blocked on the bus; it takes the next ready track. `renderGraph` walks the same order on one thread. `LiveRack.connectGraph` still connects those routes on the audio thread.
+
+**Web parallelism.** Realtime multi-core is not available in this browser build, and it was not faked.
+
+- One `AudioContext` runs every `AudioWorklet` `process` on a single audio thread, in graph order. A second worklet does not add a core. The live rack already has one worklet per track, and they still share that thread.
+- Splitting a 128-sample callback across `Worker`s copies the block. `SharedArrayBuffer` would avoid the copy, and it needs COOP/COEP. Those headers stay off. A warm worker round trip for one quantum was slower than rendering that quantum on the calling thread, so it would add dropouts rather than remove them.
+- Extra `AudioContext`s are not sample-locked to each other, so they cannot hold the PDC delays.
+
+Offline bounce can wait. `renderGraphParallel` (`src/audio/parallelRender.ts`) uses the pull scheduler. In the browser the bounce worker spawns module workers (`src/audio/workers/track.browser.ts`). In Node the same jobs use `worker_threads` (`src/audio/nodePool.ts`). A sidechain mix stays on one thread so the key hears the same audio as the sequential render. If the workers fail to start, bounce uses the single-thread render. Playback, sends, and meters are unchanged.
+
+`benchmarkMixGraph` (`src/audio/graphBench.ts`, `src/test/graph-schedule.test.ts`) builds tracks with EQ, compressor, and saturator, plus a bus and a send. It sums prepared insert chains for a 128-sample quantum and counts a dropout when that sum exceeds the buffer (2.67 ms at 48 kHz). It also times the sequential offline mix against the worker mix. On the 4-core machine that added this section, 8 tracks and 0.75 s took 1858 ms on one thread and 687 ms on 4 workers (2.71×), and the samples matched. The same quantum took 8.29 ms on one thread and 13.53 ms through workers. Both overran the 128-sample budget; the worker path overran by more. Realtime before and after are the same numbers, because the audio thread was not split.
+
+**Native plan.** The callback owns a pool of workers and runs this scheduler. `take` and `complete` are the only coordination. Buses are ordinary nodes with dependencies. No lock is held while a bus waits. The web types stay out of `src/audio/core/graph.ts`.
+
+**Not done.** Live playback is still one audio thread. Multi-core realtime waits on that native pool. Do not add COOP/COEP, and do not add worklets to imitate it.
 
 ### 2.3 Transport and timing
 
@@ -120,7 +134,7 @@ Plugin, not started: the format's audio callback (VST3, AU, AAX) calls `processB
 | Feature | Web build | Native app / plugin build | Status | Required action |
 | --- | --- | --- | --- | --- |
 | Audio thread safety | Steady 128–2048 sample quanta reuse prepared chain, automation, meter, reverb, tune, and EQ windows. No `await` or logging in `process()`. A larger quantum, and the buffer view for a block that contains a MIDI note, can still allocate once. Offline bounce still allocates its output. | Same rule inside the audio callback. The shared core is a separate port and was not changed here. | Pass | None on the web render thread for a normal quantum. Keep new plugin windows in `prepare`. |
-| Graph scheduling | One audio thread. Topological sort for routes and offline render. | Worker threads per independent track, then buses. | Partial | Later native scheduler. Do not fake it with extra Web Audio nodes. |
+| Graph scheduling | DAG in `src/audio/core/graph.ts`: topo order, feedback refusal, dependency latency into the PDC pass. Live playback is one audio thread. Offline bounce runs independent tracks on workers; a bus starts when its inputs finish. | The same pull scheduler on the audio callback's worker pool. A worker takes the next ready node and does not block on a bus. | Partial | Realtime multi-core waits on the native pool. Do not add COOP/COEP or extra worklets. |
 | Plugin delay compensation | Dry path of a latent plugin is delayed when wet is below 1. Track, send, and master edges use the reported latency, live and offline. | Same numbers inside the shared core. | Pass | None for the mix graph. A plugin that reports the wrong latency will still be compensated to that wrong number. |
 | Sample-accurate timing | Tempo map, cheap automation, and instrument notes use sample offsets. A note at offset 0 matches a note at the start of the block. | `MidiEvent.sampleOffset` splits the block. | Pass | Clip-edge fades are still not applied on every audio region. That is the arranger row, not this one. |
 | Plugin base | `NativePlugin` wraps the current processors, including tune, step sequencer, sampler / Beat Machine, and the synth. The live insert chain is still the TypeScript processors. | `core/` already has the clean EQ on the same contract, compiled to WASM and checked in `dsp-parity`. This change does not modify that crate. | Partial | The flag that runs the WASM EQ in the insert chain stays off. More plugins are still TypeScript. |

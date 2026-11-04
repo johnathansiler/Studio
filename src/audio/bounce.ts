@@ -1,6 +1,7 @@
 import { createPlugin } from './plugins/catalog'
 import { loadModule, peekModule } from './plugins/registry'
-import { renderGraph, type GraphTrack } from './renderGraph'
+import { type GraphTrack } from './renderGraph'
+import { renderGraphParallel } from './parallelRender'
 import { prepareClipNotes } from '../model/midiTools'
 import { tuneBlockScale } from './plugins/autoTune'
 import { beatsToSamples, projectEndSample } from '../model/time'
@@ -242,7 +243,7 @@ async function renderChannels(project: Project, assets: Map<string, AudioAsset>,
     graphTracks[0].groupId = null
     graphTracks[0].sends = []
   }
-  return renderGraph({
+  return renderGraphParallel({
     tracks: graphTracks,
     masterPlugins,
     masterVolume,
