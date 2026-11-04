@@ -11,6 +11,8 @@ import { automationSchedule, channelAutomationMode, laneIsLive, sendLane, valueC
 import { projectSampleBeat } from '../model/tempoMap'
 import { applyRamps, smoothParam } from './paramCurve'
 import { loadModule } from './plugins/registry'
+import { createProcessor } from './plugins/createAll'
+import { wasmDspRequested } from './wasm/flag'
 import type { Processor } from './plugins/types'
 import { MASTER, REMOTE, edgeDelays, findCycle, type RoutePoint } from './routing'
 
@@ -435,7 +437,7 @@ export class LiveRack {
       const module = await loadModule(plugin.pluginId)
       if (!module) return
       try {
-        const proc = module.create(sampleRate)
+        const proc = createProcessor(plugin.pluginId, sampleRate) ?? module.create(sampleRate)
         primeProcessor(proc, sampleRate, SCRIPT_BLOCK)
         this.processors.set(plugin.id, proc)
       } catch {
@@ -658,6 +660,7 @@ export class LiveRack {
         scaleIntervals: [...scale.scaleIntervals],
         scaleCents: scale.scaleCents ? [...scale.scaleCents] : undefined,
         quality: this.quality,
+        wasmDsp: wasmDspRequested(),
         playing: this.playing,
         originTime: this.originTime,
         originSample: this.originSample,

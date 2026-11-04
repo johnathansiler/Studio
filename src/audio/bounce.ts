@@ -1,5 +1,6 @@
 import { createPlugin } from './plugins/catalog'
 import { loadModule, peekModule } from './plugins/registry'
+import { createProcessor } from './plugins/createAll'
 import { renderGraph, type GraphTrack } from './renderGraph'
 import { prepareClipNotes } from '../model/midiTools'
 import { tuneBlockScale } from './plugins/autoTune'
@@ -255,7 +256,7 @@ async function renderChannels(project: Project, assets: Map<string, AudioAsset>,
     scaleCents: scale.scaleCents,
     automation: project.automation,
     liveRemote: false,
-    create: (pluginId, sampleRate) => peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
+    create: (pluginId, sampleRate) => createProcessor(pluginId, sampleRate) ?? peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
   })
 }
 

@@ -133,7 +133,10 @@ class InsertProcessor extends AudioWorkletProcessor {
   private onMessage(data: StateMsg | { type?: string; [key: string]: unknown }) {
     if (!data?.type) return
     if (data.type === 'state') {
-      const msg = data as unknown as StateMsg
+      const msg = data as unknown as StateMsg & { wasmDsp?: boolean }
+      if (typeof msg.wasmDsp === 'boolean') {
+        ;(globalThis as { __CUEHARBOR_WASM_DSP__?: boolean }).__CUEHARBOR_WASM_DSP__ = msg.wasmDsp
+      }
       this.slots = msg.slots || []
       this.automation = msg.automation || []
       this.tempo = msg.tempo || 120

@@ -42,6 +42,7 @@ import { ATTACK_SEC, RELEASE_SEC, builtinLevel, drumLevel, liveWhen, scheduleDel
 import { renderSamplerSpan } from './plugins/sampler'
 import { renderGraph } from './renderGraph'
 import { loadModule, peekModule } from './plugins/registry'
+import { createProcessor } from './plugins/createAll'
 import { createLoudness, measureLoudness, type LoudnessState } from './plugins/dsp'
 import type { Processor } from './plugins/types'
 
@@ -2119,7 +2120,7 @@ export class AudioEngine {
       scaleCents: scale.scaleCents,
       automation: project.automation,
       liveRemote: false,
-      create: (pluginId, sampleRate) => peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
+      create: (pluginId, sampleRate) => createProcessor(pluginId, sampleRate) ?? peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
     })
     return encodeWav(graph.master, rate, { dither: 'tpdf' })
   }

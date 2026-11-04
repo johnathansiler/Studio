@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createNativePlugin } from '../audio/core/registry'
-import { defaultParams, descriptor } from '../audio/plugins/catalog'
+import { FACTORY, defaultParams, descriptor } from '../audio/plugins/catalog'
+import { createCore } from '../audio/plugins/dispatch'
+import { prepareChainPool, processChain, type ChainSlot } from '../audio/plugins/chain'
+import { createProcessor } from '../audio/plugins/createAll'
 import { create as createEq } from '../audio/plugins/eq'
 import { glideValue } from '../audio/paramCurve'
 import { DSP_WASM_BYTE_LENGTH } from '../audio/wasm/dspBytes'
 import { WasmEq } from '../audio/wasm/engine'
+import { WasmInsert } from '../audio/wasm/insert'
 import { wasmDspRequested } from '../audio/wasm/flag'
 import { loadWasmEqWorklet } from '../audio/wasm/loader'
 
@@ -340,4 +344,192 @@ interface WorkletProcessor {
 
 function viStubAudioNode(ctor: new (ctx: AudioContext, name: string) => { name: string }) {
   ;(globalThis as { AudioWorkletNode?: unknown }).AudioWorkletNode = ctor
+}
+
+const INSERTS = ['tune', 'eq', 'compressor', 'vocal', 'saturator', 'reverb', 'delay', 'mod', 'limiter'] as const
+const PARITY_LIMIT = 1e-5
+
+function renderInsert(
+  id: (typeof INSERTS)[number],
+  left: Float32Array,
+  right: Float32Array,
+  params: Record<string, number>,
+  rate: number,
+  block: number,
+  extra: { quality?: 'full' | 'eco'; offline?: boolean; note?: { pitch: number; vel: number } } = {},
+) {
+  const ts = createCore(id, rate) as ReturnType<typeof createCore> & { note?: (pitch: number, vel: number) => void }
+  const rust = new WasmInsert(id, rate)
+  ts.reset()
+  rust.reset()
+  if (extra.note) {
+    ts.note?.(extra.note.pitch, extra.note.vel)
+    rust.note(extra.note.pitch, extra.note.vel)
+  }
+  const tsL = new Float32Array(left.length)
+  const tsR = new Float32Array(right.length)
+  const rsL = new Float32Array(left.length)
+  const rsR = new Float32Array(right.length)
+  for (let offset = 0; offset < left.length; offset += block) {
+    const count = Math.min(block, left.length - offset)
+    const ctx = {
+      ...context(rate, offset),
+      quality: extra.quality ?? 'full' as const,
+      offline: extra.offline ?? false,
+    }
+    ts.process(
+      [left.subarray(offset, offset + count), right.subarray(offset, offset + count)],
+      [tsL.subarray(offset, offset + count), tsR.subarray(offset, offset + count)],
+      params,
+      ctx,
+    )
+    rust.process(
+      [left.subarray(offset, offset + count), right.subarray(offset, offset + count)],
+      [rsL.subarray(offset, offset + count), rsR.subarray(offset, offset + count)],
+      params,
+      ctx,
+    )
+  }
+  const score = Math.max(maxAbs(tsL, rsL), maxAbs(tsR, rsR))
+  const latencyTs = ts.latencySamples || 0
+  const latencyRs = rust.latencySamples || 0
+  rust.destroy()
+  return { score, latencyTs, latencyRs }
+}
+
+function maxAbs(a: Float32Array, b: Float32Array) {
+  let max = 0
+  for (let i = 0; i < a.length; i++) {
+    const delta = Math.abs((a[i] || 0) - (b[i] || 0))
+    if (delta > max) max = delta
+  }
+  return max
+}
+
+describe('rust insert parity', () => {
+  it('matches every ported insert across rates, blocks, presets, and glides', () => {
+    const scores: { name: string; max: number }[] = []
+    const rates = [48000, 44100]
+    const blocks = [64, 128, 256]
+    for (const id of INSERTS) {
+      const presets = [{ name: 'defaults', params: {} }, ...(FACTORY[id] ?? []).map((preset) => ({ name: preset.name, params: preset.params }))]
+      let worst = 0
+      for (const preset of presets) {
+        for (const rate of rates) {
+          for (const block of blocks) {
+            const frames = id === 'tune' || id === 'mod' ? 2048 : 1024
+            const params = { ...defaultParams(id), ...preset.params }
+            const left = sine(220, frames, rate, 0.35)
+            const right = noise(frames, 0.2)
+            const rendered = renderInsert(id, left, right, params, rate, block)
+            if (rendered.score > worst) worst = rendered.score
+            expect(rendered.latencyRs, `${id} ${preset.name} latency`).toBe(rendered.latencyTs)
+            expect(rendered.score, `${id} ${preset.name} ${rate} ${block}`).toBeLessThan(PARITY_LIMIT)
+          }
+        }
+      }
+      scores.push({ name: id, max: worst })
+    }
+    const glide = glideInsert('compressor', 'threshold', -24)
+    const drive = glideInsert('saturator', 'drive', 0.65)
+    scores.push({ name: 'compressor glide', max: glide })
+    scores.push({ name: 'saturator glide', max: drive })
+    expect(glide).toBeLessThan(PARITY_LIMIT)
+    expect(drive).toBeLessThan(PARITY_LIMIT)
+    const synth = renderInsert('synth' as 'eq', sine(440, 1024, 48000, 0.05), sine(440, 1024, 48000, 0.05), {}, 48000, 128, { note: { pitch: 60, vel: 0.8 } })
+    expect(synth.score).toBeLessThan(PARITY_LIMIT)
+    scores.push({ name: 'synth', max: synth.score })
+    console.log(`DSP_WASM_BYTES ${DSP_WASM_BYTE_LENGTH}`)
+    for (const score of scores) console.log(`DSP_PARITY_PLUGIN ${score.name} maxAbs=${score.max}`)
+  })
+
+  it('runs the insert chain through WASM when the flag is on', () => {
+    const rate = 48000
+    const frames = 2048
+    const block = 128
+    const left = sine(330, frames, rate, 0.4)
+    const right = sine(440, frames, rate, 0.25)
+    const plain = renderChain(false, left, right, rate, block)
+    const flagged = renderChain(true, left, right, rate, block)
+    const max = Math.max(maxAbs(plain.left, flagged.left), maxAbs(plain.right, flagged.right))
+    console.log(`DSP_PARITY_CHAIN maxAbs=${max}`)
+    expect(max).toBeLessThan(PARITY_LIMIT)
+    expect(flagged.latency).toBe(plain.latency)
+  })
+})
+
+function glideInsert(id: 'compressor' | 'saturator', key: string, target: number) {
+  const rate = 48000
+  const block = 128
+  const frames = block * 8
+  const left = sine(180, frames, rate, 0.5)
+  const right = noise(frames, 0.15)
+  const start = defaultParams(id)
+  const goal = { ...start, [key]: target }
+  const ts = createCore(id, rate)
+  const rust = new WasmInsert(id, rate)
+  ts.reset()
+  rust.reset()
+  const current = { ...start }
+  const tsL = new Float32Array(frames)
+  const tsR = new Float32Array(frames)
+  const rsL = new Float32Array(frames)
+  const rsR = new Float32Array(frames)
+  let worst = 0
+  for (let offset = 0; offset < frames; offset += block) {
+    const count = Math.min(block, frames - offset)
+    const params: Record<string, number> = {}
+    for (const name of Object.keys(start)) {
+      params[name] = glideValue(current[name], goal[name], count, rate)
+      current[name] = params[name]
+    }
+    const ctx = { ...context(rate, offset), quality: 'full' as const, offline: false }
+    ts.process([left.subarray(offset, offset + count), right.subarray(offset, offset + count)], [tsL.subarray(offset, offset + count), tsR.subarray(offset, offset + count)], params, ctx)
+    rust.process([left.subarray(offset, offset + count), right.subarray(offset, offset + count)], [rsL.subarray(offset, offset + count), rsR.subarray(offset, offset + count)], params, ctx)
+    worst = Math.max(worst, maxAbs(tsL.subarray(offset, offset + count), rsL.subarray(offset, offset + count)), maxAbs(tsR.subarray(offset, offset + count), rsR.subarray(offset, offset + count)))
+  }
+  rust.destroy()
+  return worst
+}
+
+function renderChain(flag: boolean, left: Float32Array, right: Float32Array, rate: number, block: number) {
+  const host = globalThis as { __CUEHARBOR_WASM_DSP__?: boolean }
+  if (flag) host.__CUEHARBOR_WASM_DSP__ = true
+  else delete host.__CUEHARBOR_WASM_DSP__
+  const ids = ['eq', 'compressor', 'saturator', 'reverb', 'limiter']
+  const params = [
+    { ...defaultParams('eq'), midG: 3, midF: 1200 },
+    { ...defaultParams('compressor'), threshold: -18, ratio: 4, makeup: 3, mix: 1 },
+    { ...defaultParams('saturator'), drive: 0.35, mix: 0.8 },
+    { ...defaultParams('reverb'), mix: 0.25, size: 0.5 },
+    { ...defaultParams('limiter'), threshold: -6, ceiling: -1 },
+  ]
+  const slots: ChainSlot[] = ids.map((id, index) => ({
+    id: `slot-${id}`,
+    pluginId: id,
+    enabled: true,
+    wet: id === 'limiter' ? 0.5 : 1,
+    params: params[index],
+    failed: false,
+    sidechain: '',
+    processor: createProcessor(id, rate),
+  }))
+  const pool = prepareChainPool(slots.length, 2, block)
+  const outL = new Float32Array(left.length)
+  const outR = new Float32Array(right.length)
+  let latency = 0
+  for (let offset = 0; offset < left.length; offset += block) {
+    const count = Math.min(block, left.length - offset)
+    const result = processChain(
+      slots,
+      [left.subarray(offset, offset + count), right.subarray(offset, offset + count)],
+      [outL.subarray(offset, offset + count), outR.subarray(offset, offset + count)],
+      { ...context(rate, offset), quality: 'full', offline: false },
+      undefined,
+      pool,
+    )
+    latency = result.latency
+  }
+  delete host.__CUEHARBOR_WASM_DSP__
+  return { left: outL, right: outR, latency }
 }

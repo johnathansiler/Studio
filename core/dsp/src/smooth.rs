@@ -111,6 +111,73 @@ pub fn glide_sample(from: f64, to: f64, sample_rate: f64) -> f64 {
 }
 
 /// One block step. Matches `glideValue` with the default 10 ms time.
+/// Per-sample gain or mix. The first target snaps, matching `SampleGlide`.
+#[derive(Clone, Copy, Debug)]
+pub struct SampleGlide {
+    value: f64,
+    ready: bool,
+    alpha: f64,
+    rate: f64,
+}
+
+impl Default for SampleGlide {
+    fn default() -> Self {
+        Self {
+            value: 0.0,
+            ready: false,
+            alpha: 0.0,
+            rate: 0.0,
+        }
+    }
+}
+
+impl SampleGlide {
+    pub fn prepare(&mut self, sample_rate: f64) {
+        let rate = if sample_rate > 0.0 {
+            sample_rate
+        } else {
+            48_000.0
+        };
+        if rate == self.rate && self.alpha > 0.0 {
+            return;
+        }
+        self.rate = rate;
+        self.alpha = sample_alpha(rate);
+    }
+
+    pub fn settled(&self) -> bool {
+        self.ready
+    }
+
+    pub fn peek(&self) -> f64 {
+        self.value
+    }
+
+    pub fn snap(&mut self, target: f64) -> f64 {
+        self.value = if target.is_finite() { target } else { 0.0 };
+        self.ready = true;
+        self.value
+    }
+
+    pub fn next(&mut self, target: f64) -> f64 {
+        let goal = if target.is_finite() { target } else { 0.0 };
+        if !self.ready {
+            return self.snap(goal);
+        }
+        if (self.value - goal).abs() < 1e-6 {
+            self.value = goal;
+            return goal;
+        }
+        self.value += (goal - self.value) * self.alpha;
+        self.value
+    }
+
+    pub fn reset(&mut self) {
+        self.ready = false;
+        self.value = 0.0;
+    }
+}
+
 pub fn glide_block(from: f64, to: f64, frames: usize, rate: f64) -> f64 {
     let start = if from.is_finite() { from } else { to };
     let target = if to.is_finite() { to } else { start };

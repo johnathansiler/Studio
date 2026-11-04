@@ -3,14 +3,19 @@
 
 use ryu::Buffer;
 
+use crate::contract::ControlLayout;
 use crate::eq::CONTROLS;
 
 pub fn write_state(out: &mut [u8], values: &[f64]) -> usize {
+    write_controls(out, CONTROLS, values)
+}
+
+pub fn write_controls(out: &mut [u8], controls: &[ControlLayout], values: &[f64]) -> usize {
     let mut cursor = 0;
     if !push(out, &mut cursor, b"{\"v\":1,\"params\":{") {
         return 0;
     }
-    for (index, control) in CONTROLS.iter().enumerate() {
+    for (index, control) in controls.iter().enumerate() {
         if index > 0 && !push(out, &mut cursor, b",") {
             return 0;
         }
@@ -33,15 +38,28 @@ pub fn write_state(out: &mut [u8], values: &[f64]) -> usize {
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn write_layout(out: &mut [u8]) -> usize {
+    write_layout_for(out, "eq", "EQ", "2", CONTROLS)
+}
+
+pub fn write_layout_for(
+    out: &mut [u8],
+    id: &str,
+    name: &str,
+    version: &str,
+    controls: &[ControlLayout],
+) -> usize {
     let mut cursor = 0;
-    if !push(
-        out,
-        &mut cursor,
-        b"{\"id\":\"eq\",\"name\":\"EQ\",\"version\":\"2\",\"controls\":[",
-    ) {
+    if !push(out, &mut cursor, b"{\"id\":\"")
+        || !push(out, &mut cursor, id.as_bytes())
+        || !push(out, &mut cursor, b"\",\"name\":\"")
+        || !push(out, &mut cursor, name.as_bytes())
+        || !push(out, &mut cursor, b"\",\"version\":\"")
+        || !push(out, &mut cursor, version.as_bytes())
+        || !push(out, &mut cursor, b"\",\"controls\":[")
+    {
         return 0;
     }
-    for (index, control) in CONTROLS.iter().enumerate() {
+    for (index, control) in controls.iter().enumerate() {
         if index > 0 && !push(out, &mut cursor, b",") {
             return 0;
         }
@@ -95,18 +113,73 @@ pub fn write_layout(out: &mut [u8]) -> usize {
 
 /// Read a version-1 blob. Missing keys keep `values`. A bad version or a bad
 /// number leaves `values` untouched and returns false.
-pub fn read_state(data: &[u8], values: &mut [f64]) -> bool {
+pub fn write_named(out: &mut [u8], keys: &[&str], values: &[f64]) -> usize {
+    let mut cursor = 0;
+    if !push(out, &mut cursor, b"{\"v\":1,\"params\":{") {
+        return 0;
+    }
+    for (index, key) in keys.iter().enumerate() {
+        if index > 0 && !push(out, &mut cursor, b",") {
+            return 0;
+        }
+        if !push(out, &mut cursor, b"\"")
+            || !push(out, &mut cursor, key.as_bytes())
+            || !push(out, &mut cursor, b"\":")
+        {
+            return 0;
+        }
+        let value = values.get(index).copied().unwrap_or(0.0);
+        if !write_number(out, &mut cursor, value) {
+            return 0;
+        }
+    }
+    if !push(out, &mut cursor, b"}}") {
+        return 0;
+    }
+    cursor
+}
+
+pub fn read_named(data: &[u8], keys: &[&str], values: &mut [f64]) -> bool {
     let Ok(json) = std::str::from_utf8(data) else {
         return false;
     };
     if !version_one(json) || !json.contains("\"params\"") {
         return false;
     }
-    let mut next = [0.0; 64];
-    let count = values.len().min(CONTROLS.len()).min(next.len());
+    let mut next = [0.0; 96];
+    let count = values.len().min(keys.len()).min(next.len());
     next[..count].copy_from_slice(&values[..count]);
     for index in 0..count {
-        if let Some(text) = find_number(json, CONTROLS[index].key) {
+        if let Some(text) = find_number(json, keys[index]) {
+            let Ok(parsed) = text.parse::<f64>() else {
+                return false;
+            };
+            if !parsed.is_finite() {
+                return false;
+            }
+            next[index] = parsed;
+        }
+    }
+    values[..count].copy_from_slice(&next[..count]);
+    true
+}
+
+pub fn read_state(data: &[u8], values: &mut [f64]) -> bool {
+    read_controls(data, CONTROLS, values)
+}
+
+pub fn read_controls(data: &[u8], controls: &[ControlLayout], values: &mut [f64]) -> bool {
+    let Ok(json) = std::str::from_utf8(data) else {
+        return false;
+    };
+    if !version_one(json) || !json.contains("\"params\"") {
+        return false;
+    }
+    let mut next = [0.0; 96];
+    let count = values.len().min(controls.len()).min(next.len());
+    next[..count].copy_from_slice(&values[..count]);
+    for index in 0..count {
+        if let Some(text) = find_number(json, controls[index].key) {
             let Ok(parsed) = text.parse::<f64>() else {
                 return false;
             };
