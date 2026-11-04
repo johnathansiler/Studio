@@ -3,7 +3,6 @@ import { isSoundPlugin } from '../instruments/scaler/chain'
 import type { PluginInstance } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { addInsert, insertLabel, insertMenuChoices } from './PluginSheet'
-import { useScreenOverlay } from './screenOverlay'
 import './pluginsDrawer.css'
 
 /** One line under each plugin in the add list. */
@@ -93,7 +92,6 @@ export function PluginsDrawer({
   useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
   const trackId = store.selectedTrackId
   const [menu, setMenu] = useState(menuOpen)
-  useScreenOverlay(() => onClose?.(), true)
   const previous = useRef(trackId)
   useEffect(() => {
     if (previous.current === trackId) return
@@ -129,7 +127,6 @@ export function PluginsDrawerView({
       id="arrange-plugins"
       data-place={place}
       data-plugins-panel="open"
-      data-screen-overlay=""
       aria-label={track ? `Plugins on ${track.name}` : 'Plugins'}
     >
       <header className="plugins-drawer-head">
