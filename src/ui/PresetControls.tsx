@@ -84,12 +84,12 @@ export function PresetControls({
 
   return (
     <div className="preset-dock" data-preset-dock={pluginId}>
-      <button type="button" className="btn-quiet" aria-label="Previous preset" title="Load the previous preset." onClick={() => apply(cyclePreset(pluginId, stored, view.name, -1).name)}>Previous</button>
+      <button type="button" className="btn-quiet" aria-label="Previous preset" title="Load the previous preset." onClick={() => apply(cyclePreset(pluginId, stored, view.name, -1).name)}>‹</button>
       <span className="preset-name" data-preset-name={view.name} data-preset-changed={view.changed ? 'yes' : 'no'} title={view.changed ? `${view.name} has unsaved changes.` : view.name}>
         {view.changed && <i className="preset-dot" aria-hidden="true" />}
         <b>{view.name}</b>
       </span>
-      <button type="button" className="btn-quiet" aria-label="Next preset" title="Load the next preset." onClick={() => apply(cyclePreset(pluginId, stored, view.name, 1).name)}>Next</button>
+      <button type="button" className="btn-quiet" aria-label="Next preset" title="Load the next preset." onClick={() => apply(cyclePreset(pluginId, stored, view.name, 1).name)}>›</button>
       <div className="preset-anchor">
         <button
           ref={menuButton}

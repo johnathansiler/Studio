@@ -82,6 +82,45 @@ async function openPlugin(page: Page, pluginId: string) {
   }, pluginId)
 }
 
+function rowGaps(page: Page) {
+  return page.evaluate(() => {
+    const roots = [...document.querySelectorAll('[data-plugin-root]')] as HTMLElement[]
+    const root = roots[roots.length - 1]
+    if (!root) return []
+    const visible = (el: Element) => {
+      if ((el as HTMLElement).closest('[hidden]')) return false
+      const css = getComputedStyle(el)
+      if (css.display === 'none' || css.visibility === 'hidden') return false
+      const rect = el.getBoundingClientRect()
+      return rect.width > 1 && rect.height > 1
+    }
+    const controls = [...root.querySelectorAll('button, select, input')].filter(visible)
+    const rows: { top: number; bottom: number }[] = []
+    for (const el of controls) {
+      const rect = el.getBoundingClientRect()
+      const row = rows.find((item) => Math.abs(item.top - rect.top) < 14)
+      if (row) {
+        row.top = Math.min(row.top, rect.top)
+        row.bottom = Math.max(row.bottom, rect.bottom)
+      } else rows.push({ top: rect.top, bottom: rect.bottom })
+    }
+    rows.sort((a, b) => a.top - b.top)
+    const gaps: string[] = []
+    const nodes = [...root.querySelectorAll('*')].filter(visible)
+    for (let index = 1; index < rows.length; index += 1) {
+      const gap = rows[index].top - rows[index - 1].bottom
+      if (gap <= 24) continue
+      const filled = nodes.some((el) => {
+        if (controls.some((control) => control === el || control.contains(el))) return false
+        const box = el.getBoundingClientRect()
+        return box.height > 8 && box.top >= rows[index - 1].bottom - 2 && box.bottom <= rows[index].top + 2
+      })
+      if (!filled) gaps.push(String(Math.round(gap)))
+    }
+    return gaps
+  })
+}
+
 function measure(page: Page) {
   return page.evaluate(() => {
     const roots = [...document.querySelectorAll('[data-plugin-root]')] as HTMLElement[]
@@ -164,6 +203,7 @@ describe('plugin pages do not scroll', () => {
           }
           expect(box!.scroll, `${viewport.name} ${id} scroll ${box!.outside.join(', ')}`).toBeLessThanOrEqual(2)
           expect(box!.outside, `${viewport.name} ${id}`).toEqual([])
+          if (viewport.width === 390) expect(await rowGaps(page), `${viewport.name} ${id} gaps`).toEqual([])
           const tabCount = await handle.evaluate((node) => node.querySelectorAll('[data-plugin-tab]').length)
           if (tabCount > 1) {
             const before = await handle.evaluate((node) => node.querySelector('[data-plugin-page]:not([hidden])')?.getAttribute('data-plugin-page') ?? '')
@@ -185,6 +225,7 @@ describe('plugin pages do not scroll', () => {
             const next = await measure(page)
             expect(next!.scroll, `${viewport.name} ${id} after tab`).toBeLessThanOrEqual(2)
             expect(next!.outside, `${viewport.name} ${id} after tab`).toEqual([])
+            if (viewport.width === 390) expect(await rowGaps(page), `${viewport.name} ${id} tab gaps`).toEqual([])
             await handle.evaluate((node) => {
               const tab = node.querySelector('[data-plugin-tab]') as HTMLButtonElement | null
               tab?.click()
@@ -199,6 +240,17 @@ describe('plugin pages do not scroll', () => {
               expect(next!.outside, `${viewport.name} ${id} section`).toEqual([])
               await select.selectOption(values[0])
             }
+          }
+          if (id === 'scaler' && viewport.width === 390) {
+            await handle.evaluate((node) => {
+              const tab = [...node.querySelectorAll('[data-plugin-tab]')].find((item) => item.getAttribute('data-plugin-tab') === 'options') as HTMLButtonElement | undefined
+              tab?.click()
+            })
+            await page.waitForTimeout(40)
+            const options = await measure(page)
+            expect(options!.scroll, 'scaler options scroll').toBeLessThanOrEqual(2)
+            expect(options!.outside, `scaler options ${options!.outside.join(', ')}`).toEqual([])
+            expect(await rowGaps(page), 'scaler options gaps').toEqual([])
           }
         }
         await page.evaluate(() => {
