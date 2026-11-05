@@ -152,16 +152,18 @@
 }
 .slot-actions,
 .plugin-sheet .row.slot-actions {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
-  gap: 8px;
-  align-items: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 6px;
+  align-items: center;
   width: 100%;
 }
 .slot-actions > .text-btn,
 .slot-actions > .slot-upload {
-  width: 100%;
-  min-height: 36px;
+  width: auto;
+  flex: 0 0 auto;
+  min-height: 40px;
   margin: 0;
   padding: 6px 10px;
   white-space: nowrap;

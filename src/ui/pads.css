@@ -282,17 +282,28 @@
 
 .hw-cursor .hw-key { min-width: 0; }
 
-.hw-keys, .hw-transport, .mpc-tools, .mpc-steps {
-  display: grid;
+.hw-keys, .hw-transport, .mpc-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   gap: 6px;
   min-width: 0;
 }
-
-.hw-keys { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.hw-transport { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.mpc-steps {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
 .hw-keys > .hw-key,
 .hw-transport > .hw-key,
-.mpc-tools > .hw-key,
+.mpc-tools > .hw-key {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0 10px;
+}
 .mpc-steps > .hw-key { min-width: 0; }
 
 .note-repeat-row {

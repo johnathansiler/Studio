@@ -814,7 +814,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .strip.master { background: #1b2820; border-color: rgba(115, 196, 143, 0.4); }
 .strip h3 { margin: 0; font-size: 13px; }
-.inserts { display: flex; flex-direction: column; gap: 4px; }
+.inserts { display: flex; flex-direction: row; flex-wrap: wrap; gap: 6px; justify-content: flex-start; align-items: center; }
+.inserts button, .insert-add, .plugin-pick { width: auto; flex: 0 0 auto; max-width: 100%; }
 .sheet-fields .inserts[data-chain='midi-sound'] { flex: 1 1 100%; min-width: min(100%, 280px); }
 .chain-part {
   font-size: 11px;
