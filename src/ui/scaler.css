@@ -682,13 +682,41 @@
 .scaler-meta { color: #9eb0c4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .scaler-logo { letter-spacing: 0.12em; text-transform: uppercase; font-size: 14px; }
 .scaler-setname { color: #d5deea; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
-.scaler-panel.phone:not(.land) .scaler-topbar { flex-wrap: wrap; }
-.scaler-panel.phone:not(.land) .scaler-setname,
-.scaler-panel.phone:not(.land) .scaler-meta {
-  flex: 1 0 auto;
+.scaler-panel.phone:not(.land) .scaler-topbar { flex-wrap: nowrap; }
+.scaler-panel.phone:not(.land) .scaler-setname {
+  flex: 1 1 auto;
   overflow: visible;
   text-overflow: clip;
-  white-space: normal;
+  white-space: nowrap;
+}
+.scaler-panel.phone:not(.land) .scaler-stage {
+  max-height: none;
+  overflow: visible;
+  flex: 0 0 auto;
+}
+.scaler-panel.phone:not(.land) .scaler-pick-row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+.scaler-panel.phone:not(.land) .scaler-pick-row .scaler-scale {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.scaler-panel.phone:not(.land) .scaler-padgrid,
+.scaler-panel.phone:not(.land) .scaler-pad-cells {
+  min-height: 0;
+  overflow: hidden;
+}
+.scaler-panel.phone:not(.land) .scaler-perform {
+  flex-wrap: nowrap;
+  max-height: none;
+  overflow: visible;
+}
+.scaler-panel.phone:not(.land) .scaler-tools {
+  flex-wrap: nowrap;
 }
 .scaler-topbar .scaler-readout { padding: 0 8px; min-height: 40px; display: inline-flex; align-items: center; }
 .scaler-stage {
