@@ -379,7 +379,19 @@ const scaleList = allScales()
   const barNumber = Math.floor(beat / bar) + 1
   const beatNumber = Math.floor(beat % bar) + 1
   const signature = `${store.project.timeSignature?.numerator || 4}/${store.project.timeSignature?.denominator || 4}`
+  const portrait = form === 'phone' && !land
   const compact = form === 'phone'
+
+  function outputPills() {
+    return (
+      <>
+        <button type="button" className={`btn-quiet ${state.output !== 'midi' ? 'on' : ''}`} aria-pressed={state.output !== 'midi'} title="Play the chords through this track." onClick={() => patch({ output: (state.output === 'audio' ? 'both' : state.output === 'both' ? 'midi' : 'audio') satisfies ScalerOutput })}>Audio output</button>
+        <button type="button" className={`btn-quiet ${state.output !== 'audio' ? 'on' : ''}`} aria-pressed={state.output !== 'audio'} title="Send the chords as MIDI." onClick={() => patch({ output: (state.output === 'midi' ? 'both' : state.output === 'both' ? 'audio' : 'midi') satisfies ScalerOutput })}>MIDI output</button>
+        <button type="button" className={`btn-quiet ${state.input === 'midi' ? 'on' : ''}`} aria-pressed={state.input === 'midi'} title="Detect reads the MIDI on this track." onClick={() => patch({ input: 'midi' satisfies ScalerInput })}>MIDI input</button>
+        <button type="button" className={`btn-quiet ${state.input === 'audio' ? 'on' : ''}`} aria-pressed={state.input === 'audio'} title="Detect reads an audio clip in this project." onClick={() => patch({ input: 'audio' satisfies ScalerInput })}>Audio input</button>
+      </>
+    )
+  }
 
   return (
     <div className={`scaler-panel ${form === 'desk' ? '' : form}${land ? ' land' : ''}`} data-scaler="plugin" data-page={store.scalerPage} data-progressions={progressCount} data-patterns={patternCount} data-performances={performanceCount} data-screen-overlay="" aria-label="Scaler">
@@ -403,7 +415,7 @@ const scaleList = allScales()
       <header className="scaler-topbar">
         <strong className="scaler-logo">Scaler</strong>
         <span className="scaler-setname">{setPattern?.name ?? 'Chord set'}</span>
-        <span className="scaler-meta">Bar {barNumber} Beat {beatNumber} · {signature} · {Math.round(store.project.tempo)} bpm</span>
+        {!portrait && <span className="scaler-meta">Bar {barNumber} Beat {beatNumber} · {signature} · {Math.round(store.project.tempo)} bpm</span>}
         <div className="scaler-transport" role="group" aria-label="Transport">
           {!(form === 'phone' && !land) && <button type="button" className="btn-quiet" title="Previous chord set." onClick={() => setSong((value) => cycle(value, -1, Math.max(1, sets.length)))}>Previous</button>}
           <button type="button" className="btn-secondary" title="Play the chord set." onClick={() => playLine(setChords)}>Play</button>
@@ -416,12 +428,7 @@ const scaleList = allScales()
       </header>
       <div className="scaler-tools" role="group" aria-label="Output" data-output="">
         <button type="button" className="btn-secondary" title="Send the selected chord to this track at the playhead." onClick={() => playChord(pad, true)}>To track</button>
-        <div className="scaler-pills">
-        <button type="button" className={`btn-quiet ${state.output !== 'midi' ? 'on' : ''}`} aria-pressed={state.output !== 'midi'} title="Play the chords through this track." onClick={() => patch({ output: (state.output === 'audio' ? 'both' : state.output === 'both' ? 'midi' : 'audio') satisfies ScalerOutput })}>Audio output</button>
-        <button type="button" className={`btn-quiet ${state.output !== 'audio' ? 'on' : ''}`} aria-pressed={state.output !== 'audio'} title="Send the chords as MIDI." onClick={() => patch({ output: (state.output === 'midi' ? 'both' : state.output === 'both' ? 'audio' : 'midi') satisfies ScalerOutput })}>MIDI output</button>
-        <button type="button" className={`btn-quiet ${state.input === 'midi' ? 'on' : ''}`} aria-pressed={state.input === 'midi'} title="Detect reads the MIDI on this track." onClick={() => patch({ input: 'midi' satisfies ScalerInput })}>MIDI input</button>
-        <button type="button" className={`btn-quiet ${state.input === 'audio' ? 'on' : ''}`} aria-pressed={state.input === 'audio'} title="Detect reads an audio clip in this project." onClick={() => patch({ input: 'audio' satisfies ScalerInput })}>Audio input</button>
-        </div>
+        {!portrait && <div className="scaler-pills">{outputPills()}</div>}
         <button type="button" className={`btn-quiet ${options ? 'on' : ''}`} aria-expanded={options} aria-controls="scaler-options" title="Chords, songs, performances, and the rest of Scaler." onClick={() => setOptions((value) => !value)}>Options</button>
       </div>
       <div className="scaler-stage">
@@ -457,7 +464,33 @@ const scaleList = allScales()
         </section>}
         <section className="scaler-section" aria-label="Current Scale">
           <div className="scaler-section-head">
-            <b>Current Scale</b>
+            {!compact && <b>Current Scale</b>}
+            {portrait ? (
+              <div className="scaler-pick-row">
+                <label className="scaler-scale">
+                  <span>Key</span>
+                  <select aria-label="Key" data-key-picker="" title="Choose the key." value={state.root} disabled={locked} onChange={(event) => patch({ root: Number(event.target.value), lastVoicing: [], lastCents: [] })}>
+                    {NOTE_NAMES.map((name, pc) => <option key={name} value={pc}>{KEY_WORD[pc]}</option>)}
+                  </select>
+                </label>
+                <label className="scaler-scale" data-scale-picker="">
+                  <span>Scale</span>
+                  <select aria-label="Scale" title="Choose the scale. Keys in the scale light up." value={scaleId} disabled={locked} onChange={(event) => patch({ ...pickScale(event.target.value), lastVoicing: [], lastCents: [] })}>
+                    {families.map((group) => {
+                      const items = scaleList.filter((item) => item.family === group.id)
+                      if (!items.length) return null
+                      return (
+                        <optgroup key={group.id} label={group.name}>
+                          {items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                        </optgroup>
+                      )
+                    })}
+                    {!scaleList.some((item) => item.id === scaleId) && <option value={scaleId}>{scaleName}</option>}
+                  </select>
+                </label>
+              </div>
+            ) : (
+            <>
             <div className="scaler-key-pick">
               <span className="scaler-label" id="scaler-key-label">Key</span>
               <div className="scaler-key-scroll" role="group" aria-labelledby="scaler-key-label" data-key-picker="">
@@ -481,6 +514,8 @@ const scaleList = allScales()
                 {!scaleList.some((item) => item.id === scaleId) && <option value={scaleId}>{scaleName}</option>}
               </select>
             </label>
+            </>
+            )}
             {!compact && <button type="button" className="btn-secondary" title="Play the scale chords." onClick={() => playLine(diatonic)}>Play scale</button>}
             {!compact && <button type="button" title="Cycle the voicing." onClick={() => {
               const index = Math.max(0, VOICINGS.findIndex((item) => item.id === state.voicing))
@@ -557,6 +592,7 @@ const scaleList = allScales()
         </div>
       )}
       <div id="scaler-options" className="scaler-drawer" hidden={!options}>
+        {portrait && <div className="scaler-pills" role="group" aria-label="Output">{outputPills()}</div>}
         <div className="scaler-readout">
           <span>Notes <b>{liveNotes || 'Rest'}</b></span>
           <span>Chord <b>{current?.symbol ?? 'Rest'}</b></span>

@@ -169,12 +169,34 @@ describe('scaler plugin panel', () => {
         const shot = `/opt/cursor/artifacts/scaler-${viewport.name}.png`
         await page.screenshot({ path: shot, fullPage: false })
         const box = await page.evaluate(() => {
+          function controlHits(panel: HTMLElement) {
+            const controls = [...panel.querySelectorAll('button, select, input')].filter((el) => {
+              if (el.closest('[hidden]') || el.closest('.scaler-keys')) return false
+              const style = getComputedStyle(el)
+              if (style.display === 'none' || style.visibility === 'hidden') return false
+              const box = el.getBoundingClientRect()
+              return box.width > 1 && box.height > 1
+            })
+            const hits: string[] = []
+            const overlap = (a: DOMRect, b: DOMRect) => a.left < b.right - 1 && a.right > b.left + 1 && a.top < b.bottom - 1 && a.bottom > b.top + 1
+            for (let i = 0; i < controls.length; i++) {
+              for (let j = i + 1; j < controls.length; j++) {
+                const left = controls[i]
+                const right = controls[j]
+                if (left.contains(right) || right.contains(left)) continue
+                if (!overlap(left.getBoundingClientRect(), right.getBoundingClientRect())) continue
+                hits.push(`${(left.textContent || left.getAttribute('aria-label') || left.tagName).trim().slice(0, 40)} × ${(right.textContent || right.getAttribute('aria-label') || right.tagName).trim().slice(0, 40)}`)
+              }
+            }
+            return hits
+          }
           const panel = document.querySelector('.scaler-panel') as HTMLElement
           const keys = document.querySelector('.scaler-keys') as HTMLElement
           const pads = document.querySelector('.scaler-padgrid') as HTMLElement
           const stage = document.querySelector('.scaler-stage') as HTMLElement
           const picker = document.querySelector('[data-key-picker]') as HTMLElement
-          const scale = document.querySelector('[data-scale-picker] select') as HTMLElement
+          const scale = document.querySelector('[data-scale-picker] select, [data-scale-picker]') as HTMLElement
+          const padSource = document.querySelector('.scaler-pad-source') as HTMLElement
           const pills = document.querySelector('[data-output]') as HTMLElement
           const white = document.querySelector('.scaler-white') as HTMLElement
           const black = document.querySelector('.scaler-black') as HTMLElement
@@ -211,12 +233,16 @@ describe('scaler plugin panel', () => {
             match: document.querySelector('.scaler-match') ? rect(document.querySelector('.scaler-match') as HTMLElement) : { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 },
             matchHeads: [...document.querySelectorAll('.scaler-match .head span')].map((node) => rect(node)),
             toTrack: rect(toTrack),
-            audioOut: rect(audioOut),
-            midiOut: rect(midiOut),
+            audioOut: audioOut ? rect(audioOut) : { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 },
+            midiOut: midiOut ? rect(midiOut) : { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 },
             optionsButton: rect(optionsButton),
             outputButtons: [...pills.querySelectorAll('button')].map((button) => ({ label: button.textContent ?? '', ...rect(button) })),
             hidden: options.hidden,
             notes: [...picker.querySelectorAll('button')].map((button) => ({ name: button.getAttribute('aria-label'), ...rect(button) })),
+            keyKind: picker.tagName,
+            keyCount: picker.tagName === 'SELECT' ? picker.querySelectorAll('option').length : picker.querySelectorAll('button').length,
+            padSource: rect(padSource),
+            hits: controlHits(panel),
           }
         })
         const where = viewport.name
@@ -224,7 +250,15 @@ describe('scaler plugin panel', () => {
         expect(box.panelScroll, `${where} preset ${box.preset.height} top ${box.top.height} pills ${box.pills.height} stage ${box.stage.height} pads ${box.pads.height} perform ${box.perform.height} keys ${box.key.height}`).toBeLessThanOrEqual(2)
         expect(box.pageScroll, where).toBeLessThanOrEqual(2)
         expect(box.pageWide, where).toBeLessThanOrEqual(2)
-        expect(box.notes, where).toHaveLength(12)
+        const portrait = viewport.width <= 520 && viewport.height > viewport.width
+        if (portrait) {
+          expect(box.keyKind, where).toBe('SELECT')
+          expect(box.keyCount, where).toBe(12)
+          expect(box.hits, `${where}\n${box.hits.join('\n')}`).toEqual([])
+          expect(box.scale.bottom, where).toBeLessThanOrEqual(box.padSource.top + 1)
+          expect(box.perform.top, where).toBeGreaterThanOrEqual(box.pads.bottom - 1)
+        }
+        if (!portrait) expect(box.notes, where).toHaveLength(12)
         expect(box.pads.height, where).toBeGreaterThan(box.key.height)
         expect(box.pads.width * box.pads.height, `${where} ${box.panelClass} pads ${Math.round(box.pads.width)}x${Math.round(box.pads.height)} stage ${Math.round(box.stage.width)}x${Math.round(box.stage.height)}`).toBeGreaterThan(box.stage.width * box.stage.height)
         expect(box.key.bottom, where).toBeLessThanOrEqual(viewport.height + 1)
@@ -252,10 +286,12 @@ describe('scaler plugin panel', () => {
         expect(box.toTrack.left, where).toBeGreaterThanOrEqual(-1)
         expect(box.toTrack.right, where).toBeLessThanOrEqual(viewport.width + 1)
         expect(box.toTrack.height, where).toBeGreaterThanOrEqual(40)
+        if (!portrait) {
         expect(box.audioOut.left, where).toBeGreaterThanOrEqual(-1)
         expect(box.audioOut.right, where).toBeLessThanOrEqual(viewport.width + 1)
         expect(box.midiOut.left, where).toBeGreaterThanOrEqual(-1)
         expect(box.midiOut.right, where).toBeLessThanOrEqual(viewport.width + 1)
+        }
         expect(box.optionsButton.left, where).toBeGreaterThanOrEqual(-1)
         expect(box.optionsButton.right, where).toBeLessThanOrEqual(viewport.width + 1)
         expect(box.optionsButton.height, where).toBeGreaterThanOrEqual(40)
@@ -269,6 +305,7 @@ describe('scaler plugin panel', () => {
           expect(button.bottom, `${where} ${button.label}`).toBeLessThanOrEqual(box.pills.bottom + 1)
         }
         if (viewport.width <= 520) expect(outputRows.size, where).toBeLessThanOrEqual(2)
+        if (!portrait) {
         const pickerRight = Math.max(...box.notes.map((note) => note.right))
         const pickerLeft = Math.min(...box.notes.map((note) => note.left))
         for (const note of box.notes) {
@@ -280,6 +317,7 @@ describe('scaler plugin panel', () => {
           expect(note.right, `${where} ${note.name}`).toBeLessThanOrEqual(Math.min(viewport.width, pickerRight) + 1)
           expect(note.right, `${where} ${note.name} clipped`).toBeLessThanOrEqual(box.stage.right + 2)
           expect(note.left, `${where} ${note.name} clipped`).toBeGreaterThanOrEqual(box.stage.left - 2)
+        }
         }
         if (viewport.width >= 1100) {
           expect(box.matchHeads.length, where).toBe(5)
