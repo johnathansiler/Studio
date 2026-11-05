@@ -48,9 +48,6 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
   const short = viewport.height < 500 && viewport.width > viewport.height
   const channels = project.tracks.filter((track) => track.type !== 'bus' && track.type !== 'group')
   const buses = project.tracks.filter((track) => track.type === 'bus' || track.type === 'group')
-  const flow = buses.length
-    ? 'Tracks feed buses. Buses feed the master.'
-    : 'Tracks feed the master. A bus sums tracks before it.'
   const [masterOn, setMasterOn] = useState(false)
   const focus: string | 'master' = masterOn ? 'master' : (store.selectedTrackId ?? channels[0]?.id ?? 'master')
   const detailsRef = useRef<HTMLDetailsElement>(null)
@@ -72,9 +69,7 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
       data-short={short ? '1' : undefined}
       style={{ ['--strip' as string]: `${strip}px` }}
     >
-      <WidthBar axis="strip" value={layout.strip} onChange={setStrip} onReset={resetStrip} />
-      <p className="mix-flow" aria-label={`Signal flow. ${flow}`}>{flow}</p>
-      <MixToolbar store={store} engine={engine} focus={focus} detailsRef={detailsRef} onTune={onTune} />
+      <MixToolbar store={store} engine={engine} focus={focus} detailsRef={detailsRef} onTune={onTune} strip={layout.strip} onStrip={setStrip} onResetStrip={resetStrip} />
       <div className="mixer-bay">
         <div className="mixer">
           {channels.map((track) => (
@@ -194,12 +189,18 @@ function MixToolbar({
   focus,
   detailsRef,
   onTune,
+  strip,
+  onStrip,
+  onResetStrip,
 }: {
   store: ProjectStore
   engine: AudioEngine
   focus: string | 'master'
   detailsRef: RefObject<HTMLDetailsElement | null>
   onTune?: (trackId: string) => void
+  strip: number
+  onStrip: (next: number) => void
+  onResetStrip: () => void
 }) {
   const [open, setOpen] = useState(false)
   const [section, setSection] = useState<MixSection>('channel')
@@ -287,6 +288,7 @@ function MixToolbar({
               <h4>{name}</h4>
               <button type="button" className="overlay-close" onClick={close}>Close</button>
             </header>
+            <WidthBar axis="strip" value={strip} onChange={onStrip} onReset={onResetStrip} />
             <div className="mix-chips" role="tablist" aria-label="Channel sections">
               {sections.map((item) => (
                 <button

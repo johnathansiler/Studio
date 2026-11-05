@@ -192,10 +192,10 @@ describe('layout audit across the five viewports', () => {
             problems.push(`${viewport.name} transport menu is not under the tabs`)
           }
           await page.screenshot({ path: `${artifacts}/layout-after-transport-menu-${viewport.name}.png` })
-          const song = page.locator('#transport-menu button, .transport-drawer button').filter({ hasText: /^Song/ }).first()
+          const song = page.locator('#transport-menu button, .transport-drawer button, .arrange-panels button').filter({ hasText: /^Setup/ }).first()
           if (await song.count()) {
             await song.click()
-            await page.locator('[aria-label="Song"]').first().waitFor()
+            await page.locator('[aria-label="Setup"]').first().waitFor()
             const menuStill = await page.locator('#transport-menu:visible, .transport-drawer[data-open="true"]').count()
             if (menuStill > 0) problems.push(`${viewport.name} song left the transport menu open`)
             const scrim = await page.evaluate(() => {

@@ -34,7 +34,7 @@ export const TOOL_INFO: Record<ArrangeTool, ToolInfo> = {
   select: {
     label: 'Select',
     hint: 'Drag the middle of a clip to move it. Drag either end to trim.',
-    arrange: 'Select: drag the middle to move, either end to trim',
+    arrange: 'Select a clip, then drag it to move or drag either end to trim.',
     piano: 'Select: tap a note, drag to move',
     cursor: 'default',
   },
@@ -117,6 +117,14 @@ export const TOOL_ACTIONS = [
 
 const listeners = new Set<() => void>()
 let current: ArrangeTool = 'select'
+let selectHintShown = false
+
+/** The Select explanation is shown once each time the app is open. */
+export function takeSelectHint() {
+  if (selectHintShown || current !== 'select') return false
+  selectHintShown = true
+  return true
+}
 
 export function activeTool(): ArrangeTool {
   return current

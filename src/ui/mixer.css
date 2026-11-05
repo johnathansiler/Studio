@@ -703,8 +703,11 @@
   flex: 0 0 var(--mix-col, var(--strip, 84px));
 }
 
-.shell .mixer-view.mixer-console[data-short] .width-tools {
-  display: none;
+.shell .mixer-view.mixer-console .mix-panel .width-tools {
+  flex-wrap: wrap;
+  padding: 0 0 8px;
+  background: transparent;
+  border: 0;
 }
 
 .shell .mixer-view.mixer-console[data-short] .mix-flow {

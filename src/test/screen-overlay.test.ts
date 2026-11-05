@@ -272,7 +272,7 @@ describe('screen overlays leave the view tabs free', () => {
 
         const openers: { name: string; open: () => Promise<void>; shot?: boolean }[] = [
           { name: 'menu', shot: true, open: async () => { await page.locator('.menu-btn').click() } },
-          { name: 'song', open: async () => { await page.locator('.arrange-panels').getByRole('button', { name: /^Song/ }).click() } },
+          { name: 'song', open: async () => { await page.locator('.arrange-panels').getByRole('button', { name: /^Setup/ }).click() } },
           { name: 'add-track', open: async () => { await page.getByRole('button', { name: /^Add Track/ }).click() } },
           {
             name: 'plugin',

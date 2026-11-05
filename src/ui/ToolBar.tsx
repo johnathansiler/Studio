@@ -7,6 +7,7 @@ import {
   activeTool,
   keyForTool,
   subscribeTools,
+  takeSelectHint,
   toolChip,
   type ArrangeTool,
 } from '../state/tools'
@@ -14,6 +15,7 @@ import { useFormFactor } from './form'
 import { AnchoredMenu } from './AnchoredMenu'
 import { useScreenOverlay } from './screenOverlay'
 import { TipButton } from './Hint'
+import { bindSwipeDismiss } from './swipeDismiss'
 import './guideSheet.css'
 
 const TOOL_GROUPS: { label: string; ids: ArrangeTool[] }[] = [
@@ -36,6 +38,7 @@ export function ToolBar({
   onClose,
   tucked = false,
   extra,
+  store,
 }: {
   onChange: (tool: ArrangeTool) => void
   onDuplicate: () => void
@@ -57,6 +60,8 @@ export function ToolBar({
   tucked?: boolean
   /** Sits in the same row as Select, Delete, and Duplicate. */
   extra?: ReactNode
+  /** When set, Delete and Duplicate appear only after a clip is selected. */
+  store?: import('../state/store').ProjectStore
 }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const stripRef = useRef<HTMLDivElement>(null)
@@ -64,6 +69,11 @@ export function ToolBar({
   const [toolsOpen, setToolsOpen] = useState(false)
   const shown = FACE_TOOLS
   const chip = toolChip(value, context)
+  const clipOn = useSyncExternalStore(
+    (listener) => store ? store.subscribe(listener) : () => undefined,
+    () => Boolean(store && (store.selectedClipId || store.selectedMidiClipId || store.selectedPatternClipId)),
+    () => false,
+  )
   const showWord = true
   void phone
   void words
@@ -83,7 +93,8 @@ export function ToolBar({
     const copy = TOOL_ACTIONS.find((action) => action.id === 'duplicate')!
     return (
       <div className="timeline-tools tucked" role="toolbar" aria-label="Tools" data-active-tool={value} data-tool-context={context}>
-        <span className="tool-now" role="status" aria-live="polite">{chip}</span>
+        {value !== 'select' && <span className="tool-now" role="status" aria-live="polite">{chip}</span>}
+        <SelectHint active={value === 'select' && context === 'arrange'} />
         <div className="clip-actions">
         <button
           ref={toolButton}
@@ -100,17 +111,21 @@ export function ToolBar({
           <span className="tool-label">{current.label}</span>
         </button>
         {extra}
-        <TipButton className="tool tool-quick delete" label={remove.label} hint={remove.hint} onClick={onDelete}>
-          <ToolIcon id="delete" />
-          <span className="tool-label">{remove.label}</span>
-        </TipButton>
-        <TipButton className="tool tool-quick duplicate" label={copy.label} hint={copy.hint} onClick={onDuplicate}>
-          <ToolIcon id="duplicate" />
-          <span className="tool-label">{copy.label}</span>
-        </TipButton>
+        {clipOn && (
+          <>
+            <TipButton className="tool tool-quick delete" label={remove.label} hint={remove.hint} onClick={onDelete}>
+              <ToolIcon id="delete" />
+              <span className="tool-label">{remove.label}</span>
+            </TipButton>
+            <TipButton className="tool tool-quick duplicate" label={copy.label} hint={copy.hint} onClick={onDuplicate}>
+              <ToolIcon id="duplicate" />
+              <span className="tool-label">{copy.label}</span>
+            </TipButton>
+          </>
+        )}
         </div>
         <AnchoredMenu fill id="tool-choices" open={toolsOpen} onClose={() => setToolsOpen(false)} label="Choose a tool" triggerRef={toolButton} prefer="up">
-          {shown.map((id) => {
+          {[...shown, 'box' as const, 'erase' as const].map((id) => {
             const info = TOOL_INFO[id]
             const key = keyForTool(id)
             const label = key ? `${info.label} (${key})` : info.label
@@ -269,7 +284,47 @@ function ToolPanel({
   return createPortal(body, document.body)
 }
 
-function ToolIcon({ id }: { id: ArrangeTool | 'duplicate' | 'delete' }) {
+const SELECT_HINT = 'Select a clip, then drag it to move or drag either end to trim.'
+
+function SelectHint({ active }: { active: boolean }) {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    if (!active) return
+    let alive = true
+    let hide = 0
+    const show = window.setTimeout(() => {
+      if (!alive || !takeSelectHint()) return
+      setOpen(true)
+      hide = window.setTimeout(() => setOpen(false), 4000)
+    }, 0)
+    return () => {
+      alive = false
+      window.clearTimeout(show)
+      window.clearTimeout(hide)
+    }
+  }, [active])
+  if (!open || typeof document === 'undefined') return null
+  return createPortal(<SelectToast onClose={() => setOpen(false)} />, document.body)
+}
+
+function SelectToast({ onClose }: { onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    return bindSwipeDismiss(el, onClose)
+  }, [onClose])
+  return (
+    <div className="select-hint-host">
+      <div ref={ref} className="toast select-hint" role="status">
+        <span>{SELECT_HINT}</span>
+        <button type="button" className="hint-close" aria-label="Close" title="Close" onClick={onClose}>Close</button>
+      </div>
+    </div>
+  )
+}
+
+function ToolIcon({ id }: { id: ArrangeTool | 'delete' | 'duplicate' }) {
   const common = { width: 18, height: 18, viewBox: '0 0 18 18', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
   if (id === 'select') return <svg {...common}><path d="M4 2.5l8 6.2-3.2.6 2.1 4.2-1.8.9-2.1-4.2-3 .9z" /></svg>
   if (id === 'box') return <svg {...common}><rect x="3" y="3.5" width="12" height="11" strokeDasharray="2.2 1.6" /></svg>

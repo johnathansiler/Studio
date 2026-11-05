@@ -364,7 +364,10 @@ describe('short landscape mixer', () => {
         await page.setContent(markup(storeWith(4), viewport.width, viewport.height), { waitUntil: 'load' })
         const report = await readMixer(page)
         expect(report.short, viewport.name).toBe('')
-        expect(report.widthTools, viewport.name).toBe(true)
+        expect(report.widthTools, viewport.name).toBe(false)
+        const widthCopy = await page.locator('.mix-panel').textContent()
+        expect(widthCopy, viewport.name).toMatch(/Narrow|Normal/)
+        expect(widthCopy, viewport.name).toContain('Reset')
         for (const strip of report.channels) {
           expect(strip.fader.height / strip.box.height, `${viewport.name} ${strip.name}`).toBeGreaterThanOrEqual(0.5)
           expect(strip.fader.height, `${viewport.name} ${strip.name}`).toBeGreaterThanOrEqual(160)

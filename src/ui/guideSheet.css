@@ -161,6 +161,24 @@
   width: 100%;
   min-height: 44px;
 }
+.unstuck-pages {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.unstuck-pages button {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #121a16;
+  color: var(--text);
+}
+.unstuck-pages button.on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
 .unstuck-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

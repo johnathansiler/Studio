@@ -1,25 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CATALOG } from '../audio/plugins/catalog'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
+import { AnchoredMenu } from './AnchoredMenu'
 import { SoundBrowser } from './SoundBrowser'
 import { PatternSend, patternBeat } from './PatternSend'
 import { quickDragArmed } from './clipKeys'
 
-export type BrowserTab = 'sounds' | 'drums' | 'instruments' | 'loops' | 'patterns' | 'plugins' | 'clips'
+export type BrowserTab = 'sounds' | 'instruments' | 'loops' | 'patterns' | 'clips'
 
 const TABS: { id: BrowserTab; label: string; hint: string }[] = [
-  { id: 'sounds', label: 'Sounds', hint: 'Loops, one-shots, and instruments from the free library.' },
-  { id: 'drums', label: 'Drums', hint: 'Drum one-shots and kits.' },
+  { id: 'sounds', label: 'Sounds', hint: 'Loops, one-shots, drums, and instruments from the free library.' },
   { id: 'instruments', label: 'Instruments', hint: 'Starter instruments. Drag one onto an instrument track.' },
   { id: 'loops', label: 'Loops', hint: 'Loops that follow the song tempo.' },
+]
+
+const PROJECT: { id: 'patterns' | 'clips'; label: string; hint: string }[] = [
   { id: 'patterns', label: 'Patterns', hint: 'Patterns from the Beats rack. Drag one onto the playlist.' },
-  { id: 'plugins', label: 'Plugins', hint: 'Effects you insert on a track.' },
   { id: 'clips', label: 'Clips', hint: 'Clips already in this project.' },
 ]
 
 const PATTERN_MIME = 'application/x-cueharbor-pattern'
-const PLUGIN_MIME = 'application/x-cueharbor-plugin'
 
 type PreviewEngine = {
   unlock: () => void
@@ -57,15 +57,14 @@ export function PlaylistBrowser({
   useEffect(() => {
     const allow = (event: DragEvent) => {
       const types = event.dataTransfer ? [...event.dataTransfer.types] : []
-      if (!types.includes(PATTERN_MIME) && !types.includes(PLUGIN_MIME)) return
+      if (!types.includes(PATTERN_MIME)) return
       event.preventDefault()
     }
     const drop = (event: DragEvent) => {
       const target = event.target instanceof Element ? event.target : null
       if (!target || target.closest('.playlist-browser')) return
       const patternId = event.dataTransfer?.getData(PATTERN_MIME)
-      const pluginId = event.dataTransfer?.getData(PLUGIN_MIME)
-      if (!patternId && !pluginId) return
+      if (!patternId) return
       const inner = target.closest('.timeline-inner') as HTMLElement | null
       const lane = target.closest('[data-track]') as HTMLElement | null
       if (!inner && !lane) return
@@ -77,13 +76,6 @@ export function PlaylistBrowser({
         if (performance.now() - pointerDropped.current < 500) return
         store.selectPattern(patternId)
         store.placePattern(Math.max(0, projectSampleBeat(project, sample)), lane?.dataset.track)
-        return
-      }
-      const id = lane?.dataset.track || trackId
-      if (pluginId && id) {
-        store.addPlugin(id, pluginId)
-        const name = CATALOG.find((item) => item.id === pluginId)?.name ?? pluginId
-        store.toast(`${name} is on the track.`, 'good')
       }
     }
     window.addEventListener('dragover', allow)
@@ -110,10 +102,6 @@ export function PlaylistBrowser({
   const patterns = useMemo(
     () => (project.beats?.patterns ?? []).filter((item) => !needle || item.name.toLowerCase().includes(needle)),
     [needle, project.beats],
-  )
-  const plugins = useMemo(
-    () => CATALOG.filter((item) => !needle || item.name.toLowerCase().includes(needle)),
-    [needle],
   )
   const clips = useMemo(() => {
     const rows: { id: string; name: string; where: string; sample: number; trackId: string; midi: boolean }[] = []
@@ -149,7 +137,10 @@ export function PlaylistBrowser({
     return rows.filter((row) => !needle || `${row.name} ${row.where}`.toLowerCase().includes(needle))
   }, [needle, project, trackId])
 
-  const soundLock = tab === 'instruments' ? 'instrument' : tab === 'loops' ? 'loop' : tab === 'drums' ? 'drum' : tab === 'sounds' ? 'all' : null
+  const soundLock = tab === 'instruments' ? 'instrument' : tab === 'loops' ? 'loop' : tab === 'sounds' ? 'all' : null
+  const projectOn = tab === 'patterns' || tab === 'clips'
+  const projectButton = useRef<HTMLButtonElement>(null)
+  const [projectOpen, setProjectOpen] = useState(false)
 
   return (
     <aside className="playlist-browser" data-playlist-browser="open" aria-label="Browser">
@@ -160,6 +151,30 @@ export function PlaylistBrowser({
               {item.label}
             </button>
           ))}
+          <button
+            ref={projectButton}
+            type="button"
+            className={projectOn ? 'on' : ''}
+            aria-expanded={projectOpen}
+            aria-haspopup="menu"
+            title="Patterns and clips already in this project."
+            onClick={() => setProjectOpen((open) => !open)}
+          >
+            Project
+          </button>
+          <AnchoredMenu open={projectOpen} onClose={() => setProjectOpen(false)} label="Project" triggerRef={projectButton} prefer="down">
+            {PROJECT.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={tab === item.id ? 'on' : ''}
+                title={item.hint}
+                onClick={() => { onTab(item.id); setProjectOpen(false) }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </AnchoredMenu>
         </div>
         <button type="button" className="browser-close overlay-close" title="Hide the browser. The playlist stays put." onClick={onClose}>Close</button>
       </div>
@@ -217,30 +232,6 @@ export function PlaylistBrowser({
                 <i style={{ background: pattern.color }} />
                 <strong>{pattern.name}</strong>
                 <span>{pattern.steps} steps</span>
-                <span>Add</span>
-              </button>
-            ))}
-            {tab === 'plugins' && plugins.map((plugin) => (
-              <button
-                key={plugin.id}
-                type="button"
-                className="browser-row"
-                draggable={!phone}
-                title="Insert this effect on the selected track."
-                onPointerDown={() => { dragging.current = false }}
-                onDragStart={(event) => {
-                  dragging.current = true
-                  event.dataTransfer.setData(PLUGIN_MIME, plugin.id)
-                  event.dataTransfer.setData('text/plain', plugin.id)
-                  event.dataTransfer.effectAllowed = 'copy'
-                }}
-                onClick={() => {
-                  if (dragging.current || !trackId) return
-                  store.addPlugin(trackId, plugin.id)
-                  store.toast(`${plugin.name} is on the track.`, 'good')
-                }}
-              >
-                <strong>{plugin.name}</strong>
                 <span>Add</span>
               </button>
             ))}

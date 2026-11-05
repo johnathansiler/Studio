@@ -12,20 +12,26 @@ export function RecordBar({
   engine,
   session,
   onQuickPunch,
+  onMidi,
   inline = false,
+  dock = false,
 }: {
   store: ProjectStore
   engine: AudioEngine
   session: SessionClient
   onQuickPunch: () => void
+  /** Open hardware MIDI tools. Shown inside the Punch sheet. */
+  onMidi?: () => void
   /** Draw the fields in place. The phone setup button owns the open and close. */
   inline?: boolean
+  /** Punch button. The recording settings dock under it. */
+  dock?: boolean
 }) {
   const project = store.project
   const record = store.recordSettings()
   const compact = useFormFactor() !== 'desk'
   const [open, setOpen] = useState(false)
-  const optionsButton = useRef<HTMLSpanElement>(null)
+  const optionsButton = useRef<HTMLElement | null>(null)
   const selectedFolder = project.tracks
     .flatMap((track) => track.clips.map((clip) => ({ track, clip })))
     .find((item) => item.clip.id === store.selectedClipId && item.clip.folder)
@@ -148,8 +154,40 @@ export function RecordBar({
           </TipButton>
         </>
       )}
+      {onMidi && (
+        <TipButton className="guide-choice" label="MIDI" hint="Hardware MIDI, learn, and effects on this track." onClick={() => { setOpen(false); onMidi() }}>
+          <strong>MIDI</strong>
+          <small>Hardware, learn, and effects.</small>
+        </TipButton>
+      )}
     </>
   )
+
+  if (dock) {
+    return (
+      <>
+        <button
+          ref={(node) => { optionsButton.current = node }}
+          type="button"
+          className={`t-btn punch btn-quiet${open ? ' on' : ''}`}
+          aria-expanded={open}
+          aria-label="Punch. Punch, cycle, and input for recording."
+          title="Punch, cycle, and input for recording."
+          onClick={() => setOpen((value) => !value)}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M2 3v10M5 5v6M11 5v6M14 3v10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+          <span className="t-word">Punch</span>
+        </button>
+        <AnchoredMenu className="punch-menu" open={open} onClose={() => setOpen(false)} label="Punch" triggerRef={optionsButton} prefer="down">
+          <div className="rec-bar inline" role="group" aria-label="Recording">
+            {fields}
+          </div>
+        </AnchoredMenu>
+      </>
+    )
+  }
 
   if (inline) {
     return (
@@ -170,7 +208,7 @@ export function RecordBar({
   const options = copy('options')
   return (
     <div className="rec-bar" role="group" aria-label="Recording">
-      <span ref={optionsButton}>
+      <span ref={(node) => { optionsButton.current = node }}>
         <TipButton label={options.label} hint={options.hint} pressed={open} onClick={() => setOpen((value) => !value)} />
       </span>
       {record.loop && <span className="tool-chip">Cycle on</span>}

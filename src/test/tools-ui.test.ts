@@ -183,13 +183,13 @@ describe('mobile control lists', () => {
       'new', 'open', 'save', 'export',
       'box', 'erase', 'pan',
       'dock',
-      'scaler', 'players', 'midi',
+      'scaler', 'midi',
       'signature', 'shortcuts',
     ])
     expect(phone.map((item) => item.action)).toEqual([
       'new', 'open', 'save', 'export',
       'box', 'erase', 'pan',
-      'players', 'midi',
+      'midi',
       'signature', 'shortcuts',
     ])
     expect(desk.map((item) => item.action)).not.toContain('click')

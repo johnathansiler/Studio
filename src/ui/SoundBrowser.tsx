@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import type { LibraryEntry } from '../audio/multisample/library'
+import { fetchInstrument, type LibraryEntry } from '../audio/multisample/library'
+import { libraryBaseUrl } from '../audio/multisample/source'
 import type { SamplePack } from '../audio/multisample/types'
 import { decodeSlotFile, focusedSlot, SOUND_MIME } from '../audio/sample/slot'
 import { uid } from '../model/types'
@@ -500,6 +501,46 @@ export function SoundBrowser({
     void intoSlot(entry)
   }
 
+  async function previewInstrument(entry: LibraryEntry) {
+    if (playing === entry.id) {
+      previewGen.current += 1
+      engine.stopPreview()
+      setPlaying('')
+      return
+    }
+    const gen = ++previewGen.current
+    engine.stopPreview()
+    const target = selected?.type === 'midi' ? selected.id : ''
+    const loaded = target ? store.track(target)?.library : null
+    if (target && loaded?.id === entry.id && engine.auditionLibrary) {
+      setPlaying(entry.id)
+      const choice = playableAudition(loaded)
+      await engine.auditionLibrary(target, choice.pitch, choice.velocity)
+      return
+    }
+    setBusy(entry.id)
+    try {
+      const imported = await fetchInstrument(libraryBaseUrl(), entry)
+      if (gen !== previewGen.current) return
+      const sample = imported.program.samples.find((item) => item.url)
+      if (!sample?.url) {
+        store.toast('Load places this instrument. Then play a note.', 'warn')
+        return
+      }
+      const response = await fetch(sample.url)
+      if (!response.ok) throw new Error(`${entry.name} has no preview.`)
+      const bytes = await response.arrayBuffer()
+      const decoded = engine.decodeLibrary ? await engine.decodeLibrary(bytes) : await decodeSoundBytes(bytes)
+      if (gen !== previewGen.current) return
+      engine.previewPcm(decoded.channels, decoded.sampleRate, false)
+      setPlaying(entry.id)
+    } catch (error) {
+      store.toast(error instanceof Error ? error.message : 'Could not preview that instrument.', 'warn')
+    } finally {
+      setBusy('')
+    }
+  }
+
   async function loadInstrument(entry: LibraryEntry, trackId?: string | null, audition = true) {
     if (store.remoteFollow) {
       store.toast('The host owns the arrangement.', 'warn')
@@ -576,7 +617,7 @@ export function SoundBrowser({
       id="sound-browser"
       role="complementary"
       aria-label="Sounds. Loops, one-shots, and instruments from the free library."
-      title={phone ? 'Tap a row to preview. Add puts it on the selected track.' : 'Drag a sound onto a track, or tap Add.'}
+      title={phone ? 'Tap a row to preview. Load puts it on the selected track.' : 'Drag a sound onto a track, or tap Load.'}
     >
       {!embedded && (
         <div className="sound-head">
@@ -602,9 +643,9 @@ export function SoundBrowser({
           onFavorites={setFavoritesOnly}
         />
       </div>
-      {!embedded && !lockType && (
+      {!lockType && (
         <div className="sound-chips" role="group" aria-label="Kind">
-          {KIND_CHIPS.map((chip) => (
+          {(embedded ? KIND_CHIPS.filter((chip) => chip.id !== 'instrument') : KIND_CHIPS).map((chip) => (
             <button key={chip.id} type="button" className={type === chip.id ? 'on' : ''} aria-pressed={type === chip.id} onClick={() => setType(chip.id)}>
               {chip.label}
             </button>
@@ -622,7 +663,6 @@ export function SoundBrowser({
       <div className="sound-list">
         {starterRows.map((entry) => {
           const on = playing === entry.id
-          const saved = sounds.favorites.includes(entry.id)
           const credit = `${entry.description} ${entry.license} · Hugging Face`
           return (
             <div className={`sound-row${on ? ' is-playing' : ''}`} key={entry.id}>
@@ -638,9 +678,10 @@ export function SoundBrowser({
                 onClick={() => {
                   if (dragMoved.current) return
                   engine.unlock()
-                  setPlaying(on ? '' : entry.id)
-                  if (on) engine.stopPreview()
-                  else void loadInstrument(entry, null, true)
+                  if (on) {
+                    engine.stopPreview()
+                    setPlaying('')
+                  } else void previewInstrument(entry)
                 }}
               >
                 {on && <i className="sound-live" aria-hidden="true" />}
@@ -651,29 +692,17 @@ export function SoundBrowser({
                 type="button"
                 className="sound-add"
                 disabled={busy === entry.id || store.remoteFollow}
-                aria-label={`Add. ${instrumentHint}`}
+                aria-label={`Load. ${instrumentHint}`}
                 title={instrumentHint}
                 onClick={() => { engine.unlock(); void loadInstrument(entry, null, true) }}
               >
-                Add
-              </button>
-              <button
-                type="button"
-                className={`sound-save${saved ? ' on' : ''}`}
-                aria-pressed={saved}
-                disabled={store.remoteFollow}
-                aria-label={saved ? `Saved. ${entry.name} is in favorites.` : `Save. Keep ${entry.name} in favorites.`}
-                title="Keep this sound in the project favorites."
-                onClick={() => store.toggleSoundFavorite(entry.id)}
-              >
-                {saved ? 'Saved' : 'Save'}
+                Load
               </button>
             </div>
           )
         })}
         {shownSounds.map((entry) => {
           const on = playing === entry.id
-          const saved = sounds.favorites.includes(entry.id)
           const playHint = entry.type === 'loop' ? 'Play on the speakers at the song tempo.' : 'Play this sound on the speakers.'
           const credit = `${entry.license} · ${entry.source || 'Source not listed'}`
           return (
@@ -712,22 +741,11 @@ export function SoundBrowser({
                 type="button"
                 className="sound-add"
                 disabled={busy === entry.id || store.remoteFollow}
-                aria-label={`Add. ${where}`}
+                aria-label={`Load. ${where}`}
                 title={where}
                 onClick={() => { engine.unlock(); void add(entry) }}
               >
-                Add
-              </button>
-              <button
-                type="button"
-                className={`sound-save${saved ? ' on' : ''}`}
-                aria-pressed={saved}
-                disabled={store.remoteFollow}
-                aria-label={saved ? `Saved. ${entry.name} is in favorites.` : `Save. Keep ${entry.name} in favorites.`}
-                title="Keep this sound in the project favorites."
-                onClick={() => store.toggleSoundFavorite(entry.id)}
-              >
-                {saved ? 'Saved' : 'Save'}
+                Load
               </button>
             </div>
           )
