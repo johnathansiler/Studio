@@ -735,7 +735,15 @@
   flex: 0 0 auto;
   flex-wrap: nowrap;
   gap: 4px;
+  order: 0;
 }
+.clip-actions .tool-current,
+.command-strip .tool-current { order: 1; }
+.clip-actions .snap-control,
+.command-strip .snap-control,
+.command-strip .snap-inline { order: 2; }
+.clip-actions .tool-quick,
+.command-strip .tool-quick { order: 3; }
 .shell.phone:not(.land) .command-strip.tucked,
 .shell.fold .command-strip.tucked {
   display: flex;

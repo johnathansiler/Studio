@@ -88,7 +88,7 @@ describe('scaler insert', () => {
     expect(keys.plugins.filter((plugin) => plugin.pluginId === 'scaler')).toHaveLength(again.length)
     const html = renderToStaticMarkup(createElement(InsertList, { store, trackId: keys.id }))
     expect(html).toContain('>Scaler<')
-    expect(html).toContain('Add insert')
+    expect(html).toContain('Add plugin')
     const master = renderToStaticMarkup(createElement(InsertList, { store, trackId: 'master' }))
     expect(master).not.toContain('>Scaler<')
   })

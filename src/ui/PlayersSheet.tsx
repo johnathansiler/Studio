@@ -24,7 +24,7 @@ const WRITE = 'Put the parts on the tracks as MIDI you can edit.'
 const ANOTHER = 'Write a different take in the same style.'
 const CLOSE = 'Close the players. The song stays as it is.'
 
-export function PlayersSheet({ store, engine, onClose }: { store: ProjectStore; engine: AudioEngine; onClose: () => void }) {
+export function PlayersSheet({ store, engine, onClose, embedded = false }: { store: ProjectStore; engine: AudioEngine; onClose: () => void; embedded?: boolean }) {
   const { settings, follow } = selectPlayers(store)
   const analyses = useSyncExternalStore(subscribeAnalysis, cachedAnalyses, cachedAnalyses)
   const detected = detection(analyses)
@@ -57,7 +57,7 @@ export function PlayersSheet({ store, engine, onClose }: { store: ProjectStore; 
         : 'No chord track yet. The players write a progression, unless Analyze found chords.'
 
   return (
-    <aside className="players-dock" data-screen-overlay="" aria-label="Players">
+    <aside className={`players-dock${embedded ? ' embedded' : ''}`} data-screen-overlay={embedded ? undefined : ''} aria-label="Players">
       <header>
         <strong>Players</strong>
         <TipButton label="Close" hint={CLOSE} onClick={onClose} />

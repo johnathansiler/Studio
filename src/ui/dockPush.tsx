@@ -26,16 +26,22 @@ export function usePushPhase(open: boolean): PushPhase {
   return phase
 }
 
+/** Room the portrait track column needs for one row of full-size Mute, Solo, Arm, and Roll. */
+const PORTRAIT_TRACK = 252
+const PORTRAIT_TIMELINE = 72
+
 export function browserWidthFor(width: number, height: number) {
-  if (width <= 520 && height >= width) return Math.round(width * 0.66)
+  if (width <= 520 && height >= width) {
+    const room = width - PORTRAIT_TRACK - PORTRAIT_TIMELINE
+    return Math.max(96, Math.min(Math.round(width * 0.4), room))
+  }
   return Math.min(360, Math.max(240, Math.round(width * 0.28)))
 }
 
 export function clampBrowserWidth(value: number, viewport: number, portraitPhone: boolean) {
   if (portraitPhone) {
-    const min = Math.round(viewport * 0.6)
-    const max = Math.round(viewport * 0.7)
-    return Math.min(max, Math.max(min, Math.round(value)))
+    const max = Math.max(96, viewport - PORTRAIT_TRACK - PORTRAIT_TIMELINE)
+    return Math.min(max, Math.max(96, Math.round(value)))
   }
   const max = Math.min(520, Math.max(280, viewport - 280))
   return Math.min(max, Math.max(220, Math.round(value)))

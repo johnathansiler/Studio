@@ -3,7 +3,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 40;
+  z-index: calc(var(--overlay-z, 360) + 40);
   max-height: min(46dvh, 420px);
   overflow: auto;
   background: #18241d;
@@ -60,6 +60,18 @@
 .players-fill input { width: 100%; min-height: 44px; }
 .players-parts, .players-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .players-parts button.on, .players-actions button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.players-dock.embedded {
+  position: static;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+  width: auto;
+  max-height: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
 .players-dock .hint { margin: 0; }
 .shell.fold .players-dock {
   left: auto;

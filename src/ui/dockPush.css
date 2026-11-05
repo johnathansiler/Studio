@@ -64,13 +64,13 @@
 }
 
 .shell.phone:not(.land) .playlist-frame.browser-open > .playlist-browser {
-  flex-basis: var(--browser, 66%);
-  width: var(--browser, 66%);
-  max-width: 70%;
+  flex-basis: var(--browser, 96px);
+  width: var(--browser, 96px);
+  max-width: calc(100% - 252px);
 }
 
 .shell.phone:not(.land) .playlist-frame.browser-open > .arrange {
-  grid-template-columns: minmax(88px, 46%) minmax(0, 1fr);
+  grid-template-columns: max-content minmax(120px, 1fr);
 }
 
 .browser-resize {
@@ -223,4 +223,115 @@
 
 .shell.phone.land .workspace.browser-docked > .shell-browser {
   max-width: 46%;
+}
+
+/* One row of track controls. The column is only as wide as that row. */
+.shell .arrange .heads-col,
+.shell .arrange .heads {
+  width: max-content;
+  min-width: max-content;
+  max-width: none;
+}
+.shell .arrange .head .pl-head {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  align-content: center;
+  justify-content: center;
+  height: 100%;
+  width: max-content;
+  min-width: max-content;
+  gap: 2px;
+  padding: 2px 4px 2px 0;
+}
+.shell .arrange .pl-name-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  width: 100%;
+}
+.shell .arrange .pl-name-row .swatch {
+  width: 6px;
+  align-self: stretch;
+  flex: none;
+  height: auto;
+}
+.shell .arrange .pl-name-row .name {
+  flex: 1 1 auto;
+  min-width: 52px;
+  width: auto;
+  max-width: none;
+  height: 36px;
+  min-height: 36px;
+}
+.shell .arrange .track-controls {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  min-width: max-content;
+}
+.shell .arrange .track-controls .track-live {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 36px;
+  height: 14px;
+  margin: 0;
+  order: 0;
+}
+.shell .arrange .track-controls .track-more {
+  position: static;
+  top: auto;
+  right: auto;
+}
+.shell .arrange,
+.shell.phone .arrange,
+.shell.phone:not(.land) .arrange,
+.shell.phone.land .arrange,
+.shell.fold .arrange,
+.shell:not(.phone) .arrange {
+  grid-template-columns: max-content minmax(160px, 1fr);
+  --lane-h: 96px;
+}
+.shell.phone:not(.land) .playlist-frame,
+.shell.phone.land .playlist-frame {
+  overflow-x: auto;
+}
+.shell.phone:not(.land) .head,
+.shell.phone .head,
+.shell.phone.land .head,
+.shell.phone .lane,
+.shell.phone.land .lane {
+  height: var(--lane-h);
+  overflow: visible;
+}
+
+/* Landscape kept 28px flags and a fixed column, which pushed the full words out of the header. */
+.shell.phone.land .arrange .heads-col,
+.shell.phone.land .arrange .heads,
+.shell.phone.land .arrange .head,
+.shell.phone.land .arrange .head .pl-head,
+.shell.phone.land .arrange .track-controls {
+  width: max-content;
+  min-width: max-content;
+  max-width: none;
+  overflow: visible;
+}
+.shell.phone.land .arrange .head .pl-head {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+}
+.shell.phone.land .arrange .track-controls .mini,
+.shell.phone.land .arrange .track-controls .piano-open,
+.shell.phone.land .arrange .track-controls .beat-open {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: max(40px, max-content);
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
 }

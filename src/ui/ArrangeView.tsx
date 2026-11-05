@@ -80,7 +80,7 @@ function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup
         type="button"
         className={`cap-btn${browserOpen ? ' on' : ''}`}
         aria-pressed={browserOpen}
-        title="Sounds and loops. Open the browser of sounds, instruments, loops, and patterns."
+        title="Sounds and loops. Open sounds, instruments, and loops."
         onClick={onBrowser}
       >
         <strong>Browser</strong>
@@ -91,7 +91,7 @@ function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup
         className={`cap-btn${setupOpen ? ' on' : ''}`}
         aria-expanded={setupOpen}
         aria-controls="arrange-setup"
-        title="Song. Automation write mode, recording, and markers."
+        title="Automation and markers."
         onClick={(event) => {
           const opening = !setupOpen
           onSetup()
@@ -100,8 +100,8 @@ function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup
           }
         }}
       >
-        <strong>Song</strong>
-        <small>Record and markers</small>
+        <strong>Setup</strong>
+        <small>Automation and markers</small>
       </button>
       <button
         type="button"
@@ -110,11 +110,11 @@ function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup
         aria-expanded={pluginsOpen}
         aria-controls="arrange-plugins"
         data-arrange-plugins="toggle"
-        title="Plugins. The chain on the selected track."
+        title="Effects on this track."
         onClick={onPlugins}
       >
         <strong>Plugins</strong>
-        <small>Chain</small>
+        <small>Effects on this track</small>
       </button>
     </div>
   )
@@ -796,17 +796,30 @@ export function ArrangeView({
         {project.tracks.map((track) => (
           <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} style={rowStyle(track, store.selectedTrackId, store.selectedClipId, !!store.openLanes[track.id], phone)} onClick={() => { store.selectTrack(track.id); revealTrack(track.id, 'select-track') }}>
             <div className="pl-head">
-              <i className="swatch" style={{ background: track.color }} />
-              <input
-                className="name"
-                aria-label={`${track.name} name`}
-                style={{ color: track.color }}
-                value={track.name}
-                title={isSampledInstrument(track) ? 'Open the sampler.' : undefined}
-                onClick={() => { if (isSampledInstrument(track)) store.showRack(track.id) }}
-                onChange={(event) => store.updateTrack(track.id, { name: event.target.value })}
-              />
-              <TrackPresence trackId={track.id} />
+              <div className="pl-name-row">
+                <i className="swatch" style={{ background: track.color }} />
+                <input
+                  className="name"
+                  aria-label={`${track.name} name`}
+                  style={{ color: track.color }}
+                  value={track.name}
+                  title={isSampledInstrument(track) ? 'Open the sampler.' : undefined}
+                  onClick={() => { if (isSampledInstrument(track)) store.showRack(track.id) }}
+                  onChange={(event) => store.updateTrack(track.id, { name: event.target.value })}
+                />
+                <TrackPresence trackId={track.id} />
+                {store.selectedTrackId === track.id && showsOnscreenPiano(track) && (
+                  <span className="onscreen-piano-slot" onClick={(event) => event.stopPropagation()}>
+                    <KeyboardToggle
+                      store={store}
+                      engine={engine}
+                      word="On-screen Piano"
+                      hint="Show or hide the on-screen piano. It plays this track's instrument."
+                    />
+                  </span>
+                )}
+              </div>
+              <div className="track-controls" data-track-controls="">
               <MixFlags store={store} trackId={track.id} compact />
               {track.type === 'midi' && (
                 <button
@@ -820,16 +833,6 @@ export function ArrangeView({
                   <PianoIcon />
                   <span>Roll</span>
                 </button>
-              )}
-              {store.selectedTrackId === track.id && showsOnscreenPiano(track) && (
-                <span className="onscreen-piano-slot" onClick={(event) => event.stopPropagation()}>
-                  <KeyboardToggle
-                    store={store}
-                    engine={engine}
-                    word="On-screen Piano"
-                    hint="Show or hide the on-screen piano. It plays this track's instrument."
-                  />
-                </span>
               )}
               {showsOpenBeatMachine(track) && (
                 <OpenBeatMachineButton store={store} trackId={track.id} onOpen={onOpenBeatMachine} />
@@ -855,6 +858,7 @@ export function ArrangeView({
               <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); setTrackAnchor(event.currentTarget); setTrackSheet(track.id) }}>
                 ⋮
               </TipButton>
+              </div>
             </div>
             <LanePicker store={store} trackId={track.id} />
           </div>

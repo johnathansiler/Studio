@@ -6,6 +6,7 @@ import type { SectionKind } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { useFormFactor } from '../ui/form'
 import { GuideLayer } from '../ui/GuideLayer'
+import { PlayersSheet } from '../ui/PlayersSheet'
 import '../ui/guideSheet.css'
 import {
   AMOUNTS,
@@ -43,6 +44,7 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
   const [memory, setMemory] = useState<Memory | null>(null)
   const [sectionId, setSectionId] = useState('')
   const [rewriteRole, setRewriteRole] = useState<RoleId>('drums')
+  const [page, setPage] = useState<'write' | 'players'>('write')
   const bar = Math.max(1, quartersPerBar(store.project.timeSignature))
   const picture = readClip(store.project, store.selectedMidiClipId, bar)
   const sections = (store.project.sections ?? []).filter((section) => section.durationBeats > 0)
@@ -214,6 +216,13 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
           </div>
           <button type="button" className="guide-x overlay-close" onClick={onClose} aria-label="Close Unstuck">Close</button>
         </header>
+        <div className="unstuck-pages" role="tablist" aria-label="Unstuck pages">
+          <button type="button" role="tab" aria-selected={page === 'write'} className={page === 'write' ? 'on' : ''} onClick={() => setPage('write')}>Write</button>
+          <button type="button" role="tab" aria-selected={page === 'players'} className={page === 'players' ? 'on' : ''} onClick={() => setPage('players')}>Players</button>
+        </div>
+        {page === 'players' ? (
+          <PlayersSheet embedded store={store} engine={engine} onClose={() => setPage('write')} />
+        ) : <>
         <div className="unstuck-grid" data-unstuck="parts">
           {ROLES.map((role) => (
             <button key={role.id} type="button" data-unstuck-action={role.id} onClick={() => write({ action: 'part', role: role.id })}>
@@ -359,6 +368,7 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
             </div>
           </section>
         )}
+        </>}
       </div>
     </GuideLayer>
   )

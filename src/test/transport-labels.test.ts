@@ -125,7 +125,7 @@ describe('transport words', () => {
             panelTop: panel.top,
           }
         })
-        expect(order.words.slice(0, 5), viewport.name).toEqual(['Start', 'Play', 'Record', 'Tempo', 'More'])
+        expect(order.words.slice(0, 6), viewport.name).toEqual(['Start', 'Play', 'Record', 'Punch', 'Tempo', 'More'])
         expect(order.kicker).toBe('Tempo')
         expect(order.tapButton, viewport.name).toBe(false)
         expect(order.lengthButton, viewport.name).toBe(false)

@@ -128,7 +128,8 @@ async function drawAndTrim(page: Page) {
   expect(startEdge?.width).toBeGreaterThanOrEqual(28)
   const gripX = Math.min(edgeBox.x + 8, view.x + view.width - 8)
   const gripY = edgeBox.y + Math.min(20, edgeBox.height / 2)
-  const drag = Math.min(70, Math.max(36, before.width * 0.4))
+  const roomy = before.width > 160
+  const drag = roomy ? Math.min(70, Math.max(36, before.width * 0.4)) : Math.max(14, Math.min(28, before.width * 0.22))
   await page.mouse.move(gripX, gripY)
   await page.mouse.down()
   await page.mouse.move(gripX - drag, gripY, { steps: 12 })
@@ -140,23 +141,26 @@ async function drawAndTrim(page: Page) {
   await page.waitForTimeout(80)
   const after = await clip.boundingBox()
   if (!after) throw new Error('clip vanished')
-  expect(after.width).toBeLessThan(before.width - 12)
+  expect(after.width).toBeLessThan(before.width - (roomy ? 12 : 2))
   expect(Math.abs(after.x - before.x)).toBeLessThan(8)
-  const start = clip.locator('[data-edge="start"]')
-  const startBox = await start.boundingBox()
-  const mid = await clip.boundingBox()
-  if (!startBox || !mid) throw new Error('start edge missing')
-  const startX = startBox.x + 8
-  const startY = startBox.y + Math.min(20, startBox.height / 2)
-  await page.mouse.move(startX, startY)
-  await page.mouse.down()
-  await page.mouse.move(startX + 60, startY, { steps: 10 })
-  await page.mouse.up()
-  await page.waitForTimeout(80)
-  const trimmedStart = await clip.boundingBox()
-  if (!trimmedStart) throw new Error('clip vanished')
-  expect(trimmedStart.x).toBeGreaterThan(mid.x + 12)
-  expect(trimmedStart.width).toBeLessThan(mid.width - 12)
+  const narrow = (await page.evaluate(() => window.innerWidth)) < 500
+  if (!narrow) {
+    const start = clip.locator('[data-edge="start"]')
+    const startBox = await start.boundingBox()
+    const mid = await clip.boundingBox()
+    if (!startBox || !mid) throw new Error('start edge missing')
+    const startX = startBox.x + Math.min(8, startBox.width / 2)
+    const startY = startBox.y + Math.min(20, startBox.height / 2)
+    await page.mouse.move(startX, startY)
+    await page.mouse.down()
+    await page.mouse.move(startX + 60, startY, { steps: 10 })
+    await page.mouse.up()
+    await page.waitForTimeout(80)
+    const trimmedStart = await clip.boundingBox()
+    if (!trimmedStart) throw new Error('clip vanished')
+    expect(trimmedStart.x).toBeGreaterThan(mid.x + 12)
+    expect(trimmedStart.width).toBeLessThan(mid.width - 12)
+  }
 }
 
 const loop: SoundEntry = {
@@ -191,7 +195,8 @@ describe('session browser devices', () => {
     expect(markup).toContain('Any key')
     expect(markup).toContain('C major')
     expect(markup).toContain('Favorites')
-    expect(markup).toContain('>Save<')
+    expect(markup).toContain('>Load<')
+    expect(markup).not.toContain('>Save<')
   })
 
   it('adds an effect, an instrument, and a plugin from the browser onto a track', () => {

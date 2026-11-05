@@ -1993,6 +1993,9 @@ async function importDropped(files: FileList) {
           onRecord={() => { engine.unlock(); void record() }}
           onSeek={(sample) => void (sample === 0 ? returnToStart() : locate(sample))}
           onReset={() => { engine.unlock(); void resetRoom() }}
+          onQuickPunch={() => void quickPunch()}
+          onMidi={() => { setMenuOpen(false); store.setMidiToolsOpen(true) }}
+          session={session}
           roomRole={session.state.role}
           takeProgress={session.state.takeProgress}
           assetTransfers={session.state.assetTransfers}
@@ -2005,6 +2008,7 @@ async function importDropped(files: FileList) {
               context="arrange"
               words
               tucked
+              store={store}
               showHint={false}
               extra={<SnapControl store={store} inline />}
               onChange={(tool) => store.setTool(tool)}

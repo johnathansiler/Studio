@@ -183,10 +183,12 @@ describe('arrange browser', () => {
     }))
     expect(browser).toContain('data-playlist-browser="open"')
     expect(browser).not.toContain('data-screen-overlay')
-    for (const label of ['Sounds', 'Instruments', 'Loops', 'Patterns', 'Plugins', 'Clips']) expect(browser).toContain(label)
+    for (const label of ['Sounds', 'Instruments', 'Loops', 'Project', 'Drums']) expect(browser).toContain(label)
+    expect(browser).not.toContain('>Plugins<')
+    expect(browser).not.toContain('Drum one-shots and kits.')
     expect(html).not.toContain('>Read<')
     expect(html).not.toContain('Auto-Tune')
-    expect(html).toContain('>Song<')
+    expect(html).toContain('>Setup<')
   })
 })
 
@@ -216,7 +218,7 @@ describe('phone arrange', () => {
         onAnalyze: () => undefined,
       } as never))
       expect(html).toContain('data-phone-arrange="compact"')
-      expect(html).toContain('>Song<')
+      expect(html).toContain('>Setup<')
       expect(html).toContain('data-loop="off"')
       expect(html).toContain('Loop start')
       expect(html).toContain('Loop end')

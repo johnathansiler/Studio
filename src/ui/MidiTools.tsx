@@ -63,9 +63,10 @@ export function MidiTools({ store, engine }: { store: ProjectStore; engine: Audi
     return () => window.removeEventListener('pointerdown', down, true)
   }, [store, store.midiLearnActive, tick])
 
-  if (hide || !store.midiToolsOpen) return null
+  if (!store.midiToolsOpen) return null
   return (
-    <section className="midi-tools" aria-label="MIDI tools">
+    <section className="midi-tools" aria-label="MIDI tools" data-screen-overlay="">
+      {hide && <p className="midi-note">This browser has no hardware MIDI ports. Scale, arp, and chord still run on the track.</p>}
       <div className="midi-tabs" role="tablist">
         <Tab id="learn" label="Learn" hint="Map a knob or key to a control" section={section} setSection={setSection} store={store} />
         <Tab id="fx" label="FX" hint="Effects before the instrument" section={section} setSection={setSection} store={store} />

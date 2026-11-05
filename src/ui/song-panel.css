@@ -88,6 +88,35 @@
   min-width: 0;
 }
 
+.song-note {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.song-meters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.song-meters button {
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #121a16;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.song-meters button.on {
+  border-color: transparent;
+  background: #1c3a28;
+  color: #f4fff8;
+}
+
 .song-sheet .guide-choice {
   flex-direction: row;
   align-items: center;

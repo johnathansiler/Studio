@@ -89,7 +89,6 @@ export const MENU_COPY: MenuSpec[] = [
   { id: 'dock-bottom', action: 'dock', group: 'view', place: 'desk', label: 'Bottom', hint: 'Move the side panel under the editor.' },
   { id: 'dock-side', action: 'dock', group: 'view', place: 'desk', label: 'Side', hint: 'Move the panel back beside the editor.' },
   { id: 'scaler', action: 'scaler', group: 'tools', place: 'desk', label: 'Scaler', hint: 'Chord instrument. Play pads, or open Write to generate MIDI.' },
-  { id: 'players', action: 'players', group: 'tools', place: 'all', label: 'Players', hint: 'A drummer, bass, and keys that follow the song. Writes MIDI you can edit.' },
   { id: 'midi', action: 'midi', group: 'tools', place: 'all', label: 'MIDI', hint: 'Learn knobs, effects, hardware out, live capture, and recording several inputs.' },
   { id: 'signature', action: 'signature', group: 'settings', place: 'all', label: 'Time', hint: 'Beats in each bar.' },
   { id: 'shortcuts', action: 'shortcuts', group: 'settings', place: 'all', label: 'Shortcuts', hint: 'Keys for play, record, and editing.' },

@@ -9,6 +9,8 @@ import { recordButtonOn } from '../model/transport'
 import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import type { AssetStatus } from '../remote/assets'
+import type { SessionClient } from '../remote/session'
+import { RecordBar } from './RecordBar'
 import { AutomationFollow } from './AutomationLane'
 import { AssetTransfers } from './AssetTransfers'
 import { TRANSPORT_COPY, copyOf } from './chrome'
@@ -25,6 +27,9 @@ export function TransportBar({
   onRecord,
   onSeek,
   onReset,
+  onQuickPunch,
+  onMidi,
+  session,
   roomRole,
   simple = false,
   takeProgress = null,
@@ -39,6 +44,9 @@ export function TransportBar({
   onRecord: () => void
   onSeek: (sample: number) => void
   onReset?: () => void
+  onQuickPunch?: () => void
+  onMidi?: () => void
+  session?: SessionClient
   /** Solo and host can reset. A guest sees a disabled Host only control. */
   roomRole?: 'host' | 'guest'
   /** Phone uses the same transport controls, with text labels. */
@@ -429,6 +437,14 @@ export function TransportBar({
         <TipButton className={`t-btn rec ${recordButtonOn(status) ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={recordButtonOn(status)} onPress={() => engine.unlock()} onClick={onRecord}>
           <span className="t-word">Record</span>
         </TipButton>
+        <RecordBar
+          dock
+          store={store}
+          engine={engine}
+          session={session ?? ({ state: { participants: [], selfId: 'local' } } as unknown as SessionClient)}
+          onQuickPunch={onQuickPunch ?? (() => undefined)}
+          onMidi={onMidi}
+        />
         <div className="tempo-cluster" role="group" aria-label="Tempo" ref={tempoWrap}>{tempoField}</div>
         <button
           ref={menuButton}
