@@ -435,7 +435,7 @@
 .shell.fold .tune-board.pitch > * { flex: 0 0 auto; }
 
 .shell.phone.land .plugin-sheet.tune-open {
-  max-height: none;
+  max-height: 26dvh;
 }
 .shell.phone.land [data-plugin-root] .tune-body,
 .shell.phone.land [data-plugin-root] .tune-board {

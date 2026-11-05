@@ -585,10 +585,6 @@ export function PadsPanel({
           <button type="button" className={`hw-key ch-tab${chopOpen ? ' on' : ''}`} aria-pressed={chopOpen} aria-expanded={chopOpen} onClick={() => setChopOpen((value) => !value)}>Chop</button>
         </div>
         {chopOpen && <ChopDrawer store={store} engine={engine} trackId={trackId} vintageStartsOpen={vintageStartsOpen} />}
-        </div>
-
-        <div data-plugin-page="play" hidden={face !== 'play'}>
-        <div className="hw-deck">
           <div className="note-repeat-row">
             <button
               type="button"
@@ -632,7 +628,10 @@ export function PadsPanel({
               </button>
             </div>
           </div>
+        </div>
 
+        <div data-plugin-page="play" hidden={face !== 'play'}>
+        <div className="hw-deck">
           <div className="mpc-knob-row">
             <button type="button" className={`hw-key ch-tab mpc-full${kit.fullLevel ? ' on' : ''}`} aria-pressed={kit.fullLevel} title="Full level. Every hit plays at velocity 127, wherever you touch the pad." onClick={() => store.patchTrackKit(trackId, { fullLevel: !kit.fullLevel })}>Full Level</button>
             <div className="hw-knobs" aria-label="Knobs">

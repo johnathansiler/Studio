@@ -537,7 +537,7 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
           </select>
           <small>This beat. Song plays Arrange.</small>
         </label>
-        <div hidden={page !== 'mix'}>
+        <div hidden={phone && page !== 'mix'}>
         <div className="rack-lengths" role="group" aria-label={`${bar('steps').label}. ${bar('steps').hint}`}>
           <span className="rack-lengths-label">Steps</span>
           {([16, 32, 64] as const).map((length) => (
