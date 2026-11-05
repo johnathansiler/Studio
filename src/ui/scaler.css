@@ -155,7 +155,7 @@
 .scaler-drawer:not([hidden]) {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -505,7 +505,7 @@
 .scaler-fold { border: 1px solid #2a3442; border-radius: 8px; background: #121820; padding: 6px 8px; min-width: 0; max-width: 100%; }
 .scaler-fold h2 { margin: 0 0 6px; font-size: 14px; letter-spacing: 0.04em; color: #d5deea; }
 .scaler-fold summary { cursor: pointer; color: #9eb0c3; letter-spacing: 0.04em; min-height: 40px; display: flex; align-items: center; }
-.scaler-table { display: flex; flex-direction: column; margin-top: 6px; max-height: 168px; overflow: auto; }
+.scaler-table { display: flex; flex-direction: column; margin-top: 6px; max-height: none; overflow: hidden; }
 .scaler-table .head, .scaler-table button {
   display: grid;
   grid-template-columns: 1.2fr 1.4fr 0.4fr 1.4fr 0.7fr 0.5fr;
@@ -660,7 +660,7 @@
   box-shadow: var(--raised);
   padding: 0 10px;
 }
-.perf-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto; }
+.perf-list { display: flex; flex-direction: column; gap: 6px; max-height: none; overflow: hidden; }
 .perf-row strong { flex: 1 1 140px; }
 .perf-note { margin: 0; color: #8ea0b4; }
 @media (max-width: 900px) {
@@ -722,8 +722,8 @@
 .scaler-stage {
   flex: 0 1 auto;
   min-height: 0;
-  max-height: 210px;
-  overflow: auto;
+  max-height: none;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -782,8 +782,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr);
   gap: 6px;
-  max-height: 220px;
-  overflow: auto;
+  max-height: none;
+  overflow: hidden;
   margin-top: 4px;
   padding: 6px;
   border-radius: 10px;
@@ -823,11 +823,14 @@
   box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45);
 }
 .scaler-perform { flex: 0 0 auto; padding: 0 8px; }
-.scaler-panel.phone.land .scaler-perform {
-  max-height: 0;
-  overflow: hidden;
-  padding: 0;
-  margin: 0;
+.scaler-panel.phone.land .scaler-keys {
+  flex: 0 0 56px;
+  height: 56px;
+  min-height: 40px;
+  max-height: 56px;
+}
+.scaler-panel.phone.land .scaler-padgrid {
+  flex: 1 1 auto;
 }
 .scaler-panel.phone:not(.land) .scaler-blocks {
   max-height: 0;
@@ -869,8 +872,8 @@
     display: flex;
     flex-direction: column;
     margin-top: 4px;
-    max-height: 220px;
-    overflow: auto;
+    max-height: none;
+    overflow: hidden;
     border-radius: 8px;
   }
   .scaler-match .head,
@@ -900,15 +903,9 @@
     text-overflow: ellipsis;
   }
 }
-.scaler-panel.phone .scaler-browse,
-.shell.phone:not(.land) .scaler-panel .scaler-browse {
-  position: absolute;
-  z-index: 8;
-  left: 8px;
-  right: 8px;
+.scaler-panel .scaler-browse {
   grid-template-columns: 1fr;
-  max-height: 46%;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45), var(--raised);
+  align-content: start;
 }
 [data-screen-overlay].scaler-panel.land {
   display: grid !important;
@@ -917,25 +914,32 @@
 .scaler-panel.phone.land {
   grid-template-columns: 1fr;
   grid-template-areas:
-    "presets"
     "bar"
+    "tabs"
     "out"
     "stage"
     "pads"
-    "perform"
     "keys";
 }
 .scaler-panel.land {
   display: grid;
   grid-template-columns: minmax(560px, 1fr) minmax(320px, 1.2fr);
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto;
   grid-template-areas:
     "presets presets"
     "bar bar"
+    "tabs tabs"
     "out out"
     "stage pads"
     "perform perform"
     "keys keys";
+}
+.scaler-panel.land > .plugin-page-tabs { grid-area: tabs; }
+.scaler-panel.land > .scaler-browse,
+.scaler-panel.land > .scaler-drawer {
+  grid-column: 1 / -1;
+  grid-row: 5 / -1;
+  min-height: 0;
 }
 .scaler-panel.land > .preset-dock { grid-area: presets; }
 .scaler-panel.land > .scaler-topbar { grid-area: bar; }

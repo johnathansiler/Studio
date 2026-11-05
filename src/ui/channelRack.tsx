@@ -31,7 +31,7 @@ import type { SoundEntry } from '../sounds/types'
 import { selectBeats } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { BEAT_BAR, BEAT_ROW, BEAT_SHEET, copyOf, described } from './chrome'
-import { useFormFactor } from './form'
+import { useFormFactor, useLandscape } from './form'
 import { TipButton } from './Hint'
 import { LoopRegion } from './LoopRegion'
 import { DrumRoll } from './DrumRoll'
@@ -333,7 +333,7 @@ function Picker({
   )
 }
 
-export function ChannelRack({ store, engine }: { store: ProjectStore; engine: RackEngine }) {
+export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectStore; engine: RackEngine; page?: 'steps' | 'mix' }) {
   useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
   const beatState = selectBeats(store)
   const project = beatState.project
@@ -357,6 +357,8 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
   const inflight = useRef(new Set<string>())
   const scrollRef = useRef<HTMLDivElement>(null)
   const form = useFormFactor()
+  const land = useLandscape()
+  const [rowPage, setRowPage] = useState(0)
   const phone = form === 'phone'
   const short = form !== 'desk'
   const sampleKey = pattern?.channels.map((row) => `${row.id}:${row.sampleId ?? ''}`).join('|') ?? ''
@@ -535,6 +537,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
           </select>
           <small>This beat. Song plays Arrange.</small>
         </label>
+        <div hidden={phone && page !== 'mix'}>
         <div className="rack-lengths" role="group" aria-label={`${bar('steps').label}. ${bar('steps').hint}`}>
           <span className="rack-lengths-label">Steps</span>
           {([16, 32, 64] as const).map((length) => (
@@ -562,6 +565,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
         <span className={`rack-loop ${mode === 'pattern' || project.loopEnabled ? 'on' : ''}`} data-loop={project.loopEnabled ? 'on' : 'off'} data-mode={mode} title={mode === 'pattern' ? 'Pattern mode loops this beat. Song mode uses the arrangement loop.' : 'The song loop. It is the same region as Arrange, and the playhead wraps inside it.'}>
           {mode === 'pattern' ? 'Pattern' : project.loopEnabled ? 'Loop on' : 'Loop off'}
         </span>
+        </div>
       </div>
       {sampleError && (
         <p className="rack-sample-note" role="status">
@@ -664,6 +668,15 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
           </label>
         )}
       </div>
+      {phone && land && pattern.channels.length > 3 && (
+        <label className="plugin-page-menu">
+          <span>Rows</span>
+          <select aria-label="Step rows" value={rowPage} onChange={(event) => setRowPage(Number(event.target.value))}>
+            <option value={0}>{pattern.channels[0]?.name ?? 'First'} to {pattern.channels[Math.min(2, pattern.channels.length - 1)]?.name ?? 'Third'}</option>
+            <option value={1}>{pattern.channels[3]?.name ?? 'Next'} to {pattern.channels[pattern.channels.length - 1]?.name ?? 'Last'}</option>
+          </select>
+        </label>
+      )}
       <div
         className="rack-scroll"
         ref={scrollRef}
@@ -755,7 +768,7 @@ export function ChannelRack({ store, engine }: { store: ProjectStore; engine: Ra
             ))}
           </div>
         </div>
-        {pattern.channels.map((channel) => {
+        {(phone && land ? pattern.channels.slice(rowPage * 3, rowPage * 3 + 3) : pattern.channels).map((channel) => {
           const cells = store.quantizePreview?.channels.find((row) => row.id === channel.id)?.cells ?? channel.cells
           const volume = rowCopy('volume')
           const pan = rowCopy('pan')

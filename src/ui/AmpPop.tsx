@@ -3,6 +3,7 @@ import type { AudioEngine } from '../audio/engine'
 import { descriptor } from '../audio/plugins/catalog'
 import { commitAmpPreset } from '../presets/project'
 import { PresetControls } from './PresetControls'
+import './pluginPages.css'
 import { GestureReadout, useDragValue } from './kit/controls'
 import {
   AMPS,
@@ -55,7 +56,7 @@ export function AmpPop({
   const target = heard ? targetNote(heard.note + heard.cents / 100, preset) : (TUNE_PRESETS[preset]?.strings[0] ?? 40)
   const cents = heard ? (heard.note + heard.cents / 100 - target) * 100 : 0
   return (
-    <div className="board-pop" data-board="open" data-screen-overlay="" role="dialog" aria-label="Amp">
+    <div className="board-pop" data-board="open" data-plugin-root="" data-screen-overlay="" role="dialog" aria-label="Amp">
       <header>
         <strong>Amp</strong>
         <PresetControls

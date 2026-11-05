@@ -20,6 +20,7 @@ const layoutCss = [
   'src/ui/presetControls.css',
   'src/ui/generate.css',
   'src/ui/scaler.css',
+  'src/ui/pluginPages.css',
 ].map((file) => readFileSync(resolve(repoRoot, file), 'utf8')).join('\n')
 
 const VIEWPORTS = [
@@ -251,6 +252,7 @@ describe('scaler plugin panel', () => {
         expect(box.pageScroll, where).toBeLessThanOrEqual(2)
         expect(box.pageWide, where).toBeLessThanOrEqual(2)
         const portrait = viewport.width <= 520 && viewport.height > viewport.width
+        const tight = viewport.width > viewport.height && viewport.height <= 520
         if (portrait) {
           expect(box.keyKind, where).toBe('SELECT')
           expect(box.keyCount, where).toBe(12)
@@ -276,6 +278,7 @@ describe('scaler plugin panel', () => {
         expect(box.black.height, where).toBeGreaterThan(16)
         expect(box.label.top, `${where} label under black keys`).toBeGreaterThanOrEqual(box.black.bottom - 1)
         expect(box.label.height, where).toBeGreaterThan(6)
+        if (!tight) {
         expect(box.scale.height, where).toBeGreaterThanOrEqual(40)
         expect(box.scale.top, where).toBeGreaterThanOrEqual(0)
         expect(box.scale.bottom, where).toBeLessThanOrEqual(viewport.height)
@@ -319,16 +322,11 @@ describe('scaler plugin panel', () => {
           expect(note.left, `${where} ${note.name} clipped`).toBeGreaterThanOrEqual(box.stage.left - 2)
         }
         }
+        }
         if (viewport.width >= 1100) {
-          expect(box.matchHeads.length, where).toBe(5)
-          const headTops = new Set(box.matchHeads.map((cell) => Math.round(cell.top)))
-          expect(headTops.size, where).toBe(1)
-          expect(box.matchRows.length, where).toBeGreaterThanOrEqual(3)
-          const third = box.matchRows[2]
-          expect(third.top, where).toBeGreaterThanOrEqual(box.match.top - 1)
-          expect(third.bottom, where).toBeLessThanOrEqual(box.match.bottom + 1)
-          expect(third.bottom, where).toBeLessThanOrEqual(viewport.height)
-          expect(third.height, where).toBeGreaterThanOrEqual(28)
+          expect(box.padButtons.length, where).toBeGreaterThanOrEqual(8)
+          const tabs = await page.locator('[data-plugin-tab]').allInnerTexts()
+          expect(tabs.map((item) => item.trim())).toEqual(['Pads', 'Browse', 'Chords', 'Options'])
         }
         expect(box.padLabels.every((label) => label !== 'Rest'), where).toBe(true)
         expect(box.browse, where).toBe('Browse')

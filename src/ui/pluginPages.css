@@ -1,0 +1,146 @@
+/* Plugin pages fill the overlay. One section is on screen. Nothing inside scrolls. */
+
+[data-screen-overlay][data-plugin-root],
+.plugins-drawer[data-plugin-root] {
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+
+[data-plugin-root] > header,
+[data-plugin-root] > .preset-dock,
+[data-plugin-root] > .step-sequencer-bar,
+[data-plugin-root] > .mpc-brand,
+[data-plugin-root] > .plugins-drawer-head {
+  flex: 0 0 auto;
+  min-height: 40px;
+  max-height: 48px;
+  overflow: hidden;
+}
+
+.plugin-pages {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.plugin-page-tabs,
+.plugin-page-menu {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 40px;
+}
+
+.plugin-page-tabs {
+  overflow: hidden;
+}
+
+.plugin-page-tabs button {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 8px;
+  border-radius: 10px;
+  color: #d5deea;
+  background-color: #243044;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(0, 0, 0, 0.28));
+  border: 1px solid #3d4c63;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.plugin-page-tabs button.on,
+.plugin-page-tabs button[aria-selected='true'] {
+  color: #102117;
+  background-color: #73c48f;
+  border-color: #d7ffe6;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.28);
+}
+
+.plugin-page-menu {
+  padding: 0 2px;
+}
+
+.plugin-page-menu span {
+  flex: 0 0 auto;
+  color: #9eb0c4;
+}
+
+.plugin-page-menu select {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 40px;
+}
+
+.plugin-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plugin-page[hidden],
+[data-plugin-root] [hidden] {
+  display: none !important;
+}
+
+.plugin-controls {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.plugin-controls label,
+.plugin-controls .plugin-control {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shell.phone.land [data-plugin-root] .kit-eq { height: 88px; }
+.shell.phone.land [data-plugin-root] .space-stage,
+.shell.phone.land [data-plugin-root] .wave { height: 64px; }
+.shell.phone.land [data-plugin-root] .kit-shell { gap: 4px; padding: 6px; min-height: 0; overflow: hidden; }
+[data-plugin-root].step-sequencer .beats,
+[data-plugin-root] .rack-scroll,
+[data-plugin-root] .sample-panel,
+[data-plugin-root] .tune-body,
+[data-plugin-root] .tune-board {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden !important;
+}
+
+.shell.phone.land [data-plugin-root].patch-sheet .patch-hint {
+  display: none;
+}
+.shell.phone.land [data-plugin-root].patch-sheet .patch-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.shell.phone.land [data-plugin-root].patch-sheet .patch-keys {
+  flex: 0 0 40px;
+  min-height: 40px;
+}
+
+.shell.phone [data-plugin-root] .kit-shell,
+.shell.fold [data-plugin-root] .kit-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
