@@ -15,12 +15,13 @@ import { makeTrack, uid, type MidiClip, type MidiNote, type Project, type Track 
 import { ensureScale, roleById, roleLabel, scaleIsBuiltin, type RoleId } from './brief'
 import type { SongDraft } from './draft'
 
-export const UNSTUCK_MARK = 'Unstuck '
+export const UNSTUCK_MARK = 'Ideas '
+const CLIP_MARKS = ['Ideas ', 'Unstuck '] as const
 
 const OURS = /^(Intro|Verse|Pre-Chorus|Pre|Post-Chorus|Chorus|Bridge|Instrumental|Outro|Loop|Breakdown|Break)( \d+)?$/
 
 export function unstuckNamed(name: string) {
-  return name.startsWith(UNSTUCK_MARK)
+  return CLIP_MARKS.some((mark) => name.startsWith(mark))
 }
 
 export function nameHasRole(name: string, label: string) {
@@ -169,9 +170,9 @@ function pushClip(track: Track, clip: SongDraft['tracks'][number]['clips'][numbe
 
 function owns(name: string, label: string, names: Set<string>) {
   if (names.has(name)) return true
-  const prefix = `${UNSTUCK_MARK}${label}`
-  const replacingMain = [...names].some((item) => item.startsWith(prefix))
-  return replacingMain && name.startsWith(prefix)
+  const prefixes = CLIP_MARKS.map((mark) => `${mark}${label}`)
+  const replacingMain = [...names].some((item) => prefixes.some((prefix) => item.startsWith(prefix)))
+  return replacingMain && prefixes.some((prefix) => name.startsWith(prefix))
 }
 
 function exciseRole(track: Track, label: string, names: Set<string>, start: number, end: number) {

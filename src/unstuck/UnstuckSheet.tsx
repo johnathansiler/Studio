@@ -102,13 +102,13 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
     if (job.action === 'vary' && pictureNow) {
       const start = again && memory ? memory.startBeat : pictureNow.startBeat + pictureNow.durationBeats
       const end = start + pictureNow.durationBeats
-      return { ...base, startBeat: start, replace: again || hasClip('Unstuck Variation', start, end), previousEnd: end, clip: pictureNow }
+      return { ...base, startBeat: start, replace: again || hasClip('Ideas Variation', start, end), previousEnd: end, clip: pictureNow }
     }
     if (job.action === 'continue' && pictureNow) {
       const start = again && memory ? memory.startBeat : pictureNow.startBeat + pictureNow.durationBeats
       const bars = job.bars === 'section' ? 8 : job.bars
       const end = start + bars * bar
-      return { ...base, startBeat: start, replace: again || hasClip('Unstuck Continue', start, end), previousEnd: end, clip: pictureNow, afterKind: sectionKindAt(pictureNow.startBeat) }
+      return { ...base, startBeat: start, replace: again || hasClip('Ideas Continue', start, end), previousEnd: end, clip: pictureNow, afterKind: sectionKindAt(pictureNow.startBeat) }
     }
     if (job.action === 'complement' && pictureNow) {
       const end = pictureNow.startBeat + pictureNow.durationBeats
@@ -133,8 +133,8 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
     const followed = job.action === 'part' ? plansBetween(start, end) : undefined
     const at = job.action === 'fill' || job.action === 'transition' ? Math.max(start, end - bar) : start
     const replaceRole = job.action === 'part' && span ? hasRole(job.role, start, end) : false
-    const replaceFill = (job.action === 'fill' && hasClip('Unstuck Fill', at, at + bar))
-      || (job.action === 'transition' && hasClip('Unstuck Transition', at, at + bar))
+    const replaceFill = (job.action === 'fill' && hasClip('Ideas Fill', at, at + bar))
+      || (job.action === 'transition' && hasClip('Ideas Transition', at, at + bar))
     return {
       ...base,
       startBeat: at,
@@ -157,8 +157,9 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
   }
 
   function hasClip(fragment: string, start: number, end: number) {
+    const legacy = fragment.replace(/^Ideas /, 'Unstuck ')
     return store.project.tracks.some((track) => track.midiClips.some((clip) => {
-      if (!clip.name.includes(fragment)) return false
+      if (!clip.name.includes(fragment) && !clip.name.includes(legacy)) return false
       const clipEnd = clip.startBeat + clip.durationBeats
       return clipEnd > start + 0.01 && clip.startBeat < end - 0.01
     }))
@@ -167,7 +168,7 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
   function hasRole(role: RoleId, start: number, end: number) {
     const label = roleLabel(role)
     return store.project.tracks.some((track) => track.midiClips.some((clip) => {
-      if (!clip.name.startsWith('Unstuck ') || !clip.name.includes(label)) return false
+      if (!(clip.name.startsWith('Ideas ') || clip.name.startsWith('Unstuck ')) || !clip.name.includes(label)) return false
       const clipEnd = clip.startBeat + clip.durationBeats
       return clipEnd > start + 0.01 && clip.startBeat < end - 0.01
     }))
@@ -207,16 +208,16 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
 
   return (
     <GuideLayer>
-      <div className={`guide-sheet unstuck-sheet unstuck-dock ${place}`} role="dialog" aria-label="Unstuck" data-unstuck="open" data-screen-overlay="">
+      <div className={`guide-sheet unstuck-sheet unstuck-dock ${place}`} role="dialog" aria-label="Ideas" data-unstuck="open" data-screen-overlay="">
         {place === 'sheet' && <div className="guide-handle" aria-hidden="true" />}
         <header className="guide-head">
           <div>
-            <h2>Unstuck</h2>
+            <h2>Ideas</h2>
             <p>Pick one part. Full song always writes two verses and two choruses, then any extra sections the seed keeps. Shuffle again keeps the locks.</p>
           </div>
-          <button type="button" className="guide-x overlay-close" onClick={onClose} aria-label="Close Unstuck">Close</button>
+          <button type="button" className="guide-x overlay-close" onClick={onClose} aria-label="Close Ideas">Close</button>
         </header>
-        <div className="unstuck-pages" role="tablist" aria-label="Unstuck pages">
+        <div className="unstuck-pages" role="tablist" aria-label="Ideas pages">
           <button type="button" role="tab" aria-selected={page === 'write'} className={page === 'write' ? 'on' : ''} onClick={() => setPage('write')}>Write</button>
           <button type="button" role="tab" aria-selected={page === 'players'} className={page === 'players' ? 'on' : ''} onClick={() => setPage('players')}>Players</button>
         </div>

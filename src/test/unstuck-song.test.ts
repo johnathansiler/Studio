@@ -236,14 +236,14 @@ describe('unstuck songs', () => {
       clip: picture,
     })))
     expect(store.project.tracks.find((track) => track.id === keys.id)!.midiClips[0].notes.map((note) => note.pitch)).toEqual(before)
-    const variation = store.project.tracks.flatMap((track) => track.midiClips).find((clip) => clip.name.startsWith('Unstuck Variation'))!
+    const variation = store.project.tracks.flatMap((track) => track.midiClips).find((clip) => clip.name.startsWith('Ideas Variation'))!
     expect(variation.startBeat).toBe(16)
 
     store.writeUnstuck(composeUnstuck(brief({ seed: 6 }), { action: 'continue', bars: 4 }, ctx({
       startBeat: 16,
       clip: picture,
     })))
-    const continued = store.project.tracks.flatMap((track) => track.midiClips).find((clip) => clip.name.startsWith('Unstuck Continue'))!
+    const continued = store.project.tracks.flatMap((track) => track.midiClips).find((clip) => clip.name.startsWith('Ideas Continue'))!
     expect(continued.startBeat).toBe(16)
     expect(continued.notes.length).toBeGreaterThan(2)
 
