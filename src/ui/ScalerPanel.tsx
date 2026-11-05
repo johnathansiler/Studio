@@ -11,6 +11,7 @@ import { NOTE_NAMES, type ArpDirection } from '../model/scale'
 import { projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { allProgressions, allScales, GENRE_INFO, getScale, harmonize, loadScaleCatalog, progressionsFor, realizeProgression, scaleFamilies, songSets, spellScale, VOICINGS, type VoicingId } from '../theory'
+import type { TheoryProgression } from '../theory/types'
 import { GeneratePanel } from './GeneratePop'
 import { scalerPatch } from '../presets/apply'
 import { commitScalerPreset } from '../presets/project'
@@ -81,7 +82,16 @@ export function ScalerPanel({ store, engine, trackId }: { store: ProjectStore; e
   const [expression, setExpression] = useState(0)
   const [human, setHuman] = useState(0)
   const [perfOpen, setPerfOpen] = useState(false)
-const [options, setOptions] = useState(false)
+  const [options, setOptions] = useState(false)
+  const [browser, setBrowser] = useState(false)
+  const [browseCat, setBrowseCat] = useState<'common' | 'genres' | 'styles' | 'moods'>('common')
+  const [browseSub, setBrowseSub] = useState('All')
+  const [hearts, setHearts] = useState<string[]>([])
+  const [padSource, setPadSource] = useState<'set' | 'scale' | 'main'>('set')
+  const [lit, setLit] = useState<number | null>(null)
+  const [heldPcs, setHeldPcs] = useState<number[] | null>(null)
+  const [linked, setLinked] = useState(true)
+  const [land, setLand] = useState(() => typeof window !== 'undefined' && window.innerWidth > window.innerHeight)
   useScreenOverlay(() => store.closeScaler())
   const perfButton = useRef<HTMLButtonElement>(null)
   const [audioHeard, setAudioHeard] = useState<string[]>([])
@@ -102,6 +112,11 @@ const [options, setOptions] = useState(false)
     void loadScaleCatalog().then(() => { if (alive) setCatalog((value) => value + 1) })
     void loadPerformanceLibrary().then(() => { if (alive) setCatalog((value) => value + 1) })
     return () => { alive = false }
+  }, [])
+  useEffect(() => {
+    const apply = () => setLand(window.innerWidth > window.innerHeight)
+    window.addEventListener('resize', apply)
+    return () => window.removeEventListener('resize', apply)
   }, [])
 
   const track = store.track(trackId)
@@ -306,9 +321,68 @@ const scaleList = allScales()
   const progressCount = library.length
   const patternCount = patternCatalog().length
   const performanceCount = performanceCatalog().length
+  const setPattern = songPattern
+  const setChords = setPattern ? realizeProgression(state.root, scaleId, setPattern, bar, 3) : []
+  const suggest = suggestNext(diatonic.length ? diatonic : setChords, active.slots)
+  const matchNotes = matchSource(active.slots, setChords, diatonic)
+  const scaleRows = detectedScales(matchNotes, state.root, scaleId).slice(0, 4)
+  const playedPcs = heldPcs ? new Set(heldPcs) : chordPcs
+  const padItems = padBoard(padSource, active.slots, setChords, diatonic)
+
+  function tonesOf(chord: { tones: { midi: number; cents?: number }[] }, velocity: number): ScalerNote[] {
+    return place(chord.tones.map((tone) => ({
+      pitch: tone.midi,
+      fine: tone.cents ? Math.round(tone.cents) : undefined,
+      startBeat: 0,
+      durationBeats: bar,
+      velocity,
+    })), st, octave, human, expressionId)
+  }
+
+  function addToMain(symbol: string, roman: string, notes: ScalerNote[]) {
+    setSections((prev) => prev.map((part, index) => {
+      if (index !== section) return part
+      const slots = part.slots.slice()
+      const empty = slots.findIndex((item) => !item)
+      slots[empty === -1 ? slot % 8 : empty] = { symbol, roman, notes }
+      return { ...part, slots }
+    }))
+    setSlot((value) => (value + 1) % 8)
+  }
+
+  function auditionChord(symbol: string, roman: string, tones: { midi: number; cents?: number }[], velocity: number, add = false) {
+    const notes = tonesOf({ tones }, velocity)
+    setHeldPcs(tones.map((tone) => mod12(tone.midi)))
+    setHint(`${symbol}. ${roman}.`)
+    hear(notes)
+    if (add) addToMain(symbol, roman, notes)
+  }
+
+  function playLine(line: { tones: { midi: number; cents?: number }[] }[]) {
+    const notes = line.flatMap((chord, index) => tonesOf(chord, 0.84).map((note) => ({ ...note, startBeat: note.startBeat + index * bar })))
+    if (notes.length) hear(notes)
+  }
+
+  function dropOnMain(event: DragEvent) {
+    const raw = event.dataTransfer.getData(SCALER_MIME) || event.dataTransfer.getData('text/plain')
+    try {
+      const parsed = JSON.parse(raw) as { name?: string; roman?: string; notes?: ScalerNote[] }
+      if (!parsed.notes?.length) return
+      event.preventDefault()
+      addToMain(parsed.name || 'Chord', parsed.roman || '', parsed.notes)
+    } catch { /* not a scaler drag */ }
+  }
+
+  const browseSubs = browseSubsFor(browseCat, sets.map((item) => item.name), GENRE_INFO.map((item) => item.name))
+  const browseList = library.filter((item) => setVisible(item, browseCat, browseSub, songQuery, state.root, scaleId, bar)).slice(0, 12)
+  const beat = Math.max(0, projectSampleBeat(store.project, engine.currentTimelineSample()))
+  const barNumber = Math.floor(beat / bar) + 1
+  const beatNumber = Math.floor(beat % bar) + 1
+  const signature = `${store.project.timeSignature?.numerator || 4}/${store.project.timeSignature?.denominator || 4}`
+  const compact = form === 'phone'
 
   return (
-    <div className={`scaler-panel ${form === 'desk' ? '' : form}`} data-scaler="plugin" data-page={store.scalerPage} data-progressions={progressCount} data-patterns={patternCount} data-performances={performanceCount} data-screen-overlay="" aria-label="Scaler">
+    <div className={`scaler-panel ${form === 'desk' ? '' : form}${land ? ' land' : ''}`} data-scaler="plugin" data-page={store.scalerPage} data-progressions={progressCount} data-patterns={patternCount} data-performances={performanceCount} data-screen-overlay="" aria-label="Scaler">
       <PresetControls
         pluginId="scaler"
         instanceKey={`scaler:${trackId}`}
@@ -326,45 +400,18 @@ const scaleList = allScales()
         presets={store.project.presets}
         onCommit={(next) => commitScalerPreset(store, trackId, scalerPatch(next.params, next.text), next.presets)}
       />
-      <header className="scaler-head">
-        <div className="scaler-key-pick">
-          <span className="scaler-label" id="scaler-key-label">Key</span>
-          <div className="scaler-key-scroll" role="group" aria-labelledby="scaler-key-label" data-key-picker="">
-            {NOTE_NAMES.map((name, pc) => (
-              <button
-                key={name}
-                type="button"
-                className={state.root === pc ? 'on' : ''}
-                aria-pressed={state.root === pc}
-                aria-label={`Key ${KEY_WORD[pc]}`}
-                title={`Set the key to ${KEY_WORD[pc]}.`}
-                disabled={locked}
-                onClick={() => patch({ root: pc, lastVoicing: [], lastCents: [] })}
-              >{name}</button>
-            ))}
-          </div>
+      <header className="scaler-topbar">
+        <strong className="scaler-logo">Scaler</strong>
+        <span className="scaler-setname">{setPattern?.name ?? 'Chord set'}</span>
+        <span className="scaler-meta">Bar {barNumber} Beat {beatNumber} · {signature} · {Math.round(store.project.tempo)} bpm</span>
+        <div className="scaler-transport" role="group" aria-label="Transport">
+          {!(form === 'phone' && !land) && <button type="button" className="btn-quiet" title="Previous chord set." onClick={() => setSong((value) => cycle(value, -1, Math.max(1, sets.length)))}>Previous</button>}
+          <button type="button" className="btn-secondary" title="Play the chord set." onClick={() => playLine(setChords)}>Play</button>
+          <button type="button" className={rec || engine.status === 'recording' ? 'on' : ''} aria-pressed={rec} title="Record each pad as MIDI on this track." onClick={() => setRec((value) => !value)}>Record</button>
+          {!(form === 'phone' && !land) && <button type="button" className={loop ? 'on' : ''} aria-pressed={loop} title="Preview the line twice." onClick={() => setLoop((value) => !value)}>Loop</button>}
+          {!(form === 'phone' && !land) && <button type="button" className="btn-quiet" title="Undo the last edit." onClick={() => store.undo()}>Undo</button>}
+          {!(form === 'phone' && !land) && <button type="button" className="btn-quiet" title="Redo the edit you undid." onClick={() => store.redo()}>Redo</button>}
         </div>
-        <label className="scaler-scale" data-scale-picker="">
-          <span>Scale</span>
-          <select
-            aria-label="Scale"
-            title="Choose the scale. Keys in the scale light up."
-            value={scaleId}
-            disabled={locked}
-            onChange={(event) => patch({ ...pickScale(event.target.value), lastVoicing: [], lastCents: [] })}
-          >
-            {families.map((group) => {
-              const items = scaleList.filter((item) => item.family === group.id)
-              if (!items.length) return null
-              return (
-                <optgroup key={group.id} label={group.name}>
-                  {items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                </optgroup>
-              )
-            })}
-            {!scaleList.some((item) => item.id === scaleId) && <option value={scaleId}>{scaleName}</option>}
-          </select>
-        </label>
         <button type="button" className="scaler-close overlay-close" title="Close Scaler. The track keeps the instrument." aria-label="Close Scaler. The track keeps the instrument." onClick={() => store.openScaler(trackId)}>Close</button>
       </header>
       <div className="scaler-tools" role="group" aria-label="Output" data-output="">
@@ -377,6 +424,137 @@ const scaleList = allScales()
         </div>
         <button type="button" className={`btn-quiet ${options ? 'on' : ''}`} aria-expanded={options} aria-controls="scaler-options" title="Chords, songs, performances, and the rest of Scaler." onClick={() => setOptions((value) => !value)}>Options</button>
       </div>
+      <div className="scaler-stage">
+        {!compact && <section className="scaler-section" aria-label="Chord Set">
+          <div className="scaler-section-head">
+            <b>Chord Set</b>
+            <button type="button" className="btn-quiet" title="Open the chord set browser." aria-expanded={browser} onClick={() => setBrowser((value) => !value)}>{setPattern?.name ?? 'Choose set'}</button>
+            <button type="button" className="btn-secondary" title="Play this chord set." onClick={() => playLine(setChords)}>Play set</button>
+            <button type="button" className={locked ? 'on' : ''} aria-pressed={locked} title="Lock the key and the chord set." onClick={() => setLocked((value) => !value)}>{locked ? 'Locked' : 'Lock'}</button>
+            <span className="scaler-semi">Semi {st}</span>
+            <button type="button" className="btn-quiet" title="Lower the chords by one semitone." onClick={() => { if (!locked) setSt(clamp(st - 1, -12, 12)) }}>Semi down</button>
+            <button type="button" className="btn-quiet" title="Raise the chords by one semitone." onClick={() => { if (!locked) setSt(clamp(st + 1, -12, 12)) }}>Semi up</button>
+            <button type="button" className={linked ? 'on link' : ''} aria-pressed={linked} title="Transpose chord sets into the current scale." onClick={() => setLinked((value) => !value)}>{linked ? 'Linked' : 'Link'}</button>
+          </div>
+          <div className="scaler-blocks" role="list" aria-label="Chord set blocks">
+            {setChords.slice(0, 8).map((chord, index) => (
+              <button
+                key={`${chord.symbol}-${index}`}
+                type="button"
+                className="scaler-block"
+                draggable
+                title={`${chord.symbol}. ${chord.roman}. Drag it onto the main track, or double tap to add it.`}
+                onPointerDown={(event) => auditionChord(chord.symbol, chord.roman, chord.tones, strikeVelocity(event))}
+                onDoubleClick={() => auditionChord(chord.symbol, chord.roman, chord.tones, 0.84, true)}
+                onDragStart={(event) => dragChord(event, tonesOf(chord, 0.84), chord.symbol)}
+              >
+                <b>{chord.symbol}</b>
+                <small>{chord.roman}</small>
+              </button>
+            ))}
+          </div>
+          {browser && (
+            <div className="scaler-browse" role="region" aria-label="Chord sets">
+              <div className="scaler-browse-col" role="list" aria-label="Categories">
+                {(['common', 'genres', 'styles', 'moods'] as const).map((id) => (
+                  <button key={id} type="button" className={browseCat === id ? 'on' : ''} onClick={() => { setBrowseCat(id); setBrowseSub('All') }}>
+                    {id === 'common' ? 'Common Progressions' : id === 'genres' ? 'Genres' : id === 'styles' ? 'Styles' : 'Moods'}
+                  </button>
+                ))}
+              </div>
+              <div className="scaler-browse-col" role="list" aria-label="Subcategories">
+                {browseSubs.map((name) => (
+                  <button key={name} type="button" className={browseSub === name ? 'on' : ''} onClick={() => setBrowseSub(name)}>{name}</button>
+                ))}
+              </div>
+              <div className="scaler-browse-col">
+                <input aria-label="Search chord sets" placeholder="Search chord sets" value={songQuery} onChange={(event) => setSongQuery(event.target.value)} />
+                <div role="list" aria-label="Chord set list">
+                  {browseList.map((item) => (
+                    <div key={item.id} className="scaler-setrow">
+                      <button type="button" onClick={() => { loadProgression(item); setBrowser(false) }}>{item.name}</button>
+                      <button type="button" className={hearts.includes(item.id) ? 'on' : ''} aria-pressed={hearts.includes(item.id)} title="Save this set as a favorite." onClick={() => setHearts((prev) => prev.includes(item.id) ? prev.filter((id) => id !== item.id) : [...prev, item.id])}>{hearts.includes(item.id) ? 'Favorite' : 'Mark favorite'}</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </section>}
+        <section className="scaler-section" aria-label="Current Scale">
+          <div className="scaler-section-head">
+            <b>Current Scale</b>
+            <div className="scaler-key-pick">
+              <span className="scaler-label" id="scaler-key-label">Key</span>
+              <div className="scaler-key-scroll" role="group" aria-labelledby="scaler-key-label" data-key-picker="">
+                {NOTE_NAMES.map((name, pc) => (
+                  <button key={name} type="button" className={state.root === pc ? 'on' : ''} aria-pressed={state.root === pc} aria-label={`Key ${KEY_WORD[pc]}`} title={`Set the key to ${KEY_WORD[pc]}.`} disabled={locked} onClick={() => patch({ root: pc, lastVoicing: [], lastCents: [] })}>{name}</button>
+                ))}
+              </div>
+            </div>
+            <label className="scaler-scale" data-scale-picker="">
+              <span>Scale</span>
+              <select aria-label="Scale" title="Choose the scale. Keys in the scale light up." value={scaleId} disabled={locked} onChange={(event) => patch({ ...pickScale(event.target.value), lastVoicing: [], lastCents: [] })}>
+                {families.map((group) => {
+                  const items = scaleList.filter((item) => item.family === group.id)
+                  if (!items.length) return null
+                  return (
+                    <optgroup key={group.id} label={group.name}>
+                      {items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                    </optgroup>
+                  )
+                })}
+                {!scaleList.some((item) => item.id === scaleId) && <option value={scaleId}>{scaleName}</option>}
+              </select>
+            </label>
+            {!compact && <button type="button" className="btn-secondary" title="Play the scale chords." onClick={() => playLine(diatonic)}>Play scale</button>}
+            {!compact && <button type="button" title="Cycle the voicing." onClick={() => {
+              const index = Math.max(0, VOICINGS.findIndex((item) => item.id === state.voicing))
+              patch({ voicing: VOICINGS[cycle(index, 1, VOICINGS.length)].id })
+            }}>Voicing {voiceLabel}</button>}
+            {!compact && <button type="button" title="Raise the octave. Shift click lowers it." onClick={(event) => setOctave(clamp(octave + (event.shiftKey ? -1 : 1), -2, 2))}>Octave {octave + 2}</button>}
+          </div>
+          {!compact && <div className="scaler-blocks" aria-label="Scale chords">
+            {diatonic.map((chord, index) => (
+              <button key={`${chord.symbol}-${index}`} type="button" className="scaler-block" draggable title={`${chord.symbol}. ${chord.roman}.`} onPointerDown={(event) => auditionChord(chord.symbol, chord.roman, chord.tones, strikeVelocity(event))} onDoubleClick={() => auditionChord(chord.symbol, chord.roman, chord.tones, 0.84, true)} onDragStart={(event) => dragChord(event, tonesOf(chord, 0.84), chord.symbol)}>
+                <b>{chord.symbol}</b>
+                <small>{chord.roman}</small>
+              </button>
+            ))}
+          </div>}
+          {!compact && <div className="scaler-match" role="table" aria-label="Scale match">
+            <div className="head" role="row"><span>Scale</span><span>Note match</span><span>Chord match</span><span>Mode</span><span>Mood</span></div>
+            {scaleRows.map((row) => (
+              <button key={`${row.root}-${row.scaleId}`} type="button" role="row" className={row.root === state.root && row.scaleId === scaleId ? 'on' : ''} onClick={() => patch({ root: row.root, ...pickScale(row.scaleId), lastVoicing: [], lastCents: [] })}>
+                <span>Play {NOTE_NAMES[row.root]} {row.name}</span>
+                <span>{row.notes}</span>
+                <span>{row.chords}</span>
+                <span>{row.mode}</span>
+                <span>{row.style}</span>
+              </button>
+            ))}
+          </div>}
+        </section>
+        {!compact && <section className="scaler-section" aria-label="Main Track" onDragOver={(event) => event.preventDefault()} onDrop={dropOnMain}>
+          <div className="scaler-section-head">
+            <b>Main Track</b>
+            <button type="button" className="btn-quiet" title={sound.hint} onClick={() => {
+              const index = Math.max(0, SOUNDS.findIndex((item) => item.id === state.sound))
+              const next = SOUNDS[cycle(index, 1, SOUNDS.length)]
+              patch({ sound: next.id })
+              if (next.id === 'library' || next.id === 'forward') setOptions(true)
+            }}>{sound.label}</button>
+            <span className="scaler-semi">Semi {st}</span>
+            <button type="button" className={linked ? 'on link' : ''} aria-pressed={linked} title="Keep the main track in the current scale." onClick={() => setLinked((value) => !value)}>{linked ? 'Linked' : 'Link'}</button>
+          </div>
+          <div className="scaler-blocks" aria-label="Main track chords">
+            {active.slots.map((item, index) => item && (
+              <button key={index} type="button" className="scaler-block" onPointerDown={(event) => { setHeldPcs(item.notes.map((note) => mod12(note.pitch))); hear(item.notes.map((note) => ({ ...note, velocity: strikeVelocity(event) }))) }}>{item.symbol}<small>{item.roman}</small></button>
+            ))}
+            <button type="button" className="scaler-suggest" title={suggest ? `Suggest ${suggest.symbol}.` : 'Suggest a next chord.'} onClick={() => { if (suggest) auditionChord(suggest.symbol, suggest.roman, suggest.tones, 0.84, true) }}>Suggest</button>
+          </div>
+        </section>}
+      </div>
       <div id="scaler-options" className="scaler-drawer" hidden={!options}>
         <div className="scaler-readout">
           <span>Notes <b>{liveNotes || 'Rest'}</b></span>
@@ -384,7 +562,6 @@ const scaleList = allScales()
         </div>
         <div className="scaler-strip">
           <button
-            ref={perfButton}
             type="button"
             className={perfOpen ? 'on' : ''}
             aria-expanded={perfOpen}
@@ -714,7 +891,55 @@ const scaleList = allScales()
           <GeneratePanel store={store} engine={engine} trackId={trackId} scale={{ root: state.root, scale: state.scale, library: state.library }} />
         </details>
       </div>
-      <Piano start={48} end={72} scalePcs={scalePcs} chordPcs={chordPcs} mode={state.keysLock} onPlay={playKey} />
+      <div className="scaler-padgrid" role="group" aria-label="Chord pads" data-pad-grid="">
+        <div className="scaler-pad-source" role="group" aria-label="Pad source">
+          {(['set', 'scale', 'main'] as const).map((id) => (
+            <button key={id} type="button" className={padSource === id ? 'on' : ''} aria-pressed={padSource === id} onClick={() => setPadSource(id)}>{id === 'set' ? 'Chord Set' : id === 'scale' ? 'Scale' : 'Main Track'}</button>
+          ))}
+          <button type="button" className="scaler-suggest" title={suggest ? `Suggest ${suggest.symbol}.` : 'Suggest a next chord.'} onClick={() => { if (suggest) auditionChord(suggest.symbol, suggest.roman, suggest.tones, 0.84, true) }}>Suggest</button>
+        </div>
+        <div className="scaler-pad-cells">
+          {padItems.map((item, index) => (
+            <button
+              key={index}
+              type="button"
+              className={`scaler-pad${lit === index ? ' lit' : ''}${item ? '' : ' empty'}`}
+              disabled={!item}
+              aria-pressed={lit === index}
+              onPointerDown={(event) => {
+                if (!item) return
+                event.preventDefault()
+                setLit(index)
+                auditionChord(item.symbol, item.roman, item.tones, strikeVelocity(event))
+              }}
+              onPointerUp={() => setLit((value) => value === index ? null : value)}
+              onPointerCancel={() => setLit((value) => value === index ? null : value)}
+            >
+              <b>{item ? item.symbol : 'Rest'}</b>
+              <small>{item ? item.roman : ''}</small>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="scaler-perform" role="group" aria-label="Performance">
+        <button ref={perfButton} type="button" className={perfOpen ? 'on' : ''} aria-expanded={perfOpen} title="Styles, packs, variation, and where the MIDI goes." onClick={() => setPerfOpen((value) => !value)}>Performance {performance?.name ?? 'Block'}</button>
+        {!(form === 'phone' && !land) && <button type="button" title="Move timing and velocity a little." onClick={() => setHuman(cycle(human, 1, HUMAN.length))}>Humanize {HUMAN[human]}</button>}
+        {!(form === 'phone' && !land) && <button type="button" title="Delay the offbeats." onClick={() => patch({ swing: SWINGS[cycle(swingIndex, 1, SWINGS.length)] })}>Swing {SWING_LABEL[swingIndex]}</button>}
+        {!(form === 'phone' && !land) && <button type="button" title="How fast the performance steps." onClick={() => patch({ rate: RATES[cycle(rateIndex, 1, RATES.length)] })}>{RATE_LABEL[rateIndex]}</button>}
+        {!(form === 'phone' && !land) && <button type="button" title="How long each note holds." onClick={() => patch({ gate: GATES[cycle(gateIndex, 1, GATES.length)] })}>Gate {Math.round(GATES[gateIndex] * 100)} percent</button>}
+        <button type="button" title="Scale snap, chord lock, or one finger chords." onClick={() => {
+          const next = KEYS_LOCKS[cycle(lockIndex, 1, KEYS_LOCKS.length)]
+          patch({ keysLock: next, snap: next !== 'off' })
+        }}>Keys lock {KEYS_LOCK_LABELS[state.keysLock]}</button>
+        {!(form === 'phone' && !land) && (
+          <button type="button" title="How the chord is stacked." onClick={() => {
+            const index = Math.max(0, VOICE_GROUPS.findIndex((item) => item.label === voiceLabel))
+            const next = VOICE_GROUPS[cycle(index, 1, VOICE_GROUPS.length)]
+            patch({ voiceGroup: next.id, ...(next.voicing ? { voicing: next.voicing } : {}), voiceLead: next.id === 'dynamic' ? true : state.voiceLead })
+          }}>Voice grouping {voiceLabel}</button>
+        )}
+      </div>
+      <Piano start={60} end={72} scalePcs={scalePcs} chordPcs={playedPcs} mode={state.keysLock} onPlay={playKey} />
     </div>
   )
 }
@@ -847,4 +1072,65 @@ function mod12(midi: number) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
+}
+
+const COMMON_SETS = new Set(['axis', 'sensitive', 'fifties', 'cadence', 'plagal', 'circle', 'minor-loop', 'andalusian', 'step'])
+
+function strikeVelocity(event: { pointerType: string; pressure: number }) {
+  if (event.pointerType === 'mouse') return 0.85
+  if (event.pressure > 0 && event.pressure < 1) return Math.max(0.15, Math.min(1, event.pressure))
+  return 0.85
+}
+
+function browseSubsFor(cat: 'common' | 'genres' | 'styles' | 'moods', styles: string[], genres: string[]) {
+  if (cat === 'common') return ['All', 'Plain']
+  if (cat === 'genres') return ['All', ...genres]
+  if (cat === 'styles') return ['All', ...styles.slice(0, 8)]
+  return ['All', 'Uplifting', 'Mixed', 'Tense']
+}
+
+function setVisible(item: TheoryProgression, cat: 'common' | 'genres' | 'styles' | 'moods', sub: string, query: string, root: number, scaleId: string, barBeats: number) {
+  const text = query.trim().toLowerCase()
+  if (text && !`${item.name} ${item.description}`.toLowerCase().includes(text)) return false
+  if (cat === 'common') return COMMON_SETS.has(item.id)
+  if (cat === 'genres') {
+    if (sub === 'All') return Boolean(item.genre)
+    return item.genre === GENRE_INFO.find((genre) => genre.name === sub)?.id
+  }
+  if (cat === 'styles') {
+    if (sub === 'All') return Boolean(item.song)
+    return item.song === sub
+  }
+  if (sub === 'All') return true
+  const symbols = realizeProgression(root, scaleId, item, barBeats, 3).map((chord) => chord.symbol)
+  return progressionMood(symbols, scaleId).feel === sub
+}
+
+function suggestNext(pool: { symbol: string; roman: string; tones: { midi: number; cents?: number }[] }[], slots: (Slot | null)[]) {
+  if (!pool.length) return null
+  const last = [...slots].reverse().find((item): item is Slot => !!item)
+  if (!last) return pool[0]
+  const at = pool.findIndex((chord) => chord.symbol === last.symbol)
+  return pool[(Math.max(0, at) + 4) % pool.length]
+}
+
+function matchSource(slots: (Slot | null)[], setChords: { tones: { midi: number }[] }[], diatonic: { tones: { midi: number }[] }[]) {
+  const main = slots.flatMap((slot) => slot ? slot.notes.map((note) => ({ midi: note.pitch })) : [])
+  if (main.length >= 3) return main
+  const fromSet = setChords.flatMap((chord) => chord.tones.map((tone) => ({ midi: tone.midi })))
+  if (fromSet.length) return fromSet
+  return diatonic.flatMap((chord) => chord.tones.map((tone) => ({ midi: tone.midi })))
+}
+
+function padBoard(
+  source: 'set' | 'scale' | 'main',
+  slots: (Slot | null)[],
+  setChords: { symbol: string; roman: string; tones: { midi: number; cents?: number }[] }[],
+  diatonic: { symbol: string; roman: string; tones: { midi: number; cents?: number }[] }[],
+) {
+  const fromMain = slots.map((slot) => slot ? { symbol: slot.symbol, roman: slot.roman, tones: slot.notes.map((note) => ({ midi: note.pitch, cents: note.fine })) } : null)
+  const picked = source === 'main' ? fromMain : source === 'scale' ? diatonic : setChords
+  const items = picked.filter((item) => item && item.tones.length).slice(0, 8)
+  while (items.length < 8) items.push(null)
+  return items
 }
