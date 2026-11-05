@@ -472,12 +472,12 @@ function invertPairs(pairs: { pitch: number; fine: number }[], times: number) {
 
 function clipName(role: RoleId, section: string, job: UnstuckJob) {
   const label = roleLabel(role)
-  if (job.action === 'fill') return 'Unstuck Fill'
-  if (job.action === 'transition') return `Unstuck Transition · ${label}`
-  if (job.action === 'vary') return `Unstuck Variation · ${label}`
-  if (job.action === 'continue') return `Unstuck Continue · ${label}`
-  if (section === 'Part') return `Unstuck ${label}`
-  return `Unstuck ${label} · ${section}`
+  if (job.action === 'fill') return 'Ideas Fill'
+  if (job.action === 'transition') return `Ideas Transition · ${label}`
+  if (job.action === 'vary') return `Ideas Variation · ${label}`
+  if (job.action === 'continue') return `Ideas Continue · ${label}`
+  if (section === 'Part') return `Ideas ${label}`
+  return `Ideas ${label} · ${section}`
 }
 
 function publish(job: UnstuckJob, plans: PlanSection[], bar: number) {

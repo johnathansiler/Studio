@@ -13,7 +13,7 @@ const META: Record<TrackRole, { name: string; color: string }> = {
   drums: { name: 'Drums', color: '#c58be0' },
   melody: { name: 'Melody', color: '#73c48f' },
   pad: { name: 'Pad', color: '#f09a6a' },
-  other: { name: 'Unstuck', color: '#ef6b6b' },
+  other: { name: 'Ideas', color: '#ef6b6b' },
 }
 
 export function applySuggestion(project: Project, suggestion: Suggestion): { trackId: string | null; clipId: string | null } {

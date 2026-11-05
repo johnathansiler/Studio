@@ -86,7 +86,7 @@ function tabBarHtml() {
       <button type="button" class="active">Arrange</button>
       <button type="button">Mix</button>
     </div>
-    <button type="button" class="unstuck-btn">Unstuck</button>
+    <button type="button" class="unstuck-btn">Ideas</button>
   </header>`
 }
 
