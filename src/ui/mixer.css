@@ -414,16 +414,15 @@
 }
 
 .shell .mixer-view.mixer-console .mix-pair {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-start;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
 }
 .shell .mixer-view.mixer-console .mix-panel .mix-pair .mini,
 .shell .mixer-view.mixer-console .mix-panel .mix-pair button {
-  width: auto;
-  flex: 0 0 auto;
-  max-width: 100%;
+  width: 100%;
+  min-width: 40px;
+  min-height: 40px;
 }
 
 .shell .mixer-view.mixer-console .mix-panel .pan-knob-wrap,
@@ -485,14 +484,14 @@
 }
 
 .shell .mixer-view.mixer-console .link-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-start;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
 }
 .shell .mixer-view.mixer-console .mix-panel .link-row button {
-  width: auto;
-  flex: 0 0 auto;
+  width: 100%;
+  min-width: 40px;
+  min-height: 40px;
 }
 
 .shell .mixer-view.mixer-console .send-row {
