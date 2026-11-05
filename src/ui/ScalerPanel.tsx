@@ -18,6 +18,7 @@ import { commitScalerPreset } from '../presets/project'
 import { ScalerPerformances } from './ScalerPerformances'
 import { useFormFactor } from './form'
 import './pluginPages.css'
+import { ChoiceCard } from './ChoiceCard'
 import { PresetControls } from './PresetControls'
 import { useScreenOverlay } from './screenOverlay'
 import { LibraryPanel } from './LibraryPanel'
@@ -647,7 +648,7 @@ const scaleList = allScales()
           presets={store.project.presets}
           onCommit={(next) => commitScalerPreset(store, trackId, scalerPatch(next.params, next.text), next.presets)}
         />}
-        <label className="scaler-scale">
+        <label className="choice-card">
           <span>Section</span>
           <select aria-label="Options section" value={opt} onChange={(event) => setOpt(event.target.value)}>
             <option value="performance">Performance</option>
@@ -660,63 +661,62 @@ const scaleList = allScales()
             <option value="write">Write</option>
           </select>
         </label>
-        <div hidden={opt !== 'performance'}>
-        <div className="scaler-pills" role="group" aria-label="Output">{outputPills()}</div>
+        <div className="option-stack" hidden={opt !== 'performance'}>
+        <div className="io-grid" role="group" aria-label="Output">{outputPills()}</div>
         <div className="scaler-readout">
           <span>Notes <b>{liveNotes || 'Rest'}</b></span>
           <span>Chord <b>{current?.symbol ?? 'Rest'}</b></span>
         </div>
-        <div className="scaler-strip">
-          <button
-            type="button"
-            className={perfOpen ? 'on' : ''}
-            aria-expanded={perfOpen}
-            aria-label="Performances"
-            title="Styles, packs, variation, and where the MIDI goes."
-            onClick={() => setPerfOpen((value) => !value)}
-          >Performances</button>
-          <ScalerPerformances
-            open={perfOpen}
-            onClose={() => setPerfOpen(false)}
-            triggerRef={perfButton}
-            store={store}
-            trackId={trackId}
-            state={state}
-            pad={pad}
-            bar={bar}
-            onHear={(notes) => hear(notes)}
-          />
-          <Stepper label="Perform" value={performance?.name ?? 'Block'} hint="Arpeggio, strum, rhythm, bass, melody, or comping." onStep={(dir) => {
+        <button
+          type="button"
+          className={`choice-wide ${perfOpen ? 'on' : ''}`}
+          aria-expanded={perfOpen}
+          aria-label="Performances"
+          title="Styles, packs, variation, and where the MIDI goes."
+          onClick={() => setPerfOpen((value) => !value)}
+        >Performances</button>
+        <ScalerPerformances
+          open={perfOpen}
+          onClose={() => setPerfOpen(false)}
+          triggerRef={perfButton}
+          store={store}
+          trackId={trackId}
+          state={state}
+          pad={pad}
+          bar={bar}
+          onHear={(notes) => hear(notes)}
+        />
+        <div className="choice-grid">
+          <ChoiceCard label="Perform" hint="Arpeggio, strum, rhythm, bass, melody, or comping." value={state.performanceId} options={(performances.length ? performances : performanceCatalog()).map((item) => ({ value: item.id, label: item.name }))} onChange={(id) => {
             const list = performances.length ? performances : performanceCatalog()
-            const index = Math.max(0, list.findIndex((item) => item.id === state.performanceId))
-            const next = list[cycle(index, dir, list.length)]
-            patch({ performanceId: next.id, rate: next.rate, swing: next.swing })
+            const next = list.find((item) => item.id === id)
+            if (next) patch({ performanceId: next.id, rate: next.rate, swing: next.swing })
           }} />
-          <Stepper label="Expressions" value={EXPRESSIONS[expression]?.name ?? 'Still'} hint={EXPRESSIONS[expression]?.hint ?? 'Feel of the part.'} onStep={(dir) => setExpression(cycle(expression, dir, EXPRESSIONS.length))} />
-          <Stepper label="Keys lock" value={KEYS_LOCK_LABELS[state.keysLock]} hint="Scale snap or hide, chord lock, chord notes, or one finger chords." onStep={(dir) => {
-            const next = KEYS_LOCKS[cycle(lockIndex, dir, KEYS_LOCKS.length)]
-            patch({ keysLock: next, snap: next !== 'off' })
-          }} />
-          <Stepper label="Voice grouping" value={voicingPhrase(voiceLabel)} hint="How the chord is stacked, or only the bass or upper notes." onStep={(dir) => {
-            const index = Math.max(0, VOICE_GROUPS.findIndex((item) => item.label === voiceLabel))
-            const next = VOICE_GROUPS[cycle(index, dir, VOICE_GROUPS.length)]
+          <ChoiceCard label="Expressions" hint={EXPRESSIONS[expression]?.hint ?? 'Feel of the part.'} value={String(expression)} options={EXPRESSIONS.map((item, index) => ({ value: String(index), label: item.name }))} onChange={(id) => setExpression(Number(id))} />
+          <ChoiceCard label="Keys lock" hint="Scale snap or hide, chord lock, chord notes, or one finger chords." value={state.keysLock} options={KEYS_LOCKS.map((id) => ({ value: id, label: KEYS_LOCK_LABELS[id] }))} onChange={(id) => patch({ keysLock: id as KeysLock, snap: id !== 'off' })} />
+          <ChoiceCard label="Voice grouping" hint="How the chord is stacked, or only the bass or upper notes." value={String(Math.max(0, VOICE_GROUPS.findIndex((item) => item.label === voiceLabel)))} options={VOICE_GROUPS.map((item, index) => ({ value: String(index), label: voicingPhrase(item.label) }))} onChange={(id) => {
+            const next = VOICE_GROUPS[Number(id)]
+            if (!next) return
             patch({ voiceGroup: next.id, ...(next.voicing ? { voicing: next.voicing } : {}), voiceLead: next.id === 'dynamic' ? true : state.voiceLead })
           }} />
         </div>
+        <div className="pattern-grid" role="group" aria-label="Performances">
+          {['Arpeggio', 'Strum', 'Rhythm', 'Bassline', 'Melody', 'Comping'].map((item) => (
+            <button key={item} type="button" className={category === item ? 'on' : ''} onClick={() => setCategory(item)}>{item}</button>
+          ))}
         </div>
-        <div className="scaler-strip" hidden={opt !== 'timing'}>
-          <Stepper label="Humanize" value={HUMAN[human]} hint="Move timing and velocity a little, so the chord is not a machine." onStep={(dir) => setHuman(cycle(human, dir, HUMAN.length))} />
-          <Stepper label="Rate" value={RATE_LABEL[rateIndex]} hint="How fast the performance steps." onStep={(dir) => patch({ rate: RATES[cycle(rateIndex, dir, RATES.length)] })} />
-          <Stepper label="Swing" value={SWING_LABEL[swingIndex]} hint="Delay the offbeats." onStep={(dir) => patch({ swing: SWINGS[cycle(swingIndex, dir, SWINGS.length)] })} />
-          <Stepper label="Arpeggio" value={state.arp === 'off' ? 'Off' : state.arp === 'upDown' ? 'Up down' : state.arp[0].toUpperCase() + state.arp.slice(1)} hint="Break the chord into single notes when no performance is chosen." onStep={(dir) => patch({ arp: ARPS[cycle(Math.max(0, ARPS.indexOf(state.arp)), dir, ARPS.length)], performanceId: '' })} />
-          <Stepper label="Gate" value={`${Math.round(GATES[gateIndex] * 100)} percent`} hint="How long each note holds." onStep={(dir) => patch({ gate: GATES[cycle(gateIndex, dir, GATES.length)] })} />
+        </div>
+        <div className="choice-grid" hidden={opt !== 'timing'}>
+          <ChoiceCard label="Humanize" hint="Move timing and velocity a little, so the chord is not a machine." value={String(human)} options={HUMAN.map((name, index) => ({ value: String(index), label: name }))} onChange={(id) => setHuman(Number(id))} />
+          <ChoiceCard label="Rate" hint="How fast the performance steps." value={String(rateIndex)} options={RATE_LABEL.map((name, index) => ({ value: String(index), label: name }))} onChange={(id) => patch({ rate: RATES[Number(id)] })} />
+          <ChoiceCard label="Swing" hint="Delay the offbeats." value={String(swingIndex)} options={SWING_LABEL.map((name, index) => ({ value: String(index), label: name }))} onChange={(id) => patch({ swing: SWINGS[Number(id)] })} />
+          <ChoiceCard label="Arpeggio" hint="Break the chord into single notes when no performance is chosen." value={state.arp} options={ARPS.map((id) => ({ value: id, label: id === 'off' ? 'Off' : id === 'upDown' ? 'Up down' : id[0].toUpperCase() + id.slice(1) }))} onChange={(id) => patch({ arp: id as ArpDirection, performanceId: '' })} />
+          <ChoiceCard label="Gate" hint="How long each note holds." value={String(gateIndex)} options={GATES.map((value, index) => ({ value: String(index), label: `${Math.round(value * 100)} percent` }))} onChange={(id) => patch({ gate: GATES[Number(id)] })} />
         </div>
         <div className="scaler-sound" hidden={opt !== 'sound'}>
-          <Stepper label="Sound" value={sound.label} hint={sound.hint} onStep={(dir) => {
-            const index = Math.max(0, SOUNDS.findIndex((item) => item.id === state.sound))
-            const next = SOUNDS[cycle(index, dir, SOUNDS.length)]
-            patch({ sound: next.id })
-            if (next.id === 'library' || next.id === 'forward') setOptions(true)
+          <ChoiceCard label="Sound" hint={sound.hint} value={state.sound} options={SOUNDS.map((item) => ({ value: item.id, label: item.label }))} onChange={(id) => {
+            patch({ sound: id as ScalerSound })
+            if (id === 'library' || id === 'forward') setOptions(true)
           }} />
           <div className="scaler-sounds" role="group" aria-label="Sound. Which instrument plays the chords.">
             {SOUNDS.map((item) => (
@@ -752,16 +752,15 @@ const scaleList = allScales()
             else setHint(midiChords.length ? `Detected a key from the notes on this track. Chords ${midiChords.join(', ')}.` : 'Detected a key from the notes on this track.')
           }}>Detect</button>
           <button type="button" title="Browse scales inside the plugin." onClick={() => setFamily('all')}>Scales</button>
-          <Stepper label="Songs" value={activeSet?.name ?? 'Song'} hint={activeSet ? `${activeSet.style}. ${activeSet.name}.` : 'A set of progressions.'} onStep={(dir) => {
-            const next = cycle(song, dir, sets.length)
+          <ChoiceCard label="Songs" hint={activeSet ? `${activeSet.style}. ${activeSet.name}.` : 'A set of progressions.'} value={String(song)} options={sets.map((item, index) => ({ value: String(index), label: item.name }))} onChange={(id) => {
+            const next = Number(id)
             setSong(next)
             const chosen = library.find((item) => item.id === sets[next]?.progressionIds[0])
             if (chosen) loadProgression(chosen)
           }} />
-          <Stepper label="Chord set" value={GROUPS.find((item) => item.id === state.group)?.label ?? 'Triads'} hint="Which chords the pads show." onStep={(dir) => {
-            const index = Math.max(0, GROUPS.findIndex((item) => item.id === state.group))
+          <ChoiceCard label="Chord set" hint="Which chords the pads show." value={state.group} options={GROUPS.map((item) => ({ value: item.id, label: item.label }))} onChange={(id) => {
             setPad(0)
-            patch({ group: GROUPS[cycle(index, dir, GROUPS.length)].id, inversion: 0, lastVoicing: [], lastCents: [] })
+            patch({ group: id as ScalerGroup, inversion: 0, lastVoicing: [], lastCents: [] })
           }} />
           <button type="button" className={family === 'western' ? 'on' : ''} title="Western scales in the library." onClick={() => setFamily(family === 'western' ? 'all' : 'western')}>User</button>
           <span className={`mood-pill ${laneMood.feel.toLowerCase()}`} title="Whether this progression feels bright and lifting or dark and tense.">{laneMood.feel}</span>
@@ -770,11 +769,6 @@ const scaleList = allScales()
           <button type="button" className={genre === 'all' ? 'on' : ''} onClick={() => { setGenre('all'); setSong(0) }}>All genres</button>
           {GENRE_INFO.map((item) => (
             <button key={item.id} type="button" className={genre === item.id ? 'on' : ''} onClick={() => { setGenre(item.id); setSong(0) }}>{item.name}</button>
-          ))}
-        </div>
-        <div className="scaler-families" role="group" aria-label="Performances" hidden={opt !== 'performance'}>
-          {['Arpeggio', 'Strum', 'Rhythm', 'Bassline', 'Melody', 'Comping'].map((item) => (
-            <button key={item} type="button" className={category === item ? 'on' : ''} onClick={() => setCategory(item)}>{item}</button>
           ))}
         </div>
         <div className="scaler-pads" role="group" aria-label="Song progressions" hidden={opt !== 'songs'}>
@@ -788,7 +782,7 @@ const scaleList = allScales()
         </div>
 
         <div className="scaler-transport" hidden={opt !== 'songs'}>
-          <Stepper label="Transpose" value={String(st)} hint="Transpose the chords, in semitones." onStep={(dir) => { if (!locked) setSt(clamp(st + dir, -12, 12)) }} />
+          <ChoiceCard label="Transpose" hint="Transpose the chords, in semitones." value={String(st)} options={Array.from({ length: 25 }, (_, index) => ({ value: String(index - 12), label: String(index - 12) }))} onChange={(id) => { if (!locked) setSt(Number(id)) }} />
           <button type="button" className={locked ? 'on' : ''} aria-pressed={locked} title="Lock the key, the chord set, and transpose." onClick={() => setLocked((value) => !value)}>{locked ? 'Locked' : 'Lock'}</button>
           <input aria-label="Search songs" title="Find a progression by name." placeholder="Search songs" value={songQuery} onChange={(event) => setSongQuery(event.target.value)} />
         </div>
@@ -865,7 +859,7 @@ const scaleList = allScales()
                 {id === 'voicing' ? `Voicing ${Math.max(1, VOICINGS.findIndex((item) => item.id === state.voicing) + 1)}` : id[0].toUpperCase() + id.slice(1)}
               </button>
             ))}
-            <Stepper label="Octave" value={String(octave + 2)} hint="Shift the played chords by octaves." onStep={(dir) => setOctave(clamp(octave + dir, -2, 2))} />
+            <ChoiceCard label="Octave" hint="Shift the played chords by octaves." value={String(octave + 2)} options={[0, 1, 2, 3, 4].map((item) => ({ value: String(item), label: String(item) }))} onChange={(id) => setOctave(Number(id) - 2)} />
           </div>
           {tab === 'diatonic' && (
             <div className="scaler-pads diatonic" role="group" aria-label="Diatonic chords">
@@ -898,7 +892,7 @@ const scaleList = allScales()
                   <button key={item.id} type="button" className={state.voicing === item.id ? 'on' : ''} title={item.description} onClick={() => patch({ voicing: item.id })}>{item.name}</button>
                 ))}
               </div>
-              <Stepper label="Inversion" value={state.inversion % shapeCount === 0 ? 'Root' : String(state.inversion % shapeCount)} hint="Which chord tone sits lowest." onStep={(dir) => patch({ inversion: clamp((state.inversion % shapeCount) + dir, 0, shapeCount - 1) })} />
+              <ChoiceCard label="Inversion" hint="Which chord tone sits lowest." value={String(state.inversion % shapeCount)} options={Array.from({ length: shapeCount }, (_, inversion) => ({ value: String(inversion), label: inversion === 0 ? 'Root' : String(inversion) }))} onChange={(id) => patch({ inversion: Number(id) })} />
             </div>
           )}
           {tab === 'variations' && current && (
@@ -916,7 +910,7 @@ const scaleList = allScales()
             <div className="scaler-mod">
               <Fifths root={destRoot} home={state.root} onPick={setDestRoot} />
               <div>
-                <Stepper label="Modulation" value={modCopy[modKind].value} hint={modCopy[modKind].hint} onStep={(dir) => setModKind(cycle(modKind, dir, 3))} />
+                <ChoiceCard label="Modulation" hint={modCopy[modKind].hint} value={String(modKind)} options={modCopy.map((item, index) => ({ value: String(index), label: item.value }))} onChange={(id) => setModKind(Number(id))} />
                 <p className="scaler-hint">From {NOTE_NAMES[state.root]} toward {NOTE_NAMES[destRoot]}. Pick a destination chord to land there.</p>
                 <div className="scaler-pads" aria-label="Modulation pathway">
                   {pathway.map((step, index) => (
@@ -1050,17 +1044,6 @@ const scaleList = allScales()
         )}
       </div>
       <Piano start={60} end={72} scalePcs={scalePcs} chordPcs={playedPcs} mode={state.keysLock} onPlay={playKey} away={view !== 'pads'} />
-    </div>
-  )
-}
-
-function Stepper({ label, value, hint, onStep }: { label: string; value: string; hint: string; onStep: (dir: number) => void }) {
-  return (
-    <div className="stepper" title={hint}>
-      <span>{label}</span>
-      <button type="button" aria-label={`Previous ${label}. ${hint}`} onClick={() => onStep(-1)}>&lt;</button>
-      <b>{value}</b>
-      <button type="button" aria-label={`Next ${label}. ${hint}`} onClick={() => onStep(1)}>&gt;</button>
     </div>
   )
 }

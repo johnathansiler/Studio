@@ -21,12 +21,11 @@ import {
   readRegions,
   regionActive,
   regionForBlob,
-  stepHarmony,
   tuneOnTrack,
   vocalNotes,
 } from '../audio/plugins/autoTune'
-import { AnchoredMenu } from './AnchoredMenu'
 import { NOTE_NAMES, SCALES } from '../model/scale'
+import { ChoiceCard } from './ChoiceCard'
 import type { ProjectStore } from '../state/store'
 import { TipButton } from './Hint'
 import './autoTune.css'
@@ -116,14 +115,8 @@ export function AutoTuneFace({
   const [naming, setNaming] = useState(false)
   const [draft, setDraft] = useState('')
   const [hint, setHint] = useState('')
-  const [voiceMenu, setVoiceMenu] = useState<number | null>(null)
   const [regionSlot, setRegionSlot] = useState<number | null>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
-  const voiceRef0 = useRef<HTMLButtonElement>(null)
-  const voiceRef1 = useRef<HTMLButtonElement>(null)
-  const voiceRef2 = useRef<HTMLButtonElement>(null)
-  const voiceRef3 = useRef<HTMLButtonElement>(null)
-  const voiceRefs = [voiceRef0, voiceRef1, voiceRef2, voiceRef3]
   const a4 = values.a4 || 440
   const shownTrace = enabled && (values.amount ?? 0) > 0.001 ? trace : null
   const blobs = graphNotes(shownTrace, a4)
@@ -136,11 +129,6 @@ export function AutoTuneFace({
   const derived = activeNoteMask({ ...values, custom: 0, mask: 0 }, projectRoot, projectIntervals)
   const names = presets?.length ? [...presets] : TUNE_PRESET_META.map((item) => item.name)
   const presetAt = active && names.includes(active) ? names.indexOf(active) : -1
-  const scaleLabel = scaleText(values, projectScale)
-  const heardKey = (values.autoKey ?? 0) >= 0.5 ? detectKey(shownTrace, a4) : null
-  const keyLabel = heardKey
-    ? `Heard · ${heardKey.name}`
-    : (values.root ?? -1) < 0 ? `Project · ${projectKey}` : NOTE_NAMES[Math.round(values.root)] ?? projectKey
   const rangeAt = nearestRange(values.minHz ?? 80, values.maxHz ?? 1000)
   const presetHint = TUNE_PRESET_META.find((item) => item.name === active)?.hint
   const sung = (values.vocal ?? 0) >= 0.5 ? vocalNotes(shownTrace, a4) : []
@@ -209,15 +197,8 @@ export function AutoTuneFace({
           <button type="button" role="tab" data-plugin-tab="graph" className={view === 'graph' ? 'on' : ''} aria-selected={view === 'graph'} title="Notes on a pitch grid. Drag a note to retune it." aria-label="Graph. Notes on a pitch grid. Drag a note to retune it." onClick={() => setView('graph')}>Graph</button>
           <button type="button" role="tab" data-plugin-tab="tone" className={view === 'tone' ? 'on' : ''} aria-selected={view === 'tone'} title="Flex, vibrato, reference, and tone." aria-label="Tone. Flex, vibrato, reference, and tone." onClick={() => setView('tone')}>Tone</button>
         </div>
-        {!sharedBar && (
-          <Stepper
-            label="Preset"
-            hint="Previous or next preset."
-            value={presetAt < 0 ? 'Custom' : names[presetAt]}
-            preset={presetAt < 0 ? undefined : names[presetAt]}
-            onPrev={() => onPreset(names[presetAt < 0 ? names.length - 1 : (presetAt - 1 + names.length) % names.length])}
-            onNext={() => onPreset(names[presetAt < 0 ? 0 : (presetAt + 1) % names.length])}
-          />
+        {!sharedBar && names.length > 0 && (
+          <ChoiceCard label="Preset" hint="Choose a preset." mark={presetAt < 0 ? undefined : names[presetAt]} value={presetAt < 0 ? names[0] : names[presetAt]} options={names.map((name) => ({ value: name, label: name }))} onChange={(id) => onPreset(id)} />
         )}
         <div className="tune-actions">
           {naming && !sharedBar ? (
@@ -279,19 +260,14 @@ export function AutoTuneFace({
         </div>
       )}
 
-      <div className="tune-row">
-        <Stepper label="Range" hint="Detector range." value={TUNE_RANGES[rangeAt].name} onPrev={() => applyRange((rangeAt + TUNE_RANGES.length - 1) % TUNE_RANGES.length, patch)} onNext={() => applyRange((rangeAt + 1) % TUNE_RANGES.length, patch)} />
-        <Stepper label="Key" hint="Song key, or a key for this track." value={keyLabel} onPrev={() => stepKey(values.root ?? -1, -1, set)} onNext={() => stepKey(values.root ?? -1, 1, set)} />
-        <Stepper label="Scale" hint="Song scale, or chromatic." value={scaleLabel} onPrev={() => stepScale(values, -1, patch)} onNext={() => stepScale(values, 1, patch)} />
-        <div className="tune-ref side">
-          <span>Reference</span>
-          <small>Concert A, in Hz.</small>
-          <div>
-            <button type="button" aria-label="Lower the reference pitch." title="Lower the reference pitch by 1 Hz." onClick={() => set('a4', Math.max(430, Math.round(values.a4 ?? 440) - 1))}>−</button>
-            <strong>{Math.round(values.a4 ?? 440)} Hz</strong>
-            <button type="button" aria-label="Raise the reference pitch." title="Raise the reference pitch by 1 Hz." onClick={() => set('a4', Math.min(450, Math.round(values.a4 ?? 440) + 1))}>+</button>
-          </div>
-        </div>
+      <div className="tune-row choice-grid">
+        <ChoiceCard label="Range" hint="Detector range." value={String(rangeAt)} options={TUNE_RANGES.map((item, index) => ({ value: String(index), label: item.name }))} onChange={(id) => applyRange(Number(id), patch)} />
+        <ChoiceCard label="Key" hint="Song key, or a key for this track." value={String(Math.round(values.root ?? -1) < 0 ? -1 : ((Math.round(values.root ?? 0) % 12) + 12) % 12)} options={[{ value: '-1', label: `Project · ${projectKey}` }, ...NOTE_NAMES.map((name, index) => ({ value: String(index), label: name }))]} onChange={(id) => set('root', Number(id))} />
+        <ChoiceCard label="Scale" hint="Song scale, or chromatic." value={(values.mode ?? 1) < 0.5 ? 'chromatic' : String(Math.round(values.scaleIndex ?? -1))} options={[{ value: '-1', label: `Project · ${projectScale}` }, { value: 'chromatic', label: 'Chromatic' }, ...SCALES.map((item, index) => ({ value: String(index), label: item.name }))]} onChange={(id) => {
+          if (id === 'chromatic') patch({ mode: 0, scaleIndex: -1, custom: 0, mask: 0 })
+          else patch({ mode: 1, scaleIndex: Number(id), custom: 0, mask: 0 })
+        }} />
+        <ChoiceCard label="Reference" hint="Concert A, in Hz." value={String(Math.round(values.a4 ?? 440))} options={Array.from({ length: 21 }, (_, index) => ({ value: String(430 + index), label: `${430 + index} Hz` }))} onChange={(id) => set('a4', Number(id))} />
       </div>
 
       <div className="tune-tools" role="group" aria-label="Note edit tool">
@@ -371,18 +347,9 @@ export function AutoTuneFace({
               <div className="tune-step" key={id}>
                 <span>Voice {voice}</span>
                 <small>Harmony interval.</small>
-                <div>
-                  <button type="button" aria-label={`Previous Voice ${voice} interval.`} title="Previous harmony interval." onClick={() => set(id, stepHarmony(current, -1))}>‹</button>
-                  <button type="button" ref={voiceRefs[voice - 1]} aria-label={`Voice ${voice} interval. ${harmonyName(current)}.`} title="Choose a harmony interval." onClick={() => setVoiceMenu((open) => open === voice ? null : voice)}>{harmonyName(current)}</button>
-                  <button type="button" aria-label={`Next Voice ${voice} interval.`} title="Next harmony interval." onClick={() => set(id, stepHarmony(current, 1))}>›</button>
-                </div>
-                {voiceMenu === voice ? (
-                  <AnchoredMenu className="tune-intervals" open label={`Voice ${voice} interval`} triggerRef={voiceRefs[voice - 1]} onClose={() => setVoiceMenu(null)}>
-                    {HARMONY_STEPS.map((semis) => (
-                      <button type="button" key={semis} role="menuitem" onClick={() => { set(id, semis); setVoiceMenu(null) }}>{harmonyName(semis)}</button>
-                    ))}
-                  </AnchoredMenu>
-                ) : null}
+                <select aria-label={`Voice ${voice} interval. ${harmonyName(current)}.`} title="Choose a harmony interval." value={String(current)} onChange={(event) => set(id, Number(event.target.value))}>
+                  {HARMONY_STEPS.map((semis) => <option key={semis} value={semis}>{harmonyName(semis)}</option>)}
+                </select>
               </div>
             )
           })}
@@ -455,20 +422,6 @@ function Knob({
   )
 }
 
-function Stepper({ label, hint, value, preset, onPrev, onNext }: { label: string; hint: string; value: string; preset?: string; onPrev: () => void; onNext: () => void }) {
-  return (
-    <div className="tune-step">
-      <span>{label}</span>
-      <small>{hint}</small>
-      <div>
-        <button type="button" aria-label={`Previous ${label}.`} title={`Previous ${label.toLowerCase()}.`} onClick={onPrev}>‹</button>
-        <strong data-preset={preset}>{value}</strong>
-        <button type="button" aria-label={`Next ${label}.`} title={`Next ${label.toLowerCase()}.`} onClick={onNext}>›</button>
-      </div>
-    </div>
-  )
-}
-
 function Key({ midi, mask, passMask, white, onDown, onUp }: { midi: number; mask: number; passMask: number; white?: boolean; onDown: (pc: number, down: boolean) => void; onUp: (pc: number) => void }) {
   const pc = ((midi % 12) + 12) % 12
   const name = NOTE_NAMES[pc]
@@ -522,33 +475,6 @@ function toggleBitLocal(mask: number, pc: number) {
 function applyRange(index: number, patch: (next: Record<string, number>) => void) {
   const range = TUNE_RANGES[index]
   patch({ minHz: range.minHz, maxHz: range.maxHz })
-}
-
-function stepKey(root: number, dir: number, set: (id: string, value: number) => void) {
-  const current = Math.round(root)
-  const order = [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-  const at = Math.max(0, order.indexOf(current < 0 ? -1 : ((current % 12) + 12) % 12))
-  set('root', order[(at + dir + order.length) % order.length])
-}
-
-function stepScale(values: Record<string, number>, dir: number, patch: (next: Record<string, number>) => void) {
-  const chromatic = (values.mode ?? 1) < 0.5
-  const index = Math.round(values.scaleIndex ?? -1)
-  const order: { mode: number; scaleIndex: number }[] = [
-    { mode: 1, scaleIndex: -1 },
-    { mode: 0, scaleIndex: -1 },
-    ...SCALES.map((_, scaleIndex) => ({ mode: 1, scaleIndex })),
-  ]
-  const at = chromatic ? 1 : index < 0 ? 0 : index + 2
-  const next = order[(at + dir + order.length) % order.length]
-  patch({ ...next, custom: 0, mask: 0 })
-}
-
-function scaleText(values: Record<string, number>, projectScale: string) {
-  if ((values.mode ?? 1) < 0.5) return 'Chromatic'
-  const index = Math.round(values.scaleIndex ?? -1)
-  if (index < 0) return `Project · ${projectScale}`
-  return SCALES[index]?.name ?? projectScale
 }
 
 function nearestRange(minHz: number, maxHz: number) {

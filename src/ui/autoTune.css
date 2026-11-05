@@ -420,7 +420,14 @@
   overflow: auto;
 }
 
-.shell.phone .plugin-sheet.tune-open { padding-top: 10px; }
+.shell.phone .plugin-sheet.tune-open { padding-top: 4px; }
+.shell.phone .tune-board { padding: 4px 8px 8px; gap: 4px; }
+.shell.phone .tune-meter {
+  aspect-ratio: auto;
+  width: 96px;
+  height: 72px;
+  max-width: 96px;
+}
 
 .shell.phone .plugin-sheet.tune-open > .tune-body,
 .shell.fold .plugin-sheet.tune-open > .tune-body,

@@ -97,11 +97,53 @@
 
 .plugin-controls {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 6px;
   min-height: 0;
   overflow: hidden;
+  align-content: start;
 }
+
+.choice-grid,
+.io-grid,
+.pattern-grid,
+.option-stack {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 6px;
+  align-content: start;
+}
+.choice-grid { grid-template-columns: 1fr 1fr; }
+.io-grid { grid-template-columns: 1fr 1fr; }
+.pattern-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.option-stack { grid-template-columns: 1fr; }
+.choice-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  min-width: 0;
+  width: 100%;
+}
+.choice-card > span {
+  color: #8ea0b4;
+  font-size: 11px;
+  font-weight: 740;
+  letter-spacing: 0.04em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+.choice-card select,
+.io-grid button,
+.pattern-grid button,
+.choice-wide {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  height: 40px;
+}
+.choice-span { grid-column: 1 / -1; }
 
 .plugin-controls label,
 .plugin-controls .plugin-control {
