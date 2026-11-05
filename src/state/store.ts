@@ -2233,9 +2233,9 @@ export class ProjectStore {
         this.openScaler(trackId)
         return
       }
-      if (plugin && isDrumsPlugin(plugin) && trackId !== 'master') {
+      if (plugin && (isDrumsPlugin(plugin) || insertsBeatMachine(plugin.pluginId)) && trackId !== 'master') {
         this.pluginFocus = null
-        this.openPads(trackId)
+        this.showPads(trackId)
         return
       }
       if (plugin?.pluginId === 'steps' && trackId !== 'master') {

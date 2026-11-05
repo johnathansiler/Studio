@@ -285,9 +285,11 @@ describe('short landscape mixer', () => {
           }
           const words = strip.controls.map((control) => control.word)
           if (strip.name === 'Master') {
-            expect(words, where).toEqual(expect.arrayContaining(['Arrives', 'Leaves', 'More']))
+            expect(words, where).toEqual(expect.arrayContaining(['Arrives', 'Leaves']))
+            expect(words, where).not.toContain('More')
           } else {
-            expect(words, `${where} ${strip.name}`).toEqual(expect.arrayContaining(['Mute', 'Solo', 'More']))
+            expect(words, `${where} ${strip.name}`).toEqual(expect.arrayContaining(['Mute', 'Solo']))
+            expect(words, `${where} ${strip.name}`).not.toContain('More')
           }
           for (const hidden of ['Arm', 'Safe', 'Inserts', 'Off', 'Read', 'Touch', 'Latch']) {
             expect(words, `${where} ${strip.name} ${hidden}`).not.toContain(hidden)
@@ -320,11 +322,12 @@ describe('short landscape mixer', () => {
         const open = await page.evaluate(() => {
           const strip = document.querySelector('.mixer > .strip') as HTMLElement
           const before = (strip.querySelector('.volume-row .touch-slider') as HTMLElement).getBoundingClientRect().height
-          const details = strip.querySelector('details.mix-more') as HTMLDetailsElement
+          const details = document.querySelector('details.mix-more') as HTMLDetailsElement
           details.open = true
           const fader = (strip.querySelector('.volume-row .touch-slider') as HTMLElement).getBoundingClientRect()
-          const panel = (strip.querySelector('.mix-panel') as HTMLElement).getBoundingClientRect()
-          const arm = [...strip.querySelectorAll('button')].some((button) => (button.textContent || '').includes('Arm') && button.getBoundingClientRect().height >= 40)
+          const panel = (document.querySelector('.mix-panel') as HTMLElement).getBoundingClientRect()
+          const arm = [...document.querySelectorAll('.mix-panel button')].some((button) => (button.textContent || '').includes('Arm') && button.getBoundingClientRect().height >= 40)
+          const phase = [...document.querySelectorAll('.mix-panel button')].find((button) => (button.textContent || '').includes('Phase'))
           return {
             before,
             after: fader.height,
@@ -333,16 +336,18 @@ describe('short landscape mixer', () => {
             panelRight: panel.right,
             panelBottom: panel.bottom,
             arm,
+            phaseWidth: phase ? phase.getBoundingClientRect().width : 0,
             vw: window.innerWidth,
             vh: window.innerHeight,
           }
         })
         expect(open.after, where).toBeGreaterThanOrEqual(160)
         expect(Math.abs(open.after - open.before), where).toBeLessThanOrEqual(1)
-        expect(open.panelLeft, where).toBeLessThanOrEqual(1)
-        expect(open.panelRight, where).toBeGreaterThanOrEqual(open.vw - 1)
-        expect(open.panelBottom, where).toBeGreaterThanOrEqual(open.vh - 1)
+        expect(open.panelRight - open.panelLeft, where).toBeLessThan(open.vw - 16)
+        expect(open.panelBottom - open.panelTop, where).toBeLessThan(open.vh * 0.7)
         expect(open.arm, where).toBe(true)
+        expect(open.phaseWidth, where).toBeGreaterThanOrEqual(40)
+        expect(open.phaseWidth, where).toBeLessThan(open.panelRight - open.panelLeft - 24)
         await page.close()
       }
     } finally {

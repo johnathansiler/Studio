@@ -67,6 +67,7 @@ async function measure(width: number, height: number, shell: string, layout: { s
       const strips = [...document.querySelectorAll<HTMLElement>('.mixer > .strip')]
       return {
         layout: (document.querySelector('.mixer-view') as HTMLElement).dataset.layout,
+        panelMode: (document.querySelector('.mix-panel .mode-full')?.textContent || '').trim(),
         hostHeight: host.height,
         strips: strips.map((strip) => {
           const box = strip.getBoundingClientRect()
@@ -119,13 +120,14 @@ describe('dominant volume fader', () => {
     for (const item of cases) {
       const report = await measure(item.width, item.height, item.shell, item, item.shot)
       expect(report.layout).toBe('columns')
+      expect(report.panelMode).toBe('Read')
       expect(report.strips.length).toBeGreaterThan(1)
       for (const strip of report.strips) {
         expect(strip.ratio, `${item.shell} ${strip.name}`).toBeGreaterThanOrEqual(0.5)
         expect(strip.vertical, strip.name).toBe(true)
         expect(strip.thumbHeight, strip.name).toBeGreaterThanOrEqual(44)
         expect(strip.db, strip.name).toMatch(/dB|inf/)
-        expect(strip.mode, strip.name).toBe('Read')
+        expect(strip.mode, strip.name).toBe('')
         expect(strip.faderTop, strip.name).toBeGreaterThanOrEqual(0)
         expect(strip.faderBottom, strip.name).toBeLessThanOrEqual(item.height + 1)
       }

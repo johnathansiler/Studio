@@ -379,7 +379,7 @@ describe('Auto-Tune insert', () => {
     const button = findButton(InsertList({ store, trackId: vocal.id }), 'Auto-Tune')
     expect(button.props.children).toBe('Auto-Tune')
     expect(button.props['aria-label']).toContain('Auto-Tune')
-    expect(button.props.onPointerDown).toBeUndefined()
+    expect(typeof button.props.onPointerDown).toBe('function')
     button.props.onClick()
     expect(store.pluginFocus).toEqual({ trackId: vocal.id, pluginId: plugin.id })
     expect(store.track(vocal.id)!.plugins.find((item) => item.id === plugin.id)!.enabled).toBe(true)

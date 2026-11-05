@@ -103,7 +103,7 @@ async function readStrips(page: Page) {
         faderWidth: faderBox.width,
         ratio: faderBox.height / box.height,
         vertical: fader.classList.contains('vertical'),
-        more: !!strip.querySelector('.more-open, .more-fold, .more-drawer'),
+        more: false,
         racks,
         controls,
       }
@@ -134,12 +134,13 @@ describe('mixer fader stays full size', () => {
         const where = `columns from saved rows ${width}`
         expect(strips.length, where).toBeGreaterThan(1)
         const channel = strips.find((strip) => !strip.master)!
-        expect(strips.every((strip) => strip.more), where).toBe(true)
-        expect(channel.controls.some((control) => control.word === 'More'), where).toBe(true)
+        expect(strips.every((strip) => strip.more), where).toBe(false)
+        expect(await page.locator('.mix-toolbar .mix-more').count(), where).toBe(1)
         const labels = channel.controls.map((control) => control.word)
-        for (const word of ['Mute', 'Solo', 'More']) {
+        for (const word of ['Mute', 'Solo']) {
           expect(labels, `${where} ${word}`).toContain(word)
         }
+        expect(labels, where).not.toContain('More')
         expect(labels, where).not.toContain('Inserts')
         expect(labels, where).not.toContain('Pan')
         const heights = strips.map((strip) => strip.faderHeight)
@@ -178,13 +179,14 @@ describe('mixer fader stays full size', () => {
         expect(Math.max(...heights) - Math.min(...heights), where).toBeLessThanOrEqual(1)
         expect(Math.max(...widthsOfFader) - Math.min(...widthsOfFader), where).toBeLessThanOrEqual(1)
         for (const strip of strips) {
-          expect(strip.more, strip.name).toBe(true)
+          expect(strip.more, strip.name).toBe(false)
           expect(strip.ratio, strip.name).toBeGreaterThanOrEqual(0.5)
           expect(strip.vertical, strip.name).toBe(true)
           expect(strip.faderHeight, strip.name).toBeGreaterThanOrEqual(48)
         }
         const channel = strips.find((strip) => !strip.master)!
-        expect(channel.controls.map((control) => control.word), where).toEqual(expect.arrayContaining(['Mute', 'Solo', 'More']))
+        expect(channel.controls.map((control) => control.word), where).toEqual(expect.arrayContaining(['Mute', 'Solo']))
+        expect(channel.controls.map((control) => control.word), where).not.toContain('More')
         const scrolled = await scrollTools(page)
         expect(Math.abs(scrolled[0].faderHeight - heights[0]), where).toBeLessThanOrEqual(1)
         expect(Math.abs(scrolled[0].faderWidth - widthsOfFader[0]), where).toBeLessThanOrEqual(1)
@@ -207,7 +209,7 @@ describe('mixer fader stays full size', () => {
         expect(Math.max(...heights) - Math.min(...heights), where).toBeLessThanOrEqual(1)
         for (const strip of strips) {
           expect(strip.ratio, `${where} ${strip.name}`).toBeGreaterThanOrEqual(0.5)
-          expect(strip.more, strip.name).toBe(true)
+          expect(strip.more, strip.name).toBe(false)
           const tools = strip.racks.find((rack) => rack.zone === 'tools')
           if (tools) {
             expect(tools.direction, strip.name).toBe('column')

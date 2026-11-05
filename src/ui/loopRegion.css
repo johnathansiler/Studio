@@ -38,10 +38,11 @@
 .loop-host {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 8;
   touch-action: none;
   user-select: none;
   overflow: hidden;
+  pointer-events: auto;
 }
 .loop-host .song-loop {
   position: absolute;
@@ -70,10 +71,10 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  z-index: 3;
-  width: 40px;
-  min-width: 0;
-  min-height: 0;
+  z-index: 9;
+  width: 44px;
+  min-width: 44px;
+  min-height: 40px;
   height: auto;
   margin: 0;
   padding: 0;
@@ -85,14 +86,15 @@
   color: transparent;
   cursor: ew-resize;
   touch-action: none;
+  pointer-events: auto;
   overflow: visible;
   -webkit-tap-highlight-color: transparent;
 }
 .shell.phone .loop-host button.loop-grip,
 .shell.fold .loop-host button.loop-grip {
   width: 44px;
-  min-width: 0;
-  min-height: 40px;
+  min-width: 44px;
+  min-height: 44px;
 }
 .loop-host button.loop-grip:active,
 .loop-host button.loop-grip:focus {

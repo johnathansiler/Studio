@@ -14,7 +14,7 @@ function expectClear(hit: { hitLeft: number; hitWidth: number }, label: { left: 
 }
 
 describe('loop edge grips', () => {
-  it('draws a slim cap and extends the touch pad outward on a wide loop', () => {
+  it('draws a slim cap and extends the touch pad inward on a wide loop', () => {
     const label = { center: 800, width: 80 }
     const grips = layoutLoopGrips({
       start: 400,
@@ -34,10 +34,10 @@ describe('loop edge grips', () => {
     expect(grips.end.faceLeft + grips.end.faceWidth).toBe(1200)
     expect(grips.start.hitWidth).toBeGreaterThanOrEqual(44)
     expect(grips.end.hitWidth).toBeGreaterThanOrEqual(44)
-    expect(grips.start.hitLeft).toBeLessThan(400)
-    expect(grips.start.hitLeft + grips.start.hitWidth).toBeLessThanOrEqual(400 + LOOP_GRIP_VISUAL)
-    expect(grips.end.hitLeft).toBeGreaterThanOrEqual(1200 - LOOP_GRIP_VISUAL)
-    expect(grips.end.hitLeft + grips.end.hitWidth).toBeGreaterThan(1200)
+    expect(grips.start.hitLeft).toBeGreaterThanOrEqual(400)
+    expect(grips.start.hitLeft + grips.start.hitWidth).toBeGreaterThanOrEqual(400 + 44)
+    expect(grips.end.hitLeft).toBeLessThanOrEqual(1200 - 44)
+    expect(grips.end.hitLeft + grips.end.hitWidth).toBeLessThanOrEqual(1200)
     const chip = { left: label.center - label.width / 2, right: label.center + label.width / 2 }
     expectClear(grips.start, chip, grips.end)
     expectClear(grips.end, chip, grips.start)
@@ -58,9 +58,10 @@ describe('loop edge grips', () => {
     expect(grips.start.faceWidth).toBe(12)
     expect(grips.start.hitLeft).toBeGreaterThanOrEqual(0)
     expect(grips.start.hitWidth).toBeGreaterThanOrEqual(LOOP_GRIP_HIT)
-    expect(grips.start.hitLeft).toBeLessThanOrEqual(0)
-    expect(grips.start.hitLeft + grips.start.hitWidth).toBeGreaterThanOrEqual(12)
-    expect(grips.end.hitLeft + grips.end.hitWidth).toBeGreaterThan(720)
+    expect(grips.start.hitLeft + grips.start.hitWidth).toBeGreaterThanOrEqual(44)
+    expect(grips.end.hitLeft).toBeLessThanOrEqual(720 - 40)
+    expect(grips.end.hitLeft + grips.end.hitWidth).toBeLessThanOrEqual(720)
+    expect(grips.end.hitWidth).toBeGreaterThanOrEqual(LOOP_GRIP_HIT)
     expectClear(grips.start, { left: 315, right: 405 }, grips.end)
   })
 
@@ -115,7 +116,7 @@ describe('loop edge grips', () => {
     }
   })
 
-  it('stays on the outer side of the label when the view is narrow', () => {
+  it('keeps a 44px end pad inside a narrow view when the loop runs off the right edge', () => {
     const grips = layoutLoopGrips({
       start: 0,
       end: 400,
@@ -126,10 +127,12 @@ describe('loop edge grips', () => {
       labelWidth: 80,
       hit: 44,
     })
-    expect(grips.start.hitWidth).toBeGreaterThanOrEqual(LOOP_GRIP_HIT)
-    expect(grips.start.hitLeft + grips.start.hitWidth).toBeLessThanOrEqual(20.5)
-    expect(grips.end.hitLeft).toBeGreaterThanOrEqual(100 - 0.5)
-    expectClear(grips.start, { left: 20, right: 100 }, grips.end)
+    expect(grips.start.hitWidth).toBeGreaterThanOrEqual(44)
+    expect(grips.start.hitLeft).toBeGreaterThanOrEqual(0)
+    expect(grips.start.hitLeft + grips.start.hitWidth).toBeLessThanOrEqual(120)
+    const endVisible = Math.min(grips.end.hitLeft + grips.end.hitWidth, 120) - Math.max(grips.end.hitLeft, 0)
+    expect(endVisible).toBeGreaterThanOrEqual(44)
+    expect(grips.end.hitLeft + grips.end.hitWidth).toBeLessThanOrEqual(120.5)
   })
 
   it('refuses a touch pad under 40px and a face outside 10–14px', () => {
@@ -153,6 +156,27 @@ describe('loop edge grips', () => {
     expect(grips.end.hitWidth).toBeGreaterThanOrEqual(LOOP_GRIP_HIT)
     expect(grips.start.faceLeft + grips.start.faceWidth).toBeLessThanOrEqual(grips.end.faceLeft)
     expectClear(grips.start, null, grips.end)
+  })
+
+  it('keeps the end handle inside the phone when the loop ends at the right edge', () => {
+    const grips = layoutLoopGrips({
+      start: 0,
+      end: 1440,
+      hostWidth: 2000,
+      viewLeft: 0,
+      viewWidth: 390,
+      labelCenter: 0,
+      labelWidth: 0,
+      hit: 44,
+    })
+    const viewRight = 390
+    expect(grips.end.hitWidth).toBeGreaterThanOrEqual(44)
+    expect(grips.end.hitLeft).toBeGreaterThanOrEqual(0)
+    expect(grips.end.hitLeft + grips.end.hitWidth).toBeLessThanOrEqual(viewRight)
+    expect(viewRight - grips.end.hitLeft).toBeGreaterThanOrEqual(44)
+    expect(grips.start.hitWidth).toBeGreaterThanOrEqual(44)
+    expect(loopEdgeAt(viewRight - 8, grips, { left: 0, right: 390 })).toBe('end')
+    expect(loopEdgeAt(20, grips, { left: 0, right: 1440 })).toBe('start')
   })
 
   it('lets either handle win over the loop body, including a touch on the visible cap', () => {

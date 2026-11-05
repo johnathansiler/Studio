@@ -51,7 +51,7 @@ describe('phone mixer at 412x915', () => {
         for (const details of document.querySelectorAll<HTMLDetailsElement>('details.mix-more')) details.open = true
         const mixer = document.querySelector('.mixer-view') as HTMLElement
         const strip = document.querySelector('.strip') as HTMLElement
-        const autos = [...strip.querySelectorAll<HTMLElement>('.strip-auto button')]
+        const autos = [...document.querySelectorAll<HTMLElement>('.mix-panel .strip-auto button')]
         const buttons = [...document.querySelectorAll<HTMLElement>('button')].filter((button) => {
           const style = getComputedStyle(button)
           const box = button.getBoundingClientRect()
@@ -73,9 +73,9 @@ describe('phone mixer at 412x915', () => {
         const face = (strip.querySelector('.strip-col') as HTMLElement | null) ?? strip
         const faceBox = face.getBoundingClientRect()
         const autoBoxes = autos.map((button) => button.getBoundingClientRect())
-        const panel = strip.querySelector('.mix-panel') as HTMLElement
+        const panel = document.querySelector('.mix-panel') as HTMLElement
         const panelBox = panel.getBoundingClientRect()
-        const arm = strip.querySelector('.arm-flag') as HTMLElement
+        const arm = panel.querySelector('.arm-flag') as HTMLElement
         const armShown = [...arm.querySelectorAll<HTMLElement>('span')].filter((node) => getComputedStyle(node).display !== 'none').map((node) => (node.textContent || '').trim()).join('')
         const armStyle = getComputedStyle(arm)
         return {
@@ -83,11 +83,11 @@ describe('phone mixer at 412x915', () => {
           narrow: mixer.dataset.narrow,
           stripWidth: faceBox.width,
           modeCount: autos.length,
-          modeInside: autoBoxes.length === 1 && autoBoxes[0].width >= 36 && autoBoxes[0].height >= 40 && autoBoxes[0].left >= panelBox.left - 1 && autoBoxes[0].right <= panelBox.right + 1 && panelBox.left <= 1 && panelBox.width >= window.innerWidth - 2,
+          modeInside: autoBoxes.length === 1 && autoBoxes[0].width >= 36 && autoBoxes[0].height >= 40 && autoBoxes[0].left >= panelBox.left - 1 && autoBoxes[0].right <= panelBox.right + 1 && panelBox.width < window.innerWidth - 16,
           words: autos.map((button) => (button.querySelector('.mode-full') as HTMLElement | null)?.textContent),
           letters: autos.map((button) => getComputedStyle(button.querySelector('.mode-short') as HTMLElement).display),
           pressed: autos.some((button) => button.classList.contains('on') && button.getAttribute('aria-pressed') === 'true'),
-          fx: !!strip.querySelector('.fx-open'),
+          fx: !!document.querySelector('.mix-chips [role="tab"]'),
           chevron: !!strip.querySelector('select'),
           armShown,
           armLit: arm.classList.contains('on-r') && armStyle.backgroundColor !== 'rgba(0, 0, 0, 0)',
@@ -157,8 +157,11 @@ describe('phone mixer at 412x915', () => {
           scrollWidth: node.scrollWidth,
           clientWidth: node.clientWidth,
         }))
-        const captions = [...first.querySelectorAll<HTMLElement>('.mode-full, .mini-word, .arm-full')].filter((node) => getComputedStyle(node).display !== 'none').map((node) => (node.textContent || '').trim())
-        const arm = first.querySelector('.arm-flag') as HTMLElement
+        const details = document.querySelector('details.mix-more') as HTMLDetailsElement
+        details.open = true
+        const panel = document.querySelector('.mix-panel') as HTMLElement
+        const captions = [...document.querySelectorAll<HTMLElement>('.mode-full, .mini-word, .arm-full')].filter((node) => getComputedStyle(node).display !== 'none').map((node) => (node.textContent || '').trim())
+        const arm = panel.querySelector('.arm-flag') as HTMLElement
         const armShown = [...arm.querySelectorAll<HTMLElement>('span')].filter((node) => getComputedStyle(node).display !== 'none').map((node) => (node.textContent || '').trim()).join('')
         const mix = (document.querySelector('.mixer') as HTMLElement).getBoundingClientRect()
         return {

@@ -500,7 +500,7 @@ button.snap-grid { flex-direction: column; gap: 1px; }
   margin-bottom: 0;
 }
 .rack-ruler .rack-steps { position: relative; min-height: 40px; }
-.rack-ruler .loop-host { position: absolute; top: 0; bottom: 0; left: 0; right: 48px; width: auto; overflow: hidden; }
+.rack-ruler .loop-host { position: absolute; top: 0; bottom: 0; left: 0; right: 0; width: auto; overflow: hidden; z-index: 8; }
 .shell.phone .rack-ruler .rack-steps { min-height: 44px; }
 
 .rack-ruler .rack-lead {
