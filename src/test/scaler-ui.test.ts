@@ -171,10 +171,11 @@ describe('scaler plugin panel', () => {
         const box = await page.evaluate(() => {
           const panel = document.querySelector('.scaler-panel') as HTMLElement
           const keys = document.querySelector('.scaler-keys') as HTMLElement
+          const pads = document.querySelector('.scaler-padgrid') as HTMLElement
+          const stage = document.querySelector('.scaler-stage') as HTMLElement
           const picker = document.querySelector('[data-key-picker]') as HTMLElement
           const scale = document.querySelector('[data-scale-picker] select') as HTMLElement
           const pills = document.querySelector('[data-output]') as HTMLElement
-          const head = document.querySelector('.scaler-head') as HTMLElement
           const white = document.querySelector('.scaler-white') as HTMLElement
           const black = document.querySelector('.scaler-black') as HTMLElement
           const options = document.querySelector('#scaler-options') as HTMLElement
@@ -192,7 +193,13 @@ describe('scaler plugin panel', () => {
             pageScroll: document.documentElement.scrollHeight - window.innerHeight,
             pageWide: document.documentElement.scrollWidth - window.innerWidth,
             key: rect(keys),
-            head: rect(head),
+            pads: rect(pads),
+            stage: rect(stage),
+            top: rect(document.querySelector('.scaler-topbar') as HTMLElement),
+            perform: document.querySelector('.scaler-perform') ? rect(document.querySelector('.scaler-perform') as HTMLElement) : { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 },
+            preset: rect(document.querySelector('.preset-dock') as HTMLElement),
+            panelClass: (document.querySelector('.scaler-panel') as HTMLElement).className,
+            padButtons: [...pads.querySelectorAll('.scaler-pad')].map((button) => rect(button)),
             pills: rect(pills),
             scale: rect(scale),
             white: rect(white),
@@ -208,16 +215,22 @@ describe('scaler plugin panel', () => {
         })
         const where = viewport.name
         expect(box.hidden, where).toBe(true)
-        expect(box.panelScroll, where).toBeLessThanOrEqual(2)
+        expect(box.panelScroll, `${where} preset ${box.preset.height} top ${box.top.height} pills ${box.pills.height} stage ${box.stage.height} pads ${box.pads.height} perform ${box.perform.height} keys ${box.key.height}`).toBeLessThanOrEqual(2)
         expect(box.pageScroll, where).toBeLessThanOrEqual(2)
         expect(box.pageWide, where).toBeLessThanOrEqual(2)
         expect(box.notes, where).toHaveLength(12)
-        expect(box.key.height, where).toBeGreaterThan(box.head.height)
-        expect(box.key.height, where).toBeGreaterThan(box.pills.height)
-        expect(box.key.height, where).toBeGreaterThan(140)
+        expect(box.pads.height, where).toBeGreaterThan(box.key.height)
+        expect(box.pads.width * box.pads.height, `${where} ${box.panelClass} pads ${Math.round(box.pads.width)}x${Math.round(box.pads.height)} stage ${Math.round(box.stage.width)}x${Math.round(box.stage.height)}`).toBeGreaterThan(box.stage.width * box.stage.height)
         expect(box.key.bottom, where).toBeLessThanOrEqual(viewport.height + 1)
         expect(box.key.top, where).toBeGreaterThan(40)
-        expect(box.white.height, where).toBeGreaterThan(120)
+        expect(box.white.height, where).toBeGreaterThanOrEqual(40)
+        expect(box.padButtons.length, where).toBeGreaterThanOrEqual(8)
+        const padRows = new Set(box.padButtons.map((button) => Math.round(button.top / 8)))
+        if (viewport.width <= 520) expect(padRows.size, where).toBeGreaterThanOrEqual(2)
+        for (const button of box.padButtons) {
+          expect(button.height, `${where} pad`).toBeGreaterThanOrEqual(40)
+          expect(button.width, `${where} pad`).toBeGreaterThanOrEqual(40)
+        }
         expect(box.white.width, where).toBeGreaterThanOrEqual(40)
         expect(box.black.width, where).toBeGreaterThanOrEqual(40)
         expect(box.black.height, where).toBeGreaterThanOrEqual(40)
