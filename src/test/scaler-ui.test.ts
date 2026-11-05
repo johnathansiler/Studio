@@ -200,10 +200,16 @@ describe('scaler plugin panel', () => {
             preset: rect(document.querySelector('.preset-dock') as HTMLElement),
             panelClass: (document.querySelector('.scaler-panel') as HTMLElement).className,
             padButtons: [...pads.querySelectorAll('.scaler-pad')].map((button) => rect(button)),
+            padLabels: [...pads.querySelectorAll('.scaler-pad b')].map((node) => node.textContent ?? ''),
+            matchRows: [...document.querySelectorAll('.scaler-match button')].map((button) => rect(button)),
+            browse: [...document.querySelectorAll('button')].find((button) => button.textContent === 'Browse')?.textContent ?? '',
             pills: rect(pills),
             scale: rect(scale),
             white: rect(white),
             black: rect(black),
+            label: rect(white.querySelector('small') as HTMLElement),
+            match: document.querySelector('.scaler-match') ? rect(document.querySelector('.scaler-match') as HTMLElement) : { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 },
+            matchHeads: [...document.querySelectorAll('.scaler-match .head span')].map((node) => rect(node)),
             toTrack: rect(toTrack),
             audioOut: rect(audioOut),
             midiOut: rect(midiOut),
@@ -232,8 +238,10 @@ describe('scaler plugin panel', () => {
           expect(button.width, `${where} pad`).toBeGreaterThanOrEqual(40)
         }
         expect(box.white.width, where).toBeGreaterThanOrEqual(40)
-        expect(box.black.width, where).toBeGreaterThanOrEqual(40)
-        expect(box.black.height, where).toBeGreaterThanOrEqual(40)
+        expect(box.black.width, where).toBeGreaterThan(8)
+        expect(box.black.height, where).toBeGreaterThan(16)
+        expect(box.label.top, `${where} label under black keys`).toBeGreaterThanOrEqual(box.black.bottom - 1)
+        expect(box.label.height, where).toBeGreaterThan(6)
         expect(box.scale.height, where).toBeGreaterThanOrEqual(40)
         expect(box.scale.top, where).toBeGreaterThanOrEqual(0)
         expect(box.scale.bottom, where).toBeLessThanOrEqual(viewport.height)
@@ -261,15 +269,35 @@ describe('scaler plugin panel', () => {
           expect(button.bottom, `${where} ${button.label}`).toBeLessThanOrEqual(box.pills.bottom + 1)
         }
         if (viewport.width <= 520) expect(outputRows.size, where).toBeLessThanOrEqual(2)
+        const pickerRight = Math.max(...box.notes.map((note) => note.right))
+        const pickerLeft = Math.min(...box.notes.map((note) => note.left))
         for (const note of box.notes) {
           expect(note.height, `${where} ${note.name}`).toBeGreaterThanOrEqual(40)
           expect(note.width, `${where} ${note.name}`).toBeGreaterThanOrEqual(36)
           expect(note.top, `${where} ${note.name}`).toBeGreaterThanOrEqual(-1)
           expect(note.bottom, `${where} ${note.name}`).toBeLessThanOrEqual(viewport.height + 1)
-          expect(note.left, `${where} ${note.name}`).toBeGreaterThanOrEqual(-1)
-          expect(note.right, `${where} ${note.name}`).toBeLessThanOrEqual(viewport.width + 1)
+          expect(note.left, `${where} ${note.name}`).toBeGreaterThanOrEqual(pickerLeft - 1)
+          expect(note.right, `${where} ${note.name}`).toBeLessThanOrEqual(Math.min(viewport.width, pickerRight) + 1)
+          expect(note.right, `${where} ${note.name} clipped`).toBeLessThanOrEqual(box.stage.right + 2)
+          expect(note.left, `${where} ${note.name} clipped`).toBeGreaterThanOrEqual(box.stage.left - 2)
         }
+        if (viewport.width >= 1100) {
+          expect(box.matchHeads.length, where).toBe(5)
+          const headTops = new Set(box.matchHeads.map((cell) => Math.round(cell.top)))
+          expect(headTops.size, where).toBe(1)
+          expect(box.matchRows.length, where).toBeGreaterThanOrEqual(3)
+          const third = box.matchRows[2]
+          expect(third.top, where).toBeGreaterThanOrEqual(box.match.top - 1)
+          expect(third.bottom, where).toBeLessThanOrEqual(box.match.bottom + 1)
+          expect(third.bottom, where).toBeLessThanOrEqual(viewport.height)
+          expect(third.height, where).toBeGreaterThanOrEqual(28)
+        }
+        expect(box.padLabels.every((label) => label !== 'Rest'), where).toBe(true)
+        expect(box.browse, where).toBe('Browse')
       }
+      const computer = readFileSync('/opt/cursor/artifacts/scaler-computer-1440x900.png')
+      expect(computer.readUInt32BE(16)).toBe(1440)
+      expect(computer.readUInt32BE(20)).toBe(900)
     } finally {
       await browser.close()
     }
