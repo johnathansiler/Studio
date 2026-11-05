@@ -428,7 +428,8 @@ const scaleList = allScales()
         {!compact && <section className="scaler-section" aria-label="Chord Set">
           <div className="scaler-section-head">
             <b>Chord Set</b>
-            <button type="button" className="btn-quiet" title="Open the chord set browser." aria-expanded={browser} onClick={() => setBrowser((value) => !value)}>{setPattern?.name ?? 'Choose set'}</button>
+            <button type="button" className={`btn-quiet${browser ? ' on' : ''}`} title="Open the chord set browser." aria-expanded={browser} onClick={() => setBrowser((value) => !value)}>Browse</button>
+            <span className="scaler-setname">{setPattern?.name ?? 'Chord set'}</span>
             <button type="button" className="btn-secondary" title="Play this chord set." onClick={() => playLine(setChords)}>Play set</button>
             <button type="button" className={locked ? 'on' : ''} aria-pressed={locked} title="Lock the key and the chord set." onClick={() => setLocked((value) => !value)}>{locked ? 'Locked' : 'Lock'}</button>
             <span className="scaler-semi">Semi {st}</span>
@@ -453,33 +454,6 @@ const scaleList = allScales()
               </button>
             ))}
           </div>
-          {browser && (
-            <div className="scaler-browse" role="region" aria-label="Chord sets">
-              <div className="scaler-browse-col" role="list" aria-label="Categories">
-                {(['common', 'genres', 'styles', 'moods'] as const).map((id) => (
-                  <button key={id} type="button" className={browseCat === id ? 'on' : ''} onClick={() => { setBrowseCat(id); setBrowseSub('All') }}>
-                    {id === 'common' ? 'Common Progressions' : id === 'genres' ? 'Genres' : id === 'styles' ? 'Styles' : 'Moods'}
-                  </button>
-                ))}
-              </div>
-              <div className="scaler-browse-col" role="list" aria-label="Subcategories">
-                {browseSubs.map((name) => (
-                  <button key={name} type="button" className={browseSub === name ? 'on' : ''} onClick={() => setBrowseSub(name)}>{name}</button>
-                ))}
-              </div>
-              <div className="scaler-browse-col">
-                <input aria-label="Search chord sets" placeholder="Search chord sets" value={songQuery} onChange={(event) => setSongQuery(event.target.value)} />
-                <div role="list" aria-label="Chord set list">
-                  {browseList.map((item) => (
-                    <div key={item.id} className="scaler-setrow">
-                      <button type="button" onClick={() => { loadProgression(item); setBrowser(false) }}>{item.name}</button>
-                      <button type="button" className={hearts.includes(item.id) ? 'on' : ''} aria-pressed={hearts.includes(item.id)} title="Save this set as a favorite." onClick={() => setHearts((prev) => prev.includes(item.id) ? prev.filter((id) => id !== item.id) : [...prev, item.id])}>{hearts.includes(item.id) ? 'Favorite' : 'Mark favorite'}</button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
         </section>}
         <section className="scaler-section" aria-label="Current Scale">
           <div className="scaler-section-head">
@@ -511,7 +485,7 @@ const scaleList = allScales()
             {!compact && <button type="button" title="Cycle the voicing." onClick={() => {
               const index = Math.max(0, VOICINGS.findIndex((item) => item.id === state.voicing))
               patch({ voicing: VOICINGS[cycle(index, 1, VOICINGS.length)].id })
-            }}>Voicing {voiceLabel}</button>}
+            }}>Voicing: {voicingPhrase(voiceLabel)}</button>}
             {!compact && <button type="button" title="Raise the octave. Shift click lowers it." onClick={(event) => setOctave(clamp(octave + (event.shiftKey ? -1 : 1), -2, 2))}>Octave {octave + 2}</button>}
           </div>
           {!compact && <div className="scaler-blocks" aria-label="Scale chords">
@@ -555,6 +529,33 @@ const scaleList = allScales()
           </div>
         </section>}
       </div>
+      {browser && (
+        <div className="scaler-browse" role="region" aria-label="Chord sets">
+          <div className="scaler-browse-col" role="list" aria-label="Categories">
+            {(['common', 'genres', 'styles', 'moods'] as const).map((id) => (
+              <button key={id} type="button" className={browseCat === id ? 'on' : ''} onClick={() => { setBrowseCat(id); setBrowseSub('All') }}>
+                {id === 'common' ? 'Common Progressions' : id === 'genres' ? 'Genres' : id === 'styles' ? 'Styles' : 'Moods'}
+              </button>
+            ))}
+          </div>
+          <div className="scaler-browse-col" role="list" aria-label="Subcategories">
+            {browseSubs.map((name) => (
+              <button key={name} type="button" className={browseSub === name ? 'on' : ''} onClick={() => setBrowseSub(name)}>{name}</button>
+            ))}
+          </div>
+          <div className="scaler-browse-col">
+            <input aria-label="Search chord sets" placeholder="Search chord sets" value={songQuery} onChange={(event) => setSongQuery(event.target.value)} />
+            <div role="list" aria-label="Chord set list">
+              {browseList.map((item) => (
+                <div key={item.id} className="scaler-setrow">
+                  <button type="button" onClick={() => { loadProgression(item); setBrowser(false) }}>{item.name}</button>
+                  <button type="button" className={hearts.includes(item.id) ? 'on' : ''} aria-pressed={hearts.includes(item.id)} title="Save this set as a favorite." onClick={() => setHearts((prev) => prev.includes(item.id) ? prev.filter((id) => id !== item.id) : [...prev, item.id])}>{hearts.includes(item.id) ? 'Favorite' : 'Mark favorite'}</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       <div id="scaler-options" className="scaler-drawer" hidden={!options}>
         <div className="scaler-readout">
           <span>Notes <b>{liveNotes || 'Rest'}</b></span>
@@ -591,7 +592,7 @@ const scaleList = allScales()
             const next = KEYS_LOCKS[cycle(lockIndex, dir, KEYS_LOCKS.length)]
             patch({ keysLock: next, snap: next !== 'off' })
           }} />
-          <Stepper label="Voice grouping" value={voiceLabel} hint="How the chord is stacked, or only the bass or upper notes." onStep={(dir) => {
+          <Stepper label="Voice grouping" value={voicingPhrase(voiceLabel)} hint="How the chord is stacked, or only the bass or upper notes." onStep={(dir) => {
             const index = Math.max(0, VOICE_GROUPS.findIndex((item) => item.label === voiceLabel))
             const next = VOICE_GROUPS[cycle(index, dir, VOICE_GROUPS.length)]
             patch({ voiceGroup: next.id, ...(next.voicing ? { voicing: next.voicing } : {}), voiceLead: next.id === 'dynamic' ? true : state.voiceLead })
@@ -893,6 +894,7 @@ const scaleList = allScales()
       </div>
       <div className="scaler-padgrid" role="group" aria-label="Chord pads" data-pad-grid="">
         <div className="scaler-pad-source" role="group" aria-label="Pad source">
+          <button type="button" className={`btn-quiet${browser ? ' on' : ''}`} aria-expanded={browser} title="Open genres, styles, and moods." onClick={() => setBrowser((value) => !value)}>Browse</button>
           {(['set', 'scale', 'main'] as const).map((id) => (
             <button key={id} type="button" className={padSource === id ? 'on' : ''} aria-pressed={padSource === id} onClick={() => setPadSource(id)}>{id === 'set' ? 'Chord Set' : id === 'scale' ? 'Scale' : 'Main Track'}</button>
           ))}
@@ -936,7 +938,7 @@ const scaleList = allScales()
             const index = Math.max(0, VOICE_GROUPS.findIndex((item) => item.label === voiceLabel))
             const next = VOICE_GROUPS[cycle(index, 1, VOICE_GROUPS.length)]
             patch({ voiceGroup: next.id, ...(next.voicing ? { voicing: next.voicing } : {}), voiceLead: next.id === 'dynamic' ? true : state.voiceLead })
-          }}>Voice grouping {voiceLabel}</button>
+          }}>Voice grouping: {voicingPhrase(voiceLabel)}</button>
         )}
       </div>
       <Piano start={60} end={72} scalePcs={scalePcs} chordPcs={playedPcs} mode={state.keysLock} onPlay={playKey} />
@@ -1122,15 +1124,32 @@ function matchSource(slots: (Slot | null)[], setChords: { tones: { midi: number 
   return diatonic.flatMap((chord) => chord.tones.map((tone) => ({ midi: tone.midi })))
 }
 
+function voicingPhrase(label: string) {
+  if (label === 'Close') return 'Close position'
+  return label
+}
+
 function padBoard(
   source: 'set' | 'scale' | 'main',
   slots: (Slot | null)[],
   setChords: { symbol: string; roman: string; tones: { midi: number; cents?: number }[] }[],
   diatonic: { symbol: string; roman: string; tones: { midi: number; cents?: number }[] }[],
 ) {
-  const fromMain = slots.map((slot) => slot ? { symbol: slot.symbol, roman: slot.roman, tones: slot.notes.map((note) => ({ midi: note.pitch, cents: note.fine })) } : null)
-  const picked = source === 'main' ? fromMain : source === 'scale' ? diatonic : setChords
-  const items = picked.filter((item) => item && item.tones.length).slice(0, 8)
-  while (items.length < 8) items.push(null)
+  const fromMain = slots.flatMap((slot) => slot ? [{ symbol: slot.symbol, roman: slot.roman, tones: slot.notes.map((note) => ({ midi: note.pitch, cents: note.fine })) }] : [])
+  const primary = source === 'main' && fromMain.length ? fromMain : source === 'scale' ? diatonic : setChords
+  const secondary = primary === diatonic ? setChords : diatonic
+  const items: { symbol: string; roman: string; tones: { midi: number; cents?: number }[] }[] = []
+  for (const chord of [...primary, ...secondary]) {
+    if (!chord?.tones?.length) continue
+    if (items.some((item) => item.symbol === chord.symbol && item.roman === chord.roman)) continue
+    items.push(chord)
+    if (items.length === 8) return items
+  }
+  const seed = items.length ? items.slice() : secondary.filter((chord) => chord.tones?.length)
+  let index = 0
+  while (items.length < 8 && seed.length && index < 16) {
+    items.push(seed[index % seed.length])
+    index += 1
+  }
   return items
 }
