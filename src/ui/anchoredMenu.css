@@ -1,6 +1,6 @@
 .anchored-menu {
   position: fixed;
-  z-index: 80;
+  z-index: calc(var(--overlay-z, 360) + 30);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -77,6 +77,24 @@
 .anchored-menu button {
   min-height: 40px;
   min-width: 40px;
+}
+
+/* Small menus dock under the button and size to their words. */
+.anchored-menu[data-menu-size='dock']:not(.transport-drawer) {
+  width: max-content;
+  min-width: 0;
+  align-items: flex-start;
+}
+.anchored-menu[data-menu-size='dock']:not(.transport-drawer) > button,
+.anchored-menu[data-menu-size='dock']:not(.transport-drawer) .guide-choice,
+.anchored-menu[data-menu-size='dock']:not(.transport-drawer) .sheet-row,
+.anchored-menu[data-menu-size='dock']:not(.transport-drawer) .add-choice,
+.anchored-menu[data-menu-size='dock']:not(.transport-drawer) .ch-row,
+.anchored-menu.insert-menu button {
+  width: auto;
+  max-width: none;
+  align-self: flex-start;
+  white-space: nowrap;
 }
 
 .anchored-menu.transport-drawer {
@@ -162,15 +180,3 @@
   padding: 6px 8px;
 }
 
-.shell .mixer-view.mixer-console .mix-more[open] > summary {
-  background-color: #18241d;
-  background-image: none;
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-  border-right-color: #18241d;
-}
-
-.shell .mixer-view.mixer-console .strip:has(.mix-more[open]) .mix-panel {
-  border-bottom-left-radius: 0;
-  border-top-left-radius: 12px;
-}

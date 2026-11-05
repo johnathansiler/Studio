@@ -349,7 +349,14 @@ function insertButton(store: ProjectStore, trackId: string | 'master', plugin: {
       className={plugin.enabled ? 'on' : ''}
       title={descriptor(plugin.pluginId)?.name ?? plugin.pluginId}
       aria-label={`${descriptor(plugin.pluginId)?.name ?? plugin.pluginId}. Open this insert.`}
-      onClick={() => store.focusPlugin(trackId, plugin.id)}
+      onPointerDown={(event) => {
+        event.stopPropagation()
+      }}
+      onClick={(event) => {
+        event?.stopPropagation()
+        event?.preventDefault()
+        store.focusPlugin(trackId, plugin.id)
+      }}
       onDoubleClick={() => store.updatePlugin(trackId, plugin.id, { enabled: !plugin.enabled })}
     >
       {insertLabel(plugin.pluginId, plugin)}
@@ -373,7 +380,7 @@ function AddScalerInstrument({ store, trackId }: { store: ProjectStore; trackId:
       >
         Add instrument
       </button>
-      <AnchoredMenu fill open={open} onClose={() => setOpen(false)} label="Add instrument" triggerRef={button} prefer="down">
+      <AnchoredMenu className="insert-menu" open={open} onClose={() => setOpen(false)} label="Add instrument" triggerRef={button} prefer="down">
         <button type="button" onClick={() => { store.addScalerSound(trackId, 'synth'); setOpen(false) }}>Synth</button>
         <button type="button" onClick={() => { store.addScalerSound(trackId, 'sampler'); setOpen(false) }}>Sampler</button>
         <button type="button" onClick={() => { store.addScalerSound(trackId, 'pads'); setOpen(false) }}>Beat Machine</button>
@@ -495,27 +502,35 @@ export function addInsert(store: ProjectStore, trackId: string | 'master', value
 
 function PluginPicker({ store, trackId, roomy }: { store: ProjectStore; trackId: string | 'master'; roomy?: boolean }) {
   const [open, setOpen] = useState(false)
+  const button = useRef<HTMLButtonElement>(null)
   const choices = insertMenuChoices(store, trackId)
   return (
-    <div className={`plugin-picker${open ? ' open' : ''}`}>
+    <>
       <button
+        ref={button}
         type="button"
         className="plugin-pick insert-add"
         aria-expanded={open}
         aria-label="Add insert"
         title="Add an instrument or effect."
-        onClick={() => setOpen((value) => !value)}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation()
+          setOpen((value) => !value)
+        }}
       >
         {open ? 'Close' : roomy ? 'Add effect' : 'Add'}
       </button>
       {open && (
-        <div className="plugin-picks" role="group" aria-label="Instruments and effects">
+        <AnchoredMenu className="insert-menu" open={open} onClose={() => setOpen(false)} label="Add effect" triggerRef={button} prefer="down">
           {choices.map((plugin) => (
             <button
               key={plugin.id}
               type="button"
               className="plugin-pick"
-              onClick={() => {
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation()
                 addInsert(store, trackId, plugin.id)
                 setOpen(false)
               }}
@@ -523,9 +538,9 @@ function PluginPicker({ store, trackId, roomy }: { store: ProjectStore; trackId:
               {plugin.name}
             </button>
           ))}
-        </div>
+        </AnchoredMenu>
       )}
-    </div>
+    </>
   )
 }
 

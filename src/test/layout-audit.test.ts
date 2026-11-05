@@ -122,7 +122,7 @@ describe('layout audit across the five viewports', () => {
         const mix = await auditControls(page, '.topbar, .transport, .strip-foot')
         for (const hit of mix) problems.push(`${viewport.name} mix ${hit.label} ${hit.width}x${hit.height} overflow=${hit.overflow} covered=${hit.covered} ${hit.cover}`)
 
-        const more = page.locator('.mixer > .strip summary.more-open').first()
+        const more = page.locator('.mix-toolbar summary').first()
         if (await more.count()) {
           await more.click()
           await page.locator('.mix-panel').first().waitFor()
@@ -130,10 +130,9 @@ describe('layout audit across the five viewports', () => {
             const node = document.querySelector('.mix-panel') as HTMLElement
             const box = node.getBoundingClientRect()
             const tabs = document.querySelector('.views')!.getBoundingClientRect()
-            const sample = document.elementFromPoint(window.innerWidth / 2, tabs.bottom + 24)
-            const add = document.querySelector('.mixer .add-track-btn')
-            const addBox = add?.getBoundingClientRect()
-            const addHit = addBox ? document.elementFromPoint(addBox.left + addBox.width / 2, addBox.top + addBox.height / 2) : null
+            const sample = document.elementFromPoint(box.left + box.width / 2, box.top + Math.min(24, box.height / 2))
+            const phase = [...node.querySelectorAll('button')].find((button) => (button.textContent || '').includes('Phase'))
+            const phaseBox = phase?.getBoundingClientRect()
             return {
               left: box.left,
               right: box.right,
@@ -143,14 +142,14 @@ describe('layout audit across the five viewports', () => {
               vw: window.innerWidth,
               vh: window.innerHeight,
               inside: !!sample && (sample === node || node.contains(sample)),
-              addCovered: !!addHit && (addHit === node || node.contains(addHit)),
+              phaseWidth: phaseBox?.width ?? 0,
             }
           })
-          if (panel.left > 1 || panel.right < panel.vw - 1 || panel.bottom < panel.vh - 1) {
-            problems.push(`${viewport.name} mix more does not fill the screen`)
-          }
+          if (panel.right - panel.left > panel.vw - 16) problems.push(`${viewport.name} mix more stretches full width`)
+          if (panel.bottom - panel.top > panel.vh * 0.7) problems.push(`${viewport.name} mix more covers the mixer`)
           if (panel.top < panel.tabBottom - 2) problems.push(`${viewport.name} mix more covers the tabs`)
           if (!panel.inside) problems.push(`${viewport.name} mix more is not the top layer`)
+          if (panel.phaseWidth > 0 && panel.phaseWidth > panel.right - panel.left - 24) problems.push(`${viewport.name} mix pill stretches`)
           await page.screenshot({ path: `${artifacts}/layout-after-mix-more-${viewport.name}.png` })
           await page.keyboard.press('Escape').catch(() => undefined)
         }

@@ -39,14 +39,17 @@ describe('half-width mixer strips', () => {
       await page.setContent(`<!doctype html><html><head><style>${css}</style></head><body><div class="shell">${html}</div></body></html>`, { waitUntil: 'load' })
       const box = await page.evaluate(() => {
         const strip = document.querySelector('.strip') as HTMLElement
-        const full = strip.querySelector('.mode-full') as HTMLElement
-        const short = strip.querySelector('.mode-short') as HTMLElement
-        const shorts = [...strip.querySelectorAll('.mode-short')].map((node) => node.textContent)
+        const details = document.querySelector('details.mix-more') as HTMLDetailsElement
+        details.open = true
+        const panel = document.querySelector('.mix-panel') as HTMLElement
+        const full = panel.querySelector('.mode-full') as HTMLElement
+        const short = panel.querySelector('.mode-short') as HTMLElement
+        const shorts = [...panel.querySelectorAll('.mode-short')].map((node) => node.textContent)
         const name = strip.querySelector('h3') as HTMLElement
         const fader = strip.querySelector('.fader-row .touch-slider') as HTMLElement
-        const pan = strip.querySelector('.pan-knob') as HTMLElement
+        const pan = panel.querySelector('.pan-knob') as HTMLElement
         const meter = strip.querySelector('.meter') as HTMLElement
-        const buttons = [...strip.querySelectorAll('.mini')].map((node) => (node.textContent || '').replace(/\s+/g, ''))
+        const buttons = [...panel.querySelectorAll('.mini'), ...strip.querySelectorAll('.mini')].map((node) => (node.textContent || '').replace(/\s+/g, ''))
         const stripBox = strip.getBoundingClientRect()
         const nameBox = name.getBoundingClientRect()
         const faderBox = fader.getBoundingClientRect()

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { STRIP_BOUNDS, displayedStrip, isNarrowStrip } from '../model/layoutWidth'
 import { gainToDb } from '../model/time'
@@ -7,7 +7,6 @@ import type { ProjectStore } from '../state/store'
 import type { Track } from '../model/types'
 import { AddTrackButton } from './AddTrack'
 import { AutoFader, ChannelAutomation, MixFlags, PanKnob } from './AutomationLane'
-import { showHint } from './Hint'
 import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
 import { InsertList } from './PluginSheet'
@@ -52,6 +51,17 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
   const flow = buses.length
     ? 'Tracks feed buses. Buses feed the master.'
     : 'Tracks feed the master. A bus sums tracks before it.'
+  const [masterOn, setMasterOn] = useState(false)
+  const focus: string | 'master' = masterOn ? 'master' : (store.selectedTrackId ?? channels[0]?.id ?? 'master')
+  const detailsRef = useRef<HTMLDetailsElement>(null)
+  const openDetail = (next: string | 'master') => {
+    if (next === 'master') setMasterOn(true)
+    else {
+      setMasterOn(false)
+      store.selectTrack(next)
+    }
+    if (detailsRef.current) detailsRef.current.open = true
+  }
   return (
     <div
       className="mixer-view mixer-console"
@@ -64,6 +74,7 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
     >
       <WidthBar axis="strip" value={layout.strip} onChange={setStrip} onReset={resetStrip} />
       <p className="mix-flow" aria-label={`Signal flow. ${flow}`}>{flow}</p>
+      <MixToolbar store={store} engine={engine} focus={focus} detailsRef={detailsRef} onTune={onTune} />
       <div className="mixer-bay">
         <div className="mixer">
           {channels.map((track) => (
@@ -73,9 +84,10 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
               engine={engine}
               trackId={track.id}
               flow="track"
-              selected={store.selectedTrackId === track.id}
-              onTune={onTune}
+              selected={focus === track.id}
               onOpenKeyboard={onOpenKeyboard}
+              onSelect={() => { setMasterOn(false); store.selectTrack(track.id) }}
+              onOpen={() => openDetail(track.id)}
             />
           ))}
           <AddTrackButton store={store} />
@@ -86,14 +98,15 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
               engine={engine}
               trackId={track.id}
               flow="bus"
-              selected={store.selectedTrackId === track.id}
-              onTune={onTune}
+              selected={focus === track.id}
               onOpenKeyboard={onOpenKeyboard}
+              onSelect={() => { setMasterOn(false); store.selectTrack(track.id) }}
+              onOpen={() => openDetail(track.id)}
             />
           ))}
         </div>
         <div className="mix-divider" aria-hidden="true" />
-        <MasterStrip store={store} engine={engine} />
+        <MasterStrip store={store} engine={engine} selected={focus === 'master'} onSelect={() => setMasterOn(true)} onOpen={() => openDetail('master')} />
       </div>
     </div>
   )
@@ -113,16 +126,18 @@ function ChannelStrip({
   trackId,
   flow,
   selected,
-  onTune,
   onOpenKeyboard,
+  onSelect,
+  onOpen,
 }: {
   store: ProjectStore
   engine: AudioEngine
   trackId: string
   flow: 'track' | 'bus'
   selected: boolean
-  onTune?: (trackId: string) => void
   onOpenKeyboard?: (trackId: string) => void
+  onSelect: () => void
+  onOpen: () => void
 }) {
   const track = store.track(trackId)
   if (!track) return null
@@ -138,7 +153,7 @@ function ChannelStrip({
       <div className="strip-col">
         <div className="strip-head">
           <p className="strip-kind">{kind}</p>
-          <StripName name={track.name} color={track.color} />
+          <StripName name={track.name} color={track.color} onSelect={onSelect} onOpen={onOpen} />
           <p className="strip-path" title={`${kind} ${track.name} feeds ${output}.`}>To {output}</p>
           <TrackPresence trackId={track.id} />
         </div>
@@ -146,174 +161,218 @@ function ChannelStrip({
         <div className="strip-foot">
           <MixFlags store={store} trackId={track.id} part="mute" />
           <MixFlags store={store} trackId={track.id} part="solo" />
-          <ChannelMore store={store} engine={engine} track={track} output={output} onTune={onTune} />
         </div>
       </div>
     </div>
   )
 }
 
-function MasterStrip({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
+function MasterStrip({ store, engine, selected, onSelect, onOpen }: { store: ProjectStore; engine: AudioEngine; selected: boolean; onSelect: () => void; onOpen: () => void }) {
   return (
-    <div className="strip master" data-flow="master">
+    <div className={`strip master${selected ? ' is-selected' : ''}`} data-flow="master">
       <div className="strip-col">
         <div className="strip-head">
           <p className="strip-kind">Master</p>
-          <StripName name="Master" />
+          <StripName name="Master" onSelect={onSelect} onOpen={onOpen} />
           <p className="strip-path" title="Tracks and buses arrive here, then leave to the speakers.">Output</p>
         </div>
         <MasterLane store={store} engine={engine} value={store.project.masterVolume} vertical />
         <div className="strip-foot">
           <div className="strip-note" title="Tracks and buses arrive on the master."><span>Arrives</span></div>
           <div className="strip-note" title="The mix leaves through the speakers."><span>Leaves</span></div>
-          <MasterMore store={store} engine={engine} />
         </div>
       </div>
     </div>
   )
 }
 
-function ChannelMore({
+type MixSection = 'channel' | 'inserts' | 'sends' | 'route'
+
+function MixToolbar({
+  store,
+  engine,
+  focus,
+  detailsRef,
+  onTune,
+}: {
+  store: ProjectStore
+  engine: AudioEngine
+  focus: string | 'master'
+  detailsRef: RefObject<HTMLDetailsElement | null>
+  onTune?: (trackId: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [section, setSection] = useState<MixSection>('channel')
+  const [mastering, setMastering] = useState(false)
+  useMixSheet(open, () => {
+    if (detailsRef.current) detailsRef.current.open = false
+    setOpen(false)
+  })
+  const track = focus === 'master' ? null : store.track(focus)
+  const name = focus === 'master' ? 'Master' : track?.name ?? 'Channel'
+  const sections: { id: MixSection; label: string }[] = focus === 'master'
+    ? [
+        { id: 'channel', label: 'Channel' },
+        { id: 'inserts', label: 'Inserts' },
+      ]
+    : [
+        { id: 'channel', label: 'Channel' },
+        { id: 'inserts', label: 'Inserts' },
+        { id: 'sends', label: 'Sends' },
+        { id: 'route', label: 'Routing' },
+      ]
+  const shown = sections.some((item) => item.id === section) ? section : 'channel'
+  const close = () => {
+    if (detailsRef.current) detailsRef.current.open = false
+  }
+  useLayoutEffect(() => {
+    const root = detailsRef.current
+    if (!open || !root) return
+    const summary = root.querySelector('summary')
+    const panel = root.querySelector('.mix-panel') as HTMLElement | null
+    if (!summary || !panel) return
+    const place = () => {
+      const box = summary.getBoundingClientRect()
+      const tabs = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--view-tabs-bottom')) || 0
+      const maxH = Math.min(420, Math.round(window.innerHeight * 0.52))
+      const width = Math.min(panel.offsetWidth || 300, window.innerWidth - 16)
+      let left = box.left
+      if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 8 - width)
+      let top = box.bottom + 4
+      if (top + 160 > window.innerHeight - 8) top = Math.max(tabs + 4, window.innerHeight - 8 - maxH)
+      panel.style.top = `${Math.max(tabs + 4, top)}px`
+      panel.style.bottom = 'auto'
+      panel.style.left = `${left}px`
+      panel.style.maxHeight = `${maxH}px`
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [open, shown, focus, detailsRef])
+  return (
+    <>
+      <div className="mix-toolbar" role="toolbar" aria-label="Mix">
+        <details
+          ref={detailsRef}
+          className="mix-more"
+          data-mix-more=""
+          onToggle={(event) => setOpen(event.currentTarget.open)}
+        >
+          <summary className="mix-toolbar-more more-open" aria-label={`More. Options for ${name}.`} title={`Options for ${name}.`}>
+            <span>More</span>
+          </summary>
+          <div
+            className="mix-back"
+            onPointerDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              close()
+            }}
+          />
+          <div
+            className="mix-panel"
+            role="dialog"
+            aria-label={`${name} channel`}
+            data-mix-sheet=""
+            data-mix-section={shown}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              const button = (event.target as HTMLElement).closest('button')
+              if (!button?.closest('.inserts')) return
+              if (button.classList.contains('insert-add') || button.classList.contains('plugin-pick')) return
+              close()
+            }}
+          >
+            <header className="mix-sheet-head">
+              <h4>{name}</h4>
+              <button type="button" className="overlay-close" onClick={close}>Close</button>
+            </header>
+            <div className="mix-chips" role="tablist" aria-label="Channel sections">
+              {sections.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={shown === item.id}
+                  className={shown === item.id ? 'on' : ''}
+                  onClick={() => setSection(item.id)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            {shown === 'channel' && track && (
+              <ChannelSection store={store} engine={engine} track={track} onTune={onTune} />
+            )}
+            {shown === 'channel' && focus === 'master' && (
+              <MasterChannel store={store} engine={engine} onMaster={() => { setMastering(true); close() }} />
+            )}
+            {shown === 'inserts' && (
+              <div className="mix-block">
+                <InsertList store={store} trackId={focus === 'master' ? 'master' : focus} roomy />
+              </div>
+            )}
+            {shown === 'sends' && focus !== 'master' && <SendRows store={store} engine={engine} trackId={focus} />}
+            {shown === 'route' && focus !== 'master' && <RoutePicks store={store} trackId={focus} />}
+          </div>
+        </details>
+        <p className="mix-toolbar-name">{name}</p>
+      </div>
+      {mastering && <MasterSheet store={store} engine={engine} onClose={() => setMastering(false)} />}
+    </>
+  )
+}
+
+function ChannelSection({
   store,
   engine,
   track,
-  output,
   onTune,
 }: {
   store: ProjectStore
   engine: AudioEngine
   track: Track
-  output: string
   onTune?: (trackId: string) => void
 }) {
-  const detailsRef = useRef<HTMLDetailsElement>(null)
-  const [open, setOpen] = useState(false)
-  useMixSheet(open, () => {
-    if (detailsRef.current) detailsRef.current.open = false
-    setOpen(false)
-  })
   return (
-    <details
-      ref={detailsRef}
-      className="mix-more"
-      onClick={(event) => event.stopPropagation()}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary className="more-open" aria-label={`More. Inserts, sends, pan, phase, and routing for ${track.name}.`} title="Inserts, sends, pan, phase, and routing.">
-        <span className="more-closed">More</span>
-        <span className="more-open-word">Close</span>
-      </summary>
-      <div className="mix-panel" aria-label={`${track.name} channel`}>
-        <button type="button" className="overlay-close" onClick={() => { if (detailsRef.current) detailsRef.current.open = false }}>Close</button>
-        <section className="mix-block">
-          <h4>Automation</h4>
-          <p>Off ignores lanes. Read plays them. Touch and Latch write while you move a control.</p>
-          <ChannelAutomation store={store} trackId={track.id} />
-        </section>
-        <section className="mix-block">
-          <h4>Pan</h4>
-          <p>Place this channel left or right.</p>
-          <PanKnob store={store} engine={engine} label={`${track.name} pan. Left or right.`} value={track.pan} spec={{ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }} />
-        </section>
-        <section className="mix-block">
-          <h4>Phase</h4>
-          <p>Sweep this channel with a phase effect.</p>
-          <PhaseButton store={store} trackId={track.id} name={track.name} />
-        </section>
-        <section className="mix-block">
-          <h4>Record</h4>
-          <p>Arm records on this channel. Safe stays audible when other channels are soloed.</p>
-          <div className="mix-pair">
-            <MixFlags store={store} trackId={track.id} part="arm" />
-            <MixFlags store={store} trackId={track.id} part="safe" />
-          </div>
-          {track.type === 'audio' && onTune && <TuneButton name={track.name} onTune={() => onTune(track.id)} />}
-        </section>
-        <section className="mix-block">
-          <h4>Inserts</h4>
-          <p>Instruments and effects on this channel, in order.</p>
-          <FxButton name={track.name} />
-          <InsertList store={store} trackId={track.id} roomy />
-        </section>
-        <section className="mix-block">
-          <h4>Sends</h4>
-          <p>A copy of this channel, sent to a bus.</p>
-          <SendRows store={store} engine={engine} trackId={track.id} />
-        </section>
-        <section className="mix-block">
-          <h4>Routing</h4>
-          <p>Output {output}. Choose where this channel goes next, and which channels move together.</p>
-          <RoutePicks store={store} trackId={track.id} />
-        </section>
+    <div className="mix-block">
+      <div className="mix-row">
+        <span className="mix-label">Automation</span>
+        <ChannelAutomation store={store} trackId={track.id} />
       </div>
-    </details>
+      <div className="mix-row">
+        <span className="mix-label">Pan</span>
+        <PanKnob store={store} engine={engine} label={`${track.name} pan. Left or right.`} value={track.pan} spec={{ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }} />
+      </div>
+      <div className="mix-pills">
+        <PhaseButton store={store} trackId={track.id} name={track.name} />
+        <MixFlags store={store} trackId={track.id} part="arm" />
+        <MixFlags store={store} trackId={track.id} part="safe" />
+        {track.type === 'audio' && onTune && <TuneButton name={track.name} onTune={() => onTune(track.id)} />}
+      </div>
+    </div>
   )
 }
 
-function MasterMore({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
-  const [mastering, setMastering] = useState(false)
-  const detailsRef = useRef<HTMLDetailsElement>(null)
-  const [open, setOpen] = useState(false)
-  useMixSheet(open, () => {
-    if (detailsRef.current) detailsRef.current.open = false
-    setOpen(false)
-  })
+function MasterChannel({ store, engine, onMaster }: { store: ProjectStore; engine: AudioEngine; onMaster: () => void }) {
   return (
-    <details
-      ref={detailsRef}
-      className="mix-more"
-      onClick={(event) => event.stopPropagation()}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary className="more-open" aria-label="More. Levels, inserts, and mastering for the master." title="Levels, inserts, and mastering.">
-        <span className="more-closed">More</span>
-        <span className="more-open-word">Close</span>
-      </summary>
-      <div className="mix-panel" aria-label="Master channel">
-        <button type="button" className="overlay-close" onClick={() => { if (detailsRef.current) detailsRef.current.open = false }}>Close</button>
-        <section className="mix-block">
-          <h4>Automation</h4>
-          <p>Off ignores lanes. Read plays them. Touch and Latch write while you move a control.</p>
-          <ChannelAutomation store={store} trackId="master" />
-        </section>
-        <section className="mix-block">
-          <h4>Levels</h4>
-          <p>Loudness and the highest peak on the master.</p>
-          <LevelReadout engine={engine} />
-        </section>
-        <section className="mix-block">
-          <h4>Inserts</h4>
-          <p>Effects on the master bus, in order.</p>
-          <FxButton name="Master" master />
-          <InsertList store={store} trackId="master" roomy />
-        </section>
-        <section className="mix-block">
-          <h4>Mastering</h4>
-          <p>Loudness, tone, and the limiter.</p>
-          <button
-            id="master-open"
-            type="button"
-            className="text-btn master-open"
-            aria-expanded={mastering}
-            aria-label="Master. Loudness, tone, and the limiter."
-            title="Loudness, tone, and the limiter."
-            onClick={() => setMastering((open) => !open)}
-          >
-            <span className="master-full">{mastering ? 'Close' : 'Master'}</span>
-          </button>
-          {mastering && <MasterSheet store={store} engine={engine} onClose={() => setMastering(false)} />}
-        </section>
+    <div className="mix-block">
+      <div className="mix-row">
+        <span className="mix-label">Automation</span>
+        <ChannelAutomation store={store} trackId="master" />
       </div>
-    </details>
-  )
-}
-
-function FxButton({ name, master = false }: { name: string; master?: boolean }) {
-  const label = master ? 'Master effects. Inserts on the master bus.' : `${name} effects. Inserts and sends.`
-  return (
-    <button type="button" className="mini fx-open" aria-label={label} title={master ? 'Master inserts.' : 'Inserts and sends.'}>
-      <span className="mini-word">Inserts</span>
-    </button>
+      <LevelReadout engine={engine} />
+      <button
+        id="master-open"
+        type="button"
+        className="btn-secondary master-open"
+        aria-label="Master. Loudness, tone, and the limiter."
+        title="Loudness, tone, and the limiter."
+        onClick={onMaster}
+      >
+        Master
+      </button>
+    </div>
   )
 }
 
@@ -436,7 +495,6 @@ function SendRows({ store, engine, trackId }: { store: ProjectStore; engine: Aud
         return (
           <div className="send-row" key={send.id}>
             <span>{busName}</span>
-            <small>{send.preFader ? 'Before the fader.' : 'After the fader.'}</small>
             <TouchSlider
               label={`${busName} send level. How much of this channel goes to the bus.`}
               title="Send level. Latch and touch write this while playing."
@@ -475,13 +533,15 @@ function SendRows({ store, engine, trackId }: { store: ProjectStore; engine: Aud
           </div>
         )
       })}
-      {open.map((bus) => (
-        <button key={bus.id} type="button" className="mini send-add" aria-label={`Send. Add a send to ${bus.name}.`} title={`Add a send to ${bus.name}.`} onClick={() => store.addSend(trackId, bus.id)}>
-          <span className="mini-word">Send</span>
-          <small>Add a send to {bus.name}.</small>
-        </button>
-      ))}
-      {buses.length === 0 && <p className="mix-empty">No bus yet. Add a bus, then send this channel to it.</p>}
+      {open.length > 0 && (
+        <MixSelect
+          label="Add send"
+          value=""
+          options={[{ value: '', label: 'Choose' }, ...open.map((bus) => ({ value: bus.id, label: bus.name }))]}
+          onChange={(next) => { if (next) store.addSend(trackId, next) }}
+        />
+      )}
+      {buses.length === 0 && <p className="mix-empty">No bus yet.</p>}
     </div>
   )
 }
@@ -491,16 +551,13 @@ function RoutePicks({ store, trackId }: { store: ProjectStore; trackId: string }
   if (!track) return null
   const targets = store.project.tracks.filter((item) => (item.type === 'bus' || item.type === 'group') && item.id !== track.id)
   const groups = targets.filter((item) => item.type === 'group')
-  const output = !track.output ? (track.input.startsWith('remote:') ? 'Cue' : 'Master') : targets.find((item) => item.id === track.output)?.name ?? 'Master'
-  const groupLabel = groups.find((item) => item.id === track.groupId)?.name ?? 'No group'
   const links = mixGroupsOf(store.project)
   const linkId = trackGroupId(store.project, trackId) ?? ''
   const link = links.find((item) => item.id === linkId)
   return (
     <div className="route-fields">
-      <InlinePick
+      <MixSelect
         label="Output"
-        hint="Where this channel goes next."
         value={track.output ?? ''}
         options={[
           { value: '', label: track.input.startsWith('remote:') ? 'Cue' : 'Master' },
@@ -508,18 +565,14 @@ function RoutePicks({ store, trackId }: { store: ProjectStore; trackId: string }
         ]}
         onChange={(next) => store.updateTrack(track.id, { output: next || null })}
       />
-      <p className="mix-current">Now {output}.</p>
-      <InlinePick
+      <MixSelect
         label="Group"
-        hint="A folder that sums this channel."
         value={track.groupId ?? ''}
         options={[{ value: '', label: 'No group' }, ...groups.map((item) => ({ value: item.id, label: item.name }))]}
         onChange={(next) => store.updateTrack(track.id, { groupId: next || null })}
       />
-      <p className="mix-current">Now {groupLabel}.</p>
-      <InlinePick
+      <MixSelect
         label="Link"
-        hint="Channels that move together."
         value={linkId}
         options={[
           { value: '', label: 'No link' },
@@ -548,43 +601,47 @@ function Flag({ store, groupId, on, flag, label, title }: { store: ProjectStore;
   )
 }
 
-function InlinePick({
+function MixSelect({
   label,
-  hint,
   value,
   options,
   onChange,
 }: {
   label: string
-  hint: string
   value: string
   options: { value: string; label: string }[]
   onChange: (value: string) => void
 }) {
   const [open, setOpen] = useState(false)
-  const current = options.find((item) => item.value === value)?.label ?? value
+  const [box, setBox] = useState<{ top: number; left: number } | null>(null)
+  const current = options.find((item) => item.value === value)?.label ?? 'Choose'
   return (
-    <div className={`inline-pick${open ? ' open' : ''}`}>
+    <div className={`mix-select${open ? ' open' : ''}`}>
       <button
         type="button"
         aria-expanded={open}
-        aria-label={`${label}. ${current}. ${hint}`}
-        title={hint}
+        aria-haspopup="listbox"
+        aria-label={`${label}. ${current}.`}
+        title={label}
+        onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation()
+          const rect = event.currentTarget.getBoundingClientRect()
+          setBox({ top: rect.bottom + 4, left: rect.left })
           setOpen((shown) => !shown)
         }}
       >
         <span>{label}</span>
-        <small>{current}. {hint}</small>
+        <small>{current}</small>
       </button>
-      {open && (
-        <div role="group" aria-label={label}>
+      {open && box && (
+        <div className="mix-select-menu" role="listbox" aria-label={label} style={{ top: box.top, left: box.left }} onPointerDown={(event) => event.stopPropagation()}>
           {options.map((item) => (
             <button
               key={item.value || 'none'}
               type="button"
-              aria-pressed={item.value === value}
+              role="option"
+              aria-selected={item.value === value}
               onClick={(event) => {
                 event.stopPropagation()
                 onChange(item.value)
@@ -600,12 +657,16 @@ function InlinePick({
   )
 }
 
-function StripName({ name, color }: { name: string; color?: string }) {
+function StripName({ name, color, onSelect, onOpen }: { name: string; color?: string; onSelect: () => void; onOpen: () => void }) {
   const timer = useRef(0)
-  const hold = (event: ReactPointerEvent<HTMLHeadingElement>) => {
-    const point = { x: event.clientX, y: event.clientY }
+  const held = useRef(false)
+  const hold = () => {
+    held.current = false
     window.clearTimeout(timer.current)
-    timer.current = window.setTimeout(() => showHint(name, point.x, point.y), 520)
+    timer.current = window.setTimeout(() => {
+      held.current = true
+      onOpen()
+    }, 480)
   }
   const cancel = () => window.clearTimeout(timer.current)
   return (
@@ -613,10 +674,27 @@ function StripName({ name, color }: { name: string; color?: string }) {
       className="strip-name"
       style={color ? { color } : undefined}
       title={name}
-      onPointerDown={hold}
-      onPointerUp={cancel}
+      onPointerDown={(event) => {
+        event.stopPropagation()
+        if (event.button !== 0 && event.pointerType !== 'touch') return
+        hold()
+      }}
+      onPointerUp={(event) => {
+        event.stopPropagation()
+        cancel()
+      }}
       onPointerCancel={cancel}
-      onPointerLeave={cancel}
+      onPointerLeave={(event) => {
+        if (event.pointerType !== 'touch') cancel()
+      }}
+      onClick={(event) => {
+        event.stopPropagation()
+        if (held.current) {
+          held.current = false
+          return
+        }
+        onSelect()
+      }}
     >
       <span className="strip-title">{name}</span>
     </h3>
@@ -649,10 +727,10 @@ function LevelReadout({ engine }: { engine: AudioEngine }) {
   const text = useMasterText(engine)
   return (
     <div className="level-read" id="master-meters" aria-label="Master levels">
-      <p><span>Short-term</span> <b>{text.lufs}</b> <small>Loudness right now, in LUFS.</small></p>
-      <p><span>Integrated</span> <b>{text.integrated}</b> <small>Loudness of the whole play.</small></p>
-      <p><span>Peak</span> <b>{text.peak} dB</b> <small>Highest true peak.</small></p>
-      <p><span>Processor</span> <b>{text.cpu}%</b> <small>How hard the mix is working.</small></p>
+      <p title="Loudness right now, in LUFS."><span>Short-term</span> <b>{text.lufs}</b></p>
+      <p title="Loudness of the whole play."><span>Integrated</span> <b>{text.integrated}</b></p>
+      <p title="Highest true peak."><span>Peak</span> <b>{text.peak} dB</b></p>
+      <p title="How hard the mix is working."><span>Processor</span> <b>{text.cpu}%</b></p>
     </div>
   )
 }
