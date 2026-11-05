@@ -418,6 +418,12 @@
   grid-template-columns: 1fr 1fr;
   gap: 4px;
 }
+.shell .mixer-view.mixer-console .mix-panel .mix-pair .mini,
+.shell .mixer-view.mixer-console .mix-panel .mix-pair button {
+  width: 100%;
+  min-width: 40px;
+  min-height: 40px;
+}
 
 .shell .mixer-view.mixer-console .mix-panel .pan-knob-wrap,
 .shell .mixer-view.mixer-console .mix-panel .pan-knob {
@@ -481,6 +487,11 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
+}
+.shell .mixer-view.mixer-console .mix-panel .link-row button {
+  width: 100%;
+  min-width: 40px;
+  min-height: 40px;
 }
 
 .shell .mixer-view.mixer-console .send-row {

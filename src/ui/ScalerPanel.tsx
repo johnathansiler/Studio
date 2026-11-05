@@ -699,11 +699,7 @@ const scaleList = allScales()
             if (!next) return
             patch({ voiceGroup: next.id, ...(next.voicing ? { voicing: next.voicing } : {}), voiceLead: next.id === 'dynamic' ? true : state.voiceLead })
           }} />
-        </div>
-        <div className="pattern-grid" role="group" aria-label="Performances">
-          {['Arpeggio', 'Strum', 'Rhythm', 'Bassline', 'Melody', 'Comping'].map((item) => (
-            <button key={item} type="button" className={category === item ? 'on' : ''} onClick={() => setCategory(item)}>{item}</button>
-          ))}
+          <ChoiceCard label="Pattern" hint="Arpeggio, strum, rhythm, bass, melody, or comping." value={category} options={['Arpeggio', 'Strum', 'Rhythm', 'Bassline', 'Melody', 'Comping'].map((item) => ({ value: item, label: item }))} onChange={setCategory} />
         </div>
         </div>
         <div className="choice-grid" hidden={opt !== 'timing'}>
@@ -718,14 +714,6 @@ const scaleList = allScales()
             patch({ sound: id as ScalerSound })
             if (id === 'library' || id === 'forward') setOptions(true)
           }} />
-          <div className="scaler-sounds" role="group" aria-label="Sound. Which instrument plays the chords.">
-            {SOUNDS.map((item) => (
-              <button key={item.id} type="button" className={state.sound === item.id ? 'on' : ''} aria-pressed={state.sound === item.id} title={item.hint} onClick={() => {
-                patch({ sound: item.id })
-                if (item.id === 'library' || item.id === 'forward') setOptions(true)
-              }}>{item.label}</button>
-            ))}
-          </div>
           {state.sound === 'forward' && (
             <div className="scaler-forward">
               {store.project.tracks.filter((item) => item.type === 'midi' && item.id !== trackId).map((item) => (
@@ -765,20 +753,12 @@ const scaleList = allScales()
           <button type="button" className={family === 'western' ? 'on' : ''} title="Western scales in the library." onClick={() => setFamily(family === 'western' ? 'all' : 'western')}>User</button>
           <span className={`mood-pill ${laneMood.feel.toLowerCase()}`} title="Whether this progression feels bright and lifting or dark and tense.">{laneMood.feel}</span>
         </div>
-        <div className="scaler-families" role="group" aria-label="Genres" hidden={opt !== 'songs'}>
-          <button type="button" className={genre === 'all' ? 'on' : ''} onClick={() => { setGenre('all'); setSong(0) }}>All genres</button>
-          {GENRE_INFO.map((item) => (
-            <button key={item.id} type="button" className={genre === item.id ? 'on' : ''} onClick={() => { setGenre(item.id); setSong(0) }}>{item.name}</button>
-          ))}
-        </div>
-        <div className="scaler-pads" role="group" aria-label="Song progressions" hidden={opt !== 'songs'}>
-          {songLines.filter((item) => !songQuery || `${item.name} ${item.description}`.toLowerCase().includes(songQuery.toLowerCase())).slice(0, 8).map((item) => (
-            <button key={item.id} type="button" className="scaler-card" title={item.description} onClick={() => loadProgression(item)}>
-              <i className="bar" data-mood={moodOf(item.name, scaleId).word} />
-              <b>{item.name}</b>
-              <span>{item.genre}</span>
-            </button>
-          ))}
+        <div className="choice-grid" hidden={opt !== 'songs'}>
+          <ChoiceCard label="Genre" hint="Filter progressions by genre." value={genre} options={[{ value: 'all', label: 'All genres' }, ...GENRE_INFO.map((item) => ({ value: item.id, label: item.name }))]} onChange={(id) => { setGenre(id); setSong(0) }} />
+          <ChoiceCard label="Progression" hint="Load a progression from this list." value={songLines.find((item) => !songQuery || `${item.name} ${item.description}`.toLowerCase().includes(songQuery.toLowerCase()))?.id ?? ''} options={songLines.filter((item) => !songQuery || `${item.name} ${item.description}`.toLowerCase().includes(songQuery.toLowerCase())).slice(0, 12).map((item) => ({ value: item.id, label: item.name }))} onChange={(id) => {
+            const item = songLines.find((row) => row.id === id)
+            if (item) loadProgression(item)
+          }} />
         </div>
 
         <div className="scaler-transport" hidden={opt !== 'songs'}>

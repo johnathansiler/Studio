@@ -106,25 +106,30 @@
 
 .choice-grid,
 .io-grid,
-.pattern-grid,
 .option-stack {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: flex-start;
   width: 100%;
   min-width: 0;
-  gap: 6px;
+  gap: 8px;
   align-content: start;
 }
-.choice-grid { grid-template-columns: 1fr 1fr; }
-.io-grid { grid-template-columns: 1fr 1fr; }
-.pattern-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.option-stack { grid-template-columns: 1fr; }
+.io-grid { flex-wrap: nowrap; gap: 6px; align-items: center; }
+.option-stack { flex-direction: column; align-items: flex-start; gap: 6px; }
+.option-stack > .choice-grid,
+.option-stack > .io-grid,
+.option-stack > .scaler-readout { width: 100%; }
 .choice-card {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
   gap: 2px;
+  flex: 0 1 auto;
+  width: max-content;
+  max-width: calc(50% - 4px);
   min-width: 0;
-  width: 100%;
 }
 .choice-card > span {
   color: #8ea0b4;
@@ -134,16 +139,28 @@
   line-height: 1.1;
   text-transform: uppercase;
 }
-.choice-card select,
-.io-grid button,
-.pattern-grid button,
-.choice-wide {
+.choice-card select {
   width: 100%;
-  min-width: 0;
+  min-width: 7.5em;
+  max-width: 100%;
   min-height: 40px;
   height: 40px;
 }
-.choice-span { grid-column: 1 / -1; }
+.io-grid button,
+.choice-wide {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 100%;
+  min-width: 40px;
+  min-height: 40px;
+  height: 40px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+.io-grid button { font-size: 12px; padding: 0 8px; }
+@media (min-width: 880px) {
+  .choice-card { max-width: 220px; }
+}
 
 .plugin-controls label,
 .plugin-controls .plugin-control {
