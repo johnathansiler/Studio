@@ -4,6 +4,7 @@ import type { PluginInstance } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { addInsert, insertLabel, insertMenuChoices } from './PluginSheet'
 import './pluginsDrawer.css'
+import './pluginPages.css'
 
 /** One line under each plugin in the add list. */
 const NOTES: Record<string, string> = {
@@ -92,13 +93,15 @@ export function PluginsDrawer({
   useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
   const trackId = store.selectedTrackId
   const [menu, setMenu] = useState(menuOpen)
+  const [groupId, setGroupId] = useState('instruments')
+  const [moreAt, setMoreAt] = useState(0)
   const previous = useRef(trackId)
   useEffect(() => {
     if (previous.current === trackId) return
     previous.current = trackId
     setMenu(false)
   }, [trackId])
-  return <PluginsDrawerView store={store} place={place} trackId={trackId} menuOpen={menu} onMenu={setMenu} onClose={onClose} />
+  return <PluginsDrawerView store={store} place={place} trackId={trackId} menuOpen={menu} onMenu={setMenu} onClose={onClose} groupId={groupId} onGroup={setGroupId} moreAt={moreAt} onMore={setMoreAt} />
 }
 
 export function PluginsDrawerView({
@@ -108,6 +111,10 @@ export function PluginsDrawerView({
   menuOpen,
   onMenu,
   onClose,
+  groupId,
+  onGroup,
+  moreAt = 0,
+  onMore,
 }: {
   store: ProjectStore
   place: 'bottom' | 'side'
@@ -115,15 +122,24 @@ export function PluginsDrawerView({
   menuOpen: boolean
   onMenu: (open: boolean) => void
   onClose?: () => void
+  groupId?: string
+  onGroup?: (id: string) => void
+  moreAt?: number
+  onMore?: (index: number) => void
 }) {
   const track = trackId ? store.track(trackId) : null
   const plugins = track?.plugins ?? []
   const bands = chainBands(plugins)
   const choices = track ? insertMenuChoices(store, track.id) : []
   const groups = groupInsertChoices(choices)
+  const activeGroup = groupId && groups.some((group) => group.id === groupId) ? groupId : groups[0]?.id
+  const chooseGroup = onGroup ?? (() => undefined)
+  const chooseMore = onMore ?? (() => undefined)
   return (
     <section
       className="plugins-drawer"
+      data-plugin-root=""
+      data-plugin-pages=""
       id="arrange-plugins"
       data-place={place}
       data-plugins-panel="open"
@@ -152,14 +168,40 @@ export function PluginsDrawerView({
         )}
         {track && menuOpen && (
           <div className="plugins-menu" id="arrange-plugin-menu" role="group" aria-label="Add a plugin">
+            {groups.length <= 4 && (
+            <div className="plugin-page-tabs" role="tablist" aria-label="Plugin groups">
+              {groups.map((group) => (
+                <button key={group.id} type="button" role="tab" data-plugin-tab={group.id} aria-selected={group.id === activeGroup} className={group.id === activeGroup ? 'on' : ''} onClick={() => chooseGroup(group.id)}>{group.title}</button>
+              ))}
+            </div>
+            )}
+            {groups.length > 4 && (
+              <label className="plugin-page-menu">
+                <span>Group</span>
+                <select aria-label="Plugin group" value={activeGroup} onChange={(event) => chooseGroup(event.target.value)}>
+                  {groups.map((group) => <option key={group.id} value={group.id}>{group.title}</option>)}
+                </select>
+              </label>
+            )}
             {groups.map((group) => (
-              <section key={group.id} className="plugins-group" data-plugin-group={group.id}>
+              <section key={group.id} className="plugins-group" data-plugin-group={group.id} data-plugin-page={group.id} hidden={group.id !== activeGroup}>
                 <h3>{group.title}</h3>
-                {group.items.map((item) => (
+                {group.id === 'more' && group.items.length > 6 && (
+                  <label className="plugin-page-menu">
+                    <span>More</span>
+                    <select aria-label="More plugins" value={moreAt} onChange={(event) => chooseMore(Number(event.target.value))}>
+                      {Array.from({ length: Math.ceil(group.items.length / 6) }, (_, index) => (
+                        <option key={index} value={index}>{group.items[index * 6]?.name} to {group.items[Math.min(group.items.length - 1, index * 6 + 5)]?.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {group.items.map((item, index) => (
                   <button
                     key={item.id}
                     type="button"
                     className="btn-secondary plugins-choice"
+                    hidden={group.id === 'more' && (index < moreAt * 6 || index >= moreAt * 6 + 6)}
                     data-plugin-choice={item.id}
                     title={pluginNote(item.id) || item.name}
                     onClick={() => {

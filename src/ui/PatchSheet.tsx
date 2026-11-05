@@ -25,6 +25,7 @@ import {
   type PatchLayer,
 } from '../instruments/patch'
 import { uid } from '../model/types'
+import './pluginPages.css'
 import type { ProjectStore } from '../state/store'
 
 const TABS = [
@@ -96,7 +97,7 @@ export function PatchSheet({
     store.updateOmni(trackId, (current) => editLayer(current, id, partial), draft)
   }
   return (
-    <section className="patch-sheet" data-screen-overlay="" role="dialog" aria-label="Layered patch">
+    <section className="patch-sheet" data-screen-overlay="" data-plugin-root="" data-plugin-pages="" role="dialog" aria-label="Layered patch">
       <header>
         <input
           aria-label="Patch name"
@@ -130,7 +131,7 @@ export function PatchSheet({
       </header>
       <div className="patch-tabs" role="tablist">
         {TABS.map(([id, label, help]) => (
-          <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => { setTab(id); show(help) }}>{label}</button>
+          <button key={id} type="button" role="tab" data-plugin-tab={id} aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => { setTab(id); show(help) }}>{label}</button>
         ))}
       </div>
       <p className="patch-hint">{hint}</p>

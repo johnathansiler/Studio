@@ -20,6 +20,7 @@ import { readIdentity } from '../storage/identity'
 import { onMidiMessage } from '../midi/access'
 import { setPerformanceOwnsMidi } from '../midi/remember'
 import { useFormFactor } from './form'
+import './pluginPages.css'
 import { readKit } from '../presets/apply'
 import { commitPadPreset } from '../presets/project'
 import { AnchoredMenu } from './AnchoredMenu'
@@ -97,6 +98,8 @@ export function PadsPanel({
   const [padPage, setPadPage] = useState<0 | 1>(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [chopOpen, setChopOpen] = useState(chopStartsOpen)
+  const [face, setFace] = useState<'pads' | 'play' | 'setup'>('pads')
+  const [setupPart, setSetupPart] = useState('song')
   const [kitOpen, setKitOpen] = useState(false)
   const kitButton = useRef<HTMLButtonElement>(null)
   const taps = useRef(emptyTap())
@@ -450,7 +453,7 @@ export function PadsPanel({
   }
 
   return (
-    <div className={`mpc hw ch-sheet ${phone ? 'phone' : ''}`} data-pads="plugin" data-hardware="mpc" data-pad-count={FACE_PADS} data-screen-overlay="" aria-label="Beat Machine">
+    <div className={`mpc hw ch-sheet ${phone ? 'phone' : ''}`} data-pads="plugin" data-hardware="mpc" data-pad-count={FACE_PADS} data-plugin-root="" data-plugin-pages="" data-screen-overlay="" aria-label="Beat Machine">
       <div className="hw-body">
         <header className="mpc-brand">
           <div className="mpc-title">
@@ -487,7 +490,13 @@ export function PadsPanel({
             Close
           </button>
         </header>
+        <div className="plugin-page-tabs" role="tablist" aria-label="Beat Machine pages">
+          {([['pads', 'Pads'], ['play', 'Play'], ['setup', 'Setup']] as const).map(([id, label]) => (
+            <button key={id} type="button" role="tab" data-plugin-tab={id} aria-selected={face === id} className={face === id ? 'on' : ''} onClick={() => setFace(id)}>{label}</button>
+          ))}
+        </div>
 
+        <div data-plugin-page="pads" hidden={face !== 'pads'}>
         <PadScreen
           name={source ? padFaceName(source) : 'Pad'}
           samples={screenSamples}
@@ -576,7 +585,9 @@ export function PadsPanel({
           <button type="button" className={`hw-key ch-tab${chopOpen ? ' on' : ''}`} aria-pressed={chopOpen} aria-expanded={chopOpen} onClick={() => setChopOpen((value) => !value)}>Chop</button>
         </div>
         {chopOpen && <ChopDrawer store={store} engine={engine} trackId={trackId} vintageStartsOpen={vintageStartsOpen} />}
+        </div>
 
+        <div data-plugin-page="play" hidden={face !== 'play'}>
         <div className="hw-deck">
           <div className="note-repeat-row">
             <button
@@ -662,9 +673,20 @@ export function PadsPanel({
             }} />
           </label>
         </div>
+        </div>
 
-        <section className={`hw-window${settingsOpen ? ' open' : ''}`} aria-label="Pad settings">
-          <div className="hw-keys">
+        <div data-plugin-page="setup" hidden={face !== 'setup'}>
+        <section className="hw-window open" aria-label="Pad settings">
+          <label className="plugin-page-menu">
+            <span>Section</span>
+            <select aria-label="Setup section" value={setupPart} onChange={(event) => setSetupPart(event.target.value)}>
+              <option value="song">Song</option>
+              <option value="mix">Mix</option>
+              <option value="steps">Steps</option>
+              <option value="pad">Pad</option>
+            </select>
+          </label>
+          <div className="hw-keys" hidden={setupPart !== 'song'}>
             <button type="button" className="hw-key ch-tab" title="Next sequence. Lengthens the pattern one step at a time." onClick={() => store.setMpcLength(trackId, kit.sequences[0]?.lengthBeats === 32 ? 4 : (kit.sequences[0]?.lengthBeats || 4) * 2)}>Next sequence</button>
             <button type="button" className={`hw-key ch-tab${source?.muted ? ' on' : ''}`} aria-pressed={!!source?.muted} title="Track mute. Mute this pad. The clip keeps its notes." onClick={() => source && store.updateTrackPad(trackId, bank, selected, { muted: !source.muted })}>Track mute</button>
             <button type="button" className="hw-key ch-tab" title="Tap tempo. With sync on, this sets the project tempo." onClick={tapTempo}>Tap tempo</button>
@@ -675,7 +697,7 @@ export function PadsPanel({
             <button type="button" className={`hw-key ch-tab${store.project.countIn ? ' on' : ''}`} aria-pressed={store.project.countIn} title={`Count-in is ${countInCaption(countInBarsOf(store.project))}. Tap for off, one bar, or two bars.`} onClick={() => store.cycleCountIn()}>Count in</button>
             <button type="button" className={`hw-key ch-tab${store.project.metronomeEnabled ? ' on' : ''}`} aria-pressed={store.project.metronomeEnabled} title="Metronome while the pads record." onClick={() => store.toggle('metronomeEnabled')}>Metronome</button>
           </div>
-          <div className="mpc-tools">
+          <div className="mpc-tools" hidden={setupPart !== 'mix'}>
             <select aria-label="Output" title="MIDI out records clips and can drive another instrument. Audio out renders the pads. Both does both." value={kit.output} onChange={(event) => store.patchTrackKit(trackId, { output: event.target.value as 'midi' | 'audio' | 'both' })}>
               <option value="midi">MIDI out</option>
               <option value="audio">Audio out</option>
@@ -728,7 +750,7 @@ export function PadsPanel({
               <input aria-label="Fixed velocity" title="Velocity used by Fixed curve and by pads with no sensitivity." type="range" min={0.01} max={1} step={0.01} value={kit.velocityFixed} onChange={(event) => store.patchTrackKit(trackId, { velocityFixed: Number(event.target.value) })} />
             </label>
           </div>
-          <div className="mpc-steps" aria-label="Steps">
+          <div className="mpc-steps" aria-label="Steps" hidden={setupPart !== 'steps'}>
             {Array.from({ length: 16 }, (_, step) => {
               const sequence = kit.sequences[0]
               const on = sequence ? stepOn(sequence.notes, pads[selected]?.pitch ?? 0, step, stepBeats) : false
@@ -738,11 +760,11 @@ export function PadsPanel({
               )
             })}
           </div>
-          <label className="mpc-step-velocity">Step velocity
+          <label className="mpc-step-velocity" hidden={setupPart !== 'steps'}>Step velocity
             <input aria-label="Step velocity" title="Velocity of the selected step. Turn the step on, then set how hard it hits." type="range" min={0.01} max={1} step={0.01} value={stepLevel} onChange={(event) => store.setMpcStepVelocity(trackId, bank, selected, stepPick, Number(event.target.value))} />
           </label>
           {source && (
-            <aside className="mpc-params" aria-label="Pad settings">
+            <aside className="mpc-params" aria-label="Pad settings" hidden={setupPart !== 'pad'}>
               <h3 title={source.sampleName || source.name}>{padFaceName(source)}</h3>
               <div className="mpc-side-meter" aria-label="Pad meter" style={{ ['--vel' as string]: String(meters[selected] ?? 0) }}>
                 <i style={{ height: `${Math.round((meters[selected] ?? 0) * 100)}%` }} />
@@ -807,6 +829,7 @@ export function PadsPanel({
             onCommit={(next) => commitPadPreset(store, trackId, next.params, next.presets)}
           />
         </footer>
+        </div>
       </div>
     </div>
   )

@@ -25,6 +25,7 @@ import { projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { themeFor } from './faces/themes'
 import { useFormFactor } from './form'
+import { PluginPages } from './PluginPages'
 import { TipButton } from './Hint'
 import { Keyboard, Knob } from './kit/controls'
 import './kit/kit.css'
@@ -248,6 +249,9 @@ export function SamplePanel({ store, engine, trackId, plugin, vu }: { store: Pro
         if (file) void onFile(file)
       }}
     >
+      <PluginPages label="Sampler pages" pages={[
+        { id: 'wave', label: 'Wave', node: (
+      <>
       <div className="slot-stage">
         <SlotWave
           channel={channel}
@@ -285,6 +289,8 @@ export function SamplePanel({ store, engine, trackId, plugin, vu }: { store: Pro
           )
         })}
       </div>
+      </> ) },
+      { id: 'edit', label: 'Edit', node: ( <>
       <div className="slot-actions">
         <SlotButton className={recording && !dubbing ? 'on' : ''} label={recordLabel} hint={recordHint} pressed={recording && !dubbing} onClick={() => { if (recording) stopTake(); else void beginRecord('replace') }} />
         <label className="text-btn slot-upload" title="Load a wav, mp3, m4a, ogg, flac, or aiff file from this device.">
@@ -334,6 +340,8 @@ export function SamplePanel({ store, engine, trackId, plugin, vu }: { store: Pro
           }} />
         </div>
       )}
+      </> ) },
+      { id: 'pads', label: 'Pads', node: ( <>
       {sampler && (plugin.params.keys >= 0.5 ? (
         <Keyboard
           compact={phone}
@@ -399,6 +407,8 @@ export function SamplePanel({ store, engine, trackId, plugin, vu }: { store: Pro
           {looper && trackId !== 'master' && <SlotButton label="Bounce" hint="Put the mixed loop on the arrange track." onClick={() => store.bounceLooper(trackId, plugin.id, engine.currentTimelineSample())} />}
         </div>
       )}
+      </> ) },
+      ]} />
     </div>
   )
 }

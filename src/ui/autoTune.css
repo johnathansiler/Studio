@@ -358,7 +358,23 @@
 .tune-board.graph .tune-notes,
 .tune-board.graph .tune-piano,
 .tune-board.graph .tune-status,
-.tune-board.graph .tune-tools { display: none; }
+.tune-board.graph .tune-tools,
+.tune-board.pitch .tune-notes,
+.tune-board.pitch .tune-piano,
+.tune-board.pitch .tune-tools,
+.tune-board.pitch .tune-row,
+.tune-board.pitch .tune-drawer,
+.tune-board.pitch .tune-graph,
+.tune-board.scale .tune-stage,
+.tune-board.scale .tune-drawer,
+.tune-board.scale .tune-graph,
+.tune-board.scale .tune-row,
+.tune-board.tone .tune-stage,
+.tune-board.tone .tune-notes,
+.tune-board.tone .tune-piano,
+.tune-board.tone .tune-graph,
+.tune-board.tone .tune-tools { display: none; }
+.tune-board.tone .tune-drawer { display: flex; }
 
 .tune-board.graph .tune-graph {
   flex: 1 1 auto;
@@ -419,7 +435,26 @@
 .shell.fold .tune-board.pitch > * { flex: 0 0 auto; }
 
 .shell.phone.land .plugin-sheet.tune-open {
-  max-height: 26dvh;
+  max-height: none;
+}
+.shell.phone.land [data-plugin-root] .tune-body,
+.shell.phone.land [data-plugin-root] .tune-board {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.shell.phone.land .tune-board.pitch .tune-status,
+.shell.phone.land .tune-board.pitch .tune-meter {
+  display: none;
+}
+.shell.phone.land .tune-board.pitch .tune-knobs {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.shell.phone.land .tune-board.scale .tune-piano,
+.shell.phone.land .tune-board.graph .tune-graph {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 120px;
 }
 
 .shell.phone .tune-notes,
@@ -478,7 +513,8 @@
 
 @media (min-width: 900px) {
   .shell:not(.phone):not(.fold) .tune-board .more { display: none; }
-  .shell:not(.phone):not(.fold) .tune-board .side { display: flex; }
+  .shell:not(.phone):not(.fold) .tune-board.tone .side { display: flex; }
+  .shell:not(.phone):not(.fold) .tune-board:not(.tone) .side { display: none; }
 }
 
 .shell:not(.phone):not(.fold) .tune-board.pitch > * { flex: 0 0 auto; }
@@ -530,6 +566,10 @@
 .shell.fold .tune-board .tune-graph canvas {
   min-height: 220px;
   height: 42dvh;
+}
+.shell.phone.land .tune-board .tune-graph canvas {
+  min-height: 0;
+  height: 100px;
 }
 
 .tune-drawer {

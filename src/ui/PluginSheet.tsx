@@ -11,7 +11,8 @@ import { PresetControls } from './PresetControls'
 import { TouchSlider } from './kit/controls'
 import { AmpPop } from './AmpPop'
 import { AutoTuneFace } from './AutoTuneFace'
-import { useFormFactor } from './form'
+import { useFormFactor, useLandscape } from './form'
+import { PluginPages, chunkParams } from './PluginPages'
 import { BevelSelect } from './BevelSelect'
 import { NOTE_NAMES, SCALES } from '../model/scale'
 import { projectSampleBeat } from '../model/tempoMap'
@@ -31,7 +32,9 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   const canvas = useRef<HTMLCanvasElement>(null)
   const [tick, setTick] = useState(0)
   const [sheetWidth, setSheetWidth] = useState(480)
-  const compact = useFormFactor() !== 'desk'
+  const form = useFormFactor()
+  const land = useLandscape()
+  const compact = form !== 'desk'
   const autoTune = plugin?.pluginId === 'tune'
   const sampleFace = plugin?.pluginId === 'sampler' && !isDrumsPlugin(plugin)
   const ampFace = plugin?.pluginId === 'saturator' && Math.round(plugin.params.kind ?? 0) === 5
@@ -110,7 +113,7 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
     window.addEventListener('pointerup', up)
   }
   return (
-    <div className={`plugin-sheet ${autoTune ? 'tune-open' : ''}`} role="dialog" aria-label={spec.name} data-screen-overlay="" style={autoTune ? { height: sheetHeight } : compact ? undefined : { width: sheetWidth }}>
+    <div className={`plugin-sheet ${autoTune ? 'tune-open' : ''}`} role="dialog" aria-label={spec.name} data-plugin-root="" data-screen-overlay="" style={autoTune ? undefined : compact ? undefined : { width: sheetWidth }}>
       {autoTune ? (
         <div className="tune-resize" title="Drag to resize the plugin." aria-label="Resize plugin. Drag up or down." onPointerDown={resizeHeight} />
       ) : (
@@ -132,55 +135,108 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
         )}
         <button className="text-btn overlay-close" title="Close the plugin." aria-label="Close the plugin." onClick={() => store.focusPlugin(null)}>Close</button>
       </header>
-      {plugin.pluginId !== 'tune' && (
-      <label className="wet" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
-        Wet
-        <TouchSlider label="Wet" min={0} max={1} step={0.01} value={plugin.wet} fallback={1} onChange={(value) => store.updatePlugin(focus.trackId, plugin.id, { wet: value })} />
-      </label>
-      )}
-      {(plugin.pluginId === 'compressor' || plugin.pluginId === 'vocal') && (
-        <label>
-          Sidechain key
-          <select aria-label="Sidechain key" title="Route any track or bus into this compressor or gate." value={plugin.sidechain} onChange={(event) => store.updatePlugin(focus.trackId, plugin.id, { sidechain: event.target.value })}>
-            <option value="">Input</option>
-            {buses.map((track) => (
-              <option key={track.id} value={track.id}>{track.name}</option>
-            ))}
-          </select>
-        </label>
-      )}
-      {plugin.pluginId === 'compressor' && (
-        <button type="button" className="text-btn" title="Ducking preset: heavy compression for a sidechain key." onClick={() => store.applyPluginPreset(focus.trackId, plugin.id, 'Duck')}>Duck</button>
-      )}
-      {customFace && (
-        <Suspense fallback={<p className="face-hint">Loading the faceplate.</p>}>
-          <div onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
-            <PluginFace
-              pluginId={plugin.pluginId}
-              params={faceParams}
-              values={plugin.params}
-              vu={engine.meter(plugin.id)?.vu ?? -20}
-              gr={engine.meter(plugin.id)?.gr ?? 0}
-              spectrum={engine.spectrum(plugin.id)}
-              compact={compact}
-              showParams={customFace}
-              keyboard={false}
-              onChange={(id, value) => {
-                setLast(id)
-                const param = spec.params.find((item) => item.id === id)
-                store.setAutomated(
-                  { trackId: focus.trackId, target: 'plugin', pluginId: plugin.id, param: id, min: param?.min ?? 0, max: param?.max ?? 1 },
-                  value,
-                  rolling(),
-                  engine.currentTimelineSample(),
-                )
-              }}
-              onNote={(note, down) => {
-                if (down) engine.previewSample(plugin.id, note)
-              }}
-            />
-          </div>
-        </Suspense>
+      {!sampleFace && !autoTune && (
+        <PluginPages
+          label={`${spec.name} pages`}
+          pages={[
+            ...(customFace ? [{
+              id: 'face',
+              label: 'Face',
+              node: (
+                <Suspense fallback={<p className="face-hint">Loading the faceplate.</p>}>
+                  <div onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
+                    <PluginFace
+                      pluginId={plugin.pluginId}
+                      params={faceParams}
+                      values={plugin.params}
+                      vu={engine.meter(plugin.id)?.vu ?? -20}
+                      gr={engine.meter(plugin.id)?.gr ?? 0}
+                      spectrum={engine.spectrum(plugin.id)}
+                      compact={compact}
+                      showParams={false}
+                      keyboard={false}
+                      onChange={(id, value) => {
+                        setLast(id)
+                        const param = spec.params.find((item) => item.id === id)
+                        store.setAutomated(
+                          { trackId: focus.trackId, target: 'plugin', pluginId: plugin.id, param: id, min: param?.min ?? 0, max: param?.max ?? 1 },
+                          value,
+                          rolling(),
+                          engine.currentTimelineSample(),
+                        )
+                      }}
+                      onNote={(note, down) => {
+                        if (down) engine.previewSample(plugin.id, note)
+                      }}
+                    />
+                  </div>
+                </Suspense>
+              ),
+            }] : []),
+            ...chunkParams(faceParams, form === 'phone' && land ? 4 : form === 'phone' ? 8 : 12).map((group, index) => ({
+              id: `controls-${index}`,
+              label: group.length === 1 ? group[0].name : `${group[0].name} to ${group[group.length - 1].name}`,
+              node: (
+                <div className="plugin-controls" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
+                  {group.map((param) => (
+                    <label key={param.id}>
+                      {param.name} {formatParam(param.id, plugin.params[param.id] ?? param.default, param.unit)}
+                      <ParamControl
+                        id={param.id}
+                        min={param.min}
+                        max={param.max}
+                        labels={param.id === 'kind' ? kindLabels(plugin.pluginId) : []}
+                        value={plugin.params[param.id] ?? param.default}
+                        fallback={param.default}
+                        onChange={(value) => {
+                          setLast(param.id)
+                          store.setAutomated(
+                            { trackId: focus.trackId, target: 'plugin', pluginId: plugin.id, param: param.id, min: param.min, max: param.max },
+                            value,
+                            rolling(),
+                            engine.currentTimelineSample(),
+                          )
+                        }}
+                      />
+                    </label>
+                  ))}
+                </div>
+              ),
+            })),
+            {
+              id: 'route',
+              label: 'Route',
+              node: (
+                <>
+                  <label className="wet" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
+                    Wet
+                    <TouchSlider label="Wet" min={0} max={1} step={0.01} value={plugin.wet} fallback={1} onChange={(value) => store.updatePlugin(focus.trackId, plugin.id, { wet: value })} />
+                  </label>
+                  {(plugin.pluginId === 'compressor' || plugin.pluginId === 'vocal') && (
+                    <label>
+                      Sidechain key
+                      <select aria-label="Sidechain key" title="Route any track or bus into this compressor or gate." value={plugin.sidechain} onChange={(event) => store.updatePlugin(focus.trackId, plugin.id, { sidechain: event.target.value })}>
+                        <option value="">Input</option>
+                        {buses.map((track) => (
+                          <option key={track.id} value={track.id}>{track.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {plugin.pluginId === 'compressor' && (
+                    <button type="button" className="text-btn" title="Ducking preset: heavy compression for a sidechain key." onClick={() => store.applyPluginPreset(focus.trackId, plugin.id, 'Duck')}>Duck</button>
+                  )}
+                  <div className="row slot-actions">
+                    <button className="text-btn" title="Move this plugin earlier." aria-label="Move this plugin earlier." onClick={() => store.movePlugin(focus.trackId, plugin.id, -1)}>Earlier</button>
+                    <button className="text-btn" title="Move this plugin later." aria-label="Move this plugin later." onClick={() => store.movePlugin(focus.trackId, plugin.id, 1)}>Later</button>
+                    <button className="text-btn" title="Remove this plugin." aria-label="Remove this plugin." onClick={() => store.removePlugin(focus.trackId, plugin.id)}>Remove</button>
+                    <button className="text-btn" title="Write an automation point." aria-label="Point. Write an automation point." onClick={point}>Point</button>
+                  </div>
+                </>
+              ),
+            },
+          ]}
+        />
       )}
       {sampleFace && <SamplePanel store={store} engine={engine} trackId={focus.trackId} plugin={plugin} vu={engine.meter(plugin.id)?.vu} />}
       {autoTune && (
@@ -208,36 +264,6 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
         />
         </div>
       )}
-      {!customFace && !autoTune && !sampleFace ? <div className="knobs" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
-        {faceParams.map((param) => (
-          <label key={param.id}>
-            {param.name} {formatParam(param.id, plugin.params[param.id] ?? param.default, param.unit)}
-            <ParamControl
-              id={param.id}
-              min={param.min}
-              max={param.max}
-              labels={param.id === 'kind' ? kindLabels(plugin.pluginId) : []}
-              value={plugin.params[param.id] ?? param.default}
-              fallback={param.default}
-              onChange={(value) => {
-                setLast(param.id)
-                store.setAutomated(
-                  { trackId: focus.trackId, target: 'plugin', pluginId: plugin.id, param: param.id, min: param.min, max: param.max },
-                  value,
-                  rolling(),
-                  engine.currentTimelineSample(),
-                )
-              }}
-            />
-          </label>
-        ))}
-      </div> : null}
-      <div className="row slot-actions">
-        <button className="text-btn" title="Move this plugin earlier." aria-label="Move this plugin earlier." onClick={() => store.movePlugin(focus.trackId, plugin.id, -1)}>←</button>
-        <button className="text-btn" title="Move this plugin later." aria-label="Move this plugin later." onClick={() => store.movePlugin(focus.trackId, plugin.id, 1)}>→</button>
-        <button className="text-btn" title="Remove this plugin." aria-label="Remove this plugin." onClick={() => store.removePlugin(focus.trackId, plugin.id)}>Remove</button>
-        <button className="text-btn" title="Write an automation point." aria-label="Point. Write an automation point." onClick={point}>Point</button>
-      </div>
     </div>
   )
 }

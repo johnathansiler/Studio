@@ -109,7 +109,7 @@ export function AutoTuneFace({
   onBypass: () => void
   onSave?: (name: string) => void
 }) {
-  const [view, setView] = useState<'pitch' | 'graph'>('pitch')
+  const [view, setView] = useState<'pitch' | 'graph' | 'scale' | 'tone'>('pitch')
   const [tool, setTool] = useState<'remove' | 'bypass'>('remove')
   const [latch, setLatch] = useState(true)
   const [more, setMore] = useState(false)
@@ -201,11 +201,13 @@ export function AutoTuneFace({
     : 'Bypass: tap a note to let it through uncorrected.'
 
   return (
-    <section className={`tune-board ${more ? 'show-more' : ''} ${view}`} aria-label={`${TUNE_NAME} faceplate`}>
+    <section className={`tune-board ${more ? 'show-more' : ''} ${view}`} data-plugin-pages="" aria-label={`${TUNE_NAME} faceplate`}>
       <header className="tune-top">
-        <div className="tune-tabs" role="group" aria-label="Plugin view">
-          <button type="button" className={view === 'pitch' ? 'on' : ''} aria-pressed={view === 'pitch'} title="Meter, knobs, and the scale keyboard." aria-label="Pitch. Meter, knobs, and the scale keyboard." onClick={() => setView('pitch')}>Pitch</button>
-          <button type="button" className={view === 'graph' ? 'on' : ''} aria-pressed={view === 'graph'} title="Notes on a pitch grid. Drag a note to retune it." aria-label="Graph. Notes on a pitch grid. Drag a note to retune it." onClick={() => setView('graph')}>Graph</button>
+        <div className="tune-tabs plugin-page-tabs" role="tablist" aria-label="Plugin view">
+          <button type="button" role="tab" data-plugin-tab="pitch" className={view === 'pitch' ? 'on' : ''} aria-selected={view === 'pitch'} title="Meter and the main knobs." aria-label="Pitch. Meter and the main knobs." onClick={() => setView('pitch')}>Pitch</button>
+          <button type="button" role="tab" data-plugin-tab="scale" className={view === 'scale' ? 'on' : ''} aria-selected={view === 'scale'} title="Scale notes and the keyboard." aria-label="Scale. Scale notes and the keyboard." onClick={() => setView('scale')}>Scale</button>
+          <button type="button" role="tab" data-plugin-tab="graph" className={view === 'graph' ? 'on' : ''} aria-selected={view === 'graph'} title="Notes on a pitch grid. Drag a note to retune it." aria-label="Graph. Notes on a pitch grid. Drag a note to retune it." onClick={() => setView('graph')}>Graph</button>
+          <button type="button" role="tab" data-plugin-tab="tone" className={view === 'tone' ? 'on' : ''} aria-selected={view === 'tone'} title="Flex, vibrato, reference, and tone." aria-label="Tone. Flex, vibrato, reference, and tone." onClick={() => setView('tone')}>Tone</button>
         </div>
         {!sharedBar && (
           <Stepper
