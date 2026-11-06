@@ -70,7 +70,7 @@
 }
 
 .shell.phone:not(.land) .playlist-frame.browser-open > .arrange {
-  grid-template-columns: max-content minmax(120px, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr);
 }
 
 .browser-resize {
@@ -252,6 +252,9 @@
   min-width: 0;
   width: 100%;
 }
+.shell:not(.phone) .arrange .pl-name-row {
+  padding-right: 46px;
+}
 .shell .arrange .pl-name-row .swatch {
   width: 6px;
   align-self: stretch;
@@ -334,4 +337,197 @@
   max-width: none;
   height: 40px;
   min-height: 40px;
+}
+
+/* Portrait phone: the header is only as wide as one row of word pills.
+   The name, meter, and track menu sit above that row, so Mute / Solo /
+   Arm / Roll / Open Beat Machine stay readable and the clip lane remains. */
+.shell.phone:not(.land) .playlist-frame {
+  overflow-x: hidden;
+  min-width: 0;
+  width: 100%;
+}
+.shell.phone:not(.land) .arrange {
+  display: grid;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  align-items: stretch;
+  --lane-h: 100px;
+}
+.shell.phone:not(.land) .arrange > .heads-col,
+.shell.phone:not(.land) .arrange > .timeline-col {
+  display: contents;
+}
+.shell.phone:not(.land) .arrange-add {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.shell.phone:not(.land) .arrange-add .add-track-btn {
+  width: 100%;
+  height: 52px;
+  min-height: 52px;
+}
+.shell.phone:not(.land) .arrange .heads {
+  grid-column: 1;
+  grid-row: 2;
+  width: max-content;
+  min-width: max-content;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.shell.phone:not(.land) .arrange .heads::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+.shell.phone:not(.land) .timeline-add-spacer {
+  display: none;
+}
+.shell.phone:not(.land) .arrange .timeline-scroll {
+  grid-column: 2;
+  grid-row: 2;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+}
+.shell.phone:not(.land) .arrange .head {
+  width: auto;
+  min-width: 100%;
+}
+.shell.phone:not(.land) .arrange .head .pl-head {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  justify-content: flex-start;
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  height: 100%;
+  gap: 2px;
+  padding: 42px 2px 4px 0;
+  box-sizing: border-box;
+}
+.shell.phone:not(.land) .arrange .pl-name-row {
+  position: absolute;
+  top: 2px;
+  left: 0;
+  right: 0;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 2px 0 0;
+  gap: 4px;
+  box-sizing: border-box;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+.shell.phone:not(.land) .arrange .pl-name-row .name {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 52px;
+  max-width: 100%;
+  height: 36px;
+  min-height: 36px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell.phone:not(.land) .arrange .pl-head .presence-chips {
+  flex: 0 1 auto;
+  width: auto;
+  max-width: 42%;
+  min-width: 0;
+  min-height: 0;
+  height: 28px;
+}
+.shell.phone:not(.land) .arrange .pl-head:has(.onscreen-piano) {
+  padding-top: 82px;
+}
+.shell.phone:not(.land) .arrange .pl-head:has(.onscreen-piano) .pl-name-row {
+  height: 40px;
+  min-height: 40px;
+  flex-wrap: nowrap;
+}
+.shell.phone:not(.land) .arrange .pl-name-row .onscreen-piano-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 42px;
+  flex: none;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  height: 36px;
+}
+.shell.phone:not(.land) .arrange .pl-head .onscreen-piano {
+  flex: 0 1 auto;
+  width: auto;
+  max-width: 100%;
+  min-width: max-content;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 8px;
+}
+.shell.phone:not(.land) .arrange .track-controls {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 2px;
+  width: max-content;
+  min-width: max-content;
+  max-width: none;
+}
+.shell.phone:not(.land) .arrange .pl-head .track-controls > .mini,
+.shell.phone:not(.land) .arrange .pl-head .track-controls > .piano-open,
+.shell.phone:not(.land) .arrange .pl-head .track-controls > .beat-open {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: max-content;
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 5px;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.shell.phone:not(.land) .arrange .pl-name-row .track-live {
+  position: static;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 28px;
+  height: 14px;
+  margin: 0;
+  order: 3;
+}
+.shell.phone:not(.land) .arrange .pl-name-row .track-more {
+  position: static;
+  top: auto;
+  right: auto;
+  order: 4;
+  flex: 0 0 40px;
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
 }

@@ -812,6 +812,21 @@ export function ArrangeView({
                   onChange={(event) => store.updateTrack(track.id, { name: event.target.value })}
                 />
                 <TrackPresence trackId={track.id} />
+                <span className="track-live" data-track-live={track.id}>
+                  <i
+                    className="midi-activity"
+                    data-midi-activity={track.id}
+                    data-lit={midiOn[track.id] ? '1' : '0'}
+                    role="img"
+                    aria-label={midiOn[track.id] ? 'MIDI activity. Notes are playing.' : 'MIDI activity. Idle.'}
+                  />
+                  <span className="mini-meter" data-arrange-meter={track.id} aria-hidden>
+                    <i style={{ transform: `scaleX(${levels[track.id] ?? 0})` }} />
+                  </span>
+                </span>
+                <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); setTrackAnchor(event.currentTarget); setTrackSheet(track.id) }}>
+                  ⋮
+                </TipButton>
                 {store.selectedTrackId === track.id && showsOnscreenPiano(track) && (
                   <span className="onscreen-piano-slot" onClick={(event) => event.stopPropagation()}>
                     <KeyboardToggle
@@ -847,21 +862,6 @@ export function ArrangeView({
                   <span className="mini-word">Arm</span>
                 </TipButton>
               )}
-              <span className="track-live" data-track-live={track.id}>
-                <i
-                  className="midi-activity"
-                  data-midi-activity={track.id}
-                  data-lit={midiOn[track.id] ? '1' : '0'}
-                  role="img"
-                  aria-label={midiOn[track.id] ? 'MIDI activity. Notes are playing.' : 'MIDI activity. Idle.'}
-                />
-                <span className="mini-meter" data-arrange-meter={track.id} aria-hidden>
-                  <i style={{ transform: `scaleX(${levels[track.id] ?? 0})` }} />
-                </span>
-              </span>
-              <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); setTrackAnchor(event.currentTarget); setTrackSheet(track.id) }}>
-                ⋮
-              </TipButton>
               </div>
             </div>
             <LanePicker store={store} trackId={track.id} />
