@@ -340,8 +340,8 @@
 }
 
 /* Portrait phone: the header is only as wide as one row of word pills.
-   The name, meter, and track menu sit above that row, so Mute / Solo /
-   Arm / Roll / Open Beat Machine stay readable and the clip lane remains. */
+   The name, meter, track menu, and Beat Machine icon sit above that row,
+   so Mute / Solo / Arm / Roll stay on one line and the clip lane remains. */
 .shell.phone:not(.land) .playlist-frame {
   overflow-x: hidden;
   min-width: 0;
@@ -530,4 +530,74 @@
   height: 40px;
   min-height: 40px;
   padding: 0;
+}
+
+/* Icon-only Beat Machine control. It shares the quiet pill bevel and stays
+   a 40px target, but it must not widen the header past the word pills.
+   The phone and fold quiet rules size this button to its content, so these
+   selectors stay more specific than those. */
+.shell .arrange .pl-head .beat-open,
+.shell.phone .arrange .pl-head .beat-open,
+.shell.phone.land .arrange .pl-head .beat-open,
+.shell.fold .arrange .pl-head .beat-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 40px;
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  gap: 0;
+  box-sizing: border-box;
+  border-radius: 999px;
+  box-shadow: var(--btn-bevel);
+}
+/* Portrait name row is pinned to the pill-row width. Drop the meter bar so
+   the title, pad icon, and track menu all stay visible. */
+.shell.phone:not(.land) .arrange .pl-name-row:has(.beat-open) {
+  gap: 2px;
+}
+.shell.phone:not(.land) .arrange .pl-name-row:has(.beat-open) .mini-meter {
+  display: none;
+}
+.shell.phone:not(.land) .arrange .pl-name-row:has(.beat-open) .track-live {
+  flex: 0 0 8px;
+  width: 8px;
+  min-width: 8px;
+}
+.shell.phone:not(.land) .arrange .pl-name-row:has(.beat-open) .name {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 36px;
+}
+/* Wider screens: this header takes the shared column and no more.
+   width 0 + min-width 100% keeps its content from growing that column,
+   and the name shrinks by the icon's width. */
+.shell.phone.land .arrange .head:has(.beat-open),
+.shell.fold .arrange .head:has(.beat-open),
+.shell:not(.phone) .arrange .head:has(.beat-open) {
+  width: 0;
+  min-width: 100%;
+  max-width: 100%;
+}
+.shell.phone.land .arrange .head:has(.beat-open) .pl-head,
+.shell.fold .arrange .head:has(.beat-open) .pl-head,
+.shell:not(.phone) .arrange .head:has(.beat-open) .pl-head,
+.shell.phone.land .arrange .pl-name-row:has(.beat-open),
+.shell.fold .arrange .pl-name-row:has(.beat-open),
+.shell:not(.phone) .arrange .pl-name-row:has(.beat-open) {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.shell.phone.land .arrange .pl-name-row:has(.beat-open) .name,
+.shell.fold .arrange .pl-name-row:has(.beat-open) .name,
+.shell:not(.phone) .arrange .pl-name-row:has(.beat-open) .name {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
 }

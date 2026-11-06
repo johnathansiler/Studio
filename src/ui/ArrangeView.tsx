@@ -824,6 +824,9 @@ export function ArrangeView({
                     <i style={{ transform: `scaleX(${levels[track.id] ?? 0})` }} />
                   </span>
                 </span>
+                {showsOpenBeatMachine(track) && (
+                  <OpenBeatMachineButton store={store} trackId={track.id} onOpen={onOpenBeatMachine} />
+                )}
                 <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); setTrackAnchor(event.currentTarget); setTrackSheet(track.id) }}>
                   ⋮
                 </TipButton>
@@ -852,9 +855,6 @@ export function ArrangeView({
                   <PianoIcon />
                   <span>Roll</span>
                 </button>
-              )}
-              {showsOpenBeatMachine(track) && (
-                <OpenBeatMachineButton store={store} trackId={track.id} onOpen={onOpenBeatMachine} />
               )}
               {(track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
                 <TipButton className={`mini ${track.armed ? 'on-r' : ''}`} label={copyOf(TRACK_ROW, 'arm').label} hint={track.type === 'midi' ? 'Record this instrument from its MIDI input.' : copyOf(TRACK_ROW, 'arm').hint} pressed={track.armed} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
@@ -1321,7 +1321,7 @@ function laneStyle(track: { clips: AudioClip[] }, selectedId: string | null): { 
 function rowStyle(track: { id: string; type: string; instrument?: string; plugins?: { pluginId: string; params?: Record<string, number> }[]; clips: AudioClip[] }, selectedTrackId: string | null, selectedClipId: string | null, automation: boolean, phone = false) {
   const base = rowHeight(track, selectedClipId, automation)
   const piano = selectedTrackId === track.id && showsOnscreenPiano(track)
-  const extra = (showsOpenBeatMachine(track) ? 34 : 0) + (piano ? (phone ? 48 : 112) : 0)
+  const extra = piano ? (phone ? 48 : 112) : 0
   if (!extra) return base
   return { ...base, minHeight: `calc(var(--lane-h) + ${extra}px)` }
 }
