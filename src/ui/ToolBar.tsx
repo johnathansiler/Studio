@@ -124,7 +124,7 @@ export function ToolBar({
           </>
         )}
         </div>
-        <AnchoredMenu fill id="tool-choices" open={toolsOpen} onClose={() => setToolsOpen(false)} label="Choose a tool" triggerRef={toolButton} prefer="up">
+        <AnchoredMenu id="tool-choices" open={toolsOpen} onClose={() => setToolsOpen(false)} label="Choose a tool" triggerRef={toolButton} prefer="up">
           {[...shown, 'box' as const, 'erase' as const].map((id) => {
             const info = TOOL_INFO[id]
             const key = keyForTool(id)
