@@ -100,6 +100,7 @@ export function PadsPanel({
   const [face, setFace] = useState<'pads' | 'sound' | 'pattern'>('pads')
   const [kitOpen, setKitOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
+  const [snapZero, setSnapZero] = useState(true)
   const kitButton = useRef<HTMLButtonElement>(null)
   const moreButton = useRef<HTMLButtonElement>(null)
   const taps = useRef(emptyTap())
@@ -515,9 +516,9 @@ export function PadsPanel({
           swing={source?.swing ?? kit.swing}
           tempo={store.project.tempo}
           hitToken={hitToken}
+          snap={snapZero}
           onTrim={(from, to) => store.setPadWindow(trackId, bank, selected, from, to, true)}
           onTrimEnd={() => store.endDraft()}
-          onReset={resetWindow}
         />
 
         <div className="mpc-grid-wrap">
@@ -695,6 +696,8 @@ export function PadsPanel({
                 <input aria-label="Pad high pass" title="Remove bass from this pad." type="range" min={0} max={1} step={0.01} value={source.highpass ?? 0} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { highpass: Number(event.target.value) })} />
               </label>
               <button type="button" className={`hw-key ch-tab${region.loop ? ' on' : ''}`} aria-pressed={region.loop} title="Loop the sample window." onClick={() => store.updateTrackPad(trackId, bank, selected, { region: { ...region, loop: !region.loop } })}>Loop</button>
+              <button type="button" className={`hw-key ch-tab${snapZero ? ' on' : ''}`} aria-pressed={snapZero} data-pad-snap="sound" title="Snap a dragged marker to the nearest zero crossing. Off places it freely." onClick={() => setSnapZero((value) => !value)}>Snap to zero</button>
+              <button type="button" className="hw-key ch-tab" title="Reset start and end for this pad." onClick={resetWindow}>Reset window</button>
               <button type="button" className={`hw-key ch-tab${source.poly === 'mono' ? ' on' : ''}`} aria-pressed={source.poly === 'mono'} title="Mono retriggers this pad. Poly lets notes overlap." onClick={() => store.updateTrackPad(trackId, bank, selected, { poly: source.poly === 'mono' ? 'poly' : 'mono' })}>{source.poly === 'mono' ? 'Mono' : 'Poly'}</button>
               <label>Choke
                 <input aria-label="Choke group" title="Pads in the same group cut each other. Hats use group 1." type="number" min={0} max={8} value={source.choke} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { choke: Number(event.target.value) })} />
@@ -778,19 +781,23 @@ export function PadsPanel({
 
         <div className="mpc-perform" data-beat-perform="open">
           <div className="hw-transport" aria-label="Transport" data-beat-transport="open">
-            <button type="button" className={`hw-key rec ch-tab${recording ? ' on' : ''}`} aria-pressed={recording} title="Record pad hits into a clip on this track, with the count-in and the loop." onClick={record}>Record</button>
-            <button type="button" className={`hw-key dub ch-tab${recordMode === 'overdub' ? ' on' : ''}`} aria-pressed={recordMode === 'overdub'} title="Overdub keeps the notes already in the loop." onClick={() => setRecordMode('overdub')}>Overdub</button>
-            <button type="button" className={`hw-key ch-tab${recordMode === 'replace' ? ' on' : ''}`} aria-pressed={recordMode === 'replace'} title="Replace clears the loop while you record." onClick={() => setRecordMode('replace')}>Replace</button>
-            <button type="button" className="hw-key ch-tab" title="Stop" onClick={() => { if (recording) onRecord(); engine.stop?.() }}>Stop</button>
-            <button type="button" className="hw-key ch-tab" title="Play from the current position." onClick={() => { void engine.playAtPerf?.(engine.positionSamples, performance.now(), 'arrangement') }}>Play</button>
-            <button type="button" className="hw-key ch-tab" title="Play start. Play from the top." onClick={() => { void engine.playAtPerf?.(0, performance.now(), 'arrangement') }}>Play start</button>
-            <button type="button" className={`hw-key ch-tab${eraseOn ? ' on' : ''}`} aria-pressed={eraseOn} title="Hold Erase and a pad to clear that sound while the loop plays." onPointerDown={(event) => { event.preventDefault(); setEraseOn(true) }} onPointerUp={() => setEraseOn(false)} onPointerCancel={() => setEraseOn(false)} onPointerLeave={() => setEraseOn(false)}>Erase</button>
-            <button type="button" className={`hw-key ch-tab${padArm !== 'idle' ? ' on' : ''}`} aria-pressed={padArm !== 'idle'} title="Arm this pad. Recording starts when the mic crosses the threshold." onClick={() => { void armPad() }}>{padArm === 'idle' ? 'Arm pad' : 'Stop pad'}</button>
-            <button type="button" className={`hw-key ch-tab${store.project.countIn ? ' on' : ''}`} aria-pressed={store.project.countIn} title={`Count-in is ${countInCaption(countInBarsOf(store.project))}. Tap for off, one bar, or two bars.`} onClick={() => store.cycleCountIn()}>Count in</button>
-            <button type="button" className={`hw-key ch-tab${store.project.metronomeEnabled ? ' on' : ''}`} aria-pressed={store.project.metronomeEnabled} title="Metronome while the pads record." onClick={() => store.toggle('metronomeEnabled')}>Metronome</button>
-            <button type="button" className={`hw-key ch-tab${kit.recordTrim ? ' on' : ''}`} aria-pressed={kit.recordTrim} title="Trim silence from the pad take." onClick={() => store.patchTrackKit(trackId, { recordTrim: !kit.recordTrim })}>Trim</button>
-            <button type="button" className={`hw-key ch-tab${kit.recordChop ? ' on' : ''}`} aria-pressed={!!kit.recordChop} title="Chop the pad take on transients across this bank." onClick={() => store.patchTrackKit(trackId, { recordChop: !kit.recordChop })}>Auto chop</button>
-            <button ref={moreButton} type="button" className={`hw-key ch-tab${moreOpen ? ' on' : ''}`} aria-expanded={moreOpen} title="Output, sync, latch, and chop shortcuts." onClick={() => setMoreOpen((value) => !value)}>More</button>
+            <div className="pad-actions" role="group" aria-label="Take">
+              <button type="button" className={`hw-key pad-key rec${recording ? ' on' : ''}`} aria-pressed={recording} aria-label="Record" title="Record pad hits into a clip on this track, with the count-in and the loop." onClick={record}><TransportGlyph name="record" /><span>Record</span></button>
+              <button type="button" className={`hw-key pad-key dub${recordMode === 'overdub' ? ' on' : ''}`} aria-pressed={recordMode === 'overdub'} aria-label="Overdub" title="Overdub keeps the notes already in the loop." onClick={() => setRecordMode('overdub')}><TransportGlyph name="overdub" /><span>Overdub</span></button>
+              <button type="button" className={`hw-key pad-key replace${recordMode === 'replace' ? ' on' : ''}`} aria-pressed={recordMode === 'replace'} aria-label="Replace" title="Replace clears the loop while you record." onClick={() => setRecordMode('replace')}><TransportGlyph name="replace" /><span>Replace</span></button>
+              <button type="button" className="hw-key pad-key stop" aria-label="Stop" title="Stop" onClick={() => { if (recording) onRecord(); engine.stop?.() }}><TransportGlyph name="stop" /><span>Stop</span></button>
+              <button type="button" className="hw-key pad-key play" aria-label="Play" title="Play from the current position." onClick={() => { void engine.playAtPerf?.(engine.positionSamples, performance.now(), 'arrangement') }}><TransportGlyph name="play" /><span>Play</span></button>
+              <button type="button" className="hw-key pad-key start" aria-label="Play start" title="Play start. Play from the top." onClick={() => { void engine.playAtPerf?.(0, performance.now(), 'arrangement') }}><TransportGlyph name="start" /><span>Play start</span></button>
+              <button type="button" className={`hw-key pad-key erase${eraseOn ? ' on' : ''}`} aria-pressed={eraseOn} aria-label="Erase" title="Hold Erase and a pad to clear that sound while the loop plays." onPointerDown={(event) => { event.preventDefault(); setEraseOn(true) }} onPointerUp={() => setEraseOn(false)} onPointerCancel={() => setEraseOn(false)} onPointerLeave={() => setEraseOn(false)}><TransportGlyph name="erase" /><span>Erase</span></button>
+              <button type="button" className={`hw-key pad-key arm${padArm !== 'idle' ? ' on' : ''}`} aria-pressed={padArm !== 'idle'} aria-label={padArm === 'idle' ? 'Arm pad' : 'Stop pad'} title="Arm this pad. Recording starts when the mic crosses the threshold." onClick={() => { void armPad() }}><TransportGlyph name="arm" /><span>{padArm === 'idle' ? 'Arm pad' : 'Stop pad'}</span></button>
+            </div>
+            <div className="pad-modes" role="group" aria-label="Record options">
+              <button type="button" className={`hw-key pad-led${store.project.countIn ? ' on' : ''}`} aria-pressed={store.project.countIn} aria-label="Count in" title={`Count-in is ${countInCaption(countInBarsOf(store.project))}. Tap for off, one bar, or two bars.`} onClick={() => store.cycleCountIn()}><span className="pad-led-face"><i />Count in</span></button>
+              <button type="button" className={`hw-key pad-led${store.project.metronomeEnabled ? ' on' : ''}`} aria-pressed={store.project.metronomeEnabled} aria-label="Metronome" title="Metronome while the pads record." onClick={() => store.toggle('metronomeEnabled')}><span className="pad-led-face"><i />Metronome</span></button>
+              <button type="button" className={`hw-key pad-led${kit.recordTrim ? ' on' : ''}`} aria-pressed={kit.recordTrim} aria-label="Trim" title="Trim silence from the pad take." onClick={() => store.patchTrackKit(trackId, { recordTrim: !kit.recordTrim })}><span className="pad-led-face"><i />Trim</span></button>
+              <button type="button" className={`hw-key pad-led${kit.recordChop ? ' on' : ''}`} aria-pressed={!!kit.recordChop} aria-label="Auto chop" title="Chop the pad take on transients across this bank." onClick={() => store.patchTrackKit(trackId, { recordChop: !kit.recordChop })}><span className="pad-led-face"><i />Auto chop</span></button>
+              <button ref={moreButton} type="button" className={`hw-key pad-key pad-more${moreOpen ? ' on' : ''}`} aria-expanded={moreOpen} aria-label="More" title="Output, sync, latch, and chop shortcuts." onClick={() => setMoreOpen((value) => !value)}>More</button>
+            </div>
           </div>
           <label className="hw-slider">Threshold
             <input aria-label="Record threshold" title="Mic level that starts the armed pad." type="range" min={0.01} max={0.5} step={0.01} value={kit.recordThreshold} onChange={(event) => store.patchTrackKit(trackId, { recordThreshold: Number(event.target.value) })} />
@@ -822,6 +829,38 @@ export function PadsPanel({
 
       </div>
     </div>
+  )
+}
+
+function TransportGlyph({ name }: { name: 'record' | 'overdub' | 'replace' | 'stop' | 'play' | 'start' | 'erase' | 'arm' }) {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" className={`pad-glyph pad-glyph-${name}`}>
+      {name === 'record' && <circle cx="8" cy="8" r="4.2" />}
+      {name === 'overdub' && (
+        <>
+          <circle cx="8" cy="8" r="5.1" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          <circle cx="8" cy="8" r="2.2" />
+        </>
+      )}
+      {name === 'replace' && (
+        <path d="M8 2.4a5.6 5.6 0 0 1 4.7 2.6M13.2 2.6v3.1H10M8 13.6a5.6 5.6 0 0 1-4.7-2.6M2.8 13.4v-3.1H6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      )}
+      {name === 'stop' && <rect x="4" y="4" width="8" height="8" rx="1" />}
+      {name === 'play' && <path d="M5 3.2 12.6 8 5 12.8Z" />}
+      {name === 'start' && (
+        <>
+          <rect x="2.6" y="3.2" width="1.7" height="9.6" rx="0.4" />
+          <path d="M6.2 3.2 13.4 8 6.2 12.8Z" />
+        </>
+      )}
+      {name === 'erase' && <path d="M3.2 11.2 6.6 4.2h3.2l3 7H3.2Z" />}
+      {name === 'arm' && (
+        <>
+          <circle cx="8" cy="8" r="5.1" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          <circle className="pad-arm-dot" cx="8" cy="8" r="2.1" />
+        </>
+      )}
+    </svg>
   )
 }
 
