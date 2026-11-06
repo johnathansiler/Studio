@@ -84,16 +84,16 @@ describe('pad screen trim and zoom', () => {
       swing: 62,
       tempo: 120,
       hitToken: 0,
+      snap: true,
       onTrim: () => {},
       onTrimEnd: () => {},
-      onReset: () => {},
     }))
-    expect(html).toContain('Zoom in')
-    expect(html).toContain('Zoom out')
-    expect(html).toContain('Zoom to Start')
-    expect(html).toContain('Zoom to End')
-    expect(html).toContain('Snap to zero')
-    expect(html).toContain('Reset')
+    expect(html).not.toContain('Zoom in')
+    expect(html).not.toContain('Zoom out')
+    expect(html).not.toContain('Zoom to Start')
+    expect(html).not.toContain('Zoom to End')
+    expect(html).not.toContain('Snap to zero')
+    expect(html).not.toContain('>Reset<')
     expect(html).toContain('pad-screen-zero')
     expect(html).toContain('Start marker')
     expect(html).toContain('End marker')
@@ -103,6 +103,7 @@ describe('pad screen trim and zoom', () => {
     expect(html).not.toContain('Vinyl')
     expect(html).not.toContain('Swing')
     expect(html).not.toContain('Vintage')
-    expect(html).toContain('mpc-pill')
+    expect(html).not.toContain('mpc-pill')
+    expect(html).toContain('data-snap-zero="1"')
   })
 })
