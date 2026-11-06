@@ -25,6 +25,7 @@ import {
   type VintageTable,
 } from '../model/padChop'
 import { setPadVintage } from './padVoiceAdapter'
+import { AnchoredMenu } from './AnchoredMenu'
 import { WaveformView } from './WaveformView'
 import type { ProjectStore } from '../state/store'
 
@@ -57,6 +58,9 @@ export function ChopDrawer({
   const slices = chop && samples ? slicesFor(chop, samples, sampleRate, store.project.tempo) : []
   const plan = assignPlan(slices.length)
   const fileRef = useRef<HTMLInputElement>(null)
+  const loadButton = useRef<HTMLButtonElement>(null)
+  const modeButton = useRef<HTMLButtonElement>(null)
+  const vintageButton = useRef<HTMLButtonElement>(null)
   const chopping = useRef(false)
   const [snapZero, setSnapZero] = useState(true)
   const [loadOpen, setLoadOpen] = useState(false)
@@ -204,29 +208,25 @@ export function ChopDrawer({
     <section className="chop-drawer" aria-label="Chop" data-chop="open">
       <div className="chop-bar">
         <div className="chop-anchor">
-          <button type="button" className="hw-key ch-tab" aria-expanded={loadOpen} onClick={() => { setLoadOpen((value) => !value); setModeOpen(false); setVintageOpen(false) }}>Load sample</button>
-          {loadOpen && (
-            <div className="chop-menu" role="group" aria-label="Load sample">
-              <button type="button" className="hw-key ch-tab" onClick={() => { void loadSoundCatalog(fetch, soundCache()).then((result) => setBrowser(result.entries.slice(0, 24))) }}>Browser</button>
-              <button type="button" className="hw-key ch-tab" onClick={() => fileRef.current?.click()}>Upload</button>
-              <button type="button" className="hw-key ch-tab" onClick={() => { void fromMic() }}>Microphone</button>
-              <button type="button" className="hw-key ch-tab" onClick={() => { void fromTab() }}>Tab audio</button>
-              <input ref={fileRef} className="chop-file" type="file" accept={SLOT_ACCEPT} aria-label="Upload a sample" onChange={(event) => { void fromFile(event) }} />
-              {browser && browser.map((entry) => (
-                <button key={entry.id} type="button" className="hw-key ch-tab" onClick={() => { void fromBrowser(entry) }}>{entry.name}</button>
-              ))}
-            </div>
-          )}
+          <button ref={loadButton} type="button" className="hw-key ch-tab" aria-expanded={loadOpen} onClick={() => { setLoadOpen((value) => !value); setModeOpen(false); setVintageOpen(false) }}>Load sample</button>
+          <AnchoredMenu className="chop-menu" open={loadOpen} onClose={() => setLoadOpen(false)} label="Load sample" triggerRef={loadButton} prefer="auto">
+            <button type="button" className="hw-key ch-tab" onClick={() => { void loadSoundCatalog(fetch, soundCache()).then((result) => setBrowser(result.entries.slice(0, 24))) }}>Browser</button>
+            <button type="button" className="hw-key ch-tab" onClick={() => fileRef.current?.click()}>Upload</button>
+            <button type="button" className="hw-key ch-tab" onClick={() => { void fromMic() }}>Microphone</button>
+            <button type="button" className="hw-key ch-tab" onClick={() => { void fromTab() }}>Tab audio</button>
+            <input ref={fileRef} className="chop-file" type="file" accept={SLOT_ACCEPT} aria-label="Upload a sample" onChange={(event) => { void fromFile(event) }} />
+            {browser && browser.map((entry) => (
+              <button key={entry.id} type="button" className="hw-key ch-tab" onClick={() => { void fromBrowser(entry) }}>{entry.name}</button>
+            ))}
+          </AnchoredMenu>
         </div>
         <div className="chop-anchor">
-          <button type="button" className="hw-key ch-tab" aria-expanded={modeOpen} onClick={() => { setModeOpen((value) => !value); setLoadOpen(false); setVintageOpen(false) }}>Chop mode</button>
-          {modeOpen && (
-            <div className="chop-menu" role="group" aria-label="Chop mode">
-              {(['tempo', 'even', 'transient', 'manual'] as ChopMode[]).map((mode) => (
-                <button key={mode} type="button" className={`hw-key ch-tab${chop?.mode === mode ? ' on' : ''}`} onClick={() => { if (chop) patch({ mode }); setModeOpen(false) }}>{modeLabel(mode)}</button>
-              ))}
-            </div>
-          )}
+          <button ref={modeButton} type="button" className="hw-key ch-tab" aria-expanded={modeOpen} onClick={() => { setModeOpen((value) => !value); setLoadOpen(false); setVintageOpen(false) }}>Chop mode</button>
+          <AnchoredMenu className="chop-menu" open={modeOpen} onClose={() => setModeOpen(false)} label="Chop mode" triggerRef={modeButton} prefer="auto">
+            {(['tempo', 'even', 'transient', 'manual'] as ChopMode[]).map((mode) => (
+              <button key={mode} type="button" className={`hw-key ch-tab${chop?.mode === mode ? ' on' : ''}`} onClick={() => { if (chop) patch({ mode }); setModeOpen(false) }}>{modeLabel(mode)}</button>
+            ))}
+          </AnchoredMenu>
         </div>
         <p className="chop-readout" aria-live="polite">{label}</p>
       </div>
@@ -326,9 +326,8 @@ export function ChopDrawer({
             <label className="vintage-knob">Vintage
               <input className="hw-knob" aria-label="Vintage" title="Vintage. Scales every vintage amount together." type="range" min={0} max={1} step={0.01} value={vintage?.macro ?? 0} style={{ ['--turn' as string]: String(vintage?.macro ?? 0) }} onChange={(event) => store.patchTrackKit(trackId, { vintage: { macro: Number(event.target.value), table: vintage?.table ?? FACTORY_VINTAGE[0].table, presetName: vintage?.presetName ?? '' } })} />
             </label>
-            <button type="button" className="hw-key ch-tab" aria-expanded={vintageOpen} onClick={() => setVintageOpen((value) => !value)}>Vintage menu</button>
-            {vintageOpen && (
-              <div className="chop-menu vintage-menu" role="group" aria-label="Vintage menu">
+            <button ref={vintageButton} type="button" className="hw-key ch-tab" aria-expanded={vintageOpen} onClick={() => setVintageOpen((value) => !value)}>Vintage menu</button>
+            <AnchoredMenu className="chop-menu vintage-menu" open={vintageOpen} onClose={() => setVintageOpen(false)} label="Vintage menu" triggerRef={vintageButton} prefer="auto">
                 <p>Each amount is the sound at 100%. The knob fades all of them from clean to that blend.</p>
                 {FACTORY_VINTAGE.map((preset) => (
                   <button key={preset.name} type="button" className="hw-key ch-tab" onClick={() => applyPreset(preset)}>{preset.name}</button>
@@ -358,8 +357,7 @@ export function ChopDrawer({
                     <span>Now {scaled[key].toFixed(2)}</span>
                   </label>
                 ))}
-              </div>
-            )}
+            </AnchoredMenu>
           </div>
           <label className="chop-sense">High pass
             <input aria-label="Sample high pass" type="range" min={0} max={1} step={0.01} value={chop.highpass} onChange={(event) => patch({ highpass: Number(event.target.value) })} />

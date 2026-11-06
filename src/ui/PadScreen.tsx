@@ -34,7 +34,6 @@ export function PadScreen({
   highpass,
   vintage,
   level,
-  gate,
   swing,
   tempo,
   hitToken,
@@ -68,7 +67,6 @@ export function PadScreen({
   const headRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<WaveView>({ start: 0, end: 1 })
   const [snap, setSnap] = useState(true)
-  const [fine, setFine] = useState(false)
   const [lock, setLock] = useState<{ edge: 'start' | 'end'; text: string } | null>(null)
   const viewRef = useRef(view)
   const regionRef = useRef({ start, end, reverse })
@@ -138,7 +136,6 @@ export function PadScreen({
     const width = wave.clientWidth || 1
     const dx = clientX - originX
     const pulled = Math.abs(clientY - originY) > 28
-    setFine(pulled)
     const shown = dragFraction(markerLeft(origin, view, reverse), dx, width, pulled)
     const fraction = viewFraction(shown * width, width, view, reverse)
     const raw = sampleIndex(fraction, data.length)
@@ -221,20 +218,18 @@ export function PadScreen({
     if (pointers.current.size < 2) pinch.current = null
     if (wasDrag && pointers.current.size === 0) {
       drag.current = null
-      setFine(false)
       onTrimEnd()
     }
   }
 
   const startLabel = secondsLabel(start, length, rate)
   const endLabel = secondsLabel(end, length, rate)
-  const tuneLabel = `${pitchMode === 'stretch' ? 'Stretch' : 'Vinyl'} ${tune >= 0 ? '+' : ''}${tune.toFixed(1)}`
   const startLeft = markerLeft(start, view, reverse)
   const endLeft = markerLeft(end, view, reverse)
 
   return (
     <div className="pad-screen-stack">
-    <section className="pad-screen hw-screen" aria-label="Pad screen" data-pad-screen="lcd">
+    <section className="pad-screen hw-screen" aria-label={`Pad screen. ${name}`} data-pad-screen="lcd">
       <div className="pad-screen-wave" ref={waveRef} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}>
         <canvas ref={canvasRef} aria-hidden />
         <i className="pad-screen-zero" aria-hidden />
@@ -259,19 +254,6 @@ export function PadScreen({
             title="Drag the end. Pull up or down for a finer move. It snaps to a zero crossing."
           />
         )}
-        <div className="pad-screen-readout">
-          <strong>{name}</strong>
-          <span>Start {startLabel}</span>
-          <span>End {endLabel}</span>
-          <span>{tuneLabel}</span>
-          <span>{gate === 'hold' ? 'Hold' : 'One shot'}</span>
-          <span>Swing {Math.round(swing)}</span>
-          <span>Level {Math.round(level * 100)}</span>
-          <span>Vintage {Math.round(vintage * 100)}</span>
-          {fine && <span>Fine</span>}
-          {lock && <span className="pad-lock">{lock.text}</span>}
-          {!samples && <span>No sample</span>}
-        </div>
       </div>
     </section>
       <div className="pad-screen-tools" role="group" aria-label="Waveform zoom">

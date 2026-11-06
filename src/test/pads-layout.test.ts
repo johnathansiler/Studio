@@ -86,7 +86,7 @@ describe('beat machine layout', () => {
             clientWidth: document.documentElement.clientWidth,
             scrollHeight: document.documentElement.scrollHeight,
             mpcRight: mpc ? Math.round(mpc.right) : 0,
-            pastRight: boxes.filter((box) => box.right > (mpc?.right ?? 0) + 1).length,
+            pastRight: boxes.filter((box) => box.right > (mpc?.right ?? 0) + 1).map((box) => `${box.name} right ${Math.round(box.right)} mpc ${Math.round(mpc?.right ?? 0)}`).slice(0, 8),
           }
         })
         const path = `/opt/cursor/artifacts/beat-${viewport.name}-${viewport.width}x${viewport.height}.png`
@@ -103,12 +103,56 @@ describe('beat machine layout', () => {
           expect(report.padWidth).toBeLessThanOrEqual(100)
         }
         expect(report.scrollWidth).toBeLessThanOrEqual(viewport.width + 1)
-        expect(report.pastRight).toBe(0)
+        expect(report.pastRight, viewport.name).toEqual([])
         expect(report.scrollHeight).toBeLessThanOrEqual(viewport.height + 1)
         const minimum = viewport.width >= 800 ? 110 : viewport.width >= 390 ? 72 : 64
         expect(report.padWidth).toBeGreaterThanOrEqual(minimum)
         expect(report.padHeight).toBeGreaterThanOrEqual(minimum)
         expect(Math.abs(report.padWidth - report.padHeight)).toBeLessThanOrEqual(6)
+        const face = await page.evaluate(() => {
+          const overlaps = (pad: DOMRect, row?: DOMRect) => {
+            if (!row || row.width < 1) return false
+            const width = Math.min(pad.right, row.right) - Math.max(pad.left, row.left)
+            const height = Math.min(pad.bottom, row.bottom) - Math.max(pad.top, row.top)
+            return width > 1 && height > 1
+          }
+          document.querySelectorAll('.mpc-pad').forEach((node) => node.classList.add('lit'))
+          const banks = document.querySelector('.mpc-banks')?.getBoundingClientRect()
+          const repeat = document.querySelector('.note-repeat-row')?.getBoundingClientRect()
+          const pads = [...document.querySelectorAll('.mpc-pad')].map((node) => node.getBoundingClientRect())
+          const transport = document.querySelector('[data-beat-transport]') as HTMLElement | null
+          const lip = document.querySelector('.hw-lip') as HTMLElement | null
+          const wave = document.querySelector('.pad-screen-wave') as HTMLElement | null
+          const transportBox = transport?.getBoundingClientRect()
+          const lipBox = lip?.getBoundingClientRect()
+          return {
+            tabs: [...document.querySelectorAll('[data-plugin-tab]')].map((node) => node.textContent?.trim() || ''),
+            readout: document.querySelector('.pad-screen-readout') != null,
+            waveText: (wave?.innerText || '').replace(/\s+/g, ' ').trim(),
+            transportHidden: transport?.closest('[hidden]') != null,
+            transportText: transport?.innerText || '',
+            lipHidden: lip?.closest('[hidden]') != null,
+            lipText: lip?.innerText || '',
+            padHits: pads.filter((pad) => overlaps(pad, banks) || overlaps(pad, repeat)).length,
+            transportBottom: transportBox?.bottom ?? -1,
+            lipBottom: lipBox?.bottom ?? -1,
+            viewH: window.innerHeight,
+          }
+        })
+        expect(face.tabs, viewport.name).toEqual(['Pads', 'Sound', 'Pattern'])
+        expect(face.readout, viewport.name).toBe(false)
+        expect(face.waveText, viewport.name).not.toMatch(/Vinyl|Swing|One shot|Vintage|Level/)
+        expect(face.transportHidden, viewport.name).toBe(false)
+        for (const word of ['Record', 'Overdub', 'Replace', 'Stop', 'Play', 'Erase', 'Arm', 'Count in', 'Metronome', 'Trim', 'Auto chop']) {
+          expect(face.transportText, `${viewport.name} ${word}`).toContain(word)
+        }
+        expect(face.lipHidden, viewport.name).toBe(false)
+        expect(face.lipText, viewport.name).toMatch(/sampler/i)
+        expect(face.lipText, viewport.name).toContain('Presets')
+        expect(face.padHits, viewport.name).toBe(0)
+        expect(face.transportBottom, viewport.name).toBeGreaterThan(0)
+        expect(face.transportBottom, viewport.name).toBeLessThanOrEqual(face.viewH + 1)
+        expect(face.lipBottom, viewport.name).toBeLessThanOrEqual(face.viewH + 1)
         shots.push({ name: viewport.name, path, padWidth: report.padWidth, padHeight: report.padHeight })
         await page.close()
       }
@@ -167,7 +211,7 @@ describe('beat machine layout', () => {
           html, body { margin: 0; height: auto; overflow: visible; background: #1a1a1a; }
           .stage { width: ${viewport.width}px; min-height: ${viewport.height}px; height: auto; }
           .mpc, .hw-body { height: auto; overflow: visible; }
-          ${viewport.vintage ? '.vintage-menu { position: relative; top: auto; left: auto; max-height: none; width: min(360px, 100%); }' : ''}
+          ${viewport.vintage ? '.vintage-menu { position: relative; top: auto; bottom: auto; left: auto; max-height: none; width: min(360px, 100%); }' : ''}
         </style></head><body><div class="stage">${viewport.html}</div></body></html>`, { waitUntil: 'load' })
         await page.evaluate(() => {
           const canvas = document.querySelector('.chop-wave canvas') as HTMLCanvasElement | null

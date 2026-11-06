@@ -127,6 +127,8 @@
   gap: 6px;
   min-width: 0;
   flex: none;
+  position: relative;
+  z-index: 1;
 }
 
 .mpc-banks .hw-key,
@@ -150,7 +152,10 @@
   min-width: 0;
   min-height: auto;
   display: block;
-  overflow: visible;
+  position: relative;
+  z-index: 0;
+  /* Press glow and the raised shadow stay inside the grid, off the rows below. */
+  overflow: hidden;
 }
 
 .mpc-grid {
@@ -313,6 +318,8 @@
   align-items: stretch;
   width: 100%;
   min-width: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .mpc-knob-row {
@@ -419,7 +426,7 @@
   text-align: center;
   touch-action: none;
   user-select: none;
-  overflow: visible;
+  overflow: hidden;
   background-color: #141414;
   background-image:
     radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.16), transparent 46%),
@@ -460,18 +467,16 @@
 
 .mpc-pad.lit,
 .mpc-pad:active {
-  transform: translateY(8px);
   color: #fff;
   background-image:
     radial-gradient(circle at 50% 42%, rgba(130, 255, 176, calc(0.2 + var(--vel, 0) * 0.55)), transparent 62%),
     linear-gradient(180deg, #2a2a2a 0%, #0c0c0c 70%, #050505 100%);
   box-shadow:
     inset 0 8px 12px rgba(0, 0, 0, 0.75),
-    0 0 calc(8px + var(--vel, 0.4) * 28px) rgba(80, 230, 140, calc(0.35 + var(--vel, 0) * 0.5)),
-    4px 4px 8px rgba(0, 0, 0, 0.4);
+    inset 0 0 calc(8px + var(--vel, 0.4) * 16px) rgba(80, 230, 140, calc(0.45 + var(--vel, 0) * 0.4));
 }
 
-.mpc-pad.sel { outline: 1px solid rgba(255, 255, 255, 0.35); }
+.mpc-pad.sel { outline: 1px solid rgba(255, 255, 255, 0.35); outline-offset: -3px; }
 .mpc-pad.muted span { opacity: 0.4; }
 
 .mpc-full {
@@ -528,8 +533,8 @@
 
 .pad-screen {
   position: relative;
-  flex: 0 0 108px;
-  height: 108px;
+  flex: 0 0 92px;
+  height: 92px;
   min-width: 0;
   border-radius: 10px;
   overflow: hidden;
@@ -594,23 +599,7 @@
   box-shadow: inset 2px 0 0 #f0d78a, 0 0 0 1px #f0d78a;
 }
 
-.pad-screen-readout {
-  position: absolute;
-  top: 4px;
-  left: 8px;
-  right: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  pointer-events: none;
-  color: #d5e6cf;
-  font-size: 11px;
-  line-height: 1.2;
-}
-
-.pad-screen-readout strong { font-size: 13px; color: #f4ffe8; }
-
-.pad-lock { color: #f0d78a; }
+.mpc [data-plugin-page='pads'] > * + * { margin-top: 6px; }
 
 .pad-screen-tools {
   display: flex;
@@ -748,10 +737,80 @@
   overflow: hidden;
 }
 
+/* Sampler presets and the take transport follow the pads. They stay in flow so they never cover Bank or Note Repeat. */
+.mpc-perform {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
+  margin-top: 6px;
+}
+
+.mpc-perform .hw-transport {
+  flex-wrap: wrap;
+}
+
+.mpc-perform .hw-slider {
+  width: auto;
+  flex: 1 1 160px;
+  min-width: min(100%, 160px);
+  flex-direction: row;
+  align-items: center;
+  height: 40px;
+  min-height: 40px;
+  gap: 8px;
+}
+
+.mpc-perform .hw-slider input {
+  height: 40px;
+  min-height: 40px;
+}
+
+/* Narrow phones keep the whole playing face, including presets, inside the viewport. */
+@media (min-width: 431px) and (max-width: 799px) {
+  .mpc-grid { width: min(100%, 380px); margin-inline: auto; }
+}
+
+@media (max-width: 430px) {
+  .pad-screen { flex-basis: 90px; height: 90px; }
+  .hw-body { gap: 2px; padding: 4px; }
+  .mpc [data-plugin-page='pads'] > * + * { margin-top: 2px; }
+  .mpc-grid { width: min(100%, 360px); margin-inline: auto; }
+  .hw-lip { padding: 0 8px; min-height: 40px; }
+  .mpc-perform { margin-top: 2px; gap: 2px; }
+  .mpc-perform .hw-transport { gap: 4px; }
+  .pad-screen-tools { gap: 4px; }
+}
+
+@media (min-width: 401px) and (max-width: 430px) {
+  .mpc-grid { height: 164px; aspect-ratio: auto; }
+}
+
+@media (max-width: 400px) {
+  .mpc-kind { display: none; }
+  .pad-screen { flex-basis: 90px; height: 90px; }
+  .hw-body { padding: 4px; gap: 2px; }
+  .mpc [data-plugin-page='pads'] > * + * { margin-top: 2px; }
+  .mpc-grid { width: min(100%, 320px); }
+  .mpc-perform { margin-top: 2px; gap: 2px; }
+  .mpc-perform .hw-transport { gap: 4px; }
+  .pad-screen-tools { gap: 4px; }
+}
+
+@media (max-width: 370px) {
+  .pad-screen { flex-basis: 90px; height: 90px; }
+  .hw-body { padding: 4px; gap: 2px; }
+  .mpc [data-plugin-page='pads'] > * + * { margin-top: 2px; }
+  .mpc-grid { width: min(100%, 288px); }
+  .mpc-perform { margin-top: 2px; gap: 2px; }
+}
+
 /* Wide face keeps the same row order. Pads stay the largest squares that fit. */
 @container (min-width: 800px) {
-  .pad-screen { flex-basis: 168px; height: 168px; }
-  .mpc-grid { width: min(100%, 640px); margin-inline: auto; gap: 12px; }
+  .pad-screen { flex-basis: 128px; height: 128px; }
+  .mpc-grid { width: min(100%, 480px); margin-inline: auto; gap: 12px; }
   .hw-body { gap: 8px; padding: 12px; }
   .mpc-brand { flex-direction: row; align-items: center; justify-content: flex-start; }
   .mpc-keyboard, .mpc-close { flex: 0 0 auto; width: auto; }
@@ -801,6 +860,18 @@
   border-radius: 0 8px 8px 8px;
   background: #242424;
   box-shadow: 0 12px 20px rgba(0, 0, 0, 0.45);
+}
+
+/* Portaled sample menus follow the trigger and stay inside the phone. */
+.anchored-menu.chop-menu {
+  position: fixed;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
+  width: min(280px, calc(100vw - 16px));
+  max-width: min(280px, calc(100vw - 16px));
+  z-index: calc(var(--overlay-z, 360) + 32);
 }
 .chop-menu .hw-key { width: 100%; min-height: 44px; }
 .chop-file { position: absolute; width: 1px; height: 1px; opacity: 0; }

@@ -309,7 +309,7 @@ export function SamplePanel({ store, engine, trackId, plugin, vu }: { store: Pro
         </label>
         <SlotButton label="Sounds" hint="Open the sound library and put one in this slot." onClick={() => window.dispatchEvent(new Event(OPEN_SOUNDS))} />
         {sampler && <SlotButton className={plugin.params.keys >= 0.5 ? 'on' : ''} label="Keys" hint="Play the sample from the keyboard instead of the pads." pressed={plugin.params.keys >= 0.5} onClick={() => store.updatePlugin(trackId, plugin.id, { params: { keys: plugin.params.keys >= 0.5 ? 0 : 1 } })} />}
-        {looper && !phone && <SlotButton className={dubbing ? 'on' : ''} label={dubbing ? 'Stop' : 'Dub'} hint={dubbing ? 'Stop and keep this pass.' : 'Record another pass over the loop. The loop restarts with the pass.'} pressed={dubbing} onClick={() => { if (recording) stopTake(); else void beginRecord('overdub') }} />}
+        {looper && <SlotButton className={dubbing ? 'on' : ''} label={dubbing ? 'Stop' : 'Dub'} hint={dubbing ? 'Stop and keep this pass.' : 'Record another pass over the loop. The loop restarts with the pass.'} pressed={dubbing} onClick={() => { if (recording) stopTake(); else void beginRecord('overdub') }} />}
         {looper && <SlotButton label="Play" hint="Play the loop from the next bar." onClick={() => store.armLooper(trackId, plugin.id, 1, beat())} />}
         {looper && <SlotButton label="Stop" hint="Stop the loop." onClick={() => { stopRef.current = true; store.armLooper(trackId, plugin.id, 0, beat()) }} />}
         <SlotButton className={more ? 'on' : ''} label="More" hint="Trim, normalize, slices, and the clip send." pressed={more} onClick={() => setMore((value) => !value)} />
@@ -376,7 +376,6 @@ export function SamplePanel({ store, engine, trackId, plugin, vu }: { store: Pro
       {more && (
         <div className="slot-actions">
           <SlotButton label="Clip" hint="Copy the selected arrange clip into this slot." onClick={sendSelected} />
-          {looper && phone && <SlotButton className={dubbing ? 'on' : ''} label={dubbing ? 'Stop' : 'Dub'} hint={dubbing ? 'Stop and keep this pass.' : 'Record another pass over the loop. The loop restarts with the pass.'} pressed={dubbing} onClick={() => { if (recording) stopTake(); else void beginRecord('overdub') }} />}
           {sampler && <SlotButton label="Slice" hint="Cut the sample into pads across the keyboard." onClick={() => store.chopSample(trackId, plugin.id, 'grid')} />}
           {sampler && <SlotButton label="Hits" hint="Cut the sample at the transients." onClick={() => store.chopSample(trackId, plugin.id, 'transient')} />}
           {sampler && <SlotButton label="Beat" hint="Cut the sample on each beat." onClick={() => store.chopSample(trackId, plugin.id, 'beat')} />}

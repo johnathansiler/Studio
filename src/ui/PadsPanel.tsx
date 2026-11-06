@@ -96,12 +96,12 @@ export function PadsPanel({
   const [recordMode, setRecordMode] = useState<'overdub' | 'replace'>('overdub')
   const [stepPick, setStepPick] = useState(0)
   const [padPage, setPadPage] = useState<0 | 1>(0)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [chopOpen, setChopOpen] = useState(chopStartsOpen)
-  const [face, setFace] = useState<'pads' | 'play' | 'setup'>('pads')
-  const [setupPart, setSetupPart] = useState('song')
+  const [face, setFace] = useState<'pads' | 'sound' | 'pattern'>('pads')
   const [kitOpen, setKitOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
   const kitButton = useRef<HTMLButtonElement>(null)
+  const moreButton = useRef<HTMLButtonElement>(null)
   const taps = useRef(emptyTap())
   const stopRec = useRef(false)
   const [padArm, setPadArm] = useState<'idle' | 'count-in' | 'recording'>('idle')
@@ -491,8 +491,8 @@ export function PadsPanel({
           </button>
         </header>
         <div className="plugin-page-tabs" role="tablist" aria-label="Beat Machine pages">
-          {([['pads', 'Pads'], ['play', 'Play'], ['setup', 'Setup']] as const).map(([id, label]) => (
-            <button key={id} type="button" role="tab" data-plugin-tab={id} aria-selected={face === id} className={face === id ? 'on' : ''} onClick={() => setFace(id)}>{label}</button>
+          {([['pads', 'Pads'], ['sound', 'Sound'], ['pattern', 'Pattern']] as const).map(([id, label]) => (
+            <button key={id} type="button" role="tab" data-plugin-tab={id} aria-selected={face === id} className={face === id ? 'on' : ''} onClick={() => { setFace(id); setMoreOpen(false) }}>{label}</button>
           ))}
         </div>
 
@@ -630,8 +630,8 @@ export function PadsPanel({
           </div>
         </div>
 
-        <div data-plugin-page="play" hidden={face !== 'play'}>
-        <div className="hw-deck">
+        <div data-plugin-page="sound" hidden={face !== 'sound'}>
+        <section className="hw-window open" aria-label="Sound">
           <div className="mpc-knob-row">
             <button type="button" className={`hw-key ch-tab mpc-full${kit.fullLevel ? ' on' : ''}`} aria-pressed={kit.fullLevel} title="Full level. Every hit plays at velocity 127, wherever you touch the pad." onClick={() => store.patchTrackKit(trackId, { fullLevel: !kit.fullLevel })}>Full Level</button>
             <div className="hw-knobs" aria-label="Knobs">
@@ -643,7 +643,6 @@ export function PadsPanel({
               </label>
             </div>
           </div>
-
           <div className="mpc-pad-tools">
             <select className="hw-key ch-tab" aria-label="16 Levels" title="One pad spread across 16 velocities, tunes, or decays. Bank B continues the upper eight." value={levels} onChange={(event) => setLevels(event.target.value as LevelSpread | '')}>
               <option value="">16 Levels</option>
@@ -653,117 +652,10 @@ export function PadsPanel({
               <option value="decay">Decay</option>
               <option value="attack">Attack</option>
             </select>
-            <button type="button" className={`hw-key ch-tab${settingsOpen ? ' on' : ''}`} aria-pressed={settingsOpen} aria-expanded={settingsOpen} title="Pad settings. Steps, mix, chop, and the other controls." onClick={() => setSettingsOpen((value) => !value)}>Pad settings</button>
-          </div>
-
-          <div className="hw-transport" aria-label="Transport">
-            <button type="button" className={`hw-key rec ch-tab${recording ? ' on' : ''}`} aria-pressed={recording} title="Record pad hits into a clip on this track, with the count-in and the loop." onClick={record}>Record</button>
-            <button type="button" className={`hw-key dub ch-tab${recordMode === 'overdub' ? ' on' : ''}`} aria-pressed={recordMode === 'overdub'} title="Overdub keeps the notes already in the loop." onClick={() => setRecordMode(recordMode === 'overdub' ? 'replace' : 'overdub')}>Overdub</button>
-            <button type="button" className="hw-key ch-tab" title="Stop" onClick={() => { if (recording) onRecord(); engine.stop?.() }}>Stop</button>
-            <button type="button" className="hw-key ch-tab" title="Play from the current position." onClick={() => { void engine.playAtPerf?.(engine.positionSamples, performance.now(), 'arrangement') }}>Play</button>
-            <button type="button" className="hw-key ch-tab" title="Play start. Play from the top." onClick={() => { void engine.playAtPerf?.(0, performance.now(), 'arrangement') }}>Play start</button>
-            <button type="button" className={`hw-key ch-tab${eraseOn ? ' on' : ''}`} aria-pressed={eraseOn} title="Hold Erase and a pad to clear that sound while the loop plays." onPointerDown={(event) => { event.preventDefault(); setEraseOn(true) }} onPointerUp={() => setEraseOn(false)} onPointerCancel={() => setEraseOn(false)} onPointerLeave={() => setEraseOn(false)}>Erase</button>
-          </div>
-
-          <label className="hw-slider">Swing {Math.round(kit.swing)}
-            <input aria-label="Swing" title="Swing. 50 is straight. 75 is a hard shuffle." type="range" min={50} max={75} step={1} value={kit.swing} onChange={(event) => {
-              const swing = Number(event.target.value)
-              store.patchTrackKit(trackId, { swing, trackSwing: swing })
-            }} />
-          </label>
-        </div>
-        </div>
-
-        <div data-plugin-page="setup" hidden={face !== 'setup'}>
-        <section className="hw-window open" aria-label="Pad settings">
-          <label className="plugin-page-menu">
-            <span>Section</span>
-            <select aria-label="Setup section" value={setupPart} onChange={(event) => setSetupPart(event.target.value)}>
-              <option value="song">Song</option>
-              <option value="mix">Mix</option>
-              <option value="steps">Steps</option>
-              <option value="pad">Pad</option>
-            </select>
-          </label>
-          <div className="hw-keys" hidden={setupPart !== 'song'}>
-            <button type="button" className="hw-key ch-tab" title="Next sequence. Lengthens the pattern one step at a time." onClick={() => store.setMpcLength(trackId, kit.sequences[0]?.lengthBeats === 32 ? 4 : (kit.sequences[0]?.lengthBeats || 4) * 2)}>Next sequence</button>
             <button type="button" className={`hw-key ch-tab${source?.muted ? ' on' : ''}`} aria-pressed={!!source?.muted} title="Track mute. Mute this pad. The clip keeps its notes." onClick={() => source && store.updateTrackPad(trackId, bank, selected, { muted: !source.muted })}>Track mute</button>
-            <button type="button" className="hw-key ch-tab" title="Tap tempo. With sync on, this sets the project tempo." onClick={tapTempo}>Tap tempo</button>
-            <button type="button" className="hw-key ch-tab" title="Undo sequence" disabled={!store.canUndo} onClick={() => store.undo()}>Undo</button>
-            <button type="button" className={`hw-key ch-tab${kit.timing ? ' on' : ''}`} aria-pressed={kit.timing} title="Input quantize. Snap new hits to the grid by the strength and swing." onClick={() => store.patchTrackKit(trackId, { timing: !kit.timing, timingGrid: quantizeGridBeats(kit.quantizeRate || '1/16') })}>Quantize</button>
-            <button type="button" className={`hw-key ch-tab${padArm !== 'idle' ? ' on' : ''}`} aria-pressed={padArm !== 'idle'} title="Arm this pad. Recording starts when the mic crosses the threshold." onClick={() => { void armPad() }}>{padArm === 'idle' ? 'Arm pad' : 'Stop pad'}</button>
-            <button type="button" className="hw-key ch-tab" title="Open this clip in the piano roll." onClick={edit}>Piano roll</button>
-            <button type="button" className={`hw-key ch-tab${store.project.countIn ? ' on' : ''}`} aria-pressed={store.project.countIn} title={`Count-in is ${countInCaption(countInBarsOf(store.project))}. Tap for off, one bar, or two bars.`} onClick={() => store.cycleCountIn()}>Count in</button>
-            <button type="button" className={`hw-key ch-tab${store.project.metronomeEnabled ? ' on' : ''}`} aria-pressed={store.project.metronomeEnabled} title="Metronome while the pads record." onClick={() => store.toggle('metronomeEnabled')}>Metronome</button>
           </div>
-          <div className="mpc-tools" hidden={setupPart !== 'mix'}>
-            <select aria-label="Output" title="MIDI out records clips and can drive another instrument. Audio out renders the pads. Both does both." value={kit.output} onChange={(event) => store.patchTrackKit(trackId, { output: event.target.value as 'midi' | 'audio' | 'both' })}>
-              <option value="midi">MIDI out</option>
-              <option value="audio">Audio out</option>
-              <option value="both">Both</option>
-            </select>
-            <button type="button" className={`hw-key ch-tab${kit.multiOut ? ' on' : ''}`} aria-pressed={kit.multiOut} title="Send each pad to its own bus." onClick={() => store.patchTrackKit(trackId, { multiOut: !kit.multiOut })}>Multi out</button>
-            <select aria-label="Note repeat rate" title="Straight notes and triplets, from a quarter to a thirty-second." value={kit.repeatRate} onChange={(event) => store.patchTrackKit(trackId, { repeatRate: event.target.value })}>
-              {REPEAT_CHOICES.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
-            </select>
-            <button type="button" className={`hw-key ch-tab${kit.repeatLatch ? ' on' : ''}`} aria-pressed={kit.repeatLatch} title="Latch keeps note repeat playing after the pad is released." onClick={() => store.patchTrackKit(trackId, { repeatLatch: !kit.repeatLatch })}>Latch</button>
-            <button type="button" className={`hw-key ch-tab${recordMode === 'replace' ? ' on' : ''}`} aria-pressed={recordMode === 'replace'} title="Replace clears the loop while you record." onClick={() => setRecordMode('replace')}>Replace</button>
-            <button type="button" className={`hw-key ch-tab${kit.syncTempo ? ' on' : ''}`} aria-pressed={kit.syncTempo} title="Sync note repeat to the project tempo." onClick={() => store.patchTrackKit(trackId, { syncTempo: !kit.syncTempo })}>Sync</button>
-            <button type="button" className="hw-key ch-tab" title="Chop the selected pad on transients and spread the slices across this bank." onClick={() => store.chopTrackPad(trackId, bank, selected, 'transient')}>Transient</button>
-            <button type="button" className="hw-key ch-tab" title="Chop the selected pad on a grid and spread the slices across this bank." onClick={() => store.chopTrackPad(trackId, bank, selected, 'grid')}>Grid</button>
-            <button type="button" className="hw-key ch-tab" title="Chop the selected pad at its start and end and spread the slices across this bank." onClick={() => store.chopTrackPad(trackId, bank, selected, 'manual')}>Manual</button>
-            <button type="button" className="hw-key ch-tab" title="Place the song chain on the arrangement." onClick={() => store.placeMpcSong(trackId, projectSampleBeat(store.project, engine.currentTimelineSample()))}>Place song</button>
-            <button type="button" className="hw-key ch-tab" title="Render the pattern to an audio clip." onClick={() => store.printMpcAudio(trackId, undefined, engine.currentTimelineSample())}>Print audio</button>
-            <button type="button" className="hw-key ch-tab" title="Rewrite the pattern and the recorded clip with this timing and velocity scatter." onClick={() => store.humanizePadTake(trackId)}>Humanize</button>
-            <select aria-label="Quantize grid" title="Grid for input quantize and for applying quantize to the pattern, including triplets." value={kit.quantizeRate || '1/16'} onChange={(event) => store.patchTrackKit(trackId, { quantizeRate: event.target.value, timingGrid: quantizeGridBeats(event.target.value) })}>
-              {REPEAT_CHOICES.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
-            </select>
-            <label>Strength
-              <input aria-label="Quantize strength" title="How far notes move toward the grid. 100 percent is fully on the grid." type="range" min={0} max={100} step={1} value={Math.round((kit.timingStrength ?? 1) * 100)} onChange={(event) => store.patchTrackKit(trackId, { timingStrength: Number(event.target.value) / 100 })} />
-            </label>
-            <button type="button" className="hw-key ch-tab" title="Apply quantize to the recorded pattern and the step sequence." onClick={() => store.quantizePadTake(trackId)}>Apply quantize</button>
-            <label>Threshold
-              <input aria-label="Record threshold" title="Mic level that starts the armed pad." type="range" min={0.01} max={0.5} step={0.01} value={kit.recordThreshold} onChange={(event) => store.patchTrackKit(trackId, { recordThreshold: Number(event.target.value) })} />
-            </label>
-            <button type="button" className={`hw-key ch-tab${kit.recordTrim ? ' on' : ''}`} aria-pressed={kit.recordTrim} title="Trim silence from the pad take." onClick={() => store.patchTrackKit(trackId, { recordTrim: !kit.recordTrim })}>Trim</button>
-            <button type="button" className={`hw-key ch-tab${kit.recordChop ? ' on' : ''}`} aria-pressed={!!kit.recordChop} title="Chop the pad take on transients across this bank." onClick={() => store.patchTrackKit(trackId, { recordChop: !kit.recordChop })}>Auto chop</button>
-            <label>Timing
-              <input aria-label="Humanize timing" title="How far live hits and the Humanize edit may move, in beats." type="range" min={0} max={0.25} step={0.005} value={kit.humanizeTime} onChange={(event) => store.patchTrackKit(trackId, { humanizeTime: Number(event.target.value) })} />
-            </label>
-            <label>Velocity
-              <input aria-label="Humanize velocity" title="How far live hits and the Humanize edit may change velocity." type="range" min={0} max={1} step={0.01} value={kit.humanizeVelocity} onChange={(event) => store.patchTrackKit(trackId, { humanizeVelocity: Number(event.target.value) })} />
-            </label>
-            <select aria-label="Velocity curve" title="Linear, soft, hard, or a fixed velocity." value={kit.velocityCurve} onChange={(event) => store.patchTrackKit(trackId, { velocityCurve: Number(event.target.value) })}>
-              {VELOCITY_CURVES.map((curve) => <option key={curve.id} value={curve.id}>{curve.label}</option>)}
-            </select>
-            <label>Scale
-              <input aria-label="Velocity scale" title="How strongly the curve replaces the played velocity." type="range" min={0} max={1} step={0.01} value={kit.velocityAmount} onChange={(event) => store.patchTrackKit(trackId, { velocityAmount: Number(event.target.value) })} />
-            </label>
-            <label>Minimum
-              <input aria-label="Velocity minimum" title="Softest velocity the curve may produce." type="range" min={0} max={1} step={0.01} value={kit.velocityMin} onChange={(event) => store.patchTrackKit(trackId, { velocityMin: Number(event.target.value) })} />
-            </label>
-            <label>Maximum
-              <input aria-label="Velocity maximum" title="Loudest velocity the curve may produce." type="range" min={0} max={1} step={0.01} value={kit.velocityMax} onChange={(event) => store.patchTrackKit(trackId, { velocityMax: Number(event.target.value) })} />
-            </label>
-            <label>Fixed
-              <input aria-label="Fixed velocity" title="Velocity used by Fixed curve and by pads with no sensitivity." type="range" min={0.01} max={1} step={0.01} value={kit.velocityFixed} onChange={(event) => store.patchTrackKit(trackId, { velocityFixed: Number(event.target.value) })} />
-            </label>
-          </div>
-          <div className="mpc-steps" aria-label="Steps" hidden={setupPart !== 'steps'}>
-            {Array.from({ length: 16 }, (_, step) => {
-              const sequence = kit.sequences[0]
-              const on = sequence ? stepOn(sequence.notes, pads[selected]?.pitch ?? 0, step, stepBeats) : false
-              const level = sequence ? stepVelocity(sequence.notes, pads[selected]?.pitch ?? 0, step, stepBeats) : null
-              return (
-                <button key={step} type="button" className={`hw-key ch-tab${on ? ' on' : ''}${stepPick === step ? ' sel' : ''}`} aria-pressed={on} aria-label={`Step ${step + 1}`} title={level == null ? `Step ${step + 1}` : `Step ${step + 1}. Velocity ${Math.round(level * 127)}.`} onClick={() => { setStepPick(step); store.toggleMpcStep(trackId, bank, selected, step, kit.velocityFixed) }}>{step + 1}</button>
-              )
-            })}
-          </div>
-          <label className="mpc-step-velocity" hidden={setupPart !== 'steps'}>Step velocity
-            <input aria-label="Step velocity" title="Velocity of the selected step. Turn the step on, then set how hard it hits." type="range" min={0.01} max={1} step={0.01} value={stepLevel} onChange={(event) => store.setMpcStepVelocity(trackId, bank, selected, stepPick, Number(event.target.value))} />
-          </label>
           {source && (
-            <aside className="mpc-params" aria-label="Pad settings" hidden={setupPart !== 'pad'}>
+            <aside className="mpc-params" aria-label="Pad settings">
               <h3 title={source.sampleName || source.name}>{padFaceName(source)}</h3>
               <div className="mpc-side-meter" aria-label="Pad meter" style={{ ['--vel' as string]: String(meters[selected] ?? 0) }}>
                 <i style={{ height: `${Math.round((meters[selected] ?? 0) * 100)}%` }} />
@@ -815,20 +707,119 @@ export function PadsPanel({
                   ))}
                 </select>
               </label>
+              <select aria-label="Velocity curve" title="Linear, soft, hard, or a fixed velocity." value={kit.velocityCurve} onChange={(event) => store.patchTrackKit(trackId, { velocityCurve: Number(event.target.value) })}>
+                {VELOCITY_CURVES.map((curve) => <option key={curve.id} value={curve.id}>{curve.label}</option>)}
+              </select>
+              <label>Scale
+                <input aria-label="Velocity scale" title="How strongly the curve replaces the played velocity." type="range" min={0} max={1} step={0.01} value={kit.velocityAmount} onChange={(event) => store.patchTrackKit(trackId, { velocityAmount: Number(event.target.value) })} />
+              </label>
+              <label>Minimum
+                <input aria-label="Velocity minimum" title="Softest velocity the curve may produce." type="range" min={0} max={1} step={0.01} value={kit.velocityMin} onChange={(event) => store.patchTrackKit(trackId, { velocityMin: Number(event.target.value) })} />
+              </label>
+              <label>Maximum
+                <input aria-label="Velocity maximum" title="Loudest velocity the curve may produce." type="range" min={0} max={1} step={0.01} value={kit.velocityMax} onChange={(event) => store.patchTrackKit(trackId, { velocityMax: Number(event.target.value) })} />
+              </label>
+              <label>Fixed
+                <input aria-label="Fixed velocity" title="Velocity used by Fixed curve and by pads with no sensitivity." type="range" min={0.01} max={1} step={0.01} value={kit.velocityFixed} onChange={(event) => store.patchTrackKit(trackId, { velocityFixed: Number(event.target.value) })} />
+              </label>
             </aside>
           )}
         </section>
-        <footer className="hw-lip">
-          <span className="mpc-lip-word">Sampler</span>
-          <PresetControls
-            pluginId="pads"
-            instanceKey={`pads:${trackId}`}
-            values={readKit(kit)}
-            presets={store.project.presets}
-            onCommit={(next) => commitPadPreset(store, trackId, next.params, next.presets)}
-          />
-        </footer>
         </div>
+
+        <div data-plugin-page="pattern" hidden={face !== 'pattern'}>
+        <section className="hw-window open" aria-label="Pattern">
+          <div className="mpc-steps" aria-label="Steps">
+            {Array.from({ length: 16 }, (_, step) => {
+              const sequence = kit.sequences[0]
+              const on = sequence ? stepOn(sequence.notes, pads[selected]?.pitch ?? 0, step, stepBeats) : false
+              const level = sequence ? stepVelocity(sequence.notes, pads[selected]?.pitch ?? 0, step, stepBeats) : null
+              return (
+                <button key={step} type="button" className={`hw-key ch-tab${on ? ' on' : ''}${stepPick === step ? ' sel' : ''}`} aria-pressed={on} aria-label={`Step ${step + 1}`} title={level == null ? `Step ${step + 1}` : `Step ${step + 1}. Velocity ${Math.round(level * 127)}.`} onClick={() => { setStepPick(step); store.toggleMpcStep(trackId, bank, selected, step, kit.velocityFixed) }}>{step + 1}</button>
+              )
+            })}
+          </div>
+          <label className="mpc-step-velocity">Step velocity
+            <input aria-label="Step velocity" title="Velocity of the selected step. Turn the step on, then set how hard it hits." type="range" min={0.01} max={1} step={0.01} value={stepLevel} onChange={(event) => store.setMpcStepVelocity(trackId, bank, selected, stepPick, Number(event.target.value))} />
+          </label>
+          <div className="hw-keys">
+            <button type="button" className="hw-key ch-tab" title="Next sequence. Lengthens the pattern one step at a time." onClick={() => store.setMpcLength(trackId, kit.sequences[0]?.lengthBeats === 32 ? 4 : (kit.sequences[0]?.lengthBeats || 4) * 2)}>Next sequence</button>
+            <button type="button" className={`hw-key ch-tab${kit.timing ? ' on' : ''}`} aria-pressed={kit.timing} title="Input quantize. Snap new hits to the grid by the strength and swing." onClick={() => store.patchTrackKit(trackId, { timing: !kit.timing, timingGrid: quantizeGridBeats(kit.quantizeRate || '1/16') })}>Quantize</button>
+            <button type="button" className="hw-key ch-tab" title="Apply quantize to the recorded pattern and the step sequence." onClick={() => store.quantizePadTake(trackId)}>Apply quantize</button>
+            <button type="button" className="hw-key ch-tab" title="Rewrite the pattern and the recorded clip with this timing and velocity scatter." onClick={() => store.humanizePadTake(trackId)}>Humanize</button>
+            <button type="button" className="hw-key ch-tab" title="Place the song chain on the arrangement." onClick={() => store.placeMpcSong(trackId, projectSampleBeat(store.project, engine.currentTimelineSample()))}>Place song</button>
+            <button type="button" className="hw-key ch-tab" title="Render the pattern to an audio clip." onClick={() => store.printMpcAudio(trackId, undefined, engine.currentTimelineSample())}>Print audio</button>
+            <button type="button" className="hw-key ch-tab" title="Tap tempo. With sync on, this sets the project tempo." onClick={tapTempo}>Tap tempo</button>
+            <button type="button" className="hw-key ch-tab" title="Undo sequence" disabled={!store.canUndo} onClick={() => store.undo()}>Undo</button>
+            <button type="button" className="hw-key ch-tab" title="Open this clip in the piano roll." onClick={edit}>Piano roll</button>
+          </div>
+          <label className="hw-slider">Swing {Math.round(kit.swing)}
+            <input aria-label="Swing" title="Swing. 50 is straight. 75 is a hard shuffle." type="range" min={50} max={75} step={1} value={kit.swing} onChange={(event) => {
+              const swing = Number(event.target.value)
+              store.patchTrackKit(trackId, { swing, trackSwing: swing })
+            }} />
+          </label>
+          <div className="mpc-tools">
+            <select aria-label="Quantize grid" title="Grid for input quantize and for applying quantize to the pattern, including triplets." value={kit.quantizeRate || '1/16'} onChange={(event) => store.patchTrackKit(trackId, { quantizeRate: event.target.value, timingGrid: quantizeGridBeats(event.target.value) })}>
+              {REPEAT_CHOICES.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
+            </select>
+            <label>Strength
+              <input aria-label="Quantize strength" title="How far notes move toward the grid. 100 percent is fully on the grid." type="range" min={0} max={100} step={1} value={Math.round((kit.timingStrength ?? 1) * 100)} onChange={(event) => store.patchTrackKit(trackId, { timingStrength: Number(event.target.value) / 100 })} />
+            </label>
+            <label>Timing
+              <input aria-label="Humanize timing" title="How far live hits and the Humanize edit may move, in beats." type="range" min={0} max={0.25} step={0.005} value={kit.humanizeTime} onChange={(event) => store.patchTrackKit(trackId, { humanizeTime: Number(event.target.value) })} />
+            </label>
+            <label>Velocity
+              <input aria-label="Humanize velocity" title="How far live hits and the Humanize edit may change velocity." type="range" min={0} max={1} step={0.01} value={kit.humanizeVelocity} onChange={(event) => store.patchTrackKit(trackId, { humanizeVelocity: Number(event.target.value) })} />
+            </label>
+          </div>
+        </section>
+        </div>
+
+        <div className="mpc-perform" data-beat-perform="open">
+          <div className="hw-transport" aria-label="Transport" data-beat-transport="open">
+            <button type="button" className={`hw-key rec ch-tab${recording ? ' on' : ''}`} aria-pressed={recording} title="Record pad hits into a clip on this track, with the count-in and the loop." onClick={record}>Record</button>
+            <button type="button" className={`hw-key dub ch-tab${recordMode === 'overdub' ? ' on' : ''}`} aria-pressed={recordMode === 'overdub'} title="Overdub keeps the notes already in the loop." onClick={() => setRecordMode('overdub')}>Overdub</button>
+            <button type="button" className={`hw-key ch-tab${recordMode === 'replace' ? ' on' : ''}`} aria-pressed={recordMode === 'replace'} title="Replace clears the loop while you record." onClick={() => setRecordMode('replace')}>Replace</button>
+            <button type="button" className="hw-key ch-tab" title="Stop" onClick={() => { if (recording) onRecord(); engine.stop?.() }}>Stop</button>
+            <button type="button" className="hw-key ch-tab" title="Play from the current position." onClick={() => { void engine.playAtPerf?.(engine.positionSamples, performance.now(), 'arrangement') }}>Play</button>
+            <button type="button" className="hw-key ch-tab" title="Play start. Play from the top." onClick={() => { void engine.playAtPerf?.(0, performance.now(), 'arrangement') }}>Play start</button>
+            <button type="button" className={`hw-key ch-tab${eraseOn ? ' on' : ''}`} aria-pressed={eraseOn} title="Hold Erase and a pad to clear that sound while the loop plays." onPointerDown={(event) => { event.preventDefault(); setEraseOn(true) }} onPointerUp={() => setEraseOn(false)} onPointerCancel={() => setEraseOn(false)} onPointerLeave={() => setEraseOn(false)}>Erase</button>
+            <button type="button" className={`hw-key ch-tab${padArm !== 'idle' ? ' on' : ''}`} aria-pressed={padArm !== 'idle'} title="Arm this pad. Recording starts when the mic crosses the threshold." onClick={() => { void armPad() }}>{padArm === 'idle' ? 'Arm pad' : 'Stop pad'}</button>
+            <button type="button" className={`hw-key ch-tab${store.project.countIn ? ' on' : ''}`} aria-pressed={store.project.countIn} title={`Count-in is ${countInCaption(countInBarsOf(store.project))}. Tap for off, one bar, or two bars.`} onClick={() => store.cycleCountIn()}>Count in</button>
+            <button type="button" className={`hw-key ch-tab${store.project.metronomeEnabled ? ' on' : ''}`} aria-pressed={store.project.metronomeEnabled} title="Metronome while the pads record." onClick={() => store.toggle('metronomeEnabled')}>Metronome</button>
+            <button type="button" className={`hw-key ch-tab${kit.recordTrim ? ' on' : ''}`} aria-pressed={kit.recordTrim} title="Trim silence from the pad take." onClick={() => store.patchTrackKit(trackId, { recordTrim: !kit.recordTrim })}>Trim</button>
+            <button type="button" className={`hw-key ch-tab${kit.recordChop ? ' on' : ''}`} aria-pressed={!!kit.recordChop} title="Chop the pad take on transients across this bank." onClick={() => store.patchTrackKit(trackId, { recordChop: !kit.recordChop })}>Auto chop</button>
+            <button ref={moreButton} type="button" className={`hw-key ch-tab${moreOpen ? ' on' : ''}`} aria-expanded={moreOpen} title="Output, sync, latch, and chop shortcuts." onClick={() => setMoreOpen((value) => !value)}>More</button>
+          </div>
+          <label className="hw-slider">Threshold
+            <input aria-label="Record threshold" title="Mic level that starts the armed pad." type="range" min={0.01} max={0.5} step={0.01} value={kit.recordThreshold} onChange={(event) => store.patchTrackKit(trackId, { recordThreshold: Number(event.target.value) })} />
+          </label>
+          <AnchoredMenu open={moreOpen} onClose={() => setMoreOpen(false)} label="More" triggerRef={moreButton} prefer="auto">
+            <select aria-label="Output" title="MIDI out records clips and can drive another instrument. Audio out renders the pads. Both does both." value={kit.output} onChange={(event) => store.patchTrackKit(trackId, { output: event.target.value as 'midi' | 'audio' | 'both' })}>
+              <option value="midi">MIDI out</option>
+              <option value="audio">Audio out</option>
+              <option value="both">Both</option>
+            </select>
+            <button type="button" className={`hw-key ch-tab${kit.multiOut ? ' on' : ''}`} aria-pressed={kit.multiOut} title="Send each pad to its own bus." onClick={() => store.patchTrackKit(trackId, { multiOut: !kit.multiOut })}>Multi out</button>
+            <button type="button" className={`hw-key ch-tab${kit.syncTempo ? ' on' : ''}`} aria-pressed={kit.syncTempo} title="Sync note repeat to the project tempo." onClick={() => store.patchTrackKit(trackId, { syncTempo: !kit.syncTempo })}>Sync</button>
+            <button type="button" className={`hw-key ch-tab${kit.repeatLatch ? ' on' : ''}`} aria-pressed={kit.repeatLatch} title="Latch keeps note repeat playing after the pad is released." onClick={() => store.patchTrackKit(trackId, { repeatLatch: !kit.repeatLatch })}>Latch</button>
+            <button type="button" className="hw-key ch-tab" title="Chop the selected pad on transients and spread the slices across this bank." onClick={() => store.chopTrackPad(trackId, bank, selected, 'transient')}>Transient</button>
+            <button type="button" className="hw-key ch-tab" title="Chop the selected pad on a grid and spread the slices across this bank." onClick={() => store.chopTrackPad(trackId, bank, selected, 'grid')}>Grid</button>
+            <button type="button" className="hw-key ch-tab" title="Chop the selected pad at its start and end and spread the slices across this bank." onClick={() => store.chopTrackPad(trackId, bank, selected, 'manual')}>Manual</button>
+          </AnchoredMenu>
+          <footer className="hw-lip">
+            <span className="mpc-lip-word">Sampler</span>
+            <PresetControls
+              pluginId="pads"
+              instanceKey={`pads:${trackId}`}
+              values={readKit(kit)}
+              presets={store.project.presets}
+              onCommit={(next) => commitPadPreset(store, trackId, next.params, next.presets)}
+            />
+          </footer>
+        </div>
+
       </div>
     </div>
   )
