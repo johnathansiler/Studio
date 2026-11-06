@@ -109,6 +109,21 @@
   width: 100%;
 }
 
+/* Short sheets stay as tall as their controls. The shared overlay rule must not stretch them. */
+[data-screen-overlay].fit-sheet {
+  top: auto !important;
+  bottom: calc(12px + var(--edit-bar, env(safe-area-inset-bottom))) !important;
+  left: auto !important;
+  right: 8px !important;
+  width: max-content !important;
+  max-width: min(520px, calc(100vw - 16px)) !important;
+  height: fit-content !important;
+  max-height: min(70dvh, 520px) !important;
+  min-height: 0 !important;
+  border-radius: 16px !important;
+  overflow: auto !important;
+}
+
 [data-screen-overlay] button.tool,
 .anchored-menu button.tool {
   display: flex;

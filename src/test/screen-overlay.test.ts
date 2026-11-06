@@ -363,6 +363,14 @@ describe('screen overlays leave the view tabs free', () => {
           }, undefined, { timeout: 8000 })
           if (await page.locator('[data-screen-overlay]').count()) await assertOverlay(page)
           else await assertDocked(page)
+          if (opener.name === 'song' && layout.name === 'phone') {
+            const setup = await page.locator('#arrange-setup').boundingBox()
+            expect(setup).toBeTruthy()
+            expect(setup!.height).toBeLessThan(layout.height * 0.45)
+            expect(setup!.y + setup!.height).toBeLessThan(layout.height - 8)
+            expect(await page.locator('#arrange-setup').getAttribute('data-screen-overlay')).toBeNull()
+            expect(await page.locator('#arrange-setup').getAttribute('data-menu-size')).toBe('dock')
+          }
           if (opener.shot) await page.screenshot({ path: `${artifacts}/overlay-${opener.name}-${layout.name}.png` })
           await page.getByRole('button', { name: /^Arrange/ }).first().click()
           await settleClosed(page)

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { useScreenOverlay } from './screenOverlay'
 import { browserWidthFor, usePushPhase } from './dockPush'
 import { createPortal } from 'react-dom'
@@ -56,7 +56,7 @@ import { sampleAtX, type WaveSpan } from './waveZoom'
 import { CommentControl, CommentPins } from './timelineComments'
 
 
-function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup, onPlugins }: { browserOpen: boolean; setupOpen: boolean; pluginsOpen: boolean; onBrowser: () => void; onSetup: () => void; onPlugins: () => void }) {
+function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup, onPlugins, setupButton }: { browserOpen: boolean; setupOpen: boolean; pluginsOpen: boolean; onBrowser: () => void; onSetup: () => void; onPlugins: () => void; setupButton: RefObject<HTMLButtonElement | null> }) {
   const [host, setHost] = useState<HTMLElement | null>(null)
   useEffect(() => {
     const pick = () => {
@@ -87,6 +87,7 @@ function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup
         <small>Sounds and loops</small>
       </button>
       <button
+        ref={setupButton}
         type="button"
         className={`cap-btn${setupOpen ? ' on' : ''}`}
         aria-expanded={setupOpen}
@@ -690,6 +691,7 @@ export function ArrangeView({
   }
 
   const [setupOpen, setSetupOpen] = useState(false)
+  const setupButton = useRef<HTMLButtonElement | null>(null)
   const [browserOwned, setBrowserOwned] = useState(() => browserDock ?? panelChoice('arrangeBrowser') ?? form === 'desk')
   const browserOpen = browserDock ?? browserOwned
   function setBrowserOpen(next: boolean) {
@@ -737,6 +739,7 @@ export function ArrangeView({
         browserOpen={browserOpen}
         setupOpen={setupOpen}
         pluginsOpen={pluginsOpen}
+        setupButton={setupButton}
         onPlugins={() => setPluginsOpen((open) => !open)}
         onBrowser={() => {
           const next = !browserOpen
@@ -755,6 +758,7 @@ export function ArrangeView({
           session={session}
           position={position}
           compact={compact}
+          triggerRef={setupButton}
           onClose={() => setSetupOpen(false)}
           onQuickPunch={onQuickPunch}
         />

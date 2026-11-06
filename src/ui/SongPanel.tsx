@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState, type RefObject } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import type { SessionClient } from '../remote/session'
 import type { ProjectStore } from '../state/store'
 import { AutomationModeBar } from './AutomationLane'
-import { GuideLayer } from './GuideLayer'
 import { SongMapHead } from './SongMap'
-import { useScreenOverlay } from './screenOverlay'
+import { AnchoredMenu } from './AnchoredMenu'
 import './song-panel.css'
 
 const TABS = [
@@ -24,13 +23,11 @@ const METERS: [number, number, string][] = [
 
 type SongTab = (typeof TABS)[number]['id']
 
-/** Compact song setup. It floats over the arrange view. */
+/** Compact song setup. It docks under the Setup button and stays as tall as its controls. */
 export function SongPanel({
   store,
-  engine,
-  session,
   position,
-  compact,
+  triggerRef,
   onClose,
   onQuickPunch: _onQuickPunch,
 }: {
@@ -39,26 +36,16 @@ export function SongPanel({
   session: SessionClient
   position: number
   compact: boolean
+  triggerRef: RefObject<HTMLButtonElement | null>
   onClose: () => void
   onQuickPunch: () => void
 }) {
-  void engine
-  void session
   void _onQuickPunch
   const [tab, setTab] = useState<SongTab>('automation')
-  useScreenOverlay(onClose)
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   return (
-    <GuideLayer>
-      <button type="button" className="guide-scrim song-scrim" aria-label="Close setup" onClick={onClose} />
-      <div id="arrange-setup" className={`guide-sheet song-sheet ${compact ? 'sheet' : 'pop'}`} role="dialog" aria-label="Setup" data-screen-overlay="">
+    <AnchoredMenu open triggerRef={triggerRef} onClose={onClose} label="Setup" prefer="up" id="arrange-setup" className="song-menu">
+      <div className="song-sheet">
         <header className="song-head">
           <h2>Setup</h2>
           <button type="button" className="song-close overlay-close" onClick={onClose}>Close</button>
@@ -89,7 +76,6 @@ export function SongPanel({
         )}
         {tab === 'time' && (
           <section className="song-pane" aria-label="Time signature">
-            <p className="song-note">How the beats are grouped. 4/4 is four quarter notes in a bar.</p>
             <div className="song-meters" role="group" aria-label="Time signature">
               {METERS.map(([beats, note, label]) => {
                 const on = store.project.timeSignature.numerator === beats && store.project.timeSignature.denominator === note
@@ -109,6 +95,6 @@ export function SongPanel({
           </section>
         )}
       </div>
-    </GuideLayer>
+    </AnchoredMenu>
   )
 }

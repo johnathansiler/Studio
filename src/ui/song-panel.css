@@ -1,23 +1,24 @@
-/* Song setup floats over the arrange view. It does not take a row in the layout. */
-.guide-sheet.song-sheet {
-  position: fixed;
-  z-index: 220;
-  left: auto;
-  right: 8px;
-  bottom: 72px;
-  width: min(420px, calc(100vw - 16px));
-  max-height: min(68dvh, 520px);
-  gap: 8px;
-  padding: 8px;
-  overflow: auto;
+/* Setup docks to its button. The sheet is only as tall as the chips and the open section. */
+.anchored-menu.song-menu {
+  width: max-content;
+  max-width: min(420px, calc(100vw - 32px));
+  height: auto;
+  max-height: min(70dvh, 480px);
+  align-items: flex-start;
 }
 
-.guide-sheet.song-sheet.sheet {
-  left: 8px;
-  right: 8px;
-  width: auto;
-  max-width: 440px;
-  margin-left: auto;
+.anchored-menu.song-menu .song-sheet {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: max-content;
+  max-width: 100%;
+  height: auto;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
 }
 
 .song-scrim {
@@ -65,7 +66,20 @@
   display: flex;
   flex-wrap: nowrap;
   gap: 4px;
+  width: max-content;
+  max-width: 100%;
   overflow-x: auto;
+}
+
+.anchored-menu.song-menu .song-pills button,
+.anchored-menu.song-menu .auto-mode button,
+.anchored-menu.song-menu .song-meters button,
+.anchored-menu.song-menu .map-head button,
+.anchored-menu.song-menu .song-close {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: none;
+  align-self: flex-start;
 }
 
 .song-pills button {
@@ -86,6 +100,17 @@
 
 .song-pane {
   min-width: 0;
+  width: max-content;
+  max-width: 100%;
+}
+
+.anchored-menu.song-menu .auto-mode,
+.anchored-menu.song-menu .song-meters,
+.anchored-menu.song-menu .map-head,
+.anchored-menu.song-menu .map-head .row {
+  width: max-content;
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
 .song-note {
