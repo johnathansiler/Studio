@@ -3916,6 +3916,11 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   min-height: 40px;
   min-width: 40px;
 }
+.shell.fold .pl-head .beat-open {
+  width: 40px;
+  max-width: 40px;
+  padding: 0;
+}
 .shell.fold .tempo-point {
   width: 40px;
   height: 40px;
