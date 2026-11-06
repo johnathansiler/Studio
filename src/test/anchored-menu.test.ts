@@ -39,6 +39,18 @@ describe('anchored menu placement', () => {
     expect(tall.left + Math.min(500, tall.maxWidth)).toBeLessThanOrEqual(viewport.width - 8)
   })
 
+  it('flips a sample menu above a low phone trigger so every option stays on screen', () => {
+    const trigger = { left: 16, top: 620, width: 140, height: 40 }
+    const menu = { width: 240, height: 200 }
+    const place = placeAnchoredMenu({ trigger, menu, viewport, prefer: 'auto' })
+    expect(place.side).toBe('up')
+    expect(place.top).toBeGreaterThanOrEqual(8)
+    expect(place.top + menu.height).toBeLessThanOrEqual(viewport.height - 8)
+    expect(place.maxHeight).toBeGreaterThanOrEqual(menu.height)
+    expect(place.left).toBeGreaterThanOrEqual(8)
+    expect(place.left + menu.width).toBeLessThanOrEqual(viewport.width - 8)
+  })
+
   it('stays below the view tabs when that band is reserved', () => {
     const trigger = { left: 16, top: 8, width: 72, height: 36 }
     const place = placeAnchoredMenu({
