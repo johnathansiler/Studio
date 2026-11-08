@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { AnchoredMenu } from './AnchoredMenu'
+import { SheetGrab } from './bottomSheet'
 import { SoundBrowser } from './SoundBrowser'
 import { PatternSend, patternBeat } from './PatternSend'
 import { quickDragArmed } from './clipKeys'
@@ -38,6 +39,7 @@ export function PlaylistBrowser({
   onTab,
   onClose,
   onSeek,
+  sheet = false,
 }: {
   store: ProjectStore
   engine: PreviewEngine
@@ -46,6 +48,8 @@ export function PlaylistBrowser({
   onTab: (tab: BrowserTab) => void
   onClose: () => void
   onSeek: (sample: number) => void
+  /** Phone Arrange draws this as a bottom sheet instead of a side column. */
+  sheet?: boolean
 }) {
   const project = store.project
   const [query, setQuery] = useState('')
@@ -142,8 +146,93 @@ export function PlaylistBrowser({
   const projectButton = useRef<HTMLButtonElement>(null)
   const [projectOpen, setProjectOpen] = useState(false)
 
+  const catalog = soundLock ? (
+    <SoundBrowser
+      store={store}
+      engine={engine}
+      phone={phone}
+      embedded
+      lockType={soundLock === 'all' ? undefined : soundLock}
+      onClose={onClose}
+    />
+  ) : (
+    <div className="browser-body">
+      <input aria-label="Search the browser" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
+      <div className="browser-list">
+        {tab === 'patterns' && (
+          <PatternSend store={store} beat={patternBeat(store, engine.currentTimelineSample())} phone={phone} />
+        )}
+        {tab === 'patterns' && patterns.map((pattern) => (
+          <button
+            key={pattern.id}
+            type="button"
+            className="browser-row"
+            title="In song. Place this pattern on Arrange as a linked clip. Editing the pattern updates every copy. Drag to choose the lane."
+            onPointerDown={(event) => {
+              if (event.button !== 0) return
+              dragging.current = false
+              const startX = event.clientX
+              const startY = event.clientY
+              const node = event.currentTarget
+              const move = (ev: PointerEvent) => {
+                if (!quickDragArmed(ev.clientX - startX, ev.clientY - startY)) return
+                dragging.current = true
+                if (!node.hasPointerCapture(ev.pointerId)) node.setPointerCapture(ev.pointerId)
+              }
+              const up = (ev: PointerEvent) => {
+                node.removeEventListener('pointermove', move)
+                node.removeEventListener('pointerup', up)
+                node.removeEventListener('pointercancel', up)
+                if (!dragging.current) return
+                pointerDropped.current = performance.now()
+                dropPattern(ev.clientX, ev.clientY, pattern.id)
+              }
+              node.addEventListener('pointermove', move)
+              node.addEventListener('pointerup', up)
+              node.addEventListener('pointercancel', up)
+            }}
+            onClick={() => {
+              if (dragging.current) return
+              store.selectPattern(pattern.id)
+              store.placePattern(Math.max(0, projectSampleBeat(project, engine.currentTimelineSample())))
+            }}
+          >
+            <i style={{ background: pattern.color }} />
+            <strong>{pattern.name}</strong>
+            <span>{pattern.steps} steps</span>
+            <span>Add</span>
+          </button>
+        ))}
+        {tab === 'clips' && clips.map((clip) => (
+          <button
+            key={clip.id}
+            type="button"
+            className="browser-row"
+            title="Select this clip and move the playhead to it."
+            onClick={() => {
+              store.selectClip(clip.trackId, clip.id, clip.midi, false)
+              onSeek(clip.sample)
+            }}
+          >
+            <strong>{clip.name}</strong>
+            <span>{clip.where}</span>
+          </button>
+        ))}
+        {tab === 'patterns' && !patterns.length && <p>No patterns yet.</p>}
+        {tab === 'clips' && !clips.length && <p>No clips on the playlist yet.</p>}
+      </div>
+    </div>
+  )
+
   return (
-    <aside className="playlist-browser" data-playlist-browser="open" aria-label="Browser">
+    <aside
+      className={`playlist-browser${sheet ? ' bottom-sheet' : ''}`}
+      data-playlist-browser="open"
+      data-bottom-sheet={sheet ? 'open' : undefined}
+      aria-label="Browser"
+      onPointerDown={sheet ? (event) => event.stopPropagation() : undefined}
+    >
+      {sheet && <SheetGrab label="Resize browser. Drag up or down." />}
       <div className="browser-tabs">
         <div className="browser-chip-scroll" role="tablist" aria-label="Browser">
           {TABS.map((item) => (
@@ -178,83 +267,7 @@ export function PlaylistBrowser({
         </div>
         <button type="button" className="browser-close overlay-close" title="Hide the browser. The playlist stays put." onClick={onClose}>Close</button>
       </div>
-      {soundLock ? (
-        <SoundBrowser
-          store={store}
-          engine={engine}
-          phone={phone}
-          embedded
-          lockType={soundLock === 'all' ? undefined : soundLock}
-          onClose={onClose}
-        />
-      ) : (
-        <div className="browser-body">
-          <input aria-label="Search the browser" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
-          <div className="browser-list">
-            {tab === 'patterns' && (
-              <PatternSend store={store} beat={patternBeat(store, engine.currentTimelineSample())} phone={phone} />
-            )}
-            {tab === 'patterns' && patterns.map((pattern) => (
-              <button
-                key={pattern.id}
-                type="button"
-                className="browser-row"
-                title="In song. Place this pattern on Arrange as a linked clip. Editing the pattern updates every copy. Drag to choose the lane."
-                onPointerDown={(event) => {
-                  if (event.button !== 0) return
-                  dragging.current = false
-                  const startX = event.clientX
-                  const startY = event.clientY
-                  const node = event.currentTarget
-                  const move = (ev: PointerEvent) => {
-                    if (!quickDragArmed(ev.clientX - startX, ev.clientY - startY)) return
-                    dragging.current = true
-                    if (!node.hasPointerCapture(ev.pointerId)) node.setPointerCapture(ev.pointerId)
-                  }
-                  const up = (ev: PointerEvent) => {
-                    node.removeEventListener('pointermove', move)
-                    node.removeEventListener('pointerup', up)
-                    node.removeEventListener('pointercancel', up)
-                    if (!dragging.current) return
-                    pointerDropped.current = performance.now()
-                    dropPattern(ev.clientX, ev.clientY, pattern.id)
-                  }
-                  node.addEventListener('pointermove', move)
-                  node.addEventListener('pointerup', up)
-                  node.addEventListener('pointercancel', up)
-                }}
-                onClick={() => {
-                  if (dragging.current) return
-                  store.selectPattern(pattern.id)
-                  store.placePattern(Math.max(0, projectSampleBeat(project, engine.currentTimelineSample())))
-                }}
-              >
-                <i style={{ background: pattern.color }} />
-                <strong>{pattern.name}</strong>
-                <span>{pattern.steps} steps</span>
-                <span>Add</span>
-              </button>
-            ))}
-            {tab === 'clips' && clips.map((clip) => (
-              <button
-                key={clip.id}
-                type="button"
-                className="browser-row"
-                title="Select this clip and move the playhead to it."
-                onClick={() => {
-                  store.selectClip(clip.trackId, clip.id, clip.midi, false)
-                  onSeek(clip.sample)
-                }}
-              >
-                <strong>{clip.name}</strong>
-                <span>{clip.where}</span>
-              </button>
-            ))}
-            {tab === 'patterns' && !patterns.length && <p>No patterns yet.</p>}
-            {tab === 'clips' && !clips.length && <p>No clips on the playlist yet.</p>}
-          </div>
-        </div>
-      )}
+      {sheet ? <div className="bottom-sheet-body">{catalog}</div> : catalog}
     </aside>
   )
 }

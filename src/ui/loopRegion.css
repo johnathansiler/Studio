@@ -41,8 +41,13 @@
   z-index: 8;
   touch-action: none;
   user-select: none;
-  overflow: hidden;
+  overflow: visible;
   pointer-events: auto;
+}
+.ruler > span,
+.ruler > i {
+  pointer-events: none;
+  z-index: 1;
 }
 .loop-host .song-loop {
   position: absolute;
@@ -71,7 +76,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  z-index: 9;
+  z-index: 20;
   width: 44px;
   min-width: 44px;
   min-height: 40px;
