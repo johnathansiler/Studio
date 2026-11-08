@@ -11,6 +11,7 @@ import { ScoreView } from './ScoreView'
 import { StepInput } from './StepInput'
 import './midi-editors.css'
 import { useScreenOverlay } from './screenOverlay'
+import { PluginTransport } from './pluginTransport'
 
 const MODES: { id: MidiEditorMode; label: string; hint: string }[] = [
   { id: 'roll', label: 'Roll', hint: 'Piano roll. Draw and move notes on a grid.' },
@@ -61,6 +62,7 @@ export function MidiDock({
       {editor.mode === 'roll' && (
         <PianoRoll store={store} engine={engine} onIdeas={onIdeas} onGenerate={onGenerate} onClose={onClose} leading={modes} />
       )}
+      <PluginTransport engine={engine} />
     </div>
   )
 }

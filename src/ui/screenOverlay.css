@@ -94,8 +94,46 @@
 [data-screen-overlay].mpc,
 [data-screen-overlay].scaler-panel,
 [data-screen-overlay].midi-dock,
-[data-screen-overlay].keyboard-dock {
+[data-screen-overlay].keyboard-dock,
+[data-screen-overlay].inst-panel {
   overflow: hidden;
+}
+
+/* Record, Stop, and Play stay on screen in every plugin that plays or records. */
+.plugin-transport,
+[data-plugin-transport="open"] {
+  display: flex !important;
+  flex: 0 0 auto;
+  visibility: visible;
+}
+.plugin-transport {
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 4px;
+  background: #141c18;
+  z-index: 5;
+}
+.plugin-transport > button {
+  flex: 1 1 0;
+  min-width: 40px;
+  min-height: 40px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid #31443a;
+  background: #1c2b24;
+  color: #eef3ea;
+  font-size: 13px;
+  font-weight: 680;
+}
+.plugin-transport > button.on,
+.plugin-transport > button[aria-pressed='true'] {
+  background: #8a3030;
+  color: #ffe4e4;
+  border-color: #a84848;
 }
 
 .dock-slot.panel-slot:has([data-screen-overlay]) {
@@ -158,6 +196,20 @@
   height: auto !important;
   min-height: 0;
   overflow: auto;
+}
+
+[data-screen-overlay].inst-panel > .inst-body,
+[data-screen-overlay].inst-panel > .sampler-face,
+[data-screen-overlay].inst-panel > .rack-body,
+[data-screen-overlay].midi-dock > .piano {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+[data-screen-overlay].keyboard-dock > .keyboard-face {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 [data-screen-overlay] .preset-list,

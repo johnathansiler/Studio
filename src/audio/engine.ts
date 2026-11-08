@@ -107,6 +107,8 @@ export class AudioEngine {
   lastOnsetFrame = -1
   private oneShots: { pitch: number; when: number; stop: () => void }[] = []
   private liveBuiltins: { key: string; gain: GainNode; src: AudioScheduledSourceNode }[] = []
+  /** Pad voices that actually started. The phone tests read this after a tap. */
+  heardPads: { pitch: number; velocity: number; when: number }[] = []
   /** While the Pads faceplate is open, hits go to that track's mixer channel. */
   private padRouteId: string | null = null
   private padVoices: { pitch: number; trackId: string; gain: GainNode; level: GainNode; pan: StereoPannerNode; stop: (at?: number) => void; born: number; until: number; src: AudioBufferSourceNode }[] = []
@@ -3368,12 +3370,16 @@ export class AudioEngine {
     bus.gain.value = 1
   }
 
+  private notePad(pitch: number, velocity: number, when: number) {
+    this.heardPads.push({ pitch, velocity, when })
+    if (this.heardPads.length > 64) this.heardPads.splice(0, this.heardPads.length - 64)
+  }
+
   private playLivePad(pitch: number, velocity: number, sample: Float32Array | null, color?: PadColor, when?: number): boolean {
     if (!this.padRouteId) return false
     const track = this.project?.tracks.find((item) => item.id === this.padRouteId)
     if (!track || track.instrument !== 'pads') return false
-    if (!this.ctx) this.unlock()
-    const ctx = this.ctx
+    const ctx = this.unlock()
     const strip = track.id ? this.strips.get(track.id) : undefined
     if (!ctx || !strip) return false
     this.markMidi(track.id, when, 0.2)
@@ -3436,6 +3442,7 @@ export class AudioEngine {
     })) {
       for (const other of chokeTargets(pads.map((item) => ({ pitch: item.pitch, choke: item.choke })), hit.pitch)) this.fadePadPitch(other, start)
       if (pad?.poly === 'mono') this.fadePadPitch(hit.pitch, start)
+      this.notePad(hit.pitch, hit.velocity, start)
       return
     }
     for (const other of chokeTargets(pads.map((item) => ({ pitch: item.pitch, choke: item.choke })), hit.pitch)) this.fadePadPitch(other, start)
@@ -3511,6 +3518,7 @@ export class AudioEngine {
     }
     src.start(start)
     src.stop(start + dur + 0.01)
+    this.notePad(hit.pitch, hit.velocity, start)
     const voice = { pitch: hit.pitch, trackId: track.id, gain, level, pan: panner, stop, born: start, until: start + dur, src }
     this.padVoices.push(voice)
     src.onended = () => {

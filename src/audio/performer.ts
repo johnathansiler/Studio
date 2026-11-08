@@ -192,6 +192,7 @@ export class Performer {
   }
 
   down(rawPitch: number, velocity: number, eventMs: number, pointerId: number, levelIndex?: number, givenFine?: number) {
+    this.engine.unlock()
     const sounded = this.soundingPitch(rawPitch, givenFine)
     const pitch = sounded.midi
     const fine = sounded.cents

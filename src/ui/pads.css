@@ -10,7 +10,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: auto;
+  overflow: hidden;
   color: #f3f3f3;
   background: #2a2a2a;
 }
@@ -23,6 +23,7 @@
   flex-direction: column;
   gap: 6px;
   padding: 8px;
+  overflow: hidden;
   border-radius: 16px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 18%),
@@ -756,6 +757,16 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
+}
+
+/* The page scrolls. Record, Stop, and Play stay on screen on every Beat Machine tab. */
+.mpc [data-plugin-page]:not([hidden]) {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Sampler presets and the take transport follow the pads. They stay in flow so they never cover Bank or Note Repeat. */

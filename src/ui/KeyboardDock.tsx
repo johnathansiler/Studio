@@ -21,6 +21,7 @@ import { octaveName } from './kit/controls'
 import { hidePianoRoll, notifyKeyboard } from './keyboardStage'
 import { useScreenOverlay } from './screenOverlay'
 import { miniPads, padGridColumn, padLabel } from './miniKeys'
+import { PluginTransport } from './pluginTransport'
 
 /**
  * How hard a dock key was struck.
@@ -246,8 +247,8 @@ export function KeyboardDock({ store, engine, onEditNotes }: { store: ProjectSto
     const sounded = playKeyboardNote(store, engine, pitch, level)
     if (!sounded.length) return
     held.current.set(token, sounded)
-    recording.current = engine.status === 'recording'
-    if (recording.current && target.kind === 'instrument' && target.armed) {
+    recording.current = engine.status === 'recording' || engine.status === 'counting-in' || store.padRecord?.trackId === target.trackId
+    if (recording.current && target.kind === 'instrument' && (target.armed || store.padRecord?.trackId === target.trackId)) {
       const dest = keyboardDestination(store.project.tracks, store.selectedTrackId, store.selectedMidiClipId)
       if (dest && dest.trackId === target.trackId) {
         const pads = Boolean(beat && beat.pitch >= 0)
@@ -293,9 +294,9 @@ export function KeyboardDock({ store, engine, onEditNotes }: { store: ProjectSto
   releaseRef.current = release
 
   useEffect(() => {
-    recording.current = engine.status === 'recording'
+    recording.current = engine.status === 'recording' || engine.status === 'counting-in'
     return engine.subscribe(() => {
-      const next = engine.status === 'recording'
+      const next = engine.status === 'recording' || engine.status === 'counting-in'
       if (recording.current && !next) flush(performance.now())
       recording.current = next
     })
@@ -398,6 +399,7 @@ export function KeyboardDock({ store, engine, onEditNotes }: { store: ProjectSto
           )
         })}
       </div>
+      <PluginTransport engine={engine} />
       </div>
     </div>
   )

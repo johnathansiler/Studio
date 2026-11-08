@@ -1075,8 +1075,9 @@ export class ProjectStore {
       const track = this.track(trackId)
       if (!track || track.type !== 'midi') return
       track.instrument = 'pads'
+      track.armed = true
       track.padKit = normalizePadKit(track.padKit ?? this.project.padKit)
-      if (!track.input.startsWith('midi')) track.input = 'midi'
+      if (!track.input.startsWith('midi') && track.input !== 'none') track.input = 'midi'
       const covering = track.midiClips.find((item) => !item.slotOnly && item.scene == null && item.startBeat <= beat + 0.02 && beat < item.startBeat + item.durationBeats + 0.02)
       let clip = covering
       let fresh = false

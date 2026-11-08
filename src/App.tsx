@@ -81,6 +81,7 @@ import { deletesSelection } from './ui/clipKeys'
 import { historyCommand, typingTarget } from './state/history'
 import { claimComputerKey } from './model/keyboardPlay'
 import { KeyboardDock } from './ui/KeyboardDock'
+import { TransportActionContext } from './ui/pluginTransport'
 import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark, keyboardShellTurn, notifyKeyboard, PADS_HISTORY, PIANO_HISTORY, presentKeyboard, releaseOrientation, setKeyboardPresenter, setPianoHider, STEPS_HISTORY, type EditorHistoryMark, type KeyboardPresentation } from './ui/keyboardStage'
 import { onViewTab, syncViewTabFrame } from './ui/overlayHost'
 import { useScreenOverlay } from './ui/screenOverlay'
@@ -261,6 +262,7 @@ export function App() {
   const ignorePop = useRef(0)
   const editorHistory = useRef<EditorHistoryMark | null>(null)
   const recordReady = useRef(false)
+  const recordEpoch = useRef(0)
   const holdLandscape = useRef(false)
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
@@ -1038,6 +1040,7 @@ export function App() {
   }
 
   async function stop() {
+    recordEpoch.current += 1
     if (session.state.role === 'guest') {
       session.requestTransport({ action: 'stop' })
       return
@@ -1045,10 +1048,14 @@ export function App() {
     const wasRecording = engine.status === 'recording'
     const decision = stopPress(engine.status, store.project, engine.currentTimelineSample())
     if (decision.action === 'home') {
+      if (store.padRecord) store.endTake(Math.round(engine.currentTimelineSample()))
       await locate(decision.sample)
       return
     }
-    if (engine.status === 'stopped') return
+    if (engine.status === 'stopped') {
+      if (store.padRecord) store.endTake(Math.round(engine.currentTimelineSample()))
+      return
+    }
     const end = Math.round(engine.currentTimelineSample())
     const captures = await engine.finishRecording()
     engine.stop()
@@ -1262,12 +1269,29 @@ export function App() {
     else await record()
   }
 
+  function prepareBeatRecord() {
+    if (engine.status === 'recording' || engine.status === 'counting-in') return
+    const selected = store.selectedTrackId ? store.track(store.selectedTrackId) : null
+    const id = store.padsTrackId
+      ?? (selected && (selected.instrument === 'pads' || selected.instrument === 'drum-machine') ? selected.id : null)
+    if (!id) return
+    store.armPadRecord(id, projectSampleBeat(store.project, engine.positionSamples))
+  }
+
   async function record() {
     if (session.state.role === 'guest') {
       store.toast('The host records. Your take still lands on their timeline.', 'info')
       return
     }
+    engine.unlock()
     void engine.resume()
+    if (engine.status === 'recording' || engine.status === 'counting-in') {
+      recordReady.current = false
+      await stop()
+      return
+    }
+    const epoch = ++recordEpoch.current
+    prepareBeatRecord()
     const decision = recordPress(engine.status, store.project.tracks, recordReady.current)
     if (decision === 'stop') {
       recordReady.current = false
@@ -1276,11 +1300,13 @@ export function App() {
     }
     if (decision === 'disarm') {
       recordReady.current = false
+      if (store.padRecord) store.finishPadRecord(null)
       setRecordHint('')
       return
     }
     if (decision === 'arm') {
       recordReady.current = true
+      if (store.padRecord) store.finishPadRecord(null)
       setRecordHint('Arm a track to record.')
       window.setTimeout(() => setRecordHint(''), 2800)
       return
@@ -1292,6 +1318,7 @@ export function App() {
     if (slot && slotTrack?.type === 'midi' && slotTrack.armed) store.prepareMidiSlot(slot.trackId, slot.scene)
     if (intoSlot && slotTrack?.armed && store.transportMode !== 'session') store.enterSession()
     await ready()
+    if (epoch !== recordEpoch.current) return
     const takeId = uid('take')
     const inputs = await collectRecordInputs({
       tracks: store.project.tracks,
@@ -1301,8 +1328,10 @@ export function App() {
       setLocalMic: (stream) => engine.setLocalMic(stream),
       openMic: (audio) => navigator.mediaDevices.getUserMedia({ audio, video: false }),
     })
+    if (epoch !== recordEpoch.current) return
     const midiArmed = armedRecordPlan(store.project.tracks).midi.length > 0
     if (!inputs.length && !midiArmed) {
+      if (store.padRecord) store.finishPadRecord(null)
       setRecordHint('Arm a track to record.')
       window.setTimeout(() => setRecordHint(''), 2800)
       return
@@ -1331,6 +1360,7 @@ export function App() {
         timeSignature: meterAtSample(store.project, fromSample),
       })
     }
+    if (epoch !== recordEpoch.current) return
     await engine.beginRecord({
       fromSample,
       inputs,
@@ -1883,6 +1913,11 @@ async function importDropped(files: FileList) {
   }
 
   return (
+    <TransportActionContext.Provider value={{
+      record: () => { engine.unlock(); void record() },
+      stop: () => { void stop() },
+      play: () => { engine.unlock(); void play() },
+    }}>
     <div
       ref={shellRef}
       className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''} ${store.keyboardMidi ? 'keys-open' : ''} ${keysLandscape && keyboardShellTurn(screenAngle) === 'upside-down' ? 'orient-180' : ''} ${keysLandscape && keyboardShellTurn(screenAngle) !== 'upside-down' ? 'keys-landscape' : ''}`}
@@ -2128,7 +2163,9 @@ async function importDropped(files: FileList) {
               store={store}
               engine={engine}
               trackId={store.padsTrackId}
-              onRecord={() => { void record() }}
+              onRecord={() => { engine.unlock(); void record() }}
+              onStop={() => { void stop() }}
+              onPlay={() => { engine.unlock(); void play() }}
               onEdit={(clipId) => openPiano(store.padsTrackId!, clipId)}
               onKeyboard={openBeatKeyboard}
             />
@@ -2275,6 +2312,7 @@ async function importDropped(files: FileList) {
       <HintBubble />
       <Toasts store={store} />
     </div>
+    </TransportActionContext.Provider>
   )
 }
 

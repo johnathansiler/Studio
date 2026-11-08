@@ -5,6 +5,7 @@ import type { ProjectStore } from '../state/store'
 import { BeatView } from './BeatView'
 import { PresetControls } from './PresetControls'
 import { useScreenOverlay } from './screenOverlay'
+import { PluginTransport } from './pluginTransport'
 import { useState } from 'react'
 import './pluginPages.css'
 
@@ -43,6 +44,7 @@ export function StepSequencerPanel({
         />
       )}
       <BeatView store={store} engine={engine} page={page} />
+      <PluginTransport engine={engine} />
     </section>
   )
 }
