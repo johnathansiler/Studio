@@ -705,6 +705,10 @@ export function ArrangeView({
   useScreenOverlay(() => setPluginsOpen(false), pluginsOpen)
   const [browserTab, setBrowserTab] = useState<BrowserTab>(libraryTab || 'sounds')
   const [browserWidth, setBrowserWidth] = useState(() => browserWidthFor(typeof window === 'undefined' ? 1440 : window.innerWidth, typeof window === 'undefined' ? 900 : window.innerHeight))
+  useEffect(() => {
+    if (phone) return
+    setBrowserWidth(browserWidthFor(window.innerWidth, window.innerHeight))
+  }, [phone])
   const [trackSheet, setTrackSheet] = useState<string | null>(null)
   useScreenOverlay(() => setTrackSheet(null), trackSheet != null)
   const [trackAnchor, setTrackAnchor] = useState<HTMLElement | null>(null)
@@ -763,9 +767,9 @@ export function ArrangeView({
           onQuickPunch={onQuickPunch}
         />
       )}
-      <div className={`arrange-stage${pluginsPhase !== 'off' ? (phone ? ' plugins-bottom' : ' plugins-side') : ''}`} data-plugins-drawer={pluginsPhase !== 'off' ? (phone ? 'bottom' : 'side') : 'closed'} data-push={pluginsPhase} style={{ ['--push' as string]: '280px' }}>
-      <div className={`playlist-frame ${browserPhase !== 'off' ? 'browser-open' : ''} ${phone ? 'phone-arrange' : ''}`} data-push={browserPhase} style={{ ['--browser' as string]: `${browserWidth}px`, ['--push' as string]: `${browserWidth}px` }}>
-      {browserPhase !== 'off' && (
+      <div className={`arrange-stage${pluginsPhase !== 'off' ? (phone ? ' plugins-bottom' : ' plugins-side') : ''}${phone && browserPhase !== 'off' ? ' browser-bottom' : ''}`} data-plugins-drawer={pluginsPhase !== 'off' ? (phone ? 'bottom' : 'side') : 'closed'} data-browser-sheet={phone ? (browserPhase !== 'off' ? 'bottom' : 'closed') : 'side'} data-push={pluginsPhase} data-browser-push={phone ? browserPhase : undefined} style={{ ['--push' as string]: '280px' }}>
+      <div className={`playlist-frame ${!phone && browserPhase !== 'off' ? 'browser-open' : ''} ${phone ? 'phone-arrange' : ''}`} data-push={phone ? 'off' : browserPhase} style={{ ['--browser' as string]: `${browserWidth}px`, ['--push' as string]: `${browserWidth}px` }}>
+      {!phone && browserPhase !== 'off' && (
         <>
           <PlaylistBrowser
             store={store}
@@ -776,7 +780,7 @@ export function ArrangeView({
             onSeek={onSeek}
             onClose={() => { engine.stopPreview(); setBrowserOpen(false); rememberPanel('arrangeBrowser', false); onLibraryClose?.() }}
           />
-          {!phone && <button type="button" className="browser-resize" aria-label="Browser width. Drag to resize." title="Drag to resize the browser." onPointerDown={resizeBrowser} />}
+          <button type="button" className="browser-resize" aria-label="Browser width. Drag to resize." title="Drag to resize the browser." onPointerDown={resizeBrowser} />
         </>
       )}
       <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'}>
@@ -1186,6 +1190,18 @@ export function ArrangeView({
       </div>
       </div>
       </div>
+      {phone && browserPhase !== 'off' && (
+        <PlaylistBrowser
+          store={store}
+          engine={engine}
+          phone={phone}
+          sheet
+          tab={browserTab}
+          onTab={setBrowserTab}
+          onSeek={onSeek}
+          onClose={() => { engine.stopPreview(); setBrowserOpen(false); rememberPanel('arrangeBrowser', false); onLibraryClose?.() }}
+        />
+      )}
       {pluginsPhase !== 'off' && <PluginsDrawer store={store} place={phone ? 'bottom' : 'side'} menuOpen={pluginsMenu} onClose={() => setPluginsOpen(false)} />}
       </div>
       <AnchoredMenu

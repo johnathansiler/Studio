@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { isSoundPlugin } from '../instruments/scaler/chain'
 import type { PluginInstance } from '../model/types'
 import type { ProjectStore } from '../state/store'
+import { SheetGrab } from './bottomSheet'
 import { addInsert, insertLabel, insertMenuChoices } from './PluginSheet'
 import './pluginsDrawer.css'
 import './pluginPages.css'
@@ -135,22 +136,26 @@ export function PluginsDrawerView({
   const activeGroup = groupId && groups.some((group) => group.id === groupId) ? groupId : groups[0]?.id
   const chooseGroup = onGroup ?? (() => undefined)
   const chooseMore = onMore ?? (() => undefined)
+  const sheet = place === 'bottom'
   return (
     <section
-      className="plugins-drawer"
+      className={`plugins-drawer${sheet ? ' bottom-sheet' : ''}`}
       data-plugin-root=""
       data-plugin-pages=""
       id="arrange-plugins"
       data-place={place}
+      data-bottom-sheet={sheet ? 'open' : undefined}
       data-plugins-panel="open"
       aria-label={track ? `Plugins on ${track.name}` : 'Plugins'}
+      onPointerDown={sheet ? (event) => event.stopPropagation() : undefined}
     >
+      {sheet && <SheetGrab label="Resize plugins. Drag up or down." />}
       <header className="plugins-drawer-head">
         <strong>Plugins</strong>
         <span>{track ? track.name : 'No track'}</span>
         {onClose && <button type="button" className="overlay-close" onClick={onClose}>Close</button>}
       </header>
-      <div className="plugins-drawer-body">
+      <div className={`plugins-drawer-body${sheet ? ' bottom-sheet-body' : ''}`}>
         <p className="plugins-drawer-note">
           {track ? `${track.name}. In the order sound passes through.` : 'Tap a track header to load its plugins.'}
         </p>

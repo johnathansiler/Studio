@@ -14,7 +14,7 @@ function expectClear(hit: { hitLeft: number; hitWidth: number }, label: { left: 
 }
 
 describe('loop edge grips', () => {
-  it('draws a slim cap and extends the touch pad inward on a wide loop', () => {
+  it('draws a slim cap and extends the touch pad around it on a wide loop', () => {
     const label = { center: 800, width: 80 }
     const grips = layoutLoopGrips({
       start: 400,
@@ -34,10 +34,10 @@ describe('loop edge grips', () => {
     expect(grips.end.faceLeft + grips.end.faceWidth).toBe(1200)
     expect(grips.start.hitWidth).toBeGreaterThanOrEqual(44)
     expect(grips.end.hitWidth).toBeGreaterThanOrEqual(44)
-    expect(grips.start.hitLeft).toBeGreaterThanOrEqual(400)
-    expect(grips.start.hitLeft + grips.start.hitWidth).toBeGreaterThanOrEqual(400 + 44)
-    expect(grips.end.hitLeft).toBeLessThanOrEqual(1200 - 44)
-    expect(grips.end.hitLeft + grips.end.hitWidth).toBeLessThanOrEqual(1200)
+    expect(grips.start.hitLeft).toBeLessThanOrEqual(400 - 18)
+    expect(grips.start.hitLeft + grips.start.hitWidth).toBeGreaterThanOrEqual(400 + 12 + 18)
+    expect(grips.end.hitLeft).toBeLessThanOrEqual(1200 - 12 - 18)
+    expect(grips.end.hitLeft + grips.end.hitWidth).toBeGreaterThanOrEqual(1200 + 18)
     const chip = { left: label.center - label.width / 2, right: label.center + label.width / 2 }
     expectClear(grips.start, chip, grips.end)
     expectClear(grips.end, chip, grips.start)
@@ -59,8 +59,9 @@ describe('loop edge grips', () => {
     expect(grips.start.hitLeft).toBeGreaterThanOrEqual(0)
     expect(grips.start.hitWidth).toBeGreaterThanOrEqual(LOOP_GRIP_HIT)
     expect(grips.start.hitLeft + grips.start.hitWidth).toBeGreaterThanOrEqual(44)
-    expect(grips.end.hitLeft).toBeLessThanOrEqual(720 - 40)
-    expect(grips.end.hitLeft + grips.end.hitWidth).toBeLessThanOrEqual(720)
+    expect(grips.end.hitLeft).toBeLessThanOrEqual(grips.end.faceLeft - 18)
+    expect(grips.end.hitLeft + grips.end.hitWidth).toBeGreaterThanOrEqual(720 + 18)
+    expect(grips.end.hitLeft + grips.end.hitWidth).toBeLessThanOrEqual(800)
     expect(grips.end.hitWidth).toBeGreaterThanOrEqual(LOOP_GRIP_HIT)
     expectClear(grips.start, { left: 315, right: 405 }, grips.end)
   })

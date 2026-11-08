@@ -32,8 +32,8 @@
 .browser-row span, .browser-body p { color: var(--muted); font-size: 12px; }
 .shell.phone .playlist-frame.browser-open,
 .shell.fold .playlist-frame.browser-open { display: flex; }
-.shell.phone .playlist-browser,
-.shell.fold .playlist-browser { position: relative; z-index: auto; width: var(--browser, 66%); max-width: 70%; box-shadow: none; }
+.shell.fold .playlist-browser,
+.shell.phone .playlist-frame > .playlist-browser { position: relative; z-index: auto; width: var(--browser, 66%); max-width: 70%; box-shadow: none; }
 .shell.fold .arrange { grid-template-columns: 220px minmax(0, 1fr); --lane-h: 76px; }
 .shell.fold .pl-head { flex-wrap: nowrap; height: 100%; align-items: center; }
 .shell.fold .track-live { flex: none; }

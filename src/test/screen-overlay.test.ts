@@ -380,12 +380,21 @@ describe('screen overlays leave the view tabs free', () => {
         const browserToggle = page.locator('.arrange-panels').getByRole('button', { name: /^Browser/ })
         const docked = page.locator('[data-playlist-browser="open"]')
         if (await docked.count() === 0) await browserToggle.click()
-        await page.locator('.playlist-frame[data-push="on"]').waitFor()
         await docked.first().waitFor()
         expect(await docked.first().getAttribute('data-screen-overlay')).toBeNull()
         const dockBox = await docked.first().boundingBox()
         const arrangeBox = await page.locator('.arrange').first().boundingBox()
-        expect(dockBox && arrangeBox && dockBox.x + dockBox.width <= arrangeBox.x + 2).toBe(true)
+        if (layout.shell.split(' ').includes('phone')) {
+          await page.locator('.arrange-stage.browser-bottom [data-bottom-sheet="open"]').waitFor()
+          const bar = await page.locator('.tool-slot').boundingBox()
+          expect(dockBox!.x).toBeLessThanOrEqual(2)
+          expect(dockBox!.x + dockBox!.width).toBeGreaterThanOrEqual(layout.width - 4)
+          expect(arrangeBox!.width).toBeGreaterThan(layout.width * 0.85)
+          if (bar) expect(dockBox!.y + dockBox!.height).toBeLessThanOrEqual(bar.y + 2)
+        } else {
+          await page.locator('.playlist-frame[data-push="on"]').waitFor()
+          expect(dockBox && arrangeBox && dockBox.x + dockBox.width <= arrangeBox.x + 2).toBe(true)
+        }
         await page.screenshot({ path: `${artifacts}/browser-arrange-${layout.name}.png` })
         await page.getByRole('button', { name: /^Filter/ }).first().click()
         const filterMenu = page.locator('.anchored-menu.sound-filter-menu')

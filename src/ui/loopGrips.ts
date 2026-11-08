@@ -3,6 +3,8 @@ export const LOOP_GRIP_VISUAL = 12
 /** Minimum invisible hit width. Phones and foldables use the coarser size. */
 export const LOOP_GRIP_HIT = 40
 export const LOOP_GRIP_HIT_COARSE = 44
+/** Touch room on each side of the slim cap, before the pad is clamped to the ruler. */
+export const LOOP_GRIP_SIDE = 24
 
 export function loopGripHit(coarse: boolean) {
   return coarse ? LOOP_GRIP_HIT_COARSE : LOOP_GRIP_HIT
@@ -40,8 +42,9 @@ export interface LoopGripBox {
 
 /**
  * Slim caps on the loop edges. Each touch pad is at least 40px and reaches
- * inward, so a handle sitting on the screen edge is still grabbable.
- * Pads stay inside the visible ruler and do not overlap each other.
+ * about 24px to either side of the cap. A handle on the screen edge shifts
+ * inward so the whole pad stays inside the visible ruler.
+ * Pads do not overlap each other or the length label.
  */
 export function layoutLoopGrips(input: {
   start: number
@@ -74,7 +77,7 @@ export function layoutLoopGrips(input: {
   }
 }
 
-/** Full-width pads on the inner side of each cap, clamped to the visible ruler. */
+/** Pads centered on each cap, about 24px past the cap on both sides, clamped to the visible ruler. */
 function inwardHits(
   faces: { start: number; end: number; faceW: number },
   hit: number,
@@ -83,7 +86,7 @@ function inwardHits(
   viewRight: number,
   label: { left: number; right: number } | null,
 ) {
-  const span = Math.max(hit, faces.faceW)
+  const span = Math.max(hit, faces.faceW + LOOP_GRIP_SIDE * 2)
   const hostL = 0
   const hostR = hostWidth > 0 ? hostWidth : Math.max(viewRight, faces.end + faces.faceW)
   const seeL = viewRight > viewLeft ? viewLeft : hostL
@@ -95,19 +98,27 @@ function inwardHits(
   const room = Math.max(0, visR - visL)
   const width = room >= span ? span : room
 
-  let startLeft = Math.max(visL, faces.start)
-  let startRight = startLeft + width
-  if (startRight > visR) {
-    startRight = visR
-    startLeft = Math.max(visL, startRight - width)
+  const place = (faceLeft: number, faceRight: number) => {
+    const mid = (faceLeft + faceRight) / 2
+    let left = mid - width / 2
+    let right = left + width
+    if (right > visR) {
+      right = visR
+      left = right - width
+    }
+    if (left < visL) {
+      left = visL
+      right = Math.min(visR, left + width)
+    }
+    return { left, right }
   }
 
-  let endRight = Math.min(visR, faces.end + faces.faceW)
-  let endLeft = endRight - width
-  if (endLeft < visL) {
-    endLeft = visL
-    endRight = Math.min(visR, endLeft + width)
-  }
+  let start = place(faces.start, faces.start + faces.faceW)
+  let end = place(faces.end, faces.end + faces.faceW)
+  let startLeft = start.left
+  let startRight = start.right
+  let endLeft = end.left
+  let endRight = end.right
 
   if (startRight > endLeft) {
     const anchor = (faces.start + faces.end + faces.faceW) / 2
@@ -143,6 +154,9 @@ function inwardHits(
     if (parkedLeft >= visL - 0.5) {
       startLeft = Math.max(visL, parkedLeft)
       startRight = startLeft + width
+    } else if (label.left - visL >= LOOP_GRIP_HIT) {
+      startLeft = visL
+      startRight = Math.min(label.left, visL + width)
     }
   }
   if (blocksLabel(endLeft, endRight) && label) {
@@ -151,6 +165,9 @@ function inwardHits(
     if (parkedRight <= visR + 0.5) {
       endLeft = parkedLeft
       endRight = Math.min(visR, parkedRight)
+    } else if (visR - label.right >= LOOP_GRIP_HIT) {
+      endRight = visR
+      endLeft = Math.max(label.right, visR - width)
     }
   }
 
