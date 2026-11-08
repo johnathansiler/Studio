@@ -62,6 +62,8 @@ export function PadsPanel({
   engine,
   trackId,
   onRecord,
+  onStop,
+  onPlay,
   onEdit,
   onKeyboard,
   chopStartsOpen = false,
@@ -71,6 +73,8 @@ export function PadsPanel({
   engine: AudioEngine
   trackId: string
   onRecord: () => void
+  onStop?: () => void
+  onPlay?: () => void
   onEdit: (clipId: string) => void
   onKeyboard?: () => void
   /** First paint only, so a static render can show the chop editor. */
@@ -120,7 +124,7 @@ export function PadsPanel({
       engine,
       () => target.current,
       (aimed, notes, mode) => store.commitPadHits(aimed.trackId, notes, mode),
-      () => engine.status === 'recording',
+      () => engine.status === 'recording' || engine.status === 'counting-in' || store.padRecord?.trackId === trackId,
       (aimed, pitch, from, to) => {
         const window = store.padRecord
         const clip = store.track(aimed.trackId)?.midiClips.find((item) => item.id === aimed.clipId)
@@ -223,6 +227,7 @@ export function PadsPanel({
     const down = (event: PointerEvent) => {
       const key = (event.target as HTMLElement).closest?.('[data-pad]') as HTMLElement | null
       if (!key || !root.contains(key)) return
+      engine.unlock()
       event.preventDefault()
       const index = Number(key.dataset.pad)
       const pitch = Number(key.dataset.pitch)
@@ -325,18 +330,19 @@ export function PadsPanel({
   }
 
   function record() {
-    if (engine.status === 'recording' || engine.status === 'counting-in') {
-      onRecord()
-      return
-    }
-    const track = store.project.tracks.find((item) => item.id === trackId)
-    if (!track?.armed) {
-      store.toast('Arm this track to record.', 'info')
-      return
-    }
-    const beat = projectSampleBeat(store.project, engine.positionSamples)
-    store.armPadRecord(trackId, beat)
+    engine.unlock()
     onRecord()
+    const rec = store.padRecord
+    if (rec?.trackId === trackId) target.current = { trackId, clipId: rec.clipId, drums: true }
+  }
+
+  function stopTake() {
+    engine.unlock()
+    if (onStop) onStop()
+    else {
+      if (recording) onRecord()
+      engine.stop?.()
+    }
   }
 
   function edit() {
@@ -780,13 +786,13 @@ export function PadsPanel({
         </div>
 
         <div className="mpc-perform" data-beat-perform="open">
-          <div className="hw-transport" aria-label="Transport" data-beat-transport="open">
+          <div className="hw-transport" aria-label="Transport" data-beat-transport="open" data-plugin-transport="open">
             <div className="pad-actions" role="group" aria-label="Take">
               <button type="button" className={`hw-key pad-key rec${recording ? ' on' : ''}`} aria-pressed={recording} aria-label="Record" title="Record pad hits into a clip on this track, with the count-in and the loop." onClick={record}><TransportGlyph name="record" /><span>Record</span></button>
               <button type="button" className={`hw-key pad-key dub${recordMode === 'overdub' ? ' on' : ''}`} aria-pressed={recordMode === 'overdub'} aria-label="Overdub" title="Overdub keeps the notes already in the loop." onClick={() => setRecordMode('overdub')}><TransportGlyph name="overdub" /><span>Overdub</span></button>
               <button type="button" className={`hw-key pad-key replace${recordMode === 'replace' ? ' on' : ''}`} aria-pressed={recordMode === 'replace'} aria-label="Replace" title="Replace clears the loop while you record." onClick={() => setRecordMode('replace')}><TransportGlyph name="replace" /><span>Replace</span></button>
-              <button type="button" className="hw-key pad-key stop" aria-label="Stop" title="Stop" onClick={() => { if (recording) onRecord(); engine.stop?.() }}><TransportGlyph name="stop" /><span>Stop</span></button>
-              <button type="button" className="hw-key pad-key play" aria-label="Play" title="Play from the current position." onClick={() => { void engine.playAtPerf?.(engine.positionSamples, performance.now(), 'arrangement') }}><TransportGlyph name="play" /><span>Play</span></button>
+              <button type="button" className="hw-key pad-key stop" aria-label="Stop" title="Stop" onClick={stopTake}><TransportGlyph name="stop" /><span>Stop</span></button>
+              <button type="button" className="hw-key pad-key play" aria-label="Play" title="Play from the current position." onClick={() => { engine.unlock(); if (onPlay) onPlay(); else void engine.playAtPerf?.(engine.positionSamples, performance.now(), 'arrangement') }}><TransportGlyph name="play" /><span>Play</span></button>
               <button type="button" className="hw-key pad-key start" aria-label="Play start" title="Play start. Play from the top." onClick={() => { void engine.playAtPerf?.(0, performance.now(), 'arrangement') }}><TransportGlyph name="start" /><span>Play start</span></button>
               <button type="button" className={`hw-key pad-key erase${eraseOn ? ' on' : ''}`} aria-pressed={eraseOn} aria-label="Erase" title="Hold Erase and a pad to clear that sound while the loop plays." onPointerDown={(event) => { event.preventDefault(); setEraseOn(true) }} onPointerUp={() => setEraseOn(false)} onPointerCancel={() => setEraseOn(false)} onPointerLeave={() => setEraseOn(false)}><TransportGlyph name="erase" /><span>Erase</span></button>
               <button type="button" className={`hw-key pad-key arm${padArm !== 'idle' ? ' on' : ''}`} aria-pressed={padArm !== 'idle'} aria-label={padArm === 'idle' ? 'Arm pad' : 'Stop pad'} title="Arm this pad. Recording starts when the mic crosses the threshold." onClick={() => { void armPad() }}><TransportGlyph name="arm" /><span>{padArm === 'idle' ? 'Arm pad' : 'Stop pad'}</span></button>

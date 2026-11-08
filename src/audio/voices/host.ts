@@ -14,8 +14,11 @@ interface Live {
   script: ScriptProcessorNode | null
   gain: GainNode | null
   dest: AudioNode | null
+  keeper: ConstantSourceNode | null
   signature: string
   failed: boolean
+  /** True after the audio thread has pulled a block. Until then live hits use the buffer voice. */
+  pulled: boolean
 }
 
 export class PadHost {
@@ -46,7 +49,7 @@ export class PadHost {
     if (track.instrument !== 'pads') return false
     this.syncTrack(ctx, track, dest, assetOf, tempo)
     const live = this.lives.get(track.id)
-    if (!live || live.failed || !live.script) return false
+    if (!live || live.failed || !live.script || !live.pulled) return false
     return live.graph.hit(hit.pitch, hit.velocity, hit.time, { tune: hit.tune, filter: hit.filter })
   }
 
@@ -77,8 +80,10 @@ export class PadHost {
         script: null,
         gain: null,
         dest: null,
+        keeper: null,
         signature: '',
         failed: false,
+        pulled: false,
       }
       this.lives.set(track.id, live)
       this.attach(ctx, live, dest)
@@ -132,19 +137,27 @@ export class PadHost {
       live.failed = true
       return
     }
-    let script: ScriptProcessorNode
+    let script: ScriptProcessorNode | null = null
+    let keeper: ConstantSourceNode | null = null
     try {
-      script = create.call(ctx, 256, 0, 2)
+      script = create.call(ctx, 256, 1, 2)
+      if (typeof ctx.createConstantSource === 'function') {
+        keeper = ctx.createConstantSource()
+        keeper.offset.value = 0
+        keeper.connect(script)
+        keeper.start()
+      }
     } catch {
-      live.failed = true
-      return
+      try { script = create.call(ctx, 256, 0, 2) } catch { script = null }
+      keeper = null
     }
-    if (typeof script.connect !== 'function') {
+    if (!script || typeof script.connect !== 'function') {
       live.failed = true
       return
     }
     const gain = ctx.createGain()
     script.onaudioprocess = (event: AudioProcessingEvent) => {
+      live.pulled = true
       const buffer = event.outputBuffer
       if (!buffer) return
       const left = buffer.getChannelData(0)
@@ -156,10 +169,12 @@ export class PadHost {
       script.connect(gain)
       gain.connect(dest)
     } catch {
+      try { keeper?.stop() } catch { /* already stopped */ }
       live.failed = true
       return
     }
     live.script = script
+    live.keeper = keeper
     live.gain = gain
     live.dest = dest
   }
@@ -168,6 +183,7 @@ export class PadHost {
     const live = this.lives.get(id)
     this.lives.delete(id)
     if (!live) return
+    try { live.keeper?.stop() } catch { /* already stopped */ }
     try { live.script?.disconnect() } catch { /* gone */ }
     try { live.gain?.disconnect() } catch { /* gone */ }
   }

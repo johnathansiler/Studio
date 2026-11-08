@@ -11,6 +11,7 @@ import type { ProjectStore } from '../state/store'
 import './kit/kit.css'
 import './instrument.css'
 import { useScreenOverlay } from './screenOverlay'
+import { PluginTransport } from './pluginTransport'
 
 export function RackView({ store, engine, trackId, onOpenKnock }: { store: ProjectStore; engine: AudioEngine; trackId: string; onOpenKnock?: () => void }) {
   const rackState = selectRack(store, trackId)
@@ -122,6 +123,7 @@ export function RackView({ store, engine, trackId, onOpenKnock }: { store: Proje
         </div>
       ) : null}
       {track.instrument === 'library' && <LibraryPanel store={store} engine={engine} trackId={track.id} />}
+      <PluginTransport engine={engine} />
     </div>
   )
 }

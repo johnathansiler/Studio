@@ -21,6 +21,7 @@ import './pluginPages.css'
 import { ChoiceCard } from './ChoiceCard'
 import { PresetControls } from './PresetControls'
 import { useScreenOverlay } from './screenOverlay'
+import { PluginTransport } from './pluginTransport'
 import { LibraryPanel } from './LibraryPanel'
 import './scaler.css'
 
@@ -431,6 +432,7 @@ const scaleList = allScales()
         </div>
         <button type="button" className="scaler-close overlay-close" title="Close Scaler. The track keeps the instrument." aria-label="Close Scaler. The track keeps the instrument." onClick={() => store.openScaler(trackId)}>Close</button>
       </header>
+      <PluginTransport engine={engine} />
       <div className="plugin-page-tabs scaler-page-tabs" role="tablist" aria-label="Scaler pages">
         {(['pads', 'browse', 'chords', 'options'] as const).map((id) => (
           <button key={id} type="button" role="tab" data-plugin-tab={id} aria-selected={view === id} className={view === id ? 'on' : ''} onClick={() => { setView(id); if (id === 'options') setOptions(true); if (id === 'browse') setBrowser(true) }}>

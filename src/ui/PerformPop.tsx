@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { FEATURES } from '../features'
 import { Performer, pointerVelocity, type PerformTarget } from '../audio/performer'
 import type { AudioEngine } from '../audio/engine'
@@ -17,6 +17,7 @@ import type { SessionClient } from '../remote/session'
 import { midiOutputs, onMidiMessage, onMidiPorts } from '../midi/access'
 import { setPerformanceOwnsMidi } from '../midi/remember'
 import { attachGlissando } from './glissando'
+import { TransportActionContext } from './pluginTransport'
 
 const WHITE = [0, 2, 4, 5, 7, 9, 11]
 const BLACK = [1, 3, 6, 8, 10]
@@ -56,6 +57,7 @@ export function PerformPop({
   onClose: () => void
 }) {
   const drums = mode === 'drums'
+  const transport = useContext(TransportActionContext)
   const board = useRef<HTMLDivElement>(null)
   const performer = useRef<Performer | null>(null)
   const target = useRef<PerformTarget | null>(null)
@@ -327,10 +329,12 @@ export function PerformPop({
         {drums ? (FEATURES.session ? DECKS : DECKS.filter((item) => item !== 'session')).map((item) => (
           <button key={item} type="button" className={deck === item ? 'on' : ''} onClick={() => setDeck(item)}>{item[0].toUpperCase() + item.slice(1)}</button>
         )) : <strong>Keys</strong>}
-        <button type="button" className={engine.status === 'recording' ? 'on' : ''} onClick={() => {
-          if (engine.status !== 'recording' && clip) store.armTakeUndo(clip.trackId, clip.clipId)
+        <button type="button" className={engine.status === 'recording' || engine.status === 'counting-in' ? 'on' : ''} aria-pressed={engine.status === 'recording' || engine.status === 'counting-in'} aria-label="Record" onClick={() => {
+          engine.unlock()
+          if (engine.status !== 'recording' && engine.status !== 'counting-in' && clip) store.armTakeUndo(clip.trackId, clip.clipId)
           onRecord()
         }}>Rec</button>
+        <button type="button" aria-label="Stop" title="Stop playback and recording." onClick={() => { engine.unlock(); transport?.stop() }}>Stop</button>
         {!drums && (
           <>
             <button type="button" onClick={() => setOctave((value) => Math.max(-3, value - 1))} aria-label="Octave down">−</button>

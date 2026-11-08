@@ -293,6 +293,21 @@ describe('pads drum machine', () => {
     const made = store.addTracks({ kind: 'midi', count: 1, instrument: 'pads', input: 'mic', channels: 1, armed: false })
     expect(store.track(made[0])?.name).toBe('Beat Machine 1')
   })
+
+  it('arms the Beat Machine track when a take opens so Record can capture MIDI', () => {
+    const store = new ProjectStore(createEmptyProject())
+    const id = store.project.tracks.find((track) => track.type === 'midi')!.id
+    store.insertPads(id)
+    expect(store.track(id)?.armed).toBe(false)
+    store.armPadRecord(id, 0)
+    expect(store.track(id)?.armed).toBe(true)
+    expect(store.padRecord?.trackId).toBe(id)
+    store.commitPadHits(id, [{ pitch: 36, startBeat: 0.25, durationBeats: 0.2, velocity: 0.9 }])
+    store.finishPadRecord(1)
+    const clip = store.track(id)!.midiClips.find((item) => item.name === 'Beat Machine')!
+    expect(clip.notes.map((note) => note.pitch)).toEqual([36])
+    expect(store.padRecord).toBeNull()
+  })
 })
 
 /** One bar of free 1/16 repeats, the hits a held pad would print. */
