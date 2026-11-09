@@ -4,6 +4,7 @@ import { activeTunePreset, orderedInserts, tuneScaleOf } from '../audio/plugins/
 import { CATALOG, FACTORY, descriptor } from '../audio/plugins/catalog'
 import { commitPluginPreset } from '../presets/project'
 import { INSTRUMENT_IDS, isDrumsPlugin, kindLabels, paramsForKind } from '../audio/plugins/ids'
+import { controlChoices, controlLabel, controlText } from '../audio/plugins/readout'
 import { insertsBeatMachine, pluginIsBeatMachine } from '../instruments/pads/identity'
 import { chainSections, trackHasScaler } from '../instruments/scaler/chain'
 import { AnchoredMenu } from './AnchoredMenu'
@@ -180,12 +181,14 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
                 <div className="plugin-controls" onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()}>
                   {group.map((param) => (
                     <label key={param.id}>
-                      {param.name} {formatParam(param.id, plugin.params[param.id] ?? param.default, param.unit)}
+                      {controlLabel(plugin.pluginId, param.id, param.name)} {formatParam(plugin.pluginId, param.id, plugin.params[param.id] ?? param.default, param.unit)}
                       <ParamControl
+                        pluginId={plugin.pluginId}
                         id={param.id}
+                        name={controlLabel(plugin.pluginId, param.id, param.name)}
                         min={param.min}
                         max={param.max}
-                        labels={param.id === 'kind' ? kindLabels(plugin.pluginId) : []}
+                        labels={param.id === 'kind' ? kindLabels(plugin.pluginId) : controlChoices(plugin.pluginId, param.id) ?? []}
                         value={plugin.params[param.id] ?? param.default}
                         fallback={param.default}
                         onChange={(value) => {
@@ -268,15 +271,16 @@ export function PluginSheet({ store, engine }: { store: ProjectStore; engine: Au
   )
 }
 
-function ParamControl({ id, min, max, value, fallback, onChange, labels = [] }: { id: string; min: number; max: number; value: number; fallback?: number; onChange: (value: number) => void; labels?: string[] }) {
-  if (id === 'kind' && labels.length) {
+function ParamControl({ pluginId, id, name, min, max, value, fallback, onChange, labels = [] }: { pluginId: string; id: string; name?: string; min: number; max: number; value: number; fallback?: number; onChange: (value: number) => void; labels?: readonly string[] }) {
+  if ((id === 'kind' || labels.length > 0) && labels.length) {
+    const aria = id === 'kind' ? 'Kind' : (name ?? id)
     return (
-      <select aria-label="Kind" value={Math.max(0, Math.min(labels.length - 1, Math.round(value)))} onChange={(event) => onChange(Number(event.target.value))}>
+      <select aria-label={aria} value={Math.max(0, Math.min(labels.length - 1, Math.round(value)))} onChange={(event) => onChange(Number(event.target.value))}>
         {labels.map((name, index) => <option key={name} value={index}>{name}</option>)}
       </select>
     )
   }
-  if (id === 'mode') {
+  if (pluginId === 'tune' && id === 'mode') {
     return (
       <select value={value >= 0.5 ? 1 : 0} onChange={(event) => onChange(Number(event.target.value))}>
         <option value={0}>Chromatic</option>
@@ -309,10 +313,9 @@ function ParamControl({ id, min, max, value, fallback, onChange, labels = [] }: 
   return <TouchSlider label={id} min={min} max={max} step={step} value={value} fallback={fallback} onChange={onChange} />
 }
 
-function formatParam(id: string, value: number, unit: string) {
-  if (id === 'mode' || id === 'root' || id === 'scaleIndex') return ''
-  const shown = Math.abs(value) >= 100 ? Math.round(value) : Math.round(value * 100) / 100
-  return unit ? `${shown} ${unit}` : `${shown}`
+function formatParam(pluginId: string, id: string, value: number, unit: string) {
+  if (pluginId === 'tune' && (id === 'mode' || id === 'root' || id === 'scaleIndex')) return ''
+  return controlText(pluginId, id, value, unit)
 }
 
 export function InsertList({ store, trackId, roomy = false }: { store: ProjectStore; trackId: string | 'master'; roomy?: boolean }) {

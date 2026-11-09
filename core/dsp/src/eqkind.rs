@@ -323,8 +323,8 @@ impl EqBank {
         }
     }
 
-    fn master(&mut self, left: &mut [f32], right: &mut [f32], frames: usize, values: &[f64], sample_rate: f64, offline: bool) {
-        let heavy = offline && param(values, 12, 1.0) >= 0.5;
+    fn master(&mut self, left: &mut [f32], right: &mut [f32], frames: usize, values: &[f64], sample_rate: f64, _offline: bool) {
+        let heavy = param(values, 12, 1.0) >= 0.5;
         let key = [
             param(values, 1, 20.0),
             param(values, 2, 20000.0),

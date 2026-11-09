@@ -145,13 +145,13 @@ impl SpaceBank {
             delay_filter: design_biquad(BiquadKind::Lowpass, sample_rate, 5000.0, 0.7, 0.0),
             delay_freq: 5000.0,
             delay_mix: SampleGlide::default(),
-            echo_l: line(1.2, sample_rate),
-            echo_r: line(1.2, sample_rate),
+            echo_l: line(1.8, sample_rate),
+            echo_r: line(1.8, sample_rate),
             echo_write: 0,
             echo_phase: 0.0,
             echo_shaper: AnalogShaper::new(2),
-            bbd_l: line(0.4, sample_rate),
-            bbd_r: line(0.4, sample_rate),
+            bbd_l: line(1.8, sample_rate),
+            bbd_r: line(1.8, sample_rate),
             bbd_write: 0,
             bbd_tone: [
                 design_biquad(BiquadKind::Lowpass, sample_rate, 3000.0, 0.7, 0.0),
@@ -318,7 +318,7 @@ impl SpaceBank {
     }
 
     fn echo(&mut self, left: &mut [f32], right: &mut [f32], frames: usize, values: &[f64], sample_rate: f64) {
-        let time = clamp(param(values, 3, 280.0), 20.0, 1000.0) / 1000.0;
+        let time = clamp(param(values, 3, 280.0), 1.0, 1800.0) / 1000.0;
         let feedback = clamp(param(values, 4, 0.35), 0.0, 0.9);
         let wow = clamp(param(values, 8, 0.25), 0.0, 1.0);
         let drive = clamp(param(values, 9, 0.3), 0.0, 1.0);
@@ -341,7 +341,7 @@ impl SpaceBank {
     }
 
     fn bbd(&mut self, left: &mut [f32], right: &mut [f32], frames: usize, values: &[f64], sample_rate: f64) {
-        let time = clamp(param(values, 3, 180.0), 10.0, 380.0) / 1000.0;
+        let time = clamp(param(values, 3, 180.0), 1.0, 1800.0) / 1000.0;
         let feedback = clamp(param(values, 4, 0.3), 0.0, 0.85);
         let clock = clamp(param(values, 10, 0.5), 0.0, 1.0);
         let cutoff = 1200.0 + (1.0 - clock) * 5000.0;

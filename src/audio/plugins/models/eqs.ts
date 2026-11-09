@@ -169,8 +169,10 @@ export function createFocus(sampleRate: number): Processor {
   for (let i = 0; i < size; i++) window[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (size - 1))
   const collect = [new Float32Array(size), new Float32Array(size)]
   const overlap = [new Float32Array(size), new Float32Array(size)]
+  const dryMem = [new Float32Array(size), new Float32Array(size)]
   let filled = 0
   let read = 0
+  let dryAt = 0
   const fftScratch = [makeFftScratch(size), makeFftScratch(size)]
   return {
     latencySamples: 0,
@@ -181,8 +183,11 @@ export function createFocus(sampleRate: number): Processor {
       env = 0
       filled = 0
       read = 0
+      dryAt = 0
       overlap[0].fill(0)
       overlap[1].fill(0)
+      dryMem[0].fill(0)
+      dryMem[1].fill(0)
     },
     process(input, output, params, ctx) {
       const linear = (params.linear ?? 0) >= 0.5 && ctx.quality !== 'eco'
@@ -223,11 +228,25 @@ export function createFocus(sampleRate: number): Processor {
             collect[1].copyWithin(0, size / 2)
             filled = size / 2
           }
-          const outL = overlap[0][read % size]
-          const outR = overlap[1][read % size]
+          let outL = overlap[0][read % size]
+          let outR = overlap[1][read % size]
           overlap[0][read % size] = 0
           overlap[1][read % size] = 0
           read += 1
+          if (dynamic > 0.001) {
+            const hop = size / 2
+            const delayedL = dryMem[0][(dryAt - hop + size) % size]
+            const delayedR = dryMem[1][(dryAt - hop + size) % size]
+            dryMem[0][dryAt % size] = dryL
+            dryMem[1][dryAt % size] = dryR
+            dryAt += 1
+            const band = Math.max(Math.abs(outL), Math.abs(outR))
+            env += (band - env) * (band > env ? 0.15 : 0.01)
+            const duck = env > threshold ? dynamic : 0
+            const wet = 1 - duck
+            outL = delayedL * duck + outL * wet
+            outR = delayedR * duck + outR * wet
+          }
           decode(output, i, outL, outR, mode, input, i)
         } else {
           const shapedL = applyFilters(left, dryL)

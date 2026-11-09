@@ -117,6 +117,33 @@ export function peakIndex(buffer: Float32Array, start = 0) {
   return at
 }
 
+/** Loudest bin from 40 Hz to 2 kHz. Useful when a pitch shift sits under broadband residue. */
+export function dominantHz(buffer: Float32Array, sampleRate = RATE, start = 0) {
+  const n = Math.min(4096, buffer.length - start)
+  if (n < 64) return 0
+  let best = 0
+  let at = 0
+  const bins = 180
+  for (let bin = 2; bin <= bins; bin++) {
+    const hz = (bin / n) * sampleRate
+    if (hz < 40 || hz > 2000) continue
+    const omega = (2 * Math.PI * hz) / sampleRate
+    let real = 0
+    let imag = 0
+    for (let i = 0; i < n; i++) {
+      const sample = buffer[start + i] || 0
+      real += sample * Math.cos(omega * i)
+      imag -= sample * Math.sin(omega * i)
+    }
+    const power = real * real + imag * imag
+    if (power > best) {
+      best = power
+      at = hz
+    }
+  }
+  return at
+}
+
 /** Power-weighted spectral centroid in Hz. Magnitude uses a short DFT. */
 export function spectralCentroid(buffer: Float32Array, sampleRate = RATE, start = 0) {
   const n = Math.min(2048, buffer.length - start)
@@ -149,9 +176,11 @@ export function bandShare(buffer: Float32Array, freq: number, sampleRate = RATE,
   const high = freq * 2 ** octaves
   let band = 0
   let all = 0
-  const bins = 96
-  for (let bin = 1; bin <= bins; bin++) {
-    const hz = (bin / bins) * (sampleRate / 2)
+  const bins = 64
+  const fMin = 28
+  const fMax = sampleRate * 0.45
+  for (let bin = 0; bin < bins; bin++) {
+    const hz = fMin * (fMax / fMin) ** (bin / (bins - 1))
     const omega = (2 * Math.PI * hz) / sampleRate
     let real = 0
     let imag = 0

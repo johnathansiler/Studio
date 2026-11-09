@@ -82,6 +82,7 @@ export function createLimiter(sampleRate: number): Processor {
     process(input, output, params, ctx) {
       const ceiling = dbToGain(params.ceiling ?? -0.1)
       const threshold = dbToGain(params.threshold ?? 0)
+      const limit = Math.min(ceiling, threshold)
       const release = coeff(params.release || 40, ctx.sampleRate)
       const n = input[0]?.length ?? 0
       for (let i = 0; i < n; i++) {
@@ -94,7 +95,7 @@ export function createLimiter(sampleRate: number): Processor {
         delay[1][slot] = right
         let peak = Math.max(Math.abs(left), Math.abs(right))
         for (let k = 0; k < look; k++) peak = Math.max(peak, Math.abs(delay[0][k]), Math.abs(delay[1][k]))
-        const needed = Math.min(1, ceiling / Math.max(peak, threshold, 1e-8))
+        const needed = peak > limit ? Math.min(1, limit / Math.max(peak, 1e-8)) : 1
         gain += (needed - gain) * (needed < gain ? 1 : release)
         index += 1
         if (output[0]) output[0][i] = sanitize(outL * gain)
