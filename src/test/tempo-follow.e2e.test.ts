@@ -78,9 +78,9 @@ describe('production loop tempo follow', () => {
       await page.getByRole('button', { name: 'Browser', exact: true }).click()
       await page.locator('.browser-tabs').waitFor()
       await page.evaluate(() => {
-        const loops = [...document.querySelectorAll('.browser-tabs button')].find((button) => button.textContent?.trim() === 'Loops')
-        if (!(loops instanceof HTMLButtonElement)) throw new Error('missing loops tab')
-        loops.click()
+        const sounds = [...document.querySelectorAll('.browser-tabs button')].find((button) => button.textContent?.trim() === 'Sounds')
+        if (!(sounds instanceof HTMLButtonElement)) throw new Error('missing sounds tab')
+        sounds.click()
       })
       const search = page.getByLabel('Search sounds')
       await search.fill('2-AND-4 (100)')
