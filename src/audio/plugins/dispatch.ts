@@ -440,7 +440,10 @@ function createMaster(sampleRate: number): Processor {
     process(input, output, params, ctx) {
       const kind = Math.round(params.kind ?? 0)
       const chain: Processor[] = []
-      const wide = Math.abs((params.width ?? 1) - 1) > 0.001 || Math.abs((params.low ?? 1) - 1) > 0.001 || Math.abs((params.high ?? 1) - 1) > 0.001
+      const wide = Math.abs((params.width ?? 1) - 1) > 0.001
+        || Math.abs((params.low ?? 1) - 1) > 0.001
+        || Math.abs((params.high ?? 1) - 1) > 0.001
+        || Math.abs((params.bass ?? 120) - 120) > 0.5
       if (wide) chain.push(image)
       if (kind === 2) chain.push(maxim)
       if (kind >= 1) chain.push(brick)

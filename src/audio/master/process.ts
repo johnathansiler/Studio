@@ -129,7 +129,7 @@ export function createMasterEq(sampleRate: number): Processor {
       designed = ''
     },
     process(input, output, params, ctx) {
-      const heavy = ctx.offline === true && (params.phase ?? 1) >= 0.5
+      const heavy = (params.phase ?? 1) >= 0.5
       const ms = (params.ms ?? 0) >= 0.5
       const n = input[0]?.length ?? 0
       const key = `${heavy}:${ms}:${params.hp}:${params.lp}:${params.lowG}:${params.midF}:${params.midG}:${params.midQ}:${params.highG}:${params.sLow}:${params.sMid}:${params.sHigh}`
@@ -356,8 +356,8 @@ function brickFactor(offline: boolean): 2 | 4 {
 
 function prepareBrick(state: BrickState | null, sampleRate: number, lookaheadMs: number, offline: boolean): BrickState {
   const factor = brickFactor(offline)
-  if (state && state.factor === factor) return state
   const look = Math.max(8, Math.round((lookaheadMs / 1000) * sampleRate * factor))
+  if (state && state.factor === factor && state.look === look) return state
   const taps = offline ? 48 : 32
   return {
     factor,
@@ -504,7 +504,12 @@ export function createMaxim(sampleRate: number): Processor {
         boosted[0][i] = (left[i] || 0) * gain
         boosted[1][i] = (right[i] || 0) * gain
       }
-      brick.process(boosted, output, { ceiling: params.ceiling ?? -1, release: 80, lookahead: 5, releaseMode: 1 }, ctx)
+      brick.process(boosted, output, {
+        ceiling: params.ceiling ?? -1,
+        release: params.release ?? 80,
+        lookahead: params.lookahead ?? 5,
+        releaseMode: params.releaseMode ?? 1,
+      }, ctx)
       this.latencySamples = brick.latencySamples
     },
   }
@@ -655,14 +660,47 @@ export function createClip(sampleRate: number): Processor {
 }
 
 export function createDither(): Processor {
+  let rng = 0x12345678
+  let errL = 0
+  let errR = 0
+  const uniform = () => {
+    rng = (Math.imul(rng, 1664525) + 1013904223) >>> 0
+    return rng / 4294967296
+  }
   return {
     latencySamples: 0,
-    reset() {},
-    process(input, output) {
+    reset() {
+      rng = 0x12345678
+      errL = 0
+      errR = 0
+    },
+    process(input, output, params) {
+      const bits = Math.max(8, Math.min(24, Math.round(params.bits ?? 24)))
+      const shape = Math.max(0, Math.min(2, Math.round(params.shape ?? 0)))
       const n = input[0]?.length ?? 0
-      for (let c = 0; c < output.length; c++) {
-        const src = input[Math.min(c, input.length - 1)]
-        for (let i = 0; i < n; i++) output[c][i] = src?.[i] || 0
+      if (bits >= 23 && shape === 0) {
+        for (let c = 0; c < output.length; c++) {
+          const src = input[Math.min(c, input.length - 1)]
+          for (let i = 0; i < n; i++) output[c][i] = src?.[i] || 0
+        }
+        return
+      }
+      const levels = 2 ** (bits - 1)
+      const lsb = 1 / levels
+      const quant = (sample: number, err: number) => {
+        const white = shape === 0 ? (uniform() - 0.5) * lsb : (uniform() - uniform()) * lsb
+        const noise = shape >= 2 ? white - err * 0.85 : white
+        const dithered = sample + noise
+        const q = Math.max(-1, Math.min(1, Math.round(dithered * levels) / levels))
+        return { q, err: q - dithered }
+      }
+      for (let i = 0; i < n; i++) {
+        const left = quant(input[0]?.[i] || 0, errL)
+        const right = quant(input[1]?.[i] ?? input[0]?.[i] ?? 0, errR)
+        errL = left.err
+        errR = right.err
+        if (output[0]) output[0][i] = left.q
+        if (output[1]) output[1][i] = right.q
       }
     },
   }

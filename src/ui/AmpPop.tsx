@@ -21,6 +21,7 @@ import {
   tunePitch,
 } from '../audio/plugins/ampDsp'
 import type { PluginInstance } from '../model/types'
+import { controlText } from '../audio/plugins/readout'
 import type { ParamSpec } from '../audio/plugins/types'
 import { selectChain } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -291,13 +292,15 @@ function PedalDetail({
 }) {
   const id = Math.round(params[`s${index}`] ?? 0)
   if (!id) return <p className="face-hint">Add a pedal.</p>
+  if (id === 1) return <p className="face-hint">Tuner. It listens and does not change the sound.</p>
+  const names = pedalNames(id)
   const delay = id === 16
   const room = id === 17
   return (
     <div className="pedal-detail">
       <strong>{PEDALS[id]}</strong>
-      <label>Level
-        <input aria-label="Pedal level" type="range" min={0} max={1} step={0.01} value={params[`a${index}`] ?? 0.5} onChange={(event) => onChange(`a${index}`, Number(event.target.value))} />
+      <label>{names.a}
+        <input aria-label={names.a} type="range" min={0} max={1} step={0.01} value={params[`a${index}`] ?? 0.5} onChange={(event) => onChange(`a${index}`, Number(event.target.value))} />
       </label>
       {delay || room ? (
         <select aria-label={delay ? 'Delay mode' : 'Reverb mode'} value={modeValue(params[`b${index}`] ?? 0)} onChange={(event) => onChange(`b${index}`, Number(event.target.value))}>
@@ -315,11 +318,11 @@ function PedalDetail({
             </>
           )}
         </select>
-      ) : (
-        <label>Tone
-          <input aria-label="Pedal tone" type="range" min={0} max={1} step={0.01} value={params[`b${index}`] ?? 0.35} onChange={(event) => onChange(`b${index}`, Number(event.target.value))} />
+      ) : names.b ? (
+        <label>{names.b}
+          <input aria-label={names.b} type="range" min={0} max={1} step={0.01} value={params[`b${index}`] ?? 0.35} onChange={(event) => onChange(`b${index}`, Number(event.target.value))} />
         </label>
-      )}
+      ) : null}
       <button type="button" className={(params[`z${index}`] ?? 0) >= 0.5 ? 'on' : ''} onClick={() => onChange(`z${index}`, (params[`z${index}`] ?? 0) >= 0.5 ? 0 : 1)}>
         {(params[`z${index}`] ?? 0) >= 0.5 ? 'Post' : 'Pre'}
       </button>
@@ -335,6 +338,20 @@ function PedalDetail({
   )
 }
 
+function pedalNames(id: number): { a: string; b: string | null } {
+  if (id === 2) return { a: 'Threshold', b: 'Release' }
+  if (id === 3) return { a: 'Amount', b: 'Release' }
+  if (id === 4 || id === 5 || id === 6 || id === 7 || id === 21) return { a: 'Drive', b: 'Tone' }
+  if (id === 8) return { a: 'Position', b: 'Auto' }
+  if (id === 9) return { a: 'Bass', b: 'Treble' }
+  if (id === 10 || id === 11 || id === 14 || id === 12 || id === 13 || id === 15) return { a: 'Depth', b: 'Rate' }
+  if (id === 16 || id === 17 || id === 18 || id === 20) return { a: 'Mix', b: null }
+  if (id === 19) return { a: 'Mix', b: 'Pitch' }
+  if (id === 22) return { a: 'Level', b: 'Freq' }
+  if (id === 23) return { a: 'Depth', b: 'Speed' }
+  return { a: 'Level', b: 'Tone' }
+}
+
 function modeValue(value: number) {
   if (value < 0.34) return 0
   if (value < 0.67) return 0.5
@@ -342,17 +359,19 @@ function modeValue(value: number) {
 }
 
 function Knob({ spec, value, onChange }: { spec: ParamSpec; value: number; pluginId: string; onChange: (value: number) => void }) {
+  const shownOf = (next: number) => controlText('amp', spec.id, next, spec.unit)
   const { ref, readout, dragging } = useDragValue<HTMLButtonElement>({
     min: spec.min,
     max: spec.max,
     value,
     fallback: spec.default,
+    format: shownOf,
     onChange: (next) => onChange(next),
   })
   const span = spec.max - spec.min || 1
   const unit = Math.max(0, Math.min(1, (value - spec.min) / span))
   const angle = -140 + unit * 280
-  const shown = `${Math.abs(value) >= 100 ? Math.round(value) : Math.round(value * 100) / 100}${spec.unit ? ` ${spec.unit}` : ''}`
+  const shown = shownOf(value)
   return (
     <div className="knob">
       <button
