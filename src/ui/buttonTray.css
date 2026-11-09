@@ -77,7 +77,6 @@
 .tune-actions,
 .tune-tools,
 .metro-combo,
-.sound-chips,
 .scaler-pills,
 .scaler-tools,
 .timeline-tools {
@@ -135,7 +134,6 @@
 .command-strip button.tool,
 .browser-tabs button,
 .browser-tabs select,
-.sound-chips button,
 .sound-filters .sound-filter,
 .row-btns > button,
 .slot-actions > button,
@@ -150,6 +148,40 @@
   width: auto;
   max-width: 100%;
   min-width: max(40px, max-content);
+}
+
+/* Kind chips (All, One-shots, Loops, Drums) keep their full words.
+   The row must not shrink inside the browser column. It wraps, and a
+   chip wider than the column can scroll sideways. */
+.sound-chips {
+  display: flex;
+  flex-flow: row wrap;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-start;
+  align-content: flex-start;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: max-content;
+  height: auto;
+  overflow: visible;
+}
+.shell .sound-chips button,
+.shell .sound-chips button:not(.on),
+.shell .sound-chips button.on,
+.sound-chips button {
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: none;
+  min-width: max(40px, max-content);
+  height: 40px;
+  min-height: 40px;
+  max-height: none;
+  padding: 0 12px;
+  overflow: visible;
+  white-space: nowrap;
+  text-overflow: clip;
 }
 
 .transport.simple .t-main .tempo-cluster {
