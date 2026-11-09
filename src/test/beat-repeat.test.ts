@@ -178,6 +178,36 @@ describe('beat repeat latch and midi', () => {
 })
 
 describe('pad, keyboard, and MIDI input share the grid', () => {
+  it('plays a one-shot drum through and does not cut it on release', () => {
+    const calls: string[] = []
+    const engine = {
+      transportPlaying: false,
+      tempo: 120,
+      sampleRate: rate,
+      positionSamples: 0,
+      unlock: () => ({ currentTime: 0 }),
+      playOrigin: () => ({ context: 0, beat: 0 }),
+      outputStamp: () => ({ contextTime: 0, performanceTime: 0 }),
+      clockCompensation: () => ({ outputLatency: 0, baseLatency: 0, calibrationSec: 0 }),
+      setRepeatWatch: () => undefined,
+      liveDrum: () => calls.push('drum'),
+      liveNoteOn: () => calls.push('note'),
+      liveNoteOff: () => calls.push('off'),
+      playBuffer: () => calls.push('buffer'),
+    }
+    const performer = new Performer(
+      engine as unknown as AudioEngine,
+      () => ({ trackId: 'drums', clipId: '', drums: true }),
+      () => undefined,
+      () => false,
+      () => undefined,
+    )
+    performer.setEngaged(false)
+    performer.down(36, 0.9, 0, 1)
+    performer.up(1, 30)
+    expect(calls).toEqual(['drum'])
+  })
+
   it('records repeated hits from a pad, a key, and a MIDI pad on the same clock', async () => {
     let now = 0.01
     const played: { when: number; pitch: number; velocity: number }[] = []

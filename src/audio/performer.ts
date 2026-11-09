@@ -285,8 +285,9 @@ export class Performer {
       return
     }
     const still = [...this.held.values(), ...this.latched.values()].some((item) => item.pitch === held.pitch)
-    if (!still) {
-      const aimed = this.target()
+    const aimed = this.target()
+    const oneShot = !!aimed?.drums && this.padFor(held.pitch)?.gate !== 'hold'
+    if (!still && !oneShot) {
       if (aimed && !aimed.drums && !held.sample) this.engine.releaseThrough(aimed.trackId, held.pitch)
       else this.engine.liveNoteOff(held.pitch)
     }

@@ -475,14 +475,17 @@
 }
 
 .mpc-pad.lit,
-.mpc-pad:active {
+.mpc-pad:active,
+.mpc-pad[aria-pressed='true'] {
   color: #fff;
   background-image:
-    radial-gradient(circle at 50% 42%, rgba(130, 255, 176, calc(0.2 + var(--vel, 0) * 0.55)), transparent 62%),
+    radial-gradient(circle at 50% 42%, rgba(130, 255, 176, calc(0.35 + var(--vel, 0) * 0.55)), transparent 62%),
     linear-gradient(180deg, #2a2a2a 0%, #0c0c0c 70%, #050505 100%);
   box-shadow:
     inset 0 8px 12px rgba(0, 0, 0, 0.75),
-    inset 0 0 calc(8px + var(--vel, 0.4) * 16px) rgba(80, 230, 140, calc(0.45 + var(--vel, 0) * 0.4));
+    inset 0 0 calc(8px + var(--vel, 0.4) * 16px) rgba(80, 230, 140, calc(0.55 + var(--vel, 0) * 0.4));
+  outline: 2px solid #b6ffd0;
+  outline-offset: -5px;
 }
 
 .mpc-pad.sel { outline: 1px solid rgba(255, 255, 255, 0.35); outline-offset: -3px; }
@@ -916,6 +919,53 @@
     inset 0 2px 4px rgba(0, 0, 0, 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.16),
     0 1px 0 #0c0c0c;
+}
+
+/* Note Repeat is a setting toggle: oval, with a latched color and a separate pressed-in state. */
+.shell .mpc .note-repeat-row .note-repeat-hold,
+.mpc .note-repeat-row .note-repeat-hold {
+  border-radius: 999px;
+}
+.shell .mpc .note-repeat-row .note-repeat-hold.on,
+.mpc .note-repeat-row .note-repeat-hold.on,
+.mpc .note-repeat-row .note-repeat-hold[aria-pressed='true'] {
+  background-color: #1f6b45;
+  background-image: linear-gradient(180deg, #3d9a62 0%, #1c5a38 55%, #144428 100%);
+  color: #f4fff6;
+  border-color: #8dffb0;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.35),
+    0 2px 0 #0c0c0c;
+}
+.shell .mpc .note-repeat-row .note-repeat-hold.down,
+.mpc .note-repeat-row .note-repeat-hold.down,
+.mpc .note-repeat-row .note-repeat-hold:active {
+  background-color: #141414;
+  background-image: linear-gradient(180deg, #1a1a1a 0%, #2c2c2c 100%);
+  color: #fff;
+  border-color: #9ec8ff;
+  box-shadow:
+    inset 0 5px 8px rgba(0, 0, 0, 0.8),
+    inset 0 0 0 1px rgba(158, 200, 255, 0.45);
+  transform: translateY(1px);
+}
+.shell .mpc .note-repeat-row .note-repeat-hold.on.down,
+.mpc .note-repeat-row .note-repeat-hold.on.down,
+.mpc .note-repeat-row .note-repeat-hold.on:active {
+  background-color: #123c28;
+  background-image: linear-gradient(180deg, #145032 0%, #0e3320 100%);
+  color: #e9fff1;
+  border-color: #b6ffd0;
+  box-shadow:
+    inset 0 5px 8px rgba(0, 0, 0, 0.72),
+    inset 0 0 0 1px rgba(182, 255, 208, 0.55);
+}
+
+/* Previous, the rate, and Next are action keys. The Note Repeat toggle stays oval. */
+.shell .mpc .note-repeat-row .note-repeat-rate > button.hw-key,
+.mpc .note-repeat-row .note-repeat-rate > button.hw-key {
+  border-radius: 5px;
 }
 
 .mpc .pad-more {

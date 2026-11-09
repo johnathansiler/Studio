@@ -3005,12 +3005,14 @@ export class ProjectStore {
    * Otherwise a new track of the right kind, which becomes the selection.
    * One undo step.
    */
-  placeClipAtPlayhead(trackId: string | null, clip: AudioClip | MidiClip, playheadSample: number) {
+  placeClipAtPlayhead(trackId: string | null, clip: AudioClip | MidiClip, playheadSample: number): { trackId: string; clipId: string } | null {
     const playhead = readPlayhead(this.project, playheadSample)
     const placed = stampClipAtPlayhead(clip, playhead)
+    let result: { trackId: string; clipId: string } | null = null
     this.mutate(() => {
-      this.commitArrangedClip(trackId, placed)
+      result = this.commitArrangedClip(trackId, placed)
     })
+    return result
   }
 
   /**

@@ -135,6 +135,26 @@ type PreviewEngine = {
   auditionLibrary?: (trackId: string, pitch?: number, velocity?: number) => Promise<void>
 }
 
+/** Bring the new Arrange clip into the timeline, including when a phone sheet has shortened the lanes. */
+export function revealArrangedClip(trackId: string, clipId: string) {
+  const show = () => {
+    const clip = document.querySelector(`[data-clip="${CSS.escape(clipId)}"]`) as HTMLElement | null
+    const timeline = document.querySelector('.timeline-scroll') as HTMLElement | null
+    const heads = document.querySelector('.arrange .heads') as HTMLElement | null
+    if (!timeline || !clip || clip.getAttribute('data-track') !== trackId) return false
+    const view = timeline.getBoundingClientRect()
+    const box = clip.getBoundingClientRect()
+    const pad = 12
+    if (box.top < view.top + pad || box.bottom > view.bottom - pad) timeline.scrollTop += box.top - view.top - pad
+    if (box.left < view.left + pad || box.right > view.right - pad) timeline.scrollLeft += box.left - view.left - pad
+    if (heads) heads.scrollTop = timeline.scrollTop
+    return true
+  }
+  requestAnimationFrame(() => {
+    if (!show()) requestAnimationFrame(show)
+  })
+}
+
 export function SoundBrowser({
   store,
   engine,
@@ -178,6 +198,7 @@ export function SoundBrowser({
     setType(lockType && lockType !== 'all' ? lockType : 'all')
   }, [lockType])
   const [busy, setBusy] = useState('')
+  const [fault, setFault] = useState('')
   const [playing, setPlaying] = useState('')
   const [wave, setWave] = useState<{ id: string; peaks: number[]; bars: number } | null>(null)
   const [head, setHead] = useState(0)
@@ -430,7 +451,9 @@ export function SoundBrowser({
 
   async function add(entry: SoundEntry, trackId?: string | null, startSample?: number) {
     if (store.remoteFollow) {
-      store.toast('The host owns the arrangement.', 'warn')
+      const message = 'The host owns the arrangement.'
+      setFault(message)
+      store.toast(message, 'warn')
       return
     }
     const dropped = trackId ? store.track(trackId) : null
@@ -450,16 +473,34 @@ export function SoundBrowser({
         bufferId: `lib_${entry.id}`,
       })
       if (!placed) {
-        store.toast('That sound had no audio.', 'warn')
+        const message = 'That sound had no audio.'
+        setFault(message)
+        store.toast(message, 'warn')
         return
       }
       if (!store.buffers.has(placed.asset.id)) store.addAsset(placed.asset)
       const host = audioTarget(trackId)
-      store.placeClipAtPlayhead(host, placed.clip, startSample ?? engine.currentTimelineSample())
-      const conformed = entry.type === 'loop' && placed.clip.stretch?.followTempo
+      const at = startSample ?? engine.currentTimelineSample()
+      const landed = store.placeClipAtPlayhead(host, placed.clip, at)
+      const clip = landed ? store.project.tracks.find((track) => track.id === landed.trackId)?.clips.find((item) => item.id === landed.clipId) : null
+      const channel = clip ? store.buffers.get(clip.bufferId)?.channels[0] : null
+      if (!landed || !clip || clip.durationSamples < 1 || !channel?.length) {
+        const message = 'Could not add that sound onto the track.'
+        setFault(message)
+        store.toast(message, 'warn')
+        return
+      }
+      setFault('')
+      engine.stopPreview()
+      setPlaying('')
+      setWave(null)
+      revealArrangedClip(landed.trackId, landed.clipId)
+      const conformed = entry.type === 'loop' && clip.stretch?.followTempo
       store.toast(conformed ? `${entry.name} is on the track at the song tempo.` : `${entry.name} is on the track.`, 'good')
     } catch (error) {
-      store.toast(error instanceof Error ? error.message : 'Could not add that sound.', 'warn')
+      const message = error instanceof Error ? error.message : 'Could not add that sound.'
+      setFault(message)
+      store.toast(message, 'warn')
     } finally {
       setBusy('')
     }
@@ -660,6 +701,7 @@ export function SoundBrowser({
           )}
         </p>
       )}
+      {fault && <p className="sound-status" role="alert">{fault}</p>}
       <div className="sound-list">
         {starterRows.map((entry) => {
           const on = playing === entry.id
