@@ -23,7 +23,7 @@ import { hitRoute, padPitchForKey } from '../instruments/mpc/model'
 import { preparePadPcm } from '../instruments/mpc/render'
 import { RackHost } from './rack/host'
 import { PadHost } from './voices/host'
-import { renderNotes } from './rack/dsp'
+import { graphPlugins, renderArrangeInputs } from './arrangeSources'
 import { LibraryHost } from './multisample/host'
 import type { SamplePack } from './multisample/types'
 import { renderQuantizedClip } from '../model/quantize'
@@ -34,7 +34,7 @@ import { findPeakOffset, jamDelays, perfAtContextTime, type SliceChunk, sliceChu
 import { encodeWav, linearResample } from '../model/wav'
 import { tuneBlockScale } from './plugins/autoTune'
 import { audibleIds } from '../model/audible'
-import { automationSchedule, channelAutomationMode, laneFor, rackLanesFor, valueAtMappedSample } from '../model/automation'
+import { automationSchedule, channelAutomationMode, laneFor, valueAtMappedSample } from '../model/automation'
 import { applyRamps, smoothParam } from './paramCurve'
 import { channelRoute } from '../model/sharedMix'
 import { chainContext, enabledFx, LiveMidiChain, midiPanicMessages, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
@@ -2204,95 +2204,24 @@ export class AudioEngine {
   }
 
   async exportMix(project: Project, assets: Map<string, AudioAsset>): Promise<ArrayBuffer> {
-    const rate = this.sampleRate
+    const rate = project.sampleRate || this.sampleRate
     const end = Math.max(rate, arrangementEndSample(project))
-    const renderedTracks = []
-    for (const track of project.tracks) {
-      const offline = new OfflineAudioContext(2, end, rate)
-      const input = offline.createGain()
-      input.connect(offline.destination)
-      const strip = { input } as StripNodes
-      for (const clip of track.clips) {
-        if (clip.slotOnly) continue
-        const asset = assets.get(clip.bufferId)
-        if (!asset) continue
-        const buffer = this.bufferFromAsset(offline, asset)
-        this.scheduleAudioClip(offline, strip, buffer, clip, 0, 0, end)
-      }
-      const heard = this.heardMidi(project, track)
-      if (heard.voice.instrument === 'library' && heard.voice.library) {
-        const events = []
-        for (const item of heard.notes) {
-          const start = beatsToSamples(item.startBeat, rate, project.tempo)
-          const dur = beatsToSamples(item.note.durationBeats, rate, project.tempo)
-          if (start >= end) continue
-          events.push({ sample: Math.max(0, start), pitch: item.note.pitch, vel: item.note.velocity, slide: !!item.note.slide })
-          events.push({ sample: Math.min(end - 1, start + dur), pitch: item.note.pitch, vel: 0 })
-        }
-        await this.libraryHost.prepare(heard.voice.id, heard.voice, events, rate)
-        const rendered = this.libraryHost.renderOffline(heard.voice.id, heard.voice, events, rate, end)
-        const buffer = offline.createBuffer(2, end, rate)
-        buffer.getChannelData(0).set(rendered[0])
-        buffer.getChannelData(1).set(rendered[1])
-        const src = offline.createBufferSource()
-        src.buffer = buffer
-        src.connect(strip.input)
-        src.start(0)
-      } else if (samplerInsert(heard.voice)) {
-        for (const item of heard.notes) {
-          const span = beatSpanSamples(project, item.startBeat, item.note.durationBeats)
-          if (span.start >= end) continue
-          this.scheduleVoice(offline, strip, item.note, span.start / rate, span.duration / rate, heard.voice)
-        }
-      } else if (track.instrument === 'scaler' && heard.voice.instrument === 'drum-machine') {
-        for (const item of heard.notes) {
-          const span = beatSpanSamples(project, item.startBeat, item.note.durationBeats)
-          if (span.start >= end) continue
-          this.scheduleVoice(offline, strip, item.note, span.start / rate, span.duration / rate, heard.voice)
-        }
-      } else if (heard.voice.rack) {
-        const events = []
-        for (const item of heard.notes) {
-          const span = beatSpanSamples(project, item.startBeat, item.note.durationBeats)
-          if (span.start >= end) continue
-          events.push({ sample: Math.max(0, Math.round(span.start)), pitch: item.note.pitch, vel: item.note.velocity, slide: !!item.note.slide })
-          events.push({ sample: Math.min(end - 1, Math.round(span.start + span.duration)), pitch: item.note.pitch, vel: 0 })
-        }
-        const rendered = renderNotes(heard.voice.rack, events, rate, project.tempo, end, assets, rackLanesFor(project, heard.voice.id))
-        const buffer = offline.createBuffer(2, end, rate)
-        buffer.copyToChannel(rendered[0], 0)
-        buffer.copyToChannel(rendered[1], 1)
-        const src = offline.createBufferSource()
-        src.buffer = buffer
-        src.connect(strip.input)
-        src.start(0)
-      } else {
-        for (const item of heard.notes) {
-          const span = beatSpanSamples(project, item.startBeat, item.note.durationBeats)
-          if (span.start >= end) continue
-          this.scheduleVoice(offline, strip, item.note, span.start / rate, span.duration / rate, heard.voice)
-        }
-      }
-      this.schedulePatternClips(offline, strip, project, track.id, 0, 0, end)
-      const rendered = await offline.startRendering()
-      const left = new Float32Array(rendered.getChannelData(0))
-      const right = rendered.numberOfChannels > 1 ? new Float32Array(rendered.getChannelData(1)) : new Float32Array(left)
-      renderedTracks.push({
-        id: track.id,
-        type: track.type,
-        input: track.input,
-        buffer: [left, right],
-        volume: track.volume,
-        pan: track.pan,
-        mute: track.mute,
-        solo: track.solo,
-        soloSafe: track.soloSafe,
-        plugins: track.plugins,
-        sends: track.sends,
-        output: track.output,
-        groupId: track.groupId,
-      })
-    }
+    const inputs = await renderArrangeInputs(project, assets, 0, end, end)
+    const renderedTracks = project.tracks.map((track) => ({
+      id: track.id,
+      type: track.type,
+      input: track.input,
+      buffer: inputs.get(track.id) ?? [new Float32Array(end), new Float32Array(end)],
+      volume: track.volume,
+      pan: track.pan,
+      mute: track.mute,
+      solo: track.solo,
+      soloSafe: track.soloSafe,
+      plugins: graphPlugins(track),
+      sends: track.sends,
+      output: track.output,
+      groupId: track.groupId,
+    }))
     const ids = new Set<string>()
     for (const track of project.tracks) for (const plugin of track.plugins) ids.add(plugin.pluginId)
     for (const plugin of project.masterPlugins) ids.add(plugin.pluginId)
@@ -4393,19 +4322,6 @@ export class AudioEngine {
     const at = this.perfForContext(when)
     this.midiSink(noteBytes(true, this.midiOutChannel, note.pitch, midiVelocityByte(note.velocity)), at)
     this.midiSink(noteBytes(false, this.midiOutChannel, note.pitch, 0), at + Math.max(0, dur) * 1000)
-  }
-
-  private heardMidi(project: Project, track: Track) {
-    const groups = performancesOn(project, track)
-    const voice = groups[0]?.voice ?? track
-    const notes: { note: MidiNote; startBeat: number }[] = []
-    for (const group of groups) {
-      for (const clip of group.clips) {
-        if (clip.slotOnly || clip.scene != null) continue
-        for (const note of prepareClipNotes(project, group.owner, clip)) notes.push({ note, startBeat: clip.startBeat + note.startBeat })
-      }
-    }
-    return { voice, notes }
   }
 
   private scheduleVoice(ctx: BaseAudioContext, strip: StripNodes, note: MidiNote, when: number, dur: number, track?: Track, bucket?: Stoppable[], routed = false) {

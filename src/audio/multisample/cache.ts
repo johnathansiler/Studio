@@ -22,7 +22,7 @@ export class MemoryBank implements SampleBank {
   }
 }
 
-type FetchLike = (input: string, init?: { headers?: Record<string, string> }) => Promise<Response>
+export type FetchLike = (input: string, init?: { headers?: Record<string, string> }) => Promise<Response>
 
 /**
  * Decodes a sample the first time a voice asks for it.

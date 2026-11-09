@@ -1065,7 +1065,7 @@ export function normalizeProject(project: Project): Project {
   if (!project.masterPlugins.some((plugin) => plugin.pluginId === 'limiter')) {
     const limiter = createPlugin('limiter', 'Transparent')
     limiter.enabled = false
-    project.masterPlugins.unshift(limiter)
+    project.masterPlugins.push(limiter)
   }
   return normalizeMix(project)
 }

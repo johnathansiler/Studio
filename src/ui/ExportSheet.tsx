@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { BounceCancelled, runBounce, type BounceJob, type BounceKind } from '../audio/bounce'
+import { LibrarySamplesMissing, prepareLibrarySources } from '../audio/arrangeSources'
+import { BounceCancelled, bounceBounds, runBounce, type BounceJob, type BounceKind } from '../audio/bounce'
 import { decodeWavPCM } from '../model/wav'
 import { selectProject } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -60,7 +61,7 @@ export function ExportSheet({
     const job: BounceJob = {
       kind: format,
       project: store.project,
-      assets: [...store.buffers.values()],
+      assets: [],
       scope: format === 'track' ? 'selection' : scope,
       startSample: scope === 'selection' || format === 'track' ? selectionStart : Math.round(start * store.project.sampleRate),
       endSample: scope === 'selection' || format === 'track' ? selectionEnd : Math.round((end || store.project.loopEndSample / store.project.sampleRate) * store.project.sampleRate),
@@ -82,6 +83,13 @@ export function ExportSheet({
       projectAudio: audio,
     }
     try {
+      if (format !== 'midi' && format !== 'project') {
+        const bounds = bounceBounds(store.project, job.scope, job.startSample, job.endSample)
+        await prepareLibrarySources(store.project, store.buffers, bounds.start, bounds.end, {
+          shouldCancel: () => { if (cancel.current) throw new BounceCancelled() },
+        })
+      }
+      job.assets = [...store.buffers.values()]
       const files = await bounceWithWorker(job, setProgress, () => cancel.current, worker)
       if (cancel.current) return
       if (format === 'track' && files[0]) {
@@ -94,7 +102,9 @@ export function ExportSheet({
       }
       setProgress(1)
     } catch (error) {
-      if (!(error instanceof BounceCancelled) && (error as Error)?.name !== 'BounceCancelled') store.toast('Export failed.', 'warn')
+      if (error instanceof BounceCancelled || (error as Error)?.name === 'BounceCancelled') return
+      const missing = error instanceof LibrarySamplesMissing || (error as Error)?.name === 'LibrarySamplesMissing'
+      store.toast(missing ? (error as Error).message : 'Export failed.', 'warn')
     } finally {
       setRunning(false)
     }
