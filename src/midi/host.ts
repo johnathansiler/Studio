@@ -13,17 +13,26 @@ import { samplesToBeats } from '../model/time'
 import { selectLiveCapture, selectMidiMaps, selectMidiOut } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { playScalerLive } from '../instruments/scaler/live'
+import { planLive } from '../instruments/scaler/route'
 import { noteTarget } from '../model/noteTarget'
-import { hardwareMidiAllowed, midiOutputs, onMidiMessage, type MidiPortInfo } from './access'
+import { hardwareMidiAllowed, midiOutputs, onMidiMessage, onMidiPortEnd, type MidiPortInfo } from './access'
 import { performanceOwnsMidi, rememberOff, rememberOn, setCaptureEnabled, stepOwnsMidi } from './remember'
 
 interface OpenNote {
   trackId: string
+  portId: string
   pitch: number
   startBeat: number
   velocity: number
   /** The key that started this note. A chord shares one source. */
   source: number
+}
+
+interface Voiced {
+  portId: string
+  trackId: string
+  source: number
+  pitches: number[]
 }
 
 /**
@@ -37,8 +46,9 @@ export class MidiHost {
   private clockTempo = 0
   private recording = false
   private open: OpenNote[] = []
-  /** Source key to the pitches it actually sounded, so note-off releases the whole chord. */
-  private sounded = new Map<string, number[]>()
+  /** Notes actually sounding, so note-off, stop, and a dropped port release the whole chord. */
+  private voiced: Voiced[] = []
+  private portUnlisten: (() => void) | null = null
   private takes = new Map<string, { pitch: number; startBeat: number; durationBeats: number; velocity: number }[]>()
   private draftTimer = 0
 
@@ -51,17 +61,25 @@ export class MidiHost {
     this.stop()
     if (hideHardware || !hardwareMidiAllowed()) return
     this.unlisten = onMidiMessage((input, data, timeStamp) => this.onMessage(input, data, timeStamp))
+    this.portUnlisten = onMidiPortEnd((input) => this.endInput(input))
     this.unsub = this.engine.subscribe(() => this.watchTransport())
     this.engine.midiSink = (bytes, time) => this.send(bytes, time)
+    this.watchTransport()
   }
 
   stop() {
+    const recording = this.recording || this.engine.status === 'recording'
     this.unlisten?.()
     this.unlisten = null
+    this.portUnlisten?.()
+    this.portUnlisten = null
     this.unsub?.()
     this.unsub = null
     this.stopClock()
     if (this.engine.midiSink) this.engine.midiSink = null
+    if (recording) this.commitTakes()
+    else this.releaseAllVoices()
+    this.recording = false
   }
 
   send(bytes: number[], timeMs?: number) {
@@ -96,25 +114,56 @@ export class MidiHost {
     const dest = midiDestinations(this.store.project.tracks, input.id, this.store.selectedTrackId, recording)
     const beat = this.beatAt(timeStamp)
     if (message.kind === 'note-on') {
-      const velocity = message.value / 127
-      for (const id of dest.play) {
-        const pitches = this.sound(id, message.number, velocity)
-        this.sounded.set(`${id}:${message.number}`, pitches)
-        if (recording && dest.record.includes(id)) {
-          for (const pitch of pitches) this.open.push({ trackId: id, pitch, startBeat: beat, velocity, source: message.number })
-        } else if (!recording) {
-          for (const pitch of pitches) rememberOn(id, pitch, beat, velocity)
-        }
-      }
+      this.noteOn(input.id, dest, message.number, message.value / 127, beat, recording)
       return
     }
+    this.noteOff(input.id, dest, message.number, beat, recording)
+  }
+
+  /**
+   * Sound dest.play only. Every dest.record id is captured, including a track that is not playing.
+   * A track in both lists is sounded once and recorded once per pitch.
+   */
+  private noteOn(portId: string, dest: { play: string[]; record: string[] }, source: number, velocity: number, beat: number, recording: boolean) {
+    const played = new Set<string>()
     for (const id of dest.play) {
-      const pitches = this.sounded.get(`${id}:${message.number}`) ?? [message.number]
-      this.sounded.delete(`${id}:${message.number}`)
-      for (const pitch of pitches) this.engine.releaseThrough(id, pitch)
-      if (!recording) for (const pitch of pitches) rememberOff(id, pitch, beat)
+      const pitches = this.sound(id, source, velocity)
+      const dropped = this.replaceVoice(portId, id, source, pitches)
+      for (const pitch of dropped) {
+        this.engine.releaseThrough(id, pitch)
+        if (!recording) rememberOff(id, pitch, beat)
+      }
+      played.add(id)
+      if (!recording) {
+        for (const pitch of pitches) rememberOn(id, pitch, beat, velocity)
+      }
     }
-    if (recording) this.closeRecorded(dest.record, message.number, beat)
+    if (!recording) return
+    for (const id of new Set(dest.record)) {
+      this.closeRecorded([id], source, beat, portId)
+      const pitches = played.has(id) ? this.voicePitches(portId, id, source) : this.capturePitches(id, source, velocity)
+      for (const pitch of uniquePitches(pitches)) {
+        this.open.push({ trackId: id, portId, pitch, startBeat: beat, velocity, source })
+      }
+    }
+  }
+
+  private noteOff(portId: string, dest: { play: string[]; record: string[] }, source: number, beat: number, recording: boolean) {
+    for (const id of dest.play) {
+      const pitches = this.takeVoice(portId, id, source) ?? [source]
+      for (const pitch of pitches) {
+        this.engine.releaseThrough(id, pitch)
+        if (!recording) rememberOff(id, pitch, beat)
+      }
+    }
+    if (recording) this.closeRecorded(dest.record, source, beat, portId)
+  }
+
+  /** Pitches a record-only track would store. Scaler can transpose them. This does not play the track. */
+  private capturePitches(trackId: string, midi: number, velocity: number): number[] {
+    const plan = planLive(this.store.project, trackId, midi, velocity)
+    if (!plan) return [midi]
+    return plan.record
   }
 
   /** Play a key. Scaler may turn it into a chord, or hide it. */
@@ -143,24 +192,89 @@ export class MidiHost {
     }, 160)
   }
 
-  private closeRecorded(trackIds: string[], pitch: number, beat: number) {
+  private closeRecorded(trackIds: string[], pitch: number, beat: number, portId: string) {
     const wanted = new Set(trackIds)
     const keep: OpenNote[] = []
     for (const note of this.open) {
-      if (note.source !== pitch || !wanted.has(note.trackId)) {
+      if (note.source !== pitch || note.portId !== portId || !wanted.has(note.trackId)) {
         keep.push(note)
         continue
       }
-      const list = this.takes.get(note.trackId) || []
-      list.push({
-        pitch: note.pitch,
-        startBeat: note.startBeat,
-        durationBeats: Math.max(0.05, beat - note.startBeat),
-        velocity: note.velocity,
-      })
-      this.takes.set(note.trackId, list)
+      this.pushTake(note, beat)
     }
     this.open = keep
+  }
+
+  /** A port that drops releases what it was sounding and ends its open recorded notes. */
+  private endInput(input: MidiPortInfo) {
+    const beat = this.beatAt(performance.now())
+    const recording = this.recording || this.engine.status === 'recording'
+    const mine = this.voiced.filter((voice) => voice.portId === input.id)
+    this.voiced = this.voiced.filter((voice) => voice.portId !== input.id)
+    for (const voice of mine) {
+      for (const pitch of voice.pitches) {
+        this.engine.releaseThrough(voice.trackId, pitch)
+        if (!recording) rememberOff(voice.trackId, pitch, beat)
+      }
+    }
+    if (!recording) return
+    const keep: OpenNote[] = []
+    for (const note of this.open) {
+      if (note.portId !== input.id) {
+        keep.push(note)
+        continue
+      }
+      this.pushTake(note, beat)
+    }
+    this.open = keep
+  }
+
+  private releaseAllVoices() {
+    const beat = this.beatAt(performance.now())
+    const recording = this.recording || this.engine.status === 'recording'
+    const voices = this.voiced.splice(0)
+    for (const voice of voices) {
+      for (const pitch of voice.pitches) {
+        this.engine.releaseThrough(voice.trackId, pitch)
+        if (!recording) rememberOff(voice.trackId, pitch, beat)
+      }
+    }
+  }
+
+  private replaceVoice(portId: string, trackId: string, source: number, pitches: number[]): number[] {
+    const index = this.voiceIndex(portId, trackId, source)
+    const previous = index >= 0 ? this.voiced[index].pitches : []
+    const next = { portId, trackId, source, pitches }
+    if (index >= 0) this.voiced[index] = next
+    else this.voiced.push(next)
+    const kept = new Set(pitches)
+    return previous.filter((pitch) => !kept.has(pitch))
+  }
+
+  private takeVoice(portId: string, trackId: string, source: number): number[] | null {
+    const index = this.voiceIndex(portId, trackId, source)
+    if (index < 0) return null
+    const [found] = this.voiced.splice(index, 1)
+    return found.pitches
+  }
+
+  private voicePitches(portId: string, trackId: string, source: number): number[] {
+    return this.voiced.find((item) => item.portId === portId && item.trackId === trackId && item.source === source)?.pitches ?? []
+  }
+
+  private voiceIndex(portId: string, trackId: string, source: number) {
+    return this.voiced.findIndex((item) => item.portId === portId && item.trackId === trackId && item.source === source)
+  }
+
+  private pushTake(note: OpenNote, beat: number) {
+    const list = this.takes.get(note.trackId) || []
+    list.push({
+      pitch: note.pitch,
+      startBeat: note.startBeat,
+      durationBeats: Math.max(0.05, beat - note.startBeat),
+      velocity: note.velocity,
+    })
+    this.takes.set(note.trackId, list)
   }
 
   private watchTransport() {
@@ -184,17 +298,9 @@ export class MidiHost {
   }
 
   private commitTakes() {
+    this.releaseAllVoices()
     const beat = samplesToBeats(this.engine.currentTimelineSample(), this.store.project.sampleRate, this.store.project.tempo)
-    for (const note of this.open) {
-      const list = this.takes.get(note.trackId) || []
-      list.push({
-        pitch: note.pitch,
-        startBeat: note.startBeat,
-        durationBeats: Math.max(0.05, beat - note.startBeat),
-        velocity: note.velocity,
-      })
-      this.takes.set(note.trackId, list)
-    }
+    for (const note of this.open) this.pushTake(note, beat)
     this.open = []
     for (const [trackId, notes] of this.takes) {
       if (!notes.length) continue
@@ -246,4 +352,16 @@ export class MidiHost {
       quantizeBeats: this.store.project.quantizeBeats || 0,
     }))
   }
+}
+
+function uniquePitches(pitches: number[]): number[] {
+  const seen = new Set<number>()
+  const out: number[] = []
+  for (const pitch of pitches) {
+    const next = Math.max(0, Math.min(127, Math.round(pitch)))
+    if (seen.has(next)) continue
+    seen.add(next)
+    out.push(next)
+  }
+  return out
 }

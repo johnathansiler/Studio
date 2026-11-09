@@ -6,13 +6,16 @@ export interface MidiPortInfo {
 }
 
 type Handler = (input: MidiPortInfo, data: Uint8Array, timeStamp: number) => void
+type EndHandler = (input: MidiPortInfo) => void
 
 const handlers = new Set<Handler>()
+const enders = new Set<EndHandler>()
 const portListeners = new Set<() => void>()
 let access: MIDIAccess | null = null
 let opening: Promise<void> | null = null
 let inputs: MidiPortInfo[] = []
 let outputs: MIDIOutput[] = []
+let connected = new Map<string, MidiPortInfo>()
 
 export function hardwareMidiAllowed(userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent): boolean {
   if (hidesHardwareMidi(userAgent)) return false
@@ -33,6 +36,15 @@ export function onMidiMessage(handler: Handler): () => void {
   void ensureAccess()
   return () => {
     handlers.delete(handler)
+  }
+}
+
+/** Fires once when a port that was connected disappears or reports disconnected. */
+export function onMidiPortEnd(handler: EndHandler): () => void {
+  enders.add(handler)
+  void ensureAccess()
+  return () => {
+    enders.delete(handler)
   }
 }
 
@@ -65,14 +77,22 @@ function ensureAccess() {
 }
 
 function bind(next: MIDIAccess) {
-  inputs = [...next.inputs.values()].map((port) => ({ id: port.id, name: port.name || 'MIDI in' }))
-  outputs = [...next.outputs.values()]
-  for (const listener of portListeners) listener()
+  const live = new Map<string, MidiPortInfo>()
   for (const port of next.inputs.values()) {
+    const info = { id: port.id, name: port.name || 'MIDI in' }
+    if (port.state !== 'disconnected') live.set(port.id, info)
     port.onmidimessage = (event) => {
-      if (!event.data) return
-      const info = { id: port.id, name: port.name || 'MIDI in' }
+      if (!event.data || port.state === 'disconnected') return
       for (const handler of handlers) handler(info, event.data, event.timeStamp)
     }
   }
+  for (const [id, info] of connected) {
+    if (!live.has(id)) {
+      for (const end of enders) end(info)
+    }
+  }
+  connected = live
+  inputs = [...next.inputs.values()].map((port) => ({ id: port.id, name: port.name || 'MIDI in' }))
+  outputs = [...next.outputs.values()]
+  for (const listener of portListeners) listener()
 }
