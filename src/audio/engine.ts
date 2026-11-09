@@ -1,7 +1,7 @@
 import { clipNeedsStretch, preferStretchCache, renderClipChannels, sourceSamplesOf, timelineSamples } from './stretch/engine'
 import { clickVoice } from './metroClick'
 import { onSpectralCommit } from './spectral/job'
-import { onStretchCommit, readStretch, storeStretch, stretchCacheKey, stretchSlot } from './stretch/commit'
+import { followClockToken, onStretchCommit, readStretch, storeStretch, stretchCacheKey, stretchSlot } from './stretch/commit'
 import type { StretchMode } from './stretch/engine'
 import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
 import { midiLit, pruneMidiMarks, type MidiMark } from '../model/midiActivity'
@@ -238,6 +238,9 @@ export class AudioEngine {
   sessionNotice = ''
   private stretchReady = false
   private readonly stretchKeys = new Set<string>()
+  private followClock = ''
+  private followReady = false
+  private followRearm = 0
   private joining = false
   private readonly dropCommit = onStretchCommit((key) => {
     if (this.stretchKeys.has(key)) this.adoptCommit()
@@ -653,6 +656,26 @@ export class AudioEngine {
         this.scheduleAhead()
       }
     }
+    const follow = followClockToken(project)
+    if (this.followReady && follow !== this.followClock && this.playing && this.status !== 'recording') this.queueFollowRearm()
+    this.followClock = follow
+    this.followReady = true
+  }
+
+  /** Collapse a tempo drag into one reschedule. The latest project is what plays. */
+  private queueFollowRearm() {
+    if (this.followRearm) return
+    this.followRearm = window.setTimeout(() => {
+      this.followRearm = 0
+      if (!this.playing || !this.ctx || !this.project || this.status === 'recording') return
+      if (this.mode === 'session') {
+        for (const id of [...this.sessionStarted]) this.stopSessionTrack(id)
+        this.scheduleAhead()
+        return
+      }
+      this.retargetPlayingLoop()
+      this.scheduleAhead()
+    }, 40)
   }
 
   /** Faders, pans, sends, and solo follow the project. Playing lanes are scheduled on the audio clock. */
@@ -1435,6 +1458,10 @@ export class AudioEngine {
     this.playing = false
     this.silenceNow()
     this.arrangementScheduled = false
+    if (this.followRearm) {
+      window.clearTimeout(this.followRearm)
+      this.followRearm = 0
+    }
     this.sessionStarted.clear()
     this.nextLoopCtx = null
     if (this.scheduler && !this.repeatWatch) {
