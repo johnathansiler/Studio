@@ -82,7 +82,7 @@ export const MENU_COPY: MenuSpec[] = [
   { id: 'export', action: 'export', group: 'project', place: 'all', label: 'Export', hint: 'Bounce or download the mix.' },
   { id: 'box', action: 'box', group: 'edit', place: 'all', label: 'Box', hint: 'Drag a rectangle to select several clips or notes.' },
   { id: 'erase', action: 'erase', group: 'edit', place: 'all', label: 'Erase', hint: 'Tap a clip or note to delete it. Drag to delete more.' },
-  { id: 'pan', action: 'pan', group: 'edit', place: 'all', label: 'Pan', hint: 'Drag to scroll the timeline or the piano roll.' },
+  { id: 'pan', action: 'pan', group: 'edit', place: 'all', label: 'Scroll', hint: 'Scroll the timeline or the piano roll. This is not the mixer pan.' },
   { id: 'session-view', action: 'session-mode', group: 'view', place: 'all', label: 'Launch', hint: 'Play clips from slots instead of the timeline.' },
   { id: 'arrangement', action: 'session-mode', group: 'view', place: 'all', label: 'Timeline', hint: 'Leave clip launching and go back to the arrangement.' },
   { id: 'capture', action: 'capture', group: 'view', place: 'phone', label: 'Capture', hint: 'Put the clips that are playing onto the timeline.' },

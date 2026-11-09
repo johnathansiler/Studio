@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { buildPeakPyramid } from '../audio/peakPyramid'
 import { snapFraction } from '../audio/zeroCross'
-import { drawWaveform, type WaveOutline } from './waveformDraw'
+import { WAVE_DPR_CAP, drawWaveform, type WaveOutline } from './waveformDraw'
 import { fitSpan, panSpan, sampleAtX, zoomSpan, type WaveSpan } from './waveZoom'
 import './waveform.css'
 
@@ -130,7 +130,7 @@ export function WaveformView({
     const paint = () => {
       const cssW = Math.max(1, host.clientWidth || node.clientWidth || 320)
       const cssH = Math.max(1, host.clientHeight || node.clientHeight || 96)
-      const dpr = Math.min(2, window.devicePixelRatio || 1)
+      const dpr = Math.min(WAVE_DPR_CAP, window.devicePixelRatio || 1)
       node.width = Math.max(1, Math.floor(cssW * dpr))
       node.height = Math.max(1, Math.floor(cssH * dpr))
       const ctx = node.getContext('2d')

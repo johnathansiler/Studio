@@ -1776,7 +1776,13 @@ async function importDropped(files: FileList) {
     setPhonePane('edit')
     setMenuOpen(false)
     setPianoOpen(false)
+    store.closePiano()
     store.closePads()
+    store.clearKeyboardReturn()
+    if (store.keyboardMidi) {
+      store.setKeyboardMidi(false)
+      notifyKeyboard(false)
+    }
     store.openSteps(trackId)
   }
 
@@ -2098,6 +2104,7 @@ async function importDropped(files: FileList) {
                   session={session}
                   onSeek={(sample) => void locate(sample)}
                   onOpenPiano={openPiano}
+                  onOpenSteps={openStepSequencer}
                   onOpenKeyboard={openKeyboard}
                   onImportInstrument={(trackId, files) => { void importAsInstrument(trackId, files) }}
                   onPerform={(mode) => openPerform(mode)}

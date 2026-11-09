@@ -58,10 +58,12 @@ export function LoopRegion({
       const scroller = scrollParent(host)
       const hostRect = host.getBoundingClientRect()
       const viewRect = scroller.getBoundingClientRect()
-      const rawLeft = viewRect.left - hostRect.left
-      const rawRight = viewRect.right - hostRect.left
+      const padLeft = viewRect.left + scroller.clientLeft
+      const padRight = padLeft + scroller.clientWidth
+      const rawLeft = padLeft - hostRect.left
+      const rawRight = padRight - hostRect.left
       const viewLeft = Math.max(0, rawLeft)
-      const viewRight = Math.min(width, rawRight)
+      const viewRight = Math.min(width, Math.max(viewLeft, rawRight))
       const viewWidth = Math.max(0, viewRight - viewLeft) || width
       const next = { width, viewLeft, viewWidth }
       setBox((prev) => (
@@ -75,9 +77,13 @@ export function LoopRegion({
     measure()
     const scroller = scrollParent(host)
     scroller.addEventListener('scroll', measure, { passive: true })
+    const observer = new ResizeObserver(measure)
+    observer.observe(scroller)
+    observer.observe(host)
     window.addEventListener('resize', measure)
     return () => {
       scroller.removeEventListener('scroll', measure)
+      observer.disconnect()
       window.removeEventListener('resize', measure)
     }
   }, [project.loopStartSample, project.loopEndSample, gridBeats])

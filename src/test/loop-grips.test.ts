@@ -177,7 +177,10 @@ describe('loop edge grips', () => {
     expect(viewRight - grips.end.hitLeft).toBeGreaterThanOrEqual(44)
     expect(grips.start.hitWidth).toBeGreaterThanOrEqual(44)
     expect(loopEdgeAt(viewRight - 8, grips, { left: 0, right: 390 })).toBe('end')
+    expect(loopEdgeAt(grips.end.faceLeft - 36, grips, { left: 0, right: 1440 })).toBe('end')
+    expect(loopEdgeAt(180, grips, { left: 0, right: 1440 })).toBe('move')
     expect(loopEdgeAt(20, grips, { left: 0, right: 1440 })).toBe('start')
+    expect(grips.end.faceLeft - grips.end.hitLeft).toBeGreaterThanOrEqual(44)
   })
 
   it('lets either handle win over the loop body, including a touch on the visible cap', () => {

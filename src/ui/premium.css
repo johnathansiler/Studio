@@ -141,6 +141,12 @@
   border-color: color-mix(in srgb, var(--line) 82%, white);
 }
 
+html[data-tempo-drag],
+html[data-tempo-drag] body {
+  overflow: hidden;
+  touch-action: none;
+}
+
 .shell .project-name,
 .shell .head input.name,
 .shell .pl-head .name {
@@ -775,7 +781,7 @@
   align-self: stretch;
   align-items: center;
   justify-content: center;
-  min-height: 68px;
+  min-height: 44px;
   height: auto;
   overflow: visible;
   white-space: normal;
@@ -785,6 +791,7 @@
   background-image: var(--face);
   box-shadow: var(--raised);
   border: 1px solid color-mix(in srgb, var(--line) 75%, white);
+  border-radius: 12px;
 }
 
 .action-sheet .sheet-row.ch-row {
@@ -811,16 +818,24 @@
 }
 
 .shell #shell-menu .menu-sig > span { font-weight: 640; }
-.shell #shell-menu .menu-sig > small {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 420;
-  line-height: 1.35;
+.shell #shell-menu .menu-sig > small,
+.shell #shell-menu button > small {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .shell #shell-menu .menu-sig select {
   text-align: center;
   text-align-last: center;
+  min-height: 44px;
+  font-size: 16px;
 }
 
 .shell #shell-menu .latency-choice select {
@@ -828,9 +843,50 @@
   font-size: 16px;
 }
 
-.shell #shell-menu button > small {
-  display: block;
-  min-height: 2.7em;
+.shell #shell-menu .menu-group[aria-label='Project'],
+.shell #shell-menu .menu-group[aria-label='Edit'] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.shell #shell-menu .menu-group[aria-label='Project'] > .menu-heading,
+.shell #shell-menu .menu-group[aria-label='Edit'] > .menu-heading {
+  grid-column: 1 / -1;
+}
+
+/* The menu is portaled to the body, so these rules cannot depend on .shell. */
+#shell-menu button > small,
+#shell-menu .menu-sig > small {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+#shell-menu button,
+#shell-menu .menu-sig,
+#shell-menu select {
+  min-height: 44px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+#shell-menu .menu-group[aria-label='Project'],
+#shell-menu .menu-group[aria-label='Edit'] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+#shell-menu .menu-group[aria-label='Project'] > .menu-heading,
+#shell-menu .menu-group[aria-label='Edit'] > .menu-heading {
+  grid-column: 1 / -1;
 }
 
 .shell #shell-menu button[aria-pressed='true'] {

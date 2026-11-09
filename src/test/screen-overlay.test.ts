@@ -357,20 +357,33 @@ describe('screen overlays leave the view tabs free', () => {
 
         for (const opener of openers) {
           await opener.open()
+          if (opener.name === 'song' || opener.name === 'tools') {
+            const sheet = page.locator(opener.name === 'song' ? '#arrange-setup[data-bottom-sheet="open"]' : '#tool-choices[data-bottom-sheet="open"]')
+            await sheet.waitFor()
+            expect(await sheet.getAttribute('data-screen-overlay')).toBeNull()
+            const box = await sheet.boundingBox()
+            const bar = await page.locator('.tool-slot').boundingBox()
+            const transport = await page.locator('.transport').boundingBox()
+            expect(box).toBeTruthy()
+            expect(box!.height, `${layout.name} ${opener.name}`).toBeGreaterThan(48)
+            expect(box!.height).toBeLessThan(layout.height * 0.85)
+            if (bar) expect(box!.y + box!.height).toBeLessThanOrEqual(bar.y + 4)
+            if (transport) expect(box!.y).toBeGreaterThanOrEqual((transport.y + transport.height) - 4)
+            const close = sheet.locator('.overlay-close')
+            const closeBox = await close.boundingBox()
+            expect(closeBox!.height).toBeGreaterThanOrEqual(44)
+            expect(closeBox!.width).toBeGreaterThanOrEqual(44)
+            await page.getByRole('button', { name: /^Arrange/ }).first().click()
+            await sheet.waitFor({ state: 'detached' })
+            await settleClosed(page)
+            continue
+          }
           await page.waitForFunction(() => {
             return document.querySelector('[data-screen-overlay]')
               || document.querySelector('.anchored-menu[data-menu-size="dock"]')
           }, undefined, { timeout: 8000 })
           if (await page.locator('[data-screen-overlay]').count()) await assertOverlay(page)
           else await assertDocked(page)
-          if (opener.name === 'song' && layout.name === 'phone') {
-            const setup = await page.locator('#arrange-setup').boundingBox()
-            expect(setup).toBeTruthy()
-            expect(setup!.height).toBeLessThan(layout.height * 0.45)
-            expect(setup!.y + setup!.height).toBeLessThan(layout.height - 8)
-            expect(await page.locator('#arrange-setup').getAttribute('data-screen-overlay')).toBeNull()
-            expect(await page.locator('#arrange-setup').getAttribute('data-menu-size')).toBe('dock')
-          }
           if (opener.shot) await page.screenshot({ path: `${artifacts}/overlay-${opener.name}-${layout.name}.png` })
           await page.getByRole('button', { name: /^Arrange/ }).first().click()
           await settleClosed(page)

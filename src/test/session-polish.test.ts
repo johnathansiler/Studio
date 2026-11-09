@@ -40,6 +40,8 @@ describe('a clip tap only selects', () => {
     expect(clipTapAction({ moved: false, sinceLastMs: 200, kind: 'midi' })).toBe('edit')
     expect(clipTapAction({ moved: false, sinceLastMs: 200, kind: 'audio' })).toBe('edit')
     expect(clipTapAction({ moved: false, sinceLastMs: 200, kind: 'pattern' })).toBe('select')
+    expect(clipTapAction({ moved: false, sinceLastMs: 10_000, kind: 'pattern', sequencer: true })).toBe('edit')
+    expect(clipTapAction({ moved: true, sinceLastMs: 10, kind: 'pattern', sequencer: true })).toBe('drag')
     expect(clipTapAction({ moved: true, sinceLastMs: 100, kind: 'midi' })).toBe('drag')
   })
 })

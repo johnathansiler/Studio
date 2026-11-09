@@ -15,7 +15,7 @@ import { loopGridBeats } from '../model/loopEdit'
 import { gridBackground, gridPaint } from '../model/gridLines'
 import { activeGridBeats, edgeFromPointer, lengthReadout, moveFromPointer, positionReadout } from '../model/snapGrid'
 import { quartersPerBar } from '../model/time'
-import { editorForGesture } from '../model/editorOpen'
+import { editorForGesture, hasStepSequencer } from '../model/editorOpen'
 import { holdMeter } from './levels'
 import { patternToMidiNotes } from '../model/patternMidi'
 import { panelChoice, rememberPanel } from './panelMemory'
@@ -30,24 +30,26 @@ import { activeTool, EDITOR_TOOL_KEYS, subscribeTools, toolClaimsGesture } from 
 import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
 import { PlaylistBrowser, type BrowserTab } from './PlaylistBrowser'
-import { SongPanel } from './SongPanel'
 import { AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
-import { AutoTuneLaneMark, addOrOpenAutoTune } from './AutoTuneFace'
+import { AutoTuneLaneMark } from './AutoTuneFace'
 import { OpenBeatMachineButton } from './BeatMachineButton'
 import { AddTrackButton } from './AddTrack'
 import type { TrackChoice } from '../model/addTrack'
 import { showsOpenBeatMachine } from '../instruments/pads/identity'
 import { showsOnscreenPiano } from '../model/onscreenPiano'
 import { KeyboardToggle } from './KeyboardDock'
-import { InsertList, RouteFields, SendList } from './PluginSheet'
+import { ArrangeBottomSheet } from './ArrangeBottomSheet'
+import { UtilitySheets } from './UtilitySheets'
+import { TrackOptions, trackKindLabel } from './TrackOptions'
+import { ARRANGE_SHEET_EVENT, popSheetHistory, publishArrangeSheet, rememberSheetHistory, sheetHistoryKey, type UtilitySheet } from './arrangePanel'
 import { PluginsDrawer } from './PluginsDrawer'
-import { TRACK_ROW, TRACK_SHEET, copyOf, described } from './chrome'
+import { TRACK_ROW, copyOf } from './chrome'
 import { useFormFactor } from './form'
 import './guideSheet.css'
-import { SheetRow, TipButton } from './Hint'
+import { TipButton } from './Hint'
 import { AnchoredMenu } from './AnchoredMenu'
 import { RemoteTimeline, TrackPresence, remoteClipMark, useRemotePeers } from './presenceMarks'
-import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, trimZone } from './touchEdit'
+import { coarsePointer, patternHoldOpensMenu, patternMenuPoint, patternPointerIntent, trimZone } from './touchEdit'
 import { clipTapAction, laneDoubleClickAddsClip } from './clipKeys'
 import { isSampledInstrument } from '../instruments/sampled'
 import { LoopRegion } from './LoopRegion'
@@ -129,6 +131,7 @@ export function ArrangeView({
   session,
   onSeek,
   onOpenPiano,
+  onOpenSteps,
   onOpenKeyboard,
   onImportInstrument,
   onPerform,
@@ -148,6 +151,7 @@ export function ArrangeView({
   session: SessionClient
   onSeek: (sample: number) => void
   onOpenPiano: (trackId: string, clipId?: string) => void
+  onOpenSteps?: (trackId: string) => void
   onOpenKeyboard?: (trackId: string) => void
   onImportInstrument?: (trackId: string, files: FileList) => void
   onPerform: (mode: 'keys' | 'drums') => void
@@ -177,7 +181,6 @@ export function ArrangeView({
   const [nudge, setNudge] = useState<{ audio: Record<string, number>; midi: Record<string, number>; pattern: Record<string, number> } | null>(null)
   const [patternMenu, setPatternMenu] = useState<{ x: number; y: number } | null>(null)
   const form = useFormFactor()
-  const compact = form !== 'desk'
   const [dragView, setDragView] = useState<null | {
     trackId: string
     clipId: string
@@ -554,14 +557,23 @@ export function ArrangeView({
   }
 
   function openClipEditor(kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
-    if (kind === 'midi') onOpenPiano(trackId, clipId)
+    const track = project.tracks.find((item) => item.id === trackId)
+    const surface = editorForGesture('edit-notes', track?.type ?? '', track)
+    if (surface === 'steps') onOpenSteps?.(trackId)
+    else if (kind === 'midi') onOpenPiano(trackId, clipId)
     else if (kind === 'audio') store.selectClip(trackId, clipId, false, true)
   }
 
   function noteClipTap(kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
     const now = performance.now()
     const since = clipId === lastClipTap.current.id ? now - lastClipTap.current.at : Number.POSITIVE_INFINITY
-    const action = clipTapAction({ moved: false, sinceLastMs: since, kind })
+    const track = project.tracks.find((item) => item.id === trackId)
+    const action = clipTapAction({
+      moved: false,
+      sinceLastMs: since,
+      kind,
+      sequencer: kind === 'pattern' && hasStepSequencer(track),
+    })
     if (action === 'edit') {
       lastClipTap.current = { id: '', at: 0 }
       openClipEditor(kind, trackId, clipId)
@@ -574,6 +586,7 @@ export function ArrangeView({
     const track = project.tracks.find((item) => item.id === trackId)
     const surface = editorForGesture(gesture, track?.type ?? '', track)
     if (surface === 'pads') onOpenBeatMachine?.(trackId)
+    else if (surface === 'steps') onOpenSteps?.(trackId)
     else if (surface === 'keyboard') onOpenKeyboard?.(trackId)
     else if (surface === 'piano') onOpenPiano(trackId, clipId)
   }
@@ -581,8 +594,8 @@ export function ArrangeView({
   function moveSelection(event: ReactPointerEvent, kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
     event.stopPropagation()
     focusTimeline()
-    if (touch || event.pointerType === 'touch') event.preventDefault()
     if (kind === 'pattern') setPatternMenu(null)
+    else if (touch || event.pointerType === 'touch') event.preventDefault()
     const additive = event.shiftKey || event.metaKey || event.ctrlKey
     const selected = kind === 'audio' ? store.selectedClipIds : kind === 'midi' ? store.selectedMidiClipIds : store.selectedPatternClipIds
     const wasIn = selected.includes(clipId)
@@ -628,6 +641,7 @@ export function ArrangeView({
     }
     const deltas = new Map<string, number>()
     let travel = 0
+    let intent: 'wait' | 'drag' | 'scroll' = 'wait'
     const preview = (clientX: number) => {
       const pointerBeat = projectSampleBeat(project, Math.max(0, sampleAt(clientX)))
       const patch: Record<string, number> = {}
@@ -654,11 +668,21 @@ export function ArrangeView({
     }
     watch(
       (ev) => {
-        travel = Math.max(travel, Math.hypot(ev.clientX - originX, ev.clientY - originY))
-        if (kind === 'pattern' && touch && travel <= PATTERN_HOLD_SLOP) return
+        const dx = ev.clientX - originX
+        const dy = ev.clientY - originY
+        travel = Math.max(travel, Math.hypot(dx, dy))
+        if (kind === 'pattern') {
+          intent = patternPointerIntent(dx, dy, event.pointerType)
+          if (intent !== 'drag') return
+        }
         preview(ev.clientX)
       },
       (ev) => {
+        if (kind === 'pattern' && (intent === 'scroll' || ev.type === 'pointercancel')) {
+          setNudge(null)
+          setDragView(null)
+          return
+        }
         preview(ev.clientX)
         setNudge(null)
         setDragView(null)
@@ -690,7 +714,8 @@ export function ArrangeView({
     )
   }
 
-  const [setupOpen, setSetupOpen] = useState(false)
+  const [utility, setUtility] = useState<UtilitySheet | null>(null)
+  const setupOpen = utility === 'setup'
   const setupButton = useRef<HTMLButtonElement | null>(null)
   const [browserOwned, setBrowserOwned] = useState(() => browserDock ?? panelChoice('arrangeBrowser') ?? form === 'desk')
   const browserOpen = browserDock ?? browserOwned
@@ -701,7 +726,6 @@ export function ArrangeView({
   }
   const browserPhase = usePushPhase(browserOpen)
   const pluginsPhase = usePushPhase(pluginsOpen)
-  useScreenOverlay(() => setSetupOpen(false), setupOpen)
   useScreenOverlay(() => setPluginsOpen(false), pluginsOpen)
   const [browserTab, setBrowserTab] = useState<BrowserTab>(libraryTab || 'sounds')
   const [browserWidth, setBrowserWidth] = useState(() => browserWidthFor(typeof window === 'undefined' ? 1440 : window.innerWidth, typeof window === 'undefined' ? 900 : window.innerHeight))
@@ -710,8 +734,64 @@ export function ArrangeView({
     setBrowserWidth(browserWidthFor(window.innerWidth, window.innerHeight))
   }, [phone])
   const [trackSheet, setTrackSheet] = useState<string | null>(null)
-  useScreenOverlay(() => setTrackSheet(null), trackSheet != null)
-  const [trackAnchor, setTrackAnchor] = useState<HTMLElement | null>(null)
+  const utilityRef = useRef(utility)
+  const trackRef = useRef(trackSheet)
+  utilityRef.current = utility
+  trackRef.current = trackSheet
+  const historyKey = sheetHistoryKey(trackSheet, utility)
+  useScreenOverlay(() => closeSheets(), historyKey != null)
+  function closeSheets() {
+    if (trackRef.current || utilityRef.current) popSheetHistory()
+    setTrackSheet(null)
+    setUtility(null)
+  }
+  function toggleUtility(id: UtilitySheet) {
+    const current = utilityRef.current
+    const next = current === id ? null : id
+    if (current && !next && !trackRef.current) popSheetHistory()
+    if (next) {
+      engine.stopPreview()
+      setBrowserOpen(false)
+      setPluginsOpen(false)
+      setTrackSheet(null)
+    }
+    setUtility(next)
+  }
+  function toggleTrack(id: string) {
+    if (trackRef.current === id) {
+      popSheetHistory()
+      setTrackSheet(null)
+      return
+    }
+    engine.stopPreview()
+    setBrowserOpen(false)
+    setPluginsOpen(false)
+    setUtility(null)
+    setTrackSheet(id)
+  }
+  useEffect(() => {
+    publishArrangeSheet(utility)
+    return () => publishArrangeSheet(null)
+  }, [utility])
+  useEffect(() => {
+    if (!historyKey) return
+    rememberSheetHistory(historyKey)
+    const onPop = () => {
+      setTrackSheet(null)
+      setUtility(null)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [historyKey])
+  useEffect(() => {
+    const onSheet = (event: Event) => {
+      const id = (event as CustomEvent<UtilitySheet>).detail
+      if (id !== 'setup' && id !== 'tools' && id !== 'snap') return
+      toggleUtility(id)
+    }
+    document.addEventListener(ARRANGE_SHEET_EVENT, onSheet)
+    return () => document.removeEventListener(ARRANGE_SHEET_EVENT, onSheet)
+  })
   useEffect(() => {
     if (!libraryTab) return
     setBrowserOpen(true)
@@ -744,29 +824,21 @@ export function ArrangeView({
         setupOpen={setupOpen}
         pluginsOpen={pluginsOpen}
         setupButton={setupButton}
-        onPlugins={() => setPluginsOpen((open) => !open)}
+        onPlugins={() => {
+          if (!pluginsOpen) closeSheets()
+          setPluginsOpen((open) => !open)
+        }}
         onBrowser={() => {
           const next = !browserOpen
+          if (next) closeSheets()
           if (!next) {
             engine.stopPreview()
             onLibraryClose?.()
           }
           setBrowserOpen(next)
         }}
-        onSetup={() => setSetupOpen((open) => !open)}
+        onSetup={() => toggleUtility('setup')}
       />
-      {setupOpen && (
-        <SongPanel
-          store={store}
-          engine={engine}
-          session={session}
-          position={position}
-          compact={compact}
-          triggerRef={setupButton}
-          onClose={() => setSetupOpen(false)}
-          onQuickPunch={onQuickPunch}
-        />
-      )}
       <div className={`arrange-stage${pluginsPhase !== 'off' ? (phone ? ' plugins-bottom' : ' plugins-side') : ''}${phone && browserPhase !== 'off' ? ' browser-bottom' : ''}`} data-plugins-drawer={pluginsPhase !== 'off' ? (phone ? 'bottom' : 'side') : 'closed'} data-browser-sheet={phone ? (browserPhase !== 'off' ? 'bottom' : 'closed') : 'side'} data-push={pluginsPhase} data-browser-push={phone ? browserPhase : undefined} style={{ ['--push' as string]: '280px' }}>
       <div className={`playlist-frame ${!phone && browserPhase !== 'off' ? 'browser-open' : ''} ${phone ? 'phone-arrange' : ''}`} data-push={phone ? 'off' : browserPhase} style={{ ['--browser' as string]: `${browserWidth}px`, ['--push' as string]: `${browserWidth}px` }}>
       {!phone && browserPhase !== 'off' && (
@@ -831,7 +903,7 @@ export function ArrangeView({
                 {showsOpenBeatMachine(track) && (
                   <OpenBeatMachineButton store={store} trackId={track.id} onOpen={onOpenBeatMachine} />
                 )}
-                <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); setTrackAnchor(event.currentTarget); setTrackSheet(track.id) }}>
+                <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); toggleTrack(track.id) }}>
                   ⋮
                 </TipButton>
                 {store.selectedTrackId === track.id && showsOnscreenPiano(track) && (
@@ -847,7 +919,7 @@ export function ArrangeView({
               </div>
               <div className="track-controls" data-track-controls="">
               <MixFlags store={store} trackId={track.id} compact />
-              {track.type === 'midi' && (
+              {track.type === 'midi' && !hasStepSequencer(track) && (
                 <button
                   type="button"
                   className="piano-open"
@@ -1048,7 +1120,9 @@ export function ArrangeView({
                       event.stopPropagation()
                       lastClipTap.current = { id: '', at: 0 }
                       store.selectClip(track.id, clip.id, true, false)
-                      onOpenPiano(track.id, clip.id)
+                      const surface = editorForGesture('tap-clip', track.type, track)
+                      if (surface === 'steps') onOpenSteps?.(track.id)
+                      else onOpenPiano(track.id, clip.id)
                     }}
                   >
                     <em>{clip.name}</em>
@@ -1057,7 +1131,12 @@ export function ArrangeView({
                         type="button"
                         className="edit-notes"
                         onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => { event.stopPropagation(); if (editorForGesture('edit-notes', 'midi') === 'piano') onOpenPiano(track.id, clip.id) }}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          const surface = editorForGesture('edit-notes', track.type, track)
+                          if (surface === 'steps') onOpenSteps?.(track.id)
+                          else if (surface === 'piano') onOpenPiano(track.id, clip.id)
+                        }}
                       >
                         Edit Notes
                       </button>
@@ -1109,7 +1188,7 @@ export function ArrangeView({
                         data-track={track.id}
                         data-remote-select={remote?.id}
                         className={`clip pattern ${picked ? 'selected' : ''}${remote ? ' remote-selected' : ''}`}
-                        style={{ left, width: widthPx, background: pattern?.color || track.color, pointerEvents: passive ? 'none' : undefined, touchAction: passive ? undefined : 'none', ['--remote' as string]: remote?.color }}
+                        style={{ left, width: widthPx, background: pattern?.color || track.color, pointerEvents: passive ? 'none' : undefined, touchAction: passive ? undefined : 'pan-y', ['--remote' as string]: remote?.color }}
                         onContextMenu={(event) => event.preventDefault()}
                         onDoubleClick={(event) => {
                           event.preventDefault()
@@ -1203,6 +1282,37 @@ export function ArrangeView({
         />
       )}
       {pluginsPhase !== 'off' && <PluginsDrawer store={store} place={phone ? 'bottom' : 'side'} menuOpen={pluginsMenu} onClose={() => setPluginsOpen(false)} />}
+      <UtilitySheets
+        utility={utility}
+        store={store}
+        engine={engine}
+        session={session}
+        position={position}
+        setupButton={setupButton}
+        onClose={closeSheets}
+        onQuickPunch={onQuickPunch}
+      />
+      {sheetTrack && (
+        <ArrangeBottomSheet
+          id="track-options"
+          label={`${sheetTrack.name} track`}
+          title={sheetTrack.name}
+          detail={trackKindLabel(sheetTrack)}
+          onClose={closeSheets}
+        >
+          <TrackOptions
+            store={store}
+            track={sheetTrack}
+            level={levels[sheetTrack.id] ?? 0}
+            automationOpen={!!store.openLanes[sheetTrack.id]}
+            participants={session.state.participants.filter((person) => person.id !== session.state.selfId)}
+            onClose={closeSheets}
+            onPerform={onPerform}
+            onOpenBeatMachine={onOpenBeatMachine}
+            onAnalyze={onAnalyze}
+          />
+        </ArrangeBottomSheet>
+      )}
       </div>
       <AnchoredMenu
         open={!!patternMenu}
@@ -1219,111 +1329,6 @@ export function ArrangeView({
       {store.clipSheet && selected ? (
         <ClipSheet store={store} trackId={selected.track.id} clip={selected.clip} onClose={() => store.closeClipSheet()} />
       ) : null}
-      <AnchoredMenu fill open={!!sheetTrack} onClose={() => setTrackSheet(null)} label={sheetTrack?.name ?? 'Track'} trigger={trackAnchor} prefer="down">
-        {sheetTrack && (
-        <>
-          <SheetRow
-            label={sheetTrack.soloSafe ? 'Solo safe on' : 'Solo safe'}
-            hint="Stay audible when other tracks are soloed."
-            pressed={!!sheetTrack.soloSafe}
-            onClick={() => store.updateTrack(sheetTrack.id, { soloSafe: !sheetTrack.soloSafe })}
-          />
-          <SheetRow
-            label={store.openLanes[sheetTrack.id] ? 'Hide automation' : 'Automation'}
-            hint="Show the automation lane for this track."
-            pressed={!!store.openLanes[sheetTrack.id]}
-            onClick={() => store.toggleAutomation(sheetTrack.id)}
-          />
-          {sheetTrack.type === 'audio' && (
-            <SheetRow
-              label="Auto-Tune"
-              hint="Add Auto-Tune on this track. It starts in key and audible."
-              pressed={sheetTrack.plugins.some((plugin) => plugin.pluginId === 'tune' && plugin.enabled)}
-              onClick={() => { setTrackSheet(null); addOrOpenAutoTune(store, sheetTrack.id) }}
-            />
-          )}
-          {(sheetTrack.type === 'audio' || (sheetTrack.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
-            <SheetRow
-              label={sheetTrack.armed ? 'Armed' : 'Arm'}
-              hint={sheetTrack.type === 'midi' ? 'Record this instrument from its MIDI input.' : copyOf(TRACK_ROW, 'arm').hint}
-              pressed={sheetTrack.armed}
-              onClick={() => store.updateTrack(sheetTrack.id, { armed: !sheetTrack.armed })}
-            />
-          )}
-          {sheetTrack.type === 'audio' && (
-            <SheetRow
-              label={copyOf(TRACK_SHEET, 'monitor').label}
-              hint={copyOf(TRACK_SHEET, 'monitor').hint}
-              pressed={sheetTrack.monitor}
-              onClick={() => store.updateTrack(sheetTrack.id, { monitor: !sheetTrack.monitor })}
-            />
-          )}
-          <label className="sheet-range">
-            <span>{copyOf(TRACK_SHEET, 'volume').label}</span>
-            <small>{copyOf(TRACK_SHEET, 'volume').hint}</small>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              {...described(copyOf(TRACK_SHEET, 'volume'))}
-              value={sheetTrack.volume}
-              onPointerDown={() => store.beginAutomationTouch()}
-              onPointerUp={() => store.endAutomationTouch()}
-              onPointerCancel={() => store.endAutomationTouch()}
-              onChange={(event) => store.updateTrack(sheetTrack.id, { volume: Number(event.target.value) })}
-            />
-          </label>
-          {sheetTrack.type === 'audio' && (
-            <label className="sheet-range">
-              <span>{copyOf(TRACK_SHEET, 'input').label}</span>
-              <small>{copyOf(TRACK_SHEET, 'input').hint}</small>
-              <select {...described(copyOf(TRACK_SHEET, 'input'))} value={sheetTrack.input} onChange={(event) => store.updateTrack(sheetTrack.id, { input: event.target.value })}>
-                <option value="mic">Mic</option>
-                <option value="line">Line</option>
-                <option value="mic:0">Mic 1</option>
-                <option value="mic:1">Mic 2</option>
-                <option value="mic:2">Mic 3</option>
-                <option value="mic:3">Mic 4</option>
-                <option value="none">No input</option>
-                {session.state.participants
-                  .filter((person) => person.id !== session.state.selfId)
-                  .map((person) => (
-                    <option key={person.id} value={`remote:${person.id}`}>{person.name} · live</option>
-                  ))}
-              </select>
-            </label>
-          )}
-          {sheetTrack.type === 'midi' && (
-            <>
-              <SheetRow label={copyOf(TRACK_SHEET, 'scaler').label} hint={copyOf(TRACK_SHEET, 'scaler').hint} pressed={store.scalerTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openScaler(sheetTrack.id) }} />
-              <SheetRow label={copyOf(TRACK_SHEET, 'rack').label} hint={copyOf(TRACK_SHEET, 'rack').hint} pressed={store.rackTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openRack(sheetTrack.id) }} />
-              <SheetRow label="Patch" hint={isSampledInstrument(sheetTrack) ? 'Sampler. Waveform, root, envelope, tone, and the keyboard.' : 'Layered patch: synths, samples, grains, and a morph pad.'} pressed={isSampledInstrument(sheetTrack) ? store.rackTrackId === sheetTrack.id : store.patchTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); store.openPatch(sheetTrack.id) }} />
-              <SheetRow label={copyOf(TRACK_SHEET, 'keys').label} hint={isSampledInstrument(sheetTrack) ? 'Sampler keyboard, root, and envelope.' : copyOf(TRACK_SHEET, 'keys').hint} onClick={() => { setTrackSheet(null); if (isSampledInstrument(sheetTrack)) store.showRack(sheetTrack.id); else onPerform('keys') }} />
-              <SheetRow label={copyOf(TRACK_SHEET, 'drums').label} hint={copyOf(TRACK_SHEET, 'drums').hint} pressed={store.padsTrackId === sheetTrack.id} onClick={() => { setTrackSheet(null); if (onOpenBeatMachine) onOpenBeatMachine(sheetTrack.id); else store.insertPads(sheetTrack.id) }} />
-            </>
-          )}
-          <div className="sheet-fields">
-            <RouteFields store={store} trackId={sheetTrack.id} />
-            <InsertList store={store} trackId={sheetTrack.id} />
-            <SendList store={store} trackId={sheetTrack.id} />
-          </div>
-          {sheetTrack.type === 'audio' && (
-            <SheetRow
-              label="Repair"
-              hint="Spectrogram. Select a spot and remove clicks, hum, or noise."
-              onClick={() => {
-                const clip = sheetTrack.clips.find((item) => item.id === store.selectedClipId) ?? sheetTrack.clips[0]
-                setTrackSheet(null)
-                if (clip) store.openSpectral(sheetTrack.id, clip.id)
-              }}
-            />
-          )}
-          <SheetRow label="Analyze" hint="Analyze the key, chords, and sections of this track." onClick={() => { setTrackSheet(null); onAnalyze(sheetTrack.id) }} />
-          <SheetRow label={copyOf(TRACK_SHEET, 'remove').label} hint={copyOf(TRACK_SHEET, 'remove').hint} onClick={() => { store.removeTrack(sheetTrack.id); setTrackSheet(null) }} />
-        </>
-        )}
-      </AnchoredMenu>
     </div>
   )
 }

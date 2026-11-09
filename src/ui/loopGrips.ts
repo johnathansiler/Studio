@@ -115,6 +115,12 @@ function inwardHits(
 
   let start = place(faces.start, faces.start + faces.faceW)
   let end = place(faces.end, faces.end + faces.faceW)
+  const endFaceRight = faces.end + faces.faceW
+  if (endFaceRight > visR - LOOP_GRIP_SIDE) {
+    const want = Math.max(width, hit + LOOP_GRIP_SIDE)
+    end.right = visR
+    end.left = Math.max(visL, end.right - want)
+  }
   let startLeft = start.left
   let startRight = start.right
   let endLeft = end.left

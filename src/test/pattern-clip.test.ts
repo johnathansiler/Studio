@@ -3,7 +3,7 @@ import { deletesSelection } from '../ui/clipKeys'
 import { ProjectStore } from '../state/store'
 import { createEmptyProject } from '../model/types'
 import { normalizeBeats, renderPattern, starterPattern } from '../model/steps'
-import { PATTERN_HOLD_MS, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint } from '../ui/touchEdit'
+import { PATTERN_HOLD_MS, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, patternPointerIntent } from '../ui/touchEdit'
 
 describe('new arrangement', () => {
   it('starts empty and still keeps the default pattern in the rack', () => {
@@ -225,6 +225,15 @@ describe('phone pattern menu', () => {
     expect(patternHoldOpensMenu(true, PATTERN_HOLD_MS - 1, 0)).toBe(false)
     expect(patternHoldOpensMenu(true, PATTERN_HOLD_MS + 200, PATTERN_HOLD_SLOP + 1)).toBe(false)
     expect(patternHoldOpensMenu(false, PATTERN_HOLD_MS + 200, 0)).toBe(false)
+  })
+
+  it('lets a vertical touch scroll and treats a sideways move as a drag', () => {
+    expect(patternPointerIntent(2, 3, 'touch')).toBe('wait')
+    expect(patternPointerIntent(0, 24, 'touch')).toBe('scroll')
+    expect(patternPointerIntent(4, 28, 'pen')).toBe('scroll')
+    expect(patternPointerIntent(24, 4, 'touch')).toBe('drag')
+    expect(patternPointerIntent(0, 24, 'mouse')).toBe('drag')
+    expect(patternPointerIntent(24, 0, 'mouse')).toBe('drag')
   })
 
   it('places the menu above the finger and inside the screen', () => {

@@ -56,29 +56,27 @@ export function RecordBar({
         <small>{copy('punch').hint}</small>
       </TipButton>
       <TipButton className="guide-choice" label={copy('in').label} hint={copy('in').hint} onClick={() => store.setRecord({ punchIn: Math.round(engine.currentTimelineSample()) })}>
-        <strong>{copy('in').label}</strong>
-        <small>{copy('in').hint}</small>
+        <strong>In</strong>
       </TipButton>
       <TipButton className="guide-choice" label={copy('out').label} hint={copy('out').hint} onClick={() => store.setRecord({ punchOut: Math.round(engine.currentTimelineSample()) })}>
-        <strong>{copy('out').label}</strong>
-        <small>{copy('out').hint}</small>
+        <strong>Out</strong>
       </TipButton>
       <TipButton className="guide-choice" label={copy('quick').label} hint={copy('quick').hint} onClick={onQuickPunch}>
         <strong>{copy('quick').label}</strong>
         <small>{copy('quick').hint}</small>
       </TipButton>
       <label className="guide-choice" title={copy('pre').hint}>
-        <strong>{copy('pre').label}</strong>
+        <strong>Pre</strong>
         <small>{copy('pre').hint}</small>
         <input aria-label={described(copy('pre'))['aria-label']} inputMode="decimal" value={record.preRoll} onChange={(event) => store.setRecord({ preRoll: Number(event.target.value) || 0 })} />
       </label>
       <label className="guide-choice" title={copy('post').hint}>
-        <strong>{copy('post').label}</strong>
+        <strong>Post</strong>
         <small>{copy('post').hint}</small>
         <input aria-label={described(copy('post'))['aria-label']} inputMode="decimal" value={record.postRoll} onChange={(event) => store.setRecord({ postRoll: Number(event.target.value) || 0 })} />
       </label>
       <label className="guide-choice">
-        <strong>{copy('unit').label}</strong>
+        <strong>Unit</strong>
         <small>{copy('unit').hint}</small>
         <select {...described(copy('unit'))} value={record.rollUnit} onChange={(event) => store.setRecord({ rollUnit: event.target.value === 'seconds' ? 'seconds' : 'bars' })}>
           <option value="bars">Bars</option>
@@ -87,7 +85,7 @@ export function RecordBar({
       </label>
       {audioTrack && (
         <label className="guide-choice">
-        <strong>{copy('input').label}</strong>
+        <strong>Input</strong>
         <small>{copy('input').hint}</small>
         <select
           {...described(copy('input'))}
