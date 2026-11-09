@@ -152,7 +152,7 @@ export function analyzeProject(project: Project, buffers?: Map<string, AnalysisA
   const densities = new Float32Array(barCount)
   const global = new Float32Array(12)
   project.tracks.forEach((track, index) => readTrack(track, index, project, map, bars, masks, densities, global, buffers, barBeats))
-  const fitted = keyFromHistogram(global)
+  const fitted = keyFromHistogram(global, bars)
   const { scale, ...key } = fitted
   const activity: BarActivity[] = bars.map((bar, index) => ({
     chroma: bar.chroma,

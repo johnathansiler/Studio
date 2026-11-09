@@ -40,5 +40,14 @@ export function forgetAnalyses() {
 export function summaryLine(result: AnalysisResult) {
   if (result.key.confidence <= 0 && !result.chordsByBar.length) return ''
   const chords = result.chordsByBar.slice(0, 6).map((chord) => chord.symbol).join(' ')
-  return chords ? `${result.key.label} · ${chords}` : result.key.label
+  const name = result.key.alternative ? `${result.key.label} or ${result.key.alternative}` : result.key.label
+  return chords ? `${name} · ${chords}` : name
+}
+
+/** The analysis-panel line. A relative key is named only when the center is not settled. */
+export function analysisReadout(result: AnalysisResult) {
+  if (result.key.confidence <= 0 && !result.chordsByBar.length) return 'Nothing to analyze on this track yet.'
+  const line = `${result.key.label} · ${result.scale} · ${Math.round(result.tempo)} bpm`
+  if (!result.key.alternative) return line
+  return `${line} · ${Math.round(result.key.confidence * 100)}% · or ${result.key.alternative}`
 }
