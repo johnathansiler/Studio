@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { ButtonTray } from './ButtonTray'
 import type { AudioEngine } from '../audio/engine'
 
 export interface TransportActions {
@@ -25,11 +26,11 @@ export function PluginTransport({ engine, extra }: { engine: AudioEngine; extra?
     fn?.()
   }
   return (
-    <div className="plugin-transport" data-plugin-transport="open" role="group" aria-label="Transport">
+    <ButtonTray className="plugin-transport" data-plugin-transport="open" role="group" aria-label="Transport">
       <button type="button" className={recording ? 'on' : ''} aria-pressed={recording} aria-label="Record" title="Record onto this track." onClick={() => go(actions?.record)}>Record</button>
       <button type="button" aria-label="Stop" title="Stop playback and recording. The playhead stays where it is." onClick={() => go(actions?.stop)}>Stop</button>
       <button type="button" className={running && !recording ? 'on' : ''} aria-pressed={running && !recording} aria-label="Play" title="Play from the playhead." onClick={() => go(running && !recording ? actions?.stop : actions?.play)}>Play</button>
       {extra}
-    </div>
+    </ButtonTray>
   )
 }

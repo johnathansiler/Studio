@@ -32,7 +32,7 @@ export function MainMenu({
         const rows = items.filter((item) => item.group === group.id)
         if (!rows.length) return null
         return (
-          <section key={group.id} className="menu-group" aria-label={group.label}>
+          <section key={group.id} className="menu-group btn-tray" aria-label={group.label}>
             <p className="menu-heading">{group.label}</p>
             {group.id === 'settings' && onLatency && (
               <label key="latency" className="menu-sig latency-choice" data-menu-action="latency">

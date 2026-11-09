@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const css = readFileSync(new URL('../ui/buttonTiers.css', import.meta.url), 'utf8')
+const tray = readFileSync(new URL('../ui/buttonTray.css', import.meta.url), 'utf8')
 const main = readFileSync(new URL('../main.tsx', import.meta.url), 'utf8')
 
 describe('button tiers', () => {
@@ -39,8 +40,21 @@ describe('button tiers', () => {
     const premium = main.indexOf("import './ui/premium.css'")
     const stage = main.indexOf("import './ui/pluginStage.css'")
     const tiers = main.indexOf("import './ui/buttonTiers.css'")
+    const trayImport = main.indexOf("import './ui/buttonTray.css'")
     expect(premium).toBeGreaterThan(-1)
     expect(stage).toBeGreaterThan(premium)
     expect(tiers).toBeGreaterThan(stage)
+    expect(trayImport).toBeGreaterThan(tiers)
+  })
+
+  it('shares one recessed tray and one rounded-rectangle button', () => {
+    expect(tray).toContain('--tray-bg')
+    expect(tray).toContain('--tray-gap: 5px')
+    expect(tray).toContain('--tray-btn-radius: 12px')
+    expect(tray).toContain('.btn-tray')
+    expect(tray).toContain('.btn-tray-equal')
+    expect(tray).not.toContain('border-radius: 999px')
+    expect(css).toContain('--btn-radius: 12px')
+    expect(css).not.toContain('999px')
   })
 })

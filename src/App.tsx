@@ -67,6 +67,7 @@ import { SessionView } from './ui/SessionView'
 import { collabBadgeOn, collabPanelVisible, type StudioTab } from './ui/collabTab'
 import './ui/collab.css'
 import { AnchoredMenu } from './ui/AnchoredMenu'
+import { ButtonTray } from './ui/ButtonTray'
 import { TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
 import { SnapControl } from './ui/SnapControl'
@@ -2044,7 +2045,7 @@ async function importDropped(files: FileList) {
       )}
       {surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano' && (
         <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
-          <div className={`command-strip${(phone && !land) || form === 'fold' ? ' tucked' : ''}`} id="command-strip" role="toolbar" aria-label="Edit">
+          <ButtonTray className={`command-strip${(phone && !land) || form === 'fold' ? ' tucked' : ''}`} id="command-strip" role="toolbar" aria-label="Edit">
             <ToolBar
               context="arrange"
               words
@@ -2056,7 +2057,7 @@ async function importDropped(files: FileList) {
               onDuplicate={() => store.duplicateSelection()}
               onDelete={() => store.deleteSelectedClip()}
             />
-          </div>
+          </ButtonTray>
           <MidiTools store={store} engine={engine} />
         </div>
       )}
