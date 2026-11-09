@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, afterEach } from 'vitest'
 import { encodeWav } from '../model/wav'
 import { zipFiles } from '../model/zip'
@@ -8,6 +10,8 @@ import { chopLoops, soundsForRole } from '../sounds/roles'
 import { soundFileUrl } from '../sounds/source'
 import { placeSound } from '../sounds/place'
 import { createEmptyProject } from '../model/types'
+import { ProjectStore } from '../state/store'
+import { SoundBrowser } from '../ui/SoundBrowser'
 
 function sha(bytes: ArrayBuffer) {
   return createHash('sha256').update(Buffer.from(bytes)).digest('hex')
@@ -94,6 +98,18 @@ describe('private library import', () => {
     expect(soundsForRole(listed.entries, 'step').map((item) => item.id)).toEqual([row.id])
     expect(chopLoops(listed.entries)).toEqual([])
     expect(filterSounds(listed.entries, { text: 'goldbaby', type: 'all', bpm: 'any', key: '', favoritesOnly: false, projectBpm: 120, favorites: [], tag: 'kick' })).toEqual([])
+    expect(filterSounds(listed.entries, { text: 'private kick', type: 'all', bpm: 'any', key: '', favoritesOnly: false, projectBpm: 120, favorites: [], role: 'drum_one_shot' }).map((item) => item.id)).toEqual([row.id])
+    const markup = renderToStaticMarkup(createElement(SoundBrowser, {
+      store: new ProjectStore(createEmptyProject()),
+      phone: true,
+      engine: { unlock() {}, stopPreview() {}, previewPcm() {}, currentTimelineSample: () => 0 },
+      onClose: () => undefined,
+      initial: { entries: saved, status: 'ok' },
+    }))
+    expect(markup).toContain('Private')
+    expect(markup).toContain(PRIVATE_LICENSE)
+    expect(markup).not.toContain('CC0')
+    expect(markup).not.toContain('Hugging Face.')
     expect(filterSounds(listed.entries, { text: '', type: 'drum', bpm: 'any', key: '', favoritesOnly: false, projectBpm: 120, favorites: [], tag: 'kick' }).map((item) => item.id)).toEqual([row.id])
   })
 
@@ -164,5 +180,25 @@ describe('private library import', () => {
     expect(chopLoops([saved]).map((item) => item.id)).toEqual([saved.id])
     expect(soundsForRole([saved], 'step')).toEqual([])
     expect(filterSounds([saved], { text: '', type: 'drum', bpm: 'any', key: '', favoritesOnly: false, projectBpm: 100, favorites: [] })).toEqual([])
+  })
+
+  it('reads a nested catalog folder and leaves saved audio when the private file is gone', async () => {
+    const wav = encodeWav([tone()], 48000)
+    const hash = sha(wav)
+    const row = entry(hash, { name: 'Folder hit', tags: ['kick', 'private'], bpm: 90, key: 'C minor' })
+    const store = memoryPrivateStore()
+    setPrivateLibraryStore(store)
+    const result = await importPrivateLibrary([
+      { name: 'PRIVATE_CATALOG.json', relativePath: 'bundle/catalog/PRIVATE_CATALOG.json', bytes: new TextEncoder().encode(JSON.stringify(document([row]))).buffer },
+      { name: `${hash}.wav`, relativePath: `bundle/assets/${hash.slice(0, 2)}/${hash}.wav`, bytes: wav },
+    ])
+    expect(result.installed).toBe(1)
+    const saved = (await store.catalog())[0]
+    expect(filterSounds([saved], { text: '90 folder', type: 'all', bpm: 'any', key: 'C minor', favoritesOnly: false, projectBpm: 120, favorites: [] }).map((item) => item.id)).toEqual([saved.id])
+    const project = new ProjectStore(createEmptyProject())
+    project.addAsset({ id: `lib_${saved.id}`, name: saved.name, sampleRate: 48000, channels: [tone()] })
+    setPrivateLibraryStore(memoryPrivateStore())
+    await expect(fetchCatalogSound(saved)).rejects.toThrow(/not on this device/)
+    expect(project.buffers.get(`lib_${saved.id}`)?.channels[0]?.length).toBeGreaterThan(0)
   })
 })

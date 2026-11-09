@@ -1280,6 +1280,11 @@ body:has(.unstuck-sheet) .toasts { z-index: 90; top: 64px; bottom: auto; }
   line-height: 1.35;
   pointer-events: auto;
 }
+body:has(.shell.phone.land) .select-hint-host {
+  top: 92px;
+  bottom: auto;
+}
+
 .select-hint-host .hint-close {
   flex: none;
   min-width: 40px;

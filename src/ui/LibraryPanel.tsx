@@ -110,7 +110,7 @@ export function LibraryPanel({
         >
           <option value="">Load sample</option>
           {sounds.map((entry) => (
-            <option key={entry.id} value={entry.id}>{entry.name} · {entry.type === 'loop' ? 'Loop' : 'One-shot'}</option>
+            <option key={entry.id} value={entry.id}>{entry.name} · {entry.origin === 'private' ? 'Private' : entry.type === 'loop' ? 'Loop' : 'One-shot'}</option>
           ))}
         </select>
         <label className="library-file" title="Read an SFZ, SoundFont, or DecentSampler file from this device. The audio stays in this browser.">

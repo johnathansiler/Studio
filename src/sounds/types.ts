@@ -58,4 +58,6 @@ export interface SoundQuery {
   category?: string
   /** Empty shows every tag. */
   tag?: string
+  /** Empty shows every catalog role, such as loop or drum_one_shot. */
+  role?: string
 }

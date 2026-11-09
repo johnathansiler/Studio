@@ -7,6 +7,7 @@ import { analyzeProject } from '../analysis/project'
 import { handleAnalysisMessage } from '../analysis/worker'
 import { createEmptyProject, uid, type MidiNote, type Project } from '../model/types'
 import { decodeWavPCM } from '../model/wav'
+import { SOUND_DATASET_BASE } from '../sounds/contract'
 import { placeSound } from '../sounds/place'
 import type { SoundEntry } from '../sounds/types'
 import { AnalysisSheet } from '../ui/AnalysisSheet'
@@ -307,7 +308,7 @@ describe('tonal center', () => {
   })
 })
 
-const LIBRARY = 'https://huggingface.co/datasets/cueharbor/sound-library/resolve/main'
+const LIBRARY = SOUND_DATASET_BASE
 
 async function libraryWav(path: string) {
   const response = await fetch(`${LIBRARY}/${path}`)

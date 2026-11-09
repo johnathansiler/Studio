@@ -5,15 +5,17 @@ import type { SamplePack } from '../audio/multisample/types'
 import { decodeSlotFile, focusedSlot, SOUND_MIME } from '../audio/sample/slot'
 import { uid } from '../model/types'
 import { soundCache } from '../sounds/cache'
-import { catalogMessage, fetchCatalogSound, filterSounds, loadSoundCatalog, soundCategories, soundCollections, soundKeys, soundTags } from '../sounds/catalog'
+import { browserSounds, catalogMessage, fetchCatalogSound, loadSoundCatalog, soundCategories, soundCollections, soundKeys, soundRoles, soundTags } from '../sounds/catalog'
 import { boundLibraryHost, filterStarters, loadStarterOnto, playableAudition } from '../sounds/instruments'
 import { matchCountLabel, readSoundWidth, soundWidthFromDrag, writeSoundWidth } from '../sounds/panel'
 import { loopBarCount, waveformPeaks } from '../model/playheadPlace'
 import { quartersPerBar } from '../model/time'
 import { decodeSoundBytes, placeSound, previewChannelsFor, trackIdFromDrop } from '../sounds/place'
 import { PACK_LABEL, packLabel } from '../sounds/contract'
-import { importPrivateLibrary, type PrivateSourceFile } from '../sounds/private'
+import { importPrivateLibrary, type PrivateImportResult, type PrivateSourceFile } from '../sounds/private'
+import { roleLabel } from '../sounds/roles'
 import type { CatalogResult, SoundEntry, SoundFilter, SoundKind, SoundQuery } from '../sounds/types'
+import { useFormFactor } from './form'
 import { selectSounds } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { AnchoredMenu } from './AnchoredMenu'
@@ -38,6 +40,9 @@ export function SoundFilterButton({
   onTag,
   onCollection,
   onCategory,
+  roles = [],
+  role = '',
+  onRole,
   showKind = false,
   kind = 'all',
   onKind,
@@ -60,23 +65,27 @@ export function SoundFilterButton({
   onTag?: (value: string) => void
   onCollection?: (value: string) => void
   onCategory?: (value: string) => void
+  roles?: string[]
+  role?: string
+  onRole?: (value: string) => void
   showKind?: boolean
   kind?: SoundFilter
   onKind?: (value: SoundFilter) => void
 }) {
   const [open, setOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
-  const summary = [bpm === 'project' ? 'Song tempo' : '', soundKey, collectionLabels?.[collection] ?? collection, category, favoritesOnly ? 'Favorites' : ''].filter(Boolean).join(', ')
+  const summary = [bpm === 'project' ? 'Song tempo' : '', soundKey, collectionLabels?.[collection] ?? collection, category, role ? roleLabel(role) : '', tag, favoritesOnly ? 'Favorites' : ''].filter(Boolean).join(', ')
+  const filtering = bpm !== 'any' || Boolean(soundKey || favoritesOnly || collection || category || tag || role)
   return (
     <>
       <button
         ref={buttonRef}
         type="button"
-        className={`sound-filter${bpm !== 'any' || soundKey || favoritesOnly ? ' on' : ''}`}
+        className={`sound-filter${filtering ? ' on' : ''}`}
         aria-expanded={open}
         aria-haspopup="menu"
-        aria-label={summary ? `Filter. ${summary}.` : 'Filter. Kind, collection, category, tempo, key, and favorites.'}
-        title="Kind, collection, category, tempo, key, and favorites."
+        aria-label={summary ? `Filter. ${summary}.` : 'Filter. Kind, role, pack, tag, category, tempo, key, and favorites.'}
+        title="Kind, role, pack, tag, category, tempo, key, and favorites."
         onClick={() => setOpen((value) => !value)}
       >
         Filter
@@ -99,6 +108,17 @@ export function SoundFilterButton({
               <button type="button" className={`filter-choice${!collection ? ' on' : ''}`} aria-pressed={!collection} onClick={() => onCollection('')}>Any pack</button>
               {collections.map((item) => (
                 <button key={item} type="button" className={`filter-choice${collection === item ? ' on' : ''}`} aria-pressed={collection === item} onClick={() => onCollection(item)}>{collectionLabels?.[item] ?? item}</button>
+              ))}
+            </div>
+          </>
+        )}
+        {roles.length > 0 && onRole && (
+          <>
+            <p className="filter-label">Role</p>
+            <div className="filter-row" role="group" aria-label="Role. Loop, drum one-shot, and other catalog roles.">
+              <button type="button" className={`filter-choice${!role ? ' on' : ''}`} aria-pressed={!role} onClick={() => onRole('')}>Any role</button>
+              {roles.map((item) => (
+                <button key={item} type="button" className={`filter-choice${role === item ? ' on' : ''}`} aria-pressed={role === item} onClick={() => onRole(item)}>{roleLabel(item)}</button>
               ))}
             </div>
           </>
@@ -160,6 +180,85 @@ export function SoundFilterButton({
 
 const INSTRUMENT_PREFIX = 'instrument:'
 let dragId = ''
+
+/** Folder, zip, or loose files the user picks. Nothing here runs until that pick. */
+export function PrivateLibraryButton({ onDone }: { onDone: (message: string, changed: boolean) => void }) {
+  const phone = useFormFactor() === 'phone'
+  const [open, setOpen] = useState(false)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const zipRef = useRef<HTMLInputElement>(null)
+  const folderRef = useRef<HTMLInputElement>(null)
+
+  async function install(list: FileList) {
+    setOpen(false)
+    onDone('Reading the chosen files…', false)
+    try {
+      const sources: PrivateSourceFile[] = []
+      for (const file of list) {
+        const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
+        sources.push({ name: file.name, relativePath, read: () => file.arrayBuffer() })
+      }
+      const result: PrivateImportResult = await importPrivateLibrary(sources)
+      onDone(result.message, !result.keptPrevious)
+    } catch (error) {
+      onDone(error instanceof Error ? error.message : 'The import did not finish. The library already on this device was kept.', false)
+    }
+  }
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        className="sound-filter"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label="Add a private library from this device. Files stay in this browser."
+        title="Add a folder, zip, or catalog from this device. The files stay in this browser and are not uploaded."
+        onClick={() => setOpen((value) => !value)}
+      >
+        Add
+      </button>
+      <AnchoredMenu className="sound-filter-menu" open={open} onClose={() => setOpen(false)} label="Add private sounds" triggerRef={buttonRef}>
+        <button type="button" className="filter-choice" onClick={() => zipRef.current?.click()}>Zip or files</button>
+        {!phone && <button type="button" className="filter-choice" onClick={() => folderRef.current?.click()}>Folder</button>}
+        <p className="filter-label">{phone ? 'Choose a zip you already saved. A phone does not import a whole library by itself.' : 'The files stay on this device. They are not uploaded.'}</p>
+      </AnchoredMenu>
+      <input
+        ref={zipRef}
+        className="chop-file"
+        type="file"
+        accept=".wav,.json,.zip,audio/wav,application/zip,application/json"
+        multiple
+        hidden
+        aria-label="Add a private zip or files from this device"
+        onChange={(event) => {
+          const list = event.target.files
+          event.target.value = ''
+          if (!list?.length) return
+          void install(list)
+        }}
+      />
+      {!phone && (
+        <input
+          ref={folderRef}
+          className="chop-file"
+          type="file"
+          multiple
+          hidden
+          aria-label="Add a private library folder from this device"
+          {...{ webkitdirectory: '', directory: '' }}
+          onChange={(event) => {
+            const list = event.target.files
+            event.target.value = ''
+            if (!list?.length) return
+            void install(list)
+          }}
+        />
+      )}
+    </>
+  )
+}
 
 const KIND_LABEL: Record<SoundKind, string> = {
   'one-shot': 'One-shot',
@@ -265,6 +364,7 @@ export function SoundBrowser({
   const [collection, setCollection] = useState('')
   const [category, setCategory] = useState('')
   const [tag, setTag] = useState('')
+  const [role, setRole] = useState('')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [loadRatio, setLoadRatio] = useState(0)
   const [privateNote, setPrivateNote] = useState('')
@@ -305,7 +405,7 @@ export function SoundBrowser({
 
   useEffect(() => {
     setPage(0)
-  }, [text, type, bpm, soundKey, collection, category, tag, favoritesOnly])
+  }, [text, type, bpm, soundKey, collection, category, tag, role, favoritesOnly])
 
   useEffect(() => () => engine.stopPreview(), [engine])
   useEffect(() => {
@@ -387,9 +487,10 @@ export function SoundBrowser({
     collection,
     category,
     tag,
+    role,
   }
-  const sampleKeyboard = lockType === 'instrument'
-  const filtered = sampleKeyboard ? filterSounds(result.entries, { ...query, type: 'all' }) : type === 'instrument' ? [] : filterSounds(result.entries, query)
+  const playOnKeys = type === 'instrument'
+  const filtered = browserSounds(result.entries, query)
   const starterRows = filterStarters(starters, query)
   const pageSize = 60
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
@@ -397,11 +498,12 @@ export function SoundBrowser({
   const shownSounds = filtered.slice(safePage * pageSize, safePage * pageSize + pageSize)
   const shown = shownSounds.length + starterRows.length
   const total = filtered.length + starterRows.length
-  const queryActive = Boolean(text || type !== 'all' || bpm !== 'any' || soundKey || collection || category || tag || favoritesOnly)
+  const queryActive = Boolean(text || type !== 'all' || bpm !== 'any' || soundKey || collection || category || tag || role || favoritesOnly)
   const keys = soundKeys(result.entries)
   const collections = soundCollections(result.entries)
   const categories = soundCategories(result.entries)
   const tags = soundTags(result.entries)
+  const roles = soundRoles(result.entries)
   const offline = failed || result.status === 'missing'
   const message = loading && !shown
     ? 'Loading'
@@ -411,7 +513,7 @@ export function SoundBrowser({
         ? catalogMessage({ entries: result.entries, status: 'missing' }, 0, false)
         : catalogMessage(result, 0, queryActive || type === 'instrument')
   const selected = store.project.tracks.find((track) => track.id === store.selectedTrackId) ?? null
-  const where = sampleKeyboard
+  const where = playOnKeys
     ? 'Loads this file as one sample on the keyboard. It is not a multisampled instrument.'
     : selected?.type === 'audio'
       ? `Adds to ${selected.name} at the playhead.`
@@ -420,25 +522,6 @@ export function SoundBrowser({
     ? `Loads onto ${selected.name}.`
     : 'Loads onto an instrument track.'
   const count = matchCountLabel(total, shown)
-
-  async function installPrivate(list: FileList) {
-    setPrivateNote('Reading the chosen files…')
-    try {
-      const sources: PrivateSourceFile[] = []
-      for (const file of list) {
-        const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
-        sources.push({ name: file.name, relativePath, read: () => file.arrayBuffer() })
-      }
-      const result = await importPrivateLibrary(sources)
-      setPrivateNote(result.message)
-      if (!result.keptPrevious) {
-        const next = await loadSoundCatalog(fetch, soundCache())
-        setResult(next)
-      }
-    } catch (error) {
-      setPrivateNote(error instanceof Error ? error.message : 'The import did not finish. The library already on this device was kept.')
-    }
-  }
 
   async function reload() {
     setLoading(true)
@@ -780,23 +863,11 @@ export function SoundBrowser({
           value={text}
           onChange={(event) => setText(event.target.value)}
         />
-        <label className="sound-filter" title="Install a private library from a folder or zip on this device. The files stay in this browser. They are not uploaded and are not part of the shared factory library.">
-          Private
-          <input
-            className="chop-file"
-            type="file"
-            accept=".wav,.json,.zip,audio/wav,application/zip"
-            multiple
-            hidden
-            aria-label="Install a private library from this device"
-            onChange={(event) => {
-              const list = event.target.files
-              event.target.value = ''
-              if (!list?.length) return
-              void installPrivate(list)
-            }}
-          />
-        </label>
+        <PrivateLibraryButton onDone={(message, changed) => {
+          setPrivateNote(message)
+          if (!changed) return
+          void loadSoundCatalog(fetch, soundCache()).then((next) => setResult(next)).catch(() => undefined)
+        }} />
         <SoundFilterButton
           bpm={bpm}
           soundKey={soundKey}
@@ -814,11 +885,14 @@ export function SoundBrowser({
           tags={tags}
           tag={tag}
           onTag={setTag}
+          roles={roles}
+          role={role}
+          onRole={setRole}
           onCollection={setCollection}
           onCategory={setCategory}
         />
       </div>
-      {type === 'drum' && !sampleKeyboard && (
+      {type === 'drum' && (
         <p className="sound-status" role="status">These are drum one-shots. Loops stay under Loops. A pad with no downloaded one-shot keeps its built-in voice.</p>
       )}
       {!lockType && (
@@ -885,7 +959,8 @@ export function SoundBrowser({
           const on = playing === entry.id
           const playHint = entry.type === 'loop' ? 'Play on the speakers at the song tempo.' : 'Play this sound on the speakers.'
           const credit = `${entry.license} · ${entry.source || 'Source not listed'}${entry.tags.length ? ` · ${entry.tags.join(', ')}` : ''}`
-          const meta = busy === entry.id ? `Loading ${Math.round(loadRatio * 100)}%` : on ? 'Playing' : [entry.origin === 'private' ? 'On this device' : '', KIND_LABEL[entry.type], entry.publisher, entry.pack ? packLabel(entry.pack) : '', entry.category && entry.category !== entry.type ? entry.category : '', entry.role].filter(Boolean).join(' · ')
+          const hosted = entry.origin === 'private' ? 'On this device. Not uploaded.' : 'Hugging Face.'
+          const meta = busy === entry.id ? `Loading ${Math.round(loadRatio * 100)}%` : on ? 'Playing' : [entry.origin === 'private' ? 'Private' : '', KIND_LABEL[entry.type], entry.publisher, entry.pack ? packLabel(entry.pack) : '', entry.category && entry.category !== entry.type ? entry.category : '', entry.role ? roleLabel(entry.role) : ''].filter(Boolean).join(' · ')
           return (
             <div className={`sound-row${on ? ' is-playing' : ''}`} key={entry.id}>
               <button
@@ -893,7 +968,7 @@ export function SoundBrowser({
                 className="sound-copy"
                 draggable={!phone}
                 aria-pressed={on}
-                title={`${playHint} ${credit}. Hugging Face.`}
+                title={`${playHint} ${credit}. ${hosted}`}
                 disabled={busy === entry.id}
                 onDragStart={(event) => beginDrag(entry.id, entry.name, event)}
                 onDragEnd={() => { dragId = ''; window.setTimeout(() => { dragMoved.current = false }, 0) }}
@@ -924,7 +999,7 @@ export function SoundBrowser({
                 disabled={busy === entry.id || store.remoteFollow}
                 aria-label={`Load. ${where}`}
                 title={where}
-                onClick={() => { engine.unlock(); void (sampleKeyboard ? playAsInstrument(entry) : add(entry)) }}
+                onClick={() => { engine.unlock(); void (playOnKeys ? playAsInstrument(entry) : add(entry)) }}
               >
                 Load
               </button>

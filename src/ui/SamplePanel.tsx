@@ -249,6 +249,9 @@ export function SamplePanel({ store, engine, trackId, plugin, vu }: { store: Pro
         if (file) void onFile(file)
       }}
     >
+      {(recording || level > 0) && (
+        <p className="slot-status">{phase === 'count-in' ? `Count-in ${countBeat}` : 'Recording'}</p>
+      )}
       <PluginPages label="Sampler pages" pages={[
         { id: 'wave', label: 'Wave', node: (
       <>
@@ -262,9 +265,6 @@ export function SamplePanel({ store, engine, trackId, plugin, vu }: { store: Pro
         />
         <OutMeter unit={meter} />
       </div>
-      {(recording || level > 0) && (
-        <p className="slot-status">{phase === 'count-in' ? `Count-in ${countBeat}` : 'Recording'}</p>
-      )}
       <div
         className="slot-knobs"
         onPointerDown={() => store.beginAutomationTouch()}

@@ -23,6 +23,7 @@ import {
   writeSoundWidth,
   type SoundWidthMemory,
 } from '../sounds/panel'
+import { SOUND_DATASET_BASE } from '../sounds/contract'
 import { legacySoundFileUrl, soundFileUrl } from '../sounds/source'
 import type { SoundEntry } from '../sounds/types'
 import { ProjectStore } from '../state/store'
@@ -112,7 +113,7 @@ describe('library access', () => {
     expect(filterSounds(parsed, { ...query, type: 'instrument' })).toEqual([])
     expect(() => soundFileUrl(loops[0].path)).toThrow(/Hugging Face|library/)
     const file = legacySoundFileUrl(loops[0].path)
-    expect(file).toBe('https://huggingface.co/datasets/cueharbor/sound-library/resolve/main/loops/drums/boom-bap_88bpm.wav')
+    expect(file).toBe(`${SOUND_DATASET_BASE}/loops/drums/boom-bap_88bpm.wav`)
     expect(file).not.toContain('github.com')
     expect(() => soundFileUrl(loops[0].source)).toThrow(/Hugging Face/)
     expect(() => soundFileUrl('https://cueharbor.onrender.com/loops/a.wav')).toThrow(/Hugging Face/)

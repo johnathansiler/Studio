@@ -99,10 +99,15 @@ export function ChopDrawer({
   }
 
   async function fromBrowser(entry: SoundEntry) {
-    const bytes = await fetchCatalogSound(entry)
-    const decoded = await decodeSoundBytes(bytes)
-    const channel = decoded.channels[0]
-    if (channel?.length) await useSamples(entry.name, channel, decoded.sampleRate)
+    try {
+      const bytes = await fetchCatalogSound(entry)
+      const decoded = await decodeSoundBytes(bytes)
+      const channel = decoded.channels[0]
+      if (channel?.length) await useSamples(entry.name, channel, decoded.sampleRate)
+      else store.toast('That sound had no audio.', 'warn')
+    } catch (error) {
+      store.toast(error instanceof Error ? error.message : 'That sound is not on this device. The rest of the project still plays.', 'warn')
+    }
   }
 
   async function fromFile(event: ChangeEvent<HTMLInputElement>) {
@@ -221,7 +226,7 @@ export function ChopDrawer({
             )}
             {browser && chopLoops(browser, loopQuery).length === 0 && <p className="hw-key ch-tab">No hosted loops yet.</p>}
             {browser && chopLoops(browser, loopQuery).map((entry) => (
-              <button key={entry.id} type="button" className="hw-key ch-tab" onClick={() => { void fromBrowser(entry) }}>{entry.name} · Loop</button>
+              <button key={entry.id} type="button" className="hw-key ch-tab" onClick={() => { void fromBrowser(entry) }}>{entry.name} · {entry.origin === 'private' ? 'Private' : 'Loop'}</button>
             ))}
           </AnchoredMenu>
         </div>

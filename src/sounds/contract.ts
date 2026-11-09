@@ -1,12 +1,15 @@
 /**
  * SoundScout 2026-11-09 host contract.
- * These URLs are the publish target. They are not verified live until the
- * dataset upload finishes with the user's Hugging Face token.
+ * Audio and the catalog are read from one pinned dataset commit.
+ * `main` can move; saved projects and new downloads stay on this snapshot.
  */
 
 export const SOUNDSCOUT_VERSION = 'soundscout-2026-11-09'
 
-export const SOUND_DATASET_BASE = 'https://huggingface.co/datasets/cueharbor/sound-library/resolve/main'
+/** Dataset commit that contains catalogs/soundscout-2026-11-09.json and the 770 WAVs. */
+export const SOUND_DATASET_COMMIT = '7a1ea9faef7f7813fff02c0a3b84910438949596'
+
+export const SOUND_DATASET_BASE = `https://huggingface.co/datasets/cueharbor/sound-library/resolve/${SOUND_DATASET_COMMIT}`
 
 export const SOUND_VERSION_PREFIX = `${SOUNDSCOUT_VERSION}/`
 

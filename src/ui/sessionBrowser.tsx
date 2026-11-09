@@ -1,6 +1,6 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { soundCache } from '../sounds/cache'
-import { fetchCatalogSound, filterSounds, loadSoundCatalog, soundCategories, soundCollections, soundKeys, soundTags } from '../sounds/catalog'
+import { browserSounds, fetchCatalogSound, loadSoundCatalog, soundCategories, soundCollections, soundKeys, soundRoles, soundTags } from '../sounds/catalog'
 import { audioTrackFor, decodeSoundBytes, placeSound, previewChannelsFor } from '../sounds/place'
 import type { SoundEntry, SoundFilter, SoundQuery } from '../sounds/types'
 import type { ProjectStore } from '../state/store'
@@ -16,7 +16,7 @@ import {
 import { parseSessionDrag, type SessionDrag } from '../model/sessionInteract'
 import { beginSessionDrag } from './sessionPointer'
 import { PACK_LABEL, packLabel } from '../sounds/contract'
-import { SoundFilterButton } from './SoundBrowser'
+import { PrivateLibraryButton, SoundFilterButton } from './SoundBrowser'
 
 const CATALOG_WAIT_MS = 8000
 
@@ -69,24 +69,28 @@ export async function dropLibrarySound(store: ProjectStore, trackId: string, sce
     store.toast('Drop sounds on an audio track.', 'warn')
     return
   }
-  const bytes = await fetchCatalogSound(entry)
-  const decoded = await decodeSoundBytes(bytes)
-  const placed = placeSound({
-    entry,
-    channels: decoded.channels,
-    fileRate: decoded.sampleRate,
-    project: store.project,
-    startSample: 0,
-    bufferId: `lib_${entry.id}`,
-  })
-  if (!placed) {
-    store.toast('That sound had no audio.', 'warn')
-    return
+  try {
+    const bytes = await fetchCatalogSound(entry)
+    const decoded = await decodeSoundBytes(bytes)
+    const placed = placeSound({
+      entry,
+      channels: decoded.channels,
+      fileRate: decoded.sampleRate,
+      project: store.project,
+      startSample: 0,
+      bufferId: `lib_${entry.id}`,
+    })
+    if (!placed) {
+      store.toast('That sound had no audio.', 'warn')
+      return
+    }
+    placed.clip.slotOnly = true
+    placed.clip.loop = entry.type === 'loop' || placed.clip.loop !== false
+    if (!store.buffers.has(placed.asset.id)) store.addAsset(placed.asset)
+    store.placeInSlot(trackId, scene, placed.clip)
+  } catch (error) {
+    store.toast(error instanceof Error ? error.message : 'That sound is not on this device. The rest of the project still plays.', 'warn')
   }
-  placed.clip.slotOnly = true
-  placed.clip.loop = entry.type === 'loop' || placed.clip.loop !== false
-  if (!store.buffers.has(placed.asset.id)) store.addAsset(placed.asset)
-  store.placeInSlot(trackId, scene, placed.clip)
 }
 
 /** Puts a browser device on the selected track, or on a track of the right kind. */
@@ -179,6 +183,7 @@ export function SessionBrowser({
   const [collection, setCollection] = useState('')
   const [category, setCategory] = useState('')
   const [tag, setTag] = useState('')
+  const [role, setRole] = useState('')
   const [page, setPage] = useState(0)
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [playing, setPlaying] = useState('')
@@ -219,9 +224,10 @@ export function SessionBrowser({
     return () => { alive = false }
   }, [])
 
+  const previewAbort = useRef<AbortController | null>(null)
   const needle = query.trim().toLowerCase()
   const favorites = store?.project.soundFavorites ?? []
-  const filteredSounds = filterSounds(entries, {
+  const filteredSounds = browserSounds(entries, {
     text: query,
     type: kind,
     bpm,
@@ -232,6 +238,7 @@ export function SessionBrowser({
     collection,
     category,
     tag,
+    role,
   })
   const pageSize = 60
   const pageCount = Math.max(1, Math.ceil(filteredSounds.length / pageSize))
@@ -243,23 +250,31 @@ export function SessionBrowser({
   async function preview(entry: SoundEntry) {
     if (!engine || !store) return
     if (playing === entry.id) {
+      previewAbort.current?.abort()
       engine.stopPreview()
       setPlaying('')
       return
     }
+    previewAbort.current?.abort()
+    const controller = new AbortController()
+    previewAbort.current = controller
     setBusy(entry.id)
     try {
       engine.unlock()
       setLoadRatio(0)
-      const bytes = await fetchCatalogSound(entry, { onProgress: setLoadRatio })
+      const bytes = await fetchCatalogSound(entry, { onProgress: setLoadRatio, signal: controller.signal })
+      if (controller.signal.aborted) return
       const decoded = await decodeSoundBytes(bytes)
+      if (controller.signal.aborted) return
       const channels = previewChannelsFor(entry, decoded.channels, decoded.sampleRate, store.project, engine.currentTimelineSample())
+      if (controller.signal.aborted) return
       engine.previewPcm(channels, store.project.sampleRate)
       setPlaying(entry.id)
     } catch (error) {
+      if (controller.signal.aborted) return
       store.toast(error instanceof Error ? error.message : 'Could not play that sound.', 'warn')
     } finally {
-      setBusy('')
+      if (previewAbort.current === controller) setBusy('')
     }
   }
 
@@ -307,6 +322,12 @@ export function SessionBrowser({
       <div className="sl-search-row">
         <input className="sl-search" aria-label="Search browser" placeholder="Search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0) }} />
         {group === 'sounds' && (
+          <PrivateLibraryButton onDone={(message, changed) => {
+            store?.toast(message, changed ? 'good' : 'info')
+            if (changed) void loadCatalog()
+          }} />
+        )}
+        {group === 'sounds' && (
           <SoundFilterButton
             bpm={bpm}
             soundKey={soundKey}
@@ -324,6 +345,9 @@ export function SessionBrowser({
             tags={soundTags(entries)}
             tag={tag}
             onTag={(value) => { setTag(value); setPage(0) }}
+            roles={soundRoles(entries)}
+            role={role}
+            onRole={(value) => { setRole(value); setPage(0) }}
             onCollection={(value) => { setCollection(value); setPage(0) }}
             onCategory={(value) => { setCategory(value); setPage(0) }}
             showKind
@@ -356,7 +380,7 @@ export function SessionBrowser({
             <button
               type="button"
               data-drag-item={entry.id}
-              title={`${entry.name}. ${entry.type}. ${entry.category ?? ''} ${entry.tags.join(', ')}. Drag onto a slot.`}
+              title={`${entry.name}. ${entry.origin === 'private' ? 'Private. On this device.' : ''} ${entry.type}. ${entry.category ?? ''} ${entry.role ?? ''} ${entry.tags.join(', ')}. Drag onto a slot.`}
               aria-pressed={playing === entry.id}
               disabled={busy === entry.id}
               onPointerDown={(event) => beginSessionDrag(event, { kind: 'sound', id: entry.id }, entry.name, (drag, point) => onPointerDrop?.(drag, point))}
@@ -364,7 +388,7 @@ export function SessionBrowser({
             >
               {playing === entry.id && <i className="sound-live" aria-hidden="true" />}
               <strong>{entry.name}</strong>
-              <small>{busy === entry.id ? `Loading ${Math.round(loadRatio * 100)}%` : playing === entry.id ? 'Playing' : [entry.type === 'one-shot' ? 'One-shot' : entry.type === 'loop' ? 'Loop' : 'Instrument', entry.pack ? packLabel(entry.pack) : '', entry.category].filter(Boolean).join(' · ')}</small>
+              <small>{busy === entry.id ? `Loading ${Math.round(loadRatio * 100)}%` : playing === entry.id ? 'Playing' : [entry.origin === 'private' ? 'Private' : '', entry.type === 'one-shot' ? 'One-shot' : entry.type === 'loop' ? 'Loop' : 'Instrument', entry.pack ? packLabel(entry.pack) : '', entry.category, entry.role].filter(Boolean).join(' · ')}</small>
             </button>
             <button type="button" className="sl-add" disabled={busy === entry.id || !store || store.remoteFollow} aria-label={`Add. ${entry.name}`} onClick={() => void addSound(entry)}>Add</button>
             <button
