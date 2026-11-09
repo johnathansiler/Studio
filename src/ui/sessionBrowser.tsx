@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { soundCache } from '../sounds/cache'
-import { fetchCatalogSound, filterSounds, loadSoundCatalog, soundCategories, soundCollections, soundKeys } from '../sounds/catalog'
+import { fetchCatalogSound, filterSounds, loadSoundCatalog, soundCategories, soundCollections, soundKeys, soundTags } from '../sounds/catalog'
 import { audioTrackFor, decodeSoundBytes, placeSound, previewChannelsFor } from '../sounds/place'
 import type { SoundEntry, SoundFilter, SoundQuery } from '../sounds/types'
 import type { ProjectStore } from '../state/store'
@@ -178,6 +178,8 @@ export function SessionBrowser({
   const [soundKey, setSoundKey] = useState('')
   const [collection, setCollection] = useState('')
   const [category, setCategory] = useState('')
+  const [tag, setTag] = useState('')
+  const [page, setPage] = useState(0)
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [playing, setPlaying] = useState('')
   const [busy, setBusy] = useState('')
@@ -219,7 +221,7 @@ export function SessionBrowser({
 
   const needle = query.trim().toLowerCase()
   const favorites = store?.project.soundFavorites ?? []
-  const shownSounds = filterSounds(entries, {
+  const filteredSounds = filterSounds(entries, {
     text: query,
     type: kind,
     bpm,
@@ -229,7 +231,12 @@ export function SessionBrowser({
     favorites,
     collection,
     category,
-  }).slice(0, 200)
+    tag,
+  })
+  const pageSize = 60
+  const pageCount = Math.max(1, Math.ceil(filteredSounds.length / pageSize))
+  const safePage = Math.min(page, pageCount - 1)
+  const shownSounds = filteredSounds.slice(safePage * pageSize, safePage * pageSize + pageSize)
   const devices = browserGroup(group).filter((item) => !needle || `${item.name} ${item.hint}`.toLowerCase().includes(needle))
   const keys = soundKeys(entries)
 
@@ -298,7 +305,7 @@ export function SessionBrowser({
         }}
       />
       <div className="sl-search-row">
-        <input className="sl-search" aria-label="Search browser" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <input className="sl-search" aria-label="Search browser" placeholder="Search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0) }} />
         {group === 'sounds' && (
           <SoundFilterButton
             bpm={bpm}
@@ -314,8 +321,11 @@ export function SessionBrowser({
             collection={collection}
             category={category}
             collectionLabels={PACK_LABEL}
-            onCollection={setCollection}
-            onCategory={setCategory}
+            tags={soundTags(entries)}
+            tag={tag}
+            onTag={(value) => { setTag(value); setPage(0) }}
+            onCollection={(value) => { setCollection(value); setPage(0) }}
+            onCategory={(value) => { setCategory(value); setPage(0) }}
             showKind
             kind={kind}
             onKind={setKind}
@@ -346,7 +356,7 @@ export function SessionBrowser({
             <button
               type="button"
               data-drag-item={entry.id}
-              title={`${entry.name}. Drag onto a slot.`}
+              title={`${entry.name}. ${entry.type}. ${entry.category ?? ''} ${entry.tags.join(', ')}. Drag onto a slot.`}
               aria-pressed={playing === entry.id}
               disabled={busy === entry.id}
               onPointerDown={(event) => beginSessionDrag(event, { kind: 'sound', id: entry.id }, entry.name, (drag, point) => onPointerDrop?.(drag, point))}
@@ -354,7 +364,7 @@ export function SessionBrowser({
             >
               {playing === entry.id && <i className="sound-live" aria-hidden="true" />}
               <strong>{entry.name}</strong>
-              <small>{busy === entry.id ? `Loading ${Math.round(loadRatio * 100)}%` : playing === entry.id ? 'Playing' : [entry.type === 'one-shot' ? 'One-shot' : entry.type === 'loop' ? 'Loop' : 'Instrument', entry.pack ? packLabel(entry.pack) : ''].filter(Boolean).join(' · ')}</small>
+              <small>{busy === entry.id ? `Loading ${Math.round(loadRatio * 100)}%` : playing === entry.id ? 'Playing' : [entry.type === 'one-shot' ? 'One-shot' : entry.type === 'loop' ? 'Loop' : 'Instrument', entry.pack ? packLabel(entry.pack) : '', entry.category].filter(Boolean).join(' · ')}</small>
             </button>
             <button type="button" className="sl-add" disabled={busy === entry.id || !store || store.remoteFollow} aria-label={`Add. ${entry.name}`} onClick={() => void addSound(entry)}>Add</button>
             <button
@@ -370,6 +380,13 @@ export function SessionBrowser({
             </button>
           </div>
         ))}
+        {group === 'sounds' && phase === 'ready' && pageCount > 1 && (
+          <p className="sl-note">
+            Page {safePage + 1} of {pageCount}. {filteredSounds.length} sounds.
+            <button type="button" disabled={safePage <= 0} onClick={() => setPage(safePage - 1)}>Previous</button>
+            <button type="button" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>Next</button>
+          </p>
+        )}
         {group !== 'sounds' && devices.map((item) => (
           <DeviceRow key={`${item.kind}:${item.id}`} item={item} store={store} onPointerDrop={onPointerDrop} />
         ))}

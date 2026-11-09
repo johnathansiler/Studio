@@ -164,9 +164,10 @@ describe('library access', () => {
       initial: { entries: loops, status: 'ok' },
       instruments: [xylophone],
     }))
-    expect(markup).toContain('Xylophone')
+    expect(markup).not.toContain('Xylophone')
+    expect(markup).not.toContain('Upright Piano')
     expect(markup).toContain('Boom Bap 88 BPM')
-    expect(markup).toContain('4 matches.')
+    expect(markup).toContain('3 matches.')
     expect(markup).toContain('Hugging Face')
     expect(markup).toContain('https://github.com/sgossner/VCSL')
     expect(markup).not.toContain('href="https://github.com')
@@ -181,7 +182,7 @@ describe('library access', () => {
       initial: { entries: loops, status: 'ok' },
       instruments: [xylophone],
     }))
-    expect(onKeys).toContain('Loads onto Keys.')
+    expect(onKeys).toContain('Adds on a new audio track at the playhead.')
 
     const phone = renderToStaticMarkup(createElement(SoundBrowser, {
       store,
@@ -195,7 +196,7 @@ describe('library access', () => {
     expect(phone).toContain('sound-dismiss')
     expect(phone).not.toContain('sound-resize')
     expect(phone).toContain('Close')
-    expect(phone).toContain('Load. Load it on this track and play a note.')
+    expect(phone).toContain('Load. Adds on a new audio track at the playhead.')
     expect(phone).toContain('>Drums<')
     expect(phone).not.toContain('role="dialog"')
   })
@@ -208,12 +209,11 @@ describe('library access', () => {
       store,
       engine: engineStub() as unknown as AudioEngine,
       trackId: keys.id,
-      initialCatalog: [xylophone],
     }))
-    expect(sheet).toContain('Starter instruments')
-    expect(sheet).toContain('Xylophone')
-    expect(sheet).toContain('starter:xylophone')
-    expect(sheet).not.toContain('>Load</option></select>')
+    expect(sheet).not.toContain('Starter instruments')
+    expect(sheet).not.toContain('Upright Piano')
+    expect(sheet).not.toContain('Xylophone')
+    expect(sheet).not.toContain('starter:xylophone')
 
     const urls: string[] = []
     const tone = new Float32Array(4800)

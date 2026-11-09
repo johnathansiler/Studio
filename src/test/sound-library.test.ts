@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { yinPitch } from '../audio/stretch/voice'
 import { encodeWav } from '../model/wav'
 import { createEmptyProject, type Project } from '../model/types'
-import { SoundCache, fetchSoundBytes, memoryByteStore } from '../sounds/cache'
+import { SoundCache, fetchSoundBytes, memoryByteStore, sha256Hex } from '../sounds/cache'
 import {
   bpmMatchesProject,
   catalogMessage,
@@ -125,7 +125,7 @@ describe('sound library', () => {
     expect(isDrumSound(fixture[2])).toBe(true)
     expect(isDrumSound(fixture[1])).toBe(false)
     expect(isDrumSound({ name: 'Gogodze kit kick', path: 'one-shots/drums/gogodze-kit/kick.wav', tags: ['drums', 'kit', 'kick'] })).toBe(true)
-    expect(filterSounds(fixture, { text: '', type: 'drum', bpm: 'any', key: '', favoritesOnly: false, projectBpm: 120, favorites }).map((entry) => entry.id)).toEqual(['hat', 'dust'])
+    expect(filterSounds(fixture, { text: '', type: 'drum', bpm: 'any', key: '', favoritesOnly: false, projectBpm: 120, favorites }).map((entry) => entry.id)).toEqual(['hat'])
   })
 
   it('accepts the C major and A minor labels used in the sound index', () => {
@@ -281,5 +281,43 @@ describe('sound library', () => {
     }))
     expect(missing).toContain('The sound library is not online yet.')
     expect(missing).toContain('Drag a sound onto a track')
+  })
+
+  it('bounds files already stored and does not drop a good copy when a new download fails', async () => {
+    const map = new Map<string, ArrayBuffer>()
+    const durable = memoryByteStore(map)
+    const older = legacySoundFileUrl('loops/older.wav')
+    const newer = legacySoundFileUrl('loops/newer.wav')
+    await durable.put(older, new Uint8Array(8).buffer)
+    await durable.put(newer, new Uint8Array(8).buffer)
+    const cache = new SoundCache([durable], 8)
+    expect(await cache.get(older)).toBeNull()
+    expect((await cache.get(newer))?.byteLength).toBe(8)
+
+    const url = legacySoundFileUrl('loops/keep.wav')
+    const good = new Uint8Array([4, 5, 6, 7])
+    const goodBytes = good.buffer.slice(good.byteOffset, good.byteOffset + good.byteLength)
+    const hash = await sha256Hex(goodBytes)
+    const keeper = new SoundCache([memoryByteStore()], 64)
+    await keeper.put(url, goodBytes)
+    await expect(fetchSoundBytes(url, async () => new Response('no', { status: 503 }), keeper, { sha256: 'ab'.repeat(32), attempts: 1 })).rejects.toThrow(/503/)
+    expect(new Uint8Array(await keeper.get(url) as ArrayBuffer)).toEqual(good)
+
+    let calls = 0
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const shared = new SoundCache([memoryByteStore()])
+    const fetchImpl = async () => {
+      calls += 1
+      await gate
+      return new Response(good)
+    }
+    const first = fetchSoundBytes(url, fetchImpl, shared, { sha256: hash, attempts: 1 })
+    const second = fetchSoundBytes(url, fetchImpl, shared, { sha256: hash, attempts: 1 })
+    release()
+    const [left, right] = await Promise.all([first, second])
+    expect(calls).toBe(1)
+    expect(new Uint8Array(left)).toEqual(good)
+    expect(new Uint8Array(right)).toEqual(good)
   })
 })

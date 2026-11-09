@@ -1,4 +1,4 @@
-/** Load the default CC0 drum kit from the CueHarbor library on Hugging Face. */
+/** Fill empty kick pads from downloaded one-shots. Other pads keep their built-in voices. */
 
 import { soundCache } from '../../sounds/cache'
 import { fetchCatalogSound, loadSoundCatalog } from '../../sounds/catalog'

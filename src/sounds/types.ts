@@ -28,6 +28,12 @@ export interface SoundEntry {
   creator?: string
   attributionRequired?: boolean
   isContentAlias?: boolean
+  /** `private` files live in this browser. They are not factory URLs. */
+  origin?: 'library' | 'private'
+  /** Catalog role such as drum_one_shot, one_shot, or loop. */
+  role?: string
+  publisher?: string
+  localBlobId?: string
 }
 
 export interface CatalogResult {
@@ -50,4 +56,6 @@ export interface SoundQuery {
   collection?: string
   /** Empty shows every category. */
   category?: string
+  /** Empty shows every tag. */
+  tag?: string
 }

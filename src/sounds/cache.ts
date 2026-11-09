@@ -1,9 +1,17 @@
 import { assertSoundUrl } from './source'
 
+export interface StoredFile {
+  key: string
+  size: number
+  at: number
+}
+
 export interface ByteStore {
   get(key: string): Promise<ArrayBuffer | null>
   put(key: string, bytes: ArrayBuffer): Promise<void>
   delete?(key: string): Promise<void>
+  /** Sizes already on disk. Audio bytes stay put until a later read. */
+  stat?(): Promise<StoredFile[]>
 }
 
 /** Phone cache bound. One file can exceed it; the rest are dropped. The whole library is not kept. */
@@ -15,6 +23,7 @@ export interface FetchSoundOptions {
   sha256?: string
   totalBytes?: number
   onProgress?: (ratio: number) => void
+  signal?: AbortSignal
 }
 
 const DB_NAME = 'cueharbor-sound-library'
@@ -36,6 +45,9 @@ export function memoryByteStore(map = new Map<string, ArrayBuffer>()): ByteStore
     },
     async delete(key) {
       map.delete(key)
+    },
+    async stat() {
+      return [...map.entries()].map(([key, bytes], index) => ({ key, size: bytes.byteLength, at: index }))
     },
   }
 }
@@ -62,13 +74,17 @@ export function cacheApiStore(cachesImpl: CacheStorage = globalThis.caches, name
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
+const DB_VERSION = 2
+const DB_META = 'meta'
+
 function openSoundDb() {
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, 1)
+      const request = indexedDB.open(DB_NAME, DB_VERSION)
       request.onupgradeneeded = () => {
         const db = request.result
         if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE)
+        if (!db.objectStoreNames.contains(DB_META)) db.createObjectStore(DB_META)
       }
       request.onsuccess = () => resolve(request.result)
       request.onerror = () => {
@@ -101,9 +117,11 @@ export function idbByteStore(): ByteStore {
     },
     async put(key, bytes) {
       const db = await openSoundDb()
+      const copy = new Uint8Array(copyBytes(bytes))
       await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(DB_STORE, 'readwrite')
-        tx.objectStore(DB_STORE).put(new Uint8Array(copyBytes(bytes)), key)
+        const tx = db.transaction([DB_STORE, DB_META], 'readwrite')
+        tx.objectStore(DB_STORE).put(copy, key)
+        tx.objectStore(DB_META).put({ size: copy.byteLength, at: Date.now() }, key)
         tx.oncomplete = () => resolve()
         tx.onerror = () => reject(tx.error)
       })
@@ -111,13 +129,57 @@ export function idbByteStore(): ByteStore {
     async delete(key) {
       const db = await openSoundDb()
       await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(DB_STORE, 'readwrite')
+        const tx = db.transaction([DB_STORE, DB_META], 'readwrite')
         tx.objectStore(DB_STORE).delete(key)
+        tx.objectStore(DB_META).delete(key)
         tx.oncomplete = () => resolve()
         tx.onerror = () => reject(tx.error)
       })
     },
+    async stat() {
+      const db = await openSoundDb()
+      const saved = await readStore(db, DB_META, (value) => {
+        const row = value as { size?: number, at?: number }
+        return { size: row?.size ?? 0, at: row?.at ?? 0 }
+      })
+      if (saved.length) return saved
+      const scanned = await readStore(db, DB_STORE, (value) => {
+        const size = value instanceof Uint8Array || value instanceof ArrayBuffer ? value.byteLength : 0
+        return { size, at: 0 }
+      })
+      if (!scanned.length) return []
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(DB_META, 'readwrite')
+        const meta = tx.objectStore(DB_META)
+        for (const row of scanned) meta.put({ size: row.size, at: row.at }, row.key)
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(tx.error)
+      })
+      return scanned
+    },
   }
+}
+
+function readStore(db: IDBDatabase, name: string, measure: (value: unknown) => { size: number, at: number }) {
+  return new Promise<StoredFile[]>((resolve, reject) => {
+    if (!db.objectStoreNames.contains(name)) {
+      resolve([])
+      return
+    }
+    const rows: StoredFile[] = []
+    const request = db.transaction(name, 'readonly').objectStore(name).openCursor()
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (!cursor) {
+        resolve(rows)
+        return
+      }
+      const measured = measure(cursor.value)
+      rows.push({ key: String(cursor.key), size: measured.size, at: measured.at })
+      cursor.continue()
+    }
+    request.onerror = () => reject(request.error)
+  })
 }
 
 export function browserSoundStores(): ByteStore[] {
@@ -134,10 +196,14 @@ export function browserSoundStores(): ByteStore[] {
 export class SoundCache {
   private readonly order: string[] = []
   private readonly sizes = new Map<string, number>()
+  private readonly ready: Promise<void>
 
-  constructor(private readonly layers: ByteStore[], private readonly budget = SOUND_CACHE_BUDGET_BYTES) {}
+  constructor(private readonly layers: ByteStore[], private readonly budget = SOUND_CACHE_BUDGET_BYTES) {
+    this.ready = this.hydrate()
+  }
 
   async get(key: string): Promise<ArrayBuffer | null> {
+    await this.ready
     for (let index = 0; index < this.layers.length; index++) {
       try {
         const hit = await this.layers[index].get(key)
@@ -155,6 +221,7 @@ export class SoundCache {
   }
 
   async put(key: string, bytes: ArrayBuffer) {
+    await this.ready
     for (const layer of this.layers) {
       try {
         await layer.put(key, bytes)
@@ -167,6 +234,7 @@ export class SoundCache {
   }
 
   async delete(key: string) {
+    await this.ready
     this.sizes.delete(key)
     this.order.splice(0, this.order.length, ...this.order.filter((item) => item !== key))
     for (const layer of this.layers) {
@@ -187,11 +255,43 @@ export class SoundCache {
   /** Drop the oldest files until the newest one fits, or it is the only file left. */
   private async evict(keep: string) {
     const total = () => [...this.sizes.values()].reduce((sum, size) => sum + size, 0)
-    while (total() > this.budget && this.order.some((key) => key !== keep)) {
-      const key = this.order.find((item) => item !== keep)
-      if (!key) break
-      await this.delete(key)
+    while (total() > this.budget) {
+      const victim = this.order.find((key) => key !== keep)
+      if (!victim) break
+      if (!keep && this.order.length === 1) break
+      await this.forget(victim)
     }
+  }
+
+  private async forget(key: string) {
+    this.sizes.delete(key)
+    this.order.splice(0, this.order.length, ...this.order.filter((item) => item !== key))
+    for (const layer of this.layers) {
+      try {
+        await layer.delete?.(key)
+      } catch {
+        /* a missing copy is already gone */
+      }
+    }
+  }
+
+  private async hydrate() {
+    const found: StoredFile[] = []
+    for (const layer of this.layers) {
+      if (!layer.stat) continue
+      try {
+        found.push(...await layer.stat())
+      } catch {
+        /* one store can be unavailable */
+      }
+    }
+    found.sort((a, b) => a.at - b.at || a.key.localeCompare(b.key))
+    for (const row of found) {
+      if (this.sizes.has(row.key)) continue
+      this.sizes.set(row.key, row.size)
+      this.order.push(row.key)
+    }
+    await this.evict('')
   }
 }
 
@@ -247,23 +347,45 @@ function permanentFailure(error: unknown) {
   return error instanceof Error && /not match the SoundScout catalog|\(404\)|\(403\)|\(401\)|\(400\)/.test(error.message)
 }
 
-/** Download one library file from Hugging Face, or the browser copy from last time. */
-export async function fetchSoundBytes(url: string, fetchImpl: FetchLike = (input, init) => fetch(input, init), cache = soundCache(), options: FetchSoundOptions = {}): Promise<ArrayBuffer> {
-  assertSoundUrl(url)
+interface Flight {
+  controller: AbortController
+  promise: Promise<ArrayBuffer>
+  waiters: number
+}
+
+const flights = new Map<string, Flight>()
+
+function cancelled() {
+  return new DOMException('The download was cancelled.', 'AbortError')
+}
+
+function waitFor(promise: Promise<ArrayBuffer>, signal?: AbortSignal) {
+  if (!signal) return promise
+  if (signal.aborted) return Promise.reject(cancelled())
+  return new Promise<ArrayBuffer>((resolve, reject) => {
+    const onAbort = () => reject(cancelled())
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
+}
+
+async function downloadSound(url: string, fetchImpl: FetchLike, cache: SoundCache, options: FetchSoundOptions, signal: AbortSignal) {
   const expected = options.sha256?.trim().toLowerCase()
-  const hit = await cache.get(url)
-  if (hit) {
-    if (!expected || await sha256Hex(hit) === expected) {
-      options.onProgress?.(1)
-      return hit
-    }
-    await cache.delete(url)
-  }
   const attempts = Math.max(1, Math.round(options.attempts ?? 3))
   let last: unknown
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      const response = await fetchImpl(url)
+      if (signal.aborted) throw cancelled()
+      const response = await fetchImpl(url, { signal })
       if (!response.ok) throw new Error(`Could not download that sound (${response.status})`)
       const bytes = await readBody(response, options.onProgress, options.totalBytes ?? 0)
       if (expected && await sha256Hex(bytes) !== expected) throw new Error('Downloaded audio does not match the SoundScout catalog.')
@@ -271,10 +393,57 @@ export async function fetchSoundBytes(url: string, fetchImpl: FetchLike = (input
       return bytes
     } catch (error) {
       last = error
+      if (signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error instanceof Error ? error : cancelled()
       if (permanentFailure(error) || attempt === attempts - 1) throw error instanceof Error ? error : new Error('Could not download that sound')
       const wait = options.delayMs ?? (attempt === 0 ? 200 : 600)
       if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait))
     }
   }
   throw last instanceof Error ? last : new Error('Could not download that sound')
+}
+
+/** Download one library file from Hugging Face, or the browser copy from last time. */
+export async function fetchSoundBytes(url: string, fetchImpl: FetchLike = (input, init) => fetch(input, init), cache = soundCache(), options: FetchSoundOptions = {}): Promise<ArrayBuffer> {
+  assertSoundUrl(url)
+  const expected = options.sha256?.trim().toLowerCase()
+  const hit = await cache.get(url)
+  if (hit && (!expected || await sha256Hex(hit) === expected)) {
+    options.onProgress?.(1)
+    return hit
+  }
+  const existing = flights.get(url)
+  if (existing) {
+    existing.waiters += 1
+    const release = () => {
+      existing.waiters -= 1
+      if (existing.waiters <= 0) existing.controller.abort()
+    }
+    if (options.signal?.aborted) {
+      release()
+      throw cancelled()
+    }
+    options.signal?.addEventListener('abort', release, { once: true })
+    try {
+      return await waitFor(existing.promise, options.signal)
+    } finally {
+      options.signal?.removeEventListener('abort', release)
+    }
+  }
+  const controller = new AbortController()
+  const flight: Flight = { controller, promise: Promise.resolve(new ArrayBuffer(0)), waiters: 1 }
+  const release = () => {
+    flight.waiters -= 1
+    if (flight.waiters <= 0) controller.abort()
+  }
+  if (options.signal?.aborted) release()
+  else options.signal?.addEventListener('abort', release, { once: true })
+  const promise = downloadSound(url, fetchImpl, cache, options, controller.signal)
+  flight.promise = promise
+  flights.set(url, flight)
+  try {
+    return await waitFor(promise, options.signal)
+  } finally {
+    options.signal?.removeEventListener('abort', release)
+    if (flights.get(url)?.promise === promise) flights.delete(url)
+  }
 }

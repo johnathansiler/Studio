@@ -7,7 +7,7 @@ import { captureSlot, openInputCapture, SLOT_ACCEPT } from '../audio/sample/slot
 import { soundCache } from '../sounds/cache'
 import { fetchCatalogSound, loadSoundCatalog } from '../sounds/catalog'
 import { decodeSoundBytes } from '../sounds/place'
-import { soundsForRole } from '../sounds/roles'
+import { chopLoops } from '../sounds/roles'
 import type { SoundEntry } from '../sounds/types'
 import {
   FACTORY_VINTAGE,
@@ -69,6 +69,7 @@ export function ChopDrawer({
   const [presetTick, setPresetTick] = useState(0)
   const [presetDraft, setPresetDraft] = useState('')
   const [browser, setBrowser] = useState<SoundEntry[] | null>(null)
+  const [loopQuery, setLoopQuery] = useState('')
   const [picked, setPicked] = useState<number | null>(null)
   const vintage = kit.vintage
   const scaled = setPadVintage(vintage)
@@ -210,13 +211,16 @@ export function ChopDrawer({
         <div className="chop-anchor">
           <button ref={loadButton} type="button" className="hw-key ch-tab" aria-expanded={loadOpen} onClick={() => { setLoadOpen((value) => !value); setModeOpen(false); setVintageOpen(false) }}>Load sample</button>
           <AnchoredMenu className="chop-menu" open={loadOpen} onClose={() => setLoadOpen(false)} label="Load sample" triggerRef={loadButton} prefer="auto">
-            <button type="button" className="hw-key ch-tab" onClick={() => { void loadSoundCatalog(fetch, soundCache()).then((result) => setBrowser(soundsForRole(result.entries, 'chop').slice().sort((a, b) => a.name.localeCompare(b.name)).slice(0, 40))) }}>Browser</button>
+            <button type="button" className="hw-key ch-tab" onClick={() => { void loadSoundCatalog(fetch, soundCache()).then((result) => setBrowser(chopLoops(result.entries))) }}>Browser</button>
             <button type="button" className="hw-key ch-tab" onClick={() => fileRef.current?.click()}>Upload</button>
             <button type="button" className="hw-key ch-tab" onClick={() => { void fromMic() }}>Microphone</button>
             <button type="button" className="hw-key ch-tab" onClick={() => { void fromTab() }}>Tab audio</button>
             <input ref={fileRef} className="chop-file" type="file" accept={SLOT_ACCEPT} aria-label="Upload a sample" onChange={(event) => { void fromFile(event) }} />
-            {browser && browser.length === 0 && <p className="hw-key ch-tab">No hosted loops yet.</p>}
-            {browser && browser.map((entry) => (
+            {browser && (
+              <input aria-label="Search loops" placeholder="Search loops" value={loopQuery} onChange={(event) => setLoopQuery(event.target.value)} />
+            )}
+            {browser && chopLoops(browser, loopQuery).length === 0 && <p className="hw-key ch-tab">No hosted loops yet.</p>}
+            {browser && chopLoops(browser, loopQuery).map((entry) => (
               <button key={entry.id} type="button" className="hw-key ch-tab" onClick={() => { void fromBrowser(entry) }}>{entry.name} · Loop</button>
             ))}
           </AnchoredMenu>

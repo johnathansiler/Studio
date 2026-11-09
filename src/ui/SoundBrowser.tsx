@@ -5,13 +5,14 @@ import type { SamplePack } from '../audio/multisample/types'
 import { decodeSlotFile, focusedSlot, SOUND_MIME } from '../audio/sample/slot'
 import { uid } from '../model/types'
 import { soundCache } from '../sounds/cache'
-import { catalogMessage, fetchCatalogSound, filterSounds, loadSoundCatalog, soundCategories, soundCollections, soundKeys } from '../sounds/catalog'
-import { boundLibraryHost, filterStarters, loadStarterOnto, playableAudition, refreshStarterCatalog, starterCatalog } from '../sounds/instruments'
+import { catalogMessage, fetchCatalogSound, filterSounds, loadSoundCatalog, soundCategories, soundCollections, soundKeys, soundTags } from '../sounds/catalog'
+import { boundLibraryHost, filterStarters, loadStarterOnto, playableAudition } from '../sounds/instruments'
 import { matchCountLabel, readSoundWidth, soundWidthFromDrag, writeSoundWidth } from '../sounds/panel'
 import { loopBarCount, waveformPeaks } from '../model/playheadPlace'
 import { quartersPerBar } from '../model/time'
 import { decodeSoundBytes, placeSound, previewChannelsFor, trackIdFromDrop } from '../sounds/place'
 import { PACK_LABEL, packLabel } from '../sounds/contract'
+import { importPrivateLibrary, type PrivateSourceFile } from '../sounds/private'
 import type { CatalogResult, SoundEntry, SoundFilter, SoundKind, SoundQuery } from '../sounds/types'
 import { selectSounds } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -32,6 +33,9 @@ export function SoundFilterButton({
   collection = '',
   category = '',
   collectionLabels,
+  tags = [],
+  tag = '',
+  onTag,
   onCollection,
   onCategory,
   showKind = false,
@@ -51,6 +55,9 @@ export function SoundFilterButton({
   collection?: string
   category?: string
   collectionLabels?: Record<string, string>
+  tags?: string[]
+  tag?: string
+  onTag?: (value: string) => void
   onCollection?: (value: string) => void
   onCategory?: (value: string) => void
   showKind?: boolean
@@ -92,6 +99,17 @@ export function SoundFilterButton({
               <button type="button" className={`filter-choice${!collection ? ' on' : ''}`} aria-pressed={!collection} onClick={() => onCollection('')}>Any pack</button>
               {collections.map((item) => (
                 <button key={item} type="button" className={`filter-choice${collection === item ? ' on' : ''}`} aria-pressed={collection === item} onClick={() => onCollection(item)}>{collectionLabels?.[item] ?? item}</button>
+              ))}
+            </div>
+          </>
+        )}
+        {tags.length > 0 && onTag && (
+          <>
+            <p className="filter-label">Tag</p>
+            <div className="filter-row" role="group" aria-label="Tag. Instrument, role, and other labels from the catalog.">
+              <button type="button" className={`filter-choice${!tag ? ' on' : ''}`} aria-pressed={!tag} onClick={() => onTag('')}>Any tag</button>
+              {tags.map((item) => (
+                <button key={item} type="button" className={`filter-choice${tag === item ? ' on' : ''}`} aria-pressed={tag === item} onClick={() => onTag(item)}>{item}</button>
               ))}
             </div>
           </>
@@ -149,7 +167,6 @@ const KIND_LABEL: Record<SoundKind, string> = {
   instrument: 'Instrument',
 }
 
-const LIST_CAP = 200
 const CATALOG_WAIT_MS = 8000
 
 const KIND_CHIPS: { id: SoundQuery['type']; label: string }[] = [
@@ -215,7 +232,6 @@ export function SoundBrowser({
   onWidth,
   reserve = 0,
   initial,
-  instruments: instrumentSeed,
   embedded = false,
   lockType,
 }: {
@@ -238,7 +254,8 @@ export function SoundBrowser({
   useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
   const sounds = selectSounds(store)
   const [result, setResult] = useState<CatalogResult>(initial ?? { entries: [], status: 'missing' })
-  const [starters, setStarters] = useState<LibraryEntry[]>(instrumentSeed ?? [])
+  const [starters] = useState<LibraryEntry[]>([])
+  const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(!initial)
   const [failed, setFailed] = useState(false)
   const [text, setText] = useState('')
@@ -247,8 +264,10 @@ export function SoundBrowser({
   const [soundKey, setSoundKey] = useState('')
   const [collection, setCollection] = useState('')
   const [category, setCategory] = useState('')
+  const [tag, setTag] = useState('')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [loadRatio, setLoadRatio] = useState(0)
+  const [privateNote, setPrivateNote] = useState('')
   useEffect(() => {
     setType(lockType && lockType !== 'all' ? lockType : 'all')
   }, [lockType])
@@ -285,16 +304,8 @@ export function SoundBrowser({
   }, [initial])
 
   useEffect(() => {
-    if (instrumentSeed) return
-    let alive = true
-    void starterCatalog().then((next) => {
-      if (!alive) return
-      setStarters(next)
-    }).catch(() => {
-      /* the sound list still shows */
-    })
-    return () => { alive = false }
-  }, [instrumentSeed])
+    setPage(0)
+  }, [text, type, bpm, soundKey, collection, category, tag, favoritesOnly])
 
   useEffect(() => () => engine.stopPreview(), [engine])
   useEffect(() => {
@@ -375,16 +386,22 @@ export function SoundBrowser({
     favorites: sounds.favorites,
     collection,
     category,
+    tag,
   }
-  const filtered = type === 'instrument' ? [] : filterSounds(result.entries, query)
+  const sampleKeyboard = lockType === 'instrument'
+  const filtered = sampleKeyboard ? filterSounds(result.entries, { ...query, type: 'all' }) : type === 'instrument' ? [] : filterSounds(result.entries, query)
   const starterRows = filterStarters(starters, query)
-  const shownSounds = filtered.slice(0, LIST_CAP)
+  const pageSize = 60
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const safePage = Math.min(page, pageCount - 1)
+  const shownSounds = filtered.slice(safePage * pageSize, safePage * pageSize + pageSize)
   const shown = shownSounds.length + starterRows.length
   const total = filtered.length + starterRows.length
-  const queryActive = Boolean(text || type !== 'all' || bpm !== 'any' || soundKey || collection || category || favoritesOnly)
+  const queryActive = Boolean(text || type !== 'all' || bpm !== 'any' || soundKey || collection || category || tag || favoritesOnly)
   const keys = soundKeys(result.entries)
   const collections = soundCollections(result.entries)
   const categories = soundCategories(result.entries)
+  const tags = soundTags(result.entries)
   const offline = failed || result.status === 'missing'
   const message = loading && !shown
     ? 'Loading'
@@ -394,13 +411,34 @@ export function SoundBrowser({
         ? catalogMessage({ entries: result.entries, status: 'missing' }, 0, false)
         : catalogMessage(result, 0, queryActive || type === 'instrument')
   const selected = store.project.tracks.find((track) => track.id === store.selectedTrackId) ?? null
-  const where = selected?.type === 'audio'
-    ? `Adds to ${selected.name} at the playhead.`
-    : 'Adds on a new audio track at the playhead.'
+  const where = sampleKeyboard
+    ? 'Loads this file as one sample on the keyboard. It is not a multisampled instrument.'
+    : selected?.type === 'audio'
+      ? `Adds to ${selected.name} at the playhead.`
+      : 'Adds on a new audio track at the playhead.'
   const instrumentWhere = selected?.type === 'midi'
     ? `Loads onto ${selected.name}.`
     : 'Loads onto an instrument track.'
   const count = matchCountLabel(total, shown)
+
+  async function installPrivate(list: FileList) {
+    setPrivateNote('Reading the chosen files…')
+    try {
+      const sources: PrivateSourceFile[] = []
+      for (const file of list) {
+        const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
+        sources.push({ name: file.name, relativePath, read: () => file.arrayBuffer() })
+      }
+      const result = await importPrivateLibrary(sources)
+      setPrivateNote(result.message)
+      if (!result.keptPrevious) {
+        const next = await loadSoundCatalog(fetch, soundCache())
+        setResult(next)
+      }
+    } catch (error) {
+      setPrivateNote(error instanceof Error ? error.message : 'The import did not finish. The library already on this device was kept.')
+    }
+  }
 
   async function reload() {
     setLoading(true)
@@ -413,9 +451,6 @@ export function SoundBrowser({
       setResult({ entries: [], status: 'missing' })
       setFailed(true)
     }
-    try {
-      setStarters(await until(refreshStarterCatalog(), CATALOG_WAIT_MS))
-    } catch { /* keep the instruments already on screen */ }
     setLoading(false)
   }
 
@@ -437,15 +472,17 @@ export function SoundBrowser({
     return ids[0] ?? null
   }
 
-  async function loadEntry(entry: SoundEntry) {
+  const previewAbort = useRef<AbortController | null>(null)
+  async function loadEntry(entry: SoundEntry, signal?: AbortSignal) {
     setLoadRatio(0)
-    const bytes = await fetchCatalogSound(entry, { onProgress: setLoadRatio })
+    const bytes = await fetchCatalogSound(entry, { onProgress: setLoadRatio, signal })
     if (engine.decodeLibrary) return engine.decodeLibrary(bytes)
     return decodeSoundBytes(bytes)
   }
 
   async function preview(entry: SoundEntry) {
     if (playing === entry.id) {
+      previewAbort.current?.abort()
       previewGen.current += 1
       engine.stopPreview()
       setPlaying('')
@@ -453,14 +490,17 @@ export function SoundBrowser({
       setHead(0)
       return
     }
+    previewAbort.current?.abort()
+    const controller = new AbortController()
+    previewAbort.current = controller
     const gen = ++previewGen.current
-    engine.stopPreview()
     setBusy(entry.id)
     try {
-      const decoded = await loadEntry(entry)
-      if (gen !== previewGen.current) return
+      const decoded = await loadEntry(entry, controller.signal)
+      if (gen !== previewGen.current || controller.signal.aborted) return
       const channels = previewChannelsFor(entry, decoded.channels, decoded.sampleRate, store.project, engine.currentTimelineSample())
       const lead = channels[0]
+      engine.stopPreview()
       engine.previewPcm(channels, store.project.sampleRate, entry.type === 'loop')
       const seconds = lead?.length ? lead.length / store.project.sampleRate : 0
       setWave({
@@ -471,7 +511,7 @@ export function SoundBrowser({
       setHead(0)
       setPlaying(entry.id)
     } catch (error) {
-      if (gen !== previewGen.current) return
+      if (gen !== previewGen.current || controller.signal.aborted) return
       store.toast(error instanceof Error ? error.message : 'Could not play that sound.', 'warn')
     } finally {
       if (gen === previewGen.current) setBusy('')
@@ -740,6 +780,23 @@ export function SoundBrowser({
           value={text}
           onChange={(event) => setText(event.target.value)}
         />
+        <label className="sound-filter" title="Install a private library from a folder or zip on this device. The files stay in this browser. They are not uploaded and are not part of the shared factory library.">
+          Private
+          <input
+            className="chop-file"
+            type="file"
+            accept=".wav,.json,.zip,audio/wav,application/zip"
+            multiple
+            hidden
+            aria-label="Install a private library from this device"
+            onChange={(event) => {
+              const list = event.target.files
+              event.target.value = ''
+              if (!list?.length) return
+              void installPrivate(list)
+            }}
+          />
+        </label>
         <SoundFilterButton
           bpm={bpm}
           soundKey={soundKey}
@@ -754,10 +811,16 @@ export function SoundBrowser({
           collection={collection}
           category={category}
           collectionLabels={PACK_LABEL}
+          tags={tags}
+          tag={tag}
+          onTag={setTag}
           onCollection={setCollection}
           onCategory={setCategory}
         />
       </div>
+      {type === 'drum' && !sampleKeyboard && (
+        <p className="sound-status" role="status">These are drum one-shots. Loops stay under Loops. A pad with no downloaded one-shot keeps its built-in voice.</p>
+      )}
       {!lockType && (
         <div className="sound-chips" role="group" aria-label="Kind">
           {(embedded ? KIND_CHIPS.filter((chip) => chip.id !== 'instrument') : KIND_CHIPS).map((chip) => (
@@ -767,6 +830,7 @@ export function SoundBrowser({
           ))}
         </div>
       )}
+      {privateNote && <p className="sound-status" role="status">{privateNote}</p>}
       {message && (
         <p className="sound-status" role="status">
           {message}
@@ -820,8 +884,8 @@ export function SoundBrowser({
         {shownSounds.map((entry) => {
           const on = playing === entry.id
           const playHint = entry.type === 'loop' ? 'Play on the speakers at the song tempo.' : 'Play this sound on the speakers.'
-          const credit = `${entry.license} · ${entry.source || 'Source not listed'}`
-          const meta = busy === entry.id ? `Loading ${Math.round(loadRatio * 100)}%` : on ? 'Playing' : [KIND_LABEL[entry.type], entry.pack ? packLabel(entry.pack) : entry.category].filter(Boolean).join(' · ')
+          const credit = `${entry.license} · ${entry.source || 'Source not listed'}${entry.tags.length ? ` · ${entry.tags.join(', ')}` : ''}`
+          const meta = busy === entry.id ? `Loading ${Math.round(loadRatio * 100)}%` : on ? 'Playing' : [entry.origin === 'private' ? 'On this device' : '', KIND_LABEL[entry.type], entry.publisher, entry.pack ? packLabel(entry.pack) : '', entry.category && entry.category !== entry.type ? entry.category : '', entry.role].filter(Boolean).join(' · ')
           return (
             <div className={`sound-row${on ? ' is-playing' : ''}`} key={entry.id}>
               <button
@@ -860,7 +924,7 @@ export function SoundBrowser({
                 disabled={busy === entry.id || store.remoteFollow}
                 aria-label={`Load. ${where}`}
                 title={where}
-                onClick={() => { engine.unlock(); void add(entry) }}
+                onClick={() => { engine.unlock(); void (sampleKeyboard ? playAsInstrument(entry) : add(entry)) }}
               >
                 Load
               </button>
@@ -868,7 +932,13 @@ export function SoundBrowser({
           )
         })}
       </div>
-      {count && <p className="sound-count">{count}</p>}
+      {count && <p className="sound-count">{count}{pageCount > 1 ? ` Page ${safePage + 1} of ${pageCount}.` : ''}</p>}
+      {pageCount > 1 && (
+        <div className="sound-chips" role="group" aria-label="More sounds">
+          <button type="button" disabled={safePage <= 0} onClick={() => setPage(safePage - 1)}>Previous</button>
+          <button type="button" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>Next</button>
+        </div>
+      )}
     </div>
   )
 

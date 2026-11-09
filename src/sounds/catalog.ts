@@ -2,6 +2,7 @@ import type { SoundCache } from './cache'
 import { fetchSoundBytes, soundCache, type FetchSoundOptions } from './cache'
 import { SOUNDSCOUT_VERSION, SOUND_VERSION_PREFIX } from './contract'
 import { licenseAllowed } from './license'
+import { readPrivateCatalog, readPrivateFile } from './private'
 import { soundCatalogUrl, soundFileUrl } from './source'
 import type { CatalogResult, SoundEntry, SoundKind, SoundQuery } from './types'
 
@@ -61,9 +62,10 @@ export function bpmMatchesProject(bpm: number, projectBpm: number) {
 const DRUM_WORD = /\b(drum|drums|kit|kick|snare|hi-?hat|hat|clap|tom|cymbal|rimshot|rim)\b/
 
 /** One-shots and loops that are drum samples or kits. Percussion that is not a drum stays out. */
-export function isDrumSound(entry: Pick<SoundEntry, 'name' | 'path' | 'tags' | 'category'>) {
+export function isDrumSound(entry: Pick<SoundEntry, 'name' | 'path' | 'tags' | 'category' | 'role'>) {
   const category = (entry.category ?? '').toLowerCase()
-  if (category === 'kick' || category === 'drums' || category === 'percussion') return true
+  if (category === 'kick' || category === 'drums' || category === 'percussion' || category === 'perc' || category === 'snare' || category === 'hat' || category === 'clap' || category === 'tom' || category === 'cymbal') return true
+  if ((entry.role ?? '').toLowerCase() === 'drum_one_shot') return true
   const path = entry.path.toLowerCase()
   if (path.startsWith('drums/') || path.includes('/drums/')) return true
   return DRUM_WORD.test(`${entry.name} ${entry.path} ${entry.tags.join(' ')}`.toLowerCase())
@@ -75,15 +77,16 @@ export function filterSounds(entries: SoundEntry[], query: SoundQuery): SoundEnt
   return entries
     .filter((entry) => {
       if (query.type === 'drum') {
-        if (!isDrumSound(entry)) return false
+        if (entry.type !== 'one-shot' || !isDrumSound(entry)) return false
       } else if (query.type !== 'all' && entry.type !== query.type) return false
       if (query.favoritesOnly && !query.favorites.includes(entry.id)) return false
       if (query.collection && entry.collection !== query.collection && entry.pack !== query.collection) return false
       if (query.category && entry.category !== query.category) return false
+      if (query.tag && !entry.tags.some((tag) => tag.toLowerCase() === query.tag?.toLowerCase())) return false
       if (key && !soundKeyMatches(key, entry.key)) return false
       if (query.bpm === 'project' && (entry.bpm == null || !bpmMatchesProject(entry.bpm, query.projectBpm))) return false
       if (!tokens.length) return true
-      const hay = `${entry.name} ${entry.collection ?? ''} ${entry.category ?? ''} ${entry.tags.join(' ')} ${entry.key ?? ''} ${entry.pitch ?? ''} ${entry.type} ${entry.source}`.toLowerCase()
+      const hay = `${entry.name} ${entry.collection ?? ''} ${entry.category ?? ''} ${entry.role ?? ''} ${entry.publisher ?? ''} ${entry.pack ?? ''} ${entry.tags.join(' ')} ${entry.key ?? ''} ${entry.pitch ?? ''} ${entry.type} ${entry.source}`.toLowerCase()
       return tokens.every((token) => hay.includes(token))
     })
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
@@ -129,6 +132,11 @@ export function soundCollections(entries: SoundEntry[]) {
 
 export function soundCategories(entries: SoundEntry[]) {
   return [...new Set(entries.map((entry) => entry.category).filter((category): category is string => Boolean(category)))].sort((a, b) => a.localeCompare(b))
+}
+
+/** Every tag on the loaded catalog. New packs can add tags without a code change. */
+export function soundTags(entries: SoundEntry[]) {
+  return [...new Set(entries.flatMap((entry) => entry.tags))].sort((a, b) => a.localeCompare(b))
 }
 
 export function catalogMessage(result: CatalogResult, filteredCount: number, queryActive: boolean) {
@@ -230,12 +238,11 @@ export async function loadSoundCatalog(fetchImpl: FetchLike = (input, init) => f
       } catch {
         return readCachedCatalog(cache, url)
       }
-      const entries = parseSoundScoutCatalog(json)
-      if (!entries.length) return { entries: [], status: 'missing' }
-      if (cache) {
+      const remote = parseSoundScoutCatalog(json)
+      if (remote.length && cache) {
         try { await cache.put(url, bytesOf(text)) } catch { /* the list still shows */ }
       }
-      return { entries, status: 'ok' }
+      return finishCatalog(remote, remote.length ? 'ok' : 'missing')
     }
   } catch {
     /* try the last versioned catalog, never the legacy index */
@@ -244,21 +251,41 @@ export async function loadSoundCatalog(fetchImpl: FetchLike = (input, init) => f
 }
 
 async function readCachedCatalog(cache: SoundCache | undefined, url: string): Promise<CatalogResult> {
-  if (!cache) return { entries: [], status: 'missing' }
+  if (!cache) return finishCatalog([], 'missing')
   try {
     const bytes = await cache.get(url)
-    if (!bytes) return { entries: [], status: 'missing' }
+    if (!bytes) return finishCatalog([], 'missing')
     const json = JSON.parse(new TextDecoder().decode(bytes)) as unknown
-    const entries = parseSoundScoutCatalog(json)
-    if (!entries.length) return { entries: [], status: 'missing' }
-    return { entries, status: 'ok' }
+    const remote = parseSoundScoutCatalog(json)
+    if (!remote.length) return finishCatalog([], 'missing')
+    return finishCatalog(remote, 'ok')
   } catch {
-    return { entries: [], status: 'missing' }
+    return finishCatalog([], 'missing')
   }
+}
+
+/** Shared catalog plus files installed on this device. Private rows are not fetched. */
+async function finishCatalog(remote: SoundEntry[], status: CatalogResult['status']): Promise<CatalogResult> {
+  let local: SoundEntry[] = []
+  try {
+    local = await readPrivateCatalog()
+  } catch {
+    local = []
+  }
+  if (!remote.length && !local.length) return { entries: [], status: 'missing' }
+  const seen = new Set(remote.map((entry) => entry.id))
+  const entries = remote.concat(local.filter((entry) => entry.origin === 'private' && !seen.has(entry.id)))
+  return { entries, status: remote.length ? status : 'ok' }
 }
 
 /** One file from the active catalog. Checks the inventory hash before caching. */
 export async function fetchCatalogSound(entry: SoundEntry, options?: FetchSoundOptions & { fetchImpl?: FetchLike; cache?: SoundCache }) {
+  if (entry.origin === 'private') {
+    const bytes = await readPrivateFile(entry.id)
+    if (!bytes) throw new Error('That file is not installed on this device.')
+    options?.onProgress?.(1)
+    return bytes
+  }
   const url = soundFileUrl(entry.path)
   return fetchSoundBytes(url, options?.fetchImpl ?? listedFetch, options?.cache ?? listedCache ?? soundCache(), {
     attempts: options?.attempts,

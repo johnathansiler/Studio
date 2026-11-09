@@ -25,7 +25,7 @@ import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import { displayedPlayhead } from '../model/transportSync'
 import { catalogMessage, fetchCatalogSound, loadSoundCatalog } from '../sounds/catalog'
 import { decodeSoundBytes, matchProjectRate } from '../sounds/place'
-import { libraryMatchesCategory, soundsForRole } from '../sounds/roles'
+import { libraryMatchesCategory, sampleRole, soundsForRole } from '../sounds/roles'
 import type { SoundEntry } from '../sounds/types'
 import { selectBeats } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -312,8 +312,8 @@ function Picker({
   })
   const libRows = library.filter((entry) => {
     if (!libraryMatchesCategory(entry, category)) return false
-    return !needle || entry.name.toLowerCase().includes(needle) || entry.tags.some((tag) => tag.toLowerCase().includes(needle)) || (entry.pack ?? '').toLowerCase().includes(needle)
-  }).slice(0, 40)
+    return !needle || entry.name.toLowerCase().includes(needle) || entry.tags.some((tag) => tag.toLowerCase().includes(needle)) || (entry.pack ?? '').toLowerCase().includes(needle) || (entry.category ?? '').toLowerCase().includes(needle)
+  })
   return (
     <div className="rack-picker" role="listbox" aria-label="Sounds to add. Search the kit or the library.">
       <input
@@ -474,8 +474,11 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
     asked.current = true
     void loadSoundCatalog().then((result) => {
       const sounds = soundsForRole(result.entries, 'step')
+      const roles = new Set(sounds.map((entry) => sampleRole(entry)))
       setLibrary(sounds)
-      setLibraryNote(sounds.length ? '' : catalogMessage(result, 0, false))
+      setLibraryNote(sounds.length
+        ? (roles.size === 1 && roles.has('kick') ? 'Downloaded drum one-shots are kicks. Other rows keep the built-in voices.' : '')
+        : catalogMessage(result, 0, false))
     })
   }
 

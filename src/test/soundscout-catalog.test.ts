@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { decodeWavPCM } from '../model/wav'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
@@ -12,6 +13,7 @@ import {
 import { LEGACY_INDEX_URL, SOUND_CATALOG_URL, SOUND_VERSION_PREFIX } from '../sounds/contract'
 import { licenseAllowed } from '../sounds/license'
 import { legacySoundFileUrl, soundCatalogUrl, soundFileUrl } from '../sounds/source'
+import { placeSound } from '../sounds/place'
 import { libraryMatchesCategory, soundsForRole } from '../sounds/roles'
 import { ensureDefaultKit } from '../instruments/pads/load'
 import { pickDefaultKit } from '../instruments/pads/record'
@@ -70,6 +72,36 @@ describe('SoundScout catalog', () => {
     expect(filterSounds([kick], { ...query, key: 'C' })).toEqual([])
     expect(filterSounds([kick], { ...query, key: 'C1' }).map((entry) => entry.id)).toEqual([kick.id])
     expect(soundFileUrl(kick.path)).toBe(document.urlContract.exampleAudio)
+    const hashed = catalog.filter((entry) => entry.path.includes('#'))
+    expect(hashed.length).toBeGreaterThan(1)
+    for (const entry of hashed) {
+      const url = new URL(soundFileUrl(entry.path))
+      expect(url.hash).toBe('')
+      expect(url.href.includes('#')).toBe(false)
+      expect(url.href.includes('%23')).toBe(true)
+      expect(url.href.includes('%2523')).toBe(false)
+      expect(decodeURIComponent(url.pathname).endsWith(entry.path.slice(entry.path.lastIndexOf('/')))).toBe(true)
+    }
+    const natural = catalog.find((entry) => entry.type === 'loop' && entry.bpm == null)!
+    const naturalPlaced = placeSound({
+      entry: natural,
+      channels: [new Float32Array(480)],
+      fileRate: 48000,
+      project: createEmptyProject(48000),
+      startSample: 0,
+    })
+    expect(naturalPlaced?.clip.stretch?.followTempo).toBe(false)
+    expect(naturalPlaced?.clip.durationSamples).toBe(480)
+    const timed = catalog.find((entry) => entry.type === 'loop' && entry.bpm)!
+    const timedPlaced = placeSound({
+      entry: timed,
+      channels: [new Float32Array(480)],
+      fileRate: 48000,
+      project: createEmptyProject(48000),
+      startSample: 0,
+    })
+    expect(timedPlaced?.clip.stretch?.followTempo).toBe(true)
+    expect(timedPlaced?.clip.stretch?.sourceBpm).toBe(timed.bpm)
     expect(() => soundFileUrl('loops/dust.wav')).toThrow(/Hugging Face|library/)
     expect(() => soundFileUrl('one-shots/drums/kick.wav')).toThrow(/Hugging Face|library/)
     expect(legacySoundFileUrl('loops/dust.wav')).toBe('https://huggingface.co/datasets/cueharbor/sound-library/resolve/main/loops/dust.wav')
@@ -195,4 +227,16 @@ describe('SoundScout catalog', () => {
     expect(store.trackKit(id).banks[0][1].sampleName).toBe('Saved snare')
     expect(store.buffers.get(bufferId)?.channels[0]).toEqual(before)
   })
+
+  it('downloads a hosted file whose name contains a hash and checks the catalog hash', async () => {
+    const entry = catalog.filter((item) => item.path.includes('#') && item.sha256).sort((a, b) => (a.bytes ?? 0) - (b.bytes ?? 0))[0]
+    const url = soundFileUrl(entry.path)
+    const response = await fetch(url)
+    expect(response.status).toBe(200)
+    const bytes = await response.arrayBuffer()
+    expect(await sha256Hex(bytes)).toBe(entry.sha256)
+    const wav = decodeWavPCM(bytes)
+    expect(wav.sampleRate).toBe(entry.sampleRate)
+    expect(wav.channels.length).toBeGreaterThan(0)
+  }, 60000)
 })
