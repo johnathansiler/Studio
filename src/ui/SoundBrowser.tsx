@@ -8,7 +8,8 @@ import { soundCache } from '../sounds/cache'
 import { browserSounds, catalogMessage, fetchCatalogSound, loadSoundCatalog, soundCategories, soundCollections, soundKeys, soundRoles, soundTags } from '../sounds/catalog'
 import { boundLibraryHost, filterStarters, loadStarterOnto, playableAudition } from '../sounds/instruments'
 import { matchCountLabel, readSoundWidth, soundWidthFromDrag, writeSoundWidth } from '../sounds/panel'
-import { loopBarCount, waveformPeaks } from '../model/playheadPlace'
+import { loopBarCount } from '../model/playheadPlace'
+import { MiniWave } from './WaveformView'
 import { quartersPerBar } from '../model/time'
 import { decodeSoundBytes, placeSound, previewChannelsFor, trackIdFromDrop } from '../sounds/place'
 import { PACK_LABEL, packLabel } from '../sounds/contract'
@@ -374,7 +375,9 @@ export function SoundBrowser({
   const [busy, setBusy] = useState('')
   const [fault, setFault] = useState('')
   const [playing, setPlaying] = useState('')
-  const [wave, setWave] = useState<{ id: string; peaks: number[]; bars: number } | null>(null)
+  const [wave, setWave] = useState<{ id: string; bars: number } | null>(null)
+  const heard = useRef(new Map<string, Float32Array>())
+  const [heardTick, setHeardTick] = useState(0)
   const [head, setHead] = useState(0)
   const entriesRef = useRef(result.entries)
   const startersRef = useRef(starters)
@@ -586,9 +589,12 @@ export function SoundBrowser({
       engine.stopPreview()
       engine.previewPcm(channels, store.project.sampleRate, entry.type === 'loop')
       const seconds = lead?.length ? lead.length / store.project.sampleRate : 0
+      if (lead?.length) {
+        heard.current.set(entry.id, lead)
+        setHeardTick((tick) => tick + 1)
+      }
       setWave({
         id: entry.id,
-        peaks: waveformPeaks(lead ?? new Float32Array()),
         bars: entry.type === 'loop' ? loopBarCount(seconds, store.project.tempo, quartersPerBar(store.project.timeSignature)) : 0,
       })
       setHead(0)
@@ -978,16 +984,18 @@ export function SoundBrowser({
                   void preview(entry)
                 }}
               >
-                {on && wave?.id === entry.id && (
-                  <span className="sound-wave" aria-hidden="true">
-                    {wave.peaks.map((peak, index) => (
-                      <i key={index} style={{ height: `${Math.max(12, peak * 100)}%` }} />
-                    ))}
-                    <b className="sound-shade" style={{ width: `${head * 100}%` }} />
-                    <b className="sound-head" style={{ left: `${head * 100}%` }} />
-                    {wave.bars > 1 && Array.from({ length: wave.bars - 1 }, (_, index) => (
-                      <b key={index} className="sound-bar" style={{ left: `${((index + 1) / wave.bars) * 100}%` }} />
-                    ))}
+                {heard.current.get(entry.id) && (
+                  <span className="sound-wave" aria-hidden="true" data-heard={heardTick}>
+                    <MiniWave channel={heard.current.get(entry.id)} color="rgba(142, 224, 174, 0.95)" label="Sound waveform" />
+                    {on && wave?.id === entry.id && (
+                      <>
+                        <b className="sound-shade" style={{ width: `${head * 100}%` }} />
+                        <b className="sound-head" style={{ left: `${head * 100}%` }} />
+                        {wave.bars > 1 && Array.from({ length: wave.bars - 1 }, (_, index) => (
+                          <b key={index} className="sound-bar" style={{ left: `${((index + 1) / wave.bars) * 100}%` }} />
+                        ))}
+                      </>
+                    )}
                   </span>
                 )}
                 <strong>{entry.name}</strong>

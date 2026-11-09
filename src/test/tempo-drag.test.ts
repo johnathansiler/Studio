@@ -12,8 +12,11 @@ describe('tempo drag', () => {
   })
 
   it('raises tempo when the finger moves up and clamps to 30–300', () => {
-    expect(tempoFromDrag(120, 25)).toBe(125)
-    expect(tempoFromDrag(120, -15)).toBe(117)
+    expect(tempoFromDrag(120, 30)).toBe(123)
+    expect(tempoFromDrag(120, -20)).toBe(118)
+    expect(tempoFromDrag(120, 8)).toBe(121)
+    expect(tempoFromDrag(120, 14)).toBe(121.4)
+    expect(tempoFromDrag(120, 8, undefined, true)).toBe(120.2)
     expect(tempoFromDrag(120, 10000)).toBe(300)
     expect(tempoFromDrag(40, -10000)).toBe(30)
   })
@@ -24,7 +27,7 @@ describe('tempo drag', () => {
     store.setTempo(tempoFromDrag(120, 40), true)
     store.setTempo(tempoFromDrag(120, 80), true)
     store.endTempoGroup()
-    expect(store.project.tempo).toBe(136)
+    expect(store.project.tempo).toBe(128)
     store.undo()
     expect(store.project.tempo).toBe(120)
     expect(store.canUndo).toBe(false)

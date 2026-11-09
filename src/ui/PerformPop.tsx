@@ -17,6 +17,7 @@ import type { SessionClient } from '../remote/session'
 import { midiOutputs, onMidiMessage, onMidiPorts } from '../midi/access'
 import { setPerformanceOwnsMidi } from '../midi/remember'
 import { attachGlissando } from './glissando'
+import { paintWaveCanvas } from './waveformDraw'
 import { TransportActionContext } from './pluginTransport'
 
 const WHITE = [0, 2, 4, 5, 7, 9, 11]
@@ -773,33 +774,27 @@ function PadWave({ pad, samples }: { pad: PadVoice; samples?: Float32Array }) {
   const ref = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
     const canvas = ref.current
-    const ctx = canvas?.getContext('2d')
-    if (!canvas || !ctx) return
+    if (!canvas) return
     const kind = DRUM_PADS.find((item) => item.pitch === pad.pitch)?.kind ?? 'perc'
     const data = samples ?? renderDrum(kind, 8000, pad.pitch)
-    const width = canvas.width
-    const height = canvas.height
-    ctx.clearRect(0, 0, width, height)
+    const cssW = Math.max(1, canvas.clientWidth || 320)
+    const cssH = Math.max(1, canvas.clientHeight || 72)
+    const dpr = Math.min(3, window.devicePixelRatio || 1)
+    paintWaveCanvas(canvas, cssW, cssH, data, '#73c48f', { start: 0, end: data.length }, { dpr, background: 'transparent' })
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.beginPath()
-    const step = Math.max(1, Math.floor(data.length / width))
-    for (let x = 0; x < width; x++) {
-      const sample = data[Math.min(data.length - 1, x * step)] || 0
-      const y = (0.5 - sample * 0.45) * height
-      if (x === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    }
-    ctx.strokeStyle = '#73c48f'
-    ctx.stroke()
-    ctx.beginPath()
-    const attack = pad.attack * width
-    ctx.moveTo(0, height)
-    ctx.lineTo(attack, height * (1 - pad.level))
-    ctx.lineTo(attack + pad.decay * width * 0.35, height * (1 - pad.sustain * pad.level))
-    ctx.lineTo(width, height)
+    const attack = pad.attack * cssW
+    ctx.moveTo(0, cssH)
+    ctx.lineTo(attack, cssH * (1 - pad.level))
+    ctx.lineTo(attack + pad.decay * cssW * 0.35, cssH * (1 - pad.sustain * pad.level))
+    ctx.lineTo(cssW, cssH)
     ctx.strokeStyle = '#e0b15a'
+    ctx.lineWidth = 1.5
     ctx.stroke()
   }, [pad, samples])
-  return <canvas ref={ref} className="pad-wave" width={480} height={96} aria-label="Pad waveform" />
+  return <canvas ref={ref} className="pad-wave" aria-label="Pad waveform" />
 }
 
 function StepEditor({

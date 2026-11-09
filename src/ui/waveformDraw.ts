@@ -1,5 +1,5 @@
 import { crossingsInRange } from '../audio/zeroCross'
-import { peaksForSpan, type PeakPyramid } from '../audio/peakPyramid'
+import { buildPeakPyramid, peaksForSpan, type PeakPyramid } from '../audio/peakPyramid'
 import { showsSampleDots, usesRawSamples, type WaveSpan } from './waveZoom'
 
 export interface WaveOutline {
@@ -47,6 +47,17 @@ export function envelopeVertices(
   return { top, bottom }
 }
 
+export interface WaveDrawOptions {
+  /** When false, paint over whatever is already in the canvas. */
+  clear?: boolean
+  /** Scales the envelope. 1 is unity. */
+  gain?: number
+  /** Flat color behind the center line. */
+  background?: string
+  /** Mirror the wave left-to-right. Sample 0 of the span lands on the right. */
+  flipX?: boolean
+}
+
 /**
  * Paint one frame of a waveform into a CSS-pixel context (the caller sets the
  * device-pixel transform). UI thread only.
@@ -60,18 +71,32 @@ export function drawWaveform(
   span: WaveSpan,
   color: string,
   outline?: WaveOutline[] | null,
+  options?: WaveDrawOptions,
 ) {
   const cssW = Math.max(1, width)
   const cssH = Math.max(1, height)
-  ctx.clearRect(0, 0, cssW, cssH)
-  const mid = cssH / 2
-  ctx.strokeStyle = 'rgba(244, 255, 248, 0.78)'
-  ctx.lineWidth = 1
-  ctx.beginPath()
-  ctx.moveTo(0, mid + 0.5)
-  ctx.lineTo(cssW, mid + 0.5)
-  ctx.stroke()
+  const gain = Number.isFinite(options?.gain) ? options!.gain! : 1
+  const clear = options?.clear !== false
+  if (options?.flipX) {
+    ctx.translate(cssW, 0)
+    ctx.scale(-1, 1)
+  }
+  if (clear) {
+    ctx.clearRect(0, 0, cssW, cssH)
+    if (options?.background) {
+      ctx.fillStyle = options.background
+      ctx.fillRect(0, 0, cssW, cssH)
+    }
+    const midLine = cssH / 2
+    ctx.strokeStyle = 'rgba(244, 255, 248, 0.78)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(0, midLine + 0.5)
+    ctx.lineTo(cssW, midLine + 0.5)
+    ctx.stroke()
+  }
 
+  const mid = cssH / 2
   const amp = Math.max(1, mid - 3)
   const start = span.start
   const end = Math.max(span.start + 1, span.end)
@@ -88,7 +113,7 @@ export function drawWaveform(
     let moved = false
     for (let i = from; i <= to; i++) {
       const x = ((i - start) / view) * cssW
-      const y = mid - (channel[i] || 0) * amp
+      const y = mid - (channel[i] || 0) * gain * amp
       if (!moved) {
         ctx.moveTo(x, y)
         moved = true
@@ -100,7 +125,7 @@ export function drawWaveform(
       const radius = Math.min(4, Math.max(1.6, (cssW / view) * 0.18))
       for (let i = from; i <= to; i++) {
         const x = ((i - start) / view) * cssW
-        const y = mid - (channel[i] || 0) * amp
+        const y = mid - (channel[i] || 0) * gain * amp
         ctx.beginPath()
         ctx.arc(x, y, radius, 0, Math.PI * 2)
         ctx.fill()
@@ -116,7 +141,7 @@ export function drawWaveform(
   const bars = channel && pyramid
     ? peaksForSpan(pyramid, start, end, columns)
     : outlineColumns(outline, start, end, channel?.length ?? outline?.length ?? 1, columns)
-  paintEnvelope(ctx, bars, cssW, cssH, color)
+  paintEnvelope(ctx, gain === 1 ? bars : bars.map((bar) => ({ min: bar.min * gain, max: bar.max * gain })), cssW, cssH, color)
   if (channel && view <= 16000) paintTicks(ctx, channel, start, end, cssW, cssH)
 }
 
@@ -190,4 +215,67 @@ export function outlineColumns(
     bars.push({ min: lo, max: hi })
   }
   return bars
+}
+
+/** Absolute peaks from older project rows become a symmetric min/max outline. */
+export function peakOutline(peaks: readonly (number | WaveOutline)[] | null | undefined): WaveOutline[] {
+  if (!peaks?.length) return []
+  return peaks.map((peak) => {
+    if (typeof peak === 'number') {
+      const amp = Math.abs(peak)
+      return { min: -amp, max: amp }
+    }
+    return { min: peak?.min || 0, max: peak?.max || 0 }
+  })
+}
+
+/**
+ * Size a canvas for the device pixel ratio and paint with `drawWaveform`.
+ * This is the only canvas entry point for waveforms.
+ */
+export function paintWaveCanvas(
+  canvas: HTMLCanvasElement,
+  cssWidth: number,
+  cssHeight: number,
+  channel: ArrayLike<number> | null | undefined,
+  color: string,
+  span: WaveSpan,
+  extras?: {
+    outline?: WaveOutline[] | null
+    pyramid?: PeakPyramid | null
+    clear?: boolean
+    gain?: number
+    background?: string
+    flipX?: boolean
+    dpr?: number
+  },
+) {
+  const cssW = Math.max(1, cssWidth)
+  const cssH = Math.max(1, cssHeight)
+  const dpr = Math.min(WAVE_DPR_CAP, Math.max(1, extras?.dpr && extras.dpr > 0 ? extras.dpr : 1))
+  const pxW = Math.max(1, Math.floor(cssW * dpr))
+  const pxH = Math.max(1, Math.floor(cssH * dpr))
+  if (canvas.width !== pxW || canvas.height !== pxH) {
+    canvas.width = pxW
+    canvas.height = pxH
+  }
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  canvas.dataset.waveformDraw = 'shared'
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  const length = channel?.length ?? extras?.outline?.length ?? 1
+  const view = { start: span.start, end: Math.max(span.start + 1, span.end || length) }
+  let pyramid = extras?.pyramid ?? null
+  if (!pyramid && channel && channel.length > 1 && !usesRawSamples(view.end - view.start, cssW)) {
+    pyramid = buildPeakPyramid(channel)
+  }
+  ctx.save()
+  drawWaveform(ctx, cssW, cssH, channel, pyramid, view, color, extras?.outline, {
+    clear: extras?.clear !== false,
+    gain: extras?.gain,
+    background: extras?.background,
+    flipX: extras?.flipX,
+  })
+  ctx.restore()
+  return pyramid
 }

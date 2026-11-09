@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { buildPeakPyramid } from '../audio/peakPyramid'
 import { snapFraction } from '../audio/zeroCross'
-import { WAVE_DPR_CAP, drawWaveform, type WaveOutline } from './waveformDraw'
+import { WAVE_DPR_CAP, paintWaveCanvas, type WaveOutline } from './waveformDraw'
 import { fitSpan, panSpan, sampleAtX, zoomSpan, type WaveSpan } from './waveZoom'
 import './waveform.css'
 
@@ -131,18 +131,13 @@ export function WaveformView({
       const cssW = Math.max(1, host.clientWidth || node.clientWidth || 320)
       const cssH = Math.max(1, host.clientHeight || node.clientHeight || 96)
       const dpr = Math.min(WAVE_DPR_CAP, window.devicePixelRatio || 1)
-      node.width = Math.max(1, Math.floor(cssW * dpr))
-      node.height = Math.max(1, Math.floor(cssH * dpr))
-      const ctx = node.getContext('2d')
-      if (!ctx) return
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       const tone = color || readColor(node)
       let pyramid = null
       if (channel && channel.length > 1) {
         if (pyramidCache.current?.channel !== channel) pyramidCache.current = { channel, pyramid: buildPeakPyramid(channel) }
         pyramid = pyramidCache.current.pyramid
       }
-      drawWaveform(ctx, cssW, cssH, channel, pyramid, spanRef.current, tone, outline)
+      paintWaveCanvas(node, cssW, cssH, channel, tone, spanRef.current, { outline, pyramid, dpr })
     }
     paint()
     const watch = new ResizeObserver(paint)
@@ -346,6 +341,55 @@ export function WaveformView({
     )
   }
   return body
+}
+
+/** Small waveform for rows and overviews. Peaks are built only after the canvas is on screen. */
+export function MiniWave({
+  channel,
+  outline,
+  color = '#73c48f',
+  className,
+  label = 'Waveform',
+}: {
+  channel?: ArrayLike<number> | null
+  outline?: WaveOutline[] | null
+  color?: string
+  className?: string
+  label?: string
+}) {
+  const ref = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const canvas = ref.current
+    const host = canvas?.parentElement
+    if (!canvas || !host) return
+    let pyramid: ReturnType<typeof buildPeakPyramid> | null = null
+    let seen = false
+    const paint = () => {
+      if (!seen) return
+      const cssW = Math.max(1, host.clientWidth || canvas.clientWidth || 72)
+      const cssH = Math.max(1, host.clientHeight || canvas.clientHeight || 28)
+      const dpr = Math.min(WAVE_DPR_CAP, window.devicePixelRatio || 1)
+      if (channel && channel.length > 1 && !pyramid) pyramid = buildPeakPyramid(channel)
+      paintWaveCanvas(canvas, cssW, cssH, channel, color, { start: 0, end: channel?.length || outline?.length || 1 }, {
+        outline,
+        pyramid,
+        dpr,
+      })
+    }
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return
+      seen = true
+      paint()
+    })
+    io.observe(host)
+    const ro = new ResizeObserver(() => paint())
+    ro.observe(host)
+    return () => {
+      io.disconnect()
+      ro.disconnect()
+    }
+  }, [channel, outline, color])
+  return <canvas ref={ref} className={className} aria-hidden={label ? undefined : true} aria-label={label} />
 }
 
 function fractionInView(span: WaveSpan, x: number, width: number, length: number) {
