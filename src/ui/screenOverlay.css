@@ -244,8 +244,13 @@
 }
 
 .step-sequencer > .step-sequencer-bar {
+  position: relative;
+  z-index: 8;
   margin-bottom: 8px;
   overflow: visible;
+  min-height: 44px;
+  height: 44px;
+  max-height: 44px;
 }
 
 .step-sequencer-bar > button.step-close.overlay-close {
@@ -253,12 +258,18 @@
   top: 0;
   right: 0;
   margin: 0;
-  min-width: 40px;
+  min-width: 44px;
   width: auto;
-  height: 40px;
-  min-height: 40px;
-  max-height: 40px;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
   z-index: 2;
+  pointer-events: auto;
+}
+
+[data-screen-overlay].step-sequencer .beats.channel-rack {
+  position: relative;
+  z-index: 1;
 }
 
 .shell .step-sequencer .rack-bar button.on,

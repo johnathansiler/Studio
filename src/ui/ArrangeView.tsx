@@ -572,7 +572,7 @@ export function ArrangeView({
       moved: false,
       sinceLastMs: since,
       kind,
-      sequencer: kind === 'pattern' && hasStepSequencer(track),
+      sequencer: (kind === 'pattern' || kind === 'midi') && hasStepSequencer(track),
     })
     if (action === 'edit') {
       lastClipTap.current = { id: '', at: 0 }
@@ -595,7 +595,9 @@ export function ArrangeView({
     event.stopPropagation()
     focusTimeline()
     if (kind === 'pattern') setPatternMenu(null)
-    else if (touch || event.pointerType === 'touch') event.preventDefault()
+    const onSequencer = hasStepSequencer(project.tracks.find((item) => item.id === trackId))
+    const scrollAware = kind === 'pattern' || (kind === 'midi' && onSequencer)
+    if (!scrollAware && (touch || event.pointerType === 'touch')) event.preventDefault()
     const additive = event.shiftKey || event.metaKey || event.ctrlKey
     const selected = kind === 'audio' ? store.selectedClipIds : kind === 'midi' ? store.selectedMidiClipIds : store.selectedPatternClipIds
     const wasIn = selected.includes(clipId)
@@ -671,14 +673,14 @@ export function ArrangeView({
         const dx = ev.clientX - originX
         const dy = ev.clientY - originY
         travel = Math.max(travel, Math.hypot(dx, dy))
-        if (kind === 'pattern') {
+        if (scrollAware) {
           intent = patternPointerIntent(dx, dy, event.pointerType)
           if (intent !== 'drag') return
         }
         preview(ev.clientX)
       },
       (ev) => {
-        if (kind === 'pattern' && (intent === 'scroll' || ev.type === 'pointercancel')) {
+        if (scrollAware && (intent === 'scroll' || ev.type === 'pointercancel')) {
           setNudge(null)
           setDragView(null)
           return
@@ -1089,7 +1091,7 @@ export function ArrangeView({
                     data-track={track.id}
                     data-remote-select={remote?.id}
                     className={`clip ${picked ? 'selected' : ''}${remote ? ' remote-selected' : ''}`}
-                    style={{ left, width: widthPx, background: track.color, pointerEvents: passive ? 'none' : undefined, ['--remote' as string]: remote?.color }}
+                    style={{ left, width: widthPx, background: track.color, pointerEvents: passive ? 'none' : undefined, touchAction: !passive && hasStepSequencer(track) ? 'pan-y' : undefined, ['--remote' as string]: remote?.color }}
                     onPointerDown={(event) => {
                       if (tool === 'erase') {
                         beginErase(event)
