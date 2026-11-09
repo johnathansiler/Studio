@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { yinPitch } from '../audio/stretch/voice'
 import { encodeWav } from '../model/wav'
 import { createEmptyProject, type Project } from '../model/types'
-import { SoundCache, fetchSoundBytes, memoryByteStore, sha256Hex } from '../sounds/cache'
+import { SOUND_DOWNLOAD_LIMIT, SoundCache, fetchSoundBytes, memoryByteStore, resetSoundDownloads, sha256Hex } from '../sounds/cache'
 import {
   bpmMatchesProject,
   catalogMessage,
@@ -15,7 +15,7 @@ import {
   parseCatalog,
 } from '../sounds/catalog'
 import { audioTrackFor, decodeSoundBytes, placeSound, previewChannelsFor, trackIdFromDrop } from '../sounds/place'
-import { LEGACY_INDEX_URL } from '../sounds/contract'
+import { LEGACY_INDEX_URL, SOUND_DATASET_BASE } from '../sounds/contract'
 import { assertSoundUrl, legacySoundFileUrl, soundFileUrl } from '../sounds/source'
 import type { SoundEntry } from '../sounds/types'
 import { isUntouchedEmpty } from '../model/launchProject'
@@ -145,7 +145,7 @@ describe('sound library', () => {
 
   it('fetches library files from Hugging Face and replays them from storage', async () => {
     const url = legacySoundFileUrl('loops/dust.wav')
-    expect(url).toBe('https://huggingface.co/datasets/cueharbor/sound-library/resolve/main/loops/dust.wav')
+    expect(url).toBe(`${SOUND_DATASET_BASE}/loops/dust.wav`)
     expect(() => soundFileUrl('loops/dust.wav')).toThrow(/Hugging Face|library/)
     expect(() => soundFileUrl('../secret.wav')).toThrow(/Hugging Face/)
     expect(() => soundFileUrl('https://cueharbor.onrender.com/loops/dust.wav')).toThrow(/Hugging Face|library/)
@@ -319,5 +319,41 @@ describe('sound library', () => {
     expect(calls).toBe(1)
     expect(new Uint8Array(left)).toEqual(good)
     expect(new Uint8Array(right)).toEqual(good)
+  })
+
+  it('downloads a few files at a time and drops a cancel that is still waiting', async () => {
+    resetSoundDownloads()
+    const cache = new SoundCache([memoryByteStore()])
+    let active = 0
+    let peak = 0
+    let calls = 0
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const fetchImpl = async () => {
+      calls += 1
+      active += 1
+      peak = Math.max(peak, active)
+      await gate
+      active -= 1
+      return new Response(new Uint8Array([1, 2, 3, 4]))
+    }
+    const urls = [1, 2, 3, 4, 5].map((index) => legacySoundFileUrl(`loops/lane-${index}.wav`))
+    const running = urls.slice(0, SOUND_DOWNLOAD_LIMIT).map((url) => fetchSoundBytes(url, fetchImpl, cache, { attempts: 1 }))
+    const waiting = urls.slice(SOUND_DOWNLOAD_LIMIT).map((url) => fetchSoundBytes(url, fetchImpl, cache, { attempts: 1 }))
+    try {
+      for (let i = 0; i < 20 && calls < SOUND_DOWNLOAD_LIMIT; i += 1) await new Promise((resolve) => setTimeout(resolve, 5))
+      expect(calls).toBe(SOUND_DOWNLOAD_LIMIT)
+      expect(peak).toBeLessThanOrEqual(SOUND_DOWNLOAD_LIMIT)
+      const signal = new AbortController()
+      const cancelled = fetchSoundBytes(legacySoundFileUrl('loops/lane-cancel.wav'), fetchImpl, cache, { attempts: 1, signal: signal.signal })
+      signal.abort()
+      await expect(cancelled).rejects.toThrow(/cancel/i)
+      expect(calls).toBe(SOUND_DOWNLOAD_LIMIT)
+    } finally {
+      release()
+      await Promise.allSettled([...running, ...waiting])
+      resetSoundDownloads()
+    }
+    expect(calls).toBe(urls.length)
   })
 })

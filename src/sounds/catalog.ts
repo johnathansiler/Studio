@@ -1,6 +1,6 @@
 import type { SoundCache } from './cache'
 import { fetchSoundBytes, soundCache, type FetchSoundOptions } from './cache'
-import { SOUNDSCOUT_VERSION, SOUND_VERSION_PREFIX } from './contract'
+import { packLabel, SOUNDSCOUT_VERSION, SOUND_VERSION_PREFIX } from './contract'
 import { licenseAllowed } from './license'
 import { readPrivateCatalog, readPrivateFile } from './private'
 import { soundCatalogUrl, soundFileUrl } from './source'
@@ -83,10 +83,11 @@ export function filterSounds(entries: SoundEntry[], query: SoundQuery): SoundEnt
       if (query.collection && entry.collection !== query.collection && entry.pack !== query.collection) return false
       if (query.category && entry.category !== query.category) return false
       if (query.tag && !entry.tags.some((tag) => tag.toLowerCase() === query.tag?.toLowerCase())) return false
+      if (query.role && (entry.role ?? '').toLowerCase() !== query.role.trim().toLowerCase()) return false
       if (key && !soundKeyMatches(key, entry.key)) return false
       if (query.bpm === 'project' && (entry.bpm == null || !bpmMatchesProject(entry.bpm, query.projectBpm))) return false
       if (!tokens.length) return true
-      const hay = `${entry.name} ${entry.collection ?? ''} ${entry.category ?? ''} ${entry.role ?? ''} ${entry.publisher ?? ''} ${entry.pack ?? ''} ${entry.tags.join(' ')} ${entry.key ?? ''} ${entry.pitch ?? ''} ${entry.type} ${entry.source}`.toLowerCase()
+      const hay = `${entry.name} ${entry.collection ?? ''} ${entry.category ?? ''} ${entry.role ?? ''} ${entry.publisher ?? ''} ${entry.pack ?? ''} ${entry.pack ? packLabel(entry.pack) : ''} ${entry.tags.join(' ')} ${entry.key ?? ''} ${entry.pitch ?? ''} ${entry.bpm ?? ''} ${entry.origin === 'private' ? 'private' : ''} ${entry.type} ${entry.source}`.toLowerCase()
       return tokens.every((token) => hay.includes(token))
     })
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
@@ -139,6 +140,29 @@ export function soundTags(entries: SoundEntry[]) {
   return [...new Set(entries.flatMap((entry) => entry.tags))].sort((a, b) => a.localeCompare(b))
 }
 
+/** Roles already stored on the rows. Public rows get one derived role when the file has none. */
+export function soundRoles(entries: SoundEntry[]) {
+  return [...new Set(entries.map((entry) => entry.role).filter((role): role is string => Boolean(role)))].sort((a, b) => a.localeCompare(b))
+}
+
+/**
+ * What the browser lists for a kind chip.
+ * "Instruments" is not a stored kind in this catalog. It is the same free
+ * files, loaded as one sample on the keyboard instead of the old starter list.
+ */
+export function browserSounds(entries: SoundEntry[], query: SoundQuery) {
+  const type = query.type === 'instrument' ? 'all' : query.type
+  return filterSounds(entries, { ...query, type })
+}
+
+function derivedRole(type: SoundKind, category: string | undefined, tags: string[]) {
+  if (type === 'loop') return 'loop'
+  const cat = (category ?? '').toLowerCase()
+  if (cat === 'kick' || cat === 'snare' || cat === 'clap' || cat === 'hat' || cat === 'hi-hat' || cat === 'tom' || cat === 'drums') return 'drum_one_shot'
+  if (tags.some((tag) => /^(kick|snare|clap|hat|drums)$/i.test(tag))) return 'drum_one_shot'
+  return 'one_shot'
+}
+
 export function catalogMessage(result: CatalogResult, filteredCount: number, queryActive: boolean) {
   if (result.status === 'missing') return 'The sound library is not online yet.'
   if (!result.entries.length) return 'No free sounds are listed yet.'
@@ -181,6 +205,7 @@ export function parseScoutEntry(input: unknown): SoundEntry | null {
   const sha256 = typeof raw.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(raw.sha256.trim()) ? raw.sha256.trim().toLowerCase() : undefined
   const bytes = typeof raw.bytes === 'number' && Number.isFinite(raw.bytes) && raw.bytes > 0 ? raw.bytes : undefined
   const pack = typeof raw.packId === 'string' && raw.packId.trim() ? raw.packId.trim() : typeof raw.pack === 'string' && raw.pack.trim() ? raw.pack.trim() : undefined
+  const explicitRole = typeof raw.role === 'string' && raw.role.trim() ? raw.role.trim() : ''
   return {
     id,
     path,
@@ -198,6 +223,7 @@ export function parseScoutEntry(input: unknown): SoundEntry | null {
     sha256,
     bytes,
     pack,
+    role: explicitRole || derivedRole(type as SoundKind, category, tags),
     licenseClass: licenseClass || undefined,
     licenseNote: typeof raw.licenseNote === 'string' && raw.licenseNote.trim() ? raw.licenseNote.trim() : undefined,
     creator: typeof raw.creator === 'string' && raw.creator.trim() ? raw.creator.trim() : undefined,
@@ -282,7 +308,7 @@ async function finishCatalog(remote: SoundEntry[], status: CatalogResult['status
 export async function fetchCatalogSound(entry: SoundEntry, options?: FetchSoundOptions & { fetchImpl?: FetchLike; cache?: SoundCache }) {
   if (entry.origin === 'private') {
     const bytes = await readPrivateFile(entry.id)
-    if (!bytes) throw new Error('That file is not installed on this device.')
+    if (!bytes) throw new Error('That private sound is not on this device. The rest of the project still plays.')
     options?.onProgress?.(1)
     return bytes
   }

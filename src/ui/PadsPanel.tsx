@@ -337,8 +337,8 @@ export function PadsPanel({
       if (!samples?.length) return
       store.assignTrackPad(trackId, bank, index, { name: entry.name, samples, sampleRate: decoded.sampleRate })
       setSelected(index)
-    } catch {
-      store.toast('That sound could not be loaded onto the pad.', 'warn')
+    } catch (error) {
+      store.toast(error instanceof Error ? error.message : 'That sound could not be loaded onto the pad.', 'warn')
     }
   }
 

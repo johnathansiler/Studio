@@ -33,8 +33,8 @@ async function readClip(page: Page) {
         }
       }
     }).__cueharbor.store
-    const host = store.project.tracks.find((track) => track.clips.some((clip) => /boom bap 88/i.test(clip.name)))
-    const clip = host?.clips.find((item) => /boom bap 88/i.test(item.name))
+    const host = store.project.tracks.find((track) => track.clips.some((clip) => clip.name.includes('2-AND-4 (100)')))
+    const clip = host?.clips.find((item) => item.name.includes('2-AND-4 (100)'))
     const channel = clip ? store.buffers.get(clip.bufferId)?.channels[0] : undefined
     const node = clip ? document.querySelector(`[data-clip="${clip.id}"]`) as HTMLElement | null : null
     const box = node?.getBoundingClientRect()
@@ -53,7 +53,7 @@ async function readClip(page: Page) {
 }
 
 describe('production loop tempo follow', () => {
-  it('stretches a loaded Boom Bap loop when the song tempo changes', async () => {
+  it('stretches a loaded SoundScout loop when the song tempo changes', async () => {
     mkdirSync('/opt/cursor/artifacts', { recursive: true })
     const port = 4600 + Math.floor(Math.random() * 200)
     const url = `http://127.0.0.1:${port}`
@@ -83,10 +83,10 @@ describe('production loop tempo follow', () => {
         loops.click()
       })
       const search = page.getByLabel('Search sounds')
-      await search.fill('Boom Bap 88')
-      await page.locator('.sound-row', { hasText: 'Boom Bap 88 BPM' }).first().waitFor({ timeout: 20000 })
+      await search.fill('2-AND-4 (100)')
+      await page.locator('.sound-row', { hasText: '2-AND-4 (100)' }).first().waitFor({ timeout: 20000 })
       await page.evaluate(() => {
-        const row = [...document.querySelectorAll('.sound-row')].find((item) => item.textContent?.includes('Boom Bap 88 BPM'))
+        const row = [...document.querySelectorAll('.sound-row')].find((item) => item.textContent?.includes('2-AND-4 (100)'))
         const button = row?.querySelector('button.sound-add')
         if (!(button instanceof HTMLButtonElement)) throw new Error('missing load')
         button.click()
@@ -94,7 +94,7 @@ describe('production loop tempo follow', () => {
       await page.locator('[data-clip]').first().waitFor({ timeout: 20000 })
       const loaded = await readClip(page)
       expect(loaded.follow).toBe(true)
-      expect(loaded.bpm).toBe(88)
+      expect(loaded.bpm).toBe(100)
       expect(loaded.source).toBeGreaterThan(1000)
       expect(loaded.beats).toBeGreaterThan(7.5)
       expect(loaded.beats).toBeLessThan(8.5)
@@ -195,8 +195,8 @@ describe('production loop tempo follow', () => {
         }
         hook.store.setTempo(140)
         const drum = await mixOf()
-        const host = hook.store.project.tracks.find((track) => track.clips.some((clip) => /boom bap 88/i.test(clip.name)))
-        const boom = host?.clips.find((clip) => /boom bap 88/i.test(clip.name))
+        const host = hook.store.project.tracks.find((track) => track.clips.some((clip) => clip.name.includes('2-AND-4 (100)')))
+        const boom = host?.clips.find((clip) => clip.name.includes('2-AND-4 (100)'))
         if (host && boom) hook.store.selectClip(host.id, boom.id)
         hook.store.deleteSelectedClip()
         const tone = new Float32Array(Math.round(0.8 * rate))

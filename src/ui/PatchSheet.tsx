@@ -136,7 +136,7 @@ export function PatchSheet({
           <option value="">Load</option>
           {samples.length > 0 && (
             <optgroup label="Downloaded samples">
-              {samples.map((item) => <option key={item.id} value={`sample:${item.id}`}>{item.name} · {item.type === 'loop' ? 'Loop' : 'One-shot'}</option>)}
+              {samples.map((item) => <option key={item.id} value={`sample:${item.id}`}>{item.name} · {item.origin === 'private' ? 'Private' : item.type === 'loop' ? 'Loop' : 'One-shot'}</option>)}
             </optgroup>
           )}
           {(store.project.omniLibrary ?? []).length > 0 && (

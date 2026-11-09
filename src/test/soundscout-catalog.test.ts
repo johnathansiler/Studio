@@ -6,14 +6,15 @@ import { describe, expect, it } from 'vitest'
 import { createEmptyProject } from '../model/types'
 import { SoundCache, fetchSoundBytes, memoryByteStore, sha256Hex } from '../sounds/cache'
 import {
+  browserSounds,
   filterSounds,
   loadSoundCatalog,
   parseSoundScoutCatalog,
 } from '../sounds/catalog'
-import { LEGACY_INDEX_URL, SOUND_CATALOG_URL, SOUND_VERSION_PREFIX } from '../sounds/contract'
+import { LEGACY_INDEX_URL, SOUND_CATALOG_URL, SOUND_DATASET_BASE, SOUND_DATASET_COMMIT, SOUND_VERSION_PREFIX } from '../sounds/contract'
 import { licenseAllowed } from '../sounds/license'
 import { legacySoundFileUrl, soundCatalogUrl, soundFileUrl } from '../sounds/source'
-import { placeSound } from '../sounds/place'
+import { placeSound, previewChannelsFor } from '../sounds/place'
 import { libraryMatchesCategory, soundsForRole } from '../sounds/roles'
 import { ensureDefaultKit } from '../instruments/pads/load'
 import { pickDefaultKit } from '../instruments/pads/record'
@@ -71,7 +72,8 @@ describe('SoundScout catalog', () => {
     const query = { text: '', type: 'all' as const, bpm: 'any' as const, key: '', favoritesOnly: false, projectBpm: 120, favorites: [] as string[] }
     expect(filterSounds([kick], { ...query, key: 'C' })).toEqual([])
     expect(filterSounds([kick], { ...query, key: 'C1' }).map((entry) => entry.id)).toEqual([kick.id])
-    expect(soundFileUrl(kick.path)).toBe(document.urlContract.exampleAudio)
+    expect(soundFileUrl(kick.path)).toBe(document.urlContract.exampleAudio.replace('/resolve/main/', `/resolve/${SOUND_DATASET_COMMIT}/`))
+    expect(soundFileUrl(kick.path)).toContain(SOUND_DATASET_COMMIT)
     const hashed = catalog.filter((entry) => entry.path.includes('#'))
     expect(hashed.length).toBeGreaterThan(1)
     for (const entry of hashed) {
@@ -92,6 +94,8 @@ describe('SoundScout catalog', () => {
     })
     expect(naturalPlaced?.clip.stretch?.followTempo).toBe(false)
     expect(naturalPlaced?.clip.durationSamples).toBe(480)
+    const naturalPreview = previewChannelsFor(natural, [new Float32Array(480)], 48000, createEmptyProject(48000), 0)
+    expect(naturalPreview[0]?.length).toBe(480)
     const timed = catalog.find((entry) => entry.type === 'loop' && entry.bpm)!
     const timedPlaced = placeSound({
       entry: timed,
@@ -104,7 +108,7 @@ describe('SoundScout catalog', () => {
     expect(timedPlaced?.clip.stretch?.sourceBpm).toBe(timed.bpm)
     expect(() => soundFileUrl('loops/dust.wav')).toThrow(/Hugging Face|library/)
     expect(() => soundFileUrl('one-shots/drums/kick.wav')).toThrow(/Hugging Face|library/)
-    expect(legacySoundFileUrl('loops/dust.wav')).toBe('https://huggingface.co/datasets/cueharbor/sound-library/resolve/main/loops/dust.wav')
+    expect(legacySoundFileUrl('loops/dust.wav')).toBe(`${SOUND_DATASET_BASE}/loops/dust.wav`)
     expect(() => legacySoundFileUrl(kick.path)).toThrow(/Hugging Face|library/)
     expect(soundCatalogUrl()).toBe(SOUND_CATALOG_URL)
 
@@ -181,6 +185,59 @@ describe('SoundScout catalog', () => {
     expect(all).toContain('One-shot')
     expect(all).toContain('MBase kicks')
     expect(all).toContain('Loop')
+
+    const grime = catalog.find((entry) => entry.tags.includes('grime') && entry.tags.includes('rim'))!
+    expect(grime.role).toBe('drum_one_shot')
+    expect(libraryMatchesCategory(grime, 'Kicks')).toBe(true)
+    expect(libraryMatchesCategory(grime, 'Snares')).toBe(false)
+    expect(libraryMatchesCategory(grime, 'Perc')).toBe(false)
+    expect(soundsForRole([grime], 'step').map((entry) => entry.id)).toEqual([grime.id])
+    expect(percussion.role).toBe('loop')
+    const open = { text: '', type: 'all' as const, bpm: 'any' as const, key: '', favoritesOnly: false, projectBpm: 120, favorites: [] as string[] }
+    expect(filterSounds(catalog, { ...open, role: 'drum_one_shot' }).every((entry) => entry.type === 'one-shot' && entry.category === 'kick')).toBe(true)
+    expect(filterSounds(catalog, { ...open, role: 'loop' }).every((entry) => entry.type === 'loop')).toBe(true)
+    expect(filterSounds(catalog, { ...open, text: 'mbase' }).every((entry) => entry.pack === 'HW-MBASE')).toBe(true)
+    expect(browserSounds(catalog, { ...open, type: 'instrument' })).toHaveLength(776)
+    expect(browserSounds(catalog, { ...open, type: 'instrument' }).some((entry) => /xylophone|upright piano|nylon/i.test(entry.name))).toBe(false)
+    const chopList = soundsForRole(catalog, 'chop')
+    expect(chopList.length).toBeGreaterThan(40)
+    expect(chopList[39]?.type).toBe('loop')
+    const forty = Array.from({ length: 40 }, (_, index) => ({
+      id: `chop-loop-${index + 1}`,
+      path: `soundscout-2026-11-09/loops/chop-loop-${index + 1}.wav`,
+      name: `Chop loop ${index + 1}`,
+      type: 'loop' as const,
+      tags: ['loop'],
+      durationSec: 1,
+      sampleRate: 48000,
+      license: 'CC0-1.0',
+      source: 'test',
+      role: 'loop',
+    }))
+    const chopped = renderToStaticMarkup(createElement(SoundBrowser, {
+      store,
+      phone: true,
+      engine,
+      onClose: () => undefined,
+      lockType: 'loop',
+      initial: { entries: forty, status: 'ok' },
+    }))
+    expect(chopped).toContain('Chop loop 40')
+    expect(chopped).not.toContain('Xylophone')
+    const keys = renderToStaticMarkup(createElement(SoundBrowser, {
+      store,
+      phone: false,
+      engine,
+      onClose: () => undefined,
+      lockType: 'instrument',
+      initial: { entries: [forty[39], steps[0]], status: 'ok' },
+      instruments: [{ id: 'xylophone', name: 'Xylophone', license: 'CC0-1.0', path: 'xylophone/instrument.sfz', bytes: 1, description: 'old starter' }],
+    }))
+    expect(keys).toContain('Chop loop 40')
+    expect(keys).toContain(steps[0].name)
+    expect(keys).toContain('one sample on the keyboard')
+    expect(keys).not.toContain('Xylophone')
+    expect(keys).not.toContain('starterCatalog')
   })
 
   it('loads one file on demand, retries, and does not keep a bad download', async () => {
@@ -239,4 +296,33 @@ describe('SoundScout catalog', () => {
     expect(wav.sampleRate).toBe(entry.sampleRate)
     expect(wav.channels.length).toBeGreaterThan(0)
   }, 60000)
+
+  it('heads every previously broken hash name on the pinned dataset', async () => {
+    const hashed = catalog.filter((entry) => entry.path.includes('#'))
+    expect(hashed).toHaveLength(121)
+    const extras = [
+      catalog.find((entry) => entry.path.includes('(')),
+      catalog.find((entry) => entry.path.includes(' ') && !entry.path.includes('#') && !entry.path.includes('(')),
+    ].filter((entry): entry is (typeof catalog)[number] => Boolean(entry))
+    const catalogHead = await fetch(SOUND_CATALOG_URL, { method: 'HEAD' })
+    expect(catalogHead.status).toBe(200)
+    expect(SOUND_CATALOG_URL).toContain(SOUND_DATASET_COMMIT)
+    const failures: string[] = []
+    const queue = [...hashed, ...extras]
+    async function worker() {
+      for (;;) {
+        const entry = queue.pop()
+        if (!entry) return
+        const url = soundFileUrl(entry.path)
+        if (url.includes('#') || !url.includes('%23') && entry.path.includes('#')) failures.push(`encode ${entry.path}`)
+        if (!url.includes(SOUND_DATASET_COMMIT)) failures.push(`pin ${entry.path}`)
+        const response = await fetch(url, { method: 'HEAD' })
+        if (response.status !== 200) failures.push(`${response.status} ${entry.path}`)
+        const length = Number(response.headers.get('content-length'))
+        if (length > 0 && entry.bytes && length !== entry.bytes) failures.push(`length ${length} ${entry.path}`)
+      }
+    }
+    await Promise.all(Array.from({ length: 6 }, () => worker()))
+    expect(failures).toEqual([])
+  }, 120000)
 })

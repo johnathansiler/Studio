@@ -35,10 +35,18 @@ export function chopLoops(entries: SoundEntry[], text = '') {
   return soundsForRole(entries, 'chop')
     .filter((entry) => {
       if (!tokens.length) return true
-      const hay = `${entry.name} ${entry.category ?? ''} ${entry.tags.join(' ')}`.toLowerCase()
+      const hay = `${entry.name} ${entry.category ?? ''} ${entry.role ?? ''} ${entry.pack ?? ''} ${entry.key ?? ''} ${entry.bpm ?? ''} ${entry.publisher ?? ''} ${entry.tags.join(' ')}`.toLowerCase()
       return tokens.every((token) => hay.includes(token))
     })
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+}
+
+/** Short labels for the filter menu. The stored role string is unchanged. */
+export function roleLabel(role: string) {
+  if (role === 'loop') return 'Loop'
+  if (role === 'drum_one_shot') return 'Drum one-shot'
+  if (role === 'one_shot' || role === 'one-shot') return 'One-shot'
+  return role.replace(/[_-]+/g, ' ')
 }
 
 /** Kit categories in the step sequencer. A kick does not satisfy a snare, hat, or perc row. */

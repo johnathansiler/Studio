@@ -56,7 +56,7 @@ async function loadRowSample(store: ProjectStore, sampleId: string) {
   const catalog = await loadSoundCatalog()
   const id = sampleId.startsWith('lib_') ? sampleId.slice(4) : sampleId
   const entry = catalog.entries.find((item) => item.id === id)
-  if (!entry) throw new Error('That drum sample is not in the free library.')
+  if (!entry) throw new Error('That sound is not on this device. The rest of the project still plays.')
   const bytes = await fetchCatalogSound(entry)
   const decoded = await decodeSoundBytes(bytes)
   const channels = matchProjectRate(decoded.channels, decoded.sampleRate, store.project.sampleRate)
@@ -312,7 +312,8 @@ function Picker({
   })
   const libRows = library.filter((entry) => {
     if (!libraryMatchesCategory(entry, category)) return false
-    return !needle || entry.name.toLowerCase().includes(needle) || entry.tags.some((tag) => tag.toLowerCase().includes(needle)) || (entry.pack ?? '').toLowerCase().includes(needle) || (entry.category ?? '').toLowerCase().includes(needle)
+    const hay = `${entry.name} ${entry.tags.join(' ')} ${entry.pack ?? ''} ${entry.category ?? ''} ${entry.role ?? ''} ${entry.key ?? ''} ${entry.bpm ?? ''} ${entry.origin === 'private' ? 'private' : ''}`.toLowerCase()
+    return !needle || hay.includes(needle)
   })
   return (
     <div className="rack-picker" role="listbox" aria-label="Sounds to add. Search the kit or the library.">
@@ -350,7 +351,7 @@ function Picker({
             onClick={() => onLibrary(entry, index)}
           >
             <b>{shortSoundName(entry.name)}</b>
-            <small>Library</small>
+            <small>{entry.origin === 'private' ? 'Private' : 'Library'}</small>
           </button>
         ))}
       </div>

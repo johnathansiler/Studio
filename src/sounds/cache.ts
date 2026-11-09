@@ -17,6 +17,9 @@ export interface ByteStore {
 /** Phone cache bound. One file can exceed it; the rest are dropped. The whole library is not kept. */
 export const SOUND_CACHE_BUDGET_BYTES = 64 * 1024 * 1024
 
+/** How many library files download at once. Extra requests wait, and a cancel leaves the queue. */
+export const SOUND_DOWNLOAD_LIMIT = 3
+
 export interface FetchSoundOptions {
   attempts?: number
   delayMs?: number
@@ -354,6 +357,42 @@ interface Flight {
 }
 
 const flights = new Map<string, Flight>()
+let activeDownloads = 0
+const downloadWaiters: Array<() => void> = []
+
+function acquireDownload(signal?: AbortSignal) {
+  if (signal?.aborted) return Promise.reject(cancelled())
+  if (activeDownloads < SOUND_DOWNLOAD_LIMIT) {
+    activeDownloads += 1
+    return Promise.resolve()
+  }
+  return new Promise<void>((resolve, reject) => {
+    const grant = () => {
+      signal?.removeEventListener('abort', onAbort)
+      activeDownloads += 1
+      resolve()
+    }
+    const onAbort = () => {
+      const index = downloadWaiters.indexOf(grant)
+      if (index >= 0) downloadWaiters.splice(index, 1)
+      reject(cancelled())
+    }
+    downloadWaiters.push(grant)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+function releaseDownload() {
+  activeDownloads = Math.max(0, activeDownloads - 1)
+  const next = downloadWaiters.shift()
+  if (next) next()
+}
+
+/** Tests start from an empty download queue. */
+export function resetSoundDownloads() {
+  activeDownloads = 0
+  downloadWaiters.splice(0, downloadWaiters.length)
+}
 
 function cancelled() {
   return new DOMException('The download was cancelled.', 'AbortError')
@@ -361,7 +400,10 @@ function cancelled() {
 
 function waitFor(promise: Promise<ArrayBuffer>, signal?: AbortSignal) {
   if (!signal) return promise
-  if (signal.aborted) return Promise.reject(cancelled())
+  if (signal.aborted) {
+    promise.catch(() => undefined)
+    return Promise.reject(cancelled())
+  }
   return new Promise<ArrayBuffer>((resolve, reject) => {
     const onAbort = () => reject(cancelled())
     signal.addEventListener('abort', onAbort, { once: true })
@@ -379,6 +421,15 @@ function waitFor(promise: Promise<ArrayBuffer>, signal?: AbortSignal) {
 }
 
 async function downloadSound(url: string, fetchImpl: FetchLike, cache: SoundCache, options: FetchSoundOptions, signal: AbortSignal) {
+  await acquireDownload(signal)
+  try {
+    return await downloadSoundBody(url, fetchImpl, cache, options, signal)
+  } finally {
+    releaseDownload()
+  }
+}
+
+async function downloadSoundBody(url: string, fetchImpl: FetchLike, cache: SoundCache, options: FetchSoundOptions, signal: AbortSignal) {
   const expected = options.sha256?.trim().toLowerCase()
   const attempts = Math.max(1, Math.round(options.attempts ?? 3))
   let last: unknown
