@@ -127,7 +127,7 @@ export class MidiHost {
   private noteOn(portId: string, dest: { play: string[]; record: string[] }, source: number, velocity: number, beat: number, recording: boolean) {
     const played = new Set<string>()
     for (const id of dest.play) {
-      const pitches = this.sound(id, source, velocity)
+      const pitches = this.sound(id, source, velocity, recording)
       const dropped = this.replaceVoice(portId, id, source, pitches)
       for (const pitch of dropped) {
         this.engine.releaseThrough(id, pitch)
@@ -167,10 +167,10 @@ export class MidiHost {
   }
 
   /** Play a key. Scaler may turn it into a chord, or hide it. */
-  private sound(trackId: string, midi: number, velocity: number): number[] {
+  private sound(trackId: string, midi: number, velocity: number, recording = false): number[] {
     const live = playScalerLive(this.store.project, this.engine, trackId, midi, velocity)
     if (live === null) {
-      this.engine.playThrough(trackId, midi, velocity)
+      this.engine.playThrough(trackId, midi, velocity, 0, false, recording ? 'record' : 'midi')
       return [midi]
     }
     return live.map((note) => note.midi)

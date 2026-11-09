@@ -3,6 +3,7 @@ import type { SamplerProgram } from '../audio/multisample/types'
 import { noteName } from '../audio/sample/pitch'
 import { dragSlotPoint, readSlotPoints, type SlotPoints } from '../audio/sample/slot'
 import type { ProjectStore } from '../state/store'
+import { HarborPresetBar, HarborProgress } from './HarborPresets'
 import { Keyboard, Knob } from './kit/controls'
 import { WaveformView, type WaveMarker } from './WaveformView'
 import './kit/kit.css'
@@ -45,6 +46,12 @@ export function SamplerFace({ store, engine, trackId }: { store: ProjectStore; e
   return (
     <section className="sampler-face" data-sampler="face" aria-label="Sampler">
       <p className="sampler-title">{title}</p>
+      {program?.id.startsWith('harbor:') && (
+        <>
+          <HarborPresetBar store={store} trackId={track.id} />
+          <HarborProgress />
+        </>
+      )}
       {program ? (
         <ZoneMap program={program} />
       ) : (

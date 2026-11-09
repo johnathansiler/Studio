@@ -26,6 +26,7 @@ import { PadHost } from './voices/host'
 import { graphPlugins, renderArrangeInputs } from './arrangeSources'
 import { LibraryHost } from './multisample/host'
 import type { SamplePack } from './multisample/types'
+import { publishInstrumentVoice, type NoteSurface } from '../harbor/surfaces'
 import { renderQuantizedClip } from '../model/quantize'
 import { emptyPatternLoopSamples, patternHitTrack, rackPlayMode, transportPatternClips } from '../model/channelRack'
 import { findStepChannel, stepPatternOwner } from '../model/stepPlugin'
@@ -935,10 +936,8 @@ export class AudioEngine {
       return
     }
     if (track?.instrument === 'library') {
-      if (track.library) {
-        this.libraryHost.note(trackId, pitch, level, when)
-        if (!hold) this.libraryHost.note(trackId, pitch, 0, when + 0.35)
-      }
+      this.voiceNote('mini', trackId, pitch, level, when)
+      if (!hold) this.voiceNote('mini', trackId, pitch, 0, when + 0.35)
       return
     }
     this.rackHost.note(trackId, pitch, level, when, slide)
@@ -954,7 +953,7 @@ export class AudioEngine {
       return
     }
     if (track?.instrument === 'library') {
-      this.libraryHost.note(trackId, pitch, 0, when)
+      this.voiceNote('mini', trackId, pitch, 0, when)
       return
     }
     this.rackHost.note(trackId, pitch, 0, when)
@@ -985,6 +984,22 @@ export class AudioEngine {
 
   holdLibraryAudio(trackId: string, samples: { id: string; sampleRate: number; channels: Float32Array[] }[]) {
     this.libraryHost.holdAudio(trackId, samples)
+  }
+
+  /**
+   * One multi-sample voice for every note surface.
+   * Keyboard, mini keys, pads, both piano rolls, Arrange, recording, Scaler, and hardware MIDI call this.
+   */
+  voiceNote(surface: NoteSurface, trackId: string, pitch: number, velocity: number, when?: number) {
+    publishInstrumentVoice({ surface, trackId, pitch, velocity, down: velocity > 0, when })
+    const track = this.project?.tracks.find((item) => item.id === trackId)
+    if (!(track?.instrument === 'library' && track.library)) return false
+    if (when == null) {
+      try { this.previewPatch(trackId, pitch, velocity > 0, velocity > 0 ? velocity : 0.8) } catch { /* the note is still routed when this device has no audio context */ }
+      return true
+    }
+    this.libraryHost.note(trackId, pitch, velocity, when)
+    return true
   }
 
   /** Audition a layered patch. `down` starts the note; a lift releases it. A loaded starter instrument plays instead. */
@@ -3625,7 +3640,12 @@ export class AudioEngine {
    * Monitor one track through its MIDI effect chain, then the instrument.
    * `shaped` is set when Scaler already turned the key into notes, so this call plays the sound and does not enter Scaler again.
    */
-  playThrough(trackId: string, pitch: number, velocity: number, fine = 0, shaped = false) {
+  playThrough(trackId: string, pitch: number, velocity: number, fine = 0, shaped = false, surface: NoteSurface = 'keyboard') {
+    const library = this.project?.tracks.find((item) => item.id === trackId)
+    if (library?.instrument === 'library' && library.library) {
+      this.voiceNote(surface, trackId, pitch, velocity)
+      return
+    }
     if (!shaped && this.project) {
       const plan = planLive(this.project, trackId, pitch, velocity)
       if (plan) {
@@ -3642,10 +3662,6 @@ export class AudioEngine {
     const ctx = this.unlock()
     const when = liveWhen(ctx.currentTime)
     const track = this.project?.tracks.find((item) => item.id === trackId)
-    if (track?.instrument === 'library' && track.library) {
-      this.previewPatch(trackId, pitch, true, velocity)
-      return
-    }
     if (samplerInsert(track)) {
       this.previewRack(trackId, pitch, false, true, velocity)
       return
@@ -3678,14 +3694,14 @@ export class AudioEngine {
     this.liveTrackId = previous
   }
 
-  releaseThrough(trackId: string, pitch: number) {
+  releaseThrough(trackId: string, pitch: number, surface: NoteSurface = 'keyboard') {
     this.holdMidi(trackId, -1)
     this.clearLive(trackId, pitch)
     const when = this.ctx?.currentTime ?? 0
     this.stopBuiltin(`${trackId}:${Math.round(pitch)}`, when)
     const track = this.project?.tracks.find((item) => item.id === trackId)
     if (track?.instrument === 'library' && track.library) {
-      this.previewPatch(trackId, pitch, false)
+      this.voiceNote(surface, trackId, pitch, 0)
       return
     }
     if (samplerInsert(track) || (track?.rack && track.instrument !== 'drum-machine')) {
@@ -4268,7 +4284,11 @@ export class AudioEngine {
   }
 
   /** Local audition only. Stays on the speaker and never enters the cue or mic path. */
-  previewPitches(pitches: number[]) {
+  previewPitches(pitches: number[], trackId?: string, surface: NoteSurface = 'roll') {
+    if (trackId && this.project?.tracks.some((track) => track.id === trackId && track.instrument === 'library' && track.library)) {
+      for (const pitch of pitches) this.voiceNote(surface, trackId, pitch, 0.8)
+      return
+    }
     const ctx = this.ctx
     const out = this.speakerGain
     if (!ctx || !out) return
@@ -4382,8 +4402,9 @@ export class AudioEngine {
       if (track.library) {
         const voiceId = track.id
         const at = Math.max(when, ctx.currentTime)
-        this.libraryHost.note(voiceId, note.pitch, note.velocity, at)
-        this.libraryHost.note(voiceId, note.pitch, 0, at + dur)
+        const surface: NoteSurface = note.id === 'mpc' ? 'pads' : 'arrange'
+        this.voiceNote(surface, voiceId, note.pitch, note.velocity, at)
+        this.voiceNote(surface, voiceId, note.pitch, 0, at + dur)
         this.previewRelease(bucket, () => this.libraryHost.release(voiceId, note.pitch, this.ctx?.currentTime ?? 0))
       }
       return

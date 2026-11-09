@@ -91,7 +91,7 @@ describe('loop load and beat machine pads', () => {
       })
       await page.getByRole('button', { name: 'Browser', exact: true }).click()
       await page.locator('[data-playlist-browser="open"]').waitFor()
-      await page.locator('.browser-tabs').getByRole('button', { name: 'Loops', exact: true }).click()
+      await page.locator('.browser-tabs').getByRole('button', { name: 'Sounds', exact: true }).click()
       await page.getByLabel('Search sounds').fill('2-AND-4 (120)')
       const row = page.locator('.sound-row', { hasText: '2-AND-4 (120)' }).first()
       await row.waitFor({ timeout: 20000 })

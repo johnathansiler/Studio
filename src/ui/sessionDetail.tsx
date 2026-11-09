@@ -160,7 +160,7 @@ export function SessionDetail({
               <Waveform store={store} trackId={track.id} clip={clip} engine={engine} />
             </>
           ) : (
-            <PianoRoll store={store} engine={engine} chrome={false} chordsOpen={chords} actionsRef={actions} />
+            <PianoRoll store={store} engine={engine} chrome={false} chordsOpen={chords} actionsRef={actions} voiceSurface="clip" />
           )}
         </div>
       )}
