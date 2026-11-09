@@ -13,6 +13,7 @@ import { writeLayout } from '../model/layoutWidth'
 import { createEmptyProject, type PluginInstance } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { MixerView } from '../ui/MixerView'
+import { addStripInsert, isInstrumentSource, stripSlotChoices } from '../ui/PluginSheet'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const css = [
@@ -211,6 +212,32 @@ describe('mixer insert order and pan', () => {
     const empty = createEmptyProject()
     expect(empty.tracks[0].pan).toBe(0)
   })
+
+  it('does not retarget an instrument add from an audio strip', () => {
+    const store = new ProjectStore()
+    const vocal = store.project.tracks.find((track) => track.type === 'audio')!
+    const keys = store.project.tracks.find((track) => track.type === 'midi')!
+    const keysBefore = keys.plugins.map((plugin) => plugin.pluginId)
+    const midiCount = store.project.tracks.filter((track) => track.type === 'midi').length
+    const choices = stripSlotChoices(store, vocal.id).map((plugin) => plugin.id)
+    for (const id of ['synth', 'steps', 'scaler', 'pads', 'drums']) {
+      expect(choices, id).not.toContain(id)
+      addStripInsert(store, vocal.id, id)
+    }
+    expect(store.track(vocal.id)!.plugins.map((plugin) => plugin.pluginId)).toEqual([])
+    expect(store.track(keys.id)!.plugins.map((plugin) => plugin.pluginId)).toEqual(keysBefore)
+    expect(store.project.tracks.filter((track) => track.type === 'midi')).toHaveLength(midiCount)
+    expect(stripSlotChoices(store, keys.id).map((plugin) => plugin.id)).toEqual(expect.arrayContaining(['synth', 'steps']))
+    addStripInsert(store, keys.id, 'synth')
+    expect(store.track(keys.id)!.plugins.some((plugin) => plugin.pluginId === 'synth')).toBe(true)
+    expect(store.track(vocal.id)!.plugins.some((plugin) => plugin.pluginId === 'synth')).toBe(false)
+    expect(isInstrumentSource({ pluginId: 'steps' })).toBe(true)
+    for (const id of ['synth', 'sampler', 'scaler', 'pads', 'looper', 'eq', 'compressor']) {
+      expect(isInstrumentSource({ pluginId: id }), id).toBe(false)
+    }
+    addStripInsert(store, vocal.id, 'eq')
+    expect(store.track(vocal.id)!.plugins.map((plugin) => plugin.pluginId)).toEqual(['eq'])
+  })
 })
 
 const viewports = [
@@ -378,6 +405,12 @@ describe('mixer insert slots and pan knob', () => {
         })
         expect(flow.dir, where).toBe('column')
         expect(['auto', 'scroll'], where).toContain(flow.overflowY)
+        if (viewport.height < 500 && viewport.width > viewport.height) {
+          const cue = await page.locator('.strip', { has: page.locator('h3', { hasText: 'Vocal' }) }).locator('.strip-rack').evaluate((node) => getComputedStyle(node, '::before').content)
+          expect(cue, where).not.toBe('none')
+          const single = await page.locator('.strip', { has: page.locator('h3', { hasText: 'Audio 1' }) }).locator('.strip-rack').evaluate((node) => getComputedStyle(node, '::before').content)
+          expect(single, where).toBe('none')
+        }
         const rackBottom = vocal.slots[0].box.top + 40
         expect(rackBottom, where).toBeLessThanOrEqual(vocal.fader.top + 1)
         expect(vocal.pan, where).toBeTruthy()

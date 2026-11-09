@@ -508,12 +508,31 @@ export function clipInsertName(name: string, column: number) {
   return `${name.slice(0, Math.max(1, chars - 1))}…`
 }
 
-/** Step Sequencer and instruments are sources. They stay in the saved list and are not serial audio effects. */
+/**
+ * The live insert worklet drops only the Step Sequencer.
+ * Synth, sampler, Scaler, and Beat Machine stay in that serial chain, so they are not labeled as skipped sources.
+ */
 export function isInstrumentSource(plugin: { pluginId: string; params?: Record<string, number> }) {
-  if (plugin.pluginId === 'steps' || plugin.pluginId === 'looper' || plugin.pluginId === 'synth' || plugin.pluginId === 'scaler') return true
-  if (plugin.pluginId === 'sampler' || insertsBeatMachine(plugin.pluginId) || pluginIsBeatMachine(plugin)) return true
-  if (INSTRUMENT_IDS.has(plugin.pluginId)) return true
-  return false
+  return plugin.pluginId === 'steps'
+}
+
+/** These choices retarget through addPlugin when the clicked strip is not a MIDI track. */
+const RETARGET_IDS = new Set(['steps', 'scaler', 'synth'])
+
+export function stripCanHost(store: ProjectStore, trackId: string | 'master', pluginId: string) {
+  if (!RETARGET_IDS.has(pluginId) && !insertsBeatMachine(pluginId)) return true
+  const track = trackId === 'master' ? null : store.track(trackId)
+  return track?.type === 'midi'
+}
+
+export function stripSlotChoices(store: ProjectStore, trackId: string | 'master') {
+  return insertMenuChoices(store, trackId).filter((plugin) => stripCanHost(store, trackId, plugin.id))
+}
+
+/** Strip Add. Refuses a choice that would land on a different track. */
+export function addStripInsert(store: ProjectStore, trackId: string | 'master', value: string) {
+  if (!value || !stripCanHost(store, trackId, value)) return
+  addInsert(store, trackId, value)
 }
 
 function audioPlace(index: number, count: number) {
@@ -524,7 +543,7 @@ function audioPlace(index: number, count: number) {
 }
 
 function sourcePlace(name: string, savedIndex: number) {
-  return `${name}. Instrument source, saved at position ${savedIndex + 1}. This slot does not process in series.`
+  return `${name}. Instrument source, saved at position ${savedIndex + 1}. The audio chain skips this slot. It does not process in series.`
 }
 
 /** Named insert slots. Top is first in the audio chain. One empty slot adds on this track. */
@@ -586,7 +605,7 @@ export function StripInserts({ store, trackId, column }: { store: ProjectStore; 
 function PluginPicker({ store, trackId, slot = false, order = 0 }: { store: ProjectStore; trackId: string | 'master'; roomy?: boolean; slot?: boolean; order?: number }) {
   const [open, setOpen] = useState(false)
   const button = useRef<HTMLButtonElement>(null)
-  const choices = insertMenuChoices(store, trackId)
+  const choices = slot ? stripSlotChoices(store, trackId) : insertMenuChoices(store, trackId)
   const name = trackId === 'master' ? 'Master' : store.track(trackId)?.name ?? 'Track'
   const addLabel = `Add insert on ${name}. It is placed at the bottom and processes last, then the fader.`
   return (
@@ -619,7 +638,8 @@ function PluginPicker({ store, trackId, slot = false, order = 0 }: { store: Proj
               onClick={(event) => {
                 event.stopPropagation()
                 if (trackId !== 'master') store.selectTrack(trackId)
-                addInsert(store, trackId, plugin.id)
+                if (slot) addStripInsert(store, trackId, plugin.id)
+                else addInsert(store, trackId, plugin.id)
                 setOpen(false)
               }}
             >

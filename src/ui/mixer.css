@@ -901,9 +901,36 @@
 .shell .mixer-view.mixer-console[data-short] .strip-head { grid-row: 1; }
 .shell .mixer-view.mixer-console[data-short] .strip-rack {
   grid-row: 2;
+  position: relative;
   height: 40px;
   min-height: 40px;
   max-height: 40px;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip-rack:has(.strip-insert:nth-child(2))::before {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 3px;
+  z-index: 3;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid #b7f0cb;
+  pointer-events: none;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip-rack:has(.strip-insert:nth-child(2))::after {
+  content: '';
+  position: absolute;
+  left: 1px;
+  right: 12px;
+  bottom: 0;
+  z-index: 2;
+  height: 14px;
+  background: linear-gradient(to bottom, rgba(18, 26, 22, 0), #121a16 80%);
+  pointer-events: none;
 }
 
 .shell .mixer-view.mixer-console[data-short] .strip-inserts {
@@ -915,6 +942,8 @@
   min-height: 40px;
   max-height: 40px;
   gap: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: #73c48f #121a16;
 }
 
 .shell .mixer-view.mixer-console[data-short] .strip-insert {
