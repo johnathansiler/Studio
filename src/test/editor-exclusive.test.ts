@@ -330,8 +330,8 @@ describe('editors, close, and header meters in the app', () => {
         expect(closeBox!.width, label).toBeLessThan(160)
         expect(Math.round(closeBox!.height), label).toBe(40)
         expect(closePaint.text, label).toBe('Close')
-        expect(closePaint.background, label).toBe('rgb(20, 28, 24)')
-        expect(closePaint.color, label).toBe('rgb(197, 210, 201)')
+        expect(closePaint.background, label).toBe('rgb(26, 36, 32)')
+        expect(closePaint.color, label).toBe('rgb(244, 247, 244)')
         await close.click()
         await page.locator('[data-pads="plugin"]').waitFor({ state: 'detached' })
 

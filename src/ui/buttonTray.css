@@ -1,0 +1,642 @@
+/* One physical button, nestled in a recessed tray.
+   Loaded last so this face wins over older pills and flat tabs.
+   Knobs, faders, pads, piano keys, and step cells keep their own shapes. */
+
+.btn-tray,
+.shell .views,
+.shell .transport.simple .t-main,
+.shell .history-btns,
+.shell .browser-tabs,
+.shell .clip-actions,
+.shell .sound-chips,
+.shell .sound-head,
+.shell .sound-filters,
+.shell .mix-chips,
+.shell .preset-dock,
+.shell .scaler-tools,
+.shell .scaler-pills,
+.shell .scaler-transport,
+.shell .plugin-transport,
+.shell .hw-transport,
+.shell .kit-toggles,
+.shell .tune-tabs,
+.shell .tune-tools,
+.shell .tune-actions,
+.shell .tune-notes,
+.shell .me-modes,
+.shell .tool-row,
+.shell .inline-choices,
+.shell .unstuck-tabs,
+.shell .unstuck-actions,
+.shell .song-pills,
+.shell .auto-mode,
+.shell .call-pills,
+.shell .side-tabs,
+.shell .patch-tabs,
+.shell .rack-bar,
+.shell .menu-group,
+.anchored-menu.btn-tray,
+.song-sheet .song-pills,
+.song-sheet .auto-mode {
+  background-color: var(--tray-bg);
+  background-image: none;
+  border: 1px solid #070b09;
+  border-radius: var(--tray-radius);
+  box-shadow: var(--tray-shadow);
+  gap: var(--tray-gap);
+  padding: var(--tray-pad);
+}
+
+.btn-tray,
+.shell .transport.simple .t-main.btn-tray,
+.shell .history-btns,
+.shell .browser-tabs,
+.shell .clip-actions.btn-tray,
+.shell .sound-chips,
+.shell .mix-chips,
+.shell .preset-dock,
+.shell .scaler-tools,
+.shell .scaler-pills,
+.shell .scaler-transport,
+.shell .plugin-transport,
+.shell .hw-transport,
+.shell .kit-toggles,
+.shell .tune-tabs,
+.shell .tune-tools,
+.shell .tune-actions,
+.shell .tune-notes,
+.shell .unstuck-tabs,
+.shell .unstuck-actions,
+.shell .song-pills,
+.shell .call-pills,
+.shell .menu-group.btn-tray,
+.anchored-menu.btn-tray {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: flex-start;
+  width: max-content;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.btn-tray-equal,
+.shell .views.btn-tray-equal {
+  display: flex;
+  flex-wrap: nowrap;
+  width: 100%;
+  max-width: 100%;
+}
+
+.shell .views.btn-tray-equal > button {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+}
+
+/* Grids stay grids. Only the well and the button face change. */
+.shell .mpc-banks,
+.shell .pad-actions,
+.shell .pad-modes,
+.mpc-banks,
+.pad-actions,
+.pad-modes {
+  background-color: var(--tray-bg);
+  border: 1px solid #070b09;
+  border-radius: var(--tray-radius);
+  box-shadow: var(--tray-shadow);
+  gap: var(--tray-gap);
+  padding: var(--tray-pad);
+}
+
+.shell .transport.simple .t-main.btn-tray {
+  flex: 0 1 auto;
+  overflow-x: auto;
+}
+
+.shell .preset-dock {
+  display: flex;
+  flex-wrap: nowrap;
+  width: 100%;
+  max-width: 100%;
+  flex: 1 1 auto;
+}
+
+.anchored-menu.preset-menu .preset-list .btn-quiet {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.select-hint-host {
+  bottom: calc(96px + env(safe-area-inset-bottom));
+}
+
+.shell .browser-tabs.btn-tray {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.shell .browser-tabs .browser-chip-scroll {
+  display: contents;
+}
+
+.pad-led,
+.shell .pad-modes .pad-led {
+  background: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.pad-led-face {
+  border-radius: var(--btn-radius) !important;
+}
+
+.shell .clip-actions.btn-tray,
+.shell.phone:not(.land) .command-strip.tucked .clip-actions.btn-tray,
+.shell.fold .command-strip.tucked .clip-actions.btn-tray {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  width: max-content;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.shell .command-strip .arrange-panels,
+.shell .clip-actions .arrange-panels,
+.shell .clip-actions .snap-control.inline,
+.shell .transport-drawer .metro-combo,
+.anchored-menu.transport-drawer .metro-combo {
+  display: contents;
+}
+
+.shell .menu-group.btn-tray {
+  flex-direction: row;
+  align-self: flex-start;
+}
+
+.shell .track-controls,
+.shell.phone:not(.land) .arrange .track-controls,
+.shell .arrange .track-controls {
+  background-color: var(--tray-bg);
+  border: 1px solid #070b09;
+  border-radius: 14px;
+  box-shadow: var(--tray-shadow);
+  gap: 4px;
+  padding: 3px;
+  width: max-content;
+  max-width: 100%;
+}
+
+.shell .menu-group .menu-heading,
+.menu-group .menu-heading {
+  flex: 1 0 100%;
+  margin: 0 2px 2px;
+}
+
+.anchored-menu.btn-tray:not([data-screen-overlay]) {
+  align-items: flex-start;
+}
+
+.anchored-menu.btn-tray:has(.menu-group) {
+  background: transparent;
+  background-image: none;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  gap: 6px;
+}
+
+.anchored-menu.btn-tray[data-screen-overlay],
+[data-screen-overlay].btn-tray {
+  width: auto;
+  max-width: none;
+  border-radius: 0;
+  background-color: #141c18;
+  box-shadow: none;
+}
+
+:is(
+  .btn-tray,
+  .views,
+  .t-main,
+  .browser-tabs,
+  .browser-chip-scroll,
+  .clip-actions,
+  .arrange-panels,
+  .history-btns,
+  .menu-group,
+  .anchored-menu,
+  .shell-menu,
+  .mix-chips,
+  .mix-pills,
+  .link-row,
+  .sound-chips,
+  .sound-filters,
+  .sound-head,
+  .sound-actions,
+  .preset-dock,
+  .scaler-tools,
+  .scaler-pills,
+  .scaler-transport,
+  .plugin-transport,
+  .hw-transport,
+  .kit-toggles,
+  .tune-tabs,
+  .tune-tools,
+  .tune-actions,
+  .tune-notes,
+  .tune-step,
+  .tune-ref,
+  .me-modes,
+  .me-bar,
+  .scale-bar,
+  .tool-row,
+  .inline-choices,
+  .unstuck-tabs,
+  .unstuck-actions,
+  .song-pills,
+  .auto-mode,
+  .rec-bar,
+  .call-pills,
+  .call-controls,
+  .pad-actions,
+  .pad-modes,
+  .mpc-banks,
+  .note-repeat-row,
+  .note-repeat-rate,
+  .plugin-page-tabs,
+  .rack-bar,
+  .side-tabs,
+  .patch-tabs,
+  .level-bar,
+  .inserts
+) :is(button, .bpm-readout):not(:is([role="slider"], .mpc-pad, .loop-grip, .mini-pad, .sound-dismiss, .guide-scrim, .browser-scrim, .song-scrim)),
+:is(
+  .btn-primary,
+  .btn-secondary,
+  .btn-quiet,
+  .btn-tertiary,
+  .text-btn,
+  .t-btn,
+  .menu-btn,
+  .cap-btn,
+  .history-btn,
+  .icon-btn,
+  .add-track-btn,
+  .sound-add,
+  .sound-close,
+  .browser-close,
+  .mpc-close,
+  .mpc-keyboard,
+  .inst-close,
+  .step-close,
+  .scaler-close,
+  .song-close,
+  .guide-x,
+  .unstuck-btn,
+  .filter-choice,
+  .ch-row,
+  .sheet-row,
+  .guide-choice,
+  .add-choice,
+  .hw-key,
+  .kit-toggle,
+  .kit-fold,
+  .snap-toggle,
+  .beat-open,
+  .piano-open,
+  button.mini,
+  button.overlay-close,
+  .hint-close
+):not(:is([role="slider"], .mpc-pad, .mini-pad, .loop-grip, .sound-dismiss, .guide-scrim, .browser-scrim, .song-scrim)) {
+  border-radius: var(--btn-radius) !important;
+  border-style: solid !important;
+  border-width: 1px !important;
+  border-color: var(--btn-raised-border) !important;
+  background-color: var(--btn-raised-bg) !important;
+  background-image: var(--btn-raised-face) !important;
+  box-shadow: var(--btn-raised-shadow) !important;
+  color: var(--btn-raised-ink) !important;
+  font-weight: 680;
+}
+
+.shell .views > button,
+.shell .transport .t-btn,
+.shell .transport .bpm-readout,
+.shell .menu-btn,
+.shell .history-btn,
+.shell .browser-tabs button,
+.shell .clip-actions button,
+.shell .clip-actions .cap-btn,
+.shell .clip-actions .snap-toggle,
+.shell .sound-chips button,
+.shell .sound-add,
+.shell .mix-chips button,
+.shell .plugin-transport button,
+.shell .hw-transport button,
+.shell .tune-tabs button,
+.shell .tune-tools button,
+.shell .tune-actions button,
+.shell .preset-dock > button,
+.shell .scaler-tools > button,
+.shell .scaler-transport button,
+.anchored-menu button:not(.guide-scrim) {
+  min-height: var(--btn-min);
+  min-width: var(--btn-min);
+}
+
+.shell .topbar .views > button {
+  height: 40px;
+  min-height: 40px;
+  max-height: none;
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.shell.fold .views > button {
+  height: 44px;
+  min-height: 44px;
+}
+
+.shell.phone .views,
+.shell.fold .views,
+.shell .views {
+  gap: var(--tray-gap);
+  padding: var(--tray-pad);
+}
+
+.shell.phone.land .views {
+  padding: 0;
+  gap: 4px;
+  height: 40px;
+  min-height: 40px;
+}
+
+.shell.phone.land .views > button {
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}
+
+.shell .transport.simple .t-main > .t-btn,
+.shell .transport.simple .t-main > .tempo-cluster,
+.shell.phone:not(.land) .transport.simple .t-main > .t-btn,
+.shell.phone:not(.land) .transport.simple .t-main > .tempo-cluster,
+.shell.fold .transport.simple .t-main > .t-btn,
+.shell.fold .transport.simple .t-main > .tempo-cluster,
+.shell.phone.land .transport.simple .t-main > .t-btn,
+.shell.phone.land .transport.simple .t-main > .tempo-cluster {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: max(40px, max-content);
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  padding: 0 10px;
+}
+
+.shell .transport.simple .t-main .bpm-readout {
+  width: auto;
+  min-width: 56px;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  padding: 0 8px;
+}
+
+.shell.phone:not(.land) .command-strip.tucked .clip-actions.btn-tray > .tool,
+.shell.phone:not(.land) .command-strip.tucked .clip-actions.btn-tray .cap-btn,
+.shell.phone:not(.land) .command-strip.tucked .clip-actions.btn-tray .snap-toggle,
+.shell.fold .command-strip.tucked .clip-actions.btn-tray > .tool,
+.shell.fold .command-strip.tucked .clip-actions.btn-tray .cap-btn,
+.shell.fold .command-strip.tucked .clip-actions.btn-tray .snap-toggle,
+.shell .clip-actions.btn-tray > .tool,
+.shell .clip-actions.btn-tray .cap-btn,
+.shell .clip-actions.btn-tray .snap-toggle,
+.shell .browser-tabs button,
+.shell .mix-chips button,
+.shell .sound-chips button,
+.shell .tune-tools button,
+.shell .tune-tabs button,
+.shell .tune-actions button,
+.shell .plugin-transport button,
+.shell .scaler-tools > button,
+.anchored-menu:not([data-screen-overlay]):not(.preset-menu) button,
+#shell-menu button,
+.shell-menu button,
+.menu-group button {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 100%;
+  min-width: max(40px, max-content);
+}
+
+#shell-menu button,
+.shell-menu button,
+.menu-group button,
+.anchored-menu .ch-row,
+.anchored-menu .guide-choice,
+.anchored-menu .add-choice,
+.anchored-menu .sheet-row {
+  align-self: flex-start;
+  height: auto;
+  min-height: var(--btn-min);
+  max-width: min(280px, 100%);
+  white-space: normal;
+}
+
+.shell .views > button.active,
+.shell .views > button.collab-tab.active,
+:is(
+  .btn-tray,
+  .views,
+  .t-main,
+  .browser-tabs,
+  .clip-actions,
+  .mix-chips,
+  .sound-chips,
+  .tune-tabs,
+  .tune-tools,
+  .tune-actions,
+  .tune-notes,
+  .plugin-transport,
+  .hw-transport,
+  .scaler-tools,
+  .scaler-pills,
+  .me-modes,
+  .tool-row,
+  .inline-choices,
+  .song-pills,
+  .auto-mode,
+  .pad-actions,
+  .mpc-banks,
+  .note-repeat-row,
+  .anchored-menu,
+  .menu-group,
+  .preset-dock,
+  .unstuck-tabs
+) :is(button, .bpm-readout).on:not(.rec):not(.play):not(.on-m):not(.on-s):not(.on-r):not(.mute):not(.arm):not(.bypass-toggle),
+:is(button, .bpm-readout)[aria-pressed="true"]:not(.rec):not(.play):not(.on-m):not(.on-s):not(.on-r):not(.mini):not(.bypass-toggle):not([role="slider"]):not(.mpc-pad),
+.shell .menu-btn.on,
+.shell .text-btn.on,
+.shell .cap-btn.on,
+.shell .snap-toggle.on,
+.shell .tool.on,
+.btn-quiet.on,
+.btn-secondary.on,
+.btn-tertiary.on {
+  background-color: var(--btn-on-bg) !important;
+  background-image: var(--btn-on-face) !important;
+  color: var(--btn-on-ink) !important;
+  border-color: transparent !important;
+  box-shadow: var(--btn-on-shadow) !important;
+}
+
+.shell .transport .t-btn.play:not(.on),
+.shell .plugin-transport button[aria-label="Play"]:not(.on),
+.shell .hw-transport button[aria-label="Play"]:not(.on) {
+  background-color: #1f6b43 !important;
+  background-image: var(--btn-primary-face) !important;
+  color: #e9fff2 !important;
+  border-color: transparent !important;
+  box-shadow: var(--btn-raised-shadow) !important;
+}
+
+.shell .transport .t-btn.play.on,
+.shell .plugin-transport button[aria-label="Play"].on,
+.shell .hw-transport button[aria-label="Play"].on {
+  background-color: var(--btn-on-bg) !important;
+  background-image: var(--btn-on-face) !important;
+  color: var(--btn-on-ink) !important;
+  border-color: transparent !important;
+  box-shadow: var(--btn-on-shadow) !important;
+}
+
+.shell .transport .t-btn.rec,
+.shell .plugin-transport button[aria-label="Record"],
+.shell .hw-transport button[aria-label="Record"],
+.shell .hw-key.rec:not(.on),
+.shell .mpc .pad-key.rec:not(.on) {
+  background-color: #6a2a2a !important;
+  background-image: var(--btn-rec-face) !important;
+  color: #ffe8e8 !important;
+  border-color: transparent !important;
+  box-shadow: var(--btn-raised-shadow) !important;
+}
+
+.shell .transport .t-btn.rec.on,
+.shell .plugin-transport button[aria-label="Record"].on,
+.shell .hw-transport button[aria-label="Record"].on,
+.shell .hw-key.rec.on,
+.shell .mpc .pad-key.rec.on {
+  background-color: #e45454 !important;
+  background-image: var(--btn-rec-face) !important;
+  color: #fff6f6 !important;
+  border-color: transparent !important;
+  box-shadow: var(--btn-raised-shadow), 0 0 14px rgba(228, 84, 84, 0.45) !important;
+}
+
+.shell .mini.on-m,
+.shell .strip .mini.on-m,
+.shell .sl-flags button.mute.on,
+.shell button.mute.on {
+  background-color: var(--btn-toggle-mute-bg) !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(0, 0, 0, 0.12)) !important;
+  color: var(--btn-toggle-mute-ink) !important;
+  border-color: transparent !important;
+  box-shadow: var(--btn-raised-shadow) !important;
+}
+
+.shell .mini.on-s,
+.shell .strip .mini.on-s,
+.shell .sl-flags button.on:not(.mute):not(.arm) {
+  background-color: var(--btn-toggle-solo-bg) !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.32), rgba(0, 0, 0, 0.14)) !important;
+  color: var(--btn-toggle-solo-ink) !important;
+  border-color: transparent !important;
+  box-shadow: var(--btn-raised-shadow) !important;
+}
+
+.shell .mini.on-r,
+.shell .strip .mini.on-r,
+.shell .sl-flags button.arm.on,
+.shell .pad-key.arm.on {
+  background-color: var(--btn-toggle-arm-bg) !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(0, 0, 0, 0.18)) !important;
+  color: var(--btn-toggle-arm-ink) !important;
+  border-color: transparent !important;
+  box-shadow: var(--btn-raised-shadow) !important;
+}
+
+.shell .tune-actions .bypass-toggle.lit,
+.tune-actions .bypass-toggle.lit {
+  background-color: #5c4014 !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(0, 0, 0, 0.16)) !important;
+  color: #fff4dd !important;
+  border-color: transparent !important;
+  box-shadow: var(--btn-raised-shadow) !important;
+}
+
+.shell .add-track-btn,
+.shell .text-btn.primary,
+.btn-primary {
+  background-color: var(--btn-on-bg) !important;
+  background-image: var(--btn-on-face) !important;
+  color: var(--btn-on-ink) !important;
+  border-color: transparent !important;
+  box-shadow: var(--btn-raised-shadow) !important;
+}
+
+.shell .arrange .pl-head .beat-open,
+.shell .arrange .pl-head .track-controls .mini {
+  border-radius: var(--btn-radius) !important;
+  box-shadow: var(--btn-raised-shadow) !important;
+}
+
+.shell .arrange .pl-head .beat-open {
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  height: 40px;
+  padding: 0;
+}
+
+.mpc .note-repeat-hold.down,
+.mpc .note-repeat-hold:active,
+.shell .mpc .note-repeat-row .note-repeat-hold.down,
+.shell .mpc .note-repeat-row .note-repeat-hold:active {
+  background-color: #141816 !important;
+  background-image: linear-gradient(180deg, #1c2420, #101412) !important;
+  color: #fff !important;
+  border-color: #9ec8ff !important;
+  box-shadow: inset 0 3px 6px rgba(0, 0, 0, 0.65), var(--btn-raised-shadow) !important;
+}
+
+.shell .mpc-banks .hw-key,
+.shell .pad-actions .pad-key,
+.shell .pad-modes .hw-key,
+.mpc-banks .hw-key,
+.pad-actions .pad-key,
+.pad-modes .hw-key {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: initial;
+}
+
+@media (hover: hover) {
+  .shell .views > button:hover:not(.active),
+  .shell .transport .t-btn:hover:not(.play):not(.rec),
+  .shell .menu-btn:hover,
+  .shell .browser-tabs button:hover:not(.on) {
+    box-shadow: var(--btn-raised-shadow), 0 3px 8px rgba(0, 0, 0, 0.35) !important;
+  }
+}

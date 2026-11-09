@@ -240,7 +240,7 @@ export function PlaylistBrowser({
       onPointerDown={sheet ? (event) => event.stopPropagation() : undefined}
     >
       {sheet && <SheetGrab label="Resize browser. Drag up or down." />}
-      <div className="browser-tabs">
+      <div className="browser-tabs btn-tray">
         <div className="browser-chip-scroll" role="tablist" aria-label="Browser">
           {TABS.map((item) => (
             <button key={item.id} type="button" className={tab === item.id ? 'on' : ''} title={item.hint} aria-pressed={tab === item.id} onClick={() => onTab(item.id)}>

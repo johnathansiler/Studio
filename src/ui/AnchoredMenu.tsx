@@ -137,7 +137,7 @@ export function AnchoredMenu({
     <div
       ref={menuRef}
       id={id}
-      className={['anchored-menu', className].filter(Boolean).join(' ')}
+      className={['anchored-menu', 'btn-tray', className].filter(Boolean).join(' ')}
       role="menu"
       aria-label={label}
       data-side={style?.side ?? (prefer === 'up' ? 'up' : 'down')}

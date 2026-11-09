@@ -1,3 +1,4 @@
+import { ButtonTray } from './ButtonTray'
 import { copyOf, described, studioViewTabs, VIEW_COPY } from './chrome'
 
 export function ViewSwitcher({
@@ -16,7 +17,7 @@ export function ViewSwitcher({
   onCollab: () => void
 }) {
   return (
-    <div className="views">
+    <ButtonTray className="views" equal label="Views">
       <button
         type="button"
         className={`collab-tab ${collabShown ? 'active' : ''}`}
@@ -41,6 +42,6 @@ export function ViewSwitcher({
           </button>
         )
       })}
-    </div>
+    </ButtonTray>
   )
 }

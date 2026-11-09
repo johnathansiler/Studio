@@ -95,7 +95,7 @@ export function ToolBar({
       <div className="timeline-tools tucked" role="toolbar" aria-label="Tools" data-active-tool={value} data-tool-context={context}>
         {value !== 'select' && <span className="tool-now" role="status" aria-live="polite">{chip}</span>}
         <SelectHint active={value === 'select' && context === 'arrange'} />
-        <div className="clip-actions">
+        <div className="clip-actions btn-tray">
         <button
           ref={toolButton}
           type="button"

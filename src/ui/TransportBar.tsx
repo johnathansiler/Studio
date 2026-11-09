@@ -465,7 +465,7 @@ export function TransportBar({
     <div className="transport simple">
       <AutomationFollow store={store} engine={engine} />
       {inSession && syncLabel ? <span className="sync-pill">{syncLabel}</span> : null}
-      <div className="t-main">
+      <div className="t-main btn-tray">
         <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>
           <span className="t-word">Start</span>
         </TipButton>

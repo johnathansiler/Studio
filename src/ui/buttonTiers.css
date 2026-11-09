@@ -5,7 +5,32 @@
 
 :root {
   --btn-min: 40px;
-  --btn-radius: 10px;
+  --btn-radius: 12px;
+  --tray-bg: #0c110f;
+  --tray-radius: 18px;
+  --tray-pad: 5px;
+  --tray-gap: 5px;
+  --tray-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.72),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.55);
+  --btn-raised-bg: #1a2420;
+  --btn-raised-ink: #f4f7f4;
+  --btn-raised-border: rgba(255, 255, 255, 0.14);
+  --btn-raised-face: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.05) 40%, rgba(0, 0, 0, 0.28) 100%);
+  --btn-raised-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+    0 1px 0 rgba(0, 0, 0, 0.35),
+    0 2px 4px rgba(0, 0, 0, 0.42);
+  --btn-on-bg: #9ae6c4;
+  --btn-on-ink: #102117;
+  --btn-on-face: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.08) 42%, rgba(0, 0, 0, 0.08));
+  --btn-on-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.65),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.16),
+    0 0 16px rgba(154, 230, 196, 0.55),
+    0 2px 4px rgba(0, 0, 0, 0.35);
   --btn-bevel:
     inset 0 1px 0 rgba(255, 255, 255, 0.32),
     inset 0 -2px 0 rgba(0, 0, 0, 0.48),
@@ -31,9 +56,9 @@
   --btn-quiet-border: #2c3b33;
   --btn-quiet-face: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.32));
 
-  --btn-toggle-bg: #2a6846;
-  --btn-toggle-ink: #f3fff8;
-  --btn-toggle-border: #8ed4ab;
+  --btn-toggle-bg: var(--btn-on-bg);
+  --btn-toggle-ink: var(--btn-on-ink);
+  --btn-toggle-border: transparent;
   --btn-toggle-mute-bg: #8e9aa6;
   --btn-toggle-mute-ink: #141816;
   --btn-toggle-solo-bg: #b8923a;
@@ -89,7 +114,7 @@
   background-image: var(--btn-quiet-face);
   color: var(--btn-quiet-ink);
   border-color: var(--btn-quiet-border);
-  border-radius: 999px;
+  border-radius: var(--btn-radius);
   font-weight: 640;
   font-size: 12px;
   padding: 0 10px;
@@ -230,7 +255,7 @@
   min-height: var(--btn-min);
   height: var(--btn-min);
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--btn-radius);
   border: 1px solid var(--btn-quiet-border);
   background-color: var(--btn-quiet-bg);
   background-image: var(--btn-quiet-face);
@@ -492,7 +517,7 @@
   min-width: var(--btn-min);
   height: var(--btn-min);
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--btn-radius);
   border: 1px solid var(--btn-quiet-border);
   background: var(--btn-quiet-face), var(--btn-quiet-bg);
   color: var(--btn-quiet-ink);
@@ -592,11 +617,11 @@
 }
 .shell .views button.active,
 .shell .views button.collab-tab.active {
-  background-color: var(--accent);
-  background-image: var(--face);
-  color: var(--accent-ink);
+  background-color: var(--btn-on-bg);
+  background-image: var(--btn-on-face);
+  color: var(--btn-on-ink);
   border-color: transparent;
-  box-shadow: var(--pressed), var(--glow);
+  box-shadow: var(--btn-on-shadow);
   font-weight: 740;
 }
 

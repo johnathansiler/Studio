@@ -10,7 +10,7 @@ export function HistoryButtons({
   onRedo: () => void
 }) {
   return (
-    <div className="history-btns" role="group" aria-label="History">
+    <div className="history-btns btn-tray" role="group" aria-label="History">
       <button type="button" className="text-btn history-btn" data-history="undo" title="Undo" aria-label="Undo" disabled={!canUndo} onClick={onUndo}>
         <span className="history-icon" aria-hidden>↶</span>
         <span className="history-word">Undo</span>

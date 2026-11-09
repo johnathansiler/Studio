@@ -141,7 +141,7 @@ function expectFullRow(geometry: Awaited<ReturnType<typeof tabGeometry>>, minHei
     expect(box.shadow).not.toBe('none')
   }
   const active = geometry.boxes.find((box) => box.label === 'Arrange')
-  expect(active?.background).toBe('rgb(115, 196, 143)')
+  expect(active?.background).toBe('rgb(154, 230, 196)')
 }
 
 async function assertOverlay(page: Page) {
@@ -263,7 +263,7 @@ describe('screen overlays leave the view tabs free', () => {
             expect(box.width).toBeGreaterThan(70)
             expect(box.shadow).not.toBe('none')
           }
-          expect(tabs.boxes.find((box) => box.label === 'Arrange')?.background).toBe('rgb(115, 196, 143)')
+          expect(tabs.boxes.find((box) => box.label === 'Arrange')?.background).toBe('rgb(154, 230, 196)')
         } else {
           expectFullRow(tabs, layout.name === 'unfolded' ? 44 : 40)
           expect(tabs.boxes.every((box) => box.fontSize === '13px')).toBe(true)
