@@ -3,6 +3,7 @@ import { AnchoredMenu } from './AnchoredMenu'
 import type { AudioEngine } from '../audio/engine'
 import { formatLoopReadout } from '../model/loopEdit'
 import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, shouldOpenExactTempo, type TapMemory, type TapSource } from '../model/tap'
+import { tempoDragIntent, tempoFromDrag } from '../model/tempoDrag'
 import { formatMapBars } from '../model/tempoMap'
 import { countInBarsOf, countInCaption, formatTimecode } from '../model/time'
 import { recordButtonOn } from '../model/transport'
@@ -68,7 +69,16 @@ export function TransportBar({
   const written = useRef<number | null>(null)
   const shown = useRef(project.tempo)
   const draftRef = useRef<string | null>(null)
-  const drag = useRef<{ y: number; origin: number; moved: boolean } | null>(null)
+  const drag = useRef<{
+    id: number
+    x: number
+    y: number
+    at: number
+    origin: number
+    mode: 'pending' | 'drag' | 'ignore'
+    tap: boolean
+    stopScroll: (() => void) | null
+  } | null>(null)
   const suppressFocus = useRef(false)
   const tapping = useRef(false)
   const flashTimer = useRef(0)
@@ -180,6 +190,8 @@ export function TransportBar({
   useEffect(() => () => {
     window.clearTimeout(flashTimer.current)
     window.clearTimeout(editTimer.current)
+    drag.current?.stopScroll?.()
+    delete document.documentElement.dataset.tempoDrag
     store.endTempoGroup()
   }, [store])
 
@@ -204,8 +216,92 @@ export function TransportBar({
     return () => node.removeEventListener('wheel', onWheel)
   }, [store])
 
+  function endTempoScroll(state: { stopScroll: (() => void) | null } | null) {
+    state?.stopScroll?.()
+    if (state) state.stopScroll = null
+    delete document.documentElement.dataset.tempoDrag
+  }
+
+  function onTempoDown(event: ReactPointerEvent, tap: boolean) {
+    if (store.remoteFollow || event.button !== 0) return
+    endTempoScroll(drag.current)
+    const node = event.currentTarget
+    const pointerId = event.pointerId
+    const state = {
+      id: pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      at: performance.now(),
+      origin: typedBase() ?? shown.current,
+      mode: 'pending' as 'pending' | 'drag' | 'ignore',
+      tap,
+      stopScroll: null as (() => void) | null,
+    }
+    drag.current = state
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return
+      if (state.mode === 'ignore' || store.remoteFollow) return
+      const dx = ev.clientX - state.x
+      const dy = state.y - ev.clientY
+      if (state.mode === 'pending') {
+        const intent = tempoDragIntent(dx, dy)
+        if (intent === 'pending') return
+        if (intent === 'scroll') {
+          state.mode = 'ignore'
+          return
+        }
+        state.mode = 'drag'
+        window.clearTimeout(editTimer.current)
+        memory.current = emptyTap()
+        store.endTempoGroup()
+        suppressFocus.current = true
+        draftRef.current = null
+        setDraft(null)
+        try { node.setPointerCapture(pointerId) } catch { /* The pointer can already be gone. */ }
+        if (node instanceof HTMLElement) node.blur()
+        document.documentElement.dataset.tempoDrag = '1'
+        const block = (touch: Event) => { if (touch.cancelable) touch.preventDefault() }
+        window.addEventListener('touchmove', block, { passive: false })
+        const previous = state.stopScroll
+        state.stopScroll = () => {
+          previous?.()
+          window.removeEventListener('touchmove', block)
+        }
+      }
+      if (ev.cancelable) ev.preventDefault()
+      publish(tempoFromDrag(state.origin, dy), true)
+    }
+    const up = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      if (drag.current !== state) return
+      drag.current = null
+      endTempoScroll(state)
+      if (state.mode === 'drag') {
+        if (ev.type === 'pointercancel') publish(state.origin, true)
+        store.endTempoGroup()
+        window.setTimeout(() => { suppressFocus.current = false }, 0)
+        return
+      }
+      if (ev.type === 'pointercancel' || state.mode === 'ignore' || !state.tap) return
+      pulse()
+      armExactTempo(applyTap(state.at, 'pointer'))
+      memory.current = noteTapRelease(memory.current, performance.now())
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    state.stopScroll = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+  }
+
   function commitDraft(text: string) {
-    if (tapping.current || drag.current?.moved || suppressFocus.current) return
+    if (tapping.current || drag.current?.mode === 'drag' || suppressFocus.current) return
     draftRef.current = null
     setDraft(null)
     const trimmed = text.trim()
@@ -217,38 +313,6 @@ export function TransportBar({
     memory.current = emptyTap()
     store.endTempoGroup()
     publish(value, false)
-  }
-
-  function onTempoPointerDown(event: ReactPointerEvent<HTMLInputElement>) {
-    if (store.remoteFollow || event.button !== 0) return
-    drag.current = { y: event.clientY, origin: typedBase() ?? shown.current, moved: false }
-  }
-
-  function onTempoPointerMove(event: ReactPointerEvent<HTMLInputElement>) {
-    const state = drag.current
-    if (!state || store.remoteFollow) return
-    const dy = state.y - event.clientY
-    if (!state.moved) {
-      if (Math.abs(dy) < 4) return
-      state.moved = true
-      suppressFocus.current = true
-      memory.current = emptyTap()
-      store.endTempoGroup()
-      setDraft(null)
-      event.currentTarget.setPointerCapture(event.pointerId)
-      event.currentTarget.blur()
-    }
-    publish(state.origin + dy * 0.2, true)
-  }
-
-  function onTempoPointerUp() {
-    const moved = drag.current?.moved ?? false
-    drag.current = null
-    if (!moved) return
-    store.endTempoGroup()
-    window.setTimeout(() => {
-      suppressFocus.current = false
-    }, 0)
   }
 
   const running = status === 'playing' || status === 'recording' || status === 'counting-in'
@@ -266,7 +330,7 @@ export function TransportBar({
     if (!shouldOpenExactTempo(result) || store.remoteFollow) return
     editTimer.current = window.setTimeout(() => setEditingTempo(true), 1500)
   }
-  const tempoLabel = `${tempoCopy.label}. Tap to set tempo. ${tempoCopy.hint}`
+  const tempoLabel = `${tempoCopy.label}. Tap to set tempo. Drag up or down to change the tempo. ${tempoCopy.hint}`
   const tempoField = editingTempo ? (
         <label className="bpm-readout tempo-edit">
           <span className="tempo-kicker">Tempo</span>
@@ -309,17 +373,14 @@ export function TransportBar({
             const delta = (event.shiftKey ? 1 : 0.1) * (event.key === 'ArrowUp' ? 1 : -1)
             bump(delta)
           }}
-          onPointerDown={onTempoPointerDown}
-          onPointerMove={onTempoPointerMove}
-          onPointerUp={onTempoPointerUp}
-          onPointerCancel={onTempoPointerUp}
+          onPointerDown={(event) => onTempoDown(event, false)}
         />
         </label>
   ) : (
         <button
           type="button"
           className={`bpm-readout tempo-tap${flash ? ' flash' : ''}`}
-          title="Tap to set tempo. Pause after one tap to type an exact tempo."
+          title="Tap to set tempo. Drag up or down to change it. Pause after one tap to type an exact tempo."
           aria-label={tempoLabel}
           disabled={store.remoteFollow}
           onKeyDown={(event) => {
@@ -328,23 +389,7 @@ export function TransportBar({
             const delta = (event.shiftKey ? 1 : 0.1) * (event.key === 'ArrowUp' ? 1 : -1)
             bump(delta)
           }}
-          onPointerDown={(event) => {
-            if (event.button !== 0 || store.remoteFollow) return
-            event.preventDefault()
-            try {
-              event.currentTarget.setPointerCapture(event.pointerId)
-            } catch {
-              /* The pointer can already be gone. */
-            }
-            pulse()
-            armExactTempo(applyTap(performance.now(), 'pointer'))
-          }}
-          onPointerUp={() => {
-            memory.current = noteTapRelease(memory.current, performance.now())
-          }}
-          onPointerCancel={() => {
-            memory.current = noteTapRelease(memory.current, performance.now())
-          }}
+          onPointerDown={(event) => onTempoDown(event, true)}
         >
           <span className="tempo-kicker">Tempo</span>
           <span className="tempo-figure">{formatTempo(tempo)}</span>

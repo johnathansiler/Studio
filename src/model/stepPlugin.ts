@@ -104,6 +104,7 @@ function ensurePluginRack(plugin: PluginInstance) {
  */
 export function adoptStepSequencers(project: Project) {
   for (const item of stepSequencers(project)) ensurePluginRack(item.plugin)
+  if (stepSequencers(project).length) project.stepsAdopted = true
   const beats = project.beats
   const owned = new Set(stepSequencers(project).flatMap((item) => item.plugin.steps?.patterns.map((pattern) => pattern.id) ?? []))
   if (beats?.patterns?.length && beats.patterns.every((pattern) => owned.has(pattern.id))) {
@@ -111,6 +112,7 @@ export function adoptStepSequencers(project: Project) {
     if (owner?.plugin.steps) project.beats = owner.plugin.steps
     return
   }
+  if (project.stepsAdopted) return
   if (!beatsWereUsed(beats, project.patternClips) || !beats) return
   const track = makeTrack({
     name: numbered(project.tracks, 'Step Sequencer'),
@@ -129,4 +131,5 @@ export function adoptStepSequencers(project: Project) {
     clip.trackId = track.id
   }
   project.beats = plugin.steps
+  project.stepsAdopted = true
 }

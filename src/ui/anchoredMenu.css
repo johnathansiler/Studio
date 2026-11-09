@@ -102,13 +102,24 @@
   flex-wrap: wrap;
   align-items: center;
   align-content: flex-start;
-  width: min(340px, calc(100vw - 16px));
+  width: min(420px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  overflow-x: hidden;
+  box-sizing: border-box;
 }
 
 .anchored-menu.transport-drawer[data-menu-size='dock'],
-.anchored-menu.transport-drawer[data-menu-size='pending'] {
-  width: max-content;
-  max-width: min(420px, calc(100vw - 16px));
+.anchored-menu.transport-drawer[data-menu-size='pending'],
+.anchored-menu.transport-drawer[data-menu-size='fill'] {
+  width: min(420px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  overflow-x: hidden;
+}
+
+[data-screen-overlay].anchored-menu.transport-drawer {
+  width: auto !important;
+  max-width: none !important;
+  overflow-x: hidden !important;
 }
 
 .anchored-menu.transport-drawer .t-btn,
@@ -130,7 +141,63 @@
 .anchored-menu.transport-drawer .arrange-panels {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
+  flex: 1 1 100%;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.anchored-menu.transport-drawer .arrange-panels .cap-btn,
+.anchored-menu.transport-drawer .metro-combo .t-btn,
+.anchored-menu.transport-drawer > .t-btn {
+  flex: 1 1 0;
+  min-width: 40px;
+  max-width: 100%;
+  width: auto;
+  overflow: hidden;
+}
+
+.anchored-menu.transport-drawer .lcd,
+.anchored-menu.transport-drawer .lcd .bars,
+.anchored-menu.transport-drawer .lcd .tc {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.anchored-menu.punch-menu {
+  width: min(360px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+.anchored-menu.punch-menu .rec-bar.inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 6px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.anchored-menu.punch-menu .guide-choice,
+.anchored-menu.punch-menu .rec-bar.inline > button,
+.anchored-menu.punch-menu .rec-bar.inline > label,
+.anchored-menu.punch-menu .rec-bar.inline > select {
+  flex: 1 1 calc(33% - 6px);
+  min-width: 40px;
+  min-height: 44px;
+  max-width: 100%;
+  width: auto;
+}
+
+.anchored-menu.punch-menu .guide-choice small {
+  display: none;
 }
 
 .anchored-menu.transport-drawer .lcd {
@@ -173,9 +240,10 @@
 
 .anchored-menu #shell-menu button,
 .anchored-menu #shell-menu .menu-sig,
+.anchored-menu #shell-menu select,
 .shell.phone .anchored-menu #shell-menu button,
 .shell.fold .anchored-menu #shell-menu button {
-  min-height: 40px;
+  min-height: 44px;
   height: auto;
   padding: 6px 8px;
 }

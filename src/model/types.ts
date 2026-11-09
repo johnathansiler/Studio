@@ -524,6 +524,11 @@ export interface Project {
   beats?: BeatRack
   patternClips?: PatternClip[]
   /**
+   * The old Beats rack was copied onto a Step Sequencer track, or the user removed that track.
+   * A later load must not create another sequencer from the leftover rack.
+   */
+  stepsAdopted?: boolean
+  /**
    * Channel-rack transport. Pattern loops the open beat.
    * Song plays arrangement clips. Missing follows an empty timeline as Pattern.
    */

@@ -4,7 +4,6 @@ import type { SessionClient } from '../remote/session'
 import type { ProjectStore } from '../state/store'
 import { AutomationModeBar } from './AutomationLane'
 import { SongMapHead } from './SongMap'
-import { AnchoredMenu } from './AnchoredMenu'
 import './song-panel.css'
 
 const TABS = [
@@ -41,15 +40,12 @@ export function SongPanel({
   onQuickPunch: () => void
 }) {
   void _onQuickPunch
+  void triggerRef
+  void onClose
   const [tab, setTab] = useState<SongTab>('automation')
 
   return (
-    <AnchoredMenu open triggerRef={triggerRef} onClose={onClose} label="Setup" prefer="up" id="arrange-setup" className="song-menu">
       <div className="song-sheet">
-        <header className="song-head">
-          <h2>Setup</h2>
-          <button type="button" className="song-close overlay-close" onClick={onClose}>Close</button>
-        </header>
         <div className="song-pills" role="tablist" aria-label="Setup sections">
           {TABS.map((item) => (
             <button
@@ -95,6 +91,5 @@ export function SongPanel({
           </section>
         )}
       </div>
-    </AnchoredMenu>
   )
 }

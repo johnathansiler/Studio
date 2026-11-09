@@ -63,6 +63,16 @@
   margin: 0;
 }
 
+[data-screen-overlay].anchored-menu:has(#shell-menu) {
+  overflow: hidden;
+}
+
+[data-screen-overlay].anchored-menu:has(#shell-menu) > button.overlay-close {
+  min-width: 44px;
+  min-height: 44px;
+  height: 44px;
+}
+
 [data-screen-overlay] #shell-menu,
 [data-screen-overlay].anchored-menu #shell-menu {
   position: static;
@@ -74,8 +84,11 @@
   max-width: none;
   max-height: none;
   height: auto;
+  min-height: 0;
   flex: 1 1 auto;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 0;
   border-radius: 0;
   box-shadow: none;

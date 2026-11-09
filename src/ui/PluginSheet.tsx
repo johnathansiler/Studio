@@ -436,7 +436,7 @@ export function SendList({ store, trackId, engine, roomy = false }: { store: Pro
   )
 }
 
-export function RouteFields({ store, trackId }: { store: ProjectStore; trackId: string }) {
+export function RouteFields({ store, trackId, labeled = false }: { store: ProjectStore; trackId: string; labeled?: boolean }) {
   const track = store.track(trackId)
   if (!track) return null
   const targets = store.project.tracks.filter((item) => (item.type === 'bus' || item.type === 'group') && item.id !== track.id)
@@ -445,25 +445,32 @@ export function RouteFields({ store, trackId }: { store: ProjectStore; trackId: 
     ? (track.input.startsWith('remote:') ? 'Cue' : 'Master')
     : targets.find((item) => item.id === track.output)?.name ?? 'Master'
   const groupLabel = groups.find((item) => item.id === track.groupId)?.name ?? 'No group'
+  const output = (
+    <BevelSelect
+      label="Output"
+      hint={`Output. ${outputLabel}`}
+      value={track.output ?? ''}
+      options={[
+        { value: '', label: track.input.startsWith('remote:') ? 'Cue' : 'Master' },
+        ...targets.map((item) => ({ value: item.id, label: item.name })),
+      ]}
+      onChange={(next) => store.updateTrack(track.id, { output: next || null })}
+    />
+  )
+  const group = (
+    <BevelSelect
+      label="Group"
+      hint={`Group. ${groupLabel}`}
+      value={track.groupId ?? ''}
+      options={[{ value: '', label: 'No group' }, ...groups.map((item) => ({ value: item.id, label: item.name }))]}
+      onChange={(next) => store.updateTrack(track.id, { groupId: next || null })}
+    />
+  )
+  if (!labeled) return <div className="route-fields">{output}{group}</div>
   return (
-    <div className="route-fields">
-      <BevelSelect
-        label="Output"
-        hint={`Output. ${outputLabel}`}
-        value={track.output ?? ''}
-        options={[
-          { value: '', label: track.input.startsWith('remote:') ? 'Cue' : 'Master' },
-          ...targets.map((item) => ({ value: item.id, label: item.name })),
-        ]}
-        onChange={(next) => store.updateTrack(track.id, { output: next || null })}
-      />
-      <BevelSelect
-        label="Group"
-        hint={`Group. ${groupLabel}`}
-        value={track.groupId ?? ''}
-        options={[{ value: '', label: 'No group' }, ...groups.map((item) => ({ value: item.id, label: item.name }))]}
-        onChange={(next) => store.updateTrack(track.id, { groupId: next || null })}
-      />
+    <div className="route-fields labeled">
+      <label className="route-field"><span>Output</span>{output}</label>
+      <label className="route-field"><span>Group</span>{group}</label>
     </div>
   )
 }

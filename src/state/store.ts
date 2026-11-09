@@ -2195,8 +2195,17 @@ export class ProjectStore {
 
   removeTrack(id: string) {
     this.mutate(() => {
+      const track = this.project.tracks.find((item) => item.id === id)
+      const removedSteps = !!track?.plugins.some((plugin) => plugin.pluginId === 'steps')
       this.project.tracks = this.project.tracks.filter((t) => t.id !== id)
       if (this.selectedTrackId === id) this.selectedTrackId = this.project.tracks[0]?.id ?? null
+      if (this.stepTrackId === id) this.stepTrackId = null
+      if (!removedSteps) return
+      this.project.patternClips = (this.project.patternClips ?? []).filter((clip) => clip.trackId !== id)
+      const host = this.project.tracks.find((item) => item.plugins.some((plugin) => plugin.pluginId === 'steps'))
+      const rack = host?.plugins.find((plugin) => plugin.pluginId === 'steps')?.steps
+      if (rack) this.project.beats = rack
+      else this.project.stepsAdopted = true
     })
   }
 

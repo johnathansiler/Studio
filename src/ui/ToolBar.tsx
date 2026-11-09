@@ -12,8 +12,8 @@ import {
   type ArrangeTool,
 } from '../state/tools'
 import { useFormFactor } from './form'
-import { AnchoredMenu } from './AnchoredMenu'
 import { useScreenOverlay } from './screenOverlay'
+import { currentArrangeSheet, subscribeArrangeSheet, toggleArrangeSheet } from './arrangePanel'
 import { TipButton } from './Hint'
 import { bindSwipeDismiss } from './swipeDismiss'
 import './guideSheet.css'
@@ -64,9 +64,9 @@ export function ToolBar({
   store?: import('../state/store').ProjectStore
 }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
+  const toolsOpen = useSyncExternalStore(subscribeArrangeSheet, currentArrangeSheet, () => null) === 'tools'
   const stripRef = useRef<HTMLDivElement>(null)
   const toolButton = useRef<HTMLButtonElement>(null)
-  const [toolsOpen, setToolsOpen] = useState(false)
   const shown = FACE_TOOLS
   const chip = toolChip(value, context)
   const clipOn = useSyncExternalStore(
@@ -105,7 +105,7 @@ export function ToolBar({
           aria-controls="tool-choices"
           title={current.hint}
           aria-label={`Tool: ${current.label}. ${current.hint}`}
-          onClick={() => setToolsOpen((open) => !open)}
+          onClick={() => toggleArrangeSheet('tools')}
         >
           <ToolIcon id={value} />
           <span className="tool-label">{current.label}</span>
@@ -124,26 +124,6 @@ export function ToolBar({
           </>
         )}
         </div>
-        <AnchoredMenu id="tool-choices" open={toolsOpen} onClose={() => setToolsOpen(false)} label="Choose a tool" triggerRef={toolButton} prefer="up">
-          {[...shown, 'box' as const, 'erase' as const].map((id) => {
-            const info = TOOL_INFO[id]
-            const key = keyForTool(id)
-            const label = key ? `${info.label} (${key})` : info.label
-            return (
-              <TipButton
-                key={id}
-                className={`tool ${value === id ? 'on' : ''}`}
-                label={label}
-                hint={info.hint}
-                pressed={value === id}
-                onClick={() => { onChange(id); setToolsOpen(false) }}
-              >
-                <ToolIcon id={id} />
-                <span className="tool-label">{info.label}</span>
-              </TipButton>
-            )
-          })}
-        </AnchoredMenu>
       </div>
     )
   }

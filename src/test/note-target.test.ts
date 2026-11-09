@@ -81,6 +81,10 @@ describe('keyboard before the piano roll', () => {
     expect(editorForGesture('edit-notes', 'midi')).toBe('piano')
     expect(editorForGesture('select-track', 'audio')).toBe('none')
     expect(editorForGesture('tap-clip', 'audio')).toBe('none')
+    const steps = { plugins: [{ pluginId: 'steps' }] }
+    expect(editorForGesture('select-track', 'midi', steps)).toBe('steps')
+    expect(editorForGesture('tap-clip', 'midi', steps)).toBe('steps')
+    expect(editorForGesture('edit-notes', 'midi', steps)).toBe('steps')
   })
 
   it('draws Edit Notes on the selected clip and does not draw the piano roll', () => {

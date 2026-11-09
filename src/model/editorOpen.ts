@@ -14,10 +14,12 @@ export interface GestureTrack {
 
 /**
  * A track header opens the one-octave keyboard. A Beat Machine header opens its pad panel.
- * Tapping a MIDI clip, including a clip on a Beat Machine track, opens the piano roll for that clip.
+ * A Step Sequencer header or any of its clips opens the sequencer, not the piano roll.
+ * Tapping another MIDI clip, including a clip on a Beat Machine track, opens the piano roll.
  * Edit Notes opens the piano roll. Audio clips have no notes, so a tap leaves the editors alone.
  */
 export function editorForGesture(gesture: EditorGesture, trackType: string, track?: GestureTrack | null): EditorSurface {
+  if (trackType === 'midi' && track && hasStepSequencer(track)) return 'steps'
   if (gesture === 'edit-notes' || gesture === 'tap-clip') return trackType === 'midi' ? 'piano' : 'none'
   if (trackType === 'midi' && gesture === 'select-track') {
     if (track && showsOpenBeatMachine({ type: 'midi', instrument: track.instrument, plugins: track.plugins })) return 'pads'
