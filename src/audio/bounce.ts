@@ -1,11 +1,11 @@
+import { graphPlugins, renderArrangeInputs } from './arrangeSources'
 import { createPlugin } from './plugins/catalog'
 import { loadModule, peekModule } from './plugins/registry'
 import { createProcessor, preloadWasmInserts } from './plugins/createAll'
 import { type GraphTrack } from './renderGraph'
 import { renderGraphParallel } from './parallelRender'
-import { prepareClipNotes } from '../model/midiTools'
 import { tuneBlockScale } from './plugins/autoTune'
-import { beatsToSamples, projectEndSample } from '../model/time'
+import { projectEndSample } from '../model/time'
 import { readPlayhead, stampClipAtPlayhead } from '../model/playheadPlace'
 import { makeTrack, uid, type AudioAsset, type AudioClip, type PluginInstance, type Project, type Track } from '../model/types'
 import { encodeWav, linearResample, type DitherMode, type WavBits } from '../model/wav'
@@ -89,8 +89,8 @@ export function bounceBounds(project: Project, scope: BounceJob['scope'], startS
   return { start: 0, end: Math.max(project.sampleRate, projectEndSample(project.tracks, project.sampleRate, project.tempo)) }
 }
 
-export async function renderArrangement(project: Project, assets: Map<string, AudioAsset>, start: number, length: number, limiter: boolean, stemId: string | null = null) {
-  const rendered = await renderChannels(project, assets, start, length, limiter, stemId)
+export async function renderArrangement(project: Project, assets: Map<string, AudioAsset>, start: number, length: number, limiter: boolean, stemId: string | null = null, scheduleEnd = start + length, shouldCancel?: () => void) {
+  const rendered = await renderChannels(project, assets, start, length, limiter, stemId, scheduleEnd, shouldCancel)
   return rendered.master
 }
 
@@ -120,7 +120,7 @@ export async function runBounce(job: BounceJob, onProgress?: (progress: number) 
       stop()
       const track = job.project.tracks.find((item) => item.id === ids[index])
       if (!track) continue
-      const channels = await renderArrangement(job.project, assets, bounds.start, length, false, track.id)
+      const channels = await renderArrangement(job.project, assets, bounds.start, length, false, track.id, bounds.end, stop)
       files.push({ name: `${String(index + 1).padStart(2, '0')}-${fileSlug(track.name)}.wav`, channels })
       onProgress?.((index + 1) / ids.length)
     }
@@ -133,7 +133,7 @@ export async function runBounce(job: BounceJob, onProgress?: (progress: number) 
   stop()
   const stemId = job.kind === 'track' ? job.trackId : null
   const useLimiter = (job.kind === 'mix' || job.kind === 'wav' || job.kind === 'mp3' || job.kind === 'flac') && job.limiter
-  const rendered = await renderChannels(job.project, assets, bounds.start, length, useLimiter, stemId)
+  const rendered = await renderChannels(job.project, assets, bounds.start, length, useLimiter, stemId, bounds.end, stop)
   onProgress?.(0.7)
   stop()
   const rate = job.kind === 'mp3' && job.sampleRate !== 44100 ? 48000 : job.sampleRate
@@ -219,9 +219,10 @@ export function applyFreeze(project: Project, buffers: Map<string, AudioAsset>, 
   return { project: next, buffers: map }
 }
 
-async function renderChannels(project: Project, assets: Map<string, AudioAsset>, start: number, length: number, limiter: boolean, stemId: string | null) {
+async function renderChannels(project: Project, assets: Map<string, AudioAsset>, start: number, length: number, limiter: boolean, stemId: string | null, scheduleEnd = start + length, shouldCancel?: () => void) {
   await ensurePlugins(project)
   await preloadWasmInserts()
+  shouldCancel?.()
   const scale = tuneBlockScale(project.scale)
   const routed = routeForStem(project.tracks, stemId)
   let masterPlugins = project.masterPlugins.map(copyPlugin)
@@ -229,19 +230,19 @@ async function renderChannels(project: Project, assets: Map<string, AudioAsset>,
   if (stemId) {
     masterPlugins = masterPlugins.map((plugin) => ({ ...plugin, enabled: false }))
     masterVolume = 1
-  } else if (limiter) masterPlugins = enableLimiter(masterPlugins)
-  else masterPlugins = masterPlugins.map((plugin) => (plugin.pluginId === 'limiter' ? { ...plugin, enabled: false } : plugin))
+  } else masterPlugins = bounceMasterPlugins(masterPlugins, limiter)
+  const inputs = renderArrangeInputs(project, assets, start, length, scheduleEnd, shouldCancel)
   const graphTracks: GraphTrack[] = routed.map((track) => ({
     id: track.id,
     type: track.type,
     input: track.input,
-    buffer: mixTrack(project, track, assets, start, length),
+    buffer: inputs.get(track.id) ?? [new Float32Array(length), new Float32Array(length)],
     volume: track.volume,
     pan: track.pan,
     mute: track.mute,
     solo: track.solo,
     soloSafe: track.soloSafe,
-    plugins: track.plugins,
+    plugins: graphPlugins(track),
     sends: track.sends,
     output: track.output,
     groupId: track.groupId,
@@ -290,69 +291,6 @@ function feeds(track: Track, target: string, tracks: Track[], seen = new Set<str
   return next ? feeds(next, target, tracks, seen) : false
 }
 
-function mixTrack(project: Project, track: Track, assets: Map<string, AudioAsset>, start: number, length: number) {
-  const rate = project.sampleRate
-  const tempo = project.tempo
-  const out = [new Float32Array(length), new Float32Array(length)]
-  for (const clip of track.clips) {
-    const asset = assets.get(clip.bufferId)
-    if (!asset?.channels.length) continue
-    const channels = asset.sampleRate === rate ? asset.channels : asset.channels.map((channel) => linearResample(channel, asset.sampleRate, rate))
-    const clipEnd = clip.startSample + clip.durationSamples
-    const from = Math.max(clip.startSample, start)
-    const to = Math.min(clipEnd, start + length)
-    const clipDur = clip.durationSamples / rate
-    const fadeIn = clip.fadeInSamples / rate
-    const fadeOut = clip.fadeOutSamples / rate
-    for (let i = from; i < to; i++) {
-      const rel = (i - clip.startSample) / rate
-      let gain = clip.gain
-      if (fadeIn > 0 && rel < fadeIn) gain *= rel / fadeIn
-      if (fadeOut > 0 && rel > clipDur - fadeOut) gain *= Math.max(0, (clipDur - rel) / fadeOut)
-      gain = Math.max(0.0001, gain)
-      const src = clip.offsetSamples + (i - clip.startSample)
-      const dst = i - start
-      if (src < 0 || dst < 0 || dst >= length) continue
-      for (let c = 0; c < 2; c++) {
-        const channel = channels[Math.min(c, channels.length - 1)]
-        out[c][dst] += (channel?.[src] ?? 0) * gain
-      }
-    }
-  }
-  for (const clip of track.midiClips) {
-    for (const note of prepareClipNotes(project, track, clip)) {
-      const noteStart = Math.round(beatsToSamples(clip.startBeat + note.startBeat, rate, tempo))
-      const duration = Math.round(beatsToSamples(note.durationBeats, rate, tempo))
-      addVoice(out, note.pitch, note.velocity, noteStart, duration, start, rate)
-    }
-  }
-  return out
-}
-
-function addVoice(out: Float32Array[], pitch: number, velocity: number, startSample: number, duration: number, origin: number, rate: number) {
-  const freq = 440 * 2 ** ((pitch - 69) / 12)
-  const peak = Math.max(0.001, 0.07 * (velocity <= 1 ? velocity : velocity / 127))
-  const total = duration + Math.round(0.03 * rate)
-  let phase = 0
-  let low = 0
-  let cutoff = 2200
-  for (let i = 0; i < total; i++) {
-    const dst = startSample + i - origin
-    if (dst >= out[0].length) break
-    if (dst < 0) continue
-    const t = i / rate
-    phase += freq / rate
-    const saw = 2 * ((phase % 1) - 0.5)
-    cutoff += (900 - cutoff) * (1 - Math.exp(-1 / (0.05 * rate)))
-    low += Math.min(1, cutoff / rate) * (saw - low)
-    const attack = 0.012
-    const releaseAt = Math.max(0.05, duration / rate)
-    const env = t < attack ? 0.0001 * (peak / 0.0001) ** (t / attack) : peak * (0.0001 / peak) ** ((t - attack) / Math.max(0.001, releaseAt - attack))
-    out[0][dst] += low * env
-    out[1][dst] += low * env
-  }
-}
-
 async function ensurePlugins(project: Project) {
   const ids = new Set<string>()
   for (const track of project.tracks) for (const plugin of track.plugins) ids.add(plugin.pluginId)
@@ -360,16 +298,24 @@ async function ensurePlugins(project: Project) {
   await Promise.all([...ids].map((id) => loadModule(id)))
 }
 
+/** Master chain for a mix file. The speaker safety compressor is never inserted here. */
+export function bounceMasterPlugins(plugins: PluginInstance[], limiter: boolean) {
+  const copy = plugins.map(copyPlugin)
+  if (!limiter) return copy.map((plugin) => (plugin.pluginId === 'limiter' ? { ...plugin, enabled: false } : plugin))
+  return enableLimiter(copy)
+}
+
 function enableLimiter(plugins: PluginInstance[]) {
   const copy = plugins.map(copyPlugin)
-  const found = copy.find((plugin) => plugin.pluginId === 'limiter')
-  if (found) {
-    found.enabled = true
+  let last = -1
+  for (let index = 0; index < copy.length; index++) if (copy[index].pluginId === 'limiter') last = index
+  if (last >= 0 && last === copy.length - 1) {
+    copy[last].enabled = true
     return copy
   }
   const limiter = createPlugin('limiter', 'Transparent')
   limiter.enabled = true
-  return [limiter, ...copy]
+  return [...copy, limiter]
 }
 
 function copyPlugin(plugin: PluginInstance): PluginInstance {
