@@ -876,7 +876,7 @@ export function ArrangeView({
           <SongMapHead store={store} position={position} compact />
         </div>
         {project.tracks.map((track) => (
-          <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} style={rowStyle(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => { store.selectTrack(track.id); revealTrack(track.id, 'select-track') }}>
+          <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} style={rowStyle(track, store.selectedTrackId, store.selectedClipId, !!store.openLanes[track.id], phone)} onClick={() => { store.selectTrack(track.id); revealTrack(track.id, 'select-track') }}>
             <div className="pl-head">
               <div className="pl-name-row">
                 <i className="swatch" style={{ background: track.color }} />
@@ -1008,7 +1008,7 @@ export function ArrangeView({
               className={`lane${store.selectedTrackId === track.id ? ' is-selected' : ''}`}
               data-track={track.id}
               key={track.id}
-              style={{ ...(laneGrid ?? { backgroundImage: 'none' }), ...rowStyle(track, store.selectedClipId, !!store.openLanes[track.id]) }}
+              style={{ ...(laneGrid ?? { backgroundImage: 'none' }), ...rowStyle(track, store.selectedTrackId, store.selectedClipId, !!store.openLanes[track.id], phone) }}
               onDoubleClick={(event) => {
                 if (track.type !== 'midi') return
                 if (!laneDoubleClickAddsClip(event.target)) return
@@ -1341,8 +1341,14 @@ function laneStyle(track: { clips: AudioClip[] }, selectedId: string | null): { 
   return { height: Math.max(168, 40 + open.folder.lanes.length * 48) }
 }
 
-function rowStyle(track: { clips: AudioClip[] }, selectedClipId: string | null, automation: boolean) {
-  return rowHeight(track, selectedClipId, automation)
+function rowStyle(track: { id: string; type: string; instrument?: string; plugins?: { pluginId: string; params?: Record<string, number> }[]; clips: AudioClip[] }, selectedTrackId: string | null, selectedClipId: string | null, automation: boolean, phone = false) {
+  const base = rowHeight(track, selectedClipId, automation)
+  const piano = selectedTrackId === track.id && showsOnscreenPiano(track)
+  if (!piano) return base
+  /* Desktop lanes are 96px. Eight extra pixels clear the mute row under Keys.
+     Phone already pins the name above the flags inside the normal lane. */
+  const extra = phone ? 0 : 8
+  return { ...base, minHeight: `calc(var(--lane-h) + ${extra}px)` }
 }
 
 function rowHeight(track: { clips: AudioClip[] }, selectedId: string | null, automation: boolean) {
