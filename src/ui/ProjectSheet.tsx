@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react'
 import type { ProjectListItem } from '../storage/idb'
 import { ageLabel } from './share'
+import { peakOutline } from './waveformDraw'
+import { MiniWave } from './WaveformView'
 
 export function ProjectSheet({
   projects,
@@ -56,7 +57,9 @@ export function ProjectSheet({
           {projects.map((item) => (
             <div className="project-row" key={item.id}>
               <button className="text-btn project-open" onClick={() => onOpen(item.id)}>
-                <Wave peaks={item.peaks} />
+                <span className="project-wave">
+                  <MiniWave outline={peakOutline(item.peaks)} color="#73c48f" label={`${item.name} waveform`} />
+                </span>
                 <span>{item.name}</span>
                 <span>{ageLabel(item.savedAt)}</span>
               </button>
@@ -83,19 +86,3 @@ export function ProjectSheet({
   )
 }
 
-function Wave({ peaks }: { peaks: number[] }) {
-  const ref = useRef<HTMLCanvasElement>(null)
-  useEffect(() => {
-    const canvas = ref.current
-    const ctx = canvas?.getContext('2d')
-    if (!canvas || !ctx) return
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
-    ctx.fillStyle = '#73c48f'
-    const bins = Math.max(1, peaks.length)
-    peaks.forEach((peak, index) => {
-      const h = Math.max(1, peak * canvas.height)
-      ctx.fillRect(index * (canvas.width / bins), (canvas.height - h) / 2, Math.max(1, canvas.width / bins - 1), h)
-    })
-  }, [peaks])
-  return <canvas ref={ref} width={72} height={28} aria-hidden />
-}

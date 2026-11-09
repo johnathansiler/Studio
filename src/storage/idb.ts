@@ -5,7 +5,7 @@ import { digestProject, musicalClone } from '../state/ops'
 import type { SyncJournal } from '../state/sync'
 import type { VersionListItem, VersionReason } from '../state/versions'
 import { expiredVersionIds } from '../state/versions'
-import { chooseCurrent, contentHash, dedupeBlobs, longestPeaks, planCommit, type AssetRef, type ProjectDoc, type SnapshotDoc, type WorkspaceSnapshot } from './content'
+import { chooseCurrent, contentHash, dedupeBlobs, longestPeaks, planCommit, type AssetRef, type ProjectDoc, type SnapshotDoc, type StoredPeak, type WorkspaceSnapshot } from './content'
 import { mirrorBlob, mirrorProject, removeMirror } from './opfs'
 
 const DB_NAME = 'cueharbor'
@@ -79,7 +79,7 @@ export interface ProjectListItem {
   id: string
   name: string
   savedAt: number
-  peaks: number[]
+  peaks: StoredPeak[]
   bytes: number
 }
 

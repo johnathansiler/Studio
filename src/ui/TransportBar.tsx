@@ -3,6 +3,7 @@ import { AnchoredMenu } from './AnchoredMenu'
 import type { AudioEngine } from '../audio/engine'
 import { formatLoopReadout } from '../model/loopEdit'
 import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, shouldOpenExactTempo, type TapMemory, type TapSource } from '../model/tap'
+import { dragNumeric } from '../model/dragNumeric'
 import { tempoDragIntent, tempoFromDrag } from '../model/tempoDrag'
 import { formatMapBars } from '../model/tempoMap'
 import { countInBarsOf, countInCaption, formatTimecode } from '../model/time'
@@ -17,6 +18,7 @@ import { AssetTransfers } from './AssetTransfers'
 import { TRANSPORT_COPY, copyOf } from './chrome'
 import { ButtonTray } from './ButtonTray'
 import { TipButton } from './Hint'
+import { armFinePress, markIntegerLand } from './integerTick'
 import './loopRegion.css'
 import './remoteFixes.css'
 
@@ -210,8 +212,13 @@ export function TransportBar({
       if (store.remoteFollow) return
       if (event.deltaY === 0) return
       event.preventDefault()
-      const step = (event.deltaY < 0 ? 0.1 : -0.1) * (event.shiftKey ? 10 : 1)
-      bumpRef.current(step)
+      const fine = event.shiftKey
+      const current = shown.current
+      const deltaPx = (event.deltaY < 0 ? 1 : -1) * (fine ? 4 : 10)
+      const next = dragNumeric({ origin: current, deltaPx, min: 30, max: 300, fine })
+      markIntegerLand(node, current, next)
+      memory.current = emptyTap()
+      publish(next, true)
     }
     node.addEventListener('wheel', onWheel, { passive: false })
     return () => node.removeEventListener('wheel', onWheel)
@@ -236,9 +243,18 @@ export function TransportBar({
       origin: typedBase() ?? shown.current,
       mode: 'pending' as 'pending' | 'drag' | 'ignore',
       tap,
+      fine: false,
+      applied: false,
       stopScroll: null as (() => void) | null,
+      cancelFine: (() => undefined) as () => void,
     }
     drag.current = state
+    state.cancelFine = armFinePress(event.pointerType, () => {
+      if (drag.current !== state || state.mode === 'ignore') return
+      state.fine = true
+      state.origin = shown.current
+      state.y = event.clientY
+    })
     const move = (ev: PointerEvent) => {
       if (ev.pointerId !== pointerId) return
       if (state.mode === 'ignore' || store.remoteFollow) return
@@ -249,8 +265,10 @@ export function TransportBar({
         if (intent === 'pending') return
         if (intent === 'scroll') {
           state.mode = 'ignore'
+          state.cancelFine()
           return
         }
+        state.cancelFine()
         state.mode = 'drag'
         window.clearTimeout(editTimer.current)
         memory.current = emptyTap()
@@ -269,14 +287,24 @@ export function TransportBar({
           window.removeEventListener('touchmove', block)
         }
       }
+      const fine = ev.shiftKey || state.fine
+      if (fine !== state.applied) {
+        state.applied = fine
+        state.origin = shown.current
+        state.y = ev.clientY
+      }
       if (ev.cancelable) ev.preventDefault()
-      publish(tempoFromDrag(state.origin, dy), true)
+      const before = shown.current
+      const next = tempoFromDrag(state.origin, state.y - ev.clientY, undefined, fine)
+      publish(next, true)
+      markIntegerLand(node, before, next)
     }
     const up = (ev: PointerEvent) => {
       if (ev.pointerId !== pointerId) return
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', up)
+      state.cancelFine()
       if (drag.current !== state) return
       drag.current = null
       endTempoScroll(state)

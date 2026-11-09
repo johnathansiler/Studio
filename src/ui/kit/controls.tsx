@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { attachGlissando } from '../glissando'
-import { attachControlGesture, type GestureChange, type GestureElement, type GestureReadout } from '../gestures'
+import { attachControlGesture, dragValue, type GestureChange, type GestureElement, type GestureReadout } from '../gestures'
 import type { FaceTheme } from '../faces/themes'
 import './kit.css'
 
@@ -69,9 +69,7 @@ export function clampUnit(value: number, min: number, max: number) {
 }
 
 export function valueFromDrag(start: number, dy: number, min: number, max: number, fine: boolean) {
-  const span = max - min || 1
-  const next = start + (-dy / (fine ? 220 : 90)) * span
-  return Math.max(min, Math.min(max, next))
+  return dragValue(start, -dy, min, max, fine)
 }
 
 export function formatValue(value: number, unit: string) {

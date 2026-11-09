@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { swingDelay } from '../model/padMachine'
+import { buildPeakPyramid, type PeakPyramid } from '../audio/peakPyramid'
 import {
   dragFraction,
   fractionOf,
@@ -13,11 +14,10 @@ import {
   showsSamples,
   snapRadius,
   viewFraction,
-  viewPeaks,
-  zeroCrossings,
   zoomAround,
   type WaveView,
 } from '../model/padTrim'
+import { paintWaveCanvas } from './waveformDraw'
 import { bindSwipeDismiss } from './swipeDismiss'
 
 const HINT_KEY = 'cueharbor-pad-zoom-hint'
@@ -412,6 +412,8 @@ function placeMarkers(wave: HTMLElement, next: WaveView, region: { start: number
   }
 }
 
+const padPyramids = new WeakMap<Float32Array, PeakPyramid>()
+
 function paint(
   canvas: HTMLCanvasElement,
   width: number,
@@ -422,80 +424,53 @@ function paint(
 ) {
   const cssWidth = Math.max(1, Math.floor(width))
   const cssHeight = Math.max(1, Math.floor(height))
-  const ratio = Math.min(2, window.devicePixelRatio || 1)
-  if (canvas.width !== Math.floor(cssWidth * ratio) || canvas.height !== Math.floor(cssHeight * ratio)) {
-    canvas.width = Math.floor(cssWidth * ratio)
-    canvas.height = Math.floor(cssHeight * ratio)
+  const dpr = Math.min(3, window.devicePixelRatio || 1)
+  if (!samples || samples.length < 2 || cssWidth < 2) {
+    paintWaveCanvas(canvas, cssWidth, cssHeight, null, '#d7f5c8', { start: 0, end: 1 }, { dpr, background: '#10160f' })
+    return
   }
+  let pyramid = padPyramids.get(samples)
+  if (!pyramid) {
+    pyramid = buildPeakPyramid(samples)
+    padPyramids.set(samples, pyramid)
+  }
+  const gain = Math.max(0.05, Math.min(1, look.level || 0))
+  const span = {
+    start: Math.max(0, view.start * samples.length),
+    end: Math.max(1, view.end * samples.length),
+  }
+  const shared = { pyramid, dpr, gain, flipX: look.reverse, background: '#10160f' as const }
+  paintWaveCanvas(canvas, cssWidth, cssHeight, samples, 'rgba(120, 140, 112, 0.55)', span, shared)
   const ctx = canvas.getContext('2d')
   if (!ctx) return
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
-  ctx.clearRect(0, 0, cssWidth, cssHeight)
-  ctx.fillStyle = '#10160f'
-  ctx.fillRect(0, 0, cssWidth, cssHeight)
-  const mid = cssHeight / 2
-  ctx.strokeStyle = 'rgba(186, 214, 170, 0.45)'
+  const windowSpan = Math.max(1e-6, view.end - view.start)
+  const xAt = (fraction: number) => {
+    const shown = (fraction - view.start) / windowSpan
+    return (look.reverse ? 1 - shown : shown) * cssWidth
+  }
+  const left = Math.min(xAt(look.start), xAt(look.end))
+  const right = Math.max(xAt(look.start), xAt(look.end))
+  ctx.save()
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.beginPath()
-  ctx.moveTo(0, mid)
-  ctx.lineTo(cssWidth, mid)
-  ctx.stroke()
-  if (!samples || samples.length < 2 || cssWidth < 2) return
-  const gain = Math.max(0.05, Math.min(1, look.level || 0))
-  const span = Math.max(1e-6, view.end - view.start)
-  const inside = (pixel: number) => {
-    const shown = look.reverse ? 1 - pixel / cssWidth : pixel / cssWidth
-    const fraction = view.start + shown * span
-    return fraction >= look.start && fraction <= look.end
-  }
-  if (showsSamples(view, samples.length, cssWidth)) {
-    const first = Math.max(0, Math.floor(view.start * (samples.length - 1)))
-    const last = Math.min(samples.length - 1, Math.ceil(view.end * (samples.length - 1)))
-    ctx.beginPath()
-    for (let index = first; index <= last; index++) {
-      const x = markerLeft(index / (samples.length - 1), view, look.reverse) * cssWidth
-      const y = mid - (samples[index] || 0) * gain * (cssHeight * 0.42)
-      if (index === first) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    }
-    ctx.strokeStyle = '#d7f5c8'
-    ctx.lineWidth = 1.4
-    ctx.stroke()
-    const roomy = last - first < cssWidth
-    if (roomy) {
-      ctx.fillStyle = '#f4ffe8'
-      for (let index = first; index <= last; index++) {
-        const x = markerLeft(index / (samples.length - 1), view, look.reverse) * cssWidth
-        const y = mid - (samples[index] || 0) * gain * (cssHeight * 0.42)
-        ctx.fillRect(x - 1.5, y - 1.5, 3, 3)
-      }
-    }
-    ctx.fillStyle = '#f0d78a'
-    for (const hit of zeroCrossings(samples, first, last)) {
-      const x = markerLeft(hit.index / (samples.length - 1), view, look.reverse) * cssWidth
-      ctx.fillRect(x, mid - 7, 1.5, 14)
-    }
-  } else {
-    const peaks = viewPeaks(samples, view, cssWidth, false)
-    for (let x = 0; x < cssWidth; x++) {
-      const shown = look.reverse ? cssWidth - 1 - x : x
-      const lo = peaks[shown * 2] || 0
-      const hi = peaks[shown * 2 + 1] || 0
-      const y1 = mid - hi * gain * (cssHeight * 0.42)
-      const y2 = mid - lo * gain * (cssHeight * 0.42)
-      ctx.fillStyle = inside(x) ? '#d7f5c8' : 'rgba(120, 140, 112, 0.35)'
-      ctx.fillRect(x, Math.min(y1, y2), 1, Math.max(1, Math.abs(y2 - y1)))
-    }
-  }
+  ctx.rect(left, 0, Math.max(1, right - left), cssHeight)
+  ctx.clip()
+  paintWaveCanvas(canvas, cssWidth, cssHeight, samples, '#d7f5c8', span, { ...shared, clear: false, background: undefined })
+  ctx.restore()
+  const overlay = canvas.getContext('2d')
+  if (!overlay) return
+  overlay.setTransform(dpr, 0, 0, dpr, 0, 0)
+  const mid = cssHeight / 2
   if (look.highpass > 0.02) {
-    ctx.fillStyle = 'rgba(40, 70, 120, 0.28)'
-    ctx.fillRect(0, mid, cssWidth, mid * Math.min(1, look.highpass))
+    overlay.fillStyle = 'rgba(40, 70, 120, 0.28)'
+    overlay.fillRect(0, mid, cssWidth, mid * Math.min(1, look.highpass))
   }
   if (look.filter < 0.98) {
-    ctx.fillStyle = 'rgba(120, 80, 30, 0.28)'
-    ctx.fillRect(0, 0, cssWidth, mid * (1 - Math.max(0, look.filter)))
+    overlay.fillStyle = 'rgba(120, 80, 30, 0.28)'
+    overlay.fillRect(0, 0, cssWidth, mid * (1 - Math.max(0, look.filter)))
   }
   if (look.vintage > 0.01) {
-    ctx.fillStyle = `rgba(196, 140, 60, ${0.08 + look.vintage * 0.22})`
-    ctx.fillRect(0, 0, cssWidth, cssHeight)
+    overlay.fillStyle = `rgba(196, 140, 60, ${0.08 + look.vintage * 0.22})`
+    overlay.fillRect(0, 0, cssWidth, cssHeight)
   }
 }

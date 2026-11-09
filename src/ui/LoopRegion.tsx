@@ -1,10 +1,13 @@
 import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { formatLoopReadout, loopGridBeats, loopMinSamples, resolveLoopDrag, type LoopDragMode } from '../model/loopEdit'
+import { formatLoopReadout, loopGridBeats, loopSnapMinSamples, resolveLoopDrag, type LoopDragMode } from '../model/loopEdit'
+import { positionReadout } from '../model/snapGrid'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
+import { quartersPerBar } from '../model/time'
 import type { Project } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { useFormFactor } from './form'
-import { layoutLoopGrips, loopEdgeAt, loopGripHit } from './loopGrips'
+import { armFinePress } from './integerTick'
+import { LOOP_DRAG_THRESHOLD, layoutLoopGrips, loopEdgeAt, loopGripHit, type LoopGripBox } from './loopGrips'
 import './loopRegion.css'
 
 export function LoopRegion({
@@ -39,11 +42,16 @@ export function LoopRegion({
     originStart: number
     originEnd: number
     originX: number
+    originY: number
     minSamples: number
     moved: boolean
     changed: boolean
     onBody: boolean
+    fine: boolean
+    cancelFine: () => void
   } | null>(null)
+  const [activeEdge, setActiveEdge] = useState<'start' | 'end' | 'move' | null>(null)
+  const [liveRead, setLiveRead] = useState<{ x: number; text: string } | null>(null)
   const lastTap = useRef(0)
   const [box, setBox] = useState({ width: 0, viewLeft: 0, viewWidth: 0 })
   const readout = formatLoopReadout(project, project.loopStartSample, project.loopEndSample)
@@ -99,19 +107,20 @@ export function LoopRegion({
     start: rawLeft,
     end: rawRight,
     hostWidth: width,
+    hostHeight: hostRef.current?.clientHeight || 44,
     viewLeft,
     viewWidth,
-    labelCenter: 0,
-    labelWidth: 0,
     hit: loopGripHit(coarse),
   })
+  const body = { left, right: left + barWidth, top: 0, bottom: hostRef.current?.clientHeight || 44, mode: grips.mode }
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!event.isPrimary) return
     if (event.button !== 0 && event.pointerType !== 'touch') return
     const rect = event.currentTarget.getBoundingClientRect()
     const localX = event.clientX - rect.left
-    const edge = loopEdgeAt(localX, grips, { left, right: left + barWidth })
+    const localY = event.clientY - rect.top
+    const edge = loopEdgeAt(localX, grips, body, localY)
     const onBody = edge !== 'seek'
     if (yieldEmpty && !onBody) return
     const mode: LoopDragMode | 'seek' = edge
@@ -122,6 +131,7 @@ export function LoopRegion({
     } catch {
       /* The pointer can already be gone. */
     }
+    const fine = event.shiftKey || event.altKey
     drag.current = {
       pointerId: event.pointerId,
       mode,
@@ -129,11 +139,20 @@ export function LoopRegion({
       originStart: project.loopStartSample,
       originEnd: project.loopEndSample,
       originX: event.clientX,
-      minSamples: loopMinSamples(project, project.loopStartSample),
+      originY: event.clientY,
+      minSamples: loopSnapMinSamples(project, project.loopStartSample, gridBeats),
       moved: false,
       changed: false,
       onBody,
+      fine,
+      cancelFine: () => undefined,
     }
+    drag.current.cancelFine = armFinePress(event.pointerType, () => {
+      const state = drag.current
+      if (!state) return
+      state.fine = true
+    })
+    if (edge === 'start' || edge === 'end' || edge === 'move') setActiveEdge(edge)
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
@@ -141,19 +160,23 @@ export function LoopRegion({
     if (!state || event.pointerId !== state.pointerId) return
     const host = event.currentTarget.getBoundingClientRect()
     setFinger(event.clientX - host.left)
-    if (Math.abs(event.clientX - state.originX) <= 2) return
+    if (Math.hypot(event.clientX - state.originX, event.clientY - state.originY) <= LOOP_DRAG_THRESHOLD) return
     state.moved = true
     const mode: LoopDragMode = state.mode === 'seek' ? 'draw' : state.mode
     state.mode = mode
+    const fine = event.shiftKey || event.altKey || state.fine
     const rect = event.currentTarget.getBoundingClientRect()
     const next = resolveLoopDrag(
       { ...state, mode },
       sampleAt(event.clientX, rect),
       project,
-      gridBeats,
-      event.altKey,
+      fine ? 0 : gridBeats,
+      fine,
       state.minSamples,
     )
+    const shown = mode === 'end' ? next.end : next.start
+    const beat = projectSampleBeat(project, shown)
+    setLiveRead({ x: event.clientX - rect.left, text: positionReadout(beat, quartersPerBar(project.timeSignature)) })
     if (next.start === store.project.loopStartSample && next.end === store.project.loopEndSample && store.project.loopEnabled) return
     store.setLoop(true, next.start, next.end, true)
     state.changed = true
@@ -162,8 +185,11 @@ export function LoopRegion({
   function onPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
     const state = drag.current
     if (!state || event.pointerId !== state.pointerId) return
+    state.cancelFine()
     drag.current = null
     setFinger(null)
+    setActiveEdge(null)
+    setLiveRead(null)
     if (state.changed) store.endDraft()
     if (!state.moved && state.mode === 'seek') {
       const rect = event.currentTarget.getBoundingClientRect()
@@ -182,8 +208,9 @@ export function LoopRegion({
   return (
     <div
       ref={hostRef}
-      className={`loop-host${project.loopEnabled ? '' : ' off'}`}
+      className={`loop-host${project.loopEnabled ? '' : ' off'}${grips.mode === 'offset' ? ' offset' : ''}`}
       data-loop={project.loopEnabled ? 'on' : 'off'}
+      data-loop-hit={grips.mode}
       data-loop-region={view}
       data-loop-length={readout.length}
       data-loop-span={readout.span}
@@ -201,28 +228,38 @@ export function LoopRegion({
         style={{ left, width: barWidth }}
         title={`${readout.text}. Drag to move the loop. Double-click to turn it ${project.loopEnabled ? 'off' : 'on'}.`}
       />
-      <button
-        type="button"
-        className="loop-grip"
-        data-loop-edge="start"
-        style={{ left: grips.start.hitLeft, width: grips.start.hitWidth }}
-        aria-label="Loop start. Drag to move the start of the loop."
-        title="Loop start. Drag to move the start of the loop."
-      >
-        <span className="loop-grip-face start" style={{ left: grips.start.faceLeft - grips.start.hitLeft, width: grips.start.faceWidth }} aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        className="loop-grip end"
-        data-loop-edge="end"
-        style={{ left: grips.end.hitLeft, width: grips.end.hitWidth }}
-        aria-label="Loop end. Drag to stretch the loop."
-        title="Loop end. Drag to stretch the loop."
-      >
-        <span className="loop-grip-face end" style={{ left: grips.end.faceLeft - grips.end.hitLeft, width: grips.end.faceWidth }} aria-hidden="true" />
-      </button>
+      <LoopGrip edge="start" box={grips.start} dragging={activeEdge === 'start'} />
+      <LoopGrip edge="end" box={grips.end} dragging={activeEdge === 'end'} />
       {finger != null && <i className="snap-line loop-finger" style={{ left: finger }} />}
+      {liveRead && <em className="loop-drag-read" data-loop-drag-read="1" style={{ left: liveRead.x }}>{liveRead.text}</em>}
     </div>
+  )
+}
+
+function LoopGrip({ edge, box, dragging }: { edge: 'start' | 'end'; box: LoopGripBox; dragging: boolean }) {
+  const offset = box.offset !== 'inline'
+  return (
+    <button
+      type="button"
+      className={`loop-grip ${edge}${offset ? ` offset offset-${box.offset}` : ''}${dragging ? ' dragging' : ''}`}
+      data-loop-edge={edge}
+      style={{
+        left: box.hitLeft,
+        top: box.hitTop,
+        width: box.hitWidth,
+        height: box.hitHeight,
+        bottom: 'auto',
+        touchAction: 'none',
+      }}
+      aria-label={edge === 'start' ? 'Loop start. Drag to move the start of the loop.' : 'Loop end. Drag to stretch the loop.'}
+      title={edge === 'start' ? 'Loop start. Drag to move the start of the loop.' : 'Loop end. Drag to stretch the loop.'}
+    >
+      <span
+        className={`loop-grip-face ${edge}${offset ? ' tab' : ''}`}
+        style={{ left: box.faceLeft - box.hitLeft, top: offset ? box.faceTop : undefined, width: box.faceWidth, height: offset ? box.faceHeight : undefined }}
+        aria-hidden="true"
+      />
+    </button>
   )
 }
 
