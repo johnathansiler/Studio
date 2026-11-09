@@ -2206,7 +2206,7 @@ export class AudioEngine {
   async exportMix(project: Project, assets: Map<string, AudioAsset>): Promise<ArrayBuffer> {
     const rate = project.sampleRate || this.sampleRate
     const end = Math.max(rate, arrangementEndSample(project))
-    const inputs = renderArrangeInputs(project, assets, 0, end, end)
+    const inputs = await renderArrangeInputs(project, assets, 0, end, end)
     const renderedTracks = project.tracks.map((track) => ({
       id: track.id,
       type: track.type,

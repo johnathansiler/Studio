@@ -1,4 +1,4 @@
-import { graphPlugins, renderArrangeInputs } from './arrangeSources'
+import { graphPlugins, renderArrangeInputs, type ArrangePrint } from './arrangeSources'
 import { createPlugin } from './plugins/catalog'
 import { loadModule, peekModule } from './plugins/registry'
 import { createProcessor, preloadWasmInserts } from './plugins/createAll'
@@ -89,8 +89,8 @@ export function bounceBounds(project: Project, scope: BounceJob['scope'], startS
   return { start: 0, end: Math.max(project.sampleRate, projectEndSample(project.tracks, project.sampleRate, project.tempo)) }
 }
 
-export async function renderArrangement(project: Project, assets: Map<string, AudioAsset>, start: number, length: number, limiter: boolean, stemId: string | null = null, scheduleEnd = start + length, shouldCancel?: () => void) {
-  const rendered = await renderChannels(project, assets, start, length, limiter, stemId, scheduleEnd, shouldCancel)
+export async function renderArrangement(project: Project, assets: Map<string, AudioAsset>, start: number, length: number, limiter: boolean, stemId: string | null = null, scheduleEnd = start + length, shouldCancel?: () => void, fetchImpl?: ArrangePrint['fetchImpl']) {
+  const rendered = await renderChannels(project, assets, start, length, limiter, stemId, scheduleEnd, shouldCancel, fetchImpl)
   return rendered.master
 }
 
@@ -219,7 +219,7 @@ export function applyFreeze(project: Project, buffers: Map<string, AudioAsset>, 
   return { project: next, buffers: map }
 }
 
-async function renderChannels(project: Project, assets: Map<string, AudioAsset>, start: number, length: number, limiter: boolean, stemId: string | null, scheduleEnd = start + length, shouldCancel?: () => void) {
+async function renderChannels(project: Project, assets: Map<string, AudioAsset>, start: number, length: number, limiter: boolean, stemId: string | null, scheduleEnd = start + length, shouldCancel?: () => void, fetchImpl?: ArrangePrint['fetchImpl']) {
   await ensurePlugins(project)
   await preloadWasmInserts()
   shouldCancel?.()
@@ -231,7 +231,7 @@ async function renderChannels(project: Project, assets: Map<string, AudioAsset>,
     masterPlugins = masterPlugins.map((plugin) => ({ ...plugin, enabled: false }))
     masterVolume = 1
   } else masterPlugins = bounceMasterPlugins(masterPlugins, limiter)
-  const inputs = renderArrangeInputs(project, assets, start, length, scheduleEnd, shouldCancel)
+  const inputs = await renderArrangeInputs(project, assets, start, length, scheduleEnd, { shouldCancel, fetchImpl })
   const graphTracks: GraphTrack[] = routed.map((track) => ({
     id: track.id,
     type: track.type,
@@ -298,24 +298,19 @@ async function ensurePlugins(project: Project) {
   await Promise.all([...ids].map((id) => loadModule(id)))
 }
 
-/** Master chain for a mix file. The speaker safety compressor is never inserted here. */
+/**
+ * Master chain for a mix file.
+ * `limiter` adds an optional safety stage at the end. It does not turn a user's
+ * limiter off or change its ceiling. The speaker safety compressor is never inserted.
+ */
 export function bounceMasterPlugins(plugins: PluginInstance[], limiter: boolean) {
   const copy = plugins.map(copyPlugin)
-  if (!limiter) return copy.map((plugin) => (plugin.pluginId === 'limiter' ? { ...plugin, enabled: false } : plugin))
-  return enableLimiter(copy)
-}
-
-function enableLimiter(plugins: PluginInstance[]) {
-  const copy = plugins.map(copyPlugin)
-  let last = -1
-  for (let index = 0; index < copy.length; index++) if (copy[index].pluginId === 'limiter') last = index
-  if (last >= 0 && last === copy.length - 1) {
-    copy[last].enabled = true
-    return copy
-  }
-  const limiter = createPlugin('limiter', 'Transparent')
-  limiter.enabled = true
-  return [...copy, limiter]
+  if (!limiter) return copy
+  const last = copy[copy.length - 1]
+  if (last?.pluginId === 'limiter' && last.enabled) return copy
+  const safety = createPlugin('limiter', 'Transparent')
+  safety.enabled = true
+  return [...copy, safety]
 }
 
 function copyPlugin(plugin: PluginInstance): PluginInstance {

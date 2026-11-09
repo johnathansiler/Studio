@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { MPEGDecoder } from 'mpg123-decoder'
+import { LibrarySamplesMissing } from '../audio/arrangeSources'
+import { AudioEngine } from '../audio/engine'
 import { bounceMasterPlugins, BounceCancelled, renderArrangement, runBounce } from '../audio/bounce'
 import { renderSamplerSpan } from '../audio/plugins/sampler'
 import { renderGraph } from '../audio/renderGraph'
@@ -11,9 +13,13 @@ import { beatSpanSamples } from '../model/tempoMap'
 import { beatsToSamples } from '../model/time'
 import { createEmptyProject, makeTrack, type AudioAsset, type Project } from '../model/types'
 import { renderClipChannels } from '../audio/stretch/engine'
-import { decodeWavPCM } from '../model/wav'
+import { packProject, unpackProject } from '../model/archive'
+import { decodeWavPCM, encodeWav } from '../model/wav'
 import { unzip } from '../model/zip'
 import { normalizePadKit } from '../model/padMachine'
+import { loadStarterOnto } from '../sounds/instruments'
+import { ProjectStore } from '../state/store'
+import type { LibraryEntry } from '../audio/multisample/library'
 
 const rate = 48000
 
@@ -339,6 +345,99 @@ describe('export sources', () => {
     expect(openPeak).toBeGreaterThan(1.2)
     expect(limitedPeak).toBeLessThan(1.02)
     expect(limitedPeak).toBeLessThan(openPeak * 0.85)
+
+    const user = createPlugin('limiter', 'Transparent')
+    user.enabled = true
+    user.params.ceiling = -20
+    const kept = bounceMasterPlugins([user, createPlugin('eq')], false)
+    expect(kept.map((plugin) => plugin.pluginId)).toEqual(['limiter', 'eq'])
+    expect(kept[0].enabled).toBe(true)
+    expect(kept[0].params.ceiling).toBe(-20)
+    const toneAsset = asset('hot', tone(Math.round(rate * 0.3), 220, 0.9))
+    const mastered = project()
+    mastered.masterPlugins = [{ ...user, params: { ...user.params } }]
+    mastered.tracks[0].clips = [{
+      id: 'c', name: 'c', bufferId: 'hot', startSample: 0, offsetSamples: 0, durationSamples: toneAsset.channels[0].length,
+      fadeInSamples: 0, fadeOutSamples: 0, gain: 1, source: 'import',
+    }]
+    const buffers = new Map([[toneAsset.id, toneAsset]])
+    const sheetOff = await renderArrangement(mastered, buffers, 0, toneAsset.channels[0].length, false)
+    const sheetOn = await renderArrangement(mastered, buffers, 0, toneAsset.channels[0].length, true)
+    const quick = decodeWavPCM(await new AudioEngine().exportMix(mastered, buffers))
+    expect(peakIndex(sheetOff[0]).best).toBeLessThan(0.2)
+    expect(peakIndex(sheetOn[0]).best).toBeLessThan(0.2)
+    expect(peakIndex(quick.channels[0]).best).toBeLessThan(0.2)
+    mastered.masterPlugins = [{ ...user, enabled: false, params: { ...user.params } }]
+    const bypassed = await renderArrangement(mastered, buffers, 0, toneAsset.channels[0].length, false)
+    expect(peakIndex(bypassed[0]).best).toBeGreaterThan(0.5)
+    mastered.masterPlugins = [{ ...user, enabled: true, params: { ...user.params } }]
+    const [zip] = await runBounce({
+      kind: 'stems', project: mastered, assets: [toneAsset], scope: 'time', startSample: 0, endSample: toneAsset.channels[0].length, tail: 0,
+      sampleRate: rate, bits: 32, dither: 'none', normalize: 'off', normalizeTarget: -1, limiter: false,
+      stemIds: null, trackId: null, mp3Mode: 'cbr', mp3Bitrate: 128, mp3Quality: 4, title: '', artist: '', artwork: null, projectAudio: 'wav',
+    })
+    const stemFile = (await unzip(zip.bytes))[0]
+    const stem = decodeWavPCM(stemFile.data.buffer.slice(stemFile.data.byteOffset, stemFile.data.byteOffset + stemFile.data.byteLength) as ArrayBuffer)
+    expect(peakIndex(stem.channels[0]).best).toBeGreaterThan(0.5)
+  })
+
+  it('prints a URL-only starter instrument, then keeps that PCM for a reload', async () => {
+    const entry: LibraryEntry = { id: 'tone', name: 'Tone', license: 'CC0-1.0', path: 'tone/instrument.sfz', bytes: 8, description: '' }
+    const source = tone(Math.round(rate * 0.2), 330, 0.6)
+    const wav = encodeWav([source], rate)
+    const sfz = '<region> sample=samples/c4.wav key=c4\n'
+    let sampleFetches = 0
+    const fetchImpl = async (url: string) => {
+      expect(url.startsWith('https://huggingface.co/datasets/')).toBe(true)
+      if (url.endsWith('.sfz')) return new Response(sfz)
+      sampleFetches += 1
+      return new Response(wav)
+    }
+    const store = new ProjectStore(createEmptyProject(rate, 'Library'))
+    const keys = store.project.tracks.find((track) => track.type === 'midi')!
+    await loadStarterOnto(entry, keys.id, { setLibrary: (id, program) => store.setLibrary(id, program) }, { audition: false, fetchImpl })
+    const program = store.track(keys.id)!.library!
+    expect(program.samples[0].url).toContain('huggingface.co')
+    expect(program.samples[0].bufferId || '').toBe('')
+    expect(store.buffers.size).toBe(0)
+    keys.volume = 1
+    keys.pan = 0
+    keys.midiClips = [{
+      id: 'm', name: 'note', startBeat: 0, durationBeats: 1,
+      notes: [{ id: 'n', pitch: 60, startBeat: 0, durationBeats: 0.5, velocity: 0.9 }],
+    }]
+    store.project.masterPlugins = []
+    store.project.masterVolume = 1
+    const printed = await renderArrangement(store.project, store.buffers, 0, rate, false, null, rate, undefined, fetchImpl)
+    expect(rms(printed[0], 0, source.length)).toBeGreaterThan(0.02)
+    expect(sampleFetches).toBe(1)
+    expect(correlate(printed[0].subarray(200, 2000), source.subarray(200, 2000))).toBeGreaterThan(0.8)
+    const savedId = program.samples[0].bufferId || ''
+    expect(store.buffers.get(savedId)?.channels[0].length).toBe(source.length)
+    const opened = await unpackProject(await packProject(store.project, store.buffers.values(), { audio: 'wav' }))
+    const offline = async (_url: string) => { throw new Error('network') }
+    const again = await renderArrangement(opened.project, new Map(opened.assets.map((item) => [item.id, item])), 0, rate, false, null, rate, undefined, offline)
+    expect(rms(again[0], 0, source.length)).toBeGreaterThan(0.02)
+    expect(correlate(again[0].subarray(200, 2000), printed[0].subarray(200, 2000))).toBeGreaterThan(0.98)
+
+    const broken = new ProjectStore(createEmptyProject(rate, 'Missing'))
+    const host = broken.project.tracks.find((track) => track.type === 'midi')!
+    await loadStarterOnto(entry, host.id, { setLibrary: (id, program) => broken.setLibrary(id, program) }, { audition: false, fetchImpl })
+    host.volume = 1
+    host.midiClips = keys.midiClips
+    broken.project.masterPlugins = []
+    broken.project.masterVolume = 1
+    await expect(renderArrangement(broken.project, broken.buffers, 0, rate, false, null, rate, undefined, async (url: string) => {
+      if (url.endsWith('.sfz')) return new Response(sfz)
+      return new Response('missing', { status: 404 })
+    })).rejects.toBeInstanceOf(LibrarySamplesMissing)
+    let fetching = false
+    await expect(renderArrangement(broken.project, broken.buffers, 0, rate, false, null, rate, () => {
+      if (fetching) throw new BounceCancelled()
+    }, async (url: string) => {
+      if (url.endsWith('.wav')) fetching = true
+      return url.endsWith('.sfz') ? new Response(sfz) : new Response(wav)
+    })).rejects.toBeInstanceOf(BounceCancelled)
   })
 
   it('agrees across wav, stems, and mp3, and still cancels', async () => {

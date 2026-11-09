@@ -26,12 +26,161 @@ import { matchBufferRate, renderPatchSpan } from '../instruments/patch/engine'
 import { renderNotes, type SampleBuffer } from './rack/dsp'
 import { renderSamplerSpan } from './plugins/sampler'
 import { clipNeedsStretch, renderClipChannels } from './stretch/engine'
-import { SampleCache } from './multisample/cache'
-import { renderSampler, type SamplerNote } from './multisample/engine'
+import { SampleCache, type FetchLike } from './multisample/cache'
+import { SamplerInstrument, type SamplerNote } from './multisample/engine'
 import { isPackAsset, packFromAsset } from './multisample/persist'
+import type { SampleRef } from './multisample/types'
 
 const FLOOR = 0.0001
 const HIT_PEAK = 0.22
+
+export class LibrarySamplesMissing extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'LibrarySamplesMissing'
+  }
+}
+
+export interface ArrangePrint {
+  shouldCancel?: () => void
+  /** Used for starter zones that are still URLs. Defaults to the platform fetch. */
+  fetchImpl?: FetchLike
+}
+
+/**
+ * One stereo buffer per track for the bounce window. The mix graph has to hold
+ * those together because of sends. Library decode is only the zones for notes
+ * inside that window, one download at a time, written straight into the track
+ * buffer in short blocks. The catalog itself is not fetched.
+ */
+export async function renderArrangeInputs(
+  project: Project,
+  assets: Map<string, AudioAsset>,
+  origin: number,
+  length: number,
+  scheduleEnd = origin + length,
+  print?: ArrangePrint | (() => void),
+): Promise<Map<string, Float32Array[]>> {
+  const options = printOptions(print)
+  await prepareLibrarySources(project, assets, origin, scheduleEnd, options)
+  const buffers = new Map<string, Float32Array[]>()
+  for (const track of project.tracks) {
+    options.shouldCancel?.()
+    const out = [new Float32Array(length), new Float32Array(length)]
+    buffers.set(track.id, out)
+    mixAudioClips(out, project, track, assets, origin, length)
+    mixMidi(out, project, track, assets, origin, length, scheduleEnd, options.shouldCancel)
+  }
+  mixStepSequencers(buffers, project, assets, origin, length, scheduleEnd, options.shouldCancel)
+  mixPatternClips(buffers, project, assets, origin, length, scheduleEnd, options.shouldCancel)
+  return buffers
+}
+
+function printOptions(print?: ArrangePrint | (() => void)): ArrangePrint {
+  if (typeof print === 'function') return { shouldCancel: print }
+  return print ?? {}
+}
+
+/**
+ * Download only the zones the notes in this window will play, and keep that PCM
+ * on the project so a save can round-trip it. A failed or cancelled load throws.
+ */
+export async function prepareLibrarySources(
+  project: Project,
+  assets: Map<string, AudioAsset>,
+  origin: number,
+  scheduleEnd: number,
+  print: ArrangePrint = {},
+) {
+  const cache = new SampleCache(print.fetchImpl)
+  for (const track of project.tracks) {
+    print.shouldCancel?.()
+    if (track.instrument !== 'library' || !track.library) continue
+    const events = libraryEvents(project, track, origin, scheduleEnd)
+    if (!events.length) continue
+    const instrument = new SamplerInstrument(project.sampleRate, cache)
+    instrument.setProgram(track.library)
+    const planned = instrument.plan(events)
+    const needed = new Map<string, SampleRef>()
+    for (const note of planned) for (const sample of note.samples) needed.set(sample.id, sample)
+    const failed = new Set<string>()
+    for (const sample of needed.values()) {
+      print.shouldCancel?.()
+      const stored = storedSample(sample, assets)
+      if (stored) {
+        if (stored.pack) cache.holdPack(stored.pack)
+        else if (stored.audio) cache.holdAudio(sample.id, stored.audio)
+        continue
+      }
+      if (!sample.url) {
+        failed.add(sample.id)
+        continue
+      }
+      try {
+        const decoded = await cache.load(sample)
+        print.shouldCancel?.()
+        if (!decoded?.channels.some((channel) => channel.length > 0)) {
+          failed.add(sample.id)
+          continue
+        }
+        const id = sample.bufferId || `lib:${track.id}:${sample.id}`
+        if (!assets.has(id)) {
+          assets.set(id, { id, name: sample.id, sampleRate: decoded.sampleRate, channels: decoded.channels })
+        }
+        const owned = track.library.samples.find((item) => item.id === sample.id)
+        if (owned) owned.bufferId = id
+        sample.bufferId = id
+      } catch (error) {
+        if (error instanceof Error && error.name === 'BounceCancelled') throw error
+        failed.add(sample.id)
+      }
+    }
+    let missing = 0
+    for (const note of planned) {
+      if (note.attackIds.length > 0 && note.attackIds.every((id) => failed.has(id))) missing += 1
+    }
+    if (missing > 0) {
+      throw new LibrarySamplesMissing(missing === 1 ? 'A library note could not load its sample' : `${missing} library notes could not load their samples`)
+    }
+  }
+}
+
+function storedSample(sample: SampleRef, assets: Map<string, AudioAsset>): { audio?: { sampleRate: number; channels: Float32Array[] }; pack?: ReturnType<typeof packFromAsset> } | null {
+  if (sample.bufferId) {
+    const asset = assets.get(sample.bufferId)
+    if (asset?.channels.some((channel) => channel.length > 0) && !isPackAsset(asset)) {
+      return { audio: { sampleRate: asset.sampleRate, channels: asset.channels } }
+    }
+  }
+  if (sample.packId) {
+    const packed = assets.get(sample.packId)
+    if (packed && isPackAsset(packed)) {
+      const pack = packFromAsset({ id: sample.packId, name: packed.name, channels: packed.channels })
+      if (pack) return { pack }
+    }
+  }
+  return null
+}
+
+function libraryEvents(project: Project, track: Track, origin: number, scheduleEnd: number): SamplerNote[] {
+  const events: SamplerNote[] = []
+  for (const group of performancesOn(project, track)) {
+    if (group.voice.instrument !== 'library') continue
+    for (const clip of group.clips) {
+      if (clip.slotOnly || clip.scene != null) continue
+      for (const note of prepareClipNotes(project, group.owner, clip)) {
+        if (note.muted) continue
+        const span = beatSpanSamples(project, clip.startBeat + note.startBeat, note.durationBeats)
+        if (span.start >= scheduleEnd || span.start + span.duration < origin) continue
+        const on = Math.max(0, Math.round(span.start - origin))
+        const off = Math.max(0, Math.round(span.start + span.duration - origin))
+        events.push({ sample: on, pitch: note.pitch, vel: note.velocity })
+        events.push({ sample: off, pitch: note.pitch, vel: 0 })
+      }
+    }
+  }
+  return events
+}
 
 /**
  * Steps never run as an audio insert. Sampler and Beat Machine are printed
@@ -46,27 +195,6 @@ export function graphPlugins(track: Track): PluginInstance[] {
         && (track.instrument === 'pads' || track.instrument === 'drum-machine' || track.instrument === '808'))
     return generator ? { ...plugin, enabled: false } : plugin
   })
-}
-
-export function renderArrangeInputs(
-  project: Project,
-  assets: Map<string, AudioAsset>,
-  origin: number,
-  length: number,
-  scheduleEnd = origin + length,
-  shouldCancel?: () => void,
-): Map<string, Float32Array[]> {
-  const buffers = new Map<string, Float32Array[]>()
-  for (const track of project.tracks) {
-    shouldCancel?.()
-    const out = [new Float32Array(length), new Float32Array(length)]
-    buffers.set(track.id, out)
-    mixAudioClips(out, project, track, assets, origin, length)
-    mixMidi(out, project, track, assets, origin, length, scheduleEnd, shouldCancel)
-  }
-  mixStepSequencers(buffers, project, assets, origin, length, scheduleEnd, shouldCancel)
-  mixPatternClips(buffers, project, assets, origin, length, scheduleEnd, shouldCancel)
-  return buffers
 }
 
 function mixAudioClips(
@@ -280,37 +408,50 @@ function mixLibrary(
   length: number,
 ) {
   const program = track.library
-  if (!program) return
+  if (!program || !notes.length) return
   const rate = project.sampleRate
-  // Project PCM only. A later library can drop buffers or packs in; export does not fetch one.
   const bank = new SampleCache(async () => new Response(null, { status: 404 }))
   const seen = new Set<string>()
   for (const sample of program.samples ?? []) {
-    if (sample.packId && !seen.has(sample.packId)) {
-      seen.add(sample.packId)
-      const packed = assets.get(sample.packId)
-      if (packed && isPackAsset(packed)) {
-        const pack = packFromAsset({ id: sample.packId, name: packed.name, channels: packed.channels })
-        if (pack) bank.holdPack(pack)
+    const stored = storedSample(sample, assets)
+    if (!stored) continue
+    if (stored.pack) {
+      if (sample.packId && !seen.has(sample.packId)) {
+        seen.add(sample.packId)
+        bank.holdPack(stored.pack)
       }
-    }
-    if (!sample.bufferId) continue
-    const asset = assets.get(sample.bufferId)
-    if (!asset?.channels?.length || isPackAsset(asset)) continue
-    bank.holdAudio(sample.id, { sampleRate: asset.sampleRate, channels: asset.channels })
+    } else if (stored.audio) bank.holdAudio(sample.id, stored.audio)
   }
-  const frames = Math.max(1, length)
   const events: SamplerNote[] = []
   for (const note of notes) {
     const on = Math.round(note.start - origin)
     const off = Math.round(note.start + note.duration - origin)
-    if (off < 0 || on >= frames) continue
+    if (off < 0 || on >= length) continue
     events.push({ sample: Math.max(0, on), pitch: note.pitch, vel: note.velocity })
-    events.push({ sample: Math.max(0, Math.min(frames - 1, off)), pitch: note.pitch, vel: 0 })
+    events.push({ sample: Math.min(length - 1, Math.max(0, off)), pitch: note.pitch, vel: 0 })
   }
   if (!events.length) return
-  const rendered = renderSampler(program, events, rate, frames, bank)
-  addStereo(out, rendered, origin, origin, frames, 0)
+  const instrument = new SamplerInstrument(rate, bank)
+  instrument.setProgram(program)
+  const ordered = events.slice().sort((a, b) => a.sample - b.sample || b.vel - a.vel)
+  let cursor = 0
+  let offset = 0
+  while (offset < length) {
+    while (cursor < ordered.length && ordered[cursor].sample <= offset) {
+      const event = ordered[cursor]
+      if (event.vel <= 0) instrument.noteOff(event.pitch, event.vel)
+      else instrument.noteOn(event.pitch, event.vel)
+      cursor += 1
+    }
+    const next = ordered[cursor]?.sample ?? length
+    const count = Math.min(128, length - offset, Math.max(1, next - offset))
+    const block = instrument.render(count)
+    for (let i = 0; i < count; i++) {
+      out[0][offset + i] += block[0][i] || 0
+      out[1][offset + i] += block[1][i] || 0
+    }
+    offset += count
+  }
 }
 
 function mixPad(
