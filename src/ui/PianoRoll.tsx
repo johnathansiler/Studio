@@ -73,8 +73,11 @@ const SOURCES: { id: ChordSource; name: string }[] = [
   { id: 'gospel', name: 'Gospel' },
 ]
 
-const LOW = 48
-const HIGH = 84
+/** C1 through C6. Kick and snare live at C2 and D2, below the old C3 floor. */
+export const ROLL_LOW = 24
+export const ROLL_HIGH = 84
+const LOW = ROLL_LOW
+const HIGH = ROLL_HIGH
 const VEL_H = 36
 
 export interface PianoActions {
@@ -156,6 +159,51 @@ export function PianoRoll({
   const gridRef = useRef<HTMLDivElement>(null)
   const pianoRef = useRef<HTMLDivElement>(null)
   const keysRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const view = rollRef.current
+    if (!view) return
+    let frame = 0
+    let tries = 0
+    let userMoved = false
+    const markUser = () => { userMoved = true }
+    const place = () => {
+      if (userMoved) return
+      const keys = keysRef.current
+      const notes = clip?.notes ?? []
+      if (!notes.length) return
+      if (view.clientHeight < 40 && tries < 8) {
+        tries += 1
+        frame = requestAnimationFrame(place)
+        return
+      }
+      const pitches = notes.map((note) => note.pitch).filter((pitch) => Number.isFinite(pitch)).sort((a, b) => a - b)
+      if (!pitches.length) return
+      const focus = pitches[Math.floor((pitches.length - 1) / 2)]
+      const rowHeight = Math.max(1, rowRef.current)
+      const top = (HIGH - focus) * rowHeight
+      const shown = top >= view.scrollTop + 8 && top + rowHeight <= view.scrollTop + view.clientHeight - 8
+      if (shown) return
+      const next = Math.max(0, Math.min(Math.max(0, view.scrollHeight - view.clientHeight), top - view.clientHeight * 0.35))
+      if (Math.abs(next - view.scrollTop) < 1) return
+      view.scrollTop = next
+      if (keys) keys.scrollTop = next
+    }
+    view.addEventListener('pointerdown', markUser)
+    view.addEventListener('wheel', markUser, { passive: true })
+    keysRef.current?.addEventListener('pointerdown', markUser)
+    keysRef.current?.addEventListener('wheel', markUser, { passive: true })
+    place()
+    const watch = new ResizeObserver(() => place())
+    watch.observe(view)
+    return () => {
+      cancelAnimationFrame(frame)
+      view.removeEventListener('pointerdown', markUser)
+      view.removeEventListener('wheel', markUser)
+      keysRef.current?.removeEventListener('pointerdown', markUser)
+      keysRef.current?.removeEventListener('wheel', markUser)
+      watch.disconnect()
+    }
+  }, [clip?.id])
   const velRef = useRef<HTMLDivElement>(null)
   const dragGen = useRef(0)
   const multi = useRef(false)

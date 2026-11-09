@@ -50,6 +50,14 @@ function residentWave(sampleRate: number, pitch: number | undefined) {
 /** Pads drawn on the face. Bank A is 1–8. Bank B is 9–16 of the same stored kit bank. */
 export const FACE_PADS = 8
 
+/**
+ * A pad is always a drum hit, even before Arrange has a clip to record into.
+ * An empty clip id only means nothing is open yet. Note Repeat and one-shots share this.
+ */
+export function padPerformTarget(trackId: string, clipId?: string | null): PerformTarget {
+  return { trackId, clipId: clipId || '', drums: true }
+}
+
 /** Storage index for a face slot. Both pages together still address all 16 saved pads. */
 export function facePadIndex(page: number, slot: number): number {
   const bankPage = page >= 1 ? 1 : 0
@@ -96,6 +104,7 @@ export function PadsPanel({
   const [selected, setSelected] = useState(0)
   const [levels, setLevels] = useState<LevelSpread | ''>('')
   const [repeatOn, setRepeatOn] = useState(false)
+  const [repeatDown, setRepeatDown] = useState(false)
   const [eraseOn, setEraseOn] = useState(false)
   const [recordMode, setRecordMode] = useState<'overdub' | 'replace'>('overdub')
   const [stepPick, setStepPick] = useState(0)
@@ -162,7 +171,7 @@ export function PadsPanel({
       ? store.padRecord.clipId
       : store.track(trackId)?.midiClips.find((clip) => clip.id === store.selectedMidiClipId)?.id
         ?? store.track(trackId)?.midiClips[0]?.id
-    target.current = clipId ? { trackId, clipId, drums: true } : null
+    target.current = padPerformTarget(trackId, clipId)
   })
 
   useEffect(() => {
@@ -256,11 +265,16 @@ export function PadsPanel({
     root.addEventListener('pointermove', move)
     root.addEventListener('pointerup', up)
     root.addEventListener('pointercancel', up)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
     return () => {
       root.removeEventListener('pointerdown', down)
       root.removeEventListener('pointermove', move)
       root.removeEventListener('pointerup', up)
       root.removeEventListener('pointercancel', up)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      for (const id of pointers.keys()) play.up(id, performance.now())
     }
   }, [kit.repeatPressure, levels, play])
 
@@ -333,7 +347,7 @@ export function PadsPanel({
     engine.unlock()
     onRecord()
     const rec = store.padRecord
-    if (rec?.trackId === trackId) target.current = { trackId, clipId: rec.clipId, drums: true }
+    if (rec?.trackId === trackId) target.current = padPerformTarget(trackId, rec.clipId)
   }
 
   function stopTake() {
@@ -535,7 +549,8 @@ export function PadsPanel({
               const label = levels ? levelLabel(index, levels) : padFaceName(pad)
               const sampleTitle = pad.sampleName || (pad.layers[0]?.bufferId ? store.buffers.get(pad.layers[0].bufferId)?.name : '') || pad.name
               const velocity = meters[index] ?? 0
-              const lit = litPads.includes(index) || litNotes.includes(pitch) || velocity > 0.08
+              const held = litPads.includes(index)
+              const lit = held || litNotes.includes(pitch) || velocity > 0.08
               return (
                 <button
                   key={`${bank}-${pad.pitch}-${index}`}
@@ -543,6 +558,7 @@ export function PadsPanel({
                   className={`mpc-pad ch-raised${lit ? ' lit' : ''}${selected === index ? ' sel' : ''}${pad.muted ? ' muted' : ''}`}
                   data-pad={index}
                   data-pitch={pitch}
+                  aria-pressed={held}
                   style={{ ['--vel' as string]: String(velocity) }}
                   title={`${sampleTitle && sampleTitle !== label ? `${label}. ${sampleTitle}` : label}. Drag a sound here.`}
                   onDragOver={(event) => {
@@ -595,10 +611,19 @@ export function PadsPanel({
           <div className="note-repeat-row">
             <button
               type="button"
-              className={`note-repeat-hold hw-key${repeatOn ? ' on' : ''}`}
+              className={`note-repeat-hold hw-key${repeatOn ? ' on' : ''}${repeatDown ? ' down' : ''}`}
               aria-pressed={repeatOn}
+              data-down={repeatDown ? '1' : '0'}
               aria-label="Note Repeat: tap to turn on or off"
               title="Note Repeat: tap to turn on or off. While it is on, pads repeat at this rate."
+              onPointerDown={(event) => {
+                if (event.button !== 0 && event.pointerType !== 'touch' && event.pointerType !== 'pen') return
+                setRepeatDown(true)
+              }}
+              onPointerUp={() => setRepeatDown(false)}
+              onPointerCancel={() => setRepeatDown(false)}
+              onPointerLeave={() => setRepeatDown(false)}
+              onBlur={() => setRepeatDown(false)}
               onClick={() => setRepeatOn((value) => !value)}
             >
               Note Repeat

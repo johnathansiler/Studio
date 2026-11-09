@@ -24,7 +24,7 @@ import { createKit } from '../model/padMachine'
 import { browserGroup } from '../model/sessionBoard'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
-import { facePadIndex, PadsPanel } from '../ui/PadsPanel'
+import { facePadIndex, padPerformTarget, PadsPanel } from '../ui/PadsPanel'
 import { OpenBeatMachineButton } from '../ui/BeatMachineButton'
 import { InsertList, insertChoices, insertLabel } from '../ui/PluginSheet'
 
@@ -41,6 +41,11 @@ const engine = {
 } as unknown as AudioEngine
 
 describe('pads drum machine', () => {
+  it('treats a pad hit as a drum before any clip exists', () => {
+    expect(padPerformTarget('trk', null)).toEqual({ trackId: 'trk', clipId: '', drums: true })
+    expect(padPerformTarget('trk', 'midi_1')).toEqual({ trackId: 'trk', clipId: 'midi_1', drums: true })
+  })
+
   it('records pad hits onto the clip at the played beats', () => {
     const store = new ProjectStore(createEmptyProject())
     const id = store.project.tracks.find((track) => track.type === 'midi')!.id

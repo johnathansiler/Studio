@@ -117,7 +117,13 @@ export function fitKey(hist: Float32Array | number[]): KeyFit {
   const major = bestMajorMinor(hist, false)
   const minor = bestMajorMinor(hist, true)
   if (Math.abs(major.score - minor.score) < 0.06) {
-    const pick = thirdDelta(hist, major.root, false) >= thirdDelta(hist, minor.root, true) ? major : minor
+    // The relative minor's third is the major tonic, so the third test
+    // votes minor whenever the major chord is loud. Relatives follow the
+    // higher correlation. Parallel keys still use the third.
+    const relative = (minor.root - major.root + 12) % 12 === 9
+    const pick = relative
+      ? (major.score >= minor.score ? major : minor)
+      : (thirdDelta(hist, major.root, false) >= thirdDelta(hist, minor.root, true) ? major : minor)
     if (pick.score > best.score - 0.04) best = pick
   } else if (best.scale !== 'ionian' && best.scale !== 'aeolian') {
     const plain = major.score >= minor.score ? major : minor
@@ -143,23 +149,190 @@ function thirdDelta(hist: Float32Array | number[], root: number, minor: boolean)
   return (hist[want] || 0) - (hist[other] || 0) + 0.4 * (hist[root] || 0)
 }
 
-export function keyFromHistogram(hist: Float32Array | number[]): AnalysisKey & { scale: ScaleId } {
+function scoreAt(hist: Float32Array | number[], root: number, scale: ScaleId) {
+  return correlate(rotate(hist, root), modeProfile(scale))
+}
+
+/**
+ * C major and A minor use the same seven notes. The pitch profile follows
+ * whichever note is loudest, so a vi chord can outvote the tonic.
+ * Only an authentic dominant resolving to its tonic (G7→C, E→Am) may move
+ * that choice. G→Am is V→vi in C and only bVII→i in A minor, so that
+ * motion can support a minor the profile already chose, not flip a major.
+ * Inside the same profile gap, a key the cadence does not settle keeps
+ * its relative name instead of reading as certain.
+ */
+const CLOSE_GAP = 0.12
+/** One plain V→I is 3 × 0.85 = 2.55 before any loop weight. */
+const AUTHENTIC_LEAD = 2
+/** Opening on the tonic (0.75) plus one bar (0.35) is not a cadence. */
+const SETTLED_LEAD = 1.5
+const LOOP_LIMIT = 8
+
+interface HeardChord {
+  root: number
+  id: string
+}
+
+function family(id: string) {
+  if (id === '7') return 'dom'
+  if (id === 'maj' || id === 'maj7' || id === 'aug') return 'maj'
+  if (id === 'min' || id === 'm7' || id === 'mMaj7') return 'min'
+  if (id === 'dim' || id === 'dim7' || id === 'm7b5') return 'dim'
+  return 'open'
+}
+
+function heardChords(bars: BarChroma[]) {
+  const chords: HeardChord[] = []
+  for (const bar of bars) {
+    if (bar.energy <= 1e-5) continue
+    const fit = chordFromChroma(bar.chroma, bar.bass, null)
+    if (fit) chords.push({ root: fit.root, id: fit.id })
+  }
+  return chords
+}
+
+function tonicStrength(chord: HeardChord, root: number, minor: boolean) {
+  if (chord.root !== root) return 0
+  const kind = family(chord.id)
+  if (minor && kind === 'min') return 1
+  if (!minor && kind === 'maj') return 1
+  if (kind === 'open') return 0.4
+  return 0
+}
+
+/** Major triad or dominant seventh on degree 5. The seventh is the stronger dominant. */
+function authenticStrength(chord: HeardChord, root: number) {
+  if (chord.root !== (root + 7) % 12) return 0
+  if (family(chord.id) === 'dom') return 1
+  if (chord.id === 'maj') return 0.85
+  if (chord.id === 'maj7') return 0.45
+  return 0
+}
+
+function isFlatSeven(chord: HeardChord, root: number) {
+  return chord.root === (root + 10) % 12 && (family(chord.id) === 'maj' || family(chord.id) === 'dom')
+}
+
+function isMinorFive(chord: HeardChord, root: number) {
+  return chord.root === (root + 7) % 12 && family(chord.id) === 'min'
+}
+
+function isPlagal(chord: HeardChord, root: number, minor: boolean) {
+  if (chord.root !== (root + 5) % 12) return false
+  return minor ? family(chord.id) === 'min' : family(chord.id) === 'maj'
+}
+
+interface Claim {
+  /** V or V7 resolving to the tonic. The only evidence that may override the profile. */
+  authentic: number
+  /** Authentic plus modal, plagal, and where the tonic sits in the phrase. */
+  support: number
+}
+
+function motion(prev: HeardChord, next: HeardChord, root: number, minor: boolean) {
+  const onto = tonicStrength(next, root, minor)
+  if (onto <= 0) return { authentic: 0, modal: 0 }
+  const authentic = authenticStrength(prev, root)
+  if (authentic > 0) return { authentic: 3 * authentic * onto, modal: 0 }
+  // V→vi of the relative major is this same bVII→i. It stays modal support.
+  if (minor && isFlatSeven(prev, root)) return { authentic: 0, modal: 1.15 * onto }
+  if (minor && isMinorFive(prev, root)) return { authentic: 0, modal: 0.9 * onto }
+  if (isPlagal(prev, root, minor)) return { authentic: 0, modal: 0.7 * onto }
+  return { authentic: 0, modal: 0 }
+}
+
+function tonicClaim(chords: HeardChord[], root: number, minor: boolean): Claim {
+  if (!chords.length) return { authentic: 0, support: 0 }
+  let authentic = 0
+  let modal = 0
+  const add = (part: { authentic: number; modal: number }, weight: number) => {
+    authentic += part.authentic * weight
+    modal += part.modal * weight
+  }
+  const looped = chords.length >= 2 && chords.length <= LOOP_LIMIT
+  const transitions = chords.length - 1
+  for (let i = 0; i < transitions; i++) {
+    // In a loop the repeat (last→first) is the cadence. The chord before
+    // the final bar is not a second ending, or V→vi would outvote I.
+    const weight = !looped && i === transitions - 1 ? 1.35 : 1
+    add(motion(chords[i], chords[i + 1], root, minor), weight)
+  }
+  if (looped) add(motion(chords[chords.length - 1], chords[0], root, minor), 2.2)
+  let support = authentic + modal
+  support += tonicStrength(chords[0], root, minor) * 0.75
+  support += tonicStrength(chords[chords.length - 1], root, minor) * 0.8
+  for (const chord of chords) {
+    support += tonicStrength(chord, root, minor) * 0.35
+    support += authenticStrength(chord, root) * 0.4
+  }
+  return { authentic, support }
+}
+
+function relativeKey(fit: KeyFit, hist: Float32Array | number[]): KeyFit | null {
+  if (fit.scale === 'aeolian') {
+    const root = (fit.root + 3) % 12
+    return { root, scale: 'ionian', score: scoreAt(hist, root, 'ionian') }
+  }
+  if (fit.scale === 'ionian') {
+    const root = (fit.root + 9) % 12
+    return { root, scale: 'aeolian', score: scoreAt(hist, root, 'aeolian') }
+  }
+  return null
+}
+
+function labelFor(fit: KeyFit) {
+  const name = NOTE_NAMES[fit.root]
+  if (fit.scale === 'ionian') return { name, mode: 'major', label: `${name} major` }
+  if (fit.scale === 'aeolian') return { name, mode: 'minor', label: `${name} minor` }
+  const mode = scaleById(fit.scale).name.toLowerCase()
+  return { name, mode, label: `${name} ${mode}` }
+}
+
+function keyConfidence(score: number, pairGap: number, ambiguous: boolean) {
+  const profile = clamp01((score + 1) / 2)
+  if (ambiguous) return clamp01(0.4 + 0.18 * Math.min(1, pairGap / CLOSE_GAP))
+  if (pairGap >= CLOSE_GAP) return profile
+  const doubt = (CLOSE_GAP - Math.max(0, pairGap)) / CLOSE_GAP
+  return clamp01(profile * (1 - 0.18 * doubt))
+}
+
+export function keyFromHistogram(hist: Float32Array | number[], bars?: BarChroma[]): AnalysisKey & { scale: ScaleId } {
   let total = 0
   for (let i = 0; i < 12; i++) total += hist[i] || 0
   if (total <= 1e-6) return { root: 0, name: 'C', mode: 'major', label: 'C major', confidence: 0, scale: 'ionian' }
-  const fit = fitKey(hist)
-  const name = NOTE_NAMES[fit.root]
-  const named = scaleById(fit.scale)
-  let mode = named.name.toLowerCase()
-  let label = `${name} ${mode}`
-  if (fit.scale === 'ionian') {
-    mode = 'major'
-    label = `${name} major`
-  } else if (fit.scale === 'aeolian') {
-    mode = 'minor'
-    label = `${name} minor`
+  const profile = fitKey(hist)
+  const rival = relativeKey(profile, hist)
+  const heard = bars?.length ? heardChords(bars) : []
+  let chosen = profile
+  let winner = rival ? tonicClaim(heard, profile.root, profile.scale === 'aeolian') : { authentic: 0, support: 0 }
+  let otherClaim = rival ? tonicClaim(heard, rival.root, rival.scale === 'aeolian') : { authentic: 0, support: 0 }
+  if (rival && heard.length && otherClaim.authentic > winner.authentic + AUTHENTIC_LEAD && profile.score - rival.score < CLOSE_GAP) {
+    chosen = rival
+    const swap = winner
+    winner = otherClaim
+    otherClaim = swap
   }
-  return { root: fit.root, name, mode, label, confidence: clamp01((fit.score + 1) / 2), scale: fit.scale }
+  const pairGap = rival ? Math.abs(profile.score - rival.score) : 1
+  const supportLead = winner.support - otherClaim.support
+  const ambiguous = Boolean(
+    rival
+    && heard.length >= 2
+    && chosen.score >= 0.55
+    && pairGap < CLOSE_GAP
+    && supportLead < SETTLED_LEAD,
+  )
+  const named = labelFor(chosen)
+  const other = chosen === rival ? profile : rival
+  return {
+    root: chosen.root,
+    name: named.name,
+    mode: named.mode,
+    label: named.label,
+    confidence: keyConfidence(chosen.score, pairGap, ambiguous),
+    scale: chosen.scale,
+    ...(ambiguous && other ? { alternative: labelFor(other).label } : {}),
+  }
 }
 
 function cosine(chroma: Float32Array, template: Float32Array) {
