@@ -5,14 +5,17 @@
 
 :root {
   --btn-min: 40px;
-  --btn-radius: 10px;
+  --btn-radius: 12px;
   --btn-bevel:
-    inset 0 1px 0 rgba(255, 255, 255, 0.32),
-    inset 0 -2px 0 rgba(0, 0, 0, 0.48),
-    0 1px 2px rgba(0, 0, 0, 0.38);
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.46),
+    0 1px 2px rgba(0, 0, 0, 0.42),
+    0 2px 4px rgba(0, 0, 0, 0.22);
   --btn-bevel-pressed:
-    inset 0 2px 4px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.28),
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 0 14px color-mix(in srgb, var(--accent) 55%, transparent);
 
   --btn-primary-bg: var(--accent);
   --btn-primary-ink: var(--accent-ink);
@@ -31,9 +34,9 @@
   --btn-quiet-border: #2c3b33;
   --btn-quiet-face: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.32));
 
-  --btn-toggle-bg: #2a6846;
-  --btn-toggle-ink: #f3fff8;
-  --btn-toggle-border: #8ed4ab;
+  --btn-toggle-bg: var(--accent);
+  --btn-toggle-ink: var(--accent-ink);
+  --btn-toggle-border: transparent;
   --btn-toggle-mute-bg: #8e9aa6;
   --btn-toggle-mute-ink: #141816;
   --btn-toggle-solo-bg: #b8923a;
@@ -89,7 +92,7 @@
   background-image: var(--btn-quiet-face);
   color: var(--btn-quiet-ink);
   border-color: var(--btn-quiet-border);
-  border-radius: 999px;
+  border-radius: var(--btn-radius);
   font-weight: 640;
   font-size: 12px;
   padding: 0 10px;
@@ -230,7 +233,7 @@
   min-height: var(--btn-min);
   height: var(--btn-min);
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--btn-radius);
   border: 1px solid var(--btn-quiet-border);
   background-color: var(--btn-quiet-bg);
   background-image: var(--btn-quiet-face);
@@ -339,10 +342,10 @@
 .shell .dock .call-controls .t-btn.on,
 .shell .mini.on:not(.on-m):not(.on-s):not(.on-r) {
   background-color: var(--btn-toggle-bg);
-  background-image: var(--btn-quiet-face);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.08) 46%, rgba(0, 0, 0, 0.12));
   color: var(--btn-toggle-ink);
   border: 1px solid var(--btn-toggle-border);
-  box-shadow: var(--btn-bevel-pressed);
+  box-shadow: var(--btn-bevel), var(--glow);
 }
 
 /* Mix flags share the strip's row. Color only, so the fader layout stays put. */
@@ -492,7 +495,7 @@
   min-width: var(--btn-min);
   height: var(--btn-min);
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--btn-radius);
   border: 1px solid var(--btn-quiet-border);
   background: var(--btn-quiet-face), var(--btn-quiet-bg);
   color: var(--btn-quiet-ink);

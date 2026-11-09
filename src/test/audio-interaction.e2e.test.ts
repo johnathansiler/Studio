@@ -346,7 +346,7 @@ describe('loop load and beat machine pads', () => {
       }))
       expect(pressed.down).toBe(true)
       expect(pressed.on).toBe(false)
-      expect(parseFloat(pressed.radius)).toBeGreaterThan(16)
+      expect(parseFloat(pressed.radius)).toBe(12)
       expect(pressed.bg).not.toBe(before)
       await page.screenshot({ path: '/opt/cursor/artifacts/note-repeat-pressed-390.png' })
       await repeat.dispatchEvent('pointerup', { pointerId: 21, pointerType: 'touch', button: 0, buttons: 0 })

@@ -1,0 +1,583 @@
+/* Recessed tray + raised buttons.
+   One shape, one height, one gap. Related controls sit in the tray.
+   Equal-width segments are only for a small top-level switcher. */
+
+:root {
+  --tray-bg: #090d0b;
+  --tray-radius: 18px;
+  --tray-pad: 5px;
+  --tray-gap: 5px;
+  --tray-edge: rgba(255, 255, 255, 0.08);
+  --tray-inset:
+    inset 0 2px 6px rgba(0, 0, 0, 0.62),
+    inset 0 1px 0 rgba(0, 0, 0, 0.45),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+  --tray-btn-radius: 12px;
+  --tray-btn-border: rgba(255, 255, 255, 0.14);
+  --tray-btn-face: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.04) 42%, rgba(0, 0, 0, 0.28));
+  --tray-btn-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.42),
+    0 1px 2px rgba(0, 0, 0, 0.42),
+    0 2px 4px rgba(0, 0, 0, 0.22);
+  --tray-on-face: linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08) 48%, rgba(0, 0, 0, 0.1));
+  --tray-on-glow: 0 0 14px color-mix(in srgb, var(--accent) 58%, transparent);
+}
+
+.btn-tray,
+.views,
+.transport.simple .t-main,
+.command-strip,
+.browser-tabs,
+.history-btns,
+#shell-menu .menu-group,
+.plugin-transport,
+.hw-transport,
+.mpc-banks,
+.note-repeat-row,
+.sound-chips,
+.sound-filters,
+.scaler-pills,
+.scaler-tools,
+.scaler-scale-tools,
+.call-pills,
+.row-btns,
+.slot-actions,
+.preset-actions,
+.players-actions,
+.inst-row,
+.tune-actions,
+.tune-tools,
+.metro-combo,
+.song-pills,
+.auto-mode,
+.timeline-tools,
+.anchored-menu:not(:has(#shell-menu)) {
+  box-sizing: border-box;
+  gap: var(--tray-gap);
+  padding: var(--tray-pad);
+  border-radius: var(--tray-radius);
+  background-color: var(--tray-bg);
+  background-image: none;
+  border: 1px solid var(--tray-edge);
+  box-shadow: var(--tray-inset);
+}
+
+/* Hug the words. A switcher is the only row that stretches. */
+.btn-tray:not(.btn-tray-equal),
+.transport.simple .t-main,
+.command-strip,
+.history-btns,
+.plugin-transport,
+.call-pills,
+.row-btns,
+.slot-actions,
+.preset-actions,
+.players-actions,
+.tune-actions,
+.tune-tools,
+.metro-combo,
+.sound-chips,
+.scaler-pills,
+.scaler-tools,
+.timeline-tools {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  justify-content: flex-start;
+  width: max-content;
+  max-width: 100%;
+  flex: 0 1 auto;
+}
+
+.btn-tray-equal,
+.views.btn-tray,
+.views {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: stretch;
+  justify-content: stretch;
+  width: 100%;
+  max-width: 100%;
+  flex: 1 0 100%;
+}
+
+.views.btn-tray,
+.shell .views {
+  gap: 4px;
+  padding: 4px;
+}
+
+.views.btn-tray > button,
+.views > button,
+.btn-tray-equal > button,
+.shell .views > button,
+.shell .views > button.collab-tab {
+  flex: 1 1 0%;
+  width: 0;
+  min-width: 0;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.transport.simple .t-main.btn-tray > .t-btn,
+.transport.simple .t-main.btn-tray > button,
+.transport.simple .t-main.btn-tray > .tempo-cluster,
+.transport .t-main > .t-btn,
+.transport .t-main > button,
+.plugin-transport > button,
+.call-pills > button,
+.call-pills .t-btn,
+.call-pills .copy-link,
+.call-pills .leave-btn,
+.command-strip > .tool,
+.command-strip .timeline-tools button,
+.command-strip button.tool,
+.browser-tabs button,
+.browser-tabs select,
+.sound-chips button,
+.sound-filters .sound-filter,
+.row-btns > button,
+.slot-actions > button,
+.preset-actions > button,
+.tune-actions > button,
+.tune-tools > button,
+.history-btns > button,
+.metro-combo > button,
+.scaler-pills button,
+.scaler-tools > button {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 100%;
+  min-width: max(40px, max-content);
+}
+
+.transport.simple .t-main .tempo-cluster {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: max(40px, max-content);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.transport.simple .t-main .tempo-cluster .bpm-readout {
+  width: auto;
+  min-width: 52px;
+  flex: 0 0 auto;
+}
+
+/* Browser header is the tray. The chip scroller is not a second one. */
+.browser-tabs.btn-tray,
+.browser-tabs {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  width: 100%;
+  max-width: 100%;
+}
+
+.browser-tabs .browser-chip-scroll {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--tray-gap);
+  min-width: 0;
+  width: auto;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+/* Menus: chips in a tray, not bars stretched across the screen. */
+#shell-menu .menu-group,
+#shell-menu .menu-group[aria-label='Project'],
+#shell-menu .menu-group[aria-label='Edit'],
+.shell #shell-menu .menu-group,
+.shell #shell-menu .menu-group[aria-label='Project'],
+.shell #shell-menu .menu-group[aria-label='Edit'] {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  justify-content: flex-start;
+  align-content: flex-start;
+  width: 100%;
+  max-width: 100%;
+  grid-template-columns: none;
+}
+
+#shell-menu .menu-heading,
+.shell #shell-menu .menu-heading {
+  flex: 1 0 100%;
+  width: 100%;
+  grid-column: auto;
+}
+
+#shell-menu .menu-group > button,
+.shell #shell-menu .menu-group > button,
+.anchored-menu:not(:has(#shell-menu)):not(.transport-drawer) > button,
+.anchored-menu:not(:has(#shell-menu)) .ch-row,
+.anchored-menu:not(:has(#shell-menu)) .sheet-row,
+.anchored-menu:not(:has(#shell-menu)) .add-choice,
+.anchored-menu:not(:has(#shell-menu)) .guide-choice,
+.anchored-menu.insert-menu button {
+  flex: 0 0 auto;
+  align-self: center;
+  width: auto;
+  max-width: min(320px, calc(100vw - 28px));
+  min-width: max(40px, max-content);
+  height: auto;
+  min-height: 40px;
+}
+
+#shell-menu .menu-group > button,
+.shell #shell-menu button {
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}
+
+#shell-menu .menu-sig,
+.shell #shell-menu .menu-sig {
+  flex: 1 0 100%;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  min-height: 40px;
+  align-self: stretch;
+}
+
+.anchored-menu:not(:has(#shell-menu)):not(.transport-drawer):not(.preset-menu) {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: flex-start;
+  width: max-content;
+  max-width: min(420px, calc(100vw - 16px));
+}
+
+/* Preset lists stay a narrow dropdown under their button. */
+.anchored-menu.preset-menu {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  width: min(280px, calc(100vw - 16px));
+  max-width: min(280px, calc(100vw - 16px));
+}
+.anchored-menu.preset-menu button {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.anchored-menu.transport-drawer,
+.anchored-menu.transport-drawer[data-menu-size='dock'],
+.anchored-menu.transport-drawer[data-menu-size='pending'],
+.anchored-menu.transport-drawer[data-menu-size='fill'] {
+  width: max-content;
+  max-width: min(420px, calc(100vw - 16px));
+}
+
+/* Shared raised face. Moderate radius, never a pill.
+   Pads, piano keys, and knobs are not in this list. */
+.shell .t-btn,
+.shell .menu-btn,
+.shell .text-btn,
+.shell .history-btn,
+.shell .unstuck-btn,
+.shell .views button,
+.shell .browser-tabs button,
+.shell .sound-chips button,
+.shell .sound-filter,
+.shell .sound-add,
+.shell .sound-save,
+.shell .sound-close,
+.shell .command-strip button,
+.shell .timeline-tools button,
+.shell .cap-btn,
+.shell .snap-toggle,
+.shell .plugin-transport > button,
+.shell button.hw-key,
+.shell .mpc-keyboard,
+.shell .mpc-close,
+.shell .keyboard-toggle,
+.shell .keyboard-close,
+.shell .roll-close,
+.shell .beat-open,
+.shell .piano-open,
+.shell .browser-close,
+.shell .song-close,
+.shell .step-close,
+.shell .scaler-close,
+.shell .inst-close,
+.shell .mini,
+.shell .song-pills button,
+.shell .auto-mode button,
+.shell .call-pills button,
+.shell .row-btns > button,
+.shell .slot-actions > button,
+.shell .preset-actions > button,
+.shell .players-actions > button,
+.shell .inst-row > button,
+.shell .inst-row .bevel,
+.shell .tune-actions > button,
+.shell .tune-tools > button,
+.shell .tune-board button:not(.tune-knob):not(.white):not(.black),
+.shell .scaler-pills button,
+.shell .scaler-tools > button,
+.shell .btn-primary,
+.shell .btn-secondary,
+.shell .btn-quiet,
+.shell .btn-tertiary,
+.anchored-menu button,
+.song-sheet button,
+.guide-sheet button,
+#shell-menu button,
+.plugin-transport > button,
+.tune-board button:not(.tune-knob):not(.white):not(.black),
+.mpc button.hw-key,
+.mpc-keyboard,
+.mpc-close {
+  border-radius: var(--tray-btn-radius) !important;
+  box-shadow: var(--tray-btn-shadow);
+  background-image: var(--tray-btn-face);
+  border-style: solid;
+  border-width: 1px;
+}
+
+.shell .views button,
+.views button {
+  border-radius: var(--tray-btn-radius) !important;
+  height: 40px;
+  min-height: 40px;
+  border: 1px solid var(--tray-btn-border);
+  background-color: #18231d;
+  background-image: var(--tray-btn-face);
+  box-shadow: var(--tray-btn-shadow);
+  color: var(--text);
+  font-weight: 680;
+}
+
+.shell .views button.active,
+.shell .views button.collab-tab.active,
+.views button.active {
+  background-color: var(--accent);
+  background-image: var(--tray-on-face);
+  color: var(--accent-ink);
+  border-color: transparent;
+  box-shadow: var(--tray-btn-shadow), var(--tray-on-glow);
+  font-weight: 740;
+}
+
+/* Selected chrome is the same light green as the view switcher.
+   Mute, solo, arm, record, and play keep their own colors below. */
+.shell .browser-tabs button.on,
+.shell .sound-filter.on,
+.shell .sound-chips button.on,
+.shell .song-pills button.on,
+.shell .auto-mode button.on,
+.shell .cap-btn.on,
+.shell .snap-toggle.on,
+.shell .tool.on,
+.shell .text-btn.on,
+.shell .menu-btn.on,
+.shell .keyboard-toggle.on,
+.shell .t-btn.on:not(.play):not(.rec),
+.shell .t-btn.loop.on,
+.shell .t-btn.click.on,
+.shell .t-btn.count.on,
+.shell .mpc .ch-tab.on:not(.rec),
+.shell .mpc-full.on,
+.shell .note-repeat-hold.on,
+.shell .inserts button.on,
+#shell-menu button[aria-pressed='true'],
+.anchored-menu button.on:not(.rec):not(.pad-key),
+.song-sheet button.on,
+.tune-board button.on:not(.tune-knob):not(.white):not(.black),
+.plugin-transport > button[aria-label='Play'].on,
+.plugin-transport > button[aria-label='Play'][aria-pressed='true'] {
+  background-color: var(--accent);
+  background-image: var(--tray-on-face);
+  color: var(--accent-ink);
+  border-color: transparent;
+  box-shadow: var(--tray-btn-shadow), var(--tray-on-glow);
+}
+
+.shell .transport .t-btn.play,
+.plugin-transport > button[aria-label='Play'] {
+  background-color: #1f6b45;
+  background-image: var(--tray-on-face);
+  color: #e7fff0;
+  border-color: color-mix(in srgb, var(--accent) 55%, #000);
+  box-shadow: var(--tray-btn-shadow);
+}
+
+.shell .transport .t-btn.play.on,
+.plugin-transport > button[aria-label='Play'].on,
+.plugin-transport > button[aria-label='Play'][aria-pressed='true'] {
+  background-color: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+  box-shadow: var(--tray-btn-shadow), var(--tray-on-glow);
+}
+
+.shell .transport .t-btn.rec,
+.shell .mpc .hw-key.rec:not(.on),
+.plugin-transport > button[aria-label='Record'],
+.pad-actions .pad-key.rec:not(.on) {
+  background-color: #6e3030;
+  background-image: var(--btn-rec-face, var(--tray-btn-face));
+  color: #ffe4e4;
+  border-color: color-mix(in srgb, var(--rec) 50%, #000);
+  box-shadow: var(--tray-btn-shadow);
+}
+
+.shell .transport .t-btn.rec.on,
+.shell .mpc .hw-key.rec.on,
+.plugin-transport > button[aria-label='Record'].on,
+.plugin-transport > button[aria-label='Record'][aria-pressed='true'],
+.pad-actions .pad-key.rec.on {
+  background-color: var(--rec);
+  background-image: var(--btn-rec-face, var(--tray-on-face));
+  color: #fff;
+  border-color: transparent;
+  box-shadow: var(--tray-btn-shadow), 0 0 14px color-mix(in srgb, var(--rec) 55%, transparent);
+}
+
+.shell .mini.on-m,
+.shell .strip .mini.on-m,
+.shell .sl-flags button.mute.on {
+  background-color: var(--btn-toggle-mute-bg);
+  color: var(--btn-toggle-mute-ink);
+  border-color: transparent;
+}
+
+.shell .mini.on-s,
+.shell .strip .mini.on-s,
+.shell .sl-flags button.on:not(.mute):not(.arm) {
+  background-color: var(--btn-toggle-solo-bg);
+  color: var(--btn-toggle-solo-ink);
+  border-color: transparent;
+}
+
+.shell .mini.on-r,
+.shell .strip .mini.on-r,
+.shell .mixer-view .arm-flag.on-r,
+.shell .sl-flags button.arm.on {
+  background-color: var(--btn-toggle-arm-bg);
+  color: var(--btn-toggle-arm-ink);
+  border-color: transparent;
+}
+
+/* Icon-only track control stays a 40px rounded square, same shadow as Mute. */
+.shell .arrange .pl-head .beat-open,
+.shell.phone .arrange .pl-head .beat-open,
+.shell.phone.land .arrange .pl-head .beat-open,
+.shell.fold .arrange .pl-head .beat-open {
+  border-radius: var(--tray-btn-radius) !important;
+  box-shadow: var(--btn-bevel);
+}
+
+.shell .pl-head .mini,
+.shell .strip .mini {
+  box-shadow: var(--btn-bevel);
+  border-radius: var(--tray-btn-radius) !important;
+}
+
+/* Note Repeat matches the other rounded rectangles. */
+.shell .mpc .note-repeat-row .note-repeat-hold,
+.mpc .note-repeat-row .note-repeat-hold {
+  border-radius: var(--tray-btn-radius) !important;
+}
+
+/* Add Track keeps its full-width bar. Same raised face, not a pill. */
+.shell .add-track-btn,
+.add-track-btn {
+  border-radius: var(--tray-btn-radius) !important;
+  background-color: var(--accent);
+  background-image: var(--tray-on-face);
+  color: var(--accent-ink);
+  border-color: transparent;
+  box-shadow: var(--tray-btn-shadow), var(--tray-on-glow);
+}
+
+.pad-actions,
+.pad-modes {
+  gap: var(--tray-gap);
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+/* Beat Machine header: Close stays in the reserved corner and does not cover Keyboard. */
+.mpc-brand {
+  width: 100%;
+  box-sizing: border-box;
+  padding-right: 96px;
+  overflow: hidden;
+}
+.mpc-title {
+  flex: 1 1 0%;
+  min-width: 0;
+  overflow: hidden;
+}
+.mpc-keyboard {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+}
+.mpc-brand > .mpc-close {
+  position: absolute !important;
+  right: 4px !important;
+  left: auto !important;
+  top: 0 !important;
+  z-index: 2;
+}
+
+/* Plugin Record / Stop / Play stay one row inside the plugin, content-sized. */
+.plugin-transport,
+[data-plugin-transport='open'].plugin-transport {
+  flex-wrap: nowrap;
+  width: 100%;
+  max-width: 100%;
+  flex: 0 0 auto;
+  padding: 4px;
+}
+
+/* Sideways phones keep a 40px chrome row so the mixer fader keeps its throw. */
+.shell.phone.land .views,
+.shell.phone.land .views.btn-tray,
+.shell.phone.land .transport .t-main,
+.shell.phone.land .transport .t-main.btn-tray {
+  padding: 0;
+  gap: 4px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.shell.phone.land .views {
+  height: 40px;
+  min-height: 40px;
+}
+
+.shell.phone.land .views button,
+.shell.phone.land .transport .t-btn,
+.shell.phone.land .transport .bpm-readout {
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}
+
+.shell.phone[data-collab='open'] .call-pills button,
+.shell[data-collab='open'] .call-pills button {
+  flex: 0 0 auto;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}

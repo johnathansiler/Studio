@@ -126,7 +126,7 @@ describe('beat machine arrange header', () => {
           expect(beat!.beat!.left, viewport.name).toBeGreaterThanOrEqual(0)
           expect(beat!.beat!.right, viewport.name).toBeLessThanOrEqual(beat!.headRight + 1)
           expect(beat!.beat!.shadow, viewport.name).toBe(beat!.muteShadow)
-          expect(beat!.beat!.radius, viewport.name).toBe('999px')
+          expect(beat!.beat!.radius, viewport.name).toBe('12px')
           const widest = Math.max(...others.map((row) => row.controls))
           const widestHead = Math.max(...others.map((row) => row.head))
           expect(beat!.controls, `${viewport.name} controls ${beat!.controls} vs ${widest}`).toBeLessThanOrEqual(widest + 8)

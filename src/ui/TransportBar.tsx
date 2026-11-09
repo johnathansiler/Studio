@@ -15,6 +15,7 @@ import { RecordBar } from './RecordBar'
 import { AutomationFollow } from './AutomationLane'
 import { AssetTransfers } from './AssetTransfers'
 import { TRANSPORT_COPY, copyOf } from './chrome'
+import { ButtonTray } from './ButtonTray'
 import { TipButton } from './Hint'
 import './loopRegion.css'
 import './remoteFixes.css'
@@ -465,7 +466,7 @@ export function TransportBar({
     <div className="transport simple">
       <AutomationFollow store={store} engine={engine} />
       {inSession && syncLabel ? <span className="sync-pill">{syncLabel}</span> : null}
-      <div className="t-main">
+      <ButtonTray className="t-main">
         <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>
           <span className="t-word">Start</span>
         </TipButton>
@@ -503,7 +504,7 @@ export function TransportBar({
         >
           <span className="t-word">More</span>
         </button>
-      </div>
+      </ButtonTray>
       <AnchoredMenu
         id="transport-menu"
         className="transport-drawer"
@@ -515,10 +516,10 @@ export function TransportBar({
         prefer="down"
       >
         {loopControl}
-        <div className="metro-combo" role="group" aria-label="Metronome">
+        <ButtonTray className="metro-combo" role="group" aria-label="Metronome">
           {clickButton}
           {countButton}
-        </div>
+        </ButtonTray>
         {resetButton}
         {positionReadout}
         <div id="transport-menu-extra" className="transport-menu-extra" />
