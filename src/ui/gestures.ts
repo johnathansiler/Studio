@@ -221,6 +221,7 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
     if (travel > TAP_PX) {
       drag.moved = true
       taps.move(travel)
+      cancelFine()
     }
     const fine = fineNow(event.shiftKey) || !!drag.fineLatch
     if (fine !== drag.fine) {
@@ -414,6 +415,7 @@ export function installControlGuards(doc: Document) {
     if (travel > TAP_PX) {
       drag.moved = true
       taps.move(travel)
+      cancelFine()
     }
     if (!drag.moved) return
     const fine = event.shiftKey || pointers.size > 1 || drag.fineLatch

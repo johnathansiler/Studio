@@ -264,8 +264,10 @@ export function TransportBar({
         if (intent === 'pending') return
         if (intent === 'scroll') {
           state.mode = 'ignore'
+          state.cancelFine()
           return
         }
+        state.cancelFine()
         state.mode = 'drag'
         window.clearTimeout(editTimer.current)
         memory.current = emptyTap()
