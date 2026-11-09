@@ -4,7 +4,7 @@ import { activeTunePreset, orderedInserts, tuneScaleOf } from '../audio/plugins/
 import { CATALOG, FACTORY, descriptor } from '../audio/plugins/catalog'
 import { commitPluginPreset } from '../presets/project'
 import { INSTRUMENT_IDS, isDrumsPlugin, kindLabels, paramsForKind } from '../audio/plugins/ids'
-import { pluginIsBeatMachine } from '../instruments/pads/identity'
+import { insertsBeatMachine, pluginIsBeatMachine } from '../instruments/pads/identity'
 import { chainSections, trackHasScaler } from '../instruments/scaler/chain'
 import { AnchoredMenu } from './AnchoredMenu'
 import { PresetControls } from './PresetControls'
@@ -508,10 +508,23 @@ export function clipInsertName(name: string, column: number) {
   return `${name.slice(0, Math.max(1, chars - 1))}…`
 }
 
-function slotPlace(index: number, count: number) {
-  if (index === 0) return 'First. This insert processes first.'
-  if (index === count - 1) return 'Last. This insert processes last, then the fader.'
-  return 'This insert receives the one above and feeds the one below.'
+/** Step Sequencer and instruments are sources. They stay in the saved list and are not serial audio effects. */
+export function isInstrumentSource(plugin: { pluginId: string; params?: Record<string, number> }) {
+  if (plugin.pluginId === 'steps' || plugin.pluginId === 'looper' || plugin.pluginId === 'synth' || plugin.pluginId === 'scaler') return true
+  if (plugin.pluginId === 'sampler' || insertsBeatMachine(plugin.pluginId) || pluginIsBeatMachine(plugin)) return true
+  if (INSTRUMENT_IDS.has(plugin.pluginId)) return true
+  return false
+}
+
+function audioPlace(index: number, count: number) {
+  if (index === 0 && count <= 1) return 'Only audio effect. This processes first, then the fader.'
+  if (index === 0) return 'First audio effect. This processes first.'
+  if (index === count - 1) return 'Last audio effect. It receives the previous audio effect, then the fader.'
+  return 'This audio effect receives the previous audio effect and feeds the next one.'
+}
+
+function sourcePlace(name: string, savedIndex: number) {
+  return `${name}. Instrument source, saved at position ${savedIndex + 1}. This slot does not process in series.`
 }
 
 /** Named insert slots. Top is first in the audio chain. One empty slot adds on this track. */
@@ -533,16 +546,23 @@ export function StripInserts({ store, trackId, column }: { store: ProjectStore; 
       >
         {plugins.map((plugin, index) => {
           const full = insertLabel(plugin.pluginId, plugin)
-          const label = `${full}. Insert ${index + 1} of ${plugins.length}. ${slotPlace(index, plugins.length)} Open this insert.`
+          const source = isInstrumentSource(plugin)
+          const audio = plugins.filter((item) => !isInstrumentSource(item))
+          const audioIndex = audio.findIndex((item) => item.id === plugin.id)
+          const label = source
+            ? `${sourcePlace(full, index)} Open this source.`
+            : `${full}. Audio effect ${audioIndex + 1} of ${audio.length}. ${audioPlace(audioIndex, audio.length)} Open this effect.`
           return (
             <button
               key={plugin.id}
               type="button"
               role="listitem"
-              className={`strip-insert${plugin.enabled ? ' on' : ' is-off'}`}
+              className={`strip-insert${source ? ' is-source' : ''}${plugin.enabled ? ' on' : ' is-off'}`}
               data-plugin={plugin.id}
               data-plugin-id={plugin.pluginId}
+              data-role={source ? 'source' : 'audio'}
               data-chain-index={index}
+              data-audio-index={source ? undefined : audioIndex}
               title={label}
               aria-label={label}
               onPointerDown={(event) => event.stopPropagation()}

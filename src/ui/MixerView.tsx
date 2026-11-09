@@ -112,7 +112,7 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
 
 /** Column width the insert names have to fit. Phone bays share one width across about five strips. */
 function insertColumn(strip: number, viewportWidth: number, short: boolean) {
-  if (short) return 46
+  if (short) return 120
   if (!(viewportWidth > 0) || viewportWidth > 1100) return strip
   const share = Math.max(44, (viewportWidth - 40) / 5)
   return Math.round(Math.min(strip, share))

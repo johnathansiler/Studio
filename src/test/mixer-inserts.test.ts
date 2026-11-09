@@ -246,11 +246,14 @@ function withWindow<T>(width: number, height: number, draw: () => T): T {
 function loadedStore() {
   const store = new ProjectStore()
   writeLayout(store.project.id, { strip: 84, column: 70, mixer: 'columns' })
-  const [vocal, music] = store.project.tracks
+  const [vocal, music, keys] = store.project.tracks
   store.addPlugin(vocal.id, 'eq')
   store.addPlugin(vocal.id, 'compressor')
   store.addPlugin(vocal.id, 'reverb')
   store.addPlugin(music.id, 'delay')
+  store.addPlugin(keys.id, 'eq')
+  store.addPlugin(keys.id, 'steps')
+  store.addPlugin(keys.id, 'compressor')
   store.updateTrack(vocal.id, { pan: -0.35 })
   for (let i = store.project.tracks.length; i < 8; i += 1) store.addTrack('audio')
   return store
@@ -288,6 +291,8 @@ async function readStrip(page: Page) {
         label: slot.getAttribute('aria-label') || '',
         index: slot.getAttribute('data-chain-index'),
         plugin: slot.getAttribute('data-plugin-id') || '',
+        role: slot.getAttribute('data-role') || '',
+        audioIndex: slot.getAttribute('data-audio-index'),
         add: slot.classList.contains('strip-insert-add'),
         box: boxOf(slot),
         scrollWidth: slot.scrollWidth,
@@ -341,9 +346,10 @@ describe('mixer insert slots and pan knob', () => {
         expect(vocal.layout, where).toBe('columns')
         expect(vocal.slots.map((slot) => slot.plugin), where).toEqual(['eq', 'compressor', 'reverb', ''])
         expect(vocal.slots.map((slot) => slot.index), where).toEqual(['0', '1', '2', '3'])
-        expect(vocal.slots[0].label, where).toMatch(/First/)
-        expect(vocal.slots[1].label, where).toMatch(/receives the one above/)
-        expect(vocal.slots[2].label, where).toMatch(/Last/)
+        expect(vocal.slots[0].label, where).toMatch(/First audio effect/)
+        expect(vocal.slots[0].role, where).toBe('audio')
+        expect(vocal.slots[1].label, where).toMatch(/previous audio effect/)
+        expect(vocal.slots[2].label, where).toMatch(/Last audio effect/)
         expect(vocal.slots[3].add, where).toBe(true)
         expect(vocal.slots[3].label, where).toMatch(/Vocal/)
         expect(music.slots.map((slot) => slot.plugin), where).toEqual(['delay', ''])
@@ -351,8 +357,27 @@ describe('mixer insert slots and pan knob', () => {
         expect(master.slots.map((slot) => slot.plugin), where).toEqual(['limiter', ''])
         expect(master.pan, where).toBeNull()
         for (let i = 1; i < vocal.slots.length; i += 1) {
-          expect(vocal.slots[i].box.top, `${where} slot ${i}`).toBeGreaterThanOrEqual(vocal.slots[i - 1].box.top - 1)
+          expect(vocal.slots[i].box.top, `${where} slot ${i} is below the slot above`).toBeGreaterThanOrEqual(vocal.slots[i - 1].box.bottom - 1)
         }
+        const keysStrip = report.strips.find((strip) => strip.name === 'Keys')!
+        const keyed = keysStrip.slots.filter((slot) => !slot.add)
+        expect(keyed.map((slot) => slot.plugin), where).toEqual(['eq', 'steps', 'compressor'])
+        expect(keyed.map((slot) => slot.role), where).toEqual(['audio', 'source', 'audio'])
+        expect(keyed[1].label, where).toMatch(/Instrument source/)
+        expect(keyed[1].label, where).toMatch(/does not process in series/)
+        expect(keyed[1].label, where).not.toMatch(/audio effect/)
+        expect(keyed[0].audioIndex, where).toBe('0')
+        expect(keyed[2].audioIndex, where).toBe('1')
+        expect(keyed[2].label, where).toMatch(/previous audio effect/)
+        for (let i = 1; i < keysStrip.slots.length; i += 1) {
+          expect(keysStrip.slots[i].box.top, `${where} keys ${i}`).toBeGreaterThanOrEqual(keysStrip.slots[i - 1].box.bottom - 1)
+        }
+        const flow = await page.locator('.mixer > .strip .strip-inserts').first().evaluate((node) => {
+          const style = getComputedStyle(node)
+          return { dir: style.flexDirection, overflowY: style.overflowY }
+        })
+        expect(flow.dir, where).toBe('column')
+        expect(['auto', 'scroll'], where).toContain(flow.overflowY)
         const rackBottom = vocal.slots[0].box.top + 40
         expect(rackBottom, where).toBeLessThanOrEqual(vocal.fader.top + 1)
         expect(vocal.pan, where).toBeTruthy()
