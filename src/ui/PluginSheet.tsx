@@ -500,29 +500,96 @@ export function addInsert(store: ProjectStore, trackId: string | 'master', value
   else store.addPlugin(trackId, value)
 }
 
-function PluginPicker({ store, trackId }: { store: ProjectStore; trackId: string | 'master'; roomy?: boolean }) {
+/** Names that fit a narrow strip. The full name stays on the button label. */
+export function clipInsertName(name: string, column: number) {
+  const inner = Math.max(28, column - 10)
+  const chars = Math.max(3, Math.floor(inner / 7.2))
+  if (name.length <= chars) return name
+  return `${name.slice(0, Math.max(1, chars - 1))}…`
+}
+
+function slotPlace(index: number, count: number) {
+  if (index === 0) return 'First. This insert processes first.'
+  if (index === count - 1) return 'Last. This insert processes last, then the fader.'
+  return 'This insert receives the one above and feeds the one below.'
+}
+
+/** Named insert slots. Top is first in the audio chain. One empty slot adds on this track. */
+export function StripInserts({ store, trackId, column }: { store: ProjectStore; trackId: string | 'master'; column: number }) {
+  const track = trackId === 'master' ? null : store.track(trackId)
+  const plugins = trackId === 'master' ? store.project.masterPlugins : track?.plugins ?? []
+  const name = trackId === 'master' ? 'Master' : track?.name ?? 'Track'
+  return (
+    <div className="strip-rack">
+      <p className="strip-inserts-label">Inserts</p>
+      <div
+        className="strip-inserts"
+        role="list"
+        data-inserts={trackId}
+        data-chain="serial"
+        aria-label={`Inserts on ${name}. The top insert processes first. Each insert below receives the one above. The bottom insert is last, then the fader feeds the output.`}
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        {plugins.map((plugin, index) => {
+          const full = insertLabel(plugin.pluginId, plugin)
+          const label = `${full}. Insert ${index + 1} of ${plugins.length}. ${slotPlace(index, plugins.length)} Open this insert.`
+          return (
+            <button
+              key={plugin.id}
+              type="button"
+              role="listitem"
+              className={`strip-insert${plugin.enabled ? ' on' : ' is-off'}`}
+              data-plugin={plugin.id}
+              data-plugin-id={plugin.pluginId}
+              data-chain-index={index}
+              title={label}
+              aria-label={label}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation()
+                event.preventDefault()
+                if (trackId !== 'master') store.selectTrack(trackId)
+                store.focusPlugin(trackId, plugin.id)
+              }}
+            >
+              <span>{clipInsertName(full, column)}</span>
+            </button>
+          )
+        })}
+        <PluginPicker store={store} trackId={trackId} slot order={plugins.length} />
+      </div>
+    </div>
+  )
+}
+
+function PluginPicker({ store, trackId, slot = false, order = 0 }: { store: ProjectStore; trackId: string | 'master'; roomy?: boolean; slot?: boolean; order?: number }) {
   const [open, setOpen] = useState(false)
   const button = useRef<HTMLButtonElement>(null)
   const choices = insertMenuChoices(store, trackId)
+  const name = trackId === 'master' ? 'Master' : store.track(trackId)?.name ?? 'Track'
+  const addLabel = `Add insert on ${name}. It is placed at the bottom and processes last, then the fader.`
   return (
     <>
       <button
         ref={button}
         type="button"
-        className="plugin-pick insert-add"
+        className={slot ? 'strip-insert strip-insert-add' : 'plugin-pick insert-add'}
         aria-expanded={open}
-        aria-label="Add plugin"
-        title="Add an instrument or effect on this track."
+        aria-label={slot ? addLabel : 'Add plugin'}
+        title={slot ? addLabel : 'Add an instrument or effect on this track.'}
+        data-chain-index={slot ? order : undefined}
+        data-add-track={slot ? trackId : undefined}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation()
           setOpen((value) => !value)
         }}
       >
-        {open ? 'Close' : 'Add plugin'}
+        {slot ? 'Add' : open ? 'Close' : 'Add plugin'}
       </button>
       {open && (
-        <AnchoredMenu className="insert-menu" open={open} onClose={() => setOpen(false)} label="Add plugin" triggerRef={button} prefer="down">
+        <AnchoredMenu className="insert-menu" open={open} onClose={() => setOpen(false)} label="Add plugin" triggerRef={button} prefer="auto">
           {choices.map((plugin) => (
             <button
               key={plugin.id}
@@ -531,6 +598,7 @@ function PluginPicker({ store, trackId }: { store: ProjectStore; trackId: string
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation()
+                if (trackId !== 'master') store.selectTrack(trackId)
                 addInsert(store, trackId, plugin.id)
                 setOpen(false)
               }}

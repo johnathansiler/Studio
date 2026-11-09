@@ -1,5 +1,5 @@
-/* Slim mix console. The face is the name, meter, fader, and Mute/Solo.
-   One toolbar More opens the selected channel as a compact sheet. */
+/* Slim mix console. The face is the name, insert stack, pan, meter, fader, and Mute/Solo.
+   One toolbar More opens the selected channel as a compact sheet. Pan stays on the strip. */
 
 @property --slot {
   syntax: "<length>";
@@ -681,7 +681,7 @@
 
 .shell .mixer-view.mixer-console[data-short] {
   --face: 16px;
-  --foot: 80px;
+  --foot: 40px;
 }
 .shell .mixer-view.mixer-console[data-short] .mix-toolbar {
   min-height: 40px;
@@ -882,9 +882,85 @@
   white-space: nowrap;
 }
 
-.shell .mixer-view.mixer-console[data-short] .strip-foot {
-  grid-template-rows: 40px 40px;
+.shell .mixer-view.mixer-console[data-short] .strip-col {
+  display: grid;
+  grid-template-columns: 40px minmax(40px, 1fr) minmax(40px, 1fr);
+  grid-template-rows: var(--face) 40px minmax(0, 1fr) 40px;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
   gap: 0;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip-head,
+.shell .mixer-view.mixer-console[data-short] .strip-rack,
+.shell .mixer-view.mixer-console[data-short] .volume-row {
+  grid-column: 1 / -1;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip-head { grid-row: 1; }
+.shell .mixer-view.mixer-console[data-short] .strip-rack {
+  grid-row: 2;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip-inserts {
+  flex-direction: row;
+  align-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  gap: 2px;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip-insert {
+  flex: 0 0 40px;
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  font-size: 9px;
+  padding: 0 2px;
+}
+.shell .mixer-view.mixer-console[data-short] .volume-row { grid-row: 3; }
+
+.shell .mixer-view.mixer-console[data-short] .strip:not(.master) .strip-pan {
+  grid-column: 1;
+  grid-row: 4;
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip:not(.master) .strip-foot {
+  grid-column: 2 / -1;
+  grid-row: 4;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip.master .strip-foot {
+  grid-column: 1 / -1;
+  grid-row: 4;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip-foot {
+  grid-template-rows: 40px;
+  grid-template-columns: minmax(40px, 1fr) minmax(40px, 1fr);
+  gap: 2px;
+  width: 100%;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  flex-basis: 40px;
+}
+
+.shell .mixer-view.mixer-console[data-short] .strip-foot > * {
+  min-width: 40px;
+  width: 100%;
+  max-width: 100%;
 }
 
 .shell .mixer-view.mixer-console[data-short] .strip-foot .mini,
@@ -1064,4 +1140,168 @@
 .shell .mixer-view.mixer-console .mix-panel .mode-short,
 .shell .mixer-view.mixer-console .mix-panel .mode-stack {
   display: none;
+}
+
+/* Inserts sit above the fader. Top slot is first in the chain. The fader keeps the rest. */
+.shell .mixer-view.mixer-console .strip-rack {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  max-height: max(40px, min(168px, calc(46% - var(--face) - var(--foot) - 40px)));
+  gap: 0;
+  overflow: hidden;
+}
+
+.shell .mixer-view.mixer-console .strip-inserts-label {
+  display: none;
+  flex: 0 0 14px;
+  height: 14px;
+  margin: 0;
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: 0.06em;
+  line-height: 14px;
+  text-align: center;
+  text-transform: uppercase;
+  color: #9fb3a6;
+}
+
+.shell:not(.phone):not(.fold) .mixer-view.mixer-console:not([data-short]) .strip-inserts-label {
+  display: block;
+}
+
+.shell .mixer-view.mixer-console .strip-inserts {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: manipulation;
+  scrollbar-width: none;
+}
+
+.shell .mixer-view.mixer-console .strip-insert {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 40px;
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  margin: 0;
+  padding: 0 3px;
+  border: 1px solid #0e1411;
+  border-radius: 7px;
+  background-color: #1a2420;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03) 42%, rgba(0, 0, 0, 0.42));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.5),
+    0 1px 2px rgba(0, 0, 0, 0.35);
+  color: #d5e0d8;
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1.1;
+  text-align: center;
+  overflow: hidden;
+}
+
+.shell .mixer-view.mixer-console .strip-insert span {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell .mixer-view.mixer-console .strip-insert.on {
+  color: #f4fff8;
+  border-color: color-mix(in srgb, var(--insert, #73c48f) 70%, #0e1411);
+  box-shadow:
+    inset 3px 0 0 var(--insert, #73c48f),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.5),
+    0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.shell .mixer-view.mixer-console .strip-insert.is-off {
+  opacity: 0.5;
+}
+
+.shell .mixer-view.mixer-console .strip-insert-add {
+  background-color: #121a16;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.28));
+  color: #9fb3a6;
+}
+
+.shell .mixer-view.mixer-console .strip-pan {
+  flex: 0 0 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}
+
+.shell .mixer-view.mixer-console .strip-pan .pan-knob-wrap,
+.shell .mixer-view.mixer-console .strip-pan .pan-knob {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  max-width: 40px;
+  max-height: 40px;
+}
+
+.shell .mixer-view.mixer-console .strip-pan .pan-knob {
+  overflow: hidden;
+  touch-action: none;
+}
+
+.shell .mixer-view.mixer-console .strip-pan .pan-state {
+  max-width: 34px;
+  height: 9px;
+  margin-top: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 8px;
+  line-height: 9px;
+  letter-spacing: -0.04em;
+}
+
+.shell .mixer-view.mixer-console:not([data-short]) .strip .volume-row {
+  flex: 1 1 auto;
+  min-height: 48px;
+}
+
+/* Sideways phones keep one 40px row for pan, mute, and solo, so the fader stays tall. */
+.shell.phone.land .mixer-view.mixer-console[data-short] .mixer > .strip,
+.shell.phone.land .mixer-view.mixer-console[data-short] .mixer-bay > .strip.master,
+.shell.fold .mixer-view.mixer-console[data-short] .mixer > .strip,
+.shell.fold .mixer-view.mixer-console[data-short] .mixer-bay > .strip.master,
+.shell .mixer-view.mixer-console[data-short] .mixer > .strip,
+.shell .mixer-view.mixer-console[data-short] .mixer-bay > .strip.master {
+  --mix-col: 136px;
+  width: 136px;
+  min-width: 136px;
+  max-width: 136px;
+  flex: 0 0 136px;
 }

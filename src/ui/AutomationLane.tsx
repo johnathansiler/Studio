@@ -276,7 +276,7 @@ export function PanKnob({ store, engine, spec, value, label }: { store: ProjectS
         }}
       >
         <i style={{ transform: `rotate(${angle}deg)` }} />
-        <span>Pan</span>
+        <span className="pan-state">{words}</span>
       </button>
       <GestureReadout readout={readout} />
     </div>
