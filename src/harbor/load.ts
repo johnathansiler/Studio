@@ -1,3 +1,4 @@
+import { libraryFetch } from '../audio/multisample/cache'
 import { selectLayers } from '../audio/multisample/map'
 import { libraryFileUrl } from '../audio/multisample/source'
 import type { SampleRef, SamplerProgram } from '../audio/multisample/types'
@@ -27,7 +28,7 @@ function bytesOf(text: string) {
 }
 
 /** The versioned catalog only. A missing file does not invent instruments. */
-export async function loadHarborCatalog(fetchImpl: FetchLike = (input, init) => fetch(input, init), cache?: SoundCache): Promise<HarborCatalog> {
+export async function loadHarborCatalog(fetchImpl: FetchLike = libraryFetch, cache?: SoundCache): Promise<HarborCatalog> {
   const url = instrumentCatalogUrl()
   try {
     const response = await fetchImpl(url, { cache: 'no-store' })
@@ -127,7 +128,7 @@ async function readBody(response: Response, onProgress?: (ratio: number) => void
 /** Download just the zones a note will play. Other roots stay on Hugging Face. */
 export async function loadZoneSamples(
   samples: SampleRef[],
-  fetchImpl: FetchLike = (input, init) => fetch(input, init),
+  fetchImpl: FetchLike = libraryFetch,
   cache?: SoundCache,
 ) {
   const loaded: { id: string; sampleRate: number; channels: Float32Array[] }[] = []
@@ -181,7 +182,7 @@ async function readIncludes(presetUrl: string, text: string, fetchImpl: FetchLik
 }
 
 /** Audio files under one instrument folder. The listing is metadata, not the samples. */
-export async function listInstrumentFiles(path: string, fetchImpl: FetchLike = (input, init) => fetch(input, init)) {
+export async function listInstrumentFiles(path: string, fetchImpl: FetchLike = libraryFetch) {
   const folder = path.replace(/\\/g, '/').replace(/\/+$/, '').replace(/\/[^/]+\.(sfz|dspreset)$/i, '')
   const files: string[] = []
   let url: string | null = `${instrumentTreeUrl(folder)}?recursive=1&limit=1000`
@@ -201,7 +202,7 @@ export async function listInstrumentFiles(path: string, fetchImpl: FetchLike = (
 }
 
 /** Build the multi-sample program for one catalog instrument. Samples stay on Hugging Face until a note plays. */
-export async function prepareCatalogInstrument(instrument: CatalogInstrument, fetchImpl: FetchLike = (input, init) => fetch(input, init)) {
+export async function prepareCatalogInstrument(instrument: CatalogInstrument, fetchImpl: FetchLike = libraryFetch) {
   if (/\.(sfz|dspreset)$/i.test(instrument.path)) {
     const url = instrumentFileUrl(instrument.path)
     const response = await fetchImpl(url)

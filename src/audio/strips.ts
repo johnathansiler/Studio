@@ -19,6 +19,8 @@ export interface StripNodes {
   analyser: AnalyserNode
   output: GainNode
   irDecay: number
+  /** True while the dynamics node is in the signal path. A disabled compressor stays out of the chain. */
+  compLive: boolean
 }
 
 export function createStrip(ctx: BaseAudioContext): StripNodes {
@@ -53,7 +55,9 @@ export function createStrip(ctx: BaseAudioContext): StripNodes {
   input.connect(eqLow)
   eqLow.connect(eqMid)
   eqMid.connect(eqHigh)
-  eqHigh.connect(comp)
+  eqHigh.connect(pan)
+  eqHigh.connect(delaySend)
+  eqHigh.connect(revSend)
   comp.connect(pan)
   comp.connect(delaySend)
   delaySend.connect(delay)
@@ -95,6 +99,7 @@ export function createStrip(ctx: BaseAudioContext): StripNodes {
     analyser,
     output: post,
     irDecay: 0,
+    compLive: false,
   }
 }
 
@@ -111,6 +116,17 @@ export function applyInserts(
   smoothParam(strip.eqHigh.gain, eq ? eq.params.high || 0 : 0, now)
 
   const comp = inserts.find((i) => i.type === 'compressor' && i.enabled)
+  const wantComp = Boolean(comp)
+  if (wantComp !== strip.compLive) {
+    try { strip.eqHigh.disconnect() } catch { /* the shelf is being rewired */ }
+    if (wantComp) strip.eqHigh.connect(strip.comp)
+    else {
+      strip.eqHigh.connect(strip.pan)
+      strip.eqHigh.connect(strip.delaySend)
+      strip.eqHigh.connect(strip.revSend)
+    }
+    strip.compLive = wantComp
+  }
   if (comp) {
     smoothParam(strip.comp.threshold, comp.params.threshold ?? -18, now)
     smoothParam(strip.comp.knee, comp.params.knee ?? 8, now)

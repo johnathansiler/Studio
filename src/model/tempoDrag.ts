@@ -23,8 +23,9 @@ export function tempoDragIntent(dx: number, dy: number, slop = TEMPO_DRAG_SLOP):
 }
 
 /** Song tempo for an upward drag of `dy` pixels, on the same 30–300 scale as typing. */
-export function tempoFromDrag(origin: number, dy: number, perPx = TEMPO_DRAG_PER_PX, fine = false) {
-  if (perPx === TEMPO_DRAG_PER_PX) return roundTempo(dragNumeric({ origin, deltaPx: dy, min: 30, max: 300, fine }), false)
+export function tempoFromDrag(origin: number, dy: number, perPx = TEMPO_DRAG_PER_PX, fine = false, release = false) {
+  if (perPx === TEMPO_DRAG_PER_PX) return roundTempo(dragNumeric({ origin, deltaPx: dy, min: 30, max: 300, fine, release }), false)
   const raw = origin + dy * perPx
-  return roundTempo(fine ? raw : applyIntegerDetent(raw), false)
+  const next = fine ? raw : release ? Math.round(raw) : applyIntegerDetent(raw)
+  return roundTempo(next, false)
 }

@@ -11,6 +11,7 @@ import { sidechainMono } from './sidechain'
 import { MASTER, REMOTE } from './routing'
 import { renderInserts, type InsertClock, type InsertJob, type InsertPlugin } from './renderChain'
 import { wasmDspRequested } from './wasm/flag'
+import { panGains } from './level'
 import type { Processor } from './plugins/types'
 
 export interface GraphTrack {
@@ -330,22 +331,23 @@ function applyAutomatedFader(
   for (let i = 0; i < length; i++) {
     const v = typeof vol === 'number' ? vol : vol[i]
     const p = typeof pan === 'number' ? pan : pan[i]
-    const angle = ((p + 1) * Math.PI) / 4
-    out[0][i] = (input[0]?.[i] || 0) * Math.cos(angle) * v
-    out[1][i] = (input[1]?.[i] ?? input[0]?.[i] ?? 0) * Math.sin(angle) * v
+    const gains = panGains(p)
+    out[0][i] = (input[0]?.[i] || 0) * gains.left * v
+    out[1][i] = (input[1]?.[i] ?? input[0]?.[i] ?? 0) * gains.right * v
   }
   return out
 }
 
 function applyFader(input: Float32Array[], volume: number, pan: number) {
-  const angle = ((pan + 1) * Math.PI) / 4
-  const left = Math.cos(angle) * volume
-  const right = Math.sin(angle) * volume
-  const gains = [left, right]
-  return input.map((channel, index) => {
-    const out = new Float32Array(channel.length)
-    const gain = gains[index] ?? volume
-    for (let i = 0; i < channel.length; i++) out[i] = channel[i] * gain
-    return out
-  })
+  const gains = panGains(pan)
+  const leftIn = input[0] ?? new Float32Array(0)
+  const rightIn = input.length > 1 ? (input[1] ?? leftIn) : leftIn
+  const length = Math.max(leftIn.length, rightIn.length)
+  const left = new Float32Array(length)
+  const right = new Float32Array(length)
+  for (let i = 0; i < length; i++) {
+    left[i] = (leftIn[i] || 0) * gains.left * volume
+    right[i] = (rightIn[i] || 0) * gains.right * volume
+  }
+  return [left, right]
 }

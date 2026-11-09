@@ -92,10 +92,11 @@ describe('library instruments on every note surface', () => {
           for (const name of PLAY) {
             await showBrowser(page)
             await page.evaluate((wanted) => {
-              const buttons = [...document.querySelectorAll('[data-harbor="instruments"] button')]
-              const button = buttons.find((item) => item.textContent?.includes(wanted))
+              const rows = [...document.querySelectorAll('[data-harbor="instruments"] .sound-row')]
+              const row = rows.find((item) => item.textContent?.includes(wanted))
+              const button = row?.querySelector('.sound-add') as HTMLButtonElement | null
               if (!button) throw new Error('missing ' + wanted)
-              ;(button as HTMLButtonElement).click()
+              button.click()
             }, name)
             await page.waitForFunction((wanted) => {
               const hook = (window as unknown as { __cueharbor?: { store: { project: { tracks: { instrument?: string; library?: { name?: string } }[] } } } }).__cueharbor

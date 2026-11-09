@@ -91,6 +91,7 @@ describe('instrument library browser', () => {
     for (const family of ['Strings', 'Brass', 'Woodwinds', 'Keys', 'Bass', 'Guitar', 'Mallets', 'World', 'Synth']) {
       expect(html).toContain(family)
     }
+    expect(html).toContain('>Load<')
     expect(html).toContain('Osiris Piano')
     expect(html).toContain('Black And Blue')
     expect(html).toContain('CC0')

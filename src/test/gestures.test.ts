@@ -106,6 +106,30 @@ describe('knob gestures', () => {
     expect(fine).toBeGreaterThan(0)
     expect(fine).toBeLessThan(coarse)
   })
+
+  it('rounds a normal release to an integer and keeps decimals when shift is held', () => {
+    const knob = new FakeControl()
+    const run = (shift: boolean) => {
+      let value = 120
+      const stop = attachControlGesture(knob, () => ({
+        min: 30,
+        max: 300,
+        fallback: 120,
+        axis: 'y',
+        getValue: () => value,
+        onChange: (change) => {
+          value = change.value
+        },
+      }))
+      knob.dispatch('pointerdown', { clientX: 0, clientY: 100, shiftKey: shift })
+      knob.dispatch('pointermove', { clientX: 0, clientY: 85, shiftKey: shift })
+      knob.dispatch('pointerup', { clientX: 0, clientY: 85, shiftKey: shift })
+      stop()
+      return value
+    }
+    expect(Number.isInteger(run(false))).toBe(true)
+    expect(Number.isInteger(run(true))).toBe(false)
+  })
 })
 
 describe('shared knob, slider, and fader reset', () => {

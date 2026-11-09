@@ -3,6 +3,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import { isolationHeaders } from './server/headers'
+import { selfContainedWorklets, workletSourceGuard } from './scripts/worklet-bundle'
 
 const root = dirname(fileURLToPath(import.meta.url))
 
@@ -24,8 +26,24 @@ function dropBundledOrt(): Plugin {
   }
 }
 
+/** COOP/COEP on dev and `vite preview`, matching the production server. */
+function isolationPreview(): Plugin {
+  const headers = isolationHeaders()
+  const apply = (server: { middlewares: { use: (fn: (req: unknown, res: { setHeader: (name: string, value: string) => void }, next: () => void) => void) => void } }) => {
+    server.middlewares.use((_req, res, next) => {
+      for (const [name, value] of Object.entries(headers)) res.setHeader(name, value)
+      next()
+    })
+  }
+  return {
+    name: 'isolation-headers',
+    configureServer: apply,
+    configurePreviewServer: apply,
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), dropBundledOrt()],
+  plugins: [selfContainedWorklets(), react(), dropBundledOrt(), isolationPreview(), workletSourceGuard()],
   resolve: {
     alias: [
       { find: 'onnxruntime-web/wasm', replacement: resolve(root, 'node_modules/onnxruntime-web/dist/ort.wasm.min.mjs') },

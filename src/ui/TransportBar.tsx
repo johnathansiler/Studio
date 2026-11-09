@@ -215,7 +215,7 @@ export function TransportBar({
       const fine = event.shiftKey
       const current = shown.current
       const deltaPx = (event.deltaY < 0 ? 1 : -1) * (fine ? 4 : 10)
-      const next = dragNumeric({ origin: current, deltaPx, min: 30, max: 300, fine })
+      const next = dragNumeric({ origin: current, deltaPx, min: 30, max: 300, fine, release: !fine })
       markIntegerLand(node, current, next)
       memory.current = emptyTap()
       publish(next, true)
@@ -310,6 +310,13 @@ export function TransportBar({
       endTempoScroll(state)
       if (state.mode === 'drag') {
         if (ev.type === 'pointercancel') publish(state.origin, true)
+        else {
+          const fine = ev.shiftKey || state.fine
+          const before = shown.current
+          const next = tempoFromDrag(state.origin, state.y - ev.clientY, undefined, fine, true)
+          publish(next, true)
+          markIntegerLand(node, before, next)
+        }
         store.endTempoGroup()
         window.setTimeout(() => { suppressFocus.current = false }, 0)
         return

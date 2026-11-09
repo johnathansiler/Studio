@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent as Re
 import { soundCache } from '../sounds/cache'
 import { decodeSoundBytes, trackIdFromDrop } from '../sounds/place'
 import { filterHarborLoops, loopInstruments, loopKeys } from '../harbor/filter'
-import { instrumentFileUrl, loadHarborCatalog, prepareCatalogInstrument, rememberHarborCatalog } from '../harbor/load'
+import { normalizePeak } from '../audio/level'
+import { sampleLoadFault, sampleLoadState, subscribeSampleLoad } from '../audio/sampleLoadBus'
+import { instrumentFileUrl, loadHarborCatalog, loadZoneSamples, prepareCatalogInstrument, rememberHarborCatalog, samplesForNote } from '../harbor/load'
 import { installHarborInstrument } from '../harbor/player'
 import { placeHarborLoop, previewHarborLoop } from '../harbor/place'
 import { articulationsIn } from '../harbor/program'
@@ -66,6 +68,8 @@ export function HarborBrowser({
   const [filterOpen, setFilterOpen] = useState(false)
   const [busy, setBusy] = useState('')
   const [playing, setPlaying] = useState('')
+  const [fault, setFault] = useState('')
+  const sampleLoad = useSyncExternalStore(subscribeSampleLoad, sampleLoadState, sampleLoadState)
   const addRef = useRef<(entry: HarborEntry, trackId?: string | null, startSample?: number) => void>(() => undefined)
   const entriesRef = useRef(catalog.loops)
   const filterButton = useRef<HTMLButtonElement>(null)
@@ -169,6 +173,8 @@ export function HarborBrowser({
       return
     }
     setBusy(item.id)
+    setFault('')
+    sampleLoadFault('')
     try {
       engine.unlock()
       const program = await prepareCatalogInstrument(item)
@@ -190,7 +196,40 @@ export function HarborBrowser({
       }, { cache: soundCache() })
       store.toast(`${item.name} is on the keyboard.`, 'good')
     } catch (error) {
-      store.toast(error instanceof Error ? error.message : 'Could not load that instrument.', 'warn')
+      const message = error instanceof Error ? error.message : 'Could not load that instrument.'
+      setFault(message)
+      sampleLoadFault(message)
+      store.toast(message, 'warn')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  /** Play middle C on the speakers. Does not open the instrument editor. */
+  async function previewInstrument(item: CatalogInstrument) {
+    if (playing === item.id) {
+      engine.stopPreview()
+      setPlaying('')
+      return
+    }
+    setBusy(item.id)
+    setFault('')
+    sampleLoadFault('')
+    try {
+      engine.unlock()
+      const program = await prepareCatalogInstrument(item)
+      if (!program) throw new Error(`${item.name} has no playable notes.`)
+      const decoded = await loadZoneSamples(samplesForNote(program, 60, 0.9))
+      const first = decoded.find((sample) => sample.channels.some((channel) => channel.length > 0))
+      if (!first) throw new Error(`${item.name} did not load a preview.`)
+      engine.stopPreview()
+      engine.previewPcm(normalizePeak(first.channels), first.sampleRate, false)
+      setPlaying(item.id)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not preview that instrument.'
+      setFault(message)
+      sampleLoadFault(message)
+      store.toast(message, 'warn')
     } finally {
       setBusy('')
     }
@@ -356,6 +395,7 @@ export function HarborBrowser({
       {section === 'instruments' && selected?.type === 'midi' && <HarborPresetBar store={store} trackId={selected.id} />}
       <HarborProgress />
       {message && <p className="sound-status">{message}</p>}
+      {fault && <p className="sound-status" role="alert">{fault}</p>}
       <div className="harbor-list sound-list">
         {section === 'instruments' && INSTRUMENT_FAMILIES.map((family) => {
           const rows = shownInstruments.filter((item) => item.family === family)
@@ -363,14 +403,22 @@ export function HarborBrowser({
           return (
             <section key={family} data-family={family}>
               <h3 className="harbor-family">{family}</h3>
-              {rows.map((item) => (
-                <div key={item.id} className={`sound-row${busy === item.id ? ' is-playing' : ''}`}>
-                  <button type="button" className="sound-copy" title={`${item.name}. ${licenseLabel(item.license)}. Loads onto the selected instrument track.`} onClick={() => void loadInstrument(item)}>
+              {rows.map((item) => {
+                const meta = busy === item.id
+                  ? `Loading ${Math.round((sampleLoad.ratio || 0) * 100)}%`
+                  : playing === item.id
+                    ? 'Playing'
+                    : `${licenseLabel(item.license)}${item.category ? ` · ${item.category}` : ''}`
+                return (
+                <div key={item.id} className={`sound-row${playing === item.id || busy === item.id ? ' is-playing' : ''}`}>
+                  <button type="button" className="sound-copy" title={`${item.name}. Preview middle C.`} onClick={() => void previewInstrument(item)}>
                     <strong>{item.name}</strong>
-                    <span className="sound-meta">{licenseLabel(item.license)}{item.category ? ` · ${item.category}` : ''}</span>
+                    <span className="sound-meta">{meta}</span>
                   </button>
+                  <button type="button" className="sound-add" disabled={busy === item.id} aria-label={`Load ${item.name}`} title={where} onClick={() => void loadInstrument(item)}>Load</button>
                 </div>
-              ))}
+                )
+              })}
             </section>
           )
         })}
