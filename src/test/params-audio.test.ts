@@ -173,6 +173,7 @@ function arm(engine: AudioEngine, ctx: ReturnType<typeof installAudioMocks>) {
     analyser: ctx.createAnalyser(),
     output: master,
     irDecay: 0,
+    compLive: false,
   }
   return live
 }

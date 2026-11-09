@@ -127,6 +127,8 @@ export interface InstrumentPlay {
 export interface DecodedSample {
   sampleRate: number
   channels: Float32Array[]
+  /** Peak of the decoded frames, filled when the sample is stored. */
+  peak?: number
 }
 
 /** SF2 (or any packed PCM) held so zones can decode one sample at a time. */

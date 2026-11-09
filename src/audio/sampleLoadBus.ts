@@ -3,22 +3,35 @@
 export interface SampleLoadState {
   pending: number
   ratio: number
+  fault: string
 }
 
 const ratios = new Map<string, number>()
 const listeners = new Set<() => void>()
-const EMPTY: SampleLoadState = { pending: 0, ratio: 0 }
+let fault = ''
+const EMPTY: SampleLoadState = { pending: 0, ratio: 0, fault: '' }
 let snapshot: SampleLoadState = EMPTY
 
 function emit() {
-  if (!ratios.size) snapshot = EMPTY
-  else {
+  const pending = ratios.size
+  let ratio = 0
+  if (pending) {
     let sum = 0
-    for (const ratio of ratios.values()) sum += ratio
-    const next = sum / ratios.size
-    if (snapshot.pending !== ratios.size || snapshot.ratio !== next) snapshot = { pending: ratios.size, ratio: next }
+    for (const value of ratios.values()) sum += value
+    ratio = sum / pending
+  }
+  if (snapshot.pending !== pending || snapshot.ratio !== ratio || snapshot.fault !== fault) {
+    snapshot = pending ? { pending, ratio, fault } : { pending: 0, ratio: 0, fault }
   }
   for (const listener of listeners) listener()
+}
+
+/** A failed zone download. Empty string clears it. Shown next to the instrument list. */
+export function sampleLoadFault(message: string) {
+  const next = message.trim()
+  if (fault === next) return
+  fault = next
+  emit()
 }
 
 export function sampleLoadBegin(id: string) {
@@ -52,5 +65,6 @@ export function subscribeSampleLoad(listener: () => void) {
 /** Tests start from an empty queue. */
 export function resetSampleLoad() {
   ratios.clear()
+  fault = ''
   emit()
 }

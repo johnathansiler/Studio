@@ -7,11 +7,12 @@ import { AnchoredMenu } from './AnchoredMenu'
 
 export function HarborProgress({ label = 'Loading zones' }: { label?: string }) {
   const state = useSyncExternalStore(subscribeSampleLoad, sampleLoadState, sampleLoadState)
+  if (state.fault && state.pending <= 0) return <p className="sound-status" role="alert">{state.fault}</p>
   if (state.pending <= 0) return null
   return (
     <p className="harbor-progress" role="status" data-harbor-progress="on">
       <progress value={Number.isFinite(state.ratio) ? state.ratio : 0} max={1} />
-      <span>{label}</span>
+      <span>{state.fault || label}</span>
     </p>
   )
 }

@@ -1,3 +1,4 @@
+import { measurePeak } from '../level'
 import { sampleLoadBegin, sampleLoadFinish } from '../sampleLoadBus'
 import { decodeWavPCM } from '../../model/wav'
 import type { DecodedSample, SampleFormat, SamplePack, SampleRef } from './types'
@@ -7,6 +8,12 @@ import { packStream, STREAM_FRAMES, viewStream, type SampleStream } from './stre
 export interface SampleBank {
   get(sample: SampleRef): DecodedSample | null
   request(sample: SampleRef): void
+  peak?(sample: SampleRef): number | null
+}
+
+/** Cross-origin samples. Omit cookies so a `*` CORS header still satisfies COEP credentialless. */
+export function libraryFetch(input: string, init?: RequestInit) {
+  return fetch(input, { ...init, mode: 'cors', credentials: 'omit' })
 }
 
 export class MemoryBank implements SampleBank {
@@ -19,7 +26,12 @@ export class MemoryBank implements SampleBank {
   request(_sample: SampleRef) {}
 
   put(id: string, sample: DecodedSample) {
+    if (sample.peak == null) sample.peak = measurePeak(sample.channels)
     this.samples.set(id, sample)
+  }
+
+  peak(sample: SampleRef) {
+    return this.samples.get(sample.id)?.peak ?? null
   }
 }
 
@@ -42,7 +54,7 @@ export class SampleCache implements SampleBank {
   private bytes = 0
 
   constructor(
-    private readonly fetchImpl: FetchLike = (input, init) => fetch(input, init),
+    private readonly fetchImpl: FetchLike = (input, init) => libraryFetch(input, init),
     readonly maxBytes = 256 * 1024 * 1024,
   ) {}
 
@@ -173,7 +185,12 @@ export class SampleCache implements SampleBank {
     await Promise.all([...this.inflight.values()])
   }
 
+  peak(sample: SampleRef) {
+    return this.decoded.get(sample.id)?.peak ?? this.views.get(sample.id)?.peak ?? null
+  }
+
   private remember(id: string, sample: DecodedSample) {
+    if (sample.peak == null) sample.peak = measurePeak(sample.channels)
     const frames = sample.channels[0]?.length ?? 0
     if (frames > STREAM_FRAMES) {
       this.views.set(id, sample)
