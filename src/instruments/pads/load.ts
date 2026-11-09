@@ -1,9 +1,8 @@
 /** Load the default CC0 drum kit from the CueHarbor library on Hugging Face. */
 
-import { fetchSoundBytes, soundCache } from '../../sounds/cache'
-import { loadSoundCatalog } from '../../sounds/catalog'
+import { soundCache } from '../../sounds/cache'
+import { fetchCatalogSound, loadSoundCatalog } from '../../sounds/catalog'
 import { decodeSoundBytes } from '../../sounds/place'
-import { soundFileUrl } from '../../sounds/source'
 import type { ProjectStore } from '../../state/store'
 import { pickDefaultKit } from './record'
 
@@ -19,8 +18,10 @@ export async function ensureDefaultKit(store: ProjectStore, trackId: string): Pr
     const catalog = await loadSoundCatalog(fetch, soundCache())
     const picks = pickDefaultKit(catalog.entries)
     for (const pick of picks) {
+      const entry = catalog.entries.find((item) => item.id === pick.id)
+      if (!entry) continue
       try {
-        const bytes = await fetchSoundBytes(soundFileUrl(pick.path))
+        const bytes = await fetchCatalogSound(entry)
         const decoded = await decodeSoundBytes(bytes)
         const samples = decoded.channels[0]
         if (!samples?.length) continue

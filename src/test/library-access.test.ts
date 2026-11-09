@@ -23,7 +23,7 @@ import {
   writeSoundWidth,
   type SoundWidthMemory,
 } from '../sounds/panel'
-import { soundFileUrl } from '../sounds/source'
+import { legacySoundFileUrl, soundFileUrl } from '../sounds/source'
 import type { SoundEntry } from '../sounds/types'
 import { ProjectStore } from '../state/store'
 import { PatchSheet } from '../ui/PatchSheet'
@@ -110,7 +110,8 @@ describe('library access', () => {
       'loops-keys-felt-piano-g-120',
     ])
     expect(filterSounds(parsed, { ...query, type: 'instrument' })).toEqual([])
-    const file = soundFileUrl(loops[0].path)
+    expect(() => soundFileUrl(loops[0].path)).toThrow(/Hugging Face|library/)
+    const file = legacySoundFileUrl(loops[0].path)
     expect(file).toBe('https://huggingface.co/datasets/cueharbor/sound-library/resolve/main/loops/drums/boom-bap_88bpm.wav')
     expect(file).not.toContain('github.com')
     expect(() => soundFileUrl(loops[0].source)).toThrow(/Hugging Face/)

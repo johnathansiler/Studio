@@ -1,9 +1,8 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { fetchSoundBytes, soundCache } from '../sounds/cache'
-import { filterSounds, loadSoundCatalog, soundKeys } from '../sounds/catalog'
+import { soundCache } from '../sounds/cache'
+import { fetchCatalogSound, filterSounds, loadSoundCatalog, soundCategories, soundCollections, soundKeys } from '../sounds/catalog'
 import { audioTrackFor, decodeSoundBytes, placeSound, previewChannelsFor } from '../sounds/place'
-import { soundFileUrl } from '../sounds/source'
-import type { SoundEntry, SoundQuery } from '../sounds/types'
+import type { SoundEntry, SoundFilter, SoundQuery } from '../sounds/types'
 import type { ProjectStore } from '../state/store'
 import {
   browserGroup,
@@ -16,6 +15,7 @@ import {
 } from '../model/sessionBoard'
 import { parseSessionDrag, type SessionDrag } from '../model/sessionInteract'
 import { beginSessionDrag } from './sessionPointer'
+import { PACK_LABEL, packLabel } from '../sounds/contract'
 import { SoundFilterButton } from './SoundBrowser'
 
 const CATALOG_WAIT_MS = 8000
@@ -69,7 +69,7 @@ export async function dropLibrarySound(store: ProjectStore, trackId: string, sce
     store.toast('Drop sounds on an audio track.', 'warn')
     return
   }
-  const bytes = await fetchSoundBytes(soundFileUrl(entry.path))
+  const bytes = await fetchCatalogSound(entry)
   const decoded = await decodeSoundBytes(bytes)
   const placed = placeSound({
     entry,
@@ -174,10 +174,14 @@ export function SessionBrowser({
   const [phase, setPhase] = useState<'loading' | 'error' | 'ready'>('loading')
   const [query, setQuery] = useState('')
   const [bpm, setBpm] = useState<SoundQuery['bpm']>('any')
+  const [kind, setKind] = useState<SoundFilter>('all')
   const [soundKey, setSoundKey] = useState('')
+  const [collection, setCollection] = useState('')
+  const [category, setCategory] = useState('')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [playing, setPlaying] = useState('')
   const [busy, setBusy] = useState('')
+  const [loadRatio, setLoadRatio] = useState(0)
   useSyncExternalStore(
     (listener) => store ? store.subscribe(listener) : () => undefined,
     () => store?.version ?? 0,
@@ -217,12 +221,14 @@ export function SessionBrowser({
   const favorites = store?.project.soundFavorites ?? []
   const shownSounds = filterSounds(entries, {
     text: query,
-    type: 'all',
+    type: kind,
     bpm,
     key: soundKey,
     favoritesOnly,
     projectBpm: store?.project.tempo ?? 120,
     favorites,
+    collection,
+    category,
   }).slice(0, 200)
   const devices = browserGroup(group).filter((item) => !needle || `${item.name} ${item.hint}`.toLowerCase().includes(needle))
   const keys = soundKeys(entries)
@@ -237,7 +243,8 @@ export function SessionBrowser({
     setBusy(entry.id)
     try {
       engine.unlock()
-      const bytes = await fetchSoundBytes(soundFileUrl(entry.path))
+      setLoadRatio(0)
+      const bytes = await fetchCatalogSound(entry, { onProgress: setLoadRatio })
       const decoded = await decodeSoundBytes(bytes)
       const channels = previewChannelsFor(entry, decoded.channels, decoded.sampleRate, store.project, engine.currentTimelineSample())
       engine.previewPcm(channels, store.project.sampleRate)
@@ -302,6 +309,16 @@ export function SessionBrowser({
             onBpm={setBpm}
             onKey={setSoundKey}
             onFavorites={setFavoritesOnly}
+            collections={soundCollections(entries)}
+            categories={soundCategories(entries)}
+            collection={collection}
+            category={category}
+            collectionLabels={PACK_LABEL}
+            onCollection={setCollection}
+            onCategory={setCategory}
+            showKind
+            kind={kind}
+            onKind={setKind}
           />
         )}
       </div>
@@ -337,7 +354,7 @@ export function SessionBrowser({
             >
               {playing === entry.id && <i className="sound-live" aria-hidden="true" />}
               <strong>{entry.name}</strong>
-              <small>{playing === entry.id ? 'Playing' : entry.type}</small>
+              <small>{busy === entry.id ? `Loading ${Math.round(loadRatio * 100)}%` : playing === entry.id ? 'Playing' : [entry.type === 'one-shot' ? 'One-shot' : entry.type === 'loop' ? 'Loop' : 'Instrument', entry.pack ? packLabel(entry.pack) : ''].filter(Boolean).join(' · ')}</small>
             </button>
             <button type="button" className="sl-add" disabled={busy === entry.id || !store || store.remoteFollow} aria-label={`Add. ${entry.name}`} onClick={() => void addSound(entry)}>Add</button>
             <button

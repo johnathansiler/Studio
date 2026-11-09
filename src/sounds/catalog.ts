@@ -1,18 +1,18 @@
-import type { CatalogResult, SoundEntry, SoundKind, SoundQuery } from './types'
-import { soundIndexUrl } from './source'
 import type { SoundCache } from './cache'
+import { fetchSoundBytes, soundCache, type FetchSoundOptions } from './cache'
+import { SOUNDSCOUT_VERSION, SOUND_VERSION_PREFIX } from './contract'
+import { licenseAllowed } from './license'
+import { soundCatalogUrl, soundFileUrl } from './source'
+import type { CatalogResult, SoundEntry, SoundKind, SoundQuery } from './types'
+
+export { licenseAllowed } from './license'
 
 const KINDS = new Set<SoundKind>(['one-shot', 'loop', 'instrument'])
 
-/** CC0, public domain, and Unlicense only. */
-export function licenseAllowed(license: string) {
-  const text = license.trim().toLowerCase().replace(/[_]+/g, ' ').replace(/\s+/g, ' ')
-  if (!text) return false
-  if (text === 'cc0' || text.startsWith('cc0 ') || text.startsWith('cc0-') || text.startsWith('cc-0') || text.startsWith('cc zero') || text.startsWith('creative commons zero')) return true
-  if (text === 'public domain' || text.startsWith('public domain')) return true
-  if (text === 'unlicense' || text.startsWith('unlicense')) return true
-  return false
-}
+type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
+
+let listedFetch: FetchLike = (input, init) => fetch(input, init)
+let listedCache: SoundCache | undefined
 
 export function parseSoundEntry(input: unknown): SoundEntry | null {
   if (!input || typeof input !== 'object') return null
@@ -30,7 +30,13 @@ export function parseSoundEntry(input: unknown): SoundEntry | null {
   const durationSec = typeof raw.durationSec === 'number' && Number.isFinite(raw.durationSec) && raw.durationSec >= 0 ? raw.durationSec : 0
   const sampleRate = typeof raw.sampleRate === 'number' && Number.isFinite(raw.sampleRate) && raw.sampleRate > 0 ? raw.sampleRate : 48000
   const source = typeof raw.source === 'string' ? raw.source.trim() : ''
-  return { id, path, name, type: type as SoundKind, tags, bpm, key, durationSec, sampleRate, license, source }
+  const collection = typeof raw.collection === 'string' && raw.collection.trim() ? raw.collection.trim() : undefined
+  const category = typeof raw.category === 'string' && raw.category.trim() ? raw.category.trim() : undefined
+  const pitch = typeof raw.pitch === 'string' && raw.pitch.trim() ? raw.pitch.trim() : undefined
+  const sha256 = typeof raw.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(raw.sha256.trim()) ? raw.sha256.trim().toLowerCase() : undefined
+  const bytes = typeof raw.bytes === 'number' && Number.isFinite(raw.bytes) && raw.bytes > 0 ? raw.bytes : undefined
+  const pack = typeof raw.pack === 'string' && raw.pack.trim() ? raw.pack.trim() : undefined
+  return { id, path, name, type: type as SoundKind, tags, bpm, key, pitch, durationSec, sampleRate, license, source, collection, category, sha256, bytes, pack }
 }
 
 export function parseCatalog(input: unknown): SoundEntry[] {
@@ -55,7 +61,9 @@ export function bpmMatchesProject(bpm: number, projectBpm: number) {
 const DRUM_WORD = /\b(drum|drums|kit|kick|snare|hi-?hat|hat|clap|tom|cymbal|rimshot|rim)\b/
 
 /** One-shots and loops that are drum samples or kits. Percussion that is not a drum stays out. */
-export function isDrumSound(entry: Pick<SoundEntry, 'name' | 'path' | 'tags'>) {
+export function isDrumSound(entry: Pick<SoundEntry, 'name' | 'path' | 'tags' | 'category'>) {
+  const category = (entry.category ?? '').toLowerCase()
+  if (category === 'kick' || category === 'drums' || category === 'percussion') return true
   const path = entry.path.toLowerCase()
   if (path.startsWith('drums/') || path.includes('/drums/')) return true
   return DRUM_WORD.test(`${entry.name} ${entry.path} ${entry.tags.join(' ')}`.toLowerCase())
@@ -70,10 +78,12 @@ export function filterSounds(entries: SoundEntry[], query: SoundQuery): SoundEnt
         if (!isDrumSound(entry)) return false
       } else if (query.type !== 'all' && entry.type !== query.type) return false
       if (query.favoritesOnly && !query.favorites.includes(entry.id)) return false
+      if (query.collection && entry.collection !== query.collection && entry.pack !== query.collection) return false
+      if (query.category && entry.category !== query.category) return false
       if (key && !soundKeyMatches(key, entry.key)) return false
       if (query.bpm === 'project' && (entry.bpm == null || !bpmMatchesProject(entry.bpm, query.projectBpm))) return false
       if (!tokens.length) return true
-      const hay = `${entry.name} ${entry.tags.join(' ')} ${entry.key ?? ''} ${entry.type} ${entry.source}`.toLowerCase()
+      const hay = `${entry.name} ${entry.collection ?? ''} ${entry.category ?? ''} ${entry.tags.join(' ')} ${entry.key ?? ''} ${entry.pitch ?? ''} ${entry.type} ${entry.source}`.toLowerCase()
       return tokens.every((token) => hay.includes(token))
     })
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
@@ -109,6 +119,18 @@ export function soundKeys(entries: SoundEntry[]) {
   return [...new Set(entries.map((entry) => entry.key).filter((key): key is string => Boolean(key)))].sort((a, b) => a.localeCompare(b))
 }
 
+export function soundPacks(entries: SoundEntry[]) {
+  return [...new Set(entries.map((entry) => entry.pack).filter((pack): pack is string => Boolean(pack)))].sort((a, b) => a.localeCompare(b))
+}
+
+export function soundCollections(entries: SoundEntry[]) {
+  return soundPacks(entries)
+}
+
+export function soundCategories(entries: SoundEntry[]) {
+  return [...new Set(entries.map((entry) => entry.category).filter((category): category is string => Boolean(category)))].sort((a, b) => a.localeCompare(b))
+}
+
 export function catalogMessage(result: CatalogResult, filteredCount: number, queryActive: boolean) {
   if (result.status === 'missing') return 'The sound library is not online yet.'
   if (!result.entries.length) return 'No free sounds are listed yet.'
@@ -116,20 +138,88 @@ export function catalogMessage(result: CatalogResult, filteredCount: number, que
   return ''
 }
 
-type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
-
 function bytesOf(text: string) {
   const encoded = new TextEncoder().encode(text)
   return encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength)
 }
 
 /**
- * Network first. A missing or unreadable index falls back to the last cached copy,
- * then to an empty catalog so the panel can still open.
+ * One versioned SoundScout row. Names, bpm, and key are copied only when the
+ * document has them. Legacy index rows are not accepted here.
+ */
+export function parseScoutEntry(input: unknown): SoundEntry | null {
+  if (!input || typeof input !== 'object') return null
+  const raw = input as Record<string, unknown>
+  const id = typeof raw.id === 'string' ? raw.id.trim() : ''
+  const path = typeof raw.path === 'string' ? raw.path.trim() : ''
+  const name = typeof raw.name === 'string' ? raw.name : ''
+  const type = raw.type
+  if (!id || !path || !name.trim() || typeof type !== 'string' || !KINDS.has(type as SoundKind)) return null
+  if (!path.startsWith(SOUND_VERSION_PREFIX) || path.includes('..')) return null
+  const license = typeof raw.license === 'string' ? raw.license.trim() : ''
+  const licenseClass = typeof raw.licenseClass === 'string' ? raw.licenseClass.trim() : ''
+  if (/NOT_CC0/.test(licenseClass) && license !== 'Informal-creator-grant') return null
+  const attributionRequired = raw.attributionRequired === true
+  if (!licenseAllowed(license, attributionRequired)) return null
+  const tags = Array.isArray(raw.tags) ? raw.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0).map((tag) => tag.trim()) : []
+  const bpm = typeof raw.bpm === 'number' && Number.isFinite(raw.bpm) && raw.bpm > 0 ? raw.bpm : undefined
+  const key = typeof raw.key === 'string' && raw.key.trim() ? raw.key.trim() : undefined
+  const durationSec = typeof raw.durationSec === 'number' && Number.isFinite(raw.durationSec) && raw.durationSec >= 0 ? raw.durationSec : 0
+  const sampleRate = typeof raw.sampleRate === 'number' && Number.isFinite(raw.sampleRate) && raw.sampleRate > 0 ? raw.sampleRate : 0
+  if (!(sampleRate > 0)) return null
+  const source = typeof raw.source === 'string' ? raw.source.trim() : ''
+  const collection = typeof raw.collection === 'string' && raw.collection.trim() ? raw.collection.trim() : undefined
+  const category = typeof raw.category === 'string' && raw.category.trim() ? raw.category.trim() : undefined
+  const sha256 = typeof raw.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(raw.sha256.trim()) ? raw.sha256.trim().toLowerCase() : undefined
+  const bytes = typeof raw.bytes === 'number' && Number.isFinite(raw.bytes) && raw.bytes > 0 ? raw.bytes : undefined
+  const pack = typeof raw.packId === 'string' && raw.packId.trim() ? raw.packId.trim() : typeof raw.pack === 'string' && raw.pack.trim() ? raw.pack.trim() : undefined
+  return {
+    id,
+    path,
+    name,
+    type: type as SoundKind,
+    tags,
+    bpm,
+    key,
+    durationSec,
+    sampleRate,
+    license,
+    source,
+    collection,
+    category,
+    sha256,
+    bytes,
+    pack,
+    licenseClass: licenseClass || undefined,
+    licenseNote: typeof raw.licenseNote === 'string' && raw.licenseNote.trim() ? raw.licenseNote.trim() : undefined,
+    creator: typeof raw.creator === 'string' && raw.creator.trim() ? raw.creator.trim() : undefined,
+    attributionRequired,
+    isContentAlias: raw.isContentAlias === true,
+  }
+}
+
+/** The versioned catalog object. An array is the old stock index and is ignored. */
+export function parseSoundScoutCatalog(input: unknown): SoundEntry[] {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return []
+  const doc = input as Record<string, unknown>
+  if (doc.version !== SOUNDSCOUT_VERSION || !Array.isArray(doc.entries)) return []
+  const entries: SoundEntry[] = []
+  for (const item of doc.entries) {
+    const entry = parseScoutEntry(item)
+    if (entry) entries.push(entry)
+  }
+  return entries
+}
+
+/**
+ * Fetch the versioned SoundScout catalog only.
+ * A missing file, a legacy index, or a cached copy of that index does not become the list.
+ * Audio files are not requested here.
  */
 export async function loadSoundCatalog(fetchImpl: FetchLike = (input, init) => fetch(input, init), cache?: SoundCache): Promise<CatalogResult> {
-  const url = soundIndexUrl()
-  const store = cache
+  listedFetch = fetchImpl
+  listedCache = cache
+  const url = soundCatalogUrl()
   try {
     const response = await fetchImpl(url, { cache: 'no-store' })
     if (response.ok) {
@@ -138,29 +228,43 @@ export async function loadSoundCatalog(fetchImpl: FetchLike = (input, init) => f
       try {
         json = JSON.parse(text)
       } catch {
-        return cachedCatalog(store, url)
+        return readCachedCatalog(cache, url)
       }
-      if (!Array.isArray(json)) return { entries: [], status: 'missing' }
-      if (store) {
-        try { await store.put(url, bytesOf(text)) } catch { /* the list still shows */ }
+      const entries = parseSoundScoutCatalog(json)
+      if (!entries.length) return { entries: [], status: 'missing' }
+      if (cache) {
+        try { await cache.put(url, bytesOf(text)) } catch { /* the list still shows */ }
       }
-      return { entries: parseCatalog(json), status: 'ok' }
+      return { entries, status: 'ok' }
     }
   } catch {
-    /* try the copy kept from the last successful load */
+    /* try the last versioned catalog, never the legacy index */
   }
-  return cachedCatalog(store, url)
+  return readCachedCatalog(cache, url)
 }
 
-async function cachedCatalog(cache: SoundCache | undefined, url: string): Promise<CatalogResult> {
+async function readCachedCatalog(cache: SoundCache | undefined, url: string): Promise<CatalogResult> {
   if (!cache) return { entries: [], status: 'missing' }
   try {
     const bytes = await cache.get(url)
     if (!bytes) return { entries: [], status: 'missing' }
     const json = JSON.parse(new TextDecoder().decode(bytes)) as unknown
-    if (!Array.isArray(json)) return { entries: [], status: 'missing' }
-    return { entries: parseCatalog(json), status: 'ok' }
+    const entries = parseSoundScoutCatalog(json)
+    if (!entries.length) return { entries: [], status: 'missing' }
+    return { entries, status: 'ok' }
   } catch {
     return { entries: [], status: 'missing' }
   }
+}
+
+/** One file from the active catalog. Checks the inventory hash before caching. */
+export async function fetchCatalogSound(entry: SoundEntry, options?: FetchSoundOptions & { fetchImpl?: FetchLike; cache?: SoundCache }) {
+  const url = soundFileUrl(entry.path)
+  return fetchSoundBytes(url, options?.fetchImpl ?? listedFetch, options?.cache ?? listedCache ?? soundCache(), {
+    attempts: options?.attempts,
+    delayMs: options?.delayMs,
+    onProgress: options?.onProgress,
+    sha256: options?.sha256 ?? entry.sha256,
+    totalBytes: options?.totalBytes ?? entry.bytes,
+  })
 }

@@ -4,15 +4,15 @@ import { libraryBaseUrl } from '../audio/multisample/source'
 import type { SamplePack } from '../audio/multisample/types'
 import { decodeSlotFile, focusedSlot, SOUND_MIME } from '../audio/sample/slot'
 import { uid } from '../model/types'
-import { fetchSoundBytes, soundCache } from '../sounds/cache'
-import { catalogMessage, filterSounds, loadSoundCatalog, soundKeys } from '../sounds/catalog'
+import { soundCache } from '../sounds/cache'
+import { catalogMessage, fetchCatalogSound, filterSounds, loadSoundCatalog, soundCategories, soundCollections, soundKeys } from '../sounds/catalog'
 import { boundLibraryHost, filterStarters, loadStarterOnto, playableAudition, refreshStarterCatalog, starterCatalog } from '../sounds/instruments'
 import { matchCountLabel, readSoundWidth, soundWidthFromDrag, writeSoundWidth } from '../sounds/panel'
 import { loopBarCount, waveformPeaks } from '../model/playheadPlace'
 import { quartersPerBar } from '../model/time'
 import { decodeSoundBytes, placeSound, previewChannelsFor, trackIdFromDrop } from '../sounds/place'
-import { soundFileUrl } from '../sounds/source'
-import type { CatalogResult, SoundEntry, SoundKind, SoundQuery } from '../sounds/types'
+import { PACK_LABEL, packLabel } from '../sounds/contract'
+import type { CatalogResult, SoundEntry, SoundFilter, SoundKind, SoundQuery } from '../sounds/types'
 import { selectSounds } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { AnchoredMenu } from './AnchoredMenu'
@@ -27,6 +27,16 @@ export function SoundFilterButton({
   onBpm,
   onKey,
   onFavorites,
+  collections = [],
+  categories = [],
+  collection = '',
+  category = '',
+  collectionLabels,
+  onCollection,
+  onCategory,
+  showKind = false,
+  kind = 'all',
+  onKind,
 }: {
   bpm: SoundQuery['bpm']
   soundKey: string
@@ -36,10 +46,20 @@ export function SoundFilterButton({
   onBpm: (bpm: SoundQuery['bpm']) => void
   onKey: (key: string) => void
   onFavorites: (value: boolean) => void
+  collections?: string[]
+  categories?: string[]
+  collection?: string
+  category?: string
+  collectionLabels?: Record<string, string>
+  onCollection?: (value: string) => void
+  onCategory?: (value: string) => void
+  showKind?: boolean
+  kind?: SoundFilter
+  onKind?: (value: SoundFilter) => void
 }) {
   const [open, setOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
-  const summary = [bpm === 'project' ? 'Song tempo' : '', soundKey, favoritesOnly ? 'Favorites' : ''].filter(Boolean).join(', ')
+  const summary = [bpm === 'project' ? 'Song tempo' : '', soundKey, collectionLabels?.[collection] ?? collection, category, favoritesOnly ? 'Favorites' : ''].filter(Boolean).join(', ')
   return (
     <>
       <button
@@ -48,13 +68,45 @@ export function SoundFilterButton({
         className={`sound-filter${bpm !== 'any' || soundKey || favoritesOnly ? ' on' : ''}`}
         aria-expanded={open}
         aria-haspopup="menu"
-        aria-label={summary ? `Filter. ${summary}.` : 'Filter. Tempo, key, and favorites.'}
-        title="Tempo, key, and favorites."
+        aria-label={summary ? `Filter. ${summary}.` : 'Filter. Kind, collection, category, tempo, key, and favorites.'}
+        title="Kind, collection, category, tempo, key, and favorites."
         onClick={() => setOpen((value) => !value)}
       >
         Filter
       </button>
       <AnchoredMenu className="sound-filter-menu" open={open} onClose={() => setOpen(false)} label="Filter" triggerRef={buttonRef}>
+        {showKind && onKind && (
+          <>
+            <p className="filter-label">Kind</p>
+            <div className="filter-row" role="group" aria-label="Kind. One-shots, loops, or drums.">
+              {KIND_CHIPS.filter((chip) => chip.id !== 'instrument').map((chip) => (
+                <button key={chip.id} type="button" className={`filter-choice${kind === chip.id ? ' on' : ''}`} aria-pressed={kind === chip.id} onClick={() => onKind(chip.id)}>{chip.label}</button>
+              ))}
+            </div>
+          </>
+        )}
+        {collections.length > 0 && onCollection && (
+          <>
+            <p className="filter-label">Pack</p>
+            <div className="filter-row" role="group" aria-label="Pack.">
+              <button type="button" className={`filter-choice${!collection ? ' on' : ''}`} aria-pressed={!collection} onClick={() => onCollection('')}>Any pack</button>
+              {collections.map((item) => (
+                <button key={item} type="button" className={`filter-choice${collection === item ? ' on' : ''}`} aria-pressed={collection === item} onClick={() => onCollection(item)}>{collectionLabels?.[item] ?? item}</button>
+              ))}
+            </div>
+          </>
+        )}
+        {categories.length > 0 && onCategory && (
+          <>
+            <p className="filter-label">Category</p>
+            <div className="filter-row" role="group" aria-label="Category.">
+              <button type="button" className={`filter-choice${!category ? ' on' : ''}`} aria-pressed={!category} onClick={() => onCategory('')}>Any category</button>
+              {categories.map((item) => (
+                <button key={item} type="button" className={`filter-choice${category === item ? ' on' : ''}`} aria-pressed={category === item} onClick={() => onCategory(item)}>{item.charAt(0).toUpperCase() + item.slice(1)}</button>
+              ))}
+            </div>
+          </>
+        )}
         {showTempoKey && (
           <>
             <p className="filter-label">Tempo</p>
@@ -193,7 +245,10 @@ export function SoundBrowser({
   const [type, setType] = useState<SoundQuery['type']>(lockType && lockType !== 'all' ? lockType : 'all')
   const [bpm, setBpm] = useState<SoundQuery['bpm']>('any')
   const [soundKey, setSoundKey] = useState('')
+  const [collection, setCollection] = useState('')
+  const [category, setCategory] = useState('')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
+  const [loadRatio, setLoadRatio] = useState(0)
   useEffect(() => {
     setType(lockType && lockType !== 'all' ? lockType : 'all')
   }, [lockType])
@@ -318,14 +373,18 @@ export function SoundBrowser({
     favoritesOnly,
     projectBpm: sounds.tempo,
     favorites: sounds.favorites,
+    collection,
+    category,
   }
   const filtered = type === 'instrument' ? [] : filterSounds(result.entries, query)
   const starterRows = filterStarters(starters, query)
   const shownSounds = filtered.slice(0, LIST_CAP)
   const shown = shownSounds.length + starterRows.length
   const total = filtered.length + starterRows.length
-  const queryActive = Boolean(text || type !== 'all' || bpm !== 'any' || soundKey || favoritesOnly)
+  const queryActive = Boolean(text || type !== 'all' || bpm !== 'any' || soundKey || collection || category || favoritesOnly)
   const keys = soundKeys(result.entries)
+  const collections = soundCollections(result.entries)
+  const categories = soundCategories(result.entries)
   const offline = failed || result.status === 'missing'
   const message = loading && !shown
     ? 'Loading'
@@ -379,7 +438,8 @@ export function SoundBrowser({
   }
 
   async function loadEntry(entry: SoundEntry) {
-    const bytes = await fetchSoundBytes(soundFileUrl(entry.path))
+    setLoadRatio(0)
+    const bytes = await fetchCatalogSound(entry, { onProgress: setLoadRatio })
     if (engine.decodeLibrary) return engine.decodeLibrary(bytes)
     return decodeSoundBytes(bytes)
   }
@@ -523,8 +583,9 @@ export function SoundBrowser({
       return
     }
     setBusy(entry.id)
+    setLoadRatio(0)
     try {
-      const bytes = await fetchSoundBytes(soundFileUrl(entry.path))
+      const bytes = await fetchCatalogSound(entry, { onProgress: setLoadRatio })
       const decoded = await decodeSlotFile(bytes)
       if (!decoded.channels[0]?.length) {
         store.toast('That sound had no audio.', 'warn')
@@ -688,6 +749,13 @@ export function SoundBrowser({
           onBpm={setBpm}
           onKey={setSoundKey}
           onFavorites={setFavoritesOnly}
+          collections={collections}
+          categories={categories}
+          collection={collection}
+          category={category}
+          collectionLabels={PACK_LABEL}
+          onCollection={setCollection}
+          onCategory={setCategory}
         />
       </div>
       {!lockType && (
@@ -753,6 +821,7 @@ export function SoundBrowser({
           const on = playing === entry.id
           const playHint = entry.type === 'loop' ? 'Play on the speakers at the song tempo.' : 'Play this sound on the speakers.'
           const credit = `${entry.license} · ${entry.source || 'Source not listed'}`
+          const meta = busy === entry.id ? `Loading ${Math.round(loadRatio * 100)}%` : on ? 'Playing' : [KIND_LABEL[entry.type], entry.pack ? packLabel(entry.pack) : entry.category].filter(Boolean).join(' · ')
           return (
             <div className={`sound-row${on ? ' is-playing' : ''}`} key={entry.id}>
               <button
@@ -783,7 +852,7 @@ export function SoundBrowser({
                   </span>
                 )}
                 <strong>{entry.name}</strong>
-                <span className="sound-meta">{on ? 'Playing' : KIND_LABEL[entry.type]}</span>
+                <span className="sound-meta">{meta}</span>
               </button>
               <button
                 type="button"

@@ -15,7 +15,8 @@ import {
   parseCatalog,
 } from '../sounds/catalog'
 import { audioTrackFor, decodeSoundBytes, placeSound, previewChannelsFor, trackIdFromDrop } from '../sounds/place'
-import { assertSoundUrl, soundFileUrl, soundIndexUrl } from '../sounds/source'
+import { LEGACY_INDEX_URL } from '../sounds/contract'
+import { assertSoundUrl, legacySoundFileUrl, soundFileUrl } from '../sounds/source'
 import type { SoundEntry } from '../sounds/types'
 import { isUntouchedEmpty } from '../model/launchProject'
 import { selectSounds } from '../state/select'
@@ -95,15 +96,19 @@ describe('sound library', () => {
     expect(parsed.map((entry) => entry.id)).toEqual(['dust', 'pad', 'hat'])
     expect(parseCatalog({ sounds: fixture })).toEqual([])
 
-    const missing = await loadSoundCatalog(async () => new Response('missing', { status: 404 }))
+    const requested: string[] = []
+    const missing = await loadSoundCatalog(async (url) => {
+      requested.push(String(url))
+      return new Response('missing', { status: 404 })
+    })
     expect(missing).toEqual({ entries: [], status: 'missing' })
     expect(catalogMessage(missing, 0, false)).toBe('The sound library is not online yet.')
+    expect(requested.some((url) => url.endsWith('/index.json'))).toBe(false)
 
     const cache = new SoundCache([memoryByteStore()])
-    await cache.put(soundIndexUrl(), utf8(JSON.stringify(rawIndex())))
+    await cache.put(LEGACY_INDEX_URL, utf8(JSON.stringify(rawIndex())))
     const offline = await loadSoundCatalog(async () => { throw new Error('offline') }, cache)
-    expect(offline.status).toBe('ok')
-    expect(offline.entries.map((entry) => entry.id)).toEqual(['dust', 'pad', 'hat'])
+    expect(offline).toEqual({ entries: [], status: 'missing' })
   })
 
   it('filters by tag, kind, tempo, key, and favorites', () => {
@@ -139,8 +144,9 @@ describe('sound library', () => {
   })
 
   it('fetches library files from Hugging Face and replays them from storage', async () => {
-    const url = soundFileUrl('loops/dust.wav')
+    const url = legacySoundFileUrl('loops/dust.wav')
     expect(url).toBe('https://huggingface.co/datasets/cueharbor/sound-library/resolve/main/loops/dust.wav')
+    expect(() => soundFileUrl('loops/dust.wav')).toThrow(/Hugging Face|library/)
     expect(() => soundFileUrl('../secret.wav')).toThrow(/Hugging Face/)
     expect(() => soundFileUrl('https://cueharbor.onrender.com/loops/dust.wav')).toThrow(/Hugging Face|library/)
     expect(() => assertSoundUrl('https://cueharbor.onrender.com/api/sounds/dust.wav')).toThrow(/Hugging Face/)

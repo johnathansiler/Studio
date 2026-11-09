@@ -4,10 +4,10 @@ import { useRef, useState, type ChangeEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { preparePadPcm } from '../instruments/mpc/render'
 import { captureSlot, openInputCapture, SLOT_ACCEPT } from '../audio/sample/slot'
-import { fetchSoundBytes, soundCache } from '../sounds/cache'
-import { loadSoundCatalog } from '../sounds/catalog'
+import { soundCache } from '../sounds/cache'
+import { fetchCatalogSound, loadSoundCatalog } from '../sounds/catalog'
 import { decodeSoundBytes } from '../sounds/place'
-import { soundFileUrl } from '../sounds/source'
+import { soundsForRole } from '../sounds/roles'
 import type { SoundEntry } from '../sounds/types'
 import {
   FACTORY_VINTAGE,
@@ -98,7 +98,7 @@ export function ChopDrawer({
   }
 
   async function fromBrowser(entry: SoundEntry) {
-    const bytes = await fetchSoundBytes(soundFileUrl(entry.path))
+    const bytes = await fetchCatalogSound(entry)
     const decoded = await decodeSoundBytes(bytes)
     const channel = decoded.channels[0]
     if (channel?.length) await useSamples(entry.name, channel, decoded.sampleRate)
@@ -210,13 +210,14 @@ export function ChopDrawer({
         <div className="chop-anchor">
           <button ref={loadButton} type="button" className="hw-key ch-tab" aria-expanded={loadOpen} onClick={() => { setLoadOpen((value) => !value); setModeOpen(false); setVintageOpen(false) }}>Load sample</button>
           <AnchoredMenu className="chop-menu" open={loadOpen} onClose={() => setLoadOpen(false)} label="Load sample" triggerRef={loadButton} prefer="auto">
-            <button type="button" className="hw-key ch-tab" onClick={() => { void loadSoundCatalog(fetch, soundCache()).then((result) => setBrowser(result.entries.slice(0, 24))) }}>Browser</button>
+            <button type="button" className="hw-key ch-tab" onClick={() => { void loadSoundCatalog(fetch, soundCache()).then((result) => setBrowser(soundsForRole(result.entries, 'chop').slice().sort((a, b) => a.name.localeCompare(b.name)).slice(0, 40))) }}>Browser</button>
             <button type="button" className="hw-key ch-tab" onClick={() => fileRef.current?.click()}>Upload</button>
             <button type="button" className="hw-key ch-tab" onClick={() => { void fromMic() }}>Microphone</button>
             <button type="button" className="hw-key ch-tab" onClick={() => { void fromTab() }}>Tab audio</button>
             <input ref={fileRef} className="chop-file" type="file" accept={SLOT_ACCEPT} aria-label="Upload a sample" onChange={(event) => { void fromFile(event) }} />
+            {browser && browser.length === 0 && <p className="hw-key ch-tab">No hosted loops yet.</p>}
             {browser && browser.map((entry) => (
-              <button key={entry.id} type="button" className="hw-key ch-tab" onClick={() => { void fromBrowser(entry) }}>{entry.name}</button>
+              <button key={entry.id} type="button" className="hw-key ch-tab" onClick={() => { void fromBrowser(entry) }}>{entry.name} · Loop</button>
             ))}
           </AnchoredMenu>
         </div>
