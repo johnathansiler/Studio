@@ -49,7 +49,7 @@ import './guideSheet.css'
 import { TipButton } from './Hint'
 import { AnchoredMenu } from './AnchoredMenu'
 import { RemoteTimeline, TrackPresence, remoteClipMark, useRemotePeers } from './presenceMarks'
-import { coarsePointer, PATTERN_HOLD_SLOP, patternHoldOpensMenu, patternMenuPoint, trimZone } from './touchEdit'
+import { coarsePointer, patternHoldOpensMenu, patternMenuPoint, patternPointerIntent, trimZone } from './touchEdit'
 import { clipTapAction, laneDoubleClickAddsClip } from './clipKeys'
 import { isSampledInstrument } from '../instruments/sampled'
 import { LoopRegion } from './LoopRegion'
@@ -567,7 +567,13 @@ export function ArrangeView({
   function noteClipTap(kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
     const now = performance.now()
     const since = clipId === lastClipTap.current.id ? now - lastClipTap.current.at : Number.POSITIVE_INFINITY
-    const action = clipTapAction({ moved: false, sinceLastMs: since, kind })
+    const track = project.tracks.find((item) => item.id === trackId)
+    const action = clipTapAction({
+      moved: false,
+      sinceLastMs: since,
+      kind,
+      sequencer: kind === 'pattern' && hasStepSequencer(track),
+    })
     if (action === 'edit') {
       lastClipTap.current = { id: '', at: 0 }
       openClipEditor(kind, trackId, clipId)
@@ -588,8 +594,8 @@ export function ArrangeView({
   function moveSelection(event: ReactPointerEvent, kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
     event.stopPropagation()
     focusTimeline()
-    if (touch || event.pointerType === 'touch') event.preventDefault()
     if (kind === 'pattern') setPatternMenu(null)
+    else if (touch || event.pointerType === 'touch') event.preventDefault()
     const additive = event.shiftKey || event.metaKey || event.ctrlKey
     const selected = kind === 'audio' ? store.selectedClipIds : kind === 'midi' ? store.selectedMidiClipIds : store.selectedPatternClipIds
     const wasIn = selected.includes(clipId)
@@ -635,6 +641,7 @@ export function ArrangeView({
     }
     const deltas = new Map<string, number>()
     let travel = 0
+    let intent: 'wait' | 'drag' | 'scroll' = 'wait'
     const preview = (clientX: number) => {
       const pointerBeat = projectSampleBeat(project, Math.max(0, sampleAt(clientX)))
       const patch: Record<string, number> = {}
@@ -661,11 +668,21 @@ export function ArrangeView({
     }
     watch(
       (ev) => {
-        travel = Math.max(travel, Math.hypot(ev.clientX - originX, ev.clientY - originY))
-        if (kind === 'pattern' && touch && travel <= PATTERN_HOLD_SLOP) return
+        const dx = ev.clientX - originX
+        const dy = ev.clientY - originY
+        travel = Math.max(travel, Math.hypot(dx, dy))
+        if (kind === 'pattern') {
+          intent = patternPointerIntent(dx, dy, event.pointerType)
+          if (intent !== 'drag') return
+        }
         preview(ev.clientX)
       },
       (ev) => {
+        if (kind === 'pattern' && (intent === 'scroll' || ev.type === 'pointercancel')) {
+          setNudge(null)
+          setDragView(null)
+          return
+        }
         preview(ev.clientX)
         setNudge(null)
         setDragView(null)
@@ -1171,7 +1188,7 @@ export function ArrangeView({
                         data-track={track.id}
                         data-remote-select={remote?.id}
                         className={`clip pattern ${picked ? 'selected' : ''}${remote ? ' remote-selected' : ''}`}
-                        style={{ left, width: widthPx, background: pattern?.color || track.color, pointerEvents: passive ? 'none' : undefined, touchAction: passive ? undefined : 'none', ['--remote' as string]: remote?.color }}
+                        style={{ left, width: widthPx, background: pattern?.color || track.color, pointerEvents: passive ? 'none' : undefined, touchAction: passive ? undefined : 'pan-y', ['--remote' as string]: remote?.color }}
                         onContextMenu={(event) => event.preventDefault()}
                         onDoubleClick={(event) => {
                           event.preventDefault()

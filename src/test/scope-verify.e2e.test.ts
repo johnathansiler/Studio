@@ -318,13 +318,67 @@ describe('scoped arrange changes', () => {
       expect(division).toBe('1/8')
       await page.keyboard.press('Escape')
 
-      const made = await page.evaluate(() => {
-        const store = (window as unknown as { __cueharbor: { store: { addQuickTrack: (choice: string) => string | null; closeSteps: () => void } } }).__cueharbor.store
+      const placed = await page.evaluate(() => {
+        const store = (window as unknown as {
+          __cueharbor: { store: { addQuickTrack: (choice: string) => string | null; closeSteps: () => void; setTool: (tool: string) => void; placePattern: (beat: number, trackId?: string) => void; project: { patternClips?: { id: string; trackId?: string; startBeat: number }[] } } }
+        }).__cueharbor.store
         const id = store.addQuickTrack('steps')
         store.closeSteps()
-        return id
+        store.setTool('select')
+        if (id) store.placePattern(0, id)
+        const clip = store.project.patternClips?.find((item) => item.trackId === id)
+        return { trackId: id, clipId: clip?.id ?? null, start: clip?.startBeat ?? null }
       })
-      expect(made).toBeTruthy()
+      expect(placed.trackId).toBeTruthy()
+      expect(placed.clipId).toBeTruthy()
+      const patternClip = page.locator(`[data-clip="${placed.clipId}"][data-pattern="1"]`)
+      await patternClip.waitFor()
+      await patternClip.click()
+      await page.locator('[data-step-sequencer="open"]').waitFor()
+      expect(await page.locator('[data-editor="piano"]').count()).toBe(0)
+      await page.locator('.step-close').click()
+      await page.locator('[data-step-sequencer="open"]').waitFor({ state: 'detached' })
+      const box = await patternClip.boundingBox()
+      await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2)
+      await page.mouse.down()
+      await page.mouse.move(box!.x + box!.width / 2 + 80, box!.y + box!.height / 2, { steps: 6 })
+      await page.mouse.up()
+      expect(await page.locator('[data-step-sequencer="open"]').count()).toBe(0)
+      const dragged = await page.evaluate((id) => {
+        const store = (window as unknown as { __cueharbor: { store: { project: { patternClips?: { id: string; startBeat: number }[] } } } }).__cueharbor.store
+        return store.project.patternClips?.find((item) => item.id === id)?.startBeat ?? null
+      }, placed.clipId)
+      expect(dragged).not.toBeNull()
+      expect(dragged).toBeGreaterThan(placed.start ?? 0)
+      const scrolled = await page.evaluate(async (id) => {
+        const store = (window as unknown as { __cueharbor: { store: { project: { patternClips?: { id: string; startBeat: number }[] } } } }).__cueharbor.store
+        const before = store.project.patternClips?.find((item) => item.id === id)?.startBeat ?? null
+        const node = document.querySelector(`[data-clip="${id}"]`) as HTMLElement
+        const rect = node.getBoundingClientRect()
+        const x = rect.left + rect.width / 2
+        const y = rect.top + rect.height / 2
+        const point = (type: string, clientX: number, clientY: number, target: EventTarget) => {
+          target.dispatchEvent(new PointerEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            clientX,
+            clientY,
+            pointerId: 7,
+            pointerType: 'touch',
+            button: 0,
+            buttons: type === 'pointerup' ? 0 : 1,
+          }))
+        }
+        point('pointerdown', x, y, node)
+        point('pointermove', x, y + 48, window)
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        point('pointerup', x, y + 48, window)
+        const after = store.project.patternClips?.find((item) => item.id === id)?.startBeat ?? null
+        return { before, after, open: !!document.querySelector('[data-step-sequencer="open"]') }
+      }, placed.clipId)
+      expect(scrolled.open).toBe(false)
+      expect(scrolled.after).toBe(scrolled.before)
+      const made = placed.trackId
       await page.locator('[data-step-sequencer="open"]').waitFor({ state: 'detached' })
       await page.getByRole('textbox', { name: 'Step Sequencer 1 name' }).click()
       await page.locator('[data-step-sequencer="open"]').waitFor()

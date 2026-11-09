@@ -17,11 +17,18 @@ export function deletesSelection(key: string, target: EventTarget | KeyHost | nu
 
 type ClipHost = { closest?: (selector: string) => unknown }
 
-/** A single tap only selects. A second tap soon after opens the editor. */
+/** A single tap only selects. A second tap soon after opens the editor. A step-sequencer pattern clip opens on the first tap. */
 export const CLIP_DOUBLE_MS = 350
 
-export function clipTapAction(input: { moved: boolean; sinceLastMs: number; kind: 'audio' | 'midi' | 'pattern' }): 'drag' | 'select' | 'edit' {
+export function clipTapAction(input: {
+  moved: boolean
+  sinceLastMs: number
+  kind: 'audio' | 'midi' | 'pattern'
+  /** Pattern clips on a Step Sequencer track open that editor on the first tap. */
+  sequencer?: boolean
+}): 'drag' | 'select' | 'edit' {
   if (input.moved) return 'drag'
+  if (input.kind === 'pattern' && input.sequencer) return 'edit'
   if (input.kind !== 'pattern' && input.sinceLastMs >= 0 && input.sinceLastMs < CLIP_DOUBLE_MS) return 'edit'
   return 'select'
 }

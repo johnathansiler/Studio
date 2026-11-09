@@ -30,6 +30,19 @@ export function patternHoldOpensMenu(phone: boolean, heldMs: number, movedPx: nu
   return phone && heldMs >= PATTERN_HOLD_MS && movedPx <= PATTERN_HOLD_SLOP
 }
 
+/**
+ * A finger on a pattern clip. A small move is still a tap. A vertical touch
+ * scrolls the timeline. Any other move past the slop drags the clip.
+ * A mouse can drag in either direction.
+ */
+export function patternPointerIntent(dx: number, dy: number, pointerType: string): 'wait' | 'drag' | 'scroll' {
+  const ax = Math.abs(dx)
+  const ay = Math.abs(dy)
+  if (ax < PATTERN_HOLD_SLOP && ay < PATTERN_HOLD_SLOP) return 'wait'
+  if ((pointerType === 'touch' || pointerType === 'pen') && ay > ax) return 'scroll'
+  return 'drag'
+}
+
 /** Keep the menu on screen and off the point where the finger just lifted. */
 export function patternMenuPoint(
   x: number,
