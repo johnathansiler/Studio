@@ -31,9 +31,20 @@ export function drumRows(notes: { pitch: number }[]): { pitch: number; name: str
   ]
 }
 
+/** A played hit belongs to the nearest sixteenth, up to half a step away. */
 export function hitAt(notes: MidiNote[], pitch: number, step: number): MidiNote | undefined {
   const beat = step * DRUM_STEP
-  return notes.find((note) => note.pitch === pitch && Math.abs(note.startBeat - beat) < 0.02)
+  let best: MidiNote | undefined
+  let bestDist = DRUM_STEP / 2
+  for (const note of notes) {
+    if (note.pitch !== pitch) continue
+    const dist = Math.abs(note.startBeat - beat)
+    if (dist < bestDist) {
+      best = note
+      bestDist = dist
+    }
+  }
+  return best
 }
 
 export function clampRoll(value: number): number {

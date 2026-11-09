@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { soundingNotes, stepCount, swingShift } from '../model/drumLanes'
+import { hitAt, soundingNotes, stepCount, swingShift } from '../model/drumLanes'
+import { ROLL_HIGH, ROLL_LOW } from '../ui/PianoRoll'
 import { chooseClef, keyFifths, layoutScore, midiAtPosition, scoreSvg, spellPitch, staffPosition } from '../model/score'
 import { clearStep, nearestStep, placeStep, stepPlace, tieHeld } from '../model/stepEntry'
 import { createEmptyProject, type MidiNote, type Project } from '../model/types'
@@ -165,5 +166,26 @@ describe('score', () => {
     expect(remoteTrack.midiClips[0].notes[0].durationBeats).toBe(1)
     host.removeScoreNote(track.id, clipId, host.selectedNoteId!)
     expect(host.project.tracks.find((item) => item.id === track.id)!.midiClips[0].notes).toHaveLength(0)
+  })
+})
+
+describe('recorded drum notes stay visible', () => {
+  const kick = note({ id: 'kick', pitch: 36, startBeat: 0, durationBeats: 0.05 })
+  const snare = note({ id: 'snare', pitch: 38, startBeat: 0.4636, durationBeats: 0.21 })
+
+  it('keeps kick and snare inside the piano roll', () => {
+    expect(ROLL_LOW).toBeLessThanOrEqual(24)
+    expect(ROLL_HIGH).toBeGreaterThanOrEqual(84)
+    expect(kick.pitch).toBeGreaterThanOrEqual(ROLL_LOW)
+    expect(snare.pitch).toBeLessThanOrEqual(ROLL_HIGH)
+    expect(48).toBeGreaterThan(kick.pitch)
+  })
+
+  it('shows an off-grid pad hit on the nearest sixteenth', () => {
+    const notes = [kick, snare]
+    expect(hitAt(notes, 36, 0)?.id).toBe('kick')
+    expect(hitAt(notes, 38, 2)?.id).toBe('snare')
+    expect(hitAt(notes, 38, 1)).toBeUndefined()
+    expect(hitAt(notes, 38, 0)).toBeUndefined()
   })
 })
