@@ -20,7 +20,7 @@ import { performancesOn, routeScaler } from '../instruments/scaler/model'
 import { planLive, playTargets, stepNotes, trackHasScaler } from '../instruments/scaler/route'
 import { chokeTargets, normalizePadKit, padRegion } from '../model/padMachine'
 import { hitRoute, padPitchForKey } from '../instruments/mpc/model'
-import { preparePadPcm } from '../instruments/mpc/render'
+import { padSendGain, renderPadVoice } from '../instruments/mpc/render'
 import { RackHost } from './rack/host'
 import { PadHost } from './voices/host'
 import { graphPlugins, renderArrangeInputs } from './arrangeSources'
@@ -3392,7 +3392,7 @@ export class AudioEngine {
     ctx: BaseAudioContext,
     strip: StripNodes,
     track: Track,
-    hit: { pitch: number; velocity: number; tune?: number; filter?: number; decay?: number; pan?: number },
+    hit: { pitch: number; velocity: number; tune?: number; filter?: number; decay?: number; attack?: number; pan?: number },
     when: number,
     bucket: Stoppable[] | undefined,
     sample: Float32Array | null | undefined,
@@ -3418,22 +3418,46 @@ export class AudioEngine {
     }
     for (const other of chokeTargets(pads.map((item) => ({ pitch: item.pitch, choke: item.choke })), hit.pitch)) this.fadePadPitch(other, start)
     if (pad?.poly === 'mono') this.fadePadPitch(hit.pitch, start)
-    let pcm = sample ?? null
-    let rate = ctx.sampleRate
     const layer = pad?.layers.find((item) => item.bufferId) ?? pad?.layers[0]
-    const bufferId = layer?.bufferId
-    if (!sample && bufferId) {
-      const asset = this.assetOf(bufferId)
-      const channel = asset?.channels[0]
-      if (asset && channel?.length) {
-        pcm = channel
-        rate = asset.sampleRate
+    const kit = normalizePadKit(track.padKit)
+    const voiced = pad
+      ? {
+        ...pad,
+        tune: hit.tune ?? pad.tune,
+        filter: hit.filter ?? pad.filter,
+        decay: hit.decay ?? pad.decay,
+        attack: hit.attack ?? pad.attack,
       }
+      : null
+    const buffers = new Map<string, { sampleRate: number; samples: Float32Array }>()
+    for (const item of kit.banks.flat()) {
+      const id = (item.layers.find((entry) => entry.bufferId) ?? item.layers[0])?.bufferId
+      const asset = id ? this.assetOf(id) : undefined
+      const channel = asset?.channels[0]
+      if (id && asset && channel?.length) buffers.set(id, { sampleRate: asset.sampleRate, samples: channel })
     }
+    if (sample?.length && layer?.bufferId && !buffers.has(layer.bufferId)) {
+      buffers.set(layer.bufferId, { sampleRate: ctx.sampleRate, samples: sample })
+    }
+    const baked = voiced
+      ? renderPadVoice({
+        sampleRate: ctx.sampleRate,
+        tempo: this.project?.tempo || 120,
+        pad: voiced,
+        buffers,
+        vintage: kit.vintage,
+        chop: kit.chop,
+        velocity: 1,
+        resident: (this.drumTable.length ? this.drumTable : residentDrums(ctx.sampleRate)).map((drum) => ({
+          pitch: drum.pitch,
+          samples: drum.samples,
+          sampleRate: ctx.sampleRate,
+        })),
+      }).left
+      : null
     const region = padRegion(pad)
-    const prepared = pcm?.length ? preparePadPcm(pcm, region) : null
-    const buffer = prepared?.length && rate > 0
-      ? this.cachedPadBuffer(ctx, `${bufferId || hit.pitch}:${prepared.length}:${rate}:${region.start}:${region.end}:${region.reverse ? 1 : 0}`, prepared, rate)
+    const buffer = voiced && baked?.length
+      ? this.cachedPadBuffer(ctx, bakedKey(voiced, kit), baked, ctx.sampleRate)
       : this.cachedDrum(ctx, hit.pitch)
     if (!buffer) return
     const live = this.padVoices.filter((voice) => voice.until > start - 0.001)
@@ -3446,8 +3470,8 @@ export class AudioEngine {
     const gain = ctx.createGain()
     src.buffer = buffer
     const tune = (hit.tune ?? pad?.tune ?? 0) + (layer?.tune ?? 0)
-    src.playbackRate.value = 2 ** (tune / 12)
-    if (region.loop && buffer.duration > 0.02) {
+    src.playbackRate.value = baked?.length ? 1 : 2 ** (tune / 12)
+    if (!baked?.length && region.loop && buffer.duration > 0.02) {
       const span = Math.max(0.0001, region.end - region.start)
       const loopStart = Math.max(0, Math.min(0.98, (region.loopStart - region.start) / span))
       const loopEnd = Math.max(loopStart + 0.01, Math.min(1, (region.loopEnd - region.start) / span))
@@ -3455,7 +3479,7 @@ export class AudioEngine {
       src.loopStart = buffer.duration * loopStart
       src.loopEnd = Math.min(buffer.duration, Math.max(src.loopStart + 0.01, buffer.duration * loopEnd))
     }
-    const decay = Math.max(0.05, Math.min(1, hit.decay ?? pad?.decay ?? 1))
+    const decay = baked?.length ? 1 : Math.max(0.05, Math.min(1, hit.decay ?? pad?.decay ?? 1))
     const peak = Math.max(0.0002, Math.min(1, hit.velocity))
     const dur = Math.max(0.04, buffer.duration * decay)
     const attack = Math.min(0.003, dur * 0.25)
@@ -3472,7 +3496,7 @@ export class AudioEngine {
     const filterAmount = hit.filter ?? pad?.filter ?? 1
     let node: AudioNode = gain
     src.connect(gain)
-    if (filterAmount < 0.98) {
+    if (!baked?.length && filterAmount < 0.98) {
       const filter = ctx.createBiquadFilter()
       filter.type = 'lowpass'
       filter.frequency.setValueAtTime(Math.max(80, 180 + filterAmount * 8000), start)
@@ -3484,6 +3508,16 @@ export class AudioEngine {
     panner.pan.value = Math.max(-1, Math.min(1, hit.pan ?? pad?.pan ?? 0))
     level.connect(panner)
     panner.connect(dest)
+    for (const send of track.sends ?? []) {
+      const amount = padSendGain(pad?.send ?? 0, send.gain, send.enabled)
+      if (amount <= 0.0001) continue
+      const bus = this.strips.get(send.busId)
+      if (!bus) continue
+      const tap = ctx.createGain()
+      tap.gain.value = amount
+      panner.connect(tap)
+      tap.connect(bus.input)
+    }
     const stop = (at?: number) => {
       try { src.stop(at) } catch { /* already stopped */ }
     }
@@ -4569,6 +4603,56 @@ interface PadColor {
   attack?: number
   filter?: number
   swing?: number
+}
+
+function bakedKey(
+  pad: {
+    pitch: number
+    tune: number
+    tuneCents?: number
+    pitchMode?: string
+    filter: number
+    highpass?: number
+    decay: number
+    attack: number
+    choke: number
+    layers: { bufferId?: string; tune: number }[]
+    region?: { start: number; end: number; reverse: boolean; loop: boolean }
+  },
+  kit: {
+    vintage?: { macro: number; presetName: string; table: { bits: { amount: number }; rate: { amount: number }; wow: { amount: number }; crackle: { amount: number }; lowpass: { amount: number } } }
+    chop?: { bufferId: string; semitones: number; cents: number; pitchMode: string; highpass: number }
+  },
+) {
+  const layer = pad.layers.find((item) => item.bufferId) ?? pad.layers[0]
+  const region = pad.region
+  const vintage = kit.vintage
+  const table = vintage?.table
+  const chop = kit.chop
+  return [
+    pad.pitch,
+    layer?.bufferId || '',
+    layer?.tune || 0,
+    pad.tune,
+    pad.tuneCents || 0,
+    pad.pitchMode || 'vinyl',
+    pad.filter,
+    pad.highpass || 0,
+    pad.decay,
+    pad.attack,
+    pad.choke,
+    region?.start ?? 0,
+    region?.end ?? 1,
+    region?.reverse ? 1 : 0,
+    region?.loop ? 1 : 0,
+    vintage?.macro ?? 0,
+    table ? [table.bits.amount, table.rate.amount, table.wow.amount, table.crackle.amount, table.lowpass.amount].join(',') : '',
+    chop?.bufferId ?? '',
+    chop?.semitones ?? 0,
+    chop?.cents ?? 0,
+    chop?.pitchMode ?? '',
+    chop?.highpass ?? 0,
+  ].join(':')
 }
 
 function passthrough(): Processor {
