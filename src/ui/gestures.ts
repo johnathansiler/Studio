@@ -6,6 +6,8 @@
  * the control through the same onChange path a drag uses.
  */
 
+import { dragNumeric } from '../model/dragNumeric'
+import { markIntegerLand, armFinePress } from './integerTick'
 import { controlDefault } from './paramDefaults'
 
 export const DRAG_PX = 90
@@ -83,6 +85,7 @@ export interface ControlGesture {
 
 export interface PointerLike {
   pointerId?: number
+  pointerType?: string
   clientX: number
   clientY: number
   shiftKey?: boolean
@@ -103,12 +106,10 @@ export interface GestureElement {
   getBoundingClientRect?(): { left: number; top: number; width: number; height: number }
 }
 
-/** Upward or rightward movement raises the value. `fine` stretches the same travel. */
+/** Upward or rightward movement raises the value. Whole numbers catch the finger unless `fine`. */
 export function dragValue(start: number, delta: number, min: number, max: number, fine: boolean, travel?: number) {
-  const span = max - min || 1
   const pixels = travel && travel > 0 ? travel : (fine ? FINE_PX : DRAG_PX)
-  const next = start + (delta / pixels) * span
-  return clamp(next, min, max)
+  return dragNumeric({ origin: start, deltaPx: delta, min, max, fine, spanPx: pixels })
 }
 
 function travelFor(spec: ControlGesture, el: GestureElement, axis: 'x' | 'y', fine: boolean) {
@@ -147,7 +148,8 @@ export function resetTarget(el: Pick<GestureElement, 'className' | 'dataset' | '
 
 export function attachControlGesture(el: GestureElement, get: () => ControlGesture) {
   el.style.touchAction = 'none'
-  let drag: { id: number; x: number; y: number; value: number; moved: boolean; candidate: boolean } | null = null
+  let drag: { id: number; x: number; y: number; value: number; moved: boolean; candidate: boolean; fine: boolean; fineLatch: boolean } | null = null
+  let cancelFine: () => void = () => undefined
   let lastClient = { x: 0, y: 0 }
   let lastValue = 0
   let readoutTimer: ReturnType<typeof setTimeout> | null = null
@@ -198,8 +200,16 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
     }
     spec.onStart?.()
     try { el.setPointerCapture?.(id) } catch { /* the pointer already ended */ }
-    drag = { id, x: event.clientX, y: event.clientY, value: spec.getValue(), moved: false, candidate }
+    drag = { id, x: event.clientX, y: event.clientY, value: spec.getValue(), moved: false, candidate, fine: !!event.shiftKey, fineLatch: false }
     lastValue = spec.getValue()
+    cancelFine()
+    cancelFine = armFinePress(event.pointerType, () => {
+      if (!drag) return
+      drag.fineLatch = true
+      drag.x = lastClient.x || drag.x
+      drag.y = lastClient.y || drag.y
+      drag.value = lastValue
+    })
     if (spec.axis === 'pad' && !candidate) move(event)
   }
 
@@ -212,7 +222,13 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
       drag.moved = true
       taps.move(travel)
     }
-    const fine = fineNow(event.shiftKey)
+    const fine = fineNow(event.shiftKey) || !!drag.fineLatch
+    if (fine !== drag.fine) {
+      drag.fine = fine
+      drag.x = event.clientX
+      drag.y = event.clientY
+      drag.value = lastValue
+    }
     if (spec.axis === 'pad') {
       if (drag.candidate && !drag.moved) return
       const box = el.getBoundingClientRect?.() ?? { left: 0, top: 0, width: 1, height: 1 }
@@ -225,7 +241,10 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
     if (!drag.moved) return
     const delta = spec.axis === 'x' ? event.clientX - drag.x : drag.y - event.clientY
     const pixels = travelFor(spec, el, spec.axis, fine)
-    emit(event, dragValue(drag.value, delta, spec.min, spec.max, fine, pixels), event.clientX, event.clientY, fine)
+    const before = lastValue
+    const next = dragValue(drag.value, delta, spec.min, spec.max, fine, pixels)
+    emit(event, next, event.clientX, event.clientY, fine)
+    markIntegerLand(el as { classList?: DOMTokenList }, before, next)
   }
 
   const rebase = (event: PointerLike) => {
@@ -239,6 +258,8 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
   const end = (event: PointerLike) => {
     pointers.delete(event.pointerId ?? 1)
     if (!drag || (event.pointerId ?? 1) !== drag.id) return
+    cancelFine()
+    cancelFine = () => undefined
     const moved = drag.moved || Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > TAP_PX
     const kind = taps.end(now(), moved)
     const spec = specOf()
@@ -270,11 +291,13 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
     if (event.cancelable !== false) event.preventDefault?.()
     const spec = specOf()
     if (spec.axis === 'pad') return
-    const span = spec.max - spec.min || 1
-    const step = (event.shiftKey ? span / 200 : span / 40) * ((event.deltaY ?? 0) < 0 ? 1 : -1)
+    const fine = !!event.shiftKey
+    const current = spec.getValue()
+    const deltaPx = ((event.deltaY ?? 0) < 0 ? 1 : -1) * (fine ? 4 : 10)
     spec.onStart?.()
-    const next = clamp(spec.getValue() + step, spec.min, spec.max)
-    emit(event, next, event.clientX, event.clientY, !!event.shiftKey)
+    const next = dragValue(current, deltaPx, spec.min, spec.max, fine)
+    emit(event, next, event.clientX, event.clientY, fine)
+    markIntegerLand(el as { classList?: DOMTokenList }, current, next)
     spec.onReadout?.(null)
     spec.onCommit?.()
   }
@@ -320,7 +343,8 @@ const CONTROL = '.kit-knob button, .kit-fader button, .knob button, .tune-knob, 
 
 /** Stop the page from scrolling when a press starts on a control, and drive native sliders ourselves. */
 export function installControlGuards(doc: Document) {
-  let drag: { id: number; x: number; y: number; value: number; vertical: boolean; el: HTMLInputElement; moved: boolean } | null = null
+  let drag: { id: number; x: number; y: number; value: number; vertical: boolean; el: HTMLInputElement; moved: boolean; fine: boolean; fineLatch: boolean } | null = null
+  let cancelFine: () => void = () => undefined
   const pointers = new Set<number>()
   const taps = new TapReset()
   let tip: HTMLElement | null = null
@@ -372,7 +396,15 @@ export function installControlGuards(doc: Document) {
     }
     taps.begin(performance.now(), others, range)
     const box = range.getBoundingClientRect()
-    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, value: Number(range.value), vertical: verticalRange(range, box), el: range, moved: false }
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, value: Number(range.value), vertical: verticalRange(range, box), el: range, moved: false, fine: event.shiftKey, fineLatch: false }
+    cancelFine()
+    cancelFine = armFinePress(event.pointerType, () => {
+      if (!drag) return
+      drag.fineLatch = true
+      drag.value = Number(drag.el.value)
+      drag.x = event.clientX
+      drag.y = event.clientY
+    })
     try { range.setPointerCapture(event.pointerId) } catch { /* already gone */ }
   }
   const onMove = (event: PointerEvent) => {
@@ -384,15 +416,26 @@ export function installControlGuards(doc: Document) {
       taps.move(travel)
     }
     if (!drag.moved) return
+    const fine = event.shiftKey || pointers.size > 1 || drag.fineLatch
+    if (fine !== drag.fine) {
+      drag.fine = fine
+      drag.x = event.clientX
+      drag.y = event.clientY
+      drag.value = Number(drag.el.value)
+    }
     const delta = drag.vertical ? drag.y - event.clientY : event.clientX - drag.x
-    const next = dragValue(drag.value, delta, Number(drag.el.min), Number(drag.el.max), event.shiftKey || pointers.size > 1)
+    const before = Number(drag.el.value)
+    const next = dragValue(drag.value, delta, Number(drag.el.min), Number(drag.el.max), fine)
     writeRange(drag.el, next)
+    markIntegerLand(drag.el, before, Number(drag.el.value))
     show(event.clientX, event.clientY, drag.el.value)
   }
   const finish = (event: PointerEvent, cancel: boolean) => {
     pointers.delete(event.pointerId)
     if (!drag || event.pointerId !== drag.id) return
     const range = drag.el
+    cancelFine()
+    cancelFine = () => undefined
     const moved = cancel || drag.moved || Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > TAP_PX
     const kind = taps.end(performance.now(), moved)
     drag = null
@@ -417,14 +460,27 @@ export function installControlGuards(doc: Document) {
     event.preventDefault()
     event.stopPropagation()
   }
+  const numberOf = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) return null
+    const found = target.closest('input[type="number"]')
+    return found instanceof HTMLInputElement ? found : null
+  }
   const onWheel = (event: WheelEvent) => {
     const range = rangeOf(event.target)
-    if (!range) return
+    const field = range ? null : numberOf(event.target)
+    const el = range ?? field
+    if (!el) return
     event.preventDefault()
-    const span = Number(range.max) - Number(range.min) || 1
-    const stepAttr = Number(range.step)
-    const step = (Number.isFinite(stepAttr) && stepAttr > 0 ? stepAttr : span / 40) * (event.shiftKey ? 1 : 1) * (event.deltaY < 0 ? 1 : -1)
-    writeRange(range, Number(range.value) + (event.shiftKey ? step * 0.25 : step))
+    const fine = event.shiftKey
+    const min = el.min === '' ? Number.NEGATIVE_INFINITY : Number(el.min)
+    const max = el.max === '' ? Number.POSITIVE_INFINITY : Number(el.max)
+    const current = Number(el.value)
+    const deltaPx = (event.deltaY < 0 ? 1 : -1) * (fine ? 4 : 10)
+    const before = Number.isFinite(current) ? current : 0
+    const next = dragValue(before, deltaPx, Number.isFinite(min) ? min : Number.NEGATIVE_INFINITY, Number.isFinite(max) ? max : Number.POSITIVE_INFINITY, fine)
+    if (range) writeRange(range, next)
+    else writeNumber(el, next)
+    markIntegerLand(el, before, Number(el.value))
   }
 
   doc.addEventListener('touchstart', onTouch, { capture: true, passive: false })
@@ -452,6 +508,23 @@ function verticalRange(el: HTMLElement, box: DOMRect) {
   const mode = getComputedStyle(el).writingMode || ''
   if (mode.startsWith('vertical')) return true
   return box.height > box.width + 8
+}
+
+function writeNumber(el: HTMLInputElement, value: number) {
+  const min = el.min === '' ? Number.NEGATIVE_INFINITY : Number(el.min)
+  const max = el.max === '' ? Number.POSITIVE_INFINITY : Number(el.max)
+  const step = Number(el.step)
+  let next = clamp(value, Number.isFinite(min) ? min : Number.NEGATIVE_INFINITY, Number.isFinite(max) ? max : Number.POSITIVE_INFINITY)
+  if (el.step !== 'any' && Number.isFinite(step) && step > 0) {
+    const base = Number.isFinite(min) ? min : 0
+    next = base + Math.round((next - base) / step) * step
+    next = clamp(next, Number.isFinite(min) ? min : Number.NEGATIVE_INFINITY, Number.isFinite(max) ? max : Number.POSITIVE_INFINITY)
+  }
+  const text = String(Math.round(next * 1e6) / 1e6)
+  const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+  proto?.set?.call(el, text)
+  el.dispatchEvent(new Event('input', { bubbles: true }))
+  el.dispatchEvent(new Event('change', { bubbles: true }))
 }
 
 function writeRange(el: HTMLInputElement, value: number, notify: 'input' | 'both' = 'both') {

@@ -6,6 +6,7 @@ import { PresetControls } from './PresetControls'
 import { samplesToBeats } from '../model/time'
 import { uid } from '../model/types'
 import { selectKnock } from '../state/select'
+import { paintWaveCanvas } from './waveformDraw'
 import type { ProjectStore } from '../state/store'
 
 const MACROS = [
@@ -178,7 +179,7 @@ export function KnockPop({ store, engine, onClose }: { store: ProjectStore; engi
             ))}
           </div>
           <div className="knock-meters">
-            <canvas ref={waveRef} className="knock-wave" width={320} height={72} aria-label="Waveform" />
+            <canvas ref={waveRef} className="knock-wave" aria-label="Waveform" />
             <canvas
               ref={curveRef}
               className="knock-curve"
@@ -259,20 +260,10 @@ async function loadKnockSample(store: ProjectStore, engine: AudioEngine, trackId
 }
 
 function drawWave(canvas: HTMLCanvasElement, samples: Float32Array) {
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
-  const { width, height } = canvas
-  ctx.clearRect(0, 0, width, height)
-  ctx.strokeStyle = '#73c48f'
-  ctx.lineWidth = 1.5
-  ctx.beginPath()
-  for (let x = 0; x < width; x++) {
-    const index = Math.floor((x / width) * samples.length)
-    const y = height / 2 - (samples[index] || 0) * (height * 0.45)
-    if (x === 0) ctx.moveTo(x, y)
-    else ctx.lineTo(x, y)
-  }
-  ctx.stroke()
+  const cssW = Math.max(1, canvas.clientWidth || 320)
+  const cssH = Math.max(1, canvas.clientHeight || 72)
+  const dpr = Math.min(3, typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1)
+  paintWaveCanvas(canvas, cssW, cssH, samples, '#73c48f', { start: 0, end: samples.length }, { dpr })
 }
 
 function drawCurve(canvas: HTMLCanvasElement, punch: number, decayMs: number, curve: number) {

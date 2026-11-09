@@ -1,3 +1,4 @@
+import { buildPeakPyramid, peaksForSpan, type PeakBin } from '../audio/peakPyramid'
 import type { AudioAsset, Project } from '../model/types'
 
 export interface WorkspaceSnapshot {
@@ -25,7 +26,7 @@ export interface ProjectDoc {
   project: Project
   workspace?: WorkspaceSnapshot
   assets: AssetRef[]
-  peaks: number[]
+  peaks: StoredPeak[]
   bytes: number
 }
 
@@ -41,20 +42,14 @@ export async function contentHash(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-export function previewPeaks(channels: Float32Array[], bins = 48): number[] {
+export type StoredPeak = number | PeakBin
+
+/** Same min/max pyramid Arrange draws. Older rows stored a single absolute peak. */
+export function previewPeaks(channels: Float32Array[], columns = 128): PeakBin[] {
   const data = channels[0]
   if (!data?.length) return []
-  const width = Math.max(1, Math.floor(data.length / bins))
-  const peaks: number[] = []
-  const count = Math.min(bins, data.length)
-  for (let i = 0; i < count; i++) {
-    let peak = 0
-    const start = i * width
-    const end = Math.min(data.length, start + width)
-    for (let j = start; j < end; j++) peak = Math.max(peak, Math.abs(data[j] || 0))
-    peaks.push(Math.round(peak * 1000) / 1000)
-  }
-  return peaks
+  const pyramid = buildPeakPyramid(data)
+  return peaksForSpan(pyramid, 0, data.length, Math.min(Math.max(8, columns), data.length))
 }
 
 export function dedupeBlobs(items: { hash: string; wav: Uint8Array }[]): Map<string, Uint8Array> {
@@ -99,7 +94,7 @@ export function chooseCurrent(staging: ProjectDoc | null, current: ProjectDoc | 
   return staging.savedAt >= current.savedAt ? staging : current
 }
 
-export function longestPeaks(assets: AudioAsset[]): number[] {
+export function longestPeaks(assets: AudioAsset[]): StoredPeak[] {
   let best: Float32Array[] | null = null
   let length = 0
   for (const asset of assets) {

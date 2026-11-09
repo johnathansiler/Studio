@@ -29,6 +29,18 @@ export function loopGridBeats(project: Pick<Project, 'snap' | 'timeSignature'> &
   return activeGridBeats(project)
 }
 
+/** One snap unit, in samples. Free movement (no grid) keeps a single sample so the ends cannot cross. */
+export function loopSnapMinSamples(
+  project: Pick<Project, 'tempo' | 'tempoMap' | 'automation' | 'sampleRate' | 'timeSignature'>,
+  atSample = 0,
+  gridBeats = 0,
+): number {
+  if (!(gridBeats > 0)) return 1
+  const beat = projectSampleBeat(project, Math.max(0, atSample))
+  const samples = projectBeatSample(project, beat + gridBeats) - projectBeatSample(project, beat)
+  return Math.max(1, Math.round(Math.abs(samples)))
+}
+
 /** One meter beat, in samples, measured at `atSample` so a tempo map stays honest. */
 export function loopMinSamples(project: Pick<Project, 'tempo' | 'tempoMap' | 'automation' | 'sampleRate' | 'timeSignature'>, atSample = 0): number {
   const beat = projectSampleBeat(project, Math.max(0, atSample))

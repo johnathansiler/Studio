@@ -1046,6 +1046,13 @@ input[type='range'],
   color: var(--accent, #73c48f);
 }
 .shell.phone .preset-bar button { min-height: 44px; }
+.integer-tick {
+  animation: integer-tick 180ms ease-out;
+}
+@keyframes integer-tick {
+  0% { box-shadow: 0 0 0 2px rgba(244, 255, 248, 0.95), 0 0 12px rgba(115, 196, 143, 0.85); }
+  100% { box-shadow: var(--raised, none); }
+}
 .gesture-readout {
   position: fixed;
   z-index: 80;
@@ -3934,7 +3941,8 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   background: radial-gradient(circle, var(--amber) 0 6px, transparent 7px);
 }
 .shell.fold .loop-host button.loop-grip {
-  min-height: 40px;
+  min-height: 0;
+  min-width: 0;
 }
 
 /* Portrait phone: one transport row, inline drawers, one tool row. */
