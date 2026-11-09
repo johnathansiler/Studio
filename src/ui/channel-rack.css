@@ -1,33 +1,36 @@
-/* FL-style channel rack. Names stay sticky while the steps scroll sideways. */
+/* FL-style channel rack. One sound per row. Names stay put while steps scroll sideways. */
 
 .beats.channel-rack {
-  --lead: 268px;
-  --step: 28px;
-  --step-h: 34px;
+  --lead: 232px;
+  --step: 40px;
+  --step-h: 40px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+  flex: 1 1 auto;
   height: 100%;
   max-width: 100%;
   min-width: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding: 8px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 6px;
   background:
-    linear-gradient(180deg, rgba(115, 196, 143, 0.05), transparent 120px),
-    #101614;
-  color: var(--text);
+    linear-gradient(180deg, #2a2e34, #1b1e22 72px),
+    #1b1e22;
+  color: #e6e8ec;
 }
 
 .shell.phone .beats.channel-rack {
-  --lead: 236px;
-  --step: 36px;
+  --lead: 160px;
+  --step: 40px;
   --step-h: 44px;
+  gap: 4px;
+  padding: 4px;
 }
 
 .shell.phone.land .beats.channel-rack {
-  --lead: 168px;
-  --step: 36px;
+  --lead: 148px;
+  --step: 40px;
   --step-h: 40px;
 }
 
@@ -39,10 +42,11 @@
 .rack-bar,
 .rack-extras.open {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
+  gap: 6px;
   max-width: 100%;
   min-width: 0;
 }
@@ -232,20 +236,23 @@
 }
 
 .rack-scroll {
-  overflow-x: auto;
-  overflow-y: hidden;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
   max-width: 100%;
   width: 100%;
-  min-width: 0;
   padding-bottom: 4px;
+  touch-action: pan-x pan-y;
+  overscroll-behavior: contain;
 }
 
 .rack-row {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  width: 100%;
-  min-width: max-content;
+  width: max-content;
+  min-width: 100%;
   margin-bottom: 4px;
 }
 
@@ -259,14 +266,14 @@
   width: var(--lead);
   flex: 0 0 var(--lead);
   min-width: var(--lead);
-  height: calc(var(--step-h) + 6px);
-  padding-right: 8px;
-  background: #121a16;
-  box-shadow: 10px 0 14px rgba(8, 12, 10, 0.45);
+  height: calc(var(--step-h) + 4px);
+  padding-right: 6px;
+  background: #1c1f24;
+  box-shadow: 10px 0 14px rgba(8, 10, 12, 0.55);
 }
 
 .rack-row.sel .rack-lead {
-  background: #1a2820;
+  background: #262b33;
 }
 
 .rack-mute,
@@ -290,6 +297,7 @@
   display: grid;
   place-items: center;
 }
+.beats .rack-lead .fold-word { display: none; }
 
 .rack-mute::after {
   content: '';
@@ -402,14 +410,17 @@
 .rack-name {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 40px;
   height: var(--step-h);
   padding: 0 8px;
-  border-radius: 6px;
-  border: 1px solid #2c4036;
-  background: #1c2822;
-  color: var(--text);
-  font-weight: 650;
-  text-align: left;
+  border-radius: 5px;
+  border: 1px solid #121418;
+  background-color: #3a4048;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.05) 42%, rgba(0, 0, 0, 0.38));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), inset 0 -2px 0 rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.4);
+  color: #f2f4f7;
+  font-weight: 750;
+  text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -431,18 +442,22 @@
 }
 .rack-editing span { font-size: 11px; font-weight: 700; }
 .rack-editing small { font-size: 10px; color: var(--muted); line-height: 1.15; }
-.rack-random {
+.rack-bar button.rack-smart {
+  flex: 1 1 148px;
+  min-width: 148px;
   min-height: 44px;
-  min-width: 44px;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1px;
-  padding: 4px 10px;
+  height: 44px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid #d7ffe6;
+  background-color: #73c48f;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(0, 0, 0, 0.12));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 0 12px rgba(115, 196, 143, 0.45);
+  color: #102117;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
 }
-.rack-random strong { font-size: 13px; line-height: 1; }
-.rack-random small { font-size: 10px; line-height: 1; font-weight: 650; }
 .snap-control { display: inline-flex; align-items: stretch; gap: 4px; min-width: 0; }
 .snap-grid {
   position: relative;
@@ -499,9 +514,16 @@ button.snap-grid { flex-direction: column; gap: 1px; }
 .rack-ruler {
   margin-bottom: 0;
 }
-.rack-ruler .rack-steps { position: relative; min-height: 40px; }
+.rack-ruler {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: #1c1f24;
+}
+.rack-ruler .rack-lead { z-index: 5; }
+.rack-ruler .rack-steps { position: relative; min-height: 18px; }
 .rack-ruler .loop-host { position: absolute; top: 0; bottom: 0; left: 0; right: 0; width: auto; overflow: hidden; z-index: 8; }
-.shell.phone .rack-ruler .rack-steps { min-height: 44px; }
+.shell.phone .rack-ruler .rack-steps { min-height: 18px; }
 
 .rack-ruler .rack-lead {
   height: 16px;
@@ -540,8 +562,9 @@ button.snap-grid { flex-direction: column; gap: 1px; }
   flex: 1 1 auto;
   flex-wrap: nowrap;
   align-items: stretch;
-  gap: 6px;
-  min-width: 0;
+  gap: 4px;
+  min-width: max-content;
+  touch-action: pan-x pan-y;
 }
 
 .rack-group {
@@ -551,37 +574,48 @@ button.snap-grid { flex-direction: column; gap: 1px; }
   gap: 3px;
   min-width: max-content;
   padding: 3px;
-  border-radius: 6px;
-  background: #141c18;
+  border-radius: 4px;
+  background: #2a2623;
 }
 
 .rack-group.alt {
-  background: #24352c;
+  background: #22262c;
 }
 
 .rack-step,
 .rack-bar-step {
   width: auto;
   min-width: var(--step);
+  min-height: 40px;
   height: var(--step-h);
   flex: 1 1 var(--step);
   padding: 0;
-  border-radius: 5px;
-  border: 1px solid #3a4e44;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02) 42%, rgba(0, 0, 0, 0.28)),
-    #151c18;
-  box-shadow: var(--raised);
+  border-radius: 4px;
+  border: 1px solid #0c0e11;
+  touch-action: pan-x pan-y;
+  background-color: #2a2623;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.04) 40%, rgba(0, 0, 0, 0.5));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), inset 0 -3px 0 rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.45);
 }
 
-.rack-group.alt .rack-step:not(.on) {
-  background-color: #1c2922;
-  background-image: var(--face);
+.shell .beats .rack-group .rack-step:not(.on),
+.shell .beats .rack-group .rack-bar-step:not(.on) {
+  background-color: #2e2926;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.04) 40%, rgba(0, 0, 0, 0.5));
 }
 
-.rack-step.on {
-  border-color: transparent;
-  box-shadow: var(--pressed), 0 0 10px color-mix(in srgb, currentColor 35%, transparent);
+.shell .beats .rack-group.alt .rack-step:not(.on),
+.shell .beats .rack-group.alt .rack-bar-step:not(.on) {
+  background-color: #23272e;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.03) 40%, rgba(0, 0, 0, 0.52));
+}
+
+.rack-step.on,
+.shell .beats .rack-step.on {
+  background-color: #f4f7fb;
+  background-image: linear-gradient(180deg, #ffffff, #e7ebf1 46%, #c5ccd6);
+  border-color: #f7fbff;
+  box-shadow: inset 0 1px 0 #fff, inset 0 -2px 0 rgba(0, 0, 0, 0.35), 0 0 8px rgba(255, 255, 255, 0.28);
 }
 
 .rack-step.past {
@@ -650,10 +684,17 @@ button.snap-grid { flex-direction: column; gap: 1px; }
 }
 
 .rack-step.now {
-  z-index: 1;
-  box-shadow: var(--pressed), 0 0 14px #f4fff4, 0 0 2px #fff;
-  outline: 2px solid #f4fff4;
-  outline-offset: -2px;
+  z-index: 2;
+  outline: 3px solid #b6ff57;
+  outline-offset: -4px;
+  box-shadow: inset 0 0 0 2px #10210a, 0 0 12px #b6ff57;
+}
+
+.rack-playhead {
+  width: 3px;
+  margin-left: -1px;
+  background: #b6ff57;
+  box-shadow: 0 0 8px #b6ff57;
 }
 
 .rack-graph {
@@ -781,32 +822,26 @@ button.snap-grid { flex-direction: column; gap: 1px; }
   min-height: 44px;
 }
 
-/* Portrait phone: every drum shows all 16 steps, two rows of eight, no sideways strip.
-   The row list must grow with the kit. A hidden overflow on the inner scroller
-   shrinks it and clips every row after Snare, so the outer rack is what scrolls. */
-.shell.phone:not(.land) .beats.channel-rack {
-  --lead: 100%;
-  --step: 0px;
-  --step-h: 44px;
-  gap: 4px;
-  padding: 4px;
+/* Phone keeps one row of steps. The rack scrolls sideways when 16 steps do not fit,
+   and downward when the kit is taller than the screen. Names stay sticky. */
+.shell.phone .beats.channel-rack {
   flex: 1 1 auto;
   height: auto;
   min-height: 0;
   max-height: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
 }
-.shell.phone:not(.land) .beats .rack-scroll {
-  overflow: visible;
-  flex: 0 0 auto;
-  height: auto;
-  min-height: min-content;
+.shell.phone .beats .rack-scroll {
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
   max-height: none;
+  touch-action: pan-x pan-y;
 }
-.shell.phone:not(.land) .beats .rack-editing small,
 .shell.phone:not(.land) .beats .rack-tool,
 .shell.phone:not(.land) .beats .rack-bar > .rack-loop { display: none; }
+.rack-lead .rack-loop { display: none; }
+.shell.phone .beats .rack-editing small { display: none; }
 .shell.phone:not(.land) .beats .rack-bar { gap: 4px; }
 .shell.phone:not(.land) .beats .rack-editing select {
   height: 44px;
@@ -814,46 +849,62 @@ button.snap-grid { flex-direction: column; gap: 1px; }
   max-height: 44px;
 }
 .shell.phone:not(.land) .beats .pattern-send { flex: 1 1 auto; width: auto; }
-.shell.phone:not(.land) .beats .rack-row,
-.shell.phone:not(.land) .beats .drum-lane {
-  flex-wrap: wrap;
-  width: 100%;
-  min-width: 0;
-  margin-bottom: 8px;
+.shell.phone .beats .rack-row,
+.shell.phone .beats .drum-lane {
+  flex-wrap: nowrap;
+  width: max-content;
+  min-width: 100%;
 }
-.shell.phone:not(.land) .beats .rack-lead,
-.shell.phone:not(.land) .beats .drum-lane-name {
-  position: static;
-  width: 100%;
-  flex: 1 1 100%;
-  min-width: 0;
-  max-width: none;
-  height: 44px;
-  min-height: 44px;
+.shell.phone .beats .rack-row:not(.rack-ruler) .rack-lead,
+.shell.phone .beats .drum-lane-name {
+  position: sticky;
+  left: 0;
+  width: var(--lead);
+  flex: 0 0 var(--lead);
+  min-width: var(--lead);
+  max-width: var(--lead);
+  height: calc(var(--step-h) + 4px);
+  min-height: 40px;
 }
-.shell.phone:not(.land) .beats .rack-name { flex: 1 1 auto; min-width: 72px; font-size: 16px; }
-.shell.phone:not(.land) .beats .rack-steps,
-.shell.phone:not(.land) .beats .drum-lane .rack-steps {
-  flex: 1 1 100%;
-  flex-wrap: wrap;
-  width: 100%;
-  min-width: 0;
+.shell.phone .beats .rack-name { flex: 1 1 auto; min-width: 48px; font-size: 15px; }
+.shell.phone .beats .rack-steps,
+.shell.phone .beats .drum-lane .rack-steps {
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  width: auto;
+  min-width: max-content;
   gap: 4px;
 }
-.shell.phone:not(.land) .beats .rack-group {
-  flex: 1 1 calc(50% - 4px);
-  max-width: calc(50% - 2px);
-  min-width: 0;
+.shell.phone .beats .rack-group {
+  flex: 1 1 auto;
+  max-width: none;
+  min-width: max-content;
 }
-.shell.phone:not(.land) .beats .rack-step,
-.shell.phone:not(.land) .beats .rack-bar-step,
-.shell.phone:not(.land) .beats .drum-slot {
-  min-width: 0;
+.shell.phone .beats .rack-step,
+.shell.phone .beats .rack-bar-step,
+.shell.phone .beats .drum-slot {
+  min-width: 40px;
   width: auto;
-  flex: 1 1 0;
-  height: 44px;
-  min-height: 44px;
+  flex: 1 1 40px;
+  min-height: 40px;
 }
-.shell.phone:not(.land) .beats .rack-ruler .loop-host,
-.shell.phone:not(.land) .beats .rack-playhead { display: none; }
 .shell.phone:not(.land) .drum-roll { margin-top: 4px; }
+
+/* The plugin page locks this scroller. The step grid is the one surface that scrolls. */
+[data-plugin-root].step-sequencer .beats.channel-rack,
+[data-screen-overlay].step-sequencer .beats.channel-rack {
+  display: flex !important;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto !important;
+  overflow: hidden !important;
+}
+[data-plugin-root].step-sequencer .beats.channel-rack .rack-scroll,
+[data-screen-overlay].step-sequencer .beats.channel-rack .rack-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto !important;
+  touch-action: pan-x pan-y;
+}

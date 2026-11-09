@@ -39,7 +39,7 @@ function shellClass(width: number, height: number) {
   ].filter(Boolean).join(' ')
 }
 
-function markup(width: number, height: number) {
+function markup(width: number, height: number, ready?: ProjectStore, frame = 0) {
   const previous = globalThis.window
   globalThis.window = {
     innerWidth: width,
@@ -48,11 +48,12 @@ function markup(width: number, height: number) {
     removeEventListener() {},
   } as unknown as Window & typeof globalThis
   try {
-    const store = new ProjectStore()
+    const store = ready ?? new ProjectStore()
     const html = renderToStaticMarkup(createElement(BeatView, {
       store,
       engine: { positionSamples: 0 } as AudioEngine,
     }))
+    const editorStyle = frame ? ` style="height:${frame}px;display:flex;flex-direction:column;min-height:0"` : ''
     return `<!doctype html>
 <html>
 <head>
@@ -62,7 +63,7 @@ function markup(width: number, height: number) {
 <body>
 <div class="${shellClass(width, height)}">
   <div class="workspace">
-    <div class="main-pane"><div class="editor">${html}</div></div>
+    <div class="main-pane"><div class="editor"${editorStyle}>${html}</div></div>
     <div class="dock-slot"></div>
   </div>
 </div>
@@ -152,57 +153,40 @@ describe('pattern step layout', () => {
         expect(box.steps[1].left, JSON.stringify(box.steps.slice(0, 2))).toBeGreaterThan(box.steps[0].left + 8)
         expect(box.groups, where).toBe(4)
         expect(box.alt, where).toBe(2)
-        if (portrait) {
-          expect(box.tops, where).toHaveLength(2)
-          expect(box.steps[8].top, where).toBeGreaterThan(box.steps[0].top + 30)
-          expect(box.sticky, where).toBe('static')
-          expect(box.scrollWidth, where).toBeLessThanOrEqual(box.clientWidth + 8)
-          const kit = await page.evaluate(() => {
-            const host = document.querySelector('.beats.channel-rack') as HTMLElement
-            const names = ['Kick', 'Snare', 'Clap', 'Hat', 'Perc']
-            return names.map((name) => {
-              const row = document.querySelector(`.rack-row[data-channel="${name}"]`) as HTMLElement | null
-              if (!row) return { name, missing: true }
-              row.scrollIntoView({ block: 'center' })
-              const steps = [...row.querySelectorAll('.rack-step')].map((el) => el.getBoundingClientRect())
-              const label = row.querySelector('.rack-name') as HTMLElement
-              const hostBox = host.getBoundingClientRect()
-              const labelBox = label.getBoundingClientRect()
-              const tops = new Set(steps.map((step) => Math.round(step.top)))
-              const visibleTop = Math.max(hostBox.top, 0)
-              const visibleBottom = Math.min(hostBox.bottom, window.innerHeight)
-              return {
-                name,
-                missing: false,
-                count: steps.length,
-                tops: tops.size,
-                height: steps[0]?.height ?? 0,
-                width: steps[0]?.width ?? 0,
-                font: parseFloat(getComputedStyle(label).fontSize),
-                clipped: label.scrollWidth > label.clientWidth + 2,
-                labelWidth: labelBox.width,
-                text: label.textContent?.trim() ?? '',
-                inView: labelBox.bottom > visibleTop + 8 && labelBox.top < visibleBottom - 8 && steps.some((step) => step.bottom > visibleTop + 8 && step.top < visibleBottom - 8),
-              }
-            })
-          })
-          expect(kit.map((row) => row.name), where).toEqual(['Kick', 'Snare', 'Clap', 'Hat', 'Perc'])
-          for (const row of kit) {
-            expect(row.missing, where).toBe(false)
-            expect(row.count, `${where} ${row.name}`).toBe(16)
-            expect(row.tops, `${where} ${row.name}`).toBe(2)
-            expect(row.height, `${where} ${row.name}`).toBeGreaterThanOrEqual(40)
-            expect(row.width, `${where} ${row.name}`).toBeGreaterThanOrEqual(36)
-            expect(row.font, `${where} ${row.name}`).toBeGreaterThanOrEqual(14)
-            expect(row.clipped, `${where} ${row.name}`).toBe(false)
-            expect(row.labelWidth, `${where} ${row.name}`).toBeGreaterThanOrEqual(48)
-            expect(row.text, `${where} ${row.name}`).toBe(row.name)
-            expect(row.inView, `${where} ${row.name}`).toBe(true)
+        expect(Math.abs(box.steps[0].top - box.steps[1].top), where).toBeLessThan(2)
+        expect(box.tops, where).toHaveLength(1)
+        expect(box.sticky, where).toBe('sticky')
+        expect(box.bar, where).toContain('Smart Pattern')
+        const reach = await page.evaluate(() => {
+          const scroller = document.querySelector('.rack-scroll') as HTMLElement
+          const overflow = getComputedStyle(scroller).overflowX
+          scroller.scrollLeft = scroller.scrollWidth
+          const port = scroller.getBoundingClientRect()
+          const steps = [...document.querySelectorAll('.rack-row[data-channel="Kick"] .rack-step')]
+          const last = steps[steps.length - 1].getBoundingClientRect()
+          const name = document.querySelector('.rack-row[data-channel="Kick"] .rack-name') as HTMLElement
+          const nameBox = name.getBoundingClientRect()
+          const tops = new Set(steps.map((step) => Math.round(step.getBoundingClientRect().top)))
+          return {
+            overflow,
+            scrolls: scroller.scrollWidth > scroller.clientWidth + 8,
+            lastVisible: last.right <= port.right + 2 && last.right > port.left + 8,
+            nameVisible: nameBox.left >= port.left - 2 && nameBox.right > port.left + 8,
+            oneRow: tops.size,
+            font: parseFloat(getComputedStyle(name).fontSize),
+            clipped: name.scrollWidth > name.clientWidth + 2,
           }
-        } else {
-          expect(Math.abs(box.steps[0].top - box.steps[1].top), where).toBeLessThan(2)
-          expect(box.tops, where).toHaveLength(1)
-          expect(box.sticky, where).toBe('sticky')
+        })
+        expect(['auto', 'scroll'], where).toContain(reach.overflow)
+        expect(reach.oneRow, where).toBe(1)
+        expect(reach.nameVisible, where).toBe(true)
+        if (portrait) {
+          expect(reach.scrolls, where).toBe(true)
+          expect(reach.lastVisible, where).toBe(true)
+          expect(reach.font, where).toBeGreaterThanOrEqual(14)
+          expect(reach.clipped, where).toBe(false)
+        } else if (reach.scrolls) {
+          expect(reach.lastVisible, where).toBe(true)
         }
         expect(box.leadLeft, where).toBeGreaterThanOrEqual(-1)
         expect(box.leadRight, where).toBeLessThanOrEqual(viewport.width + 1)
@@ -218,15 +202,18 @@ describe('pattern step layout', () => {
         if (phone) expect(box.bar, where).not.toContain('Swing')
         else expect(box.bar, where).toContain('Swing')
         for (const step of box.steps) {
-          expect(step.width, where).toBeGreaterThanOrEqual(portrait ? 36 : 24)
-          expect(step.height, where).toBeGreaterThanOrEqual(portrait ? 40 : 28)
+          expect(step.width, where).toBeGreaterThanOrEqual(40)
+          expect(step.height, where).toBeGreaterThanOrEqual(40)
         }
-        if (!portrait && viewport.width <= 520) expect(box.scrollWidth, where).toBeGreaterThan(box.clientWidth + 8)
-        await page.evaluate(() => document.querySelector('.rack-extras')!.classList.add('open'))
+        await page.evaluate(() => {
+          const scroller = document.querySelector('.rack-scroll') as HTMLElement
+          scroller.scrollLeft = 0
+          document.querySelector('.rack-extras')!.classList.add('open')
+        })
         const open = await measure(page)
         expect(open.outside, open.outside.join(', ')).toEqual([])
         expect(open.scroll, where).toBeLessThanOrEqual(1)
-        expect(open.tops, where).toHaveLength(portrait ? 2 : 1)
+        expect(open.tops, where).toHaveLength(1)
         if (phone) expect(open.extras, where).toContain('Swing')
         const visible = await page.evaluate(() => document.querySelector('.rack-extras')!.getBoundingClientRect().height)
         expect(visible).toBeGreaterThan(32)
@@ -254,6 +241,51 @@ describe('pattern step layout', () => {
       })
       expect(place.width).toBeGreaterThan(20)
       expect(place.right).toBeLessThanOrEqual(1440 + 1)
+    } finally {
+      await browser.close()
+    }
+  })
+
+  it('scrolls extra instruments vertically without wrapping a row', async () => {
+    const store = new ProjectStore()
+    for (let index = 0; index < 14; index += 1) {
+      store.addPatternChannel({ name: `Extra ${index}`, kind: 'perc', note: 56, color: '#c58be0' })
+    }
+    const browser = await chromium.launch({ headless: true })
+    try {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
+      await page.setContent(markup(390, 844, store, 520), { waitUntil: 'load' })
+      const scrolled = await page.evaluate(() => {
+        const scroller = document.querySelector('.rack-scroll') as HTMLElement
+        const before = scroller.scrollTop
+        const canScroll = scroller.scrollHeight > scroller.clientHeight + 8
+        scroller.scrollTop = scroller.scrollHeight
+        const port = scroller.getBoundingClientRect()
+        const last = document.querySelector('.rack-row[data-channel="Extra 13"]') as HTMLElement
+        const lastBox = last.getBoundingClientRect()
+        const steps = [...last.querySelectorAll('.rack-step')].map((el) => el.getBoundingClientRect())
+        const name = last.querySelector('.rack-name') as HTMLElement
+        const nameBox = name.getBoundingClientRect()
+        scroller.scrollTop = 0
+        const kick = document.querySelector('.rack-row[data-channel="Kick"] .rack-name')!.getBoundingClientRect()
+        return {
+          before,
+          canScroll,
+          tops: new Set(steps.map((step) => Math.round(step.top))).size,
+          count: steps.length,
+          lastIn: lastBox.bottom <= port.bottom + 2 && lastBox.top < port.bottom - 8,
+          nameIn: nameBox.left >= port.left - 2 && nameBox.bottom <= port.bottom + 2,
+          kickBack: kick.top >= port.top - 2 && kick.top < port.bottom,
+          height: steps[0]?.height ?? 0,
+        }
+      })
+      expect(scrolled.canScroll).toBe(true)
+      expect(scrolled.tops).toBe(1)
+      expect(scrolled.count).toBe(16)
+      expect(scrolled.lastIn).toBe(true)
+      expect(scrolled.nameIn).toBe(true)
+      expect(scrolled.kickBack).toBe(true)
+      expect(scrolled.height).toBeGreaterThanOrEqual(40)
     } finally {
       await browser.close()
     }

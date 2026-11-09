@@ -3,6 +3,9 @@ import { emptyCell } from './steps'
 
 export type DrumRole = 'kick' | 'snare' | 'clap' | 'rim' | 'hat' | 'openhat' | 'perc' | 'cymbal' | 'other'
 
+/** A pitched row. Drums stay on `DrumRole`. An unrecognized sound stays `other`. */
+export type SoundRole = DrumRole | 'melodic'
+
 /** Mulberry32. The same seed always rebuilds the same beat. */
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0
@@ -14,17 +17,49 @@ export function mulberry32(seed: number): () => number {
   }
 }
 
-export function drumRole(channel: { name: string; kind: string }): DrumRole {
-  const name = channel.name.toLowerCase()
-  if (/rim|sidestick|cross.?stick|edge stick/.test(name)) return 'rim'
-  if (/crash|ride|cymbal|china|splash/.test(name) || channel.kind === 'cymbal') return 'cymbal'
-  if (/open/.test(name) && /hat|hh|hi-hat|hihat/.test(name) || channel.kind === 'openhat') return 'openhat'
-  if (/hat|hh|hi-hat|hihat/.test(name) || channel.kind === 'hat') return 'hat'
-  if (/clap|hand/.test(name) || channel.kind === 'clap') return 'clap'
-  if (/snare|sd\b/.test(name) || channel.kind === 'snare') return 'snare'
-  if (/kick|bass.?drum|\bbd\b/.test(name) || channel.kind === 'kick') return 'kick'
-  if (/tom/.test(name) || channel.kind === 'tom') return 'perc'
-  if (/perc|shaker|conga|bongo|cowbell|tamb/.test(name) || channel.kind === 'perc') return 'perc'
+/** The name of the loaded sound, when it names a drum. Row position is not a role. */
+function roleFromName(name: string): DrumRole | null {
+  const text = name.toLowerCase()
+  if (/rim|sidestick|cross.?stick|edge stick/.test(text)) return 'rim'
+  if (/crash|ride|cymbal|china|splash/.test(text)) return 'cymbal'
+  if (/open/.test(text) && /hat|hh|hi-?hat/.test(text)) return 'openhat'
+  if (/hat|hh|hi-?hat/.test(text)) return 'hat'
+  if (/clap|hand/.test(text)) return 'clap'
+  if (/snare|\bsd\b/.test(text)) return 'snare'
+  if (/kick|bass.?drum|\bbd\b/.test(text)) return 'kick'
+  if (/tom/.test(text)) return 'perc'
+  if (/perc|shaker|conga|bongo|cowbell|tamb/.test(text)) return 'perc'
+  return null
+}
+
+function roleFromKind(kind: string): DrumRole | null {
+  if (kind === 'openhat') return 'openhat'
+  if (kind === 'hat') return 'hat'
+  if (kind === 'clap') return 'clap'
+  if (kind === 'snare') return 'snare'
+  if (kind === 'kick') return 'kick'
+  if (kind === 'cymbal') return 'cymbal'
+  if (kind === 'tom' || kind === 'perc') return 'perc'
+  return null
+}
+
+/** Pitched instruments the step grid can play by changing `cell.pitch`. */
+function melodicName(name: string): boolean {
+  return /piano|keys|keyboard|rhodes|organ|\bbass\b|lead|pluck|pad|synth|string|guitar|melody|chord|arp|brass|flute|bell|marimba|vibes|choir/.test(name.toLowerCase())
+}
+
+/**
+ * Role of the loaded sound. A name that says kick, snare, hat, and so on wins,
+ * then the channel kind. Neither one is the row index. A pitched name on a
+ * channel that is not already a drum is melodic. Anything else is an honest
+ * unknown (`other`): a plain downbeat, not a copied drum groove.
+ */
+export function drumRole(channel: { name: string; kind: string }): SoundRole {
+  const named = roleFromName(channel.name)
+  if (named) return named
+  const kind = roleFromKind(channel.kind)
+  if (kind) return kind
+  if (melodicName(channel.name)) return 'melodic'
   return 'other'
 }
 
@@ -145,11 +180,53 @@ function cymbalHits(count: number, rng: () => number): Map<number, number> {
   return hits
 }
 
+const MELODY = [0, 3, 5, 7, 10, 12, 7, 5, 3, 0, 5, 10]
+
+/**
+ * A short phrase on the grid. Strong beats stay. Offbeats come and go so a new
+ * press is a new rhythm, not a coin flip on every step. Pitch is a semitone
+ * offset from the channel note. Swing is left to playback.
+ */
+function melodicHits(count: number, rng: () => number): Map<number, { velocity: number; pitch: number }> {
+  const hits = new Map<number, { velocity: number; pitch: number }>()
+  const shift = Math.floor(rng() * MELODY.length)
+  inBar(count, (base, room) => {
+    const motif = [0, 3, 6, 8, 10, 12, 14]
+    for (const step of motif) {
+      if (step >= room) continue
+      const strong = step % 4 === 0
+      if (!strong && rng() < 0.4) continue
+      if (strong && step !== 0 && rng() < 0.25) continue
+      const pitch = MELODY[(step + shift) % MELODY.length]
+      hits.set(base + step, {
+        velocity: strong ? 0.78 + rng() * 0.18 : 0.4 + rng() * 0.22,
+        pitch,
+      })
+    }
+  })
+  if (!hits.size && count > 0) hits.set(0, { velocity: 0.72, pitch: 0 })
+  inBar(count, (base, room) => {
+    if (room <= 1) return
+    const at = Math.min(3, room - 1)
+    const down = hits.get(base)
+    const next = hits.get(base + at)
+    if (down && next && next.pitch !== down.pitch) return
+    hits.set(base + at, { velocity: 0.52, pitch: (down?.pitch ?? 0) + 7 })
+  })
+  return hits
+}
+
+/**
+ * Unknown role. One downbeat per bar, and sometimes the middle of the bar.
+ * That is a plain pulse, not a kick, snare, or hat pattern and not a random fill.
+ */
 function otherHits(count: number, rng: () => number): Map<number, number> {
   const hits = new Map<number, number>()
-  const pool = Array.from({ length: count }, (_, index) => index)
-  const want = Math.min(4, Math.max(1, 2 + Math.floor(rng() * 3)))
-  for (const step of shuffle(pool, rng).slice(0, want)) hits.set(step, 0.45 + rng() * 0.4)
+  inBar(count, (base, room) => {
+    if (room <= 0) return
+    hits.set(base, 0.62 + rng() * 0.12)
+    if (room > 8 && rng() < 0.45) hits.set(base + 8, 0.38 + rng() * 0.16)
+  })
   return hits
 }
 
@@ -163,6 +240,17 @@ export function hitsForRole(role: DrumRole, count: number, rng: () => number): M
   if (role === 'perc') return percHits(count, rng)
   if (role === 'cymbal') return cymbalHits(count, rng)
   return otherHits(count, rng)
+}
+
+function writeMelodic(cells: StepCell[], count: number, hits: Map<number, { velocity: number; pitch: number }>): StepCell[] {
+  const next = cells.map((cell) => ({ ...cell }))
+  while (next.length < count) next.push(emptyCell())
+  for (let index = 0; index < count; index += 1) {
+    const hit = hits.get(index)
+    const prev = next[index] ?? emptyCell()
+    next[index] = hit ? { ...prev, on: true, velocity: hit.velocity, pitch: hit.pitch } : { ...prev, on: false }
+  }
+  return next
 }
 
 function chokeHats(pattern: BeatPattern, openSteps: Set<number>, chosen: Set<string>) {
@@ -185,6 +273,10 @@ export function applySmartDrums(pattern: BeatPattern, only: string[] | null, rng
     if (!chosen.has(channel.id)) continue
     const count = channel.steps || pattern.steps
     const role = drumRole(channel)
+    if (role === 'melodic') {
+      channel.cells = writeMelodic(channel.cells, count, melodicHits(count, rng))
+      continue
+    }
     const hits = hitsForRole(role, count, rng)
     channel.cells = writeHits(channel.cells, count, hits)
     if (role === 'openhat') for (const step of hits.keys()) openSteps.add(step)
