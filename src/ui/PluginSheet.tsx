@@ -4,7 +4,7 @@ import { activeTunePreset, orderedInserts, tuneScaleOf } from '../audio/plugins/
 import { CATALOG, FACTORY, descriptor } from '../audio/plugins/catalog'
 import { commitPluginPreset } from '../presets/project'
 import { INSTRUMENT_IDS, isDrumsPlugin, kindLabels, paramsForKind } from '../audio/plugins/ids'
-import { pluginIsBeatMachine } from '../instruments/pads/identity'
+import { insertsBeatMachine, pluginIsBeatMachine } from '../instruments/pads/identity'
 import { chainSections, trackHasScaler } from '../instruments/scaler/chain'
 import { AnchoredMenu } from './AnchoredMenu'
 import { PresetControls } from './PresetControls'
@@ -500,29 +500,135 @@ export function addInsert(store: ProjectStore, trackId: string | 'master', value
   else store.addPlugin(trackId, value)
 }
 
-function PluginPicker({ store, trackId }: { store: ProjectStore; trackId: string | 'master'; roomy?: boolean }) {
+/** Names that fit a narrow strip. The full name stays on the button label. */
+export function clipInsertName(name: string, column: number) {
+  const inner = Math.max(28, column - 10)
+  const chars = Math.max(3, Math.floor(inner / 7.2))
+  if (name.length <= chars) return name
+  return `${name.slice(0, Math.max(1, chars - 1))}…`
+}
+
+/**
+ * The live insert worklet drops only the Step Sequencer.
+ * Synth, sampler, Scaler, and Beat Machine stay in that serial chain, so they are not labeled as skipped sources.
+ */
+export function isInstrumentSource(plugin: { pluginId: string; params?: Record<string, number> }) {
+  return plugin.pluginId === 'steps'
+}
+
+/** These choices retarget through addPlugin when the clicked strip is not a MIDI track. */
+const RETARGET_IDS = new Set(['steps', 'scaler', 'synth'])
+
+export function stripCanHost(store: ProjectStore, trackId: string | 'master', pluginId: string) {
+  if (!RETARGET_IDS.has(pluginId) && !insertsBeatMachine(pluginId)) return true
+  const track = trackId === 'master' ? null : store.track(trackId)
+  return track?.type === 'midi'
+}
+
+export function stripSlotChoices(store: ProjectStore, trackId: string | 'master') {
+  return insertMenuChoices(store, trackId).filter((plugin) => stripCanHost(store, trackId, plugin.id))
+}
+
+/** Strip Add. Refuses a choice that would land on a different track. */
+export function addStripInsert(store: ProjectStore, trackId: string | 'master', value: string) {
+  if (!value || !stripCanHost(store, trackId, value)) return
+  addInsert(store, trackId, value)
+}
+
+function audioPlace(index: number, count: number) {
+  if (index === 0 && count <= 1) return 'Only audio effect. This processes first, then the fader.'
+  if (index === 0) return 'First audio effect. This processes first.'
+  if (index === count - 1) return 'Last audio effect. It receives the previous audio effect, then the fader.'
+  return 'This audio effect receives the previous audio effect and feeds the next one.'
+}
+
+function sourcePlace(name: string, savedIndex: number) {
+  return `${name}. Instrument source, saved at position ${savedIndex + 1}. The audio chain skips this slot. It does not process in series.`
+}
+
+/** Named insert slots. Top is first in the audio chain. One empty slot adds on this track. */
+export function StripInserts({ store, trackId, column }: { store: ProjectStore; trackId: string | 'master'; column: number }) {
+  const track = trackId === 'master' ? null : store.track(trackId)
+  const plugins = trackId === 'master' ? store.project.masterPlugins : track?.plugins ?? []
+  const name = trackId === 'master' ? 'Master' : track?.name ?? 'Track'
+  return (
+    <div className="strip-rack">
+      <p className="strip-inserts-label">Inserts</p>
+      <div
+        className="strip-inserts"
+        role="list"
+        data-inserts={trackId}
+        data-chain="serial"
+        aria-label={`Inserts on ${name}. The top insert processes first. Each insert below receives the one above. The bottom insert is last, then the fader feeds the output.`}
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        {plugins.map((plugin, index) => {
+          const full = insertLabel(plugin.pluginId, plugin)
+          const source = isInstrumentSource(plugin)
+          const audio = plugins.filter((item) => !isInstrumentSource(item))
+          const audioIndex = audio.findIndex((item) => item.id === plugin.id)
+          const label = source
+            ? `${sourcePlace(full, index)} Open this source.`
+            : `${full}. Audio effect ${audioIndex + 1} of ${audio.length}. ${audioPlace(audioIndex, audio.length)} Open this effect.`
+          return (
+            <button
+              key={plugin.id}
+              type="button"
+              role="listitem"
+              className={`strip-insert${source ? ' is-source' : ''}${plugin.enabled ? ' on' : ' is-off'}`}
+              data-plugin={plugin.id}
+              data-plugin-id={plugin.pluginId}
+              data-role={source ? 'source' : 'audio'}
+              data-chain-index={index}
+              data-audio-index={source ? undefined : audioIndex}
+              title={label}
+              aria-label={label}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation()
+                event.preventDefault()
+                if (trackId !== 'master') store.selectTrack(trackId)
+                store.focusPlugin(trackId, plugin.id)
+              }}
+            >
+              <span>{clipInsertName(full, column)}</span>
+            </button>
+          )
+        })}
+        <PluginPicker store={store} trackId={trackId} slot order={plugins.length} />
+      </div>
+    </div>
+  )
+}
+
+function PluginPicker({ store, trackId, slot = false, order = 0 }: { store: ProjectStore; trackId: string | 'master'; roomy?: boolean; slot?: boolean; order?: number }) {
   const [open, setOpen] = useState(false)
   const button = useRef<HTMLButtonElement>(null)
-  const choices = insertMenuChoices(store, trackId)
+  const choices = slot ? stripSlotChoices(store, trackId) : insertMenuChoices(store, trackId)
+  const name = trackId === 'master' ? 'Master' : store.track(trackId)?.name ?? 'Track'
+  const addLabel = `Add insert on ${name}. It is placed at the bottom and processes last, then the fader.`
   return (
     <>
       <button
         ref={button}
         type="button"
-        className="plugin-pick insert-add"
+        className={slot ? 'strip-insert strip-insert-add' : 'plugin-pick insert-add'}
         aria-expanded={open}
-        aria-label="Add plugin"
-        title="Add an instrument or effect on this track."
+        aria-label={slot ? addLabel : 'Add plugin'}
+        title={slot ? addLabel : 'Add an instrument or effect on this track.'}
+        data-chain-index={slot ? order : undefined}
+        data-add-track={slot ? trackId : undefined}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation()
           setOpen((value) => !value)
         }}
       >
-        {open ? 'Close' : 'Add plugin'}
+        {slot ? 'Add' : open ? 'Close' : 'Add plugin'}
       </button>
       {open && (
-        <AnchoredMenu className="insert-menu" open={open} onClose={() => setOpen(false)} label="Add plugin" triggerRef={button} prefer="down">
+        <AnchoredMenu className="insert-menu" open={open} onClose={() => setOpen(false)} label="Add plugin" triggerRef={button} prefer="auto">
           {choices.map((plugin) => (
             <button
               key={plugin.id}
@@ -531,7 +637,9 @@ function PluginPicker({ store, trackId }: { store: ProjectStore; trackId: string
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation()
-                addInsert(store, trackId, plugin.id)
+                if (trackId !== 'master') store.selectTrack(trackId)
+                if (slot) addStripInsert(store, trackId, plugin.id)
+                else addInsert(store, trackId, plugin.id)
                 setOpen(false)
               }}
             >

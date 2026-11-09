@@ -6,10 +6,10 @@ import { mixGroupsOf, selectMixer, trackGroupId } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import type { Track } from '../model/types'
 import { AddTrackButton } from './AddTrack'
-import { AutoFader, ChannelAutomation, MixFlags, PanKnob } from './AutomationLane'
+import { AutoFader, ChannelAutomation, MixFlags, PanKnob, panWords } from './AutomationLane'
 import { useLayoutWidths, usePinchResize, WidthBar } from './layoutWidth'
 import { MasterSheet } from './MasterSheet'
-import { InsertList } from './PluginSheet'
+import { InsertList, StripInserts } from './PluginSheet'
 import { TouchSlider } from './kit/controls'
 import { holdMeter } from './levels'
 import { TrackPresence } from './presenceMarks'
@@ -67,6 +67,7 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
       data-layout="columns"
       data-narrow={narrow ? '1' : undefined}
       data-short={short ? '1' : undefined}
+      data-insert-order="top-first"
       style={{ ['--strip' as string]: `${strip}px` }}
     >
       <MixToolbar store={store} engine={engine} focus={focus} detailsRef={detailsRef} onTune={onTune} strip={layout.strip} onStrip={setStrip} onResetStrip={resetStrip} />
@@ -79,6 +80,7 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
               engine={engine}
               trackId={track.id}
               flow="track"
+              column={insertColumn(strip, viewport.width, short)}
               selected={focus === track.id}
               onOpenKeyboard={onOpenKeyboard}
               onSelect={() => { setMasterOn(false); store.selectTrack(track.id) }}
@@ -93,6 +95,7 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
               engine={engine}
               trackId={track.id}
               flow="bus"
+              column={insertColumn(strip, viewport.width, short)}
               selected={focus === track.id}
               onOpenKeyboard={onOpenKeyboard}
               onSelect={() => { setMasterOn(false); store.selectTrack(track.id) }}
@@ -101,10 +104,18 @@ function MixerBody({ store, engine, onTune, onOpenKeyboard }: { store: ProjectSt
           ))}
         </div>
         <div className="mix-divider" aria-hidden="true" />
-        <MasterStrip store={store} engine={engine} selected={focus === 'master'} onSelect={() => setMasterOn(true)} onOpen={() => openDetail('master')} />
+        <MasterStrip store={store} engine={engine} column={insertColumn(strip, viewport.width, short)} selected={focus === 'master'} onSelect={() => setMasterOn(true)} onOpen={() => openDetail('master')} />
       </div>
     </div>
   )
+}
+
+/** Column width the insert names have to fit. Phone bays share one width across about five strips. */
+function insertColumn(strip: number, viewportWidth: number, short: boolean) {
+  if (short) return 120
+  if (!(viewportWidth > 0) || viewportWidth > 1100) return strip
+  const share = Math.max(44, (viewportWidth - 40) / 5)
+  return Math.round(Math.min(strip, share))
 }
 
 function routingCaption(store: ProjectStore, trackId: string) {
@@ -120,6 +131,7 @@ function ChannelStrip({
   engine,
   trackId,
   flow,
+  column,
   selected,
   onOpenKeyboard,
   onSelect,
@@ -129,6 +141,7 @@ function ChannelStrip({
   engine: AudioEngine
   trackId: string
   flow: 'track' | 'bus'
+  column: number
   selected: boolean
   onOpenKeyboard?: (trackId: string) => void
   onSelect: () => void
@@ -145,13 +158,15 @@ function ChannelStrip({
       data-flow={flow}
       onClick={() => { store.selectTrack(track.id); onOpenKeyboard?.(track.id) }}
     >
-      <div className="strip-col">
+      <div className="strip-col" style={{ ['--insert' as string]: track.color }}>
         <div className="strip-head">
           <p className="strip-kind">{kind}</p>
           <StripName name={track.name} color={track.color} onSelect={onSelect} onOpen={onOpen} />
           <p className="strip-path" title={`${kind} ${track.name} feeds ${output}.`}>To {output}</p>
           <TrackPresence trackId={track.id} />
         </div>
+        <StripInserts store={store} trackId={track.id} column={column} />
+        <StripPan store={store} engine={engine} track={track} />
         <VolumeLane store={store} engine={engine} trackId={track.id} name={track.name} value={track.volume} vertical />
         <div className="strip-foot">
           <MixFlags store={store} trackId={track.id} part="mute" />
@@ -162,7 +177,23 @@ function ChannelStrip({
   )
 }
 
-function MasterStrip({ store, engine, selected, onSelect, onOpen }: { store: ProjectStore; engine: AudioEngine; selected: boolean; onSelect: () => void; onOpen: () => void }) {
+function StripPan({ store, engine, track }: { store: ProjectStore; engine: AudioEngine; track: Track }) {
+  const words = panWords(track.pan)
+  const side = Math.abs(track.pan) < 0.02 ? 'center' : track.pan < 0 ? 'left' : 'right'
+  return (
+    <div className="strip-pan" data-pan={side} data-pan-text={words}>
+      <PanKnob
+        store={store}
+        engine={engine}
+        label={`${track.name} pan. ${words}. Drag left or right.`}
+        value={track.pan}
+        spec={{ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }}
+      />
+    </div>
+  )
+}
+
+function MasterStrip({ store, engine, column, selected, onSelect, onOpen }: { store: ProjectStore; engine: AudioEngine; column: number; selected: boolean; onSelect: () => void; onOpen: () => void }) {
   return (
     <div className={`strip master${selected ? ' is-selected' : ''}`} data-flow="master">
       <div className="strip-col">
@@ -171,6 +202,7 @@ function MasterStrip({ store, engine, selected, onSelect, onOpen }: { store: Pro
           <StripName name="Master" onSelect={onSelect} onOpen={onOpen} />
           <p className="strip-path" title="Tracks and buses arrive here, then leave to the speakers.">Output</p>
         </div>
+        <StripInserts store={store} trackId="master" column={column} />
         <MasterLane store={store} engine={engine} value={store.project.masterVolume} vertical />
         <div className="strip-foot">
           <div className="strip-note" title="Tracks and buses arrive on the master."><span>Arrives</span></div>
@@ -304,7 +336,7 @@ function MixToolbar({
               ))}
             </div>
             {shown === 'channel' && track && (
-              <ChannelSection store={store} engine={engine} track={track} onTune={onTune} />
+              <ChannelSection store={store} track={track} onTune={onTune} />
             )}
             {shown === 'channel' && focus === 'master' && (
               <MasterChannel store={store} engine={engine} onMaster={() => { setMastering(true); close() }} />
@@ -327,12 +359,10 @@ function MixToolbar({
 
 function ChannelSection({
   store,
-  engine,
   track,
   onTune,
 }: {
   store: ProjectStore
-  engine: AudioEngine
   track: Track
   onTune?: (trackId: string) => void
 }) {
@@ -341,10 +371,6 @@ function ChannelSection({
       <div className="mix-row">
         <span className="mix-label">Automation</span>
         <ChannelAutomation store={store} trackId={track.id} />
-      </div>
-      <div className="mix-row">
-        <span className="mix-label">Pan</span>
-        <PanKnob store={store} engine={engine} label={`${track.name} pan. Left or right.`} value={track.pan} spec={{ trackId: track.id, target: 'pan', param: 'pan', min: -1, max: 1 }} />
       </div>
       <div className="mix-pills">
         <PhaseButton store={store} trackId={track.id} name={track.name} />

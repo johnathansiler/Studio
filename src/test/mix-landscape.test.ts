@@ -131,6 +131,22 @@ async function readMixer(page: Page) {
       const box = node.getBoundingClientRect()
       return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height }
     }
+    const painted = (node: HTMLElement) => {
+      const box = node.getBoundingClientRect()
+      let top = box.top
+      let bottom = box.bottom
+      let parent = node.parentElement
+      while (parent && parent !== document.documentElement) {
+        const style = getComputedStyle(parent)
+        if (/auto|scroll|hidden|clip/.test(style.overflowY)) {
+          const frame = parent.getBoundingClientRect()
+          top = Math.max(top, frame.top)
+          bottom = Math.min(bottom, frame.bottom)
+        }
+        parent = parent.parentElement
+      }
+      return { left: box.left, right: box.right, top, bottom, width: box.width, height: Math.max(0, bottom - top) }
+    }
     const seen = (node: HTMLElement) => {
       const style = getComputedStyle(node)
       const box = node.getBoundingClientRect()
@@ -148,9 +164,9 @@ async function readMixer(page: Page) {
         text: (mark.textContent || '').trim(),
         box: boxOf(mark),
       }))
-      const controls = [...strip.querySelectorAll<HTMLElement>('button, summary')].filter(seen).map((node) => ({
+      const controls = [...strip.querySelectorAll<HTMLElement>('button, summary')].filter((node) => seen(node) && painted(node).height > 1).map((node) => ({
         word: (node.innerText || '').replace(/\s+/g, ' ').trim(),
-        box: boxOf(node),
+        box: painted(node),
         scrollWidth: node.scrollWidth,
         clientWidth: node.clientWidth,
         scrollHeight: node.scrollHeight,
@@ -185,9 +201,9 @@ async function readMixer(page: Page) {
         text: (mark.textContent || '').trim(),
         box: boxOf(mark),
       })),
-      masterControls: [...master.querySelectorAll<HTMLElement>('button, summary, .strip-note')].filter(seen).map((node) => ({
+      masterControls: [...master.querySelectorAll<HTMLElement>('button, summary, .strip-note')].filter((node) => seen(node) && painted(node).height > 1).map((node) => ({
         word: (node.innerText || '').replace(/\s+/g, ' ').trim(),
-        box: boxOf(node),
+        box: painted(node),
         scrollWidth: node.scrollWidth,
         clientWidth: node.clientWidth,
         scrollHeight: node.scrollHeight,

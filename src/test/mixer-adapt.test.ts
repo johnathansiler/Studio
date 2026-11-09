@@ -54,7 +54,7 @@ function markup(store: ProjectStore, width: number, height: number, shell: strin
   </body></html>`
 }
 
-const WORDS = ['Mute', 'Solo', 'More', 'Close', 'Off', 'Read', 'Touch', 'Latch', 'Inserts', 'Pan', 'Phase', 'Arm', 'Safe', 'Tune', 'Level', 'Master', 'Cue', 'Output', 'Group', 'Link', 'Send', 'Before', 'After', 'Remove', 'Faders', 'Mutes', 'Solos', 'Edits', 'Arrives', 'Leaves']
+const WORDS = ['Mute', 'Solo', 'More', 'Close', 'Off', 'Read', 'Touch', 'Latch', 'Inserts', 'Pan', 'Center', 'Left', 'Right', 'Add', 'Phase', 'Arm', 'Safe', 'Tune', 'Level', 'Master', 'Cue', 'Output', 'Group', 'Link', 'Send', 'Before', 'After', 'Remove', 'Faders', 'Mutes', 'Solos', 'Edits', 'Arrives', 'Leaves']
 
 async function readStrips(page: Page) {
   return page.evaluate((words) => {
@@ -140,9 +140,10 @@ describe('mixer fader stays full size', () => {
         for (const word of ['Mute', 'Solo']) {
           expect(labels, `${where} ${word}`).toContain(word)
         }
+        expect(labels, where).toContain('Center')
+        expect(labels, where).toContain('Add')
         expect(labels, where).not.toContain('More')
         expect(labels, where).not.toContain('Inserts')
-        expect(labels, where).not.toContain('Pan')
         const heights = strips.map((strip) => strip.faderHeight)
         expect(Math.max(...heights) - Math.min(...heights), where).toBeLessThanOrEqual(1)
         expect(heights[0], where).toBeGreaterThanOrEqual(48)
