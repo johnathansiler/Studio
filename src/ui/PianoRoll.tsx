@@ -160,13 +160,17 @@ export function PianoRoll({
   const pianoRef = useRef<HTMLDivElement>(null)
   const keysRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
+    const view = rollRef.current
+    if (!view) return
     let frame = 0
     let tries = 0
+    let userMoved = false
+    const markUser = () => { userMoved = true }
     const place = () => {
-      const view = rollRef.current
+      if (userMoved) return
       const keys = keysRef.current
       const notes = clip?.notes ?? []
-      if (!view || !notes.length) return
+      if (!notes.length) return
       if (view.clientHeight < 40 && tries < 8) {
         tries += 1
         frame = requestAnimationFrame(place)
@@ -175,21 +179,29 @@ export function PianoRoll({
       const pitches = notes.map((note) => note.pitch).filter((pitch) => Number.isFinite(pitch)).sort((a, b) => a - b)
       if (!pitches.length) return
       const focus = pitches[Math.floor((pitches.length - 1) / 2)]
-      const rowHeight = rowRef.current
+      const rowHeight = Math.max(1, rowRef.current)
       const top = (HIGH - focus) * rowHeight
       const shown = top >= view.scrollTop + 8 && top + rowHeight <= view.scrollTop + view.clientHeight - 8
       if (shown) return
       const next = Math.max(0, Math.min(Math.max(0, view.scrollHeight - view.clientHeight), top - view.clientHeight * 0.35))
+      if (Math.abs(next - view.scrollTop) < 1) return
       view.scrollTop = next
       if (keys) keys.scrollTop = next
     }
+    view.addEventListener('pointerdown', markUser)
+    view.addEventListener('wheel', markUser, { passive: true })
+    keysRef.current?.addEventListener('pointerdown', markUser)
+    keysRef.current?.addEventListener('wheel', markUser, { passive: true })
     place()
-    const view = rollRef.current
-    const watch = view ? new ResizeObserver(place) : null
-    if (view && watch) watch.observe(view)
+    const watch = new ResizeObserver(() => place())
+    watch.observe(view)
     return () => {
       cancelAnimationFrame(frame)
-      watch?.disconnect()
+      view.removeEventListener('pointerdown', markUser)
+      view.removeEventListener('wheel', markUser)
+      keysRef.current?.removeEventListener('pointerdown', markUser)
+      keysRef.current?.removeEventListener('wheel', markUser)
+      watch.disconnect()
     }
   }, [clip?.id])
   const velRef = useRef<HTMLDivElement>(null)

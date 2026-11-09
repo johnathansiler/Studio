@@ -141,7 +141,7 @@ import { downbeatAt, projectBeatSample, projectSampleBeat, snapSampleToMap, temp
 import { beatsToSamples, countInBarsOf, cycleCountInBars, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
 import { renderDrum, DRUM_PADS } from '../model/drums'
-import { isDrumTrack, clampRoll, DRUM_STEP, hitAt } from '../model/drumLanes'
+import { isDrumTrack, clampRoll, DRUM_STEP, hitAt, stepIndexFor } from '../model/drumLanes'
 import { clearStep, editorState, normalizeMidiEditor, placeStep, tieHeld, writeRollPrefs, type StepTone } from '../model/stepEntry'
 import {
   chainSong,
@@ -5966,6 +5966,8 @@ export class ProjectStore {
       if (!clip) return
       const beat = step * DRUM_STEP
       let note = hitAt(clip.notes, pitch, step)
+      const selected = this.selectedNoteId ? clip.notes.find((item) => item.id === this.selectedNoteId) : undefined
+      if (selected && selected.pitch === pitch && stepIndexFor(selected.startBeat) === step) note = selected
       if (patch.on === false) {
         if (!note) return
         const id = note.id
