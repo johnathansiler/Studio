@@ -411,9 +411,10 @@ export function SoundBrowser({
       setHead(0)
       setPlaying(entry.id)
     } catch (error) {
+      if (gen !== previewGen.current) return
       store.toast(error instanceof Error ? error.message : 'Could not play that sound.', 'warn')
     } finally {
-      setBusy('')
+      if (gen === previewGen.current) setBusy('')
     }
   }
 
@@ -461,6 +462,7 @@ export function SoundBrowser({
       await playAsInstrument(entry, dropped.id)
       return
     }
+    const gen = ++previewGen.current
     setBusy(entry.id)
     try {
       const decoded = await loadEntry(entry)
@@ -473,6 +475,7 @@ export function SoundBrowser({
         bufferId: `lib_${entry.id}`,
       })
       if (!placed) {
+        if (gen !== previewGen.current) return
         const message = 'That sound had no audio.'
         setFault(message)
         store.toast(message, 'warn')
@@ -485,24 +488,27 @@ export function SoundBrowser({
       const clip = landed ? store.project.tracks.find((track) => track.id === landed.trackId)?.clips.find((item) => item.id === landed.clipId) : null
       const channel = clip ? store.buffers.get(clip.bufferId)?.channels[0] : null
       if (!landed || !clip || clip.durationSamples < 1 || !channel?.length) {
+        if (gen !== previewGen.current) return
         const message = 'Could not add that sound onto the track.'
         setFault(message)
         store.toast(message, 'warn')
         return
       }
+      revealArrangedClip(landed.trackId, landed.clipId)
+      if (gen !== previewGen.current) return
       setFault('')
       engine.stopPreview()
       setPlaying('')
       setWave(null)
-      revealArrangedClip(landed.trackId, landed.clipId)
       const conformed = entry.type === 'loop' && clip.stretch?.followTempo
       store.toast(conformed ? `${entry.name} is on the track at the song tempo.` : `${entry.name} is on the track.`, 'good')
     } catch (error) {
+      if (gen !== previewGen.current) return
       const message = error instanceof Error ? error.message : 'Could not add that sound.'
       setFault(message)
       store.toast(message, 'warn')
     } finally {
-      setBusy('')
+      if (gen === previewGen.current) setBusy('')
     }
   }
   addRef.current = (entry, trackId, startSample) => {

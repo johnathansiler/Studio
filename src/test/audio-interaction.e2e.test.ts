@@ -149,6 +149,8 @@ describe('loop load and beat machine pads', () => {
       expect(loaded.notes).toBe(0)
       expect(loaded.ink).toBeGreaterThan(8)
       expect(loaded.seen).toBe(true)
+      expect(await page.locator('.clip-wave .wave-zoom').count()).toBe(0)
+      expect(await page.locator('.sound-row.is-playing').count()).toBe(0)
       await page.screenshot({ path: '/opt/cursor/artifacts/loop-load-playhead-390.png' })
 
       await page.evaluate(async () => {
@@ -168,7 +170,140 @@ describe('loop load and beat machine pads', () => {
       expect(heard).toBeGreaterThan(0.02)
       await page.evaluate(() => (window as unknown as { __cueharbor: { engine: { stop?: () => void } } }).__cueharbor.engine.stop?.())
 
-      await page.locator('.browser-close').click()
+      const beforeSave = await page.evaluate(() => {
+        const store = (window as unknown as {
+          __cueharbor: {
+            store: {
+              hasUnsavedEdits: () => boolean
+              project: { tracks: { id: string; type: string; clips: { id: string; name: string; startSample: number; durationSamples: number; bufferId: string }[] }[] }
+              buffers: Map<string, { sampleRate: number; channels: Float32Array[] }>
+            }
+          }
+        }).__cueharbor.store
+        const host = store.project.tracks.find((track) => track.clips.some((clip) => clip.durationSamples > 1000))
+        const clip = host?.clips.find((item) => item.durationSamples > 1000)
+        const channel = clip ? store.buffers.get(clip.bufferId)?.channels[0] : undefined
+        let peak = 0
+        let sum = 0
+        if (channel) {
+          const step = Math.max(1, Math.floor(channel.length / 4000))
+          for (let i = 0; i < channel.length; i += step) {
+            const value = Math.abs(channel[i] || 0)
+            peak = Math.max(peak, value)
+            sum += value
+          }
+        }
+        return {
+          name: clip?.name ?? '',
+          track: host?.id ?? '',
+          type: host?.type ?? '',
+          start: clip?.startSample ?? -1,
+          dur: clip?.durationSamples ?? 0,
+          bufferId: clip?.bufferId ?? '',
+          rate: clip ? store.buffers.get(clip.bufferId)?.sampleRate ?? 0 : 0,
+          length: channel?.length ?? 0,
+          peak,
+          sum,
+        }
+      })
+      expect(beforeSave.length).toBeGreaterThan(1000)
+      expect(beforeSave.peak).toBeGreaterThan(0.05)
+      const saved = await page.evaluate(async () => {
+        window.dispatchEvent(new Event('pagehide'))
+        const store = (window as unknown as { __cueharbor: { store: { hasUnsavedEdits: () => boolean } } }).__cueharbor.store
+        const started = performance.now()
+        while (store.hasUnsavedEdits() && performance.now() - started < 8000) {
+          await new Promise((resolve) => setTimeout(resolve, 50))
+        }
+        return !store.hasUnsavedEdits()
+      })
+      expect(saved).toBe(true)
+      await page.reload({ waitUntil: 'domcontentloaded' })
+      await page.getByRole('button', { name: /^Arrange/ }).first().waitFor()
+      await page.waitForFunction((name) => {
+        const store = (window as unknown as {
+          __cueharbor?: { store: { project: { tracks: { clips: { name: string }[] }[] }; buffers: Map<string, { channels: Float32Array[] }> } }
+        }).__cueharbor?.store
+        if (!store) return false
+        const clip = store.project.tracks.flatMap((track) => track.clips).find((item) => item.name === name)
+        return !!clip
+      }, beforeSave.name)
+      const reopened = await page.evaluate(async (before) => {
+        const hook = (window as unknown as {
+          __cueharbor: {
+            engine: { resume: () => Promise<void>; seek: (sample: number) => void; playAtPerf?: (sample: number, perf: number, mode: string) => Promise<void>; stop?: () => void; levels: () => { master: number } }
+            store: {
+              project: { tracks: { id: string; type: string; clips: { id: string; name: string; startSample: number; durationSamples: number; bufferId: string }[] }[] }
+              buffers: Map<string, { sampleRate: number; channels: Float32Array[] }>
+            }
+          }
+        }).__cueharbor
+        const host = hook.store.project.tracks.find((track) => track.id === before.track) ?? hook.store.project.tracks.find((track) => track.clips.some((clip) => clip.name === before.name))
+        const clip = host?.clips.find((item) => item.name === before.name)
+        const channel = clip ? hook.store.buffers.get(clip.bufferId)?.channels[0] : undefined
+        let peak = 0
+        let sum = 0
+        if (channel) {
+          const step = Math.max(1, Math.floor(channel.length / 4000))
+          for (let i = 0; i < channel.length; i += step) {
+            const value = Math.abs(channel[i] || 0)
+            peak = Math.max(peak, value)
+            sum += value
+          }
+        }
+        const node = clip ? document.querySelector(`[data-clip="${clip.id}"]`) as HTMLElement | null : null
+        node?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+        let ink = 0
+        for (let attempt = 0; attempt < 20 && ink < 8; attempt += 1) {
+          await new Promise((resolve) => requestAnimationFrame(resolve))
+          const canvas = node?.querySelector('canvas') as HTMLCanvasElement | null
+          const view = canvas?.getContext('2d', { willReadFrequently: true })
+          ink = 0
+          if (!view || !canvas || canvas.width < 1 || canvas.height < 1) continue
+          const pixels = view.getImageData(0, 0, canvas.width, canvas.height).data
+          for (let i = 3; i < pixels.length; i += 16) if (pixels[i] > 16) ink += 1
+        }
+        const box = node?.getBoundingClientRect()
+        const timeline = document.querySelector('.timeline-scroll')?.getBoundingClientRect()
+        await hook.engine.resume()
+        hook.engine.seek(clip?.startSample ?? 0)
+        await hook.engine.playAtPerf?.(clip?.startSample ?? 0, performance.now(), 'arrangement')
+        let master = 0
+        const started = performance.now()
+        while (performance.now() - started < 900) {
+          master = Math.max(master, hook.engine.levels().master || 0)
+          await new Promise((resolve) => setTimeout(resolve, 40))
+        }
+        hook.engine.stop?.()
+        return {
+          type: host?.type ?? '',
+          start: clip?.startSample ?? -1,
+          dur: clip?.durationSamples ?? 0,
+          bufferId: clip?.bufferId ?? '',
+          rate: clip ? hook.store.buffers.get(clip.bufferId)?.sampleRate ?? 0 : 0,
+          length: channel?.length ?? 0,
+          peak,
+          sum,
+          ink,
+          seen: !!box && !!timeline && box.bottom > timeline.top + 4 && box.top < timeline.bottom - 4 && box.right > timeline.left + 4,
+          master,
+        }
+      }, beforeSave)
+      expect(reopened.type).toBe('audio')
+      expect(reopened.start).toBe(beforeSave.start)
+      expect(reopened.dur).toBe(beforeSave.dur)
+      expect(reopened.bufferId).toBe(beforeSave.bufferId)
+      expect(reopened.rate).toBe(beforeSave.rate)
+      expect(reopened.length).toBe(beforeSave.length)
+      expect(reopened.peak).toBeGreaterThan(0.05)
+      expect(reopened.sum).toBeGreaterThan(beforeSave.sum * 0.98)
+      expect(reopened.ink).toBeGreaterThan(8)
+      expect(reopened.seen).toBe(true)
+      expect(reopened.master).toBeGreaterThan(0.02)
+      await page.screenshot({ path: '/opt/cursor/artifacts/loop-reload-390.png' })
+
+      const closer = page.locator('.browser-close')
+      if (await closer.isVisible().catch(() => false)) await closer.click()
       await page.getByRole('button', { name: 'Add Track' }).click()
       await page.getByRole('button', { name: /Beat Machine\. Pads/ }).click()
       await page.locator('[data-pads="plugin"]').waitFor()
@@ -325,5 +460,5 @@ describe('loop load and beat machine pads', () => {
       web.kill('SIGTERM')
       await browser.close()
     }
-  }, 120000)
+  }, 180000)
 })

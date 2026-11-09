@@ -1588,7 +1588,7 @@ function ClipView({
         ariaLabel="Clip waveform"
         className="clip-wave"
         color="rgba(255,255,255,0.9)"
-        chrome="none"
+        chrome="auto"
         snap={snapZero}
         onSnap={setSnapZero}
         listenRef={clipRef}

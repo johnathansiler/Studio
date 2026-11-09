@@ -193,6 +193,9 @@ describe('pad, keyboard, and MIDI input share the grid', () => {
       liveDrum: () => calls.push('drum'),
       liveNoteOn: () => calls.push('note'),
       liveNoteOff: () => calls.push('off'),
+      releaseMidi: () => calls.push('midi'),
+      releaseThrough: () => calls.push('release'),
+      playThrough: () => calls.push('through'),
       playBuffer: () => calls.push('buffer'),
     }
     const performer = new Performer(
@@ -203,9 +206,69 @@ describe('pad, keyboard, and MIDI input share the grid', () => {
       () => undefined,
     )
     performer.setEngaged(false)
+    performer.setDeck({
+      kit: { banks: [[{ pitch: 36, gate: 'shot', layers: [], layerMode: 'velocity' }]] } as never,
+      swing: 0,
+      fullLevel: false,
+      accent: false,
+      erase: false,
+      latch: false,
+      levels: null,
+      fixedBeats: 0,
+      recordMode: 'overdub',
+      sampleOf: () => null,
+    })
     performer.down(36, 0.9, 0, 1)
     performer.up(1, 30)
-    expect(calls).toEqual(['drum'])
+    expect(calls).toEqual(['drum', 'midi'])
+
+    calls.length = 0
+    performer.setDeck({
+      kit: { banks: [[{ pitch: 36, gate: 'hold', layers: [], layerMode: 'velocity' }]] } as never,
+      swing: 0,
+      fullLevel: false,
+      accent: false,
+      erase: false,
+      latch: false,
+      levels: null,
+      fixedBeats: 0,
+      recordMode: 'overdub',
+      sampleOf: () => null,
+    })
+    performer.down(36, 0.9, 0, 2)
+    performer.up(2, 80)
+    expect(calls).toEqual(['drum', 'off'])
+  })
+
+  it('still releases a hold-gated instrument that is not a drum', () => {
+    const calls: string[] = []
+    const performer = new Performer(
+      {
+        transportPlaying: false,
+        tempo: 120,
+        sampleRate: rate,
+        positionSamples: 0,
+        unlock: () => ({ currentTime: 0 }),
+        playOrigin: () => ({ context: 0, beat: 0 }),
+        outputStamp: () => ({ contextTime: 0, performanceTime: 0 }),
+        clockCompensation: () => ({ outputLatency: 0, baseLatency: 0, calibrationSec: 0 }),
+        setRepeatWatch: () => undefined,
+        liveDrum: () => calls.push('drum'),
+        liveNoteOn: () => calls.push('note'),
+        liveNoteOff: () => calls.push('off'),
+        releaseMidi: () => calls.push('midi'),
+        releaseThrough: () => calls.push('release'),
+        playThrough: () => calls.push('through'),
+        playBuffer: () => calls.push('buffer'),
+      } as unknown as AudioEngine,
+      () => ({ trackId: 'keys', clipId: 'clip', drums: false }),
+      () => undefined,
+      () => false,
+      () => undefined,
+    )
+    performer.down(60, 0.8, 0, 1)
+    performer.up(1, 200)
+    expect(calls).toEqual(['through', 'release'])
   })
 
   it('records repeated hits from a pad, a key, and a MIDI pad on the same clock', async () => {

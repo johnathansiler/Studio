@@ -489,6 +489,12 @@
 }
 
 .mpc-pad.sel { outline: 1px solid rgba(255, 255, 255, 0.35); outline-offset: -3px; }
+.mpc-pad.sel.lit,
+.mpc-pad.sel:active,
+.mpc-pad.sel[aria-pressed='true'] {
+  outline: 2px solid #b6ffd0;
+  outline-offset: -5px;
+}
 .mpc-pad.muted span { opacity: 0.4; }
 
 .mpc-full {

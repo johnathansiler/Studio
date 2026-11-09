@@ -3907,6 +3907,15 @@ export class AudioEngine {
     this.oneShots = this.oneShots.filter((shot) => !(shot.pitch === pitch && shot.when <= now + 0.005))
   }
 
+  /**
+   * End the hardware note for a drum one-shot.
+   * The sample keeps ringing. liveNoteOff would also stop that buffer.
+   */
+  releaseMidi(pitch: number) {
+    if (!this.midiSink) return
+    this.midiSink(noteBytes(false, this.midiOutChannel, pitch, 0))
+  }
+
   liveNoteOff(pitch: number) {
     const chain = this.liveTrackId ? this.chains.get(this.liveTrackId) : undefined
     if (chain?.holds(pitch)) {
