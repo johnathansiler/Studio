@@ -254,6 +254,7 @@ export function makeProgram(partial: Partial<SamplerProgram> & Pick<SamplerProgr
     samples: partial.samples ?? [],
     gainDb: partial.gainDb ?? 0,
     voices: partial.voices ?? 32,
+    play: partial.play,
   }
 }
 

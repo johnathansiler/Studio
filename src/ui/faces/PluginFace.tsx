@@ -17,6 +17,7 @@ import {
   xToFreq,
   yToDb,
 } from './curves'
+import { controlChoices, controlLabel, controlText } from '../../audio/plugins/readout'
 import { TOGGLE_IDS, themeFor, type FaceFamily } from './themes'
 import '../kit/kit.css'
 
@@ -190,7 +191,7 @@ function Row({
           {toggles.map((param) => (
             <Toggle
               key={param.id}
-              label={param.name}
+              label={controlLabel(pluginId, param.id, param.name)}
               on={(values[param.id] ?? param.default) >= 0.5}
               onClick={() => onChange(param.id, (values[param.id] ?? param.default) >= 0.5 ? 0 : 1)}
             />
@@ -200,14 +201,16 @@ function Row({
       <div className={`kit-row size-${size}`}>
         {knobs.map((param) => {
           const value = values[param.id] ?? param.default
+          const choices = controlChoices(pluginId, param.id)
           const shared = {
-            label: param.name,
+            label: controlLabel(pluginId, param.id, param.name),
             min: param.min,
             max: param.max,
             value,
             unit: param.unit,
             fallback: param.default,
-            onChange: (next: number) => onChange(param.id, next),
+            format: (next: number) => controlText(pluginId, param.id, next, param.unit),
+            onChange: (next: number) => onChange(param.id, choices ? Math.round(next) : next),
           }
           return <Knob key={param.id} {...shared} />
         })}

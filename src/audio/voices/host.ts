@@ -194,7 +194,7 @@ function sign(plan: PadPlan) {
   const slots = plan.slots.map((slot) => [
     slot.pitch, slot.sampleId, slot.start, slot.end, slot.semis, slot.cents, slot.mode,
     slot.highpass, slot.lowpass, slot.choke, slot.reverse ? 1 : 0, slot.hold ? 1 : 0,
-    slot.swing, slot.level, slot.pan, slot.loop ? 1 : 0, slot.busId,
+    slot.swing, slot.level, slot.pan, slot.loop ? 1 : 0, slot.busId, slot.fadeIn,
     slot.vintage.bitDepth, slot.vintage.sampleRate, slot.vintage.wow, slot.vintage.crackle, slot.vintage.lowpass,
   ].join(':')).join('|')
   return `${samples}#${slots}`

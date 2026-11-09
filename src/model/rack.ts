@@ -154,7 +154,7 @@ export const DEVICE_PARAMS: Record<DeviceKind, ParamSpec[]> = {
     ...macroSpecs(),
   ],
   fm: [
-    spec('mode', 'Mode', 0, 1, 0),
+    spec('mode', 'Mod mix', 0, 1, 0),
     spec('ratio', 'Ratio', 0.5, 8, 2),
     spec('index', 'Index', 0, 6, 1.4),
     spec('attack', 'Attack', 1, 2000, 6, 'ms'),
@@ -289,7 +289,7 @@ export const DEVICE_PARAMS: Record<DeviceKind, ParamSpec[]> = {
   filter: [
     spec('cutoff', 'Cutoff', 40, 12000, 4000, 'Hz'),
     spec('res', 'Res', 0, 0.9, 0.1),
-    spec('mode', 'Mode', 0, 1, 0),
+    spec('mode', 'High pass', 0, 1, 0),
   ],
   mix: [spec('gain', 'Gain', 0, 1.5, 1)],
   split: [spec('gain', 'Gain', 0, 1.5, 1)],
@@ -306,7 +306,7 @@ export const DEVICE_PARAMS: Record<DeviceKind, ParamSpec[]> = {
   ],
   arp: [
     spec('rate', 'Rate', 0.125, 2, 0.25, 'beat'),
-    spec('mode', 'Mode', 0, 2, 0),
+    spec('mode', 'Direction', 0, 2, 0),
     spec('gate', 'Gate', 0.05, 1, 0.7),
     spec('octaves', 'Oct', 1, 3, 1),
   ],

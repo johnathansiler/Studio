@@ -255,6 +255,7 @@ function fm(ctx: ToneCtx) {
       tone = 0
       for (let i = 0; i < Math.min(ops, 4); i++) tone += (outs[i] || 0) * (i === 0 ? 1 : levels[i])
     }
+    if ((p.mode || 0) >= 0.5) tone = tone * 0.62 + (outs[1] || 0) * 0.55
     mix += tone * 0.2 * state.env[0] * voice.vel
   }
   return mix

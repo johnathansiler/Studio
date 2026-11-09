@@ -2,7 +2,7 @@
 
 use crate::biquad::{design_biquad, tick, Biquad, BiquadKind};
 use crate::resample::{Downsampler, Upsampler};
-use crate::util::{clamp, coeff, db_to_gain, gain_to_db, js_or, js_round, param, write_stereo};
+use crate::util::{coeff, db_to_gain, js_or, js_round, param, write_stereo};
 
 pub struct CleanLimiter {
     delay: [Vec<f32>; 2],
@@ -36,7 +36,8 @@ impl CleanLimiter {
             for k in 0..64 {
                 peak = peak.max((self.delay[0][k] as f64).abs()).max((self.delay[1][k] as f64).abs());
             }
-            let needed = (ceiling / peak.max(threshold).max(1e-8)).min(1.0);
+            let limit = ceiling.min(threshold);
+            let needed = if peak > limit { (limit / peak.max(1e-8)).min(1.0) } else { 1.0 };
             self.gain += (needed - self.gain) * if needed < self.gain { 1.0 } else { release };
             self.index += 1;
             write_stereo(left, right, i, out_l * self.gain, out_r * self.gain);
@@ -100,11 +101,20 @@ impl Brick {
         self.ready = false;
     }
     fn ensure(&mut self, sample_rate: f64, lookahead_ms: f64) {
-        if self.ready {
+        let look = js_round((lookahead_ms / 1000.0) * sample_rate * self.factor as f64).max(8.0) as usize;
+        let look = look.min(self.delay_l.len());
+        if self.ready && self.look == look {
             return;
         }
-        let look = js_round((lookahead_ms / 1000.0) * sample_rate * self.factor as f64).max(8.0) as usize;
-        self.look = look.min(self.delay_l.len());
+        if self.ready {
+            self.delay_l.fill(0.0);
+            self.delay_r.fill(0.0);
+            self.index = 0;
+            self.gain = 1.0;
+            self.peak = 1e-8;
+            self.since = 0;
+        }
+        self.look = look;
         self.ready = true;
     }
     fn latency(&self) -> f64 {
@@ -319,6 +329,9 @@ pub struct LimitBank {
     bass: [Biquad; 2],
     split: [Biquad; 2],
     bass_freq: f64,
+    dither_rng: u32,
+    dither_err_l: f64,
+    dither_err_r: f64,
     scratch_l: Vec<f32>,
     scratch_r: Vec<f32>,
     pub latency: u32,
@@ -344,6 +357,9 @@ impl LimitBank {
                 design_biquad(BiquadKind::Lowpass, sample_rate, 2000.0, 0.707, 0.0),
             ],
             bass_freq: 0.0,
+            dither_rng: 0x1234_5678,
+            dither_err_l: 0.0,
+            dither_err_r: 0.0,
             scratch_l: vec![0.0; 8192],
             scratch_r: vec![0.0; 8192],
             latency: 64,
@@ -362,6 +378,9 @@ impl LimitBank {
             filter.clear_state();
         }
         self.bass_freq = 0.0;
+        self.dither_rng = 0x1234_5678;
+        self.dither_err_l = 0.0;
+        self.dither_err_r = 0.0;
         self.latency = 64;
     }
 
@@ -370,7 +389,8 @@ impl LimitBank {
         let kind = js_round(param(values, 0, 0.0)) as i32;
         let wide = (param(values, 7, 1.0) - 1.0).abs() > 0.001
             || (param(values, 9, 1.0) - 1.0).abs() > 0.001
-            || (param(values, 10, 1.0) - 1.0).abs() > 0.001;
+            || (param(values, 10, 1.0) - 1.0).abs() > 0.001
+            || (param(values, 8, 120.0) - 120.0).abs() > 0.5;
         if wide {
             self.image(left, right, frames, values, sample_rate);
         }
@@ -383,7 +403,7 @@ impl LimitBank {
             self.clean.process(left, right, frames, values, sample_rate);
             self.latency = 64;
         }
-        let _ = (param(values, 11, 24.0), param(values, 12, 0.0));
+        self.dither(left, right, frames, values);
     }
 
     fn image(&mut self, left: &mut [f32], right: &mut [f32], frames: usize, values: &[f64], sample_rate: f64) {
@@ -441,10 +461,51 @@ impl LimitBank {
             right[i] = (right[i] as f64 * self.maxim_gain) as f32;
         }
         let ceiling = db_to_gain(param(values, 3, -1.0) - if offline { 0.25 } else { 0.6 });
-        let release = coeff(80.0, sample_rate * if offline { 4.0 } else { 2.0 });
+        let release_ms = js_or(param(values, 2, 80.0), 80.0);
+        let lookahead = js_or(param(values, 4, 5.0), 5.0);
+        let release = coeff(release_ms, sample_rate * if offline { 4.0 } else { 2.0 });
         if !offline {
-            self.maxim_brick.ensure(sample_rate, 5.0);
+            self.maxim_brick.ensure(sample_rate, lookahead);
             self.maxim_brick.process_inplace(left, right, frames, ceiling, release);
         }
+    }
+
+    fn dither(&mut self, left: &mut [f32], right: &mut [f32], frames: usize, values: &[f64]) {
+        let bits = js_round(param(values, 11, 24.0)).clamp(8.0, 24.0) as i32;
+        let shape = js_round(param(values, 12, 0.0)).clamp(0.0, 2.0) as i32;
+        if bits >= 23 && shape == 0 {
+            return;
+        }
+        let levels = (1i64 << (bits - 1)) as f64;
+        let lsb = 1.0 / levels;
+        for i in 0..frames {
+            let white_l = if shape == 0 {
+                (self.uniform() - 0.5) * lsb
+            } else {
+                (self.uniform() - self.uniform()) * lsb
+            };
+            let noise_l = if shape >= 2 { white_l - self.dither_err_l * 0.85 } else { white_l };
+            let dithered_l = left[i] as f64 + noise_l;
+            let q_l = (dithered_l * levels).round() / levels;
+            let q_l = q_l.clamp(-1.0, 1.0);
+            self.dither_err_l = q_l - dithered_l;
+            let white_r = if shape == 0 {
+                (self.uniform() - 0.5) * lsb
+            } else {
+                (self.uniform() - self.uniform()) * lsb
+            };
+            let noise_r = if shape >= 2 { white_r - self.dither_err_r * 0.85 } else { white_r };
+            let dithered_r = right[i] as f64 + noise_r;
+            let q_r = (dithered_r * levels).round() / levels;
+            let q_r = q_r.clamp(-1.0, 1.0);
+            self.dither_err_r = q_r - dithered_r;
+            left[i] = q_l as f32;
+            right[i] = q_r as f32;
+        }
+    }
+
+    fn uniform(&mut self) -> f64 {
+        self.dither_rng = self.dither_rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        self.dither_rng as f64 / 4_294_967_296.0
     }
 }

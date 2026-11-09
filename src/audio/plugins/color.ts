@@ -72,11 +72,12 @@ export function createDoubler(sampleRate: number): Processor {
         const tapL = read(lines[0], write, base + Math.sin(phase) * depth)
         const tapR = read(lines[1], write, base * 1.3 + Math.cos(phase) * depth)
         const mid = (left + right) * 0.5
-        const side = (left - right) * 0.5 * (1 + width)
-        const wideL = mid + side
-        const wideR = mid - side
-        if (output[0]) output[0][i] = sanitize(left * (1 - mix) + (wideL * 0.7 + tapR * 0.5) * mix)
-        if (output[1]) output[1][i] = sanitize(right * (1 - mix) + (wideR * 0.7 + tapL * 0.5) * mix)
+        const side = (left - right) * 0.5 * width
+        const spread = 0.15 + width * 0.85
+        const wetL = mid + side + (tapR - mid) * spread
+        const wetR = mid - side + (tapL - mid) * spread
+        if (output[0]) output[0][i] = sanitize(left * (1 - mix) + wetL * mix)
+        if (output[1]) output[1][i] = sanitize(right * (1 - mix) + wetR * mix)
         write = (write + 1) % length
       }
     },

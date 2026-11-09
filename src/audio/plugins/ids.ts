@@ -196,6 +196,7 @@ export function effectLatency(id: string, params: Record<string, number>, sample
     return 64
   }
   if (id === 'eq' && kind === 5 && (params.linear ?? 0) >= 0.5) return 256
+  if (id === 'eq' && kind === 6 && (params.phase ?? 1) >= 0.5) return 511
   return 0
 }
 

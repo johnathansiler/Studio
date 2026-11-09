@@ -689,7 +689,7 @@ function pedal(state: PedalState, left: number, right: number, id: number, a: nu
   const amount = clamp(a, 0, 1)
   const tone = clamp(b, 0, 1)
   if (id === 2) return gate(state, left, right, amount, tone, ctx.sampleRate)
-  if (id === 3) return compress(state, left, right, amount, ctx.sampleRate)
+  if (id === 3) return compress(state, left, right, amount, tone, ctx.sampleRate)
   if (id === 4 || id === 5 || id === 6 || id === 7 || id === 21) return dirt(state, id, left, right, amount, tone, ctx.sampleRate, ctx.factor)
   if (id === 8) return wah(state, left, right, amount, tone, ctx)
   if (id === 9) return eqPedal(state, left, right, amount, tone, ctx.sampleRate)
@@ -700,7 +700,7 @@ function pedal(state: PedalState, left: number, right: number, id: number, a: nu
   if (id === 17) return reverb(state, left, right, amount, tone)
   if (id === 18 || id === 19) return pitch(state, left, right, id === 18 ? 0.5 : 0.5 + tone, amount)
   if (id === 20) return loop(state, left, right, amount, ctx.loop)
-  if (id === 22) return sub(state, left, right, amount, ctx.sampleRate)
+  if (id === 22) return sub(state, left, right, amount, tone, ctx.sampleRate)
   if (id === 23) return envelope(state, left, right, amount, tone, ctx.sampleRate)
   return [left, right] as const
 }
@@ -730,9 +730,9 @@ function gate(state: PedalState, left: number, right: number, amount: number, re
   return [left * state.gain, right * state.gain] as const
 }
 
-function compress(state: PedalState, left: number, right: number, amount: number, sampleRate: number) {
+function compress(state: PedalState, left: number, right: number, amount: number, release: number, sampleRate: number) {
   const peak = Math.max(Math.abs(left), Math.abs(right))
-  const coeff = Math.exp(-1 / (sampleRate * 0.02))
+  const coeff = Math.exp(-1 / (sampleRate * (0.008 + clamp(release, 0, 1) * 0.12)))
   state.env = peak + coeff * (state.env - peak)
   const over = state.env / 0.12
   const reduce = over > 1 ? 1 / (1 + (over - 1) * amount * 3) : 1
@@ -893,11 +893,12 @@ function loop(state: PedalState, left: number, right: number, amount: number, mo
   return [left, right] as const
 }
 
-function sub(state: PedalState, left: number, right: number, amount: number, sampleRate: number) {
+function sub(state: PedalState, left: number, right: number, amount: number, tone: number, sampleRate: number) {
   const mono = left + right
   if (mono >= 0 && state.subHold < 0) state.sub = -state.sub
   state.subHold = mono
-  const coeff = Math.exp((-2 * Math.PI * 120) / sampleRate)
+  const hz = 40 + clamp(tone, 0, 1) * 160
+  const coeff = Math.exp((-2 * Math.PI * hz) / sampleRate)
   state.env = state.sub * Math.abs(mono) + coeff * (state.env - state.sub * Math.abs(mono))
   const mix = amount * 0.7
   return [left + state.env * mix, right + state.env * mix] as const

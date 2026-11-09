@@ -97,8 +97,14 @@ export class SamplerInstrument {
       voice.sustain = Math.max(0, Math.min(1, play.sustain))
       voice.release = Math.max(0.005, play.release)
       if ((play.tune ?? 0) !== previous) voice.tune *= ratio
-      if (play.loop === true) voice.looping = true
-      else if (play.loop === false) voice.looping = false
+      if (play.loop === true) {
+        voice.looping = true
+        if (!(voice.loopEnd > voice.loopStart + 1)) {
+          const frames = voice.audio?.channels[0]?.length || 0
+          voice.loopStart = 0
+          if (frames > 16) voice.loopEnd = frames
+        }
+      } else if (play.loop === false) voice.looping = false
     }
   }
 
@@ -388,9 +394,11 @@ export class SamplerInstrument {
       if (forced === true) {
         loop = true
         loopMode = 'loop'
-        if (!(loopEnd > loopStart)) {
+        if (!(loopEnd > loopStart + 1)) {
+          const frames = audio?.channels[0]?.length || ref.frameCount || 0
           loopStart = Math.max(0, zone.offset)
-          loopEnd = zone.end > loopStart + 16 ? zone.end : loopEnd
+          const stated = zone.end > loopStart + 16 ? zone.end : frames
+          if (stated > loopStart + 16) loopEnd = stated
         }
       } else if (forced === false) {
         loop = false

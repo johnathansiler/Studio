@@ -51,6 +51,7 @@ export function renderMpcAudio(opts: {
   busId?: string
   vintage?: VintageState
   chop?: ChopSetup
+  resident?: { pitch: number; samples: Float32Array; sampleRate: number }[]
 }): { left: Float32Array; right: Float32Array } {
   if (!hearsAudio(opts.output)) return { left: new Float32Array(0), right: new Float32Array(0) }
   const rate = Math.max(8000, opts.sampleRate)
@@ -81,6 +82,7 @@ export function renderMpcAudio(opts: {
     sampleRate: rate,
     tempo,
     pitches,
+    resident: opts.resident,
   })
   applyPlan(pool, plan)
   const padSlot = new Map(plan.slots.map((slot) => [slot.pitch, slot.slot]))
@@ -105,6 +107,48 @@ export function renderMpcAudio(opts: {
     pool.process(left.subarray(offset, offset + count), right.subarray(offset, offset + count))
   }
   return { left, right }
+}
+
+/** One pad, baked through the same pool the live voice uses. Trailing silence is trimmed. */
+export function renderPadVoice(opts: {
+  sampleRate: number
+  tempo: number
+  pad: PadVoice
+  buffers: Map<string, PadBuffer>
+  vintage?: VintageState
+  chop?: ChopSetup
+  velocity?: number
+  resident?: { pitch: number; samples: Float32Array; sampleRate: number }[]
+}): { left: Float32Array; right: Float32Array } {
+  const pad = { ...opts.pad, level: 1, pan: 0 }
+  const rendered = renderMpcAudio({
+    sampleRate: opts.sampleRate,
+    tempo: opts.tempo,
+    notes: [{ pitch: pad.pitch, startBeat: 0, durationBeats: 4, velocity: opts.velocity ?? 1 }],
+    pads: [pad],
+    buffers: opts.buffers,
+    output: 'audio',
+    vintage: opts.vintage,
+    chop: opts.chop,
+    resident: opts.resident,
+  })
+  return trimTail(rendered.left, rendered.right)
+}
+
+/** How much of a pad is added to a track send. Zero send or a disabled bus contributes nothing. */
+export function padSendGain(padSend: number, busGain: number, enabled = true): number {
+  if (!enabled) return 0
+  const pad = Number.isFinite(padSend) ? Math.min(1, Math.max(0, padSend)) : 0
+  const bus = Number.isFinite(busGain) ? Math.max(0, busGain) : 0
+  return pad * bus
+}
+
+function trimTail(left: Float32Array, right: Float32Array) {
+  let end = Math.min(left.length, right.length)
+  while (end > 8 && Math.abs(left[end - 1] || 0) < 1e-4 && Math.abs(right[end - 1] || 0) < 1e-4) end -= 1
+  end = Math.min(left.length, end + 8)
+  if (end === left.length && end === right.length) return { left, right }
+  return { left: left.slice(0, end), right: right.slice(0, end) }
 }
 
 function clamp(value: number, min: number, max: number) {
