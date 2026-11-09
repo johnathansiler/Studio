@@ -54,12 +54,33 @@ export interface SlotPlan {
   pan: number
   loop: boolean
   busId: string
+  fadeIn: number
   vintage: Required<VintageStage>
 }
 
 export interface PadPlan {
   samples: { id: number; key: string; samples: Float32Array; sampleRate: number }[]
   slots: SlotPlan[]
+}
+
+/**
+ * Bit depth and sample rate for the Vintage knobs.
+ * SP-1200's factory amounts (bits 0.85, rate 0.8) stay on the same steps the
+ * voice already used: about 13-bit, and a hold of two at 48 kHz. The top of
+ * each knob goes further, so the control is audible across its travel.
+ */
+export function vintageBitDepth(amount: number): number {
+  const bits = unit(amount)
+  if (bits <= 0.0001) return 0
+  if (bits <= 0.85) return Math.max(4, Math.round(16 - (bits / 0.85) * 3))
+  return Math.max(4, Math.round(13 - ((bits - 0.85) / 0.15) * 9))
+}
+
+export function vintageRateHz(amount: number): number {
+  const rate = unit(amount)
+  if (rate <= 0.0001) return 0
+  if (rate <= 0.8) return 24000
+  return Math.round(24000 - ((rate - 0.8) / 0.2) * (24000 - 4000))
 }
 
 export function vintageStage(scaled: ScaledVintage): Required<VintageStage> {
@@ -69,8 +90,8 @@ export function vintageStage(scaled: ScaledVintage): Required<VintageStage> {
   const wow = unit(scaled.wow)
   const crackle = unit(scaled.crackle)
   return {
-    bitDepth: bits <= 0.0001 ? 0 : Math.max(4, Math.round(16 - bits * 4)),
-    sampleRate: rate <= 0.0001 ? 0 : Math.round(48000 - rate * (48000 - 26040)),
+    bitDepth: vintageBitDepth(bits),
+    sampleRate: vintageRateHz(rate),
     wow,
     flutter: wow * 0.35,
     noise: crackle * 0.2,
@@ -129,6 +150,31 @@ export function resolveHighpass(pad: PadVoice, chop: ChopSetup | undefined) {
   return Math.min(1, chop.highpass + own)
 }
 
+/** Decay shortens the window. Loop repeats that window. Attack lengthens the fade-in. */
+export function playedWindow(
+  data: Float32Array,
+  region: { start: number; end: number; loop?: boolean },
+  decay: number,
+  attack: number,
+  sampleRate: number,
+) {
+  const window = regionSamples(data.length, region.start, region.end)
+  const span = Math.max(2, window.end - window.start)
+  const length = Math.max(2, Math.round(span * clamp(decay, 0.05, 1)))
+  const end = Math.min(data.length, window.start + length)
+  const fadeIn = attack > 0.001
+    ? Math.max(PAD_FADE, Math.round(clamp(attack, 0, 1) * 0.3 * Math.max(1, sampleRate)))
+    : PAD_FADE
+  if (!region.loop || end - window.start < 2) {
+    return { samples: data, key: '', start: window.start, end, fadeIn }
+  }
+  const slice = data.subarray(window.start, end)
+  const copies = Math.max(2, Math.min(8, Math.ceil((Math.max(1, sampleRate) * 1.5) / slice.length)))
+  const looped = new Float32Array(slice.length * copies)
+  for (let i = 0; i < copies; i++) looped.set(slice, i * slice.length)
+  return { samples: looped, key: `loop:${window.start}:${end}:${copies}`, start: 0, end: looped.length, fadeIn }
+}
+
 export function regionSamples(length: number, startFraction: number, endFraction: number) {
   const n = Math.max(0, length | 0)
   if (n < 2) return { start: 0, end: n }
@@ -180,10 +226,11 @@ export function planPads(input: {
     const data = asset?.samples ?? drum?.samples
     if (!data || data.length < 2) continue
     const key = asset ? asset.id : `resident:${pad.pitch}`
-    const sampleId = take(key, data, asset?.sampleRate || drum?.sampleRate || input.sampleRate)
-    if (!sampleId) continue
     const region = padRegion(pad)
-    const window = regionSamples(data.length, region.start, region.end)
+    const opened = playedWindow(data, region, pad.decay ?? 1, pad.attack ?? 0, input.sampleRate)
+    const sampleId = take(opened.key ? `${key}:${opened.key}` : key, opened.samples, asset?.sampleRate || drum?.sampleRate || input.sampleRate)
+    if (!sampleId) continue
+    const window = { start: opened.start, end: opened.end }
     const pitch = resolvePitch(pad, input.chop)
     const high = resolveHighpass(pad, input.chop)
     const hz = filterHz(high, pad.filter ?? 1)
@@ -209,6 +256,7 @@ export function planPads(input: {
       pan: pad.pan ?? 0,
       loop: region.loop,
       busId: pad.busId || '',
+      fadeIn: opened.fadeIn,
       vintage,
     })
   }
@@ -223,7 +271,7 @@ export function applySlots(pool: PoolLike, plan: PadPlan) {
   for (const slot of plan.slots) {
     const pad = pool.pad(slot.slot)
     pad.setRegion(slot.sampleId, slot.start, slot.end)
-    pad.setFade(PAD_FADE, PAD_FADE)
+    pad.setFade(slot.fadeIn || PAD_FADE, PAD_FADE)
     pad.setPitch(slot.semis, slot.cents, slot.mode)
     pad.setVintage(slot.vintage)
     pad.setFilter(slot.highpass, slot.lowpass)
@@ -253,4 +301,9 @@ export function hitVoice(slot: SlotPlan, color?: { tune?: number; filter?: numbe
 function unit(value: number) {
   if (!Number.isFinite(value)) return 0
   return Math.min(1, Math.max(0, value))
+}
+
+function clamp(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min
+  return Math.min(max, Math.max(min, value))
 }

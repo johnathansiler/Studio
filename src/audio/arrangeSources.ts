@@ -11,7 +11,7 @@ import { rackLanesFor } from '../model/automation'
 import { DRUM_PADS, residentDrums } from '../model/drums'
 import { ATTACK_SEC, builtinLevel, drumLevel } from './liveStage'
 import { prepareClipNotes } from '../model/midiTools'
-import { padRegion, normalizePadKit } from '../model/padMachine'
+import { normalizePadKit } from '../model/padMachine'
 import { renderQuantizedClip } from '../model/quantize'
 import { stepPatternOwner } from '../model/stepPlugin'
 import { patternPlayRange, renderPattern, type RenderedHit } from '../model/steps'
@@ -21,7 +21,7 @@ import type { AudioAsset, AudioClip, MidiNote, PluginInstance, Project, Track } 
 import { performancesOn, routeScaler, trackHasScaler } from '../instruments/scaler/model'
 import { stepNotes } from '../instruments/scaler/route'
 import { hitRoute } from '../instruments/mpc/model'
-import { preparePadPcm } from '../instruments/mpc/render'
+import { padSendGain, renderPadVoice } from '../instruments/mpc/render'
 import { matchBufferRate, renderPatchSpan } from '../instruments/patch/engine'
 import { renderNotes, type SampleBuffer } from './rack/dsp'
 import { renderSamplerSpan } from './plugins/sampler'
@@ -65,11 +65,13 @@ export async function renderArrangeInputs(
   await prepareLibrarySources(project, assets, origin, scheduleEnd, options)
   const buffers = new Map<string, Float32Array[]>()
   for (const track of project.tracks) {
+    buffers.set(track.id, [new Float32Array(length), new Float32Array(length)])
+  }
+  for (const track of project.tracks) {
     options.shouldCancel?.()
-    const out = [new Float32Array(length), new Float32Array(length)]
-    buffers.set(track.id, out)
+    const out = buffers.get(track.id)!
     mixAudioClips(out, project, track, assets, origin, length)
-    mixMidi(out, project, track, assets, origin, length, scheduleEnd, options.shouldCancel)
+    mixMidi(out, project, track, assets, origin, length, scheduleEnd, options.shouldCancel, buffers)
   }
   mixStepSequencers(buffers, project, assets, origin, length, scheduleEnd, options.shouldCancel)
   mixPatternClips(buffers, project, assets, origin, length, scheduleEnd, options.shouldCancel)
@@ -282,6 +284,7 @@ function mixMidi(
   length: number,
   scheduleEnd: number,
   shouldCancel?: () => void,
+  buffers?: Map<string, Float32Array[]>,
 ) {
   const groups = performancesOn(project, track)
   for (const group of groups) {
@@ -295,7 +298,7 @@ function mixMidi(
         notes.push(timed(note, span.start, span.duration))
       }
     }
-    if (notes.length) mixVoice(out, project, group.voice, notes, assets, origin, length, shouldCancel)
+    if (notes.length) mixVoice(out, project, group.voice, notes, assets, origin, length, shouldCancel, buffers)
   }
 }
 
@@ -322,6 +325,7 @@ function mixVoice(
   origin: number,
   length: number,
   shouldCancel?: () => void,
+  buffers?: Map<string, Float32Array[]>,
 ) {
   const rate = project.sampleRate
   const sampler = samplerInsert(track)
@@ -345,9 +349,10 @@ function mixVoice(
     return
   }
   if (track.instrument === 'pads') {
+    const sends = sendTargets(track, buffers)
     notes.forEach((note, index) => {
       if (index % 16 === 0) shouldCancel?.()
-      mixPad(out, project, track, note, assets, origin, length)
+      mixPad(out, project, track, note, notes, assets, origin, length, sends)
     })
     return
   }
@@ -459,9 +464,11 @@ function mixPad(
   project: Project,
   track: Track,
   note: TimedNote,
+  notes: TimedNote[],
   assets: Map<string, AudioAsset>,
   origin: number,
   length: number,
+  sends: { out: Float32Array[]; gain: number }[] = [],
 ) {
   const kit = normalizePadKit(track.padKit)
   const pads = kit.banks.flat()
@@ -470,36 +477,36 @@ function mixPad(
   const route = hitRoute(kit, pad ?? { muted: false })
   if (!route.audio) return
   const rate = project.sampleRate
-  const layer = pad?.layers.find((item) => item.bufferId) ?? pad?.layers[0]
-  let pcm: Float32Array | null = null
-  let sourceRate = rate
-  if (layer?.bufferId) {
-    const asset = assets.get(layer.bufferId)
-    const channel = asset?.channels[0]
-    if (asset && channel?.length) {
-      pcm = channel
-      sourceRate = asset.sampleRate
-    }
-  }
-  const region = padRegion(pad)
-  const prepared = pcm?.length ? preparePadPcm(pcm, region) : null
-  let samples = prepared?.length ? (sourceRate === rate ? prepared : linearResample(prepared, sourceRate, rate)) : null
-  if (!samples?.length) {
-    const drums = residentDrums(rate)
-    const index = DRUM_PADS.findIndex((item) => item.pitch === Math.round(note.pitch))
-    samples = index >= 0 ? drums[index].samples : null
-  }
-  if (!samples?.length) return
-  const tune = (note.tune || pad?.tune || 0) + (layer?.tune ?? 0)
-  const playback = 2 ** (tune / 12)
-  const decay = Math.max(0.05, Math.min(1, pad?.decay ?? 1))
-  const dur = Math.max(0.04, (samples.length / rate) * decay)
+  const voiced = pad
+    ? { ...pad, tune: note.tune || pad.tune, filter: note.filter ?? pad.filter }
+    : undefined
+  const baked = voiced
+    ? renderPadVoice({
+      sampleRate: rate,
+      tempo: project.tempo || 120,
+      pad: voiced,
+      buffers: padBuffers(assets),
+      vintage: kit.vintage,
+      chop: kit.chop,
+      velocity: 1,
+      resident: residentDrums(rate).map((drum) => ({ pitch: drum.pitch, samples: drum.samples, sampleRate: rate })),
+    })
+    : null
+  const samples = baked?.left.length ? [baked.left, baked.right] : null
+  if (!samples) return
+  const dur = Math.max(0.04, samples[0].length / rate)
   const peak = Math.max(0.0002, Math.min(1, note.velocity))
   const level = pad?.muted ? 0 : (pad?.level ?? 1)
   const attack = Math.min(0.003, dur * 0.25)
   const linear = !(dur > attack + 0.008)
-  placeSample(out, [samples], Math.round(note.start), origin, length, playback, (t) => {
+  const choke = chokeSeconds(notes, pads, note, rate)
+  const gainAt = (t: number) => {
     if (t < 0 || t >= dur + 0.01) return 0
+    if (choke != null && t >= choke) {
+      const left = 0.008 - (t - choke)
+      if (left <= 0) return 0
+      return peak * (left / 0.008) * level
+    }
     let gain = peak
     if (linear) {
       gain = t < dur * 0.4
@@ -508,7 +515,54 @@ function mixPad(
     } else if (t < attack) gain = expSeg(t, 0, attack, FLOOR, peak)
     else gain = expSeg(t, attack, dur, peak, FLOOR)
     return gain * level
-  }, note.pan || pad?.pan || 0, rate, region.loop)
+  }
+  placeSample(out, samples, Math.round(note.start), origin, length, 1, gainAt, note.pan || pad?.pan || 0, rate, false)
+  const send = pad?.send ?? 0
+  if (send <= 0.0001 || !sends.length) return
+  for (const dest of sends) {
+    const amount = padSendGain(send, dest.gain)
+    if (amount <= 0.0001) continue
+    placeSample(dest.out, samples, Math.round(note.start), origin, length, 1, (t) => gainAt(t) * amount, note.pan || pad?.pan || 0, rate, false)
+  }
+}
+
+function padBuffers(assets: Map<string, AudioAsset>) {
+  const buffers = new Map<string, { sampleRate: number; samples: Float32Array }>()
+  for (const [id, asset] of assets) {
+    const channel = asset.channels[0]
+    if (channel?.length) buffers.set(id, { sampleRate: asset.sampleRate, samples: channel })
+  }
+  return buffers
+}
+
+function sendTargets(track: Track, buffers?: Map<string, Float32Array[]>) {
+  if (!buffers) return []
+  const out: { out: Float32Array[]; gain: number }[] = []
+  for (const send of track.sends ?? []) {
+    if (!send.enabled) continue
+    const dest = buffers.get(send.busId)
+    if (!dest) continue
+    out.push({ out: dest, gain: send.gain })
+  }
+  return out
+}
+
+function chokeSeconds(
+  notes: TimedNote[],
+  pads: { pitch: number; choke: number }[],
+  note: TimedNote,
+  rate: number,
+) {
+  const mine = pads.find((pad) => pad.pitch === note.pitch)
+  if (!mine?.choke) return null
+  let soon = Infinity
+  for (const other of notes) {
+    if (other.start <= note.start) continue
+    const pad = pads.find((item) => item.pitch === other.pitch)
+    if (pad?.choke === mine.choke && other.start < soon) soon = other.start
+  }
+  if (!Number.isFinite(soon)) return null
+  return (soon - note.start) / rate
 }
 
 function mixBuiltin(out: Float32Array[], note: TimedNote, rate: number, origin: number, length: number) {

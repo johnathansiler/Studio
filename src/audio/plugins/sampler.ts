@@ -276,7 +276,7 @@ export function createSampler(sampleRate: number): SamplerProcessor {
           const piece = voice.buffer.subarray(loopAt, loopStop)
           const rendered = renderStretch([piece], sampleRate, {
             ratio: beat / piece.length,
-            semitones: 0,
+            semitones: params.pitch ?? 0,
             mode: 'tonal',
             quality: ctx.offline ? 'hq' : 'preview',
           })
