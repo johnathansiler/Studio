@@ -613,3 +613,48 @@
   min-height: 40px;
   max-height: 40px;
 }
+
+/* Track header piano control. "Keys" stays whole inside a 40px tray button. */
+.shell .pl-head .onscreen-piano-slot,
+.shell.phone:not(.land) .arrange .pl-name-row .onscreen-piano-slot {
+  position: static;
+  top: auto;
+  right: auto;
+  left: auto;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: max-content;
+  max-width: none;
+  height: auto;
+  min-height: 40px;
+  overflow: visible;
+}
+.shell .pl-head .onscreen-piano,
+.shell.phone .pl-head .onscreen-piano,
+.shell.phone:not(.land) .arrange .pl-head .onscreen-piano,
+.shell.fold .pl-head .onscreen-piano {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: max(40px, max-content);
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  padding: 0 12px;
+  overflow: visible;
+  white-space: nowrap;
+  text-overflow: clip;
+}
+.shell:not(.phone) .arrange .pl-head:has(.onscreen-piano) {
+  align-content: flex-start;
+  align-items: center;
+  height: 100%;
+  min-height: 0;
+  overflow: visible;
+}
+.shell:not(.phone) .arrange .head:has(.onscreen-piano) {
+  height: var(--lane-h);
+  min-height: var(--lane-h);
+  max-height: var(--lane-h);
+  overflow: visible;
+}
