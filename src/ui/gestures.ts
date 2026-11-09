@@ -107,9 +107,9 @@ export interface GestureElement {
 }
 
 /** Upward or rightward movement raises the value. Whole numbers catch the finger unless `fine`. */
-export function dragValue(start: number, delta: number, min: number, max: number, fine: boolean, travel?: number) {
+export function dragValue(start: number, delta: number, min: number, max: number, fine: boolean, travel?: number, release = false) {
   const pixels = travel && travel > 0 ? travel : (fine ? FINE_PX : DRAG_PX)
-  return dragNumeric({ origin: start, deltaPx: delta, min, max, fine, spanPx: pixels })
+  return dragNumeric({ origin: start, deltaPx: delta, min, max, fine, spanPx: pixels, release })
 }
 
 function travelFor(spec: ControlGesture, el: GestureElement, axis: 'x' | 'y', fine: boolean) {
@@ -262,6 +262,7 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
     cancelFine()
     cancelFine = () => undefined
     const moved = drag.moved || Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > TAP_PX
+    const fine = !!(drag.fine || drag.fineLatch)
     const kind = taps.end(now(), moved)
     const spec = specOf()
     drag = null
@@ -275,6 +276,13 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
         swallowUntil = now() + 120
         spec.onCommit?.()
         return
+      }
+    }
+    if (moved && kind === 'drag' && spec.axis !== 'pad' && !fine) {
+      const next = dragValue(lastValue, 0, spec.min, spec.max, false, undefined, true)
+      if (next !== lastValue) {
+        emit(event, next, event.clientX, event.clientY, false)
+        markIntegerLand(el as { classList?: DOMTokenList }, lastValue, next)
       }
     }
     clearReadoutSoon(false)
@@ -296,7 +304,7 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
     const current = spec.getValue()
     const deltaPx = ((event.deltaY ?? 0) < 0 ? 1 : -1) * (fine ? 4 : 10)
     spec.onStart?.()
-    const next = dragValue(current, deltaPx, spec.min, spec.max, fine)
+    const next = dragValue(current, deltaPx, spec.min, spec.max, fine, undefined, !fine)
     emit(event, next, event.clientX, event.clientY, fine)
     markIntegerLand(el as { classList?: DOMTokenList }, current, next)
     spec.onReadout?.(null)
@@ -436,6 +444,7 @@ export function installControlGuards(doc: Document) {
     pointers.delete(event.pointerId)
     if (!drag || event.pointerId !== drag.id) return
     const range = drag.el
+    const fine = event.shiftKey || drag.fineLatch || pointers.size > 1
     cancelFine()
     cancelFine = () => undefined
     const moved = cancel || drag.moved || Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > TAP_PX
@@ -448,6 +457,14 @@ export function installControlGuards(doc: Document) {
         hold(event.clientX, event.clientY, range.value)
         swallow = { until: performance.now() + 120, el: range }
         return
+      }
+    }
+    if (!cancel && moved && kind === 'drag' && !fine) {
+      const before = Number(range.value)
+      const next = dragValue(before, 0, Number(range.min), Number(range.max), false, undefined, true)
+      if (next !== before) {
+        writeRange(range, next)
+        markIntegerLand(range, before, Number(range.value))
       }
     }
     hide()
@@ -479,7 +496,7 @@ export function installControlGuards(doc: Document) {
     const current = Number(el.value)
     const deltaPx = (event.deltaY < 0 ? 1 : -1) * (fine ? 4 : 10)
     const before = Number.isFinite(current) ? current : 0
-    const next = dragValue(before, deltaPx, Number.isFinite(min) ? min : Number.NEGATIVE_INFINITY, Number.isFinite(max) ? max : Number.POSITIVE_INFINITY, fine)
+    const next = dragValue(before, deltaPx, Number.isFinite(min) ? min : Number.NEGATIVE_INFINITY, Number.isFinite(max) ? max : Number.POSITIVE_INFINITY, fine, undefined, !fine)
     if (range) writeRange(range, next)
     else writeNumber(el, next)
     markIntegerLand(el, before, Number(el.value))

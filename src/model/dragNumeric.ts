@@ -2,8 +2,11 @@
 
 export const INTEGER_PX = 10
 export const FINE_INTEGER_PX = 40
-/** How close a value must be before it sticks on the nearest integer. */
-export const DETENT_RADIUS = 0.3
+/**
+ * How close a value must be before it sticks on the nearest integer.
+ * Wide enough that a value like 122.4 cannot sit between whole numbers.
+ */
+export const DETENT_RADIUS = 0.45
 export const LONG_PRESS_MS = 450
 
 export function applyIntegerDetent(value: number, radius = DETENT_RADIUS) {
@@ -20,6 +23,12 @@ export function pixelsPerUnit(span: number, spanPx: number | undefined, fine: bo
   return Math.max(spanPx / span, floor)
 }
 
+/** Nearest whole number when the finger lifts without Shift or a long-press. */
+export function releaseInteger(value: number, fine: boolean) {
+  if (fine || !Number.isFinite(value)) return value
+  return Math.round(value)
+}
+
 export function dragNumeric(input: {
   origin: number
   deltaPx: number
@@ -28,6 +37,8 @@ export function dragNumeric(input: {
   fine?: boolean
   /** Pixels that cover max-min on this control. Omit for a pure 10px-per-integer drag. */
   spanPx?: number
+  /** Finger lifted. Without fine control, the committed value is a whole number. */
+  release?: boolean
 }) {
   const fine = !!input.fine
   const min = input.min ?? Number.NEGATIVE_INFINITY
@@ -35,7 +46,8 @@ export function dragNumeric(input: {
   const span = Number.isFinite(max) && Number.isFinite(min) ? max - min : 1
   const px = pixelsPerUnit(span, input.spanPx, fine)
   const raw = input.origin + input.deltaPx / (px || 1)
-  const next = fine ? raw : applyIntegerDetent(raw)
+  let next = fine ? raw : applyIntegerDetent(raw)
+  if (input.release) next = releaseInteger(next, fine)
   if (!Number.isFinite(next)) return Number.isFinite(input.origin) ? input.origin : 0
   return Math.min(max, Math.max(min, next))
 }
