@@ -668,8 +668,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .add-choice small { display: block; color: var(--muted); font-size: 13px; }
 .step-sequencer { display: flex; flex-direction: column; height: 100%; min-height: 0; background: #101614; }
 .step-sequencer-bar {
-  display: flex; align-items: center; gap: 8px; position: relative;
-  height: 40px; min-height: 40px; max-height: 40px; padding: 0 84px 0 8px;
+  display: flex; align-items: center; gap: 8px; position: relative; z-index: 8;
+  height: 44px; min-height: 44px; max-height: 44px; padding: 0 96px 0 8px;
   border-bottom: 1px solid var(--line); flex: 0 0 auto;
 }
 .step-sequencer-bar h2 { margin: 0; flex: 0 1 auto; min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
