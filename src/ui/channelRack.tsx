@@ -31,7 +31,8 @@ import type { SoundEntry } from '../sounds/types'
 import { selectBeats } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { BEAT_BAR, BEAT_ROW, BEAT_SHEET, copyOf, described } from './chrome'
-import { useFormFactor, useLandscape } from './form'
+import { drumRole } from '../model/smartDrums'
+import { useFormFactor } from './form'
 import { TipButton } from './Hint'
 import { LoopRegion } from './LoopRegion'
 import { DrumRoll } from './DrumRoll'
@@ -77,6 +78,18 @@ function usePlaySample(engine: RackEngine) {
     return engine.subscribe(read)
   }, [engine])
   return live ?? engine.positionSamples
+}
+
+function roleHint(channel: { name: string; kind: string }) {
+  const role = drumRole(channel)
+  if (role === 'melodic') return 'Melodic phrase. Smart Pattern writes pitches on this row.'
+  if (role === 'other') return 'Unknown sound. Smart Pattern uses a plain downbeat, not a drum groove.'
+  if (role === 'kick') return 'Kick. Smart Pattern keeps the downbeat.'
+  if (role === 'snare' || role === 'clap' || role === 'rim') return 'Backbeat. Smart Pattern puts the hit on 2 and 4.'
+  if (role === 'hat') return 'Closed hat. Smart Pattern writes a hat line.'
+  if (role === 'openhat') return 'Open hat. Smart Pattern leaves room and chokes the closed hat.'
+  if (role === 'cymbal') return 'Cymbal. Smart Pattern marks the bar.'
+  return 'Percussion. Smart Pattern adds a few hits.'
 }
 
 function graphBounds(mode: GraphMode) {
@@ -174,7 +187,7 @@ function StepButtons({
   onDone: () => void
   onUnlock: () => void
 }) {
-  const painting = useRef<{ on: boolean; touch: boolean; x: number; y: number; index: number } | null>(null)
+  const painting = useRef<{ on: boolean; touch: boolean; x: number; y: number; index: number; scrollX: number; scrollY: number } | null>(null)
   const paintAt = (event: ReactPointerEvent<HTMLDivElement>, force: boolean) => {
     const hit = document.elementFromPoint(event.clientX, event.clientY)
     const step = hit?.closest('.rack-step') as HTMLElement | null
@@ -197,7 +210,16 @@ function StepButtons({
         const index = Number(step.dataset.index)
         const touch = event.pointerType === 'touch'
         const on = !channel.cells[index]?.on
-        painting.current = { on, touch, x: event.clientX, y: event.clientY, index }
+        const scroller = event.currentTarget.closest('.rack-scroll') as HTMLElement | null
+        painting.current = {
+          on,
+          touch,
+          x: event.clientX,
+          y: event.clientY,
+          index,
+          scrollX: scroller?.scrollLeft ?? 0,
+          scrollY: scroller?.scrollTop ?? 0,
+        }
         if (!touch) {
           event.preventDefault()
           onPaint(index, on, true)
@@ -211,7 +233,12 @@ function StepButtons({
       onPointerUp={(event) => {
         const gesture = painting.current
         painting.current = null
-        if (gesture?.touch && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) < 12) onPaint(gesture.index, gesture.on, true)
+        if (gesture?.touch) {
+          const scroller = event.currentTarget.closest('.rack-scroll') as HTMLElement | null
+          const scrolled = !!scroller && (Math.abs(scroller.scrollLeft - gesture.scrollX) > 2 || Math.abs(scroller.scrollTop - gesture.scrollY) > 2)
+          const moved = Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) >= 10
+          if (!scrolled && !moved) onPaint(gesture.index, gesture.on, true)
+        }
         onDone()
       }}
       onPointerCancel={() => {
@@ -242,7 +269,6 @@ function StepButtons({
                 type="button"
                 data-index={index}
                 className={className}
-                style={on ? { background: channel.color } : undefined}
                 aria-label={`${channel.name} step ${index + 1}. ${action}`}
                 aria-pressed={on}
                 aria-selected={pickedStep}
@@ -357,8 +383,6 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
   const inflight = useRef(new Set<string>())
   const scrollRef = useRef<HTMLDivElement>(null)
   const form = useFormFactor()
-  const land = useLandscape()
-  const [rowPage, setRowPage] = useState(0)
   const phone = form === 'phone'
   const short = form !== 'desk'
   const sampleKey = pattern?.channels.map((row) => `${row.id}:${row.sampleId ?? ''}`).join('|') ?? ''
@@ -537,7 +561,6 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
           </select>
           <small>This beat. Song plays Arrange.</small>
         </label>
-        <div hidden={phone && page !== 'mix'}>
         <div className="rack-lengths" role="group" aria-label={`${bar('steps').label}. ${bar('steps').hint}`}>
           <span className="rack-lengths-label">Steps</span>
           {([16, 32, 64] as const).map((length) => (
@@ -551,16 +574,23 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
             />
           ))}
         </div>
-        {!phone && swing}
+        <button
+          type="button"
+          className="rack-smart"
+          data-smart-pattern=""
+          title="Smart Pattern. Each loaded sound gets a part that fits its role. Drums follow kick, snare, hat, and the rest. Piano, bass, and other melodic sounds get a phrase. An unknown sound gets a plain downbeat. A selected row changes only that row. One undo undoes one press."
+          aria-label="Smart Pattern. Each loaded sound gets a part that fits its role. A selected row changes only that row."
+          onClick={() => store.smartRandomDrums()}
+        >
+          Smart Pattern
+        </button>
         <TipButton label="Graph" hint="Show the step graph for the selected channel. Drag a bar to change velocity, pan, pitch, or gate." pressed={graph} onClick={() => setGraph((open) => !open)} />
         <TipButton label="Roll" hint="Show this pattern as drum lanes. The notes match the step grid." pressed={store.rackRoll} onClick={() => store.toggleRackRoll()} />
-        <button type="button" className="rack-random" title="Smart random. A selected sound changes only that row. Nothing selected rebuilds the whole kit." onClick={() => store.smartRandomDrums()}>
-          <strong>Random</strong>
-          <small>Smart random</small>
-        </button>
+        <TipButton label={bar('edit').label} hint={bar('edit').hint} pressed={editOpen} onClick={() => setEditOpen((open) => !open)} />
+        <div hidden={phone && page !== 'mix'}>
+        {!phone && swing}
         <SnapControl store={store} />
         <PatternSend store={store} beat={Math.max(0, beat)} phone={short} />
-        <TipButton label={bar('edit').label} hint={bar('edit').hint} pressed={editOpen} onClick={() => setEditOpen((open) => !open)} />
         <span className="rack-tool" role="status" aria-live="polite" title={toolHint}>{toolName}</span>
         <span className={`rack-loop ${mode === 'pattern' || project.loopEnabled ? 'on' : ''}`} data-loop={project.loopEnabled ? 'on' : 'off'} data-mode={mode} title={mode === 'pattern' ? 'Pattern mode loops this beat. Song mode uses the arrangement loop.' : 'The song loop. It is the same region as Arrange, and the playhead wraps inside it.'}>
           {mode === 'pattern' ? 'Pattern' : project.loopEnabled ? 'Loop on' : 'Loop off'}
@@ -668,17 +698,9 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
           </label>
         )}
       </div>
-      {phone && land && pattern.channels.length > 3 && (
-        <label className="plugin-page-menu">
-          <span>Rows</span>
-          <select aria-label="Step rows" value={rowPage} onChange={(event) => setRowPage(Number(event.target.value))}>
-            <option value={0}>{pattern.channels[0]?.name ?? 'First'} to {pattern.channels[Math.min(2, pattern.channels.length - 1)]?.name ?? 'Third'}</option>
-            <option value={1}>{pattern.channels[3]?.name ?? 'Next'} to {pattern.channels[pattern.channels.length - 1]?.name ?? 'Last'}</option>
-          </select>
-        </label>
-      )}
       <div
         className="rack-scroll"
+        data-rack-scroll=""
         ref={scrollRef}
         onPointerDown={(event) => {
           engine.unlock?.()
@@ -690,8 +712,7 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
             return
           }
           const additive = event.shiftKey || event.metaKey || event.ctrlKey
-          const touch = event.pointerType === 'touch'
-          if (!step || (!additive && !touch)) return
+          if (!step || !additive) return
           const originX = event.clientX
           const originY = event.clientY
           let moved = false
@@ -768,7 +789,7 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
             ))}
           </div>
         </div>
-        {(phone && land ? pattern.channels.slice(rowPage * 3, rowPage * 3 + 3) : pattern.channels).map((channel) => {
+        {pattern.channels.map((channel) => {
           const cells = store.quantizePreview?.channels.find((row) => row.id === channel.id)?.cells ?? channel.cells
           const volume = rowCopy('volume')
           const pan = rowCopy('pan')
@@ -818,7 +839,7 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
                   type="button"
                   className={`rack-name${rowOn ? ' on' : ''}`}
                   style={{ color: channel.color }}
-                  title={`Play ${channel.name}. Select this channel. Fills and the graph follow it.`}
+                  title={`Play ${channel.name}. ${roleHint(channel)} Select this channel. Fills and the graph follow it.`}
                   aria-label={`${channel.name}. Play this pad and select this channel.`}
                   aria-pressed={rowOn}
                   onPointerDown={(event) => {
