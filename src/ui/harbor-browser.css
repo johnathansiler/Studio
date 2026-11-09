@@ -1,0 +1,86 @@
+.harbor-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.harbor-list {
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.harbor-family {
+  margin: 10px 2px 0;
+  color: var(--muted, #8d9a90);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.harbor-browser .sound-row,
+.harbor-browser .sound-copy,
+.harbor-browser .sound-add,
+.harbor-browser .sound-filter,
+.harbor-presets .sound-filter,
+.harbor-presets .sound-add,
+.harbor-presets input,
+.harbor-menu .filter-choice {
+  min-height: 40px;
+  min-width: 40px;
+}
+
+.harbor-presets {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.harbor-presets input {
+  flex: 1 1 80px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2, #101814);
+  color: var(--text);
+  padding: 0 8px;
+}
+
+.harbor-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.harbor-progress progress {
+  flex: 1 1 auto;
+  height: 8px;
+  min-width: 40px;
+}
+
+.harbor-browser .sound-filters {
+  flex-wrap: wrap;
+}
+
+.anchored-menu.harbor-menu {
+  z-index: calc(var(--view-tabs-z, 480) - 20);
+}
+
+@media (max-width: 420px) {
+  .harbor-browser .sound-copy strong,
+  .harbor-browser .sound-meta {
+    max-width: 100%;
+  }
+}

@@ -5,7 +5,7 @@
  */
 export function licenseAllowed(license: string, attributionRequired?: boolean) {
   if (attributionRequired === true) return false
-  const text = license.trim().toLowerCase().replace(/[_]+/g, ' ').replace(/\s+/g, ' ')
+  const text = license.trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ')
   if (!text) return false
   if (text === 'cc0' || text.startsWith('cc0 ') || text.startsWith('cc0-') || text.startsWith('cc-0') || text.startsWith('cc zero') || text.startsWith('creative commons zero')) return true
   if (text === 'public domain' || text.startsWith('public domain')) return true

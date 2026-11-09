@@ -99,6 +99,7 @@ export function PianoRoll({
   chordsOpen = false,
   actionsRef,
   leading,
+  voiceSurface = 'roll',
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -112,6 +113,8 @@ export function PianoRoll({
   actionsRef?: { current: PianoActions | null }
   /** Mode buttons that share this one toolbar row. */
   leading?: ReactNode
+  /** Full roll, or the clip roll opened from a MIDI clip. */
+  voiceSurface?: 'roll' | 'clip'
 }) {
   const piano = selectPiano(store)
   const track = piano.track
@@ -343,7 +346,7 @@ export function PianoRoll({
       const level = Math.max(0.05, Math.min(1, velocity))
       engine.unlock()
       void engine.resume()
-      engine.playThrough(track.id, tone.midi, level, tone.cents)
+      engine.playThrough(track.id, tone.midi, level, tone.cents, false, voiceSurface)
       fingers.current.set(pointerId, { pitch: tone.midi, fine: tone.cents, eventMs: event.timeStamp, velocity: level })
       return
     }
@@ -351,7 +354,7 @@ export function PianoRoll({
     fingers.current.delete(pointerId)
     if (!held) return
     const still = [...fingers.current.values()].some((item) => item.pitch === held.pitch)
-    if (!still) engine.releaseThrough(track.id, held.pitch)
+    if (!still) engine.releaseThrough(track.id, held.pitch, voiceSurface)
     const playing = engine.status === 'playing' || engine.status === 'recording'
     if (!keyCommitsNote(store.midiEditor().stepInput)) return
     const start = playing ? performanceBeat(store, engine, held.eventMs) : timelineBeat(store, engine)
@@ -1040,7 +1043,7 @@ export function PianoRoll({
           </div>
           <div className="chord-pads">
             {pads.map((pad, index) => (
-              <button key={`${pad.label}-${index}`} type="button" onClick={() => playPadNotes(store, engine, track.id, clip.id, pad.pitches)}>{pad.label}</button>
+              <button key={`${pad.label}-${index}`} type="button" onClick={() => playPadNotes(store, engine, track.id, clip.id, pad.pitches, voiceSurface)}>{pad.label}</button>
             ))}
           </div>
           <div className="scale-keys">
@@ -1089,7 +1092,7 @@ export function PianoRoll({
   )
 }
 
-function playPadNotes(store: ProjectStore, engine: AudioEngine, trackId: string, clipId: string, pitches: number[]) {
+function playPadNotes(store: ProjectStore, engine: AudioEngine, trackId: string, clipId: string, pitches: number[], surface: 'roll' | 'clip' = 'roll') {
   engine.unlock()
   const current = selectScale(store)
   const voiced = voiceChord(pitches, {
@@ -1100,7 +1103,7 @@ function playPadNotes(store: ProjectStore, engine: AudioEngine, trackId: string,
     voiceLead: current.voiceLead,
     previous: current.lastVoicing,
   })
-  engine.previewPitches(voiced)
+  engine.previewPitches(voiced, trackId, surface)
   store.insertPerformance(trackId, clipId, timelineBeat(store, engine), pitches)
 }
 

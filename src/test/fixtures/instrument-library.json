@@ -1,0 +1,1315 @@
+{
+  "version": 1,
+  "dataset": "cueharbor/instrument-library",
+  "base": "https://huggingface.co/datasets/cueharbor/instrument-library/resolve/main",
+  "created": "2026-11-09",
+  "policy": "CC0-or-public-domain-only",
+  "instruments": [
+    {
+      "id": "osiris-piano",
+      "name": "Osiris Piano",
+      "license": "CC0-1.0",
+      "path": "instruments/osiris-piano/Programs/02-warm.sfz",
+      "bytes": 483175513,
+      "description": "Versilian+Karoryfer quiet piano; FLAC samples; Reddit/WATM lead via Karoryfer free list",
+      "category": "keys",
+      "tags": [
+        "piano",
+        "quiet",
+        "soft",
+        "keys",
+        "acoustic"
+      ],
+      "velocityLayers": 2,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        48000
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 52,
+      "sampleCount": 1242,
+      "formats": {
+        "flac": 1242
+      },
+      "source": "https://github.com/sfzinstruments/Osiris_Piano",
+      "stagedPath": "instruments/osiris-piano/"
+    },
+    {
+      "id": "steinway-grand-b",
+      "name": "Steinway Grand B",
+      "license": "CC0-1.0",
+      "path": "instruments/steinway-grand-b/",
+      "bytes": 1339722744,
+      "description": "VCSL Steinway B; not in starter (starter has Kawai grand)",
+      "category": "keys",
+      "tags": [
+        "piano",
+        "grand",
+        "steinway",
+        "keys",
+        "acoustic"
+      ],
+      "velocityLayers": 4,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        24
+      ],
+      "zones": 42,
+      "sampleCount": 351,
+      "formats": {
+        "wav": 351
+      },
+      "source": "https://github.com/sgossner/VCSL",
+      "stagedPath": "instruments/steinway-grand-b/"
+    },
+    {
+      "id": "yamaha-upright",
+      "name": "Yamaha Upright Piano",
+      "license": "CC0-1.0",
+      "path": "instruments/yamaha-upright/",
+      "bytes": 248069300,
+      "description": "VCSL Yamaha upright; starter has Knight upright",
+      "category": "keys",
+      "tags": [
+        "piano",
+        "upright",
+        "yamaha",
+        "keys",
+        "acoustic"
+      ],
+      "velocityLayers": 3,
+      "roundRobins": 3,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        24
+      ],
+      "zones": 13,
+      "sampleCount": 142,
+      "formats": {
+        "wav": 142
+      },
+      "source": "https://github.com/sgossner/VCSL",
+      "stagedPath": "instruments/yamaha-upright/"
+    },
+    {
+      "id": "pipe-organ",
+      "name": "Pipe Organ",
+      "license": "CC0-1.0",
+      "path": "instruments/pipe-organ/",
+      "bytes": 145076226,
+      "description": "VCSL pipe organ",
+      "category": "keys",
+      "tags": [
+        "organ",
+        "pipe",
+        "keys",
+        "church"
+      ],
+      "velocityLayers": 1,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 21,
+      "sampleCount": 65,
+      "formats": {
+        "wav": 65
+      },
+      "source": "https://github.com/sgossner/VCSL",
+      "stagedPath": "instruments/pipe-organ/"
+    },
+    {
+      "id": "renaissance-organ",
+      "name": "Renaissance Organ",
+      "license": "CC0-1.0",
+      "path": "instruments/renaissance-organ/",
+      "bytes": 145481862,
+      "description": "VCSL renaissance organ",
+      "category": "keys",
+      "tags": [
+        "organ",
+        "renaissance",
+        "keys"
+      ],
+      "velocityLayers": 1,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        24
+      ],
+      "zones": 27,
+      "sampleCount": 81,
+      "formats": {
+        "wav": 81
+      },
+      "source": "https://github.com/sgossner/VCSL",
+      "stagedPath": "instruments/renaissance-organ/"
+    },
+    {
+      "id": "tx81z-piano1",
+      "name": "TX81Z Piano 1",
+      "license": "CC0-1.0",
+      "path": "instruments/tx81z-piano1/",
+      "bytes": 36072933,
+      "description": "VCSL TX81Z Piano 1 (distinct from starter FM Piano)",
+      "category": "keys",
+      "tags": [
+        "electric-piano",
+        "fm",
+        "tx81z",
+        "keys",
+        "synth"
+      ],
+      "velocityLayers": 3,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        24
+      ],
+      "zones": 22,
+      "sampleCount": 66,
+      "formats": {
+        "wav": 66
+      },
+      "source": "https://github.com/sgossner/VCSL",
+      "stagedPath": "instruments/tx81z-piano1/"
+    },
+    {
+      "id": "tx81z-clavisynth",
+      "name": "TX81Z Clavisynth",
+      "license": "CC0-1.0",
+      "path": "instruments/tx81z-clavisynth/",
+      "bytes": 30814812,
+      "description": "VCSL TX81Z Clavisynth",
+      "category": "keys",
+      "tags": [
+        "clav",
+        "synth",
+        "fm",
+        "tx81z",
+        "keys"
+      ],
+      "velocityLayers": 3,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        24
+      ],
+      "zones": 19,
+      "sampleCount": 57,
+      "formats": {
+        "wav": 57
+      },
+      "source": "https://github.com/sgossner/VCSL",
+      "stagedPath": "instruments/tx81z-clavisynth/"
+    },
+    {
+      "id": "caveman-cosmonaut",
+      "name": "Caveman Cosmonaut",
+      "license": "CC0-1.0",
+      "path": "instruments/caveman-cosmonaut/Programs/main.sfz",
+      "bytes": 106337408,
+      "description": "Unitra B-11 transistor organ as sample synth; Karoryfer CC0",
+      "category": "synth",
+      "tags": [
+        "synth",
+        "organ",
+        "analog",
+        "transistor",
+        "keys"
+      ],
+      "velocityLayers": 1,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 61,
+      "sampleCount": 370,
+      "formats": {
+        "wav": 370
+      },
+      "source": "https://github.com/sfzinstruments/karoryfer.caveman-cosmonaut",
+      "stagedPath": "instruments/caveman-cosmonaut/"
+    },
+    {
+      "id": "freepats-synth-pad-choir",
+      "name": "Freepats Synth Pad Choir",
+      "license": "public-domain",
+      "path": "instruments/freepats-synth-pad-choir/",
+      "bytes": 14377824,
+      "description": "Helper-staged pack from incoming/orchestral; Source: https://freepats.zenvoid.org/Synthesizer/synth-pad.html",
+      "category": "choir",
+      "tags": [
+        "choir",
+        "multisample",
+        "helper"
+      ],
+      "velocityLayers": 1,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 12,
+      "sampleCount": 12,
+      "formats": {
+        "wav": 12
+      },
+      "source": "incoming/orchestral/freepats-synth-pad-choir",
+      "stagedPath": "instruments/freepats-synth-pad-choir/"
+    },
+    {
+      "id": "jlearman-steel-drum",
+      "name": "Jlearman Steel Drum",
+      "license": "public-domain",
+      "path": "instruments/jlearman-steel-drum/",
+      "bytes": 127606440,
+      "description": "Helper-staged pack from incoming/orchestral; Source: https://github.com/jlearman/jlearman.SteelDrum/blob/main/LICENSE",
+      "category": "mallets",
+      "tags": [
+        "mallets",
+        "multisample",
+        "helper"
+      ],
+      "velocityLayers": 1,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 24,
+      "sampleCount": 368,
+      "formats": {
+        "wav": 368
+      },
+      "source": "incoming/orchestral/jlearman-steel-drum",
+      "stagedPath": "instruments/jlearman-steel-drum/"
+    },
+    {
+      "id": "vcsl-harp-psaltery",
+      "name": "Vcsl Harp Psaltery",
+      "license": "public-domain",
+      "path": "instruments/vcsl-harp-psaltery/",
+      "bytes": 203223872,
+      "description": "Helper-staged pack from incoming/orchestral; Source: https://versilian-studios.com/vcsl/ and https://github.com/sgossner/VCSL/blob/master/LICENSE",
+      "category": "world",
+      "tags": [
+        "world",
+        "multisample",
+        "helper"
+      ],
+      "velocityLayers": 3,
+      "roundRobins": 4,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16,
+        24
+      ],
+      "zones": 45,
+      "sampleCount": 136,
+      "formats": {
+        "wav": 136
+      },
+      "source": "incoming/orchestral/vcsl-harp-psaltery",
+      "stagedPath": "instruments/vcsl-harp-psaltery/"
+    },
+    {
+      "id": "vcsl-mallets",
+      "name": "Vcsl Mallets",
+      "license": "public-domain",
+      "path": "instruments/vcsl-mallets/",
+      "bytes": 375039466,
+      "description": "Helper-staged pack from incoming/orchestral; Source: https://versilian-studios.com/vcsl/ and https://github.com/sgossner/VCSL/blob/master/LICENSE",
+      "category": "mallets",
+      "tags": [
+        "mallets",
+        "multisample",
+        "helper"
+      ],
+      "velocityLayers": 4,
+      "roundRobins": 3,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16,
+        24
+      ],
+      "zones": 43,
+      "sampleCount": 229,
+      "formats": {
+        "wav": 229
+      },
+      "source": "incoming/orchestral/vcsl-mallets",
+      "stagedPath": "instruments/vcsl-mallets/"
+    },
+    {
+      "id": "vcsl-tenor-saxophone",
+      "name": "Vcsl Tenor Saxophone",
+      "license": "public-domain",
+      "path": "instruments/vcsl-tenor-saxophone/",
+      "bytes": 140308422,
+      "description": "Helper-staged pack from incoming/orchestral; Source: https://versilian-studios.com/vcsl/ and https://github.com/sgossner/VCSL/blob/master/LICENSE",
+      "category": "woodwinds",
+      "tags": [
+        "woodwinds",
+        "multisample",
+        "helper"
+      ],
+      "velocityLayers": 3,
+      "roundRobins": 7,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        48000
+      ],
+      "bitDepths": [
+        24
+      ],
+      "zones": 27,
+      "sampleCount": 105,
+      "formats": {
+        "wav": 105
+      },
+      "source": "incoming/orchestral/vcsl-tenor-saxophone",
+      "stagedPath": "instruments/vcsl-tenor-saxophone/"
+    },
+    {
+      "id": "vcsl-world",
+      "name": "Vcsl World",
+      "license": "public-domain",
+      "path": "instruments/vcsl-world/",
+      "bytes": 267039717,
+      "description": "Helper-staged pack from incoming/orchestral; Source: https://versilian-studios.com/vcsl/ and https://github.com/sgossner/VCSL/blob/master/LICENSE",
+      "category": "world",
+      "tags": [
+        "world",
+        "multisample",
+        "helper"
+      ],
+      "velocityLayers": 3,
+      "roundRobins": 16,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100,
+        48000
+      ],
+      "bitDepths": [
+        16,
+        24
+      ],
+      "zones": 31,
+      "sampleCount": 290,
+      "formats": {
+        "wav": 290
+      },
+      "source": "incoming/orchestral/vcsl-world",
+      "stagedPath": "instruments/vcsl-world/"
+    },
+    {
+      "id": "vsco2-ce-brass",
+      "name": "Vsco2 Ce Brass",
+      "license": "public-domain",
+      "path": "instruments/vsco2-ce-brass/",
+      "bytes": 637192562,
+      "description": "Helper-staged pack from incoming/orchestral; Source: https://versilian-studios.com/vsco-community/ and repo LICENSE (https://github.com/sgossner/VSCO-2-CE)",
+      "category": "brass",
+      "tags": [
+        "brass",
+        "multisample",
+        "helper"
+      ],
+      "velocityLayers": 5,
+      "roundRobins": 4,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16,
+        24
+      ],
+      "zones": 34,
+      "sampleCount": 814,
+      "formats": {
+        "wav": 814
+      },
+      "source": "incoming/orchestral/vsco2-ce-brass",
+      "stagedPath": "instruments/vsco2-ce-brass/"
+    },
+    {
+      "id": "vsco2-ce-strings",
+      "name": "Vsco2 Ce Strings",
+      "license": "public-domain",
+      "path": "instruments/vsco2-ce-strings/",
+      "bytes": 755245420,
+      "description": "Helper-staged pack from incoming/orchestral; Source: https://versilian-studios.com/vsco-community/ and repo LICENSE (https://github.com/sgossner/VSCO-2-CE)",
+      "category": "strings",
+      "tags": [
+        "strings",
+        "multisample",
+        "helper"
+      ],
+      "velocityLayers": 3,
+      "roundRobins": 2,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16,
+        24
+      ],
+      "zones": 52,
+      "sampleCount": 767,
+      "formats": {
+        "wav": 767
+      },
+      "source": "incoming/orchestral/vsco2-ce-strings",
+      "stagedPath": "instruments/vsco2-ce-strings/"
+    },
+    {
+      "id": "vsco2-ce-woodwinds",
+      "name": "Vsco2 Ce Woodwinds",
+      "license": "public-domain",
+      "path": "instruments/vsco2-ce-woodwinds/",
+      "bytes": 334320678,
+      "description": "Helper-staged pack from incoming/orchestral; Source: https://versilian-studios.com/vsco-community/ and repo LICENSE (https://github.com/sgossner/VSCO-2-CE)",
+      "category": "woodwinds",
+      "tags": [
+        "woodwinds",
+        "multisample",
+        "helper"
+      ],
+      "velocityLayers": 4,
+      "roundRobins": 2,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16,
+        24
+      ],
+      "zones": 43,
+      "sampleCount": 380,
+      "formats": {
+        "wav": 380
+      },
+      "source": "incoming/orchestral/vsco2-ce-woodwinds",
+      "stagedPath": "instruments/vsco2-ce-woodwinds/"
+    },
+    {
+      "id": "meatbass",
+      "name": "Meatbass",
+      "license": "CC0-1.0",
+      "path": "instruments/meatbass/",
+      "bytes": 293752374,
+      "description": "High-quality acoustic double bass; multiple articulations. Reddit/WATM + Karoryfer free list.",
+      "category": "bass",
+      "tags": [
+        "bass",
+        "multisample",
+        "bass"
+      ],
+      "velocityLayers": 5,
+      "roundRobins": 5,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 536,
+      "sampleCount": 536,
+      "formats": {
+        "wav": 536
+      },
+      "source": "https://github.com/sfzinstruments/karoryfer.meatbass",
+      "stagedPath": "instruments/meatbass/"
+    },
+    {
+      "id": "sneakybass",
+      "name": "Sneakybass",
+      "license": "CC0-1.0",
+      "path": "instruments/sneakybass/",
+      "bytes": 414834588,
+      "description": "Soft pizzicato upright; good for quiet passages.",
+      "category": "bass",
+      "tags": [
+        "bass",
+        "multisample",
+        "bass"
+      ],
+      "velocityLayers": 1,
+      "roundRobins": 4,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 660,
+      "sampleCount": 660,
+      "formats": {
+        "wav": 660
+      },
+      "source": "https://github.com/sfzinstruments/karoryfer.sneakybass",
+      "stagedPath": "instruments/sneakybass/"
+    },
+    {
+      "id": "big-little-bass",
+      "name": "Big Little Bass",
+      "license": "CC0-1.0",
+      "path": "instruments/big-little-bass/",
+      "bytes": 313761672,
+      "description": "Thumpy hollowbody; fills guitar-range bass niche.",
+      "category": "bass",
+      "tags": [
+        "bass",
+        "multisample",
+        "electric",
+        "bass"
+      ],
+      "velocityLayers": 2,
+      "roundRobins": 5,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 440,
+      "sampleCount": 440,
+      "formats": {
+        "wav": 440
+      },
+      "source": "https://github.com/sfzinstruments/karoryfer.big-little-bass",
+      "stagedPath": "instruments/big-little-bass/"
+    },
+    {
+      "id": "black-and-blue-basses",
+      "name": "Black And Blue Basses",
+      "license": "CC0-1.0",
+      "path": "instruments/black-and-blue-basses/",
+      "bytes": 1123279082,
+      "description": "Flagship free electric bass set; 4 vel / up to 8 RR on pick side.",
+      "category": "bass",
+      "tags": [
+        "bass",
+        "multisample",
+        "electric",
+        "bass"
+      ],
+      "velocityLayers": 5,
+      "roundRobins": 8,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 2208,
+      "sampleCount": 2208,
+      "formats": {
+        "wav": 2208
+      },
+      "source": "https://github.com/sfzinstruments/karoryfer.black-and-blue-basses",
+      "stagedPath": "instruments/black-and-blue-basses/"
+    },
+    {
+      "id": "fashionbass",
+      "name": "Fashionbass",
+      "license": "CC0-1.0",
+      "path": "instruments/fashionbass/",
+      "bytes": 171990706,
+      "description": "5 velocity layers, 3 RR; neck pickup DI.",
+      "category": "bass",
+      "tags": [
+        "bass",
+        "multisample",
+        "electric",
+        "bass"
+      ],
+      "velocityLayers": 6,
+      "roundRobins": 5,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 426,
+      "sampleCount": 426,
+      "formats": {
+        "wav": 426
+      },
+      "source": "https://github.com/sfzinstruments/karoryfer.fashionbass",
+      "stagedPath": "instruments/fashionbass/"
+    },
+    {
+      "id": "growlybass",
+      "name": "Growlybass",
+      "license": "CC0-1.0",
+      "path": "instruments/growlybass/",
+      "bytes": 190565620,
+      "description": "4 vel / 4 RR sustain; staccato + scrapes. Good aggressive electric bass.",
+      "category": "bass",
+      "tags": [
+        "bass",
+        "multisample",
+        "electric",
+        "bass"
+      ],
+      "velocityLayers": 4,
+      "roundRobins": 5,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 380,
+      "sampleCount": 380,
+      "formats": {
+        "wav": 380
+      },
+      "source": "https://github.com/sfzinstruments/karoryfer.growlybass",
+      "stagedPath": "instruments/growlybass/"
+    },
+    {
+      "id": "pastabass",
+      "name": "Pastabass",
+      "license": "CC0-1.0",
+      "path": "instruments/pastabass/",
+      "bytes": 486630942,
+      "description": "Roundwound + flatwound; muted artic (tagliatelle) covers muted/funk need.",
+      "category": "bass",
+      "tags": [
+        "bass",
+        "multisample",
+        "bass",
+        "guitar"
+      ],
+      "velocityLayers": 4,
+      "roundRobins": 4,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 766,
+      "sampleCount": 766,
+      "formats": {
+        "wav": 766
+      },
+      "source": "https://github.com/sfzinstruments/karoryfer.pastabass",
+      "stagedPath": "instruments/pastabass/"
+    },
+    {
+      "id": "swagbass",
+      "name": "Swagbass",
+      "license": "CC0-1.0",
+      "path": "instruments/swagbass/",
+      "bytes": 174135138,
+      "description": "3 vel / 4 RR; dead flatwounds = thumpy vintage feel.",
+      "category": "bass",
+      "tags": [
+        "bass",
+        "multisample",
+        "electric",
+        "bass"
+      ],
+      "velocityLayers": 3,
+      "roundRobins": 5,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 341,
+      "sampleCount": 341,
+      "formats": {
+        "wav": 341
+      },
+      "source": "https://github.com/sfzinstruments/karoryfer.swagbass",
+      "stagedPath": "instruments/swagbass/"
+    },
+    {
+      "id": "freepats-finger-bass-yr",
+      "name": "FreePats Finger Bass YR",
+      "license": "CC0-1.0",
+      "path": "instruments/freepats-finger-bass-yr/",
+      "bytes": 6327816,
+      "description": "Small but clean multi-sample; chromatic coverage limited vs Karoryfer.",
+      "category": "bass",
+      "tags": [
+        "bass",
+        "multisample",
+        "electric",
+        "bass"
+      ],
+      "velocityLayers": 1,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 12,
+      "sampleCount": 12,
+      "formats": {
+        "wav": 12
+      },
+      "source": "https://freepats.zenvoid.org/ElectricGuitar/clean-electric-bass.html",
+      "stagedPath": "instruments/freepats-finger-bass-yr/"
+    },
+    {
+      "id": "freepats-picked-bass-yr",
+      "name": "FreePats Picked Bass YR",
+      "license": "CC0-1.0",
+      "path": "instruments/freepats-picked-bass-yr/",
+      "bytes": 5288834,
+      "description": "Companion to finger variant.",
+      "category": "bass",
+      "tags": [
+        "bass",
+        "multisample",
+        "electric",
+        "bass"
+      ],
+      "velocityLayers": 1,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 13,
+      "sampleCount": 13,
+      "formats": {
+        "wav": 13
+      },
+      "source": "https://freepats.zenvoid.org/ElectricGuitar/clean-electric-bass.html",
+      "stagedPath": "instruments/freepats-picked-bass-yr/"
+    },
+    {
+      "id": "freepats-lately-bass",
+      "name": "FreePats Lately Bass",
+      "license": "CC0-1.0",
+      "path": "instruments/freepats-lately-bass/",
+      "bytes": 3992560,
+      "description": "Small synth-bass bank; FLAC converted to WAV on stage.",
+      "category": "bass",
+      "tags": [
+        "bass",
+        "multisample",
+        "bass"
+      ],
+      "velocityLayers": 1,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 11,
+      "sampleCount": 11,
+      "formats": {
+        "wav": 11
+      },
+      "source": "https://freepats.zenvoid.org/Synthesizer/synth-bass.html",
+      "stagedPath": "instruments/freepats-lately-bass/"
+    },
+    {
+      "id": "freepats-synth-bass-1",
+      "name": "FreePats Synth Bass 1",
+      "license": "CC0-1.0",
+      "path": "instruments/freepats-synth-bass-1/",
+      "bytes": 4380022,
+      "description": "Compact GM-style synth bass multi-sample.",
+      "category": "bass",
+      "tags": [
+        "bass",
+        "multisample",
+        "bass"
+      ],
+      "velocityLayers": 1,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 15,
+      "sampleCount": 15,
+      "formats": {
+        "wav": 15
+      },
+      "source": "https://freepats.zenvoid.org/Synthesizer/synth-bass.html",
+      "stagedPath": "instruments/freepats-synth-bass-1/"
+    },
+    {
+      "id": "freepats-synth-bass-2",
+      "name": "FreePats Synth Bass 2",
+      "license": "CC0-1.0",
+      "path": "instruments/freepats-synth-bass-2/",
+      "bytes": 6950412,
+      "description": "Second FreePats synth-bass timbre.",
+      "category": "bass",
+      "tags": [
+        "bass",
+        "multisample",
+        "bass"
+      ],
+      "velocityLayers": 1,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 9,
+      "sampleCount": 9,
+      "formats": {
+        "wav": 9
+      },
+      "source": "https://freepats.zenvoid.org/Synthesizer/synth-bass.html",
+      "stagedPath": "instruments/freepats-synth-bass-2/"
+    },
+    {
+      "id": "shinyguitar",
+      "name": "Shinyguitar",
+      "license": "CC0-1.0",
+      "path": "instruments/shinyguitar/",
+      "bytes": 459254688,
+      "description": "DI+mic blend archtop; multi vel + RR. Strong clean electric.",
+      "category": "guitar",
+      "tags": [
+        "guitar",
+        "multisample",
+        "electric",
+        "acoustic",
+        "guitar"
+      ],
+      "velocityLayers": 4,
+      "roundRobins": 5,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 846,
+      "sampleCount": 846,
+      "formats": {
+        "wav": 846
+      },
+      "source": "https://github.com/sfzinstruments/karoryfer.shinyguitar",
+      "stagedPath": "instruments/shinyguitar/"
+    },
+    {
+      "id": "black-and-green-guitars",
+      "name": "Black And Green Guitars",
+      "license": "CC0-1.0",
+      "path": "instruments/black-and-green-guitars/",
+      "bytes": 577662788,
+      "description": "Twangy hollowbodies; staccato + sustain articulations.",
+      "category": "guitar",
+      "tags": [
+        "guitar",
+        "multisample",
+        "electric",
+        "guitar"
+      ],
+      "velocityLayers": 3,
+      "roundRobins": 4,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 1776,
+      "sampleCount": 1776,
+      "formats": {
+        "wav": 1776
+      },
+      "source": "https://github.com/sfzinstruments/karoryfer.black-and-green-guitars",
+      "stagedPath": "instruments/black-and-green-guitars/"
+    },
+    {
+      "id": "emilyguitar",
+      "name": "Emilyguitar",
+      "license": "CC0-1.0",
+      "path": "instruments/emilyguitar/",
+      "bytes": 124950240,
+      "description": "4 vel / 3 RR; flatwound Chromes; muting samples support muted/funk use.",
+      "category": "guitar",
+      "tags": [
+        "guitar",
+        "multisample",
+        "electric"
+      ],
+      "velocityLayers": 4,
+      "roundRobins": 5,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 323,
+      "sampleCount": 323,
+      "formats": {
+        "wav": 323
+      },
+      "source": "https://github.com/sfzinstruments/karoryfer.emilyguitar",
+      "stagedPath": "instruments/emilyguitar/"
+    },
+    {
+      "id": "freepats-nylon-classical",
+      "name": "FreePats Spanish Classical Guitar",
+      "license": "CC0-1.0",
+      "path": "instruments/freepats-nylon-classical/",
+      "bytes": 19817028,
+      "description": "Modest home recording; noise-filtered. Best CC0 nylon multi found.",
+      "category": "guitar",
+      "tags": [
+        "guitar",
+        "multisample",
+        "acoustic",
+        "guitar"
+      ],
+      "velocityLayers": 1,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 48,
+      "sampleCount": 48,
+      "formats": {
+        "wav": 48
+      },
+      "source": "http://freepats.zenvoid.org/Guitar/acoustic-guitar.html",
+      "stagedPath": "instruments/freepats-nylon-classical/"
+    },
+    {
+      "id": "freepats-eguitar-clean",
+      "name": "FreePats FSBS Electric Guitar Clean",
+      "license": "CC0-1.0",
+      "path": "instruments/freepats-eguitar-clean/",
+      "bytes": 449049844,
+      "description": "Largest FreePats clean electric; FLAC\u2192WAV. Good chromatic coverage.",
+      "category": "guitar",
+      "tags": [
+        "guitar",
+        "multisample",
+        "electric"
+      ],
+      "velocityLayers": 1,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 122,
+      "sampleCount": 122,
+      "formats": {
+        "wav": 122
+      },
+      "source": "http://freepats.zenvoid.org/ElectricGuitar/clean-electric-guitar.html",
+      "stagedPath": "instruments/freepats-eguitar-clean/"
+    },
+    {
+      "id": "freepats-eguitar-jazz",
+      "name": "FreePats FSBS Electric Guitar Jazz Clean",
+      "license": "CC0-1.0",
+      "path": "instruments/freepats-eguitar-jazz/",
+      "bytes": 367048584,
+      "description": "Jazz clean amp voicing of same FSBS source.",
+      "category": "guitar",
+      "tags": [
+        "guitar",
+        "multisample",
+        "electric"
+      ],
+      "velocityLayers": 1,
+      "roundRobins": 1,
+      "releaseSamples": 0,
+      "keyRange": null,
+      "sampleRates": [
+        44100
+      ],
+      "bitDepths": [
+        16
+      ],
+      "zones": 122,
+      "sampleCount": 122,
+      "formats": {
+        "wav": 122
+      },
+      "source": "http://freepats.zenvoid.org/ElectricGuitar/clean-electric-guitar.html",
+      "stagedPath": "instruments/freepats-eguitar-jazz/"
+    }
+  ],
+  "loops": [
+    {
+      "id": "collection-of-loops-vol01-090fxgroove-01",
+      "path": "loops/collection-of-loops-vol01/090Fxgroove-01.wav",
+      "name": "090Fxgroove-01",
+      "type": "loop",
+      "tags": [
+        "loop",
+        "melodic-loop",
+        "melodic",
+        "90bpm",
+        "C#-minor"
+      ],
+      "category": "melodic",
+      "role": "melodic-loop",
+      "durationSec": 10.667,
+      "sampleRate": 44100,
+      "bitDepth": null,
+      "channels": 2,
+      "bytes": 1881704,
+      "sha256": "cc1e4384790ff6c917ad0ec15d0235fcf0459bbc3596b04441275c4e8f68ea13",
+      "license": "CC0-1.0",
+      "bpm": 90,
+      "bpmSource": "source_filename",
+      "key": "C# minor",
+      "keySource": "detected_librosa",
+      "packId": "collection-of-loops-vol01",
+      "headerOk": true,
+      "fromHelper": true
+    },
+    {
+      "id": "collection-of-loops-vol01-090fxgroove-02",
+      "path": "loops/collection-of-loops-vol01/090Fxgroove-02.wav",
+      "name": "090Fxgroove-02",
+      "type": "loop",
+      "tags": [
+        "loop",
+        "melodic-loop",
+        "melodic",
+        "90bpm",
+        "C#-major"
+      ],
+      "category": "melodic",
+      "role": "melodic-loop",
+      "durationSec": 10.667,
+      "sampleRate": 44100,
+      "bitDepth": null,
+      "channels": 2,
+      "bytes": 1881704,
+      "sha256": "22d504bb2ed880f46902fb7eb8e5b00ca381188e5c07edc98d65c6ef15e79e37",
+      "license": "CC0-1.0",
+      "bpm": 90,
+      "bpmSource": "source_filename",
+      "key": "C# major",
+      "keySource": "detected_librosa",
+      "packId": "collection-of-loops-vol01",
+      "headerOk": true,
+      "fromHelper": true
+    },
+    {
+      "id": "drums-beat-loops-vol01-085drumkit02-001",
+      "path": "loops/drums/beat-loops-vol01/085Drumkit02-001.wav",
+      "name": "085Drumkit02-001",
+      "type": "loop",
+      "tags": [
+        "loop",
+        "drum-loop",
+        "drums",
+        "85bpm"
+      ],
+      "category": "drums",
+      "role": "drum-loop",
+      "durationSec": 2.949,
+      "sampleRate": 44100,
+      "bitDepth": null,
+      "channels": 2,
+      "bytes": 520314,
+      "sha256": "b729f8d4e801b4f861e9b8d47047de81526fa6fdfd16ea9fd137af898e6648cd",
+      "license": "CC0-1.0",
+      "bpm": 85,
+      "bpmSource": "source_filename",
+      "key": null,
+      "keySource": "n/a",
+      "packId": "drums/beat-loops-vol01",
+      "headerOk": true,
+      "fromHelper": true
+    },
+    {
+      "id": "drums-beat-loops-vol01-085drumkit02-002",
+      "path": "loops/drums/beat-loops-vol01/085Drumkit02-002.wav",
+      "name": "085Drumkit02-002",
+      "type": "loop",
+      "tags": [
+        "loop",
+        "drum-loop",
+        "drums",
+        "85bpm"
+      ],
+      "category": "drums",
+      "role": "drum-loop",
+      "durationSec": 2.949,
+      "sampleRate": 44100,
+      "bitDepth": null,
+      "channels": 2,
+      "bytes": 520314,
+      "sha256": "530a951c676538e3bb35b614588f9d417329b80312be99940590c9c3cfd482e9",
+      "license": "CC0-1.0",
+      "bpm": 85,
+      "bpmSource": "source_filename",
+      "key": null,
+      "keySource": "n/a",
+      "packId": "drums/beat-loops-vol01",
+      "headerOk": true,
+      "fromHelper": true
+    }
+  ],
+  "counts": {
+    "instruments": 36,
+    "instrumentSamplesCatalogSum": 14529,
+    "loops": 525,
+    "loopsMelodic": 182,
+    "loopsDrums": 343,
+    "byInstrumentCategory": {
+      "keys": 7,
+      "synth": 1,
+      "choir": 1,
+      "mallets": 2,
+      "world": 2,
+      "woodwinds": 2,
+      "brass": 1,
+      "strings": 1,
+      "bass": 13,
+      "guitar": 6
+    },
+    "byLoopPack": {
+      "collection-of-loops-vol01": 146,
+      "drums/beat-loops-vol01": 93,
+      "drums/beat-loops-vol02": 98,
+      "drums/eatme-108-breakbeat": 1,
+      "drums/eatme-breakbeat-loops": 10,
+      "drums/rhythm-ace-drum-loops": 141,
+      "fun-bass-loop": 1,
+      "phaseforge-ambient-textures": 3,
+      "rhythm-ace-plus-melody": 13,
+      "techno-bass-loop": 1,
+      "winaaa-bgm-cc0": 18
+    },
+    "bpmTagged": 525,
+    "keyTagged": 182,
+    "bpmSource": {
+      "source_filename": 492,
+      "detected_librosa": 33
+    },
+    "keySource": {
+      "detected_librosa": 182,
+      "n/a": 343
+    }
+  }
+}

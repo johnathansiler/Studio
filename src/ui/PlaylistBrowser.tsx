@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { AnchoredMenu } from './AnchoredMenu'
@@ -11,8 +11,8 @@ export type BrowserTab = 'sounds' | 'instruments' | 'loops' | 'patterns' | 'clip
 
 const TABS: { id: BrowserTab; label: string; hint: string }[] = [
   { id: 'sounds', label: 'Sounds', hint: 'Loops, one-shots, drums, and instruments from the free library.' },
-  { id: 'instruments', label: 'Instruments', hint: 'Starter instruments. Drag one onto an instrument track.' },
-  { id: 'loops', label: 'Loops', hint: 'Loops that follow the song tempo.' },
+  { id: 'instruments', label: 'Instruments', hint: 'Multi-sampled instruments. One tap loads the selected MIDI track.' },
+  { id: 'loops', label: 'Loops', hint: 'Melodic and drum loops that follow the song tempo.' },
 ]
 
 const PROJECT: { id: 'patterns' | 'clips'; label: string; hint: string }[] = [
@@ -28,8 +28,11 @@ type PreviewEngine = {
   previewPcm: (channels: Float32Array[], sampleRate?: number) => void
   currentTimelineSample: () => number
   holdLibraryPack?: (trackId: string, pack: import('../audio/multisample/types').SamplePack) => void
+  holdLibraryAudio?: (trackId: string, samples: { id: string; sampleRate: number; channels: Float32Array[] }[]) => void
   auditionLibrary?: (trackId: string, pitch?: number, velocity?: number) => Promise<void>
 }
+
+const HarborBrowser = lazy(() => import('./HarborBrowser').then((mod) => ({ default: mod.HarborBrowser })))
 
 export function PlaylistBrowser({
   store,
@@ -146,7 +149,11 @@ export function PlaylistBrowser({
   const projectButton = useRef<HTMLButtonElement>(null)
   const [projectOpen, setProjectOpen] = useState(false)
 
-  const catalog = soundLock ? (
+  const catalog = tab === 'instruments' || tab === 'loops' ? (
+    <Suspense fallback={<p className="sound-status">Loading</p>}>
+      <HarborBrowser store={store} engine={engine} section={tab} />
+    </Suspense>
+  ) : soundLock ? (
     <SoundBrowser
       store={store}
       engine={engine}

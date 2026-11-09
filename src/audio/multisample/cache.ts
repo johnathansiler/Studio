@@ -1,3 +1,4 @@
+import { sampleLoadBegin, sampleLoadFinish } from '../sampleLoadBus'
 import { decodeWavPCM } from '../../model/wav'
 import type { DecodedSample, SampleFormat, SamplePack, SampleRef } from './types'
 import { assertHuggingFaceUrl } from './source'
@@ -104,6 +105,7 @@ export class SampleCache implements SampleBank {
 
   private async fetchAndStore(sample: SampleRef): Promise<DecodedSample | null> {
     assertHuggingFaceUrl(sample.url)
+    sampleLoadBegin(sample.id)
     if (this.active >= this.maxActive) await new Promise<void>((resolve) => this.waiters.push(resolve))
     this.active += 1
     try {
@@ -120,6 +122,7 @@ export class SampleCache implements SampleBank {
       this.remember(sample.id, decoded)
       return decoded
     } finally {
+      sampleLoadFinish(sample.id)
       this.active -= 1
       this.waiters.shift()?.()
     }
