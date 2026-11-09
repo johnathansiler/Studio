@@ -100,7 +100,6 @@ export function selfContainedWorklets(): Plugin {
     async load(id) {
       if (!id.startsWith('\0self-worklet:')) return null
       const abs = id.slice('\0self-worklet:'.length)
-      if (process.env.VITEST) return 'export default "/worklet-stub.js"'
       let code = cache.get(abs)
       if (!code) {
         code = await bundleWorklet(abs)

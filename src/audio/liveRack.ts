@@ -360,7 +360,7 @@ export class LiveRack {
   private owners(project: Project) {
     return [
       { id: 'master', plugins: project.masterPlugins },
-      ...project.tracks.map((track) => ({ id: track.id, plugins: track.plugins.filter((plugin) => plugin.pluginId !== 'steps') })),
+      ...project.tracks.map((track) => ({ id: track.id, plugins: track.plugins.filter((plugin) => audibleInsert(plugin)) })),
     ]
   }
 
@@ -788,4 +788,15 @@ export class LiveRack {
     delay.connect(to)
     this.links.push({ from, to: delay }, { from: delay, to })
   }
+}
+
+/**
+ * Beat Machine is a sampler insert with kind >= 1. That processor is a dry
+ * pass-through. Leaving it in the live chain replaces the pad voice with
+ * silence whenever the insert node does not copy its input.
+ */
+function audibleInsert(plugin: PluginInstance) {
+  if (plugin.pluginId === 'steps') return false
+  if (plugin.pluginId === 'sampler' && Math.round(plugin.params?.kind ?? 0) >= 1) return false
+  return true
 }
