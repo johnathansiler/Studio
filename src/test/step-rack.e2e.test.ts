@@ -182,19 +182,34 @@ describe('step sequencer rack', () => {
         await page.setViewportSize(viewport)
         await page.waitForTimeout(200)
         const fitted = await page.evaluate(() => {
+          const button = (label: string) => document.querySelector(`.plugin-transport button[aria-label="${label}"]`) as HTMLButtonElement
+          const visible = (el: HTMLElement) => {
+            const box = el.getBoundingClientRect()
+            const hidden = el.getAttribute('aria-hidden') === 'true' || el.hasAttribute('disabled') || getComputedStyle(el).visibility === 'hidden' || getComputedStyle(el).display === 'none'
+            return {
+              ok: !hidden && box.height >= 40 && box.width >= 40 && box.top >= -1 && box.bottom <= window.innerHeight + 1 && box.left >= -1 && box.right <= window.innerWidth + 1,
+              name: el.getAttribute('aria-label'),
+            }
+          }
           const close = document.querySelector('.step-close')!.getBoundingClientRect()
-          const play = document.querySelector('.plugin-transport button[aria-label="Play"]')!.getBoundingClientRect()
+          const play = visible(button('Play'))
+          const stop = visible(button('Stop'))
+          const record = visible(button('Record'))
           const steps = [...document.querySelectorAll('.rack-row[data-channel="Kick"] .rack-step')]
           const tops = new Set(steps.map((el) => Math.round(el.getBoundingClientRect().top)))
           return {
             close: close.top >= 0 && close.bottom <= window.innerHeight + 1 && close.height >= 40,
-            play: play.top >= 0 && play.bottom <= window.innerHeight + 1 && play.height >= 40,
+            play: play.ok && play.name === 'Play',
+            stop: stop.ok && stop.name === 'Stop',
+            record: record.ok && record.name === 'Record',
             oneRow: tops.size === 1,
             steps: steps.length,
           }
         })
         expect(fitted.close, `${viewport.width}x${viewport.height}`).toBe(true)
         expect(fitted.play, `${viewport.width}x${viewport.height}`).toBe(true)
+        expect(fitted.stop, `${viewport.width}x${viewport.height}`).toBe(true)
+        expect(fitted.record, `${viewport.width}x${viewport.height}`).toBe(true)
         expect(fitted.oneRow, `${viewport.width}x${viewport.height}`).toBe(true)
         expect(fitted.steps, `${viewport.width}x${viewport.height}`).toBe(16)
         await shot(page, `sequencer-${viewport.width}x${viewport.height}`)
@@ -220,6 +235,83 @@ describe('step sequencer rack', () => {
         hook.__seqRack = proof
         return proof.track > 0.01 && proof.master > 0.01
       }, undefined, { timeout: 12000 })
+
+      await page.locator('.plugin-transport').getByRole('button', { name: 'Stop' }).click()
+      const loaded = await page.evaluate(() => {
+        const hook = (window as unknown as {
+          __cueharbor: {
+            engine: { ctx: AudioContext | null; levels: () => { master: number; tracks: Record<string, number> } }
+            store: {
+              project: { sampleRate: number; tracks: { id: string; name: string }[] }
+              addAsset: (asset: { id: string; name: string; sampleRate: number; channels: Float32Array[] }) => void
+              addPatternChannel: (choice: { name: string; kind: string; note: number; color: string; sampleId: string }) => string | null
+              activePattern: () => { channels: { id: string; name: string; kind: string; sampleId: string | null; cells: { on: boolean }[] }[] } | null
+              setChannel: (id: string, patch: { mute: boolean }) => void
+              selectRackChannel: (id: string) => void
+              smartRandomDrums: (seed?: number) => void
+              buffers: { get: (id: string) => { channels: Float32Array[] } | undefined }
+            }
+          }
+        }).__cueharbor
+        const store = hook.store
+        const rate = store.project.sampleRate
+        const data = new Float32Array(Math.round(rate / 8))
+        for (let index = 0; index < data.length; index += 1) data[index] = Math.sin((2 * Math.PI * 180 * index) / rate) * 0.85
+        store.addAsset({ id: 'lib_loaded', name: 'Loaded Kick', sampleRate: rate, channels: [data] })
+        const id = store.addPatternChannel({ name: 'Loaded Kick', kind: 'note', note: 36, color: '#ef6b6b', sampleId: 'lib_loaded' })
+        const pattern = store.activePattern()
+        if (!id || !pattern) return { ok: false, starts: 0, track: 0, master: 0 }
+        for (const channel of pattern.channels) {
+          if (channel.id !== id) store.setChannel(channel.id, { mute: true })
+        }
+        store.selectRackChannel(id)
+        store.smartRandomDrums(4)
+        const row = store.activePattern()?.channels.find((channel) => channel.id === id)
+        const ctx = hook.engine.ctx
+        const pageWindow = window as unknown as { __bufferStarts?: number }
+        pageWindow.__bufferStarts = 0
+        if (ctx) {
+          const original = ctx.createBufferSource.bind(ctx)
+          ctx.createBufferSource = () => {
+            pageWindow.__bufferStarts = (pageWindow.__bufferStarts ?? 0) + 1
+            return original()
+          }
+        }
+        return {
+          ok: true,
+          sampleId: row?.sampleId ?? '',
+          kind: row?.kind ?? '',
+          on0: !!row?.cells[0]?.on,
+          on4: !!row?.cells[4]?.on,
+          buffered: (store.buffers.get('lib_loaded')?.channels[0]?.length ?? 0) > 0,
+          ctx: !!ctx,
+        }
+      })
+      expect(loaded.ok).toBe(true)
+      expect(loaded.sampleId).toBe('lib_loaded')
+      expect(loaded.kind).toBe('note')
+      expect(loaded.on0).toBe(true)
+      expect(loaded.on4).toBe(false)
+      expect(loaded.buffered).toBe(true)
+      expect(loaded.ctx).toBe(true)
+      await page.locator('.plugin-transport').getByRole('button', { name: 'Play' }).click()
+      await page.waitForFunction(() => {
+        const hook = (window as unknown as {
+          __cueharbor?: { engine: { levels: () => { master: number; tracks: Record<string, number> } }; store: { project: { tracks: { id: string; name: string }[] } } }
+          __loadedProof?: { track: number; master: number }
+        })
+        const live = hook.__cueharbor
+        const track = live?.store.project.tracks.find((item) => item.name.startsWith('Step Sequencer'))
+        if (!live || !track) return false
+        const levels = live.engine.levels()
+        const proof = hook.__loadedProof ?? { track: 0, master: 0 }
+        proof.track = Math.max(proof.track, levels.tracks[track.id] || 0)
+        proof.master = Math.max(proof.master, levels.master || 0)
+        hook.__loadedProof = proof
+        return proof.track > 0.01 && proof.master > 0.01
+      }, undefined, { timeout: 8000 })
+      const starts = await page.evaluate(() => (window as unknown as { __bufferStarts?: number }).__bufferStarts ?? 0)
+      expect(starts).toBeGreaterThan(0)
 
       await page.waitForTimeout(900)
       await page.reload({ waitUntil: 'domcontentloaded' })

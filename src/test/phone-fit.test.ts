@@ -215,23 +215,20 @@ describe('phone fit at 412x915', () => {
         expect(await page.getByRole('button', { name: 'Columns' }).count()).toBe(0)
         expect(await page.getByRole('button', { name: 'Rows' }).count()).toBe(0)
         const mix = await page.evaluate(() => {
-          const mixer = document.querySelector('.mixer-view .mixer') as HTMLElement
+          const more = document.querySelector('.mix-more') as HTMLDetailsElement | null
+          if (more && !more.open) more.open = true
           const mute = document.querySelector('.strip button[aria-label*="Mute"]') as HTMLElement
-          const safeButton = document.querySelector('.strip .solo-safe') as HTMLElement
-          const arm = document.querySelector('.strip .arm-flag') as HTMLElement
-          const details = safeButton.closest('details') as HTMLDetailsElement | null
-          if (details && !details.open) {
-            ;(details.querySelector('summary') as HTMLElement | null)?.click()
-            details.open = true
-          }
-          safeButton.scrollIntoView({ block: 'center' })
+          const safeButton = document.querySelector('.mix-panel .solo-safe') as HTMLElement
+          const arm = document.querySelector('.mix-panel .arm-flag') as HTMLElement
+          const panel = document.querySelector('.mix-panel') as HTMLElement
           const box = mute.getBoundingClientRect()
           const safeBox = safeButton.getBoundingClientRect()
           const armBox = arm.getBoundingClientRect()
-          const host = mixer.getBoundingClientRect()
+          const panelBox = panel.getBoundingClientRect()
           const word = mute.querySelector('.mini-word') as HTMLElement
           const master = document.querySelector('.strip.master') as HTMLElement
           const strip = document.querySelector('.strip:not(.master)') as HTMLElement
+          const onScreen = (rect: DOMRect) => rect.height >= 40 && rect.top >= -1 && rect.bottom <= window.innerHeight + 1 && rect.left >= -1 && rect.right <= window.innerWidth + 1
           return {
             top: box.top,
             bottom: safeBox.bottom,
@@ -239,8 +236,8 @@ describe('phone fit at 412x915', () => {
             wordShown: getComputedStyle(word).display,
             safe: safeButton.querySelector('.arm-full')?.textContent ?? 'missing',
             safeShown: getComputedStyle(safeButton.querySelector('.arm-full') as HTMLElement).display,
-            safeIn: safeBox.top >= host.top - 1 && safeBox.bottom <= Math.min(host.bottom, window.innerHeight) + 1 && safeBox.height >= 40,
-            armIn: armBox.top >= host.top - 1 && armBox.bottom <= Math.min(host.bottom, window.innerHeight) + 1 && armBox.height >= 40,
+            safeIn: onScreen(safeBox) && safeBox.top >= panelBox.top - 1 && safeBox.bottom <= panelBox.bottom + 1,
+            armIn: onScreen(armBox) && armBox.top >= panelBox.top - 1 && armBox.bottom <= panelBox.bottom + 1,
             masterWidth: (master.querySelector('.strip-col') as HTMLElement | null ?? master).getBoundingClientRect().width,
             stripWidth: (strip.querySelector('.strip-col') as HTMLElement | null ?? strip).getBoundingClientRect().width,
             view: window.innerHeight,
@@ -322,20 +319,16 @@ describe('phone fit at 412x915', () => {
         await fold.getByRole('button', { name: /^Mix/ }).click()
         await fold.locator('.mixer .strip').first().waitFor()
         const foldMix = await fold.evaluate(() => {
-          const safe = document.querySelector('.strip .solo-safe') as HTMLElement
-          const details = safe.closest('details') as HTMLDetailsElement | null
-          if (details && !details.open) {
-            ;(details.querySelector('summary') as HTMLElement | null)?.click()
-            details.open = true
-          }
-          safe.scrollIntoView({ block: 'center' })
+          const more = document.querySelector('.mix-more') as HTMLDetailsElement | null
+          if (more && !more.open) more.open = true
+          const safe = document.querySelector('.mix-panel .solo-safe') as HTMLElement
           const box = safe.getBoundingClientRect()
           const strip = document.querySelector('.strip:not(.master)') as HTMLElement
           const master = document.querySelector('.strip.master') as HTMLElement
           return {
             safe: safe.querySelector('.arm-full')?.textContent,
             height: box.height,
-            inView: box.top >= 0 && box.bottom <= window.innerHeight + 1,
+            inView: box.top >= 0 && box.bottom <= window.innerHeight + 1 && box.left >= -1 && box.right <= window.innerWidth + 1,
             masterWidth: (master.querySelector('.strip-col') as HTMLElement | null ?? master).getBoundingClientRect().width,
             stripWidth: (strip.querySelector('.strip-col') as HTMLElement | null ?? strip).getBoundingClientRect().width,
           }

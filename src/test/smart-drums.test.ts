@@ -185,6 +185,25 @@ describe('smart drum random', () => {
     expect(swingBefore).toBe(0)
   })
 
+  it('keeps a loaded sample on the hits Smart Pattern writes for the sequencer', () => {
+    const store = new ProjectStore()
+    const tone = new Float32Array(480)
+    tone.fill(0.6)
+    store.addAsset({ id: 'lib_loaded', name: 'Loaded Kick', sampleRate: 48000, channels: [tone] })
+    const id = store.addPatternChannel({ name: 'Loaded Kick', kind: 'note', note: 36, color: '#ef6b6b', sampleId: 'lib_loaded' })
+    store.selectRackChannel(id!)
+    store.smartRandomDrums(4)
+    const channel = store.activePattern()!.channels.find((row) => row.id === id)!
+    expect(channel.sampleId).toBe('lib_loaded')
+    expect(channel.kind).toBe('note')
+    expect(channel.cells[0].on).toBe(true)
+    expect(channel.cells[4].on).toBe(false)
+    expect(store.buffers.get('lib_loaded')?.channels[0]?.length).toBe(480)
+    const hits = renderPattern(store.activePattern()!, 0, 4).filter((hit) => hit.channelId === id)
+    expect(hits.length).toBeGreaterThan(0)
+    expect(hits.every((hit) => hit.sampleId === 'lib_loaded' && hit.kind === 'note')).toBe(true)
+  })
+
   it('keeps swing and writes only the steps a short pattern can play', () => {
     const store = new ProjectStore()
     store.setPatternSwing(0.15)
