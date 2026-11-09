@@ -3253,8 +3253,9 @@ export class ProjectStore {
     const asset = this.buffers.get(clip.bufferId)
     if (!asset?.channels.length || !clip.stretch) return
     const source = sourceSamplesOf(clip)
-    const sliced = asset.channels.map((channel) => Float32Array.from(channel.subarray(clip.offsetSamples, Math.min(channel.length, clip.offsetSamples + source))))
-    queueClipStretch(clip, sliced, this.project)
+    const end = Math.min(asset.channels[0]?.length ?? 0, clip.offsetSamples + source)
+    const channels = asset.channels.map((channel) => Float32Array.from(channel.subarray(0, end)))
+    queueClipStretch(clip, channels, this.project)
   }
 
   private detectClipBpm(clip: AudioClip) {

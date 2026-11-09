@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { peakIndex, renderClipChannels, timelineSamples } from '../audio/stretch/engine'
-import { followClockToken, onStretchCommit, queueClipStretch, stretchCacheKey, stretchSlot } from '../audio/stretch/commit'
+import { followClockToken, onStretchCommit, queueClipStretch, readStretch, stretchCacheKey, stretchSlot } from '../audio/stretch/commit'
 import { yinPitch } from '../audio/stretch/voice'
 import { createEmptyProject, type AudioClip } from '../model/types'
 import { ProjectStore } from '../state/store'
@@ -101,8 +101,9 @@ describe('loaded loop tempo follow', () => {
 
     const tone = sine(440, 0.8)
     const tonal = place(loop('pad', 100, 1, ['pad']), tone, 120)
-    store.setTempo(80)
-    const low = renderClipChannels(tonal.asset.channels, tonal.clip, { ...tonal.store.project, tempo: 80 }, 'hq')
+    tonal.store.setTempo(80)
+    expect(beats(tonal.clip.durationSamples, 80)).toBeCloseTo(beats(tone.length, 100), 1)
+    const low = renderClipChannels(tonal.asset.channels, tonal.clip, tonal.store.project, 'hq')
     const start = Math.floor(low[0].length * 0.3)
     const hz = yinPitch(low[0].subarray(start, start + 4096), rate, 200, 800).hz
     expect(Math.abs(cents(hz, 440))).toBeLessThan(25)
@@ -152,11 +153,18 @@ describe('loaded loop tempo follow', () => {
     const beatsLeft = beats(clip.durationSamples, 120)
     expect(beatsLeft).toBeGreaterThan(6)
     expect(beatsLeft).toBeLessThan(8)
+    const trimmedKey = stretchCacheKey(clip, store.project)
+    const trimmed = stretchSlot(trimmedKey)?.channels?.[0] ?? new Float32Array()
+    expect(trimmed.length).toBeGreaterThan(rate / 4)
+    expect(peakIndex(trimmed)).toBeLessThan(rate * 0.05)
     store.setTempo(140)
     expect(beats(clip.durationSamples, 140)).toBeCloseTo(beatsLeft, 1)
     const out = renderClipChannels(asset.channels, clip, store.project, 'preview')
     expect(Math.abs(out[0].length - timelineSamples(clip, store.project))).toBeLessThan(rate * 0.02)
     expect(peakIndex(out[0])).toBeLessThan(rate * 0.05)
+    const played = readStretch(stretchCacheKey(clip, store.project), asset.channels, clip, store.project)[0]
+    expect(peakIndex(played)).toBeLessThan(rate * 0.05)
+    expect(Math.abs(played.length - clip.durationSamples)).toBeLessThan(rate * 0.02)
   })
 
   it('undo, redo, and reload keep follow-tempo', () => {
