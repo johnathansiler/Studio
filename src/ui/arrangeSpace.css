@@ -11,6 +11,7 @@
 .browser-chip-scroll { display: flex; flex: 1; min-width: 0; gap: 4px; overflow-x: auto; }
 .browser-tabs button, .browser-tabs select { min-height: 40px; flex: none; border-radius: 999px; border: 1px solid var(--line); background: #18231d; color: var(--text); padding: 0 12px; font-size: 13px; }
 .browser-close { border-radius: 8px; }
+.browser-tabs > .browser-close.overlay-close { margin: 0; align-self: center; }
 .shell .playlist-browser .sound-filters input,
 .shell .sound-panel .sound-filters input,
 .shell .browser-body input {
@@ -39,11 +40,12 @@
 .shell.fold .track-live { flex: none; }
 .shell.fold .pl-head .mini { min-height: 40px; height: 40px; }
 .shell.phone .browser-tabs button, .shell.phone .browser-tabs select, .shell.phone .browser-row { min-height: 44px; }
-.playlist-browser .sound-filters { flex-wrap: wrap; max-width: 100%; }
+.playlist-browser .sound-filters { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; }
 .playlist-browser .sound-filters select,
-.playlist-browser .sound-filters input,
-.playlist-browser .sound-filters button { max-width: 100%; min-width: 0; }
-.shell.phone .playlist-browser .sound-filters { flex-wrap: wrap; overflow-x: hidden; }
+.playlist-browser .sound-filters input { max-width: 100%; min-width: 0; }
+.playlist-browser .sound-filters .sound-filter { flex: none; min-width: 40px; min-height: 40px; }
+.shell.phone .playlist-browser .sound-filters { flex-wrap: nowrap; overflow-x: auto; }
+.shell.phone .playlist-browser .sound-filters .sound-filter { min-width: 44px; min-height: 44px; }
 .shell.phone .arrange { grid-template-columns: 188px minmax(0, 1fr); }
 .shell.phone:not(.land) .arrange { grid-template-columns: max-content minmax(48px, 1fr); --lane-h: 96px; }
 .shell.phone:not(.land) .pl-head {

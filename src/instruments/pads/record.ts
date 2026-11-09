@@ -18,6 +18,7 @@ export interface PadSound {
   path: string
   type: string
   tags?: string[]
+  category?: string
 }
 
 /** Shared loop, or one bar at the playhead when the loop is off. */
@@ -147,6 +148,24 @@ function soundHay(entry: PadSound): string {
   return `${entry.name} ${entry.path} ${entry.tags?.join(' ') ?? ''}`.toLowerCase()
 }
 
+/** Whole word for short tokens that sit inside other words, such as rim inside grime. */
+function roleWord(hay: string, word: string) {
+  if (word === 'rim' || word === 'tom' || word === 'hat') return new RegExp(`\\b${word}\\b`, 'i').test(hay)
+  return hay.includes(word)
+}
+
+/** A kick stays on the kick pad even when its tags mention a rim click. */
+function categoryAllows(category: string | undefined, words: string[]) {
+  if (!category) return true
+  if (category === 'kick') return words.includes('kick')
+  if (category === 'snare' || category === 'clap') return words.some((word) => word === 'snare' || word === 'clap')
+  if (category === 'hat') return words.includes('hat') || words.includes('open')
+  if (category === 'percussion' || category === 'cowbell' || category === 'shaker' || category === 'tambourine') {
+    return words.some((word) => word === 'tamb' || word === 'cow' || word === 'conga' || word === 'clave')
+  }
+  return true
+}
+
 /** A pad face shows the sound, wrapped, never cut off with an ellipsis. */
 export function shortPadName(name: string): string {
   const head = name.split(/\s[–—-]\s/)[0]?.trim() || name
@@ -167,8 +186,9 @@ export function pickDefaultKit(entries: PadSound[]): { index: number; id: string
     const found = pool.find((entry) => {
       if (used.has(entry.id)) return false
       const hay = soundHay(entry)
-      if (role.avoid?.some((word) => hay.includes(word))) return false
-      return role.words.every((word) => hay.includes(word))
+      if (!categoryAllows(entry.category, role.words)) return false
+      if (role.avoid?.some((word) => roleWord(hay, word))) return false
+      return role.words.every((word) => roleWord(hay, word))
     })
     if (!found) return
     used.add(found.id)

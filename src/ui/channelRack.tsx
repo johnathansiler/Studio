@@ -23,10 +23,9 @@ import { loopGridBeats } from '../model/loopEdit'
 import { STEP_BEAT, type StepCell, type StepChannel } from '../model/steps'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import { displayedPlayhead } from '../model/transportSync'
-import { fetchSoundBytes } from '../sounds/cache'
-import { catalogMessage, loadSoundCatalog } from '../sounds/catalog'
+import { catalogMessage, fetchCatalogSound, loadSoundCatalog } from '../sounds/catalog'
 import { decodeSoundBytes, matchProjectRate } from '../sounds/place'
-import { soundFileUrl } from '../sounds/source'
+import { libraryMatchesCategory, sampleRole, soundsForRole } from '../sounds/roles'
 import type { SoundEntry } from '../sounds/types'
 import { selectBeats } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -57,8 +56,8 @@ async function loadRowSample(store: ProjectStore, sampleId: string) {
   const catalog = await loadSoundCatalog()
   const id = sampleId.startsWith('lib_') ? sampleId.slice(4) : sampleId
   const entry = catalog.entries.find((item) => item.id === id)
-  if (!entry) throw new Error('That drum sample is not in the free library.')
-  const bytes = await fetchSoundBytes(soundFileUrl(entry.path))
+  if (!entry) throw new Error('That sound is not on this device. The rest of the project still plays.')
+  const bytes = await fetchCatalogSound(entry)
   const decoded = await decodeSoundBytes(bytes)
   const channels = matchProjectRate(decoded.channels, decoded.sampleRate, store.project.sampleRate)
   if (!channels[0]?.length) throw new Error('That drum sample had no audio.')
@@ -311,9 +310,11 @@ function Picker({
     if (category !== 'All' && category !== cat) return false
     return !needle || choice.name.toLowerCase().includes(needle)
   })
-  const libRows = category === 'Kicks' || category === 'Snares' || category === 'Hats' || category === 'Perc'
-    ? []
-    : library.filter((entry) => !needle || entry.name.toLowerCase().includes(needle) || entry.tags.some((tag) => tag.toLowerCase().includes(needle))).slice(0, 40)
+  const libRows = library.filter((entry) => {
+    if (!libraryMatchesCategory(entry, category)) return false
+    const hay = `${entry.name} ${entry.tags.join(' ')} ${entry.pack ?? ''} ${entry.category ?? ''} ${entry.role ?? ''} ${entry.key ?? ''} ${entry.bpm ?? ''} ${entry.origin === 'private' ? 'private' : ''}`.toLowerCase()
+    return !needle || hay.includes(needle)
+  })
   return (
     <div className="rack-picker" role="listbox" aria-label="Sounds to add. Search the kit or the library.">
       <input
@@ -350,7 +351,7 @@ function Picker({
             onClick={() => onLibrary(entry, index)}
           >
             <b>{shortSoundName(entry.name)}</b>
-            <small>Library</small>
+            <small>{entry.origin === 'private' ? 'Private' : 'Library'}</small>
           </button>
         ))}
       </div>
@@ -473,9 +474,12 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
     if (asked.current) return
     asked.current = true
     void loadSoundCatalog().then((result) => {
-      const sounds = result.entries.filter((entry) => entry.type === 'instrument' || entry.type === 'one-shot')
+      const sounds = soundsForRole(result.entries, 'step')
+      const roles = new Set(sounds.map((entry) => sampleRole(entry)))
       setLibrary(sounds)
-      setLibraryNote(sounds.length ? '' : catalogMessage(result, 0, false))
+      setLibraryNote(sounds.length
+        ? (roles.size === 1 && roles.has('kick') ? 'Downloaded drum one-shots are kicks. Other rows keep the built-in voices.' : '')
+        : catalogMessage(result, 0, false))
     })
   }
 
@@ -488,7 +492,7 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
     if (!sampleId || store.buffers.has(sampleId)) return
     void (async () => {
       try {
-        const bytes = await fetchSoundBytes(soundFileUrl(entry.path))
+        const bytes = await fetchCatalogSound(entry)
         const decoded = await decodeSoundBytes(bytes)
         const channels = matchProjectRate(decoded.channels, decoded.sampleRate, store.project.sampleRate)
         if (!channels[0]?.length) {

@@ -40,15 +40,20 @@ function beatAtSample(sample: number, project: Project) {
   return (lo + hi) / 2
 }
 
-export function loopBpm(entry: SoundEntry, channel: Float32Array, sampleRate: number) {
+/**
+ * Tempo follow uses the catalog BPM only.
+ * A loop with no BPM keeps its natural length unless the caller passes `conform`.
+ */
+export function loopBpm(entry: SoundEntry, channel?: Float32Array, sampleRate?: number, conform = false) {
   if (entry.type !== 'loop') return null
   if (entry.bpm && entry.bpm > 0) return entry.bpm
-  return detectBpm(channel, sampleRate)
+  if (conform && channel && sampleRate && sampleRate > 0) return detectBpm(channel, sampleRate)
+  return null
 }
 
 /**
  * Build the asset and clip for the playhead.
- * Loops follow the project tempo with the pitch-preserving stretch.
+ * A loop follows the song tempo only when the catalog recorded a BPM.
  */
 export function placeSound(options: {
   entry: SoundEntry

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { yinPitch } from '../audio/stretch/voice'
 import { encodeWav } from '../model/wav'
 import { createEmptyProject, type Project } from '../model/types'
-import { SoundCache, fetchSoundBytes, memoryByteStore } from '../sounds/cache'
+import { SOUND_DOWNLOAD_LIMIT, SoundCache, fetchSoundBytes, memoryByteStore, resetSoundDownloads, sha256Hex } from '../sounds/cache'
 import {
   bpmMatchesProject,
   catalogMessage,
@@ -15,7 +15,8 @@ import {
   parseCatalog,
 } from '../sounds/catalog'
 import { audioTrackFor, decodeSoundBytes, placeSound, previewChannelsFor, trackIdFromDrop } from '../sounds/place'
-import { assertSoundUrl, soundFileUrl, soundIndexUrl } from '../sounds/source'
+import { LEGACY_INDEX_URL, SOUND_DATASET_BASE } from '../sounds/contract'
+import { assertSoundUrl, legacySoundFileUrl, soundFileUrl } from '../sounds/source'
 import type { SoundEntry } from '../sounds/types'
 import { isUntouchedEmpty } from '../model/launchProject'
 import { selectSounds } from '../state/select'
@@ -95,15 +96,19 @@ describe('sound library', () => {
     expect(parsed.map((entry) => entry.id)).toEqual(['dust', 'pad', 'hat'])
     expect(parseCatalog({ sounds: fixture })).toEqual([])
 
-    const missing = await loadSoundCatalog(async () => new Response('missing', { status: 404 }))
+    const requested: string[] = []
+    const missing = await loadSoundCatalog(async (url) => {
+      requested.push(String(url))
+      return new Response('missing', { status: 404 })
+    })
     expect(missing).toEqual({ entries: [], status: 'missing' })
     expect(catalogMessage(missing, 0, false)).toBe('The sound library is not online yet.')
+    expect(requested.some((url) => url.endsWith('/index.json'))).toBe(false)
 
     const cache = new SoundCache([memoryByteStore()])
-    await cache.put(soundIndexUrl(), utf8(JSON.stringify(rawIndex())))
+    await cache.put(LEGACY_INDEX_URL, utf8(JSON.stringify(rawIndex())))
     const offline = await loadSoundCatalog(async () => { throw new Error('offline') }, cache)
-    expect(offline.status).toBe('ok')
-    expect(offline.entries.map((entry) => entry.id)).toEqual(['dust', 'pad', 'hat'])
+    expect(offline).toEqual({ entries: [], status: 'missing' })
   })
 
   it('filters by tag, kind, tempo, key, and favorites', () => {
@@ -120,7 +125,7 @@ describe('sound library', () => {
     expect(isDrumSound(fixture[2])).toBe(true)
     expect(isDrumSound(fixture[1])).toBe(false)
     expect(isDrumSound({ name: 'Gogodze kit kick', path: 'one-shots/drums/gogodze-kit/kick.wav', tags: ['drums', 'kit', 'kick'] })).toBe(true)
-    expect(filterSounds(fixture, { text: '', type: 'drum', bpm: 'any', key: '', favoritesOnly: false, projectBpm: 120, favorites }).map((entry) => entry.id)).toEqual(['hat', 'dust'])
+    expect(filterSounds(fixture, { text: '', type: 'drum', bpm: 'any', key: '', favoritesOnly: false, projectBpm: 120, favorites }).map((entry) => entry.id)).toEqual(['hat'])
   })
 
   it('accepts the C major and A minor labels used in the sound index', () => {
@@ -139,8 +144,9 @@ describe('sound library', () => {
   })
 
   it('fetches library files from Hugging Face and replays them from storage', async () => {
-    const url = soundFileUrl('loops/dust.wav')
-    expect(url).toBe('https://huggingface.co/datasets/cueharbor/sound-library/resolve/main/loops/dust.wav')
+    const url = legacySoundFileUrl('loops/dust.wav')
+    expect(url).toBe(`${SOUND_DATASET_BASE}/loops/dust.wav`)
+    expect(() => soundFileUrl('loops/dust.wav')).toThrow(/Hugging Face|library/)
     expect(() => soundFileUrl('../secret.wav')).toThrow(/Hugging Face/)
     expect(() => soundFileUrl('https://cueharbor.onrender.com/loops/dust.wav')).toThrow(/Hugging Face|library/)
     expect(() => assertSoundUrl('https://cueharbor.onrender.com/api/sounds/dust.wav')).toThrow(/Hugging Face/)
@@ -275,5 +281,79 @@ describe('sound library', () => {
     }))
     expect(missing).toContain('The sound library is not online yet.')
     expect(missing).toContain('Drag a sound onto a track')
+  })
+
+  it('bounds files already stored and does not drop a good copy when a new download fails', async () => {
+    const map = new Map<string, ArrayBuffer>()
+    const durable = memoryByteStore(map)
+    const older = legacySoundFileUrl('loops/older.wav')
+    const newer = legacySoundFileUrl('loops/newer.wav')
+    await durable.put(older, new Uint8Array(8).buffer)
+    await durable.put(newer, new Uint8Array(8).buffer)
+    const cache = new SoundCache([durable], 8)
+    expect(await cache.get(older)).toBeNull()
+    expect((await cache.get(newer))?.byteLength).toBe(8)
+
+    const url = legacySoundFileUrl('loops/keep.wav')
+    const good = new Uint8Array([4, 5, 6, 7])
+    const goodBytes = good.buffer.slice(good.byteOffset, good.byteOffset + good.byteLength)
+    const hash = await sha256Hex(goodBytes)
+    const keeper = new SoundCache([memoryByteStore()], 64)
+    await keeper.put(url, goodBytes)
+    await expect(fetchSoundBytes(url, async () => new Response('no', { status: 503 }), keeper, { sha256: 'ab'.repeat(32), attempts: 1 })).rejects.toThrow(/503/)
+    expect(new Uint8Array(await keeper.get(url) as ArrayBuffer)).toEqual(good)
+
+    let calls = 0
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const shared = new SoundCache([memoryByteStore()])
+    const fetchImpl = async () => {
+      calls += 1
+      await gate
+      return new Response(good)
+    }
+    const first = fetchSoundBytes(url, fetchImpl, shared, { sha256: hash, attempts: 1 })
+    const second = fetchSoundBytes(url, fetchImpl, shared, { sha256: hash, attempts: 1 })
+    release()
+    const [left, right] = await Promise.all([first, second])
+    expect(calls).toBe(1)
+    expect(new Uint8Array(left)).toEqual(good)
+    expect(new Uint8Array(right)).toEqual(good)
+  })
+
+  it('downloads a few files at a time and drops a cancel that is still waiting', async () => {
+    resetSoundDownloads()
+    const cache = new SoundCache([memoryByteStore()])
+    let active = 0
+    let peak = 0
+    let calls = 0
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const fetchImpl = async () => {
+      calls += 1
+      active += 1
+      peak = Math.max(peak, active)
+      await gate
+      active -= 1
+      return new Response(new Uint8Array([1, 2, 3, 4]))
+    }
+    const urls = [1, 2, 3, 4, 5].map((index) => legacySoundFileUrl(`loops/lane-${index}.wav`))
+    const running = urls.slice(0, SOUND_DOWNLOAD_LIMIT).map((url) => fetchSoundBytes(url, fetchImpl, cache, { attempts: 1 }))
+    const waiting = urls.slice(SOUND_DOWNLOAD_LIMIT).map((url) => fetchSoundBytes(url, fetchImpl, cache, { attempts: 1 }))
+    try {
+      for (let i = 0; i < 20 && calls < SOUND_DOWNLOAD_LIMIT; i += 1) await new Promise((resolve) => setTimeout(resolve, 5))
+      expect(calls).toBe(SOUND_DOWNLOAD_LIMIT)
+      expect(peak).toBeLessThanOrEqual(SOUND_DOWNLOAD_LIMIT)
+      const signal = new AbortController()
+      const cancelled = fetchSoundBytes(legacySoundFileUrl('loops/lane-cancel.wav'), fetchImpl, cache, { attempts: 1, signal: signal.signal })
+      signal.abort()
+      await expect(cancelled).rejects.toThrow(/cancel/i)
+      expect(calls).toBe(SOUND_DOWNLOAD_LIMIT)
+    } finally {
+      release()
+      await Promise.allSettled([...running, ...waiting])
+      resetSoundDownloads()
+    }
+    expect(calls).toBe(urls.length)
   })
 })

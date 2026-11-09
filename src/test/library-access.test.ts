@@ -23,7 +23,8 @@ import {
   writeSoundWidth,
   type SoundWidthMemory,
 } from '../sounds/panel'
-import { soundFileUrl } from '../sounds/source'
+import { SOUND_DATASET_BASE } from '../sounds/contract'
+import { legacySoundFileUrl, soundFileUrl } from '../sounds/source'
 import type { SoundEntry } from '../sounds/types'
 import { ProjectStore } from '../state/store'
 import { PatchSheet } from '../ui/PatchSheet'
@@ -110,8 +111,9 @@ describe('library access', () => {
       'loops-keys-felt-piano-g-120',
     ])
     expect(filterSounds(parsed, { ...query, type: 'instrument' })).toEqual([])
-    const file = soundFileUrl(loops[0].path)
-    expect(file).toBe('https://huggingface.co/datasets/cueharbor/sound-library/resolve/main/loops/drums/boom-bap_88bpm.wav')
+    expect(() => soundFileUrl(loops[0].path)).toThrow(/Hugging Face|library/)
+    const file = legacySoundFileUrl(loops[0].path)
+    expect(file).toBe(`${SOUND_DATASET_BASE}/loops/drums/boom-bap_88bpm.wav`)
     expect(file).not.toContain('github.com')
     expect(() => soundFileUrl(loops[0].source)).toThrow(/Hugging Face/)
     expect(() => soundFileUrl('https://cueharbor.onrender.com/loops/a.wav')).toThrow(/Hugging Face/)
@@ -163,9 +165,10 @@ describe('library access', () => {
       initial: { entries: loops, status: 'ok' },
       instruments: [xylophone],
     }))
-    expect(markup).toContain('Xylophone')
+    expect(markup).not.toContain('Xylophone')
+    expect(markup).not.toContain('Upright Piano')
     expect(markup).toContain('Boom Bap 88 BPM')
-    expect(markup).toContain('4 matches.')
+    expect(markup).toContain('3 matches.')
     expect(markup).toContain('Hugging Face')
     expect(markup).toContain('https://github.com/sgossner/VCSL')
     expect(markup).not.toContain('href="https://github.com')
@@ -180,7 +183,7 @@ describe('library access', () => {
       initial: { entries: loops, status: 'ok' },
       instruments: [xylophone],
     }))
-    expect(onKeys).toContain('Loads onto Keys.')
+    expect(onKeys).toContain('Adds on a new audio track at the playhead.')
 
     const phone = renderToStaticMarkup(createElement(SoundBrowser, {
       store,
@@ -194,7 +197,7 @@ describe('library access', () => {
     expect(phone).toContain('sound-dismiss')
     expect(phone).not.toContain('sound-resize')
     expect(phone).toContain('Close')
-    expect(phone).toContain('Load. Load it on this track and play a note.')
+    expect(phone).toContain('Load. Adds on a new audio track at the playhead.')
     expect(phone).toContain('>Drums<')
     expect(phone).not.toContain('role="dialog"')
   })
@@ -207,12 +210,11 @@ describe('library access', () => {
       store,
       engine: engineStub() as unknown as AudioEngine,
       trackId: keys.id,
-      initialCatalog: [xylophone],
     }))
-    expect(sheet).toContain('Starter instruments')
-    expect(sheet).toContain('Xylophone')
-    expect(sheet).toContain('starter:xylophone')
-    expect(sheet).not.toContain('>Load</option></select>')
+    expect(sheet).not.toContain('Starter instruments')
+    expect(sheet).not.toContain('Upright Piano')
+    expect(sheet).not.toContain('Xylophone')
+    expect(sheet).not.toContain('starter:xylophone')
 
     const urls: string[] = []
     const tone = new Float32Array(4800)

@@ -11,10 +11,9 @@ import { REPEAT_CHOICES, VELOCITY_CURVES, quantizeGridBeats, repeatSetting, step
 import { emptyTap, pushTap } from '../model/tap'
 import type { ProjectStore } from '../state/store'
 import { SOUND_MIME, captureSlot, micChannel, openInputCapture, rememberedSlotInput } from '../audio/sample/slot'
-import { fetchSoundBytes, soundCache } from '../sounds/cache'
-import { loadSoundCatalog } from '../sounds/catalog'
+import { soundCache } from '../sounds/cache'
+import { fetchCatalogSound, loadSoundCatalog } from '../sounds/catalog'
 import { decodeSoundBytes } from '../sounds/place'
-import { soundFileUrl } from '../sounds/source'
 import type { SoundEntry } from '../sounds/types'
 import { readIdentity } from '../storage/identity'
 import { onMidiMessage } from '../midi/access'
@@ -332,14 +331,14 @@ export function PadsPanel({
     const entry = sounds.current.find((item) => item.id === id)
     if (!entry) return
     try {
-      const bytes = await fetchSoundBytes(soundFileUrl(entry.path))
+      const bytes = await fetchCatalogSound(entry)
       const decoded = await decodeSoundBytes(bytes)
       const samples = decoded.channels[0]
       if (!samples?.length) return
       store.assignTrackPad(trackId, bank, index, { name: entry.name, samples, sampleRate: decoded.sampleRate })
       setSelected(index)
-    } catch {
-      store.toast('That sound could not be loaded onto the pad.', 'warn')
+    } catch (error) {
+      store.toast(error instanceof Error ? error.message : 'That sound could not be loaded onto the pad.', 'warn')
     }
   }
 

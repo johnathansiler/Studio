@@ -55,7 +55,7 @@ async function openSampler(page: Page, phone: boolean) {
     await page.locator('.mix-toolbar summary').click()
     await page.locator('.mix-panel').getByRole('tab', { name: 'Inserts' }).click()
   }
-  const root = page.locator(phone ? '.mix-panel' : '.anchored-menu[data-open="true"]').first()
+  const root = page.locator(phone ? '.mix-panel' : '#track-options')
   await root.getByRole('button', { name: 'Add plugin' }).click()
   await page.getByRole('button', { name: 'Sampler', exact: true }).click()
   const button = root.locator('.inserts button', { hasText: 'Sampler' })
@@ -159,6 +159,7 @@ describe('loop and sample panel', () => {
           return dest.stream
         }
       })
+      await deskPage.locator('.slot-panel').getByRole('tab', { name: 'Edit' }).click()
       await deskPage.locator('.slot-panel').getByRole('button', { name: /^Record/ }).click()
       await deskPage.locator('.slot-status', { hasText: 'Recording' }).waitFor({ timeout: 8000 })
       await deskPage.waitForTimeout(350)
@@ -168,9 +169,9 @@ describe('loop and sample panel', () => {
 
       await deskPage.locator('.plugin-sheet').getByRole('button', { name: 'Close the plugin.' }).click()
       await deskPage.locator('.head').first().getByRole('button', { name: /^Track/ }).click()
-      const deskSheet = deskPage.locator('.anchored-menu[data-open="true"]')
+      const deskSheet = deskPage.locator('#track-options')
       await deskSheet.getByRole('button', { name: 'Add plugin' }).click()
-      await deskSheet.getByRole('button', { name: 'Delay', exact: true }).click()
+      await deskPage.getByRole('button', { name: 'Delay', exact: true }).click()
       await deskSheet.locator('.inserts button', { hasText: 'Delay' }).waitFor()
       await desk.close()
 
@@ -182,7 +183,7 @@ describe('loop and sample panel', () => {
       expect(await percent(phonePage, '.slot-handle.loop')).toBeGreaterThan(25)
       await dragHandle(phonePage, '.slot-handle.edge', 0.18, 0.2, 'touch')
       expect(await percent(phonePage, '.slot-handle.edge')).toBeGreaterThan(8)
-      await phonePage.locator('.plugin-sheet').getByRole('button', { name: 'Close the plugin.' }).click()
+      await phonePage.locator('.plugin-sheet').getByRole('button', { name: 'Close the plugin.' }).evaluate((el) => (el as HTMLButtonElement).click())
       const phoneSlots = phonePage.locator('.mix-panel')
       if ((await phonePage.locator('details.mix-more').getAttribute('open')) == null) await phonePage.locator('.mix-toolbar summary').click()
       await phoneSlots.getByRole('tab', { name: 'Inserts' }).click()

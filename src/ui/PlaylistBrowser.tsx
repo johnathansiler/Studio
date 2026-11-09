@@ -11,7 +11,7 @@ export type BrowserTab = 'sounds' | 'instruments' | 'loops' | 'patterns' | 'clip
 
 const TABS: { id: BrowserTab; label: string; hint: string }[] = [
   { id: 'sounds', label: 'Sounds', hint: 'Loops, one-shots, drums, and instruments from the free library.' },
-  { id: 'instruments', label: 'Instruments', hint: 'Starter instruments. Drag one onto an instrument track.' },
+  { id: 'instruments', label: 'Instruments', hint: 'Library sounds. Load one sample across the keyboard.' },
   { id: 'loops', label: 'Loops', hint: 'Loops that follow the song tempo.' },
 ]
 

@@ -33,7 +33,7 @@ import { preparePadPcm, renderMpcAudio } from '../instruments/mpc/render'
 import { captureSlot } from '../audio/sample/slot'
 import { createKit } from '../model/padMachine'
 import { createEmptyProject, type PluginInstance } from '../model/types'
-import { soundFileUrl } from '../sounds/source'
+import { legacySoundFileUrl, soundFileUrl } from '../sounds/source'
 import { ProjectStore } from '../state/store'
 import { PadsPanel } from '../ui/PadsPanel'
 
@@ -190,8 +190,10 @@ describe('sampler drums', () => {
     const slices = kitFromSlices([{ bufferId: 'slice', root: 60, loopStart: 0.1, loopEnd: 0.4, reverse: true }], createKit())
     expect(slices.banks[0][0].layers[0].bufferId).toBe('slice')
     expect(slices.banks[0][0].region?.reverse).toBe(true)
-    const url = soundFileUrl('one-shots/drums/kick.wav')
+    expect(() => soundFileUrl('one-shots/drums/kick.wav')).toThrow(/Hugging Face|library/)
+    const url = legacySoundFileUrl('one-shots/drums/kick.wav')
     expect(url.startsWith('https://huggingface.co/datasets/cueharbor/sound-library/')).toBe(true)
+    expect(url.includes('soundscout-2026-11-09')).toBe(false)
     expect(url.includes('render.com') || url.includes('cloudflare')).toBe(false)
     expect(() => soundFileUrl('https://cdn.jsdelivr.net/gh/example/kick.wav')).toThrow()
   })

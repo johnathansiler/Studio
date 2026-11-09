@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { bindLocalSamples, importInstrument } from '../audio/multisample/import'
-import { STARTER_CATALOG, type LibraryEntry } from '../audio/multisample/library'
-import { loadStarterOnto, starterCatalog } from '../sounds/instruments'
+import { fetchCatalogSound, loadSoundCatalog } from '../sounds/catalog'
+import { decodeSoundBytes } from '../sounds/place'
+import type { SoundEntry } from '../sounds/types'
 import { selectInstrument } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import './instrument.css'
@@ -11,41 +12,48 @@ export function LibraryPanel({
   store,
   engine,
   trackId,
-  initialCatalog,
+  initialSounds,
 }: {
   store: ProjectStore
   engine: AudioEngine
   trackId: string
-  /** Tests pass the catalog so the picker renders without the network. */
-  initialCatalog?: LibraryEntry[]
+  /** Tests pass downloaded samples so the picker renders without the network. */
+  initialSounds?: SoundEntry[]
 }) {
   const instrument = selectInstrument(store, trackId)
   const program = instrument.program
-  const [status, setStatus] = useState(program ? `${program.name} · ${program.zones.length} zones` : 'Load a starter instrument or import SFZ, SF2, or DecentSampler.')
-  const [hint, setHint] = useState('Samples stay on this device or stream from Hugging Face. Nothing is hosted here.')
+  const [status, setStatus] = useState(program ? `${program.name} · ${program.zones.length} zones` : 'Load one downloaded sample, or import SFZ, SF2, or DecentSampler.')
+  const [hint, setHint] = useState('A downloaded file plays as one sample. It is not a multisampled instrument. Import still reads files on this device.')
   const [busy, setBusy] = useState(false)
-  const [catalog, setCatalog] = useState<LibraryEntry[]>(initialCatalog ?? STARTER_CATALOG)
+  const [sounds, setSounds] = useState<SoundEntry[]>(initialSounds ?? [])
   const show = (text: string) => setHint(text)
 
   useEffect(() => {
-    if (initialCatalog) return
+    if (initialSounds) return
     let alive = true
-    void starterCatalog().then((next) => {
-      if (alive) setCatalog(next)
+    void loadSoundCatalog().then((next) => {
+      if (alive) setSounds(next.entries)
     }).catch(() => undefined)
     return () => { alive = false }
-  }, [initialCatalog])
+  }, [initialSounds])
 
-  async function loadStarter(entry: LibraryEntry) {
+  async function loadSample(entry: SoundEntry) {
     setBusy(true)
-    setStatus(`Downloading ${entry.name} from Hugging Face…`)
+    setStatus(`Downloading ${entry.name}…`)
     try {
-      const imported = await loadStarterOnto(entry, trackId, {
-        setLibrary: (id, program) => store.setLibrary(id, program),
-        holdLibraryPack: (id, pack) => engine.holdLibraryPack(id, pack),
-        auditionLibrary: (id, pitch) => engine.auditionLibrary(id, pitch),
-      })
-      setStatus(`${imported.program.name} · ${imported.program.zones.length} zones · samples stream per note`)
+      const bytes = await fetchCatalogSound(entry)
+      const decoded = await decodeSoundBytes(bytes)
+      if (!decoded.channels[0]?.length) {
+        setStatus('That file had no audio.')
+        return
+      }
+      store.loadSamplerSound(trackId, {
+        id: `lib_${entry.id}`,
+        name: entry.name,
+        sampleRate: decoded.sampleRate,
+        channels: decoded.channels,
+      }, undefined, entry.type === 'loop')
+      setStatus(`${entry.name} plays as one sample across the keyboard.`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Download failed')
     } finally {
@@ -89,20 +97,20 @@ export function LibraryPanel({
     <div className="library-panel">
       <div className="library-row">
         <select
-          aria-label="Load starter instrument"
-          title="Load a free starter instrument onto this track. Samples stream from Hugging Face."
-          value={catalog.some((entry) => entry.id === program?.id) ? program?.id ?? '' : ''}
+          aria-label="Load sample"
+          title="Load one downloaded file onto this track. It plays as a single sample, not a multisampled instrument."
+          value=""
           disabled={busy}
           onChange={(event) => {
-            const entry = catalog.find((item) => item.id === event.target.value)
+            const entry = sounds.find((item) => item.id === event.target.value)
             if (!entry) return
-            show(entry.description || `Load ${entry.name}. Samples stream from Hugging Face.`)
-            void loadStarter(entry)
+            show(`${entry.name} is one ${entry.type === 'loop' ? 'loop' : 'one-shot'}. It is not a multisampled instrument.`)
+            void loadSample(entry)
           }}
         >
-          <option value="">Load</option>
-          {catalog.map((entry) => (
-            <option key={entry.id} value={entry.id} title={entry.description}>{entry.name}</option>
+          <option value="">Load sample</option>
+          {sounds.map((entry) => (
+            <option key={entry.id} value={entry.id}>{entry.name} · {entry.origin === 'private' ? 'Private' : entry.type === 'loop' ? 'Loop' : 'One-shot'}</option>
           ))}
         </select>
         <label className="library-file" title="Read an SFZ, SoundFont, or DecentSampler file from this device. The audio stays in this browser.">

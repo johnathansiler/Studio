@@ -12,10 +12,28 @@ export interface SoundEntry {
   tags: string[]
   bpm?: number
   key?: string
+  /** Evidenced note name, such as C1 on a kick. This is not a musical key. */
+  pitch?: string
   durationSec: number
   sampleRate: number
   license: string
   source: string
+  collection?: string
+  category?: string
+  sha256?: string
+  bytes?: number
+  pack?: string
+  licenseClass?: string
+  licenseNote?: string
+  creator?: string
+  attributionRequired?: boolean
+  isContentAlias?: boolean
+  /** `private` files live in this browser. They are not factory URLs. */
+  origin?: 'library' | 'private'
+  /** Catalog role such as drum_one_shot, one_shot, or loop. */
+  role?: string
+  publisher?: string
+  localBlobId?: string
 }
 
 export interface CatalogResult {
@@ -34,4 +52,12 @@ export interface SoundQuery {
   favoritesOnly: boolean
   projectBpm: number
   favorites: string[]
+  /** Empty shows every collection. */
+  collection?: string
+  /** Empty shows every category. */
+  category?: string
+  /** Empty shows every tag. */
+  tag?: string
+  /** Empty shows every catalog role, such as loop or drum_one_shot. */
+  role?: string
 }

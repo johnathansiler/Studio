@@ -52,6 +52,12 @@
   max-height: min(var(--sheet-h, 58%), 62dvh, calc(100% - 36px));
 }
 
+/* Landscape phones are short. Keep the search row above the edit bar. */
+.shell.phone.land .arrange-stage > .playlist-browser.bottom-sheet {
+  flex: 0 0 auto;
+  min-height: 118px;
+}
+
 .shell.phone .arrange-stage.browser-bottom.plugins-bottom > .bottom-sheet {
   flex-basis: var(--sheet-h, 42%);
   max-height: min(var(--sheet-h, 42%), 46%, 46dvh);

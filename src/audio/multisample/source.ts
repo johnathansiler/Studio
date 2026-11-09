@@ -13,11 +13,18 @@ export function setLibraryBaseUrl(url: string) {
   baseUrl = trimmed
 }
 
+/** Encode each path segment once so `#`, `?`, and spaces stay in the path. */
+export function encodeLibraryPath(path: string) {
+  return path.replace(/\\/g, '/').split('/').filter((segment) => segment.length > 0).map((segment) => encodeURIComponent(segment)).join('/')
+}
+
 export function libraryFileUrl(base: string, path: string) {
   const root = base.trim().replace(/\/$/, '')
   const clean = path.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '')
-  const url = new URL(clean, `${root}/`).toString()
+  if (!clean || clean.split('/').includes('..')) throw new Error('Library files must be Hugging Face URLs')
+  const url = new URL(encodeLibraryPath(clean), `${root}/`).toString()
   assertHuggingFaceUrl(url)
+  if (new URL(url).hash) throw new Error('Library files must be Hugging Face URLs')
   return url
 }
 
@@ -45,7 +52,7 @@ export function resolveSampleUrl(presetUrl: string, samplePath: string) {
   }
   const root = presetUrl.replace(/[^/]*$/, '')
   const clean = samplePath.replace(/\\/g, '/').replace(/^\.\//, '')
-  const url = new URL(clean, root).toString()
+  const url = new URL(encodeLibraryPath(clean), root).toString()
   assertHuggingFaceUrl(url)
   return url
 }

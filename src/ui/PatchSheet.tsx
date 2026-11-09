@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { GestureReadout, TouchSlider, useDragValue } from './kit/controls'
 import type { AudioEngine } from '../audio/engine'
-import { STARTER_CATALOG, type LibraryEntry } from '../audio/multisample/library'
-import { loadStarterOnto, starterCatalog } from '../sounds/instruments'
 import { detectRoot } from '../audio/sample/engine'
+import { fetchCatalogSound, loadSoundCatalog } from '../sounds/catalog'
+import { decodeSoundBytes } from '../sounds/place'
+import type { SoundEntry } from '../sounds/types'
 import {
   LAYER_KINDS,
   MAX_LAYERS,
@@ -42,13 +43,13 @@ export function PatchSheet({
   store,
   engine,
   trackId,
-  initialCatalog,
+  initialSounds,
 }: {
   store: ProjectStore
   engine: AudioEngine
   trackId: string
-  /** Tests pass the catalog so the Load menu renders without the network. */
-  initialCatalog?: LibraryEntry[]
+  /** Tests pass downloaded samples so the Load menu renders without the network. */
+  initialSounds?: SoundEntry[]
 }) {
   const track = store.track(trackId)
   const patch = track?.omniPatch
@@ -57,30 +58,45 @@ export function PatchSheet({
   const [routeId, setRouteId] = useState('')
   const [more, setMore] = useState(false)
   const [hint, setHint] = useState(controlHelp('tabLayers'))
-  const [starters, setStarters] = useState<LibraryEntry[]>(initialCatalog ?? STARTER_CATALOG)
+  const [samples, setSamples] = useState<SoundEntry[]>(initialSounds ?? [])
   useEffect(() => {
-    if (initialCatalog) return
+    if (initialSounds) return
     let alive = true
-    void starterCatalog().then((next) => {
-      if (alive) setStarters(next)
+    void loadSoundCatalog().then((next) => {
+      if (alive) setSamples(next.entries)
     }).catch(() => undefined)
     return () => { alive = false }
-  }, [initialCatalog])
+  }, [initialSounds])
   useEffect(() => () => {
     for (const note of KEYS) engine.previewPatch(trackId, note, false)
   }, [engine, trackId])
   async function loadChoice(value: string) {
-    if (value.startsWith('starter:')) {
-      const entry = starters.find((item) => item.id === value.slice('starter:'.length))
+    if (value.startsWith('sample:')) {
+      const entry = samples.find((item) => item.id === value.slice('sample:'.length))
       if (!entry) return
-      setHint(`Downloading ${entry.name} from Hugging Face…`)
+      setHint(`Downloading ${entry.name}…`)
       try {
-        const imported = await loadStarterOnto(entry, trackId, {
-          setLibrary: (id, program) => store.setLibrary(id, program),
-          holdLibraryPack: (id, pack) => engine.holdLibraryPack(id, pack),
-          auditionLibrary: (id, pitch) => engine.auditionLibrary(id, pitch),
+        const bytes = await fetchCatalogSound(entry)
+        const decoded = await decodeSoundBytes(bytes)
+        if (!decoded.channels[0]?.length) {
+          setHint('That file had no audio.')
+          return
+        }
+        const id = uid('smp')
+        store.addAsset({ id, name: entry.name, sampleRate: decoded.sampleRate, channels: decoded.channels })
+        const root = detectRoot(decoded.channels[0], decoded.sampleRate)
+        let placed = false
+        store.updateOmni(trackId, (current) => {
+          const added = current.layers.length < MAX_LAYERS ? addLayer(current, 'sampler') : null
+          const target = added ?? current.layers.find((item) => item.kind === 'sampler' || item.kind === 'granular')
+          if (!target) return
+          editLayer(current, target.id, { bufferId: id, root })
+          if (added) setLayerId(added.id)
+          placed = true
         })
-        setHint(`${imported.program.name} is on this track. Samples stream from Hugging Face.`)
+        setHint(placed
+          ? `${entry.name} is one ${entry.type === 'loop' ? 'loop' : 'one-shot'} on a sampler layer. The other synth layers stay as they are.`
+          : 'This patch has no room for another sample layer.')
       } catch (error) {
         setHint(error instanceof Error ? error.message : 'Download failed')
       }
@@ -113,14 +129,16 @@ export function PatchSheet({
         <button type="button" className="text-btn" title={controlHelp('name')} onClick={() => store.saveOmniPatch(trackId)}>Save</button>
         <select
           aria-label="Load patch"
-          title="Load a starter instrument or a saved patch. Starter instruments play from Hugging Face."
+          title="Load one downloaded sample onto a sampler layer, or a patch saved in this project. Analog, wavetable, and FM layers stay as they are."
           value=""
           onChange={(event) => { if (event.target.value) void loadChoice(event.target.value) }}
         >
           <option value="">Load</option>
-          <optgroup label="Starter instruments">
-            {starters.map((item) => <option key={item.id} value={`starter:${item.id}`} title={item.description}>{item.name}</option>)}
-          </optgroup>
+          {samples.length > 0 && (
+            <optgroup label="Downloaded samples">
+              {samples.map((item) => <option key={item.id} value={`sample:${item.id}`}>{item.name} · {item.origin === 'private' ? 'Private' : item.type === 'loop' ? 'Loop' : 'One-shot'}</option>)}
+            </optgroup>
+          )}
           {(store.project.omniLibrary ?? []).length > 0 && (
             <optgroup label="Saved patches">
               {(store.project.omniLibrary ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
