@@ -11,6 +11,11 @@ export interface AnalysisKey {
   label: string
   /** Correlation of the pitch profile with the chosen key. 0 when there is no music. */
   confidence: number
+  /**
+   * The relative major or minor when the notes fit both and the cadence does not settle it.
+   * Absent when the center is clear.
+   */
+  alternative?: string
 }
 
 export interface AnalysisChord {

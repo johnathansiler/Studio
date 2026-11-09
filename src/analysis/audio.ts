@@ -42,7 +42,7 @@ export function analyzeAudio(buffer: AnalysisBuffer): AnalysisResult {
     accumulateBar(bars[index], chroma, frame.bass, frame.rms, frame.flux)
   }
   const hist = histogramFromFrames(frames, shift, foldChroma)
-  const fitted = keyFromHistogram(hist)
+  const fitted = keyFromHistogram(hist, bars)
   const { scale, ...key } = fitted
   const chordsByBar = chordsForBars(bars, barBeats, { root: fitted.root, scale: fitted.scale })
   const activity: BarActivity[] = bars.map((bar) => ({

@@ -13,7 +13,7 @@ export { analyzeProject, beatAtSample } from './project'
 export type { AnalysisAsset } from './project'
 export { transcribeHum } from './pitch'
 export { analyzeAudioInWorker, analyzeProjectInWorker, transcribeHumInWorker } from './job'
-export { summaryLine } from './cache'
+export { analysisReadout, summaryLine } from './cache'
 export type {
   AnalysisBuffer,
   AnalysisChord,

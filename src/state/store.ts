@@ -3,7 +3,7 @@ import { FEATURES, preferArrangeTransport, preferArrangeView } from '../features
 import { spectralKey, ensureRepair, pushOp, sliceRegion } from '../audio/spectral/edit'
 import { learnOffline } from '../audio/spectral/job'
 import type { SpectralAction, SpectralRegion } from '../audio/spectral/types'
-import { scheduleStretchCommit, stretchCacheKey } from '../audio/stretch/commit'
+import { queueClipStretch } from '../audio/stretch/commit'
 import { TUNE_INSERT_PRESET } from '../audio/plugins/autoTune'
 import { createPlugin, normalizeProject, presetParams } from '../audio/plugins/catalog'
 import {
@@ -27,7 +27,7 @@ import {
   type LoopTake,
 } from '../audio/sample/engine'
 import { assetFromClip, placeLooper, placeSampler, playbackChannel, readSlotPoints, type SlotPoints } from '../audio/sample/slot'
-import { defaultStretch, inspectClip, renderClipChannels, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
+import { defaultStretch, inspectClip, sourceSamplesOf, stretchEdge, timelineSamples } from '../audio/stretch/engine'
 import { feedbackMessage } from '../audio/core/graph'
 import { findCycle, MASTER } from '../audio/routing'
 import { isPackAsset, packToAsset } from '../audio/multisample/persist'
@@ -141,7 +141,7 @@ import { downbeatAt, projectBeatSample, projectSampleBeat, snapSampleToMap, temp
 import { beatsToSamples, countInBarsOf, cycleCountInBars, quartersPerBar, samplesToBeats } from '../model/time'
 import { linearResample } from '../model/wav'
 import { renderDrum, DRUM_PADS } from '../model/drums'
-import { isDrumTrack, clampRoll, DRUM_STEP, hitAt } from '../model/drumLanes'
+import { isDrumTrack, clampRoll, DRUM_STEP, hitAt, stepIndexFor } from '../model/drumLanes'
 import { clearStep, editorState, normalizeMidiEditor, placeStep, tieHeld, writeRollPrefs, type StepTone } from '../model/stepEntry'
 import {
   chainSong,
@@ -3005,12 +3005,14 @@ export class ProjectStore {
    * Otherwise a new track of the right kind, which becomes the selection.
    * One undo step.
    */
-  placeClipAtPlayhead(trackId: string | null, clip: AudioClip | MidiClip, playheadSample: number) {
+  placeClipAtPlayhead(trackId: string | null, clip: AudioClip | MidiClip, playheadSample: number): { trackId: string; clipId: string } | null {
     const playhead = readPlayhead(this.project, playheadSample)
     const placed = stampClipAtPlayhead(clip, playhead)
+    let result: { trackId: string; clipId: string } | null = null
     this.mutate(() => {
-      this.commitArrangedClip(trackId, placed)
+      result = this.commitArrangedClip(trackId, placed)
     })
+    return result
   }
 
   /**
@@ -3251,18 +3253,9 @@ export class ProjectStore {
     const asset = this.buffers.get(clip.bufferId)
     if (!asset?.channels.length || !clip.stretch) return
     const source = sourceSamplesOf(clip)
-    const sliced = asset.channels.map((channel) => Float32Array.from(channel.subarray(clip.offsetSamples, Math.min(channel.length, clip.offsetSamples + source))))
-    const frozen: AudioClip = {
-      ...clip,
-      stretch: { ...clip.stretch, markers: clip.stretch.markers.map((marker) => ({ ...marker })) },
-    }
-    const project = this.project
-    const key = stretchCacheKey(frozen, project)
-    scheduleStretchCommit(
-      key,
-      () => renderClipChannels(sliced, frozen, project, 'hq'),
-      () => renderClipChannels(sliced, frozen, project, 'preview'),
-    )
+    const end = Math.min(asset.channels[0]?.length ?? 0, clip.offsetSamples + source)
+    const channels = asset.channels.map((channel) => Float32Array.from(channel.subarray(0, end)))
+    queueClipStretch(clip, channels, this.project)
   }
 
   private detectClipBpm(clip: AudioClip) {
@@ -3281,7 +3274,11 @@ export class ProjectStore {
         return asset?.channels[0].length ?? clip.offsetSamples + clip.durationSamples
       }))
       for (const track of this.project.tracks) {
-        for (const clip of track.clips) if (ids.has(clip.id)) this.commitClip(clip)
+        for (const clip of track.clips) {
+          if (!ids.has(clip.id)) continue
+          if (clip.stretch?.followTempo) clip.durationSamples = timelineSamples(clip, this.project)
+          this.commitClip(clip)
+        }
       }
     })
   }
@@ -5964,6 +5961,8 @@ export class ProjectStore {
       if (!clip) return
       const beat = step * DRUM_STEP
       let note = hitAt(clip.notes, pitch, step)
+      const selected = this.selectedNoteId ? clip.notes.find((item) => item.id === this.selectedNoteId) : undefined
+      if (selected && selected.pitch === pitch && stepIndexFor(selected.startBeat) === step) note = selected
       if (patch.on === false) {
         if (!note) return
         const id = note.id

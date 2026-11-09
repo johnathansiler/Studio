@@ -43,8 +43,10 @@ describe('browser load at the playhead', () => {
     store.selectTrack(keys.id)
     const before = store.project.tracks.length
     const sample = Math.round(1.3 * store.project.sampleRate * (60 / store.project.tempo))
-    store.placeClipAtPlayhead(null, audioClip('Clarinet'), sample)
+    const placed = store.placeClipAtPlayhead(null, audioClip('Clarinet'), sample)
     expect(store.project.tracks.length).toBe(before + 1)
+    expect(placed?.trackId).toBe(store.selectedTrackId)
+    expect(placed?.clipId).toBe('clip-Clarinet')
     const track = store.project.tracks.find((item) => item.id === store.selectedTrackId)!
     expect(track.type).toBe('audio')
     expect(track.name).toBe('Clarinet')

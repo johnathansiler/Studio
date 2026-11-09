@@ -31,9 +31,29 @@ export function drumRows(notes: { pitch: number }[]): { pitch: number; name: str
   ]
 }
 
+/**
+ * Sixteenth that owns this hit. The window is half a step on either side.
+ * An exact midpoint belongs to the later sixteenth, so the hit lights one cell.
+ */
+export function stepIndexFor(startBeat: number): number {
+  if (!Number.isFinite(startBeat)) return -1
+  return Math.max(0, Math.round(startBeat / DRUM_STEP))
+}
+
+/** The nearest hit of this pitch that belongs to the step. Timings are not changed. */
 export function hitAt(notes: MidiNote[], pitch: number, step: number): MidiNote | undefined {
   const beat = step * DRUM_STEP
-  return notes.find((note) => note.pitch === pitch && Math.abs(note.startBeat - beat) < 0.02)
+  let best: MidiNote | undefined
+  let bestDist = Infinity
+  for (const note of notes) {
+    if (note.pitch !== pitch || stepIndexFor(note.startBeat) !== step) continue
+    const dist = Math.abs(note.startBeat - beat)
+    if (dist < bestDist) {
+      best = note
+      bestDist = dist
+    }
+  }
+  return best
 }
 
 export function clampRoll(value: number): number {

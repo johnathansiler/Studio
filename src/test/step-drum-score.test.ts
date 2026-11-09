@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { soundingNotes, stepCount, swingShift } from '../model/drumLanes'
+import { hitAt, soundingNotes, stepCount, stepIndexFor, swingShift } from '../model/drumLanes'
+import { ROLL_HIGH, ROLL_LOW } from '../ui/PianoRoll'
 import { chooseClef, keyFifths, layoutScore, midiAtPosition, scoreSvg, spellPitch, staffPosition } from '../model/score'
 import { clearStep, nearestStep, placeStep, stepPlace, tieHeld } from '../model/stepEntry'
 import { createEmptyProject, type MidiNote, type Project } from '../model/types'
@@ -165,5 +166,63 @@ describe('score', () => {
     expect(remoteTrack.midiClips[0].notes[0].durationBeats).toBe(1)
     host.removeScoreNote(track.id, clipId, host.selectedNoteId!)
     expect(host.project.tracks.find((item) => item.id === track.id)!.midiClips[0].notes).toHaveLength(0)
+  })
+})
+
+describe('recorded drum notes stay visible', () => {
+  const kick = note({ id: 'kick', pitch: 36, startBeat: 0, durationBeats: 0.05 })
+  const snare = note({ id: 'snare', pitch: 38, startBeat: 0.4636, durationBeats: 0.21 })
+
+  it('keeps kick and snare inside the piano roll', () => {
+    expect(ROLL_LOW).toBeLessThanOrEqual(24)
+    expect(ROLL_HIGH).toBeGreaterThanOrEqual(84)
+    expect(kick.pitch).toBeGreaterThanOrEqual(ROLL_LOW)
+    expect(snare.pitch).toBeLessThanOrEqual(ROLL_HIGH)
+    expect(48).toBeGreaterThan(kick.pitch)
+  })
+
+  it('shows an off-grid pad hit on the nearest sixteenth', () => {
+    const notes = [kick, snare]
+    expect(hitAt(notes, 36, 0)?.id).toBe('kick')
+    expect(hitAt(notes, 38, 2)?.id).toBe('snare')
+    expect(snare.startBeat).toBeCloseTo(0.4636)
+    expect(hitAt(notes, 38, 1)).toBeUndefined()
+    expect(hitAt(notes, 38, 0)).toBeUndefined()
+  })
+
+  it('gives an exact midpoint to the later sixteenth and does not move the note', () => {
+    const mid = note({ id: 'mid', pitch: 36, startBeat: 0.125, durationBeats: 0.2 })
+    const early = note({ id: 'early', pitch: 38, startBeat: 0.124, durationBeats: 0.2 })
+    expect(stepIndexFor(0.125)).toBe(1)
+    expect(stepIndexFor(0.124)).toBe(0)
+    expect(stepIndexFor(0.375)).toBe(2)
+    expect(hitAt([mid], 36, 1)?.id).toBe('mid')
+    expect(hitAt([mid], 36, 0)).toBeUndefined()
+    expect(hitAt([early], 38, 0)?.id).toBe('early')
+    expect(hitAt([early], 38, 1)).toBeUndefined()
+    const nearer = note({ id: 'grid', pitch: 36, startBeat: 0, durationBeats: 0.2 })
+    const farther = note({ id: 'late', pitch: 36, startBeat: 0.1, durationBeats: 0.2 })
+    expect(hitAt([farther, nearer], 36, 0)?.id).toBe('grid')
+    expect(farther.startBeat).toBeCloseTo(0.1)
+    expect(nearer.startBeat).toBeCloseTo(0)
+
+    const store = new ProjectStore(createEmptyProject())
+    const track = store.project.tracks.find((item) => item.type === 'midi')!
+    store.addMidiClip(track.id, 0)
+    const clip = store.track(track.id)!.midiClips[0]
+    clip.notes = [
+      { ...farther },
+      { ...nearer },
+    ]
+    store.selectNote(farther.id)
+    store.setDrumHit(track.id, clip.id, 36, 0, { velocity: 0.4 })
+    const edited = store.track(track.id)!.midiClips[0].notes
+    expect(edited.find((item) => item.id === 'late')!.startBeat).toBeCloseTo(0.1)
+    expect(edited.find((item) => item.id === 'late')!.velocity).toBeCloseTo(0.4)
+    expect(edited.find((item) => item.id === 'grid')!.velocity).not.toBeCloseTo(0.4)
+    store.setDrumHit(track.id, clip.id, 36, 0, { on: false })
+    const left = store.track(track.id)!.midiClips[0].notes
+    expect(left.map((item) => item.id)).toEqual(['grid'])
+    expect(left[0].startBeat).toBeCloseTo(0)
   })
 })
