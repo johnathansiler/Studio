@@ -167,7 +167,7 @@ function delayLine(seconds: number, sampleRate: number) {
 
 /** Tape echo with wow and a saturated feedback path. */
 export function createEcho(sampleRate: number): Processor {
-  const line = [delayLine(1.2, sampleRate), delayLine(1.2, sampleRate)]
+  const line = [delayLine(1.8, sampleRate), delayLine(1.8, sampleRate)]
   const shaper = createShaper(2)
   let write = 0
   let phase = 0
@@ -182,7 +182,7 @@ export function createEcho(sampleRate: number): Processor {
       phase = 0
     },
     process(input, output, params, ctx) {
-      const time = clamp(params.time ?? 280, 20, 1000) / 1000
+      const time = clamp(params.time ?? 280, 1, 1800) / 1000
       const feedback = clamp(params.feedback ?? 0.35, 0, 0.9)
       const wow = clamp(params.wow ?? 0.25, 0, 1)
       const drive = clamp(params.drive ?? 0.3, 0, 1)
@@ -209,7 +209,7 @@ export function createEcho(sampleRate: number): Processor {
 
 /** Bucket-brigade delay: short time and a clock lowpass in the loop. */
 export function createBbd(sampleRate: number): Processor {
-  const line = [delayLine(0.4, sampleRate), delayLine(0.4, sampleRate)]
+  const line = [delayLine(1.8, sampleRate), delayLine(1.8, sampleRate)]
   const tone = [designBiquad('lowpass', sampleRate, 3000, 0.7), designBiquad('lowpass', sampleRate, 3000, 0.7)]
   let write = 0
   const meter = createMeter()
@@ -224,7 +224,7 @@ export function createBbd(sampleRate: number): Processor {
       tone[1].x1 = tone[1].x2 = tone[1].y1 = tone[1].y2 = 0
     },
     process(input, output, params, ctx) {
-      const time = clamp(params.time ?? 180, 10, 380) / 1000
+      const time = clamp(params.time ?? 180, 1, 1800) / 1000
       const feedback = clamp(params.feedback ?? 0.3, 0, 0.85)
       const clock = clamp(params.clock ?? 0.5, 0, 1)
       const cutoff = 1200 + (1 - clock) * 5000

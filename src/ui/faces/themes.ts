@@ -88,4 +88,4 @@ export function themeFor(id: string): FaceTheme {
   return FACE_THEMES[id] ?? theme(id, id, id.slice(0, 2).toUpperCase(), 'util', 'knobs', '#141816', '#73c48f', '#d5f5e3')
 }
 
-export const TOGGLE_IDS = new Set(['bright', 'cab', 'axis', 'mute', 'sync', 'pingpong', 'tube', 'linear', 'reverse', 'keys', 'mono', 'record', 'stretch'])
+export const TOGGLE_IDS = new Set(['bright', 'cab', 'axis', 'mute', 'sync', 'pingpong', 'tube', 'linear', 'reverse', 'keys', 'mono', 'record', 'stretch', 'phase', 'dynamic', 'color', 'clipMode', 'curve', 'speed'])

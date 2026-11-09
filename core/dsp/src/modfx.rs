@@ -138,9 +138,12 @@ impl ModBank {
             let tap_l = read_at(&self.double[0], self.double_write, base + self.double_phase.sin() * depth);
             let tap_r = read_at(&self.double[1], self.double_write, base * 1.3 + self.double_phase.cos() * depth);
             let mid = (dry_l + dry_r) * 0.5;
-            let side = (dry_l - dry_r) * 0.5 * (1.0 + width);
-            left[i] = store(dry_l * (1.0 - mix) + ((mid + side) * 0.7 + tap_r * 0.5) * mix);
-            right[i] = store(dry_r * (1.0 - mix) + ((mid - side) * 0.7 + tap_l * 0.5) * mix);
+            let side = (dry_l - dry_r) * 0.5 * width;
+            let spread = 0.15 + width * 0.85;
+            let wet_l = mid + side + (tap_r - mid) * spread;
+            let wet_r = mid - side + (tap_l - mid) * spread;
+            left[i] = store(dry_l * (1.0 - mix) + wet_l * mix);
+            right[i] = store(dry_r * (1.0 - mix) + wet_r * mix);
             self.double_write = (self.double_write + 1) % length;
         }
     }

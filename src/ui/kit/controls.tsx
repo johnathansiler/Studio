@@ -86,6 +86,7 @@ export function Knob({
   value,
   unit = '',
   fallback,
+  format,
   onChange,
 }: {
   label: string
@@ -94,19 +95,21 @@ export function Knob({
   value: number
   unit?: string
   fallback: number
+  format?: (value: number) => string
   onChange: (value: number) => void
 }) {
+  const shownOf = format ?? ((next: number) => formatValue(next, unit))
   const { ref, readout, dragging } = useDragValue<HTMLButtonElement>({
     min,
     max,
     value,
     fallback,
-    format: (next) => formatValue(next, unit),
+    format: shownOf,
     onChange,
   })
   const unitValue = clampUnit(value, min, max)
   const angle = -140 + unitValue * 280
-  const shown = formatValue(value, unit)
+  const shown = shownOf(value)
   return (
     <div className={`kit-knob${dragging ? ' dragging' : ''}`}>
       <button
