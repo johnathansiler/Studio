@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { analyzeProjectInWorker, transcribeHumInWorker } from '../analysis/job'
-import { rememberTrackAnalysis, subscribeAnalysis, summaryLine, trackAnalysis } from '../analysis/cache'
+import { analysisReadout, rememberTrackAnalysis, subscribeAnalysis, summaryLine, trackAnalysis } from '../analysis/cache'
 import type { AnalysisResult, HumNote } from '../analysis/types'
 import type { Project } from '../model/types'
 import type { ProjectStore } from '../state/store'
@@ -161,7 +161,7 @@ export function AnalysisSheet({
       {error && <p className="hint">{error}</p>}
       {analysis && (
         <div className="analysis-result">
-          <p className="readout">{analysis.key.confidence <= 0 && !analysis.chordsByBar.length ? 'Nothing to analyze on this track yet.' : `${analysis.key.label} · ${analysis.scale} · ${Math.round(analysis.tempo)} bpm`}</p>
+          <p className="readout">{analysisReadout(analysis)}</p>
           <div className="chords" aria-label="Chords">
             {analysis.chordsByBar.map((chord) => (
               <span className="chord" key={`${chord.bar}-${chord.symbol}`}>{chord.bar + 1} {chord.symbol}</span>
