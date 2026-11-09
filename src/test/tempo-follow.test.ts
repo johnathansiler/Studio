@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { NOTE_PEAK } from '../audio/level'
 import { peakIndex, renderClipChannels, timelineSamples } from '../audio/stretch/engine'
 import { followClockToken, onStretchCommit, queueClipStretch, readStretch, stretchCacheKey, stretchSlot } from '../audio/stretch/commit'
 import { yinPitch } from '../audio/stretch/voice'
@@ -149,7 +150,7 @@ describe('loaded loop tempo follow', () => {
     expect(clip.stretch?.sourceSamples).toBeLessThan(full)
     expect(clip.offsetSamples + (clip.stretch?.sourceSamples ?? 0)).toBeLessThanOrEqual(full)
     expect(asset.channels[0].length).toBe(full)
-    expect(asset.channels[0][0]).toBe(1)
+    expect(asset.channels[0][0]).toBeCloseTo(NOTE_PEAK, 5)
     const beatsLeft = beats(clip.durationSamples, 120)
     expect(beatsLeft).toBeGreaterThan(6)
     expect(beatsLeft).toBeLessThan(8)

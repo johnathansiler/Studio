@@ -136,6 +136,7 @@ export function parseWavHeader(buffer: ArrayBuffer): WavInfo {
       channels = view.getUint16(offset + 10, true)
       sampleRate = view.getUint32(offset + 12, true)
       bits = view.getUint16(offset + 22, true)
+      if (format === 0xfffe && size >= 40) format = view.getUint16(offset + 32, true)
     } else if (id === 'data') {
       dataBytes = size
       break

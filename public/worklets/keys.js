@@ -200,6 +200,7 @@ class KeysProcessor extends AudioWorkletProcessor {
     this.drainSab()
     while (this.pending.length) this.take(this.pending.shift())
     const out = outputs[0] && outputs[0][0]
+    const right = outputs[0] && outputs[0][1]
     if (!out) return true
     this.armHits(currentFrame, out.length)
     const rate = sampleRate
@@ -257,6 +258,7 @@ class KeysProcessor extends AudioWorkletProcessor {
       const a = sample < 0 ? -sample : sample
       if (a > knee) sample = (sample < 0 ? -1 : 1) * (knee + (1 - knee) * Math.tanh((a - knee) / (1 - knee)))
       out[i] = sample
+      if (right) right[i] = sample
     }
     return true
   }

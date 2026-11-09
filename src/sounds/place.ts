@@ -1,3 +1,4 @@
+import { normalizePeak } from '../audio/level'
 import { resampleSinc } from '../audio/quality/resample'
 import { defaultStretch, detectBpm, renderTempoFollow, samplesAtBeat, tempoMapOf, timelineSamples } from '../audio/stretch/engine'
 import type { StretchMode } from '../model/types'
@@ -65,7 +66,7 @@ export function placeSound(options: {
   clipId?: string
 }): { asset: AudioAsset; clip: AudioClip } | null {
   const rate = options.project.sampleRate
-  const channels = matchProjectRate(options.channels, options.fileRate, rate)
+  const channels = normalizePeak(matchProjectRate(options.channels, options.fileRate, rate))
   const lead = channels[0]
   if (!lead?.length) return null
   const bpm = loopBpm(options.entry, lead, rate)

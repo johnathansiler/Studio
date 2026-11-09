@@ -45,6 +45,8 @@ import { publishNotice } from './core/notice'
 import { deviceKind, initialBufferHint, recordingAlignmentSamples, resumeNeedsGesture, routeChangePlan, routeOf, type RouteSnapshot } from './core/driver'
 import { bufferHintOf, formatLatencyReadout, latencyHintOrder, writeBufferHint, type BufferHint } from './core/buffer'
 import { ATTACK_SEC, RELEASE_SEC, builtinLevel, drumLevel, liveWhen, scheduleDelaySeconds } from './liveStage'
+import { normalizePeak, safetyCurve } from './level'
+import { sampleLoadFault } from './sampleLoadBus'
 import { renderSamplerSpan } from './plugins/sampler'
 import { renderGraphParallel } from './parallelRender'
 import { loadModule, peekModule } from './plugins/registry'
@@ -145,7 +147,7 @@ export class AudioEngine {
   private referenceGain: GainNode | null = null
   private speakerGain: GainNode | null = null
   /** Safety limiter in front of the speakers. Keeps a summed mix from hard-clipping. */
-  private safety: DynamicsCompressorNode | null = null
+  private safety: WaveShaperNode | null = null
   private talkBus: GainNode | null = null
   private metroGain: GainNode | null = null
   private cueDest: MediaStreamAudioDestinationNode | null = null
@@ -546,14 +548,19 @@ export class AudioEngine {
     this.remoteDelay.connect(this.speakerGain)
     this.talkBus.connect(this.talkAnalyser)
     this.talkAnalyser.connect(this.speakerGain)
-    this.safety = ctx.createDynamicsCompressor()
-    this.safety.threshold.value = -0.2
-    this.safety.knee.value = 0
-    this.safety.ratio.value = 12
-    this.safety.attack.value = 0.001
-    this.safety.release.value = 0.04
+    this.safety = ctx.createWaveShaper()
+    this.safety.curve = safetyCurve()
+    this.safety.oversample = 'none'
     this.speakerGain.connect(this.safety)
     this.safety.connect(ctx.destination)
+    try {
+      const dest = ctx.destination
+      if (dest.maxChannelCount >= 2) {
+        dest.channelCount = 2
+        dest.channelCountMode = 'explicit'
+        dest.channelInterpretation = 'speakers'
+      }
+    } catch { /* the destination channel count is fixed on this device */ }
     this.metroGain.connect(this.localBus)
     this.patternStrip = createStrip(ctx)
     applyInserts(ctx, this.patternStrip, [])
@@ -994,12 +1001,64 @@ export class AudioEngine {
     publishInstrumentVoice({ surface, trackId, pitch, velocity, down: velocity > 0, when })
     const track = this.project?.tracks.find((item) => item.id === trackId)
     if (!(track?.instrument === 'library' && track.library)) return false
-    if (when == null) {
-      try { this.previewPatch(trackId, pitch, velocity > 0, velocity > 0 ? velocity : 0.8) } catch { /* the note is still routed when this device has no audio context */ }
-      return true
-    }
-    this.libraryHost.note(trackId, pitch, velocity, when)
+    this.queueLibrary(trackId, pitch, velocity, when)
     return true
+  }
+
+  /**
+   * Download the pressed note and the roots next to it, then play through the track.
+   * A note that is still downloading stays quiet and reports the failure. It does not pretend to sound.
+   */
+  private queueLibrary(trackId: string, pitch: number, velocity: number, when?: number) {
+    const key = `${trackId}:${Math.round(pitch)}`
+    if (!(velocity > 0)) {
+      this.libraryHeld.delete(key)
+      const at = when ?? liveWhen(this.ctx?.currentTime ?? 0)
+      this.libraryHost.note(trackId, pitch, 0, at)
+      return
+    }
+    let ctx: AudioContext
+    try {
+      ctx = this.unlock()
+    } catch {
+      sampleLoadFault('Audio is not available on this device yet.')
+      return
+    }
+    if (this.project) this.sync(this.project, this.assetOf)
+    const track = this.project?.tracks.find((item) => item.id === trackId)
+    const program = track?.library
+    if (!track || track.instrument !== 'library' || !program) {
+      sampleLoadFault('Load an instrument onto this track first.')
+      return
+    }
+    this.libraryHeld.add(key)
+    const level = velocity <= 1 ? velocity : Math.max(0.05, Math.min(1, velocity / 127))
+    const midi = Math.round(pitch)
+    const roots = new Set<number>([midi])
+    for (const zone of program.zones) {
+      if (zone.trigger === 'release') continue
+      if (Math.abs(zone.root - midi) <= 2) roots.add(Math.round(zone.root))
+    }
+    const events = [...roots].slice(0, 6).map((note, index) => ({ sample: index, pitch: note, vel: level }))
+    const rate = ctx.sampleRate || this.sampleRate
+    void this.libraryHost.prepare(trackId, track, events, rate).then((ready) => {
+      if (!this.libraryHeld.has(key)) return
+      if (this.project?.tracks.find((item) => item.id === trackId)?.library !== program) return
+      if (ready.sounding <= 0) {
+        sampleLoadFault('That note is outside this instrument.')
+        return
+      }
+      if (ready.missing > 0) {
+        sampleLoadFault('That sample did not load.')
+        return
+      }
+      sampleLoadFault('')
+      const now = this.ctx?.currentTime ?? 0
+      const at = when != null && when > now ? when : liveWhen(now)
+      this.libraryHost.note(trackId, pitch, level, at)
+    }).catch((error: unknown) => {
+      sampleLoadFault(error instanceof Error ? error.message : 'Could not load that note.')
+    })
   }
 
   /** Audition a layered patch. `down` starts the note; a lift releases it. A loaded starter instrument plays instead. */
@@ -1011,21 +1070,7 @@ export class AudioEngine {
     const level = velocity > 0 && velocity <= 1 ? velocity : 0.85
     const track = this.project?.tracks.find((item) => item.id === trackId)
     if (track?.instrument === 'library' && track.library) {
-      const key = `${trackId}:${Math.round(pitch)}`
-      if (!down) {
-        this.libraryHeld.delete(key)
-        this.libraryHost.note(trackId, pitch, 0, when)
-        return
-      }
-      this.libraryHeld.add(key)
-      const rate = this.ctx?.sampleRate ?? this.sampleRate
-      const program = track.library
-      void this.libraryHost.prepare(trackId, track, [{ sample: 0, pitch, vel: level }], rate).then((ready) => {
-        if (!this.libraryHeld.has(key) || ready.missing > 0 || ready.sounding <= 0) return
-        if (this.project?.tracks.find((item) => item.id === trackId)?.library !== program) return
-        const at = liveWhen(this.ctx?.currentTime ?? 0)
-        this.libraryHost.note(trackId, pitch, level, at)
-      }).catch(() => undefined)
+      this.queueLibrary(trackId, pitch, down ? level : 0)
       return
     }
     this.patchHost.note(trackId, pitch, down ? level : 0, when)
@@ -4004,7 +4049,7 @@ export class AudioEngine {
     const out = this.liveBus ?? this.speakerGain
     if (!ctx || this.keysNode || !out) return
     if (!this.drumTable.length) this.drumTable = residentDrums(ctx.sampleRate)
-    const node = new AudioWorkletNode(ctx, 'keys-processor', { numberOfOutputs: 1, outputChannelCount: [1] })
+    const node = new AudioWorkletNode(ctx, 'keys-processor', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] })
     const gain = ctx.createGain()
     gain.gain.value = 0.9
     node.connect(gain)
@@ -4230,11 +4275,14 @@ export class AudioEngine {
     const out = this.speakerGain
     const lead = channels[0]
     if (!out || !lead?.length) return
+    const shaped = normalizePeak(channels)
+    const shapedLead = shaped[0]
+    if (!shapedLead?.length) return
     const rate = sampleRate && sampleRate > 0 ? sampleRate : ctx.sampleRate
-    const buffer = ctx.createBuffer(Math.max(1, channels.length), lead.length, rate)
-    channels.forEach((channel, index) => {
-      const data = new Float32Array(lead.length)
-      data.set(channel.subarray(0, Math.min(channel.length, lead.length)))
+    const buffer = ctx.createBuffer(Math.max(1, shaped.length), shapedLead.length, rate)
+    shaped.forEach((channel, index) => {
+      const data = new Float32Array(shapedLead.length)
+      data.set(channel.subarray(0, Math.min(channel.length, shapedLead.length)))
       buffer.copyToChannel(data, index)
     })
     const src = ctx.createBufferSource()
@@ -4583,8 +4631,8 @@ function hintStorage() {
 function openContext(sampleRate: number | undefined, hint: BufferHint) {
   const options: AudioContextOptions[] = []
   for (const item of latencyHintOrder(hint)) {
-    if (sampleRate) options.push({ latencyHint: item, sampleRate })
     options.push({ latencyHint: item })
+    if (sampleRate) options.push({ latencyHint: item, sampleRate })
   }
   let last: unknown
   for (const option of options) {
