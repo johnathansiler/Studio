@@ -33,13 +33,13 @@ function concat(parts: Float32Array[]) {
  * Harmonic chord, same generator shape as the analysis regression suite.
  * `boostPc` makes one pitch class louder, the way the felt loop's A outruns its C.
  */
-function chordBar(notes: number[], beats: number, tempo: number, sampleRate: number, boostPc = -1) {
+function chordBar(notes: number[], beats: number, tempo: number, sampleRate: number, boostPc = -1, boost = 1.2) {
   const samples = Math.round((beats * 60 * sampleRate) / tempo)
   const beat = (60 / tempo) * sampleRate
   const data = new Float32Array(samples)
   for (const note of notes) {
     const freq = midiHz(note)
-    const gain = ((note % 12) + 12) % 12 === boostPc ? 1.2 : 1
+    const gain = ((note % 12) + 12) % 12 === boostPc ? boost : 1
     for (let h = 1; h <= 4; h++) {
       const f = freq * h
       if (f >= sampleRate * 0.45) break
@@ -54,8 +54,8 @@ function chordBar(notes: number[], beats: number, tempo: number, sampleRate: num
   return data
 }
 
-function audioOf(chords: number[][], tempo = 100, rate = 16000, boostPc = -1) {
-  return concat(chords.map((notes) => chordBar(notes, 4, tempo, rate, boostPc)))
+function audioOf(chords: number[][], tempo = 100, rate = 16000, boostPc = -1, boost = 1.2) {
+  return concat(chords.map((notes) => chordBar(notes, 4, tempo, rate, boostPc, boost)))
 }
 
 function shift(chords: number[][], semis: number) {
@@ -75,6 +75,14 @@ const MINOR_LOOP = [
   [45, 57, 60, 64],
   [38, 50, 53, 57],
   [40, 52, 55, 59],
+  [45, 57, 60, 64],
+]
+
+/** I–IV–V–vi. The vi is louder, and V moves to vi instead of back to I. */
+const DECEPTIVE = [
+  [48, 60, 64, 67],
+  [41, 53, 57, 60],
+  [43, 55, 59, 62],
   [45, 57, 60, 64],
 ]
 
@@ -192,6 +200,57 @@ describe('tonal center', () => {
     expect(short.key.label).toBe('C major')
     expect(short.key.alternative).toBeUndefined()
     expect(short.tempo).toBe(90)
+  })
+
+  it('keeps I–IV–V–vi in the major when vi is louder, and says the minor is still possible', () => {
+    const tempo = 100
+    const rate = 16000
+    const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+    for (const semis of [0, 3, 6]) {
+      const root = semis % 12
+      const vi = (root + 9) % 12
+      const audio = audioOf(shift(DECEPTIVE, semis), tempo, rate, vi, 1.15)
+      const fromAudio = analyzeAudio({ sampleRate: rate, channels: [audio], tempo })
+      const project = createEmptyProject(rate)
+      project.tempo = tempo
+      const track = project.tracks.find((item) => item.type === 'audio')!
+      track.clips = [{
+        id: 'clip',
+        name: 'Loop',
+        bufferId: 'buf',
+        startSample: 0,
+        offsetSamples: 0,
+        durationSamples: audio.length,
+        fadeInSamples: 0,
+        fadeOutSamples: 0,
+        gain: 1,
+        source: 'import',
+      }]
+      const fromProject = analyzeProject(project, new Map([['buf', { sampleRate: rate, channels: [audio] }]]))
+      const fromWorker = handleAnalysisMessage({
+        id: semis + 1,
+        type: 'analyze',
+        sampleRate: rate,
+        channels: [audio],
+        tempo,
+        numerator: 4,
+        denominator: 4,
+      })
+      const fromWorkerProject = handleAnalysisMessage({
+        id: semis + 11,
+        type: 'project',
+        project,
+        assets: [{ id: 'buf', sampleRate: rate, channels: [audio] }],
+      })
+      for (const result of [fromAudio, fromProject, fromWorker.analysis, fromWorkerProject.analysis]) {
+        expect(result?.key.root).toBe(root)
+        expect(result?.scale).toBe('ionian')
+        expect(result?.key.alternative).toBe(`${names[vi]} minor`)
+        expect(result?.key.confidence).toBeLessThan(0.6)
+        expect(result?.chordsByBar.map((chord) => chord.root)).toEqual([root, (root + 5) % 12, (root + 7) % 12, vi])
+      }
+      expect(analysisReadout(fromAudio)).toContain(`or ${names[vi]} minor`)
+    }
   })
 
   it('names the relative key when both tonics alternate and neither dominant arrives', () => {

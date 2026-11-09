@@ -117,7 +117,13 @@ export function fitKey(hist: Float32Array | number[]): KeyFit {
   const major = bestMajorMinor(hist, false)
   const minor = bestMajorMinor(hist, true)
   if (Math.abs(major.score - minor.score) < 0.06) {
-    const pick = thirdDelta(hist, major.root, false) >= thirdDelta(hist, minor.root, true) ? major : minor
+    // The relative minor's third is the major tonic, so the third test
+    // votes minor whenever the major chord is loud. Relatives follow the
+    // higher correlation. Parallel keys still use the third.
+    const relative = (minor.root - major.root + 12) % 12 === 9
+    const pick = relative
+      ? (major.score >= minor.score ? major : minor)
+      : (thirdDelta(hist, major.root, false) >= thirdDelta(hist, minor.root, true) ? major : minor)
     if (pick.score > best.score - 0.04) best = pick
   } else if (best.scale !== 'ionian' && best.scale !== 'aeolian') {
     const plain = major.score >= minor.score ? major : minor
@@ -150,12 +156,17 @@ function scoreAt(hist: Float32Array | number[], root: number, scale: ScaleId) {
 /**
  * C major and A minor use the same seven notes. The pitch profile follows
  * whichever note is loudest, so a vi chord can outvote the tonic.
- * A dominant that resolves — G7 back to C, or E back to Am — names the center.
- * When neither cadence wins, the relative key stays visible instead of a false certainty.
+ * Only an authentic dominant resolving to its tonic (G7→C, E→Am) may move
+ * that choice. G→Am is V→vi in C and only bVII→i in A minor, so that
+ * motion can support a minor the profile already chose, not flip a major.
+ * Inside the same profile gap, a key the cadence does not settle keeps
+ * its relative name instead of reading as certain.
  */
-const RELATIVE_OVERRIDE_GAP = 0.12
-const AMBIGUOUS_PROFILE_GAP = 0.1
-const CLAIM_LEAD = 1.25
+const CLOSE_GAP = 0.12
+/** One plain V→I is 3 × 0.85 = 2.55 before any loop weight. */
+const AUTHENTIC_LEAD = 2
+/** Opening on the tonic (0.75) plus one bar (0.35) is not a cadence. */
+const SETTLED_LEAD = 1.5
 const LOOP_LIMIT = 8
 
 interface HeardChord {
@@ -212,34 +223,50 @@ function isPlagal(chord: HeardChord, root: number, minor: boolean) {
   return minor ? family(chord.id) === 'min' : family(chord.id) === 'maj'
 }
 
-function resolveScore(prev: HeardChord, next: HeardChord, root: number, minor: boolean) {
-  const onto = tonicStrength(next, root, minor)
-  if (onto <= 0) return 0
-  const authentic = authenticStrength(prev, root)
-  if (authentic > 0) return 3 * authentic * onto
-  if (minor && isFlatSeven(prev, root)) return 1.15 * onto
-  if (minor && isMinorFive(prev, root)) return 0.9 * onto
-  if (isPlagal(prev, root, minor)) return 0.7 * onto
-  return 0
+interface Claim {
+  /** V or V7 resolving to the tonic. The only evidence that may override the profile. */
+  authentic: number
+  /** Authentic plus modal, plagal, and where the tonic sits in the phrase. */
+  support: number
 }
 
-function tonicClaim(chords: HeardChord[], root: number, minor: boolean) {
-  if (!chords.length) return 0
-  let score = tonicStrength(chords[0], root, minor) * 0.75
-  score += tonicStrength(chords[chords.length - 1], root, minor) * 0.8
-  for (const chord of chords) {
-    score += tonicStrength(chord, root, minor) * 0.35
-    score += authenticStrength(chord, root) * 0.4
+function motion(prev: HeardChord, next: HeardChord, root: number, minor: boolean) {
+  const onto = tonicStrength(next, root, minor)
+  if (onto <= 0) return { authentic: 0, modal: 0 }
+  const authentic = authenticStrength(prev, root)
+  if (authentic > 0) return { authentic: 3 * authentic * onto, modal: 0 }
+  // V→vi of the relative major is this same bVII→i. It stays modal support.
+  if (minor && isFlatSeven(prev, root)) return { authentic: 0, modal: 1.15 * onto }
+  if (minor && isMinorFive(prev, root)) return { authentic: 0, modal: 0.9 * onto }
+  if (isPlagal(prev, root, minor)) return { authentic: 0, modal: 0.7 * onto }
+  return { authentic: 0, modal: 0 }
+}
+
+function tonicClaim(chords: HeardChord[], root: number, minor: boolean): Claim {
+  if (!chords.length) return { authentic: 0, support: 0 }
+  let authentic = 0
+  let modal = 0
+  const add = (part: { authentic: number; modal: number }, weight: number) => {
+    authentic += part.authentic * weight
+    modal += part.modal * weight
   }
+  const looped = chords.length >= 2 && chords.length <= LOOP_LIMIT
   const transitions = chords.length - 1
   for (let i = 0; i < transitions; i++) {
-    const ending = i === transitions - 1
-    score += resolveScore(chords[i], chords[i + 1], root, minor) * (ending ? 1.35 : 1)
+    // In a loop the repeat (last→first) is the cadence. The chord before
+    // the final bar is not a second ending, or V→vi would outvote I.
+    const weight = !looped && i === transitions - 1 ? 1.35 : 1
+    add(motion(chords[i], chords[i + 1], root, minor), weight)
   }
-  if (chords.length >= 2 && chords.length <= LOOP_LIMIT) {
-    score += resolveScore(chords[chords.length - 1], chords[0], root, minor) * 2.2
+  if (looped) add(motion(chords[chords.length - 1], chords[0], root, minor), 2.2)
+  let support = authentic + modal
+  support += tonicStrength(chords[0], root, minor) * 0.75
+  support += tonicStrength(chords[chords.length - 1], root, minor) * 0.8
+  for (const chord of chords) {
+    support += tonicStrength(chord, root, minor) * 0.35
+    support += authenticStrength(chord, root) * 0.4
   }
-  return score
+  return { authentic, support }
 }
 
 function relativeKey(fit: KeyFit, hist: Float32Array | number[]): KeyFit | null {
@@ -262,11 +289,11 @@ function labelFor(fit: KeyFit) {
   return { name, mode, label: `${name} ${mode}` }
 }
 
-function keyConfidence(score: number, pairGap: number, claimGap: number, ambiguous: boolean) {
+function keyConfidence(score: number, pairGap: number, ambiguous: boolean) {
   const profile = clamp01((score + 1) / 2)
-  if (ambiguous) return clamp01(0.38 + 0.14 * Math.min(1, claimGap / CLAIM_LEAD))
-  if (pairGap >= RELATIVE_OVERRIDE_GAP) return profile
-  const doubt = (RELATIVE_OVERRIDE_GAP - Math.max(0, pairGap)) / RELATIVE_OVERRIDE_GAP
+  if (ambiguous) return clamp01(0.4 + 0.18 * Math.min(1, pairGap / CLOSE_GAP))
+  if (pairGap >= CLOSE_GAP) return profile
+  const doubt = (CLOSE_GAP - Math.max(0, pairGap)) / CLOSE_GAP
   return clamp01(profile * (1 - 0.18 * doubt))
 }
 
@@ -278,21 +305,22 @@ export function keyFromHistogram(hist: Float32Array | number[], bars?: BarChroma
   const rival = relativeKey(profile, hist)
   const heard = bars?.length ? heardChords(bars) : []
   let chosen = profile
-  let claimGap = 0
-  if (rival && heard.length) {
-    const ours = tonicClaim(heard, profile.root, profile.scale === 'aeolian')
-    const theirs = tonicClaim(heard, rival.root, rival.scale === 'aeolian')
-    claimGap = Math.abs(ours - theirs)
-    const pairGap = profile.score - rival.score
-    if (theirs > ours + CLAIM_LEAD && pairGap < RELATIVE_OVERRIDE_GAP) chosen = rival
+  let winner = rival ? tonicClaim(heard, profile.root, profile.scale === 'aeolian') : { authentic: 0, support: 0 }
+  let otherClaim = rival ? tonicClaim(heard, rival.root, rival.scale === 'aeolian') : { authentic: 0, support: 0 }
+  if (rival && heard.length && otherClaim.authentic > winner.authentic + AUTHENTIC_LEAD && profile.score - rival.score < CLOSE_GAP) {
+    chosen = rival
+    const swap = winner
+    winner = otherClaim
+    otherClaim = swap
   }
   const pairGap = rival ? Math.abs(profile.score - rival.score) : 1
+  const supportLead = winner.support - otherClaim.support
   const ambiguous = Boolean(
     rival
     && heard.length >= 2
     && chosen.score >= 0.55
-    && pairGap < AMBIGUOUS_PROFILE_GAP
-    && claimGap < CLAIM_LEAD,
+    && pairGap < CLOSE_GAP
+    && supportLead < SETTLED_LEAD,
   )
   const named = labelFor(chosen)
   const other = chosen === rival ? profile : rival
@@ -301,7 +329,7 @@ export function keyFromHistogram(hist: Float32Array | number[], bars?: BarChroma
     name: named.name,
     mode: named.mode,
     label: named.label,
-    confidence: keyConfidence(chosen.score, pairGap, claimGap, ambiguous),
+    confidence: keyConfidence(chosen.score, pairGap, ambiguous),
     scale: chosen.scale,
     ...(ambiguous && other ? { alternative: labelFor(other).label } : {}),
   }
