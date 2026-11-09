@@ -54,7 +54,7 @@ export function trimAudioClip(
         stretch: {
           ...stretch,
           sourceSamples: source,
-          followTempo: false,
+          followTempo: stretch.followTempo,
           markers: stretch.markers
             .map((marker) => ({ ...marker, source: marker.source - sourceDelta }))
             .filter((marker) => marker.source > 0 && marker.source < source),
@@ -72,7 +72,7 @@ export function trimAudioClip(
       stretch: {
         ...stretch,
         sourceSamples: source,
-        followTempo: false,
+        followTempo: stretch.followTempo,
         markers: stretch.markers.filter((marker) => marker.source > 0 && marker.source < source),
       },
     }
