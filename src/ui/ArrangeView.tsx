@@ -913,7 +913,7 @@ export function ArrangeView({
                     <KeyboardToggle
                       store={store}
                       engine={engine}
-                      word="On-screen Piano"
+                      word="Keys"
                       hint="Show or hide the on-screen piano. It plays this track's instrument."
                     />
                   </span>
@@ -1344,8 +1344,10 @@ function laneStyle(track: { clips: AudioClip[] }, selectedId: string | null): { 
 function rowStyle(track: { id: string; type: string; instrument?: string; plugins?: { pluginId: string; params?: Record<string, number> }[]; clips: AudioClip[] }, selectedTrackId: string | null, selectedClipId: string | null, automation: boolean, phone = false) {
   const base = rowHeight(track, selectedClipId, automation)
   const piano = selectedTrackId === track.id && showsOnscreenPiano(track)
-  const extra = piano ? (phone ? 48 : 112) : 0
-  if (!extra) return base
+  if (!piano) return base
+  /* Desktop lanes are 96px. Eight extra pixels clear the mute row under Keys.
+     Phone already pins the name above the flags inside the normal lane. */
+  const extra = phone ? 0 : 8
   return { ...base, minHeight: `calc(var(--lane-h) + ${extra}px)` }
 }
 

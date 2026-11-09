@@ -613,3 +613,76 @@
   min-height: 40px;
   max-height: 40px;
 }
+
+/* Track header piano control. "Keys" stays whole inside a 40px tray button.
+   The name line and the mute row stack, and neither covers the other. */
+.shell .arrange .head:has(.onscreen-piano) .pl-head {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  align-content: flex-start;
+  justify-content: flex-start;
+  height: auto;
+  min-height: 100%;
+  gap: 4px;
+  overflow: visible;
+}
+.shell.phone:not(.land) .arrange .pl-head:has(.onscreen-piano) {
+  padding: 44px 2px 4px 0;
+}
+.shell:not(.phone) .arrange .head:has(.onscreen-piano) .pl-name-row {
+  position: relative;
+  top: auto;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  flex: 0 0 40px;
+}
+.shell.phone:not(.land) .arrange .pl-head:has(.onscreen-piano) .pl-name-row {
+  position: absolute;
+  top: 2px;
+  left: 0;
+  right: 0;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  overflow: visible;
+  z-index: 1;
+}
+.shell .pl-head .onscreen-piano-slot,
+.shell.phone:not(.land) .arrange .pl-name-row .onscreen-piano-slot {
+  position: static;
+  top: auto;
+  right: auto;
+  left: auto;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: max-content;
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  overflow: visible;
+}
+.shell .pl-head .onscreen-piano,
+.shell.phone .pl-head .onscreen-piano,
+.shell.phone:not(.land) .arrange .pl-head .onscreen-piano,
+.shell.fold .pl-head .onscreen-piano {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: max(40px, max-content);
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  padding: 0 12px;
+  overflow: visible;
+  white-space: nowrap;
+  text-overflow: clip;
+}
+.shell .arrange .head:has(.onscreen-piano) .track-controls {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  margin-top: 0;
+}
