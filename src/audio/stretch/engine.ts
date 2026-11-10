@@ -34,7 +34,7 @@ export function preferStretchCache(phone: boolean, cpu: number) {
 
 export function detectTransients(channel: Float32Array, sampleRate: number, threshold = 0.2): number[] {
   const hop = Math.max(1, Math.round(sampleRate * 0.01))
-  const envLen = Math.floor(channel.length / hop)
+  const envLen = Math.ceil(channel.length / hop)
   if (envLen < 3) return []
   const env = new Float32Array(envLen)
   let peak = 0
@@ -56,9 +56,10 @@ export function detectTransients(channel: Float32Array, sampleRate: number, thre
   const hits: number[] = []
   let last = -minGap
   const fluxGate = peak * Math.max(0.12, threshold * 0.6)
-  for (let i = 1; i < envLen - 1; i++) {
+  for (let i = 1; i < envLen; i++) {
     const flux = env[i] - env[i - 1]
-    if (flux < fluxGate || env[i] < gate || env[i] < env[i + 1]) continue
+    const next = i + 1 < envLen ? env[i + 1] : -1
+    if (flux < fluxGate || env[i] < gate || env[i] < next) continue
     let onset = i
     while (onset > 0 && env[onset - 1] <= env[onset] && env[onset - 1] > gate * 0.3) onset -= 1
     const at = refineOnset(channel, onset * hop, hop)

@@ -6,6 +6,7 @@ class RecorderProcessor extends AudioWorkletProcessor {
     this.pendingR = []
     this.batch = 0
     this.startFrame = 0
+    this.nextFrame = 0
     this.haveStart = false
     this.port.onmessage = (event) => {
       if (event.data?.type === 'start') {
@@ -14,6 +15,7 @@ class RecorderProcessor extends AudioWorkletProcessor {
         this.pendingR = []
         this.batch = 0
         this.haveStart = false
+        this.nextFrame = 0
       } else if (event.data?.type === 'stop') {
         this.flush(true)
         this.active = false
@@ -55,12 +57,20 @@ class RecorderProcessor extends AudioWorkletProcessor {
     if (!this.active) return true
     const input = inputs[0]
     if (!input || !input[0] || !input[0].length) return true
+    const frames = input[0].length
+    // A skipped quantum advances currentFrame without delivering samples.
+    // Flush first so the gap stays silent instead of being glued into this batch.
+    if (this.haveStart && currentFrame !== this.nextFrame) {
+      this.flush(false)
+      this.batch = 0
+    }
     if (!this.haveStart) {
       this.startFrame = currentFrame
       this.haveStart = true
     }
     this.pendingL.push(new Float32Array(input[0]))
     this.pendingR.push(input[1] ? new Float32Array(input[1]) : null)
+    this.nextFrame = currentFrame + frames
     this.batch += 1
     if (this.batch >= 8) {
       this.flush(false)

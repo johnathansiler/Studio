@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 import { assembleTimedChunks } from '../audio/capture'
 import { crossfadeLoopRegion } from '../audio/clipEdge'
@@ -6,7 +8,7 @@ import { MemoryBank } from '../audio/multisample/cache'
 import { readFrame } from '../audio/multisample/read'
 import { makeProgram, makeSample, makeZone } from '../audio/multisample/types'
 import { phaseStretch } from '../audio/stretch/phase'
-import { renderClipChannels, timeStretch } from '../audio/stretch/engine'
+import { detectTransients, renderClipChannels, timeStretch } from '../audio/stretch/engine'
 import { SamplePool } from '../audio/voices/engine'
 import { playedWindow } from '../audio/voices/program'
 import type { AudioClip, Project } from '../model/types'
@@ -34,8 +36,7 @@ function maxJump(buf: Float32Array, start = 1, end = buf.length) {
   return jump
 }
 
-function thd(buf: Float32Array, freq: number) {
-  const start = Math.floor(buf.length * 0.35)
+function thd(buf: Float32Array, freq: number, start = Math.floor(buf.length * 0.35)) {
   const n = Math.min(8192, buf.length - start - 64)
   if (n < 256) return 1
   const frame = buf.subarray(start, start + n)
@@ -106,7 +107,8 @@ describe('playback artifacts', () => {
     const input = sine(440, Math.round(rate * 0.5))
     const output = phaseStretch(input, Math.round(input.length * 1.5), rate, 'pro')
     const tail = rms(output, output.length - Math.round(rate * 0.02), output.length - 8)
-    expect(tail).toBeGreaterThan(0.02)
+    expect(tail).toBeGreaterThan(0.2)
+    expect(thd(output, 440, Math.max(0, output.length - 6000))).toBeLessThan(0.05)
     expect(maxJump(output, Math.round(rate * 0.05), output.length - 8)).toBeLessThan(0.08)
   })
 
@@ -115,6 +117,13 @@ describe('playback artifacts', () => {
     const output = phaseStretch(input, Math.round(input.length * (88 / 90)), rate, 'pro')
     expect(maxJump(output, 200, output.length - 8)).toBeLessThan(0.08)
     expect(thd(output, 440)).toBeLessThan(0.05)
+    expect(thd(output, 440, Math.max(0, output.length - 6000))).toBeLessThan(0.05)
+  })
+
+  it('keeps the pitch of a buffer that is exactly one analysis window', () => {
+    const output = phaseStretch(sine(440, 4096), 6144, rate, 'pro')
+    expect(thd(output, 440)).toBeLessThan(0.05)
+    expect(rms(output, 800, 5200)).toBeGreaterThan(0.2)
   })
 
   it('does not insert a full-scale step between beats when a loop follows tempo', () => {
@@ -252,6 +261,47 @@ describe('playback artifacts', () => {
     expect(placed?.left[250]).toBeCloseTo(-0.5)
   })
 
+  it('finds an onset in the final analysis hop', () => {
+    const channel = new Float32Array(rate)
+    channel[rate - 200] = 1
+    expect(detectTransients(channel, rate, 0.2)).toContain(rate - 200)
+  })
+
+  it('does not glue recorder blocks across a missing quantum', () => {
+    const rec = openRecorder()
+    rec.start()
+    const block = () => new Float32Array(128).fill(0.25)
+    rec.frame(0)
+    rec.process([[block()]])
+    rec.frame(128)
+    rec.process([[block()]])
+    rec.frame(384)
+    rec.process([[block()]])
+    rec.stop()
+    const chunks = rec.messages.filter((message) => message.type === 'chunk')
+    expect(chunks.map((chunk) => chunk.frame)).toEqual([0, 384])
+    expect(chunks[0].left?.length).toBe(256)
+    expect(chunks[1].left?.length).toBe(128)
+    const placed = assembleTimedChunks(chunks.map((chunk) => ({ frame: chunk.frame ?? 0, left: chunk.left ?? new Float32Array(), right: null })))
+    expect(placed?.left.length).toBe(384 + 128)
+    expect(placed?.left[300]).toBe(0)
+    expect(placed?.left[10]).toBeCloseTo(0.25)
+    expect(placed?.left[400]).toBeCloseTo(0.25)
+  })
+
+  it('still batches contiguous recorder quanta', () => {
+    const rec = openRecorder()
+    rec.start()
+    for (let i = 0; i < 8; i++) {
+      rec.frame(i * 128)
+      rec.process([[new Float32Array(128).fill(0.2)]])
+    }
+    const chunks = rec.messages.filter((message) => message.type === 'chunk')
+    expect(chunks).toHaveLength(1)
+    expect(chunks[0].frame).toBe(0)
+    expect(chunks[0].left?.length).toBe(1024)
+  })
+
   it('makes a loop wrap land on the first sample', () => {
     const loop = sine(330, 2000, 0.5, 1.1)
     const faded = crossfadeLoopRegion(loop, 0, loop.length, 128)
@@ -259,3 +309,46 @@ describe('playback artifacts', () => {
     expect(maxJump(faded, 400, 1600)).toBeLessThan(0.08)
   })
 })
+
+interface RecorderChunk {
+  type: string
+  frame?: number
+  left?: Float32Array
+}
+
+interface RecorderProcessor {
+  port: { onmessage: ((event: { data: { type: string } }) => void) | null }
+  process: (inputs: Array<ArrayLike<Float32Array> | undefined>) => boolean
+}
+
+function openRecorder() {
+  const messages: RecorderChunk[] = []
+  const found: Array<new () => RecorderProcessor> = []
+  const sandbox = {
+    Float32Array,
+    currentFrame: 0,
+    AudioWorkletProcessor: class {
+      port: { onmessage: ((event: { data: { type: string } }) => void) | null; postMessage: (data: RecorderChunk) => void }
+      constructor() {
+        this.port = {
+          onmessage: null,
+          postMessage: (data) => { messages.push(data) },
+        }
+      }
+    },
+    registerProcessor(_name: string, next: new () => RecorderProcessor) {
+      found.push(next)
+    },
+  }
+  runInNewContext(readFileSync('public/worklets/recorder.js', 'utf8'), sandbox)
+  const Processor = found[0]
+  if (!Processor) throw new Error('recorder did not register')
+  const processor = new Processor()
+  return {
+    messages,
+    frame(frame: number) { sandbox.currentFrame = frame },
+    start() { processor.port.onmessage?.({ data: { type: 'start' } }) },
+    stop() { processor.port.onmessage?.({ data: { type: 'stop' } }) },
+    process(inputs: Array<ArrayLike<Float32Array> | undefined>) { processor.process(inputs) },
+  }
+}
