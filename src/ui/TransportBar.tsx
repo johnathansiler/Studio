@@ -41,6 +41,7 @@ export function TransportBar({
   session,
   roomRole,
   simple = false,
+  phone = false,
   takeProgress = null,
   recordHint = '',
   assetTransfers = [],
@@ -60,6 +61,8 @@ export function TransportBar({
   roomRole?: 'host' | 'guest'
   /** Phone uses the same transport controls, with text labels. */
   simple?: boolean
+  /** Phone metronome is the dock icon. The word Click stays off that transport. */
+  phone?: boolean
   /** 0–1 while a full-quality guest take is moving to the host. */
   takeProgress?: number | null
   recordHint?: string
@@ -491,7 +494,7 @@ export function TransportBar({
           onMidi={onMidi}
         />
         <div className="tempo-cluster" role="group" aria-label="Tempo" ref={tempoWrap}>{tempoField}</div>
-        {clickButton}
+        {phone ? null : clickButton}
         {countButton}
         {resetButton}
       </ButtonTray>

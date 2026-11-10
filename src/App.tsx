@@ -724,7 +724,9 @@ export function App() {
     if (!menuOpen) return
     const close = (event: PointerEvent) => {
       const target = event.target as HTMLElement | null
-      if (target?.closest('.shell-menu, .menu-btn')) return
+      // The row under the sheet is the menu's actions. Dismissing on
+      // pointerdown removes New, Open, Save, and Export before click.
+      if (target?.closest('.shell-menu, .menu-btn, .phone-context')) return
       setMenuOpen(false)
     }
     window.addEventListener('pointerdown', close)
@@ -2082,6 +2084,7 @@ async function importDropped(files: FileList) {
           engine={engine}
           syncLabel={session.state.syncLabel}
           simple={phone && !land}
+          phone={phone}
           recordHint={recordHint}
           onPlay={() => { engine.unlock(); void play() }}
           onStop={() => void stop()}

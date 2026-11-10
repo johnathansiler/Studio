@@ -408,7 +408,6 @@ function MixToolbar({
     </>
   )
   if (slot) return createPortal(toolbar, slot)
-  if (form === 'phone') return mastering ? <MasterSheet store={store} engine={engine} onClose={() => setMastering(false)} /> : null
   return toolbar
 }
 

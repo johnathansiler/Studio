@@ -22,11 +22,12 @@ const engineStub = {
   unlock() {},
 }
 
-function markup(store: ProjectStore, roomRole?: 'host' | 'guest') {
+function markup(store: ProjectStore, roomRole?: 'host' | 'guest', phone = false) {
   return renderToStaticMarkup(createElement(TransportBar, {
     store,
     engine: engineStub as never,
     roomRole,
+    phone,
     onPlay() {},
     onStop() {},
     onRecord() {},
@@ -98,6 +99,12 @@ describe('count-in on the transport', () => {
     store.toggle('countIn')
     expect(store.project.metronomeEnabled).toBe(false)
     expect(store.project.countIn).toBe(false)
+
+    const phone = markup(store, undefined, true)
+    expect(phone).not.toContain('id="transport-click"')
+    expect(phone).not.toContain('>Click<')
+    expect(phone).toContain('id="transport-count"')
+    expect(phone).toContain('id="transport-reset"')
   })
 })
 
@@ -113,10 +120,12 @@ describe('transport row actions', () => {
     try {
       const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
       await page.goto(`${address}src/test/transport-row.harness.html`, { waitUntil: 'networkidle' })
-      await page.locator('#transport-click').waitFor()
+      await page.locator('#transport-count').waitFor()
+      expect(await page.locator('#transport-click').count()).toBe(0)
+      expect(await page.locator('.t-word', { hasText: /^Click$/ }).count()).toBe(0)
       expect(await page.locator('.t-btn.menu, #transport-menu').count()).toBe(0)
       const names = await page.locator('.t-main > .t-btn, .t-main > .tempo-cluster').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label') || node.getAttribute('aria-label')))
-      expect(names).toHaveLength(8)
+      expect(names).toHaveLength(7)
       const row = await page.locator('.t-main > .t-btn, .t-main > .tempo-cluster').evaluateAll((nodes) => {
         const boxes = nodes.map((node) => node.getBoundingClientRect())
         return {
@@ -126,18 +135,10 @@ describe('transport row actions', () => {
           minHeight: Math.min(...boxes.map((box) => box.height)),
         }
       })
-      expect(row.count).toBe(8)
+      expect(row.count).toBe(7)
       expect(new Set(row.tops).size).toBe(1)
       expect(row.min).toBeGreaterThanOrEqual(40)
       expect(row.minHeight).toBeGreaterThanOrEqual(40)
-
-      expect(await page.locator('#metro').getAttribute('data-on')).toBe('1')
-      await page.locator('#transport-click').click()
-      expect(await page.locator('#metro').getAttribute('data-on')).toBe('0')
-      expect(await page.locator('#transport-click').getAttribute('aria-pressed')).toBe('false')
-      await page.locator('#transport-click').click()
-      expect(await page.locator('#metro').getAttribute('data-on')).toBe('1')
-      expect(await page.locator('#transport-click').getAttribute('aria-pressed')).toBe('true')
 
       expect(await page.locator('#count').getAttribute('data-on')).toBe('1')
       await page.locator('#transport-count').click()

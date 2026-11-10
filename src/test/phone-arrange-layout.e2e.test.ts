@@ -127,6 +127,8 @@ async function measure(page: Page) {
       }),
       tabsTop: document.querySelector('.views')?.getBoundingClientRect().top ?? 99,
       pluginsInBar: barButtons.some((button) => button.label.startsWith('Plugins')),
+      transportClick: [...document.querySelectorAll('.transport .t-word')].some((node) => (node.textContent || '').trim() === 'Click'),
+      metroButtons: document.querySelectorAll('[data-phone-action="metronome"], #transport-click').length,
       barButtons,
       controls,
       overlaps,
@@ -209,6 +211,8 @@ describe('phone arrange layout', () => {
             expect(labels.some((label) => label.startsWith('Undo')), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Redo')), viewport.name).toBe(true)
             expect(labels.some((label) => label === 'Click'), viewport.name).toBe(false)
+            expect(layout.transportClick, viewport.name).toBe(false)
+            expect(layout.metroButtons, viewport.name).toBe(1)
             const menu = layout.barButtons.find((button) => button.label.startsWith('Menu'))!
             const browserBtn = layout.barButtons.find((button) => button.label === 'Browse')!
             const toolsBtn = layout.barButtons.find((button) => button.label === 'Tools')!
@@ -239,6 +243,8 @@ describe('phone arrange layout', () => {
             expect(labels.some((label) => label.startsWith('Menu')), viewport.name).toBe(true)
             expect(labels.some((label) => label === 'Browse'), viewport.name).toBe(true)
             expect(labels.some((label) => label === 'Tools'), viewport.name).toBe(true)
+            expect(layout.transportClick, viewport.name).toBe(false)
+            expect(layout.metroButtons, viewport.name).toBe(1)
             const menu = layout.barButtons.find((button) => button.label.startsWith('Menu'))!
             const browserBtn = layout.barButtons.find((button) => button.label === 'Browse')!
             expect(menu.left, viewport.name).toBeLessThan(browserBtn.left)
@@ -324,6 +330,13 @@ describe('phone arrange layout', () => {
             })
             expect(before.hitGrip, 'playhead strip').toBe(false)
             expect(before.context).toBe('arrange')
+            const metro = page.locator('[data-phone-action="metronome"]')
+            const metroBefore = await metro.getAttribute('aria-pressed')
+            await metro.click()
+            expect(await metro.getAttribute('aria-pressed')).toBe(metroBefore === 'true' ? 'false' : 'true')
+            expect(await page.evaluate(() => (window as unknown as { __cueharbor: { store: { project: { metronomeEnabled: boolean } } } }).__cueharbor.store.project.metronomeEnabled)).toBe(metroBefore !== 'true')
+            await metro.click()
+            expect(await metro.getAttribute('aria-pressed')).toBe(metroBefore)
             const strip = page.locator('[data-playhead-strip]')
             const stripBox = await strip.boundingBox()
             await strip.click({ position: { x: Math.round((stripBox?.width ?? 80) * 0.62), y: Math.round((stripBox?.height ?? 28) / 2) } })
@@ -386,6 +399,10 @@ describe('phone arrange layout', () => {
           expect(await menuClose.innerText(), shot.name).not.toMatch(/Close/)
           expect(await page.getByRole('textbox', { name: 'Project name' }).count()).toBeGreaterThan(0)
           expect(await page.getByRole('button', { name: /^Undo/ }).count()).toBeGreaterThan(0)
+          if (shot.name === '390x844') {
+            await page.locator('[data-phone-action="save"]').click()
+            await page.locator('.toast').filter({ hasText: /Saved|space|could not/i }).waitFor()
+          }
           await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-menu.png` })
           await page.keyboard.press('Escape')
 

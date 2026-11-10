@@ -285,6 +285,12 @@
   min-width: 0;
 }
 
+/* The dock is two rows. Toasts and the select hint sit above it, not on the tabs. */
+body:has(.shell.phone) .toasts,
+body:has(.shell.phone) .select-hint-host {
+  bottom: calc(108px + env(safe-area-inset-bottom));
+}
+
 .shell.phone .playhead-strip {
   position: sticky;
   top: var(--ruler-h, 22px);
