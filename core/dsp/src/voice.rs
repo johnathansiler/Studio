@@ -116,6 +116,11 @@ struct Voice {
     time: f64,
     velocity: f64,
     release_samples: f64,
+    last_l: f64,
+    last_r: f64,
+    tail: f64,
+    tail_l: f64,
+    tail_r: f64,
 }
 
 impl Voice {
@@ -149,6 +154,11 @@ impl Voice {
             time: 0.0,
             velocity: 1.0,
             release_samples: 1.0,
+            last_l: 0.0,
+            last_r: 0.0,
+            tail: 0.0,
+            tail_l: 0.0,
+            tail_r: 0.0,
         }
     }
 }
@@ -393,12 +403,18 @@ impl VoiceEngine {
             .map(|slot| slot.file_rate)
             .unwrap_or(self.sample_rate);
         let Some(slot_index) = self.claim(pad_index) else { return };
+        let previous = self.voices[slot_index];
         let time_rate = file_rate / self.sample_rate;
         let semis = region.semis + region.cents / 100.0;
         let pitch = 2f64.powf(semis / 12.0);
         let sr = self.sample_rate;
         let voice = &mut self.voices[slot_index];
         *voice = Voice::idle();
+        if previous.active {
+            voice.tail_l = previous.last_l;
+            voice.tail_r = previous.last_r;
+            voice.tail = 1.0;
+        }
         voice.active = true;
         voice.pad = pad_index;
         voice.wait = region.swing;
@@ -449,7 +465,8 @@ impl VoiceEngine {
         }
         if self.voices[index].wait > 0 {
             self.voices[index].wait -= 1;
-            return None;
+            let rate = self.sample_rate;
+            return Some(mix_tail(&mut self.voices[index], rate, 0.0, 0.0));
         }
         let voice = &self.voices[index];
         let region = self.pads[voice.pad];
@@ -556,15 +573,33 @@ impl VoiceEngine {
         voice.cursor = cursor + step;
         let gain = sample * voice.env * voice.velocity * region.level.clamp(0.0, 1.0);
         let angle = (region.pan.clamp(-1.0, 1.0) + 1.0) * std::f64::consts::FRAC_PI_4;
-        Some((gain * angle.cos(), gain * angle.sin()))
+        Some(mix_tail(voice, sample_rate, gain * angle.cos(), gain * angle.sin()))
     }
+}
+
+fn mix_tail(voice: &mut Voice, sample_rate: f64, left: f64, right: f64) -> (f64, f64) {
+    let add_l = voice.tail_l * voice.tail;
+    let add_r = voice.tail_r * voice.tail;
+    if voice.tail > 0.0 {
+        voice.tail *= (-1.0 / (sample_rate * 0.004)).exp();
+        if voice.tail < 1e-4 {
+            voice.tail = 0.0;
+        }
+    }
+    let mixed_l = left + add_l;
+    let mixed_r = right + add_r;
+    voice.last_l = mixed_l;
+    voice.last_r = mixed_r;
+    (mixed_l, mixed_r)
 }
 
 fn wobble_of(wow: f64, flutter: f64, time: f64) -> f64 {
     1.0 + wow * 0.015 * (std::f64::consts::TAU * 0.55 * time).sin() + flutter * 0.004 * (std::f64::consts::TAU * 7.1 * time).sin()
 }
 
-fn stretch_read(buffer: &[f32], start: f64, end: f64, playhead: f64, pitch: f64, reverse: bool) -> f64 {
+const BLEND: f64 = 64.0;
+
+fn ola_read(buffer: &[f32], start: f64, end: f64, playhead: f64, pitch: f64, reverse: bool) -> f64 {
     let local = playhead % HOP;
     let base = playhead - local;
     let (pos_a, pos_b) = if reverse {
@@ -580,6 +615,20 @@ fn stretch_read(buffer: &[f32], start: f64, end: f64, playhead: f64, pitch: f64,
         return read_linear(buffer, if reverse { end - 1.0 - playhead } else { start + playhead });
     }
     (read_linear(buffer, pos_a) * win_a + read_linear(buffer, pos_b) * win_b) / norm
+}
+
+fn stretch_read(buffer: &[f32], start: f64, end: f64, playhead: f64, pitch: f64, reverse: bool) -> f64 {
+    let direct_at = if reverse { end - 1.0 - playhead * pitch } else { start + playhead * pitch };
+    let direct = read_linear(buffer, direct_at);
+    if playhead < HOP - BLEND {
+        return direct;
+    }
+    let overlapped = ola_read(buffer, start, end, playhead, pitch, reverse);
+    if playhead < HOP {
+        let gain = (playhead - (HOP - BLEND)) / BLEND;
+        return direct * (1.0 - gain) + overlapped * gain;
+    }
+    overlapped
 }
 
 fn hann(phase: f64) -> f64 {

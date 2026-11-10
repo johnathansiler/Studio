@@ -102,7 +102,9 @@ export function phaseStretch(input: Float32Array, outLen: number, sampleRate: nu
   const prevAna = new Float64Array(half + 1)
   const prevSyn = new Float64Array(half + 1)
   const prevMag = new Float64Array(half + 1)
+  const freqHold = new Float64Array(half + 1)
   let primed = false
+  let prevIn = -1
   let inCursor = 0
   const frames = Math.ceil(length / synthHop) + 2
 
@@ -124,9 +126,15 @@ export function phaseStretch(input: Float32Array, outLen: number, sampleRate: nu
     }
     const synth = new Float64Array(half + 1)
     let transient = false
+    const frozen = primed && inAt === prevIn
     if (!primed) {
       for (let bin = 0; bin <= half; bin++) synth[bin] = phase[bin]
+      // One frame has no phase delta. A one-sample shift gives a frequency
+      // so a buffer that never advances does not repeat the same grain.
+      estimateShiftFrequency(input, inAt, size, window, phase, freqHold)
       primed = true
+    } else if (frozen) {
+      for (let bin = 0; bin <= half; bin++) synth[bin] = prevSyn[bin] + freqHold[bin] * synthHop
     } else {
       let flux = 0
       for (let bin = 1; bin < half; bin++) {
@@ -139,14 +147,19 @@ export function phaseStretch(input: Float32Array, outLen: number, sampleRate: nu
       for (let bin = 1; bin < half; bin++) {
         if (mag[bin] >= mag[bin - 1] && mag[bin] > mag[bin + 1] && mag[bin] > floor) peaks.push(bin)
       }
-      const dIn = Math.max(1, analysisHop)
+      // Actual samples read since the previous frame. The nominal hop is
+      // longer than a frame that has hit the end of the input, and using
+      // it detunes everything after that frame.
+      const dIn = Math.max(1, inAt - prevIn)
       for (let bin = 0; bin <= half; bin++) {
         const omega = (2 * Math.PI * bin) / size
         const delta = princarg(phase[bin] - prevAna[bin] - omega * dIn)
         const freq = omega + delta / dIn
         const propagated = prevSyn[bin] + freq * synthHop
-        if (transient) synth[bin] = phase[bin]
-        else {
+        if (transient) {
+          synth[bin] = phase[bin]
+          freqHold[bin] = freq
+        } else {
           let peak = -1
           let distance = 4
           for (const candidate of peaks) {
@@ -156,13 +169,16 @@ export function phaseStretch(input: Float32Array, outLen: number, sampleRate: nu
               peak = candidate
             }
           }
+          const locked = peak >= 0 ? freqOf(phase[peak], prevAna[peak], peak, size, dIn) : freq
+          freqHold[bin] = locked
           synth[bin] =
             peak >= 0
-              ? prevSyn[peak] + freqOf(phase[peak], prevAna[peak], peak, size, dIn) * synthHop + princarg(phase[bin] - phase[peak])
+              ? prevSyn[peak] + locked * synthHop + princarg(phase[bin] - phase[peak])
               : propagated
         }
       }
     }
+    prevIn = inAt
     for (let bin = 0; bin <= half; bin++) {
       prevAna[bin] = phase[bin]
       prevSyn[bin] = synth[bin]
@@ -188,20 +204,10 @@ export function phaseStretch(input: Float32Array, outLen: number, sampleRate: nu
       weight[at] += window[i] * shaped
     }
     inCursor += analysisHop
-    if (inAt >= input.length - size && frame > 0) break
   }
-  let typical = 0
-  const from = Math.floor(length * 0.2)
-  const to = Math.max(from + 1, Math.floor(length * 0.8))
-  for (let i = from; i < to; i++) if (weight[i] > typical) typical = weight[i]
   for (let i = 0; i < length; i++) {
     const covered = weight[i]
-    if (!(covered > 1e-8) || !(typical > 0)) {
-      output[i] = 0
-      continue
-    }
-    const gain = covered >= typical * 0.5 ? 1 / covered : covered / (typical * typical * 0.5)
-    output[i] = sanitize(output[i] * gain)
+    output[i] = covered > 1e-4 ? sanitize(output[i] / covered) : 0
   }
   const onset = Math.min(length, input.length, Math.round(sampleRate * 0.006))
   for (let i = 0; i < onset; i++) {
@@ -214,4 +220,25 @@ export function phaseStretch(input: Float32Array, outLen: number, sampleRate: nu
 function freqOf(phase: number, prev: number, bin: number, size: number, dIn: number) {
   const omega = (2 * Math.PI * bin) / size
   return omega + princarg(phase - prev - omega * dIn) / dIn
+}
+
+/** Radians per sample from a one-sample shift of the same analysis window. */
+function estimateShiftFrequency(
+  input: Float32Array,
+  inAt: number,
+  size: number,
+  window: Float64Array,
+  phase: Float64Array,
+  freqHold: Float64Array,
+) {
+  const half = size >> 1
+  const re = new Float64Array(size)
+  const im = new Float64Array(size)
+  for (let i = 0; i < size; i++) re[i] = (input[inAt + i + 1] || 0) * window[i]
+  fft(re, im, false)
+  for (let bin = 0; bin <= half; bin++) {
+    const omega = (2 * Math.PI * bin) / size
+    const shifted = Math.atan2(im[bin], re[bin])
+    freqHold[bin] = omega + princarg(shifted - phase[bin] - omega)
+  }
 }

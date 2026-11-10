@@ -76,6 +76,11 @@ interface Playing {
   time: number
   velocity: number
   releaseSamples: number
+  lastL: number
+  lastR: number
+  tail: number
+  tailL: number
+  tailR: number
 }
 
 function emptyRegion(): Region {
@@ -91,6 +96,7 @@ function idle(): Playing {
     active: false, released: false, pad: 0, cursor: 0, wait: 0, env: 1, rateTime: 1, ratePitch: 1, stretch: false,
     hp: 0, hpX: 0, lp: 0, vintLp: 0, hpA: 0, lpA: 0, vintA: 0, held: 0, holdLeft: 0, holdN: 1,
     bits: 0, wow: 0, flutter: 0, noise: 0, crackle: 0, seed: 1, time: 0, velocity: 1, releaseSamples: 1,
+    lastL: 0, lastR: 0, tail: 0, tailL: 0, tailR: 0,
   }
 }
 
@@ -123,7 +129,9 @@ function hann(phase: number) {
   return 0.5 - 0.5 * Math.cos(TAU * phase)
 }
 
-function stretchRead(buffer: Float32Array, start: number, end: number, playhead: number, pitch: number, reverse: boolean) {
+const BLEND = 64
+
+function olaRead(buffer: Float32Array, start: number, end: number, playhead: number, pitch: number, reverse: boolean) {
   const local = playhead % HOP
   const base = playhead - local
   const posA = reverse ? (end - 1 - base) - local * pitch : start + base + local * pitch
@@ -133,6 +141,19 @@ function stretchRead(buffer: Float32Array, start: number, end: number, playhead:
   const norm = winA + winB
   if (norm <= 1e-9) return readLinear(buffer, reverse ? end - 1 - playhead : start + playhead)
   return (readLinear(buffer, posA) * winA + readLinear(buffer, posB) * winB) / norm
+}
+
+/** Constant-time pitch. The first hop reads from the attack so a tuned hit is not skipped. */
+function stretchRead(buffer: Float32Array, start: number, end: number, playhead: number, pitch: number, reverse: boolean) {
+  const directAt = reverse ? end - 1 - playhead * pitch : start + playhead * pitch
+  const direct = readLinear(buffer, directAt)
+  if (playhead < HOP - BLEND) return direct
+  const overlapped = olaRead(buffer, start, end, playhead, pitch, reverse)
+  if (playhead < HOP) {
+    const gain = (playhead - (HOP - BLEND)) / BLEND
+    return direct * (1 - gain) + overlapped * gain
+  }
+  return overlapped
 }
 
 function edgeGain(cursor: number, span: number, fadeIn: number, fadeOut: number) {
@@ -229,10 +250,16 @@ export class SamplePool {
     }
     const fileRate = this.slots[region.sampleId - 1]?.fileRate ?? this.rate
     const slot = this.claim(pad)
+    const previous = this.voices[slot]
     const timeRate = fileRate / this.rate
     const semis = region.semis + region.cents / 100
     const pitch = 2 ** (semis / 12)
     const voice = idle()
+    if (previous?.active) {
+      voice.tailL = previous.lastL
+      voice.tailR = previous.lastR
+      voice.tail = 1
+    }
     voice.active = true
     voice.pad = pad
     voice.wait = region.swing
@@ -267,7 +294,7 @@ export class SamplePool {
     if (!voice.active) return null
     if (voice.wait > 0) {
       voice.wait -= 1
-      return null
+      return this.mixTail(voice, 0, 0)
     }
     const region = this.pads[voice.pad]
     const buffer = this.slots[region.sampleId - 1]?.samples
@@ -335,7 +362,23 @@ export class SamplePool {
     voice.cursor += step
     const gain = sample * voice.env * voice.velocity * Math.max(0, Math.min(1, region.level))
     const angle = (Math.max(-1, Math.min(1, region.pan)) + 1) * Math.PI / 4
-    return [gain * Math.cos(angle), gain * Math.sin(angle)]
+    return this.mixTail(voice, gain * Math.cos(angle), gain * Math.sin(angle))
+  }
+
+  /** Keep the sample that was just replaced, so a retrigger does not step. */
+  private mixTail(voice: Playing, left: number, right: number): [number, number] | null {
+    const addL = voice.tailL * voice.tail
+    const addR = voice.tailR * voice.tail
+    if (voice.tail > 0) {
+      voice.tail *= Math.exp(-1 / (this.rate * 0.004))
+      if (voice.tail < 1e-4) voice.tail = 0
+    }
+    const mixedL = left + addL
+    const mixedR = right + addR
+    voice.lastL = mixedL
+    voice.lastR = mixedR
+    if (voice.tail <= 0 && left === 0 && right === 0 && !voice.active) return null
+    return [mixedL, mixedR]
   }
 }
 

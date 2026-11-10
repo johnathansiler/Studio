@@ -6,7 +6,7 @@
 const TAPS = 8
 const HALF = TAPS / 2
 const PHASES = 128
-const CUTOFFS = [0.95, 0.48, 0.24]
+const CUTOFFS = [0.95, 0.72, 0.5, 0.36, 0.24, 0.16]
 
 let table: Float32Array[] | null = null
 
@@ -45,9 +45,12 @@ function windowed(x: number, cutoff: number, radius: number) {
 }
 
 export function bandForRate(rate: number) {
-  if (!(rate > 1.05)) return 0
-  if (rate <= 2.2) return 1
-  return 2
+  if (!(rate > 1.02)) return 0
+  const need = 0.92 / rate
+  for (let band = 0; band < CUTOFFS.length; band++) {
+    if (CUTOFFS[band] <= need) return band
+  }
+  return CUTOFFS.length - 1
 }
 
 export interface ReadSpan {

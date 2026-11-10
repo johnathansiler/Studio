@@ -33,24 +33,51 @@ export function preferStretchCache(phone: boolean, cpu: number) {
 }
 
 export function detectTransients(channel: Float32Array, sampleRate: number, threshold = 0.2): number[] {
+  const hop = Math.max(1, Math.round(sampleRate * 0.01))
+  const envLen = Math.ceil(channel.length / hop)
+  if (envLen < 3) return []
+  const env = new Float32Array(envLen)
   let peak = 0
-  for (let i = 0; i < channel.length; i++) {
-    const mag = Math.abs(channel[i] || 0)
+  for (let i = 0; i < envLen; i++) {
+    let energy = 0
+    const base = i * hop
+    const count = Math.min(hop, channel.length - base)
+    for (let j = 0; j < count; j++) {
+      const sample = channel[base + j] || 0
+      energy += sample * sample
+    }
+    const mag = Math.sqrt(energy / Math.max(1, count))
+    env[i] = mag
     if (mag > peak) peak = mag
   }
   if (peak < 1e-8) return []
   const gate = Math.max(0.02, threshold) * peak
-  const minGap = Math.max(1, Math.round(sampleRate * 0.03))
+  const minGap = Math.max(hop, Math.round(sampleRate * 0.05))
   const hits: number[] = []
   let last = -minGap
-  for (let index = 1; index < channel.length - 1; index++) {
-    const mag = Math.abs(channel[index] || 0)
-    if (mag < gate || mag < Math.abs(channel[index - 1] || 0) || mag <= Math.abs(channel[index + 1] || 0)) continue
-    if (index - last < minGap) continue
-    hits.push(index)
-    last = index
+  const fluxGate = peak * Math.max(0.12, threshold * 0.6)
+  for (let i = 1; i < envLen; i++) {
+    const flux = env[i] - env[i - 1]
+    const next = i + 1 < envLen ? env[i + 1] : -1
+    if (flux < fluxGate || env[i] < gate || env[i] < next) continue
+    let onset = i
+    while (onset > 0 && env[onset - 1] <= env[onset] && env[onset - 1] > gate * 0.3) onset -= 1
+    const at = refineOnset(channel, onset * hop, hop)
+    if (at - last < minGap) continue
+    hits.push(at)
+    last = at
   }
+  if (env[0] > gate && (hits.length === 0 || hits[0] > hop)) hits.unshift(refineOnset(channel, 0, hop))
   return hits
+}
+
+function refineOnset(channel: Float32Array, start: number, hop: number) {
+  const end = Math.min(channel.length, start + hop)
+  let peak = 0
+  for (let i = start; i < end; i++) peak = Math.max(peak, Math.abs(channel[i] || 0))
+  const gate = peak * 0.2
+  for (let i = start; i < end; i++) if (Math.abs(channel[i] || 0) >= gate) return i
+  return start
 }
 
 /** Onset autocorrelation. Null when the signal has no pulse. */
@@ -491,11 +518,13 @@ function stretchBeats(input: Float32Array, outLen: number, sampleRate: number, q
     const src1 = bounds[i + 1]
     let out0 = Math.round((src0 / input.length) * outLen)
     const out1 = i === bounds.length - 2 ? outLen : Math.round((src1 / input.length) * outLen)
+    let overlap = 0
     if (hits.includes(src0)) {
       const copy = Math.min(attack, src1 - src0, Math.max(0, out1 - out0))
       for (let k = 0; k < copy; k++) output[out0 + k] = input[src0 + k] || 0
-      src0 += copy
-      out0 += copy
+      overlap = Math.min(64, Math.floor(copy / 2))
+      src0 += copy - overlap
+      out0 += copy - overlap
     }
     const srcLen = src1 - src0
     const dstLen = out1 - out0
@@ -507,7 +536,16 @@ function stretchBeats(input: Float32Array, outLen: number, sampleRate: number, q
         : quality === 'preview'
           ? wsola(body, dstLen, 'beats')
           : phaseStretch(body, dstLen, sampleRate, 'beats')
-    output.set(piece.subarray(0, Math.min(piece.length, output.length - out0)), out0)
+    const count = Math.min(piece.length, output.length - out0)
+    const fadeN = out0 > 0 ? Math.min(Math.max(overlap, 48), Math.floor(count / 2)) : 0
+    for (let i = 0; i < count; i++) {
+      const sample = piece[i] || 0
+      const at = out0 + i
+      if (i < fadeN) {
+        const gain = i / Math.max(1, fadeN)
+        output[at] = (output[at] || 0) * (1 - gain) + sample * gain
+      } else output[at] = sample
+    }
   }
   return output
 }
