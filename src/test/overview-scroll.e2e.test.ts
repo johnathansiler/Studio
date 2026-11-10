@@ -347,6 +347,104 @@ describe('timeline overview and loop handles', () => {
     await desk.page.close()
   }, 90000)
 
+  it('shrinks and grows lanes from the vertical bar at 390x844 and 1440x900', async () => {
+    const sizes = [
+      { width: 390, height: 844, touch: true },
+      { width: 1440, height: 900, touch: false },
+    ]
+    for (const viewport of sizes) {
+      const { page, errors } = await boot(viewport, viewport.touch)
+      const read = () => page.evaluate(() => {
+        const lane = document.querySelector('.timeline-scroll .lane') as HTMLElement
+        const head = document.querySelector('.arrange .heads .head') as HTMLElement
+        const mute = document.querySelector('.arrange .heads button[aria-label="Mute track"]') as HTMLElement
+        const face = document.querySelector('[data-loop-region="arrange"] .loop-grip-face') as HTMLElement
+        const trackX = document.querySelector('[data-overview="x"] .overview-track') as HTMLElement
+        const trackY = document.querySelector('[data-overview="y"] .overview-track') as HTMLElement
+        const thumbX = document.querySelector('[data-overview-thumb="x"]') as HTMLElement
+        const thumbY = document.querySelector('[data-overview-thumb="y"]') as HTMLElement
+        const zoom = Number(getComputedStyle(document.querySelector('.arrange')!).getPropertyValue('--lane-zoom'))
+        const muteBox = mute.getBoundingClientRect()
+        const hit = document.elementFromPoint(muteBox.left + muteBox.width / 2, muteBox.top + muteBox.height / 2) as HTMLElement | null
+        return {
+          zoom,
+          laneH: lane.getBoundingClientRect().height,
+          headH: head.getBoundingClientRect().height,
+          muteH: muteBox.height,
+          muteHit: !!hit?.closest('button[aria-label="Mute track"]'),
+          faceW: face.getBoundingClientRect().width,
+          barX: trackX.getBoundingClientRect().height,
+          barY: trackY.getBoundingClientRect().width,
+          thumbX: thumbX.getBoundingClientRect().height,
+          thumbY: thumbY.getBoundingClientRect().width,
+          gutterX: (document.querySelector('[data-overview="x"]') as HTMLElement).getBoundingClientRect().height,
+          gutterY: (document.querySelector('[data-overview="y"]') as HTMLElement).getBoundingClientRect().width,
+        }
+      })
+      const before = await read()
+      expect(before.zoom).toBeGreaterThan(0.5)
+      expect(before.zoom).toBeLessThan(2.25)
+      expect(Math.abs(before.barX - before.faceW)).toBeLessThan(1)
+      expect(Math.abs(before.barY - before.faceW)).toBeLessThan(1)
+      expect(Math.abs(before.thumbX - before.faceW)).toBeLessThan(1)
+      expect(Math.abs(before.thumbY - before.faceW)).toBeLessThan(1)
+      expect(before.gutterX).toBeGreaterThanOrEqual(40)
+      expect(before.gutterY).toBeGreaterThanOrEqual(40)
+
+      const dragEnd = async (deltaY: number) => {
+        const thumb = await page.locator('[data-overview-thumb="y"]').boundingBox()
+        expect(thumb).toBeTruthy()
+        const x = thumb!.x + thumb!.width / 2
+        // Stay inside the end grip (the bottom 40px) and inside the viewport.
+        const y = thumb!.y + Math.max(12, thumb!.height - 24)
+        const dest = Math.max(4, Math.min(viewport.height - 4, y + deltaY))
+        if (viewport.touch) {
+          const client = await page.context().newCDPSession(page)
+          const point = (py: number) => [{ x: Math.round(x), y: Math.round(py), id: 1 }]
+          await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(y) })
+          const steps = 8
+          for (let step = 1; step <= steps; step++) {
+            const py = y + ((dest - y) * step) / steps
+            await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: point(py) })
+            await page.waitForTimeout(16)
+          }
+          await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+          await client.detach()
+        } else {
+          await page.mouse.move(x, y)
+          await page.mouse.down()
+          await page.mouse.move(x, dest, { steps: 10 })
+          await page.mouse.up()
+        }
+        await page.waitForTimeout(40)
+      }
+
+      const thumbBox = await page.locator('[data-overview-thumb="y"]').boundingBox()
+      const endY = thumbBox!.y + Math.max(12, thumbBox!.height - 24)
+      const shrinkRoom = Math.min(160, Math.max(48, viewport.height - 8 - endY))
+      await dragEnd(shrinkRoom)
+      const shrunk = await read()
+      expect(shrunk.zoom, `${viewport.width} shrink zoom`).toBeLessThan(before.zoom - 0.04)
+      expect(shrunk.laneH, `${viewport.width} shrink lanes`).toBeLessThan(before.laneH - 4)
+      expect(Math.abs(shrunk.headH - shrunk.laneH), `${viewport.width} header tracks the lane`).toBeLessThan(2)
+      expect(shrunk.muteH, `${viewport.width} mute stays a touch target`).toBeGreaterThanOrEqual(40)
+      expect(shrunk.muteHit, `${viewport.width} mute stays hittable`).toBe(true)
+      await page.screenshot({ path: `/opt/cursor/artifacts/overview_lanes_${viewport.width}x${viewport.height}.png` })
+
+      const grownThumb = await page.locator('[data-overview-thumb="y"]').boundingBox()
+      const grownEnd = grownThumb!.y + Math.max(12, grownThumb!.height - 24)
+      const growRoom = Math.min(180, Math.max(90, grownEnd - 20))
+      await dragEnd(-growRoom)
+      const grown = await read()
+      expect(grown.zoom, `${viewport.width} grow zoom`).toBeGreaterThan(shrunk.zoom + 0.08)
+      expect(grown.laneH, `${viewport.width} grow lanes`).toBeGreaterThan(shrunk.laneH + 6)
+      expect(grown.zoom, `${viewport.width} grows past the default`).toBeGreaterThan(before.zoom + 0.04)
+      expect(grown.laneH).toBeGreaterThan(before.laneH + 4)
+      expect(errors, errors.join('\n')).toEqual([])
+      await page.close()
+    }
+  }, 90000)
+
   it('shows the overview bars at five viewports', async () => {
     const viewports = [
       { width: 390, height: 844, touch: true },
@@ -364,6 +462,8 @@ describe('timeline overview and loop handles', () => {
         const scroll = rect('.timeline-scroll')!
         const paintedX = rect('[data-overview="x"] .overview-track')!
         const paintedY = rect('[data-overview="y"] .overview-track')!
+        const thumbX = rect('[data-overview-thumb="x"]')!
+        const thumbY = rect('[data-overview-thumb="y"]')!
         const tools = rect('.tool-slot')
         const heads = rect('.arrange .heads')!
         const ruler = rect('.arrange .timeline-scroll .ruler')!
@@ -395,6 +495,10 @@ describe('timeline overview and loop handles', () => {
           gapY: y.left - scroll.right,
           paintedXH: paintedX.height,
           paintedYW: paintedY.width,
+          thumbXH: thumbX.height,
+          thumbYW: thumbY.width,
+          faceW: faceBox?.width ?? 0,
+          faceH: faceBox?.height ?? 0,
           barBottom: x.bottom,
           toolsTop: tools?.top ?? null,
           sideLeft: y.left,
@@ -420,10 +524,11 @@ describe('timeline overview and loop handles', () => {
       expect(box.yw, `${name} vertical hit`).toBeGreaterThanOrEqual(40)
       expect(Math.abs(box.gapX), `${name} horizontal gap`).toBeLessThan(2)
       expect(Math.abs(box.gapY), `${name} vertical gap`).toBeLessThan(2)
-      expect(box.paintedXH, `${name} painted horizontal bar`).toBeGreaterThanOrEqual(7)
-      expect(box.paintedXH, `${name} painted horizontal bar`).toBeLessThanOrEqual(9)
-      expect(box.paintedYW, `${name} painted vertical bar`).toBeGreaterThanOrEqual(7)
-      expect(box.paintedYW, `${name} painted vertical bar`).toBeLessThanOrEqual(9)
+      expect(box.faceW, `${name} loop grip thickness`).toBeGreaterThan(10)
+      expect(Math.abs(box.paintedXH - box.faceW), `${name} horizontal bar matches the loop grip`).toBeLessThan(1)
+      expect(Math.abs(box.paintedYW - box.faceW), `${name} vertical bar matches the loop grip`).toBeLessThan(1)
+      expect(Math.abs(box.thumbXH - box.faceW), `${name} horizontal thumb matches the loop grip`).toBeLessThan(1)
+      expect(Math.abs(box.thumbYW - box.faceW), `${name} vertical thumb matches the loop grip`).toBeLessThan(1)
       if (box.toolsTop != null) expect(box.barBottom, `${name} bar above the edit bar`).toBeLessThanOrEqual(box.toolsTop + 1)
       expect(box.sideLeft, `${name} vertical bar clears the track headers`).toBeGreaterThanOrEqual(box.headRight - 1)
       expect(Math.abs(box.laneLeft - box.headRight), `${name} lane meets the header column`).toBeLessThanOrEqual(2)

@@ -1,5 +1,11 @@
-/* Timeline overview bars. The gutter is the hit target; the painted bar stays slim.
-   Heights come from --overview-gutter and the measured scroller, not a fixed ruler size. */
+/* Timeline overview bars. The gutter is the 40px hit target.
+   The painted bar uses the loop grip's border-box thickness. */
+
+:root {
+  --loop-grip-thickness: 12px;
+  --loop-grip-edge: 1px;
+  --overview-bar: var(--loop-grip-thickness);
+}
 
 .arrange {
   --overview-gutter: 40px;
@@ -125,17 +131,17 @@
 .overview-scroll[data-axis="x"] .overview-track {
   left: 6px;
   right: 6px;
-  height: 8px;
+  height: var(--overview-bar, 12px);
   top: 50%;
-  margin-top: -4px;
+  margin-top: calc(var(--overview-bar, 12px) / -2);
 }
 
 .overview-scroll[data-axis="y"] .overview-track {
   top: 6px;
   bottom: 6px;
-  width: 8px;
+  width: var(--overview-bar, 12px);
   left: 50%;
-  margin-left: -4px;
+  margin-left: calc(var(--overview-bar, 12px) / -2);
 }
 
 .overview-thumb {
@@ -190,7 +196,7 @@
 .overview-grip::before {
   content: '';
   width: 1px;
-  height: 5px;
+  height: 7px;
   border-radius: 1px;
   background: rgba(16, 33, 23, 0.55);
   box-shadow:
@@ -199,7 +205,7 @@
 }
 
 .overview-scroll[data-axis="y"] .overview-grip::before {
-  width: 5px;
+  width: 7px;
   height: 1px;
   box-shadow:
     0 -2px 0 rgba(16, 33, 23, 0.45),
@@ -264,4 +270,96 @@
 .loop-host.follow-scroll .park-dock.left .loop-grip-face {
   left: 0;
   right: auto;
+}
+
+/* Half-height lanes are shorter than the two-row header. Pin the 40px
+   controls to the bottom of the lane and keep the column from growing over
+   the timeline. Default zoom does not set this attribute. */
+.arrange[data-lane-scale="tight"] .head {
+  overflow: hidden;
+}
+
+.arrange[data-lane-scale="tight"] .head .pl-head,
+.shell.phone:not(.land) .arrange[data-lane-scale="tight"] .head .pl-head,
+.shell.phone.land .arrange[data-lane-scale="tight"] .head .pl-head,
+.shell.fold .arrange[data-lane-scale="tight"] .head .pl-head,
+.shell:not(.phone) .arrange[data-lane-scale="tight"] .pl-head {
+  position: relative;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  justify-content: flex-end;
+  height: 100%;
+  min-height: 0;
+  width: max-content;
+  max-width: none;
+  padding: 0;
+  gap: 0;
+}
+
+.arrange[data-lane-scale="tight"] .pl-name-row,
+.shell.phone:not(.land) .arrange[data-lane-scale="tight"] .pl-name-row,
+.shell.phone.land .arrange[data-lane-scale="tight"] .pl-name-row,
+.shell:not(.phone) .arrange[data-lane-scale="tight"] .pl-name-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  height: calc(100% - 40px);
+  min-height: 0;
+  max-height: calc(100% - 40px);
+  padding: 0 2px 0 0;
+  overflow: visible;
+}
+
+.arrange[data-lane-scale="tight"] .pl-name-row .name,
+.shell.phone:not(.land) .arrange[data-lane-scale="tight"] .pl-name-row .name,
+.shell.phone.land .arrange[data-lane-scale="tight"] .pl-name-row .name,
+.shell:not(.phone) .arrange[data-lane-scale="tight"] .pl-head .name {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.arrange[data-lane-scale="tight"] .track-controls,
+.shell.phone:not(.land) .arrange[data-lane-scale="tight"] .track-controls,
+.shell.phone.land .arrange[data-lane-scale="tight"] .track-controls,
+.shell:not(.phone) .arrange[data-lane-scale="tight"] .track-controls {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  width: max-content;
+  min-width: max-content;
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  padding-right: 42px;
+  box-sizing: border-box;
+}
+
+.arrange[data-lane-scale="tight"] .pl-name-row .track-more,
+.shell.phone:not(.land) .arrange[data-lane-scale="tight"] .pl-name-row .track-more,
+.shell:not(.phone) .arrange[data-lane-scale="tight"] .pl-head .track-more {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  bottom: auto;
+  left: auto;
+  flex: 0 0 40px;
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  z-index: 3;
 }

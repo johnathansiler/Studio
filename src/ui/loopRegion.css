@@ -137,14 +137,14 @@
   position: absolute;
   top: 2px;
   bottom: 2px;
-  width: 12px;
+  width: var(--loop-grip-thickness, 12px);
   display: flex;
   align-items: center;
   justify-content: center;
   pointer-events: none;
   transform: none;
   border-radius: 6px 2px 2px 6px;
-  border: 1px solid rgba(255, 255, 255, 0.42);
+  border: var(--loop-grip-edge, 1px) solid rgba(255, 255, 255, 0.42);
   color: transparent;
   font-size: 0;
   background-color: #3e8f5c;
