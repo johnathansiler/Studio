@@ -56,6 +56,7 @@
   border-radius: 8px;
   cursor: grab;
   z-index: 1;
+  touch-action: none;
   background-image: linear-gradient(180deg, rgba(232, 255, 239, 0.96), rgba(96, 186, 128, 0.92) 52%, rgba(24, 72, 44, 0.94));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.72),
@@ -71,11 +72,7 @@
     0 0 12px rgba(224, 177, 90, 0.55);
 }
 .loop-host:active .song-loop { cursor: grabbing; }
-/* Invisible hit pad. The slim face is the only thing drawn. */
-.ruler:has(.loop-host.offset) {
-  overflow: visible;
-  z-index: 5;
-}
+/* Invisible hit pad. The slim face is the only thing drawn, and both faces share the ruler row. */
 .loop-host button.loop-grip {
   position: absolute;
   top: 0;
