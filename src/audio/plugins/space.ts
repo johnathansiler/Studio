@@ -10,6 +10,7 @@ export function createDelay(sampleRate: number): Processor {
   let filter = designBiquad('lowpass', sampleRate, 5000, 0.7)
   let freq = 5000
   const mixGlide = new SampleGlide()
+  const timeGlide = new SampleGlide()
   return {
     latencySamples: 0,
     reset() {
@@ -17,6 +18,7 @@ export function createDelay(sampleRate: number): Processor {
       right.fill(0)
       write = 0
       filter.x1 = filter.x2 = filter.y1 = filter.y2 = 0
+      timeGlide.reset()
     },
     process(input, output, params, ctx) {
       if (params.filter !== freq) {
@@ -30,14 +32,16 @@ export function createDelay(sampleRate: number): Processor {
       const samples = params.sync >= 0.5
         ? Math.max(1, (60 / Math.max(1, ctx.tempo)) * params.division * ctx.sampleRate)
         : Math.max(1, (params.time / 1000) * ctx.sampleRate)
+      timeGlide.prepare(ctx.sampleRate)
       const ping = params.pingpong >= 0.5
       const n = input[0]?.length ?? 0
       for (let i = 0; i < n; i++) {
         const mix = mixGlide.next(mixTarget)
+        const delaySamples = Math.max(1, timeGlide.next(samples))
         const dryL = input[0][i] || 0
         const dryR = input[1]?.[i] ?? dryL
-        const tapL = readAt(left, write, samples)
-        const tapR = readAt(right, write, ping ? samples * 0.5 : samples)
+        const tapL = readAt(left, write, delaySamples)
+        const tapR = readAt(right, write, ping ? delaySamples * 0.5 : delaySamples)
         const fb = tickBiquad(filter, (tapL + tapR) * 0.5) * feedback
         left[write] = sanitize(dryL + fb)
         right[write] = sanitize(dryR + fb)

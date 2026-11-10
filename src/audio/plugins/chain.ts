@@ -120,11 +120,14 @@ export function processChain(
     const slot = slots[s]
     const next = pooled && view ? view.stages[s + 1] : current.map(() => new Float32Array(n))
     const active = slot.enabled && !slot.failed && slot.processor && slot.wet > 0.0001
-    if (!active || !slot.processor) {
+    const fading = !active && !!slot.processor && !slot.failed && heldMix(pool, slot, s) > 0.0008
+    if ((!active && !fading) || !slot.processor) {
       if (slot.notes) slot.notes.length = 0
       rememberClosed(pool, slot, s)
       copy(current, next)
     } else {
+      const savedWet = slot.wet
+      if (!active) slot.wet = 0
       try {
         const wet = pooled && view ? view.wet[s] : next.map(() => new Float32Array(n))
         const sidechain = slot.sidechain && sidechainAt ? sidechainAt(slot.sidechain, n) : null
@@ -136,6 +139,8 @@ export function processChain(
         slot.failed = true
         if (slot.notes) slot.notes.length = 0
         copy(current, next)
+      } finally {
+        slot.wet = savedWet
       }
     }
     current = next
@@ -278,6 +283,15 @@ function mixConstant(
       dest[i] = sanitize(sample * dryMix + processed * mix)
     }
   }
+}
+
+function heldMix(pool: ChainPool | undefined, slot: ChainSlot, index: number) {
+  const prepared = pool && index >= 0 && index < pool.delay.length ? pool.delay[index] : null
+  if (prepared) {
+    if (prepared.id !== slot.id || !prepared.ready) return 0
+    return prepared.mix
+  }
+  return looseMix.get(slot) ?? 0
 }
 
 function rememberClosed(pool: ChainPool | undefined, slot: ChainSlot, index: number) {

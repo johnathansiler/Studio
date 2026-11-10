@@ -59,6 +59,8 @@ interface Fx {
   low: number
   band: number
   lp: number
+  adaaU: number
+  adaaF: number
 }
 
 function mem(): Mem {
@@ -261,7 +263,7 @@ export class RackRuntime {
     const found = this.fx.get(id)
     if (found) return found
     const combs = kind === 'reverb' ? Array.from({ length: 4 }, (_, index) => new Float32Array(800 + index * 230)) : []
-    const created: Fx = { env: 0, phase: 0, delay: new Float32Array(this.sampleRate * 2), delayPos: 0, combs, combPos: combs.map(() => 0), low: 0, band: 0, lp: 0 }
+    const created: Fx = { env: 0, phase: 0, delay: new Float32Array(this.sampleRate * 2), delayPos: 0, combs, combPos: combs.map(() => 0), low: 0, band: 0, lp: 0, adaaU: 0, adaaF: 0 }
     this.fx.set(id, created)
     return created
   }

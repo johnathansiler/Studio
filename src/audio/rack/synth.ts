@@ -1,4 +1,5 @@
 import { applyMacros, DEVICE_PARAMS, type DeviceKind, type ParamSpec } from '../../model/rack'
+import { additiveSaw, additiveSquare, blepPulse, partialsFor } from '../quality/blep'
 
 export interface SynthState {
   phase: number[]
@@ -14,6 +15,8 @@ export interface SynthState {
   prev: number
   extra: number[]
   buf: Float32Array | null
+  adaaU: number
+  adaaF: number
 }
 
 export interface PlayVoice {
@@ -37,6 +40,8 @@ export interface FxBus {
   combPos: number[]
   low: number
   band: number
+  adaaU: number
+  adaaF: number
 }
 
 export interface ToneCtx {
@@ -67,6 +72,8 @@ export function freshState(): SynthState {
     prev: 0,
     extra: Array(8).fill(0),
     buf: null,
+    adaaU: 0,
+    adaaF: 0,
   }
 }
 
@@ -149,17 +156,17 @@ function analog(ctx: ToneCtx) {
       const index = 4 + u
       const step = advance(state, index, hz * 2 ** (cents / 1200), sr)
       if (u === 0) wrapped = step.wrapped
-      osc1 += shape(p.wave1 || 0, step.phase, pw, noise)
+      osc1 += shape(p.wave1 || 0, step.phase, step.dt, pw, noise, partialsFor(step.dt, ctx.quality))
     }
     osc1 /= uni
     const second = advance(state, 1, hz * 2 ** ((p.detune || 0) / 1200), sr)
     if ((p.sync || 0) >= 0.5 && wrapped) state.phase[1] = state.phase[4] || 0
-    const osc2 = shape(p.wave2 ?? 1, (p.sync || 0) >= 0.5 && wrapped ? state.phase[1] : second.phase, pw, noise)
+    const osc2 = shape(p.wave2 ?? 1, (p.sync || 0) >= 0.5 && wrapped ? state.phase[1] : second.phase, second.dt, pw, noise, partialsFor(second.dt, ctx.quality))
     const third = advance(state, 2, hz * 0.5, sr)
-    const osc3 = shape(p.wave3 ?? 3, third.phase, pw, noise)
+    const osc3 = shape(p.wave3 ?? 3, third.phase, third.dt, pw, noise, partialsFor(third.dt, ctx.quality))
     let tone = osc1 * (p.mix1 ?? 0.7) + osc2 * (p.mix2 ?? 0) + osc3 * (p.mix3 ?? 0)
     if ((p.ring || 0) >= 0.5) tone = osc1 * osc2
-    if ((p.drive || 0) > 0.001) tone = Math.tanh(tone * (1 + p.drive * 6))
+    if ((p.drive || 0) > 0.001) tone = adaaTanh(state, tone * (1 + p.drive * 6))
     const open = cutoff >= 12000 && (p.res || 0) < 0.05 && Math.abs(p.famt || 0) < 0.01
     const filtered = open ? tone : filter(state, tone, cutoff, p.res || 0, p.fmode || 0, p.slope || 0, p.ftype || 0, sr, ctx.quality)
     mix += filtered * 0.22 * amp * voice.vel
@@ -172,7 +179,10 @@ function analog(ctx: ToneCtx) {
 function wavetable(ctx: ToneCtx) {
   const p = ctx.params
   const sr = ctx.sr
-  const tables = ctx.table ?? builtinTable(clampInt(p.table || 0, 0, BUILTIN.length - 1))
+  const tableIndex = clampInt(p.table || 0, 0, BUILTIN.length - 1)
+  const builtin = !ctx.table
+  const tables = ctx.table ?? builtinTable(tableIndex)
+  const cap = builtin ? TABLE_CAPS[tableIndex] || 1 : 0
   let mix = 0
   const uni = Math.max(1, Math.min(ctx.quality === 'eco' ? 1 : 4, Math.round(p.uni || 1)))
   for (const voice of ctx.voices) {
@@ -199,7 +209,7 @@ function wavetable(ctx: ToneCtx) {
         const pw = clamp(p.pw || 0.5, 0.05, 0.95)
         phase = phase < pw ? (phase / pw) * 0.5 : 0.5 + ((phase - pw) / (1 - pw)) * 0.5
       }
-      let sample = morph(tables, p.position || 0, phase)
+      let sample = morph(tables, bandlimitedPosition(p.position || 0, tables.length, cap, hz, sr), phase)
       if (warp === 2) sample = fold(sample * (1 + amt * 3))
       osc += sample
     }
@@ -266,7 +276,7 @@ function fx(ctx: ToneCtx, input: number) {
   let sample = input
   const drive = p.fxDrv || 0
   if (drive > 0.001) {
-    const wet = Math.tanh(sample * (1 + drive * 8))
+    const wet = adaaTanh(ctx.fx, sample * (1 + drive * 8))
     sample = sample * (1 - drive) + wet * drive
   }
   const chorus = p.fxChor || 0
@@ -371,21 +381,48 @@ function glideTo(state: SynthState, voice: PlayVoice, played: number, glideMs: n
 }
 
 function advance(state: SynthState, index: number, hz: number, sr: number) {
-  const phase = (state.phase[index] || 0) + hz / sr
+  const dt = hz / sr
+  const phase = (state.phase[index] || 0) + dt
   const wrapped = phase >= 1
   state.phase[index] = wrapped ? phase - Math.floor(phase) : phase
-  return { phase: state.phase[index], wrapped }
+  return { phase: state.phase[index], wrapped, dt }
 }
 
-function shape(kind: number, phase: number, pw: number, noise: number) {
-  const p = phase - Math.floor(phase)
+function shape(kind: number, phase: number, dt: number, pw: number, noise: number, partials: number) {
   const wave = clampInt(kind, 0, 5)
-  if (wave === 1) return p < 0.5 ? 1 : -1
-  if (wave === 2) return p < clamp(pw, 0.05, 0.95) ? 1 : -1
-  if (wave === 3) return p < 0.5 ? 4 * p - 1 : 3 - 4 * p
-  if (wave === 4) return Math.sin(2 * Math.PI * p)
+  if (wave === 1) return additiveSquare(phase, partials)
+  if (wave === 2) {
+    if (Math.abs(pw - 0.5) < 0.04) return additiveSquare(phase, partials)
+    return blepPulse(phase, dt, pw)
+  }
+  if (wave === 3) {
+    const p = phase - Math.floor(phase)
+    return p < 0.5 ? 4 * p - 1 : 3 - 4 * p
+  }
+  if (wave === 4) return Math.sin(2 * Math.PI * (phase - Math.floor(phase)))
   if (wave === 5) return noise
-  return 2 * p - 1
+  return additiveSaw(phase, partials)
+}
+
+/** Keep wavetable harmonics under Nyquist. `cap` is the brightest frame's harmonic count. */
+function bandlimitedPosition(position: number, frameCount: number, cap: number, hz: number, sr: number) {
+  const pos = clamp(position, 0, 0.999)
+  if (!(cap > 1) || !(hz > 0) || frameCount < 2) return pos
+  const maxH = Math.max(1, Math.floor((sr * 0.45) / hz))
+  if (maxH >= cap) return pos
+  const limit = (maxH - 1) / (cap - 1)
+  return Math.min(pos, Math.max(0, limit))
+}
+
+/** ADAA tanh. Antiderivative is log(cosh). One sample of state, no oversampling latency. */
+function adaaTanh(state: { adaaU: number; adaaF: number }, input: number) {
+  const u = Math.max(-12, Math.min(12, input))
+  const next = Math.log(Math.cosh(u))
+  const delta = u - state.adaaU
+  const y = Math.abs(delta) < 1e-5 ? Math.tanh(u) : (next - state.adaaF) / delta
+  state.adaaU = u
+  state.adaaF = next
+  return y
 }
 
 function morph(frames: Float32Array[], position: number, phase: number) {
@@ -462,6 +499,8 @@ function clampInt(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.round(value)))
 }
 
+/** Brightest harmonic kept in each builtin wavetable. Sine, saw, square, formant, bell. */
+const TABLE_CAPS = [1, 28, 21, 8, 10]
 const BUILTIN = buildTables()
 
 function builtinTable(index: number) {

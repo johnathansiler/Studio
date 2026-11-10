@@ -49,6 +49,7 @@ export function createDoubler(sampleRate: number): Processor {
   const lines = [new Float32Array(length), new Float32Array(length)]
   let write = 0
   let phase = 0
+  const mixGlide = new SampleGlide()
   return {
     latencySamples: 0,
     reset() {
@@ -56,9 +57,11 @@ export function createDoubler(sampleRate: number): Processor {
       lines[1].fill(0)
       write = 0
       phase = 0
+      mixGlide.reset()
     },
     process(input, output, params, ctx) {
-      const mix = clamp(params.mix, 0, 1)
+      mixGlide.prepare(ctx.sampleRate)
+      const mixTarget = clamp(params.mix, 0, 1)
       const width = clamp(params.width, 0, 1)
       const base = clamp((params.delay / 1000) * ctx.sampleRate, 1, length - 2)
       const depth = clamp(params.depth, 0, 1) * ctx.sampleRate * 0.003
@@ -76,6 +79,7 @@ export function createDoubler(sampleRate: number): Processor {
         const spread = 0.15 + width * 0.85
         const wetL = mid + side + (tapR - mid) * spread
         const wetR = mid - side + (tapL - mid) * spread
+        const mix = mixGlide.next(mixTarget)
         if (output[0]) output[0][i] = sanitize(left * (1 - mix) + wetL * mix)
         if (output[1]) output[1][i] = sanitize(right * (1 - mix) + wetR * mix)
         write = (write + 1) % length
@@ -89,15 +93,18 @@ export function createChorus(sampleRate: number): Processor {
   const line = new Float32Array(length)
   let write = 0
   let phase = 0
+  const mixGlide = new SampleGlide()
   return {
     latencySamples: 0,
     reset() {
       line.fill(0)
       write = 0
       phase = 0
+      mixGlide.reset()
     },
     process(input, output, params, ctx) {
-      const mix = clamp(params.mix, 0, 1)
+      mixGlide.prepare(ctx.sampleRate)
+      const mixTarget = clamp(params.mix, 0, 1)
       const rate = clamp(params.rate, 0.05, 5)
       const depth = clamp(params.depth, 0, 1) * ctx.sampleRate * 0.008
       const base = ctx.sampleRate * 0.012
@@ -109,6 +116,7 @@ export function createChorus(sampleRate: number): Processor {
         phase += (rate * Math.PI * 2) / ctx.sampleRate
         const wetL = read(line, write, base + (0.5 + 0.5 * Math.sin(phase)) * depth)
         const wetR = read(line, write, base + (0.5 + 0.5 * Math.sin(phase + 2)) * depth)
+        const mix = mixGlide.next(mixTarget)
         if (output[0]) output[0][i] = sanitize(left * (1 - mix) + wetL * mix)
         if (output[1]) output[1][i] = sanitize(right * (1 - mix) + wetR * mix)
         write = (write + 1) % length

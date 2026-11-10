@@ -135,9 +135,12 @@ pub fn design_biquad(
 
 #[inline]
 pub fn tick(filter: &mut Biquad, x: f64) -> f64 {
-    let y = filter.b0 * x + filter.b1 * filter.x1 + filter.b2 * filter.x2
+    let mut y = filter.b0 * x + filter.b1 * filter.x1 + filter.b2 * filter.x2
         - filter.a1 * filter.y1
         - filter.a2 * filter.y2;
+    if !y.is_finite() || y.abs() < 1e-15 {
+        y = 0.0;
+    }
     filter.x2 = filter.x1;
     filter.x1 = x;
     filter.y2 = filter.y1;
@@ -145,8 +148,8 @@ pub fn tick(filter: &mut Biquad, x: f64) -> f64 {
     y
 }
 
-/// Flush non-finite samples and denormals. Filter state keeps the raw value,
-/// matching `sanitize` which is applied only when the sample is stored.
+/// Flush non-finite samples and denormals. `tick` also clears denormal state
+/// so a quiet filter does not stick in the subnormal range.
 pub fn sanitize(sample: f64) -> f64 {
     if !sample.is_finite() || sample.abs() < 1e-15 {
         0.0

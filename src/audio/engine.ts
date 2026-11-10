@@ -46,6 +46,8 @@ import { deviceKind, initialBufferHint, recordingAlignmentSamples, resumeNeedsGe
 import { bufferHintOf, formatLatencyReadout, latencyHintOrder, writeBufferHint, type BufferHint } from './core/buffer'
 import { ATTACK_SEC, RELEASE_SEC, builtinLevel, drumLevel, liveWhen, scheduleDelaySeconds } from './liveStage'
 import { normalizePeak, safetyCurve } from './level'
+import { fileDither } from './master/ditherPlan'
+import { holdFullScale } from './master/safety'
 import { sampleLoadFault } from './sampleLoadBus'
 import { renderSamplerSpan } from './plugins/sampler'
 import { renderGraphParallel } from './parallelRender'
@@ -146,8 +148,11 @@ export class AudioEngine {
   private referenceSource: AudioBufferSourceNode | null = null
   private referenceGain: GainNode | null = null
   private speakerGain: GainNode | null = null
-  /** Safety limiter in front of the speakers. Keeps a summed mix from hard-clipping. */
+  /** Last-ditch shaper until the lookahead limiter worklet is installed. */
   private safety: WaveShaperNode | null = null
+  /** Lookahead limiter in front of the meters, the cue, and the speakers. */
+  private safetyNode: AudioWorkletNode | null = null
+  private safetyReady = false
   private talkBus: GainNode | null = null
   private metroGain: GainNode | null = null
   private cueDest: MediaStreamAudioDestinationNode | null = null
@@ -463,6 +468,34 @@ export class AudioEngine {
     return this.ctx
   }
 
+  /** Put the lookahead limiter ahead of the meter so the cue and the speakers share it. */
+  private installSafety() {
+    const ctx = this.ctx
+    if (!ctx || !this.masterGain || !this.masterMeter || !this.speakerGain || this.safetyNode) return
+    let node: AudioWorkletNode
+    try {
+      node = new AudioWorkletNode(ctx, 'cueharbor-safety', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        channelCount: 2,
+        channelCountMode: 'explicit',
+        channelInterpretation: 'speakers',
+      })
+    } catch {
+      return
+    }
+    try { this.masterGain.disconnect(this.masterMeter) } catch { /* the meter is being rewired */ }
+    this.masterGain.connect(node)
+    node.connect(this.masterMeter)
+    this.safetyNode = node
+    if (this.safety) {
+      try { this.speakerGain.disconnect(this.safety) } catch { /* the shaper is leaving the graph */ }
+      try { this.safety.disconnect() } catch { /* already disconnected */ }
+      this.speakerGain.connect(ctx.destination)
+    }
+  }
+
   private async ensureWorklets() {
     if (!this.ctx) return
     if (!this.workletsReady) {
@@ -479,6 +512,15 @@ export class AudioEngine {
         this.workletError = error instanceof Error ? error.message : 'AudioWorklet failed'
       }
     }
+    if (!this.safetyReady) {
+      try {
+        await this.ctx.audioWorklet.addModule('/worklets/safety.js')
+        this.safetyReady = true
+      } catch {
+        this.safetyReady = false
+      }
+    }
+    if (this.safetyReady) this.installSafety()
     if (!this.stretchReady) {
       try {
         await this.ctx.audioWorklet.addModule('/worklets/stretch.js')
@@ -1818,6 +1860,8 @@ export class AudioEngine {
     this.masterGain = null
     this.speakerGain = null
     this.safety = null
+    this.safetyNode = null
+    this.safetyReady = false
     this.talkBus = null
     this.metroGain = null
     this.cueDest = null
@@ -2303,7 +2347,7 @@ export class AudioEngine {
       liveRemote: false,
       create: (pluginId, sampleRate) => createProcessor(pluginId, sampleRate) ?? peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
     })
-    return encodeWav(graph.master, rate, { dither: 'tpdf' })
+    return encodeWav(holdFullScale(graph.master), rate, { dither: fileDither(project, 16, 'tpdf') })
   }
 
   bufferFor(asset: AudioAsset) {
