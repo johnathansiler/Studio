@@ -159,6 +159,10 @@ function mixText(law: MixLaw | null, value: number, fallback: string) {
   return fallback
 }
 
+function pageWindow(): Window | null {
+  return (globalThis as { window?: Window }).window ?? null
+}
+
 function travelFor(spec: ControlGesture, el: GestureElement, axis: 'x' | 'y', fine: boolean) {
   if (!spec.matchLength) return fine ? FINE_PX : DRAG_PX
   const box = el.getBoundingClientRect?.()
@@ -249,14 +253,17 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
     }
     spec.onStart?.()
     try { el.setPointerCapture?.(id) } catch { /* the pointer already ended */ }
-    drag = { id, x: event.clientX, y: event.clientY, downX: event.clientX, downY: event.clientY, started: now(), value: spec.getValue(), moved: false, candidate, fine: !!event.shiftKey, fineLatch: false, pointerType: event.pointerType }
-    lastValue = spec.getValue()
+    const value = spec.getValue()
+    lastClient = { x: event.clientX, y: event.clientY }
+    lastValue = value
+    drag = { id, x: event.clientX, y: event.clientY, downX: event.clientX, downY: event.clientY, started: now(), value, moved: false, candidate, fine: !!event.shiftKey || pointers.size > 1, fineLatch: false, pointerType: event.pointerType }
     cancelFine()
     cancelFine = armFinePress(event.pointerType, () => {
       if (!drag) return
       drag.fineLatch = true
-      drag.x = lastClient.x || drag.x
-      drag.y = lastClient.y || drag.y
+      drag.fine = true
+      drag.x = lastClient.x
+      drag.y = lastClient.y
       drag.value = lastValue
     })
     if (spec.axis === 'pad' && !candidate) move(event)
@@ -319,9 +326,10 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
   const rebase = (event: PointerLike) => {
     if (!drag) return
     pointers.add(event.pointerId ?? 1)
-    drag.x = lastClient.x || event.clientX
-    drag.y = lastClient.y || event.clientY
+    drag.x = lastClient.x
+    drag.y = lastClient.y
     drag.value = lastValue
+    if (pointers.size > 1) drag.fine = true
   }
 
   const end = (event: PointerLike) => {
@@ -397,7 +405,7 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
   el.addEventListener('wheel', onWheel, { passive: false })
   el.addEventListener('click', onClick, { capture: true })
   el.addEventListener('dblclick', onClick, { capture: true })
-  const host = typeof window !== 'undefined' ? window : null
+  const host = pageWindow()
   host?.addEventListener('pointerdown', onWindowDown as unknown as EventListener)
   host?.addEventListener('pointerup', onWindowUp as unknown as EventListener)
   host?.addEventListener('pointercancel', onWindowUp as unknown as EventListener)
@@ -424,6 +432,7 @@ const CONTROL = '.kit-knob button, .kit-fader button, .knob button, .tune-knob, 
 export function installControlGuards(doc: Document) {
   let drag: { id: number; x: number; y: number; downX: number; downY: number; started: number; value: number; vertical: boolean; el: HTMLInputElement; moved: boolean; fine: boolean; fineLatch: boolean; pointerType?: string } | null = null
   let cancelFine: () => void = () => undefined
+  let lastPoint = { x: 0, y: 0 }
   const pointers = new Set<number>()
   const taps = new TapReset()
   let tip: HTMLElement | null = null
@@ -463,6 +472,15 @@ export function installControlGuards(doc: Document) {
     event.preventDefault()
   }
   const onDown = (event: PointerEvent) => {
+    if (drag && event.pointerId !== drag.id) {
+      pointers.add(event.pointerId)
+      drag.x = lastPoint.x
+      drag.y = lastPoint.y
+      drag.value = Number(drag.el.value)
+      drag.fine = true
+      if (event.cancelable) event.preventDefault()
+      return
+    }
     const range = rangeOf(event.target)
     if (!range && !blocked(event.target)) return
     if (event.cancelable) event.preventDefault()
@@ -475,20 +493,23 @@ export function installControlGuards(doc: Document) {
     }
     taps.begin(performance.now(), others, range)
     const box = range.getBoundingClientRect()
-    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, downX: event.clientX, downY: event.clientY, started: performance.now(), value: Number(range.value), vertical: verticalRange(range, box), el: range, moved: false, fine: event.shiftKey, fineLatch: false, pointerType: event.pointerType }
+    lastPoint = { x: event.clientX, y: event.clientY }
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, downX: event.clientX, downY: event.clientY, started: performance.now(), value: Number(range.value), vertical: verticalRange(range, box), el: range, moved: false, fine: event.shiftKey || pointers.size > 1, fineLatch: false, pointerType: event.pointerType }
     cancelFine()
     cancelFine = armFinePress(event.pointerType, () => {
       if (!drag) return
       drag.fineLatch = true
+      drag.fine = true
       drag.value = Number(drag.el.value)
-      drag.x = event.clientX
-      drag.y = event.clientY
+      drag.x = lastPoint.x
+      drag.y = lastPoint.y
     })
     try { range.setPointerCapture(event.pointerId) } catch { /* already gone */ }
   }
   const onMove = (event: PointerEvent) => {
     if (!drag || event.pointerId !== drag.id) return
     if (event.cancelable) event.preventDefault()
+    lastPoint = { x: event.clientX, y: event.clientY }
     const travel = Math.hypot(event.clientX - drag.x, event.clientY - drag.y)
     if (travel > TAP_PX) {
       drag.moved = true
