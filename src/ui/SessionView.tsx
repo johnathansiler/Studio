@@ -28,6 +28,7 @@ import { panelChoice, rememberPanel } from './panelMemory'
 import { dropLibrarySound, SessionBrowser, soundById } from './sessionBrowser'
 import { SessionDetail } from './sessionDetail'
 import { sessionTargetAt } from './sessionPointer'
+import { gainToDb } from '../model/time'
 import { TouchSlider } from './kit/controls'
 import './sessionGrid.css'
 import './sessionLive.css'
@@ -309,7 +310,7 @@ function SessionBody({
               ))}
               <div className="sl-mix sl-master" data-mixer="master">
                 <div className="sl-fader">
-                  <TouchSlider vertical label="Master volume" title="Master volume." min={0} max={1.25} step={0.01} value={grid.project.masterVolume} fallback={0.9} onStart={() => store.beginAutomationTouch()} onCommit={() => store.endAutomationTouch()} onChange={(value) => store.setMasterVolume(value)} />
+                  <TouchSlider vertical label="Master volume" title="Master volume." min={0} max={1.25} step={0.001} value={grid.project.masterVolume} fallback={0.9} format={gainToDb} onStart={() => store.beginAutomationTouch()} onCommit={() => store.endAutomationTouch()} onChange={(value) => store.setMasterVolume(value)} />
                   <div className="sl-meter" aria-hidden><i style={{ height: `${Math.min(100, levels.master * 140)}%` }} /></div>
                 </div>
               </div>
@@ -504,12 +505,12 @@ function TrackMix({ store, track, index, level }: { store: ProjectStore; track: 
   return (
     <div className="sl-mix" data-mixer={track.id}>
       <div className="sl-fader">
-        <TouchSlider vertical label={`${track.name} volume`} title="Volume." min={0} max={1.25} step={0.01} value={track.volume} fallback={0.8} onStart={() => store.beginAutomationTouch()} onCommit={() => store.endAutomationTouch()} onChange={(value) => store.updateTrack(track.id, { volume: value })} />
+        <TouchSlider vertical label={`${track.name} volume`} title="Volume." min={0} max={1.25} step={0.001} value={track.volume} fallback={0.8} format={gainToDb} onStart={() => store.beginAutomationTouch()} onCommit={() => store.endAutomationTouch()} onChange={(value) => store.updateTrack(track.id, { volume: value })} />
         <div className="sl-meter" aria-hidden><i style={{ height: `${Math.min(100, level * 160)}%` }} /></div>
       </div>
       <label className="sl-pan">
         Pan
-        <input aria-label={`${track.name} pan`} title="Pan." data-fallback="0" type="range" min={-1} max={1} step={0.01} value={track.pan} onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()} onChange={(event) => store.updateTrack(track.id, { pan: Number(event.target.value) })} />
+        <input aria-label={`${track.name} pan`} title="Pan." data-fallback="0" type="range" min={-1} max={1} step="any" value={track.pan} onPointerDown={() => store.beginAutomationTouch()} onPointerUp={() => store.endAutomationTouch()} onPointerCancel={() => store.endAutomationTouch()} onChange={(event) => store.updateTrack(track.id, { pan: Number(event.target.value) })} />
       </label>
       <div className="sl-flags">
         <button type="button" className={track.mute ? 'mute on' : ''} title="Activator. Turn the track on or off." onClick={() => store.updateTrack(track.id, { mute: !track.mute })}>{index + 1}</button>

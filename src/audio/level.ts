@@ -30,6 +30,12 @@ export function normalizePeak(channels: Float32Array[], target = NOTE_PEAK, maxB
   })
 }
 
+/**
+ * Notes this close to center skip a one-shot panner.
+ * 0.005 is half a pan unit, so −3 and +2 (0.03 and 0.02) still pan.
+ */
+export const PAN_APPLY = 0.005
+
 /** Equal-power pan. Center is −3 dB on each side. −1 is full left. */
 export function panGains(pan: number) {
   const clamped = Math.max(-1, Math.min(1, Number.isFinite(pan) ? pan : 0))

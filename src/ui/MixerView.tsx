@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 're
 import type { AudioEngine } from '../audio/engine'
 import { STRIP_BOUNDS, displayedStrip, isNarrowStrip } from '../model/layoutWidth'
 import { gainToDb } from '../model/time'
+import { DbRead } from './DbRead'
 import { mixGroupsOf, selectMixer, trackGroupId } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import type { Track } from '../model/types'
@@ -179,7 +180,7 @@ function ChannelStrip({
 
 function StripPan({ store, engine, track }: { store: ProjectStore; engine: AudioEngine; track: Track }) {
   const words = panWords(track.pan)
-  const side = Math.abs(track.pan) < 0.02 ? 'center' : track.pan < 0 ? 'left' : 'right'
+  const side = words === 'Center' ? 'center' : track.pan < 0 ? 'left' : 'right'
   return (
     <div className="strip-pan" data-pan={side} data-pan-text={words}>
       <PanKnob
@@ -505,7 +506,15 @@ function MasterLane({ store, engine, value, vertical }: { store: ProjectStore; e
         onCommit={() => store.endAutomationTouch()}
         onChange={(next) => store.setMasterVolume(next)}
       />
-      <span className="fader-db">{db}</span>
+      <DbRead
+        gain={value}
+        min={0}
+        max={1.25}
+        label="Master volume decibels"
+        onFocus={() => store.beginAutomationTouch()}
+        onBlur={() => store.endAutomationTouch()}
+        onChange={(next) => store.setMasterVolume(next)}
+      />
     </div>
   )
 }

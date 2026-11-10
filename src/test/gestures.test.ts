@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
+import { dbPixels, panPixels } from '../model/mixLaw'
+import { gainToDb } from '../model/time'
 import { attachControlGesture, READOUT_HOLD_MS, type GestureElement, type PointerLike } from '../ui/gestures'
 
 interface Stored {
@@ -129,6 +131,71 @@ describe('knob gestures', () => {
     }
     expect(Number.isInteger(run(false))).toBe(true)
     expect(Number.isInteger(run(true))).toBe(false)
+  })
+
+  it('keeps a fractional pan and a tenth of a decibel after the finger lifts', () => {
+    const pan = new FakeControl()
+    pan.className = 'pan-knob'
+    pan.attrs['aria-label'] = 'Vocal pan. Drag left or right.'
+    let panned = 0
+    const stopPan = attachControlGesture(pan, () => ({
+      min: -1,
+      max: 1,
+      fallback: 0,
+      axis: 'x',
+      getValue: () => panned,
+      onChange: (change) => {
+        panned = change.value
+      },
+    }))
+    pan.dispatch('pointerdown', { clientX: 200, clientY: 40, shiftKey: true })
+    pan.dispatch('pointermove', { clientX: 200 + panPixels(-37.5, true), clientY: 40, shiftKey: true })
+    pan.dispatch('pointerup', { clientX: 200 + panPixels(-37.5, true), clientY: 40, shiftKey: true })
+    expect(panned).toBeCloseTo(-0.375, 5)
+    stopPan()
+
+    const fader = new FakeControl()
+    fader.className = 'touch-slider vertical volume'
+    fader.attrs['aria-label'] = 'Keys volume. How loud this track is.'
+    let level = 1
+    const stopFader = attachControlGesture(fader, () => ({
+      min: 0,
+      max: 1.25,
+      fallback: 1,
+      axis: 'y',
+      getValue: () => level,
+      onChange: (change) => {
+        level = change.value
+      },
+    }))
+    fader.dispatch('pointerdown', { clientX: 10, clientY: 200 })
+    fader.dispatch('pointermove', { clientX: 10, clientY: 200 + dbPixels(6.3) })
+    fader.dispatch('pointerup', { clientX: 10, clientY: 200 + dbPixels(6.3) })
+    expect(gainToDb(level)).toBe('-6.3 dB')
+    stopFader()
+  })
+
+  it('uses a finer pan scale when a phone drag moves vertically', () => {
+    const pan = new FakeControl()
+    pan.className = 'pan-knob'
+    pan.attrs['aria-label'] = 'Vocal pan'
+    let panned = 0
+    const stop = attachControlGesture(pan, () => ({
+      min: -1,
+      max: 1,
+      fallback: 0,
+      axis: 'x',
+      getValue: () => panned,
+      onChange: (change) => {
+        panned = change.value
+      },
+    }))
+    pan.dispatch('pointerdown', { clientX: 80, clientY: 80, pointerType: 'touch' })
+    pan.dispatch('pointermove', { clientX: 80, clientY: 64, pointerType: 'touch' })
+    pan.dispatch('pointermove', { clientX: 80, clientY: 64 - panPixels(12, true), pointerType: 'touch' })
+    pan.dispatch('pointerup', { clientX: 80, clientY: 64 - panPixels(12, true), pointerType: 'touch' })
+    expect(panned).toBeCloseTo(0.12, 5)
+    stop()
   })
 })
 

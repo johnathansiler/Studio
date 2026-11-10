@@ -28,10 +28,31 @@
 }
 
 .track-volume-top b {
+  position: relative;
   font-size: 18px;
   font-weight: 720;
   font-variant-numeric: tabular-nums;
   color: var(--accent, #73c48f);
+}
+.track-volume-top b .fader-db {
+  position: relative;
+  display: inline;
+  pointer-events: none;
+}
+.track-volume-top b .db-type {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  background: transparent;
+  color: transparent;
+  font: inherit;
+  pointer-events: auto;
+  touch-action: manipulation;
 }
 
 .track-fader {

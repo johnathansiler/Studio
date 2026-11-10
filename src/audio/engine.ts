@@ -38,6 +38,7 @@ import { encodeWav, linearResample } from '../model/wav'
 import { tuneBlockScale } from './plugins/autoTune'
 import { audibleIds } from '../model/audible'
 import { automationSchedule, channelAutomationMode, laneFor, valueAtMappedSample } from '../model/automation'
+import { PAN_APPLY } from './level'
 import { applyRamps, smoothParam } from './paramCurve'
 import { channelRoute } from '../model/sharedMix'
 import { chainContext, enabledFx, LiveMidiChain, midiPanicMessages, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
@@ -3187,7 +3188,7 @@ export class AudioEngine {
     src.connect(gain)
     const dest = into ?? strip.input
     const pan = hit.pan || 0
-    if (Math.abs(pan) > 0.02 && ctx.createStereoPanner) {
+    if (Math.abs(pan) >= PAN_APPLY && ctx.createStereoPanner) {
       const panner = ctx.createStereoPanner()
       panner.pan.value = Math.max(-1, Math.min(1, pan))
       gain.connect(panner)
@@ -3251,7 +3252,7 @@ export class AudioEngine {
     source.connect(gain)
     const dest = into ?? strip.input
     const pan = hit.pan || 0
-    if (Math.abs(pan) > 0.02 && ctx.createStereoPanner) {
+    if (Math.abs(pan) >= PAN_APPLY && ctx.createStereoPanner) {
       const panner = ctx.createStereoPanner()
       panner.pan.value = Math.max(-1, Math.min(1, pan))
       gain.connect(panner)
@@ -4639,7 +4640,7 @@ export class AudioEngine {
     osc.connect(filter)
     filter.connect(gain)
     const pan = note.pan || 0
-    if (Math.abs(pan) > 0.02 && ctx.createStereoPanner) {
+    if (Math.abs(pan) >= PAN_APPLY && ctx.createStereoPanner) {
       const panner = ctx.createStereoPanner()
       panner.pan.value = Math.max(-1, Math.min(1, pan))
       gain.connect(panner)

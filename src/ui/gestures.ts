@@ -7,6 +7,8 @@
  */
 
 import { dragNumeric } from '../model/dragNumeric'
+import { controlLaw, DB_STEP, dragGain, dragPan, formatPan, quantizeDb, type MixLaw } from '../model/mixLaw'
+import { gainToDb } from '../model/time'
 import { markIntegerLand, armFinePress } from './integerTick'
 import { controlDefault } from './paramDefaults'
 
@@ -107,9 +109,54 @@ export interface GestureElement {
 }
 
 /** Upward or rightward movement raises the value. Whole numbers catch the finger unless `fine`. */
-export function dragValue(start: number, delta: number, min: number, max: number, fine: boolean, travel?: number, release = false) {
+export function dragValue(start: number, delta: number, min: number, max: number, fine: boolean, travel?: number, release = false, law: MixLaw | null = null) {
+  if (law === 'pan') return dragPan({ origin: start, deltaPx: delta, min, max, fine })
+  if (law === 'db') return dragGain({ origin: start, deltaPx: delta, min, max, fine })
   const pixels = travel && travel > 0 ? travel : (fine ? FINE_PX : DRAG_PX)
   return dragNumeric({ origin: start, deltaPx: delta, min, max, fine, spanPx: pixels, release })
+}
+
+/** Phone: a slow drag, or a drag on the crossed axis, is the fine scale. */
+const SLOW_PX_PER_MS = 0.12
+const SLOW_AFTER_MS = 140
+
+function lawOf(el: GestureElement, spec: Pick<ControlGesture, 'min' | 'max'>): MixLaw | null {
+  const cues = controlCues(el)
+  return controlLaw({ label: cues.label, title: cues.title, className: cues.className, min: spec.min, max: spec.max })
+}
+
+function steerFine(input: {
+  law: MixLaw | null
+  pointerType?: string
+  shift: boolean
+  extra: boolean
+  fineLatch: boolean
+  axis: 'x' | 'y'
+  originX: number
+  originY: number
+  downX: number
+  downY: number
+  started: number
+  now: number
+  clientX: number
+  clientY: number
+}): { fine: boolean; cross: boolean } {
+  let fine = input.shift || input.extra || input.fineLatch
+  if (!input.law || input.pointerType !== 'touch') return { fine, cross: false }
+  const primary = input.axis === 'x' ? input.clientX - input.originX : input.originY - input.clientY
+  const cross = input.axis === 'x' ? input.originY - input.clientY : input.clientX - input.originX
+  const crossFine = Math.abs(cross) > Math.abs(primary) + 6 && Math.abs(cross) > TAP_PX
+  const elapsed = input.now - input.started
+  const travel = Math.hypot(input.clientX - input.downX, input.clientY - input.downY)
+  const slow = elapsed > SLOW_AFTER_MS && travel > TAP_PX && travel / elapsed < SLOW_PX_PER_MS
+  if (crossFine || slow) fine = true
+  return { fine, cross: crossFine }
+}
+
+function mixText(law: MixLaw | null, value: number, fallback: string) {
+  if (law === 'pan') return formatPan(value)
+  if (law === 'db') return gainToDb(value)
+  return fallback
 }
 
 function travelFor(spec: ControlGesture, el: GestureElement, axis: 'x' | 'y', fine: boolean) {
@@ -148,7 +195,7 @@ export function resetTarget(el: Pick<GestureElement, 'className' | 'dataset' | '
 
 export function attachControlGesture(el: GestureElement, get: () => ControlGesture) {
   el.style.touchAction = 'none'
-  let drag: { id: number; x: number; y: number; value: number; moved: boolean; candidate: boolean; fine: boolean; fineLatch: boolean } | null = null
+  let drag: { id: number; x: number; y: number; downX: number; downY: number; started: number; value: number; moved: boolean; candidate: boolean; fine: boolean; fineLatch: boolean; pointerType?: string } | null = null
   let cancelFine: () => void = () => undefined
   let lastClient = { x: 0, y: 0 }
   let lastValue = 0
@@ -179,8 +226,10 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
     lastValue = value
     lastClient = { x: event.clientX, y: event.clientY }
     spec.onChange({ value, x, y, clientX: event.clientX, clientY: event.clientY, fine })
-    const text = spec.format ? spec.format(spec.axis === 'pad' ? x : value) : formatReadout(spec.axis === 'pad' ? x : value)
-    spec.onReadout?.({ x: event.clientX, y: event.clientY - 28, text: spec.axis === 'pad' ? `${Math.round(x * 100)} ${Math.round(y * 100)}` : text })
+    const shown = spec.axis === 'pad' ? x : value
+    const fallback = spec.format ? spec.format(shown) : formatReadout(shown)
+    const text = spec.axis === 'pad' ? `${Math.round(x * 100)} ${Math.round(y * 100)}` : spec.format ? fallback : mixText(lawOf(el, spec), shown, fallback)
+    spec.onReadout?.({ x: event.clientX, y: event.clientY - 28, text })
   }
 
   const onTouchStart = (event: PointerLike) => {
@@ -200,7 +249,7 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
     }
     spec.onStart?.()
     try { el.setPointerCapture?.(id) } catch { /* the pointer already ended */ }
-    drag = { id, x: event.clientX, y: event.clientY, value: spec.getValue(), moved: false, candidate, fine: !!event.shiftKey, fineLatch: false }
+    drag = { id, x: event.clientX, y: event.clientY, downX: event.clientX, downY: event.clientY, started: now(), value: spec.getValue(), moved: false, candidate, fine: !!event.shiftKey, fineLatch: false, pointerType: event.pointerType }
     lastValue = spec.getValue()
     cancelFine()
     cancelFine = armFinePress(event.pointerType, () => {
@@ -223,7 +272,24 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
       taps.move(travel)
       cancelFine()
     }
-    const fine = fineNow(event.shiftKey) || !!drag.fineLatch
+    const law = spec.axis === 'pad' ? null : lawOf(el, spec)
+    const steered = steerFine({
+      law,
+      pointerType: drag.pointerType,
+      shift: fineNow(event.shiftKey),
+      extra: false,
+      fineLatch: !!drag.fineLatch,
+      axis: spec.axis === 'y' ? 'y' : 'x',
+      originX: drag.x,
+      originY: drag.y,
+      downX: drag.downX,
+      downY: drag.downY,
+      started: drag.started,
+      now: now(),
+      clientX: event.clientX,
+      clientY: event.clientY,
+    })
+    const fine = steered.fine
     if (fine !== drag.fine) {
       drag.fine = fine
       drag.x = event.clientX
@@ -240,10 +306,12 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
     }
     // A tap, including the second tap of a double tap, must not write until it is a drag.
     if (!drag.moved) return
-    const delta = spec.axis === 'x' ? event.clientX - drag.x : drag.y - event.clientY
+    const delta = steered.cross
+      ? (spec.axis === 'x' ? drag.y - event.clientY : event.clientX - drag.x)
+      : (spec.axis === 'x' ? event.clientX - drag.x : drag.y - event.clientY)
     const pixels = travelFor(spec, el, spec.axis, fine)
     const before = lastValue
-    const next = dragValue(drag.value, delta, spec.min, spec.max, fine, pixels)
+    const next = dragValue(drag.value, delta, spec.min, spec.max, fine, pixels, false, law)
     emit(event, next, event.clientX, event.clientY, fine)
     markIntegerLand(el as { classList?: DOMTokenList }, before, next)
   }
@@ -278,7 +346,8 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
         return
       }
     }
-    if (moved && kind === 'drag' && spec.axis !== 'pad' && !fine) {
+    const law = spec.axis === 'pad' ? null : lawOf(el, spec)
+    if (moved && kind === 'drag' && spec.axis !== 'pad' && !fine && !law) {
       const next = dragValue(lastValue, 0, spec.min, spec.max, false, undefined, true)
       if (next !== lastValue) {
         emit(event, next, event.clientX, event.clientY, false)
@@ -302,9 +371,10 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
     if (spec.axis === 'pad') return
     const fine = !!event.shiftKey
     const current = spec.getValue()
+    const law = lawOf(el, spec)
     const deltaPx = ((event.deltaY ?? 0) < 0 ? 1 : -1) * (fine ? 4 : 10)
     spec.onStart?.()
-    const next = dragValue(current, deltaPx, spec.min, spec.max, fine, undefined, !fine)
+    const next = dragValue(current, deltaPx, spec.min, spec.max, fine, undefined, !fine && !law, law)
     emit(event, next, event.clientX, event.clientY, fine)
     markIntegerLand(el as { classList?: DOMTokenList }, current, next)
     spec.onReadout?.(null)
@@ -312,7 +382,7 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
   }
 
   const onWindowDown = (event: PointerLike) => {
-    if (!drag) return
+    if (!drag || (event.pointerId ?? 1) === drag.id) return
     rebase(event)
   }
   const onWindowUp = (event: PointerLike) => {
@@ -352,7 +422,7 @@ const CONTROL = '.kit-knob button, .kit-fader button, .knob button, .tune-knob, 
 
 /** Stop the page from scrolling when a press starts on a control, and drive native sliders ourselves. */
 export function installControlGuards(doc: Document) {
-  let drag: { id: number; x: number; y: number; value: number; vertical: boolean; el: HTMLInputElement; moved: boolean; fine: boolean; fineLatch: boolean } | null = null
+  let drag: { id: number; x: number; y: number; downX: number; downY: number; started: number; value: number; vertical: boolean; el: HTMLInputElement; moved: boolean; fine: boolean; fineLatch: boolean; pointerType?: string } | null = null
   let cancelFine: () => void = () => undefined
   const pointers = new Set<number>()
   const taps = new TapReset()
@@ -405,7 +475,7 @@ export function installControlGuards(doc: Document) {
     }
     taps.begin(performance.now(), others, range)
     const box = range.getBoundingClientRect()
-    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, value: Number(range.value), vertical: verticalRange(range, box), el: range, moved: false, fine: event.shiftKey, fineLatch: false }
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, downX: event.clientX, downY: event.clientY, started: performance.now(), value: Number(range.value), vertical: verticalRange(range, box), el: range, moved: false, fine: event.shiftKey, fineLatch: false, pointerType: event.pointerType }
     cancelFine()
     cancelFine = armFinePress(event.pointerType, () => {
       if (!drag) return
@@ -426,19 +496,38 @@ export function installControlGuards(doc: Document) {
       cancelFine()
     }
     if (!drag.moved) return
-    const fine = event.shiftKey || pointers.size > 1 || drag.fineLatch
+    const law = inputLaw(drag.el)
+    const steered = steerFine({
+      law,
+      pointerType: drag.pointerType,
+      shift: event.shiftKey || pointers.size > 1,
+      extra: false,
+      fineLatch: drag.fineLatch,
+      axis: drag.vertical ? 'y' : 'x',
+      originX: drag.x,
+      originY: drag.y,
+      downX: drag.downX,
+      downY: drag.downY,
+      started: drag.started,
+      now: performance.now(),
+      clientX: event.clientX,
+      clientY: event.clientY,
+    })
+    const fine = steered.fine
     if (fine !== drag.fine) {
       drag.fine = fine
       drag.x = event.clientX
       drag.y = event.clientY
       drag.value = Number(drag.el.value)
     }
-    const delta = drag.vertical ? drag.y - event.clientY : event.clientX - drag.x
+    const delta = steered.cross
+      ? (drag.vertical ? event.clientX - drag.x : drag.y - event.clientY)
+      : (drag.vertical ? drag.y - event.clientY : event.clientX - drag.x)
     const before = Number(drag.el.value)
-    const next = dragValue(drag.value, delta, Number(drag.el.min), Number(drag.el.max), fine)
+    const next = dragValue(drag.value, delta, Number(drag.el.min), Number(drag.el.max), fine, undefined, false, law)
     writeRange(drag.el, next)
     markIntegerLand(drag.el, before, Number(drag.el.value))
-    show(event.clientX, event.clientY, drag.el.value)
+    show(event.clientX, event.clientY, mixText(law, Number(drag.el.value), drag.el.value))
   }
   const finish = (event: PointerEvent, cancel: boolean) => {
     pointers.delete(event.pointerId)
@@ -459,7 +548,8 @@ export function installControlGuards(doc: Document) {
         return
       }
     }
-    if (!cancel && moved && kind === 'drag' && !fine) {
+    const law = inputLaw(range)
+    if (!cancel && moved && kind === 'drag' && !fine && !law) {
       const before = Number(range.value)
       const next = dragValue(before, 0, Number(range.min), Number(range.max), false, undefined, true)
       if (next !== before) {
@@ -491,12 +581,22 @@ export function installControlGuards(doc: Document) {
     if (!el) return
     event.preventDefault()
     const fine = event.shiftKey
+    const label = el.getAttribute('aria-label') || ''
+    if (/decibel/i.test(label)) {
+      const quantum = fine ? DB_STEP : 1
+      const current = Number(el.value)
+      const before = Number.isFinite(current) ? current : 0
+      const next = quantizeDb(before + (event.deltaY < 0 ? quantum : -quantum))
+      writeNumber(el, next)
+      return
+    }
     const min = el.min === '' ? Number.NEGATIVE_INFINITY : Number(el.min)
     const max = el.max === '' ? Number.POSITIVE_INFINITY : Number(el.max)
     const current = Number(el.value)
+    const law = inputLaw(el)
     const deltaPx = (event.deltaY < 0 ? 1 : -1) * (fine ? 4 : 10)
     const before = Number.isFinite(current) ? current : 0
-    const next = dragValue(before, deltaPx, Number.isFinite(min) ? min : Number.NEGATIVE_INFINITY, Number.isFinite(max) ? max : Number.POSITIVE_INFINITY, fine, undefined, !fine)
+    const next = dragValue(before, deltaPx, Number.isFinite(min) ? min : Number.NEGATIVE_INFINITY, Number.isFinite(max) ? max : Number.POSITIVE_INFINITY, fine, undefined, !fine && !law, law)
     if (range) writeRange(range, next)
     else writeNumber(el, next)
     markIntegerLand(el, before, Number(el.value))
@@ -546,13 +646,26 @@ function writeNumber(el: HTMLInputElement, value: number) {
   el.dispatchEvent(new Event('change', { bubbles: true }))
 }
 
+function inputLaw(el: HTMLInputElement): MixLaw | null {
+  const min = el.min === '' ? Number.NEGATIVE_INFINITY : Number(el.min)
+  const max = el.max === '' ? Number.POSITIVE_INFINITY : Number(el.max)
+  return controlLaw({
+    label: el.getAttribute('aria-label') ?? '',
+    title: el.getAttribute('title') ?? '',
+    className: typeof el.className === 'string' ? el.className : '',
+    min,
+    max,
+  })
+}
+
 function writeRange(el: HTMLInputElement, value: number, notify: 'input' | 'both' = 'both') {
   const min = Number(el.min)
   const max = Number(el.max)
   const step = Number(el.step)
+  const law = inputLaw(el)
   let next = clamp(value, min, max)
-  if (Number.isFinite(step) && step > 0) next = clamp(min + Math.round((next - min) / step) * step, min, max)
-  const text = String(next)
+  if (!law && Number.isFinite(step) && step > 0) next = clamp(min + Math.round((next - min) / step) * step, min, max)
+  const text = String(Math.round(next * 1e8) / 1e8)
   const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
   proto?.set?.call(el, text)
   el.dispatchEvent(new Event('input', { bubbles: true }))

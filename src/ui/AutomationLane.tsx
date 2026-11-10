@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { formatPan } from '../model/mixLaw'
 import { gainToDb } from '../model/time'
+import { DbRead } from './DbRead'
 import { controlDefault } from './paramDefaults'
 import { GestureReadout, TouchSlider, useDragValue } from './kit/controls'
 import type { AudioEngine } from '../audio/engine'
@@ -196,9 +198,7 @@ function useShownValue(store: ProjectStore, engine: AudioEngine, spec: AutoSpec,
 }
 
 export function panWords(value: number) {
-  if (Math.abs(value) < 0.02) return 'Center'
-  if (value < 0) return `Left ${Math.round(-value * 100)}`
-  return `Right ${Math.round(value * 100)}`
+  return formatPan(value)
 }
 
 export function AutoFader({ store, engine, spec, value, label, className, vertical: verticalProp, readout = false }: { store: ProjectStore; engine: AudioEngine; spec: AutoSpec; value: number; label: string; className?: string; vertical?: boolean; readout?: boolean }) {
@@ -225,7 +225,17 @@ export function AutoFader({ store, engine, spec, value, label, className, vertic
         onCommit={() => store.endAutomationTouch()}
         onChange={(next) => store.setAutomated(spec, next, rolling, engine.currentTimelineSample())}
       />
-      {readout && <span className="fader-db">{db}</span>}
+      {readout && (
+        <DbRead
+          gain={shown}
+          min={spec.min}
+          max={spec.max}
+          label={`${label} decibels`}
+          onFocus={() => store.beginAutomationTouch()}
+          onBlur={() => store.endAutomationTouch()}
+          onChange={(next) => store.setAutomated(spec, next, rolling, engine.currentTimelineSample())}
+        />
+      )}
     </>
   )
 }
@@ -258,12 +268,11 @@ export function PanKnob({ store, engine, spec, value, label }: { store: ProjectS
         title={label}
         aria-valuemin={spec.min}
         aria-valuemax={spec.max}
-        aria-valuenow={Math.round(shown * 100) / 100}
+        aria-valuenow={Math.round(shown * 1000) / 1000}
         aria-valuetext={words}
         onClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => {
-          const span = spec.max - spec.min || 1
-          const step = event.shiftKey ? span / 200 : span / 40
+          const step = event.shiftKey ? 0.001 : 0.01
           const write = (next: number) => {
             store.beginAutomationTouch()
             store.setAutomated(spec, Math.max(spec.min, Math.min(spec.max, next)), rolling, engine.currentTimelineSample())
