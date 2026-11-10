@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { AudioEngine } from '../audio/engine'
 import { createSafetyLimiter, holdFullScale, SAFETY_ATTACK, SAFETY_LOOK } from '../audio/master/safety'
 import { truePeakDb } from '../audio/master/fir'
 import { renderSaw } from '../audio/liveStage'
@@ -376,5 +377,28 @@ describe('audio engine quality', () => {
     synth.process([input.subarray(7000, 8000), input.subarray(7000, 8000)], [out.subarray(7000, 8000), out.subarray(7000, 8000)], {}, blockCtx(7000))
     expect(maxJump(out, 6990, 7040)).toBeLessThan(0.02)
     expect(out.every((sample) => Number.isFinite(sample) && Math.abs(sample) <= 0.35 + 1e-4)).toBe(true)
+  })
+
+  it('adds the lookahead to recording and monitoring alignment only while the limiter is installed', () => {
+    const engine = new AudioEngine()
+    const live = engine as unknown as {
+      ctx: { sampleRate: number; baseLatency: number; outputLatency: number }
+      safetyNode: object | null
+    }
+    live.ctx = { sampleRate: RATE, baseLatency: 0.01, outputLatency: 0.02 }
+    live.safetyNode = null
+    expect(engine.latencyCompensationSamples()).toBe(1440)
+    expect(engine.clockCompensation().calibrationSec).toBe(0)
+    expect(engine.monitoringOffsetSeconds()).toBeCloseTo(0.03)
+    expect(engine.monitorInfo().ms).toBeCloseTo(30)
+    live.safetyNode = {}
+    const safetySec = SAFETY_LOOK / RATE
+    expect(engine.latencyCompensationSamples()).toBe(1440 + SAFETY_LOOK)
+    expect(engine.clockCompensation().calibrationSec).toBeCloseTo(safetySec)
+    expect(engine.monitoringOffsetSeconds()).toBeCloseTo(0.03 + safetySec)
+    expect(engine.monitorInfo().ms).toBeCloseTo(30 + safetySec * 1000)
+    engine.loopbackMs = 50
+    expect(engine.clockCompensation().calibrationSec).toBeCloseTo(0.02 + safetySec)
+    expect(engine.monitoringOffsetSeconds()).toBeCloseTo(0.05 + safetySec)
   })
 })
