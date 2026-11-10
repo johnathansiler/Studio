@@ -25,14 +25,17 @@ export function placeAnchoredMenu(input: {
   margin?: number
   /** Menus stay below this line so they never cover the view tabs. */
   clearTop?: number
+  /** Menus stay above this inset so they never cover the bottom bar. */
+  clearBottom?: number
 }): AnchorPlacement {
   const margin = input.margin ?? 8
   const floor = Math.max(margin, input.clearTop ?? 0)
+  const clearBottom = Math.max(0, input.clearBottom ?? 0)
   const trigger = input.trigger
   const menuWidth = Math.max(40, input.menu.width)
   const menuHeight = Math.max(40, input.menu.height)
   const viewW = Math.max(margin * 2 + 40, input.viewport.width)
-  const viewH = Math.max(margin * 2 + 40, input.viewport.height)
+  const viewH = Math.max(margin * 2 + 40, input.viewport.height - clearBottom)
   const below = viewH - (trigger.top + trigger.height) - margin
   const above = trigger.top - margin
   let side: 'down' | 'up' = input.prefer === 'up' || input.prefer === 'down'

@@ -3,6 +3,7 @@ import { isSoundPlugin } from '../instruments/scaler/chain'
 import type { PluginInstance } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { SheetGrab } from './bottomSheet'
+import { SheetHeader } from './SheetClose'
 import { addInsert, insertLabel, insertMenuChoices } from './PluginSheet'
 import './pluginsDrawer.css'
 import './pluginPages.css'
@@ -102,6 +103,19 @@ export function PluginsDrawer({
     previous.current = trackId
     setMenu(false)
   }, [trackId])
+  useEffect(() => {
+    if (place !== 'bottom' || !onClose) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      queueMicrotask(() => {
+        if (event.defaultPrevented) return
+        if (document.querySelector('.anchored-menu[data-open="true"]:not([hidden])')) return
+        onClose()
+      })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [place, onClose])
   return <PluginsDrawerView store={store} place={place} trackId={trackId} menuOpen={menu} onMenu={setMenu} onClose={onClose} groupId={groupId} onGroup={setGroupId} moreAt={moreAt} onMore={setMoreAt} />
 }
 
@@ -150,11 +164,19 @@ export function PluginsDrawerView({
       onPointerDown={sheet ? (event) => event.stopPropagation() : undefined}
     >
       {sheet && <SheetGrab label="Resize plugins. Drag up or down." />}
-      <header className="plugins-drawer-head">
-        <strong>Plugins</strong>
-        <span>{track ? track.name : 'No track'}</span>
-        {onClose && <button type="button" className="overlay-close" onClick={onClose}>Close</button>}
-      </header>
+      {onClose ? (
+        <SheetHeader
+          className="plugins-drawer-head"
+          title={<strong>Plugins</strong>}
+          detail={<span>{track ? track.name : 'No track'}</span>}
+          onClose={onClose}
+        />
+      ) : (
+        <header className="plugins-drawer-head sheet-head">
+          <strong>Plugins</strong>
+          <span>{track ? track.name : 'No track'}</span>
+        </header>
+      )}
       <div className={`plugins-drawer-body${sheet ? ' bottom-sheet-body' : ''}`}>
         <p className="plugins-drawer-note">
           {track ? `${track.name}. In the order sound passes through.` : 'Tap a track header to load its plugins.'}

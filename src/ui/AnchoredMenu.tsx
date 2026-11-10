@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { placeAnchoredMenu, anchoredShouldClose, menuFillsViewport, type AnchorBox } from './anchorPlace'
+import { syncPhoneSheetFrame } from './overlayHost'
+import { SheetClose } from './SheetClose'
 import { useScreenOverlay } from './screenOverlay'
 import './anchoredMenu.css'
 import './screenOverlay.css'
 
-type MenuSize = 'dock' | 'fill' | 'pending'
+type MenuSize = 'dock' | 'fill' | 'sheet' | 'pending'
 
 export function AnchoredMenu({
   open,
@@ -18,6 +20,7 @@ export function AnchoredMenu({
   id,
   className,
   fill = false,
+  sheet = false,
   children,
 }: {
   open: boolean
@@ -32,18 +35,26 @@ export function AnchoredMenu({
   className?: string
   /** Eligible to fill the screen. A short menu still docks under its button. */
   fill?: boolean
+  /** Phone project menu: a bottom sheet above the bar, as tall as the browser sheet. */
+  sheet?: boolean
   children: ReactNode
 }) {
   useScreenOverlay(onClose, open)
   const menuRef = useRef<HTMLDivElement>(null)
-  const [mode, setMode] = useState<MenuSize>(open && fill ? 'pending' : 'dock')
+  const [mode, setMode] = useState<MenuSize>(open && sheet ? 'sheet' : open && fill ? 'pending' : 'dock')
   const [style, setStyle] = useState<{ top: number; left: number; maxHeight: number; maxWidth: number; side: 'down' | 'up' } | null>(null)
-  const sizing = open && fill
+  const sizing = open && fill && !sheet
   const [tracked, setTracked] = useState(sizing)
-  if (sizing !== tracked) {
+  if (open && sheet && mode !== 'sheet') {
+    setMode('sheet')
+  } else if (!sheet && sizing !== tracked) {
     setTracked(sizing)
     setMode(sizing ? 'pending' : 'dock')
   }
+
+  useLayoutEffect(() => {
+    if (open && (mode === 'sheet' || sheet)) syncPhoneSheetFrame(document.querySelector('.shell'))
+  }, [open, mode, sheet])
 
   useLayoutEffect(() => {
     if (!open || !fill || mode !== 'pending') return
@@ -55,11 +66,12 @@ export function AnchoredMenu({
       { width: window.innerWidth, height: window.innerHeight },
       clearTop,
     )
-    setMode(fills ? 'fill' : 'dock')
+    const phone = !!document.querySelector('.shell.phone')
+    setMode(fills ? (phone ? 'sheet' : 'fill') : 'dock')
   }, [open, fill, mode, children])
 
-  const filling = open && fill && mode === 'fill'
-  const measuring = open && fill && mode === 'pending'
+  const filling = open && (mode === 'fill' || mode === 'sheet')
+  const measuring = open && fill && !sheet && mode === 'pending'
 
   useLayoutEffect(() => {
     if (!open || filling || measuring) {
@@ -72,12 +84,14 @@ export function AnchoredMenu({
       const box = anchor ?? (live ? live.getBoundingClientRect() : null)
       if (!node || !box) return
       const clearTop = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--view-tabs-bottom')) || 0
+      const clearBottom = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--phone-chrome-bottom')) || 0
       const next = placeAnchoredMenu({
         trigger: { left: box.left, top: box.top, width: box.width, height: box.height },
         menu: { width: node.offsetWidth || node.scrollWidth, height: node.scrollHeight },
         viewport: { width: window.innerWidth, height: window.innerHeight },
         prefer,
         clearTop,
+        clearBottom,
       })
       setStyle(next)
       live?.classList.add('anchored-trigger')
@@ -101,12 +115,14 @@ export function AnchoredMenu({
   useEffect(() => {
     if (!open) return
     const onPointer = (event: PointerEvent) => {
-      if (filling) return
+      if (filling && mode !== 'sheet') return
       const live = trigger ?? triggerRef?.current ?? null
       if (anchoredShouldClose(event.target as Node | null, live, menuRef.current)) onClose()
     }
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onClose()
     }
     window.addEventListener('pointerdown', onPointer, true)
     window.addEventListener('keydown', onKey)
@@ -114,12 +130,27 @@ export function AnchoredMenu({
       window.removeEventListener('pointerdown', onPointer, true)
       window.removeEventListener('keydown', onKey)
     }
-  }, [open, onClose, trigger, triggerRef, filling])
+  }, [open, onClose, trigger, triggerRef, filling, mode])
 
   if (!open && typeof document !== 'undefined') return null
 
   const showClose = Boolean(fill && open && !measuring)
-  const sheet = filling ? (
+  const phoneSheet = open && fill && mode === 'sheet'
+  const menu = phoneSheet ? (
+    <div
+      ref={menuRef}
+      id={id}
+      className={['anchored-menu', 'screen-overlay', 'phone-sheet', className].filter(Boolean).join(' ')}
+      role="dialog"
+      aria-label={label}
+      data-screen-overlay=""
+      data-open={open ? 'true' : 'false'}
+      data-menu-size="sheet"
+    >
+      <SheetClose onClick={onClose} />
+      <div className="phone-sheet-body">{children}</div>
+    </div>
+  ) : filling ? (
     <div
       id={id}
       className={['anchored-menu', 'screen-overlay', className].filter(Boolean).join(' ')}
@@ -130,7 +161,7 @@ export function AnchoredMenu({
       hidden={!open}
       data-menu-size="fill"
     >
-      <button type="button" className="overlay-close" onClick={onClose}>Close</button>
+      <SheetClose onClick={onClose} />
       {children}
     </div>
   ) : (
@@ -151,10 +182,10 @@ export function AnchoredMenu({
         maxWidth: style.maxWidth,
       }}
     >
-      {showClose ? <button type="button" className="overlay-close" onClick={onClose}>Close</button> : null}
+      {showClose ? <SheetClose onClick={onClose} /> : null}
       {children}
     </div>
   )
-  if (typeof document === 'undefined') return sheet
-  return createPortal(sheet, document.body)
+  if (typeof document === 'undefined') return menu
+  return createPortal(menu, document.body)
 }

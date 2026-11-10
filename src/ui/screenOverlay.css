@@ -67,6 +67,50 @@
   overflow: hidden;
 }
 
+/* Phone sheets rise from the bottom bar. Tabs, transport, and the bar stay visible.
+   The menu matches the browser sheet and scrolls inside that height. */
+body:has(.shell.phone) [data-screen-overlay].phone-sheet,
+body:has(.shell.phone) [data-screen-overlay].guide-sheet {
+  top: auto !important;
+  bottom: calc(var(--phone-chrome-bottom, 52px) + 12px) !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  max-height: var(--phone-sheet-h, 46dvh) !important;
+  min-height: 0 !important;
+  border-radius: 16px 16px 0 0 !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+body:has(.shell.phone) [data-screen-overlay].phone-sheet > .overlay-close,
+body:has(.shell.phone) [data-screen-overlay].guide-sheet > .guide-head {
+  flex: 0 0 auto;
+}
+
+body:has(.shell.phone) [data-screen-overlay].phone-sheet > .phone-sheet-body,
+body:has(.shell.phone) [data-screen-overlay].guide-sheet {
+  min-height: 0;
+}
+
+body:has(.shell.phone) [data-screen-overlay].phone-sheet > .phone-sheet-body {
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+body:has(.shell.phone) [data-screen-overlay].guide-sheet {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
 [data-screen-overlay].anchored-menu:has(#shell-menu) > button.overlay-close {
   min-width: 44px;
   min-height: 44px;

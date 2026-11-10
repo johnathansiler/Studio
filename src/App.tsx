@@ -84,7 +84,7 @@ import { claimComputerKey } from './model/keyboardPlay'
 import { KeyboardDock } from './ui/KeyboardDock'
 import { TransportActionContext } from './ui/pluginTransport'
 import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark, keyboardShellTurn, notifyKeyboard, PADS_HISTORY, PIANO_HISTORY, presentKeyboard, releaseOrientation, setKeyboardPresenter, setPianoHider, STEPS_HISTORY, type EditorHistoryMark, type KeyboardPresentation } from './ui/keyboardStage'
-import { onViewTab, syncViewTabFrame } from './ui/overlayHost'
+import { onViewTab, syncPhoneSheetFrame, syncViewTabFrame } from './ui/overlayHost'
 import { useScreenOverlay } from './ui/screenOverlay'
 import { HintBubble, TipButton } from './ui/Hint'
 import { Toasts } from './ui/Toasts'
@@ -240,18 +240,23 @@ export function App() {
   const shellRef = useRef<HTMLDivElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   useLayoutEffect(() => {
-    const place = () => syncViewTabFrame(shellRef.current)
+    const place = () => {
+      syncViewTabFrame(shellRef.current)
+      syncPhoneSheetFrame(shellRef.current)
+    }
     place()
     const observer = new ResizeObserver(place)
     if (shellRef.current) observer.observe(shellRef.current)
-    const bar = shellRef.current?.querySelector('.views')
-    if (bar) observer.observe(bar)
+    for (const selector of ['.views', '.transport', '.tool-slot']) {
+      const node = shellRef.current?.querySelector(selector)
+      if (node) observer.observe(node)
+    }
     window.addEventListener('resize', place)
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', place)
     }
-  }, [form, land, phone])
+  }, [form, land, phone, editorView])
   const [keysLandscape, setKeysLandscape] = useState(false)
   const [screenAngle, setScreenAngle] = useState<number | null>(() => {
     if (typeof screen === 'undefined' || !screen.orientation) return null
@@ -1580,6 +1585,9 @@ async function importDropped(files: FileList) {
   const collabShown = collabPanelVisible(studioTab)
   const dockShown = !collabShown && dockVisible({ surface, panel, dockOpen: false })
   useLayoutEffect(() => {
+    syncPhoneSheetFrame(shellRef.current)
+  }, [collabShown, panel, editorView, phone, land])
+  useLayoutEffect(() => {
     if (panel !== 'pads' && panel !== 'steps') return
     const place = () => alignPluginClose(shellRef.current)
     place()
@@ -1891,7 +1899,7 @@ async function importDropped(files: FileList) {
   useScreenOverlay(() => setIdeasOpen(false), ideasOpen)
   useScreenOverlay(() => { engine.stopPreview(); setPlayersOpen(false) }, playersOpen)
   useScreenOverlay(() => { engine.stopPreview(); setUnstuckOpen(false) }, unstuckOpen)
-  const shellOpen = soundsOpen && editorView !== 'arrange' && surface === 'studio'
+  const shellOpen = soundsOpen && surface === 'studio' && (collabShown || editorView !== 'arrange')
   const shellPhase = usePushPhase(shellOpen)
   useScreenOverlay(() => setAnalysisTrackId(null), analysisTrackId != null)
   useScreenOverlay(() => setPerform(null), perform != null)
@@ -1911,7 +1919,7 @@ async function importDropped(files: FileList) {
   useScreenOverlay(() => store.closeSpectral(), store.spectralTrackId != null)
   useScreenOverlay(() => store.closeClipSheet(), store.clipSheet)
 
-  const phoneArrange = phone && !land && surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano'
+  const phoneArrange = phone && surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano'
   const menuButton = (
     <button ref={menuButtonRef} type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Project, edit, view, and settings." title="Project, edit, view, and settings." aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
       <MenuIcon />
@@ -1978,8 +1986,8 @@ async function importDropped(files: FileList) {
       }}
     >
       <header className="topbar">
-        {!phoneArrange && menuButton}
-        {!phoneArrange && (
+        {!phone && menuButton}
+        {!phone && (
           <div className="brand">
             <div className="mark" aria-hidden>
               <svg width="16" height="16" viewBox="0 0 18 18">
@@ -1990,7 +1998,7 @@ async function importDropped(files: FileList) {
             <h1>CueHarbor</h1>
           </div>
         )}
-        {!phoneArrange && (
+        {!phone && (
           <input className="project-name" aria-label="Project name" value={store.project.name} onChange={(event) => store.renameProject(event.target.value)} />
         )}
         <ViewSwitcher
@@ -2001,9 +2009,9 @@ async function importDropped(files: FileList) {
           onView={showView}
           onCollab={showCollab}
         />
-        {!phoneArrange && historyButtons}
-        {!phoneArrange && ideasButton}
-        <AnchoredMenu fill open={menuOpen} onClose={() => setMenuOpen(false)} label="Project menu" triggerRef={menuButtonRef} prefer="down">
+        {!phone && historyButtons}
+        {!phone && ideasButton}
+        <AnchoredMenu fill sheet={phone} open={menuOpen} onClose={() => setMenuOpen(false)} label="Project menu" triggerRef={menuButtonRef} prefer="down">
           <MainMenu
             items={visibleMenu({
               phone,
@@ -2018,8 +2026,13 @@ async function importDropped(files: FileList) {
             disabled={(action) => store.remoteFollow && (action === 'new' || action === 'session-mode' || action === 'capture' || action === 'snap' || action === 'loop' || action === 'signature' || action === 'box' || action === 'erase' || action === 'pan')}
             signature={`${store.project.timeSignature.numerator}/${store.project.timeSignature.denominator}`}
             onSignature={(numerator, denominator) => store.setTimeSignature(numerator, denominator)}
-            projectName={phoneArrange ? store.project.name : undefined}
-            onProjectName={phoneArrange ? (name) => store.renameProject(name) : undefined}
+            projectName={phone ? store.project.name : undefined}
+            onProjectName={phone ? (name) => store.renameProject(name) : undefined}
+            canUndo={store.canUndo}
+            canRedo={store.canRedo}
+            onUndo={phone ? () => { setMenuOpen(false); store.undo() } : undefined}
+            onRedo={phone ? () => { setMenuOpen(false); store.redo() } : undefined}
+            onIdeas={phone ? () => { setMenuOpen(false); setUnstuckOpen(true) } : undefined}
             latencyHint={latencyHint}
             latencyReadout={latencyReadout}
             onLatency={(hint) => {
@@ -2071,6 +2084,23 @@ async function importDropped(files: FileList) {
           takeProgress={session.state.takeProgress}
           assetTransfers={session.state.assetTransfers}
         />
+      )}
+      {phone && !phoneArrange && (
+        <div className="tool-slot" id="tool-slot" data-slot="phone-bar">
+          <div className="command-strip phone-bar tucked" role="toolbar" aria-label="Phone">
+            {menuButton}
+            <button
+              type="button"
+              className={`cap-btn${soundsOpen ? ' on' : ''}`}
+              aria-pressed={soundsOpen}
+              title="Sounds and loops. Open sounds, instruments, and loops."
+              onClick={() => setSoundsOpen((open) => !open)}
+            >
+              <strong>Browser</strong>
+            </button>
+            <div id="phone-screen-slot" />
+          </div>
+        </div>
       )}
       {surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano' && (
         <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
