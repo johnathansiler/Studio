@@ -170,9 +170,20 @@ export function playedWindow(
   }
   const slice = data.subarray(window.start, end)
   const copies = Math.max(2, Math.min(8, Math.ceil((Math.max(1, sampleRate) * 1.5) / slice.length)))
+  const fade = Math.min(PAD_FADE, Math.floor(slice.length / 4))
   const looped = new Float32Array(slice.length * copies)
-  for (let i = 0; i < copies; i++) looped.set(slice, i * slice.length)
-  return { samples: looped, key: `loop:${window.start}:${end}:${copies}`, start: 0, end: looped.length, fadeIn }
+  looped.set(slice, 0)
+  for (let copy = 1; copy < copies; copy++) {
+    const base = copy * slice.length
+    looped.set(slice, base)
+    for (let i = 0; i < fade; i++) {
+      const gain = (i + 1) / fade
+      const at = base - fade + i
+      const head = slice[(i + 1) % fade] || 0
+      looped[at] = (looped[at] || 0) * (1 - gain) + head * gain
+    }
+  }
+  return { samples: looped, key: `loop:${window.start}:${end}:${copies}:${fade}`, start: 0, end: looped.length, fadeIn }
 }
 
 export function regionSamples(length: number, startFraction: number, endFraction: number) {

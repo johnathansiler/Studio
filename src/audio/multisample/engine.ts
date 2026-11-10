@@ -244,7 +244,15 @@ export class SamplerInstrument {
     })
     this.held.push({ note: midi, velocity: vel, roundRobin: snapshot })
     for (const group of mapped.advance) this.counters[group] = (this.counters[group] ?? 0) + 1
-    this.start(midi, velocity > 1 ? vel / 127 : velocity, mapped.layers, 'attack')
+    let replaced = false
+    for (const voice of this.voices) {
+      if (!voice.active || voice.released || voice.note !== midi || voice.trigger !== 'attack') continue
+      voice.released = true
+      voice.stage = 'release'
+      voice.release = Math.min(voice.release, 0.005)
+      replaced = true
+    }
+    this.start(midi, velocity > 1 ? vel / 127 : velocity, mapped.layers, 'attack', replaced)
     return mapped.layers
   }
 
@@ -358,7 +366,7 @@ export class SamplerInstrument {
     return [this.left, this.right]
   }
 
-  private start(note: number, vel: number, layers: MappedLayer[], trigger: ZoneTrigger) {
+  private start(note: number, vel: number, layers: MappedLayer[], trigger: ZoneTrigger, soften = false) {
     for (const layer of layers) {
       const zone = layer.zone
       if (zone.exclusive > 0) {
@@ -378,7 +386,8 @@ export class SamplerInstrument {
       }
       const zone = layer.zone
       const play = this.currentProgram?.play
-      const attack = play ? play.attack : zone.ampeg.attack
+      const programmed = play ? play.attack : zone.ampeg.attack
+      const attack = soften ? Math.max(programmed, 0.004) : programmed
       const decay = play ? play.decay : zone.ampeg.decay
       const sustain = play ? play.sustain : zone.ampeg.sustain
       const release = Math.max(0.005, play ? play.release : zone.ampeg.release)

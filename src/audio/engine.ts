@@ -1,4 +1,6 @@
 import { clipNeedsStretch, preferStretchCache, renderClipChannels, sourceSamplesOf, timelineSamples } from './stretch/engine'
+import { assembleTimedChunks } from './capture'
+import { crossfadeLoopRegion } from './clipEdge'
 import { clickVoice } from './metroClick'
 import { onSpectralCommit } from './spectral/job'
 import { followClockToken, onStretchCommit, readStretch, storeStretch, stretchCacheKey, stretchSlot } from './stretch/commit'
@@ -90,6 +92,8 @@ interface ActiveRec {
 interface Stoppable {
   stop: (when?: number) => void
   disconnect: () => void
+  /** Fade across a reschedule instead of cutting the waveform. */
+  release?: (when: number) => void
 }
 
 type PunchInfo = { timelineSample: number; cueEpochHostPerf: number; ctxTime: number }
@@ -1997,19 +2001,12 @@ export class AudioEngine {
   private assemble(rec: ActiveRec): CaptureResult | null {
     if (!rec.chunks.length) return null
     const sr = this.sampleRate
-    const first = rec.chunks[0]
+    const first = rec.chunks.reduce((earliest, chunk) => (chunk.frame < earliest.frame ? chunk : earliest))
     const startSample = Math.round(rec.timelineSample + (first.frame / sr - rec.anchorCtx) * sr)
-    let length = 0
-    for (const chunk of rec.chunks) length += chunk.left.length
-    const left = new Float32Array(length)
-    const hasRight = rec.chunks.some((c) => c.right)
-    const right = hasRight ? new Float32Array(length) : null
-    let offset = 0
-    for (const chunk of rec.chunks) {
-      left.set(chunk.left, offset)
-      if (right && chunk.right) right.set(chunk.right, offset)
-      offset += chunk.left.length
-    }
+    const placed = assembleTimedChunks(rec.chunks)
+    if (!placed) return null
+    const left = placed.left
+    const right = placed.right
     return {
       channels: right ? [left, right] : [left],
       sampleRate: sr,
@@ -2583,7 +2580,8 @@ export class AudioEngine {
     const linear = Math.max(0, this.sampleAt(ctx.currentTime))
     const patternLoop = emptyPatternLoopSamples(project)
     const sample = patternLoop > 1 ? linear % patternLoop : this.heardSample(linear)
-    this.stopSources()
+    this.joining = true
+    this.stopSources(now)
     this.playOriginCtx = now
     this.playOriginSample = sample
     this.positionSamples = sample
@@ -2750,9 +2748,18 @@ export class AudioEngine {
           dur = Math.max(0.01, playBuffer.duration)
           playRate = 1
         }
+        const looping = clipLoops(audio)
+        if (looping && playRate === 1 && playBuffer.length > 32) {
+          const startFrame = Math.max(0, Math.round(offset * playBuffer.sampleRate))
+          const endFrame = Math.min(playBuffer.length, Math.round((offset + dur) * playBuffer.sampleRate))
+          const faded = this.ctx.createBuffer(playBuffer.numberOfChannels, playBuffer.length, playBuffer.sampleRate)
+          for (let channel = 0; channel < playBuffer.numberOfChannels; channel++) {
+            faded.copyToChannel(crossfadeLoopRegion(playBuffer.getChannelData(channel), startFrame, endFrame, 128), channel)
+          }
+          playBuffer = faded
+        }
         src.buffer = playBuffer
         src.playbackRate.value = playRate
-        const looping = clipLoops(audio)
         if (looping && dur > 0.01) {
           src.loop = true
           src.loopStart = offset
@@ -2902,6 +2909,7 @@ export class AudioEngine {
   private scheduleWindow(ctxTime: number, timelineStart: number, timelineEnd: number) {
     const project = this.project
     const ctx = this.ctx
+    const handoff = this.joining
     if (!project || !ctx) return
     this.scheduleStepSequencers(ctx, project, ctxTime, timelineStart, timelineEnd)
     for (const track of project.tracks) {
@@ -2933,6 +2941,7 @@ export class AudioEngine {
       }
       this.schedulePatternClips(ctx, strip, project, track.id, ctxTime, timelineStart, timelineEnd)
     }
+    if (handoff) this.joining = false
   }
 
   private schedulePatternClips(
@@ -3267,7 +3276,26 @@ export class AudioEngine {
     src.connect(gain)
     gain.connect(strip.input)
     src.start(Math.max(when, 0), Math.max(0, offset), dur)
-    if (ctx === this.ctx) this.sources.push(src)
+    if (ctx === this.ctx) {
+      this.sources.push({
+        stop: (at?: number) => {
+          try { src.stop(at) } catch { /* already stopped */ }
+        },
+        disconnect: () => {
+          try { src.disconnect() } catch { /* already disconnected */ }
+          try { gain.disconnect() } catch { /* already disconnected */ }
+        },
+        release: (at: number) => {
+          const start = Math.max(ctx.currentTime, at - 0.008)
+          try {
+            gain.gain.cancelScheduledValues(start)
+            gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), start)
+            gain.gain.linearRampToValueAtTime(0.0001, at + 0.008)
+            src.stop(at + 0.012)
+          } catch { /* already stopped */ }
+        },
+      })
+    }
   }
 
   playOrigin(): { context: number; beat: number } {
@@ -4119,12 +4147,12 @@ export class AudioEngine {
     if (!this.playing || !ctx || !project) return
     const now = Math.max(ctx.currentTime + 0.01, this.playOriginCtx)
     const sample = Math.max(0, Math.round(this.sampleAt(now)))
-    this.stopSources()
+    this.joining = true
+    this.stopSources(now)
     this.arrangementScheduled = true
     this.sessionStarted.clear()
     this.nextLoopCtx = now
     this.nextLoopSample = sample
-    this.joining = true
     const end = arrangementEndSample(project)
     this.scheduleWindow(now, sample, end)
     this.joining = false
@@ -4577,19 +4605,32 @@ export class AudioEngine {
     bucket.push({ stop, disconnect() {} })
   }
 
-  private stopSources() {
+  private stopSources(fadeAt?: number) {
     this.stopPreview()
     this.stopScalerPreview()
+    const fading = fadeAt != null
     for (const src of this.sources) {
+      if (fading && src.release) {
+        src.release(fadeAt)
+        continue
+      }
       try {
-        src.stop()
+        src.stop(fading ? fadeAt : undefined)
       } catch {
         /* already stopped */
       }
-      try {
-        src.disconnect()
-      } catch {
-        /* already disconnected */
+      if (!fading) {
+        try {
+          src.disconnect()
+        } catch {
+          /* already disconnected */
+        }
+      } else {
+        const node = src
+        const delay = Math.max(20, ((fadeAt - (this.ctx?.currentTime ?? fadeAt)) * 1000) + 40)
+        window.setTimeout(() => {
+          try { node.disconnect() } catch { /* already disconnected */ }
+        }, delay)
       }
     }
     this.sources = []

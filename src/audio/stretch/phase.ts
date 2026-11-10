@@ -102,7 +102,9 @@ export function phaseStretch(input: Float32Array, outLen: number, sampleRate: nu
   const prevAna = new Float64Array(half + 1)
   const prevSyn = new Float64Array(half + 1)
   const prevMag = new Float64Array(half + 1)
+  const freqHold = new Float64Array(half + 1)
   let primed = false
+  let prevIn = -1
   let inCursor = 0
   const frames = Math.ceil(length / synthHop) + 2
 
@@ -124,9 +126,12 @@ export function phaseStretch(input: Float32Array, outLen: number, sampleRate: nu
     }
     const synth = new Float64Array(half + 1)
     let transient = false
+    const frozen = primed && inAt === prevIn
     if (!primed) {
       for (let bin = 0; bin <= half; bin++) synth[bin] = phase[bin]
       primed = true
+    } else if (frozen) {
+      for (let bin = 0; bin <= half; bin++) synth[bin] = prevSyn[bin] + freqHold[bin] * synthHop
     } else {
       let flux = 0
       for (let bin = 1; bin < half; bin++) {
@@ -145,8 +150,10 @@ export function phaseStretch(input: Float32Array, outLen: number, sampleRate: nu
         const delta = princarg(phase[bin] - prevAna[bin] - omega * dIn)
         const freq = omega + delta / dIn
         const propagated = prevSyn[bin] + freq * synthHop
-        if (transient) synth[bin] = phase[bin]
-        else {
+        if (transient) {
+          synth[bin] = phase[bin]
+          freqHold[bin] = freq
+        } else {
           let peak = -1
           let distance = 4
           for (const candidate of peaks) {
@@ -156,13 +163,16 @@ export function phaseStretch(input: Float32Array, outLen: number, sampleRate: nu
               peak = candidate
             }
           }
+          const locked = peak >= 0 ? freqOf(phase[peak], prevAna[peak], peak, size, dIn) : freq
+          freqHold[bin] = locked
           synth[bin] =
             peak >= 0
-              ? prevSyn[peak] + freqOf(phase[peak], prevAna[peak], peak, size, dIn) * synthHop + princarg(phase[bin] - phase[peak])
+              ? prevSyn[peak] + locked * synthHop + princarg(phase[bin] - phase[peak])
               : propagated
         }
       }
     }
+    prevIn = inAt
     for (let bin = 0; bin <= half; bin++) {
       prevAna[bin] = phase[bin]
       prevSyn[bin] = synth[bin]
@@ -188,20 +198,10 @@ export function phaseStretch(input: Float32Array, outLen: number, sampleRate: nu
       weight[at] += window[i] * shaped
     }
     inCursor += analysisHop
-    if (inAt >= input.length - size && frame > 0) break
   }
-  let typical = 0
-  const from = Math.floor(length * 0.2)
-  const to = Math.max(from + 1, Math.floor(length * 0.8))
-  for (let i = from; i < to; i++) if (weight[i] > typical) typical = weight[i]
   for (let i = 0; i < length; i++) {
     const covered = weight[i]
-    if (!(covered > 1e-8) || !(typical > 0)) {
-      output[i] = 0
-      continue
-    }
-    const gain = covered >= typical * 0.5 ? 1 / covered : covered / (typical * typical * 0.5)
-    output[i] = sanitize(output[i] * gain)
+    output[i] = covered > 1e-4 ? sanitize(output[i] / covered) : 0
   }
   const onset = Math.min(length, input.length, Math.round(sampleRate * 0.006))
   for (let i = 0; i < onset; i++) {
