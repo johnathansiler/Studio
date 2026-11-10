@@ -1,6 +1,6 @@
 import { libraryFetch } from '../audio/multisample/cache'
 import { selectLayers } from '../audio/multisample/map'
-import { libraryFileUrl } from '../audio/multisample/source'
+import { encodeLibraryPath, libraryFileUrl } from '../audio/multisample/source'
 import type { SampleRef, SamplerProgram } from '../audio/multisample/types'
 import { midiVelocity } from '../audio/multisample/types'
 import { sampleLoadBegin, sampleLoadFinish, sampleLoadRatio } from '../audio/sampleLoadBus'
@@ -11,6 +11,7 @@ import { importSfz } from '../audio/multisample/sfz'
 import { instrumentCatalogUrl, instrumentLibraryBase, instrumentTreeUrl } from './contract'
 import { programFromPaths, programLicense } from './program'
 import { parseHarborCatalog } from './parse'
+import { datasetFilePath, reconcileProgram } from './reconcile'
 import { fillKeyboard } from './zones'
 import type { CatalogInstrument, HarborCatalog } from './types'
 
@@ -163,35 +164,89 @@ export async function hashedZone(bytes: ArrayBuffer, expected?: string) {
   return (await sha256Hex(bytes)) === expected.toLowerCase()
 }
 
-async function readIncludes(presetUrl: string, text: string, fetchImpl: FetchLike, files: Map<string, string>, depth: number) {
+/**
+ * `#include` paths in this library are written from the root preset, even inside a nested map.
+ * Try the file that contains the directive first, then the root preset, and fetch only a path
+ * the dataset listing contains. An empty listing keeps the old request so a failed index
+ * does not erase the instrument.
+ */
+async function readIncludes(
+  presetUrl: string,
+  rootUrl: string,
+  text: string,
+  fetchImpl: FetchLike,
+  files: Map<string, string>,
+  existing: Set<string> | null,
+  depth: number,
+) {
   if (depth > 4) return
   const includes = [...text.matchAll(/#include\s+"([^"]+)"/gi)].map((match) => match[1])
   for (const include of includes) {
-    if (files.has(include)) continue
-    const url = new URL(include, presetUrl).toString()
+    const key = include.replace(/\\/g, '/')
+    if (files.has(include) || files.has(key)) continue
+    const url = includeUrl(include, presetUrl, rootUrl, existing)
+    if (!url) continue
     try {
       const response = await fetchImpl(url)
       if (!response.ok) continue
       const body = await response.text()
       files.set(include, body)
-      await readIncludes(url, body, fetchImpl, files, depth + 1)
+      if (key !== include) files.set(key, body)
+      await readIncludes(url, rootUrl, body, fetchImpl, files, existing, depth + 1)
     } catch {
       /* a missing include leaves those zones out */
     }
   }
 }
 
-/** Audio files under one instrument folder. The listing is metadata, not the samples. */
-export async function listInstrumentFiles(path: string, fetchImpl: FetchLike = libraryFetch) {
+function includeUrl(include: string, presetUrl: string, rootUrl: string, existing: Set<string> | null) {
+  const fromHere = resolvedDatasetPath(presetUrl, include)
+  const fromRoot = resolvedDatasetPath(rootUrl, include)
+  const listed = [fromHere, fromRoot].find((path) => path && existing?.has(path))
+  if (listed) return libraryFileUrl(instrumentLibraryBase(), listed)
+  if (existing && existing.size > 0) return ''
+  try {
+    return new URL(include.replace(/\\/g, '/'), presetUrl).toString()
+  } catch {
+    return ''
+  }
+}
+
+function resolvedDatasetPath(baseFileUrl: string, relative: string) {
+  try {
+    const root = baseFileUrl.replace(/[^/]*$/, '')
+    const clean = relative.replace(/\\/g, '/').replace(/^\.\//, '')
+    if (!clean || /^(https?:)?\/\//i.test(clean)) return ''
+    return datasetFilePath(new URL(encodeLibraryPath(clean), root).toString())
+  } catch {
+    return ''
+  }
+}
+
+/** `instruments/<id>` so a preset under Programs/ still sees the sibling sample folders. */
+export function instrumentSampleRoot(path: string) {
+  const clean = path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  const parts = clean.split('/').filter(Boolean)
+  if (parts[0] === 'instruments' && parts[1]) return `${parts[0]}/${parts[1]}`
+  return clean.replace(/\/[^/]+\.(sfz|dspreset)$/i, '')
+}
+
+/** Files under one instrument folder. The listing is metadata, not the samples. */
+export async function listInstrumentFiles(path: string, fetchImpl: FetchLike = libraryFetch, audioOnly = true) {
   const folder = path.replace(/\\/g, '/').replace(/\/+$/, '').replace(/\/[^/]+\.(sfz|dspreset)$/i, '')
   const files: string[] = []
   let url: string | null = `${instrumentTreeUrl(folder)}?recursive=1&limit=1000`
-  while (url) {
+  const seen = new Set<string>()
+  while (url && !seen.has(url)) {
+    seen.add(url)
     const response = await fetchImpl(url)
     if (!response.ok) break
     const page = await response.json() as { type?: string; path?: string }[]
+    if (!Array.isArray(page)) break
     for (const item of page) {
-      if (item.type === 'file' && item.path && /\.(wav|flac|aif|aiff)$/i.test(item.path)) files.push(item.path)
+      if (item.type !== 'file' || !item.path) continue
+      if (audioOnly && !/\.(wav|flac|aif|aiff)$/i.test(item.path)) continue
+      files.push(item.path)
     }
     const link = response.headers.get('Link') ?? ''
     const next = link.split(',').find((part) => part.includes('rel="next"'))
@@ -204,16 +259,19 @@ export async function listInstrumentFiles(path: string, fetchImpl: FetchLike = l
 /** Build the multi-sample program for one catalog instrument. Samples stay on Hugging Face until a note plays. */
 export async function prepareCatalogInstrument(instrument: CatalogInstrument, fetchImpl: FetchLike = libraryFetch) {
   if (/\.(sfz|dspreset)$/i.test(instrument.path)) {
+    const listed = await listInstrumentFiles(instrumentSampleRoot(instrument.path), fetchImpl, false)
+    const existing = new Set(listed)
     const url = instrumentFileUrl(instrument.path)
     const response = await fetchImpl(url)
     if (!response.ok) throw new Error(`${instrument.name} is not on Hugging Face yet (${response.status})`)
     const text = await response.text()
     const files = new Map<string, string>()
-    await readIncludes(url, text, fetchImpl, files, 0)
+    await readIncludes(url, url, text, fetchImpl, files, existing, 0)
     const imported = importSfz(text, instrument.name, files)
     const absolute = absolutizeProgram(imported, url)
+    const reconciled = existing.size ? reconcileProgram(absolute, listed) : absolute
     return fillKeyboard({
-      ...absolute,
+      ...reconciled,
       id: `harbor:${instrument.id}`,
       name: instrument.name,
       license: programLicense(instrument.license),
@@ -221,5 +279,8 @@ export async function prepareCatalogInstrument(instrument: CatalogInstrument, fe
     })
   }
   const paths = await listInstrumentFiles(instrument.path, fetchImpl)
-  return programFromPaths(instrument, paths)?.program ?? null
+  const built = programFromPaths(instrument, paths)
+  if (!built) return null
+  const reconciled = paths.length ? reconcileProgram(built.program, paths) : built.program
+  return fillKeyboard(reconciled)
 }
