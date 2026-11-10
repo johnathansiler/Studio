@@ -97,8 +97,28 @@ body:has(.choice-tray) .select-hint-host {
   min-height: 44px;
   margin: 0;
   padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: var(--muted, #93a399);
   font-size: 0;
   line-height: 0;
+}
+
+.shell .choice-tray button.choice-tray-close.guide-x.overlay-close[aria-label="Close"]:hover,
+.shell .choice-tray button.choice-tray-close.guide-x.overlay-close[aria-label="Close"]:focus-visible {
+  border: 0;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: var(--text, #eef3ea);
+}
+
+.shell .choice-tray button.choice-tray-close:focus-visible {
+  outline: 2px solid var(--accent, #73c48f);
+  outline-offset: 2px;
 }
 
 .choice-tray .choice-tray-close svg {

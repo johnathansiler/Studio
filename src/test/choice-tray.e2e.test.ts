@@ -82,6 +82,19 @@ async function readTray(page: Page, sheetSelector: string, sourceSelector: strin
       close: boxOf(sheet?.querySelector('.choice-tray-close') ?? null),
       closeLabel: sheet?.querySelector('.choice-tray-close')?.getAttribute('aria-label') ?? '',
       closeText: (sheet?.querySelector('.choice-tray-close')?.textContent || '').trim(),
+      closeChrome: (() => {
+        const close = sheet?.querySelector('.choice-tray-close')
+        if (!(close instanceof HTMLElement)) return null
+        const style = getComputedStyle(close)
+        const glyph = close.querySelector('svg')
+        const mark = glyph instanceof Element ? glyph.getBoundingClientRect() : null
+        return {
+          bg: style.backgroundColor,
+          shadow: style.boxShadow,
+          border: style.borderTopWidth,
+          glyph: mark ? { width: mark.width, height: mark.height } : null,
+        }
+      })(),
       chips,
       body: body instanceof HTMLElement ? {
         overflowY: bodyStyle?.overflowY ?? '',
@@ -107,6 +120,12 @@ function assertTray(name: string, tray: Awaited<ReturnType<typeof readTray>>, la
   expect(tray.closeText, name).toBe('')
   expect(tray.close!.width, name).toBeGreaterThanOrEqual(40)
   expect(tray.close!.height, name).toBeGreaterThanOrEqual(40)
+  expect(tray.closeChrome?.bg, `${name} close face`).toBe('rgba(0, 0, 0, 0)')
+  expect(tray.closeChrome?.shadow, `${name} close face`).toBe('none')
+  expect(tray.closeChrome?.border, `${name} close face`).toBe('0px')
+  expect(tray.closeChrome?.glyph!.width, `${name} close mark`).toBeLessThanOrEqual(16)
+  expect(tray.closeChrome?.glyph!.height, `${name} close mark`).toBeLessThanOrEqual(16)
+  expect(tray.closeChrome?.glyph!.width, `${name} close mark`).toBeLessThan(tray.close!.width - 16)
   expect(tray.body!.overflowY, name).toBe('auto')
   expect(tray.body!.overscroll, name).toBe('contain')
   expect(tray.body!.touch, name).toContain('pan-y')
