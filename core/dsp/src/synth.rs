@@ -26,8 +26,12 @@ impl Synth {
         self.phase = 0.0;
     }
     pub fn note(&mut self, pitch: f64, vel: f64) {
+        let next = vel.clamp(0.0, 1.0);
+        if next > 0.0 && self.vel <= 0.0 && self.env < 0.02 {
+            self.phase = 0.0;
+        }
         self.pitch = pitch.clamp(0.0, 127.0);
-        self.vel = vel.clamp(0.0, 1.0);
+        self.vel = next;
     }
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32], frames: usize, sample_rate: f64, notes: &[Note]) {
         if notes.is_empty() {
@@ -63,7 +67,9 @@ impl Synth {
                 right[i] = store(dry_r);
                 continue;
             }
-            let follow = if self.vel > self.env { 0.25 } else { 0.04 };
+            let attack = 1.0 - (-1.0 / (0.004 * sample_rate)).exp();
+            let release = 1.0 - (-1.0 / (0.012 * sample_rate)).exp();
+            let follow = if self.vel > self.env { attack } else { release };
             self.env += (self.vel - self.env) * follow;
             if self.env < 1e-5 {
                 self.env = 0.0;

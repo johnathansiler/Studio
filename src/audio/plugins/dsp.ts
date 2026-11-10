@@ -80,7 +80,8 @@ export function designBiquad(kind: BiquadKind, sampleRate: number, freq: number,
 }
 
 export function tickBiquad(filter: Biquad, x: number) {
-  const y = filter.b0 * x + filter.b1 * filter.x1 + filter.b2 * filter.x2 - filter.a1 * filter.y1 - filter.a2 * filter.y2
+  let y = filter.b0 * x + filter.b1 * filter.x1 + filter.b2 * filter.x2 - filter.a1 * filter.y1 - filter.a2 * filter.y2
+  if (!Number.isFinite(y) || Math.abs(y) < 1e-15) y = 0
   filter.x2 = filter.x1
   filter.x1 = x
   filter.y2 = filter.y1

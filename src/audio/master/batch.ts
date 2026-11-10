@@ -3,19 +3,9 @@
 import { fileSlug, runBounce, type BounceFile, type BounceJob } from '../bounce'
 import { zipFiles } from '../../model/zip'
 import { uid, type AudioAsset, type PluginInstance, type Project } from '../../model/types'
-import type { DitherMode } from '../../model/wav'
 import { isChainPlugin } from '../plugins/ids'
+import { ditherShape } from './ditherPlan'
 import type { LoudnessTarget } from './assistant'
-
-export function ditherShape(project: Project): DitherMode {
-  const plugin = [...project.masterPlugins].reverse().find((item) => item.pluginId === 'limiter' && item.enabled)
-  const bits = plugin?.params.bits ?? 24
-  const shape = plugin?.params.shape ?? 0
-  if (bits >= 23.5 && shape < 0.5) return 'none'
-  if (shape >= 1.5) return 'shaped'
-  if (shape >= 0.5) return 'tpdf'
-  return 'none'
-}
 
 export function withSharedChain(project: Project, chain: PluginInstance[]): Project {
   const copy = JSON.parse(JSON.stringify(project)) as Project

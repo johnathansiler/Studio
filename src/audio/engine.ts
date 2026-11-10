@@ -48,6 +48,8 @@ import { deviceKind, initialBufferHint, recordingAlignmentSamples, resumeNeedsGe
 import { bufferHintOf, formatLatencyReadout, latencyHintOrder, writeBufferHint, type BufferHint } from './core/buffer'
 import { ATTACK_SEC, RELEASE_SEC, builtinLevel, drumLevel, liveWhen, scheduleDelaySeconds } from './liveStage'
 import { normalizePeak, safetyCurve } from './level'
+import { fileDither } from './master/ditherPlan'
+import { holdFullScale, SAFETY_LOOK } from './master/safety'
 import { sampleLoadFault } from './sampleLoadBus'
 import { renderSamplerSpan } from './plugins/sampler'
 import { renderGraphParallel } from './parallelRender'
@@ -150,8 +152,16 @@ export class AudioEngine {
   private referenceSource: AudioBufferSourceNode | null = null
   private referenceGain: GainNode | null = null
   private speakerGain: GainNode | null = null
-  /** Safety limiter in front of the speakers. Keeps a summed mix from hard-clipping. */
+  /** Last-ditch shaper until the lookahead limiter worklet is installed. */
   private safety: WaveShaperNode | null = null
+  /** Lookahead limiter in front of the meters, the cue, and the speakers. */
+  private safetyNode: AudioWorkletNode | null = null
+  private safetyReady = false
+  /**
+   * Matches the limiter delay for inputs that join at the speakers
+   * (remote, talk, cue return, previews). Zero until the worklet is in.
+   */
+  private sideDelay: DelayNode | null = null
   private talkBus: GainNode | null = null
   private metroGain: GainNode | null = null
   private cueDest: MediaStreamAudioDestinationNode | null = null
@@ -389,8 +399,9 @@ export class AudioEngine {
     const device = this.outputLatencyMs
     const chain = trackId ? (this.rack.ownerLatency(trackId) / this.sampleRate) * 1000 : 0
     const direct = this.directMonitor
+    const safetyMs = direct ? 0 : this.safetyLatencySeconds() * 1000
     return {
-      ms: direct ? (this.ctx?.outputLatency || 0) * 1000 : device + chain,
+      ms: direct ? (this.ctx?.outputLatency || 0) * 1000 : device + chain + safetyMs,
       direct,
       directAvailable: this.directAvailable(),
       eco: this.rack.quality === 'eco',
@@ -467,6 +478,62 @@ export class AudioEngine {
     return this.ctx
   }
 
+  /** Put the lookahead limiter ahead of the meter so the cue and the speakers share it. */
+  private installSafety() {
+    const ctx = this.ctx
+    if (!ctx || !this.masterGain || !this.masterMeter || !this.speakerGain || this.safetyNode) return
+    let node: AudioWorkletNode
+    try {
+      node = new AudioWorkletNode(ctx, 'cueharbor-safety', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        channelCount: 2,
+        channelCountMode: 'explicit',
+        channelInterpretation: 'speakers',
+      })
+    } catch {
+      return
+    }
+    try { this.masterGain.disconnect(this.masterMeter) } catch { /* the meter is being rewired */ }
+    this.masterGain.connect(node)
+    node.connect(this.masterMeter)
+    this.safetyNode = node
+    if (this.safety) {
+      try { this.speakerGain.disconnect(this.safety) } catch { /* the shaper is leaving the graph */ }
+      try { this.safety.disconnect() } catch { /* already disconnected */ }
+      this.speakerGain.connect(ctx.destination)
+    }
+    this.alignSideDelay()
+  }
+
+  /** Samples the installed lookahead adds. The waveshaper fallback adds none. */
+  private safetyLatencySamples() {
+    return this.safetyNode ? SAFETY_LOOK : 0
+  }
+
+  private safetyLatencySeconds() {
+    const rate = this.sampleRate
+    return rate > 0 ? this.safetyLatencySamples() / rate : 0
+  }
+
+  /** Keep speaker-only inputs on the same delay as the limited mix. */
+  private alignSideDelay() {
+    const ctx = this.ctx
+    if (!ctx || !this.sideDelay || !this.safetyNode) return
+    const seconds = SAFETY_LOOK / ctx.sampleRate
+    try {
+      this.sideDelay.delayTime.setValueAtTime(seconds, ctx.currentTime)
+    } catch {
+      this.sideDelay.delayTime.value = seconds
+    }
+  }
+
+  /** Where talk, remote, cue return, and previews join the speakers. */
+  private speakerSide(): AudioNode | null {
+    return this.sideDelay ?? this.speakerGain
+  }
+
   private async ensureWorklets() {
     if (!this.ctx) return
     if (!this.workletsReady) {
@@ -483,6 +550,15 @@ export class AudioEngine {
         this.workletError = error instanceof Error ? error.message : 'AudioWorklet failed'
       }
     }
+    if (!this.safetyReady) {
+      try {
+        await this.ctx.audioWorklet.addModule('/worklets/safety.js')
+        this.safetyReady = true
+      } catch {
+        this.safetyReady = false
+      }
+    }
+    if (this.safetyReady) this.installSafety()
     if (!this.stretchReady) {
       try {
         await this.ctx.audioWorklet.addModule('/worklets/stretch.js')
@@ -548,10 +624,13 @@ export class AudioEngine {
     this.masterMeter.connect(this.cueDest)
     this.masterMeter.connect(this.monitorDelay)
     this.monitorDelay.connect(this.speakerGain)
+    this.sideDelay = ctx.createDelay(1)
+    this.sideDelay.delayTime.value = 0
+    this.sideDelay.connect(this.speakerGain)
     this.remoteBus.connect(this.remoteDelay)
-    this.remoteDelay.connect(this.speakerGain)
+    this.remoteDelay.connect(this.sideDelay)
     this.talkBus.connect(this.talkAnalyser)
-    this.talkAnalyser.connect(this.speakerGain)
+    this.talkAnalyser.connect(this.sideDelay)
     this.safety = ctx.createWaveShaper()
     this.safety.curve = safetyCurve()
     this.safety.oversample = 'none'
@@ -1104,7 +1183,7 @@ export class AudioEngine {
     const node = ctx.createGain()
     node.gain.value = Number.isFinite(gain) && gain > 0 ? gain : 1
     source.connect(node)
-    node.connect(this.speakerGain)
+    node.connect(this.speakerSide() ?? this.speakerGain)
     source.start()
     this.referenceSource = source
     this.referenceGain = node
@@ -1326,7 +1405,7 @@ export class AudioEngine {
   latencyCompensationSamples() {
     const ctx = this.ctx
     if (!ctx) return 0
-    return recordingAlignmentSamples(ctx.baseLatency || 0, ctx.outputLatency || 0, ctx.sampleRate)
+    return recordingAlignmentSamples(ctx.baseLatency || 0, ctx.outputLatency || 0, ctx.sampleRate) + this.safetyLatencySamples()
   }
 
   setRemoteMusic(peerId: string, stream: MediaStream | null) {
@@ -1389,7 +1468,7 @@ export class AudioEngine {
     if (!stream || !this.ctx || !this.speakerGain) return
     if (!this.cueReturnGain) {
       this.cueReturnGain = this.ctx.createGain()
-      this.cueReturnGain.connect(this.speakerGain)
+      this.cueReturnGain.connect(this.speakerSide() ?? this.speakerGain)
     }
     this.cueReturnSrc = this.ctx.createMediaStreamSource(stream)
     this.cueReturnSrc.connect(this.cueReturnGain)
@@ -1819,9 +1898,12 @@ export class AudioEngine {
     this.remoteBus = null
     this.monitorDelay = null
     this.remoteDelay = null
+    this.sideDelay = null
     this.masterGain = null
     this.speakerGain = null
     this.safety = null
+    this.safetyNode = null
+    this.safetyReady = false
     this.talkBus = null
     this.metroGain = null
     this.cueDest = null
@@ -2167,7 +2249,7 @@ export class AudioEngine {
     await this.resume()
     if (this.pcmPlayer || !this.speakerGain || !this.ctx) return
     const node = new AudioWorkletNode(this.ctx, 'pcm-player')
-    node.connect(this.speakerGain)
+    node.connect(this.speakerSide() ?? this.speakerGain)
     this.pcmPlayer = node
   }
 
@@ -2300,7 +2382,7 @@ export class AudioEngine {
       liveRemote: false,
       create: (pluginId, sampleRate) => createProcessor(pluginId, sampleRate) ?? peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
     })
-    return encodeWav(graph.master, rate, { dither: 'tpdf' })
+    return encodeWav(holdFullScale(graph.master), rate, { dither: fileDither(project, 16, 'tpdf') })
   }
 
   bufferFor(asset: AudioAsset) {
@@ -3327,14 +3409,14 @@ export class AudioEngine {
     const output = this.ctx?.outputLatency || 0
     const base = this.ctx?.baseLatency || 0
     const loop = this.loopbackMs == null ? null : this.loopbackMs / 1000
-    return monitoringOffset(output, base, loop)
+    return monitoringOffset(output, base, loop) + this.safetyLatencySeconds()
   }
 
   clockCompensation() {
     const outputLatency = this.ctx?.outputLatency || 0
     const baseLatency = this.ctx?.baseLatency || 0
     const loop = this.loopbackMs == null ? null : this.loopbackMs / 1000
-    return { outputLatency, baseLatency, calibrationSec: calibrationTrim(outputLatency, baseLatency, loop) }
+    return { outputLatency, baseLatency, calibrationSec: calibrationTrim(outputLatency, baseLatency, loop) + this.safetyLatencySeconds() }
   }
 
   /** Browser output path plus one render quantum. The speaker cannot be earlier than this. */
@@ -3363,7 +3445,7 @@ export class AudioEngine {
       }
       check()
     })
-    const outputMs = ((this.ctx?.outputLatency || 0) + (this.ctx?.baseLatency || 0)) * 1000
+    const outputMs = ((this.ctx?.outputLatency || 0) + (this.ctx?.baseLatency || 0)) * 1000 + this.safetyLatencySeconds() * 1000
     const played = contextTimeForEvent(eventMs, stamp)
     const graphMs = frame < 0 || !this.ctx ? -1 : Math.max(0, (frame / this.ctx.sampleRate - played) * 1000)
     return {
@@ -4238,7 +4320,7 @@ export class AudioEngine {
   previewSequence(events: { pitch: number; at: number; dur: number; velocity?: number; drum?: boolean; cents?: number }[]) {
     this.stopPreview()
     const ctx = this.ctx
-    const out = this.speakerGain
+    const out = this.speakerSide()
     if (!ctx || !out || !events.length) return
     const now = ctx.currentTime + 0.02
     const bus = ctx.createGain()
@@ -4300,7 +4382,7 @@ export class AudioEngine {
   previewPcm(channels: Float32Array[], sampleRate?: number, loop = false) {
     this.stopPreview()
     const ctx = this.unlock()
-    const out = this.speakerGain
+    const out = this.speakerSide()
     const lead = channels[0]
     if (!out || !lead?.length) return
     const shaped = normalizePeak(channels)
@@ -4400,7 +4482,7 @@ export class AudioEngine {
       return
     }
     const ctx = this.ctx
-    const out = this.speakerGain
+    const out = this.speakerSide()
     if (!ctx || !out) return
     const unique: { midi: number; cents: number }[] = []
     const seen = new Set<number>()

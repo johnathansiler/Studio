@@ -32,12 +32,16 @@ function createSynthVoice(sampleRate: number): Processor & { note: (pitch: numbe
       phase = 0
     },
     note(next, level) {
+      const levelNext = Math.max(0, Math.min(1, level))
+      if (levelNext > 0 && vel <= 0 && env < 0.02) phase = 0
       pitch = Math.max(0, Math.min(127, next))
-      vel = Math.max(0, Math.min(1, level))
+      vel = levelNext
     },
     process(input, output) {
       const n = output[0]?.length ?? 0
       const step = (2 * Math.PI * 440 * 2 ** ((pitch - 69) / 12)) / sampleRate
+      const attack = 1 - Math.exp(-1 / (0.004 * sampleRate))
+      const release = 1 - Math.exp(-1 / (0.012 * sampleRate))
       for (let i = 0; i < n; i++) {
         const dryAt = (channel: number) => input[Math.min(channel, input.length - 1)]?.[i] ?? 0
         if (vel <= 0 && env <= 1e-5) {
@@ -45,7 +49,7 @@ function createSynthVoice(sampleRate: number): Processor & { note: (pitch: numbe
           for (let c = 0; c < output.length; c++) output[c][i] = dryAt(c)
           continue
         }
-        env += (vel - env) * (vel > env ? 0.25 : 0.04)
+        env += (vel - env) * (vel > env ? attack : release)
         if (env < 1e-5) env = 0
         const sample = env > 0 ? Math.sin(phase) * env * 0.35 : 0
         phase += step

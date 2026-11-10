@@ -16,6 +16,8 @@ import { packProject } from '../model/archive'
 import { encodeMp3, keyLabel } from './mp3'
 import { normalizeAudio } from './normalize'
 import { limitBuffer } from './master/process'
+import { fileDither } from './master/ditherPlan'
+import { holdFullScale } from './master/safety'
 import { measureProgram } from './master/meter'
 import type { Processor } from './plugins/types'
 
@@ -126,7 +128,7 @@ export async function runBounce(job: BounceJob, onProgress?: (progress: number) 
     }
     const encoded = files.map((file) => ({
       name: file.name,
-      data: new Uint8Array(encodeWav(resample(finish(file.channels, job), job.project.sampleRate, job.sampleRate), job.sampleRate, { bits: job.bits, dither: job.dither })),
+      data: new Uint8Array(encodeWav(holdFullScale(resample(finish(file.channels, job), job.project.sampleRate, job.sampleRate)), job.sampleRate, { bits: job.bits, dither: fileDither(job.project, job.bits, job.dither) })),
     }))
     return [{ name: `${fileSlug(job.project.name)}-stems.zip`, mime: 'application/zip', bytes: await zipFiles(encoded) }]
   }
@@ -139,6 +141,7 @@ export async function runBounce(job: BounceJob, onProgress?: (progress: number) 
   const rate = job.kind === 'mp3' && job.sampleRate !== 44100 ? 48000 : job.sampleRate
   let channels = resample(finish(rendered.master, job), job.project.sampleRate, rate)
   if (job.truePeakCeiling != null && Number.isFinite(job.truePeakCeiling)) channels = limitBuffer(channels, rate, job.truePeakCeiling, true)
+  channels = holdFullScale(channels)
   const note = job.report ? loudnessNote(channels, rate, job.isrc) : ''
   onProgress?.(0.85)
   if (job.kind === 'flac') {
@@ -156,7 +159,7 @@ export async function runBounce(job: BounceJob, onProgress?: (progress: number) 
     return [{ name: `${fileSlug(job.project.name)}.mp3`, mime: 'audio/mpeg', bytes }]
   }
   onProgress?.(1)
-  return [{ name: `${fileSlug(job.project.name)}.wav`, mime: 'audio/wav', bytes: new Uint8Array(encodeWav(channels, rate, { bits: job.bits, dither: job.dither, comment: note })) }]
+  return [{ name: `${fileSlug(job.project.name)}.wav`, mime: 'audio/wav', bytes: new Uint8Array(encodeWav(channels, rate, { bits: job.bits, dither: fileDither(job.project, job.bits, job.dither), comment: note })) }]
 }
 
 function loudnessNote(channels: Float32Array[], sampleRate: number, isrc?: string) {

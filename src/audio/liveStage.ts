@@ -1,3 +1,5 @@
+import { additiveSaw, partialsFor } from './quality/blep'
+
 /**
  * Shared live-input and playback gain, timing, and limiting.
  * Live notes start at AudioContext.currentTime. Playback of the same note
@@ -126,10 +128,10 @@ export function renderSaw(pitch: number, peak: number, sampleRate: number, frame
     const n = i - start
     if (n < 0) continue
     const env = n < attack ? 0.0001 * (peak / 0.0001) ** (n / Math.max(1, attack)) : peak
-    phase += hz / sampleRate
+    const dt = hz / sampleRate
+    phase += dt
     phase -= Math.floor(phase)
-    const saw = 2 * phase - 1
-    out[i] = saw * env
+    out[i] = additiveSaw(phase, partialsFor(dt)) * env
   }
   return out
 }
