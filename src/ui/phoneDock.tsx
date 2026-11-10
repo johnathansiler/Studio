@@ -1,11 +1,14 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
+import { countInBarsOf, countInCaption } from '../model/time'
 import { SNAP_DIVISIONS, normalizeSnapDivision } from '../model/snapGrid'
 import type { ProjectStore } from '../state/store'
 import { TOOL_INFO, activeTool, subscribeTools, type ArrangeTool } from '../state/tools'
 import { currentArrangeSheet, subscribeArrangeSheet, toggleArrangeSheet } from './arrangePanel'
+import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import type { BrowserTab } from './PlaylistBrowser'
 import { SnapChoices, ToolChoices } from './UtilitySheets'
+import { useScreenOverlay } from './screenOverlay'
 import {
   BROWSER_TAB_EVENT,
   OPEN_PLUGINS_EVENT,
@@ -77,6 +80,29 @@ function Hit({
   )
 }
 
+function TransportMoreSheet({ store, onClose }: { store: ProjectStore; onClose: () => void }) {
+  const project = store.project
+  const count = countInCaption(countInBarsOf(project))
+  return (
+    <ArrangeBottomSheet id="phone-transport-more" label="More" title="More" detail="Loop, metronome, and count." onClose={onClose}>
+      <div className="phone-more-rows" role="group" aria-label="Loop, metronome, and count">
+        <button type="button" aria-pressed={project.loopEnabled} onClick={() => store.toggle('loopEnabled')}>
+          <strong>Loop</strong>
+          <span>{project.loopEnabled ? 'On' : 'Off'}</span>
+        </button>
+        <button type="button" aria-pressed={project.metronomeEnabled} onClick={() => store.toggle('metronomeEnabled')}>
+          <strong>Metronome</strong>
+          <span>{project.metronomeEnabled ? 'On' : 'Off'}</span>
+        </button>
+        <button type="button" aria-pressed={project.countIn} onClick={() => store.cycleCountIn()}>
+          <strong>Count</strong>
+          <span>{count}</span>
+        </button>
+      </div>
+    </ArrangeBottomSheet>
+  )
+}
+
 function selectedClip(store: ProjectStore) {
   if (store.selectedClipId) {
     for (const track of store.project.tracks) {
@@ -132,6 +158,7 @@ export function PhoneDock({
   const focus = useSyncExternalStore(subscribePhoneFocus, phoneFocus, () => 'none' as const)
   const tool = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const [offstage, setOffstage] = useState<'tools' | 'snap' | null>(null)
+  const [transportMore, setTransportMore] = useState(false)
   const [host, setHost] = useState<HTMLElement | null>(null)
   const arrangeLive = place === 'arrange'
   const toolsOpen = (arrangeLive && utility === 'tools') || offstage === 'tools'
@@ -162,6 +189,11 @@ export function PhoneDock({
     setOffstage(null)
     toggleArrangeSheet(id)
   }, [arrangeLive, offstage])
+
+  useEffect(() => {
+    if (place !== 'mix' || menuOpen || browseOpen) setTransportMore(false)
+  }, [place, menuOpen, browseOpen])
+  useScreenOverlay(() => setTransportMore(false), transportMore && place === 'mix')
 
   function openTools() {
     if (menuOpen) onMenu()
@@ -194,7 +226,9 @@ export function PhoneDock({
     ? <ToolChoices store={store} onClose={() => setOffstage(null)} />
     : offstage === 'snap'
       ? <SnapChoices store={store} onClose={() => setOffstage(null)} />
-      : null
+      : transportMore && place === 'mix'
+        ? <TransportMoreSheet store={store} onClose={() => setTransportMore(false)} />
+        : null
 
   return (
     <>
@@ -280,7 +314,15 @@ export function PhoneDock({
             <Hit action="delete" label="Delete" title="Remove the selected notes." onClick={() => store.deleteSelectedClip()} />
           </>
         )}
-        {kind === 'mix' && <div id="phone-screen-slot" className="phone-mix-slot" />}
+        {kind === 'mix' && (
+          <Hit
+            action="more"
+            label="More"
+            title="Loop, metronome, and count."
+            pressed={transportMore}
+            onClick={() => setTransportMore((open) => !open)}
+          />
+        )}
         {kind === 'collab' && (
           <>
             <Hit action="undo" label="Undo" history="undo" disabled={!canUndo} onClick={onUndo}><span className="history-word">Undo</span></Hit>

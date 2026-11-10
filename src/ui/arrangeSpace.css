@@ -7,6 +7,8 @@
   background: #121814; border-right: 1px solid var(--line); overflow: hidden;
 }
 .browser-resize { width: 8px; padding: 0; border: 0; background: transparent; cursor: col-resize; }
+.browser-sheet-title { flex: none; min-height: 36px; padding: 8px 12px 0; }
+.browser-sheet-title strong { font-size: 16px; font-weight: 720; line-height: 1.2; }
 .browser-tabs { display: flex; flex-wrap: nowrap; gap: 4px; align-items: center; padding: 4px 6px; border-bottom: 1px solid var(--line); }
 .browser-chip-scroll { display: flex; flex: 1; min-width: 0; gap: 4px; overflow-x: auto; }
 .browser-tabs button, .browser-tabs select { min-height: 40px; flex: none; border-radius: 999px; border: 1px solid var(--line); background: #18231d; color: var(--text); padding: 0 12px; font-size: 13px; }

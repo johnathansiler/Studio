@@ -52,7 +52,16 @@ async function openSampler(page: Page, phone: boolean) {
   if (phone) await page.getByRole('button', { name: /^Mix/ }).first().click()
   else await page.locator('.head').first().getByRole('button', { name: /^Track/ }).click()
   if (phone) {
-    await page.locator('.mix-toolbar summary').click()
+    const summary = page.locator('.mix-toolbar summary')
+    const box = await summary.boundingBox()
+    if (box && box.width >= 20 && box.height >= 20) await summary.click()
+    else await page.locator('.strip .strip-name').first().click({ delay: 560 })
+    if ((await page.locator('details.mix-more').getAttribute('open')) == null) {
+      await page.evaluate(() => {
+        const details = document.querySelector('details.mix-more') as HTMLDetailsElement | null
+        if (details) details.open = true
+      })
+    }
     await page.locator('.mix-panel').getByRole('tab', { name: 'Inserts' }).click()
   }
   const root = page.locator(phone ? '.mix-panel' : '#track-options')
@@ -185,7 +194,18 @@ describe('loop and sample panel', () => {
       expect(await percent(phonePage, '.slot-handle.edge')).toBeGreaterThan(8)
       await phonePage.locator('.plugin-sheet').getByRole('button', { name: 'Close the plugin.' }).evaluate((el) => (el as HTMLButtonElement).click())
       const phoneSlots = phonePage.locator('.mix-panel')
-      if ((await phonePage.locator('details.mix-more').getAttribute('open')) == null) await phonePage.locator('.mix-toolbar summary').click()
+      if ((await phonePage.locator('details.mix-more').getAttribute('open')) == null) {
+        const summary = phonePage.locator('.mix-toolbar summary')
+        const box = await summary.boundingBox()
+        if (box && box.width >= 20 && box.height >= 20) await summary.click()
+        else await phonePage.locator('.strip .strip-name').first().click({ delay: 560 })
+        if ((await phonePage.locator('details.mix-more').getAttribute('open')) == null) {
+          await phonePage.evaluate(() => {
+            const details = document.querySelector('details.mix-more') as HTMLDetailsElement | null
+            if (details) details.open = true
+          })
+        }
+      }
       await phoneSlots.getByRole('tab', { name: 'Inserts' }).click()
       await phoneSlots.getByRole('button', { name: 'Add plugin' }).click()
       await phonePage.getByRole('button', { name: 'Delay', exact: true }).click()

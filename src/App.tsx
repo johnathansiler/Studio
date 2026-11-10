@@ -2309,6 +2309,7 @@ async function importDropped(files: FileList) {
       )}
       {projectsOpen && (
         <ProjectSheet
+          dockSheet={phone}
           projects={projects}
           snapshots={snapshots}
           usage={usage}
@@ -2362,6 +2363,7 @@ async function importDropped(files: FileList) {
         <ExportSheet
           store={store}
           phone={phone || form === 'fold'}
+          dockSheet={phone}
           onClose={() => setExportOpen(false)}
           onFreeze={(audio) => {
             const source = store.selectedTrackId

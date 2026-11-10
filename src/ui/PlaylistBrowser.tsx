@@ -17,6 +17,14 @@ const TABS: { id: BrowserTab; label: string; hint: string }[] = [
   { id: 'loops', label: 'Loops', hint: 'Melodic and drum loops that follow the song tempo.' },
 ]
 
+const SECTION_TITLE: Record<BrowserTab, string> = {
+  sounds: 'Sounds',
+  instruments: 'Instruments',
+  loops: 'Loops',
+  patterns: 'Patterns',
+  clips: 'Clips',
+}
+
 const PROJECT: { id: 'patterns' | 'clips'; label: string; hint: string }[] = [
   { id: 'patterns', label: 'Patterns', hint: 'Patterns from the Beats rack. Drag one onto the playlist.' },
   { id: 'clips', label: 'Clips', hint: 'Clips already in this project.' },
@@ -256,6 +264,11 @@ export function PlaylistBrowser({
       onPointerDown={sheet ? (event) => event.stopPropagation() : undefined}
     >
       {sheet && <SheetGrab label="Resize browser. Drag up or down." />}
+      {phone && (
+        <header className="browser-sheet-title sheet-head">
+          <strong data-browser-title={tab}>{SECTION_TITLE[tab]}</strong>
+        </header>
+      )}
       <div className="browser-tabs btn-tray">
         <div className="browser-chip-scroll" role="tablist" aria-label="Browser">
           {TABS.map((item) => (
@@ -263,30 +276,45 @@ export function PlaylistBrowser({
               {item.label}
             </button>
           ))}
-          <button
-            ref={projectButton}
-            type="button"
-            className={projectOn ? 'on' : ''}
-            aria-expanded={projectOpen}
-            aria-haspopup="menu"
-            title="Patterns and clips already in this project."
-            onClick={() => setProjectOpen((open) => !open)}
-          >
-            Project
-          </button>
-          <AnchoredMenu open={projectOpen} onClose={() => setProjectOpen(false)} label="Project" triggerRef={projectButton} prefer="down">
-            {PROJECT.map((item) => (
+          {phone ? PROJECT.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={tab === item.id ? 'on' : ''}
+              title={item.hint}
+              aria-pressed={tab === item.id}
+              onClick={() => onTab(item.id)}
+            >
+              {item.label}
+            </button>
+          )) : (
+            <>
               <button
-                key={item.id}
+                ref={projectButton}
                 type="button"
-                className={tab === item.id ? 'on' : ''}
-                title={item.hint}
-                onClick={() => { onTab(item.id); setProjectOpen(false) }}
+                className={projectOn ? 'on' : ''}
+                aria-expanded={projectOpen}
+                aria-haspopup="menu"
+                title="Patterns and clips already in this project."
+                onClick={() => setProjectOpen((open) => !open)}
               >
-                {item.label}
+                Project
               </button>
-            ))}
-          </AnchoredMenu>
+              <AnchoredMenu open={projectOpen} onClose={() => setProjectOpen(false)} label="Project" triggerRef={projectButton} prefer="down">
+                {PROJECT.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={tab === item.id ? 'on' : ''}
+                    title={item.hint}
+                    onClick={() => { onTab(item.id); setProjectOpen(false) }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </AnchoredMenu>
+            </>
+          )}
         </div>
         <SheetClose className="browser-close" onClick={onClose} />
       </div>

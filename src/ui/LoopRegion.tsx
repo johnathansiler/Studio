@@ -7,7 +7,7 @@ import type { Project } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { useFormFactor } from './form'
 import { armFinePress } from './integerTick'
-import { LOOP_DRAG_THRESHOLD, LOOP_TOUCH_THRESHOLD, layoutLoopGrips, loopEdgeAt, loopGripHit, resolveGripParks, type GripPark, type LoopGripBox } from './loopGrips'
+import { LOOP_DRAG_THRESHOLD, LOOP_TOUCH_THRESHOLD, layoutLoopGrips, loopEdgeAt, loopGripHit, type LoopGripBox } from './loopGrips'
 import './loopRegion.css'
 
 type DragPoint = { x: number; y: number; shift: boolean; alt: boolean }
@@ -54,9 +54,9 @@ export function LoopRegion({
   /** Empty-ruler presses pass through, so pan and zoom still work. */
   yieldEmpty?: boolean
   /**
-   * Arrange timeline. Caps stay in content coordinates while they are on screen,
-   * and park on a viewport edge only after they leave. Positions are not rewritten
-   * on each scroll event, so momentum scroll cannot leave them a frame behind.
+   * Arrange timeline. The host is as wide as the ruler, so the caps stay on
+   * their beats while the timeline scrolls and zooms. They are not pinned to
+   * the viewport.
    */
   followScroll?: boolean
 }) {
@@ -74,9 +74,6 @@ export function LoopRegion({
   const [, setPaint] = useState(0)
   const lastTap = useRef(0)
   const [box, setBox] = useState({ width: 0, viewLeft: 0, viewWidth: 0 })
-  const [park, setPark] = useState<{ start: GripPark; end: GripPark }>({ start: 'track', end: 'track' })
-  const faceRef = useRef({ start: 0, startEnd: 0, end: 0, endEnd: 0 })
-  const viewRef = useRef({ origin: 0, width: 0 })
   const readout = formatLoopReadout(project, project.loopStartSample, project.loopEndSample)
   const sampleAtRef = useRef(sampleAt)
   sampleAtRef.current = sampleAt
@@ -89,7 +86,10 @@ export function LoopRegion({
     const host = hostRef.current
     if (!host) return
     const measure = () => {
-      const width = host.clientWidth
+      // A sticky ruler resolves `inset: 0` against the visible slice, so the
+      // host stays on screen while the bars scroll. Size it to the ruler's
+      // layout width and pin only the left edge so the caps travel with the beats.
+      const width = followScroll ? (host.parentElement?.offsetWidth || host.offsetWidth) : host.clientWidth
       if (followScroll) {
         const next = { width, viewLeft: 0, viewWidth: width }
         setBox((prev) => (near(prev.width, next.width) && near(prev.viewLeft, 0) && near(prev.viewWidth, next.viewWidth) ? prev : next))
@@ -120,6 +120,7 @@ export function LoopRegion({
     const observer = new ResizeObserver(measure)
     observer.observe(scroller)
     observer.observe(host)
+    if (followScroll && host.parentElement) observer.observe(host.parentElement)
     window.addEventListener('resize', measure)
     const blockTouch = (event: TouchEvent) => {
       if (!drag.current) return
@@ -213,60 +214,9 @@ export function LoopRegion({
     hit: loopGripHit(coarse),
     confineHeight: confineHits,
   })
-  faceRef.current = {
-    start: grips.start.faceLeft,
-    startEnd: grips.start.faceLeft + grips.start.faceWidth,
-    end: grips.end.faceLeft,
-    endEnd: grips.end.faceLeft + grips.end.faceWidth,
-  }
   const body = { left, right: left + barWidth, top: 0, bottom: hostRef.current?.clientHeight || 44, mode: grips.mode }
   const finger = drag.current?.finger ?? null
   const liveRead = drag.current?.read ?? null
-
-  useLayoutEffect(() => {
-    if (!followScroll) return
-    const host = hostRef.current
-    if (!host) return
-    const scroller = scrollParent(host)
-    const measureView = () => {
-      const hostRect = host.getBoundingClientRect()
-      const scrollRect = scroller.getBoundingClientRect()
-      viewRef.current = {
-        origin: hostRect.left - scrollRect.left - scroller.clientLeft + scroller.scrollLeft,
-        width: scroller.clientWidth,
-      }
-    }
-    const apply = () => {
-      const widthNow = viewRef.current.width
-      if (!(widthNow > 1)) return
-      const left = scroller.scrollLeft - viewRef.current.origin
-      const right = left + widthNow
-      const faces = faceRef.current
-      const next = resolveGripParks({
-        startFace: faces.start,
-        startFaceEnd: faces.startEnd,
-        endFace: faces.end,
-        endFaceEnd: faces.endEnd,
-        viewLeft: left,
-        viewRight: right,
-        hit: 44,
-      })
-      setPark((prev) => (prev.start === next.start && prev.end === next.end ? prev : next))
-    }
-    measureView()
-    apply()
-    const onScroll = () => apply()
-    scroller.addEventListener('scroll', onScroll, { passive: true })
-    const observer = new ResizeObserver(() => {
-      measureView()
-      apply()
-    })
-    observer.observe(scroller)
-    return () => {
-      scroller.removeEventListener('scroll', onScroll)
-      observer.disconnect()
-    }
-  }, [followScroll, rawLeft, rawRight, box.width])
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!event.isPrimary) return
@@ -348,9 +298,6 @@ export function LoopRegion({
     }
   }
 
-  const startPark = followScroll ? park.start : 'track'
-  const endPark = followScroll ? park.end : 'track'
-
   return (
     <div
       ref={hostRef}
@@ -360,11 +307,16 @@ export function LoopRegion({
       data-loop-region={view}
       data-loop-length={readout.length}
       data-loop-span={readout.span}
-      data-park-start={followScroll ? startPark : undefined}
-      data-park-end={followScroll ? endPark : undefined}
+      data-park-start={followScroll ? 'track' : undefined}
+      data-park-end={followScroll ? 'track' : undefined}
       role="group"
       aria-label={`Loop, ${readout.text}. Drag the edges to resize. Drag the middle to move it. Double-click to turn it ${project.loopEnabled ? 'off' : 'on'}.`}
-      style={{ touchAction: 'none' }}
+      style={followScroll ? {
+        touchAction: 'none',
+        left: 0,
+        right: 'auto',
+        width: width > 0 ? width : undefined,
+      } : { touchAction: 'none' }}
       onPointerDown={onPointerDown}
     >
       <div
@@ -374,20 +326,8 @@ export function LoopRegion({
         style={{ left, width: barWidth, touchAction: 'none' }}
         title={`${readout.text}. Drag to move the loop. Double-click to turn it ${project.loopEnabled ? 'off' : 'on'}.`}
       />
-      {startPark === 'track' && <LoopGrip edge="start" box={grips.start} dragging={activeEdge === 'start'} />}
-      {endPark === 'track' && <LoopGrip edge="end" box={grips.end} dragging={activeEdge === 'end'} />}
-      {(startPark === 'left' || endPark === 'left') && (
-        <div className="park-dock left">
-          {startPark === 'left' && <LoopGrip edge="start" box={grips.start} dragging={activeEdge === 'start'} parked="left" />}
-          {endPark === 'left' && <LoopGrip edge="end" box={grips.end} dragging={activeEdge === 'end'} parked="left" />}
-        </div>
-      )}
-      {(startPark === 'right' || endPark === 'right') && (
-        <div className="park-dock right">
-          {startPark === 'right' && <LoopGrip edge="start" box={grips.start} dragging={activeEdge === 'start'} parked="right" />}
-          {endPark === 'right' && <LoopGrip edge="end" box={grips.end} dragging={activeEdge === 'end'} parked="right" />}
-        </div>
-      )}
+      <LoopGrip edge="start" box={grips.start} dragging={activeEdge === 'start'} />
+      <LoopGrip edge="end" box={grips.end} dragging={activeEdge === 'end'} />
       {finger != null && <i className="snap-line loop-finger" style={{ left: finger }} />}
       {liveRead && <em className="loop-drag-read" data-loop-drag-read="1" style={{ left: liveRead.x }}>{liveRead.text}</em>}
     </div>

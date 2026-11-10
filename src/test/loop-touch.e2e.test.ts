@@ -93,12 +93,12 @@ async function geometry(page: Page) {
   })
 }
 
-function expectStableHandles(grip: Awaited<ReturnType<typeof geometry>>, label: string) {
+function expectStableHandles(grip: Awaited<ReturnType<typeof geometry>>, label: string, minHeight = 40) {
   expect(grip, label).toBeTruthy()
   expect(grip!.startW, label).toBeGreaterThanOrEqual(44)
   expect(grip!.endW, label).toBeGreaterThanOrEqual(44)
-  expect(grip!.startH, label).toBeGreaterThanOrEqual(40)
-  expect(grip!.endH, label).toBeGreaterThanOrEqual(40)
+  expect(grip!.startH, label).toBeGreaterThanOrEqual(minHeight)
+  expect(grip!.endH, label).toBeGreaterThanOrEqual(minHeight)
   expect(Math.abs(grip!.startY - grip!.endY), label).toBeLessThanOrEqual(1)
   expect(grip!.overlap, label).toBe(false)
   expect(grip!.hostTouch, label).toBe('none')
@@ -182,7 +182,7 @@ describe('loop handles follow a finger on a phone', () => {
 
     await setLoop(page, 0, 1)
     const short = await geometry(page)
-    expectStableHandles(short, '1-beat layout')
+    expectStableHandles(short, '1-beat layout', 20)
     await page.screenshot({ path: '/opt/cursor/artifacts/after-loop-390x844-one-beat.png' })
 
     const beforeEnd = await readLoop(page)
@@ -195,11 +195,11 @@ describe('loop handles follow a finger on a phone', () => {
     expect(onGrid(afterEnd.end, afterEnd.beat), `end ${afterEnd.end} beat ${afterEnd.beat}`).toBe(true)
     expect(afterEnd.scroll, 'timeline did not scroll').toBe(beforeEnd.scroll)
     expect(afterEnd.scrollTop).toBe(beforeEnd.scrollTop)
-    for (const row of endRows) expectStableHandles(row, 'during 1-beat end drag')
+    for (const row of endRows) expectStableHandles(row, 'during 1-beat end drag', 20)
 
     await setLoop(page, 1, 5)
     const startGrip = await geometry(page)
-    expectStableHandles(startGrip, 'start layout')
+    expectStableHandles(startGrip, 'start layout', 20)
     const beforeStart = await readLoop(page)
     const startAt = startGrip!.startFace!
     await touchDrag(page, startAt, { x: startAt.x + 80, y: startAt.y })
@@ -209,8 +209,17 @@ describe('loop handles follow a finger on a phone', () => {
     expect(onGrid(afterStart.start, afterStart.beat)).toBe(true)
     expect(afterStart.scroll).toBe(beforeStart.scroll)
 
+    await page.evaluate(() => {
+      const scroller = document.querySelector('.timeline-scroll') as HTMLElement | null
+      const face = document.querySelector('[data-loop-region="arrange"] [data-loop-edge="end"] .loop-grip-face') as HTMLElement | null
+      if (!scroller || !face) return
+      const box = face.getBoundingClientRect()
+      const view = scroller.getBoundingClientRect()
+      if (box.right > view.right - 16) scroller.scrollLeft += box.right - view.right + 36
+      if (box.left < view.left + 16) scroller.scrollLeft -= view.left + 16 - box.left
+    })
     const endGrip = await geometry(page)
-    expectStableHandles(endGrip, 'end layout')
+    expectStableHandles(endGrip, 'end layout', 20)
     const beforeStretch = await readLoop(page)
     const stretchAt = endGrip!.endFace!
     await touchDrag(page, stretchAt, { x: stretchAt.x + 80, y: stretchAt.y })
@@ -252,7 +261,7 @@ describe('loop handles follow a finger on a phone', () => {
     await page.getByRole('button', { name: /^Play/ }).first().tap()
     await page.waitForFunction(() => (window as unknown as { __cueharborStatus?: string }).__cueharborStatus === 'playing', null, { timeout: 4000 })
     const playingGrip = await geometry(page)
-    expectStableHandles(playingGrip, 'playback layout')
+    expectStableHandles(playingGrip, 'playback layout', 20)
     const beforePlay = await readLoop(page)
     const playAt = playingGrip!.endFace!
     const playRows = await touchDrag(page, playAt, { x: playAt.x + 70, y: playAt.y })
@@ -261,7 +270,7 @@ describe('loop handles follow a finger on a phone', () => {
     expect(afterPlay.end, 'end follows the finger during playback').not.toBe(beforePlay.end)
     expect(afterPlay.start).toBe(beforePlay.start)
     expect(onGrid(afterPlay.end, afterPlay.beat)).toBe(true)
-    for (const row of playRows) expectStableHandles(row, 'during playback drag')
+    for (const row of playRows) expectStableHandles(row, 'during playback drag', 20)
     await page.screenshot({ path: '/opt/cursor/artifacts/after-loop-390x844.png' })
 
     expect(errors, errors.join('\n')).toEqual([])

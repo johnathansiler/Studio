@@ -183,11 +183,54 @@
   z-index: 6;
 }
 
-.shell.phone > .phone-sheet-host > .choice-tray {
+.shell.phone > .phone-sheet-host > .choice-tray,
+.shell.phone > .phone-sheet-host > .bottom-sheet.arrange-sheet {
   position: relative;
   z-index: 4;
+  flex: 0 0 auto;
   width: 100%;
   max-height: min(46dvh, calc(100dvh - 160px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 16px 16px 0 0;
+  border-top: 1px solid var(--line);
+  background-color: #141c18;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.phone-more-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.phone-more-rows button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #1c2b24;
+  color: var(--text);
+  font: inherit;
+  font-weight: 680;
+  text-align: left;
+}
+
+.phone-more-rows button[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+
+.phone-more-rows button span {
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .shell.phone #phone-screen-slot.phone-mix-slot {

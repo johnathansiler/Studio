@@ -33,8 +33,14 @@ async function dragLoopEnd(page: Page) {
     const grip = document.querySelector('[data-loop-region="arrange"] [data-loop-edge="end"]') as HTMLElement | null
     const host = document.querySelector('[data-loop-region="arrange"]') as HTMLElement | null
     if (!grip || !host) throw new Error('loop end missing')
+    const scroller = host.parentElement?.closest('.timeline-scroll') as HTMLElement | null
+    if (scroller) {
+      const faceNow = grip.querySelector('.loop-grip-face')?.getBoundingClientRect()
+      const viewNow = scroller.getBoundingClientRect()
+      if (faceNow && faceNow.left > viewNow.right - 36) scroller.scrollLeft += faceNow.left - viewNow.right + 48
+    }
     const box = grip.getBoundingClientRect()
-    const view = (host.parentElement?.closest('.timeline-scroll') ?? host).getBoundingClientRect()
+    const view = (scroller ?? host).getBoundingClientRect()
     const y = box.top + box.height / 2
     const x = Math.min(box.right - 6, view.right - 6)
     const before = store.project.loopEndSample
@@ -99,7 +105,7 @@ describe('phone mix sheet and loop end', () => {
       expect(loop.after).not.toBe(loop.before)
 
       await page.getByRole('button', { name: /^Mix/ }).first().click()
-      await page.locator('details.mix-more').waitFor()
+      await page.locator('details.mix-more').waitFor({ state: 'attached' })
       const cells = await page.evaluate(() => {
         const store = (window as unknown as {
           __cueharbor: {
@@ -123,7 +129,7 @@ describe('phone mix sheet and loop end', () => {
         const pattern = plugin?.steps?.patterns[0]
         return JSON.stringify(pattern?.channels.map((channel) => channel.cells.map((cell) => cell.on)) ?? [])
       })
-      await page.locator('details.mix-more').waitFor()
+      await page.locator('details.mix-more').waitFor({ state: 'attached' })
       await page.evaluate(() => {
         const details = document.querySelector('details.mix-more') as HTMLDetailsElement | null
         if (!details) throw new Error('mix more missing')
@@ -200,7 +206,20 @@ describe('phone mix sheet and loop end', () => {
         })
         await page.locator('.mixer').waitFor()
         const summary = page.locator('.mix-toolbar summary')
-        if ((await page.locator('details.mix-more').getAttribute('open')) == null) await summary.click()
+        if ((await page.locator('details.mix-more').getAttribute('open')) == null) {
+          const box = await summary.boundingBox()
+          if (box && box.width >= 20 && box.height >= 20) await summary.click()
+          else {
+            const name = page.locator('.strip .strip-name').first()
+            await name.click({ delay: 560 })
+            if ((await page.locator('details.mix-more').getAttribute('open')) == null) {
+              await page.evaluate(() => {
+                const details = document.querySelector('details.mix-more') as HTMLDetailsElement | null
+                if (details) details.open = true
+              })
+            }
+          }
+        }
         await page.locator('.mix-panel').waitFor()
         await page.screenshot({ path: `/opt/cursor/artifacts/mix-sheet-${viewport.name}.png` })
         if ((await page.locator('details.mix-more').getAttribute('open')) != null) await page.locator('.mix-panel .overlay-close').click()

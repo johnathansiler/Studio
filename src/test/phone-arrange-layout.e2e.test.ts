@@ -466,7 +466,7 @@ describe('phone arrange layout', () => {
           await page.locator('.mixer').first().waitFor()
           const mix = await page.evaluate(() => {
             const bar = document.querySelector('.tool-slot')?.getBoundingClientRect()
-            const more = document.querySelector('.mix-toolbar-more')?.getBoundingClientRect()
+            const more = document.querySelector('[data-phone-action="more"]')?.getBoundingClientRect()
             return {
               topMenu: !!document.querySelector('.topbar .menu-btn'),
               topName: !!document.querySelector('.topbar .project-name'),

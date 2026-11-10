@@ -228,6 +228,16 @@
   min-width: 0;
 }
 
+/* Stretching both edges pins the host to the sticky ruler's visible slice.
+   Left plus an explicit width keeps the caps on the beats while scrolling. */
+.arrange .timeline-scroll .ruler > .loop-host.follow-scroll {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: auto;
+  max-width: none;
+}
+
 .loop-host.follow-scroll .park-dock {
   position: sticky;
   z-index: 22;
