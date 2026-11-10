@@ -2,6 +2,8 @@
 export const LOOP_GRIP_VISUAL = 12
 export const LOOP_GRIP_HIT = 44
 export const LOOP_DRAG_THRESHOLD = 4
+/** A finger jitters more than a mouse. Travel under this is still a tap. */
+export const LOOP_TOUCH_THRESHOLD = 10
 export const LOOP_LONG_PRESS_MS = 450
 
 export function loopGripHit(_coarse = false) {
@@ -23,7 +25,8 @@ export interface LoopGripBox {
 export interface LoopLayout {
   start: LoopGripBox
   end: LoopGripBox
-  mode: 'outward' | 'side' | 'offset'
+  /** `outside` parks the pads beyond the region edges. Both stay on one row. */
+  mode: 'outward' | 'outside'
 }
 
 export function loopEdgeAt(
@@ -37,31 +40,23 @@ export function loopEdgeAt(
   if (startOn && endOn) return nearest(x, y, grips)
   if (startOn) return 'start'
   if (endOn) return 'end'
+  const top = body.top ?? Number.NEGATIVE_INFINITY
+  const bottom = body.bottom ?? Number.POSITIVE_INFINITY
+  const inBand = y == null || (y >= top && y <= bottom)
+  if (inBand && x >= body.left && x <= body.right) return 'move'
   const slop = 12
   const startNear = contains(grips.start, x, y, slop)
   const endNear = contains(grips.end, x, y, slop)
   if (startNear && endNear) return nearest(x, y, grips)
   if (startNear) return 'start'
   if (endNear) return 'end'
-  const top = body.top ?? Number.NEGATIVE_INFINITY
-  const bottom = body.bottom ?? Number.POSITIVE_INFINITY
-  const inBand = y == null || (y >= top && y <= bottom)
-  if (inBand && x >= body.left && x <= body.right) {
-    if (body.mode === 'side' || body.mode === 'offset') {
-      const mid = (body.left + body.right) / 2
-      const width = body.right - body.left
-      if (width >= 36 && Math.abs(x - mid) <= width * 0.18) return 'move'
-      return x <= mid ? 'start' : 'end'
-    }
-    return 'move'
-  }
   return 'seek'
 }
 
 /**
- * Each handle is at least 44px and grows away from the loop so the two pads
- * never share a pixel. A very short loop splits by which side you grab, and
- * an even shorter one lifts the handles above and below the ruler.
+ * Both handles stay on one row. A wide loop grows each pad away from the
+ * region. A short one, or one pinched against the screen, parks the pads
+ * outside the edges so they never stack or share a pixel.
  */
 export function layoutLoopGrips(input: {
   start: number
@@ -82,84 +77,75 @@ export function layoutLoopGrips(input: {
   const viewL = input.viewWidth > 0 ? input.viewLeft : 0
   const viewR = input.viewWidth > 0 ? input.viewLeft + input.viewWidth : (hostW || viewL)
   const visL = hostW > 0 ? clamp(viewL, 0, hostW) : viewL
-  const visR = hostW > 0 ? clamp(Math.max(viewR, visL), visL, hostW) : Math.max(viewR, visL + hit)
+  const visR = hostW > 0 ? clamp(Math.max(viewR, visL), visL, hostW) : Math.max(viewR, visL)
   const left = Math.min(input.start, input.end)
   const right = Math.max(input.start, input.end)
-  const loopW = Math.max(0, right - left)
-  const segL = clamp(left, visL, visR)
-  const segR = clamp(right, visL, visR)
+  const room = Math.max(0, visR - visL)
 
-  let startFace = left
-  let endFace = right - visual
-  if (left < visL - 0.5) startFace = visL
-  if (right > visR + 0.5) endFace = visR - visual
-  if (startFace + visual > endFace) {
-    const mid = (segL + segR) / 2
-    startFace = mid - visual
-    endFace = mid
-  }
-  startFace = clamp(startFace, visL, Math.max(visL, visR - visual))
-  endFace = clamp(endFace, visL, Math.max(visL, visR - visual))
+  let outside = right - left < hit - 0.5
+  let startHit = outside && left >= visL - 0.5 ? left - hit : (left < visL ? visL : left) + visual - hit
+  let endHit = outside && right <= visR + 0.5 ? right : right > visR ? visR - hit : right - visual
 
-  const shift = (preferredLeft: number) => {
-    let boxL = preferredLeft
-    let boxR = boxL + hit
-    if (boxL < visL) {
-      boxL = visL
-      boxR = boxL + hit
+  if (room >= hit * 2) {
+    const maxLeft = visR - hit
+    startHit = clamp(startHit, visL, maxLeft)
+    endHit = clamp(endHit, visL, maxLeft)
+    if (startHit + hit > endHit + 0.5) {
+      outside = true
+      const mid = clamp((Math.max(left, visL) + Math.min(right, visR)) / 2, visL + hit, Math.max(visL + hit, visR - hit))
+      startHit = clamp(mid - hit, visL, maxLeft)
+      endHit = clamp(Math.max(endHit, startHit + hit), visL, maxLeft)
+      if (startHit + hit > endHit) startHit = Math.max(visL, endHit - hit)
     }
-    if (boxR > visR) {
-      boxR = visR
-      boxL = boxR - hit
-    }
-    if (boxL < visL) boxL = visL
-    if (boxR > visR) boxR = visR
-    return { left: boxL, right: Math.max(boxL, boxR) }
+    if (endHit + hit > visR) endHit = visR - hit
+    if (startHit + hit > endHit) startHit = Math.max(visL, endHit - hit)
+  } else {
+    outside = true
+    startHit = visL
+    endHit = visL + Math.max(1, room / 2)
   }
 
-  const startHit = shift(startFace + visual - hit)
-  const endHit = shift(endFace)
-  const overlaps = startHit.right - endHit.left > 0.5
-  const inline = (box: { left: number; right: number }, face: number, offset: LoopGripBox['offset']): LoopGripBox => ({
-    hitLeft: Math.round(box.left),
-    hitTop: offset === 'above' ? -12 : offset === 'below' ? hostH - 12 : 0,
-    hitWidth: Math.max(0, Math.round(box.right) - Math.round(box.left)),
-    hitHeight: offset === 'inline' ? hostH : hit,
-    faceLeft: Math.round(face),
-    faceTop: offset === 'inline' ? 2 : 8,
-    faceWidth: visual,
-    faceHeight: offset === 'inline' ? hostH - 4 : 28,
-    offset,
-  })
+  const startW = room >= hit * 2 ? hit : Math.max(1, endHit - startHit)
+  const endW = room >= hit * 2 ? hit : Math.max(1, visR - endHit)
+  const startFace = faceInside(startHit, startW, left < visL ? visL : left, visual)
+  const endFace = faceInside(endHit, endW, right > visR ? visR - visual : right - visual, visual)
+  const split = separateFaces(startFace, endFace, startHit, startW, endHit, endW, visual)
 
-  if (!overlaps) {
-    return {
-      mode: loopW < hit * 2 ? 'side' : 'outward',
-      start: inline(startHit, startFace, 'inline'),
-      end: inline(endHit, endFace, 'inline'),
-    }
-  }
-
-  const room = visR - visL
-  const mid = (Math.max(left, visL) + Math.min(right, visR)) / 2
-  if (loopW >= hit && room >= hit * 2 && mid - visL >= hit - 0.5 && visR - mid >= hit - 0.5) {
-    return {
-      mode: 'side',
-      start: inline({ left: mid - hit, right: mid }, startFace, 'inline'),
-      end: inline({ left: mid, right: mid + hit }, endFace, 'inline'),
-    }
-  }
-
-  let startLeft = clamp(startFace + visual - hit, visL, Math.max(visL, visR - hit))
-  let endLeft = clamp(endFace, visL, Math.max(visL, visR - hit))
-  if (room >= hit * 2 && Math.abs(startLeft - endLeft) < 8) {
-    startLeft = clamp(segL - hit, visL, Math.max(visL, visR - hit * 2))
-    endLeft = startLeft + hit
-  }
   return {
-    mode: 'offset',
-    start: inline({ left: startLeft, right: startLeft + Math.min(hit, visR - startLeft) }, startFace, 'above'),
-    end: inline({ left: endLeft, right: Math.min(visR, endLeft + hit) }, endFace, 'below'),
+    mode: outside ? 'outside' : 'outward',
+    start: box(startHit, startW, split.start, hostH, visual),
+    end: box(endHit, endW, split.end, hostH, visual),
+  }
+}
+
+function faceInside(hitL: number, width: number, preferred: number, visual: number) {
+  const max = hitL + Math.max(visual, width) - visual
+  return clamp(preferred, hitL, Math.max(hitL, max))
+}
+
+function separateFaces(startFace: number, endFace: number, startHit: number, startW: number, endHit: number, endW: number, visual: number) {
+  if (startFace + visual <= endFace + 0.5) return { start: startFace, end: endFace }
+  const pushed = faceInside(endHit, endW, startFace + visual, visual)
+  if (startFace + visual <= pushed + 0.5) return { start: startFace, end: pushed }
+  return {
+    start: faceInside(startHit, startW, pushed - visual, visual),
+    end: pushed,
+  }
+}
+
+function box(hitLeft: number, hitWidth: number, face: number, hostH: number, visual: number): LoopGripBox {
+  const left = Math.round(hitLeft)
+  const width = Math.max(1, Math.round(hitWidth))
+  return {
+    hitLeft: left,
+    hitTop: 0,
+    hitWidth: width,
+    hitHeight: hostH,
+    faceLeft: Math.round(face),
+    faceTop: 2,
+    faceWidth: visual,
+    faceHeight: Math.max(visual, hostH - 4),
+    offset: 'inline',
   }
 }
 

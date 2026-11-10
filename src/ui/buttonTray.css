@@ -30,7 +30,6 @@
 .command-strip,
 .browser-tabs,
 .history-btns,
-#shell-menu .menu-group,
 .plugin-transport,
 .hw-transport,
 .mpc-banks,
@@ -215,33 +214,8 @@
   border-radius: 0;
 }
 
-/* Menus: chips in a tray, not bars stretched across the screen. */
-#shell-menu .menu-group,
-#shell-menu .menu-group[aria-label='Project'],
-#shell-menu .menu-group[aria-label='Edit'],
-.shell #shell-menu .menu-group,
-.shell #shell-menu .menu-group[aria-label='Project'],
-.shell #shell-menu .menu-group[aria-label='Edit'] {
-  display: flex;
-  flex-flow: row wrap;
-  align-items: center;
-  justify-content: flex-start;
-  align-content: flex-start;
-  width: 100%;
-  max-width: 100%;
-  grid-template-columns: none;
-}
-
-#shell-menu .menu-heading,
-.shell #shell-menu .menu-heading {
-  flex: 1 0 100%;
-  width: 100%;
-  grid-column: auto;
-}
-
-#shell-menu .menu-group > button,
-.shell #shell-menu .menu-group > button,
-.anchored-menu:not(:has(#shell-menu)) > button,
+/* The project menu is a text list in mainMenu.css, not a chip tray. */
+.anchored-menu:not(:has(#shell-menu)):not(.transport-drawer) > button,
 .anchored-menu:not(:has(#shell-menu)) .ch-row,
 .anchored-menu:not(:has(#shell-menu)) .sheet-row,
 .anchored-menu:not(:has(#shell-menu)) .add-choice,
@@ -256,24 +230,7 @@
   min-height: 40px;
 }
 
-#shell-menu .menu-group > button,
-.shell #shell-menu button {
-  height: 40px;
-  min-height: 40px;
-  max-height: 40px;
-}
-
-#shell-menu .menu-sig,
-.shell #shell-menu .menu-sig {
-  flex: 1 0 100%;
-  width: 100%;
-  max-width: 100%;
-  height: auto;
-  min-height: 40px;
-  align-self: stretch;
-}
-
-.anchored-menu:not(:has(#shell-menu)):not(.preset-menu) {
+.anchored-menu:not(:has(#shell-menu)):not(.transport-drawer):not(.preset-menu) {
   flex-direction: row;
   flex-wrap: wrap;
   align-items: center;
@@ -350,7 +307,6 @@
 .anchored-menu button,
 .song-sheet button,
 .guide-sheet button,
-#shell-menu button,
 .plugin-transport > button,
 .tune-board button:not(.tune-knob):not(.white):not(.black),
 .mpc button.hw-key,
@@ -408,7 +364,6 @@
 .shell .mpc-full.on,
 .shell .note-repeat-hold.on,
 .shell .inserts button.on,
-#shell-menu button[aria-pressed='true'],
 .anchored-menu button.on:not(.rec):not(.pad-key),
 .song-sheet button.on,
 .tune-board button.on:not(.tune-knob):not(.white):not(.black),
