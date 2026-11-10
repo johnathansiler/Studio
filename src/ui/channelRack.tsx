@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
 import { FEATURES } from '../features'
+import { controlLaw, formatPan } from '../model/mixLaw'
+import { gainToDb } from '../model/time'
 import { GestureReadout, useDragValue } from './kit/controls'
 import { AnchoredMenu } from './AnchoredMenu'
 import type { AudioEngine } from '../audio/engine'
@@ -129,15 +131,19 @@ function Knob({
   onChange: (next: number, drag: boolean) => void
   onDone: () => void
 }) {
+  const law = controlLaw({ label, min, max })
+  const shown = law === 'db' ? gainToDb(value) : law === 'pan' ? formatPan(value) : value.toFixed(2)
   const set = (next: number, fromDrag: boolean) => {
-    const snapped = Math.round(Math.max(min, Math.min(max, next)) / step) * step
-    onChange(Number(snapped.toFixed(2)), fromDrag)
+    const clamped = Math.max(min, Math.min(max, next))
+    if (law) onChange(clamped, fromDrag)
+    else onChange(Number((Math.round(clamped / step) * step).toFixed(2)), fromDrag)
   }
   const { ref, readout, dragging } = useDragValue<HTMLButtonElement>({
     min,
     max,
     value,
     fallback: (min + max) / 2,
+    format: law === 'db' ? gainToDb : law === 'pan' ? formatPan : undefined,
     onChange: (next) => set(next, true),
     onCommit: onDone,
   })
@@ -161,7 +167,7 @@ function Knob({
       }}
     >
       <i style={{ transform: `rotate(${knobAngle(value, min, max)}deg)` }} />
-      {(dragging || readout) && <em className="rack-readout">{readout?.text ?? value.toFixed(2)}</em>}
+      {(dragging || readout) && <em className="rack-readout">{readout?.text ?? shown}</em>}
       <GestureReadout readout={readout} />
     </button>
   )
@@ -659,7 +665,7 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
                   type="range"
                   min={-1}
                   max={1}
-                  step={0.01}
+                  step="any"
                   value={focus.pan}
                   onChange={(event) => store.setChannel(focus.id, { pan: Number(event.target.value) }, true)}
                   onPointerUp={() => store.endDraft()}

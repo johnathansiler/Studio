@@ -17,7 +17,8 @@ export function markIntegerLand(el: { classList?: DOMTokenList } | null | undefi
 
 /** Touch long-press turns the rest of the drag into fine mode. Returns a cancel. */
 export function armFinePress(pointerType: string | undefined, onFine: () => void): () => void {
-  if (pointerType !== 'touch') return () => undefined
-  const id = window.setTimeout(onFine, LONG_PRESS_MS)
-  return () => window.clearTimeout(id)
+  const host = (globalThis as { window?: { setTimeout: typeof setTimeout; clearTimeout: typeof clearTimeout } }).window
+  if (pointerType !== 'touch' || !host) return () => undefined
+  const id = host.setTimeout(onFine, LONG_PRESS_MS)
+  return () => host.clearTimeout(id)
 }

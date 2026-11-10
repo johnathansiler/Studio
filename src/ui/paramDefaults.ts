@@ -109,7 +109,7 @@ function near(a: number, b: number): boolean {
 }
 
 /** Mixer gain fader. Unity is 0 dB, including when a call site still says 0.8 or 0.9. */
-function isMixerFader(q: DefaultQuery): boolean {
+export function isMixerFader(q: DefaultQuery): boolean {
   const label = tokens(q.label || '')
   const klass = tokens(q.className || '')
   const param = (q.param || '').toLowerCase()

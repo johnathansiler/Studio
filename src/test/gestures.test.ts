@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
+import { dbPixels, panPixels } from '../model/mixLaw'
+import { gainToDb } from '../model/time'
 import { attachControlGesture, READOUT_HOLD_MS, type GestureElement, type PointerLike } from '../ui/gestures'
 
 interface Stored {
@@ -129,6 +131,206 @@ describe('knob gestures', () => {
     }
     expect(Number.isInteger(run(false))).toBe(true)
     expect(Number.isInteger(run(true))).toBe(false)
+  })
+
+  it('keeps a fractional pan and a tenth of a decibel after the finger lifts', () => {
+    const pan = new FakeControl()
+    pan.className = 'pan-knob'
+    pan.attrs['aria-label'] = 'Vocal pan. Drag left or right.'
+    let panned = 0
+    const stopPan = attachControlGesture(pan, () => ({
+      min: -1,
+      max: 1,
+      fallback: 0,
+      axis: 'x',
+      getValue: () => panned,
+      onChange: (change) => {
+        panned = change.value
+      },
+    }))
+    pan.dispatch('pointerdown', { clientX: 200, clientY: 40, shiftKey: true })
+    pan.dispatch('pointermove', { clientX: 200 + panPixels(-37.5, true), clientY: 40, shiftKey: true })
+    pan.dispatch('pointerup', { clientX: 200 + panPixels(-37.5, true), clientY: 40, shiftKey: true })
+    expect(panned).toBeCloseTo(-0.375, 5)
+    stopPan()
+
+    const fader = new FakeControl()
+    fader.className = 'touch-slider vertical volume'
+    fader.attrs['aria-label'] = 'Keys volume. How loud this track is.'
+    let level = 1
+    const stopFader = attachControlGesture(fader, () => ({
+      min: 0,
+      max: 1.25,
+      fallback: 1,
+      axis: 'y',
+      getValue: () => level,
+      onChange: (change) => {
+        level = change.value
+      },
+    }))
+    fader.dispatch('pointerdown', { clientX: 10, clientY: 200 })
+    fader.dispatch('pointermove', { clientX: 10, clientY: 200 + dbPixels(6.3) })
+    fader.dispatch('pointerup', { clientX: 10, clientY: 200 + dbPixels(6.3) })
+    expect(gainToDb(level)).toBe('-6.3 dB')
+    stopFader()
+  })
+
+  it('uses a finer pan scale when a phone drag moves vertically', () => {
+    const pan = new FakeControl()
+    pan.className = 'pan-knob'
+    pan.attrs['aria-label'] = 'Vocal pan'
+    let panned = 0
+    const stop = attachControlGesture(pan, () => ({
+      min: -1,
+      max: 1,
+      fallback: 0,
+      axis: 'x',
+      getValue: () => panned,
+      onChange: (change) => {
+        panned = change.value
+      },
+    }))
+    pan.dispatch('pointerdown', { clientX: 80, clientY: 80, pointerType: 'touch' })
+    pan.dispatch('pointermove', { clientX: 80, clientY: 64, pointerType: 'touch' })
+    pan.dispatch('pointermove', { clientX: 80, clientY: 64 - panPixels(12, true), pointerType: 'touch' })
+    pan.dispatch('pointerup', { clientX: 80, clientY: 64 - panPixels(12, true), pointerType: 'touch' })
+    expect(panned).toBeCloseTo(0.12, 5)
+    stop()
+  })
+
+  it('keeps a normal touch drag on whole pan units and tenths of a decibel', () => {
+    const pan = new FakeControl()
+    pan.className = 'pan-knob'
+    pan.attrs['aria-label'] = 'Vocal pan'
+    let panned = 0
+    const stopPan = attachControlGesture(pan, () => ({
+      min: -1,
+      max: 1,
+      fallback: 0,
+      axis: 'x',
+      getValue: () => panned,
+      onChange: (change) => {
+        panned = change.value
+      },
+    }))
+    pan.dispatch('pointerdown', { clientX: 40, clientY: 40, pointerType: 'touch', pointerId: 1 })
+    pan.dispatch('pointermove', { clientX: 40 + panPixels(40), clientY: 44, pointerType: 'touch', pointerId: 1 })
+    pan.dispatch('pointerup', { clientX: 40 + panPixels(40), clientY: 44, pointerType: 'touch', pointerId: 1 })
+    expect(panned).toBeCloseTo(0.4, 5)
+    stopPan()
+
+    const fader = new FakeControl()
+    fader.className = 'touch-slider vertical volume'
+    fader.attrs['aria-label'] = 'Keys volume. How loud this track is.'
+    let level = 1
+    const stopFader = attachControlGesture(fader, () => ({
+      min: 0,
+      max: 1.25,
+      fallback: 1,
+      axis: 'y',
+      getValue: () => level,
+      onChange: (change) => {
+        level = change.value
+      },
+    }))
+    fader.dispatch('pointerdown', { clientX: 20, clientY: 80, pointerType: 'touch' })
+    fader.dispatch('pointermove', { clientX: 24, clientY: 80 + dbPixels(6.3), pointerType: 'touch' })
+    expect(gainToDb(level)).toBe('-6.3 dB')
+    fader.dispatch('pointerup', { clientX: 24, clientY: 80 + dbPixels(6.3), pointerType: 'touch' })
+    stopFader()
+  })
+
+  it('reaches a tenth from shift, a second finger, a long press, and a slow drag', () => {
+    const listeners = new Map<string, Array<(event: PointerLike) => void>>()
+    const host = {
+      addEventListener(type: string, fn: (event: PointerLike) => void) {
+        const list = listeners.get(type) ?? []
+        list.push(fn)
+        listeners.set(type, list)
+      },
+      removeEventListener(type: string, fn: (event: PointerLike) => void) {
+        listeners.set(type, (listeners.get(type) ?? []).filter((item) => item !== fn))
+      },
+      setTimeout(fn: () => void, ms?: number) {
+        return setTimeout(fn, ms)
+      },
+      clearTimeout(id: ReturnType<typeof setTimeout>) {
+        clearTimeout(id)
+      },
+      dispatch(type: string, event: PointerLike) {
+        for (const fn of listeners.get(type) ?? []) fn(event)
+      },
+    }
+    const previous = (globalThis as { window?: unknown }).window
+    ;(globalThis as { window?: unknown }).window = host
+    const make = () => {
+      const pan = new FakeControl()
+      pan.className = 'pan-knob'
+      pan.attrs['aria-label'] = 'Vocal pan'
+      let panned = 0
+      const stop = attachControlGesture(pan, () => ({
+        min: -1,
+        max: 1,
+        fallback: 0,
+        axis: 'x',
+        getValue: () => panned,
+        onChange: (change) => {
+          panned = change.value
+        },
+      }))
+      return { pan, stop, read: () => panned }
+    }
+    try {
+      const shifted = make()
+      shifted.pan.dispatch('pointerdown', { clientX: 80, clientY: 40, pointerType: 'touch', shiftKey: true, pointerId: 1 })
+      shifted.pan.dispatch('pointermove', { clientX: 80 + panPixels(-12.5, true), clientY: 40, pointerType: 'touch', shiftKey: true, pointerId: 1 })
+      expect(shifted.read()).toBeCloseTo(-0.125, 5)
+      shifted.stop()
+
+      const second = make()
+      second.pan.dispatch('pointerdown', { clientX: 100, clientY: 40, pointerType: 'touch', pointerId: 1 })
+      host.dispatch('pointerdown', { pointerId: 2, clientX: 320, clientY: 200, pointerType: 'touch' })
+      second.pan.dispatch('pointermove', { clientX: 100 + panPixels(7.5, true), clientY: 40, pointerType: 'touch', pointerId: 1 })
+      expect(second.read()).toBeCloseTo(0.075, 5)
+      second.stop()
+
+      vi.useFakeTimers()
+      const held = make()
+      held.pan.dispatch('pointerdown', { clientX: 50, clientY: 40, pointerType: 'touch', pointerId: 1 })
+      vi.advanceTimersByTime(450)
+      held.pan.dispatch('pointermove', { clientX: 50 + panPixels(4.5, true), clientY: 40, pointerType: 'touch', pointerId: 1 })
+      expect(held.read()).toBeCloseTo(0.045, 5)
+      held.stop()
+      vi.useRealTimers()
+
+      let clock = 5_000
+      const spy = vi.spyOn(performance, 'now').mockImplementation(() => clock)
+      const slow = make()
+      slow.pan.dispatch('pointerdown', { clientX: 70, clientY: 40, pointerType: 'touch', pointerId: 1 })
+      clock = 5_200
+      slow.pan.dispatch('pointermove', { clientX: 78, clientY: 40, pointerType: 'touch', pointerId: 1 })
+      clock = 5_500
+      slow.pan.dispatch('pointermove', { clientX: 78 + panPixels(2.5, true), clientY: 40, pointerType: 'touch', pointerId: 1 })
+      expect(slow.read()).toBeCloseTo(0.025, 5)
+      slow.stop()
+      spy.mockRestore()
+
+      const again = make()
+      again.pan.dispatch('pointerdown', { clientX: 100, clientY: 30, pointerType: 'mouse', pointerId: 1 })
+      host.dispatch('pointerdown', { pointerId: 1, clientX: 100, clientY: 30, pointerType: 'mouse' })
+      again.pan.dispatch('pointermove', { clientX: 140, clientY: 30, pointerType: 'mouse', pointerId: 1 })
+      again.pan.dispatch('pointerup', { clientX: 140, clientY: 30, pointerType: 'mouse', pointerId: 1 })
+      expect(again.read()).toBeCloseTo(0.2, 5)
+      again.pan.dispatch('pointerdown', { clientX: 16, clientY: 90, pointerType: 'mouse', pointerId: 1 })
+      host.dispatch('pointerdown', { pointerId: 1, clientX: 16, clientY: 90, pointerType: 'mouse' })
+      again.pan.dispatch('pointermove', { clientX: 24, clientY: 90, pointerType: 'mouse', pointerId: 1 })
+      expect(again.read()).toBeCloseTo(0.24, 5)
+      again.stop()
+    } finally {
+      vi.useRealTimers()
+      if (previous === undefined) delete (globalThis as { window?: unknown }).window
+      else (globalThis as { window?: unknown }).window = previous
+    }
   })
 })
 

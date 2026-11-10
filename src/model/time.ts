@@ -135,8 +135,8 @@ export function formatClock(seconds: number): string {
 }
 
 export function gainToDb(gain: number): string {
-  if (gain <= 0.0001) return '-inf'
-  const db = 20 * Math.log10(gain)
+  if (!(gain > 0.0001)) return '-inf'
+  const db = Math.round(20 * Math.log10(gain) * 10) / 10
   return `${db.toFixed(1)} dB`
 }
 

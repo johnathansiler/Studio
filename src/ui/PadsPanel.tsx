@@ -695,7 +695,7 @@ export function PadsPanel({
                 <input aria-label="Pad volume" title="How loud this pad is." type="range" min={0} max={1} step={0.01} value={source.level} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { level: Number(event.target.value) })} />
               </label>
               <label>Pan
-                <input aria-label="Pad pan" title="Left or right for this pad." type="range" min={-1} max={1} step={0.01} value={source.pan} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { pan: Number(event.target.value) })} />
+                <input aria-label="Pad pan" title="Left or right for this pad." type="range" min={-1} max={1} step="any" value={source.pan} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { pan: Number(event.target.value) })} />
               </label>
               <label>Decay
                 <input aria-label="Pad decay" title="How long this pad rings." type="range" min={0.05} max={1} step={0.01} value={source.decay} onChange={(event) => store.updateTrackPad(trackId, bank, selected, { decay: Number(event.target.value) })} />
