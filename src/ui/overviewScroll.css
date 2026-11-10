@@ -44,6 +44,15 @@
   max-height: none;
 }
 
+/* Fold scrolls the whole arrange and leaves the timeline overflow visible.
+   The overview gutter sits beside that timeline, so the scroller has to clip
+   or a parked loop cap sticks to the screen edge and covers the vertical bar. */
+.shell.fold .timeline-stage > .timeline-scroll {
+  overflow: auto;
+  height: 100%;
+  min-height: 0;
+}
+
 /* The header column loses the same strip the horizontal bar takes, so lanes stay aligned. */
 .arrange .heads-col > .heads {
   margin-bottom: var(--overview-gutter, 40px);
@@ -68,17 +77,17 @@
   display: none;
 }
 
-/* Lane height zoom. --lane-h stays the form-factor size; this only scales it. */
-.arrange .heads .head,
-.arrange .timeline-scroll .lane,
-.shell.phone .arrange .heads .head,
-.shell.phone .arrange .timeline-scroll .lane,
-.shell.phone.land .arrange .heads .head,
-.shell.phone.land .arrange .timeline-scroll .lane,
-.shell.phone:not(.land) .arrange .head,
-.shell.phone:not(.land) .arrange .lane,
-.shell.phone .lane,
-.shell.phone.land .lane {
+/* Lane height zoom. --lane-h stays the form-factor size; this only scales it.
+   These selectors outrank arrangeSpace and dockPush, which set a fixed lane height
+   and load later than this file. */
+.arrange[data-phone-arrange] .heads .head,
+.arrange[data-phone-arrange] .timeline-scroll .lane,
+.shell.phone .arrange[data-phone-arrange] .heads .head,
+.shell.phone .arrange[data-phone-arrange] .timeline-scroll .lane,
+.shell.phone.land .arrange[data-phone-arrange] .heads .head,
+.shell.phone.land .arrange[data-phone-arrange] .timeline-scroll .lane,
+.shell.phone:not(.land) .arrange[data-phone-arrange] .head,
+.shell.phone:not(.land) .arrange[data-phone-arrange] .lane {
   height: calc(var(--lane-h, 72px) * var(--lane-zoom, 1));
   min-height: calc(var(--lane-h, 72px) * var(--lane-zoom, 1));
 }
@@ -242,7 +251,8 @@
   right: auto;
   width: 44px;
   min-width: 44px;
-  height: 100%;
+  height: 44px;
+  min-height: 44px;
   flex: none;
 }
 

@@ -64,6 +64,11 @@ describe('timeline overview and loop handles', () => {
     await page.goto(url, { waitUntil: 'domcontentloaded' })
     await page.locator('[data-loop-region="arrange"]').waitFor()
     await page.locator('[data-overview="x"]').waitFor()
+    const toast = page.locator('.select-hint')
+    if (await toast.count()) {
+      await page.locator('.hint-close').click()
+      await toast.waitFor({ state: 'detached' })
+    }
     await page.waitForTimeout(250)
     return { page, errors }
   }
@@ -103,6 +108,8 @@ describe('timeline overview and loop handles', () => {
           const end = host.querySelector('[data-loop-edge="end"] .loop-grip-face')!.getBoundingClientRect()
           const startBeat = project.loopStartSample / project.sampleRate / (60 / project.tempo)
           const endBeat = project.loopEndSample / project.sampleRate / (60 / project.tempo)
+          const thumb = host.ownerDocument.querySelector('[data-overview-thumb="x"]') as HTMLElement
+          const match = /translateX\(([-\d.]+)px\)/.exec(thumb.style.transform)
           return {
             start: start.left,
             end: end.right,
@@ -111,18 +118,27 @@ describe('timeline overview and loop handles', () => {
             parkStart: host.dataset.parkStart,
             parkEnd: host.dataset.parkEnd,
             scroll: scroller.scrollLeft,
+            px,
+            thumb: match ? Number(match[1]) : 0,
           }
         }
+        let hostWrites = 0
+        const observer = new MutationObserver(() => { hostWrites += 1 })
+        observer.observe(host, { subtree: true, attributes: true, attributeFilter: ['style', 'class', 'data-park-start', 'data-park-end'] })
         const immediate = read()
         await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
-        return { immediate, later: read() }
+        observer.disconnect()
+        return { immediate, later: read(), hostWrites }
       }, left)
       for (const sample of [row.immediate, row.later]) {
         expect(sample.parkStart, `start park at ${left}`).toBe('track')
         expect(sample.parkEnd, `end park at ${left}`).toBe('track')
         expect(Math.abs(sample.start - sample.expectStart), `start x at ${left}`).toBeLessThan(1.5)
         expect(Math.abs(sample.end - sample.expectEnd), `end x at ${left}`).toBeLessThan(1.5)
+        expect(sample.px, `px stays put while scrolling at ${left}`).toBe(row.immediate.px)
       }
+      expect(row.hostWrites, `loop host restyle at ${left}`).toBe(0)
+      if (row.later.scroll > 1) expect(row.later.thumb, `thumb tracks scroll at ${left}`).toBeGreaterThan(1)
     }
     expect(errors, errors.join('\n')).toEqual([])
     await page.close()
@@ -146,8 +162,29 @@ describe('timeline overview and loop handles', () => {
       return contentRight - grip.getBoundingClientRect().right < 8 && grip.getBoundingClientRect().width >= 44
     })
     const before = await page.evaluate(() => (window as unknown as { __cueharbor: { store: { project: { loopEndSample: number } } } }).__cueharbor.store.project.loopEndSample)
+    const parked = await page.evaluate(() => {
+      const grip = document.querySelector('[data-loop-region="arrange"] [data-loop-edge="end"]') as HTMLElement
+      const face = grip.querySelector('.loop-grip-face') as HTMLElement
+      const ruler = document.querySelector('.arrange .timeline-scroll .ruler') as HTMLElement
+      const gripBox = grip.getBoundingClientRect()
+      const faceBox = face.getBoundingClientRect()
+      const rulerBox = ruler.getBoundingClientRect()
+      return {
+        gripH: gripBox.height,
+        gripW: gripBox.width,
+        faceTop: faceBox.top,
+        faceBottom: faceBox.bottom,
+        rulerTop: rulerBox.top,
+        rulerBottom: rulerBox.bottom,
+      }
+    })
+    expect(parked.gripW).toBeGreaterThanOrEqual(44)
+    expect(parked.gripH).toBeGreaterThanOrEqual(44)
+    expect(parked.faceTop).toBeGreaterThanOrEqual(parked.rulerTop - 1)
+    expect(parked.faceBottom).toBeLessThanOrEqual(parked.rulerBottom + 1)
     const box = await page.locator('[data-loop-region="arrange"] [data-loop-edge="end"]').boundingBox()
     expect(box!.width).toBeGreaterThanOrEqual(44)
+    expect(box!.height).toBeGreaterThanOrEqual(44)
     const client = await page.context().newCDPSession(page)
     const from = { x: box!.x + box!.width - 8, y: box!.y + box!.height / 2 }
     const to = { x: from.x - 70, y: from.y }
@@ -249,6 +286,8 @@ describe('timeline overview and loop handles', () => {
       left: (document.querySelector('.timeline-scroll') as HTMLElement).scrollLeft,
       px: Number((document.querySelector('.timeline-inner') as HTMLElement).dataset.px),
       lane: getComputedStyle(document.querySelector('.arrange')!).getPropertyValue('--lane-zoom').trim(),
+      laneH: (document.querySelector('.timeline-scroll .lane') as HTMLElement).getBoundingClientRect().height,
+      headH: (document.querySelector('.arrange .heads .head') as HTMLElement).getBoundingClientRect().height,
     }))
     const mouseThumb = await desk.page.locator('[data-overview-thumb="x"]').boundingBox()
     await desk.page.mouse.move(mouseThumb!.x + mouseThumb!.width / 2, mouseThumb!.y + mouseThumb!.height / 2)
@@ -274,8 +313,35 @@ describe('timeline overview and loop handles', () => {
     await desk.page.mouse.move(vThumb!.x + vThumb!.width / 2, vThumb!.y + vThumb!.height - 4 - 80, { steps: 8 })
     await desk.page.mouse.up()
     await desk.page.waitForTimeout(40)
-    const lane = await desk.page.evaluate(() => getComputedStyle(document.querySelector('.arrange')!).getPropertyValue('--lane-zoom').trim())
-    expect(Number(lane)).toBeGreaterThan(Number(before.lane || '1'))
+    const lane = await desk.page.evaluate(() => ({
+      zoom: getComputedStyle(document.querySelector('.arrange')!).getPropertyValue('--lane-zoom').trim(),
+      laneH: (document.querySelector('.timeline-scroll .lane') as HTMLElement).getBoundingClientRect().height,
+      headH: (document.querySelector('.arrange .heads .head') as HTMLElement).getBoundingClientRect().height,
+      rule: getComputedStyle(document.querySelector('.timeline-scroll .lane') as HTMLElement).height,
+    }))
+    expect(Number(lane.zoom)).toBeGreaterThan(Number(before.lane || '1'))
+    expect(lane.laneH).toBeGreaterThan(before.laneH + 4)
+    expect(Math.abs(lane.headH - lane.laneH)).toBeLessThan(2)
+
+    const wheeled = await desk.page.evaluate(async () => {
+      const scroller = document.querySelector('.timeline-scroll') as HTMLElement
+      const inner = document.querySelector('.timeline-inner') as HTMLElement
+      const thumb = document.querySelector('[data-overview-thumb="x"]') as HTMLElement
+      const beforePx = Number(inner.dataset.px)
+      const beforeWidth = thumb.getBoundingClientRect().width
+      scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -140, ctrlKey: true, bubbles: true, cancelable: true }))
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+      return {
+        px: Number(inner.dataset.px),
+        beforePx,
+        thumb: thumb.getBoundingClientRect().width,
+        beforeWidth,
+        scroll: scroller.scrollLeft,
+      }
+    })
+    expect(wheeled.px).toBeGreaterThan(wheeled.beforePx)
+    expect(wheeled.thumb).toBeLessThan(wheeled.beforeWidth - 0.5)
     await desk.page.screenshot({ path: '/opt/cursor/artifacts/overview_1440x900.png' })
     expect(desk.errors, desk.errors.join('\n')).toEqual([])
     await desk.page.close()
@@ -292,20 +358,94 @@ describe('timeline overview and loop handles', () => {
     for (const viewport of viewports) {
       const { page, errors } = await boot(viewport, viewport.touch)
       const box = await page.evaluate(() => {
-        const x = document.querySelector('[data-overview="x"]')!.getBoundingClientRect()
-        const y = document.querySelector('[data-overview="y"]')!.getBoundingClientRect()
-        const scroll = document.querySelector('.timeline-scroll')!.getBoundingClientRect()
+        const rect = (selector: string) => document.querySelector(selector)?.getBoundingClientRect() ?? null
+        const x = rect('[data-overview="x"]')!
+        const y = rect('[data-overview="y"]')!
+        const scroll = rect('.timeline-scroll')!
+        const paintedX = rect('[data-overview="x"] .overview-track')!
+        const paintedY = rect('[data-overview="y"] .overview-track')!
+        const tools = rect('.tool-slot')
+        const heads = rect('.arrange .heads')!
+        const ruler = rect('.arrange .timeline-scroll .ruler')!
+        const grip = document.querySelector('[data-loop-region="arrange"] [data-loop-edge="end"]') as HTMLElement | null
+        const face = grip?.querySelector('.loop-grip-face') as HTMLElement | null
+        const hitAt = (xPx: number, yPx: number) => {
+          const node = document.elementFromPoint(xPx, yPx) as HTMLElement | null
+          return {
+            overview: !!node?.closest('[data-overview]'),
+            clip: !!node?.closest('.clip'),
+            head: !!node?.closest('.head, .heads'),
+            grip: !!node?.closest('[data-loop-edge]'),
+            ruler: !!node?.closest('.ruler'),
+          }
+        }
+        const clip = document.querySelector('.timeline-scroll .clip') as HTMLElement | null
+        const clipBox = clip?.getBoundingClientRect()
+        const headBtn = document.querySelector('.arrange .heads .track-controls button') as HTMLElement | null
+        const headBox = headBtn?.getBoundingClientRect()
+        const gripBox = grip?.getBoundingClientRect()
+        const faceBox = face?.getBoundingClientRect()
+        const scrollRight = scroll.right
+        const play = rect('[data-playhead="arrange"]')
+        const scrubX = play ? Math.min(Math.max(play.left + 2, ruler.left + 80), ruler.right - 8) : ruler.left + Math.min(80, ruler.width / 2)
         return {
           xh: x.height,
           yw: y.width,
           gapX: x.top - scroll.bottom,
           gapY: y.left - scroll.right,
+          paintedXH: paintedX.height,
+          paintedYW: paintedY.width,
+          barBottom: x.bottom,
+          toolsTop: tools?.top ?? null,
+          sideLeft: y.left,
+          headRight: heads.right,
+          laneLeft: scroll.left,
+          rulerH: ruler.height,
+          gripH: gripBox?.height ?? 0,
+          gripW: gripBox?.width ?? 0,
+          gripRight: gripBox?.right ?? 0,
+          scrollRight,
+          faceTop: faceBox ? faceBox.top - ruler.top : 0,
+          faceBottom: faceBox ? faceBox.bottom - ruler.top : 0,
+          clipHit: clipBox && clipBox.width > 8 && clipBox.bottom > scroll.top && clipBox.top < scroll.bottom
+            ? hitAt(clipBox.left + Math.min(24, clipBox.width / 2), clipBox.top + Math.min(18, clipBox.height / 2))
+            : null,
+          headHit: headBox && headBox.width > 8 ? hitAt(headBox.left + headBox.width / 2, headBox.top + headBox.height / 2) : null,
+          gripHit: gripBox ? hitAt(gripBox.left + Math.min(12, gripBox.width / 2), ruler.top + Math.min(8, ruler.height / 2)) : null,
+          scrubHit: hitAt(scrubX, ruler.top + ruler.height / 2),
         }
       })
-      expect(box.xh, `${viewport.width}x${viewport.height} horizontal hit`).toBeGreaterThanOrEqual(40)
-      expect(box.yw, `${viewport.width}x${viewport.height} vertical hit`).toBeGreaterThanOrEqual(40)
-      expect(Math.abs(box.gapX), `${viewport.width} horizontal gap`).toBeLessThan(2)
-      expect(Math.abs(box.gapY), `${viewport.width} vertical gap`).toBeLessThan(2)
+      const name = `${viewport.width}x${viewport.height}`
+      expect(box.xh, `${name} horizontal hit`).toBeGreaterThanOrEqual(40)
+      expect(box.yw, `${name} vertical hit`).toBeGreaterThanOrEqual(40)
+      expect(Math.abs(box.gapX), `${name} horizontal gap`).toBeLessThan(2)
+      expect(Math.abs(box.gapY), `${name} vertical gap`).toBeLessThan(2)
+      expect(box.paintedXH, `${name} painted horizontal bar`).toBeGreaterThanOrEqual(7)
+      expect(box.paintedXH, `${name} painted horizontal bar`).toBeLessThanOrEqual(9)
+      expect(box.paintedYW, `${name} painted vertical bar`).toBeGreaterThanOrEqual(7)
+      expect(box.paintedYW, `${name} painted vertical bar`).toBeLessThanOrEqual(9)
+      if (box.toolsTop != null) expect(box.barBottom, `${name} bar above the edit bar`).toBeLessThanOrEqual(box.toolsTop + 1)
+      expect(box.sideLeft, `${name} vertical bar clears the track headers`).toBeGreaterThanOrEqual(box.headRight - 1)
+      expect(Math.abs(box.laneLeft - box.headRight), `${name} lane meets the header column`).toBeLessThanOrEqual(2)
+      expect(box.gripW, `${name} loop hit width`).toBeGreaterThanOrEqual(44)
+      expect(box.gripH, `${name} loop hit height`).toBeGreaterThanOrEqual(44)
+      expect(box.gripRight, `${name} loop hit stays inside the timeline`).toBeLessThanOrEqual(box.scrollRight + 1)
+      expect(box.faceTop, `${name} loop cap inside the strip`).toBeGreaterThanOrEqual(-1)
+      expect(box.faceBottom, `${name} loop cap inside the strip`).toBeLessThanOrEqual(box.rulerH + (box.rulerH <= 26 ? 1 : 8))
+      if (box.clipHit) {
+        expect(box.clipHit.overview, `${name} clip touch`).toBe(false)
+        expect(box.clipHit.clip, `${name} clip touch`).toBe(true)
+      }
+      if (box.headHit) {
+        expect(box.headHit.overview, `${name} header touch`).toBe(false)
+        expect(box.headHit.head, `${name} header touch`).toBe(true)
+      }
+      if (box.gripHit) {
+        expect(box.gripHit.overview, `${name} loop touch`).toBe(false)
+        expect(box.gripHit.grip, `${name} loop touch`).toBe(true)
+      }
+      expect(box.scrubHit.overview, `${name} ruler scrub`).toBe(false)
+      expect(box.scrubHit.ruler, `${name} ruler scrub`).toBe(true)
       await page.screenshot({ path: `/opt/cursor/artifacts/overview_${viewport.width}x${viewport.height}.png` })
       expect(errors, errors.join('\n')).toEqual([])
       await page.close()

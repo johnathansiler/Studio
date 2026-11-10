@@ -402,9 +402,10 @@ function LoopGrip({ edge, box, dragging, parked = null }: { edge: 'start' | 'end
         left: 'auto',
         right: 'auto',
         top: 0,
-        width: 44,
+        width: Math.max(44, box.hitWidth),
         minWidth: 44,
-        height: '100%',
+        height: Math.max(44, box.hitHeight),
+        minHeight: 44,
         bottom: 'auto',
         touchAction: 'none',
       } : {

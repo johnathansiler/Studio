@@ -300,12 +300,19 @@ export function ArrangeView({
       points.delete(event.pointerId)
       if (points.size < 2) pinch = null
     }
+    const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return
+      event.preventDefault()
+      setPx((value) => clampPx(value * (event.deltaY > 0 ? 0.9 : 1.1)))
+    }
     el.addEventListener('pointerdown', down, true)
+    el.addEventListener('wheel', wheel, { passive: false })
     window.addEventListener('pointermove', move, { passive: false })
     window.addEventListener('pointerup', up)
     window.addEventListener('pointercancel', up)
     return () => {
       el.removeEventListener('pointerdown', down, true)
+      el.removeEventListener('wheel', wheel)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', up)
@@ -988,12 +995,6 @@ export function ArrangeView({
           if (heads && body && heads.scrollTop !== body.scrollTop) heads.scrollTop = body.scrollTop
         }}
         onPointerDown={(event) => { focusTimeline(); onTimelineDown(event) }}
-        onWheel={(event) => {
-          if (event.ctrlKey || event.metaKey) {
-            event.preventDefault()
-            setPx((value) => clampPx(value * (event.deltaY > 0 ? 0.9 : 1.1)))
-          }
-        }}
       >
         <div className="timeline-inner" ref={innerRef} data-px={px} style={{ width }}>
           <SongMap store={store} px={px} width={width} onSeek={onSeek} />
@@ -1406,13 +1407,16 @@ function rowStyle(track: { id: string; type: string; instrument?: string; plugin
   /* Desktop lanes are 96px. Eight extra pixels clear the mute row under Keys.
      Phone already pins the name above the flags inside the normal lane. */
   const extra = phone ? 0 : 8
-  return { ...base, minHeight: `calc(var(--lane-h) + ${extra}px)` }
+  return { ...base, minHeight: `calc(var(--lane-h, 72px) * var(--lane-zoom, 1) + ${extra}px)` }
 }
 
-function rowHeight(track: { clips: AudioClip[] }, selectedId: string | null, automation: boolean) {
+function rowHeight(track: { clips: AudioClip[] }, selectedId: string | null, automation: boolean): { height?: number | string } {
   const base = laneStyle(track, selectedId)
-  if (!automation) return base
-  return { height: Math.max(base.height ?? 150, 236) }
+  if (!automation) {
+    if (base.height == null) return base
+    return { height: `calc(${base.height}px * var(--lane-zoom, 1))` }
+  }
+  return { height: `calc(${Math.max(base.height ?? 150, 236)}px * var(--lane-zoom, 1))` }
 }
 
 function ClipView({
