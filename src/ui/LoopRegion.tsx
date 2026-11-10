@@ -7,7 +7,7 @@ import type { Project } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { useFormFactor } from './form'
 import { armFinePress } from './integerTick'
-import { LOOP_DRAG_THRESHOLD, LOOP_TOUCH_THRESHOLD, layoutLoopGrips, loopEdgeAt, loopGripHit, type LoopGripBox } from './loopGrips'
+import { LOOP_DRAG_THRESHOLD, LOOP_TOUCH_THRESHOLD, layoutLoopGrips, loopEdgeAt, loopGripHit, resolveGripParks, type GripPark, type LoopGripBox } from './loopGrips'
 import './loopRegion.css'
 
 type DragPoint = { x: number; y: number; shift: boolean; alt: boolean }
@@ -40,6 +40,7 @@ export function LoopRegion({
   xAt,
   onSeek,
   yieldEmpty = false,
+  followScroll = false,
 }: {
   store: ProjectStore
   project: Project
@@ -52,6 +53,12 @@ export function LoopRegion({
   onSeek?: (sample: number) => void
   /** Empty-ruler presses pass through, so pan and zoom still work. */
   yieldEmpty?: boolean
+  /**
+   * Arrange timeline. Caps stay in content coordinates while they are on screen,
+   * and park on a viewport edge only after they leave. Positions are not rewritten
+   * on each scroll event, so momentum scroll cannot leave them a frame behind.
+   */
+  followScroll?: boolean
 }) {
   const coarse = useFormFactor() !== 'desk'
   const hostRef = useRef<HTMLDivElement>(null)
@@ -65,6 +72,9 @@ export function LoopRegion({
   const [, setPaint] = useState(0)
   const lastTap = useRef(0)
   const [box, setBox] = useState({ width: 0, viewLeft: 0, viewWidth: 0 })
+  const [park, setPark] = useState<{ start: GripPark; end: GripPark }>({ start: 'track', end: 'track' })
+  const faceRef = useRef({ start: 0, startEnd: 0, end: 0, endEnd: 0 })
+  const viewRef = useRef({ origin: 0, width: 0 })
   const readout = formatLoopReadout(project, project.loopStartSample, project.loopEndSample)
   const sampleAtRef = useRef(sampleAt)
   sampleAtRef.current = sampleAt
@@ -78,6 +88,11 @@ export function LoopRegion({
     if (!host) return
     const measure = () => {
       const width = host.clientWidth
+      if (followScroll) {
+        const next = { width, viewLeft: 0, viewWidth: width }
+        setBox((prev) => (near(prev.width, next.width) && near(prev.viewLeft, 0) && near(prev.viewWidth, next.viewWidth) ? prev : next))
+        return
+      }
       const scroller = scrollParent(host)
       const hostRect = host.getBoundingClientRect()
       const viewRect = scroller.getBoundingClientRect()
@@ -99,7 +114,7 @@ export function LoopRegion({
     }
     measure()
     const scroller = scrollParent(host)
-    scroller.addEventListener('scroll', measure, { passive: true })
+    if (!followScroll) scroller.addEventListener('scroll', measure, { passive: true })
     const observer = new ResizeObserver(measure)
     observer.observe(scroller)
     observer.observe(host)
@@ -110,12 +125,12 @@ export function LoopRegion({
     }
     host.addEventListener('touchmove', blockTouch, { passive: false })
     return () => {
-      scroller.removeEventListener('scroll', measure)
+      if (!followScroll) scroller.removeEventListener('scroll', measure)
       observer.disconnect()
       window.removeEventListener('resize', measure)
       host.removeEventListener('touchmove', blockTouch)
     }
-  }, [])
+  }, [followScroll])
 
   applyRef.current = () => {
     const point = pendingMove.current
@@ -184,8 +199,8 @@ export function LoopRegion({
   const rawRight = xAt(project.loopEndSample, width)
   const left = Math.min(rawLeft, rawRight)
   const barWidth = Math.max(0, Math.abs(rawRight - rawLeft))
-  const viewLeft = box.viewWidth > 0 ? box.viewLeft : 0
-  const viewWidth = box.viewWidth > 0 ? box.viewWidth : width
+  const viewLeft = followScroll ? 0 : (box.viewWidth > 0 ? box.viewLeft : 0)
+  const viewWidth = followScroll ? width : (box.viewWidth > 0 ? box.viewWidth : width)
   const grips = layoutLoopGrips({
     start: rawLeft,
     end: rawRight,
@@ -195,9 +210,60 @@ export function LoopRegion({
     viewWidth,
     hit: loopGripHit(coarse),
   })
+  faceRef.current = {
+    start: grips.start.faceLeft,
+    startEnd: grips.start.faceLeft + grips.start.faceWidth,
+    end: grips.end.faceLeft,
+    endEnd: grips.end.faceLeft + grips.end.faceWidth,
+  }
   const body = { left, right: left + barWidth, top: 0, bottom: hostRef.current?.clientHeight || 44, mode: grips.mode }
   const finger = drag.current?.finger ?? null
   const liveRead = drag.current?.read ?? null
+
+  useLayoutEffect(() => {
+    if (!followScroll) return
+    const host = hostRef.current
+    if (!host) return
+    const scroller = scrollParent(host)
+    const measureView = () => {
+      const hostRect = host.getBoundingClientRect()
+      const scrollRect = scroller.getBoundingClientRect()
+      viewRef.current = {
+        origin: hostRect.left - scrollRect.left - scroller.clientLeft + scroller.scrollLeft,
+        width: scroller.clientWidth,
+      }
+    }
+    const apply = () => {
+      const widthNow = viewRef.current.width
+      if (!(widthNow > 1)) return
+      const left = scroller.scrollLeft - viewRef.current.origin
+      const right = left + widthNow
+      const faces = faceRef.current
+      const next = resolveGripParks({
+        startFace: faces.start,
+        startFaceEnd: faces.startEnd,
+        endFace: faces.end,
+        endFaceEnd: faces.endEnd,
+        viewLeft: left,
+        viewRight: right,
+        hit: 44,
+      })
+      setPark((prev) => (prev.start === next.start && prev.end === next.end ? prev : next))
+    }
+    measureView()
+    apply()
+    const onScroll = () => apply()
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    const observer = new ResizeObserver(() => {
+      measureView()
+      apply()
+    })
+    observer.observe(scroller)
+    return () => {
+      scroller.removeEventListener('scroll', onScroll)
+      observer.disconnect()
+    }
+  }, [followScroll, rawLeft, rawRight, box.width])
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!event.isPrimary) return
@@ -205,7 +271,10 @@ export function LoopRegion({
     const rect = event.currentTarget.getBoundingClientRect()
     const localX = event.clientX - rect.left
     const localY = event.clientY - rect.top
-    const edge = loopEdgeAt(localX, grips, body, localY)
+    const exact = visualGrip(event.currentTarget, event.clientX, event.clientY, 0)
+    const layoutEdge = loopEdgeAt(localX, grips, body, localY)
+    const sloppy = exact || layoutEdge === 'move' ? null : visualGrip(event.currentTarget, event.clientX, event.clientY, 12)
+    const edge = exact ?? sloppy ?? layoutEdge
     const onBody = edge !== 'seek'
     if (yieldEmpty && !onBody) return
     event.stopPropagation()
@@ -276,15 +345,20 @@ export function LoopRegion({
     }
   }
 
+  const startPark = followScroll ? park.start : 'track'
+  const endPark = followScroll ? park.end : 'track'
+
   return (
     <div
       ref={hostRef}
-      className={`loop-host${project.loopEnabled ? '' : ' off'}`}
+      className={`loop-host${project.loopEnabled ? '' : ' off'}${followScroll ? ' follow-scroll' : ''}`}
       data-loop={project.loopEnabled ? 'on' : 'off'}
       data-loop-hit={grips.mode}
       data-loop-region={view}
       data-loop-length={readout.length}
       data-loop-span={readout.span}
+      data-park-start={followScroll ? startPark : undefined}
+      data-park-end={followScroll ? endPark : undefined}
       role="group"
       aria-label={`Loop, ${readout.text}. Drag the edges to resize. Drag the middle to move it. Double-click to turn it ${project.loopEnabled ? 'off' : 'on'}.`}
       style={{ touchAction: 'none' }}
@@ -297,21 +371,44 @@ export function LoopRegion({
         style={{ left, width: barWidth, touchAction: 'none' }}
         title={`${readout.text}. Drag to move the loop. Double-click to turn it ${project.loopEnabled ? 'off' : 'on'}.`}
       />
-      <LoopGrip edge="start" box={grips.start} dragging={activeEdge === 'start'} />
-      <LoopGrip edge="end" box={grips.end} dragging={activeEdge === 'end'} />
+      {startPark === 'track' && <LoopGrip edge="start" box={grips.start} dragging={activeEdge === 'start'} />}
+      {endPark === 'track' && <LoopGrip edge="end" box={grips.end} dragging={activeEdge === 'end'} />}
+      {(startPark === 'left' || endPark === 'left') && (
+        <div className="park-dock left">
+          {startPark === 'left' && <LoopGrip edge="start" box={grips.start} dragging={activeEdge === 'start'} parked="left" />}
+          {endPark === 'left' && <LoopGrip edge="end" box={grips.end} dragging={activeEdge === 'end'} parked="left" />}
+        </div>
+      )}
+      {(startPark === 'right' || endPark === 'right') && (
+        <div className="park-dock right">
+          {startPark === 'right' && <LoopGrip edge="start" box={grips.start} dragging={activeEdge === 'start'} parked="right" />}
+          {endPark === 'right' && <LoopGrip edge="end" box={grips.end} dragging={activeEdge === 'end'} parked="right" />}
+        </div>
+      )}
       {finger != null && <i className="snap-line loop-finger" style={{ left: finger }} />}
       {liveRead && <em className="loop-drag-read" data-loop-drag-read="1" style={{ left: liveRead.x }}>{liveRead.text}</em>}
     </div>
   )
 }
 
-function LoopGrip({ edge, box, dragging }: { edge: 'start' | 'end'; box: LoopGripBox; dragging: boolean }) {
+function LoopGrip({ edge, box, dragging, parked = null }: { edge: 'start' | 'end'; box: LoopGripBox; dragging: boolean; parked?: 'left' | 'right' | null }) {
   return (
     <button
       type="button"
-      className={`loop-grip ${edge}${dragging ? ' dragging' : ''}`}
+      className={`loop-grip ${edge}${dragging ? ' dragging' : ''}${parked ? ' parked' : ''}`}
       data-loop-edge={edge}
-      style={{
+      style={parked ? {
+        position: 'relative',
+        left: 'auto',
+        right: 'auto',
+        top: 0,
+        width: 44,
+        minWidth: 44,
+        height: '100%',
+        bottom: 'auto',
+        touchAction: 'none',
+      } : {
+        position: 'absolute',
         left: box.hitLeft,
         top: box.hitTop,
         width: box.hitWidth,
@@ -324,7 +421,11 @@ function LoopGrip({ edge, box, dragging }: { edge: 'start' | 'end'; box: LoopGri
     >
       <span
         className={`loop-grip-face ${edge}`}
-        style={{ left: box.faceLeft - box.hitLeft, width: box.faceWidth }}
+        style={parked === 'right'
+          ? { left: 'auto', right: 0, width: box.faceWidth }
+          : parked === 'left'
+            ? { left: 0, right: 'auto', width: box.faceWidth }
+            : { left: box.faceLeft - box.hitLeft, width: box.faceWidth }}
         aria-hidden="true"
       />
     </button>
@@ -356,6 +457,19 @@ export function SongLoopStrip({ store, onSeek }: { store: ProjectStore; onSeek?:
 
 function near(a: number, b: number) {
   return Math.abs(a - b) < 0.5
+}
+
+function visualGrip(host: HTMLElement, clientX: number, clientY: number, slop = 0): 'start' | 'end' | null {
+  let best: { edge: 'start' | 'end'; dist: number } | null = null
+  for (const edge of ['start', 'end'] as const) {
+    const node = host.querySelector<HTMLElement>(`[data-loop-edge="${edge}"]`)
+    if (!node) continue
+    const rect = node.getBoundingClientRect()
+    if (clientX < rect.left - slop || clientX > rect.right + slop || clientY < rect.top - slop || clientY > rect.bottom + slop) continue
+    const dist = (clientX - (rect.left + rect.width / 2)) ** 2 + (clientY - (rect.top + rect.height / 2)) ** 2
+    if (!best || dist < best.dist) best = { edge, dist }
+  }
+  return best?.edge ?? null
 }
 
 function scrollParent(node: HTMLElement) {

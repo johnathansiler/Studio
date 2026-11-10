@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { useScreenOverlay } from './screenOverlay'
 import { browserWidthFor, usePushPhase } from './dockPush'
 import { createPortal } from 'react-dom'
@@ -53,6 +53,8 @@ import { coarsePointer, patternHoldOpensMenu, patternMenuPoint, patternPointerIn
 import { clipTapAction, laneDoubleClickAddsClip } from './clipKeys'
 import { isSampledInstrument } from '../instruments/sampled'
 import { LoopRegion } from './LoopRegion'
+import { TimelineOverview } from './OverviewScrollbar'
+import { clampTimelinePx } from './overviewScroll'
 import { WaveformView } from './WaveformView'
 import { sampleAtX, type WaveSpan } from './waveZoom'
 import { CommentControl, CommentPins } from './timelineComments'
@@ -190,6 +192,12 @@ export function ArrangeView({
   const [ghost, setGhost] = useState<{ trackId: string; left: number; width: number } | null>(null)
   const [tool, setToolState] = useState(activeTool)
   const scroller = useRef<HTMLDivElement>(null)
+  const secondsRef = useRef(16)
+  const [laneZoom, setLaneZoom] = useState(1)
+  const laneZoomRef = useRef(laneZoom)
+  laneZoomRef.current = laneZoom
+  const zoomScroll = useRef<{ left: number | null; top: number | null }>({ left: null, top: null })
+  const clampPx = (value: number) => clampTimelinePx(value, scroller.current?.clientWidth ?? 0, secondsRef.current)
   const lastClipTap = useRef({ id: '', at: 0 })
   const headsRef = useRef<HTMLDivElement>(null)
   const innerRef = useRef<HTMLDivElement>(null)
@@ -245,7 +253,7 @@ export function ArrangeView({
   useEffect(() => {
     const onZoom = (event: Event) => {
       const factor = (event as CustomEvent<number>).detail
-      setPx((value) => Math.min(280, Math.max(30, value * factor)))
+      setPx((value) => clampPx(value * factor))
     }
     window.addEventListener('cueharbor-zoom', onZoom)
     return () => window.removeEventListener('cueharbor-zoom', onZoom)
@@ -278,7 +286,7 @@ export function ArrangeView({
       const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1
       const midX = (a.x + b.x) / 2
       const midY = (a.y + b.y) / 2
-      setPx(Math.min(280, Math.max(30, pinch.px * (dist / pinch.dist))))
+      setPx(clampPx(pinch.px * (dist / pinch.dist)))
       el.scrollLeft = pinch.left - (midX - pinch.x)
       el.scrollTop = pinch.top - (midY - pinch.y)
     }
@@ -297,6 +305,18 @@ export function ArrangeView({
       window.removeEventListener('pointercancel', up)
     }
   }, [])
+  useLayoutEffect(() => {
+    const el = scroller.current
+    if (!el) return
+    if (zoomScroll.current.left != null) {
+      el.scrollLeft = zoomScroll.current.left
+      zoomScroll.current.left = null
+    }
+    if (zoomScroll.current.top != null) {
+      el.scrollTop = zoomScroll.current.top
+      zoomScroll.current.top = null
+    }
+  }, [px, laneZoom])
 
   const seconds = Math.max(
     16,
@@ -304,6 +324,7 @@ export function ArrangeView({
     (project.loopEndSample / project.sampleRate) * 2,
     ...project.tracks.flatMap((t) => t.clips.map((c) => (c.startSample + c.durationSamples) / project.sampleRate + 2)),
   )
+  secondsRef.current = seconds
   const width = seconds * px
   const linear = mapIsLinear(project)
   const beatPx = (60 / project.tempo) * px
@@ -423,7 +444,7 @@ export function ArrangeView({
       const originX = event.clientX
       const start = pxRef.current
       watch(
-        (ev) => setPx(Math.min(280, Math.max(30, start * Math.pow(1.004, ev.clientX - originX)))),
+        (ev) => setPx(clampPx(start * Math.pow(1.004, ev.clientX - originX))),
         () => undefined,
       )
       return
@@ -849,7 +870,7 @@ export function ArrangeView({
           <button type="button" className="browser-resize" aria-label="Browser width. Drag to resize." title="Drag to resize the browser." onPointerDown={resizeBrowser} />
         </>
       )}
-      <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'}>
+      <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'} style={{ ['--lane-zoom' as string]: String(laneZoom) }}>
       <div className="heads-col">
       <div className="arrange-add">
         <AddTrackButton store={store} prominent onAdded={onTrackAdded} />
@@ -941,6 +962,7 @@ export function ArrangeView({
       </div>
       <div className="timeline-col">
       <div className="timeline-add-spacer" aria-hidden="true" />
+      <div className="timeline-stage">
       <div
         className="timeline-scroll"
         ref={scroller}
@@ -955,7 +977,7 @@ export function ArrangeView({
         onWheel={(event) => {
           if (event.ctrlKey || event.metaKey) {
             event.preventDefault()
-            setPx((value) => Math.min(280, Math.max(30, value * (event.deltaY > 0 ? 0.9 : 1.1))))
+            setPx((value) => clampPx(value * (event.deltaY > 0 ? 0.9 : 1.1)))
           }
         }}
       >
@@ -972,6 +994,7 @@ export function ArrangeView({
               xAt={(sample) => (sample / project.sampleRate) * px}
               onSeek={(sample) => onSeek(snapSampleToMap(sample, project))}
               yieldEmpty={tool === 'pan' || tool === 'zoom'}
+              followScroll
             />
             {marks.filter((mark) => mark.downbeat).map((mark) => (
               <span key={mark.beat} style={{ left: pxAtBeat(project, mark.beat, px) }}>
@@ -1260,6 +1283,30 @@ export function ArrangeView({
           <div className="playhead" data-playhead="arrange" style={{ left: (displayedPlayhead(position, project) / project.sampleRate) * px }} />
         </div>
         </div>
+        <TimelineOverview
+          scrollerRef={scroller}
+          seconds={seconds}
+          px={px}
+          laneZoom={laneZoom}
+          onTimeWindow={(nextPx, scrollLeft) => {
+            const next = clampPx(nextPx)
+            if (Math.abs(next - pxRef.current) < 0.01) {
+              if (scroller.current) scroller.current.scrollLeft = scrollLeft
+              return
+            }
+            zoomScroll.current.left = scrollLeft
+            setPx(next)
+          }}
+          onLaneWindow={(nextZoom, scrollTop) => {
+            if (Math.abs(nextZoom - laneZoomRef.current) < 0.001) {
+              if (scroller.current) scroller.current.scrollTop = scrollTop
+              return
+            }
+            zoomScroll.current.top = scrollTop
+            setLaneZoom(nextZoom)
+          }}
+        />
+      </div>
       </div>
       </div>
       </div>
