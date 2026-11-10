@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { AnchoredMenu } from './AnchoredMenu'
+import { BROWSER_TAB_EVENT } from './phoneContext'
 import { SheetGrab } from './bottomSheet'
 import { SheetClose } from './SheetClose'
 import { SoundBrowser } from './SoundBrowser'
@@ -309,5 +310,13 @@ export function ShellBrowser({
   onSeek: (sample: number) => void
 }) {
   const [tab, setTab] = useState<BrowserTab>('sounds')
+  useEffect(() => {
+    const onTab = (event: Event) => {
+      const next = (event as CustomEvent<BrowserTab>).detail
+      if (next) setTab(next)
+    }
+    document.addEventListener(BROWSER_TAB_EVENT, onTab)
+    return () => document.removeEventListener(BROWSER_TAB_EVENT, onTab)
+  }, [])
   return <PlaylistBrowser store={store} engine={engine} phone={phone} tab={tab} onTab={setTab} onClose={onClose} onSeek={onSeek} />
 }

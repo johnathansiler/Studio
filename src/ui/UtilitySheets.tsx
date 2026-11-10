@@ -56,7 +56,7 @@ export function UtilitySheets({
   return null
 }
 
-function ToolChoices({ store, onClose }: { store: ProjectStore; onClose: () => void }) {
+export function ToolChoices({ store, onClose }: { store: ProjectStore; onClose: () => void }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const current = TOOL_INFO[value]
   return (
@@ -80,7 +80,7 @@ function ToolChoices({ store, onClose }: { store: ProjectStore; onClose: () => v
   )
 }
 
-function SnapChoices({ store, onClose }: { store: ProjectStore; onClose: () => void }) {
+export function SnapChoices({ store, onClose }: { store: ProjectStore; onClose: () => void }) {
   const on = store.project.snap !== false
   const division = normalizeSnapDivision(store.project.snapDivision)
   const gridLabel = SNAP_DIVISIONS.find((item) => item.id === division)?.label ?? division

@@ -263,7 +263,7 @@
 .arrange-setup-body .map-head { height: auto; overflow: visible; }
 .arrange-setup-body .rec-bar { flex-wrap: wrap; }
 
-.shell.phone .arrange { --map-h: 0px; --ruler-h: 22px; }
+.shell.phone .arrange { --map-h: 0px; --ruler-h: 22px; --playhead-strip: 28px; }
 .heads-col,
 .timeline-col {
   min-width: 0;
@@ -281,13 +281,25 @@
 .arrange .heads .ruler-gap {
   height: calc(var(--map-h, 68px) + var(--ruler-h, 28px));
 }
+.shell.phone .arrange > .heads .ruler-gap,
+.shell.phone .arrange .heads .ruler-gap {
+  height: calc(var(--map-h, 0px) + var(--ruler-h, 22px) + var(--playhead-strip, 28px));
+}
 .arrange .timeline-scroll .ruler {
   height: var(--ruler-h, 28px);
   top: var(--map-h, 68px);
 }
-/* Phone loop strip is half of the old 44px bar. The grip hit stays 44px and may hang below. */
+/* Phone loop strip stays short. Grip hits match that height so they do not
+   cover the playhead strip. The ruler stays overflow visible so parked caps
+   can stick to the viewport edge. */
 .shell.phone .arrange .timeline-scroll .ruler {
   overflow: visible;
+}
+.shell.phone .arrange .ruler .loop-host button.loop-grip,
+.shell.phone .arrange .ruler .loop-host .park-dock .loop-grip {
+  height: var(--ruler-h, 22px) !important;
+  min-height: 0 !important;
+  max-height: var(--ruler-h, 22px) !important;
 }
 .shell.phone .arrange .timeline-scroll .ruler > span {
   top: 1px;

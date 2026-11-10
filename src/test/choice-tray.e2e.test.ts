@@ -205,7 +205,7 @@ describe('select and snap choice tray', () => {
 
         let browserHeight: number | null = null
         if (viewport.phoneSheet) {
-          await page.getByRole('button', { name: /^Browser/ }).first().click()
+          await page.getByRole('button', { name: viewport.phoneSheet ? 'Browse' : /^Browser/ }).first().click()
           const browserSheet = page.locator('.arrange-stage > .playlist-browser.bottom-sheet')
           await browserSheet.waitFor()
           await page.waitForFunction(() => {
@@ -215,11 +215,12 @@ describe('select and snap choice tray', () => {
             return box.height > 80 && box.top < window.innerHeight && box.bottom > 0
           })
           browserHeight = (await browserSheet.boundingBox())!.height
-          await page.getByRole('button', { name: /^Browser/ }).first().click()
+          await page.getByRole('button', { name: viewport.phoneSheet ? 'Browse' : /^Browser/ }).first().click()
           await browserSheet.waitFor({ state: 'detached' })
         }
 
-        await page.getByRole('button', { name: /^Tool:/ }).click()
+        if (viewport.phoneSheet) await page.getByRole('button', { name: 'Tools', exact: true }).click()
+        else await page.getByRole('button', { name: /^Tool:/ }).click()
         await page.locator('#tool-choices[data-choice-tray="open"]').waitFor()
         const selectTray = await readTray(page, '#tool-choices', '.tool-current')
         assertTray(`${viewport.name} select`, selectTray, SELECT_LABELS, browserHeight)
@@ -247,10 +248,10 @@ describe('select and snap choice tray', () => {
           await page.locator('#snap-choices').waitFor({ state: 'detached' })
           const off = await page.evaluate(() => (window as unknown as { __cueharbor: { store: { project: { snap?: boolean } } } }).__cueharbor.store.project.snap)
           expect(off).toBe(false)
-          await page.getByRole('button', { name: /^Tool:/ }).click()
+          await page.getByRole('button', { name: 'Tools', exact: true }).click()
           await page.locator('#tool-choices').getByRole('button', { name: /^Draw/ }).click()
           await page.locator('#tool-choices').waitFor({ state: 'detached' })
-          expect(await page.getByRole('button', { name: /^Tool: Draw/ }).isVisible()).toBe(true)
+          expect(await page.evaluate(() => (window as unknown as { __cueharbor: { store: { tool: string } } }).__cueharbor.store.tool)).toBe('pencil')
         } else {
           await page.keyboard.press('Escape')
           await page.locator('#snap-choices').waitFor({ state: 'detached' })

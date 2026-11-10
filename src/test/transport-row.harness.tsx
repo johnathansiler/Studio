@@ -34,6 +34,7 @@ function Bar() {
         store={store}
         engine={engine as never}
         simple
+        phone
         onPlay={() => undefined}
         onStop={() => undefined}
         onRecord={() => undefined}

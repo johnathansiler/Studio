@@ -384,34 +384,9 @@
   box-sizing: border-box;
   align-items: center;
 }
-.shell.phone .arrange-add-tools {
-  display: flex;
-  flex-direction: row;
-  order: 2;
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  height: 40px;
-}
-.shell.phone .arrange-add .history-btns {
-  order: 1;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 4px;
-  width: auto;
-  height: 40px;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  box-shadow: none;
-}
-.shell.phone .arrange-add .ideas-bulb { order: 2; }
-.shell.phone .arrange-add .history-btn,
+.shell.phone .arrange-add-tools { display: none; }
 .shell.phone .arrange-add .ideas-bulb {
+  order: 2;
   flex: 0 0 auto;
   height: 40px;
   min-height: 40px;
@@ -419,8 +394,10 @@
 }
 .shell.phone .arrange-add .add-track-slot {
   order: 1;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
+  width: var(--track-head-w, max-content);
   min-width: 0;
+  max-width: var(--track-head-w, none);
   height: 40px;
 }
 .shell.phone .arrange-add .add-track-btn {
@@ -458,6 +435,42 @@
   height: 100%;
   min-height: 0;
   max-height: 100%;
+}
+
+/* Landscape uses the same two-row grid, so the bulb in the add row does not
+   push the timeline away from the track headers. */
+.shell.phone.land .arrange {
+  display: grid;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  align-items: stretch;
+}
+.shell.phone.land .arrange > .heads-col,
+.shell.phone.land .arrange > .timeline-col {
+  display: contents;
+}
+.shell.phone.land .arrange .heads {
+  grid-column: 1;
+  grid-row: 2;
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.shell.phone.land .arrange .timeline-stage {
+  grid-column: 2;
+  grid-row: 2;
+  width: auto;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+}
+.shell.phone.land .timeline-add-spacer {
+  display: none;
 }
 .shell.phone:not(.land) .arrange .head {
   width: auto;
@@ -811,11 +824,15 @@
 
 /* Compact lanes keep the mute row tappable. The name shares that row instead of stacking under it. */
 .shell.phone .arrange[data-lane-compact] .head .pl-head {
-  flex-direction: row;
-  align-items: center;
-  justify-content: flex-start;
-  padding: 2px 2px 2px 0;
-  gap: 2px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-end;
+  width: max-content;
+  min-width: max-content;
+  max-width: max-content;
+  padding: 0 2px 0 0;
+  gap: 0;
+  overflow: hidden;
 }
 .shell.phone .arrange[data-lane-compact] .pl-name-row {
   position: relative;

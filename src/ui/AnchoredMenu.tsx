@@ -117,7 +117,11 @@ export function AnchoredMenu({
     const onPointer = (event: PointerEvent) => {
       if (filling && mode !== 'sheet') return
       const live = trigger ?? triggerRef?.current ?? null
-      if (anchoredShouldClose(event.target as Node | null, live, menuRef.current)) onClose()
+      const target = event.target
+      // The phone row sits outside the sheet. Closing on pointerdown unmounts
+      // New / Open / Save / Export before their click can run.
+      if (target instanceof Element && target.closest('.phone-dock-slot')) return
+      if (anchoredShouldClose(target as Node | null, live, menuRef.current)) onClose()
     }
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return

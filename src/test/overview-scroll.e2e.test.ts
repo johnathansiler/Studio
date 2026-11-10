@@ -179,12 +179,15 @@ describe('timeline overview and loop handles', () => {
       }
     })
     expect(parked.gripW).toBeGreaterThanOrEqual(44)
-    expect(parked.gripH).toBeGreaterThanOrEqual(44)
+    const rulerH = parked.rulerBottom - parked.rulerTop
+    expect(parked.gripH).toBeGreaterThanOrEqual(rulerH - 1)
+    expect(parked.gripH).toBeLessThanOrEqual(rulerH + 1)
     expect(parked.faceTop).toBeGreaterThanOrEqual(parked.rulerTop - 1)
     expect(parked.faceBottom).toBeLessThanOrEqual(parked.rulerBottom + 1)
     const box = await page.locator('[data-loop-region="arrange"] [data-loop-edge="end"]').boundingBox()
     expect(box!.width).toBeGreaterThanOrEqual(44)
-    expect(box!.height).toBeGreaterThanOrEqual(44)
+    expect(box!.height).toBeGreaterThanOrEqual(rulerH - 1)
+    expect(box!.height).toBeLessThanOrEqual(rulerH + 1)
     const client = await page.context().newCDPSession(page)
     const from = { x: box!.x + box!.width - 8, y: box!.y + box!.height / 2 }
     const to = { x: from.x - 70, y: from.y }
@@ -702,7 +705,13 @@ describe('timeline overview and loop handles', () => {
       expect(box.sideLeft, `${name} vertical bar clears the track headers`).toBeGreaterThanOrEqual(box.headRight - 1)
       expect(Math.abs(box.laneLeft - box.headRight), `${name} lane meets the header column`).toBeLessThanOrEqual(2)
       expect(box.gripW, `${name} loop hit width`).toBeGreaterThanOrEqual(44)
-      expect(box.gripH, `${name} loop hit height`).toBeGreaterThanOrEqual(44)
+      const phoneGrip = viewport.height <= 520 || viewport.width <= 520
+      if (phoneGrip) {
+        expect(box.gripH, `${name} loop hit stays in the loop strip`).toBeGreaterThanOrEqual(box.rulerH - 1)
+        expect(box.gripH, `${name} loop hit stays in the loop strip`).toBeLessThanOrEqual(box.rulerH + 1)
+      } else {
+        expect(box.gripH, `${name} loop hit height`).toBeGreaterThanOrEqual(44)
+      }
       expect(box.gripRight, `${name} loop hit stays inside the timeline`).toBeLessThanOrEqual(box.scrollRight + 1)
       expect(box.faceTop, `${name} loop cap inside the strip`).toBeGreaterThanOrEqual(-1)
       expect(box.faceBottom, `${name} loop cap inside the strip`).toBeLessThanOrEqual(box.rulerH + (box.rulerH <= 26 ? 1 : 8))

@@ -155,7 +155,7 @@ describe('beat machine arrange header', () => {
             await page.locator('[data-pads="plugin"]').waitFor({ state: 'detached' })
           }
 
-          const browserButton = page.getByRole('button', { name: 'Browser', exact: true })
+          const browserButton = page.getByRole('button', { name: viewport.name === 'phone' || viewport.name === 'land' ? 'Browse' : 'Browser', exact: true })
           if ((await browserButton.getAttribute('aria-pressed')) !== 'true') await browserButton.click()
           await page.locator('[data-playlist-browser="open"]').waitFor()
           const docked = await layout(page)

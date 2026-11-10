@@ -35,6 +35,7 @@ function transportPage(shell: string) {
     store,
     engine: engine as never,
     simple: true,
+    phone: shell === 'phone',
     onPlay() {},
     onStop() {},
     onRecord() {},
@@ -48,7 +49,7 @@ function transportPage(shell: string) {
 
 const VIEWPORTS = [
   { name: 'desk', width: 1440, height: 900, shell: 'studio', words: ['Start', 'Play', 'Record'] },
-  { name: 'phone', width: 390, height: 844, shell: 'phone', words: ['Start', 'Play', 'Record', 'Punch', 'Click', '1-2'] },
+  { name: 'phone', width: 390, height: 844, shell: 'phone', words: ['Start', 'Play', 'Record', 'Punch', '1-2'] },
   { name: 'fold', width: 880, height: 1000, shell: 'fold', words: ['Start', 'Play', 'Record'] },
 ]
 
@@ -116,18 +117,19 @@ describe('transport words', () => {
           const widths = boxes.map((box) => box.width)
           const transport = document.querySelector('.transport')!.getBoundingClientRect()
           const tray = document.querySelector('.t-main')!.getBoundingClientRect()
-          const click = document.querySelector('.t-btn.click') as HTMLElement
+          const click = document.querySelector('.t-btn.click') as HTMLElement | null
           const count = document.querySelector('.t-btn.count') as HTMLElement
           const rec = document.querySelector('.t-btn.rec') as HTMLElement
           const paint = (node: HTMLElement, on: boolean) => {
             node.classList.toggle('on', on)
             return getComputedStyle(node).backgroundColor
           }
-          const clickOff = paint(click, false)
-          const clickOn = paint(click, true)
+          const clickOff = click ? paint(click, false) : ''
+          const clickOn = click ? paint(click, true) : ''
+          const countOff = paint(count, false)
           const countOn = paint(count, true)
           const recOn = paint(rec, true)
-          paint(click, false)
+          if (click) paint(click, false)
           paint(count, false)
           paint(rec, false)
           const buttons = row.map((node) => {
@@ -148,26 +150,37 @@ describe('transport words', () => {
             traySpans: tray.width >= transport.width - 16 && tray.left >= transport.left - 1 && tray.right <= transport.right + 1,
             minWidth: Math.min(...widths),
             widthSpread: Math.max(...widths) - Math.min(...widths),
+            clickWord: words.includes('Click') || [...document.querySelectorAll('.t-word')].some((node) => (node.textContent || '').trim() === 'Click'),
             clickOff,
             clickOn,
+            countOff,
             countOn,
             recOn,
           }
         })
-        expect(order.words.slice(0, 7), viewport.name).toEqual(['Start', 'Play', 'Record', 'Punch', 'Tempo', 'Click', '1-2'])
+        if (viewport.name === 'phone') {
+          expect(order.words, viewport.name).toEqual(['Start', 'Play', 'Record', 'Punch', 'Tempo', '1-2'])
+          expect(order.clickWord, viewport.name).toBe(false)
+          expect(order.rowCount, viewport.name).toBe(7)
+          expect(order.countOn, viewport.name).not.toBe(order.countOff)
+          expect(order.recOn, viewport.name).not.toBe(order.countOn)
+        } else {
+          expect(order.words.slice(0, 7), viewport.name).toEqual(['Start', 'Play', 'Record', 'Punch', 'Tempo', 'Click', '1-2'])
+          expect(order.clickWord, viewport.name).toBe(true)
+          expect(order.rowCount, viewport.name).toBe(8)
+          expect(order.clickOn, viewport.name).not.toBe(order.clickOff)
+          expect(order.countOn, viewport.name).toBe(order.clickOn)
+          expect(order.recOn, viewport.name).not.toBe(order.clickOn)
+        }
         expect(order.kicker).toBe('Tempo')
         expect(order.tapButton, viewport.name).toBe(false)
         expect(order.lengthButton, viewport.name).toBe(false)
         expect(order.tempoLabel).toContain('Tap to set tempo')
         expect(order.more, viewport.name).toBe(0)
-        expect(order.rowCount, viewport.name).toBe(8)
         expect(order.oneRow, viewport.name).toBe(true)
         expect(order.traySpans, viewport.name).toBe(true)
         expect(order.minWidth, viewport.name).toBeGreaterThanOrEqual(40)
         expect(order.widthSpread, viewport.name).toBeLessThanOrEqual(4)
-        expect(order.clickOn, viewport.name).not.toBe(order.clickOff)
-        expect(order.countOn, viewport.name).toBe(order.clickOn)
-        expect(order.recOn, viewport.name).not.toBe(order.clickOn)
         for (const button of order.buttons) {
           expect(button.height, `${viewport.name} ${button.text}`).toBeGreaterThanOrEqual(40)
           expect(button.width, `${viewport.name} ${button.text}`).toBeLessThan(viewport.width - 8)

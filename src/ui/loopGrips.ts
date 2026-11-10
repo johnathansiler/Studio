@@ -69,11 +69,15 @@ export function layoutLoopGrips(input: {
   labelWidth?: number
   hit?: number
   visual?: number
+  /** Phone arrange: the hit stays inside the short loop strip and cannot cover the playhead strip. Width stays 44. */
+  confineHeight?: boolean
 }): LoopLayout {
   const hit = Math.max(LOOP_GRIP_HIT, input.hit ?? LOOP_GRIP_HIT)
   const visual = clamp(input.visual ?? LOOP_GRIP_VISUAL, 10, 14)
   const hostW = Math.max(0, input.hostWidth)
-  const hostH = Math.max(44, input.hostHeight ?? 44)
+  const hostH = input.confineHeight
+    ? Math.max(1, input.hostHeight ?? 22)
+    : Math.max(44, input.hostHeight ?? 44)
   const viewL = input.viewWidth > 0 ? input.viewLeft : 0
   const viewR = input.viewWidth > 0 ? input.viewLeft + input.viewWidth : (hostW || viewL)
   const visL = hostW > 0 ? clamp(viewL, 0, hostW) : viewL

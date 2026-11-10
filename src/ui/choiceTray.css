@@ -4,7 +4,8 @@
 .shell .arrange-stage > .bottom-sheet.arrange-sheet.choice-tray,
 .shell.phone .arrange-stage > .bottom-sheet.arrange-sheet.choice-tray,
 .shell.fold .arrange-stage > .bottom-sheet.arrange-sheet.choice-tray,
-.shell.phone.land .arrange-stage > .bottom-sheet.arrange-sheet.choice-tray {
+.shell.phone.land .arrange-stage > .bottom-sheet.arrange-sheet.choice-tray,
+.shell.phone > .phone-sheet-host > .bottom-sheet.arrange-sheet.choice-tray {
   position: relative;
   z-index: 4;
   flex: 0 0 auto;

@@ -76,6 +76,8 @@ import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
 import { UNSTUCK_COPY, visibleMenu } from './ui/chrome'
 import { ViewSwitcher } from './ui/ViewSwitcher'
+import { PhoneDock } from './ui/phoneDock'
+import { CLOSE_ARRANGE_SHEETS, type PhonePlace } from './ui/phoneContext'
 import { MainMenu } from './ui/MainMenu'
 import { dockVisible, EDITOR_DOCK_DEFAULT, fittedDockWidth, paneAfterRestore, pianoDockWidth, readSessionDock, writeSessionDock } from './ui/sessionDock'
 import { deletesSelection } from './ui/clipKeys'
@@ -722,7 +724,9 @@ export function App() {
     if (!menuOpen) return
     const close = (event: PointerEvent) => {
       const target = event.target as HTMLElement | null
-      if (target?.closest('.shell-menu, .menu-btn')) return
+      // The row under the sheet is the menu's actions. Dismissing on
+      // pointerdown removes New, Open, Save, and Export before click.
+      if (target?.closest('.shell-menu, .menu-btn, .phone-context')) return
       setMenuOpen(false)
     }
     window.addEventListener('pointerdown', close)
@@ -1920,6 +1924,15 @@ async function importDropped(files: FileList) {
   useScreenOverlay(() => store.closeClipSheet(), store.clipSheet)
 
   const phoneArrange = phone && surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano'
+  const phonePlace: PhonePlace = collabShown
+    ? 'collab'
+    : panel === 'pads' || panel === 'steps' || panel === 'scaler' || panel === 'piano' || panel === 'rack'
+      ? 'plugin'
+      : editorView === 'mix'
+        ? 'mix'
+        : surface === 'studio' && editorView === 'arrange'
+          ? 'arrange'
+          : 'other'
   const menuButton = (
     <button ref={menuButtonRef} type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Project, edit, view, and settings." title="Project, edit, view, and settings." aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
       <MenuIcon />
@@ -2071,6 +2084,7 @@ async function importDropped(files: FileList) {
           engine={engine}
           syncLabel={session.state.syncLabel}
           simple={phone && !land}
+          phone={phone}
           recordHint={recordHint}
           onPlay={() => { engine.unlock(); void play() }}
           onStop={() => void stop()}
@@ -2085,24 +2099,42 @@ async function importDropped(files: FileList) {
           assetTransfers={session.state.assetTransfers}
         />
       )}
-      {phone && !phoneArrange && (
-        <div className="tool-slot" id="tool-slot" data-slot="phone-bar">
-          <div className="command-strip phone-bar tucked" role="toolbar" aria-label="Phone">
-            {menuButton}
-            <button
-              type="button"
-              className={`cap-btn${soundsOpen ? ' on' : ''}`}
-              aria-pressed={soundsOpen}
-              title="Sounds and loops. Open sounds, instruments, and loops."
-              onClick={() => setSoundsOpen((open) => !open)}
-            >
-              <strong>Browser</strong>
-            </button>
-            <div id="phone-screen-slot" />
+      {phone && (
+        <>
+          <div id="phone-sheet-host" className="phone-sheet-host" />
+          <div className="tool-slot phone-dock-slot" id="tool-slot" data-slot="phone-dock">
+            <PhoneDock
+              store={store}
+              place={phonePlace}
+              menuOpen={menuOpen}
+              browseOpen={soundsOpen}
+              menuRef={menuButtonRef}
+              onMenu={() => {
+                setSoundsOpen(false)
+                document.dispatchEvent(new CustomEvent(CLOSE_ARRANGE_SHEETS))
+                setMenuOpen((open) => !open)
+              }}
+              onBrowse={() => {
+                setMenuOpen(false)
+                setSoundsOpen((open) => !open)
+              }}
+              onMenuAction={(action) => {
+                if (action === 'new') beginNewProject()
+                else if (action === 'open') { setMenuOpen(false); void openProjects() }
+                else if (action === 'save') { setMenuOpen(false); void persist() }
+                else if (action === 'export') { setMenuOpen(false); setExportOpen(true) }
+              }}
+              onUnstuck={() => { setMenuOpen(false); setUnstuckOpen((open) => !open) }}
+              onUndo={() => store.undo()}
+              onRedo={() => store.redo()}
+              canUndo={store.canUndo}
+              canRedo={store.canRedo}
+              playheadSample={() => engine.currentTimelineSample()}
+            />
           </div>
-        </div>
+        </>
       )}
-      {surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano' && (
+      {!phone && surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano' && (
         <div className="tool-slot" id="tool-slot" data-slot="timeline-tools">
           <ButtonTray className={`command-strip${(phone && !land) || form === 'fold' ? ' tucked' : ''}`} id="command-strip" role="toolbar" aria-label="Edit">
             <ToolBar
@@ -2176,7 +2208,7 @@ async function importDropped(files: FileList) {
                   browserDock={soundsOpen}
                   onBrowserDock={setSoundsOpen}
                   onLibraryClose={() => { engine.stopPreview(); setSoundsOpen(false) }}
-                  phoneBar={phoneArrange ? { menu: menuButton, history: historyButtons, ideas: ideasButton } : null}
+                  phoneBar={phoneArrange ? { ideas: ideasButton } : null}
                 />
               )}
               {editorView === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} onOpenKeyboard={openKeyboard} />}
