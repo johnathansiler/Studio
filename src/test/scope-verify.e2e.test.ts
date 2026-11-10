@@ -318,21 +318,17 @@ describe('scoped arrange changes', () => {
       await page.locator('[data-clip="wave-clip"] canvas').waitFor()
       await page.screenshot({ path: `${artifacts}/waveform-390x844.png` })
 
-      await page.getByRole('button', { name: /^More/ }).first().click()
-      await page.locator('#transport-menu').waitFor()
-      await noSideScroll(page, '#transport-menu')
-      await page.screenshot({ path: `${artifacts}/more-menu-390x844.png` })
-      await page.keyboard.press('Escape')
+      expect(await page.locator('.transport .t-btn.menu, #transport-menu').count()).toBe(0)
+      await noSideScroll(page, '.transport .t-main')
+      await page.screenshot({ path: `${artifacts}/transport-row-390x844.png` })
 
       for (const size of [
         { width: 476, height: 752 },
         { width: 844, height: 390 },
       ]) {
         await page.setViewportSize(size)
-        await page.getByRole('button', { name: /^More/ }).first().click()
-        await page.locator('#transport-menu').waitFor()
-        await noSideScroll(page, '#transport-menu')
-        await page.keyboard.press('Escape')
+        expect(await page.locator('.transport .t-btn.menu, #transport-menu').count()).toBe(0)
+        await noSideScroll(page, '.transport .t-main')
       }
 
       await page.setViewportSize({ width: 390, height: 844 })

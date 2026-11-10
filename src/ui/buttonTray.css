@@ -47,7 +47,6 @@
 .inst-row,
 .tune-actions,
 .tune-tools,
-.metro-combo,
 .song-pills,
 .auto-mode,
 .timeline-tools,
@@ -64,7 +63,6 @@
 
 /* Hug the words. A switcher is the only row that stretches. */
 .btn-tray:not(.btn-tray-equal),
-.transport.simple .t-main,
 .command-strip,
 .history-btns,
 .plugin-transport,
@@ -75,7 +73,6 @@
 .players-actions,
 .tune-actions,
 .tune-tools,
-.metro-combo,
 .scaler-pills,
 .scaler-tools,
 .timeline-tools {
@@ -118,11 +115,6 @@
   box-sizing: border-box;
 }
 
-.transport.simple .t-main.btn-tray > .t-btn,
-.transport.simple .t-main.btn-tray > button,
-.transport.simple .t-main.btn-tray > .tempo-cluster,
-.transport .t-main > .t-btn,
-.transport .t-main > button,
 .plugin-transport > button,
 .call-pills > button,
 .call-pills .t-btn,
@@ -140,7 +132,6 @@
 .tune-actions > button,
 .tune-tools > button,
 .history-btns > button,
-.metro-combo > button,
 .scaler-pills button,
 .scaler-tools > button {
   flex: 0 0 auto;
@@ -184,9 +175,9 @@
 }
 
 .transport.simple .t-main .tempo-cluster {
-  flex: 0 0 auto;
-  width: auto;
-  min-width: max(40px, max-content);
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
   padding: 0;
   background: transparent;
   border: 0;
@@ -194,9 +185,9 @@
 }
 
 .transport.simple .t-main .tempo-cluster .bpm-readout {
-  width: auto;
-  min-width: 52px;
-  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 /* Browser header is the tray. The chip scroller is not a second one. */
@@ -260,14 +251,6 @@
   width: 100%;
   min-width: 0;
   max-width: 100%;
-}
-
-.anchored-menu.transport-drawer,
-.anchored-menu.transport-drawer[data-menu-size='dock'],
-.anchored-menu.transport-drawer[data-menu-size='pending'],
-.anchored-menu.transport-drawer[data-menu-size='fill'] {
-  width: max-content;
-  max-width: min(420px, calc(100vw - 16px));
 }
 
 /* Shared raised face. Moderate radius, never a pill.
@@ -640,4 +623,147 @@
   z-index: 2;
   flex: 0 0 auto;
   margin-top: 0;
+}
+
+/* One transport row. The tray fills the transport area and the controls share it. */
+.shell .transport.simple {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  justify-content: stretch;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 4px;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.shell .transport.simple .t-main.btn-tray {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: stretch;
+  justify-content: stretch;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  flex: 1 1 100%;
+  box-sizing: border-box;
+  gap: 4px;
+  padding: 4px;
+  container-type: inline-size;
+  container-name: transport-row;
+}
+
+.shell .transport.simple .t-main.btn-tray > .t-btn,
+.shell .transport.simple .t-main.btn-tray > button,
+.shell .transport.simple .t-main.btn-tray > .tempo-cluster,
+.shell .transport.simple .t-main .tempo-cluster > .t-btn,
+.shell .transport.simple .t-main .tempo-cluster > .bpm-readout {
+  flex: 1 1 0%;
+  width: 0;
+  min-width: 0;
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  padding: 0 2px;
+  box-sizing: border-box;
+}
+
+.shell .transport.simple .t-main .t-btn,
+.shell .transport.simple .t-main .bpm-readout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  overflow: hidden;
+}
+
+.shell .transport.simple .t-main .tempo-cluster > .t-btn,
+.shell .transport.simple .t-main .tempo-cluster > .bpm-readout {
+  padding: 0;
+}
+
+.shell .transport.simple .t-main .bpm-readout.tempo-tap,
+.shell .transport.simple .t-main .bpm-readout.tempo-edit {
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+
+.shell .transport.simple .t-main .t-word {
+  font-size: 12px;
+  font-weight: 680;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.shell .transport.simple .t-main .tempo-kicker {
+  font-size: 9px;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+.shell .transport.simple .t-main .tempo-figure {
+  font-size: 13px;
+  line-height: 1.05;
+  padding: 0;
+  height: auto;
+  min-height: 0;
+}
+
+.shell .transport.simple .t-main .t-mark {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.shell .transport.simple .t-main .punch svg {
+  display: none;
+}
+
+@container transport-row (max-width: 720px) {
+  .shell .transport.simple .t-main .t-word {
+    font-size: 10px;
+    letter-spacing: -0.045em;
+  }
+  .shell .transport.simple .t-main .tempo-kicker {
+    font-size: 8px;
+    letter-spacing: 0;
+  }
+  .shell .transport.simple .t-main .tempo-figure {
+    font-size: 11px;
+  }
+}
+
+@container transport-row (max-width: 420px) {
+  .shell .transport.simple .t-main .tempo-kicker {
+    font-size: 7px;
+  }
+  .shell .transport.simple .t-main .tempo-figure {
+    font-size: 9px;
+    letter-spacing: -0.06em;
+    font-variant-numeric: normal;
+  }
+}
+
+/* Sideways phones stay a single 40px strip so the mixer fader keeps its throw. */
+.shell.phone.land .transport.simple {
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  padding: 0 4px;
+}
+
+.shell.phone.land .transport.simple .t-main.btn-tray {
+  height: 40px;
+  padding: 0;
+  gap: 3px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }

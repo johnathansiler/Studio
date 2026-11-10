@@ -1,5 +1,8 @@
+import { resolve } from 'node:path'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { chromium } from 'playwright'
+import { createServer } from 'vite'
 import { describe, expect, it, vi } from 'vitest'
 import { AudioEngine } from '../audio/engine'
 import { midiPanicMessages } from '../model/midiTools'
@@ -63,7 +66,7 @@ describe('count-in on the transport', () => {
     expect(TRANSPORT_COPY.map((item) => item.id)).toEqual(expect.arrayContaining(['click', 'count-in', 'reset']))
   })
 
-  it('shows Click and Count on the transport with a lit on state', () => {
+  it('shows Metronome and Count-in on the transport row, with no More menu', () => {
     const store = new ProjectStore()
     store.project.metronomeEnabled = false
     store.project.countIn = false
@@ -71,21 +74,87 @@ describe('count-in on the transport', () => {
     const off = markup(store)
     expect(off).toContain('id="transport-click"')
     expect(off).toContain('id="transport-count"')
-    expect(off).toContain('>Metronome<')
-    expect(off).toContain('>Count<')
-    expect(off).toContain('>Off<')
+    expect(off).toContain('id="transport-reset"')
+    expect(off).toContain('aria-label="Metronome. Metronome while you play and record."')
+    expect(off).toContain('aria-label="Count-in. Count one bar before recording starts."')
+    expect(off).toContain('>1-2<')
+    expect(off).not.toContain('>More<')
+    expect(off).not.toContain('id="transport-menu"')
+    expect(off).not.toContain('transport-drawer')
     expect(off).not.toContain('click on')
     expect(off).not.toContain('count on')
     expect(off).toContain('aria-pressed="false"')
 
-    store.project.metronomeEnabled = true
-    store.project.countIn = true
-    store.project.countInBars = 2
+    store.toggle('metronomeEnabled')
+    store.toggle('countIn')
+    expect(store.project.metronomeEnabled).toBe(true)
+    expect(store.project.countIn).toBe(true)
+    expect(store.project.countInBars).toBe(1)
     const on = markup(store)
     expect(on).toContain('click on')
     expect(on).toContain('count on')
-    expect(on).toContain('>2 bars<')
     expect(on).toContain('aria-pressed="true"')
+    store.toggle('metronomeEnabled')
+    store.toggle('countIn')
+    expect(store.project.metronomeEnabled).toBe(false)
+    expect(store.project.countIn).toBe(false)
+  })
+})
+
+describe('transport row actions', () => {
+  it('toggles metronome and count-in, and reset calls the transport reset', async () => {
+    const server = await createServer({
+      configFile: resolve(import.meta.dirname, '../../vite.config.ts'),
+      server: { host: '127.0.0.1', port: 0, strictPort: false },
+    })
+    await server.listen()
+    const address = server.resolvedUrls?.local[0] ?? `http://127.0.0.1:${server.config.server.port}`
+    const browser = await chromium.launch({ headless: true })
+    try {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
+      await page.goto(`${address}src/test/transport-row.harness.html`, { waitUntil: 'networkidle' })
+      await page.locator('#transport-click').waitFor()
+      expect(await page.locator('.t-btn.menu, #transport-menu').count()).toBe(0)
+      const names = await page.locator('.t-main > .t-btn, .t-main > .tempo-cluster').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label') || node.getAttribute('aria-label')))
+      expect(names).toHaveLength(8)
+      const row = await page.locator('.t-main > .t-btn, .t-main > .tempo-cluster').evaluateAll((nodes) => {
+        const boxes = nodes.map((node) => node.getBoundingClientRect())
+        return {
+          count: boxes.length,
+          tops: boxes.map((box) => Math.round(box.top)),
+          min: Math.min(...boxes.map((box) => box.width)),
+          minHeight: Math.min(...boxes.map((box) => box.height)),
+        }
+      })
+      expect(row.count).toBe(8)
+      expect(new Set(row.tops).size).toBe(1)
+      expect(row.min).toBeGreaterThanOrEqual(40)
+      expect(row.minHeight).toBeGreaterThanOrEqual(40)
+
+      expect(await page.locator('#metro').getAttribute('data-on')).toBe('1')
+      await page.locator('#transport-click').click()
+      expect(await page.locator('#metro').getAttribute('data-on')).toBe('0')
+      expect(await page.locator('#transport-click').getAttribute('aria-pressed')).toBe('false')
+      await page.locator('#transport-click').click()
+      expect(await page.locator('#metro').getAttribute('data-on')).toBe('1')
+      expect(await page.locator('#transport-click').getAttribute('aria-pressed')).toBe('true')
+
+      expect(await page.locator('#count').getAttribute('data-on')).toBe('1')
+      await page.locator('#transport-count').click()
+      expect(await page.locator('#count').getAttribute('data-on')).toBe('0')
+      expect(await page.locator('#transport-count').getAttribute('aria-pressed')).toBe('false')
+      await page.locator('#transport-count').click()
+      expect(await page.locator('#count').getAttribute('data-on')).toBe('1')
+      expect(await page.locator('#count').getAttribute('data-bars')).toBe('1')
+      expect(await page.locator('#transport-count').getAttribute('aria-pressed')).toBe('true')
+
+      expect(await page.locator('#resets').getAttribute('data-n')).toBe('0')
+      await page.locator('#transport-reset').click()
+      expect(await page.locator('#resets').getAttribute('data-n')).toBe('1')
+    } finally {
+      await browser.close()
+      await server.close()
+    }
   })
 })
 
@@ -113,14 +182,14 @@ describe('room reset', () => {
     const host = markup(store, 'host')
     const guest = markup(store, 'guest')
     const solo = markup(store)
-    expect(host).toContain('>Reset<')
+    expect(host).toContain('aria-label="Reset. Reset – fix glitches"')
     expect(host).toContain('fix glitches')
-    expect(host).not.toContain('>Host only<')
-    expect(solo).toContain('>Reset<')
+    expect(host).not.toContain('Host only')
+    expect(solo).toContain('aria-label="Reset. Reset – fix glitches"')
     expect(solo).toContain('fix glitches')
-    expect(guest).toContain('>Host only<')
+    expect(guest).toContain('aria-label="Host only. Host only"')
     expect(guest).toContain('disabled')
-    expect(guest).not.toContain('>Reset<')
+    expect(guest).not.toContain('aria-label="Reset.')
   })
 
   it('stops at the start and clears toasts without changing the project or undo history', async () => {

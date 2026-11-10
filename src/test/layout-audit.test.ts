@@ -155,50 +155,15 @@ describe('layout audit across the five viewports', () => {
         }
 
         await page.getByRole('button', { name: /^Arrange/ }).first().click()
-        const menu = page.locator('.transport').getByRole('button', { name: /^More/ })
-        if (await menu.count()) {
-          await menu.click()
-          await page.locator('#transport-menu, .transport-drawer').first().waitFor()
-          await page.waitForFunction(() => {
-            const node = document.querySelector('#transport-menu, .transport-drawer')
-            return !!node && node.getAttribute('data-menu-size') !== 'pending'
-          })
-          const sheet = await page.evaluate(() => {
-            const node = document.querySelector('#transport-menu, .transport-drawer') as HTMLElement
-            const box = node.getBoundingClientRect()
-            const tabs = document.querySelector('.views')!.getBoundingClientRect()
-            const trigger = document.querySelector('.transport .t-btn.menu')!.getBoundingClientRect()
-            return {
-              left: box.left,
-              right: box.right,
-              top: box.top,
-              bottom: box.bottom,
-              tabBottom: tabs.bottom,
-              triggerBottom: trigger.bottom,
-              triggerLeft: trigger.left,
-              size: node.getAttribute('data-menu-size'),
-              overlay: node.hasAttribute('data-screen-overlay'),
-              vw: window.innerWidth,
-              vh: window.innerHeight,
-            }
-          })
-          if (sheet.top < sheet.tabBottom - 2) problems.push(`${viewport.name} transport menu covers the tabs`)
-          if (sheet.size === 'dock') {
-            if (sheet.overlay) problems.push(`${viewport.name} docked transport menu is a full-screen sheet`)
-            if (sheet.left <= 1 && sheet.right >= sheet.vw - 1) problems.push(`${viewport.name} docked transport menu fills the width`)
-            if (sheet.bottom - sheet.top > sheet.vh * 0.72) problems.push(`${viewport.name} docked transport menu fills the height`)
-            if (sheet.top + 8 < sheet.triggerBottom) problems.push(`${viewport.name} docked transport menu is not under More`)
-          } else if (sheet.left > 1 || sheet.right < sheet.vw - 1 || Math.abs(sheet.top - sheet.tabBottom) > 4) {
-            problems.push(`${viewport.name} transport menu is not under the tabs`)
-          }
-          await page.screenshot({ path: `${artifacts}/layout-after-transport-menu-${viewport.name}.png` })
-          const song = page.locator('#transport-menu button, .transport-drawer button, .arrange-panels button').filter({ hasText: /^Setup/ }).first()
-          if (await song.count()) {
-            await song.click()
-            await page.locator('[aria-label="Setup"]').first().waitFor()
-            const menuStill = await page.locator('#transport-menu:visible, .transport-drawer[data-open="true"]').count()
-            if (menuStill > 0) problems.push(`${viewport.name} song left the transport menu open`)
-            const scrim = await page.evaluate(() => {
+        if (await page.locator('.transport').getByRole('button', { name: /^More/ }).count()) {
+          problems.push(`${viewport.name} transport still has More`)
+        }
+        await page.screenshot({ path: `${artifacts}/layout-after-transport-${viewport.name}.png` })
+        const song = page.locator('.arrange-panels button').filter({ hasText: /^Setup/ }).first()
+        if (await song.count()) {
+          await song.click()
+          await page.locator('[aria-label="Setup"]').first().waitFor()
+          const scrim = await page.evaluate(() => {
               const node = document.querySelector('.song-scrim') as HTMLElement | null
               if (!node) return null
               const box = node.getBoundingClientRect()
@@ -208,7 +173,6 @@ describe('layout audit across the five viewports', () => {
             })
             if (scrim?.blocksMenu) problems.push(`${viewport.name} song scrim blocks the top bar`)
             await page.screenshot({ path: `${artifacts}/layout-after-song-${viewport.name}.png` })
-          }
         }
       }
       expect(problems, problems.join('\n')).toEqual([])

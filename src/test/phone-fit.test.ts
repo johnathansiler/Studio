@@ -70,11 +70,10 @@ describe('phone fit at 412x915', () => {
           expect(button.right).toBeLessThanOrEqual(412 + 1)
         }
         expect(timeline.ratio).toBeGreaterThanOrEqual(0.65)
-        await page.locator('.transport').getByRole('button', { name: /^More/ }).click()
-        const loop = await page.locator('.t-btn.loop .t-word').boundingBox()
-        expect(loop).toBeTruthy()
-        expect(loop!.x + loop!.width).toBeLessThanOrEqual(412 + 1)
-        await page.keyboard.press('Escape')
+        expect(await page.locator('.transport').getByRole('button', { name: /^More/ }).count()).toBe(0)
+        const row = await page.locator('.transport .t-main').boundingBox()
+        expect(row).toBeTruthy()
+        expect(row!.x + row!.width).toBeLessThanOrEqual(412 + 1)
         expect(timeline.names.map((item) => item.value)).toEqual(['Vocal', 'Music', 'Keys'])
         for (const name of timeline.names) {
           expect(name.width, name.value).toBeGreaterThan(48)

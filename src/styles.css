@@ -4065,64 +4065,6 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
 }
 .transport.simple .t-main .t-word { font-size: 12px; }
 .transport.simple .sync-pill { flex: 1 0 100%; }
-.transport-drawer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  align-content: flex-start;
-  gap: 4px;
-  width: 100%;
-  flex: 1 0 100%;
-  min-width: 0;
-}
-.transport-drawer[hidden] { display: none !important; }
-.transport-drawer .t-btn,
-.transport-drawer .loop-combo,
-.transport-drawer .metro-combo,
-.transport-drawer .reset,
-.transport-drawer .cap-btn {
-  flex: 0 1 auto;
-  width: auto;
-  height: 40px;
-  min-height: 40px;
-  max-height: 40px;
-  padding: 0 8px;
-  font-size: 12px;
-}
-.transport-drawer .loop-combo { min-width: 0; }
-.transport-drawer .loop-combo .t-btn { height: 40px; min-height: 40px; max-height: 40px; padding: 0 8px; font-size: 12px; }
-.transport-drawer .metro-combo {
-  display: flex;
-  width: auto;
-  gap: 4px;
-  padding: 0;
-}
-.transport-drawer .metro-combo .t-btn { flex: 0 1 auto; width: auto; height: 40px; min-height: 40px; max-height: 40px; padding: 0 8px; }
-.transport-drawer .lcd {
-  display: flex;
-  flex-direction: row;
-  align-items: baseline;
-  gap: 8px;
-  flex: 1 0 100%;
-  width: 100%;
-  min-width: 0;
-  min-height: 0;
-  height: 22px;
-  max-height: 22px;
-  padding: 0 2px;
-  overflow: hidden;
-}
-.transport-drawer .lcd .bars,
-.transport-drawer .lcd .tc { display: inline; font-size: 12px; line-height: 22px; white-space: nowrap; }
-.transport-drawer .transport-more-extra,
-.transport-drawer .arrange-panels {
-  display: contents;
-}
-.transport-drawer .cap-btn {
-  flex-direction: row;
-  gap: 4px;
-}
-.transport-drawer .cap-btn small { display: none; }
 .shell.phone:not(.land) .tool-slot:has(.command-strip.tucked) {
   display: block;
   height: auto;
@@ -4130,13 +4072,6 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   max-height: none;
   overflow: visible;
   padding: 4px 6px 6px;
-}
-.shell.phone:not(.land) .transport.simple .transport-drawer .lcd {
-  order: 8;
-  flex: 1 0 100%;
-  min-width: 0;
-  height: 22px;
-  max-height: 22px;
 }
 .shell.phone:not(.land) .command-strip.tucked {
   display: flex;
@@ -4193,10 +4128,7 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
 }
 .shell.phone:not(.land) .transport.simple .t-main .t-btn,
 .shell.phone:not(.land) .transport.simple .t-main .bpm-readout,
-.shell.phone:not(.land) .transport.simple .t-main .tempo-cluster,
-.shell.phone:not(.land) .transport.simple .transport-drawer .t-btn,
-.shell.phone:not(.land) .transport.simple .transport-drawer .loop-combo,
-.shell.phone:not(.land) .transport.simple .transport-drawer .cap-btn {
+.shell.phone:not(.land) .transport.simple .t-main .tempo-cluster {
   height: 40px;
   min-height: 40px;
   max-height: 40px;

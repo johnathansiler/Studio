@@ -62,10 +62,8 @@ function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup
   const [host, setHost] = useState<HTMLElement | null>(null)
   useEffect(() => {
     const pick = () => {
-      const extra = document.getElementById('transport-menu-extra')
-      const extraOpen = extra && !extra.closest('[hidden]')
       const actions = document.querySelector('.command-strip .clip-actions')
-      setHost((extraOpen ? extra : null) || (actions instanceof HTMLElement ? actions : null) || document.getElementById('command-strip') || document.getElementById('tool-slot'))
+      setHost((actions instanceof HTMLElement ? actions : null) || document.getElementById('command-strip') || document.getElementById('tool-slot'))
     }
     pick()
     const observer = new MutationObserver(pick)
@@ -95,13 +93,7 @@ function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup
         aria-expanded={setupOpen}
         aria-controls="arrange-setup"
         title="Automation and markers."
-        onClick={(event) => {
-          const opening = !setupOpen
-          onSetup()
-          if (opening && event.currentTarget.closest('#transport-menu, .transport-drawer')) {
-            document.dispatchEvent(new CustomEvent('cueharbor-close-transport-menu'))
-          }
-        }}
+        onClick={onSetup}
       >
         <strong>Setup</strong>
         <small>Automation and markers</small>
