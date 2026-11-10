@@ -1,6 +1,18 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { gainForDb, dbFromGain } from '../model/mixLaw'
 import { gainToDb } from '../model/time'
+
+/**
+ * Drop a typed draft when the fader moves on its own, such as a double-tap
+ * back to 0 dB. A draft that still matches the gain stays, so typing is not cut off.
+ */
+export function dbDraftAfterGain(draft: string | null, gain: number) {
+  if (draft == null) return null
+  const typed = Number(draft)
+  if (!Number.isFinite(typed)) return draft
+  const live = Math.round(dbFromGain(gain) * 10) / 10
+  return Math.abs(live - typed) > 0.05 ? null : draft
+}
 
 /** Visible decibel text plus a number field on the same spot, so a value can be typed. */
 export function DbRead({
@@ -21,6 +33,9 @@ export function DbRead({
   onBlur?: () => void
 }) {
   const [draft, setDraft] = useState<string | null>(null)
+  useEffect(() => {
+    setDraft((current) => dbDraftAfterGain(current, gain))
+  }, [gain])
   const shown = gain > 0.0001 ? (Math.round(dbFromGain(gain) * 10) / 10).toFixed(1) : ''
   const text = gainToDb(gain)
   return (

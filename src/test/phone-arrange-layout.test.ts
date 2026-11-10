@@ -13,7 +13,7 @@ describe('phone arrange chrome', () => {
     const css = readFileSync(new URL('../ui/arrangeSpace.css', import.meta.url), 'utf8')
     expect(css).toContain('.shell.phone .arrange { --map-h: 0px; --ruler-h: 22px; --playhead-strip: 28px; }')
     expect(css).toContain('height: calc(var(--ruler-h) - 2px)')
-    expect(css).toContain('overflow: hidden')
+    expect(css).toContain('overflow: visible')
     expect(css).toContain('--playhead-strip: 28px')
     const grips = readFileSync(new URL('../ui/loopGrips.ts', import.meta.url), 'utf8')
     expect(grips).toContain('export const LOOP_GRIP_HIT = 44')

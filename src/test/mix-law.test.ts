@@ -5,6 +5,7 @@ import { renderSamplerSpan } from '../audio/plugins/sampler'
 import { notePanGains, panGains } from '../audio/level'
 import { createEmptyProject } from '../model/types'
 import { smoothParam } from '../audio/paramCurve'
+import { dbDraftAfterGain } from '../ui/DbRead'
 import {
   DB_PX,
   DB_STEP,
@@ -196,5 +197,14 @@ describe('saved mix values and sampler pan', () => {
     expect(center).toBeGreaterThan(0.01)
     const drop = 10 * Math.log10(nudged / center)
     expect(Math.abs(drop)).toBeLessThan(0.5)
+  })
+
+  it('clears a typed decibel draft when the fader resets underneath it', () => {
+    const quiet = gainForDb(-6.3, 0, 1.25)
+    const unity = gainForDb(0, 0, 1.25)
+    expect(dbDraftAfterGain('-6.3', quiet)).toBe('-6.3')
+    expect(dbDraftAfterGain('-6.3', unity)).toBeNull()
+    expect(dbDraftAfterGain('-', unity)).toBe('-')
+    expect(dbDraftAfterGain(null, unity)).toBeNull()
   })
 })

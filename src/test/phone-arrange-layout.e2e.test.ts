@@ -340,11 +340,12 @@ describe('phone arrange layout', () => {
             expect(after.start).toBe(before.start)
             expect(after.end).toBe(before.end)
             const open = await page.evaluate(() => document.querySelector('.timeline-scroll')!.getBoundingClientRect().width)
-            const bar = await page.locator('[data-overview="y"]').boundingBox()
-            if (!bar) throw new Error('missing lane overview')
-            await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height - 12)
+            const thumb = await page.locator('[data-overview-thumb="y"]').boundingBox()
+            if (!thumb) throw new Error('missing lane overview thumb')
+            const x = thumb.x + thumb.width / 2
+            await page.mouse.move(x, thumb.y + Math.max(8, thumb.height - 8))
             await page.mouse.down()
-            await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height + 90, { steps: 12 })
+            await page.mouse.move(x, thumb.y + thumb.height + 140, { steps: 14 })
             await page.mouse.up()
             await page.waitForTimeout(80)
             const shrunk = await page.evaluate(() => {
@@ -361,9 +362,12 @@ describe('phone arrange layout', () => {
             })
             expect(shrunk.compact, 'lane zoom').toBe('true')
             expect(shrunk.row, 'lane height').toBeLessThan(80)
-            expect(shrunk.lane, 'lane width').toBeGreaterThan(390 * 0.6)
-            expect(shrunk.lane, 'lane vs open').toBeGreaterThan(open * 0.9)
-            expect(shrunk.head + shrunk.lane, 'header stays narrow').toBeLessThan(390)
+            // The header stays the narrow control column, so the lane does not
+            // collapse toward 40px. Mute, Solo, Arm, and Roll plus the overview
+            // bar are what remain beside it.
+            expect(shrunk.lane, 'lane width').toBeGreaterThan(140)
+            expect(shrunk.lane, 'lane vs open').toBeGreaterThan(open - 8)
+            expect(shrunk.head, 'header stays narrow').toBeLessThan(220)
           }
 
           await page.getByRole('button', { name: /^Menu/ }).click()

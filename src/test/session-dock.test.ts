@@ -89,7 +89,9 @@ async function spansArrange(page: Page) {
 async function drawAndTrim(page: Page) {
   const draw = page.getByRole('button', { name: /^Draw/ })
   if (!(await draw.isVisible().catch(() => false))) {
-    await page.getByRole('button', { name: /^Tool:/ }).click()
+    const legacy = page.getByRole('button', { name: /^Tool:/ })
+    if (await legacy.count()) await legacy.click()
+    else await page.getByRole('button', { name: 'Tools', exact: true }).click()
   }
   await draw.click()
   const view = await page.locator('.timeline-scroll').boundingBox()
@@ -107,7 +109,9 @@ async function drawAndTrim(page: Page) {
   const select = page.getByRole('button', { name: /^Select/ })
   if (!(await select.isVisible().catch(() => false))) {
     const picker = page.getByRole('button', { name: /^Tool:/ })
-    if ((await picker.getAttribute('aria-expanded')) !== 'true') await picker.click()
+    if (await picker.count()) {
+      if ((await picker.getAttribute('aria-expanded')) !== 'true') await picker.click()
+    } else await page.getByRole('button', { name: 'Tools', exact: true }).click()
   }
   await select.click()
   await page.mouse.click(view.x + 30, Math.min(lane.y + 110, view.y + view.height - 12))

@@ -289,9 +289,11 @@
   height: var(--ruler-h, 28px);
   top: var(--map-h, 68px);
 }
-/* Phone loop strip stays short. Grip hits stay inside it so the playhead strip can take the touch. */
+/* Phone loop strip stays short. Grip hits match that height so they do not
+   cover the playhead strip. The ruler stays overflow visible so parked caps
+   can stick to the viewport edge. */
 .shell.phone .arrange .timeline-scroll .ruler {
-  overflow: hidden;
+  overflow: visible;
 }
 .shell.phone .arrange .ruler .loop-host button.loop-grip,
 .shell.phone .arrange .ruler .loop-host .park-dock .loop-grip {
