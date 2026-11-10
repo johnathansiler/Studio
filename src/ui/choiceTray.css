@@ -1,0 +1,210 @@
+/* Select and Snap share one nestled tray.
+   The sheet hugs the chips, stays in the arrange column, and scrolls on its own. */
+
+.shell .arrange-stage > .bottom-sheet.arrange-sheet.choice-tray,
+.shell.phone .arrange-stage > .bottom-sheet.arrange-sheet.choice-tray,
+.shell.fold .arrange-stage > .bottom-sheet.arrange-sheet.choice-tray,
+.shell.phone.land .arrange-stage > .bottom-sheet.arrange-sheet.choice-tray {
+  position: relative;
+  z-index: 4;
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 16px 16px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 0;
+  background-color: #0c1210;
+  background-image: none;
+  box-shadow:
+    inset 0 3px 10px rgba(0, 0, 0, 0.62),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  padding: 0;
+}
+
+/* Plugins sit beside the timeline, so the tray cannot be another column.
+   Pin it to the bottom edge of the arrange stage, above the edit bar. */
+.arrange-stage.plugins-side:has(> .choice-tray) {
+  position: relative;
+}
+
+.shell .arrange-stage.plugins-side > .bottom-sheet.arrange-sheet.choice-tray {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  height: auto;
+  max-height: min(100%, 280px);
+  align-self: end;
+}
+
+/* The select tip is fixed over the edit bar and would cover the chips. */
+body:has(.choice-tray) .select-hint-host {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.choice-tray-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 0 0 auto;
+  width: min(560px, 100%);
+  margin: 0 auto;
+  min-height: 44px;
+  padding: 2px 4px 0 12px;
+  box-sizing: border-box;
+}
+
+.choice-tray-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.choice-tray-title strong {
+  font-size: 13px;
+  font-weight: 720;
+  letter-spacing: 0.01em;
+}
+
+.choice-tray-value {
+  color: var(--accent, #73c48f);
+  font-size: 13px;
+  font-weight: 740;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.shell .choice-tray button.choice-tray-close.guide-x.overlay-close[aria-label="Close"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  flex: 0 0 44px;
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  font-size: 0;
+  line-height: 0;
+}
+
+.choice-tray .choice-tray-close svg {
+  display: block;
+}
+
+.choice-tray > .choice-tray-body.bottom-sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: min(560px, 100%);
+  margin: 0 auto;
+  padding: 0 8px 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.choice-tray .choice-tray-well.btn-tray {
+  display: grid;
+  grid-template-columns: repeat(var(--tray-cols, 2), max-content);
+  grid-auto-rows: 40px;
+  gap: 4px;
+  padding: 4px;
+  align-items: center;
+  justify-content: start;
+  justify-items: stretch;
+  width: max-content;
+  max-width: 100%;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+}
+
+.choice-tray .choice-chip {
+  appearance: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: max-content;
+  min-width: 40px;
+  max-width: 100%;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  margin: 0;
+  padding: 6px 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  touch-action: manipulation;
+}
+
+.choice-tray .choice-chip-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  padding: 0 10px;
+  border-radius: 9px;
+  border: 1px solid var(--btn-quiet-border, #2c3b33);
+  background-color: var(--btn-quiet-bg, #141c18);
+  background-image: var(--btn-quiet-face, linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.32)));
+  box-shadow: var(--btn-bevel, inset 0 1px 0 rgba(255, 255, 255, 0.34), inset 0 -1px 0 rgba(0, 0, 0, 0.46));
+  color: var(--btn-quiet-ink, #c5d2c9);
+  font-size: 12px;
+  font-weight: 680;
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.choice-tray .choice-chip.on .choice-chip-face,
+.choice-tray .choice-chip[aria-pressed='true'] .choice-chip-face {
+  background-color: var(--accent, #73c48f);
+  background-image: var(--tray-on-face, linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08) 48%, rgba(0, 0, 0, 0.1)));
+  color: var(--accent-ink, #102117);
+  border-color: transparent;
+  box-shadow: var(--tray-btn-shadow, inset 0 1px 0 rgba(255, 255, 255, 0.32), inset 0 -1px 0 rgba(0, 0, 0, 0.42)), var(--tray-on-glow, 0 0 14px color-mix(in srgb, var(--accent) 58%, transparent));
+  font-weight: 740;
+}
+
+.choice-tray .choice-chip:focus-visible .choice-chip-face {
+  outline: 2px solid var(--accent, #73c48f);
+  outline-offset: 2px;
+}
+
+.shell.phone .choice-tray button.choice-chip,
+.shell.fold .choice-tray button.choice-chip,
+.shell .choice-tray button.choice-chip {
+  width: max-content;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}
