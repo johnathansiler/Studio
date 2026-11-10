@@ -169,3 +169,45 @@ function nearest(x: number, y: number | undefined, grips: { start: LoopGripBox; 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
+
+/** `track` stays on the beat. The others park on a viewport edge once the cap has left. */
+export type GripPark = 'track' | 'left' | 'right'
+
+/**
+ * Park only after the whole cap has left the view. While any of it is on screen
+ * it stays in timeline coordinates, so scrolling cannot pull it off the beat.
+ */
+export function gripParkSide(faceStart: number, faceEnd: number, viewLeft: number, viewRight: number): GripPark {
+  if (!(viewRight > viewLeft + 1)) return 'track'
+  if (faceEnd <= viewLeft + 0.5) return 'left'
+  if (faceStart >= viewRight - 0.5) return 'right'
+  return 'track'
+}
+
+/**
+ * Park caps that have left the view. If a cap still on the beat would sit under
+ * a parked neighbor, park it on that same edge so the 44px targets never overlap.
+ */
+export function resolveGripParks(input: {
+  startFace: number
+  startFaceEnd: number
+  endFace: number
+  endFaceEnd: number
+  viewLeft: number
+  viewRight: number
+  hit?: number
+}): { start: GripPark; end: GripPark } {
+  const hit = Math.max(1, input.hit ?? 44)
+  let start = gripParkSide(input.startFace, input.startFaceEnd, input.viewLeft, input.viewRight)
+  let end = gripParkSide(input.endFace, input.endFaceEnd, input.viewLeft, input.viewRight)
+  if (start === 'track' && end === 'right' && input.startFaceEnd > input.viewRight - hit) start = 'right'
+  if (start === 'track' && end === 'left' && input.startFace < input.viewLeft + hit) start = 'left'
+  if (end === 'track' && start === 'left' && input.endFace < input.viewLeft + hit) end = 'left'
+  if (end === 'track' && start === 'right' && input.endFaceEnd > input.viewRight - hit) end = 'right'
+  return { start, end }
+}
+
+/** Screen x of a timeline cap. `origin` is the content box's left edge, already including scroll. */
+export function loopCapScreenX(contentX: number, scrollLeft: number, contentOrigin: number) {
+  return contentOrigin + contentX - scrollLeft
+}

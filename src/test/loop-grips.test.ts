@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LOOP_GRIP_HIT, LOOP_GRIP_VISUAL, layoutLoopGrips, loopEdgeAt, loopGripHit, type LoopGripBox } from '../ui/loopGrips'
+import { LOOP_GRIP_HIT, LOOP_GRIP_VISUAL, gripParkSide, layoutLoopGrips, loopCapScreenX, loopEdgeAt, loopGripHit, resolveGripParks, type LoopGripBox } from '../ui/loopGrips'
 
 function right(box: LoopGripBox) {
   return box.hitLeft + box.hitWidth
@@ -122,5 +122,20 @@ describe('loop edge grips', () => {
     expect(loopEdgeAt(382, grips, { left: 0, right: 4000, mode: grips.mode }, 20)).toBe('end')
     expect(loopEdgeAt(12, grips, { left: 0, right: 4000, mode: grips.mode }, 20)).toBe('start')
     expect(overlaps(grips.start, grips.end)).toBe(false)
+  })
+
+  it('parks a cap only after it has left the view, and keeps an on-screen cap on the beat', () => {
+    expect(gripParkSide(180, 192, 0, 800)).toBe('track')
+    expect(gripParkSide(180, 192, 40, 840)).toBe('track')
+    expect(gripParkSide(180, 192, 192, 900)).toBe('left')
+    expect(gripParkSide(180, 192, 0, 180)).toBe('right')
+    expect(loopCapScreenX(180, 40, 120)).toBe(260)
+    expect(loopCapScreenX(180, 0, 120)).toBe(300)
+    expect(resolveGripParks({
+      startFace: 40, startFaceEnd: 52, endFace: 400, endFaceEnd: 412, viewLeft: 0, viewRight: 180,
+    })).toEqual({ start: 'track', end: 'right' })
+    expect(resolveGripParks({
+      startFace: 150, startFaceEnd: 162, endFace: 400, endFaceEnd: 412, viewLeft: 0, viewRight: 180,
+    })).toEqual({ start: 'right', end: 'right' })
   })
 })
