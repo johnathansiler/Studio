@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { gainToDb } from '../model/time'
+import { DbRead } from './DbRead'
 import type { ProjectStore } from '../state/store'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { isSampledInstrument } from '../instruments/sampled'
@@ -128,7 +129,17 @@ export function TrackOptions({
       <div className="track-volume">
         <div className="track-volume-top">
           <span>Volume</span>
-          <b>{gainToDb(track.volume)}</b>
+          <b>
+            <DbRead
+              gain={track.volume}
+              min={0}
+              max={1.25}
+              label={`${track.name} volume decibels`}
+              onFocus={() => store.beginAutomationTouch()}
+              onBlur={() => store.endAutomationTouch()}
+              onChange={(next) => store.updateTrack(track.id, { volume: next })}
+            />
+          </b>
         </div>
         <div className="track-fader">
           <i className="track-meter" data-track-meter="" aria-hidden="true">
@@ -138,7 +149,7 @@ export function TrackOptions({
             type="range"
             min={0}
             max={1.25}
-            step={0.01}
+            step="any"
             data-track-action="volume"
             title={volume.hint}
             aria-label={`${volume.label}. ${volume.hint}`}

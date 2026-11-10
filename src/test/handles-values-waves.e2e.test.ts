@@ -129,7 +129,7 @@ describe('loop handles, whole-number drags, and smooth waveforms', () => {
     }
   }, 120000)
 
-  it('soft-locks tempo and a pan knob onto whole numbers at three sizes', async () => {
+  it('soft-locks tempo onto whole numbers and lets a pan knob leave center', async () => {
     for (const viewport of VIEWPORTS) {
       const page = await browser.newPage({ viewport, hasTouch: true })
       await page.goto(url, { waitUntil: 'domcontentloaded' })
@@ -155,7 +155,9 @@ describe('loop handles, whole-number drags, and smooth waveforms', () => {
         viewport.width < 500 ? 'touch' : 'mouse',
       )
       const pan = await page.evaluate(() => window.__cueharbor.store.project.tracks[0].pan)
-      expect(Number.isInteger(pan), `pan ${pan} at ${viewport.width}`).toBe(true)
+      expect(pan, `pan ${pan} at ${viewport.width}`).not.toBe(0)
+      expect([-1, 1].includes(pan), `pan ${pan} at ${viewport.width}`).toBe(false)
+      expect(Math.abs(pan)).toBeLessThanOrEqual(1)
       await page.screenshot({ path: `/opt/cursor/artifacts/after-integer-${viewport.width}x${viewport.height}.png` })
       await page.close()
     }
@@ -242,12 +244,21 @@ declare global {
           tempo: number
           loopStartSample: number
           loopEndSample: number
-          tracks: { id: string; type: string; pan: number }[]
+          tracks: { id: string; type: string; pan: number; volume: number }[]
+          masterVolume: number
         }
         setLoop: (on: boolean, start?: number, end?: number) => void
         setView: (view: string) => void
+        updateTrack: (id: string, patch: { pan?: number; volume?: number }) => void
+        undo: () => void
+        redo: () => void
         addAsset: (asset: { id: string; name: string; sampleRate: number; channels: Float32Array[] }) => void
         addAudioClip: (trackId: string, clip: Record<string, unknown>) => void
+      }
+      engine: {
+        unlock: () => void
+        resume: () => Promise<void>
+        strips: Map<string, { pan: { pan: { value: number } }; fader: { gain: { value: number } } }>
       }
     }
   }

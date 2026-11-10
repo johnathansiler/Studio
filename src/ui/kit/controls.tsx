@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { attachGlissando } from '../glissando'
+import { controlLaw } from '../../model/mixLaw'
 import { attachControlGesture, dragValue, type GestureChange, type GestureElement, type GestureReadout } from '../gestures'
 import type { FaceTheme } from '../faces/themes'
 import './kit.css'
@@ -117,7 +118,7 @@ export function Knob({
         aria-label={label}
         aria-valuemin={min}
         aria-valuemax={max}
-        aria-valuenow={Math.round(value * 100) / 100}
+        aria-valuenow={Math.round(value * 10000) / 10000}
         aria-valuetext={shown}
         style={{ ['--arc' as string]: String(unitValue) }}
         onKeyDown={(event) => {
@@ -171,7 +172,7 @@ export function Fader({
         aria-label={label}
         aria-valuemin={min}
         aria-valuemax={max}
-        aria-valuenow={Math.round(value * 100) / 100}
+        aria-valuenow={Math.round(value * 10000) / 10000}
         aria-valuetext={shown}
       >
         <span className="track"><i style={{ height: `${unitValue * 100}%` }} /><b style={{ bottom: `calc(${unitValue * 100}% - 7px)` }} /></span>
@@ -216,7 +217,9 @@ export function TouchSlider({
   onStart?: () => void
   onCommit?: () => void
 }) {
+  const law = controlLaw({ label, title, className, min, max })
   const snap = (next: number) => {
+    if (law) return Math.max(min, Math.min(max, next))
     const span = step && step > 0 ? step : 0
     const raw = span ? min + Math.round((next - min) / span) * span : next
     return Math.max(min, Math.min(max, raw))
@@ -244,7 +247,7 @@ export function TouchSlider({
       title={title || label}
       aria-valuemin={min}
       aria-valuemax={max}
-      aria-valuenow={Math.round(value * 100) / 100}
+      aria-valuenow={Math.round(value * 10000) / 10000}
       aria-valuetext={shown}
       style={{ ['--at' as string]: String(unit) }}
     >
