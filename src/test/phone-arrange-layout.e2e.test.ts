@@ -75,12 +75,23 @@ async function measure(page: Page) {
     const overlaps: string[] = []
     for (const head of document.querySelectorAll<HTMLElement>('.arrange .head')) {
       const name = head.querySelector('input.name') as HTMLElement | null
-      if (!name) continue
-      const nameBox = name.getBoundingClientRect()
-      for (const button of head.querySelectorAll<HTMLElement>('button')) {
-        const rect = button.getBoundingClientRect()
-        const hit = nameBox.left < rect.right - 1 && nameBox.right > rect.left + 1 && nameBox.top < rect.bottom - 1 && nameBox.bottom > rect.top + 1
-        if (hit) overlaps.push((name as HTMLInputElement).value)
+      const meter = head.querySelector('.mini-meter') as HTMLElement | null
+      const buttons = [...head.querySelectorAll<HTMLElement>('button')]
+      if (name) {
+        const nameBox = name.getBoundingClientRect()
+        for (const button of buttons) {
+          const rect = button.getBoundingClientRect()
+          const hit = nameBox.left < rect.right - 1 && nameBox.right > rect.left + 1 && nameBox.top < rect.bottom - 1 && nameBox.bottom > rect.top + 1
+          if (hit) overlaps.push((name as HTMLInputElement).value)
+        }
+      }
+      if (meter) {
+        const meterBox = meter.getBoundingClientRect()
+        for (const button of buttons) {
+          const rect = button.getBoundingClientRect()
+          const hit = meterBox.left < rect.right - 1 && meterBox.right > rect.left + 1 && meterBox.top < rect.bottom - 1 && meterBox.bottom > rect.top + 1
+          if (hit) overlaps.push(`meter ${(name as HTMLInputElement | null)?.value || ''}`)
+        }
       }
     }
     return {

@@ -660,12 +660,6 @@
   min-width: 52px;
   max-width: none;
 }
-.shell.phone:not(.land) .arrange .pl-name-row .track-live {
-  flex: 0 0 22px;
-  width: 22px;
-  min-width: 22px;
-  max-width: 22px;
-}
 .shell.phone:not(.land) .arrange .pl-head .track-controls > .mini,
 .shell.phone:not(.land) .arrange .pl-head .track-controls > .piano-open,
 .shell.phone:not(.land) .arrange .pl-head .track-controls > .beat-open {
