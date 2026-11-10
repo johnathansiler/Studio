@@ -43,16 +43,39 @@ describe('studio navigation', () => {
         await page.getByRole('button', { name: /^Arrange/ }).first().waitFor()
         const tabs = await page.locator('.views button').evaluateAll((nodes) => nodes.map((node) => (node.textContent || '').replace(/\s+/g, ' ').trim()))
         expect(tabs).toEqual(['Collab', 'Arrange', 'Mix'])
-        const place = await page.evaluate(() => {
-          const bar = document.querySelector('.topbar')!.getBoundingClientRect()
-          const menu = document.querySelector('.menu-btn')!.getBoundingClientRect()
-          const name = document.querySelector('.project-name')!.getBoundingClientRect()
-          return { menuLeft: menu.left, menuHeight: menu.height, menuWidth: menu.width, barLeft: bar.left, barMid: bar.left + bar.width / 2, nameLeft: name.left }
-        })
-        expect(place.menuLeft).toBeLessThan(place.barMid)
-        expect(place.menuLeft).toBeLessThanOrEqual(place.nameLeft)
-        expect(place.menuHeight).toBeGreaterThanOrEqual(40)
-        expect(place.menuWidth).toBeGreaterThanOrEqual(40)
+        if (viewport.width <= 520) {
+          const place = await page.evaluate(() => {
+            const slot = document.querySelector('.tool-slot')!.getBoundingClientRect()
+            const menu = document.querySelector('.menu-btn')!.getBoundingClientRect()
+            const browser = [...document.querySelectorAll('.cap-btn')].find((button) => (button.textContent || '').includes('Browser'))!.getBoundingClientRect()
+            return {
+              menuLeft: menu.left,
+              browserLeft: browser.left,
+              menuHeight: menu.height,
+              menuWidth: menu.width,
+              inSlot: menu.top >= slot.top - 2 && menu.bottom <= slot.bottom + 2,
+              topName: !!document.querySelector('.topbar .project-name'),
+            }
+          })
+          expect(place.topName).toBe(false)
+          expect(place.inSlot).toBe(true)
+          expect(place.menuLeft).toBeLessThan(place.browserLeft)
+          expect(place.menuHeight).toBeGreaterThanOrEqual(40)
+          expect(place.menuWidth).toBeGreaterThanOrEqual(40)
+          await page.locator('.menu-btn').click()
+          await page.getByRole('textbox', { name: 'Project name' }).waitFor()
+        } else {
+          const place = await page.evaluate(() => {
+            const bar = document.querySelector('.topbar')!.getBoundingClientRect()
+            const menu = document.querySelector('.menu-btn')!.getBoundingClientRect()
+            const name = document.querySelector('.project-name')!.getBoundingClientRect()
+            return { menuLeft: menu.left, menuHeight: menu.height, menuWidth: menu.width, barLeft: bar.left, barMid: bar.left + bar.width / 2, nameLeft: name.left }
+          })
+          expect(place.menuLeft).toBeLessThan(place.barMid)
+          expect(place.menuLeft).toBeLessThanOrEqual(place.nameLeft)
+          expect(place.menuHeight).toBeGreaterThanOrEqual(40)
+          expect(place.menuWidth).toBeGreaterThanOrEqual(40)
+        }
         await page.close()
       }
 

@@ -70,6 +70,8 @@ export function MainMenu({
   latencyHint,
   latencyReadout,
   onLatency,
+  projectName,
+  onProjectName,
 }: {
   items: readonly MenuSpec[]
   pressed: (action: string) => boolean
@@ -80,11 +82,26 @@ export function MainMenu({
   latencyHint?: BufferHint
   latencyReadout?: string
   onLatency?: (hint: BufferHint) => void
+  /** Phone Arrange keeps the session name here after the top row is removed. */
+  projectName?: string
+  onProjectName?: (name: string) => void
 }) {
   const latencyValue = bufferHintLabel(latencyHint ?? 'interactive')
   const latencyDetail = latencyReadout || 'Base not measured. Output not measured.'
   return (
     <div className="shell-menu" id="shell-menu">
+      {onProjectName && (
+        <label className="menu-session">
+          <span>Session</span>
+          <input
+            className="project-name"
+            aria-label="Project name"
+            title="Session name"
+            value={projectName ?? ''}
+            onChange={(event) => onProjectName(event.target.value)}
+          />
+        </label>
+      )}
       {MENU_GROUPS.map((group) => {
         const rows = items.filter((item) => item.group === group.id)
         if (!rows.length && !(group.id === 'settings' && onLatency)) return null

@@ -21,6 +21,9 @@ async function waitForServer(url: string, child: ChildProcess) {
 
 async function openScaler(page: Page) {
   await page.goto('http://127.0.0.1:5217/', { waitUntil: 'domcontentloaded', timeout: 30000 })
+  const size = page.viewportSize()
+  const phone = !!size && size.width <= 520 && size.height >= size.width
+  if (phone) await page.locator('.track-more').first().click()
   await page.locator('[data-arrange-plugins="toggle"]').click()
   await page.getByRole('button', { name: 'Add Plugin', exact: true }).click()
   await page.locator('[data-plugin-choice="scaler"]').click()
