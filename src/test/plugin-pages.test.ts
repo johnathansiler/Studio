@@ -171,7 +171,7 @@ describe('plugin pages do not scroll', () => {
           const store = (window as unknown as { __cueharbor?: { store?: { project?: { tracks?: { name: string }[] } } } }).__cueharbor?.store
           return !!store?.project?.tracks?.some((track) => track.name === 'Keys')
         })
-        await page.locator('[data-arrange-plugins="toggle"]').waitFor()
+        await page.getByRole('button', { name: /^Arrange/ }).first().waitFor()
         await page.waitForTimeout(1200)
         for (const id of ids) {
           const errors: string[] = []
@@ -262,6 +262,10 @@ describe('plugin pages do not scroll', () => {
           if (store.patchTrackId) store.openPatch(store.patchTrackId)
         })
         await page.locator('[data-plugin-root]').first().waitFor({ state: 'detached', timeout: 3000 }).catch(() => undefined)
+        const phoneShell = await page.locator('.shell.phone').count()
+        if (phoneShell && await page.locator('[data-arrange-plugins="toggle"]').count() === 0) {
+          await page.locator('.track-more').first().click()
+        }
         await page.locator('[data-arrange-plugins="toggle"]').click()
         await page.locator('[data-plugins-panel="open"]').waitFor()
         await page.evaluate(() => {

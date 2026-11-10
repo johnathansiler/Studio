@@ -115,6 +115,10 @@ describe('arrange track row and browser', () => {
         }
         await page.screenshot({ path: '/opt/cursor/artifacts/arrange-phone-browser.png' })
 
+        if ((await page.getByRole('button', { name: 'Browser', exact: true }).getAttribute('aria-pressed')) === 'true') {
+          await page.getByRole('button', { name: 'Browser', exact: true }).click()
+        }
+        await page.locator('.head.is-selected .track-more').click()
         await page.getByRole('button', { name: /^Plugins/ }).click()
         await page.getByRole('button', { name: 'Add plugin' }).first().waitFor()
         await page.screenshot({ path: '/opt/cursor/artifacts/arrange-phone-plugins.png' })

@@ -65,6 +65,7 @@ export function TrackOptions({
   onPerform,
   onOpenBeatMachine,
   onAnalyze,
+  onOpenPlugins,
 }: {
   store: ProjectStore
   track: Track
@@ -75,6 +76,8 @@ export function TrackOptions({
   onPerform: (mode: 'keys' | 'drums') => void
   onOpenBeatMachine?: (trackId: string) => void
   onAnalyze: (trackId: string) => void
+  /** Phone Arrange has no bottom-bar Plugins button. The same sheet opens from here. */
+  onOpenPlugins?: () => void
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false)
   useEffect(() => { setConfirmRemove(false) }, [track.id])
@@ -229,6 +232,19 @@ export function TrackOptions({
         )}
       </div>
       <div className="track-plugins">
+        {onOpenPlugins && (
+          <button
+            type="button"
+            className="track-secondary"
+            data-track-action="plugins"
+            data-arrange-plugins="toggle"
+            title="Effects on this track."
+            aria-label="Plugins. Effects on this track."
+            onClick={() => onOpenPlugins()}
+          >
+            Plugins
+          </button>
+        )}
         <InsertList store={store} trackId={track.id} />
       </div>
       {(track.sends.length > 0 || buses) && <SendList store={store} trackId={track.id} />}

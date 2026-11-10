@@ -1911,6 +1911,39 @@ async function importDropped(files: FileList) {
   useScreenOverlay(() => store.closeSpectral(), store.spectralTrackId != null)
   useScreenOverlay(() => store.closeClipSheet(), store.clipSheet)
 
+  const phoneArrange = phone && !land && surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano'
+  const menuButton = (
+    <button ref={menuButtonRef} type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Project, edit, view, and settings." title="Project, edit, view, and settings." aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
+      <MenuIcon />
+      <span className="menu-word">Menu</span>
+    </button>
+  )
+  const historyButtons = (
+    <HistoryButtons canUndo={store.canUndo} canRedo={store.canRedo} onUndo={() => store.undo()} onRedo={() => store.redo()} />
+  )
+  const ideasButton = phoneArrange ? (
+    <button
+      type="button"
+      className={`ideas-bulb${unstuckOpen ? ' on' : ''}`}
+      aria-label="Ideas"
+      title="Ideas"
+      aria-pressed={unstuckOpen}
+      disabled={store.remoteFollow}
+      onClick={() => { setMenuOpen(false); setUnstuckOpen((open) => !open) }}
+    >
+      <IdeasBulbIcon />
+    </button>
+  ) : (
+    <TipButton
+      className={`unstuck-btn ${unstuckOpen ? 'on' : ''}`}
+      label={UNSTUCK_COPY.label}
+      hint={UNSTUCK_COPY.hint}
+      pressed={unstuckOpen}
+      disabled={store.remoteFollow}
+      onClick={() => { setMenuOpen(false); setUnstuckOpen((open) => !open) }}
+    />
+  )
+
   if (new URLSearchParams(window.location.search).get('faces') === '1') {
     return (
       <Suspense fallback={null}>
@@ -1927,7 +1960,7 @@ async function importDropped(files: FileList) {
     }}>
     <div
       ref={shellRef}
-      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''} ${store.keyboardMidi ? 'keys-open' : ''} ${keysLandscape && keyboardShellTurn(screenAngle) === 'upside-down' ? 'orient-180' : ''} ${keysLandscape && keyboardShellTurn(screenAngle) !== 'upside-down' ? 'keys-landscape' : ''}`}
+      className={`shell ${surface} ${phone ? 'phone' : ''} ${form === 'fold' ? 'fold' : ''} ${land ? 'land' : ''} ${phoneArrange ? 'phone-arrange' : ''} ${phonePane === 'room' && surface === 'studio' ? 'room' : ''} ${store.keyboardMidi ? 'keys-open' : ''} ${keysLandscape && keyboardShellTurn(screenAngle) === 'upside-down' ? 'orient-180' : ''} ${keysLandscape && keyboardShellTurn(screenAngle) !== 'upside-down' ? 'keys-landscape' : ''}`}
       style={{ ['--dock' as string]: `${dock}px`, ['--sounds' as string]: `${soundWidth}px` }}
       data-version={version}
       data-form={form}
@@ -1945,20 +1978,21 @@ async function importDropped(files: FileList) {
       }}
     >
       <header className="topbar">
-        <button ref={menuButtonRef} type="button" className={`menu-btn ${menuOpen ? 'on' : ''}`} aria-label="Menu. Project, edit, view, and settings." title="Project, edit, view, and settings." aria-expanded={menuOpen} aria-controls="shell-menu" onClick={() => setMenuOpen((open) => !open)}>
-          <MenuIcon />
-          <span className="menu-word">Menu</span>
-        </button>
-        <div className="brand">
-          <div className="mark" aria-hidden>
-            <svg width="16" height="16" viewBox="0 0 18 18">
-              <path d="M2 12c2-4 3.4-6 7-6s5 2 7 6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-              <circle cx="9" cy="5.5" r="1.3" fill="currentColor" />
-            </svg>
+        {!phoneArrange && menuButton}
+        {!phoneArrange && (
+          <div className="brand">
+            <div className="mark" aria-hidden>
+              <svg width="16" height="16" viewBox="0 0 18 18">
+                <path d="M2 12c2-4 3.4-6 7-6s5 2 7 6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                <circle cx="9" cy="5.5" r="1.3" fill="currentColor" />
+              </svg>
+            </div>
+            <h1>CueHarbor</h1>
           </div>
-          <h1>CueHarbor</h1>
-        </div>
-        <input className="project-name" aria-label="Project name" value={store.project.name} onChange={(event) => store.renameProject(event.target.value)} />
+        )}
+        {!phoneArrange && (
+          <input className="project-name" aria-label="Project name" value={store.project.name} onChange={(event) => store.renameProject(event.target.value)} />
+        )}
         <ViewSwitcher
           active={surface === 'studio' ? editorView : null}
           collabShown={collabShown}
@@ -1967,15 +2001,8 @@ async function importDropped(files: FileList) {
           onView={showView}
           onCollab={showCollab}
         />
-        <HistoryButtons canUndo={store.canUndo} canRedo={store.canRedo} onUndo={() => store.undo()} onRedo={() => store.redo()} />
-        <TipButton
-          className={`unstuck-btn ${unstuckOpen ? 'on' : ''}`}
-          label={UNSTUCK_COPY.label}
-          hint={UNSTUCK_COPY.hint}
-          pressed={unstuckOpen}
-          disabled={store.remoteFollow}
-          onClick={() => { setMenuOpen(false); setUnstuckOpen((open) => !open) }}
-        />
+        {!phoneArrange && historyButtons}
+        {!phoneArrange && ideasButton}
         <AnchoredMenu fill open={menuOpen} onClose={() => setMenuOpen(false)} label="Project menu" triggerRef={menuButtonRef} prefer="down">
           <MainMenu
             items={visibleMenu({
@@ -1991,6 +2018,8 @@ async function importDropped(files: FileList) {
             disabled={(action) => store.remoteFollow && (action === 'new' || action === 'session-mode' || action === 'capture' || action === 'snap' || action === 'loop' || action === 'signature' || action === 'box' || action === 'erase' || action === 'pan')}
             signature={`${store.project.timeSignature.numerator}/${store.project.timeSignature.denominator}`}
             onSignature={(numerator, denominator) => store.setTimeSignature(numerator, denominator)}
+            projectName={phoneArrange ? store.project.name : undefined}
+            onProjectName={phoneArrange ? (name) => store.renameProject(name) : undefined}
             latencyHint={latencyHint}
             latencyReadout={latencyReadout}
             onLatency={(hint) => {
@@ -2117,6 +2146,7 @@ async function importDropped(files: FileList) {
                   browserDock={soundsOpen}
                   onBrowserDock={setSoundsOpen}
                   onLibraryClose={() => { engine.stopPreview(); setSoundsOpen(false) }}
+                  phoneBar={phoneArrange ? { menu: menuButton, history: historyButtons, ideas: ideasButton } : null}
                 />
               )}
               {editorView === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} onOpenKeyboard={openKeyboard} />}
@@ -2328,6 +2358,16 @@ function MenuIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
       <path d="M3 4.5h10M3 8h10M3 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function IdeasBulbIcon() {
+  return (
+    <svg className="ideas-bulb-icon" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+      <path className="ideas-rays" d="M12 1.4v1.6M4.4 5.2l1.1 1.1M19.6 5.2l-1.1 1.1M2.2 12H3.8M20.2 12h1.6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M9 18h6M10 21h4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M12 3.2a5.6 5.6 0 0 0-3 10.3c.5.4.8 1 .8 1.6V17h4.4v-1.9c0-.6.3-1.2.8-1.6A5.6 5.6 0 0 0 12 3.2z" fill="currentColor" fillOpacity="0.22" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
     </svg>
   )
 }

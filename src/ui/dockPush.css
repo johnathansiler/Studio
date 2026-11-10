@@ -358,11 +358,54 @@
   width: auto;
   min-width: 0;
   max-width: 100%;
+  /* 75% of the 56px bar. The button stays a 40px touch target inside it. */
+  height: 42px;
+  min-height: 42px;
+  max-height: 42px;
+  padding: 1px 4px;
+  gap: 4px;
+  box-sizing: border-box;
+  align-items: center;
+}
+.shell.phone:not(.land) .arrange-add-tools {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 40px;
+}
+.shell.phone:not(.land) .arrange-add .history-btns {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  width: auto;
+  height: 40px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.shell.phone:not(.land) .arrange-add .history-btn,
+.shell.phone:not(.land) .arrange-add .ideas-bulb {
+  flex: 0 0 auto;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}
+.shell.phone:not(.land) .arrange-add .add-track-slot {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
 }
 .shell.phone:not(.land) .arrange-add .add-track-btn {
   width: 100%;
-  height: 52px;
-  min-height: 52px;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
 }
 .shell.phone:not(.land) .arrange .heads {
   grid-column: 1;
@@ -590,4 +633,156 @@
   width: auto;
   min-width: 0;
   max-width: 100%;
+}
+
+/* Portrait header hugs the wider of the name row and the pill row.
+   Shorter tracks stretch to that column so a name is not crushed. */
+.shell.phone:not(.land) .arrange {
+  column-gap: 0;
+}
+.shell.phone:not(.land) .arrange .heads {
+  width: max-content;
+  min-width: max-content;
+  max-width: max-content;
+}
+.shell.phone:not(.land) .arrange .head,
+.shell.phone:not(.land) .arrange .head .pl-head {
+  width: auto;
+  min-width: 100%;
+  max-width: none;
+}
+.shell.phone:not(.land) .arrange .head .pl-head {
+  min-width: max(100%, 156px);
+}
+.shell.phone:not(.land) .arrange .pl-name-row .name {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 52px;
+  max-width: none;
+}
+.shell.phone:not(.land) .arrange .pl-head .track-controls > .mini,
+.shell.phone:not(.land) .arrange .pl-head .track-controls > .piano-open,
+.shell.phone:not(.land) .arrange .pl-head .track-controls > .beat-open {
+  min-width: 40px;
+  width: max-content;
+}
+
+/* Session name lives in the menu on portrait Arrange. The menu itself stays a square list. */
+#shell-menu .menu-session {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px 6px;
+  box-sizing: border-box;
+}
+#shell-menu .menu-session span {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: var(--faint, #6d7f74);
+}
+#shell-menu .menu-session .project-name {
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  min-height: 44px;
+  flex: none;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line, #2a3a32);
+  background: #121a16;
+  color: inherit;
+  font-size: 16px;
+  font-weight: 680;
+}
+
+/* Portrait Arrange drops the chrome row. Tabs stay. Menu sits with the edit bar. */
+.shell.phone:not(.land).phone-arrange .topbar {
+  flex-wrap: nowrap;
+  gap: 0;
+  padding: 4px 6px 2px;
+  min-height: 0;
+}
+.shell.phone:not(.land).phone-arrange .views {
+  order: 0;
+  flex: 1 1 auto;
+  width: 100%;
+}
+
+.ideas-bulb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 214, 120, 0.5);
+  color: #ffe7a8;
+  background-color: #2a2416;
+  background-image: linear-gradient(180deg, rgba(255, 236, 180, 0.34), rgba(0, 0, 0, 0.28));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.38),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.38),
+    0 0 8px rgba(255, 196, 80, 0.55);
+}
+.ideas-bulb:disabled { opacity: 0.45; }
+.ideas-bulb.on,
+.ideas-bulb[aria-pressed="true"] {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.35),
+    0 0 12px rgba(255, 210, 110, 0.8);
+}
+.ideas-bulb-icon {
+  display: block;
+  filter: drop-shadow(0 0 3px rgba(255, 214, 120, 0.9));
+}
+.ideas-bulb .ideas-rays {
+  animation: ideas-shine 2.4s ease-in-out infinite;
+}
+@keyframes ideas-shine {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ideas-bulb .ideas-rays { animation: none; opacity: 0.85; }
+}
+
+/* Menu, Browser, Setup, Select, and Snap share one row and stay on screen. */
+.shell.phone:not(.land).phone-arrange .command-strip.tucked .clip-actions {
+  overflow: hidden;
+}
+.shell.phone:not(.land).phone-arrange .command-strip.tucked .clip-actions .arrange-panels {
+  display: contents;
+}
+.shell.phone:not(.land).phone-arrange .command-strip.tucked .menu-btn,
+.shell.phone:not(.land).phone-arrange .command-strip.tucked .cap-btn,
+.shell.phone:not(.land).phone-arrange .command-strip.tucked .tool-current,
+.shell.phone:not(.land).phone-arrange .command-strip.tucked .tool-quick,
+.shell.phone:not(.land).phone-arrange .command-strip.tucked .snap-inline {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 4px;
+  overflow: hidden;
+}
+.shell.phone:not(.land).phone-arrange .command-strip.tucked .menu-btn {
+  order: -1;
+}
+.shell.phone:not(.land).phone-arrange .command-strip.tucked .menu-word,
+.shell.phone:not(.land).phone-arrange .command-strip.tucked .cap-btn strong,
+.shell.phone:not(.land).phone-arrange .command-strip.tucked .tool-label,
+.shell.phone:not(.land).phone-arrange .command-strip.tucked .snap-inline .tool-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

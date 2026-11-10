@@ -180,6 +180,7 @@ describe('phone browser sheet, plugins scroll, and loop grips', () => {
         })
         expect(added.plugins.length, JSON.stringify(added)).toBeGreaterThan(6)
         const scrollBefore = await arrangeScroll(page)
+        await page.locator('.head.is-selected .track-more').click()
         await page.getByRole('button', { name: /^Plugins/ }).click()
         const sheet = page.locator('#arrange-plugins.bottom-sheet')
         await sheet.waitFor()

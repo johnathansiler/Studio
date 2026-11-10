@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { useScreenOverlay } from './screenOverlay'
 import { browserWidthFor, usePushPhase } from './dockPush'
 import { createPortal } from 'react-dom'
@@ -58,7 +58,7 @@ import { sampleAtX, type WaveSpan } from './waveZoom'
 import { CommentControl, CommentPins } from './timelineComments'
 
 
-function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup, onPlugins, setupButton }: { browserOpen: boolean; setupOpen: boolean; pluginsOpen: boolean; onBrowser: () => void; onSetup: () => void; onPlugins: () => void; setupButton: RefObject<HTMLButtonElement | null> }) {
+function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup, onPlugins, setupButton, menu, showPlugins = true }: { browserOpen: boolean; setupOpen: boolean; pluginsOpen: boolean; onBrowser: () => void; onSetup: () => void; onPlugins: () => void; setupButton: RefObject<HTMLButtonElement | null>; menu?: ReactNode; showPlugins?: boolean }) {
   const [host, setHost] = useState<HTMLElement | null>(null)
   useEffect(() => {
     const pick = () => {
@@ -76,6 +76,7 @@ function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup
   }, [])
   const buttons = (
     <div className="arrange-panels">
+      {menu}
       <button
         type="button"
         className={`cap-btn${browserOpen ? ' on' : ''}`}
@@ -98,19 +99,21 @@ function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup
         <strong>Setup</strong>
         <small>Automation and markers</small>
       </button>
-      <button
-        type="button"
-        className={`cap-btn${pluginsOpen ? ' on' : ''}`}
-        aria-pressed={pluginsOpen}
-        aria-expanded={pluginsOpen}
-        aria-controls="arrange-plugins"
-        data-arrange-plugins="toggle"
-        title="Effects on this track."
-        onClick={onPlugins}
-      >
-        <strong>Plugins</strong>
-        <small>Effects on this track</small>
-      </button>
+      {showPlugins && (
+        <button
+          type="button"
+          className={`cap-btn${pluginsOpen ? ' on' : ''}`}
+          aria-pressed={pluginsOpen}
+          aria-expanded={pluginsOpen}
+          aria-controls="arrange-plugins"
+          data-arrange-plugins="toggle"
+          title="Effects on this track."
+          onClick={onPlugins}
+        >
+          <strong>Plugins</strong>
+          <small>Effects on this track</small>
+        </button>
+      )}
     </div>
   )
   if (host) return createPortal(buttons, host)
@@ -137,6 +140,7 @@ export function ArrangeView({
   onBrowserDock,
   pluginsDrawer,
   pluginsMenu,
+  phoneBar,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -161,6 +165,8 @@ export function ArrangeView({
   pluginsDrawer?: boolean
   /** Open the add list with the drawer. */
   pluginsMenu?: boolean
+  /** Portrait phone Arrange: Menu in the edit bar, Undo/Redo/Ideas beside Add Track. */
+  phoneBar?: { menu: ReactNode; history: ReactNode; ideas: ReactNode } | null
 }) {
   const project = selectArrange(store).project
   const remotes = useRemotePeers()
@@ -818,6 +824,8 @@ export function ArrangeView({
         setupOpen={setupOpen}
         pluginsOpen={pluginsOpen}
         setupButton={setupButton}
+        menu={phoneBar?.menu}
+        showPlugins={form !== 'phone'}
         onPlugins={() => {
           if (!pluginsOpen) closeSheets()
           setPluginsOpen((open) => !open)
@@ -852,6 +860,12 @@ export function ArrangeView({
       <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'}>
       <div className="heads-col">
       <div className="arrange-add">
+        {phoneBar && (
+          <div className="arrange-add-tools">
+            {phoneBar.history}
+            {phoneBar.ideas}
+          </div>
+        )}
         <AddTrackButton store={store} prominent onAdded={onTrackAdded} />
       </div>
       <div
@@ -1304,6 +1318,11 @@ export function ArrangeView({
             onPerform={onPerform}
             onOpenBeatMachine={onOpenBeatMachine}
             onAnalyze={onAnalyze}
+            onOpenPlugins={phone ? () => {
+              if (sheetTrack) store.selectTrack(sheetTrack.id)
+              closeSheets()
+              setPluginsOpen(true)
+            } : undefined}
           />
         </ArrangeBottomSheet>
       )}
