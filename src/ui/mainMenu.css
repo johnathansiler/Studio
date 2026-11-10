@@ -1,0 +1,307 @@
+/* Project menu: one quiet list. Rows are text, not tray chips. */
+
+.anchored-menu:has(#shell-menu) {
+  gap: 0;
+  padding: 0;
+  align-items: stretch;
+}
+
+.anchored-menu[data-menu-size='pending']:has(#shell-menu),
+.anchored-menu[data-menu-size='dock']:has(#shell-menu) {
+  width: min(420px, calc(100vw - 16px));
+  max-width: min(420px, calc(100vw - 16px));
+  min-width: 0;
+}
+
+[data-screen-overlay].anchored-menu:has(#shell-menu) {
+  border: 0;
+  box-shadow: none;
+}
+
+.anchored-menu #shell-menu,
+[data-screen-overlay] #shell-menu,
+#shell-menu {
+  width: 100%;
+  max-width: none;
+  padding: 0 0 calc(8px + env(safe-area-inset-bottom));
+  gap: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+
+#shell-menu .menu-group,
+#shell-menu .menu-group[aria-label='Project'],
+#shell-menu .menu-group[aria-label='Edit'],
+#shell-menu .menu-group[aria-label='View'],
+#shell-menu .menu-group[aria-label='Tools'],
+#shell-menu .menu-group[aria-label='Settings'] {
+  display: flex;
+  flex-flow: column nowrap;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  grid-template-columns: none;
+}
+
+#shell-menu .menu-heading {
+  flex: none;
+  width: auto;
+  margin: 0;
+  padding: 14px 16px 4px;
+  min-height: 0;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-align: left;
+  text-transform: uppercase;
+  color: var(--faint, #6d7f74);
+  background: none;
+  border: 0;
+  grid-column: auto;
+}
+
+#shell-menu .menu-group:first-child .menu-heading {
+  padding-top: 6px;
+}
+
+#shell-menu .menu-rows {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+}
+
+.anchored-menu #shell-menu button.menu-row,
+.anchored-menu #shell-menu label.menu-row,
+#shell-menu button.menu-row,
+#shell-menu label.menu-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  align-self: stretch;
+  gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 44px;
+  max-height: none;
+  margin: 0;
+  padding: 8px 16px;
+  border-radius: 0 !important;
+  border-style: solid;
+  border-width: 0;
+  border-color: transparent;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: var(--text, #eef3ea);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 520;
+  letter-spacing: 0;
+  line-height: 1.25;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+  overflow: visible;
+  cursor: pointer;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#shell-menu .menu-rows > .menu-row + .menu-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#shell-menu button.menu-row > .menu-copy,
+#shell-menu label.menu-row > .menu-copy,
+#shell-menu .menu-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+}
+
+#shell-menu button.menu-row > .menu-aside,
+#shell-menu label.menu-row > .menu-value,
+#shell-menu .menu-aside,
+#shell-menu .menu-value {
+  width: auto;
+  max-width: max-content;
+  height: auto;
+}
+
+#shell-menu .menu-copy > .menu-label,
+#shell-menu .menu-copy > small {
+  width: 100%;
+  max-width: 100%;
+}
+
+#shell-menu .menu-label {
+  display: block;
+  color: var(--text, #eef3ea);
+  font-size: 15px;
+  font-weight: 560;
+  line-height: 20px;
+  text-align: left;
+  white-space: normal;
+}
+
+#shell-menu .menu-row small,
+#shell-menu .menu-copy small {
+  position: static;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  clip: auto;
+  clip-path: none;
+  color: var(--muted, #93a399);
+  font-size: 12px;
+  font-weight: 420;
+  line-height: 16px;
+  letter-spacing: 0;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+#shell-menu .menu-row > span::before,
+#shell-menu .menu-row[aria-pressed='true'] > span::before,
+#shell-menu .menu-row[aria-pressed='true']::after {
+  content: none;
+  display: none;
+}
+
+#shell-menu .menu-aside,
+#shell-menu .menu-value {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--muted, #93a399);
+  font-size: 14px;
+  font-weight: 520;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+#shell-menu .menu-chevron {
+  display: block;
+  flex: none;
+  color: var(--faint, #6d7f74);
+}
+
+#shell-menu .menu-check {
+  display: block;
+  flex: none;
+  color: var(--accent, #73c48f);
+}
+
+#shell-menu .menu-setting {
+  position: relative;
+}
+
+.anchored-menu #shell-menu .menu-setting select,
+#shell-menu .menu-setting select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0 !important;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 16px;
+  appearance: none;
+}
+
+#shell-menu .menu-setting select:focus {
+  outline: none;
+}
+
+.anchored-menu #shell-menu button.menu-row:hover,
+.anchored-menu #shell-menu label.menu-row:hover,
+#shell-menu button.menu-row:hover,
+#shell-menu label.menu-row:hover,
+.anchored-menu #shell-menu button.menu-row:active:not(:disabled),
+.anchored-menu #shell-menu label.menu-row:active,
+#shell-menu button.menu-row:active:not(:disabled),
+#shell-menu label.menu-row:active {
+  background-color: rgba(255, 255, 255, 0.06);
+  background-image: none;
+  box-shadow: none;
+  border-color: transparent;
+}
+
+.anchored-menu #shell-menu button.menu-row[aria-pressed='true'],
+#shell-menu button.menu-row[aria-pressed='true'] {
+  background-color: rgba(115, 196, 143, 0.16);
+  background-image: none;
+  box-shadow: none;
+  border-color: transparent;
+  color: var(--text, #eef3ea);
+}
+
+.anchored-menu #shell-menu button.menu-row[aria-pressed='true']:active:not(:disabled),
+#shell-menu button.menu-row[aria-pressed='true']:active:not(:disabled) {
+  background-color: rgba(115, 196, 143, 0.24);
+  background-image: none;
+  box-shadow: none;
+}
+
+#shell-menu button.menu-row[aria-pressed='true'] .menu-label {
+  color: var(--accent, #73c48f);
+}
+
+.anchored-menu #shell-menu button.menu-row:focus-visible,
+.anchored-menu #shell-menu label.menu-row:focus-within,
+#shell-menu button.menu-row:focus-visible,
+#shell-menu label.menu-row:focus-within {
+  outline: 2px solid rgba(115, 196, 143, 0.7);
+  outline-offset: -2px;
+}
+
+#shell-menu .menu-row:disabled,
+#shell-menu .menu-setting[aria-disabled='true'] {
+  opacity: 0.4;
+  cursor: default;
+}

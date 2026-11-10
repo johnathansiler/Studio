@@ -78,23 +78,58 @@ describe('scoped arrange changes', () => {
           expect(actions, `${size.width}x${size.height}`).toContain(action)
         }
         const fit = await menu.evaluate((node) => {
-          const buttons = [...node.querySelectorAll('button, select, .menu-sig')]
-          const heights = buttons.map((button) => button.getBoundingClientRect().height)
-          const smalls = [...node.querySelectorAll('small')].map((small) => {
+          const rows = [...node.querySelectorAll('.menu-row')]
+          const controls = [...node.querySelectorAll('button.menu-row, label.menu-row, .menu-setting select')]
+          const heights = controls.map((control) => control.getBoundingClientRect().height)
+          const hints = [...node.querySelectorAll('.menu-row small')].map((small) => {
             const box = small.getBoundingClientRect()
-            return box.width * box.height
+            const style = getComputedStyle(small)
+            return {
+              width: box.width,
+              height: box.height,
+              clipped: style.position === 'absolute' || style.visibility === 'hidden',
+            }
           })
+          const group = node.querySelector('.menu-group')
+          const groupStyle = group ? getComputedStyle(group) : null
+          const heading = node.querySelector('.menu-heading')
+          const headingStyle = heading ? getComputedStyle(heading) : null
           return {
             scroll: node.scrollWidth,
             client: node.clientWidth,
             heights,
-            smalls,
-            canScroll: node.scrollHeight > node.clientHeight + 4,
+            hints,
+            radii: rows.map((row) => getComputedStyle(row).borderRadius),
+            images: rows.map((row) => getComputedStyle(row).backgroundImage),
+            widths: rows.map((row) => row.getBoundingClientRect().width),
+            groupBorder: groupStyle ? parseFloat(groupStyle.borderTopWidth) : 1,
+            groupRadius: groupStyle ? groupStyle.borderRadius : '12px',
+            groupBg: groupStyle ? groupStyle.backgroundColor : 'rgb(0, 0, 0)',
+            headingCase: headingStyle ? headingStyle.textTransform : '',
+            headingSize: headingStyle ? parseFloat(headingStyle.fontSize) : 99,
           }
         })
-        expect(fit.scroll).toBeLessThanOrEqual(fit.client + 2)
-        expect(Math.min(...fit.heights)).toBeGreaterThanOrEqual(40)
-        expect(Math.max(...fit.smalls)).toBeLessThanOrEqual(4)
+        expect(fit.scroll, `${size.width}x${size.height}`).toBeLessThanOrEqual(fit.client + 2)
+        expect(Math.min(...fit.heights), `${size.width}x${size.height}`).toBeGreaterThanOrEqual(44)
+        expect(Math.max(...fit.heights), `${size.width}x${size.height}`).toBeLessThanOrEqual(120)
+        expect(fit.hints.length).toBeGreaterThan(0)
+        for (const hint of fit.hints) {
+          expect(hint.height).toBeGreaterThan(8)
+          expect(hint.width).toBeGreaterThan(24)
+          expect(hint.clipped).toBe(false)
+        }
+        expect(Math.min(...fit.widths)).toBeGreaterThanOrEqual(fit.client - 1)
+        for (const radius of fit.radii) expect(parseFloat(radius)).toBe(0)
+        for (const image of fit.images) expect(image).toBe('none')
+        expect(fit.groupBorder).toBe(0)
+        expect(parseFloat(fit.groupRadius)).toBe(0)
+        expect(fit.groupBg).toMatch(/rgba\(0,\s*0,\s*0,\s*0\)|transparent/)
+        expect(fit.headingCase).toBe('uppercase')
+        expect(fit.headingSize).toBeLessThanOrEqual(12)
+        const arrangeRadius = await page.getByRole('button', { name: /^Arrange/ }).first().evaluate((node) => getComputedStyle(node).borderRadius)
+        expect(parseFloat(arrangeRadius)).toBe(12)
+        const closeRadius = await close.evaluate((node) => parseFloat(getComputedStyle(node).borderRadius))
+        expect(closeRadius).toBe(12)
         const shortcuts = menu.locator('[data-menu-action="shortcuts"]')
         await shortcuts.scrollIntoViewIfNeeded()
         expect(await shortcuts.isVisible()).toBe(true)
@@ -106,6 +141,37 @@ describe('scoped arrange changes', () => {
           await menu.waitFor({ state: 'detached' })
           const tool = await page.evaluate(() => (window as unknown as { __cueharbor: { store: { tool: string } } }).__cueharbor.store.tool)
           expect(tool).toBe('pan')
+          await page.getByRole('button', { name: /^Menu/ }).click()
+          const again = page.locator('#shell-menu')
+          await again.waitFor()
+          const scrollRow = again.locator('[data-menu-action="pan"]')
+          expect(await scrollRow.getAttribute('aria-pressed')).toBe('true')
+          const checkBox = await scrollRow.locator('.menu-check').boundingBox()
+          expect(checkBox!.width).toBeGreaterThan(8)
+          expect(checkBox!.height).toBeGreaterThan(8)
+          const checkColor = await scrollRow.locator('.menu-check').evaluate((node) => getComputedStyle(node).color)
+          expect(checkColor.replace(/\s/g, '')).toContain('115,196,143')
+          const pressedBg = await scrollRow.evaluate((node) => getComputedStyle(node).backgroundColor)
+          expect(pressedBg.replace(/\s/g, '')).not.toBe('rgb(115,196,143)')
+          await page.locator('[data-screen-overlay] > .overlay-close').click()
+          await again.waitFor({ state: 'detached' })
+        } else if (size.width === 1440) {
+          await menu.locator('[data-menu-action="signature"] select').selectOption('3/4')
+          await page.waitForFunction(() => {
+            const sig = (window as unknown as { __cueharbor: { store: { project: { timeSignature: { numerator: number, denominator: number } } } } }).__cueharbor.store.project.timeSignature
+            return sig.numerator === 3 && sig.denominator === 4
+          })
+          expect(await menu.locator('[data-menu-action="signature"] .menu-value').innerText()).toContain('3/4')
+          await menu.locator('[data-menu-action="signature"] select').selectOption('4/4')
+          await menu.locator('[data-menu-action="latency"] select').selectOption('playback')
+          await page.waitForFunction(() => document.querySelector('[data-menu-action="latency"] .menu-value')?.textContent?.includes('Playback'))
+          await menu.locator('[data-menu-action="latency"] select').selectOption('interactive')
+          await page.waitForFunction(() => document.querySelector('[data-menu-action="latency"] .menu-value')?.textContent?.includes('Lowest'))
+          await menu.locator('[data-menu-action="shortcuts"]').click()
+          const help = page.getByRole('dialog', { name: 'Shortcuts' })
+          await help.waitFor()
+          await help.getByRole('button', { name: 'Close' }).click()
+          await menu.waitFor({ state: 'detached' })
         } else {
           await close.click()
           await menu.waitFor({ state: 'detached' })
