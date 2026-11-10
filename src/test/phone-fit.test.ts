@@ -49,6 +49,7 @@ describe('phone fit at 412x915', () => {
           return { ratio: lane.height / window.innerHeight, names }
         })
         const history = await page.evaluate(() => {
+          const bar = document.querySelector('.arrange-add')!.getBoundingClientRect()
           return ['[data-history="undo"]', '[data-history="redo"]'].map((selector) => {
             const button = document.querySelector(selector) as HTMLElement
             const word = button.querySelector('.history-word') as HTMLElement
@@ -57,16 +58,17 @@ describe('phone fit at 412x915', () => {
               text: word.textContent,
               display: getComputedStyle(word).display,
               top: box.top,
-              bottom: box.bottom,
+              height: box.height,
               right: box.right,
+              inAdd: bar.top - 1 <= box.top && box.bottom <= bar.bottom + 1,
             }
           })
         })
         for (const button of history) {
           expect(button.display).not.toBe('none')
           expect(button.text === 'Undo' || button.text === 'Redo').toBe(true)
-          expect(button.top).toBeGreaterThanOrEqual(0)
-          expect(button.bottom).toBeLessThanOrEqual(96)
+          expect(button.inAdd).toBe(true)
+          expect(button.height).toBeGreaterThanOrEqual(40)
           expect(button.right).toBeLessThanOrEqual(412 + 1)
         }
         expect(timeline.ratio).toBeGreaterThanOrEqual(0.65)
@@ -194,8 +196,12 @@ describe('phone fit at 412x915', () => {
         await page.getByRole('button', { name: /^Arrange/ }).first().click()
         const add = page.getByRole('button', { name: 'Add Track' })
         const addBox = await add.boundingBox()
-        expect(addBox!.height).toBeGreaterThanOrEqual(48)
-        expect(addBox!.x).toBeLessThan(80)
+        const addBar = await page.locator('.arrange-add').boundingBox()
+        expect(addBox!.height).toBeGreaterThanOrEqual(40)
+        expect(addBox!.height).toBeLessThanOrEqual(44)
+        expect(addBar!.x).toBeLessThan(8)
+        expect(addBox!.x).toBeGreaterThan(40)
+        expect(addBox!.x + addBox!.width).toBeLessThanOrEqual(413)
         await add.click()
         await page.getByRole('group', { name: 'Add Track' }).waitFor()
         await shot(page, 'live-add-track-412')
@@ -255,7 +261,8 @@ describe('phone fit at 412x915', () => {
         await phone.goto(url, { waitUntil: 'domcontentloaded' })
         await phone.getByRole('button', { name: /^Arrange/ }).first().waitFor()
         const phoneAdd = await phone.getByRole('button', { name: 'Add Track' }).boundingBox()
-        expect(phoneAdd!.height).toBeGreaterThanOrEqual(48)
+        expect(phoneAdd!.height).toBeGreaterThanOrEqual(40)
+        expect(phoneAdd!.height).toBeLessThanOrEqual(44)
         expect(phoneAdd!.width).toBeGreaterThanOrEqual(40)
         await phone.getByRole('button', { name: 'Add Track' }).click()
         const phoneChoices = phone.locator('.add-choice')

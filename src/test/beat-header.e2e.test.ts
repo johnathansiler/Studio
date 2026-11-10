@@ -138,8 +138,14 @@ describe('beat machine arrange header', () => {
             expect(row.clipped, `${viewport.name} ${row.name}`).toBe(false)
           }
           expect(closed.add?.text, viewport.name).toContain('Add Track')
-          expect(closed.add!.height, viewport.name).toBeGreaterThanOrEqual(48)
-          expect(closed.add!.width, viewport.name).toBeGreaterThanOrEqual((viewport.name === 'phone' ? closed.arrange : closed.column) - 16)
+          if (viewport.name === 'phone') {
+            expect(closed.add!.height, viewport.name).toBeGreaterThanOrEqual(40)
+            expect(closed.add!.height, viewport.name).toBeLessThanOrEqual(44)
+            expect(closed.add!.width, viewport.name).toBeGreaterThanOrEqual(120)
+          } else {
+            expect(closed.add!.height, viewport.name).toBeGreaterThanOrEqual(48)
+            expect(closed.add!.width, viewport.name).toBeGreaterThanOrEqual(closed.column - 16)
+          }
           if (viewport.name === 'phone') {
             expect(closed.column, 'phone column').toBeLessThanOrEqual(190)
             expect(closed.lane, 'phone lane').toBeGreaterThanOrEqual(200)
@@ -165,8 +171,14 @@ describe('beat machine arrange header', () => {
             expect(row.rows, `${viewport.name} browser ${row.name}`).toBe(1)
             expect(row.clipped, `${viewport.name} browser ${row.name}`).toBe(false)
           }
-          expect(docked.add!.width, `${viewport.name} browser add`).toBeGreaterThanOrEqual((viewport.name === 'phone' ? docked.arrange : docked.column) - 16)
-          expect(docked.add!.height, `${viewport.name} browser add`).toBeGreaterThanOrEqual(48)
+          if (viewport.name === 'phone') {
+            expect(docked.add!.height, `${viewport.name} browser add`).toBeGreaterThanOrEqual(40)
+            expect(docked.add!.height, `${viewport.name} browser add`).toBeLessThanOrEqual(44)
+            expect(docked.add!.width, `${viewport.name} browser add`).toBeGreaterThanOrEqual(120)
+          } else {
+            expect(docked.add!.width, `${viewport.name} browser add`).toBeGreaterThanOrEqual(docked.column - 16)
+            expect(docked.add!.height, `${viewport.name} browser add`).toBeGreaterThanOrEqual(48)
+          }
           if (viewport.name === 'phone') {
             expect(docked.column, 'phone browser column').toBeLessThanOrEqual(190)
             expect(docked.lane, 'phone browser lane').toBeGreaterThan(40)

@@ -286,8 +286,8 @@ describe('arrange plugins drawer', () => {
     const store = new ProjectStore(createEmptyProject())
 
     const phone = arrange(store, 390, 844)
-    expect(phone).toContain('data-arrange-plugins="toggle"')
-    expect(phone).toContain('>Plugins<')
+    expect(phone).not.toContain('data-arrange-plugins="toggle"')
+    expect(phone).not.toContain('>Plugins<')
     expect(phone).toContain('data-plugins-drawer="closed"')
     expect(phone).not.toContain('id="arrange-plugins"')
 
