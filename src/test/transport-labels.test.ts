@@ -9,7 +9,15 @@ import { ProjectStore } from '../state/store'
 import { TransportBar } from '../ui/TransportBar'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-const css = ['src/styles.css', 'src/ui/premium.css', 'src/ui/remoteFixes.css', 'src/ui/loopRegion.css']
+const css = [
+  'src/styles.css',
+  'src/ui/remoteFixes.css',
+  'src/ui/premium.css',
+  'src/ui/buttonTiers.css',
+  'src/ui/anchoredMenu.css',
+  'src/ui/buttonTray.css',
+  'src/ui/loopRegion.css',
+]
   .map((file) => readFileSync(resolve(root, file), 'utf8'))
   .join('\n')
 
@@ -39,9 +47,9 @@ function transportPage(shell: string) {
 }
 
 const VIEWPORTS = [
-  { name: 'desk', width: 1440, height: 900, shell: 'studio', words: ['Start', 'Play', 'Record', 'More'] },
-  { name: 'phone', width: 390, height: 844, shell: 'phone', words: ['Start', 'Play', 'Record', 'More'] },
-  { name: 'fold', width: 880, height: 1000, shell: 'fold', words: ['Start', 'Play', 'Record', 'More'] },
+  { name: 'desk', width: 1440, height: 900, shell: 'studio', words: ['Start', 'Play', 'Record'] },
+  { name: 'phone', width: 390, height: 844, shell: 'phone', words: ['Start', 'Play', 'Record', 'Punch', 'Click', '1-2'] },
+  { name: 'fold', width: 880, height: 1000, shell: 'fold', words: ['Start', 'Play', 'Record'] },
 ]
 
 describe('transport words', () => {
@@ -97,21 +105,34 @@ describe('transport words', () => {
           }
         }, viewport.words)
         expect(report.playClass).not.toContain(' on')
-        expect(report.stopped).toBe(report.idle)
         expect(report.playing).not.toBe(report.stopped)
         expect(report.barRight).toBeLessThanOrEqual(report.viewport + 1)
         expect(report.barScroll).toBeLessThanOrEqual(report.barClient + 1)
         const order = await page.evaluate(() => {
           const words = [...document.querySelectorAll('.t-main .t-word, .t-main .tempo-kicker')].map((node) => (node.textContent || '').trim())
-          const menu = document.querySelector('.t-main .t-btn.menu')!.getBoundingClientRect()
-          const drawer = document.querySelector('.transport-drawer') as HTMLElement
-          drawer.hidden = false
-          drawer.removeAttribute('hidden')
-          drawer.style.display = 'flex'
-          const panel = drawer.getBoundingClientRect()
-          const buttons = [...drawer.querySelectorAll('button')].map((node) => {
+          const row = [...document.querySelectorAll<HTMLElement>('.t-main > .t-btn, .t-main > .tempo-cluster')]
+          const boxes = row.map((node) => node.getBoundingClientRect())
+          const tops = boxes.map((box) => Math.round(box.top))
+          const widths = boxes.map((box) => box.width)
+          const transport = document.querySelector('.transport')!.getBoundingClientRect()
+          const tray = document.querySelector('.t-main')!.getBoundingClientRect()
+          const click = document.querySelector('.t-btn.click') as HTMLElement
+          const count = document.querySelector('.t-btn.count') as HTMLElement
+          const rec = document.querySelector('.t-btn.rec') as HTMLElement
+          const paint = (node: HTMLElement, on: boolean) => {
+            node.classList.toggle('on', on)
+            return getComputedStyle(node).backgroundColor
+          }
+          const clickOff = paint(click, false)
+          const clickOn = paint(click, true)
+          const countOn = paint(count, true)
+          const recOn = paint(rec, true)
+          paint(click, false)
+          paint(count, false)
+          paint(rec, false)
+          const buttons = row.map((node) => {
             const box = node.getBoundingClientRect()
-            return { text: (node.textContent || '').replace(/\s+/g, ' ').trim(), top: box.top, height: box.height, width: box.width }
+            return { text: (node.getAttribute('aria-label') || node.textContent || '').replace(/\s+/g, ' ').trim(), top: box.top, height: box.height, width: box.width }
           })
           const tempo = document.querySelector('.tempo-tap')
           return {
@@ -121,16 +142,32 @@ describe('transport words', () => {
             tapButton: buttons.some((button) => button.text === 'Tap'),
             tempoLabel: tempo?.getAttribute('aria-label') || '',
             lengthButton: buttons.some((button) => button.text === 'Length'),
-            menuTop: menu.top,
-            panelTop: panel.top,
+            more: document.querySelectorAll('.t-btn.menu, #transport-menu, .transport-drawer').length,
+            rowCount: row.length,
+            oneRow: new Set(tops).size === 1,
+            traySpans: tray.width >= transport.width - 16 && tray.left >= transport.left - 1 && tray.right <= transport.right + 1,
+            minWidth: Math.min(...widths),
+            widthSpread: Math.max(...widths) - Math.min(...widths),
+            clickOff,
+            clickOn,
+            countOn,
+            recOn,
           }
         })
-        expect(order.words.slice(0, 6), viewport.name).toEqual(['Start', 'Play', 'Record', 'Punch', 'Tempo', 'More'])
+        expect(order.words.slice(0, 7), viewport.name).toEqual(['Start', 'Play', 'Record', 'Punch', 'Tempo', 'Click', '1-2'])
         expect(order.kicker).toBe('Tempo')
         expect(order.tapButton, viewport.name).toBe(false)
         expect(order.lengthButton, viewport.name).toBe(false)
         expect(order.tempoLabel).toContain('Tap to set tempo')
-        expect(order.panelTop, viewport.name).toBeGreaterThanOrEqual(0)
+        expect(order.more, viewport.name).toBe(0)
+        expect(order.rowCount, viewport.name).toBe(8)
+        expect(order.oneRow, viewport.name).toBe(true)
+        expect(order.traySpans, viewport.name).toBe(true)
+        expect(order.minWidth, viewport.name).toBeGreaterThanOrEqual(40)
+        expect(order.widthSpread, viewport.name).toBeLessThanOrEqual(4)
+        expect(order.clickOn, viewport.name).not.toBe(order.clickOff)
+        expect(order.countOn, viewport.name).toBe(order.clickOn)
+        expect(order.recOn, viewport.name).not.toBe(order.clickOn)
         for (const button of order.buttons) {
           expect(button.height, `${viewport.name} ${button.text}`).toBeGreaterThanOrEqual(40)
           expect(button.width, `${viewport.name} ${button.text}`).toBeLessThan(viewport.width - 8)

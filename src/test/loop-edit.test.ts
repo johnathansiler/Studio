@@ -104,7 +104,7 @@ describe('loop length readout', () => {
     expect(loopLabelCenter(100, 100, 80, 0, 400)).toBe(150)
   })
 
-  it('shows the same length on the transport and every loop ruler', () => {
+  it('shows the same length on every loop ruler', () => {
     const store = new ProjectStore(song())
     const engine = {
       positionSamples: 0,
@@ -129,11 +129,9 @@ describe('loop length readout', () => {
       onRecord() {},
       onSeek() {},
     }))
-    expect(transport).toContain('data-loop-readout="transport"')
-    expect(transport).toContain('data-loop-length="4 bars"')
-    expect(transport).toContain('1 → 5')
+    expect(transport).not.toContain('data-loop-readout="transport"')
+    expect(transport).not.toContain('>More<')
     expect(transport).not.toContain('>Fine<')
-    expect(transport).toContain('data-loop-readout="transport"')
 
     const arrange = renderToStaticMarkup(createElement(ArrangeView, {
       store,

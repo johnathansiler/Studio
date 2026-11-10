@@ -173,8 +173,8 @@ describe('phone landscape compaction', () => {
     }
   })
 
-  it('keeps the tempo, Tap label, and timecode inside a portrait phone', async () => {
-    const transportCss = ['src/styles.css', 'src/ui/premium.css', 'src/ui/remoteFixes.css', 'src/ui/anchoredMenu.css', 'src/ui/loopRegion.css', 'src/ui/autoTune.css']
+  it('keeps the tempo inside a portrait phone transport row', async () => {
+    const transportCss = ['src/styles.css', 'src/ui/premium.css', 'src/ui/remoteFixes.css', 'src/ui/buttonTiers.css', 'src/ui/anchoredMenu.css', 'src/ui/buttonTray.css', 'src/ui/loopRegion.css', 'src/ui/autoTune.css']
       .map((file) => readFileSync(resolve(root, file), 'utf8'))
       .join('\n')
     const store = new ProjectStore()
@@ -207,9 +207,9 @@ describe('phone landscape compaction', () => {
         await page.setContent(pageHtml, { waitUntil: 'load' })
         expect(await page.locator('.tap-tempo').count()).toBe(0)
         expect(await page.getByRole('button', { name: /^Tap$/ }).count()).toBe(0)
+        expect(await page.getByRole('button', { name: /^More/ }).count()).toBe(0)
         const tempoLabel = await page.locator('.tempo-tap').getAttribute('aria-label')
         expect(tempoLabel).toContain('Tap to set tempo')
-        await page.getByRole('button', { name: /^More/ }).click()
         const box = await page.evaluate(() => {
           const read = (selector: string) => {
             const node = document.querySelector(selector)
@@ -238,14 +238,12 @@ describe('phone landscape compaction', () => {
           return {
             tempo: read('.tempo-tap'),
             figure: read('.tempo-figure'),
-            bars: read('.bars'),
-            tc: read('.tc'),
             width: window.innerWidth,
             height: window.innerHeight,
           }
         })
         expect(box.figure?.text).toBe('299.9')
-        for (const item of [box.tempo, box.figure, box.bars, box.tc]) {
+        for (const item of [box.tempo, box.figure]) {
           expect(item).not.toBeNull()
           if (!item) continue
           expect(item.textLeft).toBeGreaterThanOrEqual(item.left - 1)

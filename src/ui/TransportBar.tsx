@@ -1,12 +1,8 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { AnchoredMenu } from './AnchoredMenu'
 import type { AudioEngine } from '../audio/engine'
-import { formatLoopReadout } from '../model/loopEdit'
 import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, shouldOpenExactTempo, type TapMemory, type TapSource } from '../model/tap'
 import { dragNumeric } from '../model/dragNumeric'
 import { tempoDragIntent, tempoFromDrag } from '../model/tempoDrag'
-import { formatMapBars } from '../model/tempoMap'
-import { countInBarsOf, countInCaption, formatTimecode } from '../model/time'
 import { recordButtonOn } from '../model/transport'
 import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -21,6 +17,15 @@ import { TipButton } from './Hint'
 import { armFinePress, markIntegerLand } from './integerTick'
 import './loopRegion.css'
 import './remoteFixes.css'
+
+function ResetIcon() {
+  return (
+    <svg className="t-mark" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path d="M4.2 9a4.8 4.8 0 1 0 1.4-3.4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M4 3.1v3.4h3.4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
 
 export function TransportBar({
   store,
@@ -62,7 +67,6 @@ export function TransportBar({
   assetTransfers?: AssetStatus[]
 }) {
   const project = selectTransport(store).project
-  const [position, setPosition] = useState(engine.positionSamples)
   const [status, setStatus] = useState(engine.status)
   const [live, setLive] = useState<number | null>(null)
   const [draft, setDraft] = useState<string | null>(null)
@@ -85,13 +89,6 @@ export function TransportBar({
   const suppressFocus = useRef(false)
   const tapping = useRef(false)
   const flashTimer = useRef(0)
-  const [menuOpen, setMenuOpen] = useState(false)
-  useEffect(() => {
-    const close = () => setMenuOpen(false)
-    document.addEventListener('cueharbor-close-transport-menu', close)
-    return () => document.removeEventListener('cueharbor-close-transport-menu', close)
-  }, [])
-  const menuButton = useRef<HTMLButtonElement>(null)
   const [editingTempo, setEditingTempo] = useState(false)
   const editTimer = useRef(0)
   const tempoWrap = useRef<HTMLDivElement>(null)
@@ -101,7 +98,6 @@ export function TransportBar({
   useEffect(
     () =>
       engine.subscribe(() => {
-        setPosition(engine.positionSamples)
         setStatus(engine.status)
       }),
     [engine],
@@ -354,13 +350,9 @@ export function TransportBar({
   const running = status === 'playing' || status === 'recording' || status === 'counting-in'
   void simple
   const transport = (id: string) => copyOf(TRANSPORT_COPY, id)
-  const countBars = countInBarsOf(project)
-  const countCaption = countInCaption(countBars)
   const guestRoom = roomRole === 'guest'
   const resetCopy = transport('reset')
-  const loopRead = formatLoopReadout(project, project.loopStartSample, project.loopEndSample)
   const inSession = roomRole === 'host' || roomRole === 'guest'
-  const menuHint = 'Metronome, loop, reset, playhead, and sounds.'
   function armExactTempo(result: { bpm: number | null; ignored: boolean } | null) {
     window.clearTimeout(editTimer.current)
     if (!shouldOpenExactTempo(result) || store.remoteFollow) return
@@ -368,7 +360,7 @@ export function TransportBar({
   }
   const tempoLabel = `${tempoCopy.label}. Tap to set tempo. Drag up or down to change the tempo. ${tempoCopy.hint}`
   const tempoField = editingTempo ? (
-        <label className="bpm-readout tempo-edit">
+        <label className="t-btn bpm-readout tempo-edit">
           <span className="tempo-kicker">Tempo</span>
           <input
           ref={fieldRef}
@@ -415,7 +407,7 @@ export function TransportBar({
   ) : (
         <button
           type="button"
-          className={`bpm-readout tempo-tap${flash ? ' flash' : ''}`}
+          className={`t-btn bpm-readout tempo-tap${flash ? ' flash' : ''}`}
           title="Tap to set tempo. Drag up or down to change it. Pause after one tap to type an exact tempo."
           aria-label={tempoLabel}
           disabled={store.remoteFollow}
@@ -431,23 +423,6 @@ export function TransportBar({
           <span className="tempo-figure">{formatTempo(tempo)}</span>
         </button>
   )
-  const loopWord = project.loopEnabled ? `Loop ${loopRead.length}` : 'Loop'
-  const loopControl = (
-    <button
-      type="button"
-      className={`t-btn loop${project.loopEnabled ? ' on' : ''}`}
-      data-loop-readout="transport"
-      data-loop-length={loopRead.length}
-      data-loop-span={loopRead.span}
-      title={`${transport('loop').hint} ${loopRead.text}`}
-      aria-label={`${loopWord}. ${transport('loop').hint}`}
-      aria-pressed={project.loopEnabled}
-      disabled={store.remoteFollow}
-      onClick={() => store.toggle('loopEnabled')}
-    >
-      <span className="t-word">{loopWord}</span>
-    </button>
-  )
   const clickButton = (
         <TipButton
           id="transport-click"
@@ -458,22 +433,20 @@ export function TransportBar({
           disabled={store.remoteFollow}
           onClick={() => store.toggle('metronomeEnabled')}
         >
-          <span className="t-word">Metronome</span>
-          <span className="t-state">{project.metronomeEnabled ? 'On' : 'Off'}</span>
+          <span className="t-word">Click</span>
         </TipButton>
   )
   const countButton = (
         <TipButton
           id="transport-count"
-          className={`t-btn count${countBars > 0 ? ' on' : ''}`}
-          label={transport('count-in').label}
-          hint={`${transport('count-in').hint} Now ${countCaption}.`}
-          pressed={countBars > 0}
+          className={`t-btn count${project.countIn ? ' on' : ''}`}
+          label="Count-in"
+          hint={transport('count-in').hint}
+          pressed={project.countIn}
           disabled={store.remoteFollow}
-          onClick={() => store.cycleCountIn()}
+          onClick={() => store.toggle('countIn')}
         >
-          <span className="t-word">Count</span>
-          <span className="t-state">{countCaption}</span>
+          <span className="t-word">1-2</span>
         </TipButton>
   )
   const resetButton = (
@@ -485,17 +458,8 @@ export function TransportBar({
           disabled={guestRoom}
           onClick={() => onReset?.()}
         >
-          <span className="t-word">{guestRoom ? 'Host only' : 'Reset'}</span>
+          <ResetIcon />
         </TipButton>
-  )
-  const positionReadout = (
-      <div className="lcd" aria-live="polite" aria-label="Position">
-        <div className="bars">{formatMapBars(project, position)}</div>
-        <div className="tc">
-          {formatTimecode(position, project.sampleRate)} · {status}
-          {takeProgress != null ? ` · HQ ${Math.round(takeProgress * 100)}%` : ''}
-        </div>
-      </div>
   )
   return (
     <div className="transport simple">
@@ -527,38 +491,10 @@ export function TransportBar({
           onMidi={onMidi}
         />
         <div className="tempo-cluster" role="group" aria-label="Tempo" ref={tempoWrap}>{tempoField}</div>
-        <button
-          ref={menuButton}
-          type="button"
-          className={`t-btn menu${menuOpen ? ' on' : ''}`}
-          aria-expanded={menuOpen}
-          aria-controls="transport-menu"
-          title={menuHint}
-          aria-label={`More. ${menuHint}`}
-          onClick={() => setMenuOpen((open) => !open)}
-        >
-          <span className="t-word">More</span>
-        </button>
-      </ButtonTray>
-      <AnchoredMenu
-        id="transport-menu"
-        className="transport-drawer"
-        fill
-        open={menuOpen}
-        onClose={() => setMenuOpen(false)}
-        label="More"
-        triggerRef={menuButton}
-        prefer="down"
-      >
-        {loopControl}
-        <ButtonTray className="metro-combo" role="group" aria-label="Metronome">
-          {clickButton}
-          {countButton}
-        </ButtonTray>
+        {clickButton}
+        {countButton}
         {resetButton}
-        {positionReadout}
-        <div id="transport-menu-extra" className="transport-menu-extra" />
-      </AnchoredMenu>
+      </ButtonTray>
       {takeProgress != null && (
         <div
           className="hq-take"
