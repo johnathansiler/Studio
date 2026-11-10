@@ -1,10 +1,11 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import {
   contentOfPixel,
+  laneOverviewSpan,
   laneZoomBounds,
   overviewPart,
+  overviewThumb,
   panOverview,
-  thumbBox,
   timeWindow,
   timelinePxBounds,
   zoomLaneByEdge,
@@ -98,7 +99,7 @@ function OverviewBar({
     const paint = () => {
       const metrics = readMetrics(el, axis, pxRef.current, secondsRef.current, laneRef.current)
       const length = axis === 'x' ? track.clientWidth : track.clientHeight
-      const box = thumbBox(metrics.offset, metrics.view, metrics.span, length)
+      const box = overviewThumb(metrics.offset, metrics.view, metrics.span, metrics.visual, length)
       const across = axis === 'x' ? 'translateX' : 'translateY'
       thumb.style.transform = `${across}(${box.origin}px)`
       if (axis === 'x') {
@@ -134,7 +135,7 @@ function OverviewBar({
     const pointer = axis === 'x' ? event.clientX - rect.left : event.clientY - rect.top
     const length = axis === 'x' ? rect.width : rect.height
     const metrics = readMetrics(el, axis, pxRef.current, secondsRef.current, laneRef.current)
-    const box = thumbBox(metrics.offset, metrics.view, metrics.span, length)
+    const box = overviewThumb(metrics.offset, metrics.view, metrics.span, metrics.visual, length)
     const part = overviewPart(pointer, box.origin, box.size)
     if (!part) return
     event.stopPropagation()
@@ -160,6 +161,7 @@ function OverviewBar({
       total: Math.max(lanes.fixed + lanes.flex, 1),
       fixed: lanes.fixed,
       flex: lanes.flex,
+      lanePx: lanes.lanePx,
     }
     let frame = 0
     let latest = pointer
@@ -195,7 +197,7 @@ function OverviewBar({
         })
         onTimeRef.current(next.px, next.scrollLeft)
       } else {
-        const bounds = laneZoomBounds(node.clientHeight, drag.fixed, drag.flex)
+        const bounds = laneZoomBounds(node.clientHeight, drag.fixed, drag.flex, drag.lanePx)
         const next = zoomLaneByEdge({
           edge: drag.part,
           y0: drag.y0,
@@ -258,14 +260,13 @@ function OverviewBar({
 function readMetrics(el: HTMLElement, axis: Axis, px: number, seconds: number, laneZoom: number) {
   if (axis === 'x') {
     const span = Math.max(el.scrollWidth, seconds * Math.max(px, 0.05), el.clientWidth, 1)
-    return { offset: el.scrollLeft, view: el.clientWidth, span }
+    return { offset: el.scrollLeft, view: el.clientWidth, span, visual: span }
   }
   const lanes = measureLanes(el, laneZoom)
-  return {
-    offset: el.scrollTop,
-    view: el.clientHeight,
-    span: Math.max(el.scrollHeight, lanes.fixed + lanes.flex * Math.max(laneZoom, 0.05), el.clientHeight, 1),
-  }
+  const content = Math.max(el.scrollHeight, lanes.fixed + lanes.flex * Math.max(laneZoom, 0.05), 1)
+  const bounds = laneZoomBounds(el.clientHeight, lanes.fixed, lanes.flex, lanes.lanePx)
+  const visual = laneOverviewSpan(el.clientHeight, lanes.fixed, lanes.flex, laneZoom, bounds.min)
+  return { offset: el.scrollTop, view: el.clientHeight, span: content, visual }
 }
 
 function measureLanes(el: HTMLElement, zoom: number) {
@@ -275,6 +276,9 @@ function measureLanes(el: HTMLElement, zoom: number) {
   const fixed = mapHeight + (ruler?.offsetHeight ?? 0)
   const lanes = [...el.querySelectorAll(':scope .timeline-inner > .lane')] as HTMLElement[]
   const height = lanes.reduce((sum, lane) => sum + lane.offsetHeight, 0)
-  const flex = height > 0 ? height / Math.max(0.05, zoom) : 1
-  return { fixed, flex }
+  const scale = Math.max(0.05, zoom)
+  const flex = height > 0 ? height / scale : 1
+  const unscaled = lanes.map((lane) => lane.offsetHeight / scale).filter((value) => value > 1)
+  const lanePx = unscaled.length ? Math.min(...unscaled) : 0
+  return { fixed, flex, lanePx }
 }

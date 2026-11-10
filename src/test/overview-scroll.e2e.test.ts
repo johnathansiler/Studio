@@ -347,6 +347,273 @@ describe('timeline overview and loop handles', () => {
     await desk.page.close()
   }, 90000)
 
+  it('shrinks and grows lanes from the vertical bar at 390x844 and 1440x900', async () => {
+    const sizes = [
+      { width: 390, height: 844, touch: true },
+      { width: 1440, height: 900, touch: false },
+    ]
+    for (const viewport of sizes) {
+      const { page, errors } = await boot(viewport, viewport.touch)
+      const read = () => page.evaluate(() => {
+        const lane = document.querySelector('.timeline-scroll .lane') as HTMLElement
+        const head = document.querySelector('.arrange .heads .head') as HTMLElement
+        const mute = document.querySelector('.arrange .heads button[aria-label="Mute track"]') as HTMLElement
+        const face = document.querySelector('[data-loop-region="arrange"] .loop-grip-face') as HTMLElement
+        const trackX = document.querySelector('[data-overview="x"] .overview-track') as HTMLElement
+        const trackY = document.querySelector('[data-overview="y"] .overview-track') as HTMLElement
+        const thumbX = document.querySelector('[data-overview-thumb="x"]') as HTMLElement
+        const thumbY = document.querySelector('[data-overview-thumb="y"]') as HTMLElement
+        const zoom = Number(getComputedStyle(document.querySelector('.arrange')!).getPropertyValue('--lane-zoom'))
+        const muteBox = mute.getBoundingClientRect()
+        const hit = document.elementFromPoint(muteBox.left + muteBox.width / 2, muteBox.top + muteBox.height / 2) as HTMLElement | null
+        return {
+          zoom,
+          laneH: lane.getBoundingClientRect().height,
+          headH: head.getBoundingClientRect().height,
+          muteH: muteBox.height,
+          muteHit: !!hit?.closest('button[aria-label="Mute track"]'),
+          faceW: face.getBoundingClientRect().width,
+          barX: trackX.getBoundingClientRect().height,
+          barY: trackY.getBoundingClientRect().width,
+          thumbX: thumbX.getBoundingClientRect().height,
+          thumbY: thumbY.getBoundingClientRect().width,
+          thumbLen: thumbY.getBoundingClientRect().height,
+          trackLen: trackY.getBoundingClientRect().height,
+          gutterX: (document.querySelector('[data-overview="x"]') as HTMLElement).getBoundingClientRect().height,
+          gutterY: (document.querySelector('[data-overview="y"]') as HTMLElement).getBoundingClientRect().width,
+          laneMin: Math.min(...[...document.querySelectorAll('.timeline-scroll .lane')].map((node) => node.getBoundingClientRect().height)),
+        }
+      })
+      const before = await read()
+      expect(before.zoom).toBeGreaterThan(0.5)
+      expect(before.zoom).toBeLessThan(2.25)
+      expect(Math.abs(before.barX - before.faceW)).toBeLessThan(1)
+      expect(Math.abs(before.barY - before.faceW)).toBeLessThan(1)
+      expect(Math.abs(before.thumbX - before.faceW)).toBeLessThan(1)
+      expect(Math.abs(before.thumbY - before.faceW)).toBeLessThan(1)
+      expect(before.gutterX).toBeGreaterThanOrEqual(40)
+      expect(before.gutterY).toBeGreaterThanOrEqual(40)
+      expect(before.thumbLen, `${viewport.width} default thumb is not stuck full`).toBeLessThan(before.trackLen * 0.92)
+      expect(before.thumbLen, `${viewport.width} default thumb can still grow`).toBeGreaterThan(before.trackLen * 0.2)
+
+      const dragEnd = async (deltaY: number) => {
+        const thumb = await page.locator('[data-overview-thumb="y"]').boundingBox()
+        expect(thumb).toBeTruthy()
+        const x = thumb!.x + thumb!.width / 2
+        // Stay inside the end grip (the bottom 40px) and inside the viewport.
+        const y = thumb!.y + Math.max(12, thumb!.height - 24)
+        const dest = Math.max(4, Math.min(viewport.height - 4, y + deltaY))
+        if (viewport.touch) {
+          const client = await page.context().newCDPSession(page)
+          const point = (py: number) => [{ x: Math.round(x), y: Math.round(py), id: 1 }]
+          await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(y) })
+          const steps = 8
+          for (let step = 1; step <= steps; step++) {
+            const py = y + ((dest - y) * step) / steps
+            await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: point(py) })
+            await page.waitForTimeout(16)
+          }
+          await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+          await client.detach()
+        } else {
+          await page.mouse.move(x, y)
+          await page.mouse.down()
+          await page.mouse.move(x, dest, { steps: 10 })
+          await page.mouse.up()
+        }
+        await page.waitForTimeout(40)
+      }
+
+      const thumbBox = await page.locator('[data-overview-thumb="y"]').boundingBox()
+      const endY = thumbBox!.y + Math.max(12, thumbBox!.height - 24)
+      const shrinkRoom = Math.min(160, Math.max(48, viewport.height - 8 - endY))
+      await dragEnd(shrinkRoom)
+      const shrunk = await read()
+      expect(shrunk.zoom, `${viewport.width} shrink zoom`).toBeLessThan(before.zoom - 0.04)
+      expect(shrunk.laneH, `${viewport.width} shrink lanes`).toBeLessThan(before.laneH - 4)
+      expect(shrunk.thumbLen, `${viewport.width} thumb grows as lanes shrink`).toBeGreaterThan(before.thumbLen + 4)
+      expect(shrunk.laneMin, `${viewport.width} lanes stay at least the header controls`).toBeGreaterThanOrEqual(40)
+      expect(Math.abs(shrunk.headH - shrunk.laneH), `${viewport.width} header tracks the lane`).toBeLessThan(2)
+      expect(shrunk.muteH, `${viewport.width} mute stays a touch target`).toBeGreaterThanOrEqual(40)
+      expect(shrunk.muteHit, `${viewport.width} mute stays hittable`).toBe(true)
+      await page.screenshot({ path: `/opt/cursor/artifacts/overview_lanes_${viewport.width}x${viewport.height}.png` })
+
+      const grownThumb = await page.locator('[data-overview-thumb="y"]').boundingBox()
+      const grownEnd = grownThumb!.y + Math.max(12, grownThumb!.height - 24)
+      const growRoom = Math.min(180, Math.max(90, grownEnd - 20))
+      await dragEnd(-growRoom)
+      const grown = await read()
+      expect(grown.zoom, `${viewport.width} grow zoom`).toBeGreaterThan(shrunk.zoom + 0.08)
+      expect(grown.laneH, `${viewport.width} grow lanes`).toBeGreaterThan(shrunk.laneH + 6)
+      expect(grown.zoom, `${viewport.width} grows past the default`).toBeGreaterThan(before.zoom + 0.04)
+      expect(grown.laneH).toBeGreaterThan(before.laneH + 4)
+      expect(grown.thumbLen, `${viewport.width} thumb shrinks as lanes grow`).toBeLessThan(before.thumbLen - 4)
+      expect(errors, errors.join('\n')).toEqual([])
+      await page.close()
+    }
+  }, 90000)
+
+  it('zooms a taller stack in and out, and keeps wheel, pinch, and loop alignment', async () => {
+    const desk = await boot({ width: 1440, height: 900 }, false)
+    await desk.page.evaluate(() => {
+      const store = (window as unknown as { __cueharbor: { store: { addTrack: (type: 'audio') => void } } }).__cueharbor.store
+      for (let i = 0; i < 6; i++) store.addTrack('audio')
+    })
+    await desk.page.waitForFunction(() => document.querySelectorAll('.timeline-scroll .lane').length >= 8)
+    const measure = () => desk.page.evaluate(() => {
+      const lanes = [...document.querySelectorAll('.timeline-scroll .lane')] as HTMLElement[]
+      const thumb = document.querySelector('[data-overview-thumb="y"]') as HTMLElement
+      const track = document.querySelector('[data-overview="y"] .overview-track') as HTMLElement
+      const arrange = document.querySelector('.arrange') as HTMLElement
+      return {
+        count: lanes.length,
+        zoom: Number(getComputedStyle(arrange).getPropertyValue('--lane-zoom')),
+        laneMin: Math.min(...lanes.map((lane) => lane.getBoundingClientRect().height)),
+        thumb: thumb.getBoundingClientRect().height,
+        track: track.getBoundingClientRect().height,
+        px: Number((document.querySelector('.timeline-inner') as HTMLElement).dataset.px),
+      }
+    })
+    const before = await measure()
+    expect(before.count).toBeGreaterThanOrEqual(8)
+    expect(before.zoom).toBeCloseTo(1, 2)
+    expect(before.thumb).toBeLessThan(before.track * 0.92)
+
+    const dragY = async (page: Page, deltaY: number) => {
+      const thumb = await page.locator('[data-overview-thumb="y"]').boundingBox()
+      expect(thumb).toBeTruthy()
+      const x = thumb!.x + thumb!.width / 2
+      const y = thumb!.y + Math.max(12, thumb!.height - 24)
+      const dest = Math.max(4, Math.min(896, y + deltaY))
+      await page.mouse.move(x, y)
+      await page.mouse.down()
+      await page.mouse.move(x, dest, { steps: 12 })
+      await page.mouse.up()
+      await page.waitForTimeout(40)
+    }
+    await dragY(desk.page, 220)
+    const shrunk = await measure()
+    expect(shrunk.zoom).toBeLessThan(before.zoom - 0.08)
+    expect(shrunk.laneMin).toBeGreaterThanOrEqual(40)
+    expect(shrunk.laneMin).toBeLessThan(before.laneMin - 8)
+    expect(shrunk.thumb).toBeGreaterThan(before.thumb + 6)
+    await desk.page.screenshot({ path: '/opt/cursor/artifacts/overview_lanes_stack_out_1440x900.png' })
+
+    await dragY(desk.page, -280)
+    const grown = await measure()
+    expect(grown.zoom).toBeGreaterThan(before.zoom + 0.08)
+    expect(grown.laneMin).toBeGreaterThan(shrunk.laneMin + 8)
+    expect(grown.thumb).toBeLessThan(shrunk.thumb - 6)
+    await desk.page.screenshot({ path: '/opt/cursor/artifacts/overview_lanes_stack_in_1440x900.png' })
+
+    const wheeled = await desk.page.evaluate(async () => {
+      const scroller = document.querySelector('.timeline-scroll') as HTMLElement
+      const inner = document.querySelector('.timeline-inner') as HTMLElement
+      const beforePx = Number(inner.dataset.px)
+      const beforeThumb = (document.querySelector('[data-overview-thumb="x"]') as HTMLElement).getBoundingClientRect().width
+      scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -160, ctrlKey: true, bubbles: true, cancelable: true }))
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+      return {
+        px: Number(inner.dataset.px),
+        beforePx,
+        thumb: (document.querySelector('[data-overview-thumb="x"]') as HTMLElement).getBoundingClientRect().width,
+        beforeThumb,
+      }
+    })
+    expect(wheeled.px).toBeGreaterThan(wheeled.beforePx)
+    expect(wheeled.thumb).toBeLessThan(wheeled.beforeThumb - 0.5)
+
+    const aligned = await desk.page.evaluate(async () => {
+      const store = (window as unknown as {
+        __cueharbor: { store: { project: { sampleRate: number; tempo: number; loopStartSample: number; loopEndSample: number }; setLoop: (on: boolean, start?: number, end?: number) => void } }
+      }).__cueharbor.store
+      const beat = store.project.sampleRate * (60 / store.project.tempo)
+      store.setLoop(true, Math.round(beat * 4), Math.round(beat * 12))
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+      const scroller = document.querySelector('.timeline-scroll') as HTMLElement
+      const inner = document.querySelector('.timeline-inner') as HTMLElement
+      const host = document.querySelector('[data-loop-region="arrange"]') as HTMLElement
+      scroller.scrollLeft = 180
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+      const project = store.project
+      const px = Number(inner.dataset.px)
+      const beatPx = (60 / project.tempo) * px
+      const origin = inner.getBoundingClientRect().left
+      const start = host.querySelector('[data-loop-edge="start"] .loop-grip-face')!.getBoundingClientRect()
+      const end = host.querySelector('[data-loop-edge="end"] .loop-grip-face')!.getBoundingClientRect()
+      const startBeat = project.loopStartSample / project.sampleRate / (60 / project.tempo)
+      const endBeat = project.loopEndSample / project.sampleRate / (60 / project.tempo)
+      return {
+        start: Math.abs(start.left - (origin + startBeat * beatPx)),
+        end: Math.abs(end.right - (origin + endBeat * beatPx)),
+        parkStart: host.dataset.parkStart,
+        parkEnd: host.dataset.parkEnd,
+      }
+    })
+    expect(aligned.parkStart).toBe('track')
+    expect(aligned.parkEnd).toBe('track')
+    expect(aligned.start).toBeLessThan(1.5)
+    expect(aligned.end).toBeLessThan(1.5)
+    expect(desk.errors, desk.errors.join('\n')).toEqual([])
+    await desk.page.close()
+
+    const phone = await boot({ width: 390, height: 844 }, true)
+    await phone.page.evaluate(() => {
+      const store = (window as unknown as { __cueharbor: { store: { addTrack: (type: 'audio') => void } } }).__cueharbor.store
+      for (let i = 0; i < 6; i++) store.addTrack('audio')
+    })
+    await phone.page.waitForFunction(() => document.querySelectorAll('.timeline-scroll .lane').length >= 8)
+    const phoneBefore = await phone.page.evaluate(() => ({
+      zoom: Number(getComputedStyle(document.querySelector('.arrange')!).getPropertyValue('--lane-zoom')),
+      px: Number((document.querySelector('.timeline-inner') as HTMLElement).dataset.px),
+      lane: (document.querySelector('.timeline-scroll .lane') as HTMLElement).getBoundingClientRect().height,
+    }))
+    const thumb = await phone.page.locator('[data-overview-thumb="y"]').boundingBox()
+    const x = thumb!.x + thumb!.width / 2
+    const y = thumb!.y + Math.max(12, thumb!.height - 24)
+    const client = await phone.page.context().newCDPSession(phone.page)
+    const point = (py: number) => [{ x: Math.round(x), y: Math.round(py), id: 1 }]
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(y) })
+    for (let step = 1; step <= 8; step++) {
+      await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: point(Math.min(820, y + step * 18)) })
+      await phone.page.waitForTimeout(16)
+    }
+    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await phone.page.waitForTimeout(40)
+    const phoneShrunk = await phone.page.evaluate(() => ({
+      zoom: Number(getComputedStyle(document.querySelector('.arrange')!).getPropertyValue('--lane-zoom')),
+      laneMin: Math.min(...[...document.querySelectorAll('.timeline-scroll .lane')].map((node) => node.getBoundingClientRect().height)),
+    }))
+    expect(phoneShrunk.zoom).toBeLessThan(phoneBefore.zoom - 0.05)
+    expect(phoneShrunk.laneMin).toBeGreaterThanOrEqual(40)
+
+    const scroll = await phone.page.locator('.timeline-scroll').boundingBox()
+    const midY = scroll!.y + Math.min(scroll!.height * 0.45, Math.max(12, scroll!.height - 24))
+    const half = Math.max(6, scroll!.width / 2 - 8)
+    const spread = async (from: number, to: number) => {
+      const fingers = (gap: number) => [
+        { x: Math.round(scroll!.x + scroll!.width / 2 - gap), y: Math.round(midY), id: 1 },
+        { x: Math.round(scroll!.x + scroll!.width / 2 + gap), y: Math.round(midY), id: 2 },
+      ]
+      await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: fingers(from) })
+      for (let step = 1; step <= 6; step++) {
+        const gap = from + ((to - from) * step) / 6
+        await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: fingers(gap) })
+        await phone.page.waitForTimeout(16)
+      }
+      await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    }
+    await spread(Math.max(4, half * 0.35), half)
+    await phone.page.waitForTimeout(40)
+    const pinched = await phone.page.evaluate(() => Number((document.querySelector('.timeline-inner') as HTMLElement).dataset.px))
+    expect(pinched).toBeGreaterThan(phoneBefore.px)
+    await client.detach()
+    await phone.page.screenshot({ path: '/opt/cursor/artifacts/overview_lanes_stack_390x844.png' })
+    expect(phone.errors, phone.errors.join('\n')).toEqual([])
+    await phone.page.close()
+  }, 90000)
+
   it('shows the overview bars at five viewports', async () => {
     const viewports = [
       { width: 390, height: 844, touch: true },
@@ -364,6 +631,8 @@ describe('timeline overview and loop handles', () => {
         const scroll = rect('.timeline-scroll')!
         const paintedX = rect('[data-overview="x"] .overview-track')!
         const paintedY = rect('[data-overview="y"] .overview-track')!
+        const thumbX = rect('[data-overview-thumb="x"]')!
+        const thumbY = rect('[data-overview-thumb="y"]')!
         const tools = rect('.tool-slot')
         const heads = rect('.arrange .heads')!
         const ruler = rect('.arrange .timeline-scroll .ruler')!
@@ -395,6 +664,10 @@ describe('timeline overview and loop handles', () => {
           gapY: y.left - scroll.right,
           paintedXH: paintedX.height,
           paintedYW: paintedY.width,
+          thumbXH: thumbX.height,
+          thumbYW: thumbY.width,
+          faceW: faceBox?.width ?? 0,
+          faceH: faceBox?.height ?? 0,
           barBottom: x.bottom,
           toolsTop: tools?.top ?? null,
           sideLeft: y.left,
@@ -420,10 +693,11 @@ describe('timeline overview and loop handles', () => {
       expect(box.yw, `${name} vertical hit`).toBeGreaterThanOrEqual(40)
       expect(Math.abs(box.gapX), `${name} horizontal gap`).toBeLessThan(2)
       expect(Math.abs(box.gapY), `${name} vertical gap`).toBeLessThan(2)
-      expect(box.paintedXH, `${name} painted horizontal bar`).toBeGreaterThanOrEqual(7)
-      expect(box.paintedXH, `${name} painted horizontal bar`).toBeLessThanOrEqual(9)
-      expect(box.paintedYW, `${name} painted vertical bar`).toBeGreaterThanOrEqual(7)
-      expect(box.paintedYW, `${name} painted vertical bar`).toBeLessThanOrEqual(9)
+      expect(box.faceW, `${name} loop grip thickness`).toBeGreaterThan(10)
+      expect(Math.abs(box.paintedXH - box.faceW), `${name} horizontal bar matches the loop grip`).toBeLessThan(1)
+      expect(Math.abs(box.paintedYW - box.faceW), `${name} vertical bar matches the loop grip`).toBeLessThan(1)
+      expect(Math.abs(box.thumbXH - box.faceW), `${name} horizontal thumb matches the loop grip`).toBeLessThan(1)
+      expect(Math.abs(box.thumbYW - box.faceW), `${name} vertical thumb matches the loop grip`).toBeLessThan(1)
       if (box.toolsTop != null) expect(box.barBottom, `${name} bar above the edit bar`).toBeLessThanOrEqual(box.toolsTop + 1)
       expect(box.sideLeft, `${name} vertical bar clears the track headers`).toBeGreaterThanOrEqual(box.headRight - 1)
       expect(Math.abs(box.laneLeft - box.headRight), `${name} lane meets the header column`).toBeLessThanOrEqual(2)

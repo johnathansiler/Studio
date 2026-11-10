@@ -54,7 +54,7 @@ import { clipTapAction, laneDoubleClickAddsClip } from './clipKeys'
 import { isSampledInstrument } from '../instruments/sampled'
 import { LoopRegion } from './LoopRegion'
 import { TimelineOverview } from './OverviewScrollbar'
-import { clampTimelinePx } from './overviewScroll'
+import { LANE_ZOOM_TIGHT, clampTimelinePx } from './overviewScroll'
 import { WaveformView } from './WaveformView'
 import { sampleAtX, type WaveSpan } from './waveZoom'
 import { CommentControl, CommentPins } from './timelineComments'
@@ -885,7 +885,7 @@ export function ArrangeView({
           <button type="button" className="browser-resize" aria-label="Browser width. Drag to resize." title="Drag to resize the browser." onPointerDown={resizeBrowser} />
         </>
       )}
-      <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'} data-lane-compact={laneZoom <= 0.72 ? 'true' : undefined} style={{ ['--lane-zoom' as string]: String(laneZoom) }}>
+      <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'} data-lane-scale={laneZoom < LANE_ZOOM_TIGHT ? 'tight' : 'roomy'} data-lane-compact={laneZoom <= 0.72 ? 'true' : undefined} style={{ ['--lane-zoom' as string]: String(laneZoom) }}>
       <div className="heads-col">
       <div className="arrange-add">
         <AddTrackButton store={store} prominent onAdded={onTrackAdded} />
