@@ -27,7 +27,7 @@ const FM: Record<string, number> = {
 }
 
 function emptyFx(): FxBus {
-  return { phase: 0, delay: new Float32Array(2400), delayPos: 0, combs: [], combPos: [], low: 0, band: 0 }
+  return { phase: 0, delay: new Float32Array(2400), delayPos: 0, combs: [], combPos: [], low: 0, band: 0, adaaU: 0, adaaF: 0 }
 }
 
 function voice(note: number): PlayVoice {
