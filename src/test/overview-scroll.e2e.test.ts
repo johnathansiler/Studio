@@ -347,6 +347,68 @@ describe('timeline overview and loop handles', () => {
     await desk.page.close()
   }, 90000)
 
+  it('shrinks track lanes and then grows them from the vertical bar', async () => {
+    async function laneBox(page: Page) {
+      return page.evaluate(() => {
+        const lane = document.querySelector('.timeline-scroll .lane') as HTMLElement
+        const head = document.querySelector('.arrange .heads .head') as HTMLElement
+        const control = document.querySelector('.arrange .heads .track-controls button') as HTMLElement | null
+        const zoom = getComputedStyle(document.querySelector('.arrange')!).getPropertyValue('--lane-zoom').trim()
+        const controlBox = control?.getBoundingClientRect()
+        const headBox = head.getBoundingClientRect()
+        return {
+          zoom: Number(zoom || '1'),
+          lane: lane.getBoundingClientRect().height,
+          head: headBox.height,
+          control: controlBox?.height ?? 0,
+          controlVisible: !!controlBox && controlBox.bottom > headBox.top + 4 && controlBox.top < headBox.bottom - 4,
+        }
+      })
+    }
+    const phone = await boot({ width: 390, height: 844 }, true)
+    const before = await laneBox(phone.page)
+    const bar = await phone.page.locator('[data-overview="y"]').boundingBox()
+    expect(bar).toBeTruthy()
+    const from = { x: bar!.x + bar!.width / 2, y: bar!.y + bar!.height - 18 }
+    async function drag(dy: number) {
+      await phone.page.evaluate(async ({ x, y, dy }) => {
+        const node = document.querySelector('[data-overview="y"]') as HTMLElement
+        const fire = (type: string, clientY: number) => {
+          const event = new PointerEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            clientX: x,
+            clientY,
+            pointerId: 1,
+            isPrimary: true,
+            button: 0,
+            buttons: type === 'pointerup' ? 0 : 1,
+            pointerType: 'touch',
+          })
+          if (type === 'pointerdown') node.dispatchEvent(event)
+          else window.dispatchEvent(event)
+        }
+        fire('pointerdown', y)
+        for (let step = 1; step <= 8; step++) fire('pointermove', y + (dy * step) / 8)
+        fire('pointerup', y + dy)
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+      }, { x: from.x, y: from.y, dy })
+      await phone.page.waitForTimeout(40)
+    }
+    await drag(120)
+    const shrunk = await laneBox(phone.page)
+    expect(shrunk.zoom).toBeLessThan(before.zoom - 0.04)
+    expect(shrunk.lane).toBeLessThan(before.lane - 4)
+    expect(shrunk.control).toBeGreaterThanOrEqual(40)
+    expect(shrunk.controlVisible).toBe(true)
+    await drag(-160)
+    const grown = await laneBox(phone.page)
+    expect(grown.zoom).toBeGreaterThan(shrunk.zoom + 0.04)
+    expect(grown.lane).toBeGreaterThan(shrunk.lane + 4)
+    expect(phone.errors, phone.errors.join('\n')).toEqual([])
+    await phone.page.close()
+  }, 60000)
+
   it('shows the overview bars at five viewports', async () => {
     const viewports = [
       { width: 390, height: 844, touch: true },
@@ -407,6 +469,7 @@ describe('timeline overview and loop handles', () => {
           scrollRight,
           faceTop: faceBox ? faceBox.top - ruler.top : 0,
           faceBottom: faceBox ? faceBox.bottom - ruler.top : 0,
+          faceW: faceBox?.width ?? 0,
           clipHit: clipBox && clipBox.width > 8 && clipBox.bottom > scroll.top && clipBox.top < scroll.bottom
             ? hitAt(clipBox.left + Math.min(24, clipBox.width / 2), clipBox.top + Math.min(18, clipBox.height / 2))
             : null,
@@ -420,10 +483,9 @@ describe('timeline overview and loop handles', () => {
       expect(box.yw, `${name} vertical hit`).toBeGreaterThanOrEqual(40)
       expect(Math.abs(box.gapX), `${name} horizontal gap`).toBeLessThan(2)
       expect(Math.abs(box.gapY), `${name} vertical gap`).toBeLessThan(2)
-      expect(box.paintedXH, `${name} painted horizontal bar`).toBeGreaterThanOrEqual(7)
-      expect(box.paintedXH, `${name} painted horizontal bar`).toBeLessThanOrEqual(9)
-      expect(box.paintedYW, `${name} painted vertical bar`).toBeGreaterThanOrEqual(7)
-      expect(box.paintedYW, `${name} painted vertical bar`).toBeLessThanOrEqual(9)
+      expect(box.faceW, `${name} loop grip`).toBeGreaterThanOrEqual(11)
+      expect(Math.abs(box.paintedXH - box.faceW), `${name} horizontal bar matches the loop grip`).toBeLessThanOrEqual(1)
+      expect(Math.abs(box.paintedYW - box.faceW), `${name} vertical bar matches the loop grip`).toBeLessThanOrEqual(1)
       if (box.toolsTop != null) expect(box.barBottom, `${name} bar above the edit bar`).toBeLessThanOrEqual(box.toolsTop + 1)
       expect(box.sideLeft, `${name} vertical bar clears the track headers`).toBeGreaterThanOrEqual(box.headRight - 1)
       expect(Math.abs(box.laneLeft - box.headRight), `${name} lane meets the header column`).toBeLessThanOrEqual(2)

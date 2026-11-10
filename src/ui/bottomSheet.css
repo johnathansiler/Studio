@@ -26,11 +26,11 @@
 .shell.phone .arrange-stage > .bottom-sheet {
   position: relative;
   z-index: 4;
-  flex: 0 1 var(--sheet-h, 70%);
+  flex: 0 1 var(--phone-sheet-h, var(--sheet-h, 70%));
   width: 100%;
   max-width: none;
   height: auto;
-  max-height: min(var(--sheet-h, 70%), 72dvh, calc(100% - 36px));
+  max-height: var(--phone-sheet-h, min(var(--sheet-h, 70%), 72dvh, calc(100% - 36px)));
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -48,8 +48,24 @@
 }
 
 .shell.phone.land .arrange-stage > .bottom-sheet {
-  flex-basis: var(--sheet-h, 58%);
-  max-height: min(var(--sheet-h, 58%), 62dvh, calc(100% - 36px));
+  flex-basis: var(--phone-sheet-h, var(--sheet-h, 58%));
+  max-height: var(--phone-sheet-h, min(var(--sheet-h, 58%), 62dvh, calc(100% - 36px)));
+}
+
+/* Browser and Plugins take the shared sheet height. Short sheets still hug their content. */
+.shell.phone .arrange-stage > .playlist-browser.bottom-sheet,
+.shell.phone .arrange-stage > .plugins-drawer.bottom-sheet {
+  flex: 0 0 var(--phone-sheet-h, 46dvh) !important;
+  height: var(--phone-sheet-h, 46dvh) !important;
+  max-height: var(--phone-sheet-h, 46dvh) !important;
+  min-height: 0 !important;
+}
+
+.shell.phone.land .arrange-stage > .playlist-browser.bottom-sheet {
+  flex: 0 0 var(--phone-sheet-h, 46dvh) !important;
+  height: var(--phone-sheet-h, 46dvh) !important;
+  max-height: var(--phone-sheet-h, 46dvh) !important;
+  min-height: 0 !important;
 }
 
 /* Landscape phones are short. Keep the search row above the edit bar. */
@@ -64,19 +80,20 @@
 }
 
 .shell.phone .arrange-stage > .plugins-drawer.bottom-sheet[data-plugin-root] {
-  flex: 0 1 var(--sheet-h, 70%) !important;
+  flex: 0 0 var(--phone-sheet-h, 46dvh) !important;
   width: 100% !important;
   max-width: none !important;
-  height: auto !important;
-  max-height: min(var(--sheet-h, 70%), 72dvh, calc(100% - 36px)) !important;
+  height: var(--phone-sheet-h, 46dvh) !important;
+  max-height: var(--phone-sheet-h, 46dvh) !important;
   min-height: 0 !important;
   overflow: hidden !important;
   touch-action: pan-y;
 }
 
 .shell.phone.land .arrange-stage > .plugins-drawer.bottom-sheet[data-plugin-root] {
-  flex-basis: var(--sheet-h, 58%) !important;
-  max-height: min(var(--sheet-h, 58%), 62dvh, calc(100% - 36px)) !important;
+  flex-basis: var(--phone-sheet-h, 46dvh) !important;
+  height: var(--phone-sheet-h, 46dvh) !important;
+  max-height: var(--phone-sheet-h, 46dvh) !important;
 }
 
 .shell.phone .arrange-stage.browser-bottom > .playlist-browser.bottom-sheet,
@@ -188,7 +205,7 @@
   flex: 0 0 auto;
   height: auto;
   min-height: min-content;
-  max-height: calc(100% - 36px);
+  max-height: var(--phone-sheet-h, calc(100% - 36px));
 }
 
 .arrange-sheet-head,

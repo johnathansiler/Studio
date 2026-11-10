@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  LANE_ZOOM_COMPACT,
   LANE_ZOOM_MAX,
   TIMELINE_PX_MAX,
   TIMELINE_PX_SOFT_MIN,
   clampTimelinePx,
+  laneSpan,
   laneZoomBounds,
   overviewPart,
   panOverview,
@@ -11,7 +13,6 @@ import {
   timelinePxBounds,
   zoomLaneByEdge,
   zoomTimeByEdge,
-  contentOfPixel,
 } from '../ui/overviewScroll'
 
 describe('timeline overview thumb', () => {
@@ -133,12 +134,10 @@ describe('track-height zoom from the overview', () => {
     expect(bounds.min).toBeLessThan(1)
     expect(bounds.min).toBeCloseTo((view - fixed) / flex)
     expect(bounds.max).toBe(LANE_ZOOM_MAX)
-    expect(laneZoomBounds(800, 80, 200).min).toBe(1)
     const fitted = zoomLaneByEdge({
       edge: 'end',
-      y0: 0,
-      y1: view,
-      total: fixed + flex,
+      zoom: 1,
+      scrollTop: 0,
       deltaFrac: 1,
       view,
       fixed,
@@ -147,16 +146,134 @@ describe('track-height zoom from the overview', () => {
     })
     expect(fitted.zoom).toBeCloseTo(bounds.min)
     expect(fitted.scrollTop).toBeCloseTo(0)
+    expect(laneSpan(fixed, flex, fitted.zoom)).toBeLessThanOrEqual(view + 0.5)
   })
 
-  it('zooms in around the top anchor and restores the same window at zero drag', () => {
-    const y0 = contentOfPixel(100, 1, fixed)
-    const y1 = contentOfPixel(100 + view, 1, fixed)
+  it('keeps the default height between a compact floor and the tall limit', () => {
+    const roomy = laneZoomBounds(800, 80, 200)
+    expect(roomy.min).toBeCloseTo(LANE_ZOOM_COMPACT)
+    expect(roomy.min).toBeLessThan(1)
+    expect(roomy.max).toBeGreaterThan(1)
+    expect(roomy.max).toBe(LANE_ZOOM_MAX)
+    const shrunk = zoomLaneByEdge({
+      edge: 'end',
+      zoom: 1,
+      scrollTop: 0,
+      deltaFrac: 0.2,
+      view: 800,
+      fixed: 80,
+      flex: 200,
+      bounds: roomy,
+    })
+    expect(shrunk.zoom).toBeLessThan(1)
+    expect(shrunk.zoom).toBeGreaterThanOrEqual(roomy.min - 1e-6)
+  })
+
+  it('zooms in and out symmetrically from either end', () => {
+    const drag = 0.12
+    const out = zoomLaneByEdge({
+      edge: 'end',
+      zoom: 1,
+      scrollTop: 40,
+      deltaFrac: drag,
+      view,
+      fixed,
+      flex,
+      bounds,
+    })
+    expect(out.zoom).toBeLessThan(1)
+    const back = zoomLaneByEdge({
+      edge: 'end',
+      zoom: out.zoom,
+      scrollTop: out.scrollTop,
+      deltaFrac: -drag,
+      view,
+      fixed,
+      flex,
+      bounds,
+    })
+    expect(back.zoom).toBeCloseTo(1, 2)
+    const inn = zoomLaneByEdge({
+      edge: 'end',
+      zoom: 1,
+      scrollTop: 40,
+      deltaFrac: -drag,
+      view,
+      fixed,
+      flex,
+      bounds,
+    })
+    expect(inn.zoom).toBeGreaterThan(1)
+    const undone = zoomLaneByEdge({
+      edge: 'end',
+      zoom: inn.zoom,
+      scrollTop: inn.scrollTop,
+      deltaFrac: drag,
+      view,
+      fixed,
+      flex,
+      bounds,
+    })
+    expect(undone.zoom).toBeCloseTo(1, 2)
+    const nudge = 0.04
+    const fromStart = zoomLaneByEdge({
+      edge: 'start',
+      zoom: 1.4,
+      scrollTop: 200,
+      deltaFrac: -nudge,
+      view,
+      fixed,
+      flex,
+      bounds,
+    })
+    expect(fromStart.zoom).toBeLessThan(1.4)
+    const startBack = zoomLaneByEdge({
+      edge: 'start',
+      zoom: fromStart.zoom,
+      scrollTop: fromStart.scrollTop,
+      deltaFrac: nudge,
+      view,
+      fixed,
+      flex,
+      bounds,
+    })
+    expect(startBack.zoom).toBeCloseTo(1.4, 2)
+    const tighter = zoomLaneByEdge({
+      edge: 'start',
+      zoom: 1.4,
+      scrollTop: 200,
+      deltaFrac: drag,
+      view,
+      fixed,
+      flex,
+      bounds,
+    })
+    expect(tighter.zoom).toBeGreaterThan(1.4)
+  })
+
+  it('grows a phone stack after it has been shrunk', () => {
+    const view = 579
+    const fixed = 22
+    const flex = 300
+    const bounds = laneZoomBounds(view, fixed, flex)
+    const shrunk = zoomLaneByEdge({
+      edge: 'end',
+      zoom: 0.7026022304832714,
+      scrollTop: 0,
+      deltaFrac: -160 / 579,
+      view,
+      fixed,
+      flex,
+      bounds,
+    })
+    expect(shrunk.zoom).toBeGreaterThan(0.75)
+  })
+
+  it('restores the same window at zero drag and can scroll a short thumb', () => {
     const still = zoomLaneByEdge({
       edge: 'end',
-      y0,
-      y1,
-      total: fixed + flex,
+      zoom: 1,
+      scrollTop: 100,
       deltaFrac: 0,
       view,
       fixed,
@@ -165,18 +282,10 @@ describe('track-height zoom from the overview', () => {
     })
     expect(still.zoom).toBeCloseTo(1)
     expect(still.scrollTop).toBeCloseTo(100)
-    const closer = zoomLaneByEdge({
-      edge: 'end',
-      y0,
-      y1,
-      total: fixed + flex,
-      deltaFrac: -0.08,
-      view,
-      fixed,
-      flex,
-      bounds,
-    })
-    expect(closer.zoom).toBeGreaterThan(1)
-    expect(contentOfPixel(closer.scrollTop, closer.zoom, fixed)).toBeCloseTo(y0)
+    const span = laneSpan(fixed, flex, 1.8)
+    const box = thumbBox(40, view, span, 280)
+    expect(box.size).toBeLessThan(280)
+    const panned = panOverview({ offset: 40, view, span, track: 280, thumb: box.size, deltaPx: 30 })
+    expect(panned).toBeGreaterThan(40)
   })
 })

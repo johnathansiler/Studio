@@ -137,7 +137,7 @@
   position: absolute;
   top: 2px;
   bottom: 2px;
-  width: 12px;
+  width: var(--grip-visual, 12px);
   display: flex;
   align-items: center;
   justify-content: center;

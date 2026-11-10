@@ -1,8 +1,9 @@
-/* Timeline overview bars. The gutter is the hit target; the painted bar stays slim.
+/* Timeline overview bars. The gutter is the hit target. The painted bar matches the loop grip.
    Heights come from --overview-gutter and the measured scroller, not a fixed ruler size. */
 
 .arrange {
   --overview-gutter: 40px;
+  --grip-visual: 12px;
 }
 
 .timeline-stage {
@@ -125,17 +126,17 @@
 .overview-scroll[data-axis="x"] .overview-track {
   left: 6px;
   right: 6px;
-  height: 8px;
+  height: var(--grip-visual, 12px);
   top: 50%;
-  margin-top: -4px;
+  margin-top: calc(var(--grip-visual, 12px) / -2);
 }
 
 .overview-scroll[data-axis="y"] .overview-track {
   top: 6px;
   bottom: 6px;
-  width: 8px;
+  width: var(--grip-visual, 12px);
   left: 50%;
-  margin-left: -4px;
+  margin-left: calc(var(--grip-visual, 12px) / -2);
 }
 
 .overview-thumb {

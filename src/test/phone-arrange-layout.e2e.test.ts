@@ -97,7 +97,7 @@ async function measure(page: Page) {
     return {
       ruler: ruler ? ruler.getBoundingClientRect().height : 0,
       gap: gap ? gap.getBoundingClientRect().height : 0,
-      grip: grip ? grip.getBoundingClientRect().height : 0,
+      gripHit: grip ? grip.getBoundingClientRect().height : 0,
       face: face ? face.getBoundingClientRect().height : 0,
       headRight: heads ? heads.getBoundingClientRect().right : 0,
       laneLeft: lane ? lane.getBoundingClientRect().left : 0,
@@ -111,6 +111,14 @@ async function measure(page: Page) {
       addUndo: !!document.querySelector('.arrange-add [data-history="undo"]'),
       addRedo: !!document.querySelector('.arrange-add [data-history="redo"]'),
       bulb: document.querySelector('.arrange-add .ideas-bulb')?.getAttribute('aria-label') ?? '',
+      addOrder: [...document.querySelectorAll('.arrange-add .add-track-btn, .arrange-add [data-history], .arrange-add .ideas-bulb')].map((node) => {
+        const rect = node.getBoundingClientRect()
+        return { label: (node.getAttribute('aria-label') || node.textContent || '').replace(/\s+/g, ' ').trim(), left: rect.left }
+      }),
+      grip: document.querySelector('.loop-grip-face')?.getBoundingClientRect().width ?? 0,
+      barX: document.querySelector('[data-overview="x"] .overview-track')?.getBoundingClientRect().height ?? 0,
+      barY: document.querySelector('[data-overview="y"] .overview-track')?.getBoundingClientRect().width ?? 0,
+      tabsTop: document.querySelector('.views')?.getBoundingClientRect().top ?? 99,
       pluginsInBar: barButtons.some((button) => button.label.startsWith('Plugins')),
       barButtons,
       controls,
@@ -144,13 +152,16 @@ describe('phone arrange layout', () => {
           await page.locator('[data-loop-region="arrange"]').waitFor()
           const layout = await measure(page)
           await page.screenshot({ path: `/opt/cursor/artifacts/arrange-chrome-${viewport.name}.png` })
-          expect(layout.grip, viewport.name).toBeGreaterThanOrEqual(44)
+          expect(layout.gripHit, viewport.name).toBeGreaterThanOrEqual(44)
+          expect(Math.abs(layout.barX - layout.grip), viewport.name).toBeLessThanOrEqual(1)
+          expect(Math.abs(layout.barY - layout.grip), viewport.name).toBeLessThanOrEqual(1)
           expect(layout.overlaps, viewport.name).toEqual([])
           for (const row of layout.controls) {
             expect(row.tops, viewport.name).toBe(1)
             expect(row.wrapped, viewport.name).toBe(false)
           }
           if (viewport.kind === 'portrait') {
+            expect(layout.tabsTop, viewport.name).toBeLessThanOrEqual(8)
             expect(layout.ruler, viewport.name).toBeGreaterThanOrEqual(20)
             expect(layout.ruler, viewport.name).toBeLessThanOrEqual(24)
             expect(Math.abs(layout.gap - layout.ruler), viewport.name).toBeLessThanOrEqual(2)
@@ -165,6 +176,14 @@ describe('phone arrange layout', () => {
             expect(layout.addUndo, viewport.name).toBe(true)
             expect(layout.addRedo, viewport.name).toBe(true)
             expect(layout.bulb, viewport.name).toBe('Ideas')
+            const order = layout.addOrder.map((item) => item.label)
+            expect(order[0], viewport.name).toMatch(/Add Track/)
+            expect(order.some((label) => label.startsWith('Undo')), viewport.name).toBe(true)
+            expect(order.some((label) => label.startsWith('Redo')), viewport.name).toBe(true)
+            expect(order[order.length - 1], viewport.name).toBe('Ideas')
+            for (let i = 1; i < layout.addOrder.length; i++) {
+              expect(layout.addOrder[i].left, viewport.name).toBeGreaterThan(layout.addOrder[i - 1].left)
+            }
             expect(layout.pluginsInBar, viewport.name).toBe(false)
             expect(Math.abs(layout.laneLeft - layout.headRight), viewport.name).toBeLessThanOrEqual(2)
             expect(layout.laneWidth, viewport.name).toBeGreaterThan(viewport.width * 0.4)
@@ -183,13 +202,27 @@ describe('phone arrange layout', () => {
               expect(button.height, `${viewport.name} ${button.label}`).toBeGreaterThanOrEqual(40)
             }
           } else if (viewport.kind === 'land') {
+            expect(layout.tabsTop, viewport.name).toBeLessThanOrEqual(8)
             expect(layout.ruler, viewport.name).toBeGreaterThanOrEqual(20)
             expect(layout.ruler, viewport.name).toBeLessThanOrEqual(24)
             expect(layout.face, viewport.name).toBeLessThanOrEqual(layout.ruler + 1)
-            expect(layout.topMenu, viewport.name).toBe(true)
-            expect(layout.topName, viewport.name).toBe(true)
+            expect(layout.topMenu, viewport.name).toBe(false)
+            expect(layout.topName, viewport.name).toBe(false)
+            expect(layout.topUndo, viewport.name).toBe(false)
+            expect(layout.topIdeas, viewport.name).toBe(false)
+            expect(layout.addUndo, viewport.name).toBe(true)
             expect(layout.pluginsInBar, viewport.name).toBe(false)
-            expect(layout.addHeight, viewport.name).toBeGreaterThanOrEqual(48)
+            expect(layout.addHeight, viewport.name).toBeGreaterThanOrEqual(40)
+            expect(layout.addHeight, viewport.name).toBeLessThanOrEqual(48)
+            const labels = layout.barButtons.map((button) => button.label)
+            expect(labels.some((label) => label.startsWith('Menu')), viewport.name).toBe(true)
+            expect(labels.some((label) => label.startsWith('Browser')), viewport.name).toBe(true)
+            const menu = layout.barButtons.find((button) => button.label.startsWith('Menu'))!
+            const browserBtn = layout.barButtons.find((button) => button.label.startsWith('Browser'))!
+            expect(menu.left, viewport.name).toBeLessThan(browserBtn.left)
+            const order = layout.addOrder.map((item) => item.label)
+            expect(order[0], viewport.name).toMatch(/Add Track/)
+            expect(order[order.length - 1], viewport.name).toBe('Ideas')
           } else {
             expect(layout.ruler, viewport.name).toBeGreaterThanOrEqual(36)
             expect(layout.topMenu, viewport.name).toBe(true)
@@ -200,6 +233,128 @@ describe('phone arrange layout', () => {
             expect(layout.pluginsInBar, viewport.name).toBe(true)
             expect(layout.addBtnHeight, viewport.name).toBeGreaterThanOrEqual(48)
           }
+        }
+
+        async function sheetClearance(selector: string, source: string) {
+          return page.evaluate(({ selector, source }) => {
+            const sheet = document.querySelector(selector) as HTMLElement | null
+            const tabs = document.querySelector('.views')?.getBoundingClientRect()
+            const transport = document.querySelector('.transport')?.getBoundingClientRect()
+            const bar = document.querySelector('.tool-slot')?.getBoundingClientRect()
+            const button = [...document.querySelectorAll('button')].find((node) => (node.getAttribute('aria-label') || node.textContent || '').replace(/\s+/g, ' ').trim().startsWith(source))?.getBoundingClientRect()
+            if (!sheet || !tabs) return null
+            const box = sheet.getBoundingClientRect()
+            const hits = (a: DOMRect, b: DOMRect) => a.top < b.bottom - 1 && a.bottom > b.top + 1 && a.left < b.right - 1 && a.right > b.left + 1
+            const body = sheet.querySelector('.phone-sheet-body, .bottom-sheet-body, #shell-menu') as HTMLElement | null
+            return {
+              top: box.top,
+              bottom: box.bottom,
+              height: box.height,
+              tabsBottom: tabs.bottom,
+              transportBottom: transport?.bottom ?? null,
+              barTop: bar?.top ?? null,
+              coversTabs: hits(box, tabs),
+              coversTransport: transport ? hits(box, transport) : false,
+              coversBar: bar ? hits(box, bar) : false,
+              coversButton: button ? hits(box, button) : false,
+              buttonTop: button?.top ?? null,
+              buttonBottom: button?.bottom ?? null,
+              scrolls: body ? getComputedStyle(body).overflowY === 'auto' || getComputedStyle(body).overflowY === 'scroll' : false,
+              close: !!sheet.querySelector('.overlay-close, .browser-close, .guide-x'),
+            }
+          }, { selector, source })
+        }
+
+        for (const shot of [
+          { width: 390, height: 844, name: '390x844' },
+          { width: 844, height: 390, name: '844x390' },
+        ]) {
+          await page.setViewportSize({ width: shot.width, height: shot.height })
+          await page.goto(url, { waitUntil: 'domcontentloaded' })
+          await page.getByRole('button', { name: /^Arrange/ }).first().waitFor()
+          const timeline = page.locator('.timeline-scroll')
+          if (!(await timeline.isVisible().catch(() => false))) {
+            await page.getByRole('button', { name: /^Arrange/ }).first().click()
+          }
+          await timeline.waitFor()
+          await page.locator('[data-overview="y"]').waitFor()
+          await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-arrange.png` })
+
+          await page.getByRole('button', { name: /^Menu/ }).click()
+          await page.locator('#shell-menu').waitFor()
+          const menu = await sheetClearance('.anchored-menu.phone-sheet', 'Menu')
+          expect(menu, shot.name).toBeTruthy()
+          expect(menu!.coversTabs, shot.name).toBe(false)
+          expect(menu!.coversTransport, shot.name).toBe(false)
+          expect(menu!.coversButton, shot.name).toBe(false)
+          expect(menu!.close, shot.name).toBe(true)
+          expect(menu!.scrolls, shot.name).toBe(true)
+          expect(await page.getByRole('textbox', { name: 'Project name' }).count()).toBeGreaterThan(0)
+          expect(await page.getByRole('button', { name: /^Undo/ }).count()).toBeGreaterThan(0)
+          await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-menu.png` })
+          await page.keyboard.press('Escape')
+
+          await page.getByRole('button', { name: 'Browser', exact: true }).click()
+          const browser = page.locator('.arrange-stage > [data-playlist-browser="open"]')
+          await browser.waitFor()
+          const browserBox = await sheetClearance('.arrange-stage > [data-playlist-browser="open"]', 'Browser')
+          expect(browserBox!.coversTabs, shot.name).toBe(false)
+          expect(browserBox!.coversTransport, shot.name).toBe(false)
+          expect(browserBox!.coversButton, shot.name).toBe(false)
+          expect(Math.abs(menu!.height - browserBox!.height), `${shot.name} menu vs browser`).toBeLessThanOrEqual(4)
+          await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-browser.png` })
+          await page.getByRole('button', { name: 'Browser', exact: true }).click()
+
+          await page.getByRole('button', { name: /^Collab/ }).first().click()
+          await page.locator('[data-collab-panel="open"]').waitFor()
+          const collab = await page.evaluate(() => ({
+            topMenu: !!document.querySelector('.topbar .menu-btn'),
+            topName: !!document.querySelector('.topbar .project-name'),
+            tabsTop: document.querySelector('.views')?.getBoundingClientRect().top ?? 99,
+            labels: [...document.querySelectorAll('.tool-slot button')].map((node) => (node.getAttribute('aria-label') || node.textContent || '').replace(/\s+/g, ' ').trim()),
+          }))
+          expect(collab.topMenu, shot.name).toBe(false)
+          expect(collab.topName, shot.name).toBe(false)
+          expect(collab.tabsTop, shot.name).toBeLessThanOrEqual(8)
+          expect(collab.labels.some((label) => label.startsWith('Menu')), shot.name).toBe(true)
+          expect(collab.labels.some((label) => label.startsWith('Browser')), shot.name).toBe(true)
+          expect(collab.labels.findIndex((label) => label.startsWith('Menu'))).toBeLessThan(collab.labels.findIndex((label) => label.startsWith('Browser')))
+          await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-collab.png` })
+
+          await page.getByRole('button', { name: /^Mix/ }).first().click()
+          await page.locator('.mixer').first().waitFor()
+          const mix = await page.evaluate(() => {
+            const bar = document.querySelector('.tool-slot')?.getBoundingClientRect()
+            const more = document.querySelector('.mix-toolbar-more')?.getBoundingClientRect()
+            return {
+              topMenu: !!document.querySelector('.topbar .menu-btn'),
+              topName: !!document.querySelector('.topbar .project-name'),
+              topUndo: !!document.querySelector('.topbar [data-history="undo"]'),
+              tabsTop: document.querySelector('.views')?.getBoundingClientRect().top ?? 99,
+              labels: [...document.querySelectorAll('.tool-slot button, .tool-slot summary')].map((node) => (node.getAttribute('aria-label') || node.textContent || '').replace(/\s+/g, ' ').trim()),
+              moreTop: more?.top ?? null,
+              moreBottom: more?.bottom ?? null,
+              moreHeight: more?.height ?? 0,
+              barBottom: bar?.bottom ?? null,
+            }
+          })
+          expect(mix.topMenu, shot.name).toBe(false)
+          expect(mix.topName, shot.name).toBe(false)
+          expect(mix.topUndo, shot.name).toBe(false)
+          expect(mix.tabsTop, shot.name).toBeLessThanOrEqual(8)
+          expect(mix.labels.some((label) => label.startsWith('Menu')), shot.name).toBe(true)
+          expect(mix.labels.some((label) => label.startsWith('Browser')), shot.name).toBe(true)
+          expect(mix.labels.findIndex((label) => label.startsWith('Menu'))).toBeLessThan(mix.labels.findIndex((label) => label.startsWith('Browser')))
+          expect(mix.moreHeight, shot.name).toBeGreaterThanOrEqual(40)
+          expect(mix.moreBottom, shot.name).toBeLessThanOrEqual((mix.barBottom ?? 0) + 1)
+          await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-mix.png` })
+          await page.getByRole('button', { name: /^Menu/ }).click()
+          await page.locator('#shell-menu').waitFor()
+          const mixMenu = await sheetClearance('.anchored-menu.phone-sheet', 'Menu')
+          expect(mixMenu!.coversTabs, shot.name).toBe(false)
+          expect(mixMenu!.coversButton, shot.name).toBe(false)
+          expect(mixMenu!.coversBar, shot.name).toBe(false)
+          await page.keyboard.press('Escape')
         }
 
         await page.setViewportSize({ width: 390, height: 844 })
@@ -213,25 +368,11 @@ describe('phone arrange layout', () => {
         await page.getByRole('button', { name: /^Menu/ }).click()
         expect(await page.getByRole('textbox', { name: 'Project name' }).inputValue()).toBe('Harbor Night')
         await page.keyboard.press('Escape')
-        await page.getByRole('button', { name: 'Ideas', exact: true }).click()
-        await page.locator('.unstuck-sheet, [data-unstuck]').first().waitFor()
-        await page.keyboard.press('Escape')
-        await page.getByRole('button', { name: /^Mix/ }).first().click()
-        await page.locator('.mixer').first().waitFor()
-        const mix = await page.evaluate(() => ({
-          menu: !!document.querySelector('.topbar .menu-btn'),
-          name: !!document.querySelector('.topbar .project-name'),
-          undo: !!document.querySelector('.topbar [data-history="undo"]'),
-        }))
-        expect(mix.menu).toBe(true)
-        expect(mix.name).toBe(true)
-        expect(mix.undo).toBe(true)
-        await page.screenshot({ path: '/opt/cursor/artifacts/arrange-chrome-390x844-mix.png' })
       } finally {
         await browser.close()
       }
     } finally {
       child.kill('SIGTERM')
     }
-  }, 120000)
+  }, 180000)
 })

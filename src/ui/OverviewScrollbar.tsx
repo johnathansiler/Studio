@@ -1,6 +1,5 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import {
-  contentOfPixel,
   laneZoomBounds,
   overviewPart,
   panOverview,
@@ -142,8 +141,6 @@ function OverviewBar({
     try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* already gone */ }
     const time = timeWindow(el.scrollLeft, el.clientWidth, pxRef.current)
     const lanes = measureLanes(el, laneRef.current)
-    const y0 = contentOfPixel(el.scrollTop, laneRef.current, lanes.fixed)
-    const y1 = contentOfPixel(el.scrollTop + el.clientHeight, laneRef.current, lanes.fixed)
     const drag = {
       pointerId: event.pointerId,
       part,
@@ -155,9 +152,8 @@ function OverviewBar({
       thumb: box.size,
       startSec: time.startSec,
       endSec: time.endSec,
-      y0,
-      y1,
-      total: Math.max(lanes.fixed + lanes.flex, 1),
+      zoom: laneRef.current,
+      scrollTop: el.scrollTop,
       fixed: lanes.fixed,
       flex: lanes.flex,
     }
@@ -198,9 +194,8 @@ function OverviewBar({
         const bounds = laneZoomBounds(node.clientHeight, drag.fixed, drag.flex)
         const next = zoomLaneByEdge({
           edge: drag.part,
-          y0: drag.y0,
-          y1: drag.y1,
-          total: drag.total,
+          zoom: drag.zoom,
+          scrollTop: drag.scrollTop,
           deltaFrac,
           view: node.clientHeight,
           fixed: drag.fixed,

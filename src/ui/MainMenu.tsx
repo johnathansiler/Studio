@@ -72,6 +72,11 @@ export function MainMenu({
   onLatency,
   projectName,
   onProjectName,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  onIdeas,
 }: {
   items: readonly MenuSpec[]
   pressed: (action: string) => boolean
@@ -82,9 +87,15 @@ export function MainMenu({
   latencyHint?: BufferHint
   latencyReadout?: string
   onLatency?: (hint: BufferHint) => void
-  /** Phone Arrange keeps the session name here after the top row is removed. */
+  /** Phone keeps the session name here after the top row is removed. */
   projectName?: string
   onProjectName?: (name: string) => void
+  /** Phone Collab and Mix reach Undo, Redo, and Ideas from this sheet. */
+  canUndo?: boolean
+  canRedo?: boolean
+  onUndo?: () => void
+  onRedo?: () => void
+  onIdeas?: () => void
 }) {
   const latencyValue = bufferHintLabel(latencyHint ?? 'interactive')
   const latencyDetail = latencyReadout || 'Base not measured. Output not measured.'
@@ -101,6 +112,22 @@ export function MainMenu({
             onChange={(event) => onProjectName(event.target.value)}
           />
         </label>
+      )}
+      {(onUndo || onRedo || onIdeas) && (
+        <section className="menu-group" aria-label="History">
+          <p className="menu-heading">History</p>
+          <div className="menu-rows">
+            {onUndo && (
+              <MenuRow action="undo" label="Undo" hint="Undo the last edit." disabled={!canUndo} onClick={onUndo} />
+            )}
+            {onRedo && (
+              <MenuRow action="redo" label="Redo" hint="Redo the edit you undid." disabled={!canRedo} onClick={onRedo} />
+            )}
+            {onIdeas && (
+              <MenuRow action="ideas" label="Ideas" hint="Pick a part, or write a full song. The MIDI stays editable." onClick={onIdeas} />
+            )}
+          </div>
+        </section>
       )}
       {MENU_GROUPS.map((group) => {
         const rows = items.filter((item) => item.group === group.id)

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import type { AudioEngine } from '../audio/engine'
 import { STRIP_BOUNDS, displayedStrip, isNarrowStrip } from '../model/layoutWidth'
 import { gainToDb } from '../model/time'
@@ -237,6 +238,17 @@ function MixToolbar({
   const [open, setOpen] = useState(false)
   const [section, setSection] = useState<MixSection>('channel')
   const [mastering, setMastering] = useState(false)
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    const pick = () => {
+      const node = document.getElementById('phone-screen-slot')
+      setSlot(node instanceof HTMLElement ? node : null)
+    }
+    pick()
+    const observer = new MutationObserver(pick)
+    observer.observe(document.body, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [])
   useMixSheet(open, () => {
     if (detailsRef.current) detailsRef.current.open = false
     setOpen(false)
@@ -267,22 +279,33 @@ function MixToolbar({
     const place = () => {
       const box = summary.getBoundingClientRect()
       const tabs = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--view-tabs-bottom')) || 0
-      const maxH = Math.min(420, Math.round(window.innerHeight * 0.52))
+      const chromeTop = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--phone-chrome-top')) || tabs
+      const chromeBottom = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--phone-chrome-bottom')) || 0
+      const phone = document.querySelector('.shell.phone')
+      const floor = phone ? Math.max(tabs, chromeTop) : tabs
+      const limit = window.innerHeight - (phone ? chromeBottom : 0)
+      const maxH = Math.min(420, Math.max(120, Math.round(limit - floor - 12)))
       const width = Math.min(panel.offsetWidth || 300, window.innerWidth - 16)
       let left = box.left
       if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 8 - width)
-      let top = box.bottom + 4
-      if (top + 160 > window.innerHeight - 8) top = Math.max(tabs + 4, window.innerHeight - 8 - maxH)
-      panel.style.top = `${Math.max(tabs + 4, top)}px`
-      panel.style.bottom = 'auto'
+      if (phone) {
+        panel.style.top = 'auto'
+        panel.style.bottom = `${Math.max(8, chromeBottom + 4)}px`
+        panel.style.maxHeight = `${Math.min(maxH, Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--phone-sheet-h')) || maxH)}px`
+      } else {
+        let top = box.bottom + 4
+        if (top + 160 > window.innerHeight - 8) top = Math.max(tabs + 4, window.innerHeight - 8 - maxH)
+        panel.style.top = `${Math.max(tabs + 4, top)}px`
+        panel.style.bottom = 'auto'
+        panel.style.maxHeight = `${maxH}px`
+      }
       panel.style.left = `${left}px`
-      panel.style.maxHeight = `${maxH}px`
     }
     place()
     window.addEventListener('resize', place)
     return () => window.removeEventListener('resize', place)
   }, [open, shown, focus, detailsRef])
-  return (
+  const toolbar = (
     <>
       <div className="mix-toolbar" role="toolbar" aria-label="Mix">
         <details
@@ -355,6 +378,8 @@ function MixToolbar({
       {mastering && <MasterSheet store={store} engine={engine} onClose={() => setMastering(false)} />}
     </>
   )
+  if (slot) return createPortal(toolbar, slot)
+  return toolbar
 }
 
 function ChannelSection({
