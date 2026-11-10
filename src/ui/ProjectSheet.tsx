@@ -2,6 +2,7 @@ import type { ProjectListItem } from '../storage/idb'
 import { ageLabel } from './share'
 import { peakOutline } from './waveformDraw'
 import { MiniWave } from './WaveformView'
+import { SheetClose } from './SheetClose'
 
 export function ProjectSheet({
   projects,
@@ -21,6 +22,8 @@ export function ProjectSheet({
   onRevert,
   onAudio,
   onKeep,
+  /** Phone dock: an X, and the sheet stops above the bottom bar. */
+  dockSheet = false,
 }: {
   projects: ProjectListItem[]
   snapshots: { key: string; savedAt: number }[]
@@ -39,11 +42,15 @@ export function ProjectSheet({
   onRevert: (key: string) => void
   onAudio: () => void
   onKeep: () => void
+  dockSheet?: boolean
 }) {
   return (
-    <div className="modal-back" data-screen-overlay="" role="dialog" aria-label="Projects" onClick={onClose}>
+    <div className={`modal-back${dockSheet ? ' phone-sheet' : ''}`} data-screen-overlay="" role="dialog" aria-label="Projects" onClick={onClose}>
       <div className="modal" id="project-sheet" onClick={(event) => event.stopPropagation()}>
-        <h2>Projects</h2>
+        <header className="sheet-head">
+          <h2>Projects</h2>
+          {dockSheet && <SheetClose onClick={onClose} />}
+        </header>
         <input aria-label="Name" value={name} onChange={(event) => onName(event.target.value)} />
         <div className="row-btns wrap">
           <button className="text-btn" onClick={onNew}>New</button>
@@ -79,7 +86,7 @@ export function ProjectSheet({
         <div className="row-btns">
           <span>{usage}</span>
           {!persisted && <button className="text-btn" onClick={onKeep}>Keep</button>}
-          <button className="text-btn overlay-close" onClick={onClose}>Close</button>
+          {dockSheet ? null : <button className="text-btn overlay-close" onClick={onClose}>Close</button>}
         </div>
       </div>
     </div>

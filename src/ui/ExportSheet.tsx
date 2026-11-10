@@ -5,17 +5,21 @@ import { decodeWavPCM } from '../model/wav'
 import { selectProject } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { shareOrDownload } from './share'
+import { SheetClose } from './SheetClose'
 
 export function ExportSheet({
   store,
   phone,
   onClose,
   onFreeze,
+  /** Phone dock: an X, and the sheet stops above the bottom bar. */
+  dockSheet = false,
 }: {
   store: ProjectStore
   phone: boolean
   onClose: () => void
   onFreeze: (audio: { sampleRate: number; channels: Float32Array[] }, start: number) => void
+  dockSheet?: boolean
 }) {
   const [format, setFormat] = useState<BounceKind>('wav')
   const [advanced, setAdvanced] = useState(false)
@@ -111,10 +115,12 @@ export function ExportSheet({
   }
 
   return (
-    <div className="modal-back" data-screen-overlay="" role="dialog" aria-label="Export" onClick={onClose}>
+    <div className={`modal-back${dockSheet ? ' phone-sheet' : ''}`} data-screen-overlay="" role="dialog" aria-label="Export" onClick={onClose}>
       <div className="modal" id="export-sheet" onClick={(event) => event.stopPropagation()}>
-        <h2>Export</h2>
-        <button type="button" className="overlay-close" onClick={onClose}>Close</button>
+        <header className="sheet-head">
+          <h2>Export</h2>
+          {dockSheet ? <SheetClose onClick={onClose} /> : <button type="button" className="overlay-close" onClick={onClose}>Close</button>}
+        </header>
         <select id="export-format" aria-label="Format" value={format} onChange={(event) => setFormat(event.target.value as BounceKind)}>
           <option value="wav">WAV</option>
           <option value="mp3">MP3</option>

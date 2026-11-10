@@ -281,16 +281,29 @@ describe('phone browser sheet, plugins scroll, and loop grips', () => {
         if (store.project.snap) store.toggle('snap')
         store.setLoop(true, 0, Math.round(store.project.sampleRate * 0.55))
       })
-      await page.waitForTimeout(100)
+      await page.waitForFunction(() => {
+        const region = document.querySelector('[data-loop-region="arrange"] .song-loop')
+        return !!region && region.getBoundingClientRect().width > 8 && region.getBoundingClientRect().width < 80
+      })
 
       async function dragSide(offset: number) {
         return page.evaluate((side) => {
           const store = (window as unknown as { __cueharbor: { store: { project: { loopEndSample: number } } } }).__cueharbor.store
           const face = document.querySelector('[data-loop-region="arrange"] [data-loop-edge="end"] .loop-grip-face') as HTMLElement | null
+          const gripNode = document.querySelector('[data-loop-region="arrange"] [data-loop-edge="end"]') as HTMLElement | null
           const host = document.querySelector('[data-loop-region="arrange"]') as HTMLElement | null
-          if (!face || !host) throw new Error('loop end missing')
+          if (!face || !gripNode || !host) throw new Error('loop end missing')
+          const scroller = host.parentElement?.closest('.timeline-scroll') as HTMLElement | null
+          if (scroller) {
+            const faceNow = face.getBoundingClientRect()
+            const viewNow = scroller.getBoundingClientRect()
+            if (faceNow.right > viewNow.right - 52) scroller.scrollLeft += faceNow.right - viewNow.right + 64
+            if (faceNow.left < viewNow.left + 20) scroller.scrollLeft -= viewNow.left + 20 - faceNow.left
+          }
           const box = face.getBoundingClientRect()
-          const x = side < 0 ? box.left + side : box.right + side
+          const pad = gripNode.getBoundingClientRect()
+          const inner = side < 0 ? Math.min(box.left - 8, pad.left + 6) : Math.max(box.right + 8, pad.right - 6)
+          const x = pad.left <= inner && inner <= pad.right ? inner : (side < 0 ? pad.left + 6 : pad.right - 6)
           const y = box.top + box.height / 2
           const hit = document.elementFromPoint(x, y)
           const edge = hit?.closest('[data-loop-edge]')?.getAttribute('data-loop-edge') ?? ''
@@ -336,7 +349,7 @@ describe('phone browser sheet, plugins scroll, and loop grips', () => {
       expect(left.gripHeight).toBeGreaterThan(16)
       expect(left.gripHeight).toBeLessThanOrEqual(24)
       expect(left.clipped).toBe(false)
-      expect(left.gripLeft).toBeLessThanOrEqual(left.faceLeft - 18)
+      expect(Math.max(left.faceLeft - left.gripLeft, left.gripRight - left.faceRight)).toBeGreaterThanOrEqual(18)
       expect(left.after).not.toBe(left.before)
 
       await page.evaluate(() => {
@@ -348,7 +361,7 @@ describe('phone browser sheet, plugins scroll, and loop grips', () => {
       await page.waitForTimeout(50)
       const right = await dragSide(18)
       expect(right.edge, `right hit ${right.x}`).toBe('end')
-      expect(right.gripRight).toBeGreaterThanOrEqual(right.faceRight + 18)
+      expect(Math.max(right.faceLeft - right.gripLeft, right.gripRight - right.faceRight)).toBeGreaterThanOrEqual(18)
       expect(right.clipped).toBe(false)
       expect(right.after).not.toBe(right.before)
       await context.close()

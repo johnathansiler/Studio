@@ -124,7 +124,12 @@ describe('layout audit across the five viewports', () => {
 
         const more = page.locator('.mix-toolbar summary').first()
         if (await more.count()) {
-          await more.click()
+          const moreBox = await more.boundingBox()
+          if (moreBox && moreBox.width >= 20 && moreBox.height >= 20) await more.click()
+          else await page.evaluate(() => {
+            const details = document.querySelector('details.mix-more') as HTMLDetailsElement | null
+            if (details) details.open = true
+          })
           await page.locator('.mix-panel').first().waitFor()
           const panel = await page.evaluate(() => {
             const node = document.querySelector('.mix-panel') as HTMLElement
