@@ -4088,6 +4088,21 @@ html[data-posture="tabletop"] .shell .transport .t-btn.play {
   overflow: visible;
   padding: 4px 6px 6px;
 }
+.shell.phone:not(.land) .tool-slot:has(.command-strip.phone-bar) {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  height: 52px;
+  min-height: 52px;
+  max-height: 52px;
+  overflow: hidden;
+}
+.shell.phone:not(.land) .command-strip.phone-bar.tucked {
+  flex-wrap: nowrap;
+  height: 40px;
+  max-height: 40px;
+  overflow: hidden;
+}
 .shell.phone:not(.land) .command-strip.tucked {
   display: flex;
   flex-wrap: wrap;

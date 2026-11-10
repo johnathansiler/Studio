@@ -200,7 +200,9 @@ describe('phone fit at 412x915', () => {
         expect(addBox!.height).toBeGreaterThanOrEqual(40)
         expect(addBox!.height).toBeLessThanOrEqual(44)
         expect(addBar!.x).toBeLessThan(8)
-        expect(addBox!.x).toBeGreaterThan(40)
+        expect(addBox!.x).toBeLessThan(16)
+        const undoBox = await page.locator('.arrange-add [data-history="undo"]').boundingBox()
+        expect(undoBox!.x).toBeGreaterThan(addBox!.x + addBox!.width - 1)
         expect(addBox!.x + addBox!.width).toBeLessThanOrEqual(413)
         await add.click()
         await page.getByRole('group', { name: 'Add Track' }).waitFor()
@@ -217,8 +219,8 @@ describe('phone fit at 412x915', () => {
         await page.getByRole('button', { name: /^Mix/ }).click()
         await page.locator('.mixer-view[data-layout="columns"]').waitFor()
         await page.locator('.mixer .strip').first().waitFor()
-        expect(await page.getByRole('button', { name: 'Columns' }).count()).toBe(0)
-        expect(await page.getByRole('button', { name: 'Rows' }).count()).toBe(0)
+        expect(await page.getByRole('button', { name: 'Columns', exact: true }).count()).toBe(0)
+        expect(await page.getByRole('button', { name: 'Rows', exact: true }).count()).toBe(0)
         const mix = await page.evaluate(() => {
           const more = document.querySelector('.mix-more') as HTMLDetailsElement | null
           if (more && !more.open) more.open = true

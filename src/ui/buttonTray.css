@@ -320,6 +320,7 @@
 }
 
 .shell .views button,
+.shell .views button.collab-tab,
 .views button {
   border-radius: var(--tray-btn-radius) !important;
   height: 40px;

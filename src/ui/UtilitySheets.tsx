@@ -3,6 +3,7 @@ import { SNAP_DIVISIONS, normalizeSnapDivision, type SnapDivisionId } from '../m
 import type { ProjectStore } from '../state/store'
 import { TOOL_INFO, activeTool, keyForTool, subscribeTools, type ArrangeTool } from '../state/tools'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
+import { ChoiceChip, ChoiceTray } from './ChoiceTray'
 import { SongPanel } from './SongPanel'
 import type { UtilitySheet } from './arrangePanel'
 import type { AudioEngine } from '../audio/engine'
@@ -47,78 +48,64 @@ export function UtilitySheets({
     )
   }
   if (utility === 'tools') {
-    return (
-      <ArrangeBottomSheet id="tool-choices" label="Select" title="Select" detail="Choose how a tap on the timeline behaves." onClose={onClose}>
-        <ToolChoices store={store} onClose={onClose} />
-      </ArrangeBottomSheet>
-    )
+    return <ToolChoices store={store} onClose={onClose} />
   }
   if (utility === 'snap') {
-    return (
-      <ArrangeBottomSheet id="snap-choices" label="Snap" title="Snap" onClose={onClose}>
-        <SnapChoices store={store} onClose={onClose} />
-      </ArrangeBottomSheet>
-    )
+    return <SnapChoices store={store} onClose={onClose} />
   }
   return null
 }
 
 function ToolChoices({ store, onClose }: { store: ProjectStore; onClose: () => void }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
+  const current = TOOL_INFO[value]
   return (
-    <div className="arrange-choices" role="listbox" aria-label="Tools">
+    <ChoiceTray id="tool-choices" label="Select" title="Select" value={current?.label ?? 'Select'} onClose={onClose}>
       {TOOLS.map((id) => {
         const info = TOOL_INFO[id]
         const key = keyForTool(id)
-        const label = key ? `${info.label} (${key})` : info.label
+        const name = key ? `${info.label} (${key})` : info.label
         return (
-          <button
+          <ChoiceChip
             key={id}
-            type="button"
-            className={value === id ? 'on' : ''}
-            aria-pressed={value === id}
-            title={info.hint}
-            aria-label={`${label}. ${info.hint}`}
+            label={info.label}
+            name={`${name}. ${info.hint}`}
+            hint={info.hint}
+            pressed={value === id}
             onClick={() => { store.setTool(id); onClose() }}
-          >
-            <strong>{info.label}</strong>
-          </button>
+          />
         )
       })}
-    </div>
+    </ChoiceTray>
   )
 }
 
 function SnapChoices({ store, onClose }: { store: ProjectStore; onClose: () => void }) {
   const on = store.project.snap !== false
   const division = normalizeSnapDivision(store.project.snapDivision)
+  const gridLabel = SNAP_DIVISIONS.find((item) => item.id === division)?.label ?? division
   return (
-    <div className="arrange-choices" role="listbox" aria-label="Snap">
-      <button
-        type="button"
-        className={on ? 'on' : ''}
-        aria-pressed={on}
-        title={on ? 'Snap is on. Press to move in small steps.' : 'Snap is off. Press to land on the grid.'}
+    <ChoiceTray id="snap-choices" label="Snap" title="Snap" value={on ? gridLabel : 'Off'} onClose={onClose}>
+      <ChoiceChip
+        label={on ? 'On' : 'Off'}
+        name={on ? 'Snap On. Press to move in small steps.' : 'Snap Off. Press to land on the grid.'}
+        hint={on ? 'Snap is on. Press to move in small steps.' : 'Snap is off. Press to land on the grid.'}
+        pressed
         onClick={() => { store.toggle('snap'); onClose() }}
-      >
-        <strong>{on ? 'Snap On' : 'Snap Off'}</strong>
-      </button>
+      />
       {SNAP_DIVISIONS.map((item) => (
-        <button
+        <ChoiceChip
           key={item.id}
-          type="button"
-          className={on && item.id === division ? 'on' : ''}
-          aria-pressed={on && item.id === division}
-          title={`Grid size ${item.label}. Used when Snap is on.`}
+          label={item.label}
+          hint={`Grid size ${item.label}. Used when Snap is on.`}
+          pressed={on && item.id === division}
           onClick={() => {
             store.setSnapDivision(item.id as SnapDivisionId)
             if (store.project.snap === false) store.toggle('snap')
             onClose()
           }}
-        >
-          <strong>{item.label}</strong>
-        </button>
+        />
       ))}
-    </div>
+    </ChoiceTray>
   )
 }
