@@ -54,18 +54,21 @@ describe('on-screen piano visibility', () => {
     const vocal = store.project.tracks.find((track) => track.type === 'audio')!
     const keys = store.project.tracks.find((track) => track.type === 'midi')!
     store.selectTrack(vocal.id)
-    expect(arrange(store)).not.toContain('On-screen Piano')
+    expect(arrange(store)).not.toContain('onscreen-piano')
     store.selectTrack(keys.id)
-    expect(arrange(store)).toContain('On-screen Piano')
+    expect(arrange(store)).toContain('>Keys<')
+    expect(arrange(store)).toContain('on-screen piano')
     store.setTrackInstrument(keys.id, 'none')
-    expect(arrange(store)).not.toContain('On-screen Piano')
+    expect(arrange(store)).not.toContain('onscreen-piano')
     store.setTrackInstrument(keys.id, 'synth')
     const synth = arrange(store)
-    expect(synth).toContain('On-screen Piano')
+    expect(synth).toContain('>Keys<')
     expect(synth).toContain('onscreen-piano')
+    expect(synth).toContain('on-screen piano')
+    expect(synth).not.toContain('>On-screen Piano<')
     expect(synth).not.toContain('>Keyboard<')
     store.selectTrack(vocal.id)
-    expect(arrange(store)).not.toContain('On-screen Piano')
+    expect(arrange(store)).not.toContain('onscreen-piano')
   })
 
   it('offers On-screen Piano in the note editor so the playable piano can swap in', () => {
