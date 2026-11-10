@@ -15,6 +15,7 @@ import { useFormFactor } from './form'
 import { useScreenOverlay } from './screenOverlay'
 import { currentArrangeSheet, subscribeArrangeSheet, toggleArrangeSheet } from './arrangePanel'
 import { TipButton } from './Hint'
+import { SheetClose } from './SheetClose'
 import { bindSwipeDismiss } from './swipeDismiss'
 import './guideSheet.css'
 
@@ -214,12 +215,12 @@ function ToolPanel({
       <button type="button" className="guide-scrim" aria-label="Close tools" onClick={onClose} />
       <div className={`guide-sheet tool-sheet ${place}`} role="dialog" aria-label="Tools" data-tool-panel="open" data-screen-overlay="">
         {place === 'sheet' && <div className="guide-handle" aria-hidden="true" />}
-        <header className="guide-head">
+        <header className="guide-head sheet-head">
           <div>
             <h2>Tools</h2>
             <p>Pick how a tap on the timeline behaves. The lit tool is the one in use.</p>
           </div>
-          <button type="button" className="guide-x overlay-close" onClick={onClose} aria-label="Close tools">Close</button>
+          <SheetClose className="guide-x" onClick={() => onClose?.()} />
         </header>
         {TOOL_GROUPS.map((group) => (
           <section className="guide-section" key={group.label}>
@@ -298,7 +299,7 @@ function SelectToast({ onClose }: { onClose: () => void }) {
     <div className="select-hint-host">
       <div ref={ref} className="toast select-hint" role="status">
         <span>{SELECT_HINT}</span>
-        <button type="button" className="hint-close" aria-label="Close" title="Close" onClick={onClose}>Close</button>
+        <SheetClose className="hint-close" onClick={onClose} />
       </div>
     </div>
   )

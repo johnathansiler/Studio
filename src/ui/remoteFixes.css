@@ -185,6 +185,13 @@
   flex-wrap: wrap;
   overflow: visible;
 }
+.shell.phone.land .tool-slot:has(.command-strip.phone-bar) {
+  flex-wrap: nowrap;
+  height: 48px;
+  min-height: 48px;
+  max-height: 48px;
+  overflow: hidden;
+}
 .shell.phone.land .tool-slot .timeline-tools {
   flex-wrap: wrap;
   height: auto;
@@ -256,3 +263,36 @@
 .shell.phone.land .needle-face { height: 28px; }
 .shell.phone.land .knob { width: 48px; }
 .shell.phone.land .knob button { width: 32px; height: 32px; }
+
+/* Phone top row is only the view tabs. Menu and the session name live elsewhere. */
+.shell.phone .topbar,
+.shell.phone.land .topbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  padding: max(4px, env(safe-area-inset-top)) 4px 2px;
+  overflow: hidden;
+}
+.shell.phone .topbar .views,
+.shell.phone.land .topbar .views,
+.shell.phone.land .views {
+  order: 0;
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+}
+
+.shell.phone .mix-more[open] > .mix-back {
+  top: var(--phone-chrome-top, var(--view-tabs-bottom, 48px));
+  bottom: var(--phone-chrome-bottom, 52px);
+}
+.shell.phone .mix-more[open] > .mix-panel {
+  bottom: calc(var(--phone-chrome-bottom, 52px) + 4px);
+  max-height: var(--phone-sheet-h, 46dvh);
+  overflow: auto;
+  overscroll-behavior: contain;
+}

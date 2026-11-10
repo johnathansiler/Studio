@@ -589,7 +589,8 @@ describe('timeline overview and loop handles', () => {
     expect(phoneShrunk.laneMin).toBeGreaterThanOrEqual(40)
 
     const scroll = await phone.page.locator('.timeline-scroll').boundingBox()
-    const midY = scroll!.y + scroll!.height * 0.45
+    const midY = scroll!.y + Math.min(scroll!.height * 0.45, Math.max(12, scroll!.height - 24))
+    const half = Math.max(6, scroll!.width / 2 - 8)
     const spread = async (from: number, to: number) => {
       const fingers = (gap: number) => [
         { x: Math.round(scroll!.x + scroll!.width / 2 - gap), y: Math.round(midY), id: 1 },
@@ -603,7 +604,7 @@ describe('timeline overview and loop handles', () => {
       }
       await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     }
-    await spread(28, 90)
+    await spread(Math.max(4, half * 0.35), half)
     await phone.page.waitForTimeout(40)
     const pinched = await phone.page.evaluate(() => Number((document.querySelector('.timeline-inner') as HTMLElement).dataset.px))
     expect(pinched).toBeGreaterThan(phoneBefore.px)

@@ -363,3 +363,96 @@
   min-height: 40px;
   z-index: 3;
 }
+
+/* Phone chrome's one-row header wins once lanes are short enough to set
+   data-lane-compact. The name shares the 40px control row. These selectors
+   outrank the tight fold above, which still covers the desk and the range
+   between 0.72 and 0.9. */
+.shell.phone:not(.land) .arrange[data-lane-compact] {
+  /* Leave the timeline and the 40px vertical bar on screen. The name shrinks. */
+  grid-template-columns: minmax(0, calc(100% - 96px)) minmax(96px, 1fr);
+}
+
+.shell.phone:not(.land) .arrange[data-lane-compact] .heads {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="tight"] .head .pl-head,
+.shell.phone.land .arrange[data-lane-compact][data-lane-scale="tight"] .head .pl-head {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 2px 2px 0;
+  gap: 2px;
+}
+
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="tight"] .pl-name-row,
+.shell.phone.land .arrange[data-lane-compact][data-lane-scale="tight"] .pl-name-row {
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  max-height: none;
+  padding: 0 2px 0 0;
+  overflow: visible;
+}
+
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="tight"] .pl-name-row .name,
+.shell.phone.land .arrange[data-lane-compact][data-lane-scale="tight"] .pl-name-row .name {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  height: 36px;
+  min-height: 36px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="tight"] .track-controls,
+.shell.phone.land .arrange[data-lane-compact][data-lane-scale="tight"] .track-controls {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  width: max-content;
+  min-width: max-content;
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  padding-right: 0;
+}
+
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="tight"] .pl-head .track-controls > .mini,
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="tight"] .pl-head .track-controls > .piano-open,
+.shell.phone.land .arrange[data-lane-compact][data-lane-scale="tight"] .pl-head .track-controls > .mini,
+.shell.phone.land .arrange[data-lane-compact][data-lane-scale="tight"] .pl-head .track-controls > .piano-open {
+  height: 40px;
+  min-height: 40px;
+}
+
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="tight"] .pl-name-row .track-more {
+  position: static;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
+}

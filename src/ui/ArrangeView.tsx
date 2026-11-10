@@ -885,16 +885,16 @@ export function ArrangeView({
           <button type="button" className="browser-resize" aria-label="Browser width. Drag to resize." title="Drag to resize the browser." onPointerDown={resizeBrowser} />
         </>
       )}
-      <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'} data-lane-scale={laneZoom < LANE_ZOOM_TIGHT ? 'tight' : 'roomy'} style={{ ['--lane-zoom' as string]: String(laneZoom) }}>
+      <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'} data-lane-scale={laneZoom < LANE_ZOOM_TIGHT ? 'tight' : 'roomy'} data-lane-compact={laneZoom <= 0.72 ? 'true' : undefined} style={{ ['--lane-zoom' as string]: String(laneZoom) }}>
       <div className="heads-col">
       <div className="arrange-add">
+        <AddTrackButton store={store} prominent onAdded={onTrackAdded} />
         {phoneBar && (
           <div className="arrange-add-tools">
             {phoneBar.history}
             {phoneBar.ideas}
           </div>
         )}
-        <AddTrackButton store={store} prominent onAdded={onTrackAdded} />
       </div>
       <div
         className="heads"

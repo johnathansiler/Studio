@@ -3,6 +3,7 @@ import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { AnchoredMenu } from './AnchoredMenu'
 import { SheetGrab } from './bottomSheet'
+import { SheetClose } from './SheetClose'
 import { SoundBrowser } from './SoundBrowser'
 import { PatternSend, patternBeat } from './PatternSend'
 import { quickDragArmed } from './clipKeys'
@@ -60,6 +61,20 @@ export function PlaylistBrowser({
   const pointerDropped = useRef(0)
   const needle = query.trim().toLowerCase()
   const trackId = store.selectedTrackId || project.tracks[0]?.id || ''
+
+  useEffect(() => {
+    if (!sheet && !phone) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      queueMicrotask(() => {
+        if (event.defaultPrevented) return
+        if (document.querySelector('.anchored-menu[data-open="true"]:not([hidden])')) return
+        onClose()
+      })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sheet, phone, onClose])
 
   useEffect(() => {
     const allow = (event: DragEvent) => {
@@ -272,7 +287,7 @@ export function PlaylistBrowser({
             ))}
           </AnchoredMenu>
         </div>
-        <button type="button" className="browser-close overlay-close" title="Hide the browser. The playlist stays put." onClick={onClose}>Close</button>
+        <SheetClose className="browser-close" onClick={onClose} />
       </div>
       {sheet ? <div className="bottom-sheet-body">{catalog}</div> : catalog}
     </aside>

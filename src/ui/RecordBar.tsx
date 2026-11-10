@@ -6,6 +6,7 @@ import { RECORD_COPY, copyOf, described } from './chrome'
 import { useFormFactor } from './form'
 import { TipButton } from './Hint'
 import { AnchoredMenu } from './AnchoredMenu'
+import { SheetClose } from './SheetClose'
 
 export function RecordBar({
   store,
@@ -179,6 +180,10 @@ export function RecordBar({
           <span className="t-word">Punch</span>
         </button>
         <AnchoredMenu className="punch-menu" open={open} onClose={() => setOpen(false)} label="Punch" triggerRef={optionsButton} prefer="down">
+          <div className="sheet-head punch-head">
+            <strong>Punch</strong>
+            <SheetClose onClick={() => setOpen(false)} />
+          </div>
           <div className="rec-bar inline" role="group" aria-label="Recording">
             {fields}
           </div>

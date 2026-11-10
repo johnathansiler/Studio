@@ -158,25 +158,52 @@ async function assertOverlay(page: Page) {
     const vh = window.innerHeight
     const boxes = overlays.map((node) => {
       const box = node.getBoundingClientRect()
-      return { top: box.top, left: box.left, right: box.right, bottom: box.bottom }
+      return {
+        top: box.top,
+        left: box.left,
+        right: box.right,
+        bottom: box.bottom,
+        phoneSheet: node.classList.contains('phone-sheet') || node.classList.contains('guide-sheet'),
+      }
     })
     const y = Math.min(vh - 4, (view.bottom + vh) / 2)
     const hit = document.elementFromPoint(vw / 2, y)
     const covered = overlays.some((node) => hit === node || node.contains(hit))
+    const phone = !!document.querySelector('.shell.phone')
+    const transport = document.querySelector('.transport')?.getBoundingClientRect()
+    const bar = document.querySelector('.tool-slot')?.getBoundingClientRect()
     const pill = overlays
       .flatMap((node) => [...node.querySelectorAll('button.overlay-close, .step-close, .scaler-close, .mpc-close, .browser-close, .song-close')])
       .map((node) => node.getBoundingClientRect())
-    return { tabHits, viewBottom: view.bottom, boxes, vw, vh, covered, pills: pill.map((box) => ({ width: box.width, height: box.height })) }
+    return {
+      tabHits,
+      viewBottom: view.bottom,
+      boxes,
+      vw,
+      vh,
+      covered,
+      phone,
+      transportBottom: transport?.bottom ?? null,
+      barTop: bar?.top ?? null,
+      pills: pill.map((box) => ({ width: box.width, height: box.height })),
+    }
   })
   for (const tab of result.tabHits) expect(tab.ok, tab.label).toBe(true)
   expect(result.boxes.length).toBeGreaterThan(0)
-  for (const box of result.boxes) {
+  const sheets = result.phone ? result.boxes.filter((box) => box.phoneSheet) : []
+  const full = result.boxes.filter((box) => !sheets.includes(box))
+  for (const box of sheets) {
+    expect(box.top).toBeGreaterThanOrEqual(result.viewBottom - 2)
+    if (result.transportBottom != null) expect(box.top).toBeGreaterThanOrEqual(result.transportBottom - 2)
+    if (result.barTop != null) expect(box.bottom).toBeLessThanOrEqual(result.barTop + 2)
+  }
+  for (const box of full) {
     expect(box.left).toBeLessThanOrEqual(1)
     expect(box.right).toBeGreaterThanOrEqual(result.vw - 1)
     expect(box.bottom).toBeGreaterThanOrEqual(result.vh - 1)
     expect(Math.abs(box.top - result.viewBottom)).toBeLessThanOrEqual(3)
   }
-  expect(result.covered).toBe(true)
+  if (full.length) expect(result.covered).toBe(true)
   expect(result.pills.length).toBeGreaterThan(0)
   for (const pill of result.pills) {
     expect(pill.width).toBeGreaterThanOrEqual(40)

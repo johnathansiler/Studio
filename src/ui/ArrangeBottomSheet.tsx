@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { SheetGrab } from './bottomSheet'
+import { SheetHeader } from './SheetClose'
 
 /** Same bottom sheet Browser and Plugins use: header, Close, body scrolls, height follows short content. */
 export function ArrangeBottomSheet({
@@ -35,13 +36,12 @@ export function ArrangeBottomSheet({
       onPointerDown={(event) => event.stopPropagation()}
     >
       <SheetGrab label={`Resize ${title}. Drag up or down.`} />
-      <header className="arrange-sheet-head">
-        <div>
-          <strong>{title}</strong>
-          {detail ? <span>{detail}</span> : null}
-        </div>
-        <button type="button" className="overlay-close" onClick={onClose}>Close</button>
-      </header>
+      <SheetHeader
+        className="arrange-sheet-head"
+        title={<strong>{title}</strong>}
+        detail={detail ? <span>{detail}</span> : null}
+        onClose={onClose}
+      />
       <div className="bottom-sheet-body">{children}</div>
     </section>
   )

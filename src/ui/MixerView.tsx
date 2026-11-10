@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import type { AudioEngine } from '../audio/engine'
 import { STRIP_BOUNDS, displayedStrip, isNarrowStrip } from '../model/layoutWidth'
 import { gainToDb } from '../model/time'
@@ -14,6 +15,7 @@ import { TouchSlider } from './kit/controls'
 import { holdMeter } from './levels'
 import { TrackPresence } from './presenceMarks'
 import { useScreenOverlay } from './screenOverlay'
+import { SheetClose } from './SheetClose'
 import './mixer.css'
 
 /** Full-screen channel sheet. A view tab closes it with the other overlays. */
@@ -237,6 +239,17 @@ function MixToolbar({
   const [open, setOpen] = useState(false)
   const [section, setSection] = useState<MixSection>('channel')
   const [mastering, setMastering] = useState(false)
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    const pick = () => {
+      const node = document.getElementById('phone-screen-slot')
+      setSlot(node instanceof HTMLElement ? node : null)
+    }
+    pick()
+    const observer = new MutationObserver(pick)
+    observer.observe(document.body, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [])
   useMixSheet(open, () => {
     if (detailsRef.current) detailsRef.current.open = false
     setOpen(false)
@@ -258,31 +271,67 @@ function MixToolbar({
   const close = () => {
     if (detailsRef.current) detailsRef.current.open = false
   }
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
   useLayoutEffect(() => {
     const root = detailsRef.current
     if (!open || !root) return
     const summary = root.querySelector('summary')
     const panel = root.querySelector('.mix-panel') as HTMLElement | null
+    const scrim = root.querySelector('.mix-back') as HTMLElement | null
     if (!summary || !panel) return
     const place = () => {
       const box = summary.getBoundingClientRect()
       const tabs = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--view-tabs-bottom')) || 0
-      const maxH = Math.min(420, Math.round(window.innerHeight * 0.52))
+      const phone = document.querySelector('.shell.phone')
+      const bar = phone?.querySelector('.tool-slot')?.getBoundingClientRect()
+      const transport = phone?.querySelector('.transport')?.getBoundingClientRect()
+      const chromeTop = Math.max(
+        tabs,
+        transport && transport.height > 8 ? transport.bottom : 0,
+      )
+      const chromeBottom = bar && bar.height > 8 && bar.top < window.innerHeight - 4
+        ? Math.max(0, window.innerHeight - bar.top)
+        : 0
+      const floor = phone ? chromeTop : tabs
+      const limit = window.innerHeight - (phone ? chromeBottom : 0)
+      const maxH = Math.min(420, Math.max(120, Math.round(limit - floor - 16)))
       const width = Math.min(panel.offsetWidth || 300, window.innerWidth - 16)
       let left = box.left
       if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 8 - width)
-      let top = box.bottom + 4
-      if (top + 160 > window.innerHeight - 8) top = Math.max(tabs + 4, window.innerHeight - 8 - maxH)
-      panel.style.top = `${Math.max(tabs + 4, top)}px`
-      panel.style.bottom = 'auto'
+      if (phone) {
+        const bottom = Math.round(chromeBottom + 8)
+        panel.style.top = 'auto'
+        panel.style.bottom = `${bottom}px`
+        panel.style.maxHeight = `${maxH}px`
+        if (scrim) {
+          scrim.style.top = `${Math.round(chromeTop)}px`
+          scrim.style.bottom = `${Math.round(chromeBottom)}px`
+        }
+      } else {
+        let top = box.bottom + 4
+        if (top + 160 > window.innerHeight - 8) top = Math.max(tabs + 4, window.innerHeight - 8 - maxH)
+        panel.style.top = `${Math.max(tabs + 4, top)}px`
+        panel.style.bottom = 'auto'
+        panel.style.maxHeight = `${maxH}px`
+        if (scrim) {
+          scrim.style.top = ''
+          scrim.style.bottom = ''
+        }
+      }
       panel.style.left = `${left}px`
-      panel.style.maxHeight = `${maxH}px`
     }
     place()
     window.addEventListener('resize', place)
     return () => window.removeEventListener('resize', place)
   }, [open, shown, focus, detailsRef])
-  return (
+  const toolbar = (
     <>
       <div className="mix-toolbar" role="toolbar" aria-label="Mix">
         <details
@@ -316,9 +365,9 @@ function MixToolbar({
               close()
             }}
           >
-            <header className="mix-sheet-head">
+            <header className="mix-sheet-head sheet-head">
               <h4>{name}</h4>
-              <button type="button" className="overlay-close" onClick={close}>Close</button>
+              <SheetClose onClick={close} />
             </header>
             <WidthBar axis="strip" value={strip} onChange={onStrip} onReset={onResetStrip} />
             <div className="mix-chips" role="tablist" aria-label="Channel sections">
@@ -355,6 +404,8 @@ function MixToolbar({
       {mastering && <MasterSheet store={store} engine={engine} onClose={() => setMastering(false)} />}
     </>
   )
+  if (slot) return createPortal(toolbar, slot)
+  return toolbar
 }
 
 function ChannelSection({

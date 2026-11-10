@@ -6,6 +6,7 @@ import type { SectionKind } from '../model/types'
 import type { ProjectStore } from '../state/store'
 import { useFormFactor } from '../ui/form'
 import { GuideLayer } from '../ui/GuideLayer'
+import { SheetClose } from '../ui/SheetClose'
 import { PlayersSheet } from '../ui/PlayersSheet'
 import '../ui/guideSheet.css'
 import {
@@ -210,12 +211,12 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
     <GuideLayer>
       <div className={`guide-sheet unstuck-sheet unstuck-dock ${place}`} role="dialog" aria-label="Ideas" data-unstuck="open" data-screen-overlay="">
         {place === 'sheet' && <div className="guide-handle" aria-hidden="true" />}
-        <header className="guide-head">
+        <header className="guide-head sheet-head">
           <div>
             <h2>Ideas</h2>
             <p>Pick one part. Full song always writes two verses and two choruses, then any extra sections the seed keeps. Shuffle again keeps the locks.</p>
           </div>
-          <button type="button" className="guide-x overlay-close" onClick={onClose} aria-label="Close Ideas">Close</button>
+          <SheetClose className="guide-x" onClick={onClose} />
         </header>
         <div className="unstuck-pages" role="tablist" aria-label="Ideas pages">
           <button type="button" role="tab" aria-selected={page === 'write'} className={page === 'write' ? 'on' : ''} onClick={() => setPage('write')}>Write</button>
