@@ -4,9 +4,11 @@ export const OVERVIEW_HIT = 40
 export const TIMELINE_PX_MAX = 280
 /** Existing timeline floor. A long project may zoom out further so the whole song fits. */
 export const TIMELINE_PX_SOFT_MIN = 30
-/** Half the default lane height. A tall stack may zoom out further so every lane fits. */
+/** Half the default lane height. The usual zoom-out stop when every lane still fits. */
 export const LANE_ZOOM_SOFT_MIN = 0.5
 export const LANE_ZOOM_MAX = 2.25
+/** Header Mute / Solo / Arm controls. A lane never zooms shorter than this. */
+export const LANE_MIN_PX = 40
 /** Below this the header folds onto one row so the 40px controls still fit. */
 export const LANE_ZOOM_TIGHT = 0.9
 
@@ -43,16 +45,58 @@ export function clampTimelinePx(px: number, viewPx: number, totalSec: number) {
 }
 
 /**
- * Fully out fits every lane in the viewport, and can keep going to half height
- * when the stack is already shorter than the view. Fully in stops at a tall lane.
- * Default zoom is 1, between those ends. `flex` is the track stack at zoom 1.
- * `fixed` is the ruler and map, which do not scale.
+ * Fully out reaches half height when that still fits, and can go a little
+ * further so a tall stack fits, but never below a 40px lane. Fully in stops
+ * at a tall lane. Default zoom is 1, between those ends.
+ * `flex` is the track stack at zoom 1. `fixed` is the ruler and map.
+ * `lanePx` is the shortest lane at zoom 1; omit it when the height is unknown.
  */
-export function laneZoomBounds(view: number, fixed: number, flex: number): ZoomBounds {
+export function laneZoomBounds(view: number, fixed: number, flex: number, lanePx = 0): ZoomBounds {
   const room = Math.max(0, view - Math.max(0, Math.min(fixed, view)))
   const fit = flex > 1 ? room / flex : LANE_ZOOM_SOFT_MIN
-  const min = Math.min(LANE_ZOOM_SOFT_MIN, Math.max(0.05, fit))
+  const pixelFloor = lanePx > 1 ? Math.min(1, LANE_MIN_PX / lanePx) : 0
+  const min = Math.min(1, Math.max(pixelFloor, Math.min(LANE_ZOOM_SOFT_MIN, Math.max(0.05, fit))))
   return { min, max: Math.max(min, LANE_ZOOM_MAX) }
+}
+
+/**
+ * Document length the vertical thumb is drawn against.
+ * The real stack is padded by the zoom-out room below the floor, scaled up
+ * with the current zoom. At the floor the thumb fills the track when every
+ * lane fits. At the default zoom the thumb is shorter, so either end can
+ * still move and the bar does not look stuck.
+ */
+export function laneOverviewSpan(view: number, fixed: number, flex: number, zoom: number, minZoom: number): number {
+  const safeView = Math.max(1, view)
+  const z = Math.max(1e-6, zoom)
+  const floor = Math.max(1e-6, Math.min(z, minZoom > 0 ? minZoom : z))
+  const content = Math.max(0, fixed) + Math.max(0, flex) * z
+  const atFloor = Math.max(0, fixed) + Math.max(0, flex) * floor
+  const slack = Math.max(0, safeView - atFloor)
+  return Math.max(safeView, content + slack * (z / floor), 1)
+}
+
+/**
+ * Thumb size comes from `visualSpan` (so zoom-out room shortens a full bar).
+ * Thumb position still tracks the real content, and a shorter thumb can
+ * travel to the end of the track. When the two spans match, this is `thumbBox`.
+ */
+export function overviewThumb(
+  offset: number,
+  view: number,
+  contentSpan: number,
+  visualSpan: number,
+  track: number,
+  minThumb = 28,
+): ThumbBox {
+  if (!(visualSpan > contentSpan + 1e-4)) return thumbBox(offset, view, contentSpan, track, minThumb)
+  const visual = Math.max(visualSpan, contentSpan, view, 1)
+  const sized = thumbBox(0, view, visual, track, minThumb)
+  const scrollable = Math.max(0, Math.max(contentSpan, view, 0) - Math.max(0, view))
+  const travel = Math.max(0, Math.max(0, track) - sized.size)
+  const safeOffset = clamp(Number.isFinite(offset) ? offset : 0, 0, scrollable)
+  const origin = scrollable <= 1e-6 ? 0 : (safeOffset / scrollable) * travel
+  return { origin, size: sized.size }
 }
 
 export function laneSpan(fixed: number, flex: number, zoom: number) {
