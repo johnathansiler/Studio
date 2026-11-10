@@ -15,6 +15,7 @@ import { TouchSlider } from './kit/controls'
 import { holdMeter } from './levels'
 import { TrackPresence } from './presenceMarks'
 import { useScreenOverlay } from './screenOverlay'
+import { SheetClose } from './SheetClose'
 import './mixer.css'
 
 /** Full-screen channel sheet. A view tab closes it with the other overlays. */
@@ -339,9 +340,9 @@ function MixToolbar({
               close()
             }}
           >
-            <header className="mix-sheet-head">
+            <header className="mix-sheet-head sheet-head">
               <h4>{name}</h4>
-              <button type="button" className="overlay-close" onClick={close}>Close</button>
+              <SheetClose onClick={close} />
             </header>
             <WidthBar axis="strip" value={strip} onChange={onStrip} onReset={onResetStrip} />
             <div className="mix-chips" role="tablist" aria-label="Channel sections">

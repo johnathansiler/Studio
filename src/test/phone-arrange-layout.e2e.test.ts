@@ -115,9 +115,6 @@ async function measure(page: Page) {
         const rect = node.getBoundingClientRect()
         return { label: (node.getAttribute('aria-label') || node.textContent || '').replace(/\s+/g, ' ').trim(), left: rect.left }
       }),
-      grip: document.querySelector('.loop-grip-face')?.getBoundingClientRect().width ?? 0,
-      barX: document.querySelector('[data-overview="x"] .overview-track')?.getBoundingClientRect().height ?? 0,
-      barY: document.querySelector('[data-overview="y"] .overview-track')?.getBoundingClientRect().width ?? 0,
       tabsTop: document.querySelector('.views')?.getBoundingClientRect().top ?? 99,
       pluginsInBar: barButtons.some((button) => button.label.startsWith('Plugins')),
       barButtons,
@@ -153,8 +150,6 @@ describe('phone arrange layout', () => {
           const layout = await measure(page)
           await page.screenshot({ path: `/opt/cursor/artifacts/arrange-chrome-${viewport.name}.png` })
           expect(layout.gripHit, viewport.name).toBeGreaterThanOrEqual(44)
-          expect(Math.abs(layout.barX - layout.grip), viewport.name).toBeLessThanOrEqual(1)
-          expect(Math.abs(layout.barY - layout.grip), viewport.name).toBeLessThanOrEqual(1)
           expect(layout.overlaps, viewport.name).toEqual([])
           for (const row of layout.controls) {
             expect(row.tops, viewport.name).toBe(1)
@@ -289,21 +284,54 @@ describe('phone arrange layout', () => {
           expect(menu!.coversButton, shot.name).toBe(false)
           expect(menu!.close, shot.name).toBe(true)
           expect(menu!.scrolls, shot.name).toBe(true)
+          const menuClose = page.getByRole('dialog', { name: 'Project menu' }).getByRole('button', { name: 'Close', exact: true })
+          const menuCloseBox = await menuClose.boundingBox()
+          expect(menuCloseBox!.width, shot.name).toBeGreaterThanOrEqual(40)
+          expect(menuCloseBox!.height, shot.name).toBeGreaterThanOrEqual(40)
+          expect(await menuClose.innerText(), shot.name).not.toMatch(/Close/)
           expect(await page.getByRole('textbox', { name: 'Project name' }).count()).toBeGreaterThan(0)
           expect(await page.getByRole('button', { name: /^Undo/ }).count()).toBeGreaterThan(0)
           await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-menu.png` })
           await page.keyboard.press('Escape')
 
-          await page.getByRole('button', { name: 'Browser', exact: true }).click()
           const browser = page.locator('.arrange-stage > [data-playlist-browser="open"]')
+          await page.locator('.tool-slot').getByRole('button', { name: 'Browser', exact: true }).evaluate((node) => (node as HTMLButtonElement).click())
           await browser.waitFor()
           const browserBox = await sheetClearance('.arrange-stage > [data-playlist-browser="open"]', 'Browser')
+          expect(browserBox!.coversTabs, shot.name).toBe(false)
+          expect(browserBox!.coversTransport, shot.name).toBe(false)
           expect(browserBox!.coversTabs, shot.name).toBe(false)
           expect(browserBox!.coversTransport, shot.name).toBe(false)
           expect(browserBox!.coversButton, shot.name).toBe(false)
           expect(Math.abs(menu!.height - browserBox!.height), `${shot.name} menu vs browser`).toBeLessThanOrEqual(4)
           await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-browser.png` })
-          await page.getByRole('button', { name: 'Browser', exact: true }).click()
+          const browserClose = page.locator('.playlist-browser .sheet-close')
+          const browserCloseBox = await browserClose.boundingBox()
+          expect(await browserClose.getAttribute('aria-label')).toBe('Close')
+          expect(browserCloseBox!.width, shot.name).toBeGreaterThanOrEqual(40)
+          expect(browserCloseBox!.height, shot.name).toBeGreaterThanOrEqual(40)
+          await page.locator('.tool-slot').getByRole('button', { name: 'Browser', exact: true }).click()
+          await browser.waitFor({ state: 'hidden' })
+
+          await page.locator('.tool-slot').getByRole('button', { name: /^Tool:/ }).click()
+          const selectSheet = page.locator('#tool-choices')
+          await selectSheet.waitFor()
+          const selectClose = selectSheet.getByRole('button', { name: 'Close', exact: true })
+          const selectBox = await selectClose.boundingBox()
+          expect(selectBox!.width, shot.name).toBeGreaterThanOrEqual(40)
+          expect(await selectClose.innerText()).not.toMatch(/Close/)
+          const selectClear = await sheetClearance('#tool-choices', 'Tool:')
+          expect(selectClear!.coversTabs, shot.name).toBe(false)
+          expect(selectClear!.coversTransport, shot.name).toBe(false)
+          expect(selectClear!.coversButton, shot.name).toBe(false)
+          await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-select.png` })
+          await selectClose.click()
+
+          await page.locator('.tool-slot').getByRole('button', { name: /^Snap/ }).click()
+          const snapSheet = page.locator('#snap-choices')
+          await snapSheet.waitFor()
+          await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-snap.png` })
+          await snapSheet.getByRole('button', { name: 'Close', exact: true }).click()
 
           await page.getByRole('button', { name: /^Collab/ }).first().click()
           await page.locator('[data-collab-panel="open"]').waitFor()

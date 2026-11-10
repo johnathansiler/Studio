@@ -4,8 +4,6 @@ export const OVERVIEW_HIT = 40
 export const TIMELINE_PX_MAX = 280
 /** Existing timeline floor. A long project may zoom out further so the whole song fits. */
 export const TIMELINE_PX_SOFT_MIN = 30
-/** Compact lanes are about half the default height. Headers keep a usable control row. */
-export const LANE_ZOOM_COMPACT = 0.5
 export const LANE_ZOOM_MAX = 2.25
 
 export interface ZoomBounds {
@@ -41,15 +39,13 @@ export function clampTimelinePx(px: number, viewPx: number, totalSec: number) {
 }
 
 /**
- * Fully out fits every lane in the viewport, and can go below the default so a short
- * stack can still shrink. Fully in stops at a tall, still-readable lane.
- * The default zoom of 1 sits between those ends.
+ * Fully out fits every lane in the viewport. Fully in stops at a tall, still-readable lane.
  * `flex` is the track stack height at zoom 1. `fixed` is the ruler and map, which do not scale.
  */
 export function laneZoomBounds(view: number, fixed: number, flex: number): ZoomBounds {
-  const room = Math.max(1, view - Math.max(0, Math.min(fixed, Math.max(0, view - 1))))
-  const fit = flex > 1 ? room / flex : LANE_ZOOM_COMPACT
-  const min = Math.min(LANE_ZOOM_COMPACT, Math.max(0.05, fit))
+  const room = Math.max(0, view - Math.max(0, Math.min(fixed, view)))
+  const fit = flex > 1 ? room / flex : 1
+  const min = Math.min(1, Math.max(0.05, fit))
   return { min, max: Math.max(min, LANE_ZOOM_MAX) }
 }
 
@@ -171,46 +167,40 @@ export function zoomTimeByEdge(input: {
   }
 }
 
-/**
- * Same window math as the time overview. Lane zoom is pixels per unscaled track pixel.
- * A stack that already fits the viewport can still shrink to the compact floor, because
- * the window is allowed to grow past the real stack into empty space.
- */
+function unclampedLaneZoom(y0: number, y1: number, view: number, fixed: number) {
+  if (y1 <= y0 + 1e-3) return LANE_ZOOM_MAX
+  if (y1 <= fixed + 1e-3) return 1
+  if (y0 >= fixed - 1e-3) return view / (y1 - y0)
+  const headerShown = Math.max(0, fixed - y0)
+  const flexSpan = y1 - fixed
+  if (flexSpan < 1e-3) return 1
+  return (view - headerShown) / flexSpan
+}
+
 export function zoomLaneByEdge(input: {
   edge: 'start' | 'end'
-  zoom: number
-  scrollTop: number
+  y0: number
+  y1: number
+  total: number
   deltaFrac: number
   view: number
   fixed: number
   flex: number
   bounds: ZoomBounds
 }) {
-  const fixed = Math.max(0, input.fixed)
-  const flex = Math.max(1e-6, input.flex)
+  const total = Math.max(input.fixed + input.flex, input.total, 1e-6)
+  const delta = (Number.isFinite(input.deltaFrac) ? input.deltaFrac : 0) * total
+  let y0 = input.y0
+  let y1 = input.y1
+  if (input.edge === 'end') y1 = clamp(y1 + delta, Math.min(total, y0 + 0.5), total)
+  else y0 = clamp(y0 + delta, 0, Math.max(0, y1 - 0.5))
+  const raw = unclampedLaneZoom(y0, y1, Math.max(1, input.view), input.fixed)
+  const zoom = clamp(raw, input.bounds.min, input.bounds.max)
+  const span = laneSpan(input.fixed, input.flex, zoom)
   const view = Math.max(1, input.view)
-  const bounds = input.bounds
-  const zoom0 = clamp(Number.isFinite(input.zoom) ? input.zoom : 1, bounds.min, bounds.max)
-  const span0 = laneSpan(fixed, flex, zoom0)
-  const scroll0 = clamp(Number.isFinite(input.scrollTop) ? input.scrollTop : 0, 0, Math.max(0, span0 - view))
-  const lanePx = view
-  const startFlex = Math.max(0, (scroll0 - fixed) / zoom0)
-  const shown = lanePx / zoom0
-  const virtual = Math.max(flex, lanePx / Math.max(1e-6, bounds.min))
-  const timed = zoomTimeByEdge({
-    edge: input.edge,
-    startSec: startFlex,
-    endSec: startFlex + shown,
-    totalSec: virtual,
-    deltaFrac: input.deltaFrac,
-    viewPx: lanePx,
-    bounds,
-  })
-  const zoom = timed.px
-  let scrollTop = input.edge === 'start'
-    ? fixed + timed.endSec * zoom - view
-    : fixed + timed.startSec * zoom
-  if (timed.startSec <= 1e-4 && scroll0 < fixed && input.edge === 'end') scrollTop = scroll0
-  const span = laneSpan(fixed, flex, zoom)
-  return { zoom, scrollTop: clamp(scrollTop, 0, Math.max(0, span - view)) }
+  const scrollable = Math.max(0, span - view)
+  const scrollTop = input.edge === 'start'
+    ? clamp(pixelOfContent(y1, zoom, input.fixed) - view, 0, scrollable)
+    : clamp(pixelOfContent(y0, zoom, input.fixed), 0, scrollable)
+  return { zoom, scrollTop }
 }

@@ -3,6 +3,7 @@ import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { AnchoredMenu } from './AnchoredMenu'
 import { SheetGrab } from './bottomSheet'
+import { SheetClose } from './SheetClose'
 import { SoundBrowser } from './SoundBrowser'
 import { PatternSend, patternBeat } from './PatternSend'
 import { quickDragArmed } from './clipKeys'
@@ -272,7 +273,7 @@ export function PlaylistBrowser({
             ))}
           </AnchoredMenu>
         </div>
-        <button type="button" className="browser-close overlay-close" title="Hide the browser. The playlist stays put." onClick={onClose}>Close</button>
+        <SheetClose className="browser-close" onClick={onClose} />
       </div>
       {sheet ? <div className="bottom-sheet-body">{catalog}</div> : catalog}
     </aside>

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 import { createPortal } from 'react-dom'
 import { placeAnchoredMenu, anchoredShouldClose, menuFillsViewport, type AnchorBox } from './anchorPlace'
 import { syncPhoneSheetFrame } from './overlayHost'
+import { SheetClose } from './SheetClose'
 import { useScreenOverlay } from './screenOverlay'
 import './anchoredMenu.css'
 import './screenOverlay.css'
@@ -144,7 +145,7 @@ export function AnchoredMenu({
       data-open={open ? 'true' : 'false'}
       data-menu-size="sheet"
     >
-      <button type="button" className="overlay-close" onClick={onClose}>Close</button>
+      <SheetClose onClick={onClose} />
       <div className="phone-sheet-body">{children}</div>
     </div>
   ) : filling ? (
@@ -158,7 +159,7 @@ export function AnchoredMenu({
       hidden={!open}
       data-menu-size="fill"
     >
-      <button type="button" className="overlay-close" onClick={onClose}>Close</button>
+      <SheetClose onClick={onClose} />
       {children}
     </div>
   ) : (
@@ -179,7 +180,7 @@ export function AnchoredMenu({
         maxWidth: style.maxWidth,
       }}
     >
-      {showClose ? <button type="button" className="overlay-close" onClick={onClose}>Close</button> : null}
+      {showClose ? <SheetClose onClick={onClose} /> : null}
       {children}
     </div>
   )
