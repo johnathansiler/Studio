@@ -120,7 +120,9 @@ export function AnchoredMenu({
       if (anchoredShouldClose(event.target as Node | null, live, menuRef.current)) onClose()
     }
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onClose()
     }
     window.addEventListener('pointerdown', onPointer, true)
     window.addEventListener('keydown', onKey)

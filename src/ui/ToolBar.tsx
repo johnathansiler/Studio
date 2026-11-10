@@ -299,7 +299,7 @@ function SelectToast({ onClose }: { onClose: () => void }) {
     <div className="select-hint-host">
       <div ref={ref} className="toast select-hint" role="status">
         <span>{SELECT_HINT}</span>
-        <button type="button" className="hint-close" aria-label="Close" title="Close" onClick={onClose}>Close</button>
+        <SheetClose className="hint-close" onClick={onClose} />
       </div>
     </div>
   )

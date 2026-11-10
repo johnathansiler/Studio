@@ -34,6 +34,11 @@ button.sheet-close svg {
   flex: none;
 }
 
+button.sheet-close.overlay-close::before,
+button.sheet-close.overlay-close::after {
+  content: none !important;
+}
+
 .sheet-head,
 .arrange-sheet-head.sheet-head,
 .plugins-drawer-head.sheet-head,

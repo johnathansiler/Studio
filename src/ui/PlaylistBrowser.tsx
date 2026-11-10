@@ -63,6 +63,20 @@ export function PlaylistBrowser({
   const trackId = store.selectedTrackId || project.tracks[0]?.id || ''
 
   useEffect(() => {
+    if (!sheet && !phone) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      queueMicrotask(() => {
+        if (event.defaultPrevented) return
+        if (document.querySelector('.anchored-menu[data-open="true"]:not([hidden])')) return
+        onClose()
+      })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sheet, phone, onClose])
+
+  useEffect(() => {
     const allow = (event: DragEvent) => {
       const types = event.dataTransfer ? [...event.dataTransfer.types] : []
       if (!types.includes(PATTERN_MIME)) return

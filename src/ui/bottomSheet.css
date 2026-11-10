@@ -106,6 +106,7 @@
 .shell.phone .arrange-stage.browser-bottom[data-browser-push='in'] > .playlist-browser.bottom-sheet,
 .shell.phone .arrange-stage.plugins-bottom[data-push='in'] > .plugins-drawer.bottom-sheet {
   transition: none;
+  transform: none;
 }
 
 .shell.phone .arrange-stage.browser-bottom[data-browser-push='on'] > .playlist-browser.bottom-sheet,

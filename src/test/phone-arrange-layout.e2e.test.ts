@@ -266,12 +266,18 @@ describe('phone arrange layout', () => {
         ]) {
           await page.setViewportSize({ width: shot.width, height: shot.height })
           await page.goto(url, { waitUntil: 'domcontentloaded' })
-          await page.getByRole('button', { name: /^Arrange/ }).first().waitFor()
+          const arrangeTab = page.getByRole('button', { name: /^Arrange/ }).first()
+          await arrangeTab.waitFor()
           const timeline = page.locator('.timeline-scroll')
-          if (!(await timeline.isVisible().catch(() => false))) {
-            await page.getByRole('button', { name: /^Arrange/ }).first().click()
-          }
+          // The saved session can restore Mix after the first paint. Land on Arrange once that settles.
+          await page.waitForTimeout(500)
+          await arrangeTab.click()
           await timeline.waitFor()
+          await page.waitForTimeout(300)
+          if (!(await timeline.isVisible().catch(() => false))) {
+            await arrangeTab.click()
+            await timeline.waitFor()
+          }
           await page.locator('[data-overview="y"]').waitFor()
           await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-arrange.png` })
 

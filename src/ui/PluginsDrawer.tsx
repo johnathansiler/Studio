@@ -103,6 +103,19 @@ export function PluginsDrawer({
     previous.current = trackId
     setMenu(false)
   }, [trackId])
+  useEffect(() => {
+    if (place !== 'bottom' || !onClose) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      queueMicrotask(() => {
+        if (event.defaultPrevented) return
+        if (document.querySelector('.anchored-menu[data-open="true"]:not([hidden])')) return
+        onClose()
+      })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [place, onClose])
   return <PluginsDrawerView store={store} place={place} trackId={trackId} menuOpen={menu} onMenu={setMenu} onClose={onClose} groupId={groupId} onGroup={setGroupId} moreAt={moreAt} onMore={setMoreAt} />
 }
 

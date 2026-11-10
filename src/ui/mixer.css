@@ -386,6 +386,12 @@
   background: rgba(6, 10, 8, 0.35);
 }
 
+/* The channel sheet stays above the phone bar and under the transport. */
+.shell.phone #phone-screen-slot .mix-more[open] > .mix-back {
+  top: var(--phone-chrome-top, var(--view-tabs-bottom, 48px));
+  bottom: var(--phone-chrome-bottom, 52px);
+}
+
 .shell .mixer-view.mixer-console .mix-more[open] > .mix-panel,
 .shell.phone #phone-screen-slot .mix-more[open] > .mix-panel {
   display: flex;
@@ -412,6 +418,11 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.2),
     0 12px 28px rgba(0, 0, 0, 0.45);
+}
+
+.shell.phone #phone-screen-slot .mix-more[open] > .mix-panel {
+  bottom: calc(var(--phone-chrome-bottom, 52px) + 8px);
+  max-height: min(420px, var(--phone-sheet-h, 46dvh));
 }
 
 .shell .mixer-view.mixer-console .mix-block {

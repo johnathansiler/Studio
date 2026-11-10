@@ -69,11 +69,19 @@ export function syncViewTabFrame(root?: ParentNode | null): ViewTabFrame | null 
   return frame
 }
 
+/** The phone shell, whether `root` is that element or a parent that contains it. */
+function phoneShell(root?: ParentNode | null): Element | null {
+  if (typeof document === 'undefined') return null
+  if (root instanceof Element && root.classList.contains('shell') && root.classList.contains('phone')) return root
+  const scope = root ?? document
+  return scope.querySelector('.shell.phone')
+}
+
 /** Room between the transport (or the tabs) and the phone bottom bar. Sheets use this height. */
 export function syncPhoneSheetFrame(root?: ParentNode | null) {
   if (typeof document === 'undefined') return
   const target = document.documentElement
-  const shell = (root ?? document).querySelector('.shell.phone')
+  const shell = phoneShell(root)
   if (!shell) {
     target.style.removeProperty('--phone-chrome-top')
     target.style.removeProperty('--phone-chrome-bottom')

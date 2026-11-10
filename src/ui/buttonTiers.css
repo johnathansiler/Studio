@@ -280,12 +280,12 @@
   display: inline;
 }
 
-/* A close control that only drew a cross still reads as the word. */
-.shell button[aria-label^="Close"]:not(.guide-scrim):not(.browser-scrim):not(.song-scrim):not(.sound-dismiss):not(.inst-close):not(.guide-x) {
+/* Older cross marks still read as the word. Shared sheet closes stay an X; the name is on aria-label. */
+.shell button[aria-label^="Close"]:not(.guide-scrim):not(.browser-scrim):not(.song-scrim):not(.sound-dismiss):not(.inst-close):not(.guide-x):not(.sheet-close) {
   font-size: 0;
 }
 
-.shell button[aria-label^="Close"]:not(.guide-scrim):not(.browser-scrim):not(.song-scrim):not(.sound-dismiss):not(.inst-close):not(.guide-x)::after {
+.shell button[aria-label^="Close"]:not(.guide-scrim):not(.browser-scrim):not(.song-scrim):not(.sound-dismiss):not(.inst-close):not(.guide-x):not(.sheet-close)::after {
   content: "Close";
   font-size: 12px;
   font-weight: 640;
