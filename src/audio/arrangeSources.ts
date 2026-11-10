@@ -9,7 +9,7 @@ import { compPieces } from '../model/comp'
 import { patternHitTrack, transportPatternClips } from '../model/channelRack'
 import { rackLanesFor } from '../model/automation'
 import { DRUM_PADS, residentDrums } from '../model/drums'
-import { PAN_APPLY } from './level'
+import { notePanGains } from './level'
 import { ATTACK_SEC, builtinLevel, drumLevel } from './liveStage'
 import { prepareClipNotes } from '../model/midiTools'
 import { normalizePadKit } from '../model/padMachine'
@@ -919,10 +919,8 @@ function expSeg(t: number, t0: number, t1: number, v0: number, v1: number) {
 }
 
 function panPair(pan: number): [number, number] {
-  const value = Math.max(-1, Math.min(1, pan || 0))
-  if (Math.abs(value) < PAN_APPLY) return [1, 1]
-  const angle = ((value + 1) * Math.PI) / 4
-  return [Math.cos(angle), Math.sin(angle)]
+  const gains = notePanGains(pan)
+  return [gains.left, gains.right]
 }
 
 function readAt(channel: ArrayLike<number>, pos: number) {

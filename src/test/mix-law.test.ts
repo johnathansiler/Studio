@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { PAN_APPLY, panGains } from '../audio/level'
+import { createPlugin } from '../audio/plugins/catalog'
+import { emptySampler } from '../audio/sample/engine'
+import { renderSamplerSpan } from '../audio/plugins/sampler'
+import { notePanGains, panGains } from '../audio/level'
+import { createEmptyProject } from '../model/types'
 import { smoothParam } from '../audio/paramCurve'
 import {
   DB_PX,
@@ -95,8 +99,6 @@ describe('mixer decibel mapping', () => {
 
 describe('engine pan and level follow the float', () => {
   it('uses equal-power gains for in-between pan, including +2', () => {
-    expect(PAN_APPLY).toBeLessThanOrEqual(0.005)
-    expect(0.02).toBeGreaterThanOrEqual(PAN_APPLY)
     const mid = panGains(-0.375)
     const unit = panGains(0.12)
     const nudge = panGains(0.02)
@@ -109,6 +111,34 @@ describe('engine pan and level follow the float', () => {
     expect(mid.left).toBeLessThan(hard.left)
     expect(nudge.right).toBeGreaterThan(nudge.left)
     expect(unit.right).not.toBeCloseTo(panGains(1).right, 2)
+  })
+
+  it('keeps a one-shot within a fraction of a dB of center at +2 and -3', () => {
+    const center = notePanGains(0)
+    expect(center.left).toBe(1)
+    expect(center.right).toBe(1)
+    for (const pan of [0.02, -0.03, 0.005]) {
+      const gains = notePanGains(pan)
+      const leftDb = 20 * Math.log10(gains.left)
+      const rightDb = 20 * Math.log10(gains.right)
+      expect(Math.abs(leftDb), `left ${pan}`).toBeLessThan(0.4)
+      expect(Math.abs(rightDb), `right ${pan}`).toBeLessThan(0.4)
+    }
+    expect(notePanGains(0.02).right).toBeGreaterThan(notePanGains(0.02).left)
+    expect(notePanGains(-0.03).left).toBeGreaterThan(notePanGains(-0.03).right)
+    expect(notePanGains(1).left).toBeCloseTo(0, 8)
+    expect(notePanGains(1).right).toBeCloseTo(1, 8)
+    expect(notePanGains(-1).left).toBeCloseTo(1, 8)
+    expect(notePanGains(-1).right).toBeCloseTo(0, 8)
+    expect(notePanGains(0.5).left).toBeCloseTo(panGains(0.5).left, 8)
+    expect(notePanGains(-0.5).right).toBeCloseTo(panGains(-0.5).right, 8)
+    let previous = 10 * Math.log10(2)
+    for (let step = 1; step <= 100; step += 1) {
+      const gains = notePanGains(step / 100)
+      const power = 10 * Math.log10(gains.left ** 2 + gains.right ** 2)
+      expect(Math.abs(power - previous), `step ${step}`).toBeLessThan(0.25)
+      previous = power
+    }
   })
 
   it('smooths the exact gain instead of stepping to a whole number', () => {
@@ -128,5 +158,43 @@ describe('engine pan and level follow the float', () => {
     const target = events.find((event) => event.method === 'target')
     expect(target?.value).toBeCloseTo(gain, 8)
     expect(Number.isInteger(target?.value ?? 0)).toBe(false)
+  })
+})
+
+describe('saved mix values and sampler pan', () => {
+  it('round-trips a fractional pan and a tenth of a decibel through JSON', () => {
+    const project = createEmptyProject()
+    project.tracks[0].pan = -0.375
+    project.tracks[0].volume = gainFromDb(-6.3)
+    project.masterVolume = gainFromDb(1.7)
+    const copy = JSON.parse(JSON.stringify(project)) as typeof project
+    expect(copy.tracks[0].pan).toBeCloseTo(-0.375, 8)
+    expect(gainToDb(copy.tracks[0].volume)).toBe('-6.3 dB')
+    expect(gainToDb(copy.masterVolume)).toBe('1.7 dB')
+    expect(dragGain({ origin: copy.tracks[0].volume, deltaPx: 0, min: 0, max: 1.25 })).toBeCloseTo(copy.tracks[0].volume, 8)
+    expect(dragPan({ origin: copy.tracks[0].pan, deltaPx: 0 })).toBeCloseTo(-0.375, 8)
+  })
+
+  it('does not drop the sampler about 3 dB when pan leaves center', () => {
+    const rate = 48000
+    const frames = Math.floor(rate * 0.08)
+    const sample = new Float32Array(frames)
+    for (let i = 0; i < sample.length; i++) sample[i] = Math.sin((2 * Math.PI * 440 * i) / rate) * 0.5
+    const energy = (channels: Float32Array[]) => {
+      let sum = 0
+      for (const channel of channels) for (const value of channel) sum += value * value
+      return sum
+    }
+    const render = (pan: number) => {
+      const plugin = createPlugin('sampler')
+      plugin.params = { ...plugin.params, pan, stretch: 0, attack: 1, decay: 40, sustain: 1, release: 80, keys: 1 }
+      plugin.sampler = { ...emptySampler(), bufferId: 'tone', root: 60, loopMode: 0 }
+      return renderSamplerSpan(plugin, sample, [{ time: 0, pitch: 60, vel: 1 }], rate, frames)
+    }
+    const center = energy(render(0))
+    const nudged = energy(render(0.02))
+    expect(center).toBeGreaterThan(0.01)
+    const drop = 10 * Math.log10(nudged / center)
+    expect(Math.abs(drop)).toBeLessThan(0.5)
   })
 })

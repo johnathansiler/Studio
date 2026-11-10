@@ -30,17 +30,36 @@ export function normalizePeak(channels: Float32Array[], target = NOTE_PEAK, maxB
   })
 }
 
-/**
- * Notes this close to center skip a one-shot panner.
- * 0.005 is half a pan unit, so −3 and +2 (0.03 and 0.02) still pan.
- */
-export const PAN_APPLY = 0.005
-
 /** Equal-power pan. Center is −3 dB on each side. −1 is full left. */
 export function panGains(pan: number) {
   const clamped = Math.max(-1, Math.min(1, Number.isFinite(pan) ? pan : 0))
   const angle = ((clamped + 1) * Math.PI) / 4
   return { left: Math.cos(angle), right: Math.sin(angle) }
+}
+
+/**
+ * How far a one-shot pan travels before it is pure equal-power.
+ * Inside this span the law joins the direct (no panner) center, which is
+ * unity on both sides, to equal-power. Past it, the gains match `panGains`.
+ */
+export const NOTE_PAN_BLEND = 0.25
+
+/**
+ * Pan for a one-shot note.
+ * A centered hit connects with no extra panner, so both sides stay at unity.
+ * Equal-power alone would sit 3 dB under that, and switching it on at the
+ * first step off center is an audible jump. This curve keeps that center,
+ * meets equal-power by ±0.25, and matches a hard pan exactly.
+ */
+export function notePanGains(pan: number) {
+  const clamped = Math.max(-1, Math.min(1, Number.isFinite(pan) ? pan : 0))
+  const equal = panGains(clamped)
+  const amount = Math.min(1, Math.abs(clamped) / NOTE_PAN_BLEND)
+  const mix = amount * amount * (3 - 2 * amount)
+  return {
+    left: (1 - mix) + equal.left * mix,
+    right: (1 - mix) + equal.right * mix,
+  }
 }
 
 /**

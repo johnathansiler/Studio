@@ -38,7 +38,7 @@ import { encodeWav, linearResample } from '../model/wav'
 import { tuneBlockScale } from './plugins/autoTune'
 import { audibleIds } from '../model/audible'
 import { automationSchedule, channelAutomationMode, laneFor, valueAtMappedSample } from '../model/automation'
-import { PAN_APPLY } from './level'
+import { notePanGains } from './level'
 import { applyRamps, smoothParam } from './paramCurve'
 import { channelRoute } from '../model/sharedMix'
 import { chainContext, enabledFx, LiveMidiChain, midiPanicMessages, midiVelocityByte, noteBytes, prepareClipNotes } from '../model/midiTools'
@@ -3186,14 +3186,7 @@ export class AudioEngine {
     gain.gain.setValueAtTime(0.0001, when)
     gain.gain.exponentialRampToValueAtTime(peak, when + 0.003)
     src.connect(gain)
-    const dest = into ?? strip.input
-    const pan = hit.pan || 0
-    if (Math.abs(pan) >= PAN_APPLY && ctx.createStereoPanner) {
-      const panner = ctx.createStereoPanner()
-      panner.pan.value = Math.max(-1, Math.min(1, pan))
-      gain.connect(panner)
-      panner.connect(dest)
-    } else gain.connect(dest)
+    connectNotePan(ctx, gain, into ?? strip.input, hit.pan || 0)
     const gate = Math.max(0.08, Math.min(1, (hit.durationBeats || 0.2) / 0.2))
     src.start(when)
     src.stop(when + Math.max(0.05, buffer.duration * gate))
@@ -3250,14 +3243,7 @@ export class AudioEngine {
     gain.gain.exponentialRampToValueAtTime(peak, when + 0.005)
     gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.03, dur))
     source.connect(gain)
-    const dest = into ?? strip.input
-    const pan = hit.pan || 0
-    if (Math.abs(pan) >= PAN_APPLY && ctx.createStereoPanner) {
-      const panner = ctx.createStereoPanner()
-      panner.pan.value = Math.max(-1, Math.min(1, pan))
-      gain.connect(panner)
-      panner.connect(dest)
-    } else gain.connect(dest)
+    connectNotePan(ctx, gain, into ?? strip.input, hit.pan || 0)
     const startable = source as AudioScheduledSourceNode
     if (typeof startable.start === 'function') {
       startable.start(when)
@@ -4639,13 +4625,7 @@ export class AudioEngine {
     gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.05, dur))
     osc.connect(filter)
     filter.connect(gain)
-    const pan = note.pan || 0
-    if (Math.abs(pan) >= PAN_APPLY && ctx.createStereoPanner) {
-      const panner = ctx.createStereoPanner()
-      panner.pan.value = Math.max(-1, Math.min(1, pan))
-      gain.connect(panner)
-      panner.connect(strip.input)
-    } else gain.connect(strip.input)
+    connectNotePan(ctx, gain, strip.input, note.pan || 0)
     osc.start(when)
     osc.stop(when + dur + 0.03)
     if (ctx === this.ctx) {
@@ -4732,6 +4712,45 @@ export class AudioEngine {
 function samplerInsert(track: Track | undefined) {
   if (!track || track.instrument !== 'sampler') return null
   return track.plugins.find((plugin) => plugin.pluginId === 'sampler' && plugin.enabled && plugin.sampler?.bufferId) ?? null
+}
+
+/**
+ * One-shot pan. Exact center connects straight through, matching a project
+ * that never had a note panner. Anywhere else uses `notePanGains`, so the
+ * first step off center does not drop 3 dB under that direct connection.
+ * A context without a merger (test doubles) keeps a stereo panner.
+ */
+function connectNotePan(ctx: BaseAudioContext, source: AudioNode, dest: AudioNode, pan: number) {
+  const gains = notePanGains(pan)
+  if (gains.left === 1 && gains.right === 1) {
+    source.connect(dest)
+    return
+  }
+  if (typeof ctx.createChannelMerger === 'function' && typeof ctx.createGain === 'function') {
+    const left = ctx.createGain()
+    const right = ctx.createGain()
+    left.channelCountMode = 'explicit'
+    right.channelCountMode = 'explicit'
+    left.channelCount = 1
+    right.channelCount = 1
+    left.gain.value = gains.left
+    right.gain.value = gains.right
+    const merge = ctx.createChannelMerger(2)
+    source.connect(left)
+    source.connect(right)
+    left.connect(merge, 0, 0)
+    right.connect(merge, 0, 1)
+    merge.connect(dest)
+    return
+  }
+  if (typeof ctx.createStereoPanner === 'function') {
+    const panner = ctx.createStereoPanner()
+    panner.pan.value = Math.max(-1, Math.min(1, Number.isFinite(pan) ? pan : 0))
+    source.connect(panner)
+    panner.connect(dest)
+    return
+  }
+  source.connect(dest)
 }
 
 function fadeSource(ctx: AudioContext, gain: GainNode, src: AudioBufferSourceNode) {
