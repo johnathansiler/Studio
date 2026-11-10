@@ -1,0 +1,300 @@
+/* Phone bottom chrome. The tabs match Collab / Arrange / Mix.
+   The row above them is small on the face and still a 40px hit. */
+
+.shell.phone .tool-slot.phone-dock-slot,
+.shell.phone:not(.land) .tool-slot.phone-dock-slot:not(:empty),
+.shell.phone.land .tool-slot.phone-dock-slot:not(:empty) {
+  position: relative;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  max-height: none;
+  height: auto;
+  min-height: 0;
+  padding: 2px 4px calc(4px + env(safe-area-inset-bottom));
+  overflow: visible;
+}
+
+.shell.phone > .phone-sheet-host {
+  order: 6;
+}
+
+.shell.phone[data-editor="piano"] .tool-slot.phone-dock-slot {
+  display: flex;
+}
+
+.shell.phone .phone-context {
+  order: 0;
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.shell.phone .phone-context::-webkit-scrollbar { display: none; }
+
+.shell.phone .phone-hit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  min-width: 40px;
+  width: auto;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  margin: 0;
+  padding: 7px 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: inherit;
+}
+
+.shell.phone .phone-hit .phone-face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  box-sizing: border-box;
+  height: 26px;
+  min-height: 0;
+  max-height: 26px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--btn-quiet-border);
+  background-color: var(--btn-quiet-bg);
+  background-image: var(--btn-quiet-face);
+  box-shadow: var(--btn-bevel);
+  color: var(--btn-quiet-ink);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.shell.phone .phone-hit.on .phone-face,
+.shell.phone .phone-hit[aria-pressed="true"] .phone-face {
+  background-color: var(--btn-toggle-bg);
+  background-image: var(--btn-quiet-face);
+  color: var(--btn-toggle-ink);
+  border-color: transparent;
+  box-shadow: var(--btn-bevel-pressed);
+}
+
+.shell.phone .phone-hit .metro-icon {
+  display: block;
+}
+
+.shell.phone .phone-hit .history-word {
+  display: inline;
+}
+
+.shell.phone .phone-tabs {
+  order: 1;
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: stretch;
+  justify-content: stretch;
+  gap: 4px;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 3px;
+  border-radius: 10px;
+  background-color: var(--tray-bg, #090d0b);
+  border: 1px solid var(--tray-edge, rgba(255, 255, 255, 0.08));
+  box-shadow: var(--tray-inset);
+}
+
+.shell.phone .phone-tabs > button,
+.shell.phone .phone-tabs > button.menu-btn,
+.shell.phone .phone-tabs > button.phone-tab {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  max-width: none;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background-color: #18231d;
+  background-image: var(--face);
+  box-shadow: var(--raised);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 640;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  line-height: 1;
+}
+
+.shell.phone.land .phone-tabs > button,
+.shell.phone.land .phone-tabs > button.menu-btn {
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  font-size: 12px;
+}
+
+.shell.phone .phone-tabs > button.active,
+.shell.phone .phone-tabs > button.menu-btn.active,
+.shell.phone .phone-tabs > button.on {
+  background-color: var(--accent);
+  background-image: var(--face);
+  color: var(--accent-ink);
+  box-shadow: var(--raised);
+}
+
+.shell.phone .phone-tabs .menu-word {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell.phone > .phone-sheet-host:empty {
+  display: none;
+}
+
+.shell.phone > .phone-sheet-host:not(:empty) {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 0;
+  z-index: 6;
+}
+
+.shell.phone > .phone-sheet-host > .choice-tray {
+  position: relative;
+  z-index: 4;
+  width: 100%;
+  max-height: min(46dvh, calc(100dvh - 160px));
+}
+
+.shell.phone #phone-screen-slot.phone-mix-slot {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  width: auto;
+  min-width: 0;
+  min-height: 40px;
+  order: 0;
+}
+
+.shell.phone #phone-screen-slot.phone-mix-slot .mix-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  width: auto;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  overflow: visible;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
+.shell.phone #phone-screen-slot.phone-mix-slot .mix-toolbar-name {
+  display: none;
+}
+
+.shell.phone #phone-screen-slot.phone-mix-slot .mix-more {
+  flex: 0 0 auto;
+  height: 40px;
+  min-height: 40px;
+  margin: 0;
+}
+
+.shell.phone #phone-screen-slot.phone-mix-slot .mix-toolbar-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  list-style: none;
+  width: auto;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  margin: 0;
+  padding: 7px 2px;
+  border: 0;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  line-height: 1;
+}
+
+.shell.phone #phone-screen-slot.phone-mix-slot .mix-toolbar-more::-webkit-details-marker {
+  display: none;
+}
+
+.shell.phone #phone-screen-slot.phone-mix-slot .mix-toolbar-more::marker {
+  content: '';
+}
+
+.shell.phone #phone-screen-slot.phone-mix-slot .mix-toolbar-more span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--btn-quiet-border);
+  background-color: var(--btn-quiet-bg);
+  background-image: var(--btn-quiet-face);
+  box-shadow: var(--btn-bevel);
+  color: var(--btn-quiet-ink);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.shell.phone .arrange-add .add-track-slot {
+  flex: 0 0 auto;
+  width: var(--track-head-w, max-content);
+  min-width: 0;
+  max-width: var(--track-head-w, none);
+}
+
+.shell.phone .arrange-add .add-track-btn {
+  width: 100%;
+  min-width: 0;
+}
+
+.shell.phone .playhead-strip {
+  position: sticky;
+  top: var(--ruler-h, 22px);
+  z-index: 3;
+  height: var(--playhead-strip, 28px);
+  min-height: 28px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.18)),
+    #121a16;
+  border-bottom: 1px solid var(--line);
+  cursor: ew-resize;
+  touch-action: none;
+}

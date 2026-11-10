@@ -60,7 +60,9 @@ export function LoopRegion({
    */
   followScroll?: boolean
 }) {
-  const coarse = useFormFactor() !== 'desk'
+  const form = useFormFactor()
+  const coarse = form !== 'desk'
+  const confineHits = form === 'phone' && view === 'arrange'
   const hostRef = useRef<HTMLDivElement>(null)
   const drag = useRef<DragState | null>(null)
   const pendingMove = useRef<DragPoint | null>(null)
@@ -205,10 +207,11 @@ export function LoopRegion({
     start: rawLeft,
     end: rawRight,
     hostWidth: width,
-    hostHeight: hostRef.current?.clientHeight || 44,
+    hostHeight: hostRef.current?.clientHeight || (confineHits ? 22 : 44),
     viewLeft,
     viewWidth,
     hit: loopGripHit(coarse),
+    confineHeight: confineHits,
   })
   faceRef.current = {
     start: grips.start.faceLeft,
@@ -404,8 +407,8 @@ function LoopGrip({ edge, box, dragging, parked = null }: { edge: 'start' | 'end
         top: 0,
         width: Math.max(44, box.hitWidth),
         minWidth: 44,
-        height: Math.max(44, box.hitHeight),
-        minHeight: 44,
+        height: box.hitHeight,
+        minHeight: 0,
         bottom: 'auto',
         touchAction: 'none',
       } : {

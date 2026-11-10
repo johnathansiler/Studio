@@ -15,6 +15,7 @@ import { TouchSlider } from './kit/controls'
 import { holdMeter } from './levels'
 import { TrackPresence } from './presenceMarks'
 import { useScreenOverlay } from './screenOverlay'
+import { useFormFactor } from './form'
 import { SheetClose } from './SheetClose'
 import './mixer.css'
 
@@ -240,6 +241,7 @@ function MixToolbar({
   const [section, setSection] = useState<MixSection>('channel')
   const [mastering, setMastering] = useState(false)
   const [slot, setSlot] = useState<HTMLElement | null>(null)
+  const form = useFormFactor()
   useEffect(() => {
     const pick = () => {
       const node = document.getElementById('phone-screen-slot')
@@ -399,12 +401,13 @@ function MixToolbar({
             {shown === 'route' && focus !== 'master' && <RoutePicks store={store} trackId={focus} />}
           </div>
         </details>
-        <p className="mix-toolbar-name">{name}</p>
+        {form !== 'phone' && <p className="mix-toolbar-name">{name}</p>}
       </div>
       {mastering && <MasterSheet store={store} engine={engine} onClose={() => setMastering(false)} />}
     </>
   )
   if (slot) return createPortal(toolbar, slot)
+  if (form === 'phone') return mastering ? <MasterSheet store={store} engine={engine} onClose={() => setMastering(false)} /> : null
   return toolbar
 }
 

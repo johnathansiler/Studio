@@ -96,7 +96,7 @@ describe('arrange track row and browser', () => {
         await page.setViewportSize({ width: 390, height: 844 })
         await page.goto(url, { waitUntil: 'domcontentloaded' })
         await page.getByRole('button', { name: /^Arrange/ }).first().waitFor()
-        await page.getByRole('button', { name: /^Browser/ }).click()
+        await page.getByRole('button', { name: 'Browse', exact: true }).click()
         await page.locator('[data-playlist-browser="open"]').waitFor()
         const tabs = await page.locator('.browser-tabs button').allTextContents()
         expect(tabs.join(' ')).not.toMatch(/Plugins/)
@@ -115,8 +115,8 @@ describe('arrange track row and browser', () => {
         }
         await page.screenshot({ path: '/opt/cursor/artifacts/arrange-phone-browser.png' })
 
-        if ((await page.getByRole('button', { name: 'Browser', exact: true }).getAttribute('aria-pressed')) === 'true') {
-          await page.getByRole('button', { name: 'Browser', exact: true }).click()
+        if ((await page.getByRole('button', { name: 'Browse', exact: true }).getAttribute('aria-pressed')) === 'true') {
+          await page.getByRole('button', { name: 'Browse', exact: true }).click()
         }
         await page.locator('.head.is-selected .track-more').click()
         await page.getByRole('button', { name: /^Plugins/ }).click()

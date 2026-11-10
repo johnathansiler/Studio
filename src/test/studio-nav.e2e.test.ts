@@ -47,7 +47,7 @@ describe('studio navigation', () => {
           const place = await page.evaluate(() => {
             const slot = document.querySelector('.tool-slot')!.getBoundingClientRect()
             const menu = document.querySelector('.menu-btn')!.getBoundingClientRect()
-            const browser = [...document.querySelectorAll('.cap-btn')].find((button) => (button.textContent || '').includes('Browser'))!.getBoundingClientRect()
+            const browser = document.querySelector('[data-phone-tab="browse"]')!.getBoundingClientRect()
             return {
               menuLeft: menu.left,
               browserLeft: browser.left,

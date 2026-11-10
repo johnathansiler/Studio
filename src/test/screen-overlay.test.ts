@@ -299,7 +299,11 @@ describe('screen overlays leave the view tabs free', () => {
 
         const openers: { name: string; open: () => Promise<void>; shot?: boolean }[] = [
           { name: 'menu', shot: true, open: async () => { await page.locator('.menu-btn').click() } },
-          { name: 'song', open: async () => { await page.locator('.arrange-panels').getByRole('button', { name: /^Setup/ }).click() } },
+          { name: 'song', open: async () => {
+            const setup = page.locator('.arrange-panels').getByRole('button', { name: /^Setup/ })
+            if (await setup.count()) await setup.click()
+            else await page.getByRole('button', { name: /^Setup/ }).click()
+          } },
           { name: 'add-track', open: async () => { await page.getByRole('button', { name: /^Add Track/ }).click() } },
           {
             name: 'plugin',
@@ -378,7 +382,7 @@ describe('screen overlays leave the view tabs free', () => {
         if (layout.name === 'phone') {
           openers.splice(2, 0, {
             name: 'tools',
-            open: async () => { await page.getByRole('button', { name: /^Tool:/ }).click() },
+            open: async () => { await page.getByRole('button', { name: 'Tools', exact: true }).click() },
           })
         }
 
@@ -417,7 +421,10 @@ describe('screen overlays leave the view tabs free', () => {
         }
 
         await page.getByRole('button', { name: /^Arrange/ }).first().click()
-        const browserToggle = page.locator('.arrange-panels').getByRole('button', { name: /^Browser/ })
+        const phoneShell = layout.shell.split(' ').includes('phone')
+        const browserToggle = phoneShell
+          ? page.getByRole('button', { name: 'Browse', exact: true })
+          : page.locator('.arrange-panels').getByRole('button', { name: /^Browser/ })
         const docked = page.locator('[data-playlist-browser="open"]')
         if (await docked.count() === 0) await browserToggle.click()
         await docked.first().waitFor()

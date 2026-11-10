@@ -36,11 +36,13 @@ async function measure(page: Page) {
       return { top: rect.top, left: rect.left, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height }
     }
     const ruler = document.querySelector('.arrange .timeline-scroll .ruler') as HTMLElement | null
+    const strip = document.querySelector('[data-playhead-strip]') as HTMLElement | null
+    const lane = document.querySelector('.timeline-scroll .lane') as HTMLElement | null
     const gap = document.querySelector('.arrange .ruler-gap') as HTMLElement | null
     const grip = document.querySelector('[data-loop-region="arrange"] [data-loop-edge="end"]') as HTMLElement | null
     const face = grip?.querySelector('.loop-grip-face') as HTMLElement | null
     const heads = document.querySelector('.arrange .heads') as HTMLElement | null
-    const lane = document.querySelector('.timeline-scroll') as HTMLElement | null
+    const laneScroll = document.querySelector('.timeline-scroll') as HTMLElement | null
     const add = document.querySelector('.arrange-add') as HTMLElement | null
     const addBtn = document.querySelector('.arrange-add .add-track-btn') as HTMLElement | null
     const slot = document.querySelector('.tool-slot') as HTMLElement | null
@@ -96,12 +98,20 @@ async function measure(page: Page) {
     }
     return {
       ruler: ruler ? ruler.getBoundingClientRect().height : 0,
+      strip: strip ? strip.getBoundingClientRect().height : 0,
+      stripTop: strip ? strip.getBoundingClientRect().top : 0,
+      rulerBottom: ruler ? ruler.getBoundingClientRect().bottom : 0,
+      laneTop: lane ? lane.getBoundingClientRect().top : 0,
       gap: gap ? gap.getBoundingClientRect().height : 0,
       gripHit: grip ? grip.getBoundingClientRect().height : 0,
+      gripWidth: grip ? grip.getBoundingClientRect().width : 0,
+      gripBottom: grip ? grip.getBoundingClientRect().bottom : 0,
       face: face ? face.getBoundingClientRect().height : 0,
+      headWidth: heads ? heads.getBoundingClientRect().width : 0,
+      addWidth: addBtn ? addBtn.getBoundingClientRect().width : 0,
       headRight: heads ? heads.getBoundingClientRect().right : 0,
-      laneLeft: lane ? lane.getBoundingClientRect().left : 0,
-      laneWidth: lane ? lane.getBoundingClientRect().width : 0,
+      laneLeft: laneScroll ? laneScroll.getBoundingClientRect().left : 0,
+      laneWidth: laneScroll ? laneScroll.getBoundingClientRect().width : 0,
       addHeight: add ? add.getBoundingClientRect().height : 0,
       addBtnHeight: addBtn ? addBtn.getBoundingClientRect().height : 0,
       topMenu: !!document.querySelector('.topbar .menu-btn'),
@@ -149,7 +159,8 @@ describe('phone arrange layout', () => {
           await page.locator('[data-loop-region="arrange"]').waitFor()
           const layout = await measure(page)
           await page.screenshot({ path: `/opt/cursor/artifacts/arrange-chrome-${viewport.name}.png` })
-          expect(layout.gripHit, viewport.name).toBeGreaterThanOrEqual(44)
+          expect(layout.gripWidth, viewport.name).toBeGreaterThanOrEqual(44)
+          if (viewport.kind === 'wide') expect(layout.gripHit, viewport.name).toBeGreaterThanOrEqual(44)
           expect(layout.overlaps, viewport.name).toEqual([])
           for (const row of layout.controls) {
             expect(row.tops, viewport.name).toBe(1)
@@ -159,22 +170,27 @@ describe('phone arrange layout', () => {
             expect(layout.tabsTop, viewport.name).toBeLessThanOrEqual(8)
             expect(layout.ruler, viewport.name).toBeGreaterThanOrEqual(20)
             expect(layout.ruler, viewport.name).toBeLessThanOrEqual(24)
-            expect(Math.abs(layout.gap - layout.ruler), viewport.name).toBeLessThanOrEqual(2)
+            expect(layout.strip, viewport.name).toBeGreaterThanOrEqual(28)
+            expect(layout.stripTop, viewport.name).toBeGreaterThanOrEqual(layout.rulerBottom - 1)
+            expect(layout.laneTop, viewport.name).toBeGreaterThanOrEqual(layout.stripTop + layout.strip - 2)
+            expect(layout.gripHit, viewport.name).toBeLessThanOrEqual(layout.ruler + 1)
+            expect(layout.gripBottom, viewport.name).toBeLessThanOrEqual(layout.stripTop + 1)
+            expect(Math.abs(layout.gap - (layout.ruler + layout.strip)), viewport.name).toBeLessThanOrEqual(2)
             expect(layout.face, viewport.name).toBeLessThanOrEqual(layout.ruler)
             expect(layout.addHeight, viewport.name).toBeGreaterThanOrEqual(40)
             expect(layout.addHeight, viewport.name).toBeLessThanOrEqual(44)
             expect(layout.addBtnHeight, viewport.name).toBeGreaterThanOrEqual(40)
+            expect(Math.abs(layout.addWidth - layout.headWidth), viewport.name).toBeLessThanOrEqual(2)
             expect(layout.topMenu, viewport.name).toBe(false)
             expect(layout.topName, viewport.name).toBe(false)
             expect(layout.topUndo, viewport.name).toBe(false)
             expect(layout.topIdeas, viewport.name).toBe(false)
-            expect(layout.addUndo, viewport.name).toBe(true)
-            expect(layout.addRedo, viewport.name).toBe(true)
+            expect(layout.addUndo, viewport.name).toBe(false)
+            expect(layout.addRedo, viewport.name).toBe(false)
             expect(layout.bulb, viewport.name).toBe('Ideas')
             const order = layout.addOrder.map((item) => item.label)
             expect(order[0], viewport.name).toMatch(/Add Track/)
-            expect(order.some((label) => label.startsWith('Undo')), viewport.name).toBe(true)
-            expect(order.some((label) => label.startsWith('Redo')), viewport.name).toBe(true)
+            expect(order.some((label) => label.startsWith('Undo')), viewport.name).toBe(false)
             expect(order[order.length - 1], viewport.name).toBe('Ideas')
             for (let i = 1; i < layout.addOrder.length; i++) {
               expect(layout.addOrder[i].left, viewport.name).toBeGreaterThan(layout.addOrder[i - 1].left)
@@ -184,14 +200,21 @@ describe('phone arrange layout', () => {
             expect(layout.laneWidth, viewport.name).toBeGreaterThan(viewport.width * 0.4)
             const labels = layout.barButtons.map((button) => button.label)
             expect(labels.some((label) => label.startsWith('Menu')), viewport.name).toBe(true)
-            expect(labels.some((label) => label.startsWith('Browser')), viewport.name).toBe(true)
+            expect(labels.some((label) => label === 'Browse'), viewport.name).toBe(true)
+            expect(labels.some((label) => label === 'Tools'), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Setup')), viewport.name).toBe(true)
-            expect(labels.some((label) => label.startsWith('Tool:') || label.startsWith('Select')), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Snap')), viewport.name).toBe(true)
+            expect(labels.some((label) => label.startsWith('Unstuck')), viewport.name).toBe(true)
+            expect(labels.some((label) => label.startsWith('Metronome')), viewport.name).toBe(true)
+            expect(labels.some((label) => label.startsWith('Undo')), viewport.name).toBe(true)
+            expect(labels.some((label) => label.startsWith('Redo')), viewport.name).toBe(true)
+            expect(labels.some((label) => label === 'Click'), viewport.name).toBe(false)
             const menu = layout.barButtons.find((button) => button.label.startsWith('Menu'))!
-            const browserBtn = layout.barButtons.find((button) => button.label.startsWith('Browser'))!
+            const browserBtn = layout.barButtons.find((button) => button.label === 'Browse')!
+            const toolsBtn = layout.barButtons.find((button) => button.label === 'Tools')!
             expect(menu.left, viewport.name).toBeLessThan(browserBtn.left)
-            expect(menu.right, viewport.name).toBeLessThanOrEqual(browserBtn.left + 8)
+            expect(browserBtn.left, viewport.name).toBeLessThan(toolsBtn.left)
+            expect(menu.top, viewport.name).toBeGreaterThanOrEqual(browserBtn.top - 2)
             for (const button of layout.barButtons) {
               expect(button.clipped, `${viewport.name} ${button.label}`).toBe(false)
               expect(button.height, `${viewport.name} ${button.label}`).toBeGreaterThanOrEqual(40)
@@ -205,18 +228,23 @@ describe('phone arrange layout', () => {
             expect(layout.topName, viewport.name).toBe(false)
             expect(layout.topUndo, viewport.name).toBe(false)
             expect(layout.topIdeas, viewport.name).toBe(false)
-            expect(layout.addUndo, viewport.name).toBe(true)
+            expect(layout.addUndo, viewport.name).toBe(false)
             expect(layout.pluginsInBar, viewport.name).toBe(false)
             expect(layout.addHeight, viewport.name).toBeGreaterThanOrEqual(40)
             expect(layout.addHeight, viewport.name).toBeLessThanOrEqual(48)
+            expect(layout.strip, viewport.name).toBeGreaterThanOrEqual(28)
+            expect(layout.gripHit, viewport.name).toBeLessThanOrEqual(layout.ruler + 1)
+            expect(Math.abs(layout.addWidth - layout.headWidth), viewport.name).toBeLessThanOrEqual(2)
             const labels = layout.barButtons.map((button) => button.label)
             expect(labels.some((label) => label.startsWith('Menu')), viewport.name).toBe(true)
-            expect(labels.some((label) => label.startsWith('Browser')), viewport.name).toBe(true)
+            expect(labels.some((label) => label === 'Browse'), viewport.name).toBe(true)
+            expect(labels.some((label) => label === 'Tools'), viewport.name).toBe(true)
             const menu = layout.barButtons.find((button) => button.label.startsWith('Menu'))!
-            const browserBtn = layout.barButtons.find((button) => button.label.startsWith('Browser'))!
+            const browserBtn = layout.barButtons.find((button) => button.label === 'Browse')!
             expect(menu.left, viewport.name).toBeLessThan(browserBtn.left)
             const order = layout.addOrder.map((item) => item.label)
             expect(order[0], viewport.name).toMatch(/Add Track/)
+            expect(order.some((label) => label.startsWith('Undo')), viewport.name).toBe(false)
             expect(order[order.length - 1], viewport.name).toBe('Ideas')
           } else {
             expect(layout.ruler, viewport.name).toBeGreaterThanOrEqual(36)
@@ -280,6 +308,63 @@ describe('phone arrange layout', () => {
           }
           await page.locator('[data-overview="y"]').waitFor()
           await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-arrange.png` })
+          if (shot.name === '390x844') {
+            const before = await page.evaluate(() => {
+              const hook = (window as unknown as { __cueharbor: { store: { project: { loopStartSample: number; loopEndSample: number } } } }).__cueharbor
+              const play = document.querySelector('[data-playhead="arrange"]')?.getBoundingClientRect().left ?? 0
+              const strip = document.querySelector('[data-playhead-strip]')!.getBoundingClientRect()
+              const hit = document.elementFromPoint(strip.left + strip.width * 0.55, strip.top + strip.height / 2)
+              return {
+                play,
+                start: hook.store.project.loopStartSample,
+                end: hook.store.project.loopEndSample,
+                hitGrip: Boolean(hit?.closest('[data-loop-edge], .loop-grip')),
+                context: document.querySelector('.phone-context')?.getAttribute('data-phone-context'),
+              }
+            })
+            expect(before.hitGrip, 'playhead strip').toBe(false)
+            expect(before.context).toBe('arrange')
+            const strip = page.locator('[data-playhead-strip]')
+            const stripBox = await strip.boundingBox()
+            await strip.click({ position: { x: Math.round((stripBox?.width ?? 80) * 0.62), y: Math.round((stripBox?.height ?? 28) / 2) } })
+            await page.waitForTimeout(80)
+            const after = await page.evaluate(() => {
+              const hook = (window as unknown as { __cueharbor: { store: { project: { loopStartSample: number; loopEndSample: number } } } }).__cueharbor
+              return {
+                play: document.querySelector('[data-playhead="arrange"]')?.getBoundingClientRect().left ?? 0,
+                start: hook.store.project.loopStartSample,
+                end: hook.store.project.loopEndSample,
+              }
+            })
+            expect(after.play).not.toBe(before.play)
+            expect(after.start).toBe(before.start)
+            expect(after.end).toBe(before.end)
+            const open = await page.evaluate(() => document.querySelector('.timeline-scroll')!.getBoundingClientRect().width)
+            const bar = await page.locator('[data-overview="y"]').boundingBox()
+            if (!bar) throw new Error('missing lane overview')
+            await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height - 12)
+            await page.mouse.down()
+            await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height + 90, { steps: 12 })
+            await page.mouse.up()
+            await page.waitForTimeout(80)
+            const shrunk = await page.evaluate(() => {
+              const arrange = document.querySelector('.arrange') as HTMLElement
+              const lane = document.querySelector('.timeline-scroll')!.getBoundingClientRect()
+              const head = document.querySelector('.arrange .heads')!.getBoundingClientRect()
+              const row = document.querySelector('.arrange .lane')!.getBoundingClientRect()
+              return {
+                compact: arrange.getAttribute('data-lane-compact'),
+                lane: lane.width,
+                head: head.width,
+                row: row.height,
+              }
+            })
+            expect(shrunk.compact, 'lane zoom').toBe('true')
+            expect(shrunk.row, 'lane height').toBeLessThan(80)
+            expect(shrunk.lane, 'lane width').toBeGreaterThan(390 * 0.6)
+            expect(shrunk.lane, 'lane vs open').toBeGreaterThan(open * 0.9)
+            expect(shrunk.head + shrunk.lane, 'header stays narrow').toBeLessThan(390)
+          }
 
           await page.getByRole('button', { name: /^Menu/ }).click()
           await page.locator('#shell-menu').waitFor()
@@ -301,9 +386,9 @@ describe('phone arrange layout', () => {
           await page.keyboard.press('Escape')
 
           const browser = page.locator('.arrange-stage > [data-playlist-browser="open"]')
-          await page.locator('.tool-slot').getByRole('button', { name: 'Browser', exact: true }).evaluate((node) => (node as HTMLButtonElement).click())
+          await page.locator('.tool-slot').getByRole('button', { name: 'Browse', exact: true }).evaluate((node) => (node as HTMLButtonElement).click())
           await browser.waitFor()
-          const browserBox = await sheetClearance('.arrange-stage > [data-playlist-browser="open"]', 'Browser')
+          const browserBox = await sheetClearance('.arrange-stage > [data-playlist-browser="open"]', 'Browse')
           expect(browserBox!.coversTabs, shot.name).toBe(false)
           expect(browserBox!.coversTransport, shot.name).toBe(false)
           expect(browserBox!.coversTabs, shot.name).toBe(false)
@@ -316,17 +401,17 @@ describe('phone arrange layout', () => {
           expect(await browserClose.getAttribute('aria-label')).toBe('Close')
           expect(browserCloseBox!.width, shot.name).toBeGreaterThanOrEqual(40)
           expect(browserCloseBox!.height, shot.name).toBeGreaterThanOrEqual(40)
-          await page.locator('.tool-slot').getByRole('button', { name: 'Browser', exact: true }).click()
+          await page.locator('.tool-slot').getByRole('button', { name: 'Browse', exact: true }).click()
           await browser.waitFor({ state: 'hidden' })
 
-          await page.locator('.tool-slot').getByRole('button', { name: /^Tool:/ }).click()
+          await page.locator('.tool-slot').getByRole('button', { name: 'Tools', exact: true }).click()
           const selectSheet = page.locator('#tool-choices')
           await selectSheet.waitFor()
           const selectClose = selectSheet.getByRole('button', { name: 'Close', exact: true })
           const selectBox = await selectClose.boundingBox()
           expect(selectBox!.width, shot.name).toBeGreaterThanOrEqual(40)
           expect(await selectClose.innerText()).not.toMatch(/Close/)
-          const selectClear = await sheetClearance('#tool-choices', 'Tool:')
+          const selectClear = await sheetClearance('#tool-choices', 'Tools')
           expect(selectClear!.coversTabs, shot.name).toBe(false)
           expect(selectClear!.coversTransport, shot.name).toBe(false)
           expect(selectClear!.coversButton, shot.name).toBe(false)
@@ -351,8 +436,9 @@ describe('phone arrange layout', () => {
           expect(collab.topName, shot.name).toBe(false)
           expect(collab.tabsTop, shot.name).toBeLessThanOrEqual(8)
           expect(collab.labels.some((label) => label.startsWith('Menu')), shot.name).toBe(true)
-          expect(collab.labels.some((label) => label.startsWith('Browser')), shot.name).toBe(true)
-          expect(collab.labels.findIndex((label) => label.startsWith('Menu'))).toBeLessThan(collab.labels.findIndex((label) => label.startsWith('Browser')))
+          expect(collab.labels.some((label) => label === 'Browse'), shot.name).toBe(true)
+          expect(collab.labels.some((label) => label === 'Tools'), shot.name).toBe(true)
+          expect(collab.labels.findIndex((label) => label.startsWith('Menu'))).toBeLessThan(collab.labels.findIndex((label) => label === 'Browse'))
           await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-collab.png` })
 
           await page.getByRole('button', { name: /^Mix/ }).first().click()
@@ -377,8 +463,10 @@ describe('phone arrange layout', () => {
           expect(mix.topUndo, shot.name).toBe(false)
           expect(mix.tabsTop, shot.name).toBeLessThanOrEqual(8)
           expect(mix.labels.some((label) => label.startsWith('Menu')), shot.name).toBe(true)
-          expect(mix.labels.some((label) => label.startsWith('Browser')), shot.name).toBe(true)
-          expect(mix.labels.findIndex((label) => label.startsWith('Menu'))).toBeLessThan(mix.labels.findIndex((label) => label.startsWith('Browser')))
+          expect(mix.labels.some((label) => label === 'Browse'), shot.name).toBe(true)
+          expect(mix.labels.some((label) => label === 'Tools'), shot.name).toBe(true)
+          expect(mix.labels.some((label) => label.startsWith('Vocal')), shot.name).toBe(false)
+          expect(mix.labels.findIndex((label) => label.startsWith('Menu'))).toBeLessThan(mix.labels.findIndex((label) => label === 'Browse'))
           expect(mix.moreHeight, shot.name).toBeGreaterThanOrEqual(40)
           expect(mix.moreBottom, shot.name).toBeLessThanOrEqual((mix.barBottom ?? 0) + 1)
           await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-mix.png` })

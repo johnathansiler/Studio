@@ -89,7 +89,7 @@ describe('loop load and beat machine pads', () => {
         if (!midi) throw new Error('missing midi track')
         store.selectTrack(midi.id)
       })
-      await page.getByRole('button', { name: 'Browser', exact: true }).click()
+      await page.getByRole('button', { name: 'Browse', exact: true }).click()
       await page.locator('[data-playlist-browser="open"]').waitFor()
       await page.locator('.browser-tabs').getByRole('button', { name: 'Sounds', exact: true }).click()
       await page.getByLabel('Search sounds').fill('2-AND-4 (120)')

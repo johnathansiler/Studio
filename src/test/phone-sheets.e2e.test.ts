@@ -79,7 +79,7 @@ describe('phone browser sheet, plugins scroll, and loop grips', () => {
       await page.getByRole('button', { name: /^Arrange/ }).first().waitFor()
       const laneBefore = await laneWidth(page)
       const scrollBefore = await arrangeScroll(page)
-      await page.getByRole('button', { name: 'Browser', exact: true }).click()
+      await page.getByRole('button', { name: 'Browse', exact: true }).click()
       const sheet = page.locator('.arrange-stage > [data-playlist-browser="open"][data-bottom-sheet="open"]')
       await sheet.waitFor()
       await page.locator('.sound-row, .sound-status').first().waitFor({ timeout: 15000 })
@@ -124,7 +124,8 @@ describe('phone browser sheet, plugins scroll, and loop grips', () => {
         await page.setViewportSize({ width: viewport.width, height: viewport.height })
         await page.waitForTimeout(200)
         const open = page.locator('[data-playlist-browser="open"]')
-        if (await open.count() === 0) await page.getByRole('button', { name: 'Browser', exact: true }).click()
+        const phoneSize = viewport.width <= 520 || viewport.height <= 520
+        if (await open.count() === 0) await page.getByRole('button', { name: phoneSize ? 'Browse' : 'Browser', exact: true }).click()
         await open.first().waitFor()
         await page.screenshot({ path: `/opt/cursor/artifacts/after-browser-${viewport.name}.png` })
         if (viewport.name === '390x844' || viewport.name === '844x390') {

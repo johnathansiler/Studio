@@ -49,7 +49,7 @@ describe('phone fit at 412x915', () => {
           return { ratio: lane.height / window.innerHeight, names }
         })
         const history = await page.evaluate(() => {
-          const bar = document.querySelector('.arrange-add')!.getBoundingClientRect()
+          const row = document.querySelector('.phone-context')!.getBoundingClientRect()
           return ['[data-history="undo"]', '[data-history="redo"]'].map((selector) => {
             const button = document.querySelector(selector) as HTMLElement
             const word = button.querySelector('.history-word') as HTMLElement
@@ -60,14 +60,14 @@ describe('phone fit at 412x915', () => {
               top: box.top,
               height: box.height,
               right: box.right,
-              inAdd: bar.top - 1 <= box.top && box.bottom <= bar.bottom + 1,
+              inRow: row.top - 1 <= box.top && box.bottom <= row.bottom + 1,
             }
           })
         })
         for (const button of history) {
           expect(button.display).not.toBe('none')
           expect(button.text === 'Undo' || button.text === 'Redo').toBe(true)
-          expect(button.inAdd).toBe(true)
+          expect(button.inRow).toBe(true)
           expect(button.height).toBeGreaterThanOrEqual(40)
           expect(button.right).toBeLessThanOrEqual(412 + 1)
         }
@@ -201,8 +201,8 @@ describe('phone fit at 412x915', () => {
         expect(addBox!.height).toBeLessThanOrEqual(44)
         expect(addBar!.x).toBeLessThan(8)
         expect(addBox!.x).toBeLessThan(16)
-        const undoBox = await page.locator('.arrange-add [data-history="undo"]').boundingBox()
-        expect(undoBox!.x).toBeGreaterThan(addBox!.x + addBox!.width - 1)
+        const undoBox = await page.locator('.phone-context [data-history="undo"]').boundingBox()
+        expect(undoBox).toBeTruthy()
         expect(addBox!.x + addBox!.width).toBeLessThanOrEqual(413)
         await add.click()
         await page.getByRole('group', { name: 'Add Track' }).waitFor()

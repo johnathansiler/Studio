@@ -7,7 +7,7 @@
 }
 
 .shell.phone:not(.land):has(.tool-slot:not(:empty)) {
-  --edit-bar: calc(52px + env(safe-area-inset-bottom));
+  --edit-bar: calc(92px + env(safe-area-inset-bottom));
 }
 
 .shell.phone.land:has(.tool-slot:not(:empty)) {

@@ -42,6 +42,8 @@ import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import { UtilitySheets } from './UtilitySheets'
 import { TrackOptions, trackKindLabel } from './TrackOptions'
 import { ARRANGE_SHEET_EVENT, popSheetHistory, publishArrangeSheet, rememberSheetHistory, sheetHistoryKey, type UtilitySheet } from './arrangePanel'
+import { BROWSER_TAB_EVENT, CLOSE_ARRANGE_SHEETS, OPEN_PLUGINS_EVENT } from './phoneContext'
+import { setPhoneFocus } from './phoneFocus'
 import { PluginsDrawer } from './PluginsDrawer'
 import { TRACK_ROW, copyOf } from './chrome'
 import { useFormFactor } from './form'
@@ -167,8 +169,8 @@ export function ArrangeView({
   pluginsDrawer?: boolean
   /** Open the add list with the drawer. */
   pluginsMenu?: boolean
-  /** Portrait phone Arrange: Menu in the edit bar, Undo/Redo/Ideas beside Add Track. */
-  phoneBar?: { menu: ReactNode; history: ReactNode; ideas: ReactNode } | null
+  /** Phone Arrange keeps the Ideas bulb beside Add Track. Undo and Redo live in the dock. */
+  phoneBar?: { menu?: ReactNode; history?: ReactNode; ideas?: ReactNode } | null
 }) {
   const project = selectArrange(store).project
   const remotes = useRemotePeers()
@@ -206,6 +208,20 @@ export function ArrangeView({
   const clampPx = (value: number) => clampTimelinePx(value, scroller.current?.clientWidth ?? 0, secondsRef.current)
   const lastClipTap = useRef({ id: '', at: 0 })
   const headsRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (!phone) return
+    const heads = headsRef.current
+    const arrange = heads?.closest('.arrange') as HTMLElement | null
+    if (!heads || !arrange) return
+    const apply = () => {
+      const width = Math.round(heads.getBoundingClientRect().width)
+      if (width > 0) arrange.style.setProperty('--track-head-w', `${width}px`)
+    }
+    apply()
+    const observer = new ResizeObserver(apply)
+    observer.observe(heads)
+    return () => observer.disconnect()
+  }, [phone, project.tracks.length])
   const innerRef = useRef<HTMLDivElement>(null)
   useEffect(() => subscribeTools(() => setToolState(activeTool())), [])
   useEffect(() => engine.subscribe(() => setPosition(engine.positionSamples)), [engine])
@@ -434,6 +450,7 @@ export function ArrangeView({
     const current = activeTool()
     const target = event.target as HTMLElement
     if (target.closest('.song-map, .smart-tempo, .map-head')) return
+    if (phone && !target.closest('.clip, .ruler, .playhead-strip, .loop-host')) setPhoneFocus('none')
     if (target.closest('.clip') && !passive) return
     if (target.closest('.ruler') && current !== 'pan' && current !== 'zoom') return
     if (toolClaimsGesture(current)) event.preventDefault()
@@ -753,6 +770,14 @@ export function ArrangeView({
     rememberPanel('arrangeBrowser', next)
   }
   const browserPhase = usePushPhase(browserOpen)
+  useEffect(() => {
+    if (!phone || !browserOpen) return
+    setPluginsOpen(false)
+    if (!utilityRef.current && !trackRef.current) return
+    popSheetHistory()
+    setTrackSheet(null)
+    setUtility(null)
+  }, [phone, browserOpen])
   const pluginsPhase = usePushPhase(pluginsOpen)
   useScreenOverlay(() => setPluginsOpen(false), pluginsOpen)
   const [browserTab, setBrowserTab] = useState<BrowserTab>(libraryTab || 'sounds')
@@ -812,6 +837,33 @@ export function ArrangeView({
     return () => window.removeEventListener('popstate', onPop)
   }, [historyKey])
   useEffect(() => {
+    const onTab = (event: Event) => {
+      const next = (event as CustomEvent<BrowserTab>).detail
+      if (next) setBrowserTab(next)
+    }
+    const onClose = () => {
+      if (trackRef.current || utilityRef.current) popSheetHistory()
+      setTrackSheet(null)
+      setUtility(null)
+      setPluginsOpen(false)
+    }
+    const onPlugins = () => {
+      if (trackRef.current || utilityRef.current) popSheetHistory()
+      setTrackSheet(null)
+      setUtility(null)
+      setBrowserOpen(false)
+      setPluginsOpen(true)
+    }
+    document.addEventListener(BROWSER_TAB_EVENT, onTab)
+    document.addEventListener(CLOSE_ARRANGE_SHEETS, onClose)
+    document.addEventListener(OPEN_PLUGINS_EVENT, onPlugins)
+    return () => {
+      document.removeEventListener(BROWSER_TAB_EVENT, onTab)
+      document.removeEventListener(CLOSE_ARRANGE_SHEETS, onClose)
+      document.removeEventListener(OPEN_PLUGINS_EVENT, onPlugins)
+    }
+  }, [])
+  useEffect(() => {
     const onSheet = (event: Event) => {
       const id = (event as CustomEvent<UtilitySheet>).detail
       if (id !== 'setup' && id !== 'tools' && id !== 'snap') return
@@ -847,13 +899,14 @@ export function ArrangeView({
   return (
     <div className="arrange-wrap">
       <SmartTempoBar store={store} />
+      {!phone && (
       <ArrangeChrome
         browserOpen={browserOpen}
         setupOpen={setupOpen}
         pluginsOpen={pluginsOpen}
         setupButton={setupButton}
         menu={phoneBar?.menu}
-        showPlugins={form !== 'phone'}
+        showPlugins
         onPlugins={() => {
           if (!pluginsOpen) closeSheets()
           setPluginsOpen((open) => !open)
@@ -869,6 +922,7 @@ export function ArrangeView({
         }}
         onSetup={() => toggleUtility('setup')}
       />
+      )}
       <div className={`arrange-stage${pluginsPhase !== 'off' ? (phone ? ' plugins-bottom' : ' plugins-side') : ''}${phone && browserPhase !== 'off' ? ' browser-bottom' : ''}`} data-plugins-drawer={pluginsPhase !== 'off' ? (phone ? 'bottom' : 'side') : 'closed'} data-browser-sheet={phone ? (browserPhase !== 'off' ? 'bottom' : 'closed') : 'side'} data-push={pluginsPhase} data-browser-push={phone ? browserPhase : undefined} style={{ ['--push' as string]: '280px' }}>
       <div className={`playlist-frame ${!phone && browserPhase !== 'off' ? 'browser-open' : ''} ${phone ? 'phone-arrange' : ''}`} data-push={phone ? 'off' : browserPhase} style={{ ['--browser' as string]: `${browserWidth}px`, ['--push' as string]: `${browserWidth}px` }}>
       {!phone && browserPhase !== 'off' && (
@@ -889,12 +943,7 @@ export function ArrangeView({
       <div className="heads-col">
       <div className="arrange-add">
         <AddTrackButton store={store} prominent onAdded={onTrackAdded} />
-        {phoneBar && (
-          <div className="arrange-add-tools">
-            {phoneBar.history}
-            {phoneBar.ideas}
-          </div>
-        )}
+        {phoneBar?.ideas}
       </div>
       <div
         className="heads"
@@ -910,7 +959,7 @@ export function ArrangeView({
           <SongMapHead store={store} position={position} compact />
         </div>
         {project.tracks.map((track) => (
-          <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} style={rowStyle(track, store.selectedTrackId, store.selectedClipId, !!store.openLanes[track.id], phone)} onClick={() => { store.selectTrack(track.id); revealTrack(track.id, 'select-track') }}>
+          <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} style={rowStyle(track, store.selectedTrackId, store.selectedClipId, !!store.openLanes[track.id], phone)} onClick={() => { if (phone) setPhoneFocus('track'); store.selectTrack(track.id); revealTrack(track.id, 'select-track') }}>
             <div className="pl-head">
               <div className="pl-name-row">
                 <i className="swatch" style={{ background: track.color }} />
@@ -1019,6 +1068,40 @@ export function ArrangeView({
             <CommentControl session={session} project={project} position={position} />
             <CommentPins session={session} project={project} px={px} onSeek={onSeek} />
           </div>
+          {phone && (
+            <div
+              className="playhead-strip"
+              data-playhead-strip=""
+              role="slider"
+              aria-label="Playhead. Tap or drag to move it."
+              aria-valuemin={0}
+              aria-valuenow={Math.round(position)}
+              onPointerDown={(event) => {
+                if (event.button !== 0 && event.pointerType !== 'touch') return
+                event.stopPropagation()
+                event.preventDefault()
+                const node = event.currentTarget
+                const seek = (clientX: number) => {
+                  const rect = node.getBoundingClientRect()
+                  const sample = Math.max(0, ((clientX - rect.left) / pxRef.current) * project.sampleRate)
+                  onSeek(snapSampleToMap(sample, project))
+                }
+                seek(event.clientX)
+                const pointerId = event.pointerId
+                const move = (ev: PointerEvent) => {
+                  if (ev.pointerId !== pointerId) return
+                  seek(ev.clientX)
+                }
+                const up = (ev: PointerEvent) => {
+                  if (ev.pointerId !== pointerId) return
+                  window.removeEventListener('pointermove', move)
+                  window.removeEventListener('pointerup', up)
+                }
+                window.addEventListener('pointermove', move)
+                window.addEventListener('pointerup', up)
+              }}
+            />
+          )}
           <div className="bar-grid" aria-hidden>
             {marks.filter((mark) => mark.downbeat).map((mark) => (
               <i key={mark.beat} style={{ left: pxAtBeat(project, mark.beat, px) }} />
