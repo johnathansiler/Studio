@@ -190,6 +190,14 @@ export function SheetRow({
   )
 }
 
+function MenuCheck() {
+  return (
+    <svg className="menu-check" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M3.5 8.2 6.6 11.3 12.6 4.8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 export function MenuRow({
   label,
   hint,
@@ -198,6 +206,7 @@ export function MenuRow({
   className,
   id,
   action,
+  trailing,
   onClick,
 }: {
   label: string
@@ -207,13 +216,14 @@ export function MenuRow({
   className?: string
   id?: string
   action?: string
+  trailing?: ReactNode
   onClick: () => void
 }) {
   return (
     <button
       type="button"
       id={id}
-      className={['ch-row', className].filter(Boolean).join(' ')}
+      className={['menu-row', className].filter(Boolean).join(' ')}
       disabled={disabled}
       title={hint}
       aria-label={`${label}. ${hint}`}
@@ -221,8 +231,16 @@ export function MenuRow({
       data-menu-action={action}
       onClick={onClick}
     >
-      <span>{label}</span>
-      <small>{hint}</small>
+      <span className="menu-copy">
+        <span className="menu-label">{label}</span>
+        {hint ? <small>{hint}</small> : null}
+      </span>
+      {pressed || trailing ? (
+        <span className="menu-aside">
+          {pressed ? <MenuCheck /> : null}
+          {trailing}
+        </span>
+      ) : null}
     </button>
   )
 }
