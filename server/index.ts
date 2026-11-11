@@ -13,8 +13,13 @@ import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { withIsolation } from './headers.ts'
+import { createLibraryApi, libraryClientIp, presignR2Get } from './library.ts'
 
 const usage = createUsageLedger()
+const libraryApi = createLibraryApi({
+  env: () => process.env,
+  sign: (key, env) => presignR2Get(env, key),
+})
 
 const PORT = Number(process.env.PORT || 8787)
 const HOST = process.env.HOST || '0.0.0.0'
@@ -273,6 +278,7 @@ function leave(client: Client, announce = false) {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`)
   if (url.pathname === '/api/health') return json(res, { ok: true, service: 'cueharbor', sessions: sessions.size })
+  if (url.pathname === '/api/library' || url.pathname === '/api/library/sign') return handleLibrary(req, res, url.pathname)
   if (url.pathname === '/api/usage' && req.method === 'GET') return json(res, await usage.view())
   if (url.pathname === '/api/usage' && req.method === 'POST') return reportUsage(req, res)
   if (url.pathname === '/api/sfu/session' && req.method === 'POST') return openSfuSession(req, res)
@@ -415,6 +421,34 @@ async function handleDiag(req: IncomingMessage, res: ServerResponse, code: strin
   if (!entry) return json(res, { error: 'Diagnostic was empty.' }, 400)
   session.diag = rememberDiag(session.diag, entry, 200)
   return json(res, { ok: true, kept: session.diag.length })
+}
+
+async function handleLibrary(req: IncomingMessage, res: ServerResponse, pathname: string) {
+  const header = req.headers['x-library-key']
+  const accessKey = (Array.isArray(header) ? header[0] : header) || ''
+  let body: unknown = null
+  if (req.method === 'POST') {
+    try {
+      const text = await readBody(req, 32_000)
+      body = text ? JSON.parse(text) as unknown : null
+    } catch {
+      return json(res, { error: 'Those library paths cannot be signed.' }, 400)
+    }
+  }
+  const ip = libraryClientIp(req.headers, req.socket.remoteAddress)
+  try {
+    const result = await libraryApi.handle({
+      method: req.method || 'GET',
+      pathname,
+      ip,
+      accessKey,
+      body,
+      now: Date.now(),
+    })
+    return json(res, result.body, result.status)
+  } catch {
+    return json(res, { error: 'Could not sign that sound.' }, 500)
+  }
 }
 
 function json(res: ServerResponse, body: unknown, status = 200) {

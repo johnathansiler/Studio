@@ -540,6 +540,85 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   min-height: 40px;
 }
 
+.my-library {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  contain: inline-size;
+}
+
+.my-library .library-chip-scroll,
+.my-library .sound-filters,
+.my-library .bpm-range,
+.my-library .sound-list,
+.my-library .library-lock {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.playlist-browser .my-library .library-chip-scroll,
+.bottom-sheet .my-library .library-chip-scroll {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+.my-library .library-chip-scroll button {
+  flex: none;
+  font-family: inherit;
+}
+
+.library-lock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.library-lock input,
+.my-library .bpm-range input {
+  width: 100%;
+  min-width: 0;
+  font-family: inherit;
+}
+
+.my-library .bpm-range {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.my-library .bpm-range input {
+  flex: 1 1 0;
+  width: 0;
+}
+
+.my-library .sound-list {
+  gap: 0;
+  max-width: 100%;
+}
+
+.my-library .sound-row {
+  height: 64px;
+  min-height: 64px;
+  max-height: 64px;
+  margin: 0 0 6px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+}
+
+.bottom-sheet .my-library.sound-panel,
+.playlist-browser .my-library.sound-panel {
+  overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .shell.phone.land .playlist-browser .sound-count,
 .shell.phone.land .playlist-browser .sound-status {
   flex: none;

@@ -3031,6 +3031,17 @@ export class ProjectStore {
     this.emit()
   }
 
+  /** Remember a private-library object key. Presigned URLs are refused. */
+  rememberLibrarySound(bufferId: string, key: string) {
+    const clean = key.trim()
+    if (!bufferId || !clean || /^https?:/i.test(clean) || clean.includes('://') || clean.includes('X-Amz-')) return
+    this.mutate(() => {
+      const list = (this.project.libraryFiles ?? []).filter((item) => item.bufferId !== bufferId && item.key !== clean)
+      list.push({ bufferId, key: clean })
+      this.project.libraryFiles = list
+    })
+  }
+
   addAudioClip(trackId: string, clip: AudioClip) {
     this.mutate(() => {
       const track = this.track(trackId)

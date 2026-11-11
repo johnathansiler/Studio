@@ -1,4 +1,5 @@
 import { normalizeProject } from '../audio/plugins/catalog'
+import { cleanLibraryFiles } from '../library/project'
 import { createEmptyProject, SCHEMA_VERSION, type Project } from './types'
 
 export function migrateProject(input: unknown): Project {
@@ -18,5 +19,8 @@ export function migrateProject(input: unknown): Project {
     tracks: Array.isArray(raw.tracks) ? raw.tracks : base.tracks,
     version: SCHEMA_VERSION,
   }
+  const libraryFiles = cleanLibraryFiles(raw.libraryFiles)
+  if (libraryFiles) merged.libraryFiles = libraryFiles
+  else delete merged.libraryFiles
   return normalizeProject(merged)
 }
