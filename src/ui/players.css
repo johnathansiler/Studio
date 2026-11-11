@@ -60,15 +60,19 @@
 .players-fill input { width: 100%; min-height: 44px; }
 .players-parts, .players-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .players-parts button.on, .players-actions button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
-.players-dock.embedded {
+.players-dock.embedded,
+.shell .players-dock.embedded,
+.shell.fold .players-dock.embedded {
   position: static;
   left: auto;
   right: auto;
+  top: auto;
   bottom: auto;
   z-index: auto;
   width: auto;
   max-height: none;
   border: 0;
+  border-left: 0;
   padding: 0;
   background: transparent;
 }
