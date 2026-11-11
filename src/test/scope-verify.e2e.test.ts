@@ -212,27 +212,59 @@ describe('scoped arrange changes', () => {
         }).__cueharbor.store
         store.setLoop(true, 0, store.project.sampleRate * 120)
       })
+      // A long loop keeps its end cap on the beat, off the right of the phone, until the timeline scrolls there.
+      const longLoop = await page.waitForFunction(() => {
+        const host = document.querySelector('[data-loop-region="arrange"]') as HTMLElement | null
+        const face = host?.querySelector('[data-loop-edge="end"] .loop-grip-face') as HTMLElement | null
+        const scroll = document.querySelector('.timeline-scroll') as HTMLElement | null
+        const inner = document.querySelector('.timeline-inner') as HTMLElement | null
+        if (!host || !face || !scroll || !inner) return null
+        if (host.dataset.parkEnd !== 'track') return null
+        const project = (window as unknown as { __cueharbor: { store: { project: { sampleRate: number; loopEndSample: number } } } }).__cueharbor.store.project
+        const expectEnd = inner.getBoundingClientRect().left + (project.loopEndSample / project.sampleRate) * Number(inner.dataset.px)
+        const faceRight = face.getBoundingClientRect().right
+        const viewRight = scroll.getBoundingClientRect().left + scroll.clientLeft + scroll.clientWidth
+        if (Math.abs(faceRight - expectEnd) > 1.5) return null
+        if (expectEnd < viewRight + 1000) return null
+        return { expectEnd, faceRight, viewRight, past: viewRight - faceRight }
+      })
+      const offscreen = await longLoop.jsonValue()
+      expect(offscreen).toBeTruthy()
+      expect(offscreen!.faceRight).toBeGreaterThan(offscreen!.viewRight)
+      expect(offscreen!.past).toBeLessThan(-1000)
+      await page.evaluate(() => {
+        const scroller = document.querySelector('.timeline-scroll') as HTMLElement
+        const grip = document.querySelector('[data-loop-region="arrange"] [data-loop-edge="end"]') as HTMLElement
+        const hitRight = parseFloat(grip.style.left) + (parseFloat(grip.style.width) || grip.offsetWidth)
+        scroller.scrollLeft = Math.max(0, hitRight - scroller.clientWidth + 2)
+      })
       await page.waitForFunction(() => {
-        const grip = document.querySelector('[data-loop-edge="end"]')
+        const grip = document.querySelector('[data-loop-region="arrange"] [data-loop-edge="end"]')
         const scroll = document.querySelector('.timeline-scroll')
         if (!grip || !scroll) return false
-        const contentRight = scroll.getBoundingClientRect().left + scroll.clientLeft + scroll.clientWidth
-        return contentRight - grip.getBoundingClientRect().right < 8
+        const g = grip.getBoundingClientRect()
+        const s = scroll.getBoundingClientRect()
+        return Math.min(g.right, s.right) - Math.max(g.left, s.left) >= 44
       })
       const loopHit = await page.evaluate(() => {
-        const grip = document.querySelector('[data-loop-edge="end"]') as HTMLElement | null
+        const grip = document.querySelector('[data-loop-region="arrange"] [data-loop-edge="end"]') as HTMLElement | null
         const scroll = document.querySelector('.timeline-scroll') as HTMLElement | null
         const face = grip?.querySelector('.loop-grip-face') as HTMLElement | null
-        if (!grip || !scroll || !face) return null
+        const host = grip?.closest('.loop-host') as HTMLElement | null
+        const inner = document.querySelector('.timeline-inner') as HTMLElement | null
+        if (!grip || !scroll || !face || !host || !inner) return null
         const g = grip.getBoundingClientRect()
         const s = scroll.getBoundingClientRect()
         const f = face.getBoundingClientRect()
         const visible = Math.min(g.right, s.right) - Math.max(g.left, s.left)
         const y = f.top + f.height / 2
-        const inner = document.elementFromPoint(f.left - 24, y)
+        const onFace = document.elementFromPoint(f.left + f.width / 2, y)
+        const beside = document.elementFromPoint(f.left - 24, y)
         const edgeX = Math.min(s.right, window.innerWidth) - 3
         const edge = document.elementFromPoint(edgeX, y)
-        const host = grip.closest('.loop-host')?.getBoundingClientRect()
+        const project = (window as unknown as { __cueharbor: { store: { project: { sampleRate: number; loopEndSample: number } } } }).__cueharbor.store.project
+        const expectEnd = inner.getBoundingClientRect().left + (project.loopEndSample / project.sampleRate) * Number(inner.dataset.px)
+        const hostBox = host.getBoundingClientRect()
         return {
           visible,
           faceWidth: f.width,
@@ -240,18 +272,23 @@ describe('scoped arrange changes', () => {
           grip: { left: g.left, right: g.right, top: g.top },
           face: { left: f.left, right: f.right },
           scroll: { left: s.left, right: s.right },
-          host: host ? { left: host.left, right: host.right } : null,
+          host: { left: hostBox.left, right: hostBox.right },
+          onBeat: Math.abs(f.right - expectEnd),
+          parkEnd: host.dataset.parkEnd ?? '',
           edgeX,
           y,
-          innerIsEnd: !!inner?.closest('[data-loop-edge="end"]'),
+          innerIsEnd: !!onFace?.closest('[data-loop-edge="end"]'),
           edgeIsEnd: !!edge?.closest('[data-loop-edge="end"]'),
           edgeTag: edge ? `${edge.tagName}.${edge.className}` : 'none',
-          startStolen: !!inner?.closest('[data-loop-edge="start"]'),
+          startStolen: !!beside?.closest('[data-loop-edge="start"]'),
         }
       })
       expect(loopHit).toBeTruthy()
+      expect(loopHit!.parkEnd).toBe('track')
+      expect(loopHit!.onBeat).toBeLessThan(1.5)
       expect(loopHit!.faceWidth).toBeGreaterThanOrEqual(10)
       expect(loopHit!.faceWidth).toBeLessThanOrEqual(14)
+      expect(loopHit!.gripWidth).toBeGreaterThanOrEqual(44)
       expect(loopHit!.visible).toBeGreaterThanOrEqual(44)
       expect(loopHit!.innerIsEnd).toBe(true)
       expect(loopHit!.edgeIsEnd).toBe(true)
@@ -265,6 +302,10 @@ describe('scoped arrange changes', () => {
       await page.mouse.up()
       const shorter = await page.evaluate(() => (window as unknown as { __cueharbor: { store: { project: { loopEndSample: number } } } }).__cueharbor.store.project.loopEndSample)
       expect(shorter).toBeLessThan(beforeLoop)
+      await page.evaluate(() => {
+        const scroller = document.querySelector('.timeline-scroll') as HTMLElement | null
+        if (scroller) scroller.scrollLeft = 0
+      })
 
       const vocal = page.locator('.head', { has: page.getByRole('textbox', { name: 'Vocal name' }) })
       await vocal.locator('.track-more').click()
@@ -393,6 +434,16 @@ describe('scoped arrange changes', () => {
       await dragTempo(3)
       expect(await tempoOf(page)).toBeCloseTo(small, 1)
 
+      // Scroll is the current tool, so an empty-lane click pans instead of clearing the clip.
+      // The clip row hides Setup until the selection is cleared.
+      await page.evaluate(() => {
+        const store = (window as unknown as {
+          __cueharbor: { store: { project: { tracks: { id: string; name: string }[] }; selectClip: (trackId: string, clipId: string | null, midi?: boolean, openSheet?: boolean) => void } }
+        }).__cueharbor.store
+        const track = store.project.tracks.find((item) => item.name === 'Music') ?? store.project.tracks[0]
+        store.selectClip(track.id, null, false, false)
+      })
+      await page.locator('.phone-context[data-phone-context="arrange"]').waitFor()
       await page.getByRole('button', { name: /^Setup/ }).first().click()
       await page.locator('#arrange-setup[data-bottom-sheet="open"]').waitFor()
       expect(await page.getByRole('button', { name: /^Record/ }).first().isVisible()).toBe(true)
