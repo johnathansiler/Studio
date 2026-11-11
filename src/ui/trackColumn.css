@@ -189,7 +189,7 @@
   padding: 2px;
 }
 
-.track-add .add-track-slot,
+.track-add .add-track-slot.prominent .add-track-btn,
 .track-add .add-track-btn {
   width: 100%;
   height: 40px;
