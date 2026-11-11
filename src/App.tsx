@@ -2045,7 +2045,7 @@ async function importDropped(files: FileList) {
             canRedo={store.canRedo}
             onUndo={phone ? () => { setMenuOpen(false); store.undo() } : undefined}
             onRedo={phone ? () => { setMenuOpen(false); store.redo() } : undefined}
-            onIdeas={phone ? () => { setMenuOpen(false); setUnstuckOpen(true) } : undefined}
+            onIdeas={phone && !phoneArrange ? () => { setMenuOpen(false); setUnstuckOpen(true) } : undefined}
             latencyHint={latencyHint}
             latencyReadout={latencyReadout}
             onLatency={(hint) => {

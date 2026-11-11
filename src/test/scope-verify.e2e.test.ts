@@ -69,10 +69,27 @@ describe('scoped arrange changes', () => {
         await page.getByRole('button', { name: /^Menu/ }).click()
         const menu = page.locator('#shell-menu')
         await menu.waitFor()
-        const close = page.locator('[data-screen-overlay] > .overlay-close')
-        const closeBox = await close.boundingBox()
-        expect(closeBox!.width).toBeGreaterThanOrEqual(44)
-        expect(closeBox!.height).toBeGreaterThanOrEqual(44)
+        await page.waitForFunction(() => {
+          const node = document.querySelector('#shell-menu')?.closest('.anchored-menu')
+          return !!node && node.getAttribute('data-menu-size') !== 'pending'
+        })
+        const close = page.locator('.anchored-menu:has(#shell-menu) > .overlay-close')
+        const docked = page.locator('.anchored-menu:has(#shell-menu)[data-menu-size="dock"]')
+        const sheet = (await close.count()) > 0
+        if (sheet) {
+          const closeBox = await close.boundingBox()
+          expect(closeBox!.width, `${size.width}x${size.height}`).toBeGreaterThanOrEqual(44)
+          expect(closeBox!.height, `${size.width}x${size.height}`).toBeGreaterThanOrEqual(44)
+        } else {
+          await docked.waitFor()
+          const box = await docked.boundingBox()
+          const tabs = await page.locator('.views').boundingBox()
+          expect(box, `${size.width}x${size.height}`).toBeTruthy()
+          expect(box!.x, `${size.width}x${size.height}`).toBeGreaterThanOrEqual(-1)
+          expect(box!.y, `${size.width}x${size.height}`).toBeGreaterThanOrEqual((tabs?.y ?? 0) + (tabs?.height ?? 0) - 1)
+          expect(box!.x + box!.width, `${size.width}x${size.height}`).toBeLessThanOrEqual(size.width + 2)
+          expect(box!.y + box!.height, `${size.width}x${size.height}`).toBeLessThanOrEqual(size.height + 2)
+        }
         const actions = await menu.locator('[data-menu-action]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-menu-action')))
         const phoneMenu = size.width <= 520 || size.height <= 520
         for (const action of ['box', 'erase', 'pan', 'signature']) {
@@ -136,8 +153,10 @@ describe('scoped arrange changes', () => {
         expect(fit.headingSize).toBeLessThanOrEqual(12)
         const arrangeRadius = await page.getByRole('button', { name: /^Arrange/ }).first().evaluate((node) => getComputedStyle(node).borderRadius)
         expect(parseFloat(arrangeRadius)).toBe(12)
-        const closeRadius = await close.evaluate((node) => parseFloat(getComputedStyle(node).borderRadius))
-        expect(closeRadius).toBe(12)
+        if (sheet) {
+          const closeRadius = await close.evaluate((node) => parseFloat(getComputedStyle(node).borderRadius))
+          expect(closeRadius).toBe(12)
+        }
         const shortcuts = menu.locator('[data-menu-action="shortcuts"]')
         await shortcuts.scrollIntoViewIfNeeded()
         expect(await shortcuts.isVisible()).toBe(true)
@@ -180,7 +199,8 @@ describe('scoped arrange changes', () => {
           await time.getByRole('button', { name: '4/4', exact: true }).click()
           await page.locator('#arrange-setup').getByRole('button', { name: 'Close', exact: true }).click()
         } else {
-          await close.click()
+          if (sheet) await close.click()
+          else await page.keyboard.press('Escape')
           await menu.waitFor({ state: 'detached' })
         }
       }
