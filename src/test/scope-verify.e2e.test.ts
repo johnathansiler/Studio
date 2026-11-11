@@ -74,7 +74,15 @@ describe('scoped arrange changes', () => {
         expect(closeBox!.width).toBeGreaterThanOrEqual(44)
         expect(closeBox!.height).toBeGreaterThanOrEqual(44)
         const actions = await menu.locator('[data-menu-action]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-menu-action')))
-        for (const action of ['new', 'open', 'save', 'export', 'box', 'erase', 'pan', 'signature', 'shortcuts', 'latency']) {
+        const phoneMenu = size.width <= 520 || size.height <= 520
+        for (const action of ['box', 'erase', 'pan', 'signature']) {
+          expect(actions, `${size.width}x${size.height} ${action}`).not.toContain(action)
+        }
+        for (const action of ['new', 'open', 'save', 'export']) {
+          if (phoneMenu) expect(actions, `${size.width}x${size.height} ${action}`).not.toContain(action)
+          else expect(actions, `${size.width}x${size.height} ${action}`).toContain(action)
+        }
+        for (const action of ['shortcuts', 'latency']) {
           expect(actions, `${size.width}x${size.height}`).toContain(action)
         }
         const fit = await menu.evaluate((node) => {
@@ -135,34 +143,22 @@ describe('scoped arrange changes', () => {
         expect(await shortcuts.isVisible()).toBe(true)
         if (size.width === 390 && size.height === 844) {
           await page.screenshot({ path: `${artifacts}/main-menu-390x844.png` })
-          const scrollName = await menu.getByRole('button', { name: /^Scroll/ }).getAttribute('aria-label')
-          expect(scrollName).toMatch(/not the mixer pan/i)
-          await menu.getByRole('button', { name: /^Scroll/ }).click()
+          await page.locator('[data-screen-overlay] > .overlay-close').click()
           await menu.waitFor({ state: 'detached' })
+          await page.getByRole('button', { name: 'Tools', exact: true }).click()
+          const scroll = page.locator('#tool-choices').getByRole('button', { name: /^Scroll/ })
+          await scroll.waitFor()
+          expect(await scroll.getAttribute('aria-label')).toMatch(/not the mixer pan/i)
+          await scroll.click()
+          await page.locator('#tool-choices').waitFor({ state: 'detached' })
           const tool = await page.evaluate(() => (window as unknown as { __cueharbor: { store: { tool: string } } }).__cueharbor.store.tool)
           expect(tool).toBe('pan')
-          await page.getByRole('button', { name: /^Menu/ }).click()
-          const again = page.locator('#shell-menu')
-          await again.waitFor()
-          const scrollRow = again.locator('[data-menu-action="pan"]')
-          expect(await scrollRow.getAttribute('aria-pressed')).toBe('true')
-          const checkBox = await scrollRow.locator('.menu-check').boundingBox()
-          expect(checkBox!.width).toBeGreaterThan(8)
-          expect(checkBox!.height).toBeGreaterThan(8)
-          const checkColor = await scrollRow.locator('.menu-check').evaluate((node) => getComputedStyle(node).color)
-          expect(checkColor.replace(/\s/g, '')).toContain('115,196,143')
-          const pressedBg = await scrollRow.evaluate((node) => getComputedStyle(node).backgroundColor)
-          expect(pressedBg.replace(/\s/g, '')).not.toBe('rgb(115,196,143)')
-          await page.locator('[data-screen-overlay] > .overlay-close').click()
-          await again.waitFor({ state: 'detached' })
+          await page.getByRole('button', { name: 'Tools', exact: true }).click()
+          const again = page.locator('#tool-choices').getByRole('button', { name: /^Scroll/ })
+          expect(await again.getAttribute('aria-pressed')).toBe('true')
+          await page.locator('#tool-choices').getByRole('button', { name: 'Close', exact: true }).click()
+          await page.locator('#tool-choices').waitFor({ state: 'detached' })
         } else if (size.width === 1440) {
-          await menu.locator('[data-menu-action="signature"] select').selectOption('3/4')
-          await page.waitForFunction(() => {
-            const sig = (window as unknown as { __cueharbor: { store: { project: { timeSignature: { numerator: number, denominator: number } } } } }).__cueharbor.store.project.timeSignature
-            return sig.numerator === 3 && sig.denominator === 4
-          })
-          expect(await menu.locator('[data-menu-action="signature"] .menu-value').innerText()).toContain('3/4')
-          await menu.locator('[data-menu-action="signature"] select').selectOption('4/4')
           await menu.locator('[data-menu-action="latency"] select').selectOption('playback')
           await page.waitForFunction(() => document.querySelector('[data-menu-action="latency"] .menu-value')?.textContent?.includes('Playback'))
           await menu.locator('[data-menu-action="latency"] select').selectOption('interactive')
@@ -172,6 +168,17 @@ describe('scoped arrange changes', () => {
           await help.waitFor()
           await help.getByRole('button', { name: 'Close' }).click()
           await menu.waitFor({ state: 'detached' })
+          await page.getByRole('button', { name: /^Setup/ }).first().click()
+          await page.locator('#arrange-setup').getByRole('tab', { name: 'Time' }).click()
+          const time = page.locator('.song-meters')
+          await time.waitFor()
+          await time.getByRole('button', { name: '3/4', exact: true }).click()
+          await page.waitForFunction(() => {
+            const sig = (window as unknown as { __cueharbor: { store: { project: { timeSignature: { numerator: number, denominator: number } } } } }).__cueharbor.store.project.timeSignature
+            return sig.numerator === 3 && sig.denominator === 4
+          })
+          await time.getByRole('button', { name: '4/4', exact: true }).click()
+          await page.locator('#arrange-setup').getByRole('button', { name: 'Close', exact: true }).click()
         } else {
           await close.click()
           await menu.waitFor({ state: 'detached' })
@@ -369,10 +376,10 @@ describe('scoped arrange changes', () => {
       await page.getByRole('button', { name: /^Setup/ }).first().click()
       await page.locator('#arrange-setup[data-bottom-sheet="open"]').waitFor()
       expect(await page.getByRole('button', { name: /^Record/ }).first().isVisible()).toBe(true)
-      await page.getByRole('button', { name: /^Tool:/ }).click()
+      await page.getByRole('button', { name: 'Tools', exact: true }).click()
       await page.locator('#tool-choices').waitFor()
       expect(await page.locator('#arrange-setup').count()).toBe(0)
-      await page.locator('#tool-choices').getByRole('button', { name: /^Draw/ }).click()
+      await page.locator('.phone-context [data-phone-action="pencil"]').click()
       await page.locator('.snap-inline').click()
       await page.locator('#snap-choices').waitFor()
       await page.getByRole('button', { name: '1/8', exact: true }).click()

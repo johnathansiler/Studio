@@ -206,7 +206,7 @@ describe('phone arrange layout', () => {
             expect(labels.some((label) => label === 'Tools'), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Setup')), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Snap')), viewport.name).toBe(true)
-            expect(labels.some((label) => label.startsWith('Unstuck')), viewport.name).toBe(true)
+            expect(labels.some((label) => label.startsWith('Unstuck') || label === 'Ideas'), viewport.name).toBe(false)
             expect(labels.some((label) => label.startsWith('Metronome')), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Undo')), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Redo')), viewport.name).toBe(true)
@@ -243,6 +243,8 @@ describe('phone arrange layout', () => {
             expect(labels.some((label) => label.startsWith('Menu')), viewport.name).toBe(true)
             expect(labels.some((label) => label === 'Browse'), viewport.name).toBe(true)
             expect(labels.some((label) => label === 'Tools'), viewport.name).toBe(true)
+            expect(labels.some((label) => label.startsWith('Unstuck') || label === 'Ideas'), viewport.name).toBe(false)
+            expect(labels.some((label) => label.startsWith('Setup')), viewport.name).toBe(true)
             expect(layout.transportClick, viewport.name).toBe(false)
             expect(layout.metroButtons, viewport.name).toBe(1)
             const menu = layout.barButtons.find((button) => button.label.startsWith('Menu'))!
@@ -260,6 +262,12 @@ describe('phone arrange layout', () => {
             expect(layout.topIdeas, viewport.name).toBe(true)
             expect(layout.addUndo, viewport.name).toBe(false)
             expect(layout.pluginsInBar, viewport.name).toBe(true)
+            expect(await page.locator('#arrange-plugins').count(), viewport.name).toBe(0)
+            const pluginsToggle = page.locator('[data-arrange-plugins="toggle"]')
+            await pluginsToggle.click()
+            await page.locator('#arrange-plugins').waitFor()
+            await pluginsToggle.click()
+            await page.locator('#arrange-plugins').waitFor({ state: 'detached' })
             expect(layout.addBtnHeight, viewport.name).toBeGreaterThanOrEqual(48)
           }
         }
@@ -400,6 +408,13 @@ describe('phone arrange layout', () => {
           expect(await page.getByRole('textbox', { name: 'Project name' }).count()).toBeGreaterThan(0)
           expect(await page.getByRole('button', { name: /^Undo/ }).count()).toBeGreaterThan(0)
           if (shot.name === '390x844') {
+            const menuActions = await page.locator('#shell-menu [data-menu-action]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-menu-action')))
+            for (const action of ['new', 'open', 'save', 'export', 'box', 'erase', 'pan', 'signature']) {
+              expect(menuActions, action).not.toContain(action)
+            }
+            expect(menuActions).toContain('shortcuts')
+            const menuRow = await page.locator('.phone-context [data-phone-action]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-phone-action')))
+            expect(menuRow).toEqual(['new', 'open', 'save', 'export'])
             await page.locator('[data-phone-action="save"]').click()
             await page.locator('.toast').filter({ hasText: /Saved|space|could not/i }).waitFor()
           }
@@ -428,6 +443,16 @@ describe('phone arrange layout', () => {
           await page.locator('.tool-slot').getByRole('button', { name: 'Tools', exact: true }).click()
           const selectSheet = page.locator('#tool-choices')
           await selectSheet.waitFor()
+          if (shot.name === '390x844') {
+            const chips = await selectSheet.locator('.choice-chip-face').allTextContents()
+            expect(chips.map((chip) => chip.trim())).toEqual(['Scroll'])
+            const toolRow = await page.locator('.phone-context [data-phone-action]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-phone-action')))
+            expect(toolRow).toEqual(['select', 'pencil', 'split', 'trim', 'zoom', 'box', 'erase', 'snap'])
+            await page.locator('[data-phone-action="pencil"]').click()
+            expect(await page.evaluate(() => (window as unknown as { __cueharbor: { store: { tool: string } } }).__cueharbor.store.tool)).toBe('pencil')
+            await page.locator('[data-phone-action="erase"]').click()
+            expect(await page.evaluate(() => (window as unknown as { __cueharbor: { store: { tool: string } } }).__cueharbor.store.tool)).toBe('erase')
+          }
           const selectClose = selectSheet.getByRole('button', { name: 'Close', exact: true })
           const selectBox = await selectClose.boundingBox()
           expect(selectBox!.width, shot.name).toBeGreaterThanOrEqual(40)
@@ -488,6 +513,7 @@ describe('phone arrange layout', () => {
           expect(mix.labels.some((label) => label === 'Tools'), shot.name).toBe(true)
           expect(mix.labels.some((label) => label.startsWith('Vocal')), shot.name).toBe(false)
           expect(mix.labels.findIndex((label) => label.startsWith('Menu'))).toBeLessThan(mix.labels.findIndex((label) => label === 'Browse'))
+          expect(await page.locator('#transport-count').count(), shot.name).toBe(0)
           expect(mix.moreHeight, shot.name).toBeGreaterThanOrEqual(40)
           expect(mix.moreBottom, shot.name).toBeLessThanOrEqual((mix.barBottom ?? 0) + 1)
           await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-mix.png` })

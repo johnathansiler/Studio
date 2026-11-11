@@ -2124,7 +2124,6 @@ async function importDropped(files: FileList) {
                 else if (action === 'save') { setMenuOpen(false); void persist() }
                 else if (action === 'export') { setMenuOpen(false); setExportOpen(true) }
               }}
-              onUnstuck={() => { setMenuOpen(false); setUnstuckOpen((open) => !open) }}
               onUndo={() => store.undo()}
               onRedo={() => store.redo()}
               canUndo={store.canUndo}

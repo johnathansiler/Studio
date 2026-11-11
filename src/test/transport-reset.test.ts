@@ -103,8 +103,12 @@ describe('count-in on the transport', () => {
     const phone = markup(store, undefined, true)
     expect(phone).not.toContain('id="transport-click"')
     expect(phone).not.toContain('>Click<')
-    expect(phone).toContain('id="transport-count"')
+    expect(phone).not.toContain('id="transport-count"')
+    expect(phone).not.toContain('>1-2<')
     expect(phone).toContain('id="transport-reset"')
+    const ids = TRANSPORT_COPY.map((item) => item.id)
+    expect(ids.filter((id) => id === 'click')).toHaveLength(1)
+    expect(ids.filter((id) => id === 'count-in')).toHaveLength(1)
   })
 })
 
@@ -120,12 +124,13 @@ describe('transport row actions', () => {
     try {
       const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
       await page.goto(`${address}src/test/transport-row.harness.html`, { waitUntil: 'networkidle' })
-      await page.locator('#transport-count').waitFor()
+      expect(await page.locator('#transport-count').count()).toBe(0)
       expect(await page.locator('#transport-click').count()).toBe(0)
       expect(await page.locator('.t-word', { hasText: /^Click$/ }).count()).toBe(0)
+      expect(await page.locator('.t-word', { hasText: '1-2' }).count()).toBe(0)
       expect(await page.locator('.t-btn.menu, #transport-menu').count()).toBe(0)
       const names = await page.locator('.t-main > .t-btn, .t-main > .tempo-cluster').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label') || node.getAttribute('aria-label')))
-      expect(names).toHaveLength(7)
+      expect(names).toHaveLength(6)
       const row = await page.locator('.t-main > .t-btn, .t-main > .tempo-cluster').evaluateAll((nodes) => {
         const boxes = nodes.map((node) => node.getBoundingClientRect())
         return {
@@ -135,19 +140,10 @@ describe('transport row actions', () => {
           minHeight: Math.min(...boxes.map((box) => box.height)),
         }
       })
-      expect(row.count).toBe(7)
+      expect(row.count).toBe(6)
       expect(new Set(row.tops).size).toBe(1)
       expect(row.min).toBeGreaterThanOrEqual(40)
       expect(row.minHeight).toBeGreaterThanOrEqual(40)
-
-      expect(await page.locator('#count').getAttribute('data-on')).toBe('1')
-      await page.locator('#transport-count').click()
-      expect(await page.locator('#count').getAttribute('data-on')).toBe('0')
-      expect(await page.locator('#transport-count').getAttribute('aria-pressed')).toBe('false')
-      await page.locator('#transport-count').click()
-      expect(await page.locator('#count').getAttribute('data-on')).toBe('1')
-      expect(await page.locator('#count').getAttribute('data-bars')).toBe('1')
-      expect(await page.locator('#transport-count').getAttribute('aria-pressed')).toBe('true')
 
       expect(await page.locator('#resets').getAttribute('data-n')).toBe('0')
       await page.locator('#transport-reset').click()

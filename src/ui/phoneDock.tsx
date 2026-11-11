@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { countInBarsOf, countInCaption } from '../model/time'
 import { SNAP_DIVISIONS, normalizeSnapDivision } from '../model/snapGrid'
 import type { ProjectStore } from '../state/store'
-import { TOOL_INFO, activeTool, subscribeTools, type ArrangeTool } from '../state/tools'
+import { PHONE_TOOL_ROW, TOOL_INFO, activeTool, subscribeTools, type ArrangeTool } from '../state/tools'
 import { currentArrangeSheet, subscribeArrangeSheet, toggleArrangeSheet } from './arrangePanel'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import type { BrowserTab } from './PlaylistBrowser'
@@ -11,20 +11,11 @@ import { SnapChoices, ToolChoices } from './UtilitySheets'
 import { useScreenOverlay } from './screenOverlay'
 import {
   BROWSER_TAB_EVENT,
-  OPEN_PLUGINS_EVENT,
   phoneContextKind,
   type PhonePlace,
 } from './phoneContext'
 import { phoneFocus, subscribePhoneFocus } from './phoneFocus'
 import './phoneDock.css'
-
-const QUICK_TOOLS: { id: ArrangeTool; label: string }[] = [
-  { id: 'select', label: 'Select' },
-  { id: 'pencil', label: 'Draw' },
-  { id: 'split', label: 'Split' },
-  { id: 'trim', label: 'Trim' },
-  { id: 'zoom', label: 'Zoom' },
-]
 
 const BROWSER_TABS: { id: BrowserTab; label: string }[] = [
   { id: 'sounds', label: 'Sounds' },
@@ -132,7 +123,6 @@ export function PhoneDock({
   onMenu,
   onBrowse,
   onMenuAction,
-  onUnstuck,
   onUndo,
   onRedo,
   canUndo,
@@ -147,7 +137,6 @@ export function PhoneDock({
   onMenu: () => void
   onBrowse: () => void
   onMenuAction: (action: string) => void
-  onUnstuck: () => void
   onUndo: () => void
   onRedo: () => void
   canUndo: boolean
@@ -223,7 +212,7 @@ export function PhoneDock({
   }
 
   const sheet = offstage === 'tools'
-    ? <ToolChoices store={store} onClose={() => setOffstage(null)} />
+    ? <ToolChoices store={store} onClose={() => setOffstage(null)} omit={PHONE_TOOL_ROW} />
     : offstage === 'snap'
       ? <SnapChoices store={store} onClose={() => setOffstage(null)} />
       : transportMore && place === 'mix'
@@ -253,29 +242,21 @@ export function PhoneDock({
         ))}
         {kind === 'tools' && (
           <>
-            {QUICK_TOOLS.map((item) => (
+            {PHONE_TOOL_ROW.map((id) => (
               <Hit
-                key={item.id}
-                action={item.id}
-                label={`Tool: ${item.label}. ${TOOL_INFO[item.id].hint}`}
-                title={TOOL_INFO[item.id].hint}
-                pressed={tool === item.id}
-                onClick={() => pickTool(item.id)}
+                key={id}
+                action={id}
+                label={`${TOOL_INFO[id].label}. ${TOOL_INFO[id].hint}`}
+                title={TOOL_INFO[id].hint}
+                pressed={tool === id}
+                onClick={() => pickTool(id)}
               >
-                {item.label}
+                {TOOL_INFO[id].label}
               </Hit>
             ))}
             <Hit action="snap" className="snap-inline" label={snapLabel} title="Snap grid." pressed={snapOn} onClick={openSnap}>
               {snapLabel}
             </Hit>
-            {arrangeLive && (
-              <Hit
-                action="plugins"
-                label="Plugins"
-                title="Effects on this track."
-                onClick={() => document.dispatchEvent(new CustomEvent(OPEN_PLUGINS_EVENT))}
-              />
-            )}
           </>
         )}
         {kind === 'clip' && clip && (
@@ -342,7 +323,6 @@ export function PhoneDock({
           <>
             <Hit action="setup" label="Setup" title="Automation and markers." pressed={utility === 'setup'} onClick={() => toggleArrangeSheet('setup')} />
             <Hit action="snap" className="snap-inline" label={snapLabel} title="Snap grid." pressed={snapOn} onClick={openSnap}>{snapLabel}</Hit>
-            <Hit action="unstuck" label="Unstuck" title="Pick a part, or write a full song." onClick={onUnstuck} />
             <Hit action="metronome" label="Metronome" title="Metronome while you play and record." pressed={store.project.metronomeEnabled} onClick={() => store.toggle('metronomeEnabled')}>
               <MetronomeIcon />
             </Hit>
@@ -385,7 +365,7 @@ export function PhoneDock({
           aria-expanded={toolsOpen}
           aria-controls="tool-choices"
           aria-label="Tools"
-          title="Select, draw, split, trim, zoom, and snap."
+          title="Select, draw, split, trim, zoom, box, erase, and snap."
           onClick={openTools}
         >
           Tools
