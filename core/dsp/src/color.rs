@@ -3,13 +3,20 @@
 use crate::amp::Amp;
 use crate::biquad::{design_biquad, tick, Biquad, BiquadKind};
 use crate::resample::Oversampler;
-use crate::shaper::{shaper_latency_samples, AnalogShaper, SoftShaper};
+use crate::shaper::{shaper_latency_samples, soft_sample_rate, AnalogShaper, SoftShaper};
 use crate::smooth::SampleGlide;
+
+const SAT_FADE: u32 = 128;
 use crate::util::{clamp, js_round, param, read_frac, store};
 
 pub struct SatBank {
-    tone: Biquad,
+    tone: [Biquad; 2],
+    tone_target: Biquad,
     tone_freq: f64,
+    tone_ready: bool,
+    tone_move: bool,
+    sat_warm: u32,
+    sat_fade: u32,
     soft: [SoftShaper; 2],
     drive: SampleGlide,
     mix: SampleGlide,
@@ -22,6 +29,11 @@ pub struct SatBank {
     seed: i64,
     bump_key: (i32, i64),
     bump_ready: bool,
+    tape_lp: [Biquad; 2],
+    tape_rolloff: f64,
+    tape_rate: f64,
+    dc_x: [f64; 2],
+    dc_y: [f64; 2],
     sum_shapers: [AnalogShaper; 2],
     oxide_eco: Oversampler,
     oxide_full: Oversampler,
@@ -38,8 +50,16 @@ pub struct SatBank {
 impl SatBank {
     pub fn new(sample_rate: f64) -> Self {
         Self {
-            tone: design_biquad(BiquadKind::Lowpass, sample_rate, 8000.0, 0.7, 0.0),
+            tone: [
+                design_biquad(BiquadKind::Lowpass, soft_sample_rate(sample_rate), 8000.0, 0.7, 0.0),
+                design_biquad(BiquadKind::Lowpass, soft_sample_rate(sample_rate), 8000.0, 0.7, 0.0),
+            ],
+            tone_target: design_biquad(BiquadKind::Lowpass, soft_sample_rate(sample_rate), 8000.0, 0.7, 0.0),
             tone_freq: f64::NAN,
+            tone_ready: false,
+            tone_move: false,
+            sat_warm: 0,
+            sat_fade: 0,
             soft: [SoftShaper::new(), SoftShaper::new()],
             drive: SampleGlide::default(),
             mix: SampleGlide::default(),
@@ -58,6 +78,14 @@ impl SatBank {
             seed: 19,
             bump_key: (0, 0),
             bump_ready: false,
+            tape_lp: [
+                design_biquad(BiquadKind::Lowpass, sample_rate, 8000.0, 0.7, 0.0),
+                design_biquad(BiquadKind::Lowpass, sample_rate, 8000.0, 0.7, 0.0),
+            ],
+            tape_rolloff: f64::NAN,
+            tape_rate: f64::NAN,
+            dc_x: [0.0; 2],
+            dc_y: [0.0; 2],
             sum_shapers: [AnalogShaper::new(4), AnalogShaper::new(4)],
             oxide_eco: Oversampler::new(2, 32),
             oxide_full: Oversampler::new(4, 48),
@@ -73,11 +101,22 @@ impl SatBank {
     }
 
     pub fn reset(&mut self) {
-        self.tone.clear_state();
+        for filter in &mut self.tone {
+            filter.clear_state();
+        }
         self.soft[0].reset();
         self.soft[1].reset();
         self.drive.reset();
         self.mix.reset();
+        self.sat_warm = 0;
+        self.sat_fade = 0;
+        self.tone_ready = false;
+        self.tone_move = false;
+        self.tone_freq = f64::NAN;
+        self.tape_lp[0].clear_state();
+        self.tape_lp[1].clear_state();
+        self.dc_x = [0.0; 2];
+        self.dc_y = [0.0; 2];
         self.delay[0].fill(0.0);
         self.delay[1].fill(0.0);
         self.write = 0;
@@ -117,27 +156,64 @@ impl SatBank {
     fn soft(&mut self, left: &mut [f32], right: &mut [f32], frames: usize, values: &[f64], sample_rate: f64) {
         let freq = param(values, 2, 8000.0);
         if freq != self.tone_freq {
-            let next = design_biquad(BiquadKind::Lowpass, sample_rate, freq, 0.7, 0.0);
-            self.tone.copy_coeffs(&next);
+            let next = design_biquad(BiquadKind::Lowpass, soft_sample_rate(sample_rate), freq, 0.7, 0.0);
+            self.tone_target.copy_coeffs(&next);
             self.tone_freq = freq;
+            if !self.tone_ready {
+                self.tone[0].copy_coeffs(&self.tone_target);
+                self.tone[1].copy_coeffs(&self.tone_target);
+                self.tone_ready = true;
+                self.tone_move = false;
+            } else {
+                self.tone_move = true;
+            }
         }
         let drive_target = clamp(param(values, 1, 0.0), 0.0, 1.0);
         let mix_target = clamp(param(values, 3, 1.0), 0.0, 1.0);
         self.drive.prepare(sample_rate);
         self.mix.prepare(sample_rate);
-        let neutral = drive_target <= 0.0001 && (!self.drive.settled() || self.drive.peek() <= 0.0001);
-        self.latency = if drive_target <= 0.0001 { 0 } else { shaper_latency_samples() };
+        let rate = if sample_rate > 0.0 { sample_rate } else { 48_000.0 };
+        let alpha = 1.0 - (-1.0 / (0.008 * rate)).exp();
+        let latency = shaper_latency_samples();
+        self.latency = if drive_target <= 0.0001 { 0 } else { latency };
         for i in 0..frames {
+            if self.tone_move {
+                let target = self.tone_target;
+                self.tone_move = !slew_tone(&mut self.tone, &target, alpha);
+            }
             let drive = self.drive.next(drive_target);
             let mix = self.mix.next(mix_target);
-            let shape = 1.0 + drive * 8.0;
-            for channel in 0..2 {
-                let buffer = if channel == 0 { &mut *left } else { &mut *right };
-                let dry = buffer[i] as f64;
-                let bent = if neutral { dry } else { self.soft[channel].shape(dry, drive, shape) };
-                let filtered = if neutral { dry } else { tick(&mut self.tone, bent) };
-                buffer[i] = store(dry * (1.0 - mix) + filtered * mix);
+            let want = drive_target > 0.0001 || drive > 0.0001;
+            let mut wet = [0.0; 2];
+            if want || self.sat_fade > 0 {
+                let shape = 1.0 + drive * 8.0;
+                let dry = [left[i] as f64, right[i] as f64];
+                for channel in 0..2 {
+                    wet[channel] = self.soft[channel].shape(dry[channel], drive, shape, &mut self.tone[channel]);
+                }
+                if self.sat_warm < 1_000_000 {
+                    self.sat_warm += 1;
+                }
+                if self.sat_warm > latency {
+                    self.sat_fade = if want {
+                        self.sat_fade.saturating_add(1).min(SAT_FADE)
+                    } else {
+                        self.sat_fade.saturating_sub(1)
+                    };
+                }
+            } else if self.sat_warm != 0 {
+                self.soft[0].reset();
+                self.soft[1].reset();
+                for filter in &mut self.tone {
+                    filter.clear_state();
+                }
+                self.sat_warm = 0;
+                self.sat_fade = 0;
             }
+            let open = self.sat_fade as f64 / SAT_FADE as f64;
+            let amount = open * mix;
+            left[i] = store(left[i] as f64 * (1.0 - amount) + wet[0] * amount);
+            right[i] = store(right[i] as f64 * (1.0 - amount) + wet[1] * amount);
         }
     }
 
@@ -161,10 +237,17 @@ impl SatBank {
         }
         let bias = clamp(param(values, 5, 0.4), 0.0, 1.0);
         let rolloff = 6000.0 * (speeds[speed as usize] / 15.0) * (1.15 - bias * 0.5);
-        let mut lowpass = [
-            design_biquad(BiquadKind::Lowpass, sample_rate, rolloff, 0.7, 0.0),
-            design_biquad(BiquadKind::Lowpass, sample_rate, rolloff, 0.7, 0.0),
-        ];
+        if !self.tape_rolloff.is_finite()
+            || !self.tape_rate.is_finite()
+            || (self.tape_rolloff - rolloff).abs() > 1e-4
+            || (self.tape_rate - sample_rate).abs() > 0.1
+        {
+            let next = design_biquad(BiquadKind::Lowpass, sample_rate, rolloff, 0.7, 0.0);
+            self.tape_lp[0].copy_coeffs(&next);
+            self.tape_lp[1].copy_coeffs(&next);
+            self.tape_rolloff = rolloff;
+            self.tape_rate = sample_rate;
+        }
         let wow = clamp(param(values, 6, 0.15), 0.0, 1.0);
         let drive = 0.15 + clamp(param(values, 1, 0.35), 0.0, 1.0) * 0.7;
         let hiss_level = if eco { 0.0 } else { clamp(param(values, 8, 0.0), 0.0, 1.0) * 0.004 };
@@ -182,8 +265,8 @@ impl SatBank {
             let noise = (self.seed as f64 / 2147483647.0) * 2.0 - 1.0;
             let high = tick(&mut self.hiss[0], noise * hiss_level);
             let hissed = tick(&mut self.hiss[1], high);
-            let bumped_l = tick(&mut lowpass[0], tick(&mut self.bump[0], colored_l)) + hissed;
-            let bumped_r = tick(&mut lowpass[1], tick(&mut self.bump[1], colored_r)) + hissed;
+            let bumped_l = tick(&mut self.tape_lp[0], tick(&mut self.bump[0], colored_l)) + hissed;
+            let bumped_r = tick(&mut self.tape_lp[1], tick(&mut self.bump[1], colored_r)) + hissed;
             left[i] = store(bumped_l);
             right[i] = store(bumped_r);
             self.write = (self.write + 1) % self.delay[0].len();
@@ -200,12 +283,13 @@ impl SatBank {
         let tube = param(values, 9, 0.0) >= 0.5;
         let drive = clamp(param(values, 1, 0.3), 0.0, 1.0) * if tube { 1.0 } else { 0.55 };
         let makeup = 1.0 / (1.0 + drive * 0.35);
+        let dc_rate = (-2.0 * std::f64::consts::PI * 8.0 / sample_rate).exp();
         for i in 0..frames {
             let bend = |sample: f64| if tube { sample + 0.45 * sample * sample } else { sample };
             let wet_l = self.sum_shapers[0].oversample(bend(left[i] as f64), drive) * makeup;
             let wet_r = self.sum_shapers[1].oversample(bend(right[i] as f64), drive) * makeup;
-            left[i] = store(wet_l);
-            right[i] = store(wet_r);
+            left[i] = store(block_dc(&mut self.dc_x[0], &mut self.dc_y[0], wet_l, dc_rate));
+            right[i] = store(block_dc(&mut self.dc_x[1], &mut self.dc_y[1], wet_r, dc_rate));
         }
     }
 
@@ -272,6 +356,37 @@ impl SatBank {
             right[i] = store(self.scratch_r[i] as f64);
         }
     }
+}
+
+fn slew_tone(tone: &mut [Biquad; 2], target: &Biquad, alpha: f64) -> bool {
+    let mut err: f64 = 0.0;
+    for filter in tone.iter_mut() {
+        filter.b0 += (target.b0 - filter.b0) * alpha;
+        filter.b1 += (target.b1 - filter.b1) * alpha;
+        filter.b2 += (target.b2 - filter.b2) * alpha;
+        filter.a1 += (target.a1 - filter.a1) * alpha;
+        filter.a2 += (target.a2 - filter.a2) * alpha;
+        err = err
+            .max((target.b0 - filter.b0).abs())
+            .max((target.b1 - filter.b1).abs())
+            .max((target.b2 - filter.b2).abs())
+            .max((target.a1 - filter.a1).abs())
+            .max((target.a2 - filter.a2).abs());
+    }
+    if err < 1e-8 {
+        tone[0].copy_coeffs(target);
+        tone[1].copy_coeffs(target);
+        true
+    } else {
+        false
+    }
+}
+
+fn block_dc(prev_x: &mut f64, prev_y: &mut f64, sample: f64, rate: f64) -> f64 {
+    let y = sample - *prev_x + rate * *prev_y;
+    *prev_x = sample;
+    *prev_y = if y.is_finite() && y.abs() >= 1e-15 { y } else { 0.0 };
+    *prev_y
 }
 
 fn shape_oxide(sample: f64, drive: f64, tube: bool) -> f64 {

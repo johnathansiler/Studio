@@ -1,5 +1,6 @@
 /** Guitar and bass amp, cabinet, pedal, and tuner DSP. Shared by the live insert and the offline bounce. */
 
+import { SampleGlide } from '../core/smooth'
 import { copyCoeffs, designBiquad, sanitize, tickBiquad, type Biquad } from './dsp'
 
 export const SLOT_COUNT = 8
@@ -483,6 +484,7 @@ export interface AmpState {
   tuneCount: number
   readout: PitchRead | null
   sampleRate: number
+  gainGlide: SampleGlide
 }
 
 export function createAmpState(sampleRate: number): AmpState {
@@ -502,6 +504,7 @@ export function createAmpState(sampleRate: number): AmpState {
     tuneCount: 0,
     readout: null,
     sampleRate,
+    gainGlide: new SampleGlide(),
   }
 }
 
@@ -519,6 +522,7 @@ export function resetAmpState(state: AmpState) {
   state.tuneWrite = 0
   state.tuneCount = 0
   state.readout = null
+  state.gainGlide.reset()
 }
 
 function createOs(sampleRate: number, factor: number): OsChannel {
@@ -934,7 +938,8 @@ export function processAmp(
 ) {
   const n = input[0]?.length ?? 0
   const model = clamp(Math.round(params.model ?? 0), 0, AMPS.length - 1)
-  const gain = clamp(params.gain ?? 0, 0, 1)
+  const gainTarget = clamp(params.gain ?? 0, 0, 1)
+  state.gainGlide.prepare(ctx.sampleRate)
   const factor = osFactor(ctx.quality)
   ensureOs(state.os[0], ctx.sampleRate, factor)
   ensureOs(state.os[1], ctx.sampleRate, factor)
@@ -945,7 +950,6 @@ export function processAmp(
   const blend = clamp(params.blend ?? 0, 0, 1)
   const trim = clamp(params.master ?? 1, 0, 1)
   const neutral = Math.abs((params.bass ?? 0.5) - 0.5) < 0.001 && Math.abs((params.mid ?? 0.5) - 0.5) < 0.001 && Math.abs((params.treble ?? 0.5) - 0.5) < 0.001 && Math.abs((params.presence ?? 0.5) - 0.5) < 0.001
-  const ampOn = gain >= 0.001
   const bright = (params.bright ?? 0) >= 0.5
   const mute = (params.mute ?? 0) >= 0.5
   const run: AmpRun = { sampleRate: ctx.sampleRate, expr: clamp(params.expr ?? 0, 0, 1), loop: params.loop ?? 0, tempo: ctx.tempo || 120, factor }
@@ -969,7 +973,8 @@ export function processAmp(
       if (slot.post || slot.id <= 1) continue
       ;[left, right] = pedal(state.pedals[s], left, right, slot.id, slot.a, slot.b, run)
     }
-    if (ampOn) {
+    const gain = state.gainGlide.next(gainTarget)
+    if (gain >= 0.001) {
       left = oversample(state.os[0], prepare(state.tone[0], left, bright), model, gain)
       right = oversample(state.os[1], prepare(state.tone[1], right, bright), model, gain)
       left = stack(state.tone[0], left, neutral)

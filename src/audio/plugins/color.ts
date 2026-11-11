@@ -1,47 +1,111 @@
 import { SampleGlide } from '../core/smooth'
-import { createShaperState, oversampleShape, shaperLatencySamples, type ShaperState } from '../quality/oversample'
-import { clamp, designBiquad, sanitize, tickBiquad } from './dsp'
+import { createShaperState, oversampleShape, resetShaperState, SHAPER_FACTOR, shaperLatencySamples, type ShaperState } from '../quality/oversample'
+import { clamp, copyCoeffs, designBiquad, sanitize, type Biquad } from './dsp'
 import type { Processor } from './types'
 
+const SAT_FADE = 128
+
 export function createSaturator(sampleRate: number): Processor {
-  let tone = designBiquad('lowpass', sampleRate, 8000, 0.7)
-  let freq = 8000
+  const toneRate = sampleRate * SHAPER_FACTOR
+  const tone = [designBiquad('lowpass', toneRate, 8000, 0.7), designBiquad('lowpass', toneRate, 8000, 0.7)]
+  const toneTarget = designBiquad('lowpass', toneRate, 8000, 0.7)
+  let freq = Number.NaN
+  let toneReady = false
+  let toneMove = false
   const shapers: ShaperState[] = [createShaperState(), createShaperState()]
   const driveGlide = new SampleGlide()
   const mixGlide = new SampleGlide()
+  let warm = 0
+  let fade = 0
   return {
     latencySamples: 0,
     reset() {
-      tone.x1 = tone.x2 = tone.y1 = tone.y2 = 0
-      shapers[0] = createShaperState()
-      shapers[1] = createShaperState()
+      clearTone(tone)
+      resetShaperState(shapers[0])
+      resetShaperState(shapers[1])
+      driveGlide.reset()
+      mixGlide.reset()
+      warm = 0
+      fade = 0
+      toneReady = false
+      toneMove = false
+      freq = Number.NaN
     },
     process(input, output, params, ctx) {
       if (params.tone !== freq) {
-        const next = designBiquad('lowpass', ctx.sampleRate, params.tone, 0.7)
-        tone = { ...tone, b0: next.b0, b1: next.b1, b2: next.b2, a1: next.a1, a2: next.a2 }
+        const next = designBiquad('lowpass', ctx.sampleRate * SHAPER_FACTOR, params.tone, 0.7)
+        copyCoeffs(toneTarget, next)
         freq = params.tone
+        if (!toneReady) {
+          copyCoeffs(tone[0], toneTarget)
+          copyCoeffs(tone[1], toneTarget)
+          toneReady = true
+          toneMove = false
+        } else toneMove = true
       }
       const driveTarget = clamp(params.drive, 0, 1)
       const mixTarget = clamp(params.mix ?? 1, 0, 1)
       driveGlide.prepare(ctx.sampleRate)
       mixGlide.prepare(ctx.sampleRate)
-      const neutral = driveTarget <= 0.0001 && (!driveGlide.settled || driveGlide.peek() <= 0.0001)
-      this.latencySamples = driveTarget <= 0.0001 ? 0 : shaperLatencySamples()
+      const rate = ctx.sampleRate > 0 ? ctx.sampleRate : 48000
+      const alpha = 1 - Math.exp(-1 / (0.008 * rate))
+      const latency = shaperLatencySamples()
+      this.latencySamples = driveTarget <= 0.0001 ? 0 : latency
       const n = input[0]?.length ?? 0
       for (let i = 0; i < n; i++) {
+        if (toneMove) toneMove = !slewTone(tone, toneTarget, alpha)
         const drive = driveGlide.next(driveTarget)
         const mix = mixGlide.next(mixTarget)
-        const shape = 1 + drive * 8
+        const want = driveTarget > 0.0001 || drive > 0.0001
+        let wetL = 0
+        let wetR = 0
+        if (want || fade > 0) {
+          const dryL = input[0]?.[i] ?? 0
+          const dryR = input[1]?.[i] ?? dryL
+          const shape = 1 + drive * 8
+          wetL = oversampleShape(shapers[0], dryL, drive, shape, tone[0])
+          wetR = oversampleShape(shapers[1], dryR, drive, shape, tone[1])
+          if (warm < 1000000) warm += 1
+          if (warm > latency) fade = want ? Math.min(SAT_FADE, fade + 1) : Math.max(0, fade - 1)
+        } else if (warm !== 0) {
+          resetShaperState(shapers[0])
+          resetShaperState(shapers[1])
+          clearTone(tone)
+          warm = 0
+          fade = 0
+        }
+        const open = fade / SAT_FADE
         for (let c = 0; c < output.length; c++) {
           const dry = input[Math.min(c, input.length - 1)]?.[i] ?? 0
-          const bent = neutral ? dry : oversampleShape(shapers[Math.min(c, shapers.length - 1)], dry, drive, shape)
-          const filtered = neutral ? dry : tickBiquad(tone, bent)
-          output[c][i] = sanitize(dry * (1 - mix) + filtered * mix)
+          const wet = c === 0 ? wetL : wetR
+          const amount = open * mix
+          output[c][i] = sanitize(dry * (1 - amount) + wet * amount)
         }
       }
     },
   }
+}
+
+function clearTone(tone: Biquad[]) {
+  for (const filter of tone) filter.x1 = filter.x2 = filter.y1 = filter.y2 = 0
+}
+
+function slewTone(tone: Biquad[], target: Biquad, alpha: number) {
+  let err = 0
+  for (const filter of tone) {
+    filter.b0 += (target.b0 - filter.b0) * alpha
+    filter.b1 += (target.b1 - filter.b1) * alpha
+    filter.b2 += (target.b2 - filter.b2) * alpha
+    filter.a1 += (target.a1 - filter.a1) * alpha
+    filter.a2 += (target.a2 - filter.a2) * alpha
+    err = Math.max(err, Math.abs(target.b0 - filter.b0), Math.abs(target.b1 - filter.b1), Math.abs(target.b2 - filter.b2), Math.abs(target.a1 - filter.a1), Math.abs(target.a2 - filter.a2))
+  }
+  if (err < 1e-8) {
+    copyCoeffs(tone[0], target)
+    copyCoeffs(tone[1], target)
+    return true
+  }
+  return false
 }
 
 export function createDoubler(sampleRate: number): Processor {

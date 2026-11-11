@@ -4,19 +4,41 @@ use crate::biquad::{design_biquad, tick, Biquad, BiquadKind};
 use crate::resample::{Downsampler, Upsampler};
 use crate::util::{coeff, db_to_gain, js_or, js_round, param, write_stereo};
 
+const PEAK_TAPS: usize = 20;
+const PEAK_FACTOR: usize = 16;
+const PEAK_SLACK: f64 = 1.0005;
+const LOOK: usize = 64;
+
 pub struct CleanLimiter {
     delay: [Vec<f32>; 2],
+    peaks: Vec<f32>,
+    hist: [[f64; PEAK_TAPS]; 2],
+    hist_write: [usize; 2],
+    phases: [f64; PEAK_FACTOR * PEAK_TAPS],
     index: usize,
     gain: f64,
 }
 
 impl CleanLimiter {
     pub fn new() -> Self {
-        Self { delay: [vec![0.0; 64], vec![0.0; 64]], index: 0, gain: 1.0 }
+        let mut limiter = Self {
+            delay: [vec![0.0; LOOK], vec![0.0; LOOK]],
+            peaks: vec![0.0; LOOK],
+            hist: [[0.0; PEAK_TAPS]; 2],
+            hist_write: [0, 0],
+            phases: [0.0; PEAK_FACTOR * PEAK_TAPS],
+            index: 0,
+            gain: 1.0,
+        };
+        design_peak_phases(&mut limiter.phases);
+        limiter
     }
     pub fn reset(&mut self) {
         self.delay[0].fill(0.0);
         self.delay[1].fill(0.0);
+        self.peaks.fill(0.0);
+        self.hist = [[0.0; PEAK_TAPS]; 2];
+        self.hist_write = [0, 0];
         self.index = 0;
         self.gain = 1.0;
     }
@@ -24,25 +46,98 @@ impl CleanLimiter {
         let ceiling = db_to_gain(param(values, 3, -0.1));
         let threshold = db_to_gain(param(values, 1, 0.0));
         let release = coeff(js_or(param(values, 2, 50.0), 40.0), sample_rate);
+        let attack = 1.0 - (-1.0_f64 / 12.0).exp();
+        let limit = ceiling.min(threshold);
         for i in 0..frames {
             let dry_l = left[i] as f64;
             let dry_r = right[i] as f64;
-            let slot = self.index % 64;
+            let slot = self.index % LOOK;
             let out_l = self.delay[0][slot] as f64;
             let out_r = self.delay[1][slot] as f64;
             self.delay[0][slot] = dry_l as f32;
             self.delay[1][slot] = dry_r as f32;
-            let mut peak = dry_l.abs().max(dry_r.abs());
-            for k in 0..64 {
-                peak = peak.max((self.delay[0][k] as f64).abs()).max((self.delay[1][k] as f64).abs());
+            let entered = read_true_peak(&mut self.hist[0], &mut self.hist_write[0], &self.phases, dry_l)
+                .max(read_true_peak(&mut self.hist[1], &mut self.hist_write[1], &self.phases, dry_r));
+            self.peaks[slot] = entered as f32;
+            let mut peak: f64 = 0.0;
+            for value in &self.peaks {
+                peak = peak.max(*value as f64);
             }
-            let limit = ceiling.min(threshold);
-            let needed = if peak > limit { (limit / peak.max(1e-8)).min(1.0) } else { 1.0 };
-            self.gain += (needed - self.gain) * if needed < self.gain { 1.0 } else { release };
+            let needed = if peak > limit * PEAK_SLACK {
+                (limit / peak.max(1e-8)).min(1.0)
+            } else {
+                1.0
+            };
+            self.gain += (needed - self.gain) * if needed < self.gain { attack } else { release };
             self.index += 1;
             write_stereo(left, right, i, out_l * self.gain, out_r * self.gain);
         }
     }
+}
+
+fn peak_bessel(x: f64) -> f64 {
+    let mut sum = 1.0;
+    let mut term = 1.0;
+    let half = x * 0.5;
+    for k in 1..=12 {
+        term *= (half * half) / ((k * k) as f64);
+        sum += term;
+    }
+    sum
+}
+
+fn design_peak_phases(phases: &mut [f64]) {
+    let length = PEAK_FACTOR * PEAK_TAPS;
+    let cutoff = 0.5 / PEAK_FACTOR as f64;
+    let mid = (length as f64 - 1.0) / 2.0;
+    let beta = 6.0;
+    let beta0 = peak_bessel(beta);
+    let mut kernel = [0.0; PEAK_FACTOR * PEAK_TAPS];
+    let mut sum = 0.0;
+    for i in 0..length {
+        let x = i as f64 - mid;
+        let arg = 2.0 * cutoff * x;
+        let sinc = if arg.abs() < 1e-8 {
+            1.0
+        } else {
+            let p = std::f64::consts::PI * arg;
+            p.sin() / p
+        };
+        let amount = if mid == 0.0 { 0.0 } else { x / mid };
+        let inside = 1.0 - amount * amount;
+        let win = if inside > 0.0 {
+            peak_bessel(beta * inside.sqrt()) / beta0
+        } else {
+            0.0
+        };
+        kernel[i] = 2.0 * cutoff * sinc * win;
+        sum += kernel[i];
+    }
+    let scale = PEAK_FACTOR as f64 / if sum == 0.0 { 1.0 } else { sum };
+    for tap in &mut kernel {
+        *tap *= scale;
+    }
+    for phase in 0..PEAK_FACTOR {
+        for tap in 0..PEAK_TAPS {
+            phases[phase * PEAK_TAPS + tap] = kernel[tap * PEAK_FACTOR + phase];
+        }
+    }
+}
+
+fn read_true_peak(hist: &mut [f64; PEAK_TAPS], write: &mut usize, phases: &[f64], sample: f64) -> f64 {
+    let at = *write;
+    hist[at] = sample;
+    let mut best = sample.abs();
+    for phase in 0..PEAK_FACTOR {
+        let branch = &phases[phase * PEAK_TAPS..phase * PEAK_TAPS + PEAK_TAPS];
+        let mut acc = 0.0;
+        for tap in 0..PEAK_TAPS {
+            acc += hist[(at + PEAK_TAPS - tap) % PEAK_TAPS] * branch[tap];
+        }
+        best = best.max(acc.abs());
+    }
+    *write = (at + 1) % PEAK_TAPS;
+    best
 }
 
 struct Brick {

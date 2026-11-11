@@ -145,9 +145,26 @@ describe('eq controls', () => {
     expect(bandShare(mono('eq', { kind: 2, preMid: 2, preMidG: 12 }, air), 1600, RATE, 0.4)).toBeGreaterThan(bandShare(mono('eq', { kind: 2, preMid: 2, preMidG: -12 }, air), 1600, RATE, 0.4))
     expect(bandShare(mono('eq', { kind: 2, preHigh: 1, preHighG: 12 }, air), 10000)).toBeGreaterThan(bandShare(mono('eq', { kind: 2, preHigh: 1, preHighG: -12 }, air), 10000))
     const tone = sine(180, 0.3, 0.4)
-    const clean = harmonicRatio(mono('eq', { kind: 2, preDrive: 0 }, tone), 180, RATE, skip)
-    const driven = harmonicRatio(mono('eq', { kind: 2, preDrive: 1 }, tone), 180, RATE, skip)
-    expect(driven).toBeGreaterThan(clean + 0.02)
+    const clean = mono('eq', { kind: 2, preDrive: 0 }, tone)
+    const driven = mono('eq', { kind: 2, preDrive: 1 }, tone)
+    const odd = (buffer: Float32Array) => {
+      const n = 4096
+      const start = skip
+      const power = (hz: number) => {
+        let real = 0
+        let imag = 0
+        for (let i = 0; i < n; i++) {
+          const window = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1))
+          const sample = (buffer[start + i] || 0) * window
+          const angle = (2 * Math.PI * hz * i) / RATE
+          real += sample * Math.cos(angle)
+          imag -= sample * Math.sin(angle)
+        }
+        return real * real + imag * imag
+      }
+      return power(540) / Math.max(1e-12, power(180))
+    }
+    expect(odd(driven)).toBeGreaterThan(odd(clean) * 20)
   })
 
   it('narrows the channel bells and tilts around the printed frequency', () => {
