@@ -5,22 +5,25 @@ import { AnchoredMenu } from './AnchoredMenu'
 import { BROWSER_TAB_EVENT } from './phoneContext'
 import { SheetGrab } from './bottomSheet'
 import { SheetClose } from './SheetClose'
+import { MyLibrary } from './MyLibrary'
 import { SoundBrowser } from './SoundBrowser'
 import { PatternSend, patternBeat } from './PatternSend'
 import { quickDragArmed } from './clipKeys'
 
-export type BrowserTab = 'sounds' | 'instruments' | 'loops' | 'patterns' | 'clips'
+export type BrowserTab = 'sounds' | 'instruments' | 'loops' | 'library' | 'patterns' | 'clips'
 
 const TABS: { id: BrowserTab; label: string; hint: string }[] = [
   { id: 'sounds', label: 'Sounds', hint: 'Loops, one-shots, drums, and instruments from the free library.' },
   { id: 'instruments', label: 'Instruments', hint: 'Multi-sampled instruments. One tap loads the selected MIDI track.' },
   { id: 'loops', label: 'Loops', hint: 'Melodic and drum loops that follow the song tempo.' },
+  { id: 'library', label: 'My Library', hint: 'Your private library. Sounds stay in the bucket and play from a short-lived link.' },
 ]
 
 const SECTION_TITLE: Record<BrowserTab, string> = {
   sounds: 'Sounds',
   instruments: 'Instruments',
   loops: 'Loops',
+  library: 'My Library',
   patterns: 'Patterns',
   clips: 'Clips',
 }
@@ -35,7 +38,8 @@ const PATTERN_MIME = 'application/x-cueharbor-pattern'
 type PreviewEngine = {
   unlock: () => void
   stopPreview: () => void
-  previewPcm: (channels: Float32Array[], sampleRate?: number) => void
+  previewPcm: (channels: Float32Array[], sampleRate?: number, loop?: boolean) => void
+  decodeLibrary?: (bytes: ArrayBuffer) => Promise<{ sampleRate: number; channels: Float32Array[] }>
   currentTimelineSample: () => number
   holdLibraryPack?: (trackId: string, pack: import('../audio/multisample/types').SamplePack) => void
   holdLibraryAudio?: (trackId: string, samples: { id: string; sampleRate: number; channels: Float32Array[] }[]) => void
@@ -173,7 +177,9 @@ export function PlaylistBrowser({
   const projectButton = useRef<HTMLButtonElement>(null)
   const [projectOpen, setProjectOpen] = useState(false)
 
-  const catalog = tab === 'instruments' || tab === 'loops' ? (
+  const catalog = tab === 'library' ? (
+    <MyLibrary store={store} engine={engine} />
+  ) : tab === 'instruments' || tab === 'loops' ? (
     <Suspense fallback={<p className="sound-status">Loading</p>}>
       <HarborBrowser store={store} engine={engine} section={tab} />
     </Suspense>

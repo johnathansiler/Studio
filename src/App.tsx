@@ -11,6 +11,7 @@ import { inspectClip } from './audio/stretch/engine'
 import { createEmptyProject, isLocalInput, uid, type AudioClip, type TakeLane } from './model/types'
 import { AwarenessChannel, bindAwareness, currentEditCursor, localAwareness, onPresencePoke } from './remote/presence'
 import { SessionClient } from './remote/session'
+import { watchLibraryProject } from './library/project'
 import { buildRoomCopy, deleteProject, listProjects, listSnapshots, listVersions, loadLastProject, loadProject, loadRoomCopy, loadSnapshot, requestPersistentStorage, saveProject, saveRoomCopy, saveVersion, storageReport, type ProjectListItem, type WorkspaceSnapshot } from './storage/idb'
 import { joinAction } from './model/negotiate'
 import { locksProject, readInviteToken } from './state/ops'
@@ -128,6 +129,8 @@ function createBundle(): Bundle {
 
 export function App() {
   const [{ store, engine, session }] = useState(createBundle)
+
+  useEffect(() => watchLibraryProject(store), [store])
 
   useEffect(() => {
     const hook = window as unknown as {

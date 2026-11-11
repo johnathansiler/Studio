@@ -550,6 +550,16 @@ export interface Project {
   midiEditor?: MidiEditorPrefs
   /** Names for session scenes. Empty entries use Scene 1, Scene 2, and so on. */
   sceneNames?: string[]
+  /**
+   * Private library files used by this project.
+   * `key` is the object path. Presigned URLs are never stored.
+   */
+  libraryFiles?: LibraryFileRef[]
+}
+
+export interface LibraryFileRef {
+  bufferId: string
+  key: string
 }
 
 export interface AudioAsset {

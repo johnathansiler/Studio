@@ -16,3 +16,14 @@ services:
         sync: false
       - key: CF_TURN_API_TOKEN
         sync: false
+      # Private R2 library. The bucket stays private. These never go in the client.
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: LIBRARY_ACCESS_KEY
+        sync: false

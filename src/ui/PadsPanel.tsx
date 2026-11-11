@@ -12,6 +12,7 @@ import { emptyTap, pushTap } from '../model/tap'
 import type { ProjectStore } from '../state/store'
 import { SOUND_MIME, captureSlot, micChannel, openInputCapture, rememberedSlotInput } from '../audio/sample/slot'
 import { soundCache } from '../sounds/cache'
+import { loadLibraryDrag } from '../library/place'
 import { fetchCatalogSound, loadSoundCatalog } from '../sounds/catalog'
 import { decodeSoundBytes } from '../sounds/place'
 import type { SoundEntry } from '../sounds/types'
@@ -329,6 +330,15 @@ export function PadsPanel({
     event.preventDefault()
     event.stopPropagation()
     const id = event.dataTransfer.getData(SOUND_MIME) || event.dataTransfer.getData('text/plain')
+    if (id.startsWith('library:')) {
+      try {
+        const loaded = await loadLibraryDrag(store, id, 0, { trackId, bank, index })
+        if (loaded) setSelected(index)
+      } catch (error) {
+        store.toast(error instanceof Error ? error.message : 'That sound could not be loaded onto the pad.', 'warn')
+      }
+      return
+    }
     const entry = sounds.current.find((item) => item.id === id)
     if (!entry) return
     try {

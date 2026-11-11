@@ -21,6 +21,7 @@ const BROWSER_TABS: { id: BrowserTab; label: string }[] = [
   { id: 'sounds', label: 'Sounds' },
   { id: 'instruments', label: 'Instruments' },
   { id: 'loops', label: 'Loops' },
+  { id: 'library', label: 'My Library' },
   { id: 'patterns', label: 'Patterns' },
 ]
 
