@@ -2376,9 +2376,15 @@ export class ProjectStore {
       const plugin = this.pluginList(trackId)?.find((item) => item.id === pluginId)
       if (!plugin) return
       if (patch.enabled != null) plugin.enabled = patch.enabled
-      if (patch.wet != null) plugin.wet = Math.min(1, Math.max(0, patch.wet))
+      if (patch.wet != null && Number.isFinite(patch.wet)) plugin.wet = Math.min(1, Math.max(0, patch.wet))
       if (patch.sidechain != null) plugin.sidechain = patch.sidechain
-      if (patch.params) plugin.params = { ...plugin.params, ...patch.params }
+      if (patch.params) {
+        const next = { ...plugin.params }
+        for (const [key, value] of Object.entries(patch.params)) {
+          if (typeof value === 'number' && Number.isFinite(value)) next[key] = value
+        }
+        plugin.params = next
+      }
       if (patch.sampler) plugin.sampler = patch.sampler
       if (patch.looper) plugin.looper = patch.looper
     }
@@ -6881,6 +6887,8 @@ function applyFine(note: { fine?: number }, cents: number) {
 }
 
 function clamp(n: number, min: number, max: number) {
+  if (n === Infinity) return max
+  if (!Number.isFinite(n)) return Number.isFinite(min) ? min : 0
   return Math.min(max, Math.max(min, n))
 }
 
