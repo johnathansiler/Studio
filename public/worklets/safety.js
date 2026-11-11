@@ -1,6 +1,6 @@
 /**
  * Speaker and cue safety limiter.
- * Keep LOOK, ATTACK, RELEASE_SEC, CEILING, the gain law, and the 4x peak
+ * Keep LOOK, ATTACK, RELEASE_SEC, CEILING, the gain law, and the 16x peak
  * detector in sync with src/audio/master/safety.ts and src/audio/quality/truePeak.ts.
  * AudioWorklet rejects module loading, so this file stays self-contained.
  */
@@ -9,9 +9,9 @@ const ATTACK = 8
 const RELEASE_SEC = 0.05
 const CEILING = 1
 const SLACK = 1.0005
-const FACTOR = 4
-const PHASE_TAPS = 16
-const BETA = 5
+const FACTOR = 16
+const PHASE_TAPS = 20
+const BETA = 6
 
 function bessel0(x) {
   let sum = 1

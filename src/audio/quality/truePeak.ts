@@ -1,15 +1,15 @@
 /**
- * 4x intersample peak for one new sample.
- * 16 taps per phase, Kaiser beta 5, cutoff at the original Nyquist.
- * On the sines used by the limiter tests this stays within about 0.02 dB of a
- * 64-tap 4x reconstruction, which is inside the 0.05 dB true-peak budget.
- * A full-scale 1 kHz sine reads about 1.0003, so callers treat anything within
- * 0.005% of the ceiling as not over.
+ * 16x intersample peak for one new sample.
+ * 20 taps per phase, Kaiser beta 6, cutoff at the original Nyquist.
+ * 4x quarter-sample points miss a 12 kHz tone at 48 kHz by 0.17 dB when the
+ * crest lands halfway between them. 16x with this kernel keeps that miss,
+ * and the 18 kHz case, inside about 0.01 dB. A full-scale 1 kHz sine stays
+ * inside the 0.005% slack, so callers do not turn a unity sine down.
  */
 
-const FACTOR = 4
-const PHASE_TAPS = 16
-const BETA = 5
+const FACTOR = 16
+const PHASE_TAPS = 20
+const BETA = 6
 const BESSEL_TERMS = 12
 
 export const TRUE_PEAK_SLACK = 1.0005

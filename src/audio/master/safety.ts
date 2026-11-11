@@ -5,7 +5,6 @@
  * Signals that already sit at or under full scale are left sample-for-sample.
  */
 
-import { truePeakLinear } from './fir'
 import { createTruePeakState, readTruePeak, resetTruePeak, TRUE_PEAK_SLACK } from '../quality/truePeak'
 
 /** Samples of lookahead. 32 samples is 0.67 ms at 48 kHz. Keep in sync with the worklet. */
@@ -20,12 +19,11 @@ export const SAFETY_CEILING = 1
 export function holdFullScale(channels: Float32Array[]) {
   let peak = 0
   for (const channel of channels) {
+    const state = createTruePeakState()
     for (let i = 0; i < channel.length; i++) {
-      const sample = channel[i] || 0
-      const abs = sample < 0 ? -sample : sample
-      if (abs > peak) peak = abs
+      const detected = readTruePeak(state, channel[i] || 0)
+      if (detected > peak) peak = detected
     }
-    if (channel.length >= 64) peak = Math.max(peak, truePeakLinear(channel, 64))
   }
   if (!(peak > SAFETY_CEILING * TRUE_PEAK_SLACK) || !Number.isFinite(peak)) return channels
   const gain = SAFETY_CEILING / peak

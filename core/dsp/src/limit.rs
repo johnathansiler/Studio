@@ -4,8 +4,8 @@ use crate::biquad::{design_biquad, tick, Biquad, BiquadKind};
 use crate::resample::{Downsampler, Upsampler};
 use crate::util::{coeff, db_to_gain, js_or, js_round, param, write_stereo};
 
-const PEAK_TAPS: usize = 16;
-const PEAK_FACTOR: usize = 4;
+const PEAK_TAPS: usize = 20;
+const PEAK_FACTOR: usize = 16;
 const PEAK_SLACK: f64 = 1.0005;
 const LOOK: usize = 64;
 
@@ -90,7 +90,7 @@ fn design_peak_phases(phases: &mut [f64]) {
     let length = PEAK_FACTOR * PEAK_TAPS;
     let cutoff = 0.5 / PEAK_FACTOR as f64;
     let mid = (length as f64 - 1.0) / 2.0;
-    let beta = 5.0;
+    let beta = 6.0;
     let beta0 = peak_bessel(beta);
     let mut kernel = [0.0; PEAK_FACTOR * PEAK_TAPS];
     let mut sum = 0.0;
