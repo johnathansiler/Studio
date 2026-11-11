@@ -42,7 +42,7 @@ import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import { UtilitySheets } from './UtilitySheets'
 import { TrackOptions, trackKindLabel } from './TrackOptions'
 import { ARRANGE_SHEET_EVENT, popSheetHistory, publishArrangeSheet, rememberSheetHistory, sheetHistoryKey, type UtilitySheet } from './arrangePanel'
-import { BROWSER_TAB_EVENT, CLOSE_ARRANGE_SHEETS, OPEN_PLUGINS_EVENT } from './phoneContext'
+import { BROWSER_TAB_EVENT, CLOSE_ARRANGE_SHEETS } from './phoneContext'
 import { setPhoneFocus } from './phoneFocus'
 import { PluginsDrawer } from './PluginsDrawer'
 import { TRACK_ROW, copyOf } from './chrome'
@@ -56,7 +56,7 @@ import { clipTapAction, laneDoubleClickAddsClip } from './clipKeys'
 import { isSampledInstrument } from '../instruments/sampled'
 import { LoopRegion } from './LoopRegion'
 import { TimelineOverview } from './OverviewScrollbar'
-import { LANE_ZOOM_TIGHT, clampTimelinePx } from './overviewScroll'
+import { laneScaleAttr, clampTimelinePx } from './overviewScroll'
 import { WaveformView } from './WaveformView'
 import { sampleAtX, type WaveSpan } from './waveZoom'
 import { CommentControl, CommentPins } from './timelineComments'
@@ -847,20 +847,11 @@ export function ArrangeView({
       setUtility(null)
       setPluginsOpen(false)
     }
-    const onPlugins = () => {
-      if (trackRef.current || utilityRef.current) popSheetHistory()
-      setTrackSheet(null)
-      setUtility(null)
-      setBrowserOpen(false)
-      setPluginsOpen(true)
-    }
     document.addEventListener(BROWSER_TAB_EVENT, onTab)
     document.addEventListener(CLOSE_ARRANGE_SHEETS, onClose)
-    document.addEventListener(OPEN_PLUGINS_EVENT, onPlugins)
     return () => {
       document.removeEventListener(BROWSER_TAB_EVENT, onTab)
       document.removeEventListener(CLOSE_ARRANGE_SHEETS, onClose)
-      document.removeEventListener(OPEN_PLUGINS_EVENT, onPlugins)
     }
   }, [])
   useEffect(() => {
@@ -939,7 +930,7 @@ export function ArrangeView({
           <button type="button" className="browser-resize" aria-label="Browser width. Drag to resize." title="Drag to resize the browser." onPointerDown={resizeBrowser} />
         </>
       )}
-      <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'} data-lane-scale={laneZoom < LANE_ZOOM_TIGHT ? 'tight' : 'roomy'} data-lane-compact={laneZoom <= 0.72 ? 'true' : undefined} style={{ ['--lane-zoom' as string]: String(laneZoom) }}>
+      <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'} data-lane-scale={laneScaleAttr(laneZoom)} data-lane-compact={laneZoom <= 0.72 ? 'true' : undefined} style={{ ['--lane-zoom' as string]: String(laneZoom) }}>
       <div className="heads-col">
       <div className="arrange-add">
         <AddTrackButton store={store} prominent onAdded={onTrackAdded} />

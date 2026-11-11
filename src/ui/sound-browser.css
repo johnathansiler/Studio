@@ -451,3 +451,96 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
 .shell.phone .sound-list {
   min-height: 120px;
 }
+
+/* Landscape sheets are short. Chips stay one compact row and the matches scroll inside the sheet. */
+.shell.phone.land .playlist-browser.bottom-sheet > .browser-sheet-title {
+  height: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.shell.phone.land .playlist-browser.bottom-sheet > .bottom-sheet-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.shell.phone.land .playlist-browser.bottom-sheet > .bottom-sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.shell.phone.land .playlist-browser.bottom-sheet > .bottom-sheet-body > .sound-panel {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 2px 8px 2px;
+  gap: 2px;
+}
+
+.shell.phone.land .playlist-browser .sound-filters {
+  flex: none;
+  height: 32px;
+  min-height: 0;
+  max-height: 32px;
+}
+
+.shell.phone.land .playlist-browser .sound-filters input,
+.shell.phone.land .playlist-browser .sound-filters .sound-filter,
+.shell.phone.land .playlist-browser .sound-filters button {
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+}
+
+.shell.phone.land .playlist-browser .sound-chips {
+  flex: none;
+  flex-flow: row nowrap;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.shell.phone.land .playlist-browser .sound-chips button {
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.shell.phone.land .playlist-browser .sound-list {
+  flex: 1 0 52px;
+  min-height: 52px;
+  height: auto;
+  max-height: none;
+  overflow: auto;
+}
+
+.shell.phone.land .playlist-browser .sound-count {
+  flex: none;
+  min-height: 0;
+  margin: 0;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.shell.phone.land .playlist-browser .sound-row,
+.shell.phone.land .playlist-browser .sound-copy {
+  min-height: 40px;
+}
+
+.shell.phone.land .playlist-browser .sound-count,
+.shell.phone.land .playlist-browser .sound-status {
+  flex: none;
+}

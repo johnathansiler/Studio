@@ -431,7 +431,13 @@ describe('phone arrange layout', () => {
           expect(browserBox!.coversTabs, shot.name).toBe(false)
           expect(browserBox!.coversTransport, shot.name).toBe(false)
           expect(browserBox!.coversButton, shot.name).toBe(false)
-          expect(Math.abs(menu!.height - browserBox!.height), `${shot.name} menu vs browser`).toBeLessThanOrEqual(4)
+          if (shot.name === '844x390') {
+            // Landscape keeps a taller browser so the sound list can scroll above the dock.
+            expect(browserBox!.height, shot.name).toBeGreaterThan(120)
+            expect(browserBox!.bottom, shot.name).toBeLessThanOrEqual((browserBox!.barTop ?? 0) + 1)
+          } else {
+            expect(Math.abs(menu!.height - browserBox!.height), `${shot.name} menu vs browser`).toBeLessThanOrEqual(4)
+          }
           await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-browser.png` })
           const browserClose = page.locator('.playlist-browser .sheet-close')
           const browserCloseBox = await browserClose.boundingBox()

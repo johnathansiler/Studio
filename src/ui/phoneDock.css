@@ -338,10 +338,22 @@
   min-width: 0;
 }
 
-/* The dock is two rows. Toasts and the select hint sit above it, not on the tabs. */
-body:has(.shell.phone) .toasts,
+/* Toasts sit above the dock and the horizontal overview, clear of Record.
+   They do not take taps, so a message never blocks the transport or the timeline. */
+body:has(.shell.phone) .toasts {
+  top: auto;
+  right: 12px;
+  bottom: calc(var(--phone-chrome-bottom, 108px) + 40px + 10px);
+  z-index: 20;
+  pointer-events: none;
+}
+
+body:has(.shell.phone) .toast {
+  pointer-events: none;
+}
+
 body:has(.shell.phone) .select-hint-host {
-  bottom: calc(108px + env(safe-area-inset-bottom));
+  bottom: calc(var(--phone-chrome-bottom, 108px) + 40px + 10px);
 }
 
 .shell.phone .playhead-strip {

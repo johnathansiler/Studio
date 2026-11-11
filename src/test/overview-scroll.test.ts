@@ -7,6 +7,7 @@ import {
   TIMELINE_PX_SOFT_MIN,
   clampTimelinePx,
   laneOverviewSpan,
+  laneScaleAttr,
   laneZoomBounds,
   overviewPart,
   overviewThumb,
@@ -340,5 +341,19 @@ describe('track-height zoom from the overview', () => {
     expect(fit).toBeGreaterThan(floor)
     expect(fit).toBeLessThan(LANE_ZOOM_SOFT_MIN)
     expect(fitted.min).toBeCloseTo(fit)
+  })
+
+  it('hides the track name once the lane is at the compact zoom', () => {
+    expect(laneScaleAttr(1)).toBe('roomy')
+    expect(laneScaleAttr(0.9)).toBe('roomy')
+    expect(laneScaleAttr(0.85)).toBe('tight')
+    expect(laneScaleAttr(0.8)).toBe('tight')
+    expect(laneScaleAttr(0.73)).toBe('tight')
+    expect(laneScaleAttr(0.72)).toBe('min')
+    expect(laneScaleAttr(0.7)).toBe('min')
+    expect(laneScaleAttr(0.6)).toBe('min')
+    expect(laneScaleAttr(0.58)).toBe('min')
+    expect(laneScaleAttr(0.5)).toBe('min')
+    expect(laneScaleAttr(0.42)).toBe('min')
   })
 })

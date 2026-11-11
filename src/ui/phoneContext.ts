@@ -36,4 +36,3 @@ export function phoneContextKind(input: {
 
 export const BROWSER_TAB_EVENT = 'cueharbor-browser-tab'
 export const CLOSE_ARRANGE_SHEETS = 'cueharbor-close-arrange-sheets'
-export const OPEN_PLUGINS_EVENT = 'cueharbor-open-plugins'

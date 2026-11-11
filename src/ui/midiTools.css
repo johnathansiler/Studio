@@ -77,3 +77,19 @@
 .shell.fold .midi-tools select {
   min-height: 44px;
 }
+
+/* Phone Menu opens this as a short sheet above the dock, not a full-screen overlay. */
+.phone-sheet-host .midi-tools.midi-tools-sheet {
+  flex: none;
+  max-height: none;
+  overflow: visible;
+  padding: 0 0 8px;
+}
+
+.phone-sheet-host .midi-tools-sheet .midi-tabs,
+.phone-sheet-host .midi-tools-sheet .midi-row,
+.phone-sheet-host .midi-tools-sheet .midi-maps,
+.phone-sheet-host .midi-tools-sheet .midi-fx {
+  flex-wrap: wrap;
+  overflow: visible;
+}
