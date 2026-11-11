@@ -206,7 +206,7 @@ describe('phone arrange layout', () => {
             expect(labels.some((label) => label === 'Tools'), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Setup')), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Snap')), viewport.name).toBe(true)
-            expect(labels.some((label) => label.startsWith('Unstuck')), viewport.name).toBe(true)
+            expect(labels.some((label) => label === 'Ideas'), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Metronome')), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Undo')), viewport.name).toBe(true)
             expect(labels.some((label) => label.startsWith('Redo')), viewport.name).toBe(true)
