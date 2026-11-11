@@ -129,10 +129,10 @@ export function createSum(sampleRate: number): Processor {
 }
 
 export function tapeModule(): PluginModule {
-  return { descriptor: descriptor('tape')!, presets: FACTORY.tape, create: createTape }
+  return { descriptor: descriptor('tape')!, presets: FACTORY.tape ?? [], create: createTape }
 }
 export function sumModule(): PluginModule {
-  return { descriptor: descriptor('sum')!, presets: FACTORY.sum, create: createSum }
+  return { descriptor: descriptor('sum')!, presets: FACTORY.sum ?? [], create: createSum }
 }
 
 export { coeff, applyFilters, type Biquad }

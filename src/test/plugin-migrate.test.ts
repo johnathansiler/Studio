@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CATALOG, defaultParams, normalizeProject } from '../audio/plugins/catalog'
+import { CATALOG, createPlugin, defaultParams, normalizeProject } from '../audio/plugins/catalog'
 import { createCore } from '../audio/plugins/dispatch'
 import { CORE_IDS, MOVES, migratePlugin } from '../audio/plugins/ids'
 import { createEmptyProject, type PluginInstance } from '../model/types'
@@ -187,6 +187,33 @@ describe('plugin id migration', () => {
       const move = MOVES[id]
       if (move.remove) continue
       expect(CORE_IDS).toContain(move.to)
+    }
+  })
+
+  it('loads every legacy id as the current plugin and kind, with the same parameter values', () => {
+    for (const [id, move] of Object.entries(MOVES)) {
+      const project = createEmptyProject()
+      project.masterPlugins = []
+      const params: Record<string, number> = { marker: 0.42 }
+      const renamed = move.rename ? Object.entries(move.rename).find(([from]) => !move.drop?.includes(from)) : undefined
+      if (renamed) params[renamed[0]] = 1.25
+      project.tracks[0].plugins = [insert(id, params)]
+      normalizeProject(project)
+      const found = project.tracks[0].plugins.find((plugin) => plugin.id === `old-${id}`)
+      if (move.remove) {
+        expect(found, id).toBeUndefined()
+        continue
+      }
+      expect(found?.pluginId, id).toBe(move.to)
+      expect(found?.params.kind, id).toBe(move.kind)
+      expect(found?.wet, id).toBe(0.8)
+      expect(found?.params.marker, id).toBe(0.42)
+      if (renamed) expect(found?.params[renamed[1]], `${id} ${renamed[0]}`).toBe(1.25)
+      if (move.drop) for (const key of move.drop) expect(found?.params[key], `${id} drop ${key}`).toBeUndefined()
+      if (move.chain) expect(found?.params.chain, id).toBe(1)
+      const made = createPlugin(id)
+      expect(made.pluginId, `create ${id}`).toBe(move.to)
+      expect(made.params.kind, `create ${id}`).toBe(move.kind)
     }
   })
 

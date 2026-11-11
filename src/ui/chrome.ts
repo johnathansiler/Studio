@@ -1,4 +1,7 @@
 import { FEATURES } from '../features'
+import { SESSION_MENU, SESSION_SLOT, SESSION_VIEW } from './sessionCopy'
+
+declare const __CUEHARBOR_SESSION__: boolean
 
 /** Short labels and touch descriptions for the controls people see first. */
 
@@ -17,11 +20,11 @@ export const UNSTUCK_COPY: Copy = {
 export const VIEW_COPY: Copy[] = [
   { id: 'arrange', label: 'Arrange', hint: 'Clips on a timeline. The tools above change what a tap does.' },
   { id: 'mix', label: 'Mix', hint: 'Level, pan, and effects for each track.' },
-  { id: 'session', label: 'Session', hint: 'Launch clips in a grid. Tap a slot to play or record.' },
+  ...(__CUEHARBOR_SESSION__ ? [SESSION_VIEW] : []),
   { id: 'collab', label: 'Collab', hint: 'Call, video, and remote recording. Stays closed until you open this tab.' },
 ]
 
-/** Tabs beside Collab. Collab itself is the first tab in the bar. Session stays in VIEW_COPY and returns with FEATURES.session. */
+/** Tabs beside Collab. Collab itself is the first tab in the bar. Session returns with FEATURES.session. */
 export function studioViewTabs(): Copy[] {
   return VIEW_COPY.filter((item) => item.id !== 'collab' && (FEATURES.session || item.id !== 'session'))
 }
@@ -83,9 +86,7 @@ export const MENU_COPY: MenuSpec[] = [
   { id: 'box', action: 'box', group: 'edit', place: 'all', label: 'Box', hint: 'Drag a rectangle to select several clips or notes.' },
   { id: 'erase', action: 'erase', group: 'edit', place: 'all', label: 'Erase', hint: 'Tap a clip or note to delete it. Drag to delete more.' },
   { id: 'pan', action: 'pan', group: 'edit', place: 'all', label: 'Scroll', hint: 'Scroll the timeline or the piano roll. This is not the mixer pan.' },
-  { id: 'session-view', action: 'session-mode', group: 'view', place: 'all', label: 'Launch', hint: 'Play clips from slots instead of the timeline.' },
-  { id: 'arrangement', action: 'session-mode', group: 'view', place: 'all', label: 'Timeline', hint: 'Leave clip launching and go back to the arrangement.' },
-  { id: 'capture', action: 'capture', group: 'view', place: 'phone', label: 'Capture', hint: 'Put the clips that are playing onto the timeline.' },
+  ...(__CUEHARBOR_SESSION__ ? SESSION_MENU : []),
   { id: 'dock-bottom', action: 'dock', group: 'view', place: 'desk', label: 'Bottom', hint: 'Move the side panel under the editor.' },
   { id: 'dock-side', action: 'dock', group: 'view', place: 'desk', label: 'Side', hint: 'Move the panel back beside the editor.' },
   { id: 'scaler', action: 'scaler', group: 'tools', place: 'desk', label: 'Scaler', hint: 'Chord instrument. Play pads, or open Write to generate MIDI.' },
@@ -172,23 +173,7 @@ export const BEAT_SHEET: Copy[] = [
   { id: 'left', label: 'Shift left', hint: 'Rotate every hit one step earlier.' },
   { id: 'right', label: 'Shift right', hint: 'Rotate every hit one step later.' },
   { id: 'place', label: 'To Arrange', hint: 'Place this pattern on the Arrange timeline at the playhead.' },
-  { id: 'slot', label: 'Slot', hint: 'Put this pattern in the first clip slot.' },
-]
-
-export const SESSION_BAR: Copy[] = [
-  { id: 'quant', label: 'Launch', hint: 'When a tapped clip starts: the next beat, bar, or immediately.' },
-  { id: 'stop', label: 'Stop all', hint: 'Stop every launched clip on the next grid line.' },
-  { id: 'clip', label: 'Clip', hint: 'How the selected slot launches, loops, and follows.' },
-  { id: 'print', label: 'To arrangement', hint: 'Print the clips that are playing onto the timeline.' },
-]
-
-export const SESSION_SHEET: Copy[] = [
-  { id: 'length', label: 'Record length', hint: 'How many bars a new clip records before it loops.' },
-  { id: 'mode', label: 'Launch mode', hint: 'Toggle, gate, or one-shot when you tap the slot.' },
-  { id: 'follow', label: 'Follow', hint: 'What the slot does when it finishes.' },
-  { id: 'loop', label: 'Loop', hint: 'Repeat the clip instead of playing it once.' },
-  { id: 'legato', label: 'Legato', hint: 'The next clip takes over without retriggering.' },
-  { id: 'warp', label: 'Warp', hint: 'Stretch the audio to the song tempo.' },
+  ...(__CUEHARBOR_SESSION__ ? [SESSION_SLOT] : []),
 ]
 
 export const TRACK_ROW: Copy[] = [

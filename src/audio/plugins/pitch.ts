@@ -71,7 +71,7 @@ export function createPitch(sampleRate: number): Processor {
   }
 }
 
-const plugin: PluginModule = { descriptor: descriptor('pitch')!, presets: FACTORY.pitch, create: createPitch }
+const plugin: PluginModule = { descriptor: descriptor('pitch')!, presets: FACTORY.pitch ?? [], create: createPitch }
 export default plugin
 
 function shift(hz: number, confidence: number, semis: number) {

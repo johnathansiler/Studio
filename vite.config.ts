@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import { sessionOn } from './src/features'
 import { isolationHeaders } from './server/headers'
 import { selfContainedWorklets, workletSourceGuard } from './scripts/worklet-bundle'
 
@@ -43,6 +44,9 @@ function isolationPreview(): Plugin {
 }
 
 export default defineConfig({
+  define: {
+    __CUEHARBOR_SESSION__: JSON.stringify(sessionOn),
+  },
   plugins: [selfContainedWorklets(), react(), dropBundledOrt(), isolationPreview(), workletSourceGuard()],
   resolve: {
     alias: [

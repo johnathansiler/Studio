@@ -85,6 +85,10 @@ body:has(.shell.phone) [data-screen-overlay].guide-sheet {
   flex-direction: column !important;
 }
 
+body:has(.shell.phone) [data-screen-overlay].guide-sheet.sheet-pending {
+  min-height: var(--phone-sheet-h, 46dvh) !important;
+}
+
 body:has(.shell.phone) [data-screen-overlay].phone-sheet > .overlay-close,
 body:has(.shell.phone) [data-screen-overlay].guide-sheet > .guide-head {
   flex: 0 0 auto;

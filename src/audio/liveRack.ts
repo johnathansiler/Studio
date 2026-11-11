@@ -11,7 +11,7 @@ import { automationSchedule, channelAutomationMode, laneIsLive, sendLane, valueC
 import { projectSampleBeat } from '../model/tempoMap'
 import { applyRamps, smoothParam } from './paramCurve'
 import { loadModule } from './plugins/registry'
-import { createProcessor, preloadWasmInserts } from './plugins/createAll'
+import { loadProcessors } from './plugins/loadProcessors'
 import { wasmDspRequested } from './wasm/flag'
 import type { Processor } from './plugins/types'
 import { MASTER, REMOTE, edgeDelays, findCycle, type RoutePoint } from './routing'
@@ -285,7 +285,7 @@ export class LiveRack {
     const owners = this.owners(project)
     const ids = new Set(owners.flatMap((owner) => owner.plugins.map((plugin) => plugin.pluginId)))
     await Promise.all([...ids].map((id) => loadModule(id)))
-    await preloadWasmInserts()
+    await loadProcessors().then((mod) => mod.preloadWasmInserts())
     if (generation !== this.generation) return
     this.workletOk = await this.ensureWorklet(ctx)
     if (generation !== this.generation) return
@@ -460,6 +460,7 @@ export class LiveRack {
   }
 
   private async ensureProcessors(project: Project, sampleRate: number) {
+    const { createProcessor, preloadWasmInserts } = await loadProcessors()
     await preloadWasmInserts()
     const plugins = [...project.masterPlugins, ...project.tracks.flatMap((track) => track.plugins)]
     await Promise.all(plugins.map(async (plugin) => {

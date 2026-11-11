@@ -384,19 +384,19 @@ function fft(re: Float64Array, im: Float64Array, inverse: boolean) {
 }
 
 export function passiveModule(): PluginModule {
-  return { descriptor: descriptor('passive')!, presets: FACTORY.passive, create: createPassive }
+  return { descriptor: descriptor('passive')!, presets: FACTORY.passive ?? [], create: createPassive }
 }
 export function preModule(): PluginModule {
-  return { descriptor: descriptor('pre')!, presets: FACTORY.pre, create: createPre }
+  return { descriptor: descriptor('pre')!, presets: FACTORY.pre ?? [], create: createPre }
 }
 export function channelModule(): PluginModule {
-  return { descriptor: descriptor('channel')!, presets: FACTORY.channel, create: createChannel }
+  return { descriptor: descriptor('channel')!, presets: FACTORY.channel ?? [], create: createChannel }
 }
 export function propModule(): PluginModule {
-  return { descriptor: descriptor('prop')!, presets: FACTORY.prop, create: createProp }
+  return { descriptor: descriptor('prop')!, presets: FACTORY.prop ?? [], create: createProp }
 }
 export function focusModule(): PluginModule {
-  return { descriptor: descriptor('focus')!, presets: FACTORY.focus, create: createFocus }
+  return { descriptor: descriptor('focus')!, presets: FACTORY.focus ?? [], create: createFocus }
 }
 
 export { channelFilters, propFilters, focusFilters }
