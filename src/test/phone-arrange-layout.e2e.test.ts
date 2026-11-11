@@ -458,8 +458,9 @@ describe('phone arrange layout', () => {
               }
             }))
             for (const button of toolFit) {
-              expect(button.height, button.action).toBeGreaterThanOrEqual(40)
-              expect(button.clipped, button.action).toBe(false)
+              const action = button.action ?? 'tool'
+              expect(button.height, action).toBeGreaterThanOrEqual(40)
+              expect(button.clipped, action).toBe(false)
             }
             await page.locator('[data-phone-action="pencil"]').click()
             expect(await page.evaluate(() => (window as unknown as { __cueharbor: { store: { tool: string } } }).__cueharbor.store.tool)).toBe('pencil')
