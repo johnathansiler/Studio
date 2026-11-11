@@ -29,8 +29,10 @@ export function phoneContextKind(input: {
   if (input.place === 'collab') return 'collab'
   if (input.notes) return 'notes'
   if (input.place === 'plugin') return 'plugin'
+  /* Arrange keeps Undo, Redo, Snap, Setup, and the transport extras.
+     Mute and Solo stay on the track header, so a track tap does not replace this row. */
+  if (input.place === 'arrange') return 'arrange'
   if (input.clip) return 'clip'
-  if (input.track && input.place === 'arrange') return 'track'
   return 'arrange'
 }
 

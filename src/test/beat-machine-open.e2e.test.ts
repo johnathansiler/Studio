@@ -51,9 +51,9 @@ describe('beat machine stays open', () => {
       })
       const page = await context.newPage()
       await page.goto(url, { waitUntil: 'domcontentloaded' })
-      await page.getByRole('textbox', { name: 'Keys name' }).waitFor()
+      await page.locator('[data-track-name="Keys"]').waitFor()
 
-      const keysHead = page.locator('.head', { has: page.getByRole('textbox', { name: 'Keys name' }) })
+      const keysHead = page.locator('[data-track-name="Keys"]')
       await keysHead.getByRole('button', { name: /Track\. Input/ }).tap()
       await page.locator('#track-options').waitFor()
       await page.locator('[data-track-action="drums"]').tap()
@@ -65,7 +65,7 @@ describe('beat machine stays open', () => {
       await page.getByRole('button', { name: 'Close Beat Machine. The track keeps the instrument.' }).tap()
       await page.locator('[data-pads="plugin"]').waitFor({ state: 'detached' })
 
-      await page.getByRole('button', { name: 'Open Beat Machine' }).tap()
+      await page.locator('[data-track-name="Beat Machine 1"] .track-meter-row').tap()
       await page.locator('[data-pads="plugin"]').waitFor()
       await page.waitForTimeout(1000)
       await beatOpen(page)

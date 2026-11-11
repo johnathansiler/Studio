@@ -43,8 +43,8 @@ async function measure(page: Page) {
     const face = grip?.querySelector('.loop-grip-face') as HTMLElement | null
     const heads = document.querySelector('.arrange .heads') as HTMLElement | null
     const laneScroll = document.querySelector('.timeline-scroll') as HTMLElement | null
-    const add = document.querySelector('.arrange-add') as HTMLElement | null
-    const addBtn = document.querySelector('.arrange-add .add-track-btn') as HTMLElement | null
+    const add = document.querySelector('.track-add') as HTMLElement | null
+    const addBtn = document.querySelector('.track-add .add-track-btn') as HTMLElement | null
     const slot = document.querySelector('.tool-slot') as HTMLElement | null
     const slotBox = slot?.getBoundingClientRect()
     const barButtons = slot
@@ -60,7 +60,9 @@ async function measure(page: Page) {
             top: rect.top,
             bottom: rect.bottom,
             height: rect.height,
-            clipped: slotBox ? rect.left < slotBox.left - 1 || rect.right > slotBox.right + 1 || rect.bottom > slotBox.bottom + 1 : false,
+            clipped: slotBox ? (button.closest('.phone-context')
+              ? rect.top < slotBox.top - 1 || rect.bottom > slotBox.bottom + 1
+              : rect.left < slotBox.left - 1 || rect.right > slotBox.right + 1 || rect.bottom > slotBox.bottom + 1) : false,
           }
         })
       : []
@@ -120,7 +122,7 @@ async function measure(page: Page) {
       topIdeas: !!document.querySelector('.topbar .unstuck-btn'),
       addUndo: !!document.querySelector('.arrange-add [data-history="undo"]'),
       addRedo: !!document.querySelector('.arrange-add [data-history="redo"]'),
-      bulb: document.querySelector('.arrange-add .ideas-bulb')?.getAttribute('aria-label') ?? '',
+      bulb: document.querySelector('.transport .ideas-bulb')?.getAttribute('aria-label') ?? '',
       addOrder: [...document.querySelectorAll('.arrange-add .add-track-btn, .arrange-add [data-history], .arrange-add .ideas-bulb')].map((node) => {
         const rect = node.getBoundingClientRect()
         return { label: (node.getAttribute('aria-label') || node.textContent || '').replace(/\s+/g, ' ').trim(), left: rect.left }
@@ -179,10 +181,8 @@ describe('phone arrange layout', () => {
             expect(layout.gripBottom, viewport.name).toBeLessThanOrEqual(layout.stripTop + 1)
             expect(Math.abs(layout.gap - (layout.ruler + layout.strip)), viewport.name).toBeLessThanOrEqual(2)
             expect(layout.face, viewport.name).toBeLessThanOrEqual(layout.ruler)
-            expect(layout.addHeight, viewport.name).toBeGreaterThanOrEqual(40)
-            expect(layout.addHeight, viewport.name).toBeLessThanOrEqual(44)
             expect(layout.addBtnHeight, viewport.name).toBeGreaterThanOrEqual(40)
-            expect(Math.abs(layout.addWidth - layout.headWidth), viewport.name).toBeLessThanOrEqual(2)
+            expect(layout.addBtnHeight, viewport.name).toBeLessThanOrEqual(44)
             expect(layout.topMenu, viewport.name).toBe(false)
             expect(layout.topName, viewport.name).toBe(false)
             expect(layout.topUndo, viewport.name).toBe(false)
@@ -190,13 +190,6 @@ describe('phone arrange layout', () => {
             expect(layout.addUndo, viewport.name).toBe(false)
             expect(layout.addRedo, viewport.name).toBe(false)
             expect(layout.bulb, viewport.name).toBe('Ideas')
-            const order = layout.addOrder.map((item) => item.label)
-            expect(order[0], viewport.name).toMatch(/Add Track/)
-            expect(order.some((label) => label.startsWith('Undo')), viewport.name).toBe(false)
-            expect(order[order.length - 1], viewport.name).toBe('Ideas')
-            for (let i = 1; i < layout.addOrder.length; i++) {
-              expect(layout.addOrder[i].left, viewport.name).toBeGreaterThan(layout.addOrder[i - 1].left)
-            }
             expect(layout.pluginsInBar, viewport.name).toBe(false)
             expect(Math.abs(layout.laneLeft - layout.headRight), viewport.name).toBeLessThanOrEqual(2)
             expect(layout.laneWidth, viewport.name).toBeGreaterThan(viewport.width * 0.4)
@@ -234,11 +227,9 @@ describe('phone arrange layout', () => {
             expect(layout.topIdeas, viewport.name).toBe(false)
             expect(layout.addUndo, viewport.name).toBe(false)
             expect(layout.pluginsInBar, viewport.name).toBe(false)
-            expect(layout.addHeight, viewport.name).toBeGreaterThanOrEqual(40)
-            expect(layout.addHeight, viewport.name).toBeLessThanOrEqual(48)
+            expect(layout.addBtnHeight, viewport.name).toBeGreaterThanOrEqual(40)
             expect(layout.strip, viewport.name).toBeGreaterThanOrEqual(28)
             expect(layout.gripHit, viewport.name).toBeLessThanOrEqual(layout.ruler + 1)
-            expect(Math.abs(layout.addWidth - layout.headWidth), viewport.name).toBeLessThanOrEqual(2)
             const labels = layout.barButtons.map((button) => button.label)
             expect(labels.some((label) => label.startsWith('Menu')), viewport.name).toBe(true)
             expect(labels.some((label) => label === 'Browse'), viewport.name).toBe(true)
@@ -250,16 +241,14 @@ describe('phone arrange layout', () => {
             const menu = layout.barButtons.find((button) => button.label.startsWith('Menu'))!
             const browserBtn = layout.barButtons.find((button) => button.label === 'Browse')!
             expect(menu.left, viewport.name).toBeLessThan(browserBtn.left)
-            const order = layout.addOrder.map((item) => item.label)
-            expect(order[0], viewport.name).toMatch(/Add Track/)
-            expect(order.some((label) => label.startsWith('Undo')), viewport.name).toBe(false)
-            expect(order[order.length - 1], viewport.name).toBe('Ideas')
+            expect(layout.bulb, viewport.name).toBe('Ideas')
           } else {
             expect(layout.ruler, viewport.name).toBeGreaterThanOrEqual(36)
             expect(layout.topMenu, viewport.name).toBe(true)
             expect(layout.topName, viewport.name).toBe(true)
             expect(layout.topUndo, viewport.name).toBe(true)
-            expect(layout.topIdeas, viewport.name).toBe(true)
+            expect(layout.topIdeas, viewport.name).toBe(false)
+            expect(layout.bulb, viewport.name).toBe('Ideas')
             expect(layout.addUndo, viewport.name).toBe(false)
             expect(layout.pluginsInBar, viewport.name).toBe(true)
             expect(await page.locator('#arrange-plugins').count(), viewport.name).toBe(0)
@@ -268,7 +257,7 @@ describe('phone arrange layout', () => {
             await page.locator('#arrange-plugins').waitFor()
             await pluginsToggle.click()
             await page.locator('#arrange-plugins').waitFor({ state: 'detached' })
-            expect(layout.addBtnHeight, viewport.name).toBeGreaterThanOrEqual(48)
+            expect(layout.addBtnHeight, viewport.name).toBeGreaterThanOrEqual(40)
           }
         }
 

@@ -154,7 +154,7 @@ async function waitForServer(url: string, child: ChildProcess) {
 async function readLives(page: Page) {
   return page.evaluate(() => {
     return [...document.querySelectorAll<HTMLElement>('.head')].map((head) => {
-      const name = (head.querySelector('input.name') as HTMLInputElement | null)?.value || ''
+      const name = head.getAttribute('data-track-name') || ''
       const meter = head.querySelector('.mini-meter') as HTMLElement | null
       const bar = head.querySelector('.mini-meter i') as HTMLElement | null
       const midi = head.querySelector('.midi-activity') as HTMLElement | null
@@ -184,7 +184,7 @@ async function peaksWhile(page: Page, during: () => Promise<void>) {
       const lives = host.__lives ?? {}
       for (const head of document.querySelectorAll<HTMLElement>('.head')) {
         const id = head.getAttribute('data-track') || ''
-        const name = (head.querySelector('input.name') as HTMLInputElement | null)?.value || ''
+        const name = head.getAttribute('data-track-name') || ''
         const bar = head.querySelector('.mini-meter i') as HTMLElement | null
         const match = /scaleX\(([^)]+)\)/.exec(bar?.style.transform || '')
         const scale = match ? Number(match[1]) : 0
@@ -222,7 +222,7 @@ describe('editors, close, and header meters in the app', () => {
         const page = await context.newPage()
         const label = `${viewport.width}x${viewport.height}`
         await page.goto(url, { waitUntil: 'domcontentloaded' })
-        await page.getByRole('textbox', { name: 'Keys name' }).waitFor()
+        await page.locator('[data-track-name="Keys"] .track-meter-row').waitFor()
         expect(await page.locator('[data-keyboard-dock="open"]').count(), label).toBe(0)
         expect(await page.locator('[data-editor="piano"]').count(), label).toBe(0)
 
@@ -234,7 +234,7 @@ describe('editors, close, and header meters in the app', () => {
           expect(row.muteH, `${label} ${row.name} mute`).toBeGreaterThanOrEqual(viewport.phone ? 40 : 22)
         }
 
-        await page.getByRole('textbox', { name: 'Keys name' }).click()
+        await page.locator('[data-track-name="Keys"] .track-meter-row').click()
         await page.locator('[data-keyboard-dock="open"]').waitFor()
         expect(await page.locator('[data-editor="piano"]').count(), label).toBe(0)
         if (viewport.phone) {
@@ -278,7 +278,7 @@ describe('editors, close, and header meters in the app', () => {
         await page.locator('.roll-close').click()
         await page.locator('[data-editor="piano"]').waitFor({ state: 'detached' })
 
-        await page.getByRole('textbox', { name: 'Keys name' }).click()
+        await page.locator('[data-track-name="Keys"] .track-meter-row').click()
         await page.locator('[data-keyboard-dock="open"]').waitFor()
         expect(await page.locator('[data-editor="piano"]').count(), label).toBe(0)
         const played = await peaksWhile(page, async () => {
@@ -297,7 +297,7 @@ describe('editors, close, and header meters in the app', () => {
         await page.locator('.keyboard-close').click()
         await page.locator('[data-keyboard-dock="open"]').waitFor({ state: 'detached' })
         await page.waitForTimeout(350)
-        const keysHead = page.locator('.head', { has: page.getByRole('textbox', { name: 'Keys name' }) })
+        const keysHead = page.locator('.head', { has: page.locator('[data-track-name="Keys"] .track-meter-row') })
         await keysHead.getByRole('button', { name: 'Mute track' }).click()
         const muted = await peaksWhile(page, async () => {
           await page.evaluate(() => {
@@ -335,14 +335,14 @@ describe('editors, close, and header meters in the app', () => {
         await close.click()
         await page.locator('[data-pads="plugin"]').waitFor({ state: 'detached' })
 
-        await page.getByRole('textbox', { name: 'Beat Machine 1 name' }).click()
+        await page.locator('[data-track-name="Beat Machine 1"] .track-meter-row').click()
         await page.locator('[data-pads="plugin"]').waitFor()
         expect(await page.locator('[data-keyboard-dock="open"]').count(), label).toBe(0)
         await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
         await page.keyboard.press('Escape')
         await page.locator('[data-pads="plugin"]').waitFor({ state: 'detached' })
 
-        await page.getByRole('textbox', { name: 'Beat Machine 1 name' }).click()
+        await page.locator('[data-track-name="Beat Machine 1"] .track-meter-row').click()
         await page.locator('[data-pads="plugin"]').waitFor()
         await page.goBack()
         await page.locator('[data-pads="plugin"]').waitFor({ state: 'detached' })
@@ -362,7 +362,7 @@ describe('editors, close, and header meters in the app', () => {
         await page.locator('.roll-close').click()
         await page.locator('[data-editor="piano"]').waitFor({ state: 'detached' })
 
-        await page.getByRole('textbox', { name: 'Beat Machine 1 name' }).click()
+        await page.locator('[data-track-name="Beat Machine 1"] .track-meter-row').click()
         await page.locator('[data-pads="plugin"]').waitFor()
         await page.locator('[data-beat-keyboard]').click()
         await page.locator('[data-keyboard-dock="open"]').waitFor()

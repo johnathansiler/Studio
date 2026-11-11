@@ -6,9 +6,9 @@ describe('phone context row', () => {
     expect(phoneContextKind({ sheet: null, place: 'arrange', notes: false, clip: false, track: false })).toBe('arrange')
   })
 
-  it('keeps the current track on the arrange row until the header is tapped', () => {
+  it('keeps Undo and the edit row when a track header is tapped', () => {
     expect(phoneContextKind({ sheet: null, place: 'arrange', notes: false, clip: false, track: false })).toBe('arrange')
-    expect(phoneContextKind({ sheet: null, place: 'arrange', notes: false, clip: false, track: true })).toBe('track')
+    expect(phoneContextKind({ sheet: null, place: 'arrange', notes: false, clip: false, track: true })).toBe('arrange')
   })
 
   it('follows the open sheet, then the screen, then the selection', () => {
@@ -19,6 +19,6 @@ describe('phone context row', () => {
     expect(phoneContextKind({ sheet: null, place: 'collab', notes: false, clip: false, track: false })).toBe('collab')
     expect(phoneContextKind({ sheet: null, place: 'plugin', notes: true, clip: false, track: false })).toBe('notes')
     expect(phoneContextKind({ sheet: null, place: 'plugin', notes: false, clip: false, track: false })).toBe('plugin')
-    expect(phoneContextKind({ sheet: null, place: 'arrange', notes: false, clip: true, track: true })).toBe('clip')
+    expect(phoneContextKind({ sheet: null, place: 'arrange', notes: false, clip: true, track: true })).toBe('arrange')
   })
 })

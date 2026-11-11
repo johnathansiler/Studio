@@ -653,7 +653,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   position: relative; top: auto; z-index: 2; flex: none; height: 56px; min-height: 56px;
   display: flex; align-items: stretch; padding: 4px; background: #141c18; border-bottom: 1px solid var(--line);
 }
-.timeline-add-spacer { height: 56px; min-height: 56px; }
+.timeline-add-spacer { height: var(--viewfinder-h, 0px); min-height: 0; }
 .add-track-menu {
   position: absolute; left: 0; top: calc(100% + 4px); z-index: 40;
   width: min(420px, calc(100vw - 16px));
@@ -746,11 +746,6 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   pointer-events: none;
 }
 .ruler i { position: absolute; top: 30px; width: 1px; height: 10px; background: var(--line); }
-.lane-add {
-  position: absolute; top: 18px; left: 8px; width: 56px; height: 64px;
-  border-radius: 8px; border: 1px dashed rgba(255,255,255,0.28); background: transparent;
-  color: rgba(255,255,255,0.4); font-size: 22px; min-height: 44px;
-}
 .loop-band { position: absolute; top: 0; bottom: 0; background: rgba(115, 196, 143, 0.08); border-left: 1px solid var(--accent); border-right: 1px solid var(--accent); pointer-events: none; }
 .lane { position: relative; background-image: linear-gradient(to right, rgba(255,255,255,0.025) 1px, transparent 1px); }
 .clip {
@@ -1711,7 +1706,6 @@ html.phone-root, html.phone-root body { overflow-x: hidden; max-width: 100%; }
 .shell.phone .inserts button,
 .shell.phone .insert-add { min-height: 44px; }
 .shell.phone .clip { height: 78px; }
-.shell.phone .lane-add { top: 14px; height: 72px; }
 .beats { height: 100%; overflow: auto; padding: 8px; background: #121a16; max-width: 100%; min-width: 0; width: 100%; }
 .beat-bar, .tool-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
 .beat-bar input, .beat-bar select, .beat-bar button, .tool-row button, .tool-row select { min-height: 32px; }

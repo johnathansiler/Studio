@@ -57,20 +57,19 @@ describe('phone dock fixes', () => {
           if (!keys) throw new Error('no midi track')
           store.addMidiClip(keys.id, 0)
         })
-        await page.locator('[data-phone-context="clip"]').waitFor()
-        await page.getByRole('textbox', { name: 'Vocal name' }).click()
-        await page.locator('[data-phone-context="track"]').waitFor()
+        await page.locator('[data-track-name="Vocal"] .track-meter-row').click()
+        await page.locator('[data-phone-context="arrange"]').waitFor()
         const trackRow = await page.evaluate(() => {
           const row = document.querySelector('.phone-context')
           return {
             kind: row?.getAttribute('data-phone-context'),
-            words: [...(row?.querySelectorAll('button') ?? [])].map((button) => (button.textContent || '').trim()),
+            words: [...(row?.querySelectorAll('button') ?? [])].map((button) => (button.textContent || '').replace(/\s+/g, ' ').trim()),
             clip: (window as unknown as { __cueharbor: { store: { selectedMidiClipId: string | null } } }).__cueharbor.store.selectedMidiClipId,
           }
         })
-        expect(trackRow.kind, viewport.name).toBe('track')
-        expect(trackRow.clip, viewport.name).toBeNull()
-        expect(trackRow.words, viewport.name).toEqual(expect.arrayContaining(['Mute', 'Solo']))
+        expect(trackRow.kind, viewport.name).toBe('arrange')
+        expect(trackRow.words.join(' '), viewport.name).toContain('Undo')
+        expect(trackRow.words.join(' '), viewport.name).toContain('Redo')
 
         await page.evaluate(() => {
           const store = (window as unknown as {
