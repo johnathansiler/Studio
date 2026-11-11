@@ -47,7 +47,7 @@ import { audioStateOf, planInterruption, planRecovery, type RecoveryAction } fro
 import { publishNotice } from './core/notice'
 import { deviceKind, initialBufferHint, recordingAlignmentSamples, resumeNeedsGesture, routeChangePlan, routeOf, type RouteSnapshot } from './core/driver'
 import { bufferHintOf, formatLatencyReadout, latencyHintOrder, writeBufferHint, type BufferHint } from './core/buffer'
-import { ATTACK_SEC, LATE_SLIP_SEC, MAX_SCHEDULE_PASSES, RELEASE_SEC, SCHEDULER_HORIZON_SEC, advanceLoopCursor, builtinLevel, drumLevel, liveWhen, placeNoteTime, scheduleDelaySeconds } from './liveStage'
+import { ATTACK_SEC, LATE_SLIP_SEC, MAX_SCHEDULE_PASSES, RELEASE_SEC, SCHEDULER_HORIZON_SEC, advanceLoopCursor, builtinLevel, clipSliceEnvelope, drumLevel, liveWhen, nextTimelineSample, placeNoteTime, scheduleDelaySeconds } from './liveStage'
 import { normalizePeak, safetyCurve } from './level'
 import { fileDither } from './master/ditherPlan'
 import { holdFullScale, SAFETY_LOOK } from './master/safety'
@@ -1638,7 +1638,10 @@ export class AudioEngine {
     this.countPlan = null
     this.countWait?.()
     this.countWait = null
-    if (!opts?.internal) this.commandEpoch += 1
+    if (!opts?.internal) {
+      this.commandEpoch += 1
+      this.launchTicket = 0
+    }
     if (!opts?.keepHold && !opts?.internal) this.heldPlaying = false
     if (this.playing && this.ctx) {
       this.positionSamples = Math.max(0, Math.round(this.heardSample(this.sampleAt(this.ctx.currentTime))))
@@ -1809,11 +1812,10 @@ export class AudioEngine {
     if (visible && this.heldPlaying && !this.playing) {
       const ticket = this.commandEpoch
       const mode = this.heldMode
-      const at = this.positionSamples
       if (plan.notice) this.postNotice('')
       await this.finishSession()
       const running = (this.ctx?.state as string | undefined) === 'running'
-      if (this.heldPlaying && ticket === this.commandEpoch && !this.playing && running) void this.play(this.positionSamples || at, mode)
+      if (this.heldPlaying && ticket === this.commandEpoch && !this.playing && running) void this.play(this.positionSamples, mode)
     }
   }
 
@@ -2744,7 +2746,7 @@ export class AudioEngine {
       const filter = this.ctx.createBiquadFilter()
       filter.type = 'lowpass'
       filter.frequency.setValueAtTime(voice.lowpass, at)
-      filter.Q.setValueAtTime(0.7, when)
+      filter.Q.setValueAtTime(0.7, at)
       osc.connect(filter)
       tail = filter
     }
@@ -2828,10 +2830,11 @@ export class AudioEngine {
     this.pendingSchedule = true
   }
 
-  /** Samples to schedule on this pass. Never more than the horizon, never a zero-length slice. */
+  /** Samples to schedule on this pass. Never more than the horizon, and never past `remain`. */
   private horizonSamples(remain: number) {
     const cap = Math.max(1, Math.ceil(SCHEDULER_HORIZON_SEC * this.sampleRate))
-    return Math.max(1, Math.min(Math.max(0, remain), cap))
+    if (!(remain > 0)) return 0
+    return Math.min(remain, cap)
   }
 
   /**
@@ -2869,11 +2872,16 @@ export class AudioEngine {
       this.realignCursor('pattern', patternLoop)
       let passes = 0
       while (this.nextLoopCtx != null && this.nextLoopCtx < horizon && passes < MAX_SCHEDULE_PASSES) {
+        if (this.nextLoopSample >= patternLoop) {
+          this.nextLoopSample = 0
+          continue
+        }
         const samples = this.horizonSamples(patternLoop - this.nextLoopSample)
-        this.scheduleWindow(this.nextLoopCtx, this.nextLoopSample, this.nextLoopSample + samples)
+        if (!(samples > 0)) break
+        const started = this.nextLoopSample
+        this.scheduleWindow(this.nextLoopCtx, started, started + samples)
         this.nextLoopCtx += samples / this.sampleRate
-        const wrapped = this.nextLoopSample + samples >= patternLoop - 1
-        this.nextLoopSample = wrapped ? 0 : this.nextLoopSample + samples
+        this.nextLoopSample = nextTimelineSample(started, samples, patternLoop, 0)
         passes += 1
       }
       return
@@ -2887,12 +2895,9 @@ export class AudioEngine {
       }
       this.realignCursor('linear', Math.ceil(SCHEDULER_HORIZON_SEC * this.sampleRate))
       let passes = 0
-      while (this.nextLoopCtx != null && this.nextLoopCtx < horizon && this.nextLoopSample < end - 1 && passes < MAX_SCHEDULE_PASSES) {
+      while (this.nextLoopCtx != null && this.nextLoopCtx < horizon && this.nextLoopSample < end && passes < MAX_SCHEDULE_PASSES) {
         const samples = this.horizonSamples(end - this.nextLoopSample)
-        if (samples < 8) {
-          this.nextLoopSample = end
-          break
-        }
+        if (!(samples > 0)) break
         this.scheduleWindow(this.nextLoopCtx, this.nextLoopSample, this.nextLoopSample + samples)
         this.nextLoopCtx += samples / this.sampleRate
         this.nextLoopSample += samples
@@ -2909,14 +2914,19 @@ export class AudioEngine {
     this.realignCursor('loop', loopLen)
     let passes = 0
     while (this.nextLoopCtx != null && this.nextLoopCtx < horizon && passes < MAX_SCHEDULE_PASSES) {
+      if (this.nextLoopSample >= project.loopEndSample) {
+        this.nextLoopSample = project.loopStartSample
+        continue
+      }
       const samples = this.horizonSamples(project.loopEndSample - this.nextLoopSample)
+      if (!(samples > 0)) break
       const when = this.nextLoopCtx
-      this.scheduleWindow(when, this.nextLoopSample, this.nextLoopSample + samples)
-      this.loopQueuedUntil = this.nextLoopSample + samples
+      const started = this.nextLoopSample
+      this.scheduleWindow(when, started, started + samples)
+      this.loopQueuedUntil = started + samples
       this.loopQueuedCtx = when + samples / this.sampleRate
       this.nextLoopCtx += samples / this.sampleRate
-      const wrapped = this.nextLoopSample + samples >= project.loopEndSample - 1
-      this.nextLoopSample = wrapped ? project.loopStartSample : this.nextLoopSample + samples
+      this.nextLoopSample = nextTimelineSample(started, samples, project.loopEndSample, project.loopStartSample)
       passes += 1
     }
   }
@@ -3014,9 +3024,11 @@ export class AudioEngine {
         gain.gain.exponentialRampToValueAtTime(peak, startWhen + 0.008)
         src.connect(gain)
         gain.connect(strip.input)
+        const playDur = playRate === 1 ? dur : dur / rate
         if (looping) src.start(startWhen, offset)
-        else src.start(startWhen, offset, playRate === 1 ? dur : dur / rate)
+        else src.start(startWhen, offset, playDur)
         this.trackNodes(trackId, {
+          endAt: looping ? undefined : startWhen + playDur + 0.08,
           stop: (at?: number) => {
             const now = at ?? this.ctx?.currentTime ?? startWhen
             try {
@@ -3185,7 +3197,7 @@ export class AudioEngine {
           if (clip.slotOnly || clip.scene != null) continue
           for (const note of prepareClipNotes(project, group.owner, clip)) {
             const span = beatSpanSamples(project, clip.startBeat + note.startBeat, note.durationBeats)
-            if (span.start + span.duration <= timelineStart || span.start >= timelineEnd) continue
+            if (span.start < timelineStart || span.start >= timelineEnd) continue
             const rawWhen = ctxTime + (span.start - timelineStart) / this.sampleRate
             const when = ctx === this.ctx ? placeNoteTime(rawWhen, ctx.currentTime) : rawWhen
             if (when == null) continue
@@ -3486,43 +3498,43 @@ export class AudioEngine {
     const to = Math.min(clipEnd, timelineEnd)
     if (to - from < 8) return
     const when = ctxTime + (from - timelineStart) / sr
-    if (ctx === this.ctx && when < ctx.currentTime - LATE_SLIP_SEC) return
-    const offset = (clip.offsetSamples + (from - clip.startSample)) / buffer.sampleRate
+    const live = ctx === this.ctx
+    if (live && when < ctx.currentTime - LATE_SLIP_SEC) return
+    const slip = live ? Math.max(0, ctx.currentTime - when) : 0
+    const at = Math.max(0, when + slip)
     const dur = (to - from) / sr
+    const playDur = dur - slip
+    if (playDur * sr < 8) return
+    const offset = (clip.offsetSamples + (from - clip.startSample)) / buffer.sampleRate + slip
     const src = ctx.createBufferSource()
     src.buffer = buffer
     const gain = ctx.createGain()
-    const relFrom = (from - clip.startSample) / sr
+    const relFrom = (from - clip.startSample) / sr + slip
     const relTo = (to - clip.startSample) / sr
     const clipDur = clip.durationSamples / sr
     const fadeIn = clip.fadeInSamples / sr
     const fadeOut = clip.fadeOutSamples / sr
-    const env = (t: number) => {
-      let g = clip.gain
-      if (fadeIn > 0 && t < fadeIn) g *= t / fadeIn
-      if (fadeOut > 0 && t > clipDur - fadeOut) g *= Math.max(0, (clipDur - t) / fadeOut)
-      return Math.max(0.0001, g)
-    }
-    const at = ctx === this.ctx ? Math.max(when, ctx.currentTime) : Math.max(0, when)
     const join = this.joining && from <= timelineStart + 8
-    gain.gain.setValueAtTime(join ? 0.0001 : env(relFrom), at)
-    if (join && !(fadeIn > 0 && relFrom < fadeIn)) {
-      gain.gain.linearRampToValueAtTime(Math.max(0.0001, clip.gain), at + Math.min(0.008, dur))
-    }
-    if (fadeIn > 0 && relFrom < fadeIn) {
-      gain.gain.linearRampToValueAtTime(clip.gain, Math.min(at + (fadeIn - relFrom), at + dur))
-    }
-    if (fadeOut > 0 && relTo > clipDur - fadeOut) {
-      const start = at + Math.max(0, clipDur - fadeOut - relFrom)
-      gain.gain.setValueAtTime(Math.max(0.0001, clip.gain), start)
-      gain.gain.linearRampToValueAtTime(0.0001, at + dur)
-    }
+    const points = clipSliceEnvelope({
+      at,
+      dur: playDur,
+      relFrom,
+      relTo,
+      clipGain: clip.gain,
+      fadeInSec: fadeIn,
+      fadeOutSec: fadeOut,
+      clipDurSec: clipDur,
+      join,
+    })
+    const [first, ...rest] = points
+    if (first) gain.gain.setValueAtTime(first.value, first.at)
+    for (const point of rest) gain.gain.linearRampToValueAtTime(point.value, point.at)
     src.connect(gain)
     gain.connect(strip.input)
-    src.start(at, Math.max(0, offset), dur)
-    if (ctx === this.ctx) {
+    src.start(at, Math.max(0, offset), playDur)
+    if (live) {
       this.sources.push({
-        endAt: at + dur + 0.05,
+        endAt: at + playDur + 0.05,
         stop: (whenStop?: number) => {
           try { src.stop(whenStop) } catch { /* already stopped */ }
         },
@@ -4448,7 +4460,12 @@ export class AudioEngine {
     const to = Math.min(clipEnd, timelineEnd)
     if (to - from < 8) return
     const when = ctxTime + (from - timelineStart) / sr
-    if (when < ctx.currentTime - 0.02) return
+    if (when < ctx.currentTime - LATE_SLIP_SEC) return
+    const slip = Math.max(0, ctx.currentTime - when)
+    const at = when + slip
+    const playFrom = from + Math.round(slip * sr)
+    const playDur = (to - playFrom) / sr
+    if (to - playFrom < 8) return
     const source = sourceSamplesOf(clip)
     const channels: Float32Array[] = []
     for (let index = 0; index < buffer.numberOfChannels; index++) {
@@ -4457,25 +4474,25 @@ export class AudioEngine {
     }
     const node = new AudioWorkletNode(ctx, 'cueharbor-stretch')
     const gain = ctx.createGain()
-    const relFrom = (from - clip.startSample) / sr
+    const relFrom = (playFrom - clip.startSample) / sr
     const relTo = (to - clip.startSample) / sr
     const clipDur = duration / sr
-    const dur = (to - from) / sr
     const fadeIn = clip.fadeInSamples / sr
     const fadeOut = clip.fadeOutSamples / sr
-    const env = (t: number) => {
-      let level = clip.gain
-      if (fadeIn > 0 && t < fadeIn) level *= t / fadeIn
-      if (fadeOut > 0 && t > clipDur - fadeOut) level *= Math.max(0, (clipDur - t) / fadeOut)
-      return Math.max(0.0001, level)
-    }
-    gain.gain.setValueAtTime(env(relFrom), Math.max(when, 0))
-    if (fadeIn > 0 && relFrom < fadeIn) gain.gain.linearRampToValueAtTime(Math.max(0.0001, clip.gain), Math.min(Math.max(when, 0) + (fadeIn - relFrom), Math.max(when, 0) + dur))
-    if (fadeOut > 0 && relTo > clipDur - fadeOut) {
-      const start = Math.max(when, 0) + Math.max(0, clipDur - fadeOut - relFrom)
-      gain.gain.setValueAtTime(Math.max(0.0001, clip.gain), start)
-      gain.gain.linearRampToValueAtTime(0.0001, Math.max(when, 0) + dur)
-    }
+    const points = clipSliceEnvelope({
+      at,
+      dur: playDur,
+      relFrom,
+      relTo,
+      clipGain: clip.gain,
+      fadeInSec: fadeIn,
+      fadeOutSec: fadeOut,
+      clipDurSec: clipDur,
+      join: false,
+    })
+    const [first, ...rest] = points
+    if (first) gain.gain.setValueAtTime(first.value, first.at)
+    for (const point of rest) gain.gain.linearRampToValueAtTime(point.value, point.at)
     node.connect(gain)
     gain.connect(strip.input)
     node.port.postMessage({
@@ -4490,12 +4507,12 @@ export class AudioEngine {
         quality: 'preview' as const,
         formant: stretch.formant,
       },
-      startFrame: Math.max(0, Math.round(Math.max(when, 0) * sr)),
-      skip: Math.max(0, from - clip.startSample),
-      frames: Math.max(1, to - from),
+      startFrame: Math.max(0, Math.round(at * sr)),
+      skip: Math.max(0, playFrom - clip.startSample),
+      frames: Math.max(1, to - playFrom),
     })
     this.sources.push({
-      endAt: Math.max(when, 0) + dur + 0.05,
+      endAt: at + playDur + 0.05,
       stop: () => {
         try { node.disconnect() } catch { /* already stopped */ }
       },
@@ -4914,9 +4931,6 @@ export class AudioEngine {
         const next = list.filter((node) => node.endAt == null || now < node.endAt)
         if (next.length !== list.length) this.sessionNodes.set(id, next)
       }
-    }
-    if (this.oneShots.length) {
-      this.oneShots = this.oneShots.filter((shot) => now < shot.when + 2)
     }
     if (this.padVoices.length) {
       this.padVoices = this.padVoices.filter((voice) => now < voice.until + 0.05)

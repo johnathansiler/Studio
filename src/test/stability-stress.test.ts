@@ -5,7 +5,9 @@ import {
   SCHEDULER_HORIZON_SEC,
   WORKLET_QUEUE_CAP,
   advanceLoopCursor,
+  clipSliceEnvelope,
   enqueueWorkletMessage,
+  nextTimelineSample,
   placeNoteTime,
   timingStats,
 } from '../audio/liveStage'
@@ -17,6 +19,9 @@ import { ProjectStore } from '../state/store'
 interface RecordedStart {
   when: number
   now: number
+  offset: number
+  duration: number | null
+  kind: string
 }
 
 interface FakeParam {
@@ -51,9 +56,15 @@ class FakeNode {
   }
   connect() { return this }
   disconnect() {}
-  start(when?: number) {
+  start(when?: number, offset?: number, duration?: number) {
     if (this.ended || typeof when !== 'number') return
-    const hit = { when, now: this.ctx.currentTime }
+    const hit = {
+      when,
+      now: this.ctx.currentTime,
+      offset: offset ?? 0,
+      duration: duration ?? null,
+      kind: this.kind,
+    }
     this.starts.push(hit)
     this.ctx.starts.push(hit)
   }
@@ -67,13 +78,16 @@ class FakeNode {
   }
 }
 
-function param(initial: number): FakeParam {
+function param(initial: number, onLinear?: (value: number, time: number) => void): FakeParam {
   const node: FakeParam = {
     value: initial,
     cancelScheduledValues() {},
     setValueAtTime(value) { node.value = value },
     setTargetAtTime(value) { node.value = value },
-    linearRampToValueAtTime(value) { node.value = value },
+    linearRampToValueAtTime(value, time) {
+      node.value = value
+      onLinear?.(value, time)
+    },
     exponentialRampToValueAtTime(value) { node.value = value },
   }
   return node
@@ -84,6 +98,7 @@ class FakeContext {
   currentTime = 5
   state: AudioContextState = 'running'
   starts: RecordedStart[] = []
+  linearRamps: { value: number; time: number }[] = []
   created = { osc: 0, gain: 0, filter: 0, buffer: 0 }
   destination: FakeNode
   private listeners = new Set<() => void>()
@@ -138,12 +153,13 @@ class FakeContext {
     }
   }
   private node(kind: string) {
+    const ctx = this
     const raw = new FakeNode(this, kind)
     return new Proxy(raw, {
       get(target, key) {
         if (key in target) return (target as unknown as Record<string | symbol, unknown>)[key]
         if (key === 'gain' || key === 'frequency' || key === 'Q' || key === 'pan' || key === 'delayTime' || key === 'threshold' || key === 'knee' || key === 'ratio' || key === 'attack' || key === 'release' || key === 'offset') {
-          const created = param(key === 'gain' ? 1 : key === 'frequency' ? 440 : 0)
+          const created = param(key === 'gain' ? 1 : key === 'frequency' ? 440 : 0, key === 'gain' ? (value, time) => ctx.linearRamps.push({ value, time }) : undefined)
           ;(target as unknown as Record<string, unknown>)[key as string] = created
           return created
         }
@@ -254,6 +270,64 @@ describe('scheduler health', () => {
     const third = await encodedAssetWav({ ...asset, channels: [edited] })
     expect(third.wav).not.toBe(first.wav)
     expect(third.hash).not.toBe(first.hash)
+    const trimmed = data.subarray(0, data.length - 32)
+    expect(assetWavStamp({ ...asset, channels: [trimmed] })).not.toBe(stamp)
+    const same = new Float32Array(4096)
+    for (let i = 0; i < same.length; i++) same[i] = Math.sin(i / 12) * 0.2
+    const renamed = await encodedAssetWav({ id: 'take-copy', name: 'take', sampleRate: 48000, channels: [same] })
+    expect(renamed.hash).toBe(first.hash)
+    expect(renamed.wav).not.toBe(first.wav)
+  })
+
+  it('keeps the last sample of a loop and continues a fade across slices', () => {
+    const cap = Math.ceil(SCHEDULER_HORIZON_SEC * 48000)
+    const end = cap + 1
+    let cursor = 0
+    let reached = 0
+    for (let pass = 0; pass < 4 && cursor < end; pass++) {
+      const samples = Math.min(end - cursor, cap)
+      reached = cursor + samples
+      cursor = nextTimelineSample(cursor, samples, end, 0)
+    }
+    expect(reached).toBe(end)
+    expect(cursor).toBe(0)
+    const fade = clipSliceEnvelope({
+      at: 10,
+      dur: 0.35,
+      relFrom: 0,
+      relTo: 0.35,
+      clipGain: 1,
+      fadeInSec: 1,
+      fadeOutSec: 0,
+      clipDurSec: 4,
+      join: false,
+    })
+    expect(fade.at(-1)?.value).toBeCloseTo(0.35, 5)
+    const next = clipSliceEnvelope({
+      at: 10.35,
+      dur: 0.35,
+      relFrom: 0.35,
+      relTo: 0.7,
+      clipGain: 1,
+      fadeInSec: 1,
+      fadeOutSec: 0,
+      clipDurSec: 4,
+      join: false,
+    })
+    expect(next[0]?.value).toBeCloseTo(fade.at(-1)?.value ?? 0, 5)
+    const tail = clipSliceEnvelope({
+      at: 12,
+      dur: 0.35,
+      relFrom: 3.7,
+      relTo: 4,
+      clipGain: 1,
+      fadeInSec: 0,
+      fadeOutSec: 1,
+      clipDurSec: 4,
+      join: false,
+    })
+    expect(tail[0]?.value).toBeGreaterThan(0.2)
+    expect(tail.at(-1)?.value).toBeLessThan(0.05)
   })
 })
 
@@ -436,6 +510,132 @@ describe('transport and graph stress', () => {
     expect(engine.stability().sources).toBeLessThanOrEqual(16)
     expect(engine.stability().oneShots).toBeLessThanOrEqual(4)
     expect(engine.stability().padVoices).toBeLessThanOrEqual(16)
+  })
+
+  it('starts a sustained note once, and a clip from its own offset', async () => {
+    installHost()
+    const engine = new AudioEngine()
+    const project = createEmptyProject(48000)
+    project.metronomeEnabled = false
+    project.loopEnabled = true
+    project.loopStartSample = 0
+    project.loopEndSample = project.sampleRate * 2
+    const keys = project.tracks.find((track) => track.type === 'midi')!
+    keys.midiClips.push({
+      id: 'held-clip',
+      name: 'Held',
+      startBeat: 0,
+      durationBeats: 4,
+      notes: [{ id: 'held', pitch: 64, startBeat: 0, durationBeats: 2, velocity: 0.8 }],
+    })
+    const samples = new Float32Array(96000)
+    samples.fill(0.2)
+    const vocal = project.tracks.find((track) => track.type === 'audio')!
+    vocal.clips.push({
+      id: 'voice',
+      name: 'Voice',
+      bufferId: 'take',
+      startSample: 12000,
+      offsetSamples: 5000,
+      durationSamples: 48000,
+      fadeInSamples: 48000,
+      fadeOutSamples: 0,
+      gain: 1,
+      source: 'import',
+    })
+    engine.sync(project, (id) => (id === 'take' ? { id, name: 'take', sampleRate: 48000, channels: [samples] } : undefined))
+    await engine.play(0)
+    const ctx = engine.ctx as unknown as FakeContext
+    for (let step = 0; step < 80; step++) {
+      ctx.currentTime += 0.025
+      engine.wakeTransport()
+    }
+    const notes = ctx.starts.filter((start) => start.kind === 'osc')
+    expect(notes).toHaveLength(2)
+    expect((notes[1]?.when ?? 0) - (notes[0]?.when ?? 0)).toBeGreaterThan(1.5)
+    const clips = ctx.starts.filter((start) => start.kind === 'buffer-source' && start.duration != null)
+    expect(clips.length).toBeGreaterThan(1)
+    const origin = (engine as unknown as { playOriginCtx: number }).playOriginCtx
+    expect(clips[0]?.offset).toBeCloseTo(5000 / 48000, 5)
+    expect(clips[0]?.when).toBeCloseTo(origin + 12000 / 48000, 5)
+    for (let index = 1; index < clips.length; index++) {
+      const previous = clips[index - 1]!
+      const next = clips[index]!
+      const gap = next.when - ((previous.when ?? 0) + (previous.duration ?? 0))
+      expect(gap).toBeGreaterThan(-0.001)
+      if (next.offset + 1e-4 < previous.offset) {
+        expect(next.offset).toBeCloseTo(5000 / 48000, 4)
+      } else {
+        expect(gap).toBeLessThan(0.002)
+        expect(next.offset).toBeGreaterThan(previous.offset)
+      }
+    }
+    const firstSliceEnd = (clips[0]?.when ?? 0) + (clips[0]?.duration ?? 0)
+    const earlyFull = ctx.linearRamps.some((ramp) => ramp.value > 0.8 && ramp.time < firstSliceEnd - 0.01)
+    expect(earlyFull).toBe(false)
+    const continued = ctx.linearRamps.some((ramp) => ramp.value > 0.05 && ramp.value < 0.25)
+    expect(continued).toBe(true)
+    engine.stop()
+    expect(engine.stability().playing).toBe(false)
+    await engine.play(0)
+    expect(engine.positionSamples).toBe(0)
+    expect(engine.stability().playing).toBe(true)
+    engine.stop()
+  })
+
+  it('does not revive playback when stop wins, including a seek back to zero', async () => {
+    installHost()
+    const engine = new AudioEngine()
+    const real = engine.resume.bind(engine)
+    let release: (() => void) | null = null
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    engine.resume = async (rate?: number, settle?: boolean) => {
+      await gate
+      return real(rate, settle)
+    }
+    const first = engine.play(0)
+    engine.stop()
+    engine.seek(0)
+    release!()
+    await first
+    await flush()
+    expect(engine.stability().playing).toBe(false)
+    expect(engine.status).toBe('stopped')
+    await engine.play(0)
+    expect(engine.positionSamples).toBe(0)
+    expect(engine.stability().playing).toBe(true)
+    engine.stop()
+  })
+
+  it('punches in on a running transport and resumes after the tab returns', async () => {
+    installHost()
+    const engine = new AudioEngine()
+    const project = createEmptyProject(48000)
+    project.metronomeEnabled = false
+    engine.sync(project, () => undefined)
+    await engine.play(0)
+    const ctx = engine.ctx as unknown as FakeContext
+    ctx.currentTime += 0.5
+    engine.wakeTransport()
+    const at = engine.positionSamples
+    expect(at).toBeGreaterThan(1000)
+    await engine.beginRecord({ fromSample: at, inputs: [], countIn: false })
+    expect(engine.status).toBe('recording')
+    expect(engine.stability().playing).toBe(true)
+    engine.stop()
+    await engine.play(at)
+    visibility.state = 'hidden'
+    for (const listener of visListeners) listener()
+    await flush()
+    expect(engine.stability().playing).toBe(false)
+    expect(engine.stability().heldPlaying).toBe(true)
+    visibility.state = 'visible'
+    for (const listener of visListeners) listener()
+    await flush()
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(engine.stability().playing).toBe(true)
+    expect(engine.positionSamples).toBeGreaterThan(1000)
+    engine.stop()
   })
 })
 

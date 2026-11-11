@@ -79,6 +79,70 @@ export function advanceLoopCursor(cursor: number, now: number, cycleSec: number)
   return { cursor, jumped: false }
 }
 
+/**
+ * Timeline sample after a window of `samples`.
+ * Reaching `end` wraps to `restart`. The last sample before `end` is kept.
+ */
+export function nextTimelineSample(cursor: number, samples: number, end: number, restart: number): number {
+  if (!Number.isFinite(cursor)) return restart
+  if (!Number.isFinite(samples) || !(samples > 0) || !Number.isFinite(end)) return cursor
+  if (cursor + samples >= end) return restart
+  return cursor + samples
+}
+
+export interface SliceGainPoint {
+  at: number
+  value: number
+}
+
+/**
+ * Gain points for one scheduled slice of a clip.
+ * The value at each edge matches the clip fade, so the next slice continues it.
+ */
+export function clipSliceEnvelope(input: {
+  at: number
+  dur: number
+  relFrom: number
+  relTo: number
+  clipGain: number
+  fadeInSec: number
+  fadeOutSec: number
+  clipDurSec: number
+  join: boolean
+}): SliceGainPoint[] {
+  const { at, dur, relFrom, relTo, clipGain, fadeInSec, fadeOutSec, clipDurSec, join } = input
+  const env = (t: number) => {
+    let gain = clipGain
+    if (fadeInSec > 0 && t < fadeInSec) gain *= Math.max(0, t / fadeInSec)
+    if (fadeOutSec > 0 && t > clipDurSec - fadeOutSec) gain *= Math.max(0, (clipDurSec - t) / fadeOutSec)
+    return Math.max(0.0001, gain)
+  }
+  const points: SliceGainPoint[] = [{ at, value: join ? 0.0001 : env(relFrom) }]
+  let cursor = at
+  if (join && !(fadeInSec > 0 && relFrom < fadeInSec) && dur > 0) {
+    const joinAt = Math.min(at + 0.008, at + dur)
+    if (joinAt > cursor + 1e-6) {
+      points.push({ at: joinAt, value: env(Math.min(relTo, relFrom + (joinAt - at))) })
+      cursor = joinAt
+    }
+  }
+  const knees: number[] = []
+  if (fadeInSec > 0 && fadeInSec > relFrom && fadeInSec < relTo) knees.push(fadeInSec)
+  const fadeOutAt = clipDurSec - fadeOutSec
+  if (fadeOutSec > 0 && fadeOutAt > relFrom && fadeOutAt < relTo) knees.push(fadeOutAt)
+  knees.sort((a, b) => a - b)
+  for (const knee of knees) {
+    const whenKnee = at + (knee - relFrom)
+    if (whenKnee > cursor + 1e-5) {
+      points.push({ at: whenKnee, value: env(knee) })
+      cursor = whenKnee
+    }
+  }
+  const endAt = at + Math.max(0, dur)
+  if (endAt > cursor + 1e-5) points.push({ at: endAt, value: env(relTo) })
+  return points
+}
+
 /** Bound a worklet message queue. Newest messages stay, including the one just posted. */
 export function enqueueWorkletMessage<T>(queue: T[], message: T, cap = WORKLET_QUEUE_CAP): T[] {
   const room = Math.max(1, Math.round(cap))
