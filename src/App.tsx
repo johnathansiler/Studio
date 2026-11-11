@@ -45,7 +45,7 @@ import { MidiTools } from './ui/MidiTools'
 import { PerformPop } from './ui/PerformPop'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
-import { SheetFallback } from './ui/sheetFallback'
+import { LazySheet } from './ui/sheetFallback'
 import './ui/guideSheet.css'
 import { panelChoice } from './ui/panelMemory'
 import { ShellBrowser } from './ui/PlaylistBrowser'
@@ -2307,10 +2307,10 @@ async function importDropped(files: FileList) {
       {store.patchTrackId && <PatchSheet store={store} engine={engine} trackId={store.patchTrackId} />}
       <QuantizeSheet store={store} />
       {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
-      {ideasOpen && <Suspense fallback={<SheetFallback label="Ideas" />}><IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} /></Suspense>}
-      {playersOpen && <Suspense fallback={<SheetFallback label="Players" />}><PlayersSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setPlayersOpen(false) }} /></Suspense>}
-      {unstuckOpen && <Suspense fallback={<SheetFallback label="Ideas" />}><UnstuckSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }} /></Suspense>}
-      {analysisTrackId && <Suspense fallback={<SheetFallback label="Analysis" />}><AnalysisSheet store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} /></Suspense>}
+      {ideasOpen && <LazySheet label="Chord Ideas" className="ideas-pop" onClose={() => setIdeasOpen(false)}><IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} /></LazySheet>}
+      {playersOpen && <LazySheet label="Players" className="players-dock" onClose={() => { engine.stopPreview(); setPlayersOpen(false) }}><PlayersSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setPlayersOpen(false) }} /></LazySheet>}
+      {unstuckOpen && <LazySheet label="Ideas" className="guide-sheet unstuck-sheet" onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }}><UnstuckSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }} /></LazySheet>}
+      {analysisTrackId && <LazySheet label="Analysis" className="analysis-sheet" onClose={() => setAnalysisTrackId(null)}><AnalysisSheet store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} /></LazySheet>}
       {perform && (
         <PerformPop
           mode={perform}
@@ -2433,11 +2433,11 @@ async function importDropped(files: FileList) {
           </div>
         </div>
       )}
-      {knockOpen && <Suspense fallback={<SheetFallback label="Knock" />}><KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} /></Suspense>}
+      {knockOpen && <LazySheet label="Knock" className="knock-pop" onClose={() => setKnockOpen(false)}><KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} /></LazySheet>}
       {store.spectralTrackId != null && (
-        <Suspense fallback={<SheetFallback label="Spectral repair" />}>
+        <LazySheet label="Spectral repair" className="spectral-sheet" onClose={() => store.closeSpectral()}>
           <SpectralSheet store={store} />
-        </Suspense>
+        </LazySheet>
       )}
       <KeyboardDock store={store} engine={engine} onEditNotes={editNotes} />
       <HintBubble />
