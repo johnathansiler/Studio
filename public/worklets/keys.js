@@ -8,6 +8,7 @@ class KeysProcessor extends AudioWorkletProcessor {
     this.drums = []
     this.pending = []
     this.hits = []
+    this.queueCap = 48
     this.sab = null
     this.port.onmessage = (event) => {
       const data = event.data
@@ -32,6 +33,7 @@ class KeysProcessor extends AudioWorkletProcessor {
         this.sab = new Int32Array(data.buffer)
         return
       }
+      if (this.pending.length >= this.queueCap) this.pending.splice(0, this.pending.length - this.queueCap + 1)
       this.pending.push(data)
     }
   }

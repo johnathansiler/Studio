@@ -5,7 +5,7 @@ import { clickVoice } from './metroClick'
 import { onSpectralCommit } from './spectral/job'
 import { followClockToken, onStretchCommit, readStretch, storeStretch, stretchCacheKey, stretchSlot } from './stretch/commit'
 import type { StretchMode } from './stretch/engine'
-import { analyserRms, applyInserts, createStrip, type StripNodes } from './strips'
+import { analyserRms, applyInserts, createStrip, releaseStrip, type StripNodes } from './strips'
 import { midiLit, pruneMidiMarks, type MidiMark } from '../model/midiActivity'
 import { compPieces } from '../model/comp'
 import { quantizeSample, renderTempoWarp, warpRate } from '../model/launch'
@@ -47,7 +47,7 @@ import { audioStateOf, planInterruption, planRecovery, type RecoveryAction } fro
 import { publishNotice } from './core/notice'
 import { deviceKind, initialBufferHint, recordingAlignmentSamples, resumeNeedsGesture, routeChangePlan, routeOf, type RouteSnapshot } from './core/driver'
 import { bufferHintOf, formatLatencyReadout, latencyHintOrder, writeBufferHint, type BufferHint } from './core/buffer'
-import { ATTACK_SEC, RELEASE_SEC, builtinLevel, drumLevel, liveWhen, scheduleDelaySeconds } from './liveStage'
+import { ATTACK_SEC, LATE_SLIP_SEC, MAX_SCHEDULE_PASSES, RELEASE_SEC, SCHEDULER_HORIZON_SEC, advanceLoopCursor, builtinLevel, drumLevel, liveWhen, placeNoteTime, scheduleDelaySeconds } from './liveStage'
 import { normalizePeak, safetyCurve } from './level'
 import { fileDither } from './master/ditherPlan'
 import { holdFullScale, SAFETY_LOOK } from './master/safety'
@@ -86,6 +86,7 @@ interface ActiveRec {
   node: AudioWorkletNode
   source: MediaStreamAudioSourceNode
   silent: GainNode
+  splitter?: ChannelSplitterNode
   chunks: { frame: number; left: Float32Array; right: Float32Array | null }[]
   meta: RecordInput
   timelineSample: number
@@ -97,6 +98,10 @@ interface Stoppable {
   disconnect: () => void
   /** Fade across a reschedule instead of cutting the waveform. */
   release?: (when: number) => void
+  /** Audio-clock time after which the voice can leave the graph. */
+  endAt?: number
+  /** Session-loop timer. Replaced on the next pass instead of piling up. */
+  loopTimer?: boolean
 }
 
 type PunchInfo = { timelineSample: number; cueEpochHostPerf: number; ctxTime: number }
@@ -116,7 +121,7 @@ export class AudioEngine {
   private warmVoices: { osc: OscillatorNode; gain: GainNode; busy: boolean; pitch: number; age: number }[] = []
   lastOnsetFrame = -1
   private oneShots: { pitch: number; when: number; stop: () => void }[] = []
-  private liveBuiltins: { key: string; gain: GainNode; src: AudioScheduledSourceNode }[] = []
+  private liveBuiltins: { key: string; gain: GainNode; src: AudioScheduledSourceNode; entry: Stoppable }[] = []
   /** Pad voices that actually started. The phone tests read this after a tap. */
   heardPads: { pitch: number; velocity: number; when: number }[] = []
   /** While the Pads faceplate is open, hits go to that track's mixer channel. */
@@ -202,6 +207,15 @@ export class AudioEngine {
   private scalerMidi: { pitch: number; onAt: number }[] = []
   private warpPcm = new Map<string, Float32Array[]>()
   private scheduler = 0
+  /** Bumped by play, seek, and stop so a late async start cannot revive transport. */
+  private commandEpoch = 0
+  /** Non-zero while play() or beginRecord() is waiting on the device. */
+  private launchTicket = 0
+  private reaped = 0
+  private schedulerSkips = 0
+  /** Largest gap between scheduler wakes, in seconds. */
+  schedulerGapSec = 0
+  private lastWakeCtx = 0
   /** Beat repeat is armed, so the look-ahead pump stays up while transport is stopped. */
   private repeatWatch = false
   private beatPump: ((now: number, horizon: number) => void) | null = null
@@ -216,7 +230,6 @@ export class AudioEngine {
   private rebuiltUntilRunning = false
   private playOriginCtx = 0
   private playOriginSample = 0
-  private arrangementScheduled = false
   /** Pattern mode and the open pattern. A change rearms the shared transport. */
   private rackToken = ''
   private loopArmed: boolean | null = null
@@ -674,9 +687,15 @@ export class AudioEngine {
     }
     for (const id of [...this.strips.keys()]) {
       if (!project.tracks.some((t) => t.id === id)) {
-        this.strips.get(id)?.output.disconnect()
+        const strip = this.strips.get(id)
+        if (strip) releaseStrip(strip)
         this.strips.delete(id)
       }
+    }
+    for (const id of [...this.chains.keys()]) {
+      if (project.tracks.some((track) => track.id === id)) continue
+      this.chains.get(id)?.panic()
+      this.chains.delete(id)
     }
     for (const track of project.tracks) {
       const strip = this.strips.get(track.id)!
@@ -830,6 +849,15 @@ export class AudioEngine {
         smoothParam(trim.gain.gain, heard ? Math.max(0, channel.volume) : 0, now)
         smoothParam(trim.pan.pan, channel.pan || 0, now)
       }
+    }
+    const liveIds = new Set<string>()
+    for (const pattern of patterns) for (const channel of pattern.channels) liveIds.add(channel.id)
+    for (const id of [...this.drumTrims.keys()]) {
+      if (liveIds.has(id)) continue
+      const trim = this.drumTrims.get(id)
+      try { trim?.pan.disconnect() } catch { /* already gone */ }
+      try { trim?.gain.disconnect() } catch { /* already gone */ }
+      this.drumTrims.delete(id)
     }
   }
 
@@ -1317,7 +1345,6 @@ export class AudioEngine {
     if (!this.playing) return
     this.mode = 'session'
     this.stopSources()
-    this.arrangementScheduled = false
     this.scheduleAhead()
   }
 
@@ -1325,7 +1352,6 @@ export class AudioEngine {
     if (!this.playing) return
     this.mode = 'arrangement'
     this.stopSources()
-    this.arrangementScheduled = false
     this.scheduleAhead()
   }
 
@@ -1529,7 +1555,7 @@ export class AudioEngine {
   seek(sample: number) {
     const next = Math.max(0, Math.round(sample))
     if (this.status === 'recording' || this.status === 'counting-in') return
-    if (this.playing) {
+    if (this.playing || this.launchTicket) {
       void this.play(next, this.mode)
       return
     }
@@ -1538,10 +1564,18 @@ export class AudioEngine {
   }
 
   async play(fromSample: number, mode: 'arrangement' | 'session' = 'arrangement') {
-    await this.resume()
-    await this.warmUpcomingLibrary(Math.max(0, fromSample), 2.5)
-    const startAt = this.ctx!.currentTime + 0.05
-    this.startTransport(startAt, fromSample, mode)
+    const ticket = ++this.commandEpoch
+    this.launchTicket = ticket
+    try {
+      await this.resume()
+      if (ticket !== this.commandEpoch || !this.ctx) return
+      await this.warmUpcomingLibrary(Math.max(0, fromSample), 2.5)
+      if (ticket !== this.commandEpoch || !this.ctx) return
+      const startAt = this.ctx.currentTime + 0.05
+      this.startTransport(startAt, fromSample, mode)
+    } finally {
+      if (this.launchTicket === ticket) this.launchTicket = 0
+    }
   }
 
   /**
@@ -1554,32 +1588,40 @@ export class AudioEngine {
   }
 
   async playAtPerf(sample: number, perfMs: number, mode: 'arrangement' | 'session' = 'arrangement') {
-    await this.resume()
-    await this.warmUpcomingLibrary(Math.max(0, sample), 2.5)
-    this.refreshClockAnchor()
-    const ctx = this.ctx!
-    let startAt = this.contextForPerf(perfMs)
-    let from = Math.max(0, sample)
-    const earliest = ctx.currentTime + 0.02
-    if (startAt < earliest) {
-      from += Math.round((earliest - startAt) * this.sampleRate)
-      startAt = earliest
-    }
-    const plan = this.countPlan
-    this.countPlan = null
-    if (plan) this.scheduleCountClicks(startAt, plan.tempo, plan, plan.bars)
-    this.startTransport(startAt, from, mode)
-    if (plan && startAt > ctx.currentTime + 0.05) {
-      this.status = 'counting-in'
-      const wait = Math.max(0, (startAt - ctx.currentTime) * 1000)
-      window.clearTimeout(this.countTimer)
-      this.countTimer = window.setTimeout(() => {
-        if (this.playing && this.status === 'counting-in') {
-          this.status = 'playing'
-          this.emit()
-        }
-      }, wait)
-      this.emit()
+    const ticket = ++this.commandEpoch
+    this.launchTicket = ticket
+    try {
+      await this.resume()
+      if (ticket !== this.commandEpoch || !this.ctx) return
+      await this.warmUpcomingLibrary(Math.max(0, sample), 2.5)
+      if (ticket !== this.commandEpoch || !this.ctx) return
+      this.refreshClockAnchor()
+      const ctx = this.ctx
+      let startAt = this.contextForPerf(perfMs)
+      let from = Math.max(0, sample)
+      const earliest = ctx.currentTime + 0.02
+      if (startAt < earliest) {
+        from += Math.round((earliest - startAt) * this.sampleRate)
+        startAt = earliest
+      }
+      const plan = this.countPlan
+      this.countPlan = null
+      if (plan) this.scheduleCountClicks(startAt, plan.tempo, plan, plan.bars)
+      this.startTransport(startAt, from, mode)
+      if (plan && startAt > ctx.currentTime + 0.05) {
+        this.status = 'counting-in'
+        const wait = Math.max(0, (startAt - ctx.currentTime) * 1000)
+        window.clearTimeout(this.countTimer)
+        this.countTimer = window.setTimeout(() => {
+          if (ticket === this.commandEpoch && this.playing && this.status === 'counting-in') {
+            this.status = 'playing'
+            this.emit()
+          }
+        }, wait)
+        this.emit()
+      }
+    } finally {
+      if (this.launchTicket === ticket) this.launchTicket = 0
     }
   }
 
@@ -1591,17 +1633,18 @@ export class AudioEngine {
     this.emit()
   }
 
-  stop() {
+  stop(opts?: { internal?: boolean; keepHold?: boolean }) {
     clearTimeout(this.countTimer)
     this.countPlan = null
     this.countWait?.()
     this.countWait = null
+    if (!opts?.internal) this.commandEpoch += 1
+    if (!opts?.keepHold && !opts?.internal) this.heldPlaying = false
     if (this.playing && this.ctx) {
       this.positionSamples = Math.max(0, Math.round(this.heardSample(this.sampleAt(this.ctx.currentTime))))
     }
     this.playing = false
     this.silenceNow()
-    this.arrangementScheduled = false
     if (this.followRearm) {
       window.clearTimeout(this.followRearm)
       this.followRearm = 0
@@ -1755,7 +1798,7 @@ export class AudioEngine {
       this.rememberTransport()
       this.heldPlaying = true
       try {
-        this.stop()
+        this.stop({ keepHold: true })
       } catch {
         this.playing = false
       }
@@ -1764,25 +1807,29 @@ export class AudioEngine {
       return
     }
     if (visible && this.heldPlaying && !this.playing) {
+      const ticket = this.commandEpoch
+      const mode = this.heldMode
+      const at = this.positionSamples
       if (plan.notice) this.postNotice('')
       await this.finishSession()
-      if (!this.playing && (this.ctx?.state as string | undefined) === 'running') void this.play(this.positionSamples, this.heldMode)
+      const running = (this.ctx?.state as string | undefined) === 'running'
+      if (this.heldPlaying && ticket === this.commandEpoch && !this.playing && running) void this.play(this.positionSamples || at, mode)
     }
   }
 
   private rememberTransport() {
-    this.heldPlaying = this.playing
+    if (this.playing) this.heldPlaying = true
     this.heldMode = this.mode
-    try {
-      if (this.playing && this.ctx && (this.ctx.state as string) !== 'closed') {
-        this.heldPosition = Math.max(0, Math.round(this.heardSample(this.sampleAt(this.ctx.currentTime))))
-      } else {
+      try {
+        if (this.playing && this.ctx && (this.ctx.state as string) !== 'closed') {
+          this.heldPosition = Math.max(0, Math.round(this.heardSample(this.sampleAt(this.ctx.currentTime))))
+        } else if (!this.heldPlaying) {
+          this.heldPosition = this.positionSamples
+        }
+      } catch {
         this.heldPosition = this.positionSamples
       }
-    } catch {
-      this.heldPosition = this.positionSamples
     }
-  }
 
   /** Resume or rebuild the device. The project and playhead stay. */
   private async finishSession() {
@@ -1821,7 +1868,7 @@ export class AudioEngine {
       const wasPlaying = this.heldPlaying
       const mode = this.heldMode
       try {
-        this.stop()
+        this.stop({ internal: true })
       } catch {
         this.playing = false
       }
@@ -1954,17 +2001,9 @@ export class AudioEngine {
     const release = this.countWait
     this.countWait = null
     release?.()
-    for (const rec of this.recorders.values()) {
-      try { rec.node.port.postMessage({ type: 'stop' }) } catch { /* already gone */ }
-      try { rec.source.disconnect() } catch { /* already gone */ }
-      try { rec.node.disconnect() } catch { /* already gone */ }
-      try { rec.silent.disconnect() } catch { /* already gone */ }
-    }
+    for (const rec of this.recorders.values()) this.releaseRecorder(rec)
     this.recorders.clear()
-    for (const pending of this.pendingRecorders) {
-      try { pending.stream.removeEventListener('addtrack', pending.handler) } catch { /* already gone */ }
-    }
-    this.pendingRecorders = []
+    this.dropPending()
     try { this.stopRolling() } catch { /* the rolling tap is already gone */ }
   }
 
@@ -2004,37 +2043,44 @@ export class AudioEngine {
     mode?: 'arrangement' | 'session'
     onPunch?: (info: PunchInfo) => void
   }) {
-    await this.resume()
-    const punch = () => {
-      const ctx = this.ctx!
-      this.refreshClockAnchor()
-      const ctxTime = opts.hostPerfAtSample != null ? Math.max(this.contextForPerf(opts.hostPerfAtSample), ctx.currentTime + 0.02) : ctx.currentTime + 0.04
-      if (opts.mode) {
-        const previous = this.mode
-        this.mode = opts.mode
-        if (this.playing && previous !== opts.mode) {
-          this.stopSources()
-          this.arrangementScheduled = false
-          this.scheduleAhead()
+    const ticket = ++this.commandEpoch
+    this.launchTicket = ticket
+    try {
+      await this.resume()
+      if (ticket !== this.commandEpoch || !this.ctx) return
+      const punch = () => {
+        if (ticket !== this.commandEpoch || !this.ctx) return
+        const ctx = this.ctx
+        this.refreshClockAnchor()
+        const ctxTime = opts.hostPerfAtSample != null ? Math.max(this.contextForPerf(opts.hostPerfAtSample), ctx.currentTime + 0.02) : ctx.currentTime + 0.04
+        if (opts.mode) {
+          const previous = this.mode
+          this.mode = opts.mode
+          if (this.playing && previous !== opts.mode) {
+            this.stopSources()
+            this.scheduleAhead()
+          }
         }
+        if (!this.playing) this.armTransport(ctxTime, opts.fromSample)
+        const timelineSample = this.playing ? Math.round(this.sampleAt(ctxTime)) : opts.fromSample
+        const cueEpochHostPerf = this.perfForContext(ctxTime)
+        this.status = 'recording'
+        this.armRecorders(opts.inputs, timelineSample, ctxTime)
+        opts.onPunch?.({ timelineSample, cueEpochHostPerf, ctxTime })
+        this.emit()
       }
-      if (!this.playing) this.armTransport(ctxTime, opts.fromSample)
-      const timelineSample = this.playing ? Math.round(this.sampleAt(ctxTime)) : opts.fromSample
-      const cueEpochHostPerf = this.perfForContext(ctxTime)
-      this.status = 'recording'
-      this.armRecorders(opts.inputs, timelineSample, ctxTime)
-      opts.onPunch?.({ timelineSample, cueEpochHostPerf, ctxTime })
-      this.emit()
+      if (opts.countIn && opts.hostPerfAtSample != null && this.project && !this.playing) {
+        const bars = Math.max(1, countInBarsOf(this.project))
+        const go = await this.holdForDownbeat(opts.hostPerfAtSample, tempoAtSample(this.project, opts.fromSample), meterAtSample(this.project, opts.fromSample), bars)
+        if (!go || ticket !== this.commandEpoch) return
+        punch()
+        return
+      }
+      if (opts.countIn && this.project?.countIn && !this.playing) await this.runCountIn(punch, opts.fromSample)
+      else punch()
+    } finally {
+      if (this.launchTicket === ticket) this.launchTicket = 0
     }
-    if (opts.countIn && opts.hostPerfAtSample != null && this.project && !this.playing) {
-      const bars = Math.max(1, countInBarsOf(this.project))
-      const go = await this.holdForDownbeat(opts.hostPerfAtSample, tempoAtSample(this.project, opts.fromSample), meterAtSample(this.project, opts.fromSample), bars)
-      if (!go) return
-      punch()
-      return
-    }
-    if (opts.countIn && this.project?.countIn && !this.playing) await this.runCountIn(punch, opts.fromSample)
-    else punch()
   }
 
   async finishRecording(): Promise<CaptureResult[]> {
@@ -2065,15 +2111,12 @@ export class AudioEngine {
       )
     }
     await Promise.all(waits)
-    for (const pending of this.pendingRecorders) pending.stream.removeEventListener('addtrack', pending.handler)
-    this.pendingRecorders = []
+    this.dropPending()
     const results: CaptureResult[] = []
     for (const rec of this.recorders.values()) {
       const built = this.assemble(rec)
       if (built) results.push(built)
-      rec.source.disconnect()
-      rec.node.disconnect()
-      rec.silent.disconnect()
+      this.releaseRecorder(rec)
     }
     this.recorders.clear()
     if (this.status === 'recording') this.status = this.playing ? 'playing' : 'stopped'
@@ -2101,6 +2144,26 @@ export class AudioEngine {
     }
   }
 
+  private releaseRecorder(rec: ActiveRec) {
+    try { rec.node.port.postMessage({ type: 'stop' }) } catch { /* already stopped */ }
+    try { rec.source.disconnect() } catch { /* already gone */ }
+    try { rec.splitter?.disconnect() } catch { /* already gone */ }
+    try { rec.node.disconnect() } catch { /* already gone */ }
+    try { rec.silent.disconnect() } catch { /* already gone */ }
+  }
+
+  private dropPending(key?: string) {
+    const kept: typeof this.pendingRecorders = []
+    for (const pending of this.pendingRecorders) {
+      if (key != null && pending.key !== key) {
+        kept.push(pending)
+        continue
+      }
+      try { pending.stream.removeEventListener('addtrack', pending.handler) } catch { /* already gone */ }
+    }
+    this.pendingRecorders = kept
+  }
+
   private armRecorders(inputs: RecordInput[], timelineSample: number, anchorCtx: number) {
     if (!this.ctx) return
     for (const input of inputs) {
@@ -2110,10 +2173,10 @@ export class AudioEngine {
         const handler = () => {
           if (!input.stream.getAudioTracks().some((track) => track.readyState === 'live')) return
           input.stream.removeEventListener('addtrack', handler)
-          this.pendingRecorders = this.pendingRecorders.filter((pending) => pending.key !== input.key)
+          this.dropPending(input.key)
           if (this.status === 'recording') this.armRecorders([input], timelineSample, anchorCtx)
         }
-        this.pendingRecorders = this.pendingRecorders.filter((pending) => pending.key !== input.key)
+        this.dropPending(input.key)
         this.pendingRecorders.push({ key: input.key, stream: input.stream, handler })
         input.stream.addEventListener('addtrack', handler)
         continue
@@ -2127,8 +2190,9 @@ export class AudioEngine {
       const node = new AudioWorkletNode(this.ctx, 'recorder-processor')
       const silent = this.ctx.createGain()
       silent.gain.value = 0
+      let splitter: ChannelSplitterNode | undefined
       if (input.channel != null) {
-        const splitter = this.ctx.createChannelSplitter(input.channel + 1)
+        splitter = this.ctx.createChannelSplitter(input.channel + 1)
         src.connect(splitter)
         splitter.connect(node, input.channel, 0)
       } else src.connect(node)
@@ -2138,6 +2202,7 @@ export class AudioEngine {
         node,
         source: src,
         silent,
+        splitter,
         chunks: [],
         meta: input,
         timelineSample,
@@ -2446,7 +2511,11 @@ export class AudioEngine {
     this.emit()
     const runAt = start + beats * beatSec
     await new Promise<void>((resolve) => {
-      this.countTimer = window.setTimeout(() => resolve(), Math.max(0, (runAt - ctx.currentTime) * 1000))
+      this.countWait = resolve
+      this.countTimer = window.setTimeout(() => {
+        this.countWait = null
+        resolve()
+      }, Math.max(0, (runAt - ctx.currentTime) * 1000))
     })
     if (this.status !== 'counting-in') return
     done()
@@ -2457,9 +2526,11 @@ export class AudioEngine {
     this.playOriginCtx = startAt
     this.playOriginSample = fromSample
     this.positionSamples = fromSample
-    this.arrangementScheduled = false
     this.sessionStarted.clear()
     this.nextLoopCtx = null
+    this.schedulerGapSec = 0
+    this.lastWakeCtx = 0
+    this.schedulerSkips = 0
     this.nextMetroSample = this.project ? clickAtOrAfter(this.project, fromSample) : fromSample
     this.ensureScheduler()
     if (!this.raf) this.raf = requestAnimationFrame(() => this.tick())
@@ -2471,8 +2542,7 @@ export class AudioEngine {
   private ensureScheduler() {
     if (this.scheduler) return
     this.scheduler = window.setInterval(() => {
-      this.scheduleAhead()
-      if (this.playing && this.ctx) this.positionSamples = this.heardSample(this.currentTimelineSample())
+      this.wakeTransport()
       const now = performance.now()
       if (now - this.lastUiEmit > 50) {
         this.lastUiEmit = now
@@ -2483,6 +2553,41 @@ export class AudioEngine {
         this.scheduler = 0
       }
     }, 25)
+  }
+
+  /**
+   * One scheduler wake. Notes are placed on the audio clock, finished voices leave the graph,
+   * and the playhead is pulled from that same clock so the two cannot drift apart.
+   */
+  wakeTransport() {
+    const now = this.ctx?.currentTime
+    if (now != null) {
+      if (this.lastWakeCtx > 0) this.schedulerGapSec = Math.max(this.schedulerGapSec, now - this.lastWakeCtx)
+      this.lastWakeCtx = now
+    }
+    this.scheduleAhead()
+    if (this.playing && this.ctx) this.positionSamples = this.heardSample(this.currentTimelineSample())
+  }
+
+  /** Counts kept for the stress tests. Playback does not read this. */
+  stability() {
+    return {
+      sources: this.sources.length,
+      padVoices: this.padVoices.length,
+      oneShots: this.oneShots.length,
+      drumTrims: this.drumTrims.size,
+      chains: this.chains.size,
+      strips: this.strips.size,
+      liveBuiltins: this.liveBuiltins.length,
+      reaped: this.reaped,
+      schedulerSkips: this.schedulerSkips,
+      schedulerGapSec: this.schedulerGapSec,
+      commandEpoch: this.commandEpoch,
+      playing: this.playing,
+      heldPlaying: this.heldPlaying,
+      recorders: this.recorders.size,
+      pendingRecorders: this.pendingRecorders.length,
+    }
   }
 
   setBeatPump(pump: ((now: number, horizon: number) => void) | null) {
@@ -2590,11 +2695,12 @@ export class AudioEngine {
     if (!this.ctx || this.scheduling) return
     this.scheduling = true
     try {
+      this.reapSources()
       this.applyLoopAudio()
       if (this.pendingSchedule) this.pendingSchedule = false
       if (!this.ctx) return
       const now = this.ctx.currentTime
-      const horizon = now + 0.35
+      const horizon = now + SCHEDULER_HORIZON_SEC
       if (this.beatPump) this.beatPump(now, horizon)
       if (!this.playing || !this.project) return
       this.refreshClockAnchor()
@@ -2625,27 +2731,30 @@ export class AudioEngine {
   private click(when: number, accent: boolean, countIn = false) {
     if (!this.ctx || !this.metroGain) return
     const voice = clickVoice(accent, countIn)
+    const at = Math.max(when, this.ctx.currentTime)
     const osc = this.ctx.createOscillator()
     const gain = this.ctx.createGain()
     osc.type = voice.type
-    osc.frequency.setValueAtTime(voice.frequency, when)
-    gain.gain.setValueAtTime(0.0001, when)
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, voice.peak), when + 0.002)
-    gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.045)
+    osc.frequency.setValueAtTime(voice.frequency, at)
+    gain.gain.setValueAtTime(0.0001, at)
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, voice.peak), at + 0.002)
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.045)
     let tail: AudioNode = osc
     if (voice.lowpass != null) {
       const filter = this.ctx.createBiquadFilter()
       filter.type = 'lowpass'
-      filter.frequency.setValueAtTime(voice.lowpass, when)
+      filter.frequency.setValueAtTime(voice.lowpass, at)
       filter.Q.setValueAtTime(0.7, when)
       osc.connect(filter)
       tail = filter
     }
     tail.connect(gain)
     gain.connect(this.metroGain)
-    osc.start(when)
-    osc.stop(when + 0.05)
-    this.sources.push(osc)
+    osc.start(at)
+    osc.stop(at + 0.05)
+    const chain: AudioNode[] = [osc, gain]
+    if (tail !== osc) chain.push(tail)
+    this.holdVoice(at + 0.08, chain)
   }
 
   /** Restart arrangement playback at the wrapped playhead so a loop toggle takes effect immediately. */
@@ -2668,7 +2777,6 @@ export class AudioEngine {
     this.playOriginCtx = now
     this.playOriginSample = sample
     this.positionSamples = sample
-    this.arrangementScheduled = false
     this.nextLoopCtx = null
     this.loopQueuedUntil = 0
     this.loopQueuedCtx = 0
@@ -2720,6 +2828,36 @@ export class AudioEngine {
     this.pendingSchedule = true
   }
 
+  /** Samples to schedule on this pass. Never more than the horizon, never a zero-length slice. */
+  private horizonSamples(remain: number) {
+    const cap = Math.max(1, Math.ceil(SCHEDULER_HORIZON_SEC * this.sampleRate))
+    return Math.max(1, Math.min(Math.max(0, remain), cap))
+  }
+
+  /**
+   * A stalled wake used to schedule every missed cycle on the main thread.
+   * Jump the cursor to now instead, and count it so the stress test can see the gap.
+   */
+  private realignCursor(mode: 'loop' | 'pattern' | 'linear', cycleSamples: number) {
+    const ctx = this.ctx
+    const project = this.project
+    if (!ctx || !project || this.nextLoopCtx == null) return
+    const cycleSec = Math.max(cycleSamples, 1) / this.sampleRate
+    const moved = advanceLoopCursor(this.nextLoopCtx, ctx.currentTime, cycleSec)
+    if (!moved.jumped) return
+    this.schedulerSkips += 1
+    this.nextLoopCtx = moved.cursor
+    const linear = Math.max(0, this.sampleAt(ctx.currentTime))
+    if (mode === 'pattern') {
+      const cycle = Math.max(1, cycleSamples)
+      this.nextLoopSample = ((Math.round(linear) % cycle) + cycle) % cycle
+    } else if (mode === 'loop') {
+      this.nextLoopSample = Math.round(transportSample(linear, project))
+    } else {
+      this.nextLoopSample = Math.min(arrangementEndSample(project), Math.round(linear))
+    }
+  }
+
   private scheduleArrangement(horizon: number) {
     const project = this.project!
     const patternLoop = this.status === 'recording' ? 0 : emptyPatternLoopSamples(project)
@@ -2728,20 +2866,38 @@ export class AudioEngine {
         this.nextLoopCtx = this.playOriginCtx
         this.nextLoopSample = ((this.playOriginSample % patternLoop) + patternLoop) % patternLoop
       }
-      while (this.nextLoopCtx < horizon) {
-        const samples = Math.max(1, patternLoop - this.nextLoopSample)
+      this.realignCursor('pattern', patternLoop)
+      let passes = 0
+      while (this.nextLoopCtx != null && this.nextLoopCtx < horizon && passes < MAX_SCHEDULE_PASSES) {
+        const samples = this.horizonSamples(patternLoop - this.nextLoopSample)
         this.scheduleWindow(this.nextLoopCtx, this.nextLoopSample, this.nextLoopSample + samples)
         this.nextLoopCtx += samples / this.sampleRate
-        this.nextLoopSample = 0
+        const wrapped = this.nextLoopSample + samples >= patternLoop - 1
+        this.nextLoopSample = wrapped ? 0 : this.nextLoopSample + samples
+        passes += 1
       }
       return
     }
     const end = arrangementEndSample(project)
     const cycleWhileRecording = this.status === 'recording' && project.record?.loop
     if (!project.loopEnabled || (this.status === 'recording' && !cycleWhileRecording)) {
-      if (this.arrangementScheduled) return
-      this.arrangementScheduled = true
-      this.scheduleWindow(this.playOriginCtx, this.playOriginSample, end)
+      if (this.nextLoopCtx == null) {
+        this.nextLoopCtx = this.playOriginCtx
+        this.nextLoopSample = this.playOriginSample
+      }
+      this.realignCursor('linear', Math.ceil(SCHEDULER_HORIZON_SEC * this.sampleRate))
+      let passes = 0
+      while (this.nextLoopCtx != null && this.nextLoopCtx < horizon && this.nextLoopSample < end - 1 && passes < MAX_SCHEDULE_PASSES) {
+        const samples = this.horizonSamples(end - this.nextLoopSample)
+        if (samples < 8) {
+          this.nextLoopSample = end
+          break
+        }
+        this.scheduleWindow(this.nextLoopCtx, this.nextLoopSample, this.nextLoopSample + samples)
+        this.nextLoopCtx += samples / this.sampleRate
+        this.nextLoopSample += samples
+        passes += 1
+      }
       return
     }
     const loopLen = project.loopEndSample - project.loopStartSample
@@ -2750,14 +2906,18 @@ export class AudioEngine {
       this.nextLoopCtx = this.playOriginCtx
       this.nextLoopSample = this.playOriginSample
     }
-    while (this.nextLoopCtx < horizon) {
-      const samples = Math.max(1, project.loopEndSample - this.nextLoopSample)
+    this.realignCursor('loop', loopLen)
+    let passes = 0
+    while (this.nextLoopCtx != null && this.nextLoopCtx < horizon && passes < MAX_SCHEDULE_PASSES) {
+      const samples = this.horizonSamples(project.loopEndSample - this.nextLoopSample)
       const when = this.nextLoopCtx
       this.scheduleWindow(when, this.nextLoopSample, this.nextLoopSample + samples)
       this.loopQueuedUntil = this.nextLoopSample + samples
       this.loopQueuedCtx = when + samples / this.sampleRate
       this.nextLoopCtx += samples / this.sampleRate
-      this.nextLoopSample = project.loopStartSample
+      const wrapped = this.nextLoopSample + samples >= project.loopEndSample - 1
+      this.nextLoopSample = wrapped ? project.loopStartSample : this.nextLoopSample + samples
+      passes += 1
     }
   }
 
@@ -2931,6 +3091,8 @@ export class AudioEngine {
       if (limit != null && nextWhen >= limit - 0.001) return
       const timer = window.setTimeout(() => schedulePass(nextWhen), Math.max(20, durSec * 1000 - 200))
       const node: Stoppable = {
+        loopTimer: true,
+        endAt: nextWhen + 0.05,
         stop: (at?: number) => {
           const kill = () => window.clearTimeout(timer)
           const now = this.ctx?.currentTime ?? 0
@@ -2940,7 +3102,15 @@ export class AudioEngine {
         disconnect: () => undefined,
       }
       if (retiredHere && retired) retired.nodes.push(node)
-      else this.trackNodes(track.id, node)
+      else {
+        const previous = this.sessionNodes.get(track.id) || []
+        const stale = new Set(previous.filter((item) => item.loopTimer))
+        const list = previous.filter((item) => !item.loopTimer)
+        list.push(node)
+        this.sessionNodes.set(track.id, list)
+        if (stale.size) this.sources = this.sources.filter((item) => !stale.has(item))
+        this.sources.push(node)
+      }
     }
     schedulePass(firstWhen)
   }
@@ -3016,8 +3186,9 @@ export class AudioEngine {
           for (const note of prepareClipNotes(project, group.owner, clip)) {
             const span = beatSpanSamples(project, clip.startBeat + note.startBeat, note.durationBeats)
             if (span.start + span.duration <= timelineStart || span.start >= timelineEnd) continue
-            const when = ctxTime + (span.start - timelineStart) / this.sampleRate
-            if (when < ctx.currentTime) continue
+            const rawWhen = ctxTime + (span.start - timelineStart) / this.sampleRate
+            const when = ctx === this.ctx ? placeNoteTime(rawWhen, ctx.currentTime) : rawWhen
+            if (when == null) continue
             this.scheduleVoice(ctx, strip, note, when, span.duration / this.sampleRate, group.voice)
           }
         }
@@ -3186,11 +3357,12 @@ export class AudioEngine {
     gain.gain.setValueAtTime(0.0001, when)
     gain.gain.exponentialRampToValueAtTime(peak, when + 0.003)
     src.connect(gain)
-    connectNotePan(ctx, gain, into ?? strip.input, hit.pan || 0)
+    const panNodes = connectNotePan(ctx, gain, into ?? strip.input, hit.pan || 0)
     const gate = Math.max(0.08, Math.min(1, (hit.durationBeats || 0.2) / 0.2))
     src.start(when)
-    src.stop(when + Math.max(0.05, buffer.duration * gate))
-    if (ctx === this.ctx) this.sources.push(src)
+    const end = when + Math.max(0.05, buffer.duration * gate)
+    src.stop(end)
+    if (ctx === this.ctx) this.holdVoice(end + 0.03, [src, gain, ...panNodes])
     return true
   }
 
@@ -3212,8 +3384,8 @@ export class AudioEngine {
     src.start(start)
     src.stop(start + buffer.duration)
     if (ctx === this.ctx) {
-      this.sources.push(src)
-      bucket?.push(src)
+      const entry = this.holdVoice(start + buffer.duration + 0.03, [src, gain])
+      bucket?.push(entry)
     }
     return true
   }
@@ -3243,17 +3415,19 @@ export class AudioEngine {
     gain.gain.exponentialRampToValueAtTime(peak, when + 0.005)
     gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.03, dur))
     source.connect(gain)
-    connectNotePan(ctx, gain, into ?? strip.input, hit.pan || 0)
+    const panNodes = connectNotePan(ctx, gain, into ?? strip.input, hit.pan || 0)
     const startable = source as AudioScheduledSourceNode
+    const end = when + dur + 0.02
     if (typeof startable.start === 'function') {
       startable.start(when)
-      startable.stop(when + dur + 0.02)
+      startable.stop(end)
     }
     extra && typeof (extra as AudioScheduledSourceNode).start === 'function' && (extra as AudioScheduledSourceNode).start(when)
-    extra && typeof (extra as AudioScheduledSourceNode).stop === 'function' && (extra as AudioScheduledSourceNode).stop(when + dur + 0.02)
+    extra && typeof (extra as AudioScheduledSourceNode).stop === 'function' && (extra as AudioScheduledSourceNode).stop(end)
     if (ctx === this.ctx) {
-      if (typeof startable.stop === 'function') this.sources.push(startable)
-      if (extra && typeof (extra as AudioScheduledSourceNode).stop === 'function') this.sources.push(extra as AudioScheduledSourceNode)
+      const chain: AudioNode[] = [source, gain, ...panNodes]
+      if (extra && extra !== source) chain.push(extra)
+      this.holdVoice(end + 0.03, chain)
     }
   }
 
@@ -3312,7 +3486,7 @@ export class AudioEngine {
     const to = Math.min(clipEnd, timelineEnd)
     if (to - from < 8) return
     const when = ctxTime + (from - timelineStart) / sr
-    if (ctx === this.ctx && when < ctx.currentTime - 0.02) return
+    if (ctx === this.ctx && when < ctx.currentTime - LATE_SLIP_SEC) return
     const offset = (clip.offsetSamples + (from - clip.startSample)) / buffer.sampleRate
     const dur = (to - from) / sr
     const src = ctx.createBufferSource()
@@ -3329,26 +3503,28 @@ export class AudioEngine {
       if (fadeOut > 0 && t > clipDur - fadeOut) g *= Math.max(0, (clipDur - t) / fadeOut)
       return Math.max(0.0001, g)
     }
+    const at = ctx === this.ctx ? Math.max(when, ctx.currentTime) : Math.max(0, when)
     const join = this.joining && from <= timelineStart + 8
-    gain.gain.setValueAtTime(join ? 0.0001 : env(relFrom), when)
+    gain.gain.setValueAtTime(join ? 0.0001 : env(relFrom), at)
     if (join && !(fadeIn > 0 && relFrom < fadeIn)) {
-      gain.gain.linearRampToValueAtTime(Math.max(0.0001, clip.gain), when + Math.min(0.008, dur))
+      gain.gain.linearRampToValueAtTime(Math.max(0.0001, clip.gain), at + Math.min(0.008, dur))
     }
     if (fadeIn > 0 && relFrom < fadeIn) {
-      gain.gain.linearRampToValueAtTime(clip.gain, Math.min(when + (fadeIn - relFrom), when + dur))
+      gain.gain.linearRampToValueAtTime(clip.gain, Math.min(at + (fadeIn - relFrom), at + dur))
     }
     if (fadeOut > 0 && relTo > clipDur - fadeOut) {
-      const start = when + Math.max(0, clipDur - fadeOut - relFrom)
+      const start = at + Math.max(0, clipDur - fadeOut - relFrom)
       gain.gain.setValueAtTime(Math.max(0.0001, clip.gain), start)
-      gain.gain.linearRampToValueAtTime(0.0001, when + dur)
+      gain.gain.linearRampToValueAtTime(0.0001, at + dur)
     }
     src.connect(gain)
     gain.connect(strip.input)
-    src.start(Math.max(when, 0), Math.max(0, offset), dur)
+    src.start(at, Math.max(0, offset), dur)
     if (ctx === this.ctx) {
       this.sources.push({
-        stop: (at?: number) => {
-          try { src.stop(at) } catch { /* already stopped */ }
+        endAt: at + dur + 0.05,
+        stop: (whenStop?: number) => {
+          try { src.stop(whenStop) } catch { /* already stopped */ }
         },
         disconnect: () => {
           try { src.disconnect() } catch { /* already disconnected */ }
@@ -3650,6 +3826,8 @@ export class AudioEngine {
     panner.pan.value = Math.max(-1, Math.min(1, hit.pan ?? pad?.pan ?? 0))
     level.connect(panner)
     panner.connect(dest)
+    const chain: AudioNode[] = [src, gain, level, panner]
+    if (node !== gain) chain.push(node)
     for (const send of track.sends ?? []) {
       const amount = padSendGain(pad?.send ?? 0, send.gain, send.enabled)
       if (amount <= 0.0001) continue
@@ -3659,21 +3837,27 @@ export class AudioEngine {
       tap.gain.value = amount
       panner.connect(tap)
       tap.connect(bus.input)
+      chain.push(tap)
     }
     const stop = (at?: number) => {
       try { src.stop(at) } catch { /* already stopped */ }
     }
+    const end = start + dur + 0.01
     src.start(start)
-    src.stop(start + dur + 0.01)
+    src.stop(end)
     this.notePad(hit.pitch, hit.velocity, start)
     const voice = { pitch: hit.pitch, trackId: track.id, gain, level, pan: panner, stop, born: start, until: start + dur, src }
     this.padVoices.push(voice)
-    src.onended = () => {
+    const releaseChain = () => {
       this.padVoices = this.padVoices.filter((item) => item.src !== src)
+      for (const item of chain) {
+        try { item.disconnect() } catch { /* already disconnected */ }
+      }
     }
+    src.onended = releaseChain
     if (ctx === this.ctx) {
-      this.sources.push(src)
-      bucket?.push(src)
+      const entry = this.holdVoice(end + 0.04, chain)
+      bucket?.push(entry)
     }
   }
 
@@ -3758,11 +3942,16 @@ export class AudioEngine {
     gain.gain.exponentialRampToValueAtTime(0.0001, stopAt)
     const stop = () => fadeSource(ctx, gain, src)
     this.oneShots.push({ pitch, when: startAt, stop })
+    const end = startAt + buffer.duration * decay + 0.02
     src.onended = () => {
       this.oneShots = this.oneShots.filter((shot) => shot.stop !== stop)
+      try { src.disconnect() } catch { /* already disconnected */ }
+      try { filter.disconnect() } catch { /* already disconnected */ }
+      try { gain.disconnect() } catch { /* already disconnected */ }
     }
     src.start(startAt)
-    src.stop(startAt + buffer.duration * decay + 0.02)
+    src.stop(end)
+    this.holdVoice(end + 0.04, [src, filter, gain])
   }
 
   liveGain(pitch: number, velocity: number) {
@@ -3791,11 +3980,15 @@ export class AudioEngine {
     gain.gain.exponentialRampToValueAtTime(0.0001, stopAt)
     const stop = () => fadeSource(ctx, gain, src)
     this.oneShots.push({ pitch: this.drumTable[index]?.pitch ?? -1, when: startAt, stop })
+    const end = startAt + buffer.duration * decay + 0.02
     src.onended = () => {
       this.oneShots = this.oneShots.filter((shot) => shot.stop !== stop)
+      try { src.disconnect() } catch { /* already disconnected */ }
+      try { gain.disconnect() } catch { /* already disconnected */ }
     }
     src.start(startAt)
-    src.stop(startAt + buffer.duration * decay + 0.02)
+    src.stop(end)
+    this.holdVoice(end + 0.04, [src, gain])
     return true
   }
 
@@ -3847,12 +4040,18 @@ export class AudioEngine {
       const kit = normalizePadKit(track.padKit)
       const bank = kit.banks[Math.min(kit.banks.length - 1, Math.max(0, kit.activeBank || 0))] ?? []
       const played = padPitchForKey(bank, pitch)
-      if (!strip || !this.acceptLive(trackId, played, when)) return
+      if (!strip || !this.acceptLive(trackId, played, when)) {
+        this.holdMidi(trackId, -1)
+        return
+      }
       this.playPadNote(ctx, strip, track, { pitch: played, velocity, tune: fine / 100 }, when, undefined, null)
       return
     }
     if (track?.instrument === 'drum-machine') {
-      if (!this.acceptLive(trackId, pitch, when)) return
+      if (!this.acceptLive(trackId, pitch, when)) {
+        this.holdMidi(trackId, -1)
+        return
+      }
       const strip = this.strips.get(trackId)
       if (strip) this.playDrum(ctx, strip, { id: 'live', pitch, startBeat: 0, durationBeats: 0.25, velocity, fine }, when)
       return
@@ -3861,7 +4060,10 @@ export class AudioEngine {
       this.previewRack(trackId, pitch, false, true, velocity)
       return
     }
-    if (!this.acceptLive(trackId, pitch, when)) return
+    if (!this.acceptLive(trackId, pitch, when)) {
+      this.holdMidi(trackId, -1)
+      return
+    }
     const previous = this.liveTrackId
     this.liveTrackId = trackId
     const strip = track ? this.strips.get(track.id) : undefined
@@ -3963,8 +4165,8 @@ export class AudioEngine {
     filter.connect(gain)
     gain.connect(strip.input)
     osc.start(when)
-    this.liveBuiltins.push({ key, gain, src: osc })
-    this.sources.push(osc)
+    const entry = this.holdVoice(Number.POSITIVE_INFINITY, [osc, filter, gain])
+    this.liveBuiltins.push({ key, gain, src: osc, entry })
   }
 
   private stopBuiltin(key: string, when: number) {
@@ -3980,6 +4182,7 @@ export class AudioEngine {
         voice.gain.gain.exponentialRampToValueAtTime(0.0001, when + RELEASE_SEC)
         voice.src.stop(when + RELEASE_SEC + 0.02)
       } catch { /* already stopped */ }
+      voice.entry.endAt = when + RELEASE_SEC + 0.05
     }
     this.liveBuiltins = keep
   }
@@ -4218,13 +4421,12 @@ export class AudioEngine {
     const sample = Math.max(0, Math.round(this.sampleAt(now)))
     this.joining = true
     this.stopSources(now)
-    this.arrangementScheduled = true
     this.sessionStarted.clear()
     this.nextLoopCtx = now
     this.nextLoopSample = sample
-    const end = arrangementEndSample(project)
-    this.scheduleWindow(now, sample, end)
-    this.joining = false
+    this.loopQueuedUntil = 0
+    this.loopQueuedCtx = 0
+    this.scheduleAhead()
   }
 
   private scheduleStretchWorklet(
@@ -4293,6 +4495,7 @@ export class AudioEngine {
       frames: Math.max(1, to - from),
     })
     this.sources.push({
+      endAt: Math.max(when, 0) + dur + 0.05,
       stop: () => {
         try { node.disconnect() } catch { /* already stopped */ }
       },
@@ -4625,12 +4828,13 @@ export class AudioEngine {
     gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.05, dur))
     osc.connect(filter)
     filter.connect(gain)
-    connectNotePan(ctx, gain, strip.input, note.pan || 0)
+    const panNodes = connectNotePan(ctx, gain, strip.input, note.pan || 0)
+    const end = when + dur + 0.03
     osc.start(when)
-    osc.stop(when + dur + 0.03)
+    osc.stop(end)
     if (ctx === this.ctx) {
-      this.sources.push(osc)
-      bucket?.push(osc)
+      const entry = this.holdVoice(end + 0.02, [osc, filter, gain, ...panNodes])
+      bucket?.push(entry)
     }
   }
 
@@ -4659,13 +4863,64 @@ export class AudioEngine {
     const src = ctx.createBufferSource()
     src.buffer = buffer
     src.connect(strip.input)
-    src.start(Math.max(when, 0))
-    if (ctx === this.ctx) this.sources.push(src)
+    const at = Math.max(when, 0)
+    src.start(at)
+    if (ctx === this.ctx) this.holdVoice(at + buffer.duration + 0.05, [src])
   }
 
   private previewRelease(bucket: Stoppable[] | undefined, stop: () => void) {
     if (bucket !== this.scalerVoices) return
     bucket.push({ stop, disconnect() {} })
+  }
+
+  /** Keep a voice until `endAt`, then drop every node it created. */
+  private holdVoice(endAt: number, nodes: AudioNode[], release?: (when: number) => void): Stoppable {
+    const entry: Stoppable = {
+      endAt,
+      stop: (when?: number) => {
+        for (const node of nodes) {
+          const src = node as Partial<AudioScheduledSourceNode>
+          if (typeof src.stop !== 'function') continue
+          try { src.stop(when) } catch { /* already stopped */ }
+        }
+      },
+      disconnect: () => {
+        for (const node of nodes) {
+          try { node.disconnect() } catch { /* already disconnected */ }
+        }
+      },
+      release,
+    }
+    this.sources.push(entry)
+    return entry
+  }
+
+  /** Finished one-shots must not stay connected for the rest of the session. */
+  private reapSources() {
+    const now = this.ctx?.currentTime
+    if (now == null) return
+    const keep: Stoppable[] = []
+    for (const src of this.sources) {
+      if (src.endAt != null && now >= src.endAt) {
+        try { src.disconnect() } catch { /* already disconnected */ }
+        this.reaped += 1
+        continue
+      }
+      keep.push(src)
+    }
+    if (keep.length !== this.sources.length) this.sources = keep
+    if (this.sessionNodes.size) {
+      for (const [id, list] of this.sessionNodes) {
+        const next = list.filter((node) => node.endAt == null || now < node.endAt)
+        if (next.length !== list.length) this.sessionNodes.set(id, next)
+      }
+    }
+    if (this.oneShots.length) {
+      this.oneShots = this.oneShots.filter((shot) => now < shot.when + 2)
+    }
+    if (this.padVoices.length) {
+      this.padVoices = this.padVoices.filter((voice) => now < voice.until + 0.05)
+    }
   }
 
   private stopSources(fadeAt?: number) {
@@ -4720,11 +4975,11 @@ function samplerInsert(track: Track | undefined) {
  * first step off center does not drop 3 dB under that direct connection.
  * A context without a merger (test doubles) keeps a stereo panner.
  */
-function connectNotePan(ctx: BaseAudioContext, source: AudioNode, dest: AudioNode, pan: number) {
+function connectNotePan(ctx: BaseAudioContext, source: AudioNode, dest: AudioNode, pan: number): AudioNode[] {
   const gains = notePanGains(pan)
   if (gains.left === 1 && gains.right === 1) {
     source.connect(dest)
-    return
+    return []
   }
   if (typeof ctx.createChannelMerger === 'function' && typeof ctx.createGain === 'function') {
     const left = ctx.createGain()
@@ -4741,16 +4996,17 @@ function connectNotePan(ctx: BaseAudioContext, source: AudioNode, dest: AudioNod
     left.connect(merge, 0, 0)
     right.connect(merge, 0, 1)
     merge.connect(dest)
-    return
+    return [left, right, merge]
   }
   if (typeof ctx.createStereoPanner === 'function') {
     const panner = ctx.createStereoPanner()
     panner.pan.value = Math.max(-1, Math.min(1, Number.isFinite(pan) ? pan : 0))
     source.connect(panner)
     panner.connect(dest)
-    return
+    return [panner]
   }
   source.connect(dest)
+  return []
 }
 
 function fadeSource(ctx: AudioContext, gain: GainNode, src: AudioBufferSourceNode) {
