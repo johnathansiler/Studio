@@ -2057,6 +2057,24 @@ html[data-posture="tabletop"] .shell .master-sheet {
   position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column;
   background: #121a16; color: var(--text);
 }
+.ideas-pop.embedded,
+.shell .ideas-pop.embedded,
+.shell.phone:not(.land) .ideas-pop.embedded {
+  position: relative !important;
+  inset: auto !important;
+  top: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: auto !important;
+  z-index: auto !important;
+  width: auto;
+  height: auto;
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: transparent;
+  overflow: hidden;
+}
 .ideas-pop header, .idea-actions, .chip-row { display: flex; gap: 8px; align-items: center; }
 .ideas-pop header { padding: 10px 12px; }
 .ideas-pop header strong { margin-right: auto; }

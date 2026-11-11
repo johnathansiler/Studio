@@ -275,6 +275,9 @@ describe('unstuck songs', () => {
     const engine = { stopPreview() {}, positionSamples: 0 } as AudioEngine
     const html = renderToStaticMarkup(createElement(UnstuckSheet, { store, engine, onClose: () => undefined }))
     expect(html).toContain('data-unstuck="parts"')
+    expect(html).toContain('>Write<')
+    expect(html).toContain('>Progressions<')
+    expect(html).toContain('>Players<')
     expect(html).toContain('>Drums<')
     expect(html).toContain('>Bass<')
     expect(html).toContain('>Chords<')
