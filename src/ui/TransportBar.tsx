@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { createPortal } from 'react-dom'
 import type { AudioEngine } from '../audio/engine'
 import { emptyTap, formatTempo, noteTapRelease, pushTap, roundTempo, shouldOpenExactTempo, type TapMemory, type TapSource } from '../model/tap'
 import { dragNumeric } from '../model/dragNumeric'
 import { tempoDragIntent, tempoFromDrag } from '../model/tempoDrag'
+import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
+import { quartersPerBar } from '../model/time'
 import { recordButtonOn } from '../model/transport'
 import { selectTransport } from '../state/select'
 import type { ProjectStore } from '../state/store'
@@ -17,6 +20,22 @@ import { TipButton } from './Hint'
 import { armFinePress, markIntegerLand } from './integerTick'
 import './loopRegion.css'
 import './remoteFixes.css'
+
+function shiftBars(project: { tempo: number; tempoMap?: { beat: number; bpm: number }[]; automation?: unknown[]; sampleRate: number; timeSignature: { numerator: number; denominator: number } }, samples: number, bars: number) {
+  const beat = projectSampleBeat(project as never, Math.max(0, samples))
+  const next = Math.max(0, beat + bars * quartersPerBar(project.timeSignature))
+  return Math.max(0, Math.round(projectBeatSample(project as never, next)))
+}
+
+export function IdeasBulbIcon() {
+  return (
+    <svg className="ideas-bulb-icon" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+      <path className="ideas-rays" d="M12 1.4v1.6M4.4 5.2l1.1 1.1M19.6 5.2l-1.1 1.1M2.2 12H3.8M20.2 12h1.6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M9 18h6M10 21h4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M12 3.2a5.6 5.6 0 0 0-3 10.3c.5.4.8 1 .8 1.6V17h4.4v-1.9c0-.6.3-1.2.8-1.6A5.6 5.6 0 0 0 12 3.2z" fill="currentColor" fillOpacity="0.22" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
+  )
+}
 
 function ResetIcon() {
   return (
@@ -38,6 +57,8 @@ export function TransportBar({
   onReset,
   onQuickPunch,
   onMidi,
+  onIdeas,
+  bulbOn = false,
   session,
   roomRole,
   simple = false,
@@ -56,6 +77,8 @@ export function TransportBar({
   onReset?: () => void
   onQuickPunch?: () => void
   onMidi?: () => void
+  onIdeas?: () => void
+  bulbOn?: boolean
   session?: SessionClient
   /** Solo and host can reset. A guest sees a disabled Host only control. */
   roomRole?: 'host' | 'guest'
@@ -462,15 +485,53 @@ export function TransportBar({
           onClick={() => onReset?.()}
         >
           <ResetIcon />
+          <span className="t-word">Reset</span>
         </TipButton>
+  )
+  const [extrasHost, setExtrasHost] = useState<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    const pick = () => {
+      const node = document.getElementById('transport-extras')
+      setExtrasHost(node instanceof HTMLElement ? node : null)
+    }
+    pick()
+    const observer = new MutationObserver(pick)
+    observer.observe(document.body, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [])
+  function nudge(bars: number) {
+    const at = typeof engine.currentTimelineSample === 'function' ? engine.currentTimelineSample() : engine.positionSamples
+    onSeek(shiftBars(project, at, bars))
+  }
+  const extras = (
+    <div className="transport-extras" role="group" aria-label="Punch, tempo, and reset">
+      <RecordBar
+        dock
+        store={store}
+        engine={engine}
+        session={session ?? ({ state: { participants: [], selfId: 'local' } } as unknown as SessionClient)}
+        onQuickPunch={onQuickPunch ?? (() => undefined)}
+        onMidi={onMidi}
+      />
+      <div className="tempo-cluster" role="group" aria-label="Tempo" ref={tempoWrap}>{tempoField}</div>
+      {phone ? null : clickButton}
+      {phone ? null : countButton}
+      {resetButton}
+    </div>
   )
   return (
     <div className="transport simple">
       <AutomationFollow store={store} engine={engine} />
       {inSession && syncLabel ? <span className="sync-pill">{syncLabel}</span> : null}
       <ButtonTray className="t-main">
-        <TipButton className="t-btn" label={transport('to-start').label} hint={transport('to-start').hint} onClick={() => onSeek(0)}>
+        <TipButton className="t-btn" label="Go to Start" hint={transport('to-start').hint} onClick={() => onSeek(0)}>
           <span className="t-word">Start</span>
+        </TipButton>
+        <TipButton className="t-btn" label="Rewind" hint="Jump the playhead back one bar." onClick={() => nudge(-1)}>
+          <span className="t-word">Rewind</span>
+        </TipButton>
+        <TipButton className="t-btn" label="Fast Forward" hint="Jump the playhead forward one bar." onClick={() => nudge(1)}>
+          <span className="t-word">Forward</span>
         </TipButton>
         <TipButton
           className={`t-btn play${running ? ' on' : ''}`}
@@ -485,19 +546,19 @@ export function TransportBar({
         <TipButton className={`t-btn rec ${recordButtonOn(status) ? 'on' : ''}`} label={transport('record').label} hint={transport('record').hint} pressed={recordButtonOn(status)} onPress={() => engine.unlock()} onClick={onRecord}>
           <span className="t-word">Record</span>
         </TipButton>
-        <RecordBar
-          dock
-          store={store}
-          engine={engine}
-          session={session ?? ({ state: { participants: [], selfId: 'local' } } as unknown as SessionClient)}
-          onQuickPunch={onQuickPunch ?? (() => undefined)}
-          onMidi={onMidi}
-        />
-        <div className="tempo-cluster" role="group" aria-label="Tempo" ref={tempoWrap}>{tempoField}</div>
-        {phone ? null : clickButton}
-        {phone ? null : countButton}
-        {resetButton}
+        <button
+          type="button"
+          className={`t-btn ideas-bulb${bulbOn ? ' on' : ''}`}
+          aria-label="Ideas"
+          title="Ideas"
+          aria-pressed={bulbOn}
+          disabled={!onIdeas || store.remoteFollow}
+          onClick={() => onIdeas?.()}
+        >
+          <IdeasBulbIcon />
+        </button>
       </ButtonTray>
+      {extrasHost ? createPortal(extras, extrasHost) : extras}
       {takeProgress != null && (
         <div
           className="hq-take"

@@ -179,7 +179,7 @@ export function RecordBar({
           </svg>
           <span className="t-word">Punch</span>
         </button>
-        <AnchoredMenu className="punch-menu" open={open} onClose={() => setOpen(false)} label="Punch" triggerRef={optionsButton} prefer="down">
+        <AnchoredMenu className="punch-menu" open={open} onClose={() => setOpen(false)} label="Punch" triggerRef={optionsButton} prefer="auto">
           <div className="sheet-head punch-head">
             <strong>Punch</strong>
             <SheetClose onClick={() => setOpen(false)} />

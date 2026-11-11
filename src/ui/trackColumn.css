@@ -1,0 +1,208 @@
+/* Header column only. The timeline ruler, loop handles, and lanes stay put. */
+
+.track-viewfinder-slot {
+  flex: none;
+  min-width: 0;
+  max-width: 100%;
+  background: #141c18;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 6;
+}
+
+.shell.phone .track-viewfinder-slot,
+.shell.phone.land .track-viewfinder-slot {
+  grid-column: 1;
+  grid-row: 1;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  justify-self: stretch;
+  align-self: stretch;
+  overflow: hidden;
+}
+
+.track-viewfinder {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px 5px;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 11px;
+  line-height: 1.3;
+  overflow: hidden;
+}
+
+.track-viewfinder p {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-viewfinder .viewfinder-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.track-viewfinder .viewfinder-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.track-viewfinder .viewfinder-title span,
+.track-viewfinder .viewfinder-meta,
+.track-viewfinder .viewfinder-empty {
+  color: var(--muted);
+}
+
+.arrange .head .pl-head {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.shell.phone:not(.land) .arrange .head .pl-head,
+.shell.phone.land .arrange .head .pl-head,
+.shell:not(.phone) .arrange .head .pl-head,
+.shell.fold .arrange .head .pl-head {
+  padding: 4px 2px 4px 0;
+}
+
+.shell .arrange .head .track-meter-row {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
+  height: 10px;
+}
+
+.shell.phone:not(.land) .arrange .pl-head .track-meter-row .track-live,
+.shell .arrange .head .track-meter-row .track-live {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 10px;
+  margin: 0;
+}
+
+.shell.phone:not(.land) .arrange .pl-head .track-meter-row .mini-meter,
+.shell.phone .arrange .head .track-meter-row .mini-meter,
+.shell.fold .arrange .head .track-meter-row .mini-meter,
+.shell .arrange .head .track-meter-row .mini-meter {
+  display: block;
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 24px;
+  max-width: none;
+  height: 8px;
+}
+
+.arrange .track-controls > .track-more,
+.arrange[data-lane-scale="tight"] .pl-head .track-more,
+.arrange[data-lane-scale="min"] .pl-head .track-more,
+.arrange[data-lane-compact] .pl-head .track-more,
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="min"] .pl-head .track-more,
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="tight"] .pl-head .track-more,
+.shell.phone.land .arrange[data-lane-compact][data-lane-scale="tight"] .pl-head .track-more,
+.shell:not(.phone) .arrange[data-lane-scale="min"] .pl-head .track-more,
+.shell:not(.phone) .arrange[data-lane-scale="tight"] .pl-head .track-more {
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: auto !important;
+  flex: 0 0 40px;
+  width: 40px !important;
+  min-width: 40px !important;
+  max-width: 40px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+  margin: 0 !important;
+  pointer-events: auto !important;
+}
+
+.arrange[data-lane-scale="min"] .track-controls,
+.arrange[data-lane-scale="tight"] .track-controls,
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="min"] .track-controls,
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="tight"] .track-controls {
+  padding-right: 0 !important;
+}
+
+.arrange[data-lane-scale="min"] .track-meter-row {
+  display: none;
+}
+
+.track-add {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 2px;
+}
+
+.track-add .add-track-slot,
+.track-add .add-track-btn {
+  width: 100%;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}
+
+.shell.phone .phone-context[data-phone-context="arrange"] {
+  flex-wrap: wrap;
+  overflow-x: hidden;
+}
+
+.shell.phone .phone-context .transport-extras-slot,
+.shell.phone .phone-context .transport-extras,
+.command-strip .transport-extras-slot,
+.command-strip .transport-extras {
+  display: contents;
+}
+
+.transport-extras-slot.parked {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.transport-extras-slot.parked .transport-extras {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 4px;
+  min-width: 0;
+}
+
+.transport-extras .t-btn,
+.transport-extras .tempo-cluster,
+.transport-extras .bpm-readout {
+  height: 40px;
+  min-height: 40px;
+  min-width: 40px;
+}
+
+.transport-extras .punch svg,
+.transport-extras .reset .t-mark {
+  display: none;
+}
+
+.shell .transport.simple .t-main .ideas-bulb svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}

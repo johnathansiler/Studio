@@ -48,9 +48,9 @@ function transportPage(shell: string) {
 }
 
 const VIEWPORTS = [
-  { name: 'desk', width: 1440, height: 900, shell: 'studio', words: ['Start', 'Play', 'Record'] },
-  { name: 'phone', width: 390, height: 844, shell: 'phone', words: ['Start', 'Play', 'Record', 'Punch'] },
-  { name: 'fold', width: 880, height: 1000, shell: 'fold', words: ['Start', 'Play', 'Record'] },
+  { name: 'desk', width: 1440, height: 900, shell: 'studio', words: ['Start', 'Rewind', 'Forward', 'Play', 'Record'] },
+  { name: 'phone', width: 390, height: 844, shell: 'phone', words: ['Start', 'Rewind', 'Forward', 'Play', 'Record'] },
+  { name: 'fold', width: 880, height: 1000, shell: 'fold', words: ['Start', 'Rewind', 'Forward', 'Play', 'Record'] },
 ]
 
 describe('transport words', () => {
@@ -161,16 +161,14 @@ describe('transport words', () => {
             recOn,
           }
         })
+        expect(order.words.filter((word) => word !== 'Tempo' && word !== 'Click' && word !== '1-2' && word !== 'Reset' && word !== 'Punch'), viewport.name).toEqual(['Start', 'Rewind', 'Forward', 'Play', 'Record'])
+        expect(order.rowCount, viewport.name).toBe(6)
         if (viewport.name === 'phone') {
-          expect(order.words, viewport.name).toEqual(['Start', 'Play', 'Record', 'Punch', 'Tempo'])
           expect(order.clickWord, viewport.name).toBe(false)
           expect(order.countPresent, viewport.name).toBe(false)
-          expect(order.rowCount, viewport.name).toBe(6)
           expect(order.recOn, viewport.name).not.toBe(order.recOff)
         } else {
-          expect(order.words.slice(0, 7), viewport.name).toEqual(['Start', 'Play', 'Record', 'Punch', 'Tempo', 'Click', '1-2'])
           expect(order.clickWord, viewport.name).toBe(true)
-          expect(order.rowCount, viewport.name).toBe(8)
           expect(order.clickOn, viewport.name).not.toBe(order.clickOff)
           expect(order.countOn, viewport.name).toBe(order.clickOn)
           expect(order.recOn, viewport.name).not.toBe(order.clickOn)

@@ -64,7 +64,7 @@ import { collabBadgeOn, collabPanelVisible, type StudioTab } from './ui/collabTa
 import './ui/collab.css'
 import { AnchoredMenu } from './ui/AnchoredMenu'
 import { ButtonTray } from './ui/ButtonTray'
-import { TransportBar } from './ui/TransportBar'
+import { IdeasBulbIcon, TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
 import { SnapControl } from './ui/SnapControl'
 import { activeTool } from './state/tools'
@@ -79,7 +79,7 @@ const SpectralSheet = lazy(() => import('./ui/SpectralSheet').then((mod) => ({ d
 const SessionPane = __CUEHARBOR_SESSION__
   ? lazy(() => import('./ui/SessionView').then((mod) => ({ default: mod.SessionView })))
   : function HiddenSession(_props: Record<string, unknown>) { return null }
-import { UNSTUCK_COPY, visibleMenu } from './ui/chrome'
+import { visibleMenu } from './ui/chrome'
 import { ViewSwitcher } from './ui/ViewSwitcher'
 import { PhoneDock } from './ui/phoneDock'
 import { CLOSE_ARRANGE_SHEETS, type PhonePlace } from './ui/phoneContext'
@@ -94,7 +94,7 @@ import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark
 import { sheetHistoryPop } from './ui/arrangePanel'
 import { onViewTab, syncPhoneSheetFrame, syncViewTabFrame } from './ui/overlayHost'
 import { useScreenOverlay } from './ui/screenOverlay'
-import { HintBubble, TipButton } from './ui/Hint'
+import { HintBubble } from './ui/Hint'
 import { Toasts } from './ui/Toasts'
 import { HistoryButtons } from './ui/HistoryButtons'
 import { formatBytes } from './ui/share'
@@ -1959,6 +1959,7 @@ async function importDropped(files: FileList) {
   useScreenOverlay(() => store.closeClipSheet(), store.clipSheet)
 
   const phoneArrange = phone && surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano'
+  const transportShown = (surface === 'studio' || surface === 'artist' || session.state.status === 'live') && !collabShown
   const phonePlace: PhonePlace = collabShown
     ? 'collab'
     : panel === 'pads' || panel === 'steps' || panel === 'scaler' || panel === 'piano' || panel === 'rack'
@@ -1993,7 +1994,7 @@ async function importDropped(files: FileList) {
     setIdeasPage('write')
     setUnstuckOpen(true)
   }
-  const ideasButton = phoneArrange ? (
+  const ideasButton = (
     <button
       type="button"
       className={`ideas-bulb${unstuckOpen ? ' on' : ''}`}
@@ -2005,15 +2006,6 @@ async function importDropped(files: FileList) {
     >
       <IdeasBulbIcon />
     </button>
-  ) : (
-    <TipButton
-      className={`unstuck-btn ${unstuckOpen ? 'on' : ''}`}
-      label={UNSTUCK_COPY.label}
-      hint={UNSTUCK_COPY.hint}
-      pressed={unstuckOpen}
-      disabled={store.remoteFollow}
-      onClick={toggleIdeas}
-    />
   )
 
   if (new URLSearchParams(window.location.search).get('faces') === '1') {
@@ -2074,7 +2066,7 @@ async function importDropped(files: FileList) {
           onCollab={showCollab}
         />
         {!phone && historyButtons}
-        {!phone && ideasButton}
+        {!phone && !transportShown && ideasButton}
         <AnchoredMenu fill sheet={phone} open={menuOpen} onClose={() => setMenuOpen(false)} label="Project menu" triggerRef={menuButtonRef} prefer="down">
           <MainMenu
             items={visibleMenu({
@@ -2096,7 +2088,7 @@ async function importDropped(files: FileList) {
             canRedo={store.canRedo}
             onUndo={phone ? () => { setMenuOpen(false); store.undo() } : undefined}
             onRedo={phone ? () => { setMenuOpen(false); store.redo() } : undefined}
-            onIdeas={phone && !phoneArrange ? () => openIdeas('write') : undefined}
+            onIdeas={phone && !transportShown ? () => openIdeas('write') : undefined}
             latencyHint={latencyHint}
             latencyReadout={latencyReadout}
             onLatency={(hint) => {
@@ -2149,6 +2141,8 @@ async function importDropped(files: FileList) {
           onReset={() => { engine.unlock(); void resetRoom() }}
           onQuickPunch={() => void quickPunch()}
           onMidi={() => { setMenuOpen(false); store.setMidiToolsOpen(true) }}
+          onIdeas={toggleIdeas}
+          bulbOn={unstuckOpen}
           session={session}
           roomRole={session.state.role}
           takeProgress={session.state.takeProgress}
@@ -2200,7 +2194,7 @@ async function importDropped(files: FileList) {
               tucked
               store={store}
               showHint={false}
-              extra={<SnapControl store={store} inline />}
+              extra={<><SnapControl store={store} inline /><div id="transport-extras" className="transport-extras-slot" /></>}
               onChange={(tool) => store.setTool(tool)}
               onDuplicate={() => store.duplicateSelection()}
               onDelete={() => store.deleteSelectedClip()}
@@ -2265,7 +2259,7 @@ async function importDropped(files: FileList) {
                   browserDock={soundsOpen}
                   onBrowserDock={setSoundsOpen}
                   onLibraryClose={() => { engine.stopPreview(); setSoundsOpen(false) }}
-                  phoneBar={phoneArrange ? { ideas: ideasButton } : null}
+                  phoneBar={null}
                 />
               )}
               {editorView === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} onOpenKeyboard={openKeyboard} />}
@@ -2497,12 +2491,3 @@ function MenuIcon() {
   )
 }
 
-function IdeasBulbIcon() {
-  return (
-    <svg className="ideas-bulb-icon" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
-      <path className="ideas-rays" d="M12 1.4v1.6M4.4 5.2l1.1 1.1M19.6 5.2l-1.1 1.1M2.2 12H3.8M20.2 12h1.6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M9 18h6M10 21h4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M12 3.2a5.6 5.6 0 0 0-3 10.3c.5.4.8 1 .8 1.6V17h4.4v-1.9c0-.6.3-1.2.8-1.6A5.6 5.6 0 0 0 12 3.2z" fill="currentColor" fillOpacity="0.22" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-    </svg>
-  )
-}

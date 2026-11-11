@@ -113,7 +113,7 @@ describe('layout audit across the five viewports', () => {
         await page.goto(url, { waitUntil: 'domcontentloaded' })
         await page.getByRole('button', { name: /^Arrange/ }).first().waitFor()
         await page.screenshot({ path: `${artifacts}/layout-after-arrange-${viewport.name}.png` })
-        const arrange = await auditControls(page, '.topbar, .transport, .tool-slot, .arrange-add, .pl-head')
+        const arrange = await auditControls(page, '.topbar, .transport, .tool-slot, .track-viewfinder, .track-add, .pl-head')
         for (const hit of arrange) problems.push(`${viewport.name} arrange ${hit.label} ${hit.width}x${hit.height} overflow=${hit.overflow} covered=${hit.covered} ${hit.cover}`)
 
         await page.getByRole('button', { name: /^Mix/ }).first().click()

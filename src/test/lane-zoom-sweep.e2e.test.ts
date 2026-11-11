@@ -99,7 +99,7 @@ async function readLayout(page: Page): Promise<LayoutReport> {
     const heads = [...document.querySelectorAll('.arrange .heads .head')] as HTMLElement[]
     const lanes = [...document.querySelectorAll('.timeline-scroll .timeline-inner > .lane')] as HTMLElement[]
     const tracks = heads.map((head, index) => {
-      const name = head.querySelector('.name') as HTMLElement | null
+      const name = null as HTMLElement | null
       const menu = head.querySelector('.track-more') as HTMLElement | null
       const lane = lanes[index]
       const nameBox = name?.getBoundingClientRect()
@@ -119,7 +119,7 @@ async function readLayout(page: Page): Promise<LayoutReport> {
         && box.bottom <= outer.bottom + slop
         && (verticalOnly || (box.left >= outer.left - slop && box.right <= outer.right + slop))
       return {
-        name: (name as HTMLInputElement | null)?.value ?? '',
+        name: head.getAttribute('data-track-name') ?? '',
         nameVisible,
         nameHeight: nameBox?.height ?? 0,
         menuHeight: menuBox?.height ?? 0,
@@ -156,12 +156,7 @@ function assertLayout(layout: LayoutReport, zoom: number | null, where: string) 
   expect(layout.tracks.length, where).toBeGreaterThan(0)
   for (const track of layout.tracks) {
     const label = `${where} ${track.name} lane ${track.laneHeight} name ${track.nameHeight}px hit ${track.hit}`
-    if (scale === 'min') expect(track.nameVisible, label).toBe(false)
-    else {
-      expect(track.nameVisible, label).toBe(true)
-      expect(track.nameHeight, label).toBeGreaterThanOrEqual(16)
-    }
-    expect(track.nameVisible && track.nameHeight < 16, `${label} squashed name`).toBe(false)
+    expect(track.nameVisible, label).toBe(false)
     expect(track.menuWidth, label).toBeGreaterThanOrEqual(36)
     expect(track.menuHeight, label).toBeGreaterThanOrEqual(36)
     expect(track.menuHeight, label).toBeLessThanOrEqual(44)

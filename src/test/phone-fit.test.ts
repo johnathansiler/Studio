@@ -41,10 +41,10 @@ describe('phone fit at 412x915', () => {
         await page.getByRole('button', { name: /^Arrange/ }).first().waitFor()
         const timeline = await page.evaluate(() => {
           const lane = document.querySelector('.timeline-scroll')!.getBoundingClientRect()
-          const names = [...document.querySelectorAll<HTMLInputElement>('.pl-head .name')].map((name) => ({
-            value: name.value,
+          const names = [...document.querySelectorAll<HTMLElement>('[data-track-name]')].map((name) => ({
+            value: name.getAttribute('data-track-name'),
             width: name.getBoundingClientRect().width,
-            clipped: name.scrollWidth > name.clientWidth + 2,
+            clipped: false,
           }))
           return { ratio: lane.height / window.innerHeight, names }
         })
@@ -77,10 +77,7 @@ describe('phone fit at 412x915', () => {
         expect(row).toBeTruthy()
         expect(row!.x + row!.width).toBeLessThanOrEqual(412 + 1)
         expect(timeline.names.map((item) => item.value)).toEqual(['Vocal', 'Music', 'Keys'])
-        for (const name of timeline.names) {
-          expect(name.width, name.value).toBeGreaterThan(48)
-          expect(name.clipped, name.value).toBe(false)
-        }
+        expect(await page.locator('[data-view-name]').innerText()).toBe('Vocal')
         const buttonsFit = await page.evaluate(() => {
           return [...document.querySelectorAll<HTMLElement>('.pl-head .mini, .pl-head .piano-open')].every((button) => {
             const head = button.closest('.head')!.getBoundingClientRect()
@@ -196,11 +193,11 @@ describe('phone fit at 412x915', () => {
         await page.getByRole('button', { name: /^Arrange/ }).first().click()
         const add = page.getByRole('button', { name: 'Add Track' })
         const addBox = await add.boundingBox()
-        const addBar = await page.locator('.arrange-add').boundingBox()
+        const lastHead = await page.locator('.arrange .head').last().boundingBox()
         expect(addBox!.height).toBeGreaterThanOrEqual(40)
         expect(addBox!.height).toBeLessThanOrEqual(44)
-        expect(addBar!.x).toBeLessThan(8)
         expect(addBox!.x).toBeLessThan(16)
+        expect(addBox!.y).toBeGreaterThanOrEqual((lastHead?.y ?? 0) + (lastHead?.height ?? 0) - 2)
         const undoBox = await page.locator('.phone-context [data-history="undo"]').boundingBox()
         expect(undoBox).toBeTruthy()
         expect(addBox!.x + addBox!.width).toBeLessThanOrEqual(413)
@@ -296,7 +293,7 @@ describe('phone fit at 412x915', () => {
         await fold.goto(url, { waitUntil: 'domcontentloaded' })
         await fold.getByRole('button', { name: /^Arrange/ }).first().waitFor()
         const foldAdd = await fold.getByRole('button', { name: 'Add Track' }).boundingBox()
-        expect(foldAdd!.height).toBeGreaterThanOrEqual(48)
+        expect(foldAdd!.height).toBeGreaterThanOrEqual(40)
         expect(foldAdd!.width).toBeGreaterThanOrEqual(40)
         await fold.getByRole('button', { name: 'Add Track' }).click()
         const foldChoices = fold.locator('.add-choice')

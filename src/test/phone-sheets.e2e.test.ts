@@ -168,7 +168,7 @@ describe('phone browser sheet, plugins scroll, and loop grips', () => {
         const page = await context.newPage()
         await page.goto(url, { waitUntil: 'domcontentloaded' })
         await page.getByRole('button', { name: /^Arrange/ }).first().waitFor()
-        await page.getByRole('textbox', { name: 'Keys name' }).click()
+        await page.locator('[data-track-name="Keys"] .track-meter-row').click()
         const added = await page.evaluate(() => {
           const store = (window as unknown as {
             __cueharbor: { store: { selectedTrackId: string; project: { tracks: { id: string; name: string; plugins: { pluginId: string }[] }[] }; addPlugin: (id: string, pluginId: string) => void; track: (id: string) => { name: string; plugins: { pluginId: string }[] } } }

@@ -653,7 +653,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   position: relative; top: auto; z-index: 2; flex: none; height: 56px; min-height: 56px;
   display: flex; align-items: stretch; padding: 4px; background: #141c18; border-bottom: 1px solid var(--line);
 }
-.timeline-add-spacer { height: 56px; min-height: 56px; }
+.timeline-add-spacer { height: var(--viewfinder-h, 0px); min-height: 0; }
 .add-track-menu {
   position: absolute; left: 0; top: calc(100% + 4px); z-index: 40;
   width: min(420px, calc(100vw - 16px));

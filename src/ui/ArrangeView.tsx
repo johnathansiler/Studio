@@ -32,12 +32,9 @@ import type { SessionClient } from '../remote/session'
 import { PlaylistBrowser, type BrowserTab } from './PlaylistBrowser'
 import { AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
 import { AutoTuneLaneMark } from './AutoTuneFace'
-import { OpenBeatMachineButton } from './BeatMachineButton'
 import { AddTrackButton } from './AddTrack'
 import type { TrackChoice } from '../model/addTrack'
-import { showsOpenBeatMachine } from '../instruments/pads/identity'
 import { showsOnscreenPiano } from '../model/onscreenPiano'
-import { KeyboardToggle } from './KeyboardDock'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import { UtilitySheets } from './UtilitySheets'
 import { TrackOptions, trackKindLabel } from './TrackOptions'
@@ -53,13 +50,14 @@ import { AnchoredMenu } from './AnchoredMenu'
 import { RemoteTimeline, TrackPresence, remoteClipMark, useRemotePeers } from './presenceMarks'
 import { coarsePointer, patternHoldOpensMenu, patternMenuPoint, patternPointerIntent, trimZone } from './touchEdit'
 import { clipTapAction, laneDoubleClickAddsClip } from './clipKeys'
-import { isSampledInstrument } from '../instruments/sampled'
 import { LoopRegion } from './LoopRegion'
 import { TimelineOverview } from './OverviewScrollbar'
 import { laneScaleAttr, clampTimelinePx } from './overviewScroll'
 import { WaveformView } from './WaveformView'
 import { sampleAtX, type WaveSpan } from './waveZoom'
 import { CommentControl, CommentPins } from './timelineComments'
+import { TrackViewfinder } from './TrackViewfinder'
+import './trackColumn.css'
 
 
 function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup, onPlugins, setupButton, menu, showPlugins = true }: { browserOpen: boolean; setupOpen: boolean; pluginsOpen: boolean; onBrowser: () => void; onSetup: () => void; onPlugins: () => void; setupButton: RefObject<HTMLButtonElement | null>; menu?: ReactNode; showPlugins?: boolean }) {
@@ -208,6 +206,17 @@ export function ArrangeView({
   const clampPx = (value: number) => clampTimelinePx(value, scroller.current?.clientWidth ?? 0, secondsRef.current)
   const lastClipTap = useRef({ id: '', at: 0 })
   const headsRef = useRef<HTMLDivElement>(null)
+  const finderRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const node = finderRef.current
+    const arrange = node?.closest('.arrange') as HTMLElement | null
+    if (!node || !arrange) return
+    const apply = () => arrange.style.setProperty('--viewfinder-h', `${Math.round(node.getBoundingClientRect().height)}px`)
+    apply()
+    const observer = new ResizeObserver(apply)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
   useLayoutEffect(() => {
     if (!phone) return
     const heads = headsRef.current
@@ -932,9 +941,8 @@ export function ArrangeView({
       )}
       <div className={`arrange ${phone ? 'phone-arrange' : ''}`} data-tool={tool} data-phone-arrange={phone ? 'compact' : 'full'} data-lane-scale={laneScaleAttr(laneZoom)} data-lane-compact={laneZoom <= 0.72 ? 'true' : undefined} style={{ ['--lane-zoom' as string]: String(laneZoom) }}>
       <div className="heads-col">
-      <div className="arrange-add">
-        <AddTrackButton store={store} prominent onAdded={onTrackAdded} />
-        {phoneBar?.ideas}
+      <div className="track-viewfinder-slot" ref={finderRef}>
+        <TrackViewfinder store={store} playheadSample={position} />
       </div>
       <div
         className="heads"
@@ -950,20 +958,9 @@ export function ArrangeView({
           <SongMapHead store={store} position={position} compact />
         </div>
         {project.tracks.map((track) => (
-          <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} key={track.id} style={rowStyle(track, store.selectedTrackId, store.selectedClipId, !!store.openLanes[track.id], phone)} onClick={() => { if (phone) { setPhoneFocus('track'); store.selectClip(track.id, null, false, false) }; store.selectTrack(track.id); revealTrack(track.id, 'select-track') }}>
+          <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} data-track-name={track.name} key={track.id} style={rowStyle(track, store.selectedTrackId, store.selectedClipId, !!store.openLanes[track.id], phone)} onClick={() => { if (phone) { setPhoneFocus('track'); store.selectClip(track.id, null, false, false) }; store.selectTrack(track.id); revealTrack(track.id, 'select-track') }}>
             <div className="pl-head">
-              <div className="pl-name-row">
-                <i className="swatch" style={{ background: track.color }} />
-                <input
-                  className="name"
-                  aria-label={`${track.name} name`}
-                  style={{ color: track.color }}
-                  value={track.name}
-                  title={isSampledInstrument(track) ? 'Open the sampler.' : undefined}
-                  onClick={() => { if (isSampledInstrument(track)) store.showRack(track.id) }}
-                  onChange={(event) => store.updateTrack(track.id, { name: event.target.value })}
-                />
-                <TrackPresence trackId={track.id} />
+              <div className="track-meter-row">
                 <span className="track-live" data-track-live={track.id}>
                   <i
                     className="midi-activity"
@@ -976,49 +973,27 @@ export function ArrangeView({
                     <i style={{ transform: `scaleX(${levels[track.id] ?? 0})` }} />
                   </span>
                 </span>
-                {showsOpenBeatMachine(track) && (
-                  <OpenBeatMachineButton store={store} trackId={track.id} onOpen={onOpenBeatMachine} />
-                )}
-                <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); toggleTrack(track.id) }}>
-                  ⋮
-                </TipButton>
-                {store.selectedTrackId === track.id && showsOnscreenPiano(track) && (
-                  <span className="onscreen-piano-slot" onClick={(event) => event.stopPropagation()}>
-                    <KeyboardToggle
-                      store={store}
-                      engine={engine}
-                      word="Keys"
-                      hint="Show or hide the on-screen piano. It plays this track's instrument."
-                    />
-                  </span>
-                )}
+                <TrackPresence trackId={track.id} />
               </div>
               <div className="track-controls" data-track-controls="">
               <MixFlags store={store} trackId={track.id} compact />
-              {track.type === 'midi' && !hasStepSequencer(track) && (
-                <button
-                  type="button"
-                  className="piano-open"
-                  data-piano={track.id}
-                  aria-label="Piano roll"
-                  title="Piano roll"
-                  onClick={(event) => { event.stopPropagation(); onOpenPiano(track.id) }}
-                >
-                  <PianoIcon />
-                  <span>Roll</span>
-                </button>
-              )}
               {(track.type === 'audio' || (track.type === 'midi' && hardwareMidiAllowed(navigator.userAgent))) && (
                 <TipButton className={`mini ${track.armed ? 'on-r' : ''}`} label={copyOf(TRACK_ROW, 'arm').label} hint={track.type === 'midi' ? 'Record this instrument from its MIDI input.' : copyOf(TRACK_ROW, 'arm').hint} pressed={track.armed} onClick={() => store.updateTrack(track.id, { armed: !track.armed })}>
                   <span className="mini-mark">R</span>
                   <span className="mini-word">Arm</span>
                 </TipButton>
               )}
+              <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); toggleTrack(track.id) }}>
+                ⋮
+              </TipButton>
               </div>
             </div>
             <LanePicker store={store} trackId={track.id} />
           </div>
         ))}
+        <div className="track-add">
+          <AddTrackButton store={store} prominent onAdded={onTrackAdded} />
+        </div>
       </div>
       </div>
       <div className="timeline-col">
@@ -1439,6 +1414,8 @@ export function ArrangeView({
             onClose={closeSheets}
             onPerform={onPerform}
             onOpenBeatMachine={onOpenBeatMachine}
+            onOpenPiano={onOpenPiano}
+            onOpenSteps={onOpenSteps}
             onAnalyze={onAnalyze}
             onOpenPlugins={phone ? () => {
               if (sheetTrack) store.selectTrack(sheetTrack.id)
@@ -1821,15 +1798,6 @@ function ClipView({
       )}
     </div>
     </div>
-  )
-}
-
-function PianoIcon() {
-  return (
-    <svg width="14" height="12" viewBox="0 0 14 12" aria-hidden="true">
-      <rect x="0.5" y="0.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" />
-      <path d="M3 1v6M6 1v6M9 1v6M11 1v6" stroke="currentColor" />
-    </svg>
   )
 }
 

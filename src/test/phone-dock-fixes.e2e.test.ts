@@ -58,7 +58,7 @@ describe('phone dock fixes', () => {
           store.addMidiClip(keys.id, 0)
         })
         await page.locator('[data-phone-context="clip"]').waitFor()
-        await page.getByRole('textbox', { name: 'Vocal name' }).click()
+        await page.locator('[data-track-name="Vocal"] .track-meter-row').click()
         await page.locator('[data-phone-context="track"]').waitFor()
         const trackRow = await page.evaluate(() => {
           const row = document.querySelector('.phone-context')
