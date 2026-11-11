@@ -96,19 +96,22 @@ export const ARRANGE_TOOLS: { id: ArrangeTool; label: string }[] = (
 /** Always on the arrange strip. One tap, on phone, fold, and desktop. */
 export const FACE_TOOLS: ArrangeTool[] = ['select', 'pencil', 'split', 'trim', 'zoom']
 
-/** Rare edit modes. They live in the menu, not on the strip. */
-export const MENU_TOOLS: ArrangeTool[] = ['box', 'erase', 'pan']
+/** Box and Erase live with the other tools. Scroll does not: the timeline already moves. */
+export const MENU_TOOLS: ArrangeTool[] = ['box', 'erase']
 
-/** Face tools first. Kept so older checks can list the strip, then the menu. */
+/** Face tools first. Kept so older checks can list the strip, then Box and Erase. */
 export const PRIMARY_TOOLS: ArrangeTool[] = FACE_TOOLS
 
-/** Menu-only tools. They are not repeated on the strip. */
+/** Tools that sit past the face strip. They are not repeated as menu rows. */
 export const SHEET_TOOLS: ArrangeTool[] = MENU_TOOLS
 
-/** Face tools, then the menu tools. Nothing is listed twice. */
+/** Face tools, then Box and Erase. Pan stays a key (6) and is not a second button. */
 export function compactToolOrder(): ArrangeTool[] {
   return [...FACE_TOOLS, ...MENU_TOOLS]
 }
+
+/** Phone Tools row. Snap is a separate grid button beside these. */
+export const PHONE_TOOL_ROW: ArrangeTool[] = [...FACE_TOOLS, ...MENU_TOOLS]
 
 export const TOOL_ACTIONS = [
   { id: 'duplicate', label: 'Duplicate', hint: 'Copy the selected clips and place them just after.' },

@@ -3,7 +3,9 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { MainMenu } from '../ui/MainMenu'
+import { PhoneDock } from '../ui/phoneDock'
 import { TrackOptions } from '../ui/TrackOptions'
+import { PHONE_TOOL_ROW } from '../state/tools'
 import { visibleMenu } from '../ui/chrome'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
@@ -45,10 +47,9 @@ describe('phone arrange chrome', () => {
     expect(html).toContain('class="menu-session"')
   })
 
-  it('opens the plugins sheet from the track menu', () => {
+  it('adds a plugin from the track inserts', () => {
     const store = new ProjectStore(createEmptyProject())
     const track = store.project.tracks[0]
-    let opened = false
     const html = renderToStaticMarkup(createElement(TrackOptions, {
       store,
       track,
@@ -58,13 +59,53 @@ describe('phone arrange chrome', () => {
       onClose: () => undefined,
       onPerform: () => undefined,
       onAnalyze: () => undefined,
-      onOpenPlugins: () => { opened = true },
     }))
-    expect(html).toContain('data-arrange-plugins="toggle"')
-    expect(html).toContain('>Plugins<')
     expect(html).toContain('class="inserts"')
-    const props = html
-    expect(props).toContain('aria-label="Plugins. Effects on this track."')
-    void opened
+    expect(html).toContain('Add plugin')
+    expect(html).not.toContain('data-arrange-plugins="toggle"')
+    expect(html).not.toContain('>Plugins<')
+  })
+
+  it('keeps Ideas on the bulb and parks Box and Erase on the tools row', () => {
+    const store = new ProjectStore(createEmptyProject())
+    const html = renderToStaticMarkup(createElement(PhoneDock, {
+      store,
+      place: 'arrange',
+      menuOpen: false,
+      browseOpen: false,
+      menuRef: { current: null },
+      onMenu: () => undefined,
+      onBrowse: () => undefined,
+      onMenuAction: () => undefined,
+      onUndo: () => undefined,
+      onRedo: () => undefined,
+      canUndo: false,
+      canRedo: false,
+      playheadSample: () => 0,
+    }))
+    expect(html).toContain('data-phone-tab="menu"')
+    expect(html).toContain('data-phone-tab="browse"')
+    expect(html).toContain('data-phone-tab="tools"')
+    expect(html).toContain('data-phone-action="setup"')
+    expect(html).not.toContain('data-phone-action="unstuck"')
+    expect(html).not.toContain('data-phone-action="plugins"')
+    expect(PHONE_TOOL_ROW).toEqual(['select', 'pencil', 'split', 'trim', 'zoom', 'box', 'erase'])
+    const menu = renderToStaticMarkup(createElement(PhoneDock, {
+      store,
+      place: 'arrange',
+      menuOpen: true,
+      browseOpen: false,
+      menuRef: { current: null },
+      onMenu: () => undefined,
+      onBrowse: () => undefined,
+      onMenuAction: () => undefined,
+      onUndo: () => undefined,
+      onRedo: () => undefined,
+      canUndo: false,
+      canRedo: false,
+      playheadSample: () => 0,
+    }))
+    for (const action of ['new', 'open', 'save', 'export']) expect(menu).toContain(`data-phone-action="${action}"`)
+    expect(menu).not.toContain('data-phone-action="unstuck"')
   })
 })

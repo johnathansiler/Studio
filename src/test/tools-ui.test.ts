@@ -59,10 +59,11 @@ describe('edit tool chrome', () => {
     const visible = PRIMARY_TOOLS.map((id) => ({ id }))
     const later = SHEET_TOOLS.map((id) => ({ id }))
     expect(PRIMARY_TOOLS).toEqual(['select', 'pencil', 'split', 'trim', 'zoom'])
-    expect(SHEET_TOOLS).toEqual(['box', 'erase', 'pan'])
+    expect(SHEET_TOOLS).toEqual(['box', 'erase'])
     expect(sharesId(visible, later)).toEqual([])
     expect(compactToolOrder()).toEqual([...PRIMARY_TOOLS, ...SHEET_TOOLS])
-    expect([...compactToolOrder()].sort()).toEqual(ARRANGE_TOOLS.map((tool) => tool.id).sort())
+    expect(compactToolOrder()).not.toContain('pan')
+    expect(ARRANGE_TOOLS.map((tool) => tool.id)).toEqual(expect.arrayContaining([...compactToolOrder(), 'pan']))
   })
 
   it('describes every tool', () => {
@@ -155,6 +156,10 @@ describe('mobile control lists', () => {
       expect(TRANSPORT_COPY.some((item) => item.id === id)).toBe(true)
     }
     expect(TRANSPORT_COPY.find((item) => item.id === 'to-start')?.label).toBe('Start')
+    const transportIds = TRANSPORT_COPY.map((item) => item.id)
+    expect(new Set(transportIds).size).toBe(transportIds.length)
+    expect(transportIds.filter((id) => id === 'click')).toEqual(['click'])
+    expect(transportIds.filter((id) => id === 'count-in')).toEqual(['count-in'])
     for (const id of ['to-start', 'loop', 'click', 'count-in', 'quantize']) {
       expect(MENU_COPY.some((item) => item.id === id)).toBe(false)
       expect(visibleMenu({ phone: true, session: false, dockBottom: false, hardwareMidi: false }).some((item) => item.id === id)).toBe(false)
@@ -181,17 +186,20 @@ describe('mobile control lists', () => {
     const phone = visibleMenu({ phone: true, session: false, dockBottom: false, hardwareMidi: true })
     expect(desk.map((item) => item.action)).toEqual([
       'new', 'open', 'save', 'export',
-      'box', 'erase', 'pan',
       'dock',
       'scaler', 'midi',
-      'signature', 'shortcuts',
+      'shortcuts',
     ])
     expect(phone.map((item) => item.action)).toEqual([
-      'new', 'open', 'save', 'export',
-      'box', 'erase', 'pan',
       'midi',
-      'signature', 'shortcuts',
+      'shortcuts',
     ])
+    for (const action of ['new', 'open', 'save', 'export', 'box', 'erase', 'pan', 'signature']) {
+      expect(phone.map((item) => item.action)).not.toContain(action)
+    }
+    for (const action of ['box', 'erase', 'pan', 'signature']) {
+      expect(desk.map((item) => item.action)).not.toContain(action)
+    }
     expect(desk.map((item) => item.action)).not.toContain('click')
     expect(desk.map((item) => item.action)).not.toContain('count-in')
     expect(phone.map((item) => item.action)).not.toContain('click')
@@ -210,10 +218,10 @@ describe('mobile control lists', () => {
     expect(new Set(actions).size).toBe(actions.length)
     expect(actions).toEqual(desk.map((item) => item.action))
     for (const item of desk) expect(html).toContain(item.label)
-    const scroll = MENU_COPY.find((item) => item.action === 'pan')
-    expect(scroll?.label).toBe('Scroll')
-    expect(scroll?.hint).toMatch(/not the mixer pan/i)
-    expect(html).toContain('aria-label="Scroll. Scroll the timeline or the piano roll. This is not the mixer pan."')
+    expect(MENU_COPY.some((item) => item.action === 'pan' || item.action === 'box' || item.action === 'erase' || item.action === 'signature')).toBe(false)
+    expect(html).not.toContain('>Scroll<')
+    expect(html).not.toContain('>Box<')
+    expect(html).not.toContain('>Time<')
     expect(html).not.toContain('>Pan<')
   })
 })

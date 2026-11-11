@@ -495,7 +495,7 @@ export function TransportBar({
         />
         <div className="tempo-cluster" role="group" aria-label="Tempo" ref={tempoWrap}>{tempoField}</div>
         {phone ? null : clickButton}
-        {countButton}
+        {phone ? null : countButton}
         {resetButton}
       </ButtonTray>
       {takeProgress != null && (

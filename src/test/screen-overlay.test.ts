@@ -388,8 +388,23 @@ describe('screen overlays leave the view tabs free', () => {
 
         for (const opener of openers) {
           await opener.open()
-          if (opener.name === 'song' || opener.name === 'tools') {
-            const sheet = page.locator(opener.name === 'song' ? '#arrange-setup[data-bottom-sheet="open"]' : '#tool-choices[data-bottom-sheet="open"]')
+          if (opener.name === 'tools') {
+            expect(await page.locator('#tool-choices').count()).toBe(0)
+            await page.locator('[data-phone-action="box"]').waitFor()
+            await page.locator('[data-phone-action="erase"]').waitFor()
+            const tab = await page.locator('[data-phone-tab="tools"]').boundingBox()
+            const box = await page.locator('[data-phone-action="box"]').boundingBox()
+            expect(tab!.height).toBeGreaterThanOrEqual(40)
+            expect(box!.height).toBeGreaterThanOrEqual(40)
+            const bar = await page.locator('.tool-slot').boundingBox()
+            expect(box!.y + box!.height).toBeLessThanOrEqual((bar?.y ?? 0) + (bar?.height ?? 0) + 1)
+            await page.getByRole('button', { name: 'Tools', exact: true }).click()
+            await page.locator('[data-phone-action="box"]').waitFor({ state: 'detached' })
+            await settleClosed(page)
+            continue
+          }
+          if (opener.name === 'song') {
+            const sheet = page.locator('#arrange-setup[data-bottom-sheet="open"]')
             await sheet.waitFor()
             expect(await sheet.getAttribute('data-screen-overlay')).toBeNull()
             const box = await sheet.boundingBox()
@@ -473,13 +488,13 @@ describe('screen overlays leave the view tabs free', () => {
         await page.getByRole('button', { name: /^Arrange/ }).first().click()
 
         await page.locator('.menu-btn').click()
-        await page.locator('[data-screen-overlay]').first().waitFor()
+        await page.locator('.anchored-menu[data-open="true"]').waitFor()
         await page.getByRole('button', { name: /^Arrange/ }).first().click()
         await settleClosed(page)
         expect(await page.getByRole('button', { name: /^Arrange/ }).first().getAttribute('class')).toContain('active')
 
         await page.locator('.menu-btn').click()
-        await page.locator('[data-screen-overlay]').first().waitFor()
+        await page.locator('.anchored-menu[data-open="true"]').waitFor()
         await page.getByRole('button', { name: /^Mix/ }).first().click()
         await settleClosed(page)
         expect(await page.getByRole('button', { name: /^Mix/ }).first().getAttribute('class')).toContain('active')

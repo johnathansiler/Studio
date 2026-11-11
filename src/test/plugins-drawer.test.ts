@@ -7,6 +7,7 @@ import { chromium } from 'playwright'
 import { describe, expect, it } from 'vitest'
 import type { AudioEngine } from '../audio/engine'
 import { formFactor } from '../ui/form'
+import { panelChoice, rememberPanel } from '../ui/panelMemory'
 import { ArrangeView } from '../ui/ArrangeView'
 import { InsertList, addInsert, insertMenuChoices } from '../ui/PluginSheet'
 import { PluginsDrawer, PluginsDrawerView, chainBands, groupInsertChoices, pluginNote } from '../ui/PluginsDrawer'
@@ -278,7 +279,7 @@ describe('arrange plugins drawer', () => {
     expect(html).not.toContain('No plugins on this track yet.')
   })
 
-  it('starts closed on a phone and fold, and open beside the tracks on a computer', () => {
+  it('starts the plugins drawer closed, and remembers when it was opened', () => {
     expect(formFactor(390, 844)).toBe('phone')
     expect(formFactor(476, 752)).toBe('phone')
     expect(formFactor(880, 1000)).toBe('fold')
@@ -297,12 +298,22 @@ describe('arrange plugins drawer', () => {
     const fold = arrange(store, 880, 1000)
     expect(fold).toContain('data-plugins-drawer="closed"')
 
+    rememberPanel('arrangePlugins', false)
     const desk = arrange(store, 1440, 900)
-    expect(desk).toContain('data-plugins-drawer="side"')
-    expect(desk).toContain('plugins-side')
-    expect(desk).toContain('id="arrange-plugins"')
-    expect(desk).not.toContain('data-screen-overlay')
-    expect(desk.indexOf('class="playlist-frame')).toBeLessThan(desk.indexOf('id="arrange-plugins"'))
+    expect(desk).toContain('data-arrange-plugins="toggle"')
+    expect(desk).toContain('data-plugins-drawer="closed"')
+    expect(desk).not.toContain('id="arrange-plugins"')
+    expect(desk).not.toContain('plugins-side')
+
+    rememberPanel('arrangePlugins', true)
+    const remembered = arrange(store, 1440, 900)
+    expect(panelChoice('arrangePlugins')).toBe(true)
+    expect(remembered).toContain('data-plugins-drawer="side"')
+    expect(remembered).toContain('plugins-side')
+    expect(remembered).toContain('id="arrange-plugins"')
+    expect(remembered).not.toContain('data-screen-overlay')
+    expect(remembered.indexOf('class="playlist-frame')).toBeLessThan(remembered.indexOf('id="arrange-plugins"'))
+    rememberPanel('arrangePlugins', false)
 
     const phoneOpen = arrange(store, 390, 844, true)
     expect(phoneOpen).toContain('data-plugins-drawer="bottom"')

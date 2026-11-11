@@ -219,15 +219,25 @@ describe('select and snap choice tray', () => {
           await browserSheet.waitFor({ state: 'detached' })
         }
 
-        if (viewport.phoneSheet) await page.getByRole('button', { name: 'Tools', exact: true }).click()
-        else await page.getByRole('button', { name: /^Tool:/ }).click()
-        await page.locator('#tool-choices[data-choice-tray="open"]').waitFor()
-        const selectTray = await readTray(page, '#tool-choices', '.tool-current')
-        assertTray(`${viewport.name} select`, selectTray, SELECT_LABELS, browserHeight)
-        await assertChipsReachable(page, '#tool-choices', `${viewport.name} select chips`)
-        if (viewport.shot) await page.screenshot({ path: `/opt/cursor/artifacts/select_tray_${viewport.name}.png` })
-        await page.locator('#tool-choices').getByRole('button', { name: 'Close', exact: true }).click()
-        await page.locator('#tool-choices').waitFor({ state: 'detached' })
+        if (viewport.phoneSheet) {
+          await page.getByRole('button', { name: 'Tools', exact: true }).click()
+          expect(await page.locator('#tool-choices').count(), viewport.name).toBe(0)
+          const labels = await page.locator('.phone-context .phone-hit').evaluateAll((nodes) => nodes.map((node) => (node.textContent || '').replace(/\s+/g, ' ').trim()))
+          for (const label of ['Select', 'Draw', 'Split', 'Trim', 'Zoom', 'Box', 'Erase']) {
+            expect(labels, viewport.name).toContain(label)
+          }
+          expect(labels.join(' '), viewport.name).not.toMatch(/Plugins|Scroll|Unstuck/)
+          expect(await page.locator('[data-phone-tab="tools"]').getAttribute('aria-pressed')).toBe('true')
+          if (viewport.shot) await page.screenshot({ path: `/opt/cursor/artifacts/select_row_${viewport.name}.png` })
+        } else {
+          await page.getByRole('button', { name: /^Tool:/ }).click()
+          await page.locator('#tool-choices[data-choice-tray="open"]').waitFor()
+          const selectTray = await readTray(page, '#tool-choices', '.tool-current')
+          assertTray(`${viewport.name} select`, selectTray, SELECT_LABELS, browserHeight)
+          await assertChipsReachable(page, '#tool-choices', `${viewport.name} select chips`)
+          await page.locator('#tool-choices').getByRole('button', { name: 'Close', exact: true }).click()
+          await page.locator('#tool-choices').waitFor({ state: 'detached' })
+        }
 
         await page.locator('.snap-inline').click()
         await page.locator('#snap-choices[data-choice-tray="open"]').waitFor()
@@ -248,9 +258,10 @@ describe('select and snap choice tray', () => {
           await page.locator('#snap-choices').waitFor({ state: 'detached' })
           const off = await page.evaluate(() => (window as unknown as { __cueharbor: { store: { project: { snap?: boolean } } } }).__cueharbor.store.project.snap)
           expect(off).toBe(false)
-          await page.getByRole('button', { name: 'Tools', exact: true }).click()
-          await page.locator('#tool-choices').getByRole('button', { name: /^Draw/ }).click()
-          await page.locator('#tool-choices').waitFor({ state: 'detached' })
+          if (await page.locator('[data-phone-action="pencil"]').count() === 0) {
+            await page.getByRole('button', { name: 'Tools', exact: true }).click()
+          }
+          await page.locator('[data-phone-action="pencil"]').click()
           expect(await page.evaluate(() => (window as unknown as { __cueharbor: { store: { tool: string } } }).__cueharbor.store.tool)).toBe('pencil')
         } else {
           await page.keyboard.press('Escape')

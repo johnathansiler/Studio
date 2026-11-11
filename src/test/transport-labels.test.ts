@@ -49,7 +49,7 @@ function transportPage(shell: string) {
 
 const VIEWPORTS = [
   { name: 'desk', width: 1440, height: 900, shell: 'studio', words: ['Start', 'Play', 'Record'] },
-  { name: 'phone', width: 390, height: 844, shell: 'phone', words: ['Start', 'Play', 'Record', 'Punch', '1-2'] },
+  { name: 'phone', width: 390, height: 844, shell: 'phone', words: ['Start', 'Play', 'Record', 'Punch'] },
   { name: 'fold', width: 880, height: 1000, shell: 'fold', words: ['Start', 'Play', 'Record'] },
 ]
 
@@ -118,7 +118,7 @@ describe('transport words', () => {
           const transport = document.querySelector('.transport')!.getBoundingClientRect()
           const tray = document.querySelector('.t-main')!.getBoundingClientRect()
           const click = document.querySelector('.t-btn.click') as HTMLElement | null
-          const count = document.querySelector('.t-btn.count') as HTMLElement
+          const count = document.querySelector('.t-btn.count') as HTMLElement | null
           const rec = document.querySelector('.t-btn.rec') as HTMLElement
           const paint = (node: HTMLElement, on: boolean) => {
             node.classList.toggle('on', on)
@@ -126,11 +126,11 @@ describe('transport words', () => {
           }
           const clickOff = click ? paint(click, false) : ''
           const clickOn = click ? paint(click, true) : ''
-          const countOff = paint(count, false)
-          const countOn = paint(count, true)
+          const countOff = count ? paint(count, false) : ''
+          const countOn = count ? paint(count, true) : ''
           const recOn = paint(rec, true)
           if (click) paint(click, false)
-          paint(count, false)
+          if (count) paint(count, false)
           paint(rec, false)
           const buttons = row.map((node) => {
             const box = node.getBoundingClientRect()
@@ -159,11 +159,11 @@ describe('transport words', () => {
           }
         })
         if (viewport.name === 'phone') {
-          expect(order.words, viewport.name).toEqual(['Start', 'Play', 'Record', 'Punch', 'Tempo', '1-2'])
+          expect(order.words, viewport.name).toEqual(['Start', 'Play', 'Record', 'Punch', 'Tempo'])
           expect(order.clickWord, viewport.name).toBe(false)
-          expect(order.rowCount, viewport.name).toBe(7)
-          expect(order.countOn, viewport.name).not.toBe(order.countOff)
-          expect(order.recOn, viewport.name).not.toBe(order.countOn)
+          expect(order.rowCount, viewport.name).toBe(6)
+          expect(order.countOff, viewport.name).toBe('')
+          expect(order.recOn, viewport.name).not.toBe('')
         } else {
           expect(order.words.slice(0, 7), viewport.name).toEqual(['Start', 'Play', 'Record', 'Punch', 'Tempo', 'Click', '1-2'])
           expect(order.clickWord, viewport.name).toBe(true)

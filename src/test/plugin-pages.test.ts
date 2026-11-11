@@ -263,21 +263,26 @@ describe('plugin pages do not scroll', () => {
         })
         await page.locator('[data-plugin-root]').first().waitFor({ state: 'detached', timeout: 3000 }).catch(() => undefined)
         const phoneShell = await page.locator('.shell.phone').count()
-        if (phoneShell && await page.locator('[data-arrange-plugins="toggle"]').count() === 0) {
+        if (phoneShell) {
           await page.locator('.track-more').first().click()
+          await page.locator('#track-options').getByRole('button', { name: 'Add plugin', exact: true }).click()
+          await page.locator('.insert-menu button').first().waitFor()
+          expect(await page.locator('.insert-menu button').count(), `${viewport.name} inserts`).toBeGreaterThan(3)
+          expect(await page.locator('[data-arrange-plugins="toggle"]').count(), `${viewport.name} plugins door`).toBe(0)
+        } else {
+          await page.locator('[data-arrange-plugins="toggle"]').click()
+          await page.locator('[data-plugins-panel="open"]').waitFor()
+          await page.evaluate(() => {
+            const button = [...document.querySelectorAll('button')].find((item) => item.textContent?.trim() === 'Add Plugin') as HTMLButtonElement | undefined
+            button?.click()
+          })
+          await page.waitForTimeout(50)
+          const drawer = await page.locator('.plugins-drawer').evaluate((node) => {
+            const root = node as HTMLElement
+            return root.scrollHeight - root.clientHeight
+          })
+          expect(drawer, `${viewport.name} drawer`).toBeLessThanOrEqual(2)
         }
-        await page.locator('[data-arrange-plugins="toggle"]').click()
-        await page.locator('[data-plugins-panel="open"]').waitFor()
-        await page.evaluate(() => {
-          const button = [...document.querySelectorAll('button')].find((item) => item.textContent?.trim() === 'Add Plugin') as HTMLButtonElement | undefined
-          button?.click()
-        })
-        await page.waitForTimeout(50)
-        const drawer = await page.locator('.plugins-drawer').evaluate((node) => {
-          const root = node as HTMLElement
-          return root.scrollHeight - root.clientHeight
-        })
-        expect(drawer, `${viewport.name} drawer`).toBeLessThanOrEqual(2)
         await page.close()
       }
     } finally {

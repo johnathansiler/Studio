@@ -182,15 +182,11 @@ describe('phone browser sheet, plugins scroll, and loop grips', () => {
         expect(added.plugins.length, JSON.stringify(added)).toBeGreaterThan(6)
         const scrollBefore = await arrangeScroll(page)
         await page.locator('.head.is-selected .track-more').click()
-        await page.getByRole('button', { name: /^Plugins/ }).click()
-        const sheet = page.locator('#arrange-plugins.bottom-sheet')
+        const sheet = page.locator('#track-options.bottom-sheet')
         await sheet.waitFor()
-        await page.getByRole('button', { name: 'Add Plugin' }).click()
-        const select = sheet.locator('select[aria-label="Plugin group"]')
-        if (await select.count()) {
-          const count = await select.locator('option').count()
-          await select.selectOption({ index: count - 1 })
-        }
+        const add = sheet.getByRole('button', { name: 'Add plugin', exact: true })
+        await add.waitFor()
+        expect(await sheet.getByRole('button', { name: /^Plugins/ }).count()).toBe(0)
         const body = sheet.locator('.bottom-sheet-body')
         const beforeFit = await body.evaluate((el) => {
           const style = getComputedStyle(el)
@@ -204,37 +200,34 @@ describe('phone browser sheet, plugins scroll, and loop grips', () => {
             clientHeight: el.clientHeight,
             sheetBottom: sheetBox?.bottom ?? 0,
             barTop: bar?.top ?? window.innerHeight,
-            rows: el.querySelectorAll('.plugin-row').length,
-            choices: el.querySelectorAll('button.plugins-choice').length,
-            text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 400),
+            inserts: el.querySelectorAll('.inserts button').length,
           }
         })
         expect(beforeFit.overflowY).toBe('auto')
         expect(beforeFit.overscroll).toBe('contain')
         expect(beforeFit.touch).toContain('pan-y')
         expect(beforeFit.sheetBottom).toBeLessThanOrEqual(beforeFit.barTop + 2)
-        expect(beforeFit.rows).toBeGreaterThan(4)
+        expect(beforeFit.inserts).toBeGreaterThan(4)
         expect(beforeFit.scrollHeight).toBeGreaterThan(beforeFit.clientHeight + 8)
 
         const start = await body.evaluate((el) => el.scrollTop)
-        await touchScroll(page, '#arrange-plugins .bottom-sheet-body', 240)
+        await touchScroll(page, '#track-options .bottom-sheet-body', 240)
         let top = await body.evaluate((el) => el.scrollTop)
         if (top <= start) {
-          await touchScroll(page, '#arrange-plugins .bottom-sheet-body', 320)
+          await touchScroll(page, '#track-options .bottom-sheet-body', 320)
           top = await body.evaluate((el) => el.scrollTop)
         }
         expect(top).toBeGreaterThan(start)
         const placed = await body.evaluate((el) => {
           el.scrollTop = el.scrollHeight
-          const rows = [...el.querySelectorAll<HTMLElement>('.plugin-row')]
+          const rows = [...el.querySelectorAll<HTMLElement>('.inserts button')]
           const last = rows[rows.length - 1]
           if (!last) return null
           const box = last.getBoundingClientRect()
           const view = el.getBoundingClientRect()
           const bar = document.querySelector('.tool-slot')?.getBoundingClientRect()
-          const button = last.querySelector('button')
           return {
-            text: (button?.textContent || '').replace(/\s+/g, ' ').trim(),
+            text: (last.textContent || '').replace(/\s+/g, ' ').trim(),
             top: box.top,
             bottom: box.bottom,
             viewTop: view.top,
@@ -246,7 +239,7 @@ describe('phone browser sheet, plugins scroll, and loop grips', () => {
         const visible = Math.min(placed!.bottom, placed!.viewBottom) - Math.max(placed!.top, placed!.viewTop)
         expect(visible).toBeGreaterThan(32)
         expect(placed!.bottom).toBeLessThanOrEqual(placed!.barTop + 2)
-        await body.locator('.plugin-row').last().locator('button').first().tap()
+        await body.locator('.inserts button').filter({ hasText: 'EQ' }).first().tap()
         const scrollAfter = await arrangeScroll(page)
         expect(Math.abs(scrollAfter.timeline - scrollBefore.timeline)).toBeLessThanOrEqual(1)
         expect(Math.abs(scrollAfter.heads - scrollBefore.heads)).toBeLessThanOrEqual(2)

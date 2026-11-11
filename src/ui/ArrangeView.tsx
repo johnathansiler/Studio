@@ -165,7 +165,7 @@ export function ArrangeView({
   /** Shared with Mix and Collab so the dock stays open when the view changes. */
   browserDock?: boolean
   onBrowserDock?: (open: boolean) => void
-  /** Force the plugins drawer. Omit to open it on a computer and keep it closed on a phone or fold. */
+  /** Force the plugins drawer. Omit to start closed. Opening or closing it is remembered for this visit. */
   pluginsDrawer?: boolean
   /** Open the add list with the drawer. */
   pluginsMenu?: boolean
@@ -195,7 +195,7 @@ export function ArrangeView({
   }>(null)
   const phone = form === 'phone'
   const touch = form !== 'desk'
-  const [pluginsOpen, setPluginsOpen] = useState(() => pluginsDrawer ?? form === 'desk')
+  const [pluginsOpen, setPluginsOpen] = useState(() => pluginsDrawer ?? panelChoice('arrangePlugins') ?? false)
   const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
   const [ghost, setGhost] = useState<{ trackId: string; left: number; width: number } | null>(null)
   const [tool, setToolState] = useState(activeTool)
@@ -778,6 +778,10 @@ export function ArrangeView({
     setTrackSheet(null)
     setUtility(null)
   }, [phone, browserOpen])
+  useEffect(() => {
+    if (pluginsDrawer != null) return
+    rememberPanel('arrangePlugins', pluginsOpen)
+  }, [pluginsDrawer, pluginsOpen])
   const pluginsPhase = usePushPhase(pluginsOpen)
   useScreenOverlay(() => setPluginsOpen(false), pluginsOpen)
   const [browserTab, setBrowserTab] = useState<BrowserTab>(libraryTab || 'sounds')
@@ -1449,11 +1453,6 @@ export function ArrangeView({
             onPerform={onPerform}
             onOpenBeatMachine={onOpenBeatMachine}
             onAnalyze={onAnalyze}
-            onOpenPlugins={phone ? () => {
-              if (sheetTrack) store.selectTrack(sheetTrack.id)
-              closeSheets()
-              setPluginsOpen(true)
-            } : undefined}
           />
         </ArrangeBottomSheet>
       )}

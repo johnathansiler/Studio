@@ -3,28 +3,25 @@ import { createPortal } from 'react-dom'
 import { countInBarsOf, countInCaption } from '../model/time'
 import { SNAP_DIVISIONS, normalizeSnapDivision } from '../model/snapGrid'
 import type { ProjectStore } from '../state/store'
-import { TOOL_INFO, activeTool, subscribeTools, type ArrangeTool } from '../state/tools'
+import { PHONE_TOOL_ROW, TOOL_INFO, activeTool, subscribeTools, type ArrangeTool } from '../state/tools'
 import { currentArrangeSheet, subscribeArrangeSheet, toggleArrangeSheet } from './arrangePanel'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import type { BrowserTab } from './PlaylistBrowser'
-import { SnapChoices, ToolChoices } from './UtilitySheets'
+import { SnapChoices } from './UtilitySheets'
 import { useScreenOverlay } from './screenOverlay'
 import {
   BROWSER_TAB_EVENT,
-  OPEN_PLUGINS_EVENT,
+  CLOSE_ARRANGE_SHEETS,
   phoneContextKind,
   type PhonePlace,
 } from './phoneContext'
 import { phoneFocus, subscribePhoneFocus } from './phoneFocus'
 import './phoneDock.css'
 
-const QUICK_TOOLS: { id: ArrangeTool; label: string }[] = [
-  { id: 'select', label: 'Select' },
-  { id: 'pencil', label: 'Draw' },
-  { id: 'split', label: 'Split' },
-  { id: 'trim', label: 'Trim' },
-  { id: 'zoom', label: 'Zoom' },
-]
+const QUICK_TOOLS: { id: ArrangeTool; label: string }[] = PHONE_TOOL_ROW.map((id) => ({
+  id,
+  label: TOOL_INFO[id].label,
+}))
 
 const BROWSER_TABS: { id: BrowserTab; label: string }[] = [
   { id: 'sounds', label: 'Sounds' },
@@ -132,7 +129,6 @@ export function PhoneDock({
   onMenu,
   onBrowse,
   onMenuAction,
-  onUnstuck,
   onUndo,
   onRedo,
   canUndo,
@@ -147,7 +143,6 @@ export function PhoneDock({
   onMenu: () => void
   onBrowse: () => void
   onMenuAction: (action: string) => void
-  onUnstuck: () => void
   onUndo: () => void
   onRedo: () => void
   canUndo: boolean
@@ -157,11 +152,12 @@ export function PhoneDock({
   const utility = useSyncExternalStore(subscribeArrangeSheet, currentArrangeSheet, () => null)
   const focus = useSyncExternalStore(subscribePhoneFocus, phoneFocus, () => 'none' as const)
   const tool = useSyncExternalStore(subscribeTools, activeTool, activeTool)
-  const [offstage, setOffstage] = useState<'tools' | 'snap' | null>(null)
+  const [offstage, setOffstage] = useState<'snap' | null>(null)
+  const [toolsOn, setToolsOn] = useState(false)
   const [transportMore, setTransportMore] = useState(false)
   const [host, setHost] = useState<HTMLElement | null>(null)
   const arrangeLive = place === 'arrange'
-  const toolsOpen = (arrangeLive && utility === 'tools') || offstage === 'tools'
+  const toolsOpen = toolsOn
   const snapOn = store.project.snap !== false
   const division = normalizeSnapDivision(store.project.snapDivision)
   const gridLabel = SNAP_DIVISIONS.find((item) => item.id === division)?.label ?? division
@@ -191,6 +187,10 @@ export function PhoneDock({
   }, [arrangeLive, offstage])
 
   useEffect(() => {
+    if (menuOpen || browseOpen) setToolsOn(false)
+  }, [menuOpen, browseOpen])
+
+  useEffect(() => {
     if (place !== 'mix' || menuOpen || browseOpen) setTransportMore(false)
   }, [place, menuOpen, browseOpen])
   useScreenOverlay(() => setTransportMore(false), transportMore && place === 'mix')
@@ -198,11 +198,8 @@ export function PhoneDock({
   function openTools() {
     if (menuOpen) onMenu()
     if (browseOpen) onBrowse()
-    if (arrangeLive) {
-      toggleArrangeSheet('tools')
-      return
-    }
-    setOffstage((value) => (value === 'tools' ? null : 'tools'))
+    document.dispatchEvent(new CustomEvent(CLOSE_ARRANGE_SHEETS))
+    setToolsOn((open) => !open)
   }
 
   function openSnap() {
@@ -222,18 +219,16 @@ export function PhoneDock({
     store.splitAt(clip.trackId, clip.clipId, playheadSample())
   }
 
-  const sheet = offstage === 'tools'
-    ? <ToolChoices store={store} onClose={() => setOffstage(null)} />
-    : offstage === 'snap'
-      ? <SnapChoices store={store} onClose={() => setOffstage(null)} />
-      : transportMore && place === 'mix'
-        ? <TransportMoreSheet store={store} onClose={() => setTransportMore(false)} />
-        : null
+  const sheet = offstage === 'snap'
+    ? <SnapChoices store={store} onClose={() => setOffstage(null)} />
+    : transportMore && place === 'mix'
+      ? <TransportMoreSheet store={store} onClose={() => setTransportMore(false)} />
+      : null
 
   return (
     <>
       {host && sheet ? createPortal(sheet, host) : null}
-      <div className="phone-context" role="toolbar" aria-label="Actions" data-phone-context={kind}>
+      <div className="phone-context" id="phone-context" role="toolbar" aria-label="Actions" data-phone-context={kind}>
         {kind === 'menu' && (
           <>
             <Hit action="new" label="New" title="Start a fresh session." onClick={() => onMenuAction('new')} />
@@ -257,7 +252,7 @@ export function PhoneDock({
               <Hit
                 key={item.id}
                 action={item.id}
-                label={`Tool: ${item.label}. ${TOOL_INFO[item.id].hint}`}
+                label={`${item.label}. ${TOOL_INFO[item.id].hint}`}
                 title={TOOL_INFO[item.id].hint}
                 pressed={tool === item.id}
                 onClick={() => pickTool(item.id)}
@@ -268,14 +263,6 @@ export function PhoneDock({
             <Hit action="snap" className="snap-inline" label={snapLabel} title="Snap grid." pressed={snapOn} onClick={openSnap}>
               {snapLabel}
             </Hit>
-            {arrangeLive && (
-              <Hit
-                action="plugins"
-                label="Plugins"
-                title="Effects on this track."
-                onClick={() => document.dispatchEvent(new CustomEvent(OPEN_PLUGINS_EVENT))}
-              />
-            )}
           </>
         )}
         {kind === 'clip' && clip && (
@@ -342,7 +329,6 @@ export function PhoneDock({
           <>
             <Hit action="setup" label="Setup" title="Automation and markers." pressed={utility === 'setup'} onClick={() => toggleArrangeSheet('setup')} />
             <Hit action="snap" className="snap-inline" label={snapLabel} title="Snap grid." pressed={snapOn} onClick={openSnap}>{snapLabel}</Hit>
-            <Hit action="unstuck" label="Unstuck" title="Pick a part, or write a full song." onClick={onUnstuck} />
             <Hit action="metronome" label="Metronome" title="Metronome while you play and record." pressed={store.project.metronomeEnabled} onClick={() => store.toggle('metronomeEnabled')}>
               <MetronomeIcon />
             </Hit>
@@ -383,9 +369,9 @@ export function PhoneDock({
           data-phone-tab="tools"
           aria-pressed={toolsOpen}
           aria-expanded={toolsOpen}
-          aria-controls="tool-choices"
+          aria-controls="phone-context"
           aria-label="Tools"
-          title="Select, draw, split, trim, zoom, and snap."
+          title="Select, draw, split, trim, zoom, box, erase, and snap."
           onClick={openTools}
         >
           Tools

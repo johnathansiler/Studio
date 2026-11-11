@@ -1,6 +1,6 @@
 /** Open and closed panels for this visit. Switching views does not forget them. */
 
-type PanelKey = 'arrangeBrowser' | 'arrangeTools' | 'hintDismissed' | 'sessionBrowser' | 'sessionDetail' | 'sessionMix'
+type PanelKey = 'arrangeBrowser' | 'arrangePlugins' | 'arrangeTools' | 'hintDismissed' | 'sessionBrowser' | 'sessionDetail' | 'sessionMix'
 
 const memory: Partial<Record<PanelKey, boolean>> = {}
 

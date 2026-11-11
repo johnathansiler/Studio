@@ -120,8 +120,8 @@ describe('arrange track row and browser', () => {
           await page.getByRole('button', { name: 'Browse', exact: true }).click()
         }
         await page.locator('.head.is-selected .track-more').click()
-        await page.getByRole('button', { name: /^Plugins/ }).click()
-        await page.getByRole('button', { name: 'Add plugin' }).first().waitFor()
+        await page.getByRole('button', { name: 'Add plugin', exact: true }).waitFor()
+        expect(await page.getByRole('button', { name: /^Plugins/ }).count()).toBe(0)
         await page.screenshot({ path: '/opt/cursor/artifacts/arrange-phone-plugins.png' })
       } finally {
         await browser.close()
