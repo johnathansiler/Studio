@@ -7,6 +7,7 @@ import { displayedPlayhead, transportSample } from '../model/transportSync'
 import { selectArrange, selectBeats, selectMixer, selectSession, selectTransport } from '../state/select'
 import { ProjectStore } from '../state/store'
 import { ArrangeView } from '../ui/ArrangeView'
+import { PhoneDock } from '../ui/phoneDock'
 import { PlaylistBrowser } from '../ui/PlaylistBrowser'
 
 describe('shared transport and mixer', () => {
@@ -195,7 +196,7 @@ describe('arrange browser', () => {
 describe('phone arrange', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('shows compact mute and solo, a setup button, and the loop bar', () => {
+  it('shows compact mute and solo and the loop bar, with Setup on the phone row', () => {
     vi.stubGlobal('window', {
       innerWidth: 390,
       innerHeight: 844,
@@ -218,12 +219,38 @@ describe('phone arrange', () => {
         onAnalyze: () => undefined,
       } as never))
       expect(html).toContain('data-phone-arrange="compact"')
-      expect(html).toContain('>Setup<')
+      expect(html).not.toContain('arrange-panels')
+      expect(html).not.toContain('>Setup<')
+      expect(html).toContain('>Add Track<')
       expect(html).toContain('data-loop="off"')
       expect(html).toContain('Loop start')
       expect(html).toContain('Loop end')
       expect(html).not.toContain('Solo safe')
       expect(html).not.toContain('>Sec<')
       expect(html).not.toContain('Record options')
+      const dock = renderToStaticMarkup(createElement(PhoneDock, {
+        store,
+        place: 'arrange',
+        menuOpen: false,
+        browseOpen: false,
+        menuRef: { current: null },
+        onMenu() {},
+        onBrowse() {},
+        onMenuAction() {},
+        onUndo() {},
+        onRedo() {},
+        canUndo: false,
+        canRedo: false,
+        playheadSample: () => 0,
+      }))
+      expect(dock).toContain('data-phone-action="setup"')
+      expect(dock).toContain('>Setup<')
+      expect(dock).toContain('data-phone-action="snap"')
+      expect(dock).toContain('data-phone-action="metronome"')
+      expect(dock).toContain('data-phone-action="undo"')
+      expect(dock).toContain('data-phone-action="redo"')
+      expect(dock).toContain('>Menu<')
+      expect(dock).toContain('>Browse<')
+      expect(dock).toContain('>Tools<')
   })
 })

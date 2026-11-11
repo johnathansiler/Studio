@@ -70,7 +70,9 @@ describe('sampler controls', () => {
     const dry = render({ stretch: 1, pitch: 0, attack: 1, sustain: 1, release: 200 }, sample, [{ time: 0, pitch: 60, vel: 1 }], 0.7)
     const up = render({ stretch: 1, pitch: 12, attack: 1, sustain: 1, release: 200 }, sample, [{ time: 0, pitch: 60, vel: 1 }], 0.7)
     expect(centsOff(measureHz(up, rate, 2000), measureHz(dry, rate, 2000) * 2)).toBeLessThan(80)
-    expect(Math.abs(activeLength(up) - activeLength(dry)) / rate).toBeLessThan(0.08)
+    // Both stretches are one beat. The 0.01 floor also counts the 200ms release, where a pitched tail stays audible a little longer.
+    expect(Math.abs(activeLength(up, 0.05) - activeLength(dry, 0.05)) / rate).toBeLessThan(0.02)
+    expect(Math.abs(activeLength(up) - activeLength(dry)) / rate).toBeLessThan(0.1)
   })
 
   it('follows the root note', () => {
