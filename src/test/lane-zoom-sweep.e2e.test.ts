@@ -83,6 +83,7 @@ type TrackReport = {
   hitRuler: boolean
   hit: string
   laneHeight: number
+  controls: { label: string; self: boolean }[]
 }
 
 type LayoutReport = {
@@ -129,6 +130,14 @@ async function readLayout(page: Page): Promise<LayoutReport> {
         hitRuler: Boolean(hit?.closest('.ruler, [data-loop-region], .loop-grip, .ruler-gap, .loop-gap')),
         hit: (hit?.getAttribute('aria-label') || hit?.className || hit?.tagName || 'none').toString().replace(/\s+/g, ' ').slice(0, 80),
         laneHeight: laneBox?.height ?? headBox.height,
+        controls: [...head.querySelectorAll('.track-controls > button')].map((button) => {
+          const box = button.getBoundingClientRect()
+          const target = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+          return {
+            label: (button.getAttribute('aria-label') || '').replace(/\s+/g, ' ').slice(0, 24),
+            self: Boolean(box.width > 1 && target && (target === button || button.contains(target))),
+          }
+        }),
       }
     })
     return {
@@ -160,6 +169,10 @@ function assertLayout(layout: LayoutReport, zoom: number | null, where: string) 
     expect(track.menuInsideLane, label).toBe(true)
     expect(track.hitMenu, label).toBe(true)
     expect(track.hitRuler, label).toBe(false)
+    if (scale === 'min') {
+      expect(track.controls.length, label).toBeGreaterThan(0)
+      for (const control of track.controls) expect(control.self, `${label} ${control.label}`).toBe(true)
+    }
   }
   expect(layout.scale, where).toBe(scale)
 }
