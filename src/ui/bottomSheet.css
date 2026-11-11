@@ -61,17 +61,12 @@
   min-height: 0 !important;
 }
 
+/* Landscape is short. Give the list a real viewport and keep the sheet above the dock. */
 .shell.phone.land .arrange-stage > .playlist-browser.bottom-sheet {
-  flex: 0 0 var(--phone-sheet-h, 46dvh) !important;
-  height: var(--phone-sheet-h, 46dvh) !important;
-  max-height: var(--phone-sheet-h, 46dvh) !important;
+  flex: 0 0 auto !important;
+  height: min(200px, calc(100% - 24px)) !important;
+  max-height: calc(100% - 24px) !important;
   min-height: 0 !important;
-}
-
-/* Landscape phones are short. Keep the search row above the edit bar. */
-.shell.phone.land .arrange-stage > .playlist-browser.bottom-sheet {
-  flex: 0 0 auto;
-  min-height: 118px;
 }
 
 .shell.phone .arrange-stage.browser-bottom.plugins-bottom > .bottom-sheet {

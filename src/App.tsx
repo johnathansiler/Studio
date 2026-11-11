@@ -2107,7 +2107,12 @@ async function importDropped(files: FileList) {
               else if (action === 'dock') setDockEdge(dockEdge === 'right' ? 'bottom' : 'right')
               else if (action === 'scaler') openPlugin('play')
               else if (action === 'players') { setPhonePane('edit'); setSurface('studio'); openIdeas('players') }
-              else if (action === 'midi') { setMenuOpen(false); store.setMidiToolsOpen(!store.midiToolsOpen) }
+              else if (action === 'midi') {
+                setMenuOpen(false)
+                setSoundsOpen(false)
+                document.dispatchEvent(new CustomEvent(CLOSE_ARRANGE_SHEETS))
+                store.setMidiToolsOpen(!store.midiToolsOpen)
+              }
               else if (action === 'snap') store.toggle('snap')
               else if (action === 'shortcuts') { setMenuOpen(false); setHelp(true) }
             }}
@@ -2137,7 +2142,9 @@ async function importDropped(files: FileList) {
       )}
       {phone && (
         <>
-          <div id="phone-sheet-host" className="phone-sheet-host" />
+          <div id="phone-sheet-host" className="phone-sheet-host">
+            <MidiTools store={store} engine={engine} phone />
+          </div>
           <div className="tool-slot phone-dock-slot" id="tool-slot" data-slot="phone-dock">
             <PhoneDock
               store={store}

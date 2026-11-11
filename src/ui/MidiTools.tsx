@@ -19,13 +19,14 @@ import { samplesToBeats } from '../model/time'
 import { selectLiveCapture, selectMidiMaps, selectMidiOut, selectTrackFx } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import type { MidiFx, MidiFxKind, Track } from '../model/types'
+import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import './midiTools.css'
 
 const KINDS: MidiFxKind[] = ['arp', 'chord', 'scale']
 const CHORD_NAMES = ['Maj', 'Min', 'Sus2', 'Sus4', '7', 'm7', 'Dim', 'Aug']
 const ARP_DIRS = ['Up', 'Down', 'Up/Down', 'Random']
 
-export function MidiTools({ store, engine }: { store: ProjectStore; engine: AudioEngine }) {
+export function MidiTools({ store, engine, phone = false }: { store: ProjectStore; engine: AudioEngine; phone?: boolean }) {
   const hide = hidesHardwareMidi(typeof navigator === 'undefined' ? '' : navigator.userAgent)
   const [tick, setTick] = useState(0)
   const [section, setSection] = useState<'learn' | 'fx' | 'out' | 'capture' | 'inputs'>('fx')
@@ -64,8 +65,8 @@ export function MidiTools({ store, engine }: { store: ProjectStore; engine: Audi
   }, [store, store.midiLearnActive, tick])
 
   if (!store.midiToolsOpen) return null
-  return (
-    <section className="midi-tools" aria-label="MIDI tools" data-screen-overlay="">
+  const tools = (
+    <>
       {hide && <p className="midi-note">This browser has no hardware MIDI ports. Scale, arp, and chord still run on the track.</p>}
       <div className="midi-tabs" role="tablist">
         <Tab id="learn" label="Learn" hint="Map a knob or key to a control" section={section} setSection={setSection} store={store} />
@@ -73,13 +74,31 @@ export function MidiTools({ store, engine }: { store: ProjectStore; engine: Audi
         <Tab id="out" label="Out" hint="Send notes to external gear" section={section} setSection={setSection} store={store} />
         <Tab id="capture" label="Capture" hint="Keep what you just played" section={section} setSection={setSection} store={store} />
         <Tab id="inputs" label="Inputs" hint="Record several inputs at once" section={section} setSection={setSection} store={store} />
-        <button type="button" title="Hide MIDI tools" onPointerDown={hint(store, 'Hide MIDI tools')} onClick={() => store.setMidiToolsOpen(false)}>Close</button>
+        {!phone && <button type="button" title="Hide MIDI tools" onPointerDown={hint(store, 'Hide MIDI tools')} onClick={() => store.setMidiToolsOpen(false)}>Close</button>}
       </div>
       {section === 'learn' && <LearnRow store={store} />}
       {section === 'fx' && <FxRow store={store} track={track} fx={fx} />}
       {section === 'out' && <OutRow store={store} />}
       {section === 'capture' && <CaptureRow store={store} engine={engine} track={track} />}
       {section === 'inputs' && <InputsRow store={store} />}
+    </>
+  )
+  if (phone) {
+    return (
+      <ArrangeBottomSheet
+        id="midi-tools-sheet"
+        label="MIDI tools"
+        title="MIDI"
+        detail="Learn, effects, hardware, and capture."
+        onClose={() => store.setMidiToolsOpen(false)}
+      >
+        <div className="midi-tools midi-tools-sheet">{tools}</div>
+      </ArrangeBottomSheet>
+    )
+  }
+  return (
+    <section className="midi-tools" aria-label="MIDI tools" data-screen-overlay="">
+      {tools}
     </section>
   )
 }

@@ -11,6 +11,17 @@ export const LANE_ZOOM_MAX = 2.25
 export const LANE_MIN_PX = 40
 /** Below this the header folds onto one row so the 40px controls still fit. */
 export const LANE_ZOOM_TIGHT = 0.9
+/**
+ * Below this the leftover above the 40px controls is shorter than a readable
+ * name on a normal lane (about 96px). Hide the name. The track menu stays.
+ */
+export const LANE_ZOOM_NAME = 0.58
+
+export function laneScaleAttr(zoom: number): 'min' | 'tight' | 'roomy' {
+  if (zoom < LANE_ZOOM_NAME) return 'min'
+  if (zoom < LANE_ZOOM_TIGHT) return 'tight'
+  return 'roomy'
+}
 
 export interface ZoomBounds {
   min: number

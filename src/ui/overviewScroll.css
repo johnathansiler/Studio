@@ -470,3 +470,174 @@
   bottom: auto;
   left: auto;
 }
+
+/* Landscape headers were a full cell plus a 40px margin, so they ran under the dock.
+   Match the timeline scroller, which already stops above the overview gutter.
+   Bottom padding lets the last track scroll clear of that edge on phone and landscape. */
+.shell.phone.land .arrange .heads.heads {
+  margin-bottom: 0;
+  height: calc(100% - var(--overview-gutter, 40px));
+  max-height: calc(100% - var(--overview-gutter, 40px));
+  box-sizing: border-box;
+}
+
+.shell.phone .arrange .heads,
+.shell.phone .arrange .timeline-scroll,
+.shell.phone.land .arrange .heads,
+.shell.phone.land .arrange .timeline-scroll {
+  box-sizing: border-box;
+  padding-bottom: 12px;
+}
+
+/* Fully zoomed-out lanes are about 40px. The name must not stick out above the
+   header, and the track menu has to stay inside the lane so .heads can take the tap. */
+.shell .arrange[data-lane-scale="min"] .head,
+.shell.phone .arrange[data-lane-scale="min"] .head,
+.shell.phone.land .arrange[data-lane-scale="min"] .head,
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="min"] .head {
+  position: relative;
+  overflow: hidden;
+}
+
+.shell .arrange[data-lane-scale="min"] .head .pl-head,
+.shell.phone .arrange[data-lane-scale="min"] .head .pl-head,
+.shell.phone.land .arrange[data-lane-scale="min"] .head .pl-head,
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="min"] .head .pl-head,
+.shell:not(.phone) .arrange[data-lane-scale="min"] .pl-head {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+  padding: 0;
+  gap: 0;
+}
+
+.shell .arrange[data-lane-scale="min"] .pl-name-row,
+.shell.phone .arrange[data-lane-scale="min"] .pl-name-row,
+.shell.phone.land .arrange[data-lane-scale="min"] .pl-name-row,
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="min"] .pl-name-row,
+.shell:not(.phone) .arrange[data-lane-scale="min"] .pl-name-row {
+  position: absolute;
+  top: auto;
+  left: auto;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  height: 40px;
+  min-height: 0;
+  max-height: 40px;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.shell .arrange[data-lane-scale="min"] .pl-name-row > :not(.track-more),
+.shell.phone .arrange[data-lane-scale="min"] .pl-name-row > :not(.track-more),
+.shell.phone.land .arrange[data-lane-scale="min"] .pl-name-row > :not(.track-more),
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="min"] .pl-name-row > :not(.track-more) {
+  display: none;
+}
+
+.shell .arrange[data-lane-scale="min"] .pl-name-row .track-more,
+.shell.phone .arrange[data-lane-scale="min"] .pl-name-row .track-more,
+.shell.phone.land .arrange[data-lane-scale="min"] .pl-name-row .track-more,
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="min"] .pl-name-row .track-more,
+.shell:not(.phone) .arrange[data-lane-scale="min"] .pl-head .track-more {
+  position: absolute;
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  width: 40px !important;
+  min-width: 40px !important;
+  max-width: 40px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+  margin: 0;
+  z-index: 7;
+  pointer-events: auto;
+}
+
+.shell .arrange[data-lane-scale="min"] .track-controls,
+.shell.phone .arrange[data-lane-scale="min"] .track-controls,
+.shell.phone.land .arrange[data-lane-scale="min"] .track-controls,
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="min"] .track-controls {
+  padding-right: 42px;
+  box-sizing: border-box;
+}
+
+/* Tight lanes still have a name band. Keep it inside the header and truncate.
+   The menu stays in the control band, not on top of the name. */
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="tight"] .pl-name-row,
+.shell.phone.land .arrange[data-lane-compact][data-lane-scale="tight"] .pl-name-row,
+.shell:not(.phone) .arrange[data-lane-scale="tight"] .pl-name-row,
+.shell.fold .arrange[data-lane-scale="tight"] .pl-name-row {
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  min-height: 0;
+  max-height: calc(100% - 40px);
+  overflow: hidden;
+  padding: 0 42px 0 0;
+}
+
+/* Portrait width stays the control row. A width of 0 keeps the name out of max-content. */
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="tight"] .pl-name-row,
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="min"] .pl-name-row {
+  width: 0;
+  min-width: 100%;
+  max-width: 100%;
+}
+
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="tight"] .pl-name-row .name,
+.shell.phone.land .arrange[data-lane-compact][data-lane-scale="tight"] .pl-name-row .name,
+.shell:not(.phone) .arrange[data-lane-scale="tight"] .pl-name-row .name,
+.shell.phone.land .arrange[data-lane-scale="tight"] .pl-head .name,
+.shell.phone:not(.land) .arrange[data-lane-scale="tight"] .pl-name-row .name {
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 16px;
+  padding: 0;
+}
+
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="tight"] .pl-name-row .track-more,
+.shell.phone.land .arrange[data-lane-compact][data-lane-scale="tight"] .pl-name-row .track-more,
+.shell:not(.phone) .arrange[data-lane-scale="tight"] .pl-head .track-more,
+.shell.phone .arrange[data-lane-scale="tight"] .pl-head .track-more {
+  position: absolute;
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  z-index: 6;
+  pointer-events: auto;
+}
