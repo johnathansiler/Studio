@@ -79,6 +79,8 @@ describe('ideas sheet pages', () => {
     expect(app).toContain("onIdeas={() => openIdeas('progressions')}")
     expect(app).toContain("openIdeas('players')")
     expect(app).toContain("openIdeas('write')")
+    expect(app).toMatch(/function toggleIdeas\(\) \{\s*setMenuOpen\(false\)\s*if \(unstuckOpen\) \{\s*engine\.stopPreview\(\)/)
+    expect(app).toMatch(/if \(unstuckOpen && page !== ideasPage\) engine\.stopPreview\(\)/)
     expect(app).toContain('page={ideasPage}')
     expect(app).not.toContain('playersOpen')
     expect(app).not.toContain('ideasOpen')

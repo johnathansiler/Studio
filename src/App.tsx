@@ -1941,12 +1941,14 @@ async function importDropped(files: FileList) {
   )
   function openIdeas(page: IdeasPage) {
     setMenuOpen(false)
+    if (unstuckOpen && page !== ideasPage) engine.stopPreview()
     setIdeasPage(page)
     setUnstuckOpen(true)
   }
   function toggleIdeas() {
     setMenuOpen(false)
     if (unstuckOpen) {
+      engine.stopPreview()
       setUnstuckOpen(false)
       return
     }
