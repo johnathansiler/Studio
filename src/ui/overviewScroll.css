@@ -597,12 +597,21 @@
   padding: 0 42px 0 0;
 }
 
-/* Portrait width stays the control row. A width of 0 keeps the name out of max-content. */
+/* Portrait width stays the control row. A width of 0 keeps the name out of max-content.
+   Min scale would otherwise pad Mute / Solo / Arm by 42px for the menu, and the
+   waveform lane would shrink to about 125px. The menu overlays that row instead. */
 .shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="tight"] .pl-name-row,
 .shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="min"] .pl-name-row {
   width: 0;
   min-width: 100%;
   max-width: 100%;
+}
+
+.shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="min"] .track-controls {
+  padding-right: 0;
+  width: max-content;
+  min-width: max-content;
+  max-width: none;
 }
 
 .shell.phone:not(.land) .arrange[data-lane-compact][data-lane-scale="tight"] .pl-name-row .name,
