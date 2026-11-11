@@ -1148,9 +1148,6 @@ export function ArrangeView({
                   onMove={(event) => moveSelection(event, 'audio', track.id, clip.id)}
                 />
               ))}
-              {track.type === 'midi' && track.midiClips.every((clip) => clip.slotOnly) && (
-                <button type="button" className="lane-add" aria-label="Add clip" onClick={() => { store.addMidiClip(track.id, 0); revealTrack(track.id, 'tap-clip', store.selectedMidiClipId ?? undefined) }}>+</button>
-              )}
               <AutomationOverlay store={store} trackId={track.id} px={px} tool={tool} />
               {track.midiClips.filter((clip) => !clip.slotOnly && clip.scene == null).map((clip) => {
                 const live = dragView?.clipId === clip.id ? dragView : null

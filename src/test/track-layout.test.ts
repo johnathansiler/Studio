@@ -69,6 +69,8 @@ describe('track view layout', () => {
       onAnalyze() {},
     } as never))
     expect(html).not.toContain('arrange-add')
+    expect(html).not.toContain('lane-add')
+    expect(html).not.toContain('aria-label="Add clip"')
     expect(html).toContain('data-loop-region="arrange"')
     expect(html).toContain('data-playhead-strip')
     expect(html).toContain('class="ruler"')
