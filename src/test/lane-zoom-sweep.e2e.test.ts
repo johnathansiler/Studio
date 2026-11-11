@@ -249,10 +249,10 @@ describe('portrait lane zoom sweep', () => {
             zoom = await page.evaluate(() => Number(getComputedStyle(document.querySelector('.arrange')!).getPropertyValue('--lane-zoom')))
             if (zoom > before - 0.01) break
           }
-          expect(zoom, 'zoom floor').toBeGreaterThanOrEqual(0.5 - 0.001)
-          expect(zoom, 'zoom floor').toBeLessThanOrEqual(0.52)
           const lane = await page.evaluate(() => document.querySelector('.timeline-scroll .lane')!.getBoundingClientRect().height)
           expect(lane, 'lane at the floor').toBeGreaterThanOrEqual(40)
+          expect(lane, 'lane at the floor').toBeLessThan(52)
+          expect(zoom, 'zoom floor').toBeGreaterThanOrEqual(0.5)
         }
       } finally {
         await browser.close()

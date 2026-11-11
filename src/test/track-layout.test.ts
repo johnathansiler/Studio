@@ -88,6 +88,10 @@ describe('track view layout', () => {
     expect(html).toContain('class="mini track-more')
     expect(html).toContain('data-view-name')
     expect(html).toContain('>Vocal<')
+    expect(html).toContain('C Major')
+    expect(html).toContain(' · 120')
+    expect(html).not.toContain('No sample')
+    expect(html).not.toContain('Inserts')
     vi.unstubAllGlobals()
   })
 

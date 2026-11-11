@@ -34,7 +34,6 @@ import { AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
 import { AutoTuneLaneMark } from './AutoTuneFace'
 import { AddTrackButton } from './AddTrack'
 import type { TrackChoice } from '../model/addTrack'
-import { showsOnscreenPiano } from '../model/onscreenPiano'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import { UtilitySheets } from './UtilitySheets'
 import { TrackOptions, trackKindLabel } from './TrackOptions'
@@ -57,7 +56,6 @@ import { WaveformView } from './WaveformView'
 import { sampleAtX, type WaveSpan } from './waveZoom'
 import { CommentControl, CommentPins } from './timelineComments'
 import { TrackViewfinder } from './TrackViewfinder'
-import './trackColumn.css'
 
 
 function ArrangeChrome({ browserOpen, setupOpen, pluginsOpen, onBrowser, onSetup, onPlugins, setupButton, menu, showPlugins = true }: { browserOpen: boolean; setupOpen: boolean; pluginsOpen: boolean; onBrowser: () => void; onSetup: () => void; onPlugins: () => void; setupButton: RefObject<HTMLButtonElement | null>; menu?: ReactNode; showPlugins?: boolean }) {
@@ -958,7 +956,7 @@ export function ArrangeView({
           <SongMapHead store={store} position={position} compact />
         </div>
         {project.tracks.map((track) => (
-          <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} data-track-name={track.name} key={track.id} style={rowStyle(track, store.selectedTrackId, store.selectedClipId, !!store.openLanes[track.id], phone)} onClick={() => { if (phone) { setPhoneFocus('track'); store.selectClip(track.id, null, false, false) }; store.selectTrack(track.id); revealTrack(track.id, 'select-track') }}>
+          <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} data-track-name={track.name} key={track.id} style={rowStyle(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => { if (phone) { setPhoneFocus('track'); store.selectClip(track.id, null, false, false) }; store.selectTrack(track.id); revealTrack(track.id, 'select-track') }}>
             <div className="pl-head">
               <div className="track-meter-row">
                 <span className="track-live" data-track-live={track.id}>
@@ -1087,7 +1085,7 @@ export function ArrangeView({
               className={`lane${store.selectedTrackId === track.id ? ' is-selected' : ''}`}
               data-track={track.id}
               key={track.id}
-              style={{ ...(laneGrid ?? { backgroundImage: 'none' }), ...rowStyle(track, store.selectedTrackId, store.selectedClipId, !!store.openLanes[track.id], phone) }}
+              style={{ ...(laneGrid ?? { backgroundImage: 'none' }), ...rowStyle(track, store.selectedClipId, !!store.openLanes[track.id]) }}
               onDoubleClick={(event) => {
                 if (track.type !== 'midi') return
                 if (!laneDoubleClickAddsClip(event.target)) return
@@ -1451,14 +1449,8 @@ function laneStyle(track: { clips: AudioClip[] }, selectedId: string | null): { 
   return { height: Math.max(168, 40 + open.folder.lanes.length * 48) }
 }
 
-function rowStyle(track: { id: string; type: string; instrument?: string; plugins?: { pluginId: string; params?: Record<string, number> }[]; clips: AudioClip[] }, selectedTrackId: string | null, selectedClipId: string | null, automation: boolean, phone = false) {
-  const base = rowHeight(track, selectedClipId, automation)
-  const piano = selectedTrackId === track.id && showsOnscreenPiano(track)
-  if (!piano) return base
-  /* Desktop lanes are 96px. Eight extra pixels clear the mute row under Keys.
-     Phone already pins the name above the flags inside the normal lane. */
-  const extra = phone ? 0 : 8
-  return { ...base, minHeight: `calc(var(--lane-h, 72px) * var(--lane-zoom, 1) + ${extra}px)` }
+function rowStyle(track: { clips: AudioClip[] }, selectedClipId: string | null, automation: boolean) {
+  return rowHeight(track, selectedClipId, automation)
 }
 
 function rowHeight(track: { clips: AudioClip[] }, selectedId: string | null, automation: boolean): { height?: number | string } {
