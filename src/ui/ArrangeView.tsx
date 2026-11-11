@@ -959,6 +959,9 @@ export function ArrangeView({
           <div className={`head${store.selectedTrackId === track.id ? ' is-selected' : ''}`} data-track={track.id} data-track-name={track.name} key={track.id} style={rowStyle(track, store.selectedClipId, !!store.openLanes[track.id])} onClick={() => { if (phone) { setPhoneFocus('track'); store.selectClip(track.id, null, false, false) }; store.selectTrack(track.id); revealTrack(track.id, 'select-track') }}>
             <div className="pl-head">
               <div className="track-meter-row">
+                <span className="mini-meter" data-arrange-meter={track.id} aria-hidden>
+                  <i style={{ transform: `scaleX(${levels[track.id] ?? 0})` }} />
+                </span>
                 <span className="track-live" data-track-live={track.id}>
                   <i
                     className="midi-activity"
@@ -967,9 +970,6 @@ export function ArrangeView({
                     role="img"
                     aria-label={midiOn[track.id] ? 'MIDI activity. Notes are playing.' : 'MIDI activity. Idle.'}
                   />
-                  <span className="mini-meter" data-arrange-meter={track.id} aria-hidden>
-                    <i style={{ transform: `scaleX(${levels[track.id] ?? 0})` }} />
-                  </span>
                 </span>
                 <TrackPresence trackId={track.id} />
               </div>

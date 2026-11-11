@@ -23,7 +23,7 @@ export function TrackViewfinder({
   return (
     <aside className="track-viewfinder" data-viewfinder="" data-view-track={glance.id} aria-label="Track">
       <p className="viewfinder-line">
-        {line ? line : (
+        {line ?? (
           <>
             <strong data-view-name="" style={{ color: glance.color }}>{glance.name}</strong>
             <span>{` · ${glance.key} · ${glance.bpm}`}</span>

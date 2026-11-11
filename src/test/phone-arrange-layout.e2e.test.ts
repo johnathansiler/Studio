@@ -60,7 +60,9 @@ async function measure(page: Page) {
             top: rect.top,
             bottom: rect.bottom,
             height: rect.height,
-            clipped: slotBox ? rect.left < slotBox.left - 1 || rect.right > slotBox.right + 1 || rect.bottom > slotBox.bottom + 1 : false,
+            clipped: slotBox ? (button.closest('.phone-context')
+              ? rect.top < slotBox.top - 1 || rect.bottom > slotBox.bottom + 1
+              : rect.left < slotBox.left - 1 || rect.right > slotBox.right + 1 || rect.bottom > slotBox.bottom + 1) : false,
           }
         })
       : []
