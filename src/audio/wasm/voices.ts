@@ -179,8 +179,21 @@ export function createWasmSampler(sampleRate: number): Processor & {
       pending.sort((a, b) => a.time - b.time)
     },
     sounding: () => active,
-    process(_input, output, _params, ctx: BlockContext) {
-      const frames = output[0]?.length ?? 0
+    process(input, output, params, ctx: BlockContext) {
+      const frames = output[0]?.length ?? input[0]?.length ?? 0
+      // Kind 1 is Beat Machine. The pad voice is mixed upstream. This insert
+      // must copy the buffer, matching the TypeScript sampler.
+      if (Math.round(params.kind ?? 0) >= 1) {
+        for (let c = 0; c < output.length; c++) {
+          const dest = output[c]
+          if (!dest) continue
+          const src = input[Math.min(c, Math.max(0, input.length - 1))]
+          const n = Math.min(frames, dest.length)
+          if (src && src !== dest) dest.set(src.subarray(0, n))
+          else if (!src) dest.fill(0, 0, n)
+        }
+        return
+      }
       const play = ctx.playTime
       if (play != null && pending.length) {
         const end = play + frames / sampleRate
