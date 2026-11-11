@@ -82,8 +82,11 @@ export function createLimiter(sampleRate: number): Processor {
     process(input, output, params, ctx) {
       const ceiling = dbToGain(params.ceiling ?? -0.1)
       const threshold = dbToGain(params.threshold ?? 0)
-      const limit = Math.min(ceiling, threshold)
+      // 0.2 dB under the ceiling covers the intersample peak a sample-peak detector misses.
+      const limit = Math.min(ceiling, threshold) * 10 ** (-0.2 / 20)
       const release = coeff(params.release || 40, ctx.sampleRate)
+      // Reach the new gain inside the 64-sample lookahead instead of stepping in one sample.
+      const attack = 1 - Math.exp(-1 / 12)
       const n = input[0]?.length ?? 0
       for (let i = 0; i < n; i++) {
         const left = input[0][i] || 0
@@ -96,7 +99,7 @@ export function createLimiter(sampleRate: number): Processor {
         let peak = Math.max(Math.abs(left), Math.abs(right))
         for (let k = 0; k < look; k++) peak = Math.max(peak, Math.abs(delay[0][k]), Math.abs(delay[1][k]))
         const needed = peak > limit ? Math.min(1, limit / Math.max(peak, 1e-8)) : 1
-        gain += (needed - gain) * (needed < gain ? 1 : release)
+        gain += (needed - gain) * (needed < gain ? attack : release)
         index += 1
         if (output[0]) output[0][i] = sanitize(outL * gain)
         if (output[1]) output[1][i] = sanitize(outR * gain)

@@ -5,7 +5,7 @@
 
 const FACTOR = 4
 const PHASE_TAPS = 12
-const DOWN_TAPS = 24
+const DOWN_TAPS = 48
 
 function sinc(x: number) {
   if (Math.abs(x) < 1e-8) return 1
@@ -54,6 +54,16 @@ export interface ShaperState {
   filled: number
 }
 
+export function resetShaperState(state: ShaperState) {
+  state.ring.fill(0)
+  state.high.fill(0)
+  state.write = 0
+  state.highWrite = 0
+  state.prevU = 0
+  state.prevF = 0
+  state.filled = 0
+}
+
 export function createShaperState(): ShaperState {
   return {
     ring: new Float64Array(PHASE_TAPS),
@@ -79,7 +89,8 @@ const PHASES = (() => {
   })
 })()
 
-const DOWN = lowpass(DOWN_TAPS, 0.9 / FACTOR, 1)
+/** Just under the original Nyquist. 0.9/factor sat above it and folded the new harmonics. */
+const DOWN = lowpass(DOWN_TAPS, 0.4 / FACTOR, 1)
 
 function clampUnit(value: number) {
   return Math.max(-20, Math.min(20, value))

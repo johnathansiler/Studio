@@ -2,29 +2,14 @@
 //! Kernels are built in `prepare`, not in `process_block`.
 
 const ANALOG_TAPS: usize = 16;
-const ANALOG_DOWN: usize = 31;
+const ANALOG_DOWN: usize = 63;
 const SOFT_TAPS: usize = 12;
-const SOFT_DOWN: usize = 24;
+const SOFT_DOWN: usize = 48;
 const SOFT_FACTOR: usize = 4;
 
 fn analog_kernel(length: usize, cutoff: f64, gain: f64, out: &mut [f64]) {
-    let mid = (length as f64 - 1.0) / 2.0;
-    let mut sum = 0.0;
-    for i in 0..length {
-        let x = i as f64 - mid;
-        let sinc = if x.abs() < 1e-8 {
-            1.0
-        } else {
-            (std::f64::consts::PI * x).sin() / (std::f64::consts::PI * x)
-        };
-        let window = 0.5 - 0.5 * ((2.0 * std::f64::consts::PI * i as f64) / (length as f64 - 1.0)).cos();
-        out[i] = 2.0 * cutoff * sinc * window;
-        sum += out[i];
-    }
-    let scale = gain / if sum == 0.0 { 1.0 } else { sum };
-    for tap in out.iter_mut().take(length) {
-        *tap *= scale;
-    }
+    // Same Kaiser lowpass as `soft_lowpass`. Cutoff scales the sinc, not only the height.
+    soft_lowpass(length, cutoff, gain, out);
 }
 
 fn polyphase(factor: usize, cutoff: f64, gain: f64, branch: &mut [f64]) {
@@ -81,7 +66,7 @@ impl AnalogShaper {
         self.prev_u = 0.0;
         self.prev_f = 0.0;
         polyphase(rate, 0.45 / rate as f64, rate as f64, &mut self.phases);
-        analog_kernel(ANALOG_DOWN, 0.9 / rate as f64, 1.0, &mut self.down);
+        analog_kernel(ANALOG_DOWN, 0.4 / rate as f64, 1.0, &mut self.down);
     }
 
     pub fn force_factor(&mut self, factor: usize) {
@@ -225,7 +210,7 @@ impl SoftShaper {
                 self.phases[phase * SOFT_TAPS + tap] = kernel[tap * SOFT_FACTOR + phase];
             }
         }
-        soft_lowpass(SOFT_DOWN, 0.9 / SOFT_FACTOR as f64, 1.0, &mut self.down);
+        soft_lowpass(SOFT_DOWN, 0.4 / SOFT_FACTOR as f64, 1.0, &mut self.down);
         self.ready = true;
     }
 

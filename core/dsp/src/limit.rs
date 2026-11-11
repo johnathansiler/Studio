@@ -24,6 +24,9 @@ impl CleanLimiter {
         let ceiling = db_to_gain(param(values, 3, -0.1));
         let threshold = db_to_gain(param(values, 1, 0.0));
         let release = coeff(js_or(param(values, 2, 50.0), 40.0), sample_rate);
+        // 0.2 dB under the ceiling, and a 12-sample attack inside the 64-sample lookahead.
+        let limit_trim = 10f64.powf(-0.2 / 20.0);
+        let attack = 1.0 - (-1.0_f64 / 12.0).exp();
         for i in 0..frames {
             let dry_l = left[i] as f64;
             let dry_r = right[i] as f64;
@@ -36,9 +39,9 @@ impl CleanLimiter {
             for k in 0..64 {
                 peak = peak.max((self.delay[0][k] as f64).abs()).max((self.delay[1][k] as f64).abs());
             }
-            let limit = ceiling.min(threshold);
+            let limit = ceiling.min(threshold) * limit_trim;
             let needed = if peak > limit { (limit / peak.max(1e-8)).min(1.0) } else { 1.0 };
-            self.gain += (needed - self.gain) * if needed < self.gain { 1.0 } else { release };
+            self.gain += (needed - self.gain) * if needed < self.gain { attack } else { release };
             self.index += 1;
             write_stereo(left, right, i, out_l * self.gain, out_r * self.gain);
         }

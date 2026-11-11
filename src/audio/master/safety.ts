@@ -37,7 +37,7 @@ export function holdFullScale(channels: Float32Array[]) {
   if (frames < 512) return scaled
   let truePeak = 0
   for (const channel of scaled) truePeak = Math.max(truePeak, truePeakLinear(channel, 24))
-  if (!(truePeak > 1.02) || !Number.isFinite(truePeak)) return scaled
+  if (!(truePeak > 1) || !Number.isFinite(truePeak)) return scaled
   const trim = 1 / truePeak
   for (const channel of scaled) {
     for (let i = 0; i < channel.length; i++) channel[i] *= trim

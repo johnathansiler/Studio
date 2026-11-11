@@ -451,12 +451,13 @@ function voiceState(voice: PlayVoice, id: string) {
 
 function envelope(value: number, released: boolean, attackMs = 8, decayMs = 200, sustain = 0.7, releaseMs = 200, sr = 48000) {
   if (!released) {
-    const attack = Math.max(1, (attackMs / 1000) * sr)
+    // A zero attack used to reach full level in one sample and clicked.
+    const attack = Math.max(0.001 * sr, (attackMs / 1000) * sr)
     if (value < 0.999) return Math.min(1, value + 1 / attack)
     const decay = Math.max(1, (decayMs / 1000) * sr)
     return value + (sustain - value) * (1 - Math.exp(-1 / decay))
   }
-  const release = Math.max(1, (releaseMs / 1000) * sr)
+  const release = Math.max(0.002 * sr, (releaseMs / 1000) * sr)
   return value * Math.exp(-1 / release)
 }
 

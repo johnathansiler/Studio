@@ -24,6 +24,8 @@ export function createTape(sampleRate: number): Processor {
   const shapers = [createShaper(4), createShaper(4)]
   const bump = [designBiquad('peaking', sampleRate, 55, 0.8, 0), designBiquad('peaking', sampleRate, 55, 0.8, 0)]
   const hiss = [designBiquad('highpass', sampleRate, 2000, 0.7), designBiquad('lowpass', sampleRate, 8000, 0.7)]
+  const lowpass = [designBiquad('lowpass', sampleRate, 8000, 0.7), designBiquad('lowpass', sampleRate, 8000, 0.7)]
+  let lowpassKey = ''
   const delay = [new Float32Array(256), new Float32Array(256)]
   let write = 0
   let phase = 0
@@ -39,6 +41,8 @@ export function createTape(sampleRate: number): Processor {
       write = 0
       phase = 0
       seed = 19
+      lowpass[0].x1 = lowpass[0].x2 = lowpass[0].y1 = lowpass[0].y2 = 0
+      lowpass[1].x1 = lowpass[1].x2 = lowpass[1].y1 = lowpass[1].y2 = 0
     },
     process(input, output, params, ctx) {
       const factor = ctx.quality === 'eco' ? 2 : 4
@@ -58,7 +62,12 @@ export function createTape(sampleRate: number): Processor {
       const bias = clamp(params.bias ?? 0.4, 0, 1)
       const speeds = [7.5, 15, 30]
       const rolloff = 6000 * (speeds[speed] / 15) * (1.15 - bias * 0.5)
-      const lowpass = [designBiquad('lowpass', ctx.sampleRate, rolloff, 0.7), designBiquad('lowpass', ctx.sampleRate, rolloff, 0.7)]
+      const rolloffKey = `${ctx.sampleRate}:${rolloff.toFixed(4)}`
+      if (rolloffKey !== lowpassKey) {
+        copyFilter(lowpass[0], designBiquad('lowpass', ctx.sampleRate, rolloff, 0.7))
+        copyFilter(lowpass[1], designBiquad('lowpass', ctx.sampleRate, rolloff, 0.7))
+        lowpassKey = rolloffKey
+      }
       const wow = clamp(params.wow ?? 0.2, 0, 1)
       const drive = 0.15 + clamp(params.drive ?? 0.35, 0, 1) * 0.7
       const hissLevel = ctx.quality === 'eco' ? 0 : clamp(params.hiss ?? 0.15, 0, 1) * 0.004
@@ -86,6 +95,13 @@ export function createTape(sampleRate: number): Processor {
   }
 }
 
+function blockDc(state: { x: number; y: number }, sample: number, rate: number) {
+  const y = sample - state.x + rate * state.y
+  state.x = sample
+  state.y = !Number.isFinite(y) || Math.abs(y) < 1e-15 ? 0 : y
+  return state.y
+}
+
 function readDelay(line: Float32Array, at: number) {
   const length = line.length
   const wrapped = ((at % length) + length) % length
@@ -99,12 +115,17 @@ function readDelay(line: Float32Array, at: number) {
 export function createSum(sampleRate: number): Processor {
   const shapers = [createShaper(4), createShaper(4)]
   const meter = createMeter()
+  const dc = [
+    { x: 0, y: 0 },
+    { x: 0, y: 0 },
+  ]
   return {
     latencySamples: 0,
     meter,
     reset() {
       meter.vu = -20
       meter.gr = 0
+      dc[0].x = dc[0].y = dc[1].x = dc[1].y = 0
     },
     process(input, output, params, ctx) {
       const factor = ctx.quality === 'eco' ? 2 : 4
@@ -117,9 +138,10 @@ export function createSum(sampleRate: number): Processor {
       const makeup = 1 / (1 + drive * 0.35)
       const n = input[0]?.length ?? 0
       const bend = (sample: number) => (tube ? sample + 0.45 * sample * sample : sample)
+      const dcRate = Math.exp((-2 * Math.PI * 8) / ctx.sampleRate)
       for (let i = 0; i < n; i++) {
-        const left = oversample(shapers[0], bend(input[0]?.[i] || 0), drive) * makeup
-        const right = oversample(shapers[1], bend(input[1]?.[i] ?? input[0]?.[i] ?? 0), drive) * makeup
+        const left = blockDc(dc[0], oversample(shapers[0], bend(input[0]?.[i] || 0), drive) * makeup, dcRate)
+        const right = blockDc(dc[1], oversample(shapers[1], bend(input[1]?.[i] ?? input[0]?.[i] ?? 0), drive) * makeup, dcRate)
         out(output, i, left, right)
         trackVu(meter, left, ctx.sampleRate)
       }

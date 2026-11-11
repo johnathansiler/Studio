@@ -2,6 +2,7 @@
 //! which the TypeScript chain skips. The voiced path is the amp, tone stack, and cabinet.
 
 use crate::biquad::{design_biquad, tick, Biquad, BiquadKind};
+use crate::smooth::SampleGlide;
 use crate::util::{clamp, js_round, param, store};
 
 const HPF: [f64; 9] = [80.0, 90.0, 120.0, 70.0, 85.0, 140.0, 32.0, 40.0, 48.0];
@@ -148,6 +149,7 @@ pub struct Amp {
     key: [f64; 6],
     ready: bool,
     rate: f64,
+    gain: SampleGlide,
 }
 
 impl Amp {
@@ -161,6 +163,7 @@ impl Amp {
             key: [0.0; 6],
             ready: false,
             rate: sample_rate,
+            gain: SampleGlide::default(),
         }
     }
 
@@ -173,12 +176,14 @@ impl Amp {
         self.ir.fill(0.0);
         self.length = 0;
         self.ready = false;
+        self.gain.reset();
     }
 
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32], frames: usize, values: &[f64], sample_rate: f64, eco: bool) {
         // The saturator catalog keeps the amp model at its default, Clear American.
         let model = 0usize;
-        let gain = clamp(param(values, 13, 0.35), 0.0, 1.0);
+        let gain_target = clamp(param(values, 13, 0.35), 0.0, 1.0);
+        self.gain.prepare(sample_rate);
         let factor = if eco { 2 } else { 4 };
         self.os[0].ensure(sample_rate, factor);
         self.os[1].ensure(sample_rate, factor);
@@ -197,11 +202,11 @@ impl Amp {
             && (param(values, 15, 0.5) - 0.5).abs() < 0.001
             && (param(values, 16, 0.5) - 0.5).abs() < 0.001
             && (param(values, 17, 0.5) - 0.5).abs() < 0.001;
-        let amp_on = gain >= 0.001;
         for i in 0..frames {
+            let gain = self.gain.next(gain_target);
             let mut l = left[i] as f64;
             let mut r = right[i] as f64;
-            if amp_on {
+            if gain >= 0.001 {
                 l = self.os[0].shape(tick(&mut self.tone[0].hpf, l), model, gain);
                 r = self.os[1].shape(tick(&mut self.tone[1].hpf, r), model, gain);
                 if !neutral {

@@ -307,6 +307,7 @@ describe('playback artifacts', () => {
     const faded = crossfadeLoopRegion(loop, 0, loop.length, 128)
     expect(Math.abs(faded[faded.length - 1] - faded[0])).toBeLessThan(0.02)
     expect(maxJump(faded, 400, 1600)).toBeLessThan(0.08)
+    expect(maxJump(faded, faded.length - 140, faded.length)).toBeLessThan(0.08)
   })
 })
 

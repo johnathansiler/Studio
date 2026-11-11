@@ -170,15 +170,37 @@ export interface Shaper {
   memory: { u: number; f: number }
 }
 
+function bessel0(x: number) {
+  let sum = 1
+  let term = 1
+  const half = x * 0.5
+  for (let k = 1; k <= 10; k++) {
+    term *= (half * half) / (k * k)
+    sum += term
+  }
+  return sum
+}
+
+function kaiser(amount: number, beta: number) {
+  const inside = 1 - amount * amount
+  return inside > 0 ? bessel0(beta * Math.sqrt(inside)) / bessel0(beta) : 0
+}
+
+/**
+ * Windowed-sinc lowpass. `cutoff` is a fraction of the filter's sample rate.
+ * The sinc argument has to include that cutoff; scaling only the height leaves a full-band kernel.
+ */
 function kernel(length: number, cutoff: number, gain: number) {
   const taps = new Float64Array(length)
   const mid = (length - 1) / 2
+  const beta = 8
   let sum = 0
   for (let i = 0; i < length; i++) {
     const x = i - mid
-    const sinc = Math.abs(x) < 1e-8 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x)
-    const window = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (length - 1))
-    taps[i] = 2 * cutoff * sinc * window
+    const arg = 2 * cutoff * x
+    const sinc = Math.abs(arg) < 1e-8 ? 1 : Math.sin(Math.PI * arg) / (Math.PI * arg)
+    const amount = mid === 0 ? 0 : x / mid
+    taps[i] = 2 * cutoff * sinc * kaiser(amount, beta)
     sum += taps[i]
   }
   const scale = gain / (sum || 1)
@@ -187,7 +209,7 @@ function kernel(length: number, cutoff: number, gain: number) {
 }
 
 const PHASE_TAPS = 16
-const DOWN_TAPS = 31
+const DOWN_TAPS = 63
 
 function polyphase(factor: number, cutoff: number, gain: number) {
   const full = kernel(factor * PHASE_TAPS, cutoff, gain)
@@ -205,7 +227,7 @@ export function createShaper(factor: number): Shaper {
     hist: new Float64Array(PHASE_TAPS),
     high: new Float64Array(DOWN_TAPS),
     phases: polyphase(rate, 0.45 / rate, rate),
-    downTaps: kernel(DOWN_TAPS, 0.9 / rate, 1),
+    downTaps: kernel(DOWN_TAPS, 0.4 / rate, 1),
     write: 0,
     highWrite: 0,
     memory: { u: 0, f: 0 },
