@@ -31,11 +31,32 @@ export function sheetHistoryKey(trackId: string | null, utility: UtilitySheet | 
   return utility
 }
 
+/**
+ * The sheet close calls history.back(), which fires popstate on a later turn.
+ * An editor opened in the same click pushes its own entry before that pop,
+ * and the late pop then removes the editor. Callers that push history wait for this.
+ */
+let pendingPop: Promise<void> | null = null
+
+/** The in-flight sheet pop, or null when history.back() is not waiting. */
+export function sheetHistoryPop(): Promise<void> | null {
+  return pendingPop
+}
+
 /** Drop the sheet history entry when a control closes it. A browser Back press is already popping. */
 export function popSheetHistory() {
   if (typeof history === 'undefined') return
   const state = history.state as { cueharbor?: string } | null
-  if (state?.cueharbor === MARK) history.back()
+  if (state?.cueharbor !== MARK || pendingPop) return
+  pendingPop = new Promise((resolve) => {
+    const done = () => {
+      window.removeEventListener('popstate', done)
+      pendingPop = null
+      resolve()
+    }
+    window.addEventListener('popstate', done)
+  })
+  history.back()
 }
 
 export function rememberSheetHistory(key: string) {

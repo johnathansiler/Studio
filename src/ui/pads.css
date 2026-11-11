@@ -624,22 +624,95 @@
 .pad-zoom-hint {
   position: absolute;
   left: 50%;
-  top: calc(100% + 4px);
+  bottom: 6px;
   transform: translateX(-50%);
-  z-index: 4;
+  z-index: 5;
   max-width: calc(100% - 16px);
   margin: 0;
-  padding: 6px 12px;
+  padding: 4px 10px;
   border-radius: 999px;
   background: rgba(16, 22, 16, 0.94);
   color: #e7f5df;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 640;
   line-height: 1.2;
   letter-spacing: 0;
   white-space: nowrap;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
   touch-action: none;
+}
+
+/* Sampler presets are a short tray. The X stays in the tray, clear of the level slider,
+   and the list stops above the Undo row and the phone tabs. */
+body:has([data-pads='plugin']) .anchored-menu.preset-menu:not([data-screen-overlay]) {
+  max-height: min(320px, calc(100dvh - var(--phone-chrome-bottom, 0px) - 96px)) !important;
+  overflow: auto !important;
+}
+
+body:has([data-pads='plugin']) .anchored-menu.preset-menu[data-screen-overlay] {
+  top: auto !important;
+  left: auto !important;
+  right: 8px !important;
+  bottom: calc(var(--phone-chrome-bottom, 0px) + 16px) !important;
+  width: min(360px, calc(100vw - 16px)) !important;
+  max-width: min(360px, calc(100vw - 16px)) !important;
+  height: auto !important;
+  max-height: min(232px, calc(100dvh - var(--phone-chrome-bottom, 0px) - 148px)) !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  border-radius: 14px !important;
+  overflow: hidden !important;
+}
+
+body:has([data-pads='plugin']) .anchored-menu.preset-menu > button.sheet-close.overlay-close {
+  position: relative !important;
+  top: auto !important;
+  right: auto !important;
+  left: auto !important;
+  align-self: flex-end !important;
+  flex: 0 0 28px !important;
+  width: 28px !important;
+  min-width: 28px !important;
+  max-width: 28px !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  max-height: 28px !important;
+  margin: 6px 6px 0 auto !important;
+  padding: 0 !important;
+  border-radius: 8px !important;
+  z-index: 2 !important;
+}
+
+body:has([data-pads='plugin']) .anchored-menu.preset-menu > button.sheet-close.overlay-close svg {
+  width: 12px;
+  height: 12px;
+}
+
+body:has([data-pads='plugin']) .anchored-menu.preset-menu[data-screen-overlay] .preset-list {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: auto !important;
+  flex-wrap: nowrap !important;
+}
+
+body:has([data-pads='plugin']) .anchored-menu.preset-menu[data-screen-overlay] .preset-list button {
+  flex: 0 0 40px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+}
+
+body:not(:has(.shell.phone)):has([data-pads='plugin']) .anchored-menu.preset-menu[data-screen-overlay] {
+  bottom: 96px !important;
+  height: auto !important;
+  max-height: 360px !important;
+  overflow: auto !important;
+}
+
+body:not(:has(.shell.phone)):has([data-pads='plugin']) .anchored-menu.preset-menu[data-screen-overlay] .preset-list {
+  flex: 0 0 auto !important;
+  overflow: visible !important;
 }
 
 .hw-transport .rec,
