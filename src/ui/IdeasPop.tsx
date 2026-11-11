@@ -17,7 +17,18 @@ import {
 import { selectScale } from '../state/select'
 import type { ProjectStore } from '../state/store'
 
-export function IdeasPop({ store, engine, onClose }: { store: ProjectStore; engine: AudioEngine; onClose: () => void }) {
+export function IdeasPop({
+  store,
+  engine,
+  onClose,
+  embedded = false,
+}: {
+  store: ProjectStore
+  engine: AudioEngine
+  onClose?: () => void
+  /** Inside the Ideas sheet. The sheet owns the title and the X. */
+  embedded?: boolean
+}) {
   const scale = selectScale(store)
   const idea = scale.idea || 'axis'
   const [query, setQuery] = useState('')
@@ -47,9 +58,15 @@ export function IdeasPop({ store, engine, onClose }: { store: ProjectStore; engi
     })
   }
   return (
-    <div className="ideas-pop" data-ideas="open" data-screen-overlay="" role="dialog" aria-label="Ideas">
+    <div
+      className={embedded ? 'ideas-pop embedded' : 'ideas-pop'}
+      data-ideas="open"
+      data-screen-overlay={embedded ? undefined : ''}
+      role={embedded ? undefined : 'dialog'}
+      aria-label={embedded ? 'Progressions' : 'Ideas'}
+    >
       <header>
-        <strong>Ideas</strong>
+        {!embedded && <strong>Ideas</strong>}
         <input aria-label="Search ideas" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
         <button type="button" onClick={() => {
           const pick = randomIdea(filterIdeas('', genre, 'all'))
@@ -59,7 +76,7 @@ export function IdeasPop({ store, engine, onClose }: { store: ProjectStore; engi
           setQuery('')
           setMood('all')
         }}>Random</button>
-        <button type="button" className="text-btn overlay-close" onClick={onClose} aria-label="Close ideas">Close</button>
+        {!embedded && <button type="button" className="text-btn overlay-close" onClick={onClose} aria-label="Close ideas">Close</button>}
       </header>
       <div className="chip-row" aria-label="Genre">
         <button type="button" className={genre === 'all' ? 'on' : ''} onClick={() => setGenre('all')}>All</button>

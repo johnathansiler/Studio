@@ -151,6 +151,11 @@
 .unstuck-dock {
   z-index: 230;
 }
+/* The piano roll lives in a dock above ordinary overlays. Ideas opened from
+   that roll has to paint over the roll, and still under the view tabs. */
+.unstuck-sheet[data-screen-overlay] {
+  z-index: calc(var(--overlay-z) + 16) !important;
+}
 .unstuck-sheet button,
 .unstuck-sheet select,
 .unstuck-sheet input[type='number'] {
@@ -161,10 +166,42 @@
   width: 100%;
   min-height: 44px;
 }
+.unstuck-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  flex: 0 0 auto;
+  background: #141c18;
+}
+/* A sticky title would cover the catalog on a short phone sheet. */
+body:has(.shell.phone) .unstuck-sticky {
+  position: static;
+}
 .unstuck-pages {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 8px;
+  flex: 0 0 auto;
+}
+.unstuck-sheet [data-ideas-page="progressions"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* Phone sheets are short. The catalog keeps its rows and the sheet scrolls. */
+body:has(.shell.phone) .unstuck-sheet [data-ideas-page="progressions"],
+body:has(.shell.phone) .ideas-pop.embedded,
+body:has(.shell.phone) .ideas-pop.embedded .idea-stage,
+body:has(.shell.phone) .ideas-pop.embedded .idea-list,
+body:has(.shell.phone) .ideas-pop.embedded .idea-detail {
+  flex: 0 0 auto !important;
+  height: auto !important;
+  max-height: none !important;
+  min-height: 0;
+  overflow: visible !important;
 }
 .unstuck-pages button {
   min-height: 40px;

@@ -58,10 +58,12 @@ export function PlayersSheet({ store, engine, onClose, embedded = false }: { sto
 
   return (
     <aside className={`players-dock${embedded ? ' embedded' : ''}`} data-screen-overlay={embedded ? undefined : ''} aria-label="Players">
-      <header>
-        <strong>Players</strong>
-        <TipButton label="Close" hint={CLOSE} onClick={onClose} />
-      </header>
+      {!embedded && (
+        <header>
+          <strong>Players</strong>
+          <TipButton label="Close" hint={CLOSE} onClick={onClose} />
+        </header>
+      )}
       <p className="players-readout">{settings.followSections ? sections : 'One region, with a fill at the end.'}</p>
       <p className="players-readout">{followLine}</p>
       <label className="players-style">
