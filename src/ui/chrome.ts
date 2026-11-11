@@ -128,7 +128,7 @@ export const PIANO_BAR: Copy[] = [
 
 export const PIANO_SHEET: Copy[] = [
   { id: 'detect', label: 'Detect key', hint: 'Guess the key from the notes in this clip.' },
-  { id: 'ideas', label: 'Ideas', hint: 'Suggest chords that fit this clip.' },
+  { id: 'ideas', label: 'Chord Ideas', hint: 'Suggest chords that fit this clip.' },
   { id: 'slide', label: 'Slide', hint: 'Glide from the selected note into the next one.' },
   { id: 'quantize', label: 'Quantize', hint: 'Snap the selected notes onto the grid.' },
   { id: 'arp', label: 'Arp', hint: 'Turn the selected chord into an arpeggio.' },

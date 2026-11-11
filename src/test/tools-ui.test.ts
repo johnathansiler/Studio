@@ -142,6 +142,7 @@ describe('mobile control lists', () => {
   })
 
   it('keeps bar controls out of the sheet', () => {
+    expect(PIANO_SHEET.find((item) => item.id === 'ideas')?.label).toBe('Chord Ideas')
     expect(sharesId(PIANO_BAR, PIANO_SHEET)).toEqual([])
     expect(sharesId(BEAT_BAR, BEAT_SHEET)).toEqual([])
     expect(sharesId(SESSION_BAR, SESSION_SHEET)).toEqual([])
