@@ -1000,6 +1000,34 @@ export class ProjectStore {
     })
   }
 
+  /** Put a whole bank of library hits on the kit in one undo step. */
+  placePadKit(trackId: string, bank: number, pads: { index: number; name: string; samples?: Float32Array; sampleRate?: number; level?: number; tune?: number; decay?: number }[]) {
+    const prepared = pads.map((pad) => {
+      if (!pad.samples || !pad.sampleRate) return { ...pad, bufferId: undefined as string | undefined }
+      const bufferId = uid('smp')
+      const samples = normalizeChannel(pad.samples)
+      this.buffers.set(bufferId, { id: bufferId, name: pad.name, sampleRate: pad.sampleRate, channels: [samples] })
+      return { ...pad, bufferId }
+    })
+    this.mutate(() => {
+      const track = this.track(trackId)
+      if (!track) return
+      const kit = normalizePadKit(track.padKit)
+      const row = kit.banks[bank]
+      if (!row) return
+      for (const pad of prepared) {
+        const current = row[pad.index]
+        if (!current) continue
+        const next = pad.bufferId ? assignPad(current, { name: pad.name, bufferId: pad.bufferId }) : { ...current }
+        if (pad.level != null) next.level = pad.level
+        if (pad.tune != null) next.tune = pad.tune
+        if (pad.decay != null) next.decay = pad.decay
+        row[pad.index] = next
+      }
+      track.padKit = normalizePadKit(kit)
+    })
+  }
+
   /** Put a mic take on the armed pad. Trim drops the quiet ends. Auto chop spreads transients across the bank. */
   placePadTake(trackId: string, bank: number, index: number, samples: Float32Array, sampleRate: number, opts: { trim: boolean; autoChop: boolean; threshold: number }) {
     const trimmed = opts.trim ? trimSilence(samples, Math.max(0.0008, opts.threshold * 0.25)) : samples

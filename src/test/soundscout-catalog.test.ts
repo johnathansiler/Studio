@@ -199,8 +199,11 @@ describe('SoundScout catalog', () => {
     expect(libraryMatchesCategory(steps[0], 'Snares')).toBe(false)
     expect(libraryMatchesCategory(steps[0], 'Kicks')).toBe(true)
     const picks = pickDefaultKit(catalog)
-    expect(picks.map((pick) => pick.index)).toEqual([0])
+    expect(picks.map((pick) => pick.index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+    expect(new Set(picks.map((pick) => pick.id)).size).toBe(16)
     expect(catalog.find((entry) => entry.id === picks[0].id)?.type).toBe('one-shot')
+    expect(picks[0].name).toMatch(/808/)
+    expect(picks.find((pick) => pick.index === 2)?.name).toMatch(/rim|grime/i)
 
     const loop = catalog.find((entry) => entry.pack === 'LEN-ZIP')!
     const nature = catalog.find((entry) => entry.pack === 'ORG-MEAD-NATURE')!

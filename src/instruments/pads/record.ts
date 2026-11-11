@@ -3,6 +3,7 @@
 import { isDrumSound } from '../../sounds/catalog'
 import { DRUM_PADS } from '../../model/drums'
 import { chokeTargets, recordTake, timingCorrect, type PadVoice, type RecordTakeMode } from '../../model/padMachine'
+import { defaultKitPicks } from './kits'
 
 export interface PadHit {
   pitch: number
@@ -177,8 +178,24 @@ export function shortPadName(name: string): string {
   return cleaned || name.trim() || 'Pad'
 }
 
-/** Bank A slots filled from CC0 drum one-shots. The same catalog always picks the same files. */
-export function pickDefaultKit(entries: PadSound[]): { index: number; id: string; name: string; path: string }[] {
+/** Bank A of a new Beat Machine. The curated 808 kit wins when those ids are in the catalog. */
+export function pickDefaultKit(entries: PadSound[]): { index: number; id: string; name: string; path: string; levelScale?: number; decayScale?: number }[] {
+  const curated = defaultKitPicks(entries)
+  if (curated?.length) {
+    return curated.map((voice) => ({
+      index: voice.index,
+      id: voice.id,
+      name: voice.name,
+      path: voice.path,
+      levelScale: voice.levelScale,
+      decayScale: voice.decayScale,
+    }))
+  }
+  return pickRoleKit(entries)
+}
+
+/** First matching one-shot per pad. Used when the curated ids are not in this catalog. */
+function pickRoleKit(entries: PadSound[]): { index: number; id: string; name: string; path: string }[] {
   const pool = entries.filter((entry) => entry.type === 'one-shot' && isDrumSound({ name: entry.name, path: entry.path, tags: entry.tags ?? [] }))
   const used = new Set<string>()
   const picks: { index: number; id: string; name: string; path: string }[] = []

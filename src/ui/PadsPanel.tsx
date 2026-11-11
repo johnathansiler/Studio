@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { Performer, pointerVelocity, type PerformTarget } from '../audio/performer'
-import { ensureDefaultKit } from '../instruments/pads/load'
+import { applyPadKitSamples, ensureDefaultKit } from '../instruments/pads/load'
 import { clipBeat, padFaceName } from '../instruments/pads/record'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
 import { countInBarsOf, countInCaption } from '../model/time'
@@ -21,6 +21,7 @@ import { setPerformanceOwnsMidi } from '../midi/remember'
 import { useFormFactor } from './form'
 import './pluginPages.css'
 import { readKit } from '../presets/apply'
+import { readStamp } from '../presets/library'
 import { commitPadPreset } from '../presets/project'
 import { AnchoredMenu } from './AnchoredMenu'
 import { PresetControls } from './PresetControls'
@@ -853,7 +854,11 @@ export function PadsPanel({
               instanceKey={`pads:${trackId}`}
               values={readKit(kit)}
               presets={store.project.presets}
-              onCommit={(next) => commitPadPreset(store, trackId, next.params, next.presets)}
+              onCommit={(next) => {
+                commitPadPreset(store, trackId, next.params, next.presets)
+                const stamp = readStamp(next.presets, `pads:${trackId}`)
+                void applyPadKitSamples(store, trackId, stamp?.name ?? 'Init')
+              }}
             />
           </footer>
         </div>
