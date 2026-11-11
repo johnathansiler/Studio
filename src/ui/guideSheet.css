@@ -173,9 +173,22 @@
   flex: 0 0 auto;
   background: #141c18;
 }
-/* A sticky title would cover the catalog on a short phone sheet. */
+/* A sticky title would cover the catalog on a short phone sheet.
+   The title and the X stay in the flex header. The open page scrolls under them. */
 body:has(.shell.phone) .unstuck-sticky {
   position: static;
+}
+body:has(.shell.phone) .unstuck-sheet.guide-sheet[data-screen-overlay] {
+  overflow: hidden !important;
+}
+body:has(.shell.phone) .unstuck-sheet [data-ideas-page] {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 .unstuck-pages {
   display: flex;
@@ -191,8 +204,15 @@ body:has(.shell.phone) .unstuck-sticky {
   flex-direction: column;
   overflow: hidden;
 }
-/* Phone sheets are short. The catalog keeps its rows and the sheet scrolls. */
-body:has(.shell.phone) .unstuck-sheet [data-ideas-page="progressions"],
+/* Phone sheets are short. The catalog keeps its rows and this page scrolls under the title. */
+body:has(.shell.phone) .unstuck-sheet [data-ideas-page="progressions"] {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
 body:has(.shell.phone) .ideas-pop.embedded,
 body:has(.shell.phone) .ideas-pop.embedded .idea-stage,
 body:has(.shell.phone) .ideas-pop.embedded .idea-list,
