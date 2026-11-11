@@ -548,7 +548,8 @@ export class ProjectStore {
 
   toast(text: string, tone: Toast['tone'] = 'info') {
     const id = uid('toast')
-    this.toasts = [...this.toasts, { id, text, tone }]
+    const next = [...this.toasts.filter((toast) => toast.text !== text), { id, text, tone }]
+    this.toasts = next.slice(-4)
     this.emit()
     setTimeout(() => this.dismissToast(id), 4200)
   }

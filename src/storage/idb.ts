@@ -96,6 +96,38 @@ let cached: IDBDatabase | null = null
 let opening: Promise<IDBDatabase> | null = null
 let queue: Promise<unknown> = Promise.resolve()
 
+const WAV_CACHE_LIMIT = 24
+const wavCache = new Map<string, { wav: Uint8Array; hash: string }>()
+
+/**
+ * Cheap identity for an in-memory asset. Autosave reuses the encoded wav when this matches,
+ * so a tempo tweak during playback does not re-encode every take on the main thread.
+ */
+export function assetWavStamp(asset: AudioAsset): string {
+  let hash = (asset.sampleRate * 131 + asset.channels.length) | 0
+  for (const channel of asset.channels) {
+    hash = Math.imul(hash ^ channel.length, 16777619)
+    for (let i = 0; i < channel.length; i++) hash = Math.imul(hash ^ Math.round((channel[i] || 0) * 1e6), 16777619)
+  }
+  return `${asset.id}:${hash >>> 0}`
+}
+
+/** Encoded wav plus its content hash. Repeated saves of an unchanged asset return the same bytes. */
+export async function encodedAssetWav(asset: AudioAsset): Promise<{ wav: Uint8Array; hash: string }> {
+  const stamp = assetWavStamp(asset)
+  const hit = wavCache.get(stamp)
+  if (hit) return hit
+  const wav = new Uint8Array(encodeWav(asset.channels, asset.sampleRate, { bits: 32 }))
+  const hash = await contentHash(wav)
+  if (wavCache.size >= WAV_CACHE_LIMIT) {
+    const oldest = wavCache.keys().next().value
+    if (oldest) wavCache.delete(oldest)
+  }
+  const stored = { wav, hash }
+  wavCache.set(stamp, stored)
+  return stored
+}
+
 function enqueue<T>(work: () => Promise<T>): Promise<T> {
   const run = queue.then(work, work)
   queue = run.then(() => undefined, () => undefined)
@@ -172,10 +204,9 @@ async function writeProject(project: Project, buffers: Map<string, AudioAsset>, 
   const stored: { hash: string; wav: Uint8Array }[] = []
   const assets: AssetRef[] = []
   for (const asset of buffers.values()) {
-    const wav = new Uint8Array(encodeWav(asset.channels, asset.sampleRate, { bits: 32 }))
-    const hash = await contentHash(wav)
-    assets.push({ id: asset.id, name: asset.name, sampleRate: asset.sampleRate, hash })
-    stored.push({ hash, wav })
+    const encoded = await encodedAssetWav(asset)
+    assets.push({ id: asset.id, name: asset.name, sampleRate: asset.sampleRate, hash: encoded.hash })
+    stored.push({ hash: encoded.hash, wav: encoded.wav })
   }
   const blobs = dedupeBlobs(stored)
   for (const [hash, wav] of blobs) {

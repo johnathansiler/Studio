@@ -242,7 +242,7 @@ export class LiveRack {
     if (next !== this.topology) {
       this.topology = next
       const generation = ++this.generation
-      void this.finish(ctx, project, strips, master, generation)
+      void this.finish(ctx, project, strips, master, generation).catch(() => undefined)
     } else this.pushParams()
     this.connectIfNeeded()
   }
