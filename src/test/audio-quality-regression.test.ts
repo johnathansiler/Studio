@@ -198,6 +198,36 @@ describe('audio quality regression', () => {
     expect(amp.every((sample) => Number.isFinite(sample))).toBe(true)
   })
 
+  it('does not let a full-scale sine out of the saturator past the pre-change overshoot', () => {
+    const n = RATE
+    const sine = new Float32Array(n)
+    for (let i = 0; i < n; i++) sine[i] = Math.sin((2 * Math.PI * 1000 * i) / RATE)
+    const hot = run(createSaturator(RATE), sine, { drive: 1, tone: 8000, mix: 1 }, n)
+    const from = Math.floor(0.5 * RATE)
+    const to = Math.floor(0.9 * RATE)
+    // main's saturator already reaches 1.016 on this sine. The bandlimited tone
+    // filter rings higher; the high-rate ceiling holds the peak near that.
+    expect(peak(hot, from, to)).toBeLessThanOrEqual(1.04)
+    const quietIn = new Float32Array(n)
+    const quietAmp = 10 ** (-12 / 20)
+    for (let i = 0; i < n; i++) quietIn[i] = sine[i] * quietAmp
+    const quiet = run(createSaturator(RATE), quietIn, { drive: 1, tone: 8000, mix: 1 }, n)
+    expect(peak(quiet, from, to)).toBeGreaterThan(0.95)
+    const noise = new Float32Array(n)
+    let seed = 7
+    for (let i = 0; i < n; i++) {
+      seed = (seed * 16807) % 2147483647
+      noise[i] = (seed / 2147483647) * 2 - 1
+    }
+    const analog = createShaper(4)
+    let analogPeak = 0
+    for (let i = 0; i < to; i++) {
+      const y = Math.abs(oversample(analog, noise[i], 1))
+      if (i >= from) analogPeak = Math.max(analogPeak, y)
+    }
+    expect(analogPeak).toBeLessThanOrEqual((1 + 0.15) / (1 + 0.6) + 1e-6)
+  })
+
   it('keeps the tape lowpass continuous across blocks', () => {
     const tone = sine(1000, 0.4, 0.4)
     const params = { speed: 1, bias: 0.4, wow: 0, bump: 0, hiss: 0, drive: 0.5 }

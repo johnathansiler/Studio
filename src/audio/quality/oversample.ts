@@ -1,9 +1,16 @@
+import { tickBiquad, type Biquad } from '../plugins/dsp'
+
 /**
  * 4x oversampled waveshaper.
- * A windowed-sinc polyphase raises the rate, ADAA shapes tanh, then a lowpass drops back.
+ * A windowed-sinc polyphase raises the rate, a rational tanh shapes the sample, the tone
+ * lowpass runs at the high rate, a smooth ceiling eases peaks back toward
+ * full scale, then a lowpass drops back.
  */
 
-const FACTOR = 4
+export const SHAPER_FACTOR = 4
+const FACTOR = SHAPER_FACTOR
+/** How hard peaks above full scale are pulled back. Gentle enough that the new harmonics stay under the alias floor. */
+const CEILING_K = 12
 const PHASE_TAPS = 8
 const DOWN_TAPS = 32
 
@@ -49,8 +56,6 @@ export interface ShaperState {
   write: number
   high: Float64Array
   highWrite: number
-  prevU: number
-  prevF: number
   filled: number
 }
 
@@ -59,8 +64,6 @@ export function resetShaperState(state: ShaperState) {
   state.high.fill(0)
   state.write = 0
   state.highWrite = 0
-  state.prevU = 0
-  state.prevF = 0
   state.filled = 0
 }
 
@@ -70,8 +73,6 @@ export function createShaperState(): ShaperState {
     write: 0,
     high: new Float64Array(DOWN_TAPS),
     highWrite: 0,
-    prevU: 0,
-    prevF: 0,
     filled: 0,
   }
 }
@@ -103,7 +104,18 @@ export function padeTanh(u: number) {
   return u < 0 ? -clamped : clamped
 }
 
-export function oversampleShape(state: ShaperState, sample: number, drive: number, shape: number) {
+/**
+ * Identity at and below full scale, so a wave that already fits is unchanged.
+ * Above full scale the curve bends back toward ±1 with a continuous slope.
+ */
+export function softCeiling(sample: number) {
+  const abs = Math.abs(sample)
+  if (abs <= 1) return sample
+  const excess = abs - 1
+  return Math.sign(sample) * (1 + excess / (1 + CEILING_K * excess))
+}
+
+export function oversampleShape(state: ShaperState, sample: number, drive: number, shape: number, tone: Biquad) {
   state.ring[state.write] = sample
   const norm = padeTanh(shape) || 1
   for (let phase = 0; phase < FACTOR; phase++) {
@@ -114,7 +126,7 @@ export function oversampleShape(state: ShaperState, sample: number, drive: numbe
       acc += state.ring[index] * taps[tap]
     }
     const curved = (acc + drive * acc * acc * 0.2) * shape
-    state.high[state.highWrite] = padeTanh(curved) / norm
+    state.high[state.highWrite] = softCeiling(tickBiquad(tone, padeTanh(curved) / norm))
     state.highWrite = (state.highWrite + 1) % DOWN_TAPS
   }
   state.write = (state.write + 1) % PHASE_TAPS

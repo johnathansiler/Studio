@@ -3,7 +3,7 @@
 use crate::amp::Amp;
 use crate::biquad::{design_biquad, tick, Biquad, BiquadKind};
 use crate::resample::Oversampler;
-use crate::shaper::{shaper_latency_samples, AnalogShaper, SoftShaper};
+use crate::shaper::{shaper_latency_samples, soft_sample_rate, AnalogShaper, SoftShaper};
 use crate::smooth::SampleGlide;
 
 const SAT_FADE: u32 = 128;
@@ -51,10 +51,10 @@ impl SatBank {
     pub fn new(sample_rate: f64) -> Self {
         Self {
             tone: [
-                design_biquad(BiquadKind::Lowpass, sample_rate, 8000.0, 0.7, 0.0),
-                design_biquad(BiquadKind::Lowpass, sample_rate, 8000.0, 0.7, 0.0),
+                design_biquad(BiquadKind::Lowpass, soft_sample_rate(sample_rate), 8000.0, 0.7, 0.0),
+                design_biquad(BiquadKind::Lowpass, soft_sample_rate(sample_rate), 8000.0, 0.7, 0.0),
             ],
-            tone_target: design_biquad(BiquadKind::Lowpass, sample_rate, 8000.0, 0.7, 0.0),
+            tone_target: design_biquad(BiquadKind::Lowpass, soft_sample_rate(sample_rate), 8000.0, 0.7, 0.0),
             tone_freq: f64::NAN,
             tone_ready: false,
             tone_move: false,
@@ -156,7 +156,7 @@ impl SatBank {
     fn soft(&mut self, left: &mut [f32], right: &mut [f32], frames: usize, values: &[f64], sample_rate: f64) {
         let freq = param(values, 2, 8000.0);
         if freq != self.tone_freq {
-            let next = design_biquad(BiquadKind::Lowpass, sample_rate, freq, 0.7, 0.0);
+            let next = design_biquad(BiquadKind::Lowpass, soft_sample_rate(sample_rate), freq, 0.7, 0.0);
             self.tone_target.copy_coeffs(&next);
             self.tone_freq = freq;
             if !self.tone_ready {
@@ -189,8 +189,7 @@ impl SatBank {
                 let shape = 1.0 + drive * 8.0;
                 let dry = [left[i] as f64, right[i] as f64];
                 for channel in 0..2 {
-                    let bent = self.soft[channel].shape(dry[channel], drive, shape);
-                    wet[channel] = tick(&mut self.tone[channel], bent);
+                    wet[channel] = self.soft[channel].shape(dry[channel], drive, shape, &mut self.tone[channel]);
                 }
                 if self.sat_warm < 1_000_000 {
                     self.sat_warm += 1;

@@ -1,11 +1,19 @@
 //! Oversampled shapers from `models/analog.ts` and `quality/oversample.ts`.
 //! Kernels are built in `prepare`, not in `process_block`.
 
+use crate::biquad::{tick, Biquad};
+
 const ANALOG_TAPS: usize = 16;
 const ANALOG_DOWN: usize = 63;
 const SOFT_TAPS: usize = 8;
 const SOFT_DOWN: usize = 32;
 const SOFT_FACTOR: usize = 4;
+/// Pulls peaks above full scale back toward ±1. Same constant as `softCeiling` in oversample.ts.
+const CEILING_K: f64 = 12.0;
+
+pub fn soft_sample_rate(sample_rate: f64) -> f64 {
+    sample_rate * SOFT_FACTOR as f64
+}
 
 fn analog_kernel(length: usize, cutoff: f64, gain: f64, out: &mut [f64]) {
     // Same Kaiser lowpass as `soft_lowpass`. Cutoff scales the sinc, not only the height.
@@ -97,7 +105,9 @@ impl AnalogShaper {
             let index = (self.high_write + ANALOG_DOWN - 1 - tap) % ANALOG_DOWN;
             mixed += self.high[index] * self.down[tap];
         }
-        mixed
+        let amount = crate::util::clamp(drive, 0.0, 1.0);
+        let bound = (1.0 + 0.15 * amount) / (1.0 + 0.6 * amount);
+        mixed.clamp(-bound, bound)
     }
 }
 
@@ -217,7 +227,7 @@ impl SoftShaper {
         self.high_write = 0;
     }
 
-    pub fn shape(&mut self, sample: f64, drive: f64, shape: f64) -> f64 {
+    pub fn shape(&mut self, sample: f64, drive: f64, shape: f64, tone: &mut Biquad) -> f64 {
         self.ring[self.write] = sample;
         let norm = pade_tanh(shape);
         let norm = if norm == 0.0 { 1.0 } else { norm };
@@ -229,7 +239,8 @@ impl SoftShaper {
                 acc += self.ring[index] * taps[tap];
             }
             let curved = (acc + drive * acc * acc * 0.2) * shape;
-            self.high[self.high_write] = pade_tanh(curved) / norm;
+            let bent = tick(tone, pade_tanh(curved) / norm);
+            self.high[self.high_write] = soft_ceiling(bent);
             self.high_write = (self.high_write + 1) % SOFT_DOWN;
         }
         self.write = (self.write + 1) % SOFT_TAPS;
@@ -254,6 +265,15 @@ fn pade_tanh(u: f64) -> f64 {
     let y = (a * (27.0 + a * a)) / (27.0 + 9.0 * a * a);
     let clamped = if y > 1.0 { 1.0 } else { y };
     if u < 0.0 { -clamped } else { clamped }
+}
+
+fn soft_ceiling(sample: f64) -> f64 {
+    let abs = sample.abs();
+    if abs <= 1.0 {
+        return sample;
+    }
+    let excess = abs - 1.0;
+    sample.signum() * (1.0 + excess / (1.0 + CEILING_K * excess))
 }
 
 pub fn shaper_latency_samples() -> u32 {

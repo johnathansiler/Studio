@@ -267,6 +267,11 @@ export function oversample(shaper: Shaper, sample: number, drive: number) {
     const index = (shaper.highWrite - 1 - tap + shaper.high.length) % shaper.high.length
     mixed += shaper.high[index] * shaper.downTaps[tap]
   }
+  // colorSample never exceeds this. The reconstruction filter can ring past it.
+  const amount = clamp(drive, 0, 1)
+  const bound = (1 + 0.15 * amount) / (1 + 0.6 * amount)
+  if (mixed > bound) return bound
+  if (mixed < -bound) return -bound
   return mixed
 }
 

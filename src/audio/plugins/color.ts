@@ -1,13 +1,14 @@
 import { SampleGlide } from '../core/smooth'
-import { createShaperState, oversampleShape, resetShaperState, shaperLatencySamples, type ShaperState } from '../quality/oversample'
-import { clamp, copyCoeffs, designBiquad, sanitize, tickBiquad, type Biquad } from './dsp'
+import { createShaperState, oversampleShape, resetShaperState, SHAPER_FACTOR, shaperLatencySamples, type ShaperState } from '../quality/oversample'
+import { clamp, copyCoeffs, designBiquad, sanitize, type Biquad } from './dsp'
 import type { Processor } from './types'
 
 const SAT_FADE = 128
 
 export function createSaturator(sampleRate: number): Processor {
-  const tone = [designBiquad('lowpass', sampleRate, 8000, 0.7), designBiquad('lowpass', sampleRate, 8000, 0.7)]
-  const toneTarget = designBiquad('lowpass', sampleRate, 8000, 0.7)
+  const toneRate = sampleRate * SHAPER_FACTOR
+  const tone = [designBiquad('lowpass', toneRate, 8000, 0.7), designBiquad('lowpass', toneRate, 8000, 0.7)]
+  const toneTarget = designBiquad('lowpass', toneRate, 8000, 0.7)
   let freq = Number.NaN
   let toneReady = false
   let toneMove = false
@@ -32,7 +33,7 @@ export function createSaturator(sampleRate: number): Processor {
     },
     process(input, output, params, ctx) {
       if (params.tone !== freq) {
-        const next = designBiquad('lowpass', ctx.sampleRate, params.tone, 0.7)
+        const next = designBiquad('lowpass', ctx.sampleRate * SHAPER_FACTOR, params.tone, 0.7)
         copyCoeffs(toneTarget, next)
         freq = params.tone
         if (!toneReady) {
@@ -62,8 +63,8 @@ export function createSaturator(sampleRate: number): Processor {
           const dryL = input[0]?.[i] ?? 0
           const dryR = input[1]?.[i] ?? dryL
           const shape = 1 + drive * 8
-          wetL = tickBiquad(tone[0], oversampleShape(shapers[0], dryL, drive, shape))
-          wetR = tickBiquad(tone[1], oversampleShape(shapers[1], dryR, drive, shape))
+          wetL = oversampleShape(shapers[0], dryL, drive, shape, tone[0])
+          wetR = oversampleShape(shapers[1], dryR, drive, shape, tone[1])
           if (warm < 1000000) warm += 1
           if (warm > latency) fade = want ? Math.min(SAT_FADE, fade + 1) : Math.max(0, fade - 1)
         } else if (warm !== 0) {
