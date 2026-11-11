@@ -96,7 +96,10 @@ export const ARRANGE_TOOLS: { id: ArrangeTool; label: string }[] = (
 /** Always on the arrange strip. One tap, on phone, fold, and desktop. */
 export const FACE_TOOLS: ArrangeTool[] = ['select', 'pencil', 'split', 'trim', 'zoom']
 
-/** Rare edit modes. They live in the menu, not on the strip. */
+/** Phone Tools row. The choice sheet does not list these again. Scroll stays in the sheet. */
+export const PHONE_TOOL_ROW: ArrangeTool[] = ['select', 'pencil', 'split', 'trim', 'zoom', 'box', 'erase']
+
+/** Rare edit modes. The compact strip does not repeat them. */
 export const MENU_TOOLS: ArrangeTool[] = ['box', 'erase', 'pan']
 
 /** Face tools first. Kept so older checks can list the strip, then the menu. */

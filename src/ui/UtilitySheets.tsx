@@ -1,16 +1,29 @@
-import { useSyncExternalStore } from 'react'
+import { useSyncExternalStore, type RefObject } from 'react'
 import { SNAP_DIVISIONS, normalizeSnapDivision, type SnapDivisionId } from '../model/snapGrid'
 import type { ProjectStore } from '../state/store'
-import { TOOL_INFO, activeTool, keyForTool, subscribeTools, type ArrangeTool } from '../state/tools'
+import { PHONE_TOOL_ROW, TOOL_INFO, activeTool, keyForTool, subscribeTools, type ArrangeTool } from '../state/tools'
+import type { AudioEngine } from '../audio/engine'
+import type { SessionClient } from '../remote/session'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import { ChoiceChip, ChoiceTray } from './ChoiceTray'
 import { SongPanel } from './SongPanel'
 import type { UtilitySheet } from './arrangePanel'
-import type { AudioEngine } from '../audio/engine'
-import type { SessionClient } from '../remote/session'
-import type { RefObject } from 'react'
+import { useFormFactor } from './form'
 
-const TOOLS: ArrangeTool[] = ['select', 'pencil', 'split', 'trim', 'zoom', 'box', 'erase']
+/** Tools the choice sheet can offer. Scroll is the pan tool, named so it is not the mixer pan. */
+const TRAY_TOOLS: ArrangeTool[] = ['select', 'pencil', 'split', 'trim', 'zoom', 'box', 'erase', 'pan']
+
+export function toolTrayIds(omit: readonly ArrangeTool[] = []) {
+  return TRAY_TOOLS.filter((id) => !omit.includes(id))
+}
+
+function toolFace(id: ArrangeTool) {
+  if (id === 'pan') {
+    return { label: 'Scroll', hint: 'Scroll the timeline or the piano roll. This is not the mixer pan.' }
+  }
+  const info = TOOL_INFO[id]
+  return { label: info.label, hint: info.hint }
+}
 
 export function UtilitySheets({
   utility,
@@ -31,6 +44,7 @@ export function UtilitySheets({
   onClose: () => void
   onQuickPunch: () => void
 }) {
+  const phone = useFormFactor() === 'phone'
   if (utility === 'setup') {
     return (
       <ArrangeBottomSheet id="arrange-setup" label="Setup" title="Setup" onClose={onClose}>
@@ -48,7 +62,7 @@ export function UtilitySheets({
     )
   }
   if (utility === 'tools') {
-    return <ToolChoices store={store} onClose={onClose} />
+    return <ToolChoices store={store} onClose={onClose} omit={phone ? PHONE_TOOL_ROW : []} />
   }
   if (utility === 'snap') {
     return <SnapChoices store={store} onClose={onClose} />
@@ -56,21 +70,24 @@ export function UtilitySheets({
   return null
 }
 
-export function ToolChoices({ store, onClose }: { store: ProjectStore; onClose: () => void }) {
+export function ToolChoices({ store, onClose, omit = [] }: { store: ProjectStore; onClose: () => void; omit?: readonly ArrangeTool[] }) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
-  const current = TOOL_INFO[value]
+  const listed = toolTrayIds(omit)
+  if (listed.length === 0) return null
+  const title = listed.includes('select') ? 'Select' : 'Tools'
+  const current = toolFace(value)
   return (
-    <ChoiceTray id="tool-choices" label="Select" title="Select" value={current?.label ?? 'Select'} onClose={onClose}>
-      {TOOLS.map((id) => {
-        const info = TOOL_INFO[id]
+    <ChoiceTray id="tool-choices" label={title} title={title} value={listed.includes(value) ? current.label : (TOOL_INFO[value]?.label ?? title)} onClose={onClose}>
+      {listed.map((id) => {
+        const face = toolFace(id)
         const key = keyForTool(id)
-        const name = key ? `${info.label} (${key})` : info.label
+        const name = key ? `${face.label} (${key})` : face.label
         return (
           <ChoiceChip
             key={id}
-            label={info.label}
-            name={`${name}. ${info.hint}`}
-            hint={info.hint}
+            label={face.label}
+            name={`${name}. ${face.hint}`}
+            hint={face.hint}
             pressed={value === id}
             onClick={() => { store.setTool(id); onClose() }}
           />

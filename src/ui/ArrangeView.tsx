@@ -165,7 +165,7 @@ export function ArrangeView({
   /** Shared with Mix and Collab so the dock stays open when the view changes. */
   browserDock?: boolean
   onBrowserDock?: (open: boolean) => void
-  /** Force the plugins drawer. Omit to open it on a computer and keep it closed on a phone or fold. */
+  /** Force the plugins drawer open. Omit to leave it closed until the Plugins button opens it. */
   pluginsDrawer?: boolean
   /** Open the add list with the drawer. */
   pluginsMenu?: boolean
@@ -195,7 +195,7 @@ export function ArrangeView({
   }>(null)
   const phone = form === 'phone'
   const touch = form !== 'desk'
-  const [pluginsOpen, setPluginsOpen] = useState(() => pluginsDrawer ?? form === 'desk')
+  const [pluginsOpen, setPluginsOpen] = useState(() => pluginsDrawer === true)
   const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
   const [ghost, setGhost] = useState<{ trackId: string; left: number; width: number } | null>(null)
   const [tool, setToolState] = useState(activeTool)

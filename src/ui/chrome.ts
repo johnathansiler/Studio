@@ -40,8 +40,6 @@ export const TRANSPORT_COPY: Copy[] = [
   { id: 'loop', label: 'Loop', hint: 'Repeat the highlighted region. Drag its edges to change the length.' },
   { id: 'tempo', label: 'Tempo', hint: 'Tap to set tempo. Pause after one tap to type an exact tempo. Scroll or the arrow keys nudge it.' },
   { id: 'tap', label: 'Tap', hint: 'Tap in time. The tempo follows your taps.' },
-  { id: 'click', label: 'Click', hint: 'Metronome while you play and record.' },
-  { id: 'count-in', label: 'Count', hint: 'Count off, one bar, or two bars before play and record.' },
   { id: 'reset', label: 'Reset', hint: 'Reset – fix glitches' },
 ]
 
@@ -74,24 +72,23 @@ export interface MenuSpec extends Copy {
  * Launch/Timeline is the session transport, which the Session tab does not switch.
  * Capture stays on the phone because the session bar hides that button there.
  * Play, Stop, Record, Loop, Click, Count-in, and Reset stay on the transport.
- * Select, Draw, Split, Trim, Zoom, Duplicate, Delete, and Snap stay on the strip.
- * Quantize stays in the piano roll and the beat pad, not on this strip.
+ * Select, Draw, Split, Trim, Zoom, Box, and Erase stay on the Tools row. Scroll stays in the Tools sheet.
+ * Snap stays on the strip. Quantize stays in the piano roll and the beat pad.
+ * Time signature stays in Setup. New, Open, Save, and Export stay in the phone dock row.
  * While FEATURES.session is off, visibleMenu hides Launch, Timeline, and Capture.
  */
+const PHONE_ROW_MENU = new Set(['new', 'open', 'save', 'export'])
+
 export const MENU_COPY: MenuSpec[] = [
   { id: 'new', action: 'new', group: 'project', place: 'all', label: 'New', hint: 'Start a fresh session. The timeline starts empty.' },
   { id: 'open', action: 'open', group: 'project', place: 'all', label: 'Open', hint: 'Open a project saved in this browser.' },
   { id: 'save', action: 'save', group: 'project', place: 'all', label: 'Save', hint: 'Keep this project in the browser.' },
   { id: 'export', action: 'export', group: 'project', place: 'all', label: 'Export', hint: 'Bounce or download the mix.' },
-  { id: 'box', action: 'box', group: 'edit', place: 'all', label: 'Box', hint: 'Drag a rectangle to select several clips or notes.' },
-  { id: 'erase', action: 'erase', group: 'edit', place: 'all', label: 'Erase', hint: 'Tap a clip or note to delete it. Drag to delete more.' },
-  { id: 'pan', action: 'pan', group: 'edit', place: 'all', label: 'Scroll', hint: 'Scroll the timeline or the piano roll. This is not the mixer pan.' },
   ...(__CUEHARBOR_SESSION__ ? SESSION_MENU : []),
   { id: 'dock-bottom', action: 'dock', group: 'view', place: 'desk', label: 'Bottom', hint: 'Move the side panel under the editor.' },
   { id: 'dock-side', action: 'dock', group: 'view', place: 'desk', label: 'Side', hint: 'Move the panel back beside the editor.' },
   { id: 'scaler', action: 'scaler', group: 'tools', place: 'desk', label: 'Scaler', hint: 'Chord instrument. Play pads, or open Write to generate MIDI.' },
   { id: 'midi', action: 'midi', group: 'tools', place: 'all', label: 'MIDI', hint: 'Learn knobs, effects, hardware out, live capture, and recording several inputs.' },
-  { id: 'signature', action: 'signature', group: 'settings', place: 'all', label: 'Time', hint: 'Beats in each bar.' },
   { id: 'shortcuts', action: 'shortcuts', group: 'settings', place: 'all', label: 'Shortcuts', hint: 'Keys for play, record, and editing.' },
 ]
 
@@ -103,6 +100,7 @@ export function visibleMenu(input: {
 }): MenuSpec[] {
   const place = input.phone ? 'phone' : 'desk'
   return MENU_COPY.filter((item) => {
+    if (input.phone && PHONE_ROW_MENU.has(item.action)) return false
     if (!FEATURES.session && (item.action === 'session-mode' || item.action === 'capture')) return false
     if (item.place !== 'all' && item.place !== place) return false
     if (item.action === 'session-mode') return input.session ? item.id === 'arrangement' : item.id === 'session-view'

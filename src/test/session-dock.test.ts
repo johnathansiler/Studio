@@ -86,6 +86,14 @@ async function spansArrange(page: Page) {
   expect(box.main).toBeGreaterThan(box.work - 4)
 }
 
+async function closeToolSheet(page: Page) {
+  const sheet = page.locator('#tool-choices')
+  if (await sheet.count()) {
+    await sheet.getByRole('button', { name: 'Close', exact: true }).click()
+    await sheet.waitFor({ state: 'detached' })
+  }
+}
+
 async function drawAndTrim(page: Page) {
   const draw = page.getByRole('button', { name: /^Draw/ })
   if (!(await draw.isVisible().catch(() => false))) {
@@ -94,6 +102,7 @@ async function drawAndTrim(page: Page) {
     else await page.getByRole('button', { name: 'Tools', exact: true }).click()
   }
   await draw.click()
+  await closeToolSheet(page)
   const view = await page.locator('.timeline-scroll').boundingBox()
   const lane = await page.locator('.timeline-scroll .lane').first().boundingBox()
   if (!view || !lane) throw new Error('no lane')
@@ -114,6 +123,7 @@ async function drawAndTrim(page: Page) {
     } else await page.getByRole('button', { name: 'Tools', exact: true }).click()
   }
   await select.click()
+  await closeToolSheet(page)
   await page.mouse.click(view.x + 30, Math.min(lane.y + 110, view.y + view.height - 12))
   await page.mouse.move(2, 2)
   const edge = clip.locator('[data-edge="end"]')

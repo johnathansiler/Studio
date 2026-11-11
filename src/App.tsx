@@ -2081,7 +2081,7 @@ async function importDropped(files: FileList) {
             canRedo={store.canRedo}
             onUndo={phone ? () => { setMenuOpen(false); store.undo() } : undefined}
             onRedo={phone ? () => { setMenuOpen(false); store.redo() } : undefined}
-            onIdeas={phone ? () => openIdeas('write') : undefined}
+            onIdeas={phone && !phoneArrange ? () => openIdeas('write') : undefined}
             latencyHint={latencyHint}
             latencyReadout={latencyReadout}
             onLatency={(hint) => {
@@ -2160,7 +2160,6 @@ async function importDropped(files: FileList) {
                 else if (action === 'save') { setMenuOpen(false); void persist() }
                 else if (action === 'export') { setMenuOpen(false); setExportOpen(true) }
               }}
-              onUnstuck={toggleIdeas}
               onUndo={() => store.undo()}
               onRedo={() => store.redo()}
               canUndo={store.canUndo}
