@@ -45,7 +45,7 @@ function dock(store: ProjectStore, menuOpen = false) {
 describe('removed duplicate controls', () => {
   it('keeps the arrange row to Setup, Snap, metronome, Undo, and Redo', () => {
     const html = dock(new ProjectStore())
-    expect(actions(html)).toEqual(['setup', 'snap', 'metronome', 'undo', 'redo'])
+    expect(actions(html)).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome'])
     expect(html).not.toContain('data-phone-action="unstuck"')
     expect(html).not.toContain('>Unstuck<')
     expect(html).not.toContain('data-phone-action="plugins"')

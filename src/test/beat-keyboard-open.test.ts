@@ -110,7 +110,7 @@ async function waitForServer(url: string, child: ChildProcess) {
 }
 
 async function noKeyboard(page: Page) {
-  await page.getByRole('textbox', { name: 'Keys name' }).waitFor()
+  await page.locator('[data-track-name="Keys"]').waitFor()
   await page.waitForTimeout(400)
   expect(await page.locator('[data-keyboard-dock="open"]').count()).toBe(0)
 }
@@ -138,7 +138,7 @@ describe('beat machine keyboard in the app', () => {
         await page.goto(url, { waitUntil: 'domcontentloaded' })
         await noKeyboard(page)
 
-        await page.getByRole('textbox', { name: 'Keys name' }).click()
+        await page.locator('[data-track-name="Keys"] .track-meter-row').click()
         await page.locator('[data-keyboard-dock="open"]').waitFor()
         await page.reload({ waitUntil: 'domcontentloaded' })
         await noKeyboard(page)
@@ -150,7 +150,7 @@ describe('beat machine keyboard in the app', () => {
         await page.getByRole('button', { name: 'Close Beat Machine. The track keeps the instrument.' }).click()
         await page.locator('[data-pads="plugin"]').waitFor({ state: 'detached' })
 
-        await page.getByRole('textbox', { name: 'Beat Machine 1 name' }).click()
+        await page.locator('[data-track-name="Beat Machine 1"] .track-meter-row').click()
         await page.locator('[data-pads="plugin"]').waitFor()
         expect(await page.locator('[data-keyboard-dock="open"]').count()).toBe(0)
 

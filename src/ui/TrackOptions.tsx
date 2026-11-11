@@ -3,6 +3,7 @@ import { gainToDb } from '../model/time'
 import { DbRead } from './DbRead'
 import type { ProjectStore } from '../state/store'
 import { hardwareMidiAllowed } from '../model/beatRepeat'
+import { hasStepSequencer } from '../model/editorOpen'
 import { isSampledInstrument } from '../instruments/sampled'
 import type { Track } from '../model/types'
 import { TRACK_ROW, TRACK_SHEET, copyOf } from './chrome'
@@ -65,6 +66,8 @@ export function TrackOptions({
   onClose,
   onPerform,
   onOpenBeatMachine,
+  onOpenPiano,
+  onOpenSteps,
   onAnalyze,
   onOpenPlugins,
 }: {
@@ -76,6 +79,8 @@ export function TrackOptions({
   onClose: () => void
   onPerform: (mode: 'keys' | 'drums') => void
   onOpenBeatMachine?: (trackId: string) => void
+  onOpenPiano?: (trackId: string, clipId?: string) => void
+  onOpenSteps?: (trackId: string) => void
   onAnalyze: (trackId: string) => void
   /** Phone Arrange has no bottom-bar Plugins button. The same sheet opens from here. */
   onOpenPlugins?: () => void
@@ -124,8 +129,17 @@ export function TrackOptions({
     return false
   }
 
+  const sequencer = hasStepSequencer(track)
   return (
     <div className="track-options">
+      <label className="route-field track-rename">
+        <span>Name</span>
+        <input
+          aria-label={`${track.name} name`}
+          value={track.name}
+          onChange={(event) => store.updateTrack(track.id, { name: event.target.value })}
+        />
+      </label>
       <div className="track-volume">
         <div className="track-volume-top">
           <span>Volume</span>
@@ -205,6 +219,16 @@ export function TrackOptions({
           />
         )}
       </div>
+      {(track.type === 'midi' && !sequencer) || sequencer ? (
+        <div className="track-toggles" role="group" aria-label="Editors">
+          {track.type === 'midi' && !sequencer && (
+            <Toggle action="roll" label="Roll" hint="Piano roll." pressed={false} onClick={() => { onClose(); onOpenPiano?.(track.id) }} />
+          )}
+          {sequencer && (
+            <Toggle action="steps" label="Step Sequencer" hint="Open the step sequencer." pressed={false} onClick={() => { onClose(); onOpenSteps?.(track.id) }} />
+          )}
+        </div>
+      ) : null}
       {tiles.length > 0 && (
         <section className="track-open" aria-label="Open">
           <h3>Open</h3>

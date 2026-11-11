@@ -14,6 +14,7 @@ import './ui/bottomSheet.css'
 import './ui/buttonTray.css'
 import './ui/choiceTray.css'
 import './ui/mainMenu.css'
+import './ui/trackColumn.css'
 
 scheduleWasmPreload()
 

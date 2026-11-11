@@ -307,7 +307,7 @@ describe('scoped arrange changes', () => {
         if (scroller) scroller.scrollLeft = 0
       })
 
-      const vocal = page.locator('.head', { has: page.getByRole('textbox', { name: 'Vocal name' }) })
+      const vocal = page.locator('[data-track-name="Vocal"]')
       await vocal.locator('.track-more').click()
       await page.locator('#track-options').waitFor()
       expect(await page.locator('[data-track-action="keys"]').count()).toBe(0)
@@ -317,7 +317,7 @@ describe('scoped arrange changes', () => {
       expect(closeBox!.height).toBeGreaterThanOrEqual(44)
       await page.locator('#track-options .overlay-close').click()
 
-      const keys = page.locator('.head', { has: page.getByRole('textbox', { name: 'Keys name' }) })
+      const keys = page.locator('[data-track-name="Keys"]')
       await keys.locator('.track-more').click()
       await page.locator('#track-options').waitFor()
       expect(await page.locator('[data-track-action="drums"]').innerText()).toContain('Beat Machine')
@@ -520,7 +520,7 @@ describe('scoped arrange changes', () => {
       expect(scrolled.after).toBe(scrolled.before)
       const made = placed.trackId
       await page.locator('[data-step-sequencer="open"]').waitFor({ state: 'detached' })
-      await page.getByRole('textbox', { name: 'Step Sequencer 1 name' }).click()
+      await page.locator('[data-track-name="Step Sequencer 1"] .track-meter-row').click()
       await page.locator('[data-step-sequencer="open"]').waitFor()
       expect(await page.locator('[data-editor="piano"]').count()).toBe(0)
       await page.locator('.step-close').click()

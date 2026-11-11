@@ -222,7 +222,8 @@ export function PhoneDock({
   return (
     <>
       {host && sheet ? createPortal(sheet, host) : null}
-      <div className="phone-context" role="toolbar" aria-label="Actions" data-phone-context={kind}>
+      {kind !== 'arrange' ? <div id="transport-extras" className="transport-extras-slot parked" /> : null}
+      <div className={`phone-context${kind === 'arrange' ? ' btn-tray' : ''}`} role="toolbar" aria-label="Actions" data-phone-context={kind}>
         {kind === 'menu' && (
           <>
             <Hit action="new" label="New" title="Start a fresh session." onClick={() => onMenuAction('new')} />
@@ -321,13 +322,14 @@ export function PhoneDock({
         )}
         {kind === 'arrange' && (
           <>
+            <Hit action="undo" label="Undo" history="undo" disabled={!canUndo} onClick={onUndo}><span className="history-word">Undo</span></Hit>
+            <Hit action="redo" label="Redo" history="redo" disabled={!canRedo} onClick={onRedo}><span className="history-word">Redo</span></Hit>
+            <Hit action="snap" className="snap-inline" label={snapLabel} title="Snap grid." pressed={snapOn} onClick={openSnap}>Snap</Hit>
             <Hit action="setup" label="Setup" title="Automation and markers." pressed={utility === 'setup'} onClick={() => toggleArrangeSheet('setup')} />
-            <Hit action="snap" className="snap-inline" label={snapLabel} title="Snap grid." pressed={snapOn} onClick={openSnap}>{snapLabel}</Hit>
             <Hit action="metronome" label="Metronome" title="Metronome while you play and record." pressed={store.project.metronomeEnabled} onClick={() => store.toggle('metronomeEnabled')}>
               <MetronomeIcon />
             </Hit>
-            <Hit action="undo" label="Undo" history="undo" disabled={!canUndo} onClick={onUndo}><span className="history-word">Undo</span></Hit>
-            <Hit action="redo" label="Redo" history="redo" disabled={!canRedo} onClick={onRedo}><span className="history-word">Redo</span></Hit>
+            <div id="transport-extras" className="transport-extras-slot" />
           </>
         )}
       </div>

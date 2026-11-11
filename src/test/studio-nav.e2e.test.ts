@@ -81,25 +81,25 @@ describe('studio navigation', () => {
 
       const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
       await page.goto(url, { waitUntil: 'domcontentloaded' })
-      await page.getByRole('textbox', { name: 'Keys name' }).waitFor()
+      await page.locator('[data-track-name="Keys"]').waitFor()
       expect(await page.locator('[data-keyboard-dock="open"]').count()).toBe(0)
 
       await addTrack(page, /Instrument\. Play keys/)
       await page.locator('[data-keyboard-dock="open"]').waitFor()
-      await page.getByRole('textbox', { name: 'Instrument 1 name' }).waitFor()
+      await page.locator('[data-track-name="Instrument 1"]').waitFor()
       await page.locator('.keyboard-close').click()
       await page.locator('[data-keyboard-dock="open"]').waitFor({ state: 'detached' })
 
       await addTrack(page, /Step Sequencer\. Program beats/)
       await page.locator('[data-step-sequencer="open"]').waitFor()
-      await page.getByRole('textbox', { name: 'Step Sequencer 1 name' }).waitFor()
+      await page.locator('[data-track-name="Step Sequencer 1"]').waitFor()
       const kick = page.getByRole('button', { name: /Kick step 2\./ })
       await kick.click()
       expect(await kick.getAttribute('aria-pressed')).toBe('true')
       await page.locator('.step-close').click()
       await page.locator('[data-step-sequencer="open"]').waitFor({ state: 'detached' })
 
-      const click = page.locator('.transport').getByRole('button', { name: /^Metronome/ })
+      const click = page.getByRole('button', { name: /^Metronome/ })
       if (await click.getAttribute('aria-pressed') === 'true') await click.click()
       await page.getByRole('button', { name: /^Play/ }).first().click()
       await page.waitForFunction(() => {
@@ -182,7 +182,7 @@ describe('studio navigation', () => {
       await page.locator('[data-pads="plugin"]').waitFor({ state: 'detached' })
 
       await addTrack(page, /Audio \/ Vocal\. Record mic/)
-      await page.getByRole('textbox', { name: 'Audio 1 name' }).waitFor()
+      await page.locator('[data-track-name="Audio 1"]').waitFor()
       const armed = await page.evaluate(() => {
         const hook = (window as unknown as { __cueharbor?: { store: { project: { tracks: { name: string; armed: boolean; type: string }[] } } } }).__cueharbor
         return hook?.store.project.tracks.find((track) => track.name === 'Audio 1')
