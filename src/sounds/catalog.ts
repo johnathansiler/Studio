@@ -248,6 +248,8 @@ export function parseSoundScoutCatalog(input: unknown): SoundEntry[] {
 /**
  * Fetch the versioned SoundScout catalog only.
  * A missing file, a legacy index, or a cached copy of that index does not become the list.
+ * The cache key is the catalog URL, which includes the dataset commit and catalog filename.
+ * A stored copy of an older commit or filename is not reused.
  * Audio files are not requested here.
  */
 export async function loadSoundCatalog(fetchImpl: FetchLike = (input, init) => fetch(input, init), cache?: SoundCache): Promise<CatalogResult> {
