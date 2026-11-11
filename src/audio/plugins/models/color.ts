@@ -14,6 +14,8 @@ import {
   trackVu,
 } from './analog'
 
+const TAPE_IPS = [7.5, 15, 30]
+
 function out(output: Float32Array[], index: number, left: number, right: number) {
   if (output[0]) output[0][index] = sanitize(left)
   if (output[1]) output[1][index] = sanitize(right)
@@ -25,12 +27,14 @@ export function createTape(sampleRate: number): Processor {
   const bump = [designBiquad('peaking', sampleRate, 55, 0.8, 0), designBiquad('peaking', sampleRate, 55, 0.8, 0)]
   const hiss = [designBiquad('highpass', sampleRate, 2000, 0.7), designBiquad('lowpass', sampleRate, 8000, 0.7)]
   const lowpass = [designBiquad('lowpass', sampleRate, 8000, 0.7), designBiquad('lowpass', sampleRate, 8000, 0.7)]
-  let lowpassKey = ''
+  let lowpassRolloff = Number.NaN
+  let lowpassRate = Number.NaN
   const delay = [new Float32Array(256), new Float32Array(256)]
   let write = 0
   let phase = 0
   let seed = 19
-  let bumpKey = ''
+  let bumpSpeed = Number.NaN
+  let bumpDbHeld = Number.NaN
   const meter = createMeter()
   return {
     latencySamples: 0,
@@ -53,20 +57,19 @@ export function createTape(sampleRate: number): Processor {
       const speed = clamp(Math.round(params.speed ?? 1), 0, 2)
       const bumpHz = tapeBumpHz(speed)
       const bumpDb = clamp(params.bump ?? 0.5, 0, 1) * 6
-      const key = `${speed}:${bumpDb}`
-      if (key !== bumpKey) {
+      if (speed !== bumpSpeed || bumpDb !== bumpDbHeld) {
         copyFilter(bump[0], designBiquad('peaking', ctx.sampleRate, bumpHz, 0.9, bumpDb))
         copyFilter(bump[1], designBiquad('peaking', ctx.sampleRate, bumpHz, 0.9, bumpDb))
-        bumpKey = key
+        bumpSpeed = speed
+        bumpDbHeld = bumpDb
       }
       const bias = clamp(params.bias ?? 0.4, 0, 1)
-      const speeds = [7.5, 15, 30]
-      const rolloff = 6000 * (speeds[speed] / 15) * (1.15 - bias * 0.5)
-      const rolloffKey = `${ctx.sampleRate}:${rolloff.toFixed(4)}`
-      if (rolloffKey !== lowpassKey) {
+      const rolloff = 6000 * (TAPE_IPS[speed] / 15) * (1.15 - bias * 0.5)
+      if (!Number.isFinite(lowpassRolloff) || Math.abs(lowpassRolloff - rolloff) > 1e-4 || Math.abs(lowpassRate - ctx.sampleRate) > 0.1) {
         copyFilter(lowpass[0], designBiquad('lowpass', ctx.sampleRate, rolloff, 0.7))
         copyFilter(lowpass[1], designBiquad('lowpass', ctx.sampleRate, rolloff, 0.7))
-        lowpassKey = rolloffKey
+        lowpassRolloff = rolloff
+        lowpassRate = ctx.sampleRate
       }
       const wow = clamp(params.wow ?? 0.2, 0, 1)
       const drive = 0.15 + clamp(params.drive ?? 0.35, 0, 1) * 0.7

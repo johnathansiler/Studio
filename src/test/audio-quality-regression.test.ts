@@ -22,6 +22,7 @@ import { createBrick } from '../audio/master/process'
 import { defaultParams } from '../audio/plugins/catalog'
 import { renderGraph } from '../audio/renderGraph'
 import { createCore } from '../audio/plugins/dispatch'
+import { shaperLatencySamples } from '../audio/quality/oversample'
 import type { Processor } from '../audio/plugins/types'
 
 const RATE = 48000
@@ -354,6 +355,51 @@ describe('audio quality regression', () => {
     let at = 0
     for (let i = 1; i < out.length; i++) if (Math.abs(out[i]) > Math.abs(out[at])) at = i
     expect(Math.abs(at - 200 - sat.latencySamples)).toBeLessThan(3)
-    expect(sat.latencySamples).toBeGreaterThan(0)
+    expect(sat.latencySamples).toBe(shaperLatencySamples())
+  })
+
+  it('compensates a driven saturator before the first process call', () => {
+    const length = 512
+    const impulse = new Float32Array(length)
+    impulse[64] = 0.5
+    const track = (id: string, drive: number | null) => ({
+      id,
+      type: 'audio' as const,
+      input: 'none',
+      buffer: [impulse.slice(), impulse.slice()],
+      volume: 1,
+      pan: 0,
+      mute: false,
+      solo: false,
+      plugins: drive == null ? [] : [{
+        id: `${id}-fx`,
+        pluginId: 'saturator',
+        version: '1',
+        enabled: true,
+        wet: 1,
+        params: { ...defaultParams('saturator'), drive, tone: 12000, mix: 1 },
+        sidechain: '',
+      }],
+      sends: [],
+      output: null,
+      groupId: null,
+    })
+    const base = {
+      masterPlugins: [],
+      masterVolume: 1,
+      sampleRate: RATE,
+      tempo: 120,
+      length,
+      scaleRoot: 0,
+      scaleIntervals: [0, 2, 4, 5, 7, 9, 11],
+      automation: [],
+      offline: true,
+      create: (id: string, sampleRate: number) => createCore(id as 'saturator', sampleRate),
+    }
+    const driven = renderGraph({ ...base, tracks: [track('dry', null), track('sat', 0.6)] })
+    expect(driven.delays['dry>master']).toBe(shaperLatencySamples())
+    expect(driven.delays['sat>master'] ?? 0).toBe(0)
+    const idle = renderGraph({ ...base, tracks: [track('dry', null), track('sat', 0)] })
+    expect(idle.delays['dry>master'] ?? 0).toBe(0)
   })
 })

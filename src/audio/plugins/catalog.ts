@@ -15,6 +15,7 @@ import { normalizeMix } from '../../model/mixGroups'
 import { normalizeOmniProject } from '../../instruments/patch/model'
 import { tuneLiveLatency } from './autoTune'
 import { CORE_CATALOG } from './coreCatalog'
+import { shaperLatencySamples } from '../quality/oversample'
 import { effectLatency, migratePlugin, migratePreset, targetOf, MOVES } from './ids'
 import type { FactoryPreset, ParamSpec, PluginDescriptor } from './types'
 
@@ -1008,6 +1009,9 @@ export function latencyOf(pluginId: string, params: Record<string, number>, samp
     return tuneLatency(sampleRate)
   }
   if (id === 'mod' && kind === 5 && (params.mix ?? 0) > 0.001) return tuneLatency(sampleRate)
+  // The graph reads this before process(). The soft shaper's own latencySamples
+  // stays 0 until the first block, which left a driven saturator 12 samples late.
+  if (id === 'saturator' && kind === 0 && (params.drive ?? 0) > 0.0001) return shaperLatencySamples()
   return effectLatency(id, { ...params, kind }, sampleRate)
 }
 
