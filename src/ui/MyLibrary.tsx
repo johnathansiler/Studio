@@ -3,11 +3,11 @@ import { SOUND_MIME } from '../audio/sample/slot'
 import { LibraryAuthError, clearLibraryAccessKey, libraryStatus, readLibraryAccessKey, writeLibraryAccessKey } from '../library/access'
 import { loadLibraryCatalog } from '../library/audio'
 import { libraryDragId, loadLibraryDrag, loadLibraryEntry, publishLibrary, readLibraryAsset } from '../library/place'
-import { hitAt, searchLibrary, type LibraryHits, type LibraryIndex } from '../library/search'
+import { hitAt, libraryRowWindow, searchLibrary, type LibraryHits, type LibraryIndex } from '../library/search'
 import { EMPTY_LIBRARY_QUERY, type LibraryDocument, type LibraryEntry, type LibraryQuery } from '../library/types'
 import type { ProjectStore } from '../state/store'
 
-const ROW = 64
+const ROW = 70
 const GROUPS = [
   { id: 'type', label: 'Type' },
   { id: 'category', label: 'Category' },
@@ -55,8 +55,10 @@ function chipLabel(value: string) {
 }
 
 function scrollParent(node: HTMLElement) {
+  const own = getComputedStyle(node).overflowY
+  if (own === 'auto' || own === 'scroll') return node
   let el: HTMLElement | null = node.parentElement
-  while (el) {
+  while (el && el !== document.body && el !== document.documentElement) {
     const overflow = getComputedStyle(el).overflowY
     if (overflow === 'auto' || overflow === 'scroll') return el
     el = el.parentElement
@@ -165,13 +167,16 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
     if (!node) return
     const scroller = scrollParent(node)
     const update = () => {
-      const view = (scroller === node ? node : scroller).getBoundingClientRect()
-      const top = node.getBoundingClientRect().top
-      const scrolled = Math.max(0, view.top - top)
-      const start = Math.max(0, Math.floor(scrolled / ROW) - 4)
-      const end = Math.min(hits.total, start + Math.ceil(view.height / ROW) + 10)
-      setRange((prev) => prev.start === start && prev.end === end ? prev : { start, end })
+      const listIsScroller = scroller === node
+      const scrolled = listIsScroller
+        ? scroller.scrollTop
+        : Math.max(0, scroller.getBoundingClientRect().top - node.getBoundingClientRect().top)
+      const viewHeight = Math.min(scroller.clientHeight || window.innerHeight, window.innerHeight || scroller.clientHeight)
+      const next = libraryRowWindow(hits.total, scrolled, viewHeight, ROW)
+      setRange((prev) => prev.start === next.start && prev.end === next.end ? prev : next)
     }
+    node.scrollTop = 0
+    if (scroller !== node) scroller.scrollTop = 0
     update()
     scroller.addEventListener('scroll', update, { passive: true })
     node.addEventListener('scroll', update, { passive: true })
@@ -182,7 +187,7 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
       node.removeEventListener('scroll', update)
       observer?.disconnect()
     }
-  }, [hits.total, phase])
+  }, [hits.total, phase, text, query])
 
   async function unlock(event: React.FormEvent) {
     event.preventDefault()
@@ -334,8 +339,8 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
           <div className="sound-list" ref={listRef} aria-label="Library sounds">
             {hits.total === 0 && <p className="sound-status">Nothing matches.</p>}
             {hits.total > 0 && (
-              <div style={{ height: hits.total * ROW, position: 'relative' }}>
-                <div style={{ position: 'absolute', top: range.start * ROW, left: 0, right: 0 }}>
+              <div style={{ height: hits.total * ROW, position: 'relative', width: '100%', maxWidth: '100%' }}>
+                <div style={{ position: 'absolute', top: range.start * ROW, left: 0, right: 0, maxWidth: '100%' }}>
                   {shown.map((entry) => {
                     const on = playing === entry.key
                     const meta = [on ? 'Playing' : '', entry.type ? chipLabel(entry.type) : '', entry.category, entry.pack, entry.bpm ? `${entry.bpm} bpm` : '', entry.musicalKey || entry.root].filter(Boolean).join(' · ')

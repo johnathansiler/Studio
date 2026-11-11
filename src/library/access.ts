@@ -68,5 +68,21 @@ export async function signLibraryKeys(keys: string[], accessKey: string, fetchIm
   }
   if (response.status === 429) throw new Error(body?.error || 'Too many library requests. Wait a minute and try again.')
   if (!response.ok || !Array.isArray(body?.urls)) throw new Error(body?.error || LIBRARY_NOT_READY)
-  return { expiresIn: body.expiresIn || 900, urls: body.urls.filter((item) => item && typeof item.key === 'string' && typeof item.url === 'string' && !item.url.includes(accessKey)) }
+  return { expiresIn: body.expiresIn || 900, urls: body.urls.filter((item) => item && typeof item.key === 'string' && typeof item.url === 'string' && signedUrlKeepsSecret(item.url, accessKey)) }
+}
+
+/** A passphrase that appears inside an object key is not a leaked secret. A query value or login is. */
+export function signedUrlKeepsSecret(url: string, accessKey: string) {
+  if (!accessKey) return false
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false
+    if (parsed.username === accessKey || parsed.password === accessKey) return false
+    for (const value of parsed.searchParams.values()) {
+      if (value === accessKey) return false
+    }
+    return true
+  } catch {
+    return false
+  }
 }

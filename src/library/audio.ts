@@ -1,5 +1,5 @@
-import { LIBRARY_CATALOG_KEY, gunzipText, idbCatalogCache, indexParsedCatalog, parseLibraryCatalog, sameCatalog, type CachedCatalog, type CatalogCache } from './catalog'
-import { readLibraryAccessKey, signLibraryKeys } from './access'
+import { LIBRARY_CATALOG_KEY, gunzipText, idbCatalogCache, indexParsedCatalog, parseLibraryCatalog, type CachedCatalog, type CatalogCache } from './catalog'
+import { LibraryAuthError, readLibraryAccessKey, signLibraryKeys } from './access'
 import type { LibraryDocument } from './types'
 import type { LibraryIndex } from './search'
 
@@ -110,6 +110,7 @@ async function writeIdb(key: string, bytes: ArrayBuffer) {
 
 let audioCache: AudioCache | null = null
 let catalogCache: CatalogCache | null = null
+let hotCatalog: { sha256: string; loaded: LoadedCatalog } | null = null
 
 export function libraryAudioCache() {
   return audioCache ?? (audioCache = typeof indexedDB === 'undefined' ? memoryAudioCache() : browserAudioCache())
@@ -122,6 +123,7 @@ export function libraryCatalogCache() {
 export function setLibraryCaches(next: { audio?: AudioCache | null; catalog?: CatalogCache | null }) {
   if (next.audio !== undefined) audioCache = next.audio
   if (next.catalog !== undefined) catalogCache = next.catalog
+  hotCatalog = null
 }
 
 /** Bytes for one object. A cached copy is used offline. A miss gets a new signature, never a stored URL. */
@@ -147,51 +149,61 @@ export interface LoadedCatalog {
 }
 
 /**
- * Show the cached catalog, then refresh it when the signed copy has a new version.
- * The gzip is stored. Presigned URLs are not.
+ * Unlock first. A wrong passphrase never reveals a cached catalog.
+ * A matching file hash skips parsing the download again. The gzip is stored. Presigned URLs are not.
  */
 export async function loadLibraryCatalog(fetchImpl: typeof fetch = fetch, cache = libraryCatalogCache(), onCached?: (loaded: LoadedCatalog) => void): Promise<LoadedCatalog> {
   const cached = await cache.read().catch(() => null)
-  let cachedParsed: Awaited<ReturnType<typeof parseGzip>> | null = null
-  let cachedIndex: LibraryIndex | null = null
-  if (cached?.gzip) {
-    try {
-      cachedParsed = await parseGzip(cached.gzip)
-      cachedIndex = indexParsed(cachedParsed)
-      onCached?.({ document: cachedParsed.document, index: cachedIndex, fromCache: true })
-    } catch {
-      cachedParsed = null
-      cachedIndex = null
-    }
-  }
   const accessKey = readLibraryAccessKey()
-  if (!accessKey) {
-    if (!cachedParsed || !cachedIndex) throw new Error('Unlock My Library on this device first.')
-    return { document: cachedParsed.document, index: cachedIndex, fromCache: true }
-  }
+  if (!accessKey) throw new Error('Unlock My Library on this device first.')
+  let signed: Awaited<ReturnType<typeof signLibraryKeys>>
   try {
-    const signed = await signLibraryKeys([LIBRARY_CATALOG_KEY], accessKey, fetchImpl)
+    signed = await signLibraryKeys([LIBRARY_CATALOG_KEY], accessKey, fetchImpl)
+  } catch (error) {
+    if (error instanceof LibraryAuthError) throw error
+    const offline = await parsedCache(cached)
+    if (offline) {
+      onCached?.(offline)
+      return offline
+    }
+    throw error
+  }
+  const warmed = await parsedCache(cached)
+  if (warmed) onCached?.(warmed)
+  try {
     const url = signed.urls.find((item) => item.key === LIBRARY_CATALOG_KEY)?.url
     if (!url) throw new Error('Could not sign the library catalog.')
     const response = await fetchImpl(url)
     if (!response.ok) throw new Error('Could not download the library catalog.')
     const gzip = await response.arrayBuffer()
     const hash = await sha256Hex(gzip)
-    const cachedMeta = cachedParsed
-      ? { version: cachedParsed.document.version, generatedAt: cachedParsed.document.generatedAt, count: cachedParsed.document.count }
-      : null
-    const storedMeta = cached ? { version: cached.version, generatedAt: cached.generatedAt, count: cached.count } : null
-    if (cachedParsed && cachedIndex && cached?.sha256 === hash && cachedMeta && storedMeta && sameCatalog(storedMeta, cachedMeta)) {
-      return { document: cachedParsed.document, index: cachedIndex, fromCache: true }
+    if (warmed && cached?.sha256 && cached.sha256 === hash) {
+      return { ...warmed, fromCache: true }
     }
     const parsed = await parseGzip(gzip)
     const meta = { version: parsed.document.version, generatedAt: parsed.document.generatedAt, count: parsed.document.count }
     const stored: CachedCatalog = { ...meta, sha256: hash, gzip: gzip.slice(0) }
     try { await cache.write(stored) } catch { /* the list still shows */ }
-    return { document: parsed.document, index: indexParsed(parsed), fromCache: false }
+    const loaded: LoadedCatalog = { document: parsed.document, index: indexParsed(parsed), fromCache: false }
+    hotCatalog = { sha256: hash, loaded }
+    return loaded
   } catch (error) {
-    if (cachedParsed && cachedIndex) return { document: cachedParsed.document, index: cachedIndex, fromCache: true }
+    if (error instanceof LibraryAuthError) throw error
+    if (warmed) return warmed
     throw error
+  }
+}
+
+async function parsedCache(cached: CachedCatalog | null): Promise<LoadedCatalog | null> {
+  if (!cached?.gzip) return null
+  if (cached.sha256 && hotCatalog?.sha256 === cached.sha256) return hotCatalog.loaded
+  try {
+    const parsed = await parseGzip(cached.gzip)
+    const loaded: LoadedCatalog = { document: parsed.document, index: indexParsed(parsed), fromCache: true }
+    if (cached.sha256) hotCatalog = { sha256: cached.sha256, loaded }
+    return loaded
+  } catch {
+    return null
   }
 }
 

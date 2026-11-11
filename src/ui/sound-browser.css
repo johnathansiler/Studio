@@ -544,18 +544,27 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
+  contain: inline-size;
 }
 
 .my-library .library-chip-scroll,
 .my-library .sound-filters,
-.my-library .bpm-range {
+.my-library .bpm-range,
+.my-library .sound-list,
+.my-library .library-lock {
   max-width: 100%;
   min-width: 0;
 }
 
-.my-library .library-chip-scroll {
+.playlist-browser .my-library .library-chip-scroll,
+.bottom-sheet .my-library .library-chip-scroll {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  width: 100%;
   overflow-x: auto;
-  flex-wrap: nowrap;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
 }
 
 .my-library .library-chip-scroll button {
@@ -572,14 +581,9 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
 
 .library-lock input,
 .my-library .bpm-range input {
-  min-height: 40px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-2);
-  color: var(--text);
-  padding: 0 10px;
+  width: 100%;
+  min-width: 0;
   font-family: inherit;
-  font-size: 13px;
 }
 
 .my-library .bpm-range {
@@ -589,19 +593,23 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
 }
 
 .my-library .bpm-range input {
-  width: 4.8em;
-  flex: none;
+  flex: 1 1 0;
+  width: 0;
 }
 
 .my-library .sound-list {
   gap: 0;
+  max-width: 100%;
 }
 
 .my-library .sound-row {
   height: 64px;
   min-height: 64px;
   max-height: 64px;
+  margin: 0 0 6px;
   box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
 }
 
 .bottom-sheet .my-library.sound-panel,

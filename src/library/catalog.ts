@@ -136,6 +136,17 @@ function openDb() {
   })
 }
 
+/** Fields stored in IndexedDB. The hash is what the next open compares. */
+export function catalogCacheFields(doc: CachedCatalog) {
+  return {
+    version: doc.version,
+    generatedAt: doc.generatedAt,
+    count: doc.count,
+    sha256: typeof doc.sha256 === 'string' ? doc.sha256 : '',
+    gzip: doc.gzip.slice(0),
+  }
+}
+
 export function idbCatalogCache(): CatalogCache {
   return {
     async read() {
@@ -151,7 +162,7 @@ export function idbCatalogCache(): CatalogCache {
               resolve(null)
               return
             }
-            resolve({ version: row.version, generatedAt: row.generatedAt, count: row.count, sha256: typeof row.sha256 === 'string' ? row.sha256 : undefined, gzip })
+            resolve({ version: row.version, generatedAt: row.generatedAt, count: row.count, sha256: typeof row.sha256 === 'string' && row.sha256 ? row.sha256 : undefined, gzip })
           }
           request.onerror = () => reject(request.error)
         })
@@ -162,14 +173,9 @@ export function idbCatalogCache(): CatalogCache {
     async write(doc) {
       if (typeof indexedDB === 'undefined') return
       const db = await openDb()
-      const copy = doc.gzip.slice(0)
+      const row = catalogCacheFields(doc)
       await new Promise<void>((resolve, reject) => {
-        const request = db.transaction(DB_STORE, 'readwrite').objectStore(DB_STORE).put({
-          version: doc.version,
-          generatedAt: doc.generatedAt,
-          count: doc.count,
-          gzip: copy,
-        }, DB_KEY)
+        const request = db.transaction(DB_STORE, 'readwrite').objectStore(DB_STORE).put(row, DB_KEY)
         request.onsuccess = () => resolve()
         request.onerror = () => reject(request.error)
       })

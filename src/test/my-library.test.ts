@@ -4,13 +4,13 @@ import { encodeWav } from '../model/wav'
 import { migrateProject } from '../model/schema'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
-import { accessKeyMatches, createLibraryApi, LIBRARY_NOT_READY, libraryObjectKey, presignR2Get, type LibraryEnv } from '../../server/library.ts'
-import { gunzipText, parseLibraryCatalog, sameCatalog } from '../library/catalog'
-import { clearLibraryAccessKey, writeLibraryAccessKey } from '../library/access'
-import { memoryAudioCache, setLibraryCaches } from '../library/audio'
-import { placeLibraryAsset, readLibraryAsset } from '../library/place'
+import { accessKeyMatches, createLibraryApi, LIBRARY_NOT_READY, libraryClientIp, libraryObjectKey, presignR2Get, type LibraryEnv } from '../../server/library.ts'
+import { catalogCacheFields, gunzipText, memoryCatalogCache, parseLibraryCatalog, sameCatalog, type CachedCatalog } from '../library/catalog'
+import { clearLibraryAccessKey, LibraryAuthError, readLibraryAccessKey, signLibraryKeys, signedUrlKeepsSecret, writeLibraryAccessKey } from '../library/access'
+import { loadLibraryCatalog, memoryAudioCache, setLibraryCaches } from '../library/audio'
+import { libraryBufferId, placeLibraryAsset, readLibraryAsset } from '../library/place'
 import { cleanLibraryFiles, projectKeepsLibraryKeys, restoreLibraryFiles } from '../library/project'
-import { buildLibraryIndex, entryMatchesText, searchLibrary, tokenMatches } from '../library/search'
+import { buildLibraryIndex, entryMatchesText, libraryRowWindow, searchLibrary, tokenMatches } from '../library/search'
 import type { LibraryEntry } from '../library/types'
 
 const env: LibraryEnv = {
@@ -125,6 +125,9 @@ describe('private library auth and signing', () => {
     expect(accessKeyMatches('owner-pass', 'owner-passx')).toBe(false)
     expect(accessKeyMatches('c', 'owner-pass')).toBe(false)
     expect(libraryObjectKey('../secret.wav')).toBeNull()
+    expect(libraryObjectKey('foo/../../secret.wav')).toBeNull()
+    expect(libraryObjectKey('foo//bar.wav')).toBeNull()
+    expect(libraryObjectKey('a\\b.wav')).toBeNull()
     expect(libraryObjectKey('https://example.com/a.wav')).toBeNull()
     expect(libraryObjectKey('Drums/C#.wav')).toBe('Drums/C#.wav')
   })
@@ -184,6 +187,14 @@ describe('private library auth and signing', () => {
     expect(url.searchParams.get('X-Amz-Expires')).toBe('900')
     expect(url.searchParams.get('X-Amz-SignedHeaders')).toBe('host')
     expect(url.toString()).not.toContain(env.R2_SECRET_ACCESS_KEY)
+    const encoded = new URL(await presignR2Get(env, 'Drums/a?.wav'))
+    expect(encoded.pathname).toContain('a%3F.wav')
+    expect(encoded.searchParams.get('X-Amz-Algorithm')).toBe('AWS4-HMAC-SHA256')
+    const api = createLibraryApi({ env: () => env, sign: async () => 'https://signed.example/nope' })
+    const blocked = await api.handle({ method: 'POST', pathname: '/api/library/sign', ip: '1.1.1.1', accessKey: 'owner-pass', body: { method: 'PUT', keys: ['../secret.wav'] }, now: 4_000 })
+    expect(blocked.status).toBe(400)
+    const removed = await api.handle({ method: 'DELETE', pathname: '/api/library/sign', ip: '1.1.1.1', accessKey: 'owner-pass', body: { keys: ['Drums/kick.wav'] }, now: 4_001 })
+    expect(removed.status).toBe(405)
   })
 })
 
@@ -242,5 +253,115 @@ describe('private library project refs', () => {
     expect(JSON.stringify(store.project)).not.toContain('https://library.test')
     clearLibraryAccessKey()
     setLibraryCaches({ audio: null })
+  })
+
+  it('keeps a loop on the arrangement, a note on an instrument, and a second hit on the same pads', async () => {
+    const wav = encodeWav([new Float32Array([0.2, -0.2, 0.2, -0.2])], 48000)
+    const cache = memoryAudioCache()
+    await cache.put(trap.entry.key, wav)
+    await cache.put(choir.entry.key, wav)
+    setLibraryCaches({ audio: cache })
+    const store = new ProjectStore(createEmptyProject(48000))
+    const asset = await readLibraryAsset(trap.entry)
+    placeLibraryAsset(store, trap.entry, asset, 0)
+    const snare = { ...trap.entry, key: 'Drums/snare.wav', name: 'Snare' }
+    placeLibraryAsset(store, snare, { ...asset, id: libraryBufferId(snare.key), name: 'Snare' }, 0)
+    expect(store.project.tracks.filter((track) => track.instrument === 'pads')).toHaveLength(1)
+
+    const note = { ...trap.entry, type: 'multisample note', key: 'Keys/C2.wav', name: 'C2', note: 'C2' }
+    placeLibraryAsset(store, note, { ...asset, id: libraryBufferId(note.key), name: 'C2' }, 0)
+    expect(store.project.tracks.filter((track) => track.instrument === 'pads')).toHaveLength(1)
+    const sampler = store.project.tracks.find((track) => track.instrument === 'sampler')
+    expect(sampler?.plugins.find((plugin) => plugin.pluginId === 'sampler')?.sampler?.root).toBe(36)
+
+    const loopAsset = await readLibraryAsset(choir.entry)
+    const ids = store.addTracks({ kind: 'midi', count: 1, instrument: 'sampler', input: 'mic', channels: 1, armed: false })
+    const pluginId = store.loadSamplerSound(ids[0], { ...loopAsset, id: 'slot-tone', name: 'Tone' }, 60, false)
+    store.pluginFocus = { trackId: ids[0], pluginId }
+    expect(placeLibraryAsset(store, choir.entry, loopAsset, 48_000)).toContain('sampler')
+    store.pluginFocus = null
+    expect(placeLibraryAsset(store, choir.entry, { ...loopAsset, id: libraryBufferId('Choir/again.wav') }, 48_000)).toContain('track')
+    expect(store.project.tracks.some((track) => track.type === 'audio' && track.clips.length > 0)).toBe(true)
+    expect(projectKeepsLibraryKeys(store.project)).toBe(true)
+    clearLibraryAccessKey()
+    setLibraryCaches({ audio: null })
+  })
+})
+
+describe('private library cache and address', () => {
+  function tinyGzip() {
+    const document = {
+      version: 2,
+      generated_at: '2026-11-11T00:00:00Z',
+      count: 1,
+      pending: '',
+      entries: [{ key: 'Drums/kick.wav', size: 10, format: 'wav', pack: 'Kit', type: 'one-shot', category: 'kick', instrument: 'kick', genre: [], bpm: null, musical_key: '', root: 'C', note: 'C1', mood: [], tags: [], license: 'private', search: 'kick c' }],
+    }
+    const gzip = gzipSync(Buffer.from(JSON.stringify(document)))
+    return gzip.buffer.slice(gzip.byteOffset, gzip.byteOffset + gzip.byteLength)
+  }
+
+  function fetchCatalog(gzip: ArrayBuffer, signStatus = 200): typeof fetch {
+    return (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/library/sign')) {
+        if (signStatus === 401) return new Response(JSON.stringify({ error: 'That passphrase does not unlock the library.' }), { status: 401 })
+        return new Response(JSON.stringify({ expiresIn: 900, urls: [{ key: 'catalog/catalog.json.gz', url: 'https://library.test/catalog.json.gz' }] }), { status: 200 })
+      }
+      return new Response(gzip)
+    }) as typeof fetch
+  }
+
+  it('stores the catalog hash and skips a second parse when the file is unchanged', async () => {
+    const gzip = tinyGzip()
+    const slot: { current: CachedCatalog | null } = { current: null }
+    const cache = memoryCatalogCache(slot)
+    writeLibraryAccessKey('owner-pass')
+    const first = await loadLibraryCatalog(fetchCatalog(gzip), cache)
+    expect(first.fromCache).toBe(false)
+    expect(slot.current?.sha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(catalogCacheFields(slot.current!).sha256).toBe(slot.current?.sha256)
+    const second = await loadLibraryCatalog(fetchCatalog(gzip), cache)
+    expect(second.fromCache).toBe(true)
+    expect(second.document.version).toBe(2)
+    if (slot.current) slot.current = { ...slot.current, sha256: undefined }
+    const refreshed = await loadLibraryCatalog(fetchCatalog(gzip), cache)
+    expect(refreshed.fromCache).toBe(false)
+    clearLibraryAccessKey()
+    setLibraryCaches({ catalog: null })
+  })
+
+  it('does not reveal a cached catalog when the passphrase is wrong', async () => {
+    const gzip = tinyGzip()
+    const cache = memoryCatalogCache()
+    await cache.write({ version: 2, generatedAt: '2026-11-11T00:00:00Z', count: 1, sha256: 'abc', gzip })
+    writeLibraryAccessKey('wrong')
+    let shown = 0
+    await expect(loadLibraryCatalog(fetchCatalog(gzip, 401), cache, () => { shown += 1 })).rejects.toBeInstanceOf(LibraryAuthError)
+    expect(shown).toBe(0)
+    expect(readLibraryAccessKey()).toBe('')
+    await expect(loadLibraryCatalog(fetchCatalog(gzip), cache)).rejects.toThrow(/Unlock/)
+    setLibraryCaches({ catalog: null })
+  })
+
+  it('keeps a signed URL whose path contains the passphrase', async () => {
+    expect(signedUrlKeepsSecret('https://x.example/Drums/wav/kick.wav?X-Amz-Signature=abcd', 'wav')).toBe(true)
+    expect(signedUrlKeepsSecret('https://x.example/a.wav?token=wav', 'wav')).toBe(false)
+    expect(signedUrlKeepsSecret('https://wav:hidden@x.example/a.wav', 'wav')).toBe(false)
+    const signed = await signLibraryKeys(['Drums/wav/kick.wav'], 'wav', (async () => new Response(JSON.stringify({
+      expiresIn: 900,
+      urls: [{ key: 'Drums/wav/kick.wav', url: 'https://x.example/Drums/wav/kick.wav?X-Amz-Signature=abcd' }],
+    }), { status: 200 })) as typeof fetch)
+    expect(signed.urls.map((item) => item.key)).toEqual(['Drums/wav/kick.wav'])
+  })
+
+  it('rates limits by the Cloudflare client address, not a forged forwarding header', () => {
+    expect(libraryClientIp({ 'x-forwarded-for': '1.2.3.4', 'cf-connecting-ip': '5.6.7.8' }, '10.0.0.1')).toBe('5.6.7.8')
+    expect(libraryClientIp({ 'x-forwarded-for': '1.2.3.4, 9.9.9.9' }, '10.0.0.1')).toBe('10.0.0.1')
+    expect(libraryClientIp({ 'true-client-ip': '8.8.4.4', 'x-forwarded-for': '1.1.1.1' })).toBe('8.8.4.4')
+    const window = libraryRowWindow(91_800, 7000, 390, 70)
+    expect(window.end).toBeLessThan(200)
+    expect(window.end - window.start).toBeLessThan(40)
+    expect(libraryRowWindow(91_800, 0, 5_000_000, 70).end).toBeLessThan(120)
   })
 })

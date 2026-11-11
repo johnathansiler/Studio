@@ -104,6 +104,22 @@ function prune(times: number[], now: number, windowMs: number) {
   return times.filter((time) => now - time < windowMs)
 }
 
+function headerValue(value: string | string[] | undefined) {
+  const raw = Array.isArray(value) ? value[0] : value
+  const text = raw?.trim() ?? ''
+  if (!text || text.length > 64 || text.includes(',') || /\s/.test(text)) return ''
+  return text
+}
+
+/**
+ * Address for the rate limit.
+ * Cloudflare sets CF-Connecting-IP and overwrites a client-supplied value.
+ * X-Forwarded-For is appended to, so its first address is forgeable and is ignored.
+ */
+export function libraryClientIp(headers: { [key: string]: string | string[] | undefined }, remoteAddress?: string | null) {
+  return headerValue(headers['cf-connecting-ip']) || headerValue(headers['true-client-ip']) || remoteAddress?.trim() || 'local'
+}
+
 export function createLibraryApi(deps: {
   env: () => LibraryEnv
   sign?: (key: string, env: LibraryEnv) => Promise<string>
@@ -128,7 +144,8 @@ export function createLibraryApi(deps: {
       const now = call.now
       const ip = call.ip || 'local'
       const locked = prune(failures.get(ip) ?? [], now, FAIL_WINDOW_MS)
-      failures.set(ip, locked)
+      if (locked.length) failures.set(ip, locked)
+      else failures.delete(ip)
       const provided = call.accessKey ?? ''
       const matches = accessKeyMatches(provided, ready.accessKey)
       if (locked.length >= FAIL_MAX) {
@@ -146,12 +163,12 @@ export function createLibraryApi(deps: {
       }
       const keys = keysFromBody(call.body)
       if (!keys) return { status: 400, body: { error: 'Those library paths cannot be signed.' } }
+      recent.push(now)
+      successes.set(ip, recent)
       const urls: { key: string; url: string }[] = []
       for (const key of keys) {
         urls.push({ key, url: await sign(key, env) })
       }
-      recent.push(now)
-      successes.set(ip, recent)
       return { status: 200, body: { ready: true, expiresIn: LIBRARY_EXPIRES_SEC, urls } }
     },
   }

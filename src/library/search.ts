@@ -114,41 +114,39 @@ function postings(index: LibraryIndex, token: string): Uint32Array {
   for (const word of words) {
     if (!word.startsWith(token)) continue
     const list = index.exact.get(word)
-    if (list) lists.push(list)
+    if (list?.length) lists.push(list)
   }
-  return unionSorted(lists)
+  return unionMarked(lists, index.entries.length)
 }
 
-function unionSorted(lists: Uint32Array[]) {
+/** Merge posting lists in one pass. Pairwise unions get slow when a short prefix hits thousands of words. */
+function unionMarked(lists: Uint32Array[], size: number) {
   if (!lists.length) return EMPTY
   if (lists.length === 1) return lists[0]
-  let merged = lists[0]
-  for (let n = 1; n < lists.length; n++) merged = unionPair(merged, lists[n])
-  return merged
-}
-
-function unionPair(a: Uint32Array, b: Uint32Array) {
-  const out: number[] = []
-  let i = 0
-  let j = 0
-  while (i < a.length && j < b.length) {
-    const av = a[i]
-    const bv = b[j]
-    if (av === bv) {
-      out.push(av)
-      i += 1
-      j += 1
-    } else if (av < bv) {
-      out.push(av)
-      i += 1
-    } else {
-      out.push(bv)
-      j += 1
+  const seen = new Uint8Array(size)
+  let count = 0
+  for (const list of lists) {
+    for (let i = 0; i < list.length; i++) {
+      const id = list[i]
+      if (seen[id] === 0) {
+        seen[id] = 1
+        count += 1
+      }
     }
   }
-  while (i < a.length) out.push(a[i++])
-  while (j < b.length) out.push(b[j++])
-  return Uint32Array.from(out)
+  const out = new Uint32Array(count)
+  let n = 0
+  for (let i = 0; i < size; i++) if (seen[i]) out[n++] = i
+  return out
+}
+
+/** Rows that belong on screen. The height is the visible pane, never the full catalog. */
+export function libraryRowWindow(total: number, scrollTop: number, viewHeight: number, row = 64) {
+  const height = Math.max(row, Math.min(viewHeight > 0 ? viewHeight : row, 4096))
+  const start = Math.max(0, Math.floor(Math.max(0, scrollTop) / row) - 4)
+  const visible = Math.ceil(height / row) + 10
+  const end = Math.min(total, start + visible)
+  return { start, end: Math.max(start, end) }
 }
 
 function intersect(a: Uint32Array, b: Uint32Array) {
@@ -182,7 +180,7 @@ export function entryMatchesFilters(entry: LibraryEntry, query: LibraryQuery) {
 }
 
 export function searchLibrary(index: LibraryIndex, query: LibraryQuery): LibraryHits {
-  const tokens = queryTokens(query.text)
+  const tokens = queryTokens(query.text || '')
   let ids: Uint32Array | null = null
   if (tokens.length) {
     ids = postings(index, tokens[0])

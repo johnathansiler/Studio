@@ -13,7 +13,7 @@ import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { withIsolation } from './headers.ts'
-import { createLibraryApi, presignR2Get } from './library.ts'
+import { createLibraryApi, libraryClientIp, presignR2Get } from './library.ts'
 
 const usage = createUsageLedger()
 const libraryApi = createLibraryApi({
@@ -435,9 +435,7 @@ async function handleLibrary(req: IncomingMessage, res: ServerResponse, pathname
       return json(res, { error: 'Those library paths cannot be signed.' }, 400)
     }
   }
-  const forwarded = req.headers['x-forwarded-for']
-  const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded
-  const ip = raw?.split(',')[0]?.trim() || req.socket.remoteAddress || 'local'
+  const ip = libraryClientIp(req.headers, req.socket.remoteAddress)
   try {
     const result = await libraryApi.handle({
       method: req.method || 'GET',

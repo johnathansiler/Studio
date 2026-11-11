@@ -1,3 +1,4 @@
+import { parseNote } from '../audio/multisample/sfz'
 import { decodeSlotFile, focusedSlot } from '../audio/sample/slot'
 import type { AudioAsset } from '../model/types'
 import { placeSound } from '../sounds/place'
@@ -9,12 +10,27 @@ import type { LibraryEntry } from './types'
 const registry = new Map<string, LibraryEntry>()
 
 export function libraryBufferId(key: string) {
-  let hash = 2166136261
+  let high = 2166136261
+  let low = 2166136261 ^ 0x9e3779b9
   for (let i = 0; i < key.length; i++) {
-    hash ^= key.charCodeAt(i)
-    hash = Math.imul(hash, 16777619)
+    const code = key.charCodeAt(i)
+    high ^= code
+    high = Math.imul(high, 16777619)
+    low ^= code
+    low = Math.imul(low, 2246822519)
   }
-  return `r2_${(hash >>> 0).toString(36)}`
+  return `r2_${(high >>> 0).toString(36)}_${(low >>> 0).toString(36)}`
+}
+
+function midiRoot(entry: LibraryEntry) {
+  const parsed = parseNote(entry.note) ?? parseNote(entry.root)
+  return parsed == null ? undefined : parsed
+}
+
+function padsHost(store: ProjectStore) {
+  const open = store.padsTrackId
+  if (open && store.track(open)?.type === 'midi') return open
+  return store.project.tracks.find((track) => track.type === 'midi' && track.instrument === 'pads')?.id ?? null
 }
 
 export function publishLibrary(entries: LibraryEntry[]) {
@@ -103,12 +119,13 @@ export function placeLibraryAsset(store: ProjectStore, entry: LibraryEntry, asse
   }
   if (entry.type === 'multisample note') {
     const selected = store.selectedTrackId ? store.track(store.selectedTrackId) : null
-    const trackId = selected?.type === 'midi' ? selected.id : store.addTracks({ kind: 'midi', count: 1, instrument: 'sampler', input: 'mic', channels: 1, armed: false })[0]
+    const host = selected?.type === 'midi' && selected.instrument !== 'pads' ? selected.id : null
+    const trackId = host ?? store.addTracks({ kind: 'midi', count: 1, instrument: 'sampler', input: 'mic', channels: 1, armed: false })[0]
     if (!trackId) throw new Error('Could not add an instrument track.')
-    store.loadSamplerSound(trackId, asset, undefined, false)
+    store.loadSamplerSound(trackId, asset, midiRoot(entry), false)
     return `${entry.name} plays across the keyboard.`
   }
-  const trackId = store.insertPads(null)
+  const trackId = store.insertPads(padsHost(store))
   if (!trackId) throw new Error('Could not open Beat Machine.')
   const pad = emptyPad(store, trackId)
   store.assignTrackPad(trackId, pad.bank, pad.index, { name: entry.name, bufferId: asset.id })
