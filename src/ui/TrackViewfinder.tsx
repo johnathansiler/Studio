@@ -26,7 +26,7 @@ export function TrackViewfinder({
         {line ?? (
           <>
             <strong data-view-name="" style={{ color: glance.color }}>{glance.name}</strong>
-            <span>{` · ${glance.key} · ${glance.bpm}`}</span>
+            <span>{`\u00a0·\u00a0${glance.key}\u00a0·\u00a0${glance.bpm}`}</span>
           </>
         )}
       </p>

@@ -62,6 +62,7 @@
 .track-viewfinder .viewfinder-line span {
   flex: none;
   color: var(--muted);
+  white-space: pre;
 }
 
 .shell .arrange,
@@ -71,7 +72,7 @@
 .shell.fold .arrange,
 .shell:not(.phone) .arrange,
 .shell.phone .arrange[data-phone-arrange] {
-  --lane-h: 48px; /* 6px meter, 2px gap, 40px buttons */
+  --lane-h: 46px; /* 4px meter, 2px gap, 40px buttons */
 }
 
 .shell .arrange .head,
@@ -112,20 +113,18 @@
   align-self: stretch;
   width: 100%;
   min-width: 0;
-  height: 6px;
+  height: 4px;
 }
 
 .shell.phone:not(.land) .arrange .pl-head .track-meter-row .track-live,
-.shell .arrange .head .track-meter-row .track-live {
+.shell .arrange .head .track-meter-row .track-live,
+.shell .arrange .head .track-meter-row .midi-activity {
   position: absolute;
-  right: 1px;
-  top: -1px;
-  display: flex;
-  flex: none;
-  width: auto;
-  min-width: 0;
-  height: 8px;
+  width: 1px;
+  height: 1px;
   margin: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
   pointer-events: none;
 }
 
@@ -139,10 +138,11 @@
   width: 100%;
   min-width: 0;
   max-width: none;
-  height: 6px;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  background: var(--panel-2);
+  height: 4px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--panel-3);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
 }
 
 .arrange .track-controls > .track-more,
@@ -245,25 +245,48 @@
 }
 
 .shell.phone .phone-context.btn-tray .bpm-readout {
-  flex-direction: row;
-  gap: 4px;
+  flex-direction: column;
+  gap: 1px;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  font-family: var(--font);
+  font-variant-numeric: normal;
 }
 
 .shell.phone .phone-context.btn-tray .tempo-kicker,
 .shell.phone .phone-context.btn-tray .tempo-figure {
-  font-size: 11px;
+  font-family: var(--font);
+  font-variant-numeric: normal;
   font-weight: 650;
   line-height: 1;
+  width: auto;
+  min-width: 0;
+  letter-spacing: 0;
 }
+
+.shell.phone .phone-context.btn-tray .tempo-kicker { font-size: 9px; }
+.shell.phone .phone-context.btn-tray .tempo-figure { font-size: 12px; }
 
 .shell.phone .phone-context.btn-tray {
   flex-flow: row nowrap;
-  align-items: center;
-  justify-content: flex-start;
+  align-items: stretch;
+  justify-content: stretch;
   width: 100%;
   max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
+  gap: 2px;
+}
+
+.shell.phone .phone-context.btn-tray .phone-hit,
+.shell.phone .phone-context.btn-tray .t-btn,
+.shell.phone .phone-context.btn-tray .bpm-readout {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  max-width: none;
+  padding: 0 1px;
+  font-size: 11px;
 }
 
 .shell.phone .phone-context .transport-extras-slot,
