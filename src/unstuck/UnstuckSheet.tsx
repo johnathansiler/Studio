@@ -7,8 +7,10 @@ import type { ProjectStore } from '../state/store'
 import { useFormFactor } from '../ui/form'
 import { GuideLayer } from '../ui/GuideLayer'
 import { SheetClose } from '../ui/SheetClose'
+import { IdeasPop } from '../ui/IdeasPop'
 import { PlayersSheet } from '../ui/PlayersSheet'
 import '../ui/guideSheet.css'
+import type { IdeasPage } from './ideasPage'
 import {
   AMOUNTS,
   FEELS,
@@ -38,14 +40,28 @@ interface Memory {
   endBeat: number
 }
 
-export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; engine: AudioEngine; onClose: () => void }) {
+export function UnstuckSheet({
+  store,
+  engine,
+  onClose,
+  page: pageProp,
+  onPage,
+}: {
+  store: ProjectStore
+  engine: AudioEngine
+  onClose: () => void
+  /** Controlled tab. The piano roll opens Progressions; the Ideas button opens Write. */
+  page?: IdeasPage
+  onPage?: (page: IdeasPage) => void
+}) {
   const version = store.version
   const place = useFormFactor() === 'desk' ? 'pop' : 'sheet'
   const [brief, setBrief] = useState<UnstuckBrief>(() => briefFromProject(store.project))
   const [memory, setMemory] = useState<Memory | null>(null)
   const [sectionId, setSectionId] = useState('')
   const [rewriteRole, setRewriteRole] = useState<RoleId>('drums')
-  const [page, setPage] = useState<'write' | 'players'>('write')
+  const [localPage, setLocalPage] = useState<IdeasPage>(pageProp ?? 'write')
+  const page = pageProp ?? localPage
   const bar = Math.max(1, quartersPerBar(store.project.timeSignature))
   const picture = readClip(store.project, store.selectedMidiClipId, bar)
   const sections = (store.project.sections ?? []).filter((section) => section.durationBeats > 0)
@@ -196,6 +212,12 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
     write({ action: 'rewrite', roles: [rewriteRole], kind: section.kind, name: section.name, bars, startBeat: section.startBeat })
   }
 
+  function choose(next: IdeasPage) {
+    if (next !== page) engine.stopPreview()
+    setLocalPage(next)
+    onPage?.(next)
+  }
+
   function togglePart(role: RoleId) {
     const has = brief.parts.includes(role)
     const parts = has ? brief.parts.filter((item) => item !== role) : [...brief.parts, role]
@@ -210,21 +232,30 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
   return (
     <GuideLayer>
       <div className={`guide-sheet unstuck-sheet unstuck-dock ${place}`} role="dialog" aria-label="Ideas" data-unstuck="open" data-screen-overlay="">
-        {place === 'sheet' && <div className="guide-handle" aria-hidden="true" />}
-        <header className="guide-head sheet-head">
-          <div>
-            <h2>Ideas</h2>
-            <p>Pick one part. Full song always writes two verses and two choruses, then any extra sections the seed keeps. Shuffle again keeps the locks.</p>
+        <div className="unstuck-sticky">
+          {place === 'sheet' && <div className="guide-handle" aria-hidden="true" />}
+          <header className="guide-head sheet-head">
+            <div>
+              <h2>Ideas</h2>
+              <p>{pageBlurb(page)}</p>
+            </div>
+            <SheetClose className="guide-x" onClick={onClose} />
+          </header>
+          <div className="unstuck-pages" role="tablist" aria-label="Ideas pages">
+            <button type="button" role="tab" id="ideas-tab-write" aria-selected={page === 'write'} aria-controls="ideas-panel" className={page === 'write' ? 'on' : ''} onClick={() => choose('write')}>Write</button>
+            <button type="button" role="tab" id="ideas-tab-progressions" aria-selected={page === 'progressions'} aria-controls="ideas-panel" className={page === 'progressions' ? 'on' : ''} onClick={() => choose('progressions')}>Progressions</button>
+            <button type="button" role="tab" id="ideas-tab-players" aria-selected={page === 'players'} aria-controls="ideas-panel" className={page === 'players' ? 'on' : ''} onClick={() => choose('players')}>Players</button>
           </div>
-          <SheetClose className="guide-x" onClick={onClose} />
-        </header>
-        <div className="unstuck-pages" role="tablist" aria-label="Ideas pages">
-          <button type="button" role="tab" aria-selected={page === 'write'} className={page === 'write' ? 'on' : ''} onClick={() => setPage('write')}>Write</button>
-          <button type="button" role="tab" aria-selected={page === 'players'} className={page === 'players' ? 'on' : ''} onClick={() => setPage('players')}>Players</button>
         </div>
         {page === 'players' ? (
-          <PlayersSheet embedded store={store} engine={engine} onClose={() => setPage('write')} />
-        ) : <>
+          <div id="ideas-panel" role="tabpanel" aria-labelledby="ideas-tab-players" data-ideas-page="players">
+            <PlayersSheet embedded store={store} engine={engine} onClose={() => choose('write')} />
+          </div>
+        ) : page === 'progressions' ? (
+          <div id="ideas-panel" role="tabpanel" aria-labelledby="ideas-tab-progressions" data-ideas-page="progressions">
+            <IdeasPop embedded store={store} engine={engine} />
+          </div>
+        ) : <div id="ideas-panel" role="tabpanel" aria-labelledby="ideas-tab-write" data-ideas-page="write">
         <div className="unstuck-grid" data-unstuck="parts">
           {ROLES.map((role) => (
             <button key={role.id} type="button" data-unstuck-action={role.id} onClick={() => write({ action: 'part', role: role.id })}>
@@ -370,10 +401,16 @@ export function UnstuckSheet({ store, engine, onClose }: { store: ProjectStore; 
             </div>
           </section>
         )}
-        </>}
+        </div>}
       </div>
     </GuideLayer>
   )
+}
+
+function pageBlurb(page: IdeasPage) {
+  if (page === 'players') return 'A drummer, bass, and keys that follow the song. Hear a take, then Write puts editable MIDI on the tracks.'
+  if (page === 'progressions') return 'Hear a progression, then Use writes chords, bass, and drums.'
+  return 'Pick one part. Full song always writes two verses and two choruses, then any extra sections the seed keeps. Shuffle again keeps the locks.'
 }
 
 function boundsOf(draft: { tracks: { clips: { startBeat: number; durationBeats: number }[] }[]; replace?: { endBeat: number } }) {

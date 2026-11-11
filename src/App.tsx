@@ -45,9 +45,8 @@ import { MidiTools } from './ui/MidiTools'
 import { PerformPop } from './ui/PerformPop'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
-import { IdeasPop } from './ui/IdeasPop'
-import { PlayersSheet } from './ui/PlayersSheet'
 import { UnstuckSheet } from './unstuck/UnstuckSheet'
+import { ideasPageFromSearch, ideasSheetRequested, type IdeasPage } from './unstuck/ideasPage'
 import './ui/guideSheet.css'
 import { panelChoice } from './ui/panelMemory'
 import { ShellBrowser } from './ui/PlaylistBrowser'
@@ -274,9 +273,8 @@ export function App() {
   const holdLandscape = useRef(false)
   const [tuneOpen, setTuneOpen] = useState(() => new URLSearchParams(window.location.search).get('tune') === '1')
   const [knockOpen, setKnockOpen] = useState(() => new URLSearchParams(window.location.search).get('knock') === '1')
-  const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(window.location.search).get('ideas') === '1')
-  const [playersOpen, setPlayersOpen] = useState(() => new URLSearchParams(window.location.search).get('players') === '1')
-  const [unstuckOpen, setUnstuckOpen] = useState(() => new URLSearchParams(window.location.search).get('unstuck') === '1')
+  const [ideasPage, setIdeasPage] = useState<IdeasPage>(() => ideasPageFromSearch(window.location.search))
+  const [unstuckOpen, setUnstuckOpen] = useState(() => ideasSheetRequested(window.location.search))
   const [soundsOpen, setSoundsOpen] = useState(() => {
     if (new URLSearchParams(window.location.search).get('sounds') === '1') return true
     return panelChoice('arrangeBrowser') ?? formFactor(window.innerWidth, window.innerHeight) === 'desk'
@@ -519,7 +517,8 @@ export function App() {
       store.setView('arrange')
       setSurface('studio')
       setPhonePane('edit')
-      setIdeasOpen(true)
+      setIdeasPage('progressions')
+      setUnstuckOpen(true)
     }
   }, [store])
 
@@ -1900,8 +1899,6 @@ async function importDropped(files: FileList) {
   useScreenOverlay(() => setProjectsOpen(false), projectsOpen)
   useScreenOverlay(() => setTuneOpen(false), tuneOpen)
   useScreenOverlay(() => setKnockOpen(false), knockOpen)
-  useScreenOverlay(() => setIdeasOpen(false), ideasOpen)
-  useScreenOverlay(() => { engine.stopPreview(); setPlayersOpen(false) }, playersOpen)
   useScreenOverlay(() => { engine.stopPreview(); setUnstuckOpen(false) }, unstuckOpen)
   const shellOpen = soundsOpen && surface === 'studio' && (collabShown || editorView !== 'arrange')
   const shellPhase = usePushPhase(shellOpen)
@@ -1942,6 +1939,22 @@ async function importDropped(files: FileList) {
   const historyButtons = (
     <HistoryButtons canUndo={store.canUndo} canRedo={store.canRedo} onUndo={() => store.undo()} onRedo={() => store.redo()} />
   )
+  function openIdeas(page: IdeasPage) {
+    setMenuOpen(false)
+    if (unstuckOpen && page !== ideasPage) engine.stopPreview()
+    setIdeasPage(page)
+    setUnstuckOpen(true)
+  }
+  function toggleIdeas() {
+    setMenuOpen(false)
+    if (unstuckOpen) {
+      engine.stopPreview()
+      setUnstuckOpen(false)
+      return
+    }
+    setIdeasPage('write')
+    setUnstuckOpen(true)
+  }
   const ideasButton = phoneArrange ? (
     <button
       type="button"
@@ -1950,7 +1963,7 @@ async function importDropped(files: FileList) {
       title="Ideas"
       aria-pressed={unstuckOpen}
       disabled={store.remoteFollow}
-      onClick={() => { setMenuOpen(false); setUnstuckOpen((open) => !open) }}
+      onClick={toggleIdeas}
     >
       <IdeasBulbIcon />
     </button>
@@ -1961,7 +1974,7 @@ async function importDropped(files: FileList) {
       hint={UNSTUCK_COPY.hint}
       pressed={unstuckOpen}
       disabled={store.remoteFollow}
-      onClick={() => { setMenuOpen(false); setUnstuckOpen((open) => !open) }}
+      onClick={toggleIdeas}
     />
   )
 
@@ -2045,7 +2058,7 @@ async function importDropped(files: FileList) {
             canRedo={store.canRedo}
             onUndo={phone ? () => { setMenuOpen(false); store.undo() } : undefined}
             onRedo={phone ? () => { setMenuOpen(false); store.redo() } : undefined}
-            onIdeas={phone && !phoneArrange ? () => { setMenuOpen(false); setUnstuckOpen(true) } : undefined}
+            onIdeas={phone && !phoneArrange ? () => openIdeas('write') : undefined}
             latencyHint={latencyHint}
             latencyReadout={latencyReadout}
             onLatency={(hint) => {
@@ -2070,7 +2083,7 @@ async function importDropped(files: FileList) {
               } else if (FEATURES.session && action === 'capture') { setMenuOpen(false); store.captureToArrangement() }
               else if (action === 'dock') setDockEdge(dockEdge === 'right' ? 'bottom' : 'right')
               else if (action === 'scaler') openPlugin('play')
-              else if (action === 'players') { setMenuOpen(false); setPhonePane('edit'); setSurface('studio'); setPlayersOpen(true) }
+              else if (action === 'players') { setPhonePane('edit'); setSurface('studio'); openIdeas('players') }
               else if (action === 'midi') { setMenuOpen(false); store.setMidiToolsOpen(!store.midiToolsOpen) }
               else if (action === 'snap') store.toggle('snap')
               else if (action === 'shortcuts') { setMenuOpen(false); setHelp(true) }
@@ -2273,7 +2286,7 @@ async function importDropped(files: FileList) {
             <RackView store={store} engine={engine} trackId={store.rackTrackId} onOpenKnock={() => setKnockOpen(true)} />
           )}
           {surface === 'studio' && panel === 'piano' && (
-            <MidiDock store={store} engine={engine} onIdeas={() => setIdeasOpen(true)} onGenerate={() => openPlugin('write')} onClose={closePiano} />
+            <MidiDock store={store} engine={engine} onIdeas={() => openIdeas('progressions')} onGenerate={() => openPlugin('write')} onClose={closePiano} />
           )}
         </div>}
       </div>
@@ -2281,9 +2294,15 @@ async function importDropped(files: FileList) {
       {store.patchTrackId && <PatchSheet store={store} engine={engine} trackId={store.patchTrackId} />}
       <QuantizeSheet store={store} />
       {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
-      {ideasOpen && <IdeasPop store={store} engine={engine} onClose={() => setIdeasOpen(false)} />}
-      {playersOpen && <PlayersSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setPlayersOpen(false) }} />}
-      {unstuckOpen && <UnstuckSheet store={store} engine={engine} onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }} />}
+      {unstuckOpen && (
+        <UnstuckSheet
+          store={store}
+          engine={engine}
+          page={ideasPage}
+          onPage={setIdeasPage}
+          onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }}
+        />
+      )}
       {analysisTrackId && <AnalysisSheet store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} />}
       {perform && (
         <PerformPop
