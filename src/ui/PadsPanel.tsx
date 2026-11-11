@@ -536,6 +536,7 @@ export function PadsPanel({
           tempo={store.project.tempo}
           hitToken={hitToken}
           snap={snapZero}
+          recording={recording}
           onTrim={(from, to) => store.setPadWindow(trackId, bank, selected, from, to, true)}
           onTrimEnd={() => store.endDraft()}
         />

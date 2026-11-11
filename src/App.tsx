@@ -91,6 +91,7 @@ import { claimComputerKey } from './model/keyboardPlay'
 import { KeyboardDock } from './ui/KeyboardDock'
 import { TransportActionContext } from './ui/pluginTransport'
 import { browserLandscapeHost, dismissKeyboard, editorHistoryStep, isHistoryMark, keyboardShellTurn, notifyKeyboard, PADS_HISTORY, PIANO_HISTORY, presentKeyboard, releaseOrientation, setKeyboardPresenter, setPianoHider, STEPS_HISTORY, type EditorHistoryMark, type KeyboardPresentation } from './ui/keyboardStage'
+import { sheetHistoryPop } from './ui/arrangePanel'
 import { onViewTab, syncPhoneSheetFrame, syncViewTabFrame } from './ui/overlayHost'
 import { useScreenOverlay } from './ui/screenOverlay'
 import { HintBubble, TipButton } from './ui/Hint'
@@ -1686,25 +1687,39 @@ async function importDropped(files: FileList) {
     const previous = editorHistory.current
     const step = editorHistoryStep(previous, shownEditor)
     editorHistory.current = shownEditor
-    if (step === 'push' && shownEditor) history.pushState({ cueharbor: shownEditor }, '')
-    else if (step === 'replace' && shownEditor) {
-      if (isHistoryMark(history.state, previous ?? '')) history.replaceState({ cueharbor: shownEditor }, '')
-      else history.pushState({ cueharbor: shownEditor }, '')
-    } else if (step === 'back' && previous && isHistoryMark(history.state, previous)) {
-      ignorePop.current += 1
-      history.back()
+    let cancel = false
+    let removePop = () => {}
+    // A track sheet closes with history.back(). That popstate arrives after this
+    // effect. Pushing the editor first lets the sheet pop remove it and close the panel.
+    const apply = () => {
+      if (cancel) return
+      if (step === 'push' && shownEditor) history.pushState({ cueharbor: shownEditor }, '')
+      else if (step === 'replace' && shownEditor) {
+        if (isHistoryMark(history.state, previous ?? '')) history.replaceState({ cueharbor: shownEditor }, '')
+        else history.pushState({ cueharbor: shownEditor }, '')
+      } else if (step === 'back' && previous && isHistoryMark(history.state, previous)) {
+        ignorePop.current += 1
+        history.back()
+      }
+      if (!shownEditor) return
+      const onPop = () => {
+        editorHistory.current = null
+        setKeysLandscape(false)
+        void releaseOrientation()
+        if (shownEditor === PIANO_HISTORY) closePiano()
+        else if (shownEditor === STEPS_HISTORY) store.closeSteps()
+        else store.closePads()
+      }
+      window.addEventListener('popstate', onPop)
+      removePop = () => window.removeEventListener('popstate', onPop)
     }
-    if (!shownEditor) return
-    const onPop = () => {
-      editorHistory.current = null
-      setKeysLandscape(false)
-      void releaseOrientation()
-      if (shownEditor === PIANO_HISTORY) closePiano()
-      else if (shownEditor === STEPS_HISTORY) store.closeSteps()
-      else store.closePads()
+    const pending = sheetHistoryPop()
+    if (pending) void pending.then(apply)
+    else apply()
+    return () => {
+      cancel = true
+      removePop()
     }
-    window.addEventListener('popstate', onPop)
-    return () => window.removeEventListener('popstate', onPop)
   }, [shownEditor])
 
   useEffect(() => {

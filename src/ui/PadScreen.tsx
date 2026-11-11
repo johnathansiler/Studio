@@ -52,6 +52,7 @@ export function PadScreen({
   tempo,
   hitToken,
   snap,
+  recording = false,
   onTrim,
   onTrimEnd,
 }: {
@@ -74,6 +75,8 @@ export function PadScreen({
   hitToken: number
   /** Snap dragged markers to a zero crossing. The switch lives on the Sound tab. */
   snap: boolean
+  /** Hide the zoom hint so it cannot sit on the pads while a take is recording. */
+  recording?: boolean
   onTrim: (start: number, end: number) => void
   onTrimEnd: () => void
 }) {
@@ -394,10 +397,10 @@ export function PadScreen({
             />
           )}
         </div>
+        {hint && !recording && (
+          <div ref={hintRef} className="pad-zoom-hint" role="status">Pinch to zoom · double-tap to reset</div>
+        )}
       </section>
-      {hint && (
-        <div ref={hintRef} className="pad-zoom-hint" role="status">Pinch to zoom · double-tap to reset</div>
-      )}
     </div>
   )
 }
