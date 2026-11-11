@@ -13,8 +13,6 @@ import {
   PIANO_BAR,
   PIANO_SHEET,
   RECORD_COPY,
-  SESSION_BAR,
-  SESSION_SHEET,
   TRACK_ROW,
   TRACK_SHEET,
   TRANSPORT_COPY,
@@ -22,6 +20,7 @@ import {
   sharesId,
   type Copy,
 } from '../ui/chrome'
+import { SESSION_BAR, SESSION_SHEET } from '../ui/sessionCopy'
 import { noteGrip, trimZone } from '../ui/touchEdit'
 import { MainMenu } from '../ui/MainMenu'
 import { ToolBar } from '../ui/ToolBar'
@@ -182,17 +181,20 @@ describe('mobile control lists', () => {
     const phone = visibleMenu({ phone: true, session: false, dockBottom: false, hardwareMidi: true })
     expect(desk.map((item) => item.action)).toEqual([
       'new', 'open', 'save', 'export',
-      'box', 'erase', 'pan',
       'dock',
       'scaler', 'midi',
-      'signature', 'shortcuts',
+      'shortcuts',
     ])
     expect(phone.map((item) => item.action)).toEqual([
-      'new', 'open', 'save', 'export',
-      'box', 'erase', 'pan',
       'midi',
-      'signature', 'shortcuts',
+      'shortcuts',
     ])
+    for (const action of ['box', 'erase', 'pan', 'signature', 'new', 'open', 'save', 'export']) {
+      expect(phone.map((item) => item.action)).not.toContain(action)
+    }
+    for (const action of ['box', 'erase', 'pan', 'signature']) {
+      expect(desk.map((item) => item.action)).not.toContain(action)
+    }
     expect(desk.map((item) => item.action)).not.toContain('click')
     expect(desk.map((item) => item.action)).not.toContain('count-in')
     expect(phone.map((item) => item.action)).not.toContain('click')
@@ -211,10 +213,10 @@ describe('mobile control lists', () => {
     expect(new Set(actions).size).toBe(actions.length)
     expect(actions).toEqual(desk.map((item) => item.action))
     for (const item of desk) expect(html).toContain(item.label)
-    const scroll = MENU_COPY.find((item) => item.action === 'pan')
-    expect(scroll?.label).toBe('Scroll')
-    expect(scroll?.hint).toMatch(/not the mixer pan/i)
-    expect(html).toContain('aria-label="Scroll. Scroll the timeline or the piano roll. This is not the mixer pan."')
-    expect(html).not.toContain('>Pan<')
+    expect(html).not.toContain('data-menu-action="pan"')
+    expect(html).not.toContain('data-menu-action="box"')
+    expect(html).not.toContain('data-menu-action="erase"')
+    expect(html).not.toContain('data-menu-action="signature"')
+    expect(MENU_COPY.some((item) => item.action === 'pan' || item.action === 'box' || item.action === 'erase' || item.action === 'signature')).toBe(false)
   })
 })

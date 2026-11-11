@@ -1,6 +1,6 @@
 import { prepareChainPool, type ChainSlot } from './plugins/chain'
 import { prepareAccurate } from './automationRender'
-import { createProcessor, preloadWasmInserts } from './plugins/createAll'
+import { loadProcessors } from './plugins/loadProcessors'
 import { renderInserts } from './renderChain'
 import { bellIndex, claimTrack, finishTrack, sabInts } from './core/sabClock'
 import type { Processor } from './plugins/types'
@@ -86,6 +86,7 @@ export function serveRealtime(port: Port, sab: SharedArrayBuffer, mine: number[]
 async function prepare(msg: PrepareMsg) {
   if (msg.wasm === false) (globalThis as { __CUEHARBOR_WASM_DSP__?: boolean }).__CUEHARBOR_WASM_DSP__ = false
   if (msg.wasm === true) (globalThis as { __CUEHARBOR_WASM_DSP__?: boolean }).__CUEHARBOR_WASM_DSP__ = true
+  const { createProcessor, preloadWasmInserts } = await loadProcessors()
   await preloadWasmInserts()
   return msg.plugins.map((plugin): ChainSlot => ({
     id: plugin.id,

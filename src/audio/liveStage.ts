@@ -17,6 +17,14 @@ export const PATTERN_DRUM_PEAK = 0.22
 export const DEDUPE_SEC = 0.008
 export const MAX_LIVE_VOICES = 16
 export const LIVE_QUANTUM = 128
+/** How far ahead the transport places notes. A wake later than this has already missed them. */
+export const SCHEDULER_HORIZON_SEC = 0.35
+/** Loop passes one wake may build. A tiny cycle cannot pin the main thread. */
+export const MAX_SCHEDULE_PASSES = 8
+/** A note this late still sounds, on the next quantum. Later than this, it is dropped. */
+export const LATE_SLIP_SEC = 0.02
+/** Pad and key worklet messages kept while the audio thread is not pulling. */
+export const WORKLET_QUEUE_CAP = 48
 
 export function clamp01(value: number) {
   if (!Number.isFinite(value)) return 0
@@ -46,6 +54,117 @@ export function liveWhen(now: number) {
 export function scheduleDelaySeconds(when: number, now: number) {
   if (!Number.isFinite(when) || !Number.isFinite(now)) return 0
   return Math.max(0, when - now)
+}
+
+/**
+ * Place a note on the audio clock.
+ * On time stays put. A small slip moves to the next quantum. A late note is dropped
+ * so a stalled wake does not fire a pile of old hits at once.
+ */
+export function placeNoteTime(when: number, now: number, slip = LATE_SLIP_SEC): number | null {
+  if (!Number.isFinite(when) || !Number.isFinite(now)) return null
+  if (when >= now) return when
+  if (now - when <= slip) return now + 0.001
+  return null
+}
+
+/**
+ * If the loop cursor fell behind the horizon, jump to now.
+ * Scheduling every missed cycle on one wake is what freezes a short loop after a stall.
+ */
+export function advanceLoopCursor(cursor: number, now: number, cycleSec: number): { cursor: number; jumped: boolean } {
+  if (!Number.isFinite(cursor) || !Number.isFinite(now)) return { cursor: Number.isFinite(cursor) ? cursor : now, jumped: false }
+  if (!(cycleSec > 0) || cursor >= now - 0.001) return { cursor, jumped: false }
+  if (now - cursor > SCHEDULER_HORIZON_SEC) return { cursor: now + 0.01, jumped: true }
+  return { cursor, jumped: false }
+}
+
+/**
+ * Timeline sample after a window of `samples`.
+ * Reaching `end` wraps to `restart`. The last sample before `end` is kept.
+ */
+export function nextTimelineSample(cursor: number, samples: number, end: number, restart: number): number {
+  if (!Number.isFinite(cursor)) return restart
+  if (!Number.isFinite(samples) || !(samples > 0) || !Number.isFinite(end)) return cursor
+  if (cursor + samples >= end) return restart
+  return cursor + samples
+}
+
+export interface SliceGainPoint {
+  at: number
+  value: number
+}
+
+/**
+ * Gain points for one scheduled slice of a clip.
+ * The value at each edge matches the clip fade, so the next slice continues it.
+ */
+export function clipSliceEnvelope(input: {
+  at: number
+  dur: number
+  relFrom: number
+  relTo: number
+  clipGain: number
+  fadeInSec: number
+  fadeOutSec: number
+  clipDurSec: number
+  join: boolean
+}): SliceGainPoint[] {
+  const { at, dur, relFrom, relTo, clipGain, fadeInSec, fadeOutSec, clipDurSec, join } = input
+  const env = (t: number) => {
+    let gain = clipGain
+    if (fadeInSec > 0 && t < fadeInSec) gain *= Math.max(0, t / fadeInSec)
+    if (fadeOutSec > 0 && t > clipDurSec - fadeOutSec) gain *= Math.max(0, (clipDurSec - t) / fadeOutSec)
+    return Math.max(0.0001, gain)
+  }
+  const points: SliceGainPoint[] = [{ at, value: join ? 0.0001 : env(relFrom) }]
+  let cursor = at
+  if (join && !(fadeInSec > 0 && relFrom < fadeInSec) && dur > 0) {
+    const joinAt = Math.min(at + 0.008, at + dur)
+    if (joinAt > cursor + 1e-6) {
+      points.push({ at: joinAt, value: env(Math.min(relTo, relFrom + (joinAt - at))) })
+      cursor = joinAt
+    }
+  }
+  const knees: number[] = []
+  if (fadeInSec > 0 && fadeInSec > relFrom && fadeInSec < relTo) knees.push(fadeInSec)
+  const fadeOutAt = clipDurSec - fadeOutSec
+  if (fadeOutSec > 0 && fadeOutAt > relFrom && fadeOutAt < relTo) knees.push(fadeOutAt)
+  knees.sort((a, b) => a - b)
+  for (const knee of knees) {
+    const whenKnee = at + (knee - relFrom)
+    if (whenKnee > cursor + 1e-5) {
+      points.push({ at: whenKnee, value: env(knee) })
+      cursor = whenKnee
+    }
+  }
+  const endAt = at + Math.max(0, dur)
+  if (endAt > cursor + 1e-5) points.push({ at: endAt, value: env(relTo) })
+  return points
+}
+
+/** Bound a worklet message queue. Newest messages stay, including the one just posted. */
+export function enqueueWorkletMessage<T>(queue: T[], message: T, cap = WORKLET_QUEUE_CAP): T[] {
+  const room = Math.max(1, Math.round(cap))
+  const base = queue.length >= room ? queue.slice(queue.length - room + 1) : queue.slice()
+  base.push(message)
+  return base
+}
+
+/** Note-on error against the audio clock, in milliseconds. */
+export function timingStats(errorsSec: number[]) {
+  if (!errorsSec.length) return { meanMs: 0, maxMs: 0, rmsMs: 0 }
+  let sum = 0
+  let sumSq = 0
+  let max = 0
+  for (const error of errorsSec) {
+    const abs = Math.abs(error)
+    sum += error
+    sumSq += error * error
+    if (abs > max) max = abs
+  }
+  const count = errorsSec.length
+  return { meanMs: (sum / count) * 1000, maxMs: max * 1000, rmsMs: Math.sqrt(sumSq / count) * 1000 }
 }
 
 /**

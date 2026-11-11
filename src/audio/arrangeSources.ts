@@ -25,6 +25,7 @@ import { hitRoute } from '../instruments/mpc/model'
 import { padSendGain, renderPadVoice } from '../instruments/mpc/render'
 import { matchBufferRate, renderPatchSpan } from '../instruments/patch/engine'
 import { renderNotes, type SampleBuffer } from './rack/dsp'
+import { isDrumsPlugin } from './plugins/ids'
 import { renderSamplerSpan } from './plugins/sampler'
 import { clipNeedsStretch, renderClipChannels } from './stretch/engine'
 import { SampleCache, type FetchLike } from './multisample/cache'
@@ -192,7 +193,11 @@ function libraryEvents(project: Project, track: Track, origin: number, scheduleE
  */
 export function graphPlugins(track: Track): PluginInstance[] {
   return track.plugins.map((plugin) => {
+    // Beat Machine is `sampler` with kind >= 1 after the old pads id moved.
+    // Those hits are already printed into the source buffer. Leaving the
+    // generator enabled lets the Rust voice replace that buffer with silence.
     const generator = plugin.pluginId === 'steps'
+      || isDrumsPlugin(plugin)
       || (plugin.pluginId === 'sampler' && track.instrument === 'sampler')
       || ((plugin.pluginId === 'pads' || plugin.pluginId === 'drum-machine' || plugin.pluginId === '808')
         && (track.instrument === 'pads' || track.instrument === 'drum-machine' || track.instrument === '808'))

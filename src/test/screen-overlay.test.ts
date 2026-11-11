@@ -473,13 +473,13 @@ describe('screen overlays leave the view tabs free', () => {
         await page.getByRole('button', { name: /^Arrange/ }).first().click()
 
         await page.locator('.menu-btn').click()
-        await page.locator('[data-screen-overlay]').first().waitFor()
+        await page.locator('[data-screen-overlay], .anchored-menu[data-open="true"]').first().waitFor()
         await page.getByRole('button', { name: /^Arrange/ }).first().click()
         await settleClosed(page)
         expect(await page.getByRole('button', { name: /^Arrange/ }).first().getAttribute('class')).toContain('active')
 
         await page.locator('.menu-btn').click()
-        await page.locator('[data-screen-overlay]').first().waitFor()
+        await page.locator('[data-screen-overlay], .anchored-menu[data-open="true"]').first().waitFor()
         await page.getByRole('button', { name: /^Mix/ }).first().click()
         await settleClosed(page)
         expect(await page.getByRole('button', { name: /^Mix/ }).first().getAttribute('class')).toContain('active')

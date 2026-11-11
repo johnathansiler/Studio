@@ -103,6 +103,19 @@ export function createStrip(ctx: BaseAudioContext): StripNodes {
   }
 }
 
+/** Drop every connection so a removed track can leave the graph while playback continues. */
+export function releaseStrip(strip: StripNodes) {
+  const nodes: AudioNode[] = [
+    strip.input, strip.eqLow, strip.eqMid, strip.eqHigh, strip.comp,
+    strip.delay, strip.delayFb, strip.delayWet, strip.delaySend,
+    strip.convolver, strip.revWet, strip.revSend,
+    strip.pan, strip.fader, strip.mute, strip.analyser, strip.output,
+  ]
+  for (const node of nodes) {
+    try { node.disconnect() } catch { /* already disconnected */ }
+  }
+}
+
 export function applyInserts(
   ctx: BaseAudioContext,
   strip: StripNodes,

@@ -88,6 +88,16 @@
   white-space: nowrap;
 }
 
+/* Eight tools plus Snap have to stay on screen at 390. The hit stays 40px. */
+.shell.phone .phone-context[data-phone-context="tools"] .phone-hit {
+  padding-left: 1px;
+  padding-right: 1px;
+}
+
+.shell.phone .phone-context[data-phone-context="tools"] .phone-hit .phone-face {
+  padding: 0 5px;
+}
+
 .shell.phone .phone-hit.on .phone-face,
 .shell.phone .phone-hit[aria-pressed="true"] .phone-face {
   background-color: var(--btn-toggle-bg);

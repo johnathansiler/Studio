@@ -151,6 +151,17 @@ describe('phone dock fixes', () => {
         expect(moreWords.join(' '), viewport.name).toMatch(/Loop/)
         expect(moreWords.join(' '), viewport.name).toMatch(/Metronome/)
         expect(moreWords.join(' '), viewport.name).toMatch(/Count/)
+        expect(await page.locator('#transport-count').count(), viewport.name).toBe(0)
+        const beforeCount = await page.evaluate(() => {
+          const project = (window as unknown as { __cueharbor: { store: { project: { countIn: boolean; countInBars?: number } } } }).__cueharbor.store.project
+          return `${project.countIn}:${project.countInBars ?? ''}`
+        })
+        await more.getByRole('button', { name: /^Count/ }).click()
+        const afterCount = await page.evaluate(() => {
+          const project = (window as unknown as { __cueharbor: { store: { project: { countIn: boolean; countInBars?: number } } } }).__cueharbor.store.project
+          return `${project.countIn}:${project.countInBars ?? ''}`
+        })
+        expect(afterCount, viewport.name).not.toBe(beforeCount)
         expect(await more.locator('h4, h2, strong').first().innerText()).toBe('More')
         const close = more.getByRole('button', { name: 'Close', exact: true })
         expect(await close.innerText()).not.toMatch(/Close/)

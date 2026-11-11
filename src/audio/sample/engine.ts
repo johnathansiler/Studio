@@ -224,6 +224,10 @@ export function renderLooped(channel: Float32Array, start: number, end: number, 
   let pos = 0
   let dir = 1
   for (let i = 0; i < out.length; i++) {
+    if (mode === 2 && pos >= span) {
+      out[i] = 0
+      continue
+    }
     let sample = readAt(channel, a + pos)
     if (xf > 1 && dir > 0 && pos >= span - xf) {
       const t = (pos - (span - xf)) / xf
@@ -232,8 +236,7 @@ export function renderLooped(channel: Float32Array, start: number, end: number, 
     }
     out[i] = sanitize(sample)
     if (mode === 2) {
-      if (pos < span - 1) pos += 1
-      else out[i] = 0
+      pos += 1
       continue
     }
     if (mode === 1) {

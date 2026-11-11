@@ -265,7 +265,7 @@ describe('live parameter changes', () => {
     const postedBefore = insert.port.messages.length
     for (const plugin of plugins) {
       const spec = descriptor(plugin.pluginId)!
-      const param = spec.params.find((item) => item.max > item.min) ?? spec.params[0]
+      const param = sweptParam(spec)
       if (!param) continue
       plugin.params = { ...plugin.params, [param.id]: param.max }
     }
@@ -279,7 +279,7 @@ describe('live parameter changes', () => {
     expect(latest?.slots?.length).toBe(plugins.length)
     for (const plugin of plugins) {
       const spec = descriptor(plugin.pluginId)!
-      const param = spec.params.find((item) => item.max > item.min) ?? spec.params[0]
+      const param = sweptParam(spec)
       if (!param) continue
       const slot = latest!.slots!.find((item) => item.id === plugin.id)
       expect(slot?.params[param.id], plugin.pluginId).toBeCloseTo(param.max)
@@ -287,6 +287,37 @@ describe('live parameter changes', () => {
     const racks = messages(ctx).filter((message) => message.type === 'state' && message.rack)
     const rack = racks[racks.length - 1]
     expect(rack?.rack?.devices.find((item) => item.id === device.id)?.params.cutoff).toBe(9000)
+  })
+
+  it('omits only the Beat Machine slot when sampler kind reaches drums', async () => {
+    const ctx = installAudioMocks()
+    const store = new ProjectStore(createEmptyProject(48000))
+    const engine = new AudioEngine()
+    arm(engine, ctx)
+    const track = store.project.tracks.find((item) => item.type === 'midi')!
+    const plugins = CATALOG.map((item) => createPlugin(item.id))
+    track.plugins.push(...plugins)
+    engine.sync(store.project, () => undefined)
+    await until(() => messages(ctx).some((message) => message.type === 'state' && message.slots?.length === plugins.length))
+    const sampler = plugins.find((plugin) => plugin.pluginId === 'sampler')!
+    sampler.params = { ...sampler.params, kind: 1 }
+    const eq = plugins.find((plugin) => plugin.pluginId === 'eq')!
+    eq.params = { ...eq.params, midG: 9 }
+    engine.sync(store.project, () => undefined)
+    await until(() => {
+      const posted = messages(ctx).filter((message) => message.type === 'state' && message.slots)
+      const latest = posted[posted.length - 1] as { slots?: { id: string }[] } | undefined
+      return latest?.slots?.length === plugins.length - 1 && !latest.slots.some((slot) => slot.id === sampler.id)
+    })
+    const posted = messages(ctx).filter((message) => message.type === 'state' && message.slots) as { slots: { id: string; params: Record<string, number> }[] }[]
+    const latest = posted[posted.length - 1]
+    expect(latest.slots.length).toBe(plugins.length - 1)
+    expect(latest.slots.some((slot) => slot.id === sampler.id)).toBe(false)
+    expect(latest.slots.find((slot) => slot.id === eq.id)?.params.midG).toBe(9)
+    for (const plugin of plugins) {
+      if (plugin.id === sampler.id) continue
+      expect(latest.slots.some((slot) => slot.id === plugin.id), plugin.pluginId).toBe(true)
+    }
   })
 
   it('changes rendered audio when the fader or an EQ knob moves', () => {
@@ -309,6 +340,13 @@ describe('live parameter changes', () => {
     expect(Math.abs(rms(boost) - rms(cut))).toBeGreaterThan(0.02)
   })
 })
+
+/** A knob that does not change whether the insert stays on the worklet. Sampler `kind` does. */
+function sweptParam(spec: { params: { id: string; min: number; max: number }[] }) {
+  return spec.params.find((item) => item.id !== 'kind' && item.max > item.min)
+    ?? spec.params.find((item) => item.max > item.min)
+    ?? spec.params[0]
+}
 
 function runEq(eq: ReturnType<typeof createEq>, input: Float32Array, params: Record<string, number>) {
   const left = new Float32Array(input.length)

@@ -45,7 +45,7 @@ import { MidiTools } from './ui/MidiTools'
 import { PerformPop } from './ui/PerformPop'
 import { MixerView } from './ui/MixerView'
 import { PluginSheet } from './ui/PluginSheet'
-import { UnstuckSheet } from './unstuck/UnstuckSheet'
+import { LazySheet } from './ui/sheetFallback'
 import { ideasPageFromSearch, ideasSheetRequested, type IdeasPage } from './unstuck/ideasPage'
 import './ui/guideSheet.css'
 import { panelChoice } from './ui/panelMemory'
@@ -55,14 +55,11 @@ import { PadsPanel } from './ui/PadsPanel'
 import { ScalerPanel } from './ui/ScalerPanel'
 import { clampSoundWidth, readSoundWidth } from './sounds/panel'
 import { loadScaleCatalog } from './theory'
-import { AnalysisSheet } from './ui/AnalysisSheet'
 import { QuantizeSheet } from './ui/QuantizeSheet'
 import { MidiDock } from './ui/MidiDock'
-import { KnockPop } from './ui/KnockPop'
 import { ProjectSheet } from './ui/ProjectSheet'
 import { PatchSheet } from './ui/PatchSheet'
 import { RackView } from './ui/RackView'
-import { SessionView } from './ui/SessionView'
 import { collabBadgeOn, collabPanelVisible, type StudioTab } from './ui/collabTab'
 import './ui/collab.css'
 import { AnchoredMenu } from './ui/AnchoredMenu'
@@ -71,8 +68,17 @@ import { TransportBar } from './ui/TransportBar'
 import { ToolBar } from './ui/ToolBar'
 import { SnapControl } from './ui/SnapControl'
 import { activeTool } from './state/tools'
-import { SpectralSheet } from './ui/SpectralSheet'
 import { VideoDock } from './ui/VideoDock'
+
+declare const __CUEHARBOR_SESSION__: boolean
+
+const UnstuckSheet = lazy(() => import('./unstuck/UnstuckSheet').then((mod) => ({ default: mod.UnstuckSheet })))
+const AnalysisSheet = lazy(() => import('./ui/AnalysisSheet').then((mod) => ({ default: mod.AnalysisSheet })))
+const KnockPop = lazy(() => import('./ui/KnockPop').then((mod) => ({ default: mod.KnockPop })))
+const SpectralSheet = lazy(() => import('./ui/SpectralSheet').then((mod) => ({ default: mod.SpectralSheet })))
+const SessionPane = __CUEHARBOR_SESSION__
+  ? lazy(() => import('./ui/SessionView').then((mod) => ({ default: mod.SessionView })))
+  : function HiddenSession(_props: Record<string, unknown>) { return null }
 import { UNSTUCK_COPY, visibleMenu } from './ui/chrome'
 import { ViewSwitcher } from './ui/ViewSwitcher'
 import { PhoneDock } from './ui/phoneDock'
@@ -139,6 +145,23 @@ export function App() {
   }, [engine])
   useEffect(() => watchSpectral(store), [store])
   useEffect(() => installControlGuards(document), [])
+  useEffect(() => {
+    const warm = () => {
+      void import('./ui/IdeasPop')
+      void import('./ui/PlayersSheet')
+      void import('./unstuck/UnstuckSheet')
+      void import('./ui/AnalysisSheet')
+      void import('./ui/KnockPop')
+      void import('./ui/SpectralSheet')
+    }
+    const idle = window.requestIdleCallback
+    if (typeof idle === 'function') {
+      const id = idle(warm, { timeout: 1600 })
+      return () => window.cancelIdleCallback(id)
+    }
+    const timer = window.setTimeout(warm, 400)
+    return () => window.clearTimeout(timer)
+  }, [])
   const [version, setVersion] = useState(0)
   const [surface, setSurface] = useState<'studio' | 'artist'>('studio')
   const [dock, setDock] = useState(() => fittedDockWidth(typeof window === 'undefined' ? 1280 : window.innerWidth, EDITOR_DOCK_DEFAULT))
@@ -2058,7 +2081,7 @@ async function importDropped(files: FileList) {
             canRedo={store.canRedo}
             onUndo={phone ? () => { setMenuOpen(false); store.undo() } : undefined}
             onRedo={phone ? () => { setMenuOpen(false); store.redo() } : undefined}
-            onIdeas={phone ? () => openIdeas('write') : undefined}
+            onIdeas={phone && !phoneArrange ? () => openIdeas('write') : undefined}
             latencyHint={latencyHint}
             latencyReadout={latencyReadout}
             onLatency={(hint) => {
@@ -2137,7 +2160,6 @@ async function importDropped(files: FileList) {
                 else if (action === 'save') { setMenuOpen(false); void persist() }
                 else if (action === 'export') { setMenuOpen(false); setExportOpen(true) }
               }}
-              onUnstuck={toggleIdeas}
               onUndo={() => store.undo()}
               onRedo={() => store.redo()}
               canUndo={store.canUndo}
@@ -2226,14 +2248,16 @@ async function importDropped(files: FileList) {
               )}
               {editorView === 'mix' && <MixerView store={store} engine={engine} onTune={() => { setTuneOpen(true); setPhonePane('edit'); setSurface('studio') }} onOpenKeyboard={openKeyboard} />}
               {FEATURES.session && editorView === 'session' && (
-                <SessionView
-                  store={store}
-                  engine={engine}
-                  onRecord={() => { void record() }}
-                  onDropAudio={(trackId, scene, file) => { void dropOnSlot(trackId, scene, file) }}
-                  onOpenPiano={openPiano}
-                  onOpenKeyboard={openKeyboard}
-                />
+                <Suspense fallback={null}>
+                  <SessionPane
+                    store={store}
+                    engine={engine}
+                    onRecord={() => { void record() }}
+                    onDropAudio={(trackId, scene, file) => { void dropOnSlot(trackId, scene, file) }}
+                    onOpenPiano={openPiano}
+                    onOpenKeyboard={openKeyboard}
+                  />
+                </Suspense>
               )}
             </div>
           </div>
@@ -2296,15 +2320,17 @@ async function importDropped(files: FileList) {
       <QuantizeSheet store={store} />
       {tuneOpen && <TunerPop engine={engine} onClose={() => setTuneOpen(false)} />}
       {unstuckOpen && (
-        <UnstuckSheet
-          store={store}
-          engine={engine}
-          page={ideasPage}
-          onPage={setIdeasPage}
-          onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }}
-        />
+        <LazySheet label="Ideas" className="guide-sheet unstuck-sheet" onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }}>
+          <UnstuckSheet
+            store={store}
+            engine={engine}
+            page={ideasPage}
+            onPage={setIdeasPage}
+            onClose={() => { engine.stopPreview(); setUnstuckOpen(false) }}
+          />
+        </LazySheet>
       )}
-      {analysisTrackId && <AnalysisSheet store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} />}
+      {analysisTrackId && <LazySheet label="Analysis" className="analysis-sheet" onClose={() => setAnalysisTrackId(null)}><AnalysisSheet store={store} trackId={analysisTrackId} onClose={() => setAnalysisTrackId(null)} /></LazySheet>}
       {perform && (
         <PerformPop
           mode={perform}
@@ -2427,8 +2453,12 @@ async function importDropped(files: FileList) {
           </div>
         </div>
       )}
-      {knockOpen && <KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} />}
-      <SpectralSheet store={store} />
+      {knockOpen && <LazySheet label="Knock" className="knock-pop" onClose={() => setKnockOpen(false)}><KnockPop store={store} engine={engine} onClose={() => setKnockOpen(false)} /></LazySheet>}
+      {store.spectralTrackId != null && (
+        <LazySheet label="Spectral repair" className="spectral-sheet" onClose={() => store.closeSpectral()}>
+          <SpectralSheet store={store} />
+        </LazySheet>
+      )}
       <KeyboardDock store={store} engine={engine} onEditNotes={editNotes} />
       <HintBubble />
       <Toasts store={store} />

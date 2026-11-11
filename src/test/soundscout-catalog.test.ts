@@ -11,7 +11,7 @@ import {
   loadSoundCatalog,
   parseSoundScoutCatalog,
 } from '../sounds/catalog'
-import { LEGACY_INDEX_URL, SOUND_CATALOG_URL, SOUND_DATASET_BASE, SOUND_DATASET_COMMIT, SOUND_VERSION_PREFIX } from '../sounds/contract'
+import { LEGACY_INDEX_URL, SOUND_CATALOG_FILE, SOUND_CATALOG_URL, SOUND_DATASET_BASE, SOUND_DATASET_COMMIT, SOUND_VERSION_PREFIX, SOUNDSCOUT_VERSION } from '../sounds/contract'
 import { licenseAllowed } from '../sounds/license'
 import { legacySoundFileUrl, soundCatalogUrl, soundFileUrl } from '../sounds/source'
 import { placeSound, previewChannelsFor } from '../sounds/place'
@@ -32,11 +32,16 @@ const document = JSON.parse(rawText) as {
 const catalog = parseSoundScoutCatalog(document)
 
 describe('SoundScout catalog', () => {
-  it('keeps the prepared 776-row document exact, including the informal grant', () => {
+  it('keeps the prepared 813-row document exact, including the informal grant', () => {
     expect(document.version).toBe('soundscout-2026-11-09')
-    expect(catalog).toHaveLength(776)
-    expect(new Set(catalog.map((entry) => entry.sha256)).size).toBe(770)
-    expect(catalog.filter((entry) => entry.license === 'CC0-1.0')).toHaveLength(285)
+    expect(SOUNDSCOUT_VERSION).toBe('soundscout-2026-11-09')
+    expect(SOUND_VERSION_PREFIX).toBe('soundscout-2026-11-09/')
+    expect(SOUND_CATALOG_FILE).toBe('soundscout-2026-11-10')
+    expect(SOUND_CATALOG_URL).toBe(`${SOUND_DATASET_BASE}/catalogs/${SOUND_CATALOG_FILE}.json`)
+    expect(SOUND_DATASET_COMMIT).toBe('ab0c3259dbd20c344efc9f8db5bc0d2206e0d2f8')
+    expect(catalog).toHaveLength(813)
+    expect(new Set(catalog.map((entry) => entry.sha256)).size).toBe(807)
+    expect(catalog.filter((entry) => entry.license === 'CC0-1.0')).toHaveLength(322)
     expect(catalog.filter((entry) => entry.license === 'Informal-creator-grant')).toHaveLength(491)
     expect(catalog.filter((entry) => entry.isContentAlias)).toHaveLength(6)
     expect(catalog.filter((entry) => entry.licenseClass === 'INFORMAL_CREATOR_GRANT_NOT_CC0')).toHaveLength(491)
@@ -64,7 +69,23 @@ describe('SoundScout catalog', () => {
     expect(catalog.filter((entry) => entry.pack === 'ORG-MEAD-PERC' && entry.bpm == null)).toHaveLength(0)
     expect(catalog.filter((entry) => entry.pack === 'HW-MBASE' && entry.key == null)).toHaveLength(0)
     expect(document.counts.byPack['HW-MBASE']).toBe(250)
-    expect(document.counts.byType.loop).toBe(526)
+    expect(document.counts.byPack['FS-HOLIZNA-ARCADE']).toBe(14)
+    expect(document.counts.byPack['FS-HOLIZNA-LOFI']).toBe(1)
+    expect(document.counts.byPack['FS-DEADROBOTMUSIC']).toBe(1)
+    expect(document.counts.byPack['FS-JOSEFPRES-PIANO']).toBe(21)
+    expect(document.counts.entries).toBe(813)
+    expect(document.counts.uniqueWav).toBe(807)
+    expect(document.counts.byLicense['CC0-1.0']).toBe(322)
+    expect(document.counts.byType.loop).toBe(563)
+    const openQuery = { text: '', type: 'loop' as const, bpm: 'any' as const, key: '', favoritesOnly: false, projectBpm: 120, favorites: [] as string[] }
+    const piano = filterSounds(catalog, { ...openQuery, text: 'piano loops' })
+    expect(piano).toHaveLength(21)
+    expect(piano.every((entry) => entry.pack === 'FS-JOSEFPRES-PIANO' && entry.bpm === 120 && entry.type === 'loop')).toBe(true)
+    const arcade = filterSounds(catalog, { ...openQuery, text: 'arcade' })
+    expect(arcade).toHaveLength(14)
+    expect(arcade.every((entry) => entry.pack === 'FS-HOLIZNA-ARCADE' && entry.type === 'loop')).toBe(true)
+    const arcadeBpms = [...new Set(arcade.map((entry) => entry.bpm).filter((bpm): bpm is number => bpm != null))].sort((a, b) => a - b)
+    expect(arcadeBpms).toEqual([90, 100, 110, 120, 130, 150])
   })
 
   it('does not treat a kick pitch as a musical key or revive the old stock index', async () => {
@@ -118,7 +139,7 @@ describe('SoundScout catalog', () => {
       return new Response(rawText)
     })
     expect(requested).toEqual([SOUND_CATALOG_URL])
-    expect(loaded.entries).toHaveLength(776)
+    expect(loaded.entries).toHaveLength(813)
 
     const legacy = await loadSoundCatalog(async (url) => {
       requested.push(String(url))
@@ -136,8 +157,34 @@ describe('SoundScout catalog', () => {
     const versioned = new TextEncoder().encode(rawText)
     await cache.put(SOUND_CATALOG_URL, versioned.buffer.slice(versioned.byteOffset, versioned.byteOffset + versioned.byteLength))
     const restored = await loadSoundCatalog(async () => { throw new Error('offline') }, cache)
-    expect(restored.entries).toHaveLength(776)
+    expect(restored.entries).toHaveLength(813)
     expect(restored.entries.some((entry) => entry.id === 'dust' || entry.name === 'Dusty loop')).toBe(false)
+
+    const previousCatalogUrl = 'https://huggingface.co/datasets/cueharbor/sound-library/resolve/7a1ea9faef7f7813fff02c0a3b84910438949596/catalogs/soundscout-2026-11-09.json'
+    expect(previousCatalogUrl).not.toBe(SOUND_CATALOG_URL)
+    const stale = new TextEncoder().encode(JSON.stringify({
+      version: 'soundscout-2026-11-09',
+      entries: [{
+        id: 'stale-previous',
+        path: 'soundscout-2026-11-09/loops/stale.wav',
+        name: 'Stale catalog row',
+        type: 'loop',
+        license: 'CC0-1.0',
+        sampleRate: 48000,
+      }],
+    }))
+    await cache.put(previousCatalogUrl, stale.buffer.slice(stale.byteOffset, stale.byteOffset + stale.byteLength))
+    const freshRequests: string[] = []
+    const fresh = await loadSoundCatalog(async (url) => {
+      freshRequests.push(String(url))
+      return new Response(rawText)
+    }, cache)
+    expect(freshRequests).toEqual([SOUND_CATALOG_URL])
+    expect(fresh.entries).toHaveLength(813)
+    expect(fresh.entries.some((entry) => entry.id === 'stale-previous')).toBe(false)
+    const offlineNew = await loadSoundCatalog(async () => { throw new Error('offline') }, cache)
+    expect(offlineNew.entries.some((entry) => entry.id === 'stale-previous')).toBe(false)
+    expect(offlineNew.entries).toHaveLength(813)
   })
 
   it('feeds the same rows to browse, loops, chop, and drum defaults without the wrong kind', () => {
@@ -174,6 +221,22 @@ describe('SoundScout catalog', () => {
     expect(loopsOnly).toContain('Organic nature')
     expect(loopsOnly).toContain('Lentikula')
 
+    const pianoRow = catalog.find((entry) => entry.pack === 'FS-JOSEFPRES-PIANO' && entry.bpm === 120)!
+    const arcadeRow = catalog.find((entry) => entry.pack === 'FS-HOLIZNA-ARCADE' && entry.bpm === 120)!
+    const added = renderToStaticMarkup(createElement(SoundBrowser, {
+      store,
+      phone: true,
+      engine,
+      onClose: () => undefined,
+      lockType: 'loop',
+      initial: { entries: [pianoRow, arcadeRow], status: 'ok' },
+    }))
+    expect(added).toContain(pianoRow.name)
+    expect(added).toContain('120 BPM')
+    expect(added).toContain('Josefpres piano')
+    expect(added).toContain(arcadeRow.name)
+    expect(added).toContain('Holizna arcade')
+
     const all = renderToStaticMarkup(createElement(SoundBrowser, {
       store,
       phone: true,
@@ -197,7 +260,7 @@ describe('SoundScout catalog', () => {
     expect(filterSounds(catalog, { ...open, role: 'drum_one_shot' }).every((entry) => entry.type === 'one-shot' && entry.category === 'kick')).toBe(true)
     expect(filterSounds(catalog, { ...open, role: 'loop' }).every((entry) => entry.type === 'loop')).toBe(true)
     expect(filterSounds(catalog, { ...open, text: 'mbase' }).every((entry) => entry.pack === 'HW-MBASE')).toBe(true)
-    expect(browserSounds(catalog, { ...open, type: 'instrument' })).toHaveLength(776)
+    expect(browserSounds(catalog, { ...open, type: 'instrument' })).toHaveLength(813)
     expect(browserSounds(catalog, { ...open, type: 'instrument' }).some((entry) => /xylophone|upright piano|nylon/i.test(entry.name))).toBe(false)
     const chopList = soundsForRole(catalog, 'chop')
     expect(chopList.length).toBeGreaterThan(40)

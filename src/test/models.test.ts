@@ -264,7 +264,8 @@ describe('hardware models', () => {
     expect(full).toBeLessThan(800)
     expect(eco).toBeLessThan(full * 1.25)
     expect(moduleFor('fet').descriptor.name).toBe('FET')
-    expect(moduleFor('plate').presets.some((preset) => preset.name === 'Vocal')).toBe(true)
+    expect(moduleFor('plate').descriptor.name).toBe('Plate')
+    expect(moduleFor('plate').presets ?? []).toEqual([])
   })
 })
 

@@ -9,6 +9,7 @@ import type { AudioEngine } from '../audio/engine'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { formFactor } from '../ui/form'
+import { GeneratePanel } from '../ui/GeneratePop'
 import { ScalerPanel } from '../ui/ScalerPanel'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -116,9 +117,14 @@ describe('scaler plugin panel', () => {
     expect(sound).toContain('Track')
     const write = panel('write')
     expect(write).toContain('aria-label="Generate"')
-    expect(write).toContain('>Hear<')
-    expect(write).toContain('This track')
+    expect(write).toContain('data-generate="open"')
     expect(write).not.toContain('role="dialog"')
+    const store = new ProjectStore(createEmptyProject())
+    const trackId = store.project.tracks.find((track) => track.type === 'midi')!.id
+    const generated = renderToStaticMarkup(createElement(GeneratePanel, { store, engine, trackId }))
+    expect(generated).toContain('>Hear<')
+    expect(generated).toContain('This track')
+    expect(generated).not.toContain('role="dialog"')
   })
 
   it('highlights the selected chord and wraps the scale chips', () => {

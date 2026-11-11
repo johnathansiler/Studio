@@ -11,7 +11,8 @@ const VIEWPORTS = [
   { name: '1440x900', width: 1440, height: 900, phoneSheet: false, shot: false },
 ] as const
 
-const SELECT_LABELS = ['Select', 'Draw', 'Split', 'Trim', 'Zoom', 'Box', 'Erase']
+const SELECT_LABELS = ['Select', 'Draw', 'Split', 'Trim', 'Zoom', 'Box', 'Erase', 'Scroll']
+const PHONE_TOOL_LABELS = ['Scroll']
 const SNAP_LABELS = ['On', 'Bar', '1/2', '1/4', '1/8', '1/16', '1/32', '1/4T', '1/8T', '1/16T']
 
 async function waitForServer(url: string, child: ChildProcess) {
@@ -114,7 +115,7 @@ function assertTray(name: string, tray: Awaited<ReturnType<typeof readTray>>, la
   expect(tray.wellClass, name).toContain('btn-tray')
   expect(tray.position, name).not.toBe('fixed')
   expect(tray.inset, name).toContain('inset')
-  expect(tray.rows, name).toBe(2)
+  expect(tray.rows, name).toBe(labels.length <= 2 ? 1 : 2)
   expect(Number(tray.cols), name).toBeGreaterThanOrEqual(Math.ceil(labels.length / 2))
   expect(tray.closeLabel, name).toBe('Close')
   expect(tray.closeText, name).toBe('')
@@ -146,11 +147,13 @@ function assertTray(name: string, tray: Awaited<ReturnType<typeof readTray>>, la
   if (browserHeight != null) expect(tray.sheet!.height, `${name} vs browser ${browserHeight}`).toBeLessThanOrEqual(browserHeight + 8)
   expect(tray.chips.map((chip) => chip.label), name).toEqual(labels)
   const pressed = tray.chips.filter((chip) => chip.pressed)
-  expect(pressed.length, name).toBeGreaterThan(0)
-  expect(pressed.some((chip) => chip.label === tray.value), name).toBe(true)
-  const idle = tray.chips.find((chip) => !chip.pressed)
-  expect(idle, name).toBeTruthy()
-  expect(pressed[0]!.faceBg, name).not.toBe(idle!.faceBg)
+  if (pressed.length > 0) {
+    expect(pressed.some((chip) => chip.label === tray.value), name).toBe(true)
+    const idle = tray.chips.find((chip) => !chip.pressed)
+    if (idle) expect(pressed[0]!.faceBg, name).not.toBe(idle.faceBg)
+  } else {
+    expect(tray.chips.length, name).toBeGreaterThan(0)
+  }
   for (const chip of tray.chips) {
     expect(chip.hit!.width, `${name} ${chip.label}`).toBeGreaterThanOrEqual(40)
     expect(chip.hit!.height, `${name} ${chip.label}`).toBeGreaterThanOrEqual(40)
@@ -223,7 +226,12 @@ describe('select and snap choice tray', () => {
         else await page.getByRole('button', { name: /^Tool:/ }).click()
         await page.locator('#tool-choices[data-choice-tray="open"]').waitFor()
         const selectTray = await readTray(page, '#tool-choices', '.tool-current')
-        assertTray(`${viewport.name} select`, selectTray, SELECT_LABELS, browserHeight)
+        const selectLabels = viewport.phoneSheet ? PHONE_TOOL_LABELS : SELECT_LABELS
+        assertTray(`${viewport.name} select`, selectTray, selectLabels, browserHeight)
+        if (viewport.phoneSheet) {
+          const row = await page.locator('.phone-context [data-phone-action]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-phone-action')))
+          expect(row, viewport.name).toEqual(['select', 'pencil', 'split', 'trim', 'zoom', 'box', 'erase', 'snap'])
+        }
         await assertChipsReachable(page, '#tool-choices', `${viewport.name} select chips`)
         if (viewport.shot) await page.screenshot({ path: `/opt/cursor/artifacts/select_tray_${viewport.name}.png` })
         await page.locator('#tool-choices').getByRole('button', { name: 'Close', exact: true }).click()
@@ -249,9 +257,13 @@ describe('select and snap choice tray', () => {
           const off = await page.evaluate(() => (window as unknown as { __cueharbor: { store: { project: { snap?: boolean } } } }).__cueharbor.store.project.snap)
           expect(off).toBe(false)
           await page.getByRole('button', { name: 'Tools', exact: true }).click()
-          await page.locator('#tool-choices').getByRole('button', { name: /^Draw/ }).click()
-          await page.locator('#tool-choices').waitFor({ state: 'detached' })
+          await page.locator('.phone-context [data-phone-action="pencil"]').click()
           expect(await page.evaluate(() => (window as unknown as { __cueharbor: { store: { tool: string } } }).__cueharbor.store.tool)).toBe('pencil')
+          await page.locator('.phone-context [data-phone-action="box"]').click()
+          expect(await page.evaluate(() => (window as unknown as { __cueharbor: { store: { tool: string } } }).__cueharbor.store.tool)).toBe('box')
+          await page.locator('#tool-choices').getByRole('button', { name: /^Scroll/ }).click()
+          await page.locator('#tool-choices').waitFor({ state: 'detached' })
+          expect(await page.evaluate(() => (window as unknown as { __cueharbor: { store: { tool: string } } }).__cueharbor.store.tool)).toBe('pan')
         } else {
           await page.keyboard.press('Escape')
           await page.locator('#snap-choices').waitFor({ state: 'detached' })

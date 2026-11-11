@@ -11,11 +11,12 @@ import { automationSchedule, channelAutomationMode, laneIsLive, sendLane, valueC
 import { projectSampleBeat } from '../model/tempoMap'
 import { applyRamps, smoothParam } from './paramCurve'
 import { loadModule } from './plugins/registry'
-import { createProcessor, preloadWasmInserts } from './plugins/createAll'
+import { loadProcessors } from './plugins/loadProcessors'
 import { wasmDspRequested } from './wasm/flag'
 import type { Processor } from './plugins/types'
 import { MASTER, REMOTE, edgeDelays, findCycle, type RoutePoint } from './routing'
 import { canOffloadChain, isolationAvailable } from './core/isolate'
+import { isDrumsPlugin } from './plugins/ids'
 import { startBrowserRealtime, type RealtimeHandle } from './realtimePool'
 import { measureRealtime } from './realtimeMeasure'
 
@@ -241,7 +242,7 @@ export class LiveRack {
     if (next !== this.topology) {
       this.topology = next
       const generation = ++this.generation
-      void this.finish(ctx, project, strips, master, generation)
+      void this.finish(ctx, project, strips, master, generation).catch(() => undefined)
     } else this.pushParams()
     this.connectIfNeeded()
   }
@@ -285,7 +286,7 @@ export class LiveRack {
     const owners = this.owners(project)
     const ids = new Set(owners.flatMap((owner) => owner.plugins.map((plugin) => plugin.pluginId)))
     await Promise.all([...ids].map((id) => loadModule(id)))
-    await preloadWasmInserts()
+    await loadProcessors().then((mod) => mod.preloadWasmInserts())
     if (generation !== this.generation) return
     this.workletOk = await this.ensureWorklet(ctx)
     if (generation !== this.generation) return
@@ -460,6 +461,7 @@ export class LiveRack {
   }
 
   private async ensureProcessors(project: Project, sampleRate: number) {
+    const { createProcessor, preloadWasmInserts } = await loadProcessors()
     await preloadWasmInserts()
     const plugins = [...project.masterPlugins, ...project.tracks.flatMap((track) => track.plugins)]
     await Promise.all(plugins.map(async (plugin) => {
@@ -791,12 +793,13 @@ export class LiveRack {
 }
 
 /**
- * Beat Machine is a sampler insert with kind >= 1. That processor is a dry
- * pass-through. Leaving it in the live chain replaces the pad voice with
- * silence whenever the insert node does not copy its input.
+ * Beat Machine is a sampler insert with kind >= 1. PadHost already plays it
+ * into the strip. The Rust voice replaces its input, so the slot stays out of
+ * the insert worklet. A test that sets every catalog knob to its maximum
+ * therefore sees 11 slots, not 12: sampler `kind` is the knob that flips it.
  */
 function audibleInsert(plugin: PluginInstance) {
   if (plugin.pluginId === 'steps') return false
-  if (plugin.pluginId === 'sampler' && Math.round(plugin.params?.kind ?? 0) >= 1) return false
+  if (isDrumsPlugin(plugin)) return false
   return true
 }

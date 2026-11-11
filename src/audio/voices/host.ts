@@ -3,7 +3,7 @@
 import { residentDrums } from '../../model/drums'
 import { normalizePadKit } from '../../model/padMachine'
 import type { AudioAsset, Project, Track } from '../../model/types'
-import { preloadWasmInserts } from '../plugins/createAll'
+import { loadProcessors } from '../plugins/loadProcessors'
 import type { StripNodes } from '../strips'
 import { wasmDspRequested } from '../wasm/flag'
 import { PadGraph } from './live'
@@ -26,7 +26,7 @@ export class PadHost {
   private drums = new Map<number, { pitch: number; samples: Float32Array; sampleRate: number }[]>()
 
   sync(ctx: AudioContext, project: Project, strips: Map<string, StripNodes>, assetOf: (id: string) => AudioAsset | undefined) {
-    if (wasmDspRequested()) void preloadWasmInserts()
+    if (wasmDspRequested()) void loadProcessors().then((mod) => mod.preloadWasmInserts())
     const keep = new Set<string>()
     for (const track of project.tracks) {
       if (track.instrument !== 'pads') continue
