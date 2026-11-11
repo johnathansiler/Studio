@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { AudioEngine } from '../audio/engine'
 import { FEATURES } from '../features'
+
+declare const __CUEHARBOR_SESSION__: boolean
 import { createEmptyProject, type AudioClip } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { BeatView } from '../ui/BeatView'
@@ -46,6 +48,7 @@ function shell() {
 describe('session launcher hidden', () => {
   it('renders no Session UI and still loads a project that has session clips', () => {
     expect(FEATURES.session).toBe(false)
+    expect(__CUEHARBOR_SESSION__).toBe(false)
     const html = shell()
     expect(html).toContain('Arrange')
     expect(html).toContain('Mix')

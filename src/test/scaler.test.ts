@@ -8,7 +8,9 @@ import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
 import type { SamplerProgram } from '../audio/multisample/types'
 import { chordsInScale, harmonize } from '../theory'
+import { FEATURES } from '../features'
 import { VIEW_COPY } from '../ui/chrome'
+import { SESSION_VIEW } from '../ui/sessionCopy'
 
 describe('scaler instrument', () => {
   it('inserts Scaler on a track from the instrument slot', () => {
@@ -148,6 +150,9 @@ describe('scaler instrument', () => {
   })
 
   it('is not its own view tab', () => {
-    expect(VIEW_COPY.map((item) => item.id)).toEqual(['arrange', 'mix', 'session', 'collab'])
+    expect(SESSION_VIEW.id).toBe('session')
+    expect(VIEW_COPY.map((item) => item.id)).toEqual(FEATURES.session
+      ? ['arrange', 'mix', 'session', 'collab']
+      : ['arrange', 'mix', 'collab'])
   })
 })

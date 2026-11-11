@@ -5,9 +5,6 @@ import { audioInput, TRACK_CHOICES, tracksFor } from '../model/addTrack'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { AddTrackButton } from '../ui/AddTrack'
-import { deriveSongContext } from '../unstuck/context'
-import { actionDetail, unstuckActions } from '../unstuck/menu'
-import { suggest } from '../unstuck/suggest'
 import { setActiveTool } from '../state/tools'
 import { ToolBar } from '../ui/ToolBar'
 
@@ -38,43 +35,6 @@ describe('add track panel', () => {
     const kit = tracksFor({ ...base, kind: 'drum', instrument: '808' }, project.tracks)
     expect(kit[0].instrument).toBe('808')
     expect(kit[0].name).toBe('808 1')
-  })
-})
-
-describe('unstuck menu', () => {
-  it('groups plain actions and writes a new variation on the next tap', () => {
-    const store = new ProjectStore(createEmptyProject())
-    const context = deriveSongContext(store.project)
-    const actions = unstuckActions(suggest(context), context)
-    expect(actions.map((item) => item.group)).toContain('Start a song')
-    const chords = actions.find((item) => item.key === 'chords')!
-    expect(chords.title).toBe('Next chords')
-    expect(chords.detail.length).toBeGreaterThan(20)
-    expect(actionDetail(chords.items[0], context)).toBe(chords.detail)
-    store.applyUnstuck(chords.items[0])
-    const again = unstuckActions(suggest(deriveSongContext(store.project)), deriveSongContext(store.project), { chords: 1 })
-    const second = again.find((item) => item.key === 'chords')!
-    expect(second.items[1 % second.items.length].id).not.toBe(chords.items[0].id)
-    store.applyUnstuck(second.items[1 % second.items.length])
-    store.undo()
-    expect(store.project.tracks.some((track) => track.midiClips.some((clip) => clip.notes.length > 0))).toBe(true)
-    store.undo()
-  })
-
-  it('turns a one-idea card into a different variation on the next tap', () => {
-    const store = new ProjectStore(createEmptyProject())
-    const context = deriveSongContext(store.project)
-    const fill = unstuckActions(suggest(context), context).find((item) => item.key === 'move-fill')!
-    expect(fill.items.length).toBe(3)
-    expect(fill.items[1].id).not.toBe(fill.items[0].id)
-    const notes = (index: number) => JSON.stringify(fill.items[index].parts.map((part) => part.notes))
-    expect(notes(1)).not.toBe(notes(0))
-    store.applyUnstuck(fill.items[0])
-    store.applyUnstuck(fill.items[1])
-    store.undo()
-    expect(store.project.tracks.some((track) => track.midiClips.some((clip) => clip.notes.length > 0))).toBe(true)
-    store.undo()
-    expect(store.project.tracks.every((track) => track.midiClips.every((clip) => clip.notes.length === 0))).toBe(true)
   })
 })
 

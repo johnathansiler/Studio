@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type DragEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { detectedScales, FIFTHS, modulationChords, moodOf, progressionMood, qualityLabel, type ModChord, type Mood } from '../instruments/scaler/face'
 import { notesFromSlots } from '../instruments/scaler/clips'
@@ -12,7 +12,9 @@ import { projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
 import { allProgressions, allScales, GENRE_INFO, getScale, harmonize, loadScaleCatalog, progressionsFor, realizeProgression, scaleFamilies, songSets, spellScale, VOICINGS, type VoicingId } from '../theory'
 import type { TheoryProgression } from '../theory/types'
-import { GeneratePanel } from './GeneratePop'
+import { GenerateFallback } from './sheetFallback'
+
+const GeneratePanel = lazy(() => import('./GeneratePop').then((mod) => ({ default: mod.GeneratePanel })))
 import { scalerPatch } from '../presets/apply'
 import { commitScalerPreset } from '../presets/project'
 import { ScalerPerformances } from './ScalerPerformances'
@@ -973,7 +975,9 @@ const scaleList = allScales()
 
         <details className="scaler-fold" open hidden={opt !== 'write'}>
           <summary>Write</summary>
-          <GeneratePanel store={store} engine={engine} trackId={trackId} scale={{ root: state.root, scale: state.scale, library: state.library }} />
+          <Suspense fallback={<GenerateFallback />}>
+            <GeneratePanel store={store} engine={engine} trackId={trackId} scale={{ root: state.root, scale: state.scale, library: state.library }} />
+          </Suspense>
         </details>
       </div>
       <div className="scaler-padgrid" role="group" aria-label="Chord pads" data-pad-grid="" data-plugin-page="pads" hidden={view !== 'pads'}>

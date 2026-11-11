@@ -55,9 +55,15 @@ import { sampleLoadFault } from './sampleLoadBus'
 import { renderSamplerSpan } from './plugins/sampler'
 import { renderGraphParallel } from './parallelRender'
 import { loadModule, peekModule } from './plugins/registry'
-import { createProcessor, preloadWasmInserts } from './plugins/createAll'
+import { loadProcessors } from './plugins/loadProcessors'
 import { createLoudness, measureLoudness, type LoudnessState } from './plugins/dsp'
 import type { Processor } from './plugins/types'
+
+function preloadWasmInserts() {
+  return loadProcessors().then((mod) => mod.preloadWasmInserts())
+}
+
+void loadProcessors()
 
 export type EngineStatus = 'stopped' | 'playing' | 'recording' | 'counting-in'
 
@@ -2366,7 +2372,8 @@ export class AudioEngine {
     for (const track of project.tracks) for (const plugin of track.plugins) ids.add(plugin.pluginId)
     for (const plugin of project.masterPlugins) ids.add(plugin.pluginId)
     await Promise.all([...ids].map((id) => loadModule(id)))
-    await preloadWasmInserts()
+    const processors = await loadProcessors()
+    await processors.preloadWasmInserts()
     const scale = tuneBlockScale(project.scale)
     const graph = await renderGraphParallel({
       tracks: renderedTracks,
@@ -2381,7 +2388,7 @@ export class AudioEngine {
       scaleCents: scale.scaleCents,
       automation: project.automation,
       liveRemote: false,
-      create: (pluginId, sampleRate) => createProcessor(pluginId, sampleRate) ?? peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
+      create: (pluginId, sampleRate) => processors.createProcessor(pluginId, sampleRate) ?? peekModule(pluginId)?.create(sampleRate) ?? passthrough(),
     })
     return encodeWav(holdFullScale(graph.master), rate, { dither: fileDither(project, 16, 'tpdf') })
   }
