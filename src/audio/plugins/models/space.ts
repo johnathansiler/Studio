@@ -432,29 +432,29 @@ function readInt(line: Float32Array, at: number) {
 }
 
 export function plateModule(): PluginModule {
-  return { descriptor: descriptor('plate')!, presets: FACTORY.plate, create: createPlate }
+  return { descriptor: descriptor('plate')!, presets: FACTORY.plate ?? [], create: createPlate }
 }
 export function hallModule(): PluginModule {
-  return { descriptor: descriptor('hall')!, presets: FACTORY.hall, create: createHall }
+  return { descriptor: descriptor('hall')!, presets: FACTORY.hall ?? [], create: createHall }
 }
 export function convModule(): PluginModule {
-  return { descriptor: descriptor('conv')!, presets: FACTORY.conv, create: createConv }
+  return { descriptor: descriptor('conv')!, presets: FACTORY.conv ?? [], create: createConv }
 }
 export function echoModule(): PluginModule {
-  return { descriptor: descriptor('echo')!, presets: FACTORY.echo, create: createEcho }
+  return { descriptor: descriptor('echo')!, presets: FACTORY.echo ?? [], create: createEcho }
 }
 export function bbdModule(): PluginModule {
-  return { descriptor: descriptor('bbd')!, presets: FACTORY.bbd, create: createBbd }
+  return { descriptor: descriptor('bbd')!, presets: FACTORY.bbd ?? [], create: createBbd }
 }
 export function digitalModule(): PluginModule {
-  return { descriptor: descriptor('digital')!, presets: FACTORY.digital, create: createDigital }
+  return { descriptor: descriptor('digital')!, presets: FACTORY.digital ?? [], create: createDigital }
 }
 export function ensembleModule(): PluginModule {
-  return { descriptor: descriptor('ensemble')!, presets: FACTORY.ensemble, create: createEnsemble }
+  return { descriptor: descriptor('ensemble')!, presets: FACTORY.ensemble ?? [], create: createEnsemble }
 }
 export function phaseModule(): PluginModule {
-  return { descriptor: descriptor('phase')!, presets: FACTORY.phase, create: createPhase }
+  return { descriptor: descriptor('phase')!, presets: FACTORY.phase ?? [], create: createPhase }
 }
 export function rotorModule(): PluginModule {
-  return { descriptor: descriptor('rotor')!, presets: FACTORY.rotor, create: createRotor }
+  return { descriptor: descriptor('rotor')!, presets: FACTORY.rotor ?? [], create: createRotor }
 }

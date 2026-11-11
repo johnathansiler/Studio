@@ -192,7 +192,7 @@ function envelopeProcessor(
 export function moduleFor(id: 'compressor' | 'gate' | 'limiter' | 'deesser', createFn: (sampleRate: number) => Processor) {
   return {
     descriptor: descriptor(id)!,
-    presets: FACTORY[id],
+    presets: FACTORY[id] ?? [],
     create: createFn,
   }
 }

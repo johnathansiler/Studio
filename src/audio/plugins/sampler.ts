@@ -469,7 +469,7 @@ function fresh(note: number): Voice {
 
 const plugin: PluginModule = {
   descriptor: descriptor('sampler')!,
-  presets: FACTORY.sampler,
+  presets: FACTORY.sampler ?? [],
   create: createSampler,
 }
 

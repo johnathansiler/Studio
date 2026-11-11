@@ -3,8 +3,11 @@
  * The view, menus, and launch transport stay in the tree.
  * Set session to true to bring that UI back.
  */
+/** Build flag `__CUEHARBOR_SESSION__` is this value. Both have to move together. */
+export const sessionOn = false
+
 export const FEATURES: { readonly session: boolean } = {
-  session: false,
+  session: sessionOn,
 }
 
 export function preferArrangeView<T extends string>(view: T): T | 'arrange' {

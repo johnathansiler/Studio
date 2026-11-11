@@ -1,7 +1,7 @@
 import { graphPlugins, renderArrangeInputs, type ArrangePrint } from './arrangeSources'
 import { createPlugin } from './plugins/catalog'
 import { loadModule, peekModule } from './plugins/registry'
-import { createProcessor, preloadWasmInserts } from './plugins/createAll'
+import { loadProcessors } from './plugins/loadProcessors'
 import { type GraphTrack } from './renderGraph'
 import { renderGraphParallel } from './parallelRender'
 import { tuneBlockScale } from './plugins/autoTune'
@@ -224,6 +224,7 @@ export function applyFreeze(project: Project, buffers: Map<string, AudioAsset>, 
 
 async function renderChannels(project: Project, assets: Map<string, AudioAsset>, start: number, length: number, limiter: boolean, stemId: string | null, scheduleEnd = start + length, shouldCancel?: () => void, fetchImpl?: ArrangePrint['fetchImpl']) {
   await ensurePlugins(project)
+  const { createProcessor, preloadWasmInserts } = await loadProcessors()
   await preloadWasmInserts()
   shouldCancel?.()
   const scale = tuneBlockScale(project.scale)

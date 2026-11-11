@@ -107,7 +107,7 @@ export function armBeat(beat: number, beatsPerBar = 4) {
 
 const plugin: PluginModule = {
   descriptor: descriptor('looper')!,
-  presets: FACTORY.looper,
+  presets: FACTORY.looper ?? [],
   create: createLooper,
 }
 

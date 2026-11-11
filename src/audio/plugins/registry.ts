@@ -2,7 +2,7 @@ import { CORE_IDS, targetOf } from './ids'
 import type { PluginModule } from './types'
 
 const loaders: Record<string, () => Promise<{ default: PluginModule }>> = Object.fromEntries(
-  CORE_IDS.map((id) => [id, () => import('./dispatch').then((mod) => ({ default: mod.moduleFor(id) }))]),
+  CORE_IDS.map((id) => [id, () => import('./createAll').then((mod) => ({ default: mod.moduleFor(id) }))]),
 )
 
 const cache = new Map<string, PluginModule>()

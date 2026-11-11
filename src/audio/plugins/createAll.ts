@@ -1,5 +1,7 @@
 import type { Processor } from './types'
 import { createCore } from './dispatch'
+
+export { moduleFor } from './dispatch'
 import { targetOf, type CoreId } from './ids'
 import { wasmDspRequested } from '../wasm/flag'
 import { wasmInsertSupported } from '../wasm/codes'

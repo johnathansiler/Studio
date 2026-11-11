@@ -278,19 +278,19 @@ function intersample(a: number, b: number, hops: number) {
 }
 
 export function fetModule(): PluginModule {
-  return { descriptor: descriptor('fet')!, presets: FACTORY.fet, create: createFet }
+  return { descriptor: descriptor('fet')!, presets: FACTORY.fet ?? [], create: createFet }
 }
 export function optoModule(): PluginModule {
-  return { descriptor: descriptor('opto')!, presets: FACTORY.opto, create: createOpto }
+  return { descriptor: descriptor('opto')!, presets: FACTORY.opto ?? [], create: createOpto }
 }
 export function busModule(): PluginModule {
-  return { descriptor: descriptor('bus')!, presets: FACTORY.bus, create: createBus }
+  return { descriptor: descriptor('bus')!, presets: FACTORY.bus ?? [], create: createBus }
 }
 export function variModule(): PluginModule {
-  return { descriptor: descriptor('vari')!, presets: FACTORY.vari, create: createVari }
+  return { descriptor: descriptor('vari')!, presets: FACTORY.vari ?? [], create: createVari }
 }
 export function peakModule(): PluginModule {
-  return { descriptor: descriptor('peak')!, presets: FACTORY.peak, create: createPeak }
+  return { descriptor: descriptor('peak')!, presets: FACTORY.peak ?? [], create: createPeak }
 }
 
 export function meterOf(processor: Processor): Meter {

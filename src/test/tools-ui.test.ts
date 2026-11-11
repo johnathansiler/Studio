@@ -13,8 +13,6 @@ import {
   PIANO_BAR,
   PIANO_SHEET,
   RECORD_COPY,
-  SESSION_BAR,
-  SESSION_SHEET,
   TRACK_ROW,
   TRACK_SHEET,
   TRANSPORT_COPY,
@@ -22,6 +20,7 @@ import {
   sharesId,
   type Copy,
 } from '../ui/chrome'
+import { SESSION_BAR, SESSION_SHEET } from '../ui/sessionCopy'
 import { noteGrip, trimZone } from '../ui/touchEdit'
 import { MainMenu } from '../ui/MainMenu'
 import { ToolBar } from '../ui/ToolBar'

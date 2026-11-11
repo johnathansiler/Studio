@@ -3,11 +3,13 @@ import { adoptRealtime } from './core/isolate'
 import { prepareChainPool, type ChainSlot } from './plugins/chain'
 import { prepareAccurate } from './automationRender'
 import { createPlugin } from './plugins/catalog'
-import { createProcessor, preloadWasmInserts } from './plugins/createAll'
+import { loadProcessors } from './plugins/loadProcessors'
 import { renderInserts, type InsertPlugin } from './renderChain'
 import type { RealtimeHandle } from './realtimePool'
 
 const INSERTS = ['eq', 'compressor', 'saturator'] as const
+
+let createProcessor: (id: string, sampleRate: number) => ReturnType<Awaited<ReturnType<typeof loadProcessors>>['createProcessor']> = () => null
 
 /**
  * Steady-state cost of one quantum on one thread versus the shared-memory pool.
@@ -18,7 +20,9 @@ export async function measureRealtime(handle: RealtimeHandle, options?: { tracks
   const frames = options?.frames ?? 128
   const sampleRate = options?.sampleRate ?? 48000
   const rounds = options?.rounds ?? 6
-  await preloadWasmInserts()
+  const processors = await loadProcessors()
+  createProcessor = processors.createProcessor
+  await processors.preloadWasmInserts()
   const plugins = INSERTS.map(insertPlugin)
   for (let slot = 0; slot < tracks; slot++) await handle.configure(slot, sampleRate, plugins)
   const inputs = Array.from({ length: tracks }, (_, index) => {

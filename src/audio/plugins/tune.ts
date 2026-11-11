@@ -316,7 +316,7 @@ function applyThroat(output: Float32Array[], throat: number, sampleRate: number,
   }
 }
 
-const plugin: PluginModule = { descriptor: descriptor('tune')!, presets: FACTORY.tune, create: createTune }
+const plugin: PluginModule = { descriptor: descriptor('tune')!, presets: FACTORY.tune ?? [], create: createTune }
 export default plugin
 
 function copyThrough(input: Float32Array[], output: Float32Array[]) {
