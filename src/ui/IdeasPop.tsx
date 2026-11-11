@@ -63,11 +63,16 @@ export function IdeasPop({
       data-ideas="open"
       data-screen-overlay={embedded ? undefined : ''}
       role={embedded ? undefined : 'dialog'}
-      aria-label={embedded ? 'Progressions' : 'Ideas'}
+      aria-label={embedded ? 'Progressions' : 'Chord Ideas'}
     >
       <header>
-        {!embedded && <strong>Ideas</strong>}
-        <input aria-label="Search ideas" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
+        {!embedded && <strong>Chord Ideas</strong>}
+        <input
+          aria-label={embedded ? 'Search ideas' : 'Search chord ideas'}
+          placeholder="Search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
         <button type="button" onClick={() => {
           const pick = randomIdea(filterIdeas('', genre, 'all'))
           if (!pick) return
@@ -76,7 +81,7 @@ export function IdeasPop({
           setQuery('')
           setMood('all')
         }}>Random</button>
-        {!embedded && <button type="button" className="text-btn overlay-close" onClick={onClose} aria-label="Close ideas">Close</button>}
+        {!embedded && <button type="button" className="text-btn overlay-close" onClick={onClose} aria-label="Close chord ideas">Close</button>}
       </header>
       <div className="chip-row" aria-label="Genre">
         <button type="button" className={genre === 'all' ? 'on' : ''} onClick={() => setGenre('all')}>All</button>

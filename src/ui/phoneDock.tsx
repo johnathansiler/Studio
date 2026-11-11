@@ -342,7 +342,7 @@ export function PhoneDock({
           <>
             <Hit action="setup" label="Setup" title="Automation and markers." pressed={utility === 'setup'} onClick={() => toggleArrangeSheet('setup')} />
             <Hit action="snap" className="snap-inline" label={snapLabel} title="Snap grid." pressed={snapOn} onClick={openSnap}>{snapLabel}</Hit>
-            <Hit action="unstuck" label="Unstuck" title="Pick a part, or write a full song." onClick={onUnstuck} />
+            <Hit action="unstuck" label="Ideas" title="Pick a part, or write a full song." onClick={onUnstuck} />
             <Hit action="metronome" label="Metronome" title="Metronome while you play and record." pressed={store.project.metronomeEnabled} onClick={() => store.toggle('metronomeEnabled')}>
               <MetronomeIcon />
             </Hit>
