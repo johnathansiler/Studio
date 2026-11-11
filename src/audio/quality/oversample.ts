@@ -4,8 +4,8 @@
  */
 
 const FACTOR = 4
-const PHASE_TAPS = 12
-const DOWN_TAPS = 48
+const PHASE_TAPS = 8
+const DOWN_TAPS = 32
 
 function sinc(x: number) {
   if (Math.abs(x) < 1e-8) return 1
@@ -92,24 +92,20 @@ const PHASES = (() => {
 /** Just under the original Nyquist. 0.9/factor sat above it and folded the new harmonics. */
 const DOWN = lowpass(DOWN_TAPS, 0.4 / FACTOR, 1)
 
-function clampUnit(value: number) {
-  return Math.max(-20, Math.min(20, value))
-}
-
-/** First-order ADAA of tanh. The antiderivative of tanh is log(cosh). */
-function adaaTanh(state: ShaperState, u: number) {
-  const limited = clampUnit(u)
-  const next = Math.log(Math.cosh(limited))
-  const delta = limited - state.prevU
-  const y = Math.abs(delta) < 1e-6 ? Math.tanh(limited) : (next - state.prevF) / delta
-  state.prevU = limited
-  state.prevF = next
-  return y
+/**
+ * Odd rational stand-in for tanh. Max abs error vs tanh is 0.024 on the real line
+ * (at about 1.57), and it saturates at ±1. No log or cosh.
+ */
+export function padeTanh(u: number) {
+  const a = u < 0 ? -u : u
+  const y = (a * (27 + a * a)) / (27 + 9 * a * a)
+  const clamped = y > 1 ? 1 : y
+  return u < 0 ? -clamped : clamped
 }
 
 export function oversampleShape(state: ShaperState, sample: number, drive: number, shape: number) {
   state.ring[state.write] = sample
-  const norm = Math.tanh(shape) || 1
+  const norm = padeTanh(shape) || 1
   for (let phase = 0; phase < FACTOR; phase++) {
     const taps = PHASES[phase]
     let acc = 0
@@ -118,7 +114,7 @@ export function oversampleShape(state: ShaperState, sample: number, drive: numbe
       acc += state.ring[index] * taps[tap]
     }
     const curved = (acc + drive * acc * acc * 0.2) * shape
-    state.high[state.highWrite] = adaaTanh(state, curved) / norm
+    state.high[state.highWrite] = padeTanh(curved) / norm
     state.highWrite = (state.highWrite + 1) % DOWN_TAPS
   }
   state.write = (state.write + 1) % PHASE_TAPS

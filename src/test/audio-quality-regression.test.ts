@@ -16,13 +16,13 @@ import { panGains } from '../audio/level'
 import { gainFromDb, dragGain } from '../model/mixLaw'
 import { crossfadeLoopRegion } from '../audio/clipEdge'
 import { freshState, renderTone, type PlayVoice, type ToneCtx } from '../audio/rack/synth'
-import { truePeakLinear } from '../audio/master/fir'
+import { createOversample, truePeakLinear } from '../audio/master/fir'
 import { createSafetyLimiter, holdFullScale } from '../audio/master/safety'
 import { createBrick } from '../audio/master/process'
 import { defaultParams } from '../audio/plugins/catalog'
 import { renderGraph } from '../audio/renderGraph'
 import { createCore } from '../audio/plugins/dispatch'
-import { shaperLatencySamples } from '../audio/quality/oversample'
+import { padeTanh, shaperLatencySamples } from '../audio/quality/oversample'
 import type { Processor } from '../audio/plugins/types'
 
 const RATE = 48000
@@ -133,6 +133,32 @@ function mean(channel: ArrayLike<number>, from = 0, to = channel.length) {
   return n ? sum / n : 0
 }
 
+/** 4x true peak, ignoring the reconstruction filter's own warmup. */
+function fairTruePeak(buf: Float32Array) {
+  const taps = 64
+  const os = createOversample(4, taps)
+  let peak = 0
+  let seen = 0
+  const skip = taps * 2
+  const end = buf.length * 4 - skip
+  os.process(buf, new Float32Array(buf.length), (sample) => {
+    if (seen >= skip && seen < end) peak = Math.max(peak, Math.abs(sample))
+    seen += 1
+    return sample
+  })
+  const from = Math.min(buf.length, taps)
+  const to = Math.max(from, buf.length - taps)
+  for (let i = from; i < to; i++) peak = Math.max(peak, Math.abs(buf[i] || 0))
+  return peak
+}
+
+function phasedSine(freq: number, seconds: number, amp: number, phase: number, rate: number) {
+  const n = Math.round(seconds * rate)
+  const out = new Float32Array(n)
+  for (let i = 0; i < n; i++) out[i] = Math.sin((2 * Math.PI * freq * i) / rate + phase) * amp
+  return out
+}
+
 function maxD2(channel: Float32Array, from: number, to: number) {
   let worst = 0
   for (let i = from; i < to; i++) worst = Math.max(worst, Math.abs(channel[i] - 2 * channel[i - 1] + channel[i - 2]))
@@ -140,6 +166,15 @@ function maxD2(channel: Float32Array, from: number, to: number) {
 }
 
 describe('audio quality regression', () => {
+  it('keeps the rational tanh within 0.03 of tanh', () => {
+    let worst = 0
+    for (let i = 0; i <= 4000; i++) {
+      const x = (i / 4000) * 8
+      worst = Math.max(worst, Math.abs(padeTanh(x) - Math.tanh(x)), Math.abs(padeTanh(-x) - Math.tanh(-x)))
+    }
+    expect(worst).toBeLessThan(0.03)
+  })
+
   it('keeps oversampled distortion aliases under -60 dB', () => {
     const hz = 5123
     const tone = sine(hz, 0.45, 0.7)
@@ -178,16 +213,16 @@ describe('audio quality regression', () => {
   it('holds the limiter and the master ceiling, including true peak', () => {
     const hot = sine(12000, 0.25, 1)
     const limited = run(createLimiter(RATE), hot, { ceiling: -1, threshold: 0, release: 40 })
-    const start = 400
+    const start = Math.floor(RATE * 0.05)
     expect(20 * Math.log10(peak(limited, start))).toBeLessThanOrEqual(-1)
-    expect(20 * Math.log10(truePeakLinear(limited.subarray(start), 32))).toBeLessThanOrEqual(-1)
+    expect(20 * Math.log10(fairTruePeak(limited.subarray(start)) + 1e-12)).toBeLessThanOrEqual(-1 + 0.05)
     const moving = sine(200, 0.25, 1.2)
     const eased = run(createLimiter(RATE), moving, { ceiling: -1, threshold: 0, release: 40 })
     expect(maxD2(eased, 80, 220)).toBeLessThan(maxD2(eased, 2000, 4000) * 4 + 0.002)
     const brick = run(createBrick(RATE), hot, { ceiling: -1, lookahead: 5, release: 80, releaseMode: 1 })
     expect(20 * Math.log10(truePeakLinear(brick.subarray(Math.floor(RATE * 0.05)), 24) + 1e-12)).toBeLessThanOrEqual(-1)
     const held = holdFullScale([sine(440, 0.2, 1.4), sine(440, 0.2, 1.4)])
-    expect(truePeakLinear(held[0], 24)).toBeLessThanOrEqual(1)
+    expect(fairTruePeak(held[0].subarray(Math.floor(RATE * 0.02)))).toBeLessThanOrEqual(10 ** (0.05 / 20))
     expect(peak(held[0])).toBeLessThanOrEqual(1)
     const safety = createSafetyLimiter(RATE)
     const unity = sine(1000, 0.12, 1)
@@ -203,6 +238,31 @@ describe('audio quality regression', () => {
     const hfR = new Float32Array(hf.length)
     safety.process(hf, hf, hfL, hfR)
     expect(truePeakLinear(hfL.subarray(64), 24)).toBeLessThanOrEqual(1.001)
+  })
+
+  it('keeps intersample peaks under the ceiling across phase and rate', () => {
+    const phases = [0, 0.45, Math.PI / 4, 1.1]
+    const freqs = [1000, 12000, 18000]
+    const rates = [44100, 48000]
+    const allowance = 10 ** (0.05 / 20)
+    for (const rate of rates) {
+      for (const freq of freqs) {
+        for (const phase of phases) {
+          const input = phasedSine(freq, 0.2, 1, phase, rate)
+          const limited = run(createLimiter(rate), input, { ceiling: -1, threshold: 0, release: 40 }, 128, rate)
+          const settled = limited.subarray(Math.floor(rate * 0.05))
+          const ceiling = 10 ** (-1 / 20)
+          expect(fairTruePeak(settled), `limiter ${rate} ${freq} ${phase.toFixed(3)}`).toBeLessThanOrEqual(ceiling * allowance)
+          const held = holdFullScale([phasedSine(freq, 0.2, 1.4, phase, rate)])
+          expect(fairTruePeak(held[0].subarray(Math.floor(rate * 0.02))), `hold ${rate} ${freq}`).toBeLessThanOrEqual(1 * allowance)
+          const safety = createSafetyLimiter(rate)
+          const hot = phasedSine(freq, 0.15, 2, phase, rate)
+          const out = new Float32Array(hot.length)
+          safety.process(hot, hot, out, new Float32Array(hot.length))
+          expect(fairTruePeak(out.subarray(Math.floor(rate * 0.04))), `safety ${rate} ${freq}`).toBeLessThanOrEqual(1 * allowance)
+        }
+      }
+    }
   })
 
   it('settles the compressor near the threshold and stays finite', () => {

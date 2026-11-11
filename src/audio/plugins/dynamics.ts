@@ -1,4 +1,5 @@
 import { SampleGlide } from '../core/smooth'
+import { createTruePeakState, readTruePeak, resetTruePeak, TRUE_PEAK_SLACK } from '../quality/truePeak'
 import { descriptor, FACTORY } from './catalog'
 import { clamp, dbToGain, designBiquad, gainToDb, sanitize, tickBiquad, type Biquad } from './dsp'
 import type { Processor } from './types'
@@ -69,6 +70,8 @@ export function createGate(_sampleRate: number): Processor {
 export function createLimiter(sampleRate: number): Processor {
   const look = 64
   const delay: Float32Array[] = [new Float32Array(look), new Float32Array(look)]
+  const peaks = new Float32Array(look)
+  const detect = [createTruePeakState(), createTruePeakState()]
   let index = 0
   let gain = 1
   return {
@@ -76,14 +79,16 @@ export function createLimiter(sampleRate: number): Processor {
     reset() {
       delay[0].fill(0)
       delay[1].fill(0)
+      peaks.fill(0)
+      resetTruePeak(detect[0])
+      resetTruePeak(detect[1])
       index = 0
       gain = 1
     },
     process(input, output, params, ctx) {
       const ceiling = dbToGain(params.ceiling ?? -0.1)
       const threshold = dbToGain(params.threshold ?? 0)
-      // 0.2 dB under the ceiling covers the intersample peak a sample-peak detector misses.
-      const limit = Math.min(ceiling, threshold) * 10 ** (-0.2 / 20)
+      const limit = Math.min(ceiling, threshold)
       const release = coeff(params.release || 40, ctx.sampleRate)
       // Reach the new gain inside the 64-sample lookahead instead of stepping in one sample.
       const attack = 1 - Math.exp(-1 / 12)
@@ -96,9 +101,10 @@ export function createLimiter(sampleRate: number): Processor {
         const outR = delay[1][slot]
         delay[0][slot] = left
         delay[1][slot] = right
-        let peak = Math.max(Math.abs(left), Math.abs(right))
-        for (let k = 0; k < look; k++) peak = Math.max(peak, Math.abs(delay[0][k]), Math.abs(delay[1][k]))
-        const needed = peak > limit ? Math.min(1, limit / Math.max(peak, 1e-8)) : 1
+        peaks[slot] = Math.max(readTruePeak(detect[0], left), readTruePeak(detect[1], right))
+        let peak = 0
+        for (let k = 0; k < look; k++) if (peaks[k] > peak) peak = peaks[k]
+        const needed = peak > limit * TRUE_PEAK_SLACK ? Math.min(1, limit / Math.max(peak, 1e-8)) : 1
         gain += (needed - gain) * (needed < gain ? attack : release)
         index += 1
         if (output[0]) output[0][i] = sanitize(outL * gain)

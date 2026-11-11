@@ -1010,7 +1010,7 @@ export function latencyOf(pluginId: string, params: Record<string, number>, samp
   }
   if (id === 'mod' && kind === 5 && (params.mix ?? 0) > 0.001) return tuneLatency(sampleRate)
   // The graph reads this before process(). The soft shaper's own latencySamples
-  // stays 0 until the first block, which left a driven saturator 12 samples late.
+  // stays 0 until the first block, which left a driven saturator late.
   if (id === 'saturator' && kind === 0 && (params.drive ?? 0) > 0.0001) return shaperLatencySamples()
   return effectLatency(id, { ...params, kind }, sampleRate)
 }

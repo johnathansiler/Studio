@@ -1,18 +1,87 @@
 /**
  * Speaker and cue safety limiter.
- * Keep LOOK, ATTACK, RELEASE_SEC, and the gain law in sync with src/audio/master/safety.ts.
+ * Keep LOOK, ATTACK, RELEASE_SEC, CEILING, the gain law, and the 4x peak
+ * detector in sync with src/audio/master/safety.ts and src/audio/quality/truePeak.ts.
  * AudioWorklet rejects module loading, so this file stays self-contained.
  */
 const LOOK = 32
 const ATTACK = 8
 const RELEASE_SEC = 0.05
 const CEILING = 1
+const SLACK = 1.0005
+const FACTOR = 4
+const PHASE_TAPS = 16
+const BETA = 5
+
+function bessel0(x) {
+  let sum = 1
+  let term = 1
+  const half = x * 0.5
+  for (let k = 1; k <= 12; k++) {
+    term *= (half * half) / (k * k)
+    sum += term
+  }
+  return sum
+}
+
+function designPhases() {
+  const length = FACTOR * PHASE_TAPS
+  const cutoff = 0.5 / FACTOR
+  const mid = (length - 1) / 2
+  const beta0 = bessel0(BETA)
+  const kernel = new Float64Array(length)
+  let sum = 0
+  for (let i = 0; i < length; i++) {
+    const x = i - mid
+    const arg = 2 * cutoff * x
+    const sinc = Math.abs(arg) < 1e-8 ? 1 : Math.sin(Math.PI * arg) / (Math.PI * arg)
+    const amount = mid === 0 ? 0 : x / mid
+    const inside = 1 - amount * amount
+    const win = inside > 0 ? bessel0(BETA * Math.sqrt(inside)) / beta0 : 0
+    kernel[i] = 2 * cutoff * sinc * win
+    sum += kernel[i]
+  }
+  const scale = FACTOR / (sum || 1)
+  for (let i = 0; i < length; i++) kernel[i] *= scale
+  const phases = []
+  for (let phase = 0; phase < FACTOR; phase++) {
+    const taps = new Float64Array(PHASE_TAPS)
+    for (let tap = 0; tap < PHASE_TAPS; tap++) taps[tap] = kernel[tap * FACTOR + phase] || 0
+    phases.push(taps)
+  }
+  return phases
+}
+
+const PHASES = designPhases()
+
+function makeDetect() {
+  return { hist: new Float64Array(PHASE_TAPS), write: 0 }
+}
+
+function readPeak(state, sample) {
+  const hist = state.hist
+  const at = state.write
+  hist[at] = sample
+  let best = sample < 0 ? -sample : sample
+  for (let phase = 0; phase < FACTOR; phase++) {
+    const branch = PHASES[phase]
+    let acc = 0
+    for (let tap = 0; tap < PHASE_TAPS; tap++) acc += hist[(at - tap + PHASE_TAPS) % PHASE_TAPS] * branch[tap]
+    const abs = acc < 0 ? -acc : acc
+    if (abs > best) best = abs
+  }
+  state.write = (at + 1) % PHASE_TAPS
+  return best
+}
 
 class SafetyProcessor extends AudioWorkletProcessor {
   constructor() {
     super()
     this.delayL = new Float32Array(LOOK)
     this.delayR = new Float32Array(LOOK)
+    this.peaks = new Float32Array(LOOK)
+    this.detectL = makeDetect()
+    this.detectR = makeDetect()
     this.index = 0
     this.gain = 1
     this.target = 1
@@ -35,16 +104,10 @@ class SafetyProcessor extends AudioWorkletProcessor {
       const delayedR = this.delayR[slot]
       this.delayL[slot] = left
       this.delayR[slot] = right
+      this.peaks[slot] = Math.max(readPeak(this.detectL, left), readPeak(this.detectR, right))
       let peak = 0
-      for (let k = 0; k < LOOK; k++) {
-        const l = this.delayL[k]
-        const r = this.delayR[k]
-        const absL = l < 0 ? -l : l
-        const absR = r < 0 ? -r : r
-        if (absL > peak) peak = absL
-        if (absR > peak) peak = absR
-      }
-      const needed = peak > CEILING ? CEILING / peak : 1
+      for (let k = 0; k < LOOK; k++) if (this.peaks[k] > peak) peak = this.peaks[k]
+      const needed = peak > CEILING * SLACK ? CEILING / peak : 1
       if (needed < this.target - 1e-8) {
         this.target = needed
         this.slope = (this.gain - this.target) / ATTACK

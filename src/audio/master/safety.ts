@@ -6,6 +6,7 @@
  */
 
 import { truePeakLinear } from './fir'
+import { createTruePeakState, readTruePeak, resetTruePeak, TRUE_PEAK_SLACK } from '../quality/truePeak'
 
 /** Samples of lookahead. 32 samples is 0.67 ms at 48 kHz. Keep in sync with the worklet. */
 export const SAFETY_LOOK = 32
@@ -18,31 +19,21 @@ export const SAFETY_CEILING = 1
 
 export function holdFullScale(channels: Float32Array[]) {
   let peak = 0
-  let frames = 0
   for (const channel of channels) {
-    frames = Math.max(frames, channel.length)
     for (let i = 0; i < channel.length; i++) {
       const sample = channel[i] || 0
       const abs = sample < 0 ? -sample : sample
       if (abs > peak) peak = abs
     }
+    if (channel.length >= 64) peak = Math.max(peak, truePeakLinear(channel, 64))
   }
-  if (!(peak > SAFETY_CEILING) || !Number.isFinite(peak)) return channels
+  if (!(peak > SAFETY_CEILING * TRUE_PEAK_SLACK) || !Number.isFinite(peak)) return channels
   const gain = SAFETY_CEILING / peak
-  const scaled = channels.map((channel) => {
+  return channels.map((channel) => {
     const out = new Float32Array(channel.length)
     for (let i = 0; i < channel.length; i++) out[i] = (channel[i] || 0) * gain
     return out
   })
-  if (frames < 512) return scaled
-  let truePeak = 0
-  for (const channel of scaled) truePeak = Math.max(truePeak, truePeakLinear(channel, 24))
-  if (!(truePeak > 1) || !Number.isFinite(truePeak)) return scaled
-  const trim = 1 / truePeak
-  for (const channel of scaled) {
-    for (let i = 0; i < channel.length; i++) channel[i] *= trim
-  }
-  return scaled
 }
 
 /**
@@ -55,6 +46,9 @@ export function createSafetyLimiter(sampleRate = 48000) {
   const look = SAFETY_LOOK
   const delayL = new Float32Array(look)
   const delayR = new Float32Array(look)
+  const peaks = new Float32Array(look)
+  const detectL = createTruePeakState()
+  const detectR = createTruePeakState()
   let index = 0
   let gain = 1
   let target = 1
@@ -65,6 +59,9 @@ export function createSafetyLimiter(sampleRate = 48000) {
     reset() {
       delayL.fill(0)
       delayR.fill(0)
+      peaks.fill(0)
+      resetTruePeak(detectL)
+      resetTruePeak(detectR)
       index = 0
       gain = 1
       target = 1
@@ -80,16 +77,10 @@ export function createSafetyLimiter(sampleRate = 48000) {
         const delayedR = delayR[slot]
         delayL[slot] = inL
         delayR[slot] = inR
+        peaks[slot] = Math.max(readTruePeak(detectL, inL), readTruePeak(detectR, inR))
         let peak = 0
-        for (let k = 0; k < look; k++) {
-          const l = delayL[k]
-          const r = delayR[k]
-          const absL = l < 0 ? -l : l
-          const absR = r < 0 ? -r : r
-          if (absL > peak) peak = absL
-          if (absR > peak) peak = absR
-        }
-        const needed = peak > SAFETY_CEILING ? SAFETY_CEILING / peak : 1
+        for (let k = 0; k < look; k++) if (peaks[k] > peak) peak = peaks[k]
+        const needed = peak > SAFETY_CEILING * TRUE_PEAK_SLACK ? SAFETY_CEILING / peak : 1
         if (needed < target - 1e-8) {
           target = needed
           slope = (gain - target) / SAFETY_ATTACK

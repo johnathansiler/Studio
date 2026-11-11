@@ -3,8 +3,8 @@
 
 const ANALOG_TAPS: usize = 16;
 const ANALOG_DOWN: usize = 63;
-const SOFT_TAPS: usize = 12;
-const SOFT_DOWN: usize = 48;
+const SOFT_TAPS: usize = 8;
+const SOFT_DOWN: usize = 32;
 const SOFT_FACTOR: usize = 4;
 
 fn analog_kernel(length: usize, cutoff: f64, gain: f64, out: &mut [f64]) {
@@ -174,8 +174,6 @@ pub struct SoftShaper {
     write: usize,
     high: [f64; SOFT_DOWN],
     high_write: usize,
-    prev_u: f64,
-    prev_f: f64,
     phases: [f64; SOFT_FACTOR * SOFT_TAPS],
     down: [f64; SOFT_DOWN],
     ready: bool,
@@ -188,8 +186,6 @@ impl SoftShaper {
             write: 0,
             high: [0.0; SOFT_DOWN],
             high_write: 0,
-            prev_u: 0.0,
-            prev_f: 0.0,
             phases: [0.0; SOFT_FACTOR * SOFT_TAPS],
             down: [0.0; SOFT_DOWN],
             ready: false,
@@ -219,13 +215,11 @@ impl SoftShaper {
         self.high = [0.0; SOFT_DOWN];
         self.write = 0;
         self.high_write = 0;
-        self.prev_u = 0.0;
-        self.prev_f = 0.0;
     }
 
     pub fn shape(&mut self, sample: f64, drive: f64, shape: f64) -> f64 {
         self.ring[self.write] = sample;
-        let norm = shape.tanh();
+        let norm = pade_tanh(shape);
         let norm = if norm == 0.0 { 1.0 } else { norm };
         for phase in 0..SOFT_FACTOR {
             let taps = &self.phases[phase * SOFT_TAPS..phase * SOFT_TAPS + SOFT_TAPS];
@@ -235,7 +229,7 @@ impl SoftShaper {
                 acc += self.ring[index] * taps[tap];
             }
             let curved = (acc + drive * acc * acc * 0.2) * shape;
-            self.high[self.high_write] = adaa_tanh(curved, &mut self.prev_u, &mut self.prev_f) / norm;
+            self.high[self.high_write] = pade_tanh(curved) / norm;
             self.high_write = (self.high_write + 1) % SOFT_DOWN;
         }
         self.write = (self.write + 1) % SOFT_TAPS;
@@ -254,18 +248,12 @@ impl Default for SoftShaper {
     }
 }
 
-fn adaa_tanh(u: f64, prev_u: &mut f64, prev_f: &mut f64) -> f64 {
-    let limited = u.clamp(-20.0, 20.0);
-    let next = limited.cosh().ln();
-    let delta = limited - *prev_u;
-    let y = if delta.abs() < 1e-6 {
-        limited.tanh()
-    } else {
-        (next - *prev_f) / delta
-    };
-    *prev_u = limited;
-    *prev_f = next;
-    y
+/// Same rational as `padeTanh` in `quality/oversample.ts`. Max abs error vs tanh is 0.024.
+fn pade_tanh(u: f64) -> f64 {
+    let a = u.abs();
+    let y = (a * (27.0 + a * a)) / (27.0 + 9.0 * a * a);
+    let clamped = if y > 1.0 { 1.0 } else { y };
+    if u < 0.0 { -clamped } else { clamped }
 }
 
 pub fn shaper_latency_samples() -> u32 {
