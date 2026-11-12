@@ -193,6 +193,7 @@ describe('my library on a phone', () => {
       await page.getByRole('button', { name: 'Favorites', exact: true }).click()
       await page.keyboard.press('Escape')
       await page.locator('[data-library-key="Drums/139_Trap_Click_C.wav"]').waitFor()
+      await page.screenshot({ path: '/opt/cursor/artifacts/browse_favorites_star_phone_390.png' })
       await page.getByRole('button', { name: 'Unfavorite 139 Trap Click C' }).click()
       await page.getByRole('button', { name: 'Filter', exact: true }).click()
       await page.getByRole('button', { name: 'Favorites', exact: true }).click()
