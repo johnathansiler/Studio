@@ -1,7 +1,10 @@
+import { isAacFile, readLameDelay, trimAacPriming, trimCodecPadding } from '../audio/codecTrim'
 import { normalizePeak } from '../audio/level'
+import { bpmFromName, fitLoopBeats } from '../audio/loopSeam'
 import { resampleSinc } from '../audio/quality/resample'
 import { defaultStretch, detectBpm, renderTempoFollow, samplesAtBeat, tempoMapOf, timelineSamples } from '../audio/stretch/engine'
 import type { StretchMode } from '../model/types'
+import { quartersPerBar } from '../model/time'
 import { uid, type AudioAsset, type AudioClip, type Project } from '../model/types'
 import { decodeWavPCM } from '../model/wav'
 import type { SoundEntry } from './types'
@@ -48,6 +51,8 @@ function beatAtSample(sample: number, project: Project) {
 export function loopBpm(entry: SoundEntry, channel?: Float32Array, sampleRate?: number, conform = false) {
   if (entry.type !== 'loop') return null
   if (entry.bpm && entry.bpm > 0) return entry.bpm
+  const named = bpmFromName(`${entry.name} ${entry.path}`)
+  if (named) return named
   if (conform && channel && sampleRate && sampleRate > 0) return detectBpm(channel, sampleRate)
   return null
 }
@@ -87,7 +92,17 @@ export function placeSound(options: {
     source: 'import',
     stretch,
   }
-  if (stretch.followTempo) clip.durationSamples = timelineSamples(clip, options.project)
+  if (stretch.followTempo && stretch.sourceBpm) {
+    const fit = fitLoopBeats({
+      samples: lead.length,
+      sampleRate: rate,
+      bpm: stretch.sourceBpm,
+      name: `${options.entry.name} ${options.entry.path}`,
+      beatsPerBar: quartersPerBar(options.project.timeSignature),
+    })
+    if (fit) stretch.sourceBpm = fit.sourceBpm
+    clip.durationSamples = timelineSamples(clip, options.project)
+  }
   return {
     asset: { id: clip.bufferId, name: options.entry.name, sampleRate: rate, channels },
     clip,
@@ -123,15 +138,32 @@ export function trackIdFromDrop(target: { closest?: (selector: string) => { getA
   return target?.closest?.('[data-track]')?.getAttribute('data-track') ?? null
 }
 
+function isWav(bytes: ArrayBuffer) {
+  if (bytes.byteLength < 12) return false
+  const head = new Uint8Array(bytes, 0, 12)
+  return head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46
+    && head[8] === 0x57 && head[9] === 0x41 && head[10] === 0x56 && head[11] === 0x45
+}
+
 export async function decodeSoundBytes(bytes: ArrayBuffer): Promise<{ sampleRate: number; channels: Float32Array[] }> {
+  if (isWav(bytes)) {
+    try {
+      const wav = decodeWavPCM(bytes)
+      return { sampleRate: wav.sampleRate, channels: wav.channels }
+    } catch {
+      /* a WAV the reader does not know can still play through the browser decoder */
+    }
+  }
   if (typeof AudioContext !== 'undefined') {
     const ctx = new AudioContext()
     try {
       const decoded = await ctx.decodeAudioData(bytes.slice(0))
-      return {
-        sampleRate: decoded.sampleRate,
-        channels: Array.from({ length: decoded.numberOfChannels }, (_, index) => decoded.getChannelData(index).slice()),
-      }
+      const raw = new Uint8Array(bytes)
+      let channels = Array.from({ length: decoded.numberOfChannels }, (_, index) => decoded.getChannelData(index).slice())
+      const lame = readLameDelay(raw)
+      if (lame) channels = trimCodecPadding(channels, lame.delay, lame.padding).map((channel) => Float32Array.from(channel) as unknown as Float32Array<ArrayBuffer>)
+      else if (isAacFile(raw)) channels = trimAacPriming(channels, decoded.sampleRate).map((channel) => Float32Array.from(channel) as unknown as Float32Array<ArrayBuffer>)
+      return { sampleRate: decoded.sampleRate, channels }
     } catch {
       /* fall through to the wav reader */
     } finally {

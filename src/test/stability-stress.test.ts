@@ -22,6 +22,15 @@ interface RecordedStart {
   offset: number
   duration: number | null
   kind: string
+  loop: boolean
+  loopStart: number
+  loopEnd: number
+}
+
+interface RecordedStop {
+  when: number | null
+  now: number
+  kind: string
 }
 
 interface FakeParam {
@@ -64,11 +73,15 @@ class FakeNode {
       offset: offset ?? 0,
       duration: duration ?? null,
       kind: this.kind,
+      loop: this.loop,
+      loopStart: this.loopStart,
+      loopEnd: this.loopEnd,
     }
     this.starts.push(hit)
     this.ctx.starts.push(hit)
   }
-  stop() {
+  stop(when?: number) {
+    this.ctx.stops.push({ when: typeof when === 'number' ? when : null, now: this.ctx.currentTime, kind: this.kind })
     if (this.ended) return
     this.ended = true
     this.onended?.()
@@ -98,6 +111,7 @@ class FakeContext {
   currentTime = 5
   state: AudioContextState = 'running'
   starts: RecordedStart[] = []
+  stops: RecordedStop[] = []
   linearRamps: { value: number; time: number }[] = []
   created = { osc: 0, gain: 0, filter: 0, buffer: 0 }
   destination: FakeNode
@@ -577,6 +591,33 @@ describe('transport and graph stress', () => {
     expect(continued).toBe(true)
     engine.stop()
     expect(engine.stability().playing).toBe(false)
+
+    const loopSamples = new Float32Array(project.loopEndSample)
+    for (let i = 0; i < loopSamples.length; i++) loopSamples[i] = Math.sin((2 * Math.PI * 12 * i) / loopSamples.length) * 0.5
+    vocal.clips.splice(0, vocal.clips.length, {
+      id: 'fill',
+      name: 'Fill',
+      bufferId: 'fill',
+      startSample: 0,
+      offsetSamples: 0,
+      durationSamples: loopSamples.length,
+      fadeInSamples: 0,
+      fadeOutSamples: 0,
+      gain: 1,
+      source: 'import',
+    })
+    engine.sync(project, (id) => (id === 'fill' ? { id, name: 'fill', sampleRate: 48000, channels: [loopSamples] } : undefined))
+    await engine.play(0)
+    const looping = (engine.ctx as unknown as FakeContext).starts.filter((start) => start.kind === 'buffer-source' && start.duration == null)
+    expect(looping.length).toBe(1)
+    for (let step = 0; step < 40; step++) {
+      ;(engine.ctx as unknown as FakeContext).currentTime += 0.05
+      engine.wakeTransport()
+    }
+    const still = (engine.ctx as unknown as FakeContext).starts.filter((start) => start.kind === 'buffer-source' && start.duration == null)
+    expect(still.length).toBe(1)
+    engine.stop()
+
     await engine.play(0)
     expect(engine.positionSamples).toBe(0)
     expect(engine.stability().playing).toBe(true)
@@ -635,6 +676,186 @@ describe('transport and graph stress', () => {
     await new Promise((resolve) => setTimeout(resolve, 40))
     expect(engine.stability().playing).toBe(true)
     expect(engine.positionSamples).toBeGreaterThan(1000)
+    engine.stop()
+  })
+})
+
+function loopTone(length: number) {
+  const samples = new Float32Array(length)
+  for (let i = 0; i < length; i++) samples[i] = Math.sin((2 * Math.PI * 8 * i) / length) * 0.5
+  return samples
+}
+
+function fillingLoop(seconds = 2, clipSeconds = seconds) {
+  const project = createEmptyProject(48000)
+  project.metronomeEnabled = false
+  project.tempo = 120
+  project.loopEnabled = true
+  project.loopStartSample = 0
+  project.loopEndSample = project.sampleRate * seconds
+  const samples = loopTone(project.sampleRate * clipSeconds)
+  const vocal = project.tracks.find((track) => track.type === 'audio')!
+  vocal.clips.push({
+    id: 'fill',
+    name: 'Fill',
+    bufferId: 'fill',
+    startSample: 0,
+    offsetSamples: 0,
+    durationSamples: samples.length,
+    fadeInSamples: 0,
+    fadeOutSamples: 0,
+    gain: 1,
+    source: 'import',
+  })
+  const asset: AudioAsset = { id: 'fill', name: 'fill', sampleRate: 48000, channels: [samples] }
+  return { project, vocal, asset }
+}
+
+function infiniteSources(ctx: FakeContext) {
+  return ctx.starts.filter((start) => start.kind === 'buffer-source' && start.duration == null)
+}
+
+describe('seamless arrange and session loops', () => {
+  it('keeps one native loop through the cycle, the metronome, seek, gain, and tempo', async () => {
+    installHost()
+    const engine = new AudioEngine()
+    const { project, vocal, asset } = fillingLoop()
+    project.metronomeEnabled = true
+    const assets = (id: string) => (id === 'fill' ? asset : undefined)
+    engine.sync(project, assets)
+    await engine.play(0)
+    const ctx = engine.ctx as unknown as FakeContext
+    const first = infiniteSources(ctx)
+    expect(first).toHaveLength(1)
+    expect(first[0]?.loop).toBe(true)
+    expect(first[0]?.loopEnd).toBe(0)
+    expect(first[0]?.loopStart).toBe(0)
+    const origin = (engine as unknown as { playOriginCtx: number }).playOriginCtx
+    for (let step = 0; step < 30; step++) {
+      ctx.currentTime += 0.2
+      engine.wakeTransport()
+    }
+    expect(infiniteSources(ctx)).toHaveLength(1)
+    const wrapClick = ctx.starts.find((start) => start.kind === 'osc' && Math.abs(start.when - (origin + 2)) < 0.002)
+    expect(wrapClick).toBeTruthy()
+    const beat = ctx.starts.filter((start) => start.kind === 'osc').map((start) => start.when)
+    for (let index = 1; index < beat.length; index++) {
+      expect(beat[index]! - beat[index - 1]!).toBeCloseTo(0.5, 3)
+    }
+
+    vocal.clips[0]!.gain = 0.35
+    engine.sync(project, assets)
+    engine.wakeTransport()
+    expect(infiniteSources(ctx)).toHaveLength(1)
+
+    await engine.play(project.sampleRate)
+    const restarted = infiniteSources(ctx)
+    expect(restarted).toHaveLength(2)
+    expect(restarted[1]?.offset).toBeCloseTo(1, 3)
+    expect(ctx.stops.some((stop) => stop.kind === 'buffer-source')).toBe(true)
+    expect(engine.positionSamples).toBe(project.sampleRate)
+
+    project.tempo = 140
+    engine.sync(project, assets)
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    expect(infiniteSources(ctx).length).toBe(3)
+    expect(ctx.stops.filter((stop) => stop.kind === 'buffer-source').length).toBeGreaterThanOrEqual(2)
+    engine.stop()
+    expect(engine.stability().playing).toBe(false)
+    const afterStop = infiniteSources(ctx).length
+    ctx.currentTime += 0.5
+    engine.wakeTransport()
+    expect(infiniteSources(ctx)).toHaveLength(afterStop)
+  })
+
+  it('does not keep the baked cycle after the clip is removed, the loop grows past it, or recording goes linear', async () => {
+    installHost()
+    const engine = new AudioEngine()
+    const { project, vocal, asset } = fillingLoop(2, 4)
+    const assets = (id: string) => (id === 'fill' ? asset : undefined)
+    engine.sync(project, assets)
+    await engine.play(0)
+    const ctx = engine.ctx as unknown as FakeContext
+    expect(infiniteSources(ctx)).toHaveLength(1)
+
+    project.loopEndSample = project.sampleRate * 3
+    engine.sync(project, assets)
+    await flush()
+    const extended = infiniteSources(ctx)
+    expect(extended).toHaveLength(2)
+    const handoff = ctx.stops.filter((stop) => stop.kind === 'buffer-source').at(-1)
+    expect(Math.abs((handoff?.when ?? 0) - (extended[1]?.when ?? -1))).toBeLessThan(0.04)
+
+    project.loopEndSample = project.sampleRate * 5
+    engine.sync(project, assets)
+    await flush()
+    expect(infiniteSources(ctx)).toHaveLength(2)
+    expect(ctx.starts.some((start) => start.kind === 'buffer-source' && start.duration != null)).toBe(true)
+
+    vocal.clips.splice(0, vocal.clips.length)
+    engine.sync(project, assets)
+    engine.wakeTransport()
+    expect(infiniteSources(ctx)).toHaveLength(2)
+    engine.stop()
+
+    const again = fillingLoop()
+    engine.sync(again.project, (id) => (id === 'fill' ? again.asset : undefined))
+    await engine.play(0)
+    const beforeRecord = infiniteSources(ctx).length
+    await engine.beginRecord({ fromSample: 0, inputs: [], countIn: false })
+    ctx.currentTime += 0.05
+    engine.wakeTransport()
+    expect(infiniteSources(ctx)).toHaveLength(beforeRecord)
+    expect(ctx.starts.some((start) => start.kind === 'buffer-source' && (start.duration ?? 0) > 0)).toBe(true)
+    expect(engine.status).toBe('recording')
+    engine.stop()
+  })
+
+  it('loops a session clip once and queues MIDI passes on the sample grid', async () => {
+    installHost()
+    const engine = new AudioEngine()
+    const { project, vocal, asset } = fillingLoop()
+    engine.sync(project, (id) => (id === 'fill' ? asset : undefined))
+    engine.setLaunches({ [vocal.id]: 'fill' })
+    await engine.play(0, 'session')
+    const ctx = engine.ctx as unknown as FakeContext
+    expect(infiniteSources(ctx)).toHaveLength(1)
+    expect(infiniteSources(ctx)[0]?.loopEnd).toBe(0)
+    for (let step = 0; step < 20; step++) {
+      ctx.currentTime += 0.2
+      engine.wakeTransport()
+    }
+    expect(infiniteSources(ctx)).toHaveLength(1)
+    engine.stop()
+
+    const song = createEmptyProject(48000)
+    song.metronomeEnabled = false
+    song.tempo = 120
+    const midi = song.tracks.find((track) => track.type === 'midi')!
+    midi.midiClips.push({
+      id: 'phrase',
+      name: 'Phrase',
+      startBeat: 0,
+      durationBeats: 1,
+      notes: [{ id: 'n', pitch: 67, startBeat: 0, durationBeats: 0.25, velocity: 0.8 }],
+    })
+    engine.sync(song, () => undefined)
+    engine.setLaunches({ [midi.id]: 'phrase' })
+    await engine.play(0, 'session')
+    const notes = () => (engine.ctx as unknown as FakeContext).starts.filter((start) => start.kind === 'osc')
+    expect(notes().length).toBeGreaterThanOrEqual(2)
+    const firstGap = notes()[1]!.when - notes()[0]!.when
+    expect(firstGap).toBeCloseTo(0.5, 4)
+    for (let step = 0; step < 16; step++) {
+      ;(engine.ctx as unknown as FakeContext).currentTime += 0.25
+      engine.wakeTransport()
+    }
+    const when = notes().map((start) => start.when)
+    expect(new Set(when.map((time) => time.toFixed(4))).size).toBe(when.length)
+    for (let index = 1; index < when.length; index++) {
+      expect(when[index]! - when[index - 1]!).toBeCloseTo(0.5, 4)
+    }
+    expect(when.length).toBeGreaterThanOrEqual(8)
     engine.stop()
   })
 })
