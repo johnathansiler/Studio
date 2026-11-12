@@ -13,12 +13,14 @@ import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { withIsolation } from './headers.ts'
+import { createInstrumentSource } from './instruments.ts'
 import { createLibraryApi, libraryClientIp, presignR2Get } from './library.ts'
 
 const usage = createUsageLedger()
 const libraryApi = createLibraryApi({
   env: () => process.env,
   sign: (key, env) => presignR2Get(env, key),
+  instruments: createInstrumentSource({ env: () => process.env }),
 })
 
 const PORT = Number(process.env.PORT || 8787)
@@ -278,7 +280,7 @@ function leave(client: Client, announce = false) {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`)
   if (url.pathname === '/api/health') return json(res, { ok: true, service: 'cueharbor', sessions: sessions.size })
-  if (url.pathname === '/api/library' || url.pathname === '/api/library/sign') return handleLibrary(req, res, url.pathname)
+  if (url.pathname === '/api/library' || url.pathname === '/api/library/sign' || url.pathname.startsWith('/api/library/instruments')) return handleLibrary(req, res, url)
   if (url.pathname === '/api/usage' && req.method === 'GET') return json(res, await usage.view())
   if (url.pathname === '/api/usage' && req.method === 'POST') return reportUsage(req, res)
   if (url.pathname === '/api/sfu/session' && req.method === 'POST') return openSfuSession(req, res)
@@ -423,7 +425,7 @@ async function handleDiag(req: IncomingMessage, res: ServerResponse, code: strin
   return json(res, { ok: true, kept: session.diag.length })
 }
 
-async function handleLibrary(req: IncomingMessage, res: ServerResponse, pathname: string) {
+async function handleLibrary(req: IncomingMessage, res: ServerResponse, url: URL) {
   const header = req.headers['x-library-key']
   const accessKey = (Array.isArray(header) ? header[0] : header) || ''
   let body: unknown = null
@@ -439,7 +441,8 @@ async function handleLibrary(req: IncomingMessage, res: ServerResponse, pathname
   try {
     const result = await libraryApi.handle({
       method: req.method || 'GET',
-      pathname,
+      pathname: url.pathname,
+      search: url.search,
       ip,
       accessKey,
       body,

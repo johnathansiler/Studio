@@ -4,7 +4,7 @@
  * and stream samples later. Layered patches should wrap this, not replace it.
  */
 
-export type SampleLicense = 'CC0-1.0' | 'Unlicense' | 'public-domain'
+export type SampleLicense = 'CC0-1.0' | 'Unlicense' | 'public-domain' | 'private'
 export type ZoneTrigger = 'attack' | 'release'
 export type LoopMode = 'none' | 'one-shot' | 'loop' | 'sustain'
 export type SampleFormat = 'wav' | 'pcm-s16le' | 'pcm-s24le' | 'float32'
