@@ -21,3 +21,15 @@ jobs:
         run: cargo build -p cueharbor-dsp --release --target wasm32-unknown-unknown --manifest-path core/Cargo.toml
       - name: Check the committed WASM matches the Rust source
         run: node scripts/check-dsp-hash.mjs
+
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          cache: npm
+      - run: npm ci
+      - name: Production server boots
+        run: npx vitest run src/test/server-boot.test.ts
