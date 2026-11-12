@@ -48,7 +48,7 @@ async function openInstruments(page: Page) {
 describe('production instrument playback', () => {
   it('loads Yamaha and a bass, fetches samples, and reaches the speakers', async () => {
     await ensureDist()
-    const port = 4288
+    const port = 4700 + Math.floor(Math.random() * 200)
     const url = `http://127.0.0.1:${port}/`
     const child = spawn('npx', ['vite', 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
       cwd: process.cwd(),

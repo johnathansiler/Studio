@@ -643,10 +643,17 @@
   touch-action: none;
 }
 
-/* Sampler presets are a short tray. The X stays in the tray, clear of the level slider,
-   and the list stops above the Undo row and the phone tabs. */
-.shell.phone:not(.land) [data-pads='plugin'][data-screen-overlay] {
-  bottom: var(--edit-bar, 108px) !important;
+/* The phone dock paints at 400. The Beat Machine lives in the workspace, whose
+   overflow traps that z-index, so the workspace itself has to sit above the dock
+   while the face is open. A menu opened from the face is portaled to the body
+   and paints above both. View tabs stay at 480. */
+.shell.phone:not(.land):has([data-pads='plugin'][data-screen-overlay]) .workspace {
+  position: relative;
+  z-index: 410;
+}
+
+body:has(.shell.phone:not(.land) [data-pads='plugin']) .anchored-menu {
+  z-index: 440 !important;
 }
 
 body:has([data-pads='plugin']) .anchored-menu.preset-menu:not([data-screen-overlay]) {
