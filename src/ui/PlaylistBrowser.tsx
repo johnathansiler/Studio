@@ -273,6 +273,7 @@ export function PlaylistBrowser({
       {phone && (
         <header className="browser-sheet-title sheet-head">
           <strong data-browser-title={tab}>{SECTION_TITLE[tab]}</strong>
+          <SheetClose className="browser-close" onClick={onClose} />
         </header>
       )}
       <div className="browser-tabs btn-tray">
@@ -322,7 +323,7 @@ export function PlaylistBrowser({
             </>
           )}
         </div>
-        <SheetClose className="browser-close" onClick={onClose} />
+        {!phone && <SheetClose className="browser-close" onClick={onClose} />}
       </div>
       {sheet ? <div className="bottom-sheet-body">{catalog}</div> : catalog}
     </aside>

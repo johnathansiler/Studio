@@ -1962,7 +1962,7 @@ async function importDropped(files: FileList) {
   useScreenOverlay(() => store.closeClipSheet(), store.clipSheet)
 
   const phoneArrange = phone && surface === 'studio' && !collabShown && phonePane !== 'room' && editorView === 'arrange' && panel !== 'piano'
-  const transportShown = (surface === 'studio' || surface === 'artist' || session.state.status === 'live') && !collabShown
+  const transportShown = (surface === 'studio' || surface === 'artist' || session.state.status === 'live') && (!collabShown || (phone && !land))
   const phonePlace: PhonePlace = collabShown
     ? 'collab'
     : panel === 'pads' || panel === 'steps' || panel === 'scaler' || panel === 'piano' || panel === 'rack'
@@ -2044,6 +2044,7 @@ async function importDropped(files: FileList) {
         if (event.dataTransfer.files.length) void importDropped(event.dataTransfer.files)
       }}
     >
+      <div className={phone && !land ? 'phone-top' : 'chrome-stack'}>
       <header className="topbar">
         {!phone && menuButton}
         {!phone && (
@@ -2129,7 +2130,7 @@ async function importDropped(files: FileList) {
           />
         </AnchoredMenu>
       </header>
-      {(surface === 'studio' || surface === 'artist' || session.state.status === 'live') && !collabShown && (
+      {transportShown && (
         <TransportBar
           store={store}
           engine={engine}
@@ -2152,6 +2153,7 @@ async function importDropped(files: FileList) {
           assetTransfers={session.state.assetTransfers}
         />
       )}
+      </div>
       {phone && (
         <>
           <div id="phone-sheet-host" className="phone-sheet-host">

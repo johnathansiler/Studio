@@ -388,8 +388,26 @@ describe('screen overlays leave the view tabs free', () => {
 
         for (const opener of openers) {
           await opener.open()
-          if (opener.name === 'song' || opener.name === 'tools') {
-            const sheet = page.locator(opener.name === 'song' ? '#arrange-setup[data-bottom-sheet="open"]' : '#tool-choices[data-bottom-sheet="open"]')
+          if (opener.name === 'tools') {
+            const row = page.locator('#tool-choices[data-tool-row="open"]')
+            await row.waitFor()
+            expect(await row.getAttribute('data-screen-overlay')).toBeNull()
+            const box = await row.boundingBox()
+            const bar = await page.locator('.tool-slot').boundingBox()
+            expect(box).toBeTruthy()
+            expect(box!.height, `${layout.name} tools`).toBeGreaterThan(40)
+            expect(box!.height, `${layout.name} tools`).toBeLessThan(72)
+            if (bar) {
+              expect(box!.y).toBeGreaterThanOrEqual(bar.y - 1)
+              expect(box!.y + box!.height).toBeLessThanOrEqual(bar.y + bar.height + 1)
+            }
+            await page.getByRole('button', { name: 'Tools', exact: true }).click()
+            await row.waitFor({ state: 'detached' })
+            await settleClosed(page)
+            continue
+          }
+          if (opener.name === 'song') {
+            const sheet = page.locator('#arrange-setup[data-bottom-sheet="open"]')
             await sheet.waitFor()
             expect(await sheet.getAttribute('data-screen-overlay')).toBeNull()
             const box = await sheet.boundingBox()

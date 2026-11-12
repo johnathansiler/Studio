@@ -3,27 +3,17 @@ import { createPortal } from 'react-dom'
 import { countInBarsOf, countInCaption } from '../model/time'
 import { SNAP_DIVISIONS, normalizeSnapDivision } from '../model/snapGrid'
 import type { ProjectStore } from '../state/store'
-import { PHONE_TOOL_ROW, TOOL_INFO, activeTool, subscribeTools, type ArrangeTool } from '../state/tools'
+import { TOOL_INFO, activeTool, subscribeTools, type ArrangeTool } from '../state/tools'
 import { currentArrangeSheet, subscribeArrangeSheet, toggleArrangeSheet } from './arrangePanel'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
-import type { BrowserTab } from './PlaylistBrowser'
-import { SnapChoices, ToolChoices } from './UtilitySheets'
+import { SnapChoices } from './UtilitySheets'
 import { useScreenOverlay } from './screenOverlay'
 import {
-  BROWSER_TAB_EVENT,
   phoneContextKind,
   type PhonePlace,
 } from './phoneContext'
 import { phoneFocus, subscribePhoneFocus } from './phoneFocus'
 import './phoneDock.css'
-
-const BROWSER_TABS: { id: BrowserTab; label: string }[] = [
-  { id: 'sounds', label: 'Sounds' },
-  { id: 'instruments', label: 'Instruments' },
-  { id: 'loops', label: 'Loops' },
-  { id: 'library', label: 'My Library' },
-  { id: 'patterns', label: 'Patterns' },
-]
 
 function MetronomeIcon() {
   return (
@@ -31,6 +21,38 @@ function MetronomeIcon() {
       <path d="M4.2 14.2h7.6L8.4 2.4 4.2 14.2z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
       <path d="M8 12.6V6.2L11.2 8.4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
+  )
+}
+
+const PHONE_TOOLS: ArrangeTool[] = ['select', 'pencil', 'split', 'trim', 'zoom', 'box', 'erase', 'pan']
+
+function toolFace(id: ArrangeTool) {
+  if (id === 'pan') return { label: 'Scroll', hint: 'Scroll the timeline or the piano roll. This is not the mixer pan.' }
+  const info = TOOL_INFO[id]
+  return { label: info.label, hint: info.hint }
+}
+
+/** Eight tools in the same tray metrics as the edit row, so each one sits on a dock button. */
+function PhoneToolRow({ store, onClose }: { store: ProjectStore; onClose: () => void }) {
+  const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
+  return (
+    <div id="tool-choices" className="phone-tool-row btn-tray" role="toolbar" aria-label="Tools" data-tool-row="open">
+      {PHONE_TOOLS.map((id) => {
+        const face = toolFace(id)
+        return (
+          <Hit
+            key={id}
+            action={id}
+            label={`${face.label}. ${face.hint}`}
+            title={face.hint}
+            pressed={value === id}
+            onClick={() => { store.setTool(id); onClose() }}
+          >
+            {face.label}
+          </Hit>
+        )
+      })}
+    </div>
   )
 }
 
@@ -123,7 +145,7 @@ export function PhoneDock({
   menuRef,
   onMenu,
   onBrowse,
-  onMenuAction,
+  onMenuAction: _onMenuAction,
   onUndo,
   onRedo,
   canUndo,
@@ -146,7 +168,6 @@ export function PhoneDock({
 }) {
   const utility = useSyncExternalStore(subscribeArrangeSheet, currentArrangeSheet, () => null)
   const focus = useSyncExternalStore(subscribePhoneFocus, phoneFocus, () => 'none' as const)
-  const tool = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const [offstage, setOffstage] = useState<'tools' | 'snap' | null>(null)
   const [transportMore, setTransportMore] = useState(false)
   const [host, setHost] = useState<HTMLElement | null>(null)
@@ -167,6 +188,7 @@ export function PhoneDock({
   })
   const trackId = clip?.trackId || store.selectedTrackId
   const track = trackId ? store.track(trackId) : null
+  void _onMenuAction
 
   useEffect(() => {
     const node = document.getElementById('phone-sheet-host')
@@ -203,64 +225,38 @@ export function PhoneDock({
     setOffstage((value) => (value === 'snap' ? null : 'snap'))
   }
 
-  function pickTool(id: ArrangeTool) {
-    store.setTool(id)
-  }
-
   function splitClip() {
     if (!clip || clip.kind === 'pattern') return
     store.splitAt(clip.trackId, clip.clipId, playheadSample())
   }
 
-  const sheet = offstage === 'tools'
-    ? <ToolChoices store={store} onClose={() => setOffstage(null)} omit={PHONE_TOOL_ROW} />
-    : offstage === 'snap'
-      ? <SnapChoices store={store} onClose={() => setOffstage(null)} />
-      : transportMore && place === 'mix'
-        ? <TransportMoreSheet store={store} onClose={() => setTransportMore(false)} />
-        : null
+  function closeTools() {
+    if (arrangeLive) {
+      if (utility === 'tools') toggleArrangeSheet('tools')
+    } else setOffstage(null)
+  }
+
+  useEffect(() => {
+    if (!toolsOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeTools()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [toolsOpen, arrangeLive, utility])
+
+  const sheet = offstage === 'snap'
+    ? <SnapChoices store={store} onClose={() => setOffstage(null)} />
+    : transportMore && place === 'mix'
+      ? <TransportMoreSheet store={store} onClose={() => setTransportMore(false)} />
+      : null
 
   return (
     <>
       {host && sheet ? createPortal(sheet, host) : null}
       {kind !== 'arrange' ? <div id="transport-extras" className="transport-extras-slot parked" /> : null}
+      {toolsOpen ? <PhoneToolRow store={store} onClose={closeTools} /> : null}
       <div className={`phone-context${kind === 'arrange' ? ' btn-tray' : ''}`} role="toolbar" aria-label="Actions" data-phone-context={kind}>
-        {kind === 'menu' && (
-          <>
-            <Hit action="new" label="New" title="Start a fresh session." onClick={() => onMenuAction('new')} />
-            <Hit action="open" label="Open" title="Open a project saved in this browser." onClick={() => onMenuAction('open')} />
-            <Hit action="save" label="Save" title="Keep this project in the browser." onClick={() => onMenuAction('save')} />
-            <Hit action="export" label="Export" title="Bounce or download the mix." onClick={() => onMenuAction('export')} />
-          </>
-        )}
-        {kind === 'browse' && BROWSER_TABS.map((item) => (
-          <Hit
-            key={item.id}
-            action={item.id}
-            label={item.label}
-            title={`Show ${item.label.toLowerCase()} in the browser.`}
-            onClick={() => document.dispatchEvent(new CustomEvent(BROWSER_TAB_EVENT, { detail: item.id }))}
-          />
-        ))}
-        {kind === 'tools' && (
-          <>
-            {PHONE_TOOL_ROW.map((id) => (
-              <Hit
-                key={id}
-                action={id}
-                label={`${TOOL_INFO[id].label}. ${TOOL_INFO[id].hint}`}
-                title={TOOL_INFO[id].hint}
-                pressed={tool === id}
-                onClick={() => pickTool(id)}
-              >
-                {TOOL_INFO[id].label}
-              </Hit>
-            ))}
-            <Hit action="snap" className="snap-inline" label={snapLabel} title="Snap grid." pressed={snapOn} onClick={openSnap}>
-              {snapLabel}
-            </Hit>
-          </>
-        )}
         {kind === 'clip' && clip && (
           <>
             {clip.kind !== 'pattern' && (

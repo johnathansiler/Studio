@@ -128,6 +128,13 @@ async function measure(page: Page) {
         return { label: (node.getAttribute('aria-label') || node.textContent || '').replace(/\s+/g, ' ').trim(), left: rect.left }
       }),
       tabsTop: document.querySelector('.views')?.getBoundingClientRect().top ?? 99,
+      tabsBottom: document.querySelector('.views')?.getBoundingClientRect().bottom ?? 0,
+      transportTop: document.querySelector('.transport')?.getBoundingClientRect().top ?? 0,
+      transportBottom: document.querySelector('.transport')?.getBoundingClientRect().bottom ?? 0,
+      rulerTop: ruler ? ruler.getBoundingClientRect().top : 0,
+      viewfinder: !!document.querySelector('[data-viewfinder]'),
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
       pluginsInBar: barButtons.some((button) => button.label.startsWith('Plugins')),
       transportClick: [...document.querySelectorAll('.transport .t-word')].some((node) => (node.textContent || '').trim() === 'Click'),
       metroButtons: document.querySelectorAll('[data-phone-action="metronome"], #transport-click').length,
@@ -172,6 +179,10 @@ describe('phone arrange layout', () => {
           }
           if (viewport.kind === 'portrait') {
             expect(layout.tabsTop, viewport.name).toBeLessThanOrEqual(8)
+            expect(layout.transportTop, viewport.name).toBeGreaterThanOrEqual(layout.tabsBottom - 1)
+            expect(layout.viewfinder, viewport.name).toBe(false)
+            expect(layout.scrollWidth, viewport.name).toBeLessThanOrEqual(layout.clientWidth + 1)
+            expect(layout.rulerTop, viewport.name).toBeLessThanOrEqual(layout.transportBottom + 8)
             expect(layout.ruler, viewport.name).toBeGreaterThanOrEqual(20)
             expect(layout.ruler, viewport.name).toBeLessThanOrEqual(24)
             expect(layout.strip, viewport.name).toBeGreaterThanOrEqual(28)
@@ -398,14 +409,15 @@ describe('phone arrange layout', () => {
           expect(await page.getByRole('button', { name: /^Undo/ }).count()).toBeGreaterThan(0)
           if (shot.name === '390x844') {
             const menuActions = await page.locator('#shell-menu [data-menu-action]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-menu-action')))
-            for (const action of ['new', 'open', 'save', 'export', 'box', 'erase', 'pan', 'signature']) {
+            for (const action of ['new', 'open', 'save', 'export', 'shortcuts']) {
+              expect(menuActions, action).toContain(action)
+            }
+            for (const action of ['box', 'erase', 'pan', 'signature', 'ideas']) {
               expect(menuActions, action).not.toContain(action)
             }
-            expect(menuActions).toContain('shortcuts')
-            expect(menuActions).not.toContain('ideas')
             const menuRow = await page.locator('.phone-context [data-phone-action]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-phone-action')))
-            expect(menuRow).toEqual(['new', 'open', 'save', 'export'])
-            await page.locator('[data-phone-action="save"]').click()
+            expect(menuRow).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome'])
+            await page.locator('#shell-menu [data-menu-action="save"]').click()
             await page.locator('.toast').filter({ hasText: /Saved|space|could not/i }).waitFor()
           }
           await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-menu.png` })
@@ -440,10 +452,10 @@ describe('phone arrange layout', () => {
           const selectSheet = page.locator('#tool-choices')
           await selectSheet.waitFor()
           if (shot.name === '390x844') {
-            const chips = await selectSheet.locator('.choice-chip-face').allTextContents()
-            expect(chips.map((chip) => chip.trim())).toEqual(['Scroll'])
+            const chips = await selectSheet.locator('.phone-face').allTextContents()
+            expect(chips.map((chip) => chip.trim())).toEqual(['Select', 'Draw', 'Split', 'Trim', 'Zoom', 'Box', 'Erase', 'Scroll'])
             const toolRow = await page.locator('.phone-context [data-phone-action]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-phone-action')))
-            expect(toolRow).toEqual(['select', 'pencil', 'split', 'trim', 'zoom', 'box', 'erase', 'snap'])
+            expect(toolRow).toEqual(['undo', 'redo', 'snap', 'setup', 'metronome'])
             const toolFit = await page.locator('.phone-context [data-phone-action]').evaluateAll((nodes) => nodes.map((node) => {
               const rect = node.getBoundingClientRect()
               return {
@@ -457,21 +469,24 @@ describe('phone arrange layout', () => {
               expect(button.height, action).toBeGreaterThanOrEqual(40)
               expect(button.clipped, action).toBe(false)
             }
-            await page.locator('[data-phone-action="pencil"]').click()
+            await selectSheet.getByRole('button', { name: /^Draw/ }).click()
             expect(await page.evaluate(() => (window as unknown as { __cueharbor: { store: { tool: string } } }).__cueharbor.store.tool)).toBe('pencil')
-            await page.locator('[data-phone-action="erase"]').click()
+            await page.locator('.tool-slot').getByRole('button', { name: 'Tools', exact: true }).click()
+            await page.locator('#tool-choices').getByRole('button', { name: /^Erase/ }).click()
             expect(await page.evaluate(() => (window as unknown as { __cueharbor: { store: { tool: string } } }).__cueharbor.store.tool)).toBe('erase')
+            await page.locator('.tool-slot').getByRole('button', { name: 'Tools', exact: true }).click()
+            await selectSheet.waitFor()
           }
-          const selectClose = selectSheet.getByRole('button', { name: 'Close', exact: true })
-          const selectBox = await selectClose.boundingBox()
-          expect(selectBox!.width, shot.name).toBeGreaterThanOrEqual(40)
-          expect(await selectClose.innerText()).not.toMatch(/Close/)
+          const selectBox = await selectSheet.boundingBox()
+          expect(selectBox!.height, shot.name).toBeGreaterThanOrEqual(40)
+          expect(selectBox!.height, shot.name).toBeLessThan(72)
           const selectClear = await sheetClearance('#tool-choices', 'Tools')
           expect(selectClear!.coversTabs, shot.name).toBe(false)
           expect(selectClear!.coversTransport, shot.name).toBe(false)
           expect(selectClear!.coversButton, shot.name).toBe(false)
           await page.screenshot({ path: `/opt/cursor/artifacts/phone-${shot.name}-select.png` })
-          await selectClose.click()
+          await page.locator('.tool-slot').getByRole('button', { name: 'Tools', exact: true }).click()
+          await selectSheet.waitFor({ state: 'detached' })
 
           await page.locator('.tool-slot').getByRole('button', { name: /^Snap/ }).click()
           const snapSheet = page.locator('#snap-choices')
@@ -516,7 +531,11 @@ describe('phone arrange layout', () => {
           expect(mix.topMenu, shot.name).toBe(false)
           expect(mix.topName, shot.name).toBe(false)
           expect(mix.topUndo, shot.name).toBe(false)
-          expect(mix.tabsTop, shot.name).toBeLessThanOrEqual(8)
+          if (shot.name === '844x390') expect(mix.tabsTop, shot.name).toBeLessThanOrEqual(8)
+          else {
+            expect(mix.tabsTop, shot.name).toBeGreaterThanOrEqual(40)
+            expect(mix.tabsTop, shot.name).toBeLessThanOrEqual(70)
+          }
           expect(mix.labels.some((label) => label.startsWith('Menu')), shot.name).toBe(true)
           expect(mix.labels.some((label) => label === 'Browse'), shot.name).toBe(true)
           expect(mix.labels.some((label) => label === 'Tools'), shot.name).toBe(true)
@@ -530,7 +549,9 @@ describe('phone arrange layout', () => {
           await page.locator('#shell-menu').waitFor()
           if (shot.name === '390x844') {
             const mixActions = await page.locator('#shell-menu [data-menu-action]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-menu-action')))
-            expect(mixActions).toContain('ideas')
+            expect(mixActions).toContain('new')
+            expect(mixActions).not.toContain('ideas')
+            expect(await page.locator('.transport .ideas-bulb').count()).toBeGreaterThan(0)
           }
           const mixMenu = await sheetClearance('.anchored-menu.phone-sheet', 'Menu')
           expect(mixMenu!.coversTabs, shot.name).toBe(false)

@@ -89,7 +89,9 @@ async function spansArrange(page: Page) {
 async function closeToolSheet(page: Page) {
   const sheet = page.locator('#tool-choices')
   if (await sheet.count()) {
-    await sheet.getByRole('button', { name: 'Close', exact: true }).click()
+    const close = sheet.getByRole('button', { name: 'Close', exact: true })
+    if (await close.count()) await close.click()
+    else await page.getByRole('button', { name: 'Tools', exact: true }).click()
     await sheet.waitFor({ state: 'detached' })
   }
 }

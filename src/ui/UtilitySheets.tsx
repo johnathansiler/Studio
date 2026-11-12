@@ -1,7 +1,7 @@
 import { useSyncExternalStore, type RefObject } from 'react'
 import { SNAP_DIVISIONS, normalizeSnapDivision, type SnapDivisionId } from '../model/snapGrid'
 import type { ProjectStore } from '../state/store'
-import { PHONE_TOOL_ROW, TOOL_INFO, activeTool, keyForTool, subscribeTools, type ArrangeTool } from '../state/tools'
+import { TOOL_INFO, activeTool, keyForTool, subscribeTools, type ArrangeTool } from '../state/tools'
 import type { AudioEngine } from '../audio/engine'
 import type { SessionClient } from '../remote/session'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
@@ -62,7 +62,9 @@ export function UtilitySheets({
     )
   }
   if (utility === 'tools') {
-    return <ToolChoices store={store} onClose={onClose} omit={phone ? PHONE_TOOL_ROW : []} />
+    /* Phone draws the eight tools in the dock, lined up on the edit row. */
+    if (phone) return null
+    return <ToolChoices store={store} onClose={onClose} />
   }
   if (utility === 'snap') {
     return <SnapChoices store={store} onClose={onClose} />
@@ -70,14 +72,22 @@ export function UtilitySheets({
   return null
 }
 
-export function ToolChoices({ store, onClose, omit = [] }: { store: ProjectStore; onClose: () => void; omit?: readonly ArrangeTool[] }) {
+export function ToolChoices({
+  store,
+  onClose,
+  omit = [],
+}: {
+  store: ProjectStore
+  onClose: () => void
+  omit?: readonly ArrangeTool[]
+}) {
   const value = useSyncExternalStore(subscribeTools, activeTool, activeTool)
   const listed = toolTrayIds(omit)
   if (listed.length === 0) return null
   const title = listed.includes('select') ? 'Select' : 'Tools'
-  const current = toolFace(value)
+  const current = listed.includes(value) ? toolFace(value) : null
   return (
-    <ChoiceTray id="tool-choices" label={title} title={title} value={listed.includes(value) ? current.label : (TOOL_INFO[value]?.label ?? title)} onClose={onClose}>
+    <ChoiceTray id="tool-choices" label={title} title={title} value={current?.label ?? (TOOL_INFO[value]?.label ?? title)} onClose={onClose}>
       {listed.map((id) => {
         const face = toolFace(id)
         const key = keyForTool(id)
