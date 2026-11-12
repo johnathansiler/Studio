@@ -404,21 +404,21 @@ body:has(.shell.phone) #shell-menu {
   height: auto !important;
   max-height: none !important;
   flex: none !important;
-  padding: 8px 8px 12px;
+  padding: 0 0 calc(8px + env(safe-area-inset-bottom));
   background: transparent;
 }
 
 body:has(.shell.phone) #shell-menu .menu-group {
-  margin: 0 0 8px;
-  padding: 3px;
-  border-radius: 10px;
-  background-color: var(--tray-bg, #090d0b);
-  border: 1px solid var(--tray-edge, rgba(255, 255, 255, 0.08));
-  box-shadow: var(--tray-inset);
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background-color: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
 body:has(.shell.phone) #shell-menu .menu-rows {
-  gap: 4px;
+  gap: 0;
 }
 
 body:has(.shell.phone) .anchored-menu #shell-menu button.menu-row,
@@ -427,17 +427,17 @@ body:has(.shell.phone) #shell-menu button.menu-row,
 body:has(.shell.phone) #shell-menu label.menu-row {
   min-height: 44px;
   margin: 0;
-  padding: 6px 10px;
-  border-radius: 8px !important;
-  border-top: 0 !important;
-  background-color: #18231d;
-  background-image: var(--face);
-  box-shadow: var(--raised);
+  padding: 8px 16px;
+  border-radius: 0 !important;
+  border-top: 0;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
   color: var(--text);
 }
 
 body:has(.shell.phone) #shell-menu .menu-rows > .menu-row + .menu-row {
-  border-top: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 body:has(.shell.phone) #shell-menu button.menu-row:hover,
@@ -446,25 +446,25 @@ body:has(.shell.phone) #shell-menu button.menu-row:active:not(:disabled),
 body:has(.shell.phone) #shell-menu label.menu-row:active,
 body:has(.shell.phone) #shell-menu button.menu-row[aria-pressed='true'],
 body:has(.shell.phone) #shell-menu label.menu-row:focus-within {
-  background-color: #18231d;
-  background-image: var(--face);
-  box-shadow: var(--raised);
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
   border-color: transparent;
 }
 
 body:has(.shell.phone) #shell-menu button.menu-row[aria-pressed='true'] {
   background-color: var(--accent);
-  background-image: var(--face);
+  background-image: none;
   color: var(--accent-ink);
 }
 
 body:has(.shell.phone) #shell-menu .menu-session {
-  margin: 0 0 8px;
-  padding: 8px;
-  border-radius: 10px;
-  background-color: var(--tray-bg, #090d0b);
-  border: 1px solid var(--tray-edge, rgba(255, 255, 255, 0.08));
-  box-shadow: var(--tray-inset);
+  margin: 0;
+  padding: 8px 16px;
+  border-radius: 0;
+  background-color: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
 /* Portrait phone top matches the bottom dock: one stack, edit-row metrics on

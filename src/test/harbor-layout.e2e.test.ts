@@ -38,13 +38,13 @@ const pageErrors: string[] = []
 async function showBrowser(page: Page) {
   const arrange = page.getByRole('button', { name: /^Arrange/ }).first()
   if (await arrange.count()) await arrange.click().catch(() => undefined)
-  await page.waitForFunction(() => {
-    const open = [...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Browse' || button.getAttribute('aria-label') === 'Browse') as HTMLButtonElement | undefined
-    if (!document.querySelector('[data-playlist-browser="open"]')) open?.click()
-    const browser = document.querySelector('[data-playlist-browser="open"]')
-    const labels = [...(browser?.querySelectorAll('.browser-tabs button') ?? [])].map((button) => button.textContent?.trim())
-    return labels.includes('My Library') && labels.includes('Patterns') && labels.includes('Clips') && !labels.includes('Instruments')
-  }, undefined, { timeout: 20000 })
+  const browser = page.locator('[data-playlist-browser="open"]')
+  if (await browser.count() === 0) {
+    await page.getByRole('button', { name: /^Browse/ }).first().click()
+  }
+  await browser.getByRole('button', { name: 'My Library', exact: true }).waitFor()
+  await browser.getByRole('button', { name: 'Patterns', exact: true }).waitFor()
+  await browser.getByRole('button', { name: 'Clips', exact: true }).waitFor()
 }
 
 describe('library instruments on every note surface', () => {
@@ -90,10 +90,12 @@ describe('library instruments on every note surface', () => {
           expect(await page.locator('[data-harbor]').count()).toBe(0)
           for (const name of PLAY) {
             await page.evaluate(async (wanted) => {
-              const load = await import('/src/harbor/load.ts' as string)
-              const player = await import('/src/harbor/player.ts' as string)
-              const license = await import('/src/harbor/license.ts' as string)
-              const programMod = await import('/src/harbor/program.ts' as string)
+              // A direct import() here is rewritten for Vitest SSR and throws in the page.
+              const loadModule = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>
+              const load = await loadModule('/src/harbor/load.ts')
+              const player = await loadModule('/src/harbor/player.ts')
+              const license = await loadModule('/src/harbor/license.ts')
+              const programMod = await loadModule('/src/harbor/program.ts')
               const hook = (window as unknown as {
                 __cueharbor: {
                   engine: {

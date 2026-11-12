@@ -38,21 +38,17 @@ async function ensureDist() {
 }
 
 async function openInstruments(page: Page) {
-  await page.waitForFunction(() => {
-    const arrange = [...document.querySelectorAll('button')].find((button) => /^Arrange/.test(button.textContent || '')) as HTMLButtonElement | undefined
-    if (arrange && !document.querySelector('[data-playlist-browser="open"]')) arrange.click()
-    const open = [...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Browse' || button.getAttribute('aria-label') === 'Browse') as HTMLButtonElement | undefined
-    if (!document.querySelector('[data-playlist-browser="open"]')) open?.click()
-    const browser = document.querySelector('[data-playlist-browser="open"]')
-    const labels = [...(browser?.querySelectorAll('.browser-tabs button') ?? [])].map((button) => button.textContent?.trim())
-    return labels.includes('My Library') && !labels.includes('Instruments') && !document.querySelector('[data-harbor]')
-  }, undefined, { timeout: 30000 })
+  const arrange = page.getByRole('button', { name: /^Arrange/ }).first()
+  if (await arrange.count()) await arrange.click().catch(() => undefined)
+  const browser = page.locator('[data-playlist-browser="open"]')
+  if (await browser.count() === 0) await page.getByRole('button', { name: /^Browse/ }).first().click()
+  await browser.getByRole('button', { name: 'My Library', exact: true }).waitFor()
 }
 
 describe('production instrument playback', () => {
   it('loads Yamaha and a bass, fetches samples, and reaches the speakers', async () => {
     await ensureDist()
-    const port = 4288
+    const port = 4700 + Math.floor(Math.random() * 200)
     const url = `http://127.0.0.1:${port}/`
     const child = spawn('npx', ['vite', 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
       cwd: process.cwd(),

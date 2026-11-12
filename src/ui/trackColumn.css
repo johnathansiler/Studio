@@ -72,7 +72,7 @@
 .shell.fold .arrange,
 .shell:not(.phone) .arrange,
 .shell.phone .arrange[data-phone-arrange] {
-  --lane-h: 72px; /* 4px meter, 2px gap, 24px name, 2px gap, 40px buttons */
+  --lane-h: 72px; /* meter, name, and a 40px control row */
 }
 
 .shell .arrange .head,
@@ -109,9 +109,15 @@
 .arrange .head .track-title-slot {
   width: 0;
   min-width: 100%;
+  max-width: 100%;
   height: 24px;
   min-height: 24px;
   max-height: 24px;
+}
+.shell.phone:not(.land) .arrange .heads {
+  width: 186px !important;
+  min-width: 0 !important;
+  max-width: 186px !important;
 }
 
 .shell .arrange .head button.track-title,
@@ -246,7 +252,7 @@
   align-self: stretch;
   width: 100%;
   min-width: 0;
-  height: 4px;
+  height: 6px;
 }
 
 .shell.phone:not(.land) .arrange .pl-head .track-meter-row .track-live,
@@ -271,7 +277,7 @@
   width: 100%;
   min-width: 0;
   max-width: none;
-  height: 4px;
+  height: 6px;
   border: 0;
   border-radius: 2px;
   background: var(--panel-3);

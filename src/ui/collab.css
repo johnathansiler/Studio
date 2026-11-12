@@ -131,13 +131,28 @@
   max-height: 100dvh;
   overflow: hidden;
 }
+.shell.phone[data-collab="open"] .tool-slot.phone-dock-slot,
+.shell.phone[data-collab="open"]:not(.land) .tool-slot.phone-dock-slot:not(:empty),
+.shell.phone.land[data-collab="open"] .tool-slot.phone-dock-slot:not(:empty) {
+  display: none;
+}
 .shell[data-collab="open"] {
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas:
     "bar"
     "work";
 }
+.shell[data-collab="open"] .workspace > .shell-browser {
+  display: none;
+}
 .shell[data-collab="open"] .workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+.shell[data-collab="open"] .collab-pane {
+  height: 100%;
+  min-height: 0;
+}
+.shell.phone[data-collab="open"] .workspace {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -147,7 +162,7 @@
   min-height: 0;
   min-width: 0;
 }
-.shell[data-collab="open"] .collab-pane {
+.shell.phone[data-collab="open"] .collab-pane {
   flex: 1 1 auto;
   align-self: stretch;
   width: 100%;

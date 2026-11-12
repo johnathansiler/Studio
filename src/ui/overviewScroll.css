@@ -489,6 +489,26 @@
   padding-bottom: 12px;
 }
 
+/* Fully zoomed-out lanes keep the 40px menu inside the row. The title stays in the DOM and out of the hit path. */
+.shell .arrange[data-lane-scale="min"] .track-title-slot,
+.shell.phone:not(.land) .arrange[data-lane-scale="min"] .track-title-slot,
+.arrange[data-lane-scale="min"] .track-title-slot,
+.shell .arrange[data-lane-scale="min"] .track-meter-row,
+.arrange[data-lane-scale="min"] .track-meter-row {
+  display: none !important;
+}
+.arrange[data-lane-scale="min"] .pl-head {
+  justify-content: flex-end;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.arrange[data-lane-scale="min"] .track-controls {
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}
+
 /* Fully zoomed-out lanes are about 40px. The name must not stick out above the
    header, and the track menu has to stay inside the lane so .heads can take the tap. */
 .shell .arrange[data-lane-scale="min"] .head,

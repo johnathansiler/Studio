@@ -91,13 +91,11 @@ describe('scoped arrange changes', () => {
           expect(box!.y + box!.height, `${size.width}x${size.height}`).toBeLessThanOrEqual(size.height + 2)
         }
         const actions = await menu.locator('[data-menu-action]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-menu-action')))
-        const phoneMenu = size.width <= 520 || size.height <= 520
         for (const action of ['box', 'erase', 'pan', 'signature']) {
           expect(actions, `${size.width}x${size.height} ${action}`).not.toContain(action)
         }
         for (const action of ['new', 'open', 'save', 'export']) {
-          if (phoneMenu) expect(actions, `${size.width}x${size.height} ${action}`).not.toContain(action)
-          else expect(actions, `${size.width}x${size.height} ${action}`).toContain(action)
+          expect(actions, `${size.width}x${size.height} ${action}`).toContain(action)
         }
         for (const action of ['shortcuts', 'latency']) {
           expect(actions, `${size.width}x${size.height}`).toContain(action)

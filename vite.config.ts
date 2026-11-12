@@ -100,5 +100,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/test/**/*.test.ts'],
+    // Each browser test binds its own Vite port. One file at a time keeps those ports from colliding.
+    fileParallelism: false,
+    maxWorkers: 1,
   },
 })

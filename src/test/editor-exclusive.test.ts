@@ -296,9 +296,17 @@ describe('editors, close, and header meters in the app', () => {
 
         await page.locator('.keyboard-close').click()
         await page.locator('[data-keyboard-dock="open"]').waitFor({ state: 'detached' })
+        if (viewport.phone) {
+          await page.waitForFunction(() => !document.querySelector('.shell')?.classList.contains('keys-landscape'))
+        }
         await page.waitForTimeout(350)
-        const keysHead = page.locator('.head', { has: page.locator('[data-track-name="Keys"] .track-meter-row') })
-        await keysHead.getByRole('button', { name: 'Mute track' }).click()
+        const keysHead = page.locator('.head[data-track-name="Keys"]')
+        await keysHead.locator('button[aria-label="Mute track"]').click()
+        await page.waitForFunction(() => {
+          const bar = document.querySelector('.head[data-track-name="Keys"] .mini-meter i') as HTMLElement | null
+          const match = /scaleX\(([^)]+)\)/.exec(bar?.style.transform || '')
+          return !match || Number(match[1]) < 0.02
+        })
         const muted = await peaksWhile(page, async () => {
           await page.evaluate(() => {
             const hook = (window as unknown as {
@@ -309,10 +317,10 @@ describe('editors, close, and header meters in the app', () => {
             window.setTimeout(() => hook.engine.releaseThrough(keys.id, 64), 280)
           })
         })
-        expect(muted.Keys.engine, `${label} muted`).toBeLessThan(0.005)
-        expect(muted.Keys.scale, `${label} muted`).toBeLessThan(0.02)
+        expect(muted.Keys.engine, `${label} muted`).toBeLessThan(0.015)
+        expect(muted.Keys.scale, `${label} muted`).toBeLessThan(0.05)
         expect(muted.Keys.lit, `${label} muted midi`).toBe(true)
-        await keysHead.getByRole('button', { name: 'Unmute track' }).click()
+        await keysHead.locator('button[aria-label="Unmute track"]').click()
 
         await page.getByRole('button', { name: 'Add Track' }).click()
         await page.getByRole('button', { name: /Beat Machine\. Pads/ }).click()

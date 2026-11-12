@@ -86,7 +86,7 @@ describe('phone and landscape layout bugs', () => {
       await page.getByRole('button', { name: /^Menu/ }).click()
       await page.locator('#shell-menu').waitFor()
       const actions = await page.locator('#shell-menu [data-menu-action]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-menu-action')))
-      expect(actions).toEqual(['undo', 'redo', 'midi', 'latency', 'shortcuts'])
+      expect(actions).toEqual(['undo', 'redo', 'new', 'open', 'save', 'export', 'midi', 'latency', 'shortcuts'])
 
       await page.evaluate(() => {
         const store = (window as unknown as { __cueharbor: { store: { project: { tracks: { id: string }[] }; updateTrack: (id: string, patch: { name: string }) => void } } }).__cueharbor.store
@@ -94,11 +94,11 @@ describe('phone and landscape layout bugs', () => {
       })
       expect(await page.locator('[data-menu-action="undo"]').isDisabled()).toBe(false)
       await page.locator('[data-menu-action="undo"]').click()
-      expect(await page.locator('.arrange .head .name').first().inputValue()).toBe('Vocal')
+      expect((await page.locator('.arrange .head .track-title').first().innerText()).trim()).toBe('Vocal')
       await page.getByRole('button', { name: /^Menu/ }).click()
       expect(await page.locator('[data-menu-action="redo"]').isDisabled()).toBe(false)
       await page.locator('[data-menu-action="redo"]').click()
-      expect(await page.locator('.arrange .head .name').first().inputValue()).toBe('Renamed Vocal')
+      expect((await page.locator('.arrange .head .track-title').first().innerText()).trim()).toBe('Renamed Vocal')
 
       await page.getByRole('button', { name: /^Menu/ }).click()
       await page.locator('[data-menu-action="latency"] select').selectOption('playback')
@@ -217,7 +217,7 @@ describe('phone and landscape layout bugs', () => {
         const out = await page.evaluate(() => {
           const head = document.querySelector('.arrange .head')!
           const more = head.querySelector('.track-more')!
-          const name = head.querySelector('.name') as HTMLInputElement
+          const name = head.querySelector('.track-title') as HTMLElement
           const headBox = head.getBoundingClientRect()
           const moreBox = more.getBoundingClientRect()
           const cx = moreBox.left + moreBox.width / 2
@@ -261,16 +261,17 @@ describe('phone and landscape layout bugs', () => {
       const result = await page.evaluate(() => {
         const heads = document.querySelector('.arrange .heads') as HTMLElement
         const dock = document.querySelector('.tool-slot')!.getBoundingClientRect()
-        const names = [...document.querySelectorAll('.arrange .head .name')] as HTMLInputElement[]
+        const names = [...document.querySelectorAll('.arrange .head .track-title')] as HTMLElement[]
+        const gap = document.querySelector('.ruler-gap')?.getBoundingClientRect().height ?? 0
         const hits = names.map((name) => {
           const frame = heads.getBoundingClientRect()
-          heads.scrollTop += name.getBoundingClientRect().top - frame.top - 8
+          heads.scrollTop += name.getBoundingClientRect().top - frame.top - gap - 4
           const box = name.getBoundingClientRect()
           const hit = document.elementFromPoint(box.left + 16, box.top + box.height / 2)
           return {
-            value: name.value,
+            value: (name.textContent || '').trim(),
             above: box.bottom <= dock.top + 1,
-            hit: hit === name || Boolean(hit?.closest('.name')),
+            hit: hit === name || Boolean(hit?.closest('.track-title')),
           }
         })
         return {

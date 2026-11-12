@@ -1144,6 +1144,9 @@ export function ArrangeView({
                     <span>Roll</span>
                   </button>
                 ) : null}
+                {showsOpenBeatMachine(track) ? (
+                  <OpenBeatMachineButton store={store} trackId={track.id} onOpen={onOpenBeatMachine} />
+                ) : null}
               </div>
               <div className="track-controls" data-track-controls="">
               <MixFlags store={store} trackId={track.id} compact />
@@ -1153,10 +1156,7 @@ export function ArrangeView({
                   <span className="mini-word">Arm</span>
                 </TipButton>
               )}
-              {showsOpenBeatMachine(track) ? (
-                <OpenBeatMachineButton store={store} trackId={track.id} onOpen={onOpenBeatMachine} />
-              ) : null}
-              {store.selectedTrackId === track.id && showsOnscreenPiano(track) ? (
+              {store.selectedTrackId === track.id && showsOnscreenPiano(track) && !showsOpenBeatMachine(track) ? (
                 <KeyboardToggle store={store} engine={engine} word="Piano" />
               ) : null}
               <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); toggleTrack(track.id) }}>
