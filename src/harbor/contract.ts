@@ -4,7 +4,7 @@
  */
 export const INSTRUMENT_LIBRARY = {
   dataset: 'cueharbor/instrument-library',
-  revision: 'e6b451a1517ac2e450dd4a1b538e8aceaad25b08',
+  revision: '6494a1a8c8dc2914fccc8656d066ca872ef1e04a',
   catalog: 'catalog.json',
 } as const
 
