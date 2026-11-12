@@ -1132,6 +1132,18 @@ export function ArrangeView({
                   }}
                   onRename={(next) => store.updateTrack(track.id, { name: next })}
                 />
+                {track.type === 'midi' ? (
+                  <button
+                    type="button"
+                    className="piano-open"
+                    data-piano={track.id}
+                    aria-label="Piano roll"
+                    title="Piano roll"
+                    onClick={(event) => { event.stopPropagation(); onOpenPiano(track.id) }}
+                  >
+                    <span>Roll</span>
+                  </button>
+                ) : null}
               </div>
               <div className="track-controls" data-track-controls="">
               <MixFlags store={store} trackId={track.id} compact />
@@ -1141,18 +1153,6 @@ export function ArrangeView({
                   <span className="mini-word">Arm</span>
                 </TipButton>
               )}
-              {track.type === 'midi' ? (
-                <button
-                  type="button"
-                  className="piano-open"
-                  data-piano={track.id}
-                  aria-label="Piano roll"
-                  title="Piano roll"
-                  onClick={(event) => { event.stopPropagation(); onOpenPiano(track.id) }}
-                >
-                  <span>Roll</span>
-                </button>
-              ) : null}
               {showsOpenBeatMachine(track) ? (
                 <OpenBeatMachineButton store={store} trackId={track.id} onOpen={onOpenBeatMachine} />
               ) : null}

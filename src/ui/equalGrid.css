@@ -180,12 +180,17 @@
 }
 
 .transport.simple .transport-extras,
-.shell.phone .phone-context .transport-extras,
 .transport-extras-slot.parked .transport-extras {
   display: grid !important;
   width: 100%;
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* Phone Arrange dock: Delete, tempo, and Duplicate join the same eight cells as Tools. */
+.shell.phone .phone-context.btn-tray > .transport-extras-slot,
+.shell.phone .phone-context.btn-tray .transport-extras {
+  display: contents !important;
 }
 
 .shell .command-strip .transport-extras-slot {
@@ -203,7 +208,72 @@
 }
 
 .shell.phone .phone-context.btn-tray {
-  flex-flow: row wrap;
+  flex-flow: row nowrap;
+}
+
+.shell.phone .phone-context.btn-tray .transport-extras > .tempo-cluster {
+  display: contents !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  flex: none !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.shell.phone .phone-context.btn-tray .transport-extras > .t-btn,
+.shell.phone .phone-context.btn-tray .transport-extras .bpm-readout {
+  box-sizing: border-box !important;
+  flex: 1 1 0 !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 1px !important;
+  border-width: 1px !important;
+}
+
+/* Roll sits beside the name, in flow, so it does not cover the meter or the control row. */
+.arrange .head .track-title-slot,
+.shell.phone:not(.land) .arrange .track-title-slot {
+  position: relative;
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}
+
+.shell.phone:not(.land) .arrange .track-title-slot > .track-title {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.shell.phone:not(.land) .arrange .track-title-slot > .piano-open,
+.arrange .head .track-title-slot > .piano-open {
+  flex: 0 0 40px;
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  height: 40px;
+  min-height: 40px;
+}
+
+/* The name row is 40px once Roll sits beside it, so the lane clears the meter, the name, and the controls. */
+.shell .arrange,
+.shell.phone .arrange,
+.shell.phone:not(.land) .arrange,
+.shell.phone.land .arrange,
+.shell.fold .arrange,
+.shell:not(.phone) .arrange {
+  --lane-h: 96px;
 }
 
 .transport-extras .t-ico {
@@ -299,9 +369,23 @@
   content: none !important;
 }
 
+/* Share the rack header in one wrapping row so the step grid stays clickable. */
 .rack-bar > .rack-mode.eq-grid,
 .rack-bar > .rack-lengths,
-.rack-bar > .pattern-send,
+.rack-bar > .pattern-send {
+  flex: 1 1 auto;
+  width: auto;
+  max-width: 100%;
+}
+
+.rack-bar > .rack-mode.eq-grid { flex-basis: 180px; }
+.rack-bar > .rack-lengths { flex-basis: 300px; }
+.rack-bar > .pattern-send { flex-basis: 480px; }
+
+.rack-bar .eq-grid {
+  width: 100%;
+}
+
 .shell .scaler-panel .scaler-tools,
 .shell .scaler-panel .scaler-pad-source,
 .shell .transport.simple .transport-extras,
