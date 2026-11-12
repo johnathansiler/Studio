@@ -90,10 +90,12 @@ describe('library instruments on every note surface', () => {
           expect(await page.locator('[data-harbor]').count()).toBe(0)
           for (const name of PLAY) {
             await page.evaluate(async (wanted) => {
-              const load = await import('/src/harbor/load.ts' as string)
-              const player = await import('/src/harbor/player.ts' as string)
-              const license = await import('/src/harbor/license.ts' as string)
-              const programMod = await import('/src/harbor/program.ts' as string)
+              // A direct import() here is rewritten for Vitest SSR and throws in the page.
+              const loadModule = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>
+              const load = await loadModule('/src/harbor/load.ts')
+              const player = await loadModule('/src/harbor/player.ts')
+              const license = await loadModule('/src/harbor/license.ts')
+              const programMod = await loadModule('/src/harbor/program.ts')
               const hook = (window as unknown as {
                 __cueharbor: {
                   engine: {

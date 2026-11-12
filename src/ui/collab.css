@@ -131,6 +131,11 @@
   max-height: 100dvh;
   overflow: hidden;
 }
+.shell.phone[data-collab="open"] .tool-slot.phone-dock-slot,
+.shell.phone[data-collab="open"]:not(.land) .tool-slot.phone-dock-slot:not(:empty),
+.shell.phone.land[data-collab="open"] .tool-slot.phone-dock-slot:not(:empty) {
+  display: none;
+}
 .shell[data-collab="open"] {
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas:
