@@ -181,6 +181,73 @@ describe('multisample grouping', () => {
     expect(planSignKeys(undefined, ['Only/one.wav', 'Only/two.wav'], false)).toEqual(['Only/one.wav', 'Only/two.wav'])
   })
 
+  it('groups bare note names, octave folders, and names that end in a note', () => {
+    const letters = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+    const pack = 'MusicRadar 587 Lo-Fi'
+    const wobble = letters.map((note) => row(`Retro Lo-Fi/MusicRadar 587 Lo-Fi/ConstructionKits/01(100)/WobbleSynthMulti/${note}.wav`, {
+      pack, category: 'synth', note: '', root: note.replace('#', '#'),
+    }))
+    wobble.push(row('Retro Lo-Fi/MusicRadar 587 Lo-Fi/ConstructionKits/01(100)/WobbleSynthMulti/C2.wav', {
+      pack, category: 'synth', note: 'C2', root: 'C',
+    }))
+    const bass = [1, 2].flatMap((octave) => letters.map((note) => row(
+      `Retro Lo-Fi/MusicRadar 587 Lo-Fi/BonusMultiSamples/Bass01/Octave0${octave}/${note}.wav`,
+      { pack, type: '', category: 'bass', note: '', root: note },
+    )))
+    const lead = [1, 2].flatMap((octave) => ['C', 'E', 'G'].map((note) => row(
+      `Retro Lo-Fi/MusicRadar 587 Lo-Fi/BonusMultiSamples/Lead01/Octave0${octave}/${note}.wav`,
+      { pack, type: '', category: 'synth', note: '', root: note },
+    )))
+    const acid = ['Long', 'Short'].flatMap((art) => [1, 2].flatMap((octave) => ['C', 'E'].map((note) => row(
+      `Retro Lo-Fi/MusicRadar 587 Lo-Fi/ConstructionKits/04(120)/AcidMulti/Octave0${octave}(${art})/${note}.wav`,
+      { pack, category: '', note: '', root: note },
+    ))))
+    const pads = [
+      row('Pads/Warm/Pad_C3.wav', { pack: 'Pads', category: 'pad', note: 'C3' }),
+      row('Pads/Warm/Pad_D3.wav', { pack: 'Pads', category: 'pad', note: 'D3' }),
+      row('Pads/Warm/Pad_C3_v1.wav', { pack: 'Pads', category: 'pad', note: 'C3' }),
+      row('Pads/Warm/Pad_C3_v2.wav', { pack: 'Pads', category: 'pad', note: 'C3' }),
+      row('Pads/Warm/piano-A#2.wav', { pack: 'Pads', category: 'keys', note: 'A#2' }),
+      row('Pads/Warm/piano-B2.wav', { pack: 'Pads', category: 'keys', note: 'B2' }),
+    ]
+    const kick = row('Drums/kick.wav', { pack: 'Kit', type: 'one-shot', category: 'kick', note: 'C1' })
+    const instruments = groupLibraryInstruments([...wobble, ...bass, ...lead, ...acid, ...pads, kick])
+    const named = (name: string) => instruments.find((item) => item.name === name)
+
+    const wobbleInst = named('WobbleSynthMulti (01 100)')
+    expect(wobbleInst?.notes).toBe(13)
+    expect(wobbleInst?.layers.find((layer) => layer.key.endsWith('/C.wav'))?.midi).toBe(noteMidi('C3'))
+    expect(wobbleInst?.layers.find((layer) => layer.key.endsWith('/C2.wav'))?.midi).toBe(noteMidi('C2'))
+    expect(wobbleInst?.layers.every((layer) => layer.midi === 60)).toBe(false)
+
+    const bassInst = named('Bass01')
+    expect(bassInst?.notes).toBe(24)
+    expect(bassInst?.layers.find((layer) => layer.key.includes('Octave01/A#.wav'))?.midi).toBe(noteMidi('A#1'))
+    expect(bassInst?.layers.find((layer) => layer.key.includes('Octave02/C.wav'))?.midi).toBe(noteMidi('C2'))
+
+    const leadInst = named('Lead01')
+    expect(leadInst?.layers.find((layer) => layer.key.includes('Octave01/C.wav'))?.midi).toBe(noteMidi('C3'))
+    expect(leadInst?.layers.find((layer) => layer.key.includes('Octave02/C.wav'))?.midi).toBe(noteMidi('C4'))
+
+    expect(named('AcidMulti Long (04 120)')?.notes).toBe(4)
+    expect(named('AcidMulti Short (04 120)')?.notes).toBe(4)
+    expect(instruments.filter((item) => item.name.startsWith('AcidMulti'))).toHaveLength(2)
+
+    const pad = instruments.find((item) => item.pack === 'Pads' && item.name.toLowerCase().includes('pad'))
+    expect(pad && pad.notes).toBeGreaterThan(1)
+    expect(pad?.velocities).toBeGreaterThan(1)
+    const piano = instruments.find((item) => item.layers.some((layer) => layer.key.endsWith('piano-A#2.wav')))
+    expect(piano?.notes).toBe(2)
+    expect(new Set(piano?.layers.map((layer) => layer.midi))).toEqual(new Set([noteMidi('A#2'), noteMidi('B2')]))
+    expect(instruments.some((item) => item.layers.some((layer) => layer.key.endsWith('kick.wav')))).toBe(false)
+
+    const index = buildLibraryIndex([...bass], bass.map(() => ['bass']))
+    const summaries = instruments.filter((item) => item.name === 'Bass01').map(({ layers: _layers, ...summary }) => summary)
+    const rows = browseLibraryRows(index, { total: bass.length, ids: null }, summaries, { text: '', type: '', category: '', instrument: '', genre: '', musicalKey: '', mood: '', pack: '', bpmMin: null, bpmMax: null })
+    expect(rows.some((item) => item.kind === 'sound')).toBe(false)
+    expect(rows.filter((item) => item.kind === 'instrument')).toHaveLength(1)
+  })
+
   it('hides individual notes in browse and lists the instrument', () => {
     const note = row('Orchestral/Philharmonia Orchestra All Samples/french horn/french-horn_A4_15_piano_normal.mp3', { note: 'A4' })
     const kick = row('Drums/kick.wav', { type: 'one-shot', category: 'kick', pack: 'Kit', note: 'C1' })

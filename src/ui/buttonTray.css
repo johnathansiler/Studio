@@ -215,7 +215,7 @@
 }
 
 /* The project menu is a text list in mainMenu.css, not a chip tray. */
-.anchored-menu:not(:has(#shell-menu)):not(.transport-drawer) > button,
+.anchored-menu:not(:has(#shell-menu)):not(.transport-drawer):not(.library-filter-sheet) > button,
 .anchored-menu:not(:has(#shell-menu)) .ch-row,
 .anchored-menu:not(:has(#shell-menu)) .sheet-row,
 .anchored-menu:not(:has(#shell-menu)) .add-choice,
@@ -230,7 +230,7 @@
   min-height: 40px;
 }
 
-.anchored-menu:not(:has(#shell-menu)):not(.transport-drawer):not(.preset-menu) {
+.anchored-menu:not(:has(#shell-menu)):not(.transport-drawer):not(.preset-menu):not(.library-filter-sheet):not(.sound-filter-menu) {
   flex-direction: row;
   flex-wrap: wrap;
   align-items: center;

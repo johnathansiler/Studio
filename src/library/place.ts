@@ -5,9 +5,10 @@ import { placeSound } from '../sounds/place'
 import type { SoundEntry } from '../sounds/types'
 import type { ProjectStore } from '../state/store'
 import { fetchLibraryBytes } from './audio'
-import { midiName, type LibraryInstrument } from './group'
+import { midiName, summarizeInstrument, type LibraryInstrument } from './group'
 import { fetchLibraryInstrument } from './instrumentsApi'
 import { programFromLibraryInstrument } from './instrumentProgram'
+import { rememberLibraryInstrument, rememberLibrarySound } from './recent'
 import { librarySampleUrl, loadLibrarySampleBytes } from './samples'
 import type { LibraryEntry } from './types'
 
@@ -102,6 +103,7 @@ export function placeLibraryAsset(store: ProjectStore, entry: LibraryEntry, asse
   const slot = focusedSlot(store)
   if (slot) {
     store.loadSlotAudio(slot.trackId, slot.pluginId, asset)
+    rememberLibrarySound(entry)
     return `${entry.name} is in the ${slot.kind}.`
   }
   if (entry.type === 'loop') {
@@ -119,6 +121,7 @@ export function placeLibraryAsset(store: ProjectStore, entry: LibraryEntry, asse
     const host = selected?.type === 'audio' ? selected.id : null
     const landed = store.placeClipAtPlayhead(host, placed.clip, startSample)
     if (!landed) throw new Error('Could not add that sound onto the track.')
+    rememberLibrarySound(entry)
     return `${entry.name} is on the track.`
   }
   if (entry.type === 'multisample note') {
@@ -127,12 +130,14 @@ export function placeLibraryAsset(store: ProjectStore, entry: LibraryEntry, asse
     const trackId = host ?? store.addTracks({ kind: 'midi', count: 1, instrument: 'sampler', input: 'mic', channels: 1, armed: false })[0]
     if (!trackId) throw new Error('Could not add an instrument track.')
     store.loadSamplerSound(trackId, asset, midiRoot(entry), false)
+    rememberLibrarySound(entry)
     return `${entry.name} plays across the keyboard.`
   }
   const trackId = store.insertPads(padsHost(store))
   if (!trackId) throw new Error('Could not open Beat Machine.')
   const pad = emptyPad(store, trackId)
   store.assignTrackPad(trackId, pad.bank, pad.index, { name: entry.name, bufferId: asset.id })
+  rememberLibrarySound(entry)
   return `${entry.name} is on a pad.`
 }
 
@@ -167,6 +172,7 @@ export function placeLibraryInstrument(store: ProjectStore, instrument: LibraryI
   const trackId = host ?? store.addTracks({ kind: 'midi', count: 1, instrument: 'sampler', input: 'mic', channels: 1, armed: false })[0]
   if (!trackId) throw new Error('Could not add an instrument track.')
   store.setLibrary(trackId, program)
+  rememberLibraryInstrument(summarizeInstrument(instrument))
   const span = instrument.notes <= 1 ? `Root ${midiName(instrument.previewMidi)}` : `${midiName(instrument.lo)}–${midiName(instrument.hi)}`
   return `${instrument.name} plays across the keyboard. ${span}.`
 }
@@ -184,6 +190,7 @@ export async function loadLibraryDrag(store: ProjectStore, dragId: string, start
     store.addAsset(asset)
     store.rememberLibrarySound(asset.id, entry.key)
     store.assignTrackPad(pad.trackId, pad.bank, pad.index, { name: entry.name, bufferId: asset.id })
+    rememberLibrarySound(entry)
     return true
   }
   placeLibraryAsset(store, entry, asset, startSample)

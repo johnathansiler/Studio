@@ -10,7 +10,6 @@ import {
   graphRatio,
   kitCategory,
   kitChoices,
-  libraryChoice,
   rackPlayIndex,
   rackPlayMode,
   shortSoundName,
@@ -25,10 +24,8 @@ import { loopGridBeats } from '../model/loopEdit'
 import { STEP_BEAT, type StepCell, type StepChannel } from '../model/steps'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import { displayedPlayhead } from '../model/transportSync'
-import { catalogMessage, fetchCatalogSound, loadSoundCatalog } from '../sounds/catalog'
+import { fetchCatalogSound, loadSoundCatalog } from '../sounds/catalog'
 import { decodeSoundBytes, matchProjectRate } from '../sounds/place'
-import { libraryMatchesCategory, sampleRole, soundsForRole } from '../sounds/roles'
-import type { SoundEntry } from '../sounds/types'
 import { selectBeats } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import { BEAT_BAR, BEAT_ROW, BEAT_SHEET, copyOf, described } from './chrome'
@@ -287,28 +284,22 @@ function StepButtons({
   )
 }
 
-const PICK_CATS = ['All', 'Kicks', 'Snares', 'Hats', 'Perc', 'Library'] as const
+const PICK_CATS = ['All', 'Kicks', 'Snares', 'Hats', 'Perc'] as const
 
 function Picker({
   kit,
-  library,
-  note,
   query,
   category,
   onQuery,
   onCategory,
   onKit,
-  onLibrary,
 }: {
   kit: ReturnType<typeof kitChoices>
-  library: SoundEntry[]
-  note: string
   query: string
   category: string
   onQuery: (value: string) => void
   onCategory: (value: string) => void
   onKit: (choice: ReturnType<typeof kitChoices>[number]) => void
-  onLibrary: (entry: SoundEntry, index: number) => void
 }) {
   const needle = query.trim().toLowerCase()
   const kitRows = kit.filter((choice) => {
@@ -316,13 +307,8 @@ function Picker({
     if (category !== 'All' && category !== cat) return false
     return !needle || choice.name.toLowerCase().includes(needle)
   })
-  const libRows = library.filter((entry) => {
-    if (!libraryMatchesCategory(entry, category)) return false
-    const hay = `${entry.name} ${entry.tags.join(' ')} ${entry.pack ?? ''} ${entry.category ?? ''} ${entry.role ?? ''} ${entry.key ?? ''} ${entry.bpm ?? ''} ${entry.origin === 'private' ? 'private' : ''}`.toLowerCase()
-    return !needle || hay.includes(needle)
-  })
   return (
-    <div className="rack-picker" role="listbox" aria-label="Sounds to add. Search the kit or the library.">
+    <div className="rack-picker" role="listbox" aria-label="Sounds to add. Search the kit.">
       <input
         className="rack-search"
         aria-label="Search sounds"
@@ -348,20 +334,7 @@ function Picker({
             <small>{kitCategory(choice.kind)}</small>
           </button>
         ))}
-        {libRows.map((entry, index) => (
-          <button
-            key={entry.id}
-            type="button"
-            title={`Add ${entry.name} from the sound library.`}
-            aria-label={`Add ${entry.name}. Puts a library sound on this pattern.`}
-            onClick={() => onLibrary(entry, index)}
-          >
-            <b>{shortSoundName(entry.name)}</b>
-            <small>{entry.origin === 'private' ? 'Private' : 'Library'}</small>
-          </button>
-        ))}
       </div>
-      {note && <p>{note}</p>}
     </div>
   )
 }
@@ -379,13 +352,10 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
   const addButton = useRef<HTMLButtonElement>(null)
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('All')
-  const [library, setLibrary] = useState<SoundEntry[]>([])
-  const [libraryNote, setLibraryNote] = useState('')
   const [sampleState, setSampleState] = useState<Record<string, 'loading' | 'error' | 'ready'>>({})
   const [sampleError, setSampleError] = useState('')
   const [sampleRetry, setSampleRetry] = useState(0)
   const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
-  const asked = useRef(false)
   const graphing = useRef(false)
   const inflight = useRef(new Set<string>())
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -477,39 +447,12 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
 
   function openAdd() {
     setAdding((open) => !open)
-    if (asked.current) return
-    asked.current = true
-    void loadSoundCatalog().then((result) => {
-      const sounds = soundsForRole(result.entries, 'step')
-      const roles = new Set(sounds.map((entry) => sampleRole(entry)))
-      setLibrary(sounds)
-      setLibraryNote(sounds.length
-        ? (roles.size === 1 && roles.has('kick') ? 'Downloaded drum one-shots are kicks. Other rows keep the built-in voices.' : '')
-        : catalogMessage(result, 0, false))
-    })
   }
 
-  function addChoice(choice: RackChoice, entry?: SoundEntry) {
+  function addChoice(choice: RackChoice) {
     const id = store.addPatternChannel(choice)
     if (id) store.selectRackChannel(id)
     setAdding(false)
-    if (!entry) return
-    const sampleId = choice.sampleId || ''
-    if (!sampleId || store.buffers.has(sampleId)) return
-    void (async () => {
-      try {
-        const bytes = await fetchCatalogSound(entry)
-        const decoded = await decodeSoundBytes(bytes)
-        const channels = matchProjectRate(decoded.channels, decoded.sampleRate, store.project.sampleRate)
-        if (!channels[0]?.length) {
-          store.toast('That sound had no audio.', 'warn')
-          return
-        }
-        if (!store.buffers.has(sampleId)) store.addAsset({ id: sampleId, name: entry.name, sampleRate: store.project.sampleRate, channels })
-      } catch (error) {
-        store.toast(error instanceof Error ? error.message : 'Could not load that sound.', 'warn')
-      }
-    })()
   }
 
   function writeGraph(index: number, ratio: number) {
@@ -979,8 +922,8 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
         ref={addButton}
         type="button"
         className="rack-add"
-        title="Add a channel. Choose a kit sound or a library sound."
-        aria-label="Add channel. Choose a kit sound or a library sound."
+        title="Add a channel. Choose a kit sound. My Library sounds drop onto a pad."
+        aria-label="Add channel. Choose a kit sound."
         aria-expanded={adding}
         onClick={openAdd}
       >
@@ -989,14 +932,11 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
       <AnchoredMenu open={adding} onClose={() => setAdding(false)} label="Sounds to add" triggerRef={addButton} prefer="up">
         <Picker
           kit={kitChoices()}
-          library={library}
-          note={libraryNote}
           query={query}
           category={category}
           onQuery={setQuery}
           onCategory={setCategory}
           onKit={(choice) => addChoice(choice)}
-          onLibrary={(entry, index) => addChoice(libraryChoice(entry, index), entry)}
         />
       </AnchoredMenu>
     </div>

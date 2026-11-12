@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { soundCache } from '../sounds/cache'
-import { browserSounds, fetchCatalogSound, loadSoundCatalog, soundCategories, soundCollections, soundKeys, soundRoles, soundTags } from '../sounds/catalog'
-import { audioTrackFor, decodeSoundBytes, placeSound, previewChannelsFor } from '../sounds/place'
-import type { SoundEntry, SoundFilter, SoundQuery } from '../sounds/types'
+import { useState, useSyncExternalStore } from 'react'
+import { rememberCatalogSound } from '../library/recent'
+import { fetchCatalogSound } from '../sounds/catalog'
+import { decodeSoundBytes, placeSound } from '../sounds/place'
+import type { SoundEntry } from '../sounds/types'
 import type { ProjectStore } from '../state/store'
 import {
   browserGroup,
@@ -15,10 +15,6 @@ import {
 } from '../model/sessionBoard'
 import { parseSessionDrag, type SessionDrag } from '../model/sessionInteract'
 import { beginSessionDrag } from './sessionPointer'
-import { PACK_LABEL, packLabel } from '../sounds/contract'
-import { PrivateLibraryButton, SoundFilterButton } from './SoundBrowser'
-
-const CATALOG_WAIT_MS = 8000
 
 type PreviewEngine = {
   unlock: () => void
@@ -27,24 +23,7 @@ type PreviewEngine = {
   currentTimelineSample: () => number
 }
 
-function until<T>(work: Promise<T>, ms: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('timed out')), ms)
-    work.then(
-      (value) => {
-        clearTimeout(timer)
-        resolve(value)
-      },
-      (error) => {
-        clearTimeout(timer)
-        reject(error instanceof Error ? error : new Error('Could not load sounds.'))
-      },
-    )
-  })
-}
-
 const GROUPS: { id: BrowserGroup; label: string; hint: string }[] = [
-  { id: 'sounds', label: 'Sounds', hint: 'Loops and one-shots from the free library.' },
   { id: 'instruments', label: 'Instruments', hint: 'Drag onto a MIDI track.' },
   { id: 'drums', label: 'Drums', hint: 'Drag a drum instrument onto a MIDI track.' },
   { id: 'audio', label: 'Audio effects', hint: 'Drag onto a track to insert it.' },
@@ -88,6 +67,7 @@ export async function dropLibrarySound(store: ProjectStore, trackId: string, sce
     placed.clip.loop = entry.type === 'loop' || placed.clip.loop !== false
     if (!store.buffers.has(placed.asset.id)) store.addAsset(placed.asset)
     store.placeInSlot(trackId, scene, placed.clip)
+    rememberCatalogSound(entry)
   } catch (error) {
     store.toast(error instanceof Error ? error.message : 'That sound is not on this device. The rest of the project still plays.', 'warn')
   }
@@ -164,7 +144,6 @@ export function SessionBrowser({
   onClose,
   onPointerDrop,
   store,
-  engine,
 }: {
   width: number
   onResize: (width: number) => void
@@ -173,130 +152,15 @@ export function SessionBrowser({
   store?: ProjectStore
   engine?: PreviewEngine
 }) {
-  const [group, setGroup] = useState<BrowserGroup>('sounds')
-  const [entries, setEntries] = useState<SoundEntry[]>([])
-  const [phase, setPhase] = useState<'loading' | 'error' | 'ready'>('loading')
+  const [group, setGroup] = useState<BrowserGroup>('instruments')
   const [query, setQuery] = useState('')
-  const [bpm, setBpm] = useState<SoundQuery['bpm']>('any')
-  const [kind, setKind] = useState<SoundFilter>('all')
-  const [soundKey, setSoundKey] = useState('')
-  const [collection, setCollection] = useState('')
-  const [category, setCategory] = useState('')
-  const [tag, setTag] = useState('')
-  const [role, setRole] = useState('')
-  const [page, setPage] = useState(0)
-  const [favoritesOnly, setFavoritesOnly] = useState(false)
-  const [playing, setPlaying] = useState('')
-  const [busy, setBusy] = useState('')
-  const [loadRatio, setLoadRatio] = useState(0)
   useSyncExternalStore(
     (listener) => store ? store.subscribe(listener) : () => undefined,
     () => store?.version ?? 0,
     () => 0,
   )
-
-  async function loadCatalog() {
-    setPhase('loading')
-    try {
-      const result = await until(loadSoundCatalog(fetch, soundCache()), CATALOG_WAIT_MS)
-      rememberSounds(result.entries)
-      setEntries(result.entries)
-      setPhase(result.entries.length || result.status === 'ok' ? 'ready' : 'error')
-    } catch {
-      setEntries([])
-      setPhase('error')
-    }
-  }
-
-  useEffect(() => {
-    let alive = true
-    setPhase('loading')
-    void until(loadSoundCatalog(fetch, soundCache()), CATALOG_WAIT_MS).then((result) => {
-      if (!alive) return
-      rememberSounds(result.entries)
-      setEntries(result.entries)
-      setPhase(result.entries.length || result.status === 'ok' ? 'ready' : 'error')
-    }).catch(() => {
-      if (!alive) return
-      setEntries([])
-      setPhase('error')
-    })
-    return () => { alive = false }
-  }, [])
-
-  const previewAbort = useRef<AbortController | null>(null)
   const needle = query.trim().toLowerCase()
-  const favorites = store?.project.soundFavorites ?? []
-  const filteredSounds = browserSounds(entries, {
-    text: query,
-    type: kind,
-    bpm,
-    key: soundKey,
-    favoritesOnly,
-    projectBpm: store?.project.tempo ?? 120,
-    favorites,
-    collection,
-    category,
-    tag,
-    role,
-  })
-  const pageSize = 60
-  const pageCount = Math.max(1, Math.ceil(filteredSounds.length / pageSize))
-  const safePage = Math.min(page, pageCount - 1)
-  const shownSounds = filteredSounds.slice(safePage * pageSize, safePage * pageSize + pageSize)
   const devices = browserGroup(group).filter((item) => !needle || `${item.name} ${item.hint}`.toLowerCase().includes(needle))
-  const keys = soundKeys(entries)
-
-  async function preview(entry: SoundEntry) {
-    if (!engine || !store) return
-    if (playing === entry.id) {
-      previewAbort.current?.abort()
-      engine.stopPreview()
-      setPlaying('')
-      return
-    }
-    previewAbort.current?.abort()
-    const controller = new AbortController()
-    previewAbort.current = controller
-    setBusy(entry.id)
-    try {
-      engine.unlock()
-      setLoadRatio(0)
-      const bytes = await fetchCatalogSound(entry, { onProgress: setLoadRatio, signal: controller.signal })
-      if (controller.signal.aborted) return
-      const decoded = await decodeSoundBytes(bytes)
-      if (controller.signal.aborted) return
-      const channels = previewChannelsFor(entry, decoded.channels, decoded.sampleRate, store.project, engine.currentTimelineSample())
-      if (controller.signal.aborted) return
-      engine.previewPcm(channels, store.project.sampleRate)
-      setPlaying(entry.id)
-    } catch (error) {
-      if (controller.signal.aborted) return
-      store.toast(error instanceof Error ? error.message : 'Could not play that sound.', 'warn')
-    } finally {
-      if (previewAbort.current === controller) setBusy('')
-    }
-  }
-
-  async function addSound(entry: SoundEntry) {
-    if (!store) return
-    const selected = store.selectedTrackId
-    let trackId = audioTrackFor(store.project, selected, null)
-    if (!trackId) {
-      const ids = store.addTracks({ kind: 'audio', count: 1, instrument: 'none', input: 'mic', channels: 1, armed: false })
-      trackId = ids[0] ?? null
-    }
-    if (!trackId) {
-      store.toast('Could not add a track for that sound.', 'warn')
-      return
-    }
-    setBusy(entry.id)
-    try {
-      await dropLibrarySound(store, trackId, 0, entry.id)
-    } finally {
-      setBusy('')
-    }
-  }
 
   return (
     <aside className="sl-browser" data-session-browser="open" style={{ ['--browser' as string]: `${width}px` }}>
@@ -320,41 +184,7 @@ export function SessionBrowser({
         }}
       />
       <div className="sl-search-row">
-        <input className="sl-search" aria-label="Search browser" placeholder="Search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0) }} />
-        {group === 'sounds' && (
-          <PrivateLibraryButton onDone={(message, changed) => {
-            store?.toast(message, changed ? 'good' : 'info')
-            if (changed) void loadCatalog()
-          }} />
-        )}
-        {group === 'sounds' && (
-          <SoundFilterButton
-            bpm={bpm}
-            soundKey={soundKey}
-            favoritesOnly={favoritesOnly}
-            keys={keys}
-            showTempoKey
-            onBpm={setBpm}
-            onKey={setSoundKey}
-            onFavorites={setFavoritesOnly}
-            collections={soundCollections(entries)}
-            categories={soundCategories(entries)}
-            collection={collection}
-            category={category}
-            collectionLabels={PACK_LABEL}
-            tags={soundTags(entries)}
-            tag={tag}
-            onTag={(value) => { setTag(value); setPage(0) }}
-            roles={soundRoles(entries)}
-            role={role}
-            onRole={(value) => { setRole(value); setPage(0) }}
-            onCollection={(value) => { setCollection(value); setPage(0) }}
-            onCategory={(value) => { setCategory(value); setPage(0) }}
-            showKind
-            kind={kind}
-            onKind={setKind}
-          />
-        )}
+        <input className="sl-search" aria-label="Search browser" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
       </div>
       <div className="sl-groups">
         <div className="sl-chip-scroll" role="tablist" aria-label="Browser">
@@ -367,54 +197,10 @@ export function SessionBrowser({
         {onClose && <button type="button" title="Hide the browser." onClick={onClose}>Close</button>}
       </div>
       <div className="sl-list" role="list">
-        {group === 'sounds' && phase === 'loading' && <p className="sl-note" role="status">Loading</p>}
-        {group === 'sounds' && phase === 'error' && (
-          <p className="sl-note" role="status">
-            The sound library is not online yet.
-            <button type="button" onClick={() => void loadCatalog()}>Retry</button>
-          </p>
-        )}
-        {group === 'sounds' && phase === 'ready' && !shownSounds.length && <p className="sl-note">Nothing matches.</p>}
-        {group === 'sounds' && phase === 'ready' && shownSounds.map((entry) => (
-          <div className={`sl-row${playing === entry.id ? ' is-playing' : ''}`} key={entry.id}>
-            <button
-              type="button"
-              data-drag-item={entry.id}
-              title={`${entry.name}. ${entry.origin === 'private' ? 'Private. On this device.' : ''} ${entry.type}. ${entry.category ?? ''} ${entry.role ?? ''} ${entry.tags.join(', ')}. Drag onto a slot.`}
-              aria-pressed={playing === entry.id}
-              disabled={busy === entry.id}
-              onPointerDown={(event) => beginSessionDrag(event, { kind: 'sound', id: entry.id }, entry.name, (drag, point) => onPointerDrop?.(drag, point))}
-              onClick={() => void preview(entry)}
-            >
-              {playing === entry.id && <i className="sound-live" aria-hidden="true" />}
-              <strong>{entry.name}</strong>
-              <small>{busy === entry.id ? `Loading ${Math.round(loadRatio * 100)}%` : playing === entry.id ? 'Playing' : [entry.origin === 'private' ? 'Private' : '', entry.type === 'one-shot' ? 'One-shot' : entry.type === 'loop' ? 'Loop' : 'Instrument', entry.pack ? packLabel(entry.pack) : '', entry.category, entry.role].filter(Boolean).join(' · ')}</small>
-            </button>
-            <button type="button" className="sl-add" disabled={busy === entry.id || !store || store.remoteFollow} aria-label={`Add. ${entry.name}`} onClick={() => void addSound(entry)}>Add</button>
-            <button
-              type="button"
-              className={`sl-save${favorites.includes(entry.id) ? ' on' : ''}`}
-              aria-pressed={favorites.includes(entry.id)}
-              disabled={!store || store.remoteFollow}
-              aria-label={favorites.includes(entry.id) ? `Saved. ${entry.name} is in favorites.` : `Save. Keep ${entry.name} in favorites.`}
-              title="Keep this sound in the project favorites."
-              onClick={() => store?.toggleSoundFavorite(entry.id)}
-            >
-              {favorites.includes(entry.id) ? 'Saved' : 'Save'}
-            </button>
-          </div>
-        ))}
-        {group === 'sounds' && phase === 'ready' && pageCount > 1 && (
-          <p className="sl-note">
-            Page {safePage + 1} of {pageCount}. {filteredSounds.length} sounds.
-            <button type="button" disabled={safePage <= 0} onClick={() => setPage(safePage - 1)}>Previous</button>
-            <button type="button" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>Next</button>
-          </p>
-        )}
-        {group !== 'sounds' && devices.map((item) => (
+        {devices.map((item) => (
           <DeviceRow key={`${item.kind}:${item.id}`} item={item} store={store} onPointerDrop={onPointerDrop} />
         ))}
-        {group !== 'sounds' && !devices.length && <p className="sl-note">Nothing matches.</p>}
+        {!devices.length && <p className="sl-note">Nothing matches.</p>}
       </div>
     </aside>
   )

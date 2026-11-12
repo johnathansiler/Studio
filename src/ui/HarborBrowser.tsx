@@ -5,6 +5,9 @@ import { filterHarborLoops, loopInstruments, loopKeys } from '../harbor/filter'
 import { normalizePeak } from '../audio/level'
 import { sampleLoadFault, sampleLoadState, subscribeSampleLoad } from '../audio/sampleLoadBus'
 import { instrumentFileUrl, loadHarborCatalog, loadZoneSamples, prepareCatalogInstrument, rememberHarborCatalog, samplesForNote } from '../harbor/load'
+import { favoriteSounds, isFavorite, subscribeFavorites, toggleFavorite } from '../library/favorites'
+import { rememberHarborInstrument } from '../library/recent'
+import { FavoriteStar } from './FavoriteStar'
 import { installHarborInstrument } from '../harbor/player'
 import { placeHarborLoop, previewHarborLoop } from '../harbor/place'
 import { articulationsIn } from '../harbor/program'
@@ -56,6 +59,7 @@ export function HarborBrowser({
   initial?: HarborCatalog
 }) {
   useSyncExternalStore(store.subscribe, () => store.version, () => store.version)
+  useSyncExternalStore(subscribeFavorites, favoriteSounds, favoriteSounds)
   const [catalog, setCatalog] = useState<HarborCatalog>(initial ?? { version: '', instruments: [], loops: [], entries: [] })
   const [loading, setLoading] = useState(!initial)
   const [failed, setFailed] = useState(false)
@@ -194,6 +198,7 @@ export function HarborBrowser({
         holdLibraryAudio: engine.holdLibraryAudio ? (id, samples) => engine.holdLibraryAudio!(id, samples) : undefined,
         auditionLibrary: engine.auditionLibrary ? (id, pitch, velocity) => engine.auditionLibrary!(id, pitch, velocity) : undefined,
       }, { cache: soundCache() })
+      rememberHarborInstrument({ id: item.id, name: item.name, family: item.family })
       store.toast(`${item.name} is on the keyboard.`, 'good')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not load that instrument.'
@@ -415,6 +420,11 @@ export function HarborBrowser({
                     <strong>{item.name}</strong>
                     <span className="sound-meta">{meta}</span>
                   </button>
+                  <FavoriteStar
+                    name={item.name}
+                    pressed={isFavorite(`harbor:${item.id}`)}
+                    onToggle={() => toggleFavorite({ id: `harbor:${item.id}`, name: item.name, detail: item.family || 'Instrument', kind: 'harbor', harborId: item.id, legacyId: item.id })}
+                  />
                   <button type="button" className="sound-add" disabled={busy === item.id} aria-label={`Load ${item.name}`} title={where} onClick={() => void loadInstrument(item)}>Load</button>
                 </div>
                 )
@@ -438,6 +448,11 @@ export function HarborBrowser({
                 {[entry.bpm ? `${Math.round(entry.bpm)} bpm` : '', entry.key ?? '', entry.bars ? `${entry.bars} bars` : '', entry.loopKind === 'drum' ? 'Drum' : 'Melodic', licenseLabel(entry.license)].filter(Boolean).join(' · ')}
               </span>
             </button>
+            <FavoriteStar
+              name={entry.name}
+              pressed={isFavorite(`harbor:${entry.id}`)}
+              onToggle={() => toggleFavorite({ id: `harbor:${entry.id}`, name: entry.name, detail: entry.loopKind === 'drum' ? 'Drum loop' : 'Loop', kind: 'harbor', harborId: entry.id, legacyId: entry.id })}
+            />
             <button type="button" className="sound-add" disabled={busy === entry.id} onClick={() => void addLoop(entry)}>Add</button>
           </div>
         ))}

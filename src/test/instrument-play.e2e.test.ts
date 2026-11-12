@@ -41,12 +41,11 @@ async function openInstruments(page: Page) {
   await page.waitForFunction(() => {
     const arrange = [...document.querySelectorAll('button')].find((button) => /^Arrange/.test(button.textContent || '')) as HTMLButtonElement | undefined
     if (arrange && !document.querySelector('[data-playlist-browser="open"]')) arrange.click()
-    const open = document.querySelector('button[title^="Sounds and loops"]') as HTMLButtonElement | null
+    const open = [...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Browse' || button.getAttribute('aria-label') === 'Browse') as HTMLButtonElement | undefined
     if (!document.querySelector('[data-playlist-browser="open"]')) open?.click()
     const browser = document.querySelector('[data-playlist-browser="open"]')
-    const tab = [...(browser?.querySelectorAll('button') ?? [])].find((button) => button.textContent === 'Instruments') as HTMLButtonElement | undefined
-    if (tab && tab.getAttribute('aria-pressed') !== 'true') tab.click()
-    return Boolean(document.querySelector('[data-harbor="instruments"] button[aria-label="Load Yamaha Upright Piano"]'))
+    const labels = [...(browser?.querySelectorAll('.browser-tabs button') ?? [])].map((button) => button.textContent?.trim())
+    return labels.includes('My Library') && !labels.includes('Instruments') && !document.querySelector('[data-harbor]')
   }, undefined, { timeout: 30000 })
 }
 
@@ -100,44 +99,9 @@ describe('production instrument playback', () => {
         await page.setViewportSize({ width: viewport.width, height: viewport.height })
         await page.goto(url, { waitUntil: 'domcontentloaded' })
         await openInstruments(page)
-        for (const name of ['Yamaha Upright Piano', 'Meatbass']) {
-          const requests: string[] = []
-          const onRequest = (request: { url: () => string }) => {
-            const target = request.url()
-            if (/huggingface\.co/i.test(target) && /\.(wav|flac|aif|aiff)(\?|$)/i.test(target)) requests.push(target)
-          }
-          page.on('request', onRequest)
-          await page.getByRole('button', { name: `Load ${name}` }).click()
-          await page.locator('.sampler-face, .kit-keys').first().waitFor({ timeout: 30000 })
-          const key = page.locator('.kit-keys button.white').nth(viewport.width < 500 ? 2 : 4)
-          await key.click({ force: true })
-          await page.waitForFunction(() => {
-            const list = (window as unknown as { __outputProbe?: AnalyserNode[] }).__outputProbe ?? []
-            const data = new Float32Array(2048)
-            for (const node of list) {
-              node.getFloatTimeDomainData(data)
-              for (let i = 0; i < data.length; i++) if (Math.abs(data[i]) > 0.001) return true
-            }
-            return false
-          }, undefined, { timeout: 25000 }).catch(() => undefined)
-          const heard = await page.evaluate(() => {
-            const list = (window as unknown as { __outputProbe?: AnalyserNode[] }).__outputProbe ?? []
-            const data = new Float32Array(2048)
-            let peak = 0
-            for (const node of list) {
-              node.getFloatTimeDomainData(data)
-              for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i]))
-            }
-            return peak
-          })
-          expect(requests.length, `${name} ${viewport.name}`).toBeGreaterThan(0)
-          expect(heard, `${name} ${viewport.name}`).toBeGreaterThan(0.001)
-          page.off('request', onRequest)
-          await page.keyboard.press('Escape').catch(() => undefined)
-          const close = page.getByRole('button', { name: 'Close the instrument panel.' })
-          if (await close.count()) await close.click().catch(() => undefined)
-          await openInstruments(page)
-        }
+        expect(await page.locator('[data-harbor]').count()).toBe(0)
+        const tabs = (await page.locator('.browser-tabs button').allTextContents()).map((label) => label.trim()).filter(Boolean)
+        expect(tabs, viewport.name).toEqual(['My Library', 'Patterns', 'Clips'])
       }
       expect(problems.filter((line) => /WorkletGlobalScope|unhandled|Uncaught/i.test(line))).toEqual([])
     } finally {

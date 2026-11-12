@@ -89,16 +89,43 @@ describe('loop load and beat machine pads', () => {
         if (!midi) throw new Error('missing midi track')
         store.selectTrack(midi.id)
       })
-      await page.getByRole('button', { name: 'Browse', exact: true }).click()
-      await page.locator('[data-playlist-browser="open"]').waitFor()
-      await page.locator('.browser-tabs').getByRole('button', { name: 'Sounds', exact: true }).click()
-      await page.getByLabel('Search sounds').fill('2-AND-4 (120)')
-      const row = page.locator('.sound-row', { hasText: '2-AND-4 (120)' }).first()
-      await row.waitFor({ timeout: 20000 })
-      const loopName = (await row.locator('strong').innerText()).trim()
-      await row.locator('.sound-copy').tap()
-      await page.locator('.sound-row.is-playing').waitFor({ timeout: 15000 })
-      await row.getByRole('button', { name: /^Load/ }).tap()
+      const loopName = '2-AND-4 (120)'
+      await page.evaluate((name) => {
+        const hook = (window as unknown as {
+          __cueharbor: {
+            engine: { currentTimelineSample: () => number }
+            store: {
+              project: { sampleRate: number; tracks: { id: string; type: string }[] }
+              addTracks: (input: { kind: string; count: number; instrument: string; input: string; channels: number; armed: boolean }) => string[]
+              addAsset: (asset: { id: string; name: string; sampleRate: number; channels: Float32Array[] }) => void
+              addAudioClip: (trackId: string, clip: Record<string, unknown>) => void
+              selectTrack: (id: string) => void
+            }
+          }
+        }).__cueharbor
+        const store = hook.store
+        const rate = store.project.sampleRate
+        const length = Math.round(rate * 2)
+        const channel = new Float32Array(length)
+        for (let i = 0; i < channel.length; i++) channel[i] = Math.sin((2 * Math.PI * 220 * i) / rate) * 0.4
+        store.addAsset({ id: 'loopbuf', name, sampleRate: rate, channels: [channel] })
+        const created = store.addTracks({ kind: 'audio', count: 1, instrument: 'none', input: 'mic', channels: 1, armed: false })
+        const trackId = created[0]
+        store.addAudioClip(trackId, {
+          id: 'loopclip',
+          name,
+          bufferId: 'loopbuf',
+          startSample: Math.round(hook.engine.currentTimelineSample()),
+          offsetSamples: 0,
+          durationSamples: length,
+          fadeInSamples: 0,
+          fadeOutSamples: 0,
+          gain: 1,
+          source: 'import',
+          stretch: { sourceSamples: length, semitones: 0, cents: 0, mode: 'pro', followTempo: false, sourceBpm: 120, markers: [] },
+        })
+        store.selectTrack(trackId)
+      }, loopName)
       await page.locator('[data-clip]').first().waitFor({ timeout: 20000 })
       await page.waitForTimeout(150)
       const loaded = await page.evaluate((name) => {

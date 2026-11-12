@@ -4,11 +4,12 @@ import { useRef, useState, type ChangeEvent } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { preparePadPcm } from '../instruments/mpc/render'
 import { captureSlot, openInputCapture, SLOT_ACCEPT } from '../audio/sample/slot'
-import { soundCache } from '../sounds/cache'
-import { fetchCatalogSound, loadSoundCatalog } from '../sounds/catalog'
+import { readLibraryAccessKey } from '../library/access'
+import { rememberLibrarySound } from '../library/recent'
+import { loadLibraryCatalog } from '../library/audio'
+import { readLibraryAsset } from '../library/place'
+import type { LibraryEntry } from '../library/types'
 import { decodeSoundBytes } from '../sounds/place'
-import { chopLoops } from '../sounds/roles'
-import type { SoundEntry } from '../sounds/types'
 import {
   FACTORY_VINTAGE,
   assignPlan,
@@ -68,7 +69,7 @@ export function ChopDrawer({
   const [vintageOpen, setVintageOpen] = useState(vintageStartsOpen)
   const [presetTick, setPresetTick] = useState(0)
   const [presetDraft, setPresetDraft] = useState('')
-  const [browser, setBrowser] = useState<SoundEntry[] | null>(null)
+  const [browser, setBrowser] = useState<LibraryEntry[] | null>(null)
   const [loopQuery, setLoopQuery] = useState('')
   const [picked, setPicked] = useState<number | null>(null)
   const vintage = kit.vintage
@@ -98,12 +99,27 @@ export function ChopDrawer({
     setBrowser(null)
   }
 
-  async function fromBrowser(entry: SoundEntry) {
+  async function openLibrary() {
+    if (!readLibraryAccessKey()) {
+      store.toast('Unlock My Library in Browse first.', 'info')
+      return
+    }
     try {
-      const bytes = await fetchCatalogSound(entry)
-      const decoded = await decodeSoundBytes(bytes)
-      const channel = decoded.channels[0]
-      if (channel?.length) await useSamples(entry.name, channel, decoded.sampleRate)
+      const loaded = await loadLibraryCatalog()
+      setBrowser(loaded.index.entries.filter((entry) => entry.type === 'loop'))
+    } catch (error) {
+      store.toast(error instanceof Error ? error.message : 'My Library is not available.', 'warn')
+    }
+  }
+
+  async function fromLibrary(entry: LibraryEntry) {
+    try {
+      const asset = await readLibraryAsset(entry)
+      const channel = asset.channels[0]
+      if (channel?.length) {
+        await useSamples(entry.name, channel, asset.sampleRate)
+        rememberLibrarySound(entry)
+      }
       else store.toast('That sound had no audio.', 'warn')
     } catch (error) {
       store.toast(error instanceof Error ? error.message : 'That sound is not on this device. The rest of the project still plays.', 'warn')
@@ -216,7 +232,7 @@ export function ChopDrawer({
         <div className="chop-anchor">
           <button ref={loadButton} type="button" className="hw-key ch-tab" aria-expanded={loadOpen} onClick={() => { setLoadOpen((value) => !value); setModeOpen(false); setVintageOpen(false) }}>Load sample</button>
           <AnchoredMenu className="chop-menu" open={loadOpen} onClose={() => setLoadOpen(false)} label="Load sample" triggerRef={loadButton} prefer="auto">
-            <button type="button" className="hw-key ch-tab" onClick={() => { void loadSoundCatalog(fetch, soundCache()).then((result) => setBrowser(chopLoops(result.entries))) }}>Browser</button>
+            <button type="button" className="hw-key ch-tab" onClick={() => { void openLibrary() }}>My Library</button>
             <button type="button" className="hw-key ch-tab" onClick={() => fileRef.current?.click()}>Upload</button>
             <button type="button" className="hw-key ch-tab" onClick={() => { void fromMic() }}>Microphone</button>
             <button type="button" className="hw-key ch-tab" onClick={() => { void fromTab() }}>Tab audio</button>
@@ -224,9 +240,9 @@ export function ChopDrawer({
             {browser && (
               <input aria-label="Search loops" placeholder="Search loops" value={loopQuery} onChange={(event) => setLoopQuery(event.target.value)} />
             )}
-            {browser && chopLoops(browser, loopQuery).length === 0 && <p className="hw-key ch-tab">No hosted loops yet.</p>}
-            {browser && chopLoops(browser, loopQuery).map((entry) => (
-              <button key={entry.id} type="button" className="hw-key ch-tab" onClick={() => { void fromBrowser(entry) }}>{entry.name} · {entry.origin === 'private' ? 'Private' : 'Loop'}</button>
+            {browser && browser.filter((entry) => !loopQuery.trim() || entry.name.toLowerCase().includes(loopQuery.trim().toLowerCase())).length === 0 && <p className="hw-key ch-tab">No loops in My Library yet.</p>}
+            {browser && browser.filter((entry) => !loopQuery.trim() || entry.name.toLowerCase().includes(loopQuery.trim().toLowerCase())).map((entry) => (
+              <button key={entry.key} type="button" className="hw-key ch-tab" onClick={() => { void fromLibrary(entry) }}>{entry.name}</button>
             ))}
           </AnchoredMenu>
         </div>

@@ -14,6 +14,7 @@ import {
   licenseLabel,
   parseHarborCatalog,
   parseSamplePath,
+  programFromPaths,
   programFromRoots,
   zonesFromPaths,
 } from '../harbor'
@@ -26,21 +27,27 @@ const roots = JSON.parse(readFileSync(new URL('./fixtures/instrument-roots.json'
 
 describe('live instrument catalog', () => {
   it('pins the dataset commit and reads the published document', () => {
-    expect(INSTRUMENT_LIBRARY.revision).toBe('2f1b999bdffd554de70079280b238fcbb185d93e')
+    expect(INSTRUMENT_LIBRARY.revision).toBe('e6b451a1517ac2e450dd4a1b538e8aceaad25b08')
     expect(INSTRUMENT_LIBRARY.catalog).toBe('catalog.json')
-    expect(instrumentCatalogUrl()).toBe('https://huggingface.co/datasets/cueharbor/instrument-library/resolve/2f1b999bdffd554de70079280b238fcbb185d93e/catalog.json')
-    expect(instrumentFileUrl('loops/collection-of-loops-vol01/090Fxgroove-01.wav')).toBe('https://huggingface.co/datasets/cueharbor/instrument-library/resolve/2f1b999bdffd554de70079280b238fcbb185d93e/loops/collection-of-loops-vol01/090Fxgroove-01.wav')
+    expect(instrumentCatalogUrl()).toBe('https://huggingface.co/datasets/cueharbor/instrument-library/resolve/e6b451a1517ac2e450dd4a1b538e8aceaad25b08/catalog.json')
+    expect(instrumentFileUrl('loops/collection-of-loops-vol01/090Fxgroove-01.wav')).toBe('https://huggingface.co/datasets/cueharbor/instrument-library/resolve/e6b451a1517ac2e450dd4a1b538e8aceaad25b08/loops/collection-of-loops-vol01/090Fxgroove-01.wav')
     expect(catalog.version).toBe('1')
-    expect(catalog.instruments).toHaveLength(36)
+    expect(catalog.instruments).toHaveLength(40)
+    expect(catalog.loops).toHaveLength(1025)
     expect(catalog.instruments.some((item) => item.id === 'black-and-blue-basses')).toBe(true)
+    expect(catalog.instruments.some((item) => item.id === 'digrinonf-acoustic-guitar-notes')).toBe(true)
+    expect(catalog.instruments.some((item) => item.id === 'modularsamples-cs30l-straight-guitar')).toBe(true)
+    expect(catalog.instruments.some((item) => item.id === 'modularsamples-cs30l-toy-piano')).toBe(true)
+    expect(catalog.instruments.some((item) => item.id === 'owstu-acoustic-guitar')).toBe(true)
     expect(catalog.instruments.some((item) => legacyAlias(item.path, item.id))).toBe(false)
     expect(legacyAlias('instruments/darkblack-bass/Programs/01-darkblack_keysw.sfz', 'darkblack-bass')).toBe(true)
     const melodic = catalog.loops.filter((loop) => loop.loopKind === 'melodic')
     const drums = catalog.loops.filter((loop) => loop.loopKind === 'drum')
-    expect(melodic.length).toBeGreaterThan(0)
-    expect(drums.length).toBeGreaterThan(0)
-    expect(catalog.loops.every((loop) => (loop.bpm ?? 0) > 0)).toBe(true)
-    expect(melodic.every((loop) => Boolean(loop.key))).toBe(true)
+    expect(melodic).toHaveLength(484)
+    expect(drums).toHaveLength(541)
+    expect(catalog.loops.filter((loop) => (loop.bpm ?? 0) > 0)).toHaveLength(995)
+    expect(melodic.filter((loop) => loop.key)).toHaveLength(342)
+    expect(catalog.loops.some((loop) => loop.path.endsWith('computer..wav'))).toBe(true)
     expect(licenseLabel('CC0-1.0')).toBe('CC0')
     expect(licenseLabel('public-domain')).toBe('Public domain')
     expect(licenseLabel('public-domain')).not.toBe('CC0')
@@ -62,6 +69,35 @@ describe('live instrument catalog', () => {
     ])
     expect(rows).toHaveLength(3)
     expect(rows.find((row) => row.path.includes('vl2'))?.velLo).toBeGreaterThan(1)
+  })
+
+  it('groups bare note files into one instrument', () => {
+    const straight = catalog.instruments.find((item) => item.id === 'modularsamples-cs30l-straight-guitar')
+    const guitar = catalog.instruments.find((item) => item.id === 'digrinonf-acoustic-guitar-notes')
+    expect(straight && guitar).toBeTruthy()
+    const straightNotes = [
+      'instruments/modularsamples-cs30l-straight-guitar/C2_036.wav',
+      'instruments/modularsamples-cs30l-straight-guitar/F#3_054.wav',
+      'instruments/modularsamples-cs30l-straight-guitar/C4_060.wav',
+      'instruments/modularsamples-cs30l-straight-guitar/C6_084.wav',
+    ]
+    const straightProgram = programFromPaths(straight!, straightNotes)
+    expect(straightProgram?.program.name).toBe('Yamaha CS-30L Straight Guitar')
+    expect(straightProgram?.program.zones).toHaveLength(4)
+    expect(new Set(zonesFromPaths(straight!, straightNotes).map((row) => row.instrument))).toEqual(new Set(['Yamaha CS-30L Straight Guitar']))
+    const bare = [
+      'instruments/digrinonf-acoustic-guitar-notes/mediator/F#2.wav',
+      'instruments/digrinonf-acoustic-guitar-notes/mediator/F#3.wav',
+      'instruments/digrinonf-acoustic-guitar-notes/hammer-on-mediator/F#4.wav',
+      'instruments/digrinonf-acoustic-guitar-notes/slide-mediator/F#2.wav',
+    ]
+    const rows = zonesFromPaths(guitar!, bare)
+    expect(new Set(rows.map((row) => row.instrument))).toEqual(new Set(['digrinonf Acoustic Guitar']))
+    expect(new Set(rows.map((row) => row.root))).toEqual(new Set([42, 54, 66]))
+    expect(rows.some((row) => row.instrument === 'F#2' || row.instrument === 'F#2.wav')).toBe(false)
+    const built = programFromPaths(guitar!, bare)
+    expect(built?.program.zones.length).toBe(bare.length)
+    expect(built?.program.name).toBe('digrinonf Acoustic Guitar')
   })
 
   it('gives every catalog instrument a zone for MIDI 21 through 108', () => {
@@ -93,6 +129,8 @@ describe('instrument library browser', () => {
     }
     expect(html).toContain('>Load<')
     expect(html).toContain('Osiris Piano')
+    expect(html).toContain('digrinonf Acoustic Guitar')
+    expect(html).toContain('Yamaha CS-30L Toy Piano')
     expect(html).toContain('Black And Blue')
     expect(html).toContain('CC0')
     expect(html).toContain('Public domain')

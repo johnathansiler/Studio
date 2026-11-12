@@ -2263,7 +2263,7 @@ async function importDropped(files: FileList) {
                   onTrackAdded={onTrackAdded}
                   onQuickPunch={() => void quickPunch()}
                   onAnalyze={(trackId) => { setAnalysisTrackId(trackId); setPhonePane('edit'); setSurface('studio') }}
-                  libraryTab={soundsOpen ? 'sounds' : null}
+                  libraryTab={soundsOpen ? 'library' : null}
                   browserDock={soundsOpen}
                   onBrowserDock={setSoundsOpen}
                   onLibraryClose={() => { engine.stopPreview(); setSoundsOpen(false) }}

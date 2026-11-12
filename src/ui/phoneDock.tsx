@@ -351,7 +351,7 @@ export function PhoneDock({
           data-phone-tab="browse"
           aria-pressed={browseOpen}
           aria-label="Browse"
-          title="Sounds and loops. Open sounds, instruments, and loops."
+          title="My Library, patterns, and clips."
           onClick={onBrowse}
         >
           Browse

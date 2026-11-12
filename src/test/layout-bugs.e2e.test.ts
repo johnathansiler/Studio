@@ -155,48 +155,22 @@ describe('phone and landscape layout bugs', () => {
     }
   }, 60000)
 
-  it('shows the same arcade loop rows in a landscape sound sheet', async () => {
+  it('opens Browse on My Library without the old sound lists', async () => {
     const namesAt = async (width: number, height: number) => {
       const { browser, page } = await boot(width, height)
       try {
         await page.getByRole('button', { name: 'Browse', exact: true }).click()
         await page.locator('[data-playlist-browser="open"]').waitFor()
-        await page.locator('.sound-chips button', { hasText: /^Loops$/ }).click()
-        await page.locator('input[aria-label="Search sounds"]').fill('arcade')
-        await page.locator('.sound-count', { hasText: '14' }).waitFor({ timeout: 15000 })
         const result = await page.evaluate(() => {
           const sheet = document.querySelector('[data-playlist-browser="open"]')!
-          const list = sheet.querySelector('.sound-list') as HTMLElement
-          const body = sheet.querySelector('.bottom-sheet-body') as HTMLElement
-          const scroller = list.scrollHeight > list.clientHeight + 8 ? list : body
-          const dock = document.querySelector('.tool-slot')!.getBoundingClientRect()
-          const chips = sheet.querySelector('.sound-chips[aria-label="Kind"]')!.getBoundingClientRect()
+          const tabs = [...sheet.querySelectorAll('.browser-tabs .browser-chip-scroll > button')].map((node) => node.textContent?.trim() ?? '')
+          const dock = document.querySelector('.tool-slot')?.getBoundingClientRect()
           const sheetBox = sheet.getBoundingClientRect()
-          const rows = [...sheet.querySelectorAll('.sound-row')]
-          const seen = new Set<string>()
-          const readable = (row: Element) => {
-            const frame = scroller.getBoundingClientRect()
-            const rowBox = row.getBoundingClientRect()
-            const top = Math.max(rowBox.top, frame.top, sheetBox.top)
-            const bottom = Math.min(rowBox.bottom, frame.bottom, sheetBox.bottom, dock.top)
-            return bottom - top >= 28
-          }
-          const visit = () => { for (const row of rows) if (readable(row)) seen.add(row.querySelector('strong')!.textContent || '') }
-          scroller.scrollTop = 0
-          visit()
-          const atRest = rows.filter(readable).length
-          for (let y = 0; y <= scroller.scrollHeight; y += 16) {
-            scroller.scrollTop = y
-            visit()
-          }
           return {
-            rows: rows.length,
-            seen: seen.size,
-            atRest,
-            chipH: chips.height,
-            chipInside: chips.top >= sheetBox.top - 1 && chips.bottom <= Math.min(sheetBox.bottom, dock.top) + 1,
-            listScroll: scroller.scrollHeight > scroller.clientHeight + 8,
-            names: [...sheet.querySelectorAll('.sound-row strong')].map((node) => node.textContent),
+            tabs,
+            harbor: sheet.querySelectorAll('[data-harbor]').length,
+            kind: sheet.querySelectorAll('.sound-chips[aria-label="Kind"]').length,
+            aboveDock: !dock || sheetBox.bottom <= dock.top + 1,
           }
         })
         await page.screenshot({ path: `/opt/cursor/artifacts/fix-sounds-${width}x${height}.png` })
@@ -208,16 +182,12 @@ describe('phone and landscape layout bugs', () => {
     const land = await namesAt(844, 390)
     const phone = await namesAt(390, 844)
     const wide = await namesAt(476, 752)
-    expect(land.rows).toBe(14)
-    expect(land.seen).toBe(14)
-    expect(land.atRest).toBeGreaterThan(0)
-    expect(land.chipInside).toBe(true)
-    expect(land.chipH).toBeLessThanOrEqual(36)
-    expect(land.listScroll).toBe(true)
-    expect(land.names).toEqual(phone.names)
-    expect(land.names).toEqual(wide.names)
-    expect(phone.seen).toBe(14)
-    expect(wide.seen).toBe(14)
+    for (const result of [land, phone, wide]) {
+      expect(result.tabs).toEqual(['My Library', 'Patterns', 'Clips'])
+      expect(result.harbor).toBe(0)
+      expect(result.kind).toBe(0)
+      expect(result.aboveDock).toBe(true)
+    }
   }, 90000)
 
   it('keeps the track menu tappable when lanes are zoomed fully out and fully in', async () => {

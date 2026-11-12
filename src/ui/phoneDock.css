@@ -611,7 +611,7 @@ body:has(.shell.phone) #shell-menu .menu-session {
   line-height: 1;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
 }
 
 .shell.phone:not(.land) .phone-top .transport.simple .t-main .ideas-bulb {

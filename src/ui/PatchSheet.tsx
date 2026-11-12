@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { GestureReadout, TouchSlider, useDragValue } from './kit/controls'
 import type { AudioEngine } from '../audio/engine'
 import { detectRoot } from '../audio/sample/engine'
-import { fetchCatalogSound, loadSoundCatalog } from '../sounds/catalog'
+import { fetchCatalogSound } from '../sounds/catalog'
 import { decodeSoundBytes } from '../sounds/place'
 import type { SoundEntry } from '../sounds/types'
 import {
@@ -58,15 +58,7 @@ export function PatchSheet({
   const [routeId, setRouteId] = useState('')
   const [more, setMore] = useState(false)
   const [hint, setHint] = useState(controlHelp('tabLayers'))
-  const [samples, setSamples] = useState<SoundEntry[]>(initialSounds ?? [])
-  useEffect(() => {
-    if (initialSounds) return
-    let alive = true
-    void loadSoundCatalog().then((next) => {
-      if (alive) setSamples(next.entries)
-    }).catch(() => undefined)
-    return () => { alive = false }
-  }, [initialSounds])
+  const [samples] = useState<SoundEntry[]>(initialSounds ?? [])
   useEffect(() => () => {
     for (const note of KEYS) engine.previewPatch(trackId, note, false)
   }, [engine, trackId])

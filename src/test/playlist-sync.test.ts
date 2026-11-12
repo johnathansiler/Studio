@@ -177,14 +177,15 @@ describe('arrange browser', () => {
         currentTimelineSample: () => 0,
       },
       phone: false,
-      tab: 'sounds',
+      tab: 'library',
       onTab() {},
       onClose() {},
       onSeek() {},
     }))
     expect(browser).toContain('data-playlist-browser="open"')
     expect(browser).not.toContain('data-screen-overlay')
-    for (const label of ['Sounds', 'Instruments', 'Loops', 'Project', 'Drums']) expect(browser).toContain(label)
+    for (const label of ['My Library', 'Patterns', 'Clips']) expect(browser).toContain(label)
+    for (const label of ['Sounds', 'Instruments', 'Loops', 'Project']) expect(browser).not.toContain(`>${label}<`)
     expect(browser).not.toContain('>Plugins<')
     expect(browser).not.toContain('Drum one-shots and kits.')
     expect(html).not.toContain('>Read<')
