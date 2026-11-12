@@ -131,6 +131,10 @@ function steerFine(input: {
   shift: boolean
   extra: boolean
   fineLatch: boolean
+  /** The finger already moved on the control's axis, so a reversal must not switch scale. */
+  committed?: boolean
+  /** Farthest point of this hold. Returning toward the start must not look like a new slow drag. */
+  peakTravel?: number
   axis: 'x' | 'y'
   originX: number
   originY: number
@@ -145,9 +149,9 @@ function steerFine(input: {
   if (!input.law || input.pointerType !== 'touch') return { fine, cross: false }
   const primary = input.axis === 'x' ? input.clientX - input.originX : input.originY - input.clientY
   const cross = input.axis === 'x' ? input.originY - input.clientY : input.clientX - input.originX
-  const crossFine = Math.abs(cross) > Math.abs(primary) + 6 && Math.abs(cross) > TAP_PX
+  const crossFine = !input.committed && Math.abs(cross) > Math.abs(primary) + 6 && Math.abs(cross) > TAP_PX
   const elapsed = input.now - input.started
-  const travel = Math.hypot(input.clientX - input.downX, input.clientY - input.downY)
+  const travel = Math.max(input.peakTravel ?? 0, Math.hypot(input.clientX - input.downX, input.clientY - input.downY))
   const slow = elapsed > SLOW_AFTER_MS && travel > TAP_PX && travel / elapsed < SLOW_PX_PER_MS
   if (crossFine || slow) fine = true
   return { fine, cross: crossFine }
@@ -161,6 +165,13 @@ function mixText(law: MixLaw | null, value: number, fallback: string) {
 
 function pageWindow(): Window | null {
   return (globalThis as { window?: Window }).window ?? null
+}
+
+function markDrag(active: boolean) {
+  const root = (globalThis as { document?: Document }).document?.documentElement
+  if (!root) return
+  if (active) root.setAttribute('data-control-drag', '1')
+  else root.removeAttribute('data-control-drag')
 }
 
 function travelFor(spec: ControlGesture, el: GestureElement, axis: 'x' | 'y', fine: boolean) {
@@ -199,7 +210,7 @@ export function resetTarget(el: Pick<GestureElement, 'className' | 'dataset' | '
 
 export function attachControlGesture(el: GestureElement, get: () => ControlGesture) {
   el.style.touchAction = 'none'
-  let drag: { id: number; x: number; y: number; downX: number; downY: number; started: number; value: number; moved: boolean; candidate: boolean; fine: boolean; fineLatch: boolean; pointerType?: string } | null = null
+  let drag: { id: number; x: number; y: number; downX: number; downY: number; started: number; value: number; moved: boolean; candidate: boolean; fine: boolean; fineLatch: boolean; committed: boolean; peak: number; pointerType?: string } | null = null
   let cancelFine: () => void = () => undefined
   let lastClient = { x: 0, y: 0 }
   let lastValue = 0
@@ -256,7 +267,8 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
     const value = spec.getValue()
     lastClient = { x: event.clientX, y: event.clientY }
     lastValue = value
-    drag = { id, x: event.clientX, y: event.clientY, downX: event.clientX, downY: event.clientY, started: now(), value, moved: false, candidate, fine: !!event.shiftKey || pointers.size > 1, fineLatch: false, pointerType: event.pointerType }
+    drag = { id, x: event.clientX, y: event.clientY, downX: event.clientX, downY: event.clientY, started: now(), value, moved: false, candidate, fine: !!event.shiftKey || pointers.size > 1, fineLatch: false, committed: false, peak: 0, pointerType: event.pointerType }
+    markDrag(true)
     cancelFine()
     cancelFine = armFinePress(event.pointerType, () => {
       if (!drag) return
@@ -279,6 +291,11 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
       taps.move(travel)
       cancelFine()
     }
+    const axis = spec.axis === 'y' ? 'y' : 'x'
+    const primaryFromDown = axis === 'x' ? event.clientX - drag.downX : drag.downY - event.clientY
+    if (Math.abs(primaryFromDown) > 12) drag.committed = true
+    const span = Math.hypot(event.clientX - drag.downX, event.clientY - drag.downY)
+    if (span > drag.peak) drag.peak = span
     const law = spec.axis === 'pad' ? null : lawOf(el, spec)
     const steered = steerFine({
       law,
@@ -286,7 +303,9 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
       shift: fineNow(event.shiftKey),
       extra: false,
       fineLatch: !!drag.fineLatch,
-      axis: spec.axis === 'y' ? 'y' : 'x',
+      committed: drag.committed,
+      peakTravel: drag.peak,
+      axis,
       originX: drag.x,
       originY: drag.y,
       downX: drag.downX,
@@ -342,6 +361,7 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
     const kind = taps.end(now(), moved)
     const spec = specOf()
     drag = null
+    markDrag(false)
     if (kind === 'reset') {
       const next = resetTarget(el, spec)
       if (next != null) {
@@ -401,28 +421,55 @@ export function attachControlGesture(el: GestureElement, get: () => ControlGestu
   el.addEventListener('pointerdown', onDown, { passive: false })
   el.addEventListener('pointermove', move, { passive: false })
   el.addEventListener('pointerup', end, { passive: false })
-  el.addEventListener('pointercancel', end, { passive: false })
+  const onCancel = (event: PointerLike) => {
+    if (event.cancelable !== false) event.preventDefault?.()
+    pointers.delete(event.pointerId ?? 1)
+  }
+  const onTouchMove = (event: Event) => {
+    if (!drag) return
+    const touchEvent = event as Event & { cancelable?: boolean; preventDefault?: () => void; touches?: ArrayLike<{ identifier: number; clientX: number; clientY: number }> }
+    if (touchEvent.cancelable !== false) touchEvent.preventDefault?.()
+    const touches = touchEvent.touches
+    if (!touches?.length) return
+    let touch = touches[0]
+    for (let i = 0; i < touches.length; i++) {
+      if (touches[i].identifier === drag.id) touch = touches[i]
+    }
+    move({
+      pointerId: drag.id,
+      pointerType: 'touch',
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+      cancelable: true,
+      preventDefault() {},
+    })
+  }
+  el.addEventListener('pointercancel', onCancel, { passive: false })
   el.addEventListener('wheel', onWheel, { passive: false })
   el.addEventListener('click', onClick, { capture: true })
   el.addEventListener('dblclick', onClick, { capture: true })
   const host = pageWindow()
+  const doc = (globalThis as { document?: Document }).document
   host?.addEventListener('pointerdown', onWindowDown as unknown as EventListener)
-  host?.addEventListener('pointerup', onWindowUp as unknown as EventListener)
+  host?.addEventListener('pointerup', end as unknown as EventListener)
   host?.addEventListener('pointercancel', onWindowUp as unknown as EventListener)
+  doc?.addEventListener('touchmove', onTouchMove, { capture: true, passive: false })
 
   return () => {
     if (readoutTimer) clearTimeout(readoutTimer)
+    markDrag(false)
     el.removeEventListener('touchstart', onTouchStart)
     el.removeEventListener('pointerdown', onDown)
     el.removeEventListener('pointermove', move)
     el.removeEventListener('pointerup', end)
-    el.removeEventListener('pointercancel', end)
+    el.removeEventListener('pointercancel', onCancel)
     el.removeEventListener('wheel', onWheel)
     el.removeEventListener('click', onClick)
     el.removeEventListener('dblclick', onClick)
     host?.removeEventListener('pointerdown', onWindowDown as unknown as EventListener)
-    host?.removeEventListener('pointerup', onWindowUp as unknown as EventListener)
+    host?.removeEventListener('pointerup', end as unknown as EventListener)
     host?.removeEventListener('pointercancel', onWindowUp as unknown as EventListener)
+    doc?.removeEventListener('touchmove', onTouchMove, true)
   }
 }
 
@@ -430,7 +477,7 @@ const CONTROL = '.kit-knob button, .kit-fader button, .knob button, .tune-knob, 
 
 /** Stop the page from scrolling when a press starts on a control, and drive native sliders ourselves. */
 export function installControlGuards(doc: Document) {
-  let drag: { id: number; x: number; y: number; downX: number; downY: number; started: number; value: number; vertical: boolean; el: HTMLInputElement; moved: boolean; fine: boolean; fineLatch: boolean; pointerType?: string } | null = null
+  let drag: { id: number; x: number; y: number; downX: number; downY: number; started: number; value: number; vertical: boolean; el: HTMLInputElement; moved: boolean; fine: boolean; fineLatch: boolean; committed: boolean; pointerType?: string } | null = null
   let cancelFine: () => void = () => undefined
   let lastPoint = { x: 0, y: 0 }
   const pointers = new Set<number>()
@@ -494,7 +541,7 @@ export function installControlGuards(doc: Document) {
     taps.begin(performance.now(), others, range)
     const box = range.getBoundingClientRect()
     lastPoint = { x: event.clientX, y: event.clientY }
-    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, downX: event.clientX, downY: event.clientY, started: performance.now(), value: Number(range.value), vertical: verticalRange(range, box), el: range, moved: false, fine: event.shiftKey || pointers.size > 1, fineLatch: false, pointerType: event.pointerType }
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, downX: event.clientX, downY: event.clientY, started: performance.now(), value: Number(range.value), vertical: verticalRange(range, box), el: range, moved: false, fine: event.shiftKey || pointers.size > 1, fineLatch: false, committed: false, pointerType: event.pointerType }
     cancelFine()
     cancelFine = armFinePress(event.pointerType, () => {
       if (!drag) return
@@ -518,12 +565,15 @@ export function installControlGuards(doc: Document) {
     }
     if (!drag.moved) return
     const law = inputLaw(drag.el)
+    const primaryFromDown = drag.vertical ? drag.downY - event.clientY : event.clientX - drag.downX
+    if (Math.abs(primaryFromDown) > 12) drag.committed = true
     const steered = steerFine({
       law,
       pointerType: drag.pointerType,
       shift: event.shiftKey || pointers.size > 1,
       extra: false,
       fineLatch: drag.fineLatch,
+      committed: drag.committed,
       axis: drag.vertical ? 'y' : 'x',
       originX: drag.x,
       originY: drag.y,
@@ -581,7 +631,10 @@ export function installControlGuards(doc: Document) {
     hide()
   }
   const onUp = (event: PointerEvent) => finish(event, false)
-  const onCancel = (event: PointerEvent) => finish(event, true)
+  const onCancel = (event: PointerEvent) => {
+    if (event.cancelable) event.preventDefault()
+    pointers.delete(event.pointerId)
+  }
   const onClick = (event: MouseEvent) => {
     if (!swallow || performance.now() > swallow.until) return
     const target = event.target

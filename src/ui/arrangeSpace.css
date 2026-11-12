@@ -299,9 +299,9 @@
 }
 .shell.phone .arrange .ruler .loop-host button.loop-grip,
 .shell.phone .arrange .ruler .loop-host .park-dock .loop-grip {
-  height: var(--ruler-h, 22px) !important;
+  height: 100% !important;
   min-height: 0 !important;
-  max-height: var(--ruler-h, 22px) !important;
+  max-height: 100% !important;
 }
 .shell.phone .arrange .timeline-scroll .ruler > span {
   top: 1px;
@@ -309,13 +309,13 @@
   line-height: 12px;
 }
 .shell.phone .arrange .ruler .loop-host .song-loop {
-  top: 2px;
-  bottom: 2px;
+  top: 0;
+  bottom: 0;
 }
 .shell.phone .arrange .ruler .loop-host .loop-grip-face {
-  top: 1px;
-  bottom: auto;
-  height: calc(var(--ruler-h) - 2px);
+  top: 0;
+  bottom: 0;
+  height: 100%;
 }
 .shell.phone .song-map { display: none; }
 .shell.phone .heads { overflow-x: hidden; }

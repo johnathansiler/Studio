@@ -6,7 +6,8 @@ export type BrowseRow =
   | { kind: 'instrument'; instrument: LibraryInstrumentSummary }
   | { kind: 'sound'; entry: LibraryEntry }
 
-function coveredByInstrument(entry: LibraryEntry, instruments: LibraryInstrumentSummary[]) {
+function coveredByInstrument(entry: LibraryEntry, instruments: LibraryInstrumentSummary[], covered?: Set<string>) {
+  if (covered?.has(entry.key)) return true
   if (entry.type === 'multisample note') return true
   if (entry.type) return false
   const stem = (entry.key.split('/').pop() || '').replace(/\.[a-z0-9]+$/i, '')
@@ -32,13 +33,14 @@ export function browseLibraryRows(
   hits: LibraryHits,
   instruments: LibraryInstrumentSummary[],
   query: LibraryQuery,
+  covered?: Set<string>,
 ): BrowseRow[] {
   const sounds: LibraryEntry[] = []
   const count = hits.ids ? hits.ids.length : index.entries.length
   for (let n = 0; n < count; n++) {
     const id = hits.ids ? hits.ids[n] : n
     const entry = index.entries[id]
-    if (!entry || coveredByInstrument(entry, instruments)) continue
+    if (!entry || coveredByInstrument(entry, instruments, covered)) continue
     sounds.push(entry)
   }
   const shown = instruments.filter((item) => instrumentQueryHit(item, query))

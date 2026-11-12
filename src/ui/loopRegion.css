@@ -51,8 +51,8 @@
 }
 .loop-host .song-loop {
   position: absolute;
-  top: 4px;
-  bottom: 4px;
+  top: 0;
+  bottom: 0;
   border-radius: 8px;
   cursor: grab;
   z-index: 1;
@@ -135,8 +135,11 @@
 }
 .loop-host .loop-grip-face {
   position: absolute;
-  top: 2px;
-  bottom: 2px;
+  top: 0;
+  bottom: 0;
+  height: 100%;
+  margin: 0;
+  box-sizing: border-box;
   width: var(--loop-grip-thickness, 12px);
   display: flex;
   align-items: center;
@@ -188,8 +191,9 @@
 /* The arrange ruler absolutely positions every span. Keep the readout and the grip cap in their own boxes. */
 .ruler .loop-host .loop-grip-face {
   position: absolute;
-  top: 2px;
-  bottom: 2px;
+  top: 0;
+  bottom: 0;
+  height: 100%;
   transform: none;
   color: transparent;
   font-family: inherit;

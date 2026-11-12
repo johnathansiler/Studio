@@ -321,11 +321,33 @@
   display: none;
 }
 
+.shell .arrange .heads,
+.shell.phone .arrange .heads,
+.shell.phone.land .arrange .heads {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.arrange .heads-scroll {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
 .track-add {
   box-sizing: border-box;
+  position: static;
+  flex: 0 0 auto;
+  z-index: auto;
   width: 100%;
   min-width: 0;
   padding: 2px;
+  background: transparent;
 }
 
 .track-add .add-track-slot.prominent .add-track-btn,

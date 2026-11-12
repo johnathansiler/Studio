@@ -63,7 +63,7 @@ describe('track view layout', () => {
       }
       const extras = html.slice(html.indexOf('transport-extras'))
       expect(extras).toContain('>Delete<')
-      expect(extras).toContain('>Tempo<')
+      expect(extras).toContain(phone ? '>Tap<' : '>Tempo<')
       expect(extras).toContain('>Duplicate<')
       expect(extras).not.toContain('>Punch<')
       expect(extras).not.toContain('>Reset<')

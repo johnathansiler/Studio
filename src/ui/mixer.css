@@ -50,6 +50,14 @@
   --mix-col: min(var(--strip, 84px), max(44px, calc((100cqi - 36px) / 5)));
 }
 
+html[data-control-drag] .mixer,
+html[data-control-drag] .mixer-view,
+html[data-control-drag] .touch-slider,
+html[data-control-drag] .kit-fader,
+html[data-control-drag] .kit-knob {
+  touch-action: none;
+}
+
 .shell .mixer-view.mixer-console .mixer {
   display: flex;
   align-items: stretch;

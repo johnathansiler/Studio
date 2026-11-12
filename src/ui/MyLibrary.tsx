@@ -8,9 +8,10 @@ import { browseIndexForId, browseRowId, readBrowsePlace, scrollTopForIndex, writ
 import { clearRecent, recentSounds, subscribeRecent } from '../library/recent'
 import { absorbLegacyFavoriteIds, favoriteSounds, isFavorite, subscribeFavorites, toggleFavorite } from '../library/favorites'
 import { FavoriteStar } from './FavoriteStar'
-import { midiName, type LibraryInstrumentSummary } from '../library/group'
+import { groupLibraryInstruments, midiName, summarizeInstrument, type LibraryInstrument, type LibraryInstrumentSummary } from '../library/group'
 import { fetchAllLibraryInstruments } from '../library/instrumentsApi'
-import { libraryDragId, loadGroupedLibraryInstrument, loadLibraryDrag, loadLibraryEntry, previewLibraryInstrument, publishLibrary, readLibraryAsset } from '../library/place'
+import { libraryDragId, loadGroupedLibraryInstrument, loadLibraryDrag, loadLibraryEntry, placeLibraryInstrument, previewLibraryInstrument, publishLibrary, readLibraryAsset } from '../library/place'
+import { retargetLibraryMemory } from '../library/retarget'
 import { libraryRowWindow, searchLibrary, type LibraryIndex } from '../library/search'
 import type { LibraryDocument, LibraryEntry, LibraryQuery } from '../library/types'
 import type { ProjectStore } from '../state/store'
@@ -100,6 +101,8 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
   const [passphrase, setPassphrase] = useState('')
   const [index, setIndex] = useState<LibraryIndex | null>(null)
   const [instruments, setInstruments] = useState<LibraryInstrumentSummary[]>([])
+  const grouped = useRef<LibraryInstrument[]>([])
+  const coveredKeys = useRef<Set<string>>(new Set())
   const [text, setText] = useState(saved.current.libraryText)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [group, setGroup] = useState<Group>(saved.current.libraryGroup as Group)
@@ -115,11 +118,33 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
   const filterButton = useRef<HTMLButtonElement>(null)
   const previewGen = useRef(0)
 
+  function rememberGroups(entries: LibraryDocument['entries']) {
+    const full = groupLibraryInstruments(entries)
+    grouped.current = full
+    const covered = new Set<string>()
+    for (const entry of entries) {
+      if (entry.type === 'multisample note') covered.add(entry.key)
+    }
+    for (const instrument of full) {
+      for (const layer of instrument.layers) covered.add(layer.key)
+    }
+    coveredKeys.current = covered
+    setInstruments(full.map(summarizeInstrument))
+    retargetLibraryMemory(full)
+  }
+
   function apply(loaded: { document: LibraryDocument; index: LibraryIndex }) {
-    publishLibrary(loaded.index.entries.filter((entry) => entry.type !== 'multisample note'))
+    rememberGroups(loaded.index.entries)
+    publishLibrary(loaded.index.entries.filter((entry) => entry.type !== 'multisample note' && !coveredKeys.current.has(entry.key)))
     setIndex(loaded.index)
     setPhase('ready')
-    void fetchAllLibraryInstruments().then(setInstruments).catch(() => setInstruments([]))
+    void fetchAllLibraryInstruments().then((remote) => {
+      if (!remote.length) return
+      setInstruments((local) => {
+        const seen = new Set(local.map((item) => item.id))
+        return [...local, ...remote.filter((item) => !seen.has(item.id))]
+      })
+    }).catch(() => undefined)
   }
 
   async function openCatalog() {
@@ -194,7 +219,7 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
   const rows = useMemo<BrowseRow[]>(() => {
     if (!index) return []
     const next = { ...query, text }
-    const listed = browseLibraryRows(index, searchLibrary(index, next), instruments, next)
+    const listed = browseLibraryRows(index, searchLibrary(index, next), instruments, next, coveredKeys.current)
     const needle = text.trim().toLowerCase()
     const matches = (name: string) => !needle || name.toLowerCase().includes(needle)
     const picked: BrowseRow[] = []
@@ -209,6 +234,11 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
         }
         const legacy = 'legacyId' in item ? item.legacyId : ''
         const key = item.library?.key || legacy || item.id.replace(/^(library|catalog|sound|instrument):/, '')
+        const groupedHit = grouped.current.find((row) => row.layers.some((layer) => layer.key === key) || row.id === key)
+        if (groupedHit) {
+          picked.push({ kind: 'instrument', instrument: summarizeInstrument(groupedHit) })
+          continue
+        }
         const live = index.entries.find((row) => row.key === key) ?? item.library
         if (live) picked.push({ kind: 'sound', entry: live })
       }
@@ -387,7 +417,8 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
     setBusy(item.id)
     try {
       engine.unlock()
-      const note = await loadGroupedLibraryInstrument(store, item.id)
+      const local = grouped.current.find((row) => row.id === item.id)
+      const note = local ? placeLibraryInstrument(store, local) : await loadGroupedLibraryInstrument(store, item.id)
       store.toast(note, 'good')
     } catch (error) {
       if (error instanceof LibraryAuthError) {

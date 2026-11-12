@@ -175,6 +175,39 @@ describe('knob gestures', () => {
     stopFader()
   })
 
+  it('keeps a vertical fader on the finger when the drag reverses', () => {
+    const fader = new FakeControl()
+    fader.className = 'touch-slider vertical volume'
+    fader.attrs['aria-label'] = 'Vocal volume. How loud this track is.'
+    let level = 1
+    const samples: number[] = []
+    const stop = attachControlGesture(fader, () => ({
+      min: 0,
+      max: 1.25,
+      fallback: 1,
+      axis: 'y',
+      getValue: () => level,
+      onChange: (change) => {
+        level = change.value
+        samples.push(level)
+      },
+    }))
+    const y0 = 200
+    fader.dispatch('pointerdown', { clientX: 40, clientY: y0, pointerType: 'touch', pointerId: 7 })
+    for (let step = 1; step <= 12; step++) fader.dispatch('pointermove', { clientX: 42, clientY: y0 + step * 8, pointerType: 'touch', pointerId: 7 })
+    const bottom = level
+    for (let step = 1; step <= 18; step++) fader.dispatch('pointermove', { clientX: 41, clientY: y0 + 96 - step * 8, pointerType: 'touch', pointerId: 7 })
+    const above = level
+    for (let step = 1; step <= 8; step++) fader.dispatch('pointermove', { clientX: 40, clientY: y0 + 96 - 144 + step * 8, pointerType: 'touch', pointerId: 7 })
+    expect(bottom).toBeLessThan(1)
+    expect(above).toBeGreaterThan(bottom)
+    expect(above).toBeGreaterThan(1)
+    expect(level).toBeLessThan(above)
+    expect(level).toBeGreaterThan(bottom)
+    expect(samples.length).toBeGreaterThan(20)
+    stop()
+  })
+
   it('uses a finer pan scale when a phone drag moves vertically', () => {
     const pan = new FakeControl()
     pan.className = 'pan-knob'

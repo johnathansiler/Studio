@@ -54,6 +54,12 @@ export function rememberRecent(item: Omit<RecentSound, 'at'> & { at?: number }, 
   return next
 }
 
+export function replaceRecent(next: RecentSound[], storage: Store | null = defaultStorage()) {
+  memory = next.slice(0, RECENT_CAP)
+  try { storage?.setItem(RECENT_STORAGE_KEY, JSON.stringify(memory)) } catch { /* the session still has the list */ }
+  for (const listener of listeners) listener()
+}
+
 export function clearRecent(storage: Store | null = defaultStorage()) {
   memory = []
   try { storage?.removeItem(RECENT_STORAGE_KEY) } catch { /* already gone */ }

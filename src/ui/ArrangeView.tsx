@@ -1085,8 +1085,9 @@ export function ArrangeView({
           <TrackViewfinder store={store} playheadSample={position} />
         </div>
       )}
+      <div className="heads">
       <div
-        className="heads"
+        className="heads-scroll"
         ref={headsRef}
         onWheel={(event) => {
           if (event.ctrlKey || event.metaKey) return
@@ -1167,6 +1168,7 @@ export function ArrangeView({
             <LanePicker store={store} trackId={track.id} />
           </div>
         ))}
+      </div>
         <div className="track-add">
           <AddTrackButton store={store} prominent onAdded={onTrackAdded} />
         </div>

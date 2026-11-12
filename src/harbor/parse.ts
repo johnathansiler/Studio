@@ -1,3 +1,4 @@
+import { looseMidi, looseTitle, parseLooseName } from '../library/looseName'
 import { familyFor } from './family'
 import { licenseAllowed } from './license'
 import type { CatalogInstrument, HarborCatalog, HarborEntry, HarborKind, LoopKind } from './types'
@@ -111,7 +112,20 @@ export function parseHarborEntry(input: unknown): HarborEntry | null {
   const articulation = text(raw, ['articulation', 'artic'])
   const rootValue = number(raw, ['root', 'rootNote', 'rootMidi', 'midi', 'midiRoot'])
   const root = rootValue != null ? Math.max(0, Math.min(127, Math.round(rootValue))) : undefined
-  if (type === 'one-shot' && !(instrument && root != null)) return null
+  const fileStem = path.split('/').pop()?.replace(/\.[^.]+$/, '') || name
+  const loose = type === 'loop' ? null : (parseLooseName(fileStem) || parseLooseName(name))
+  let looseInstrument = instrument
+  let looseRoot = root
+  if (loose && (looseRoot == null || !looseInstrument)) {
+    const folder = path.split('/').slice(0, -1).filter(Boolean).pop() || ''
+    const role = loose.role || folder
+    if (!looseInstrument) looseInstrument = looseTitle(folder || role || 'Instrument')
+    if (looseRoot == null) {
+      const midi = loose.midi ?? (loose.pitchClass == null ? null : looseMidi(loose.pitchClass, /bass/i.test(`${role} ${folder} ${name}`) ? 1 : 3))
+      if (midi != null) looseRoot = midi
+    }
+  }
+  if (type === 'one-shot' && !(looseInstrument && looseRoot != null)) return null
   const bpm = number(raw, ['bpm', 'loopBpm'])
   const bars = number(raw, ['bars', 'loopBars'])
   const duration = number(raw, ['durationSec', 'duration'])
@@ -138,9 +152,9 @@ export function parseHarborEntry(input: unknown): HarborEntry | null {
     license,
     source: text(raw, ['source']),
     pack: text(raw, ['pack', 'packId']) || undefined,
-    instrument: instrument || undefined,
+    instrument: looseInstrument || undefined,
     articulation: articulation.replace(/\brelease\b/i, '').trim() || undefined,
-    root: promoted === 'instrument' ? root : undefined,
+    root: promoted === 'instrument' || loose ? looseRoot : undefined,
     velLo: velLo != null ? Math.max(1, Math.min(127, Math.round(velLo))) : undefined,
     velHi: velHi != null ? Math.max(1, Math.min(127, Math.round(velHi))) : undefined,
     roundRobin: roundRobinValue != null && roundRobinValue > 0 ? Math.round(roundRobinValue) : undefined,

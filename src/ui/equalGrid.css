@@ -211,6 +211,43 @@
   flex-flow: row nowrap;
 }
 
+/* Arrange dock: eight equal cells. Long words are icons, and tempo reads Tap over the number. */
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(40px, 1fr));
+  grid-auto-rows: 40px;
+  align-items: stretch;
+  justify-content: stretch;
+  gap: 2px;
+  width: 100%;
+  max-width: 100%;
+  min-height: 40px;
+  height: auto;
+  overflow: visible;
+}
+
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .phone-hit,
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .t-btn,
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .bpm-readout {
+  width: 100%;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  overflow: visible;
+  padding: 0 2px;
+}
+
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .phone-face,
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .t-word,
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .tempo-kicker,
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .tempo-figure {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  max-width: none;
+}
+
 .shell.phone .phone-context.btn-tray .transport-extras > .tempo-cluster {
   display: contents !important;
   width: auto !important;
@@ -233,6 +270,16 @@
   margin: 0 !important;
   padding: 0 1px !important;
   border-width: 1px !important;
+}
+
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .transport-extras > .t-btn,
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .transport-extras .bpm-readout,
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .phone-hit {
+  width: 100% !important;
+  min-width: 40px !important;
+  max-width: none !important;
+  flex: none !important;
+  justify-self: stretch;
 }
 
 /* Roll sits beside the name, in flow, so it does not cover the meter or the control row. */
@@ -278,8 +325,20 @@
 
 .transport-extras .t-ico {
   display: block;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .t-btn.delete .t-word,
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .t-btn.duplicate .t-word {
+  display: none;
+}
+
+.shell.phone .phone-context.btn-tray[data-phone-context="arrange"] .t-btn .t-ico {
+  display: block;
+  width: 18px;
+  height: 18px;
   flex: none;
 }
 

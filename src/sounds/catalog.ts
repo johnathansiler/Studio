@@ -2,6 +2,7 @@ import type { SoundCache } from './cache'
 import { fetchSoundBytes, soundCache, type FetchSoundOptions } from './cache'
 import { packLabel, SOUNDSCOUT_VERSION, SOUND_VERSION_PREFIX } from './contract'
 import { licenseAllowed } from './license'
+import { presentSoundEntries } from './noteGroups'
 import { readPrivateCatalog, readPrivateFile } from './private'
 import { soundCatalogUrl, soundFileUrl } from './source'
 import type { CatalogResult, SoundEntry, SoundKind, SoundQuery } from './types'
@@ -152,7 +153,7 @@ export function soundRoles(entries: SoundEntry[]) {
  */
 export function browserSounds(entries: SoundEntry[], query: SoundQuery) {
   const type = query.type === 'instrument' ? 'all' : query.type
-  return filterSounds(entries, { ...query, type })
+  return filterSounds(presentSoundEntries(entries), { ...query, type })
 }
 
 function derivedRole(type: SoundKind, category: string | undefined, tags: string[]) {

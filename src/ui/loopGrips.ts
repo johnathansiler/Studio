@@ -146,9 +146,9 @@ function box(hitLeft: number, hitWidth: number, face: number, hostH: number, vis
     hitWidth: width,
     hitHeight: hostH,
     faceLeft: Math.round(face),
-    faceTop: 2,
+    faceTop: 0,
     faceWidth: visual,
-    faceHeight: Math.max(visual, hostH - 4),
+    faceHeight: hostH,
     offset: 'inline',
   }
 }

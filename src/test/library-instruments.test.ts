@@ -9,7 +9,7 @@ import { clearLibraryAccessKey, writeLibraryAccessKey } from '../library/access'
 import { memoryAudioCache, setLibraryCaches } from '../library/audio'
 import { rememberInstrumentLayers } from '../library/instrumentsApi'
 import { librarySampleUrl, loadLibrarySampleBytes } from '../library/samples'
-import { buildLibraryIndex } from '../library/search'
+import { buildLibraryIndex, searchLibrary } from '../library/search'
 import type { LibraryEntry } from '../library/types'
 
 const env: LibraryEnv = {
@@ -383,5 +383,37 @@ describe('instrument api', () => {
     const hidden = await closed.handle({ method: 'GET', pathname: '/api/library/instruments', ip: '1.1.1.1', accessKey: 'owner-pass', body: null, now: 7 })
     expect(hidden.status).toBe(503)
     expect(signed).not.toContain('nope')
+  })
+})
+
+describe('loose note files', () => {
+  it('turns the phone screenshot names into one Bass instrument mapped by pitch', () => {
+    const names = ['A', 'B', 'C#', 'C', 'D#', 'D']
+    const entries = [
+      ...names.map((note) => row(`Goldbaby/Bass/${note}.wav`, { pack: 'Goldbaby', type: 'one-shot', category: 'bass', note: '' })),
+      row('Goldbaby/Bass/A bass.wav', { pack: 'Goldbaby', type: 'one-shot', category: 'bass', note: '' }),
+      row('Goldbaby/Bass/C#2.wav', { pack: 'Goldbaby', type: 'one-shot', category: 'bass', note: '' }),
+      row('Goldbaby/Bass/F#2.wav', { pack: 'Goldbaby', type: 'one-shot', category: 'bass', note: '' }),
+      row('Goldbaby/Bass/Db3.wav', { pack: 'Goldbaby', type: 'one-shot', category: 'bass', note: '' }),
+      row('Goldbaby/Bass/Bass C#.wav', { pack: 'Goldbaby', type: 'one-shot', category: 'bass', note: '' }),
+      row('Goldbaby/Kicks/kick.wav', { pack: 'Goldbaby', type: 'one-shot', category: 'kick', note: '' }),
+    ]
+    const instruments = groupLibraryInstruments(entries)
+    const bass = instruments.filter((item) => item.pack === 'Goldbaby' && /bass/i.test(item.name))
+    expect(bass).toHaveLength(1)
+    expect(bass[0]?.name.toLowerCase()).toContain('bass')
+    expect(bass[0]!.notes).toBeGreaterThanOrEqual(6)
+    const roots = new Set(bass[0]!.layers.map((layer) => layer.midi))
+    expect(roots.size).toBeGreaterThanOrEqual(6)
+    expect(instruments.some((item) => item.name.toLowerCase() === 'kick')).toBe(false)
+    const covered = new Set(bass[0]!.layers.map((layer) => layer.key))
+    const index = buildLibraryIndex(entries, entries.map(() => []))
+    const rows = browseLibraryRows(index, searchLibrary(index, { text: '', type: '', category: '', instrument: '', genre: '', musicalKey: '', mood: '', pack: '', bpmMin: null, bpmMax: null }), instruments.map(({ layers, ...summary }) => summary), { text: '', type: '', category: '', instrument: '', genre: '', musicalKey: '', mood: '', pack: '', bpmMin: null, bpmMax: null }, covered)
+    expect(rows.filter((row) => row.kind === 'instrument' && /bass/i.test(row.instrument.name))).toHaveLength(1)
+    expect(rows.some((row) => row.kind === 'sound' && names.includes(row.entry.name))).toBe(false)
+    const program = programFromLibraryInstrument(bass[0]!)
+    const low = selectLayers(program, { note: bass[0]!.lo, velocity: midiVelocity(0.8), keyswitch: null, roundRobin: {}, trigger: 'attack' })
+    const high = selectLayers(program, { note: bass[0]!.hi, velocity: midiVelocity(0.8), keyswitch: null, roundRobin: {}, trigger: 'attack' })
+    expect(low.layers[0]?.zone.root).not.toBe(high.layers[0]?.zone.root)
   })
 })

@@ -16,6 +16,7 @@ import { rememberCatalogSound } from '../library/recent'
 import { FavoriteStar } from './FavoriteStar'
 import { decodeSoundBytes, placeSound, previewChannelsFor, trackIdFromDrop } from '../sounds/place'
 import { PACK_LABEL, packLabel } from '../sounds/contract'
+import { looseGroup, retargetSoundMemory, samplerFromNotes } from '../sounds/noteGroups'
 import { importPrivateLibrary, type PrivateImportResult, type PrivateSourceFile } from '../sounds/private'
 import { roleLabel } from '../sounds/roles'
 import type { CatalogResult, SoundEntry, SoundFilter, SoundKind, SoundQuery } from '../sounds/types'
@@ -362,6 +363,9 @@ export function SoundBrowser({
   useEffect(() => {
     absorbLegacyFavoriteIds(store.project.soundFavorites ?? [])
   }, [store])
+  useEffect(() => {
+    if (result.entries.length) retargetSoundMemory(result.entries)
+  }, [result])
   const [busy, setBusy] = useState('')
   const [fault, setFault] = useState('')
   const [playing, setPlaying] = useState('')
@@ -609,6 +613,26 @@ export function SoundBrowser({
     }
     setBusy(entry.id)
     try {
+      const group = looseGroup(entry.id)
+      if (group) {
+        const assets: { id: string; name: string; sampleRate: number; channels: Float32Array[] }[] = []
+        const notes: { midi: number; bufferId: string; sampleRate: number }[] = []
+        for (const member of group.members) {
+          const decoded = await loadEntry(member.entry)
+          if (!decoded.channels[0]?.length) continue
+          const id = `loose_${member.entry.id}`
+          assets.push({ id, name: member.entry.name, sampleRate: decoded.sampleRate, channels: decoded.channels })
+          notes.push({ midi: member.midi, bufferId: id, sampleRate: decoded.sampleRate })
+        }
+        if (notes.length < 2) {
+          store.toast('That instrument did not have enough notes.', 'warn')
+          return
+        }
+        store.adoptLibrary(target, samplerFromNotes(group.id, group.name, notes), assets)
+        rememberCatalogSound({ ...entry, name: group.name, type: 'instrument' })
+        store.toast(`${group.name} plays across the keyboard.`, 'good')
+        return
+      }
       const decoded = await loadEntry(entry)
       const lead = decoded.channels[0]
       if (!lead?.length) {
