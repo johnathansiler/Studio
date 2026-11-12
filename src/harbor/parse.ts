@@ -35,9 +35,11 @@ function tagsOf(raw: Record<string, unknown>) {
 }
 
 function safePath(path: string) {
-  const clean = path.replace(/\\/g, '/').trim()
-  if (!clean || clean.includes('..') || clean.startsWith('/') || /^https?:/i.test(clean) || clean.includes('://')) return ''
-  return clean.replace(/^\/+/, '')
+  const clean = path.replace(/\\/g, '/').trim().replace(/^\/+|\/+$/g, '')
+  if (!clean || /^https?:/i.test(clean) || clean.includes('://')) return ''
+  // `computer..wav` is a file name. `..` is only unsafe as its own folder.
+  if (clean.split('/').some((part) => part === '.' || part === '..')) return ''
+  return clean
 }
 
 function loopKindOf(raw: Record<string, unknown>, tags: string[], name: string, path: string): LoopKind {
