@@ -1830,9 +1830,13 @@ html[data-posture="book"] .shell:not(.phone) .workspace {
 .shell.phone.land .topbar {
   display: flex;
   flex-wrap: nowrap;
-  min-height: 44px;
+  box-sizing: border-box;
+  height: 48px;
+  min-height: 40px;
+  max-height: 48px;
   padding-top: max(4px, env(safe-area-inset-top));
   padding-bottom: 4px;
+  overflow: hidden;
 }
 .shell.phone.land .brand h1 { display: none; }
 .shell.phone.land .views { width: auto; flex: none; }

@@ -277,6 +277,15 @@
   padding: max(4px, env(safe-area-inset-top)) 4px 2px;
   overflow: hidden;
 }
+.shell.phone.land .topbar {
+  box-sizing: border-box;
+  align-items: center;
+  height: 48px;
+  min-height: 40px;
+  max-height: 48px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
 .shell.phone .topbar .views,
 .shell.phone.land .topbar .views,
 .shell.phone.land .views {

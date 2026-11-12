@@ -16,6 +16,8 @@ import { gridBackground, gridPaint } from '../model/gridLines'
 import { activeGridBeats, edgeFromPointer, lengthReadout, moveFromPointer, positionReadout, subdivisionFor } from '../model/snapGrid'
 import { quartersPerBar } from '../model/time'
 import { editorForGesture, hasStepSequencer } from '../model/editorOpen'
+import { showsOnscreenPiano } from '../model/onscreenPiano'
+import { showsOpenBeatMachine } from '../instruments/pads/identity'
 import { holdMeter } from './levels'
 import { patternToMidiNotes } from '../model/patternMidi'
 import { panelChoice, rememberPanel } from './panelMemory'
@@ -34,6 +36,8 @@ import { readBrowsePlace, writeBrowsePlace } from './browsePlace'
 import { AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
 import { AutoTuneLaneMark } from './AutoTuneFace'
 import { AddTrackButton } from './AddTrack'
+import { OpenBeatMachineButton } from './BeatMachineButton'
+import { KeyboardToggle } from './KeyboardDock'
 import type { TrackChoice } from '../model/addTrack'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import { UtilitySheets } from './UtilitySheets'
@@ -1137,6 +1141,24 @@ export function ArrangeView({
                   <span className="mini-word">Arm</span>
                 </TipButton>
               )}
+              {track.type === 'midi' ? (
+                <button
+                  type="button"
+                  className="piano-open"
+                  data-piano={track.id}
+                  aria-label="Piano roll"
+                  title="Piano roll"
+                  onClick={(event) => { event.stopPropagation(); onOpenPiano(track.id) }}
+                >
+                  <span>Roll</span>
+                </button>
+              ) : null}
+              {showsOpenBeatMachine(track) ? (
+                <OpenBeatMachineButton store={store} trackId={track.id} onOpen={onOpenBeatMachine} />
+              ) : null}
+              {store.selectedTrackId === track.id && showsOnscreenPiano(track) ? (
+                <KeyboardToggle store={store} engine={engine} word="Piano" />
+              ) : null}
               <TipButton className="mini track-more" label="Track" hint="Input, routing, inserts, and the rest of this track." onClick={(event) => { event.stopPropagation(); toggleTrack(track.id) }}>
                 ⋮
               </TipButton>

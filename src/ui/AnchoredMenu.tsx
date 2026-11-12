@@ -136,7 +136,7 @@ export function AnchoredMenu({
     }
   }, [open, onClose, trigger, triggerRef, filling, mode])
 
-  if (!open || typeof document === 'undefined') return null
+  if (!open && typeof document !== 'undefined') return null
 
   const showClose = Boolean(fill && open && !measuring)
   const phoneSheet = open && fill && mode === 'sheet'
