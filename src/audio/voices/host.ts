@@ -6,24 +6,29 @@ import type { AudioAsset, Project, Track } from '../../model/types'
 import { loadProcessors } from '../plugins/loadProcessors'
 import type { StripNodes } from '../strips'
 import { wasmDspRequested } from '../wasm/flag'
-import { PadGraph } from './live'
+import padWorkletUrl from './pad.worklet.ts?worker&url'
 import { planPads, type PadPlan } from './program'
 
 interface Live {
-  graph: PadGraph
-  script: ScriptProcessorNode | null
+  id: string
+  node: AudioWorkletNode | null
   gain: GainNode | null
   dest: AudioNode | null
-  keeper: ConstantSourceNode | null
+  plan: PadPlan | null
+  /** Pitches the armed plan can play. The worklet owns the sounding graph. */
+  pitches: Set<number>
   signature: string
   failed: boolean
   /** True after the audio thread has pulled a block. Until then live hits use the buffer voice. */
   pulled: boolean
+  /** Bumps when the live is replaced so a late worklet load does not attach twice. */
+  generation: number
 }
 
 export class PadHost {
   private lives = new Map<string, Live>()
   private drums = new Map<number, { pitch: number; samples: Float32Array; sampleRate: number }[]>()
+  private module: Promise<boolean> | null = null
 
   sync(ctx: AudioContext, project: Project, strips: Map<string, StripNodes>, assetOf: (id: string) => AudioAsset | undefined) {
     if (wasmDspRequested()) void loadProcessors().then((mod) => mod.preloadWasmInserts())
@@ -49,21 +54,29 @@ export class PadHost {
     if (track.instrument !== 'pads') return false
     this.syncTrack(ctx, track, dest, assetOf, tempo)
     const live = this.lives.get(track.id)
-    if (!live || live.failed || !live.script || !live.pulled) return false
-    return live.graph.hit(hit.pitch, hit.velocity, hit.time, { tune: hit.tune, filter: hit.filter })
+    if (!live || live.failed || !live.node || !live.pulled || !live.pitches.has(hit.pitch)) return false
+    live.node.port.postMessage({
+      type: 'hit',
+      pitch: hit.pitch,
+      velocity: hit.velocity,
+      time: hit.time,
+      tune: hit.tune,
+      filter: hit.filter,
+    })
+    return true
   }
 
   release(trackId: string | null, pitch: number, time: number) {
     if (!trackId) return
-    this.lives.get(trackId)?.graph.release(pitch, time)
+    this.lives.get(trackId)?.node?.port.postMessage({ type: 'release', pitch, time })
   }
 
   cancel(pitch: number, afterTime: number) {
-    for (const live of this.lives.values()) live.graph.cancel(pitch, afterTime)
+    for (const live of this.lives.values()) live.node?.port.postMessage({ type: 'cancel', pitch, afterTime })
   }
 
   duck(pitch: number, time: number) {
-    for (const live of this.lives.values()) live.graph.release(pitch, time)
+    for (const live of this.lives.values()) live.node?.port.postMessage({ type: 'duck', pitch, time })
   }
 
   dispose() {
@@ -76,25 +89,29 @@ export class PadHost {
     let live = this.lives.get(track.id)
     if (!live) {
       live = {
-        graph: new PadGraph(ctx.sampleRate, undefined, { wasm: wasmDspRequested() }),
-        script: null,
+        id: track.id,
+        node: null,
         gain: null,
         dest: null,
-        keeper: null,
+        plan: null,
+        pitches: new Set(),
         signature: '',
         failed: false,
         pulled: false,
+        generation: 0,
       }
       this.lives.set(track.id, live)
-      this.attach(ctx, live, dest)
+      void this.attach(ctx, live, dest)
     } else if (live.dest !== dest && live.gain && typeof live.gain.disconnect === 'function') {
       try { live.gain.disconnect() } catch { /* already disconnected */ }
       try { live.gain.connect(dest) } catch { /* the strip is gone */ }
       live.dest = dest
     }
     if (live.signature !== signature) {
-      live.graph.arm(plan)
+      live.plan = plan
+      live.pitches = new Set(plan.slots.filter((slot) => !slot.loop && !slot.busId).map((slot) => slot.pitch))
       live.signature = signature
+      live.node?.port.postMessage({ type: 'arm', plan })
     }
   }
 
@@ -131,60 +148,52 @@ export class PadHost {
     return hit
   }
 
-  private attach(ctx: AudioContext, live: Live, dest: AudioNode) {
-    const create = (ctx as AudioContext & { createScriptProcessor?: (size: number, inputs: number, outputs: number) => ScriptProcessorNode }).createScriptProcessor
-    if (typeof create !== 'function') {
+  private ensure(ctx: AudioContext) {
+    const add = ctx.audioWorklet?.addModule
+    if (typeof add !== 'function') return Promise.resolve(false)
+    this.module ??= add.call(ctx.audioWorklet, padWorkletUrl).then(() => true).catch(() => false)
+    return this.module
+  }
+
+  private async attach(ctx: AudioContext, live: Live, dest: AudioNode) {
+    const generation = ++live.generation
+    const ready = await this.ensure(ctx)
+    if (generation !== live.generation || this.lives.get(live.id) !== live) return
+    if (!ready || typeof AudioWorkletNode !== 'function') {
       live.failed = true
       return
     }
-    let script: ScriptProcessorNode | null = null
-    let keeper: ConstantSourceNode | null = null
+    let node: AudioWorkletNode
     try {
-      script = create.call(ctx, 256, 1, 2)
-      if (typeof ctx.createConstantSource === 'function') {
-        keeper = ctx.createConstantSource()
-        keeper.offset.value = 0
-        keeper.connect(script)
-        keeper.start()
-      }
+      node = new AudioWorkletNode(ctx, 'cueharbor-pads', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] })
     } catch {
-      try { script = create.call(ctx, 256, 0, 2) } catch { script = null }
-      keeper = null
-    }
-    if (!script || typeof script.connect !== 'function') {
       live.failed = true
       return
     }
     const gain = ctx.createGain()
-    script.onaudioprocess = (event: AudioProcessingEvent) => {
-      live.pulled = true
-      const buffer = event.outputBuffer
-      if (!buffer) return
-      const left = buffer.getChannelData(0)
-      const right = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : left
-      const when = event.playbackTime
-      live.graph.renderInto(Number.isFinite(when) ? when : ctx.currentTime, left, right)
+    node.port.onmessage = (event: MessageEvent<{ type?: string }>) => {
+      if (event.data?.type === 'pulled') live.pulled = true
     }
     try {
-      script.connect(gain)
+      node.connect(gain)
       gain.connect(dest)
     } catch {
-      try { keeper?.stop() } catch { /* already stopped */ }
+      try { node.disconnect() } catch { /* gone */ }
       live.failed = true
       return
     }
-    live.script = script
-    live.keeper = keeper
+    live.node = node
     live.gain = gain
     live.dest = dest
+    if (live.plan) node.port.postMessage({ type: 'arm', plan: live.plan })
   }
 
   private drop(id: string) {
     const live = this.lives.get(id)
     this.lives.delete(id)
     if (!live) return
-    try { live.keeper?.stop() } catch { /* already stopped */ }
-    try { live.script?.disconnect() } catch { /* gone */ }
+    live.generation += 1
+    try { live.node?.disconnect() } catch { /* gone */ }
     try { live.gain?.disconnect() } catch { /* gone */ }
   }
 }

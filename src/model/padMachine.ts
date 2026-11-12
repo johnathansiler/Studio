@@ -177,9 +177,6 @@ export function bankPitch(bank: number, index: number): number {
 }
 
 /** Sixteen pads of a 128-pad drum rack. */
-export function rackPitch(page: number, index: number): number {
-  return clamp(page * 16 + index, 0, 127)
-}
 
 export function sixteenLevels(index: number, spread: LevelSpread): LevelParams {
   const i = clamp(Math.round(index), 0, 15)

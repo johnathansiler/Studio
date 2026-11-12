@@ -258,21 +258,6 @@ export function TouchSlider({
   )
 }
 
-export function Meter({ label, value, max = 1 }: { label: string; value: number; max?: number }) {
-  const unit = Math.max(0, Math.min(1, value / (max || 1)))
-  const cells = 12
-  return (
-    <div className="kit-meter" aria-label={`${label} ${value.toFixed(1)}`}>
-      <span>{label}</span>
-      <div>
-        {Array.from({ length: cells }, (_, index) => (
-          <i key={index} className={unit >= (index + 1) / cells ? 'lit' : ''} data-hot={index > 8 ? '1' : undefined} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
 export function Toggle({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
   return (
     <button type="button" className={`kit-toggle${on ? ' on' : ''}`} aria-pressed={on} onClick={onClick}>

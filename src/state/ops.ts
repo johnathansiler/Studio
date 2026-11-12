@@ -406,17 +406,6 @@ export function setPath(root: object, path: string, value: unknown) {
   else node[leaf] = value
 }
 
-export function getPath(root: object, path: string): unknown {
-  const parts = path.split('/')
-  let node: any = root
-  for (const key of parts) {
-    if (node == null) return undefined
-    if (Array.isArray(node)) node = node.find((item) => item?.id === key)
-    else node = node[key]
-  }
-  return node
-}
-
 function diffAny(before: any, after: any, schema: Schema | null, path: string, out: RawChange[]) {
   if (schema == null) {
     if (!same(before, after)) out.push({ p: path, v: after === undefined ? null : after })

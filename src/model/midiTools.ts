@@ -555,11 +555,6 @@ export class LiveCaptureBuffer {
   }
 }
 
-export function inputMatchesPort(input: string, portId: string): boolean {
-  if (input === 'midi' || input === 'midi:all') return true
-  return input === `midi:${portId}`
-}
-
 /** Armed MIDI tracks for this port. A named port wins over a track set to all inputs. */
 export function tracksForPort(tracks: Track[], portId: string): Track[] {
   const armed = tracks.filter((track) => track.type === 'midi' && track.armed)

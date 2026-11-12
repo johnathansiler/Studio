@@ -313,6 +313,7 @@ function MixToolbar({
         panel.style.top = 'auto'
         panel.style.bottom = `${bottom}px`
         panel.style.maxHeight = `${maxH}px`
+        panel.style.left = '8px'
         if (scrim) {
           scrim.style.top = `${Math.round(chromeTop)}px`
           scrim.style.bottom = `${Math.round(chromeBottom)}px`
@@ -327,8 +328,8 @@ function MixToolbar({
           scrim.style.top = ''
           scrim.style.bottom = ''
         }
+        panel.style.left = `${left}px`
       }
-      panel.style.left = `${left}px`
     }
     place()
     window.addEventListener('resize', place)

@@ -1,7 +1,6 @@
 import { isDrumsPlugin } from '../../audio/plugins/ids'
 
 /** User-facing name of the pad beat machine. */
-export const BEAT_MACHINE_NAME = 'Beat Machine'
 
 /** Track-header control that opens the beat machine again. */
 export const OPEN_BEAT_MACHINE = 'Open Beat Machine'

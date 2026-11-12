@@ -8,6 +8,7 @@ const ENTRIES = [
   'src/audio/insert.worklet.ts',
   'src/audio/wasm/eq.worklet.ts',
   'src/audio/stretch/worklet-entry.ts',
+  'src/audio/voices/pad.worklet.ts',
 ]
 
 describe('worklet bundles', () => {

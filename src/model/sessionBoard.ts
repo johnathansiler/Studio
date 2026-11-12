@@ -1,4 +1,4 @@
-import type { AudioClip, MidiClip, MidiFxKind, Track, TrackInstrument } from './types'
+import type { MidiFxKind, Track, TrackInstrument } from './types'
 
 export const CLIP_SWATCHES = ['#e35d5d', '#e09a3a', '#e6d15a', '#7dce6a', '#3cbfa0', '#5aa7e0', '#8b78e0', '#d36bb5']
 
@@ -100,17 +100,6 @@ export function sessionPanes(phone: boolean): { browser: boolean; detail: boolea
 
 export function sessionTracks(tracks: Track[]): Track[] {
   return tracks.filter((track) => track.type === 'audio' || track.type === 'midi')
-}
-
-export function slotClipId(track: Track, scene: number): string | null {
-  const slots = track.type === 'audio' ? track.audioSlots : track.midiSlots
-  if (slots) return slots[scene] ?? null
-  const list = track.type === 'audio' ? track.clips : track.midiClips
-  return list[scene]?.id ?? null
-}
-
-export function hasOwnColor(clip: AudioClip | MidiClip | null | undefined): boolean {
-  return Boolean(clip && 'color' in clip && clip.color)
 }
 
 /** A simple response curve for a device face. Not a measurement, just the control shape. */

@@ -15,10 +15,6 @@ export function meterBusSamples(channels: number) {
   return Math.max(1, channels) * METER_STRIDE
 }
 
-export function sharedMetersAvailable() {
-  return typeof SharedArrayBuffer !== 'undefined' && Boolean(globalThis.crossOriginIsolated)
-}
-
 export function createMeterBus(channels: number, shared = false) {
   const samples = meterBusSamples(channels)
   if (shared && typeof SharedArrayBuffer !== 'undefined') {
@@ -93,12 +89,3 @@ export function consumeMeter(bus: Float32Array, channel: number): MeterReading {
   return reading
 }
 
-export function blockPeak(channel: Float32Array, frames = channel.length) {
-  let peak = 0
-  const n = Math.min(frames, channel.length)
-  for (let i = 0; i < n; i++) {
-    const a = Math.abs(channel[i] || 0)
-    if (a > peak) peak = a
-  }
-  return peak
-}

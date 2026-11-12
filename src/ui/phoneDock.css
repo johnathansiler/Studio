@@ -377,10 +377,12 @@ body:has(.shell.phone) .select-hint-host {
   font-variant-numeric: normal;
 }
 
-/* Phone project menu: one recessed tray, dock-style buttons, and a scroll. */
+/* Same height as the browser sheet, sitting on the dock. Rows scroll inside that frame. */
 body:has(.shell.phone) [data-screen-overlay].phone-sheet:has(#shell-menu) {
-  height: min(var(--phone-sheet-h, 70dvh), calc(100dvh - var(--phone-chrome-bottom, 120px) - 8px)) !important;
-  max-height: min(var(--phone-sheet-h, 70dvh), calc(100dvh - var(--phone-chrome-bottom, 120px) - 8px)) !important;
+  top: auto !important;
+  bottom: calc(var(--phone-chrome-bottom, 108px) + 12px) !important;
+  height: var(--phone-sheet-h, 46dvh) !important;
+  max-height: var(--phone-sheet-h, 46dvh) !important;
   background-color: var(--tray-bg, #090d0b) !important;
   background-image: none !important;
   border: 1px solid var(--tray-edge, rgba(255, 255, 255, 0.08));

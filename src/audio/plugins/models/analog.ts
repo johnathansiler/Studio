@@ -337,15 +337,4 @@ export function copyFilter(target: Biquad, next: Biquad) {
   target.a2 = next.a2
 }
 
-export function rmsDb(channel: Float32Array, start = 0, end = channel.length) {
-  let sum = 0
-  let count = 0
-  for (let i = start; i < end; i++) {
-    sum += channel[i] * channel[i]
-    count += 1
-  }
-  const mean = count ? sum / count : 0
-  return mean > 1e-12 ? 10 * Math.log10(mean) : -120
-}
-
 export { clamp, dbToGain, designBiquad, gainToDb, sanitize }

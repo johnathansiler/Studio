@@ -1,4 +1,4 @@
-import type { Project, Track } from './types'
+import type { Project } from './types'
 import type { StepChannel } from './steps'
 import { stepHostForChannel } from './stepPlugin'
 
@@ -27,15 +27,3 @@ export function mirrorTrackMix(project: Project, trackId: string) {
   }
 }
 
-export function mixOf(track: Track) {
-  return {
-    id: track.id,
-    name: track.name,
-    volume: track.volume,
-    pan: track.pan,
-    mute: track.mute,
-    solo: track.solo,
-    sends: track.sends,
-    plugins: track.plugins ?? [],
-  }
-}

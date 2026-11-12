@@ -34,4 +34,3 @@ export function moduleFor(id: string): PluginModule {
   return factory()
 }
 
-export const MODEL_IDS = Object.keys(modules)

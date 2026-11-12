@@ -63,8 +63,4 @@ export function subscribeSampleLoad(listener: () => void) {
 }
 
 /** Tests start from an empty queue. */
-export function resetSampleLoad() {
-  ratios.clear()
-  fault = ''
-  emit()
-}
+

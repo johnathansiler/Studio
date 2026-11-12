@@ -61,11 +61,6 @@ export function articulationsIn(program: SamplerProgram) {
 }
 
 /** Switch index stored on the zone. It is not a key the player steals from the keyboard. */
-export function articulationIndex(program: SamplerProgram, articulation: string) {
-  const names = articulationsIn(program)
-  const index = names.indexOf(articulation)
-  return index < 0 ? 0 : index
-}
 
 export function buildInstrument(name: string, entries: HarborEntry[]): HarborInstrument | null {
   const zones = entries.filter((entry) => entry.type === 'instrument')
@@ -132,26 +127,6 @@ export function buildInstrument(name: string, entries: HarborEntry[]): HarborIns
     zones,
     program: filled,
   }
-}
-
-export function groupInstruments(entries: HarborEntry[]): HarborInstrument[] {
-  const groups = new Map<string, HarborEntry[]>()
-  for (const entry of entries) {
-    if (entry.type !== 'instrument' || entry.root == null) continue
-    const name = entry.instrument?.trim() || entry.name.trim()
-    if (!name) continue
-    const list = groups.get(name) ?? []
-    list.push(entry)
-    groups.set(name, list)
-  }
-  return [...groups.entries()]
-    .map(([name, rows]) => buildInstrument(name, rows))
-    .filter((instrument): instrument is HarborInstrument => Boolean(instrument))
-    .sort((a, b) => a.family.localeCompare(b.family) || a.name.localeCompare(b.name))
-}
-
-export function loopsOf(entries: HarborEntry[]) {
-  return entries.filter((entry) => entry.type === 'loop').sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
 }
 
 /** A program whose every velocity layer reaches the full keyboard from the given roots. */

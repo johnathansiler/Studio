@@ -84,15 +84,6 @@ export function triggerVoice(voices: Voice[], pitch: number, velocity: number, d
   return voice
 }
 
-export function releaseVoice(voices: Voice[], pitch: number) {
-  for (const voice of voices) {
-    if (voice.pitch === pitch && voice.active) {
-      voice.repeatEvery = 0
-      voice.env = Math.min(voice.env, 0.2)
-    }
-  }
-}
-
 /** How many repeats a voice would fire across a block. No allocation beyond the returned count. */
 export function repeatsInBlock(voice: Voice, frames: number): number {
   if (voice.repeatEvery <= 0 || frames <= 0) return 0
@@ -158,11 +149,4 @@ export function drumIndex(pitch: number, drums: { pitch: number }[]): number {
 }
 
 /** Sixteenth-note step inside a 16-step bar. */
-export function stepIndex(startBeat: number, steps = 16): number {
-  const sixteenths = Math.round(startBeat * 4)
-  return ((sixteenths % steps) + steps) % steps
-}
 
-export function stepBeat(index: number): number {
-  return index / 4
-}

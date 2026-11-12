@@ -448,16 +448,9 @@ html[data-control-drag] .kit-knob {
   pointer-events: none;
 }
 
+/* Phone opens the channel sheet from the strip name. This summary is not a second More. */
 .shell.phone .mixer-view.mixer-console .mix-toolbar .mix-toolbar-more {
-  position: absolute;
-  width: 1px;
-  min-width: 0;
-  height: 1px;
-  min-height: 0;
-  max-height: none;
-  padding: 0;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
+  display: none;
 }
 
 .shell.phone .mixer-view.mixer-console .mix-more[open] > .mix-back {

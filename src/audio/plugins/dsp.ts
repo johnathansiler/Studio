@@ -134,10 +134,6 @@ export function sanitize(sample: number) {
   return sample
 }
 
-export function sanitizeBuffer(buffer: Float32Array) {
-  for (let i = 0; i < buffer.length; i++) buffer[i] = sanitize(buffer[i])
-}
-
 export function dbToGain(db: number) {
   return 10 ** (db / 20)
 }
@@ -205,7 +201,3 @@ function truePeakSample(a: number, b: number) {
   return peak
 }
 
-export function hann(index: number, length: number) {
-  if (length <= 1) return 1
-  return 0.5 - 0.5 * Math.cos((2 * Math.PI * index) / (length - 1))
-}

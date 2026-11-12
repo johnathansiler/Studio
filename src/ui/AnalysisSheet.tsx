@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { analyzeProjectInWorker, transcribeHumInWorker } from '../analysis/job'
-import { analysisReadout, rememberTrackAnalysis, subscribeAnalysis, summaryLine, trackAnalysis } from '../analysis/cache'
+import { analysisReadout, rememberTrackAnalysis, trackAnalysis } from '../analysis/cache'
 import type { AnalysisResult, HumNote } from '../analysis/types'
 import type { Project } from '../model/types'
 import type { ProjectStore } from '../state/store'
@@ -19,13 +19,6 @@ const GRIDS: { value: number; label: string }[] = [
   { value: 0.25, label: '1/16' },
   { value: 0, label: 'Off' },
 ]
-
-export function TrackReadout({ trackId }: { trackId: string }) {
-  const result = useSyncExternalStore(subscribeAnalysis, () => trackAnalysis(trackId), () => null)
-  const line = result ? summaryLine(result) : ''
-  if (!line) return null
-  return <span className="track-key" title={line}>{result?.key.label}</span>
-}
 
 export function AnalysisSheet({
   store,

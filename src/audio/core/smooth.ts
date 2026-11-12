@@ -13,17 +13,8 @@ const STEPPED_PARAMS = new Set([
   'busRatio', 'busAtk', 'busRel', 'fetRatio', 'variTime', 'bits',
 ])
 
-/** Linear gains and pans. These can move every sample without retuning a filter. */
-const CHEAP_PARAMS = new Set([
-  'gain', 'pan', 'mix', 'drive', 'output', 'makeup', 'wet', 'master', 'volume',
-])
-
 export function isSteppedParam(key: string) {
   return STEPPED_PARAMS.has(key)
-}
-
-export function isCheapParam(key: string) {
-  return CHEAP_PARAMS.has(key)
 }
 
 /** Look-ahead and pitch processors keep one parameter value for the whole block. */

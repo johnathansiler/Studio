@@ -1,20 +1,7 @@
 /** Beat Machine (the Sampler plugin in drums mode). Old pad and drum ids load into it. */
 
 import { repeatIntervalBeats, type RepeatRate } from '../../model/midiClock'
-import {
-  chainSong,
-  chopSample,
-  chopsToPads,
-  createKit,
-  normalizePadKit,
-  timingCorrect,
-  type MpcOutput,
-  type PadProgram,
-  type PadRegion,
-  type PadSequence,
-  type PadVoice,
-  type SequenceNote,
-} from '../../model/padMachine'
+import { chainSong, chopSample, chopsToPads, createKit, normalizePadKit, timingCorrect, type MpcOutput, type PadProgram, type PadRegion, type PadSequence, type SequenceNote } from '../../model/padMachine'
 
 /** Core plugin id. Drums is params.kind >= 1, not a separate insert. */
 export const SAMPLER_ID = 'sampler'
@@ -24,21 +11,9 @@ export const LEGACY_DRUM_IDS = ['pads', 'drum-machine', '808', 'drums', 'looper'
 
 export type { MpcOutput, PadRegion }
 
-export function drumsMode(id: string): boolean {
-  return (LEGACY_DRUM_IDS as readonly string[]).includes(id) && id !== 'looper'
-}
-
 /** Sampler, pads, and the looper all load as the Sampler plugin. */
 export function loadsIntoSampler(id: string): boolean {
   return id === SAMPLER_ID || (LEGACY_DRUM_IDS as readonly string[]).includes(id)
-}
-
-export function hostsSamplerDrums(track: { type: string } | null | undefined): boolean {
-  return track?.type === 'midi'
-}
-
-export function hearsMidi(output: MpcOutput): boolean {
-  return output !== 'audio'
 }
 
 export function hearsAudio(output: MpcOutput): boolean {
@@ -240,18 +215,6 @@ export function arrangeSong(kit: PadProgram, fallbackNotes: SequenceNote[] = [],
   })
 }
 
-export function padStrip(pad: PadVoice) {
-  return {
-    level: pad.level,
-    pan: pad.pan,
-    send: pad.send,
-    insertId: pad.insertId || '',
-    busId: pad.busId || '',
-    mute: Boolean(pad.muted),
-    poly: pad.poly,
-  }
-}
-
 export const VELOCITY_CURVES = [
   { id: 0, label: 'Linear' },
   { id: 1, label: 'Soft' },
@@ -358,13 +321,6 @@ export function stepVelocity(notes: SequenceNote[], pitch: number, step: number,
   const start = step * beats
   const note = notes.find((item) => item.pitch === pitch && Math.abs(item.startBeat - start) < beats * 0.45)
   return note ? note.velocity : null
-}
-
-export function windowOf(region: PadRegion): { start: number; end: number } {
-  const span = Math.max(0.0001, region.end - region.start)
-  const loopStart = clamp((region.loopStart - region.start) / span, 0, 1)
-  const loopEnd = clamp((region.loopEnd - region.start) / span, loopStart, 1)
-  return { start: loopStart, end: loopEnd }
 }
 
 function clamp(value: number, min: number, max: number) {

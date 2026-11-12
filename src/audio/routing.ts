@@ -21,6 +21,3 @@ export function edgeDelays(points: readonly RouteInput[]): Map<string, number> {
   return walkLatency(points).delays
 }
 
-export function edgeKey(from: string, to: string) {
-  return `${from}>${to}`
-}

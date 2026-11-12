@@ -112,10 +112,6 @@ export function isTwelveTone(spec: ScaleSpec) {
   return spec.cents.every((cents) => Math.abs(cents - Math.round(cents / 100) * 100) < 0.6)
 }
 
-export function scalesInFamily(family: string) {
-  return allScales().filter((scale) => scale.family === family)
-}
-
 /** Scale tones in one octave, starting at MIDI octave 4 when `octave` is 4. */
 export function spellScale(rootPc: number, scaleId: string, octave = 4): Tone[] {
   const spec = getScale(scaleId)

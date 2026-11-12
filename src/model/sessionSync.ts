@@ -75,7 +75,6 @@ export function guestMayRequest(action: string): boolean {
 /** Former paced HTTP chunk size. Peer transfer uses 16 KB slices on the data channel. */
 export const ASSET_CHUNK_BYTES = 12_000
 /** Gap the old upload left between chunks. The data channel paces itself. */
-export const ASSET_CHUNK_GAP_MS = 400
 
 export function assetChunkCount(byteLength: number, chunkBytes = ASSET_CHUNK_BYTES): number {
   if (byteLength <= 0) return 0

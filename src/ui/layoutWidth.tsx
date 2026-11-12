@@ -109,10 +109,6 @@ export function usePinchResize(
   }, [bounds, ref])
 }
 
-export function pinchBlocked(target: EventTarget | null) {
-  return target instanceof Element && !!target.closest('[data-pinching="1"]')
-}
-
 const COPY = {
   strip: {
     label: 'Channel strip width',
@@ -173,28 +169,6 @@ export function WidthBar({
         </button>
       )}
     </div>
-  )
-}
-
-export function ColumnGrip({
-  value,
-  onChange,
-  labelled = true,
-}: {
-  value: number
-  onChange: (next: number) => void
-  labelled?: boolean
-}) {
-  return (
-    <WidthHandle
-      className="col-grip"
-      label="Clip column width"
-      hint="Drag to resize clip columns"
-      value={value}
-      bounds={COLUMN_BOUNDS}
-      onChange={onChange}
-      labelled={labelled}
-    />
   )
 }
 

@@ -8,10 +8,9 @@ import type { AudioEngine } from '../audio/engine'
 import type { ArrangeTool } from '../state/tools'
 import type { AutoSpec } from '../model/automation'
 import { channelAutomationMode } from '../model/automation'
-import { automatedValue, automationWriteMode, laneChoices, lanePoints, mixGroupsOf, trackGroupId } from '../state/select'
+import { automatedValue, automationWriteMode, laneChoices, lanePoints } from '../state/select'
 import type { ProjectStore } from '../state/store'
 import type { AutomationWriteMode } from '../model/types'
-import { BevelSelect } from './BevelSelect'
 import './automation.css'
 
 const MODES: { id: AutomationWriteMode; label: string; short: string; title: string }[] = [
@@ -125,45 +124,6 @@ export function MixFlags({ store, trackId, compact = false, part = 'all' }: { st
         </button>
       )}
     </>
-  )
-}
-
-export function LinkGroup({ store, trackId }: { store: ProjectStore; trackId: string }) {
-  const groups = mixGroupsOf(store.project)
-  const groupId = trackGroupId(store.project, trackId)
-  const group = groups.find((item) => item.id === groupId)
-  const linkLabel = group?.name ?? 'No link'
-  return (
-    <div className="link-row">
-      <BevelSelect
-        className="link-pick"
-        label="Link group"
-        hint={`Link group. ${linkLabel}`}
-        value={groupId ?? ''}
-        options={[
-          { value: '', label: 'No link' },
-          ...groups.map((item) => ({ value: item.id, label: item.name })),
-          { value: 'new', label: 'New link' },
-        ]}
-        onChange={(next) => store.assignMixGroup(trackId, next)}
-      />
-      {group && (
-        <>
-          <Flag store={store} groupId={group.id} on={group.faders} flag="faders" label="Faders" title="Move faders and pans by the same amount." />
-          <Flag store={store} groupId={group.id} on={group.mutes} flag="mutes" label="Mutes" title="Mute and unmute the linked tracks together." />
-          <Flag store={store} groupId={group.id} on={group.solos} flag="solos" label="Solos" title="Solo and unsolo the linked tracks together." />
-          <Flag store={store} groupId={group.id} on={group.edits} flag="edits" label="Edits" title="Move, trim, and split overlapping clips together." />
-        </>
-      )}
-    </div>
-  )
-}
-
-function Flag({ store, groupId, on, flag, label, title }: { store: ProjectStore; groupId: string; on: boolean; flag: 'faders' | 'mutes' | 'solos' | 'edits'; label: string; title: string }) {
-  return (
-    <button type="button" className={on ? 'on' : ''} aria-pressed={on} title={title} onClick={() => store.setMixLink(groupId, { [flag]: !on })}>
-      {label}
-    </button>
   )
 }
 

@@ -5,7 +5,7 @@ import type { SampleRef, SamplerProgram } from '../audio/multisample/types'
 import { midiVelocity } from '../audio/multisample/types'
 import { sampleLoadBegin, sampleLoadFinish, sampleLoadRatio } from '../audio/sampleLoadBus'
 import { decodeWavPCM } from '../model/wav'
-import { sha256Hex, type SoundCache } from '../sounds/cache'
+import { type SoundCache } from '../sounds/cache'
 import { absolutizeProgram } from '../audio/multisample/import'
 import { importSfz } from '../audio/multisample/sfz'
 import { instrumentCatalogUrl, instrumentLibraryBase, instrumentTreeUrl } from './contract'
@@ -16,8 +16,6 @@ import { fillKeyboard } from './zones'
 import type { CatalogInstrument, HarborCatalog } from './types'
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
-
-let catalogPromise: Promise<HarborCatalog> | null = null
 
 export function instrumentFileUrl(path: string) {
   return libraryFileUrl(instrumentLibraryBase(), path)
@@ -65,15 +63,7 @@ async function readCached(cache: SoundCache | undefined, url: string): Promise<H
   }
 }
 
-export function harborCatalog() {
-  if (!catalogPromise) {
-    catalogPromise = loadHarborCatalog().catch(() => ({ version: '', instruments: [], loops: [], entries: [] }))
-  }
-  return catalogPromise
-}
-
 export function rememberHarborCatalog(catalog: HarborCatalog) {
-  catalogPromise = Promise.resolve(catalog)
   return catalog
 }
 
@@ -157,11 +147,6 @@ export async function loadZoneSamples(
     }
   }
   return loaded
-}
-
-export async function hashedZone(bytes: ArrayBuffer, expected?: string) {
-  if (!expected) return true
-  return (await sha256Hex(bytes)) === expected.toLowerCase()
 }
 
 /**

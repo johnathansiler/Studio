@@ -3,7 +3,7 @@
 import { clamp, copyCoeffs, dbToGain, designBiquad, gainToDb, sanitize, tickBiquad, type Biquad } from '../plugins/dsp'
 import type { BlockContext, Processor } from '../plugins/types'
 import { createDownsample, createFir, createOversample, linearKernel, truePeakLinear } from './fir'
-import { createMeter, feedMeter, measureProgram } from './meter'
+import { createMeter, feedMeter } from './meter'
 
 export function encodeMS(left: number, right: number): [number, number] {
   return [(left + right) * 0.5, (left - right) * 0.5]
@@ -469,17 +469,6 @@ export function limitBuffer(channels: Float32Array[], sampleRate: number, ceilin
   return enforceTruePeak(limited, sampleRate, ceilingDb)
 }
 
-export function maximizeBuffer(channels: Float32Array[], sampleRate: number, targetLufs: number, ceilingDb: number, offline = true) {
-  const reading = measureProgram(channels[0] ?? new Float32Array(0), channels[1] ?? null, sampleRate)
-  const gain = reading.integrated <= -60 ? 1 : dbToGain(targetLufs - reading.integrated)
-  const boosted = channels.map((channel) => {
-    const out = new Float32Array(channel.length)
-    for (let i = 0; i < channel.length; i++) out[i] = (channel[i] || 0) * gain
-    return out
-  })
-  return limitBuffer(boosted, sampleRate, ceilingDb, offline)
-}
-
 export function createMaxim(sampleRate: number): Processor {
   const meter = createMeter(sampleRate)
   const brick = createBrick(sampleRate)
@@ -593,26 +582,6 @@ export function createImager(sampleRate: number): Processor {
         side = (bottom * low + top * high) * width
         if (output[0]) output[0][i] = sanitize(mid + side)
         if (output[1]) output[1][i] = sanitize(mid - side)
-      }
-    },
-  }
-}
-
-export function createMs(sampleRate: number): Processor {
-  void sampleRate
-  return {
-    latencySamples: 0,
-    reset() {},
-    process(input, output, params) {
-      const midGain = dbToGain(params.mid || 0)
-      const sideGain = dbToGain(params.side || 0)
-      const n = input[0]?.length ?? 0
-      const [left, right] = pair(input)
-      for (let i = 0; i < n; i++) {
-        const [mid, side] = encodeMS(left[i] || 0, right[i] || 0)
-        const [l, r] = decodeMS(mid * midGain, side * sideGain)
-        if (output[0]) output[0][i] = sanitize(l)
-        if (output[1]) output[1][i] = sanitize(r)
       }
     },
   }
