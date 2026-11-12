@@ -4,7 +4,7 @@
  * Articulation words stay, so Normal and Staccato are different instruments.
  * Dynamics stay on the instrument as velocity layers.
  */
-import { parseLooseName } from './looseName'
+import { parseLooseName } from './looseName.ts'
 
 export interface InstrumentLayer {
   key: string

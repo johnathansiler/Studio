@@ -1,4 +1,4 @@
-import type { Project } from '../model/types'
+import type { Project } from '../model/types.ts'
 
 /** One field write. Values are musical data, never samples. */
 export interface ProjectOp {
