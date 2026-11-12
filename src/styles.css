@@ -2806,6 +2806,7 @@ html[data-posture="tabletop"] .shell .master-sheet {
 .shell.phone.land .plugin-sheet.tune-open {
   max-height: 46vh;
 }
+.shell.phone.land .plugin-sheet.tune-open { max-height: 26dvh; }
 .sheet-resize { cursor: ew-resize; width: 14px; height: auto; top: 0; bottom: 0; right: auto; left: 0; position: absolute; }
 .shell.phone .sheet-resize, .shell.fold .sheet-resize { width: auto; height: 14px; right: 0; left: 0; bottom: auto; cursor: ns-resize; }
 
@@ -2924,33 +2925,6 @@ button:active:not(:disabled) {
     linear-gradient(180deg, #3a2a22, #1a120e);
 }
 .board-pop header strong { letter-spacing: 0.08em; text-transform: uppercase; }
-
-/* Plugins sit beside the work instead of covering the mixer. */
-.plugin-sheet {
-  top: 88px;
-  right: 8px;
-  bottom: 8px;
-  left: auto;
-  width: min(480px, calc(100vw - 280px));
-  max-height: none;
-  border-radius: 16px;
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
-}
-.shell.phone .plugin-sheet,
-.shell.fold .plugin-sheet {
-  top: auto;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: auto !important;
-  max-height: 46vh;
-  border-radius: 16px 16px 0 0;
-}
-.shell.phone.land .plugin-sheet.tune-open { max-height: 26dvh; }
-.sheet-resize { cursor: ew-resize; width: 14px; height: auto; top: 0; bottom: 0; right: auto; left: 0; position: absolute; }
-.shell.phone .sheet-resize,
-.shell.fold .sheet-resize { width: auto; height: 14px; left: 0; right: 0; bottom: auto; cursor: ns-resize; }
 
 /* The menu stays inside the viewport. Labels sit above their descriptions. */
 #shell-menu {

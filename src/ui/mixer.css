@@ -1272,7 +1272,8 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   touch-action: manipulation;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: #73c48f #121a16;
 }
 
 .shell .mixer-view.mixer-console .strip-insert {

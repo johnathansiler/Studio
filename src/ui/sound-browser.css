@@ -511,7 +511,8 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   min-height: 120px;
 }
 
-/* Landscape sheets are short. Chips stay one compact row and the matches scroll inside the sheet. */
+/* Landscape sheets are short. The title row collapses, and Close sits in the tab tray
+   so it is not left sticking out of that row onto the timeline overview. */
 .shell.phone.land .playlist-browser.bottom-sheet > .browser-sheet-title {
   height: 0;
   min-height: 0;
@@ -520,15 +521,25 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
   overflow: hidden;
 }
 
-.shell.phone.land .playlist-browser.bottom-sheet > .bottom-sheet-body {
+.shell.phone.land .playlist-browser.bottom-sheet > .browser-tabs.btn-tray {
   display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+.shell.phone.land .playlist-browser.bottom-sheet > .browser-tabs .browser-chip-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .shell.phone.land .playlist-browser.bottom-sheet > .bottom-sheet-body {
+  display: flex;
   flex: 1 1 auto;
+  flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 
 .shell.phone.land .playlist-browser.bottom-sheet > .bottom-sheet-body > .sound-panel {

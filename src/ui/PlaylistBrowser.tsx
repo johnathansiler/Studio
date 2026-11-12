@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
+import { useLandscape } from './form'
 import { BROWSER_TAB_EVENT } from './phoneContext'
 import { SheetGrab } from './bottomSheet'
 import { SheetClose } from './SheetClose'
@@ -60,6 +61,7 @@ export function PlaylistBrowser({
   /** Phone Arrange draws this as a bottom sheet instead of a side column. */
   sheet?: boolean
 }) {
+  const land = useLandscape()
   const project = store.project
   const opened = readBrowsePlace()
   const [query, setQuery] = useState(tab === 'clips' ? opened.clipText : opened.patternText)
@@ -267,7 +269,7 @@ export function PlaylistBrowser({
       {phone && (
         <header className="browser-sheet-title sheet-head">
           <strong data-browser-title={tab}>{SECTION_TITLE[tab]}</strong>
-          <SheetClose className="browser-close" onClick={onClose} />
+          {!(sheet && land) && <SheetClose className="browser-close" onClick={onClose} />}
         </header>
       )}
       <div className="browser-tabs btn-tray">
@@ -278,7 +280,7 @@ export function PlaylistBrowser({
             </button>
           ))}
         </div>
-        {!phone && <SheetClose className="browser-close" onClick={onClose} />}
+        {(!phone || (sheet && land)) && <SheetClose className="browser-close" onClick={onClose} />}
       </div>
       {sheet ? <div className="bottom-sheet-body">{catalog}</div> : catalog}
     </aside>
