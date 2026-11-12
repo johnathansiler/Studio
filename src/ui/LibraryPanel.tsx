@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { bindLocalSamples, importInstrument } from '../audio/multisample/import'
 import { readLibraryAccessKey } from '../library/access'
+import { rememberCatalogSound, rememberLibrarySound } from '../library/recent'
 import { loadLibraryCatalog } from '../library/audio'
 import { readLibraryAsset } from '../library/place'
 import type { LibraryEntry } from '../library/types'
@@ -49,6 +50,7 @@ export function LibraryPanel({
     try {
       const asset = await readLibraryAsset(entry)
       store.loadSamplerSound(trackId, asset, undefined, entry.type === 'loop')
+      rememberLibrarySound(entry)
       setStatus(`${entry.name} plays as one sample across the keyboard.`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Could not load that sound.')
@@ -73,6 +75,7 @@ export function LibraryPanel({
         sampleRate: decoded.sampleRate,
         channels: decoded.channels,
       }, undefined, entry.type === 'loop')
+      rememberCatalogSound(entry)
       setStatus(`${entry.name} plays as one sample across the keyboard.`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Download failed')

@@ -150,6 +150,8 @@ describe('grouped library instruments on a phone', () => {
       await page.locator('[data-library-instrument]').first().evaluate((el) => el.scrollIntoView({ block: 'center' }))
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
       await page.screenshot({ path: '/opt/cursor/artifacts/library-instruments-browse-390.png' })
+      await page.keyboard.press('Escape')
+      await page.locator('.library-filter-sheet').waitFor({ state: 'hidden' })
       await browserPane.getByRole('button', { name: 'Load French Horn - Normal' }).click()
       const face = page.locator('[data-sampler="face"]')
       await face.waitFor()

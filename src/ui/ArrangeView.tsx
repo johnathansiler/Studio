@@ -30,6 +30,7 @@ import { activeTool, EDITOR_TOOL_KEYS, subscribeTools, toolClaimsGesture } from 
 import { StemSheet } from './StemSheet'
 import type { SessionClient } from '../remote/session'
 import { PlaylistBrowser, type BrowserTab } from './PlaylistBrowser'
+import { readBrowsePlace, writeBrowsePlace } from './browsePlace'
 import { AutomationOverlay, LanePicker, MixFlags } from './AutomationLane'
 import { AutoTuneLaneMark } from './AutoTuneFace'
 import { AddTrackButton } from './AddTrack'
@@ -920,7 +921,7 @@ export function ArrangeView({
   }, [phone, browserOpen])
   const pluginsPhase = usePushPhase(pluginsOpen)
   useScreenOverlay(() => setPluginsOpen(false), pluginsOpen)
-  const [browserTab, setBrowserTab] = useState<BrowserTab>(libraryTab && libraryTab !== 'sounds' && libraryTab !== 'instruments' && libraryTab !== 'loops' ? libraryTab : 'library')
+  const [browserTab, setBrowserTab] = useState<BrowserTab>(readBrowsePlace().tab)
   const [browserWidth, setBrowserWidth] = useState(() => browserWidthFor(typeof window === 'undefined' ? 1440 : window.innerWidth, typeof window === 'undefined' ? 900 : window.innerHeight))
   useEffect(() => {
     if (phone) return
@@ -1006,7 +1007,6 @@ export function ArrangeView({
   useEffect(() => {
     if (!libraryTab) return
     setBrowserOpen(true)
-    setBrowserTab(libraryTab)
   }, [libraryTab])
   const selected = project.tracks.flatMap((track) => track.clips.filter((clip) => clip.id === store.selectedClipId).map((clip) => ({ track, clip })))[0]
   const sheetTrack = project.tracks.find((track) => track.id === trackSheet) || null
@@ -1063,7 +1063,7 @@ export function ArrangeView({
             engine={engine}
             phone={phone}
             tab={browserTab}
-            onTab={setBrowserTab}
+            onTab={(next) => { setBrowserTab(next); writeBrowsePlace({ tab: next === 'patterns' || next === 'clips' ? next : 'library' }) }}
             onSeek={onSeek}
             onClose={() => { engine.stopPreview(); setBrowserOpen(false); rememberPanel('arrangeBrowser', false); onLibraryClose?.() }}
           />
@@ -1528,7 +1528,7 @@ export function ArrangeView({
           phone={phone}
           sheet
           tab={browserTab}
-          onTab={setBrowserTab}
+          onTab={(next) => { setBrowserTab(next); writeBrowsePlace({ tab: next === 'patterns' || next === 'clips' ? next : 'library' }) }}
           onSeek={onSeek}
           onClose={() => { engine.stopPreview(); setBrowserOpen(false); rememberPanel('arrangeBrowser', false); onLibraryClose?.() }}
         />

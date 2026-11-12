@@ -168,8 +168,79 @@ describe('my library on a phone', () => {
       await page.getByLabel('Library passphrase').fill('harbor-key')
       await page.getByRole('button', { name: 'Unlock', exact: true }).click()
       await page.getByLabel('Search my library').waitFor()
+      await page.getByRole('button', { name: 'Play 139 Trap Click C' }).click()
+      const kept = page.locator('[data-browse-id="sound:Drums/139_Trap_Click_C.wav"].is-kept')
+      await kept.waitFor()
+      await page.getByRole('button', { name: 'Favorite 139 Trap Click C' }).click()
+      await page.getByRole('button', { name: 'Unfavorite 139 Trap Click C' }).waitFor()
+      await page.getByRole('button', { name: 'Filter', exact: true }).click()
+      await page.getByRole('button', { name: 'Recent', exact: true }).waitFor()
+      await page.screenshot({ path: '/opt/cursor/artifacts/browse_favorites_phone_390.png' })
+      await page.keyboard.press('Escape')
+      await page.getByRole('button', { name: 'Browse', exact: true }).click()
+      await page.locator('[data-playlist-browser="open"]').waitFor({ state: 'hidden' })
+      await page.getByRole('button', { name: 'Browse', exact: true }).click()
+      await page.locator('[data-playlist-browser="open"]').waitFor()
+      await kept.waitFor()
+      await page.reload({ waitUntil: 'domcontentloaded' })
+      await page.getByRole('button', { name: /^Arrange/ }).first().waitFor()
+      if (await page.locator('[data-playlist-browser="open"]').count() === 0) {
+        await page.getByRole('button', { name: 'Browse', exact: true }).click()
+      }
+      await kept.waitFor()
+      await page.getByRole('button', { name: 'Unfavorite 139 Trap Click C' }).waitFor()
+      await page.getByRole('button', { name: 'Filter', exact: true }).click()
+      await page.getByRole('button', { name: 'Favorites', exact: true }).click()
+      await page.keyboard.press('Escape')
+      await page.locator('[data-library-key="Drums/139_Trap_Click_C.wav"]').waitFor()
+      await page.getByRole('button', { name: 'Unfavorite 139 Trap Click C' }).click()
+      await page.getByRole('button', { name: 'Filter', exact: true }).click()
+      await page.getByRole('button', { name: 'Favorites', exact: true }).click()
+      await page.keyboard.press('Escape')
       await page.getByLabel('Search my library').fill('trap 808 C')
       await page.getByRole('button', { name: 'Filter', exact: true }).click()
+      await page.locator('.library-filter-sheet').waitFor()
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForFunction(() => {
+        const menu = document.querySelector('.library-filter-sheet')
+        const facets = document.querySelectorAll('.library-filter-grid > button[data-facet]')
+        return !!menu && menu.getBoundingClientRect().width > 200 && facets.length === 8 && facets[0].getBoundingClientRect().height >= 40
+      })
+      const grid = await page.evaluate(() => {
+        const box = (node: Element) => node.getBoundingClientRect()
+        const facets = [...document.querySelectorAll('.library-filter-grid > button[data-facet]')]
+        const options = [...document.querySelectorAll('.library-filter-grid > button[data-value]')]
+        const lock = document.querySelector('.library-lock-btn')
+        const widths = (nodes: Element[]) => nodes.map((node) => Math.round(box(node).width))
+        const heights = (nodes: Element[]) => nodes.map((node) => Math.round(box(node).height))
+        const clipped = (node: Element) => node.scrollWidth > node.clientWidth + 1
+        const facetBoxes = facets.map(box)
+        return {
+          facetWidths: widths(facets),
+          facetHeights: heights(facets),
+          columns: new Set(facetBoxes.map((item) => Math.round(item.left))).size,
+          optionWidths: widths(options),
+          optionHeights: heights(options),
+          lockHeight: lock ? Math.round(box(lock).height) : 0,
+          lockInsideGrid: !!lock?.closest('.library-filter-grid'),
+          quick: [...document.querySelectorAll('.library-quick')].map((node) => ({ t: node.textContent?.trim() ?? '', w: Math.round(box(node).width), h: Math.round(box(node).height) })),
+          clipped: [...facets, ...options].some(clipped),
+        }
+      })
+      expect(grid.quick.map((item) => item.t)).toEqual(['Recent', 'Favorites'])
+      expect(grid.quick[0].w).toBe(grid.quick[1].w)
+      expect(Math.min(...grid.quick.map((item) => item.h))).toBeGreaterThanOrEqual(40)
+      expect(grid.facetWidths).toHaveLength(8)
+      expect(grid.columns).toBe(4)
+      expect(new Set(grid.facetWidths).size).toBe(1)
+      expect(Math.min(...grid.facetHeights)).toBeGreaterThanOrEqual(40)
+      expect(grid.optionWidths.length).toBeGreaterThan(1)
+      expect(new Set(grid.optionWidths).size).toBe(1)
+      expect(grid.optionWidths[0]).toBe(grid.facetWidths[0])
+      expect(Math.min(...grid.optionHeights)).toBeGreaterThanOrEqual(40)
+      expect(grid.lockHeight).toBeGreaterThanOrEqual(40)
+      expect(grid.lockInsideGrid).toBe(false)
+      expect(grid.clipped).toBe(false)
       await page.getByRole('button', { name: 'One-shot', exact: true }).click()
       await page.getByRole('button', { name: 'Genre', exact: true }).click()
       await page.getByRole('button', { name: 'Trap', exact: true }).click()
@@ -183,6 +254,8 @@ describe('my library on a phone', () => {
       expect(await overflow()).toBe(true)
       await page.screenshot({ path: '/opt/cursor/artifacts/my-library-search-360.png' })
       await page.setViewportSize({ width: 390, height: 844 })
+      await page.keyboard.press('Escape')
+      await page.locator('.library-filter-sheet').waitFor({ state: 'hidden' })
       await page.getByRole('button', { name: 'Load 139 Trap Click C' }).click()
       const pads = page.locator('[data-pads="plugin"]')
       await pads.waitFor()

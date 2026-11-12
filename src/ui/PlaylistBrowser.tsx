@@ -8,6 +8,7 @@ import { MyLibrary } from './MyLibrary'
 import './sound-browser.css'
 import { PatternSend, patternBeat } from './PatternSend'
 import { quickDragArmed } from './clipKeys'
+import { readBrowsePlace, writeBrowsePlace } from './browsePlace'
 
 export type BrowserTab = 'sounds' | 'instruments' | 'loops' | 'library' | 'patterns' | 'clips'
 
@@ -60,10 +61,24 @@ export function PlaylistBrowser({
   sheet?: boolean
 }) {
   const project = store.project
-  const [query, setQuery] = useState('')
+  const opened = readBrowsePlace()
+  const [query, setQuery] = useState(tab === 'clips' ? opened.clipText : opened.patternText)
+  const [patternFocus, setPatternFocus] = useState(opened.patternFocus)
+  const [clipFocus, setClipFocus] = useState(opened.clipFocus)
   const dragging = useRef(false)
   const pointerDropped = useRef(0)
   const needle = query.trim().toLowerCase()
+  useEffect(() => {
+    if (tab === 'patterns') writeBrowsePlace({ patternText: query })
+    if (tab === 'clips') writeBrowsePlace({ clipText: query })
+  }, [query, tab])
+  useEffect(() => {
+    const place = readBrowsePlace()
+    const id = tab === 'clips' ? place.clipFocus : place.patternFocus
+    if (!id) return
+    const row = document.querySelector(`[data-browse-id="${CSS.escape(id)}"]`)
+    row?.scrollIntoView({ block: 'nearest' })
+  }, [tab, patternFocus, clipFocus])
   const trackId = store.selectedTrackId || project.tracks[0]?.id || ''
 
   useEffect(() => {
@@ -174,7 +189,8 @@ export function PlaylistBrowser({
           <button
             key={pattern.id}
             type="button"
-            className="browser-row"
+            className={`browser-row${patternFocus === `pattern:${pattern.id}` ? ' is-kept' : ''}`}
+            data-browse-id={`pattern:${pattern.id}`}
             title="In song. Place this pattern on Arrange as a linked clip. Editing the pattern updates every copy. Drag to choose the lane."
             onPointerDown={(event) => {
               if (event.button !== 0) return
@@ -201,6 +217,8 @@ export function PlaylistBrowser({
             }}
             onClick={() => {
               if (dragging.current) return
+              setPatternFocus(`pattern:${pattern.id}`)
+              writeBrowsePlace({ patternFocus: `pattern:${pattern.id}`, tab: 'patterns' })
               store.selectPattern(pattern.id)
               store.placePattern(Math.max(0, projectSampleBeat(project, engine.currentTimelineSample())))
             }}
@@ -215,9 +233,12 @@ export function PlaylistBrowser({
           <button
             key={clip.id}
             type="button"
-            className="browser-row"
+            className={`browser-row${clipFocus === `clip:${clip.id}` ? ' is-kept' : ''}`}
+            data-browse-id={`clip:${clip.id}`}
             title="Select this clip and move the playhead to it."
             onClick={() => {
+              setClipFocus(`clip:${clip.id}`)
+              writeBrowsePlace({ clipFocus: `clip:${clip.id}`, tab: 'clips' })
               store.selectClip(clip.trackId, clip.id, clip.midi, false)
               onSeek(clip.sample)
             }}
@@ -278,7 +299,12 @@ export function ShellBrowser({
   onClose: () => void
   onSeek: (sample: number) => void
 }) {
-  const [tab, setTab] = useState<BrowserTab>('library')
+  const [tab, setTab] = useState<BrowserTab>(readBrowsePlace().tab)
+  function chooseTab(next: BrowserTab) {
+    const stored = next === 'patterns' || next === 'clips' ? next : 'library'
+    setTab(stored)
+    writeBrowsePlace({ tab: stored })
+  }
   useEffect(() => {
     const onTab = (event: Event) => {
       const next = (event as CustomEvent<BrowserTab>).detail
@@ -287,5 +313,5 @@ export function ShellBrowser({
     document.addEventListener(BROWSER_TAB_EVENT, onTab)
     return () => document.removeEventListener(BROWSER_TAB_EVENT, onTab)
   }, [])
-  return <PlaylistBrowser store={store} engine={engine} phone={phone} tab={tab} onTab={setTab} onClose={onClose} onSeek={onSeek} />
+  return <PlaylistBrowser store={store} engine={engine} phone={phone} tab={tab} onTab={chooseTab} onClose={onClose} onSeek={onSeek} />
 }

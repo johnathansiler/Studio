@@ -1,4 +1,5 @@
 import { useState, useSyncExternalStore } from 'react'
+import { rememberCatalogSound } from '../library/recent'
 import { fetchCatalogSound } from '../sounds/catalog'
 import { decodeSoundBytes, placeSound } from '../sounds/place'
 import type { SoundEntry } from '../sounds/types'
@@ -66,6 +67,7 @@ export async function dropLibrarySound(store: ProjectStore, trackId: string, sce
     placed.clip.loop = entry.type === 'loop' || placed.clip.loop !== false
     if (!store.buffers.has(placed.asset.id)) store.addAsset(placed.asset)
     store.placeInSlot(trackId, scene, placed.clip)
+    rememberCatalogSound(entry)
   } catch (error) {
     store.toast(error instanceof Error ? error.message : 'That sound is not on this device. The rest of the project still plays.', 'warn')
   }

@@ -5,6 +5,7 @@ import type { AudioEngine } from '../audio/engine'
 import { preparePadPcm } from '../instruments/mpc/render'
 import { captureSlot, openInputCapture, SLOT_ACCEPT } from '../audio/sample/slot'
 import { readLibraryAccessKey } from '../library/access'
+import { rememberLibrarySound } from '../library/recent'
 import { loadLibraryCatalog } from '../library/audio'
 import { readLibraryAsset } from '../library/place'
 import type { LibraryEntry } from '../library/types'
@@ -115,7 +116,10 @@ export function ChopDrawer({
     try {
       const asset = await readLibraryAsset(entry)
       const channel = asset.channels[0]
-      if (channel?.length) await useSamples(entry.name, channel, asset.sampleRate)
+      if (channel?.length) {
+        await useSamples(entry.name, channel, asset.sampleRate)
+        rememberLibrarySound(entry)
+      }
       else store.toast('That sound had no audio.', 'warn')
     } catch (error) {
       store.toast(error instanceof Error ? error.message : 'That sound is not on this device. The rest of the project still plays.', 'warn')
