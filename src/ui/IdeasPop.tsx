@@ -83,13 +83,13 @@ export function IdeasPop({
         }}>Random</button>
         {!embedded && <button type="button" className="text-btn overlay-close" onClick={onClose} aria-label="Close chord ideas">Close</button>}
       </header>
-      <div className="chip-row" aria-label="Genre">
+      <div className="chip-row eq-grid" style={{ ['--eq-cols' as string]: '4' }} aria-label="Genre">
         <button type="button" className={genre === 'all' ? 'on' : ''} onClick={() => setGenre('all')}>All</button>
         {GENRES.map((item) => (
           <button key={item} type="button" className={genre === item ? 'on' : ''} onClick={() => setGenre(item)}>{item}</button>
         ))}
       </div>
-      <div className="chip-row" aria-label="Mood">
+      <div className="chip-row eq-grid" style={{ ['--eq-cols' as string]: '4' }} aria-label="Mood">
         <button type="button" className={mood === 'all' ? 'on' : ''} onClick={() => setMood('all')}>Any mood</button>
         {MOODS.map((item) => (
           <button key={item} type="button" className={mood === item ? 'on' : ''} onClick={() => setMood(item)}>{item}</button>

@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ProjectStore } from '../state/store'
+import { SongPanel } from '../ui/SongPanel'
 import { TransportBar } from '../ui/TransportBar'
 import '../styles.css'
 import '../ui/remoteFixes.css'
 import '../ui/premium.css'
 import '../ui/buttonTiers.css'
 import '../ui/buttonTray.css'
+import '../ui/equalGrid.css'
+import '../ui/song-panel.css'
 
 const store = new ProjectStore()
 store.project.metronomeEnabled = true
@@ -39,6 +42,17 @@ function Bar() {
         onStop={() => undefined}
         onRecord={() => undefined}
         onSeek={() => undefined}
+        onReset={() => setResets((value) => value + 1)}
+      />
+      <SongPanel
+        store={store}
+        engine={engine as never}
+        session={{ state: { participants: [], selfId: 'local' } } as never}
+        position={0}
+        compact
+        triggerRef={{ current: null }}
+        onClose={() => undefined}
+        onQuickPunch={() => undefined}
         onReset={() => setResets((value) => value + 1)}
       />
     </div>

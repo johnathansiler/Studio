@@ -1,0 +1,437 @@
+/* Equal cells in a recessed tray. One size, one radius, even gaps.
+   Active cells fill with the same light green as the view tabs. */
+
+.eq-grid {
+  --eq-cols: 2;
+  display: grid !important;
+  grid-template-columns: repeat(var(--eq-cols), minmax(0, 1fr));
+  gap: var(--tray-gap, 5px);
+  padding: var(--tray-pad, 5px);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  align-items: stretch;
+  justify-items: stretch;
+  border-radius: var(--tray-radius, 18px);
+  background-color: var(--tray-bg, #090d0b);
+  background-image: none;
+  border: 1px solid var(--tray-edge, rgba(255, 255, 255, 0.08));
+  box-shadow: var(--tray-inset, inset 0 2px 6px rgba(0, 0, 0, 0.62));
+  container-type: inline-size;
+  container-name: eq-grid;
+}
+
+.eq-grid > button,
+.eq-grid > .eq-label,
+.eq-grid > .t-btn,
+.eq-grid > .phone-hit,
+.eq-grid > .tempo-cluster,
+.eq-grid > .mini,
+.shell .eq-grid > button,
+.shell .eq-grid > .t-btn,
+.shell .eq-grid > .phone-hit,
+.shell .eq-grid > .mini,
+.song-sheet .eq-grid > button,
+.q-sheet .eq-grid > button {
+  box-sizing: border-box;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+  margin: 0 !important;
+  padding: 0 6px !important;
+  border-radius: var(--tray-btn-radius, 12px) !important;
+  border: 1px solid var(--tray-btn-border, rgba(255, 255, 255, 0.14)) !important;
+  background-color: #18231d;
+  background-image: var(--tray-btn-face, linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.04) 42%, rgba(0, 0, 0, 0.28)));
+  box-shadow: var(--tray-btn-shadow);
+  color: var(--text, #eef3ea);
+  font-size: 12px;
+  font-weight: 680;
+  line-height: 1 !important;
+  letter-spacing: -0.02em;
+  text-align: center;
+  text-transform: none;
+  white-space: nowrap !important;
+  overflow: hidden;
+  text-overflow: clip;
+  flex: none !important;
+  align-self: stretch !important;
+}
+
+.eq-grid > .eq-span {
+  grid-column: 1 / -1;
+}
+
+.eq-grid > button.on,
+.eq-grid > button[aria-pressed='true'],
+.eq-grid > button[aria-selected='true'],
+.eq-grid > .phone-hit.on,
+.eq-grid > .phone-hit[aria-pressed='true'],
+.eq-grid > .mini.on,
+.shell .eq-grid > button.on,
+.shell .eq-grid > button[aria-pressed='true'],
+.shell .eq-grid > button[aria-selected='true'],
+.song-sheet .eq-grid > button.on,
+.q-sheet .eq-grid > button.on {
+  background-color: var(--accent, #73c48f) !important;
+  background-image: var(--tray-on-face, linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08) 48%, rgba(0, 0, 0, 0.1))) !important;
+  color: var(--accent-ink, #102117) !important;
+  border-color: transparent !important;
+  box-shadow: var(--tray-btn-shadow), var(--tray-on-glow, 0 0 14px color-mix(in srgb, var(--accent, #73c48f) 58%, transparent));
+}
+
+.eq-grid > button.eq-danger,
+.shell .eq-grid > button.eq-danger {
+  background-color: #8f3030 !important;
+  background-image: var(--btn-rec-face, linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(0, 0, 0, 0.2))) !important;
+  color: #fff4f4 !important;
+  border-color: transparent !important;
+}
+
+.eq-grid > button:disabled,
+.shell .eq-grid > button:disabled {
+  opacity: 0.45;
+}
+
+.eq-grid > .tempo-cluster {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.eq-grid > .tempo-cluster > .t-btn,
+.eq-grid > .tempo-cluster > label.t-btn {
+  width: 100%;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  border-radius: var(--tray-btn-radius, 12px) !important;
+}
+
+.eq-grid > .eq-label {
+  color: var(--muted, #c5d2c9);
+  background-color: #141c18;
+}
+
+@container eq-grid (max-width: 520px) {
+  .eq-grid > button,
+  .eq-grid > .eq-label,
+  .eq-grid > .t-btn,
+  .eq-grid > .phone-hit,
+  .eq-grid > .mini {
+    font-size: 11px;
+    padding: 0 3px !important;
+    letter-spacing: -0.04em;
+  }
+}
+
+.eq-confirm-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(6, 10, 8, 0.55);
+}
+
+.eq-confirm {
+  width: min(360px, 100%);
+  box-sizing: border-box;
+  padding: 16px;
+  border-radius: var(--tray-radius, 18px);
+  background-color: #101816;
+  border: 1px solid var(--tray-edge, rgba(255, 255, 255, 0.08));
+  box-shadow:
+    var(--tray-inset, inset 0 2px 6px rgba(0, 0, 0, 0.62)),
+    0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.eq-confirm p {
+  margin: 0 0 12px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text, #eef3ea);
+}
+
+/* Phone mix extras and the dock More share one grid.
+   Everywhere else the extras are their own equal row. */
+.shell.phone .phone-context.phone-mix-row > .transport-extras-slot,
+.shell.phone .phone-context.phone-mix-row .transport-extras {
+  display: contents !important;
+}
+
+.shell .tool-slot > .command-strip {
+  width: 100%;
+  max-width: 100%;
+  flex-wrap: nowrap;
+}
+
+.transport.simple .transport-extras,
+.transport-extras-slot.parked .transport-extras {
+  display: grid !important;
+  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Phone Arrange dock: Delete, tempo, and Duplicate join the same eight cells as Tools. */
+.shell.phone .phone-context.btn-tray > .transport-extras-slot,
+.shell.phone .phone-context.btn-tray .transport-extras {
+  display: contents !important;
+}
+
+.shell .command-strip .transport-extras-slot {
+  display: block;
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 220px;
+  max-width: 100%;
+}
+
+.shell .command-strip .transport-extras {
+  display: grid !important;
+  width: 100%;
+  min-width: 0;
+}
+
+.shell.phone .phone-context.btn-tray {
+  flex-flow: row nowrap;
+}
+
+.shell.phone .phone-context.btn-tray .transport-extras > .tempo-cluster {
+  display: contents !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  flex: none !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.shell.phone .phone-context.btn-tray .transport-extras > .t-btn,
+.shell.phone .phone-context.btn-tray .transport-extras .bpm-readout {
+  box-sizing: border-box !important;
+  flex: 1 1 0 !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 1px !important;
+  border-width: 1px !important;
+}
+
+/* Roll sits beside the name, in flow, so it does not cover the meter or the control row. */
+.arrange .head .track-title-slot,
+.shell.phone:not(.land) .arrange .track-title-slot {
+  position: relative;
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+}
+
+.shell.phone:not(.land) .arrange .track-title-slot > .track-title {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.shell.phone:not(.land) .arrange .track-title-slot > .piano-open,
+.arrange .head .track-title-slot > .piano-open {
+  flex: 0 0 40px;
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  height: 40px;
+  min-height: 40px;
+}
+
+/* The name row is 40px once Roll sits beside it, so the lane clears the meter, the name, and the controls. */
+.shell .arrange,
+.shell.phone .arrange,
+.shell.phone:not(.land) .arrange,
+.shell.phone.land .arrange,
+.shell.fold .arrange,
+.shell:not(.phone) .arrange {
+  --lane-h: 96px;
+}
+
+.transport-extras .t-ico {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.transport-extras .t-word {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+/* Browse categories stay equal on a wide screen, not content width. */
+.shell:not(.phone) .playlist-browser .browser-tabs.btn-tray {
+  display: flex;
+  width: 100%;
+}
+
+.shell:not(.phone) .playlist-browser .browser-chip-scroll {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  gap: var(--tray-gap, 5px);
+  overflow: visible;
+}
+
+.shell:not(.phone) .playlist-browser .browser-chip-scroll > button {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  padding: 0 6px !important;
+  white-space: nowrap !important;
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+/* Plugin page names stay on one line. Preset arrows are a 40px pair. */
+.plugin-page-tabs {
+  display: flex !important;
+  flex-flow: row nowrap;
+  align-items: stretch;
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  gap: 4px;
+}
+
+.plugin-page-tabs button,
+.shell .plugin-page-tabs button {
+  flex: 1 1 0 !important;
+  width: auto !important;
+  min-width: 0 !important;
+  white-space: nowrap !important;
+  line-height: 1 !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+  overflow: hidden;
+  text-overflow: clip;
+  font-size: clamp(11px, 2.5vw, 13px);
+  padding: 0 4px !important;
+}
+
+.shell .preset-dock > button[aria-label^='Previous'],
+.shell .preset-dock > button[aria-label^='Next'],
+.preset-dock > button[aria-label^='Previous'],
+.preset-dock > button[aria-label^='Next'] {
+  flex: 0 0 40px !important;
+  width: 40px !important;
+  min-width: 40px !important;
+  max-width: 40px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+  padding: 0 !important;
+  font-size: 18px !important;
+  line-height: 1 !important;
+}
+
+.preset-dock > button[aria-label^='Previous']::after,
+.preset-dock > button[aria-label^='Next']::after {
+  content: none !important;
+}
+
+/* Share the rack header in one wrapping row so the step grid stays clickable. */
+.rack-bar > .rack-mode.eq-grid,
+.rack-bar > .rack-lengths,
+.rack-bar > .pattern-send {
+  flex: 1 1 auto;
+  width: auto;
+  max-width: 100%;
+}
+
+.rack-bar > .rack-mode.eq-grid { flex-basis: 180px; }
+.rack-bar > .rack-lengths { flex-basis: 300px; }
+.rack-bar > .pattern-send { flex-basis: 480px; }
+
+.rack-bar .eq-grid {
+  width: 100%;
+}
+
+.shell .scaler-panel .scaler-tools,
+.shell .scaler-panel .scaler-pad-source,
+.shell .transport.simple .transport-extras,
+.shell .tune-tools.eq-grid,
+.shell .song-sheet .song-pills.eq-grid,
+.shell .midi-tools .midi-tabs.eq-grid,
+.ideas-pop .chip-row.eq-grid,
+.unstuck-pages.eq-grid {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.shell .scaler-panel .scaler-tools {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: stretch;
+}
+
+.tune-board.pitch .tune-tools.eq-grid,
+.tune-board.graph .tune-tools.eq-grid,
+.tune-board.tone .tune-tools.eq-grid {
+  display: none !important;
+}
+
+.shell.phone.land .tune-board .tune-tools.eq-grid {
+  --eq-cols: 10 !important;
+  padding: 0;
+  gap: 2px;
+}
+
+.rack-lengths {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.tune-regions > .eq-grid,
+.midi-tools .midi-tabbar,
+.ideas-pop .chip-row.eq-grid {
+  width: 100%;
+}
+
+.unstuck-grid button[data-unstuck-action='next-section'] {
+  grid-column: 1 / -1;
+  min-height: 40px;
+}

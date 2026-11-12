@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
+import { eqCols } from './equalGrid'
 import { TipButton } from './Hint'
 
 /** Send the current pattern to the song as MIDI, an instrument, or an Arrange clip. */
@@ -8,10 +9,13 @@ export function PatternSend({
   store,
   beat,
   phone,
+  lead,
 }: {
   store: ProjectStore
   beat: number
   phone: boolean
+  /** Extra equal cells, such as Graph, Roll, and Edit, in the same 4-column grid. */
+  lead?: ReactNode
 }) {
   const tracks = store.project.tracks.filter((track) => track.type === 'midi')
   const [trackId, setTrackId] = useState('')
@@ -37,17 +41,20 @@ export function PatternSend({
           <option key={track.id} value={track.id}>{track.name}</option>
         ))}
       </select>
-      <TipButton label={midi} hint="Turn this pattern into MIDI on a drum-kit track and open it in the piano roll." onClick={() => send('midi')} />
-      <TipButton label={inst} hint="Put this pattern on a drum instrument that plays the same samples, as editable MIDI." onClick={() => send('instrument')} />
-      <TipButton label={arrange} hint="Send this pattern to Arrange as notes you can see and edit." onClick={() => store.sendPatternToArrange(Math.max(0, beat), trackId || undefined)} />
-      <TipButton
-        label={unique}
-        hint="Give the selected Arrange clip its own pattern. Other copies stay linked."
-        disabled={!store.selectedPatternClipId}
-        onClick={() => {
-          if (store.selectedPatternClipId) store.makePatternClipUnique(store.selectedPatternClipId)
-        }}
-      />
+      <div className="eq-grid" style={eqCols(4)}>
+        {lead}
+        <TipButton label={midi} hint="Turn this pattern into MIDI on a drum-kit track and open it in the piano roll." onClick={() => send('midi')} />
+        <TipButton label={inst} hint="Put this pattern on a drum instrument that plays the same samples, as editable MIDI." onClick={() => send('instrument')} />
+        <TipButton label={arrange} hint="Send this pattern to Arrange as notes you can see and edit." onClick={() => store.sendPatternToArrange(Math.max(0, beat), trackId || undefined)} />
+        <TipButton
+          label={unique}
+          hint="Give the selected Arrange clip its own pattern. Other copies stay linked."
+          disabled={!store.selectedPatternClipId}
+          onClick={() => {
+            if (store.selectedPatternClipId) store.makePatternClipUnique(store.selectedPatternClipId)
+          }}
+        />
+      </div>
     </div>
   )
 }

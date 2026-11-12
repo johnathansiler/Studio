@@ -31,6 +31,7 @@ import type { ProjectStore } from '../state/store'
 import { BEAT_BAR, BEAT_ROW, BEAT_SHEET, copyOf, described } from './chrome'
 import { drumRole } from '../model/smartDrums'
 import { useFormFactor } from './form'
+import { eqCols } from './equalGrid'
 import { TipButton } from './Hint'
 import { LoopRegion } from './LoopRegion'
 import { DrumRoll } from './DrumRoll'
@@ -489,7 +490,7 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
   return (
     <div className="beats channel-rack" data-length={count} data-tool={graph ? 'graph' : 'paint'} data-play-mode={mode}>
       <div className="rack-bar">
-        <div className="rack-mode" role="group" aria-label="Play mode. Pattern loops this beat. Song plays the arrangement.">
+        <div className="rack-mode eq-grid" style={eqCols(2)} role="group" aria-label="Play mode. Pattern loops this beat. Song plays the arrangement.">
           <TipButton
             label="Pattern"
             hint="Play this pattern in a loop, even when Arrange is empty or the song loop is somewhere else."
@@ -516,34 +517,44 @@ export function ChannelRack({ store, engine, page = 'steps' }: { store: ProjectS
         </label>
         <div className="rack-lengths" role="group" aria-label={`${bar('steps').label}. ${bar('steps').hint}`}>
           <span className="rack-lengths-label">Steps</span>
-          {([16, 32, 64] as const).map((length) => (
-            <TipButton
-              key={length}
-              label={String(length)}
-              hint={`Set the pattern to ${length} steps. Extra steps scroll sideways.`}
-              className={count === length ? 'on' : ''}
-              pressed={count === length}
-              onClick={() => store.setPatternLength(length)}
-            />
-          ))}
+          <div className="eq-grid" style={eqCols(4)}>
+            {([16, 32, 64] as const).map((length) => (
+              <TipButton
+                key={length}
+                label={String(length)}
+                hint={`Set the pattern to ${length} steps. Extra steps scroll sideways.`}
+                className={count === length ? 'on' : ''}
+                pressed={count === length}
+                onClick={() => store.setPatternLength(length)}
+              />
+            ))}
+            <button
+              type="button"
+              className="rack-smart"
+              data-smart-pattern=""
+              title="Smart Pattern. Each loaded sound gets a part that fits its role. Drums follow kick, snare, hat, and the rest. Piano, bass, and other melodic sounds get a phrase. An unknown sound gets a plain downbeat. A selected row changes only that row. One undo undoes one press."
+              aria-label="Smart Pattern. Each loaded sound gets a part that fits its role. A selected row changes only that row."
+              onClick={() => store.smartRandomDrums()}
+            >
+              Smart Pattern
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          className="rack-smart"
-          data-smart-pattern=""
-          title="Smart Pattern. Each loaded sound gets a part that fits its role. Drums follow kick, snare, hat, and the rest. Piano, bass, and other melodic sounds get a phrase. An unknown sound gets a plain downbeat. A selected row changes only that row. One undo undoes one press."
-          aria-label="Smart Pattern. Each loaded sound gets a part that fits its role. A selected row changes only that row."
-          onClick={() => store.smartRandomDrums()}
-        >
-          Smart Pattern
-        </button>
-        <TipButton label="Graph" hint="Show the step graph for the selected channel. Drag a bar to change velocity, pan, pitch, or gate." pressed={graph} onClick={() => setGraph((open) => !open)} />
-        <TipButton label="Roll" hint="Show this pattern as drum lanes. The notes match the step grid." pressed={store.rackRoll} onClick={() => store.toggleRackRoll()} />
-        <TipButton label={bar('edit').label} hint={bar('edit').hint} pressed={editOpen} onClick={() => setEditOpen((open) => !open)} />
+        <PatternSend
+          store={store}
+          beat={Math.max(0, beat)}
+          phone={short}
+          lead={(
+            <>
+              <TipButton label="Graph" hint="Show the step graph for the selected channel. Drag a bar to change velocity, pan, pitch, or gate." pressed={graph} onClick={() => setGraph((open) => !open)} />
+              <TipButton label="Roll" hint="Show this pattern as drum lanes. The notes match the step grid." pressed={store.rackRoll} onClick={() => store.toggleRackRoll()} />
+              <TipButton label={bar('edit').label} hint={bar('edit').hint} pressed={editOpen} onClick={() => setEditOpen((open) => !open)} />
+            </>
+          )}
+        />
         <div hidden={phone && page !== 'mix'}>
         {!phone && swing}
         <SnapControl store={store} />
-        <PatternSend store={store} beat={Math.max(0, beat)} phone={short} />
         <span className="rack-tool" role="status" aria-live="polite" title={toolHint}>{toolName}</span>
         <span className={`rack-loop ${mode === 'pattern' || project.loopEnabled ? 'on' : ''}`} data-loop={project.loopEnabled ? 'on' : 'off'} data-mode={mode} title={mode === 'pattern' ? 'Pattern mode loops this beat. Song mode uses the arrangement loop.' : 'The song loop. It is the same region as Arrange, and the playhead wraps inside it.'}>
           {mode === 'pattern' ? 'Pattern' : project.loopEnabled ? 'Loop on' : 'Loop off'}

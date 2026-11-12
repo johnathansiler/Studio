@@ -7,6 +7,7 @@ import { TOOL_INFO, activeTool, subscribeTools, type ArrangeTool } from '../stat
 import { currentArrangeSheet, subscribeArrangeSheet, toggleArrangeSheet } from './arrangePanel'
 import { ArrangeBottomSheet } from './ArrangeBottomSheet'
 import { SnapChoices } from './UtilitySheets'
+import { eqCols } from './equalGrid'
 import { useScreenOverlay } from './screenOverlay'
 import {
   phoneContextKind,
@@ -254,9 +255,9 @@ export function PhoneDock({
   return (
     <>
       {host && sheet ? createPortal(sheet, host) : null}
-      {kind !== 'arrange' ? <div id="transport-extras" className="transport-extras-slot parked" /> : null}
+      {kind !== 'arrange' && kind !== 'mix' ? <div id="transport-extras" className="transport-extras-slot parked" /> : null}
       {toolsOpen ? <PhoneToolRow store={store} onClose={closeTools} /> : null}
-      <div className={`phone-context${kind === 'arrange' ? ' btn-tray' : ''}`} role="toolbar" aria-label="Actions" data-phone-context={kind}>
+      <div className={`phone-context${kind === 'arrange' ? ' btn-tray' : ''}${kind === 'mix' ? ' eq-grid phone-mix-row' : ''}`} style={kind === 'mix' ? eqCols(4) : undefined} role="toolbar" aria-label="Actions" data-phone-context={kind}>
         {kind === 'clip' && clip && (
           <>
             {clip.kind !== 'pattern' && (
@@ -294,13 +295,16 @@ export function PhoneDock({
           </>
         )}
         {kind === 'mix' && (
-          <Hit
-            action="more"
-            label="More"
-            title="Loop, metronome, and count."
-            pressed={transportMore}
-            onClick={() => setTransportMore((open) => !open)}
-          />
+          <>
+            <div id="transport-extras" className="transport-extras-slot" />
+            <Hit
+              action="more"
+              label="More"
+              title="Loop, metronome, and count."
+              pressed={transportMore}
+              onClick={() => setTransportMore((open) => !open)}
+            />
+          </>
         )}
         {kind === 'collab' && (
           <>

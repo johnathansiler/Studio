@@ -151,21 +151,27 @@ export function WidthBar({
         onChange={onChange}
       />
       <span className="width-value" aria-hidden>{value}</span>
-      {axis === 'strip' && (
-        <button
-          type="button"
-          className="width-reset"
-          aria-pressed={value <= STRIP_HALF}
-          aria-label={value <= STRIP_HALF ? 'Normal channel width' : 'Narrow channel width'}
-          title={value <= STRIP_HALF ? 'Use the normal channel width.' : 'Make channels half as wide.'}
-          onClick={() => onChange(value <= STRIP_HALF ? STRIP_DEFAULT : STRIP_HALF)}
-        >
-          {value <= STRIP_HALF ? 'Normal' : 'Narrow'}
+      {axis === 'strip' ? (
+        <div className="eq-grid width-actions" style={{ ['--eq-cols' as string]: '2' }}>
+          <button
+            type="button"
+            className="width-reset"
+            aria-pressed={value <= STRIP_HALF}
+            aria-label={value <= STRIP_HALF ? 'Normal channel width' : 'Narrow channel width'}
+            title={value <= STRIP_HALF ? 'Use the normal channel width.' : 'Make channels half as wide.'}
+            onClick={() => onChange(value <= STRIP_HALF ? STRIP_DEFAULT : STRIP_HALF)}
+          >
+            {value <= STRIP_HALF ? 'Normal' : 'Narrow'}
+          </button>
+          <button type="button" className="width-reset" aria-label={copy.reset} title={copy.reset} onClick={onReset}>
+            Reset
+          </button>
+        </div>
+      ) : (
+        <button type="button" className="width-reset" aria-label={copy.reset} title={copy.reset} onClick={onReset}>
+          Reset
         </button>
       )}
-      <button type="button" className="width-reset" aria-label={copy.reset} title={copy.reset} onClick={onReset}>
-        Reset
-      </button>
     </div>
   )
 }

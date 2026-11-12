@@ -34,6 +34,9 @@ export function UtilitySheets({
   setupButton,
   onClose,
   onQuickPunch,
+  onReset,
+  onMidi,
+  roomRole,
 }: {
   utility: UtilitySheet | null
   store: ProjectStore
@@ -43,6 +46,9 @@ export function UtilitySheets({
   setupButton: RefObject<HTMLButtonElement | null>
   onClose: () => void
   onQuickPunch: () => void
+  onReset?: () => void
+  onMidi?: () => void
+  roomRole?: 'host' | 'guest'
 }) {
   const phone = useFormFactor() === 'phone'
   if (utility === 'setup') {
@@ -57,6 +63,9 @@ export function UtilitySheets({
           triggerRef={setupButton}
           onClose={onClose}
           onQuickPunch={onQuickPunch}
+          onReset={onReset}
+          onMidi={onMidi}
+          roomRole={roomRole}
         />
       </ArrangeBottomSheet>
     )

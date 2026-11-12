@@ -3,6 +3,11 @@ import type { AudioEngine } from '../audio/engine'
 import type { SessionClient } from '../remote/session'
 import type { ProjectStore } from '../state/store'
 import { AutomationModeBar } from './AutomationLane'
+import { EqualGrid } from './equalGrid'
+import { TRANSPORT_COPY, copyOf } from './chrome'
+import { TipButton } from './Hint'
+import { RecordBar } from './RecordBar'
+import { ResetIcon } from './TransportBar'
 import { SongMapHead } from './SongMap'
 import './song-panel.css'
 
@@ -25,10 +30,15 @@ type SongTab = (typeof TABS)[number]['id']
 /** Compact song setup. It docks under the Setup button and stays as tall as its controls. */
 export function SongPanel({
   store,
+  engine,
+  session,
   position,
   triggerRef,
   onClose,
-  onQuickPunch: _onQuickPunch,
+  onQuickPunch,
+  onReset,
+  onMidi,
+  roomRole,
 }: {
   store: ProjectStore
   engine: AudioEngine
@@ -38,15 +48,40 @@ export function SongPanel({
   triggerRef: RefObject<HTMLButtonElement | null>
   onClose: () => void
   onQuickPunch: () => void
+  onReset?: () => void
+  onMidi?: () => void
+  roomRole?: 'host' | 'guest'
 }) {
-  void _onQuickPunch
   void triggerRef
   void onClose
   const [tab, setTab] = useState<SongTab>('automation')
+  const guest = roomRole === 'guest'
+  const resetCopy = copyOf(TRANSPORT_COPY, 'reset')
 
   return (
       <div className="song-sheet">
-        <div className="song-pills" role="tablist" aria-label="Setup sections">
+        <EqualGrid cols={2} className="setup-actions" label="Punch and reset">
+          <RecordBar
+            dock
+            store={store}
+            engine={engine}
+            session={session}
+            onQuickPunch={onQuickPunch}
+            onMidi={onMidi}
+          />
+          <TipButton
+            id="transport-reset"
+            className="t-btn reset"
+            label={guest ? 'Host only' : resetCopy.label}
+            hint={guest ? 'Host only' : resetCopy.hint}
+            disabled={guest}
+            onClick={() => onReset?.()}
+          >
+            <ResetIcon />
+            <span className="t-word">Reset</span>
+          </TipButton>
+        </EqualGrid>
+        <div className="song-pills eq-grid" style={{ ['--eq-cols' as string]: '3' }} role="tablist" aria-label="Setup sections">
           {TABS.map((item) => (
             <button
               key={item.id}
@@ -72,7 +107,7 @@ export function SongPanel({
         )}
         {tab === 'time' && (
           <section className="song-pane" aria-label="Time signature">
-            <div className="song-meters" role="group" aria-label="Time signature">
+            <div className="song-meters eq-grid" style={{ ['--eq-cols' as string]: '5' }} role="group" aria-label="Time signature">
               {METERS.map(([beats, note, label]) => {
                 const on = store.project.timeSignature.numerator === beats && store.project.timeSignature.denominator === note
                 return (

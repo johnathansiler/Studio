@@ -12,6 +12,7 @@ import { countInBarsOf, countInSeconds } from '../model/time'
 import { createEmptyProject } from '../model/types'
 import { ProjectStore } from '../state/store'
 import { TRANSPORT_COPY, visibleMenu } from '../ui/chrome'
+import { SongPanel } from '../ui/SongPanel'
 import { TransportBar } from '../ui/TransportBar'
 
 const engineStub = {
@@ -75,7 +76,9 @@ describe('count-in on the transport', () => {
     const off = markup(store)
     expect(off).toContain('id="transport-click"')
     expect(off).toContain('id="transport-count"')
-    expect(off).toContain('id="transport-reset"')
+    expect(off).not.toContain('id="transport-reset"')
+    expect(off).toContain('id="transport-delete"')
+    expect(off).toContain('id="transport-duplicate"')
     expect(off).toContain('aria-label="Metronome. Metronome while you play and record."')
     expect(off).toContain('aria-label="Count-in. Count one bar before recording starts."')
     expect(off).toContain('>1-2<')
@@ -105,7 +108,9 @@ describe('count-in on the transport', () => {
     expect(phone).not.toContain('>Click<')
     expect(phone).not.toContain('id="transport-count"')
     expect(phone).not.toContain('>1-2<')
-    expect(phone).toContain('id="transport-reset"')
+    expect(phone).not.toContain('id="transport-reset"')
+    expect(phone).toContain('id="transport-delete"')
+    expect(phone).toContain('id="transport-duplicate"')
     const ids = TRANSPORT_COPY.map((item) => item.id)
     expect(ids.filter((id) => id === 'click')).toHaveLength(1)
     expect(ids.filter((id) => id === 'count-in')).toHaveLength(1)
@@ -176,9 +181,21 @@ describe('room reset', () => {
 
   it('shows Reset for the host and a disabled Host only control for a guest', () => {
     const store = new ProjectStore()
-    const host = markup(store, 'host')
-    const guest = markup(store, 'guest')
-    const solo = markup(store)
+    const setup = (roomRole?: 'host' | 'guest') => renderToStaticMarkup(createElement(SongPanel, {
+      store,
+      engine: engineStub as never,
+      session: { state: { participants: [], selfId: 'local', role: roomRole } } as never,
+      position: 0,
+      compact: true,
+      triggerRef: { current: null },
+      onClose() {},
+      onQuickPunch() {},
+      onReset() {},
+      roomRole,
+    }))
+    const host = setup('host')
+    const guest = setup('guest')
+    const solo = setup()
     expect(host).toContain('aria-label="Reset. Reset – fix glitches"')
     expect(host).toContain('fix glitches')
     expect(host).not.toContain('Host only')

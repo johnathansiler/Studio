@@ -3677,6 +3677,170 @@ export class ProjectStore {
     })
   }
 
+  /** Remove the selected arrange clips. Notes inside a clip stay until the clip goes. */
+  deleteArrangeClips() {
+    this.mutate(() => {
+      const audio = new Set(this.selectedClipIds)
+      if (this.selectedClipId) audio.add(this.selectedClipId)
+      if (audio.size) {
+        for (const track of this.project.tracks) {
+          for (const clip of track.clips) {
+            if (!audio.has(clip.id)) continue
+            for (const other of linkedAudioTargets(this.project, track.id, clip)) audio.add(other.id)
+          }
+        }
+        for (const track of this.project.tracks) track.clips = track.clips.filter((clip) => !audio.has(clip.id))
+        this.selectedClipId = null
+        this.selectedClipIds = []
+        this.dropSelectedPatterns()
+        return
+      }
+      const midi = new Set(this.selectedMidiClipIds)
+      if (this.selectedMidiClipId) midi.add(this.selectedMidiClipId)
+      if (midi.size) {
+        for (const track of this.project.tracks) track.midiClips = track.midiClips.filter((clip) => !midi.has(clip.id))
+        this.selectedMidiClipId = null
+        this.selectedMidiClipIds = []
+        this.selectedNoteId = null
+        this.selectedNoteIds = []
+      }
+      this.dropSelectedPatterns()
+    })
+  }
+
+  /** Copy the selected arrange clips and place each copy just after the original. */
+  duplicateArrangeClips() {
+    this.mutate(() => {
+      const audioIds = new Set(this.selectedClipIds)
+      if (this.selectedClipId) audioIds.add(this.selectedClipId)
+      const midiIds = new Set(this.selectedMidiClipIds)
+      if (this.selectedMidiClipId) midiIds.add(this.selectedMidiClipId)
+      const nextAudio: string[] = []
+      const nextMidi: string[] = []
+      for (const track of this.project.tracks) {
+        for (const clip of [...track.clips]) {
+          if (!audioIds.has(clip.id)) continue
+          const copy: AudioClip = {
+            ...clip,
+            id: uid('clip'),
+            name: `${clip.name} copy`,
+            startSample: clip.startSample + clip.durationSamples,
+            stretch: clip.stretch ? { ...clip.stretch, markers: clip.stretch.markers.map((marker) => ({ ...marker })) } : undefined,
+          }
+          track.clips.push(copy)
+          nextAudio.push(copy.id)
+        }
+        for (const clip of [...track.midiClips]) {
+          if (!midiIds.has(clip.id)) continue
+          const copy: MidiClip = {
+            ...clip,
+            id: uid('midi'),
+            name: `${clip.name} copy`,
+            startBeat: clip.startBeat + clip.durationBeats,
+            notes: clip.notes.map((note) => ({ ...note, id: uid('note') })),
+          }
+          track.midiClips.push(copy)
+          nextMidi.push(copy.id)
+        }
+      }
+      if (nextAudio.length) {
+        this.selectedClipIds = nextAudio
+        this.selectedClipId = nextAudio.at(-1) ?? null
+      }
+      if (nextMidi.length) {
+        this.selectedMidiClipIds = nextMidi
+        this.selectedMidiClipId = nextMidi.at(-1) ?? null
+      }
+      const patternIds = new Set(this.selectedPatternClipIds)
+      if (this.selectedPatternClipId) patternIds.add(this.selectedPatternClipId)
+      const nextPattern: string[] = []
+      if (this.project.patternClips) {
+        for (const clip of [...this.project.patternClips]) {
+          if (!patternIds.has(clip.id)) continue
+          const copy = {
+            ...clip,
+            id: uid('pcl'),
+            placed: true,
+            startBeat: clip.startBeat + clip.lengthBeats,
+          }
+          this.project.patternClips.push(copy)
+          nextPattern.push(copy.id)
+        }
+      }
+      if (nextPattern.length) {
+        this.selectedPatternClipIds = nextPattern
+        this.selectedPatternClipId = nextPattern.at(-1) ?? null
+      }
+    })
+  }
+
+  /** Copy the track, its clips, instrument, plugins, and settings onto the lane below. */
+  duplicateTrack(id: string) {
+    const index = this.project.tracks.findIndex((track) => track.id === id)
+    const source = this.project.tracks[index]
+    if (!source || index < 0) return
+    this.mutate(() => {
+      const copy = structuredClone(source)
+      copy.id = uid('track')
+      copy.name = `${source.name} copy`
+      const pluginIds = new Map<string, string>()
+      copy.plugins = copy.plugins.map((plugin) => {
+        const next = uid('plugin')
+        pluginIds.set(plugin.id, next)
+        return { ...plugin, id: next }
+      })
+      copy.inserts = copy.inserts.map((insert) => ({ ...insert, id: uid('ins') }))
+      copy.sends = copy.sends.map((send) => ({ ...send, id: uid('send') }))
+      const audioIds = new Map<string, string>()
+      copy.clips = copy.clips.map((clip) => {
+        const next = uid('clip')
+        audioIds.set(clip.id, next)
+        return { ...clip, id: next }
+      })
+      const midiIds = new Map<string, string>()
+      copy.midiClips = copy.midiClips.map((clip) => {
+        const next = uid('midi')
+        midiIds.set(clip.id, next)
+        return {
+          ...clip,
+          id: next,
+          notes: clip.notes.map((note) => ({ ...note, id: uid('note') })),
+          takes: clip.takes?.map((take) => ({
+            ...take,
+            id: uid('take'),
+            notes: take.notes.map((note) => ({ ...note, id: uid('note') })),
+          })),
+        }
+      })
+      if (copy.audioSlots) copy.audioSlots = copy.audioSlots.map((slot) => (slot ? audioIds.get(slot) ?? slot : slot))
+      if (copy.midiSlots) copy.midiSlots = copy.midiSlots.map((slot) => (slot ? midiIds.get(slot) ?? slot : slot))
+      copy.midiFx = copy.midiFx?.map((fx) => ({ ...fx, id: uid('mfx') }))
+      this.project.tracks.splice(index + 1, 0, copy)
+      for (const clip of [...(this.project.patternClips ?? [])]) {
+        if (clip.trackId !== id) continue
+        this.project.patternClips?.push({ ...structuredClone(clip), id: uid('pcl'), trackId: copy.id })
+      }
+      for (const lane of this.project.automation) {
+        if (lane.trackId !== id) continue
+        this.project.automation.push({
+          ...structuredClone(lane),
+          id: uid('lane'),
+          trackId: copy.id,
+          pluginId: pluginIds.get(lane.pluginId) ?? lane.pluginId,
+        })
+      }
+      this.selectedTrackId = copy.id
+      this.selectedClipId = null
+      this.selectedClipIds = []
+      this.selectedMidiClipId = null
+      this.selectedMidiClipIds = []
+      this.selectedPatternClipId = null
+      this.selectedPatternClipIds = []
+      this.selectedNoteId = null
+      this.selectedNoteIds = []
+    })
+  }
+
   setFade(trackId: string, clipId: string, edge: 'in' | 'out', samples: number) {
     this.mutate(() => {
       const clip = this.track(trackId)?.clips.find((c) => c.id === clipId)

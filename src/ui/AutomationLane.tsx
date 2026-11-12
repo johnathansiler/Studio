@@ -56,7 +56,7 @@ export function ChannelAutomation({ store, trackId }: { store: ProjectStore; tra
 export function AutomationModeBar({ store, embedded = false }: { store: ProjectStore; embedded?: boolean }) {
   const mode = automationWriteMode(store.project)
   return (
-    <div className={`auto-mode${embedded ? ' in-strip' : ''}`} role="group" aria-label="Automation write mode">
+    <div className={`auto-mode eq-grid${embedded ? ' in-strip' : ''}`} style={{ ['--eq-cols' as string]: '4' }} role="group" aria-label="Automation write mode">
       {MODES.map((item) => (
         <button key={item.id} type="button" className={mode === item.id ? 'on' : ''} aria-pressed={mode === item.id} aria-label={`${item.label}. ${item.title}`} title={item.title} onClick={() => store.setAutomationMode(item.id)}>
           <span className="mode-full">{item.label}</span>
