@@ -181,7 +181,7 @@ describe('transport words', () => {
           expect(order.countOn, viewport.name).toBe(order.clickOn)
           expect(order.recOn, viewport.name).not.toBe(order.clickOn)
         }
-        expect(order.kicker).toBe('Tempo')
+        expect(order.kicker).toBe(viewport.name === 'phone' ? 'Tap' : 'Tempo')
         expect(order.tapButton, viewport.name).toBe(false)
         expect(order.lengthButton, viewport.name).toBe(false)
         expect(order.tempoLabel).toContain('Tap to set tempo')

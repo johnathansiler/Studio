@@ -259,7 +259,8 @@ describe('phone and landscape layout bugs', () => {
     const { browser, page } = await boot(844, 390)
     try {
       const result = await page.evaluate(() => {
-        const heads = document.querySelector('.arrange .heads') as HTMLElement
+        const column = document.querySelector('.arrange .heads') as HTMLElement
+        const heads = (document.querySelector('.arrange .heads-scroll') as HTMLElement | null) ?? column
         const dock = document.querySelector('.tool-slot')!.getBoundingClientRect()
         const names = [...document.querySelectorAll('.arrange .head .track-title')] as HTMLElement[]
         const gap = document.querySelector('.ruler-gap')?.getBoundingClientRect().height ?? 0
@@ -275,7 +276,7 @@ describe('phone and landscape layout bugs', () => {
           }
         })
         return {
-          headsBottom: heads.getBoundingClientRect().bottom,
+          headsBottom: column.getBoundingClientRect().bottom,
           dockTop: dock.top,
           hits,
         }

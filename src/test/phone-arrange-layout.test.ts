@@ -12,7 +12,8 @@ describe('phone arrange chrome', () => {
   it('halves the phone loop strip and keeps a 44px grip hit', () => {
     const css = readFileSync(new URL('../ui/arrangeSpace.css', import.meta.url), 'utf8')
     expect(css).toContain('.shell.phone .arrange { --map-h: 0px; --ruler-h: 22px; --playhead-strip: 42px; }')
-    expect(css).toContain('height: calc(var(--ruler-h) - 2px)')
+    expect(css).toContain('.shell.phone .arrange .ruler .loop-host .loop-grip-face')
+    expect(css).toContain('height: 100%')
     expect(css).toContain('overflow: visible')
     expect(css).toContain('--playhead-strip: 42px')
     const grips = readFileSync(new URL('../ui/loopGrips.ts', import.meta.url), 'utf8')

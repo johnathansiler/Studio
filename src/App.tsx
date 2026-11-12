@@ -31,6 +31,8 @@ import { keepLandscapeAfterClose } from './ui/keyboardStage'
 import { countInAt, meterAtSample, projectSampleBeat, tempoAtSample } from './model/tempoMap'
 import { displayedPlayhead } from './model/transportSync'
 import { beatsToSamples, countInBarsOf, samplesToBeats } from './model/time'
+import { looseGroup, presentSoundEntries, samplerFromNotes } from './sounds/noteGroups'
+import type { SoundEntry } from './sounds/types'
 
 const FaceGallery = lazy(() => import('./ui/faces/PluginFace').then((mod) => ({ default: mod.FaceGallery })))
 import { guestFollowStart, scheduleLeadMs } from './model/sessionSync'
@@ -1529,19 +1531,55 @@ export function App() {
   async function importAsInstrument(trackId: string, files: FileList | File[]) {
     await ready()
     if (!engine.ctx) return
-    for (const file of files) {
+    const decoded: { id: string; name: string; path: string; sampleRate: number; channels: Float32Array[] }[] = []
+    for (const file of [...files]) {
       try {
-        const decoded = await engine.ctx.decodeAudioData((await file.arrayBuffer()).slice(0))
-        const channels = Array.from({ length: decoded.numberOfChannels }, (_, index) => decoded.getChannelData(index).slice())
-        store.loadSamplerSound(trackId, {
-          id: uid('smp'),
+        const audio = await engine.ctx.decodeAudioData((await file.arrayBuffer()).slice(0))
+        const channels = Array.from({ length: audio.numberOfChannels }, (_, index) => audio.getChannelData(index).slice())
+        const relative = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
+        decoded.push({
+          id: `import-${decoded.length}`,
           name: file.name.replace(/\.[^.]+$/, '') || file.name,
-          sampleRate: decoded.sampleRate,
+          path: relative.replace(/\\/g, '/'),
+          sampleRate: audio.sampleRate,
           channels,
         })
       } catch (error) {
         store.toast(error instanceof Error ? error.message : 'Could not read that audio file.', 'warn')
       }
+    }
+    const stubs: SoundEntry[] = decoded.map((item) => ({
+      id: item.id,
+      path: item.path,
+      name: item.name,
+      type: 'one-shot',
+      tags: [],
+      durationSec: 0,
+      sampleRate: item.sampleRate,
+      license: 'private',
+      source: 'This device',
+      pack: item.path.includes('/') ? item.path.split('/')[0] : 'Import',
+    }))
+    const shown = presentSoundEntries(stubs)
+    const consumed = new Set<string>()
+    for (const row of shown) {
+      const group = looseGroup(row.id)
+      if (!group) continue
+      const assets: { id: string; name: string; sampleRate: number; channels: Float32Array[] }[] = []
+      const notes: { midi: number; bufferId: string; sampleRate: number }[] = []
+      for (const member of group.members) {
+        const source = decoded.find((item) => item.id === member.entry.id)
+        if (!source) continue
+        const id = uid('smp')
+        assets.push({ id, name: source.name, sampleRate: source.sampleRate, channels: source.channels })
+        notes.push({ midi: member.midi, bufferId: id, sampleRate: source.sampleRate })
+        consumed.add(source.id)
+      }
+      if (notes.length >= 2) store.adoptLibrary(trackId, samplerFromNotes(group.id, group.name, notes), assets)
+    }
+    for (const item of decoded) {
+      if (consumed.has(item.id)) continue
+      store.loadSamplerSound(trackId, { id: uid('smp'), name: item.name, sampleRate: item.sampleRate, channels: item.channels })
     }
   }
 

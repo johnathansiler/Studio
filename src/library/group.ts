@@ -4,6 +4,7 @@
  * Articulation words stay, so Normal and Staccato are different instruments.
  * Dynamics stay on the instrument as velocity layers.
  */
+import { parseLooseName } from './looseName'
 
 export interface InstrumentLayer {
   key: string
@@ -147,6 +148,8 @@ interface RawSample {
   durationRank: number
   nameTokens: string[]
   looseNumbers: number[]
+  /** A one-shot whose name is a note. A single file stays a row; two or more become one instrument. */
+  looseFile: boolean
 }
 
 export function noteMidi(token: string): number | null {
@@ -345,6 +348,7 @@ function emptyRaw(row: CatalogRow, midi: number | null, pitchClass: number | nul
     durationRank: 50,
     nameTokens: [],
     looseNumbers: [],
+    looseFile: false,
   }
 }
 
@@ -372,11 +376,24 @@ function baseOctave(category: string, folder: string) {
   return 3
 }
 
+function fileStem(key: string) {
+  const file = key.split('/').pop() || key
+  return file.replace(/\.[a-z0-9]+$/i, '')
+}
+
 function parseRaw(row: CatalogRow): RawSample | null {
-  const file = row.key.split('/').pop() || row.key
-  const stem = file.replace(/\.[a-z0-9]+$/i, '')
+  const stem = fileStem(row.key)
   const named = pitchFromStem(stem)
   if (named) return emptyRaw(row, named.midi, named.pitchClass)
+  const loose = parseLooseName(stem)
+  if (loose) {
+    const raw = emptyRaw(row, loose.midi, loose.pitchClass)
+    raw.looseFile = (row.type || '').toLowerCase() !== 'multisample note'
+    const folderName = row.key.split('/').slice(0, -1).pop()?.toLowerCase() || ''
+    const role = loose.role
+    if (role && role !== folderName && !folderName.includes(role) && !role.includes(folderName)) raw.nameTokens = role.split(' ')
+    return raw
+  }
   const tokens = tokenizeStem(stem)
   let midi: number | null = null
   let fromNote = false
@@ -479,6 +496,7 @@ function parseRaw(row: CatalogRow): RawSample | null {
     durationRank,
     nameTokens: words.map((word) => word.toLowerCase()),
     looseNumbers,
+    looseFile: false,
   }
 }
 
@@ -796,9 +814,13 @@ function applyIndexSeries(items: { raw: RawSample; stem: string }[]) {
 function isGroupable(entry: CatalogRow) {
   const type = (entry.type || '').toLowerCase()
   if (type === 'multisample note') return true
-  if (type) return false
-  const file = entry.key.split('/').pop() || entry.key
-  return pitchFromStem(file.replace(/\.[a-z0-9]+$/i, '')) != null
+  if (type === 'loop' || type === 'sfx') return false
+  const stem = fileStem(entry.key)
+  if (pitchFromStem(stem) || parseLooseName(stem)) {
+    if (!type) return true
+    return type === 'one-shot' || type === 'sample' || type === 'instrument'
+  }
+  return false
 }
 
 /** Bare note names take their octave from the folder, never from a shared C4 default. */
@@ -828,6 +850,8 @@ export function groupLibraryInstruments(entries: CatalogRow[]): LibraryInstrumen
     if (!entry.key || entry.key.includes('..')) continue
     const raw = parseRaw(entry)
     if (!raw) continue
+    const type = (entry.type || '').toLowerCase()
+    if (type && type !== 'multisample note') raw.looseFile = true
     const folder = entry.key.split('/').slice(0, -1).join('/')
     const file = entry.key.split('/').pop() || entry.key
     const oct = octaveFolder(folder)
@@ -861,6 +885,9 @@ export function groupLibraryInstruments(entries: CatalogRow[]): LibraryInstrumen
   const ids = new Set<string>()
   const built: { instrument: LibraryInstrument; code: string }[] = []
   for (const group of groups.values()) {
+    const chromatic = group.samples.some((sample) => !sample.looseFile)
+    const pitches = new Set(group.samples.map((sample) => sample.midi).filter((midi): midi is number => midi != null))
+    if (!chromatic && pitches.size < 2) continue
     const one = buildOne(group.pack, group.folder, group.tokens, group.samples, ids)
     if (one) built.push(one)
   }

@@ -16,6 +16,15 @@ import {
 import { phoneFocus, subscribePhoneFocus } from './phoneFocus'
 import './phoneDock.css'
 
+function GearIcon() {
+  return (
+    <svg className="dock-icon" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <circle cx="9" cy="9" r="2.15" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M9 1.7v1.7M9 14.6v1.7M1.7 9h1.7M14.6 9h1.7M3.7 3.7l1.2 1.2M13.1 13.1l1.2 1.2M14.3 3.7l-1.2 1.2M4.9 13.1l-1.2 1.2" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 function MetronomeIcon() {
   return (
     <svg className="metro-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
@@ -326,7 +335,9 @@ export function PhoneDock({
             <Hit action="undo" label="Undo" history="undo" disabled={!canUndo} onClick={onUndo}><span className="history-word">Undo</span></Hit>
             <Hit action="redo" label="Redo" history="redo" disabled={!canRedo} onClick={onRedo}><span className="history-word">Redo</span></Hit>
             <Hit action="snap" className="snap-inline" label={snapLabel} title="Snap grid." pressed={snapOn} onClick={openSnap}>Snap</Hit>
-            <Hit action="setup" label="Setup" title="Automation and markers." pressed={utility === 'setup'} onClick={() => toggleArrangeSheet('setup')} />
+            <Hit action="setup" label="Setup" title="Automation and markers." pressed={utility === 'setup'} onClick={() => toggleArrangeSheet('setup')}>
+              <GearIcon />
+            </Hit>
             <Hit action="metronome" label="Metronome" title="Metronome while you play and record." pressed={store.project.metronomeEnabled} onClick={() => store.toggle('metronomeEnabled')}>
               <MetronomeIcon />
             </Hit>

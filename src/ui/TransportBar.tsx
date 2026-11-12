@@ -425,7 +425,7 @@ export function TransportBar({
   const tempoLabel = `${tempoCopy.label}. Tap to set tempo. Drag up or down to change the tempo. ${tempoCopy.hint}`
   const tempoField = editingTempo ? (
         <label className="t-btn bpm-readout tempo-edit">
-          <span className="tempo-kicker">Tempo</span>
+          <span className="tempo-kicker">{phone ? 'Tap' : 'Tempo'}</span>
           <input
           ref={fieldRef}
           className="tempo-figure"
@@ -483,7 +483,7 @@ export function TransportBar({
           }}
           onPointerDown={(event) => onTempoDown(event, true)}
         >
-          <span className="tempo-kicker">Tempo</span>
+          <span className="tempo-kicker">{phone ? 'Tap' : 'Tempo'}</span>
           <span className="tempo-figure">{formatTempo(tempo)}</span>
         </button>
   )

@@ -66,6 +66,10 @@ export function absorbLegacyFavoriteIds(ids: string[], storage: Store | null = d
   }
 }
 
+export function replaceFavorites(next: FavoriteSound[], storage: Store | null = defaultStorage()) {
+  write(next, storage)
+}
+
 function write(next: FavoriteSound[], storage: Store | null) {
   memory = next
   try { storage?.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(next)) } catch { /* this device keeps the in-memory list */ }

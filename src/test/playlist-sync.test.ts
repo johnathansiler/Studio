@@ -245,7 +245,8 @@ describe('phone arrange', () => {
         playheadSample: () => 0,
       }))
       expect(dock).toContain('data-phone-action="setup"')
-      expect(dock).toContain('>Setup<')
+      expect(dock).toContain('aria-label="Setup"')
+      expect(dock).toContain('dock-icon')
       expect(dock).toContain('data-phone-action="snap"')
       expect(dock).toContain('data-phone-action="metronome"')
       expect(dock).toContain('data-phone-action="undo"')

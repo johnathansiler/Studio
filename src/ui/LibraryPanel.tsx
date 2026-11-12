@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { bindLocalSamples, importInstrument } from '../audio/multisample/import'
 import { readLibraryAccessKey } from '../library/access'
+import { groupLibraryInstruments } from '../library/group'
+import { placeLibraryInstrument } from '../library/place'
 import { rememberCatalogSound, rememberLibrarySound } from '../library/recent'
 import { loadLibraryCatalog } from '../library/audio'
 import { readLibraryAsset } from '../library/place'
 import type { LibraryEntry } from '../library/types'
 import { fetchCatalogSound } from '../sounds/catalog'
+import { looseGroup, presentSoundEntries, samplerFromNotes } from '../sounds/noteGroups'
 import { decodeSoundBytes } from '../sounds/place'
 import type { SoundEntry } from '../sounds/types'
 import { selectInstrument } from '../state/select'
@@ -32,6 +35,9 @@ export function LibraryPanel({
   const [busy, setBusy] = useState(false)
   const [sounds] = useState<SoundEntry[]>(initialSounds ?? [])
   const [librarySounds, setLibrarySounds] = useState<LibraryEntry[]>([])
+  const libraryGroups = useMemo(() => groupLibraryInstruments(librarySounds).filter((item) => item.samples >= 2 || item.notes >= 2), [librarySounds])
+  const coveredLibrary = useMemo(() => new Set(libraryGroups.flatMap((item) => item.layers.map((layer) => layer.key))), [libraryGroups])
+  const looseSounds = useMemo(() => presentSoundEntries(sounds), [sounds])
   const show = (text: string) => setHint(text)
 
   useEffect(() => {
@@ -54,6 +60,33 @@ export function LibraryPanel({
       setStatus(`${entry.name} plays as one sample across the keyboard.`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Could not load that sound.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function loadLoose(group: NonNullable<ReturnType<typeof looseGroup>>) {
+    setBusy(true)
+    setStatus(`Loading ${group.name}…`)
+    try {
+      const assets: { id: string; name: string; sampleRate: number; channels: Float32Array[] }[] = []
+      const notes: { midi: number; bufferId: string; sampleRate: number }[] = []
+      for (const member of group.members) {
+        const bytes = await fetchCatalogSound(member.entry)
+        const decoded = await decodeSoundBytes(bytes)
+        if (!decoded.channels[0]?.length) continue
+        const id = `loose_${member.entry.id}`
+        assets.push({ id, name: member.entry.name, sampleRate: decoded.sampleRate, channels: decoded.channels })
+        notes.push({ midi: member.midi, bufferId: id, sampleRate: decoded.sampleRate })
+      }
+      if (notes.length < 2) {
+        setStatus('That instrument did not have enough notes.')
+        return
+      }
+      store.adoptLibrary(trackId, samplerFromNotes(group.id, group.name, notes), assets)
+      setStatus(`${group.name} plays across the keyboard.`)
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Download failed')
     } finally {
       setBusy(false)
     }
@@ -126,24 +159,41 @@ export function LibraryPanel({
           disabled={busy}
           onChange={(event) => {
             const value = event.target.value
+            if (value.startsWith('libgroup:')) {
+              const instrument = libraryGroups.find((item) => item.id === value.slice('libgroup:'.length))
+              if (!instrument) return
+              show(`${instrument.name} plays across the keyboard.`)
+              placeLibraryInstrument(store, instrument)
+              setStatus(`${instrument.name} · ${instrument.notes} notes`)
+              return
+            }
             const libraryEntry = librarySounds.find((item) => item.key === value)
             if (libraryEntry) {
               show(`${libraryEntry.name} is one ${libraryEntry.type === 'loop' ? 'loop' : 'one-shot'} from My Library.`)
               void loadLibrarySound(libraryEntry)
               return
             }
-            const entry = sounds.find((item) => item.id === value)
-            if (!entry) return
+            const group = looseGroup(value)
+            if (group) {
+              show(`${group.name} loads as one keyboard instrument.`)
+              void loadLoose(group)
+              return
+            }
+            const entry = sounds.find((item) => item.id === value) || looseSounds.find((item) => item.id === value)
+            if (!entry || entry.type === 'instrument') return
             show(`${entry.name} is one ${entry.type === 'loop' ? 'loop' : 'one-shot'}. It is not a multisampled instrument.`)
             void loadSample(entry)
           }}
         >
           <option value="">Load sample</option>
-          {librarySounds.map((entry) => (
+          {libraryGroups.map((item) => (
+            <option key={item.id} value={`libgroup:${item.id}`}>{item.name} · My Library</option>
+          ))}
+          {librarySounds.filter((entry) => !coveredLibrary.has(entry.key)).map((entry) => (
             <option key={entry.key} value={entry.key}>{entry.name} · My Library</option>
           ))}
-          {sounds.map((entry) => (
-            <option key={entry.id} value={entry.id}>{entry.name} · {entry.type === 'loop' ? 'Loop' : 'One-shot'}</option>
+          {looseSounds.map((entry) => (
+            <option key={entry.id} value={entry.id}>{entry.name} · {entry.type === 'instrument' ? 'Instrument' : entry.type === 'loop' ? 'Loop' : 'One-shot'}</option>
           ))}
         </select>
         <label className="library-file" title="Read an SFZ, SoundFont, or DecentSampler file from this device. The audio stays in this browser.">
