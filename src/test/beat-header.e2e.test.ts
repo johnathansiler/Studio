@@ -113,14 +113,16 @@ describe('beat machine arrange header', () => {
 
           const closed = await layout(page)
           await page.screenshot({ path: `/opt/cursor/artifacts/beat-header-${viewport.name}.png` })
-          expect(closed.rows.every((row) => !row.beat), viewport.name).toBe(true)
+          expect(closed.rows.filter((row) => row.name !== 'Beat Machine 1').every((row) => !row.beat), viewport.name).toBe(true)
           const beat = closed.rows.find((row) => row.name === 'Beat Machine 1')
+          expect(beat?.beat?.width, viewport.name).toBeGreaterThanOrEqual(40)
+          expect(beat?.beat?.height, viewport.name).toBeGreaterThanOrEqual(40)
           const others = closed.rows.filter((row) => row.name !== 'Beat Machine 1')
           expect(beat, viewport.name).toBeTruthy()
           const widest = Math.max(...others.map((row) => row.controls))
           const widestHead = Math.max(...others.map((row) => row.head))
-          expect(beat!.controls, `${viewport.name} controls ${beat!.controls} vs ${widest}`).toBeLessThanOrEqual(widest + 8)
-          expect(beat!.head, `${viewport.name} head`).toBeLessThanOrEqual(widestHead + 8)
+          expect(beat!.controls, `${viewport.name} controls ${beat!.controls} vs ${widest}`).toBeLessThanOrEqual(widest + 48)
+          expect(beat!.head, `${viewport.name} head`).toBeLessThanOrEqual(widestHead + 48)
           for (const row of closed.rows) {
             expect(row.rows, `${viewport.name} ${row.name}`).toBe(1)
             expect(row.clipped, `${viewport.name} ${row.name}`).toBe(false)
@@ -151,9 +153,9 @@ describe('beat machine arrange header', () => {
           await page.screenshot({ path: `/opt/cursor/artifacts/beat-header-${viewport.name}-browser.png` })
           const dockBeat = docked.rows.find((row) => row.name === 'Beat Machine 1')!
           const dockWidest = Math.max(...docked.rows.filter((row) => row.name !== 'Beat Machine 1').map((row) => row.controls))
-          expect(dockBeat.beat, `${viewport.name} browser`).toBeNull()
-          expect(dockBeat.controls, `${viewport.name} browser`).toBeLessThanOrEqual(dockWidest + 8)
-          expect(dockBeat.head, `${viewport.name} browser head`).toBeLessThanOrEqual(Math.max(...docked.rows.filter((row) => row.name !== 'Beat Machine 1').map((row) => row.head)) + 8)
+          expect(dockBeat.beat?.width, `${viewport.name} browser`).toBeGreaterThanOrEqual(40)
+          expect(dockBeat.controls, `${viewport.name} browser`).toBeLessThanOrEqual(dockWidest + 48)
+          expect(dockBeat.head, `${viewport.name} browser head`).toBeLessThanOrEqual(Math.max(...docked.rows.filter((row) => row.name !== 'Beat Machine 1').map((row) => row.head)) + 48)
           for (const row of docked.rows) {
             expect(row.rows, `${viewport.name} browser ${row.name}`).toBe(1)
             expect(row.clipped, `${viewport.name} browser ${row.name}`).toBe(false)

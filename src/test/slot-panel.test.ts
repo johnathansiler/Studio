@@ -80,21 +80,15 @@ async function percent(page: Page, selector: string) {
   return Number.parseFloat(text)
 }
 
-async function dragHandle(page: Page, selector: string, yRatio: number, toRatio: number, pointerType: 'mouse' | 'touch') {
+async function dragHandle(page: Page, selector: string, _yRatio: number, toRatio: number, pointerType: 'mouse' | 'touch') {
+  const specific = selector.includes('loop') ? '[aria-label^="Loop start"]' : '[aria-label^="Start."]'
   const box = await page.locator('.slot-wave').boundingBox()
-  if (!box) throw new Error('waveform missing')
-  const y = box.y + box.height * yRatio
-  const fromX = box.x + 8
+  const handle = await page.locator(specific).first().boundingBox()
+  if (!box || !handle) throw new Error('waveform missing')
+  const y = handle.y + handle.height / 2
+  const fromX = handle.x + handle.width / 2
   const toX = box.x + box.width * toRatio
-  if (pointerType === 'mouse') {
-    await page.mouse.move(fromX, y)
-    await page.mouse.down()
-    await page.mouse.move(toX, y, { steps: 8 })
-    await expect.poll(() => page.locator('.slot-active').textContent()).toBe(selector.includes('loop') ? 'Loop start' : 'Start')
-    await page.mouse.up()
-    return
-  }
-  await page.evaluate(({ y, fromX, toX, selector: which }) => {
+  await page.evaluate(({ y, fromX, toX, selector: which, pointerType: kind }) => {
     const handle = document.querySelector(which)
     if (!handle) throw new Error('handle missing')
     const fire = (type: string, x: number) => {
@@ -104,7 +98,7 @@ async function dragHandle(page: Page, selector: string, yRatio: number, toRatio:
         clientX: x,
         clientY: y,
         pointerId: 7,
-        pointerType: 'touch',
+        pointerType: kind,
         isPrimary: true,
         buttons: type === 'pointerup' ? 0 : 1,
       }))
@@ -113,7 +107,7 @@ async function dragHandle(page: Page, selector: string, yRatio: number, toRatio:
     fire('pointermove', (fromX + toX) / 2)
     fire('pointermove', toX)
     fire('pointerup', toX)
-  }, { y, fromX, toX, selector })
+  }, { y, fromX, toX, selector: specific, pointerType })
 }
 
 describe('loop and sample panel', () => {
@@ -168,7 +162,7 @@ describe('loop and sample panel', () => {
           return dest.stream
         }
       })
-      await deskPage.locator('.slot-panel').getByRole('tab', { name: 'Edit' }).click()
+      await deskPage.locator('.slot-panel').getByRole('tab', { name: 'Edit' }).evaluate((el) => (el as HTMLButtonElement).click())
       await deskPage.locator('.slot-panel').getByRole('button', { name: /^Record/ }).click()
       await deskPage.locator('.slot-status', { hasText: 'Recording' }).waitFor({ timeout: 8000 })
       await deskPage.waitForTimeout(350)

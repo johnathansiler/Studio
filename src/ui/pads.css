@@ -645,6 +645,10 @@
 
 /* Sampler presets are a short tray. The X stays in the tray, clear of the level slider,
    and the list stops above the Undo row and the phone tabs. */
+.shell.phone:not(.land) [data-pads='plugin'][data-screen-overlay] {
+  bottom: var(--edit-bar, 108px) !important;
+}
+
 body:has([data-pads='plugin']) .anchored-menu.preset-menu:not([data-screen-overlay]) {
   max-height: min(320px, calc(100dvh - var(--phone-chrome-bottom, 0px) - 96px)) !important;
   overflow: auto !important;

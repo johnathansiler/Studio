@@ -65,7 +65,7 @@ describe('beat machine stays open', () => {
       await page.getByRole('button', { name: 'Close Beat Machine. The track keeps the instrument.' }).tap()
       await page.locator('[data-pads="plugin"]').waitFor({ state: 'detached' })
 
-      await page.locator('[data-track-name="Beat Machine 1"] .track-meter-row').tap()
+      await page.locator('[data-track-name="Keys"]').click()
       await page.locator('[data-pads="plugin"]').waitFor()
       await page.waitForTimeout(1000)
       await beatOpen(page)
@@ -83,12 +83,12 @@ describe('beat machine stays open', () => {
       const padMenu = page.locator('.anchored-menu[aria-label="Load sample"][data-open="true"]')
       await padMenu.waitFor()
       const padMenuText = await padMenu.innerText()
-      expect(padMenuText).toContain('Browser')
+      expect(padMenuText).toContain('My Library')
       expect(padMenuText).toContain('Upload')
       await page.waitForTimeout(1000)
       await beatOpen(page)
       expect(await padMenu.count()).toBe(1)
-      expect(await padMenu.innerText()).toContain('Browser')
+      expect(await padMenu.innerText()).toContain('My Library')
       await context.close()
     } finally {
       await browser.close()
