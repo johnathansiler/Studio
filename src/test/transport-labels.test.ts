@@ -62,8 +62,10 @@ describe('transport words', () => {
         await page.setViewportSize({ width: viewport.width, height: viewport.height })
         await page.setContent(transportPage(viewport.shell), { waitUntil: 'load' })
         const report = await page.evaluate((words) => {
+          const iconFor: Record<string, string> = { Start: 'start', Rewind: 'rewind', Forward: 'forward', Play: 'play', Record: 'record' }
           const buttons = words.map((word) => {
-            const node = [...document.querySelectorAll<HTMLElement>('.transport .t-word')].find((item) => item.textContent === word || item.textContent?.startsWith(`${word} `))!
+            const icon = document.querySelector<HTMLElement>(`.t-main [data-transport-icon="${iconFor[word]}"]`)
+            const node = icon ?? [...document.querySelectorAll<HTMLElement>('.transport .t-word')].find((item) => item.textContent === word || item.textContent?.startsWith(`${word} `))!
             const button = node.closest('button') as HTMLElement
             const text = node.getBoundingClientRect()
             const box = button.getBoundingClientRect()
@@ -140,6 +142,7 @@ describe('transport words', () => {
           const tempo = document.querySelector('.tempo-tap')
           return {
             words,
+            icons: [...document.querySelectorAll('.t-main [data-transport-icon]')].map((node) => node.getAttribute('data-transport-icon')),
             kicker: document.querySelector('.tempo-kicker')?.textContent,
             buttons,
             tapButton: buttons.some((button) => button.text === 'Tap'),
@@ -161,7 +164,12 @@ describe('transport words', () => {
             recOn,
           }
         })
-        expect(order.words.filter((word) => word !== 'Tempo' && word !== 'Click' && word !== '1-2' && word !== 'Reset' && word !== 'Punch'), viewport.name).toEqual(['Start', 'Rewind', 'Forward', 'Play', 'Record'])
+        if (viewport.name === 'phone') {
+          expect(order.icons, viewport.name).toEqual(['start', 'rewind', 'forward', 'play', 'record'])
+          expect(order.words.filter((word) => ['Start', 'Rewind', 'Forward', 'Play', 'Record'].includes(word)), viewport.name).toEqual([])
+        } else {
+          expect(order.words.filter((word) => word !== 'Tempo' && word !== 'Click' && word !== '1-2' && word !== 'Reset' && word !== 'Punch'), viewport.name).toEqual(['Start', 'Rewind', 'Forward', 'Play', 'Record'])
+        }
         expect(order.rowCount, viewport.name).toBe(6)
         if (viewport.name === 'phone') {
           expect(order.clickWord, viewport.name).toBe(false)

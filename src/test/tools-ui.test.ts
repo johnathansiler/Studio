@@ -186,10 +186,11 @@ describe('mobile control lists', () => {
       'shortcuts',
     ])
     expect(phone.map((item) => item.action)).toEqual([
+      'new', 'open', 'save', 'export',
       'midi',
       'shortcuts',
     ])
-    for (const action of ['box', 'erase', 'pan', 'signature', 'new', 'open', 'save', 'export']) {
+    for (const action of ['box', 'erase', 'pan', 'signature']) {
       expect(phone.map((item) => item.action)).not.toContain(action)
     }
     for (const action of ['box', 'erase', 'pan', 'signature']) {
