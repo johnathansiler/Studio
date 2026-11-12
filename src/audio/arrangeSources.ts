@@ -218,7 +218,7 @@ function mixAudioClips(
   for (const clip of track.clips) {
     if (clip.slotOnly) continue
     const pieces = clip.folder
-      ? compPieces(clip.folder, clip.fadeInSamples, clip.fadeOutSamples).map((piece) => ({ ...clip, folder: undefined, ...piece, gain: clip.gain }))
+      ? compPieces(clip.folder, clip.fadeInSamples, clip.fadeOutSamples).map((piece) => ({ ...clip, folder: undefined, ...piece, wave: undefined, gain: clip.gain }))
       : [clip]
     for (const piece of pieces) mixOneClip(out, project, assets, piece, origin, length)
   }

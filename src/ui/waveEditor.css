@@ -7,6 +7,15 @@
   gap: 8px;
 }
 
+/* Phone: sit under the transport and above the dock, so the tools stay on screen. */
+body:has(.shell.phone) .wave-editor[data-screen-overlay] {
+  top: var(--phone-chrome-top, var(--view-tabs-bottom, 96px)) !important;
+  bottom: var(--phone-chrome-bottom, 0px) !important;
+  z-index: 420 !important;
+  padding: 6px 8px 6px;
+  gap: 4px;
+}
+
 .wave-editor {
   position: fixed;
   z-index: 46;
@@ -61,9 +70,9 @@
 
 .wave-stage {
   position: relative;
-  flex: 1 0 168px;
+  flex: 1 1 0;
   min-width: 0;
-  min-height: 168px;
+  min-height: 64px;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line, #31443a);
@@ -266,4 +275,17 @@
 .wave-empty {
   margin: 0;
   color: var(--muted, #93a399);
+}
+
+@media (max-height: 780px) {
+  .wave-stage { min-height: 52px; }
+  .wave-ruler { height: 22px; }
+  .wave-editor .wave-tools { gap: 4px; }
+  .wave-editor .wave-tools button,
+  .wave-editor .wave-tools select {
+    min-height: 34px;
+    height: 34px;
+    font-size: 12px;
+  }
+  .wave-gain { min-height: 32px; }
 }

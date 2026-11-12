@@ -1,5 +1,5 @@
 import { clipNeedsStretch, preferStretchCache, renderClipChannels, sourceSamplesOf, timelineSamples } from './stretch/engine'
-import { bodyLength, clipHasWaveBody } from './wave/edit'
+import { bodyLength, clipHasWaveBody, type WaveEdit } from './wave/edit'
 import { cachedWaveBody, renderWaveRange } from './wave/render'
 import { assembleTimedChunks } from './capture'
 import { crossfadeLoopRegion } from './clipEdge'
@@ -210,6 +210,8 @@ export class AudioEngine {
 
   private sources: Stoppable[] = []
   private previewStops: Stoppable[] = []
+  private previewEpoch = 0
+  private previewTimer: ReturnType<typeof setTimeout> | null = null
   /** Notes from the last Scaler preview, so the next chord can cut them. */
   private scalerVoices: Stoppable[] = []
   private scalerMidi: { pitch: number; onAt: number }[] = []
@@ -3193,7 +3195,7 @@ export class AudioEngine {
       for (const clip of track.clips) {
         if (clip.slotOnly) continue
         const pieces = clip.folder
-          ? compPieces(clip.folder, clip.fadeInSamples, clip.fadeOutSamples).map((piece) => ({ ...clip, folder: undefined, ...piece, gain: clip.gain }))
+          ? compPieces(clip.folder, clip.fadeInSamples, clip.fadeOutSamples).map((piece) => ({ ...clip, folder: undefined, ...piece, wave: undefined, gain: clip.gain }))
           : [clip]
         for (const piece of pieces) {
           const asset = this.assetOf(piece.bufferId)
@@ -4683,6 +4685,11 @@ export class AudioEngine {
   private previewClock: { start: number; duration: number; loop: boolean } | null = null
 
   stopPreview() {
+    this.previewEpoch += 1
+    if (this.previewTimer != null) {
+      clearTimeout(this.previewTimer)
+      this.previewTimer = null
+    }
     for (const src of this.previewStops) {
       try { src.stop() } catch { /* already stopped */ }
       try { src.disconnect() } catch { /* already disconnected */ }
@@ -4717,6 +4724,86 @@ export class AudioEngine {
       sampleRate: decoded.sampleRate,
       channels: Array.from({ length: decoded.numberOfChannels }, (_, index) => decoded.getChannelData(index).slice()),
     }
+  }
+
+  /**
+   * Audition an edited range in short slices. A long selection is not rendered
+   * up front, and slices leave the graph when they finish.
+   */
+  previewWave(channels: ArrayLike<number>[], edit: WaveEdit, start: number, end: number, sampleRate?: number, loop = false) {
+    this.stopPreview()
+    const ctx = this.unlock()
+    const out = this.speakerSide()
+    const rate = sampleRate && sampleRate > 0 ? sampleRate : ctx.sampleRate
+    const from = Math.max(0, Math.floor(Math.min(start, end)))
+    const to = Math.max(from, Math.ceil(Math.max(start, end)))
+    if (!out || !channels.length || to - from < 1) return
+    const epoch = this.previewEpoch
+    const chunk = Math.max(2048, Math.round(rate * 0.25))
+    let origin = 0
+    let cursor = from
+    const arm = () => {
+      if (epoch !== this.previewEpoch || !this.ctx) return
+      origin = this.ctx.currentTime + 0.03
+      this.previewClock = { start: origin, duration: (to - from) / rate, loop }
+      const pump = () => {
+        const live = this.ctx
+        if (epoch !== this.previewEpoch || !live) return
+        const horizon = live.currentTime + 1.25
+        let steps = 0
+        while (steps < 24) {
+          if (cursor >= to) {
+            if (!loop) return
+            origin += (to - from) / rate
+            cursor = from
+          }
+          const when = origin + (cursor - from) / rate
+          if (when > horizon) break
+          const count = Math.min(chunk, to - cursor)
+          const pcm = renderWaveRange(channels, edit, cursor, cursor + count, { fades: true, clipGain: true })
+          this.startPreviewSlice(pcm, rate, when, out, epoch)
+          cursor += count
+          steps += 1
+        }
+        if (epoch !== this.previewEpoch || (!loop && cursor >= to)) return
+        const nextWhen = origin + (cursor - from) / rate
+        const wait = Math.max(40, Math.min(300, (nextWhen - live.currentTime - 0.45) * 1000))
+        this.previewTimer = setTimeout(pump, wait)
+      }
+      pump()
+    }
+    if (ctx.state === 'running') arm()
+    else void ctx.resume().then(() => { if (epoch === this.previewEpoch) arm() })
+  }
+
+  private startPreviewSlice(channels: Float32Array[], rate: number, when: number, out: AudioNode, epoch: number) {
+    const ctx = this.ctx
+    const lead = channels[0]
+    if (!ctx || !lead?.length || epoch !== this.previewEpoch) return
+    const buffer = ctx.createBuffer(Math.max(1, channels.length), lead.length, rate)
+    channels.forEach((channel, index) => {
+      const data = new Float32Array(lead.length)
+      data.set(channel.subarray(0, Math.min(channel.length, lead.length)))
+      buffer.copyToChannel(data, index)
+    })
+    const src = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    src.buffer = buffer
+    gain.gain.value = 1
+    src.connect(gain)
+    gain.connect(out)
+    const stop = () => { try { src.stop() } catch { /* already stopped */ } }
+    const disconnect = () => {
+      try { src.disconnect() } catch { /* already disconnected */ }
+      try { gain.disconnect() } catch { /* already disconnected */ }
+      src.buffer = null
+    }
+    src.onended = () => {
+      disconnect()
+      this.previewStops = this.previewStops.filter((item) => item.stop !== stop)
+    }
+    this.previewStops.push({ stop, disconnect, endAt: when + buffer.duration })
+    try { src.start(when) } catch { disconnect() }
   }
 
   /** Speaker-only audition. The cue and the arrangement are left alone. */

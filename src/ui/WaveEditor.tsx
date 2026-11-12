@@ -318,6 +318,7 @@ export function WaveEditor({ store, engine }: { store: ProjectStore; engine: Aud
       pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
       if (pointers.size < 2) return
       pinching.current = true
+      setSelection(null)
       const pts = [...pointers.values()]
       const rect = stage.getBoundingClientRect()
       const mid = (pts[0].x + pts[1].x) / 2
@@ -365,13 +366,13 @@ export function WaveEditor({ store, engine }: { store: ProjectStore; engine: Aud
       const perPx = (current.end - current.start) / Math.max(1, rect.width)
       setView(panSpan(current, bounds, delta * perPx))
     }
-    stage.addEventListener('pointerdown', onDown)
+    stage.addEventListener('pointerdown', onDown, true)
     window.addEventListener('pointermove', onMove, { passive: false })
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onUp)
     stage.addEventListener('wheel', onWheel, { passive: false })
     return () => {
-      stage.removeEventListener('pointerdown', onDown)
+      stage.removeEventListener('pointerdown', onDown, true)
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
@@ -427,12 +428,9 @@ export function WaveEditor({ store, engine }: { store: ProjectStore; engine: Aud
       const at = Math.max(0, Math.min(body - 1, playRef.current - current.head))
       range = loopOn || at >= body - 1 ? { start: 0, end: body } : { start: at, end: body }
     }
-    const pcm = displaySamples(asset.channels, current, current.head + range.start, current.head + range.end)
-      .map((channel) => channel.slice())
-    if (!pcm[0]?.length) return
     preview.current = range
     setPlaying(true)
-    engine.previewPcm(pcm, asset.sampleRate, loopOn, true)
+    engine.previewWave(asset.channels, current, range.start, range.end, asset.sampleRate, loopOn)
   }
 
   function stop() {
@@ -609,7 +607,7 @@ export function WaveEditor({ store, engine }: { store: ProjectStore; engine: Aud
                 onPointerDown={(event) => dragHandle(event, (sample) => trimDocument(edit, 'end', audibleEnd - sample), 'Trim')}
               />
             )}
-            {shown(edit.head + edit.fadeIn) && (
+            {edit.fadeIn > 1 && shown(edit.head + edit.fadeIn) && (
               <button
                 type="button"
                 className="wave-fade"
@@ -619,7 +617,7 @@ export function WaveEditor({ store, engine }: { store: ProjectStore; engine: Aud
                 onPointerDown={(event) => dragHandle(event, (sample) => setFades(edit, { fadeIn: sample - edit.head }), 'Fade')}
               />
             )}
-            {shown(audibleEnd - edit.fadeOut) && (
+            {edit.fadeOut > 1 && shown(audibleEnd - edit.fadeOut) && (
               <button
                 type="button"
                 className="wave-fade"
@@ -828,16 +826,36 @@ export function WaveEditor({ store, engine }: { store: ProjectStore; engine: Aud
         <input
           type="range"
           aria-label="Clip gain"
-          min={-24}
-          max={12}
+          min={-48}
+          max={24}
           step={0.1}
-          value={Math.max(-24, Math.min(12, edit.gainDb))}
+          value={Math.max(-48, Math.min(24, edit.gainDb))}
           onPointerDown={() => { dragging.current = true }}
           onChange={(event) => setDraft(setGainDb(base ?? edit, Number(event.target.value)))}
-          onPointerUp={(event) => commit(setGainDb(base ?? edit, Number(event.currentTarget.value)), 'Gain')}
+          onKeyUp={(event) => {
+            if (dragging.current) return
+            const next = setGainDb(base ?? edit, Number(event.currentTarget.value))
+            if (base && Math.abs(next.gainDb - base.gainDb) < 0.05) return
+            commit(next, 'Gain')
+          }}
+          onPointerUp={(event) => {
+            const next = setGainDb(base ?? edit, Number(event.currentTarget.value))
+            if (Math.abs(next.gainDb - (base?.gainDb ?? edit.gainDb)) < 0.05) {
+              dragging.current = false
+              setDraft(null)
+              return
+            }
+            commit(next, 'Gain')
+          }}
           onBlur={(event) => {
             if (!dragging.current) return
-            commit(setGainDb(base ?? edit, Number(event.currentTarget.value)), 'Gain')
+            const next = setGainDb(base ?? edit, Number(event.currentTarget.value))
+            if (Math.abs(next.gainDb - (base?.gainDb ?? edit.gainDb)) < 0.05) {
+              dragging.current = false
+              setDraft(null)
+              return
+            }
+            commit(next, 'Gain')
           }}
         />
       </label>

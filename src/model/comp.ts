@@ -183,6 +183,7 @@ export function flattenPieces(parent: AudioClip): AudioClip[] {
     durationSamples: piece.durationSamples,
     fadeInSamples: piece.fadeInSamples,
     fadeOutSamples: piece.fadeOutSamples,
+    wave: undefined,
   }))
 }
 

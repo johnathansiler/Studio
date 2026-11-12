@@ -43,6 +43,25 @@ export function laneDoubleClickAddsClip(target: EventTarget | ClipHost | null) {
   return !el.closest('[data-clip]')
 }
 
+/**
+ * Travel under this stays a tap. A second tap can open the editor, and finger
+ * jitter does not slide the clip. A longer move still drags.
+ */
+export const CLIP_TAP_PX = 4
+export const CLIP_TOUCH_TAP_PX = 10
+
+export function clipReleaseAction(input: {
+  travel: number
+  moved: boolean
+  retargeted: boolean
+  touch: boolean
+}): 'tap' | 'drag' {
+  if (input.retargeted) return 'drag'
+  const slop = input.touch ? CLIP_TOUCH_TAP_PX : CLIP_TAP_PX
+  if (input.travel < slop || !input.moved) return 'tap'
+  return 'drag'
+}
+
 /** A quick pointer drag is enough. The browser drag gesture waits longer and drops the flick. */
 export const QUICK_DRAG_PX = 3
 

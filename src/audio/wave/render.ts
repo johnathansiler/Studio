@@ -83,9 +83,10 @@ export function renderWaveRange(
     const fade = joinFadeSamples(edit, left.region, right.region)
     if (fade < 2) continue
     const boundary = right.start
+    const denom = Math.max(1, fade - 1)
     for (let step = 0; step < fade; step++) {
-      const outGain = fadeCurve((fade - step) / fade, 'equal')
-      const inGain = fadeCurve((step + 1) / fade, 'equal')
+      const outGain = fadeCurve((fade - 1 - step) / denom, 'equal')
+      const inGain = fadeCurve(step / denom, 'equal')
       const leftAt = boundary - fade + step
       const rightAt = boundary + step
       if (leftAt >= from && leftAt < to) {

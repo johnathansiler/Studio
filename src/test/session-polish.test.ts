@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { clickVoice, gainDb } from '../audio/metroClick'
-import { clipTapAction } from '../ui/clipKeys'
+import { clipReleaseAction, clipTapAction } from '../ui/clipKeys'
 import { menuFillsViewport } from '../ui/anchorPlace'
 import { swipeShouldDismiss } from '../ui/swipeDismiss'
 
@@ -46,6 +46,12 @@ describe('a clip tap only selects', () => {
     expect(clipTapAction({ moved: true, sinceLastMs: 10, kind: 'pattern', sequencer: true })).toBe('drag')
     expect(clipTapAction({ moved: true, sinceLastMs: 10, kind: 'midi', sequencer: true })).toBe('drag')
     expect(clipTapAction({ moved: true, sinceLastMs: 100, kind: 'midi' })).toBe('drag')
+    expect(clipReleaseAction({ travel: 0, moved: true, retargeted: false, touch: true })).toBe('tap')
+    expect(clipReleaseAction({ travel: 9, moved: true, retargeted: false, touch: true })).toBe('tap')
+    expect(clipReleaseAction({ travel: 24, moved: true, retargeted: false, touch: true })).toBe('drag')
+    expect(clipReleaseAction({ travel: 3, moved: true, retargeted: false, touch: false })).toBe('tap')
+    expect(clipReleaseAction({ travel: 12, moved: true, retargeted: false, touch: false })).toBe('drag')
+    expect(clipReleaseAction({ travel: 2, moved: false, retargeted: true, touch: true })).toBe('drag')
   })
 })
 

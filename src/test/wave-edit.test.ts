@@ -111,10 +111,24 @@ describe('wave edit model', () => {
       { id: 'b', source: 200, length: 200, reverse: true, gain: 1 },
     ]
     const joined = renderWaveRange([step], broken, 0, 400)[0]
-    expect(Math.abs(joined[199])).toBeLessThan(0.2)
-    expect(Math.abs(joined[200])).toBeLessThan(0.2)
+    expect(joined[199]).toBeCloseTo(0, 4)
+    expect(joined[200]).toBeCloseTo(0, 4)
+    expect(Math.abs(joined[199] - joined[200])).toBeLessThan(1e-4)
     expect(joined[0]).toBeCloseTo(0.8)
     expect(joined[20]).toBeCloseTo(0.8)
+    expect(joined[120]).toBeCloseTo(0.8)
+  })
+
+  it('reads a window of a long clip and keeps the samples outside that window untouched', () => {
+    const length = 48000 * 30
+    const data = new Float32Array(length)
+    data[1000] = 0.42
+    data[length - 3] = -0.7
+    const edit = documentFromClip(clip(length), length)
+    const heard = renderWaveRange([data], edit, 990, 1010)[0]
+    expect(heard).toHaveLength(20)
+    expect(heard[10]).toBeCloseTo(0.42)
+    expect(heard[0]).toBe(0)
   })
 
   it('draws both channels and keeps edits through undo, save, playback, and export', async () => {

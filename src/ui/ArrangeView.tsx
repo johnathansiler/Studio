@@ -48,7 +48,7 @@ import { TipButton } from './Hint'
 import { AnchoredMenu } from './AnchoredMenu'
 import { RemoteTimeline, TrackPresence, remoteClipMark, useRemotePeers } from './presenceMarks'
 import { coarsePointer, patternHoldOpensMenu, patternMenuPoint, patternPointerIntent, trimZone } from './touchEdit'
-import { CLIP_DOUBLE_MS, clipTapAction, laneDoubleClickAddsClip } from './clipKeys'
+import { clipReleaseAction, clipTapAction, laneDoubleClickAddsClip } from './clipKeys'
 import { arrangeOutline } from '../audio/wave/render'
 import { LoopRegion } from './LoopRegion'
 import { TimelineOverview } from './OverviewScrollbar'
@@ -731,7 +731,9 @@ export function ArrangeView({
 
   function openClipEditor(kind: 'audio' | 'midi' | 'pattern', trackId: string, clipId: string) {
     if (kind === 'audio') {
-      store.openWaveEditor(trackId, clipId)
+      const audio = project.tracks.find((item) => item.id === trackId)?.clips.find((item) => item.id === clipId)
+      if (audio?.folder) store.selectClip(trackId, clipId, false, true)
+      else store.openWaveEditor(trackId, clipId)
       return
     }
     const track = project.tracks.find((item) => item.id === trackId)
@@ -872,13 +874,12 @@ export function ArrangeView({
         const host = kind === 'pattern' ? patternHostId(project.tracks, laneAt(ev.clientX, ev.clientY)) : null
         const moved = [...deltas.values()].some((value) => Math.abs(value) >= (kind === 'audio' ? 1 : 0.01))
         const retargeted = !!host && [...origins.values()].some((item) => item.trackId !== host)
-        const slop = event.pointerType === 'touch' ? 18 : 4
-        if (document.querySelector('[data-opening-editor]')) {
-          setNudge(null)
-          setDragView(null)
-          return
-        }
-        if ((travel < slop && !retargeted) || (!moved && !retargeted)) {
+        if (clipReleaseAction({
+          travel,
+          moved,
+          retargeted,
+          touch: event.pointerType === 'touch',
+        }) === 'tap') {
           if (additive && wasIn) store.selectClip(trackId, clipId, kind === 'midi', false, true)
           noteClipTap(kind, trackId, clipId)
           return
@@ -1644,7 +1645,6 @@ function ClipView({
   const [snapZero, setSnapZero] = useState(true)
   const clipRef = useRef<HTMLDivElement>(null)
   const spanRef = useRef<WaveSpan | null>(null)
-  const lastBodyTap = useRef({ at: 0, x: 0, y: 0 })
   const pinchLock = useRef(false)
   const ghost = store.quantizePreview?.audio.find((item) => item.clipId === clip.id)?.clip
   const shown = preview ?? ghost ?? clip
@@ -1802,19 +1802,7 @@ function ClipView({
       onPointerDown={(event) => {
         if ((event.target as HTMLElement).closest('.take-lane, .edge, .wave-zoom')) return
         if (event.button === 2) return
-        const now = performance.now()
-        const prev = lastBodyTap.current
-        const quick = now - prev.at < CLIP_DOUBLE_MS && Math.hypot(event.clientX - prev.x, event.clientY - prev.y) < 28
-        lastBodyTap.current = { at: now, x: event.clientX, y: event.clientY }
-        if (quick) {
-          event.preventDefault()
-          event.stopPropagation()
-          const node = event.currentTarget
-          node.setAttribute('data-opening-editor', '1')
-          store.openWaveEditor(trackId, clip.id)
-          window.setTimeout(() => node.removeAttribute('data-opening-editor'), 400)
-          return
-        }
+        if (event.pointerType !== 'mouse' && !event.isPrimary) return
         if (tool === 'erase') {
           onErase(event)
           return
@@ -1852,7 +1840,8 @@ function ClipView({
         if ((event.target as HTMLElement).closest('.take-lane, .edge, .wave-zoom')) return
         event.preventDefault()
         event.stopPropagation()
-        store.openWaveEditor(trackId, clip.id)
+        if (clip.folder) store.selectClip(trackId, clip.id, false, true)
+        else store.openWaveEditor(trackId, clip.id)
       }}
       onContextMenu={(event) => {
         event.preventDefault()
@@ -1937,7 +1926,7 @@ function ClipView({
         anchor={menu ? { left: menu.x, top: menu.y, width: 28, height: 28 } : null}
         prefer="down"
       >
-        <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openWaveEditor(trackId, clip.id); setMenu(null) }}>Edit</button>
+        <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { if (clip.folder) store.selectClip(trackId, clip.id, false, true); else store.openWaveEditor(trackId, clip.id); setMenu(null) }}>Edit</button>
         <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.selectClip(trackId, clip.id, false, true); setMenu(null) }}>Timing</button>
         <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { onSplit(snapZero); setMenu(null) }}>Split</button>
         <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => { store.openStems(trackId, clip.id); setMenu(null) }}>Stems</button>
