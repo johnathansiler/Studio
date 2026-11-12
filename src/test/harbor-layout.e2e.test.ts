@@ -39,13 +39,11 @@ async function showBrowser(page: Page) {
   const arrange = page.getByRole('button', { name: /^Arrange/ }).first()
   if (await arrange.count()) await arrange.click().catch(() => undefined)
   await page.waitForFunction(() => {
-    const open = document.querySelector('button[title^="Sounds and loops"]') as HTMLButtonElement | null
+    const open = [...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Browse' || button.getAttribute('aria-label') === 'Browse') as HTMLButtonElement | undefined
     if (!document.querySelector('[data-playlist-browser="open"]')) open?.click()
     const browser = document.querySelector('[data-playlist-browser="open"]')
-    const tab = [...(browser?.querySelectorAll('button') ?? [])].find((button) => button.textContent === 'Instruments') as HTMLButtonElement | undefined
-    if (tab && tab.getAttribute('aria-pressed') !== 'true') tab.click()
-    return Boolean(document.querySelector('[data-harbor="instruments"]')?.textContent?.includes('Meatbass')
-      && document.querySelector('[data-harbor="instruments"]')?.textContent?.includes('Vsco2 Ce Strings'))
+    const labels = [...(browser?.querySelectorAll('.browser-tabs button') ?? [])].map((button) => button.textContent?.trim())
+    return labels.includes('My Library') && labels.includes('Patterns') && labels.includes('Clips') && !labels.includes('Instruments')
   }, undefined, { timeout: 20000 })
 }
 
@@ -89,14 +87,47 @@ describe('library instruments on every note surface', () => {
           await page.setViewportSize({ width: viewport.width, height: viewport.height })
           await page.goto(url, { waitUntil: 'domcontentloaded' })
           await showBrowser(page)
+          expect(await page.locator('[data-harbor]').count()).toBe(0)
           for (const name of PLAY) {
-            await showBrowser(page)
-            await page.evaluate((wanted) => {
-              const rows = [...document.querySelectorAll('[data-harbor="instruments"] .sound-row')]
-              const row = rows.find((item) => item.textContent?.includes(wanted))
-              const button = row?.querySelector('.sound-add') as HTMLButtonElement | null
-              if (!button) throw new Error('missing ' + wanted)
-              button.click()
+            await page.evaluate(async (wanted) => {
+              const load = await import('/src/harbor/load.ts' as string)
+              const player = await import('/src/harbor/player.ts' as string)
+              const license = await import('/src/harbor/license.ts' as string)
+              const programMod = await import('/src/harbor/program.ts' as string)
+              const hook = (window as unknown as {
+                __cueharbor: {
+                  engine: {
+                    holdLibraryAudio?: (trackId: string, samples: { id: string; sampleRate: number; channels: Float32Array[] }[]) => void
+                    auditionLibrary?: (trackId: string, pitch?: number, velocity?: number) => Promise<void>
+                  }
+                  store: {
+                    addTracks: (input: { kind: string; count: number; instrument: string; input: string; channels: number; armed: boolean }) => string[]
+                    setLibrary: (trackId: string, program: unknown) => void
+                  }
+                }
+              }).__cueharbor
+              const catalog = await load.loadHarborCatalog(fetch)
+              const item = catalog.instruments.find((entry: { name: string }) => entry.name === wanted)
+              if (!item) throw new Error('missing ' + wanted)
+              const built = await load.prepareCatalogInstrument(item)
+              if (!built) throw new Error('no program ' + wanted)
+              const target = hook.store.addTracks({ kind: 'midi', count: 1, instrument: 'library', input: 'mic', channels: 1, armed: false })[0]
+              if (!target) throw new Error('no track')
+              await player.installHarborInstrument({
+                id: `harbor:${item.id}`,
+                name: item.name,
+                family: item.family,
+                license: item.license,
+                label: license.licenseLabel(item.license),
+                source: item.source ?? '',
+                articulations: programMod.articulationsIn(built),
+                zones: [],
+                program: built,
+              }, target, {
+                setLibrary: (id: string, program: unknown) => hook.store.setLibrary(id, program),
+                holdLibraryAudio: hook.engine.holdLibraryAudio?.bind(hook.engine),
+                auditionLibrary: hook.engine.auditionLibrary?.bind(hook.engine),
+              })
             }, name)
             await page.waitForFunction((wanted) => {
               const hook = (window as unknown as { __cueharbor?: { store: { project: { tracks: { instrument?: string; library?: { name?: string } }[] } } } }).__cueharbor
@@ -118,7 +149,7 @@ describe('library instruments on every note surface', () => {
             return played
           }, [...NOTE_SURFACES])
           expect(heard, viewport.name).toEqual([...NOTE_SURFACES])
-          const box = await page.locator('[data-harbor="instruments"]').boundingBox()
+          const box = await page.locator('[data-playlist-browser="open"]').boundingBox()
           expect(box, viewport.name).toBeTruthy()
           expect((box?.x ?? 0) + (box?.width ?? 0), viewport.name).toBeLessThanOrEqual(viewport.width + 1)
           await page.screenshot({ path: `/opt/cursor/artifacts/harbor-${viewport.name}.png` })

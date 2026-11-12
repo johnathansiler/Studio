@@ -14,7 +14,7 @@ const engine = {
   currentTimelineSample: () => 0,
 }
 
-function browser(phone: boolean, tab: 'sounds' | 'instruments' | 'loops' | 'patterns') {
+function browser(phone: boolean, tab: 'library' | 'patterns' | 'clips') {
   const store = new ProjectStore(createEmptyProject(48000))
   return renderToStaticMarkup(createElement(PlaylistBrowser, {
     store,
@@ -30,18 +30,23 @@ function browser(phone: boolean, tab: 'sounds' | 'instruments' | 'loops' | 'patt
 
 describe('phone browser sections', () => {
   it('titles each phone section with the same word as the button', () => {
-    for (const tab of ['sounds', 'instruments', 'loops', 'patterns'] as const) {
+    const titles = { library: 'My Library', patterns: 'Patterns', clips: 'Clips' } as const
+    for (const tab of ['library', 'patterns', 'clips'] as const) {
       const html = browser(true, tab)
-      const title = tab[0].toUpperCase() + tab.slice(1)
       expect(html).toContain(`data-browser-title="${tab}"`)
-      expect(html).toContain(`>${title}<`)
+      expect(html).toContain(`>${titles[tab]}<`)
+      expect(html).not.toContain('>Sounds<')
       expect(html).not.toContain('>Project<')
     }
   })
 
-  it('keeps the desktop Project menu', () => {
-    const html = browser(false, 'sounds')
-    expect(html).toContain('>Project<')
+  it('uses the same three tabs on the desktop', () => {
+    const html = browser(false, 'library')
+    expect(html).toContain('>My Library<')
+    expect(html).toContain('>Patterns<')
+    expect(html).toContain('>Clips<')
+    expect(html).not.toContain('>Project<')
+    expect(html).not.toContain('>Sounds<')
     expect(html).not.toContain('data-browser-title')
   })
 })

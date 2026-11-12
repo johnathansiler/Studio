@@ -126,12 +126,14 @@ describe('phone dock fixes', () => {
         await page.locator('.tool-slot').getByRole('button', { name: 'Browse', exact: true }).click()
         const browserSheet = page.locator('[data-playlist-browser="open"]')
         await browserSheet.waitFor()
-        for (const section of ['Sounds', 'Instruments', 'Loops', 'Patterns'] as const) {
-          await page.locator('.phone-context').getByRole('button', { name: section, exact: true }).click()
-          await page.locator(`[data-browser-title="${section.toLowerCase()}"]`).waitFor()
+        for (const section of ['My Library', 'Patterns', 'Clips'] as const) {
+          await browserSheet.locator('.browser-tabs').getByRole('button', { name: section, exact: true }).click()
+          const id = section === 'My Library' ? 'library' : section.toLowerCase()
+          await page.locator(`[data-browser-title="${id}"]`).waitFor()
           const title = await page.locator('[data-browser-title]').innerText()
           expect(title, viewport.name).toBe(section)
           expect(await browserSheet.getByRole('button', { name: 'Project', exact: true }).count(), viewport.name).toBe(0)
+          expect(await browserSheet.getByRole('button', { name: 'Sounds', exact: true }).count(), viewport.name).toBe(0)
         }
         const browserBox = await browserSheet.boundingBox()
         const bar = await page.locator('.tool-slot').boundingBox()
@@ -220,8 +222,9 @@ describe('phone dock fixes', () => {
       if (await deskPage.locator('[data-playlist-browser="open"]').count() === 0) {
         await deskPage.locator('.arrange-panels').getByRole('button', { name: /^Browser/ }).click()
       }
-      await deskPage.locator('.playlist-browser').getByRole('button', { name: 'Project', exact: true }).click()
-      await deskPage.locator('.anchored-menu').getByRole('button', { name: 'Patterns', exact: true }).waitFor()
+      await deskPage.locator('.playlist-browser').getByRole('button', { name: 'Patterns', exact: true }).click()
+      await deskPage.locator('.browser-row, .browser-list').first().waitFor()
+      expect(await deskPage.locator('.playlist-browser').getByRole('button', { name: 'Project', exact: true }).count()).toBe(0)
       expect(await deskPage.locator('[data-browser-title]').count()).toBe(0)
       await deskPage.keyboard.press('Escape')
       await deskPage.getByRole('button', { name: /^Mix/ }).first().click()

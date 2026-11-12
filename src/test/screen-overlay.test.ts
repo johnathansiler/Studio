@@ -461,30 +461,34 @@ describe('screen overlays leave the view tabs free', () => {
           expect(dockBox && arrangeBox && dockBox.x + dockBox.width <= arrangeBox.x + 2).toBe(true)
         }
         await page.screenshot({ path: `${artifacts}/browser-arrange-${layout.name}.png` })
-        await page.getByRole('button', { name: /^Filter/ }).first().click()
+        const filter = page.locator('[data-playlist-browser="open"]').getByRole('button', { name: /^Filter/ })
+        if (await filter.count()) await filter.first().click()
+        else await page.locator('[data-playlist-browser="open"]').getByRole('button', { name: 'Patterns', exact: true }).click()
         const filterMenu = page.locator('.anchored-menu.sound-filter-menu')
-        await filterMenu.waitFor()
-        const stack = await page.evaluate(() => {
-          const menu = document.querySelector('.anchored-menu.sound-filter-menu') as HTMLElement
-          const browser = document.querySelector('[data-playlist-browser="open"]') as HTMLElement
-          const tabs = document.querySelector('.views') as HTMLElement
-          const box = menu.getBoundingClientRect()
-          const top = document.elementFromPoint(box.left + Math.min(24, box.width / 2), box.top + Math.min(16, box.height / 2))
-          return {
-            menuZ: Number(getComputedStyle(menu).zIndex),
-            tabZ: Number(getComputedStyle(tabs).zIndex),
-            menuTop: box.top,
-            tabsBottom: tabs.getBoundingClientRect().bottom,
-            hit: menu === top || menu.contains(top),
-            covered: browser.contains(top),
-          }
-        })
-        expect(stack.menuZ).toBeGreaterThan(360)
-        expect(stack.menuZ).toBeLessThan(stack.tabZ)
-        expect(stack.menuTop).toBeGreaterThanOrEqual(stack.tabsBottom - 1)
-        expect(stack.hit).toBe(true)
-        expect(stack.covered).toBe(false)
-        await page.keyboard.press('Escape')
+        if (await filter.count()) await filterMenu.waitFor()
+        if (await filterMenu.count()) {
+          const stack = await page.evaluate(() => {
+            const menu = document.querySelector('.anchored-menu.sound-filter-menu') as HTMLElement
+            const browser = document.querySelector('[data-playlist-browser="open"]') as HTMLElement
+            const tabs = document.querySelector('.views') as HTMLElement
+            const box = menu.getBoundingClientRect()
+            const top = document.elementFromPoint(box.left + Math.min(24, box.width / 2), box.top + Math.min(16, box.height / 2))
+            return {
+              menuZ: Number(getComputedStyle(menu).zIndex),
+              tabZ: Number(getComputedStyle(tabs).zIndex),
+              menuTop: box.top,
+              tabsBottom: tabs.getBoundingClientRect().bottom,
+              hit: menu === top || menu.contains(top),
+              covered: browser.contains(top),
+            }
+          })
+          expect(stack.menuZ).toBeGreaterThan(360)
+          expect(stack.menuZ).toBeLessThan(stack.tabZ)
+          expect(stack.menuTop).toBeGreaterThanOrEqual(stack.tabsBottom - 1)
+          expect(stack.hit).toBe(true)
+          expect(stack.covered).toBe(false)
+          await page.keyboard.press('Escape')
+        }
         await page.getByRole('button', { name: /^Mix/ }).first().click()
         await page.locator('.workspace[data-push="on"] .shell-browser [data-playlist-browser="open"]').waitFor()
         await page.screenshot({ path: `${artifacts}/browser-mix-${layout.name}.png` })

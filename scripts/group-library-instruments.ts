@@ -28,10 +28,12 @@ const entries = (doc.entries ?? []).map((item) => {
 })
 const notes = entries.filter((entry) => entry.type === 'multisample note').length
 const instruments = groupLibraryInstruments(entries)
+const singles = instruments.filter((item) => item.notes <= 1)
 const sizes = instruments.map((item) => item.samples).sort((a, b) => a - b)
 const at = (ratio: number) => sizes[Math.min(sizes.length - 1, Math.floor((sizes.length - 1) * ratio))] ?? 0
 console.log(`notes ${notes}`)
 console.log(`instruments ${instruments.length}`)
+console.log(`single-note ${singles.length}`)
 console.log(`samples min ${sizes[0] ?? 0} median ${at(0.5)} p99 ${at(0.99)} max ${sizes[sizes.length - 1] ?? 0}`)
 console.log('largest')
 for (const item of instruments.slice().sort((a, b) => b.samples - a.samples).slice(0, 8)) {

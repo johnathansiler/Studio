@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
 import type { AudioEngine } from '../audio/engine'
 import { bindLocalSamples, importInstrument } from '../audio/multisample/import'
-import { fetchCatalogSound, loadSoundCatalog } from '../sounds/catalog'
+import { readLibraryAccessKey } from '../library/access'
+import { loadLibraryCatalog } from '../library/audio'
+import { readLibraryAsset } from '../library/place'
+import type { LibraryEntry } from '../library/types'
+import { fetchCatalogSound } from '../sounds/catalog'
 import { decodeSoundBytes } from '../sounds/place'
 import type { SoundEntry } from '../sounds/types'
 import { selectInstrument } from '../state/select'
@@ -25,17 +29,33 @@ export function LibraryPanel({
   const [status, setStatus] = useState(program ? `${program.name} · ${program.zones.length} zones` : 'Load one downloaded sample, or import SFZ, SF2, or DecentSampler.')
   const [hint, setHint] = useState('A downloaded file plays as one sample. It is not a multisampled instrument. Import still reads files on this device.')
   const [busy, setBusy] = useState(false)
-  const [sounds, setSounds] = useState<SoundEntry[]>(initialSounds ?? [])
+  const [sounds] = useState<SoundEntry[]>(initialSounds ?? [])
+  const [librarySounds, setLibrarySounds] = useState<LibraryEntry[]>([])
   const show = (text: string) => setHint(text)
 
   useEffect(() => {
-    if (initialSounds) return
+    if (initialSounds || !readLibraryAccessKey()) return
     let alive = true
-    void loadSoundCatalog().then((next) => {
-      if (alive) setSounds(next.entries)
+    void loadLibraryCatalog().then((loaded) => {
+      if (!alive) return
+      setLibrarySounds(loaded.index.entries.filter((entry) => entry.type === 'one-shot' || entry.type === 'loop' || entry.type === 'sfx'))
     }).catch(() => undefined)
     return () => { alive = false }
   }, [initialSounds])
+
+  async function loadLibrarySound(entry: LibraryEntry) {
+    setBusy(true)
+    setStatus(`Loading ${entry.name}…`)
+    try {
+      const asset = await readLibraryAsset(entry)
+      store.loadSamplerSound(trackId, asset, undefined, entry.type === 'loop')
+      setStatus(`${entry.name} plays as one sample across the keyboard.`)
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not load that sound.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function loadSample(entry: SoundEntry) {
     setBusy(true)
@@ -98,19 +118,29 @@ export function LibraryPanel({
       <div className="library-row">
         <select
           aria-label="Load sample"
-          title="Load one downloaded file onto this track. It plays as a single sample, not a multisampled instrument."
+          title="Load a sound from My Library onto this track. It plays as a single sample."
           value=""
           disabled={busy}
           onChange={(event) => {
-            const entry = sounds.find((item) => item.id === event.target.value)
+            const value = event.target.value
+            const libraryEntry = librarySounds.find((item) => item.key === value)
+            if (libraryEntry) {
+              show(`${libraryEntry.name} is one ${libraryEntry.type === 'loop' ? 'loop' : 'one-shot'} from My Library.`)
+              void loadLibrarySound(libraryEntry)
+              return
+            }
+            const entry = sounds.find((item) => item.id === value)
             if (!entry) return
             show(`${entry.name} is one ${entry.type === 'loop' ? 'loop' : 'one-shot'}. It is not a multisampled instrument.`)
             void loadSample(entry)
           }}
         >
           <option value="">Load sample</option>
+          {librarySounds.map((entry) => (
+            <option key={entry.key} value={entry.key}>{entry.name} · My Library</option>
+          ))}
           {sounds.map((entry) => (
-            <option key={entry.id} value={entry.id}>{entry.name} · {entry.origin === 'private' ? 'Private' : entry.type === 'loop' ? 'Loop' : 'One-shot'}</option>
+            <option key={entry.id} value={entry.id}>{entry.name} · {entry.type === 'loop' ? 'Loop' : 'One-shot'}</option>
           ))}
         </select>
         <label className="library-file" title="Read an SFZ, SoundFont, or DecentSampler file from this device. The audio stays in this browser.">

@@ -11,9 +11,8 @@ import { REPEAT_CHOICES, VELOCITY_CURVES, quantizeGridBeats, repeatSetting, step
 import { emptyTap, pushTap } from '../model/tap'
 import type { ProjectStore } from '../state/store'
 import { SOUND_MIME, captureSlot, micChannel, openInputCapture, rememberedSlotInput } from '../audio/sample/slot'
-import { soundCache } from '../sounds/cache'
 import { loadLibraryDrag } from '../library/place'
-import { fetchCatalogSound, loadSoundCatalog } from '../sounds/catalog'
+import { fetchCatalogSound } from '../sounds/catalog'
 import { decodeSoundBytes } from '../sounds/place'
 import type { SoundEntry } from '../sounds/types'
 import { readIdentity } from '../storage/identity'
@@ -189,7 +188,6 @@ export function PadsPanel({
 
   useEffect(() => {
     void ensureDefaultKit(store, trackId)
-    void loadSoundCatalog(fetch, soundCache()).then((result) => { sounds.current = result.entries })
   }, [store, trackId])
 
   useEffect(() => engine.subscribe(() => setStatus(engine.status)), [engine])

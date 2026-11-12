@@ -920,7 +920,7 @@ export function ArrangeView({
   }, [phone, browserOpen])
   const pluginsPhase = usePushPhase(pluginsOpen)
   useScreenOverlay(() => setPluginsOpen(false), pluginsOpen)
-  const [browserTab, setBrowserTab] = useState<BrowserTab>(libraryTab || 'sounds')
+  const [browserTab, setBrowserTab] = useState<BrowserTab>(libraryTab && libraryTab !== 'sounds' && libraryTab !== 'instruments' && libraryTab !== 'loops' ? libraryTab : 'library')
   const [browserWidth, setBrowserWidth] = useState(() => browserWidthFor(typeof window === 'undefined' ? 1440 : window.innerWidth, typeof window === 'undefined' ? 900 : window.innerHeight))
   useEffect(() => {
     if (phone) return

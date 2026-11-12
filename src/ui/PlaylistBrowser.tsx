@@ -1,37 +1,30 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { projectBeatSample, projectSampleBeat } from '../model/tempoMap'
 import type { ProjectStore } from '../state/store'
-import { AnchoredMenu } from './AnchoredMenu'
 import { BROWSER_TAB_EVENT } from './phoneContext'
 import { SheetGrab } from './bottomSheet'
 import { SheetClose } from './SheetClose'
 import { MyLibrary } from './MyLibrary'
-import { SoundBrowser } from './SoundBrowser'
+import './sound-browser.css'
 import { PatternSend, patternBeat } from './PatternSend'
 import { quickDragArmed } from './clipKeys'
 
 export type BrowserTab = 'sounds' | 'instruments' | 'loops' | 'library' | 'patterns' | 'clips'
 
 const TABS: { id: BrowserTab; label: string; hint: string }[] = [
-  { id: 'sounds', label: 'Sounds', hint: 'Loops, one-shots, drums, and instruments from the free library.' },
-  { id: 'instruments', label: 'Instruments', hint: 'Multi-sampled instruments. One tap loads the selected MIDI track.' },
-  { id: 'loops', label: 'Loops', hint: 'Melodic and drum loops that follow the song tempo.' },
   { id: 'library', label: 'My Library', hint: 'Your private library. Sounds stay in the bucket and play from a short-lived link.' },
+  { id: 'patterns', label: 'Patterns', hint: 'Patterns from the Beats rack. Drag one onto the playlist.' },
+  { id: 'clips', label: 'Clips', hint: 'Clips already in this project.' },
 ]
 
 const SECTION_TITLE: Record<BrowserTab, string> = {
-  sounds: 'Sounds',
-  instruments: 'Instruments',
-  loops: 'Loops',
+  sounds: 'My Library',
+  instruments: 'My Library',
+  loops: 'My Library',
   library: 'My Library',
   patterns: 'Patterns',
   clips: 'Clips',
 }
-
-const PROJECT: { id: 'patterns' | 'clips'; label: string; hint: string }[] = [
-  { id: 'patterns', label: 'Patterns', hint: 'Patterns from the Beats rack. Drag one onto the playlist.' },
-  { id: 'clips', label: 'Clips', hint: 'Clips already in this project.' },
-]
 
 const PATTERN_MIME = 'application/x-cueharbor-pattern'
 
@@ -45,8 +38,6 @@ type PreviewEngine = {
   holdLibraryAudio?: (trackId: string, samples: { id: string; sampleRate: number; channels: Float32Array[] }[]) => void
   auditionLibrary?: (trackId: string, pitch?: number, velocity?: number) => Promise<void>
 }
-
-const HarborBrowser = lazy(() => import('./HarborBrowser').then((mod) => ({ default: mod.HarborBrowser })))
 
 export function PlaylistBrowser({
   store,
@@ -172,27 +163,7 @@ export function PlaylistBrowser({
     return rows.filter((row) => !needle || `${row.name} ${row.where}`.toLowerCase().includes(needle))
   }, [needle, project, trackId])
 
-  const soundLock = tab === 'instruments' ? 'instrument' : tab === 'loops' ? 'loop' : tab === 'sounds' ? 'all' : null
-  const projectOn = tab === 'patterns' || tab === 'clips'
-  const projectButton = useRef<HTMLButtonElement>(null)
-  const [projectOpen, setProjectOpen] = useState(false)
-
-  const catalog = tab === 'library' ? (
-    <MyLibrary store={store} engine={engine} />
-  ) : tab === 'instruments' || tab === 'loops' ? (
-    <Suspense fallback={<p className="sound-status">Loading</p>}>
-      <HarborBrowser store={store} engine={engine} section={tab} />
-    </Suspense>
-  ) : soundLock ? (
-    <SoundBrowser
-      store={store}
-      engine={engine}
-      phone={phone}
-      embedded
-      lockType={soundLock === 'all' ? undefined : soundLock}
-      onClose={onClose}
-    />
-  ) : (
+  const catalog = tab === 'patterns' || tab === 'clips' ? (
     <div className="browser-body">
       <input aria-label="Search the browser" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
       <div className="browser-list">
@@ -259,6 +230,8 @@ export function PlaylistBrowser({
         {tab === 'clips' && !clips.length && <p>No clips on the playlist yet.</p>}
       </div>
     </div>
+  ) : (
+    <MyLibrary store={store} engine={engine} />
   )
 
   return (
@@ -279,49 +252,10 @@ export function PlaylistBrowser({
       <div className="browser-tabs btn-tray">
         <div className="browser-chip-scroll" role="tablist" aria-label="Browser">
           {TABS.map((item) => (
-            <button key={item.id} type="button" className={tab === item.id ? 'on' : ''} title={item.hint} aria-pressed={tab === item.id} onClick={() => onTab(item.id)}>
+            <button key={item.id} type="button" className={tab === item.id || (item.id === 'library' && (tab === 'sounds' || tab === 'instruments' || tab === 'loops')) ? 'on' : ''} title={item.hint} aria-pressed={tab === item.id} onClick={() => onTab(item.id)}>
               {item.label}
             </button>
           ))}
-          {phone ? PROJECT.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={tab === item.id ? 'on' : ''}
-              title={item.hint}
-              aria-pressed={tab === item.id}
-              onClick={() => onTab(item.id)}
-            >
-              {item.label}
-            </button>
-          )) : (
-            <>
-              <button
-                ref={projectButton}
-                type="button"
-                className={projectOn ? 'on' : ''}
-                aria-expanded={projectOpen}
-                aria-haspopup="menu"
-                title="Patterns and clips already in this project."
-                onClick={() => setProjectOpen((open) => !open)}
-              >
-                Project
-              </button>
-              <AnchoredMenu open={projectOpen} onClose={() => setProjectOpen(false)} label="Project" triggerRef={projectButton} prefer="down">
-                {PROJECT.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={tab === item.id ? 'on' : ''}
-                    title={item.hint}
-                    onClick={() => { onTab(item.id); setProjectOpen(false) }}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </AnchoredMenu>
-            </>
-          )}
         </div>
         {!phone && <SheetClose className="browser-close" onClick={onClose} />}
       </div>
@@ -344,7 +278,7 @@ export function ShellBrowser({
   onClose: () => void
   onSeek: (sample: number) => void
 }) {
-  const [tab, setTab] = useState<BrowserTab>('sounds')
+  const [tab, setTab] = useState<BrowserTab>('library')
   useEffect(() => {
     const onTab = (event: Event) => {
       const next = (event as CustomEvent<BrowserTab>).detail

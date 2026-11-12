@@ -138,6 +138,8 @@ interface RawSample {
   size: number
   category: string
   midi: number | null
+  /** Pitch class when the file name has no octave. The folder supplies the octave later. */
+  pitchClass: number | null
   velocityId: string
   velocityRank: number
   rr: number | null
@@ -313,9 +315,68 @@ function foldOctaveNotes(tokens: Token[]): Token[] {
   return out
 }
 
+/** `A`, `A#`, `Bb`, or the same with an octave digit. Nothing else in the name. */
+function pitchFromStem(stem: string): { midi: number | null; pitchClass: number | null } | null {
+  const match = stem.match(/^([A-Ga-g])([#b]|s)?(-1|\d+)?$/i)
+  if (!match) return null
+  let semi = PITCH[match[1].toLowerCase()]
+  if (semi == null) return null
+  const accidental = (match[2] || '').toLowerCase()
+  if (accidental === '#' || accidental === 's') semi += 1
+  if (accidental === 'b') semi -= 1
+  semi = ((semi % 12) + 12) % 12
+  if (!match[3]) return { midi: null, pitchClass: semi }
+  const midi = (Number(match[3]) + 1) * 12 + semi
+  if (midi < 0 || midi > 127) return null
+  return { midi, pitchClass: null }
+}
+
+function emptyRaw(row: CatalogRow, midi: number | null, pitchClass: number | null): RawSample {
+  return {
+    key: row.key,
+    size: row.size,
+    category: row.category && row.category !== 'null' ? row.category : '',
+    midi,
+    pitchClass,
+    velocityId: '',
+    velocityRank: 0,
+    rr: null,
+    release: false,
+    durationRank: 50,
+    nameTokens: [],
+    looseNumbers: [],
+  }
+}
+
+/**
+ * `Octave01`, `Octave2`, `Octave01(Long)`.
+ * The number is the folder's place in a consecutive run, not the scientific octave.
+ * A parenthetical is the articulation, so Long and Short stay separate instruments.
+ */
+function octaveFolder(folder: string): { parent: string; index: number; art: string } | null {
+  const parts = folder.split('/')
+  const last = parts[parts.length - 1] || ''
+  const match = last.match(/^octave[\s_-]*0*(\d+)(?:\s*\(([^)]+)\)|\s*[-_]([A-Za-z0-9]+))?$/i)
+  if (!match) return null
+  const index = Number(match[1])
+  if (!Number.isFinite(index)) return null
+  return { parent: parts.slice(0, -1).join('/'), index, art: (match[2] || match[3] || '').trim() }
+}
+
+/** First octave folder. Bass sits low, leads sit higher, so the same note name is not C4 in every pack. */
+function baseOctave(category: string, folder: string) {
+  const hay = `${category} ${folder}`.toLowerCase()
+  if (/bass|sub|808|contrabass/.test(hay)) return 1
+  if (/lead|pluck|acid|beeper/.test(hay)) return 3
+  if (/piano|keys|organ|rhodes|guitar|harp|chime|mallet|bell|vibes|kalimba/.test(hay)) return 2
+  return 3
+}
+
 function parseRaw(row: CatalogRow): RawSample | null {
   const file = row.key.split('/').pop() || row.key
   const stem = file.replace(/\.[a-z0-9]+$/i, '')
+  const named = pitchFromStem(stem)
+  if (named) return emptyRaw(row, named.midi, named.pitchClass)
   const tokens = tokenizeStem(stem)
   let midi: number | null = null
   let fromNote = false
@@ -410,6 +471,7 @@ function parseRaw(row: CatalogRow): RawSample | null {
     size: row.size,
     category: row.category && row.category !== 'null' ? row.category : '',
     midi,
+    pitchClass: null,
     velocityId,
     velocityRank,
     rr,
@@ -485,6 +547,14 @@ function displayName(pack: string, folder: string, tokens: string[], sampleCount
   let art = ''
   let code = ''
   const shortCode = tokens.length === 1 && tokens[0].length <= 4 && !ART_LABEL[tokens[0]]
+  const parentRaw = segs.length > 1 ? segs[segs.length - 2] : ''
+  const kit = parentRaw.match(/^(\d+)\((\d+)\)$/)
+  if (kit && tokens.length <= 1) {
+    const rawFolder = segs[segs.length - 1] || folderName
+    const art = tokens.length === 1 ? humanize(tokens[0]) : ''
+    const titled = art ? `${rawFolder} ${art}` : rawFolder
+    return { name: `${titled} (${kit[1]} ${kit[2]})`, code: '' }
+  }
   if (!joined) {
     base = folderName || cleanPack(pack)
   } else if (!folderName && shortCode) {
@@ -723,16 +793,55 @@ function applyIndexSeries(items: { raw: RawSample; stem: string }[]) {
   })
 }
 
+function isGroupable(entry: CatalogRow) {
+  const type = (entry.type || '').toLowerCase()
+  if (type === 'multisample note') return true
+  if (type) return false
+  const file = entry.key.split('/').pop() || entry.key
+  return pitchFromStem(file.replace(/\.[a-z0-9]+$/i, '')) != null
+}
+
+/** Bare note names take their octave from the folder, never from a shared C4 default. */
+function assignBareOctaves(items: { pack: string; folder: string; raw: RawSample; octaveIndex: number | null }[]) {
+  const groups = new Map<string, typeof items>()
+  for (const item of items) {
+    if (item.raw.pitchClass == null || item.raw.midi != null) continue
+    const key = `${item.pack}\n${item.folder}`
+    const list = groups.get(key) ?? []
+    list.push(item)
+    groups.set(key, list)
+  }
+  for (const list of groups.values()) {
+    const base = baseOctave(mode(list.map((item) => item.raw.category)), list[0]?.folder ?? '')
+    for (const item of list) {
+      const step = item.octaveIndex == null ? 0 : Math.max(0, item.octaveIndex - 1)
+      const midi = (base + step + 1) * 12 + (item.raw.pitchClass ?? 0)
+      if (midi >= 0 && midi <= 127) item.raw.midi = midi
+    }
+  }
+}
+
 export function groupLibraryInstruments(entries: CatalogRow[]): LibraryInstrument[] {
-  const pending: { pack: string; folder: string; raw: RawSample; stem: string }[] = []
+  const pending: { pack: string; folder: string; raw: RawSample; stem: string; octaveIndex: number | null }[] = []
   for (const entry of entries) {
-    if ((entry.type || '').toLowerCase() !== 'multisample note') continue
+    if (!isGroupable(entry)) continue
     if (!entry.key || entry.key.includes('..')) continue
     const raw = parseRaw(entry)
     if (!raw) continue
     const folder = entry.key.split('/').slice(0, -1).join('/')
     const file = entry.key.split('/').pop() || entry.key
-    pending.push({ pack: entry.pack || '', folder, raw, stem: file.replace(/\.[a-z0-9]+$/i, '') })
+    const oct = octaveFolder(folder)
+    if (oct?.art) {
+      const token = oct.art.toLowerCase()
+      if (!raw.nameTokens.includes(token)) raw.nameTokens = [...raw.nameTokens, token]
+    }
+    pending.push({
+      pack: entry.pack || '',
+      folder: oct ? oct.parent : folder,
+      raw,
+      stem: file.replace(/\.[a-z0-9]+$/i, ''),
+      octaveIndex: oct ? oct.index : null,
+    })
   }
   const byFolder = new Map<string, { raw: RawSample; stem: string }[]>()
   for (const item of pending) {
@@ -741,6 +850,7 @@ export function groupLibraryInstruments(entries: CatalogRow[]): LibraryInstrumen
     byFolder.set(`${item.pack}\n${item.folder}`, list)
   }
   for (const list of byFolder.values()) applyIndexSeries(list)
+  assignBareOctaves(pending)
   const groups = new Map<string, { pack: string; folder: string; tokens: string[]; samples: RawSample[] }>()
   for (const item of pending) {
     const key = groupKey(item.pack, item.folder, item.raw.nameTokens)

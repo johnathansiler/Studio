@@ -75,21 +75,38 @@ describe('production loop tempo follow', () => {
         hook.engine.seek(0)
         hook.store.setTempo(120)
       })
-      await page.getByRole('button', { name: 'Browser', exact: true }).click()
-      await page.locator('.browser-tabs').waitFor()
       await page.evaluate(() => {
-        const sounds = [...document.querySelectorAll('.browser-tabs button')].find((button) => button.textContent?.trim() === 'Sounds')
-        if (!(sounds instanceof HTMLButtonElement)) throw new Error('missing sounds tab')
-        sounds.click()
-      })
-      const search = page.getByLabel('Search sounds')
-      await search.fill('2-AND-4 (100)')
-      await page.locator('.sound-row', { hasText: '2-AND-4 (100)' }).first().waitFor({ timeout: 20000 })
-      await page.evaluate(() => {
-        const row = [...document.querySelectorAll('.sound-row')].find((item) => item.textContent?.includes('2-AND-4 (100)'))
-        const button = row?.querySelector('button.sound-add')
-        if (!(button instanceof HTMLButtonElement)) throw new Error('missing load')
-        button.click()
+        const hook = (window as unknown as {
+          __cueharbor: {
+            store: {
+              project: { sampleRate: number; tempo: number; tracks: { id: string; type: string }[] }
+              addAsset: (asset: { id: string; name: string; sampleRate: number; channels: Float32Array[] }) => void
+              addAudioClip: (trackId: string, clip: Record<string, unknown>) => void
+            }
+          }
+        }).__cueharbor
+        const store = hook.store
+        const rate = store.project.sampleRate
+        const sourceBpm = 100
+        const beats = 8
+        const sourceSamples = Math.round(rate * beats * 60 / sourceBpm)
+        const channel = new Float32Array(sourceSamples)
+        for (let i = 0; i < channel.length; i++) channel[i] = Math.sin((2 * Math.PI * 110 * i) / rate) * 0.35
+        store.addAsset({ id: 'loopbuf', name: '2-AND-4 (100)', sampleRate: rate, channels: [channel] })
+        const track = store.project.tracks.find((item) => item.type === 'audio') ?? store.project.tracks[0]
+        store.addAudioClip(track.id, {
+          id: 'loopclip',
+          name: '2-AND-4 (100)',
+          bufferId: 'loopbuf',
+          startSample: 0,
+          offsetSamples: 0,
+          durationSamples: Math.round(sourceSamples * sourceBpm / store.project.tempo),
+          fadeInSamples: 0,
+          fadeOutSamples: 0,
+          gain: 1,
+          source: 'import',
+          stretch: { sourceSamples, semitones: 0, cents: 0, mode: 'pro', followTempo: true, sourceBpm, markers: [] },
+        })
       })
       await page.locator('[data-clip]').first().waitFor({ timeout: 20000 })
       const loaded = await readClip(page)

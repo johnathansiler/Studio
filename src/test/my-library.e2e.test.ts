@@ -169,6 +169,7 @@ describe('my library on a phone', () => {
       await page.getByRole('button', { name: 'Unlock', exact: true }).click()
       await page.getByLabel('Search my library').waitFor()
       await page.getByLabel('Search my library').fill('trap 808 C')
+      await page.getByRole('button', { name: 'Filter', exact: true }).click()
       await page.getByRole('button', { name: 'One-shot', exact: true }).click()
       await page.getByRole('button', { name: 'Genre', exact: true }).click()
       await page.getByRole('button', { name: 'Trap', exact: true }).click()

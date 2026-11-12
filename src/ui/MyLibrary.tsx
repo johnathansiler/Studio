@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from 'react'
+import { AnchoredMenu } from './AnchoredMenu'
 import { SOUND_MIME } from '../audio/sample/slot'
 import { LibraryAuthError, clearLibraryAccessKey, libraryStatus, readLibraryAccessKey, writeLibraryAccessKey } from '../library/access'
 import { loadLibraryCatalog } from '../library/audio'
@@ -10,7 +11,7 @@ import { libraryRowWindow, searchLibrary, type LibraryIndex } from '../library/s
 import { EMPTY_LIBRARY_QUERY, type LibraryDocument, type LibraryEntry, type LibraryQuery } from '../library/types'
 import type { ProjectStore } from '../state/store'
 
-const ROW = 70
+const ROW = 48
 const GROUPS = [
   { id: 'type', label: 'Type' },
   { id: 'category', label: 'Category' },
@@ -75,20 +76,20 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
   const [passphrase, setPassphrase] = useState('')
   const [index, setIndex] = useState<LibraryIndex | null>(null)
   const [instruments, setInstruments] = useState<LibraryInstrumentSummary[]>([])
-  const [pending, setPending] = useState('')
   const [text, setText] = useState('')
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [group, setGroup] = useState<Group>('type')
   const [query, setQuery] = useState<LibraryQuery>(EMPTY_LIBRARY_QUERY)
   const [busy, setBusy] = useState('')
   const [playing, setPlaying] = useState('')
   const [range, setRange] = useState({ start: 0, end: 16 })
   const listRef = useRef<HTMLDivElement>(null)
+  const filterButton = useRef<HTMLButtonElement>(null)
   const previewGen = useRef(0)
 
   function apply(loaded: { document: LibraryDocument; index: LibraryIndex }) {
     publishLibrary(loaded.index.entries.filter((entry) => entry.type !== 'multisample note'))
     setIndex(loaded.index)
-    setPending(loaded.document.pending)
     setPhase('ready')
     void fetchAllLibraryInstruments().then(setInstruments).catch(() => setInstruments([]))
   }
@@ -355,50 +356,64 @@ export function MyLibrary({ store, engine }: { store: ProjectStore; engine: Engi
       {phase === 'load' && <p className="sound-status">{message}</p>}
       {phase === 'ready' && index && (
         <>
-          <div className="sound-filters">
+          <div className="sound-filters library-search">
             <input aria-label="Search my library" placeholder="Search" value={text} onChange={(event) => setText(event.target.value)} />
-            <button type="button" className="sound-filter" onClick={lock}>Lock</button>
-          </div>
-          {pending && <p className="sound-status">{pending}</p>}
-          <div className="sound-chips library-chip-scroll" role="group" aria-label="Filter groups">
-            {GROUPS.map((item) => (
-              <button key={item.id} type="button" className={group === item.id || groupActive(item.id, query) ? 'on' : ''} aria-pressed={group === item.id} onClick={() => setGroup(item.id)}>{item.label}</button>
-            ))}
-          </div>
-          <div className="sound-chips library-chip-scroll" role="group" aria-label={`${chipLabel(group)} filters`}>
-            {group === 'bpm' ? BPM_PRESETS.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                className={query.bpmMin === preset.min && query.bpmMax === preset.max ? 'on' : ''}
-                aria-pressed={query.bpmMin === preset.min && query.bpmMax === preset.max}
-                onClick={() => setQuery((current) => ({ ...current, bpmMin: preset.min, bpmMax: preset.max }))}
-              >
-                {preset.label}
-              </button>
-            )) : (
-              <>
-                <button type="button" className={!selectedValue(group, query) ? 'on' : ''} aria-pressed={!selectedValue(group, query)} onClick={() => setQuery((current) => ({ ...current, ...cleared(group) }))}>Any</button>
-                {values.map((value) => (
-                  <button key={value} type="button" className={selectedValue(group, query) === value ? 'on' : ''} aria-pressed={selectedValue(group, query) === value} onClick={() => setQuery((current) => ({ ...current, ...picked(group, value) }))}>{chipLabel(value)}</button>
+            <button
+              ref={filterButton}
+              type="button"
+              className={`sound-filter library-filter-btn${active.length ? ' on' : ''}`}
+              aria-expanded={filtersOpen}
+              aria-haspopup="dialog"
+              aria-label={active.length ? `Filter. ${active.length} active.` : 'Filter'}
+              title="Type, category, instrument, genre, key, and tempo."
+              onClick={() => setFiltersOpen((open) => !open)}
+            >
+              <FilterIcon />
+              {active.length > 0 && <span className="filter-badge">{active.length}</span>}
+            </button>
+            <AnchoredMenu className="sound-filter-menu library-filter-sheet" open={filtersOpen} onClose={() => setFiltersOpen(false)} label="Filter" triggerRef={filterButton}>
+              <div className="sound-chips library-chip-scroll" role="group" aria-label="Filter groups">
+                {GROUPS.map((item) => (
+                  <button key={item.id} type="button" className={`filter-choice${group === item.id || groupActive(item.id, query) ? ' on' : ''}`} aria-pressed={group === item.id} onClick={() => setGroup(item.id)}>{item.label}</button>
                 ))}
-              </>
-            )}
+              </div>
+              <div className="sound-chips library-chip-scroll" role="group" aria-label={`${chipLabel(group)} filters`}>
+                {group === 'bpm' ? BPM_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={`filter-choice${query.bpmMin === preset.min && query.bpmMax === preset.max ? ' on' : ''}`}
+                    aria-pressed={query.bpmMin === preset.min && query.bpmMax === preset.max}
+                    onClick={() => setQuery((current) => ({ ...current, bpmMin: preset.min, bpmMax: preset.max }))}
+                  >
+                    {preset.label}
+                  </button>
+                )) : (
+                  <>
+                    <button type="button" className={`filter-choice${!selectedValue(group, query) ? ' on' : ''}`} aria-pressed={!selectedValue(group, query)} onClick={() => setQuery((current) => ({ ...current, ...cleared(group) }))}>Any</button>
+                    {values.map((value) => (
+                      <button key={value} type="button" className={`filter-choice${selectedValue(group, query) === value ? ' on' : ''}`} aria-pressed={selectedValue(group, query) === value} onClick={() => setQuery((current) => ({ ...current, ...picked(group, value) }))}>{chipLabel(value)}</button>
+                    ))}
+                  </>
+                )}
+              </div>
+              {group === 'bpm' && (
+                <div className="bpm-range">
+                  <input aria-label="Minimum BPM" inputMode="numeric" placeholder="Min" value={query.bpmMin ?? ''} onChange={(event) => setQuery((current) => ({ ...current, bpmMin: readBpm(event.target.value) }))} />
+                  <input aria-label="Maximum BPM" inputMode="numeric" placeholder="Max" value={query.bpmMax ?? ''} onChange={(event) => setQuery((current) => ({ ...current, bpmMax: readBpm(event.target.value) }))} />
+                </div>
+              )}
+              <button type="button" className="filter-choice" onClick={lock}>Lock library</button>
+            </AnchoredMenu>
           </div>
-          {group === 'bpm' && (
-            <div className="bpm-range">
-              <input aria-label="Minimum BPM" inputMode="numeric" placeholder="Min" value={query.bpmMin ?? ''} onChange={(event) => setQuery((current) => ({ ...current, bpmMin: readBpm(event.target.value) }))} />
-              <input aria-label="Maximum BPM" inputMode="numeric" placeholder="Max" value={query.bpmMax ?? ''} onChange={(event) => setQuery((current) => ({ ...current, bpmMax: readBpm(event.target.value) }))} />
-            </div>
-          )}
           {active.length > 0 && (
-            <div className="sound-chips library-chip-scroll" role="group" aria-label="Active filters">
+            <div className="sound-chips library-chip-scroll library-active" role="group" aria-label="Active filters">
               {active.map((item) => (
-                <button key={item.id} type="button" className="on" onClick={() => setQuery((current) => ({ ...current, ...item.clear }))}>{item.label}</button>
+                <button key={item.id} type="button" className="on" aria-label={`Clear ${item.label}`} onClick={() => setQuery((current) => ({ ...current, ...item.clear }))}>{item.label} ×</button>
               ))}
             </div>
           )}
-          <p className="sound-count" data-library-count={rows.length}>{countLabel}</p>
+          <p className="sound-count library-count" data-library-count={rows.length}>{countLabel}</p>
           <div className="sound-list" ref={listRef} aria-label="Library sounds">
             {rows.length === 0 && <p className="sound-status">Nothing matches.</p>}
             {rows.length > 0 && (
@@ -447,8 +462,8 @@ function InstrumentRow({
   onPlay: () => void
   onLoad: () => void
 }) {
-  const span = item.notes <= 1 ? `Root ${midiName(item.previewMidi)}` : `${midiName(item.lo)}–${midiName(item.hi)}`
-  const meta = [playing ? 'Playing' : '', 'Instrument', item.category, item.pack, span, item.notes === 1 ? '' : `${item.notes} notes`].filter(Boolean).join(' · ')
+  const span = item.notes <= 1 ? midiName(item.previewMidi) : `${midiName(item.lo)}–${midiName(item.hi)}`
+  const meta = busy ? 'Loading' : playing ? 'Playing' : [item.category || 'Instrument', span].filter(Boolean).join(' · ')
   return (
     <div className={`sound-row${playing ? ' is-playing' : ''}`} data-library-instrument={item.id}>
       <button type="button" className="sound-copy" aria-label={playing ? `Stop ${item.name}` : `Play ${item.name}`} onClick={onPlay}>
@@ -475,7 +490,7 @@ function SoundRow({
   onLoad: () => void
   onDrag: (event: ReactDragEvent) => void
 }) {
-  const meta = [playing ? 'Playing' : '', entry.type ? chipLabel(entry.type) : '', entry.category, entry.pack, entry.bpm ? `${entry.bpm} bpm` : '', entry.musicalKey || entry.root].filter(Boolean).join(' · ')
+  const meta = busy ? 'Loading' : playing ? 'Playing' : [entry.type ? chipLabel(entry.type) : '', entry.category || entry.musicalKey || (entry.bpm ? `${entry.bpm} bpm` : '')].filter(Boolean).slice(0, 2).join(' · ')
   return (
     <div className={`sound-row${playing ? ' is-playing' : ''}`} data-library-key={entry.key}>
       <button type="button" className="sound-copy" draggable aria-label={playing ? `Stop ${entry.name}` : `Play ${entry.name}`} onDragStart={onDrag} onClick={onPlay}>
@@ -484,6 +499,14 @@ function SoundRow({
       </button>
       <button type="button" className="sound-add" aria-label={`Load ${entry.name}`} disabled={busy} onClick={onLoad}>Load</button>
     </div>
+  )
+}
+
+function FilterIcon() {
+  return (
+    <svg className="filter-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path d="M4 6h16M7 12h10M10 18h4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
   )
 }
 

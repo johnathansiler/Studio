@@ -623,3 +623,104 @@ html[data-posture="book"] .shell:not(.phone) .workspace.dock-bottom.sounds-open 
 .shell.phone.land .playlist-browser .sound-status {
   flex: none;
 }
+
+/* Browse categories: three equal buttons in the one recessed tray. */
+.playlist-browser .browser-tabs .browser-chip-scroll {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  width: 100%;
+  overflow: hidden;
+}
+.playlist-browser .browser-tabs .browser-chip-scroll > button {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+.my-library .library-search {
+  flex-wrap: nowrap;
+  align-items: center;
+  min-height: 0;
+}
+.my-library .library-search input {
+  height: 36px;
+  min-height: 36px;
+}
+.my-library .library-filter-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  max-height: 36px;
+  padding: 0;
+  border-radius: 10px;
+}
+.my-library .filter-icon {
+  display: block;
+}
+.my-library .filter-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 99px;
+  background: var(--accent, #73c48f);
+  color: var(--accent-ink, #102016);
+  font-family: var(--font, Outfit, sans-serif);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+.my-library .library-active {
+  flex-flow: row nowrap;
+  overflow-x: auto;
+  min-height: 0;
+}
+.my-library .library-active button {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.my-library .library-count {
+  font-size: 11px;
+  line-height: 1.2;
+  opacity: 0.72;
+}
+.my-library .sound-row {
+  height: 48px;
+  min-height: 48px;
+  max-height: 48px;
+  margin: 0 0 4px;
+}
+.my-library .sound-copy,
+.shell.phone .my-library .sound-copy {
+  min-height: 0;
+  height: auto;
+}
+.my-library .sound-add,
+.shell.phone .my-library .sound-add {
+  height: 30px;
+  min-height: 30px;
+  max-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-family: var(--font, Outfit, sans-serif);
+}
+.shell.phone .my-library .library-filter-btn,
+.shell.phone .my-library .library-search input {
+  min-height: 36px;
+  height: 36px;
+}
+.library-filter-sheet .filter-choice,
+.library-filter-sheet .sound-chips {
+  font-family: var(--font, Outfit, sans-serif);
+}
