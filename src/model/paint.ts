@@ -4,8 +4,6 @@ import type { MidiNote } from './types'
 
 export type RollTool = 'paint' | 'brush' | 'pen' | 'slice' | 'glue' | 'mute' | 'erase' | 'velocity' | 'cc'
 
-export const ROLL_TOOLS: RollTool[] = ['paint', 'brush', 'pen', 'slice', 'glue', 'mute', 'erase', 'velocity', 'cc']
-
 export interface RollMemory {
   tool: RollTool
   /** 0 is free. Otherwise the grid in quarter-note beats. */
@@ -80,29 +78,6 @@ export function chordStamp(args: {
   })
 }
 
-export function paintChords(args: {
-  fromBeat: number
-  toBeat: number
-  pitch: number
-  grid: number
-  length: number
-  velocity: number
-  root: number
-  scale: ScaleId
-  intervals: readonly number[]
-}): PaintedNote[] {
-  const length = Math.max(0.05, args.length)
-  const grid = args.grid > 0 ? args.grid : length
-  const start = snapBeat(Math.min(args.fromBeat, args.toBeat), args.grid)
-  const far = snapBeat(Math.max(args.fromBeat, args.toBeat), args.grid)
-  const end = far > start + 1e-9 ? far : start + grid
-  const notes: PaintedNote[] = []
-  for (let beat = start; beat < end - 1e-6; beat += grid) {
-    notes.push(...chordStamp({ ...args, beat, length: Math.min(length, grid) }))
-  }
-  return notes
-}
-
 export function sliceNote(note: MidiNote, atBeat: number): [MidiNote, MidiNote] | null {
   const cut = atBeat - note.startBeat
   if (cut <= 0.02 || cut >= note.durationBeats - 0.02) return null
@@ -110,30 +85,6 @@ export function sliceNote(note: MidiNote, atBeat: number): [MidiNote, MidiNote] 
     { ...note, durationBeats: cut },
     { ...note, id: `${note.id}b`, startBeat: note.startBeat + cut, durationBeats: note.durationBeats - cut },
   ]
-}
-
-export function glueNotes(notes: MidiNote[]): MidiNote[] {
-  const sorted = [...notes].sort((a, b) => a.startBeat - b.startBeat || a.pitch - b.pitch)
-  const out: MidiNote[] = []
-  for (const note of sorted) {
-    const prev = out[out.length - 1]
-    if (prev && prev.pitch === note.pitch && note.startBeat <= prev.startBeat + prev.durationBeats + 0.03) {
-      const end = Math.max(prev.startBeat + prev.durationBeats, note.startBeat + note.durationBeats)
-      prev.durationBeats = end - prev.startBeat
-      prev.velocity = Math.max(prev.velocity, note.velocity)
-    } else out.push({ ...note })
-  }
-  return out
-}
-
-export function eraseNotes(notes: MidiNote[], fromBeat: number, toBeat: number, pitch: number | null): MidiNote[] {
-  const start = Math.min(fromBeat, toBeat)
-  const end = Math.max(fromBeat, toBeat)
-  return notes.filter((note) => {
-    if (pitch != null && note.pitch !== pitch) return true
-    const noteEnd = note.startBeat + note.durationBeats
-    return noteEnd <= start || note.startBeat >= end
-  })
 }
 
 export function quantizeNotes(notes: MidiNote[], grid: number, only?: string[]): MidiNote[] {
@@ -200,12 +151,3 @@ export interface CcPoint {
   value: number
 }
 
-export function paintCc(points: CcPoint[], fromBeat: number, toBeat: number, value: number, grid: number): CcPoint[] {
-  const start = snapBeat(Math.min(fromBeat, toBeat), grid)
-  const end = snapBeat(Math.max(fromBeat, toBeat), grid)
-  const step = grid > 0 ? grid : 0.25
-  const next = points.filter((point) => point.beat < start - 1e-6 || point.beat > end + step)
-  for (let beat = start; beat <= end + 1e-6; beat += step) next.push({ beat, value: Math.max(0, Math.min(1, value)) })
-  next.sort((a, b) => a.beat - b.beat)
-  return next
-}

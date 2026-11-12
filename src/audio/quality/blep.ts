@@ -44,16 +44,6 @@ export function additiveSquare(phase: number, partials: number) {
 }
 
 /** PolyBLEP saw. Phase 0 lands near a zero crossing. Used when a pulse width is not a square. */
-export function blepSaw(phase: number, dt: number) {
-  const p = phase - Math.floor(phase)
-  return 2 * p - 1 - polyBlep(p, dt)
-}
-
-export function blepSquare(phase: number, dt: number) {
-  const p = phase - Math.floor(phase)
-  const other = p < 0.5 ? p + 0.5 : p - 0.5
-  return (p < 0.5 ? 1 : -1) + polyBlep(p, dt) - polyBlep(other, dt)
-}
 
 export function blepPulse(phase: number, dt: number, width: number) {
   const p = phase - Math.floor(phase)

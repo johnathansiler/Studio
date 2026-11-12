@@ -12,10 +12,9 @@ import { sectionKind } from '../model/sections'
 import { normalizeScale } from '../model/scale'
 import { stampMidiAtBeat } from '../model/playheadPlace'
 import { makeTrack, uid, type MidiClip, type MidiNote, type Project, type Track } from '../model/types'
-import { ensureScale, roleById, roleLabel, scaleIsBuiltin, type RoleId } from './brief'
+import { ensureScale, roleById, roleLabel, scaleIsBuiltin } from './brief'
 import type { SongDraft } from './draft'
 
-export const UNSTUCK_MARK = 'Ideas '
 const CLIP_MARKS = ['Ideas ', 'Unstuck '] as const
 
 const OURS = /^(Intro|Verse|Pre-Chorus|Pre|Post-Chorus|Chorus|Bridge|Instrumental|Outro|Loop|Breakdown|Break)( \d+)?$/
@@ -50,17 +49,6 @@ export function applyUnstuckDraft(project: Project, draft: SongDraft): { trackId
   return { trackId, clipId }
 }
 
-export function arrangementEnd(project: Project) {
-  let end = 0
-  for (const track of project.tracks) {
-    for (const clip of track.midiClips) {
-      if (clip.slotOnly || clip.scene != null) continue
-      end = Math.max(end, clip.startBeat + clip.durationBeats)
-    }
-  }
-  return end
-}
-
 export function unstuckSpan(project: Project): { start: number; end: number } | null {
   let start = Infinity
   let end = 0
@@ -73,22 +61,6 @@ export function unstuckSpan(project: Project): { start: number; end: number } | 
   }
   if (!Number.isFinite(start) || end <= start) return null
   return { start, end }
-}
-
-export function collectRole(project: Project, role: RoleId, start: number, end: number) {
-  const label = roleLabel(role)
-  const notes: { pitch: number; startBeat: number; durationBeats: number; velocity: number }[] = []
-  for (const track of project.tracks) {
-    for (const clip of track.midiClips) {
-      if (clip.slotOnly || !nameHasRole(clip.name, label)) continue
-      for (const note of clip.notes) {
-        const abs = clip.startBeat + note.startBeat
-        if (abs < start - 1e-4 || abs >= end - 1e-4) continue
-        notes.push({ pitch: note.pitch, startBeat: abs - start, durationBeats: note.durationBeats, velocity: note.velocity })
-      }
-    }
-  }
-  return notes
 }
 
 function applyKey(project: Project, key: number, scaleId: string) {

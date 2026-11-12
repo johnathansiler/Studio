@@ -1,6 +1,6 @@
-import { descriptor, FACTORY } from './catalog'
+
 import { createAmpState, processAmp, resetAmpState } from './ampDsp'
-import type { PluginModule, Processor } from './types'
+import type { Processor } from './types'
 
 export function createAmp(sampleRate: number): Processor {
   const state = createAmpState(sampleRate)
@@ -29,12 +29,3 @@ export function createAmp(sampleRate: number): Processor {
   }
 }
 
-export function ampModule(): PluginModule {
-  const spec = descriptor('amp')
-  if (!spec) throw new Error('Amp is missing from the catalog')
-  return {
-    descriptor: spec,
-    presets: FACTORY.amp ?? [],
-    create: (sampleRate) => createAmp(sampleRate),
-  }
-}

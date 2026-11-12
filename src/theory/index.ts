@@ -24,34 +24,9 @@ export type {
   WeightedPitch,
 } from './types'
 
-export {
-  FAMILY_INFO,
-  allScales,
-  findScale,
-  getScale,
-  registerScales,
-  scaleFamilies,
-  scalesInFamily,
-  isTwelveTone,
-  spellScale,
-  snapToScale,
-  toneInScale,
-  degreeTone,
-  nearestDegree,
-  rotateCents,
-} from './scales'
+export { FAMILY_INFO, allScales, findScale, getScale, scaleFamilies, isTwelveTone, spellScale, snapToScale, toneInScale, degreeTone, nearestDegree } from './scales'
 
-export {
-  CHORDS,
-  listChords,
-  getChord,
-  spellChord,
-  withBass,
-  nameIntervals,
-  romanNumeral,
-  harmonize,
-  chordsInScale,
-} from './chords'
+export { spellChord, withBass, harmonize, chordsInScale } from './chords'
 
 export { VOICINGS, voiceTones, voiceLead, movementCents, type VoiceOptions } from './voice'
 
@@ -60,7 +35,7 @@ export { detectScale } from './detect'
 export { progressionsFor, realizeProgression, allProgressions, songSets, GENRE_INFO } from './progress'
 export type { SongSet } from './progress'
 
-export { loadScaleCatalog, catalogLoaded } from './catalog'
+export { loadScaleCatalog } from './catalog'
 
 export {
   isBuiltinScale,
@@ -73,4 +48,4 @@ export {
   type KeySuggestion,
 } from './lock'
 
-export { NOTE_NAMES, toneName, toneFromCents, absoluteCents, pitchClassName } from './pitch'
+export { NOTE_NAMES, toneName, toneFromCents } from './pitch'

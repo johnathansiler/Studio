@@ -13,10 +13,6 @@ export interface SurfaceNote {
   when?: number
 }
 
-type Voice = {
-  voiceNote(surface: NoteSurface, trackId: string, pitch: number, velocity: number, when?: number): boolean
-}
-
 const listeners = new Set<(note: SurfaceNote) => void>()
 
 export function subscribeInstrumentVoice(listener: (note: SurfaceNote) => void) {
@@ -29,10 +25,4 @@ export function publishInstrumentVoice(note: SurfaceNote) {
 }
 
 /** The call every keyboard, pad, roll, clip, arrange, record, Scaler, and MIDI input uses. */
-export function playInstrument(engine: Voice, surface: NoteSurface, trackId: string, pitch: number, velocity: number, when?: number) {
-  return engine.voiceNote(surface, trackId, pitch, velocity, when)
-}
 
-export function releaseInstrument(engine: Voice, surface: NoteSurface, trackId: string, pitch: number, when?: number) {
-  return engine.voiceNote(surface, trackId, pitch, 0, when)
-}

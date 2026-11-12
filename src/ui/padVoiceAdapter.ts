@@ -54,11 +54,6 @@ export function setPadVintage(state: VintageState | undefined): VintageCall {
   return { ...scaleVintage(macro, table), macro, table }
 }
 
-export function regionCall(pad: PadVoice, sampleId: string): RegionCall {
-  const region = padRegion(pad)
-  return { sampleId, start: region.start, end: region.end }
-}
-
 function clamp01(value: number) {
   if (!Number.isFinite(value)) return 0
   return Math.min(1, Math.max(0, value))

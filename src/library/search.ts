@@ -204,8 +204,3 @@ export function searchLibrary(index: LibraryIndex, query: LibraryQuery): Library
   return { total: kept.length, ids: Uint32Array.from(kept) }
 }
 
-export function hitAt(index: LibraryIndex, hits: LibraryHits, position: number) {
-  if (position < 0 || position >= hits.total) return null
-  const id = hits.ids ? hits.ids[position] : position
-  return index.entries[id] ?? null
-}

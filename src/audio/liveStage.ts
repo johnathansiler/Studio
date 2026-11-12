@@ -14,10 +14,10 @@ export const BUILTIN_PEAK = 0.07
 /** Drum one-shot into the strip. About -12 dB at full velocity. */
 export const DRUM_PEAK = 0.25
 /** Pattern drums already sit near -13 dB. */
-export const PATTERN_DRUM_PEAK = 0.22
+
 export const DEDUPE_SEC = 0.008
 export const MAX_LIVE_VOICES = 16
-export const LIVE_QUANTUM = 128
+
 /** How far ahead the transport places notes. A wake later than this has already missed them. */
 export const SCHEDULER_HORIZON_SEC = 0.35
 /** Loop passes one wake may build. A tiny cycle cannot pin the main thread. */

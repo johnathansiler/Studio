@@ -1,5 +1,5 @@
 import { absolutizeProgram, importInstrument, type ImportedInstrument } from './import'
-import { libraryFileUrl, resolveSampleUrl } from './source'
+import { libraryFileUrl } from './source'
 import type { SampleLicense, SamplerProgram } from './types'
 
 export interface LibraryEntry {
@@ -87,14 +87,6 @@ export async function fetchInstrument(base: string, entry: LibraryEntry, fetchIm
     programs: imported.programs.map((program) => named(absolutizeProgram(program, url), entry)),
     pack: imported.pack,
   }
-}
-
-export function presetUrl(base: string, entry: LibraryEntry) {
-  return libraryFileUrl(base, entry.path)
-}
-
-export function sampleUrl(preset: string, samplePath: string) {
-  return resolveSampleUrl(preset, samplePath)
 }
 
 function named(program: SamplerProgram, entry: LibraryEntry): SamplerProgram {

@@ -31,7 +31,6 @@ export const COLUMN_BOUNDS: WidthBounds = { min: COLUMN_MIN, max: COLUMN_MAX, fa
 /** Below this, channel buttons stack one per row instead of sitting side by side. */
 export const NARROW_STRIP = 72
 /** Portrait phones at or under this width open the mixer as rows until the user chooses. */
-export const PHONE_PORTRAIT_MAX = 520
 
 export type MixerFlow = 'columns' | 'rows'
 

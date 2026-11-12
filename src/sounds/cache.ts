@@ -306,9 +306,6 @@ export function soundCache() {
 }
 
 /** Tests swap the stores. Passing null rebuilds the browser stores. */
-export function setSoundCache(cache: SoundCache | null) {
-  shared = cache
-}
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 

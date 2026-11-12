@@ -207,10 +207,6 @@ export function progressionPerformance(state: ScalerState, progressionId: string
   return { notes, voiced, name: pattern.name, symbols: chords.map((chord) => chord.symbol) }
 }
 
-export function applyDetected(state: ScalerState, found: { root: number; scale: ScaleId; library: string }): ScalerState {
-  return normalizeScaler({ ...state, root: found.root, scale: found.scale, library: found.library, snap: true, lastVoicing: [], lastCents: [] })
-}
-
 export function chooseScale(id: string): { scale: ScaleId; library: string } {
   if (isBuiltinScale(id)) return { scale: id, library: '' }
   return { scale: nearestBuiltin(getScale(id).cents), library: id }

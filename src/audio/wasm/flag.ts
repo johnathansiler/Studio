@@ -26,10 +26,6 @@ export function wasmDspRequested(global: FlagGlobal = globalThis as FlagGlobal):
  * The standalone EQ worklet is not the insert chain. Tests call this directly.
  * A normal page preloads the insert module instead.
  */
-export function maybeBootWasmDsp(): void {
-  if (!wasmDspRequested()) return
-  void import('./loader').then((mod) => mod.bootWasmDsp())
-}
 
 /**
  * Fetch the DSP chunk after the first gesture, and again when the browser is idle,

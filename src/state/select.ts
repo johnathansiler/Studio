@@ -5,24 +5,14 @@ import { normalizePlayer } from '../players/settings'
 import type { ScaleState } from '../model/scale'
 import type { QuantizeSettings } from '../model/quantize'
 import { descriptor } from '../audio/plugins/catalog'
-import { audibleIds } from '../model/audible'
 import { findLane, modeOf, specKey, valueAtMappedSample, type AutoSpec } from '../model/automation'
 import { groupForTrack } from '../model/mixGroups'
 import { DEVICE_PARAMS } from '../model/rack'
 import { orderedSections } from '../model/sections'
 import { editorState } from '../model/stepEntry'
-import { meterChanges, projectTempoMap } from '../model/tempoMap'
-import type { AudioClip, LiveCaptureSettings, MeterChange, MidiFx, MidiMapEntry, MidiOutSettings, PluginInstance, Project, SongSection, TempoPoint, Track } from '../model/types'
-import {
-  defaultLiveCapture,
-  defaultMidiOut,
-  planAudioRoutes,
-  planMidiRoutes,
-  sanitizeFx,
-  sanitizeMaps,
-  type AudioRoute,
-  type MidiRoute,
-} from '../model/midiTools'
+import { projectTempoMap } from '../model/tempoMap'
+import type { LiveCaptureSettings, MidiFx, MidiMapEntry, MidiOutSettings, PluginInstance, Project, SongSection, TempoPoint, Track } from '../model/types'
+import { defaultLiveCapture, defaultMidiOut, sanitizeFx } from '../model/midiTools'
 
 /**
  * Read models for the studio surfaces.
@@ -203,10 +193,6 @@ export function selectSpectral(store: { project: Project; spectralTrackId: strin
   }
 }
 
-export function selectClipRepair(clip: AudioClip | null | undefined) {
-  return clip?.spectral ?? null
-}
-
 export function selectGenerator(store: { project: Project; generatorState(): GeneratorSettings; scaleState(): ScaleState }) {
   const scale = store.scaleState()
   return {
@@ -251,18 +237,6 @@ export function selectTrackFx(track: Track | null | undefined): MidiFx[] {
   return sanitizeFx(track?.midiFx)
 }
 
-export function selectAudioRoutes(project: Project): AudioRoute[] {
-  return planAudioRoutes(project.tracks)
-}
-
-export function selectMidiRoutes(project: Project): MidiRoute[] {
-  return planMidiRoutes(project.tracks)
-}
-
-export function selectSavedMaps(project: Project): MidiMapEntry[] {
-  return sanitizeMaps(project.midiMaps)
-}
-
 /** Sound browser. Favorites live on the project so every screen and device sees them. */
 export function selectSounds(store: { project: Project; selectedTrackId: string | null }) {
   const tracks = store.project.tracks.filter((track) => track.type === 'audio')
@@ -299,10 +273,6 @@ export function mixGroupsOf(project: Project) {
 
 export function trackGroupId(project: Project, trackId: string) {
   return groupForTrack(project, trackId)?.id ?? null
-}
-
-export function trackAudible(project: Project, trackId: string) {
-  return audibleIds(project.tracks).has(trackId)
 }
 
 export function laneChoices(project: Project, trackId: string): LaneChoice[] {
@@ -354,10 +324,6 @@ export function selectSections(project: Project): SongSection[] {
   return orderedSections(project)
 }
 
-export function selectMarkers(project: Project): SongSection[] {
-  return orderedSections(project).filter((section) => section.kind === 'marker' || section.durationBeats <= 0)
-}
-
 export function selectSongParts(project: Project): SongSection[] {
   return orderedSections(project).filter((section) => section.kind !== 'marker' && section.durationBeats > 0)
 }
@@ -373,6 +339,3 @@ export function selectTempoMap(project: Project): TempoPoint[] {
   return projectTempoMap(project).map((point) => ({ ...point }))
 }
 
-export function selectMeterMap(project: Project): MeterChange[] {
-  return meterChanges(project).map((change) => ({ ...change }))
-}

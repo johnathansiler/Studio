@@ -60,13 +60,6 @@ export function articulationsIn(program: SamplerProgram) {
   return [...names]
 }
 
-/** Switch index stored on the zone. It is not a key the player steals from the keyboard. */
-export function articulationIndex(program: SamplerProgram, articulation: string) {
-  const names = articulationsIn(program)
-  const index = names.indexOf(articulation)
-  return index < 0 ? 0 : index
-}
-
 export function buildInstrument(name: string, entries: HarborEntry[]): HarborInstrument | null {
   const zones = entries.filter((entry) => entry.type === 'instrument')
   if (!zones.length) return null
@@ -148,10 +141,6 @@ export function groupInstruments(entries: HarborEntry[]): HarborInstrument[] {
     .map(([name, rows]) => buildInstrument(name, rows))
     .filter((instrument): instrument is HarborInstrument => Boolean(instrument))
     .sort((a, b) => a.family.localeCompare(b.family) || a.name.localeCompare(b.name))
-}
-
-export function loopsOf(entries: HarborEntry[]) {
-  return entries.filter((entry) => entry.type === 'loop').sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
 }
 
 /** A program whose every velocity layer reaches the full keyboard from the given roots. */

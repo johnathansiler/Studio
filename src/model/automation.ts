@@ -293,21 +293,3 @@ export interface WriteCursor {
   spec: AutoSpec
 }
 
-export function pluginLanesMove(lanes: AutomationLane[], pluginIds: readonly string[], sampleRate: number, tempo: number, length: number) {
-  const ids = new Set(pluginIds)
-  for (const lane of lanes) {
-    if (lane.target && lane.target !== 'plugin') continue
-    if (!ids.has(lane.pluginId)) continue
-    if (curveChanges(lane.points, sampleRate, tempo, length, 0)) return true
-  }
-  return false
-}
-
-export function constantOrCurve(points: AutomationPoint[] | undefined, fallback: number, sampleRate: number, tempo: number, length: number) {
-  if (!points?.length) return fallback
-  const sorted = prepareCurve(points)
-  if (!curveChanges(sorted, sampleRate, tempo, length, fallback)) return curveAt(sorted, 0, fallback)
-  const out = new Float32Array(length)
-  for (let i = 0; i < length; i++) out[i] = curveAt(sorted, samplesToBeats(i, sampleRate, tempo), fallback)
-  return out
-}

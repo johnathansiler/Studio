@@ -191,8 +191,4 @@ export function exportablePresets(pluginId: string, stored: readonly UserPreset[
   return userPresets(pluginId, stored)
 }
 
-export function initParams(pluginId: string): Record<string, number> {
-  return resolveParams(pluginId, {})
-}
-
 export { baseParams }

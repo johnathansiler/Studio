@@ -24,10 +24,6 @@ export function perfAtContextTime(perfAtCtx0: number, ctxTime: number): number {
   return perfAtCtx0 + ctxTime * 1000
 }
 
-export function contextTimeAtPerf(perfAtCtx0: number, perf: number): number {
-  return (perf - perfAtCtx0) / 1000
-}
-
 export interface OneWayEstimateInput {
   rttMs: number
   jitterBufferMs: number

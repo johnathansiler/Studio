@@ -1,1 +1,1 @@
-export { Psola, yinPitch, type PitchFrame } from '../stretch/voice'
+export { yinPitch, type PitchFrame } from '../stretch/voice'

@@ -5,7 +5,6 @@ import { beatsToSamples } from './time'
 import { uid, type Project } from './types'
 
 /** Pattern lengths the channel rack offers, in sixteenth notes. */
-export const RACK_LENGTHS = [16, 32, 64] as const
 
 export const RACK_COLORS = ['#ef6b6b', '#e0b15a', '#f09a6a', '#79b8d4', '#c58be0', '#73c48f', '#8fd0c6', '#d98baf']
 
@@ -42,15 +41,6 @@ export function kitChoices(): RackChoice[] {
 }
 
 /** A library sound becomes a note channel. Playback uses `lib_<id>` once the sample is stored. */
-export function libraryChoice(entry: { id: string; name: string }, index: number): RackChoice {
-  return {
-    name: entry.name,
-    kind: 'note',
-    note: 60,
-    color: choiceColor(index + 5),
-    sampleId: `lib_${entry.id}`,
-  }
-}
 
 export function makeRackChannel(choice: RackChoice, steps: number): StepChannel {
   const count = clampStepCount(steps)

@@ -157,10 +157,6 @@ export function buildChain(report: MixReport | null, genre: string, intensity: n
   ]
 }
 
-export function presetChain(genre: string, intensity: number, target: LoudnessTarget) {
-  return buildChain(null, genre, intensity, target)
-}
-
 export function chainOrder(plugins: PluginInstance[]) {
   return plugins.map((plugin) => plugin.pluginId)
 }

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
 import { bindSwipeDismiss } from './swipeDismiss'
 
 interface HintState {
@@ -146,27 +145,6 @@ export function TipButton({
       {children ?? label}
     </button>
   )
-}
-
-export function ActionSheet({ title, hint, onClose, children }: { title: string; hint?: string; onClose: () => void; children: ReactNode }) {
-  const sheet = (
-    <div className="sheet-back" onClick={onClose}>
-      <div className="action-sheet" role="dialog" aria-label={title} onClick={(event) => event.stopPropagation()}>
-        <header>
-          <div>
-            <strong>{title}</strong>
-            {hint && <p>{hint}</p>}
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close">
-            Close
-          </button>
-        </header>
-        {children}
-      </div>
-    </div>
-  )
-  if (typeof document === 'undefined') return sheet
-  return createPortal(sheet, document.body)
 }
 
 export function SheetRow({

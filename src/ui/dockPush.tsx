@@ -38,11 +38,3 @@ export function browserWidthFor(width: number, height: number) {
   return Math.min(360, Math.max(240, Math.round(width * 0.28)))
 }
 
-export function clampBrowserWidth(value: number, viewport: number, portraitPhone: boolean) {
-  if (portraitPhone) {
-    const max = Math.max(96, viewport - PORTRAIT_TRACK - PORTRAIT_TIMELINE)
-    return Math.min(max, Math.max(96, Math.round(value)))
-  }
-  const max = Math.min(520, Math.max(280, viewport - 280))
-  return Math.min(max, Math.max(220, Math.round(value)))
-}

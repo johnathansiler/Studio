@@ -615,23 +615,3 @@ export function vocalNotes(trace: Float32Array | null, a4 = 440): VocalMidiNote[
   return notes
 }
 
-export const TUNE_EXTRA_PRESETS: { name: string; short: string; hint: string; params: Record<string, number> }[] = [
-  {
-    name: 'Classic',
-    short: 'Classic',
-    hint: 'Harder snap, with tracking and a slower note transition.',
-    params: { color: 1, tracking: 0.35, transition: 0.4, retune: 0.8, humanize: 0.12, flex: 0, amount: 0.88, mode: 1, formant: 0, root: -1, scaleIndex: -1, mask: 0, minHz: 80, maxHz: 1000, transpose: 0 },
-  },
-  {
-    name: 'Harmony',
-    short: 'Harmony',
-    hint: 'Lead plus third, fifth, and both octaves.',
-    params: { harmony: 0.45, h1: 3, h2: 7, h3: 12, h4: -12, retune: 0.62, humanize: 0.2, flex: 0.1, amount: 0.8, mode: 1, formant: 0.25, root: -1, scaleIndex: -1, mask: 0, minHz: 80, maxHz: 1000, transpose: 0 },
-  },
-  {
-    name: 'MIDI target',
-    short: 'MIDI',
-    hint: 'Correct only while a MIDI note is held.',
-    params: { midi: 1, retune: 1, humanize: 0, flex: 0, amount: 1, mode: 1, formant: 0, root: -1, scaleIndex: -1, mask: 0, minHz: 80, maxHz: 1000, transpose: 0 },
-  },
-]

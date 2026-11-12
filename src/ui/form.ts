@@ -11,10 +11,6 @@ export function formFactor(width: number, height: number): FormFactor {
   return 'desk'
 }
 
-export function isLandscape(width: number, height: number) {
-  return width > height
-}
-
 export function useLandscape(): boolean {
   const [value, setValue] = useState(() => typeof window !== 'undefined' && window.innerWidth > window.innerHeight)
   useEffect(() => {

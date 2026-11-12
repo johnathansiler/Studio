@@ -200,11 +200,6 @@ export function noteName(pitch: number) {
   return NOTE_NAMES[pitchClass(pitch)]
 }
 
-export function inScale(pitch: number, root: number, scale: ScaleId) {
-  const rel = pitchClass(pitch - root)
-  return hasInterval(scaleById(scale).intervals, rel)
-}
-
 function hasInterval(intervals: readonly number[], value: number) {
   return intervals.some((interval) => interval === value)
 }

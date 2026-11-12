@@ -319,7 +319,6 @@
 
 /* Landscape kept 28px flags and a fixed column, which pushed the full words out of the header. */
 .shell.phone.land .arrange .heads-col,
-.shell.phone.land .arrange .heads,
 .shell.phone.land .arrange .head,
 .shell.phone.land .arrange .head .pl-head,
 .shell.phone.land .arrange .track-controls {
@@ -457,10 +456,12 @@
 .shell.phone.land .arrange > .timeline-col {
   display: contents;
 }
-.shell.phone.land .arrange .heads {
+.shell.phone.land .arrange .heads.heads {
   grid-column: 1;
   grid-row: 2;
-  height: 100%;
+  margin-bottom: 0;
+  height: calc(100% - var(--overview-gutter, 40px));
+  max-height: calc(100% - var(--overview-gutter, 40px));
   min-height: 0;
   overflow: hidden;
 }

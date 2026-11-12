@@ -61,11 +61,6 @@ export function sampleAtX(span: WaveSpan, x: number, width: number) {
   return view.start + t * (view.end - view.start)
 }
 
-export function xAtSample(span: WaveSpan, sample: number, width: number) {
-  const view = fitSpan(span)
-  return ((sample - view.start) / Math.max(1e-6, view.end - view.start)) * width
-}
-
 /**
  * Draw the samples themselves when a column is finer than one peak bin.
  * A coarser bin would hide the wave shape. The visible span stays small

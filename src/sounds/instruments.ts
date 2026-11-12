@@ -88,11 +88,6 @@ export function starterCatalog() {
   return catalogRequest
 }
 
-export function refreshStarterCatalog() {
-  catalogRequest = null
-  return starterCatalog()
-}
-
 /** Starter instruments ignore tempo and key. Those filters describe loops. */
 export function filterStarters(entries: LibraryEntry[], query: Pick<SoundQuery, 'text' | 'type' | 'favoritesOnly' | 'favorites'>) {
   if (query.type !== 'all' && query.type !== 'instrument') return []

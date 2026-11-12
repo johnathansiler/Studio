@@ -7,19 +7,6 @@ export const GAP_PX = 2
  * Kept so a caller can still rank controls.
  * The mixer no longer hides any of them: every control stays on the strip.
  */
-export const SECONDARY_KEEP: Record<string, number> = {
-  mute: 100,
-  solo: 90,
-  automation: 80,
-  routing: 70,
-  master: 68,
-  inserts: 60,
-  pan: 50,
-  arm: 40,
-  level: 32,
-  safe: 20,
-  tune: 10,
-}
 
 /**
  * Full-word button widths at the mixer face (12px, semibold, horizontal padding).
@@ -101,12 +88,6 @@ export function fitSecondary(width: number, items: SecondarySlot[]): SecondaryFi
  * How many rows a closed band used to spend before the fader stopped being the main control.
  * The mixer ignores this budget now and scrolls the secondary band instead.
  */
-export function secondaryRowBudget(flow: 'columns' | 'rows', zone: 'tools' | 'hear' | 'top', width: number) {
-  if (zone === 'hear' || zone === 'top') return width < 112 ? 2 : 1
-  if (flow === 'rows') return 1
-  if (width >= 160) return 3
-  return 4
-}
 
 /** Content box the secondary band can use. */
 export function secondaryContentWidth(flow: 'columns' | 'rows', strip: number, viewport: number) {

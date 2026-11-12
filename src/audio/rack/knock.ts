@@ -1,7 +1,5 @@
 /** Knock — a trap bass instrument. Original sound, not a sample-pack clone. */
 
-export const KNOCK_NAME = 'Knock'
-
 export const SCALE_NAMES = ['Major', 'Minor', 'Dorian', 'Mixolydian', 'Harmonic minor'] as const
 export const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'] as const
 export const DRIVE_NAMES = ['Soft', 'Hard', 'Tube', 'Tape', 'Fuzz', 'Crush', 'Fold', 'Rectify'] as const

@@ -38,6 +38,10 @@ const MAX_BLOCK = 8192
  * One Rust insert. The host chain still owns wet mix, dry-path delay, and
  * sample-offset slicing. This object is the processor those call.
  */
+export function createWasmInsert(id: string, sampleRate: number): WasmInsert {
+  return new WasmInsert(id, sampleRate)
+}
+
 export class WasmInsert implements Processor {
   latencySamples = 0
   private readonly exp: PlugExports
@@ -124,6 +128,3 @@ export class WasmInsert implements Processor {
   }
 }
 
-export function createWasmInsert(id: string, sampleRate: number): WasmInsert {
-  return new WasmInsert(id, sampleRate)
-}

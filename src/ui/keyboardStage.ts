@@ -24,11 +24,6 @@ export function isPadsHistory(state: unknown) {
   return isHistoryMark(state, PADS_HISTORY)
 }
 
-export function isEditorHistory(state: unknown) {
-  const mark = historyMark(state)
-  return mark === PIANO_HISTORY || mark === PADS_HISTORY || mark === STEPS_HISTORY
-}
-
 /** Push one history entry so the Android back gesture closes the piano roll. */
 export function markPianoHistory(history: { state: unknown; pushState: (data: unknown, unused: string) => void }) {
   if (isPianoHistory(history.state)) return false

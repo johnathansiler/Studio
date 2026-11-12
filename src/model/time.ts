@@ -126,14 +126,6 @@ export function formatTimecode(samples: number, sampleRate: number, fps = 30): s
   return `${pad(hh)}:${pad(mm)}:${pad(ss)}:${pad(frames)}`
 }
 
-export function formatClock(seconds: number): string {
-  const sign = seconds < 0 ? '-' : ''
-  const s = Math.abs(seconds)
-  const m = Math.floor(s / 60)
-  const r = s - m * 60
-  return `${sign}${m}:${r.toFixed(2).padStart(5, '0')}`
-}
-
 export function gainToDb(gain: number): string {
   if (!(gain > 0.0001)) return '-inf'
   const db = Math.round(20 * Math.log10(gain) * 10) / 10

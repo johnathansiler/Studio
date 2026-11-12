@@ -4,7 +4,6 @@ import { wasmDspRequested } from '../wasm/flag'
 
 export const MAX_PADS = 16
 export const SP1200 = { bitDepth: 12, sampleRate: 26040 }
-export const MPC60 = { bitDepth: 12, sampleRate: 40000 }
 
 const GRAIN = 1024
 const HOP = 512

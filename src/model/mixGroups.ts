@@ -1,7 +1,7 @@
 import { moveAudioClip, splitAudioClip, trimAudioClip } from './clips'
 import { splitMidiClip, stretchMidiClip, trimMidiClip } from './edit'
 import { isAutomationMode } from './automation'
-import type { AudioClip, MidiClip, MixGroup, Project, Track } from './types'
+import type { AudioClip, MidiClip, MixGroup, Project } from './types'
 import { uid } from './types'
 
 export interface MixerPatch {
@@ -247,6 +247,3 @@ export function linkedAudioTargets(project: Project, trackId: string, clip: Audi
   return targets
 }
 
-export function tracksInGroup(project: Project, group: MixGroup): Track[] {
-  return project.tracks.filter((track) => group.trackIds.includes(track.id))
-}

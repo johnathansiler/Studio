@@ -37,10 +37,6 @@ function ensureWorker() {
   return worker
 }
 
-export function stemHold() {
-  return held
-}
-
 export function cancelStems() {
   worker?.postMessage({ type: 'cancel' })
 }

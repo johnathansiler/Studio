@@ -1,4 +1,4 @@
-import { applyMacros, DEVICE_PARAMS, type DeviceKind, type ParamSpec } from '../../model/rack'
+import { applyMacros, DEVICE_PARAMS, type DeviceKind } from '../../model/rack'
 import { additiveSaw, additiveSquare, blepPulse, partialsFor } from '../quality/blep'
 
 export interface SynthState {
@@ -536,6 +536,3 @@ function harmonic(frames: number, weight: (k: number) => number, cap: number) {
   return out
 }
 
-export function macroSpecs(kind: DeviceKind): ParamSpec[] {
-  return DEVICE_PARAMS[kind].filter((item) => /^m[1-4]$/.test(item.id))
-}

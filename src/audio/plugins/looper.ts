@@ -1,6 +1,6 @@
 import { descriptor, FACTORY } from './catalog'
 import { sanitize } from './dsp'
-import { emptyLooper, mixTakes, nextBar, syncedLoopSamples, type LoopBox, type LoopTake, type LooperState } from '../sample/engine'
+import { emptyLooper, mixTakes, syncedLoopSamples, type LoopBox, type LoopTake, type LooperState } from '../sample/engine'
 import { playbackChannel, readSlotPoints } from '../sample/slot'
 import type { PluginInstance } from '../../model/types'
 import type { PluginModule, Processor } from './types'
@@ -99,10 +99,6 @@ export function createLooper(sampleRate: number): LooperProcessor {
 
 function beatsToSamples(beat: number, sampleRate: number, tempo: number) {
   return Math.round((beat * 60 * sampleRate) / Math.max(1, tempo))
-}
-
-export function armBeat(beat: number, beatsPerBar = 4) {
-  return nextBar(beat, beatsPerBar)
 }
 
 const plugin: PluginModule = {

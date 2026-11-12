@@ -74,10 +74,6 @@ export const CHORDS: ChordSpec[] = [
 
 const byId = new Map(CHORDS.map((item) => [item.id, item]))
 
-export function listChords(group?: ChordGroup) {
-  return group ? CHORDS.filter((item) => item.group === group) : CHORDS.slice()
-}
-
 export function getChord(id: string): ChordSpec {
   return byId.get(id) ?? CHORDS[0]
 }

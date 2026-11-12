@@ -1,5 +1,4 @@
 import type { Project } from '../model/types'
-import { analyzeAudio } from './audio'
 import { analyzeProject, type AnalysisAsset } from './project'
 import { transcribeHum } from './pitch'
 import type { AnalysisBuffer, AnalysisResult, HumNote, TranscribeOptions } from './types'
@@ -46,20 +45,6 @@ function copyChannels(channels: ArrayLike<number> | ArrayLike<number>[]) {
 }
 
 /** Audio key, chords, sections, and tempo. The FFT runs in a Web Worker. */
-export function analyzeAudioInWorker(buffer: AnalysisBuffer): Promise<AnalysisResult> {
-  if (typeof Worker === 'undefined') return Promise.resolve(analyzeAudio(buffer))
-  return request({
-    type: 'analyze',
-    sampleRate: buffer.sampleRate,
-    channels: copyChannels(buffer.channels),
-    tempo: buffer.tempo,
-    numerator: buffer.timeSignature?.numerator,
-    denominator: buffer.timeSignature?.denominator,
-  }).then((response) => {
-    if (!response.analysis) throw new Error(response.message || 'No analysis')
-    return response.analysis
-  })
-}
 
 /** Hum transcription. Pitch tracking runs in a Web Worker. */
 export function transcribeHumInWorker(buffer: AnalysisBuffer, options: TranscribeOptions = {}): Promise<HumNote[]> {

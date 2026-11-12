@@ -1,28 +1,6 @@
 import { descriptor, FACTORY } from '../catalog'
 import type { PluginModule, Processor } from '../types'
-import {
-  BUS_ATTACKS,
-  BUS_RELEASES,
-  VARI_TIMES,
-  VU_DBFS,
-  applyFilters,
-  coeff,
-  clamp,
-  copyFilter,
-  createMeter,
-  createShaper,
-  dbToGain,
-  designBiquad,
-  fetReduction,
-  gainToDb,
-  oversample,
-  sanitize,
-  stepPick,
-  trackVu,
-  variReduction,
-  vcaReduction,
-  type Meter,
-} from './analog'
+import { BUS_ATTACKS, BUS_RELEASES, VARI_TIMES, VU_DBFS, applyFilters, coeff, clamp, copyFilter, createMeter, createShaper, dbToGain, designBiquad, fetReduction, gainToDb, oversample, sanitize, stepPick, trackVu, variReduction, vcaReduction } from './analog'
 
 function stereo(input: Float32Array[], index: number) {
   const left = input[0]?.[index] || 0
@@ -293,6 +271,3 @@ export function peakModule(): PluginModule {
   return { descriptor: descriptor('peak')!, presets: FACTORY.peak ?? [], create: createPeak }
 }
 
-export function meterOf(processor: Processor): Meter {
-  return processor.meter ?? { vu: -20, gr: 0 }
-}

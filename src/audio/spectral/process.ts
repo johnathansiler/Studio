@@ -1,4 +1,4 @@
-import { analyze, frameCount, hann, mirror, synthesize } from './fft'
+import { analyze, hann, mirror, synthesize } from './fft'
 import { broadband, frameWeights, regionHz, regionTime } from './mask'
 import { HQ_SPECTRAL, NOISE_BANDS, type SpectralOp, type SpectralRegion, type SpectralRepair, type SpectralSettings } from './types'
 
@@ -432,6 +432,3 @@ function percentile(values: number[], p: number) {
   return sorted[index]
 }
 
-export function usedFrameCount(length: number, settings: SpectralSettings) {
-  return frameCount(length + settings.fftSize * 2, settings.fftSize, settings.hop)
-}

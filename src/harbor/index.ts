@@ -1,25 +1,20 @@
-export { INSTRUMENT_LIBRARY, instrumentCatalogUrl, instrumentLibraryBase } from './contract'
-export { familyFor } from './family'
-export { filterHarborLoops, loopInstruments, loopKeys } from './filter'
-export { keyPitchClass, keySemitones, sameMusicalKey } from './key'
+export { INSTRUMENT_LIBRARY, instrumentCatalogUrl } from './contract'
+
 export { licenseLabel } from './license'
-export { hashedZone, instrumentFileUrl, loadHarborCatalog, loadZoneSamples, rememberHarborCatalog, samplesForNote } from './load'
-export { parseHarborCatalog, parseHarborEntry } from './parse'
-export { placeHarborLoop, previewHarborLoop, toSoundEntry } from './place'
-export { factoryHarborPresets, harborPluginId, harborPresetChoices, presetParams, userHarborPresets } from './presets'
-export { articulationFromSample, articulationsIn, buildInstrument, groupInstruments, instrumentSlug, loopsOf } from './program'
+export { instrumentFileUrl } from './load'
+export { parseHarborCatalog } from './parse'
+
 export type { HarborInstrument } from './program'
 export type { HarborPreset } from './presets'
 export type { HarborCatalog, HarborEntry, InstrumentFamily, LoopKind } from './types'
-export { INSTRUMENT_FAMILIES } from './types'
-export { fillKeyboard, buildZones, mapKeyRanges } from './zones'
+
+export { fillKeyboard } from './zones'
 export { parseSamplePath, zonesFromPaths } from './names'
-export { NOTE_SURFACES, playInstrument, releaseInstrument, subscribeInstrumentVoice } from './surfaces'
+
 export type { NoteSurface, SurfaceNote } from './surfaces'
-export { prepareCatalogInstrument, listInstrumentFiles, instrumentSampleRoot } from './load'
-export { datasetFilePath, reconcileProgram } from './reconcile'
+
 export { programFromRoots, programFromPaths } from './program'
-export { parseCatalogInstrument, legacyAlias } from './parse'
-export { installHarborInstrument } from './player'
+export { legacyAlias } from './parse'
+
 export type { HarborHost } from './player'
-export { renderPitchedZone } from './voice'
+

@@ -260,6 +260,3 @@ export function makeProgram(partial: Partial<SamplerProgram> & Pick<SamplerProgr
   }
 }
 
-export function emptyProgram(name = 'Empty library'): SamplerProgram {
-  return makeProgram({ name, license: 'CC0-1.0' })
-}

@@ -24,10 +24,6 @@ export function createStepsPlugin(rack?: BeatRack): PluginInstance {
   }
 }
 
-export function isStepsPlugin(plugin: { pluginId?: string } | null | undefined): boolean {
-  return plugin?.pluginId === 'steps'
-}
-
 export function freshRack(): BeatRack {
   const pattern = starterPattern()
   return { activeId: pattern.id, patterns: [pattern] }

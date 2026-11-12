@@ -28,10 +28,6 @@ export function setCaptureEnabled(on: boolean) {
   if (!on) buffer.clear()
 }
 
-export function captureEnabled() {
-  return enabled
-}
-
 export function rememberPlayed(trackId: string, notes: { pitch: number; startBeat: number; durationBeats: number; velocity: number }[]) {
   if (!enabled || !notes.length) return
   buffer.add(trackId, notes)

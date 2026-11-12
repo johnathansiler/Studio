@@ -94,8 +94,6 @@ export interface ParamSpec {
   unit: string
 }
 
-export const PRESET_CATEGORIES = ['Bass', 'Lead', 'Pad', 'Keys', 'Pluck', 'Bells', 'FX', 'Drums', 'Texture'] as const
-
 export const MACRO_TARGETS = ['cutoff', 'res', 'detune', 'mix2', 'famt', 'pw', 'drive', 'lfo1'] as const
 
 const spec = (id: string, name: string, min: number, max: number, fallback: number, unit = ''): ParamSpec => ({

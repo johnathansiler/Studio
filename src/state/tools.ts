@@ -97,7 +97,6 @@ export const ARRANGE_TOOLS: { id: ArrangeTool; label: string }[] = (
 export const FACE_TOOLS: ArrangeTool[] = ['select', 'pencil', 'split', 'trim', 'zoom']
 
 /** Phone Tools row. The choice sheet does not list these again. Scroll stays in the sheet. */
-export const PHONE_TOOL_ROW: ArrangeTool[] = ['select', 'pencil', 'split', 'trim', 'zoom', 'box', 'erase']
 
 /** Rare edit modes. The compact strip does not repeat them. */
 export const MENU_TOOLS: ArrangeTool[] = ['box', 'erase', 'pan']

@@ -337,10 +337,4 @@ export function arrangementEndSample(project: Project): number {
 }
 
 /** True when the explicit map changes speed after the downbeat. */
-export function hasTempoChanges(project: Pick<Project, 'tempoMap' | 'automation'>): boolean {
-  const points = [...(project.tempoMap ?? [])]
-  for (const lane of project.automation ?? []) {
-    if (lane.pluginId === 'transport' && lane.param === 'tempo') points.push(...lane.points.map((point) => ({ beat: point.beat, bpm: point.value })))
-  }
-  return points.some((point) => point.beat > 1e-6 || point.ramp)
-}
+

@@ -1,7 +1,7 @@
 import type { ResolvedChord } from './chords'
 import { clamp, roundBeat } from './rng'
 import { surfaceRng } from './chords'
-import { styleById, type Style } from './styles'
+import { type Style } from './styles'
 import type { ArpPattern, GeneratedNote, GeneratorInput } from './types'
 
 const RATES = [1, 0.5, 1 / 3, 0.25, 1 / 6, 0.125]
@@ -109,6 +109,3 @@ function shuffle<T>(items: T[], rng: () => number) {
   return copy
 }
 
-export function defaultArp(styleId: string) {
-  return styleById(styleId).arp
-}

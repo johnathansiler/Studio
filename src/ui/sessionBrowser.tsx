@@ -32,10 +32,6 @@ const GROUPS: { id: BrowserGroup; label: string; hint: string }[] = [
 
 const sounds = new Map<string, SoundEntry>()
 
-export function rememberSounds(entries: SoundEntry[]) {
-  for (const entry of entries) sounds.set(entry.id, entry)
-}
-
 export function soundById(id: string) {
   return sounds.get(id) ?? null
 }
